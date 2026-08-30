@@ -30,6 +30,10 @@ import { ToolRegistry } from "@/tool"
 
 // --- R4-1: differential fuzz ------------------------------------------------
 
+const oldGlobLiteral = (char: string): string =>
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: regex metachars to escape
+  ".+^${}()|[]\\".includes(char) ? `\\${char}` : char
+
 /** A local reconstruction of the OLD `globToRegExp` semantics — the exact
  *  regex spelling the now-deleted matcher used. This is the oracle the new DP
  *  matcher must agree with on every non-pathological input. Inlined here
@@ -55,12 +59,7 @@ const oldGlobMatch = (path: string, glob: string): boolean => {
       re += "[^/]"
       continue
     }
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: regex metachars to escape
-    if (".+^${}()|[]\\".includes(c)) {
-      re += `\\${c}`
-      continue
-    }
-    re += c
+    re += oldGlobLiteral(c)
   }
   const anchored = hasSlash ? `^${re}$` : `(^|/)${re}$`
   return new RegExp(anchored).test(norm)
