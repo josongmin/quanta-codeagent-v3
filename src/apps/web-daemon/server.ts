@@ -26,6 +26,7 @@ import type { SupportedReadModels } from "@/protocol/session"
 import type { RuntimeFacade, RuntimeSession } from "@/sdk/runtime"
 import { loadSessionById, type PersistedObjectiveSnapshot } from "@/session"
 import { errMessage, logger } from "@/shared"
+import { composeWebGoalVerify, type WebGoalVerifyHandler } from "./goal-verify-compose"
 import { composeWebGoalWake, type WebGoalWakeHandle } from "./goal-wake-compose"
 import { composeWebGoalWork, type WebGoalWorkHandler } from "./goal-work-compose"
 import type { CostReadoutTotals, WebReadoutSources } from "./readout"
@@ -160,6 +161,8 @@ export interface WebDaemonServerConfig extends WebDaemonConfig {
    * the shared session (`composeWebGoalWork`).
    */
   readonly goalWork?: WebGoalWorkHandler
+  /** Daemon-owned checked-criterion verifier request surface. */
+  readonly goalVerify?: WebGoalVerifyHandler
 }
 
 /**
@@ -333,9 +336,11 @@ const buildDaemonReadoutSurface = (
 const stopGoalSurfaces = async (surfaces: {
   goalWake: WebGoalWakeHandle | undefined
   goalWork: WebGoalWorkHandler | undefined
+  goalVerify: WebGoalVerifyHandler | undefined
 }): Promise<void> => {
   surfaces.goalWake?.stop()
-  await surfaces.goalWork?.settled()
+  surfaces.goalVerify?.stop()
+  await Promise.all([surfaces.goalWork?.settled(), surfaces.goalVerify?.settled()])
 }
 
 const composeGoalSurfaces = async (
@@ -344,6 +349,7 @@ const composeGoalSurfaces = async (
 ): Promise<{
   goalWake: WebGoalWakeHandle | undefined
   goalWork: WebGoalWorkHandler | undefined
+  goalVerify: WebGoalVerifyHandler | undefined
 }> => ({
   goalWake: await composeWebGoalWake({
     session: sharedSession,
@@ -354,6 +360,10 @@ const composeGoalSurfaces = async (
     session: sharedSession,
     runtime: runtime as Parameters<typeof composeWebGoalWork>[0]["runtime"],
   }),
+  goalVerify: composeWebGoalVerify({
+    threadId: sharedSession.sessionId,
+    runtime: runtime as Parameters<typeof composeWebGoalVerify>[0]["runtime"],
+  }),
 })
 
 export const bindObjectivePaneThread = (
@@ -363,6 +373,19 @@ export const bindObjectivePaneThread = (
   config.observabilityPorts !== undefined
     ? { ...config, observabilityPorts: { ...config.observabilityPorts, threadId: sessionId } }
     : config
+
+const bindGoalHandlers = (
+  config: WebDaemonServerConfig,
+  sessionId: string,
+  surfaces: {
+    readonly goalWork: WebGoalWorkHandler | undefined
+    readonly goalVerify: WebGoalVerifyHandler | undefined
+  },
+): WebDaemonServerConfig => ({
+  ...bindObjectivePaneThread(config, sessionId),
+  ...(surfaces.goalWork !== undefined ? { goalWork: surfaces.goalWork } : {}),
+  ...(surfaces.goalVerify !== undefined ? { goalVerify: surfaces.goalVerify } : {}),
+})
 
 /** P1 Phase 2 — the swap-on-attach closure (module-scope to keep `startWebDaemon`
  *  under the god-function ceiling). Load the opened thread's lossless SavedSession,
@@ -428,13 +451,81 @@ const buildOnAttachThread = (deps: {
       }
     : undefined
 
+/** Own the mutable teardown handles outside `startWebDaemon`. The returned
+ * closure preserves the listener-first shutdown ordering and one-shot guard,
+ * while keeping boot composition separate from resource disposal. */
+const createDaemonStop = (resources: {
+  readonly server: Server<WSData>
+  readonly registry: ReturnType<typeof createSessionRegistry>
+  readonly runtime: RuntimeFacade
+  readonly threadStore: ReturnType<typeof setupThreadPersistence>["threadStore"]
+  readonly goalWake: WebGoalWakeHandle | undefined
+  readonly goalWork: WebGoalWorkHandler | undefined
+  readonly goalVerify: WebGoalVerifyHandler | undefined
+  readonly unsubPersist: (() => void) | null
+  readonly canvasArtifactUnsub: (() => void) | null
+  readonly followerApprovalUnsub: (() => void) | null
+  readonly followerSweepTimer: ReturnType<typeof setInterval> | null
+  readonly approvalContinuationUnsub: (() => void) | null
+  readonly transcriptPersistUnsub: (() => void) | null
+  readonly costAggregatorUnsub: (() => void) | null
+}): (() => Promise<void>) => {
+  let stopped = false
+  let {
+    unsubPersist,
+    canvasArtifactUnsub,
+    followerApprovalUnsub,
+    followerSweepTimer,
+    approvalContinuationUnsub,
+    transcriptPersistUnsub,
+    costAggregatorUnsub,
+  } = resources
+  return async () => {
+    if (stopped) return
+    stopped = true
+    await stopGoalSurfaces(resources)
+    await resources.server.stop(true)
+    await resources.registry.closeAll()
+    if (unsubPersist !== null) {
+      unsubPersist()
+      unsubPersist = null
+    }
+    if (canvasArtifactUnsub !== null) {
+      canvasArtifactUnsub()
+      canvasArtifactUnsub = null
+    }
+    if (followerApprovalUnsub !== null) {
+      followerApprovalUnsub()
+      followerApprovalUnsub = null
+    }
+    if (followerSweepTimer !== null) {
+      clearInterval(followerSweepTimer)
+      followerSweepTimer = null
+    }
+    approvalContinuationUnsub?.()
+    approvalContinuationUnsub = null
+    if (transcriptPersistUnsub !== null) {
+      transcriptPersistUnsub()
+      transcriptPersistUnsub = null
+    }
+    if (costAggregatorUnsub !== null) {
+      costAggregatorUnsub()
+      costAggregatorUnsub = null
+    }
+    resources.threadStore?.close()
+    await resources.runtime.close().catch((error: unknown) => {
+      logger.warn("web-daemon: runtime.close failed", { error: errMessage(error) })
+    })
+  }
+}
+
 export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<WebDaemonHandle> => {
   const runtime = await config.runtimeFactory()
   // ONE shared session for the whole daemon lifetime. New WS connections
   // join the same session instead of minting a fresh one — see the
   // `buildRegisteredSession` comment above.
   const sharedSession = await runtime.createSession(config.sessionConfig)
-  const { goalWake, goalWork } = await composeGoalSurfaces(runtime, sharedSession)
+  const { goalWake, goalWork, goalVerify } = await composeGoalSurfaces(runtime, sharedSession)
   const registry = createSessionRegistry()
   const startedAt = performance.now()
 
@@ -443,7 +534,6 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
   // gate-OFF byte-identical (null/undefined handles) and extracted verbatim into
   // their `./server/` siblings — see those modules for the full contracts.
   const { threadStore, unsubPersist: unsubPersist0 } = setupThreadPersistence(sharedSession)
-  let unsubPersist = unsubPersist0
   // A2 — server-boot bridge: pump every session `artifact.ready` event into the
   // Canvas artifact source so each connection's emitter forwards an
   // `artifact.ready` Canvas frame. Gate OFF ⇒ `canvasArtifactFeed` absent ⇒ null
@@ -452,23 +542,19 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
     sharedSession,
     config.canvasArtifactFeed ?? null,
   )
-  let canvasArtifactUnsub = canvasArtifactUnsub0
   const {
     followerApproval,
     followerApprovalUnsub: followerApprovalUnsub0,
     followerSweepTimer: followerSweepTimer0,
   } = setupFollowerApproval(config, sharedSession, process.env)
-  let followerApprovalUnsub = followerApprovalUnsub0
-  let followerSweepTimer = followerSweepTimer0
   // ADR-0540 W1-B — daemon-owned post-approval continuation. Gate ON ⇒ every
   // `approval.resolved(approve)` enqueues a daemon-minted bare `turn.run` on
   // the session dispatch tail (clients see the `serverAutoContinues` capability
   // marker and skip their own re-issue). Gate OFF ⇒ `unsub` is null and NOTHING
   // was subscribed (byte-identical legacy client-owned continuation).
-  let approvalContinuationUnsub = setupApprovalContinuation(sharedSession, process.env).unsub
+  const approvalContinuationUnsub0 = setupApprovalContinuation(sharedSession, process.env).unsub
 
   const cost = attachDaemonCostProjection(runtime, sharedSession)
-  let costAggregatorUnsub: (() => void) | null = cost.unsub
   // P1 Phase 1 — persist the LOSSLESS Message[] transcript to the @/session
   // store (for a later live thread swap), gate-symmetric with the sqlite
   // archive (`threadStore !== null` ⇔ QUANTA_WEB_DB on). Off ⇒ no writes.
@@ -484,7 +570,6 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
         }
       ).usageAccounting?.serialize(),
   })
-  let transcriptPersistUnsub: (() => void) | null = transcriptPersist.unsub
   // P1 Phase 2 — swap-on-attach closure (extracted to buildOnAttachThread to keep
   // this function under the god ceiling): load the opened thread, replace the live
   // transcript, repoint persistence, restore the durable objective.
@@ -498,10 +583,7 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
   const readoutSources = buildDaemonReadoutSurface(runtime, sharedSession, cost.totals)
 
   const { server, boundPort, boundHost } = buildDaemonListener({
-    config: {
-      ...bindObjectivePaneThread(config, sharedSession.sessionId),
-      ...(goalWork !== undefined ? { goalWork } : {}),
-    },
+    config: bindGoalHandlers(config, sharedSession.sessionId, { goalWork, goalVerify }),
     registry,
     startedAt,
     threadStore,
@@ -512,65 +594,28 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
     followerApproval,
   })
 
-  let stopped = false
+  const stop = createDaemonStop({
+    server,
+    registry,
+    runtime,
+    threadStore,
+    goalWake,
+    goalWork,
+    goalVerify,
+    unsubPersist: unsubPersist0,
+    canvasArtifactUnsub: canvasArtifactUnsub0,
+    followerApprovalUnsub: followerApprovalUnsub0,
+    followerSweepTimer: followerSweepTimer0,
+    approvalContinuationUnsub: approvalContinuationUnsub0,
+    transcriptPersistUnsub: transcriptPersist.unsub,
+    costAggregatorUnsub: cost.unsub,
+  })
   return {
     port: boundPort,
     hostname: boundHost,
     activeSessions: () => registry.size(),
     uptimeMs: () => Math.round(performance.now() - startedAt),
-    stop: async () => {
-      if (stopped) return
-      stopped = true
-      // Stop the listener FIRST (with force=true so in-flight WS clients
-      // are detached at the socket layer) — then drain the registry and
-      // close the runtime. Order matters: if we drain first, our adapter
-      // closes its half of the WS and Bun's `stop()` then waits forever
-      // for the client to ack on a socket we already removed handlers
-      // from. Force-stopping first delivers the close frame from Bun
-      // BEFORE we tear down our adapter state.
-      await stopGoalSurfaces({ goalWake, goalWork })
-      await server.stop(true)
-      await registry.closeAll()
-      if (unsubPersist !== null) {
-        unsubPersist()
-        unsubPersist = null
-      }
-      // A2 — stop the artifact bridge so it never fires against a closed session.
-      if (canvasArtifactUnsub !== null) {
-        canvasArtifactUnsub()
-        canvasArtifactUnsub = null
-      }
-      // T02 — tear down the follower approval coordinator's subscription + sweep
-      // timer so neither fires against a closed session.
-      if (followerApprovalUnsub !== null) {
-        followerApprovalUnsub()
-        followerApprovalUnsub = null
-      }
-      if (followerSweepTimer !== null) {
-        clearInterval(followerSweepTimer)
-        followerSweepTimer = null
-      }
-      // ADR-0540 W1-B — detach the daemon-owned continuation subscription so a
-      // late `approval.resolved` can never enqueue against a closed session
-      // (optional-call form, mirroring `threadStore?.close()` below).
-      approvalContinuationUnsub?.()
-      approvalContinuationUnsub = null
-      // UUX-1-11 — stop the cost turn tally so it never fires after close.
-      if (transcriptPersistUnsub !== null) {
-        transcriptPersistUnsub()
-        transcriptPersistUnsub = null
-      }
-      if (costAggregatorUnsub !== null) {
-        costAggregatorUnsub()
-        costAggregatorUnsub = null
-      }
-      threadStore?.close()
-      await runtime.close().catch((error: unknown) => {
-        logger.warn("web-daemon: runtime.close failed", {
-          error: errMessage(error),
-        })
-      })
-    },
+    stop,
   }
 }
 

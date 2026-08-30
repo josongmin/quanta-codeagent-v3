@@ -21,7 +21,7 @@ import type { ShadowVerifyPort } from "@/agent/shadow-verify"
 import type { FollowerCoControlDispatcher } from "@/agent/thread-follower"
 import type { ArtifactRegistry } from "@/artifact"
 import type { ArtifactPreviewResolver } from "@/host/runtime"
-import type { ObjectivePort } from "@/objective"
+import type { ObjectivePort, ObjectiveVerificationPort } from "@/objective"
 import type { UsageAccountingPort } from "@/observability/usage-accounting"
 import type { RuntimeFacade } from "@/sdk/runtime"
 import type { AgentStateSourceHandle } from "../agent-state-source"
@@ -60,6 +60,8 @@ export interface ObservableRuntimeFacade extends RuntimeFacade {
    * is off ⇒ the snapshot is undefined ⇒ the transcript omits `objective`.
    */
   readonly objectiveAuthority?: ObjectivePort
+  /** SAME host coordinator threaded into turn settlement and `/goal verify`. */
+  readonly objectiveVerifier?: ObjectiveVerificationPort
   /**
    * A7 — the session's usage-accounting authority, READ-ONLY, for the daemon's
    * cost projection (`/cost` readout, and the model label). The SAME instance

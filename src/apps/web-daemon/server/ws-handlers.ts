@@ -21,6 +21,7 @@ import type { RuntimeSession } from "@/sdk/runtime"
 import { errMessage, logger } from "@/shared"
 import { peekControlRequest } from "../control-request-frame"
 import { peekFollowerVerb } from "../follower-verb-frame"
+import { peekGoalVerify, peekGoalVerifyEnvelope } from "../goal-verify-frame"
 import { peekGoalWork, peekGoalWorkEnvelope } from "../goal-work-frame"
 import type { WebDaemonServerConfig } from "../server"
 import type { RegisteredSession, SessionRegistry } from "../session-registry"
@@ -289,6 +290,63 @@ export const consumeGoalWorkFrame = (
   return true
 }
 
+/** Consume and answer the correlated `/goal verify` request on its socket. */
+export const consumeGoalVerifyFrame = (
+  ws: Pick<ServerWebSocket<WSData>, "send"> & { readonly data?: Pick<WSData, "registered"> },
+  config: Pick<WebDaemonServerConfig, "goalVerify">,
+  raw: string,
+): boolean => {
+  const envelope = peekGoalVerifyEnvelope(raw)
+  if (envelope === null) return false
+  const request = peekGoalVerify(raw)
+  const requestId =
+    request?.requestId ?? (typeof envelope.requestId === "string" ? envelope.requestId : undefined)
+  const answer = (result: Record<string, unknown>): void => {
+    try {
+      ws.send(
+        JSON.stringify({
+          kind: "goalVerifyResult",
+          ...(requestId !== undefined ? { requestId } : {}),
+          ...result,
+        }),
+      )
+    } catch (error) {
+      logger.warn("web-daemon: goalVerifyResult send failed", { error: errMessage(error) })
+    }
+  }
+  if (ws.data !== undefined && ws.data.registered !== true) {
+    answer({
+      status: "refused",
+      outcome: { kind: "rejected", reason: "session-not-ready" },
+    })
+    return true
+  }
+  if (request === null) {
+    answer({
+      status: "refused",
+      outcome: { kind: "rejected", reason: "malformed-request" },
+    })
+    return true
+  }
+  const handler = config.goalVerify
+  if (handler === undefined) {
+    answer({
+      status: "refused",
+      outcome: { kind: "rejected", reason: "verifier-unavailable" },
+    })
+    return true
+  }
+  try {
+    handler.request(request.expectedObjectiveRevision, answer)
+  } catch (error) {
+    answer({
+      status: "refused",
+      outcome: { kind: "rejected", reason: `verifier-failed:${errMessage(error)}` },
+    })
+  }
+  return true
+}
+
 /**
  * The whole INBOUND TEXT-FRAME pipeline: every connection-layer consumer that
  * gets a look at a string frame BEFORE the session bridge does, in the ONE
@@ -335,6 +393,7 @@ const consumeInboundTextFrame = (
   // T02 — a follower verb from a 2nd client, routed to the co-control
   // dispatcher (approvals ride approval.respond via the coordinator).
   if (consumeFollowerVerbFrame(config, followerApproval, raw)) return true
+  if (consumeGoalVerifyFrame(ws, config, raw)) return true
   // GOAL-08 rail 15 — the web `/goal work` verb (one user-requested goal turn,
   // answered on this socket). Absent handler ⇒ falls through unchanged.
   if (consumeGoalWorkFrame(ws, config, raw)) return true

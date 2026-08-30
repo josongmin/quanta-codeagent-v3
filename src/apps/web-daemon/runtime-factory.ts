@@ -37,8 +37,14 @@ import {
   type InteractiveTurnAssemblerRequest,
 } from "@/host/runtime"
 import { resolveGatedObjectiveAuthority } from "@/host/runtime/objective-store-wire"
+import { maybeWireObjectiveVerifier } from "@/host/runtime/objective-verifier-wire"
 import { type LLMPort, type Provider, resolveBootSelection, tryCreateLLM } from "@/llm"
-import { applyGoalPreset, type ObjectiveAttemptSlot, type ObjectivePort } from "@/objective"
+import {
+  applyGoalPreset,
+  type ObjectiveAttemptSlot,
+  type ObjectivePort,
+  type ObjectiveVerificationPort,
+} from "@/objective"
 import { createUsageAccounting, resolveUsageAccounting } from "@/observability/usage-accounting"
 import { getDefaultPermissionStore, type PermissionStore } from "@/permission"
 import { createRuntimeFromAgentConfigBase } from "@/sdk/runtime"
@@ -291,7 +297,10 @@ const isObjectiveAttemptSlotValue = (v: unknown): v is ObjectiveAttemptSlot =>
  */
 const buildFacadeGetters = (
   parts: Awaited<ReturnType<typeof assembleWebRuntimeParts>>,
-  base: { readonly objectiveAttemptSlot?: unknown },
+  base: {
+    readonly objectiveAttemptSlot?: unknown
+    readonly objectiveVerifier?: ObjectiveVerificationPort | undefined
+  },
 ): Parameters<typeof defineOptionalFacadeGetters>[1] =>
   ({
     // RFC-03 C2 (web-parity persistence seam) — expose the SESSION-STABLE
@@ -308,6 +317,7 @@ const buildFacadeGetters = (
     // default-OFF). Passed directly (like `canvasUsage`) — the helper's
     // undefined-skip removes the need for a guard ternary here.
     ...objectivePorts(parts.objective, base.objectiveAttemptSlot),
+    ...(base.objectiveVerifier !== undefined ? { objectiveVerifier: base.objectiveVerifier } : {}),
     // A7 — the read-only cost authority for the daemon's projection surfaces.
     ...(parts.usageAccounting !== undefined ? { usageAccounting: parts.usageAccounting } : {}),
     canvasUsage: parts.canvasUsage,
@@ -466,6 +476,9 @@ export const buildProductionRuntimeFactory = (
       postureControl,
       questionGuard,
     })
+    // One coordinator per daemon session root. The turn assembler adopts this
+    // slot, and the facade exposes the same instance to `/goal verify`.
+    maybeWireObjectiveVerifier(base)
     const turnAssembler = buildInteractiveTurnAssembler()
     const { runtime } = await createRuntimeFromAgentConfigBase({
       base,
