@@ -182,6 +182,38 @@ export const censusCorpusSize = (): number => {
   return n
 }
 
+/**
+ * Does this file scan the tree and state a zero-verdict over it?
+ *
+ * The census's own gate, minus the floor question. `isFloorless` answers "does it
+ * lack a floor"; this answers "is it the kind of file a floor is owed by at all",
+ * which is what an ENROLLMENT ratchet has to iterate. Sharing the definition is
+ * the point — a second copy of SCAN/VERDICT/TEMP_ONLY is how the previous two
+ * detectors drifted apart.
+ */
+export const isScanVerdictGuard = (rawSource: string): boolean => {
+  const s = stripComments(rawSource)
+  return SCAN.test(s) && VERDICT.test(s) && !TEMP_ONLY(s)
+}
+
+/** Every in-scope scan-verdict guard, repo-relative. */
+export const scanVerdictGuards = (): readonly string[] => {
+  const found: string[] = []
+  const visit = (d: string): void => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      if (e.name === "node_modules" || e.name.startsWith(".")) continue
+      const p = join(d, e.name)
+      if (e.isDirectory()) visit(p)
+      else if (p.endsWith(".test.ts") && isScanVerdictGuard(readFileSync(p, "utf8"))) {
+        found.push(p.slice(R.length + 1))
+      }
+    }
+  }
+  visit(join(R, "tests"))
+  visit(join(R, "src"))
+  return found.sort()
+}
+
 export const floorlessGuards = (): readonly string[] => {
   out.length = 0
   walk(join(R, "tests"))
