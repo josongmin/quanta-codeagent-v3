@@ -784,6 +784,19 @@ interface Violation {
   line: string
 }
 
+const scanRuleLines = (rule: Rule, lines: readonly string[]): readonly Violation[] => {
+  const violations: Violation[] = []
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index] ?? ""
+    const trimmed = line.trim()
+    if (trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed.startsWith("/*")) continue
+    if (rule.pattern.test(line)) {
+      violations.push({ rule, lineNo: index + 1, line: trimmed })
+    }
+  }
+  return violations
+}
+
 const scanFile = (path: string): readonly Violation[] => {
   const text = readFileSync(path, "utf8")
   const lines = text.split("\n")
@@ -795,14 +808,7 @@ const scanFile = (path: string): readonly Violation[] => {
     // by this rule. Lets a rule target a single slice (e.g. domain layers)
     // without polluting its allowlist with every other slice's legitimate uses.
     if (rule.scope !== undefined && !rule.scope.test(relPath)) continue
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i] ?? ""
-      const trimmed = line.trim()
-      if (trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed.startsWith("/*")) continue
-      if (rule.pattern.test(line)) {
-        violations.push({ rule, lineNo: i + 1, line: trimmed })
-      }
-    }
+    violations.push(...scanRuleLines(rule, lines))
   }
   return violations
 }
