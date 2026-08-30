@@ -115,6 +115,127 @@ const kernelState = (opts: DefaultKernelOptions = {}) => {
  *  can never drift from what that function actually builds. */
 type KernelCtx = ReturnType<typeof kernelState>
 
+interface SpawnedProcess {
+  readonly proc: ReturnType<typeof Bun.spawn>
+  readonly stdoutReader: ChunkReader
+  readonly stderrBuf: string[]
+}
+
+const killQuietly = (proc: ReturnType<typeof Bun.spawn>): void => {
+  try {
+    proc.kill()
+  } catch {
+    /* already dead */
+  }
+}
+
+const launchNode = (nodeBin: string): Result<SpawnedProcess, KernelError> => {
+  try {
+    const proc = Bun.spawn([nodeBin, "-i", "--no-warnings"], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    const stdoutReader = (
+      proc.stdout as ReadableStream<Uint8Array>
+    ).getReader() as unknown as ChunkReader
+    const stderrBuf: string[] = []
+    void drainStderr(proc, stderrBuf)
+    return ok({ proc, stdoutReader, stderrBuf })
+  } catch (e) {
+    const detail = errMessage(e)
+    if (detail.toLowerCase().includes("enoent")) return err({ kind: "node-missing", detail })
+    return err({ kind: "spawn-failed", detail })
+  }
+}
+
+const drainStderr = async (
+  proc: ReturnType<typeof Bun.spawn>,
+  stderrBuf: string[],
+): Promise<void> => {
+  try {
+    const text = await new Response(proc.stderr as ReadableStream<Uint8Array>).text()
+    if (text.length > 0) stderrBuf.push(text)
+  } catch {
+    // process died; nothing to drain
+  }
+}
+
+const warmUpNode = async (
+  proc: ReturnType<typeof Bun.spawn>,
+  stdoutReader: ChunkReader,
+  readyTimeoutMs: number,
+): Promise<{ ok: true } | { ok: false; detail: string }> => {
+  const sentinel = `${SENTINEL_PREFIX}${randomNonce()}__`
+  try {
+    ;(proc.stdin as { write: (s: string) => unknown }).write(`;"${sentinel}";\n`)
+  } catch (e) {
+    killQuietly(proc)
+    return { ok: false, detail: errMessage(e) }
+  }
+  const read = await readUntil(stdoutReader, sentinel, readyTimeoutMs)
+  if (read.ok) return { ok: true }
+  killQuietly(proc)
+  return { ok: false, detail: read.error }
+}
+
+const reapWhenExited = (
+  proc: ReturnType<typeof Bun.spawn>,
+  id: KernelId,
+  kernels: Map<KernelId, LiveKernel>,
+  removeIfHome: (id: KernelId) => void,
+): void => {
+  void (async () => {
+    try {
+      await proc.exited
+    } finally {
+      const k = kernels.get(id)
+      if (k !== undefined) k.state = "dead"
+      removeIfHome(id)
+      kernels.delete(id)
+    }
+  })()
+}
+
+const releaseDeadKernel = (release: () => void, id: KernelId): Result<never, KernelError> => {
+  release()
+  return err({ kind: "kernel-dead", id })
+}
+
+const executeWithLock = async (
+  k: LiveKernel,
+  id: KernelId,
+  code: string,
+  execOpts: NodeReplExecOptions | undefined,
+  ctx: KernelCtx,
+  release: () => void,
+): Promise<Result<ExecResult, KernelError>> => {
+  const { removeIfHome, dropKernel, touchIfHome } = ctx
+  if (execOpts?.signal?.aborted === true) {
+    markDeadAndExit(k, id, removeIfHome, dropKernel)
+    release()
+    return err({ kind: "exec-aborted", id })
+  }
+  const write = writeExec(k, code)
+  if (!write.ok) {
+    markDead(k, id, removeIfHome, dropKernel)
+    release()
+    return err({ kind: "spawn-failed", detail: write.detail })
+  }
+  const read = await readUntilWithAbort(
+    k.stdoutReader,
+    write.sentinel,
+    execOpts?.timeoutMs ?? 0,
+    execOpts?.signal,
+  )
+  if (read.ok) return finishExec(k, id, read.body, touchIfHome, release)
+  const aborted = read.error === "aborted"
+  if (aborted) markDeadAndExit(k, id, removeIfHome, dropKernel)
+  else markDead(k, id, removeIfHome, dropKernel)
+  release()
+  return err({ kind: aborted ? "exec-aborted" : "kernel-dead", id })
+}
+
 /** Session spawn — the long pole: allocate the child, wire its streams, and
  *  register the session so `exec`/`kill` can find it. */
 const spawnOps = (ctx: KernelCtx): Pick<NodeReplKernel, "spawn"> => {
@@ -129,38 +250,9 @@ const spawnOps = (ctx: KernelCtx): Pick<NodeReplKernel, "spawn"> => {
         return err({ kind: "invalid-id", raw: spawnOpts.id ?? "" })
       }
       const id = idStr as KernelId
-
-      let proc: ReturnType<typeof Bun.spawn>
-      try {
-        proc = Bun.spawn([nodeBin, "-i", "--no-warnings"], {
-          stdin: "pipe",
-          stdout: "pipe",
-          stderr: "pipe",
-        })
-      } catch (e) {
-        const detail = errMessage(e)
-        // ENOENT on `node` → node-missing; anything else (EACCES, EAGAIN)
-        // surfaces as spawn-failed with the platform detail.
-        if (detail.toLowerCase().includes("enoent")) {
-          return err({ kind: "node-missing", detail })
-        }
-        return err({ kind: "spawn-failed", detail })
-      }
-
-      const stdoutReader = (
-        proc.stdout as ReadableStream<Uint8Array>
-      ).getReader() as unknown as ChunkReader
-      const stderrBuf: string[] = []
-      // Drain stderr in the background — accumulate into stderrBuf the
-      // caller's `exec` will consume.
-      void (async () => {
-        try {
-          const text = await new Response(proc.stderr as ReadableStream<Uint8Array>).text()
-          if (text.length > 0) stderrBuf.push(text)
-        } catch {
-          // process died; nothing to drain
-        }
-      })()
+      const launched = launchNode(nodeBin)
+      if (!launched.ok) return launched
+      const { proc, stdoutReader, stderrBuf } = launched.value
 
       const now = Date.now()
       const pid = proc.pid ?? 0
@@ -172,33 +264,8 @@ const spawnOps = (ctx: KernelCtx): Pick<NodeReplKernel, "spawn"> => {
         sessionId: spawnOpts.sessionId,
       }
 
-      // Warm-up: send a sentinel and consume the banner until it echoes.
-      const warmupNonce = randomNonce()
-      const warmupSentinel = `${SENTINEL_PREFIX}${warmupNonce}__`
-      try {
-        const writer = (proc.stdin as { write: (s: string) => unknown }).write
-        ;(proc.stdin as { write: (s: string) => unknown }).write(`;"${warmupSentinel}";\n`)
-        void writer // silence unused
-      } catch (e) {
-        try {
-          proc.kill()
-        } catch {
-          /* ignore */
-        }
-        return err({
-          kind: "spawn-failed",
-          detail: errMessage(e),
-        })
-      }
-      const warmRead = await readUntil(stdoutReader, warmupSentinel, readyTimeoutMs)
-      if (!warmRead.ok) {
-        try {
-          proc.kill()
-        } catch {
-          /* ignore */
-        }
-        return err({ kind: "spawn-failed", detail: warmRead.error })
-      }
+      const warmup = await warmUpNode(proc, stdoutReader, readyTimeoutMs)
+      if (!warmup.ok) return err({ kind: "spawn-failed", detail: warmup.detail })
 
       kernels.set(id, {
         spec,
@@ -209,20 +276,7 @@ const spawnOps = (ctx: KernelCtx): Pick<NodeReplKernel, "spawn"> => {
         pending: Promise.resolve(),
       })
       writeIfHome(spec)
-      // Reap on process death — mark dead, drop the on-disk handle, and
-      // evict from the in-memory Map so dead kernels are not retained.
-      void (async () => {
-        try {
-          await proc.exited
-        } finally {
-          const k = kernels.get(id)
-          if (k !== undefined) {
-            k.state = "dead"
-          }
-          removeIfHome(id)
-          kernels.delete(id)
-        }
-      })()
+      reapWhenExited(proc, id, kernels, removeIfHome)
 
       return ok(spec)
     },
@@ -232,7 +286,7 @@ const spawnOps = (ctx: KernelCtx): Pick<NodeReplKernel, "spawn"> => {
 /** Operations over an already-spawned session: evaluate, report, terminate,
  *  enumerate. */
 const sessionOps = (ctx: KernelCtx): Pick<NodeReplKernel, "exec" | "status" | "kill" | "list"> => {
-  const { kernels, touchIfHome, removeIfHome, dropKernel } = ctx
+  const { kernels, removeIfHome } = ctx
   return {
     async exec(
       id: KernelId,
@@ -254,34 +308,9 @@ const sessionOps = (ctx: KernelCtx): Pick<NodeReplKernel, "exec" | "status" | "k
       // while we were queued behind the in-flight exec.
       const live = kernels.get(id)
       if (live === undefined || live.state === "dead") {
-        release()
-        return err({ kind: "kernel-dead", id })
+        return releaseDeadKernel(release, id)
       }
-      if (execOpts?.signal?.aborted === true) {
-        markDeadAndExit(k, id, removeIfHome, dropKernel)
-        release()
-        return err({ kind: "exec-aborted", id })
-      }
-      const writeRes = writeExec(k, code)
-      if (!writeRes.ok) {
-        markDead(k, id, removeIfHome, dropKernel)
-        release()
-        return err({ kind: "spawn-failed", detail: writeRes.detail })
-      }
-      const readRes = await readUntilWithAbort(
-        k.stdoutReader,
-        writeRes.sentinel,
-        execOpts?.timeoutMs ?? 0,
-        execOpts?.signal,
-      )
-      if (!readRes.ok) {
-        const aborted = readRes.error === "aborted"
-        if (aborted) markDeadAndExit(k, id, removeIfHome, dropKernel)
-        else markDead(k, id, removeIfHome, dropKernel)
-        release()
-        return err({ kind: aborted ? "exec-aborted" : "kernel-dead", id })
-      }
-      return finishExec(k, id, readRes.body, touchIfHome, release)
+      return executeWithLock(k, id, code, execOpts, ctx, release)
     },
 
     status(id: KernelId): KernelState {
@@ -473,6 +502,55 @@ const DEFAULT_TIMERS: ReadUntilTimers = {
   clear: (handle) => clearTimeout(handle),
 }
 
+type ReadChunk = { done: boolean; value?: Uint8Array }
+type TimedRead = ReadChunk | typeof READ_TIMED_OUT
+const READ_TIMED_OUT = Symbol("read-timeout")
+
+const readChunkWithin = async (
+  reader: ChunkReader,
+  remainingMs: number,
+  timers: ReadUntilTimers,
+): Promise<TimedRead> => {
+  if (remainingMs <= 0) return READ_TIMED_OUT
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      reader.read(),
+      new Promise<typeof READ_TIMED_OUT>((resolve) => {
+        timer = timers.set(() => resolve(READ_TIMED_OUT), remainingMs)
+      }),
+    ])
+  } finally {
+    if (timer !== undefined) timers.clear(timer)
+  }
+}
+
+const remainingReadMs = (timeoutMs: number, startMs: number): number => {
+  return timeoutMs > 0 ? timeoutMs - (Date.now() - startMs) : -1
+}
+
+type ReadNext = { ok: true; value?: Uint8Array } | ReadFail
+
+const readNext = async (
+  reader: ChunkReader,
+  timeoutMs: number,
+  remainingMs: number,
+  timers: ReadUntilTimers,
+): Promise<ReadNext> => {
+  try {
+    const chunk =
+      timeoutMs > 0 ? await readChunkWithin(reader, remainingMs, timers) : await reader.read()
+    if (chunk === READ_TIMED_OUT) {
+      return { ok: false, error: `read timeout after ${timeoutMs}ms` }
+    }
+    if (chunk.done) return { ok: false, error: "stream closed" }
+    if (chunk.value === undefined) return { ok: true }
+    return { ok: true, value: chunk.value }
+  } catch (e) {
+    return { ok: false, error: errMessage(e) }
+  }
+}
+
 export const readUntil = async (
   reader: ChunkReader,
   sentinel: string,
@@ -482,56 +560,16 @@ export const readUntil = async (
   const decoder = new TextDecoder()
   let buf = ""
   const start = Date.now()
-  const TIMED_OUT = Symbol("read-timeout")
   while (true) {
-    const remainingMs = timeoutMs > 0 ? timeoutMs - (Date.now() - start) : -1
+    const remainingMs = remainingReadMs(timeoutMs, start)
     if (timeoutMs > 0 && remainingMs <= 0) {
       return { ok: false, error: `read timeout after ${timeoutMs}ms` }
     }
-    let done: boolean
-    let value: Uint8Array | undefined
-    try {
-      // A bare `await reader.read()` blocks FOREVER on a silent runaway child
-      // (one that emits no stdout — exactly what `timeoutMs` exists to bound),
-      // so the top-of-loop deadline check would never run again. Race the read
-      // against the remaining budget so the timeout actually fires; the
-      // abandoned read() settles later when the caller kills the child.
-      let chunk: { done: boolean; value?: Uint8Array }
-      if (timeoutMs > 0) {
-        // Capture the timer OUTSIDE the try so the `finally` can always cancel
-        // it — including the path where `reader.read()` REJECTS. Clearing only
-        // on the resolve branch would leak the bounded self-expiring timer (a
-        // dangling handle that keeps the loop's event-loop tick alive) every
-        // time the underlying read rejects mid-wait.
-        let timer: ReturnType<typeof setTimeout> | undefined
-        try {
-          const raced = await Promise.race([
-            reader.read(),
-            new Promise<typeof TIMED_OUT>((r) => {
-              timer = timers.set(() => r(TIMED_OUT), remainingMs)
-            }),
-          ])
-          if (raced === TIMED_OUT) {
-            return { ok: false, error: `read timeout after ${timeoutMs}ms` }
-          }
-          chunk = raced
-        } finally {
-          if (timer !== undefined) timers.clear(timer)
-        }
-      } else {
-        chunk = await reader.read()
-      }
-      done = chunk.done
-      value = chunk.value
-    } catch (e) {
-      return { ok: false, error: errMessage(e) }
-    }
-    if (done) {
-      return { ok: false, error: "stream closed" }
-    }
-    if (value !== undefined) {
-      buf += decoder.decode(value, { stream: true })
-    }
+    // A bare `await reader.read()` blocks forever on a silent child; this
+    // bounded helper also clears its race timer when a reader rejects.
+    const next = await readNext(reader, timeoutMs, remainingMs, timers)
+    if (!next.ok) return next
+    if (next.value !== undefined) buf += decoder.decode(next.value, { stream: true })
     const idx = buf.indexOf(sentinel)
     if (idx >= 0) {
       return { ok: true, body: buf.slice(0, idx) }
