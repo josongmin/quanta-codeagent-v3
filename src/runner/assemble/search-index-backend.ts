@@ -338,6 +338,46 @@ export const isPersistOn = (env: Record<string, string | undefined>): boolean =>
 
 const chunkId = (c: IndexerFileChunk): string => `${c.path}:${c.startLine}-${c.endLine}`
 
+type InMemoryEntry = { readonly vec: readonly number[]; readonly chunk: IndexerFileChunk }
+
+const squaredNorm = (vec: readonly number[]): number => {
+  let total = 0
+  for (let i = 0; i < vec.length; i++) total += (vec[i] ?? 0) * (vec[i] ?? 0)
+  return total
+}
+
+const cosineSimilarity = (query: readonly number[], candidate: readonly number[]): number => {
+  let dot = 0
+  const len = Math.min(candidate.length, query.length)
+  for (let i = 0; i < len; i++) dot += (candidate[i] ?? 0) * (query[i] ?? 0)
+  const denominator = Math.sqrt(squaredNorm(query)) * Math.sqrt(squaredNorm(candidate))
+  return denominator === 0 ? 0 : dot / denominator
+}
+
+const semanticHit = (id: string, score: number, chunk: IndexerFileChunk): SearchHit => ({
+  id,
+  score,
+  text: chunk.text,
+  source: "semantic",
+  metadata: {
+    path: chunk.path,
+    startLine: chunk.startLine,
+    endLine: chunk.endLine,
+  },
+})
+
+const rankedInMemoryHits = (
+  store: ReadonlyMap<string, InMemoryEntry>,
+  query: readonly number[],
+  limit: number,
+): SearchHit[] => {
+  const hits: SearchHit[] = []
+  for (const [id, { vec, chunk }] of store) {
+    hits.push(semanticHit(id, cosineSimilarity(query, vec), chunk))
+  }
+  return hits.sort((a, b) => b.score - a.score).slice(0, limit)
+}
+
 const newInMemoryBackend = (
   embed: IndexEmbed,
   metrics?: SearchIndexMetrics,
@@ -346,46 +386,20 @@ const newInMemoryBackend = (
   state: SemanticBackendState = "ready",
   stateReason?: string,
 ): SemanticBackend => {
-  type Entry = { readonly vec: readonly number[]; readonly chunk: IndexerFileChunk }
-  const store = new Map<string, Entry>()
+  const store = new Map<string, InMemoryEntry>()
   return {
     state,
     ...(stateReason !== undefined ? { stateReason } : {}),
     port: {
       async query(vec: readonly number[], k: number): Promise<readonly SearchHit[]> {
         const t0 = nowOrDate(nowMs)
-        const out: SearchHit[] = []
         // COSINE similarity, not raw dot. The legacy hash embedder emits
         // unit-length vectors, so cosine == dot there (byte-identical ranking).
         // But a real (Voyage/OpenAI/Cohere) embedder need NOT be normalized; raw
         // dot then ranks by magnitude, not direction — a ranking distortion.
         // Normalizing by both magnitudes restores direction-based ranking on the
         // most-common enabled path. Zero-magnitude vectors ⇒ score 0 (no NaN).
-        let qNorm = 0
-        for (let i = 0; i < vec.length; i++) qNorm += (vec[i] ?? 0) * (vec[i] ?? 0)
-        qNorm = Math.sqrt(qNorm)
-        for (const [id, { vec: v, chunk }] of store) {
-          let dot = 0
-          let vNorm = 0
-          const len = Math.min(v.length, vec.length)
-          for (let i = 0; i < len; i++) dot += (v[i] ?? 0) * (vec[i] ?? 0)
-          for (let i = 0; i < v.length; i++) vNorm += (v[i] ?? 0) * (v[i] ?? 0)
-          vNorm = Math.sqrt(vNorm)
-          const denom = qNorm * vNorm
-          const score = denom === 0 ? 0 : dot / denom
-          out.push({
-            id,
-            score,
-            text: chunk.text,
-            source: "semantic",
-            metadata: {
-              path: chunk.path,
-              startLine: chunk.startLine,
-              endLine: chunk.endLine,
-            },
-          })
-        }
-        const hits = out.sort((a, b) => b.score - a.score).slice(0, k)
+        const hits = rankedInMemoryHits(store, vec, k)
         safeObserve(metrics, "search.index.query.latency_ms", nowOrDate(nowMs) - t0, {
           store: storeLabel,
         })
@@ -505,58 +519,65 @@ const resolveRequestedStore = (
   return isPersistOn(env) ? { kind: "implicit", provider: "sqlite" } : { kind: "none" }
 }
 
+type StoreDeps = Parameters<typeof createStoreFromEnv>[1]
+type ResolvedStoreDeps = { readonly deps: StoreDeps; readonly dbHandle?: SqliteDb }
+
+const resolveSqliteStoreDeps = (
+  env: Record<string, string | undefined>,
+  opts: BuildSemanticBackendOptions,
+): ResolvedStoreDeps => {
+  const dbHandle = opts.db ?? openLocalIndexDb(env, "store")
+  return {
+    deps: dbHandle === null ? {} : { sqlite: { db: dbHandle, tableName: PERSIST_TABLE } },
+    ...(dbHandle !== null ? { dbHandle } : {}),
+  }
+}
+
+const resolveLanceStoreDeps = (
+  env: Record<string, string | undefined>,
+  opts: BuildSemanticBackendOptions,
+): StoreDeps => {
+  const baseURL = env.QUANTA_LANCE_BASE_URL
+  const table = env.QUANTA_LANCE_TABLE
+  if (baseURL === undefined || table === undefined) return {}
+  const maxDim = parseMaxDim(env.QUANTA_LANCE_MAX_DIM)
+  return {
+    lance: {
+      baseURL,
+      table,
+      ...(env.QUANTA_LANCE_API_KEY !== undefined ? { apiKey: env.QUANTA_LANCE_API_KEY } : {}),
+      ...(maxDim !== undefined ? { maxDim } : {}),
+      ...(opts.storeDeps?.lance ?? {}),
+    },
+  }
+}
+
+const resolveQdrantStoreDeps = (
+  env: Record<string, string | undefined>,
+  opts: BuildSemanticBackendOptions,
+): StoreDeps => {
+  const collection = env.QUANTA_QDRANT_COLLECTION
+  if (collection === undefined) return {}
+  const maxDim = parseMaxDim(env.QUANTA_QDRANT_MAX_DIM)
+  return {
+    qdrant: {
+      collection,
+      ...(env.QUANTA_QDRANT_BASE_URL !== undefined ? { baseURL: env.QUANTA_QDRANT_BASE_URL } : {}),
+      ...(env.QUANTA_QDRANT_API_KEY !== undefined ? { apiKey: env.QUANTA_QDRANT_API_KEY } : {}),
+      ...(maxDim !== undefined ? { maxDim } : {}),
+      ...(opts.storeDeps?.qdrant ?? {}),
+    },
+  }
+}
+
 const resolveStoreDeps = (
   env: Record<string, string | undefined>,
   provider: "in-memory" | "sqlite" | "lance" | "qdrant",
   opts: BuildSemanticBackendOptions,
-): { readonly deps: Parameters<typeof createStoreFromEnv>[1]; readonly dbHandle?: SqliteDb } => {
-  if (provider === "sqlite") {
-    const dbHandle = opts.db ?? openLocalIndexDb(env, "store")
-    return {
-      deps: dbHandle === null ? {} : { sqlite: { db: dbHandle, tableName: PERSIST_TABLE } },
-      ...(dbHandle !== null ? { dbHandle } : {}),
-    }
-  }
-  if (provider === "lance") {
-    const maxDim = parseMaxDim(env.QUANTA_LANCE_MAX_DIM)
-    return {
-      deps:
-        env.QUANTA_LANCE_BASE_URL !== undefined && env.QUANTA_LANCE_TABLE !== undefined
-          ? {
-              lance: {
-                baseURL: env.QUANTA_LANCE_BASE_URL,
-                table: env.QUANTA_LANCE_TABLE,
-                ...(env.QUANTA_LANCE_API_KEY !== undefined
-                  ? { apiKey: env.QUANTA_LANCE_API_KEY }
-                  : {}),
-                ...(maxDim !== undefined ? { maxDim } : {}),
-                ...(opts.storeDeps?.lance ?? {}),
-              },
-            }
-          : {},
-    }
-  }
-  if (provider === "qdrant") {
-    const maxDim = parseMaxDim(env.QUANTA_QDRANT_MAX_DIM)
-    return {
-      deps:
-        env.QUANTA_QDRANT_COLLECTION !== undefined
-          ? {
-              qdrant: {
-                collection: env.QUANTA_QDRANT_COLLECTION,
-                ...(env.QUANTA_QDRANT_BASE_URL !== undefined
-                  ? { baseURL: env.QUANTA_QDRANT_BASE_URL }
-                  : {}),
-                ...(env.QUANTA_QDRANT_API_KEY !== undefined
-                  ? { apiKey: env.QUANTA_QDRANT_API_KEY }
-                  : {}),
-                ...(maxDim !== undefined ? { maxDim } : {}),
-                ...(opts.storeDeps?.qdrant ?? {}),
-              },
-            }
-          : {},
-    }
-  }
+): ResolvedStoreDeps => {
+  if (provider === "sqlite") return resolveSqliteStoreDeps(env, opts)
+  if (provider === "lance") return { deps: resolveLanceStoreDeps(env, opts) }
+  if (provider === "qdrant") return { deps: resolveQdrantStoreDeps(env, opts) }
   return { deps: {} }
 }
 
@@ -646,6 +667,34 @@ const mapStoredHits = (
     }
   })
 
+const deleteStoredIds = async (
+  runtime: VectorStoreRuntime,
+  ids: readonly string[],
+): Promise<boolean> => {
+  const deleted = await runtime.store.delete(ids)
+  if (deleted.ok) return true
+  logger.warn(`search index ${runtime.storeLabel} delete failed: ${deleted.error.kind}`)
+  return false
+}
+
+const reconcileDeletedPath = async (runtime: VectorStoreRuntime, path: string): Promise<void> => {
+  const stale = await runtime.manifest.idsForPath(path)
+  if (stale.length > 0 && !(await deleteStoredIds(runtime, stale))) return
+  await runtime.manifest.deletePath(path)
+}
+
+const reconcileChangedPath = async (
+  runtime: VectorStoreRuntime,
+  path: string,
+  nextIds: readonly string[],
+): Promise<void> => {
+  const previous = new Set(await runtime.manifest.idsForPath(path))
+  const next = new Set(nextIds)
+  const stale = [...previous].filter((id) => !next.has(id))
+  if (stale.length > 0 && !(await deleteStoredIds(runtime, stale))) return
+  await runtime.manifest.replacePath(path, nextIds)
+}
+
 const buildVectorStoreBackend = (
   embed: IndexEmbed,
   runtimePromise: Promise<VectorStoreRuntime | null>,
@@ -713,30 +762,10 @@ const buildVectorStoreBackend = (
       const runtime = await ensureRuntime()
       if (runtime === null) return
       for (const path of batch.deletedPaths) {
-        const stale = await runtime.manifest.idsForPath(path)
-        if (stale.length === 0) {
-          await runtime.manifest.deletePath(path)
-          continue
-        }
-        const r = await runtime.store.delete(stale)
-        if (!r.ok) {
-          logger.warn(`search index ${runtime.storeLabel} delete failed: ${r.error.kind}`)
-          continue
-        }
-        await runtime.manifest.deletePath(path)
+        await reconcileDeletedPath(runtime, path)
       }
       for (const [path, nextIds] of batch.changedPaths) {
-        const prevIds = new Set(await runtime.manifest.idsForPath(path))
-        const keep = new Set(nextIds)
-        const stale = [...prevIds].filter((id) => !keep.has(id))
-        if (stale.length > 0) {
-          const r = await runtime.store.delete(stale)
-          if (!r.ok) {
-            logger.warn(`search index ${runtime.storeLabel} delete failed: ${r.error.kind}`)
-            continue
-          }
-        }
-        await runtime.manifest.replacePath(path, nextIds)
+        await reconcileChangedPath(runtime, path, nextIds)
       }
     },
   }
