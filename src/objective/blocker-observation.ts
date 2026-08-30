@@ -23,14 +23,17 @@ export const applyBlockerMutation = (
     })
   }
   const ref = dependencyRef(mutation)
-  if (ref === null || mutation.attemptId === undefined || mutation.attemptId.length === 0) {
-    return null
-  }
+  // GOAL P0-A — the attempt id is DOMAIN state, reserved by `beginAttempt`
+  // before any paid call. Reading it here (instead of trusting `mutation.attemptId`,
+  // which the tool layer could only ever fill from a per-tool-call id) is what
+  // makes "three distinct attempts" mean three attempts.
+  const attemptId = core.get(threadId)?.attempts.started?.attemptId
+  if (ref === null || attemptId === undefined || attemptId.length === 0) return null
   return core.observeBlocker(threadId, {
     dependencyRef: ref,
     reason: mutation.reason,
     waitingOn: mutation.waitingOn,
-    attemptId: mutation.attemptId,
+    attemptId,
   })
 }
 

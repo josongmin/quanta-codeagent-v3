@@ -293,9 +293,11 @@ const COMMIT_ERROR_MESSAGE: Record<CommitRejection, string> = {
   "validation-contract-missing":
     "the objective has no success criteria or checks to complete against",
   "attempt-in-flight": "an attributed attempt is still running; wait for it to settle",
+  "attempt-missing":
+    "no attributed attempt is in flight — a blocker observation is attributed to an attempt, so raise it while the goal work is running",
   "hard-cap-exhausted": "the product autonomous attempt cap for this goal is exhausted",
   "budget-exhausted": "the goal's turn budget is exhausted",
-  invalid: "objective mutation could not be applied (no objective set for this thread)",
+  invalid: "the objective mutation is malformed for this operation",
 }
 
 const commitError = (res: Extract<CommitResult, { ok: false }>): string =>
@@ -453,17 +455,18 @@ const buildObjectiveSet = (ports: ObjectiveToolPorts): Tool<ObjectiveSetInput> =
 })
 
 /** Translate a validated `objective_update` op into the authority mutation. */
-const opToMutation = (op: ObjectiveUpdateInput["op"], ctx: ToolContext): ModelObjectiveMutation => {
+const opToMutation = (op: ObjectiveUpdateInput["op"]): ModelObjectiveMutation => {
   switch (op.kind) {
+    // GOAL P0-A — no `attemptId`. The tool layer's only candidates were
+    // `ctx.turnId` (declared for the checkpoint policy, set by nothing in
+    // production) and `ctx.toolCallId` (per TOOL CALL, and web-canvas only), so
+    // this seam was either dead or wrong. The authority stamps the live attempt.
     case "addBlocker":
       return {
         kind: "addBlocker",
         reason: op.reason,
         waitingOn: op.waiting_on,
         target: op.dependency_target,
-        ...(ctx.turnId !== undefined || ctx.toolCallId !== undefined
-          ? { attemptId: ctx.turnId ?? ctx.toolCallId }
-          : {}),
       }
     case "nextActions":
       return { kind: "setNextActions", actions: op.actions }
@@ -496,7 +499,7 @@ const buildObjectiveUpdate = (ports: ObjectiveToolPorts): Tool<ObjectiveUpdateIn
     try {
       yield {
         type: "result",
-        result: await routeModelMutation(ports, threadId, opToMutation(parsed.data.op, ctx), ctx),
+        result: await routeModelMutation(ports, threadId, opToMutation(parsed.data.op), ctx),
       }
     } catch (e) {
       yield { type: "result", result: errResult(`objective_update error: ${errMessage(e)}`) }

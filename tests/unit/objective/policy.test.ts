@@ -38,6 +38,31 @@ const seed = (auth: ObjectiveAuthority, criteria: readonly string[] = ["c"]) =>
 const firstCriterion = (auth: ObjectiveAuthority, threadId = "t"): string =>
   auth.get(threadId)?.successCriteria[0]?.id ?? "missing"
 
+/** GOAL P0-A — a model blocker observation is attributed to the attempt the
+ *  HOST has in flight, so the scenario needs one. */
+const enterAttempt = (auth: ObjectiveAuthority, attemptId: string, threadId = "t"): void => {
+  const objective = auth.get(threadId)
+  if (objective === null) throw new Error("no objective")
+  if (objective.attempts.started !== undefined) {
+    run(auth, "system", { kind: "abandonAttempt" }, threadId)
+  }
+  run(
+    auth,
+    "system",
+    {
+      kind: "beginAttempt",
+      attempt: {
+        objectiveId: objective.objectiveId,
+        attemptId,
+        provenance: "user-requested-goal-work",
+        executionMode: "foreground",
+        startedRevision: auth.readDomain(threadId).revision,
+      },
+    },
+    threadId,
+  )
+}
+
 describe("GOAL-02 — the policy table is exhaustive", () => {
   test("every mutation kind × actor cell exists and the validator accepts the live table", () => {
     for (const kind of OBJECTIVE_OPERATION_KINDS) {
@@ -238,13 +263,13 @@ describe("GOAL-02 — definition ownership and terminal state", () => {
     const auth = authority()
     seed(auth)
     for (const attemptId of ["a1", "a2", "a3"]) {
+      enterAttempt(auth, attemptId)
       expect(
         reason(
           run(auth, "model", {
             kind: "addBlocker",
             reason: "r",
             waitingOn: "user",
-            attemptId,
             target: { kind: "user-input", ref: "operator" },
           }),
         ),

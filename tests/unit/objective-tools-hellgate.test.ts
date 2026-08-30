@@ -468,17 +468,35 @@ describe("objective tools — op variant round-trip (ADR-0402)", () => {
         dependency_target: { kind: "approval" as const, ref: "deploy-key" },
       },
     }
-    expect(
-      (await drain(findTool(tools, "objective_update"), input, { ...ctx(), turnId: "turn-1" })).ok,
-    ).toBe(true)
+    // GOAL P0-A — the attempts are the HOST's, reserved through the system
+    // capability. The tool context carries no attempt identity at all: a ctx
+    // field the model's turn could vary was never an attempt.
+    const system = createObjectiveCapabilities(port).system
+    const enterAttempt = (attemptId: string): void => {
+      const objective = port.get("t")
+      if (objective === null) throw new Error("no objective")
+      if (objective.attempts.started !== undefined) {
+        system.commit("t", { kind: "abandonAttempt" })
+      }
+      system.commit("t", {
+        kind: "beginAttempt",
+        attempt: {
+          objectiveId: objective.objectiveId,
+          attemptId,
+          provenance: "user-requested-goal-work",
+          executionMode: "foreground",
+          startedRevision: asObjectiveAuthority(port).readDomain("t").revision,
+        },
+      })
+    }
+
+    enterAttempt("attempt-1")
+    expect((await drain(findTool(tools, "objective_update"), input, ctx())).ok).toBe(true)
     expect(port.get("t")?.status).toBe("active")
-    expect(
-      (await drain(findTool(tools, "objective_update"), input, { ...ctx(), turnId: "turn-2" })).ok,
-    ).toBe(true)
-    const out = await drain(findTool(tools, "objective_update"), input, {
-      ...ctx(),
-      turnId: "turn-3",
-    })
+    enterAttempt("attempt-2")
+    expect((await drain(findTool(tools, "objective_update"), input, ctx())).ok).toBe(true)
+    enterAttempt("attempt-3")
+    const out = await drain(findTool(tools, "objective_update"), input, ctx())
     expect(out.ok).toBe(true)
     const o = port.get("t")
     expect(o?.status).toBe("blocked")

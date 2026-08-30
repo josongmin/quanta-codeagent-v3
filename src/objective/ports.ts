@@ -88,6 +88,10 @@ export type CommitRejection =
   | "objective-mismatch"
   /** GOAL-01 — a settlement whose `attemptId` was already settled. */
   | "attempt-replayed"
+  /** GOAL P0-A — a model blocker OBSERVATION arrived with no attributed attempt
+   *  in flight. The attempt id is host-stamped from `attempts.started`, so there
+   *  is nothing to attribute the observation to; the objective itself is live. */
+  | "attempt-missing"
   /** GOAL-01 — the goal text exceeds the domain ceiling (`MAX_GOAL_CHARS`). */
   | "goal-too-long"
   /** The bound actor may not issue this mutation kind. */

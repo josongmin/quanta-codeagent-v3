@@ -200,16 +200,32 @@ const BLOCKER_TARGET_KINDS: ReadonlySet<string> = new Set([
   "tool",
 ])
 
+/** GOAL P0-A — the SHAPE the model is responsible for. The `attemptId` is NOT
+ *  in this list: it is host-stamped from the live attempt (see
+ *  `applyBlockerMutation`), so a model cannot manufacture the three distinct
+ *  attempts its own threshold requires. */
 const validObservedBlocker = (
   mutation: Extract<ObjectiveMutation, { kind: "addBlocker" }>,
 ): boolean =>
-  typeof mutation.attemptId === "string" &&
-  mutation.attemptId.length > 0 &&
-  mutation.attemptId.length <= 512 &&
   mutation.target !== undefined &&
   BLOCKER_TARGET_KINDS.has(mutation.target.kind) &&
   mutation.target.ref.trim().length > 0 &&
   mutation.target.ref.length <= 2_000
+
+/** GOAL P0-A — the two ways a model/continuation blocker OBSERVATION is refused:
+ *  malformed for the operation, or no attempt to attribute it to. Split out of
+ *  the verdict resolver so that function stays under the complexity cap. */
+const observedBlockerRejection = (
+  prior: ObjectiveDomainSnapshot,
+  command: ObjectiveMutationCommand,
+): CommitRejection | null => {
+  if (command.mutation.kind !== "addBlocker") return null
+  if (command.actor !== "model" && command.actor !== "continuation") return null
+  if (!validObservedBlocker(command.mutation)) return "invalid"
+  // An observation is attributed to an ATTEMPT. With none in flight there is
+  // nothing to attribute it to — which is NOT the same as a missing objective.
+  return prior.state?.objective.attempts.started === undefined ? "attempt-missing" : null
+}
 
 const transitionRejection = (
   prior: ObjectiveDomainSnapshot,
@@ -264,13 +280,8 @@ export const authorizeMutation = (
   ) {
     return { verdict: "deny", reason: "terminal-objective" }
   }
-  if (
-    command.mutation.kind === "addBlocker" &&
-    (command.actor === "model" || command.actor === "continuation") &&
-    !validObservedBlocker(command.mutation)
-  ) {
-    return { verdict: "deny", reason: "invalid" }
-  }
+  const observed = observedBlockerRejection(prior, command)
+  if (observed !== null) return { verdict: "deny", reason: observed }
   const transition = transitionRejection(prior, command.mutation)
   if (transition !== null) return { verdict: "deny", reason: transition }
   if (cell === "approval") {

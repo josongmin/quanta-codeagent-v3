@@ -37,19 +37,44 @@ const commit = (
   mutation: ObjectiveMutation,
 ) => authority.commit(authority.prepare({ threadId: "t", actor, mutation }), { admitted: true })
 
+/** GOAL P0-A — the attempt id is HOST state, so an observation only exists
+ *  inside an attempt. Entering `attemptId` (abandoning whatever was in flight)
+ *  is what the kernel scheduler does for a goal turn; re-entering the SAME
+ *  attempt is a no-op, which is how "duplicate calls from one attempt" below
+ *  stays a same-attempt scenario. */
+const enterAttempt = (authority: ObjectiveAuthority, attemptId: string): void => {
+  const objective = authority.get("t")
+  if (objective === null) throw new Error("no objective")
+  if (objective.attempts.started?.attemptId === attemptId) return
+  if (objective.attempts.started !== undefined) {
+    commit(authority, "system", { kind: "abandonAttempt" })
+  }
+  commit(authority, "system", {
+    kind: "beginAttempt",
+    attempt: {
+      objectiveId: objective.objectiveId,
+      attemptId,
+      provenance: "user-requested-goal-work",
+      executionMode: "foreground",
+      startedRevision: authority.readDomain("t").revision,
+    },
+  })
+}
+
 const observe = (
   authority: ObjectiveAuthority,
   attemptId: string,
   ref = "approval:deploy",
   waitingOn: "user" | "tool" = "user",
-) =>
-  commit(authority, "model", {
+) => {
+  enterAttempt(authority, attemptId)
+  return commit(authority, "model", {
     kind: "addBlocker",
     reason: "deployment approval is pending",
     waitingOn,
     target: { kind: waitingOn === "user" ? "approval" : "tool", ref },
-    attemptId,
   })
+}
 
 describe("GOAL-09 blocker observation authority", () => {
   test("duplicate calls from one attempt do not satisfy the three-attempt threshold", () => {
@@ -201,7 +226,9 @@ describe("GOAL-09 blocker observation authority", () => {
       kind: "settleAttempt",
       settlement: {
         objectiveId: started.state?.objective.objectiveId ?? "",
-        attemptId: "settlement-attempt",
+        // GOAL P0-A — settle the attempt that is actually in flight (the one the
+        // observations above were attributed to), not a free-floating id.
+        attemptId: "attempt-2",
         startedRevision: started.revision,
         tokensUsed: 1,
         turnsUsed: 1,
@@ -216,9 +243,10 @@ describe("GOAL-09 blocker observation authority", () => {
     expect(authority.get("t")?.blockerObservations).toEqual([])
   })
 
-  test("model observations fail closed without host attempt or typed target", () => {
+  test("model observations fail closed without a typed target or a host attempt", () => {
     const authority = createObjectiveAuthority()
     seed(authority)
+    // No typed target ⇒ malformed, whether or not an attempt is running.
     expect(
       commit(authority, "model", {
         kind: "addBlocker",
@@ -226,6 +254,16 @@ describe("GOAL-09 blocker observation authority", () => {
         waitingOn: "user",
       }),
     ).toMatchObject({ ok: false, reason: "invalid" })
+    // GOAL P0-A — well-formed, but nothing to attribute it to. A DIFFERENT tag:
+    // the objective is live, so the refusal must not read as "no objective".
+    expect(
+      commit(authority, "model", {
+        kind: "addBlocker",
+        reason: "unattributed",
+        waitingOn: "user",
+        target: { kind: "approval", ref: "approval:deploy" },
+      }),
+    ).toMatchObject({ ok: false, reason: "attempt-missing" })
     expect(authority.get("t")?.blockerObservations).toEqual([])
   })
 })
