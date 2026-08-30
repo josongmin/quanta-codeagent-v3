@@ -105,6 +105,10 @@ describe("A0 — three recorders, one relationship", () => {
     expect(mystery).toBeDefined()
     expect(mystery?.cost.pricingKnown).toBe(false)
     expect(mystery?.cost.totalUsd).toBe(0)
+    // A2 — and the snapshot COUNTS it, so a surface can say incomplete
+    // instead of rendering the floor as an exact figure.
+    expect(authority.snapshot().unpricedCalls).toBe(1)
+    expect(authority.snapshot().byModel.get("mystery-model-99")?.unpricedCalls).toBe(1)
   })
 
   test("the non-finite event enters NO recorder's totals", () => {

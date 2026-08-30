@@ -433,10 +433,30 @@ const agentSplitLines = (
   ]
 }
 
+/**
+ * A2 — the Total-cost cell, honest about what the number is.
+ *   - estimates present  ⇒ "$X.XX ($Y.YY estimated)" (fallback-priced spend)
+ *   - unpriced calls     ⇒ the figure is a FLOOR: "$X.XX+ · N unpriced" — and
+ *     an unknown-only session says "incomplete", never an exact $0.00.
+ */
+const totalCostLine = (totalCostUsd: number | null, view: CostSurfaceView | undefined): string => {
+  const base = formatUsd(totalCostUsd)
+  if (view === undefined) return base
+  const marks: string[] = []
+  if (view.estimatedUsd > 0) marks.push(`${formatUsd(view.estimatedUsd)} estimated`)
+  if (view.unpricedCalls > 0) marks.push(`${view.unpricedCalls} unpriced`)
+  if (marks.length === 0) return base
+  if (view.unpricedCalls > 0 && (totalCostUsd === null || totalCostUsd === 0)) {
+    return `incomplete (${marks.join(" · ")})`
+  }
+  return `${base} (${marks.join(" · ")})`
+}
+
 /** Presentation + teardown. Rendering reads the accounting state and never
  *  mutates it. */
 const renderOps = (ctx: PanelCtx): Pick<CostPanel, "render" | "renderDetailed" | "dispose"> => {
-  const { enabled, now, sortedModelEntries, accounting, authoritative, effectiveState } = ctx
+  const { enabled, now, sortedModelEntries, accounting, authoritative, projected, effectiveState } =
+    ctx
   /**
    * Per-model rows for `/cost`, from whichever feed owns the numbers.
    *
@@ -474,7 +494,16 @@ const renderOps = (ctx: PanelCtx): Pick<CostPanel, "render" | "renderDetailed" |
     render: () => {
       if (!enabled) return renderDisabled()
       const s = effectiveState()
-      const cost = formatUsd(s.totalCostUsd)
+      const unpriced = projected()?.unpricedCalls ?? 0
+      // A2 — an unpriced call makes every dollar figure a FLOOR. An
+      // unknown-only session must never read as an exact $0.00: that is an
+      // absence wearing a number's confidence.
+      const cost =
+        unpriced > 0
+          ? s.totalCostUsd !== null && s.totalCostUsd > 0
+            ? `${formatUsd(s.totalCostUsd)} (+${unpriced} unpriced)`
+            : "cost incomplete"
+          : formatUsd(s.totalCostUsd)
       const turnLabel = `${s.turns} turn${s.turns === 1 ? "" : "s"}`
       const tokens = `${formatTokens(s.inputTokens)} in / ${formatTokens(s.outputTokens)} out`
       return `${cost} · ${turnLabel} · ${tokens} · ${s.model}`
@@ -492,7 +521,7 @@ const renderOps = (ctx: PanelCtx): Pick<CostPanel, "render" | "renderDetailed" |
         `${padLabel("Input:")}${s.inputTokens.toLocaleString("en-US")} tok`,
         `${padLabel("Output:")}${s.outputTokens.toLocaleString("en-US")} tok`,
         `${padLabel("Cache read:")}${s.cacheReadTokens.toLocaleString("en-US")} tok`,
-        `${padLabel("Total cost:")}${formatUsd(s.totalCostUsd)}`,
+        `${padLabel("Total cost:")}${totalCostLine(s.totalCostUsd, projected())}`,
         `${padLabel("Per turn avg:")}${perTurn}`,
         `${padLabel("Model:")}${s.model}`,
       ]

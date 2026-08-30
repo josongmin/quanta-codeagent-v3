@@ -28,6 +28,7 @@ export interface UsageAccountingOpts {
 interface Bucket {
   totalUsd: number
   estimatedUsd: number
+  unpricedCalls: number
   freshInputTokens: number
   cacheReadTokens: number
   cacheWriteTokens: number
@@ -38,6 +39,7 @@ interface Bucket {
 const emptyBucket = (): Bucket => ({
   totalUsd: 0,
   estimatedUsd: 0,
+  unpricedCalls: 0,
   freshInputTokens: 0,
   cacheReadTokens: 0,
   cacheWriteTokens: 0,
@@ -48,6 +50,7 @@ const emptyBucket = (): Bucket => ({
 const freeze = (b: Bucket): UsageAggregate => ({
   totalUsd: b.totalUsd,
   estimatedUsd: b.estimatedUsd,
+  unpricedCalls: b.unpricedCalls,
   freshInputTokens: b.freshInputTokens,
   cacheReadTokens: b.cacheReadTokens,
   cacheWriteTokens: b.cacheWriteTokens,
@@ -60,7 +63,12 @@ const add = (b: Bucket, usage: NormalizedUsage, cost: UsageCost): void => {
   // An estimate is tracked as its own running total rather than a boolean, so a
   // surface can say HOW MUCH of a number is guesswork instead of condemning the
   // whole figure because one unpriced call slipped in.
-  if (!cost.pricingKnown) b.estimatedUsd += cost.totalUsd
+  if (!cost.pricingKnown) {
+    b.estimatedUsd += cost.totalUsd
+    // Counted regardless of amount: a $0 unpriced call is the case the
+    // runtime path actually produces, and it must not vanish into "exact $0".
+    b.unpricedCalls += 1
+  }
   b.freshInputTokens += usage.freshInputTokens
   b.cacheReadTokens += usage.cacheReadTokens
   b.cacheWriteTokens += usage.cacheWriteTokens

@@ -16,6 +16,7 @@ export interface ModelCostLine {
   readonly model: string
   readonly totalUsd: number
   readonly estimatedUsd: number
+  readonly unpricedCalls: number
   readonly promptTokens: number
   readonly outputTokens: number
   readonly cacheReadTokens: number
@@ -44,6 +45,9 @@ export interface CostSurfaceView {
   readonly cacheWriteTokens: number
   readonly outputTokens: number
   readonly calls: number
+  /** Calls the totals could NOT price (no rate, no fallback). `> 0` ⇒ every
+   *  dollar figure in this view is a floor; surfaces must say incomplete. */
+  readonly unpricedCalls: number
   readonly byModel: readonly ModelCostLine[]
   /** Root vs. subagent spend, so a surface can show WHERE the money went
    *  instead of only how much. */
@@ -54,6 +58,7 @@ const lineOf = (model: string, a: UsageAggregate): ModelCostLine => ({
   model,
   totalUsd: a.totalUsd,
   estimatedUsd: a.estimatedUsd,
+  unpricedCalls: a.unpricedCalls,
   promptTokens: a.freshInputTokens + a.cacheReadTokens,
   outputTokens: a.outputTokens,
   cacheReadTokens: a.cacheReadTokens,
@@ -70,6 +75,7 @@ const lineOf = (model: string, a: UsageAggregate): ModelCostLine => ({
 export const costSurfaceView = (snap: UsageAccountingSnapshot): CostSurfaceView => ({
   totalUsd: snap.totalUsd,
   estimatedUsd: snap.estimatedUsd,
+  unpricedCalls: snap.unpricedCalls,
   promptTokens: snap.freshInputTokens + snap.cacheReadTokens,
   freshInputTokens: snap.freshInputTokens,
   cacheReadTokens: snap.cacheReadTokens,

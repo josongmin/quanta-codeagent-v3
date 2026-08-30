@@ -422,6 +422,94 @@ describe("every CLI cost surface reports the same total", () => {
     expect(detailed).toContain("$1.50")
   })
 
+  test("A2: an unknown model is admitted as UNPRICED and the panel says incomplete", () => {
+    // Runtime priceUsage gives unknown models NO fallback: totalUsd 0,
+    // pricingKnown false. estimatedUsd stays 0, so a surface watching only
+    // estimatedUsd misses every production unknown call — an unknown-only
+    // session rendered as an exact "$0.00", which is a wrong number wearing
+    // confidence. The books must carry an unpricedCalls count and the panel
+    // must say "incomplete", never exact-zero.
+    const usageAccounting = createUsageAccounting()
+    const panel = createCostPanel({
+      model: MODEL,
+      now: () => 1_700_000_000_000,
+      accounting: usageAccounting,
+    })
+    const config = {
+      llm: { stream: async function* () {} },
+      registry: { get: () => undefined, specs: () => [], isReadOnly: () => true },
+      stream: { emit: () => undefined },
+      permission: { mode: "acceptEdits" },
+      messages: [],
+      system: "t",
+      cwd: process.cwd(),
+      maxTurns: 1,
+      signal: new AbortController().signal,
+      sessionId: "sess-1",
+      usageAccounting,
+    } as unknown as AgentConfig
+    // REAL producer, not a hand-built fixture: the whole point is that the
+    // production unknown-model path is the one being made honest.
+    emitUsage(
+      config,
+      { ...usage(1_000_000), model: "mystery-model-99" } as UsageEv,
+      undefined,
+      undefined,
+      undefined,
+    )
+
+    const snap = usageAccounting.snapshot() as ReturnType<typeof usageAccounting.snapshot> & {
+      unpricedCalls?: number
+    }
+    expect(snap.unpricedCalls).toBe(1)
+    expect(snap.totalUsd).toBe(0)
+
+    // Unknown-only session: the status line must not read as an exact $0.00 …
+    expect(panel.render()).toContain("cost incomplete")
+    expect(panel.render()).not.toContain("$0.0000")
+    // … and /cost must name the count.
+    expect(panel.renderDetailed()).toContain("1 unpriced")
+  })
+
+  test("A2 control: a fully-priced session shows NO incomplete marker", () => {
+    const { panel } = runSession()
+    expect(panel.render()).not.toContain("incomplete")
+    expect(panel.renderDetailed()).not.toContain("unpriced")
+  })
+
+  test("A2 mixed: known spend + an unknown call shows the total AND the gap", () => {
+    const usageAccounting = createUsageAccounting()
+    const panel = createCostPanel({
+      model: MODEL,
+      now: () => 1_700_000_000_000,
+      accounting: usageAccounting,
+    })
+    const config = {
+      llm: { stream: async function* () {} },
+      registry: { get: () => undefined, specs: () => [], isReadOnly: () => true },
+      stream: { emit: () => undefined },
+      permission: { mode: "acceptEdits" },
+      messages: [],
+      system: "t",
+      cwd: process.cwd(),
+      maxTurns: 1,
+      signal: new AbortController().signal,
+      sessionId: "sess-1",
+      usageAccounting,
+    } as unknown as AgentConfig
+    emitUsage(config, usage(PARENT_INPUT), undefined, undefined, undefined) // $0.25 known
+    emitUsage(
+      config,
+      { ...usage(1_000_000), model: "mystery-model-99" } as UsageEv,
+      undefined,
+      undefined,
+      undefined,
+    )
+    const line = panel.render()
+    expect(line).toContain("$0.25") // the known part is still shown …
+    expect(line).toContain("unpriced") // … and the gap is named, not absorbed
+  })
+
   test("a hostile model id cannot inject terminal escapes into /cost", () => {
     // The model on a usage event is PROVIDER-supplied text. `state.model` was
     // sanitized at construction, but the per-model bucket keys never were — and

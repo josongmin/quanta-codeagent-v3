@@ -32,6 +32,16 @@ export interface UsageAggregate {
   readonly outputTokens: number
   /** Model calls admitted into this slice. */
   readonly calls: number
+  /**
+   * Admitted calls whose model had NO rate-card entry and NO fallback —
+   * priced at $0 with `pricingKnown:false`. Counted regardless of amount,
+   * because the runtime path deliberately gives unknown models no fallback:
+   * their `estimatedUsd` stays 0, so an "estimates present" signal alone
+   * misses every production unknown call. `> 0` means the totals are a
+   * FLOOR, and a surface must say incomplete rather than render an exact
+   * figure.
+   */
+  readonly unpricedCalls: number
 }
 
 /** Everything a surface needs, from one read. */

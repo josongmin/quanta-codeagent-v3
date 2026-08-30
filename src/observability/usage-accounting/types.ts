@@ -77,12 +77,16 @@ export interface UsageCost {
   readonly cacheWriteUsd: number
   readonly outputUsd: number
   /**
-   * `false` ⇒ the model had no entry in the rate card and these numbers came
-   * from a stand-in rate. The amount is still an honest estimate and is still
-   * worth showing — unpriced spend that renders as `$0` or vanishes is the
-   * worse failure — but it must never be presented, aggregated, or enforced
-   * against as if it were measured. Every surface that displays a cost is
-   * responsible for marking an estimate as one.
+   * `false` ⇒ the model had no entry in the rate card. Two distinct shapes
+   * share this flag, and a consumer must not conflate them:
+   *
+   *   - FALLBACK ESTIMATE (`fallbackModel` supplied — the ledger's policy):
+   *     the amounts are a stand-in rate's honest guess. Show them, marked as
+   *     estimated; never enforce against them as measured.
+   *   - UNPRICED ZERO (no fallback — the runtime path): every amount is 0.
+   *     That zero is an ABSENCE, not a price; totals containing it are a
+   *     floor, and a surface must say "incomplete" rather than render an
+   *     exact figure. The aggregate's `unpricedCalls` counts exactly these.
    */
   readonly pricingKnown: boolean
   /** The rate-card entry actually used. Differs from `usage.model` exactly when
