@@ -73,6 +73,32 @@ describe("A4 — the turn's cost is what the loop actually billed", () => {
     expect(summarizeWorkMetrics(m)).not.toContain("unpriced")
   })
 
+  test("a FALLBACK-priced record (unknown, $>0) never inflates the known total", () => {
+    // The loop's unknown events cost $0, so absorbing them would be invisible
+    // there — but a direct caller can hand a fallback estimate (the ledger's
+    // shape: pricingKnown:false with a real amount). That guess must land in
+    // the unpriced count, never in the confident total.
+    const collector = new TurnWorkMetricsCollector()
+    collector.recordUsage({
+      tokensInput: 1_000_000,
+      tokensOutput: 0,
+      model: "mystery-model-99",
+      cost: {
+        totalUsd: 5,
+        freshInputUsd: 5,
+        cacheReadUsd: 0,
+        cacheWriteUsd: 0,
+        outputUsd: 0,
+        pricingKnown: false,
+        pricingModel: "claude-sonnet-4-6",
+        pricingVersion: "test",
+      },
+    })
+    const m = collector.finalize()
+    expect(m.estimatedCostUsd).toBe(0) // the guess is not a measurement
+    expect(m.unpricedCalls).toBe(1)
+  })
+
   test("CONTROL: a direct caller with no recorded cost keeps the derive fallback", () => {
     // Old fixtures and record-less callers hand tokens straight to the
     // collector; their number must not change.

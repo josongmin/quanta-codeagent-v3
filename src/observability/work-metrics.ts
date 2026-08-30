@@ -36,6 +36,11 @@ export interface WorkMetrics {
   tokensOutput: number
   cacheReadTokens?: number | undefined
   estimatedCostUsd?: number | undefined
+  /** A4 — calls in this turn the loop could not price (unknown model, no
+   *  fallback). Present ⇒ `estimatedCostUsd` is a FLOOR — only the
+   *  known-priced portion — and the summary says so instead of impersonating
+   *  a complete total. */
+  unpricedCalls?: number | undefined
 }
 
 /**
@@ -99,7 +104,11 @@ export const summarizeWorkMetrics = (m: WorkMetrics): string => {
     `${compactTokens(m.tokensInput)} in / ${compactTokens(m.tokensOutput)} out`,
   ]
   if (m.estimatedCostUsd !== undefined) {
-    segments.push(`~$${m.estimatedCostUsd.toFixed(2)}`)
+    segments.push(
+      m.unpricedCalls !== undefined && m.unpricedCalls > 0
+        ? `~$${m.estimatedCostUsd.toFixed(2)} (+${m.unpricedCalls} unpriced)`
+        : `~$${m.estimatedCostUsd.toFixed(2)}`,
+    )
   }
   return segments.join(" · ")
 }
@@ -141,6 +150,9 @@ export const accumulateWorkMetrics = (base: WorkMetrics, delta: WorkMetrics): Wo
   }
   if (base.estimatedCostUsd !== undefined || delta.estimatedCostUsd !== undefined) {
     out.estimatedCostUsd = (base.estimatedCostUsd ?? 0) + (delta.estimatedCostUsd ?? 0)
+  }
+  if (base.unpricedCalls !== undefined || delta.unpricedCalls !== undefined) {
+    out.unpricedCalls = (base.unpricedCalls ?? 0) + (delta.unpricedCalls ?? 0)
   }
   return out
 }

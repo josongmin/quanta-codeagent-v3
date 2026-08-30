@@ -114,6 +114,70 @@ describe("RED #7 — retention bounds memory, never the accounting", () => {
   })
 })
 
+describe("A4 — the delegation keeps the ledger's own policies", () => {
+  test("an operator rate OVERRIDE still wins through the delegated formula", () => {
+    // The delegation projects the RESOLVED pricing (override-merged) into the
+    // formula's card; collapsing to the default card would silently discard
+    // every operator override.
+    const ledger = defaultBudgetLedger({
+      pricing: { "claude-sonnet-4-6": { inputPerM: 999, outputPerM: 0 } },
+    })
+    const { cost } = ledger.record({
+      model: "claude-sonnet-4-6",
+      inputTokens: 1_000_000,
+      outputTokens: 0,
+      sessionId: "s",
+      at: 1,
+    })
+    expect(cost).toBeCloseTo(999, 9)
+  })
+
+  test("poisoned buckets are scrubbed BEFORE the formula (ledger contract)", () => {
+    // Normalization deliberately passes NaN/Infinity through for the
+    // authority's reject path; the ledger's contract zeroes them instead —
+    // and no non-finite value may reach the shared formula.
+    const ledger = defaultBudgetLedger()
+    const { cost } = ledger.record({
+      model: "claude-sonnet-4-6",
+      inputTokens: Number.POSITIVE_INFINITY,
+      outputTokens: Number.NaN,
+      cacheReadTokens: -5,
+      cacheWriteTokens: 100_000, // the one sane bucket still bills ($0.375)
+      sessionId: "s",
+      at: 1,
+    })
+    expect(cost).toBeCloseTo(0.375, 9)
+    expect(Number.isFinite(ledger.snapshot().totalCost)).toBe(true)
+  })
+
+  test("the itemized breakdown maps component-by-component (Σ parts == total)", () => {
+    // `totalCost` alone would stay right even if a component were dropped in
+    // the mapping — budget_status renders the components, so each one is
+    // pinned and their sum must reproduce the total.
+    const ledger = defaultBudgetLedger()
+    ledger.record({
+      model: "claude-sonnet-4-6",
+      inputTokens: 1_000_000,
+      outputTokens: 200_000,
+      cacheReadTokens: 300_000,
+      cacheWriteTokens: 100_000,
+      sessionId: "s",
+      at: 1,
+    })
+    const b = ledger.snapshot().perModel.get("claude-sonnet-4-6")
+    expect(b?.inputCost).toBeCloseTo(3, 9)
+    expect(b?.outputCost).toBeCloseTo(3, 9)
+    expect(b?.cacheReadCost).toBeCloseTo(0.09, 9)
+    expect(b?.cacheWriteCost).toBeCloseTo(0.375, 9)
+    expect(
+      (b?.inputCost ?? 0) +
+        (b?.outputCost ?? 0) +
+        (b?.cacheReadCost ?? 0) +
+        (b?.cacheWriteCost ?? 0),
+    ).toBeCloseTo(b?.totalCost ?? -1, 9)
+  })
+})
+
 describe("a scoped clear cannot un-bill a scope it was not asked to clear", () => {
   const spendIn = (ledger: ReturnType<typeof defaultBudgetLedger>, session: string, n: number) => {
     for (let i = 0; i < n; i++) ledger.record(event(i, { sessionId: session }))

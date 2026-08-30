@@ -145,7 +145,7 @@ const USAGE_SINKS: readonly UsageSink[] = [
     })
   },
   // Turn work-metrics collector.
-  ({ collector, ev }) =>
+  ({ collector, ev, eventCost }) =>
     collector?.recordUsage({
       tokensInput: ev.inputTokens,
       tokensOutput: ev.outputTokens,
@@ -155,6 +155,7 @@ const USAGE_SINKS: readonly UsageSink[] = [
       // ended, which is wrong the moment a turn spans two models.
       ...(ev.model !== undefined ? { model: ev.model } : {}),
       ...(ev.cacheReadTokens !== undefined ? { cacheReadTokens: ev.cacheReadTokens } : {}),
+      cost: eventCost,
     }),
   // Per-task spend accumulator (guards against NaN / negative token counts).
   ({ taskSpend, ev }) => {

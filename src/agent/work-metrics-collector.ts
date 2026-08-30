@@ -30,6 +30,7 @@ import {
   parseNumstat,
   type WorkMetrics,
 } from "@/observability"
+import type { UsageCost } from "@/observability/usage-accounting"
 
 /** Sink the loop emits the per-turn {@link WorkMetrics} into when configured.
  *  Absent ⇒ no collector is instantiated, no emit (byte-identical). The
@@ -195,58 +196,55 @@ export class TurnWorkMetricsCollector {
     }
   }
 
-  finalize(model?: string): WorkMetrics {
-    // Copy the per-file map to a fresh array so the returned snapshot does
-    // NOT alias internal state — a subsequent recordDiff() would otherwise
-    // mutate a previously-returned snapshot.
+  private snapshot(): WorkMetrics {
+    // Copy the per-file map so a later recordDiff() cannot mutate an already
+    // emitted turn snapshot.
     const diffMap: FileDiffStat[] = [...this.diffByFile.values()].map((d) => ({
       file: d.file,
       addedLines: d.addedLines,
       removedLines: d.removedLines,
     }))
-    if (model === undefined) {
-      // No model ⇒ buildWorkMetrics would still derive cost off an empty
-      // table lookup, which returns null → undefined. We could call it with
-      // `model:""` but constructing the WorkMetrics directly here keeps the
-      // intent obvious and avoids an unnecessary `""` lookup.
-      const out: WorkMetrics = {
-        diffMap,
-        agentActions: this.agentActions,
-        linesRead: this.linesRead,
-        tokensInput: this.tokensInput,
-        tokensOutput: this.tokensOutput,
-      }
-      if (this.cacheReadTokens !== undefined) out.cacheReadTokens = this.cacheReadTokens
-      // Even with no caller-supplied label, the per-request buckets can price the
-      // turn — the adapter reported which model each usage came from.
-      const cost = this.costFromBuckets()
-      if (cost !== null) out.estimatedCostUsd = cost
-      return out
+    const out: WorkMetrics = {
+      diffMap,
+      agentActions: this.agentActions,
+      linesRead: this.linesRead,
+      tokensInput: this.tokensInput,
+      tokensOutput: this.tokensOutput,
     }
+    if (this.cacheReadTokens !== undefined) out.cacheReadTokens = this.cacheReadTokens
+    return out
+  }
+
+  private withRecordedCost(
+    out: WorkMetrics,
+    recordedCost: { estimatedCostUsd: number; unpricedCalls?: number },
+  ): WorkMetrics {
+    out.estimatedCostUsd = recordedCost.estimatedCostUsd
+    if (recordedCost.unpricedCalls !== undefined) out.unpricedCalls = recordedCost.unpricedCalls
+    return out
+  }
+
+  finalize(model?: string): WorkMetrics {
+    const out = this.snapshot()
+    const recordedCost = this.recordedCost()
+    if (recordedCost !== undefined) return this.withRecordedCost(out, recordedCost)
     const bucketCost = this.costFromBuckets()
     if (bucketCost !== null) {
       // MR-05 — the per-model sum WINS over a single-model estimate. `model` here
       // is the caller's best label for the turn; pricing every request at it is
       // exactly the misattribution this replaces.
-      const out: WorkMetrics = {
-        diffMap,
-        agentActions: this.agentActions,
-        linesRead: this.linesRead,
-        tokensInput: this.tokensInput,
-        tokensOutput: this.tokensOutput,
-        estimatedCostUsd: bucketCost,
-      }
-      if (this.cacheReadTokens !== undefined) out.cacheReadTokens = this.cacheReadTokens
+      out.estimatedCostUsd = bucketCost
       return out
     }
+    if (model === undefined) return out
     return buildWorkMetrics({
-      diffMap,
-      agentActions: this.agentActions,
-      linesRead: this.linesRead,
+      diffMap: out.diffMap,
+      agentActions: out.agentActions,
+      linesRead: out.linesRead,
       model,
-      tokensInput: this.tokensInput,
-      tokensOutput: this.tokensOutput,
-      ...(this.cacheReadTokens !== undefined ? { cacheReadTokens: this.cacheReadTokens } : {}),
+      tokensInput: out.tokensInput,
+      tokensOutput: out.tokensOutput,
+      ...(out.cacheReadTokens !== undefined ? { cacheReadTokens: out.cacheReadTokens } : {}),
     })
   }
 

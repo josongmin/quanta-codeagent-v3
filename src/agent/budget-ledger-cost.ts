@@ -12,7 +12,13 @@
  * convention is resolved once and this arithmetic has nothing provider-specific
  * left to get wrong.
  */
-import { normalizeUsage } from "@/observability/usage-accounting"
+import { PRICING_VERSION } from "@/observability/pricing"
+import {
+  type ModelPrice,
+  type NormalizedUsage,
+  normalizeUsage,
+  priceUsage,
+} from "@/observability/usage-accounting"
 // Type-only, so nothing at runtime points back at the ledger that imports us.
 import type { UsageEvent } from "./budget-ledger"
 import type { ModelPricing } from "./budget-ledger-pricing"
@@ -74,19 +80,20 @@ export const positive = (n: number | undefined): number =>
   n !== undefined && Number.isFinite(n) && n > 0 ? n : 0
 
 /**
- * MR-05 — normalize BEFORE pricing, so the ledger and every other cost path
- * apply the same provider rule.
+ * Compute the per-event cost by DELEGATING to the single pricing formula.
  *
- * The ledger used to add cache reads on top of the reported input for every
- * provider. That is right for Anthropic, whose `input_tokens` excludes them,
- * and wrong for OpenAI, whose `prompt_tokens` already contains them — so one
- * gpt-5.4 call with cache reads cost $2.60 here and $1.60 on the pricing path
- * the budget meter reads, inside a single `emitUsage`. Normalizing first makes
- * the buckets disjoint for both providers and leaves this function with
- * nothing provider-specific left to get wrong.
+ * A4 — this used to be a second implementation of "normalized buckets × rates"
+ * that merely agreed with `priceUsage`; now it IS `priceUsage`, with the
+ * ledger's two policies applied around it:
  *
- * `inputTokens` in the breakdown is now the FRESH input; for Anthropic that is
- * unchanged, and for OpenAI it no longer double-counts the cached portion.
+ *   1. FINITE-POSITIVE SANITIZE, first. Normalization deliberately lets
+ *      NaN/Infinity through so the AUTHORITY can reject a broken report; the
+ *      ledger's contract is the opposite — poisoned buckets contribute 0 and
+ *      the event is retained. So every bucket is scrubbed BEFORE pricing, and
+ *      no non-finite value can reach the formula.
+ *   2. THE CALLER'S RATE CARD. The resolved pricing (override-merged, or the
+ *      sonnet fallback) is projected into a one-key `ModelPrice` card so an
+ *      operator override keeps winning through the delegation.
  */
 export const computeEventCost = (event: UsageEvent, pricing: ModelPricing): MutableCost => {
   const c = emptyCost(event.model)
@@ -101,11 +108,29 @@ export const computeEventCost = (event: UsageEvent, pricing: ModelPricing): Muta
   c.outputTokens = positive(n.outputTokens)
   c.cacheReadTokens = positive(n.cacheReadTokens)
   c.cacheWriteTokens = positive(n.cacheWriteTokens)
-  c.inputCost = tokensToUsd(c.inputTokens, pricing.inputPerM)
-  c.outputCost = tokensToUsd(c.outputTokens, pricing.outputPerM)
-  c.cacheReadCost = tokensToUsd(c.cacheReadTokens, pricing.cacheReadPerM)
-  c.cacheWriteCost = tokensToUsd(c.cacheWriteTokens, pricing.cacheWritePerM)
-  c.totalCost = c.inputCost + c.outputCost + c.cacheReadCost + c.cacheWriteCost
+
+  const sanitized: NormalizedUsage = {
+    model: n.model,
+    provider: n.provider,
+    freshInputTokens: c.inputTokens,
+    cacheReadTokens: c.cacheReadTokens,
+    cacheWriteTokens: c.cacheWriteTokens,
+    outputTokens: c.outputTokens,
+  }
+  const card: Record<string, ModelPrice> = {
+    [event.model]: {
+      inPerM: pricing.inputPerM,
+      outPerM: pricing.outputPerM,
+      cacheReadPerM: pricing.cacheReadPerM ?? 0,
+      ...(pricing.cacheWritePerM !== undefined ? { cacheWritePerM: pricing.cacheWritePerM } : {}),
+    },
+  }
+  const priced = priceUsage(sanitized, card, { pricingVersion: PRICING_VERSION })
+  c.inputCost = priced.freshInputUsd
+  c.outputCost = priced.outputUsd
+  c.cacheReadCost = priced.cacheReadUsd
+  c.cacheWriteCost = priced.cacheWriteUsd
+  c.totalCost = priced.totalUsd
   return c
 }
 
