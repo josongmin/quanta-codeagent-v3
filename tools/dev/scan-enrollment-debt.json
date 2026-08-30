@@ -11,7 +11,6 @@
     "tests/unit/apps/bench/terminal/tb-2-0-retirement.test.ts",
     "tests/unit/cli/cli-feature-gates-drift-hellgate.test.ts",
     "tests/unit/observability/new-slice-metrics-hellgate.test.ts",
-    "tests/unit/orphan-orchestrator-ratchet.test.ts",
     "tests/unit/realtime/voice-session-hellgate.test.ts",
     "tests/unit/runtime/exec-cluster-spawn-env-scrub-ban-hellgate.test.ts",
     "tests/unit/tool-surface-manifest-hellgate.test.ts"
@@ -449,6 +448,12 @@
       "tests/unit/no-raw-nul-bytes-hellgate.test.ts#SRC",
       "tests/unit/no-raw-nul-bytes-hellgate.test.ts#TESTS",
       "tests/unit/no-raw-nul-bytes-hellgate.test.ts#DOCS"
+    ],
+    "tests/unit/orphan-orchestrator-ratchet.test.ts": [
+      "tests/unit/orphan-orchestrator-ratchet.test.ts#SRC",
+      "tests/unit/orphan-orchestrator-ratchet.test.ts#SDK",
+      "tests/unit/orphan-orchestrator-ratchet.test.ts#TESTS",
+      "tests/unit/orphan-orchestrator-ratchet.test.ts#DRIVER"
     ]
   }
 }

@@ -472,6 +472,18 @@
     },
     "tests/unit/no-raw-nul-bytes-hellgate.test.ts#DOCS": {
       "walked": 2745
+    },
+    "tests/unit/orphan-orchestrator-ratchet.test.ts#SRC": {
+      "walked": 3352
+    },
+    "tests/unit/orphan-orchestrator-ratchet.test.ts#SDK": {
+      "walked": 23
+    },
+    "tests/unit/orphan-orchestrator-ratchet.test.ts#TESTS": {
+      "walked": 3578
+    },
+    "tests/unit/orphan-orchestrator-ratchet.test.ts#DRIVER": {
+      "walked": 14
     }
   }
 }

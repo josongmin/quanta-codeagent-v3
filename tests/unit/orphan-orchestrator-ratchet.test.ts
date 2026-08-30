@@ -43,6 +43,7 @@ import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join, relative } from "node:path"
 import ts from "typescript"
+import { assertScanPopulation } from "./_shared/scan-population"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..")
 const SRC_ROOT = join(REPO_ROOT, "src")
@@ -164,8 +165,23 @@ const referenceCount = (sf: ts.SourceFile, name: string, isDefiningFile: boolean
 }
 
 // ── Build the corpus once ──────────────────────────────────────────────────
-const SRC_FILES = listTsFiles(SRC_ROOT).map((f) => ({ f, sf: parse(f, readFileSync(f, "utf8")) }))
-const SDK_FILES = listTsFiles(SDK_ROOT).map((f) => ({ f, sf: parse(f, readFileSync(f, "utf8")) }))
+const isProductionTs = (name: string): boolean =>
+  name.endsWith(".ts") &&
+  !name.endsWith(".d.ts") &&
+  !name.endsWith(".test.ts") &&
+  !name.endsWith(".spec.ts")
+const SRC_TS = listTsFiles(SRC_ROOT)
+assertScanPopulation(SRC_TS, SRC_ROOT, {
+  collectable: isProductionTs,
+  id: "tests/unit/orphan-orchestrator-ratchet.test.ts#SRC",
+})
+const SDK_TS = listTsFiles(SDK_ROOT)
+assertScanPopulation(SDK_TS, SDK_ROOT, {
+  collectable: isProductionTs,
+  id: "tests/unit/orphan-orchestrator-ratchet.test.ts#SDK",
+})
+const SRC_FILES = SRC_TS.map((f) => ({ f, sf: parse(f, readFileSync(f, "utf8")) }))
+const SDK_FILES = SDK_TS.map((f) => ({ f, sf: parse(f, readFileSync(f, "utf8")) }))
 const TEST_TS = ((): string[] => {
   const out: string[] = []
   const walk = (dir: string): void => {
@@ -187,7 +203,16 @@ const TEST_TS = ((): string[] => {
 })()
 const TEST_SOURCES = TEST_TS.map((f) => readFileSync(f, "utf8"))
 
-const DRIVER_EXPORTS: ExportedFn[] = listTsFiles(DRIVER_ROOT).flatMap((f) =>
+assertScanPopulation(TEST_TS, TESTS_ROOT, {
+  collectable: (name) => name.endsWith(".ts") || name.endsWith(".tsx"),
+  id: "tests/unit/orphan-orchestrator-ratchet.test.ts#TESTS",
+})
+const DRIVER_TS = listTsFiles(DRIVER_ROOT)
+assertScanPopulation(DRIVER_TS, DRIVER_ROOT, {
+  collectable: isProductionTs,
+  id: "tests/unit/orphan-orchestrator-ratchet.test.ts#DRIVER",
+})
+const DRIVER_EXPORTS: ExportedFn[] = DRIVER_TS.flatMap((f) =>
   exportedFunctionsOf(parse(f, readFileSync(f, "utf8")), f),
 )
 
