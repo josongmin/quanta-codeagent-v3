@@ -78,6 +78,26 @@ const SEAM_BOOL_GATES = [...STRICT_ONE_GATES, ...STANDARD_BOOL_GATES]
 
 const saved: Record<string, string | undefined> = {}
 
+type RuntimeGate = (typeof STRICT_ONE_GATES)[number]
+
+const assertStrictGateOff = ({ field, env }: RuntimeGate, value: string): void => {
+  process.env[env] = value
+  __resetRuntimeConfig()
+  if (runtimeConfig()[field] !== false) {
+    throw new Error(`${field} armed on falsy/garbage value ${JSON.stringify(value)} (env ${env})`)
+  }
+  delete process.env[env]
+}
+
+const assertStrictGateOn = ({ field, env }: RuntimeGate, value: string): void => {
+  process.env[env] = value
+  __resetRuntimeConfig()
+  if (runtimeConfig()[field] !== true) {
+    throw new Error(`${field} did NOT arm on truthy ${JSON.stringify(value)} (env ${env})`)
+  }
+  delete process.env[env]
+}
+
 beforeEach(() => {
   for (const k of JUN06_SEAM_KNOBS) {
     saved[k] = process.env[k]
@@ -114,26 +134,12 @@ describe("jun-6 seam default-OFF — runtime-config gates", () => {
     for (const { field, env } of STRICT_ONE_GATES) {
       // Falsy tokens / garbage must NOT enable the gate (default-OFF guarantee).
       for (const bad of ["0", "false", "off", "no", "", "garbage", "2"]) {
-        process.env[env] = bad
-        __resetRuntimeConfig()
-        const c = runtimeConfig()
-        if (c[field] !== false) {
-          throw new Error(
-            `${field} armed on falsy/garbage value ${JSON.stringify(bad)} (env ${env})`,
-          )
-        }
-        delete process.env[env]
+        assertStrictGateOff({ field, env }, bad)
       }
       // The canonical truthy vocabulary (`gateOn`) ALL enables — `=1` and `=on`
       // alike, case-insensitive and whitespace-trimmed (the consistency win).
       for (const good of ["1", "on", "true", "yes", "TRUE", " 1 "]) {
-        process.env[env] = good
-        __resetRuntimeConfig()
-        const c = runtimeConfig()
-        if (c[field] !== true) {
-          throw new Error(`${field} did NOT arm on truthy ${JSON.stringify(good)} (env ${env})`)
-        }
-        delete process.env[env]
+        assertStrictGateOn({ field, env }, good)
       }
     }
     __resetRuntimeConfig()
