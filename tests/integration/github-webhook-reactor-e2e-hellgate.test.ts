@@ -19,7 +19,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { createHmac } from "node:crypto"
 import { mkdtempSync, rmSync } from "node:fs"
-import { createServer, request as httpRequest, type Server } from "node:http"
+import {
+  createServer,
+  request as httpRequest,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from "node:http"
 import type { AddressInfo } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -36,6 +42,36 @@ import {
   type WebhookTransportPort,
 } from "@/integrations/github"
 import type { ProactiveTrigger } from "@/reactor"
+
+const requestHeaders = (headers: IncomingMessage["headers"]): Record<string, string> => {
+  const result: Record<string, string> = {}
+  for (const [key, value] of Object.entries(headers)) {
+    if (typeof value === "string") result[key.toLowerCase()] = value
+  }
+  return result
+}
+
+const handleLoopback = async (
+  onRequest: (request: WebhookRequest) => Promise<WebhookResponse>,
+  req: IncomingMessage,
+  res: ServerResponse,
+  chunks: readonly Buffer[],
+): Promise<void> => {
+  const request: WebhookRequest = {
+    method: req.method ?? "GET",
+    path: (req.url ?? "/").split("?")[0] ?? "/",
+    headers: requestHeaders(req.headers),
+    body: new Uint8Array(Buffer.concat(chunks)),
+  }
+  let response: WebhookResponse
+  try {
+    response = await onRequest(request)
+  } catch {
+    response = { status: 500, body: "threw" }
+  }
+  res.writeHead(response.status, { "content-type": "text/plain" })
+  res.end(response.body ?? "")
+}
 
 const SECRET = "reactor-e2e-secret"
 const GATE = "QUANTA_GITHUB_WEBHOOK"
@@ -55,26 +91,7 @@ const loopback = (): Bound => {
         const chunks: Buffer[] = []
         req.on("data", (c) => chunks.push(c instanceof Buffer ? c : Buffer.from(c)))
         req.on("end", () => {
-          void (async () => {
-            const headers: Record<string, string> = {}
-            for (const [k, v] of Object.entries(req.headers)) {
-              if (typeof v === "string") headers[k.toLowerCase()] = v
-            }
-            const wreq: WebhookRequest = {
-              method: req.method ?? "GET",
-              path: (req.url ?? "/").split("?")[0] ?? "/",
-              headers,
-              body: new Uint8Array(Buffer.concat(chunks)),
-            }
-            let out: WebhookResponse
-            try {
-              out = await onRequest(wreq)
-            } catch {
-              out = { status: 500, body: "threw" }
-            }
-            res.writeHead(out.status, { "content-type": "text/plain" })
-            res.end(out.body ?? "")
-          })()
+          void handleLoopback(onRequest, req, res, chunks)
         })
       })
       await new Promise<void>((resolve) => server?.listen(0, "127.0.0.1", () => resolve()))
