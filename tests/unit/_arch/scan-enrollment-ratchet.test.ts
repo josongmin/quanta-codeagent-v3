@@ -44,8 +44,26 @@ import { stripComments } from "@/shared/source-text"
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 const DEBT = join(REPO_ROOT, "tools", "dev", "scan-enrollment-debt.json")
 
-const debtList = (): readonly string[] =>
-  (JSON.parse(readFileSync(DEBT, "utf8")) as { unenrolled?: readonly string[] }).unenrolled ?? []
+type DebtFile = {
+  readonly unenrolled?: readonly string[]
+  readonly externalCorpus?: readonly { readonly file: string; readonly why: string }[]
+}
+
+const debtFile = (): DebtFile => JSON.parse(readFileSync(DEBT, "utf8")) as DebtFile
+const debtList = (): readonly string[] => debtFile().unenrolled ?? []
+const externalCorpus = (): readonly { readonly file: string; readonly why: string }[] =>
+  debtFile().externalCorpus ?? []
+
+/**
+ * An absolute path that is not inside this repo — a HOST corpus.
+ *
+ * `assertScanPopulation` intersects the scan with `git ls-files` under a repo
+ * root, so a `/sbin` entry can never be reach and a pinned baseline for it would
+ * be a fiction. Such a guard is not "enrollment pending"; it is out of the
+ * helper's contract, and saying so is different from leaving it on a list that
+ * claims work is owed.
+ */
+const HOST_PATH = /["'`]\/(?:s?bin|usr\/s?bin|usr\/local|etc|opt|proc|sys|var)\b/
 
 /**
  * Enrollment is a CALL, not a mention.
@@ -75,8 +93,42 @@ describe("scan enrollment", () => {
     ).toEqual([])
   })
 
-  test("🔴 no NEW scanning guard states a verdict without an enrolled reach", () => {
+  test("🔴 every file on the debt list is actually ENROLLABLE", () => {
+    // The list asserts "enrollment is owed here". For a guard whose corpus is the
+    // HOST — `shell-predicate-population` walks /sbin, /usr/sbin, /bin, /usr/bin
+    // for installed formatters — that claim is false and can never be discharged,
+    // so the entry would sit there forever reading as tracked debt.
+    const stuck = debtList()
+      .filter((f) => HOST_PATH.test(stripComments(readFileSync(join(REPO_ROOT, f), "utf8"))))
+      .sort()
+    expect(
+      stuck,
+      stuck.length === 0
+        ? ""
+        : "these scan a HOST path, which `assertScanPopulation` can never measure — move them " +
+            `to externalCorpus with a reason instead of listing debt that cannot be paid:\n  ${stuck.join("\n  ")}`,
+    ).toEqual([])
+  })
+
+  test("🔴 externalCorpus is not a laundering channel", () => {
+    // The exemption has to be CHECKABLE or it becomes the escape hatch every
+    // remaining guard reaches for. An entry must really scan outside the repo,
+    // must carry a reason that reads like one, and may not also claim to be debt.
     const owed = new Set(debtList())
+    const faults: string[] = []
+    for (const { file, why } of externalCorpus()) {
+      const src = stripComments(readFileSync(join(REPO_ROOT, file), "utf8"))
+      if (!HOST_PATH.test(src))
+        faults.push(`${file}: claims an external corpus but scans no host path`)
+      if (why.trim().length < 40) faults.push(`${file}: no real reason given`)
+      if (owed.has(file)) faults.push(`${file}: listed as BOTH external corpus and enrollment debt`)
+      if (isEnrolled(file)) faults.push(`${file}: is enrolled, so the exemption is dead weight`)
+    }
+    expect(faults, faults.join("\n  ")).toEqual([])
+  })
+
+  test("🔴 no NEW scanning guard states a verdict without an enrolled reach", () => {
+    const owed = new Set([...debtList(), ...externalCorpus().map((e) => e.file)])
     const added = scanVerdictGuards()
       .filter((f) => !owed.has(f))
       .filter((f) => !isEnrolled(f))
