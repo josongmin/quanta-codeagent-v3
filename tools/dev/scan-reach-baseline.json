@@ -278,6 +278,9 @@
     "tests/unit/runner/knobs/cross-slice-cycle.test.ts#PER-KNOB-DIR": {
       "walked": 68
     },
+    "tests/unit/runner/knobs/knobs-batch-layering.test.ts#KNOBS-DIR": {
+      "walked": 79
+    },
     "tests/unit/runner/knobs/knobs-import-bundle.test.ts#PER-KNOB-DIR": {
       "walked": 68
     },

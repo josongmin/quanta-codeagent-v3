@@ -1,5 +1,5 @@
 {
-  "note": "Scanning guards that state a zero-verdict but pin no MEASURED reach — their floor, if any, is a number written at the call site, which cannot see a subtree disappear. Enforced by tests/unit/_arch/scan-enrollment-ratchet.test.ts. `unenrolled` may only SHRINK: a new guard must call assertScanPopulation (tests/unit/_shared/scan-population.ts) and pin its reach in tools/dev/scan-reach-baseline.json, and a guard that enrolls must be removed from here. `externalCorpus` is NOT debt — it names guards the helper can never measure because their corpus is not the repo, and each entry is checked against the host path it claims. `expectedIds` records, per enrolled file, the baseline ids that file must REPORT at runtime; `bun run scan-reach` refuses when one is missing. NO TOTALS ARE WRITTEN HERE. A hand-maintained count drifts the moment one side moves — this note said '56 unenrolled of 86' while the arrays said 54 of 87 — so the number is whatever the arrays are.",
+  "note": "Scanning guards that state a zero-verdict but pin no MEASURED reach — their floor, if any, is a number written at the call site, which cannot see a subtree disappear. Enforced by tests/unit/_arch/scan-enrollment-ratchet.test.ts. `unenrolled` may only SHRINK: a new guard must call assertScanPopulation (tests/unit/_shared/scan-population.ts) and pin its reach in tools/dev/scan-reach-baseline.json, and a guard that enrolls must be removed from here. `failsClosed` is NOT debt either — it names enumerations that need no reach floor because an EMPTY walk turns their verdict red by itself, and each entry's file must call `assertFailsClosedOnEmpty`, which executes that claim instead of asserting it in a comment. `externalCorpus` is NOT debt — it names guards the helper can never measure because their corpus is not the repo, and each entry is checked against the host path it claims. `expectedIds` records, per enrolled file, the baseline ids that file must REPORT at runtime; `bun run scan-reach` refuses when one is missing. NO TOTALS ARE WRITTEN HERE. A hand-maintained count drifts the moment one side moves — this note said '56 unenrolled of 86' while the arrays said 54 of 87 — so the number is whatever the arrays are.",
   "unenrolled": [
     "src/apps/bench/benchmark-suite.test.ts",
     "src/tool/terminal-surface.test.ts",
@@ -57,6 +57,13 @@
     {
       "file": "tests/unit/permission/shell-predicate-population-hellgate.test.ts",
       "why": "scans /sbin, /usr/sbin, /bin and /usr/bin for the formatters the HOST has installed. assertScanPopulation intersects a scan with `git ls-files` under a repo root, so a host path can never count as reach and any baseline row for it would be a fiction. Its real evidence is the PINNED debian:12 formatter corpus run through the live assessor, which is the claim a probe of this machine cannot make on its own."
+    }
+  ],
+  "failsClosed": [
+    {
+      "file": "tests/unit/_arch/gated-test-scope-ratchet.test.ts",
+      "site": "countTestFilesUnder",
+      "why": "counts the files a gate positional selects, so a walk that reached nothing scores every token at zero and the verdict reports every token as selecting nothing — red, not green. A reach floor adds nothing to a consumer that already cannot pass over an empty walk."
     }
   ],
   "expectedIds": {
@@ -274,6 +281,9 @@
     ],
     "tests/unit/runner/knobs/cross-slice-cycle.test.ts": [
       "tests/unit/runner/knobs/cross-slice-cycle.test.ts#PER-KNOB-DIR"
+    ],
+    "tests/unit/runner/knobs/knobs-batch-layering.test.ts": [
+      "tests/unit/runner/knobs/knobs-batch-layering.test.ts#KNOBS-DIR"
     ],
     "tests/unit/runner/knobs/knobs-import-bundle.test.ts": [
       "tests/unit/runner/knobs/knobs-import-bundle.test.ts#PER-KNOB-DIR"

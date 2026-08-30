@@ -247,3 +247,37 @@ export const assertScanPopulation = (
     )
   }
 }
+
+/**
+ * The other way a scan-derived verdict can be sound: it FAILS CLOSED.
+ *
+ * Some enumerations need no reach floor, because an empty walk does not make the
+ * verdict green — it makes it red. `countTestFilesUnder` in
+ * `gated-test-scope-ratchet` is the live case: it counts the files a gate
+ * positional selects, so a walk that reached nothing scores EVERY token at zero
+ * and the assertion consuming it reports every token as selecting nothing.
+ *
+ * That is a real exemption and it was, briefly, an unchecked one — recorded in a
+ * comment, verified by nobody. An exemption nothing tests is the escape hatch
+ * every remaining migration reaches for, and this campaign exists because of
+ * exemptions like that. So the claim is EXECUTED: run the verdict over an empty
+ * enumeration and require it to throw.
+ *
+ * `verdictOverEmpty` must be the real consumer with an empty list, not a
+ * restatement of it. A thunk that throws for its own reasons proves nothing, so
+ * the paired control belongs beside every use: the same consumer over the REAL
+ * enumeration must pass.
+ */
+export const assertFailsClosedOnEmpty = (label: string, verdictOverEmpty: () => void): void => {
+  let threw = false
+  try {
+    verdictOverEmpty()
+  } catch {
+    threw = true
+  }
+  expect(
+    threw,
+    `${label}: the verdict PASSED over an EMPTY enumeration. It does not fail closed, so the ` +
+      `scan needs a reach floor — see tools/dev/scan-enrollment-debt.json`,
+  ).toBe(true)
+}

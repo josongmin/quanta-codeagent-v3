@@ -48,6 +48,11 @@ const MANIFEST = join(REPO_ROOT, "tools", "dev", "scan-migration-manifest.json")
 type DebtFile = {
   readonly unenrolled?: readonly string[]
   readonly externalCorpus?: readonly { readonly file: string; readonly why: string }[]
+  readonly failsClosed?: readonly {
+    readonly file: string
+    readonly site: string
+    readonly why: string
+  }[]
   readonly expectedIds?: Readonly<Record<string, readonly string[]>>
 }
 
@@ -56,6 +61,11 @@ const debtList = (): readonly string[] => debtFile().unenrolled ?? []
 const expectedIds = (): Readonly<Record<string, readonly string[]>> => debtFile().expectedIds ?? {}
 const externalCorpus = (): readonly { readonly file: string; readonly why: string }[] =>
   debtFile().externalCorpus ?? []
+const failsClosed = (): readonly {
+  readonly file: string
+  readonly site: string
+  readonly why: string
+}[] => debtFile().failsClosed ?? []
 
 /**
  * An absolute path that is not inside this repo — a HOST corpus.
@@ -192,6 +202,31 @@ describe("scan enrollment", () => {
     ).toEqual([])
   })
 
+  test("🔴 a failsClosed exemption must EXECUTE its claim, not state it", () => {
+    // The second exemption category, and the one that needed a gate most: "this
+    // enumeration needs no floor because it fails closed" is a claim about the
+    // consumer, and it was recorded in a comment nobody checked. Left ungated it
+    // is the escape hatch every remaining migration reaches for, which is the
+    // shape this whole campaign keeps finding. So the entry's file has to call
+    // `assertFailsClosedOnEmpty`, which runs the verdict over an empty
+    // enumeration and requires it to throw.
+    const owed = new Set(debtList())
+    const faults: string[] = []
+    for (const { file, site, why } of failsClosed()) {
+      if (!existsSync(join(REPO_ROOT, file))) faults.push(`${file}: does not exist`)
+      else if (
+        !/\bassertFailsClosedOnEmpty\s*\(/.test(
+          stripComments(readFileSync(join(REPO_ROOT, file), "utf8")),
+        )
+      ) {
+        faults.push(`${file}: claims ${site} fails closed but never calls assertFailsClosedOnEmpty`)
+      }
+      if (why.trim().length < 40) faults.push(`${file}: no real reason given for ${site}`)
+      if (owed.has(file)) faults.push(`${file}: listed as BOTH fails-closed and enrollment debt`)
+    }
+    expect(faults, faults.join("\n  ")).toEqual([])
+  })
+
   test("🔴 externalCorpus is not a laundering channel", () => {
     // The exemption has to be CHECKABLE or it becomes the escape hatch every
     // remaining guard reaches for. An entry must really scan outside the repo,
@@ -210,7 +245,11 @@ describe("scan enrollment", () => {
   })
 
   test("🔴 no NEW scanning guard states a verdict without an enrolled reach", () => {
-    const owed = new Set([...debtList(), ...externalCorpus().map((e) => e.file)])
+    const owed = new Set([
+      ...debtList(),
+      ...externalCorpus().map((e) => e.file),
+      ...failsClosed().map((e) => e.file),
+    ])
     const added = scanVerdictGuards()
       .filter((f) => !owed.has(f))
       .filter((f) => !isEnrolled(f))

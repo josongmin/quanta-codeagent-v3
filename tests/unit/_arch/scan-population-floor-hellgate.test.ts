@@ -11,7 +11,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { assertScanPopulation } from "../_shared/scan-population"
+import { assertFailsClosedOnEmpty, assertScanPopulation } from "../_shared/scan-population"
 
 const made: string[] = []
 afterEach(() => {
@@ -273,6 +273,24 @@ describe("population floor", () => {
         id: "fx",
         matched: files,
         baselinePath: fx.pin(2, 2),
+      }),
+    ).not.toThrow()
+  })
+
+  test("🔴 FAILS-CLOSED: a verdict that PASSES over an empty enumeration is refused", () => {
+    // The exemption's whole content. A scan may skip the reach floor only when an
+    // empty walk turns the verdict red by itself, and that is a claim about the
+    // consumer — so it is executed rather than written down. Before this, the one
+    // live exemption was a comment nobody checked.
+    expect(() => assertFailsClosedOnEmpty("probe", () => undefined)).toThrow(/does not fail closed/)
+  })
+
+  test("FAILS-CLOSED: a verdict that throws over an empty enumeration is accepted", () => {
+    // Paired control. Without it, "refuse everything" satisfies the case above,
+    // and the exemption would be unusable rather than checked.
+    expect(() =>
+      assertFailsClosedOnEmpty("probe", () => {
+        throw new Error("no token selected any file")
       }),
     ).not.toThrow()
   })

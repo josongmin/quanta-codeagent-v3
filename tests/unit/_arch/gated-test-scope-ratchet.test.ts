@@ -62,7 +62,7 @@ import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { GATES } from "@/../tools/dev/gate-manifest"
-import { assertScanPopulation } from "../_shared/scan-population"
+import { assertFailsClosedOnEmpty, assertScanPopulation } from "../_shared/scan-population"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 
@@ -439,14 +439,30 @@ describe("gated test scope", () => {
       tokens.length,
       "no gate positionals parsed — the check below is vacuous",
     ).toBeGreaterThan(4)
-    const empty = tokens.filter((t) => countTestFilesUnder(t) === 0).sort()
-    expect(
-      empty,
-      empty.length === 0
-        ? ""
-        : "these gate positionals match NO test file — the gate runs them and reports success " +
-            "over nothing. Fix the path in package.json.",
-    ).toEqual([])
+    const offenders = (count: (t: string) => number): readonly string[] =>
+      tokens.filter((t) => count(t) === 0).sort()
+    const verdict = (count: (t: string) => number): void => {
+      const empty = offenders(count)
+      expect(
+        empty,
+        empty.length === 0
+          ? ""
+          : "these gate positionals match NO test file — the gate runs them and reports success " +
+              "over nothing. Fix the path in package.json.",
+      ).toEqual([])
+    }
+
+    // This enumeration pins NO reach floor, and the reason is executed rather
+    // than written down. It counts the files a positional selects, so a walk
+    // that reached nothing scores every token at zero and the verdict below
+    // reports every token as selecting nothing — it fails CLOSED, the one shape
+    // a reach floor adds nothing to. That was a comment nobody checked until
+    // this line; an exemption nothing tests is the escape hatch every remaining
+    // migration reaches for.
+    assertFailsClosedOnEmpty("gated-test-scope#countTestFilesUnder", () => {
+      verdict(() => 0)
+    })
+    verdict(countTestFilesUnder)
   })
 
   test("🔴 every out-of-band directory is GATED, or says why it is not", () => {

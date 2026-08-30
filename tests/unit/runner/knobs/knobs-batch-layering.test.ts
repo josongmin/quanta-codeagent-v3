@@ -21,6 +21,8 @@ import { describe, expect, test } from "bun:test"
 import { readdir, readFile } from "node:fs/promises"
 import { join } from "node:path"
 
+import { assertScanPopulation } from "../../_shared/scan-population"
+
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..", "..")
 const KNOBS_DIR = join(REPO_ROOT, "src", "runner", "knobs")
 
@@ -36,23 +38,15 @@ const KNOBS_DIR = join(REPO_ROOT, "src", "runner", "knobs")
 const knobsModules = async (): Promise<string[]> => {
   const entries = await readdir(KNOBS_DIR, { recursive: true })
   const modules = entries.filter((f) => f.endsWith(".ts")).map((f) => join(KNOBS_DIR, f))
-  const ls = Bun.spawnSync(["git", "ls-files", "-z", "--", KNOBS_DIR], {
-    cwd: KNOBS_DIR,
-    stdout: "pipe",
+  // This file arrived with the tracked-intersection idiom written INLINE, and
+  // said why: the baseline it would otherwise pin to was in flight. It is not
+  // any more, so the reach moves onto the house instrument — the floor becomes a
+  // MEASURED, committed number instead of `>= 70` against 78, which tolerates
+  // eight modules disappearing.
+  assertScanPopulation(modules, KNOBS_DIR, {
+    id: "tests/unit/runner/knobs/knobs-batch-layering.test.ts#KNOBS-DIR",
+    collectable: (n) => n.endsWith(".ts"),
   })
-  expect(ls.exitCode).toBe(0)
-  const tracked = new Set(
-    new TextDecoder()
-      .decode(ls.stdout)
-      .split("\0")
-      .filter((p) => p !== "")
-      .map((p) => join(KNOBS_DIR, p)),
-  )
-  const reached = modules.filter((m) => tracked.has(m))
-  // Measured 2026-08-30: 78 tracked .ts modules (+1 untracked derive.ts landing
-  // with this change). Losing the per-knob subtree (~68 files) or the framework
-  // core must trip this, so the floor tolerates only small drift.
-  expect(reached.length).toBeGreaterThanOrEqual(70)
   // The two SCC-closing edge sites — if the walk misses either, the ban proves
   // nothing about the very files this guard exists for.
   expect(modules).toContain(join(KNOBS_DIR, "types.ts"))
