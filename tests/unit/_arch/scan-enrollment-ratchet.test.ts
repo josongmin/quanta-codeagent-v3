@@ -38,8 +38,8 @@
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-
 import { isScanVerdictGuard, scanVerdictGuards } from "@/../tools/dev/anti-vacuity-census"
+import { stripComments } from "@/shared/source-text"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 const DEBT = join(REPO_ROOT, "tools", "dev", "scan-enrollment-debt.json")
@@ -47,8 +47,17 @@ const DEBT = join(REPO_ROOT, "tools", "dev", "scan-enrollment-debt.json")
 const debtList = (): readonly string[] =>
   (JSON.parse(readFileSync(DEBT, "utf8")) as { unenrolled?: readonly string[] }).unenrolled ?? []
 
+/**
+ * Enrollment is a CALL, not a mention.
+ *
+ * This read `includes("assertScanPopulation")`, and a file whose only occurrence
+ * was `// TODO: call assertScanPopulation here one day` counted as enrolled —
+ * measured, with a synthetic guard that carried an inline floor and nothing else.
+ * A ratchet satisfied by a comment about the fix is the same defect it exists to
+ * catch, committed inside the instrument.
+ */
 const isEnrolled = (rel: string): boolean =>
-  readFileSync(join(REPO_ROOT, rel), "utf8").includes("assertScanPopulation")
+  /\bassertScanPopulation\s*\(/.test(stripComments(readFileSync(join(REPO_ROOT, rel), "utf8")))
 
 describe("scan enrollment", () => {
   test("anti-vacuity: the population is real and the debt list is a subset of it", () => {
@@ -81,6 +90,16 @@ describe("scan enrollment", () => {
             "MEASURED reach in tools/dev/scan-reach-baseline.json:\n  " +
             added.join("\n  "),
     ).toEqual([])
+  })
+
+  test("🔴 a MENTION is not an enrollment", () => {
+    // The instrument's own vacuity, found by attacking it: a file whose only
+    // occurrence of the helper is a comment about calling it used to read as
+    // enrolled, so a guard could be excused by a TODO.
+    const call = `assertScan${"Population"}(files, root, { id: "x" })`
+    const mention = `// TODO: call assertScan${"Population"} here one day`
+    expect(/\bassertScanPopulation\s*\(/.test(stripComments(call))).toBe(true)
+    expect(/\bassertScanPopulation\s*\(/.test(stripComments(mention))).toBe(false)
   })
 
   test("the debt list has no stale entries — an enrolled guard must be removed from it", () => {

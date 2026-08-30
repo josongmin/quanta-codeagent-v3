@@ -279,6 +279,35 @@ const OUT_OF_BAND: Readonly<Record<string, OutOfBand>> = {
   },
 }
 
+/**
+ * What is wrong with one entry's declaration, if anything.
+ *
+ * Split out because the loop body carried four branches inside a closure and
+ * scored 18 against the cap of 15 — this test would have broken the ceiling it
+ * sits beside, the same way `walkTestDirs` below did.
+ */
+const declarationFault = (
+  key: string,
+  entry: OutOfBand,
+  gateIds: ReadonlySet<string>,
+): readonly string[] => {
+  // The TYPE is `A & ({gate} | {ungated})`, which an object carrying BOTH
+  // satisfies — TypeScript's union is not exclusive, and the header claimed it
+  // was. Measured by attacking it: an entry with both passed. The two say
+  // opposite things about whether the directory runs anywhere.
+  if ("gate" in entry && "ungated" in entry) {
+    return [`${key}/ claims BOTH a gate and a deliberate ungated exclusion`]
+  }
+  if ("gate" in entry) {
+    return gateIds.has(entry.gate)
+      ? []
+      : [`${key}/ names gate \`${entry.gate}\`, which no manifest entry defines`]
+  }
+  // An ungated exclusion is a decision, so it has to read like one. The
+  // placeholder shape is what a future entry would reach for.
+  return entry.ungated.trim().length < 30 ? [`${key}/ is ungated with no real reason given`] : []
+}
+
 /** Entries worth descending into: skip `node_modules` and dotted directories. */
 const isWalkable = (name: string): boolean => name !== "node_modules" && !name.startsWith(".")
 
@@ -408,18 +437,9 @@ describe("gated test scope", () => {
       ids.size,
       "the gate manifest read is empty — this check would be vacuous",
     ).toBeGreaterThan(10)
-    const broken: string[] = []
-    for (const [key, entry] of Object.entries(OUT_OF_BAND)) {
-      if ("gate" in entry) {
-        if (!ids.has(entry.gate))
-          broken.push(`${key}/ names gate \`${entry.gate}\`, which no manifest entry defines`)
-        continue
-      }
-      // An ungated exclusion is a decision, so it has to read like one. The
-      // placeholder shape is what a future entry would reach for.
-      if (entry.ungated.trim().length < 30)
-        broken.push(`${key}/ is ungated with no real reason given`)
-    }
+    const broken = Object.entries(OUT_OF_BAND).flatMap(([key, entry]) =>
+      declarationFault(key, entry, ids),
+    )
     expect(
       broken,
       broken.length === 0
@@ -436,8 +456,14 @@ describe("gated test scope", () => {
     for (const [key, entry] of Object.entries(OUT_OF_BAND)) {
       if (!("gate" in entry)) continue
       const gate = GATES.find((g) => g.id === entry.gate)
+      // Whole token, not substring: `bun run test:web-frontend-smoke` contains
+      // `test:web-frontend`, so `includes` would bless a gate running something
+      // else with a longer name.
+      const invokes = new RegExp(
+        `(?:^|\\s)${entry.runner.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\s|$)`,
+      )
       expect(
-        gate?.run.includes(entry.runner) ?? false,
+        invokes.test(gate?.run ?? ""),
         `${key}/ names gate \`${entry.gate}\`, but that gate does not run \`${entry.runner}\``,
       ).toBe(true)
     }
