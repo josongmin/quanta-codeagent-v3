@@ -60,15 +60,6 @@ describe("no .test.js artifacts under tests/", () => {
   })
 
   test("zero sibling .test.js for any .test.ts (defense-in-depth)", () => {
-    const findTestTs = (root: string, out: string[] = []): string[] => {
-      for (const entry of readdirSync(root, { withFileTypes: true })) {
-        if (entry.name === "node_modules" || entry.name.startsWith(".")) continue
-        const full = join(root, entry.name)
-        if (entry.isDirectory()) findTestTs(full, out)
-        else if (entry.name.endsWith(".test.ts")) out.push(full)
-      }
-      return out
-    }
     const siblings = findTestTs(join(REPO_ROOT, "tests"))
       .map((ts) => ts.replace(/\.test\.ts$/, ".test.js"))
       .filter((js) => {
