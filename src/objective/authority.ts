@@ -29,6 +29,7 @@
  */
 
 import { errMessage, logger } from "@/shared"
+import type { ObjectiveAttemptProvenance } from "./attempt"
 import { objectiveCoreFromPort } from "./authority-core-adapter"
 import {
   applyBlockerMutation,
@@ -224,6 +225,46 @@ const buildSettlementReceipt = (
   })
 }
 
+/**
+ * GOAL P1-E — the budget bound on a STARTING attempt.
+ *
+ * The bound the store DERIVES (`budget.limitedBy`) is the bound the authority
+ * enforces, so a read can never report `budget_limited` while the next
+ * `beginAttempt` is admitted. `autonomousAllowance` counts TURNS only, which is
+ * why an exhausted TOKEN budget used to pass this gate untouched; it is kept
+ * below for the NON-enforcing store, where nothing derives `limitedBy` but the
+ * product autonomous cap still applies.
+ *
+ * The asymmetry is deliberate: the product autonomous cap bounds autonomous
+ * work, never a user-requested attempt (which consumes no product-cap turn).
+ */
+const attemptBudgetRejection = (
+  current: Objective,
+  provenance: ObjectiveAttemptProvenance,
+  productCap: number | undefined,
+): CommitRejection | null => {
+  const autonomous = provenance === "autonomous-continuation"
+  const limitedBy = current.budget.limitedBy
+  if (limitedBy !== undefined && (limitedBy !== "product-hard-cap" || autonomous)) {
+    return limitedBy === "product-hard-cap" ? "hard-cap-exhausted" : "budget-exhausted"
+  }
+  const allowance = autonomousAllowance({
+    userMaxTurns: current.budget.maxTurns,
+    turnsUsed: current.budget.turnsUsed,
+    autonomousTurnsStarted: current.attempts.autonomousTurnsStarted,
+    productCap,
+  })
+  if (autonomous && !allowance.allowed) {
+    return allowance.limitingSource === "product-hard-cap"
+      ? "hard-cap-exhausted"
+      : "budget-exhausted"
+  }
+  if (provenance === "user-requested-goal-work" && allowance.userRemaining <= 0) {
+    return "budget-exhausted"
+  }
+  return null
+}
+
 const settleAttempt = (
   core: ObjectiveCore,
   threadId: string,
@@ -386,25 +427,12 @@ const DISPATCH: DispatchTable = {
     if (ctx.evidence.receipts.some((r) => r.attemptKey === m.attempt.attemptId)) {
       return refused(core, threadId, "attempt-replayed")
     }
-    // GOAL-06 — the AUTHORITY rechecks both counters atomically before the slot
-    // is consumed (the controller precheck is advisory). A user-requested attempt
-    // consumes no product-cap turn, so only the user budget bounds it.
-    const allowance = autonomousAllowance({
-      userMaxTurns: current.budget.maxTurns,
-      turnsUsed: current.budget.turnsUsed,
-      autonomousTurnsStarted: current.attempts.autonomousTurnsStarted,
-      productCap: ctx.productAutonomousTurnCap,
-    })
-    if (m.attempt.provenance === "autonomous-continuation" && !allowance.allowed) {
-      return refused(
-        core,
-        threadId,
-        allowance.limitingSource === "product-hard-cap" ? "hard-cap-exhausted" : "budget-exhausted",
-      )
-    }
-    if (m.attempt.provenance === "user-requested-goal-work" && allowance.userRemaining <= 0) {
-      return refused(core, threadId, "budget-exhausted")
-    }
+    const budgetRejection = attemptBudgetRejection(
+      current,
+      m.attempt.provenance,
+      ctx.productAutonomousTurnCap,
+    )
+    if (budgetRejection !== null) return refused(core, threadId, budgetRejection)
     return applied(
       core.startAttempt(threadId, {
         attemptId: m.attempt.attemptId,
