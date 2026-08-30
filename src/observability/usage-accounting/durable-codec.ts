@@ -143,10 +143,10 @@ const readBucket = (value: unknown): DurableUsageBucket | undefined => {
     !isFiniteNonnegative(value.estimatedUsd) ||
     value.estimatedUsd > value.totalUsd ||
     !isCount(value.unpricedCalls) ||
-    !isFiniteNonnegative(value.freshInputTokens) ||
-    !isFiniteNonnegative(value.cacheReadTokens) ||
-    !isFiniteNonnegative(value.cacheWriteTokens) ||
-    !isFiniteNonnegative(value.outputTokens) ||
+    !isCount(value.freshInputTokens) ||
+    !isCount(value.cacheReadTokens) ||
+    !isCount(value.cacheWriteTokens) ||
+    !isCount(value.outputTokens) ||
     !isCount(value.calls) ||
     value.unpricedCalls > value.calls
   ) {
@@ -162,11 +162,11 @@ const readUsage = (value: unknown): NormalizedUsage | undefined => {
   if (
     typeof value.model !== "string" ||
     (value.provider !== "openai" && value.provider !== "anthropic") ||
-    !isFiniteNonnegative(value.freshInputTokens) ||
-    !isFiniteNonnegative(value.cacheReadTokens) ||
-    !isFiniteNonnegative(value.cacheWriteTokens) ||
-    !isFiniteNonnegative(value.outputTokens) ||
-    (value.reasoningTokens !== undefined && !isFiniteNonnegative(value.reasoningTokens))
+    !isCount(value.freshInputTokens) ||
+    !isCount(value.cacheReadTokens) ||
+    !isCount(value.cacheWriteTokens) ||
+    !isCount(value.outputTokens) ||
+    (value.reasoningTokens !== undefined && !isCount(value.reasoningTokens))
   ) {
     return undefined
   }
@@ -280,11 +280,13 @@ const readBucketEntries = (
 const approximatelyEqual = (left: number, right: number): boolean =>
   Math.abs(left - right) <= 1e-9 * Math.max(1, Math.abs(left), Math.abs(right))
 
+// Only USD folds have floating-point error. Integer tokens/calls must conserve
+// exactly; relative tolerance would hide real token loss in large sessions.
 const sameAggregate = (expected: DurableUsageBucket, actual: DurableUsageBucket): boolean =>
   BUCKET_KEYS.every((key) =>
-    key === "calls" || key === "unpricedCalls"
-      ? expected[key] === actual[key]
-      : approximatelyEqual(expected[key], actual[key]),
+    key === "totalUsd" || key === "estimatedUsd"
+      ? approximatelyEqual(expected[key], actual[key])
+      : expected[key] === actual[key],
   )
 
 const sumBuckets = (buckets: readonly DurableUsageBucket[]): DurableUsageBucket => {

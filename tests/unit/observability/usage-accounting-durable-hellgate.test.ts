@@ -63,6 +63,114 @@ const serializeAsLegacyV1 = (acct: UsageAccountingPort, seq: number): string => 
   })
 }
 
+type MutableDurable = {
+  total: Record<string, unknown>
+  byModel: Array<[string, Record<string, unknown>]>
+  byAgent: Array<[string, Record<string, unknown>]>
+  byKind: { root: Record<string, unknown>; subagent: Record<string, unknown> }
+  retained: Array<{ callId: string; usage: Record<string, unknown> }>
+}
+
+const withConservedToken = (payload: MutableDurable, token: string, count: number): void => {
+  for (const bucket of [
+    payload.total,
+    payload.byKind.root,
+    payload.byModel[0]?.[1],
+    payload.byAgent[0]?.[1],
+  ]) {
+    if (bucket === undefined) throw new Error("valid fixture bucket missing")
+    bucket[token] = count
+  }
+}
+
+const TOKEN_FIELDS = [
+  "freshInputTokens",
+  "cacheReadTokens",
+  "cacheWriteTokens",
+  "outputTokens",
+] as const
+
+describe("R1 — durable token and conservation mutation rails", () => {
+  for (const token of TOKEN_FIELDS) {
+    test(`${token}: even conserved aggregate counts reject fractional or unsafe integers`, () => {
+      const source = createUsageAccounting()
+      record(source, source.mintCallId(PROV))
+      for (const count of [0.5, Number.MAX_SAFE_INTEGER + 1]) {
+        const payload = JSON.parse(source.serialize()) as MutableDurable
+        withConservedToken(payload, token, count)
+        expect(createUsageAccounting().hydrate(JSON.stringify(payload))).toBe(false)
+      }
+    })
+
+    test(`${token}: retained counts reject fractional, unsafe, negative, and non-finite values`, () => {
+      const source = createUsageAccounting()
+      record(source, source.mintCallId(PROV))
+      for (const count of [
+        0.5,
+        Number.MAX_SAFE_INTEGER + 1,
+        -1,
+        Number.NaN,
+        Number.POSITIVE_INFINITY,
+      ]) {
+        const payload = JSON.parse(source.serialize()) as MutableDurable
+        const retained = payload.retained[0]
+        if (retained === undefined) throw new Error("valid fixture record missing")
+        retained.usage[token] = count
+        // JSON encodes NaN/Infinity as null; null must not become an implicit zero.
+        expect(createUsageAccounting().hydrate(JSON.stringify(payload))).toBe(false)
+      }
+    })
+  }
+
+  for (const dimension of ["byModel", "byAgent", "byKind"] as const) {
+    test(`${dimension}: a one-token disagreement is not hidden by USD tolerance`, () => {
+      const source = createUsageAccounting()
+      record(source, source.mintCallId(PROV))
+      const payload = JSON.parse(source.serialize()) as MutableDurable
+      withConservedToken(payload, "freshInputTokens", 1_000_000_000_000)
+      const bucket = dimension === "byKind" ? payload.byKind.root : payload[dimension][0]?.[1]
+      if (bucket === undefined) throw new Error("valid fixture bucket missing")
+      bucket.freshInputTokens = 1_000_000_000_001
+      expect(createUsageAccounting().hydrate(JSON.stringify(payload))).toBe(false)
+    })
+  }
+
+  test("negative and non-finite nested aggregates never hydrate or throw", () => {
+    const source = createUsageAccounting()
+    record(source, source.mintCallId(PROV))
+    for (const count of [-1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const payload = JSON.parse(source.serialize()) as MutableDurable
+      withConservedToken(payload, "freshInputTokens", count)
+      const restored = createUsageAccounting()
+      expect(() => restored.hydrate(JSON.stringify(payload))).not.toThrow()
+      expect(restored.hydrate(JSON.stringify(payload))).toBe(false)
+      expect(restored.snapshot()).toMatchObject({ calls: 0, continuityLost: true })
+    }
+  })
+
+  test("optional retained reasoningTokens obey the same safe-integer contract", () => {
+    const source = createUsageAccounting()
+    record(source, source.mintCallId(PROV))
+    for (const count of [0.5, Number.MAX_SAFE_INTEGER + 1, -1, Number.NaN]) {
+      const payload = JSON.parse(source.serialize()) as MutableDurable
+      const retained = payload.retained[0]
+      if (retained === undefined) throw new Error("valid fixture record missing")
+      retained.usage.reasoningTokens = count
+      expect(createUsageAccounting().hydrate(JSON.stringify(payload))).toBe(false)
+    }
+  })
+
+  test("a retained callId absent from exact dedup memory is rejected", () => {
+    const source = createUsageAccounting()
+    record(source, source.mintCallId(PROV))
+    const payload = JSON.parse(source.serialize()) as MutableDurable
+    const retained = payload.retained[0]
+    if (retained === undefined) throw new Error("valid fixture record missing")
+    retained.callId = "not-admitted"
+    expect(createUsageAccounting().hydrate(JSON.stringify(payload))).toBe(false)
+  })
+})
+
 describe("A6 — serialize → fresh authority → hydrate", () => {
   test("totals, buckets and the binding survive the round trip", () => {
     const a = createUsageAccounting()
