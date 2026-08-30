@@ -162,11 +162,20 @@ export const assertScanPopulation = (
   // subtree counted even though the walker never descends there. A floor met by
   // files the verdict does not consume measures a population the guard does not
   // read.
+  // The skip policy applied to REACH is what the CALLER declared, plus
+  // `node_modules` — never the coverage-side default. `__tests__` is in that
+  // default and NOT every walker honours it: `memory-fence-no-llm-import`
+  // recurses into `src/memory/__tests__` and reads all four files there, so
+  // filtering them out of reach discarded four files the guard genuinely
+  // enumerated. On the coverage side the default is lenient (it excuses a
+  // subtree from being demanded); on the reach side the same set is strict, and
+  // a lenient default cannot be reused as a strict one.
+  const reachSkip = new Set(["node_modules", ...(opts.skipDirs ?? [])])
   const skippedByPolicy = (abs_: string): boolean =>
     relative(abs, abs_)
       .split("/")
       .slice(0, -1)
-      .some((seg) => isSkippedName(seg, skip))
+      .some((seg) => reachSkip.has(seg))
   const reachedFiles = [
     ...new Set(
       files
