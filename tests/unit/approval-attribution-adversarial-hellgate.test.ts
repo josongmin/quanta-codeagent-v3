@@ -375,23 +375,27 @@ describe("A8 property — no HITL escalation is silently un-attributed", () => {
     return asm.cancel(id)
   }
 
+  const assertGapAttribution = (op: (typeof OPS)[number], requested: boolean): void => {
+    const sink = gapSink()
+    const asm = createApprovalStateMachine({
+      now: stepClock(),
+      onUnattributed: sink.onUnattributed,
+    })
+    const id = `p-${op}-${requested}`
+    if (requested) asm.request(REQ(id))
+    settleFor(asm, op, id)
+    expect(sink.gaps.length).toBe(requested ? 0 : 1)
+    if (!requested) {
+      expect(sink.gaps[0]?.approvalId).toBe(id)
+      expect(sink.gaps[0]?.op).toBe(op)
+    }
+  }
+
   test("fuzz {op × requested?}: exactly one gap IFF the id was never requested", () => {
     for (const op of OPS) {
       for (const requested of [true, false]) {
-        const sink = gapSink()
-        const asm = createApprovalStateMachine({
-          now: stepClock(),
-          onUnattributed: sink.onUnattributed,
-        })
-        const id = `p-${op}-${requested}`
-        if (requested) asm.request(REQ(id))
-        settleFor(asm, op, id)
         // The invariant: a gap fires IFF there was NO producer (never requested).
-        expect(sink.gaps.length).toBe(requested ? 0 : 1)
-        if (!requested) {
-          expect(sink.gaps[0]?.approvalId).toBe(id)
-          expect(sink.gaps[0]?.op).toBe(op)
-        }
+        assertGapAttribution(op, requested)
       }
     }
   })
