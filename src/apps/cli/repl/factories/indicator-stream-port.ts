@@ -53,10 +53,19 @@ const forwardIndicatorEvent = (
     return
   }
   if (event.type === "output_progress") {
+    // A1 — a subagent's live count must not overwrite the ROOT's gauge. The
+    // check is on the EVENT's provenance, not the port's config: parent and
+    // child share one stream, so the event is the only thing that knows.
+    // Events WITHOUT agentKind (legacy/synthetic producers) pass as before.
+    if (event.agentKind === "subagent") return
     ind.updateUsage({ outputTokens: event.outputTokens, exact: event.exact })
     return
   }
   if (event.type === "usage") {
+    // A1 — same rule for the authoritative end-of-turn snap AND the
+    // reasoning-split observer: both describe the CHILD's request, and
+    // feeding either into the root's /context gauge misreports the window.
+    if (event.agentKind === "subagent") return
     ind.updateUsage({
       inputTokens: event.inputTokens,
       outputTokens: event.outputTokens,

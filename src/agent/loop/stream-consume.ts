@@ -13,6 +13,7 @@ import { finalizeSamplingSpan, type SamplingUsage, samplingUsageFromEvent } from
 import { isToolBlockedInMode, resolveLiveAgentMode } from "../mode"
 import type { AgentMode, buildTurnContext } from "../prompt"
 import { withActiveSpanScope } from "../session-resources"
+import { isRootAgent } from "../spawn-depth"
 import { createStreamDispatcher, type TurnTimingAnchors } from "../stream-callbacks"
 import { streamingTurn } from "../streaming-dispatch"
 import { consumeTurnSignals, resolveToolChoice } from "../tool-choice"
@@ -124,7 +125,11 @@ export const inferDegradeNotice = (
   return undefined
 }
 
-async function* teeUsage(
+/** Exported for the A1 provenance wiring proof — the output_progress re-emit
+ *  below is the ONLY place the loop stamps `agentKind` onto the live gauge
+ *  feed, and a guard that is correct at the indicator but unstamped here is
+ *  exactly the wired-but-inert failure the proof exists to catch. */
+export async function* teeUsage(
   config: AgentConfig,
   src: AsyncIterable<StreamEvent>,
   recorder: TurnSession["recorder"],
@@ -158,6 +163,10 @@ async function* teeUsage(
         type: "output_progress",
         outputTokens: ev.outputTokens,
         exact: ev.exact,
+        // A1 — who is producing. Derived from the emitting config's persisted
+        // lineage (same rule as usage provenance), so a subagent's live count
+        // is distinguishable from the root's on the shared stream.
+        agentKind: isRootAgent(config) ? "root" : "subagent",
       })
     }
     yield ev

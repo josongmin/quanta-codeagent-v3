@@ -409,7 +409,16 @@ export type AgentEvent =
   // (terminal `usage` owns accounting), and the trajectory recorder SKIPS it.
   // `exact:false` ⇒ locally estimated (UI may render `~N`). NullStream
   // swallows it, so the default-OFF byte-identical contract holds.
-  | { type: "output_progress"; outputTokens: number; exact: boolean }
+  // A1 — optional provenance. A subagent shares the parent's stream, so
+  // without this a child's live output count overwrites the ROOT's gauge.
+  // OPTIONAL: omitted by legacy/synthetic producers (they pass gauges as
+  // before); the loop's re-emit stamps it.
+  | {
+      type: "output_progress"
+      outputTokens: number
+      exact: boolean
+      agentKind?: "root" | "subagent"
+    }
   // ADR control-op cluster (L3→L4 promotion 2026-05-23): back-pressure
   // signal. Emitted when the loop encountered a control-op or follow-up
   // dequeue request and DEFERRED it because the thread is paused or the
