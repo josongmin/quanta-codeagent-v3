@@ -26,10 +26,15 @@
 | P2-5 주인 없는 rail | **DONE**(fork/verify/pause/render 테스트) | `0202570d3` |
 | P2-6 PTY 배터리 | 남음 — 90초 목표 재설정 결정이 선행 |
 | P3-7b 샌드박스 계약 | 남음 — 결정 필요 |
-| 웹 objective 컨트롤 생산자 0 | 남음(어딧 B가 지적한 최대 누락: 웹은 goal을 읽기만 함). **2차 어딧 결과 진입점이 바뀜**: 가장 싼 첫 쓰기 동사는 `pause`가 아니라 **`goal work`**다 — `client.ts`의 `sendGoalWork`/`onGoalWorkResult`가 이미 구현·단위테스트돼 있고 데몬 반쪽도 e2e로 닫혀 있는데(GOAL-08 rail 15) **컴포넌트 호출자만 0**이다. revision/CAS도 필요 없다. `pause`는 그 다음 |
+| ~~웹 objective 컨트롤 생산자 0~~ → 남은 절반 | 읽기·set·work는 랜딩(W1b/W1c). **남음**: pause/resume/clear/edit — `/objective` CLI 동사 묶음이 `QUANTA_PROPOSE_GOAL` 뒤에 있고 웹 UI도 없다. 원문 메모: | 남음(어딧 B가 지적한 최대 누락: 웹은 goal을 읽기만 함). **2차 어딧 결과 진입점이 바뀜**: 가장 싼 첫 쓰기 동사는 `pause`가 아니라 **`goal work`**다 — `client.ts`의 `sendGoalWork`/`onGoalWorkResult`가 이미 구현·단위테스트돼 있고 데몬 반쪽도 e2e로 닫혀 있는데(GOAL-08 rail 15) **컴포넌트 호출자만 0**이다. revision/CAS도 필요 없다. `pause`는 그 다음 |
 | 웹 읽기 모델 드리프트 | 남음 — 손유지 `apps/web-frontend/src/types/protocol.ts`가 서버에 존재하지 않는 `verificationState`/`verifiedSourceDigest`를 선언하고 `ObservabilityPane.tsx:163`이 **절대 켜질 수 없는 분기**를 렌더한다. 반대로 이미 와이어에 실려 오는 `attempts`/`blockerObservations`/`budget.limitedBy`는 누락. byte-equality 생성기는 `@/protocol/session` 4개 파일만 덮으므로 이 미러는 게이트 밖 |
 | 웹 wake 상태 / 정산 체크포인트 | 남음 — `WebGoalWakeHandle`이 `wake.status()`를 버리고, `objectiveSettlementSink` 조립처가 CLI 1곳뿐이다. 채널은 observability objective 프레임이 맞다(agent-state는 goal 데이터를 0개 나른다). 단 4Hz 델타이므로 카운트다운 숫자가 아니라 `armed│idle(사유)│capped` + 절대 `retryAt`의 거친 모양으로 |
-| 카탈로그 evidence 갱신 | 남음 — 오늘 추가된 8개 테스트/3개 소스 경로를 goal yaml에 반영해야 한다. 2026-08-30 시도했으나 동시 세션의 미커밋 `tools/feature-catalog/reachability.ts`가 생성물 `docs/10.feature-catalog.md`를 광범위하게 바꿔서, 내 yaml만 커밋하면 `fc diff`가 red가 되고 생성물까지 커밋하면 남의 in-flight 상태를 박제하게 된다 → **트리가 깨끗해진 뒤 재시도** |
+| 카탈로그 evidence 갱신 | **DONE** — 1차분은 `e6d2adde8`, 2차분(오늘 5개 테스트 + `policy.ts`/`criteria-ops.ts` + readout 슬라이스)은 `53071a855`에 포함. 후자는 자발적 위생이 아니라 `fc check-changed`가 신규 src 파일을 막아서 강제됐다 |
+| **W1b** 웹 `/goal` 읽기 표면 | **DONE** — 웹엔 `/goal`이 아예 없었다(팔레트 `unwired()` 스텁조차). readout 채널은 lease-free라 **턴 중에도** 답하고, 서버 렌더 텍스트라 observability 프레임이 구조적으로 못 나르는 `revision`/`validationContract`/`progressReceipts`까지 낸다. 뮤턴트 3/3 RED | `53071a855` |
+| **W1** 데몬 조용한 드롭 | **DONE** — `goalWork` 프레임이 (a) 핸들러 미조립 (b) 공백 text 두 경로에서 **ack 없이 바닥으로** 떨어졌다. 브리지가 이 프레임을 디코드 못 하고 클라이언트는 타임아웃이 없어 영원히 대기. 프레임 소유 여부와 페이로드 사용 가능 여부를 분리. 뮤턴트 3/7 RED | `b89b9561c` |
+| **W1c** 브라우저 `/goal` 동사 | **DONE** — set+work 동시 랜딩. work만 내면 inert였다: 브라우저는 objective를 **만들 수 없다**(모델 create는 게이트 OFF에서 `actor-forbidden`, ON에서 `approval-unavailable` — 둘 다 프로브). 유일한 경로가 host가 USER actor로 바인딩하는 `session.objective.mutate`. 뮤턴트 4/4 RED | `2bd614e04` |
+| **W2** 웹 읽기모델 미러 + 가드 | **DONE** — 유령 2필드 삭제(+죽은 분기와 그걸 단언하던 테스트), 이미 와이어에 오던 `attempts`/`blockerObservations`/`limitedBy` 추가, criterion을 판별 유니온으로. **자체 드리프트 가드** 신설(생성기가 이 미러를 안 덮음). 가드의 공허성 arm이 첫 판(생성 번들을 겨눠 0개 비교)을 즉시 적발. 뮤턴트 4/4 RED | `8842bb30a` |
+| **W3** wake idle 상세(도메인 절반) | **DONE** — `status()`가 정책이 계산한 `retryAt`/`limitedBy`를 버렸다. armed arm의 `armedAt`은 컨트롤러 타입 확장 + 144/150 함수 수술이라 **별도 슬라이스로 분리**. 뮤턴트 4/4 RED | `bc6821811` |
 
 
 ### 2차 적대+객관 어딧에서 **반증되어 계획에서 뺀 것** (2026-08-30)
