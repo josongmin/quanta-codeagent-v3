@@ -90,52 +90,80 @@ const mkMessage = (rng: () => number): Message => {
   return { role, content }
 }
 
+const appendRandomMessages = (
+  rng: () => number,
+  current: Message[],
+  counter: ReturnType<typeof createTokenDeltaCounter>,
+): void => {
+  const added: Message[] = []
+  const count = pick(rng, 4)
+  for (let index = 0; index < count; index++) added.push(mkMessage(rng))
+  current.push(...added)
+  counter.onAppend(added)
+}
+
+const removeScatteredMessages = (
+  rng: () => number,
+  current: Message[],
+  counter: ReturnType<typeof createTokenDeltaCounter>,
+): void => {
+  const removed: Message[] = []
+  const count = 1 + pick(rng, current.length)
+  for (let index = 0; index < count; index++) {
+    const position = pick(rng, current.length)
+    removed.push(current[position] as Message)
+    current.splice(position, 1)
+  }
+  counter.onRemove(removed)
+}
+
+const applyMutation = (
+  rng: () => number,
+  current: Message[],
+  counter: ReturnType<typeof createTokenDeltaCounter>,
+): void => {
+  const operation = pick(rng, 10)
+  if (operation <= 4) {
+    appendRandomMessages(rng, current, counter)
+  } else if (operation <= 7 && current.length > 0) {
+    removeScatteredMessages(rng, current, counter)
+  } else if (operation === 8) {
+    counter.reseed(current)
+  } else {
+    counter.onRemove([])
+  }
+}
+
+const assertCounterMatchesScan = (
+  seed: number,
+  step: number,
+  current: readonly Message[],
+  counter: ReturnType<typeof createTokenDeltaCounter>,
+): void => {
+  const scan = estimateTokens(current)
+  if (counter.total() !== scan) {
+    throw new Error(
+      `INVARIANT VIOLATION seed=${seed} step=${step}: counter=${counter.total()} scan=${scan} len=${current.length}`,
+    )
+  }
+  expect(counter.total()).toBe(scan)
+}
+
+const runDeltaSequence = (seed: number): void => {
+  const rng = lcg(seed * 2654435761)
+  const current: Message[] = []
+  const counter = createTokenDeltaCounter(current)
+  const steps = 6 + pick(rng, 24)
+  for (let step = 0; step < steps; step++) {
+    applyMutation(rng, current, counter)
+    assertCounterMatchesScan(seed, step, current, counter)
+  }
+}
+
 describe("delta-token property fuzz R2 — byte-identity under arbitrary mutation", () => {
   test("≥500 random append/scattered-remove/reseed sequences: total()===scan at EVERY step", () => {
     const SEQUENCES = 600
-    for (let seed = 1; seed <= SEQUENCES; seed++) {
-      const rng = lcg(seed * 2654435761)
-      const current: Message[] = []
-      const counter = createTokenDeltaCounter(current)
-      const steps = 6 + pick(rng, 24)
-
-      for (let step = 0; step < steps; step++) {
-        const op = pick(rng, 10)
-        if (op <= 4) {
-          // APPEND 0..3 messages (0 ⇒ empty-append no-op edge).
-          const added: Message[] = []
-          const k = pick(rng, 4)
-          for (let i = 0; i < k; i++) added.push(mkMessage(rng))
-          current.push(...added)
-          counter.onAppend(added)
-        } else if (op <= 7 && current.length > 0) {
-          // REMOVE a SCATTERED subset (arbitrary positions, not a prefix).
-          const removeCount = 1 + pick(rng, current.length)
-          const removed: Message[] = []
-          for (let r = 0; r < removeCount; r++) {
-            const idx = pick(rng, current.length)
-            removed.push(current[idx] as Message)
-            current.splice(idx, 1)
-          }
-          counter.onRemove(removed)
-        } else if (op === 8) {
-          // RESEED (compaction / fork) — must equal a fresh full recompute.
-          counter.reseed(current)
-        } else {
-          // empty remove no-op edge.
-          counter.onRemove([])
-        }
-
-        // ZERO-tolerance invariant at EVERY step.
-        const scan = estimateTokens(current)
-        if (counter.total() !== scan) {
-          throw new Error(
-            `INVARIANT VIOLATION seed=${seed} step=${step}: counter=${counter.total()} scan=${scan} len=${current.length}`,
-          )
-        }
-        expect(counter.total()).toBe(scan)
-      }
-    }
+    for (let seed = 1; seed <= SEQUENCES; seed++) runDeltaSequence(seed)
   })
 
   test("charsOf is an exact homomorphism over concatenation: A++B (500 random splits)", () => {
