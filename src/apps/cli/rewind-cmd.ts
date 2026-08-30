@@ -623,6 +623,57 @@ const runRecover = async (state: RewindSlashState, ctx: SlashContext): Promise<n
   return anyStuck ? 1 : 0
 }
 
+const prepareConfirmedRewind = async (
+  state: RewindSlashState,
+  parsed: ReturnType<typeof parseRewindArgs> extends string
+    ? never
+    : Exclude<ReturnType<typeof parseRewindArgs>, string>,
+  ctx: SlashContext,
+) => {
+  const saved = await loadSessionById(state.sessionId)
+  if (saved === undefined) {
+    ctx.err(`/rewind: session not found: ${state.sessionId}\n`)
+    return { kind: "done" as const, code: 1 }
+  }
+  if (parsed.idPrefix === undefined && !parsed.toLast) {
+    renderRecentMessages(ctx, saved, "rewind targets")
+    ctx.out("usage: /rewind <id-prefix> [--yes] | /rewind --to-last [--yes]\n")
+    return { kind: "done" as const, code: 0 }
+  }
+  const targetId = pickTargetId(saved, parsed, ctx)
+  if (targetId === undefined) return { kind: "done" as const, code: 1 }
+  const target = resolveTarget(saved, targetId)
+  if (target.kind === "err") {
+    ctx.err(`/rewind: ${target.message}\n`)
+    return { kind: "done" as const, code: 1 }
+  }
+  if (target.dropMsgs === 0) {
+    ctx.out(`/rewind: ${shortId(target.fullId)} is already the last message — no-op\n`)
+    return { kind: "done" as const, code: 0 }
+  }
+  if (!parsed.yes) {
+    ctx.out(
+      `${renderConfirmLine(target.fullId, target.dropTurns, target.dropMsgs, parsed.restoreFiles, saved.meta.gitSha)}\n`,
+    )
+    ctx.out(confirmYesHint())
+    return { kind: "done" as const, code: 0 }
+  }
+  return { kind: "ready" as const, saved, target }
+}
+
+const runRecoveryRequest = async (
+  state: RewindSlashState,
+  parsed: Exclude<ReturnType<typeof parseRewindArgs>, string>,
+  ctx: SlashContext,
+): Promise<number | undefined> => {
+  if (!parsed.recover) return undefined
+  if (parsed.idPrefix !== undefined || parsed.toLast || parsed.restoreFiles) {
+    ctx.err("/rewind --recover: takes no id / other flags\n")
+    return 1
+  }
+  return runRecover(state, ctx)
+}
+
 /* ------------------------------------------------------------------ */
 /* /rewind                                                             */
 /* ------------------------------------------------------------------ */
@@ -653,47 +704,12 @@ const rewindCmdImpl: SlashCommand = {
     // RFC01-3 crash-recovery front door — takes NO id (it acts on the durable
     // pending-op breadcrumb, not the transcript), so it dispatches BEFORE the
     // id/list resolution. Extra-destructive gate is the same as --restore-files.
-    if (parsed.recover) {
-      if (parsed.idPrefix !== undefined || parsed.toLast || parsed.restoreFiles) {
-        ctx.err("/rewind --recover: takes no id / other flags\n")
-        return 1
-      }
-      return await runRecover(state, ctx)
-    }
+    const recovery = await runRecoveryRequest(state, parsed, ctx)
+    if (recovery !== undefined) return recovery
 
-    const saved = await loadSessionById(state.sessionId)
-    if (saved === undefined) {
-      ctx.err(`/rewind: session not found: ${state.sessionId}\n`)
-      return 1
-    }
-
-    // No id + no --to-last → list mode.
-    if (parsed.idPrefix === undefined && !parsed.toLast) {
-      renderRecentMessages(ctx, saved, "rewind targets")
-      ctx.out("usage: /rewind <id-prefix> [--yes] | /rewind --to-last [--yes]\n")
-      return 0
-    }
-
-    const targetId = pickTargetId(saved, parsed, ctx)
-    if (targetId === undefined) return 1
-
-    const target = resolveTarget(saved, targetId)
-    if (target.kind === "err") {
-      ctx.err(`/rewind: ${target.message}\n`)
-      return 1
-    }
-    if (target.dropMsgs === 0) {
-      ctx.out(`/rewind: ${shortId(target.fullId)} is already the last message — no-op\n`)
-      return 0
-    }
-
-    if (!parsed.yes) {
-      ctx.out(
-        `${renderConfirmLine(target.fullId, target.dropTurns, target.dropMsgs, parsed.restoreFiles, saved.meta.gitSha)}\n`,
-      )
-      ctx.out(confirmYesHint())
-      return 0
-    }
+    const prepared = await prepareConfirmedRewind(state, parsed, ctx)
+    if (prepared.kind === "done") return prepared.code
+    const { target } = prepared
 
     // RFC-def Surface B — when `--restore-files` is requested AND the durable
     // ThreadRollback coordinator is wired, route the FILE restore through it
