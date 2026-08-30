@@ -45,6 +45,13 @@ const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 const DEBT = join(REPO_ROOT, "tools", "dev", "scan-enrollment-debt.json")
 const MANIFEST = join(REPO_ROOT, "tools", "dev", "scan-migration-manifest.json")
 
+// One frozen census per test-file process. Three verdicts consume this same
+// population; rescanning ~2,800 files inside each 5s test body made the verdict
+// depend on host I/O load and allowed the three checks to observe different
+// filesystem moments. Module setup remains bounded by the outer shard/arm
+// timeout, while each assertion now operates on one coherent snapshot.
+const SCAN_VERDICT_GUARDS = scanVerdictGuards()
+
 type DebtFile = {
   readonly unenrolled?: readonly string[]
   readonly externalCorpus?: readonly { readonly file: string; readonly why: string }[]
@@ -129,7 +136,7 @@ describe("scan enrollment", () => {
     // Both directions matter. A population that came back empty would make the
     // ratchet below pass over nothing, and a debt entry naming a file that is not
     // in the population is a permission for something the rule never covered.
-    const population = scanVerdictGuards()
+    const population = SCAN_VERDICT_GUARDS
     expect(population.length, "the census found no scan-verdict guards at all").toBeGreaterThan(50)
     const known = new Set(population)
     const strays = debtList().filter((f) => !known.has(f))
@@ -250,9 +257,7 @@ describe("scan enrollment", () => {
       ...externalCorpus().map((e) => e.file),
       ...failsClosed().map((e) => e.file),
     ])
-    const added = scanVerdictGuards()
-      .filter((f) => !owed.has(f))
-      .filter((f) => !isEnrolled(f))
+    const added = SCAN_VERDICT_GUARDS.filter((f) => !owed.has(f)).filter((f) => !isEnrolled(f))
     expect(
       added,
       added.length === 0
@@ -280,8 +285,7 @@ describe("scan enrollment", () => {
     // baseline row throws at runtime (the closed universe), but a call whose row
     // exists while no ledger entry claims it is silent: `scan-reach` would never
     // expect anything from that file, so it stops reporting unnoticed.
-    const orphans = scanVerdictGuards()
-      .filter((f) => callsHelper(f))
+    const orphans = SCAN_VERDICT_GUARDS.filter((f) => callsHelper(f))
       .filter((f) => !isEnrolled(f))
       .sort()
     expect(

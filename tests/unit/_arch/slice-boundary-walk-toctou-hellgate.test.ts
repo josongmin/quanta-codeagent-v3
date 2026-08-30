@@ -41,6 +41,16 @@ import {
 
 const roots: string[] = []
 
+// Freeze the real-tree walk during module setup. The assertion below protects
+// coverage correctness, not a 5s filesystem latency budget; putting a full
+// src/ walk inside the default per-test timeout made this arm fail according to
+// host I/O contention. The cwd-parity arm and shard timeouts still bound setup.
+const LIVE_SRC_COVERAGE = (() => {
+  const src = join(import.meta.dir, "..", "..", "..", "src")
+  const files = listSliceTsFiles(src, false)
+  return readWalkedFiles(src, files, false).coverage
+})()
+
 /** A scratch tree: `<root>/{alpha,beta}/*.ts` plus one root-level file. */
 const makeTree = (): string => {
   const root = mkdtempSync(join(tmpdir(), "slice-walk-toctou-"))
@@ -210,12 +220,9 @@ describe("C — the floor catches a lost SUBTREE, not merely a lost file", () =>
 
 describe("D — the live guards actually clear the floor on the real tree", () => {
   test("src/ splits into many slice subtrees and every one is read", () => {
-    const src = join(import.meta.dir, "..", "..", "..", "src")
-    const files = listSliceTsFiles(src, false)
-    const { coverage } = readWalkedFiles(src, files, false)
     // Anti-vacuity: this is the population the vscode ratchet scans.
-    expect(coverage.read.length).toBeGreaterThan(500)
-    expect(coverage.readSubtrees.size).toBeGreaterThan(10)
-    expect(() => assertWalkFloor(coverage, "D/src")).not.toThrow()
+    expect(LIVE_SRC_COVERAGE.read.length).toBeGreaterThan(500)
+    expect(LIVE_SRC_COVERAGE.readSubtrees.size).toBeGreaterThan(10)
+    expect(() => assertWalkFloor(LIVE_SRC_COVERAGE, "D/src")).not.toThrow()
   })
 })
