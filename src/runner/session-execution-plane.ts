@@ -126,6 +126,107 @@ const adaptDelegation = (
   return { delegator, modes: AGENT_MODES }
 }
 
+const createPersistentBackgroundScheduler = async (
+  args: SharedExecutionPlaneRuntimeArgs,
+  subagentConfig: NonNullable<AgentConfig["subagent"]>,
+) => {
+  const childRunner = createSubagentRunner(
+    args.parentConfig,
+    subagentConfig.maxDepth !== undefined ? { maxDepth: subagentConfig.maxDepth } : {},
+  )
+  const maxConcurrent = parsePositiveInt(args.envSource.QUANTA_BG_MAX_CONCURRENT)
+  const maxRetained = parsePositiveInt(args.envSource.QUANTA_BG_MAX_RETAINED)
+  const admissionQueue = gateOn(args.envSource, "QUANTA_SUBAGENT_QUEUE")
+  const maxQueued = parsePositiveInt(args.envSource.QUANTA_BG_MAX_QUEUED)
+  const parentDepth = args.parentConfig.depth ?? 0
+  const childDepth = parentDepth + 1
+  const inner = defaultBackgroundSubagentScheduler({
+    runner: childRunner,
+    parentDepth,
+    ...(maxConcurrent !== undefined ? { maxConcurrent } : {}),
+    ...(maxRetained !== undefined ? { maxRetained } : {}),
+    ...(admissionQueue ? { admissionQueue: true } : {}),
+    ...(admissionQueue && maxQueued !== undefined ? { maxQueued } : {}),
+  })
+  const store = defaultJsonlSchedulerStore(
+    args.envSource.QUANTA_BG_STORE_DIR !== undefined
+      ? { baseDir: args.envSource.QUANTA_BG_STORE_DIR }
+      : undefined,
+  )
+  const persistent = await persistentBackgroundSubagentScheduler({
+    inner,
+    store,
+    workspace: args.cwd,
+    childDepth,
+  })
+  return { persistent, store, childDepth }
+}
+
+const resumeInterruptedBackgroundHandles = async (
+  args: SharedExecutionPlaneRuntimeArgs,
+  persistent: Awaited<ReturnType<typeof persistentBackgroundSubagentScheduler>>,
+  store: ReturnType<typeof defaultJsonlSchedulerStore>,
+  childDepth: number,
+): Promise<void> => {
+  if (!runtimeConfigFromEnv(args.envSource).subagentResume) return
+  const outcomes = await resumeInterruptedHandles({
+    scheduler: persistent,
+    store,
+    policy: defaultResumePolicy(),
+    workspace: args.cwd,
+    lineageGuard: { resumeForkDepth: childDepth },
+  })
+  for (const outcome of outcomes) {
+    if (outcome.decision.action === "resume" || outcome.decision.action === "mark-failed") {
+      persistent.evictInterrupted(outcome.id)
+    }
+  }
+}
+
+const publicBackgroundScheduler = (
+  persistent: Awaited<ReturnType<typeof persistentBackgroundSubagentScheduler>>,
+): BackgroundSubagentScheduler => ({
+  fork: (spec) => persistent.fork(spec),
+  poll: (id) => {
+    const result = persistent.poll(id)
+    return result === null ? null : normalizeBgResult(result)
+  },
+  await: async (id, opts) => {
+    const result = await persistent.await(id, opts)
+    return result === null ? null : normalizeBgResult(result)
+  },
+  cancel: (id) => persistent.cancel(id),
+  forceBackground: (id, forceOpts) => persistent.forceBackground(id, forceOpts),
+  list: () =>
+    persistent.list().map((entry) => ({
+      ...entry,
+      result: normalizeBgResult(entry.result),
+    })),
+  prune: (maxAgeMs) => persistent.prune(maxAgeMs),
+  serialize: () => persistent.serialize(),
+  hydrate: (json) => persistent.hydrate(json),
+  hydrateWithPrune: (json, maxAgeMs) => persistent.hydrateWithPrune(json, maxAgeMs),
+})
+
+const autoBackgroundDeps = (
+  scheduler: BackgroundSubagentScheduler,
+  envSource: Readonly<Record<string, string | undefined>>,
+) => {
+  const thresholdMs = parsePositiveInt(envSource.QUANTA_AUTO_BACKGROUND_THRESHOLD_MS)
+  const detector = defaultStuckDetector(thresholdMs !== undefined ? { thresholdMs } : {})
+  const onAccept = buildSubagentForkOnAccept({ scheduler })
+  const proposer = defaultProposeHandler({
+    detector,
+    ...(onAccept !== undefined ? { onAccept } : {}),
+  })
+  return {
+    detector,
+    proposer,
+    ...(thresholdMs !== undefined ? { thresholdMs } : {}),
+    ...(onAccept !== undefined ? { onAccept } : {}),
+  }
+}
+
 export const buildSharedExecutionPlaneSessionDeps = async (
   args: SharedExecutionPlaneArgs,
 ): Promise<Partial<SharedExecutionPlaneDeps>> => {
@@ -157,130 +258,17 @@ export const buildSharedExecutionPlaneRuntimeAugments = async (
 
   const subagentCfg = args.subagentConfig
   if (subagentCfg === undefined) return base
-
-  const childRunner = createSubagentRunner(
-    args.parentConfig,
-    subagentCfg.maxDepth !== undefined ? { maxDepth: subagentCfg.maxDepth } : {},
+  const { persistent, store, childDepth } = await createPersistentBackgroundScheduler(
+    args,
+    subagentCfg,
   )
-  const maxConcurrent = parsePositiveInt(args.envSource.QUANTA_BG_MAX_CONCURRENT)
-  const maxRetained = parsePositiveInt(args.envSource.QUANTA_BG_MAX_RETAINED)
-  // ADR-0487 — opt into the admission wait-queue when QUANTA_SUBAGENT_QUEUE is
-  // on; absent ⇒ over-cap fork throws-at-cap (byte-identical pre-queue behavior).
-  // `maxQueued` (QUANTA_BG_MAX_QUEUED) is consulted ONLY when the queue is on;
-  // absent ⇒ the scheduler's built-in DEFAULT_MAX_QUEUED (64) — no behavior shift
-  // on the default-OFF path.
-  const admissionQueue = gateOn(args.envSource, "QUANTA_SUBAGENT_QUEUE")
-  const maxQueued = parsePositiveInt(args.envSource.QUANTA_BG_MAX_QUEUED)
-  // INV-09/INV-10 (jul-14 resume-depth-preservation): the REAL depth every bg
-  // child forked through this scheduler runs at. The inner scheduler is built
-  // FROM the parent config, so a child runs at `parentDepth + 1` (0 = root).
-  // This is BOTH the capture value (persist-time `handle.depth`) AND the
-  // resume-fork depth the lineage guard enforces against — SAME source, so a
-  // handle persisted by THIS process resumes iff the resume-time scheduler
-  // would re-derive the same depth. Under the shipping cap=1 default this is
-  // always 1 and the guard is inert-but-correct; it bites under cap>=2.
-  const childDepth = (args.parentConfig.depth ?? 0) + 1
-  const inner = defaultBackgroundSubagentScheduler({
-    runner: childRunner,
-    // Phase 0-a (jul-13 nesting-control RFC §6.5): scheduler is built FROM the
-    // parent config, so background children run at `parentDepth + 1` (0 = root),
-    // reviving the runner's `req.depth > maxDepth` reject.
-    parentDepth: args.parentConfig.depth ?? 0,
-    ...(maxConcurrent !== undefined ? { maxConcurrent } : {}),
-    ...(maxRetained !== undefined ? { maxRetained } : {}),
-    ...(admissionQueue ? { admissionQueue: true } : {}),
-    ...(admissionQueue && maxQueued !== undefined ? { maxQueued } : {}),
-  })
-  const store = defaultJsonlSchedulerStore(
-    args.envSource.QUANTA_BG_STORE_DIR !== undefined
-      ? { baseDir: args.envSource.QUANTA_BG_STORE_DIR }
-      : undefined,
-  )
-  const persistent = await persistentBackgroundSubagentScheduler({
-    inner,
-    store,
-    workspace: args.cwd,
-    // INV-09/INV-10 persist-time capture: stamp every persisted handle with the
-    // real lineage depth so a later resume can enforce depth preservation.
-    childDepth,
-  })
-  // ADR-0159 work-resume wiring (GROUP B1): if QUANTA_SUBAGENT_RESUME is on,
-  // sweep interrupted handles from the previous process and re-fork them via
-  // the freshly-constructed persistent scheduler.  default-OFF: absent or "0"
-  // ⇒ byte-identical (no store reads, no forks).
-  if (runtimeConfigFromEnv(args.envSource).subagentResume) {
-    // `persistent.fork` is structurally compatible with `BackgroundSubagentScheduler.fork`.
-    // ResumerOpts.scheduler is narrowed to `Pick<..., "fork">` so no cast needed.
-    const resumeOutcomes = await resumeInterruptedHandles({
-      scheduler: persistent,
-      store,
-      policy: defaultResumePolicy(),
-      workspace: args.cwd,
-      // INV-09/INV-10 LIVE guard: enforce lineage-depth preservation at the
-      // resume trigger. `resumeForkDepth` is the SAME `childDepth` this process
-      // would re-derive a resumed fork at (= parentDepth+1), so a handle
-      // persisted by a shallower/deeper parent — or a legacy depth-less handle —
-      // is DENIED rather than silently re-derived to a possibly-shallower depth
-      // (spawn-authority escalation). NOT default-OFF: the guard is always
-      // wired; under cap=1 it is inert-but-correct (every child is depth-1).
-      lineageGuard: { resumeForkDepth: childDepth },
-    })
-    // Evict the stale "interrupted" cache entries only for handles where the
-    // sweep actually forked a new handle (action === "resume").
-    // For "skip" and "ask-user" the orchestrator took no action — the store
-    // was NOT written and the interrupted handle is still valid state that
-    // the user or system needs to inspect.  Evicting those entries would
-    // remove a live entry from list()/poll() without any corresponding store
-    // update, leaving the caller with an inconsistent view.
-    // For "mark-failed" the store was written (new "failed" snapshot), so the
-    // in-memory interrupted entry IS stale and should also be evicted.
-    for (const outcome of resumeOutcomes) {
-      if (outcome.decision.action === "resume" || outcome.decision.action === "mark-failed") {
-        persistent.evictInterrupted(outcome.id)
-      }
-    }
-  }
-  const scheduler: BackgroundSubagentScheduler = {
-    fork: (spec) => persistent.fork(spec),
-    poll: (id) => {
-      const result = persistent.poll(id)
-      return result === null ? null : normalizeBgResult(result)
-    },
-    await: async (id, opts) => {
-      const result = await persistent.await(id, opts)
-      return result === null ? null : normalizeBgResult(result)
-    },
-    cancel: (id) => persistent.cancel(id),
-    // ADR-0487 — passthrough the admission-queue promoter (no-throw).
-    forceBackground: (id, forceOpts) => persistent.forceBackground(id, forceOpts),
-    list: () =>
-      persistent.list().map((entry) => ({
-        ...entry,
-        result: normalizeBgResult(entry.result),
-      })),
-    prune: (maxAgeMs) => persistent.prune(maxAgeMs),
-    serialize: () => persistent.serialize(),
-    hydrate: (json) => persistent.hydrate(json),
-    hydrateWithPrune: (json, maxAgeMs) => persistent.hydrateWithPrune(json, maxAgeMs),
-  }
-
-  const thresholdMs = parsePositiveInt(args.envSource.QUANTA_AUTO_BACKGROUND_THRESHOLD_MS)
-  const detector = defaultStuckDetector(thresholdMs !== undefined ? { thresholdMs } : {})
-  const onAccept = buildSubagentForkOnAccept({ scheduler })
-  const proposer = defaultProposeHandler({
-    detector,
-    ...(onAccept !== undefined ? { onAccept } : {}),
-  })
+  await resumeInterruptedBackgroundHandles(args, persistent, store, childDepth)
+  const scheduler = publicBackgroundScheduler(persistent)
 
   return {
     ...base,
     delegation: adaptDelegation(args.parentConfig, subagentCfg.maxDepth),
     subagentBackground: { scheduler },
-    autoBackground: {
-      detector,
-      proposer,
-      ...(thresholdMs !== undefined ? { thresholdMs } : {}),
-      ...(onAccept !== undefined ? { onAccept } : {}),
-    },
+    autoBackground: autoBackgroundDeps(scheduler, args.envSource),
   }
 }
