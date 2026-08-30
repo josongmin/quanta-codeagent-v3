@@ -22,6 +22,8 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join, relative, resolve } from "node:path"
+
+import { assertScanPopulation } from "../_shared/scan-population"
 import { stripComments } from "../_shared/strip-comments"
 
 const SRC_ROOT = resolve(__dirname, "../../../src")
@@ -74,9 +76,17 @@ const walk = (dir: string, out: string[] = []): string[] => {
   return out
 }
 
-const censusOf = (): Map<string, number> => {
+/**
+ * The census, over a list the caller enumerated.
+ *
+ * The walk is materialised by the caller and NOT re-run here, so the reach the
+ * floor is asserted on and the reach this census consumes are the same list.
+ * A census that walks for itself can be pointed at a different tree than the one
+ * the floor measured, and the two would never disagree out loud.
+ */
+const censusOf = (files: readonly string[]): Map<string, number> => {
   const found = new Map<string, number>()
-  for (const file of walk(SRC_ROOT)) {
+  for (const file of files) {
     const src = stripComments(readFileSync(file, "utf8"))
     const n = [...src.matchAll(CALL_RE)].length
     if (n > 0) found.set(relative(SRC_ROOT, file), n)
@@ -85,11 +95,19 @@ const censusOf = (): Map<string, number> => {
 }
 
 describe("A5 — pricing call-site census", () => {
-  const found = censusOf()
+  const sources = walk(SRC_ROOT)
+  const found = censusOf(sources)
 
-  test("ANTI-VACUITY: the scanner actually saw the runtime site", () => {
-    // A scan that returns nothing would satisfy every 'no new site' check;
-    // the ONE site that must always exist anchors the scanner to reality.
+  test("ANTI-VACUITY: the scan reached the tree, and saw the runtime site", () => {
+    // Two claims, and the first is not the second. A scan that returns nothing
+    // satisfies every 'no new site' check below, and a named-site assertion only
+    // proves ONE file was read — the reach floor is what says the rest of `src/`
+    // was walked at all, and its number is measured and committed rather than
+    // chosen here.
+    assertScanPopulation(sources, SRC_ROOT, {
+      id: "tests/unit/_arch/cost-pricing-callsite-ratchet.test.ts#SRC-ROOT",
+      collectable: (n) => n.endsWith(".ts") && !n.endsWith(".d.ts"),
+    })
     expect(found.get("agent/loop/emit-helpers.ts")).toBe(1)
     expect([...found.values()].reduce((a, b) => a + b, 0)).toBeGreaterThanOrEqual(13)
   })

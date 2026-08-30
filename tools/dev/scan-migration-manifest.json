@@ -1,11 +1,5 @@
 {
-  "note": "The enrollment migration's work plan, MEASURED rather than assumed. One row per unenrolled file in tools/dev/scan-enrollment-debt.json, classified by the properties that decide how it is migrated. `klass` A = a recursive walker; B = a single non-recursive listing (needs topLevelOnly: true); C = the verdict's list is filtered by file CONTENT, so the helper belongs on the RAW enumeration and not on the derived subset; D = more than one root or more than one independent scan, so more than one baseline id. `absolutePaths` says whether the enumerated values are already full paths — re-joining a root onto them is a live way to produce a reach of zero. `floorLines` is the exact line of the existing numeric corpus floor, which the migration DELETES; a floor that also checks something the generic helper does not (read-vs-walk, TOCTOU) stays. These numbers are a starting inventory, not a verdict: the true site count for a file is what it REPORTS at runtime, recorded in `expectedIds` when it is migrated. Counting enumerator syntax is wrong in both directions — a walker's inner readdirSync is one site not one per level, and a helper called in a loop reports three ids from one call.",
-  "counts": {
-    "A-recursive-walk": 38,
-    "B-top-level": 12,
-    "C-derived/content-filtered": 2,
-    "D-multi-root-or-multi-scan": 4
-  },
+  "note": "The enrollment migration's work plan, MEASURED rather than assumed. One row per file in `unenrolled` of tools/dev/scan-enrollment-debt.json — the two sets are held EQUAL by tests/unit/_arch/scan-enrollment-ratchet.test.ts, so a migrated file cannot linger here and a new debt entry cannot arrive without a row. `klass` A = a recursive walker; B = a single non-recursive listing (needs topLevelOnly: true); C = the verdict's list is filtered by file CONTENT, so the helper belongs on the RAW enumeration and not on the derived subset; D = more than one root or more than one independent scan, so more than one baseline id. `absolutePaths` says whether the enumerated values are already full paths — re-joining a root onto them is a live way to produce a reach of zero. `floorLines` is the exact line of the existing numeric corpus floor, which the migration DELETES; a floor that also checks something the generic helper does not (read-vs-walk, TOCTOU, an exact census, a named `toContain`) STAYS. NO COUNTS ARE WRITTEN HERE. A hand-maintained total drifts the moment one side moves — this file's own prose said 56/86 while the arrays said 54/87 — so the number is whatever `rows.length` is. The classification is a starting inventory and not a verdict: `no-raw-nul-bytes-hellgate` is filed B and is really a three-root recursive walk, which the per-file re-read at step 1 of the procedure is there to catch. A file's true site count is what it REPORTS at runtime, recorded in `expectedIds`.",
   "rows": [
     {
       "file": "src/apps/bench/benchmark-suite.test.ts",
@@ -535,28 +529,6 @@
       "derived": false,
       "roots": 1,
       "floorLines": ["98: expect(ALLOWED.size).toBeGreaterThanOrEqual(3)"]
-    },
-    {
-      "file": "tests/unit/repair-shadow-js-ratchet.test.ts",
-      "klass": "B-top-level",
-      "enumerators": ["readdirSync"],
-      "recursive": false,
-      "absolutePaths": false,
-      "derived": false,
-      "roots": 1,
-      "floorLines": ["23: ).toBeGreaterThan(3)"]
-    },
-    {
-      "file": "tests/unit/runner/knobs/knobs-import-bundle.test.ts",
-      "klass": "B-top-level",
-      "enumerators": ["readdir"],
-      "recursive": false,
-      "absolutePaths": false,
-      "derived": false,
-      "roots": 1,
-      "floorLines": [
-        "207: expect(knobFileCount, \"the per-knob directory read almost nothing\").toBeGreaterThan(50)"
-      ]
     },
     {
       "file": "tests/unit/side-agent-stopall-wiring-guard.test.ts",

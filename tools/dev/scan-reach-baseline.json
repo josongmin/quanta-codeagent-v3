@@ -160,6 +160,9 @@
     "tests/integration/cli-attention-navigation.test.ts#root": {
       "walked": 3343
     },
+    "tests/unit/_arch/cost-pricing-callsite-ratchet.test.ts#SRC-ROOT": {
+      "walked": 3650
+    },
     "tests/unit/_arch/no-leftover-backup-files.test.ts#src": {
       "walked": 3747
     },

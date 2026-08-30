@@ -43,6 +43,7 @@ import { stripComments } from "@/shared/source-text"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 const DEBT = join(REPO_ROOT, "tools", "dev", "scan-enrollment-debt.json")
+const MANIFEST = join(REPO_ROOT, "tools", "dev", "scan-migration-manifest.json")
 
 type DebtFile = {
   readonly unenrolled?: readonly string[]
@@ -106,6 +107,51 @@ describe("scan enrollment", () => {
       `these are listed as enrollment debt but are not scan-verdict guards — ` +
         `remove them:\n  ${strays.join("\n  ")}`,
     ).toEqual([])
+  })
+
+  test("🔴 the migration manifest and the debt list name the SAME files", () => {
+    // Two hand-maintained lists of the same set drift, and this pair already had:
+    // the manifest carried rows for two pilots that had finished, and its own
+    // prose said "56 of 86" while the arrays said 54 of 87. A work plan that
+    // disagrees with the ledger is a plan for work that is not owed, or silence
+    // about work that is.
+    const planned = new Set(
+      (
+        JSON.parse(readFileSync(MANIFEST, "utf8")) as { rows: readonly { file: string }[] }
+      ).rows.map((r) => r.file),
+    )
+    const owed = new Set(debtList())
+    expect(
+      planned.size,
+      "the manifest read is empty — this check would be vacuous",
+    ).toBeGreaterThan(10)
+    expect(
+      [...owed].filter((f) => !planned.has(f)).sort(),
+      "these are owed but the manifest plans no work for them",
+    ).toEqual([])
+    expect(
+      [...planned].filter((f) => !owed.has(f)).sort(),
+      "these have rows in the manifest but are no longer debt — remove them",
+    ).toEqual([])
+  })
+
+  test("🔴 neither ledger states a TOTAL a human has to keep true", () => {
+    // The drift above was in prose, not in the arrays. A count written beside a
+    // list it does not derive from is a second source of truth with no gate.
+    for (const [name, path] of [
+      ["debt", DEBT],
+      ["manifest", MANIFEST],
+    ] as const) {
+      const note = (JSON.parse(readFileSync(path, "utf8")) as { note: string }).note
+      const totals = [...note.matchAll(/\b(\d{2,})\s+(?:of|unenrolled|rows|files|guards)\b/g)]
+        .map((m) => m[0])
+        // The retraction of the old numbers names them on purpose.
+        .filter((t) => !note.includes(`said '${t}`) && !note.includes(`said ${t}`))
+      expect(
+        totals,
+        `${name} note states a total that nothing derives: ${totals.join(", ")}`,
+      ).toEqual([])
+    }
   })
 
   test("🔴 every file on the debt list is actually ENROLLABLE", () => {

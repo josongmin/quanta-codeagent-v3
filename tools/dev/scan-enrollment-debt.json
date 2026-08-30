@@ -1,5 +1,5 @@
 {
-  "note": "Scanning guards that state a zero-verdict but pin no MEASURED reach — their floor, if any, is a number written at the call site, which cannot see a subtree disappear. Enforced by tests/unit/_arch/scan-enrollment-ratchet.test.ts. `unenrolled` may only SHRINK: a new guard must call assertScanPopulation (tests/unit/_shared/scan-population.ts) and pin its reach in tools/dev/scan-reach-baseline.json, and a guard that enrolls must be removed from here. `externalCorpus` is NOT debt — it names guards the helper can never measure because their corpus is not the repo, and each entry is checked against the host path it claims. Measured 2026-08-30: 56 unenrolled + 1 external, of 86 in-scope guards.",
+  "note": "Scanning guards that state a zero-verdict but pin no MEASURED reach — their floor, if any, is a number written at the call site, which cannot see a subtree disappear. Enforced by tests/unit/_arch/scan-enrollment-ratchet.test.ts. `unenrolled` may only SHRINK: a new guard must call assertScanPopulation (tests/unit/_shared/scan-population.ts) and pin its reach in tools/dev/scan-reach-baseline.json, and a guard that enrolls must be removed from here. `externalCorpus` is NOT debt — it names guards the helper can never measure because their corpus is not the repo, and each entry is checked against the host path it claims. `expectedIds` records, per enrolled file, the baseline ids that file must REPORT at runtime; `bun run scan-reach` refuses when one is missing. NO TOTALS ARE WRITTEN HERE. A hand-maintained count drifts the moment one side moves — this note said '56 unenrolled of 86' while the arrays said 54 of 87 — so the number is whatever the arrays are.",
   "unenrolled": [
     "src/apps/bench/benchmark-suite.test.ts",
     "src/tool/terminal-surface.test.ts",
@@ -63,6 +63,9 @@
     }
   ],
   "expectedIds": {
+    "tests/unit/_arch/cost-pricing-callsite-ratchet.test.ts": [
+      "tests/unit/_arch/cost-pricing-callsite-ratchet.test.ts#SRC-ROOT"
+    ],
     "tests/unit/_arch/no-leftover-backup-files.test.ts": [
       "tests/unit/_arch/no-leftover-backup-files.test.ts#src",
       "tests/unit/_arch/no-leftover-backup-files.test.ts#tests",
