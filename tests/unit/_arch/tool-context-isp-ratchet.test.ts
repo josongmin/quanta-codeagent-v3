@@ -32,6 +32,8 @@ import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
 
+import { assertScanPopulation } from "../_shared/scan-population"
+
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 const TOOL_DIR = join(REPO_ROOT, "src/tool")
 
@@ -87,7 +89,19 @@ describe("tool-context ISP ratchet", () => {
   const files = walk(TOOL_DIR)
 
   test("no module declares the 39-seam bag while using only the core five", () => {
-    expect(files.length).toBeGreaterThan(200) // anti-vacuity: the walk found the tree
+    // The floor was `> 200` against the real `src/tool` tree — a number chosen
+    // here, tolerating most of the directory disappearing. It is now the measured
+    // reach in the committed baseline, intersected with what git TRACKS, plus the
+    // claim a count cannot make: every subtree holding a collectable file
+    // contributed one. `collectable` and `skipDirs` restate this file's own
+    // `walk` exactly — `.ts` but not `.test.ts` or `.d.ts`, and never inside
+    // `__tests__` — because a predicate that disagrees with the walker measures a
+    // population the guard does not read.
+    assertScanPopulation(files, TOOL_DIR, {
+      id: "tests/unit/_arch/tool-context-isp-ratchet.test.ts#TOOL-DIR",
+      collectable: (n) => n.endsWith(".ts") && !n.endsWith(".test.ts") && !n.endsWith(".d.ts"),
+      skipDirs: ["__tests__"],
+    })
     const offenders = files
       .filter((f) => isCoreOnlyBagTyped(readFileSync(f, "utf8")))
       .map((f) => f.slice(REPO_ROOT.length + 1))

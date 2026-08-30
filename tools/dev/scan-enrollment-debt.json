@@ -7,12 +7,10 @@
     "tests/unit/_arch/capability-literal-ratchet.test.ts",
     "tests/unit/_arch/comment-scanner-burndown-ratchet.test.ts",
     "tests/unit/_arch/gate-manifest-workflow-parity.test.ts",
-    "tests/unit/_arch/gated-test-scope-ratchet.test.ts",
     "tests/unit/_arch/real-quanta-home-escape-ratchet.test.ts",
     "tests/unit/_arch/repo-index-hygiene.test.ts",
     "tests/unit/_arch/repo-path-anchor-ratchet.test.ts",
     "tests/unit/_arch/self-skip-reports-as-pass-ratchet.test.ts",
-    "tests/unit/_arch/tool-context-isp-ratchet.test.ts",
     "tests/unit/_arch/ts-exports-ssot.test.ts",
     "tests/unit/apps/bench/promax/promax-bootstrap-phase-reachability.test.ts",
     "tests/unit/apps/bench/promax/promax-port-contract-unsuppressed.test.ts",
@@ -63,7 +61,9 @@
     }
   ],
   "expectedIds": {
-    "src/agent/converge/purity.test.ts": ["src/agent/converge/purity.test.ts#src-agent-converge"],
+    "src/agent/converge/purity.test.ts": [
+      "src/agent/converge/purity.test.ts#src-agent-converge"
+    ],
     "src/agent/prompt-graph/role-drift.ratchet.test.ts": [
       "src/agent/prompt-graph/role-drift.ratchet.test.ts#src"
     ],
@@ -76,19 +76,29 @@
     "tests/unit/_arch/cost-pricing-callsite-ratchet.test.ts": [
       "tests/unit/_arch/cost-pricing-callsite-ratchet.test.ts#SRC-ROOT"
     ],
+    "tests/unit/_arch/gated-test-scope-ratchet.test.ts": [
+      "tests/unit/_arch/gated-test-scope-ratchet.test.ts#REPO-TEST-FILES"
+    ],
     "tests/unit/_arch/no-leftover-backup-files.test.ts": [
       "tests/unit/_arch/no-leftover-backup-files.test.ts#src",
       "tests/unit/_arch/no-leftover-backup-files.test.ts#tests",
       "tests/unit/_arch/no-leftover-backup-files.test.ts#tools"
     ],
-    "tests/unit/activity-slice-boundary.test.ts": ["slice-boundary:activity"],
+    "tests/unit/_arch/tool-context-isp-ratchet.test.ts": [
+      "tests/unit/_arch/tool-context-isp-ratchet.test.ts#TOOL-DIR"
+    ],
+    "tests/unit/activity-slice-boundary.test.ts": [
+      "slice-boundary:activity"
+    ],
     "tests/unit/activity/activity-store-constructor-owner-ratchet.test.ts": [
       "tests/unit/activity/activity-store-constructor-owner-ratchet.test.ts#SRC-DIR"
     ],
     "tests/unit/agent-import-cycle.test.ts": [
       "tests/unit/agent-import-cycle.test.ts#src-agent-toplevel"
     ],
-    "tests/unit/agent-slice-boundary.test.ts": ["slice-boundary:agent"],
+    "tests/unit/agent-slice-boundary.test.ts": [
+      "slice-boundary:agent"
+    ],
     "tests/unit/apps/bench/batch-sdk-parity.test.ts": [
       "tests/unit/apps/bench/batch-sdk-parity.test.ts#APP-DRIVER-DIR"
     ],
@@ -109,88 +119,152 @@
     "tests/unit/apps/cli/session-cmd-shim-removal-hellgate.test.ts": [
       "tests/unit/apps/cli/session-cmd-shim-removal-hellgate.test.ts#srcRoot"
     ],
-    "tests/unit/artifact-slice-boundary.test.ts": ["slice-boundary:artifact"],
-    "tests/unit/attention-slice-boundary.test.ts": ["slice-boundary:attention"],
+    "tests/unit/artifact-slice-boundary.test.ts": [
+      "slice-boundary:artifact"
+    ],
+    "tests/unit/attention-slice-boundary.test.ts": [
+      "slice-boundary:attention"
+    ],
     "tests/unit/audit-ratchet/error-message-canonical-hellgate.test.ts": [
       "tests/unit/audit-ratchet/error-message-canonical-hellgate.test.ts#SRC-DIR"
     ],
-    "tests/unit/auth-slice-boundary.test.ts": ["slice-boundary:auth"],
-    "tests/unit/browser-slice-boundary.test.ts": ["slice-boundary:browser"],
-    "tests/unit/capability-slice-boundary.test.ts": ["slice-boundary:capability"],
+    "tests/unit/auth-slice-boundary.test.ts": [
+      "slice-boundary:auth"
+    ],
+    "tests/unit/browser-slice-boundary.test.ts": [
+      "slice-boundary:browser"
+    ],
+    "tests/unit/capability-slice-boundary.test.ts": [
+      "slice-boundary:capability"
+    ],
     "tests/unit/cli/cli-knob-readsite-domain-hellgate.test.ts": [
       "tests/unit/cli/cli-knob-readsite-domain-hellgate.test.ts#cliRoot"
     ],
     "tests/unit/cli/terminal-chrome-hellgate.test.ts": [
       "tests/unit/cli/terminal-chrome-hellgate.test.ts#src-apps-cli"
     ],
-    "tests/unit/codemode-slice-boundary.test.ts": ["slice-boundary:codemode"],
-    "tests/unit/config-slice-boundary.test.ts": ["slice-boundary:config"],
-    "tests/unit/connectors-slice-boundary.test.ts": ["slice-boundary:connectors"],
+    "tests/unit/codemode-slice-boundary.test.ts": [
+      "slice-boundary:codemode"
+    ],
+    "tests/unit/config-slice-boundary.test.ts": [
+      "slice-boundary:config"
+    ],
+    "tests/unit/connectors-slice-boundary.test.ts": [
+      "slice-boundary:connectors"
+    ],
     "tests/unit/deny-reason-authority-ratchet-hellgate.test.ts": [
       "tests/unit/deny-reason-authority-ratchet-hellgate.test.ts#SRC-AGENT"
     ],
-    "tests/unit/git-slice-boundary.test.ts": ["slice-boundary:git"],
-    "tests/unit/host-slice-boundary.test.ts": ["slice-boundary:host"],
+    "tests/unit/git-slice-boundary.test.ts": [
+      "slice-boundary:git"
+    ],
+    "tests/unit/host-slice-boundary.test.ts": [
+      "slice-boundary:host"
+    ],
     "tests/unit/identity-mid-session-rebuilder-owner-wire-hellgate.test.ts": [
       "tests/unit/identity-mid-session-rebuilder-owner-wire-hellgate.test.ts#dir"
     ],
-    "tests/unit/integrations-slice-boundary.test.ts": ["slice-boundary:integrations"],
-    "tests/unit/ipc-slice-boundary.test.ts": ["slice-boundary:ipc"],
-    "tests/unit/kernel-slice-boundary.test.ts": ["slice-boundary:kernel"],
+    "tests/unit/integrations-slice-boundary.test.ts": [
+      "slice-boundary:integrations"
+    ],
+    "tests/unit/ipc-slice-boundary.test.ts": [
+      "slice-boundary:ipc"
+    ],
+    "tests/unit/kernel-slice-boundary.test.ts": [
+      "slice-boundary:kernel"
+    ],
     "tests/unit/kernel/knob-schema-ssot-lock-ratchet.test.ts": [
       "tests/unit/kernel/knob-schema-ssot-lock-ratchet.test.ts#src-runner-knobs-knobs"
     ],
-    "tests/unit/llm-slice-boundary.test.ts": ["slice-boundary:llm"],
-    "tests/unit/lsp-slice-boundary.test.ts": ["slice-boundary:lsp"],
+    "tests/unit/llm-slice-boundary.test.ts": [
+      "slice-boundary:llm"
+    ],
+    "tests/unit/lsp-slice-boundary.test.ts": [
+      "slice-boundary:lsp"
+    ],
     "tests/unit/manifest-codex-compat-hellgate.test.ts": [
       "tests/unit/manifest-codex-compat-hellgate.test.ts#SYSTEM-SKILLS"
     ],
-    "tests/unit/mcp-slice-boundary.test.ts": ["slice-boundary:mcp"],
-    "tests/unit/media-slice-boundary.test.ts": ["slice-boundary:media"],
+    "tests/unit/mcp-slice-boundary.test.ts": [
+      "slice-boundary:mcp"
+    ],
+    "tests/unit/media-slice-boundary.test.ts": [
+      "slice-boundary:media"
+    ],
     "tests/unit/memory-fence-no-llm-import-hellgate.test.ts": [
       "tests/unit/memory-fence-no-llm-import-hellgate.test.ts#MEMORY-ROOT"
     ],
     "tests/unit/memory-fence-stays-clean-hellgate.test.ts": [
       "tests/unit/memory-fence-stays-clean-hellgate.test.ts#MEMORY-ROOT"
     ],
-    "tests/unit/memory-slice-boundary.test.ts": ["slice-boundary:memory"],
+    "tests/unit/memory-slice-boundary.test.ts": [
+      "slice-boundary:memory"
+    ],
     "tests/unit/memory/cross-session-inject-removed-ratchet.test.ts": [
       "tests/unit/memory/cross-session-inject-removed-ratchet.test.ts#SRC-ROOT"
     ],
-    "tests/unit/migration-slice-boundary.test.ts": ["slice-boundary:migration"],
-    "tests/unit/objective-slice-boundary.test.ts": ["slice-boundary:objective"],
+    "tests/unit/migration-slice-boundary.test.ts": [
+      "slice-boundary:migration"
+    ],
+    "tests/unit/objective-slice-boundary.test.ts": [
+      "slice-boundary:objective"
+    ],
     "tests/unit/objective/constructor-owner-ratchet.test.ts": [
       "tests/unit/objective/constructor-owner-ratchet.test.ts#SRC-DIR"
     ],
-    "tests/unit/observability-slice-boundary.test.ts": ["slice-boundary:observability"],
-    "tests/unit/patch-slice-boundary.test.ts": ["slice-boundary:patch"],
-    "tests/unit/permission-slice-boundary.test.ts": ["slice-boundary:permission"],
+    "tests/unit/observability-slice-boundary.test.ts": [
+      "slice-boundary:observability"
+    ],
+    "tests/unit/patch-slice-boundary.test.ts": [
+      "slice-boundary:patch"
+    ],
+    "tests/unit/permission-slice-boundary.test.ts": [
+      "slice-boundary:permission"
+    ],
     "tests/unit/permission/single-pep-fence-hellgate.test.ts": [
       "tests/unit/permission/single-pep-fence-hellgate.test.ts#SRC"
     ],
-    "tests/unit/plugin-isolation-slice-boundary.test.ts": ["slice-boundary:plugin-isolation"],
-    "tests/unit/protocol-slice-boundary.test.ts": ["slice-boundary:protocol"],
+    "tests/unit/plugin-isolation-slice-boundary.test.ts": [
+      "slice-boundary:plugin-isolation"
+    ],
+    "tests/unit/protocol-slice-boundary.test.ts": [
+      "slice-boundary:protocol"
+    ],
     "tests/unit/quanta-home-root-ssot-ratchet-hellgate.test.ts": [
       "tests/unit/quanta-home-root-ssot-ratchet-hellgate.test.ts#SRC"
     ],
-    "tests/unit/radar-slice-boundary.test.ts": ["slice-boundary:radar"],
-    "tests/unit/reactor-slice-boundary.test.ts": ["slice-boundary:reactor"],
-    "tests/unit/realtime-slice-boundary.test.ts": ["slice-boundary:realtime"],
-    "tests/unit/remote-slice-boundary.test.ts": ["slice-boundary:remote"],
+    "tests/unit/radar-slice-boundary.test.ts": [
+      "slice-boundary:radar"
+    ],
+    "tests/unit/reactor-slice-boundary.test.ts": [
+      "slice-boundary:reactor"
+    ],
+    "tests/unit/realtime-slice-boundary.test.ts": [
+      "slice-boundary:realtime"
+    ],
+    "tests/unit/remote-slice-boundary.test.ts": [
+      "slice-boundary:remote"
+    ],
     "tests/unit/repair-shadow-js-ratchet.test.ts": [
       "tests/unit/repair-shadow-js-ratchet.test.ts#REPAIR-DIR"
     ],
     "tests/unit/retrieval-bridge-deleted-ratchet.test.ts": [
       "tests/unit/retrieval-bridge-deleted-ratchet.test.ts#SRC-ROOT"
     ],
-    "tests/unit/retrieval-slice-boundary.test.ts": ["slice-boundary:retrieval"],
+    "tests/unit/retrieval-slice-boundary.test.ts": [
+      "slice-boundary:retrieval"
+    ],
     "tests/unit/retrieval/budget-probe-hellgate.test.ts": [
       "tests/unit/retrieval/budget-probe-hellgate.test.ts#/Users/songmin/quanta-codeagent-v3/src/agent",
       "tests/unit/retrieval/budget-probe-hellgate.test.ts#/Users/songmin/quanta-codeagent-v3/src/apps",
       "tests/unit/retrieval/budget-probe-hellgate.test.ts#/Users/songmin/quanta-codeagent-v3/src/runner"
     ],
-    "tests/unit/rules-slice-boundary.test.ts": ["slice-boundary:rules"],
-    "tests/unit/runner-slice-boundary.test.ts": ["slice-boundary:runner"],
+    "tests/unit/rules-slice-boundary.test.ts": [
+      "slice-boundary:rules"
+    ],
+    "tests/unit/runner-slice-boundary.test.ts": [
+      "slice-boundary:runner"
+    ],
     "tests/unit/runner/closure-repair-driver-parity.test.ts": [
       "tests/unit/runner/closure-repair-driver-parity.test.ts#DRIVER-DIR"
     ],
@@ -207,26 +281,48 @@
       "tests/unit/runner/verify-select-driver-parity.test.ts#APP-DRIVER-DIR",
       "tests/unit/runner/verify-select-driver-parity.test.ts#DRIVER-DIR"
     ],
-    "tests/unit/runtime-slice-boundary.test.ts": ["slice-boundary:runtime"],
-    "tests/unit/scheduler-slice-boundary.test.ts": ["slice-boundary:scheduler"],
-    "tests/unit/sdk-slice-boundary.test.ts": ["slice-boundary:sdk"],
-    "tests/unit/security-slice-boundary.test.ts": ["slice-boundary:security"],
-    "tests/unit/session-slice-boundary.test.ts": ["slice-boundary:session"],
+    "tests/unit/runtime-slice-boundary.test.ts": [
+      "slice-boundary:runtime"
+    ],
+    "tests/unit/scheduler-slice-boundary.test.ts": [
+      "slice-boundary:scheduler"
+    ],
+    "tests/unit/sdk-slice-boundary.test.ts": [
+      "slice-boundary:sdk"
+    ],
+    "tests/unit/security-slice-boundary.test.ts": [
+      "slice-boundary:security"
+    ],
+    "tests/unit/session-slice-boundary.test.ts": [
+      "slice-boundary:session"
+    ],
     "tests/unit/session-turn-driver-thin-surface-hellgate.test.ts": [
       "tests/unit/session-turn-driver-thin-surface-hellgate.test.ts#session-loop-slice"
     ],
-    "tests/unit/shared-slice-boundary.test.ts": ["slice-boundary:shared"],
-    "tests/unit/side-agent-slice-boundary.test.ts": ["slice-boundary:side-agent"],
+    "tests/unit/shared-slice-boundary.test.ts": [
+      "slice-boundary:shared"
+    ],
+    "tests/unit/side-agent-slice-boundary.test.ts": [
+      "slice-boundary:side-agent"
+    ],
     "tests/unit/silent-catch-24h-ratchet.test.ts": [
       "tests/unit/silent-catch-24h-ratchet.test.ts#dir"
     ],
-    "tests/unit/skill-slice-boundary.test.ts": ["slice-boundary:skill"],
+    "tests/unit/skill-slice-boundary.test.ts": [
+      "slice-boundary:skill"
+    ],
     "tests/unit/skill/runtime/f4-discovery-owner-ratchet.test.ts": [
       "tests/unit/skill/runtime/f4-discovery-owner-ratchet.test.ts#WEB-DAEMON-DIR"
     ],
-    "tests/unit/storage-slice-boundary.test.ts": ["slice-boundary:storage"],
-    "tests/unit/stream-slice-boundary.test.ts": ["slice-boundary:stream"],
-    "tests/unit/subagent-slice-boundary.test.ts": ["slice-boundary:subagent"],
+    "tests/unit/storage-slice-boundary.test.ts": [
+      "slice-boundary:storage"
+    ],
+    "tests/unit/stream-slice-boundary.test.ts": [
+      "slice-boundary:stream"
+    ],
+    "tests/unit/subagent-slice-boundary.test.ts": [
+      "slice-boundary:subagent"
+    ],
     "tests/unit/surrogate-safe-truncation-guard.test.ts": [
       "tests/unit/surrogate-safe-truncation-guard.test.ts#SRC-DIR"
     ],
@@ -236,12 +332,20 @@
     "tests/unit/tool-no-throw-contract-guard.test.ts": [
       "tests/unit/tool-no-throw-contract-guard.test.ts#TOOL-DIR"
     ],
-    "tests/unit/tool-slice-boundary.test.ts": ["slice-boundary:tool"],
-    "tests/unit/ui-slice-boundary.test.ts": ["slice-boundary:ui"],
-    "tests/unit/voice-slice-boundary.test.ts": ["slice-boundary:voice"],
+    "tests/unit/tool-slice-boundary.test.ts": [
+      "slice-boundary:tool"
+    ],
+    "tests/unit/ui-slice-boundary.test.ts": [
+      "slice-boundary:ui"
+    ],
+    "tests/unit/voice-slice-boundary.test.ts": [
+      "slice-boundary:voice"
+    ],
     "tests/unit/wire-batch-mode-focus-fork-otel-hellgate.test.ts": [
       "tests/unit/wire-batch-mode-focus-fork-otel-hellgate.test.ts#loopDir"
     ],
-    "tests/unit/workflow-slice-boundary.test.ts": ["slice-boundary:workflow"]
+    "tests/unit/workflow-slice-boundary.test.ts": [
+      "slice-boundary:workflow"
+    ]
   }
 }

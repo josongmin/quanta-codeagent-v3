@@ -62,6 +62,7 @@ import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { GATES } from "@/../tools/dev/gate-manifest"
+import { assertScanPopulation } from "../_shared/scan-population"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 
@@ -321,33 +322,54 @@ const isTestFile = (name: string): boolean =>
  *  ratchets cognitive complexity's own cousin, and an inline 4-branch loop body
  *  inside a nested closure scored 19 against the cap of 15 — this test would
  *  have been the thing that broke the ceiling it exists beside. */
-const walkTestDirs = (rel: string, found: Set<string>, count: { n: number }): void => {
+const walkTestDirs = (rel: string, found: Set<string>, paths: string[]): void => {
   for (const ent of readdirSync(join(REPO_ROOT, rel), { withFileTypes: true })) {
     if (!isWalkable(ent.name)) continue
-    if (ent.isDirectory()) walkTestDirs(rel === "" ? ent.name : `${rel}/${ent.name}`, found, count)
+    if (ent.isDirectory()) walkTestDirs(rel === "" ? ent.name : `${rel}/${ent.name}`, found, paths)
     else if (isTestFile(ent.name)) {
-      count.n += 1
+      // The PATHS, not just a tally: a count cannot be handed to the reach floor,
+      // and the floor is the thing that says this walk covered the tree rather
+      // than a corner of it.
+      paths.push(join(REPO_ROOT, rel, ent.name))
       found.add(rel === "" ? "." : rel)
     }
   }
 }
 
-const testDirsInRepo = (): { readonly dirs: readonly string[]; readonly files: number } => {
+const testDirsInRepo = (): {
+  readonly dirs: readonly string[]
+  readonly paths: readonly string[]
+} => {
   const found = new Set<string>()
-  const count = { n: 0 }
-  walkTestDirs("", found, count)
-  return { dirs: [...found].sort(), files: count.n }
+  const paths: string[] = []
+  walkTestDirs("", found, paths)
+  return { dirs: [...found].sort(), paths }
 }
 
 describe("gated test scope", () => {
-  const { dirs, files } = testDirsInRepo()
+  const { dirs, paths } = testDirsInRepo()
 
   test("anti-vacuity: the walk finds the real test tree, repo-wide", () => {
     // If this ever went small, every assertion below would pass for free — and
     // the walk being scoped to the wrong sub-tree is precisely how this file was
     // green while 360 files ran under no gate at all.
+    // The two floors here were numbers chosen in this file. The file count is now
+    // the measured reach in the committed baseline, intersected with what git
+    // TRACKS, and carries the claim a count cannot make: every directory holding
+    // a test file contributed one. The DIRECTORY floor stays — it is a different
+    // claim (how the tree is shaped, not how much of it was read) and the named
+    // roots below are what stopped this walk being re-narrowed.
+    //
+    // The other enumeration in this file — `countTestFilesUnder`'s walk — pins no
+    // reach on purpose: it counts files a gate positional selects, so a walk that
+    // reached nothing scores every token at zero and the assertion consuming it
+    // reports every token as selecting nothing. It fails CLOSED, which is the one
+    // shape a reach floor adds nothing to.
+    assertScanPopulation([...paths], REPO_ROOT, {
+      id: "tests/unit/_arch/gated-test-scope-ratchet.test.ts#REPO-TEST-FILES",
+      collectable: (n) => isTestFile(n),
+    })
     expect(dirs.length).toBeGreaterThan(150) // 211 on 2026-08-27
-    expect(files).toBeGreaterThan(3000) // 3765 on 2026-08-27
     expect(dirs.some((d) => d.startsWith("tests/unit"))).toBe(true)
     expect(dirs.some((d) => d.startsWith("tests/integration"))).toBe(true)
     // The three roots the old `tests`-only walk could not see at all. If a

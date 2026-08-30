@@ -163,6 +163,9 @@
     "tests/unit/_arch/cost-pricing-callsite-ratchet.test.ts#SRC-ROOT": {
       "walked": 3650
     },
+    "tests/unit/_arch/gated-test-scope-ratchet.test.ts#REPO-TEST-FILES": {
+      "walked": 3892
+    },
     "tests/unit/_arch/no-leftover-backup-files.test.ts#src": {
       "walked": 3747
     },
@@ -171,6 +174,9 @@
     },
     "tests/unit/_arch/no-leftover-backup-files.test.ts#tools": {
       "walked": 1370
+    },
+    "tests/unit/_arch/tool-context-isp-ratchet.test.ts#TOOL-DIR": {
+      "walked": 305
     },
     "tests/unit/activity/activity-store-constructor-owner-ratchet.test.ts#SRC-DIR": {
       "walked": 3338
