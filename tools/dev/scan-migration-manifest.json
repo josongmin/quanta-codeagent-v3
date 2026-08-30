@@ -357,20 +357,6 @@
       ]
     },
     {
-      "file": "tests/unit/objective/authority-boundary-ratchet.test.ts",
-      "klass": "B-top-level",
-      "enumerators": [
-        "readdirSync"
-      ],
-      "recursive": false,
-      "absolutePaths": true,
-      "derived": false,
-      "roots": 1,
-      "floorLines": [
-        "98: expect(ALLOWED.size).toBeGreaterThanOrEqual(3)"
-      ]
-    },
-    {
       "file": "tests/unit/side-agent-stopall-wiring-guard.test.ts",
       "klass": "B-top-level",
       "enumerators": [

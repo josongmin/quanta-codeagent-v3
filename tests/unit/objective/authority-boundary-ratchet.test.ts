@@ -18,6 +18,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join, relative } from "node:path"
+import { assertScanPopulation } from "../_shared/scan-population"
 import { stripComments } from "../_shared/strip-comments"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
@@ -93,6 +94,10 @@ describe("GOAL-01 — objective authority boundary ratchet", () => {
   })
 
   test("every allowlisted file still holds a real call (anti-vacuum floor)", () => {
+    const files = [...walk(SRC_DIR)]
+    assertScanPopulation(files, SRC_DIR, {
+      id: "tests/unit/objective/authority-boundary-ratchet.test.ts#SRC",
+    })
     const { stale } = scan(realFiles(), ALLOWED)
     expect(stale).toEqual([])
     expect(ALLOWED.size).toBeGreaterThanOrEqual(3)

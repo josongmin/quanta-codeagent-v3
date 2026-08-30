@@ -310,6 +310,9 @@
     "tests/unit/objective/constructor-owner-ratchet.test.ts#SRC-DIR": {
       "walked": 3338
     },
+    "tests/unit/objective/authority-boundary-ratchet.test.ts#SRC": {
+      "walked": 3352
+    },
     "tests/unit/permission/single-pep-fence-hellgate.test.ts#SRC": {
       "walked": 3343,
       "matched": 6

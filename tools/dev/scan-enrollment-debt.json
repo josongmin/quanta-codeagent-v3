@@ -18,7 +18,6 @@
     "tests/unit/lint-debt-ratchet-reach.test.ts",
     "tests/unit/no-benchmark-overfit-steer-ratchet.test.ts",
     "tests/unit/no-raw-nul-bytes-hellgate.test.ts",
-    "tests/unit/objective/authority-boundary-ratchet.test.ts",
     "tests/unit/observability/new-slice-metrics-hellgate.test.ts",
     "tests/unit/observability/vocabulary-migration.test.ts",
     "tests/unit/orphan-orchestrator-ratchet.test.ts",
@@ -410,6 +409,9 @@
     "tests/unit/test-quality-ratchet-hellgate.test.ts": [
       "tests/unit/test-quality-ratchet-hellgate.test.ts#SRC",
       "tests/unit/test-quality-ratchet-hellgate.test.ts#TESTS"
+    ],
+    "tests/unit/objective/authority-boundary-ratchet.test.ts": [
+      "tests/unit/objective/authority-boundary-ratchet.test.ts#SRC"
     ]
   }
 }
