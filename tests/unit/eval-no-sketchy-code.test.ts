@@ -21,6 +21,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { extname, join, relative } from "node:path"
+import { assertScanPopulation } from "./_shared/scan-population"
 
 const ROOT = join(__dirname, "..", "..", "src", "apps", "eval")
 
@@ -131,6 +132,10 @@ describe("eval source: anti-regression scan", () => {
   const files = walk(ROOT).filter((f) => !f.includes("/scenarios/"))
 
   test("every TS file scans clean against the lazy-pattern allowlist", () => {
+    assertScanPopulation(walk(ROOT), ROOT, {
+      id: "tests/unit/eval-no-sketchy-code.test.ts#EVAL",
+      collectable: (name) => name.endsWith(".ts"),
+    })
     const failures: string[] = []
     for (const f of files) {
       const v = scanFile(f)

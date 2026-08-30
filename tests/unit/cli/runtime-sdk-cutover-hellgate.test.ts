@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { extname, join } from "node:path"
 import ts from "typescript"
+import { assertScanPopulation } from "../_shared/scan-population"
 
 const readSource = (path: string): string =>
   readFileSync(join(import.meta.dir, "../../../", path), "utf8")
@@ -67,6 +68,10 @@ describe("CLI runtime SDK cutover source gates", () => {
   test("app surfaces no longer import raw compat owners or runner side ports directly", () => {
     const offenders: Array<{ path: string; needle: string }> = []
     const files = walkTs(APPS_ROOT)
+    assertScanPopulation(files, APPS_ROOT, {
+      id: "tests/unit/cli/runtime-sdk-cutover-hellgate.test.ts#APPS",
+      collectable: (name) => name.endsWith(".ts") || name.endsWith(".tsx"),
+    })
     expect(files.length).toBeGreaterThan(100)
     for (const file of files) {
       const src = readFileSync(file, "utf8")

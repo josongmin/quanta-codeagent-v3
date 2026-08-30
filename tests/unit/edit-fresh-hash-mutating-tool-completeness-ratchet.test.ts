@@ -22,6 +22,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
+import { assertScanPopulation } from "./_shared/scan-population"
 
 const TOOL_ROOT = join(import.meta.dir, "..", "..", "src", "tool")
 
@@ -73,6 +74,9 @@ describe("jul-13 edit-fresh-hash — mutating-tool completeness ratchet", () => 
   })
 
   test("the scan actually finds the known file-mutating tools (anti-vacuum)", () => {
+    assertScanPopulation(files, TOOL_ROOT, {
+      id: "tests/unit/edit-fresh-hash-mutating-tool-completeness-ratchet.test.ts#TOOL",
+    })
     const keys = writers.map(rel)
     // If the scan silently matched nothing (regex drift), the ratchet would be
     // vacuously green — pin the floor with the tools we KNOW mutate files.

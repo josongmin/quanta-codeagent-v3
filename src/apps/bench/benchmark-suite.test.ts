@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
 import { nth, present } from "../../../tests/_helpers/expect-present"
+import { assertScanPopulation } from "../../../tests/unit/_shared/scan-population"
 import {
   BENCHMARK_SUITES,
   isBenchmarkSuite,
@@ -381,6 +382,9 @@ describe("in-process family env-AUTHORITY rail (typed config is the only authori
 
   test("KNOWN-ITEM FLOOR: the walker + literal detector really see the sanctioned owner", () => {
     const files = walk(BENCH_DIR)
+    assertScanPopulation(files, BENCH_DIR, {
+      id: "src/apps/bench/benchmark-suite.test.ts#BENCH",
+    })
     // Floor: the bench tree is large; a walker that silently returns ~nothing
     // would make the offender scan below vacuously green.
     expect(files.length).toBeGreaterThan(40)

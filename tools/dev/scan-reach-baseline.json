@@ -154,6 +154,9 @@
     "src/agent/prompt-graph/role-drift.ratchet.test.ts#src": {
       "walked": 3343
     },
+    "src/apps/bench/benchmark-suite.test.ts#BENCH": {
+      "walked": 213
+    },
     "src/tool/terminal-surface.test.ts#SRC-NON-APPS": {
       "walked": 2704
     },
@@ -168,6 +171,12 @@
     },
     "tests/unit/_arch/cost-pricing-callsite-ratchet.test.ts#SRC-ROOT": {
       "walked": 3650
+    },
+    "tests/unit/_arch/real-quanta-home-escape-ratchet.test.ts#SRC": {
+      "walked": 299
+    },
+    "tests/unit/_arch/real-quanta-home-escape-ratchet.test.ts#TESTS": {
+      "walked": 3500
     },
     "tests/unit/_arch/gated-test-scope-ratchet.test.ts#REPO-TEST-FILES": {
       "walked": 3892
@@ -220,11 +229,23 @@
     "tests/unit/cli/cli-knob-readsite-domain-hellgate.test.ts#cliRoot": {
       "walked": 352
     },
+    "tests/unit/cli/runtime-sdk-cutover-hellgate.test.ts#APPS": {
+      "walked": 754
+    },
     "tests/unit/cli/terminal-chrome-hellgate.test.ts#src-apps-cli": {
       "walked": 352
     },
     "tests/unit/deny-reason-authority-ratchet-hellgate.test.ts#SRC-AGENT": {
       "walked": 726
+    },
+    "tests/unit/dataset-family-profile-ssot.test.ts#BENCH": {
+      "walked": 213
+    },
+    "tests/unit/edit-fresh-hash-mutating-tool-completeness-ratchet.test.ts#TOOL": {
+      "walked": 306
+    },
+    "tests/unit/eval-no-sketchy-code.test.ts#EVAL": {
+      "walked": 63
     },
     "tests/unit/identity-mid-session-rebuilder-owner-wire-hellgate.test.ts#dir": {
       "walked": 6
@@ -274,6 +295,9 @@
     "tests/unit/permission/single-pep-fence-hellgate.test.ts#SRC": {
       "walked": 3343,
       "matched": 6
+    },
+    "tests/unit/permission/posture/e3-direct-writer-ratchet.test.ts#SRC": {
+      "walked": 3356
     },
     "tests/unit/quanta-home-root-ssot-ratchet-hellgate.test.ts#SRC": {
       "walked": 3338
@@ -337,6 +361,9 @@
     },
     "tests/unit/wire-batch-mode-focus-fork-otel-hellgate.test.ts#loopDir": {
       "walked": 27
+    },
+    "tests/unit/runtime/worktree-checkout-progress-retired.test.ts#SRC": {
+      "walked": 3356
     }
   }
 }

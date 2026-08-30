@@ -30,6 +30,7 @@
 import { describe, expect, test } from "bun:test"
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { join, relative } from "node:path"
+import { assertScanPopulation } from "../_shared/scan-population"
 
 const REPO = join(import.meta.dir, "..", "..", "..")
 const SRC = join(REPO, "src")
@@ -95,6 +96,11 @@ describe("R5 honesty invariant — the dead D2 checkout-% symbols are GONE from 
  */
 describe("R5 honesty invariant — the scan is non-vacuous (a dead walker FAILS)", () => {
   test("src walk reaches a large, real file set", () => {
+    assertScanPopulation(
+      SRC_FILES.map((file) => join(REPO, file.rel)),
+      SRC,
+      { id: "tests/unit/runtime/worktree-checkout-progress-retired.test.ts#SRC" },
+    )
     expect(SRC_FILES.length).toBeGreaterThan(500)
   })
 

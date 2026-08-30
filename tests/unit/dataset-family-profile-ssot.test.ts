@@ -28,6 +28,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join, relative } from "node:path"
+import { assertScanPopulation } from "./_shared/scan-population"
 import { stripComments } from "./_shared/strip-comments"
 
 const REPO = join(import.meta.dir, "..", "..")
@@ -156,6 +157,9 @@ const KNOWN_CONSUMERS = [
 
 describe("T4 SSOT ratchet — known-item floor (a dead scan must FAIL, not pass)", () => {
   test("the walker really sees the bench tree", () => {
+    assertScanPopulation(walk(BENCH_ROOT), BENCH_ROOT, {
+      id: "tests/unit/dataset-family-profile-ssot.test.ts#BENCH",
+    })
     expect(SCANNED.length).toBeGreaterThan(40)
     for (const rel of KNOWN_CONSUMERS) {
       expect(SCANNED, `${rel} dropped out of the scan set`).toContain(rel)

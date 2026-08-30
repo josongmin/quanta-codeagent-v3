@@ -31,6 +31,7 @@ import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join, relative, resolve } from "node:path"
 import { Glob } from "bun"
+import { assertScanPopulation } from "../_shared/scan-population"
 import { stripComments } from "../_shared/strip-comments"
 
 const ROOT = resolve(import.meta.dir, "../../..")
@@ -105,6 +106,23 @@ const unhermetic = (files: readonly string[]): readonly string[] =>
 
 describe("no test composes a real surface against the developer's ~/.quanta", () => {
   test("the scan is non-degenerate (a rename fails loud, not vacuously)", () => {
+    const files = testFiles()
+    assertScanPopulation(
+      files.filter((file) => file.startsWith("tests/")).map((file) => join(ROOT, file)),
+      join(ROOT, "tests"),
+      {
+        id: "tests/unit/_arch/real-quanta-home-escape-ratchet.test.ts#TESTS",
+        collectable: (name) => name.endsWith(".test.ts"),
+      },
+    )
+    assertScanPopulation(
+      files.filter((file) => file.startsWith("src/")).map((file) => join(ROOT, file)),
+      join(ROOT, "src"),
+      {
+        id: "tests/unit/_arch/real-quanta-home-escape-ratchet.test.ts#SRC",
+        collectable: (name) => name.endsWith(".test.ts"),
+      },
+    )
     // If the composition roots are renamed this list empties and the parity
     // assertion below would trivially pass — so pin that it cannot be empty.
     expect(composingFiles().length).toBeGreaterThan(2)

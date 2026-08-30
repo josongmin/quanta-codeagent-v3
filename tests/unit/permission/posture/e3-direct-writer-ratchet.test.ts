@@ -23,6 +23,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
+import { assertScanPopulation } from "../../_shared/scan-population"
 
 const REPO = join(import.meta.dir, "..", "..", "..", "..")
 const SRC = join(REPO, "src")
@@ -50,6 +51,11 @@ const filesMatching = (needle: string): string[] =>
 
 describe("RFC-05 E3 — direct permission-mode writer completeness ratchet", () => {
   test("anti-vacuity: the walk read src/", () => {
+    assertScanPopulation(
+      SOURCES.map((source) => join(REPO, source.rel)),
+      SRC,
+      { id: "tests/unit/permission/posture/e3-direct-writer-ratchet.test.ts#SRC" },
+    )
     // Every arm below is `filesMatching(needle) === []`, and a walk that reads
     // NOTHING matches nothing — so all of them passed over an absent `src/`.
     // Proven by the empty-corpus oracle before this floor existed. Derived from
