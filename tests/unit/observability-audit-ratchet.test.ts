@@ -33,6 +33,7 @@
 import { describe, expect, test } from "bun:test"
 import { type Dirent, readdirSync, readFileSync } from "node:fs"
 import { join, resolve as resolvePath } from "node:path"
+import { assertScanPopulation } from "./_shared/scan-population"
 
 const REPO_ROOT = resolvePath(__dirname, "..", "..")
 const SRC_AGENT = join(REPO_ROOT, "src", "agent")
@@ -170,6 +171,10 @@ const isBounded = (source: string): boolean => {
 describe("audit ratchet — G2 bounded-growth (F3-class)", () => {
   test("every src/agent/<slice>/store.ts is bounded OR carries an explicit UNBOUNDED: opt-out", () => {
     const stores = collectStoreFiles()
+    assertScanPopulation(stores, SRC_AGENT, {
+      id: "tests/unit/observability-audit-ratchet.test.ts#AGENT-STORES",
+      collectable: (name) => name === "store.ts",
+    })
     expect(stores.length).toBeGreaterThan(0) // sanity: at least the audited 5
     const unbounded = stores
       .map((p) => ({ path: p, ok: isBounded(readUtf8(p)) }))
@@ -237,8 +242,8 @@ const readToolSource = (path: string, entry: Dirent<string>): string | undefined
 const skipToolDirectory = (name: string): boolean =>
   name === "__tests__" || name === "node_modules" || name.startsWith(".")
 
-const collectAllToolSources = (): string => {
-  const buf: string[] = []
+const collectAllToolSources = (): readonly { readonly path: string; readonly source: string }[] => {
+  const sources: Array<{ path: string; source: string }> = []
   const pending = [...TOOL_DIRS]
   while (pending.length > 0) {
     const dir = pending.pop()
@@ -251,10 +256,10 @@ const collectAllToolSources = (): string => {
         continue
       }
       const source = readToolSource(full, entry)
-      if (source !== undefined) buf.push(source)
+      if (source !== undefined) sources.push({ path: full, source })
     }
   }
-  return buf.join("\n")
+  return sources
 }
 
 describe("audit ratchet — G3 banner cross-source pinning (F6-class)", () => {
@@ -262,7 +267,19 @@ describe("audit ratchet — G3 banner cross-source pinning (F6-class)", () => {
     const matcherSrc = readUtf8(join(SRC_AGENT, "run-ledger-attribution", "matchers.ts"))
     const banners = collectMatcherBannersFrom(matcherSrc)
     expect(banners.length).toBeGreaterThan(0) // sanity: at least the audited 5
-    const toolSrc = collectAllToolSources()
+    const sources = collectAllToolSources()
+    for (const root of TOOL_DIRS) {
+      assertScanPopulation(
+        sources.filter(({ path }) => path.startsWith(`${root}/`)).map(({ path }) => path),
+        root,
+        {
+          id: `tests/unit/observability-audit-ratchet.test.ts#${root.endsWith("/tool") ? "TOOL" : "SUBAGENT"}`,
+          collectable: (name) => name.endsWith(".ts") && !name.endsWith(".test.ts"),
+          skipDirs: ["__tests__"],
+        },
+      )
+    }
+    const toolSrc = sources.map(({ source }) => source).join("\n")
     const missing = missingMatcherBanners(matcherSrc, toolSrc)
     if (missing.length > 0) {
       const detail = missing.map((b) => `  - "${b}"`).join("\n")

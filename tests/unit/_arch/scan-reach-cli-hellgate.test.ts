@@ -26,7 +26,12 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { decide, type ScanReach, type ScanReachBaseline } from "@/../tools/dev/scan-reach-baseline"
+import {
+  decide,
+  type ScanReach,
+  type ScanReachBaseline,
+  scanReachChildArgs,
+} from "@/../tools/dev/scan-reach-baseline"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 
@@ -36,6 +41,17 @@ const baselineOf = (scans: Record<string, ScanReach>): ScanReachBaseline => ({
 })
 
 describe("scan-reach CLI decision", () => {
+  test("harvest runs in one isolated worker — parallel test state cannot erase an observed scan", () => {
+    expect(scanReachChildArgs(["one.test.ts", "two.test.ts"])).toEqual([
+      "bun",
+      "test",
+      "--parallel=1",
+      "--timeout=60000",
+      "one.test.ts",
+      "two.test.ts",
+    ])
+  })
+
   test("🔴 a FAILING child is refused even when every floor is met", () => {
     const observed = new Map([["a", { walked: 10 }]])
     const d = decide({

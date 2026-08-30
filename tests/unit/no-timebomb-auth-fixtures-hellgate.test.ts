@@ -23,6 +23,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
+import { assertScanPopulation } from "./_shared/scan-population"
 
 /** A perpetually-fresh fixture must be at/after this year — far enough out that it
  *  never realistically ages into expiry during the project's lifetime. */
@@ -82,12 +83,10 @@ const scanFileDangerZone = (file: string, now: number): DangerHit[] => {
  *  repo root, 2 pass / 1 fail from a foreign working directory. */
 const REPO_ROOT = join(import.meta.dir, "..", "..")
 
-const scanDangerZone = (now: number): { hits: DangerHit[]; files: number } => {
+const scanDangerZone = (now: number): { hits: DangerHit[]; files: readonly string[] } => {
   const hits: DangerHit[] = []
-  let files = 0
-  for (const file of walk(join(REPO_ROOT, "tests"))) {
-    if (file.endsWith(SELF)) continue
-    files++
+  const files = [...walk(join(REPO_ROOT, "tests"))].filter((file) => !file.endsWith(SELF))
+  for (const file of files) {
     hits.push(...scanFileDangerZone(file, now))
   }
   return { hits, files }
@@ -96,12 +95,17 @@ const scanDangerZone = (now: number): { hits: DangerHit[]; files: number } => {
 describe("no time-bomb auth fixtures (regression guard)", () => {
   test(`every test 'expires_at' is far-future (>=${FAR_FUTURE_YEAR}) or already past — never a latent time-bomb`, () => {
     const { hits, files } = scanDangerZone(Date.now())
+    assertScanPopulation(files, join(REPO_ROOT, "tests"), {
+      id: "tests/unit/no-timebomb-auth-fixtures-hellgate.test.ts#TESTS",
+      collectable: (name) => name !== SELF && (name.endsWith(".ts") || name.endsWith(".json")),
+    })
     // Anti-vacuity. The verdict is `hits.length === 0`, so a walk that reads
     // NOTHING produces the same green as a clean tree — "no time bombs" and
     // "I never looked" are the same value without this.
-    expect(files, "the walk read no test files — the assertion below is vacuous").toBeGreaterThan(
-      3054,
-    )
+    expect(
+      files.length,
+      "the walk read no test files — the assertion below is vacuous",
+    ).toBeGreaterThan(3054)
     if (hits.length > 0) {
       const detail = hits.map((h) => `  ${h.file}:${h.line}  expires_at:"${h.date}"`).join("\n")
       throw new Error(

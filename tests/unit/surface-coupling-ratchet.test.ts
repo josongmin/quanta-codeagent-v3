@@ -8,6 +8,7 @@ import {
   readWalkedFiles,
   type WalkCoverage,
 } from "./_arch/slice-boundary-scanner"
+import { assertScanPopulation } from "./_shared/scan-population"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..")
 const APPS_DIR = join(REPO_ROOT, "src", "apps")
@@ -83,6 +84,16 @@ const collectCrossSurfaceImports = (): {
 } => {
   const found: string[] = []
   const enumerated = listSliceTsFiles(APPS_DIR, false)
+  assertScanPopulation(enumerated, APPS_DIR, {
+    id: "tests/unit/surface-coupling-ratchet.test.ts#APPS-DIR",
+    collectable: (name) =>
+      name.endsWith(".ts") &&
+      !name.endsWith(".d.ts") &&
+      !name.endsWith(".test.ts") &&
+      !name.includes(".from-worktree") &&
+      !name.includes(".my-backup"),
+    skipDirs: ["__tests__"],
+  })
   const { files, coverage } = readWalkedFiles(APPS_DIR, enumerated, false)
   for (const { file, src } of files) {
     const rel = toPosix(relative(APPS_DIR, file))

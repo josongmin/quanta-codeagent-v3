@@ -2,7 +2,6 @@
   "note": "Scanning guards that state a zero-verdict but pin no MEASURED reach — their floor, if any, is a number written at the call site, which cannot see a subtree disappear. Enforced by tests/unit/_arch/scan-enrollment-ratchet.test.ts. `unenrolled` may only SHRINK: a new guard must call assertScanPopulation (tests/unit/_shared/scan-population.ts) and pin its reach in tools/dev/scan-reach-baseline.json, and a guard that enrolls must be removed from here. `failsClosed` is NOT debt either — it names enumerations that need no reach floor because an EMPTY walk turns their verdict red by itself, and each entry's file must call `assertFailsClosedOnEmpty`, which executes that claim instead of asserting it in a comment. `externalCorpus` is NOT debt — it names guards the helper can never measure because their corpus is not the repo, and each entry is checked against the host path it claims. `expectedIds` records, per enrolled file, the baseline ids that file must REPORT at runtime; `bun run scan-reach` refuses when one is missing. NO TOTALS ARE WRITTEN HERE. A hand-maintained count drifts the moment one side moves — this note said '56 unenrolled of 86' while the arrays said 54 of 87 — so the number is whatever the arrays are.",
   "unenrolled": [
     "src/apps/bench/benchmark-suite.test.ts",
-    "src/tool/terminal-surface.test.ts",
     "tests/meta/no-test-js-artifacts-hellgate.test.ts",
     "tests/unit/_arch/capability-literal-ratchet.test.ts",
     "tests/unit/_arch/comment-scanner-burndown-ratchet.test.ts",
@@ -26,15 +25,11 @@
     "tests/unit/gate-vocabulary-ratchet-hellgate.test.ts",
     "tests/unit/god-code-ratchet.test.ts",
     "tests/unit/host/bootstrap-host-extraction-hellgate.test.ts",
-    "tests/unit/integrations/github/slice-fence-static-hellgate-r3.test.ts",
     "tests/unit/knob-registry-completeness-ratchet-hellgate.test.ts",
     "tests/unit/lint-debt-ratchet-reach.test.ts",
     "tests/unit/no-benchmark-overfit-steer-ratchet.test.ts",
     "tests/unit/no-raw-nul-bytes-hellgate.test.ts",
-    "tests/unit/no-raw-process-env-knob-ratchet-hellgate.test.ts",
-    "tests/unit/no-timebomb-auth-fixtures-hellgate.test.ts",
     "tests/unit/objective/authority-boundary-ratchet.test.ts",
-    "tests/unit/observability-audit-ratchet.test.ts",
     "tests/unit/observability/new-slice-metrics-hellgate.test.ts",
     "tests/unit/observability/vocabulary-migration.test.ts",
     "tests/unit/orphan-orchestrator-ratchet.test.ts",
@@ -48,7 +43,6 @@
     "tests/unit/side-agent-stopall-wiring-guard.test.ts",
     "tests/unit/slice-boundary-config-parity.test.ts",
     "tests/unit/src-no-sketchy-code.test.ts",
-    "tests/unit/surface-coupling-ratchet.test.ts",
     "tests/unit/test-fixtures-do-not-leak-tmp.test.ts",
     "tests/unit/test-quality-ratchet-hellgate.test.ts",
     "tests/unit/tool-surface-manifest-hellgate.test.ts"
@@ -72,6 +66,9 @@
     ],
     "src/agent/prompt-graph/role-drift.ratchet.test.ts": [
       "src/agent/prompt-graph/role-drift.ratchet.test.ts#src"
+    ],
+    "src/tool/terminal-surface.test.ts": [
+      "src/tool/terminal-surface.test.ts#SRC-NON-APPS"
     ],
     "tests/adversarial/aug02-feeder-deferred-status.test.ts": [
       "tests/adversarial/aug02-feeder-deferred-status.test.ts#SRC"
@@ -173,6 +170,9 @@
     "tests/unit/integrations-slice-boundary.test.ts": [
       "slice-boundary:integrations"
     ],
+    "tests/unit/integrations/github/slice-fence-static-hellgate-r3.test.ts": [
+      "tests/unit/integrations/github/slice-fence-static-hellgate-r3.test.ts#SLICE-DIR"
+    ],
     "tests/unit/ipc-slice-boundary.test.ts": [
       "slice-boundary:ipc"
     ],
@@ -217,6 +217,12 @@
       "tests/unit/no-per-framework-heuristic-ratchet.test.ts#runner/batch/corpus",
       "tests/unit/no-per-framework-heuristic-ratchet.test.ts#runner/batch/eval"
     ],
+    "tests/unit/no-raw-process-env-knob-ratchet-hellgate.test.ts": [
+      "tests/unit/no-raw-process-env-knob-ratchet-hellgate.test.ts#SRC"
+    ],
+    "tests/unit/no-timebomb-auth-fixtures-hellgate.test.ts": [
+      "tests/unit/no-timebomb-auth-fixtures-hellgate.test.ts#TESTS"
+    ],
     "tests/unit/objective-slice-boundary.test.ts": [
       "slice-boundary:objective"
     ],
@@ -225,6 +231,11 @@
     ],
     "tests/unit/observability-slice-boundary.test.ts": [
       "slice-boundary:observability"
+    ],
+    "tests/unit/observability-audit-ratchet.test.ts": [
+      "tests/unit/observability-audit-ratchet.test.ts#AGENT-STORES",
+      "tests/unit/observability-audit-ratchet.test.ts#TOOL",
+      "tests/unit/observability-audit-ratchet.test.ts#SUBAGENT"
     ],
     "tests/unit/patch-slice-boundary.test.ts": [
       "slice-boundary:patch"
@@ -339,6 +350,9 @@
     ],
     "tests/unit/surrogate-safe-truncation-guard.test.ts": [
       "tests/unit/surrogate-safe-truncation-guard.test.ts#SRC-DIR"
+    ],
+    "tests/unit/surface-coupling-ratchet.test.ts": [
+      "tests/unit/surface-coupling-ratchet.test.ts#APPS-DIR"
     ],
     "tests/unit/terminal-defaults-ratchet.test.ts": [
       "tests/unit/terminal-defaults-ratchet.test.ts#SRC-DIR"

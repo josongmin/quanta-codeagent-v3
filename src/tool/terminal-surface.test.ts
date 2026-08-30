@@ -15,6 +15,7 @@
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
+import { assertScanPopulation } from "../../tests/unit/_shared/scan-population"
 import { buildDefaultTools, buildTerminalTools } from "./index"
 import { dockerExecTmux } from "./pty/docker-exec-tmux"
 import { createTmuxAdapter } from "./pty/tmux-adapter"
@@ -152,9 +153,23 @@ describe("ownership boundary — no Terminal-Bench naming leaks outside src/apps
       "runner/batch/report-envelope.ts",
       "runner/batch/report-terminal.ts",
     ]
+    const scanned = [...new Bun.Glob(SCAN).scanSync(srcDir)].filter(
+      (rel) => !rel.startsWith("apps/") && !isTest(rel),
+    )
+    assertScanPopulation(
+      scanned.map((rel) => join(srcDir, rel)),
+      srcDir,
+      {
+        id: "src/tool/terminal-surface.test.ts#SRC-NON-APPS",
+        collectable: (name) =>
+          name === "Dockerfile" ||
+          name.endsWith(".Dockerfile") ||
+          /\.(?:ts|tsx|py|sh|json|mjs|cjs|mts|cts|yaml|yml|toml|cfg|ini|txt|env)$/.test(name),
+        skipDirs: ["apps", "__tests__"],
+      },
+    )
     const integrationOffenders: string[] = []
-    for (const rel of new Bun.Glob(SCAN).scanSync(srcDir)) {
-      if (rel.startsWith("apps/") || isTest(rel)) continue
+    for (const rel of scanned) {
       const text = readFileSync(join(srcDir, rel), "utf8")
       // The integration tokens are forbidden everywhere outside apps/ — no
       // exemption, including inside the canonical report union.

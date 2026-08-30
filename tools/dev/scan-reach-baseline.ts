@@ -203,6 +203,23 @@ export interface ReachDecision {
   readonly doTighten: boolean
 }
 
+/**
+ * The harvest has to be deterministic: it is the authority that binds every
+ * baseline row to the guard that reports it. Several scan guards inspect or
+ * construct process-global surfaces, and running their files in Bun's default
+ * parallel workers made unrelated guards intermittently report an empty corpus
+ * or fail during module construction. A failed child is correctly rejected,
+ * but a flaky harvester is still not evidence. One isolated worker serializes
+ * the measurement while preserving each guard's own 60s timeout.
+ */
+export const scanReachChildArgs = (files: readonly string[]): string[] => [
+  "bun",
+  "test",
+  "--parallel=1",
+  "--timeout=60000",
+  ...files,
+]
+
 export const decide = (run: ReachRun): ReachDecision => {
   const lines: string[] = []
   if (run.observed.size === 0) {
@@ -317,7 +334,7 @@ if (import.meta.main) {
   // it was, two guards read as failures for being slower than a budget nothing
   // else imposes. Both pass at 60s, so a timeout here now means what it means
   // elsewhere: the guard hung, not that it is a scanning guard.
-  const child = Bun.spawnSync(["bun", "test", "--timeout=60000", ...files], {
+  const child = Bun.spawnSync(scanReachChildArgs(files), {
     env: { ...process.env, QUANTA_SCAN_REACH_RECORD: sink },
     stdout: "pipe",
     stderr: "pipe",

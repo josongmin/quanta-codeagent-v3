@@ -154,11 +154,17 @@
     "src/agent/prompt-graph/role-drift.ratchet.test.ts#src": {
       "walked": 3343
     },
+    "src/tool/terminal-surface.test.ts#SRC-NON-APPS": {
+      "walked": 2704
+    },
     "tests/adversarial/aug02-feeder-deferred-status.test.ts#SRC": {
       "walked": 3343
     },
     "tests/integration/cli-attention-navigation.test.ts#root": {
       "walked": 3343
+    },
+    "tests/unit/integrations/github/slice-fence-static-hellgate-r3.test.ts#SLICE-DIR": {
+      "walked": 12
     },
     "tests/unit/_arch/cost-pricing-callsite-ratchet.test.ts#SRC-ROOT": {
       "walked": 3650
@@ -228,6 +234,21 @@
     },
     "tests/unit/manifest-codex-compat-hellgate.test.ts#SYSTEM-SKILLS": {
       "walked": 22
+    },
+    "tests/unit/no-raw-process-env-knob-ratchet-hellgate.test.ts#SRC": {
+      "walked": 3351
+    },
+    "tests/unit/no-timebomb-auth-fixtures-hellgate.test.ts#TESTS": {
+      "walked": 3662
+    },
+    "tests/unit/observability-audit-ratchet.test.ts#AGENT-STORES": {
+      "walked": 4
+    },
+    "tests/unit/observability-audit-ratchet.test.ts#TOOL": {
+      "walked": 306
+    },
+    "tests/unit/observability-audit-ratchet.test.ts#SUBAGENT": {
+      "walked": 24
     },
     "tests/unit/memory-fence-no-llm-import-hellgate.test.ts#MEMORY-ROOT": {
       "walked": 49
@@ -304,6 +325,9 @@
     },
     "tests/unit/surrogate-safe-truncation-guard.test.ts#SRC-DIR": {
       "walked": 3637
+    },
+    "tests/unit/surface-coupling-ratchet.test.ts#APPS-DIR": {
+      "walked": 653
     },
     "tests/unit/terminal-defaults-ratchet.test.ts#SRC-DIR": {
       "walked": 3642

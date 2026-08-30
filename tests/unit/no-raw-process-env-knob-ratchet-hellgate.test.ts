@@ -18,6 +18,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
+import { assertScanPopulation } from "./_shared/scan-population"
 
 /** Global-reach knob reads: `process.env.QUANTA_X` / `process.env["QUANTA_X"]` /
  *  ``process.env[`QUANTA_X`]`` (template) / `const {QUANTA_X} = process.env`
@@ -99,9 +100,15 @@ const REPO_ROOT = join(import.meta.dir, "..", "..")
 
 const scan = (): { total: number; byFile: Record<string, number>; files: number } => {
   const byFile: Record<string, number> = {}
-  let files = 0
-  for (const file of walk(join(REPO_ROOT, "src"))) {
-    files++
+  const sourceRoot = join(REPO_ROOT, "src")
+  const paths = [...walk(sourceRoot)]
+  assertScanPopulation(paths, sourceRoot, {
+    id: "tests/unit/no-raw-process-env-knob-ratchet-hellgate.test.ts#SRC",
+    collectable: (name) =>
+      name.endsWith(".ts") && !name.endsWith(".d.ts") && !name.endsWith(".test.ts"),
+    skipDirs: ["__tests__"],
+  })
+  for (const file of paths) {
     if (isExempt(file)) continue
     let n = 0
     for (const line of readFileSync(file, "utf8").split("\n")) {
@@ -114,7 +121,7 @@ const scan = (): { total: number; byFile: Record<string, number>; files: number 
     }
     if (n > 0) byFile[file.replace(/^.*src\//, "src/")] = n
   }
-  return { total: Object.values(byFile).reduce((a, b) => a + b, 0), byFile, files }
+  return { total: Object.values(byFile).reduce((a, b) => a + b, 0), byFile, files: paths.length }
 }
 
 /** Baseline high-water mark (jun-07). May ONLY decrease as reads route through

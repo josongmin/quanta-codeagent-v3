@@ -32,6 +32,7 @@
 import { describe, expect, test } from "bun:test"
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { join, resolve } from "node:path"
+import { assertScanPopulation } from "../../_shared/scan-population"
 import { stripComments } from "../../_shared/strip-comments"
 
 // Repo-anchored on this file, not the ambient cwd — this fence reads real
@@ -124,6 +125,15 @@ const CLI_ADAPTERS_TEXT = (): string => readSlice(CLI_ADAPTERS)
 
 describe("ADR-0311 hellgate R3 — slice fence (static)", () => {
   test("slice dir is non-empty (sanity)", () => {
+    assertScanPopulation(
+      SLICE_FILES.map((file) => file.absPath),
+      SLICE_DIR,
+      {
+        id: "tests/unit/integrations/github/slice-fence-static-hellgate-r3.test.ts#SLICE-DIR",
+        collectable: (name) => name.endsWith(".ts"),
+        topLevelOnly: true,
+      },
+    )
     expect(SLICE_FILES.length).toBeGreaterThan(0)
   })
 
