@@ -3,12 +3,19 @@
  * No emitted usage injection, facade stub, paid provider, or silent skip. */
 import { describe, expect, test } from "bun:test"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
+import { MODEL_RATE_CARD, PRICING_VERSION } from "@/observability/pricing"
+import { createUsageAccounting, normalizeUsage, priceUsage } from "@/observability/usage-accounting"
 import type { CostSurfaceViewWire } from "@/protocol/session"
 import { saveSessionById } from "@/session"
-import { bootUsageDaemon, until } from "../support/web-usage-accounting-harness"
+import {
+  bootUsageDaemon,
+  renderSnapshotHeader,
+  until,
+} from "../support/web-usage-accounting-harness"
 
 const KNOWN = "claude-sonnet-4-6"
 const CHILD = "COST-CHILD-ONLY"
+const HOSTILE_MODEL = `bad\n\u001b[31m${"x".repeat(2_000)}`
 
 const textOf = (input: StreamInput) =>
   input.messages
@@ -37,6 +44,8 @@ class ScriptedUsageLlm implements LLMPort {
         input: { prompt: CHILD, fork_turns: "none" },
       }
       yield { type: "message_stop", stop_reason: "tool_use" }
+    } else if (text.includes("HOSTILE-COST-MODEL")) {
+      yield* this.answer(700, HOSTILE_MODEL, "hostile label completed")
     } else if (text.includes("UNKNOWN-COST-MODEL")) {
       yield* this.answer(700, "usage-e2e-unpriced-model", "unpriced completed")
     } else {
@@ -72,6 +81,31 @@ const persistedTargetFromPriorDaemon = async () => {
   } finally {
     await daemon.cleanup()
   }
+}
+
+/** Explicit historical estimate policy, NOT a change to runtime unknown-model
+ * pricing. Produce a valid persisted book through the real accounting API. */
+const historicalEstimate = (sessionId: string): string => {
+  const accounting = createUsageAccounting()
+  const provenance = { sessionId, agentId: "root", agentKind: "root" as const, depth: 0 }
+  const usage = normalizeUsage({
+    model: "historical-estimated-model",
+    inputTokens: 1_000_000,
+    outputTokens: 0,
+  })
+  expect(
+    accounting.record({
+      callId: accounting.mintCallId(provenance),
+      at: 1,
+      provenance,
+      usage,
+      cost: priceUsage(usage, MODEL_RATE_CARD, {
+        pricingVersion: PRICING_VERSION,
+        fallbackModel: KNOWN,
+      }),
+    }),
+  ).toEqual({ admitted: true })
+  return accounting.serialize()
 }
 
 describe("web production usage accounting — HTTP/WS/live attach", () => {
@@ -124,7 +158,7 @@ describe("web production usage accounting — HTTP/WS/live attach", () => {
     }
   }, 30_000)
 
-  test("opening a persisted thread replaces the live book, then new spend continues on that target", async () => {
+  test("opening a cleared-objective thread replaces the live book, then new spend continues on that target", async () => {
     const target = await persistedTargetFromPriorDaemon()
     const llm = new ScriptedUsageLlm()
     const daemon = await bootUsageDaemon(llm)
@@ -134,16 +168,42 @@ describe("web production usage accounting — HTTP/WS/live attach", () => {
       await client.run("SOURCE-FIRST-TURN")
       const targetId = "persisted-usage-target"
       // A real saved production book; no hand-built accounting state.
-      await saveSessionById({ ...target.meta, id: targetId }, target, daemon.sessionRoot)
+      await saveSessionById(
+        { ...target.meta, id: targetId },
+        {
+          ...target,
+          objective: {
+            version: 2,
+            threads: [{ threadId: target.meta.id, revision: 7, objective: null }],
+          },
+        },
+        daemon.sessionRoot,
+      )
       await client.run("SOURCE-SECOND-TURN")
       await daemon.waitSaved(client.sessionId, 2)
       expect((await daemon.cost()).output).toContain("$6.0000")
+      const snapshotsBeforeAttach = client.frames.filter(
+        (frame) => frame.kind === "snapshot",
+      ).length
+      const resumeFromSeq = client.events().at(-1)?.seq ?? client.snapshot().seq
       const attached = await daemon.connect(targetId)
       await until(
         async () => (await daemon.cost()).output.includes("$3.0000"),
         "target accounting attach",
       )
       expect((await daemon.cost()).output).not.toContain("$6.0000")
+      await until(
+        () =>
+          client.frames.filter((frame) => frame.kind === "snapshot").length > snapshotsBeforeAttach,
+        "existing peer receives attached cost snapshot",
+      )
+      expect(await renderSnapshotHeader(attached.snapshot())).toContain("$3.00")
+      expect(await renderSnapshotHeader(client.snapshot())).toContain("$3.00")
+      const resumed = await daemon.connect(undefined, resumeFromSeq)
+      expect(await renderSnapshotHeader(resumed.snapshot())).toContain("$3.00")
+      expect(resumed.frames.find((frame) => frame.kind === "resumed")).toMatchObject({
+        mode: "snapshot",
+      })
       const next = on(await attached.run("TARGET-NEXT-TURN"))
       expect(next).toMatchObject({ calls: 2, totalUsd: 6, promptTokens: 2_000_000 })
       const persisted = await daemon.waitSaved(targetId, 2)
@@ -161,6 +221,10 @@ describe("web production usage accounting — HTTP/WS/live attach", () => {
     const daemon = await bootUsageDaemon(llm, "off")
     try {
       const client = await daemon.connect()
+      expect(await renderSnapshotHeader(client.snapshot())).toContain(">off</span>")
+      const resumed = await daemon.connect(undefined, client.snapshot().seq)
+      expect(await renderSnapshotHeader(resumed.snapshot())).toContain(">off</span>")
+      expect(llm.seen).toHaveLength(0)
       expect(await client.run("OFF-ROOT-COST")).toEqual({ status: "off" })
       expect(llm.seen).toHaveLength(1)
       const readout = await daemon.cost()
@@ -171,6 +235,62 @@ describe("web production usage accounting — HTTP/WS/live attach", () => {
         "off turn persisted",
       )
       expect((await daemon.saved(client.sessionId))?.usageAccounting).toBeUndefined()
+      expect(daemon.externalNetworkAttempts()).toBe(0)
+    } finally {
+      await daemon.cleanup()
+    }
+  }, 30_000)
+
+  test("a restored positive estimate remains marked through real HTTP, WS and a new priced turn", async () => {
+    const original = await persistedTargetFromPriorDaemon()
+    const daemon = await bootUsageDaemon(new ScriptedUsageLlm())
+    try {
+      await saveSessionById(
+        original.meta,
+        { ...original, usageAccounting: historicalEstimate(original.meta.id) },
+        daemon.sessionRoot,
+      )
+      const client = await daemon.connect(original.meta.id)
+      const before = await daemon.cost()
+      expect(before.output).toContain("estimated portion  $3.0000")
+      expect(before.output).toContain("unpriced calls     1")
+      expect(await renderSnapshotHeader(client.snapshot())).toContain("estimated: $3.00")
+      const next = on(await client.run("KNOWN-AFTER-HISTORICAL-ESTIMATE"))
+      expect(next).toMatchObject({ calls: 2, totalUsd: 6, estimatedUsd: 3, unpricedCalls: 1 })
+      const after = await daemon.cost()
+      expect(after.output).toContain("$6.0000")
+      expect(after.output).toContain("estimated portion  $3.0000")
+      const saved = await daemon.waitSaved(original.meta.id, 2)
+      const fresh = createUsageAccounting()
+      expect(fresh.hydrate(saved.usageAccounting ?? "")).toBe(true)
+      expect(fresh.snapshot()).toMatchObject({ totalUsd: 6, estimatedUsd: 3, unpricedCalls: 1 })
+      expect(daemon.externalNetworkAttempts()).toBe(0)
+    } finally {
+      await daemon.cleanup()
+    }
+  }, 30_000)
+
+  test("hostile captured model identity stays exact on disk but is bounded on every display wire", async () => {
+    const daemon = await bootUsageDaemon(new ScriptedUsageLlm())
+    try {
+      const client = await daemon.connect()
+      const wire = on(await client.run("HOSTILE-COST-MODEL"))
+      expect(wire.modelSlug).toBe(`bad[31m${"x".repeat(57)}`)
+      expect(wire.modelSlug?.length).toBe(64)
+      expect(wire.unpricedCalls).toBe(1)
+      const readout = await daemon.cost()
+      expect(readout.output).toContain(`model              ${wire.modelSlug}`)
+      expect(readout.output).not.toContain("\u001b")
+      expect(readout.output).not.toContain(HOSTILE_MODEL)
+      const saved = await daemon.waitSaved(client.sessionId, 1)
+      const fresh = createUsageAccounting()
+      expect(fresh.hydrate(saved.usageAccounting ?? "")).toBe(true)
+      expect(fresh.recent(1)[0]?.usage.model).toBe(HOSTILE_MODEL)
+      const connectedAgain = await daemon.connect()
+      const header = await renderSnapshotHeader(connectedAgain.snapshot())
+      expect(header).toContain(`model: ${wire.modelSlug}`)
+      expect(header).not.toContain("\u001b")
+      expect(header).not.toContain("x".repeat(65))
       expect(daemon.externalNetworkAttempts()).toBe(0)
     } finally {
       await daemon.cleanup()
@@ -193,6 +313,9 @@ describe("web production usage accounting — HTTP/WS/live attach", () => {
           "corrupt target marked before first turn",
         )
         expect((await daemon.cost()).output).toContain("current total is partial")
+        const header = await renderSnapshotHeader(client.snapshot())
+        expect(header).toContain("prior totals lost")
+        expect(header).not.toContain("$0")
         const first = on(await client.run("RECOVERED-PARTIAL-FIRST"))
         expect(first).toMatchObject({ calls: 1, totalUsd: 3, continuityLost: true })
         const saved = await daemon.waitSaved(original.meta.id, 1, "{ corrupt")
@@ -214,6 +337,9 @@ describe("web production usage accounting — HTTP/WS/live attach", () => {
       const before = await restarted.cost()
       expect(before.output).toContain("$3.0000")
       expect(before.output).toContain("current total is partial")
+      const header = await renderSnapshotHeader(client.snapshot())
+      expect(header).toContain("$3.00")
+      expect(header).toContain("prior totals lost")
       const next = on(await client.run("RECOVERED-PARTIAL-NEXT"))
       expect(next).toMatchObject({ calls: 2, totalUsd: 6, continuityLost: true })
       await restarted.waitSaved(recovered.meta.id, 2)

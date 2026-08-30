@@ -33,6 +33,9 @@ export const systemClock: KernelClock = {
 }
 
 export interface SessionHostDescription {
+  /** Live cumulative accounting projection for initial/reconnect snapshots.
+   * Modern hosts explicitly report off; absence is an older host contract. */
+  readonly costView?: CostSurfaceViewWire
   readonly sessionId: string
   readonly permissionMode: string
   readonly capabilityManifest: CapabilityManifest

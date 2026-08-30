@@ -388,6 +388,9 @@ export const createStubRuntimeFactory = (
           return () => listeners.delete(listener)
         },
         snapshot: async () => snapshot,
+        refreshSnapshot: async () => {
+          await transportBridge?.publishSnapshot(snapshot)
+        },
         attachSessionTransport: async (
           transport: SessionTransport,
           options: { readonly replayWindow?: number } = {},

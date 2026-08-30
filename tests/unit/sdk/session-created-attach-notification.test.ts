@@ -34,7 +34,7 @@ import { describe, expect, test } from "bun:test"
 import type { SessionTransport, SessionTransportMessage } from "@/ipc/session"
 import type { KernelClock, KernelEventLogPort, SessionHost } from "@/kernel/session"
 import { createKernelSessionState } from "@/kernel/session"
-import type { SessionEvent } from "@/protocol/session"
+import type { CostSurfaceViewWire, SessionEvent } from "@/protocol/session"
 import { createRuntimeSession } from "@/sdk/runtime/session"
 import {
   attachSessionTransport as engineAttachSessionTransport,
@@ -121,6 +121,104 @@ const kernelDeps = (): { clock: KernelClock; eventLog: KernelEventLogPort } => (
 const makeSession = () => createRuntimeSession({ hostSession: makeHost(), kernel: kernelDeps() })
 
 describe("per-attach session.created: in-proc only, snapshot is the wire carrier (ticket jul-16 fix B)", () => {
+  test.each([
+    0, 1,
+  ])("resume cursor %i preserves durable replay then refreshes the attached cost book before any turn", async (resumeFromSeq) => {
+    const appended: SessionEvent[] = []
+    const host = makeHost()
+    let costView: CostSurfaceViewWire = { status: "off" }
+    const eventLog = {
+      append: (event: SessionEvent) => {
+        appended.push(event)
+      },
+      list: () => appended,
+      tip: () => appended.at(-1)?.seq ?? 0,
+      readFrom: (seq: number) => appended.filter((event) => event.seq > seq),
+      close: () => undefined,
+    }
+    const session = createRuntimeSession({
+      hostSession: { ...host, describe: () => ({ ...host.describe(), costView }) },
+      kernel: { ...kernelDeps(), eventLog },
+    })
+    await session.input.append("target transcript")
+    costView = {
+      status: "on",
+      totalUsd: 0,
+      estimatedUsd: 0,
+      unpricedCalls: 0,
+      promptTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      calls: 0,
+      rootUsd: 0,
+      subagentUsd: 0,
+      continuityLost: true,
+    }
+    const pair = createTransportPair()
+    const frames = tapFrames(pair.client)
+    await session.attachSessionTransport(pair.server)
+    await pair.client.send({
+      kind: "connect",
+      sessionId: session.sessionId,
+      resumeFromSeq,
+      resumeAck: true,
+    })
+    expect(frames.filter((f) => f.kind === "event").map((f) => f.event.seq)).toEqual(
+      resumeFromSeq === 0 ? [1] : [],
+    )
+    expect(frames.filter((f) => f.kind === "snapshot")).toMatchObject([
+      { snapshot: { seq: 1, state: { costView } } },
+    ])
+    expect(frames.at(-1)).toMatchObject({ kind: "resumed", servedThroughSeq: 1, mode: "snapshot" })
+    await session.close()
+  })
+
+  test("initial and reattached snapshots read current cost before a turn; refresh reaches existing peers without events", async () => {
+    let costView: CostSurfaceViewWire = { status: "off" }
+    const host = makeHost()
+    const session = createRuntimeSession({
+      hostSession: { ...host, describe: () => ({ ...host.describe(), costView }) },
+      kernel: kernelDeps(),
+    })
+    const pair = createTransportPair()
+    const frames = tapFrames(pair.client)
+    await session.attachSessionTransport(pair.server)
+    await session.refreshSnapshot()
+    expect(frames).toEqual([]) // no snapshot may precede the connect acknowledgement
+    await pair.client.send({ kind: "connect", sessionId: session.sessionId })
+    const snapshotCost = () =>
+      frames.flatMap((f) => (f.kind === "snapshot" ? [f.snapshot.state.costView] : []))
+    expect(snapshotCost()).toEqual([{ status: "off" }])
+    costView = {
+      status: "on",
+      totalUsd: 0,
+      estimatedUsd: 0,
+      unpricedCalls: 0,
+      promptTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      calls: 0,
+      rootUsd: 0,
+      subagentUsd: 0,
+      continuityLost: true,
+    }
+    expect((await session.snapshot()).state.costView).toEqual(costView)
+    await session.refreshSnapshot()
+    expect(snapshotCost()).toEqual([{ status: "off" }, costView])
+    const next = createTransportPair()
+    const nextFrames = tapFrames(next.client)
+    costView = { status: "off" }
+    await session.attachSessionTransport(next.server)
+    await next.client.send({ kind: "connect", sessionId: session.sessionId })
+    expect(nextFrames.find((f) => f.kind === "snapshot")).toMatchObject({
+      snapshot: { seq: 0, state: { costView: { status: "off" } } },
+    })
+    expect(frames.filter((f) => f.kind === "event")).toEqual([])
+    await session.close()
+  })
+
   test("PIN (a): a freshly-attached client's wire = snapshot with capabilities+model, ZERO session.created", async () => {
     const session = makeSession()
     const pair = createTransportPair()

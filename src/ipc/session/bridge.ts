@@ -41,6 +41,10 @@ export interface SessionTransportBridgeErrorArgs {
 
 export interface CreateSessionTransportBridgeOpts {
   readonly snapshot: SessionSnapshotLite
+  /** Optional live projection not recoverable solely by event replay. Read
+   * synchronously at replay start; its snapshot follows any incremental events
+   * on the same ordered channel. Undefined preserves legacy events-only replay. */
+  readonly readSnapshotForReplay?: () => SessionSnapshotLite | undefined
   readonly tailLimit?: number
   /** Ticket 05 (durable resume) — optional on-disk replay feed. When present,
    *  the three snapshot-fallback paths of `planSessionReplay` (behind-window /
@@ -466,6 +470,12 @@ const bridgeSend = (bctx: ReturnType<typeof bridgePeers>) => {
           },
         })
 
+  const readReplaySnapshot = (): SessionSnapshotLite | undefined => {
+    const liveSnapshot = opts.readSnapshotForReplay?.()
+    if (liveSnapshot !== undefined) updateSnapshotState(liveSnapshot)
+    return liveSnapshot
+  }
+
   /** Serve a replay plan and report HOW the peer's view was restored — the
    *  raw material of the ticket-05 `resumed` served-marker:
    *   - `mode`             — `"snapshot"` when a snapshot frame carried/reset
@@ -480,6 +490,7 @@ const bridgeSend = (bctx: ReturnType<typeof bridgePeers>) => {
     peer: SessionTransport,
     resumeFromSeq?: number,
   ): Promise<{ mode: "replay" | "snapshot"; servedThroughSeq: number }> => {
+    const liveSnapshot = readReplaySnapshot()
     const plan = planSessionReplay({
       snapshot: st.snapshot,
       tail: st.tail,
@@ -491,9 +502,13 @@ const bridgeSend = (bctx: ReturnType<typeof bridgePeers>) => {
       messages.push({ kind: "snapshot", snapshot: plan.snapshot })
     }
     messages.push(...toEventMessages(plan.tail))
+    // An idle authority attach can change projections without minting an event.
+    // Preserve every requested replay event, THEN replace the client's view.
+    const refresh = plan.snapshot === undefined ? liveSnapshot : undefined
+    if (refresh !== undefined) messages.push({ kind: "snapshot", snapshot: refresh })
     await sendMessages(peer, messages)
     return {
-      mode: plan.snapshot !== undefined ? "snapshot" : "replay",
+      mode: plan.snapshot !== undefined || refresh !== undefined ? "snapshot" : "replay",
       servedThroughSeq:
         plan.tail.at(-1)?.seq ?? plan.snapshot?.seq ?? resumeFromSeq ?? st.snapshot.seq,
     }
@@ -823,7 +838,7 @@ export const createSessionTransportBridge = (
       const frame: SessionTransportMessage = { kind: "snapshot", snapshot: st.snapshot }
       await Promise.all(
         [...peers]
-          .filter((peer) => !peer.closed)
+          .filter((peer) => !peer.closed && peer.connected)
           // J-MED-1: fan out through the per-peer send tail so a snapshot push
           // cannot cut into a peer's in-flight handshake replay either.
           .map((peer) => enqueueSend(peer.transport, () => sendMessages(peer.transport, [frame]))),

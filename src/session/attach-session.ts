@@ -7,9 +7,9 @@
  * used to be two copies with two guards + two orderings; this owns the ONE
  * crown invariant, and each surface injects its effects + owns its presentation.
  *
- * Crown ordering (a rejection anywhere leaves EVERYTHING untouched — disk-vs-live
- * honesty):
+ * Crown ordering (eligibility refusals leave every live owner untouched):
  *   load saved  → absent ⇒ `unknown-session` (nothing touched)
+ *   prepare attached state → invalid ⇒ reject before any live mutation
  *   replace transcript → the kernel's `transcript_replace_unavailable` guard
  *     REFUSES mid-turn ⇒ `refused-mid-turn`, NOTHING repointed (the live turn
  *     keeps running on the parent); any OTHER error propagates (never swallowed)
@@ -50,7 +50,9 @@ export interface AttachSessionDeps {
   /** Cancel autonomous work before any attach eligibility check or disk read. */
   readonly onAttachStart?: (() => void) | undefined
   /** Validate and stage attached state without mutation. Null rejects before
-   * transcript/persistence changes; commit runs after both succeed. */
+   * transcript/persistence changes; commit runs synchronously after both succeed.
+   * A prepared commit must apply validated state, not perform a second admission
+   * check. Unexpected adapter faults propagate; this is not a rollback API. */
   readonly prepareAttachedState?:
     | ((saved: {
         readonly meta: SessionMeta

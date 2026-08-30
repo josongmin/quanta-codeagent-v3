@@ -21,7 +21,7 @@ surface_integration:
   verified: "2026-08-30"
   evidence:
     cli: "interactive /cost projects the session authority; resume and successful live attach restore/rebind the target book, while a fresh fork starts a new book. CLI projection, attach-unit and real PTY resume/off evidence are listed below"
-    web: "GET /readout/cost and turn.completed.costView project the same authority. Real production daemon/root/child loops over TCP WebSocket plus durable save/attach/restart are covered by web-usage-accounting-live-e2e; actual React render tests cover off, unpriced/estimated spend, root/subagent split and partial history"
+    web: "GET /readout/cost, snapshot.state.costView and turn.completed.costView project the same authority. Real production daemon/root/child loops over TCP WebSocket plus durable save/attach/restart are covered by web-usage-accounting-live-e2e; received snapshots pass through the actual frontend reducer and React header before any new call"
 purpose: |
   Sticky cumulative session-spend dashboard surfaced via `/cost`. A3 (aug-30)
   rebuilt it as a pure PROJECTION of the session usage-accounting authority
@@ -42,6 +42,10 @@ purpose: |
   state, including a fresh fork, resets to an empty healthy book: copied
   transcript history is not charged again and parent spend is not inherited.
   Failed/mid-turn attach leaves the current book and persistence target intact.
+  Cleared-objective tombstones are valid attach targets and preserve their
+  revision fence. Web completion saves capture identity, transcript, objective
+  and accounting before queuing IO; attach drains earlier saves before loading
+  a target, so a delayed source save cannot read the target's new state.
 
   Corrupt durable state restores an empty partial book without throwing.
   `continuityLost` remains true through later calls, serialization and another
@@ -51,6 +55,12 @@ purpose: |
   $0, including in the tooltip; mixed priced/unpriced spend is a priced subtotal,
   and recovered history is a current subtotal. Explicit accounting-off replaces
   an earlier on snapshot; absent snapshots retain old-daemon compatibility.
+  Initial/reconnect snapshots read the live authority, and successful attach
+  publishes a refreshed snapshot to already-connected peers. Model labels are
+  display-only sanitized to 64 characters without control/newline characters;
+  raw model keys remain unchanged in the durable accounting records.
+  Cursor-based reconnect preserves requested event replay and then receives
+  the same current snapshot, including when the cursor is already at tip.
 
   Durable V2 stores normal authority-minted call ids as exact monotonic intervals
   and arbitrary external ids in a sparse exact set. The one-million-call rail
@@ -67,6 +77,9 @@ evidence:
     - src/observability/usage-accounting/durable-codec.ts
     - src/observability/usage-accounting/activation.ts
     - src/observability/usage-accounting/projection.ts
+    - src/shared/model-display.ts
+    - src/sdk/runtime/session/engine.ts
+    - src/protocol/session/snapshot.ts
     - src/apps/web-daemon/runtime-factory.ts
     - src/apps/web-daemon/readout.ts
     - src/apps/web-daemon/server.ts
@@ -82,6 +95,10 @@ evidence:
       - tests/unit/cli/cost-panel.test.ts
       - tests/unit/slash-commands.test.ts
       - tests/unit/observability/usage-accounting-durable-hellgate.test.ts
+      - tests/unit/observability/usage-accounting-projection.test.ts
+      - tests/unit/objective/attach-replace.test.ts
+      - tests/unit/sdk/session-created-attach-notification.test.ts
+      - tests/unit/ipc/session-transport-connect-live-interleave.hellgate.test.ts
       - tests/unit/apps/cli/repl/session-switch-hellgate.test.ts
       - tests/unit/apps/web-daemon/thread-hydrate-hellgate.test.ts
       - tests/unit/apps/web-daemon/transcript-persist-hellgate.test.ts

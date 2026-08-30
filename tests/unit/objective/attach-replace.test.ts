@@ -60,17 +60,42 @@ describe("objective explicit attach replacement", () => {
     expect(after.revision).toBeGreaterThan(before.revision)
   })
 
-  test("invalid input is fail-closed", () => {
+  test("an empty live identity is fail-closed", () => {
     const live = asObjectiveAuthority(createObjectiveStore())
     live.create("live", { goal: "A" })
     const before = live.readDomain("live")
     expect(
       live.replaceDomainForAttach({
-        liveThreadId: "live",
+        liveThreadId: "",
         persistedDomain: { threadId: "bad", revision: 2, state: null },
       }),
     ).toEqual({ ok: false, reason: "invalid" })
     expect(live.readDomain("live")).toEqual(before)
+  })
+
+  test.each([
+    true,
+    false,
+  ])("a prepared persisted tombstone clears an occupied=%s live key", (occupied) => {
+    const live = asObjectiveAuthority(createObjectiveStore())
+    if (occupied) live.create("live", { goal: "A" })
+    const before = live.readDomain("live")
+    const disk = asObjectiveAuthority(createObjectiveStore())
+    disk.create("disk", { goal: "cleared on disk" })
+    disk.clear("disk")
+    const snapshot = encodeObjectiveSnapshot(disk)
+    expect(snapshot?.threads[0]?.objective).toBeNull()
+    const prepared = prepareObjectiveSnapshotForAttach(live, snapshot, "live")
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) throw new Error("valid tombstone was not prepared")
+    expect(live.readDomain("live")).toEqual(before)
+    expect(prepared.prepared.commit()).toBe(true)
+    expect(live.readDomain("live")).toMatchObject({
+      state: null,
+      revision: Math.max(before.revision + 1, disk.readDomain("disk").revision),
+      attachGeneration: 1,
+      progressReceipts: [],
+    })
   })
 
   test("a multi-domain persisted snapshot is rejected before live mutation", () => {

@@ -1,3 +1,4 @@
+import { sanitizeModelDisplayLabel } from "../../../../src/shared/model-display"
 import { cx } from "../lib/classnames"
 import type { CostSurfaceViewWire } from "../types/protocol.session.generated"
 import type { CumulativeTokenUsage } from "../ws/session-hooks"
@@ -124,7 +125,7 @@ const renderViewTooltip = (v: Extract<CostSurfaceViewWire, { status: "on" }>): s
     v.subagentUsd > 0
       ? `root ${formatUsd(v.rootUsd)} · subagents ${formatUsd(v.subagentUsd)}`
       : null,
-    v.modelSlug !== undefined ? `model: ${v.modelSlug}` : null,
+    v.modelSlug !== undefined ? `model: ${sanitizeModelDisplayLabel(v.modelSlug)}` : null,
   ]
     .filter((s) => s !== null)
     .join("\n")

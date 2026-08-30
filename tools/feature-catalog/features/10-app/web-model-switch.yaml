@@ -62,7 +62,8 @@ purpose: |
   single source for the `/state` readout's `model` row, the CLI attach pill, the SDK's
   `session.model`, and `turn.completed.modelSlug`. A7 (aug-30) removed the
   daemon's cumulative `/cost` token fold: `/cost` and the header's cumulative
-  `turn.completed.costView` now project the session usage-accounting authority.
+  `turn.completed.costView` and initial/attach `snapshot.state.costView` now
+  project the session usage-accounting authority.
   Each admitted call carries its own usage/model/pricing evidence, so changing
   the selected model or completion label cannot reprice earlier spend. The
   completion model echo remains display metadata, not cost-aggregation authority.

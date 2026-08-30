@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
-import type { CostSurfaceViewWire } from "../types/protocol.session.generated"
-import { initialTranscript } from "../ws/session-hooks"
+import type { CostSurfaceViewWire, SessionSnapshotLite } from "../types/protocol.session.generated"
+import { initialTranscript, transcriptReducer } from "../ws/session-hooks"
 import { TokenCounter } from "./TokenCounter"
 
 type OnView = Extract<CostSurfaceViewWire, { status: "on" }>
@@ -24,6 +24,57 @@ const render = (costView: CostSurfaceViewWire | null) =>
   renderToStaticMarkup(<TokenCounter usage={initialTranscript.tokenUsage} costView={costView} />)
 
 describe("TokenCounter accounting state — actual rendered header", () => {
+  it("renders initial, replacement, and off snapshots through the actual reducer before a turn", () => {
+    const snapshot = (costView?: CostSurfaceViewWire): SessionSnapshotLite => ({
+      sessionId: "s",
+      revision: 0,
+      seq: 0,
+      pendingApproval: null,
+      openArtifacts: [],
+      capabilities: {} as SessionSnapshotLite["capabilities"],
+      state: {
+        status: "idle",
+        draftInput: "",
+        permissionMode: "default",
+        messageCount: 0,
+        ...(costView !== undefined ? { costView } : {}),
+      },
+    })
+    let state = initialTranscript
+    const receive = (costView?: CostSurfaceViewWire) => {
+      state = transcriptReducer(state, {
+        type: "snapshot",
+        snapshot: snapshot(costView),
+        receivedAt: "now",
+      })
+      return renderToStaticMarkup(
+        <TokenCounter usage={state.tokenUsage} costView={state.costView} />,
+      )
+    }
+    expect(receive()).toBe("")
+    expect(state.costView).toBeNull()
+    expect(receive(view({ totalUsd: 99 }))).toContain("$99.00")
+    expect(receive(view({ totalUsd: 2 }))).toContain(">$2.00</span>")
+    expect(state.costView).toEqual(view({ totalUsd: 2 }))
+    const partial = receive(
+      view({ calls: 0, totalUsd: 0, rootUsd: 0, subagentUsd: 0, continuityLost: true }),
+    )
+    expect(partial).toContain("partial history")
+    expect(partial).not.toContain("$0")
+    expect(receive({ status: "off" })).toContain(">off</span>")
+    expect(receive()).toContain(">off</span>")
+  })
+
+  it("strips control/newline bytes and caps hostile model labels at the render boundary", () => {
+    const label = `model\n\r\t\u001b\u007f\u0085\u2028\u2029${"x".repeat(100)}`
+    const markup = render(view({ modelSlug: label }))
+    expect(markup).toContain(`model: model${"x".repeat(59)}`)
+    expect(markup).not.toContain("x".repeat(60))
+    for (const control of ["\r", "\t", "\u001b", "\u007f", "\u0085", "\u2028", "\u2029"])
+      expect(markup).not.toContain(control)
+    expect(markup).not.toContain("model\n")
+  })
+
   it("explicit off renders off and never resurrects the legacy dollar total", () => {
     const markup = renderToStaticMarkup(
       <TokenCounter

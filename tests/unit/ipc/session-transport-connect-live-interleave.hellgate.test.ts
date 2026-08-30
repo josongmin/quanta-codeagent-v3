@@ -149,6 +149,41 @@ const isNonDecreasing = (xs: readonly number[]): boolean =>
 /* ------------------------------------------------------------------------- */
 
 describe("connect handshake-window ↔ live-event interleave (async transport)", () => {
+  test("live projection snapshot stays after replay and before concurrent newer events", async () => {
+    const all = [makeEvent(11), makeEvent(12), makeEvent(13), makeEvent(14)]
+    let current: SessionSnapshotLite = {
+      ...makeSnapshot(14),
+      state: { ...makeSnapshot(14).state, costView: { status: "off" } },
+    }
+    const bridge = createSessionTransportBridge({
+      snapshot: makeSnapshot(10),
+      durableLog: { readFrom: (seq) => all.filter((event) => event.seq > seq) },
+      readSnapshotForReplay: () => current,
+    })
+    await bridge.publishEvents(all)
+    const peer = await connectAsyncPeer(bridge)
+    peer.fire({ kind: "connect", sessionId: "session-1", resumeFromSeq: 10, resumeAck: true })
+    await macrotask()
+    current = { ...current, seq: 15, revision: 15 }
+    await bridge.publishEvents([makeEvent(15)])
+    await drain()
+    expect(eventSeqs(peer.sent)).toEqual([11, 12, 13, 14, 15])
+    expect(kindsOf(peer.sent)).toEqual([
+      "event",
+      "event",
+      "event",
+      "event",
+      "snapshot",
+      "resumed",
+      "event",
+    ])
+    expect(peer.sent.find((message) => message.kind === "snapshot")).toMatchObject({
+      snapshot: { seq: 14, state: { costView: { status: "off" } } },
+    })
+    expect(isNonDecreasing(orderingSeqs(peer.sent))).toBe(true)
+    await bridge.close()
+  })
+
   test("in-window replay races a mid-handshake publish: order preserved AND no loss", async () => {
     const bridge = createSessionTransportBridge({ snapshot: makeSnapshot(10) })
     await bridge.publishEvents([makeEvent(11), makeEvent(12), makeEvent(13), makeEvent(14)])

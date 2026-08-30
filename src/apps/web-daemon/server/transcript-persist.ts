@@ -21,6 +21,7 @@
 import type { RuntimeSession } from "@/sdk/runtime"
 import {
   type PersistedObjectiveSnapshot,
+  type SavePayload,
   type SessionMeta,
   type SessionRootProvider,
   saveSessionById,
@@ -57,7 +58,7 @@ export interface TranscriptPersistence {
    *  or the session id before any swap) — the REST /events boundary reads it
    *  to report `live-attach` vs `read-only-history` honestly. */
   activeThreadId(): string
-  /** Await the in-flight write (tests). */
+  /** Drain queued completion snapshots before loading an attach target. */
   flush(): Promise<void>
   unsub(): void
 }
@@ -77,7 +78,7 @@ export const attachTranscriptPersistence = (
   let turns = 0
   let inFlight: Promise<void> = Promise.resolve()
 
-  const save = async (): Promise<void> => {
+  const capture = (): { meta: SessionMeta; payload: SavePayload } => {
     const meta: SessionMeta = {
       id: activeThreadId,
       title: activeThreadId,
@@ -108,27 +109,29 @@ export const attachTranscriptPersistence = (
         })
       }
     }
-    await saveSessionById(
+    return {
       meta,
-      {
+      payload: {
         reason: "web-turn",
         turns,
-        messages: [...s.transcript.messages()],
-        ...(objective !== undefined ? { objective } : {}),
+        messages: structuredClone([...s.transcript.messages()]),
+        ...(objective !== undefined ? { objective: structuredClone(objective) } : {}),
         ...(usageAccounting !== undefined ? { usageAccounting } : {}),
       },
-      opts.rootProvider,
-    )
+    }
   }
 
   const unsub = opts.enabled
     ? session.subscribe((event) => {
         if (event.type !== "turn.completed") return
         turns += 1
+        // Freeze all owners at the completion boundary, before a later turn or
+        // attach can change them. The queue delays IO, never snapshot identity.
+        const { meta, payload } = capture()
         // Serialize writes so a fast turn burst never races the store; a
         // failure is observable but never crashes the daemon or the turn.
         inFlight = inFlight
-          .then(save)
+          .then(() => saveSessionById(meta, payload, opts.rootProvider))
           .catch((error) =>
             logger.warn("web-daemon: transcript persist failed", { error: errMessage(error) }),
           )

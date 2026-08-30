@@ -36,10 +36,16 @@ purpose: |
   `MetricSink` integration; no modern agent surfaces typed per-file
   coverage. The CLI tool manifest seeds an unset `QUANTA_COVERAGE_TOOL` to
   `1`; an explicit falsy value removes the tool without weakening jail or HITL.
+  AST/Istanbul adapters load the TypeScript compiler only when reading a source
+  file for coverage. Importing the runtime or constructing a coverage adapter
+  does not initialize the compiler; daemon model/cost readouts therefore do not
+  pay coverage-only startup work. Factory APIs remain synchronous.
 evidence:
   code:
     - src/observability/coverage/port.ts
     - src/observability/coverage/v8-source.ts
+    - src/observability/coverage/ast-source.ts
+    - src/observability/coverage/istanbul-source.ts
     - src/observability/coverage/reporter.ts
     - src/observability/coverage/index.ts
     - src/tool/coverage_check.ts
@@ -49,6 +55,7 @@ evidence:
   tests:
     unit:
       - tests/unit/coverage-source-hellgate.test.ts
+      - tests/unit/coverage-ast-source-hellgate.test.ts
       - tests/unit/coverage-reporter-hellgate.test.ts
       - tests/unit/tool/coverage-check-hellgate.test.ts
     integration: []

@@ -227,6 +227,34 @@ describe("resolveReadout — source-backed readouts serve live data", () => {
     expect(partial.output).toContain("unpriced calls")
   })
 
+  test("RS-05c: /cost caps hostile model display text and labels fallback estimates", async () => {
+    const modelSlug = `model\n\r\t\u001b\u007f\u0085\u2028\u2029${"x".repeat(100)}`
+    const result = await resolveReadout("cost", snap(), {
+      cost: () => ({
+        turns: 1,
+        status: "on",
+        totalUsd: 3,
+        estimatedUsd: 3,
+        unpricedCalls: 0,
+        promptTokens: 1_000_000,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        calls: 1,
+        rootUsd: 3,
+        subagentUsd: 0,
+        continuityLost: false,
+        modelSlug,
+      }),
+    })
+    expect(result.output).toContain("estimated portion  $3.0000")
+    expect(result.output).toContain(`model${"x".repeat(59)}`)
+    expect(result.output).not.toContain("x".repeat(60))
+    expect(result.output).not.toContain("model\n")
+    for (const control of ["\r", "\t", "\u001b", "\u007f", "\u0085", "\u2028", "\u2029"])
+      expect(result.output).not.toContain(control)
+  })
+
   test("RS-06: /context renders the segmented usage breakdown", async () => {
     const r = await resolveReadout("context", snap(), {
       context: () => ({

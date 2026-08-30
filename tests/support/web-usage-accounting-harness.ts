@@ -7,7 +7,7 @@ import type { WebDaemonHandle } from "@/apps/web-daemon/types"
 import type { SessionTransportMessage } from "@/ipc/session"
 import { decodeSessionTransportMessage, encodeSessionTransportMessage } from "@/ipc/session"
 import type { LLMPort } from "@/llm"
-import type { CostSurfaceViewWire, SessionEvent } from "@/protocol/session"
+import type { CostSurfaceViewWire, SessionEvent, SessionSnapshotLite } from "@/protocol/session"
 import { supported } from "@/protocol/session"
 import { loadSessionById, type SavedSession, staticSessionRootProvider } from "@/session"
 import { __resetRuntimeConfig } from "@/shared"
@@ -19,6 +19,40 @@ export const until = async (predicate: () => boolean | Promise<boolean>, label: 
     await Bun.sleep(5)
   }
   throw new Error(`Timed out: ${label}`)
+}
+
+/** Feed the ACTUAL received snapshot through the frontend reducer and header.
+ * Run in the frontend package so its own React dependencies and JSX config are
+ * used; do not manufacture a costView fixture or import UI types into server TS. */
+export const renderSnapshotHeader = async (snapshot: SessionSnapshotLite): Promise<string> => {
+  const child = Bun.spawn({
+    cmd: [
+      process.execPath,
+      "-e",
+      `import { createElement } from "react";
+       import { renderToStaticMarkup } from "react-dom/server";
+       import { TokenCounter } from "./src/components/TokenCounter.tsx";
+       import { initialTranscript, transcriptReducer } from "./src/ws/session-hooks.ts";
+       const snapshot = await Bun.stdin.json();
+       const state = transcriptReducer(initialTranscript, {
+         type: "snapshot", snapshot, receivedAt: "2026-08-30T00:00:00Z"
+       });
+       console.log(renderToStaticMarkup(createElement(TokenCounter, {
+         usage: state.tokenUsage, costView: state.costView
+       })));`,
+    ],
+    cwd: join(import.meta.dir, "../../apps/web-frontend"),
+    stdin: new Blob([JSON.stringify(snapshot)]),
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const [exit, output, errors] = await Promise.all([
+    child.exited,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ])
+  if (exit !== 0) throw new Error(`Frontend header renderer exited ${exit}: ${errors}`)
+  return output.trim()
 }
 
 /** Test-owned environment and sockets; only the boot LLM is replaced. The
@@ -134,7 +168,7 @@ export const bootUsageDaemon = async (llm: LLMPort, mode: "on" | "off" = "on") =
       if (saved === undefined) throw new Error("saved session vanished")
       return saved
     },
-    connect: async (threadId?: string) => {
+    connect: async (threadId?: string, resumeFromSeq?: number) => {
       const query = new URLSearchParams({ token: "usage-e2e" })
       if (threadId !== undefined) query.set("thread", threadId)
       const socket = new WebSocket(`ws://127.0.0.1:${port}/?${query}`)
@@ -149,8 +183,20 @@ export const bootUsageDaemon = async (llm: LLMPort, mode: "on" | "off" = "on") =
       const discovery = frames.find((frame) => frame.kind === "rejected")
       if (discovery?.kind !== "rejected") throw new Error("missing discovery frame")
       const sessionId = discovery.sessionId
-      socket.send(encodeSessionTransportMessage({ kind: "connect", sessionId }))
+      socket.send(
+        encodeSessionTransportMessage({
+          kind: "connect",
+          sessionId,
+          ...(resumeFromSeq !== undefined ? { resumeFromSeq, resumeAck: true as const } : {}),
+        }),
+      )
       await until(() => frames.some((frame) => frame.kind === "snapshot"), "connect snapshot")
+      if (resumeFromSeq !== undefined) {
+        await until(
+          () => frames.some((frame) => frame.kind === "resumed"),
+          "resume acknowledgement",
+        )
+      }
       const events = (): SessionEvent[] =>
         frames.flatMap((frame) => (frame.kind === "event" ? [frame.event] : []))
       const clientId = crypto.randomUUID()
@@ -172,6 +218,11 @@ export const bootUsageDaemon = async (llm: LLMPort, mode: "on" | "off" = "on") =
         socket,
         frames,
         events,
+        snapshot: (): SessionSnapshotLite => {
+          const latest = frames.filter((frame) => frame.kind === "snapshot").at(-1)
+          if (latest?.kind !== "snapshot") throw new Error("production connect omitted snapshot")
+          return latest.snapshot
+        },
         run: async (text: string): Promise<CostSurfaceViewWire> => {
           const count = events().filter((event) => event.type === "turn.completed").length
           sequence += 1

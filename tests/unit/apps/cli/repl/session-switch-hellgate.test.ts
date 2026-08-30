@@ -262,6 +262,51 @@ describe("performSessionSwitch", () => {
     expect(live.snapshot()).toMatchObject({ calls: 0, totalUsd: 0, continuityLost: false })
   })
 
+  test("a real cleared objective attaches transcript, identity, and target books together", async () => {
+    const objective = asObjectiveAuthority(createObjectiveStore())
+    objective.create("parent", { goal: "parent goal" })
+    const disk = asObjectiveAuthority(createObjectiveStore())
+    disk.create("disk", { goal: "deleted goal" })
+    disk.clear("disk")
+    const live = createUsageAccounting()
+    const target = createUsageAccounting()
+    admitUsage(live, "runtime-live", 1_000_000)
+    admitUsage(target, "runtime-old", 2_000_000)
+    const idMeta = mkMeta("parent")
+    const state = { history: [mkMsg("parent")], id: "parent" }
+    await performSessionSwitch(
+      {
+        loadSession: async () => ({
+          meta: mkMeta("fork"),
+          messages: forkMsgs,
+          objective: encodeObjectiveSnapshot(disk),
+          usageAccounting: target.serialize(),
+        }),
+        replaceTranscript: async (messages) => {
+          state.history = [...messages]
+          return messages
+        },
+        currentSessionId: () => state.id,
+        objectiveStore: objective,
+        usageAccounting: live,
+        runtimeSessionId: "runtime-live",
+        idMeta,
+        commit: ({ sessionId }) => {
+          state.id = sessionId
+        },
+      },
+      "fork",
+    )
+    expect(state).toEqual({ history: forkMsgs, id: "fork" })
+    expect(idMeta.id).toBe("fork")
+    expect(objective.readDomain("fork").state).toBeNull()
+    expect(objective.readDomain("parent").state).toBeNull()
+    expect(live.snapshot()).toMatchObject({
+      freshInputTokens: 2_000_000,
+      boundSessionId: "runtime-live",
+    })
+  })
+
   test("mid-turn refusal leaves transcript-owned objective and persistence identity unchanged", async () => {
     const store = createObjectiveStore()
     store.create("parent", { goal: "parent goal" })

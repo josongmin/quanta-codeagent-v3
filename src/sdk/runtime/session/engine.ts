@@ -11,7 +11,7 @@ import {
   type KernelSessionState,
   toSessionSnapshotLite,
 } from "@/kernel/session"
-import type { SessionCommand, SessionEvent } from "@/protocol/session"
+import type { SessionCommand, SessionEvent, SessionSnapshotLite } from "@/protocol/session"
 import { SessionClosedError, SessionProtocolValidationError } from "@/protocol/session"
 import { errMessage, fullFidelityEnabled, logger } from "@/shared"
 
@@ -62,6 +62,19 @@ export interface SessionEngineDeps {
   >
 }
 
+/** Snapshot reads project the current book, not the last turn's cached book:
+ * a successful attach can replace accounting while the session is idle. */
+export const currentSessionSnapshot = (deps: SessionEngineDeps): SessionSnapshotLite => {
+  const snapshot = toSessionSnapshotLite(deps.box.state)
+  const costView = deps.hostSession.describe().costView ?? deps.box.state.lastCostView
+  return costView === undefined ? snapshot : { ...snapshot, state: { ...snapshot.state, costView } }
+}
+
+export const refreshSessionSnapshot = async (deps: SessionEngineDeps): Promise<void> => {
+  if (deps.box.closed) throw new SessionClosedError(deps.sessionId)
+  await deps.box.transportBridge?.publishSnapshot(currentSessionSnapshot(deps))
+}
+
 export const ensureTransportBridge = (
   deps: SessionEngineDeps,
   replayWindow?: number,
@@ -76,7 +89,11 @@ export const ensureTransportBridge = (
   const eventLog = deps.kernel.eventLog
   const durableLog = isDurableSessionEventLog(eventLog) ? eventLog : undefined
   box.transportBridge = createSessionTransportBridge({
-    snapshot: toSessionSnapshotLite(box.state),
+    snapshot: currentSessionSnapshot(deps),
+    readSnapshotForReplay: () => {
+      const snapshot = currentSessionSnapshot(deps)
+      return snapshot.state.costView === undefined ? undefined : snapshot
+    },
     ...(replayWindow !== undefined ? { tailLimit: replayWindow } : {}),
     ...(durableLog !== undefined ? { durableLog } : {}),
     // Ticket 04 — the bridge is the sole grant authority for wire full fidelity.
@@ -135,7 +152,7 @@ export const publishCommittedEvents = async (
   deps.box.state = committedState
   publishEvents(deps, events)
   await deps.box.transportBridge?.publishEvents(events)
-  deps.box.transportBridge?.updateSnapshot(toSessionSnapshotLite(deps.box.state))
+  deps.box.transportBridge?.updateSnapshot(currentSessionSnapshot(deps))
   return events.length
 }
 
@@ -150,7 +167,7 @@ export const publishPendingEvents = async (
     await deps.box.transportBridge?.publishEvents(pendingEvents)
   }
   if (committedEventCount === 0 || pendingEvents.length > 0) {
-    deps.box.transportBridge?.updateSnapshot(toSessionSnapshotLite(deps.box.state))
+    deps.box.transportBridge?.updateSnapshot(currentSessionSnapshot(deps))
   }
 }
 
@@ -246,7 +263,9 @@ export const attachSessionTransport = async (
 ): Promise<ConnectedSessionTransport> => {
   const { box, sessionId } = deps
   if (box.closed) throw new SessionClosedError(sessionId)
-  const connected = await ensureTransportBridge(deps, options.replayWindow).connect(transport)
+  const bridge = ensureTransportBridge(deps, options.replayWindow)
+  bridge.updateSnapshot(currentSessionSnapshot(deps))
+  const connected = await bridge.connect(transport)
   // Synthesise a per-attach `session.created` event — IN-PROC NOTIFICATION
   // ONLY. On the wire, the connect/resume SNAPSHOT is the authoritative
   // carrier of `capabilities` + `modelSlug` (the bridge replies to the
@@ -295,7 +314,7 @@ export const closeSession = async (deps: SessionEngineDeps): Promise<void> => {
   }
   await deps.kernel.eventLog.append(event)
   await box.transportBridge?.publishEvents([event])
-  box.transportBridge?.updateSnapshot(toSessionSnapshotLite(box.state))
+  box.transportBridge?.updateSnapshot(currentSessionSnapshot(deps))
   publishEvents(deps, [event])
   await box.transportBridge?.close()
 }

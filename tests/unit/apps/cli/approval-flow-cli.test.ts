@@ -77,6 +77,7 @@ const stubSetup = (approvalDecisions: readonly ApprovalDecisionResult[]) => {
             capabilities: { approvals: "operator", tools: true },
           }),
         attachSessionTransport: async () => ({ close: async () => undefined }),
+        refreshSnapshot: async () => undefined,
         close: async () => {
           counters.sessionClose += 1
         },

@@ -11,6 +11,7 @@ import { describe, expect, test } from "bun:test"
 import { MODEL_RATE_CARD, PRICING_VERSION } from "@/observability/pricing"
 import {
   costSurfaceView,
+  costSurfaceViewWire,
   createUsageAccounting,
   normalizeUsage,
   priceUsage,
@@ -71,6 +72,17 @@ describe("prompt tokens are provider-neutral and summable", () => {
 })
 
 describe("per-model lines are ordered and complete", () => {
+  test("display labels strip controls and cap length without changing accounting identity", () => {
+    const raw = `model\n\r\t\u001b\u007f\u0085\u2028\u2029${"x".repeat(100)}`
+    const acct = createUsageAccounting()
+    expect(acct.record(record("hostile", { model: raw })).admitted).toBe(true)
+    const expected = `model${"x".repeat(59)}`
+    expect(costSurfaceViewWire(acct)).toMatchObject({ modelSlug: expected })
+    expect(costSurfaceView(acct.snapshot()).byModel[0]?.model).toBe(expected)
+    expect(acct.recent(1)[0]?.usage.model).toBe(raw)
+    expect(acct.snapshot().byModel.has(raw)).toBe(true)
+  })
+
   test("lines sort by spend descending, ties broken by name", () => {
     // Stable ordering matters: a list that reshuffles between renders reads as
     // churn rather than as data.

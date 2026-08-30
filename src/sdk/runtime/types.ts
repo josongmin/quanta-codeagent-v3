@@ -70,6 +70,9 @@ export interface RuntimeSession {
   ): Promise<SessionDispatchResult>
   subscribe(listener: (event: SessionEvent) => void): () => void
   snapshot(): Promise<SessionSnapshotLite>
+  /** Publish a fresh read-only snapshot after an out-of-band authority attach.
+   * Uses the bridge's ordered snapshot channel; never mints an event/seq. */
+  refreshSnapshot(): Promise<void>
   attachSessionTransport(
     transport: SessionTransport,
     options?: { readonly replayWindow?: number },

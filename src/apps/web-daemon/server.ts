@@ -381,7 +381,8 @@ const buildOnAttachThread = (deps: {
 }): ((threadId: string) => Promise<void>) | undefined =>
   deps.threadStore !== null
     ? async (threadId: string): Promise<void> => {
-        await hydrateThreadIntoLiveSession(threadId, {
+        const outcome = await hydrateThreadIntoLiveSession(threadId, {
+          flushPersistence: () => deps.transcriptPersist.flush(),
           loadThread: async (id) => await loadSessionById(id),
           replaceTranscript: async (messages) => {
             await deps.sharedSession.transcript.replace(messages)
@@ -425,6 +426,7 @@ const buildOnAttachThread = (deps: {
           cancelGoalWake: deps.goalWake?.onAttachStart,
           rearmGoalWake: deps.goalWake?.onAttachSettled,
         })
+        if (outcome.kind === "hydrated") await deps.sharedSession.refreshSnapshot()
       }
     : undefined
 
