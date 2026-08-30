@@ -27,6 +27,34 @@ import {
 let workDir = ""
 let sourceDir = ""
 
+test("production runtime and unused coverage factories do not initialize the compiler", async () => {
+  // A fresh process is essential: other coverage tests legitimately load the
+  // compiler and must not make this import-boundary assertion order-dependent.
+  const child = Bun.spawn(
+    [
+      process.execPath,
+      "-e",
+      `await import(${JSON.stringify(
+        join(import.meta.dir, "../../src/apps/web-daemon/runtime-factory.ts"),
+      )});
+       const { astCoverageSource, istanbulCoverageSource } = await import(${JSON.stringify(
+         join(import.meta.dir, "../../src/observability/coverage/index.ts"),
+       )});
+       astCoverageSource();
+       istanbulCoverageSource();
+       console.log(JSON.stringify({ compilerLoaded: require.cache[require.resolve("typescript")] !== undefined }));`,
+    ],
+    { cwd: join(import.meta.dir, "../.."), stdout: "pipe", stderr: "pipe" },
+  )
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ])
+  expect({ code, stderr }).toEqual({ code: 0, stderr: "" })
+  expect(JSON.parse(stdout)).toEqual({ compilerLoaded: false })
+})
+
 beforeEach(async () => {
   workDir = await mkdtemp(join(tmpdir(), "cov-ast-"))
   sourceDir = await mkdtemp(join(tmpdir(), "cov-pkg-"))

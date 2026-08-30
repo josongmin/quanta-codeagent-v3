@@ -56,7 +56,7 @@
 
 import { readFile } from "node:fs/promises"
 import { resolve } from "node:path"
-import * as ts from "typescript"
+import type * as TypeScript from "typescript"
 import { errMessage } from "@/shared"
 import { CoverageError, type CoverageReport, type CoverageSource, type FileCoverage } from "./port"
 
@@ -65,12 +65,12 @@ import { CoverageError, type CoverageReport, type CoverageSource, type FileCover
 // ────────────────────────────────────────────────────────────────────────────
 
 export interface AstCoverageSourceOpts {
-  /** Optional ts.CompilerOptions override. Defaults to a permissive setup
+  /** Optional TypeScript.CompilerOptions override. Defaults to a permissive setup
    *  matching the project's tsconfig.json — we only need a syntactic parse,
    *  not type-checking, so the options barely matter; allow callers to pin
    *  a specific `ScriptTarget` if they want to lock the AST against future
    *  syntax (e.g. parsing a known-ES2020 file even when the host is newer). */
-  readonly compilerOptions?: ts.CompilerOptions
+  readonly compilerOptions?: TypeScript.CompilerOptions
   /** Skip pattern for files. Default: `/node_modules\/|\.d\.ts$/`. The V8
    *  adapter already strips `node_modules` URLs; this is a secondary guard
    *  for callers that point us at a curated subset already containing some
@@ -220,18 +220,18 @@ const computeLineCoverage = (
 /** Default compiler options for the syntactic parse. We do NOT type-check
  *  (no `getProgram`); `createSourceFile` is enough. We pick `Latest` so newer
  *  syntax (`??=`, decorators, etc.) does not error out the parse. */
-const DEFAULT_COMPILER_OPTIONS: ts.CompilerOptions = {
+const defaultCompilerOptions = (ts: typeof TypeScript): TypeScript.CompilerOptions => ({
   target: ts.ScriptTarget.Latest,
   module: ts.ModuleKind.ESNext,
   jsx: ts.JsxEmit.Preserve,
   allowJs: true,
   // We do NOT set `strict` etc. — they only matter for type-check, which we
   // do not run. A misconfigured options object cannot mis-count branches.
-}
+})
 
-/** Pick the right `ts.ScriptKind` from the path extension. Defaults to TS
+/** Pick the right `TypeScript.ScriptKind` from the path extension. Defaults to TS
  *  (we never see a `.d.ts` here — the skip pattern filtered it). */
-const scriptKindFromPath = (abs: string): ts.ScriptKind => {
+const scriptKindFromPath = (abs: string, ts: typeof TypeScript): TypeScript.ScriptKind => {
   if (abs.endsWith(".tsx")) return ts.ScriptKind.TSX
   if (abs.endsWith(".jsx")) return ts.ScriptKind.JSX
   if (abs.endsWith(".js") || abs.endsWith(".mjs") || abs.endsWith(".cjs")) {
@@ -247,11 +247,11 @@ const scriptKindFromPath = (abs: string): ts.ScriptKind => {
  *  always so `forEachChild` never short-circuits before exhausting the file.
  *  Recursion depth is bounded by the file's parse-tree depth (TS files
  *  typically <50 deep; the JS engine's stack handles thousands). */
-const countBranchesAst = (sf: ts.SourceFile): number => {
+const countBranchesAst = (sf: TypeScript.SourceFile, ts: typeof TypeScript): number => {
   let count = 0
 
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: AST visitor with closed switch over branch-bearing node kinds — splitting per-kind helpers would obscure the single-pass invariant
-  const visit = (node: ts.Node): void => {
+  const visit = (node: TypeScript.Node): void => {
     // ── Recursion HALT cases — string/template/regex nodes have no
     //    executable branch children. We do NOT call forEachChild on them.
     if (
@@ -270,7 +270,7 @@ const countBranchesAst = (sf: ts.SourceFile): number => {
 
     switch (node.kind) {
       case ts.SyntaxKind.IfStatement: {
-        const ifs = node as ts.IfStatement
+        const ifs = node as TypeScript.IfStatement
         // Then arm always exists.
         count += 1
         if (ifs.elseStatement !== undefined) {
@@ -288,7 +288,7 @@ const countBranchesAst = (sf: ts.SourceFile): number => {
         break
       }
       case ts.SyntaxKind.SwitchStatement: {
-        const sw = node as ts.SwitchStatement
+        const sw = node as TypeScript.SwitchStatement
         for (const clause of sw.caseBlock.clauses) {
           // CaseClause OR DefaultClause — each is a +1 arm.
           if (
@@ -301,7 +301,7 @@ const countBranchesAst = (sf: ts.SourceFile): number => {
         break
       }
       case ts.SyntaxKind.BinaryExpression: {
-        const be = node as ts.BinaryExpression
+        const be = node as TypeScript.BinaryExpression
         const op = be.operatorToken.kind
         if (
           op === ts.SyntaxKind.AmpersandAmpersandToken ||
@@ -364,7 +364,7 @@ const branchesCoveredHeuristic = (
 const buildFileCoverage = async (
   script: V8Script,
   abs: string,
-  compilerOptions: ts.CompilerOptions,
+  compilerOptions: TypeScript.CompilerOptions | undefined,
 ): Promise<FileCoverage | null> => {
   let source: string
   try {
@@ -374,6 +374,10 @@ const buildFileCoverage = async (
     // silently — best-effort per-file (mirror of v8-source.ts behaviour).
     return null
   }
+  // Coverage is opt-in; importing/constructing this adapter must not initialize
+  // the compiler during an unrelated runtime boot or readout request.
+  const ts = await import("typescript")
+  const parseOptions = compilerOptions ?? defaultCompilerOptions(ts)
   const allRanges: V8Range[] = []
   for (const fn of script.functions) {
     for (const r of fn.ranges) allRanges.push(r)
@@ -386,11 +390,11 @@ const buildFileCoverage = async (
   const sf = ts.createSourceFile(
     abs,
     source,
-    compilerOptions.target ?? ts.ScriptTarget.Latest,
+    parseOptions.target ?? ts.ScriptTarget.Latest,
     /*setParentNodes*/ false,
-    scriptKindFromPath(abs),
+    scriptKindFromPath(abs, ts),
   )
-  const branchCount = countBranchesAst(sf)
+  const branchCount = countBranchesAst(sf, ts)
   const branchesCovered = branchesCoveredHeuristic(branchCount, linesCovered, lineCount)
   const statementCount = lineCount
   const statementsCovered = linesCovered
@@ -437,11 +441,11 @@ const computeTotals = (files: ReadonlyArray<FileCoverage>): CoverageReport["tota
 // ────────────────────────────────────────────────────────────────────────────
 
 class AstCoverageSource implements CoverageSource {
-  private readonly compilerOptions: ts.CompilerOptions
+  private readonly compilerOptions: TypeScript.CompilerOptions | undefined
   private readonly skipPattern: RegExp
 
   constructor(opts: AstCoverageSourceOpts) {
-    this.compilerOptions = opts.compilerOptions ?? DEFAULT_COMPILER_OPTIONS
+    this.compilerOptions = opts.compilerOptions
     this.skipPattern = opts.skipPattern ?? DEFAULT_SKIP
   }
 

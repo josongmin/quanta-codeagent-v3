@@ -50,7 +50,7 @@
 
 import { readFile } from "node:fs/promises"
 import { resolve } from "node:path"
-import * as ts from "typescript"
+import type * as TypeScript from "typescript"
 import { errMessage } from "@/shared"
 import { CoverageError, type CoverageReport, type CoverageSource, type FileCoverage } from "./port"
 
@@ -59,10 +59,10 @@ import { CoverageError, type CoverageReport, type CoverageSource, type FileCover
 // ────────────────────────────────────────────────────────────────────────────
 
 export interface IstanbulCoverageSourceOpts {
-  /** Optional `ts.CompilerOptions` override. Syntactic parse only — same
+  /** Optional `TypeScript.CompilerOptions` override. Syntactic parse only — same
    *  posture as `ast-source.ts`; the options barely matter beyond pinning
    *  `ScriptTarget`. */
-  readonly compilerOptions?: ts.CompilerOptions
+  readonly compilerOptions?: TypeScript.CompilerOptions
   /** Skip pattern for files. Default: `/node_modules\/|\.d\.ts$/`. Mirrors
    *  the AST adapter's secondary guard. */
   readonly skipPattern?: RegExp
@@ -227,14 +227,14 @@ interface BranchSite {
   readonly shortCircuitProne: boolean
 }
 
-const DEFAULT_COMPILER_OPTIONS: ts.CompilerOptions = {
+const defaultCompilerOptions = (ts: typeof TypeScript): TypeScript.CompilerOptions => ({
   target: ts.ScriptTarget.Latest,
   module: ts.ModuleKind.ESNext,
   jsx: ts.JsxEmit.Preserve,
   allowJs: true,
-}
+})
 
-const scriptKindFromPath = (abs: string): ts.ScriptKind => {
+const scriptKindFromPath = (abs: string, ts: typeof TypeScript): TypeScript.ScriptKind => {
   if (abs.endsWith(".tsx")) return ts.ScriptKind.TSX
   if (abs.endsWith(".jsx")) return ts.ScriptKind.JSX
   if (abs.endsWith(".js") || abs.endsWith(".mjs") || abs.endsWith(".cjs")) {
@@ -243,7 +243,10 @@ const scriptKindFromPath = (abs: string): ts.ScriptKind => {
   return ts.ScriptKind.TS
 }
 
-const nodeRange = (n: ts.Node, sf: ts.SourceFile): { pos: number; end: number } => ({
+const nodeRange = (
+  n: TypeScript.Node,
+  sf: TypeScript.SourceFile,
+): { pos: number; end: number } => ({
   // `getStart(sf)` skips leading trivia; the V8 ranges are emitted from
   // post-trivia byte offsets, so we use it to match. We pass `sf` explicitly
   // because the parse was done with `setParentNodes=false` (parent pointers
@@ -261,11 +264,11 @@ const nodeRange = (n: ts.Node, sf: ts.SourceFile): { pos: number; end: number } 
  * String / template-no-substitution / regex literals halt recursion — same
  * policy as the AST adapter.
  */
-const enumerateBranches = (sf: ts.SourceFile): BranchSite[] => {
+const enumerateBranches = (sf: TypeScript.SourceFile, ts: typeof TypeScript): BranchSite[] => {
   const sites: BranchSite[] = []
 
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: closed switch over branch-bearing node kinds; splitting per-kind would obscure the single-pass invariant
-  const visit = (node: ts.Node): void => {
+  const visit = (node: TypeScript.Node): void => {
     if (
       node.kind === ts.SyntaxKind.StringLiteral ||
       node.kind === ts.SyntaxKind.NoSubstitutionTemplateLiteral ||
@@ -276,7 +279,7 @@ const enumerateBranches = (sf: ts.SourceFile): BranchSite[] => {
 
     switch (node.kind) {
       case ts.SyntaxKind.IfStatement: {
-        const ifs = node as ts.IfStatement
+        const ifs = node as TypeScript.IfStatement
         sites.push({
           kind: "if-then",
           ...nodeRange(ifs.thenStatement, sf),
@@ -292,13 +295,13 @@ const enumerateBranches = (sf: ts.SourceFile): BranchSite[] => {
         break
       }
       case ts.SyntaxKind.ConditionalExpression: {
-        const ce = node as ts.ConditionalExpression
+        const ce = node as TypeScript.ConditionalExpression
         sites.push({ kind: "cond-true", ...nodeRange(ce.whenTrue, sf), shortCircuitProne: true })
         sites.push({ kind: "cond-false", ...nodeRange(ce.whenFalse, sf), shortCircuitProne: true })
         break
       }
       case ts.SyntaxKind.SwitchStatement: {
-        const sw = node as ts.SwitchStatement
+        const sw = node as TypeScript.SwitchStatement
         for (const clause of sw.caseBlock.clauses) {
           if (
             clause.kind === ts.SyntaxKind.CaseClause ||
@@ -314,7 +317,7 @@ const enumerateBranches = (sf: ts.SourceFile): BranchSite[] => {
         break
       }
       case ts.SyntaxKind.BinaryExpression: {
-        const be = node as ts.BinaryExpression
+        const be = node as TypeScript.BinaryExpression
         const op = be.operatorToken.kind
         if (
           op === ts.SyntaxKind.AmpersandAmpersandToken ||
@@ -332,11 +335,11 @@ const enumerateBranches = (sf: ts.SourceFile): BranchSite[] => {
       case ts.SyntaxKind.WhileStatement:
       case ts.SyntaxKind.DoStatement: {
         const loop = node as
-          | ts.ForStatement
-          | ts.ForInStatement
-          | ts.ForOfStatement
-          | ts.WhileStatement
-          | ts.DoStatement
+          | TypeScript.ForStatement
+          | TypeScript.ForInStatement
+          | TypeScript.ForOfStatement
+          | TypeScript.WhileStatement
+          | TypeScript.DoStatement
         sites.push({
           kind: "loop-body",
           ...nodeRange(loop.statement, sf),
@@ -345,7 +348,7 @@ const enumerateBranches = (sf: ts.SourceFile): BranchSite[] => {
         break
       }
       case ts.SyntaxKind.CatchClause: {
-        const cc = node as ts.CatchClause
+        const cc = node as TypeScript.CatchClause
         sites.push({ kind: "catch", ...nodeRange(cc.block, sf), shortCircuitProne: false })
         break
       }
@@ -453,7 +456,7 @@ const accountPerSite = (
 const buildFileMetrics = async (
   script: V8Script,
   abs: string,
-  compilerOptions: ts.CompilerOptions,
+  compilerOptions: TypeScript.CompilerOptions | undefined,
   fidelity: "lenient" | "strict",
 ): Promise<FileMetrics | null> => {
   let source: string
@@ -462,6 +465,10 @@ const buildFileMetrics = async (
   } catch {
     return null
   }
+  // Coverage is opt-in; importing/constructing this adapter must not initialize
+  // the compiler during an unrelated runtime boot or readout request.
+  const ts = await import("typescript")
+  const parseOptions = compilerOptions ?? defaultCompilerOptions(ts)
   const allRanges: V8Range[] = []
   for (const fn of script.functions) {
     for (const r of fn.ranges) allRanges.push(r)
@@ -473,11 +480,11 @@ const buildFileMetrics = async (
   const sf = ts.createSourceFile(
     abs,
     source,
-    compilerOptions.target ?? ts.ScriptTarget.Latest,
+    parseOptions.target ?? ts.ScriptTarget.Latest,
     /*setParentNodes*/ false,
-    scriptKindFromPath(abs),
+    scriptKindFromPath(abs, ts),
   )
-  const sites = enumerateBranches(sf)
+  const sites = enumerateBranches(sf, ts)
   const { hits, branchesCovered, shortCircuitWarnings } = accountPerSite(sites, allRanges, fidelity)
   const branchCount = sites.length
   const statementCount = lineCount
@@ -559,7 +566,7 @@ export type { BranchKind, BranchSite }
 // ────────────────────────────────────────────────────────────────────────────
 
 class IstanbulCoverageSource implements IstanbulCoverageSourceExt {
-  private readonly compilerOptions: ts.CompilerOptions
+  private readonly compilerOptions: TypeScript.CompilerOptions | undefined
   private readonly skipPattern: RegExp
   private readonly fidelity: "lenient" | "strict"
   private _sidecar: PerBranchSidecar = {
@@ -570,7 +577,7 @@ class IstanbulCoverageSource implements IstanbulCoverageSourceExt {
   }
 
   constructor(opts: IstanbulCoverageSourceOpts) {
-    this.compilerOptions = opts.compilerOptions ?? DEFAULT_COMPILER_OPTIONS
+    this.compilerOptions = opts.compilerOptions
     this.skipPattern = opts.skipPattern ?? DEFAULT_SKIP
     this.fidelity = opts.shortCircuitFidelity ?? "lenient"
   }
