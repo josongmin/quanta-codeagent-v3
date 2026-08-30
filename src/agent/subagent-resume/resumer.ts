@@ -296,6 +296,47 @@ const lineageDenyReason = (
   return null
 }
 
+const replayToolHistoryForHandle = async (
+  handle: PersistedHandle,
+  toolReplay: ResumerOpts["toolReplay"],
+): Promise<ReadonlyArray<ToolReplayOutcome> | undefined> => {
+  if (toolReplay === undefined) return undefined
+  const classifier = toolReplay.classifier ?? defaultIdempotencyClassifier()
+  const policy = toolReplay.policy ?? defaultToolReplayPolicy()
+  const workspace = handle.workspace ?? handle.spec.workspace ?? ""
+  try {
+    const records = await toolReplay.store.list(handle.id)
+    return await replayToolHistory({
+      records,
+      classifier,
+      policy,
+      workspace,
+      ...(toolReplay.shadowOdb !== undefined ? { shadowOdb: toolReplay.shadowOdb } : {}),
+    })
+  } catch (error) {
+    return [
+      {
+        toolUseId: "(store-list)",
+        toolName: "(store-list)",
+        decision: {
+          action: "halt",
+          reason: `tool-history store.list threw: ${errMsg(error)}`,
+        },
+      },
+    ]
+  }
+}
+
+const replayOutcomeFields = (
+  seedMessages: ReadonlyArray<Message>,
+  replayMetadata: Readonly<Record<string, string>> | undefined,
+  toolReplays: ReadonlyArray<ToolReplayOutcome> | undefined,
+): Pick<ResumeOutcome, "seedMessages" | "replayMetadata" | "toolReplays"> => ({
+  ...(seedMessages.length > 0 ? { seedMessages } : {}),
+  ...(replayMetadata !== undefined ? { replayMetadata } : {}),
+  ...(toolReplays !== undefined ? { toolReplays } : {}),
+})
+
 /** Apply the `"resume"` branch — optionally consult the replay composer, then
  *  fork in the scheduler + flip OLD to `"resumed"` in the store.
  *
@@ -333,42 +374,10 @@ const applyResume = async (
     replayMetadata = replayed.replayMetadata
   }
 
-  // 1b) OPTIONAL tool-history replay — runs BEFORE fork so workspace state +
-  //     cached outputs are ready when the re-fork's first turn fires.
-  //     NO-THROW: orchestrator captures errors as `halt` outcomes per record;
-  //     store-list-throw collapses to a synthetic single halt entry so the
-  //     main resume STILL proceeds (Phase 2.5 fault-tolerance posture).
-  let toolReplays: ReadonlyArray<ToolReplayOutcome> | undefined
-  if (toolReplay !== undefined) {
-    const classifier = toolReplay.classifier ?? defaultIdempotencyClassifier()
-    const policy = toolReplay.policy ?? defaultToolReplayPolicy()
-    const workspace = handle.workspace ?? handle.spec.workspace ?? ""
-    try {
-      const records = await toolReplay.store.list(handle.id)
-      toolReplays = await replayToolHistory({
-        records,
-        classifier,
-        policy,
-        workspace,
-        ...(toolReplay.shadowOdb !== undefined ? { shadowOdb: toolReplay.shadowOdb } : {}),
-      })
-    } catch (e) {
-      // Store-list itself threw — surface as a single halt outcome so the
-      // audit trail records WHY no per-call replays ran. Main resume still
-      // proceeds (the new fork starts fresh; the cached outputs are simply
-      // unavailable).
-      toolReplays = [
-        {
-          toolUseId: "(store-list)",
-          toolName: "(store-list)",
-          decision: {
-            action: "halt",
-            reason: `tool-history store.list threw: ${errMsg(e)}`,
-          },
-        },
-      ]
-    }
-  }
+  // 1b) OPTIONAL tool-history replay runs before fork so workspace state +
+  // cached outputs are ready when the re-fork's first turn fires. Store-list
+  // failure becomes one audit halt entry; the main resume still proceeds.
+  const toolReplays = await replayToolHistoryForHandle(handle, toolReplay)
 
   // 2) Build the resumed spec — replayMetadata is merged into spec.metadata
   //    only when it is present (Phase 2 byte-identical when replay is absent).
@@ -380,9 +389,7 @@ const applyResume = async (
       id: handle.id,
       decision,
       errorMessage: `scheduler.fork: ${errMsg(e)}`,
-      ...(seedMessages.length > 0 ? { seedMessages } : {}),
-      ...(replayMetadata !== undefined ? { replayMetadata } : {}),
-      ...(toolReplays !== undefined ? { toolReplays } : {}),
+      ...replayOutcomeFields(seedMessages, replayMetadata, toolReplays),
     }
   }
   try {
@@ -393,18 +400,14 @@ const applyResume = async (
       decision,
       newId,
       errorMessage: `store.save: ${errMsg(e)}`,
-      ...(seedMessages.length > 0 ? { seedMessages } : {}),
-      ...(replayMetadata !== undefined ? { replayMetadata } : {}),
-      ...(toolReplays !== undefined ? { toolReplays } : {}),
+      ...replayOutcomeFields(seedMessages, replayMetadata, toolReplays),
     }
   }
   return {
     id: handle.id,
     decision,
     newId,
-    ...(seedMessages.length > 0 ? { seedMessages } : {}),
-    ...(replayMetadata !== undefined ? { replayMetadata } : {}),
-    ...(toolReplays !== undefined ? { toolReplays } : {}),
+    ...replayOutcomeFields(seedMessages, replayMetadata, toolReplays),
   }
 }
 
