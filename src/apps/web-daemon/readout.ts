@@ -41,6 +41,7 @@
  */
 import type { ContextUsageBreakdown } from "@/agent/context/usage-breakdown"
 import type { Plan, TodoItem } from "@/agent/plan/types"
+import type { ObjectiveDomainSnapshot } from "@/objective"
 import type { CapabilityManifest, SessionSnapshotLite, SessionStateView } from "@/protocol/session"
 import type { StoreHealthReport } from "@/session"
 import { errMessage } from "@/shared"
@@ -136,6 +137,13 @@ export interface WebReadoutSources {
    *  populates the list (the daemon pays no boot-time network call). The WRITE
    *  half is the `controlRequest` `set_model` frame. Absent ⇒ honest missing line. */
   readonly model?: () => Promise<{ readonly current: string; readonly ids: readonly string[] }>
+  /** W1b — the objective DOMAIN snapshot for this daemon's session. The DOMAIN,
+   *  not the projected `Objective`: `revision`, the validation contract and the
+   *  progress receipts live on the snapshot and are exactly what a person needs
+   *  to answer "what is this goal doing" — none of them ride the observability
+   *  objective frame. Bound to the LIVE session id by the composition root.
+   *  Absent ⇒ honest missing-source line. */
+  readonly goal?: () => ObjectiveDomainSnapshot
   /** Injectable clock for deterministic age rendering under test. */
   readonly now?: () => number
 }
@@ -153,6 +161,7 @@ export const SOURCE_BACKED_READOUTS = [
   "doctor",
   "mcp",
   "model",
+  "goal",
 ] as const
 
 /** Readouts this surface deliberately does NOT serve, with the honest reason
@@ -181,6 +190,50 @@ export const SNAPSHOT_SERVED_READOUTS = ["state", "capabilities"] as const
 /** Aliases the route accepts for a canonical readout name. */
 export const READOUT_ALIASES: Readonly<Record<string, string>> = { caps: "capabilities" }
 
+const age = (at: number, now: number): string => {
+  const seconds = Math.max(0, Math.floor((now - at) / 1_000))
+  if (seconds < 60) return `${seconds}s ago`
+  const minutes = Math.floor(seconds / 60)
+  return minutes < 60 ? `${minutes}m ago` : `${Math.floor(minutes / 60)}h ago`
+}
+
+/** W1b — the goal, rendered from the DOMAIN snapshot. Deliberately not shared
+ *  with the CLI's `renderGoalDomain`: the biome slice fence forbids this daemon
+ *  from importing `@/apps/cli`, and the two surfaces answer different questions
+ *  (the CLI line sits under an interactive prompt; this is a standalone page a
+ *  person opens mid-turn). */
+const renderGoalReadout = (domain: ObjectiveDomainSnapshot, now: number): string => {
+  const objective = domain.state?.objective
+  if (objective === undefined) {
+    return (
+      "No goal is set for this session.\n" +
+      "Ask the agent to set one, or run `/goal <objective>` from the quanta CLI.\n"
+    )
+  }
+  const criteria = objective.successCriteria
+  const met = criteria.filter((criterion) => criterion.met).length
+  const remaining = criteria.filter((criterion) => !criterion.met).map((c) => c.text)
+  const budget = objective.budget
+  const last = domain.progressReceipts?.at(-1)
+  const blockers = objective.blockers
+    .slice(0, 3)
+    .map((blocker) => `  - [${blocker.waitingOn}] ${blocker.reason}`)
+  return (
+    `goal   ${objective.goal}\n` +
+    `status ${objective.status} · rev ${domain.revision} · validation ${domain.validationContract}\n` +
+    `criteria ${met}/${criteria.length} met` +
+    (remaining.length === 0 ? "\n" : `   remaining: ${remaining.join(", ")}\n`) +
+    `budget ${budget.turnsUsed}/${budget.maxTurns ?? "\u221e"} turns · ` +
+    `${budget.tokensUsed}/${budget.maxTokens ?? "\u221e"} tokens` +
+    (budget.limitedBy === undefined ? "\n" : ` · limited by: ${budget.limitedBy}\n`) +
+    (last === undefined
+      ? "last attempt: none\n"
+      : `last attempt: ${last.turnOutcome} · ${age(last.recordedAt, now)} · rev ${last.objectiveRevisionAfter}\n`) +
+    (blockers.length === 0 ? "" : `blockers:\n${blockers.join("\n")}\n`) +
+    (objective.nextActions.length === 0 ? "" : `next: ${objective.nextActions[0]}\n`)
+  )
+}
+
 /** Copy for a source-backed readout whose accessor is absent at runtime —
  *  names the exact missing composition piece (never a bare "not wired"). */
 const MISSING_SOURCE_COPY: Readonly<Record<(typeof SOURCE_BACKED_READOUTS)[number], string>> = {
@@ -208,6 +261,9 @@ const MISSING_SOURCE_COPY: Readonly<Record<(typeof SOURCE_BACKED_READOUTS)[numbe
   mcp:
     "/mcp: no MCP servers configured for this daemon " +
     "(no .mcp.json entries, or the mcp accessor was not threaded)",
+  goal:
+    "/goal: no objective authority is composed on this daemon " +
+    "(QUANTA_OBJECTIVE_TOOLS is off, so there is no goal domain to read)",
 }
 
 const yesno = (b: boolean): string => (b ? "yes" : "no")
@@ -482,6 +538,8 @@ const LIVE_READOUTS: Readonly<Record<(typeof SOURCE_BACKED_READOUTS)[number], Li
   doctor: (s) => (s.doctor === undefined ? undefined : mapAwaited(s.doctor(), renderDoctor)),
   mcp: (s) => (s.mcp === undefined ? undefined : renderMcp(s.mcp())),
   model: (s) => (s.model === undefined ? undefined : mapAwaited(s.model(), renderWebModelReadout)),
+  goal: (s) =>
+    s.goal === undefined ? undefined : renderGoalReadout(s.goal(), s.now?.() ?? Date.now()),
 }
 
 /** Narrow an arbitrary readout name onto the table. A unit because it is the

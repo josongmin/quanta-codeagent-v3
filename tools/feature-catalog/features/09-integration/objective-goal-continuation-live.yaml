@@ -23,12 +23,12 @@ config_refs:
     - QUANTA_GOAL_MAX_AUTONOMOUS_TURNS
 surface_integration:
   cli: full
-  web: full
+  web: partial
   method: audited
   verified: "2026-08-30"
   evidence:
     cli: "Real PTY boots the source or installed CLI, proves default-ON command discovery, explicit QUANTA_GOAL=0 opt-out, goal create/show, autonomous queue execution, draft/background/foreground quiescence fences, and goal-only quiet-window behavior; a real process kill plus resume-by-id proves the objective — and a clear — survive a restart; a settled attributed turn ANNOUNCES itself, so progress is visible without typing /goal; and the operator can attest a manual criterion (`criterion done`) or free a stuck attempt (`abandon`)."
-    web: "Web-daemon composition submits a one-use, authority-validated goal-continuation capability through RuntimeSession.turn.submitGoalContinuation; an integration test proves concurrent user input stays outside the autonomous turn. A real WebSocket client also asks for ONE user-requested goal turn with a `goalWork` frame (peeked before the session bridge, host-minted user-requested-goal-work provenance): a real-daemon e2e proves it charges the user turn budget and mints a receipt without touching the autonomous hard cap, and that every refusal is answered on the same socket."
+    web: "Web-daemon composition submits a one-use, authority-validated goal-continuation capability through RuntimeSession.turn.submitGoalContinuation; an integration test proves concurrent user input stays outside the autonomous turn. A real WebSocket client also asks for ONE user-requested goal turn with a `goalWork` frame (peeked before the session bridge, host-minted user-requested-goal-work provenance): a real-daemon e2e proves it charges the user turn budget and mints a receipt without touching the autonomous hard cap, and that every refusal is answered on the same socket. PARTIAL, not full: the browser can now READ the goal (the `/goal` readout, served out-of-band so it answers mid-turn), but it still has no WRITE affordance — `SessionClient.sendGoalWork` / `onGoalWorkResult` ship with no caller, and the ObservabilityPane ObjectiveCard sits behind the default-OFF QUANTA_OBSERVABILITY gate."
 purpose: |
   The complete goal preset is enabled by default in CLI and web-daemon roots:
   objective tools, budget enforcement, and bounded autonomous continuation.
@@ -85,6 +85,10 @@ evidence:
     - apps/web-frontend/src/ws/client.ts
     - src/runner/orchestrate/session-turn-driver.ts
     - src/sdk/runtime/session/turn-submit-authority.ts
+    - src/objective/policy.ts
+    - src/objective/core-store/criteria-ops.ts
+    - src/apps/web-daemon/readout-compose.ts
+    - src/apps/web-daemon/readout.ts
   adrs: [394]
   tests:
     unit:
@@ -106,6 +110,12 @@ evidence:
       - tests/unit/objective/budget-product-ceiling.test.ts
       - tests/unit/observability/objective-decision-counter.test.ts
       - tests/unit/session/fork-objective.test.ts
+      - tests/unit/objective/blocker-attribution-host-attempt.test.ts
+      - tests/unit/cli/goal-unblock.test.ts
+      - tests/unit/ipc/objective-reject-reason-on-wire.test.ts
+      - tests/unit/cli/goal-budget-limit-visible.test.ts
+      - tests/unit/objective/begin-attempt-budget-teeth.test.ts
+      - tests/unit/apps/web-daemon/readout-goal-hellgate.test.ts
     integration:
       - tests/integration/goal-continuation-live-e2e.test.ts
       - tests/integration/goal-web-submit-daemon-e2e.test.ts

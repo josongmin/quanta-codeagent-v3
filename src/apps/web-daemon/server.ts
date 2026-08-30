@@ -28,6 +28,7 @@ import { errMessage, logger } from "@/shared"
 import { composeWebGoalWake, type WebGoalWakeHandle } from "./goal-wake-compose"
 import { composeWebGoalWork, type WebGoalWorkHandler } from "./goal-work-compose"
 import type { CostReadoutTotals, WebReadoutSources } from "./readout"
+import { buildDaemonReadoutSources } from "./readout-compose"
 import { setupApprovalContinuation } from "./server/approval-continuation"
 import { type CanvasArtifactFeed, setupCanvasArtifactBridge } from "./server/canvas-artifact-bridge"
 import { buildFetchHandler } from "./server/fetch-handler"
@@ -440,7 +441,6 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
   // a test stub facade simply degrades every readout to the honest
   // missing-source line. `/cost` is folded HERE from the shared session's
   // `turn.completed` events — a daemon-owned source, present for any facade.
-  const facadeReadoutSources = (runtime as { readoutSources?: WebReadoutSources }).readoutSources
   const costAggregator = attachCostAggregator(sharedSession)
   let costAggregatorUnsub: (() => void) | null = costAggregator.unsub
   // P1 Phase 1 — persist the LOSSLESS Message[] transcript to the @/session
@@ -463,10 +463,11 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
     runtime,
     ...(goalWake !== undefined ? { goalWake } : {}),
   })
-  const readoutSources: WebReadoutSources = {
-    ...(facadeReadoutSources ?? {}),
+  const readoutSources = buildDaemonReadoutSources({
+    runtime,
+    threadId: sharedSession.sessionId,
     cost: costAggregator.totals,
-  }
+  })
 
   const { server, boundPort, boundHost } = buildDaemonListener({
     config: {

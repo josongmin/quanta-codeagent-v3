@@ -54,6 +54,7 @@ const READOUT_COMMANDS: readonly {
   { slug: "cost", description: "Cumulative session cost / token fold (live)" },
   { slug: "context", description: "Context-window usage breakdown (live)" },
   { slug: "doctor", description: "Session-store health check (live)" },
+  { slug: "goal", description: "Durable goal — status / criteria / budget / attempts (live)" },
 ]
 
 /** Fetch one readout and print its body (or an honest error) into the transcript.

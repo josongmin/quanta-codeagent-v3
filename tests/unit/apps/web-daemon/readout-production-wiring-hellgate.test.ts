@@ -119,6 +119,14 @@ describe("production runtime factory — readout sources are LIVE on the facade"
       cost: "server-owned fold in startWebDaemon",
       // Composed only when a .mcp.json exists; this hermetic boot has none.
       mcp: "no .mcp.json in the hermetic temp cwd",
+      // W1b — the goal accessor reads the objective domain for a THREAD, and the
+      // facade is built before any session exists, so it has no key to read
+      // under. `startWebDaemon` binds it to the live session id through
+      // `buildDaemonReadoutSources`; that composition is proven directly by
+      // tests/unit/apps/web-daemon/readout-goal-hellgate.test.ts (including the
+      // wrong-thread case), which is what keeps this exception from being a way
+      // to ship an unthreaded readout.
+      goal: "bound to the live session id in startWebDaemon, not on the facade",
     }
     const unwired: string[] = []
     for (const name of SOURCE_BACKED_READOUTS) {
