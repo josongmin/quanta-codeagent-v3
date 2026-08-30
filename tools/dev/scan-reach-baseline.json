@@ -497,6 +497,10 @@
     },
     "tests/unit/_arch/repo-index-hygiene.test.ts#INDEX": {
       "walked": 14290
+    },
+    "tests/unit/_arch/ts-exports-ssot.test.ts#TOOLS": {
+      "walked": 98,
+      "matched": 3
     }
   }
 }

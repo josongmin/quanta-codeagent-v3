@@ -2,23 +2,6 @@
   "note": "The enrollment migration's work plan, MEASURED rather than assumed. One row per file in `unenrolled` of tools/dev/scan-enrollment-debt.json — the two sets are held EQUAL by tests/unit/_arch/scan-enrollment-ratchet.test.ts, so a migrated file cannot linger here and a new debt entry cannot arrive without a row. `klass` A = a recursive walker; B = a single non-recursive listing (needs topLevelOnly: true); C = the verdict's list is filtered by file CONTENT, so the helper belongs on the RAW enumeration and not on the derived subset; D = more than one root or more than one independent scan, so more than one baseline id. `absolutePaths` says whether the enumerated values are already full paths — re-joining a root onto them is a live way to produce a reach of zero. `floorLines` is the exact line of the existing numeric corpus floor, which the migration DELETES; a floor that also checks something the generic helper does not (read-vs-walk, TOCTOU, an exact census, a named `toContain`) STAYS. NO COUNTS ARE WRITTEN HERE. A hand-maintained total drifts the moment one side moves — this file's own prose said 56/86 while the arrays said 54/87 — so the number is whatever `rows.length` is. The classification is a starting inventory and not a verdict: `no-raw-nul-bytes-hellgate` is filed B and is really a three-root recursive walk, which the per-file re-read at step 1 of the procedure is there to catch. A file's true site count is what it REPORTS at runtime, recorded in `expectedIds`.",
   "rows": [
     {
-      "file": "tests/unit/_arch/ts-exports-ssot.test.ts",
-      "klass": "A-recursive-walk",
-      "enumerators": [
-        "new Glob"
-      ],
-      "recursive": true,
-      "absolutePaths": false,
-      "derived": false,
-      "roots": 0,
-      "floorLines": [
-        "136: expect(ast.length).toBeGreaterThan(400)",
-        "327: expect(consumers.length).toBeGreaterThanOrEqual(3)",
-        "332: expect(consumers.length).toBeGreaterThanOrEqual(3) // OWN floor — see above.",
-        "388: expect(consumers.length).toBeGreaterThanOrEqual(3) // OWN floor — see above."
-      ]
-    },
-    {
       "file": "tests/unit/apps/bench/terminal/tb-2-0-retirement.test.ts",
       "klass": "A-recursive-walk",
       "enumerators": [
