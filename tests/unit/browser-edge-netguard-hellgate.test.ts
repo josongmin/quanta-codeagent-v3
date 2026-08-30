@@ -13,7 +13,30 @@
  */
 
 import { describe, expect, test } from "bun:test"
+import { join } from "node:path"
 import { type DnsResolver, guardNavigationUrl } from "@/tool/browser/net-guard"
+
+test("native DNS loads only on the first real lookup", async () => {
+  const child = Bun.spawn(
+    [
+      process.execPath,
+      "-e",
+      `const { nodeDnsResolver } = await import(${JSON.stringify(join(import.meta.dir, "../../src/tool/browser/net-guard.ts"))});
+       const before = Object.keys(require.cache).includes("node:dns/promises");
+       const addresses = await nodeDnsResolver.lookup("127.0.0.1");
+       const after = Object.keys(require.cache).includes("node:dns/promises");
+       console.log(JSON.stringify({ before, after, addresses }));`,
+    ],
+    { cwd: join(import.meta.dir, "../.."), stdout: "pipe", stderr: "pipe" },
+  )
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ])
+  expect({ code, stderr }).toEqual({ code: 0, stderr: "" })
+  expect(JSON.parse(stdout)).toEqual({ before: false, after: true, addresses: ["127.0.0.1"] })
+})
 
 // A resolver that always returns a fixed address list, recording call count.
 const fixedResolver = (

@@ -1,4 +1,4 @@
-import Anthropic from "@anthropic-ai/sdk"
+import type Anthropic from "@anthropic-ai/sdk"
 import { LLMError } from "@/shared/errors"
 import { buildAnthropicMessagesRequest } from "../anthropic-messages-codec"
 import type { LLMPort } from "../ports"
@@ -124,6 +124,10 @@ export class AnthropicAdapter implements LLMPort {
   private readonly streamTimeoutMs: { firstChunkMs: number; idleMs: number }
 
   constructor(config: AnthropicConfig) {
+    // Literal require is bundleable and synchronous: unused providers do not
+    // initialize their SDK, while client validation still happens in constructor.
+    const { default: AnthropicClient } =
+      require("@anthropic-ai/sdk") as typeof import("@anthropic-ai/sdk")
     this.betaHeaders = config.betaHeaders ?? []
     this.streamTimeoutMs = resolveAdapterStreamTimeouts(config)
     // T1 gap-closer: the per-request SDK `timeout` covers the `create()` call
@@ -139,8 +143,8 @@ export class AnthropicAdapter implements LLMPort {
     }
     this.client =
       beta.length > 0
-        ? new Anthropic({ ...base, defaultHeaders: { "anthropic-beta": beta } })
-        : new Anthropic(base)
+        ? new AnthropicClient({ ...base, defaultHeaders: { "anthropic-beta": beta } })
+        : new AnthropicClient(base)
     this.model = config.model
     this.maxTokens = config.maxTokens ?? 8192
     this.cacheTtl = config.cacheTtl ?? "5m"

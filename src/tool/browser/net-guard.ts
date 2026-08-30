@@ -14,7 +14,6 @@
  * SSRF logic is no longer copied here — it lives once in `@/shared/net/ssrf`.
  */
 
-import { lookup } from "node:dns/promises"
 import { classifyHost, isIpLiteral } from "@/shared/net/ssrf"
 
 export type NavGuardResult =
@@ -33,6 +32,7 @@ export interface DnsResolver {
  *  this; tests inject a fake. */
 export const nodeDnsResolver: DnsResolver = {
   async lookup(hostname: string): Promise<readonly string[]> {
+    const { lookup } = await import("node:dns/promises")
     const records = await lookup(hostname, { all: true })
     return records.map((r) => r.address)
   },

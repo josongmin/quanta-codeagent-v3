@@ -39,6 +39,16 @@ purpose: |
   (3) `buildUsageEvent` — the conditional `cacheReadTokens` spread.
   Provider-specific wire mapping (`mapRawEvent` vs `processChunk`) is the
   legitimately different part and stays in each adapter.
+
+  Provider SDK initialization is on demand at adapter construction, not at
+  adapter-module import: Anthropic and OpenAI use type-only top-level SDK
+  imports plus literal, bundleable `require` calls inside their constructors.
+  Client creation and constructor validation remain synchronous; errors are
+  not deferred until the first model request. A fresh-process test verifies
+  neither SDK is loaded by importing the adapters, each constructor loads only
+  its own SDK, validation still throws synchronously, and construction makes
+  no fetch calls. The real Anthropic SDK transport test preserves beta/auth
+  headers, auth-error mapping, and pre-abort behavior without external HTTP.
 evidence:
   code:
     - src/llm/adapters/shared.ts
@@ -49,6 +59,7 @@ evidence:
   tests:
     unit:
       - tests/unit/anthropic.test.ts
+      - tests/unit/anthropic-beta-header.test.ts
       - tests/unit/openai-adapter.test.ts
       - tests/unit/openai.test.ts
     integration: []

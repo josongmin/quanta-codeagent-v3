@@ -1,9 +1,55 @@
 import { describe, expect, test } from "bun:test"
+import { join } from "node:path"
 import type { LLMPort, StreamEvent } from "@/llm"
 import { assembleFromEvents } from "@/llm"
 import type { OpenSlots, RawEvent } from "@/llm/adapters/anthropic"
 import { AnthropicAdapter, finalizeToolInput, mapRawEvent } from "@/llm/adapters/anthropic"
 import { LLMError } from "@/shared"
+
+test("provider SDKs load only during synchronous adapter construction", async () => {
+  const child = Bun.spawn(
+    [
+      process.execPath,
+      "-e",
+      `const { AnthropicAdapter } = await import(${JSON.stringify(join(import.meta.dir, "../../src/llm/adapters/anthropic.ts"))});
+       const { OpenAIAdapter } = await import(${JSON.stringify(join(import.meta.dir, "../../src/llm/adapters/openai.ts"))});
+       const loaded = () => ({
+         anthropic: Object.keys(require.cache).some(p => p.includes("/@anthropic-ai/sdk/")),
+         openai: Object.keys(require.cache).some(p => p.includes("/openai/")),
+       });
+       let networkCalls = 0;
+       globalThis.fetch = async () => { networkCalls++; throw new Error("unexpected network"); };
+       const before = loaded();
+       new AnthropicAdapter({ apiKey: "test", model: "claude-test" });
+       const afterAnthropic = loaded();
+       new OpenAIAdapter({ apiKey: "test", model: "gpt-test" });
+       const afterOpenAI = loaded();
+       const thrownBy = (construct) => { try { construct(); return ""; } catch (e) { return e.message; } };
+       const anthropicError = thrownBy(() => new AnthropicAdapter({ apiKey: "test", model: "m", streamFirstChunkMs: -1 }));
+       const openaiError = thrownBy(() => new OpenAIAdapter({ apiKey: "", model: "m" }));
+       console.log(JSON.stringify({ before, afterAnthropic, afterOpenAI, anthropicError, openaiError, networkCalls }));`,
+    ],
+    {
+      cwd: join(import.meta.dir, "../.."),
+      env: { ...process.env, OPENAI_API_KEY: "", OPENAI_ADMIN_KEY: "" },
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  )
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ])
+  expect({ code, stderr }).toEqual({ code: 0, stderr: "" })
+  const result = JSON.parse(stdout)
+  expect(result.before).toEqual({ anthropic: false, openai: false })
+  expect(result.afterAnthropic).toEqual({ anthropic: true, openai: false })
+  expect(result.afterOpenAI).toEqual({ anthropic: true, openai: true })
+  expect(result.anthropicError).toContain("timeout")
+  expect(result.openaiError).toContain("Missing credentials")
+  expect(result.networkCalls).toBe(0)
+})
 
 /** Drive a sequence of raw SSE events through `mapRawEvent` with a shared
  *  open-slots map, exactly as `AnthropicAdapter.stream` does. */
