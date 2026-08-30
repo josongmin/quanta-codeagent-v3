@@ -10,6 +10,7 @@
  * isolation and avoids React-tree-scoped reconnect loops.
  */
 
+import type { CostSurfaceViewWire } from "../types/protocol.session.generated"
 import { useCallback, useEffect, useReducer, useRef, useState } from "react"
 import type {
   ConnectionState,
@@ -94,6 +95,13 @@ export interface TranscriptState {
    *  `tokenUsage` payload. Adapters that don't emit usage leave this at
    *  zero / undefined turn-count. */
   readonly tokenUsage: CumulativeTokenUsage
+  /** A7 — the server's CUMULATIVE cost snapshot (`turn.completed.costView`).
+   *  REPLACED wholesale on every carrying event, never added: it already IS
+   *  the running total, and adding a snapshot to a snapshot double-counts the
+   *  whole session each turn. `null` until a carrying event arrives (legacy
+   *  daemons / accounting off) — the additive `tokenUsage` fold above remains
+   *  as the fallback for exactly that case. */
+  readonly costView: CostSurfaceViewWire | null
 }
 
 const ZERO_USAGE: CumulativeTokenUsage = {
@@ -112,6 +120,7 @@ export const initialTranscript: TranscriptState = {
   fallbackCompletion: null,
   modelSlug: null,
   tokenUsage: ZERO_USAGE,
+  costView: null,
 }
 
 /**
@@ -472,8 +481,11 @@ const TRANSCRIPT_EVENT_HANDLERS = {
     )
   },
   "turn.completed": (state, event) => {
+    // A7 — snapshot-aware path: REPLACE, and skip the additive fold entirely
+    // (folding a delta on top of a replaced snapshot would double-count).
+    const nextCostView = event.costView ?? state.costView
     const nextUsage =
-      event.tokenUsage !== undefined
+      event.costView === undefined && event.tokenUsage !== undefined
         ? {
             promptTokens: state.tokenUsage.promptTokens + (event.tokenUsage.promptTokens ?? 0),
             completionTokens:
@@ -490,6 +502,7 @@ const TRANSCRIPT_EVENT_HANDLERS = {
     return {
       ...state,
       tokenUsage: nextUsage,
+      costView: nextCostView,
       modelSlug: nextModel,
       pendingCompletion: {
         eventId: event.eventId,
@@ -830,6 +843,7 @@ export const useSessionEvents = (
   appendClientMessage: (role: "system" | "error", text: string) => void
   modelSlug: string | null
   tokenUsage: CumulativeTokenUsage
+  costView: CostSurfaceViewWire | null
 } => {
   const [transcript, dispatch] = useReducer(transcriptReducer, initialTranscript)
   const [sessionState, setSessionState] = useState<SessionStateView | null>(null)
@@ -902,6 +916,7 @@ export const useSessionEvents = (
     appendClientMessage,
     modelSlug: transcript.modelSlug,
     tokenUsage: transcript.tokenUsage,
+    costView: transcript.costView,
   }
 }
 

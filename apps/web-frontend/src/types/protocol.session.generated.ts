@@ -336,6 +336,21 @@ export interface TurnCompletedEvent extends SessionEventEnvelope<"turn.completed
   readonly assistantText?: string
   readonly tokenUsage?: TokenUsage
   readonly modelSlug?: string
+  readonly costView?: CostSurfaceViewWire
+}
+
+export interface CostSurfaceViewWire {
+  readonly totalUsd: number
+  readonly estimatedUsd: number
+  readonly unpricedCalls: number
+  readonly promptTokens: number
+  readonly outputTokens: number
+  readonly cacheReadTokens: number
+  readonly cacheWriteTokens: number
+  readonly calls: number
+  readonly rootUsd: number
+  readonly subagentUsd: number
+  readonly modelSlug?: string
 }
 
 export interface TurnOutputDeltaEvent extends SessionEventEnvelope<"turn.output.delta"> {

@@ -1,3 +1,4 @@
+import type { CostSurfaceViewWire } from "./types/protocol.session.generated"
 import { memo, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react"
 import {
   AgentStatePanel,
@@ -118,6 +119,8 @@ interface SessionChromeProps {
   readonly resolvedConnection: { url: string; token?: string } | null
   readonly sessionState: SessionStateView | null
   readonly tokenUsage: CumulativeTokenUsage
+  /** A7 — cumulative cost snapshot (replace-semantics); null keeps the legacy pill. */
+  readonly costView: CostSurfaceViewWire | null
   readonly canRestartDaemon: boolean
   readonly onCancel?: () => void
   readonly onSetPermission?: (mode: string) => void
@@ -366,6 +369,7 @@ export const App = (): JSX.Element => {
     appendClientMessage,
     modelSlug,
     tokenUsage,
+    costView,
   } = useSessionEvents(client)
   const [learnedSessionId, setLearnedSessionId] = useState<string | null>(() => client.sessionId)
   useEffect(() => {
@@ -1110,6 +1114,7 @@ export const App = (): JSX.Element => {
         resolvedConnection={resolvedConnection}
         sessionState={sessionState ?? null}
         tokenUsage={tokenUsage}
+        costView={costView}
         canRestartDaemon={canRestartDaemon}
         onCancel={sendCancel}
         onSetPermission={onSetPermission}
@@ -1235,6 +1240,7 @@ const SessionChrome = memo(
     resolvedConnection,
     sessionState,
     tokenUsage,
+    costView,
     canRestartDaemon,
     onCancel,
     onSetPermission,
@@ -1259,7 +1265,7 @@ const SessionChrome = memo(
               wsUrl={resolvedConnection?.url ?? null}
               connected={connection.kind === "connected"}
             />
-            <TokenCounter usage={tokenUsage} />
+            <TokenCounter usage={tokenUsage} costView={costView} />
             <ModeBadge
               state={sessionState}
               {...(onSetPermission !== undefined ? { onSetPermission } : {})}
