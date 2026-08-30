@@ -82,7 +82,7 @@ describe("population floor", () => {
     ).not.toThrow()
   })
 
-  test("git-hook local env cannot redirect reach to an unrelated empty index", () => {
+  test("git-hook local env cannot redirect reach or disable the worktree", () => {
     const fx = build()
     const poison = mkdtempSync(join(tmpdir(), "scan-pop-empty-index-"))
     made.push(poison)
@@ -107,7 +107,12 @@ describe("population floor", () => {
       assertScanPopulation(walk(fx.root), fx.root, {
         id: "fx",
         baselinePath: fx.pin(2),
-        gitEnv: { ...process.env, GIT_INDEX_FILE: emptyIndex },
+        gitEnv: {
+          ...process.env,
+          GIT_DIR: join(poison, ".git"),
+          GIT_IMPLICIT_WORK_TREE: "0",
+          GIT_INDEX_FILE: emptyIndex,
+        },
       }),
     ).not.toThrow()
   })

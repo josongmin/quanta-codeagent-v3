@@ -48,9 +48,14 @@ const trackedCache = new Map<string, ReadonlySet<string>>()
 const GIT_REPOSITORY_ENV = [
   "GIT_ALTERNATE_OBJECT_DIRECTORIES",
   "GIT_COMMON_DIR",
+  "GIT_CONFIG",
+  "GIT_CONFIG_COUNT",
+  "GIT_CONFIG_PARAMETERS",
   "GIT_DIR",
   "GIT_GRAFT_FILE",
+  "GIT_IMPLICIT_WORK_TREE",
   "GIT_INDEX_FILE",
+  "GIT_NO_REPLACE_OBJECTS",
   "GIT_OBJECT_DIRECTORY",
   "GIT_PREFIX",
   "GIT_REPLACE_REF_BASE",
@@ -58,22 +63,18 @@ const GIT_REPOSITORY_ENV = [
   "GIT_WORK_TREE",
 ] as const
 
-const ambientRepoGitEnv = (
-  source: Readonly<Record<string, string | undefined>>,
-): Record<string, string | undefined> => {
-  const env = { ...source }
-  for (const key of GIT_REPOSITORY_ENV) delete env[key]
-  return env
-}
-
 const gitOutput = (
   cwd: string,
   args: readonly string[],
   sourceEnv: Readonly<Record<string, string | undefined>>,
 ): string => {
-  const out = Bun.spawnSync(["git", ...args], {
+  // Bun's `env` option overlays the parent environment; deleting a key from
+  // the object does NOT unset an inherited variable. `/usr/bin/env -u` is the
+  // process-boundary operation that actually removes hook-local Git state.
+  const unsets = GIT_REPOSITORY_ENV.flatMap((key) => ["-u", key])
+  const out = Bun.spawnSync(["/usr/bin/env", ...unsets, "git", ...args], {
     cwd,
-    env: ambientRepoGitEnv(sourceEnv),
+    env: { ...sourceEnv },
     stdout: "pipe",
     stderr: "pipe",
   })

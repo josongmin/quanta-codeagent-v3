@@ -34,6 +34,7 @@ import { join } from "node:path"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 const HOOK = join(REPO_ROOT, ".githooks", "pre-commit")
+const PUSH_HOOK = join(REPO_ROOT, ".githooks", "pre-push")
 
 const gitConfig = (key: string): string => {
   const r = Bun.spawnSync({ cmd: ["git", "config", "--get", key], cwd: REPO_ROOT })
@@ -143,5 +144,20 @@ describe("git pre-commit hook is installed and does what it claims", () => {
     expect(body.length).toBeGreaterThan(200)
     expect(body).not.toMatch(/git add\s+-u/)
     expect(body).toContain("--diff-filter=ACMR")
+  })
+})
+
+describe("git pre-push hook isolates the full gate suite from hook-local Git state", () => {
+  test("repository-local variables are unset before bun runs", () => {
+    const body = readFileSync(PUSH_HOOK, "utf8")
+      .split("\n")
+      .filter((line) => !line.trimStart().startsWith("#"))
+      .join("\n")
+    const enumerateAt = body.indexOf("git rev-parse --local-env-vars")
+    const unsetAt = body.indexOf('unset "$git_local_var"')
+    const prepushAt = body.indexOf("bun run prepush --bail")
+    expect(enumerateAt).toBeGreaterThanOrEqual(0)
+    expect(unsetAt).toBeGreaterThan(enumerateAt)
+    expect(prepushAt).toBeGreaterThan(unsetAt)
   })
 })

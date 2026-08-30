@@ -28,6 +28,16 @@ set -e
 # No bun in this checkout ⇒ never block a push on a missing toolchain.
 command -v bun >/dev/null 2>&1 || exit 0
 
+# Git exports repository-local variables to hooks (GIT_DIR, GIT_INDEX_FILE,
+# GIT_IMPLICIT_WORK_TREE, ...). The gate suite creates fixture repositories and
+# runs local-index scans; inheriting the caller's index/gitdir can redirect a
+# fixture `git init` into THIS repository or make a real worktree look bare.
+# Git itself owns the variable list, so do not maintain a second hand-written
+# subset here. The hook has already entered the worktree before this point.
+for git_local_var in $(git rev-parse --local-env-vars); do
+  unset "$git_local_var"
+done
+
 echo "pre-push: running the full gate set (bun run prepush --bail)."
 echo "          minutes, not seconds — bypass once with: git push --no-verify"
 
