@@ -455,6 +455,20 @@ describe("/skills: callback non-Error rejection coerced cleanly (no 'undefined' 
   })
 })
 
+const containsLoneSurrogate = (text: string): boolean => {
+  for (let index = 0; index < text.length; index++) {
+    const code = text.charCodeAt(index)
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = text.charCodeAt(index + 1)
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return true
+      index += 1
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      return true
+    }
+  }
+  return false
+}
+
 describe("/skills: grapheme-aware truncation (no emoji / surrogate splitting)", () => {
   test("emoji at the truncation boundary is NOT split mid-codepoint", async () => {
     const cap: CapturedCtx = { out: "", err: "" }
@@ -474,20 +488,7 @@ describe("/skills: grapheme-aware truncation (no emoji / surrogate splitting)", 
     expect(match).not.toBeNull()
     const rendered = match?.[1] ?? ""
     // Lone-surrogate detection: scan for unpaired surrogates.
-    let hasLoneSurrogate = false
-    for (let i = 0; i < rendered.length; i++) {
-      const code = rendered.charCodeAt(i)
-      if (code >= 0xd800 && code <= 0xdbff) {
-        // high surrogate — must be followed by a low surrogate
-        const next = rendered.charCodeAt(i + 1)
-        if (!(next >= 0xdc00 && next <= 0xdfff)) hasLoneSurrogate = true
-        i++ // skip the low surrogate we just verified
-      } else if (code >= 0xdc00 && code <= 0xdfff) {
-        // low surrogate not preceded by a high surrogate
-        hasLoneSurrogate = true
-      }
-    }
-    expect(hasLoneSurrogate).toBe(false)
+    expect(containsLoneSurrogate(rendered)).toBe(false)
     expect(rendered).toContain("...")
   })
 
