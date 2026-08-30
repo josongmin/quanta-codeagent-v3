@@ -21,7 +21,6 @@
     "tests/unit/runtime-config-no-dead-knob-ratchet.test.ts",
     "tests/unit/runtime/exec-cluster-spawn-env-scrub-ban-hellgate.test.ts",
     "tests/unit/slice-boundary-config-parity.test.ts",
-    "tests/unit/src-no-sketchy-code.test.ts",
     "tests/unit/tool-surface-manifest-hellgate.test.ts"
   ],
   "externalCorpus": [
@@ -427,6 +426,9 @@
     ],
     "tests/unit/knob-registry-completeness-ratchet-hellgate.test.ts": [
       "tests/unit/knob-registry-completeness-ratchet-hellgate.test.ts#SRC"
+    ],
+    "tests/unit/src-no-sketchy-code.test.ts": [
+      "tests/unit/src-no-sketchy-code.test.ts#SRC"
     ]
   }
 }

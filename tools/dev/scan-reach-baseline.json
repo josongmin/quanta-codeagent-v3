@@ -427,6 +427,9 @@
     },
     "tests/unit/knob-registry-completeness-ratchet-hellgate.test.ts#SRC": {
       "walked": 3357
+    },
+    "tests/unit/src-no-sketchy-code.test.ts#SRC": {
+      "walked": 3357
     }
   }
 }
