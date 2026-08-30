@@ -74,11 +74,25 @@ const isSshReadinessProbe = (cmd: string, args: readonly string[]): boolean =>
 
 type SpawnRule = {
   readonly matches: (cmd: string, args: readonly string[]) => boolean
-  readonly result: () => SpawnResult
+  readonly result: (args: readonly string[]) => SpawnResult
 }
 
 const commandWith = (command: string, argument: string) => (cmd: string, args: readonly string[]) =>
   cmd === command && args.includes(argument)
+
+const respondWithRules =
+  (rules: readonly SpawnRule[]) =>
+  (cmd: string, args: readonly string[]): SpawnResult =>
+    rules.find((rule) => rule.matches(cmd, args))?.result(args) ?? ok()
+
+const standardEc2ProvisioningRules = (): readonly SpawnRule[] => [
+  { matches: commandWith("curl", "ifconfig.me"), result: () => ok("203.0.113.7") },
+  { matches: commandWith("aws", "describe-security-groups"), result: () => ok("sg-1") },
+  { matches: ssmAmiLookup, result: () => ok(`${ssmAmi}\n`) },
+  { matches: commandWith("aws", "run-instances"), result: () => ok("i-1") },
+  { matches: commandWith("aws", "describe-instances"), result: () => ok("1.2.3.4") },
+  { matches: isSshReadinessProbe, result: () => ok("READY") },
+]
 
 /** The normal EC2 world used by launch-path tests. Exceptional provider states
  * stay in the individual tests; this fixture owns only the successful wire. */
@@ -101,7 +115,7 @@ const successfulEc2Response =
         },
       },
     ]
-    return rules.find((rule) => rule.matches(cmd, args))?.result() ?? ok()
+    return rules.find((rule) => rule.matches(cmd, args))?.result(args) ?? ok()
   }
 
 // ── spawnWithProc leak-safety (FIX A) ───────────────────────────────────────
@@ -490,16 +504,19 @@ describe("ec2 backend", () => {
   })
 
   test("authorize-ingress DUPLICATE error is tolerated (rule already present)", async () => {
-    const { spawn, issued } = makeMockSpawn((cmd, args) => {
-      if (cmd === "curl") return ok("203.0.113.7")
-      if (cmd === "aws" && args.includes("describe-security-groups")) return ok("sg-1")
-      if (cmd === "aws" && args.includes("authorize-security-group-ingress"))
-        return { code: 255, stdout: "", stderr: "InvalidPermission.Duplicate: rule already exists" }
-      if (ssmAmiLookup(cmd, args)) return ok(`${ssmAmi}\n`)
-      if (cmd === "aws" && args.includes("run-instances")) return ok("i-1")
-      if (cmd === "aws" && args.includes("describe-instances")) return ok("1.2.3.4")
-      return ok()
-    })
+    const { spawn, issued } = makeMockSpawn(
+      respondWithRules([
+        {
+          matches: commandWith("aws", "authorize-security-group-ingress"),
+          result: () => ({
+            code: 255,
+            stdout: "",
+            stderr: "InvalidPermission.Duplicate: rule already exists",
+          }),
+        },
+        ...standardEc2ProvisioningRules(),
+      ]),
+    )
     const backend = createEc2Backend({
       spawn,
       sleep: async () => {},
@@ -525,25 +542,19 @@ describe("ec2 backend", () => {
 
   test("falls back to next instance type on InsufficientInstanceCapacity (no AZ pin)", async () => {
     const launched: string[] = []
-    const { spawn } = makeMockSpawn((cmd, args) => {
-      if (cmd === "curl") return ok("203.0.113.7")
-      if (cmd === "aws" && args.includes("describe-security-groups")) return ok("sg-1")
-      if (ssmAmiLookup(cmd, args)) return ok(`${ssmAmi}\n`)
-      if (cmd === "aws" && args.includes("run-instances")) {
-        const it = args[args.indexOf("--instance-type") + 1] ?? ""
-        launched.push(it)
-        if (it === "c7i.4xlarge")
-          return { code: 254, stdout: "", stderr: "InsufficientInstanceCapacity" }
-        return ok("i-fallback")
-      }
-      if (cmd === "aws" && args.includes("describe-instances")) return ok("1.2.3.4")
-      // waitForSsh probes `ssh … echo READY` and gates on /READY/ in stdout (the
-      // committed ssh-ready + cloud-init poll); the old mock only handled a
-      // `test -f` probe ⇒ empty stdout ⇒ 90 retries ⇒ throw. Match the real probe.
-      if (cmd === "ssh" && args.some((a) => a.includes("echo READY") || a.includes("test -f")))
-        return ok("READY")
-      return ok()
-    })
+    const fallbackRule: SpawnRule = {
+      matches: commandWith("aws", "run-instances"),
+      result: (args) => {
+        const instanceType = args[args.indexOf("--instance-type") + 1] ?? ""
+        launched.push(instanceType)
+        return instanceType === "c7i.4xlarge"
+          ? { code: 254, stdout: "", stderr: "InsufficientInstanceCapacity" }
+          : ok("i-fallback")
+      },
+    }
+    const { spawn } = makeMockSpawn(
+      respondWithRules([fallbackRule, ...standardEc2ProvisioningRules()]),
+    )
     await createEc2Backend({ spawn, sleep: async () => {} })
       .grade("/tmp/p.jsonl", { datasetPath: "/tmp/d.jsonl", runId: "r" })
       .catch(() => undefined)
@@ -660,20 +671,23 @@ describe("ec2 backend", () => {
       require("node:path").join(require("node:os").tmpdir(), "ec2-sg-"),
     )
     const reportPath = require("node:path").join(outDir, "quanta.r.json")
-    const { spawn, issued } = makeMockSpawn((cmd, args) => {
-      if (cmd === "curl") return ok("203.0.113.7")
-      if (cmd === "aws" && args.includes("describe-security-groups")) return ok("sg-existing")
-      if (ssmAmiLookup(cmd, args)) return ok(`${ssmAmi}\n`)
-      if (cmd === "aws" && args.includes("run-instances")) return ok("i-1")
-      if (cmd === "aws" && args.includes("describe-instances")) return ok("1.1.1.1")
-      if (cmd === "ssh" && args.some((a) => a.includes("echo READY") || a.includes("test -f")))
-        return ok("READY")
-      if (cmd === "scp" && args.some((a) => a === reportPath)) {
-        require("node:fs").writeFileSync(reportPath, JSON.stringify(SAMPLE_REPORT))
-        return ok()
-      }
-      return ok()
-    })
+    const { spawn, issued } = makeMockSpawn(
+      respondWithRules([
+        {
+          matches: commandWith("aws", "describe-security-groups"),
+          result: () => ok("sg-existing"),
+        },
+        { matches: commandWith("aws", "describe-instances"), result: () => ok("1.1.1.1") },
+        {
+          matches: commandWith("scp", reportPath),
+          result: () => {
+            require("node:fs").writeFileSync(reportPath, JSON.stringify(SAMPLE_REPORT))
+            return ok()
+          },
+        },
+        ...standardEc2ProvisioningRules(),
+      ]),
+    )
     const backend = createEc2Backend({ spawn, sleep: async () => {} })
     await backend.grade("/p.jsonl", { datasetPath: "/d.jsonl", runId: "r", outDir })
     expect(issued.some((i) => i.cmd === "aws" && i.args.includes("create-security-group"))).toBe(
@@ -684,16 +698,15 @@ describe("ec2 backend", () => {
   })
 
   test("terminates the box even when grading throws (no leaked billable instance)", async () => {
-    const { spawn, issued } = makeMockSpawn((cmd, args) => {
-      if (cmd === "curl") return ok("203.0.113.7")
-      if (cmd === "aws" && args.includes("describe-security-groups")) return ok("sg-1")
-      if (ssmAmiLookup(cmd, args)) return ok(`${ssmAmi}\n`)
-      if (cmd === "aws" && args.includes("run-instances")) return ok("i-leak")
-      if (cmd === "aws" && args.includes("describe-instances")) return ok("1.1.1.1")
-      // report never appears → ssh backend throws
-      if (cmd === "ssh" && args.some((a) => a.includes("test -f"))) return ok("WAIT")
-      return ok()
-    })
+    const { spawn, issued } = makeMockSpawn(
+      respondWithRules([
+        { matches: commandWith("aws", "run-instances"), result: () => ok("i-leak") },
+        { matches: commandWith("aws", "describe-instances"), result: () => ok("1.1.1.1") },
+        // report never appears → ssh backend throws
+        { matches: commandWith("ssh", "test -f"), result: () => ok("WAIT") },
+        ...standardEc2ProvisioningRules(),
+      ]),
+    )
     const backend = createEc2Backend({
       spawn,
       sleep: async () => {},
