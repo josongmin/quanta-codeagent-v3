@@ -313,6 +313,20 @@ const attachDaemonCostProjection = (
   }
 }
 
+/** Build the daemon readout projection over the shared, live session. `/cost`
+ * receives authority totals plus its event-derived turn tally; the other
+ * readouts stay owned by the runtime compose surface. */
+const buildDaemonReadoutSurface = (
+  runtime: RuntimeFacade,
+  sharedSession: RuntimeSession,
+  cost: () => CostReadoutTotals,
+): WebReadoutSources =>
+  buildDaemonReadoutSources({
+    runtime,
+    threadId: sharedSession.sessionId,
+    cost,
+  })
+
 /** Tear the two goal surfaces down together: cancel the autonomous wake, then
  *  DRAIN in-flight user goal turns (bounded inside `settled()` — a turn that
  *  never settles must not wedge `stop()`). */
@@ -453,13 +467,6 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
   // was subscribed (byte-identical legacy client-owned continuation).
   let approvalContinuationUnsub = setupApprovalContinuation(sharedSession, process.env).unsub
 
-  // UUX-1-11 — readout sources for `GET /readout/:name`. The production
-  // runtime-factory exposes a `readoutSources` getter (agents / plan / skills /
-  // memory / context over the SAME live session collaborators); duck-read it so
-  // a test stub facade simply degrades every readout to the honest
-  // missing-source line. `/cost` projects the runtime's canonical usage
-  // authority HERE; only its turn tally comes from `turn.completed` events.
-  // A7 — /cost + turn tally as ONE projection attachment (see the helper).
   const cost = attachDaemonCostProjection(runtime, sharedSession)
   let costAggregatorUnsub: (() => void) | null = cost.unsub
   // P1 Phase 1 — persist the LOSSLESS Message[] transcript to the @/session
@@ -488,11 +495,7 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
     runtime,
     ...(goalWake !== undefined ? { goalWake } : {}),
   })
-  const readoutSources = buildDaemonReadoutSources({
-    runtime,
-    threadId: sharedSession.sessionId,
-    cost: cost.totals,
-  })
+  const readoutSources = buildDaemonReadoutSurface(runtime, sharedSession, cost.totals)
 
   const { server, boundPort, boundHost } = buildDaemonListener({
     config: {
