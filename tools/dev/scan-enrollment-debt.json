@@ -12,7 +12,6 @@
     "tests/unit/apps/bench/terminal/tb-2-0-retirement.test.ts",
     "tests/unit/cli/cli-feature-gates-drift-hellgate.test.ts",
     "tests/unit/feature-catalog-reachability.test.ts",
-    "tests/unit/host/bootstrap-host-extraction-hellgate.test.ts",
     "tests/unit/knob-registry-completeness-ratchet-hellgate.test.ts",
     "tests/unit/lint-debt-ratchet-reach.test.ts",
     "tests/unit/no-benchmark-overfit-steer-ratchet.test.ts",
@@ -422,6 +421,10 @@
     ],
     "tests/unit/observability/vocabulary-migration.test.ts": [
       "tests/unit/observability/vocabulary-migration.test.ts#SRC"
+    ],
+    "tests/unit/host/bootstrap-host-extraction-hellgate.test.ts": [
+      "tests/unit/host/bootstrap-host-extraction-hellgate.test.ts#CLI-REPL",
+      "tests/unit/host/bootstrap-host-extraction-hellgate.test.ts#HOST-BOOTSTRAP"
     ]
   }
 }

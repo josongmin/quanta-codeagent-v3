@@ -80,21 +80,6 @@
       ]
     },
     {
-      "file": "tests/unit/host/bootstrap-host-extraction-hellgate.test.ts",
-      "klass": "A-recursive-walk",
-      "enumerators": [
-        "readdirSync"
-      ],
-      "recursive": true,
-      "absolutePaths": true,
-      "derived": false,
-      "roots": 1,
-      "floorLines": [
-        "554: expect(files.length).toBeGreaterThanOrEqual(3)",
-        "666: expect(identityCalls).toBeGreaterThanOrEqual(1)"
-      ]
-    },
-    {
       "file": "tests/unit/lint-debt-ratchet-reach.test.ts",
       "klass": "A-recursive-walk",
       "enumerators": [

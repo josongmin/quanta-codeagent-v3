@@ -418,6 +418,12 @@
     },
     "tests/unit/observability/vocabulary-migration.test.ts#SRC": {
       "walked": 3656
+    },
+    "tests/unit/host/bootstrap-host-extraction-hellgate.test.ts#CLI-REPL": {
+      "walked": 113
+    },
+    "tests/unit/host/bootstrap-host-extraction-hellgate.test.ts#HOST-BOOTSTRAP": {
+      "walked": 11
     }
   }
 }
