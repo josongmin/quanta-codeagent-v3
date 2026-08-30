@@ -41,6 +41,15 @@ const fakeAdapterTransport = (): DapTransport => {
           })
         const respond = (body?: unknown, ok = true, message?: string) =>
           respondTo(req.seq, req.command, body, ok, message)
+        const finishConfiguration = (): void => {
+          if (!bpSet) {
+            respond(undefined, false, "no bp")
+            return
+          }
+          respond()
+          if (deferredLaunchSeq !== undefined) respondTo(deferredLaunchSeq, "launch")
+          send({ type: "event", event: "stopped", body: { reason: "breakpoint", threadId: 1 } })
+        }
         switch (req.command) {
           // Faithful to real debugpy: launch response DEFERRED until configurationDone.
           case "initialize":
@@ -60,13 +69,7 @@ const fakeAdapterTransport = (): DapTransport => {
             }
             break
           case "configurationDone":
-            if (!bpSet) {
-              respond(undefined, false, "no bp")
-              break
-            }
-            respond()
-            if (deferredLaunchSeq !== undefined) respondTo(deferredLaunchSeq, "launch")
-            send({ type: "event", event: "stopped", body: { reason: "breakpoint", threadId: 1 } })
+            finishConfiguration()
             break
           case "threads":
             respond({ threads: [{ id: 1, name: "main" }] })
