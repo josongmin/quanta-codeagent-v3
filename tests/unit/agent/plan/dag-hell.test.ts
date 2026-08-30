@@ -56,6 +56,21 @@ const tenByTenGridItems = (): TodoItem[] => {
   return items
 }
 
+const fiveTreeForestItems = (): TodoItem[] => {
+  const items: TodoItem[] = []
+  for (let tree = 0; tree < 5; tree++) {
+    const root = `T${tree}_root`
+    items.push(todo(root))
+    let previous = root
+    for (let depth = 0; depth < 4; depth++) {
+      const id = `T${tree}_L${depth}`
+      items.push(todo(id, [previous]))
+      previous = id
+    }
+  }
+  return items
+}
+
 // ── self-dependency ───────────────────────────────────────────────────────
 
 describe("validateDag: self_dependency", () => {
@@ -225,17 +240,7 @@ describe("topologicalSort: acyclic graphs", () => {
   })
 
   test("multi-source forest: 5 disjoint trees of depth 5 sorted deterministically", () => {
-    const items: TodoItem[] = []
-    for (let i = 0; i < 5; i++) {
-      const root = `T${i}_root`
-      items.push(todo(root))
-      let prev = root
-      for (let d = 0; d < 4; d++) {
-        const nid = `T${i}_L${d}`
-        items.push(todo(nid, [prev]))
-        prev = nid
-      }
-    }
+    const items = fiveTreeForestItems()
     const out = topologicalSort(build(items))
     if (!Array.isArray(out)) throw new Error("expected array, got cycle")
     expect(out.length).toBe(25)
