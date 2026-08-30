@@ -85,6 +85,33 @@ const renderApplied = (
   )
 }
 
+type TerminalEvent = Extract<ToolEvent, { type: "result" }>
+
+type ValidRenameRequest = { input: LspRenameApplyInput } | { failure: TerminalEvent }
+
+type ResolvedRenameAnchor = { path: string } | { failure: TerminalEvent }
+
+const failure = (output: string): TerminalEvent => ({
+  type: "result",
+  result: { ok: false, output },
+})
+
+const validateRenameRequest = (input: unknown, ctx: CoreToolContext): ValidRenameRequest => {
+  const parsed = lspRenameApplyInputSchema.safeParse(input)
+  if (!parsed.success) return { failure: failure(`invalid input: ${parsed.error.message}`) }
+  if (ctx.signal.aborted) return { failure: failure("aborted before start") }
+  return { input: parsed.data }
+}
+
+const resolveRenameAnchor = (input: LspRenameApplyInput, cwd: string): ResolvedRenameAnchor => {
+  try {
+    return { path: resolveJailed(input.path, cwd) }
+  } catch (error) {
+    if (error instanceof FsJailError) return { failure: failure(error.message) }
+    throw error
+  }
+}
+
 // ── Factory ─────────────────────────────────────────────────────────────────
 
 export const lspRenameApplyTool = (port: RenameApplyPort): Tool<LspRenameApplyInput> => ({
@@ -99,39 +126,27 @@ export const lspRenameApplyTool = (port: RenameApplyPort): Tool<LspRenameApplyIn
   isConcurrencySafe: () => false,
   hitlTier: () => "always-confirm",
   async *execute(input, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
-    const parsed = lspRenameApplyInputSchema.safeParse(input)
-    if (!parsed.success) {
-      yield {
-        type: "result",
-        result: { ok: false, output: `invalid input: ${parsed.error.message}` },
-      }
+    const request = validateRenameRequest(input, ctx)
+    if ("failure" in request) {
+      yield request.failure
       return
     }
-    if (ctx.signal.aborted) {
-      yield { type: "result", result: { ok: false, output: "aborted before start" } }
+    const anchor = resolveRenameAnchor(request.input, ctx.cwd)
+    if ("failure" in anchor) {
+      yield anchor.failure
       return
-    }
-    let abs: string
-    try {
-      abs = resolveJailed(parsed.data.path, ctx.cwd)
-    } catch (e) {
-      if (e instanceof FsJailError) {
-        yield { type: "result", result: { ok: false, output: e.message } }
-        return
-      }
-      throw e
     }
     yield {
       type: "progress",
-      message: `lsp_rename_apply: computing rename of ${parsed.data.path}:${parsed.data.line}:${parsed.data.character} → ${parsed.data.newName}`,
+      message: `lsp_rename_apply: computing rename of ${request.input.path}:${request.input.line}:${request.input.character} → ${request.input.newName}`,
     }
     let edit: RenameApplyPortWorkspaceEdit | null
     try {
       edit = await port.computeRename(
-        abs,
-        parsed.data.line - 1,
-        parsed.data.character - 1,
-        parsed.data.newName,
+        anchor.path,
+        request.input.line - 1,
+        request.input.character - 1,
+        request.input.newName,
         ctx.signal,
       )
     } catch (e) {
@@ -149,7 +164,7 @@ export const lspRenameApplyTool = (port: RenameApplyPort): Tool<LspRenameApplyIn
         type: "result",
         result: {
           ok: false,
-          output: `${parsed.data.path}:${parsed.data.line}:${parsed.data.character}: rename not available`,
+          output: `${request.input.path}:${request.input.line}:${request.input.character}: rename not available`,
         },
       }
       return
@@ -159,7 +174,7 @@ export const lspRenameApplyTool = (port: RenameApplyPort): Tool<LspRenameApplyIn
         type: "result",
         result: {
           ok: true,
-          output: `${parsed.data.path}:${parsed.data.line}:${parsed.data.character}: rename produced no edits (symbol unused)`,
+          output: `${request.input.path}:${request.input.line}:${request.input.character}: rename produced no edits (symbol unused)`,
         },
       }
       return
@@ -193,10 +208,10 @@ export const lspRenameApplyTool = (port: RenameApplyPort): Tool<LspRenameApplyIn
       result: {
         ok: true,
         output: renderApplied(
-          parsed.data.path,
-          parsed.data.line,
-          parsed.data.character,
-          parsed.data.newName,
+          request.input.path,
+          request.input.line,
+          request.input.character,
+          request.input.newName,
           edit,
         ),
       },
