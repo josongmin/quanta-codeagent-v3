@@ -85,6 +85,10 @@ export const renderGoalDomain = (
     `remaining: ${remaining.length === 0 ? "none" : remaining.join(", ")}   next: ${objective.nextActions[0] ?? "none"}   blocked: ${objective.blockers[0]?.waitingOn ?? "none"}${objective.blockerObservations[0] === undefined ? "" : ` (observing ${objective.blockerObservations[0].distinctAttemptIds.length}/3)`}\n` +
     blockerLines(objective) +
     `budget: ${budget.turnsUsed}/${budget.maxTurns ?? "∞"} turns · ${budget.tokensUsed}/${budget.maxTokens ?? "∞"} tokens` +
+    // GOAL P1-D — WHICH bound applies. The store derives this precisely so a
+    // surface can say whether raising the budget could help; until now nothing
+    // read it, so the operator saw counters and had to guess.
+    (budget.limitedBy === undefined ? "" : ` · limited by: ${budget.limitedBy}`) +
     (last === undefined
       ? "   last attempt: none\n"
       : `   last attempt: ${last.turnOutcome} · ${age(last.recordedAt, now)} (attempt ${short(last.attemptKey)})\n`) +

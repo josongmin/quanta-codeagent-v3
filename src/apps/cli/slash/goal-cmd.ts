@@ -1,3 +1,4 @@
+import type { BudgetLimitSource } from "@/objective"
 import type { SlashCommand, SlashContext } from "../slash-contract"
 import { renderGoalDomain } from "./goal-render"
 import { buildGoalControl } from "./objective"
@@ -39,10 +40,24 @@ const parseBudget = (args: readonly string[]): { maxTokens?: number; maxTurns?: 
   return Object.keys(result).length === 0 ? null : result
 }
 
-const resumeLabel = (status: string): string => {
+/** GOAL P1-D — a `budget_limited` goal has THREE possible bounds and only one
+ *  of them is recoverable by an amendment. Telling an operator to raise a
+ *  budget that the product caps anyway sends them to do the one thing
+ *  guaranteed not to work. */
+const budgetLimitLabel = (limitedBy: BudgetLimitSource | undefined): string => {
+  if (limitedBy === "product-hard-cap") {
+    return "Cannot resume: the product autonomous attempt cap is exhausted; raising the budget will not help. Start fresh goal work, or edit the goal."
+  }
+  if (limitedBy === "product-budget-ceiling") {
+    return "Cannot resume: this goal reached the product ceiling on a single goal's spend; raising the budget will not help. Edit the goal or start a new one."
+  }
+  return "Cannot resume: increase budget or edit the goal."
+}
+
+const resumeLabel = (status: string, limitedBy: BudgetLimitSource | undefined): string => {
   if (status === "active") return "Goal resumed."
   if (status === "blocked") return "Cannot resume: clear blocker first."
-  if (status === "budget_limited") return "Cannot resume: increase budget or edit the goal."
+  if (status === "budget_limited") return budgetLimitLabel(limitedBy)
   if (status === "usage_limited") return "Cannot resume until the usage limit expires."
   if (status === "completed") return "Cannot resume a completed goal; edit or create a new goal."
   return "Goal remains paused."
@@ -50,7 +65,8 @@ const resumeLabel = (status: string): string => {
 
 const handleResume = (ctx: SlashContext, control: GoalControl): number => {
   const outcome = control.resume()
-  const label = resumeLabel(outcome.domain.state?.objective.status ?? "paused")
+  const objective = outcome.domain.state?.objective
+  const label = resumeLabel(objective?.status ?? "paused", objective?.budget.limitedBy)
   if (outcome.kind !== "ok") return fail(ctx, label)
   ctx.out(`${label}\n`)
   return 0
