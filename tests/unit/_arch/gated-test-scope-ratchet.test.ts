@@ -61,6 +61,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
+import { GATES } from "@/../tools/dev/gate-manifest"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 
@@ -219,27 +220,51 @@ export const reachableByAnyScript = (
  * concrete sub-directory, so `"apps"` cannot be satisfied by the word "apps"
  * appearing incidentally in some unrelated script.
  */
-const OUT_OF_BAND: Readonly<
-  Record<string, { readonly runner: string; readonly path: string; readonly why: string }>
-> = {
+/**
+ * Directories whose tests a positional gate does not select.
+ *
+ * `runner` alone was the whole contract, and it proved only that an npm script
+ * exists and mentions the path. Measured 2026-08-30: `apps/web-frontend` sat here
+ * with a working runner — 79 files, 744 tests, 4.3s, all green — that NO gate and
+ * no workflow ran. "Out of band" had come to mean "there is a script for it",
+ * which is not the same as "it runs anywhere that matters", and that is the exact
+ * defect phase E of the scan-evidence plan named: test files no gate runs.
+ *
+ * So each entry now states which it is. `gate` names a real id in
+ * `tools/dev/gate-manifest.ts`; `ungated` is a deliberate exclusion with its
+ * reason. Exactly one of the two, because an entry with neither is the hole above
+ * and an entry with both is a contradiction about whether it runs.
+ */
+type OutOfBand = {
+  readonly runner: string
+  readonly path: string
+  readonly why: string
+} & ({ readonly gate: string } | { readonly ungated: string })
+
+const OUT_OF_BAND: Readonly<Record<string, OutOfBand>> = {
   "tests/e2e-pty": {
     runner: "e2e:pty",
     path: "tests/e2e-pty",
+    gate: "e2e-pty",
     why: "raw-mode interactive CLI e2e — needs a real pty (FFI openpty), which the normal runner cannot provide.",
   },
   "tests/smoke": {
     runner: "smoke",
     path: "tests/smoke",
+    ungated:
+      "drives a real agent loop with recorded replay; minutes of wall clock and deliberately off the per-commit path.",
     why: "the smoke battery drives a real agent loop with recorded tool/LLM replay; deliberately off the per-commit path.",
   },
   "tests/eval": {
     runner: "eval:retrieval",
     path: "tests/eval",
+    ungated: "hits LIVE provider APIs and costs money — a gate that spends money is not a gate.",
     why: "retrieval embedder/reranker evals hit LIVE provider APIs and cost money; run deliberately, never on a gate.",
   },
   "apps/web-frontend": {
     runner: "test:web-frontend",
     path: "apps/web-frontend",
+    gate: "web-frontend",
     // CORRECTED 2026-08-27 after audit. The original entry said `bun test` runs
     // 0 of these files because it cannot resolve `vitest`. That is false and was
     // never measured: `bun test ./apps/` runs all 77 files, 732 tests, and 18
@@ -371,6 +396,51 @@ describe("gated test scope", () => {
         : "these gate positionals match NO test file — the gate runs them and reports success " +
             "over nothing. Fix the path in package.json.",
     ).toEqual([])
+  })
+
+  test("🔴 every out-of-band directory is GATED, or says why it is not", () => {
+    // The hole this closes, measured: `apps/web-frontend` claimed a runner that
+    // works — 79 files, 744 tests, 4.3s, all green — and NO gate or workflow ran
+    // it. The old contract only proved the script existed and named the path, so
+    // "out of band" quietly became "there is a script for it".
+    const ids = new Set(GATES.map((g) => g.id))
+    expect(
+      ids.size,
+      "the gate manifest read is empty — this check would be vacuous",
+    ).toBeGreaterThan(10)
+    const broken: string[] = []
+    for (const [key, entry] of Object.entries(OUT_OF_BAND)) {
+      if ("gate" in entry) {
+        if (!ids.has(entry.gate))
+          broken.push(`${key}/ names gate \`${entry.gate}\`, which no manifest entry defines`)
+        continue
+      }
+      // An ungated exclusion is a decision, so it has to read like one. The
+      // placeholder shape is what a future entry would reach for.
+      if (entry.ungated.trim().length < 30)
+        broken.push(`${key}/ is ungated with no real reason given`)
+    }
+    expect(
+      broken,
+      broken.length === 0
+        ? ""
+        : "an out-of-band directory must name the gate that runs it or state why nothing does:\n  " +
+            broken.join("\n  "),
+    ).toEqual([])
+  })
+
+  test("🔴 a gate named by an out-of-band entry actually invokes its runner", () => {
+    // The second half. Naming a gate id that exists proves nothing if that gate
+    // runs something else — the same "a token appears somewhere" weakness the
+    // positional check above was written for.
+    for (const [key, entry] of Object.entries(OUT_OF_BAND)) {
+      if (!("gate" in entry)) continue
+      const gate = GATES.find((g) => g.id === entry.gate)
+      expect(
+        gate?.run.includes(entry.runner) ?? false,
+        `${key}/ names gate \`${entry.gate}\`, but that gate does not run \`${entry.runner}\``,
+      ).toBe(true)
+    }
   })
 
   test("no out-of-band entry is stale — each directory still exists and holds tests", () => {

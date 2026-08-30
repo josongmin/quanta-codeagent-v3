@@ -41,7 +41,7 @@
     "test:cov": "bun run typecheck && bun run test:clean-js && bun test --coverage tests/unit tests/integration --parallel=1",
     "test:eval": "bun run src/apps/bench/index.ts",
     "e2e:pty": "bun test tests/e2e-pty",
-    "test:web-frontend": "cd apps/web-frontend && ./node_modules/.bin/vitest run",
+    "test:web-frontend": "cd apps/web-frontend && ([ -x ./node_modules/.bin/vitest ] || bun install --frozen-lockfile) && ./node_modules/.bin/vitest run",
     "test:watch": "bun run test:clean-js && bun test --watch tests/unit --parallel=1",
     "smoke": "bun run tests/smoke/index.ts",
     "smoke:live": "bun run tests/smoke/index.ts --tier=live",

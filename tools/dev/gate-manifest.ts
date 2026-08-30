@@ -188,6 +188,12 @@ export const GATES: readonly Gate[] = [
     why: "the `*-real-e2e.test.ts` lane — 43 cases that run in NO other gate, because the env gate that keeps them out of the unit speed budget also kept them out of every gate",
   },
   {
+    id: "web-frontend",
+    stage: "prepush",
+    run: "bun run test:web-frontend",
+    why: "the SPA's 744 tests, which ran in NO gate — `bun test` cannot give them a verdict (it loads the files but supplies no DOM), so the positional gates skipped them and an out-of-band entry naming a working runner read as coverage. 4.3s under vitest",
+  },
+  {
     id: "pm-dod-ratchet",
     stage: "prepush",
     run: "bun run pm:gate",

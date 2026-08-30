@@ -135,6 +135,18 @@ jobs:
         # it is the likeliest place for a stray file to be written next to the
         # repo rather than into the harness's temp HOME.
         run: bun run tools/dev/worktree-pollution-guard.ts -- bun run e2e:pty
+      - name: web-frontend suite (vitest/jsdom — bun test cannot give it a verdict)
+        # 744 tests across 79 files that ran in NO gate until this step existed.
+        # `bun test` DOES load them — 732 tests, 18 failures — but supplies no DOM,
+        # so every failure is environment-shaped and none is a verdict. `vitest run`
+        # provides jsdom and finishes in 4.3s.
+        #
+        # The SPA has its own package.json and bun.lock and is NOT a root
+        # workspace, so nothing here installs it. The script installs from the
+        # lockfile when the binary is absent, which is what a fresh checkout is —
+        # without that the gate fails as "no such file" and reads as broken rather
+        # than as un-installed.
+        run: bun run test:web-frontend
       - name: real-toolchain e2e (opt-in lane — visible skips without the toolchain)
         # The `*-real-e2e.test.ts` lane is gated on QUANTA_REAL_TOOLCHAIN_E2E so it
         # cannot blow the per-test unit speed budget on a developer machine that
