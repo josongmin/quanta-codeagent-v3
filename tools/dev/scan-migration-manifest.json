@@ -21,18 +21,6 @@
       ]
     },
     {
-      "file": "tests/unit/cli/cli-feature-gates-drift-hellgate.test.ts",
-      "klass": "A-recursive-walk",
-      "enumerators": [],
-      "recursive": true,
-      "absolutePaths": false,
-      "derived": false,
-      "roots": 0,
-      "floorLines": [
-        "110: ).toBeGreaterThan(3000)"
-      ]
-    },
-    {
       "file": "tests/unit/realtime/voice-session-hellgate.test.ts",
       "klass": "A-recursive-walk",
       "enumerators": [

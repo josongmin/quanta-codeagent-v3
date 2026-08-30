@@ -501,6 +501,9 @@
     "tests/unit/_arch/ts-exports-ssot.test.ts#TOOLS": {
       "walked": 98,
       "matched": 3
+    },
+    "tests/unit/cli/cli-feature-gates-drift-hellgate.test.ts#SRC": {
+      "walked": 3656
     }
   }
 }
