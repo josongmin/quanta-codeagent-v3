@@ -66,45 +66,43 @@ const mkHostileReason = (rng: () => number): string => {
   return s
 }
 
+const expectedPrefix = (layer: string, pillar: string | undefined): string =>
+  pillar !== undefined
+    ? `[denied · layer=${layer} · pillar=${pillar}] `
+    : `[denied · layer=${layer}] `
+
+const assertNoHostilePrefixLeak = (seed: number): void => {
+  const rng = lcg(seed * 2654435761)
+  const layer = pick(rng, DENY_LAYERS)
+  const pillar = rng() < 0.5 ? pick(rng, DENY_PILLARS) : undefined
+  const safeReason = mkHostileReason(rng)
+  const record = structuredDenyReason({
+    layer,
+    safeReason,
+    ...(pillar !== undefined ? { pillar } : {}),
+  })
+  const prefix = denyContentPrefix(record)
+  const expected = expectedPrefix(layer, pillar)
+  if (prefix !== expected) {
+    throw new Error(
+      `P1 prefix drift: got ${JSON.stringify(prefix)} want ${JSON.stringify(expected)}`,
+    )
+  }
+  expect(prefix).toBe(expected)
+  for (const fragment of HOSTILE_FRAGMENTS) {
+    const mustNotLeak =
+      safeReason.includes(fragment) && fragment.length > 4 && !expected.includes(fragment)
+    if (!mustNotLeak) continue
+    if (prefix.includes(fragment)) {
+      throw new Error(`P1 LEAK: fragment ${JSON.stringify(fragment)} appeared in prefix`)
+    }
+    expect(prefix.includes(fragment)).toBe(false)
+  }
+}
+
 describe("deny-reason property fuzz R2 — no-leak + idempotency", () => {
   test("P1: prefix never contains the (hostile) safeReason content (≥500 random)", () => {
-    for (let seed = 1; seed <= 700; seed++) {
-      const rng = lcg(seed * 2654435761)
-      const layer = pick(rng, DENY_LAYERS)
-      const includePillar = rng() < 0.5
-      const pillar = includePillar ? pick(rng, DENY_PILLARS) : undefined
-      const safeReason = mkHostileReason(rng)
-
-      const record = structuredDenyReason({
-        layer,
-        safeReason,
-        ...(pillar !== undefined ? { pillar } : {}),
-      })
-      const prefix = denyContentPrefix(record)
-
-      // The prefix is EXACTLY the categorical tag — no reason content.
-      const expected =
-        pillar !== undefined
-          ? `[denied · layer=${layer} · pillar=${pillar}] `
-          : `[denied · layer=${layer}] `
-      if (prefix !== expected) {
-        throw new Error(
-          `P1 prefix drift: got ${JSON.stringify(prefix)} want ${JSON.stringify(expected)}`,
-        )
-      }
-      expect(prefix).toBe(expected)
-
-      // And every NON-trivial hostile fragment that was in the reason is ABSENT
-      // from the prefix (guards against a future builder that interpolates it).
-      for (const frag of HOSTILE_FRAGMENTS) {
-        if (safeReason.includes(frag) && frag.length > 4 && !expected.includes(frag)) {
-          if (prefix.includes(frag)) {
-            throw new Error(`P1 LEAK: fragment ${JSON.stringify(frag)} appeared in prefix`)
-          }
-          expect(prefix.includes(frag)).toBe(false)
-        }
-      }
-    }
+    for (let seed = 1; seed <= 700; seed++) assertNoHostilePrefixLeak(seed)
   })
 
   test("P2: builder is idempotent — re-feeding the record's fields is a fixpoint (≥500 random)", () => {
