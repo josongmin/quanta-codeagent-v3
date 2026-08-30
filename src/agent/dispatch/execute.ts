@@ -233,7 +233,18 @@ const shapeDispatchResult = (a: {
   readonly hits: readonly RedactionHit[]
 }): DispatchResult => {
   const { result, output, durationMs, call, config, hits } = a
-  const composed = composeToolResultContent({ ...result, output })
+  // aug-30 audit (G6-01) — Layer-1 whole-output substitution must cover the
+  // ATTACHMENT channel too: a secret-classified `pdf_read` / `read_image`
+  // result carries the raw bytes in `documents` / `images`, which would ship
+  // to the model verbatim BESIDE the substituted text. When Layer-1 fired,
+  // hand the composer empty attachment lists (it treats `[]` as absent, so
+  // the block collapses to the legacy substituted string).
+  const sourceClassSubstituted = hits.some((h) => h.kind === "source_class_secret")
+  const composed = composeToolResultContent(
+    sourceClassSubstituted
+      ? { ...result, output, images: [], documents: [] }
+      : { ...result, output },
+  )
   const contentBlocks = typeof composed === "string" ? undefined : composed
   const failureRedaction =
     result.failure?.mode === "error" && result.failure.modelVisibleError !== undefined

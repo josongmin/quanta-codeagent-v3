@@ -11,7 +11,9 @@
  *     {@link readJailedFileBytes} with `xlsx_read`).
  */
 
+import { homedir } from "node:os"
 import { z } from "zod"
+import { classifyPath } from "@/security"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
 import { unescapeXml } from "./authoring/ooxml-read"
 import { unzip } from "./authoring/zip-store"
@@ -69,6 +71,10 @@ export const parseDocx = (bytes: Uint8Array): ParseDocxResult => {
 
 export const docxReadTool: Tool<DocxReadInput> = {
   name: "docx_read",
+  // aug-30 audit (G6-01) — Layer-1 SOURCE CLASS, same one-liner as `csv_read`
+  // (see its comment for the full rationale). Pinned by
+  // `tests/unit/tool-source-class-coverage-hellgate.test.ts`.
+  classifySource: (input) => classifyPath(input.path, homedir()),
   description:
     "Read a DOCX document: returns the paragraph text. Pure-TS WordprocessingML " +
     "reader (STORED + DEFLATE). Read-only.",

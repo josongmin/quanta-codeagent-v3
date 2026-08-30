@@ -24,8 +24,10 @@
  */
 
 import { lstat } from "node:fs/promises"
+import { homedir } from "node:os"
 import { z } from "zod"
 import type { DocumentBlock } from "@/llm"
+import { classifyPath } from "@/security"
 import { errMessage } from "@/shared"
 import { FsJailError } from "@/storage"
 import { resolveJailedDoc } from "../_shared/resolve-jailed-doc"
@@ -177,6 +179,10 @@ const decodePhase = async (
 
 export const pdfReadTool: Tool<ReadPdfInput> = {
   name: "pdf_read",
+  // aug-30 audit (G6-01) — Layer-1 SOURCE CLASS, same one-liner as `csv_read`
+  // (see its comment for the full rationale). Pinned by
+  // `tests/unit/tool-source-class-coverage-hellgate.test.ts`.
+  classifySource: (input) => classifyPath(input.path, homedir()),
   description:
     "Read a PDF file and attach it to the model's view via the next tool_result " +
     "as a native Anthropic document block (no client-side text extraction). " +

@@ -7,7 +7,9 @@
  */
 
 import { lstat } from "node:fs/promises"
+import { homedir } from "node:os"
 import { z } from "zod"
+import { classifyPath } from "@/security"
 import { errMessage } from "@/shared"
 import { FsJailError } from "@/storage"
 import { resolveJailedDoc } from "../_shared/resolve-jailed-doc"
@@ -143,6 +145,10 @@ const renderResult = (
 
 export const ndjsonReadTool: Tool<NdjsonReadInput> = {
   name: "ndjson_read",
+  // aug-30 audit (G6-01) — Layer-1 SOURCE CLASS, same one-liner as `csv_read`
+  // (see its comment for the full rationale). Pinned by
+  // `tests/unit/tool-source-class-coverage-hellgate.test.ts`.
+  classifySource: (input) => classifyPath(input.path, homedir()),
   description:
     "Read and parse a newline-delimited JSON file. Returns parsed objects + " +
     "per-line errors (one bad line does not abort the rest). Read-only.",

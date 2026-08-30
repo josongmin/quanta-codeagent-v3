@@ -21,7 +21,9 @@
  * title placeholder, the title is `undefined` and all text falls into `body`.
  */
 
+import { homedir } from "node:os"
 import { z } from "zod"
+import { classifyPath } from "@/security"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
 import { unescapeXml } from "./authoring/ooxml-read"
 import { unzip } from "./authoring/zip-store"
@@ -141,6 +143,10 @@ const renderDeck = (slides: PptxSlideText[]): string => {
 
 export const pptxReadTool: Tool<PptxReadInput> = {
   name: "pptx_read",
+  // aug-30 audit (G6-01) — Layer-1 SOURCE CLASS, same one-liner as `csv_read`
+  // (see its comment for the full rationale). Pinned by
+  // `tests/unit/tool-source-class-coverage-hellgate.test.ts`.
+  classifySource: (input) => classifyPath(input.path, homedir()),
   description:
     "Read a PPTX presentation: returns per-slide title + body bullet text. Pure-TS " +
     "PresentationML reader (STORED + DEFLATE). Read-only.",

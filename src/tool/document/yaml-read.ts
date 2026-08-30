@@ -31,8 +31,10 @@
  */
 
 import { lstat } from "node:fs/promises"
+import { homedir } from "node:os"
 import { parse, YAMLParseError } from "yaml"
 import { z } from "zod"
+import { classifyPath } from "@/security"
 import { errMessage } from "@/shared"
 import { FsJailError } from "@/storage"
 import { resolveJailedDoc } from "../_shared/resolve-jailed-doc"
@@ -212,6 +214,10 @@ const renderResult = (visiblePath: string, doc: unknown, maxKeys: number): strin
 
 export const yamlReadTool: Tool<YamlReadInput> = {
   name: "yaml_read",
+  // aug-30 audit (G6-01) — Layer-1 SOURCE CLASS, same one-liner as `csv_read`
+  // (see its comment for the full rationale). Pinned by
+  // `tests/unit/tool-source-class-coverage-hellgate.test.ts`.
+  classifySource: (input) => classifyPath(input.path, homedir()),
   description:
     "Read and parse a YAML 1.2 file. Returns the document as indented JSON " +
     "(YAML anchors / merge keys are expanded). Read-only.",
