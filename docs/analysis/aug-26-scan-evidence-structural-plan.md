@@ -267,6 +267,29 @@ to red a real burn-down. Kept the measured `files > 2500` beside it.
 failures, one of them a real cwd bug the wrong reason would have hidden
 permanently.
 
+**E — the test files no gate runs** (`284c81be7`, 2026-08-30). Landed late, and
+the delay is the finding. `src/**` and `tools/**` had since been added to the
+`test:unit` positionals, and `gated-test-scope-ratchet` had been widened to walk
+the whole repo — so the phase looked done. It was not. `apps/web-frontend` had
+moved into the out-of-band allowlist with a runner that WORKS: measured, 79
+files, 744 tests, 4.3s, all green, and no gate and no workflow ran it.
+
+The allowlist's contract was that the named script exists and mentions the path.
+Nothing checked that anything RUNS that script, so "out of band" had quietly
+become "there is a script for it". The defect did not survive the phase — it
+survived INSIDE the mechanism written to account for the phase, which is the
+same shape as the census accepting a floor without asking what the floor is on.
+
+Each entry now declares `gate` (a real manifest id, whose `run` must invoke the
+named runner) or `ungated` (with the reason nothing runs it). `smoke` and
+`eval:retrieval` keep genuine exclusions; the other two name their gates. The
+runner also installs from its own lockfile when absent, since the SPA is not a
+root workspace and nothing installed it — proven by moving `node_modules` aside:
+744/744 in 11.6s cold.
+
+RED first, two mutations caught (the declaration replaced by a placeholder, the
+gate repointed at another runner).
+
 ### The recurring shape, stated plainly
 
 Every defect in both rounds is the same sentence: **a verdict derived from a scan,
