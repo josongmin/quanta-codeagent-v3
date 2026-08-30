@@ -28,11 +28,13 @@ purpose: |
   `slashCtx`, so the corresponding slash commands render their real bodies
   instead of the placeholder "not wired in this surface" line.
 
-  Ports wired by this slice (each independently optional / default-OFF):
+  Ports wired by this slice (each independently optional):
     - `cost`           — `() => CostPanel.renderDetailed()`; the panel is
                          constructed once at REPL setup gated by
-                         `isCostPanelEnabled(env, isTTY)` and folded with
-                         the per-turn token delta from `metrics.snapshot()`.
+                         `isCostPanelEnabled(env, isTTY)` (TTY default-ON).
+                         It projects the session usage-accounting authority;
+                         only its display turn count advances via `noteTurn()`.
+                         The old `metrics.snapshot()` token-delta fold is gone.
                          `QUANTA_COST_PANEL=0` or non-TTY ⇒ no panel ⇒
                          `/cost` stays on "not wired" (byte-identical).
     - `planSnapshot`   — `() => planStore.current()`; the in-memory
@@ -102,7 +104,7 @@ notes: |
   "/state: not wired" (byte-identical).
 
 
-  Default-OFF posture: every port is OMITTED from `ReplSlashCtx` when its
+  Gate-off posture: every port is OMITTED from `ReplSlashCtx` when its
   gate is OFF, and the spread `...(field !== undefined ? { field } : {})`
   preserves the byte-identical "not wired" output for shell-entry / one-shot
   surfaces that don't build the adapters. The new `SessionDeps.planStore`
@@ -117,5 +119,5 @@ notes: |
 
   Test pinning (30+ cases via tests/unit/apps/cli/slashctx-ports-wire-hellgate.test.ts):
   per port we verify PRESENT renders the real body, ABSENT keeps the
-  "not wired" sentinel, and a cross-port table sweeps the default-OFF axis
+  "not wired" sentinel, and a cross-port table sweeps the gate-off axis
   for all 6 commands.

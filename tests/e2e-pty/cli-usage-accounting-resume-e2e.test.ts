@@ -11,9 +11,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { drivePtyCli, PTY_AVAILABLE, type PtyCli } from "./pty-harness"
+import { drivePtyCli, PTY_AVAILABLE, type PtyCli, stripAnsi } from "./pty-harness"
 
-const BOOT = "ask before every edit"
 const T = 60_000
 
 const replayEntry = (marker: string): string =>
@@ -35,13 +34,79 @@ const sleep = async (ms: number): Promise<void> => {
   await new Promise<void>((resolve) => setTimeout(resolve, ms))
 }
 
-const submitLine = async (cli: PtyCli, line: string): Promise<void> => {
-  for (const [index, character] of [...line].entries()) {
-    cli.send(character)
-    await sleep(index === 0 && character === "/" ? 500 : 15)
+// PTY captures are append-only: an old prompt must never prove that the NEXT
+// readLine has attached its keypress listener. Advance this cursor before each
+// submit and admit input only after a fresh empty prompt is painted beyond it.
+const promptAfter = new WeakMap<PtyCli, number>()
+const waitForFrame = async (
+  cli: PtyCli,
+  after: number,
+  accepts: (frame: string) => boolean,
+  label: string,
+): Promise<void> => {
+  const deadline = Date.now() + T
+  while (Date.now() < deadline) {
+    if (accepts(stripAnsi(cli.output().slice(after)))) return
+    await sleep(10)
   }
+  throw new Error(`PTY input readiness timed out: ${label}\n${cli.screen().slice(-1500)}`)
+}
+
+const submitLine = async (cli: PtyCli, line: string): Promise<void> => {
+  // raw-line-reader.ts installs stdin.on("keypress", ...) BEFORE this empty
+  // prompt frame. A completed stream or durable save happens earlier and is
+  // not a readiness signal; the former driver could lose the leading slash.
+  await waitForFrame(cli, promptAfter.get(cli) ?? 0, (frame) => /› \r/.test(frame), "fresh prompt")
+  let typed = ""
+  for (const character of line) {
+    const after = cli.output().length
+    cli.send(character)
+    typed += character
+    const expected = `› ${typed}`
+    await waitForFrame(
+      cli,
+      after,
+      (frame) => frame.includes(expected),
+      `echo ${JSON.stringify(typed)}`,
+    )
+  }
+  promptAfter.set(cli, cli.output().length)
   cli.send("\r")
 }
+
+test("PTY input driver rejects a stale prompt and waits for the next reader frame", async () => {
+  let capture = "› \r"
+  let typed = ""
+  const sent: string[] = []
+  const fake: PtyCli = {
+    output: () => capture,
+    screen: () => capture,
+    send: (key) => {
+      sent.push(key)
+      if (key !== "\r") {
+        typed += key
+        capture += `› ${typed}\r`
+      }
+    },
+    waitFor: async () => {
+      throw new Error("input driver must use a cursor-scoped frame")
+    },
+    kill: () => undefined,
+    exited: Promise.resolve(0),
+    cwd: "",
+  }
+  promptAfter.set(fake, capture.length)
+  const pending = submitLine(fake, "/cost")
+  await Promise.resolve()
+  expect(sent).toEqual([])
+  // A turn/save marker is not a raw-reader readiness acknowledgement either.
+  capture += "done; durable save completed\r\n"
+  await Promise.resolve()
+  expect(sent).toEqual([])
+  capture += "› \r"
+  await pending
+  expect(sent).toEqual(["/", "c", "o", "s", "t", "\r"])
+})
 
 describe.skipIf(!PTY_AVAILABLE)("CLI usage accounting resume e2e (PTY)", () => {
   let sessionsDir = ""
@@ -86,8 +151,6 @@ describe.skipIf(!PTY_AVAILABLE)("CLI usage accounting resume e2e (PTY)", () => {
       },
     })
     cli = started
-    await started.waitFor(BOOT, T)
-    await sleep(50)
     return started
   }
 
@@ -138,9 +201,8 @@ describe.skipIf(!PTY_AVAILABLE)("CLI usage accounting resume e2e (PTY)", () => {
     expect(second.screen()).toContain("$3.00")
     await submitLine(second, "spend again")
     await second.waitFor("second-cost-turn", T)
-    // The marker is streamed before the async turn-save and prompt re-arm.
-    // Waiting for the second durable admission prevents `/` from racing raw
-    // input setup and being interpreted as an ordinary model prompt.
+    // Persistence and input-readiness are independent barriers: waitForBooks
+    // proves the durable admission; submitLine separately awaits reader re-arm.
     await waitForBooks(2)
     await submitLine(second, "/cost")
     await second.waitFor("2,000,000 tok", T)

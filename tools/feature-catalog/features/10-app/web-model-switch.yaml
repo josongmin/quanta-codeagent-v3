@@ -60,10 +60,12 @@ purpose: |
   now publishes the EFFECTIVE model (`@/agent/effective-model`), and the kernel
   refreshes that echo at the TURN TERMINAL. Both halves were needed: the echo is the
   single source for the `/state` readout's `model` row, the CLI attach pill, the SDK's
-  `session.model`, and — via `turn.completed.modelSlug` — the daemon's cumulative
-  `/cost` fold. It was captured ONCE at session creation, so a switched session's
-  entire spend was attributed to a model that never ran. That one looks like data,
-  which is worse than a missing field.
+  `session.model`, and `turn.completed.modelSlug`. A7 (aug-30) removed the
+  daemon's cumulative `/cost` token fold: `/cost` and the header's cumulative
+  `turn.completed.costView` now project the session usage-accounting authority.
+  Each admitted call carries its own usage/model/pricing evidence, so changing
+  the selected model or completion label cannot reprice earlier spend. The
+  completion model echo remains display metadata, not cost-aggregation authority.
 
   The candidate set is the provider's LIVE catalog (`LLMPort.listModels`), never a
   hand-maintained slug list: `MODEL_CONTEXT_WINDOWS` has no `gpt-5.6-terra` entry
