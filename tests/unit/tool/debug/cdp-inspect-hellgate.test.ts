@@ -90,46 +90,50 @@ const makeFakeInspector = (opts: FakeOpts = {}): CdpTransport => {
   let toClient: ((m: string) => void) | undefined
   let resumesSeen = 0
   const send = (msg: unknown) => toClient?.(JSON.stringify(msg))
+  const reply = (id: number, result: unknown) => send({ id, result })
+  const emitEntryPause = () => {
+    if (opts.stopsAtBp !== false)
+      send({
+        method: "Debugger.paused",
+        params: { reason: "Break on start", hitBreakpoints: [], callFrames: [] },
+      })
+  }
+  const resume = (id: number) => {
+    if (opts.throwOnTeardownResume === true && resumesSeen >= 1)
+      throw new Error("cdp: socket closed during teardown resume")
+    reply(id, {})
+    resumesSeen++
+    if (resumesSeen === 1 && opts.stopsAtBp !== false)
+      send({ method: "Debugger.paused", params: REAL_PAUSE })
+  }
   const handle = (req: { id: number; method: string; params?: Record<string, unknown> }) => {
-    const reply = (result: unknown) => send({ id: req.id, result })
     switch (req.method) {
       case "Runtime.enable":
       case "Debugger.enable":
-        reply({})
+        reply(req.id, {})
         break
       case "Debugger.setBreakpointByUrl":
-        reply({
+        reply(req.id, {
           breakpointId: "bp1",
           locations: opts.unbound ? [] : [{ scriptId: "7", lineNumber: 6, columnNumber: 0 }],
         })
         break
       case "Runtime.runIfWaitingForDebugger":
-        reply({})
+        reply(req.id, {})
         // The --inspect-brk ENTRY pause (not our bp) — driver must resume past it.
-        if (opts.stopsAtBp !== false)
-          send({
-            method: "Debugger.paused",
-            params: { reason: "Break on start", hitBreakpoints: [], callFrames: [] },
-          })
+        emitEntryPause()
         break
       case "Debugger.resume":
         // The 2nd resume is the best-effort TEARDOWN resume. Throwing here makes
         // `transport.send` (and thus `client.request`) reject, driving the
         // attributed-swallow path.
-        if (opts.throwOnTeardownResume === true && resumesSeen >= 1) {
-          throw new Error("cdp: socket closed during teardown resume")
-        }
-        reply({})
-        resumesSeen++
-        // First resume (past the entry pause) ⇒ emit the REAL bp pause.
-        if (resumesSeen === 1 && opts.stopsAtBp !== false)
-          send({ method: "Debugger.paused", params: REAL_PAUSE })
+        resume(req.id)
         break
       case "Runtime.getProperties":
-        reply({ result: PROPS[String(req.params?.objectId)] ?? [] })
+        reply(req.id, { result: PROPS[String(req.params?.objectId)] ?? [] })
         break
       default:
-        reply({})
+        reply(req.id, {})
     }
   }
   return {
