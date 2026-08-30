@@ -20,6 +20,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
+import { assertScanPopulation } from "./_shared/scan-population"
 
 function* walk(dir: string): Generator<string> {
   for (const entry of readdirSync(dir)) {
@@ -28,6 +29,16 @@ function* walk(dir: string): Generator<string> {
     if (s.isDirectory()) yield* walk(p)
     else if (entry.endsWith(".ts") || entry.endsWith(".md")) yield p
   }
+}
+
+const REPO_ROOT = join(import.meta.dir, "..", "..")
+const ROOTS = ["src", "tests", "docs"] as const
+const ROOT_FILES = ROOTS.map((root) => [...walk(join(REPO_ROOT, root))])
+for (const [index, root] of ROOTS.entries()) {
+  assertScanPopulation(ROOT_FILES[index] ?? [], join(REPO_ROOT, root), {
+    collectable: (name) => name.endsWith(".ts") || name.endsWith(".md"),
+    id: `tests/unit/no-raw-nul-bytes-hellgate.test.ts#${root.toUpperCase()}`,
+  })
 }
 
 describe("source integrity — no raw NUL (0x00) bytes", () => {
@@ -39,10 +50,9 @@ describe("source integrity — no raw NUL (0x00) bytes", () => {
     // Anchored on THIS file: `walk("src")` resolved against the ambient cwd, so
     // the scan silently read a different tree — or none — depending on where the
     // runner was launched.
-    const REPO_ROOT = join(import.meta.dir, "..", "..")
     let scanned = 0
-    for (const root of ["src", "tests", "docs"]) {
-      for (const file of walk(join(REPO_ROOT, root))) {
+    for (const files of ROOT_FILES) {
+      for (const file of files) {
         scanned++
         const buf = readFileSync(file)
         const idx = buf.indexOf(0)

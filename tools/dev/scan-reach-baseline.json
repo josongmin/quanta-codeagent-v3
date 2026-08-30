@@ -463,6 +463,15 @@
     "tests/unit/_arch/comment-scanner-burndown-ratchet.test.ts#TOOLS": {
       "walked": 115,
       "matched": 2
+    },
+    "tests/unit/no-raw-nul-bytes-hellgate.test.ts#SRC": {
+      "walked": 3680
+    },
+    "tests/unit/no-raw-nul-bytes-hellgate.test.ts#TESTS": {
+      "walked": 3590
+    },
+    "tests/unit/no-raw-nul-bytes-hellgate.test.ts#DOCS": {
+      "walked": 2745
     }
   }
 }
