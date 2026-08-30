@@ -76,56 +76,60 @@ export const growBandTo = (ctx: RenderContext, rows: number): void => {
   state.reserved = rows
 }
 
-export const redraw = (ctx: RenderContext): void => {
-  const { state, opts, stdout, promptCols, META_ROWS, metaText } = ctx
-  const target = targetReserved(ctx)
-  growBandTo(ctx, Math.max(target, state.reserved))
+const dropdownRows = (ctx: RenderContext): readonly string[] => {
+  const { state, opts } = ctx
+  if (state.listOpen) {
+    return renderListRows(state.listOpen, state.candidates, state.selectedIdx, opts.describe)
+  }
+  return atDropdownOpen(state.at) ? atListRowsFor(state.at) : []
+}
 
+const redrawReservedRows = (ctx: RenderContext, rows: readonly string[]): string => {
+  const { state, META_ROWS, metaText } = ctx
   let out = ""
-  // Slash palette and `@`-dropdown are mutually exclusive; the slash rows win.
-  const listRows = state.listOpen
-    ? renderListRows(state.listOpen, state.candidates, state.selectedIdx, opts.describe)
-    : atDropdownOpen(state.at)
-      ? atListRowsFor(state.at)
-      : []
+  const listOffset = META_ROWS === 1 ? 2 : 1
   for (let i = 0; i < state.reserved; i += 1) {
     out += moveDown(1) + CR + ERASE_LINE
     if (i === 0 && META_ROWS === 1) {
       out += fillBgRow(`  ${DIM}${metaText.value}${RESET}`)
-      continue
-    }
-    const listOffset = META_ROWS === 1 ? 2 : 1
-    if (i >= listOffset && i - listOffset < listRows.length) {
-      out += listRows[i - listOffset] ?? ""
+    } else if (i >= listOffset && i - listOffset < rows.length) {
+      out += rows[i - listOffset] ?? ""
     }
   }
-  out += moveUp(state.reserved)
-  out += CR + ERASE_LINE
-  if (state.searchMode) {
-    const tag = `${GRAY}(reverse-i-search) '${state.searchQuery}':${RESET} `
-    out += fillBgRow(`${tag}${state.searchMatch}`)
-    const cursorCol = stringColumns(stripAnsi(tag)) + stringColumns(state.searchMatch)
-    out += CR + moveRight(cursorCol)
-    stdout.write(out)
-    return
-  }
+  return out
+}
+
+const redrawSearchLine = (state: State, out: string): string => {
+  const tag = `${GRAY}(reverse-i-search) '${state.searchQuery}':${RESET} `
+  const cursorCol = stringColumns(stripAnsi(tag)) + stringColumns(state.searchMatch)
+  return out + fillBgRow(`${tag}${state.searchMatch}`) + CR + moveRight(cursorCol)
+}
+
+const redrawInputLine = (ctx: RenderContext, out: string): string => {
+  const { state, opts, promptCols } = ctx
   const displayPrompt = state.heredocOpen ? `${DIM}… ${RESET}` : `${CYAN}${opts.prompt}${RESET}`
   const echoBuf = projectPasteDisplay(state.buf, state.pasteSegments)
-  out += fillBgRow(`${displayPrompt}${echoBuf}`)
+  let rendered = out + fillBgRow(`${displayPrompt}${echoBuf}`)
   if (!state.listOpen && !state.heredocOpen && state.cursor === state.buf.length) {
     const ghost = ghostSuffix(state.buf, state.candidates)
     if (ghost !== "") {
-      out += CR + ERASE_LINE
-      out += fillBgRow(`${displayPrompt}${echoBuf}${DIM}${ghost}${RESET}`)
+      rendered += CR + ERASE_LINE + fillBgRow(`${displayPrompt}${echoBuf}${DIM}${ghost}${RESET}`)
     }
   }
-  const displayPromptCols = state.heredocOpen ? 2 : promptCols
+  const promptWidth = state.heredocOpen ? 2 : promptCols
   const cursorWidth =
     state.pasteSegments.length === 0
       ? stringColumns(state.buf.slice(0, state.cursor))
       : stringColumns(echoBuf)
-  out += CR + moveRight(displayPromptCols + cursorWidth)
-  stdout.write(out)
+  return rendered + CR + moveRight(promptWidth + cursorWidth)
+}
+
+export const redraw = (ctx: RenderContext): void => {
+  const { state, stdout } = ctx
+  const target = targetReserved(ctx)
+  growBandTo(ctx, Math.max(target, state.reserved))
+  const out = redrawReservedRows(ctx, dropdownRows(ctx)) + moveUp(state.reserved) + CR + ERASE_LINE
+  stdout.write(state.searchMode ? redrawSearchLine(state, out) : redrawInputLine(ctx, out))
 }
 
 export const releaseBand = (ctx: RenderContext): void => {
