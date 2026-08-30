@@ -82,6 +82,36 @@ describe("population floor", () => {
     ).not.toThrow()
   })
 
+  test("git-hook local env cannot redirect reach to an unrelated empty index", () => {
+    const fx = build()
+    const poison = mkdtempSync(join(tmpdir(), "scan-pop-empty-index-"))
+    made.push(poison)
+    const init = Bun.spawnSync(["git", "init", "-q"], {
+      cwd: poison,
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    expect(init.exitCode).toBe(0)
+    // Force creation of a valid index with zero entries. This is the exact
+    // hook contamination shape: git exits 0, but `ls-files` names nothing.
+    const emptyIndex = join(poison, "empty-index")
+    const readTree = Bun.spawnSync(["git", "read-tree", "--empty"], {
+      cwd: poison,
+      env: { ...process.env, GIT_INDEX_FILE: emptyIndex },
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    expect(readTree.exitCode).toBe(0)
+
+    expect(() =>
+      assertScanPopulation(walk(fx.root), fx.root, {
+        id: "fx",
+        baselinePath: fx.pin(2),
+        gitEnv: { ...process.env, GIT_INDEX_FILE: emptyIndex },
+      }),
+    ).not.toThrow()
+  })
+
   test("INJECTION: an empty walk is red — 'found nothing' is not 'nothing to find'", () => {
     const fx = build()
     expect(() => assertScanPopulation([], fx.root, { id: "fx", baselinePath: fx.pin(2) })).toThrow(

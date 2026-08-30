@@ -40,20 +40,68 @@ import { readScanReachBaseline, type ScanReach } from "../../../tools/dev/scan-r
  *  only UNDER-count, which fails closed. */
 const trackedCache = new Map<string, ReadonlySet<string>>()
 
-const trackedUnder = (root: string): ReadonlySet<string> => {
+// Git exports repository-local variables to hooks. In a pre-push hook an
+// inherited GIT_INDEX_FILE/GIT_DIR can redirect a nested `git ls-files` away
+// from the worktree this guard is measuring while still exiting zero. The
+// result is the worst possible lie for a population floor: a real walk is
+// intersected with an unrelated empty index and reported as zero reach.
+const GIT_REPOSITORY_ENV = [
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+  "GIT_COMMON_DIR",
+  "GIT_DIR",
+  "GIT_GRAFT_FILE",
+  "GIT_INDEX_FILE",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_PREFIX",
+  "GIT_REPLACE_REF_BASE",
+  "GIT_SHALLOW_FILE",
+  "GIT_WORK_TREE",
+] as const
+
+const ambientRepoGitEnv = (
+  source: Readonly<Record<string, string | undefined>>,
+): Record<string, string | undefined> => {
+  const env = { ...source }
+  for (const key of GIT_REPOSITORY_ENV) delete env[key]
+  return env
+}
+
+const gitOutput = (
+  cwd: string,
+  args: readonly string[],
+  sourceEnv: Readonly<Record<string, string | undefined>>,
+): string => {
+  const out = Bun.spawnSync(["git", ...args], {
+    cwd,
+    env: ambientRepoGitEnv(sourceEnv),
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  if (out.exitCode !== 0) {
+    const stderr = new TextDecoder().decode(out.stderr).trim()
+    throw new Error(
+      `assertScanPopulation: \`git ${args.join(" ")}\` failed under ${cwd} — reach ` +
+        `cannot be measured, so no verdict below it means anything` +
+        (stderr === "" ? "" : `: ${stderr}`),
+    )
+  }
+  return new TextDecoder().decode(out.stdout)
+}
+
+const trackedUnder = (
+  root: string,
+  sourceEnv: Readonly<Record<string, string | undefined>>,
+): ReadonlySet<string> => {
   const key = resolve(root)
   const hit = trackedCache.get(key)
   if (hit !== undefined) return hit
-  const out = Bun.spawnSync(["git", "ls-files", "-z", "--", key], { cwd: key, stdout: "pipe" })
-  if (out.exitCode !== 0) {
-    throw new Error(
-      `assertScanPopulation: \`git ls-files\` failed under ${key} — reach cannot be measured, ` +
-        `so no verdict below it means anything`,
-    )
-  }
+  // Validate repository ownership explicitly, then list from the measured root
+  // with a relative pathspec. `-- .` makes git's output relative to `key`, so
+  // macOS `/tmp` ↔ `/private/tmp` canonicalisation cannot change how paths are
+  // joined back to the caller's filesystem spelling.
+  gitOutput(key, ["rev-parse", "--show-toplevel"], sourceEnv)
   const paths = new Set(
-    new TextDecoder()
-      .decode(out.stdout)
+    gitOutput(key, ["ls-files", "-z", "--", "."], sourceEnv)
       .split("\0")
       .filter((p) => p !== "")
       .map((p) => join(key, p))
@@ -93,6 +141,9 @@ export interface ScanPopulationOptions {
    * that is visible in a diff.
    */
   readonly baselinePath?: string
+  /** TEST SEAM — inject hook-local Git variables without mutating process.env.
+   *  The helper must strip repository-local variables from this environment. */
+  readonly gitEnv?: Readonly<Record<string, string | undefined>>
 }
 
 /**
@@ -151,7 +202,7 @@ export const assertScanPopulation = (
     opts.collectable ?? ((n: string) => n.endsWith(".ts") && !n.endsWith(".test.ts"))
   const skip = new Set(["node_modules", "__tests__", ...(opts.skipDirs ?? [])])
   const abs = resolve(root)
-  const tracked = trackedUnder(abs)
+  const tracked = trackedUnder(abs, opts.gitEnv ?? process.env)
 
   // Reach is a SET of files the guard would actually collect.
   //
