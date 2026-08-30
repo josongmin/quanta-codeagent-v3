@@ -49,6 +49,74 @@ const renderBinding = (b: CommandHookBinding, approved: boolean): string => {
   return `  [${key}] ${b.event}${matcher}${src} — ${statusOf(b, approved)}\n      ${b.command}\n`
 }
 
+type HooksCtx = Parameters<NonNullable<SlashCommand["run"]>>[1]
+type HookStore = Awaited<ReturnType<typeof HookReviewStore.load>>
+
+const mutateApproval = async (
+  subcommand: "approve" | "revoke",
+  key: string | undefined,
+  bindings: readonly CommandHookBinding[],
+  store: HookStore,
+  ctx: HooksCtx,
+): Promise<number> => {
+  if (key === undefined || key === "") {
+    ctx.err(`/hooks ${subcommand}: missing <key> (run /hooks to see keys)\n`)
+    return 1
+  }
+  if (subcommand === "revoke") {
+    if (!store.revoke(key)) {
+      ctx.err(`/hooks revoke: no approval for key ${key}\n`)
+      return 1
+    }
+    await store.flush()
+    ctx.out(`/hooks: revoked approval ${key}\n`)
+    return 0
+  }
+  const binding = bindings.find((candidate) => hookBindingKey(candidate) === key)
+  if (binding === undefined) {
+    ctx.err(`/hooks approve: no configured hook with key ${key}\n`)
+    return 1
+  }
+  if (binding.needsReview !== true) {
+    ctx.out(`/hooks: hook ${key} is trusted (no review needed)\n`)
+    return 0
+  }
+  store.approve(binding)
+  await store.flush()
+  ctx.out(`/hooks: approved ${key} — ${binding.command}\n`)
+  return 0
+}
+
+const listBindings = (
+  reviewOnly: boolean,
+  bindings: readonly CommandHookBinding[],
+  store: HookStore,
+  settingsPath: string,
+  ctx: HooksCtx,
+): number => {
+  const rows = bindings.filter((binding) => !reviewOnly || binding.needsReview === true)
+  if (rows.length === 0) {
+    ctx.out(
+      reviewOnly
+        ? "/hooks: no hooks awaiting review\n"
+        : `/hooks: no command hooks configured (${settingsPath})\n`,
+    )
+    return 0
+  }
+  let pending = 0
+  let output = reviewOnly ? "Hooks awaiting review:\n" : "Configured command hooks:\n"
+  for (const binding of rows) {
+    const approved = store.isApproved(binding)
+    if (binding.needsReview === true && !approved) pending += 1
+    output += renderBinding(binding, approved)
+  }
+  if (pending > 0) {
+    output += `\n${pending} hook(s) NEED REVIEW — approve with: /hooks approve <key>\n`
+  }
+  ctx.out(output)
+  return 0
+}
+
 export const hooksCmd: SlashCommand = {
   name: "/hooks",
   describe: "List / review / approve disk-configured command hooks (T04 trust gate)",
@@ -63,60 +131,7 @@ export const hooksCmd: SlashCommand = {
     const sub = (args[0] ?? "").toLowerCase()
     const arg = args[1]
 
-    if (sub === "approve" || sub === "revoke") {
-      if (arg === undefined || arg === "") {
-        ctx.err(`/hooks ${sub}: missing <key> (run /hooks to see keys)\n`)
-        return 1
-      }
-      if (sub === "revoke") {
-        const removed = store.revoke(arg)
-        if (!removed) {
-          ctx.err(`/hooks revoke: no approval for key ${arg}\n`)
-          return 1
-        }
-        await store.flush()
-        ctx.out(`/hooks: revoked approval ${arg}\n`)
-        return 0
-      }
-      // approve — the key MUST match a currently-configured review-gated binding
-      // (you cannot approve a key for a hook that is not present on disk).
-      const match = bindings.find((b) => hookBindingKey(b) === arg)
-      if (match === undefined) {
-        ctx.err(`/hooks approve: no configured hook with key ${arg}\n`)
-        return 1
-      }
-      if (match.needsReview !== true) {
-        ctx.out(`/hooks: hook ${arg} is trusted (no review needed)\n`)
-        return 0
-      }
-      store.approve(match)
-      await store.flush()
-      ctx.out(`/hooks: approved ${arg} — ${match.command}\n`)
-      return 0
-    }
-
-    // list (default) / review
-    const reviewOnly = sub === "review"
-    const rows = bindings.filter((b) => (reviewOnly ? b.needsReview === true : true))
-    if (rows.length === 0) {
-      ctx.out(
-        reviewOnly
-          ? "/hooks: no hooks awaiting review\n"
-          : `/hooks: no command hooks configured (${settingsPath})\n`,
-      )
-      return 0
-    }
-    let pending = 0
-    let out = reviewOnly ? "Hooks awaiting review:\n" : "Configured command hooks:\n"
-    for (const b of rows) {
-      const approved = store.isApproved(b)
-      if (b.needsReview === true && !approved) pending += 1
-      out += renderBinding(b, approved)
-    }
-    if (pending > 0) {
-      out += `\n${pending} hook(s) NEED REVIEW — approve with: /hooks approve <key>\n`
-    }
-    ctx.out(out)
-    return 0
+    if (sub === "approve" || sub === "revoke") return mutateApproval(sub, arg, bindings, store, ctx)
+    return listBindings(sub === "review", bindings, store, settingsPath, ctx)
   },
 }
