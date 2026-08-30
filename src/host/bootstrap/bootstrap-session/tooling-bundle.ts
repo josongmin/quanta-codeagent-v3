@@ -175,8 +175,9 @@ export const buildToolingBundle = (
   const hasCostCap = Object.keys(costDials).length > 0
   const budgetMeter =
     writeGuardActive || hasCostCap ? new BudgetMeter({ dials: costDials }) : undefined
-  // MR-08 — the session's usage-accounting authority, minted ONLY when the
-  // operator opted in via `QUANTA_USAGE_ACCOUNTING_V2`. One per session: the
+  // MR-08 — the session's usage-accounting authority. Minted by DEFAULT
+  // (`QUANTA_USAGE_ACCOUNTING_V2` unset ⇒ on); `off` is the explicit kill
+  // switch that leaves the slot unset. One per session: the
   // loop's `emitUsage` records into it and the cost surfaces project it, so
   // both halves have to see the SAME object — which is why it is created here,
   // at the composition root, rather than by either side.

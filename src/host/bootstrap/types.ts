@@ -561,7 +561,8 @@ export interface SessionBootstrapResult {
    *  the live bootstrap always sets it (`undefined` when the guard is off). */
   readonly budgetMeter?: AgentConfig["budgetMeter"]
   /** MR-08 — the session's usage-accounting authority, minted at the
-   *  composition root when `QUANTA_USAGE_ACCOUNTING_V2` is `shadow` or `on`.
+   *  composition root by default (`QUANTA_USAGE_ACCOUNTING_V2` unset ⇒ `on`;
+   *  `shadow` records without rendering; only `off` skips the mint).
    *  Carried on the result because BOTH halves need the same object: the
    *  runtime overlay sets it on `AgentConfig` so `emitUsage` records into it,
    *  and the cost surfaces project it. Absent ⇒ `off`, and the accounting sink
