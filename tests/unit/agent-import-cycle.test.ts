@@ -109,6 +109,46 @@ interface ImportLine {
   valueNames: string[]
 }
 
+const stitchedImportAt = (lines: readonly string[], start: number): string => {
+  let stitched = lines[start] ?? ""
+  let index = start
+  while (
+    !/from\s+["'][^"']+["']\s*;?\s*$/.test(stitched) &&
+    /\bfrom\b/.test(stitched) === false &&
+    index < lines.length - 1
+  ) {
+    index += 1
+    stitched += ` ${(lines[index] ?? "").trim()}`
+  }
+  return stitched
+}
+
+const importLineFrom = (
+  stitched: string,
+  line: number,
+  agentFiles: ReadonlySet<string>,
+): ImportLine | null => {
+  const sideEffect = stitched.match(/^\s*import\s+["']([^"']+)["']/)
+  if (sideEffect) {
+    return {
+      target: resolveRelTarget(sideEffect[1] ?? "", agentFiles),
+      line,
+      typeOnly: false,
+      valueNames: [],
+    }
+  }
+  const match = stitched.match(/^\s*(import|export)\s+(type\s+)?(.+?)\s+from\s+["']([^"']+)["']/)
+  if (!match) return null
+  const typeOnly = (match[2] ?? "").trim() === "type"
+  const symbolsBlob = match[3] ?? ""
+  return {
+    target: resolveRelTarget(match[4] ?? "", agentFiles),
+    line,
+    typeOnly,
+    valueNames: extractValueNames(symbolsBlob, typeOnly),
+  }
+}
+
 /** Parse the import/export lines of a `.ts` source. Single-line regex pass;
  *  multi-line imports are uncommon in this codebase but we still handle the
  *  trivial `\n`-joined form by collapsing whitespace within a candidate. */
@@ -122,37 +162,8 @@ const parseImports = (src: string, agentFiles: ReadonlySet<string>): ImportLine[
   for (let i = 0; i < rawLines.length; i++) {
     const raw = rawLines[i] ?? ""
     if (!/^\s*(import|export)\b/.test(raw)) continue
-    // Stitch a multi-line import together (read forward until we hit `from "..."` or `;`).
-    let stitched = raw
-    let j = i
-    while (
-      !/from\s+["'][^"']+["']\s*;?\s*$/.test(stitched) &&
-      /\bfrom\b/.test(stitched) === false &&
-      j < rawLines.length - 1
-    ) {
-      j++
-      stitched += ` ${(rawLines[j] ?? "").trim()}`
-    }
-    // Side-effect import: `import "./x"` (no symbols, no `from`).
-    const sideEffect = stitched.match(/^\s*import\s+["']([^"']+)["']/)
-    if (sideEffect) {
-      const target = resolveRelTarget(sideEffect[1] ?? "", agentFiles)
-      out.push({ target, line: i + 1, typeOnly: false, valueNames: [] })
-      continue
-    }
-    // `import [type] ... from "..."` or `export [type] {..} from "..."`.
-    const m = stitched.match(/^\s*(import|export)\s+(type\s+)?(.+?)\s+from\s+["']([^"']+)["']/)
-    if (!m) continue
-    const isTypeOnly = (m[2] ?? "").trim() === "type"
-    const symbolsBlob = m[3] ?? ""
-    const spec = m[4] ?? ""
-    const target = resolveRelTarget(spec, agentFiles)
-    out.push({
-      target,
-      line: i + 1,
-      typeOnly: isTypeOnly,
-      valueNames: extractValueNames(symbolsBlob, isTypeOnly),
-    })
+    const parsed = importLineFrom(stitchedImportAt(rawLines, i), i + 1, agentFiles)
+    if (parsed !== null) out.push(parsed)
   }
   return out
 }
@@ -373,6 +384,58 @@ export const findTopLevelUsage = (
   return hits
 }
 
+const valueImportGraph = (
+  files: readonly string[],
+  parsed: ReadonlyMap<string, readonly ImportLine[]>,
+): Map<string, Set<string>> => {
+  const edges = new Map(files.map((file) => [file, new Set<string>()]))
+  for (const [file, imports] of parsed) {
+    const targets = edges.get(file)
+    if (targets === undefined) continue
+    for (const imported of imports) {
+      if (imported.typeOnly || imported.target === null || imported.target === file) continue
+      targets.add(imported.target)
+    }
+  }
+  return edges
+}
+
+const assertWhitelistedCycles = (sccs: readonly string[][]): void => {
+  const actual = sccs.map((scc) => scc.join(","))
+  const expected = WHITELIST.map((cycle) => [...cycle].sort().join(","))
+  for (const key of actual) {
+    expect(expected, `unknown value-level import cycle detected: ${key}`).toContain(key)
+  }
+  for (const key of expected) {
+    expect(actual, `whitelisted cycle no longer present: ${key}`).toContain(key)
+  }
+}
+
+const cycleEdgeUsage = (
+  parsed: ReadonlyMap<string, readonly ImportLine[]>,
+): readonly {
+  file: string
+  imported: ImportLine
+  hits: readonly { name: string; line: number }[]
+}[] => {
+  const inWhitelist = new Set(WHITELIST.flat())
+  const out: {
+    file: string
+    imported: ImportLine
+    hits: readonly { name: string; line: number }[]
+  }[] = []
+  for (const [file, imports] of parsed) {
+    if (!inWhitelist.has(file)) continue
+    const source = readFileSync(join(AGENT_DIR, file), "utf8")
+    for (const imported of imports) {
+      if (imported.typeOnly || imported.target === null || !inWhitelist.has(imported.target))
+        continue
+      out.push({ file, imported, hits: findTopLevelUsage(source, imported.valueNames) })
+    }
+  }
+  return out
+}
+
 describe("agent module import cycles", () => {
   test("ANTI-VACUITY: the enumeration reaches the real `src/agent` top level", () => {
     // This guard reports "no cycles" identically whether the graph is acyclic or
@@ -401,64 +464,20 @@ describe("agent module import cycles", () => {
   }
 
   test("known cycles are exactly the whitelisted ones", () => {
-    const edges = new Map<string, Set<string>>()
-    for (const f of files) edges.set(f, new Set<string>())
-    for (const [f, imps] of parsed) {
-      const set = edges.get(f)
-      if (!set) continue
-      for (const imp of imps) {
-        if (imp.typeOnly) continue
-        if (imp.target === null) continue
-        if (imp.target === f) continue
-        set.add(imp.target)
-      }
-    }
-    const sccs = findSCCs(files, edges)
-    const sccKeys = sccs.map((s) => s.join(","))
-    const whiteKeys = WHITELIST.map((w) => [...w].sort().join(","))
-
-    // (a) no unknown SCC
-    for (const k of sccKeys) {
-      expect(
-        whiteKeys,
-        `unknown value-level import cycle detected: ${k}\n` +
-          `If this is intentional and reviewed, add it to WHITELIST in ` +
-          `tests/unit/agent-import-cycle.test.ts and ensure every edge in the ` +
-          `ring stays runtime-lazy (no module-top-level calls into the cycle).`,
-      ).toContain(k)
-    }
-    // (b) no stale whitelist entry
-    for (const k of whiteKeys) {
-      expect(
-        sccKeys,
-        `whitelisted cycle no longer present: ${k}\n` +
-          `Refactor removed the cycle — drop the entry from WHITELIST.`,
-      ).toContain(k)
-    }
+    assertWhitelistedCycles(findSCCs(files, valueImportGraph(files, parsed)))
   })
 
   test("every edge inside a whitelisted cycle is runtime-lazy (no module-top usage)", () => {
     // For every value-import in a whitelisted SCC, verify the imported
     // symbols are not referenced at module top-level in the importing file.
-    const inWhitelist = new Set<string>()
-    for (const w of WHITELIST) for (const n of w) inWhitelist.add(n)
-    for (const [f, imps] of parsed) {
-      if (!inWhitelist.has(f)) continue
-      const src = readFileSync(join(AGENT_DIR, f), "utf8")
-      for (const imp of imps) {
-        if (imp.typeOnly) continue
-        if (imp.target === null) continue
-        if (!inWhitelist.has(imp.target)) continue
-        // This edge is INSIDE one of the rings — scan for top-level use.
-        const hits = findTopLevelUsage(src, imp.valueNames)
-        expect(
-          hits,
-          `${f}:${imp.line}: module-top-level use of symbol(s) from ` +
-            `./${imp.target} would deadlock the known cycle.\n` +
-            `Offending references: ${hits.map((h) => `${h.name}@L${h.line}`).join(", ")}.\n` +
-            `Fix: only call/reference these symbols from inside a function body.`,
-        ).toEqual([])
-      }
+    for (const { file, imported, hits } of cycleEdgeUsage(parsed)) {
+      expect(
+        hits,
+        `${file}:${imported.line}: module-top-level use of symbol(s) from ` +
+          `./${imported.target} would deadlock the known cycle.\n` +
+          `Offending references: ${hits.map((h) => `${h.name}@L${h.line}`).join(", ")}.\n` +
+          `Fix: only call/reference these symbols from inside a function body.`,
+      ).toEqual([])
     }
   })
 })
