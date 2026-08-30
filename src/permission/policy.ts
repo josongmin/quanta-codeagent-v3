@@ -1,6 +1,7 @@
 import type { HITLTierReason, ToolCapability } from "@/shared"
 import type { CircumventionTracker, EffectSignature } from "./circumvention"
 import {
+  type AutoDecision,
   type AutoModeClassifier,
   CLASSIFIER_SYSTEM_PROMPT,
   withCircumventionContext,
@@ -400,6 +401,33 @@ const precheckCircumvention = (
   return { advisory: signal.advisory }
 }
 
+const finalizeAutoDecision = (
+  action: ToolAction,
+  opts: EvaluateAutoOptions | undefined,
+  decision: AutoDecision,
+): PermissionDecision => {
+  if (decision.fallback) {
+    return emit({ kind: "ask", reason: decision.reason }, { stackSource: "global-default" })
+  }
+  if (decision.verdict === "allow") {
+    // A genuine allow clears every denied-effect signature for this multi-path
+    // action, so a prior soft denial cannot poison the rest of the session.
+    if (opts?.tracker !== undefined) {
+      for (const effect of effectsOf(opts)) opts.tracker.clearOnAllow(effect)
+    }
+    return emit({ kind: "allow" }, { stackSource: "global-default" })
+  }
+  if (decision.verdict === "deny") {
+    // A soft deny records every write effect; HARD_DENY returned before the
+    // classifier path and is therefore never added to circumvention memory.
+    if (circumventionArmed(opts)) {
+      for (const effect of effectsOf(opts)) opts.tracker.noteDenied(effect, action.tool, opts.turn)
+    }
+    return emit(softDeny(decision.reason, "global-default"), { stackSource: "global-default" })
+  }
+  return emit({ kind: "ask", reason: decision.reason }, { stackSource: "global-default" })
+}
+
 export const evaluateAuto = async (
   action: ToolAction,
   ctx: PermissionContext,
@@ -444,30 +472,7 @@ export const evaluateAuto = async (
       : "",
   })
 
-  if (decision.fallback) {
-    return emit({ kind: "ask", reason: decision.reason }, { stackSource: "global-default" })
-  }
-  if (decision.verdict === "allow") {
-    // A genuine allow of these effects clears any prior denied-effect signature
-    // so the detector cannot poison the rest of the session (§4.b clear-on-allow).
-    // Clear EVERY effect (the multi-path action allowed all of them).
-    if (opts?.tracker !== undefined) {
-      for (const eff of effectsOf(opts)) opts.tracker.clearOnAllow(eff)
-    }
-    return emit({ kind: "allow" }, { stackSource: "global-default" })
-  }
-  if (decision.verdict === "deny") {
-    // SOFT deny — record the denied WRITE effect so a same-effect-different-tool
-    // follow-up is caught. HARD_DENY already returned above (terminal), so this
-    // is unambiguously a soft policy deny.
-    // Record EVERY denied write effect so a later tool-switch to ANY of them is
-    // caught (a multi-path soft-deny remembers all its targets).
-    if (circumventionArmed(opts)) {
-      for (const eff of effectsOf(opts)) opts.tracker.noteDenied(eff, action.tool, opts.turn)
-    }
-    return emit(softDeny(decision.reason, "global-default"), { stackSource: "global-default" })
-  }
-  return emit({ kind: "ask", reason: decision.reason }, { stackSource: "global-default" })
+  return finalizeAutoDecision(action, opts, decision)
 }
 
 /* ------------------------------------------------------------------------- *
