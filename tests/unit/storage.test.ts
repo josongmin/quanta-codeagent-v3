@@ -17,6 +17,17 @@ import {
 
 const dir = mkdtempSync(join(tmpdir(), "storage-test-"))
 
+type BunFileInput = string | URL | ArrayBufferLike | Uint8Array<ArrayBuffer> | number
+type BunFileOptions = Parameters<typeof Bun.file>[1]
+
+/** Forward each overload through its narrowed input, rather than Parameters<>
+ * of the overloaded function (which keeps only the final numeric-fd arm). */
+const openBunFile = (file: typeof Bun.file, input: BunFileInput, options?: BunFileOptions) => {
+  if (typeof input === "number") return file(input, options)
+  if (typeof input === "string" || input instanceof URL) return file(input, options)
+  return file(input, options)
+}
+
 /** Force atomic publication at the old exists→text TOCTOU boundary. Publication
  * runs even after the fix removes exists(), so this rail cannot pass vacuously.
  * All bytes and renames remain real; only the scheduling point is controlled. */
@@ -25,11 +36,11 @@ const publishDuringRead = async <T>(
   publish: () => Promise<void>,
   read: () => Promise<T>,
 ): Promise<T> => {
-  const realFile = Bun.file.bind(Bun)
+  const realFile = Bun.file
   let published = false
-  const fileSpy = spyOn(Bun, "file").mockImplementation((...args: Parameters<typeof Bun.file>) => {
-    const file = realFile(...args)
-    if (args[0] !== path) return file
+  const interceptedFile: typeof Bun.file = (input: BunFileInput, options?: BunFileOptions) => {
+    const file = openBunFile(realFile, input, options)
+    if (input !== path) return file
     return new Proxy(file, {
       get(target, property) {
         if (property === "text")
@@ -44,7 +55,8 @@ const publishDuringRead = async <T>(
         return typeof value === "function" ? value.bind(target) : value
       },
     })
-  })
+  }
+  const fileSpy = spyOn(Bun, "file").mockImplementation(interceptedFile)
   try {
     const value = await read()
     expect(published).toBe(true)
