@@ -29,7 +29,9 @@
 
 import { describe, expect, test } from "bun:test"
 import { existsSync } from "node:fs"
-import { resolve } from "node:path"
+import { join, resolve } from "node:path"
+
+import { assertScanPopulation } from "../_shared/scan-population"
 
 const REPO_ROOT = resolve(import.meta.dir, "../../..")
 
@@ -50,16 +52,6 @@ const FORBIDDEN_PATTERNS: ReadonlyArray<RegExp> = [
   /\.from-worktree$/,
 ]
 
-/**
- * The floor BOTH halves of the offender list are held to.
- *
- * Measured against 8,776 tracked paths under the scoped prefixes, so it leaves
- * ~970 of headroom: a developer mid-`git rm` (files gone from the tree, still in
- * the index) stays green, while a tree the run cannot actually see — a sparse
- * checkout, an unmaterialised worktree, a mis-anchored root — does not.
- */
-const CORPUS_FLOOR = 7804
-
 function listTrackedFiles(): string[] {
   const out = Bun.spawnSync(["git", "ls-files", "--", ...SCOPED_PREFIXES], {
     cwd: REPO_ROOT,
@@ -74,16 +66,6 @@ function listTrackedFiles(): string[] {
     .split("\n")
     .map((l) => l.trim())
     .filter((l) => l.length > 0)
-  // Anti-vacuity: `git ls-files` exits 0 with no output when nothing matches, so
-  // the exit check above is not a floor. The verdict is "no backup artifacts",
-  // which an empty listing satisfies for free — proven, 2/0 against an empty
-  // mirror of the repo tree.
-  if (files.length < CORPUS_FLOOR) {
-    throw new Error(
-      `git ls-files returned ${files.length} tracked path(s) under ${SCOPED_PREFIXES.join(", ")} ` +
-        `— far below the real tree; the backup-artifact verdict would pass over nothing.`,
-    )
-  }
   return files
 }
 
@@ -95,18 +77,28 @@ describe("arch: no leftover backup/worktree files", () => {
   test("no tracked .bak/.orig/.my-backup/.from-worktree files exist under src/tests/tools", () => {
     const tracked = listTrackedFiles()
 
-    // The offender list is `tracked ∩ present`, and only the first half has a
-    // floor. `existsSync` NARROWS, so a working tree the run cannot see — a sparse
-    // checkout, a worktree whose files are not materialised, a mis-anchored
-    // REPO_ROOT — empties the list and the verdict reads "no backup artifacts".
-    // Measured: with the index intact and the tree blanked, this file passed 2/0.
-    // Flooring the intersection is what makes the two states differ.
+    // The offender list is `tracked ∩ present`, and `existsSync` NARROWS: a
+    // working tree the run cannot see — a sparse checkout, a worktree whose files
+    // are not materialised, a mis-anchored REPO_ROOT — empties the list and the
+    // verdict reads "no backup artifacts". Measured: with the index intact and
+    // the tree blanked, this file passed 2/0.
+    //
+    // Both halves used to be held to one number written here, at 7,804 of the
+    // 8,776 real paths. That is a number this author picked and it tolerates
+    // losing ~970 files, INCLUDING a whole subtree — a count stays high while a
+    // directory disappears. The floor is now per-prefix, at the committed
+    // measured reach, and it carries the claim a count cannot make: every
+    // directory holding a tracked file must contribute one.
     const present = tracked.filter((p) => existsSync(resolve(REPO_ROOT, p)))
-    if (present.length < CORPUS_FLOOR) {
-      throw new Error(
-        `only ${present.length} of ${tracked.length} tracked path(s) exist on disk — the ` +
-          `working tree this run can see is far below the real one, so an empty offender ` +
-          `list would mean "nothing was looked at" rather than "nothing was found".`,
+    for (const prefix of SCOPED_PREFIXES) {
+      const root = join(REPO_ROOT, prefix)
+      assertScanPopulation(
+        present.filter((p) => p.startsWith(prefix)).map((p) => resolve(REPO_ROOT, p)),
+        root,
+        {
+          id: `tests/unit/_arch/no-leftover-backup-files.test.ts#${prefix.replace(/\/$/, "")}`,
+          collectable: () => true,
+        },
       )
     }
 

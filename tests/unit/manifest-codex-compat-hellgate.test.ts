@@ -37,6 +37,7 @@ import {
 } from "@/skill/manifest-compat"
 import { PluginManifestSchema, parsePluginManifest } from "@/skill/plugin-manifest"
 import { parseSkillMarkdown, SkillFrontmatterCompatSchema } from "@/skill/skill-frontmatter"
+import { assertScanPopulation } from "./_shared/scan-population"
 
 const FIX = join(import.meta.dir, "..", "fixtures", "manifest-compat")
 const readFix = (rel: string): string => readFileSync(join(FIX, rel), "utf8")
@@ -442,15 +443,16 @@ describe("lenient parser + normalizer fix the discover.ts silent tool-drop", () 
     // / normalizer ever altered a native parse, this fails.
     const root = join(import.meta.dir, "..", "..", "src", "skill", "system-skills")
     const dirs = readdirSync(root, { withFileTypes: true }).filter((d) => d.isDirectory())
-    let parsed = 0
+    const read: string[] = []
     for (const d of dirs) {
       let md: string
+      const skillMd = join(root, d.name, "SKILL.md")
       try {
-        md = readFileSync(join(root, d.name, "SKILL.md"), "utf8")
+        md = readFileSync(skillMd, "utf8")
       } catch {
         continue // not every dir is a skill dir
       }
-      parsed++
+      read.push(skillMd)
       disarmCompat()
       const off = parseSkillMarkdown(md)
       armCompat()
@@ -461,18 +463,23 @@ describe("lenient parser + normalizer fix the discover.ts silent tool-drop", () 
         expect(on.value.body).toBe(off.value.body)
       }
     }
-    // The floor belongs on what was PARSED, not on what was listed. It used to
-    // read `dirs.length > 5`, and the loop's real work is behind a
-    // `catch { continue }` that swallows a missing SKILL.md — so with the skill
-    // files gone but their directories standing, the listing still cleared the
-    // floor, every read threw, every iteration skipped, and the test passed
-    // having compared nothing. Measured: 67 `expect()` calls against the real
-    // corpus, ONE against the blanked one, green both times.
-    expect(
-      parsed,
-      `only ${parsed} of ${dirs.length} skill dir(s) yielded a SKILL.md — the ` +
-        `armed-vs-unarmed comparison below ran on almost nothing`,
-    ).toBeGreaterThanOrEqual(20)
+    // The floor belongs on what was READ, not on what was listed. It used to read
+    // `dirs.length > 5`, and the loop's real work is behind a `catch { continue }`
+    // that swallows a missing SKILL.md — so with the skill files gone but their
+    // directories standing, the listing still cleared the floor, every read
+    // threw, every iteration skipped, and the test passed having compared
+    // nothing. Measured: 67 `expect()` calls against the real corpus, ONE against
+    // the blanked one, green both times.
+    //
+    // The replacement floor was 20 of the 22 real skills, and that is a number
+    // this author picked: it tolerates two skills disappearing outright. The
+    // committed baseline pins the MEASURED reach instead, and adds the claim a
+    // count cannot make — every skill DIRECTORY must contribute, so losing one
+    // skill entirely is a named failure rather than a smaller number.
+    assertScanPopulation(read, root, {
+      id: "tests/unit/manifest-codex-compat-hellgate.test.ts#SYSTEM-SKILLS",
+      collectable: (n) => n === "SKILL.md",
+    })
   })
 
   test("rr2 lenient parse yields kebab `allowed-tools` block-list; normalizer renames it", () => {

@@ -18,6 +18,8 @@ import { describe, expect, test } from "bun:test"
 import { readdir, readFile } from "node:fs/promises"
 import { join } from "node:path"
 
+import { assertScanPopulation } from "../../_shared/scan-population"
+
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..", "..")
 const KNOBS_DIR = join(REPO_ROOT, "src", "runner", "knobs")
 const PER_KNOB_DIR = join(KNOBS_DIR, "knobs")
@@ -35,7 +37,7 @@ const forbiddenBatchValueImport = (txt: string): boolean =>
     .some((l) => !l.includes(DERIVE_IMPORT))
 
 /**
- * The per-knob modules, with a floor on the listing itself.
+ * The per-knob modules, with the reach of the listing itself asserted.
  *
  * Both bans below are LOOP BODIES over this listing, and an empty directory runs
  * them zero times: the tests then pass having asserted nothing, which reads
@@ -44,19 +46,28 @@ const forbiddenBatchValueImport = (txt: string): boolean =>
  * and 67 `expect()` calls; against a present-but-empty directory they made ZERO
  * and both passed.
  *
- * The floor is 60, derived from that corpus rather than written as `> 0`, so a
- * listing that reaches a fraction of the tree fails here instead of reporting
- * clean. One helper for both, so the floor cannot be added to one ban and
- * forgotten on the other — which is how the second one was still vacuous after
- * the first was fixed.
+ * The floor is NOT written here. It was, at 60 of the 68 real modules, and that
+ * is a number this author picked — it tolerates losing eight modules silently,
+ * and `tools/dev/scan-reach-baseline.ts` documents the equilibrium such numbers
+ * reach in this repo (56 of 81 are `> 0`). The floor now lives in the committed
+ * baseline at the MEASURED value, so losing even one module is a regression a
+ * diff can see, and reach is the intersection with what git TRACKS rather than
+ * whatever a walk returned.
+ *
+ * One helper for both bans, so the floor cannot be added to one and forgotten on
+ * the other — which is how the second one was still vacuous after the first was
+ * fixed.
  */
 const perKnobModules = async (): Promise<string[]> => {
   const modules = (await readdir(PER_KNOB_DIR)).filter((f) => f.endsWith(".ts"))
-  expect(
-    modules.length,
-    `only ${modules.length} per-knob module(s) were listed — the ban that consumes ` +
-      `this listing would pass over a walk that never happened`,
-  ).toBeGreaterThanOrEqual(60)
+  assertScanPopulation(
+    modules.map((f) => join(PER_KNOB_DIR, f)),
+    PER_KNOB_DIR,
+    {
+      id: "tests/unit/runner/knobs/cross-slice-cycle.test.ts#PER-KNOB-DIR",
+      collectable: (n) => n.endsWith(".ts"),
+    },
+  )
   return modules
 }
 
