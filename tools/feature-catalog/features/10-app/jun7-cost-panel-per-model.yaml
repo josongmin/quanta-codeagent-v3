@@ -23,17 +23,13 @@ surface_integration:
     cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "The per-model By model box is the CLI /cost panel; the web TokenCounter renders cumulative tokens+cost only, with no per-model breakdown."
 purpose: |
-  Extends the cumulative cost panel with per-model attribution. Each turn's
-  tokens + cost are bucketed by the model active at that turn (a closure-held
-  `Map`, NOT on `CostPanelState`, so `snapshot()` stays byte-identical). A new
-  `byModel()` accessor returns the deterministically-sorted breakdown, and the
-  `/cost` detailed box appends a "By model:" section ONLY for heterogeneous
-  (>1 model) sessions — a single-model session renders byte-identical to the
-  pre-feature box. Fixes the prior last-writer-wins collapse where a
-  heterogeneous-model session reported every turn under the most-recent model.
-  The cost math is numerically equivalent to the pre-feature aggregate
-  (verified in the 3x adversarial pass: the old provided-cost early-return is
-  preserved as the ternary's first branch).
+  Per-model attribution on the cumulative cost panel. A3 (aug-30): the
+  closure-held Map accumulation is GONE — `byModel()` and the "By model:"
+  rows project the usage authority's per-model aggregates (each CALL priced
+  at the model it actually ran on, cache-write included), rendered through
+  the same sanitize boundary as every provider string. Rows sort
+  spend-descending with a byte-stable name tiebreak; single-model sessions
+  render no block (byte-identical).
 evidence:
   code:
     - src/apps/cli/cost-panel.ts

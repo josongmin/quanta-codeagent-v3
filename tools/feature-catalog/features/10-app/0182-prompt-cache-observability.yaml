@@ -67,6 +67,11 @@ knobs:
     purpose: "Expose the read-only prompt_cache_status tool when its observer port exists; explicit falsy value rolls back"
 deliberate_hold: null
 notes: |
+  A5 (aug-30): DEFAULT_PROMPT_CACHE_PRICING is now DERIVED from
+  MODEL_RATE_CARD (cache-bearing rows projected) instead of a hand-mirrored
+  copy — same slice, so the old plane-cleanliness rationale bought only
+  drift risk. Observer field shape, override API, sonnet fallback and
+  warn-once survive unchanged.
   Hit rate denominator-zero → 0 (NaN guard). Negative-savings guard
   prevents misconfigured pricing from showing fictitious gains. Claude
   Code's `/cost` exposes raw tokens only — this slice adds operational

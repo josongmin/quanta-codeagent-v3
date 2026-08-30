@@ -22,9 +22,16 @@ surface_integration:
     cli: "runs in the interactive CLI — 1/1 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure versioned static pricing library (no UI), the surface is the separate /cost panel"
 purpose: |
-  Pure (no network) versioned static price table. Every derived cost event
-  stamps `PRICING_VERSION` so historical costs can be re-derived after table
-  drift. Unknown model returns `null` (NOT an error, NEVER silent `$0`).
+  Pure (no network) versioned static price table — and since MR-01/A4
+  (aug-30) the ONE formula: `normalizeUsage` resolves each provider's
+  cache-token convention into disjoint buckets, `priceUsage` prices them,
+  and `costUsd` survives only as a compatibility wrapper. The budget ledger
+  DELEGATES to the same formula (finite-positive sanitize first, operator
+  overrides projected through). Every derived cost stamps `PRICING_VERSION`;
+  unknown model returns `null` from `costUsd` / `pricingKnown:false` from
+  `priceUsage` (NOT an error, NEVER a silent $0-as-measured). A call-site
+  census ratchet pins WHO may price (runtime: emit-helpers + the cost
+  preflight; offline report tier enumerated by name).
   Crucially encodes the provider-aware semantics: Anthropic's `input_tokens`
   EXCLUDES cache reads (disjoint bucket — total billed input = input +
   cacheRead), while OpenAI's `prompt_tokens` ALREADY INCLUDES `cached_tokens`
