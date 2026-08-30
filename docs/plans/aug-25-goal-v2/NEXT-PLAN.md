@@ -17,11 +17,35 @@
 | P3-7a 승인 요약에 `check.argv` 노출 | **DONE** — 뮤턴트 3/3 RED | `d6eed6e6e` |
 | P2-1 제품 예산 상한(파생, 조용한 clamp 아님) | **DONE** — 뮤턴트 5/5 RED | `30e3094c7` |
 | P1-4 텔레메트리 | 남음 — `decision-counter-sink`의 예약된 `kind:"objective"` 재사용 + 턴 밖 사건 결정 |
+| **P0-A** 모델 blocker 관측의 attempt 귀속 | **DONE** — 도구가 쓰던 `ctx.turnId`는 프로덕션에서 절대 안 채워지고 `ctx.toolCallId`는 툴콜마다 달라, CLI에선 모델 `addBlocker`가 100% 거절(게다가 "objective 없음"이라는 거짓 메시지)이고 웹에선 "3 attempts"가 "3 tool calls"로 퇴화했다. 권위가 `attempts.started.attemptId`를 찍는다(모델 위조 불가). 뮤턴트 3/3 RED | `e00966891` |
+| **P0-B** blocked 탈출구 + 이유 노출 | **DONE** — `/goal resume`이 "clear blocker first"라 지시하는 동작이 verb로 없었다(P0-2/P0-3와 같은 계열, 세 번째). `/goal show`가 blocker 이유를 렌더하고 `/goal unblock`이 지운다. 같은 의존이 3시도마다 blocker를 쌓던 것도 (reason, waitingOn) 단위로 dedupe. 뮤턴트 3/3 RED | `972456a4d` |
+| **P0-C** objective 거절 사유가 와이어에서 소실 | **DONE** — 정책 거절·CAS 충돌·호스트 크래시가 모두 `issue:"dispatch_failed"`로 뭉개졌다. 두 타입 에러의 부모만 바꿔 기존 인코딩(`protocol_validation` + free-form `issue`, `revision_conflict`) 위로 실었다 — 프런트 변경 0, 파일 1개. 뮤턴트 3/3 RED | `e6e7dbe7e` |
+| **P1-D** 어느 bound가 멈췄는지 + 틀린 조언 제거 | **DONE** — `budget.limitedBy` 소비자가 0이었고, `/goal resume`은 제품 하드캡/천장에서도 "increase budget"이라는 **작동할 수 없는 조언**을 했다. 뮤턴트 3/3 RED | `0ef1cf5c2` |
+| **P1-E** attempt 게이트가 토큰 축을 안 봄 | **DONE** — `autonomousAllowance`는 턴만 센다. `maxTokens:100`에 500을 쓴 goal도 autonomous `beginAttempt`가 APPLIED였다(프로브 실측). 스토어가 파생한 bound를 권위가 그대로 집행하도록 교체. 뮤턴트 3/3 RED | `209b64158` |
+| receipt 허위 주장 정정 | **DONE** — GOAL-07(rails 3~8,15: 롤백/`sessionEpoch` 미구현인데 "no open gap"), GOAL-09(rails 5,6: occurrence 레지스트리 부재), GOAL-08/GOAL-01 rail 12 vacuous 표기 |
 | P2-5 주인 없는 rail | **DONE**(fork/verify/pause/render 테스트) | `0202570d3` |
 | P2-6 PTY 배터리 | 남음 — 90초 목표 재설정 결정이 선행 |
 | P3-7b 샌드박스 계약 | 남음 — 결정 필요 |
-| 웹 objective 컨트롤 생산자 0 | 남음(어딧 B가 지적한 최대 누락: 웹은 goal을 읽기만 함) |
+| 웹 objective 컨트롤 생산자 0 | 남음(어딧 B가 지적한 최대 누락: 웹은 goal을 읽기만 함). **2차 어딧 결과 진입점이 바뀜**: 가장 싼 첫 쓰기 동사는 `pause`가 아니라 **`goal work`**다 — `client.ts`의 `sendGoalWork`/`onGoalWorkResult`가 이미 구현·단위테스트돼 있고 데몬 반쪽도 e2e로 닫혀 있는데(GOAL-08 rail 15) **컴포넌트 호출자만 0**이다. revision/CAS도 필요 없다. `pause`는 그 다음 |
+| 웹 읽기 모델 드리프트 | 남음 — 손유지 `apps/web-frontend/src/types/protocol.ts`가 서버에 존재하지 않는 `verificationState`/`verifiedSourceDigest`를 선언하고 `ObservabilityPane.tsx:163`이 **절대 켜질 수 없는 분기**를 렌더한다. 반대로 이미 와이어에 실려 오는 `attempts`/`blockerObservations`/`budget.limitedBy`는 누락. byte-equality 생성기는 `@/protocol/session` 4개 파일만 덮으므로 이 미러는 게이트 밖 |
+| 웹 wake 상태 / 정산 체크포인트 | 남음 — `WebGoalWakeHandle`이 `wake.status()`를 버리고, `objectiveSettlementSink` 조립처가 CLI 1곳뿐이다. 채널은 observability objective 프레임이 맞다(agent-state는 goal 데이터를 0개 나른다). 단 4Hz 델타이므로 카운트다운 숫자가 아니라 `armed│idle(사유)│capped` + 절대 `retryAt`의 거친 모양으로 |
 | 카탈로그 evidence 갱신 | 남음 — 오늘 추가된 8개 테스트/3개 소스 경로를 goal yaml에 반영해야 한다. 2026-08-30 시도했으나 동시 세션의 미커밋 `tools/feature-catalog/reachability.ts`가 생성물 `docs/10.feature-catalog.md`를 광범위하게 바꿔서, 내 yaml만 커밋하면 `fc diff`가 red가 되고 생성물까지 커밋하면 남의 in-flight 상태를 박제하게 된다 → **트리가 깨끗해진 뒤 재시도** |
+
+
+### 2차 적대+객관 어딧에서 **반증되어 계획에서 뺀 것** (2026-08-30)
+
+- **"기본 설정에서 모델의 `check.argv`가 무동의로 실행된다" → 반증.** 기본 프리셋에서 모델 `objective_set`은
+  저장되지 않고 거절된다(`"this mutation is not available to the model"`; `create × model`이 `approval`인데
+  `QUANTA_PROPOSE_GOAL`이 꺼져 있어 `actor-forbidden`). `objective_update`의 union은 2-arm(`addBlocker`/`nextActions`)
+  이라 check를 실을 수 없다. 남는 경로는 **스냅샷 복원**뿐인데(디스크의 `check.argv`가 무결성 바인딩 없이 그대로
+  실행된다) 그건 운영자의 `--resume` + 임의 파일 쓰기를 전제하므로 기본 경로가 아니다. ⇒ P3-7b는 여전히 "계약 결정".
+- **웹 결정 카운터 패리티 → DROP.** `decisionEmitterFromStream`은 디버그 전용이고 카운터 싱크는 `QUANTA_DECISION_METRICS`
+  뒤에 있다(둘 다 기본 OFF). 웹 소비자도 0이라, 랜딩해도 누구에게도 관측 가능한 변화가 없다.
+- **PTY `stale` 배터리 → 작성 불가(결정 선행).** `verificationState:"stale"`은 프런트 전용 유령 필드로 `src/` 어디에도
+  생산자가 없다. 배지가 켜질 수 없으니 단언할 대상이 없다. 웹 읽기모델 정리가 선행되어야 결정 가능하다.
+  (`e2e-pty`는 prepush 게이트이며 속도 라쳇은 없다 — 기준을 "90초"가 아니라 "raw-mode가 필요한가"로 잡을 것.)
+- **GOAL-06 rail 17 "reconcile 코드·테스트 0" → 반증.** revision 변경 시 재조회(`skip("revision-changed")`),
+  unavailable 시 쿨다운(`skip:"infra-cooldown"`), stale reservation 0(`reservation.release()`) 모두 코드와 테스트가 있다.
 
 
 ## P0-1. 승인이 걸린 goal 턴은 **버려진다** (귀속 문제가 아니라 실행 자체가 안 됨)
