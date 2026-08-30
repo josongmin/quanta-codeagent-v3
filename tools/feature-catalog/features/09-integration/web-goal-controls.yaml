@@ -1,0 +1,71 @@
+id: web-goal-controls
+title: Browser goal readout and control parity
+section: 9
+subsystem: Objective substrate (ADR-0394)
+order: 98
+maturity: L3
+status: new
+owners: ["@songmin"]
+labels: ["surface:web", "codex-parity"]
+depends_on: [objective-goal-continuation-live, objective-verifier-runtime]
+lifecycle_stage: active
+supersedes: []
+ui_surfaces: [web]
+monitoring: partial
+modes: [ide, daemon]
+configurable: integrated
+telemetry_keys: []
+surface_integration:
+  web: full
+  method: audited
+  verified: "2026-08-30"
+  evidence:
+    web: "The browser consumes a generated, total structured goal readout and exposes show/create/work/pause/stop/resume/edit/clear/abandon/budget/unblock/criterion add+done/check add/verify. Every mutation is USER-actor bound, carries the objective revision the operator viewed, waits for its own command-correlated receipt, and confirms a newer structured readback. Verify uses a separate correlated daemon frame and the production ObjectiveVerificationPort. Real TCP-WebSocket E2Es prove lifecycle mutation, policy refusal, rich criterion/check identity, blocker-ID clearing, two-client stale-write rejection, and verifier receipt commit against the live authority."
+purpose: |
+  Provides the browser's complete `/goal` control surface without introducing a
+  second objective store or parsing rendered text as state. Structured readout
+  data preserves objective, blocker, criterion and check identities; mutations
+  use viewed-revision CAS and exact command correlation; checked criteria can be
+  completed only through the shared host verifier.
+
+  This feature is narrower than bounded autonomous continuation. It does not
+  claim full web visibility for wake state, settlement checkpoints, or the
+  default-OFF observability ObjectiveCard.
+evidence:
+  code:
+    - src/protocol/readout/goal.ts
+    - src/apps/web-daemon/readout.ts
+    - src/apps/web-daemon/goal-verify-frame.ts
+    - src/apps/web-daemon/goal-verify-compose.ts
+    - src/apps/web-daemon/server/ws-handlers.ts
+    - apps/web-frontend/src/types/protocol.readout.generated.ts
+    - apps/web-frontend/src/components/slash-readout.ts
+    - apps/web-frontend/src/components/slash-goal.ts
+    - apps/web-frontend/src/components/slash-catalog.ts
+    - apps/web-frontend/src/ws/client.ts
+    - apps/web-frontend/src/ws/session-hooks.ts
+  adrs: [394]
+  tests:
+    unit:
+      - tests/unit/web-goal-readout-protocol-drift-hellgate.test.ts
+      - tests/unit/web-goal-command-wiring-hellgate.test.ts
+      - tests/unit/apps/web-daemon/readout-goal-hellgate.test.ts
+      - tests/unit/apps/web-daemon/readout-production-wiring-hellgate.test.ts
+      - tests/unit/apps/web-daemon/goal-verify-hellgate.test.ts
+      - apps/web-frontend/src/components/slash-goal.control.test.ts
+      - apps/web-frontend/src/components/slash-goal.test.ts
+      - apps/web-frontend/src/ws/objective-mutation-receipt.test.ts
+      - apps/web-frontend/src/ws/goal-verify-client.test.ts
+    integration:
+      - tests/integration/goal-control-ws-daemon-e2e.test.ts
+      - tests/integration/goal-verify-ws-daemon-e2e.test.ts
+    contract: []
+knobs:
+  - name: QUANTA_GOAL
+    where: src/objective/goal-preset.ts
+    default: 'true (ON)'
+    purpose: Public preset that composes the shared objective authority and verifier.
+deliberate_hold: null
+notes: |
+  Monitoring is partial because this control surface returns typed outcomes but
+  does not itself provide promotion-grade production decision counters.

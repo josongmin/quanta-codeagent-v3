@@ -26,8 +26,8 @@
 | P2-5 주인 없는 rail | **DONE**(fork/verify/pause/render 테스트) | `0202570d3` |
 | P2-6 PTY 배터리 | 남음 — 90초 목표 재설정 결정이 선행 |
 | P3-7b 샌드박스 계약 | 남음 — 결정 필요 |
-| **W1d** 웹 goal 컨트롤 verb | **DONE** — `/goal`이 show·set·work에 더해 `pause`/`resume`/`edit`/`clear`까지. 새 프로토콜·커널·권한 변경 0(USER actor는 정책표에서 이미 허용). 실 WebSocket 데몬 e2e가 create→pause→resume→edit→clear를 **실제 authority**에 대고 검증하고, 진행 중 attempt 아래 정의변경이 `objective:attempt-in-flight`로 거절되며 상태가 안 바뀌는 것까지 고정. 뮤턴트 9/9 RED |
-| 웹 goal 컨트롤 — 남은 것 | `abandon`·`budget`도 랜딩(같은 verb 테이블 한 줄이었다 — 스코프가 아니라 안 한 것이었음). **진짜 남은 것**: `unblock`·`criterion`은 mutation이 blocker/criterion **id**를 요구하는데 readout이 id를 안 실어서 브라우저가 대상을 지목할 수 없다(선행: readout에 id 노출 또는 복수형 mutation). `verify`는 mutation이 아니라 verifier 포트라 별건. 또한 `pause`는 도는 턴을 취소하지 않고 다음 자율 재개만 막으며, blocked 재개엔 `/goal unblock`(CLI 전용)이 필요하다. 카탈로그는 그래서 `web: partial` 유지 |
+| **W1d** 웹 goal 컨트롤 전체 | **DONE (source + focused/E2E receipts)** — generated structured readout이 revision/objective/blocker/criterion/check identity를 보존한다. `/goal`의 show/create/work/pause/stop/resume/edit/clear/abandon/budget/unblock/criterion add+done/check add/verify가 모두 브라우저에 있다. mutation은 사용자가 본 revision CAS + command ID receipt + structured readback을 사용하고, verify는 별도 correlated daemon frame으로 production verifier를 호출한다. 실제 TCP-WebSocket E2E가 rich criteria/check, blocker identity, attempt refusal, two-client stale write, verifier receipt commit을 live authority에 대고 고정한다. |
+| 웹 goal 컨트롤 — 판정 경계 | `web-goal-controls` feature는 `web: full`. 더 넓은 `objective-goal-continuation-live`는 wake 상태·settlement checkpoint의 항상 보이는 웹 투영과 default-OFF ObjectiveCard가 남아 `web: partial` 유지. `pause`는 실행 중 turn 취소가 아니라 다음 autonomous resume fence다. |
 | 웹 읽기 모델 드리프트 | 남음 — 손유지 `apps/web-frontend/src/types/protocol.ts`가 서버에 존재하지 않는 `verificationState`/`verifiedSourceDigest`를 선언하고 `ObservabilityPane.tsx:163`이 **절대 켜질 수 없는 분기**를 렌더한다. 반대로 이미 와이어에 실려 오는 `attempts`/`blockerObservations`/`budget.limitedBy`는 누락. byte-equality 생성기는 `@/protocol/session` 4개 파일만 덮으므로 이 미러는 게이트 밖 |
 | 웹 wake 상태 / 정산 체크포인트 | 남음 — `WebGoalWakeHandle`이 `wake.status()`를 버리고, `objectiveSettlementSink` 조립처가 CLI 1곳뿐이다. 채널은 observability objective 프레임이 맞다(agent-state는 goal 데이터를 0개 나른다). 단 4Hz 델타이므로 카운트다운 숫자가 아니라 `armed│idle(사유)│capped` + 절대 `retryAt`의 거친 모양으로 |
 | 카탈로그 evidence 갱신 | **DONE** — 1차분은 `e6d2adde8`, 2차분(오늘 5개 테스트 + `policy.ts`/`criteria-ops.ts` + readout 슬라이스)은 `53071a855`에 포함. 후자는 자발적 위생이 아니라 `fc check-changed`가 신규 src 파일을 막아서 강제됐다 |
@@ -38,16 +38,15 @@
 | **W3** wake idle 상세(도메인 절반) | **DONE** — `status()`가 정책이 계산한 `retryAt`/`limitedBy`를 버렸다. armed arm의 `armedAt`은 컨트롤러 타입 확장 + 144/150 함수 수술이라 **별도 슬라이스로 분리**. 뮤턴트 4/4 RED | `bc6821811` |
 
 
-### 웹 goal 쓰기의 동시성 의미 (명시적으로 수용한 한계)
+### 웹 goal 쓰기의 동시성 의미
 
-브라우저는 `expectedObjectiveRevision`을 보내지 않고, 호스트가 **적용 시점에 읽은** revision으로 CAS한다.
-- 진행 중 attempt 아래 `replace`/`clear` 보호: **있음**(도메인이 `attempt-in-flight`로 거절, e2e로 고정).
-- 유휴 상태에서 CLI와 웹이 동시에 edit: **last-writer-wins**.
-- 운영자가 *보고 있던* 상태 기준의 충돌 검출: **없음**.
+브라우저는 generated structured readout의 `revision`을 `expectedObjectiveRevision`으로 보낸다.
+- 진행 중 attempt 아래 `replace`/`clear`: authority의 `attempt-in-flight` 정책 거절.
+- 다른 표면이 먼저 쓴 stale mutation: `revision_conflict`와 expected/actual revision으로 거절, 자동 재시도 없음.
+- 성공 판단: 동일 command ID의 state update를 받은 뒤 더 높은 revision의 structured readback으로 확인.
 
-이건 "안전하다"가 아니라 **CLI 패리티의 current-state / last-writer-wins 의미를 명시적으로 수용한다**는 뜻이다.
-엄격한 cross-surface 충돌 방지가 필요해지면 readout **페이로드에 구조화된 `objectiveRevision`**을 추가하는 별도 작업이며,
-렌더된 문자열에서 revision을 파싱해서는 안 된다.
+2-client real-daemon E2E가 A의 revision N read → B의 N+1 edit → A의 stale clear 거절 → B의
+goal/objectiveId/revision 불변을 검증한다. 렌더 문자열은 표시 전용이며 제어 판단에 사용하지 않는다.
 
 
 ### 2차 적대+객관 어딧에서 **반증되어 계획에서 뺀 것** (2026-08-30)
