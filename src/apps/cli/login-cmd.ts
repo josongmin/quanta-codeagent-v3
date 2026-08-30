@@ -202,6 +202,55 @@ const peekPlanFromAccessToken = (rec: TokenRecord): string | null => {
   }
 }
 
+const completeLogin = async (
+  deps: LoginDeps,
+  cfg: OAuthConfig,
+  tokenPath: string,
+  nowMs: number,
+  signal: AbortSignal,
+  ctx: SlashContext,
+): Promise<TokenRecord> => {
+  const flow = await runBrowserFlow({
+    cfg,
+    ...(deps.opener !== undefined ? { opener: deps.opener } : {}),
+    ...(deps.callbackProvider !== undefined ? { callbackProvider: deps.callbackProvider } : {}),
+    ...(deps.timeoutMs !== undefined ? { timeoutMs: deps.timeoutMs } : {}),
+    signal,
+  })
+  ctx.out(`${dim("→ exchanging authorization code for tokens…")}\n`)
+  const record = await exchangeCode({
+    cfg,
+    code: flow.code,
+    verifier: flow.verifier,
+    redirectUri: flow.redirectUri,
+    ...(deps.fetchImpl !== undefined ? { fetchImpl: deps.fetchImpl } : {}),
+    nowMs: () => nowMs,
+  })
+  await writeToken(tokenPath, record)
+  return record
+}
+
+const loginExitCode = (
+  record: TokenRecord,
+  tokenPath: string,
+  nowMs: number,
+  ctx: SlashContext,
+): number => {
+  const plan = record.plan_type ?? peekPlanFromAccessToken(record) ?? "unknown"
+  const freeWarn =
+    plan === "free"
+      ? "Free ChatGPT plan does not include API access — model calls will fail."
+      : null
+  ctx.out(renderSuccess(record, tokenPath, nowMs, freeWarn))
+  if (
+    record.plan_type === undefined ||
+    record.plan_type === "free" ||
+    isFreePlan({ chatgpt_plan_type: record.plan_type })
+  )
+    return record.plan_type === "free" || plan === "free" ? 3 : 0
+  return 0
+}
+
 export const buildLoginCmd = (deps: LoginDeps = {}): SlashCommand => ({
   name: "/login",
   describe: "Sign in to ChatGPT (Plus / Pro / Team / Business / Enterprise)",
@@ -241,44 +290,8 @@ export const buildLoginCmd = (deps: LoginDeps = {}): SlashCommand => ({
     process.once("SIGINT", sigintHandler)
     const restoreKeypress = installLoginCtrlCInterceptor(() => ac.abort())
     try {
-      const flowOpts = {
-        cfg,
-        ...(deps.opener !== undefined ? { opener: deps.opener } : {}),
-        ...(deps.callbackProvider !== undefined ? { callbackProvider: deps.callbackProvider } : {}),
-        ...(deps.timeoutMs !== undefined ? { timeoutMs: deps.timeoutMs } : {}),
-        signal: ac.signal,
-      }
-      const flow = await runBrowserFlow(flowOpts)
-      ctx.out(`${dim("→ exchanging authorization code for tokens…")}\n`)
-      const exchangeOpts = {
-        cfg,
-        code: flow.code,
-        verifier: flow.verifier,
-        redirectUri: flow.redirectUri,
-        ...(deps.fetchImpl !== undefined ? { fetchImpl: deps.fetchImpl } : {}),
-        nowMs: () => nowMs,
-      }
-      const record = await exchangeCode(exchangeOpts)
-      await writeToken(tokenPath, record)
-
-      // Free-account preflight warning (still write the token so /status
-      // reflects truth — but warn the user that model calls will 403).
-      const planForCheck = record.plan_type ?? peekPlanFromAccessToken(record) ?? "unknown"
-      const freeWarn =
-        planForCheck === "free"
-          ? "Free ChatGPT plan does not include API access — model calls will fail."
-          : null
-      ctx.out(renderSuccess(record, tokenPath, nowMs, freeWarn))
-      if (
-        record.plan_type === undefined ||
-        record.plan_type === "free" ||
-        isFreePlan({ chatgpt_plan_type: record.plan_type })
-      ) {
-        // Non-zero exit only for the literal free plan — unknown stays 0 so
-        // the (rare) case of a plan-less id_token doesn't block the user.
-        return record.plan_type === "free" || planForCheck === "free" ? 3 : 0
-      }
-      return 0
+      const record = await completeLogin(deps, cfg, tokenPath, nowMs, ac.signal, ctx)
+      return loginExitCode(record, tokenPath, nowMs, ctx)
     } catch (e) {
       ctx.err(buildErrorRender(e))
       return 1
