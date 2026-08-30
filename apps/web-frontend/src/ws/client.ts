@@ -207,6 +207,30 @@ const decodeGoalWorkResult = (parsed: unknown): GoalWorkResultFrame | null => {
   return null
 }
 
+export interface GoalVerifyResultFrame {
+  readonly requestId: string
+  readonly status: "completed" | "refused"
+  readonly outcome: { readonly kind: string; readonly [key: string]: unknown }
+}
+
+const decodeGoalVerifyResult = (parsed: unknown): GoalVerifyResultFrame | null => {
+  if (parsed === null || typeof parsed !== "object") return null
+  const frame = parsed as Record<string, unknown>
+  if (typeof frame.requestId !== "string" || frame.requestId.length === 0) return null
+  if (frame.status !== "completed" && frame.status !== "refused") return null
+  if (frame.outcome === null || typeof frame.outcome !== "object" || Array.isArray(frame.outcome)) {
+    return null
+  }
+  const outcome = frame.outcome as Record<string, unknown>
+  return typeof outcome.kind === "string"
+    ? {
+        requestId: frame.requestId,
+        status: frame.status,
+        outcome: { ...outcome, kind: outcome.kind },
+      }
+    : null
+}
+
 export class SessionClient {
   readonly #eventHandlers = new Map<SessionEventType, Set<EventHandler<SessionEventType>>>()
   readonly #wildcardEventHandlers = new Set<(event: SessionEvent) => void>()
@@ -257,6 +281,7 @@ export class SessionClient {
   #lastCanvas: CanvasMessage | null = null
   /** GOAL-08 rail 15 — `goalWorkResult` subscribers (accept + late refusal). */
   readonly #goalWorkHandlers = new Set<(result: GoalWorkResultFrame) => void>()
+  readonly #goalVerifyHandlers = new Set<(result: GoalVerifyResultFrame) => void>()
   /** Last agent-state message, replayed to late `onAgentState` subscribers. */
   #lastAgentState: AgentStateMessage | null = null
   /** Heartbeat timers (injectable seam). `#pingHandle` schedules the next */
@@ -429,6 +454,45 @@ export class SessionClient {
     return () => {
       this.#goalWorkHandlers.delete(handler)
     }
+  }
+
+  /** Send a correlated checked-criterion verification request. */
+  sendGoalVerify(requestId: string, expectedObjectiveRevision: number): boolean {
+    if (this.#ws === null || this.#ws.readyState !== READYSTATE_OPEN) {
+      this.#log("warn", "[SessionClient] dropping goalVerify — socket not open")
+      return false
+    }
+    try {
+      this.#ws.send(JSON.stringify({ kind: "goalVerify", requestId, expectedObjectiveRevision }))
+      return true
+    } catch (err) {
+      this.#log("warn", `[SessionClient] goalVerify send failed: ${String(err)}`)
+      return false
+    }
+  }
+
+  #emitGoalVerifyResult(parsed: unknown): void {
+    const result = decodeGoalVerifyResult(parsed)
+    if (result === null) return
+    for (const handler of [...this.#goalVerifyHandlers]) {
+      try {
+        handler(result)
+      } catch (err) {
+        this.#log("warn", `[SessionClient] goalVerifyResult handler threw: ${String(err)}`)
+      }
+    }
+  }
+
+  onGoalVerifyResult(handler: (result: GoalVerifyResultFrame) => void): () => void {
+    this.#goalVerifyHandlers.add(handler)
+    return () => this.#goalVerifyHandlers.delete(handler)
+  }
+
+  #consumeGoalResult(kind: string | null, parsed: unknown): boolean {
+    if (kind === "goalWorkResult") this.#emitGoalWorkResult(parsed)
+    else if (kind === "goalVerifyResult") this.#emitGoalVerifyResult(parsed)
+    else return false
+    return true
   }
 
   sendControlRequest(request: { readonly kind: string; readonly [k: string]: unknown }): boolean {
@@ -794,10 +858,7 @@ export class SessionClient {
       }
       return
     }
-    if (kind === "goalWorkResult") {
-      this.#emitGoalWorkResult(parsed)
-      return
-    }
+    if (this.#consumeGoalResult(kind, parsed)) return
     if (kind === "rejected") {
       const rejected = decodeRejectedFromEnvelope(parsed)
       if (rejected !== null) {

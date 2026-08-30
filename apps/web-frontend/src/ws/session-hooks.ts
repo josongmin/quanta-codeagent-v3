@@ -24,7 +24,7 @@ import type {
   UiMessage,
 } from "../types/protocol"
 import type { CostSurfaceViewWire } from "../types/protocol.session.generated"
-import type { SessionClient } from "./client"
+import type { GoalVerifyResultFrame, SessionClient } from "./client"
 
 /**
  * `useConnectionState` — mirrors the client's connection state into React
@@ -1096,31 +1096,130 @@ export const useSendApprovalDecision = (
  * confirmation surface. The command has been in this package's generated union
  * since it shipped, with no caller — `/goal <text>` is that caller.
  *
- * `expectedObjectiveRevision` is deliberately omitted: it is optional on the
- * wire, and the host binds the CURRENT revision when it is absent. A browser
- * that has no revision to send must not invent one.
- *
- * Returns `false` when there is no session yet, so the caller can SAY the write
- * did not leave rather than pretending it did.
+ * The caller must pass the revision from the structured `/goal` readout. The
+ * host applies it as an objective-domain CAS, so a stale tab cannot overwrite a
+ * newer generation. The promise settles only on this command's correlated
+ * state event/rejection, immediate non-delivery, or a bounded timeout.
  */
+export type ObjectiveMutationReceipt =
+  | { readonly kind: "applied"; readonly commandId: string }
+  | { readonly kind: "rejected"; readonly commandId: string; readonly frame: SessionRejectedFrame }
+  | { readonly kind: "undelivered" }
+  | { readonly kind: "timeout"; readonly commandId: string }
+
+export interface ObjectiveMutationReceiptOptions {
+  readonly timeoutMs?: number
+  readonly makeCommandId?: () => string
+}
+
+const OBJECTIVE_MUTATION_RECEIPT_TIMEOUT_MS = 5_000
+
+/** Send one objective CAS and await only its correlated terminal wire fact. */
+export const sendObjectiveMutation = (
+  client: SessionClient,
+  sessionId: string | null,
+  mutation: unknown,
+  expectedObjectiveRevision: number,
+  options: ObjectiveMutationReceiptOptions = {},
+): Promise<ObjectiveMutationReceipt> => {
+  if (sessionId === null) return Promise.resolve({ kind: "undelivered" })
+  const commandId = options.makeCommandId?.() ?? makeCommandId()
+  return new Promise((resolve) => {
+    let settled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const finish = (receipt: ObjectiveMutationReceipt): void => {
+      if (settled) return
+      settled = true
+      unsubscribeEvents()
+      unsubscribeRejected()
+      if (timer !== undefined) clearTimeout(timer)
+      resolve(receipt)
+    }
+    const unsubscribeEvents = client.onAny((event: SessionEvent) => {
+      if (event.type === "session.state.updated" && event.causedByCommandId === commandId) {
+        finish({ kind: "applied", commandId })
+      }
+    })
+    const unsubscribeRejected = client.onRejected((frame: SessionRejectedFrame) => {
+      if (frame.commandId === commandId) finish({ kind: "rejected", commandId, frame })
+    })
+    const sent = client.send({
+      sessionId,
+      commandId,
+      issuedAt: new Date().toISOString(),
+      type: "session.objective.mutate",
+      mutation,
+      expectedObjectiveRevision,
+    } as SessionCommand)
+    if (!sent) {
+      finish({ kind: "undelivered" })
+      return
+    }
+    // A test adapter (or future in-process transport) may synchronously fan out
+    // the applied event from `send`; do not arm a leaked timer after settlement.
+    if (settled) return
+    timer = setTimeout(
+      () => finish({ kind: "timeout", commandId }),
+      options.timeoutMs ?? OBJECTIVE_MUTATION_RECEIPT_TIMEOUT_MS,
+    )
+  })
+}
+
 export const useSendObjectiveMutate = (
   client: SessionClient,
   sessionId: string | null,
-): ((mutation: unknown) => boolean) =>
+): ((mutation: unknown, expectedObjectiveRevision: number) => Promise<ObjectiveMutationReceipt>) =>
   useCallback(
-    (mutation: unknown) => {
-      if (sessionId === null) return false
-      // The CLIENT decides whether the frame left — a session id only means we
-      // know where to address it.
-      return client.send({
-        sessionId,
-        commandId: makeCommandId(),
-        issuedAt: new Date().toISOString(),
-        type: "session.objective.mutate",
-        mutation,
-      } as SessionCommand)
-    },
+    (mutation: unknown, expectedObjectiveRevision: number) =>
+      sendObjectiveMutation(client, sessionId, mutation, expectedObjectiveRevision),
     [client, sessionId],
+  )
+
+export type GoalVerificationReceipt =
+  | { readonly kind: "result"; readonly frame: GoalVerifyResultFrame }
+  | { readonly kind: "undelivered" }
+  | { readonly kind: "timeout"; readonly requestId: string }
+
+const GOAL_VERIFY_RESULT_TIMEOUT_MS = 910_000
+
+export const requestGoalVerification = (
+  client: SessionClient,
+  expectedObjectiveRevision: number,
+  options: { readonly timeoutMs?: number; readonly makeRequestId?: () => string } = {},
+): Promise<GoalVerificationReceipt> => {
+  const requestId = options.makeRequestId?.() ?? makeCommandId()
+  return new Promise((resolve) => {
+    let settled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const finish = (receipt: GoalVerificationReceipt): void => {
+      if (settled) return
+      settled = true
+      unsubscribe()
+      if (timer !== undefined) clearTimeout(timer)
+      resolve(receipt)
+    }
+    const unsubscribe = client.onGoalVerifyResult((frame) => {
+      if (frame.requestId === requestId) finish({ kind: "result", frame })
+    })
+    if (!client.sendGoalVerify(requestId, expectedObjectiveRevision)) {
+      finish({ kind: "undelivered" })
+      return
+    }
+    if (settled) return
+    timer = setTimeout(
+      () => finish({ kind: "timeout", requestId }),
+      options.timeoutMs ?? GOAL_VERIFY_RESULT_TIMEOUT_MS,
+    )
+  })
+}
+
+export const useRequestGoalVerification = (
+  client: SessionClient,
+): ((expectedObjectiveRevision: number) => Promise<GoalVerificationReceipt>) =>
+  useCallback(
+    (expectedObjectiveRevision: number) =>
+      requestGoalVerification(client, expectedObjectiveRevision),
+    [client],
   )
 
 /**
