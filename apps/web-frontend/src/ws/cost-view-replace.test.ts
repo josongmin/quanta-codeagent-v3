@@ -86,4 +86,31 @@ describe("A7 — costView replace semantics", () => {
     )
     expect(state.costView?.status === "on" ? state.costView.totalUsd : undefined).toBe(3)
   })
+
+  it("explicit off replaces prior on without folding a co-delivered legacy delta", () => {
+    let state = applySessionEventToTranscript(
+      initialTranscript,
+      completed({ costView: view(3, 1) }),
+    )
+    state = applySessionEventToTranscript(
+      state,
+      completed({
+        costView: { status: "off" },
+        tokenUsage: { promptTokens: 500, completionTokens: 50, totalTokens: 550 },
+      }),
+    )
+    expect(state.costView).toEqual({ status: "off" })
+    expect(state.tokenUsage).toEqual(initialTranscript.tokenUsage)
+  })
+
+  it("the entire smaller snapshot replaces prior totals after a thread switch", () => {
+    const previous = view(99, 90)
+    const current = { ...view(2, 1), estimatedUsd: 0.5, unpricedCalls: 1, continuityLost: true }
+    let state = applySessionEventToTranscript(initialTranscript, completed({ costView: previous }))
+    state = applySessionEventToTranscript(state, completed({ costView: current }))
+    expect(state.costView).toEqual(current)
+    // Duplicate delivery is idempotent for cumulative snapshots, not additive.
+    state = applySessionEventToTranscript(state, completed({ costView: current }))
+    expect(state.costView).toEqual(current)
+  })
 })

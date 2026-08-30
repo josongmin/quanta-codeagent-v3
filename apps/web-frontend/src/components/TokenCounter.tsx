@@ -62,10 +62,12 @@ const renderAccountingView = (view: CostSurfaceViewWire): JSX.Element | null => 
       </div>
     )
   }
-  if (view.calls === 0) return null
+  if (view.calls === 0 && !view.continuityLost) return null
   const totalTok = view.promptTokens + view.outputTokens
   const costLabel =
-    view.unpricedCalls > 0 && view.totalUsd === 0 ? "cost incomplete" : formatUsd(view.totalUsd)
+    (view.unpricedCalls > 0 || view.continuityLost) && view.totalUsd === 0
+      ? "cost incomplete"
+      : formatUsd(view.totalUsd)
   return (
     <div
       className={cx(
@@ -101,6 +103,13 @@ const formatUsd = (usd: number): string => {
 
 const formatCost = (microUsd: number): string => formatUsd(microUsd / 1_000_000)
 
+const tooltipCost = (v: Extract<CostSurfaceViewWire, { status: "on" }>): string => {
+  if (v.totalUsd === 0 && (v.unpricedCalls > 0 || v.continuityLost)) return "cost: incomplete"
+  const label =
+    v.unpricedCalls > 0 ? "priced subtotal" : v.continuityLost ? "current subtotal" : "total"
+  return `${label}: ${formatUsd(v.totalUsd)}`
+}
+
 const renderViewTooltip = (v: Extract<CostSurfaceViewWire, { status: "on" }>): string =>
   [
     `calls: ${v.calls}`,
@@ -108,7 +117,7 @@ const renderViewTooltip = (v: Extract<CostSurfaceViewWire, { status: "on" }>): s
     `output: ${v.outputTokens}`,
     `cache read: ${v.cacheReadTokens}`,
     v.cacheWriteTokens > 0 ? `cache write: ${v.cacheWriteTokens}` : null,
-    `total: ${formatUsd(v.totalUsd)}`,
+    tooltipCost(v),
     v.estimatedUsd > 0 ? `estimated: ${formatUsd(v.estimatedUsd)}` : null,
     v.unpricedCalls > 0 ? `unpriced calls: ${v.unpricedCalls}` : null,
     v.continuityLost ? "continuity: prior totals lost; current total is partial" : null,

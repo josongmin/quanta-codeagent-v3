@@ -13,10 +13,14 @@
  * network nor the user's real ~/.quanta tree is reachable. No session/turn is
  * run — composition only.
  */
-import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test"
+import * as fs from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import * as fsp from "node:fs/promises"
+import { readdir } from "node:fs/promises"
 import { homedir, tmpdir } from "node:os"
-import { join } from "node:path"
+import { join, resolve, sep } from "node:path"
+import { fileURLToPath } from "node:url"
 import {
   resolveReadout,
   SOURCE_BACKED_READOUTS,
@@ -39,10 +43,41 @@ const ENV_KEYS = [
   "QUANTA_SKILLS_DIR",
   "QUANTA_CONFIG_DIR",
   "QUANTA_SESSIONS_DIR",
+  "QUANTA_OBJECTIVE_TOOLS",
+  "QUANTA_GOAL_ENFORCE",
+  "QUANTA_OBJECTIVE_BUDGET_ENFORCE",
 ] as const
 const saved = new Map<string, string | undefined>(ENV_KEYS.map((k) => [k, process.env[k]]))
+const savedCwd = process.cwd()
 const realFetch = globalThis.fetch
 let networkAttempts = 0
+const realQuantaHome = join(homedir(), ".quanta")
+const homeReadAttempts: string[] = []
+const restoreReadGuards: (() => void)[] = []
+
+/** Test-local I/O fence: only real user-state paths are refused; fixture and
+ * repository reads still use the real filesystem. Count BEFORE throwing, since
+ * production fail-soft readers can otherwise hide an attempted home read. */
+const refuseUserHomeRead = (input: unknown): void => {
+  const path =
+    input instanceof URL ? fileURLToPath(input) : Buffer.isBuffer(input) ? input.toString() : input
+  if (typeof path !== "string") return
+  const absolute = resolve(path)
+  if (absolute !== realQuantaHome && !absolute.startsWith(`${realQuantaHome}${sep}`)) return
+  homeReadAttempts.push(absolute)
+  throw new Error(`hermetic readout: refused user-home read ${absolute}`)
+}
+
+const guardReadBoundary = (owner: object, method: string): void => {
+  const boundary = owner as Record<string, (...args: unknown[]) => unknown>
+  const original = boundary[method]
+  if (original === undefined) throw new Error(`missing filesystem boundary: ${method}`)
+  const spy = spyOn(boundary, method).mockImplementation((...args: unknown[]) => {
+    refuseUserHomeRead(args[0])
+    return Reflect.apply(original, owner, args)
+  })
+  restoreReadGuards.push(() => spy.mockRestore())
+}
 
 const hermeticLlm: LLMPort = {
   provider: "openai",
@@ -57,6 +92,25 @@ const buildHermeticFactory = () =>
   })
 
 beforeAll(() => {
+  // The production MCP/config loaders must see only the fixture, regardless of
+  // whether the developer's checkout later acquires a live .mcp.json.
+  process.chdir(tmp)
+  for (const name of [
+    "readFile",
+    "readdir",
+    "open",
+    "stat",
+    "lstat",
+    "realpath",
+    "readlink",
+    "access",
+  ] as const) {
+    guardReadBoundary(fs, name)
+    guardReadBoundary(fs, `${name}Sync`)
+    guardReadBoundary(fsp, name)
+  }
+  guardReadBoundary(fs, "existsSync")
+  guardReadBoundary(Bun, "file")
   // Any accidental adapter call is counted and rejected before it can leave
   // the process. The injected boot port's catalog is in-memory, so the final
   // zero assertion proves the production composition never touched a network.
@@ -73,6 +127,8 @@ afterAll(() => {
   }
   __resetRuntimeConfig()
   globalThis.fetch = realFetch
+  for (const restore of restoreReadGuards.reverse()) restore()
+  process.chdir(savedCwd)
   rmSync(tmp, { recursive: true, force: true })
 })
 
@@ -84,6 +140,19 @@ const SNAP: SessionSnapshotLite = makeSnapshotLite({
 })
 
 describe("production runtime factory — readout sources are LIVE on the facade", () => {
+  test("paired RED injection: user-home reads are refused and counted on every I/O family", () => {
+    const target = join(realQuantaHome, "sessions", "hermetic-tripwire.json")
+    // Named imports are intentional: this is the form used by the production
+    // sticky-model reader and /doctor, so a property-only spy cannot pass.
+    expect(() => readFileSync(target)).toThrow("refused user-home read")
+    expect(() => readdir(realQuantaHome)).toThrow("refused user-home read")
+    expect(() => Bun.file(target)).toThrow("refused user-home read")
+    expect(homeReadAttempts).toEqual([target, realQuantaHome, target])
+    // Deliberate probes are not production activity. From here any attempted
+    // user-state access makes the composition assertions below RED.
+    homeReadAttempts.length = 0
+  })
+
   test("facade exposes readoutSources whose accessors serve real data", async () => {
     process.env.OPENAI_API_KEY = "sk-test-dummy-not-a-real-key"
     process.env.QUANTA_PROVIDER = "openai"
@@ -136,14 +205,15 @@ describe("production runtime factory — readout sources are LIVE on the facade"
     expect(context.output).toContain("no prompt assembled yet")
 
     // model (aug-28) — the model switch's READ half: effective model + the ids
-    // `set_model` accepts. The stub catalog is offline here, so the list is just
-    // the boot model; `wired` + the header prove the accessor was THREADED.
+    // `set_model` accepts. The in-memory catalog contains a second candidate,
+    // proving the production readout invoked the catalog accessor.
     const model = await resolveReadout("model", SNAP, sources)
     expect(model.wired).toBe(true)
     expect(model.output).toContain("model  hermetic-model")
     expect(model.output).toContain("hermetic-model-next")
 
-    // cost is deliberately NOT on the facade — it is the server-owned fold.
+    // Cost is deliberately NOT on the facade's readout bundle — the server
+    // projects the facade's accounting authority into that accessor.
     expect(sources.cost).toBeUndefined()
 
     // CENSUS (aug-28) — every source-backed readout is either WIRED here or listed
@@ -152,8 +222,7 @@ describe("production runtime factory — readout sources are LIVE on the facade"
     // was not extended, so a wired-but-unthreaded readout was invisible. Readout
     // #13 cannot slip the same way.
     const DOCUMENTED_UNWIRED: Readonly<Record<string, string>> = {
-      // The server folds turn usage itself; the facade deliberately has no accessor.
-      cost: "server-owned fold in startWebDaemon",
+      cost: "server-owned accounting projection in startWebDaemon",
       // Composed only when a .mcp.json exists; this hermetic boot has none.
       mcp: "no .mcp.json in the hermetic temp cwd",
       // W1b — the goal accessor reads the objective domain for a THREAD, and the
@@ -176,6 +245,7 @@ describe("production runtime factory — readout sources are LIVE on the facade"
     expect(doctor.output).toContain(`root: ${join(tmp, "sessions")}`)
     expect(doctor.output).not.toContain(join(homedir(), ".quanta"))
     expect(networkAttempts).toBe(0)
+    expect(homeReadAttempts).toEqual([])
   })
 
   test("QUANTA_MEMORY=off degrades ONLY the memory readout (honest copy)", async () => {
@@ -196,6 +266,7 @@ describe("production runtime factory — readout sources are LIVE on the facade"
     // Siblings stay wired.
     expect((await resolveReadout("plan", SNAP, sources)).wired).toBe(true)
     expect(networkAttempts).toBe(0)
+    expect(homeReadAttempts).toEqual([])
     delete process.env.QUANTA_MEMORY
   })
 })
