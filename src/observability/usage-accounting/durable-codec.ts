@@ -13,6 +13,7 @@ export interface DurableUsageBucket {
 
 export interface DurableUsageV1 {
   readonly version: 1
+  readonly continuityLost: boolean
   readonly boundSessionId: string | undefined
   readonly seq: number
   readonly seen: readonly string[]
@@ -27,6 +28,7 @@ export type MintedSequenceRange = [start: number, end: number]
 
 export interface DurableUsageV2 {
   readonly version: 2
+  readonly continuityLost: boolean
   readonly boundSessionId: string | undefined
   readonly mint: Readonly<{
     namespace: string
@@ -296,6 +298,7 @@ const sumBuckets = (buckets: readonly DurableUsageBucket[]): DurableUsageBucket 
 }
 
 interface DecodedCommon {
+  readonly continuityLost: boolean
   readonly boundSessionId: string | undefined
   readonly retained: readonly UsageRecord[]
   readonly total: DurableUsageBucket
@@ -306,6 +309,9 @@ interface DecodedCommon {
 
 const readCommon = (value: UnknownRecord): DecodedCommon | undefined => {
   if (!isOptionalString(value.boundSessionId)) return undefined
+  if (value.continuityLost !== undefined && typeof value.continuityLost !== "boolean") {
+    return undefined
+  }
   const retained = readRecords(value.retained)
   const total = readBucket(value.total)
   const byModel = readBucketEntries(value.byModel)
@@ -324,6 +330,7 @@ const readCommon = (value: UnknownRecord): DecodedCommon | undefined => {
     return undefined
   }
   return {
+    continuityLost: value.continuityLost ?? false,
     boundSessionId: value.boundSessionId,
     retained,
     total,

@@ -119,6 +119,71 @@ describe("A6 — serialize → fresh authority → hydrate", () => {
     expect(b.snapshot().continuityLost).toBe(false)
   })
 
+  test("continuity loss survives repeated empty save, restore, and live rebind", () => {
+    const source = createUsageAccounting()
+    expect(source.hydrate("{ corrupt")).toBe(false)
+    let blob = source.serialize()
+    for (const sessionId of ["live-1", "live-2", "live-3"]) {
+      const restored = createUsageAccounting()
+      expect(restored.hydrate(blob, { rebindSessionId: sessionId })).toBe(true)
+      expect(restored.snapshot()).toMatchObject({
+        calls: 0,
+        continuityLost: true,
+        boundSessionId: undefined,
+      })
+      blob = restored.serialize()
+    }
+  })
+
+  test("new spend does not erase lost-history provenance across restore and rebind", () => {
+    const source = createUsageAccounting()
+    source.hydrate("{ corrupt")
+    record(source, source.mintCallId(PROV))
+    const restored = createUsageAccounting()
+    expect(restored.hydrate(source.serialize(), { rebindSessionId: "live-restored" })).toBe(true)
+    expect(restored.snapshot()).toMatchObject({
+      calls: 1,
+      totalUsd: 3,
+      continuityLost: true,
+      boundSessionId: "live-restored",
+    })
+    const again = createUsageAccounting()
+    expect(again.hydrate(restored.serialize())).toBe(true)
+    expect(again.snapshot().continuityLost).toBe(true)
+    again.reset()
+    expect(again.snapshot()).toMatchObject({ calls: 0, continuityLost: false })
+    expect(restored.hydrate(again.serialize())).toBe(true)
+    expect(restored.snapshot().continuityLost).toBe(false)
+  })
+
+  test("legacy V1 and V2 without a continuity marker restore as healthy", () => {
+    const source = createUsageAccounting()
+    record(source, source.mintCallId(PROV))
+    const legacyV2 = mutateSerialized(source, (durable) => {
+      delete durable.continuityLost
+    })
+    for (const blob of [serializeAsLegacyV1(source, 1), legacyV2]) {
+      const restored = createUsageAccounting()
+      restored.hydrate("{ corrupt")
+      expect(restored.hydrate(blob)).toBe(true)
+      expect(restored.snapshot()).toMatchObject({ calls: 1, continuityLost: false })
+    }
+  })
+
+  test("non-boolean continuity markers are rejected in both durable versions", () => {
+    const source = createUsageAccounting()
+    record(source, source.mintCallId(PROV))
+    for (const blob of [serializeAsLegacyV1(source, 1), source.serialize()]) {
+      for (const invalid of [null, "true", 0, {}, []]) {
+        const payload = JSON.parse(blob) as Record<string, unknown>
+        payload.continuityLost = invalid
+        const restored = createUsageAccounting()
+        expect(restored.hydrate(JSON.stringify(payload))).toBe(false)
+        expect(restored.snapshot()).toMatchObject({ calls: 0, continuityLost: true })
+      }
+    }
+  })
+
   test("nested bucket poison is rejected, clears prior books, and never throws", () => {
     const source = createUsageAccounting()
     record(source, source.mintCallId(PROV))

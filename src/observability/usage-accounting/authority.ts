@@ -99,36 +99,40 @@ const isFinitelyCounted = (u: NormalizedUsage, c: UsageCost): boolean =>
   Number.isFinite(u.outputTokens) &&
   Number.isFinite(c.totalUsd)
 
+/** All mutable authority books move together on reset/hydrate. Keeping this
+ * state as one replaceable owner prevents a corrupt restore from leaving one
+ * counter map from the old session beside another from the new session. */
+interface UsageBooks {
+  total: Bucket
+  byModel: Map<string, Bucket>
+  byAgent: Map<string, Bucket>
+  boundSessionId: string | undefined
+  mintNamespace: string
+  mintHighWater: number
+  mintedRanges: MintedSequenceRange[]
+  externalSeen: Set<string>
+  continuityLost: boolean
+  byKind: Record<"root" | "subagent", Bucket>
+  retained: UsageRecord[]
+}
+
+const freshUsageBooks = (): UsageBooks => ({
+  total: emptyBucket(),
+  byModel: new Map(),
+  byAgent: new Map(),
+  boundSessionId: undefined,
+  mintNamespace: crypto.randomUUID(),
+  mintHighWater: 0,
+  mintedRanges: [],
+  externalSeen: new Set(),
+  continuityLost: false,
+  byKind: { root: emptyBucket(), subagent: emptyBucket() },
+  retained: [],
+})
+
 export const createUsageAccounting = (opts: UsageAccountingOpts = {}): UsageAccountingPort => {
   const maxRetained = Math.max(1, Math.floor(opts.maxRetainedRecords ?? DEFAULT_RETAINED_RECORDS))
-
-  let total = emptyBucket()
-  let byModel = new Map<string, Bucket>()
-  let byAgent = new Map<string, Bucket>()
-  let boundSessionId: string | undefined
-  // P2 — normal authority IDs occupy one private monotonic namespace. Their
-  // admitted sequences compress into exact intervals; only arbitrary caller
-  // IDs pay the sparse-set cost.
-  let mintNamespace: string = crypto.randomUUID()
-  let mintHighWater = 0
-  let mintedRanges: MintedSequenceRange[] = []
-  let externalSeen = new Set<string>()
-  let continuityLost = false
-  let byKind: Record<"root" | "subagent", Bucket> = { root: emptyBucket(), subagent: emptyBucket() }
-  let retained: UsageRecord[] = []
-
-  const clearBooks = (): void => {
-    total = emptyBucket()
-    byModel = new Map()
-    byAgent = new Map()
-    boundSessionId = undefined
-    byKind = { root: emptyBucket(), subagent: emptyBucket() }
-    mintNamespace = crypto.randomUUID()
-    mintHighWater = 0
-    mintedRanges = []
-    externalSeen = new Set()
-    retained = []
-  }
+  let books = freshUsageBooks()
 
   return {
     mintCallId(_provenance): string {
@@ -136,20 +140,20 @@ export const createUsageAccounting = (opts: UsageAccountingOpts = {}): UsageAcco
       // lets durable dedup prove which IDs are compressible without parsing
       // caller-controlled session/agent strings.
       do {
-        if (mintHighWater === Number.MAX_SAFE_INTEGER) {
+        if (books.mintHighWater === Number.MAX_SAFE_INTEGER) {
           throw new Error("usage-accounting call-id sequence exhausted")
         }
-        mintHighWater += 1
-      } while (externalSeen.has(encodeMintedCallId(mintNamespace, mintHighWater)))
-      return encodeMintedCallId(mintNamespace, mintHighWater)
+        books.mintHighWater += 1
+      } while (books.externalSeen.has(encodeMintedCallId(books.mintNamespace, books.mintHighWater)))
+      return encodeMintedCallId(books.mintNamespace, books.mintHighWater)
     },
 
     record(record: UsageRecord): UsageRecordResult {
-      const mintedSequence = parseMintedCallId(record.callId, mintNamespace)
-      const isMinted = mintedSequence !== undefined && mintedSequence <= mintHighWater
+      const mintedSequence = parseMintedCallId(record.callId, books.mintNamespace)
+      const isMinted = mintedSequence !== undefined && mintedSequence <= books.mintHighWater
       if (
-        externalSeen.has(record.callId) ||
-        (isMinted && sequenceInRanges(mintedRanges, mintedSequence))
+        books.externalSeen.has(record.callId) ||
+        (isMinted && sequenceInRanges(books.mintedRanges, mintedSequence))
       ) {
         return { admitted: false, reason: "duplicate" }
       }
@@ -158,42 +162,43 @@ export const createUsageAccounting = (opts: UsageAccountingOpts = {}): UsageAcco
       }
       // A5 — bind to the first admitted session; reject strangers instead of
       // silently summing two sessions into one bill.
-      if (boundSessionId === undefined) {
-        boundSessionId = record.provenance.sessionId
-      } else if (record.provenance.sessionId !== boundSessionId) {
+      if (books.boundSessionId === undefined) {
+        books.boundSessionId = record.provenance.sessionId
+      } else if (record.provenance.sessionId !== books.boundSessionId) {
         return { admitted: false, reason: "session-mismatch" }
       }
-      if (isMinted) addSequenceToRanges(mintedRanges, mintedSequence)
-      else externalSeen.add(record.callId)
+      if (isMinted) addSequenceToRanges(books.mintedRanges, mintedSequence)
+      else books.externalSeen.add(record.callId)
 
       const { usage, cost, provenance } = record
-      add(total, usage, cost)
-      add(bucketIn(byModel, usage.model), usage, cost)
-      add(bucketIn(byAgent, provenance.agentId), usage, cost)
-      add(byKind[provenance.agentKind], usage, cost)
+      add(books.total, usage, cost)
+      add(bucketIn(books.byModel, usage.model), usage, cost)
+      add(bucketIn(books.byAgent, provenance.agentId), usage, cost)
+      add(books.byKind[provenance.agentKind], usage, cost)
 
-      retained.push(record)
-      if (retained.length > maxRetained) retained.splice(0, retained.length - maxRetained)
+      books.retained.push(record)
+      if (books.retained.length > maxRetained)
+        books.retained.splice(0, books.retained.length - maxRetained)
       return { admitted: true }
     },
 
     snapshot(): UsageAccountingSnapshot {
       // Read straight off the counters. Nothing here walks `retained`.
       return {
-        ...freeze(total),
-        continuityLost,
-        retained: retained.length,
-        byModel: frozenMap(byModel),
-        byAgent: frozenMap(byAgent),
-        boundSessionId,
-        byKind: { root: freeze(byKind.root), subagent: freeze(byKind.subagent) },
+        ...freeze(books.total),
+        continuityLost: books.continuityLost,
+        retained: books.retained.length,
+        byModel: frozenMap(books.byModel),
+        byAgent: frozenMap(books.byAgent),
+        boundSessionId: books.boundSessionId,
+        byKind: { root: freeze(books.byKind.root), subagent: freeze(books.byKind.subagent) },
       }
     },
 
     recent(limit?: number): readonly UsageRecord[] {
-      if (limit === undefined) return [...retained]
+      if (limit === undefined) return [...books.retained]
       const n = Math.max(0, Math.floor(limit))
-      return retained.slice(Math.max(0, retained.length - n))
+      return books.retained.slice(Math.max(0, books.retained.length - n))
     },
 
     serialize(): string {
@@ -202,18 +207,19 @@ export const createUsageAccounting = (opts: UsageAccountingOpts = {}): UsageAcco
       // from the bounded retained log.
       return JSON.stringify({
         v: 2,
-        boundSessionId,
+        continuityLost: books.continuityLost,
+        boundSessionId: books.boundSessionId,
         mint: {
-          namespace: mintNamespace,
-          highWater: mintHighWater,
-          admitted: mintedRanges,
+          namespace: books.mintNamespace,
+          highWater: books.mintHighWater,
+          admitted: books.mintedRanges,
         },
-        externalSeen: [...externalSeen],
-        retained,
-        total,
-        byModel: [...byModel.entries()],
-        byAgent: [...byAgent.entries()],
-        byKind,
+        externalSeen: [...books.externalSeen],
+        retained: books.retained,
+        total: books.total,
+        byModel: [...books.byModel.entries()],
+        byAgent: [...books.byAgent.entries()],
+        byKind: books.byKind,
       })
     },
 
@@ -222,26 +228,28 @@ export const createUsageAccounting = (opts: UsageAccountingOpts = {}): UsageAcco
       // resume proceeds, but never silently as an exact $0.
       const d = decodeDurableUsage(json)
       if (d === undefined) {
-        clearBooks()
-        continuityLost = true
+        books = freshUsageBooks()
+        books.continuityLost = true
         return false
       }
-      const reboundSessionId = options.rebindSessionId ?? d.boundSessionId
-      boundSessionId = reboundSessionId
+      // Empty books remain unbound until their first admitted call.
+      const reboundSessionId =
+        d.total.calls === 0 ? undefined : (options.rebindSessionId ?? d.boundSessionId)
+      books.boundSessionId = reboundSessionId
       if (d.version === 2) {
-        mintNamespace = d.mint.namespace
-        mintHighWater = d.mint.highWater
-        mintedRanges = d.mint.admitted.map(([start, end]) => [start, end])
-        externalSeen = new Set(d.externalSeen)
+        books.mintNamespace = d.mint.namespace
+        books.mintHighWater = d.mint.highWater
+        books.mintedRanges = d.mint.admitted.map(([start, end]) => [start, end])
+        books.externalSeen = new Set(d.externalSeen)
       } else {
         // V1 had no authenticated mint namespace, so every restored ID stays
         // in the exact sparse set. New V2 mints start in a fresh namespace.
-        mintNamespace = crypto.randomUUID()
-        mintHighWater = 0
-        mintedRanges = []
-        externalSeen = new Set(d.seen)
+        books.mintNamespace = crypto.randomUUID()
+        books.mintHighWater = 0
+        books.mintedRanges = []
+        books.externalSeen = new Set(d.seen)
       }
-      retained = d.retained.slice(-maxRetained).map((record) =>
+      books.retained = d.retained.slice(-maxRetained).map((record) =>
         options.rebindSessionId === undefined
           ? record
           : {
@@ -249,20 +257,19 @@ export const createUsageAccounting = (opts: UsageAccountingOpts = {}): UsageAcco
               provenance: { ...record.provenance, sessionId: options.rebindSessionId },
             },
       )
-      total = { ...d.total }
-      byModel = new Map(d.byModel.map(([key, bucket]) => [key, { ...bucket }]))
-      byAgent = new Map(d.byAgent.map(([key, bucket]) => [key, { ...bucket }]))
-      byKind = {
+      books.total = { ...d.total }
+      books.byModel = new Map(d.byModel.map(([key, bucket]) => [key, { ...bucket }]))
+      books.byAgent = new Map(d.byAgent.map(([key, bucket]) => [key, { ...bucket }]))
+      books.byKind = {
         root: { ...d.byKind.root },
         subagent: { ...d.byKind.subagent },
       }
-      continuityLost = false
+      books.continuityLost = d.continuityLost
       return true
     },
 
     reset(): void {
-      clearBooks()
-      continuityLost = false
+      books = freshUsageBooks()
     },
   }
 }
