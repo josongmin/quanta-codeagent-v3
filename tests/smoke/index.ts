@@ -27,27 +27,38 @@ interface Args {
   report: boolean
 }
 
+const applyDepthArg = (arg: string, out: Args): boolean => {
+  if (!arg.startsWith("--depth=")) return false
+
+  const depth = arg.slice("--depth=".length)
+  if (!isDepth(depth)) {
+    process.stderr.write(`smoke: unknown depth "${depth}" (single|medium|tikitaka)\n`)
+    process.exit(2)
+  }
+  out.depth = depth
+  return true
+}
+
+const applyTierArg = (arg: string, out: Args): boolean => {
+  if (!arg.startsWith("--tier=")) return false
+
+  const tier = arg.slice("--tier=".length)
+  if (tier !== "replay" && tier !== "live") {
+    process.stderr.write(`smoke: unknown tier "${tier}" (replay|live)\n`)
+    process.exit(2)
+  }
+  out.tier = tier
+  return true
+}
+
 const parseArgs = (argv: readonly string[]): Args => {
   const out: Args = {
     tier: process.env.QUANTA_SMOKE_LIVE === "1" ? "live" : "replay",
     report: false,
   }
   for (const arg of argv) {
-    if (arg.startsWith("--depth=")) {
-      const d = arg.slice("--depth=".length)
-      if (!isDepth(d)) {
-        process.stderr.write(`smoke: unknown depth "${d}" (single|medium|tikitaka)\n`)
-        process.exit(2)
-      }
-      out.depth = d
-    } else if (arg.startsWith("--tier=")) {
-      const t = arg.slice("--tier=".length)
-      if (t !== "replay" && t !== "live") {
-        process.stderr.write(`smoke: unknown tier "${t}" (replay|live)\n`)
-        process.exit(2)
-      }
-      out.tier = t
-    } else if (arg === "--report") {
+    if (applyDepthArg(arg, out) || applyTierArg(arg, out)) continue
+    if (arg === "--report") {
       out.report = true
     } else if (!arg.startsWith("--")) {
       out.id = arg
