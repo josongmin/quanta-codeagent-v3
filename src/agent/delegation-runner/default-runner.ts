@@ -66,6 +66,63 @@ const validateSpec = (spec: DelegateSpec): string | null => {
   return null
 }
 
+const failedDelegate = (args: {
+  readonly mode: AgentMode
+  readonly errorKind: "runner-error" | "cancelled"
+  readonly errorMessage: string
+  readonly startedAt: number
+  readonly now: () => number
+}): BoomerangResult =>
+  failureBoomerang({
+    mode: args.mode,
+    errorKind: args.errorKind,
+    errorMessage: args.errorMessage,
+    turns: 0,
+    durationMs: args.now() - args.startedAt,
+  })
+
+/** Pre-dispatch terminal cases. The typed router owns all post-dispatch
+ * behavior; this boundary only rejects work that must never reach a child. */
+const preflightFailure = (
+  spec: DelegateSpec,
+  maxDepth: number,
+  startedAt: number,
+  now: () => number,
+): BoomerangResult | undefined => {
+  const validationError = validateSpec(spec)
+  if (validationError !== null) {
+    const mode = (
+      (AGENT_MODES as readonly string[]).includes(spec.mode) ? spec.mode : "explore"
+    ) as AgentMode
+    return failedDelegate({
+      mode,
+      errorKind: "runner-error",
+      errorMessage: validationError,
+      startedAt,
+      now,
+    })
+  }
+  const depth = spec.depth ?? 0
+  if (depth >= maxDepth) {
+    return failedDelegate({
+      mode: spec.mode,
+      errorKind: "runner-error",
+      errorMessage: `depth-exceeded: delegation depth ${depth} >= cap ${maxDepth}`,
+      startedAt,
+      now,
+    })
+  }
+  return spec.signal?.aborted === true
+    ? failedDelegate({
+        mode: spec.mode,
+        errorKind: "cancelled",
+        errorMessage: "parent signal already aborted at delegate() call",
+        startedAt,
+        now,
+      })
+    : undefined
+}
+
 /** Build the default delegation runner. The returned port encapsulates the
  *  mode-router + spec validation + depth gate. The host may swap in any
  *  {@link TypedDelegationRunner} (headless stub for tests, real loop driver
@@ -87,47 +144,8 @@ export const defaultDelegationRunner = (
   return {
     async delegate(spec: DelegateSpec): Promise<BoomerangResult> {
       const startedAt = now()
-
-      // 1) Spec validation — empty prompt / unknown mode / invalid budget.
-      const validationError = validateSpec(spec)
-      if (validationError !== null) {
-        // We don't know if `spec.mode` is a valid AgentMode here; coerce
-        // safely. The boomerang's `mode` field is for trace only; the host
-        // branches on errorKind, not on mode.
-        const safeMode = (
-          (AGENT_MODES as readonly string[]).includes(spec.mode) ? spec.mode : "explore"
-        ) as AgentMode
-        return failureBoomerang({
-          mode: safeMode,
-          errorKind: "runner-error",
-          errorMessage: validationError,
-          turns: 0,
-          durationMs: now() - startedAt,
-        })
-      }
-
-      // 2) Depth gate. `spec.depth` undefined ⇒ treat as 0 (top-level).
-      const depth = spec.depth ?? 0
-      if (depth >= maxDepth) {
-        return failureBoomerang({
-          mode: spec.mode,
-          errorKind: "runner-error",
-          errorMessage: `depth-exceeded: delegation depth ${depth} >= cap ${maxDepth}`,
-          turns: 0,
-          durationMs: now() - startedAt,
-        })
-      }
-
-      // 3) Pre-flight cancellation — already-aborted ⇒ short-circuit.
-      if (spec.signal !== undefined && spec.signal.aborted === true) {
-        return failureBoomerang({
-          mode: spec.mode,
-          errorKind: "cancelled",
-          errorMessage: "parent signal already aborted at delegate() call",
-          turns: 0,
-          durationMs: now() - startedAt,
-        })
-      }
+      const preflight = preflightFailure(spec, maxDepth, startedAt, now)
+      if (preflight !== undefined) return preflight
 
       // 4) Dispatch through the typed router. The router handles mode
       // lookup + budget cap + signal chaining + child-throw wrapping +

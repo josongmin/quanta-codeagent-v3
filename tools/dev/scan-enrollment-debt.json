@@ -1,40 +1,6 @@
 {
   "note": "Scanning guards that state a zero-verdict but pin no MEASURED reach — their floor, if any, is a number written at the call site, which cannot see a subtree disappear. Enforced by tests/unit/_arch/scan-enrollment-ratchet.test.ts. `unenrolled` may only SHRINK: a new guard must call assertScanPopulation (tests/unit/_shared/scan-population.ts) and pin its reach in tools/dev/scan-reach-baseline.json, and a guard that enrolls must be removed from here. `failsClosed` is NOT debt either — it names enumerations that need no reach floor because an EMPTY walk turns their verdict red by itself, and each entry's file must call `assertFailsClosedOnEmpty`, which executes that claim instead of asserting it in a comment. `externalCorpus` is NOT debt — it names guards the helper can never measure because their corpus is not the repo, and each entry is checked against the host path it claims. `expectedIds` records, per enrolled file, the baseline ids that file must REPORT at runtime; `bun run scan-reach` refuses when one is missing. NO TOTALS ARE WRITTEN HERE. A hand-maintained count drifts the moment one side moves — this note said '56 unenrolled of 86' while the arrays said 54 of 87 — so the number is whatever the arrays are.",
-  "unenrolled": [
-    "tests/unit/_arch/capability-literal-ratchet.test.ts",
-    "tests/unit/_arch/comment-scanner-burndown-ratchet.test.ts",
-    "tests/unit/_arch/gate-manifest-workflow-parity.test.ts",
-    "tests/unit/_arch/repo-index-hygiene.test.ts",
-    "tests/unit/_arch/repo-path-anchor-ratchet.test.ts",
-    "tests/unit/_arch/ts-exports-ssot.test.ts",
-    "tests/unit/apps/bench/promax/promax-bootstrap-phase-reachability.test.ts",
-    "tests/unit/apps/bench/promax/promax-port-contract-unsuppressed.test.ts",
-    "tests/unit/apps/bench/terminal/tb-2-0-retirement.test.ts",
-    "tests/unit/cli/cli-feature-gates-drift-hellgate.test.ts",
-    "tests/unit/dangerous-gate-strict-ratchet-hellgate.test.ts",
-    "tests/unit/feature-catalog-reachability.test.ts",
-    "tests/unit/gate-vocabulary-ratchet-hellgate.test.ts",
-    "tests/unit/host/bootstrap-host-extraction-hellgate.test.ts",
-    "tests/unit/knob-registry-completeness-ratchet-hellgate.test.ts",
-    "tests/unit/lint-debt-ratchet-reach.test.ts",
-    "tests/unit/no-benchmark-overfit-steer-ratchet.test.ts",
-    "tests/unit/no-raw-nul-bytes-hellgate.test.ts",
-    "tests/unit/objective/authority-boundary-ratchet.test.ts",
-    "tests/unit/observability/new-slice-metrics-hellgate.test.ts",
-    "tests/unit/observability/vocabulary-migration.test.ts",
-    "tests/unit/orphan-orchestrator-ratchet.test.ts",
-    "tests/unit/realtime/voice-session-hellgate.test.ts",
-    "tests/unit/runagent-callsite-authority-fence-hellgate.test.ts",
-    "tests/unit/runtime-config-no-dead-knob-ratchet.test.ts",
-    "tests/unit/runtime/exec-cluster-spawn-env-scrub-ban-hellgate.test.ts",
-    "tests/unit/runtime/single-pid-kill-ban-hellgate.test.ts",
-    "tests/unit/side-agent-stopall-wiring-guard.test.ts",
-    "tests/unit/slice-boundary-config-parity.test.ts",
-    "tests/unit/src-no-sketchy-code.test.ts",
-    "tests/unit/test-fixtures-do-not-leak-tmp.test.ts",
-    "tests/unit/test-quality-ratchet-hellgate.test.ts",
-    "tests/unit/tool-surface-manifest-hellgate.test.ts"
-  ],
+  "unenrolled": [],
   "externalCorpus": [
     {
       "file": "tests/unit/permission/shell-predicate-population-hellgate.test.ts",
@@ -401,6 +367,127 @@
     ],
     "tests/unit/god-code-ratchet.test.ts": [
       "tests/unit/god-code-ratchet.test.ts#SRC"
+    ],
+    "tests/unit/gate-vocabulary-ratchet-hellgate.test.ts": [
+      "tests/unit/gate-vocabulary-ratchet-hellgate.test.ts#SRC"
+    ],
+    "tests/unit/test-fixtures-do-not-leak-tmp.test.ts": [
+      "tests/unit/test-fixtures-do-not-leak-tmp.test.ts#SRC",
+      "tests/unit/test-fixtures-do-not-leak-tmp.test.ts#TESTS",
+      "tests/unit/test-fixtures-do-not-leak-tmp.test.ts#TOOLS"
+    ],
+    "tests/unit/test-quality-ratchet-hellgate.test.ts": [
+      "tests/unit/test-quality-ratchet-hellgate.test.ts#SRC",
+      "tests/unit/test-quality-ratchet-hellgate.test.ts#TESTS"
+    ],
+    "tests/unit/objective/authority-boundary-ratchet.test.ts": [
+      "tests/unit/objective/authority-boundary-ratchet.test.ts#SRC"
+    ],
+    "tests/unit/side-agent-stopall-wiring-guard.test.ts": [
+      "tests/unit/side-agent-stopall-wiring-guard.test.ts#SRC"
+    ],
+    "tests/unit/runtime/single-pid-kill-ban-hellgate.test.ts": [
+      "tests/unit/runtime/single-pid-kill-ban-hellgate.test.ts#SRC"
+    ],
+    "tests/unit/runagent-callsite-authority-fence-hellgate.test.ts": [
+      "tests/unit/runagent-callsite-authority-fence-hellgate.test.ts#SRC"
+    ],
+    "tests/unit/dangerous-gate-strict-ratchet-hellgate.test.ts": [
+      "tests/unit/dangerous-gate-strict-ratchet-hellgate.test.ts#SRC"
+    ],
+    "tests/unit/observability/vocabulary-migration.test.ts": [
+      "tests/unit/observability/vocabulary-migration.test.ts#SRC"
+    ],
+    "tests/unit/host/bootstrap-host-extraction-hellgate.test.ts": [
+      "tests/unit/host/bootstrap-host-extraction-hellgate.test.ts#CLI-REPL",
+      "tests/unit/host/bootstrap-host-extraction-hellgate.test.ts#HOST-BOOTSTRAP"
+    ],
+    "tests/unit/knob-registry-completeness-ratchet-hellgate.test.ts": [
+      "tests/unit/knob-registry-completeness-ratchet-hellgate.test.ts#SRC"
+    ],
+    "tests/unit/src-no-sketchy-code.test.ts": [
+      "tests/unit/src-no-sketchy-code.test.ts#SRC"
+    ],
+    "tests/unit/lint-debt-ratchet-reach.test.ts": [
+      "tests/unit/lint-debt-ratchet-reach.test.ts#SRC",
+      "tests/unit/lint-debt-ratchet-reach.test.ts#TESTS"
+    ],
+    "tests/unit/feature-catalog-reachability.test.ts": [
+      "tests/unit/feature-catalog-reachability.test.ts#FEATURE-YAMLS"
+    ],
+    "tests/unit/no-benchmark-overfit-steer-ratchet.test.ts": [
+      "tests/unit/no-benchmark-overfit-steer-ratchet.test.ts#BATCH-DRIVER-LANES",
+      "tests/unit/no-benchmark-overfit-steer-ratchet.test.ts#BENCH-DRIVER-LANES"
+    ],
+    "tests/unit/slice-boundary-config-parity.test.ts": [
+      "tests/unit/slice-boundary-config-parity.test.ts#UNIT-ENTRYPOINTS"
+    ],
+    "tests/unit/runtime-config-no-dead-knob-ratchet.test.ts": [
+      "tests/unit/runtime-config-no-dead-knob-ratchet.test.ts#SRC"
+    ],
+    "tests/unit/_arch/comment-scanner-burndown-ratchet.test.ts": [
+      "tests/unit/_arch/comment-scanner-burndown-ratchet.test.ts#SRC",
+      "tests/unit/_arch/comment-scanner-burndown-ratchet.test.ts#TESTS",
+      "tests/unit/_arch/comment-scanner-burndown-ratchet.test.ts#TOOLS"
+    ],
+    "tests/unit/no-raw-nul-bytes-hellgate.test.ts": [
+      "tests/unit/no-raw-nul-bytes-hellgate.test.ts#SRC",
+      "tests/unit/no-raw-nul-bytes-hellgate.test.ts#TESTS",
+      "tests/unit/no-raw-nul-bytes-hellgate.test.ts#DOCS"
+    ],
+    "tests/unit/orphan-orchestrator-ratchet.test.ts": [
+      "tests/unit/orphan-orchestrator-ratchet.test.ts#SRC",
+      "tests/unit/orphan-orchestrator-ratchet.test.ts#SDK",
+      "tests/unit/orphan-orchestrator-ratchet.test.ts#TESTS",
+      "tests/unit/orphan-orchestrator-ratchet.test.ts#DRIVER"
+    ],
+    "tests/unit/runtime/exec-cluster-spawn-env-scrub-ban-hellgate.test.ts": [
+      "tests/unit/runtime/exec-cluster-spawn-env-scrub-ban-hellgate.test.ts#SRC"
+    ],
+    "tests/unit/_arch/gate-manifest-workflow-parity.test.ts": [
+      "tests/unit/_arch/gate-manifest-workflow-parity.test.ts#WORKFLOWS"
+    ],
+    "tests/unit/_arch/capability-literal-ratchet.test.ts": [
+      "tests/unit/_arch/capability-literal-ratchet.test.ts#TESTS"
+    ],
+    "tests/unit/_arch/repo-index-hygiene.test.ts": [
+      "tests/unit/_arch/repo-index-hygiene.test.ts#INDEX"
+    ],
+    "tests/unit/_arch/ts-exports-ssot.test.ts": [
+      "tests/unit/_arch/ts-exports-ssot.test.ts#TOOLS"
+    ],
+    "tests/unit/cli/cli-feature-gates-drift-hellgate.test.ts": [
+      "tests/unit/cli/cli-feature-gates-drift-hellgate.test.ts#SRC"
+    ],
+    "tests/unit/realtime/voice-session-hellgate.test.ts": [
+      "tests/unit/realtime/voice-session-hellgate.test.ts#SRC",
+      "tests/unit/realtime/voice-session-hellgate.test.ts#VOICE-SESSION"
+    ],
+    "tests/unit/tool-surface-manifest-hellgate.test.ts": [
+      "tests/unit/tool-surface-manifest-hellgate.test.ts#FEATURE-YAMLS"
+    ],
+    "tests/unit/apps/bench/promax/promax-bootstrap-phase-reachability.test.ts": [
+      "tests/unit/apps/bench/promax/promax-bootstrap-phase-reachability.test.ts#SRC"
+    ],
+    "tests/unit/apps/bench/promax/promax-port-contract-unsuppressed.test.ts": [
+      "tests/unit/apps/bench/promax/promax-port-contract-unsuppressed.test.ts#PROFILES"
+    ],
+    "tests/unit/observability/new-slice-metrics-hellgate.test.ts": [
+      "tests/unit/observability/new-slice-metrics-hellgate.test.ts#AGENT/ERROR-ROUTING",
+      "tests/unit/observability/new-slice-metrics-hellgate.test.ts#AGENT/GIT-DIRECTIVES",
+      "tests/unit/observability/new-slice-metrics-hellgate.test.ts#AGENT/STREAM-TIMEOUT",
+      "tests/unit/observability/new-slice-metrics-hellgate.test.ts#RUNTIME/SHELL-SNAPSHOT",
+      "tests/unit/observability/new-slice-metrics-hellgate.test.ts#SRC"
+    ],
+    "tests/unit/apps/bench/terminal/tb-2-0-retirement.test.ts": [
+      "tests/unit/apps/bench/terminal/tb-2-0-retirement.test.ts#SRC",
+      "tests/unit/apps/bench/terminal/tb-2-0-retirement.test.ts#TOOLS",
+      "tests/unit/apps/bench/terminal/tb-2-0-retirement.test.ts#ADAPTERS"
+    ],
+    "tests/unit/_arch/repo-path-anchor-ratchet.test.ts": [
+      "tests/unit/_arch/repo-path-anchor-ratchet.test.ts#TESTS",
+      "tests/unit/_arch/repo-path-anchor-ratchet.test.ts#TOOLS",
+      "tests/unit/_arch/repo-path-anchor-ratchet.test.ts#SRC"
     ]
   }
 }

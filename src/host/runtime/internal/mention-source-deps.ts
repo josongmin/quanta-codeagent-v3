@@ -133,6 +133,50 @@ const mcpListingFor = (
   return async (server: string) => byName.get(server) ?? null
 }
 
+const threadIndex = (all: readonly ThreadSummary[]): ReadonlyMap<string, ThreadSummary> =>
+  new Map(
+    all
+      .filter((thread) => typeof thread?.id === "string" && thread.id.length > 0)
+      .map((thread) => [thread.id, thread]),
+  )
+
+const descendantIdsOf = (all: readonly ThreadSummary[], selfId: string): ReadonlySet<string> => {
+  const descendants = new Set<string>([selfId])
+  let grew = true
+  while (grew) {
+    grew = false
+    for (const thread of all) {
+      const parent = thread.forkedFromId
+      if (
+        typeof thread?.id === "string" &&
+        thread.id.length > 0 &&
+        !descendants.has(thread.id) &&
+        typeof parent === "string" &&
+        descendants.has(parent)
+      ) {
+        descendants.add(thread.id)
+        grew = true
+      }
+    }
+  }
+  return descendants
+}
+
+const ancestorIdsOf = (
+  byId: ReadonlyMap<string, ThreadSummary>,
+  selfId: string,
+): ReadonlySet<string> => {
+  const ancestors = new Set<string>()
+  const seen = new Set<string>([selfId])
+  let cursor = byId.get(selfId)?.forkedFromId
+  while (typeof cursor === "string" && cursor.length > 0 && !seen.has(cursor)) {
+    seen.add(cursor)
+    if (byId.has(cursor)) ancestors.add(cursor)
+    cursor = byId.get(cursor)?.forkedFromId
+  }
+  return ancestors
+}
+
 /**
  * B4 lineage scope — compute the set of thread ids inside the caller's lineage
  * over the `forkedFromId` fork chain: `self ∪ transitive-ancestors ∪
@@ -156,44 +200,18 @@ export const computeLineageIds = (
 ): ReadonlySet<string> => {
   const scope = new Set<string>()
   if (typeof selfId !== "string" || selfId.length === 0) return scope // fail-closed
-  const byId = new Map<string, ThreadSummary>()
-  for (const m of all) if (typeof m?.id === "string" && m.id.length > 0) byId.set(m.id, m)
+  const byId = threadIndex(all)
   if (!byId.has(selfId)) return scope // self not in the list ⇒ unknown caller ⇒ empty
-  scope.add(selfId)
   // Descendants FIRST, seeded by SELF ONLY (never by ancestors — else the
   // fixpoint would walk DOWN from a shared ancestor into a SIBLING's subtree,
   // which is exactly the leak this gate closes). A `descendants` set separate
   // from `scope` keeps the seed clean; fixpoint admits any thread whose parent
   // is already a known descendant (or self).
-  const descendants = new Set<string>([selfId])
-  let grew = true
-  while (grew) {
-    grew = false
-    for (const m of all) {
-      const parent = m.forkedFromId
-      if (
-        typeof m?.id === "string" &&
-        m.id.length > 0 &&
-        !descendants.has(m.id) &&
-        typeof parent === "string" &&
-        descendants.has(parent)
-      ) {
-        descendants.add(m.id)
-        grew = true
-      }
-    }
-  }
-  for (const d of descendants) scope.add(d)
+  for (const descendant of descendantIdsOf(all, selfId)) scope.add(descendant)
   // Ancestors: walk the parent chain upward from SELF (cycle-safe). Ancestors are
   // added to `scope` but NOT to the descendant seed, so their OTHER children
   // (the caller's siblings) are never swept in.
-  let cursor: string | undefined = byId.get(selfId)?.forkedFromId
-  const seenUp = new Set<string>([selfId])
-  while (typeof cursor === "string" && cursor.length > 0 && !seenUp.has(cursor)) {
-    seenUp.add(cursor)
-    if (byId.has(cursor)) scope.add(cursor)
-    cursor = byId.get(cursor)?.forkedFromId
-  }
+  for (const ancestor of ancestorIdsOf(byId, selfId)) scope.add(ancestor)
   return scope
 }
 
@@ -302,6 +320,41 @@ export interface MentionProviderListers {
   readonly listThreads?: () => readonly NamedEntry[]
 }
 
+/** Capture the async session source exactly once for the synchronous provider.
+ * A failed read deliberately becomes an empty, lineage-scoped snapshot. */
+const threadListerFor = async (
+  sessions: SessionListSource,
+  selfThreadId: string | undefined,
+): Promise<() => readonly NamedEntry[]> => {
+  let snapshot: readonly ThreadSummary[] = []
+  try {
+    snapshot = await sessions()
+  } catch {
+    snapshot = []
+  }
+  const scope = computeLineageIds(snapshot, selfThreadId)
+  const entries = listThreadsFrom(snapshot.filter((thread) => scope.has(thread.id)))
+  return () => entries
+}
+
+const providerMcpLister = (
+  sources: MentionLiveSources,
+  env: MentionSourceEnv,
+): (() => readonly NamedEntry[]) | undefined =>
+  isOn(env, "QUANTA_MENTION_MCP") &&
+  sources.mcpServers !== undefined &&
+  sources.mcpServers.length > 0
+    ? listMcpFor(sources.mcpServers)
+    : undefined
+
+const providerSubagentLister = (
+  sources: MentionLiveSources,
+  env: MentionSourceEnv,
+): (() => readonly NamedEntry[]) | undefined =>
+  isOn(env, "QUANTA_MENTION_SUBAGENT") && sources.subagents !== undefined
+    ? listSubagentsFor(sources.subagents)
+    : undefined
+
 /**
  * Build the PROVIDER (autocomplete) listers from the live sources, gated per
  * kind on `QUANTA_MENTION_{MCP,SUBAGENT,THREAD}` (default-ON; `=off` ⇒ the
@@ -317,35 +370,15 @@ export const buildMentionProviderListers = async (
   sources: MentionLiveSources,
   env: MentionSourceEnv,
 ): Promise<MentionProviderListers> => {
-  const mcpOn =
-    isOn(env, "QUANTA_MENTION_MCP") &&
-    sources.mcpServers !== undefined &&
-    sources.mcpServers.length > 0
-  const subagentOn = isOn(env, "QUANTA_MENTION_SUBAGENT") && sources.subagents !== undefined
-  let threadLister: (() => readonly NamedEntry[]) | undefined
-  if (isOn(env, "QUANTA_MENTION_THREAD") && sources.sessions !== undefined) {
-    // Snapshot the session list ONCE (async) so the sync lister can serve it.
-    // A load fault ⇒ empty snapshot ⇒ zero candidates (NO-THROW).
-    let snapshot: readonly ThreadSummary[] = []
-    try {
-      snapshot = await sources.sessions()
-    } catch {
-      snapshot = []
-    }
-    // B4 lineage scope — enumerate ONLY the caller's lineage (self ∪ ancestors ∪
-    // descendants). A sibling / unrelated thread is never suggested; fail-closed
-    // to zero candidates when `selfThreadId` is absent (empty scope).
-    const scope = computeLineageIds(snapshot, sources.selfThreadId)
-    const entries = listThreadsFrom(snapshot.filter((m) => scope.has(m.id)))
-    threadLister = () => entries
-  }
+  const listMcpServers = providerMcpLister(sources, env)
+  const listSubagents = providerSubagentLister(sources, env)
+  const listThreads =
+    isOn(env, "QUANTA_MENTION_THREAD") && sources.sessions !== undefined
+      ? await threadListerFor(sources.sessions, sources.selfThreadId)
+      : undefined
   return {
-    ...(mcpOn
-      ? { listMcpServers: listMcpFor(sources.mcpServers as readonly McpServerSnapshot[]) }
-      : {}),
-    ...(subagentOn
-      ? { listSubagents: listSubagentsFor(sources.subagents as NamedAgentResolver) }
-      : {}),
-    ...(threadLister !== undefined ? { listThreads: threadLister } : {}),
+    ...(listMcpServers !== undefined ? { listMcpServers } : {}),
+    ...(listSubagents !== undefined ? { listSubagents } : {}),
+    ...(listThreads !== undefined ? { listThreads } : {}),
   }
 }

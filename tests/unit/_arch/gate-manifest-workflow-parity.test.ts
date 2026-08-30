@@ -38,8 +38,19 @@ import {
   REQUIRED_GATE_IDS,
   WORKFLOW_EXEMPT,
 } from "../../../tools/dev/gate-manifest"
+import { assertScanPopulation } from "../_shared/scan-population"
 
 const WORKFLOW_DIR = join(import.meta.dir, "..", "..", "..", ".github", "workflows")
+const WORKFLOW_FILES = readdirSync(WORKFLOW_DIR).sort()
+assertScanPopulation(
+  WORKFLOW_FILES.map((file) => join(WORKFLOW_DIR, file)),
+  WORKFLOW_DIR,
+  {
+    collectable: (name) => name.endsWith(".yml") || name.endsWith(".yaml"),
+    id: "tests/unit/_arch/gate-manifest-workflow-parity.test.ts#WORKFLOWS",
+    topLevelOnly: true,
+  },
+)
 
 /**
  * Every `run:` command in the workflow files, one entry per command.
@@ -277,7 +288,7 @@ describe("gate manifest ↔ workflow parity", () => {
   test("the workflow directory is fully classified (gating vs deliberately not)", () => {
     // A new workflow file must force a decision. Without this, adding one that
     // DOES gate merges would leave its steps outside the parity check entirely.
-    const onDisk = readdirSync(WORKFLOW_DIR).sort()
+    const onDisk = WORKFLOW_FILES
     const classified = [...GATING_WORKFLOWS, ...NON_GATING_WORKFLOWS.map((w) => w.file)].sort()
     expect(onDisk).toEqual(classified)
     for (const w of NON_GATING_WORKFLOWS) {

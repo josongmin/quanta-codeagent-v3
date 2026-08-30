@@ -50,6 +50,7 @@ import { CanonicalReportIdentityError, decodeCanonicalReport } from "@/runner/ba
 import { decodeTerminalBenchReport } from "@/runner/batch/report-terminal"
 import "@/../tools/leaderboard-dashboard/projectors/terminal-bench"
 import "@/../tools/leaderboard-dashboard/projectors/swe-bench"
+import { assertScanPopulation } from "../../../_shared/scan-population"
 
 const REPO = join(import.meta.dir, "..", "..", "..", "..", "..")
 const at = (...p: readonly string[]) => join(REPO, ...p)
@@ -57,31 +58,50 @@ const at = (...p: readonly string[]) => join(REPO, ...p)
 /** Every text file under the ACTIVE executable roots. Docs are scanned
  *  separately (a historical citation is legal there; an executable command is
  *  not legal here). */
-const scanActiveSources = (): readonly { readonly rel: string; readonly text: string }[] => {
+const ACTIVE_ROOTS = ["src", "tools", "adapters", "script"] as const
+const ACTIVE_TEXT_FILE =
+  /\.(?:ts|tsx|mts|cts|mjs|cjs|js|py|sh|bash|json|jsonc|toml|cfg|ini|yaml|yml|md|txt)$/
+type ActiveSource = { readonly rel: string; readonly text: string }
+
+const scanActiveRoot = (root: (typeof ACTIVE_ROOTS)[number]): readonly ActiveSource[] => {
   const out: { rel: string; text: string }[] = []
-  const roots = ["src", "tools", "adapters", "script"]
   const glob = new Bun.Glob(
     "**/*.{ts,tsx,mts,cts,mjs,cjs,js,py,sh,bash,json,jsonc,toml,cfg,ini,yaml,yml,md,txt}",
   )
-  for (const root of roots) {
-    const abs = at(root)
-    if (!existsSync(abs)) continue
-    for (const rel of glob.scanSync(abs)) {
-      if (rel.includes("node_modules/") || rel.includes("/.venv/")) continue
-      const file = join(abs, rel)
-      try {
-        if (statSync(file).size > 2_000_000) continue
-        out.push({ rel: `${root}/${rel}`, text: readFileSync(file, "utf8") })
-      } catch {
-        /* unreadable — not an offender */
-      }
+  const abs = at(root)
+  if (!existsSync(abs)) return out
+  for (const rel of glob.scanSync(abs)) {
+    if (rel.includes("node_modules/") || rel.includes("/.venv/")) continue
+    const file = join(abs, rel)
+    try {
+      if (statSync(file).size > 2_000_000) continue
+      out.push({ rel: `${root}/${rel}`, text: readFileSync(file, "utf8") })
+    } catch {
+      /* unreadable — not an offender */
     }
   }
-  out.push({ rel: "package.json", text: readFileSync(at("package.json"), "utf8") })
   return out
 }
 
-const ACTIVE = scanActiveSources()
+const ACTIVE_BY_ROOT = new Map(ACTIVE_ROOTS.map((root) => [root, scanActiveRoot(root)]))
+for (const root of ACTIVE_ROOTS) {
+  // `script/` is an optional executable root. If it appears, its missing
+  // baseline fails closed; while absent it has no walker population to measure.
+  if (!existsSync(at(root))) continue
+  const files = ACTIVE_BY_ROOT.get(root) ?? []
+  assertScanPopulation(
+    files.map(({ rel }) => at(rel)),
+    at(root),
+    {
+      collectable: (name) => ACTIVE_TEXT_FILE.test(name),
+      id: `tests/unit/apps/bench/terminal/tb-2-0-retirement.test.ts#${root.toUpperCase()}`,
+    },
+  )
+}
+const ACTIVE: readonly ActiveSource[] = [
+  ...ACTIVE_ROOTS.flatMap((root) => ACTIVE_BY_ROOT.get(root) ?? []),
+  { rel: "package.json", text: readFileSync(at("package.json"), "utf8") },
+]
 
 describe("SR-1..SR-4 — the terminal-only best-of-N surface is GONE", () => {
   const deleted = [

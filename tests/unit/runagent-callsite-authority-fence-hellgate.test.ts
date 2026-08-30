@@ -30,6 +30,7 @@ import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join, relative } from "node:path"
 import ts from "typescript"
+import { assertScanPopulation } from "./_shared/scan-population"
 
 const REPO_ROOT = join(import.meta.dir, "../..")
 const SRC_ROOT = join(REPO_ROOT, "src")
@@ -303,9 +304,9 @@ const enumerateSource = (repoRel: string, src: string): CallSite[] => {
 const enumerateFile = (abs: string): CallSite[] =>
   enumerateSource(toRepoRel(abs), readFileSync(abs, "utf8"))
 
-const enumerateAll = (): CallSite[] => {
+const enumerateAll = (files: readonly string[]): CallSite[] => {
   const out: CallSite[] = []
-  for (const abs of listSourceTsFiles(SRC_ROOT)) {
+  for (const abs of files) {
     out.push(...enumerateFile(abs))
   }
   return out
@@ -316,10 +317,19 @@ const enumerateAll = (): CallSite[] => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("runAgent call-site authority fence (INV-03 / G8)", () => {
-  const sites = enumerateAll()
+  const sourceFiles = listSourceTsFiles(SRC_ROOT)
+  const sites = enumerateAll(sourceFiles)
   const filesWithSites = new Set(sites.map((s) => s.repoRel))
 
   test("AST enumeration is live (found real call sites)", () => {
+    assertScanPopulation(sourceFiles, SRC_ROOT, {
+      id: "tests/unit/runagent-callsite-authority-fence-hellgate.test.ts#SRC",
+      collectable: (name) =>
+        name.endsWith(".ts") &&
+        !name.endsWith(".d.ts") &&
+        !name.endsWith(".test.ts") &&
+        !name.endsWith(".spec.ts"),
+    })
     // Non-vacuity floor: if the scan finds nothing, the gate is blind. There
     // must be at least the known descendant + several host entries.
     expect(sites.length).toBeGreaterThanOrEqual(10)

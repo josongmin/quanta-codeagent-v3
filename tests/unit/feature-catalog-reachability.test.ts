@@ -20,6 +20,7 @@ import {
   computeReachability,
   computeSymbolReachability,
 } from "../../tools/feature-catalog/reachability"
+import { assertScanPopulation } from "./_shared/scan-population"
 
 const r = await computeReachability()
 const sym = await computeSymbolReachability()
@@ -43,6 +44,11 @@ const walkYaml = (d: string): string[] => {
   }
   return out
 }
+const YAMLS = walkYaml(FEAT)
+assertScanPopulation(YAMLS, FEAT, {
+  collectable: (path) => path.endsWith(".yaml"),
+  id: "tests/unit/feature-catalog-reachability.test.ts#FEATURE-YAMLS",
+})
 const srcEvidence = (s: string): string[] => {
   const out: string[] = []
   let p = false
@@ -110,7 +116,7 @@ describe("fc reachability — import-graph ground truth", () => {
     const offenders: string[] = []
     // Anti-vacuity: both ratchets below collect offenders and assert the list is
     // empty, so a walk that reads no YAML satisfies them for free.
-    const yamls = walkYaml(FEAT)
+    const yamls = YAMLS
     expect(yamls.length, "no feature YAML read — the ratchet below is vacuous").toBeGreaterThan(500)
     for (const y of yamls) {
       const s = readFileSync(y, "utf8")
@@ -133,7 +139,7 @@ describe("fc reachability — import-graph ground truth", () => {
     const offenders: string[] = []
     // Anti-vacuity: both ratchets below collect offenders and assert the list is
     // empty, so a walk that reads no YAML satisfies them for free.
-    const yamls = walkYaml(FEAT)
+    const yamls = YAMLS
     expect(yamls.length, "no feature YAML read — the ratchet below is vacuous").toBeGreaterThan(500)
     for (const y of yamls) {
       const s = readFileSync(y, "utf8")

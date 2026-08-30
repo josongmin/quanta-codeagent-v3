@@ -18,14 +18,25 @@ import { fileURLToPath } from "node:url"
 import ts from "typescript"
 import { nth } from "../_helpers/expect-present"
 import { SLICE_BOUNDARY_CONFIGS } from "./_arch/slice-boundary-configs"
+import { assertScanPopulation } from "./_shared/scan-population"
 
 const UNIT_DIR = dirname(fileURLToPath(import.meta.url))
 const ENTRYPOINT_RE = /^([a-z0-9-]+)-slice-boundary\.test\.ts$/
+const UNIT_ENTRIES = readdirSync(UNIT_DIR)
+assertScanPopulation(
+  UNIT_ENTRIES.map((name) => join(UNIT_DIR, name)),
+  UNIT_DIR,
+  {
+    collectable: () => true,
+    id: "tests/unit/slice-boundary-config-parity.test.ts#UNIT-ENTRYPOINTS",
+    topLevelOnly: true,
+  },
+)
 
 /** Every file matching the `<slice>-slice-boundary.test.ts` name shape. */
 const entrypointFileNames = (): ReadonlyArray<readonly [string, string]> => {
   const out: Array<[string, string]> = []
-  for (const name of readdirSync(UNIT_DIR)) {
+  for (const name of UNIT_ENTRIES) {
     const m = ENTRYPOINT_RE.exec(name)
     if (m) out.push([nth(m, 1, "entrypoint match groups"), name])
   }

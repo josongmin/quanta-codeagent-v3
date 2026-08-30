@@ -25,6 +25,7 @@ import { describe, expect, test } from "bun:test"
 import { execSync } from "node:child_process"
 import { join } from "node:path"
 import { CLI_FEATURE_GATE_NAMES } from "@/apps/cli/cli-feature-gates"
+import { assertScanPopulation } from "../_shared/scan-population"
 
 const GATES = CLI_FEATURE_GATE_NAMES
 
@@ -43,9 +44,9 @@ const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
  * consumed and the guard would pass over a `src/` that is not there. Proven by
  * the empty-corpus oracle: with `src/` emptied this file was green.
  */
-const searchableSourceFiles = (): number => {
+const searchableSourcePaths = (): string[] => {
   const out = execSync(`rg --files --type ts ${SEARCH_ROOT}`, { encoding: "utf8", cwd: REPO_ROOT })
-  return out.split("\n").filter((l) => l.trim().length > 0).length
+  return out.split("\n").filter((line) => line.trim().length > 0)
 }
 
 /**
@@ -104,8 +105,13 @@ describe("CLI_FEATURE_GATES drift guard", () => {
   test("every seeded CLI gate has a real consumer in src/ (no stale/typo seed)", () => {
     // Anti-vacuity, derived from the real tree (3,600+ `.ts` under src/ today).
     // Without it the assertion below passes over a search that reached nothing.
+    const sourcePaths = searchableSourcePaths()
+    assertScanPopulation(sourcePaths, SEARCH_ROOT, {
+      collectable: (name) => name.endsWith(".ts"),
+      id: "tests/unit/cli/cli-feature-gates-drift-hellgate.test.ts#SRC",
+    })
     expect(
-      searchableSourceFiles(),
+      sourcePaths.length,
       "the consumer search reached no source files — every gate would read as consumed",
     ).toBeGreaterThan(3000)
     const orphans = GATES.filter((g) => !isConsumedSomewhere(g))

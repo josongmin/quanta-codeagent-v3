@@ -16,6 +16,7 @@ import {
 } from "@/realtime/voice-session"
 import { err, ok, type Result } from "@/shared"
 import type { AudioRecorderPort } from "@/voice"
+import { assertScanPopulation } from "../_shared/scan-population"
 
 /**
  * Hellgate for ADR-0442 realtime voice-session slice (RFC-03). Drives the
@@ -402,7 +403,6 @@ describe("HELL-RTV-11 default-OFF byte-identical", () => {
   test("only the opt-in `/voice-live` surface imports @/realtime/voice-session", async () => {
     const { Glob } = await import("bun")
     const root = new URL("../../../src", import.meta.url).pathname
-    const glob = new Glob("**/*.ts")
     // ADR-0442 limitation closure: the slice is now WIRED into the REPL, but
     // ONLY through the opt-in `/voice-live` surface (the slash handler + its
     // composition-root wire). Both are runtime-gated by `QUANTA_VOICE_LIVE`
@@ -417,10 +417,18 @@ describe("HELL-RTV-11 default-OFF byte-identical", () => {
     // Anti-vacuity: every verdict in this arm is `offenders === []`, and a glob
     // that matches NOTHING yields no offenders — the arm was green with `src/`
     // emptied. Derived from the real tree (3,638 `.ts` under src/ today).
-    let scanned = 0
-    for await (const _ of new Glob("**/*.ts").scan(root)) scanned++
-    expect(scanned, "the glob matched almost no source files").toBeGreaterThan(3000)
-    for await (const file of glob.scan(root)) {
+    const files: string[] = []
+    for await (const file of new Glob("**/*.ts").scan(root)) files.push(file)
+    assertScanPopulation(
+      files.map((file) => `${root}/${file}`),
+      root,
+      {
+        collectable: (name) => name.endsWith(".ts"),
+        id: "tests/unit/realtime/voice-session-hellgate.test.ts#SRC",
+      },
+    )
+    expect(files.length, "the glob matched almost no source files").toBeGreaterThan(3000)
+    for (const file of files) {
       if (file.includes("voice-session/")) continue // the slice itself
       if (allowed.has(file)) continue // the opt-in surface
       const text = await Bun.file(`${root}/${file}`).text()
@@ -432,10 +440,19 @@ describe("HELL-RTV-11 default-OFF byte-identical", () => {
   test("slice is plane-clean: imports only @/realtime + @/voice + @/shared", async () => {
     const { Glob } = await import("bun")
     const sliceRoot = new URL("../../../src/realtime/voice-session", import.meta.url).pathname
-    const glob = new Glob("**/*.ts")
     const forbidden = ["@/agent", "@/tool", "@/llm", "@/permission", "@/mcp", "@/media"]
     const offenders: string[] = []
-    for await (const file of glob.scan(sliceRoot)) {
+    const files: string[] = []
+    for await (const file of new Glob("**/*.ts").scan(sliceRoot)) files.push(file)
+    assertScanPopulation(
+      files.map((file) => `${sliceRoot}/${file}`),
+      sliceRoot,
+      {
+        collectable: (name) => name.endsWith(".ts"),
+        id: "tests/unit/realtime/voice-session-hellgate.test.ts#VOICE-SESSION",
+      },
+    )
+    for (const file of files) {
       const text = await Bun.file(`${sliceRoot}/${file}`).text()
       for (const f of forbidden) {
         // match an import specifier, not a prose mention in a comment.

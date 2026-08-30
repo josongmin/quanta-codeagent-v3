@@ -25,6 +25,7 @@ import ts from "typescript"
 import { extractExports } from "../../../tools/arch-gen/scan-slices"
 import { extractExportedSymbols } from "../../../tools/dev/merge-symbol-loss"
 import { parseSymbols } from "../../../tools/feature-catalog/reachability"
+import { assertScanPopulation } from "../_shared/scan-population"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 
@@ -180,7 +181,7 @@ describe("export extraction SSOT — measured real-file regressions", () => {
  */
 const SSOT_MODULE = "tools/shared/ts-exports.ts"
 
-const tsExportsConsumers = async (): Promise<readonly string[]> => {
+const discoverTsExportsConsumers = async (): Promise<readonly string[]> => {
   const found: string[] = []
   // The PATTERN is relative and the ROOT is explicit. A repo-rooted pattern
   // (`"tools/**/*.ts"`) only matches when the suite is launched from the repo
@@ -188,15 +189,25 @@ const tsExportsConsumers = async (): Promise<readonly string[]> => {
   // below pass while measuring nothing — the exact shape this file exists to
   // police, and what the repo-path-anchor ratchet caught here.
   const toolsRoot = join(REPO_ROOT, "tools")
+  const raw: string[] = []
   for await (const name of new Glob("**/*.ts").scan({ cwd: toolsRoot })) {
     const rel = `tools/${name}`
+    raw.push(join(toolsRoot, name))
     if (rel === SSOT_MODULE || rel.includes("/.scratch/") || rel.includes("node_modules")) continue
     // Matches `from "../shared/ts-exports"` at any relative depth, which is how
     // all three consumers reach it; `import type` and re-export forms included.
     if (/from\s+"[^"]*\/shared\/ts-exports"/.test(await readSrc(rel))) found.push(rel)
   }
+  assertScanPopulation(raw, toolsRoot, {
+    id: "tests/unit/_arch/ts-exports-ssot.test.ts#TOOLS",
+    matched: found.map((file) => join(REPO_ROOT, file)),
+  })
   return found.sort()
 }
+
+let tsExportsConsumerCache: Promise<readonly string[]> | undefined
+const tsExportsConsumers = (): Promise<readonly string[]> =>
+  (tsExportsConsumerCache ??= discoverTsExportsConsumers())
 
 /* ── AST readers used by the structural arms ─────────────────────────────── */
 

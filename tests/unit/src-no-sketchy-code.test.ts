@@ -33,6 +33,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { extname, join, relative } from "node:path"
+import { assertScanPopulation } from "./_shared/scan-population"
 
 const SRC = join(__dirname, "..", "..", "src")
 
@@ -810,6 +811,9 @@ describe("src/: anti-regression scan (root-cause invariants)", () => {
   const files = walk(SRC)
 
   test("every TS file scans clean against the lazy-pattern allowlist", () => {
+    assertScanPopulation(files, SRC, {
+      id: "tests/unit/src-no-sketchy-code.test.ts#SRC",
+    })
     const failures: string[] = []
     for (const f of files) {
       const v = scanFile(f)

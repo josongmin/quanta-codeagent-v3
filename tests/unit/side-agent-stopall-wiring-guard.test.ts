@@ -39,6 +39,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
+import { assertScanPopulation } from "./_shared/scan-population"
 import { stripComments } from "./_shared/strip-comments"
 
 const SRC_ROOT = join(import.meta.dir, "../../src")
@@ -71,18 +72,27 @@ const DEAD_BRANCH_OPENER = /\b(?:if|while)\s*\(\s*(?:false|0)\s*[)&]/
 const isCallSiteFile = (full: string, rel: string): boolean =>
   !rel.startsWith("side-agent/") && CALL_SITE.test(stripComments(readFileSync(full, "utf8")))
 
-const collectCallSiteFiles = (): string[] =>
+const sourceFiles = (): string[] =>
   (readdirSync(SRC_ROOT, { recursive: true }) as string[]).filter(
-    (rel) =>
-      rel.endsWith(".ts") &&
-      !rel.includes("node_modules") &&
-      isCallSiteFile(join(SRC_ROOT, rel), rel),
+    (rel) => rel.endsWith(".ts") && !rel.includes("node_modules"),
   )
 
+const collectCallSiteFiles = (files: readonly string[]): string[] =>
+  files.filter((rel) => isCallSiteFile(join(SRC_ROOT, rel), rel))
+
 describe("side-agent stopAll() textual-presence + anchor ratchet (R6)", () => {
-  const callSites = collectCallSiteFiles()
+  const files = sourceFiles()
+  const callSites = collectCallSiteFiles(files)
 
   test("`.stopAll(` textually appears as a call site in src (anchor count ≥ 1)", () => {
+    assertScanPopulation(
+      files.map((file) => join(SRC_ROOT, file)),
+      SRC_ROOT,
+      {
+        id: "tests/unit/side-agent-stopall-wiring-guard.test.ts#SRC",
+        collectable: (name) => name.endsWith(".ts"),
+      },
+    )
     // Audit-day measurement: 0 — every other session resource is disposed at
     // teardown, side-agent daemons were not. ≥1 textual call site keeps the
     // registry's shutdown verb from silently losing its only caller. Runtime

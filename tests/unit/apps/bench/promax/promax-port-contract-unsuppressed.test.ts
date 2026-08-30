@@ -37,6 +37,7 @@ import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { assertScanPopulation } from "../../../_shared/scan-population"
 import { stripComments } from "../../../_shared/strip-comments"
 
 // `fileURLToPath`, not `.pathname` — the latter stays percent-encoded, so the
@@ -74,15 +75,17 @@ const sources = (dir: string, into: string[] = []): string[] => {
   }
   return into
 }
+const PORT_SOURCE_FILES = sources(PORT_DIR)
+assertScanPopulation(PORT_SOURCE_FILES, PORT_DIR, {
+  id: "tests/unit/apps/bench/promax/promax-port-contract-unsuppressed.test.ts#PROFILES",
+})
 
 describe("the dataset-family port contract is checked, not asserted", () => {
   test("🔴 no file in src/apps/bench/profiles suppresses its own types", () => {
-    const offenders = sources(PORT_DIR)
-      .filter((f) => {
-        const src = readFileSync(f, "utf8")
-        return TS_DIRECTIVE.test(src) || SUPPRESSION.test(stripComments(src))
-      })
-      .map((f) => f.slice(PORT_DIR.length + 1))
+    const offenders = PORT_SOURCE_FILES.filter((f) => {
+      const src = readFileSync(f, "utf8")
+      return TS_DIRECTIVE.test(src) || SUPPRESSION.test(stripComments(src))
+    }).map((f) => f.slice(PORT_DIR.length + 1))
     expect(
       offenders,
       "a port implementation asserted its way past the contract it implements",
@@ -92,7 +95,7 @@ describe("the dataset-family port contract is checked, not asserted", () => {
   test("ANTI-VACUITY: the scan reaches the real port files", () => {
     // without this the guard passes just as well when the walk finds nothing,
     // or when the directory moves and the resolve lands somewhere empty
-    const found = sources(PORT_DIR).map((f) => f.slice(PORT_DIR.length + 1))
+    const found = PORT_SOURCE_FILES.map((f) => f.slice(PORT_DIR.length + 1))
     expect(found.length).toBeGreaterThan(5)
     for (const required of ["types.ts", "promax.ts", "registry.ts"]) {
       expect(found, `${required} is not being scanned`).toContain(required)

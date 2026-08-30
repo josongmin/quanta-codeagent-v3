@@ -44,6 +44,7 @@
 import { describe, expect, test } from "bun:test"
 import { existsSync, readFileSync } from "node:fs"
 import { join, resolve } from "node:path"
+import { assertScanPopulation } from "../_shared/scan-population"
 
 const REPO_ROOT = resolve(import.meta.dir, "../../..")
 
@@ -113,7 +114,8 @@ export const isGitlink = (entry: IndexEntry): boolean => entry.mode === GITLINK_
  */
 export const parseIndexEntries = (stdout: string): readonly IndexEntry[] => {
   const out: IndexEntry[] = []
-  for (const line of stdout.split("\n")) {
+  const records = stdout.includes("\0") ? stdout.split("\0") : stdout.split("\n")
+  for (const line of records) {
     if (line.trim() === "") continue
     const tab = line.indexOf("\t")
     if (tab === -1) continue
@@ -150,8 +152,8 @@ export const undeclaredGitlinks = (
 
 /* ─────────────────────────────── repo readers ─────────────────────────────── */
 
-const readIndex = (): readonly IndexEntry[] => {
-  const out = Bun.spawnSync(["git", "ls-files", "-s"], { cwd: REPO_ROOT })
+const loadIndex = (): readonly IndexEntry[] => {
+  const out = Bun.spawnSync(["git", "ls-files", "-s", "-z"], { cwd: REPO_ROOT })
   if (out.exitCode !== 0) {
     throw new Error(
       `git ls-files -s failed (exit ${out.exitCode}): ${new TextDecoder().decode(out.stderr)}`,
@@ -171,6 +173,17 @@ const readIndex = (): readonly IndexEntry[] => {
   }
   return entries
 }
+
+const INDEX_ENTRIES = loadIndex()
+assertScanPopulation(
+  INDEX_ENTRIES.map((entry) => resolve(REPO_ROOT, entry.path)),
+  REPO_ROOT,
+  {
+    collectable: () => true,
+    id: "tests/unit/_arch/repo-index-hygiene.test.ts#INDEX",
+  },
+)
+const readIndex = (): readonly IndexEntry[] => INDEX_ENTRIES
 
 const readGitmodules = (): string | undefined => {
   const path = join(REPO_ROOT, ".gitmodules")

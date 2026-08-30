@@ -15,6 +15,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
+import { assertScanPopulation } from "./_shared/scan-population"
 import { stripComments } from "./_shared/strip-comments"
 
 /**
@@ -58,6 +59,19 @@ const testFiles = (dir: string, into: string[] = []): string[] => {
   return into
 }
 
+/** Raw corpus for the test-adjacent predicate above. The reach assertion must
+ * prove this walk, rather than incorrectly treating the predicate's subset as
+ * the entire src/ or tools/ tree. */
+const allTsFiles = (dir: string, into: string[] = []): string[] => {
+  for (const entry of readdirSync(join(REPO_ROOT, dir))) {
+    if (entry === "node_modules" || entry.startsWith(".")) continue
+    const full = join(dir, entry)
+    if (statSync(join(REPO_ROOT, full)).isDirectory()) allTsFiles(full, into)
+    else if (full.endsWith(".ts")) into.push(full)
+  }
+  return into
+}
+
 /**
  * Comments are not code. Every file converted away from the exit hook explains
  * WHY in a comment that names it, and this very file discusses it in prose — a
@@ -93,6 +107,13 @@ describe("temp-dir cleanup is registered with the test runner", () => {
   test("ANTI-VACUITY: the scan reaches a real, populated set of test files", () => {
     // without this the guard passes just as well when the walk finds nothing
     const all = ROOTS.flatMap((root) => testFiles(root))
+    for (const root of ROOTS) {
+      const raw = allTsFiles(root).map((file) => join(REPO_ROOT, file))
+      assertScanPopulation(raw, join(REPO_ROOT, root), {
+        id: `tests/unit/test-fixtures-do-not-leak-tmp.test.ts#${root.toUpperCase()}`,
+        collectable: (name) => name.endsWith(".ts"),
+      })
+    }
     expect(all.length).toBeGreaterThan(500)
     // the helper modules are in scope too — that is where the temp dirs live
     expect(all).toContain("tests/unit/apps/bench/promax/_bootstrap-exec-harness.ts")

@@ -67,6 +67,7 @@ import {
 } from "@/apps/bench/profiles/types"
 import { createFullRemoteBackend } from "@/apps/bench/remote/full"
 import { resolveBenchRunConfig } from "@/apps/bench/run-config"
+import { assertScanPopulation } from "../../../_shared/scan-population"
 
 const REPO = join(import.meta.dir, "..", "..", "..", "..", "..")
 const SRC = join(REPO, "src")
@@ -186,15 +187,23 @@ const scanBootstrapCalls = (file: string, source: string): readonly BootstrapCal
 }
 
 /** Every PRODUCTION (non-test) call site under `src/`. */
-const productionCallSites = (): readonly BootstrapCallSite[] => {
+const deriveProductionCallSites = (files: readonly string[]): readonly BootstrapCallSite[] => {
   const out: BootstrapCallSite[] = []
-  for (const abs of listTsFiles(SRC)) {
+  for (const abs of files) {
     const rel = relative(SRC, abs)
     if (rel.endsWith(".test.ts")) continue
     out.push(...scanBootstrapCalls(rel, readFileSync(abs, "utf8")))
   }
   return out
 }
+const SRC_TS_FILES = listTsFiles(SRC)
+const PRODUCTION_CALL_SITES = deriveProductionCallSites(SRC_TS_FILES)
+assertScanPopulation(SRC_TS_FILES, SRC, {
+  collectable: (name) => name.endsWith(".ts"),
+  id: "tests/unit/apps/bench/promax/promax-bootstrap-phase-reachability.test.ts#SRC",
+  matched: [...new Set(PRODUCTION_CALL_SITES.map((call) => join(SRC, call.file)))],
+})
+const productionCallSites = (): readonly BootstrapCallSite[] => PRODUCTION_CALL_SITES
 
 // ---------------------------------------------------------------------------
 // S1 — the declared table IS what the source does
@@ -240,8 +249,7 @@ describe("S1 — the phase-wiring table is checked against real production bytes
     // would slip past it. Aliasing requires an import, and an import mentions
     // the name — so pinning the mention set closes that hole without pretending
     // this rail is a type-aware analysis.
-    const mentions = listTsFiles(SRC)
-      .filter((abs) => !abs.endsWith(".test.ts"))
+    const mentions = SRC_TS_FILES.filter((abs) => !abs.endsWith(".test.ts"))
       .filter((abs) => stripCommentsAndStrings(readFileSync(abs, "utf8")).includes(EXECUTOR_SYMBOL))
       .map((abs) => relative(SRC, abs))
       .sort()

@@ -49,6 +49,7 @@ import {
 } from "@/observability/metrics/wire-new-slices"
 import { ALL_ATTR_KEYS, ATTR_KEY_SET, QUANTA_ATTRS } from "@/observability/vocabulary"
 import { noopShellSnapshotMetric } from "@/runtime/shell-snapshot/no-op-metric"
+import { assertScanPopulation } from "../_shared/scan-population"
 import { stripComments } from "../_shared/strip-comments"
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -157,6 +158,15 @@ describe("HELL-OT-02 — narrow ports live in their slice and never import @/obs
     test(`no file under src/${slice}/ runtime-imports @/observability`, () => {
       const offenders: string[] = []
       const files = readSliceFiles(slice)
+      const root = join(SRC_ROOT, slice)
+      assertScanPopulation(
+        files.map(({ path }) => path),
+        root,
+        {
+          id: `tests/unit/observability/new-slice-metrics-hellgate.test.ts#${slice.toUpperCase()}`,
+          topLevelOnly: true,
+        },
+      )
       // ANTI-VACUITY FLOOR — this arm's OWN. `offenders.length === 0` is also
       // what an empty scan produces, so without this the arm is green on a
       // renamed/emptied slice dir having read nothing. The neighbouring
@@ -272,6 +282,9 @@ describe("HELL-OT-05 — only vocabulary.ts + new-slice-instruments.ts reference
   test("no other src/ file contains a raw literal for any of the 6 keys", () => {
     const all: string[] = []
     walkSrc(SRC_ROOT, all)
+    assertScanPopulation(all, SRC_ROOT, {
+      id: "tests/unit/observability/new-slice-metrics-hellgate.test.ts#SRC",
+    })
     // ANTI-VACUITY FLOOR — an empty walk yields zero offenders, i.e. green
     // having scanned nothing. Floored on the two files this arm is ABOUT (the
     // authorised owners), so a walk that stops short of src/observability/ is

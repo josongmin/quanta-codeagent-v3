@@ -53,6 +53,7 @@ import {
   makeFakeBootstrapDeps as makeFakeDeps,
   makeFakeBootstrapRuntime as makeRuntime,
 } from "../../_support/bootstrap-fake-deps"
+import { assertScanPopulation } from "../_shared/scan-population"
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
@@ -96,6 +97,11 @@ describe("ADR-0299 host-bootstrap-extraction hellgate", () => {
   })
 
   test('2. src/host/bootstrap/** source text does NOT contain `from "@/apps/cli"` (slice fence)', () => {
+    const root = join(REPO_ROOT, "src/host/bootstrap")
+    assertScanPopulation(walk(root), root, {
+      id: "tests/unit/host/bootstrap-host-extraction-hellgate.test.ts#HOST-BOOTSTRAP",
+      collectable: (name) => name.endsWith(".ts") || name.endsWith(".tsx"),
+    })
     const offenders = grepDir("src/host/bootstrap", /from\s+["']@\/apps\/cli/)
     expect(offenders).toEqual([])
   })
@@ -150,6 +156,11 @@ describe("ADR-0299 host-bootstrap-extraction hellgate", () => {
   })
 
   test("4c. src/apps/cli/repl/** does NOT contain `buildLlmStack` (the prior internal helper)", () => {
+    const root = join(REPO_ROOT, "src/apps/cli/repl")
+    assertScanPopulation(walk(root), root, {
+      id: "tests/unit/host/bootstrap-host-extraction-hellgate.test.ts#CLI-REPL",
+      collectable: (name) => name.endsWith(".ts") || name.endsWith(".tsx"),
+    })
     const offenders = grepDir("src/apps/cli/repl", /buildLlmStack/)
     expect(offenders).toEqual([])
   })

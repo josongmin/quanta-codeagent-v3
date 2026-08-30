@@ -69,6 +69,41 @@ const ssmAmi = "ami-0123456789abcdef0"
 const ssmAmiLookup = (cmd: string, args: readonly string[]): boolean =>
   cmd === "aws" && args.includes("get-parameter")
 
+const isSshReadinessProbe = (cmd: string, args: readonly string[]): boolean =>
+  cmd === "ssh" && args.some((arg) => arg.includes("echo READY") || arg.includes("test -f"))
+
+type SpawnRule = {
+  readonly matches: (cmd: string, args: readonly string[]) => boolean
+  readonly result: () => SpawnResult
+}
+
+const commandWith = (command: string, argument: string) => (cmd: string, args: readonly string[]) =>
+  cmd === command && args.includes(argument)
+
+/** The normal EC2 world used by launch-path tests. Exceptional provider states
+ * stay in the individual tests; this fixture owns only the successful wire. */
+const successfulEc2Response =
+  (reportPath: string) =>
+  (cmd: string, args: readonly string[]): SpawnResult => {
+    const rules: readonly SpawnRule[] = [
+      { matches: commandWith("curl", "ifconfig.me"), result: () => ok("203.0.113.7") },
+      { matches: commandWith("aws", "describe-security-groups"), result: () => ok("None") },
+      { matches: commandWith("aws", "create-security-group"), result: () => ok("sg-abc123") },
+      { matches: ssmAmiLookup, result: () => ok(`${ssmAmi}\n`) },
+      { matches: commandWith("aws", "run-instances"), result: () => ok("i-0deadbeef") },
+      { matches: commandWith("aws", "describe-instances"), result: () => ok("1.2.3.4") },
+      { matches: isSshReadinessProbe, result: () => ok("READY") },
+      {
+        matches: commandWith("scp", reportPath),
+        result: () => {
+          require("node:fs").writeFileSync(reportPath, JSON.stringify(SAMPLE_REPORT))
+          return ok()
+        },
+      },
+    ]
+    return rules.find((rule) => rule.matches(cmd, args))?.result() ?? ok()
+  }
+
 // ── spawnWithProc leak-safety (FIX A) ───────────────────────────────────────
 
 /** A fake proc whose streams/exit are controllable, recording kill + exit-await. */
@@ -383,24 +418,7 @@ describe("ec2 backend", () => {
       require("node:path").join(require("node:os").tmpdir(), "ec2-test-"),
     )
     const reportPath = require("node:path").join(outDir, "quanta.run-ec2.json")
-    const { spawn, issued } = makeMockSpawn((cmd, args) => {
-      if (cmd === "curl" && args.includes("ifconfig.me")) return ok("203.0.113.7")
-      if (cmd === "aws" && args.includes("describe-security-groups")) return ok("None") // force create
-      if (cmd === "aws" && args.includes("create-security-group")) return ok("sg-abc123")
-      if (ssmAmiLookup(cmd, args)) return ok(`${ssmAmi}\n`)
-      if (cmd === "aws" && args.includes("run-instances")) return ok("i-0deadbeef")
-      if (cmd === "aws" && args.includes("describe-instances")) return ok("1.2.3.4")
-      // waitForSsh probes `ssh … echo READY` and gates on /READY/ in stdout (the
-      // committed ssh-ready + cloud-init poll); the old mock only handled a
-      // `test -f` probe ⇒ empty stdout ⇒ 90 retries ⇒ throw. Match the real probe.
-      if (cmd === "ssh" && args.some((a) => a.includes("echo READY") || a.includes("test -f")))
-        return ok("READY")
-      if (cmd === "scp" && args.some((a) => a === reportPath)) {
-        require("node:fs").writeFileSync(reportPath, JSON.stringify(SAMPLE_REPORT))
-        return ok()
-      }
-      return ok()
-    })
+    const { spawn, issued } = makeMockSpawn(successfulEc2Response(reportPath))
     const backend = createEc2Backend({
       spawn,
       sleep: async () => {},

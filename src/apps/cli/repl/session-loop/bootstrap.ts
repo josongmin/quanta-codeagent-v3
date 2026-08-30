@@ -240,6 +240,23 @@ const installTranscriptTransitions = (
   })
 }
 
+/** `/queue send` has one owner: enqueue the follow-up as the next independent
+ * prompt. Keeping its failure boundary here prevents bootstrap from owning an
+ * unrelated command handler while preserving the live queue closure. */
+const registerPlanQueueSendWire = (
+  registerPlanQueueSendNow: RunSessionLoopDeps["registerPlanQueueSendNow"],
+  externalPromptQueue: ExternalPromptQueue,
+): void => {
+  registerPlanQueueSendNow?.((inj) => {
+    try {
+      externalPromptQueue.push(inj.text)
+      return { ok: true }
+    } catch (error) {
+      return { ok: false, reason: errMessage(error) }
+    }
+  })
+}
+
 export const bootstrapSessionLoop = async (
   deps: RunSessionLoopDeps,
   state: LoopStateHolder,
@@ -314,14 +331,7 @@ export const bootstrapSessionLoop = async (
   registerNotifyDispose(closeStack, notify)
   registerSideConversationStart?.((args) => session.side.start(args))
   // `/queue` sendNow → inject the follow-up text as the next out-of-band prompt.
-  registerPlanQueueSendNow?.((inj) => {
-    try {
-      externalPromptQueue.push(inj.text)
-      return { ok: true }
-    } catch (e) {
-      return { ok: false, reason: errMessage(e) }
-    }
-  })
+  registerPlanQueueSendWire(registerPlanQueueSendNow, externalPromptQueue)
 
   installTranscriptTransitions(deps, state, session)
   // Audit R1 C-F1: attachPlaybookHandle() allocates a filesystem watcher that
