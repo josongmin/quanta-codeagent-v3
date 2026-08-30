@@ -21,21 +21,6 @@
       ]
     },
     {
-      "file": "tests/unit/apps/bench/promax/promax-bootstrap-phase-reachability.test.ts",
-      "klass": "C-derived/content-filtered",
-      "enumerators": [
-        "readdirSync"
-      ],
-      "recursive": true,
-      "absolutePaths": true,
-      "derived": true,
-      "roots": 1,
-      "floorLines": [
-        "214: expect(found.length).toBeGreaterThanOrEqual(3)",
-        "283: expect(kinds.size).toBeGreaterThanOrEqual(2)"
-      ]
-    },
-    {
       "file": "tests/unit/apps/bench/promax/promax-port-contract-unsuppressed.test.ts",
       "klass": "C-derived/content-filtered",
       "enumerators": [
