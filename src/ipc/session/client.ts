@@ -201,6 +201,18 @@ const createResumeOutcomeWatcher = (
   }
 }
 
+interface FidelityOutcomeWatch {
+  armed: boolean
+  derived: "full" | "preview" | undefined
+  submissionEmitted: boolean
+}
+
+const fidelityFromMessage = (message: SessionTransportMessage): "full" | "preview" | undefined => {
+  if (message.kind === "fidelity") return message.granted ? "full" : "preview"
+  if (message.kind === "snapshot" || message.kind === "event") return "preview"
+  return undefined
+}
+
 /**
  * Ticket 04 — per-connect fidelity-outcome watch. Armed (BEFORE the connect send)
  * ONLY when the client requested full. The server answers with a `fidelity` ack
@@ -213,39 +225,34 @@ const createResumeOutcomeWatcher = (
  * state. One slot — the latest connect wins it.
  */
 const createFidelityOutcomeWatcher = (emitFidelity: (fidelity: "full" | "preview") => void) => {
-  let current:
-    | { armed: boolean; derived: "full" | "preview" | undefined; submissionEmitted: boolean }
-    | undefined
+  let current: FidelityOutcomeWatch | undefined
   return {
-    arm(requested: boolean) {
+    arm(requested: boolean): FidelityOutcomeWatch | undefined {
       current = requested
         ? { armed: true, derived: undefined, submissionEmitted: false }
         : undefined
       return current
     },
-    dropIfCurrent(watch: typeof current): void {
+    dropIfCurrent(watch: FidelityOutcomeWatch | undefined): void {
       if (watch !== undefined && current === watch) current = undefined
     },
-    flushAfterSubmission(watch: typeof current): void {
+    flushAfterSubmission(watch: FidelityOutcomeWatch | undefined): void {
       if (watch === undefined) return
       watch.submissionEmitted = true
       if (watch.derived !== undefined) emitFidelity(watch.derived)
     },
     observe(message: SessionTransportMessage): void {
       if (current === undefined || !current.armed) return
-      if (message.kind === "fidelity") {
-        current.armed = false
-        current.derived = message.granted ? "full" : "preview"
-        if (current.submissionEmitted) emitFidelity(current.derived)
-      } else if (message.kind === "snapshot" || message.kind === "event") {
-        // First data frame with NO preceding ack ⇒ old/silent server ⇒ preview.
-        current.armed = false
-        current.derived = "preview"
-        if (current.submissionEmitted) emitFidelity(current.derived)
-      } else if (message.kind === "rejected" && message.target === "connect") {
+      if (message.kind === "rejected" && message.target === "connect") {
         current.armed = false
         current = undefined
+        return
       }
+      const derived = fidelityFromMessage(message)
+      if (derived === undefined) return
+      current.armed = false
+      current.derived = derived
+      if (current.submissionEmitted) emitFidelity(derived)
     },
   }
 }
