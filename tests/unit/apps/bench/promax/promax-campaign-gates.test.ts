@@ -44,8 +44,12 @@ import {
   type ProMaxModelStageEvidence,
   type ProMaxStageEvidence,
 } from "@/apps/bench/promax/campaign"
-import { buildProMaxSampleFamily, type ProMaxSampleManifest } from "@/apps/bench/promax/corpus"
-import { PROMAX_V1_SNAPSHOT } from "@/apps/bench/promax/provenance"
+import {
+  buildProMaxSampleFamily,
+  canonicalJson,
+  type ProMaxSampleManifest,
+} from "@/apps/bench/promax/corpus"
+import { PROMAX_V1_SNAPSHOT, sha256Hex } from "@/apps/bench/promax/provenance"
 import { buildSyntheticProMaxCorpus } from "./promax-corpus-fixture"
 import {
   evaluatorIdentity,
@@ -208,12 +212,19 @@ const stage = (
   ...patch,
 })
 
+const armIdentity = (role: "control" | "candidate") => {
+  const arm = RECORD.arms.find((candidate) => candidate.role === role)
+  if (arm === undefined) throw new Error(`fixture gap: no ${role} arm`)
+  return { role, name: arm.name, resolvedKnobsSha256: sha256Hex(canonicalJson(arm.knobs)) } as const
+}
+
 const modelStage = (
   ids: readonly string[],
   receipt = modelReceipt(ids, 3),
   patch: Partial<ProMaxModelStageEvidence> = {},
 ): ProMaxModelStageEvidence => ({
   ...stage(ids, receipt),
+  arm: armIdentity("control"),
   preset: "agentless-v1",
   model: { provider: "openai", model: "gpt-5.4", reasoningEffortDelivered: "high" },
   budgets: { ...BUDGETS },
@@ -416,6 +427,18 @@ describe("Gate 2 — the same PMX-7 model smoke", () => {
     expect(result.summary?.gradingValid).toBe(7)
   })
 
+  test("REFUSES a stage whose arm knob digest differs despite the same preset", () => {
+    const result = evaluateProMaxModelSmokeGate({
+      record: RECORD,
+      sampleName: "PMX-7",
+      evidence: modelStage(PMX7, modelReceipt(PMX7, 3), {
+        arm: { ...armIdentity("control"), resolvedKnobsSha256: "0".repeat(64) },
+      }),
+    })
+    expect(codes(result)).toContain("provenance_incomplete")
+    expect(result.ok).toBe(false)
+  })
+
   test("REFUSES any infra-invalid, ambiguous or missing row", () => {
     const infra = modelReceipt(PMX7, 3, [{ golden: "timeout_eval" }])
     expect(
@@ -564,7 +587,10 @@ const arm = (
 ): ProMaxArmEvidence => ({
   armName,
   preset,
-  evidence: modelStage(PMX40, modelReceipt(PMX40, resolvedCount), { preset }),
+  evidence: modelStage(PMX40, modelReceipt(PMX40, resolvedCount), {
+    arm: armIdentity(armName === "candidate-v1" ? "candidate" : "control"),
+    preset,
+  }),
   rows: PMX40.map((instanceId, i) => ({
     instanceId,
     state: i < resolvedCount ? ("resolved" as const) : ("model_miss" as const),

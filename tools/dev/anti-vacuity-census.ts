@@ -4,7 +4,7 @@ import { join } from "node:path"
 // The SHARED stripper. A local copy is exactly what
 // `comment-scanner-burndown-ratchet` forbids, and for the reason this file
 // exists: a hand-rolled one gets its own blind spots.
-import { stripComments } from "../../tests/unit/_shared/strip-comments"
+import { stripComments } from "../../src/shared/source-text"
 
 const R = join(import.meta.dir, "..", "..")
 

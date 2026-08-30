@@ -125,6 +125,9 @@ export interface OtelExporterOpts {
    *  Absent (the default) ⇒ the exporter uses the static {@link headers} on
    *  every POST exactly as before (byte-identical Default-OFF). */
   readonly getHeaders?: () => Promise<Readonly<Record<string, string>>>
+  /** Maximum time to wait for one collector POST. Default `10_000`; a stalled
+   * collector is retryable telemetry loss, never permission for a CLI to hang. */
+  readonly postTimeoutMs?: number
   /** Service name attribute attached to every span/metric resource. Default
    *  `"quanta-codeagent"`. */
   readonly serviceName?: string
@@ -578,13 +581,21 @@ const forwardedExporterOverrides = (
 ): Partial<
   Pick<
     OtelExporterOpts,
-    "fetch" | "headers" | "getHeaders" | "now" | "setIntervalImpl" | "clearIntervalImpl" | "warn"
+    | "fetch"
+    | "headers"
+    | "getHeaders"
+    | "now"
+    | "postTimeoutMs"
+    | "setIntervalImpl"
+    | "clearIntervalImpl"
+    | "warn"
   >
 > => ({
   ...(overrides?.fetch !== undefined ? { fetch: overrides.fetch } : {}),
   ...(overrides?.headers !== undefined ? { headers: overrides.headers } : {}),
   ...(overrides?.getHeaders !== undefined ? { getHeaders: overrides.getHeaders } : {}),
   ...(overrides?.now !== undefined ? { now: overrides.now } : {}),
+  ...(overrides?.postTimeoutMs !== undefined ? { postTimeoutMs: overrides.postTimeoutMs } : {}),
   ...(overrides?.setIntervalImpl !== undefined
     ? { setIntervalImpl: overrides.setIntervalImpl }
     : {}),

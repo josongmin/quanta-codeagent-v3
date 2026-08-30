@@ -66,6 +66,7 @@ import {
   type UserInputRequester,
 } from "@/tool"
 import { assertScanPopulation } from "../unit/_shared/scan-population"
+import { stripComments } from "../unit/_shared/strip-comments"
 
 // ── shared real-rail helpers ────────────────────────────────────────────────
 
@@ -496,8 +497,6 @@ describe("RFC-01 A5 — TaskRegistry constructor completeness (source scan)", ()
     const CALL = /new\s+TaskRegistry\s*\(/
     // Strip block + line comments so a constructor CALL is required, never a bare
     // symbol/prose mention (e.g. subagent.ts's "defaults to `new TaskRegistry()`").
-    const stripComments = (s: string): string =>
-      s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1")
     const hits: string[] = []
     const scanned: string[] = []
     for await (const rel of glob.scan(root)) {

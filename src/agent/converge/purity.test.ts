@@ -15,6 +15,7 @@ import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { assertScanPopulation } from "../../../tests/unit/_shared/scan-population"
+import { stripComments } from "../../shared/source-text"
 
 const CORE_DIR = join(import.meta.dir)
 
@@ -70,10 +71,6 @@ describe("@/agent/converge — surface-neutral purity guard", () => {
     expect(forbiddenImports(`import type { AgentEvent } from "@/stream"`)).toEqual([])
     expect(forbiddenImports(`import { z } from "@/agent/verify-guard"`)).toEqual([])
   })
-
-  /** Strip block + line comments so a doc line like "no `process.*`" doesn't trip the code scan. */
-  const stripComments = (src: string): string =>
-    src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "")
 
   test("PURE: no `process.*` in CODE and no stale compiled `.js` sibling in the core dir", () => {
     for (const f of coreFiles()) {

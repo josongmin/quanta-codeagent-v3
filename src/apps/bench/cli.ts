@@ -215,13 +215,21 @@ if (import.meta.main) {
   // it out of a sink that mixes many concurrent runs). Default-OFF byte-identical.
   const { otelExport, runId: benchRunId, traceLink } = bootBenchOtelExport(process.env)
   if (traceLink !== undefined) logger.info(`[otel] run ${benchRunId} live trace → ${traceLink}`)
-  process.on("beforeExit", () => {
-    void otelExport.teardown()
-  })
-  main().catch((err) => {
-    logger.info(`quanta-bench error: ${errMessage(err)}`)
-    process.exit(1)
-  })
+  // `beforeExit` can run more than once when its callback starts async work.
+  // Own the final flush in this top-level lifecycle instead: a completed run
+  // gets one bounded teardown attempt, then the process can exit naturally.
+  void (async () => {
+    let failed = false
+    try {
+      await main()
+    } catch (err) {
+      failed = true
+      logger.info(`quanta-bench error: ${errMessage(err)}`)
+    } finally {
+      await otelExport.teardown()
+    }
+    if (failed) process.exitCode = 1
+  })()
 }
 
 export { buildBackend } from "./commands/grade"

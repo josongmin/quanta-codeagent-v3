@@ -36,7 +36,12 @@ export interface OtlpTransportOpts {
   readonly headers?: Readonly<Record<string, string>>
   readonly getHeaders?: () => Promise<Readonly<Record<string, string>>>
   readonly now?: () => number
+  /** Hard upper bound for one collector POST. A final flush must never keep a
+   * completed CLI process alive forever when the collector stalls. */
+  readonly postTimeoutMs?: number
 }
+
+const DEFAULT_POST_TIMEOUT_MS = 10_000
 
 /**
  * The classified POST.
@@ -54,6 +59,10 @@ const makeClassifiedPost = (
   },
 ): ((path: string, body: unknown) => Promise<PostOutcome>) => {
   const { fetchImpl, endpoint, safeWarn } = deps
+  const postTimeoutMs =
+    Number.isFinite(opts.postTimeoutMs) && (opts.postTimeoutMs ?? 0) > 0
+      ? Math.floor(opts.postTimeoutMs as number)
+      : DEFAULT_POST_TIMEOUT_MS
   const resolveHeaders = async (): Promise<Record<string, string>> => {
     const staticHeaders = { ...(opts.headers ?? {}) }
     if (opts.getHeaders === undefined) return staticHeaders
@@ -82,14 +91,29 @@ const makeClassifiedPost = (
     }
     const dynamicHeaders = await resolveHeaders()
     try {
-      const res = await fetchImpl(`${endpoint}${path}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...dynamicHeaders,
-        },
-        body: serialized,
-      })
+      let timeout: ReturnType<typeof setTimeout> | undefined
+      let res: Response
+      try {
+        const expires = new Promise<never>((_, reject) => {
+          timeout = setTimeout(
+            () => reject(new Error(`OTLP POST timed out after ${postTimeoutMs}ms`)),
+            postTimeoutMs,
+          )
+        })
+        res = await Promise.race([
+          fetchImpl(`${endpoint}${path}`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...dynamicHeaders,
+            },
+            body: serialized,
+          }),
+          expires,
+        ])
+      } finally {
+        if (timeout !== undefined) clearTimeout(timeout)
+      }
       if (res.ok) return { kind: "ok" }
       if (classifyPostStatus(res.status) === "drop") {
         return { kind: "drop", reason: `HTTP ${res.status}` }

@@ -80,6 +80,9 @@ const scan = (dir: string, into: string[] = []): string[] => {
 
 const naiveStripperSites = (): readonly string[] =>
   ROOTS.flatMap((root) => scan(join(REPO, root)))
+    // The shared implementation is the one intentional parser owner, not a
+    // duplicate scanner for this ratchet to burn down.
+    .filter((f) => f !== "src/shared/source-text.ts")
     .filter((f) => carriesOwnStripper(readFileSync(join(REPO, f), "utf8")))
     .sort()
 
@@ -89,36 +92,15 @@ const naiveStripperSites = (): readonly string[] =>
  * and delete its line; a new entry means a new copy of a known-broken helper.
  */
 const REMAINING: readonly string[] = [
-  "tests/unit/runtime/single-pid-kill-ban-hellgate.test.ts",
-  "src/agent/converge/purity.test.ts",
   "src/agent/repro-test/select.ts",
-  "src/apps/bench/composition-root-dispatch.test.ts",
-  "src/apps/bench/promax/campaign/owner-audit.ts",
   "src/observability/coverage/v8-source.ts",
   "src/runner/batch/eval/python-source-text.ts",
   "src/runner/batch/eval/verification-owner-test-expectations.ts",
   "src/shared/public-issue-text.ts",
-  "tests/integration/admissibility-deny-steer-hell.test.ts",
-  "tests/integration/cli-attention-navigation.test.ts",
   "tests/unit/_arch/repo-path-anchor-ratchet.test.ts",
-  "tests/unit/_shared/strip-comments.ts",
-  "tests/unit/activity/activity-store-constructor-owner-ratchet.test.ts",
   "tests/unit/apps/bench/promax/promax-bootstrap-phase-reachability.test.ts",
-  "tests/unit/apps/cli/cli-feature-config-hellgate.test.ts",
-  "tests/unit/apps/headless/headless-second-consumer-hellgate.test.ts",
-  "tests/unit/compiled-binary-asset-ratchet.test.ts",
-  "tests/unit/dataset-family-profile-ssot.test.ts",
-  "tests/unit/deny-reason-authority-ratchet-hellgate.test.ts",
-  "tests/unit/integrations/github/slice-fence-static-hellgate-r3.test.ts",
-  "tests/unit/objective/authority-boundary-ratchet.test.ts",
-  "tests/unit/objective/constructor-owner-ratchet.test.ts",
-  "tests/unit/observability/new-slice-metrics-hellgate.test.ts",
-  "tests/unit/runner/session-authorities-task-registry-identity.test.ts",
-  "tests/unit/runtime-config-knobs-parity-hellgate.test.ts",
-  "tests/unit/skill/runtime/f4-discovery-owner-ratchet.test.ts",
-  "tools/feature-catalog/yaml.ts",
-  "tools/leaderboard-dashboard/family-union-ssot.test.ts",
   "tools/leaderboard-dashboard/projectors/structural.test.ts",
+  "tools/feature-catalog/yaml.ts",
 ]
 
 describe("the comment-scanner burn-down", () => {

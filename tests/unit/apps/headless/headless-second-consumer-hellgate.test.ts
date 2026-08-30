@@ -65,6 +65,7 @@ import {
   runHeadlessOnce,
 } from "@/apps/headless"
 import type { StreamEvent } from "@/llm"
+import { stripComments } from "../../_shared/strip-comments"
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -269,14 +270,6 @@ describe("ADR-0308 headless second-consumer hellgate", () => {
     // Strip block JSDoc + `//` line comments before grepping so a doc
     // comment that MENTIONS `process.env` (as ours legitimately does to
     // explain the slice's env-isolation invariant) does not trip the gate.
-    const stripComments = (body: string): string => {
-      const noBlock = body.replace(/\/\*[\s\S]*?\*\//g, "")
-      const noLine = noBlock
-        .split("\n")
-        .map((l) => l.replace(/\/\/.*$/, ""))
-        .join("\n")
-      return noLine
-    }
     const offenders: Array<{ path: string; needle: string }> = []
     for (const f of readHeadless()) {
       const code = stripComments(f.body)

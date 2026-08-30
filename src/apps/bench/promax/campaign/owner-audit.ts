@@ -40,6 +40,7 @@
  */
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join, relative, sep } from "node:path"
+import { stripComments } from "@/shared/source-text"
 import { canonicalJson } from "../corpus"
 import { sha256Hex } from "../provenance"
 
@@ -390,13 +391,6 @@ export const PROMAX_OWNER_AUDIT_BASELINE: ProMaxOwnerAuditCounters = {
 
 // ── the scan ────────────────────────────────────────────────────────────────
 
-/** Strip comment content so a rail keys on CODE, never on prose. */
-const stripComments = (line: string): string => {
-  const t = line.trim()
-  if (t.startsWith("//") || t.startsWith("*") || t.startsWith("/*")) return ""
-  return line.replace(/(^|[^:])\/\/.*$/, "$1")
-}
-
 const startsWithAny = (path: string, prefixes: readonly string[]): boolean =>
   prefixes.some((prefix) => path.startsWith(prefix))
 
@@ -441,11 +435,11 @@ const classify = (
 const collectLineHits = (
   path: string,
   raw: string,
+  code: string,
   index: number,
   hits: OwnerAuditHit[],
   ownerCounts: Record<ProMaxOwnerRole, number>,
 ): void => {
-  const code = stripComments(raw)
   if (code.trim() === "") return
   for (const role of PROMAX_OWNER_ROLES) {
     if (!OWNER_DETECTORS[role].test(code)) continue
@@ -504,9 +498,10 @@ export const auditProMaxSourceOwners = (
   }
 
   for (const file of files) {
-    const lines = file.text.split("\n")
-    lines.forEach((raw, index) => {
-      collectLineHits(file.path, raw, index, hits, ownerCounts)
+    const rawLines = file.text.split("\n")
+    const codeLines = stripComments(file.text).split("\n")
+    rawLines.forEach((raw, index) => {
+      collectLineHits(file.path, raw, codeLines[index] ?? "", index, hits, ownerCounts)
     })
     hits.push(...collectFileHits(file))
   }

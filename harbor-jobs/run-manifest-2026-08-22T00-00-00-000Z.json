@@ -7,7 +7,7 @@
   "harborVersion": "0.21.0",
   "quantaSha": "9d5369d310bb",
   "dirty": false,
-  "agentVersion": "1.0.033+g9d5369d310bb",
+  "agentVersion": "1.0.035+g9d5369d310bb",
   "profile": "quanta-full",
   "model": "gpt-5.5",
   "provider": "openai",

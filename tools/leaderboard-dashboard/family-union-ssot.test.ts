@@ -37,6 +37,7 @@ import {
   DATASET_FAMILIES as ENVELOPE_FAMILIES,
   isDatasetFamily,
 } from "@/runner/batch/report-envelope"
+import { stripComments } from "../../src/shared/source-text"
 import { ActionError, buildLaunchAction, type Family } from "./bench-actions"
 
 const REPO = join(import.meta.dir, "..", "..")
@@ -152,13 +153,6 @@ const FAMILY_TOKENS = "verified|promax|live|pro"
  *  literal) — the two spellings every real copy of this axis has used. */
 const UNION_RE = new RegExp(`["'](?:${FAMILY_TOKENS})["']\\s*[|,]\\s*["'](?:${FAMILY_TOKENS})["']`)
 
-/** Drop comment content: every one of these modules DOCUMENTS the axis in prose. */
-const stripComments = (line: string): string => {
-  const t = line.trim()
-  if (t.startsWith("//") || t.startsWith("*") || t.startsWith("/*")) return ""
-  return line.replace(/(^|[^:])\/\/.*$/, "$1")
-}
-
 interface Offense {
   readonly file: string
   readonly line: number
@@ -167,8 +161,13 @@ interface Offense {
 
 const scanSource = (file: string, source: string): Offense[] => {
   const out: Offense[] = []
+  const codeLines = stripComments(source)
+    .split("\n")
+    // Synthetic JSDoc bodies omit their opening `/*`; a bare `*` is code to
+    // the canonical parser, so normalize that fixture at this caller.
+    .map((line) => (line.trimStart().startsWith("*") ? "" : line))
   source.split("\n").forEach((raw, i) => {
-    const code = stripComments(raw)
+    const code = codeLines[i] ?? ""
     if (code.trim() === "" || !UNION_RE.test(code)) return
     out.push({ file, line: i + 1, text: raw.trim() })
   })

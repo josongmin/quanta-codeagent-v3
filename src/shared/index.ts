@@ -153,6 +153,7 @@ export {
 } from "./runtime-config"
 export type { ShellExecEvent, ShellExecObserver } from "./shell-exec-types"
 export { sliceTailWholeChars, sliceWholeChars } from "./slice-whole-chars"
+export { type StripCommentsOptions, stripComments } from "./source-text"
 export type { TerminalIo, TerminalWriter } from "./terminal-io"
 export {
   __resetTerminalIo,

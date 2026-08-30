@@ -18,6 +18,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join, relative } from "node:path"
+import { stripComments } from "../_shared/strip-comments"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 const SRC_DIR = join(REPO_ROOT, "src")
@@ -40,18 +41,6 @@ const ALLOWED: ReadonlySet<string> = new Set<string>([
 ])
 
 const posix = (p: string): string => p.split(/[\\/]/).join("/")
-
-const stripComments = (src: string): string =>
-  src
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .split("\n")
-    .map((l) => {
-      const t = l.trimStart()
-      if (t.startsWith("//") || t.startsWith("*")) return ""
-      const idx = l.indexOf("//")
-      return idx >= 0 ? l.slice(0, idx) : l
-    })
-    .join("\n")
 
 function* walk(dir: string): Generator<string> {
   for (const entry of readdirSync(dir)) {

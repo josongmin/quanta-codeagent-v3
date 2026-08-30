@@ -50,6 +50,8 @@ import type {
 } from "@/runner/batch/eval/official-grade"
 import { summarizeOfficialGrade } from "@/runner/batch/eval/official-grade"
 import { errMessage } from "@/shared"
+import { canonicalJson } from "../corpus"
+import { sha256Hex } from "../provenance"
 import type { ProMaxExceptionManifest } from "./exceptions"
 import { exceptionEntriesOf, validateExceptionManifest } from "./exceptions"
 import type { ProMaxGateSink } from "./gate-clauses"
@@ -64,7 +66,11 @@ import {
   receiptResolvedCount,
   reconcileArmRowsWithReceipt,
 } from "./gate-clauses"
-import type { ProMaxCampaignBudgets, ProMaxFrozenCampaignRecord } from "./record"
+import type {
+  ProMaxCampaignArmRole,
+  ProMaxCampaignBudgets,
+  ProMaxFrozenCampaignRecord,
+} from "./record"
 import { proMaxCampaignSample } from "./record"
 
 // ── the gate vocabulary ─────────────────────────────────────────────────────
@@ -198,6 +204,13 @@ export interface ProMaxStageEvidence {
  * COMPILE error instead.
  */
 export interface ProMaxModelStageEvidence extends ProMaxStageEvidence {
+  /** The exact declared arm whose resolved configuration launched this stage. */
+  readonly arm: {
+    readonly role: ProMaxCampaignArmRole
+    readonly name: string
+    /** sha256(canonicalJson(the frozen arm's resolved knobs)). */
+    readonly resolvedKnobsSha256: string
+  }
   readonly preset: string
   readonly model: {
     readonly provider: string
@@ -509,6 +522,7 @@ const auditModelStage = (
     add,
   )
   auditQuanta(evidence.quanta, record, add)
+  auditEvidenceArmIdentity("the run", evidence, record, "provenance_incomplete", add)
 
   const summary = summarizeOfficialGrade(evidence.receipt)
   if (summary.infraInvalid > 0 || summary.ambiguous > 0 || summary.missing > 0) {
@@ -522,6 +536,54 @@ const auditModelStage = (
   auditModelRunIdentity("the run", evidence, record, add)
   auditBudgets("the run", evidence.budgets, record, "provenance_incomplete", add)
   return summary
+}
+
+/**
+ * Preset is insufficient to identify an experimental arm: a valid paired
+ * experiment can deliberately use the same preset on both arms and vary only
+ * resolved knobs. Bind every model-spending receipt to the record's role, name
+ * and canonical resolved-knob digest instead of accepting a label supplied by
+ * the runner.
+ */
+const auditEvidenceArmIdentity = (
+  what: string,
+  evidence: ProMaxModelStageEvidence,
+  record: ProMaxFrozenCampaignRecord,
+  code: "provenance_incomplete" | "paired_config_mismatch",
+  add: Sink,
+  expectedRole?: ProMaxCampaignArmRole,
+): void => {
+  if (expectedRole !== undefined && evidence.arm.role !== expectedRole) {
+    add(
+      code,
+      `${what} reports role "${evidence.arm.role}" but occupies the ${expectedRole} arm slot`,
+    )
+  }
+  const frozen = record.arms.find((arm) => arm.role === evidence.arm.role)
+  if (frozen === undefined) {
+    add(code, `${what} reports unknown arm role "${evidence.arm.role}"`)
+    return
+  }
+  if (evidence.arm.name !== frozen.name) {
+    add(
+      code,
+      `${what} reports arm name "${evidence.arm.name}" but the frozen ${frozen.role} arm is "${frozen.name}"`,
+    )
+  }
+  if (evidence.preset !== frozen.preset) {
+    add(
+      code,
+      `${what} reports preset "${evidence.preset}" but the frozen ${frozen.role} arm uses "${frozen.preset}"`,
+    )
+  }
+  const expectedDigest = sha256Hex(canonicalJson(frozen.knobs))
+  if (evidence.arm.resolvedKnobsSha256 !== expectedDigest) {
+    add(
+      code,
+      `${what} reports resolved knob digest ${evidence.arm.resolvedKnobsSha256}, not the frozen ` +
+        `${frozen.role} digest ${expectedDigest}`,
+    )
+  }
 }
 
 /** A row whose evaluator output the pinned schema does not define. */
@@ -596,7 +658,7 @@ const finiteMetric = (value: number): boolean => Number.isFinite(value) && value
  * ones the record froze for its role.
  */
 const auditPairedArm = (
-  role: string,
+  role: ProMaxCampaignArmRole,
   arm: ProMaxArmEvidence,
   record: ProMaxFrozenCampaignRecord,
   expected: readonly string[],
@@ -647,6 +709,20 @@ const auditPairedArm = (
     )
   }
   const frozenArm = record.arms.find((a) => a.role === role)
+  auditEvidenceArmIdentity(
+    `the ${role} arm "${arm.armName}"`,
+    arm.evidence,
+    record,
+    "paired_config_mismatch",
+    add,
+    role,
+  )
+  if (arm.armName !== arm.evidence.arm.name) {
+    add(
+      "paired_config_mismatch",
+      `the ${role} arm wrapper names "${arm.armName}" but its stage receipt names "${arm.evidence.arm.name}"`,
+    )
+  }
   if (arm.preset !== arm.evidence.preset) {
     add(
       "paired_config_mismatch",
@@ -700,7 +776,7 @@ export const evaluateProMaxPairedGate = (input: {
     )
   }
 
-  const arms: readonly (readonly [string, ProMaxArmEvidence])[] = [
+  const arms: readonly (readonly [ProMaxCampaignArmRole, ProMaxArmEvidence])[] = [
     ["control", control],
     ["candidate", candidate],
   ]
@@ -865,6 +941,7 @@ export const admitProMaxFullRun = (input: {
   auditQuanta(evidence.quanta, record, add)
   auditBudgets("the Full-170 run", evidence.budgets, record, "provenance_incomplete", add)
   auditModelRunIdentity("the Full-170 run", evidence, record, add)
+  auditEvidenceArmIdentity("the Full-170 run", evidence, record, "provenance_incomplete", add)
   if (!orderedEqual(evidence.receipt.assignedInstanceIds, expected)) {
     add(
       "sample_mismatch",

@@ -54,16 +54,19 @@ class CountingLLM implements LLMPort {
 const gatedStore = (): {
   readonly store: StickyModelStore
   readonly release: () => void
-  readonly writeStarted: () => boolean
+  readonly waitForWriteStart: () => Promise<void>
 } => {
   const inner = inMemoryStickyModelStore()
-  let started = false
   let open!: () => void
+  let markWriteStarted!: () => void
   const gate = new Promise<void>((r) => {
     open = r
   })
+  const writeStarted = new Promise<void>((r) => {
+    markWriteStarted = r
+  })
   return {
-    writeStarted: () => started,
+    waitForWriteStart: () => writeStarted,
     release: open,
     store: {
       get: inner.get.bind(inner),
@@ -71,7 +74,7 @@ const gatedStore = (): {
       load: inner.load.bind(inner),
       unset: inner.unset.bind(inner),
       set: async (input) => {
-        started = true
+        markWriteStarted()
         await gate
         return await inner.set(input)
       },
@@ -133,11 +136,10 @@ describe("MR-03 — the turn waits for a set_model write", () => {
 
     const running = runAgent(cfg)
 
-    // Let the loop reach the drain and block on the held write. Generous enough
-    // that a NON-waiting loop would certainly have started streaming by now — the
-    // pre-MR-03 measurement had the boot port finish an entire turn in this window.
-    await new Promise((r) => setTimeout(r, 60))
-    expect(gate.writeStarted()).toBe(true)
+    // Synchronize on the durable write itself, rather than scheduler latency. A
+    // fire-and-forget regression reaches this same point, then races on to stream;
+    // the awaited production path remains held at the write.
+    await gate.waitForWriteStart()
     expect([boot.calls, picked.calls]).toEqual([0, 0])
 
     gate.release()

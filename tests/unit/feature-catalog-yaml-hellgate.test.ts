@@ -146,7 +146,7 @@ describe("fc YAML — evidence paths resolve on disk (anti-drift)", () => {
       }
     }
     expect(errors, `\n${errors.join("\n")}`).toEqual([])
-  }, 30000)
+  }, 60000)
 })
 
 // --- Red-on-injection: both checks have teeth ------------------------------

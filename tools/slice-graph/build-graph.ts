@@ -35,7 +35,7 @@
 import { readdir, readFile, stat } from "node:fs/promises"
 import { join, relative, resolve } from "node:path"
 
-import { stripComments } from "../../tests/unit/_shared/strip-comments"
+import { stripComments } from "../../src/shared/source-text"
 
 export interface SliceGraphEdge {
   readonly from: string

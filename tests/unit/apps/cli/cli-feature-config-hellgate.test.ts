@@ -5,6 +5,7 @@ import {
   type CliFeatureConfig,
   readCliFeatureConfig,
 } from "../../../../src/apps/cli/repl/cli-feature-config"
+import { stripComments } from "../../_shared/strip-comments"
 
 /**
  * ADR-0297 hellgate — surface-level feature config consolidation.
@@ -346,12 +347,6 @@ describe("ADR-0297 readCliFeatureConfig — env-knob sweep", () => {
 // =============================================================================
 // 4. SURFACE FENCE — source-text grep
 // =============================================================================
-
-/** Strip block/line comments so the grep targets code, not doc text. The
- *  surface-fence assertions are about RUNTIME behavior — a docstring that
- *  references `process.env` for explanation must not trip the fence. */
-const stripComments = (src: string): string =>
-  src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1")
 
 describe("ADR-0297 surface fence — no direct process reads in build* helpers", () => {
   test("repl.ts contains ZERO direct process.env / isTTY reads", () => {

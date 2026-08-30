@@ -241,6 +241,14 @@ const scanForRawStringCall = (): readonly Match[] => {
   return matches
 }
 
+/** A positive allowlist is a matcher liveness contract: if a regex drifts to
+ * zero, the policy scan must fail before its empty "unexpected" set can pass. */
+const assertMatchedFloor = (id: string, matches: readonly Match[], floor: number): void => {
+  expect(matches.length, `${id}: matched ${matches.length}; floor ${floor}`).toBeGreaterThanOrEqual(
+    floor,
+  )
+}
+
 describe("error-message canonical ratchet (R2 audit-H)", () => {
   test("ANTI-VACUITY: the walk reaches a real, populated `src/` tree", () => {
     // Every scan below reports matches. Zero matches over a tree that was never
@@ -285,7 +293,9 @@ describe("error-message canonical ratchet (R2 audit-H)", () => {
       // user has migrated a site already, the allowlist entry must be removed
       // in the same change to keep the ratchet honest.
       const byPath = new Map<string, number>()
-      for (const m of scanForUnsafeCasts()) {
+      const all = scanForUnsafeCasts()
+      assertMatchedFloor("unsafe-cast allowlist", all, ALLOWED_UNSAFE_CAST_SITES.size)
+      for (const m of all) {
         byPath.set(m.relPath, (byPath.get(m.relPath) ?? 0) + 1)
       }
       const allowlistedButGone = [...ALLOWED_UNSAFE_CAST_SITES].filter((path) => !byPath.has(path))
@@ -354,7 +364,9 @@ describe("error-message canonical ratchet (R2 audit-H)", () => {
     "ternary allowlist sites still have at least one inline hit (no false-positive cleanup)",
     () => {
       const byPath = new Map<string, number>()
-      for (const m of scanForCanonicalTernary()) {
+      const all = scanForCanonicalTernary()
+      assertMatchedFloor("canonical-ternary allowlist", all, ALLOWED_TERNARY_INLINE_SITES.size)
+      for (const m of all) {
         byPath.set(m.relPath, (byPath.get(m.relPath) ?? 0) + 1)
       }
       const allowlistedButGone = [...ALLOWED_TERNARY_INLINE_SITES].filter(
@@ -399,7 +411,9 @@ describe("error-message canonical ratchet (R2 audit-H)", () => {
     "raw-String allowlist sites still have at least one hit",
     () => {
       const byPath = new Map<string, number>()
-      for (const m of scanForRawStringCall()) {
+      const all = scanForRawStringCall()
+      assertMatchedFloor("raw-String allowlist", all, ALLOWED_RAW_STRING_SITES.size)
+      for (const m of all) {
         byPath.set(m.relPath, (byPath.get(m.relPath) ?? 0) + 1)
       }
       const allowlistedButGone = [...ALLOWED_RAW_STRING_SITES].filter((path) => !byPath.has(path))

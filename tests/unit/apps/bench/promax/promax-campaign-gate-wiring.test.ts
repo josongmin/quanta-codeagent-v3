@@ -31,11 +31,12 @@ import {
   freezeProMaxCampaignRecord,
   PROMAX_OWNER_AUDIT_BASELINE,
   type ProMaxFrozenCampaignRecord,
+  parseProMaxCampaignRecord,
   runProMaxCampaignCli,
   serializeProMaxCampaignRecord,
 } from "@/apps/bench/promax/campaign"
-import { buildProMaxSampleFamily } from "@/apps/bench/promax/corpus"
-import { PROMAX_V1_SNAPSHOT } from "@/apps/bench/promax/provenance"
+import { buildProMaxSampleFamily, canonicalJson } from "@/apps/bench/promax/corpus"
+import { PROMAX_V1_SNAPSHOT, sha256Hex } from "@/apps/bench/promax/provenance"
 import { serializeOfficialGradeReceipt } from "@/runner/batch/eval/official-grade"
 import { buildSyntheticProMaxCorpus } from "./promax-corpus-fixture"
 import {
@@ -161,6 +162,11 @@ const evidenceDoc = (receipt = goldReceipt()) => ({
   quanta: { sha: RECORD.quanta.sha, dirty: false },
   receipt: JSON.parse(serializeOfficialGradeReceipt(receipt)) as unknown,
   imageFreeze: imageFreeze(),
+  arm: {
+    role: "control",
+    name: "control-v1",
+    resolvedKnobsSha256: sha256Hex(canonicalJson(RECORD.arms[0]?.knobs ?? {})),
+  },
 })
 
 // ── the ports: pure filesystem + a log sink, nothing else ───────────────────
@@ -186,7 +192,45 @@ const write = (name: string, value: unknown): string => {
 
 const RECORD_PATH = write("campaign-record.json", serializeProMaxCampaignRecord(RECORD))
 
+const declaration = (): Omit<FreezeProMaxCampaignInput, "quanta" | "ownerAudit"> => {
+  const { quanta: _quanta, ownerAudit: _ownerAudit, ...rest } = input()
+  return rest
+}
+
 describe("PMX-06 CLI — preflight is the production caller of the audit and the rails", () => {
+  test("FREEZE: source SHA and owner audit are boundary-attested, and a moving tree writes nothing", () => {
+    const out = join(DIR, "produced-record-moving.json")
+    const { lines, ports } = linesOf()
+    const snapshots = [
+      { sha: "a".repeat(40), dirty: false },
+      { sha: "b".repeat(40), dirty: false },
+    ]
+    const code = runProMaxCampaignCli(
+      ["freeze", "--input", write("freeze-input.json", declaration()), "--out", out],
+      {
+        ...ports,
+        sourceSnapshot: () => snapshots.shift() ?? { sha: "b".repeat(40), dirty: false },
+      },
+    )
+    expect(code).toBe(1)
+    expect(lines.join("\n")).toMatch(/changed while freezing/)
+    expect(() => readFileSync(out, "utf8")).toThrow()
+  })
+
+  test("FREEZE: a clean stable snapshot produces a parseable content-addressed record", () => {
+    const out = join(DIR, "produced-record-stable.json")
+    const { lines, ports } = linesOf()
+    const sourceSnapshot = () => ({ sha: "a".repeat(40), dirty: false })
+    const code = runProMaxCampaignCli(
+      ["freeze", "--input", write("freeze-stable-input.json", declaration()), "--out", out],
+      { ...ports, sourceSnapshot },
+    )
+    expect(code).toBe(0)
+    const parsed = parseProMaxCampaignRecord(readFileSync(out, "utf8"))
+    expect(parsed.ok && parsed.record.quanta.sha).toBe("a".repeat(40))
+    expect(lines.join("\n")).toContain("FROZEN")
+  })
+
   test("REACHABILITY: preflight runs the owner audit, the rails and the record, and exits 0", () => {
     const { lines, ports } = linesOf()
     const code = runProMaxCampaignCli(["preflight", "--record", RECORD_PATH], ports)
@@ -332,7 +376,7 @@ describe("PMX-06 evidence decoding is fail-closed and faithful", () => {
 })
 
 describe("PMX-06 CLI — spend safety", () => {
-  test("the operator command has NO process, docker, aws or network surface", () => {
+  test("the operator command permits only literal read-only git attestation, never spend-capable surfaces", () => {
     const source = readFileSync(join(REPO, "tools", "bench-promax", "campaign-gates.ts"), "utf8")
     const code = source
       .split("\n")
@@ -355,6 +399,9 @@ describe("PMX-06 CLI — spend safety", () => {
         present: false,
       })
     }
+    expect(code.match(/execFileSync\(/g)?.length).toBe(2)
+    expect(code).toContain('execFileSync("git", ["rev-parse", "HEAD"]')
+    expect(code).toContain('execFileSync("git", ["status", "--porcelain"]')
     // non-vacuity: the detector DOES fire on a line that would introduce one
     expect(`${code}\nconst x = spawn("aws")`.includes("spawn")).toBe(true)
   })

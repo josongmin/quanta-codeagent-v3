@@ -18,6 +18,12 @@ const PROJECTORS = import.meta.dir
 
 const read = (rel: string): string => readFileSync(join(DASHBOARD, rel), "utf8")
 
+/** The dashboard page is an HTML template literal whose embedded browser JS is
+ * intentionally scanned as code. The canonical TypeScript scanner preserves
+ * template contents, so this HTML/JS projection owns a separate transform. */
+const stripComments = (text: string): string =>
+  text.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1 ")
+
 /** Every non-test .ts under the dashboard tree, repo-relative-ish. */
 const walk = (dir: string, out: { path: string; text: string }[] = []) => {
   for (const entry of readdirSync(dir)) {
@@ -30,10 +36,6 @@ const walk = (dir: string, out: { path: string; text: string }[] = []) => {
   }
   return out
 }
-
-/** Strip line- and block-comments so a rail keys on CODE, never on prose. */
-const stripComments = (text: string): string =>
-  text.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1 ")
 
 // ---------------------------------------------------------------------------
 // Rail 1 — server.ts must not branch on a suite identity.

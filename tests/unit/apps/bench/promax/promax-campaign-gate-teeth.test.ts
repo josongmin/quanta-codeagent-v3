@@ -188,6 +188,11 @@ const modelEvidenceDoc = (
   quanta: { sha: RECORD.quanta.sha, dirty: false },
   receipt: JSON.parse(serializeOfficialGradeReceipt(receipt)) as unknown,
   imageFreeze: imageFreeze(ids),
+  arm: {
+    role: "control",
+    name: "control-v1",
+    resolvedKnobsSha256: sha256Hex(canonicalJson(RECORD.arms[0]?.knobs ?? {})),
+  },
   preset: "agentless-v1",
   model: { provider: "openai", model: "gpt-5.4", reasoningEffortDelivered: "high" },
   budgets: { ...BUDGETS },
@@ -313,7 +318,17 @@ const armDoc = (
 ): Json => ({
   armName,
   preset: "agentless-v1",
-  evidence: modelEvidenceDoc(PMX40, modelReceipt(PMX40, resolvedCount)),
+  evidence: modelEvidenceDoc(PMX40, modelReceipt(PMX40, resolvedCount), {
+    arm: {
+      role: armName === "candidate-v1" ? "candidate" : "control",
+      name: armName,
+      resolvedKnobsSha256: sha256Hex(
+        canonicalJson(
+          RECORD.arms.find((arm) => arm.name === armName)?.knobs ?? RECORD.arms[0]?.knobs ?? {},
+        ),
+      ),
+    },
+  }),
   rows: PMX40.map((instanceId, i) => ({
     instanceId,
     state: i < resolvedCount ? "resolved" : "model_miss",
@@ -338,6 +353,24 @@ describe("PMX-06 baselines — the healthy runs still PASS (no gate is refusing 
     )
     expect({ code: run.code, log: run.log }).toEqual({ code: 0, log: run.log })
     expect(run.log).toContain("continue=true")
+  })
+
+  test("gate 4 REFUSES a candidate wrapper carrying the control's same-preset knob identity", () => {
+    const candidate = armDoc("candidate-v1", 14, 1.2)
+    const swapped: Json = {
+      ...candidate,
+      evidence: {
+        ...(candidate.evidence as Json),
+        arm: {
+          role: "control",
+          name: "control-v1",
+          resolvedKnobsSha256: sha256Hex(canonicalJson(RECORD.arms[0]?.knobs ?? {})),
+        },
+      },
+    }
+    const run = gate4("same-preset-swapped-arm-identity", armDoc("control-v1", 10, 1), swapped)
+    expect(run.code).not.toBe(0)
+    expect(run.log).toContain("paired_config_mismatch")
   })
 })
 

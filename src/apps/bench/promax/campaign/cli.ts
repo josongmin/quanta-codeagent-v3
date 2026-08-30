@@ -9,6 +9,10 @@
  * ## Two subcommands
  *
  * ```text
+ *  freeze --input <campaign-input.json> --out <campaign-record.json>
+ *      resolves the repository snapshot and source-owner audit itself, then
+ *      writes one content-addressed record. It refuses a dirty or moving tree.
+ *
  *  preflight --record <path>
  *      the source-owner audit (unclassified duplicates BLOCK live spend),
  *      the verification rails (no command may pass over an empty selection),
@@ -53,7 +57,14 @@ import {
   collectOwnerAuditSources,
 } from "./owner-audit"
 import { assertRailSelectionsNonEmpty, resolveProMaxVerificationRails } from "./rails"
-import { type ProMaxFrozenCampaignRecord, parseProMaxCampaignRecord } from "./record"
+import {
+  type FreezeProMaxCampaignInput,
+  freezeProMaxCampaignRecord,
+  type ProMaxCampaignRecordResult,
+  type ProMaxFrozenCampaignRecord,
+  parseProMaxCampaignRecord,
+  serializeProMaxCampaignRecord,
+} from "./record"
 
 /** The ONLY capabilities this command has. Read, write, log. */
 export interface CampaignCliPorts {
@@ -61,6 +72,8 @@ export interface CampaignCliPorts {
   readonly readFile: (path: string) => string
   readonly writeFile: (path: string, text: string) => void
   readonly log: (line: string) => void
+  /** Read-only repository identity injected by the outer command. */
+  readonly sourceSnapshot?: () => { readonly sha: string; readonly dirty: boolean }
 }
 
 const flag = (argv: readonly string[], name: string): string | undefined => {
@@ -171,6 +184,81 @@ const runPreflight = (argv: readonly string[], ports: CampaignCliPorts): number 
   }
   for (const problem of problems) ports.log(`[promax] REFUSED — ${problem}`)
   return 1
+}
+
+/** Freeze a campaign from operator-declared inputs, with live source attestations. */
+const runFreeze = (argv: readonly string[], ports: CampaignCliPorts): number => {
+  const inputPath = flag(argv, "input")
+  const out = flag(argv, "out")
+  if (inputPath === undefined || out === undefined) {
+    ports.log(
+      "[promax] REFUSED — freeze requires --input <campaign-input.json> and --out <campaign-record.json>.",
+    )
+    return 1
+  }
+  if (ports.sourceSnapshot === undefined) {
+    ports.log(
+      "[promax] REFUSED — this caller cannot attest the current repository SHA and cleanliness.",
+    )
+    return 1
+  }
+  const doc = readJson(ports, inputPath, "campaign input")
+  if (!doc.ok) {
+    ports.log(`[promax] REFUSED — ${doc.message}`)
+    return 1
+  }
+  let before: { readonly sha: string; readonly dirty: boolean }
+  try {
+    before = ports.sourceSnapshot()
+  } catch (err) {
+    ports.log(`[promax] REFUSED — repository snapshot could not be read (${errMessage(err)}).`)
+    return 1
+  }
+  if (before.dirty) {
+    ports.log(
+      "[promax] REFUSED — repository tree is dirty; a dirty overlay cannot freeze a campaign.",
+    )
+    return 1
+  }
+  const audit = auditProMaxSourceOwners(collectOwnerAuditSources(ports.repoRoot))
+  let frozen: ProMaxCampaignRecordResult
+  try {
+    frozen = freezeProMaxCampaignRecord({
+      ...(doc.value as FreezeProMaxCampaignInput),
+      quanta: before,
+      ownerAudit: audit,
+    })
+  } catch (err) {
+    ports.log(
+      `[promax] REFUSED — campaign input is not a usable freeze declaration (${errMessage(err)}).`,
+    )
+    return 1
+  }
+  if (!frozen.ok) {
+    ports.log(
+      `[promax] REFUSED — ${frozen.failures.map((f) => `${f.code}: ${f.message}`).join(" | ")}`,
+    )
+    return 1
+  }
+  let after: { readonly sha: string; readonly dirty: boolean }
+  try {
+    after = ports.sourceSnapshot()
+  } catch (err) {
+    ports.log(`[promax] REFUSED — repository snapshot could not be re-read (${errMessage(err)}).`)
+    return 1
+  }
+  if (after.dirty || after.sha !== before.sha) {
+    ports.log(
+      `[promax] REFUSED — repository changed while freezing (before=${before.sha} dirty=${before.dirty}, ` +
+        `after=${after.sha} dirty=${after.dirty}); no record was written.`,
+    )
+    return 1
+  }
+  ports.writeFile(out, serializeProMaxCampaignRecord(frozen.record))
+  ports.log(
+    `[promax] FROZEN — ${frozen.record.campaign_id} sha256=${frozen.record.sha256} quanta=${before.sha}`,
+  )
+  return 0
 }
 
 const decodeExceptions = (
@@ -391,6 +479,7 @@ const runGate = (argv: readonly string[], ports: CampaignCliPorts): number => {
 }
 
 export const PROMAX_CAMPAIGN_CLI_USAGE = [
+  "quanta promax-campaign freeze --input <campaign-input.json> --out <campaign-record.json>",
   "quanta promax-campaign preflight --record <campaign-record.json>",
   "quanta promax-campaign gate --gate <id> --record <path> --evidence <path>",
   "                              [--exceptions <path>] [--prior <path>] [--out <path>]",
@@ -400,6 +489,7 @@ export const PROMAX_CAMPAIGN_CLI_USAGE = [
 /** The command. Returns the process exit code; never throws for a refusal. */
 export const runProMaxCampaignCli = (argv: readonly string[], ports: CampaignCliPorts): number => {
   const subcommand = argv[0]
+  if (subcommand === "freeze") return runFreeze(argv, ports)
   if (subcommand === "preflight") return runPreflight(argv, ports)
   if (subcommand === "gate") return runGate(argv, ports)
   ports.log(PROMAX_CAMPAIGN_CLI_USAGE)

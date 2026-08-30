@@ -49,6 +49,7 @@ import {
 } from "@/observability/metrics/wire-new-slices"
 import { ALL_ATTR_KEYS, ATTR_KEY_SET, QUANTA_ATTRS } from "@/observability/vocabulary"
 import { noopShellSnapshotMetric } from "@/runtime/shell-snapshot/no-op-metric"
+import { stripComments } from "../_shared/strip-comments"
 
 // ────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -79,9 +80,6 @@ const readSliceFiles = (sliceRelDir: string): Array<{ path: string; text: string
   }
   return out
 }
-
-const stripComments = (src: string): string =>
-  src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")
 
 const importsObservability = (text: string): boolean => {
   const stripped = stripComments(text)

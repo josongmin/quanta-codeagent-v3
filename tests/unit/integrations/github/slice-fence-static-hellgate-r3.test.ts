@@ -32,6 +32,7 @@
 import { describe, expect, test } from "bun:test"
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { join, resolve } from "node:path"
+import { stripComments } from "../../_shared/strip-comments"
 
 // Repo-anchored on this file, not the ambient cwd — this fence reads real
 // source out of the checkout.
@@ -93,20 +94,6 @@ const listSliceFiles = (): readonly SliceFile[] => {
       content: readFileSync(abs, "utf8"),
     })
   }
-  return out
-}
-
-/**
- * Strip line and block comments from TS source so doc-strings that mention
- * a banned identifier ("No direct Bun.spawn here…") do not produce false
- * positives. This is a SHALLOW strip — good enough for fence-style scans
- * (we never need it to round-trip into valid TS).
- */
-const stripComments = (src: string): string => {
-  // Block comments first (greedy with non-greedy body).
-  let out = src.replace(/\/\*[\s\S]*?\*\//g, "")
-  // Line comments — line-anchored to avoid eating URL `://`.
-  out = out.replace(/(^|[^:])\/\/.*$/gm, (_m, lead) => String(lead))
   return out
 }
 

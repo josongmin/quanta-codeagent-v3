@@ -62,6 +62,7 @@ import {
 } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, relative, resolve } from "node:path"
+import { stripComments } from "./_shared/strip-comments"
 
 const REPO_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "")
 
@@ -120,32 +121,6 @@ const walk = (dir: string, out: string[] = []): string[] => {
   return out
 }
 
-/**
- * Blank out whole-line comments so a doc block that MENTIONS `createRequire`
- * (both fixed files narrate the defect at length) is not counted as a call.
- *
- * Deliberately conservative: only lines whose trimmed form OPENS a comment are
- * dropped. A trailing `// …` on a code line is left in, so it can only ADD a
- * site that must be classified — the fail-closed direction. Under-stripping
- * costs a JSON entry; over-stripping would hide a real site.
- */
-const stripWholeLineComments = (source: string): string[] => {
-  let inBlock = false
-  return source.split("\n").map((raw) => {
-    const t = raw.trim()
-    if (inBlock) {
-      if (t.includes("*/")) inBlock = false
-      return ""
-    }
-    if (t.startsWith("/*")) {
-      if (!t.includes("*/")) inBlock = true
-      return ""
-    }
-    if (t.startsWith("//") || t.startsWith("*")) return ""
-    return raw
-  })
-}
-
 interface Hit {
   readonly file: string
   readonly line: number
@@ -158,11 +133,13 @@ const scanSrc = (): { readonly hits: readonly Hit[]; readonly filesScanned: numb
   const hits: Hit[] = []
   for (const abs of files) {
     const rel = relative(REPO_ROOT, abs)
-    stripWholeLineComments(readFileSync(abs, "utf8")).forEach((line, i) => {
-      for (const [name, re] of Object.entries(PATTERNS) as [PatternName, RegExp][]) {
-        if (re.test(line)) hits.push({ file: rel, line: i + 1, pattern: name, text: line.trim() })
-      }
-    })
+    stripComments(readFileSync(abs, "utf8"))
+      .split("\n")
+      .forEach((line, i) => {
+        for (const [name, re] of Object.entries(PATTERNS) as [PatternName, RegExp][]) {
+          if (re.test(line)) hits.push({ file: rel, line: i + 1, pattern: name, text: line.trim() })
+        }
+      })
   }
   return { hits, filesScanned: files.length }
 }

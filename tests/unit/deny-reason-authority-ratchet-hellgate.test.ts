@@ -15,17 +15,11 @@ import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync } from "node:fs"
 import { join, relative } from "node:path"
 import { assertScanPopulation } from "./_shared/scan-population"
+import { stripComments } from "./_shared/strip-comments"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..")
 const SRC_AGENT = join(REPO_ROOT, "src", "agent")
 const ALLOWED_OWNER = join(SRC_AGENT, "deny-reason-wire.ts")
-
-const TOKEN = /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`|\/\/[^\n]*|\/\*[\s\S]*?\*\//g
-
-const blank = (m: string): string => m.replace(/[^\n]/g, " ")
-
-const stripComments = (src: string): string =>
-  src.replace(TOKEN, (m) => (m.startsWith("//") || m.startsWith("/*") ? blank(m) : m))
 
 const collectAgentTs = (): string[] => {
   const out: string[] = []

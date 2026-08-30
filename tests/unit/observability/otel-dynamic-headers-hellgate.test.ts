@@ -85,6 +85,18 @@ const noTimer: Pick<
 const ENDPOINT = "http://collector.local:4318"
 
 describe("§12.7 dynamic OTLP headers", () => {
+  test("DH-00: a permanently pending collector POST is bounded and remains retryable", async () => {
+    const exp = otelHttpExporter({
+      endpoint: ENDPOINT,
+      fetch: (() => new Promise<Response>(() => {})) as unknown as typeof fetch,
+      flushIntervalMs: 0,
+      postTimeoutMs: 1,
+    })
+    exp.recordSpan(SPAN("timeout"))
+    await expect(exp.flush()).resolves.toBeUndefined()
+    await exp.teardown()
+  })
+
   test("DH-01: getHeaders() result is applied to the POST", async () => {
     const { fetch, calls } = makeFakeFetch()
     const exp = otelHttpExporter({

@@ -12,6 +12,9 @@ type PackageJson = { readonly scripts?: Record<string, string> }
 const packageJson = (await Bun.file(
   join(import.meta.dir, "..", "..", "package.json"),
 ).json()) as PackageJson
+const shardRunner = await Bun.file(
+  join(import.meta.dir, "..", "..", "tools", "dev", "run-test-shards.ts"),
+).text()
 
 describe("test:ci admission gate", () => {
   test("uses the live feature-catalog changed-file authority", () => {
@@ -27,10 +30,14 @@ describe("test:ci admission gate", () => {
     expect(stale).toEqual([])
   })
 
-  test("gives spawned catalog and subprocess rails a realistic CI timeout", () => {
-    for (const name of ["test:ci", "test:shard"]) {
+  test("gives spawned catalog and subprocess rails a realistic timeout", () => {
+    const expectations = {
+      "test:ci": "--timeout=15000",
+      "test:shard": "--timeout=60000",
+    } as const
+    for (const [name, timeout] of Object.entries(expectations)) {
       const script = packageJson.scripts?.[name]
-      expect(script, name).toContain("--timeout=15000")
+      expect(script, name).toContain(timeout)
       expect(script, name).toContain("--parallel=1")
     }
   })
@@ -50,5 +57,13 @@ describe("test:ci admission gate", () => {
     for (const name of serialScripts) {
       expect(packageJson.scripts?.[name], name).toContain("--parallel=1")
     }
+  })
+
+  test("the authoritative full-suite runner bounds a wedged shard worker", () => {
+    expect(packageJson.scripts?.test).toContain("tools/dev/run-test-shards.ts")
+    expect(shardRunner).toContain("const SHARD_COUNT = 8")
+    expect(shardRunner).toContain("const SHARD_TIMEOUT_MS = 5 * 60_000")
+    expect(shardRunner).toContain("proc.kill(9)")
+    expect(shardRunner).toContain("checkout changed during run")
   })
 })

@@ -30,7 +30,7 @@
 import { readdir, readFile, stat } from "node:fs/promises"
 import { dirname, join, relative, resolve } from "node:path"
 
-import { stripComments } from "../../tests/unit/_shared/strip-comments"
+import { stripComments } from "../../src/shared/source-text"
 import { parseModuleExports } from "../shared/ts-exports"
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..")

@@ -30,6 +30,7 @@ import type {
   ProMaxStageEvidence,
 } from "./gates"
 import { PROMAX_GATE_FAILURE_CODES, PROMAX_GATE_ORDER, PROMAX_LEAKAGE_CHECK_IDS } from "./gates"
+import type { ProMaxCampaignArmRole } from "./record"
 
 export type ProMaxDecode<T> =
   | { readonly ok: true; readonly evidence: T }
@@ -119,6 +120,30 @@ const decodeLeakageCheckIds = (raw: unknown, problems: string[]): string[] => {
   return ids
 }
 
+const isCampaignArmRole = (value: unknown): value is ProMaxCampaignArmRole =>
+  value === "control" || value === "candidate"
+
+/** Decode the identity that connects a model-stage artefact to one frozen arm. */
+const decodeModelArmIdentity = (
+  raw: unknown,
+  problems: string[],
+): {
+  readonly role: ProMaxCampaignArmRole | null
+  readonly name: string | null
+  readonly resolvedKnobsSha256: string | null
+} => {
+  const arm = isRecord(raw) ? raw : null
+  const role = arm === null || !isCampaignArmRole(arm.role) ? null : arm.role
+  const name = arm === null ? null : str(arm.name)
+  const resolvedKnobsSha256 = arm === null ? null : str(arm.resolvedKnobsSha256)
+  if (role === null) problems.push("`arm.role` must be exactly `control` or `candidate`")
+  if (name === null) problems.push("`arm.name` is absent — a model run must name its frozen arm")
+  if (resolvedKnobsSha256 === null || !/^[a-f0-9]{64}$/u.test(resolvedKnobsSha256)) {
+    problems.push("`arm.resolvedKnobsSha256` must be a lowercase 64-hex canonical knob digest")
+  }
+  return { role, name, resolvedKnobsSha256 }
+}
+
 export const decodeProMaxModelStageEvidence = (
   value: unknown,
 ): ProMaxDecode<ProMaxModelStageEvidence> => {
@@ -130,6 +155,8 @@ export const decodeProMaxModelStageEvidence = (
   const preset = str(record.preset)
   if (preset === null)
     problems.push("`preset` is absent — a model run must name the preset it used")
+
+  const arm = decodeModelArmIdentity(record.arm, problems)
 
   const model = record.model
   const provider = isRecord(model) ? str(model.provider) : null
@@ -167,6 +194,11 @@ export const decodeProMaxModelStageEvidence = (
     ok: true,
     evidence: {
       ...base.evidence,
+      arm: {
+        role: arm.role as ProMaxCampaignArmRole,
+        name: String(arm.name),
+        resolvedKnobsSha256: String(arm.resolvedKnobsSha256),
+      },
       preset: String(preset),
       model: {
         provider: String(provider),

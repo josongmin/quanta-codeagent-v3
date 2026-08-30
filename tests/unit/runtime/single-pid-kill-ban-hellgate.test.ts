@@ -31,6 +31,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
+import { stripComments } from "../_shared/strip-comments"
 
 const SRC = join(import.meta.dir, "..", "..", "..", "src")
 
@@ -288,11 +289,6 @@ export const directSignalTreeCallers = (files: ReadonlyArray<{ rel: string; text
     )
     .map(({ rel }) => rel)
     .sort()
-
-/** Strip line and block comments so a `signalTree(pid, …)` written inside a
- *  docstring is not counted as a call site. */
-export const stripComments = (text: string): string =>
-  text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "")
 
 describe("F3 — direct signalTree callers are a closed, justified population", () => {
   test("no src file drives signalTree by hand outside the justified allowlist", () => {

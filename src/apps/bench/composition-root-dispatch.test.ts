@@ -31,6 +31,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { stripComments } from "@/shared/source-text"
 import { positionals, VALUE_FLAGS } from "./commands/shared"
 import { DATASET_FAMILY_FLAG, readDatasetFamilySelector } from "./run-config"
 
@@ -585,12 +586,6 @@ describe("LOW-10 — the grade/pool roots make their decision WITHOUT touching a
 // NEW-2 — the dispatcher's VALUE_FLAGS table silently drifts from the real
 //         `argValue("--flag")` call sites, mis-parsing positionals.
 // ─────────────────────────────────────────────────────────────────────────────
-
-/** Strip line + block comments so PROSE that quotes a call shape (this file's
- *  own header does) is never mistaken for a live call site. Conservative: it
- *  only removes comment spans, never rewrites code. */
-const stripComments = (text: string): string =>
-  text.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ")
 
 /** Extract every value-taking flag LITERAL read by the dispatcher layer. */
 const scanValueFlags = (sources: readonly { path: string; text: string }[]): Set<string> => {

@@ -23,6 +23,7 @@ import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
 import { assertScanPopulation } from "../../_shared/scan-population"
+import { stripComments } from "../../_shared/strip-comments"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..", "..")
 const WEB_DAEMON_DIR = join(REPO_ROOT, "src", "apps", "web-daemon")
@@ -37,11 +38,6 @@ const listTsFiles = (dir: string): string[] => {
   }
   return out
 }
-
-/** Strip `//` line comments and `/* *\/` block comments so a docblock naming the
- *  primitive is not a false positive (and cannot hide a real reference). */
-const stripComments = (src: string): string =>
-  src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "")
 
 const DISCOVERY_RE = /\bdiscover(?:System)?Skills\b/
 

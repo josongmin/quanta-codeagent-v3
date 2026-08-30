@@ -28,6 +28,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join, relative } from "node:path"
+import { stripComments } from "./_shared/strip-comments"
 
 const REPO = join(import.meta.dir, "..", "..")
 const BENCH_ROOT = join(REPO, "src", "apps", "bench")
@@ -76,16 +77,6 @@ const DETECTORS: ReadonlyArray<{ readonly name: string; readonly re: RegExp }> =
   { name: "switch-case", re: new RegExp(`case\\s+["'](?:${FAMILY_TOKEN_ALTERNATION})["']\\s*:`) },
 ]
 
-/** Strip line + block comment content so a DOC COMMENT that quotes the removed
- *  branch (they all do — that is how the repair is documented) is not a
- *  false-positive, while real code is untouched. Conservative: only whole-line
- *  comment forms and trailing `//` that is not part of a `://` URL. */
-const stripComments = (line: string): string => {
-  const t = line.trim()
-  if (t.startsWith("//") || t.startsWith("*") || t.startsWith("/*")) return ""
-  return line.replace(/(^|[^:])\/\/.*$/, "$1")
-}
-
 interface Offense {
   readonly file: string
   readonly line: number
@@ -101,8 +92,14 @@ const scanSource = (
   justified: typeof JUSTIFIED = JUSTIFIED,
 ): Offense[] => {
   const out: Offense[] = []
+  // A synthetic JSDoc body may be supplied without its opening `/*`; the
+  // shared parser correctly treats a bare `*` as code, so retain this fixture
+  // normalization at the caller rather than weakening the canonical scanner.
+  const codeLines = stripComments(source)
+    .split("\n")
+    .map((line) => (line.trimStart().startsWith("*") ? "" : line))
   source.split("\n").forEach((raw, i) => {
-    const code = stripComments(raw)
+    const code = codeLines[i] ?? ""
     if (code.trim() === "") return
     for (const { name, re } of DETECTORS) {
       if (!re.test(code)) continue

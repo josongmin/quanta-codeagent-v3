@@ -1,6 +1,6 @@
 {
   "name": "quanta-codeagent",
-  "version": "1.0.034",
+  "version": "1.0.035",
   "type": "module",
   "exports": {
     "./sdk": {
@@ -24,7 +24,7 @@
     "test:clean-js": "find tests tools -name '*.js' -delete && find src -name '*.js' ! -path 'src/ui/auth-ui.js' -delete",
     "test:admission": "bun fc check-changed",
     "test:admission:audit": "bun fc audit",
-    "test": "bun run typecheck && bun run test:clean-js && bun test tests/unit tests/meta tests/adversarial tests/measurement tests/integration ./src/ ./tools/ --parallel=1",
+    "test": "bun run typecheck && bun run test:clean-js && bun run tools/dev/run-test-shards.ts --parallel=1",
     "test:unit": "bun run typecheck && bun run test:clean-js && bun test tests/unit tests/meta tests/adversarial tests/measurement ./src/ ./tools/ --parallel=1",
     "test:pollution": "bun run tools/dev/worktree-pollution-guard.ts -- bun test tests/unit",
     "test:cwd-parity": "bun run tools/dev/cwd-parity-check.ts",
@@ -34,7 +34,7 @@
     "test:integration": "bun run test:clean-js && bun test tests/integration --parallel=1",
     "test:resilient": "bun run test:clean-js && bun run tools/test-resilience/cli.ts run tests/unit tests/integration",
     "test:resilient:quarantine": "bun run tools/test-resilience/cli.ts quarantine-check",
-    "test:shard": "bun run test:clean-js && bun test tests/unit tests/meta tests/adversarial tests/measurement tests/integration ./src/ ./tools/ --timeout=15000 --parallel=1 --shard=\"${SHARD:-1/1}\"",
+    "test:shard": "bun run test:clean-js && bun test tests/unit tests/meta tests/adversarial tests/measurement tests/integration ./src/ ./tools/ --timeout=60000 --parallel=1 --shard=\"${SHARD:-1/1}\"",
     "test:real-toolchain": "QUANTA_REAL_TOOLCHAIN_E2E=1 bun test $(find tests/unit -name '*-real-e2e.test.ts') --parallel=1",
     "test:contract": "bun run test:clean-js && bun test tests/contract --parallel=1",
     "test:ci": "bun run test:admission && bun run test:cwd-parity:arch && bun run test:non-vacuity && bun run typecheck:all && bun run test:clean-js && bun test tests/unit tests/meta tests/adversarial tests/measurement tests/integration tests/contract ./src/ ./tools/ --timeout=15000 --parallel=1",

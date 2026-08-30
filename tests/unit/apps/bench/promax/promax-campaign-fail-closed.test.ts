@@ -211,12 +211,19 @@ const stage = (ids: readonly string[], receipt = goldReceipt(ids)): ProMaxStageE
   quanta: { sha: RECORD.quanta.sha, dirty: false },
 })
 
+const armIdentity = (role: "control" | "candidate") => {
+  const arm = RECORD.arms.find((candidate) => candidate.role === role)
+  if (arm === undefined) throw new Error(`fixture gap: no ${role} arm`)
+  return { role, name: arm.name, resolvedKnobsSha256: sha256Hex(canonicalJson(arm.knobs)) } as const
+}
+
 const modelStage = (
   ids: readonly string[],
   receipt = modelReceipt(ids, 3),
   patch: Partial<ProMaxModelStageEvidence> = {},
 ): ProMaxModelStageEvidence => ({
   ...stage(ids, receipt),
+  arm: armIdentity("control"),
   preset: "agentless-v1",
   model: { provider: "openai", model: "gpt-5.4", reasoningEffortDelivered: "high" },
   budgets: { ...BUDGETS },
@@ -232,7 +239,10 @@ const arm = (
 ): ProMaxArmEvidence => ({
   armName,
   preset: "agentless-v1",
-  evidence: modelStage(PMX40, modelReceipt(PMX40, resolvedCount), patch),
+  evidence: modelStage(PMX40, modelReceipt(PMX40, resolvedCount), {
+    arm: armIdentity(armName === "candidate-v1" ? "candidate" : "control"),
+    ...patch,
+  }),
   rows: PMX40.map((instanceId, i) => ({
     instanceId,
     state: i < resolvedCount ? ("resolved" as const) : ("model_miss" as const),
@@ -675,6 +685,16 @@ describe("F4 — the frozen BUDGETS are part of the experiment", () => {
       const decoded = decodeProMaxModelStageEvidence({ ...full, budgets })
       expect({ label, ok: decoded.ok }).toEqual({ label, ok: false })
     }
+  })
+
+  test("evidence that omits the frozen arm identity is refused at the decoder", () => {
+    const full = {
+      ...modelStage(PMX7),
+      receipt: JSON.parse(serializeOfficialGradeReceipt(goldReceipt(PMX7))) as unknown,
+    }
+    const { arm: _arm, ...withoutArm } = full
+    const decoded = decodeProMaxModelStageEvidence(withoutArm)
+    expect(decoded.ok).toBe(false)
   })
 })
 

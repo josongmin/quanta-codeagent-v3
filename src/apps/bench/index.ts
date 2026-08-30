@@ -113,13 +113,25 @@ if (import.meta.main) {
   // Default-OFF no-op unless QUANTA_OTEL_ENDPOINT is set.
   const { otelExport, runId: benchRunId, traceLink } = bootBenchOtelExport(process.env)
   if (traceLink !== undefined) logger.info(`[otel] run ${benchRunId} live trace → ${traceLink}`)
-  process.on("beforeExit", () => {
-    void otelExport.teardown()
-  })
-  runMain().catch((e) => {
-    logger.error(`bench fatal: ${errMessage(e)}`)
-    // Top-level fatal still goes through the injectable exit binding so a
-    // test that started the CLI with a no-op exit observes the failing code.
-    currentBenchExitFn()(1)
-  })
+  // `beforeExit` is not a one-shot shutdown hook: starting async work there
+  // makes the event loop non-empty and Bun may emit it again. A final OTLP
+  // flush launched with `void` therefore had no single owner and could keep a
+  // finished remote run alive after its report had landed. Await teardown once,
+  // after the command settles, before invoking the exit seam.
+  void (async () => {
+    let failed = false
+    try {
+      await runMain()
+    } catch (e) {
+      failed = true
+      logger.error(`bench fatal: ${errMessage(e)}`)
+    } finally {
+      await otelExport.teardown()
+    }
+    if (failed) {
+      // Top-level fatal still goes through the injectable exit binding so a
+      // test that started the CLI with a no-op exit observes the failing code.
+      currentBenchExitFn()(1)
+    }
+  })()
 }

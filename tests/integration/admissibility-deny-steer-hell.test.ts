@@ -67,6 +67,7 @@ import type { ToolUseBlock } from "@/llm"
 import type { HITLTier, PermissionContext, ToolAction } from "@/permission"
 import type { Tool } from "@/tool"
 import { ToolRegistry } from "@/tool"
+import { stripComments } from "../unit/_shared/strip-comments"
 
 // ─── Fixtures (mirror the baseline shape) ─────────────────────────────────
 
@@ -596,12 +597,6 @@ describe("ADR-0076 Gap-4 — REGRESSION GUARD: loop NOT yet consuming steerInjec
    * (running the loop end-to-end and asserting "no injection") is much
    * more invasive.
    */
-  const stripComments = (src: string): string =>
-    src
-      // block comments first so /*…//…*/ stays a block comment
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      .replace(/\/\/[^\n]*/g, "")
-
   const countCodeRefs = (path: string): number => {
     const src = readFileSync(resolve(__dirname, path), "utf8")
     return (stripComments(src).match(/\bsteerInjection\b/g) ?? []).length

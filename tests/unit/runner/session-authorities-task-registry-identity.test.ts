@@ -75,6 +75,7 @@ import { buildSubagentConfigCore } from "@/runner/assemble"
 import { buildSessionAuthorities } from "@/runner/assemble/session-authorities"
 import { createAgentTool, TaskRegistry } from "@/subagent"
 import { assertScanPopulation } from "../_shared/scan-population"
+import { stripComments } from "../_shared/strip-comments"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 const SRC_DIR = join(REPO_ROOT, "src")
@@ -98,21 +99,6 @@ const ALLOWED_MINTS: Readonly<Record<string, number>> = {
 }
 
 const posix = (p: string): string => p.split(/[\\/]/).join("/")
-
-/** Strip block comments, whole-line `//`/JSDoc `*` lines, and inline `//` tails
- *  so a `new TaskRegistry()` MENTION in prose (e.g. subagent.ts's "defaults to
- *  `new TaskRegistry()` when absent" comment) is never miscounted as a mint. */
-const stripComments = (src: string): string =>
-  src
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .split("\n")
-    .map((l) => {
-      const t = l.trimStart()
-      if (t.startsWith("//") || t.startsWith("*")) return ""
-      const idx = l.indexOf("//")
-      return idx >= 0 ? l.slice(0, idx) : l
-    })
-    .join("\n")
 
 /** Pure mint counter — the atom the red-on-injection self-tests exercise. */
 const countMints = (src: string): number => (stripComments(src).match(CALL) ?? []).length

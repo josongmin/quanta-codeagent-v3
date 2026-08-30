@@ -20,6 +20,7 @@ import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { RUNTIME_CONFIG_KNOBS } from "@/shared/runtime-config-knobs"
+import { stripComments } from "./_shared/strip-comments"
 
 /** Slice the exported runtime-config loader out of runtime-config.ts source. */
 const runtimeConfigFromEnvBody = (src: string): string => {
@@ -30,11 +31,6 @@ const runtimeConfigFromEnvBody = (src: string): string => {
   return src.slice(start, end < 0 ? undefined : end)
 }
 
-const stripComment = (l: string): string => {
-  const t = l.trimStart()
-  return t.startsWith("//") || t.startsWith("*") || t.startsWith("/*") ? "" : l
-}
-
 /** Every `QUANTA_*` knob read in the body, across all forms. */
 const discoverFromLoadEnv = (body: string): ReadonlySet<string> => {
   const found = new Set<string>()
@@ -43,8 +39,7 @@ const discoverFromLoadEnv = (body: string): ReadonlySet<string> => {
   const re =
     /env\.(QUANTA_[A-Z0-9_]+)|env\[\s*[`"'](QUANTA_[A-Z0-9_]+)[`"']|[`"'](QUANTA_[A-Z0-9_]+)[`"']/g
   const destruct = /\{([^}]*\bQUANTA_[A-Z0-9_]+[^}]*)\}\s*=\s*(?:process\.)?env\b/g
-  for (const line of body.split("\n")) {
-    const clean = stripComment(line)
+  for (const clean of stripComments(body).split("\n")) {
     for (const m of clean.matchAll(re)) {
       const name = m[1] ?? m[2] ?? m[3]
       if (name !== undefined) found.add(name)
