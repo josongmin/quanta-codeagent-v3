@@ -31,6 +31,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
+import { assertScanPopulation } from "../_shared/scan-population"
 import { stripComments } from "../_shared/strip-comments"
 
 const SRC = join(import.meta.dir, "..", "..", "..", "src")
@@ -292,7 +293,12 @@ export const directSignalTreeCallers = (files: ReadonlyArray<{ rel: string; text
 
 describe("F3 — direct signalTree callers are a closed, justified population", () => {
   test("no src file drives signalTree by hand outside the justified allowlist", () => {
-    const files = tsFiles(SRC).map((f) => ({
+    const sourceFiles = tsFiles(SRC)
+    assertScanPopulation(sourceFiles, SRC, {
+      id: "tests/unit/runtime/single-pid-kill-ban-hellgate.test.ts#SRC",
+      collectable: (name) => name.endsWith(".ts") && !name.endsWith(".d.ts"),
+    })
+    const files = sourceFiles.map((f) => ({
       rel: f.slice(SRC.length + 1),
       text: readFileSync(f, "utf8"),
     }))

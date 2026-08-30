@@ -406,6 +406,9 @@
     },
     "tests/unit/runtime/worktree-checkout-progress-retired.test.ts#SRC": {
       "walked": 3356
+    },
+    "tests/unit/runtime/single-pid-kill-ban-hellgate.test.ts#SRC": {
+      "walked": 3651
     }
   }
 }
