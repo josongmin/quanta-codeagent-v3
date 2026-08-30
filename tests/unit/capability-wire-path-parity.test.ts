@@ -90,9 +90,12 @@ describe("capability wires — assembler path vs CLI path", () => {
     const opened = registryOpenedSlots().filter(
       (k) => bound[k] !== undefined && before[k] === undefined,
     )
-    // `readFileState` is the ONE default-ON member (its gate is a strict
-    // kill-switch, not an opt-in), so it is expected here and nothing else is.
-    expect(opened).toEqual(["readFileState"])
+    // The default-ON members — the slots whose gate is a strict kill-switch
+    // rather than an opt-in. `readFileState` has always been one;
+    // `usageAccounting` joined when the accounting default flipped to `on`
+    // (only `QUANTA_USAGE_ACCOUNTING_V2=off` leaves it unset). Anything else
+    // appearing here is exactly the unintended opening this guard exists for.
+    expect(opened.sort()).toEqual(["readFileState", "usageAccounting"])
   })
 })
 
