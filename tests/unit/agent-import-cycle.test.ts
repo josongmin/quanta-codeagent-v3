@@ -236,46 +236,79 @@ const listAgentFiles = (): string[] => {
     .sort()
 }
 
+type TarjanState = {
+  index: number
+  readonly indexByNode: Map<string, number>
+  readonly lowlinkByNode: Map<string, number>
+  readonly active: Set<string>
+  readonly stack: string[]
+  readonly components: string[][]
+}
+
+const discoverTarjanNode = (state: TarjanState, node: string): void => {
+  state.indexByNode.set(node, state.index)
+  state.lowlinkByNode.set(node, state.index)
+  state.index += 1
+  state.stack.push(node)
+  state.active.add(node)
+}
+
+const updateTarjanLowlink = (state: TarjanState, node: string, candidate: number): void => {
+  state.lowlinkByNode.set(node, Math.min(state.lowlinkByNode.get(node) ?? 0, candidate))
+}
+
+const visitTarjanEdge = (
+  state: TarjanState,
+  from: string,
+  to: string,
+  visit: (node: string) => void,
+): void => {
+  if (!state.indexByNode.has(to)) {
+    visit(to)
+    updateTarjanLowlink(state, from, state.lowlinkByNode.get(to) ?? 0)
+    return
+  }
+  if (state.active.has(to)) {
+    updateTarjanLowlink(state, from, state.indexByNode.get(to) ?? 0)
+  }
+}
+
+const isTarjanComponentRoot = (state: TarjanState, node: string): boolean =>
+  state.lowlinkByNode.get(node) === state.indexByNode.get(node)
+
+const collectTarjanComponent = (state: TarjanState, root: string): void => {
+  const component: string[] = []
+  while (true) {
+    const node = state.stack.pop()
+    if (node === undefined) return
+    state.active.delete(node)
+    component.push(node)
+    if (node === root) break
+  }
+  if (component.length >= 2) state.components.push(component.sort())
+}
+
 /** Tarjan's SCC: returns SCCs of size ≥ 2 only (we don't care about
  *  self-loops here; none exist in TS imports anyway). Each SCC's nodes are
  *  sorted alphabetically for deterministic comparison. */
 export const findSCCs = (nodes: string[], edges: Map<string, Set<string>>): string[][] => {
-  let index = 0
-  const idx = new Map<string, number>()
-  const low = new Map<string, number>()
-  const onStack = new Set<string>()
-  const stack: string[] = []
-  const sccs: string[][] = []
-
-  const strongconnect = (v: string): void => {
-    idx.set(v, index)
-    low.set(v, index)
-    index++
-    stack.push(v)
-    onStack.add(v)
-    for (const w of edges.get(v) ?? new Set<string>()) {
-      if (!idx.has(w)) {
-        strongconnect(w)
-        low.set(v, Math.min(low.get(v) ?? 0, low.get(w) ?? 0))
-      } else if (onStack.has(w)) {
-        low.set(v, Math.min(low.get(v) ?? 0, idx.get(w) ?? 0))
-      }
-    }
-    if ((low.get(v) ?? 0) === (idx.get(v) ?? 0)) {
-      const comp: string[] = []
-      let w: string | undefined
-      do {
-        w = stack.pop()
-        if (w === undefined) break
-        onStack.delete(w)
-        comp.push(w)
-      } while (w !== v)
-      if (comp.length >= 2) sccs.push(comp.sort())
-    }
+  const state: TarjanState = {
+    index: 0,
+    indexByNode: new Map<string, number>(),
+    lowlinkByNode: new Map<string, number>(),
+    active: new Set<string>(),
+    stack: [],
+    components: [],
   }
-
-  for (const v of nodes) if (!idx.has(v)) strongconnect(v)
-  return sccs.sort((a, b) => a.join(",").localeCompare(b.join(",")))
+  const strongconnect = (node: string): void => {
+    discoverTarjanNode(state, node)
+    for (const neighbor of edges.get(node) ?? []) {
+      visitTarjanEdge(state, node, neighbor, strongconnect)
+    }
+    if (isTarjanComponentRoot(state, node)) collectTarjanComponent(state, node)
+  }
+  for (const node of nodes) if (!state.indexByNode.has(node)) strongconnect(node)
+  return state.components.sort((a, b) => a.join(",").localeCompare(b.join(",")))
 }
 
 /** Translate name decorations (`default:X` / `*:ns`) back to the local binding

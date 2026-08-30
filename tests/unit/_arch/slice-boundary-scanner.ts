@@ -423,67 +423,51 @@ const collectModuleConstStringLiterals = (sf: ts.SourceFile): ReadonlyMap<string
   return table
 }
 
+const staticValueImportSpecifier = (node: ts.Node): string | null => {
+  if (!ts.isImportDeclaration(node) || node.importClause?.isTypeOnly) return null
+  return node.moduleSpecifier && ts.isStringLiteralLike(node.moduleSpecifier)
+    ? node.moduleSpecifier.text
+    : null
+}
+
+const staticValueExportSpecifier = (node: ts.Node): string | null => {
+  if (!ts.isExportDeclaration(node) || node.isTypeOnly) return null
+  return node.moduleSpecifier && ts.isStringLiteralLike(node.moduleSpecifier)
+    ? node.moduleSpecifier.text
+    : null
+}
+
+const dynamicImportSpecifier = (
+  node: ts.Node,
+  constStrings: ReadonlyMap<string, string>,
+): string | null => {
+  if (
+    !ts.isCallExpression(node) ||
+    node.expression.kind !== ts.SyntaxKind.ImportKeyword ||
+    node.arguments.length === 0
+  ) {
+    return null
+  }
+  const firstArg = node.arguments[0]
+  if (firstArg && ts.isStringLiteralLike(firstArg)) return firstArg.text
+  return firstArg && ts.isIdentifier(firstArg) ? (constStrings.get(firstArg.text) ?? null) : null
+}
+
+const valueModuleSpecifier = (
+  node: ts.Node,
+  constStrings: ReadonlyMap<string, string>,
+): string | null =>
+  staticValueImportSpecifier(node) ??
+  staticValueExportSpecifier(node) ??
+  dynamicImportSpecifier(node, constStrings)
+
 export const extractImports = (src: string): Array<{ line: number; spec: string }> => {
   const out: Array<{ line: number; spec: string }> = []
   const sf = parseSourceFile(src)
   const constStrings = collectModuleConstStringLiterals(sf)
   const visit = (node: ts.Node): void => {
-    if (
-      ts.isImportDeclaration(node) &&
-      node.moduleSpecifier &&
-      ts.isStringLiteralLike(node.moduleSpecifier)
-    ) {
-      // Skip `import type { X } from "..."` — type-only imports are erased
-      // at compile time and don't create runtime cross-slice coupling.
-      // (Slice purity invariant is about RUNTIME deps, not type shape contracts.)
-      if (node.importClause?.isTypeOnly) {
-        ts.forEachChild(node, visit)
-        return
-      }
-      out.push({
-        line: lineOf(sf, node.getStart(sf)),
-        spec: node.moduleSpecifier.text,
-      })
-    } else if (
-      ts.isExportDeclaration(node) &&
-      node.moduleSpecifier &&
-      ts.isStringLiteralLike(node.moduleSpecifier)
-    ) {
-      // Same rule for `export type { X } from "..."`.
-      if (node.isTypeOnly) {
-        ts.forEachChild(node, visit)
-        return
-      }
-      out.push({
-        line: lineOf(sf, node.getStart(sf)),
-        spec: node.moduleSpecifier.text,
-      })
-    } else if (
-      ts.isCallExpression(node) &&
-      node.expression.kind === ts.SyntaxKind.ImportKeyword &&
-      node.arguments.length > 0
-    ) {
-      const [firstArg] = node.arguments
-      if (firstArg && ts.isStringLiteralLike(firstArg)) {
-        out.push({
-          line: lineOf(sf, node.getStart(sf)),
-          spec: firstArg.text,
-        })
-      } else if (firstArg && ts.isIdentifier(firstArg)) {
-        // Const-alias resolution: `const M = "@/apps/…"; await import(M)`. Resolve
-        // to the literal so hoisting the specifier into a variable can no longer
-        // hide a cross-slice / cross-surface dynamic import edge. Conservative:
-        // only a MODULE-scope `const IDENT = "literal"` in THIS file resolves;
-        // anything dynamic stays unrecorded (as before).
-        const resolved = constStrings.get(firstArg.text)
-        if (resolved !== undefined) {
-          out.push({
-            line: lineOf(sf, node.getStart(sf)),
-            spec: resolved,
-          })
-        }
-      }
-    }
+    const spec = valueModuleSpecifier(node, constStrings)
+    if (spec) out.push({ line: lineOf(sf, node.getStart(sf)), spec })
     ts.forEachChild(node, visit)
   }
   visit(sf)
@@ -687,6 +671,27 @@ const scanNodeProcessNamedImports = (src: string): Array<{ line: number; hit: st
     return node.getText().replace(/\s+/g, " ").trim()
   })
 
+const surfaceImportViolations = (dir: string, file: string, src: string): string[] => {
+  const relativeFile = relative(dir, file)
+  const runtime = extractImports(src)
+    .filter(({ spec }) => isSurfaceSpec(spec))
+    .map(({ line, spec }) => `${relativeFile}:${line}  import "${spec}"`)
+  const typeOnly = extractTypeOnlyModuleRefs(src)
+    .filter(({ spec }) => isSurfaceSpec(spec))
+    .map(({ line, spec }) => `${relativeFile}:${line}  type-import "${spec}"`)
+  return [...runtime, ...typeOnly]
+}
+
+const collectSurfaceImportViolations = (dir: string, files: readonly WalkedFile[]): string[] =>
+  files.flatMap(({ file, src }) => surfaceImportViolations(dir, file, src))
+
+const assertNoSurfaceImportViolations = (slice: string, violations: readonly string[]): void => {
+  if (violations.length === 0) return
+  throw new Error(
+    `@/${slice} must not reference apps/** (incl. type-only):\n\n${violations.join("\n")}`,
+  )
+}
+
 /** Register the standard architecture-guard battery for one slice config. */
 export const registerSliceBoundarySuite = (config: SliceBoundaryConfig): void => {
   const dir = sliceDir(config.slice)
@@ -741,30 +746,10 @@ export const registerSliceBoundarySuite = (config: SliceBoundaryConfig): void =>
     registerSurfaceIsolationGuard(
       "no file imports from any `apps/**` (surface isolation, incl. type-position)",
       () => {
-        const violations: string[] = []
-        for (const { file: f, src } of scanned("surface isolation")) {
-          // Runtime imports (value `import`/`export … from`, dynamic `import()`)…
-          for (const { line, spec } of extractImports(src)) {
-            if (isSurfaceSpec(spec)) {
-              violations.push(`${relative(dir, f)}:${line}  import "${spec}"`)
-            }
-          }
-          // …AND type-position refs (`import type`, `export type`, `import("x").T`).
-          // A core/wiring slice referencing a surface is an inversion even when
-          // erased — this is the exact form that hid the `@/agent`→`apps/cli`
-          // surface-port inversion. (For non-`apps` peer libs, type contracts stay
-          // allowed; only the surface boundary is checked here.)
-          for (const { line, spec } of extractTypeOnlyModuleRefs(src)) {
-            if (isSurfaceSpec(spec)) {
-              violations.push(`${relative(dir, f)}:${line}  type-import "${spec}"`)
-            }
-          }
-        }
-        if (violations.length > 0) {
-          throw new Error(
-            `@/${config.slice} must not reference apps/** (incl. type-only):\n\n${violations.join("\n")}`,
-          )
-        }
+        assertNoSurfaceImportViolations(
+          config.slice,
+          collectSurfaceImportViolations(dir, scanned("surface isolation")),
+        )
       },
     )
 
