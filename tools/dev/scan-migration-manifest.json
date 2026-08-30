@@ -76,20 +76,6 @@
       ]
     },
     {
-      "file": "tests/unit/_arch/repo-index-hygiene.test.ts",
-      "klass": "B-top-level",
-      "enumerators": [
-        "[\"git\", \"ls-files\""
-      ],
-      "recursive": false,
-      "absolutePaths": false,
-      "derived": false,
-      "roots": 0,
-      "floorLines": [
-        "166: if (entries.length < 12695) {"
-      ]
-    },
-    {
       "file": "tests/unit/apps/bench/promax/promax-bootstrap-phase-reachability.test.ts",
       "klass": "C-derived/content-filtered",
       "enumerators": [

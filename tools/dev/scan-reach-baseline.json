@@ -494,6 +494,9 @@
     },
     "tests/unit/_arch/capability-literal-ratchet.test.ts#TESTS": {
       "walked": 3578
+    },
+    "tests/unit/_arch/repo-index-hygiene.test.ts#INDEX": {
+      "walked": 14290
     }
   }
 }
