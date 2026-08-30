@@ -70,6 +70,35 @@ const ctx = (overrides: Partial<ReviewContext> = {}): ReviewContext => ({
   ...overrides,
 })
 
+type ConcurrentAssessmentSpec = {
+  tag: string
+  assess: () => Promise<ActionAssessment>
+  allow: boolean
+}
+
+const concurrentAssessmentSpec = (index: number): ConcurrentAssessmentSpec => {
+  switch (index % 4) {
+    case 0:
+      return { tag: `allow${index}`, assess: async () => sampleFor("allow"), allow: true }
+    case 1:
+      return { tag: `deny${index}`, assess: async () => sampleFor("deny"), allow: false }
+    case 2:
+      return {
+        tag: `garbage${index}`,
+        assess: async () => ({ kind: "grant_all", rationale: "x" }) as unknown as ActionAssessment,
+        allow: false,
+      }
+    default:
+      return {
+        tag: `throw${index}`,
+        assess: async () => {
+          throw new Error("boom")
+        },
+        allow: false,
+      }
+  }
+}
+
 const denyR = structuredDenyReason({ layer: "reviewer", pillar: "approval", safeReason: "unsafe" })
 
 /** Total builder over the union — the switch has NO default, so it only compiles
@@ -317,30 +346,7 @@ describe("reviewAction (knob ON) — CONCURRENCY: mixed hostile/benign never cro
     // resolved outcome must match its OWN assessment — a shared mutable seam
     // (e.g. a module-level "last decision") would let a benign allow bleed into
     // a hostile slot.
-    const specs: Array<{ tag: string; assess: () => Promise<ActionAssessment>; allow: boolean }> =
-      []
-    for (let i = 0; i < 40; i++) {
-      const mod = i % 4
-      if (mod === 0)
-        specs.push({ tag: `allow${i}`, assess: async () => sampleFor("allow"), allow: true })
-      else if (mod === 1)
-        specs.push({ tag: `deny${i}`, assess: async () => sampleFor("deny"), allow: false })
-      else if (mod === 2)
-        specs.push({
-          tag: `garbage${i}`,
-          assess: async () =>
-            ({ kind: "grant_all", rationale: "x" }) as unknown as ActionAssessment,
-          allow: false,
-        })
-      else
-        specs.push({
-          tag: `throw${i}`,
-          assess: async () => {
-            throw new Error("boom")
-          },
-          allow: false,
-        })
-    }
+    const specs = Array.from({ length: 40 }, (_, index) => concurrentAssessmentSpec(index))
 
     const results = await Promise.all(
       specs.map(async (s) => {
