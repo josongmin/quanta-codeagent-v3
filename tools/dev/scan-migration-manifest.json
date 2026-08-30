@@ -80,22 +80,6 @@
       ]
     },
     {
-      "file": "tests/unit/lint-debt-ratchet-reach.test.ts",
-      "klass": "A-recursive-walk",
-      "enumerators": [
-        "readdirSync"
-      ],
-      "recursive": true,
-      "absolutePaths": false,
-      "derived": false,
-      "roots": 1,
-      "floorLines": [
-        "130: expect(files.length).toBeGreaterThan(1000)",
-        "131: expect(targets.length).toBeGreaterThan(1000)",
-        "132: expect(rejected.length).toBeGreaterThan(10)"
-      ]
-    },
-    {
       "file": "tests/unit/no-benchmark-overfit-steer-ratchet.test.ts",
       "klass": "A-recursive-walk",
       "enumerators": [

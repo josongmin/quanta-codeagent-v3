@@ -430,6 +430,12 @@
     },
     "tests/unit/src-no-sketchy-code.test.ts#SRC": {
       "walked": 3357
+    },
+    "tests/unit/lint-debt-ratchet-reach.test.ts#SRC": {
+      "walked": 3748
+    },
+    "tests/unit/lint-debt-ratchet-reach.test.ts#TESTS": {
+      "walked": 3721
     }
   }
 }

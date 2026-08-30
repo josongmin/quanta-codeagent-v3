@@ -56,6 +56,7 @@ import { readdirSync, statSync } from "node:fs"
 import { join, relative } from "node:path"
 
 import { collectBiomeTargets, shouldIncludeBiomeTarget } from "../../tools/dev/biome-targets"
+import { assertScanPopulation } from "./_shared/scan-population"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..")
 const BIOME_BIN = join(REPO_ROOT, "node_modules/.bin/biome")
@@ -110,7 +111,16 @@ const biomeChecks = (paths: readonly string[]): number | null => {
 }
 
 describe("lint-debt reach — the ratchet must enumerate everything biome lints", () => {
-  const files = ROOTS.flatMap((r) => allFilesUnder(r, []))
+  const rootFiles = ROOTS.map((root) => allFilesUnder(root, []))
+  assertScanPopulation(rootFiles[0], join(REPO_ROOT, ROOTS[0]), {
+    collectable: () => true,
+    id: "tests/unit/lint-debt-ratchet-reach.test.ts#SRC",
+  })
+  assertScanPopulation(rootFiles[1], join(REPO_ROOT, ROOTS[1]), {
+    collectable: () => true,
+    id: "tests/unit/lint-debt-ratchet-reach.test.ts#TESTS",
+  })
+  const files = rootFiles.flat()
   const rejected = files.filter((f) => !shouldIncludeBiomeTarget(REPO_ROOT, f))
   const targets = collectBiomeTargets(REPO_ROOT)
 
