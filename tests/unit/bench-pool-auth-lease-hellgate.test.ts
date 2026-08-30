@@ -96,6 +96,38 @@ const infrastructureResponse = (args: readonly string[]): SpawnResult | undefine
   return undefined
 }
 
+const runIdFromArgs = (args: readonly string[]): string =>
+  lastArg(args).match(/~\/runs\/([^/]+)\/instances\.jsonl/)?.[1] ?? "x"
+
+const emitPassingRun = (
+  args: readonly string[],
+  onData: ((data: string) => void) | undefined,
+): void => {
+  if (args.some((arg) => arg.includes("cli.ts run"))) {
+    const runId = runIdFromArgs(args)
+    onData?.(`[PASS] ${runId}__inst-1 (turns=2)\n`)
+  }
+}
+
+const requeueSpawn = (): SpawnFn => {
+  let c1Seen = 0
+  return async (cmd, args, options) => {
+    if (cmd === "curl") return spawnOk("9.9.9.9")
+    emitPassingRun(args, options?.onData)
+    const infrastructure = infrastructureResponse(args)
+    if (infrastructure !== undefined) return infrastructure
+    if (cmd !== "ssh") return spawnOk("")
+    const command = lastArg(args)
+    const control = sshControlResponse(command)
+    if (control !== undefined) return control
+    const report = command.match(/cat ~\/runs\/([^/]+)\/report\.json/)
+    if (report === null) return spawnOk("")
+    if (report[1] !== "c1") return spawnOk(JSON.stringify({ resolved_ids: [`x__${report[1]}-1`] }))
+    c1Seen += 1
+    return spawnOk(c1Seen === 1 ? "" : JSON.stringify({ resolved_ids: ["x__c1-1"] }))
+  }
+}
+
 /** mock spawn: every box healthy, one resolved verdict per chunk; optional 429
  *  marker per runId. Records every call so we can inspect ship order + tokens. */
 const mockSpawn = (opts: { rateLimited?: Set<string>; eventLog?: string[] } = {}) => {
@@ -230,40 +262,7 @@ describe("T-3 pool account-aware scheduler", () => {
 
   test("a requeued (dead-box) chunk still releases its lease — no leak", async () => {
     // c1's box produces no report on the first attempt ⇒ requeue, then succeeds.
-    let c1Seen = 0
-    const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
-    const ok = (s: string): SpawnResult => ({ code: 0, stdout: s, stderr: "" })
-    const fn: SpawnFn = async (cmd, args, o) => {
-      calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
-      if (cmd === "curl") return ok("9.9.9.9")
-      if (cmd === "ssh" && args.some((a) => a.includes("cli.ts run"))) {
-        const runId =
-          (args[args.length - 1] ?? "").match(/~\/runs\/([^/]+)\/instances\.jsonl/)?.[1] ?? "x"
-        o?.onData?.(`[PASS] ${runId}__inst-1 (turns=2)\n`)
-      }
-      const a = [...args]
-      if (a.includes("get-parameter")) return ok(`${RESOLVED_AMI}\n`)
-      if (a.includes("run-instances")) return ok("i-box")
-      if (a.includes("describe-instances")) return ok("1.2.3.4")
-      if (a.includes("terminate-instances")) return ok("")
-      if (cmd === "ssh") {
-        const c = a[a.length - 1] ?? ""
-        if (c.includes("READY")) return ok("READY")
-        if (c.includes("run.exit")) return ok("0\n==XQ-RUN-EXIT-XQ==\n")
-        if (c.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
-        if (c.includes("rmdir ~/.pool-grade.lock")) return ok("")
-        const r = c.match(/cat ~\/runs\/([^/]+)\/report\.json/)
-        if (r) {
-          if (r[1] === "c1") {
-            c1Seen += 1
-            return ok(c1Seen === 1 ? "" : JSON.stringify({ resolved_ids: ["x__c1-1"] }))
-          }
-          return ok(JSON.stringify({ resolved_ids: [`x__${r[1]}-1`] }))
-        }
-        return ok("")
-      }
-      return ok("")
-    }
+    const fn = requeueSpawn()
     const mgr = new AuthLeaseManager(
       [{ label: "solo", authFile: "/s.json", maxParallel: 6, maxBoxes: 1 }],
       {
