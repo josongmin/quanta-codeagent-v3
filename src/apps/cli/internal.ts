@@ -485,6 +485,109 @@ export const buildLLMWithByok = async (
  */
 export const fallbackModels = (): string[] => parseFallbackModels(process.env.QUANTA_MODEL_FALLBACK)
 
+type LoadedMcpFeatures = Pick<Features, "mcpTools" | "mcpClients" | "mcpConfigs"> &
+  Pick<
+    Features,
+    "mcpResourceCapture" | "mcpHealth" | "mcpReloadSources" | "bindMcpReloadController"
+  > & {
+    readonly resourceToolCount: number
+    readonly autoRestart: boolean
+  }
+
+/** Resolve, load, and retain the MCP surface as one ownership unit. The
+ * resource capture, health holder, and hot-reload controller all remain the
+ * exact instances written by the loaded tools and callbacks. */
+const loadMcpFeatures = async (
+  slog: StructuredLogger,
+  opts: LoadFeaturesOpts,
+): Promise<LoadedMcpFeatures> => {
+  const mcpConfigs = await readMcpConfig(
+    slog,
+    process.env,
+    await resolveMcpLaunchPolicy(slog),
+    process.cwd(),
+  )
+  const elicitationPrompterFor = opts.elicitationPrompterFor ?? buildCliElicitationPrompterFactory()
+  const autoRestart = mcpAutoRestartEnabled()
+  const inboundWiring = resolveMcpInboundWiring(opts.llm, elicitationPrompterFor)
+  const oauthProvider = resolveMcpOAuthProvider(mcpConfigs, opts.mcpOAuthDeps)
+  const mcpHealth = mcpConfigs.length > 0 ? createMcpHealthHolder() : undefined
+  const hotReload = resolveMcpHotReload({ configCount: mcpConfigs.length, autoRestart })
+  const mcpLoadOpts = buildMcpLoadOpts(slog, {
+    autoRestart,
+    inboundWiring,
+    oauthProvider,
+    opts,
+    ...(mcpHealth !== undefined ? { mcpHealth } : {}),
+    ...mcpHotReloadLoadOpts(hotReload),
+  })
+  const {
+    tools: mcpBridgedTools,
+    clients: mcpClients,
+    resources: mcpResources,
+  } = await loadMcpToolsOrEmpty(mcpConfigs, elicitationPrompterFor, mcpLoadOpts)
+  const mcpResourceCapture =
+    runtimeConfig().mcpResources && mcpResources !== undefined
+      ? createMcpResourceCaptureHolder()
+      : undefined
+  const mcpResourceTools = buildMcpResourceTools(mcpResources, mcpResourceCapture)
+
+  return {
+    mcpTools: [...mcpBridgedTools, ...mcpResourceTools],
+    mcpClients,
+    mcpConfigs,
+    resourceToolCount: mcpResourceTools.length,
+    autoRestart,
+    ...(mcpResourceCapture !== undefined ? { mcpResourceCapture } : {}),
+    ...(mcpHealth !== undefined ? { mcpHealth } : {}),
+    ...mcpHotReloadFeatureFields(hotReload),
+  }
+}
+
+type OptionalCliToolFamilies = Pick<
+  Features,
+  "lspTools" | "lspNavTools" | "gitToolList" | "astGrepTools"
+>
+
+/** Resolve optional non-MCP tool families independently of the MCP lifecycle. */
+const loadOptionalCliToolFamilies = (): OptionalCliToolFamilies => {
+  const lspTools = lspEnabled() ? [lspDiagnosticsTool()] : []
+  const lspNavMode = resolveLspNavMode(
+    process.env.QUANTA_LSP_TOOLS,
+    anyLspServerOnPath((bin) => Bun.which(bin) !== null),
+  )
+  const lspNavTools = selectLspNavTools(lspNavMode)
+  const gitBudget = resolveGitBudget(process.env)
+  const gitToolList = gitToolsEnabled()
+    ? gitTools(undefined, {
+        ...(gitCoChangeEnabled() ? { coChange: true as const } : {}),
+        ...(gitBudget !== undefined ? { budget: gitBudget } : {}),
+      })
+    : []
+  const astGrepTools = astGrepEnabled() ? [astGrepTool as Tool] : []
+  return { lspTools, lspNavTools, gitToolList, astGrepTools }
+}
+
+/** Logging observes the assembled feature set only; it never owns gates or
+ * mutates feature state. */
+const logFeatureActivation = (
+  slog: StructuredLogger,
+  base: Pick<Features, "planMode" | "metrics" | "state">,
+  mcp: LoadedMcpFeatures,
+  tools: OptionalCliToolFamilies,
+): void => {
+  if (base.planMode) slog.info("plan.mode.on")
+  if (base.metrics) slog.info("metrics.on")
+  if (base.state) slog.info("state.persist.on", { path: base.state })
+  if (mcp.mcpTools.length > 0) slog.info("mcp.tools.loaded", { count: mcp.mcpTools.length })
+  if (mcp.resourceToolCount > 0) slog.info("mcp.resources.on", { count: mcp.resourceToolCount })
+  if (mcp.autoRestart && mcp.mcpClients.length > 0) slog.info("mcp.autorestart.on")
+  if (tools.lspTools.length > 0) slog.info("lsp.diagnostics.on")
+  if (tools.lspNavTools.length > 0) slog.info("lsp.nav.on", { count: tools.lspNavTools.length })
+  if (tools.gitToolList.length > 0) slog.info("git.tools.on", { count: tools.gitToolList.length })
+  if (tools.astGrepTools.length > 0) slog.info("ast.grep.on")
+}
+
 /** Resolve all default-OFF feature flags from env/argv and start MCP servers.
  *  Logs each enabled feature via the structured logger (minimal).
  *
@@ -502,144 +605,16 @@ export const loadFeatures = async (
   const metrics = readCliKnob("QUANTA_METRICS", "bool") ? new Metrics() : undefined
   const state = statePath()
   const resume = resumePath()
-  // §12.4 LIVE-wire — the central-config MCP launch policy (E2 denylist +
-  // E1-sub managed-only) now actually gates which `.mcp.json` servers launch.
-  // Gate OFF / no policy configured / resolve fault ⇒ undefined ⇒ byte-identical.
-  // §17 packet F1b — pass the project root so a `.mcp.json` the connector
-  // installer wrote with no env override is actually read on this launch. The
-  // writer's fallback is `<cwd>/.mcp.json`; the reader now resolves the same.
-  const mcpConfigs = await readMcpConfig(
-    slog,
-    process.env,
-    await resolveMcpLaunchPolicy(slog),
-    process.cwd(),
-  )
-  // Track C — interactive MCP elicitation prompter. Built only when an
-  // interactive CLI prompt seam is available (TTY stdin); headless / piped
-  // runs get `undefined` so each McpClient keeps its headlessRejecter default
-  // (byte-identical to the legacy load). The factory binds a per-server lease
-  // (`pool.forContext({ serverId })`) inside `loadMcpTools`.
-  const elicitationPrompterFor = opts.elicitationPrompterFor ?? buildCliElicitationPrompterFactory()
-  // ADR-0435: opt-in auto-restart. Unset ⇒ `supervisorDepsFor` is undefined ⇒
-  // `loadMcpTools` takes the original single-client branch (byte-identical).
-  const autoRestart = mcpAutoRestartEnabled()
-  // B1 + H19 (jun-04) — advertise-iff-able inbound-capability wiring (sampling +
-  // roots, unified into ONE bundle). The surface owns this decision (the only
-  // layer with the LLM, the consent prompter, AND the workspace cwd) and hands
-  // the already-built `{ negotiator, handler?, rootsProvider? }` DOWN to the
-  // bridge, which stays a pure consumer. Undefined ⇒ byte-identical (no
-  // advertisement, headless rejecter, empty roots). The SAME bundle reaches BOTH
-  // the single-client AND the supervised path (threaded into the restart
-  // factory), so a reconnected client re-advertises sampling+roots.
-  const inboundWiring = resolveMcpInboundWiring(opts.llm, elicitationPrompterFor)
-  // H18 (jun-06 live-wire) — the connectors-backed MCP OAuth provider, resolved
-  // from the loaded server configs (the issuer is each server's `url` origin).
-  // Undefined unless `QUANTA_MCP_OAUTH=1` AND a server opts in (`oauth:true`);
-  // the keyring composition (`QUANTA_MCP_OAUTH_KEYRING`) is baked into its token
-  // store here. Test seams (`opts.mcpOAuthDeps`) inject a fake auth server /
-  // browser flow / store dir; production omits them.
-  const oauthProvider = resolveMcpOAuthProvider(mcpConfigs, opts.mcpOAuthDeps)
-  // WS-G (UUX-6-22) — mint the live server-health registry ONLY when MCP is
-  // configured; the load callbacks (exit / load-error) write into it and the
-  // lifecycle pill re-reads it per flush (surface-mints→down-thread, mirrors
-  // mcpResourceCapture). No servers ⇒ undefined ⇒ callbacks not wired.
-  const mcpHealth = mcpConfigs.length > 0 ? createMcpHealthHolder() : undefined
-  // RFC04-2/3 (hot-reload) — reload observer + source collector, present ONLY
-  // under `QUANTA_MCP_HOT_RELOAD` + configured non-supervised servers (see
-  // resolveMcpHotReload). Gate off ⇒ `undefined` ⇒ byte-identical.
-  const hotReload = resolveMcpHotReload({ configCount: mcpConfigs.length, autoRestart })
-  const mcpLoadOpts = buildMcpLoadOpts(slog, {
-    autoRestart,
-    inboundWiring,
-    oauthProvider,
-    opts,
-    ...(mcpHealth !== undefined ? { mcpHealth } : {}),
-    ...mcpHotReloadLoadOpts(hotReload),
-  })
-  const {
-    tools: mcpBridgedTools,
-    clients: mcpClients,
-    resources: mcpResources,
-  } = await loadMcpToolsOrEmpty(mcpConfigs, elicitationPrompterFor, mcpLoadOpts)
-  // N3 (QUANTA_MCP_RESOURCES) — the four `mcp_*` resource/prompt tools, gated on
-  // the knob AND a live aggregate handle (see {@link buildMcpResourceTools}).
-  // B4 (jul-04 CLI-surfacing) — MINT one bounded capture holder ONLY when those
-  // tools will actually register (knob ON + a live handle), then thread the SAME
-  // instance INTO the tools (producer) AND up on `Features.mcpResourceCapture`
-  // (consumer) so `/mcp-resources` reads the exact ring the tools write into —
-  // the surface-mints→down-thread contract (one holder, no split-brain). Absent
-  // gate / handle ⇒ `undefined` ⇒ no capture, byte-identical default-OFF.
-  const mcpResourceCapture =
-    runtimeConfig().mcpResources && mcpResources !== undefined
-      ? createMcpResourceCaptureHolder()
-      : undefined
-  const mcpResourceTools = buildMcpResourceTools(mcpResources, mcpResourceCapture)
-  const mcpTools: Tool[] = [...mcpBridgedTools, ...mcpResourceTools]
-
-  // LSP-backed diagnostics: only when opted in. The tool name matches the
-  // no-op one in defaultTools, so appending it lets the registry's last-write
-  // -wins map swap in the real provider (same merge path as MCP tools).
-  const lspTools: Tool[] = lspEnabled() ? [lspDiagnosticsTool()] : []
-  // ADR-0015: LSP nav tools. NOT in defaultTools. Server-present resource gate
-  // (jun-26): with QUANTA_LSP_TOOLS unset, the READ-ONLY nav tools register
-  // by default IFF a language server binary is on PATH (mirrors the browser
-  // tools self-gating on chrome) — surfacing the nav moat out-of-box without
-  // exposing dead tools in a no-LSP environment. `=full` adds the mutating
-  // members (rename_apply/format); an explicit OFF token keeps the legacy
-  // byte-identical (empty) surface even with a server installed.
-  const lspNavMode = resolveLspNavMode(
-    process.env.QUANTA_LSP_TOOLS,
-    anyLspServerOnPath((bin) => Bun.which(bin) !== null),
-  )
-  const lspNavTools: Tool[] = selectLspNavTools(lspNavMode)
-  // ADR-0016: first-class git tools. NOT in defaultTools — opt-in only.
-  // §7.2: when QUANTA_GIT_CO_CHANGE is also on, append the co-change tool
-  // (opts.coChange). Default-OFF: gate off ⇒ git tool set is byte-identical.
-  // ADR-0107 §wire: resolve the git capture budget from env knobs (QUANTA_GIT_BUDGET_*).
-  // Absent ⇒ resolveGitBudget returns undefined ⇒ withBudget returns the SAME runner
-  // reference ⇒ byte-identical to the pre-budget path.
-  const gitBudget = resolveGitBudget(process.env)
-  const gitToolList: Tool[] = gitToolsEnabled()
-    ? gitTools(undefined, {
-        ...(gitCoChangeEnabled() ? { coChange: true as const } : {}),
-        ...(gitBudget !== undefined ? { budget: gitBudget } : {}),
-      })
-    : []
-  // Structural AST search via ast-grep (QUANTA_AST_GREP=1). Default-OFF.
-  const astGrepTools: Tool[] = astGrepEnabled() ? [astGrepTool as Tool] : []
-
-  if (planMode) slog.info("plan.mode.on")
-  if (metrics) slog.info("metrics.on")
-  if (state) slog.info("state.persist.on", { path: state })
-  if (mcpTools.length > 0) slog.info("mcp.tools.loaded", { count: mcpTools.length })
-  if (mcpResourceTools.length > 0) slog.info("mcp.resources.on", { count: mcpResourceTools.length })
-  if (autoRestart && mcpClients.length > 0) slog.info("mcp.autorestart.on")
-  if (lspTools.length > 0) slog.info("lsp.diagnostics.on")
-  if (lspNavTools.length > 0) slog.info("lsp.nav.on", { count: lspNavTools.length })
-  if (gitToolList.length > 0) slog.info("git.tools.on", { count: gitToolList.length })
-  if (astGrepTools.length > 0) slog.info("ast.grep.on")
+  const mcp = await loadMcpFeatures(slog, opts)
+  const optionalTools = loadOptionalCliToolFamilies()
+  logFeatureActivation(slog, { planMode, metrics, state }, mcp, optionalTools)
   return {
     planMode,
     metrics,
     state,
     resume,
-    mcpTools,
-    mcpClients,
-    mcpConfigs,
-    lspTools,
-    lspNavTools,
-    gitToolList,
-    astGrepTools,
-    // B4 (jul-04) — forward the SAME capture holder the mcp resource tools write
-    // into (undefined when the gate/handle absent ⇒ `/mcp-resources` "not wired").
-    ...(mcpResourceCapture !== undefined ? { mcpResourceCapture } : {}),
-    // WS-G (UUX-6-22) — forward the SAME health registry the load callbacks
-    // write into so the lifecycle pill overlays live server status per flush.
-    ...(mcpHealth !== undefined ? { mcpHealth } : {}),
-    // RFC04-2/3 (hot-reload) — forward the collected reload sources + controller
-    // late-binder so the composition root builds the controller over the SAME
-    // sources the load emitted. Absent ⇒ omitted (byte-identical).
-    ...mcpHotReloadFeatureFields(hotReload),
+    ...mcp,
+    ...optionalTools,
   }
 }
 
