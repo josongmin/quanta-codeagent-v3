@@ -14,7 +14,7 @@
  * run — composition only.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import {
@@ -30,6 +30,7 @@ import { makeSnapshotLite } from "../../../support/session-fixtures"
 
 const tmp = mkdtempSync(join(tmpdir(), "quanta-readout-wiring-"))
 const skillsDir = join(tmp, "skills")
+const mcpConfig = join(tmp, "mcp.json")
 
 const ENV_KEYS = [
   "OPENAI_API_KEY",
@@ -39,6 +40,7 @@ const ENV_KEYS = [
   "QUANTA_SKILLS_DIR",
   "QUANTA_CONFIG_DIR",
   "QUANTA_SESSIONS_DIR",
+  "QUANTA_MCP_CONFIG",
 ] as const
 const saved = new Map<string, string | undefined>(ENV_KEYS.map((k) => [k, process.env[k]]))
 const realFetch = globalThis.fetch
@@ -57,6 +59,8 @@ const buildHermeticFactory = () =>
   })
 
 beforeAll(() => {
+  writeFileSync(mcpConfig, '{"mcpServers":{}}\n')
+  process.env.QUANTA_MCP_CONFIG = mcpConfig
   // Any accidental adapter call is counted and rejected before it can leave
   // the process. The injected boot port's catalog is in-memory, so the final
   // zero assertion proves the production composition never touched a network.
@@ -97,7 +101,6 @@ describe("production runtime factory — readout sources are LIVE on the facade"
     process.env.QUANTA_MEMORY_PATH = join(tmp, "memory-test.db")
     // A discoverable user skill so the skills accessor returns a real row.
     process.env.QUANTA_SKILLS_DIR = skillsDir
-    const { mkdirSync } = await import("node:fs")
     mkdirSync(join(skillsDir, "wiring-proof-skill"), { recursive: true })
     writeFileSync(
       join(skillsDir, "wiring-proof-skill", "SKILL.md"),
@@ -106,6 +109,15 @@ describe("production runtime factory — readout sources are LIVE on the facade"
 
     const factory = buildHermeticFactory()
     const facade = await factory()
+    const verify = (
+      facade as {
+        objectiveAuthority?: unknown
+        objectiveVerifier?: { verify?: unknown; reconcile?: unknown }
+      }
+    ).objectiveVerifier
+    expect((facade as { objectiveAuthority?: unknown }).objectiveAuthority).toBeDefined()
+    expect(typeof verify?.verify).toBe("function")
+    expect(typeof verify?.reconcile).toBe("function")
     const sources = (facade as { readoutSources?: WebReadoutSources }).readoutSources
     expect(sources).toBeDefined()
     if (sources === undefined) throw new Error("unreachable")
@@ -179,8 +191,6 @@ describe("production runtime factory — readout sources are LIVE on the facade"
   })
 
   test("QUANTA_MEMORY=off degrades ONLY the memory readout (honest copy)", async () => {
-    process.env.OPENAI_API_KEY = "sk-test-dummy-not-a-real-key"
-    process.env.QUANTA_PROVIDER = "openai"
     process.env.QUANTA_MEMORY = "off"
     process.env.QUANTA_CONFIG_DIR = join(tmp, "config-off")
     process.env.QUANTA_SESSIONS_DIR = join(tmp, "sessions-off")
