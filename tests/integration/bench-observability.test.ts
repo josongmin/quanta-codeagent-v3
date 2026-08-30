@@ -68,6 +68,13 @@ const readJsonl = (file: string): unknown[] =>
     .filter((l) => l.trim() !== "")
     .map((l) => JSON.parse(l) as unknown)
 
+const scoreCounterOf = (scoreLabel: string | undefined): string => {
+  if (scoreLabel === "official_harness") return "officialHarness"
+  if (scoreLabel === "local_structural") return "localStructural"
+  if (scoreLabel === "research_contaminated") return "researchContaminated"
+  return "unlabeledPassed"
+}
+
 describe("bench observability (RFC-0002 W-D)", () => {
   test("control: NO observe-dir ⇒ runInstance unchanged, writes nothing extra", async () => {
     await withTmp(async (dir) => {
@@ -151,14 +158,7 @@ describe("bench observability (RFC-0002 W-D)", () => {
       expect(metrics.pricingVersion).toBe("pricing.v3")
       expect(metrics.snapshot.counters.instances).toBe(1)
       expect(metrics.snapshot.counters.passed).toBe(1)
-      const scoreCounter =
-        r.scoreLabel === "official_harness"
-          ? "officialHarness"
-          : r.scoreLabel === "local_structural"
-            ? "localStructural"
-            : r.scoreLabel === "research_contaminated"
-              ? "researchContaminated"
-              : "unlabeledPassed"
+      const scoreCounter = scoreCounterOf(r.scoreLabel)
       expect(metrics.snapshot.counters[scoreCounter]).toBe(1)
       const summary = JSON.parse(readFileSync(summaryFile, "utf8")) as {
         runId: string

@@ -12,7 +12,7 @@
     },
     "lint/complexity/noExcessiveCognitiveComplexity": {
       "prod": 16,
-      "tests": 83
+      "tests": 82
     }
   },
   "worstComplexity": 57,
