@@ -81,6 +81,27 @@ const LINE_COUNT_DERIVE = /\.split\(\s*["'`]\\n["'`]\s*\)\s*\.length/
 const LOC_ASSERT_INLINE =
   /\.split\(\s*["'`]\\n["'`]\s*\)\s*\.length\s*\)?\s*\.\s*toBeLessThan(?:OrEqual)?\(/
 
+type SmellCounts = { readonly trueTerminators: number; readonly locBudgets: number }
+
+const countSmells = (text: string): SmellCounts => {
+  const fileHasLineCount = LINE_COUNT_DERIVE.test(text)
+  let trueTerminators = 0
+  let locBudgets = 0
+  for (const line of text.split("\n")) {
+    if (isComment(line)) continue
+    trueTerminators += line.match(TRUE_TERMINATOR)?.length ?? 0
+    if (LOC_ASSERT_INLINE.test(line) || (fileHasLineCount && LOC_ASSERT.test(line))) locBudgets += 1
+  }
+  return { trueTerminators, locBudgets }
+}
+
+const recordCount = (counts: Record<string, number>, file: string, count: number): void => {
+  if (count > 0) counts[file.replace(/\\/g, "/")] = count
+}
+
+const sumCounts = (counts: Record<string, number>): number =>
+  Object.values(counts).reduce((sum, count) => sum + count, 0)
+
 const scan = (): {
   trueTerminators: { total: number; byFile: Record<string, number> }
   locBudgets: { total: number; byFile: Record<string, number> }
@@ -92,26 +113,14 @@ const scan = (): {
   for (const root of ROOTS) {
     for (const file of walkTests(root)) {
       filesScanned += 1
-      const text = readFileSync(file, "utf8")
-      const fileHasLineCount = LINE_COUNT_DERIVE.test(text)
-      let ttN = 0
-      let locN = 0
-      for (const line of text.split("\n")) {
-        if (isComment(line)) continue
-        const m = line.match(TRUE_TERMINATOR)
-        if (m) ttN += m.length
-        if (LOC_ASSERT_INLINE.test(line)) locN += 1
-        else if (fileHasLineCount && LOC_ASSERT.test(line)) locN += 1
-      }
-      const key = file.replace(/\\/g, "/")
-      if (ttN > 0) tt[key] = ttN
-      if (locN > 0) loc[key] = locN
+      const counts = countSmells(readFileSync(file, "utf8"))
+      recordCount(tt, file, counts.trueTerminators)
+      recordCount(loc, file, counts.locBudgets)
     }
   }
-  const sum = (r: Record<string, number>): number => Object.values(r).reduce((a, b) => a + b, 0)
   return {
-    trueTerminators: { total: sum(tt), byFile: tt },
-    locBudgets: { total: sum(loc), byFile: loc },
+    trueTerminators: { total: sumCounts(tt), byFile: tt },
+    locBudgets: { total: sumCounts(loc), byFile: loc },
     filesScanned,
   }
 }
