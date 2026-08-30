@@ -47,6 +47,10 @@ export class TurnWorkMetricsCollector {
   private agentActions = 0
   private linesRead = 0
   private tokensInput = 0
+  // A4 — the recorded-cost accumulation (see recordUsage's `cost` doc).
+  private sawRecordedCost = false
+  private recordedKnownUsd = 0
+  private recordedUnpriced = 0
   private tokensOutput = 0
   private cacheReadTokens: number | undefined = undefined
   /** MR-05 — per-MODEL token buckets. A turn can span several models (a `/model`
@@ -109,8 +113,24 @@ export class TurnWorkMetricsCollector {
     tokensInput: number
     tokensOutput: number
     cacheReadTokens?: number
+    cacheWriteTokens?: number
     model?: string
+    /**
+     * A4 — the cost the loop ACTUALLY billed for this event (the emitUsage
+     * fan-out's single priced figure). When any event of the turn carries one,
+     * `finalize()` sums THESE instead of re-deriving from buckets — the derive
+     * cannot express cache-write and silently skips unknown models. Unpriced
+     * events are counted, never absorbed into a confident-looking total.
+     */
+    cost?: UsageCost
   }): void {
+    if (u.cost !== undefined) {
+      this.sawRecordedCost = true
+      if (u.cost.pricingKnown && Number.isFinite(u.cost.totalUsd)) {
+        this.recordedKnownUsd += u.cost.totalUsd
+      }
+      if (!u.cost.pricingKnown) this.recordedUnpriced += 1
+    }
     this.tokensInput += u.tokensInput
     this.tokensOutput += u.tokensOutput
     if (u.cacheReadTokens !== undefined) {
@@ -165,6 +185,16 @@ export class TurnWorkMetricsCollector {
    *  repeated finalize() calls observe the same state and yield equal
    *  snapshots (the loop instantiates one collector per turn, so resetting is
    *  unnecessary; idempotency only matters for accidental double-finalize). */
+  /** The recorded-cost pair for {@link finalize}: the summed known spend and
+   *  the unpriced-call count, or `undefined` when no event carried a cost. */
+  private recordedCost(): { estimatedCostUsd: number; unpricedCalls?: number } | undefined {
+    if (!this.sawRecordedCost) return undefined
+    return {
+      estimatedCostUsd: this.recordedKnownUsd,
+      ...(this.recordedUnpriced > 0 ? { unpricedCalls: this.recordedUnpriced } : {}),
+    }
+  }
+
   finalize(model?: string): WorkMetrics {
     // Copy the per-file map to a fresh array so the returned snapshot does
     // NOT alias internal state — a subsequent recordDiff() would otherwise

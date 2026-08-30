@@ -62,8 +62,9 @@ describe("test:ci admission gate", () => {
   test("the authoritative full-suite runner bounds a wedged shard worker", () => {
     expect(packageJson.scripts?.test).toContain("tools/dev/run-test-shards.ts")
     expect(shardRunner).toContain("const SHARD_COUNT = 8")
-    expect(shardRunner).toContain("const SHARD_TIMEOUT_MS = 5 * 60_000")
+    expect(shardRunner).toContain("const SHARD_TIMEOUT_MS = 12 * 60_000")
     expect(shardRunner).toContain("proc.kill(9)")
+    expect(shardRunner).toContain("assertShardCoverage(discoveries, SHARD_COUNT)")
     expect(shardRunner).toContain("checkout changed during run")
   })
 })

@@ -1,4 +1,8 @@
-export {}
+import {
+  assertShardCoverage,
+  parseShardDiscovery,
+  type ShardDiscovery,
+} from "./test-shard-coverage"
 
 /**
  * Authoritative local full-suite runner.
@@ -11,10 +15,12 @@ export {}
  */
 
 const SHARD_COUNT = 8
-// The slowest observed normal shard takes a little over three minutes. Five
-// minutes leaves room for ordinary host variance while bounding a CPU-bound
-// Bun worker that ignores Bun's per-test timeout.
-const SHARD_TIMEOUT_MS = 5 * 60_000
+// The shard corpus contains cold-path source scans and real CLI integration
+// rails. A normal shard has exceeded seven minutes without any failed test, so
+// five minutes turns ordinary host variance into a false timeout. Twelve
+// minutes still bounds a CPU-bound Bun worker that ignores Bun's per-test
+// timeout while leaving headroom for the measured cold path.
+const SHARD_TIMEOUT_MS = 12 * 60_000
 const TEST_ROOTS = [
   "tests/unit",
   "tests/meta",
@@ -56,24 +62,62 @@ const gitSnapshot = async (): Promise<GitSnapshot> => {
 const sameSnapshot = (left: GitSnapshot, right: GitSnapshot): boolean =>
   left.head === right.head && left.status === right.status
 
-const runShard = async (index: number): Promise<{ readonly code: number; readonly timedOut: boolean }> => {
+const relay = async (
+  stream: ReadableStream<Uint8Array>,
+  write: (text: string) => void,
+  observe: (text: string) => void,
+): Promise<void> => {
+  const decoder = new TextDecoder()
+  for await (const chunk of stream) {
+    const text = decoder.decode(chunk, { stream: true })
+    observe(text)
+    write(text)
+  }
+  const tail = decoder.decode()
+  if (tail !== "") {
+    observe(tail)
+    write(tail)
+  }
+}
+
+const runShard = async (
+  index: number,
+): Promise<{
+  readonly code: number
+  readonly timedOut: boolean
+  readonly discovery?: ShardDiscovery
+}> => {
   const shard = `${index}/${SHARD_COUNT}`
   process.stdout.write(`\n[test:shards] START shard=${shard}\n`)
   const proc = Bun.spawn({
     cmd: ["bun", "test", ...TEST_ROOTS, "--timeout=60000", "--parallel=1", `--shard=${shard}`],
-    stdout: "inherit",
-    stderr: "inherit",
+    stdout: "pipe",
+    stderr: "pipe",
   })
+  let banner = ""
+  let discovery: ShardDiscovery | undefined
+  const observe = (text: string): void => {
+    if (discovery !== undefined) return
+    banner = `${banner}${text}`.slice(-512)
+    discovery = parseShardDiscovery(banner, shard)
+  }
+  const stdout = relay(proc.stdout, (text) => process.stdout.write(text), observe)
+  const stderr = relay(proc.stderr, (text) => process.stderr.write(text), observe)
   let timedOut = false
   const timeout = setTimeout(() => {
     timedOut = true
-    process.stderr.write(`[test:shards] TIMEOUT shard=${shard} after=${SHARD_TIMEOUT_MS}ms; killing worker\n`)
+    process.stderr.write(
+      `[test:shards] TIMEOUT shard=${shard} after=${SHARD_TIMEOUT_MS}ms; killing worker\n`,
+    )
     proc.kill(9)
   }, SHARD_TIMEOUT_MS)
   const code = await proc.exited
   clearTimeout(timeout)
-  process.stdout.write(`[test:shards] END shard=${shard} exit=${code}${timedOut ? " timeout" : ""}\n`)
-  return { code, timedOut }
+  await Promise.all([stdout, stderr])
+  process.stdout.write(
+    `[test:shards] END shard=${shard} exit=${code}${timedOut ? " timeout" : ""}\n`,
+  )
+  return discovery === undefined ? { code, timedOut } : { code, timedOut, discovery }
 }
 
 const main = async (): Promise<void> => {
@@ -83,9 +127,11 @@ const main = async (): Promise<void> => {
   )
 
   const failed: number[] = []
+  const discoveries: ShardDiscovery[] = []
   for (let index = 1; index <= SHARD_COUNT; index += 1) {
     const result = await runShard(index)
     if (result.code !== 0 || result.timedOut) failed.push(index)
+    if (result.discovery !== undefined) discoveries.push(result.discovery)
   }
 
   const after = await gitSnapshot()
@@ -98,6 +144,7 @@ const main = async (): Promise<void> => {
   if (failed.length > 0) {
     throw new Error(`[test:shards] FAILED shard(s): ${failed.join(", ")}/${SHARD_COUNT}`)
   }
+  assertShardCoverage(discoveries, SHARD_COUNT)
   process.stdout.write(
     `[test:shards] PASS shards=1-${SHARD_COUNT}/${SHARD_COUNT} head=${before.head}\n`,
   )

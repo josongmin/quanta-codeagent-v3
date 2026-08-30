@@ -91,21 +91,44 @@ const naiveStripperSites = (): readonly string[] =>
  * two lines of prose. It may only SHRINK — convert a site to the shared scanner
  * and delete its line; a new entry means a new copy of a known-broken helper.
  */
-const REMAINING: readonly string[] = [
-  "src/agent/repro-test/select.ts",
-  "src/observability/coverage/v8-source.ts",
-  "src/runner/batch/eval/python-source-text.ts",
-  "src/runner/batch/eval/verification-owner-test-expectations.ts",
-  "src/shared/public-issue-text.ts",
-  "tests/unit/_arch/repo-path-anchor-ratchet.test.ts",
-  "tests/unit/apps/bench/promax/promax-bootstrap-phase-reachability.test.ts",
-  "tools/leaderboard-dashboard/projectors/structural.test.ts",
-  "tools/feature-catalog/yaml.ts",
-]
+/**
+ * These are not deferred TypeScript guard conversions. Each owns a different
+ * language transform or lexer contract that the shared TypeScript scanner does
+ * not provide. Keeping the reason next to the path prevents a later
+ * mechanical "finish the list" edit from corrupting the guarded semantics.
+ */
+const REMAINING = [
+  { path: "src/agent/repro-test/select.ts", reason: "Python comments and docstrings" },
+  {
+    path: "src/observability/coverage/v8-source.ts",
+    reason: "V8 branch heuristic also blanks strings",
+  },
+  { path: "src/runner/batch/eval/python-source-text.ts", reason: "Python inline-comment lexer" },
+  {
+    path: "src/runner/batch/eval/verification-owner-test-expectations.ts",
+    reason: "Python triple-quote and inline-comment transform",
+  },
+  { path: "src/shared/public-issue-text.ts", reason: "HTML comment normalization" },
+  {
+    path: "tests/unit/_arch/repo-path-anchor-ratchet.test.ts",
+    reason: "scanner must preserve glob strings containing /*",
+  },
+  {
+    path: "tests/unit/apps/bench/promax/promax-bootstrap-phase-reachability.test.ts",
+    reason: "token lexer has separate code-only and comment-only modes",
+  },
+  {
+    path: "tools/leaderboard-dashboard/projectors/structural.test.ts",
+    reason: "dashboard HTML and JavaScript projection",
+  },
+  { path: "tools/feature-catalog/yaml.ts", reason: "YAML trailing-comment parser" },
+] as const
+
+const REMAINING_PATHS = REMAINING.map(({ path }) => path)
 
 describe("the comment-scanner burn-down", () => {
   test("🔴 no NEW guard carries its own defeatable comment stripper", () => {
-    const unlisted = naiveStripperSites().filter((f) => !REMAINING.includes(f))
+    const unlisted = naiveStripperSites().filter((f) => !REMAINING_PATHS.includes(f))
     expect(
       unlisted,
       "a new local comment stripper — import the shared one from tests/unit/_shared/strip-comments",
@@ -114,7 +137,7 @@ describe("the comment-scanner burn-down", () => {
 
   test("🔴 the list only shrinks — a converted site must lose its line", () => {
     const live = new Set(naiveStripperSites())
-    const stale = REMAINING.filter((f) => !live.has(f))
+    const stale = REMAINING_PATHS.filter((f) => !live.has(f))
     expect(stale, "these were converted; delete their entries so the ceiling drops").toEqual([])
   })
 
