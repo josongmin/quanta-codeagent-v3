@@ -451,6 +451,18 @@
     },
     "tests/unit/runtime-config-no-dead-knob-ratchet.test.ts#SRC": {
       "walked": 3352
+    },
+    "tests/unit/_arch/comment-scanner-burndown-ratchet.test.ts#SRC": {
+      "walked": 3656,
+      "matched": 5
+    },
+    "tests/unit/_arch/comment-scanner-burndown-ratchet.test.ts#TESTS": {
+      "walked": 3578,
+      "matched": 2
+    },
+    "tests/unit/_arch/comment-scanner-burndown-ratchet.test.ts#TOOLS": {
+      "walked": 115,
+      "matched": 2
     }
   }
 }

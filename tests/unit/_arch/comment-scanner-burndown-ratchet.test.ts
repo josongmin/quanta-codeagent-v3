@@ -33,6 +33,7 @@ import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { dirname, join, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { assertScanPopulation } from "../_shared/scan-population"
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../../..")
 
@@ -78,13 +79,27 @@ const scan = (dir: string, into: string[] = []): string[] => {
   return into
 }
 
-const naiveStripperSites = (): readonly string[] =>
-  ROOTS.flatMap((root) => scan(join(REPO, root)))
-    // The shared implementation is the one intentional parser owner, not a
-    // duplicate scanner for this ratchet to burn down.
-    .filter((f) => f !== "src/shared/source-text.ts")
-    .filter((f) => carriesOwnStripper(readFileSync(join(REPO, f), "utf8")))
-    .sort()
+const ROOT_SCANS = ROOTS.map((root) => scan(join(REPO, root)))
+const ROOT_STRIPPER_SITES = ROOT_SCANS.map((files) =>
+  files
+    .filter((file) => file !== "src/shared/source-text.ts")
+    .filter((file) => carriesOwnStripper(readFileSync(join(REPO, file), "utf8"))),
+)
+for (const [index, root] of ROOTS.entries()) {
+  const files = ROOT_SCANS[index] ?? []
+  const sites = ROOT_STRIPPER_SITES[index] ?? []
+  assertScanPopulation(
+    files.map((file) => join(REPO, file)),
+    join(REPO, root),
+    {
+      collectable: (name) => name.endsWith(".ts"),
+      id: `tests/unit/_arch/comment-scanner-burndown-ratchet.test.ts#${root.toUpperCase()}`,
+      matched: sites.map((file) => join(REPO, file)),
+    },
+  )
+}
+
+const naiveStripperSites = (): readonly string[] => ROOT_STRIPPER_SITES.flat().sort()
 
 /**
  * The burn-down list. Every entry is a guard whose scanner can be defeated by
@@ -159,6 +174,6 @@ describe("the comment-scanner burn-down", () => {
   })
 
   test("ANTI-VACUITY: the scan reaches a real, populated set of files", () => {
-    expect(["tests", "tools"].flatMap((r) => scan(join(REPO, r))).length).toBeGreaterThan(500)
+    expect((ROOT_SCANS[1]?.length ?? 0) + (ROOT_SCANS[2]?.length ?? 0)).toBeGreaterThan(500)
   })
 })
