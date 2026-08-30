@@ -26,9 +26,11 @@ import {
 import { createMcpToolReloadController } from "@/host/runtime/mcp-tool-reload"
 import type { StructuredLogger } from "@/observability"
 import {
-  createSessionUsageAccounting,
+  createUsageAccounting,
+  resolveUsageAccounting,
   type UsageAccountingPort,
 } from "@/observability/usage-accounting"
+import { logger } from "@/shared"
 
 import type {
   BootstrapFeatures,
@@ -175,13 +177,15 @@ export const buildToolingBundle = (
   const hasCostCap = Object.keys(costDials).length > 0
   const budgetMeter =
     writeGuardActive || hasCostCap ? new BudgetMeter({ dials: costDials }) : undefined
-  // MR-08 — the session's usage-accounting authority. Minted by DEFAULT
-  // (`QUANTA_USAGE_ACCOUNTING_V2` unset ⇒ on); `off` is the explicit kill
-  // switch that leaves the slot unset. One per session: the
-  // loop's `emitUsage` records into it and the cost surfaces project it, so
-  // both halves have to see the SAME object — which is why it is created here,
-  // at the composition root, rather than by either side.
-  const usageAccounting = createSessionUsageAccounting(runtime.env)
+  // A3-S3 — the session's usage-accounting authority. The knob resolves ONCE
+  // here (the CLI's composition root); a deprecated/unrecognized value fails
+  // safe to `on` and its warning prints HERE, once per session — the resolver
+  // stays pure so no module latch can eat a later session's notice. One
+  // instance per session: `emitUsage` records into it and the cost surfaces
+  // project it, so both halves must see the SAME object.
+  const usageResolution = resolveUsageAccounting(runtime.env)
+  if (usageResolution.warning !== undefined) logger.warn(usageResolution.warning)
+  const usageAccounting = usageResolution.mode === "on" ? createUsageAccounting() : undefined
 
   const tooling = deps.buildTooling(
     features.mcpTools,

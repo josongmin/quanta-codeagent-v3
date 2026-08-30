@@ -1,14 +1,8 @@
 /** Canonical usage accounting (MR-01) — normalize once, price once. */
 export {
-  createSessionUsageAccounting,
-  formatReconciliationReceipt,
-  type LegacyCostReading,
-  reconcileUsageAccounting,
+  resolveUsageAccounting,
   type UsageAccountingMode,
-  type UsageReconciliationDelta,
-  type UsageReconciliationReceipt,
-  usageAccountingIsAuthoritative,
-  usageAccountingMode,
+  type UsageAccountingResolution,
 } from "./activation"
 export {
   createUsageAccounting,

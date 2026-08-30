@@ -247,8 +247,8 @@ const sessionSetupDeps: Parameters<typeof setupSession>[0] = {
   // The CLI surface narrows it back to `CliFeatureConfig` at each call site.
   buildLifecycleBundle: (cfg, env) => buildLifecycleBundle(cfg as CliFeatureConfig, env),
   deriveMcpPillServers,
-  buildCostPanelOrUndefined: (cfg, model, accounting, authoritative) =>
-    buildCostPanelOrUndefined(cfg as CliFeatureConfig, model, accounting, authoritative),
+  buildCostPanelOrUndefined: (cfg, model, accounting) =>
+    buildCostPanelOrUndefined(cfg as CliFeatureConfig, model, accounting),
   buildBranchProgressOrUndefined: (cfg) => buildBranchProgressOrUndefined(cfg as CliFeatureConfig),
   buildPlanStoreOrUndefined: (cfg) => buildPlanStoreOrUndefined(cfg as CliFeatureConfig),
   buildTurnSummaryAndStream,

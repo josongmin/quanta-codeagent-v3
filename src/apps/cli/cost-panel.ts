@@ -25,8 +25,6 @@
 import {
   type CostSurfaceView,
   costSurfaceView,
-  formatReconciliationReceipt,
-  reconcileUsageAccounting,
   type UsageAccountingPort,
 } from "@/observability/usage-accounting"
 import { dim, gray, renderBox } from "@/ui/ui-helpers"
@@ -109,17 +107,6 @@ export interface CostPanelOptions {
    * `incrementTurn` keeps advancing it even in projected mode.
    */
   accounting?: UsageAccountingPort
-  /**
-   * `false` ⇒ SHADOW: the authority records beside the legacy feed, the panel
-   * still renders the legacy numbers, and `/cost` appends a reconciliation
-   * receipt saying whether the two agree.
-   *
-   * Without this, shadow mode records into an authority nobody ever reads and
-   * produces no evidence — which is the entire point of the mode, so the mode
-   * would be inert. Default `true` keeps a caller that passes an authority and
-   * nothing else on the projecting path.
-   */
-  accountingAuthoritative?: boolean
 }
 
 // ── formatters ──────────────────────────────────────────────────────────
@@ -187,66 +174,14 @@ const panelState = (opts: CostPanelOptions) => {
     totalCostUsd: null,
     model: sanitizeModel(opts.model),
   }
-
-  // §23.5 — per-model cumulative buckets. Keyed by the model active at each
-  // turn. Kept as a closure var (NOT on CostPanelState) so `snapshot()` stays
-  // byte-identical and existing deep-reads are unaffected.
-  const perModel = new Map<
-    string,
-    { inputTokens: number; outputTokens: number; cacheReadTokens: number; costUsd: number | null }
-  >()
-  /**
-   * Per-model buckets are keyed on the model the PROVIDER reported, which is
-   * untrusted text. The key stays verbatim so accounting stays exact; every
-   * RENDER path runs it through `sanitizeModel` instead. `state.model` was
-   * already sanitized at construction, but the per-model rows were not — an id
-   * carrying ANSI escapes reached `/cost` output intact, and the projected
-   * breakdown made that block render where it previously never did.
-   */
-  const bucketFor = (
-    model: string,
-  ): {
-    inputTokens: number
-    outputTokens: number
-    cacheReadTokens: number
-    costUsd: number | null
-  } => {
-    let b = perModel.get(model)
-    if (b === undefined) {
-      b = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, costUsd: null }
-      perModel.set(model, b)
-    }
-    return b
-  }
-
-  const accumulateCost = (turnCost: number | null): void => {
-    if (turnCost === null || !Number.isFinite(turnCost)) return
-    state.totalCostUsd = (state.totalCostUsd ?? 0) + turnCost
-  }
-
-  // Deterministic model ordering — byte compare (avoids locale drift).
-  const sortedModelEntries = (): Array<
-    [
-      string,
-      {
-        inputTokens: number
-        outputTokens: number
-        cacheReadTokens: number
-        costUsd: number | null
-      },
-    ]
-  > => [...perModel.entries()].sort((a, z) => (a[0] < z[0] ? -1 : a[0] > z[0] ? 1 : 0))
   const accounting = opts.accounting
-  const authoritative = opts.accountingAuthoritative ?? true
 
   /** The authority's current numbers, or `undefined` when this panel is not
-   *  the projecting reader (no authority, or shadow). */
+   *  the projecting reader. */
   const projected = (): CostSurfaceView | undefined =>
     // A disabled panel is a FULL no-op — it must not even read the authority,
     // so `snapshot()` keeps the historical pristine-state contract.
-    !enabled || accounting === undefined || !authoritative
-      ? undefined
-      : costSurfaceView(accounting.snapshot())
+    !enabled || accounting === undefined ? undefined : costSurfaceView(accounting.snapshot())
 
   /**
    * The ONE state every read path renders from.
@@ -282,12 +217,7 @@ const panelState = (opts: CostPanelOptions) => {
     enabled,
     now,
     state,
-    perModel,
-    bucketFor,
-    accumulateCost,
-    sortedModelEntries,
-    accounting: opts.accounting,
-    authoritative: opts.accountingAuthoritative ?? true,
+    accounting,
     projected,
     effectiveState,
   }
@@ -300,7 +230,7 @@ type PanelCtx = ReturnType<typeof panelState>
 /** Accounting: the totals, their per-model breakdown, and the two mutators
  *  that advance them. */
 const accountingOps = (ctx: PanelCtx): Pick<CostPanel, "snapshot" | "byModel" | "noteTurn"> => {
-  const { enabled, state, sortedModelEntries, projected, effectiveState } = ctx
+  const { enabled, state, projected, effectiveState } = ctx
 
   return {
     snapshot: () => effectiveState(),
@@ -308,8 +238,7 @@ const accountingOps = (ctx: PanelCtx): Pick<CostPanel, "snapshot" | "byModel" | 
     byModel: () => {
       if (!enabled) return []
       const view = projected()
-      if (view === undefined)
-        return sortedModelEntries().map(([model, b]) => ({ model: sanitizeModel(model), ...b }))
+      if (view === undefined) return []
       return view.byModel.map((line) => ({
         model: sanitizeModel(line.model),
         inputTokens: line.promptTokens,
@@ -327,45 +256,12 @@ const accountingOps = (ctx: PanelCtx): Pick<CostPanel, "snapshot" | "byModel" | 
 }
 
 /**
- * SHADOW mode's output — the whole reason the middle knob position exists.
- *
- * The authority recorded beside the legacy feed and nothing rendered from it;
- * this is where that comparison becomes something a person can read, on a real
- * session, before anything they look at depends on the new numbers. Empty in
- * every other mode.
- */
-const shadowReceiptLines = (
-  accounting: UsageAccountingPort | undefined,
-  authoritative: boolean,
-  state: CostPanelState,
-): readonly string[] => {
-  if (accounting === undefined || authoritative) return []
-  return [
-    "",
-    formatReconciliationReceipt(
-      // `promptTokens` is deliberately NOT supplied: this panel's legacy input
-      // count comes from `gen_ai.usage.input_tokens`, which is provider-shaped,
-      // so comparing it to the authority's provider-neutral prompt total
-      // reports a divergence on every Anthropic session that used the cache.
-      // Dollars and output tokens carry the signal without the false alarm.
-      reconcileUsageAccounting(accounting.snapshot(), {
-        totalUsd: state.totalCostUsd ?? 0,
-        outputTokens: state.outputTokens,
-      }),
-    ),
-  ]
-}
-
-/**
  * The root-vs-subagent split — the question this box exists to answer once a
  * session spawns. Rendered only when a subagent actually spent something, so
  * an ordinary session's `/cost` is unchanged.
  */
-const agentSplitLines = (
-  accounting: UsageAccountingPort | undefined,
-  authoritative: boolean,
-): readonly string[] => {
-  if (accounting === undefined || !authoritative) return []
+const agentSplitLines = (accounting: UsageAccountingPort | undefined): readonly string[] => {
+  if (accounting === undefined) return []
   const kinds = costSurfaceView(accounting.snapshot()).byKind
   if (kinds.subagent <= 0) return []
   return [
@@ -411,8 +307,7 @@ const statusCostCell = (totalCostUsd: number | null, unpriced: number): string =
 /** Presentation + teardown. Rendering reads the accounting state and never
  *  mutates it. */
 const renderOps = (ctx: PanelCtx): Pick<CostPanel, "render" | "renderDetailed" | "dispose"> => {
-  const { enabled, now, sortedModelEntries, accounting, authoritative, projected, effectiveState } =
-    ctx
+  const { enabled, now, accounting, projected, effectiveState } = ctx
   /**
    * Per-model rows for `/cost`, from whichever feed owns the numbers.
    *
@@ -429,15 +324,7 @@ const renderOps = (ctx: PanelCtx): Pick<CostPanel, "render" | "renderDetailed" |
     cacheReadTokens: number
     costUsd: number | null
   }[] => {
-    if (accounting === undefined || !authoritative) {
-      return sortedModelEntries().map(([model, b]) => ({
-        model: sanitizeModel(model),
-        inputTokens: b.inputTokens,
-        outputTokens: b.outputTokens,
-        cacheReadTokens: b.cacheReadTokens,
-        costUsd: b.costUsd ?? null,
-      }))
-    }
+    if (accounting === undefined) return []
     return costSurfaceView(accounting.snapshot()).byModel.map((l) => ({
       model: sanitizeModel(l.model),
       inputTokens: l.promptTokens,
@@ -507,8 +394,7 @@ const renderOps = (ctx: PanelCtx): Pick<CostPanel, "render" | "renderDetailed" |
       // The question this whole box exists to answer once a session spawns:
       // how much of the bill was the subagents? Rendered ONLY when a subagent
       // actually spent something, so a plain session's box is unchanged.
-      lines.push(...shadowReceiptLines(accounting, authoritative, s))
-      lines.push(...agentSplitLines(accounting, authoritative))
+      lines.push(...agentSplitLines(accounting))
       return renderBox(lines, {
         title: "session cost",
         titleStyle: gray,

@@ -47,7 +47,6 @@ import {
   buildRouteEventForwarder,
 } from "@/host/bootstrap/route-event-forwarder"
 import type { ImageBlock } from "@/llm"
-import { usageAccountingIsAuthoritative } from "@/observability/usage-accounting"
 import type { IdentityModeSessionState, ToolProfileSessionState } from "@/runner/assemble"
 import type { PermissionModeSessionState } from "@/runner/assemble/session-authorities"
 import { errMessage } from "@/shared"
@@ -131,14 +130,10 @@ const buildProjectingCostPanel = (
   featureCfg: SessionFeatureConfig,
   usageAccounting: SessionBootstrapResult["usageAccounting"],
 ): ReturnType<SessionBootstrapDeps["buildCostPanelOrUndefined"]> =>
-  deps.buildCostPanelOrUndefined(
-    featureCfg,
-    runtime.model,
-    // Handed over in BOTH shadow and on — shadow needs it to produce the
-    // receipt. Whether the panel RENDERS from it is the second argument.
-    usageAccounting,
-    usageAccountingIsAuthoritative(runtime.env),
-  )
+  // A3-S3 — two modes: an authority ⇒ the panel projects it; none ⇒ the panel
+  // renders an explicit "accounting off". Shadow (and its receipt) are gone
+  // with the legacy feed they compared against.
+  deps.buildCostPanelOrUndefined(featureCfg, runtime.model, usageAccounting)
 
 /** Session teardown: stop the MCP fleet, THEN close the session egress proxy on
  *  the SAME hook (the proxy exists ONLY to gate those clients' children, so its

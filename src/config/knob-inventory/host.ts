@@ -528,7 +528,7 @@ export const HOST: readonly KnobInventoryEntry[] = [
     group: "host-gate",
     home: "runtime-config",
     describe:
-      "Usage-accounting authority: on (default) | shadow | off. `on` makes every cost surface project the session authority (subagent spend included, per-call model pricing); `shadow` records but keeps the legacy feed rendering, with a reconciliation receipt in /cost; `off` is the explicit kill switch back to the legacy feed. Unrecognized values degrade to the default (on).",
+      "Usage-accounting authority: on (default) | off. `on` makes every cost surface project the session authority (subagent spend included, per-call model pricing); `off` is the kill switch — surfaces render an explicit 'accounting off' (the legacy feed is gone). `shadow` is a deprecated alias for on; any unrecognized value fails safe to on, with a warning.",
     readSite: "observability/usage-accounting/activation.ts",
   },
   {
