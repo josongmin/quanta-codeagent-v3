@@ -21,6 +21,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
+import { assertScanPopulation } from "./_shared/scan-population"
 
 const INVENTORY_DIR = join(import.meta.dir, "..", "..", "src", "config", "knob-inventory")
 const KNOB_SCHEMA_DIR = join(import.meta.dir, "..", "..", "src", "config", "knob-schema")
@@ -79,6 +80,11 @@ describe("config/knob-inventory stays a leaf (no @/runner back-edge)", () => {
   }))
 
   test("scans a non-trivial set of inventory files", () => {
+    assertScanPopulation(
+      files.map((file) => file.path),
+      INVENTORY_DIR,
+      { id: "tests/unit/config-knob-inventory-leaf-hellgate.test.ts#INVENTORY" },
+    )
     // Guards against the detector silently scanning zero files (a moved/renamed dir).
     expect(files.length).toBeGreaterThan(3)
   })
@@ -131,6 +137,11 @@ describe("config/knob-schema stays a TRUE leaf (no @/runner, no @/agent back-edg
   }))
 
   test("scans a non-trivial set of knob-schema files", () => {
+    assertScanPopulation(
+      files.map((file) => file.path),
+      KNOB_SCHEMA_DIR,
+      { id: "tests/unit/config-knob-inventory-leaf-hellgate.test.ts#SCHEMA" },
+    )
     // Guards against the detector silently scanning zero files (a moved/renamed dir).
     expect(files.length).toBeGreaterThan(3)
   })

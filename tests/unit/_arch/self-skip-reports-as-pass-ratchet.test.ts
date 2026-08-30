@@ -40,6 +40,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
+import { assertScanPopulation } from "../_shared/scan-population"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 
@@ -100,6 +101,22 @@ describe("a self-skip must not report as a pass", () => {
   const files = testFiles()
 
   test("anti-vacuity: the walk reached the real test tree", () => {
+    assertScanPopulation(
+      files.filter((file) => file.startsWith("tests/")).map((file) => join(REPO_ROOT, file)),
+      join(REPO_ROOT, "tests"),
+      {
+        id: "tests/unit/_arch/self-skip-reports-as-pass-ratchet.test.ts#TESTS",
+        collectable: (name) => name.endsWith(".test.ts"),
+      },
+    )
+    assertScanPopulation(
+      files.filter((file) => file.startsWith("src/")).map((file) => join(REPO_ROOT, file)),
+      join(REPO_ROOT, "src"),
+      {
+        id: "tests/unit/_arch/self-skip-reports-as-pass-ratchet.test.ts#SRC",
+        collectable: (name) => name.endsWith(".test.ts"),
+      },
+    )
     // This ratchet is an instance of the class it guards — a walk that read
     // nothing would report "no self-skips" just as convincingly.
     expect(

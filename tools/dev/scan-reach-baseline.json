@@ -166,6 +166,9 @@
     "tests/integration/cli-attention-navigation.test.ts#root": {
       "walked": 3343
     },
+    "tests/meta/no-test-js-artifacts-hellgate.test.ts#TESTS": {
+      "walked": 3500
+    },
     "tests/unit/integrations/github/slice-fence-static-hellgate-r3.test.ts#SLICE-DIR": {
       "walked": 12
     },
@@ -176,6 +179,12 @@
       "walked": 299
     },
     "tests/unit/_arch/real-quanta-home-escape-ratchet.test.ts#TESTS": {
+      "walked": 3500
+    },
+    "tests/unit/_arch/self-skip-reports-as-pass-ratchet.test.ts#SRC": {
+      "walked": 299
+    },
+    "tests/unit/_arch/self-skip-reports-as-pass-ratchet.test.ts#TESTS": {
       "walked": 3500
     },
     "tests/unit/_arch/gated-test-scope-ratchet.test.ts#REPO-TEST-FILES": {
@@ -235,8 +244,17 @@
     "tests/unit/cli/terminal-chrome-hellgate.test.ts#src-apps-cli": {
       "walked": 352
     },
+    "tests/unit/config-knob-inventory-leaf-hellgate.test.ts#INVENTORY": {
+      "walked": 8
+    },
+    "tests/unit/config-knob-inventory-leaf-hellgate.test.ts#SCHEMA": {
+      "walked": 11
+    },
     "tests/unit/deny-reason-authority-ratchet-hellgate.test.ts#SRC-AGENT": {
       "walked": 726
+    },
+    "tests/unit/god-code-ratchet.test.ts#SRC": {
+      "walked": 3351
     },
     "tests/unit/dataset-family-profile-ssot.test.ts#BENCH": {
       "walked": 213

@@ -13,6 +13,7 @@ import {
   GOD_MODULE_MAX_LINES,
   type SourceFile,
 } from "../../tools/god-code/detect"
+import { assertScanPopulation } from "./_shared/scan-population"
 
 // SE-metric ratchet: keep god-code from GROWING. A god-MODULE (file > 1000 lines)
 // or god-FUNCTION (body > 150 lines) that is NOT grandfathered in allowlist.json
@@ -54,6 +55,15 @@ describe("god-code ratchet (SE size metric)", () => {
   const allowFunctions = new Set(allowlistKeys(allowlist.functions, "functions"))
 
   test("thresholds match the frozen allowlist (config drift guard)", () => {
+    assertScanPopulation(
+      files.map((file) => join(REPO, file.path)),
+      join(REPO, "src"),
+      {
+        id: "tests/unit/god-code-ratchet.test.ts#SRC",
+        collectable: (name) =>
+          name.endsWith(".ts") && !name.endsWith(".test.ts") && !name.endsWith(".d.ts"),
+      },
+    )
     expect(allowlist.godModuleMaxLines).toBe(GOD_MODULE_MAX_LINES)
     expect(allowlist.godFunctionMaxLines).toBe(GOD_FUNCTION_MAX_LINES)
     // The cohort band is detector CONFIG like the two thresholds above, so it
