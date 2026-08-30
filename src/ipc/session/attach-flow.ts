@@ -134,6 +134,33 @@ export const createAttachHandshake = (opts: AttachHandshakeOpts = {}): AttachHan
   // is honest: a resume against a daemon shipped WITHOUT the marker cannot
   // settle — the same version-skew posture as every other capability gap.
   const resuming = opts.resumeFromSeq !== undefined
+  const handleRejected = (message: Extract<SessionTransportMessage, { kind: "rejected" }>) => {
+    const adoptsCanonicalSession =
+      message.target === "connect" &&
+      message.sessionId.length > 0 &&
+      message.sessionId !== HANDSHAKE_DISCOVERY_SESSION_ID &&
+      sessionId !== message.sessionId
+    if (!adoptsCanonicalSession) return undefined
+    sessionId = message.sessionId
+    return connectFrame(sessionId)
+  }
+  const handleSnapshot = (message: Extract<SessionTransportMessage, { kind: "snapshot" }>) => {
+    if (sessionId === undefined || sessionId !== message.snapshot.sessionId) {
+      sessionId = message.snapshot.sessionId
+    }
+    capabilities = message.snapshot.capabilities
+    modelSlug = message.snapshot.state.modelSlug
+    if (!resuming) ready = true
+    return undefined
+  }
+  const handleResumed = (message: Extract<SessionTransportMessage, { kind: "resumed" }>) => {
+    if (!resuming) return undefined
+    if (sessionId === undefined) sessionId = message.sessionId
+    if (resumeOutcome === undefined)
+      resumeOutcome = message.mode === "replay" ? "replayed" : "snapshot_fallback"
+    ready = true
+    return undefined
+  }
 
   return {
     get sessionId() {
@@ -155,66 +182,10 @@ export const createAttachHandshake = (opts: AttachHandshakeOpts = {}): AttachHan
       return connectFrame(sessionId ?? HANDSHAKE_DISCOVERY_SESSION_ID)
     },
     onMessage(message) {
-      switch (message.kind) {
-        case "rejected": {
-          // Only a CONNECT-target reject carries the canonical id for adoption;
-          // a COMMAND-target reject (dedup / revision / validation) is handled
-          // elsewhere and never re-drives the handshake.
-          if (
-            message.target === "connect" &&
-            message.sessionId.length > 0 &&
-            message.sessionId !== HANDSHAKE_DISCOVERY_SESSION_ID &&
-            sessionId !== message.sessionId
-          ) {
-            sessionId = message.sessionId
-            // Re-handshake to the canonical id (same resume posture as the
-            // discovery frame — the bridge answers THIS one with the replay).
-            return connectFrame(sessionId)
-          }
-          return undefined
-        }
-        case "snapshot": {
-          // A server may answer the discovery connect with a snapshot directly
-          // (no reject) — adopt the id from the snapshot in that case.
-          if (sessionId === undefined || sessionId !== message.snapshot.sessionId) {
-            sessionId = message.snapshot.sessionId
-          }
-          // ADR-0540 W1-B — retain the manifest (latest snapshot wins) so the
-          // client can gate its post-approval re-issue on `serverAutoContinues`.
-          capabilities = message.snapshot.capabilities
-          // AUDIT-γ H2 — retain the model slug (latest snapshot wins) so the
-          // client can render the connection pill from the snapshot; the engine
-          // no longer fans `session.created` to the transport bridge.
-          modelSlug = message.snapshot.state.modelSlug
-          // Ticket 05 — a RESUME handshake does NOT settle on a snapshot (a
-          // fallback answer is snapshot → tail → marker; settling here would
-          // hand over before the served window finished). The marker below is
-          // the only settle arm; this frame is retained as state.
-          if (!resuming) ready = true
-          return undefined
-        }
-        case "resumed": {
-          // Ticket 05 — the served-marker: the bridge finished serving THIS
-          // connect's replay (possibly zero frames). Only a REQUESTING
-          // handshake may settle on it (a non-resume driver never asked — an
-          // unsolicited marker is ignored like any other unknown-to-this-flow
-          // frame). Adopt the canonical id if the reject leg was skipped and
-          // take the AUTHORITATIVE outcome from the reported mode — the arm
-          // that makes the caught-up (zero-frame) resume terminate instead of
-          // hanging.
-          if (!resuming) return undefined
-          if (sessionId === undefined) {
-            sessionId = message.sessionId
-          }
-          if (resumeOutcome === undefined) {
-            resumeOutcome = message.mode === "replay" ? "replayed" : "snapshot_fallback"
-          }
-          ready = true
-          return undefined
-        }
-        default:
-          return undefined
-      }
+      if (message.kind === "rejected") return handleRejected(message)
+      if (message.kind === "snapshot") return handleSnapshot(message)
+      if (message.kind === "resumed") return handleResumed(message)
+      return undefined
     },
   }
 }
