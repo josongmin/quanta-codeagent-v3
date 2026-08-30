@@ -18,7 +18,6 @@
     "tests/unit/no-benchmark-overfit-steer-ratchet.test.ts",
     "tests/unit/no-raw-nul-bytes-hellgate.test.ts",
     "tests/unit/observability/new-slice-metrics-hellgate.test.ts",
-    "tests/unit/observability/vocabulary-migration.test.ts",
     "tests/unit/orphan-orchestrator-ratchet.test.ts",
     "tests/unit/realtime/voice-session-hellgate.test.ts",
     "tests/unit/runtime-config-no-dead-knob-ratchet.test.ts",
@@ -420,6 +419,9 @@
     ],
     "tests/unit/dangerous-gate-strict-ratchet-hellgate.test.ts": [
       "tests/unit/dangerous-gate-strict-ratchet-hellgate.test.ts#SRC"
+    ],
+    "tests/unit/observability/vocabulary-migration.test.ts": [
+      "tests/unit/observability/vocabulary-migration.test.ts#SRC"
     ]
   }
 }

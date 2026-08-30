@@ -415,6 +415,9 @@
     },
     "tests/unit/dangerous-gate-strict-ratchet-hellgate.test.ts#SRC": {
       "walked": 3656
+    },
+    "tests/unit/observability/vocabulary-migration.test.ts#SRC": {
+      "walked": 3656
     }
   }
 }

@@ -34,6 +34,7 @@ import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
 import { ALL_ATTR_KEYS, ATTR_KEY_SET, GEN_AI_ATTRS, QUANTA_ATTRS } from "@/observability/vocabulary"
+import { assertScanPopulation } from "../_shared/scan-population"
 
 // ---------------------------------------------------------------------------
 // File-system walker (vendored — tests should not import non-test src code
@@ -236,6 +237,11 @@ describe("Wave D — new keys added by this slice", () => {
 
 describe("Wave D — single source of truth (orphan literal scan)", () => {
   test("no raw quanta.* attribute-key literal exists outside the vocabulary module", () => {
+    assertScanPopulation(allSrcFiles(), SRC_ROOT, {
+      id: "tests/unit/observability/vocabulary-migration.test.ts#SRC",
+      collectable: (name) => name.endsWith(".ts") || name.endsWith(".tsx"),
+      skipDirs: ["dist"],
+    })
     const scan = scanForLiterals()
     expect(scan.scanned).toBeGreaterThan(0) // ANTI-VACUITY FLOOR
     const hits = scan.hits.filter((h) => h.kind === "quanta")
