@@ -9,8 +9,19 @@ import { stripComments } from "../../src/shared/source-text"
 const R = join(import.meta.dir, "..", "..")
 
 /** Any way this repo reaches the tree. */
+/**
+ * Any way this repo reaches the tree — as a CALL, never as a mention.
+ *
+ * `ls-files` used to match as a bare token, so a guard that never runs git but
+ * names it in a failure message joined the population: `repro-grounding` was in
+ * it on the strength of `throw new Error("git ls-files failed")` and nothing
+ * else, and an enrollment campaign would have spent work giving a corpus floor
+ * to a file with no corpus. It now requires the argument-array shape
+ * (`["git", "ls-files", …]`); the shell-string shape (`execSync("git ls-files …")`)
+ * is already covered by the `execSync` branch, and both are pinned.
+ */
 const SCAN =
-  /\breaddirSync\s*\(|\breaddir\s*\(|\bBun\.Glob\b|\bnew Glob\b|ls-files|\bglobSync\s*\(|\bopendirSync\s*\(|\bexecSync\s*\(\s*["'`][^"'`]*\b(?:find|git|rg|grep)\b/
+  /\breaddirSync\s*\(|\breaddir\s*\(|\bBun\.Glob\b|\bnew Glob\b|\[\s*["'`]git["'`]\s*,\s*["'`]ls-files["'`]|\bglobSync\s*\(|\bopendirSync\s*\(|\bexecSync\s*\(\s*["'`][^"'`]*\b(?:find|git|rg|grep)\b/
 
 /**
  * Any way a scan-derived verdict is expressed.

@@ -38,7 +38,12 @@ import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { censusCorpusSize, floorlessGuards, isFloorless } from "@/../tools/dev/anti-vacuity-census"
+import {
+  censusCorpusSize,
+  floorlessGuards,
+  isFloorless,
+  isScanVerdictGuard,
+} from "@/../tools/dev/anti-vacuity-census"
 import { manifest } from "@/../tools/dev/empty-mirror-check"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
@@ -90,8 +95,10 @@ describe("anti-vacuity burn-down", () => {
    * This list may only shrink or be re-justified; each entry names the evidence.
    */
   const REFUTED: ReadonlySet<string> = new Set([
-    // scans src/, and its verdict is `toContain` — an empty scan fails it
-    "src/runner/batch/eval/repro-grounding.test.ts",
+    // `repro-grounding` was removed 2026-08-30: it never scanned at all. The
+    // census matched the bare token `ls-files` inside `throw new Error("git
+    // ls-files failed")`, so the file joined the population on a failure message
+    // and then earned an exemption for a corpus it does not have.
     "src/tool/terminal-surface.test.ts",
     // verdict compares against a non-empty expected set, so empty ≠ clean
     "tests/unit/surface-coupling-ratchet.test.ts",
@@ -202,6 +209,34 @@ describe("anti-vacuity burn-down", () => {
     ]) {
       expect(isFloorless(scanEndingIn(verdict)), verdict).toBe(true)
     }
+  })
+
+  test("🔴 `ls-files` in an ERROR STRING is not a scan", () => {
+    // The census matched the bare token, so a guard that never runs git but names
+    // it in a failure message joined the population — `repro-grounding` was in it
+    // on the strength of `throw new Error("git ${lsFiles} failed")` and nothing
+    // else. An enrollment campaign built on that population would have spent work
+    // adding a corpus floor to a file with no corpus.
+    const lsFiles = `ls-${"files"}`
+    const errorOnly =
+      `const f = () => { if (r.exitCode !== 0) throw new Error("git ${lsFiles} failed") }\n` +
+      `test("t", () => { expect(offenders).toEqual([]) })\n`
+    expect(isScanVerdictGuard(errorOnly), "an error message is not a scan").toBe(false)
+
+    // Both real shapes must still count, or the fix trades one blindness for
+    // another: the array form and the shell-string form are both live here.
+    // Assembled from parts, the house convention for a fixture that spells out
+    // the very shape the detector hunts: written literally, this file becomes a
+    // scanning guard by its own census and demands a corpus floor for fixtures.
+    const exec = `exec${"Sync"}`
+    const arrayForm =
+      `const out = Bun.spawnSync(["git", "${lsFiles}", "-z"], { cwd: R })\n` +
+      `test("t", () => { expect(offenders).toEqual([]) })\n`
+    const stringForm =
+      `const out = ${exec}("git ${lsFiles} -- src")\n` +
+      `test("t", () => { expect(offenders).toEqual([]) })\n`
+    expect(isScanVerdictGuard(arrayForm), "the array call form must still count").toBe(true)
+    expect(isScanVerdictGuard(stringForm), "the shell-string call form must still count").toBe(true)
   })
 
   test("every REFUTED entry is still refuted — ground truth, not a permanent excuse", () => {

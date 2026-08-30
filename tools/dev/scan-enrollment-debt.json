@@ -1,8 +1,7 @@
 {
-  "note": "Scanning guards that state a zero-verdict but pin no MEASURED reach — their floor, if any, is a number written at the call site, which cannot see a subtree disappear. Enforced by tests/unit/_arch/scan-enrollment-ratchet.test.ts. The list may only SHRINK: a new guard must call assertScanPopulation (tests/unit/_shared/scan-population.ts) and pin its reach in tools/dev/scan-reach-baseline.json, and a guard that enrolls must be removed from here. Measured 2026-08-30: 58 of 87 in-scope guards.",
+  "note": "Scanning guards that state a zero-verdict but pin no MEASURED reach — their floor, if any, is a number written at the call site, which cannot see a subtree disappear. Enforced by tests/unit/_arch/scan-enrollment-ratchet.test.ts. The list may only SHRINK: a new guard must call assertScanPopulation (tests/unit/_shared/scan-population.ts) and pin its reach in tools/dev/scan-reach-baseline.json, and a guard that enrolls must be removed from here. Measured 2026-08-30: 57 of 86 in-scope guards. (`repro-grounding` left the population when the census stopped matching a bare `ls-files` inside an error string — it never scanned.)",
   "unenrolled": [
     "src/apps/bench/benchmark-suite.test.ts",
-    "src/runner/batch/eval/repro-grounding.test.ts",
     "src/tool/terminal-surface.test.ts",
     "tests/meta/no-test-js-artifacts-hellgate.test.ts",
     "tests/unit/_arch/capability-literal-ratchet.test.ts",
