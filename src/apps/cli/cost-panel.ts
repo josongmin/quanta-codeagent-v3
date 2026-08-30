@@ -394,6 +394,14 @@ const renderOps = (ctx: PanelCtx): Pick<CostPanel, "render" | "renderDetailed" |
       // The question this whole box exists to answer once a session spawns:
       // how much of the bill was the subagents? Rendered ONLY when a subagent
       // actually spent something, so a plain session's box is unchanged.
+      // A6 — a corrupt resume keeps the session alive with EMPTY books; the
+      // box says the loss out loud instead of rendering a confident $0.00.
+      if (accounting?.snapshot().continuityLost) {
+        lines.push(
+          "",
+          "Accounting:   prior totals lost (corrupt resume state) — totals restart at $0",
+        )
+      }
       lines.push(...agentSplitLines(accounting))
       return renderBox(lines, {
         title: "session cost",

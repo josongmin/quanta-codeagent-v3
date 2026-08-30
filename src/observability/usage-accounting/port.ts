@@ -18,7 +18,7 @@
  *      re-recording it is a no-op. A retry, a replayed stream, or two sinks
  *      racing the same event cannot double-bill.
  */
-import type { UsageRecord } from "./types"
+import type { UsageProvenance, UsageRecord } from "./types"
 
 /** A roll-up over some slice of records. Tokens are the disjoint buckets. */
 export interface UsageAggregate {
@@ -63,6 +63,10 @@ export interface UsageAccountingSnapshot extends UsageAggregate {
   /** Root vs. subagent spend. Both arms always present, zeroed when unused,
    *  so a surface never has to distinguish "no subagents" from "no data". */
   readonly byKind: Readonly<Record<"root" | "subagent", UsageAggregate>>
+  /** A6 — `true` when a hydrate found corrupt/unreadable state: the books are
+   *  EMPTY, and a surface must say the prior totals were lost rather than
+   *  render a confident $0.00. Cleared by `reset()`. */
+  readonly continuityLost: boolean
 }
 
 /** Why a record was not admitted. Absent ⇒ it was. */
@@ -85,8 +89,25 @@ export interface UsageRecordResult {
 }
 
 export interface UsageAccountingPort {
+  /**
+   * A6 — mint the next call id. The SEQUENCE lives inside the authority (and
+   * is persisted with it) so a resumed session's new calls continue where the
+   * saved ones stopped — an external counter restarting at 1 would collide
+   * with restored ids and drop real spend as "duplicate".
+   */
+  mintCallId(provenance: Pick<UsageProvenance, "sessionId" | "agentId">): string
   /** Admit one priced, attributed model call. Idempotent on `callId`. */
   record(record: UsageRecord): UsageRecordResult
+  /**
+   * A6 — the durable codec pair. `serialize()` captures aggregates, buckets,
+   * the retained log, the FULL dedup memory, the mint sequence and the session
+   * binding; `hydrate()` restores them into this instance. Corrupt or
+   * wrong-shape input leaves the books EMPTY, sets `continuityLost`, and
+   * returns `false` so the caller can warn — a resume proceeds, but never
+   * silently as an exact $0.
+   */
+  serialize(): string
+  hydrate(json: string): boolean
   /** Current totals. Cheap enough to call per render. */
   snapshot(): UsageAccountingSnapshot
   /** Most recent records, newest last, bounded by the retention limit. For

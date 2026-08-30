@@ -77,6 +77,11 @@ export interface PersistTurnInput {
    *  live threads) likewise omits the field. The encode lives at the caller so
    *  this slice never value-imports the `@/objective` domain. */
   objectiveSnapshot?: () => PersistedObjectiveSnapshot | undefined
+  /** A6 — durable usage-accounting feeder, same posture as the objective row
+   *  above: the composition root supplies a lazy `serialize()` of the live
+   *  authority; called once per id-mode save; ABSENT (accounting off) ⇒ the
+   *  payload omits the field ⇒ the store preserves any on-disk books. */
+  usageAccountingSnapshot?: () => string | undefined
   /** RFC-13 HOP-2 — id-assign gate (injectable purely for tests; production
    *  reads it from `runtimeConfig()`). When true, id-LESS messages are minted a
    *  stable deterministic id at the TOP of `persistTurn` (before BOTH saves and
@@ -182,11 +187,13 @@ export const persistTurn = async (input: PersistTurnInput): Promise<void> => {
     // undefined ⇒ `objective` OMITTED ⇒ the store preserves any on-disk snapshot
     // (byte-identical). See {@link resolveObjectiveSnapshot} (guarded encode).
     const objective = resolveObjectiveSnapshot(input.objectiveSnapshot)
+    const usageAccounting = input.usageAccountingSnapshot?.()
     const payload: SavePayload = {
       reason: outcome.reason,
       turns: outcome.turns,
       messages,
       ...(objective !== undefined ? { objective } : {}),
+      ...(usageAccounting !== undefined ? { usageAccounting } : {}),
     }
     await saveSessionById(idMeta, payload)
     // RFC-01 A2 — feed a durable rewind checkpoint AFTER the transcript is on

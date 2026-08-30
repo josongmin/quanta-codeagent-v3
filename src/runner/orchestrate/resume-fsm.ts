@@ -102,6 +102,9 @@ export interface ResumeResolution {
    *  `saved.objective` unconditionally — `JSON.stringify` drops the absent field,
    *  and every consumer already presence-checks. */
   objective?: PersistedObjectiveSnapshot | undefined
+  /** A6 — durable usage-accounting state (opaque; the authority's own codec).
+   *  Present only on the id-mode resume branch when the snapshot carried it. */
+  usageAccounting?: string | undefined
 }
 
 /** HIGH-LOW: default title for `--new-session`. Compact UTC `YYYY-MM-DD HH:mm`
@@ -211,6 +214,10 @@ export const resolveResume = async (input: ResolveResumeInput): Promise<ResumeRe
       // surface can restore the goal authority (ids/revision/provenance). Absent
       // on legacy/no-objective sessions ⇒ undefined ⇒ dropped ⇒ fresh authority.
       objective: saved.objective,
+      // A6 — carry the reopened session's durable BOOKS so the surface can
+      // hydrate the live authority before the first model call. Absent on
+      // legacy / accounting-off sessions ⇒ undefined ⇒ fresh books.
+      usageAccounting: saved.usageAccounting,
     }
   }
   if (newSession) {

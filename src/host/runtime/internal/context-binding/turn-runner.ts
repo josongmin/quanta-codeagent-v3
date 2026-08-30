@@ -225,6 +225,15 @@ const persistTurnOrFailStop = async (
 const isSettlementSink = (v: unknown): v is (notice: ObjectiveSettlementNotice) => void =>
   typeof v === "function"
 
+/** A6 — defer codec work until id-mode persistence actually writes, and omit
+ * the key entirely when accounting is off (exact-optional default-off). */
+const usageAccountingPersistInput = (
+  base: RuntimeBase,
+): { readonly usageAccountingSnapshot?: () => string | undefined } => {
+  const accounting = base.usageAccounting
+  return accounting === undefined ? {} : { usageAccountingSnapshot: () => accounting.serialize() }
+}
+
 export const runRuntimeTurn = async (args: {
   readonly base: RuntimeBase
   readonly turnAssembler?: RuntimeAgentTurnAssembler
@@ -294,6 +303,10 @@ export const runRuntimeTurn = async (args: {
     // RFC-03 C2 / GOAL-04 — the lazy objective-snapshot provider now runs AFTER
     // settlement, so the persisted goal carries this attempt's receipt.
     const objectiveSnapshot = buildObjectiveSnapshotProvider(args.base.objective)
+    // A6 — the session's books ride every id-mode save, lazily: serialize runs
+    // once per save, only when an authority is wired (accounting off ⇒ the
+    // field is omitted ⇒ the store preserves any on-disk books).
+    const accountingPersistence = usageAccountingPersistInput(args.base)
     await persistTurnOrFailStop(attributed, {
       state: args.state,
       idMeta: args.idMeta,
@@ -302,6 +315,7 @@ export const runRuntimeTurn = async (args: {
       outcome,
       ...(captureCheckpoint !== undefined ? { captureCheckpoint } : {}),
       ...(objectiveSnapshot !== undefined ? { objectiveSnapshot } : {}),
+      ...accountingPersistence,
     })
     // A2 — drain artifacts registered during THIS turn into protocol refs. The
     // registry is present ONLY when `QUANTA_ARTIFACT_STORE` lifted it onto the

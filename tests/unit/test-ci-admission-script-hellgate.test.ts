@@ -30,22 +30,17 @@ describe("test:ci admission gate", () => {
     expect(stale).toEqual([])
   })
 
-  test("gives spawned catalog and subprocess rails a realistic timeout", () => {
-    const expectations = {
-      "test:ci": "--timeout=15000",
-      "test:shard": "--timeout=60000",
-    } as const
-    for (const [name, timeout] of Object.entries(expectations)) {
-      const script = packageJson.scripts?.[name]
-      expect(script, name).toContain(timeout)
-      expect(script, name).toContain("--parallel=1")
-    }
+  test("keeps the manual shard escape hatch bounded", () => {
+    const script = packageJson.scripts?.["test:shard"]
+    expect(script).toContain("--timeout=60000")
+    expect(script).toContain("--parallel=1")
   })
 
   test("serializes every shared-process test entrypoint", () => {
     const serialScripts = [
       "test",
       "test:unit",
+      "test:unit:ci",
       "test:fast",
       "test:integration",
       "test:shard",
@@ -66,5 +61,7 @@ describe("test:ci admission gate", () => {
     expect(shardRunner).toContain("proc.kill(9)")
     expect(shardRunner).toContain("assertShardCoverage(discoveries, SHARD_COUNT)")
     expect(shardRunner).toContain("checkout changed during run")
+    expect(shardRunner).toContain("require a clean checkout")
+    expect(shardRunner).toContain("--junit-out")
   })
 })

@@ -135,7 +135,7 @@ export const GATES: readonly Gate[] = [
   {
     id: "unit",
     stage: "prepush",
-    run: "bun run tools/dev/worktree-pollution-guard.ts -- bun test tests/unit --reporter=junit --reporter-outfile=.cache/unit-junit.xml",
+    run: "bun run tools/dev/worktree-pollution-guard.ts -- bun run test:unit:ci",
     why: "the unit suite, wrapped so a test that leaves a file in the worktree is caught at the source",
   },
   {
@@ -148,7 +148,7 @@ export const GATES: readonly Gate[] = [
   {
     id: "integration",
     stage: "prepush",
-    run: "bun run tools/dev/worktree-pollution-guard.ts -- bun test tests/integration",
+    run: "bun run tools/dev/worktree-pollution-guard.ts -- bun run test:integration",
     why: "the integration suite (also the home of the cases too slow for the unit budget)",
   },
   {

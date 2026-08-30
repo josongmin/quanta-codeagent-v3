@@ -177,7 +177,7 @@ export const countTestFilesUnder = (token: string): number => {
 }
 
 export const gateTokens = (allScripts: Readonly<Record<string, string>>): readonly string[] => {
-  const gates = ["test", "test:unit", "test:integration", "test:ci", "test:shard"]
+  const gates = ["test", "test:unit", "test:integration", "test:contract", "test:ci", "test:shard"]
   const out = new Set<string>()
   for (const g of gates) {
     for (const m of (allScripts[g] ?? "").matchAll(/\bbun test ([^&|]*)/g)) {
@@ -191,7 +191,7 @@ export const gateTokens = (allScripts: Readonly<Record<string, string>>): readon
 
 export const gatedRoots = (allScripts: Readonly<Record<string, string>>): readonly string[] => {
   // `test:shard` carries the same roots and nothing kept it in this list.
-  const gates = ["test", "test:unit", "test:integration", "test:ci", "test:shard"]
+  const gates = ["test", "test:unit", "test:integration", "test:contract", "test:ci", "test:shard"]
   const roots = new Set<string>()
   for (const g of gates) {
     for (const m of (allScripts[g] ?? "").matchAll(/\bbun test ([^&|]*)/g)) {

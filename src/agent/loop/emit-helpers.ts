@@ -5,6 +5,7 @@ import {
   type NormalizedUsage,
   normalizeUsage,
   priceUsage,
+  type UsageAccountingPort,
   type UsageCost,
   type UsageProvenance,
 } from "@/observability/usage-accounting"
@@ -211,11 +212,11 @@ const USAGE_SINKS: readonly UsageSink[] = [
 ]
 
 /**
- * Per-accountant call sequence, so every admitted record gets a distinct id.
+ * Fallback call sequence for the default-OFF path.
  *
- * Scoped to the ACCOUNTING PORT rather than the config: a subagent gets its own
- * config but shares its parent's accountant, so keying on the port makes the
- * sequence session-global and keeps parent and child ids from colliding.
+ * A wired authority owns and persists its own sequence. This weak map exists
+ * only when accounting is absent, where the identifier is not persisted and no
+ * accounting deduplication depends on it.
  *
  * This makes ids unique; it does not make `emitUsage` deduplicating. The port's
  * `callId` idempotency defends against a record being submitted twice from
@@ -233,10 +234,15 @@ const rejectedWarned = new WeakSet<object>()
 /** Test seam: has this authority voiced its rejection warn? */
 export const __rejectedWarnedFor = (accounting: object): boolean => rejectedWarned.has(accounting)
 
-const nextCallId = (accounting: object, provenance: UsageProvenance): string => {
-  const seq = callSeq.get(accounting) ?? { n: 0 }
+const nextCallId = (
+  accounting: UsageAccountingPort | undefined,
+  fallbackIdentity: object,
+  provenance: UsageProvenance,
+): string => {
+  if (accounting !== undefined) return accounting.mintCallId(provenance)
+  const seq = callSeq.get(fallbackIdentity) ?? { n: 0 }
   seq.n += 1
-  callSeq.set(accounting, seq)
+  callSeq.set(fallbackIdentity, seq)
   return `${provenance.sessionId}:${provenance.agentId}:${seq.n}`
 }
 
@@ -288,7 +294,7 @@ export const emitUsage = (
     provenance,
     normalized,
     eventCost: priceUsage(normalized, MODEL_RATE_CARD, { pricingVersion: PRICING_VERSION }),
-    callId: nextCallId(config.usageAccounting ?? config, provenance),
+    callId: nextCallId(config.usageAccounting, config, provenance),
   }
   for (const sink of USAGE_SINKS) sink(ctx)
 }

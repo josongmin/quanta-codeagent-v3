@@ -1,3 +1,4 @@
+import { readFileSync, rmSync, writeFileSync } from "node:fs"
 import {
   assertShardCoverage,
   parseShardDiscovery,
@@ -21,15 +22,34 @@ const SHARD_COUNT = 8
 // minutes still bounds a CPU-bound Bun worker that ignores Bun's per-test
 // timeout while leaving headroom for the measured cold path.
 const SHARD_TIMEOUT_MS = 12 * 60_000
-const TEST_ROOTS = [
-  "tests/unit",
-  "tests/meta",
-  "tests/adversarial",
-  "tests/measurement",
-  "tests/integration",
-  "./src/",
-  "./tools/",
-] as const
+const SUITE_ROOTS = {
+  full: [
+    "tests/unit",
+    "tests/meta",
+    "tests/adversarial",
+    "tests/measurement",
+    "tests/integration",
+    "./src/",
+    "./tools/",
+  ],
+  core: [
+    "tests/unit",
+    "tests/meta",
+    "tests/adversarial",
+    "tests/measurement",
+    "./src/",
+    "./tools/",
+  ],
+  unit: ["tests/unit"],
+  integration: ["tests/integration"],
+} as const
+
+type SuiteName = keyof typeof SUITE_ROOTS
+
+interface RunnerOptions {
+  readonly suite: SuiteName
+  readonly junitOut?: string
+}
 
 interface GitSnapshot {
   readonly head: string
@@ -62,6 +82,72 @@ const gitSnapshot = async (): Promise<GitSnapshot> => {
 const sameSnapshot = (left: GitSnapshot, right: GitSnapshot): boolean =>
   left.head === right.head && left.status === right.status
 
+const suiteOption = (arg: string): SuiteName | undefined => {
+  if (!arg.startsWith("--suite=")) return undefined
+  const candidate = arg.slice("--suite=".length)
+  if (!(candidate in SUITE_ROOTS)) throw new Error(`unknown shard suite: ${candidate}`)
+  return candidate as SuiteName
+}
+
+const junitOption = (arg: string): string | undefined => {
+  if (!arg.startsWith("--junit-out=")) return undefined
+  const candidate = arg.slice("--junit-out=".length)
+  if (!candidate.startsWith(".cache/") || candidate.includes("..")) {
+    throw new Error("--junit-out must be a safe .cache/ path")
+  }
+  return candidate
+}
+
+const parseOptions = (args: readonly string[]): RunnerOptions => {
+  let suite: SuiteName = "full"
+  let junitOut: string | undefined
+  for (const arg of args) {
+    if (arg === "--parallel=1") continue
+    const selectedSuite = suiteOption(arg)
+    if (selectedSuite !== undefined) {
+      suite = selectedSuite
+      continue
+    }
+    const selectedJunit = junitOption(arg)
+    if (selectedJunit !== undefined) {
+      junitOut = selectedJunit
+      continue
+    }
+    throw new Error(`unknown shard runner argument: ${arg}`)
+  }
+  if (junitOut !== undefined && suite !== "unit") {
+    throw new Error("JUnit shard receipts are reserved for --suite=unit")
+  }
+  return junitOut === undefined ? { suite } : { suite, junitOut }
+}
+
+const junitShardPath = (junitOut: string, index: number): string => `${junitOut}.shard-${index}.xml`
+
+const prepareJunit = (junitOut: string): void => {
+  rmSync(junitOut, { force: true })
+  for (let index = 1; index <= SHARD_COUNT; index += 1) {
+    rmSync(junitShardPath(junitOut, index), { force: true })
+  }
+}
+
+const mergeJunit = (junitOut: string): void => {
+  const bodies: string[] = []
+  for (let index = 1; index <= SHARD_COUNT; index += 1) {
+    const xml = readFileSync(junitShardPath(junitOut, index), "utf8")
+    const root = xml.indexOf("<testsuites")
+    const open = root < 0 ? -1 : xml.indexOf(">", root)
+    const close = xml.lastIndexOf("</testsuites>")
+    if (root < 0 || open < 0 || close < 0 || !xml.includes("<testcase")) {
+      throw new Error(`[test:shards] invalid JUnit receipt from shard ${index}/${SHARD_COUNT}`)
+    }
+    bodies.push(xml.slice(open + 1, close).trim())
+  }
+  writeFileSync(
+    junitOut,
+    `<?xml version="1.0" encoding="UTF-8"?>\n<testsuites name="bun test sharded">\n${bodies.join("\n")}\n</testsuites>\n`,
+  )
+}
+
 const relay = async (
   stream: ReadableStream<Uint8Array>,
   write: (text: string) => void,
@@ -82,15 +168,28 @@ const relay = async (
 
 const runShard = async (
   index: number,
+  opts: RunnerOptions,
 ): Promise<{
   readonly code: number
   readonly timedOut: boolean
   readonly discovery?: ShardDiscovery
 }> => {
   const shard = `${index}/${SHARD_COUNT}`
+  const junitArgs =
+    opts.junitOut === undefined
+      ? []
+      : ["--reporter=junit", `--reporter-outfile=${junitShardPath(opts.junitOut, index)}`]
   process.stdout.write(`\n[test:shards] START shard=${shard}\n`)
   const proc = Bun.spawn({
-    cmd: ["bun", "test", ...TEST_ROOTS, "--timeout=60000", "--parallel=1", `--shard=${shard}`],
+    cmd: [
+      "bun",
+      "test",
+      ...SUITE_ROOTS[opts.suite],
+      "--timeout=60000",
+      "--parallel=1",
+      `--shard=${shard}`,
+      ...junitArgs,
+    ],
     stdout: "pipe",
     stderr: "pipe",
   })
@@ -121,15 +220,20 @@ const runShard = async (
 }
 
 const main = async (): Promise<void> => {
+  const opts = parseOptions(process.argv.slice(2))
   const before = await gitSnapshot()
-  process.stdout.write(
-    `[test:shards] frozen head=${before.head} dirty=${before.status === "" ? "no" : "yes"}\n`,
-  )
+  if (before.status !== "") {
+    throw new Error(
+      "[test:shards] INVALID — authoritative receipts require a clean checkout. Commit or stash changes first.",
+    )
+  }
+  if (opts.junitOut !== undefined) prepareJunit(opts.junitOut)
+  process.stdout.write(`[test:shards] frozen head=${before.head} suite=${opts.suite} dirty=no\n`)
 
   const failed: number[] = []
   const discoveries: ShardDiscovery[] = []
   for (let index = 1; index <= SHARD_COUNT; index += 1) {
-    const result = await runShard(index)
+    const result = await runShard(index, opts)
     if (result.code !== 0 || result.timedOut) failed.push(index)
     if (result.discovery !== undefined) discoveries.push(result.discovery)
   }
@@ -145,8 +249,9 @@ const main = async (): Promise<void> => {
     throw new Error(`[test:shards] FAILED shard(s): ${failed.join(", ")}/${SHARD_COUNT}`)
   }
   assertShardCoverage(discoveries, SHARD_COUNT)
+  if (opts.junitOut !== undefined) mergeJunit(opts.junitOut)
   process.stdout.write(
-    `[test:shards] PASS shards=1-${SHARD_COUNT}/${SHARD_COUNT} head=${before.head}\n`,
+    `[test:shards] PASS suite=${opts.suite} shards=1-${SHARD_COUNT}/${SHARD_COUNT} head=${before.head}\n`,
   )
 }
 

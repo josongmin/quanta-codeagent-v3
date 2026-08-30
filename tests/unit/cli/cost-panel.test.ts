@@ -153,6 +153,15 @@ describe("projection: the snapshot IS the authority's numbers", () => {
   })
 })
 
+describe("A6 — a corrupt resume never renders as a confident zero", () => {
+  test("continuityLost shows in /cost; a healthy panel shows nothing", () => {
+    const { panel, accounting } = make()
+    expect(panel.renderDetailed()).not.toContain("prior totals lost")
+    accounting.hydrate("{ corrupt")
+    expect(stripAnsi(panel.renderDetailed())).toContain("prior totals lost")
+  })
+})
+
 // ── single-line render ──────────────────────────────────────────────────
 
 describe("render(): single-line status form", () => {

@@ -477,6 +477,11 @@ export interface SavedSession {
   /** RFC-01 A2 — durable rollback-operation receipts (intent + terminal).
    *  Absent on legacy snapshots and on sessions that never rolled back. */
   rollbackOperations?: RollbackOperationRecord[]
+  /** A6 — durable usage-accounting state (an OPAQUE string: the authority
+   *  owns its own codec, the store just carries it — same posture as the
+   *  budget-ledger sidecar in import/export). Absent on legacy snapshots and
+   *  sessions saved with accounting off ⇒ byte-identical serialization. */
+  usageAccounting?: string
   /** RFC-03 C2 — durable per-thread objective snapshot. Absent on legacy
    *  snapshots and on sessions with no objective ⇒ serialization is
    *  byte-identical; absence means legacy/no objective, never an inferred
@@ -494,6 +499,11 @@ export interface SavePayload {
    *  as-is (a normal transcript save never drops rollback state). */
   rollbackCheckpoints?: RollbackCheckpointRecord[]
   rollbackOperations?: RollbackOperationRecord[]
+  /** A6 — optional durable usage-accounting state to persist alongside the
+   *  transcript. Absent ⇒ the existing on-disk value is preserved as-is (a
+   *  normal transcript save never drops the session's books — same discipline
+   *  as the rollback ledger and objective snapshot). */
+  usageAccounting?: string
   /** RFC-03 C2 — optional durable objective snapshot to persist alongside the
    *  transcript. Absent ⇒ the existing on-disk objective is preserved as-is (a
    *  normal transcript save never drops objective state — same discipline as

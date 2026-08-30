@@ -105,13 +105,34 @@ export const createUsageAccounting = (opts: UsageAccountingOpts = {}): UsageAcco
   let byModel = new Map<string, Bucket>()
   let byAgent = new Map<string, Bucket>()
   let boundSessionId: string | undefined
+  // A6 — the mint sequence and the continuity flag, both part of the durable
+  // state. The sequence is authority-owned so a resume CONTINUES it; an
+  // external counter restarting at 1 would collide with restored ids.
+  let seq = 0
+  let continuityLost = false
   let byKind: Record<"root" | "subagent", Bucket> = { root: emptyBucket(), subagent: emptyBucket() }
   // Admitted call ids. Grows with the session; a call id is small and the
   // alternative — forgetting one — is a double-billed retry.
   let seen = new Set<string>()
   let retained: UsageRecord[] = []
 
+  const clearBooks = (): void => {
+    total = emptyBucket()
+    byModel = new Map()
+    byAgent = new Map()
+    boundSessionId = undefined
+    byKind = { root: emptyBucket(), subagent: emptyBucket() }
+    seen = new Set()
+    retained = []
+    seq = 0
+  }
+
   return {
+    mintCallId(provenance): string {
+      seq += 1
+      return `${provenance.sessionId}:${provenance.agentId}:${seq}`
+    },
+
     record(record: UsageRecord): UsageRecordResult {
       if (seen.has(record.callId)) return { admitted: false, reason: "duplicate" }
       if (!isFinitelyCounted(record.usage, record.cost)) {
@@ -141,6 +162,7 @@ export const createUsageAccounting = (opts: UsageAccountingOpts = {}): UsageAcco
       // Read straight off the counters. Nothing here walks `retained`.
       return {
         ...freeze(total),
+        continuityLost,
         retained: retained.length,
         byModel: frozenMap(byModel),
         byAgent: frozenMap(byAgent),
@@ -155,14 +177,88 @@ export const createUsageAccounting = (opts: UsageAccountingOpts = {}): UsageAcco
       return retained.slice(Math.max(0, retained.length - n))
     },
 
+    serialize(): string {
+      // v1. The FULL dedup memory rides along — rebuilding `seen` from the
+      // retained slice would re-bill exactly the callIds old enough to have
+      // been evicted from it.
+      return JSON.stringify({
+        v: 1,
+        boundSessionId,
+        seq,
+        seen: [...seen],
+        retained,
+        total,
+        byModel: [...byModel.entries()],
+        byAgent: [...byAgent.entries()],
+        byKind,
+      })
+    },
+
+    hydrate(json: string): boolean {
+      // Corrupt or wrong-shape state: the books stay EMPTY and SAY so — a
+      // resume proceeds, but never silently as an exact $0.
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(json)
+      } catch {
+        clearBooks()
+        continuityLost = true
+        return false
+      }
+      const d = parsed as {
+        v?: number
+        boundSessionId?: string
+        seq?: number
+        seen?: unknown
+        retained?: unknown
+        total?: Bucket
+        byModel?: Array<[string, Bucket]>
+        byAgent?: Array<[string, Bucket]>
+        byKind?: Record<"root" | "subagent", Bucket>
+      }
+      const sane =
+        d !== null &&
+        typeof d === "object" &&
+        d.v === 1 &&
+        Array.isArray(d.seen) &&
+        Array.isArray(d.retained) &&
+        typeof d.total === "object" &&
+        d.total !== null &&
+        Number.isFinite(d.total.totalUsd) &&
+        typeof d.seq === "number" &&
+        Number.isFinite(d.seq) &&
+        Array.isArray(d.byModel) &&
+        Array.isArray(d.byAgent) &&
+        typeof d.byKind === "object" &&
+        d.byKind !== null
+      if (!sane) {
+        clearBooks()
+        continuityLost = true
+        return false
+      }
+      boundSessionId = d.boundSessionId
+      seq = Math.max(0, Math.floor(d.seq as number))
+      seen = new Set((d.seen as unknown[]).filter((x): x is string => typeof x === "string"))
+      retained = (d.retained as UsageRecord[]).slice(-maxRetained)
+      total = { ...emptyBucket(), ...(d.total as Bucket) }
+      byModel = new Map(
+        (d.byModel as Array<[string, Bucket]>).map(([k, b]) => [k, { ...emptyBucket(), ...b }]),
+      )
+      byAgent = new Map(
+        (d.byAgent as Array<[string, Bucket]>).map(([k, b]) => [k, { ...emptyBucket(), ...b }]),
+      )
+      const kinds = d.byKind as Record<"root" | "subagent", Bucket>
+      byKind = {
+        root: { ...emptyBucket(), ...kinds.root },
+        subagent: { ...emptyBucket(), ...kinds.subagent },
+      }
+      continuityLost = false
+      return true
+    },
+
     reset(): void {
-      total = emptyBucket()
-      byModel = new Map()
-      byAgent = new Map()
-      boundSessionId = undefined
-      byKind = { root: emptyBucket(), subagent: emptyBucket() }
-      seen = new Set()
-      retained = []
+      clearBooks()
+      continuityLost = false
     },
   }
 }

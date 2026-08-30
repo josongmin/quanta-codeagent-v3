@@ -124,7 +124,7 @@ const REMAINING = [
   { path: "tools/feature-catalog/yaml.ts", reason: "YAML trailing-comment parser" },
 ] as const
 
-const REMAINING_PATHS = REMAINING.map(({ path }) => path)
+const REMAINING_PATHS: readonly string[] = REMAINING.map(({ path }) => path)
 
 describe("the comment-scanner burn-down", () => {
   test("🔴 no NEW guard carries its own defeatable comment stripper", () => {

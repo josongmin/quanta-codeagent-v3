@@ -67,8 +67,7 @@ jobs:
         # contains -- so neither review nor `git log` could ever have caught it.
         # `.cache/` is gitignored, so the junit outfile below is not a leak.
         run: >-
-          bun run tools/dev/worktree-pollution-guard.ts --
-          bun test tests/unit --reporter=junit --reporter-outfile=.cache/unit-junit.xml
+          bun run tools/dev/worktree-pollution-guard.ts -- bun run test:unit:ci
       - name: cwd parity (a guard must give the same verdict from any directory)
         # Runs each arch/meta guard from the repo root AND from a throwaway working
         # directory, and fails only on the DIFFERENCE -- a single-arm run cannot
@@ -117,8 +116,7 @@ jobs:
         run: bun run tools/dev/unit-speed-budget.ts .cache/unit-junit.xml
       - name: integration (guarded — a test may not leave files in the worktree)
         run: >-
-          bun run tools/dev/worktree-pollution-guard.ts --
-          bun test tests/integration
+          bun run tools/dev/worktree-pollution-guard.ts -- bun run test:integration
       - name: interactive CLI e2e (PTY)
         # aug-23 audit — this suite was the ONLY coverage of the raw-mode
         # interactive input layer and ran in NO workflow, so it rotted unseen.

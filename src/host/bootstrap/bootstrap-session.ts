@@ -194,6 +194,17 @@ const assembleBootstrapResult = async (
 
     const resume = await resolveSessionResume(deps, runtime, slog, features, tooling.sessionId)
     const { cwd, idMeta, history, sessionId } = resume
+    // A6 — restore the session's BOOKS before the first model call. Corrupt
+    // state keeps the resume alive with EMPTY books that say so (the authority
+    // sets continuityLost; /cost renders the loss) — never a confident $0.
+    if (usageAccounting !== undefined && resume.usageAccounting !== undefined) {
+      if (!usageAccounting.hydrate(resume.usageAccounting)) {
+        slog.warn("usage-accounting.resume.corrupt", {
+          sessionId,
+          note: "prior totals could not be restored; starting empty books (continuity lost)",
+        })
+      }
+    }
     // RFC-05 E3 (durable resume) — bind the ONE authority now the session id resolved.
     const { permissionModeState, postureControl, questionGuard } = await resolveDurableLivePosture({
       bind: bindLivePosture,

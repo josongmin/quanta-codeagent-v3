@@ -85,6 +85,10 @@ export const resolveSessionResume = async (
    *  resume only). Threaded onto the bootstrap result so the surface restores the
    *  goal authority. Absent on fresh/legacy/no-objective sessions. */
   readonly objective: Awaited<ReturnType<SessionBootstrapDeps["resolveResume"]>>["objective"]
+  /** A6 — the reopened session's durable books (opaque; authority codec). */
+  readonly usageAccounting: Awaited<
+    ReturnType<SessionBootstrapDeps["resolveResume"]>
+  >["usageAccounting"]
 }> => {
   let cwd = runtime.cwd
   // `startupLog` is `undefined` when the welcome banner will render (see
@@ -129,5 +133,12 @@ export const resolveSessionResume = async (
       `quanta ready (provider=${runtime.provider}, model=${runtime.model}, mode=${runtime.mode}, cwd=${cwd}, session=${idMeta.id})`,
     )
   }
-  return { cwd, idMeta, history, sessionId, objective: resolved.objective }
+  return {
+    cwd,
+    idMeta,
+    history,
+    sessionId,
+    objective: resolved.objective,
+    usageAccounting: resolved.usageAccounting,
+  }
 }

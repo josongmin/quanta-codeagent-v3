@@ -419,6 +419,10 @@ const savedSessionSchema = z.object({
   // objective, never an inferred default). The `version` literal fail-closes the
   // WHOLE load on an unknown version.
   objective: objectiveSnapshotSchema.optional(),
+  // A6 — durable usage-accounting state. OPAQUE by design: the authority owns
+  // its codec (corrupt content is ITS hydrate's problem, surfaced as
+  // continuity-lost), so the session schema only asserts "a string".
+  usageAccounting: z.string().optional(),
   // RFC-01 A2 (aug-02) — durable rollback records. BOTH optional: a legacy
   // snapshot (minted before these fields) validates and the loader defaults
   // the absent collection to `[]` (see `readSavedSession`). The element
@@ -539,11 +543,19 @@ const commitMetaAfterSnapshot = async (
  *  missing / corrupt / legacy file ⇒ nothing to preserve (⇒ byte-identical). */
 const readExistingDurable = async (
   path: string,
-): Promise<Pick<SavedSession, "rollbackCheckpoints" | "rollbackOperations" | "objective">> => {
+): Promise<
+  Pick<SavedSession, "rollbackCheckpoints" | "rollbackOperations" | "objective" | "usageAccounting">
+> => {
   if (!(await fileExists(path))) return {}
   try {
     const parsed = JSON.parse(await readFile(path)) as Partial<SavedSession>
-    const out: Pick<SavedSession, "rollbackCheckpoints" | "rollbackOperations" | "objective"> = {}
+    const out: Pick<
+      SavedSession,
+      "rollbackCheckpoints" | "rollbackOperations" | "objective" | "usageAccounting"
+    > = {}
+    // A6 — preserve the durable accounting state across an omitting save, the
+    // same discipline as the ledger/objective rows below.
+    if (typeof parsed.usageAccounting === "string") out.usageAccounting = parsed.usageAccounting
     if (Array.isArray(parsed.rollbackCheckpoints))
       out.rollbackCheckpoints = parsed.rollbackCheckpoints
     if (Array.isArray(parsed.rollbackOperations)) out.rollbackOperations = parsed.rollbackOperations
@@ -643,19 +655,27 @@ export const saveSessionById = (
 const resolveDurableRecords = async (
   payload: SavePayload,
   path: string,
-): Promise<Pick<SavedSession, "rollbackCheckpoints" | "rollbackOperations" | "objective">> => {
+): Promise<
+  Pick<SavedSession, "rollbackCheckpoints" | "rollbackOperations" | "objective" | "usageAccounting">
+> => {
   const needPreserve =
     payload.rollbackCheckpoints === undefined ||
     payload.rollbackOperations === undefined ||
-    payload.objective === undefined
+    payload.objective === undefined ||
+    payload.usageAccounting === undefined
   const preserved = needPreserve ? await readExistingDurable(path) : {}
-  const out: Pick<SavedSession, "rollbackCheckpoints" | "rollbackOperations" | "objective"> = {}
+  const out: Pick<
+    SavedSession,
+    "rollbackCheckpoints" | "rollbackOperations" | "objective" | "usageAccounting"
+  > = {}
   const rollbackCheckpoints = payload.rollbackCheckpoints ?? preserved.rollbackCheckpoints
   const rollbackOperations = payload.rollbackOperations ?? preserved.rollbackOperations
   const objective = payload.objective ?? preserved.objective
+  const usageAccounting = payload.usageAccounting ?? preserved.usageAccounting
   if (rollbackCheckpoints !== undefined) out.rollbackCheckpoints = rollbackCheckpoints
   if (rollbackOperations !== undefined) out.rollbackOperations = rollbackOperations
   if (objective !== undefined) out.objective = objective
+  if (usageAccounting !== undefined) out.usageAccounting = usageAccounting
   return out
 }
 
