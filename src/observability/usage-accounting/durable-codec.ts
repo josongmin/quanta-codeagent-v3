@@ -278,6 +278,10 @@ const readBucketEntries = (
 }
 
 const approximatelyEqual = (left: number, right: number): boolean =>
+  // Finite inputs can overflow while folding. Infinity <= Infinity must never
+  // turn a non-conserving USD aggregate into a successful tolerance comparison.
+  Number.isFinite(left) &&
+  Number.isFinite(right) &&
   Math.abs(left - right) <= 1e-9 * Math.max(1, Math.abs(left), Math.abs(right))
 
 // Only USD folds have floating-point error. Integer tokens/calls must conserve

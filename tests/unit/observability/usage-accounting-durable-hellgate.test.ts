@@ -68,7 +68,11 @@ type MutableDurable = {
   byModel: Array<[string, Record<string, unknown>]>
   byAgent: Array<[string, Record<string, unknown>]>
   byKind: { root: Record<string, unknown>; subagent: Record<string, unknown> }
-  retained: Array<{ callId: string; usage: Record<string, unknown> }>
+  retained: Array<{
+    callId: string
+    usage: Record<string, unknown>
+    cost: Record<string, unknown>
+  }>
 }
 
 const withConservedToken = (payload: MutableDurable, token: string, count: number): void => {
@@ -133,7 +137,61 @@ describe("R1 — durable token and conservation mutation rails", () => {
       bucket.freshInputTokens = 1_000_000_000_001
       expect(createUsageAccounting().hydrate(JSON.stringify(payload))).toBe(false)
     })
+
+    test(`${dimension}: finite USD buckets whose sum overflows cannot conserve a finite total`, () => {
+      const source = createUsageAccounting()
+      record(source, source.mintCallId(PROV))
+      record(source, source.mintCallId(PROV))
+      const payload = JSON.parse(source.serialize()) as MutableDurable
+      const half = { ...payload.total, totalUsd: 1e308, freshInputTokens: 1_000_000, calls: 1 }
+      if (dimension === "byKind") payload.byKind = { root: half, subagent: { ...half } }
+      else
+        payload[dimension] = [
+          ["first", half],
+          ["second", { ...half }],
+        ]
+      const restored = createUsageAccounting()
+      const blob = JSON.stringify(payload)
+      expect(() => restored.hydrate(blob)).not.toThrow()
+      expect(restored.hydrate(blob)).toBe(false)
+      expect(restored.snapshot()).toMatchObject({ calls: 0, continuityLost: true })
+    })
   }
+
+  test("finite retained cost components whose sum overflows are rejected", () => {
+    const source = createUsageAccounting()
+    record(source, source.mintCallId(PROV))
+    const payload = JSON.parse(source.serialize()) as MutableDurable
+    const retained = payload.retained[0]
+    if (retained === undefined) throw new Error("valid fixture record missing")
+    retained.cost.freshInputUsd = 1e308
+    retained.cost.cacheReadUsd = 1e308
+    const restored = createUsageAccounting()
+    const blob = JSON.stringify(payload)
+    expect(() => restored.hydrate(blob)).not.toThrow()
+    expect(restored.hydrate(blob)).toBe(false)
+    expect(restored.snapshot()).toMatchObject({ calls: 0, continuityLost: true })
+  })
+
+  test("normal USD rounding stays accepted but a material finite mismatch is rejected", () => {
+    const source = createUsageAccounting()
+    record(source, source.mintCallId(PROV))
+    record(source, source.mintCallId(PROV))
+    const payload = JSON.parse(source.serialize()) as MutableDurable
+    payload.total.totalUsd = 0.3
+    payload.byKind.root.totalUsd = 0.3
+    const agent = payload.byAgent[0]?.[1]
+    if (agent === undefined) throw new Error("valid fixture agent missing")
+    agent.totalUsd = 0.3
+    const half = { ...payload.total, freshInputTokens: 1_000_000, calls: 1 }
+    payload.byModel = [
+      ["first", { ...half, totalUsd: 0.1 }],
+      ["second", { ...half, totalUsd: 0.2 }],
+    ]
+    expect(createUsageAccounting().hydrate(JSON.stringify(payload))).toBe(true)
+    payload.total.totalUsd = 0.30001
+    expect(createUsageAccounting().hydrate(JSON.stringify(payload))).toBe(false)
+  })
 
   test("negative and non-finite nested aggregates never hydrate or throw", () => {
     const source = createUsageAccounting()
