@@ -73,23 +73,19 @@ const tabTransport = (sends: Sent[]): CdpTransport => ({
     let onMsg: (raw: string) => void = () => {}
     let targets = 0
     let sessionsN = 0
+    const evaluateReply = (expression: string): unknown => {
+      if (expression === "document.title") return { result: { value: "Tab Page" } }
+      if (expression.includes("walk(document.body"))
+        return { result: { value: JSON.stringify(DOM_FIXTURE) } }
+      return { result: { value: null } }
+    }
     const replyFor = (m: Sent): unknown => {
-      if (m.method === "Target.createTarget") {
-        targets += 1
-        return { targetId: `t${targets}` }
+      const handlers: Record<string, () => unknown> = {
+        "Target.createTarget": () => ({ targetId: `t${++targets}` }),
+        "Target.attachToTarget": () => ({ sessionId: `s${++sessionsN}` }),
+        "Runtime.evaluate": () => evaluateReply(m.params.expression ?? ""),
       }
-      if (m.method === "Target.attachToTarget") {
-        sessionsN += 1
-        return { sessionId: `s${sessionsN}` }
-      }
-      if (m.method === "Runtime.evaluate") {
-        const expr = m.params.expression ?? ""
-        if (expr === "document.title") return { result: { value: "Tab Page" } }
-        if (expr.includes("walk(document.body"))
-          return { result: { value: JSON.stringify(DOM_FIXTURE) } }
-        return { result: { value: null } }
-      }
-      return {}
+      return handlers[m.method]?.() ?? {}
     }
     const respond = (m: Sent): void => {
       onMsg(JSON.stringify({ id: m.id, result: replyFor(m) }))
