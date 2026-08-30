@@ -357,20 +357,6 @@
       ]
     },
     {
-      "file": "tests/unit/side-agent-stopall-wiring-guard.test.ts",
-      "klass": "B-top-level",
-      "enumerators": [
-        "readdirSync"
-      ],
-      "recursive": false,
-      "absolutePaths": false,
-      "derived": false,
-      "roots": 1,
-      "floorLines": [
-        "90: expect(callSites.length).toBeGreaterThanOrEqual(1)"
-      ]
-    },
-    {
       "file": "tests/unit/apps/bench/promax/promax-bootstrap-phase-reachability.test.ts",
       "klass": "C-derived/content-filtered",
       "enumerators": [

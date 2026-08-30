@@ -26,7 +26,6 @@
     "tests/unit/runtime-config-no-dead-knob-ratchet.test.ts",
     "tests/unit/runtime/exec-cluster-spawn-env-scrub-ban-hellgate.test.ts",
     "tests/unit/runtime/single-pid-kill-ban-hellgate.test.ts",
-    "tests/unit/side-agent-stopall-wiring-guard.test.ts",
     "tests/unit/slice-boundary-config-parity.test.ts",
     "tests/unit/src-no-sketchy-code.test.ts",
     "tests/unit/tool-surface-manifest-hellgate.test.ts"
@@ -412,6 +411,9 @@
     ],
     "tests/unit/objective/authority-boundary-ratchet.test.ts": [
       "tests/unit/objective/authority-boundary-ratchet.test.ts#SRC"
+    ],
+    "tests/unit/side-agent-stopall-wiring-guard.test.ts": [
+      "tests/unit/side-agent-stopall-wiring-guard.test.ts#SRC"
     ]
   }
 }

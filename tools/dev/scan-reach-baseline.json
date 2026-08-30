@@ -362,6 +362,9 @@
     "tests/unit/session-turn-driver-thin-surface-hellgate.test.ts#session-loop-slice": {
       "walked": 14
     },
+    "tests/unit/side-agent-stopall-wiring-guard.test.ts#SRC": {
+      "walked": 3656
+    },
     "tests/unit/silent-catch-24h-ratchet.test.ts#dir": {
       "walked": 27
     },
