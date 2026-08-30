@@ -145,7 +145,7 @@ const importLineFrom = (
     target: resolveRelTarget(match[4] ?? "", agentFiles),
     line,
     typeOnly,
-    valueNames: extractValueNames(symbolsBlob, typeOnly),
+    valueNames: typeOnly ? [] : extractValueNames(symbolsBlob),
   }
 }
 
@@ -186,9 +186,8 @@ const resolveRelTarget = (spec: string, agentFiles: ReadonlySet<string>): string
  *  Skip names individually marked `type` (mixed imports like
  *  `import { type Foo, bar }`). For `import X from "..."` (default), return
  *  `["default:X"]`. For `import * as ns from "..."`, return `["*:ns"]`.
- *  When the whole import is `type`-only, return `[]`. */
-const extractValueNames = (blob: string, typeOnly: boolean): string[] => {
-  if (typeOnly) return []
+ *  Whole type-only imports are filtered by the caller. */
+const extractValueNames = (blob: string): string[] => {
   const ns = blob.match(/\*\s+as\s+([A-Za-z_$][\w$]*)/)
   if (ns) return [`*:${ns[1]}`]
   const brace = blob.match(/\{([^}]*)\}/)
