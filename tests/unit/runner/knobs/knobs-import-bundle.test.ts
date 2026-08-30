@@ -90,6 +90,7 @@ import { verifySelectRegressionKnob } from "@/runner/knobs/knobs/verify-select-r
 import { verifySelectReproKnob } from "@/runner/knobs/knobs/verify-select-repro"
 import { verifySelectRiskGateKnob } from "@/runner/knobs/knobs/verify-select-risk-gate"
 import { workingStateKnob } from "@/runner/knobs/knobs/working-state"
+import { assertScanPopulation } from "../../_shared/scan-population"
 
 const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(acceptanceKnob),
@@ -200,11 +201,24 @@ describe("per-knob side-effect import bundle", () => {
   // of the bundle test. Derived from the filesystem so the count is never stale.
   test("ALL_KNOBS covers every per-knob file (no forgotten knob)", async () => {
     const files = await readdir(PER_KNOB_DIR)
-    const knobFileCount = files.filter((f) => f.endsWith(".ts") && f !== "index.ts").length
     // `ALL_KNOBS.length === knobFileCount` is satisfied by 0 === 0, so this arm
-    // passed with the knob directory emptied — proven by the empty-corpus
-    // oracle. 68 per-knob files today; the floor is derived from that, not `> 0`.
-    expect(knobFileCount, "the per-knob directory read almost nothing").toBeGreaterThan(50)
+    // passed with the knob directory emptied — proven by the empty-corpus oracle.
+    //
+    // The floor used to be `> 50` against 68 real modules, written here. That is
+    // a number this author picked and it lets eighteen modules vanish silently;
+    // the reach now comes from the committed baseline at the MEASURED value, and
+    // is the intersection with what git TRACKS rather than whatever the listing
+    // returned. The directory is flat, so the claim is the non-recursive one.
+    assertScanPopulation(
+      files.filter((f) => f.endsWith(".ts")).map((f) => join(PER_KNOB_DIR, f)),
+      PER_KNOB_DIR,
+      {
+        id: "tests/unit/runner/knobs/knobs-import-bundle.test.ts#PER-KNOB-DIR",
+        collectable: (n) => n.endsWith(".ts"),
+        topLevelOnly: true,
+      },
+    )
+    const knobFileCount = files.filter((f) => f.endsWith(".ts") && f !== "index.ts").length
     expect(ALL_KNOBS.length).toBe(knobFileCount)
   })
 

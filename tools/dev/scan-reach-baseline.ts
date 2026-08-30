@@ -285,7 +285,13 @@ if (import.meta.main) {
       !f.includes("_shared/scan-population") &&
       !f.includes("floor-hellgate"),
   )
-  const child = Bun.spawnSync(["bun", "test", ...files], {
+  // The repo's own suites run at `--timeout=15000` (`test:ci`) and `60000`
+  // (`test:shard`); this child ran at bun's 5s default, TIGHTER than any gate.
+  // That went unnoticed while the exit code was printed and never checked — once
+  // it was, two guards read as failures for being slower than a budget nothing
+  // else imposes. Both pass at 60s, so a timeout here now means what it means
+  // elsewhere: the guard hung, not that it is a scanning guard.
+  const child = Bun.spawnSync(["bun", "test", "--timeout=60000", ...files], {
     env: { ...process.env, QUANTA_SCAN_REACH_RECORD: sink },
     stdout: "pipe",
     stderr: "pipe",
