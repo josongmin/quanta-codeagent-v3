@@ -4,7 +4,10 @@
   "description": "Native macOS Virtualization.framework binding for quanta MCP Skybridge Phase 3 (ADR-0190 scaffold)",
   "main": "index.js",
   "types": "index.d.ts",
-  "files": ["index.js", "index.d.ts"],
+  "files": [
+    "index.js",
+    "index.d.ts"
+  ],
   "license": "MIT",
   "engines": {
     "node": ">= 20"
@@ -13,7 +16,10 @@
     "name": "darwin-vz-helper",
     "triples": {
       "defaults": false,
-      "additional": ["aarch64-apple-darwin", "x86_64-apple-darwin"]
+      "additional": [
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin"
+      ]
     }
   },
   "scripts": {

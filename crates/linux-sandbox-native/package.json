@@ -4,7 +4,10 @@
   "description": "Native Linux Landlock + seccomp binding for quanta OS sandbox (ADR-0175 Phase 3)",
   "main": "index.js",
   "types": "index.d.ts",
-  "files": ["index.js", "index.d.ts"],
+  "files": [
+    "index.js",
+    "index.d.ts"
+  ],
   "license": "MIT",
   "engines": {
     "node": ">= 20"

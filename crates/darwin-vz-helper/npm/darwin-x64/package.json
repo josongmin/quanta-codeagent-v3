@@ -3,11 +3,17 @@
   "version": "0.1.0",
   "description": "Native macOS Virtualization.framework binding (x86_64-apple-darwin) — quanta Skybridge Phase 3 (ADR-0190)",
   "main": "darwin-vz-helper.darwin-x64.node",
-  "files": ["darwin-vz-helper.darwin-x64.node"],
+  "files": [
+    "darwin-vz-helper.darwin-x64.node"
+  ],
   "license": "MIT",
   "engines": {
     "node": ">= 20"
   },
-  "os": ["darwin"],
-  "cpu": ["x64"]
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "x64"
+  ]
 }

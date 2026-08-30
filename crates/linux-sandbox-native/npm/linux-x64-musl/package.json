@@ -2,11 +2,19 @@
   "name": "@quanta/linux-sandbox-native-linux-x64-musl",
   "version": "0.1.0",
   "description": "Linux x64 (musl) native binary for @quanta/linux-sandbox-native (ADR-0175)",
-  "os": ["linux"],
-  "cpu": ["x64"],
-  "libc": ["musl"],
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "libc": [
+    "musl"
+  ],
   "main": "linux-sandbox-native.linux-x64-musl.node",
-  "files": ["linux-sandbox-native.linux-x64-musl.node"],
+  "files": [
+    "linux-sandbox-native.linux-x64-musl.node"
+  ],
   "license": "MIT",
   "engines": {
     "node": ">= 20"
