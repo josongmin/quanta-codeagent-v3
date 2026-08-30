@@ -135,12 +135,14 @@ export class SessionSkillPersistError extends SessionProtocolError {
  * success echo (mirrors {@link SessionPostureConflictError} /
  * {@link SessionSkillConflictError}; the CLI direct path surfaces the same stale).
  */
-export class SessionObjectiveConflictError extends SessionProtocolError {
-  constructor(
-    readonly expectedRevision: number,
-    readonly actualRevision: number,
-  ) {
-    super(`stale objective revision: expected ${expectedRevision}, got ${actualRevision}`)
+export class SessionObjectiveConflictError extends SessionRevisionConflictError {
+  // GOAL P0-C — a CAS conflict IS a revision conflict, and the wire has carried
+  // exactly that reason (with both revisions) since the protocol shipped.
+  // Extending the plain protocol error meant `rejectDispatchFailure` could not
+  // recognise it, so the peer was told `dispatch_failed` — a lost race and a
+  // host crash reaching the operator as the same three words.
+  constructor(expectedRevision: number, actualRevision: number) {
+    super(expectedRevision, actualRevision)
     this.name = "SessionObjectiveConflictError"
   }
 }
@@ -152,9 +154,18 @@ export class SessionObjectiveConflictError extends SessionProtocolError {
  * verifier-only checked mutation). A typed NEGATIVE — no live mutation, and NEVER
  * a silent success echo. `reason` carries the authority's `CommitRejection` tag.
  */
-export class SessionObjectiveRejectedError extends SessionProtocolError {
-  constructor(readonly reason: string) {
-    super(`objective mutation rejected: ${reason}`)
+export class SessionObjectiveRejectedError extends SessionProtocolValidationError {
+  readonly reason: string
+  // GOAL P0-C — the authority's tag reaches the peer on the SHIPPED encoding:
+  // `protocol_validation` + the free-form `issue`. The reject-reason set is
+  // closed at four on the wire (an old peer hard-checks it), so a new reason
+  // value would be silently dropped; `issue` is the documented carrier for
+  // detail, and an unknown one already passes through the client's typed
+  // reconstruction untouched. Namespaced so an objective tag can never be
+  // mistaken for a kernel validation issue.
+  constructor(reason: string) {
+    super(`objective:${reason}`, `objective mutation rejected: ${reason}`)
+    this.reason = reason
     this.name = "SessionObjectiveRejectedError"
   }
 }
