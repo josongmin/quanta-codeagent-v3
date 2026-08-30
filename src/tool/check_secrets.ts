@@ -42,10 +42,13 @@
  */
 
 import { z } from "zod"
-import { compositeSecretScanner, type SecretFinding } from "@/security/secret-detection"
+// The composite uses only pattern + entropy rules. Import its owner directly
+// so registering this tool does not initialize the optional secretlint vendor.
+import { compositeSecretScanner } from "@/security/secret-detection/composite-scanner"
+import type { SecretFinding } from "@/security/secret-detection/port"
 import { errMessage } from "@/shared"
-import type { Tool } from "@/tool"
-import { defineTool } from "@/tool"
+import { defineTool } from "./factory"
+import type { Tool } from "./types"
 /** Discriminated input: scan an in-memory string OR a file path. Exactly one
  *  must be set. Zod's `.refine` enforces the XOR at validation time so the
  *  tool body sees a structurally-valid input. */

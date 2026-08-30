@@ -74,6 +74,9 @@ evidence:
   tests:
     unit:
       - tests/unit/runtime/network-proxy-ssrf.test.ts
+      - tests/unit/runner/knobs/network-proxy.test.ts
+      - tests/unit/secret-egress-hellgate.test.ts
+      - tests/unit/check-secrets-tool-hellgate.test.ts
     integration:
       - tests/integration/network-proxy-e2e.test.ts
       - tests/integration/network-proxy-subprocess-e2e.test.ts
@@ -89,6 +92,12 @@ notes: |
   allow-set; `0`/empty ⇒ inactive, fall through); (2) `withEgressProxy` constructs no socket
   when `config.enabled !== true`; (3) `withProxyEnv(base, {})` returns the SAME base reference
   so the child env is byte-identical when no address is bound.
+
+  The knob imports its existing composite secret scanner directly, avoiding
+  initialization of the optional Secretlint adapter through a shared barrel.
+  Secret-egress detection policy, proxy activation, and allowlist decisions
+  are unchanged. The production-runtime import guard in
+  `check-secrets-tool-hellgate.test.ts` covers both composite-scanner callers.
 
   The allow DECISION is delegated entirely to `isHostAllowed` (the exact predicate the
   dispatch guard uses, so socket- and arg-level agree) + `classifyHost` (canonical structural

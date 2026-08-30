@@ -52,6 +52,53 @@ const runTool = async (input: CheckSecretsInput): Promise<ToolResult> => {
 
 const structured = (r: ToolResult): CheckSecretsStructured => r.structured as CheckSecretsStructured
 
+test("production runtime import and composite scans do not load the optional secretlint adapter", async () => {
+  // A fresh process observes the real import closure, unaffected by this file's
+  // other tests. The explicit secretlint scan proves the cache probe is live.
+  const child = Bun.spawn(
+    [
+      process.execPath,
+      "-e",
+      `let networkCalls = 0;
+       globalThis.fetch = async () => { networkCalls++; throw new Error("unexpected network"); };
+       const { buildProductionRuntimeFactory } = await import(${JSON.stringify(join(import.meta.dir, "../../src/apps/web-daemon/runtime-factory.ts"))});
+       const loaded = () => Object.keys(require.cache).filter(p => p.includes("/@secretlint/"));
+       const afterRuntimeImport = loaded();
+       const { checkSecretsTool } = await import(${JSON.stringify(join(import.meta.dir, "../../src/tool/check_secrets.ts"))});
+       const key = "ghp_0123456789abcdefghijklmnopqrstuvwxyz";
+       let result;
+       for await (const event of checkSecretsTool.execute({ text: key }, { cwd: process.cwd(), signal: new AbortController().signal })) {
+         if (event.type === "result") result = event.result;
+       }
+       const afterComposite = loaded();
+       const { secretlintScanner } = await import(${JSON.stringify(join(import.meta.dir, "../../src/security/secret-detection/index.ts"))});
+       const optionalFindings = await secretlintScanner().scanText(key);
+       console.log(JSON.stringify({ factoryType: typeof buildProductionRuntimeFactory,
+         afterRuntimeImport, afterComposite, result, afterOptional: loaded(), optionalFindings, networkCalls }));`,
+    ],
+    { cwd: join(import.meta.dir, "../.."), stdout: "pipe", stderr: "pipe" },
+  )
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ])
+  expect({ code, stderr }).toEqual({ code: 0, stderr: "" })
+  const result = JSON.parse(stdout)
+  expect(result.factoryType).toBe("function")
+  expect(result.afterRuntimeImport).toEqual([])
+  expect(result.afterComposite).toEqual([])
+  expect(result.result.ok).toBe(true)
+  expect(result.result.structured.findings).toContainEqual(
+    expect.objectContaining({ kind: "github-token", preview: "ghp_***wxyz" }),
+  )
+  expect(result.afterOptional.length).toBeGreaterThan(0)
+  expect(result.optionalFindings).toContainEqual(
+    expect.objectContaining({ kind: "github-token", preview: "ghp_***wxyz" }),
+  )
+  expect(result.networkCalls).toBe(0)
+})
+
 // ────────────────────────────────────────────────────────────────────────────
 // A. ENV GATE — exactly `"on"` enables; everything else is default-OFF.
 // ────────────────────────────────────────────────────────────────────────────

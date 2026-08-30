@@ -43,7 +43,7 @@ import {
   type NetworkProxyConfig,
   nodeKeyPairSource,
 } from "@/runtime/network-proxy"
-import { compositeSecretScanner } from "@/security/secret-detection"
+import { compositeSecretScanner } from "@/security/secret-detection/composite-scanner"
 import { runtimeConfigFromEnv } from "@/shared"
 import { registerKnob } from "../registry"
 import type { Knob, Surface } from "../types"
