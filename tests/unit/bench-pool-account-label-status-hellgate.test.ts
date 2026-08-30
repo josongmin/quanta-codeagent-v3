@@ -27,38 +27,59 @@ afterAll(() => {
 /** The AMI id the fake `aws ssm get-parameter` resolves to. */
 const RESOLVED_AMI = "ami-0123456789abcdef0"
 
+const spawnOk = (stdout: string): SpawnResult => ({ code: 0, stdout, stderr: "" })
+
+const commandFromArgs = (args: readonly string[]): string => args[args.length - 1] ?? ""
+
+const runIdFromArgs = (args: readonly string[]): string =>
+  commandFromArgs(args).match(/~\/runs\/([^/]+)\/instances\.jsonl/)?.[1] ?? "x"
+
+const emitPoolPass = (
+  args: readonly string[],
+  onData: ((data: string) => void) | undefined,
+): void => {
+  if (!args.some((arg) => arg.includes("cli.ts run"))) return
+  onData?.(`[PASS] ${runIdFromArgs(args)}__inst-1 (turns=2)\n`)
+}
+
+const sshResponse = (args: readonly string[]): SpawnResult => {
+  const command = commandFromArgs(args)
+  if (command.includes("READY")) return spawnOk("READY")
+  if (command.includes("run.exit")) return spawnOk("0\n==XQ-RUN-EXIT-XQ==\n")
+  if (command.includes("mkdir ~/.pool-grade.lock")) return spawnOk("LOCKED")
+  if (command.includes("rmdir ~/.pool-grade.lock")) return spawnOk("")
+  const report = command.match(/cat ~\/runs\/([^/]+)\/report\.json/)
+  return report === null
+    ? spawnOk("")
+    : spawnOk(JSON.stringify({ resolved_ids: [`x__${report[1]}-1`] }))
+}
+
+const infrastructureResponse = (args: readonly string[]): SpawnResult | undefined => {
+  if (args.includes("get-parameter")) return spawnOk(`${RESOLVED_AMI}\n`)
+  if (args.includes("run-instances")) return spawnOk("i-box")
+  if (args.includes("describe-instances")) return spawnOk("1.2.3.4")
+  return args.includes("terminate-instances") ? spawnOk("") : undefined
+}
+
 const mockSpawn = () => {
   const calls: Array<{ cmd: string; args: string[]; input?: string }> = []
-  const ok = (s: string): SpawnResult => ({ code: 0, stdout: s, stderr: "" })
-  const fn: SpawnFn = async (cmd, args, o): Promise<SpawnResult> => {
-    calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
-    if (cmd === "ssh" && args.some((a) => a.includes("cli.ts run"))) {
-      const runId =
-        (args[args.length - 1] ?? "").match(/~\/runs\/([^/]+)\/instances\.jsonl/)?.[1] ?? "x"
-      o?.onData?.(`[PASS] ${runId}__inst-1 (turns=2)\n`)
-    }
-    const a = [...args]
-    if (cmd === "curl") return ok("9.9.9.9") // ifconfig.me public-IP probe (SG ingress)
+  const fn: SpawnFn = async (cmd, args, options): Promise<SpawnResult> => {
+    calls.push({
+      cmd,
+      args: [...args],
+      ...(options?.input !== undefined ? { input: options.input } : {}),
+    })
+    if (cmd === "curl") return spawnOk("9.9.9.9") // ifconfig.me public-IP probe (SG ingress)
     // aug-22 regression repair (`9d5369d31`): the default AMI is now an `ssm:`
     // reference that `resolveLaunchAmi` dereferences BEFORE RunInstances. Without
     // this branch the stub returned empty stdout ⇒ resolution threw ⇒ the pool
     // aborted before a single status snapshot was written. The resolution contract
     // itself stays pinned by src/apps/bench/remote/box-session/ami-resolution.test.ts.
-    if (a.includes("get-parameter")) return ok(`${RESOLVED_AMI}\n`)
-    if (a.includes("run-instances")) return ok("i-box")
-    if (a.includes("describe-instances")) return ok("1.2.3.4")
-    if (a.includes("terminate-instances")) return ok("")
-    if (cmd === "ssh") {
-      const c = a[a.length - 1] ?? ""
-      if (c.includes("READY")) return ok("READY")
-      if (c.includes("run.exit")) return ok("0\n==XQ-RUN-EXIT-XQ==\n")
-      if (c.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
-      if (c.includes("rmdir ~/.pool-grade.lock")) return ok("")
-      const r = c.match(/cat ~\/runs\/([^/]+)\/report\.json/)
-      if (r) return ok(JSON.stringify({ resolved_ids: [`x__${r[1]}-1`] }))
-      return ok("")
-    }
-    return ok("")
+    const infrastructure = infrastructureResponse(args)
+    if (infrastructure !== undefined) return infrastructure
+    if (cmd !== "ssh") return spawnOk("")
+    emitPoolPass(args, options?.onData)
+    return sshResponse(args)
   }
   return { fn, calls }
 }
