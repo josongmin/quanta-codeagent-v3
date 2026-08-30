@@ -324,6 +324,11 @@ export interface ChildControlWiring {
  * child, not become an explicit `undefined`.
  */
 const inheritedCostAccounting = (parent: AgentConfig): Partial<AgentConfig> => ({
+  // A5 — the child belongs to the SAME session; its provenance must say so.
+  // This was silently "" before the authority's session binding existed to
+  // notice: byAgent looked right while the session identity on every child
+  // record was empty.
+  ...(parent.sessionId !== undefined ? { sessionId: parent.sessionId } : {}),
   ...(parent.usageAccounting !== undefined ? { usageAccounting: parent.usageAccounting } : {}),
   ...(parent.budgetMeter !== undefined ? { budgetMeter: parent.budgetMeter } : {}),
   ...(parent.budgetLedger !== undefined ? { budgetLedger: parent.budgetLedger } : {}),

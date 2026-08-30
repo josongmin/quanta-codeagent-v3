@@ -104,7 +104,7 @@ export const createUsageAccounting = (opts: UsageAccountingOpts = {}): UsageAcco
   let total = emptyBucket()
   let byModel = new Map<string, Bucket>()
   let byAgent = new Map<string, Bucket>()
-  let bySession = new Map<string, Bucket>()
+  let boundSessionId: string | undefined
   let byKind: Record<"root" | "subagent", Bucket> = { root: emptyBucket(), subagent: emptyBucket() }
   // Admitted call ids. Grows with the session; a call id is small and the
   // alternative — forgetting one — is a double-billed retry.
@@ -117,13 +117,19 @@ export const createUsageAccounting = (opts: UsageAccountingOpts = {}): UsageAcco
       if (!isFinitelyCounted(record.usage, record.cost)) {
         return { admitted: false, reason: "non-finite" }
       }
+      // A5 — bind to the first admitted session; reject strangers instead of
+      // silently summing two sessions into one bill.
+      if (boundSessionId === undefined) {
+        boundSessionId = record.provenance.sessionId
+      } else if (record.provenance.sessionId !== boundSessionId) {
+        return { admitted: false, reason: "session-mismatch" }
+      }
       seen.add(record.callId)
 
       const { usage, cost, provenance } = record
       add(total, usage, cost)
       add(bucketIn(byModel, usage.model), usage, cost)
       add(bucketIn(byAgent, provenance.agentId), usage, cost)
-      add(bucketIn(bySession, provenance.sessionId), usage, cost)
       add(byKind[provenance.agentKind], usage, cost)
 
       retained.push(record)
@@ -138,7 +144,7 @@ export const createUsageAccounting = (opts: UsageAccountingOpts = {}): UsageAcco
         retained: retained.length,
         byModel: frozenMap(byModel),
         byAgent: frozenMap(byAgent),
-        bySession: frozenMap(bySession),
+        boundSessionId,
         byKind: { root: freeze(byKind.root), subagent: freeze(byKind.subagent) },
       }
     },
@@ -153,7 +159,7 @@ export const createUsageAccounting = (opts: UsageAccountingOpts = {}): UsageAcco
       total = emptyBucket()
       byModel = new Map()
       byAgent = new Map()
-      bySession = new Map()
+      boundSessionId = undefined
       byKind = { root: emptyBucket(), subagent: emptyBucket() }
       seen = new Set()
       retained = []

@@ -133,16 +133,29 @@ const USAGE_SINKS: readonly UsageSink[] = [
   // records the canonical normalized usage and the priced cost rather than a
   // surface-specific projection. Children share the parent's instance, so a
   // subagent's spend lands in the same counters instead of falling out of them.
-  ({ config, normalized, provenance, eventCost, callId }) => {
+  ({ config, normalized, provenance, eventCost, callId, recorder }) => {
     const accounting = config.usageAccounting
     if (accounting === undefined) return
-    accounting.record({
+    const result = accounting.record({
       callId,
       at: Date.now(),
       usage: normalized,
       cost: eventCost,
       provenance,
     })
+    // A5 — a refusal must be visible. The counter ticks on EVERY rejection
+    // (metrics optional); the operator warn is latched per AUTHORITY instance
+    // so one broken adapter doesn't spam a session, while a fresh session's
+    // first refusal still speaks even in a multi-session process.
+    if (!result.admitted && result.reason !== "duplicate") {
+      recorder?.usageRejected()
+      if (!rejectedWarned.has(accounting)) {
+        rejectedWarned.add(accounting)
+        logger.warn(
+          `usage accounting rejected a record (${result.reason}) — model=${normalized.model} agent=${provenance.agentId}; totals exclude it`,
+        )
+      }
+    }
   },
   // Turn work-metrics collector.
   ({ collector, ev, eventCost }) =>
@@ -211,6 +224,14 @@ const USAGE_SINKS: readonly UsageSink[] = [
  * means one admitted call.
  */
 const callSeq = new WeakMap<object, { n: number }>()
+
+/** A5 — authorities that already voiced their one rejection warn. Keyed per
+ *  INSTANCE (not module-global-latched) so tests stay isolated and every
+ *  session in a multi-session process gets its own first notice. */
+const rejectedWarned = new WeakSet<object>()
+
+/** Test seam: has this authority voiced its rejection warn? */
+export const __rejectedWarnedFor = (accounting: object): boolean => rejectedWarned.has(accounting)
 
 const nextCallId = (accounting: object, provenance: UsageProvenance): string => {
   const seq = callSeq.get(accounting) ?? { n: 0 }

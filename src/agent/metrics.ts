@@ -45,6 +45,10 @@ export const METRIC = {
   // unknown-model cases the pricer refuses).
   cacheWrite: GEN_AI_ATTRS.usage.cacheCreationInputTokens,
   costUsd: QUANTA_ATTRS.work.costUsd,
+  // A5 — records the authority REFUSED (non-finite report, session mismatch).
+  // A silent rejection hid broken usage reports; the counter makes the refusal
+  // measurable while the once-per-authority warn names the reason.
+  usageRejected: QUANTA_ATTRS.usage.rejected,
   // ADR-0452 — session-startup prewarm + TTFM. Canonical `quanta.startup.*`
   // keys (vocabulary.ts) so any surface reads the same well-known names.
   ttfm: QUANTA_ATTRS.startup.timeToFirstMessageMs,
@@ -133,6 +137,11 @@ export class AgentRecorder {
       this.metrics.counter(METRIC.cacheWrite).inc(reported.cacheCreationTokens)
     }
     if (cost.pricingKnown) this.metrics.counter(METRIC.costUsd).inc(cost.totalUsd)
+  }
+
+  /** A5 — one refused usage record (see METRIC.usageRejected). */
+  usageRejected(): void {
+    this.metrics.counter(METRIC.usageRejected).inc(1)
   }
 
   tokensUsed(input: number, output: number, cacheRead?: number): void {

@@ -55,7 +55,11 @@ export interface UsageAccountingSnapshot extends UsageAggregate {
   /** Per-agent roll-up — the dimension that answers "how much did the
    *  subagents cost", which no previous accountant could express. */
   readonly byAgent: ReadonlyMap<string, UsageAggregate>
-  readonly bySession: ReadonlyMap<string, UsageAggregate>
+  /** A5 — the sessionId this authority bound to on first admission, or
+   *  `undefined` before any record. Replaces the old `bySession` map, which
+   *  was structurally a singleton (one authority per session by construction)
+   *  — the singleton is now a CHECKED invariant instead of a dead dimension. */
+  readonly boundSessionId: string | undefined
   /** Root vs. subagent spend. Both arms always present, zeroed when unused,
    *  so a surface never has to distinguish "no subagents" from "no data". */
   readonly byKind: Readonly<Record<"root" | "subagent", UsageAggregate>>
@@ -69,6 +73,11 @@ export type UsageRejection =
    *  0, which would silently understate the bill — the whole point of letting
    *  non-finite counts survive normalization is that someone must notice. */
   | "non-finite"
+  /** A5 — the record's sessionId differs from the one this authority BOUND to
+   *  on first admission. One authority per session is a construction-time
+   *  invariant; a wrongly-shared instance must reject rather than silently
+   *  sum two sessions into one bill. */
+  | "session-mismatch"
 
 export interface UsageRecordResult {
   readonly admitted: boolean

@@ -148,12 +148,19 @@ describe("spend is attributable to the agent that incurred it", () => {
     expect(snap.byKind.subagent.totalUsd).toBe(0)
   })
 
-  test("sessions roll up independently", () => {
+  test("A5: the authority BINDS to its first session and rejects strangers", () => {
+    // bySession was a structurally-singleton dimension (one authority per
+    // session by construction) — but deleting the map alone would let a
+    // wrongly-SHARED authority silently sum two sessions into one bill. So
+    // the singleton becomes a checked invariant: first admitted sessionId
+    // binds; a different one is rejected, visibly.
     const acct = createUsageAccounting()
-    acct.record(call("a", { sessionId: "s1" }))
-    acct.record(call("b", { sessionId: "s2" }))
-    expect(acct.snapshot().bySession.get("s1")?.totalUsd).toBeCloseTo(3, 9)
-    expect(acct.snapshot().bySession.get("s2")?.totalUsd).toBeCloseTo(3, 9)
+    expect(acct.record(call("a", { sessionId: "s1" })).admitted).toBe(true)
+    const rejected = acct.record(call("b", { sessionId: "s2" }))
+    expect(rejected).toEqual({ admitted: false, reason: "session-mismatch" })
+    expect(acct.snapshot().totalUsd).toBeCloseTo(3, 9) // only s1's call
+    // …and the same session keeps flowing.
+    expect(acct.record(call("c", { sessionId: "s1" })).admitted).toBe(true)
   })
 })
 

@@ -31,6 +31,8 @@ describe("METRIC name table", () => {
       // emit site; the recorder now exports them from the priced record.
       cacheWrite: "gen_ai.usage.cache_creation_input_tokens",
       costUsd: "quanta.work.cost_usd",
+      // A5 — refused usage records (non-finite / session-mismatch).
+      usageRejected: "quanta.usage.rejected",
       // ADR-0452 — session-startup prewarm + TTFM (canonical quanta.startup.*).
       ttfm: "quanta.startup.time_to_first_message_ms",
       prewarmDuration: "quanta.startup.prewarm_duration_ms",

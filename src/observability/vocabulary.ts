@@ -208,6 +208,13 @@ export const QUANTA_ATTRS = {
     linesRead: "quanta.work.lines_read",
     costUsd: "quanta.work.cost_usd",
   },
+  /** A5 — usage-accounting admission outcomes. */
+  usage: {
+    /** Count of usage records the session authority REFUSED (non-finite
+     *  report, session mismatch). A refusal used to be silent; this makes it
+     *  measurable while the once-per-authority warn names the reason. */
+    rejected: "quanta.usage.rejected",
+  },
   /** ADR-0217 — per-slice OTel emit. Six canonical keys shared across the
    *  four new leaf slices (error-routing, stream-timeout, shell-snapshot,
    *  git-directives). The slices themselves NEVER reference these literals

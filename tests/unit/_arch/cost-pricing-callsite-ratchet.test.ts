@@ -1,0 +1,129 @@
+/**
+ * A5 ratchet — WHO may compute a price, held as an exact call-site census.
+ *
+ * The campaign's root defect was re-derivation: every surface that priced
+ * tokens for itself eventually disagreed with the others. An IMPORT scan
+ * cannot hold that line — importing `costUsd` proves nothing, and a scanner
+ * watching imports goes blind the moment a call is deleted behind one. So
+ * this ratchet counts CALL SITES (comment-stripped), per file, exactly:
+ *
+ *   - a NEW call site anywhere in src fails with the file's name;
+ *   - a DELETED call in an enrolled file fails too (the census is exact, not
+ *     a ceiling), so the scanner can never quietly stop seeing the corpus;
+ *   - inside src/agent/loop/** the only sanctioned sites are emit-helpers.ts
+ *     (the ONE place recorded usage is priced) and turn-iteration.ts's
+ *     projectCostPreflight (prices a pre-send ESTIMATE — no usage exists yet
+ *     to consume, so it is a projection, not a re-derivation).
+ *
+ * Enrolling a new file is a deliberate act: add it here WITH its reason, the
+ * way every entry below carries one.
+ */
+
+import { describe, expect, test } from "bun:test"
+import { readdirSync, readFileSync, statSync } from "node:fs"
+import { join, relative, resolve } from "node:path"
+import { stripComments } from "../_shared/strip-comments"
+
+const SRC_ROOT = resolve(__dirname, "../../../src")
+
+/** Exact expected pricing-call count per file, with the sanction's reason. */
+const SANCTIONED: Readonly<Record<string, { calls: number; reason: string }>> = {
+  "observability/pricing.ts": { calls: 1, reason: "the costUsd wrapper delegating to priceUsage" },
+  "observability/usage-accounting/price.ts": { calls: 0, reason: "the formula's own home" },
+  "observability/cost-dashboard.ts": {
+    calls: 1,
+    reason: "record-less fallback for snapshots taken with no recorder wired",
+  },
+  "observability/work-metrics.ts": {
+    calls: 1,
+    reason: "derive fallback for record-less WorkMetrics builders",
+  },
+  "agent/loop/emit-helpers.ts": {
+    calls: 1,
+    reason: "THE runtime pricing site: one priced figure per usage event, shared by every sink",
+  },
+  "agent/loop/turn-iteration.ts": {
+    calls: 1,
+    reason:
+      "projectCostPreflight prices a pre-send estimate (no usage exists yet) — projection, not re-derivation",
+  },
+  "agent/work-metrics-collector.ts": {
+    calls: 1,
+    reason: "bucket-derive fallback for direct callers that hand no recorded cost",
+  },
+  "agent/budget-ledger-cost.ts": {
+    calls: 1,
+    reason: "the ledger's delegation to the single formula (A4)",
+  },
+  "apps/probe/render.ts": { calls: 1, reason: "offline trajectory re-pricing (report tier)" },
+  "apps/eval/synthetic/runner.ts": { calls: 1, reason: "offline eval accounting (report tier)" },
+  "apps/eval/grounding/probe.ts": { calls: 1, reason: "offline eval accounting (report tier)" },
+  "runner/batch/observe.ts": { calls: 1, reason: "offline batch accounting (report tier)" },
+  "apps/bench/analyze/cost.ts": { calls: 3, reason: "offline bench analysis (report tier)" },
+}
+
+const CALL_RE = /\b(?:costUsd|priceUsage)\s*\(/g
+
+const walk = (dir: string, out: string[] = []): string[] => {
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry)
+    const st = statSync(full)
+    if (st.isDirectory()) walk(full, out)
+    else if (entry.endsWith(".ts") && !entry.endsWith(".d.ts")) out.push(full)
+  }
+  return out
+}
+
+const censusOf = (): Map<string, number> => {
+  const found = new Map<string, number>()
+  for (const file of walk(SRC_ROOT)) {
+    const src = stripComments(readFileSync(file, "utf8"))
+    const n = [...src.matchAll(CALL_RE)].length
+    if (n > 0) found.set(relative(SRC_ROOT, file), n)
+  }
+  return found
+}
+
+describe("A5 — pricing call-site census", () => {
+  const found = censusOf()
+
+  test("ANTI-VACUITY: the scanner actually saw the runtime site", () => {
+    // A scan that returns nothing would satisfy every 'no new site' check;
+    // the ONE site that must always exist anchors the scanner to reality.
+    expect(found.get("agent/loop/emit-helpers.ts")).toBe(1)
+    expect([...found.values()].reduce((a, b) => a + b, 0)).toBeGreaterThanOrEqual(13)
+  })
+
+  test("no file prices outside the sanctioned census (name the offender)", () => {
+    const offenders = [...found.entries()]
+      .filter(([file, n]) => SANCTIONED[file]?.calls !== n)
+      .map(([file, n]) => `${file}: ${n} call(s), sanctioned ${SANCTIONED[file]?.calls ?? 0}`)
+    expect(offenders).toEqual([])
+  })
+
+  test("every enrolled file still carries EXACTLY its sanctioned calls", () => {
+    // The census is exact in both directions: a deleted call in an enrolled
+    // file is as loud as a new one elsewhere — otherwise the scan could rot.
+    const drifted = Object.entries(SANCTIONED)
+      .filter(([file, s]) => s.calls > 0 && found.get(file) !== s.calls)
+      .map(([file, s]) => `${file}: expected ${s.calls}, found ${found.get(file) ?? 0}`)
+    expect(drifted).toEqual([])
+  })
+
+  test("inside src/agent/loop only the two sanctioned files price", () => {
+    const loopOffenders = [...found.keys()].filter(
+      (f) =>
+        f.startsWith("agent/loop/") &&
+        f !== "agent/loop/emit-helpers.ts" &&
+        f !== "agent/loop/turn-iteration.ts",
+    )
+    expect(loopOffenders).toEqual([])
+  })
+
+  test("an import alone does not enroll a file (call scan, not import scan)", () => {
+    // pricing.ts's own import lines and every consumer's `import { costUsd }`
+    // must be invisible to the census — the regex demands a CALL.
+    const importOnly = 'import { costUsd } from "@/observability"\nconst x = costUsd\n'
+    expect([...stripComments(importOnly).matchAll(CALL_RE)].length).toBe(0)
+  })
+})

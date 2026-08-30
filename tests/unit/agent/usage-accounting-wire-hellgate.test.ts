@@ -16,11 +16,13 @@
  */
 import { describe, expect, test } from "bun:test"
 import { BudgetMeter } from "@/agent/budget/meter"
-import { emitUsage } from "@/agent/loop/emit-helpers"
+import { __rejectedWarnedFor, emitUsage } from "@/agent/loop/emit-helpers"
+import { AgentRecorder } from "@/agent/metrics"
 import { isRootAgent } from "@/agent/spawn-depth"
 import { buildChildConfig } from "@/agent/subagent-runner-child-config"
 import type { AgentConfig } from "@/agent/types"
 import type { StreamEvent } from "@/llm"
+import { Metrics } from "@/observability/metrics"
 import { createUsageAccounting } from "@/observability/usage-accounting"
 import type { AgentEvent } from "@/stream/types"
 
@@ -141,6 +143,38 @@ describe("one rule decides root vs subagent, and both call sites use it", () => 
     tickIfRoot({ depth: 1 }) // subagent turn
     tickIfRoot({ depth: 2 }) // deeper subagent turn
     expect(meter.snapshot().turns).toBe(1)
+  })
+})
+
+describe("A5 — a rejected record is visible, not swallowed", () => {
+  test("a non-finite event warns ONCE per authority and ticks the rejected counter", () => {
+    const accounting = createUsageAccounting()
+    const metrics = new Metrics()
+    const { config } = makeConfig({ usageAccounting: accounting })
+    const poison = { ...usage(Number.NaN) }
+    emitUsage(config, poison, new AgentRecorder(metrics), undefined, undefined)
+    emitUsage(config, poison, new AgentRecorder(metrics), undefined, undefined)
+
+    expect(accounting.snapshot().calls).toBe(0) // still rejected
+    // The counter carries the reason — one tick per rejection, both of them.
+    expect(metrics.snapshot().counters["quanta.usage.rejected"]).toBe(2)
+    // The operator warn is latched per AUTHORITY (first rejection only) — the
+    // latch lives on the instance, so test isolation and multi-session
+    // processes keep their own notices. Witnessed via the latch probe below.
+  })
+
+  test("the warn latch is per-instance: a fresh authority warns again", () => {
+    // Two authorities, one poisoned event each ⇒ two warns would have fired.
+    // A module-global latch would collapse them to one. The latch itself is
+    // observable through __rejectedWarnedFor (a WeakSet keyed by instance).
+    const a = createUsageAccounting()
+    const b = createUsageAccounting()
+    const { config: ca } = makeConfig({ usageAccounting: a })
+    const { config: cb } = makeConfig({ usageAccounting: b })
+    emitUsage(ca, usage(Number.NaN), undefined, undefined, undefined)
+    emitUsage(cb, usage(Number.NaN), undefined, undefined, undefined)
+    expect(__rejectedWarnedFor(a)).toBe(true)
+    expect(__rejectedWarnedFor(b)).toBe(true)
   })
 })
 
