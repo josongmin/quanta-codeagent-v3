@@ -106,6 +106,60 @@ const EVIDENCE_LSP_RETRY_DELAY_MS = 500
 /** Re-reads `aborted` on every call — a plain inline check would be narrowed
  *  to `false` by TS after the first test, but awaits can flip it mid-loop. */
 const isAborted = (signal?: AbortSignal): boolean => signal?.aborted === true
+type EvidenceLocation = { uri: string; range: { start: { line: number } } }
+type EvidenceScan = EvidenceStatic | "retry" | "fatal" | "none"
+
+const isRetryableLspRequest = (error: unknown): boolean =>
+  error instanceof LspRequestError && (error.code === -32801 || error.code === -32802)
+
+const scanEvidenceLine = async (
+  session: LspNavSession,
+  file: string,
+  line: number,
+  signal: AbortSignal | undefined,
+  toLoc: (location: EvidenceLocation) => { file: string; line: number },
+): Promise<EvidenceScan> => {
+  for (let character = 0; character < 80; character += 2) {
+    if (isAborted(signal)) return "none"
+    const position = { line, character }
+    try {
+      const hover = await session.hover(file, position, signal)
+      if (hover === null) continue
+      const definitions = await session.definition(file, position, signal).catch(() => null)
+      const references = await session.references(file, position, false, signal).catch(() => null)
+      return {
+        definition_chain: (definitions ?? []).map(toLoc),
+        references: (references ?? []).map(toLoc),
+        type_info: hover.contents,
+        diagnostics: [],
+      }
+    } catch (error) {
+      if (!isRetryableLspRequest(error)) return "fatal"
+    }
+  }
+  return "retry"
+}
+
+const findEvidenceBeforeDeadline = async (
+  session: LspNavSession,
+  file: string,
+  line: number,
+  budgetMs: number,
+  now: () => number,
+  signal: AbortSignal | undefined,
+  toLoc: (location: EvidenceLocation) => { file: string; line: number },
+): Promise<EvidenceStatic | null> => {
+  const deadline = now() + budgetMs
+  while (now() < deadline) {
+    if (isAborted(signal)) return null
+    const result = await scanEvidenceLine(session, file, line, signal, toLoc)
+    if (typeof result === "object") return result
+    if (result === "fatal" || isAborted(signal)) return null
+    await sleep(EVIDENCE_LSP_RETRY_DELAY_MS, signal ?? NEVER_ABORTED)
+  }
+  return { definition_chain: [], references: [], type_info: null, diagnostics: [] }
+}
+
 export const evidenceLspStatic =
   (budgetMs = 20_000, provider?: LspNavProvider, now: () => number = Date.now) =>
   async (
@@ -116,46 +170,20 @@ export const evidenceLspStatic =
   ): Promise<EvidenceStatic | null> => {
     const session = await (provider ?? lspNavProvider()).open(file, cwd, signal)
     if (session === null) return null
-    const toLoc = (l: {
-      uri: string
-      range: { start: { line: number } }
-    }): { file: string; line: number } => ({
-      file: uriToPath(l.uri),
-      line: l.range.start.line + 1,
+    const toLoc = (location: EvidenceLocation): { file: string; line: number } => ({
+      file: uriToPath(location.uri),
+      line: location.range.start.line + 1,
     })
     try {
-      const ln = Math.max(0, line - 1) // LSP 0-based
-      const deadline = now() + budgetMs
-      while (now() < deadline) {
-        if (isAborted(signal)) return null
-        for (let ch = 0; ch < 80; ch += 2) {
-          if (isAborted(signal)) return null
-          const pos = { line: ln, character: ch }
-          try {
-            const hov = await session.hover(file, pos, signal)
-            if (hov !== null) {
-              const defs = await session.definition(file, pos, signal).catch(() => null)
-              const refs = await session.references(file, pos, false, signal).catch(() => null)
-              return {
-                definition_chain: (defs ?? []).map(toLoc),
-                references: (refs ?? []).map(toLoc),
-                type_info: hov.contents,
-                diagnostics: [],
-              }
-            }
-          } catch (e) {
-            // TYPED classification (jun-10 audit #23): ContentModified (-32801) /
-            // ServerCancelled (-32802) during indexing ⇒ retry; anything else ⇒
-            // give up. Never `String(e)` text-matching — rust-analyzer's real
-            // -32801 message never contains "content modified".
-            const retryable =
-              e instanceof LspRequestError && (e.code === -32801 || e.code === -32802)
-            if (!retryable) return null
-          }
-        }
-        await sleep(EVIDENCE_LSP_RETRY_DELAY_MS, signal ?? NEVER_ABORTED)
-      }
-      return { definition_chain: [], references: [], type_info: null, diagnostics: [] }
+      return await findEvidenceBeforeDeadline(
+        session,
+        file,
+        Math.max(0, line - 1), // LSP 0-based
+        budgetMs,
+        now,
+        signal,
+        toLoc,
+      )
     } finally {
       await session.stop().catch(() => undefined)
     }
