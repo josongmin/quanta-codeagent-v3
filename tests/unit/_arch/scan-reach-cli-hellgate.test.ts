@@ -112,6 +112,41 @@ describe("scan-reach CLI decision", () => {
     expect({ exit: d.exit, doTighten: d.doTighten }).toEqual({ exit: 0, doTighten: true })
   })
 
+  test("🔴 a file recorded as enrolled must REPORT every id it claims", () => {
+    // Site-level completeness, checked against ground truth instead of syntax.
+    // Counting enumerator calls cannot settle it: a recursive walker's internal
+    // `readdirSync` is one site not one per level, and `no-leftover-backup-files`
+    // reports THREE ids from a single call in a loop over three prefixes —
+    // measured. What the guards actually report is the only reading that is
+    // neither over- nor under-counting.
+    const observed = new Map([["f#one", { walked: 10 }]])
+    const baseline = baselineOf({ "f#one": { walked: 10 } })
+    const d = decide({
+      childExit: 0,
+      observed,
+      baseline,
+      tighten: false,
+      expectedIds: { "f.test.ts": ["f#one", "f#two"] },
+    })
+    expect(d.exit).toBe(1)
+    expect(d.lines.join("\n")).toContain("f#two")
+  })
+
+  test("PAIRED CONTROL — a file reporting every id it claims passes", () => {
+    const observed = new Map([
+      ["f#one", { walked: 10 }],
+      ["f#two", { walked: 4 }],
+    ])
+    const d = decide({
+      childExit: 0,
+      observed,
+      baseline: baselineOf({ "f#one": { walked: 10 }, "f#two": { walked: 4 } }),
+      tighten: false,
+      expectedIds: { "f.test.ts": ["f#one", "f#two"] },
+    })
+    expect(d.exit).toBe(0)
+  })
+
   test("an empty harvest is refused — the run IS the measurement", () => {
     const d = decide({
       childExit: 0,
