@@ -60,10 +60,12 @@ describe("isCostPanelEnabled: env + TTY gate", () => {
 // ── accumulation ────────────────────────────────────────────────────────
 
 describe("createCostPanel: accumulation across turns", () => {
-  test("incrementTurn folds tokens + bumps turn count", () => {
+  test("incrementTurn folds tokens; noteTurn bumps the turn count (A3-S1 split)", () => {
     const panel = make()
     panel.incrementTurn({ inputTokens: 1000, outputTokens: 200 })
+    panel.noteTurn()
     panel.incrementTurn({ inputTokens: 500, outputTokens: 100, cacheReadTokens: 50 })
+    panel.noteTurn()
     const s = panel.snapshot()
     expect(s.turns).toBe(2)
     expect(s.inputTokens).toBe(1500)
@@ -94,7 +96,9 @@ describe("createCostPanel: accumulation across turns", () => {
   test("null costUsd contribution is skipped (no NaN)", () => {
     const panel = make({ model: "claude-sonnet-4-6" })
     panel.incrementTurn({ inputTokens: 1000, outputTokens: 200, costUsd: 0.5 })
+    panel.noteTurn()
     panel.incrementTurn({ inputTokens: 100, outputTokens: 50, costUsd: null })
+    panel.noteTurn()
     const s = panel.snapshot()
     expect(s.totalCostUsd).toBeCloseTo(0.5, 6)
     expect(s.turns).toBe(2)
@@ -124,7 +128,9 @@ describe("createCostPanel.render(): single-line status form", () => {
   test("shape includes cost · turns · in/out · model", () => {
     const panel = make({ model: "claude-sonnet-4-6" })
     panel.incrementTurn({ inputTokens: 45_000, outputTokens: 12_000 })
+    panel.noteTurn()
     panel.incrementTurn({ inputTokens: 234, outputTokens: 891 })
+    panel.noteTurn()
     const line = stripAnsi(panel.render())
     // $X.XXXX format for sub-cent ranges expected for tiny totals; check
     // the structural separators + tokens label + model.
@@ -138,6 +144,7 @@ describe("createCostPanel.render(): single-line status form", () => {
   test("singular 'turn' on the first turn", () => {
     const panel = make()
     panel.incrementTurn({ inputTokens: 100, outputTokens: 20 })
+    panel.noteTurn()
     expect(panel.render()).toMatch(/1 turn(?!s)/)
   })
 
@@ -157,6 +164,7 @@ describe("createCostPanel.renderDetailed(): boxed /cost form", () => {
     const clock = makeClock()
     const panel = make({ model: "claude-sonnet-4-6", now: clock.now })
     panel.incrementTurn({ inputTokens: 45_234, outputTokens: 12_891, cacheReadTokens: 8123 })
+    panel.noteTurn()
     clock.advance(12 * 60 * 1000 + 34 * 1000) // 12m 34s
     const body = stripAnsi(panel.renderDetailed())
     expect(body).toContain("session cost")

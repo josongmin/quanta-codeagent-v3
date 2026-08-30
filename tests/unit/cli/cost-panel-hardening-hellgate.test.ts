@@ -61,6 +61,9 @@ const driveDerived = (panel: CostPanel, deltas: Delta[]): void => {
       outputTokens: d.outputTokens,
       cacheReadTokens: d.cacheReadTokens ?? 0,
     })
+    // A3-S1 — the turn count moved to noteTurn(); the driver mirrors the
+    // production pairing (one fold + one note per turn).
+    panel.noteTurn()
   }
 }
 
@@ -153,6 +156,7 @@ describe("full-precision accumulation: 1000 tiny turns", () => {
     const panel = make({ model: HAIKU })
     for (let i = 0; i < 1000; i++) {
       panel.incrementTurn({ inputTokens: 1, outputTokens: 1, cacheReadTokens: 0 })
+      panel.noteTurn()
     }
     const snap = panel.snapshot()
     expect(snap.turns).toBe(1000)
@@ -258,6 +262,7 @@ describe("empty and zero states", () => {
   test("(b) known-model turn with 0 in / 0 out ⇒ bucket cost 0 (not null), conservation holds", () => {
     const panel = make({ model: SONNET })
     panel.incrementTurn({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 })
+    panel.noteTurn()
     const b = panel.byModel()[0]
     const snap = panel.snapshot()
     // costUsd(known, 0,0,0) === 0 per pricing contract (NOT null).
