@@ -49,6 +49,18 @@ const write = async (p: string, c: string): Promise<void> => {
   await writeFile(p, c, "utf8")
 }
 
+const collectTypeScriptFiles = async (dir: string): Promise<string[]> => {
+  const entries = await readdir(dir, { withFileTypes: true })
+  const files = await Promise.all(
+    entries.map(async (entry) => {
+      const path = join(dir, entry.name)
+      if (entry.isDirectory()) return collectTypeScriptFiles(path)
+      return entry.name.endsWith(".ts") ? [path] : []
+    }),
+  )
+  return files.flat()
+}
+
 beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), "audit2-home-"))
   project = await mkdtemp(join(tmpdir(), "audit2-proj-"))
@@ -113,27 +125,7 @@ describe("CLOSED LOOP — RFC03-def promote side is reachable, still fail-safe b
     const { readFile: rf } = await import("node:fs/promises")
     const srcRoot = join(import.meta.dir, "..", "..", "src")
 
-    const collect = async (dir: string): Promise<string[]> => {
-      const out: string[] = []
-      for (const ent of await rf(dir, "utf8").then(
-        () => [] as string[],
-        async () => {
-          const { readdir } = await import("node:fs/promises")
-          const items = await readdir(dir, { withFileTypes: true })
-          const acc: string[] = []
-          for (const it of items) {
-            const p = join(dir, it.name)
-            if (it.isDirectory()) acc.push(...(await collect(p)))
-            else if (it.name.endsWith(".ts")) acc.push(p)
-          }
-          return acc
-        },
-      )) {
-        out.push(ent)
-      }
-      return out
-    }
-    const files = await collect(srcRoot)
+    const files = await collectTypeScriptFiles(srcRoot)
     let promoteConsumers = 0
     for (const f of files) {
       const txt = await rf(f, "utf8")
