@@ -166,6 +166,77 @@ const harvest = (sink: string): Map<string, ScanReach> => {
   return observed
 }
 
+/**
+ * Everything the CLI decides once the child has run — pure, so a failing child is
+ * testable without a fixture that pollutes the tree.
+ *
+ * `childExit` is the reason this exists. It used to be PRINTED in the summary
+ * line and checked nowhere, so `bun run scan-reach` could exit 0 while the guards
+ * it ran were failing: the reach numbers are recorded before an assertion fails,
+ * so a red suite still produces a full harvest. A gate whose evidence is "the
+ * numbers matched" while the tests it measured were failing is the same defect
+ * this whole file exists to close, one level up.
+ */
+export interface ReachRun {
+  readonly childExit: number
+  readonly observed: ReadonlyMap<string, ScanReach>
+  readonly baseline: ScanReachBaseline
+  readonly tighten: boolean
+}
+
+export interface ReachDecision {
+  readonly exit: 0 | 1
+  readonly lines: readonly string[]
+  /** Only ever true when nothing else is wrong. */
+  readonly doTighten: boolean
+}
+
+export const decide = (run: ReachRun): ReachDecision => {
+  const lines: string[] = []
+  if (run.observed.size === 0) {
+    return {
+      exit: 1,
+      doTighten: false,
+      lines: [
+        "scan-reach: the guards recorded NO reach at all — the run is the measurement, " +
+          "so a silent zero here would pin every floor at nothing.",
+      ],
+    }
+  }
+  const { regressions, unpinned, drops, stale } = verdictFor(run.observed, run.baseline)
+  const blocking = [
+    ...(run.childExit === 0
+      ? []
+      : [
+          `the guards themselves FAILED (bun test exit ${run.childExit}) — reach is recorded ` +
+            "before an assertion fails, so a full harvest is not evidence that anything passed",
+        ]),
+    ...regressions,
+    ...unpinned,
+    ...stale,
+  ]
+  if (blocking.length > 0) {
+    lines.push("scan-reach: refusing.")
+    lines.push("A shrunken scan is fixed at the scan, never by lowering the number.")
+    for (const b of blocking) lines.push(`  ${b}`)
+    // Tightening over ANY of these blesses a number nobody reviewed: over a
+    // failing child it pins whatever a red run happened to reach, and over an
+    // unpinned or stale row it adds or keeps a pin the closed universe refused.
+    return { exit: 1, doTighten: false, lines }
+  }
+  if (run.tighten) {
+    return {
+      exit: 0,
+      doTighten: true,
+      lines: [`scan-reach: tightened ${run.observed.size} scans (${drops.length} had grown)`],
+    }
+  }
+  for (const d of drops)
+    lines.push(`scan-reach: ${d} — \`bun run scan-reach --tighten\` locks it in`)
+  lines.push(`scan-reach: ${run.observed.size} scans at or above their floors`)
+  return { exit: 0, doTighten: false, lines }
+}
+
 if (import.meta.main) {
   const sink = `${process.env.TMPDIR ?? "/tmp"}/quanta-scan-reach-${process.pid}.jsonl`
   writeFileSync(sink, "")
@@ -192,37 +263,28 @@ if (import.meta.main) {
       !f.includes("_shared/scan-population") &&
       !f.includes("floor-hellgate"),
   )
-  const run = Bun.spawnSync(["bun", "test", ...files], {
+  const child = Bun.spawnSync(["bun", "test", ...files], {
     env: { ...process.env, QUANTA_SCAN_REACH_RECORD: sink },
     stdout: "pipe",
     stderr: "pipe",
   })
   const observed = harvest(sink)
-  if (observed.size === 0) {
-    // biome-ignore lint/suspicious/noConsole: the CLI reports to the operator
-    console.error(
-      "scan-reach: the guards recorded NO reach at all — the run is the measurement, " +
-        "so a silent zero here would pin every floor at nothing.",
-    )
-    process.exit(1)
-  }
   const baseline = readScanReachBaseline()
-  const { regressions, unpinned, drops, stale } = verdictFor(observed, baseline)
-  const say = (line: string): void => {
+  const verdict = decide({
+    childExit: child.exitCode,
+    observed,
+    baseline,
+    tighten: process.argv.includes("--tighten"),
+  })
+  for (const line of verdict.lines) {
     // biome-ignore lint/suspicious/noConsole: the CLI reports to the operator
     console.error(line)
   }
-  if (process.argv.includes("--tighten")) {
-    tighten(observed, baseline)
-    say(`scan-reach: tightened ${observed.size} scans (${drops.length} had grown)`)
-    process.exit(0)
+  if (verdict.exit !== 0 && child.exitCode !== 0) {
+    // The child's own output is the actionable part when the guards failed.
+    // biome-ignore lint/suspicious/noConsole: the CLI reports to the operator
+    console.error(`${child.stdout.toString()}${child.stderr.toString()}`.slice(-4000))
   }
-  if (regressions.length > 0 || unpinned.length > 0 || stale.length > 0) {
-    say("scan-reach: the committed reach and the measured reach disagree.")
-    say("A shrunken scan is fixed at the scan, never by lowering the number.")
-    for (const r of [...regressions, ...unpinned, ...stale]) say(`  ${r}`)
-    process.exit(1)
-  }
-  for (const d of drops) say(`scan-reach: ${d} — \`bun run scan-reach --tighten\` locks it in`)
-  say(`scan-reach: ${observed.size} scans at or above their floors (test run exit ${run.exitCode})`)
+  if (verdict.doTighten) tighten(observed, baseline)
+  process.exit(verdict.exit)
 }
