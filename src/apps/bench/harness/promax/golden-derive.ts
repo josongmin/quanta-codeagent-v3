@@ -327,6 +327,100 @@ const canonical = (value: unknown): string => {
 const idOf = (row: Record<string, unknown>, index: number): string =>
   nonBlank(row.instance_id) ? row.instance_id : `<row ${index}>`
 
+const addedFields = (
+  source: Record<string, unknown>,
+  derived: Record<string, unknown>,
+  index: number,
+  instanceId: string,
+): GoldenDiffViolation[] =>
+  Object.keys(derived)
+    .filter((key) => !Object.hasOwn(source, key))
+    .map((field) => ({
+      code: "field_added" as const,
+      index,
+      instanceId,
+      field,
+      detail: `derived row adds \`${field}\``,
+    }))
+
+const changedFields = (
+  source: Record<string, unknown>,
+  derived: Record<string, unknown>,
+  index: number,
+  instanceId: string,
+): { readonly changes: GoldenFieldChange[]; readonly violations: GoldenDiffViolation[] } => {
+  const changes: GoldenFieldChange[] = []
+  const violations: GoldenDiffViolation[] = []
+  for (const key of Object.keys(source)) {
+    if (!Object.hasOwn(derived, key)) {
+      violations.push({
+        code: "field_removed",
+        index,
+        instanceId,
+        field: key,
+        detail: `derived row drops \`${key}\``,
+      })
+      continue
+    }
+    if (canonical(source[key]) === canonical(derived[key])) continue
+    if (key === CAMPAIGN_GOLDEN_MUTABLE_FIELD) {
+      changes.push({
+        index,
+        instanceId,
+        field: key,
+        from: String(source[key]),
+        to: String(derived[key]),
+      })
+    } else {
+      violations.push({
+        code: "field_changed",
+        index,
+        instanceId,
+        field: key,
+        detail: `\`${key}\` changed`,
+      })
+    }
+  }
+  return { changes, violations }
+}
+
+const compareGoldenRow = (
+  rawSource: unknown,
+  rawDerived: unknown,
+  index: number,
+  changes: GoldenFieldChange[],
+  violations: GoldenDiffViolation[],
+  derivedImageNames: Map<string, string>,
+): void => {
+  if (!isRecord(rawSource) || !isRecord(rawDerived)) {
+    violations.push({
+      code: "field_changed",
+      index,
+      instanceId: `<row ${index}>`,
+      field: "<row>",
+      detail: "a row is not a JSON object on one side of the comparison",
+    })
+    return
+  }
+  const instanceId = idOf(rawSource, index)
+  if (canonical(rawSource.instance_id) !== canonical(rawDerived.instance_id)) {
+    violations.push({
+      code: "row_order_changed",
+      index,
+      instanceId,
+      field: "instance_id",
+      detail: `index ${index} is "${instanceId}" in the source but "${idOf(rawDerived, index)}" in the derived document`,
+    })
+    return
+  }
+  const derivedImage = rawDerived[CAMPAIGN_GOLDEN_MUTABLE_FIELD]
+  if (nonBlank(derivedImage)) derivedImageNames.set(instanceId, derivedImage)
+  violations.push(...addedFields(rawSource, rawDerived, index, instanceId))
+  const fields = changedFields(rawSource, rawDerived, index, instanceId)
+  changes.push(...fields.changes)
+  violations.push(...fields.violations)
+}
+
 /**
  * Structurally diff a source golden document against its derived campaign
  * golden. Parses BOTH from bytes so it can be run against the two files a
@@ -363,77 +457,7 @@ export const diffGoldenDocuments = (
   const derivedImageNames = new Map<string, string>()
 
   source.rows.forEach((rawSource, index) => {
-    const rawDerived = derived.rows[index]
-    if (!isRecord(rawSource) || !isRecord(rawDerived)) {
-      violations.push({
-        code: "field_changed",
-        index,
-        instanceId: `<row ${index}>`,
-        field: "<row>",
-        detail: "a row is not a JSON object on one side of the comparison",
-      })
-      return
-    }
-    const instanceId = idOf(rawSource, index)
-    if (canonical(rawSource.instance_id) !== canonical(rawDerived.instance_id)) {
-      violations.push({
-        code: "row_order_changed",
-        index,
-        instanceId,
-        field: "instance_id",
-        detail: `index ${index} is "${instanceId}" in the source but "${idOf(rawDerived, index)}" in the derived document`,
-      })
-      return
-    }
-    const derivedImage = rawDerived[CAMPAIGN_GOLDEN_MUTABLE_FIELD]
-    if (nonBlank(derivedImage)) derivedImageNames.set(instanceId, derivedImage)
-    // OWN properties only. `key in obj` walks Object.prototype, so a row whose
-    // keys are `constructor` / `toString` / `hasOwnProperty` / `valueOf` — all
-    // legal JSON keys — reported as present on BOTH sides no matter what either
-    // document said, and an added or dropped one evaded the diff entirely.
-    for (const key of Object.keys(rawDerived)) {
-      if (!Object.hasOwn(rawSource, key)) {
-        violations.push({
-          code: "field_added",
-          index,
-          instanceId,
-          field: key,
-          detail: `derived row adds \`${key}\``,
-        })
-      }
-    }
-    for (const key of Object.keys(rawSource)) {
-      if (!Object.hasOwn(rawDerived, key)) {
-        violations.push({
-          code: "field_removed",
-          index,
-          instanceId,
-          field: key,
-          detail: `derived row drops \`${key}\``,
-        })
-        continue
-      }
-      const before = canonical(rawSource[key])
-      const after = canonical(rawDerived[key])
-      if (before === after) continue
-      if (key === CAMPAIGN_GOLDEN_MUTABLE_FIELD) {
-        changes.push({
-          index,
-          instanceId,
-          field: key,
-          from: String(rawSource[key]),
-          to: String(rawDerived[key]),
-        })
-        continue
-      }
-      violations.push({
-        code: "field_changed",
-        index,
-        instanceId,
-        field: key,
-        detail: `\`${key}\` changed`,
-      })
-    }
+    compareGoldenRow(rawSource, derived.rows[index], index, changes, violations, derivedImageNames)
   })
 
   return { ok: true, changes, violations, derivedImageNames }
