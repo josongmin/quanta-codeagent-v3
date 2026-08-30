@@ -65,6 +65,31 @@ import {
 
 const HARD_MS = 10_000
 
+const verifyGuardTurnScript = async function* (
+  call: number,
+  ac: AbortController,
+): AsyncIterable<StreamEvent> {
+  if (call === 1) {
+    yield* toolUse("e1", "edit", {
+      path: "/tmp/x",
+      old_string: "a",
+      new_string: "b",
+    })
+    return
+  }
+  if (call === 2) {
+    yield* toolUse("b1", "bash", { command: "git status" })
+    return
+  }
+  if (call === 3) {
+    yield { type: "text_delta", delta: "done, the fix looks good" }
+    ac.abort()
+    yield { type: "message_stop", stop_reason: "end_turn" }
+    return
+  }
+  throw new Error("FORCED VERIFY TURN STREAMED AFTER ABORT — leak")
+}
+
 /** A stub tool that records its name into a shared `dispatched[]` array the
  *  instant it executes, optionally awaits a tick so concurrency/ordering is
  *  observable, and runs an optional side effect (e.g. fire the abort). Read-only
@@ -238,35 +263,7 @@ describe("HELLGATE — abort mid verify-guard forced turn", () => {
       model: "verify-stub",
       async *stream(_i: StreamInput): AsyncIterable<StreamEvent> {
         calls += 1
-        if (calls === 1) {
-          // Turn 1: edit (mutating).
-          for (const e of toolUse("e1", "edit", {
-            path: "/tmp/x",
-            old_string: "a",
-            new_string: "b",
-          })) {
-            yield e
-          }
-          return
-        }
-        if (calls === 2) {
-          // Turn 2: a noise `git status` (NOT a verify).
-          for (const e of toolUse("b1", "bash", { command: "git status" })) yield e
-          return
-        }
-        if (calls === 3) {
-          // Turn 3: model FINISHES with pure text. The verify-guard will block
-          // this and force one more turn. Fire the abort mid-finish-stream so
-          // the abort is pending when the loop re-enters for the forced turn.
-          yield { type: "text_delta", delta: "done, the fix looks good" }
-          ac.abort()
-          yield { type: "message_stop", stop_reason: "end_turn" }
-          return
-        }
-        // Turn 4 (the FORCED verify turn) — must NEVER open.
-        throw new Error("FORCED VERIFY TURN STREAMED AFTER ABORT — leak")
-        // biome-ignore lint/correctness/noUnreachable: intentional post-throw yield that pins the async-generator yield type.
-        yield { type: "message_stop", stop_reason: "end_turn" }
+        yield* verifyGuardTurnScript(calls, ac)
       },
     }
 
