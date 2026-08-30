@@ -20,6 +20,7 @@ import { type BedrockClientFactory, BedrockProviderAdapter } from "@/llm/provide
 import type { ProviderConfig } from "@/llm/providers/provider-port"
 import { ProviderError } from "@/llm/providers/provider-port"
 import { LLMError } from "@/shared/errors"
+import { makeRawMessageSpyStream } from "../_shared/raw-message-spy-stream"
 
 const base = (over: Partial<ProviderConfig> = {}): ProviderConfig => ({
   providerId: "bedrock",
@@ -41,52 +42,6 @@ async function* fakeStream(): AsyncGenerator<unknown> {
   yield { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 3 } }
   yield { type: "message_stop" }
 }
-
-const spyStreamEvent = (index: number): unknown | undefined => {
-  if (index === 0) {
-    return { type: "message_start", message: { model: "x", usage: { input_tokens: 1 } } }
-  }
-  if (index === 1) {
-    return { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }
-  }
-  return index < 1000
-    ? { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "x" } }
-    : undefined
-}
-
-const makeSpyStream = (hooks: {
-  readonly onDelta?: () => void
-  readonly onReturn: () => void
-  readonly onThrow?: () => void
-}): AsyncIterable<unknown> => ({
-  [Symbol.asyncIterator](): AsyncIterator<unknown> {
-    let index = 0
-    let done = false
-    return {
-      async next() {
-        if (done) return { value: undefined, done: true }
-        const value = spyStreamEvent(index)
-        if (value === undefined) {
-          done = true
-          return { value: undefined, done: true }
-        }
-        if (index >= 2) hooks.onDelta?.()
-        index += 1
-        return { value, done: false }
-      },
-      async return(value?: unknown) {
-        hooks.onReturn()
-        done = true
-        return { value, done: true }
-      },
-      async throw(error?: unknown) {
-        hooks.onThrow?.()
-        done = true
-        throw error
-      },
-    }
-  },
-})
 
 interface CallLog {
   params?: Record<string, unknown>
@@ -364,7 +319,7 @@ describe("BedrockProviderAdapter — hellgate", () => {
         {},
         {
           stream: () =>
-            makeSpyStream({
+            makeRawMessageSpyStream({
               onDelta: () => yieldedFromUpstream++,
               onReturn: () => returnCalled++,
               onThrow: () => throwCalled++,
@@ -416,7 +371,7 @@ describe("BedrockProviderAdapter — hellgate", () => {
         {},
         {
           stream: () =>
-            makeSpyStream({
+            makeRawMessageSpyStream({
               onDelta: () => {
                 if (aborted) yieldedAfterAbort++
               },
@@ -430,7 +385,7 @@ describe("BedrockProviderAdapter — hellgate", () => {
     const a2 = new BedrockProviderAdapter(base(), {
       clientFactory: recordingFactory(log, {
         stream: () =>
-          makeSpyStream({
+          makeRawMessageSpyStream({
             onDelta: () => {
               if (aborted) yieldedAfterAbort++
             },

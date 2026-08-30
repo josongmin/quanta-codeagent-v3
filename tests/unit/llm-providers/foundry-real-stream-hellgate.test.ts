@@ -31,6 +31,7 @@ import {
 import type { ProviderConfig } from "@/llm/providers/provider-port"
 import { ProviderError } from "@/llm/providers/provider-port"
 import { LLMError } from "@/shared/errors"
+import { makeRawMessageSpyStream } from "../_shared/raw-message-spy-stream"
 
 const base = (over: Partial<ProviderConfig> = {}): ProviderConfig => ({
   providerId: "foundry",
@@ -378,66 +379,18 @@ describe("FoundryProviderAdapter — real-stream hellgate", () => {
     let returnCalled = 0
     let throwCalled = 0
     let yieldedFromUpstream = 0
-    function makeHugeSpyStream(): AsyncIterable<unknown> {
-      return {
-        [Symbol.asyncIterator](): AsyncIterator<unknown> {
-          let i = 0
-          let done = false
-          return {
-            async next() {
-              if (done) return { value: undefined, done: true }
-              if (i === 0) {
-                i++
-                return {
-                  value: {
-                    type: "message_start",
-                    message: { model: "x", usage: { input_tokens: 1 } },
-                  },
-                  done: false,
-                }
-              }
-              if (i === 1) {
-                i++
-                return {
-                  value: {
-                    type: "content_block_start",
-                    index: 0,
-                    content_block: { type: "text", text: "" },
-                  },
-                  done: false,
-                }
-              }
-              if (i < 1000) {
-                i++
-                yieldedFromUpstream++
-                return {
-                  value: {
-                    type: "content_block_delta",
-                    index: 0,
-                    delta: { type: "text_delta", text: "x" },
-                  },
-                  done: false,
-                }
-              }
-              done = true
-              return { value: undefined, done: true }
-            },
-            async return(value?: unknown) {
-              returnCalled++
-              done = true
-              return { value, done: true }
-            },
-            async throw(err?: unknown) {
-              throwCalled++
-              done = true
-              throw err
-            },
-          }
-        },
-      }
-    }
     const a = foundryProviderAdapter(base(), {
-      clientFactory: recordingFactory({}, { stream: makeHugeSpyStream }),
+      clientFactory: recordingFactory(
+        {},
+        {
+          stream: () =>
+            makeRawMessageSpyStream({
+              onDelta: () => yieldedFromUpstream++,
+              onReturn: () => returnCalled++,
+              onThrow: () => throwCalled++,
+            }),
+        },
+      ),
     })
     let count = 0
     for await (const _ of a.stream({ messages: [], tools: [] })) {
@@ -473,62 +426,17 @@ describe("FoundryProviderAdapter — real-stream hellgate", () => {
     let returnCalled = 0
     let aborted = false
     let yieldedAfterAbort = 0
-    function makeAbortableSpy(): AsyncIterable<unknown> {
-      return {
-        [Symbol.asyncIterator](): AsyncIterator<unknown> {
-          let i = 0
-          let done = false
-          return {
-            async next() {
-              if (done) return { value: undefined, done: true }
-              if (i === 0) {
-                i++
-                return {
-                  value: {
-                    type: "message_start",
-                    message: { model: "x", usage: { input_tokens: 1 } },
-                  },
-                  done: false,
-                }
-              }
-              if (i === 1) {
-                i++
-                return {
-                  value: {
-                    type: "content_block_start",
-                    index: 0,
-                    content_block: { type: "text", text: "" },
-                  },
-                  done: false,
-                }
-              }
-              if (i < 1000) {
-                i++
-                if (aborted) yieldedAfterAbort++
-                return {
-                  value: {
-                    type: "content_block_delta",
-                    index: 0,
-                    delta: { type: "text_delta", text: "x" },
-                  },
-                  done: false,
-                }
-              }
-              done = true
-              return { value: undefined, done: true }
-            },
-            async return(value?: unknown) {
-              returnCalled++
-              done = true
-              return { value, done: true }
-            },
-          }
-        },
-      }
-    }
     const log: CallLog = {}
     const a = foundryProviderAdapter(base(), {
-      clientFactory: recordingFactory(log, { stream: makeAbortableSpy }),
+      clientFactory: recordingFactory(log, {
+        stream: () =>
+          makeRawMessageSpyStream({
+            onDelta: () => {
+              if (aborted) yieldedAfterAbort++
+            },
+            onReturn: () => returnCalled++,
+          }),
+      }),
     })
     const ctl = earlyCtl
     let count = 0
