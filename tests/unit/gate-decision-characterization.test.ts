@@ -14,35 +14,35 @@
 import { describe, expect, test } from "bun:test"
 import { decideGate, type GateSignals } from "@/agent/gate-decision"
 
-const BOOLS = [false, true] as const
-
 // Enumerate every boolean combination of the 8 leaf signals. patchFileCount is
 // exercised at 1 (single-file) and 2 (the >=2 high-stakes boundary) — the two
 // values that change `highStakes`.
+const bitEnabled = (mask: number, bit: number): boolean => (mask & (1 << bit)) !== 0
+
+/** The bit positions follow the original nested-loop order exactly: the
+ * innermost `highConfidenceSingleOwner` flips first, then each enclosing axis.
+ * That preserves the 512-row snapshot order while making the cartesian product
+ * explicit rather than hiding it in eight control-flow layers. */
+const signalsFromMask = (patchFileCount: number, mask: number): GateSignals => ({
+  stakes: {
+    patchFileCount,
+    crossFile: bitEnabled(mask, 7),
+    destructive: bitEnabled(mask, 6),
+  },
+  uncertainty: {
+    sampleDisagreement: bitEnabled(mask, 5),
+    unresolvedSymbols: bitEnabled(mask, 4),
+  },
+  signal: { reproAvailable: bitEnabled(mask, 3), lspAvailable: bitEnabled(mask, 2) },
+  commitFast: {
+    issueProvidesFix: bitEnabled(mask, 1),
+    highConfidenceSingleOwner: bitEnabled(mask, 0),
+  },
+})
+
 function* allSignals(): Generator<GateSignals> {
   for (const patchFileCount of [1, 2]) {
-    for (const crossFile of BOOLS) {
-      for (const destructive of BOOLS) {
-        for (const sampleDisagreement of BOOLS) {
-          for (const unresolvedSymbols of BOOLS) {
-            for (const reproAvailable of BOOLS) {
-              for (const lspAvailable of BOOLS) {
-                for (const issueProvidesFix of BOOLS) {
-                  for (const highConfidenceSingleOwner of BOOLS) {
-                    yield {
-                      stakes: { patchFileCount, crossFile, destructive },
-                      uncertainty: { sampleDisagreement, unresolvedSymbols },
-                      signal: { reproAvailable, lspAvailable },
-                      commitFast: { issueProvidesFix, highConfidenceSingleOwner },
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
+    for (let mask = 0; mask < 1 << 8; mask++) yield signalsFromMask(patchFileCount, mask)
   }
 }
 
