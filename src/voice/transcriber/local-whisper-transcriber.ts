@@ -243,6 +243,56 @@ const cleanup = async (fs: WhisperFileSystem, dir: string): Promise<void> => {
   } catch {}
 }
 
+const invalidRequest = (req: TranscribeReq): TranscriberError | undefined => {
+  if (req.format !== "wav") return { kind: "unsupported-format", format: req.format }
+  if (req.audio.byteLength === 0) return { kind: "empty-audio" }
+  return req.signal?.aborted === true ? { kind: "aborted" } : undefined
+}
+
+const spawnWhisper = (
+  spawner: WhisperBinarySpawner,
+  argv: readonly string[],
+): Result<WhisperBinaryChild, TranscriberError> => {
+  try {
+    return ok(spawner.spawn(argv))
+  } catch (e) {
+    return err({ kind: "transcription-failed", status: 0, degradeReason: errMessage(e) })
+  }
+}
+
+const readTranscript = async (
+  fs: WhisperFileSystem,
+  outTxt: string,
+): Promise<Result<VoiceTranscript, TranscriberError>> => {
+  try {
+    const text = (await fs.readFile(outTxt, "utf-8")).trim()
+    return text.length > 0
+      ? ok({ text })
+      : err({ kind: "no-transcription", degradeReason: "whisper-cpp produced empty text" })
+  } catch (e) {
+    return err({
+      kind: "transcription-failed",
+      status: 0,
+      degradeReason: `whisper-cpp output not found: ${errMessage(e)}`,
+    })
+  }
+}
+
+const runFailure = (
+  result: Awaited<ReturnType<typeof runBinary>>,
+): TranscriberError | undefined => {
+  if (result.outcome === "aborted") return { kind: "aborted" }
+  if (result.outcome === "timeout") return { kind: "timeout", elapsedMs: result.elapsedMs }
+  if (result.outcome === "exit-nonzero") {
+    return {
+      kind: "transcription-failed",
+      status: result.code,
+      degradeReason: result.stderr.length > 0 ? result.stderr : `whisper-cpp exited ${result.code}`,
+    }
+  }
+  return undefined
+}
+
 export const createLocalWhisperTranscriber = (opts: LocalWhisperOpts = {}): TranscriberPort => {
   const binary = opts.binary ?? "whisper-cpp"
   const spawner = opts.spawner ?? defaultWhisperBinarySpawner()
@@ -251,18 +301,8 @@ export const createLocalWhisperTranscriber = (opts: LocalWhisperOpts = {}): Tran
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
   return {
     async transcribe(req: TranscribeReq): Promise<Result<VoiceTranscript, TranscriberError>> {
-      if (req.format !== "wav") {
-        // whisper.cpp accepts wav natively; webm needs ffmpeg conversion
-        // which we don't bundle. Surface as unsupported-format so the
-        // surface can re-record with format:"wav".
-        return err({ kind: "unsupported-format", format: req.format })
-      }
-      if (req.audio.byteLength === 0) {
-        return err({ kind: "empty-audio" })
-      }
-      if (req.signal?.aborted === true) {
-        return err({ kind: "aborted" })
-      }
+      const invalid = invalidRequest(req)
+      if (invalid !== undefined) return err(invalid)
       if (spawner.which(binary) === null) {
         return err({
           kind: "transcription-failed",
@@ -277,41 +317,17 @@ export const createLocalWhisperTranscriber = (opts: LocalWhisperOpts = {}): Tran
           threads,
           language: req.language,
         })
-        let child: WhisperBinaryChild
-        try {
-          child = spawner.spawn(argv)
-        } catch (e) {
-          return err({
-            kind: "transcription-failed",
-            status: 0,
-            degradeReason: errMessage(e),
-          })
-        }
+        const spawned = spawnWhisper(spawner, argv)
+        if (!spawned.ok) return spawned
         const startedAt = Date.now()
-        const r = await runBinary({ child, timeoutMs, signal: req.signal, startedAt })
-        if (r.outcome === "aborted") return err({ kind: "aborted" })
-        if (r.outcome === "timeout") return err({ kind: "timeout", elapsedMs: r.elapsedMs })
-        if (r.outcome === "exit-nonzero") {
-          return err({
-            kind: "transcription-failed",
-            status: r.code,
-            degradeReason: r.stderr.length > 0 ? r.stderr : `whisper-cpp exited ${r.code}`,
-          })
-        }
-        let text: string
-        try {
-          text = (await fs.readFile(ctx.outTxt, "utf-8")).trim()
-        } catch (e) {
-          return err({
-            kind: "transcription-failed",
-            status: 0,
-            degradeReason: `whisper-cpp output not found: ${errMessage(e)}`,
-          })
-        }
-        if (text.length === 0) {
-          return err({ kind: "no-transcription", degradeReason: "whisper-cpp produced empty text" })
-        }
-        return ok({ text })
+        const outcome = await runBinary({
+          child: spawned.value,
+          timeoutMs,
+          signal: req.signal,
+          startedAt,
+        })
+        const failed = runFailure(outcome)
+        return failed === undefined ? readTranscript(fs, ctx.outTxt) : err(failed)
       } finally {
         await cleanup(fs, ctx.dir)
       }
