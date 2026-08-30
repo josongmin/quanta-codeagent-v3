@@ -320,13 +320,71 @@ const attachDispatch = async (
   return { handleEvent, onMessage, unsubscribe, close, disconnect }
 }
 
+type AttachReadLoopContext = ReturnType<typeof attachTransport> &
+  Awaited<ReturnType<typeof attachProtocol>> &
+  Awaited<ReturnType<typeof attachDispatch>>
+
+type AttachLineOutcome = "continue" | "stop"
+
+/** A readiness timeout is terminal for the pending typed line: report it
+ * explicitly instead of silently dropping the input while detaching. */
+const handleAttachReadinessFailure = (ctx: AttachReadLoopContext): AttachLineOutcome => {
+  if (!ctx.mut.closed) {
+    ctx.opts.write("\n[handshake with the daemon never completed — input not sent; detaching]\n")
+  }
+  return "stop"
+}
+
+/** Send the input.append/turn.run batch as one outcome. A send can race socket
+ * lifecycle events, so this is the single place that latches the broken state
+ * and emits the user-visible loss-of-input receipt. */
+const sendAttachLineCommands = async (
+  ctx: AttachReadLoopContext,
+  sessionId: string,
+  line: string,
+): Promise<AttachLineOutcome> => {
+  const commands = buildLineCommands({
+    sessionId,
+    line,
+    newCommandId: ctx.newCommandId,
+    issuedAt: ctx.issuedAt,
+  })
+  try {
+    for (const command of commands) await ctx.sendCommand(command)
+    return "continue"
+  } catch {
+    ctx.mut.sendBroken = true
+    ctx.opts.write("\n[disconnected from daemon (send failed)]\n")
+    return "stop"
+  }
+}
+
+/** Claim approval input before session input, wait for the canonical handshake
+ * id, then dispatch the ordered command batch. */
+const processAttachInputLine = async (
+  ctx: AttachReadLoopContext,
+  line: string,
+): Promise<AttachLineOutcome> => {
+  if (ctx.mut.closed || ctx.mut.sendBroken) return "stop"
+  if (ctx.opts.claimApprovalLine?.(line) === true) return "continue"
+
+  const ready = await ctx.waitForReady()
+  if (!ready) return handleAttachReadinessFailure(ctx)
+
+  const sessionId = ctx.handshake.sessionId
+  if (sessionId === undefined) return "continue"
+  return sendAttachLineCommands(ctx, sessionId, line)
+}
+
+const consumeAttachInput = async (ctx: AttachReadLoopContext): Promise<void> => {
+  for await (const line of ctx.opts.stdin) {
+    if ((await processAttachInputLine(ctx, line)) === "stop") return
+  }
+}
+
 /** The read loop that feeds the dispatch above. */
-const attachReadLoop = async (
-  ctx: ReturnType<typeof attachTransport> &
-    Awaited<ReturnType<typeof attachProtocol>> &
-    Awaited<ReturnType<typeof attachDispatch>>,
-) => {
-  const { opts, newCommandId, issuedAt, handshake, mut, sendCommand, waitForReady, close } = ctx
+const attachReadLoop = async (ctx: AttachReadLoopContext) => {
+  const { close } = ctx
 
   // stdin read loop — each line becomes input.append + turn.run, but only once
   // the handshake is READY (so commands carry the canonical id the daemon
@@ -335,50 +393,7 @@ const attachReadLoop = async (
   // for readiness per line.
   const readLoop = async (): Promise<void> => {
     try {
-      for await (const line of opts.stdin) {
-        if (mut.closed || mut.sendBroken) break
-        // WS-B (UUX-3-02) — a pending approval claims the next line as its
-        // answer BEFORE the line becomes session input (previously a second
-        // readline raced this loop for the same stdin and the "y" could be
-        // swallowed as a prompt line).
-        if (opts.claimApprovalLine?.(line) === true) continue
-        const ready = await waitForReady()
-        if (!ready) {
-          // UUX-3-14 — a handshake that never settles must not eat the typed
-          // line and exit SILENTLY: say why the input went nowhere.
-          if (!mut.closed) {
-            opts.write(
-              "\n[handshake with the daemon never completed — input not sent; detaching]\n",
-            )
-          }
-          break
-        }
-        const sid = handshake.sessionId
-        if (sid === undefined) continue
-        const cmds = buildLineCommands({
-          sessionId: sid,
-          line,
-          newCommandId,
-          issuedAt,
-        })
-        let failed = false
-        for (const cmd of cmds) {
-          try {
-            await sendCommand(cmd)
-          } catch {
-            // Defense-in-depth (audit finding #3): a send that THROWS after the
-            // socket died must not vanish silently — the user typed a line and
-            // it went nowhere. Surface it + stop accepting further input (the
-            // close/error listeners normally fire too, but a send can race
-            // ahead of them). Latch `mut.sendBroken` so the loop drains and exits.
-            mut.sendBroken = true
-            failed = true
-            opts.write("\n[disconnected from daemon (send failed)]\n")
-            break
-          }
-        }
-        if (failed) break
-      }
+      await consumeAttachInput(ctx)
     } finally {
       await close()
     }
