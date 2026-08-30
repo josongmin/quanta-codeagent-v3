@@ -347,18 +347,28 @@ describe("policy injection — prompt + dispatch gate resist authority-override 
     expect(results.some((r) => isHardDenyMessage(r.content))).toBe(true)
   })
 
-  test("12. CONTROL — benign read-only `ls` runs and succeeds (no over-denying)", async () => {
-    // A non-malicious bash command (and read-only by intent) must NOT be
-    // hard-denied. This isolates the gate from accidentally over-blocking.
-    const llm = new AdversarialLLM([toolUse("c1", "bash", { command: "ls /tmp" }), text("done")])
+  test("12. CONTROL — bounded benign shell runs and succeeds (no over-denying)", async () => {
+    // Keep the control independent of ambient directory size. `ls /tmp` made
+    // this permission assertion inherit shared-runner load and could consume
+    // the entire hang budget while every policy decision was already correct.
+    const llm = new AdversarialLLM([
+      toolUse("c1", "bash", { command: "printf 'policy-control\\n'" }),
+      text("done"),
+    ])
     const out = await withTimeout(
-      runAgent(adversarialConfig(llm, "list /tmp")),
+      runAgent(adversarialConfig(llm, "print the policy control marker")),
       10_000,
       "scenario-12-control",
     )
     const results = toolResults(out.messages)
     // The control must NOT see a HARD_DENY phrase — the gate let it through.
     expect(results.some((r) => isHardDenyMessage(r.content))).toBe(false)
+    expect(results).toEqual([
+      expect.objectContaining({
+        content: expect.stringContaining("policy-control"),
+        isError: false,
+      }),
+    ])
     // And the agent must terminate normally.
     expect(["completed", "max_turns"]).toContain(out.reason)
   })
