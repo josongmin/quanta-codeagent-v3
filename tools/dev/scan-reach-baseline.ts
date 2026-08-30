@@ -182,6 +182,18 @@ export interface ReachRun {
   readonly observed: ReadonlyMap<string, ScanReach>
   readonly baseline: ScanReachBaseline
   readonly tighten: boolean
+  /**
+   * Per FILE, the baseline ids that file must report — the site-level
+   * completeness claim, checked against ground truth.
+   *
+   * A file can hold several scans, and enrolling one of them used to be enough
+   * to call the file done. Counting syntax cannot settle it: a recursive walker's
+   * internal `readdirSync` is one site, not one per level, and a helper called in
+   * a loop reports THREE ids from one call (`no-leftover-backup-files`). What the
+   * guards actually REPORT is the only reading that is neither over- nor
+   * under-counting, and this is the run that has it.
+   */
+  readonly expectedIds?: Readonly<Record<string, readonly string[]>>
 }
 
 export interface ReachDecision {
@@ -204,6 +216,15 @@ export const decide = (run: ReachRun): ReachDecision => {
     }
   }
   const { regressions, unpinned, drops, stale } = verdictFor(run.observed, run.baseline)
+  const missingIds = Object.entries(run.expectedIds ?? {}).flatMap(([file, ids]) =>
+    ids
+      .filter((id) => !run.observed.has(id))
+      .map(
+        (id) =>
+          `${file} is recorded as enrolled for "${id}", but no guard reported it — the scan ` +
+          "was renamed, removed, or never ran",
+      ),
+  )
   const blocking = [
     ...(run.childExit === 0
       ? []
@@ -214,6 +235,7 @@ export const decide = (run: ReachRun): ReachDecision => {
     ...regressions,
     ...unpinned,
     ...stale,
+    ...missingIds,
   ]
   if (blocking.length > 0) {
     lines.push("scan-reach: refusing.")
@@ -270,11 +292,15 @@ if (import.meta.main) {
   })
   const observed = harvest(sink)
   const baseline = readScanReachBaseline()
+  const debt = JSON.parse(
+    readFileSync(join(import.meta.dir, "scan-enrollment-debt.json"), "utf8"),
+  ) as { expectedIds?: Readonly<Record<string, readonly string[]>> }
   const verdict = decide({
     childExit: child.exitCode,
     observed,
     baseline,
     tighten: process.argv.includes("--tighten"),
+    ...(debt.expectedIds === undefined ? {} : { expectedIds: debt.expectedIds }),
   })
   for (const line of verdict.lines) {
     // biome-ignore lint/suspicious/noConsole: the CLI reports to the operator

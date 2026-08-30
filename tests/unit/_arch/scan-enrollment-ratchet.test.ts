@@ -74,6 +74,21 @@ const HOST_PATH = /["'`]\/(?:s?bin|usr\/s?bin|usr\/local|etc|opt|proc|sys|var)\b
  * A ratchet satisfied by a comment about the fix is the same defect it exists to
  * catch, committed inside the instrument.
  */
+/**
+ * Enrollment is a CALL, not a mention, and not a COUNT.
+ *
+ * Counting enumerator syntax against helper-call syntax was tried and abandoned
+ * the same night: it over-counts a recursive walker (its internal `readdirSync`
+ * is one site, not one per level) and under-counts a helper called in a loop —
+ * `no-leftover-backup-files` reports THREE baseline ids from a single syntactic
+ * call over three prefixes. Neither error is safe: one demands work that is
+ * already done, the other blesses a file with scans still unmeasured.
+ *
+ * So the site-level completeness check is not here. It lives where ground truth
+ * is: `bun run scan-reach` runs the guards and compares the ids they actually
+ * REPORT against `expectedIds` in the debt file. This predicate answers only the
+ * cheaper question — has the file been touched at all.
+ */
 const isEnrolled = (rel: string): boolean =>
   /\bassertScanPopulation\s*\(/.test(stripComments(readFileSync(join(REPO_ROOT, rel), "utf8")))
 

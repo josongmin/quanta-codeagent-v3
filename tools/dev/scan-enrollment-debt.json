@@ -63,5 +63,18 @@
       "file": "tests/unit/permission/shell-predicate-population-hellgate.test.ts",
       "why": "scans /sbin, /usr/sbin, /bin and /usr/bin for the formatters the HOST has installed. assertScanPopulation intersects a scan with `git ls-files` under a repo root, so a host path can never count as reach and any baseline row for it would be a fiction. Its real evidence is the PINNED debian:12 formatter corpus run through the live assessor, which is the claim a probe of this machine cannot make on its own."
     }
-  ]
+  ],
+  "expectedIds": {
+    "tests/unit/_arch/no-leftover-backup-files.test.ts": [
+      "tests/unit/_arch/no-leftover-backup-files.test.ts#src",
+      "tests/unit/_arch/no-leftover-backup-files.test.ts#tests",
+      "tests/unit/_arch/no-leftover-backup-files.test.ts#tools"
+    ],
+    "tests/unit/manifest-codex-compat-hellgate.test.ts": [
+      "tests/unit/manifest-codex-compat-hellgate.test.ts#SYSTEM-SKILLS"
+    ],
+    "tests/unit/runner/knobs/cross-slice-cycle.test.ts": [
+      "tests/unit/runner/knobs/cross-slice-cycle.test.ts#PER-KNOB-DIR"
+    ]
+  }
 }

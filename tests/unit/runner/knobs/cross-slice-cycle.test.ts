@@ -124,8 +124,11 @@ describe("hellgate / cross-slice — per-knob files do NOT import each other", (
     // Central registration is wired.
     expect(txt).toContain("registerBenchKnobs")
     const sideImports = txt.match(/import\s+["']\.\/[^"']+["']/g) ?? []
-    const files = await readdir(PER_KNOB_DIR)
-    const knobFileCount = files.filter((f) => f.endsWith(".ts") && f !== "index.ts").length
+    // Through the same helper as the two bans: this is a THIRD scan of the same
+    // directory and it was left unmeasured when the other two were enrolled —
+    // `knobFileCount` is the denominator of the comparison below, so an empty
+    // listing makes `sideImports.length < 0` and the whole claim collapses.
+    const knobFileCount = (await perKnobModules()).filter((f) => f !== "index.ts").length
     // Strictly FEWER side-effect imports than knob files (the schema-backed ones
     // are registered centrally, not hand-imported) — and at least one remains
     // (the non-schema self-registering knobs).

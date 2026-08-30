@@ -94,6 +94,10 @@ export interface CostPanel {
    *  omitted we derive it from the current model + the new token counts;
    *  unknown model ⇒ contributes nothing to `totalCostUsd` (the running
    *  sum is preserved). */
+  /** A3-S1 — count one TURN. A turn is a UI fact (a turn can hold several
+   *  model calls), so it is panel-local and independent of any metrics feed.
+   *  The dashboard sink calls this BEFORE its metrics guard. */
+  noteTurn(): void
   incrementTurn(usage: CostPanelUsageDelta): void
   /** Single-line render — used as a status-bar slot. Empty string when the
    *  panel is disabled. */
@@ -277,8 +281,13 @@ const panelState = (opts: CostPanelOptions) => {
   const effectiveState = (): CostPanelState => {
     const view = projected()
     if (view === undefined) return { ...state }
+    // A3-S1 — the label names what actually STREAMED last, not the boot pick;
+    // the newest record's model is provider text, so it passes the same
+    // render-boundary sanitizer as every other model string.
+    const last = accounting?.recent(1)[0]?.usage.model
     return {
       ...state,
+      model: last !== undefined ? sanitizeModel(last) : state.model,
       inputTokens: view.promptTokens,
       outputTokens: view.outputTokens,
       cacheReadTokens: view.cacheReadTokens,
@@ -311,7 +320,7 @@ type PanelCtx = ReturnType<typeof panelState>
  *  that advance them. */
 const accountingOps = (
   ctx: PanelCtx,
-): Pick<CostPanel, "snapshot" | "byModel" | "incrementTurn"> => {
+): Pick<CostPanel, "snapshot" | "byModel" | "noteTurn" | "incrementTurn"> => {
   const {
     enabled,
     state,
@@ -339,11 +348,16 @@ const accountingOps = (
       }))
     },
 
-    incrementTurn: (usage) => {
+    noteTurn: () => {
       if (!enabled) return
       state.turns += 1
-      // Projected mode: the accountant owns every token and dollar, so the turn
-      // count above is the only thing left for this panel to advance.
+    },
+
+    incrementTurn: (usage) => {
+      if (!enabled) return
+      // A3-S1 — the turn count moved to noteTurn() (the dashboard sink calls
+      // it unconditionally); this legacy entry now carries ONLY the legacy
+      // accumulation, and dies with it in A3-S2.
       if (accounting === undefined || !authoritative) accumulateLegacyTurn(ctx, usage)
     },
   }

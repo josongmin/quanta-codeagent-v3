@@ -142,6 +142,9 @@ export const composeTurnSinks = (
   const { model, slog, metrics, turnSummary, statusBar } = setup
   return {
     renderTurnDashboard: (): void => {
+      // A3-S1 — the turn count is a UI fact and must not hide behind the
+      // metrics guard: a metrics-less session still has turns.
+      setup.costPanel?.noteTurn()
       if (!metrics) return
       const snap = metrics.snapshot()
       slog.info("metrics.snapshot", { snapshot: snap })

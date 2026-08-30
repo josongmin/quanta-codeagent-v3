@@ -1126,6 +1126,61 @@ describe("wire-protocol field-shape drift: copy field shapes === canonical daemo
     }
   })
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // [objective-mirror] — the OBJECTIVE half of this file was guarded by nothing.
+  //
+  // The generator (`tools/gen-web-frontend-protocol.ts`) emits only the session
+  // protocol, and the field-shape arm above compares only the four canonical
+  // session files, so `Objective` / `Blocker` / `ObjectiveBudget` — hand-written
+  // in the same mirror — drifted unwatched. What that cost: the mirror declared
+  // `verificationState` and `verifiedSourceDigest`, which exist NOWHERE in
+  // `src/`, and `ObservabilityPane` rendered a "Verified source is stale" branch
+  // that could never light up. In the other direction the emitter ships
+  // `objective.get()` WHOLE, so `attempts`, `blockerObservations` and
+  // `budget.limitedBy` were already arriving in the browser and the mirror threw
+  // them away — including, this morning, the `limitedBy` the CLI had just been
+  // taught to render.
+  //
+  // Same scanner, different canonical root. Interface-name matching means the
+  // criterion union is out of scope until it is expressed as interfaces.
+  const CANONICAL_OBJECTIVE_PATHS = ["src/objective/types.ts"] as const
+
+  const APPROVED_OBJECTIVE_NARROWINGS: Readonly<Record<string, ApprovedFieldNarrowing>> = {}
+
+  let objectiveReportMemo: FieldShapeDriftReport | undefined
+  const objectiveReport = (): FieldShapeDriftReport => {
+    if (objectiveReportMemo !== undefined) return objectiveReportMemo
+    const copy = parseProtocolSources([
+      { source: readText(FRONTEND_PROTOCOL_PATH), label: "web-frontend-protocol-copy" },
+    ])
+    const canonical = parseProtocolSources(
+      CANONICAL_OBJECTIVE_PATHS.map((path) => ({
+        source: readText(join(REPO_ROOT, path)),
+        label: path,
+      })),
+    )
+    objectiveReportMemo = collectFieldShapeDrift(copy, canonical, APPROVED_OBJECTIVE_NARROWINGS)
+    return objectiveReportMemo
+  }
+
+  test("[objective-mirror] zero drift against src/objective/types.ts", () => {
+    expect(objectiveReport().drift).toEqual([])
+  })
+
+  test("[objective-mirror] scanner non-vacuity: the objective types are actually compared", () => {
+    const report = objectiveReport()
+    for (const mustCompare of ["Objective", "Blocker", "ObjectiveBudget"]) {
+      expect(report.comparedInterfaces).toContain(mustCompare)
+    }
+    expect(report.comparedFieldCount).toBeGreaterThanOrEqual(20)
+  })
+
+  test("[objective-mirror] narrowing inventory is exact (no stale pins)", () => {
+    expect([...objectiveReport().usedNarrowingKeys].sort()).toEqual(
+      Object.keys(APPROVED_OBJECTIVE_NARROWINGS).sort(),
+    )
+  })
+
   test("[field-shape] narrowing inventory is exact: every pin in active use, no stale entries, no key shadowing", () => {
     // Ratchet: a pin whose divergence got mirrored away MUST be deleted (a
     // stale allowlist entry would silently green the NEXT, different drift on
