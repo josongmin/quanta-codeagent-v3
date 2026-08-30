@@ -67,32 +67,33 @@ const expectedCategory = (
 const LAYERS: Layer[] = ["system", "user", "project"]
 const ACTIONS: Act[] = ["allow", "deny", "ask"]
 
+const assertFencedOverlayCell = (layer: Layer, action: Act, hard: boolean): void => {
+  const token = `tok-${layer}-${action}-${hard}`
+  const overlay = buildAutoModeOverlay([rule(layer, action, token, hard)])
+  const category = expectedCategory(layer, action, hard)
+  if (category === null) {
+    expect(overlay).toBeUndefined()
+    return
+  }
+  if (overlay === undefined) throw new Error("expected a fenced overlay")
+  const line = `- ${token}`
+  const buckets = {
+    allow: overlay.allow ?? [],
+    soft_deny: overlay.soft_deny ?? [],
+    hard_deny: overlay.hard_deny ?? [],
+  }
+  for (const [name, lines] of Object.entries(buckets)) {
+    if (name === category) expect(lines).toContain(line)
+    else expect(lines).not.toContain(line)
+  }
+}
+
 describe("buildAutoModeOverlay — EXHAUSTIVE layer × action fence matrix (the truth table)", () => {
   test("every (layer, action, hard?) cell lands in EXACTLY the fenced category (or is dropped)", () => {
     for (const layer of LAYERS) {
       for (const action of ACTIONS) {
         for (const hard of action === "deny" ? [false, true] : [false]) {
-          const r = rule(layer, action, `tok-${layer}-${action}-${hard}`, hard)
-          const overlay = buildAutoModeOverlay([r])
-          const cat = expectedCategory(layer, action, hard)
-          const line = `- tok-${layer}-${action}-${hard}`
-          if (cat === null) {
-            // Contributes nothing ⇒ undefined overlay (nothing else in the list).
-            expect(overlay).toBeUndefined()
-            continue
-          }
-          expect(overlay).toBeDefined()
-          if (!overlay) throw new Error("unreachable")
-          // The rule appears ONLY in its fenced category, never any other.
-          const buckets = {
-            allow: overlay.allow ?? [],
-            soft_deny: overlay.soft_deny ?? [],
-            hard_deny: overlay.hard_deny ?? [],
-          }
-          for (const [name, lines] of Object.entries(buckets)) {
-            if (name === cat) expect(lines).toContain(line)
-            else expect(lines).not.toContain(line)
-          }
+          assertFencedOverlayCell(layer, action, hard)
         }
       }
     }
