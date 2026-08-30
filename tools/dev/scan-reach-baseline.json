@@ -457,13 +457,13 @@
     "tests/unit/retrieval-bridge-deleted-ratchet.test.ts#SRC-ROOT": {
       "walked": 3656
     },
-    "tests/unit/retrieval/budget-probe-hellgate.test.ts#/Users/songmin/quanta-codeagent-v3/src/agent": {
+    "tests/unit/retrieval/budget-probe-hellgate.test.ts#src/agent": {
       "walked": 836
     },
-    "tests/unit/retrieval/budget-probe-hellgate.test.ts#/Users/songmin/quanta-codeagent-v3/src/apps": {
+    "tests/unit/retrieval/budget-probe-hellgate.test.ts#src/apps": {
       "walked": 754
     },
-    "tests/unit/retrieval/budget-probe-hellgate.test.ts#/Users/songmin/quanta-codeagent-v3/src/runner": {
+    "tests/unit/retrieval/budget-probe-hellgate.test.ts#src/runner": {
       "walked": 342
     },
     "tests/unit/runagent-callsite-authority-fence-hellgate.test.ts#SRC": {

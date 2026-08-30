@@ -178,9 +178,10 @@ describe("budget-probe hellgate (12 cases)", () => {
     const roots = ["src/agent", "src/runner", "src/apps"]
     const repoRoot = join(import.meta.dir, "..", "..", "..")
     const absRoots = roots.map((r) => join(repoRoot, r))
-    for (const root of absRoots) {
+    for (const relativeRoot of roots) {
+      const root = join(repoRoot, relativeRoot)
       assertScanPopulation(visitedUnder(root), root, {
-        id: `tests/unit/retrieval/budget-probe-hellgate.test.ts#${root}`,
+        id: `tests/unit/retrieval/budget-probe-hellgate.test.ts#${relativeRoot}`,
         collectable: (n) => n.endsWith(".ts"),
       })
     }
