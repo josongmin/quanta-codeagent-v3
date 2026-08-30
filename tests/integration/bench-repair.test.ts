@@ -107,6 +107,18 @@ class ScriptedLLM implements LLMPort {
 
   constructor(private readonly scenes: readonly Scene[]) {}
 
+  private advanceSceneForNewAgentRun(input: StreamInput): void {
+    const seedText =
+      input.messages[0]?.content.map((b) => (b.type === "text" ? b.text : "")).join("\n") ?? ""
+    if (seedText === this.lastSeed) return
+
+    this.agentRuns += 1
+    this.sceneIdx += 1
+    this.turnInScene = 0
+    this.seedTextsSeen.push(seedText)
+    this.lastSeed = seedText
+  }
+
   async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
     // Canonical "new runAgent" signal: the FIRST message (the seed) differs
     // from the previous turn's first message. The agent loop preserves the
@@ -115,15 +127,7 @@ class ScriptedLLM implements LLMPort {
     // fresh seed (possibly the same problem statement, plus an optional
     // repair seedMsg). Comparing index-0 text avoids depending on the
     // turn-context (system-reminder) injection at index 1.
-    const seedText =
-      input.messages[0]?.content.map((b) => (b.type === "text" ? b.text : "")).join("\n") ?? ""
-    if (seedText !== this.lastSeed) {
-      this.agentRuns += 1
-      this.sceneIdx += 1
-      this.turnInScene = 0
-      this.seedTextsSeen.push(seedText)
-      this.lastSeed = seedText
-    }
+    this.advanceSceneForNewAgentRun(input)
     const text = input.messages
       .flatMap((m) => m.content)
       .map((b) => (b.type === "text" ? b.text : ""))
