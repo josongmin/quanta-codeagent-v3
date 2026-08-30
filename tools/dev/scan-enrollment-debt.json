@@ -11,7 +11,6 @@
     "tests/unit/apps/bench/promax/promax-port-contract-unsuppressed.test.ts",
     "tests/unit/apps/bench/terminal/tb-2-0-retirement.test.ts",
     "tests/unit/cli/cli-feature-gates-drift-hellgate.test.ts",
-    "tests/unit/dangerous-gate-strict-ratchet-hellgate.test.ts",
     "tests/unit/feature-catalog-reachability.test.ts",
     "tests/unit/host/bootstrap-host-extraction-hellgate.test.ts",
     "tests/unit/knob-registry-completeness-ratchet-hellgate.test.ts",
@@ -418,6 +417,9 @@
     ],
     "tests/unit/runagent-callsite-authority-fence-hellgate.test.ts": [
       "tests/unit/runagent-callsite-authority-fence-hellgate.test.ts#SRC"
+    ],
+    "tests/unit/dangerous-gate-strict-ratchet-hellgate.test.ts": [
+      "tests/unit/dangerous-gate-strict-ratchet-hellgate.test.ts#SRC"
     ]
   }
 }

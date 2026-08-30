@@ -41,6 +41,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
+import { assertScanPopulation } from "./_shared/scan-population"
 import { stripComments } from "./_shared/strip-comments"
 
 const SRC_ROOT = join(import.meta.dir, "../../src")
@@ -243,7 +244,8 @@ const readAllSrc = (): ReadonlyArray<readonly [path: string, text: string]> => {
 const stripSrc = (src: string): string => stripComments(src, { preservePositions: true })
 
 /** Comment-stripped view of every src file — what every src-wide assertion scans. */
-const ALL_SRC = readAllSrc().map(([p, text]) => [p, stripSrc(text)] as const)
+const ALL_SRC_RAW = readAllSrc()
+const ALL_SRC = ALL_SRC_RAW.map(([p, text]) => [p, stripSrc(text)] as const)
 
 /** Escape a string for use as a literal inside a RegExp. */
 const esc = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
@@ -359,6 +361,14 @@ describe("dangerous gates use the STRICT primitive SRC-WIDE (const-alias-aware r
   })
 
   test("the src walk actually read a substantial number of files (walk not broken)", () => {
+    assertScanPopulation(
+      ALL_SRC_RAW.map(([path]) => path),
+      SRC_ROOT,
+      {
+        id: "tests/unit/dangerous-gate-strict-ratchet-hellgate.test.ts#SRC",
+        collectable: (name) => name.endsWith(".ts"),
+      },
+    )
     // Defends against a silently-empty readdir (e.g. wrong root) making every
     // 'present' assertion vacuously... fail, and every 'no-loose' vacuously pass.
     expect(ALL_SRC.length).toBeGreaterThan(100)

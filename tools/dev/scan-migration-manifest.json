@@ -64,22 +64,6 @@
       ]
     },
     {
-      "file": "tests/unit/dangerous-gate-strict-ratchet-hellgate.test.ts",
-      "klass": "A-recursive-walk",
-      "enumerators": [
-        "readdirSync"
-      ],
-      "recursive": true,
-      "absolutePaths": true,
-      "derived": false,
-      "roots": 1,
-      "floorLines": [
-        "92: expect(STRICT_ON_GATES.length + STRICT_DISABLE_GATES.length).toBeGreaterThanOrEqual(11)",
-        "358: expect(DANGEROUS_GATES.length).toBeGreaterThanOrEqual(13)",
-        "364: expect(ALL_SRC.length).toBeGreaterThan(100)"
-      ]
-    },
-    {
       "file": "tests/unit/feature-catalog-reachability.test.ts",
       "klass": "A-recursive-walk",
       "enumerators": [

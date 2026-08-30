@@ -412,6 +412,9 @@
     },
     "tests/unit/runagent-callsite-authority-fence-hellgate.test.ts#SRC": {
       "walked": 3352
+    },
+    "tests/unit/dangerous-gate-strict-ratchet-hellgate.test.ts#SRC": {
+      "walked": 3656
     }
   }
 }
