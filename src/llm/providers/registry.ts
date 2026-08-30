@@ -125,6 +125,40 @@ const unsupportedFactory = (id: string): ProviderFactory => {
   }
 }
 
+const resolvedProvider = (id: ProviderId): ResolvedProvider => ({ id, factory: FACTORIES[id] })
+
+const resolveExplicitProvider = (explicit: string | undefined): ResolvedProvider | undefined => {
+  if (explicit === undefined || explicit.length === 0) return undefined
+  const trimmed = explicit.trim()
+  if (trimmed in FACTORIES) return resolvedProvider(trimmed as ProviderId)
+  return { id: trimmed, factory: unsupportedFactory(trimmed) }
+}
+
+const hasEnvValue = (env: ProviderEnv, key: string): boolean => {
+  const value = env[key]
+  return value !== undefined && value.length > 0
+}
+
+/** ADR-0172: URL, resource name, or quanta-native switch selects Foundry.
+ * The Claude-CLI mirror is consumed earlier by detectClaudeUseEnv. */
+const foundrySelected = (env: ProviderEnv): boolean =>
+  hasEnvValue(env, PROVIDER_ENV_KEYS.foundry) ||
+  hasEnvValue(env, FOUNDRY_EXTRA_ENV_KEYS.resource) ||
+  isTruthyEnv(env[FOUNDRY_EXTRA_ENV_KEYS.quantaUse])
+
+const mantleSelected = (env: ProviderEnv): boolean =>
+  hasEnvValue(env, PROVIDER_ENV_KEYS.mantle) || isTruthyEnv(env[MANTLE_EXTRA_ENV_KEYS.quantaUse])
+
+/** Fixed env precedence, isolated from explicit and Claude-use resolution so
+ * each layer remains independently readable and below the complexity gate. */
+const providerFromTransportEnv = (env: ProviderEnv): ProviderId => {
+  if (hasEnvValue(env, PROVIDER_ENV_KEYS.bedrock)) return "bedrock"
+  if (hasEnvValue(env, PROVIDER_ENV_KEYS.vertex)) return "vertex"
+  if (foundrySelected(env)) return "foundry"
+  if (mantleSelected(env)) return "mantle"
+  return "default"
+}
+
 /**
  * Resolve which provider transport to use. Pure function — no I/O, no SDK
  * touches. Precedence order is documented in the file header.
@@ -138,15 +172,8 @@ const unsupportedFactory = (id: string): ProviderFactory => {
 export const resolveProvider = (explicit?: string, env: ProviderEnv = {}): ResolvedProvider => {
   // Layer 1 — caller wins. Trim+normalize so " bedrock " from a flag parse
   // does not slip past the closed-union check.
-  if (explicit !== undefined && explicit.length > 0) {
-    const trimmed = explicit.trim()
-    if (trimmed in FACTORIES) {
-      const id = trimmed as ProviderId
-      return { id, factory: FACTORIES[id] }
-    }
-    // Unknown explicit id ⇒ lazy-throw factory (see file header rationale).
-    return { id: trimmed, factory: unsupportedFactory(trimmed) }
-  }
+  const explicitProvider = resolveExplicitProvider(explicit)
+  if (explicitProvider !== undefined) return explicitProvider
 
   // Layer 2 — CLAUDE_CODE_USE_* quartet (ADR-0163 Phase A). Delegated to the
   // provider router's `detectClaudeUseEnv` — the quartet SSOT — so the truthy
@@ -155,56 +182,14 @@ export const resolveProvider = (explicit?: string, env: ProviderEnv = {}): Resol
   // Per ADR-0163 precedence this layer beats the `ANTHROPIC_*_BASE_URL` keys.
   const claudeUse = detectClaudeUseEnv(env)
   if (claudeUse !== undefined && claudeUse in FACTORIES) {
-    const id = claudeUse as ProviderId
-    return { id, factory: FACTORIES[id] }
+    return resolvedProvider(claudeUse as ProviderId)
   }
 
-  // Layer 3-5 — env precedence. Order is fixed (bedrock → vertex → foundry).
+  // Remaining env precedence is fixed (bedrock → vertex → foundry → mantle).
   // Presence (non-empty string), not value, gates selection — the actual
   // URL is consumed by the adapter SDK, not by us.
-  const bedrockUrl = env[PROVIDER_ENV_KEYS.bedrock]
-  if (bedrockUrl !== undefined && bedrockUrl.length > 0) {
-    return { id: "bedrock", factory: FACTORIES.bedrock }
-  }
-  const vertexUrl = env[PROVIDER_ENV_KEYS.vertex]
-  if (vertexUrl !== undefined && vertexUrl.length > 0) {
-    return { id: "vertex", factory: FACTORIES.vertex }
-  }
-  // Foundry signal — ADR-0172 expanded from one URL key to four. Any of:
-  //   - `ANTHROPIC_FOUNDRY_BASE_URL`     non-empty  (ADR-0139 legacy)
-  //   - `ANTHROPIC_FOUNDRY_RESOURCE`     non-empty  (SDK resource-name path)
-  //   - `QUANTA_USE_FOUNDRY`             truthy     (quanta-native switch)
-  // routes to Foundry. (The Claude-CLI `CLAUDE_CODE_USE_FOUNDRY` mirror is
-  // caught at layer 2 above by the router delegation — reading it here again
-  // would be a second, drift-prone consumer of the same key.) The boolean
-  // switch uses the canonical truthy grammar consumed via `isTruthyEnv` — the
-  // SSOT in `provider-metadata.ts` (which owns the accepted-spelling set;
-  // audit L6 M11). The registry no longer hand-rolls a local copy;
-  // `provider-metadata` is a plane-clean leaf (it imports only
-  // `provider-types`), so importing it does not create a cycle nor drag a
-  // transitive dependency.
-  const foundryUrl = env[PROVIDER_ENV_KEYS.foundry]
-  const foundryResource = env[FOUNDRY_EXTRA_ENV_KEYS.resource]
-  const foundryQuantaUse = env[FOUNDRY_EXTRA_ENV_KEYS.quantaUse]
-  if (
-    (foundryUrl !== undefined && foundryUrl.length > 0) ||
-    (foundryResource !== undefined && foundryResource.length > 0) ||
-    isTruthyEnv(foundryQuantaUse)
-  ) {
-    return { id: "foundry", factory: FACTORIES.foundry }
-  }
-
-  // Mantle signal (ADR-0172 W12) — mirrors the Foundry expansion. Any of:
-  //   - `ANTHROPIC_MANTLE_BASE_URL`  non-empty  (canonical key)
-  //   - `QUANTA_USE_MANTLE`          truthy     (quanta-native switch)
-  // routes to Mantle (the `CLAUDE_CODE_USE_MANTLE` mirror is layer 2 above).
-  // Placed AFTER foundry so a more-specific transport wins.
-  const mantleUrl = env[PROVIDER_ENV_KEYS.mantle]
-  const mantleQuantaUse = env[MANTLE_EXTRA_ENV_KEYS.quantaUse]
-  if ((mantleUrl !== undefined && mantleUrl.length > 0) || isTruthyEnv(mantleQuantaUse)) {
-    return { id: "mantle", factory: FACTORIES.mantle }
-  }
-
-  // Layer 6 — fallback to the public api.anthropic.com path.
-  return { id: "default", factory: FACTORIES.default }
+  // The concrete checks live in providerFromTransportEnv. Keeping this layer
+  // as one ordered selection prevents the top-level resolver from regrowing a
+  // branch-heavy precedence ladder.
+  return resolvedProvider(providerFromTransportEnv(env))
 }

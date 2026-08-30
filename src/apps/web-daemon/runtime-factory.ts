@@ -379,10 +379,22 @@ export const resolveWebBootLLM = (
   return { provider: boot.provider, model: boot.modelId, llm }
 }
 
-export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntimeFacade>) => {
+export interface ProductionRuntimeFactoryOverrides {
+  /**
+   * Test-only boot-port seam. Production callers omit it and still resolve the
+   * provider/model through {@link resolveWebBootLLM}. Supplying the complete
+   * boot tuple keeps composition tests offline without replacing any of the
+   * downstream production wiring (model routing, config assembly, runtime).
+   */
+  readonly boot?: ReturnType<typeof resolveWebBootLLM>
+}
+
+export const buildProductionRuntimeFactory = (
+  overrides: ProductionRuntimeFactoryOverrides = {},
+): (() => Promise<ObservableRuntimeFacade>) => {
   const env = process.env as Record<string, string | undefined>
   applyGoalPreset(env, !gateDisabled(env, "QUANTA_GOAL"))
-  const { provider, llm } = resolveWebBootLLM(env)
+  const { provider, llm } = overrides.boot ?? resolveWebBootLLM(env)
 
   return async (): Promise<ObservableRuntimeFacade> => {
     const parts = await assembleWebRuntimeParts(env, llm, loadDefaultPermissionStore, provider)

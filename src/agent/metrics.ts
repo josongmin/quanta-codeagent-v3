@@ -1,6 +1,6 @@
 import type { PrewarmOutcome } from "@/llm"
 import { GEN_AI_ATTRS, type Metrics, QUANTA_ATTRS } from "@/observability"
-import type { UsageCost } from "@/observability/usage-accounting"
+import type { UsageCost, UsageRejection } from "@/observability/usage-accounting"
 import type { PersistStats, RecallStats } from "./memory-stats"
 
 /**
@@ -46,9 +46,14 @@ export const METRIC = {
   cacheWrite: GEN_AI_ATTRS.usage.cacheCreationInputTokens,
   costUsd: QUANTA_ATTRS.work.costUsd,
   // A5 — records the authority REFUSED (non-finite report, session mismatch).
-  // A silent rejection hid broken usage reports; the counter makes the refusal
-  // measurable while the once-per-authority warn names the reason.
+  // The aggregate preserves the existing dashboard while the closed reason
+  // map makes each failure mode independently actionable without unbounded
+  // metric-cardinality from an arbitrary string suffix.
   usageRejected: QUANTA_ATTRS.usage.rejected,
+  usageRejectedByReason: {
+    "non-finite": QUANTA_ATTRS.usage.rejectedByReason.nonFinite,
+    "session-mismatch": QUANTA_ATTRS.usage.rejectedByReason.sessionMismatch,
+  },
   // ADR-0452 — session-startup prewarm + TTFM. Canonical `quanta.startup.*`
   // keys (vocabulary.ts) so any surface reads the same well-known names.
   ttfm: QUANTA_ATTRS.startup.timeToFirstMessageMs,
@@ -139,9 +144,10 @@ export class AgentRecorder {
     if (cost.pricingKnown) this.metrics.counter(METRIC.costUsd).inc(cost.totalUsd)
   }
 
-  /** A5 — one refused usage record (see METRIC.usageRejected). */
-  usageRejected(): void {
+  /** A5 — one refused usage record, attributed to a closed reason vocabulary. */
+  usageRejected(reason: Exclude<UsageRejection, "duplicate">): void {
     this.metrics.counter(METRIC.usageRejected).inc(1)
+    this.metrics.counter(METRIC.usageRejectedByReason[reason]).inc(1)
   }
 
   tokensUsed(input: number, output: number, cacheRead?: number): void {

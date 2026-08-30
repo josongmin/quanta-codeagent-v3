@@ -212,8 +212,14 @@ export const QUANTA_ATTRS = {
   usage: {
     /** Count of usage records the session authority REFUSED (non-finite
      *  report, session mismatch). A refusal used to be silent; this makes it
-     *  measurable while the once-per-authority warn names the reason. */
+     *  measurable while the reason-specific counters identify the fault. */
     rejected: "quanta.usage.rejected",
+    /** Closed reason vocabulary. Keep this finite: metric names must not be
+     *  derived from adapter-controlled strings. */
+    rejectedByReason: {
+      nonFinite: "quanta.usage.rejected.non_finite",
+      sessionMismatch: "quanta.usage.rejected.session_mismatch",
+    },
   },
   /** ADR-0217 — per-slice OTel emit. Six canonical keys shared across the
    *  four new leaf slices (error-routing, stream-timeout, shell-snapshot,

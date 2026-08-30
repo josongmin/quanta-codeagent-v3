@@ -8,6 +8,7 @@ import {
   type UsageAccountingPort,
   type UsageCost,
   type UsageProvenance,
+  type UsageRejection,
 } from "@/observability/usage-accounting"
 import type { PromptPolicySnapshot, TurnPolicySnapshot } from "@/shared"
 import { errMessage, LLMError, logger, runtimeConfig } from "@/shared"
@@ -145,15 +146,18 @@ const USAGE_SINKS: readonly UsageSink[] = [
       provenance,
     })
     // A5 — a refusal must be visible. The counter ticks on EVERY rejection
-    // (metrics optional); the operator warn is latched per AUTHORITY instance
-    // so one broken adapter doesn't spam a session, while a fresh session's
-    // first refusal still speaks even in a multi-session process.
-    if (!result.admitted && result.reason !== "duplicate") {
-      recorder?.usageRejected()
-      if (!rejectedWarned.has(accounting)) {
-        rejectedWarned.add(accounting)
+    // (metrics optional); the operator warn is latched per AUTHORITY + REASON
+    // so repeats do not spam, while a second failure mode is not suppressed by
+    // whichever one happened first.
+    const reason = result.reason
+    if (!result.admitted && reason !== undefined && reason !== "duplicate") {
+      recorder?.usageRejected(reason)
+      const warnedReasons = rejectedWarned.get(accounting) ?? new Set<ObservableUsageRejection>()
+      if (!warnedReasons.has(reason)) {
+        warnedReasons.add(reason)
+        rejectedWarned.set(accounting, warnedReasons)
         logger.warn(
-          `usage accounting rejected a record (${result.reason}) — model=${normalized.model} agent=${provenance.agentId}; totals exclude it`,
+          `usage accounting rejected a record (${reason}) — model=${normalized.model} agent=${provenance.agentId}; totals exclude it`,
         )
       }
     }
@@ -226,13 +230,28 @@ const USAGE_SINKS: readonly UsageSink[] = [
  */
 const callSeq = new WeakMap<object, { n: number }>()
 
-/** A5 — authorities that already voiced their one rejection warn. Keyed per
- *  INSTANCE (not module-global-latched) so tests stay isolated and every
- *  session in a multi-session process gets its own first notice. */
-const rejectedWarned = new WeakSet<object>()
+type ObservableUsageRejection = Exclude<UsageRejection, "duplicate">
 
-/** Test seam: has this authority voiced its rejection warn? */
-export const __rejectedWarnedFor = (accounting: object): boolean => rejectedWarned.has(accounting)
+/** A5 — rejection reasons already voiced by each authority. Each set is
+ *  bounded by the closed two-member rejection union; weak keys avoid keeping
+ *  dead session authorities alive. */
+const rejectedWarned = new WeakMap<object, Set<ObservableUsageRejection>>()
+
+/** Test seam: has this authority voiced this rejection reason? When omitted,
+ *  preserves the old any-warning probe for downstream tests. */
+export const __rejectedWarnedFor = (
+  accounting: object,
+  reason?: ObservableUsageRejection,
+): boolean => {
+  const warnedReasons = rejectedWarned.get(accounting)
+  return reason === undefined
+    ? (warnedReasons?.size ?? 0) > 0
+    : (warnedReasons?.has(reason) ?? false)
+}
+
+/** Test seam: number of distinct reasons voiced for this authority. */
+export const __rejectedWarnedReasonCountFor = (accounting: object): number =>
+  rejectedWarned.get(accounting)?.size ?? 0
 
 const nextCallId = (
   accounting: UsageAccountingPort | undefined,

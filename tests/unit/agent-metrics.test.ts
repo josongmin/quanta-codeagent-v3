@@ -33,6 +33,10 @@ describe("METRIC name table", () => {
       costUsd: "quanta.work.cost_usd",
       // A5 — refused usage records (non-finite / session-mismatch).
       usageRejected: "quanta.usage.rejected",
+      usageRejectedByReason: {
+        "non-finite": "quanta.usage.rejected.non_finite",
+        "session-mismatch": "quanta.usage.rejected.session_mismatch",
+      },
       // ADR-0452 — session-startup prewarm + TTFM (canonical quanta.startup.*).
       ttfm: "quanta.startup.time_to_first_message_ms",
       prewarmDuration: "quanta.startup.prewarm_duration_ms",
@@ -42,6 +46,19 @@ describe("METRIC name table", () => {
 })
 
 describe("AgentRecorder counters", () => {
+  test("usageRejected preserves the aggregate and attributes bounded reasons", () => {
+    const m = new Metrics()
+    const rec = new AgentRecorder(m)
+    rec.usageRejected("non-finite")
+    rec.usageRejected("non-finite")
+    rec.usageRejected("session-mismatch")
+
+    const counters = m.snapshot().counters
+    expect(counters[METRIC.usageRejected]).toBe(3)
+    expect(counters[METRIC.usageRejectedByReason["non-finite"]]).toBe(2)
+    expect(counters[METRIC.usageRejectedByReason["session-mismatch"]]).toBe(1)
+  })
+
   test("turn() increments the turns counter each call", () => {
     const m = new Metrics()
     const rec = new AgentRecorder(m)

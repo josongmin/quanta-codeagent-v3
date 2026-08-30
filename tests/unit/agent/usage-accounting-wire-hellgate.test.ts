@@ -16,7 +16,11 @@
  */
 import { describe, expect, test } from "bun:test"
 import { BudgetMeter } from "@/agent/budget/meter"
-import { __rejectedWarnedFor, emitUsage } from "@/agent/loop/emit-helpers"
+import {
+  __rejectedWarnedFor,
+  __rejectedWarnedReasonCountFor,
+  emitUsage,
+} from "@/agent/loop/emit-helpers"
 import { AgentRecorder } from "@/agent/metrics"
 import { isRootAgent } from "@/agent/spawn-depth"
 import { buildChildConfig } from "@/agent/subagent-runner-child-config"
@@ -168,7 +172,7 @@ describe("A6 — the LOOP mints from the authority, so a resume cannot collide",
 })
 
 describe("A5 — a rejected record is visible, not swallowed", () => {
-  test("a non-finite event warns ONCE per authority and ticks the rejected counter", () => {
+  test("a non-finite event warns once per authority+reason and ticks both counters", () => {
     const accounting = createUsageAccounting()
     const metrics = new Metrics()
     const { config } = makeConfig({ usageAccounting: accounting })
@@ -177,11 +181,32 @@ describe("A5 — a rejected record is visible, not swallowed", () => {
     emitUsage(config, poison, new AgentRecorder(metrics), undefined, undefined)
 
     expect(accounting.snapshot().calls).toBe(0) // still rejected
-    // The counter carries the reason — one tick per rejection, both of them.
+    // The aggregate remains compatible while the bounded reason counter
+    // identifies the actual failure mode.
     expect(metrics.snapshot().counters["quanta.usage.rejected"]).toBe(2)
-    // The operator warn is latched per AUTHORITY (first rejection only) — the
-    // latch lives on the instance, so test isolation and multi-session
-    // processes keep their own notices. Witnessed via the latch probe below.
+    expect(metrics.snapshot().counters["quanta.usage.rejected.non_finite"]).toBe(2)
+    expect(__rejectedWarnedFor(accounting, "non-finite")).toBe(true)
+    expect(__rejectedWarnedReasonCountFor(accounting)).toBe(1)
+  })
+
+  test("a second rejection reason is not hidden by the first reason's warn latch", () => {
+    const accounting = createUsageAccounting()
+    const metrics = new Metrics()
+    const recorder = new AgentRecorder(metrics)
+    const { config: bound } = makeConfig({ usageAccounting: accounting, sessionId: "sess-1" })
+    const { config: mismatched } = makeConfig({ usageAccounting: accounting, sessionId: "sess-2" })
+
+    emitUsage(bound, usage(1), recorder, undefined, undefined) // establish sess-1 binding
+    emitUsage(bound, usage(Number.NaN), recorder, undefined, undefined)
+    emitUsage(mismatched, usage(1), recorder, undefined, undefined)
+
+    const counters = metrics.snapshot().counters
+    expect(counters["quanta.usage.rejected"]).toBe(2)
+    expect(counters["quanta.usage.rejected.non_finite"]).toBe(1)
+    expect(counters["quanta.usage.rejected.session_mismatch"]).toBe(1)
+    expect(__rejectedWarnedFor(accounting, "non-finite")).toBe(true)
+    expect(__rejectedWarnedFor(accounting, "session-mismatch")).toBe(true)
+    expect(__rejectedWarnedReasonCountFor(accounting)).toBe(2)
   })
 
   test("the warn latch is per-instance: a fresh authority warns again", () => {
@@ -194,8 +219,8 @@ describe("A5 — a rejected record is visible, not swallowed", () => {
     const { config: cb } = makeConfig({ usageAccounting: b })
     emitUsage(ca, usage(Number.NaN), undefined, undefined, undefined)
     emitUsage(cb, usage(Number.NaN), undefined, undefined, undefined)
-    expect(__rejectedWarnedFor(a)).toBe(true)
-    expect(__rejectedWarnedFor(b)).toBe(true)
+    expect(__rejectedWarnedFor(a, "non-finite")).toBe(true)
+    expect(__rejectedWarnedFor(b, "non-finite")).toBe(true)
   })
 })
 
