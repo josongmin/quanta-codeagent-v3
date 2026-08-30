@@ -112,11 +112,15 @@ const biomeChecks = (paths: readonly string[]): number | null => {
 
 describe("lint-debt reach — the ratchet must enumerate everything biome lints", () => {
   const rootFiles = ROOTS.map((root) => allFilesUnder(root, []))
-  assertScanPopulation(rootFiles[0], join(REPO_ROOT, ROOTS[0]), {
+  const [srcFiles, testFiles] = rootFiles
+  if (srcFiles === undefined || testFiles === undefined) {
+    throw new Error("lint-debt reach: both configured roots must be enumerated")
+  }
+  assertScanPopulation(srcFiles, join(REPO_ROOT, ROOTS[0]), {
     collectable: () => true,
     id: "tests/unit/lint-debt-ratchet-reach.test.ts#SRC",
   })
-  assertScanPopulation(rootFiles[1], join(REPO_ROOT, ROOTS[1]), {
+  assertScanPopulation(testFiles, join(REPO_ROOT, ROOTS[1]), {
     collectable: () => true,
     id: "tests/unit/lint-debt-ratchet-reach.test.ts#TESTS",
   })
