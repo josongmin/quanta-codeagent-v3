@@ -12,7 +12,7 @@
  */
 
 import { reproTestSchema } from "@/config/knob-schema/schemas/bench-repro"
-import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
+import { deriveKnob } from "@/runner/knobs/derive"
 
 // DERIVED from the schema SSOT; registration is CENTRAL (`registerBenchKnobs`).
 // No self-register here (the central registrar owns it — double-register collides).

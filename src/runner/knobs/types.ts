@@ -18,16 +18,29 @@
  */
 
 import type { AgentConfig } from "@/agent"
-import type { Instance } from "@/runner/batch/types"
 
 /** Surface = where the agent loop is being driven from. jul-4 F1: the execution-mode surface SSOT
  *  (was copy-pasted here + @/stream SurfaceMirror + @/config/knob-schema Surface). */
 export type Surface = import("@/shared/execution-surface").ExecutionSurface
 
+/** Minimal task-instance shape the framework carries through {@link ApplyContext}.
+ *  Hoisted leaf type (aug-30 structural audit G3-01): the core knob slice must
+ *  not depend on `@/runner/batch` — the bench `Instance` (@/runner/batch/types)
+ *  satisfies this STRUCTURALLY and is what the bench surface actually passes.
+ *  The framework itself reads only `id`; the other fields are named so bench
+ *  apply fns (and tests) keep their typed access without a batch import. */
+export interface ApplyInstance {
+  readonly id: string
+  /** Path to the task's repo checkout (bench passes it; unused by the core). */
+  readonly repoPath?: string
+  readonly problemStatement?: string
+  readonly testCmd?: string
+}
+
 /** Per-application context handed to `Knob.apply`. */
 export interface ApplyContext {
   readonly surface: Surface
-  readonly instance?: Instance
+  readonly instance?: ApplyInstance
   readonly sandbox?: string
 }
 

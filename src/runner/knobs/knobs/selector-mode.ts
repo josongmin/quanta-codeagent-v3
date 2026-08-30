@@ -9,7 +9,7 @@
  */
 
 import { selectorModeSchema } from "@/config/knob-schema/schemas/bench-loop"
-import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
+import { deriveKnob } from "@/runner/knobs/derive"
 
 /** Selector mode (consumed by the bench posture projection). */
 export type SelectorModeKnob = "clean" | "research"

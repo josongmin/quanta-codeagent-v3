@@ -9,6 +9,6 @@
  */
 
 import { specFidelitySteerSchema } from "@/config/knob-schema/schemas/bench-a"
-import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
+import { deriveKnob } from "@/runner/knobs/derive"
 
 export const specFidelitySteerKnob = deriveKnob(specFidelitySteerSchema)

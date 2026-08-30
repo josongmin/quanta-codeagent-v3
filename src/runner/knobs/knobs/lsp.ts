@@ -16,7 +16,7 @@
 import type { AgentConfig } from "@/agent"
 import { lspNavToolList } from "@/agent"
 import { lspSchema } from "@/config/knob-schema/schemas/bench-gap-1"
-import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
+import { deriveKnob } from "@/runner/knobs/derive"
 import type { Tool } from "@/tool"
 import { ToolRegistry } from "@/tool"
 

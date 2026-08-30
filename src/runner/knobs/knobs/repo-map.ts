@@ -32,7 +32,7 @@ import {
 } from "@/agent"
 import { repoMapSchema } from "@/config/knob-schema/schemas/bench-loop"
 import { makeRepoMapScan } from "@/runner/assemble/repo-map-scan"
-import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
+import { deriveKnob } from "@/runner/knobs/derive"
 import { runShell } from "@/runtime"
 import type { ApplyContext, Surface } from "../types"
 

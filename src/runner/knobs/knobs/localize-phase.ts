@@ -31,7 +31,7 @@
 
 import type { AgentConfig } from "@/agent"
 import { localizePhaseSchema } from "@/config/knob-schema/schemas/bench-loop"
-import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
+import { deriveKnob } from "@/runner/knobs/derive"
 import type { Surface } from "../types"
 
 const SURFACES: readonly Surface[] = ["bench"]

@@ -9,6 +9,6 @@
  */
 
 import { noPatchForceFractionSchema } from "@/config/knob-schema/schemas/bench-gap-3"
-import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
+import { deriveKnob } from "@/runner/knobs/derive"
 
 export const noPatchForceFractionKnob = deriveKnob(noPatchForceFractionSchema)

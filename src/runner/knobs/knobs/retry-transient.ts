@@ -9,6 +9,6 @@
  */
 
 import { retryTransientSchema } from "@/config/knob-schema/schemas/bench-loop"
-import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
+import { deriveKnob } from "@/runner/knobs/derive"
 
 export const retryTransientKnob = deriveKnob(retryTransientSchema)

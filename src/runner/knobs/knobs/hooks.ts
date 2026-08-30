@@ -24,7 +24,7 @@
 import type { AgentConfig } from "@/agent"
 import { HookBus } from "@/agent"
 import { hooksSchema } from "@/config/knob-schema/schemas/bench-c"
-import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
+import { deriveKnob } from "@/runner/knobs/derive"
 import type { Surface } from "../types"
 
 const SURFACES: readonly Surface[] = ["cli", "agent-batch"]

@@ -8,7 +8,7 @@
  */
 
 import { verifySelectReproSchema } from "@/config/knob-schema/schemas/bench-c"
-import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
+import { deriveKnob } from "@/runner/knobs/derive"
 
 /** Repro-selection mode (consumed by the bench posture projection). */
 export type VerifySelectReproMode = "hard" | "positive" | "off"

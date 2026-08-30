@@ -12,7 +12,7 @@
  */
 
 import { faultEvidenceSchema } from "@/config/knob-schema/schemas/bench-a"
-import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
+import { deriveKnob } from "@/runner/knobs/derive"
 
 // DERIVED from `faultEvidenceSchema` (the SSOT). NOOP apply (the effect is
 // delivered out of band by the bench driver via `benchPostureFromState`), so no

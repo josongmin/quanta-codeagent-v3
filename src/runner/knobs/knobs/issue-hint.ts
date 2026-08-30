@@ -10,7 +10,7 @@
  */
 
 import { issueHintSchema } from "@/config/knob-schema/schemas/bench-a"
-import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
+import { deriveKnob } from "@/runner/knobs/derive"
 
 /** Issue-hint localization mode. */
 export type IssueHintMode = "agentless" | "regex"

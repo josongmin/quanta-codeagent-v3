@@ -34,7 +34,7 @@
 import type { AgentConfig } from "@/agent"
 import { buildVerifyGuard } from "@/agent/verify-guard"
 import { mustPassSchema } from "@/config/knob-schema/schemas/bench-gap-1"
-import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
+import { deriveKnob } from "@/runner/knobs/derive"
 import type { Surface } from "../types"
 
 // BENCH is intentionally EXCLUDED: the bench driver is the single authority for

@@ -9,7 +9,7 @@
  */
 
 import { verifySelectLlmRiskGateSchema } from "@/config/knob-schema/schemas/bench-b"
-import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
+import { deriveKnob } from "@/runner/knobs/derive"
 
 /** LLM risk-gate mode (consumed by selection-risk-gate). */
 export type VerifySelectLlmRiskGateMode = "shadow" | "on"

@@ -9,6 +9,6 @@
  */
 
 import { dynamicMessageMatcherSchema } from "@/config/knob-schema/schemas/bench-b"
-import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
+import { deriveKnob } from "@/runner/knobs/derive"
 
 export const dynamicMessageMatcherKnob = deriveKnob(dynamicMessageMatcherSchema)

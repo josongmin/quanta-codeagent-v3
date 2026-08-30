@@ -9,6 +9,6 @@
  */
 
 import { lspCheapSchema } from "@/config/knob-schema/schemas/bench-gap-1"
-import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
+import { deriveKnob } from "@/runner/knobs/derive"
 
 export const lspCheapKnob = deriveKnob(lspCheapSchema)

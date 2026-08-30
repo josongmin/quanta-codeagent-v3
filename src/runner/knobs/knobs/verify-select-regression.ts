@@ -9,7 +9,7 @@
  */
 
 import { verifySelectRegressionSchema } from "@/config/knob-schema/schemas/bench-c"
-import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
+import { deriveKnob } from "@/runner/knobs/derive"
 
 /** Regression-selection mode (consumed by the bench posture projection). */
 export type VerifySelectRegressionMode = "discovered" | "gold" | "off"

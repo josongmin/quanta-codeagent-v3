@@ -9,6 +9,6 @@
  */
 
 import { reproExecTimeoutSchema } from "@/config/knob-schema/schemas/bench-repro"
-import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
+import { deriveKnob } from "@/runner/knobs/derive"
 
 export const reproExecTimeoutKnob = deriveKnob(reproExecTimeoutSchema)

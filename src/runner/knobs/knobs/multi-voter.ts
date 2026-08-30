@@ -36,7 +36,7 @@
 
 import type { AgentConfig } from "@/agent"
 import { multiVoterSchema } from "@/config/knob-schema/schemas/bench-c"
-import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
+import { deriveKnob } from "@/runner/knobs/derive"
 
 interface MultiVoterValue {
   readonly voters: number

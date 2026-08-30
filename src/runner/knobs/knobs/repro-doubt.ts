@@ -20,7 +20,7 @@
  */
 import type { AgentConfig } from "@/agent"
 import { reproDoubtSchema } from "@/config/knob-schema/schemas/bench-repro"
-import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
+import { deriveKnob } from "@/runner/knobs/derive"
 import type { Surface } from "../types"
 
 const SURFACES: readonly Surface[] = ["bench"]

@@ -26,7 +26,7 @@
  */
 
 import { ALL_BENCH_SCHEMAS } from "@/config/knob-schema/schemas"
-import { deriveKnob, type KnobRelationships } from "@/runner/batch/eval/kernel/derive"
+import { deriveKnob, type KnobRelationships } from "@/runner/knobs/derive"
 // Non-NOOP applyFns — the ONLY definitions live in the knob files; imported here
 // so the registrar's derived knob shares the SAME apply reference as the live
 // knob export (byte-identical). A schema absent from this map ⇒ NOOP apply.

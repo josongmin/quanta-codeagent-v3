@@ -10,7 +10,7 @@
  */
 
 import { benchInLoopExecSchema } from "@/config/knob-schema/schemas/bench-a"
-import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
+import { deriveKnob } from "@/runner/knobs/derive"
 
 /** Tri-state in-loop-exec mode (consumed by the bench posture projection). */
 export type BenchInLoopExecModeKnob = "full" | "repro-only" | "off"
