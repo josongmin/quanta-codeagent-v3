@@ -27,7 +27,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { createHmac } from "node:crypto"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
-import { createServer, request as httpRequest, type Server } from "node:http"
+import {
+  createServer,
+  request as httpRequest,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from "node:http"
 import type { AddressInfo } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -59,6 +65,37 @@ const SECRET_A = "instA-secret-aaa=="
 const SECRET_B = "instB-secret-bbbbb"
 const PR_NUMBER = 7
 
+const normalizedHeaders = (headers: IncomingMessage["headers"]): Record<string, string> => {
+  const result: Record<string, string> = {}
+  for (const [key, value] of Object.entries(headers)) {
+    if (typeof value === "string") result[key.toLowerCase()] = value
+    else if (Array.isArray(value)) result[key.toLowerCase()] = value.join(", ")
+  }
+  return result
+}
+
+const respondToLoopback = async (
+  onRequest: (request: WebhookRequest) => Promise<WebhookResponse>,
+  req: IncomingMessage,
+  res: ServerResponse,
+  chunks: readonly Buffer[],
+): Promise<void> => {
+  const request: WebhookRequest = {
+    method: req.method ?? "GET",
+    path: (req.url ?? "/").split("?")[0] ?? "/",
+    headers: normalizedHeaders(req.headers),
+    body: new Uint8Array(Buffer.concat(chunks)),
+  }
+  let response: WebhookResponse
+  try {
+    response = await onRequest(request)
+  } catch {
+    response = { status: 500, body: "handler threw" }
+  }
+  res.writeHead(response.status, { "content-type": "text/plain" })
+  res.end(response.body ?? "")
+}
+
 // ── loopback transport exposing the bound port ──────────────────────────────
 interface BoundTransport {
   readonly transport: WebhookTransportPort
@@ -73,27 +110,7 @@ const makeLoopbackTransport = (): BoundTransport => {
         const chunks: Buffer[] = []
         req.on("data", (c) => chunks.push(c instanceof Buffer ? c : Buffer.from(c)))
         req.on("end", () => {
-          void (async () => {
-            const headers: Record<string, string> = {}
-            for (const [k, v] of Object.entries(req.headers)) {
-              if (typeof v === "string") headers[k.toLowerCase()] = v
-              else if (Array.isArray(v)) headers[k.toLowerCase()] = v.join(", ")
-            }
-            const wreq: WebhookRequest = {
-              method: req.method ?? "GET",
-              path: (req.url ?? "/").split("?")[0] ?? "/",
-              headers,
-              body: new Uint8Array(Buffer.concat(chunks)),
-            }
-            let out: WebhookResponse
-            try {
-              out = await onRequest(wreq)
-            } catch {
-              out = { status: 500, body: "handler threw" }
-            }
-            res.writeHead(out.status, { "content-type": "text/plain" })
-            res.end(out.body ?? "")
-          })()
+          void respondToLoopback(onRequest, req, res, chunks)
         })
       })
       await new Promise<void>((resolve) => {
