@@ -46,6 +46,11 @@ export interface GoalControl {
    *  stuck goal can never be edited or deleted. The reserved turn is NOT
    *  refunded: the turn really ran; this only frees the lock. */
   abandonAttempt(): GoalControlOutcome & { readonly hadAttempt: boolean }
+  /** GOAL P0-B — clear every live blocker. `/goal resume` on a blocked goal
+   *  tells the operator to "clear blocker first", and until this verb existed
+   *  the CLI offered no way to do it: the mutation is user-allowed, but the only
+   *  production caller was the approval state machine clearing its OWN id. */
+  clearBlockers(): GoalControlOutcome & { readonly cleared: number }
   addCheck(text: string, argv: readonly string[]): GoalControlOutcome
   setBudget(budget: {
     maxTokens?: number | undefined
@@ -128,6 +133,24 @@ export const buildGoalControl = (
     resume: () => setStatus("active"),
     clear: () => commit({ kind: "clear" }),
     addCriterion: (text) => replaceWith([...criterionDeclarations(read()), { text }]),
+    clearBlockers: () => {
+      const domain = read()
+      if (domain.state === null) {
+        return { kind: "rejected", reason: "objective-missing", domain, cleared: 0 }
+      }
+      const ids = domain.state.objective.blockers.map((blocker) => blocker.id)
+      // Nothing to clear ⇒ issue no mutation: an unapplied commit would render
+      // as a failure for what is simply "there was nothing blocking".
+      if (ids.length === 0) return { kind: "ok", domain, cleared: 0 }
+      let outcome = commit({ kind: "clearBlocker", blockerId: ids[0] as string })
+      for (const blockerId of ids.slice(1)) {
+        if (outcome.kind !== "ok") break
+        outcome = commit({ kind: "clearBlocker", blockerId })
+      }
+      const remaining = read().state?.objective.blockers.length ?? 0
+      return { ...outcome, cleared: ids.length - remaining }
+    },
+
     abandonAttempt: () => {
       const domain = read()
       if (domain.state === null) {

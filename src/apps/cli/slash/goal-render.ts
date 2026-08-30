@@ -14,6 +14,21 @@ const validationContract = (criteria: readonly SuccessCriterion[]): string => {
   return criteria.some((criterion) => criterion.kind === "checked") ? "checked" : "manual-only"
 }
 
+/** GOAL P0-B — the operator has to see WHY the goal stopped before being told
+ *  to clear it. Bounded: the store caps blockers at 64, and a wall of them is
+ *  not more legible than the first few plus a count. */
+const blockerLines = (objective: {
+  readonly blockers: readonly { readonly reason: string; readonly waitingOn: string }[]
+}): string => {
+  if (objective.blockers.length === 0) return ""
+  const shown = objective.blockers
+    .slice(0, 3)
+    .map((blocker) => `  - [${blocker.waitingOn}] ${blocker.reason}`)
+    .join("\n")
+  const rest = objective.blockers.length - 3
+  return `blockers (/goal unblock to clear):\n${shown}${rest > 0 ? `\n  … +${rest} more` : ""}\n`
+}
+
 const delayLabel = (ms: number): string => {
   const seconds = Math.max(0, Math.round(ms / 1_000))
   return seconds < 60 ? `${seconds}s` : `${Math.round(seconds / 60)}m`
@@ -68,6 +83,7 @@ export const renderGoalDomain = (
     `status: ${objective.status} · rev ${domain.revision} · id ${short(objective.objectiveId)}\n` +
     `validation: ${validation}\n` +
     `remaining: ${remaining.length === 0 ? "none" : remaining.join(", ")}   next: ${objective.nextActions[0] ?? "none"}   blocked: ${objective.blockers[0]?.waitingOn ?? "none"}${objective.blockerObservations[0] === undefined ? "" : ` (observing ${objective.blockerObservations[0].distinctAttemptIds.length}/3)`}\n` +
+    blockerLines(objective) +
     `budget: ${budget.turnsUsed}/${budget.maxTurns ?? "∞"} turns · ${budget.tokensUsed}/${budget.maxTokens ?? "∞"} tokens` +
     (last === undefined
       ? "   last attempt: none\n"

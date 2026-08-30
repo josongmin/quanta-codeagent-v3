@@ -108,6 +108,19 @@ const handleAbandon = (ctx: SlashContext, control: GoalControl): number => {
   return reportMutation(ctx, "Attempt abandoned (the reserved turn is not refunded).", outcome)
 }
 
+const handleUnblock = (ctx: SlashContext, control: GoalControl): number => {
+  const outcome = control.clearBlockers()
+  if (outcome.kind === "ok" && outcome.cleared === 0) {
+    ctx.out("Goal: no blocker to clear.\n")
+    return 0
+  }
+  return reportMutation(
+    ctx,
+    `Cleared ${outcome.cleared} blocker${outcome.cleared === 1 ? "" : "s"}.`,
+    outcome,
+  )
+}
+
 const handleWork = (args: readonly string[], ctx: SlashContext, name: GoalName): number => {
   const instruction = args.slice(1).join(" ").trim()
   if (instruction === "") return fail(ctx, `${name} work: requires <instruction>`)
@@ -200,6 +213,8 @@ export const runGoalCommand = async (
       return handleWork(args, ctx, invokedAs)
     case "abandon":
       return handleAbandon(ctx, control)
+    case "unblock":
+      return handleUnblock(ctx, control)
     default:
       return handleCreate(args, ctx, invokedAs, control)
   }
@@ -208,7 +223,7 @@ export const runGoalCommand = async (
 export const goalCmd: SlashCommand = {
   name: "/goal",
   describe:
-    "Create or control the durable goal (show | edit | pause | resume | clear | criterion add|done | check | budget | verify | work | abandon)",
+    "Create or control the durable goal (show | edit | pause | resume | unblock | clear | criterion add|done | check | budget | verify | work | abandon)",
   category: "session",
   run: (args, ctx) => runGoalCommand(args, ctx),
 }

@@ -23,6 +23,15 @@ type ObservationInput = Parameters<ObjectiveCore["observeBlocker"]>[1]
 
 const promoteObservedBlocker = (cell: Cell, observation: ObservationInput, now: number): void => {
   if (cell.blockers.length >= MAX_BLOCKERS_PER_OBJECTIVE) return
+  // GOAL P0-B — a dependency that keeps blocking is ONE reason the goal stopped,
+  // not a new one every three attempts. Without this the operator's clear-list
+  // grew with the agent's retries, so the escape hatch got further away the
+  // longer the agent tried.
+  const alreadyLive = cell.blockers.some(
+    (blocker) =>
+      blocker.reason === observation.reason && blocker.waitingOn === observation.waitingOn,
+  )
+  if (alreadyLive) return
   cell.blockers.push({
     id: randomUUID(),
     reason: observation.reason,
