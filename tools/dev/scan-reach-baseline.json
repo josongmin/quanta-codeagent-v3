@@ -377,6 +377,24 @@
     "tests/unit/tool-no-throw-contract-guard.test.ts#TOOL-DIR": {
       "walked": 305
     },
+    "tests/unit/gate-vocabulary-ratchet-hellgate.test.ts#SRC": {
+      "walked": 3459
+    },
+    "tests/unit/test-quality-ratchet-hellgate.test.ts#SRC": {
+      "walked": 299
+    },
+    "tests/unit/test-quality-ratchet-hellgate.test.ts#TESTS": {
+      "walked": 3499
+    },
+    "tests/unit/test-fixtures-do-not-leak-tmp.test.ts#SRC": {
+      "walked": 3655
+    },
+    "tests/unit/test-fixtures-do-not-leak-tmp.test.ts#TESTS": {
+      "walked": 3577
+    },
+    "tests/unit/test-fixtures-do-not-leak-tmp.test.ts#TOOLS": {
+      "walked": 115
+    },
     "tests/unit/wire-batch-mode-focus-fork-otel-hellgate.test.ts#loopDir": {
       "walked": 27
     },

@@ -23,6 +23,7 @@ import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
 import { gateDisabled, gateDisabledStrict, gateOn, gateOnStrict } from "@/shared"
+import { assertScanPopulation } from "./_shared/scan-population"
 
 /** Raw legacy gate comparison — caught in TWO forms so a const-keyed gate can't
  *  slip the burn-down (the jun-7 adversarial audit found `env[SOME_CONST] === "1"`
@@ -58,8 +59,15 @@ const REPO_ROOT = join(import.meta.dir, "..", "..")
 
 const scanRawGates = (): { total: number; byFile: Record<string, number>; files: number } => {
   const byFile: Record<string, number> = {}
+  const sourceRoot = join(REPO_ROOT, "src")
+  const scanned = [...walk(sourceRoot)]
+  assertScanPopulation(scanned, sourceRoot, {
+    id: "tests/unit/gate-vocabulary-ratchet-hellgate.test.ts#SRC",
+    collectable: (name) => name.endsWith(".ts") && !name.endsWith(".d.ts"),
+    skipDirs: ["__tests__"],
+  })
   let files = 0
-  for (const file of walk(join(REPO_ROOT, "src"))) {
+  for (const file of scanned) {
     files++
     if (file.endsWith("shared/env-flag.ts")) continue // the SSOT lives here
     let n = 0

@@ -27,6 +27,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { dirname, join } from "node:path"
+import { assertScanPopulation } from "./_shared/scan-population"
 
 /** aug-22 audit — REPO-ANCHORED, not cwd-relative. `ROOTS = ["tests","src"]`
  *  resolved against the PROCESS cwd, and `walkTests` swallowed the resulting
@@ -132,6 +133,13 @@ describe("test-quality ratchet (jun-08 audit)", () => {
   // The floor is what makes the ceilings mean anything. Sibling precedent:
   // `dangerous-gate-strict-ratchet-hellgate.test.ts` — "walk not broken".
   test("the scan actually read the repo (floor — a vacuous scan cannot pass)", () => {
+    for (const root of ROOTS) {
+      assertScanPopulation([...walkTests(root)], root, {
+        id: `tests/unit/test-quality-ratchet-hellgate.test.ts#${root.endsWith("/tests") ? "TESTS" : "SRC"}`,
+        collectable: (name) => name.endsWith(".test.ts") && name !== SELF,
+        skipDirs: ["__snapshots__"],
+      })
+    }
     expect(scan().filesScanned).toBeGreaterThan(2000)
   })
 
