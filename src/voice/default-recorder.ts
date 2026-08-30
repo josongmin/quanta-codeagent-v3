@@ -213,6 +213,36 @@ interface BuildHandleArgs {
   readonly signal: AbortSignal | undefined
 }
 
+type DrainedRecorder =
+  | { readonly ok: true; readonly chunks: readonly Uint8Array[]; readonly over: boolean }
+  | { readonly ok: false; readonly error: RecorderError }
+
+const drainRecorder = async (
+  child: RecorderSpawnedChild,
+  maxBytes: number,
+): Promise<DrainedRecorder> => {
+  if (child.stdout === null) {
+    return { ok: false, error: { kind: "io-error", degradeReason: "stdout pipe was null" } }
+  }
+  try {
+    const chunks: Uint8Array[] = []
+    let total = 0
+    const reader = child.stdout.getReader()
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (value === undefined) continue
+      total += value.byteLength
+      if (total > maxBytes) return { ok: true, chunks, over: true }
+      chunks.push(value)
+    }
+    await child.exited
+    return { ok: true, chunks, over: false }
+  } catch (e) {
+    return { ok: false, error: { kind: "io-error", degradeReason: errMessage(e) } }
+  }
+}
+
 /** Build the internal closure that drains stdout + tracks oversize.
  *  Memoizes its own result so the public `stop()` is idempotent. */
 const buildInternalStop = (args: BuildHandleArgs): RecorderHandle["_internal"] => {
@@ -237,49 +267,21 @@ const buildInternalStop = (args: BuildHandleArgs): RecorderHandle["_internal"] =
     // SIGTERM first so the recorder stops accumulating; then drain whatever
     // it already flushed to the pipe.
     safeKill(child, "SIGTERM")
-    if (child.stdout === null) {
-      cached = { ok: false, error: { kind: "io-error", degradeReason: "stdout pipe was null" } }
-      if (signal !== undefined) signal.removeEventListener("abort", onAbort)
-      return cached
-    }
-    const chunks: Uint8Array[] = []
-    let total = 0
-    let over = false
-    try {
-      const reader = child.stdout.getReader()
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        if (value === undefined) continue
-        total += value.byteLength
-        if (total > maxBytes) {
-          over = true
-          break
-        }
-        chunks.push(value)
-      }
-      await child.exited
-    } catch (e) {
-      cached = {
-        ok: false,
-        error: {
-          kind: "io-error",
-          degradeReason: errMessage(e),
-        },
-      }
-      if (signal !== undefined) signal.removeEventListener("abort", onAbort)
-      return cached
-    }
+    const drained = await drainRecorder(child, maxBytes)
     if (signal !== undefined) signal.removeEventListener("abort", onAbort)
+    if (!drained.ok) {
+      cached = { ok: false, error: drained.error }
+      return cached
+    }
     if (aborted) {
       cached = { ok: false, error: { kind: "aborted" } }
       return cached
     }
-    if (over) {
+    if (drained.over) {
       cached = { ok: false, error: { kind: "oversize", maxBytes } }
       return cached
     }
-    cached = { ok: true, bytes: concatChunks(chunks) }
+    cached = { ok: true, bytes: concatChunks(drained.chunks) }
     return cached
   }
 
