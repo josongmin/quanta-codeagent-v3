@@ -5,8 +5,7 @@
     "tests/unit/apps/bench/promax/promax-bootstrap-phase-reachability.test.ts",
     "tests/unit/apps/bench/promax/promax-port-contract-unsuppressed.test.ts",
     "tests/unit/apps/bench/terminal/tb-2-0-retirement.test.ts",
-    "tests/unit/observability/new-slice-metrics-hellgate.test.ts",
-    "tests/unit/tool-surface-manifest-hellgate.test.ts"
+    "tests/unit/observability/new-slice-metrics-hellgate.test.ts"
   ],
   "externalCorpus": [
     {
@@ -469,6 +468,9 @@
     "tests/unit/realtime/voice-session-hellgate.test.ts": [
       "tests/unit/realtime/voice-session-hellgate.test.ts#SRC",
       "tests/unit/realtime/voice-session-hellgate.test.ts#VOICE-SESSION"
+    ],
+    "tests/unit/tool-surface-manifest-hellgate.test.ts": [
+      "tests/unit/tool-surface-manifest-hellgate.test.ts#FEATURE-YAMLS"
     ]
   }
 }

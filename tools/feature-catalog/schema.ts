@@ -445,7 +445,7 @@ export const SECTION_SLUGS: Readonly<Record<number, string>> = Object.freeze({
  * let `validate --strict` report `0 feature(s), all evidence resolved` with
  * exit 0 from a foreign working directory.
  */
-async function gatherYamlFiles(dir: string): Promise<string[]> {
+export async function gatherYamlFiles(dir: string): Promise<string[]> {
   if (!isAbsolute(dir)) {
     throw new Error(
       `feature catalog: "${dir}" is relative — pass an absolute path. A repo path built ` +

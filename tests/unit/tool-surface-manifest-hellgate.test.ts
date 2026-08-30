@@ -32,12 +32,18 @@ import {
 import { objectiveTools } from "@/tool/objective"
 import { createTmuxAdapter } from "@/tool/pty"
 import { subagentMailboxTools } from "@/tool/subagent-mailbox"
-import { loadFeatures } from "../../tools/feature-catalog/schema"
+import { gatherYamlFiles, loadFeatures } from "../../tools/feature-catalog/schema"
+import { assertScanPopulation } from "./_shared/scan-population"
 
 // Load the REAL feature catalog once (top-level await, mirrors the pattern in
 // feature-catalog-surface-integration.test.ts). Used by the manifest→catalog
 // completeness gate below.
 const CATALOG_DIR = join(import.meta.dir, "..", "..", "tools/feature-catalog/features")
+const CATALOG_YAMLS = await gatherYamlFiles(CATALOG_DIR)
+assertScanPopulation(CATALOG_YAMLS, CATALOG_DIR, {
+  collectable: (name) => name.endsWith(".yaml"),
+  id: "tests/unit/tool-surface-manifest-hellgate.test.ts#FEATURE-YAMLS",
+})
 const CATALOG_FEATURES = await loadFeatures(CATALOG_DIR)
 // Full serialized text of every feature — captures config_refs.{env,runtime,cli,
 // prefs}, knobs[].name, evidence.code, purpose / notes / surface_integration
