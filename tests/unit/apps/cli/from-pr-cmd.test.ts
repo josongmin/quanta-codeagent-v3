@@ -141,6 +141,55 @@ const stubGhSuccessful = (): GhCliPort =>
     return { stdout: "", stderr: "unhandled", exitCode: 1 }
   })
 
+const ghFailure = (): GhCliResult => ({ stdout: "", stderr: "", exitCode: 1 })
+
+const redactionPrViewResponse = (args: readonly string[]): GhCliResult | undefined =>
+  args[0] === "pr" && args[1] === "view"
+    ? {
+        stdout: JSON.stringify({
+          title: "Add",
+          body: "leak: sk-abcdef0123456789ABCDEF01234",
+          baseRefName: "main",
+          headRefName: "feat",
+          baseRefOid: "a",
+          headRefOid: "b",
+        }),
+        stderr: "",
+        exitCode: 0,
+      }
+    : undefined
+
+const redactionApiResponse = (
+  args: readonly string[],
+  captureBody: (body: string) => void,
+): GhCliResult | undefined => {
+  if (args[0] !== "api") return undefined
+  if (
+    args[1]?.includes("/files") ||
+    (args[1]?.includes("/issues/") && args[1]?.includes("/comments"))
+  ) {
+    return { stdout: "[]", stderr: "", exitCode: 0 }
+  }
+  const isCommentPost =
+    args[1] === "--method" && args[2] === "POST" && args[3]?.includes("/comments")
+  if (!isCommentPost) return undefined
+  const bodyIndex = args.indexOf("-f")
+  const bodyArg = bodyIndex >= 0 ? args[bodyIndex + 1] : undefined
+  if (bodyArg?.startsWith("body=")) captureBody(bodyArg.slice("body=".length))
+  return { stdout: JSON.stringify({ html_url: "url" }), stderr: "", exitCode: 0 }
+}
+
+const redactionGhStub = (captureBody: (body: string) => void): GhCliPort =>
+  stubGh(
+    (args) =>
+      redactionPrViewResponse(args) ??
+      (args[0] === "pr" && args[1] === "diff"
+        ? { stdout: "", stderr: "", exitCode: 0 }
+        : undefined) ??
+      redactionApiResponse(args, captureBody) ??
+      ghFailure(),
+  )
+
 describe("runFromPrCmd", () => {
   it("env-off → exitCode 0 + skipped event", async () => {
     const events: FromPrCmdEvent[] = []
@@ -238,43 +287,8 @@ describe("runFromPrCmd", () => {
     const files = new Map<string, Buffer>()
     writeEvent(files, evtPath, makeIssueCommentPayload())
     let postedBody = ""
-    const gh = stubGh((args) => {
-      if (args[0] === "pr" && args[1] === "view") {
-        return {
-          stdout: JSON.stringify({
-            title: "Add",
-            body: "leak: sk-abcdef0123456789ABCDEF01234",
-            baseRefName: "main",
-            headRefName: "feat",
-            baseRefOid: "a",
-            headRefOid: "b",
-          }),
-          stderr: "",
-          exitCode: 0,
-        }
-      }
-      if (args[0] === "pr" && args[1] === "diff") return { stdout: "", stderr: "", exitCode: 0 }
-      if (args[0] === "api" && args[1]?.includes("/files"))
-        return { stdout: "[]", stderr: "", exitCode: 0 }
-      if (args[0] === "api" && args[1]?.includes("/comments"))
-        return { stdout: "[]", stderr: "", exitCode: 0 }
-      if (
-        args[0] === "api" &&
-        args[1] === "--method" &&
-        args[2] === "POST" &&
-        args[3]?.includes("/comments")
-      ) {
-        const idx = args.indexOf("-f")
-        const bodyArg = idx >= 0 ? args[idx + 1] : undefined
-        if (bodyArg?.startsWith("body=")) {
-          postedBody = bodyArg.slice("body=".length)
-        }
-        return { stdout: JSON.stringify({ html_url: "url" }), stderr: "", exitCode: 0 }
-      }
-      if (args[0] === "api" && args[1]?.includes("/issues/") && args[1]?.includes("/comments")) {
-        return { stdout: "[]", stderr: "", exitCode: 0 }
-      }
-      return { stdout: "", stderr: "", exitCode: 1 }
+    const gh = redactionGhStub((body) => {
+      postedBody = body
     })
     const res = await runFromPrCmd(
       {},
