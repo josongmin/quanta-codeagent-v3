@@ -4,14 +4,16 @@
  * The authority replaces how several surfaces get their numbers, so it ships
  * behind a three-position knob rather than a boolean:
  *
- *   - `off`    — no authority is constructed. Every surface keeps the feed it
- *                had, and the loop is byte-identical. The default.
+ *   - `on`     — the surfaces project the authority. THE DEFAULT: this is the
+ *                accounting that actually covers subagents and prices every
+ *                call at the model it ran on, so it is what a session gets
+ *                unless the operator explicitly steps off it.
  *   - `shadow` — the authority records everything, and NOTHING reads from it.
- *                The surfaces keep their existing feed, and a reconciliation
- *                receipt reports where the two disagree. This is how the claim
- *                "the new numbers are the right ones" gets evidence on real
- *                sessions before anyone's status line depends on it.
- *   - `on`     — the surfaces project the authority.
+ *                The surfaces keep the legacy feed, and a reconciliation
+ *                receipt reports where the two disagree — the diagnostic mode
+ *                for investigating a number someone does not believe.
+ *   - `off`    — no authority is constructed and every surface keeps the
+ *                legacy feed. The explicit kill switch.
  *
  * Shadow exists because the interesting failures here are not crashes, they are
  * plausible wrong totals. A mode that runs the new accounting beside the old
@@ -22,15 +24,18 @@ import type { UsageAccountingPort, UsageAccountingSnapshot } from "./port"
 
 export type UsageAccountingMode = "off" | "shadow" | "on"
 
-/** Env knob: `QUANTA_USAGE_ACCOUNTING_V2`. Unset or unrecognized ⇒ `off`, so a
- *  typo degrades to the byte-identical path rather than half-activating. */
+/** Env knob: `QUANTA_USAGE_ACCOUNTING_V2`. Unset or unrecognized ⇒ `on` — the
+ *  default. Only the exact words `off` and `shadow` divert from it: a typo
+ *  degrades to the DEFAULT rather than silently disabling the accounting,
+ *  because "off when you wanted on" loses the session's books while "on when
+ *  you wanted off" merely keeps them. */
 export const usageAccountingMode = (
   env: Record<string, string | undefined>,
 ): UsageAccountingMode => {
   const raw = env.QUANTA_USAGE_ACCOUNTING_V2?.trim().toLowerCase()
-  if (raw === "on") return "on"
+  if (raw === "off") return "off"
   if (raw === "shadow") return "shadow"
-  return "off"
+  return "on"
 }
 
 /** The session's authority, or `undefined` in `off`. Both `shadow` and `on`

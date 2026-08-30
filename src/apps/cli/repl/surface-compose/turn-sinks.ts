@@ -34,11 +34,11 @@ export const createSurfaceState = (args: {
 })
 
 /**
- * MR-07 — SUPERSEDED, NOT YET REMOVABLE. The panel projects the usage-accounting
- * authority when one is wired, and then this fold's `incrementTurn` only
- * advances the turn count. It stays because the knob defaults to `off`, where
- * this remains the panel's ONLY feed. Removal is gated on the default flipping
- * to `on`, and takes `cost-panel-usage-tee` with it — one feed, one deletion.
+ * MR-07 — SUPERSEDED, NOT YET REMOVABLE. With the authority ON (the default)
+ * this fold's `incrementTurn` only advances the turn count. It stays because
+ * `off` (the kill switch) and `shadow` (the diagnostic mode) still render from
+ * this legacy feed. Removal is gated on retiring those modes, and takes
+ * `cost-panel-usage-tee` with it — one feed, one deletion.
  */
 const foldCostPanelDelta = (
   panel: {

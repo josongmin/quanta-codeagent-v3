@@ -524,11 +524,11 @@ export const HOST: readonly KnobInventoryEntry[] = [
   {
     envKey: "QUANTA_USAGE_ACCOUNTING_V2",
     kind: "enum",
-    default: "off",
+    default: "on",
     group: "host-gate",
     home: "runtime-config",
     describe:
-      "Usage-accounting authority: off (default) | shadow | on. `shadow` records into the authority while every surface keeps its existing feed, so a reconciliation receipt can compare the two on real sessions; `on` makes the cost surfaces project it. Unrecognized values degrade to off.",
+      "Usage-accounting authority: on (default) | shadow | off. `on` makes every cost surface project the session authority (subagent spend included, per-call model pricing); `shadow` records but keeps the legacy feed rendering, with a reconciliation receipt in /cost; `off` is the explicit kill switch back to the legacy feed. Unrecognized values degrade to the default (on).",
     readSite: "observability/usage-accounting/activation.ts",
   },
   {

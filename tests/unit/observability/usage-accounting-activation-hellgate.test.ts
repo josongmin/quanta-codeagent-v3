@@ -33,14 +33,15 @@ describe("the knob has three positions and fails safe", () => {
     expect(usageAccountingMode({ QUANTA_USAGE_ACCOUNTING_V2: " ON " })).toBe("on") // trimmed, cased
   })
 
-  test("unset or unrecognized degrades to off, never to half-on", () => {
-    // A typo must land on the byte-identical path. Half-activating — recording
-    // but not reading, or the reverse, without anyone asking for shadow — is
-    // the worst of the three outcomes.
-    expect(usageAccountingMode({})).toBe("off")
-    expect(usageAccountingMode({ QUANTA_USAGE_ACCOUNTING_V2: "shdaow" })).toBe("off")
-    expect(usageAccountingMode({ QUANTA_USAGE_ACCOUNTING_V2: "1" })).toBe("off")
-    expect(usageAccountingMode({ QUANTA_USAGE_ACCOUNTING_V2: "" })).toBe("off")
+  test("unset or unrecognized lands on the DEFAULT (on), never half-way", () => {
+    // The default is `on`, and a typo degrades to the default rather than
+    // silently disabling the accounting: "off when you wanted on" loses the
+    // session's books, "on when you wanted off" merely keeps them. Only the
+    // exact words `off` / `shadow` divert.
+    expect(usageAccountingMode({})).toBe("on")
+    expect(usageAccountingMode({ QUANTA_USAGE_ACCOUNTING_V2: "shdaow" })).toBe("on")
+    expect(usageAccountingMode({ QUANTA_USAGE_ACCOUNTING_V2: "1" })).toBe("on")
+    expect(usageAccountingMode({ QUANTA_USAGE_ACCOUNTING_V2: "" })).toBe("on")
   })
 
   test("shadow records but is not authoritative; on is both", () => {
@@ -50,15 +51,18 @@ describe("the knob has three positions and fails safe", () => {
     expect(usageAccountingIsAuthoritative({ QUANTA_USAGE_ACCOUNTING_V2: "on" })).toBe(true)
   })
 
-  test("off constructs nothing at all", () => {
-    expect(createSessionUsageAccounting({})).toBeUndefined()
-    expect(usageAccountingIsAuthoritative({})).toBe(false)
+  test("the default constructs a live authority; only explicit off constructs nothing", () => {
+    expect(createSessionUsageAccounting({})).toBeDefined()
+    expect(usageAccountingIsAuthoritative({})).toBe(true)
+    expect(createSessionUsageAccounting({ QUANTA_USAGE_ACCOUNTING_V2: "off" })).toBeUndefined()
+    expect(usageAccountingIsAuthoritative({ QUANTA_USAGE_ACCOUNTING_V2: "off" })).toBe(false)
   })
 })
 
-describe("off is inert through the shipped fan-out", () => {
-  test("emitUsage with no authority records nowhere and still emits", () => {
+describe("explicit off is inert through the shipped fan-out", () => {
+  test("emitUsage with the kill switch thrown records nowhere and still emits", () => {
     const events: unknown[] = []
+    const killed = createSessionUsageAccounting({ QUANTA_USAGE_ACCOUNTING_V2: "off" })
     const config = {
       llm: { stream: async function* () {} },
       registry: { get: () => undefined, specs: () => [], isReadOnly: () => true },
@@ -70,9 +74,7 @@ describe("off is inert through the shipped fan-out", () => {
       maxTurns: 1,
       signal: new AbortController().signal,
       sessionId: "s",
-      ...(createSessionUsageAccounting({}) !== undefined
-        ? { usageAccounting: createSessionUsageAccounting({}) }
-        : {}),
+      ...(killed !== undefined ? { usageAccounting: killed } : {}),
     } as unknown as AgentConfig
     expect(config.usageAccounting).toBeUndefined()
     emitUsage(
@@ -217,8 +219,13 @@ describe("ANTI-THEATER: the knob reaches a live config through the real assemble
       env,
     )
 
-  test("knob unset ⇒ slot UNSET (byte-identical default-OFF)", () => {
-    expect(assembleWith({}).usageAccounting).toBeUndefined()
+  test("knob unset ⇒ a live authority on the config (default-ON)", () => {
+    const cfg = assembleWith({})
+    expect(cfg.usageAccounting).toBeDefined()
+  })
+
+  test("explicit off ⇒ slot UNSET (the kill switch really kills)", () => {
+    expect(assembleWith({ QUANTA_USAGE_ACCOUNTING_V2: "off" }).usageAccounting).toBeUndefined()
   })
 
   test("shadow mints a REAL, recording authority on the config", () => {
@@ -244,7 +251,7 @@ describe("ANTI-THEATER: the knob reaches a live config through the real assemble
     expect(assembleWith({ QUANTA_USAGE_ACCOUNTING_V2: "on" }).usageAccounting).toBeDefined()
   })
 
-  test("a typo leaves the slot unset rather than half-activating", () => {
-    expect(assembleWith({ QUANTA_USAGE_ACCOUNTING_V2: "yes" }).usageAccounting).toBeUndefined()
+  test("a typo lands on the default (a live authority), never half-way", () => {
+    expect(assembleWith({ QUANTA_USAGE_ACCOUNTING_V2: "yes" }).usageAccounting).toBeDefined()
   })
 })

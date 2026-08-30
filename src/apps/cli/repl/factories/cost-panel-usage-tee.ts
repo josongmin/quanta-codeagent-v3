@@ -7,11 +7,11 @@
  * model per call, with no last-writer-wins approximation — so in
  * `QUANTA_USAGE_ACCOUNTING_V2=on` nothing here is read.
  *
- * It stays because the knob defaults to `off`, and in `off`/`shadow` the panel
- * still folds the counter delta and still needs this. Deleting it now would
- * leave the default path with no model at all. The removal is GATED on the
- * default flipping to `on`, together with `foldCostPanelDelta` — they are one
- * feed and should go in one piece.
+ * The default is `on` now, so the DEFAULT path no longer reads this. It stays
+ * because `off` (the kill switch) and `shadow` (the diagnostic mode) still
+ * render from the legacy feed, and in those modes this is still how the panel
+ * learns a model. The removal is GATED on retiring those two modes, together
+ * with `foldCostPanelDelta` — they are one feed and should go in one piece.
  */
 /**
  * MR-05 — teach the CLI cost panel WHICH model each turn ran on.

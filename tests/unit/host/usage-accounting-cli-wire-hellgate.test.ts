@@ -27,8 +27,12 @@ const bootWith = async (env: Record<string, string | undefined>) => {
 }
 
 describe("the CLI composition root honors the activation knob", () => {
-  test("knob unset ⇒ no authority on the bootstrap result", async () => {
-    expect((await bootWith({})).usageAccounting).toBeUndefined()
+  test("knob unset ⇒ the CLI session gets a live authority (default-ON)", async () => {
+    expect((await bootWith({})).usageAccounting).toBeDefined()
+  })
+
+  test("explicit off ⇒ no authority (the kill switch)", async () => {
+    expect((await bootWith({ QUANTA_USAGE_ACCOUNTING_V2: "off" })).usageAccounting).toBeUndefined()
   })
 
   test("shadow ⇒ a real, recording authority", async () => {
@@ -65,9 +69,7 @@ describe("the CLI composition root honors the activation knob", () => {
     expect((await bootWith({ QUANTA_USAGE_ACCOUNTING_V2: "on" })).usageAccounting).toBeDefined()
   })
 
-  test("a typo leaves the CLI on the byte-identical path", async () => {
-    expect(
-      (await bootWith({ QUANTA_USAGE_ACCOUNTING_V2: "shdaow" })).usageAccounting,
-    ).toBeUndefined()
+  test("a typo lands on the default, not on a silent disable", async () => {
+    expect((await bootWith({ QUANTA_USAGE_ACCOUNTING_V2: "shdaow" })).usageAccounting).toBeDefined()
   })
 })

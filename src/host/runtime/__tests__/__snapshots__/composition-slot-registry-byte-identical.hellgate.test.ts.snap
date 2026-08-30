@@ -18,7 +18,7 @@ readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — all-off default: all-off default :: assembled 1`] = `
-"KEYS[23]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,usageAccounting,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"openai",surfaceId=str:"openai-responses",transportId=str:"public",authMode=str:"OpenAI BYOK",listModels=fn,stream=fn}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
@@ -38,6 +38,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
+usageAccounting :: obj{record=fn,snapshot=fn,recent=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -62,7 +63,7 @@ readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — identity env: identity env :: assembled 1`] = `
-"KEYS[23]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,usageAccounting,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"openai",surfaceId=str:"openai-responses",transportId=str:"public",authMode=str:"OpenAI BYOK",listModels=fn,stream=fn}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
@@ -82,6 +83,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
+usageAccounting :: obj{record=fn,snapshot=fn,recent=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -106,7 +108,7 @@ readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — mcp caps full: mcp caps full :: assembled 1`] = `
-"KEYS[23]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,usageAccounting,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"openai",surfaceId=str:"openai-responses",transportId=str:"public",authMode=str:"OpenAI BYOK",listModels=fn,stream=fn}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
@@ -126,6 +128,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
+usageAccounting :: obj{record=fn,snapshot=fn,recent=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -151,7 +154,7 @@ readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — automation on: automation on :: assembled 1`] = `
-"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,automationEngine,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+"KEYS[25]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,automationEngine,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,usageAccounting,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"openai",surfaceId=str:"openai-responses",transportId=str:"public",authMode=str:"OpenAI BYOK",listModels=fn,stream=fn}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
@@ -172,6 +175,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
+usageAccounting :: obj{record=fn,snapshot=fn,recent=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -196,7 +200,7 @@ readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — sandbox: sandbox :: assembled 1`] = `
-"KEYS[23]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,usageAccounting,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"openai",surfaceId=str:"openai-responses",transportId=str:"public",authMode=str:"OpenAI BYOK",listModels=fn,stream=fn}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
@@ -216,6 +220,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
+usageAccounting :: obj{record=fn,snapshot=fn,recent=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -241,7 +246,7 @@ readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — network proxy: network proxy :: assembled 1`] = `
-"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,networkProxy,searchPipeline,stickyModelStore,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+"KEYS[25]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,networkProxy,searchPipeline,stickyModelStore,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,usageAccounting,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"openai",surfaceId=str:"openai-responses",transportId=str:"public",authMode=str:"OpenAI BYOK",listModels=fn,stream=fn}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
@@ -262,6 +267,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
+usageAccounting :: obj{record=fn,snapshot=fn,recent=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -287,7 +293,7 @@ readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — prewarm: prewarm :: assembled 1`] = `
-"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,prewarm,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+"KEYS[25]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,prewarm,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,usageAccounting,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"openai",surfaceId=str:"openai-responses",transportId=str:"public",authMode=str:"OpenAI BYOK",listModels=fn,stream=fn}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
@@ -308,6 +314,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
+usageAccounting :: obj{record=fn,snapshot=fn,recent=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -333,7 +340,7 @@ readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — lsp prewarm (nav on): lsp prewarm (nav on) :: assembled 1`] = `
-"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,lspPrewarm,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+"KEYS[25]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,lspPrewarm,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,usageAccounting,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"openai",surfaceId=str:"openai-responses",transportId=str:"public",authMode=str:"OpenAI BYOK",listModels=fn,stream=fn}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
@@ -354,6 +361,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
+usageAccounting :: obj{record=fn,snapshot=fn,recent=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -382,7 +390,7 @@ readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — observability on: observability on :: assembled 1`] = `
-"KEYS[27]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,shadowVerify,runLedger,approvalStateMachine,hooks,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+"KEYS[28]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,shadowVerify,runLedger,approvalStateMachine,hooks,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,usageAccounting,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"openai",surfaceId=str:"openai-responses",transportId=str:"public",authMode=str:"OpenAI BYOK",listModels=fn,stream=fn}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
@@ -406,6 +414,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
+usageAccounting :: obj{record=fn,snapshot=fn,recent=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -431,7 +440,7 @@ readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — remember patterns: remember patterns :: assembled 1`] = `
-"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,permissionPatternStore,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+"KEYS[25]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,permissionPatternStore,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,usageAccounting,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"openai",surfaceId=str:"openai-responses",transportId=str:"public",authMode=str:"OpenAI BYOK",listModels=fn,stream=fn}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
@@ -452,6 +461,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
+usageAccounting :: obj{record=fn,snapshot=fn,recent=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -477,7 +487,7 @@ readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — remember patterns dangerous: remember patterns dangerous :: assembled 1`] = `
-"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,permissionPatternStore,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+"KEYS[25]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,permissionPatternStore,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,usageAccounting,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"openai",surfaceId=str:"openai-responses",transportId=str:"public",authMode=str:"OpenAI BYOK",listModels=fn,stream=fn}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
@@ -498,6 +508,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
+usageAccounting :: obj{record=fn,snapshot=fn,recent=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -523,7 +534,7 @@ readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — file history: file history :: assembled 1`] = `
-"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,fileHistory,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+"KEYS[25]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,fileHistory,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,usageAccounting,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"openai",surfaceId=str:"openai-responses",transportId=str:"public",authMode=str:"OpenAI BYOK",listModels=fn,stream=fn}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
@@ -544,6 +555,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
+usageAccounting :: obj{record=fn,snapshot=fn,recent=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -570,7 +582,7 @@ readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — artifact store: artifact store :: assembled 1`] = `
-"KEYS[25]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,artifactRegistry,artifactPreviewResolver,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+"KEYS[26]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,artifactRegistry,artifactPreviewResolver,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,usageAccounting,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"openai",surfaceId=str:"openai-responses",transportId=str:"public",authMode=str:"OpenAI BYOK",listModels=fn,stream=fn}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
@@ -592,6 +604,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
+usageAccounting :: obj{record=fn,snapshot=fn,recent=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -616,7 +629,7 @@ readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — index on: index on :: assembled 1`] = `
-"KEYS[23]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,usageAccounting,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"openai",surfaceId=str:"openai-responses",transportId=str:"public",authMode=str:"OpenAI BYOK",listModels=fn,stream=fn}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
@@ -636,6 +649,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
+usageAccounting :: obj{record=fn,snapshot=fn,recent=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -659,7 +673,7 @@ readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — pipeline none: pipeline none :: assembled 1`] = `
-"KEYS[22]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,stickyModelStore,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+"KEYS[23]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,stickyModelStore,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,usageAccounting,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"openai",surfaceId=str:"openai-responses",transportId=str:"public",authMode=str:"OpenAI BYOK",listModels=fn,stream=fn}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
@@ -678,6 +692,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
+usageAccounting :: obj{record=fn,snapshot=fn,recent=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -702,7 +717,7 @@ readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — env default posture: env default posture :: assembled 1`] = `
-"KEYS[23]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,usageAccounting,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"openai",surfaceId=str:"openai-responses",transportId=str:"public",authMode=str:"OpenAI BYOK",listModels=fn,stream=fn}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
@@ -722,6 +737,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
+usageAccounting :: obj{record=fn,snapshot=fn,recent=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -746,7 +762,7 @@ readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — objective tools: objective tools :: assembled 1`] = `
-"KEYS[25]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,objective,objectiveVerifier,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+"KEYS[26]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,objective,objectiveVerifier,usageAccounting,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"openai",surfaceId=str:"openai-responses",transportId=str:"public",authMode=str:"OpenAI BYOK",listModels=fn,stream=fn}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
@@ -768,6 +784,7 @@ bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOw
 contentCaptureEnabled :: bool:false
 objective :: obj{readDomain=fn,prepare=fn,commit=fn,restore=fn,restoreDomain=fn,replaceDomainForAttach=fn,knownThreadIds=fn,recordProgressReceipt=fn,create=fn,replace=fn,clear=fn,get=fn,setExplicitStatus=fn,amendBudget=fn,addBlocker=fn,clearBlocker=fn,setNextActions=fn,markCriterion=fn,markUsageLimited=fn,list=fn,toSnapshot=fn,fromSnapshot=fn}
 objectiveVerifier :: obj{verify=fn,reconcile=fn}
+usageAccounting :: obj{record=fn,snapshot=fn,recent=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -793,7 +810,7 @@ readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — mailbox: mailbox :: assembled 1`] = `
-"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,subagentMailbox,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+"KEYS[25]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,subagentMailbox,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,usageAccounting,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"openai",surfaceId=str:"openai-responses",transportId=str:"public",authMode=str:"OpenAI BYOK",listModels=fn,stream=fn}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
@@ -814,6 +831,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
+usageAccounting :: obj{record=fn,snapshot=fn,recent=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -837,7 +855,7 @@ stickyModelStore :: obj{store=obj{get=fn,set=fn,unset=fn,peek=fn,load=fn}}"
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — stale-read guard off: stale-read guard off :: assembled 1`] = `
-"KEYS[22]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+"KEYS[23]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,usageAccounting,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"openai",surfaceId=str:"openai-responses",transportId=str:"public",authMode=str:"OpenAI BYOK",listModels=fn,stream=fn}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
@@ -856,6 +874,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
+usageAccounting :: obj{record=fn,snapshot=fn,recent=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -880,7 +899,7 @@ readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — edit repair loop: edit repair loop :: assembled 1`] = `
-"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,diagnosticsProvider,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+"KEYS[25]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,diagnosticsProvider,usageAccounting,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"openai",surfaceId=str:"openai-responses",transportId=str:"public",authMode=str:"OpenAI BYOK",listModels=fn,stream=fn}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
@@ -901,6 +920,7 @@ secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
 diagnosticsProvider :: obj{unavailableReason=fn,open=fn}
+usageAccounting :: obj{record=fn,snapshot=fn,recent=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -925,7 +945,7 @@ readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — prompt cache status: prompt cache status :: assembled 1`] = `
-"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,promptCacheObserver,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+"KEYS[25]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,promptCacheObserver,usageAccounting,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"openai",surfaceId=str:"openai-responses",transportId=str:"public",authMode=str:"OpenAI BYOK",listModels=fn,stream=fn}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
@@ -946,6 +966,7 @@ secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
 promptCacheObserver :: obj{attributeBreakpoint=fn,record=fn,snapshot=fn,reset=fn}
+usageAccounting :: obj{record=fn,snapshot=fn,recent=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -970,7 +991,7 @@ readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — passive vcs: passive vcs :: assembled 1`] = `
-"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,vcsEventSink,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+"KEYS[25]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,vcsEventSink,usageAccounting,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"openai",surfaceId=str:"openai-responses",transportId=str:"public",authMode=str:"OpenAI BYOK",listModels=fn,stream=fn}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
@@ -991,6 +1012,7 @@ secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
 vcsEventSink :: obj{emit=fn}
+usageAccounting :: obj{record=fn,snapshot=fn,recent=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -1015,7 +1037,7 @@ readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — pii redaction: pii redaction :: assembled 1`] = `
-"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,redaction,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+"KEYS[25]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,redaction,usageAccounting,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"openai",surfaceId=str:"openai-responses",transportId=str:"public",authMode=str:"OpenAI BYOK",listModels=fn,stream=fn}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
@@ -1036,6 +1058,7 @@ secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
 redaction :: obj{pii=obj{enabled=bool:true}}
+usageAccounting :: obj{record=fn,snapshot=fn,recent=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -1061,7 +1084,7 @@ readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — sticky model flag: sticky model flag :: assembled 1`] = `
-"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,modelRouting,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+"KEYS[25]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,modelRouting,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,usageAccounting,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"openai",surfaceId=str:"openai-responses",transportId=str:"public",authMode=str:"OpenAI BYOK",listModels=fn,stream=fn}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
@@ -1082,6 +1105,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
+usageAccounting :: obj{record=fn,snapshot=fn,recent=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -1107,7 +1131,7 @@ readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — tool profile flag: tool profile flag :: assembled 1`] = `
-"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,toolProfile,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+"KEYS[25]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,toolProfile,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,usageAccounting,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"openai",surfaceId=str:"openai-responses",transportId=str:"public",authMode=str:"OpenAI BYOK",listModels=fn,stream=fn}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
@@ -1128,6 +1152,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
+usageAccounting :: obj{record=fn,snapshot=fn,recent=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -1153,7 +1178,7 @@ readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — focus chain flag: focus chain flag :: assembled 1`] = `
-"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,focusChain,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+"KEYS[25]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,focusChain,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,usageAccounting,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"openai",surfaceId=str:"openai-responses",transportId=str:"public",authMode=str:"OpenAI BYOK",listModels=fn,stream=fn}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
@@ -1174,6 +1199,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
+usageAccounting :: obj{record=fn,snapshot=fn,recent=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -1201,7 +1227,7 @@ readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — fork session flag: fork session flag :: assembled 1`] = `
-"KEYS[26]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,conversationCheckpoint,fork,forkSession,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+"KEYS[27]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,conversationCheckpoint,fork,forkSession,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,usageAccounting,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"openai",surfaceId=str:"openai-responses",transportId=str:"public",authMode=str:"OpenAI BYOK",listModels=fn,stream=fn}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
@@ -1224,6 +1250,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
+usageAccounting :: obj{record=fn,snapshot=fn,recent=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -1249,7 +1276,7 @@ readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — delegate modes flag: delegate modes flag :: assembled 1`] = `
-"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,delegation,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+"KEYS[25]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,delegation,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,usageAccounting,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"openai",surfaceId=str:"openai-responses",transportId=str:"public",authMode=str:"OpenAI BYOK",listModels=fn,stream=fn}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
@@ -1270,6 +1297,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
+usageAccounting :: obj{record=fn,snapshot=fn,recent=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -1295,7 +1323,7 @@ readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — identity mode flag: identity mode flag :: assembled 1`] = `
-"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,identityModeVariant,stickyModelStore,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+"KEYS[25]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,identityModeVariant,stickyModelStore,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,usageAccounting,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"openai",surfaceId=str:"openai-responses",transportId=str:"public",authMode=str:"OpenAI BYOK",listModels=fn,stream=fn}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
@@ -1316,6 +1344,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
+usageAccounting :: obj{record=fn,snapshot=fn,recent=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -1340,7 +1369,7 @@ readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — batch mode: batch mode :: assembled 1`] = `
-"KEYS[24]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,dispatchGuard,bgShellRegistry,contentCaptureEnabled,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+"KEYS[25]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,dispatchGuard,bgShellRegistry,contentCaptureEnabled,usageAccounting,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"openai",surfaceId=str:"openai-responses",transportId=str:"public",authMode=str:"OpenAI BYOK",listModels=fn,stream=fn}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
@@ -1361,6 +1390,7 @@ secretCheckToolEnabled :: bool:false
 dispatchGuard :: obj{check=fn}
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
+usageAccounting :: obj{record=fn,snapshot=fn,recent=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -1393,7 +1423,7 @@ readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — combo: obs + artifact + file-history + patterns: combo: obs + artifact + file-history + patterns :: assembled 1`] = `
-"KEYS[31]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,shadowVerify,runLedger,approvalStateMachine,hooks,permissionPatternStore,fileHistory,artifactRegistry,artifactPreviewResolver,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+"KEYS[32]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,shadowVerify,runLedger,approvalStateMachine,hooks,permissionPatternStore,fileHistory,artifactRegistry,artifactPreviewResolver,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,usageAccounting,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"openai",surfaceId=str:"openai-responses",transportId=str:"public",authMode=str:"OpenAI BYOK",listModels=fn,stream=fn}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
@@ -1421,6 +1451,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
+usageAccounting :: obj{record=fn,snapshot=fn,recent=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -1447,7 +1478,7 @@ readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — combo: automation + mcp-full + sandbox + network-proxy: combo: automation + mcp-full + sandbox + network-proxy :: assembled 1`] = `
-"KEYS[25]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,networkProxy,searchPipeline,stickyModelStore,automationEngine,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+"KEYS[26]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,networkProxy,searchPipeline,stickyModelStore,automationEngine,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,usageAccounting,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"openai",surfaceId=str:"openai-responses",transportId=str:"public",authMode=str:"OpenAI BYOK",listModels=fn,stream=fn}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
@@ -1469,6 +1500,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
+usageAccounting :: obj{record=fn,snapshot=fn,recent=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -1494,7 +1526,7 @@ readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — combo: assembler caps (objective+mailbox+prompt-cache+edit-repair+pii): combo: assembler caps (objective+mailbox+prompt-cache+edit-repair+pii) :: assembled 1`] = `
-"KEYS[29]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,subagentMailbox,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,objective,objectiveVerifier,diagnosticsProvider,promptCacheObserver,redaction,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+"KEYS[30]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,subagentMailbox,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,objective,objectiveVerifier,diagnosticsProvider,promptCacheObserver,redaction,usageAccounting,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"openai",surfaceId=str:"openai-responses",transportId=str:"public",authMode=str:"OpenAI BYOK",listModels=fn,stream=fn}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
@@ -1520,6 +1552,7 @@ objectiveVerifier :: obj{verify=fn,reconcile=fn}
 diagnosticsProvider :: obj{unavailableReason=fn,open=fn}
 promptCacheObserver :: obj{attributeBreakpoint=fn,record=fn,snapshot=fn,reset=fn}
 redaction :: obj{pii=obj{enabled=bool:true}}
+usageAccounting :: obj{record=fn,snapshot=fn,recent=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -1553,7 +1586,7 @@ readFileState :: obj{mtimes=obj{},rangeHashes=undefined,contentDigests=undefined
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — combo: base flags + env gates together: combo: base flags + env gates together :: assembled 1`] = `
-"KEYS[32]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,toolProfile,focusChain,shadowVerify,runLedger,approvalStateMachine,hooks,artifactRegistry,artifactPreviewResolver,modelRouting,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
+"KEYS[33]: llm,registry,stream,promptSurfaceProfile,permission,messages,system,cwd,maxTurns,signal,searchPipeline,stickyModelStore,toolProfile,focusChain,shadowVerify,runLedger,approvalStateMachine,hooks,artifactRegistry,artifactPreviewResolver,modelRouting,readFileState,modePolicy,budgetMeter,lspDiagnosticsHookEnabled,secretCheckToolEnabled,bgShellRegistry,contentCaptureEnabled,usageAccounting,activeSkillCursor,contextEventsForTurn,mentionInjector,compactionEventEmit
 llm :: obj{model=str:"gpt-5.6-terra",provider=str:"openai",surfaceId=str:"openai-responses",transportId=str:"public",authMode=str:"OpenAI BYOK",listModels=fn,stream=fn}
 registry :: obj{tools=obj{},origin=undefined}
 stream :: obj{emit=fn}
@@ -1582,6 +1615,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
+usageAccounting :: obj{record=fn,snapshot=fn,recent=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
