@@ -225,19 +225,24 @@ describe("canonicalize — RE-VALIDATION on the REAL cassette (residual ≈ 0)",
   const cassettePath = resolve(import.meta.dir, "../../../../../bench-trajectory.jsonl")
   const hasWitness = existsSync(cassettePath)
 
-  const textOf = (request: StreamInput): string => {
+  const messageText = (messages: StreamInput["messages"]): string[] => {
     const parts: string[] = []
-    for (const m of request.messages ?? []) {
-      for (const b of m.content ?? []) {
-        if (b.type === "text") parts.push(b.text)
-        else if (b.type === "tool_result") parts.push(b.content)
+    for (const message of messages ?? []) {
+      for (const block of message.content ?? []) {
+        if (block.type === "text") parts.push(block.text)
+        else if (block.type === "tool_result") parts.push(block.content)
       }
     }
-    const sys = request.system
-    if (typeof sys === "string") parts.push(sys)
-    else if (Array.isArray(sys)) for (const s of sys) parts.push(s.text)
-    return parts.join("\n")
+    return parts
   }
+
+  const systemText = (system: StreamInput["system"]): string[] => {
+    if (typeof system === "string") return [system]
+    return Array.isArray(system) ? system.map((block) => block.text) : []
+  }
+
+  const textOf = (request: StreamInput): string =>
+    [...messageText(request.messages), ...systemText(request.system)].join("\n")
 
   // Detectors mirror EXACTLY the volatile shapes the canonicalizer targets —
   // NOT a broader net. In particular `workdir` matches only the RANDOM-SUFFIX
