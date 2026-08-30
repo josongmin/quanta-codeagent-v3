@@ -42,6 +42,52 @@ async function* fakeStream(): AsyncGenerator<unknown> {
   yield { type: "message_stop" }
 }
 
+const spyStreamEvent = (index: number): unknown | undefined => {
+  if (index === 0) {
+    return { type: "message_start", message: { model: "x", usage: { input_tokens: 1 } } }
+  }
+  if (index === 1) {
+    return { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }
+  }
+  return index < 1000
+    ? { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "x" } }
+    : undefined
+}
+
+const makeSpyStream = (hooks: {
+  readonly onDelta?: () => void
+  readonly onReturn: () => void
+  readonly onThrow?: () => void
+}): AsyncIterable<unknown> => ({
+  [Symbol.asyncIterator](): AsyncIterator<unknown> {
+    let index = 0
+    let done = false
+    return {
+      async next() {
+        if (done) return { value: undefined, done: true }
+        const value = spyStreamEvent(index)
+        if (value === undefined) {
+          done = true
+          return { value: undefined, done: true }
+        }
+        if (index >= 2) hooks.onDelta?.()
+        index += 1
+        return { value, done: false }
+      },
+      async return(value?: unknown) {
+        hooks.onReturn()
+        done = true
+        return { value, done: true }
+      },
+      async throw(error?: unknown) {
+        hooks.onThrow?.()
+        done = true
+        throw error
+      },
+    }
+  },
+})
+
 interface CallLog {
   params?: Record<string, unknown>
   signal?: AbortSignal
@@ -313,69 +359,18 @@ describe("BedrockProviderAdapter — hellgate", () => {
     let returnCalled = 0
     let throwCalled = 0
     let yieldedFromUpstream = 0
-    function makeHugeSpyStream(): AsyncIterable<unknown> {
-      // Return an explicit iterable with explicit next/return/throw so we
-      // can record what the consumer chain invokes. (Bun's async-iter
-      // protocol calls iter.return() on early break.)
-      return {
-        [Symbol.asyncIterator](): AsyncIterator<unknown> {
-          let i = 0
-          let done = false
-          return {
-            async next() {
-              if (done) return { value: undefined, done: true }
-              if (i === 0) {
-                i++
-                return {
-                  value: {
-                    type: "message_start",
-                    message: { model: "x", usage: { input_tokens: 1 } },
-                  },
-                  done: false,
-                }
-              }
-              if (i === 1) {
-                i++
-                return {
-                  value: {
-                    type: "content_block_start",
-                    index: 0,
-                    content_block: { type: "text", text: "" },
-                  },
-                  done: false,
-                }
-              }
-              if (i < 1000) {
-                i++
-                yieldedFromUpstream++
-                return {
-                  value: {
-                    type: "content_block_delta",
-                    index: 0,
-                    delta: { type: "text_delta", text: "x" },
-                  },
-                  done: false,
-                }
-              }
-              done = true
-              return { value: undefined, done: true }
-            },
-            async return(value?: unknown) {
-              returnCalled++
-              done = true
-              return { value, done: true }
-            },
-            async throw(err?: unknown) {
-              throwCalled++
-              done = true
-              throw err
-            },
-          }
-        },
-      }
-    }
     const a = new BedrockProviderAdapter(base(), {
-      clientFactory: recordingFactory({}, { stream: makeHugeSpyStream }),
+      clientFactory: recordingFactory(
+        {},
+        {
+          stream: () =>
+            makeSpyStream({
+              onDelta: () => yieldedFromUpstream++,
+              onReturn: () => returnCalled++,
+              onThrow: () => throwCalled++,
+            }),
+        },
+      ),
     })
     let count = 0
     for await (const _ of a.stream({ messages: [], tools: [] })) {
@@ -416,66 +411,32 @@ describe("BedrockProviderAdapter — hellgate", () => {
     let returnCalled = 0
     let yieldedAfterAbort = 0
     let aborted = false
-    function makeAbortableSpy(): AsyncIterable<unknown> {
-      return {
-        [Symbol.asyncIterator](): AsyncIterator<unknown> {
-          let i = 0
-          let done = false
-          return {
-            async next() {
-              if (done) return { value: undefined, done: true }
-              if (i === 0) {
-                i++
-                return {
-                  value: {
-                    type: "message_start",
-                    message: { model: "x", usage: { input_tokens: 1 } },
-                  },
-                  done: false,
-                }
-              }
-              if (i === 1) {
-                i++
-                return {
-                  value: {
-                    type: "content_block_start",
-                    index: 0,
-                    content_block: { type: "text", text: "" },
-                  },
-                  done: false,
-                }
-              }
-              if (i < 1000) {
-                i++
-                if (aborted) yieldedAfterAbort++
-                return {
-                  value: {
-                    type: "content_block_delta",
-                    index: 0,
-                    delta: { type: "text_delta", text: "x" },
-                  },
-                  done: false,
-                }
-              }
-              done = true
-              return { value: undefined, done: true }
-            },
-            async return(value?: unknown) {
-              returnCalled++
-              done = true
-              return { value, done: true }
-            },
-          }
-        },
-      }
-    }
     const a = new BedrockProviderAdapter(base(), {
-      clientFactory: recordingFactory({}, { stream: makeAbortableSpy }),
+      clientFactory: recordingFactory(
+        {},
+        {
+          stream: () =>
+            makeSpyStream({
+              onDelta: () => {
+                if (aborted) yieldedAfterAbort++
+              },
+              onReturn: () => returnCalled++,
+            }),
+        },
+      ),
     })
     const ctl = earlyCtl
     const log: CallLog = {}
     const a2 = new BedrockProviderAdapter(base(), {
-      clientFactory: recordingFactory(log, { stream: makeAbortableSpy }),
+      clientFactory: recordingFactory(log, {
+        stream: () =>
+          makeSpyStream({
+            onDelta: () => {
+              if (aborted) yieldedAfterAbort++
+            },
+            onReturn: () => returnCalled++,
+          }),
+      }),
     })
     let count = 0
     try {
