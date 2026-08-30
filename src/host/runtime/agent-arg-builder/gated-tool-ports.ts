@@ -274,6 +274,69 @@ const permissionProposePortSlot = (
 ): { permissionPatternPropose: PermissionPatternSlice["proposePort"] } | Record<string, never> =>
   slice !== undefined ? { permissionPatternPropose: slice.proposePort } : {}
 
+/** The stateful ports must be assembled as one small group: in particular the
+ * artifact registry and the two shared per-session slices retain their original
+ * identities while the surrounding composition root is decomposed. */
+const sharedStateToolPortSlots = (
+  artifactRegistry: ReturnType<typeof createArtifactRegistry> | undefined,
+  permissionPatternSlice: PermissionPatternSlice | undefined,
+  fileHistorySlice: FileHistorySlice | undefined,
+): Partial<DefaultToolPorts> => ({
+  ...(artifactRegistry !== undefined ? { artifactRegistry } : {}),
+  ...permissionProposePortSlot(permissionPatternSlice),
+  ...fileHistoryPortSlot(fileHistorySlice),
+})
+
+/** Ports that require an adapter or an injected runtime dependency. Keeping
+ * their gate decisions here makes `buildGatedToolPorts` a composition of named
+ * slots instead of one mutable, cross-cutting gate registry. */
+const adapterToolPortSlots = (
+  env: NodeJS.ProcessEnv,
+  cfg: ReturnType<typeof runtimeConfig>,
+  llm: LLMPort | null | undefined,
+): Partial<DefaultToolPorts> => ({
+  ...(cfg.mcpConnectors
+    ? {
+        mcpConnectors: buildMcpConnectorDiscoveryPort({
+          configPath: process.env.QUANTA_MCP_CONFIG?.trim() || joinPath(process.cwd(), ".mcp.json"),
+        }),
+      }
+    : {}),
+  ...(cfg.imageGen
+    ? {
+        imageGen: openAiImagePort({
+          ...(env.OPENAI_API_KEY !== undefined && env.OPENAI_API_KEY !== ""
+            ? { apiKey: env.OPENAI_API_KEY }
+            : {}),
+          ...(env.OPENAI_BASE_URL !== undefined && env.OPENAI_BASE_URL !== ""
+            ? { baseUrl: env.OPENAI_BASE_URL }
+            : {}),
+        }),
+      }
+    : {}),
+  ...(process.platform === "darwin" && gateOn(env, "QUANTA_IMAGE_DOWNSAMPLE")
+    ? { imageDownsample: sipsImageDownsamplePort() }
+    : {}),
+  ...(llm != null && gateOn(env, "QUANTA_REFLECT")
+    ? { reflect: reflectConsultFromLLM({ llm }) }
+    : {}),
+})
+
+/** Pure feature toggles and their small stateful kernel slots. No adapter is
+ * created here except the explicitly session-scoped node REPL kernel. */
+const configFeatureToolPortSlots = (
+  cfg: ReturnType<typeof runtimeConfig>,
+): Partial<DefaultToolPorts> => ({
+  ...(cfg.officeAuthoring ? { officeAuthoring: true } : {}),
+  ...(cfg.notebookEdit ? { notebookEdit: true } : {}),
+  ...(cfg.debugTools ? { debugTools: true } : {}),
+  ...nodeReplPortSlot(cfg.nodeRepl),
+  ...(cfg.testRunner ? { testRunner: true } : {}),
+  ...(cfg.evidence ? { evidence: { lspStatic: evidenceLspStatic() } } : {}),
+  ...(cfg.progressUpdate ? { progressUpdate: true } : {}),
+  ...codeModePortSlot(cfg.codeMode),
+})
+
 export const buildGatedToolPorts = (
   env: NodeJS.ProcessEnv,
   seams?: CompositionSeams,
@@ -316,107 +379,9 @@ export const buildGatedToolPorts = (
     // ADR-0165 — gated coverage_check tool. Default-OFF: tool menu is
     // byte-identical unless QUANTA_COVERAGE_TOOL === "1".
     ...(gateOn(process.env, "QUANTA_COVERAGE_TOOL") ? { coverageCheck: true } : {}),
-    // C1 — gated artifact (Canvas) tools. Default-OFF: tool menu byte-identical
-    // unless QUANTA_ARTIFACT_STORE === "1". Mints ONE per-session registry
-    // (real clock + monotonic id factory) shared by the artifact_* tools.
-    ...(artifactRegistry !== undefined ? { artifactRegistry } : {}),
-    // CLUSTER D #5 — gated permission_propose_pattern tool over the SHARED
-    // per-session store built by `buildBaseFromArgs` (BASELINE-SEED RESIDUAL
-    // CLOSED). The SAME store backs `AgentConfig.permissionPatternStore`, so the
-    // model can only refine patterns the USER already approved via the gate's
-    // `store.grant(...)` path. We NEVER construct a fresh empty-baseline store
-    // here. Spread-ready slot (`{}` when off ⇒ tool not registered ⇒
-    // byte-identical).
-    ...permissionProposePortSlot(permissionPatternSlice),
-    // file_history_rewind — gated per-file snapshot list/restore tool over the
-    // SHARED session store (the SAME store whose sink wires AgentConfig.fileHistory
-    // so write/edit record into exactly what this tool reads). Default-OFF: `{}`
-    // when QUANTA_FILE_HISTORY is off ⇒ tool not registered ⇒ byte-identical.
-    ...fileHistoryPortSlot(fileHistorySlice),
-    // N2 — gated MCP connector discovery tools (mcp_connector_list/_install).
-    // Default-OFF: tool menu byte-identical unless QUANTA_MCP_CONNECTORS === "1".
-    // The port lists the bundled reference catalog and installs a chosen server
-    // into the project `.mcp.json` (QUANTA_MCP_CONFIG override, else cwd) via the
-    // atomic merge writer — the same file `readMcpConfig` ingests next launch.
-    ...(cfg.mcpConnectors
-      ? {
-          mcpConnectors: buildMcpConnectorDiscoveryPort({
-            configPath:
-              process.env.QUANTA_MCP_CONFIG?.trim() || joinPath(process.cwd(), ".mcp.json"),
-          }),
-        }
-      : {}),
-    // H14a — gated image_gen tool. Default-OFF: tool menu byte-identical unless
-    // QUANTA_IMAGE_GEN === "1". The provider port is KEY-BOUND from the same
-    // `OPENAI_API_KEY` the LLM factory reads (NEVER hardcoded); a key-less port
-    // yields a typed `no_key` outcome rather than crashing, so wiring is always
-    // safe. The OpenAI base-url / model knobs the factory honors are honored too.
-    ...(cfg.imageGen
-      ? {
-          imageGen: openAiImagePort({
-            ...(env.OPENAI_API_KEY !== undefined && env.OPENAI_API_KEY !== ""
-              ? { apiKey: env.OPENAI_API_KEY }
-              : {}),
-            ...(env.OPENAI_BASE_URL !== undefined && env.OPENAI_BASE_URL !== ""
-              ? { baseUrl: env.OPENAI_BASE_URL }
-              : {}),
-          }),
-        }
-      : {}),
-    // image downsample (gap GAP 1, ADR-0507) — gated macOS `sips`-backed codec so
-    // read_image SHRINKS oversized images instead of rejecting. PLATFORM-BOUND
-    // (darwin only) + default-OFF: absent ⇒ over-cap images rejected as before
-    // (byte-identical). Non-macOS / gate-off ⇒ no port.
-    ...(process.platform === "darwin" && gateOn(env, "QUANTA_IMAGE_DOWNSAMPLE")
-      ? { imageDownsample: sipsImageDownsamplePort() }
-      : {}),
-    // reflect (gap GAP 11, ADR-0504) — gated LLM-backed self-correction tool.
-    // Default-OFF: tool menu byte-identical unless QUANTA_REFLECT is on AND a real
-    // LLM is present (a one-shot critique turn rides the main LLM, no tools offered).
-    ...(llm != null && gateOn(env, "QUANTA_REFLECT")
-      ? { reflect: reflectConsultFromLLM({ llm }) }
-      : {}),
-    // H14b — gated Office authoring tools (xlsx_write/docx_write/pptx_write).
-    // Default-OFF: tool menu byte-identical unless QUANTA_OFFICE_AUTHORING === "1".
-    // Boolean port — the tools serialize pure-TS OOXML + write through the same
-    // FS-jail chokepoint the readers use; no adapter to construct.
-    ...(cfg.officeAuthoring ? { officeAuthoring: true } : {}),
-    // W6 (NotebookEdit P17) — gated `notebook_edit` cell editor. Default-OFF:
-    // tool menu byte-identical unless QUANTA_NOTEBOOK_EDIT === "1". Pure editor
-    // over the shared FS jail; boolean flag (no adapter to construct).
-    ...(cfg.notebookEdit ? { notebookEdit: true } : {}),
-    // W5 (DAP) — gated `debug_inspect` debugger tool. Default-OFF: tool menu
-    // byte-identical unless QUANTA_DEBUG_TOOLS === "1". Boolean flag — the tool
-    // owns the real spawn port; high-risk (always-confirm tier).
-    ...(cfg.debugTools ? { debugTools: true } : {}),
-    // ADR-0249 — gated `node_repl` persistent-kernel tool. Default-OFF: tool menu
-    // byte-identical unless QUANTA_NODE_REPL === "1". Mints ONE stateful
-    // `NodeReplKernel` per session (the variable-persistence unit); construction
-    // is IO-free (no `node` subprocess until the first exec dispatches). High-risk
-    // (arbitrary Node code, full host access) ⇒ the tool is always-confirm.
-    ...nodeReplPortSlot(cfg.nodeRepl),
-    // Epic-2 — gated `run_tests` structured test-runner. Default-OFF: tool menu
-    // byte-identical unless QUANTA_TEST_RUNNER === "1". High-risk (always-confirm).
-    ...(cfg.testRunner ? { testRunner: true } : {}),
-    // Keystone — gated `collect_evidence` (Evidence Packet Builder). Default-OFF
-    // unless QUANTA_EVIDENCE === "1". The `lspStatic` enrichment port is wired
-    // LIVE here from the LSP bridge (`evidenceLspStatic`), so the packet's
-    // `static` section is real in production (not just test-local). DAP `runtime`
-    // remains a follow-up port (test-under-debugger orchestration).
-    ...(cfg.evidence ? { evidence: { lspStatic: evidenceLspStatic() } } : {}),
-    // C2 — gated communicate_update tool. Default-OFF: tool menu byte-identical
-    // unless QUANTA_PROGRESS_UPDATE === "1". Boolean port — the tool reads its
-    // `ProgressSink` from `ctx.progressSink` (surfaced by the dispatch seam from
-    // `AgentConfig.progressSink`); absent sink ⇒ a no-op + ok:true.
-    ...(cfg.progressUpdate ? { progressUpdate: true } : {}),
-    // code-mode (RFC jun-6-code-mode, Phase 1) — gated `code_cell` tool. Default-OFF:
-    // tool menu byte-identical unless QUANTA_CODE_MODE === "1". The tool reads its
-    // per-cell dispatch port from `ctx.codeCellDispatch` (surfaced by the dispatch
-    // seam from `AgentConfig.codeCellDispatchFactory`, wired by
-    // `wireOptionalAgentPorts`). The QuickJS-WASM module is lazily imported so the
-    // OFF binary never instantiates it; an unwired factory ⇒ typed `not_wired`.
-    // Slot extracted to a helper so this builder stays under the complexity cap.
-    ...codeModePortSlot(cfg.codeMode),
+    ...sharedStateToolPortSlots(artifactRegistry, permissionPatternSlice, fileHistorySlice),
+    ...adapterToolPortSlots(env, cfg, llm),
+    ...configFeatureToolPortSlots(cfg),
     // N6 — gated pty_* tools (attach/list/write/read/resize/kill). Default-OFF:
     // tool menu byte-identical unless QUANTA_PTY_ATTACH === "1". The tmux backend
     // (`Bun.spawn(["tmux", …])`, argv-array, no shell) is constructed at the
