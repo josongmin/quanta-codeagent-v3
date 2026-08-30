@@ -568,6 +568,36 @@ export const parseAgentArgs = (argv: readonly string[]): AgentArgs => {
   return assembleArgs(acc)
 }
 
+const inlineToolProfileValue = (
+  arg: string,
+): { flag: "--tool-profile"; value: string } | undefined =>
+  arg.startsWith("--tool-profile=")
+    ? { flag: "--tool-profile", value: arg.slice("--tool-profile=".length) }
+    : undefined
+
+const applyKnownFlag = (
+  acc: FlagAcc,
+  argv: readonly string[],
+  index: number,
+  flag: string,
+  inlineToolProfile: { flag: "--tool-profile"; value: string } | undefined,
+): number | undefined => {
+  const spec = FLAG_HANDLERS[flag]
+  if (spec === undefined) return undefined
+  if (!spec.takesValue) {
+    spec.apply(acc, undefined, flag)
+    return index + 1
+  }
+  if (inlineToolProfile === undefined) {
+    spec.apply(acc, takeValue(argv, index, flag), flag)
+    return index + 2
+  }
+  if (inlineToolProfile.value.length === 0)
+    throw new AgentArgsError(`flag '${flag}' requires a value`)
+  spec.apply(acc, inlineToolProfile.value, flag)
+  return index + 1
+}
+
 /**
  * Single linear scan over `argv`, dispatching each loop-head token through
  * {@link FLAG_HANDLERS} (then the dial fan-out, then unknown-flag throw). Pulled
@@ -608,9 +638,7 @@ const scanFlags = (argv: readonly string[]): FlagAcc => {
     }
     // The shipping CLI accepts the conventional `--tool-profile=value` spelling.
     // Keep this exception narrow: every other valued flag remains split-form only.
-    const inlineToolProfile = a.startsWith("--tool-profile=")
-      ? { flag: "--tool-profile", value: a.slice("--tool-profile=".length) }
-      : undefined
+    const inlineToolProfile = inlineToolProfileValue(a)
     const flag = inlineToolProfile?.flag ?? a
 
     // Every token at a loop-head position is a flag (values are consumed via
@@ -620,23 +648,9 @@ const scanFlags = (argv: readonly string[]): FlagAcc => {
 
     // OCP dispatch: a known non-dial flag is a single table entry. Value-taking
     // specs consume argv[i+1] via takeValue (i += 2); boolean specs advance one.
-    const spec = FLAG_HANDLERS[flag]
-    if (spec !== undefined) {
-      if (spec.takesValue) {
-        if (inlineToolProfile !== undefined) {
-          if (inlineToolProfile.value.length === 0) {
-            throw new AgentArgsError(`flag '${flag}' requires a value`)
-          }
-          spec.apply(acc, inlineToolProfile.value, flag)
-          i += 1
-        } else {
-          spec.apply(acc, takeValue(argv, i, flag), flag)
-          i += 2
-        }
-      } else {
-        spec.apply(acc, undefined, flag)
-        i += 1
-      }
+    const nextIndex = applyKnownFlag(acc, argv, i, flag, inlineToolProfile)
+    if (nextIndex !== undefined) {
+      i = nextIndex
       continue
     }
 
