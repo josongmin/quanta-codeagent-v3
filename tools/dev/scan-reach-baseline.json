@@ -448,6 +448,9 @@
     },
     "tests/unit/slice-boundary-config-parity.test.ts#UNIT-ENTRYPOINTS": {
       "walked": 1722
+    },
+    "tests/unit/runtime-config-no-dead-knob-ratchet.test.ts#SRC": {
+      "walked": 3352
     }
   }
 }

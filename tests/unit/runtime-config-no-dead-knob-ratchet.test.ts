@@ -39,6 +39,7 @@ import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { nth } from "../_helpers/expect-present"
+import { assertScanPopulation } from "./_shared/scan-population"
 
 const REPO_ROOT = resolve(import.meta.dir, "../..")
 const SRC = join(REPO_ROOT, "src")
@@ -57,8 +58,9 @@ const isRuntimeConfigSource = (path: string): boolean =>
 
 const isTestFile = (path: string): boolean => path.endsWith(".test.ts")
 
-/** All production .ts under src/ that are neither test nor a runtime-config source. */
-function collectProductionFiles(): string[] {
+/** All non-test source .ts under src/. Production filtering happens after this
+ * raw enumeration so the reach floor measures the actual tree traversal. */
+function collectSourceFiles(): string[] {
   const out: string[] = []
   const walk = (dir: string): void => {
     for (const entry of readdirSync(dir)) {
@@ -67,12 +69,7 @@ function collectProductionFiles(): string[] {
       if (s.isDirectory()) {
         if (entry === "__tests__" || entry === "node_modules") continue
         walk(p)
-      } else if (
-        entry.endsWith(".ts") &&
-        !entry.endsWith(".d.ts") &&
-        !isTestFile(p) &&
-        !isRuntimeConfigSource(p)
-      ) {
+      } else if (entry.endsWith(".ts") && !entry.endsWith(".d.ts") && !isTestFile(p)) {
         out.push(p)
       }
     }
@@ -83,7 +80,13 @@ function collectProductionFiles(): string[] {
 
 // Read every non-runtime-config production file ONCE; keep raw text for member
 // grep and a per-file set of "declared field names" for the homonym test.
-const PROD_FILES = collectProductionFiles()
+const SRC_FILES = collectSourceFiles()
+assertScanPopulation(SRC_FILES, SRC, {
+  collectable: (name) =>
+    name.endsWith(".ts") && !name.endsWith(".d.ts") && !name.endsWith(".test.ts"),
+  id: "tests/unit/runtime-config-no-dead-knob-ratchet.test.ts#SRC",
+})
+const PROD_FILES = SRC_FILES.filter((path) => !isRuntimeConfigSource(path))
 const PROD_SOURCES: { path: string; text: string }[] = PROD_FILES.map((path) => ({
   path,
   text: readFileSync(path, "utf8"),

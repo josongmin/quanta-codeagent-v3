@@ -15,7 +15,6 @@
     "tests/unit/observability/new-slice-metrics-hellgate.test.ts",
     "tests/unit/orphan-orchestrator-ratchet.test.ts",
     "tests/unit/realtime/voice-session-hellgate.test.ts",
-    "tests/unit/runtime-config-no-dead-knob-ratchet.test.ts",
     "tests/unit/runtime/exec-cluster-spawn-env-scrub-ban-hellgate.test.ts",
     "tests/unit/tool-surface-manifest-hellgate.test.ts"
   ],
@@ -439,6 +438,9 @@
     ],
     "tests/unit/slice-boundary-config-parity.test.ts": [
       "tests/unit/slice-boundary-config-parity.test.ts#UNIT-ENTRYPOINTS"
+    ],
+    "tests/unit/runtime-config-no-dead-knob-ratchet.test.ts": [
+      "tests/unit/runtime-config-no-dead-knob-ratchet.test.ts#SRC"
     ]
   }
 }
