@@ -36,7 +36,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { isScanVerdictGuard, scanVerdictGuards } from "@/../tools/dev/anti-vacuity-census"
 import { stripComments } from "@/shared/source-text"
@@ -48,10 +48,12 @@ const MANIFEST = join(REPO_ROOT, "tools", "dev", "scan-migration-manifest.json")
 type DebtFile = {
   readonly unenrolled?: readonly string[]
   readonly externalCorpus?: readonly { readonly file: string; readonly why: string }[]
+  readonly expectedIds?: Readonly<Record<string, readonly string[]>>
 }
 
 const debtFile = (): DebtFile => JSON.parse(readFileSync(DEBT, "utf8")) as DebtFile
 const debtList = (): readonly string[] => debtFile().unenrolled ?? []
+const expectedIds = (): Readonly<Record<string, readonly string[]>> => debtFile().expectedIds ?? {}
 const externalCorpus = (): readonly { readonly file: string; readonly why: string }[] =>
   debtFile().externalCorpus ?? []
 
@@ -90,7 +92,26 @@ const HOST_PATH = /["'`]\/(?:s?bin|usr\/s?bin|usr\/local|etc|opt|proc|sys|var)\b
  * REPORT against `expectedIds` in the debt file. This predicate answers only the
  * cheaper question — has the file been touched at all.
  */
-const isEnrolled = (rel: string): boolean =>
+/**
+ * Enrolled means the file OWNS at least one baseline id, measured.
+ *
+ * Two cheaper predicates were tried and both are wrong. Reading the file for a
+ * call misses the 49 guards that reach the helper through
+ * `slice-boundary-scanner` and name it nowhere. Treating an IMPORT of such a
+ * module as enrollment is too loose in the other direction:
+ * `surface-coupling-ratchet` imports that scanner for `assertWalkFloor`, calls
+ * the population helper never, and reports no id at all — it would have been
+ * marked done while pinning nothing.
+ *
+ * What a file reports at runtime is the only reading with neither error, and
+ * `expectedIds` is that measurement, frozen. `scan-reach` holds it equal to the
+ * baseline and to the live observation in both directions, so an entry here
+ * cannot drift away from what the guards actually do.
+ */
+const isEnrolled = (rel: string): boolean => (expectedIds()[rel] ?? []).length > 0
+
+/** A literal call, which is what a freshly migrated file has before it is pinned. */
+const callsHelper = (rel: string): boolean =>
   /\bassertScanPopulation\s*\(/.test(stripComments(readFileSync(join(REPO_ROOT, rel), "utf8")))
 
 describe("scan enrollment", () => {
@@ -213,6 +234,36 @@ describe("scan enrollment", () => {
     const mention = `// TODO: call assertScan${"Population"} here one day`
     expect(/\bassertScanPopulation\s*\(/.test(stripComments(call))).toBe(true)
     expect(/\bassertScanPopulation\s*\(/.test(stripComments(mention))).toBe(false)
+  })
+
+  test("🔴 a file that CALLS the helper must own an id", () => {
+    // The gap between migrating a guard and pinning its reach. A call with no
+    // baseline row throws at runtime (the closed universe), but a call whose row
+    // exists while no ledger entry claims it is silent: `scan-reach` would never
+    // expect anything from that file, so it stops reporting unnoticed.
+    const orphans = scanVerdictGuards()
+      .filter((f) => callsHelper(f))
+      .filter((f) => !isEnrolled(f))
+      .sort()
+    expect(
+      orphans,
+      orphans.length === 0
+        ? ""
+        : "these call the helper but claim no baseline id in scan-enrollment-debt.json, so " +
+            `nothing notices when they stop reporting:\n  ${orphans.join("\n  ")}`,
+    ).toEqual([])
+  })
+
+  test("🔴 no expectedIds entry names a file that is not enrolled", () => {
+    // The other direction: an entry for a file that no longer calls the helper
+    // pins ids that can never be reported, which reads as coverage and fails as
+    // noise the moment the guard is deleted.
+    const stray = Object.keys(expectedIds())
+      .filter((f) => !existsSync(join(REPO_ROOT, f)))
+      .sort()
+    expect(stray, `these have expectedIds but no longer exist:\n  ${stray.join("\n  ")}`).toEqual(
+      [],
+    )
   })
 
   test("the debt list has no stale entries — an enrolled guard must be removed from it", () => {

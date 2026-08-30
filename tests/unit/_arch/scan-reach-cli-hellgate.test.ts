@@ -132,6 +132,51 @@ describe("scan-reach CLI decision", () => {
     expect(d.lines.join("\n")).toContain("f#two")
   })
 
+  test("🔴 an id no ledger entry OWNS is refused", () => {
+    // The other direction. Checking only "is every expected id observed" leaves a
+    // reported scan that nobody records as owning it, which is a scan no file is
+    // accountable for — exactly the state the ledger exists to prevent.
+    const d = decide({
+      childExit: 0,
+      observed: new Map([
+        ["f#one", { walked: 10 }],
+        ["stranger#x", { walked: 3 }],
+      ]),
+      baseline: baselineOf({ "f#one": { walked: 10 }, "stranger#x": { walked: 3 } }),
+      tighten: false,
+      expectedIds: { "f.test.ts": ["f#one"] },
+    })
+    expect(d.exit).toBe(1)
+    expect(d.lines.join("\n")).toContain("no file in scan-enrollment-debt.json owns")
+  })
+
+  test("🔴 a PINNED row no ledger entry claims is refused", () => {
+    // And the third. A baseline row with no owner is a floor nobody maintains;
+    // when the guard that produced it is deleted the row survives as coverage.
+    const d = decide({
+      childExit: 0,
+      observed: new Map([["f#one", { walked: 10 }]]),
+      baseline: baselineOf({ "f#one": { walked: 10 }, "orphan#y": { walked: 1 } }),
+      tighten: false,
+      expectedIds: { "f.test.ts": ["f#one"] },
+    })
+    expect(d.exit).toBe(1)
+    expect(d.lines.join("\n")).toContain("no ledger entry claims it")
+  })
+
+  test("with NO ledger at all the two new directions stay quiet", () => {
+    // The checks are scoped to a populated ledger on purpose: a caller that
+    // passes no expectedIds is asking the older question, and answering a
+    // question it did not ask would make every such run red for free.
+    const d = decide({
+      childExit: 0,
+      observed: new Map([["f#one", { walked: 10 }]]),
+      baseline: baselineOf({ "f#one": { walked: 10 } }),
+      tighten: false,
+    })
+    expect(d.exit).toBe(0)
+  })
+
   test("PAIRED CONTROL — a file reporting every id it claims passes", () => {
     const observed = new Map([
       ["f#one", { walked: 10 }],

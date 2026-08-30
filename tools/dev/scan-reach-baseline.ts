@@ -216,15 +216,41 @@ export const decide = (run: ReachRun): ReachDecision => {
     }
   }
   const { regressions, unpinned, drops, stale } = verdictFor(run.observed, run.baseline)
-  const missingIds = Object.entries(run.expectedIds ?? {}).flatMap(([file, ids]) =>
-    ids
-      .filter((id) => !run.observed.has(id))
-      .map(
-        (id) =>
-          `${file} is recorded as enrolled for "${id}", but no guard reported it — the scan ` +
-          "was renamed, removed, or never ran",
-      ),
-  )
+  // THREE sets, held equal: what the baseline pins, what the guards reported,
+  // and what the ledger says each enrolled file owns. Checking only one
+  // direction — "is every expected id observed" — left the other two open: an id
+  // reported by a file nobody records as owning it, and a pinned row no ledger
+  // entry claims. Both mean the ledger has stopped describing the tree.
+  const owned = new Map<string, string>()
+  for (const [file, ids] of Object.entries(run.expectedIds ?? {})) {
+    for (const id of ids) owned.set(id, file)
+  }
+  const expectingAnything = owned.size > 0
+  const missingIds = [
+    ...[...owned].flatMap(([id, file]) =>
+      run.observed.has(id)
+        ? []
+        : [
+            `${file} is recorded as enrolled for "${id}", but no guard reported it — the scan ` +
+              "was renamed, removed, or never ran",
+          ],
+    ),
+    ...(expectingAnything
+      ? [...run.observed.keys()].flatMap((id) =>
+          owned.has(id)
+            ? []
+            : [
+                `"${id}" was reported by a guard but no file in scan-enrollment-debt.json owns ` +
+                  "it — an enrolled scan with no ledger entry is one nobody is accountable for",
+              ],
+        )
+      : []),
+    ...(expectingAnything
+      ? Object.keys(run.baseline.scans).flatMap((id) =>
+          owned.has(id) ? [] : [`"${id}" is pinned in the baseline but no ledger entry claims it`],
+        )
+      : []),
+  ]
   const blocking = [
     ...(run.childExit === 0
       ? []
