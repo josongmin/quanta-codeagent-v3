@@ -181,6 +181,16 @@ const parse = (path: string, src: string): ts.SourceFile =>
 const lineOf = (sf: ts.SourceFile, pos: number): number =>
   sf.getLineAndCharacterOfPosition(pos).line + 1
 
+const namedRunAgentImport = (statement: ts.Statement): ts.NamedImports | undefined => {
+  if (!ts.isImportDeclaration(statement) || !ts.isStringLiteralLike(statement.moduleSpecifier))
+    return undefined
+  if (!RUNAGENT_EXPORT_SPECIFIERS.has(statement.moduleSpecifier.text)) return undefined
+  const bindings = statement.importClause?.isTypeOnly
+    ? undefined
+    : statement.importClause?.namedBindings
+  return bindings !== undefined && ts.isNamedImports(bindings) ? bindings : undefined
+}
+
 /**
  * Resolve the LOCAL name(s) that `runAgent` is imported under in this file, from
  * one of the known re-export specifiers. Handles `import { runAgent }`,
@@ -191,13 +201,8 @@ const lineOf = (sf: ts.SourceFile, pos: number): number =>
 const localRunAgentNames = (sf: ts.SourceFile): Set<string> => {
   const names = new Set<string>()
   for (const stmt of sf.statements) {
-    if (!ts.isImportDeclaration(stmt)) continue
-    if (!ts.isStringLiteralLike(stmt.moduleSpecifier)) continue
-    if (!RUNAGENT_EXPORT_SPECIFIERS.has(stmt.moduleSpecifier.text)) continue
-    const clause = stmt.importClause
-    if (!clause || clause.isTypeOnly) continue // whole `import type { ... }`
-    const bindings = clause.namedBindings
-    if (!bindings || !ts.isNamedImports(bindings)) continue
+    const bindings = namedRunAgentImport(stmt)
+    if (bindings === undefined) continue
     for (const el of bindings.elements) {
       if (el.isTypeOnly) continue // per-specifier `{ type runAgent }`
       // `propertyName` is the ORIGINAL export name when aliased (`runAgent as fork`).
@@ -261,35 +266,47 @@ const enumerateSource = (repoRel: string, src: string): CallSite[] => {
     return false
   }
 
+  const isDeclarationName = (node: ts.Identifier): boolean => {
+    const parent = node.parent
+    return (
+      (ts.isVariableDeclaration(parent) && parent.name === node) ||
+      (ts.isFunctionDeclaration(parent) && parent.name === node) ||
+      (ts.isParameter(parent) && parent.name === node) ||
+      (ts.isBindingElement(parent) && parent.name === node) ||
+      (ts.isPropertyAssignment(parent) && parent.name === node) ||
+      ts.isPropertySignature(parent)
+    )
+  }
+
+  const callSite = (node: ts.Node): CallSite | undefined => {
+    if (
+      !ts.isCallExpression(node) ||
+      !ts.isIdentifier(node.expression) ||
+      !names.has(node.expression.text)
+    )
+      return undefined
+    const line = lineOf(sf, node.expression.getStart(sf))
+    seenCallLines.add(line)
+    return { repoRel, line, form: "call" }
+  }
+
+  const valueReference = (node: ts.Node): CallSite | undefined => {
+    if (!ts.isIdentifier(node) || !names.has(node.text)) return undefined
+    const parent = node.parent
+    const isCalleePosition = ts.isCallExpression(parent) && parent.expression === node
+    if (
+      isCalleePosition ||
+      isImportSpecifierName(node) ||
+      isDeclarationName(node) ||
+      inTypeOnlyContext(node)
+    )
+      return undefined
+    return { repoRel, line: lineOf(sf, node.getStart(sf)), form: "value-ref" }
+  }
+
   const visit = (node: ts.Node): void => {
-    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
-      if (names.has(node.expression.text)) {
-        const line = lineOf(sf, node.expression.getStart(sf))
-        seenCallLines.add(line)
-        out.push({ repoRel, line, form: "call" })
-      }
-    } else if (ts.isIdentifier(node) && names.has(node.text)) {
-      // Value-ref: not the callee of a call (handled above), not an import
-      // specifier, not a type position, not a declaration name.
-      const p = node.parent
-      const isCalleePosition = !!p && ts.isCallExpression(p) && p.expression === node
-      const isDeclName =
-        !!p &&
-        ((ts.isVariableDeclaration(p) && p.name === node) ||
-          (ts.isFunctionDeclaration(p) && p.name === node) ||
-          (ts.isParameter(p) && p.name === node) ||
-          (ts.isBindingElement(p) && p.name === node) ||
-          (ts.isPropertyAssignment(p) && p.name === node) ||
-          ts.isPropertySignature(p))
-      if (
-        !isCalleePosition &&
-        !isImportSpecifierName(node) &&
-        !isDeclName &&
-        !inTypeOnlyContext(node)
-      ) {
-        out.push({ repoRel, line: lineOf(sf, node.getStart(sf)), form: "value-ref" })
-      }
-    }
+    const match = callSite(node) ?? valueReference(node)
+    if (match !== undefined) out.push(match)
     ts.forEachChild(node, visit)
   }
   visit(sf)
