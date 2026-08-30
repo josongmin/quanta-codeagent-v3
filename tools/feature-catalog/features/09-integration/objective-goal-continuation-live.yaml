@@ -27,7 +27,7 @@ surface_integration:
   method: audited
   verified: "2026-08-30"
   evidence:
-    cli: "Real PTY boots the source or installed CLI, proves default-ON command discovery, explicit QUANTA_GOAL=0 opt-out, goal create/show, autonomous queue execution, draft/background/foreground quiescence fences, and goal-only quiet-window behavior; a real process kill plus resume-by-id proves the objective — and a clear — survive a restart."
+    cli: "Real PTY boots the source or installed CLI, proves default-ON command discovery, explicit QUANTA_GOAL=0 opt-out, goal create/show, autonomous queue execution, draft/background/foreground quiescence fences, and goal-only quiet-window behavior; a real process kill plus resume-by-id proves the objective — and a clear — survive a restart; a settled attributed turn ANNOUNCES itself, so progress is visible without typing /goal; and the operator can attest a manual criterion (`criterion done`) or free a stuck attempt (`abandon`)."
     web: "Web-daemon composition submits a one-use, authority-validated goal-continuation capability through RuntimeSession.turn.submitGoalContinuation; an integration test proves concurrent user input stays outside the autonomous turn. A real WebSocket client also asks for ONE user-requested goal turn with a `goalWork` frame (peeked before the session bridge, host-minted user-requested-goal-work provenance): a real-daemon e2e proves it charges the user turn budget and mints a receipt without touching the autonomous hard cap, and that every refusal is answered on the same socket."
 purpose: |
   The complete goal preset is enabled by default in CLI and web-daemon roots:
@@ -75,6 +75,9 @@ evidence:
     - src/apps/web-daemon/goal-work-compose.ts
     - src/apps/web-daemon/goal-work-frame.ts
     - src/apps/web-daemon/server.ts
+    - src/apps/cli/repl/goal-checkpoint-line.ts
+    - src/agent/objective-decision.ts
+    - src/objective/budget-limits.ts
     - src/objective/attempt.ts
     - src/kernel/session/scheduler.ts
     - src/kernel/session/ports.ts
@@ -96,11 +99,19 @@ evidence:
       - tests/unit/apps/web-daemon/goal-work-server-wire-hellgate.test.ts
       - tests/unit/apps/web-daemon/objective-ports.test.ts
       - tests/unit/host/objective-settlement-measured-usage.test.ts
+      - tests/unit/host/objective-settlement-checkpoint-emit.test.ts
+      - tests/unit/cli/goal-checkpoint-line.test.ts
+      - tests/unit/cli/goal-manual-attestation.test.ts
+      - tests/unit/cli/goal-abandon-attempt.test.ts
+      - tests/unit/objective/budget-product-ceiling.test.ts
+      - tests/unit/observability/objective-decision-counter.test.ts
+      - tests/unit/session/fork-objective.test.ts
     integration:
       - tests/integration/goal-continuation-live-e2e.test.ts
       - tests/integration/goal-web-submit-daemon-e2e.test.ts
       - tests/integration/goal-work-web-daemon-e2e.test.ts
       - tests/integration/goal-work-ws-daemon-e2e.test.ts
+      - tests/integration/goal-approval-resume-attribution-e2e.test.ts
       - tests/integration/objective-verifier-real-command-e2e.test.ts
     contract:
       - tests/e2e-pty/cli-goal-pursuit-e2e.test.ts
