@@ -227,7 +227,7 @@ export const importClosure = (entry: string): ReadonlySet<string> => {
     // end of the statement however long the list is; the 8,000 ceiling is only a
     // backstop for a file with no semicolons at all.
     for (const m of src.matchAll(
-      /^[ \t]*(?:import|export)\b(?:(?!\bfrom\b)[^;]){0,8000}?\bfrom\s*["'`]([^"'`]+)["'`]/gm,
+      /^[ \t]*(?:import|export)\b[^;]{0,8000}?\bfrom\s*["'`]([^"'`]+)["'`]/gm,
     )) {
       out.push(m[1] ?? "")
     }
