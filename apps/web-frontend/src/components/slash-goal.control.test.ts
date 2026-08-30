@@ -22,8 +22,8 @@
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { buildGoalSlashCommands, type GoalSlashDeps, parseGoalReadout } from "./slash-goal"
 import type { SlashCommand } from "./SlashPalette"
+import { buildGoalSlashCommands, type GoalSlashDeps, parseGoalReadout } from "./slash-goal"
 
 const realFetch = globalThis.fetch
 afterEach(() => {

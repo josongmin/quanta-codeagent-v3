@@ -13,9 +13,9 @@
  */
 
 import { describe, expect, it } from "vitest"
+import type { SessionCommand } from "../types/protocol"
 import { SessionClient, type WebSocketLike } from "./client"
 import { SESSION_PROTOCOL_VERSION } from "./envelope"
-import type { SessionCommand } from "../types/protocol"
 
 class FakeWebSocket implements WebSocketLike {
   readyState = 0

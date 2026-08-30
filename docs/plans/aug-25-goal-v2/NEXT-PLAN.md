@@ -26,7 +26,8 @@
 | P2-5 주인 없는 rail | **DONE**(fork/verify/pause/render 테스트) | `0202570d3` |
 | P2-6 PTY 배터리 | 남음 — 90초 목표 재설정 결정이 선행 |
 | P3-7b 샌드박스 계약 | 남음 — 결정 필요 |
-| ~~웹 objective 컨트롤 생산자 0~~ → 남은 절반 | 읽기·set·work는 랜딩(W1b/W1c). **남음**: pause/resume/clear/edit — `/objective` CLI 동사 묶음이 `QUANTA_PROPOSE_GOAL` 뒤에 있고 웹 UI도 없다. 원문 메모: | 남음(어딧 B가 지적한 최대 누락: 웹은 goal을 읽기만 함). **2차 어딧 결과 진입점이 바뀜**: 가장 싼 첫 쓰기 동사는 `pause`가 아니라 **`goal work`**다 — `client.ts`의 `sendGoalWork`/`onGoalWorkResult`가 이미 구현·단위테스트돼 있고 데몬 반쪽도 e2e로 닫혀 있는데(GOAL-08 rail 15) **컴포넌트 호출자만 0**이다. revision/CAS도 필요 없다. `pause`는 그 다음 |
+| **W1d** 웹 goal 컨트롤 verb | **DONE** — `/goal`이 show·set·work에 더해 `pause`/`resume`/`edit`/`clear`까지. 새 프로토콜·커널·권한 변경 0(USER actor는 정책표에서 이미 허용). 실 WebSocket 데몬 e2e가 create→pause→resume→edit→clear를 **실제 authority**에 대고 검증하고, 진행 중 attempt 아래 정의변경이 `objective:attempt-in-flight`로 거절되며 상태가 안 바뀌는 것까지 고정. 뮤턴트 9/9 RED |
+| 웹 goal 컨트롤 — 남은 것 | **남음**: `abandon`·`unblock`·`budget`·`criterion`·`verify`는 브라우저에 없다. 또한 `pause`는 도는 턴을 취소하지 않고 다음 자율 재개만 막으며, blocked 재개엔 `/goal unblock`(CLI 전용)이 필요하다. 카탈로그는 그래서 `web: partial` 유지 |
 | 웹 읽기 모델 드리프트 | 남음 — 손유지 `apps/web-frontend/src/types/protocol.ts`가 서버에 존재하지 않는 `verificationState`/`verifiedSourceDigest`를 선언하고 `ObservabilityPane.tsx:163`이 **절대 켜질 수 없는 분기**를 렌더한다. 반대로 이미 와이어에 실려 오는 `attempts`/`blockerObservations`/`budget.limitedBy`는 누락. byte-equality 생성기는 `@/protocol/session` 4개 파일만 덮으므로 이 미러는 게이트 밖 |
 | 웹 wake 상태 / 정산 체크포인트 | 남음 — `WebGoalWakeHandle`이 `wake.status()`를 버리고, `objectiveSettlementSink` 조립처가 CLI 1곳뿐이다. 채널은 observability objective 프레임이 맞다(agent-state는 goal 데이터를 0개 나른다). 단 4Hz 델타이므로 카운트다운 숫자가 아니라 `armed│idle(사유)│capped` + 절대 `retryAt`의 거친 모양으로 |
 | 카탈로그 evidence 갱신 | **DONE** — 1차분은 `e6d2adde8`, 2차분(오늘 5개 테스트 + `policy.ts`/`criteria-ops.ts` + readout 슬라이스)은 `53071a855`에 포함. 후자는 자발적 위생이 아니라 `fc check-changed`가 신규 src 파일을 막아서 강제됐다 |
@@ -35,6 +36,18 @@
 | **W1c** 브라우저 `/goal` 동사 | **DONE** — set+work 동시 랜딩. work만 내면 inert였다: 브라우저는 objective를 **만들 수 없다**(모델 create는 게이트 OFF에서 `actor-forbidden`, ON에서 `approval-unavailable` — 둘 다 프로브). 유일한 경로가 host가 USER actor로 바인딩하는 `session.objective.mutate`. 뮤턴트 4/4 RED | `2bd614e04` |
 | **W2** 웹 읽기모델 미러 + 가드 | **DONE** — 유령 2필드 삭제(+죽은 분기와 그걸 단언하던 테스트), 이미 와이어에 오던 `attempts`/`blockerObservations`/`limitedBy` 추가, criterion을 판별 유니온으로. **자체 드리프트 가드** 신설(생성기가 이 미러를 안 덮음). 가드의 공허성 arm이 첫 판(생성 번들을 겨눠 0개 비교)을 즉시 적발. 뮤턴트 4/4 RED | `8842bb30a` |
 | **W3** wake idle 상세(도메인 절반) | **DONE** — `status()`가 정책이 계산한 `retryAt`/`limitedBy`를 버렸다. armed arm의 `armedAt`은 컨트롤러 타입 확장 + 144/150 함수 수술이라 **별도 슬라이스로 분리**. 뮤턴트 4/4 RED | `bc6821811` |
+
+
+### 웹 goal 쓰기의 동시성 의미 (명시적으로 수용한 한계)
+
+브라우저는 `expectedObjectiveRevision`을 보내지 않고, 호스트가 **적용 시점에 읽은** revision으로 CAS한다.
+- 진행 중 attempt 아래 `replace`/`clear` 보호: **있음**(도메인이 `attempt-in-flight`로 거절, e2e로 고정).
+- 유휴 상태에서 CLI와 웹이 동시에 edit: **last-writer-wins**.
+- 운영자가 *보고 있던* 상태 기준의 충돌 검출: **없음**.
+
+이건 "안전하다"가 아니라 **CLI 패리티의 current-state / last-writer-wins 의미를 명시적으로 수용한다**는 뜻이다.
+엄격한 cross-surface 충돌 방지가 필요해지면 readout **페이로드에 구조화된 `objectiveRevision`**을 추가하는 별도 작업이며,
+렌더된 문자열에서 revision을 파싱해서는 안 된다.
 
 
 ### 2차 적대+객관 어딧에서 **반증되어 계획에서 뺀 것** (2026-08-30)

@@ -28,7 +28,7 @@ surface_integration:
   verified: "2026-08-30"
   evidence:
     cli: "Real PTY boots the source or installed CLI, proves default-ON command discovery, explicit QUANTA_GOAL=0 opt-out, goal create/show, autonomous queue execution, draft/background/foreground quiescence fences, and goal-only quiet-window behavior; a real process kill plus resume-by-id proves the objective — and a clear — survive a restart; a settled attributed turn ANNOUNCES itself, so progress is visible without typing /goal; and the operator can attest a manual criterion (`criterion done`) or free a stuck attempt (`abandon`)."
-    web: "Web-daemon composition submits a one-use, authority-validated goal-continuation capability through RuntimeSession.turn.submitGoalContinuation; an integration test proves concurrent user input stays outside the autonomous turn. A real WebSocket client also asks for ONE user-requested goal turn with a `goalWork` frame (peeked before the session bridge, host-minted user-requested-goal-work provenance): a real-daemon e2e proves it charges the user turn budget and mints a receipt without touching the autonomous hard cap, and that every refusal is answered on the same socket. PARTIAL, not full: the browser can now READ the goal (the `/goal` readout, served out-of-band so it answers mid-turn), but it still has no WRITE affordance — `SessionClient.sendGoalWork` / `onGoalWorkResult` ship with no caller, and the ObservabilityPane ObjectiveCard sits behind the default-OFF QUANTA_OBSERVABILITY gate."
+    web: "Web-daemon composition submits a one-use, authority-validated goal-continuation capability through RuntimeSession.turn.submitGoalContinuation; an integration test proves concurrent user input stays outside the autonomous turn. A real WebSocket client also asks for ONE user-requested goal turn with a `goalWork` frame (peeked before the session bridge, host-minted user-requested-goal-work provenance): a real-daemon e2e proves it charges the user turn budget and mints a receipt without touching the autonomous hard cap, and that every refusal is answered on the same socket. PARTIAL, not full. The browser now has a `/goal` command that SHOWS (the out-of-band readout, lease-free so it answers mid-turn), SETS, EDITS, PAUSES, RESUMES, CLEARS and WORKS the goal: the writes ride `session.objective.mutate`, which the host binds to the USER actor and to this session, plus the connection-layer `goalWork` frame. A real-WebSocket daemon e2e drives create/pause/resume/edit/clear against the live authority and pins that a definition change under a started attempt is refused with the authority's own tag. STILL MISSING on the web, which is why this is not `full`: abandon, unblock, budget, criterion and verify have no browser affordance; `pause` stops the next autonomous resume rather than cancelling the running turn; resuming a BLOCKED goal needs `/goal unblock`, which is CLI-only; and the browser sends no `expectedObjectiveRevision`, so concurrent edits from two surfaces are last-writer-wins (the host binds the revision it reads at apply time — atomic, but not optimistic concurrency against what the operator was looking at). The ObservabilityPane ObjectiveCard remains behind the default-OFF QUANTA_OBSERVABILITY gate."
 purpose: |
   The complete goal preset is enabled by default in CLI and web-daemon roots:
   objective tools, budget enforcement, and bounded autonomous continuation.
@@ -89,6 +89,9 @@ evidence:
     - src/objective/core-store/criteria-ops.ts
     - src/apps/web-daemon/readout-compose.ts
     - src/apps/web-daemon/readout.ts
+    - apps/web-frontend/src/components/slash-goal.ts
+    - apps/web-frontend/src/components/slash-catalog.ts
+    - apps/web-frontend/src/ws/session-hooks.ts
   adrs: [394]
   tests:
     unit:
@@ -116,7 +119,13 @@ evidence:
       - tests/unit/cli/goal-budget-limit-visible.test.ts
       - tests/unit/objective/begin-attempt-budget-teeth.test.ts
       - tests/unit/apps/web-daemon/readout-goal-hellgate.test.ts
+      - tests/unit/apps/web-daemon/goal-work-silent-drop-hellgate.test.ts
+      - tests/unit/web-goal-command-wiring-hellgate.test.ts
     integration:
+      - tests/integration/goal-control-ws-daemon-e2e.test.ts
+      - apps/web-frontend/src/components/slash-goal.control.test.ts
+      - apps/web-frontend/src/components/slash-goal.test.ts
+      - apps/web-frontend/src/ws/client-send-truth.test.ts
       - tests/integration/goal-continuation-live-e2e.test.ts
       - tests/integration/goal-web-submit-daemon-e2e.test.ts
       - tests/integration/goal-work-web-daemon-e2e.test.ts

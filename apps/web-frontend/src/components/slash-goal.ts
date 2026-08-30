@@ -43,8 +43,8 @@
  * line and a "did not land" line, which is the honest pair.
  */
 
-import { fetchReadoutBody, type ReadoutEndpoint } from "./slash-readout"
 import type { SlashCommand } from "./SlashPalette"
+import { fetchReadoutBody, type ReadoutEndpoint } from "./slash-readout"
 
 export interface GoalSlashDeps extends ReadoutEndpoint {
   /** Non-optional here: a write that cannot be delivered must be SAID. */
@@ -135,7 +135,8 @@ const CONTROL_VERBS: Readonly<Record<string, ControlVerb>> = {
     takesArgument: true,
     mutation: (argument) => ({ kind: "replace", definition: { goal: argument } }),
     landed: (readout, argument) => readout.present && readout.goal === collapseGoalText(argument),
-    pending: "the goal text did not change — a definition cannot be replaced under a running attempt",
+    pending:
+      "the goal text did not change — a definition cannot be replaced under a running attempt",
   },
 }
 

@@ -80,12 +80,7 @@ describe("web /goal — the control verbs are threaded, not stubbed", () => {
   test("the builder owns the control verbs, not just show/set/work", () => {
     const builder = read(GOAL_BUILDER)
 
-    for (const mutation of [
-      '"setExplicitStatus"',
-      '"clear"',
-      '"replace"',
-      '"create"',
-    ]) {
+    for (const mutation of ['"setExplicitStatus"', '"clear"', '"replace"', '"create"']) {
       expect(builder).toContain(mutation)
     }
   })
