@@ -10,8 +10,8 @@
   },
   "scripts": {
     "build:sdk": "bun build src/sdk/index.ts --outfile dist/sdk/index.js --target node --format esm",
-    "build:protocol": "bun run tools/gen-web-frontend-protocol.ts",
-    "build:protocol:check": "bun run tools/gen-web-frontend-protocol.ts --check",
+    "build:protocol": "bun run tools/gen-web-frontend-protocol.ts && bun run tools/gen-web-frontend-readout-protocol.ts",
+    "build:protocol:check": "bun run tools/gen-web-frontend-protocol.ts --check && bun run tools/gen-web-frontend-readout-protocol.ts --check",
     "build:sdk:types": "bun run tools/dev/build-sdk-types.ts",
     "dev": "bun --hot run src/apps/cli/index.ts",
     "start": "bun run src/apps/cli/index.ts",

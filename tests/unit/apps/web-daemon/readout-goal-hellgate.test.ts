@@ -71,6 +71,12 @@ describe("W1b — /goal is a readout the daemon answers", () => {
     expect(result.wired).toBe(true)
     expect(result.isError).toBe(false)
     expect(result.output.toLowerCase()).toContain("no goal")
+    expect(result.data).toEqual({
+      kind: "goal",
+      revision: 0,
+      validationContract: "missing",
+      objective: null,
+    })
   })
 
   test("a live goal renders the DOMAIN fields the objective projection cannot carry", async () => {
@@ -95,6 +101,19 @@ describe("W1b — /goal is a readout the daemon answers", () => {
     expect(result.output).toContain("rev 1")
     expect(result.output).toContain("manual-only")
     expect(result.output).toContain("0/5 turns")
+    expect(result.data?.objective).toMatchObject({
+      goal: "ship the readout",
+      status: "active",
+      budget: { turnsUsed: 0, tokensUsed: 0, maxTurns: 5 },
+      blockers: [],
+    })
+    expect(result.data?.objective?.objectiveId).toBeString()
+    expect(result.data?.objective?.objectiveId.length).toBeGreaterThan(0)
+    expect(result.data?.objective?.criteria[0]).toMatchObject({
+      kind: "manual",
+      text: "tests pass",
+      met: false,
+    })
   })
 
   test("the accessor is bound to the LIVE session id, not a placeholder", async () => {

@@ -42,6 +42,7 @@
 import type { ContextUsageBreakdown } from "@/agent/context/usage-breakdown"
 import type { Plan, TodoItem } from "@/agent/plan/types"
 import type { ObjectiveDomainSnapshot } from "@/objective"
+import type { GoalReadoutData } from "@/protocol/readout"
 import type {
   CapabilityManifest,
   CostSurfaceViewWire,
@@ -57,6 +58,9 @@ export interface ReadoutResult {
   readonly name: string
   /** Rendered, ANSI-free text body for the web to display. Always non-empty. */
   readonly output: string
+  /** Machine-readable control carrier. Present only for readouts with a
+   *  canonical structured contract; rendered `output` is never parsed for it. */
+  readonly data?: GoalReadoutData | undefined
   /** True only for an UNKNOWN readout name. A recognized-but-pending readout is
    *  NOT an error — it is a graceful "not wired here yet". */
   readonly isError: boolean
@@ -242,6 +246,71 @@ export const renderGoalReadout = (domain: ObjectiveDomainSnapshot, now: number):
     (blockers.length === 0 ? "" : `blockers:\n${blockers.join("\n")}\n`) +
     (objective.nextActions.length === 0 ? "" : `next: ${objective.nextActions[0]}\n`)
   )
+}
+
+/** Project the objective domain onto the browser-safe readout contract. Every
+ *  identity needed by a write is preserved; completion receipts stay host-side. */
+export const toGoalReadoutData = (domain: ObjectiveDomainSnapshot): GoalReadoutData => {
+  const objective = domain.state?.objective
+  return {
+    kind: "goal",
+    revision: domain.revision,
+    // The authority's empty-domain snapshot predates the derived contract and
+    // leaves it undefined. The wire contract is total: absence means missing.
+    validationContract: domain.validationContract ?? "missing",
+    objective:
+      objective === undefined
+        ? null
+        : {
+            objectiveId: objective.objectiveId,
+            goal: objective.goal,
+            status: objective.status,
+            budget: {
+              turnsUsed: objective.budget.turnsUsed,
+              tokensUsed: objective.budget.tokensUsed,
+              ...(objective.budget.maxTurns !== undefined
+                ? { maxTurns: objective.budget.maxTurns }
+                : {}),
+              ...(objective.budget.maxTokens !== undefined
+                ? { maxTokens: objective.budget.maxTokens }
+                : {}),
+              ...(objective.budget.limitedBy !== undefined
+                ? { limitedBy: objective.budget.limitedBy }
+                : {}),
+            },
+            ...(objective.attempts.started !== undefined
+              ? { startedAttemptId: objective.attempts.started.attemptId }
+              : {}),
+            blockers: objective.blockers.map((blocker) => ({
+              id: blocker.id,
+              reason: blocker.reason,
+              waitingOn: blocker.waitingOn,
+            })),
+            criteria: objective.successCriteria.map((criterion) =>
+              criterion.kind === "manual"
+                ? {
+                    id: criterion.id,
+                    kind: "manual" as const,
+                    text: criterion.text,
+                    met: criterion.met,
+                  }
+                : {
+                    id: criterion.id,
+                    kind: "checked" as const,
+                    text: criterion.text,
+                    met: criterion.met,
+                    check: {
+                      id: criterion.check.id,
+                      kind: criterion.check.kind,
+                      argv: criterion.check.argv,
+                      timeoutMs: criterion.check.timeoutMs,
+                      successExitCodes: criterion.check.successExitCodes,
+                      cwdPolicy: criterion.check.cwdPolicy,
+                    },
+                  },
+            ),
+          },
+  }
 }
 
 /** Copy for a source-backed readout whose accessor is absent at runtime —
@@ -489,12 +558,12 @@ export const renderReadout = (name: string, snapshot: SessionSnapshotLite): Read
   return { name: n, output: `unknown readout: ${n || "(empty)"}`, isError: true, wired: false }
 }
 
-const served = (name: string, output: string): ReadoutResult => ({
-  name,
-  output,
-  isError: false,
-  wired: true,
-})
+type LiveReadoutValue = string | { readonly output: string; readonly data: GoalReadoutData }
+
+const served = (name: string, value: LiveReadoutValue): ReadoutResult =>
+  typeof value === "string"
+    ? { name, output: value, isError: false, wired: true }
+    : { name, output: value.output, data: value.data, isError: false, wired: true }
 
 const sourceFailed = (name: string, error: unknown): ReadoutResult => ({
   name,
@@ -539,7 +608,9 @@ const renderMcp = (rows: readonly McpServerRow[]): string => {
  *  which case the caller falls through to the pure renderer's honest
  *  missing-source copy. Returning a promise is allowed (and only the genuinely
  *  async accessors do), so the sync rows stay sync exactly as they were. */
-type LiveReadoutRow = (sources: WebReadoutSources) => string | Promise<string> | undefined
+type LiveReadoutRow = (
+  sources: WebReadoutSources,
+) => LiveReadoutValue | Promise<LiveReadoutValue> | undefined
 
 /** `render(await value)` as one expression, so an ASYNC accessor can live in
  *  the table without making its row an `async` arrow — an `async` row would
@@ -570,8 +641,14 @@ const LIVE_READOUTS: Readonly<Record<(typeof SOURCE_BACKED_READOUTS)[number], Li
   doctor: (s) => (s.doctor === undefined ? undefined : mapAwaited(s.doctor(), renderDoctor)),
   mcp: (s) => (s.mcp === undefined ? undefined : renderMcp(s.mcp())),
   model: (s) => (s.model === undefined ? undefined : mapAwaited(s.model(), renderWebModelReadout)),
-  goal: (s) =>
-    s.goal === undefined ? undefined : renderGoalReadout(s.goal(), s.now?.() ?? Date.now()),
+  goal: (s) => {
+    if (s.goal === undefined) return undefined
+    const domain = s.goal()
+    return {
+      output: renderGoalReadout(domain, s.now?.() ?? Date.now()),
+      data: toGoalReadoutData(domain),
+    }
+  },
 }
 
 /** Narrow an arbitrary readout name onto the table. A unit because it is the

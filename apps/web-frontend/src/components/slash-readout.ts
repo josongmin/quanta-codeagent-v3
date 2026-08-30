@@ -14,6 +14,7 @@
  * stubs for the read-only commands.
  */
 
+import { decodeGoalReadoutData, type GoalReadoutData } from "../types/protocol.readout.generated"
 import type { SlashCommand } from "./SlashPalette"
 
 export interface ReadoutEndpoint {
@@ -83,6 +84,42 @@ export const readReadoutBody = async (
       : undefined
   } catch {
     return undefined
+  }
+}
+
+/** A control-grade `/goal` read. Human text remains available for display, but
+ * mutations consume only the decoded data carrier. In particular, malformed
+ * JSON is not collapsed into an absent objective. */
+export type GoalReadoutResult =
+  | { readonly kind: "served"; readonly output: string; readonly data: GoalReadoutData }
+  | { readonly kind: "unwired"; readonly output: string }
+  | { readonly kind: "malformed"; readonly status: number }
+  | { readonly kind: "network-error"; readonly message: string }
+
+export const readGoalReadout = async (ep: ReadoutEndpoint): Promise<GoalReadoutResult> => {
+  try {
+    const res = await fetch(`${ep.httpUrl.replace(/\/+$/, "")}/readout/goal`, {
+      headers: ep.token !== undefined ? { authorization: `Bearer ${ep.token}` } : {},
+    })
+    const body = (await res.json().catch(() => null)) as {
+      output?: unknown
+      wired?: unknown
+      data?: unknown
+    } | null
+    if (body === null || typeof body.output !== "string" || body.output.length === 0) {
+      return { kind: "malformed", status: res.status }
+    }
+    if (body.wired === false) return { kind: "unwired", output: body.output }
+    if (body.wired !== true) return { kind: "malformed", status: res.status }
+    const data = decodeGoalReadoutData(body.data)
+    return data === null
+      ? { kind: "malformed", status: res.status }
+      : { kind: "served", output: body.output, data }
+  } catch (error) {
+    return {
+      kind: "network-error",
+      message: error instanceof Error ? error.message : String(error),
+    }
   }
 }
 
