@@ -27,6 +27,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
+import { assertScanPopulation } from "./_shared/scan-population"
 
 /** A QUANTA_* env-var read is ALWAYS either quoted (`"QUANTA_X"` — bracket
  *  access / gate-helper arg / `envKey:` decl) or a dot-access (`env.QUANTA_X`,
@@ -349,6 +350,10 @@ const ORPHAN_CEILING = 0
 
 describe("knob-registry completeness ratchet (ADR-0503 P0)", () => {
   test(`orphan QUANTA_* reads (declared nowhere) stay <= ${ORPHAN_CEILING}`, () => {
+    const sourceRoot = join(import.meta.dir, "..", "..", "src")
+    assertScanPopulation([...walk(sourceRoot)], sourceRoot, {
+      id: "tests/unit/knob-registry-completeness-ratchet-hellgate.test.ts#SRC",
+    })
     const { declared, orphans } = scan()
     // biome-ignore lint/suspicious/noConsole: ratchet visibility for reviewers
     console.log(

@@ -424,6 +424,9 @@
     },
     "tests/unit/host/bootstrap-host-extraction-hellgate.test.ts#HOST-BOOTSTRAP": {
       "walked": 11
+    },
+    "tests/unit/knob-registry-completeness-ratchet-hellgate.test.ts#SRC": {
+      "walked": 3357
     }
   }
 }
