@@ -255,6 +255,39 @@ const panelState = (opts: CostPanelOptions) => {
       },
     ]
   > => [...perModel.entries()].sort((a, z) => (a[0] < z[0] ? -1 : a[0] > z[0] ? 1 : 0))
+  const accounting = opts.accounting
+  const authoritative = opts.accountingAuthoritative ?? true
+
+  /** The authority's current numbers, or `undefined` when this panel is not
+   *  the projecting reader (no authority, or shadow). */
+  const projected = (): CostSurfaceView | undefined =>
+    accounting === undefined || !authoritative ? undefined : costSurfaceView(accounting.snapshot())
+
+  /**
+   * The ONE state every read path renders from.
+   *
+   * In projected mode the authority owns the tokens and dollars, and `turns` /
+   * `model` / `sessionStart` stay panel-local. This resolution used to live
+   * only inside `snapshot()`, which left `render()` and `renderDetailed()`
+   * reading the raw `state` — so with an authority wired, the status line said
+   * "n/a · 0 in / 0 out" and the `/cost` header rows were zeros while
+   * `snapshot()` reported the real total. Three readers, one rule, or the rule
+   * is a suggestion.
+   */
+  const effectiveState = (): CostPanelState => {
+    const view = projected()
+    if (view === undefined) return { ...state }
+    return {
+      ...state,
+      inputTokens: view.promptTokens,
+      outputTokens: view.outputTokens,
+      cacheReadTokens: view.cacheReadTokens,
+      // `null` only when nothing has been spent yet — the panel's contract
+      // for "no known-model cost has landed", preserved.
+      totalCostUsd: view.calls === 0 ? null : view.totalUsd,
+    }
+  }
+
   return {
     enabled,
     now,
@@ -265,6 +298,8 @@ const panelState = (opts: CostPanelOptions) => {
     sortedModelEntries,
     accounting: opts.accounting,
     authoritative: opts.accountingAuthoritative ?? true,
+    projected,
+    effectiveState,
   }
 }
 
@@ -277,27 +312,18 @@ type PanelCtx = ReturnType<typeof panelState>
 const accountingOps = (
   ctx: PanelCtx,
 ): Pick<CostPanel, "snapshot" | "byModel" | "incrementTurn"> => {
-  const { enabled, state, sortedModelEntries, accounting, authoritative } = ctx
-  /** The authority's current numbers, or `undefined` when unwired. */
-  const projected = (): CostSurfaceView | undefined =>
-    accounting === undefined || !authoritative ? undefined : costSurfaceView(accounting.snapshot())
+  const {
+    enabled,
+    state,
+    sortedModelEntries,
+    accounting,
+    authoritative,
+    projected,
+    effectiveState,
+  } = ctx
 
   return {
-    snapshot: () => {
-      const view = projected()
-      if (view === undefined) return { ...state }
-      // `turns` and `model` remain panel-local: one is a UI concept the
-      // accountant does not model, the other is the session's label.
-      return {
-        ...state,
-        inputTokens: view.promptTokens,
-        outputTokens: view.outputTokens,
-        cacheReadTokens: view.cacheReadTokens,
-        // `null` only when nothing has been spent yet — the panel's contract
-        // for "no known-model cost has landed", preserved.
-        totalCostUsd: view.calls === 0 ? null : view.totalUsd,
-      }
-    },
+    snapshot: () => effectiveState(),
 
     byModel: () => {
       if (!enabled) return []
@@ -410,7 +436,7 @@ const agentSplitLines = (
 /** Presentation + teardown. Rendering reads the accounting state and never
  *  mutates it. */
 const renderOps = (ctx: PanelCtx): Pick<CostPanel, "render" | "renderDetailed" | "dispose"> => {
-  const { enabled, now, state, sortedModelEntries, accounting, authoritative } = ctx
+  const { enabled, now, sortedModelEntries, accounting, authoritative, effectiveState } = ctx
   /**
    * Per-model rows for `/cost`, from whichever feed owns the numbers.
    *
@@ -447,28 +473,28 @@ const renderOps = (ctx: PanelCtx): Pick<CostPanel, "render" | "renderDetailed" |
   return {
     render: () => {
       if (!enabled) return renderDisabled()
-      const cost = formatUsd(state.totalCostUsd)
-      const turnLabel = `${state.turns} turn${state.turns === 1 ? "" : "s"}`
-      const tokens = `${formatTokens(state.inputTokens)} in / ${formatTokens(state.outputTokens)} out`
-      return `${cost} · ${turnLabel} · ${tokens} · ${state.model}`
+      const s = effectiveState()
+      const cost = formatUsd(s.totalCostUsd)
+      const turnLabel = `${s.turns} turn${s.turns === 1 ? "" : "s"}`
+      const tokens = `${formatTokens(s.inputTokens)} in / ${formatTokens(s.outputTokens)} out`
+      return `${cost} · ${turnLabel} · ${tokens} · ${s.model}`
     },
 
     renderDetailed: () => {
       if (!enabled) return renderDisabled()
-      const duration = formatDuration(now() - state.sessionStart)
+      const s = effectiveState()
+      const duration = formatDuration(now() - s.sessionStart)
       const perTurn =
-        state.totalCostUsd !== null && state.turns > 0
-          ? formatUsd(state.totalCostUsd / state.turns)
-          : "n/a"
+        s.totalCostUsd !== null && s.turns > 0 ? formatUsd(s.totalCostUsd / s.turns) : "n/a"
       const lines = [
         `${padLabel("Duration:")}${duration}`,
-        `${padLabel("Turns:")}${state.turns.toLocaleString("en-US")}`,
-        `${padLabel("Input:")}${state.inputTokens.toLocaleString("en-US")} tok`,
-        `${padLabel("Output:")}${state.outputTokens.toLocaleString("en-US")} tok`,
-        `${padLabel("Cache read:")}${state.cacheReadTokens.toLocaleString("en-US")} tok`,
-        `${padLabel("Total cost:")}${formatUsd(state.totalCostUsd)}`,
+        `${padLabel("Turns:")}${s.turns.toLocaleString("en-US")}`,
+        `${padLabel("Input:")}${s.inputTokens.toLocaleString("en-US")} tok`,
+        `${padLabel("Output:")}${s.outputTokens.toLocaleString("en-US")} tok`,
+        `${padLabel("Cache read:")}${s.cacheReadTokens.toLocaleString("en-US")} tok`,
+        `${padLabel("Total cost:")}${formatUsd(s.totalCostUsd)}`,
         `${padLabel("Per turn avg:")}${perTurn}`,
-        `${padLabel("Model:")}${state.model}`,
+        `${padLabel("Model:")}${s.model}`,
       ]
       // §23.5 — append a per-model breakdown ONLY for heterogeneous sessions
       // (>1 distinct model). A single-model session renders byte-identical to
@@ -490,7 +516,7 @@ const renderOps = (ctx: PanelCtx): Pick<CostPanel, "render" | "renderDetailed" |
       // The question this whole box exists to answer once a session spawns:
       // how much of the bill was the subagents? Rendered ONLY when a subagent
       // actually spent something, so a plain session's box is unchanged.
-      lines.push(...shadowReceiptLines(accounting, authoritative, state))
+      lines.push(...shadowReceiptLines(accounting, authoritative, s))
       lines.push(...agentSplitLines(accounting, authoritative))
       return renderBox(lines, {
         title: "session cost",

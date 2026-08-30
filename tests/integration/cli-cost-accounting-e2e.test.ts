@@ -403,6 +403,25 @@ describe("every CLI cost surface reports the same total", () => {
     expect(detailed).not.toContain("DIVERGES")
   })
 
+  test("the RENDERED status line and /cost header show the projected totals", () => {
+    // The hole this pins: `snapshot()` was projected but `render()` and
+    // `renderDetailed()` read the raw legacy state — so with the authority ON,
+    // the status line said "n/a · 0 in / 0 out" and the /cost header rows were
+    // zeros while snapshot() reported the real total. Asserting snapshot()
+    // alone let that ship; these assertions are on the STRINGS a user sees.
+    const { panel } = runSession()
+    panel.incrementTurn({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 })
+
+    const line = panel.render()
+    expect(line).toContain("$1.50")
+    expect(line).not.toContain("n/a")
+    expect(line).not.toContain("0 in")
+
+    const detailed = panel.renderDetailed()
+    expect(detailed).toContain("600,000 tok") // parent 100k + child 500k
+    expect(detailed).toContain("$1.50")
+  })
+
   test("a hostile model id cannot inject terminal escapes into /cost", () => {
     // The model on a usage event is PROVIDER-supplied text. `state.model` was
     // sanitized at construction, but the per-model bucket keys never were — and
