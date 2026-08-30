@@ -13,7 +13,6 @@
  * emitter of a gauge event silently loses its display.
  */
 import { describe, expect, test } from "bun:test"
-import { TokenBaselineBox } from "@/agent/compaction"
 import { emitUsage } from "@/agent/loop/emit-helpers"
 import { teeUsage } from "@/agent/loop/stream-consume"
 import { buildChildConfig } from "@/agent/subagent-runner-child-config"
@@ -87,15 +86,7 @@ describe("A1 wiring proof — the LOOP stamps the provenance the guard reads", (
       yield { type: "output_progress", outputTokens: 777, exact: true } as StreamEvent
     })()
     // Drain the SHIPPED tee — the only place the loop re-emits the live feed.
-    for await (const _ of teeUsage(
-      config,
-      src,
-      undefined,
-      undefined,
-      undefined,
-      new TokenBaselineBox(),
-      0,
-    )) {
+    for await (const _ of teeUsage(config, src, undefined, undefined, undefined, {}, 0)) {
       // events observed via config.stream
     }
     return events.filter((e) => e.type === "output_progress") as Array<{
