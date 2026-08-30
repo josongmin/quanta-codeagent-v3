@@ -44,6 +44,18 @@ function build(items: readonly TodoItem[]): Readonly<Record<string, TodoItem>> {
   return rec
 }
 
+const tenByTenGridItems = (): TodoItem[] => {
+  const items: TodoItem[] = []
+  for (let layer = 0; layer < 10; layer++) {
+    const dependencies =
+      layer === 0 ? [] : Array.from({ length: 10 }, (_, col) => `L${layer - 1}_C${col}`)
+    for (let col = 0; col < 10; col++) {
+      items.push(todo(`L${layer}_C${col}`, dependencies))
+    }
+  }
+  return items
+}
+
 // ── self-dependency ───────────────────────────────────────────────────────
 
 describe("validateDag: self_dependency", () => {
@@ -308,19 +320,8 @@ describe("perf: 100-node DAG validation under 50ms", () => {
   })
 
   test("topologicalSort on a 100-node 10x10 grid completes under 50ms", () => {
-    const items: TodoItem[] = []
     // 10 layers × 10 wide; each layer depends on all of previous layer
-    for (let layer = 0; layer < 10; layer++) {
-      for (let col = 0; col < 10; col++) {
-        const id = `L${layer}_C${col}`
-        const deps: string[] = []
-        if (layer > 0) {
-          for (let c = 0; c < 10; c++) deps.push(`L${layer - 1}_C${c}`)
-        }
-        items.push(todo(id, deps))
-      }
-    }
-    const plan = build(items)
+    const plan = build(tenByTenGridItems())
     const start = performance.now()
     const out = topologicalSort(plan)
     const elapsed = performance.now() - start
