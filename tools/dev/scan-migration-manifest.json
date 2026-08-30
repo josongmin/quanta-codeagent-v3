@@ -90,22 +90,6 @@
       ]
     },
     {
-      "file": "tests/unit/_arch/gate-manifest-workflow-parity.test.ts",
-      "klass": "B-top-level",
-      "enumerators": [
-        "readdirSync"
-      ],
-      "recursive": false,
-      "absolutePaths": false,
-      "derived": false,
-      "roots": 1,
-      "floorLines": [
-        "177: expect(REQUIRED_GATE_IDS.length).toBeGreaterThanOrEqual(16) // anti-vacuity",
-        "263: expect(steps.length).toBeGreaterThanOrEqual(28)",
-        "269: expect(gatesForStage(\"precommit\").length).toBeGreaterThan(5)"
-      ]
-    },
-    {
       "file": "tests/unit/_arch/repo-index-hygiene.test.ts",
       "klass": "B-top-level",
       "enumerators": [

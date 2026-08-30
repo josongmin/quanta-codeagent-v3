@@ -488,6 +488,9 @@
     "tests/unit/runtime/exec-cluster-spawn-env-scrub-ban-hellgate.test.ts#SRC": {
       "walked": 3357,
       "matched": 3
+    },
+    "tests/unit/_arch/gate-manifest-workflow-parity.test.ts#WORKFLOWS": {
+      "walked": 6
     }
   }
 }
