@@ -26,7 +26,11 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { resolveReadout, SOURCE_BACKED_READOUTS } from "@/apps/web-daemon/readout"
+import {
+  renderGoalReadout,
+  resolveReadout,
+  SOURCE_BACKED_READOUTS,
+} from "@/apps/web-daemon/readout"
 import { buildDaemonReadoutSources } from "@/apps/web-daemon/readout-compose"
 import { createObjectiveAuthority, createObjectiveCapabilities } from "@/objective"
 import type { SessionSnapshotLite } from "@/protocol/session"
@@ -105,6 +109,55 @@ describe("W1b — /goal is a readout the daemon answers", () => {
 
     expect(result.output).not.toContain("not this session's goal")
     expect(result.output.toLowerCase()).toContain("no goal")
+  })
+})
+
+describe("W1b — the readout says what is blocking a definition change", () => {
+  test("a started attempt is rendered, so a refused edit has a visible cause", () => {
+    const { authority } = setup()
+    const caps = createObjectiveCapabilities(authority)
+    caps.user.commit(THREAD, { kind: "create", definition: { goal: "ship the release" } })
+    const objective = authority.get(THREAD)
+    if (objective === null) throw new Error("no objective")
+    caps.system.commit(THREAD, {
+      kind: "beginAttempt",
+      attempt: {
+        objectiveId: objective.objectiveId,
+        attemptId: "attempt-77",
+        provenance: "user-requested-goal-work",
+        executionMode: "foreground",
+        startedRevision: authority.readDomain(THREAD).revision,
+      },
+    })
+
+    const body = renderGoalReadout(authority.readDomain(THREAD), 10_000)
+
+    // Without this line `/goal abandon` has no observable end state, and an
+    // operator whose `edit` was refused `attempt-in-flight` cannot see why.
+    expect(body).toContain("attempt: running")
+    expect(body).toContain("attempt-7")
+  })
+
+  test("PAIRED CONTROL — no attempt in flight renders no attempt line", () => {
+    const { authority } = setup()
+    createObjectiveCapabilities(authority).user.commit(THREAD, {
+      kind: "create",
+      definition: { goal: "ship the release" },
+    })
+
+    const body = renderGoalReadout(authority.readDomain(THREAD), 10_000)
+
+    expect(body).not.toContain("attempt: running")
+  })
+
+  test("a declared budget cap is rendered so an amendment can be observed", () => {
+    const { authority } = setup()
+    createObjectiveCapabilities(authority).user.commit(THREAD, {
+      kind: "create",
+      definition: { goal: "ship the release", budget: { maxTurns: 50 } },
+    })
+
+    expect(renderGoalReadout(authority.readDomain(THREAD), 10_000)).toContain("0/50 turns")
   })
 })
 

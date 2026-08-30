@@ -93,6 +93,9 @@ describe("parseGoalReadout — the readout is parsed, not string-searched", () =
       present: true,
       goal: "ship the release",
       status: "paused",
+      attemptInFlight: false,
+      maxTurns: "∞",
+      maxTokens: "∞",
     })
   })
 
@@ -110,12 +113,100 @@ describe("parseGoalReadout — the readout is parsed, not string-searched", () =
       present: true,
       goal: "ship the release",
       status: "active",
+      attemptInFlight: false,
+      maxTurns: "∞",
+      maxTokens: "∞",
     })
   })
 
   it("an unparseable body is absence, never a confident wrong answer", () => {
     expect(parseGoalReadout("")).toEqual({ present: false })
     expect(parseGoalReadout("something the daemon has never rendered")).toEqual({ present: false })
+  })
+})
+
+describe("parseGoalReadout — the fields a control verb needs to see it land", () => {
+  it("reads a RUNNING attempt, the thing that refuses a definition change", () => {
+    const body = `${GOAL_BODY("ship it")}attempt: running attempt-77\n`
+
+    const readout = parseGoalReadout(body)
+
+    expect(readout.present && readout.attemptInFlight).toBe(true)
+  })
+
+  it("reads the declared budget caps", () => {
+    const body =
+      "goal   ship it\nstatus active · rev 3 · validation manual-only\nbudget 2/50 turns · 10/9000 tokens\n"
+
+    const readout = parseGoalReadout(body)
+
+    expect(readout.present && readout.maxTurns).toBe("50")
+    expect(readout.present && readout.maxTokens).toBe("9000")
+  })
+})
+
+describe("/goal abandon — free a stuck attempt from the browser", () => {
+  it("sends abandonAttempt and waits for the attempt to be gone", async () => {
+    const h = harness()
+    h.bodyRef.current = GOAL_BODY("ship it")
+
+    await run(h.goal, "abandon")
+
+    expect(h.mutations).toEqual([{ kind: "abandonAttempt" }])
+    expect(h.errors).toEqual([])
+  })
+
+  it("an attempt that is STILL running is reported, not called success", async () => {
+    const stuck = `${GOAL_BODY("ship it")}attempt: running attempt-77\n`
+    const h = harness({ readReadout: async () => stuck })
+    h.bodyRef.current = stuck
+
+    await run(h.goal, "abandon")
+
+    expect(h.errors.join("")).not.toBe("")
+  })
+})
+
+describe("/goal budget — raise the cap without leaving the browser", () => {
+  it("parses the CLI's own flag syntax and sends amendBudget", async () => {
+    const h = harness()
+    h.bodyRef.current =
+      "goal   ship it\nstatus active · rev 3 · validation manual-only\nbudget 0/50 turns · 0/∞ tokens\n"
+
+    await run(h.goal, "budget --max-turns=50")
+
+    expect(h.mutations).toEqual([{ kind: "amendBudget", budget: { maxTurns: 50 } }])
+    expect(h.errors).toEqual([])
+  })
+
+  it("both caps at once", async () => {
+    const h = harness()
+    h.bodyRef.current =
+      "goal   ship it\nstatus active · rev 3 · validation manual-only\nbudget 0/5 turns · 0/1000 tokens\n"
+
+    await run(h.goal, "budget --max-turns=5 --max-tokens=1000")
+
+    expect(h.mutations).toEqual([
+      { kind: "amendBudget", budget: { maxTurns: 5, maxTokens: 1000 } },
+    ])
+  })
+
+  it("PAIRED CONTROL — no flags asks for the syntax instead of sending an empty amendment", async () => {
+    const h = harness()
+
+    await run(h.goal, "budget")
+
+    expect(h.mutations).toEqual([])
+    expect(h.errors.join("")).toMatch(/--max-turns/)
+  })
+
+  it("a malformed flag is refused, never guessed at", async () => {
+    const h = harness()
+
+    await run(h.goal, "budget bigger please")
+
+    expect(h.mutations).toEqual([])
+    expect(h.errors.join("")).toMatch(/--max-turns/)
   })
 })
 

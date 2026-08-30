@@ -27,7 +27,7 @@
 | P2-6 PTY 배터리 | 남음 — 90초 목표 재설정 결정이 선행 |
 | P3-7b 샌드박스 계약 | 남음 — 결정 필요 |
 | **W1d** 웹 goal 컨트롤 verb | **DONE** — `/goal`이 show·set·work에 더해 `pause`/`resume`/`edit`/`clear`까지. 새 프로토콜·커널·권한 변경 0(USER actor는 정책표에서 이미 허용). 실 WebSocket 데몬 e2e가 create→pause→resume→edit→clear를 **실제 authority**에 대고 검증하고, 진행 중 attempt 아래 정의변경이 `objective:attempt-in-flight`로 거절되며 상태가 안 바뀌는 것까지 고정. 뮤턴트 9/9 RED |
-| 웹 goal 컨트롤 — 남은 것 | **남음**: `abandon`·`unblock`·`budget`·`criterion`·`verify`는 브라우저에 없다. 또한 `pause`는 도는 턴을 취소하지 않고 다음 자율 재개만 막으며, blocked 재개엔 `/goal unblock`(CLI 전용)이 필요하다. 카탈로그는 그래서 `web: partial` 유지 |
+| 웹 goal 컨트롤 — 남은 것 | `abandon`·`budget`도 랜딩(같은 verb 테이블 한 줄이었다 — 스코프가 아니라 안 한 것이었음). **진짜 남은 것**: `unblock`·`criterion`은 mutation이 blocker/criterion **id**를 요구하는데 readout이 id를 안 실어서 브라우저가 대상을 지목할 수 없다(선행: readout에 id 노출 또는 복수형 mutation). `verify`는 mutation이 아니라 verifier 포트라 별건. 또한 `pause`는 도는 턴을 취소하지 않고 다음 자율 재개만 막으며, blocked 재개엔 `/goal unblock`(CLI 전용)이 필요하다. 카탈로그는 그래서 `web: partial` 유지 |
 | 웹 읽기 모델 드리프트 | 남음 — 손유지 `apps/web-frontend/src/types/protocol.ts`가 서버에 존재하지 않는 `verificationState`/`verifiedSourceDigest`를 선언하고 `ObservabilityPane.tsx:163`이 **절대 켜질 수 없는 분기**를 렌더한다. 반대로 이미 와이어에 실려 오는 `attempts`/`blockerObservations`/`budget.limitedBy`는 누락. byte-equality 생성기는 `@/protocol/session` 4개 파일만 덮으므로 이 미러는 게이트 밖 |
 | 웹 wake 상태 / 정산 체크포인트 | 남음 — `WebGoalWakeHandle`이 `wake.status()`를 버리고, `objectiveSettlementSink` 조립처가 CLI 1곳뿐이다. 채널은 observability objective 프레임이 맞다(agent-state는 goal 데이터를 0개 나른다). 단 4Hz 델타이므로 카운트다운 숫자가 아니라 `armed│idle(사유)│capped` + 절대 `retryAt`의 거친 모양으로 |
 | 카탈로그 evidence 갱신 | **DONE** — 1차분은 `e6d2adde8`, 2차분(오늘 5개 테스트 + `policy.ts`/`criteria-ops.ts` + readout 슬라이스)은 `53071a855`에 포함. 후자는 자발적 위생이 아니라 `fc check-changed`가 신규 src 파일을 막아서 강제됐다 |

@@ -44,7 +44,7 @@ import type { Plan, TodoItem } from "@/agent/plan/types"
 import type { ObjectiveDomainSnapshot } from "@/objective"
 import type { CapabilityManifest, SessionSnapshotLite, SessionStateView } from "@/protocol/session"
 import type { StoreHealthReport } from "@/session"
-import { errMessage } from "@/shared"
+import { errMessage, type ThinClientRoute } from "@/shared"
 import { renderWebModelReadout } from "./web-model-switch"
 
 export interface ReadoutResult {
@@ -115,8 +115,12 @@ export interface WebReadoutSources {
   readonly agents?: () => readonly AgentFleetReadoutRow[]
   /** Current session plan (or null before the agent creates one). */
   readonly plan?: () => Plan | null
-  /** Fresh skills discovery (user dir + bundled system skills). */
-  readonly skills?: () => Promise<readonly { name: string; description: string }[]>
+  /** Fresh skills discovery (user dir + bundled system skills). `route` (ADR-0493,
+   *  G2b-01 wire) is the RESOLVED thin-client route for this surface — present only
+   *  when it routes away from "local" (gate ON + a tagged skill). */
+  readonly skills?: () => Promise<
+    readonly { name: string; description: string; route?: ThinClientRoute }[]
+  >
   /** Recent durable memory entries, newest first (read-only store view). */
   readonly memory?: () => Promise<readonly MemoryReadoutEntry[]>
   /** Cumulative session usage totals. */
@@ -202,7 +206,7 @@ const age = (at: number, now: number): string => {
  *  from importing `@/apps/cli`, and the two surfaces answer different questions
  *  (the CLI line sits under an interactive prompt; this is a standalone page a
  *  person opens mid-turn). */
-const renderGoalReadout = (domain: ObjectiveDomainSnapshot, now: number): string => {
+export const renderGoalReadout = (domain: ObjectiveDomainSnapshot, now: number): string => {
   const objective = domain.state?.objective
   if (objective === undefined) {
     return (
@@ -215,6 +219,7 @@ const renderGoalReadout = (domain: ObjectiveDomainSnapshot, now: number): string
   const remaining = criteria.filter((criterion) => !criterion.met).map((c) => c.text)
   const budget = objective.budget
   const last = domain.progressReceipts?.at(-1)
+  const started = objective.attempts.started
   const blockers = objective.blockers
     .slice(0, 3)
     .map((blocker) => `  - [${blocker.waitingOn}] ${blocker.reason}`)
@@ -232,6 +237,10 @@ const renderGoalReadout = (domain: ObjectiveDomainSnapshot, now: number): string
     (last === undefined
       ? "last attempt: none\n"
       : `last attempt: ${last.turnOutcome} · ${age(last.recordedAt, now)} · rev ${last.objectiveRevisionAfter}\n`) +
+    // The RUNNING attempt, not just the last settled one. Without it `/goal
+    // abandon` has no observable end state, and an operator whose `edit` was
+    // refused `attempt-in-flight` has no way to see why.
+    (started === undefined ? "" : `attempt: running ${started.attemptId}\n`) +
     (blockers.length === 0 ? "" : `blockers:\n${blockers.join("\n")}\n`) +
     (objective.nextActions.length === 0 ? "" : `next: ${objective.nextActions[0]}\n`)
   )
@@ -357,11 +366,17 @@ const renderPlan = (plan: Plan | null): string => {
   return lines.join("\n")
 }
 
-const renderSkillsRows = (rows: readonly { name: string; description: string }[]): string => {
+const renderSkillsRows = (
+  rows: readonly { name: string; description: string; route?: ThinClientRoute }[],
+): string => {
   if (rows.length === 0) return "skills: 0 skills discovered"
   const lines = [`skills: ${rows.length} skill${rows.length === 1 ? "" : "s"} discovered`]
   for (const r of [...rows].sort((a, b) => (a.name < b.name ? -1 : 1))) {
-    lines.push(`  ${r.name.padEnd(24)} ${clampLine(firstLine(r.description), 100)}`)
+    // ADR-0493 — annotate the resolved thin-client route ONLY when it routes
+    // away from local (the producer omits "local"), so the default rendering is
+    // byte-identical when the gate is off or the skill carries no tag.
+    const route = r.route !== undefined ? `  [thin-client: ${r.route}]` : ""
+    lines.push(`  ${r.name.padEnd(24)} ${clampLine(firstLine(r.description), 100)}${route}`)
   }
   return lines.join("\n")
 }

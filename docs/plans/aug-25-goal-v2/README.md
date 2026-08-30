@@ -66,7 +66,7 @@ PTY `cli-goal-pursuit-e2e` 8 pass/1 fail (`uses its own quiet window…`, `No ma
 | GOAL-05 | `currentSourceStale` / 렌더러 `(stale!)` 마커 미구현. RED 8번("`QUANTA_GOAL` 미설정 → `/goal` 미등록")은 default-ON 승격으로 **반전**됐고 테스트가 반대를 단언한다 | `slash/goal-render.ts`, `objective-frontdoor.hellgate.test.ts` |
 | GOAL-06 | CLI의 `attachingOrClosing`은 **상시 false**(`armGoalWake`가 넘기지 않음) → 8개 quiescence 저장소 중 attach/close만 미투영. 렌더러가 `limitedBy`(제한 주체)를 버린다. fire 순서에 reconcile 단계 없음 | `interactive-setup.ts`, `goal-wake-host.ts`, `goal-wake-controller.ts` |
 | GOAL-07 | **`sessionEpoch`·`WakeLifecyclePort`·역순 롤백 전부 미구현**(grep 0). 실제는 objective별 `attachGeneration` 카운터 + 114줄 선형 `attach-session.ts`이고, 순서 보장 7단계는 웹 데몬(`server/thread-hydrate.ts`)에 있다 | `src/objective/authority.ts`, `src/session/attach-session.ts` |
-| GOAL-08 | `session.objective.work` 커맨드·`GoalContinuationAdmissionPort`·프롬프트 digest 바인딩 미구현(대신 out-of-band `goalWork` 프레임 + `turnSubmitAuthority`/`consumeTurnSubmitProvenance` 분리, provenance 4필드). 웹 objective 컨트롤은 2026-08-30에 생산자를 얻었다(`/goal` show·set·work·pause·resume·edit·clear); verify/abandon/unblock/budget/criterion은 여전히 생산자 0 | `goal-work-frame.ts`, `turn-submit-authority.ts`, `apps/web-frontend/**` |
+| GOAL-08 | `session.objective.work` 커맨드·`GoalContinuationAdmissionPort`·프롬프트 digest 바인딩 미구현(대신 out-of-band `goalWork` 프레임 + `turnSubmitAuthority`/`consumeTurnSubmitProvenance` 분리, provenance 4필드). 웹 objective 컨트롤은 2026-08-30에 생산자를 얻었다(`/goal` show·set·work·pause·resume·edit·clear); verify·unblock·criterion은 여전히 생산자 0 | `goal-work-frame.ts`, `turn-submit-authority.ts`, `apps/web-frontend/**` |
 | GOAL-09 | `observeBlocker`는 mutation kind가 아니라 actor 라우팅. `dependencyKey`(host 파생)가 아니라 **모델이 준 문자열의 `JSON.stringify`**이고 레지스트리 조회가 없다 — 티켓 자신의 stop condition("prose가 의존성을 식별") 위반. `occurrenceEvidenceId` 미구현, 등록된 생산자 0 | `blocker-observation.ts`, `policy.ts`, `tool/objective/index.ts` |
 | GOAL-10 | `tests/smoke/goal/` 없음, **텔레메트리 섹션 전부 미구현**(decision counter 0, label allowlist 테스트 0). PTY 배터리 14항목 중 약 5항목만 존재 | `tests/smoke/`, `tests/e2e-pty/cli-goal-pursuit-e2e.test.ts` |
 
@@ -86,7 +86,7 @@ PTY `cli-goal-pursuit-e2e` 8 pass/1 fail (`uses its own quiet window…`, `No ma
 6. **GOAL-03 샌드박스 절반**. 위 표 참조. ROI 중간~높음이지만 "설치 슬롯 계약" 결정으로 이월된 상태 — 되살리려면 결정부터.
 7. **`tests/smoke/goal/`** (GOAL-10). ROI 낮음~중간, 운영 측정.
 8. **headless/batch goal 추적 없음**. GOAL-10 receipt가 명시적으로 claim 밖으로 뒀다(단, stdio door는 default-ON 승격 이후 objective *authority*는 노출한다 — 자율 *추적*만 없다). ROI 낮음.
-9. ~~번들 웹 UI에 goal-work 버튼 없음~~ → **해결**(2026-08-30). `/goal work`가 팔레트에서 `sendGoalWork`를 호출하고 `onGoalWorkResult`를 렌더한다. 잔여는 verify/abandon/unblock/budget/criterion.
+9. ~~번들 웹 UI에 goal-work 버튼 없음~~ → **해결**(2026-08-30). `/goal work`가 팔레트에서 `sendGoalWork`를 호출하고 `onGoalWorkResult`를 렌더한다. 잔여는 verify(별건: verifier 포트)와 unblock/criterion(선행: readout이 blocker/criterion id를 안 실어 대상 지목 불가).
 
 
 ## 순서와 의존

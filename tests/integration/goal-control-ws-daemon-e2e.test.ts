@@ -273,6 +273,56 @@ describe("web goal control — a real client drives the full lifecycle", () => {
     expect(domainOf(authority, thread).revision).toBe(before)
   }, 30_000)
 
+  test("abandon frees a stuck attempt, and the edit that was refused then works", async () => {
+    const { authority, handle, session } = await bootDaemon()
+    const thread = session.sessionId
+    authority.create(thread, { goal: "ship the release", successCriteria: ["c"] })
+    const caps = createObjectiveCapabilities(authority)
+    // A crash between beginAttempt and settlement leaves this behind; from here
+    // the definition can be neither replaced nor cleared.
+    caps.system.commit(thread, {
+      kind: "beginAttempt",
+      attempt: {
+        objectiveId: authority.get(thread)?.objectiveId ?? "",
+        attemptId: "a-stuck",
+        provenance: "user-requested-goal-work",
+        executionMode: "foreground",
+        startedRevision: domainOf(authority, thread).revision,
+      },
+    })
+    const client = await connect(handle, thread)
+
+    client.mutate({ kind: "abandonAttempt" }, "c-abandon")
+    expect(await until(() => authority.get(thread)?.attempts.started === undefined)).toBe(true)
+
+    // The turn really ran, so the reserved turn is NOT refunded — only the lock
+    // is freed. That is the whole contract of abandon.
+    expect(authority.get(thread)?.budget.turnsUsed).toBe(1)
+
+    client.mutate({ kind: "replace", definition: { goal: "ship v2" } }, "c-edit-after")
+    expect(await until(() => authority.get(thread)?.goal === "ship v2")).toBe(true)
+    expect(client.rejected()).toEqual([])
+  }, 30_000)
+
+  test("budget amends the cap the operator declared, and the store keeps the number", async () => {
+    const { authority, handle, session } = await bootDaemon()
+    const thread = session.sessionId
+    authority.create(thread, {
+      goal: "ship the release",
+      successCriteria: ["c"],
+      budget: { maxTurns: 3 },
+    })
+    const client = await connect(handle, thread)
+
+    client.mutate({ kind: "amendBudget", budget: { maxTurns: 50 } }, "c-budget")
+    expect(await until(() => authority.get(thread)?.budget.maxTurns === 50)).toBe(true)
+
+    // Stored VERBATIM — the product ceiling is derived at read time, never
+    // written into the operator's own number.
+    expect(authority.get(thread)?.budget.maxTurns).toBe(50)
+    expect(client.rejected()).toEqual([])
+  }, 30_000)
+
   test("a policy refusal names itself: resuming a goal that has no live objective", async () => {
     const { authority, handle, session } = await bootDaemon()
     const thread = session.sessionId

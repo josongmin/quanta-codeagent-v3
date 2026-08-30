@@ -66,7 +66,18 @@ export interface GoalSlashDeps extends ReadoutEndpoint {
 
 export type GoalReadout =
   | { readonly present: false }
-  | { readonly present: true; readonly goal: string; readonly status: string }
+  | {
+      readonly present: true
+      readonly goal: string
+      readonly status: string
+      /** A RUNNING attempt — the thing that refuses a definition change, and the
+       *  end state `abandon` is asking to clear. */
+      readonly attemptInFlight: boolean
+      /** Rendered verbatim (`"50"` or `"∞"`), so an amendment can be observed
+       *  without this file inventing a number format the daemon does not use. */
+      readonly maxTurns: string
+      readonly maxTokens: string
+    }
 
 const ABSENT: GoalReadout = { present: false }
 
@@ -86,9 +97,34 @@ export const parseGoalReadout = (body: string): GoalReadout => {
   if (body.includes("No goal is set")) return ABSENT
   const goal = /^goal\s+(.+)$/m.exec(body)?.[1]
   const status = /^status\s+(\S+)/m.exec(body)?.[1]
-  return goal === undefined || status === undefined
-    ? ABSENT
-    : { present: true, goal: collapseGoalText(goal), status }
+  if (goal === undefined || status === undefined) return ABSENT
+  const budget = /^budget\s+\d+\/(\S+)\s+turns\s+·\s+\d+\/(\S+)\s+tokens/m.exec(body)
+  return {
+    present: true,
+    goal: collapseGoalText(goal),
+    status,
+    attemptInFlight: /^attempt: running\s+\S+/m.test(body),
+    maxTurns: budget?.[1] ?? "∞",
+    maxTokens: budget?.[2] ?? "∞",
+  }
+}
+
+/** The CLI's own `/goal budget` flag syntax, so an operator does not learn two.
+ *  `null` ⇒ nothing usable was given; the caller SAYS so rather than sending an
+ *  empty amendment. */
+export const parseBudgetFlags = (
+  argument: string,
+): { readonly maxTokens?: number; readonly maxTurns?: number } | null => {
+  const result: { maxTokens?: number; maxTurns?: number } = {}
+  for (const arg of argument.split(/\s+/).filter((a) => a !== "")) {
+    const match = /^--max-(tokens|turns)=(\d+)$/.exec(arg)
+    if (match === null) return null
+    const value = Number(match[2])
+    if (!Number.isSafeInteger(value) || value < 0) return null
+    if (match[1] === "tokens") result.maxTokens = value
+    else result.maxTurns = value
+  }
+  return Object.keys(result).length === 0 ? null : result
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -131,6 +167,12 @@ const CONTROL_VERBS: Readonly<Record<string, ControlVerb>> = {
     landed: (readout) => !readout.present,
     pending: "the goal is still set — a definition cannot be cleared under a running attempt",
   },
+  abandon: {
+    takesArgument: false,
+    mutation: () => ({ kind: "abandonAttempt" }),
+    landed: (readout) => readout.present && !readout.attemptInFlight,
+    pending: "an attempt is still in flight",
+  },
   edit: {
     takesArgument: true,
     mutation: (argument) => ({ kind: "replace", definition: { goal: argument } }),
@@ -139,6 +181,21 @@ const CONTROL_VERBS: Readonly<Record<string, ControlVerb>> = {
       "the goal text did not change — a definition cannot be replaced under a running attempt",
   },
 }
+
+/** `budget` is the one verb whose argument is a flag set rather than free text,
+ *  so it builds its row from the parsed flags instead of sitting in the table. */
+const budgetVerb = (caps: { maxTokens?: number; maxTurns?: number }): ControlVerb => ({
+  takesArgument: true,
+  mutation: () => ({ kind: "amendBudget", budget: caps }),
+  landed: (readout) =>
+    readout.present &&
+    (caps.maxTurns === undefined || readout.maxTurns === String(caps.maxTurns)) &&
+    (caps.maxTokens === undefined || readout.maxTokens === String(caps.maxTokens)),
+  pending: "the budget did not change",
+})
+
+const BUDGET_USAGE =
+  "/goal budget: needs a cap — `/goal budget --max-turns=50` or `--max-tokens=200000` (or both)"
 
 const CREATE_VERB: ControlVerb = {
   takesArgument: true,
@@ -171,6 +228,13 @@ export const parseGoalCommand = (rest: string): GoalCommand => {
     return tail === ""
       ? { kind: "error", message: "/goal work: needs an instruction — `/goal work <what to do>`" }
       : { kind: "work", instruction: tail }
+  }
+
+  if (head === "budget") {
+    const caps = parseBudgetFlags(tail)
+    return caps === null
+      ? { kind: "error", message: BUDGET_USAGE }
+      : { kind: "mutate", verb: budgetVerb(caps), argument: tail }
   }
 
   const verb = CONTROL_VERBS[head]
@@ -242,7 +306,7 @@ export const buildGoalSlashCommands = (deps: GoalSlashDeps): readonly SlashComma
     slug: "goal",
     kind: "local",
     description:
-      "Durable goal — show, set, `work <text>`, `pause`, `resume`, `edit <text>`, `clear`",
+      "Durable goal — show, set, `work`, `pause`, `resume`, `edit`, `budget`, `abandon`, `clear`",
     action: async (rest: string): Promise<string> => {
       const command = parseGoalCommand(rest)
       switch (command.kind) {

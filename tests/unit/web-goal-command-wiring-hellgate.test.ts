@@ -80,7 +80,14 @@ describe("web /goal — the control verbs are threaded, not stubbed", () => {
   test("the builder owns the control verbs, not just show/set/work", () => {
     const builder = read(GOAL_BUILDER)
 
-    for (const mutation of ['"setExplicitStatus"', '"clear"', '"replace"', '"create"']) {
+    for (const mutation of [
+      '"setExplicitStatus"',
+      '"clear"',
+      '"replace"',
+      '"create"',
+      '"abandonAttempt"',
+      '"amendBudget"',
+    ]) {
       expect(builder).toContain(mutation)
     }
   })
@@ -96,6 +103,15 @@ describe("web /goal — the control verbs are threaded, not stubbed", () => {
     // pre-handshake socket.
     expect(body).toMatch(/return client\.send\(/)
     expect(body).not.toMatch(/\n\s*return true\b/)
+  })
+
+  test("budget reuses the CLI's own flag syntax rather than inventing a second one", () => {
+    // Two surfaces, one syntax: an operator who learned `--max-turns=` in the
+    // terminal must not have to learn a different one in the browser.
+    const pattern = "^--max-(tokens|turns)=(\\d+)$"
+
+    expect(read(GOAL_BUILDER)).toContain(pattern)
+    expect(read("src/apps/cli/slash/goal-cmd.ts")).toContain(pattern)
   })
 
   test("an objective refusal is not called a rejected TURN", () => {
