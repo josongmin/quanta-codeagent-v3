@@ -277,6 +277,49 @@ const webObjectiveSnapshot = (
  *  authority, same attributed-attempt slot the session host claims). Either is
  *  `undefined` when its preconditions are absent ⇒ that surface is inert and
  *  byte-identical. Hoisted so `startWebDaemon` stays under the god-fn cap. */
+/**
+ * A7 — the daemon's /cost readout as a PROJECTION of the usage authority.
+ * Turn count is the one event-derived number (an event tally, not a usage
+ * sum); every token/dollar comes from the shared wire mapper so this readout,
+ * the header pill and the CLI /cost cannot disagree. No authority ⇒ honest
+ * zeros plus the tally.
+ */
+const attachDaemonCostProjection = (
+  runtime: unknown,
+  sharedSession: RuntimeSession,
+): { totals: () => CostReadoutTotals; unsub: () => void } => {
+  // Duck-read like readoutSources: the base RuntimeFacade type does not know
+  // daemon-only getters; a facade without one degrades to the honest off shape.
+  const costAuthority = (
+    runtime as {
+      usageAccounting?: import("@/observability/usage-accounting").UsageAccountingPort
+    }
+  ).usageAccounting
+  let turns = 0
+  const unsub = sharedSession.subscribe((event) => {
+    // The only event-derived number: a TURN TALLY (an event count, never a
+    // usage sum — the tokens/dollars all come from the authority below).
+    if (event.type === "turn.completed") turns += 1
+  })
+  return {
+    unsub,
+    totals: (): CostReadoutTotals => {
+      if (costAuthority === undefined) {
+        return { turns, promptTokens: 0, completionTokens: 0, totalTokens: 0, costMicroUsd: 0 }
+      }
+      const wire = costSurfaceViewWire(costAuthority)
+      return {
+        turns,
+        promptTokens: wire.promptTokens,
+        completionTokens: wire.outputTokens,
+        totalTokens: wire.promptTokens + wire.outputTokens,
+        costMicroUsd: Math.round(wire.totalUsd * 1_000_000),
+        ...(wire.modelSlug !== undefined ? { modelSlug: wire.modelSlug } : {}),
+      }
+    },
+  }
+}
+
 /** Tear the two goal surfaces down together: cancel the autonomous wake, then
  *  DRAIN in-flight user goal turns (bounded inside `settled()` — a turn that
  *  never settles must not wedge `stop()`). */
@@ -401,41 +444,9 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
   // a test stub facade simply degrades every readout to the honest
   // missing-source line. `/cost` is folded HERE from the shared session's
   // `turn.completed` events — a daemon-owned source, present for any facade.
-  // A7 — the daemon's cost surface is a PROJECTION of the session's usage
-  // authority (the same instance the loop records into via the base
-  // threading). The old independent turn.completed fold is gone; the ONLY
-  // event-derived number left is the TURN COUNT — an event tally, not a usage
-  // sum. The cumulative snapshot itself rides `turn.completed.costView`,
-  // attached by the HOST, so every client replaces rather than folds.
-  let costTurns = 0
-  // Duck-read like readoutSources: the base RuntimeFacade type does not know
-  // daemon-only getters; a facade without one degrades to the honest off shape.
-  const costAuthority = (
-    runtime as { usageAccounting?: import("@/observability/usage-accounting").UsageAccountingPort }
-  ).usageAccounting
-  const costTotals = (): CostReadoutTotals => {
-    if (costAuthority === undefined) {
-      return {
-        turns: costTurns,
-        promptTokens: 0,
-        completionTokens: 0,
-        totalTokens: 0,
-        costMicroUsd: 0,
-      }
-    }
-    const wire = costSurfaceViewWire(costAuthority)
-    return {
-      turns: costTurns,
-      promptTokens: wire.promptTokens,
-      completionTokens: wire.outputTokens,
-      totalTokens: wire.promptTokens + wire.outputTokens,
-      costMicroUsd: Math.round(wire.totalUsd * 1_000_000),
-      ...(wire.modelSlug !== undefined ? { modelSlug: wire.modelSlug } : {}),
-    }
-  }
-  let costAggregatorUnsub: (() => void) | null = sharedSession.subscribe((event) => {
-    if (event.type === "turn.completed") costTurns += 1
-  })
+  // A7 — /cost + turn tally as ONE projection attachment (see the helper).
+  const cost = attachDaemonCostProjection(runtime, sharedSession)
+  let costAggregatorUnsub: (() => void) | null = cost.unsub
   // P1 Phase 1 — persist the LOSSLESS Message[] transcript to the @/session
   // store (for a later live thread swap), gate-symmetric with the sqlite
   // archive (`threadStore !== null` ⇔ QUANTA_WEB_DB on). Off ⇒ no writes.
@@ -459,7 +470,7 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
   const readoutSources = buildDaemonReadoutSources({
     runtime,
     threadId: sharedSession.sessionId,
-    cost: costTotals,
+    cost: cost.totals,
   })
 
   const { server, boundPort, boundHost } = buildDaemonListener({

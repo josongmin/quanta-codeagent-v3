@@ -90,6 +90,68 @@ const frozenMap = (map: Map<string, Bucket>): ReadonlyMap<string, UsageAggregate
   return out
 }
 
+/** A6 — parse + shape-gate one serialized v1 payload. `undefined` ⇒ corrupt
+ *  (the caller clears the books and marks continuity lost). Module-level so
+ *  the factory closure stays under the god-function ceiling. */
+const parseDurableUsageV1 = (
+  json: string,
+):
+  | {
+      boundSessionId: string | undefined
+      seq: number
+      seen: unknown[]
+      retained: unknown[]
+      total: Bucket
+      byModel: Array<[string, Bucket]>
+      byAgent: Array<[string, Bucket]>
+      byKind: Record<"root" | "subagent", Bucket>
+    }
+  | undefined => {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(json)
+  } catch {
+    return undefined
+  }
+  const d = parsed as {
+    v?: number
+    boundSessionId?: string
+    seq?: number
+    seen?: unknown
+    retained?: unknown
+    total?: Bucket
+    byModel?: Array<[string, Bucket]>
+    byAgent?: Array<[string, Bucket]>
+    byKind?: Record<"root" | "subagent", Bucket>
+  }
+  const sane =
+    d !== null &&
+    typeof d === "object" &&
+    d.v === 1 &&
+    Array.isArray(d.seen) &&
+    Array.isArray(d.retained) &&
+    typeof d.total === "object" &&
+    d.total !== null &&
+    Number.isFinite(d.total.totalUsd) &&
+    typeof d.seq === "number" &&
+    Number.isFinite(d.seq) &&
+    Array.isArray(d.byModel) &&
+    Array.isArray(d.byAgent) &&
+    typeof d.byKind === "object" &&
+    d.byKind !== null
+  if (!sane) return undefined
+  return {
+    boundSessionId: d.boundSessionId,
+    seq: d.seq as number,
+    seen: d.seen as unknown[],
+    retained: d.retained as unknown[],
+    total: d.total as Bucket,
+    byModel: d.byModel as Array<[string, Bucket]>,
+    byAgent: d.byAgent as Array<[string, Bucket]>,
+    byKind: d.byKind as Record<"root" | "subagent", Bucket>,
+  }
+}
+
 /** Every token bucket that participates in a total must be a real number. */
 const isFinitelyCounted = (u: NormalizedUsage, c: UsageCost): boolean =>
   Number.isFinite(u.freshInputTokens) &&
@@ -197,60 +259,22 @@ export const createUsageAccounting = (opts: UsageAccountingOpts = {}): UsageAcco
     hydrate(json: string): boolean {
       // Corrupt or wrong-shape state: the books stay EMPTY and SAY so — a
       // resume proceeds, but never silently as an exact $0.
-      let parsed: unknown
-      try {
-        parsed = JSON.parse(json)
-      } catch {
-        clearBooks()
-        continuityLost = true
-        return false
-      }
-      const d = parsed as {
-        v?: number
-        boundSessionId?: string
-        seq?: number
-        seen?: unknown
-        retained?: unknown
-        total?: Bucket
-        byModel?: Array<[string, Bucket]>
-        byAgent?: Array<[string, Bucket]>
-        byKind?: Record<"root" | "subagent", Bucket>
-      }
-      const sane =
-        d !== null &&
-        typeof d === "object" &&
-        d.v === 1 &&
-        Array.isArray(d.seen) &&
-        Array.isArray(d.retained) &&
-        typeof d.total === "object" &&
-        d.total !== null &&
-        Number.isFinite(d.total.totalUsd) &&
-        typeof d.seq === "number" &&
-        Number.isFinite(d.seq) &&
-        Array.isArray(d.byModel) &&
-        Array.isArray(d.byAgent) &&
-        typeof d.byKind === "object" &&
-        d.byKind !== null
-      if (!sane) {
+      const d = parseDurableUsageV1(json)
+      if (d === undefined) {
         clearBooks()
         continuityLost = true
         return false
       }
       boundSessionId = d.boundSessionId
-      seq = Math.max(0, Math.floor(d.seq as number))
-      seen = new Set((d.seen as unknown[]).filter((x): x is string => typeof x === "string"))
+      seq = Math.max(0, Math.floor(d.seq))
+      seen = new Set(d.seen.filter((x): x is string => typeof x === "string"))
       retained = (d.retained as UsageRecord[]).slice(-maxRetained)
-      total = { ...emptyBucket(), ...(d.total as Bucket) }
-      byModel = new Map(
-        (d.byModel as Array<[string, Bucket]>).map(([k, b]) => [k, { ...emptyBucket(), ...b }]),
-      )
-      byAgent = new Map(
-        (d.byAgent as Array<[string, Bucket]>).map(([k, b]) => [k, { ...emptyBucket(), ...b }]),
-      )
-      const kinds = d.byKind as Record<"root" | "subagent", Bucket>
+      total = { ...emptyBucket(), ...d.total }
+      byModel = new Map(d.byModel.map(([k, b]) => [k, { ...emptyBucket(), ...b }]))
+      byAgent = new Map(d.byAgent.map(([k, b]) => [k, { ...emptyBucket(), ...b }]))
       byKind = {
-        root: { ...emptyBucket(), ...kinds.root },
-        subagent: { ...emptyBucket(), ...kinds.subagent },
+        root: { ...emptyBucket(), ...d.byKind.root },
+        subagent: { ...emptyBucket(), ...d.byKind.subagent },
       }
       continuityLost = false
       return true

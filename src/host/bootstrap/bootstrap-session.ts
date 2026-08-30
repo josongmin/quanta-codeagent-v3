@@ -124,6 +124,21 @@ const buildSessionConfigPort = (cells: {
  * sessions — but nothing renders from it, so the panel keeps folding the
  * counter delta and the user sees exactly what they saw before.
  */
+/** A6+A7 in one wire: hydrate the session's BOOKS (before the first model
+ *  call), then hand the SAME authority to the panel to project. One call at
+ *  the composition site so the assemble body stays under the god-fn cap. */
+const wireCostSurfaces = (
+  deps: SessionBootstrapDeps,
+  runtime: SessionRuntimeConfigShape,
+  featureCfg: SessionFeatureConfig,
+  usageAccounting: SessionBootstrapResult["usageAccounting"],
+  resume: { usageAccounting?: string | undefined; sessionId: string },
+  slog: { warn(msg: string, fields?: Record<string, unknown>): void },
+): ReturnType<SessionBootstrapDeps["buildCostPanelOrUndefined"]> => {
+  hydrateSessionBooks(usageAccounting, resume.usageAccounting, slog, resume.sessionId)
+  return buildProjectingCostPanel(deps, runtime, featureCfg, usageAccounting)
+}
+
 const buildProjectingCostPanel = (
   deps: SessionBootstrapDeps,
   runtime: SessionRuntimeConfigShape,
@@ -134,6 +149,26 @@ const buildProjectingCostPanel = (
   // renders an explicit "accounting off". Shadow (and its receipt) are gone
   // with the legacy feed they compared against.
   deps.buildCostPanelOrUndefined(featureCfg, runtime.model, usageAccounting)
+
+/**
+ * A6 — restore the session's BOOKS before the first model call. Corrupt state
+ * keeps the resume alive with EMPTY books that say so (the authority sets
+ * continuityLost; /cost renders the loss) — never a confident $0.
+ */
+const hydrateSessionBooks = (
+  usageAccounting: SessionBootstrapResult["usageAccounting"],
+  saved: string | undefined,
+  slog: { warn(msg: string, fields?: Record<string, unknown>): void },
+  sessionId: string,
+): void => {
+  if (usageAccounting === undefined || saved === undefined) return
+  if (!usageAccounting.hydrate(saved)) {
+    slog.warn("usage-accounting.resume.corrupt", {
+      sessionId,
+      note: "prior totals could not be restored; starting empty books (continuity lost)",
+    })
+  }
+}
 
 /** Session teardown: stop the MCP fleet, THEN close the session egress proxy on
  *  the SAME hook (the proxy exists ONLY to gate those clients' children, so its
@@ -194,17 +229,6 @@ const assembleBootstrapResult = async (
 
     const resume = await resolveSessionResume(deps, runtime, slog, features, tooling.sessionId)
     const { cwd, idMeta, history, sessionId } = resume
-    // A6 — restore the session's BOOKS before the first model call. Corrupt
-    // state keeps the resume alive with EMPTY books that say so (the authority
-    // sets continuityLost; /cost renders the loss) — never a confident $0.
-    if (usageAccounting !== undefined && resume.usageAccounting !== undefined) {
-      if (!usageAccounting.hydrate(resume.usageAccounting)) {
-        slog.warn("usage-accounting.resume.corrupt", {
-          sessionId,
-          note: "prior totals could not be restored; starting empty books (continuity lost)",
-        })
-      }
-    }
     // RFC-05 E3 (durable resume) — bind the ONE authority now the session id resolved.
     const { permissionModeState, postureControl, questionGuard } = await resolveDurableLivePosture({
       bind: bindLivePosture,
@@ -225,7 +249,7 @@ const assembleBootstrapResult = async (
     } = await buildPromptState(deps, runtime, cwd)
     const onShellEvent = deps.composeShellEvent(features.metrics, runtime.stdoutIsTTY)
     const workMetricsSink = deps.buildWorkMetricsSink(features.metrics !== undefined)
-    const costPanel = buildProjectingCostPanel(deps, runtime, featureCfg, usageAccounting)
+    const costPanel = wireCostSurfaces(deps, runtime, featureCfg, usageAccounting, resume, slog)
     const branchProgress = deps.buildBranchProgressOrUndefined(featureCfg)
     const planStore = deps.buildPlanStoreOrUndefined(featureCfg)
     const sessionConfigPort = buildSessionConfigPort({
