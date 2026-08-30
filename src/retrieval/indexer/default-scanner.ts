@@ -305,9 +305,24 @@ const readFileGuarded = async (
   return { outcome: { mtime: stat.mtimeMs, bytes } }
 }
 
+/** G9-04 fast-path identity: what a bare `stat` reveals about a file, plus the
+ *  sha computed the last time its content was actually read. mtime alone is
+ *  NOT sufficient identity (some editors restore it) — the fast path requires
+ *  BOTH `mtimeMs` and `size` to match, and any signature change falls through
+ *  to the sha-based full path, which stays the authority. */
+interface StatSig {
+  readonly mtimeMs: number
+  readonly size: number
+  readonly sha: string
+}
+
 interface ScanState {
   readonly corpus: Map<string, readonly FileChunk[]>
   readonly tracker: DeltaTracker
+  /** Prior-pass stat signatures — the fast-path cache. Committed only after a
+   *  scan lands (same transaction as tracker/corpus), so a failed upsert pass
+   *  leaves it cold and the next tick re-reads. */
+  readonly statSigs: Map<string, StatSig>
   scanning: boolean
   stopped: boolean
 }
@@ -315,6 +330,7 @@ interface ScanState {
 const newScanState = (): ScanState => ({
   corpus: new Map(),
   tracker: new DeltaTracker(),
+  statSigs: new Map(),
   scanning: false,
   stopped: false,
 })
@@ -324,21 +340,64 @@ interface DoScanOutcome {
   readonly chunksByPath: Map<string, readonly FileChunk[]>
   readonly skipped: Map<string, SkipReason>
   readonly aborted: boolean
+  /** Stat signature of every file observed this pass (fast-pathed or read);
+   *  the driver commits these as the next pass's fast-path cache. */
+  readonly statSigs: Map<string, StatSig>
   /** REL paths of directories whose `readdir` failed this pass. Files beneath
    *  them were never observed, so the driver must not diff them as deletions. */
   readonly unreadableDirs: readonly string[]
 }
 
-/** Single scan pass — walks, reads, chunks. Pure of corpus / tracker
- *  state; the outer driver applies the delta. */
+/** `stat` alone, for the fast-path check. Any failure returns undefined and
+ *  the caller falls through to `readFileGuarded`, which owns the error → skip
+ *  mapping — the fast path must never invent a new failure surface. */
+const tryStatSignature = async (
+  absPath: string,
+): Promise<{ readonly mtimeMs: number; readonly size: number } | undefined> => {
+  try {
+    const st = await fsp.stat(absPath)
+    return { mtimeMs: st.mtimeMs, size: st.size }
+  } catch {
+    return undefined
+  }
+}
+
+/** Fast path (G9-04): when the stat signature (mtimeMs+size) matches the
+ *  prior pass, record the prior sha into `snapshot`/`statSigs` and return
+ *  true — read + hash + chunk are skipped. The stamp is byte-identical to
+ *  what the full path produced last pass, so `DeltaTracker.diff` still
+ *  classifies the file as unchanged and still sees it for deletion diffing.
+ *  Any mismatch (or stat failure) returns false: the sha path is authority. */
+const tookFastPath = async (
+  visit: FileVisit,
+  priorSigs: ReadonlyMap<string, StatSig>,
+  snapshot: Map<string, FileStamp>,
+  statSigs: Map<string, StatSig>,
+): Promise<boolean> => {
+  const prior = priorSigs.get(visit.relPath)
+  if (prior === undefined) return false
+  const sig = await tryStatSignature(visit.absPath)
+  if (sig === undefined || sig.mtimeMs !== prior.mtimeMs || sig.size !== prior.size) return false
+  snapshot.set(visit.relPath, { mtime: prior.mtimeMs, sha: prior.sha })
+  statSigs.set(visit.relPath, prior)
+  return true
+}
+
+/** Single scan pass — walks, reads, chunks. Pure of corpus / tracker state
+ *  (the outer driver applies the delta); `priorSigs` is consulted read-only:
+ *  a file whose stat signature (mtimeMs+size) matches its prior-pass entry is
+ *  fast-pathed — its recorded sha is reused and read/hash/chunk are skipped.
+ *  A changed, new, or unstattable file takes the full sha-authority path. */
 const doScan = async (
   opts: ScannerInternalOpts,
   signal: AbortSignal | undefined,
+  priorSigs: ReadonlyMap<string, StatSig>,
 ): Promise<DoScanOutcome> => {
   const matcher = await loadIgnore(opts.root, opts.honorIgnoreFiles)
   const globRe = globToRegex(opts.glob)
   const snapshot = new Map<string, FileStamp>()
   const chunksByPath = new Map<string, readonly FileChunk[]>()
+  const statSigs = new Map<string, StatSig>()
   const skipped = new Map<string, SkipReason>()
   const cycleSet = new Set<string>()
   const unreadableDirs = new Set<string>()
@@ -359,6 +418,7 @@ const doScan = async (
       aborted = true
       break
     }
+    if (await tookFastPath(visit, priorSigs, snapshot, statSigs)) continue
     const res = await readFileGuarded(visit, opts.maxBytes)
     if ("skip" in res) {
       skipped.set(visit.relPath, res.skip)
@@ -371,6 +431,11 @@ const doScan = async (
     }
     const sha = sha1OfBytes(res.outcome.bytes)
     snapshot.set(visit.relPath, { mtime: res.outcome.mtime, sha })
+    statSigs.set(visit.relPath, {
+      mtimeMs: res.outcome.mtime,
+      size: res.outcome.bytes.byteLength,
+      sha,
+    })
     const chunks = await chunkOneFile(opts, {
       path: visit.relPath,
       text,
@@ -380,7 +445,7 @@ const doScan = async (
     if (chunks.length > 0) chunksByPath.set(visit.relPath, chunks)
   }
   if (signal?.aborted) aborted = true
-  return { snapshot, chunksByPath, skipped, aborted, unreadableDirs: [...unreadableDirs] }
+  return { snapshot, chunksByPath, skipped, aborted, statSigs, unreadableDirs: [...unreadableDirs] }
 }
 
 /** Deletions the scan is ENTITLED to apply. A path under a directory we could
@@ -486,7 +551,12 @@ class DefaultIndexer implements CodebaseIndexer {
     if (scanOpts.signal?.aborted) return err({ kind: "aborted" as const })
     this.st.scanning = true
     try {
-      const out = await doScan(this.opts, scanOpts.signal)
+      // "initial" bypasses the fast-path cache: its contract is a full
+      // read + chunk + upsert of everything observed, and a fast-pathed file
+      // has no chunks in `chunksByPath` to upsert.
+      const priorSigs: ReadonlyMap<string, StatSig> =
+        mode === "delta" ? this.st.statSigs : new Map()
+      const out = await doScan(this.opts, scanOpts.signal, priorSigs)
       if (out.aborted) return err({ kind: "aborted" as const })
       const raw = this.st.tracker.diff(out.snapshot)
       const parts = {
@@ -530,6 +600,11 @@ class DefaultIndexer implements CodebaseIndexer {
     }
     for (const path of deleted) this.st.tracker.delete(path)
     for (const [path, stamp] of out.snapshot) this.st.tracker.put(path, stamp)
+    // Fast-path cache follows the tracker exactly: a path skipped this pass
+    // (and thus diffed as deleted) loses its signature, so a later reappearance
+    // takes the full read path rather than trusting a stale sha.
+    for (const path of deleted) this.st.statSigs.delete(path)
+    for (const [path, sig] of out.statSigs) this.st.statSigs.set(path, sig)
   }
 
   *getCorpus(): Iterable<FileChunk> {

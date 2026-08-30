@@ -7,10 +7,12 @@
  * partitions using `mtime ≠ prev.mtime || sha ≠ prev.sha` as the
  * "modified" predicate.
  *
- * mtime alone is NOT enough (some editors restore mtime); sha alone is
- * fine but the mtime fast-path lets `scanDelta` skip the SHA computation
- * on unchanged files. Combined: skip when both mtime AND sha match (the
- * common-case fast path); re-chunk when sha differs (the slow path).
+ * mtime alone is NOT enough (some editors restore mtime), so this diff
+ * treats `mtime ≠ prev || sha ≠ prev` as modified — sha is the authority.
+ * The read-skipping fast path lives OUTSIDE this class: `doScan` in
+ * `default-scanner.ts` keeps a per-path stat-signature cache (mtimeMs+size
+ * → sha) and skips read/hash/chunk when the signature is unchanged; any
+ * signature change falls through to the full sha path diffed here.
  */
 
 export interface FileStamp {
