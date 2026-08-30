@@ -44,24 +44,19 @@ const conversationText = (input: StreamInput): string =>
 /** Latest task_id + owner_token (S17) seen in any tool_result body — used by
  *  the parent to chain `task_output` / `continue_from` / `task_stop` against
  *  the live values minted by the registry. */
-const findLastTaskFields = (input: StreamInput): { taskId?: string; ownerToken?: string } => {
-  for (let i = input.messages.length - 1; i >= 0; i--) {
-    const m = input.messages[i]
-    if (!m) continue
-    for (const b of m.content) {
-      if (b.type !== "tool_result") continue
-      const taskMatch = b.content.match(/task_id: (\S+)/)
-      const ownerMatch = b.content.match(/owner_token: (\S+)/)
-      if (taskMatch?.[1] || ownerMatch?.[1]) {
-        return {
-          ...(taskMatch?.[1] ? { taskId: taskMatch[1] } : {}),
-          ...(ownerMatch?.[1] ? { ownerToken: ownerMatch[1] } : {}),
-        }
-      }
-    }
-  }
-  return {}
+const taskFieldsFromResult = (content: string): { taskId?: string; ownerToken?: string } => {
+  const taskId = content.match(/task_id: (\S+)/)?.[1]
+  const ownerToken = content.match(/owner_token: (\S+)/)?.[1]
+  return { ...(taskId ? { taskId } : {}), ...(ownerToken ? { ownerToken } : {}) }
 }
+
+const findLastTaskFields = (input: StreamInput): { taskId?: string; ownerToken?: string } =>
+  input.messages
+    .toReversed()
+    .flatMap((message) => message.content)
+    .filter((block) => block.type === "tool_result")
+    .map((block) => taskFieldsFromResult(block.content))
+    .find((fields) => fields.taskId || fields.ownerToken) ?? {}
 
 const rewriteTaskId = (
   e: StreamEvent,

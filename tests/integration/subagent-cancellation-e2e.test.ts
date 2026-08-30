@@ -59,24 +59,19 @@ const conversationText = (input: StreamInput): string =>
 /** Sniff the most recent agent-tool tool_result for `task_id: <id>` and
  *  `owner_token: <token>` (S17). Used by the routing LLM to substitute live
  *  values into scripted tool calls that reference `__PLACEHOLDER__`. */
-const findLastTaskFields = (input: StreamInput): { taskId?: string; ownerToken?: string } => {
-  for (let i = input.messages.length - 1; i >= 0; i--) {
-    const m = input.messages[i]
-    if (!m) continue
-    for (const b of m.content) {
-      if (b.type !== "tool_result") continue
-      const taskMatch = b.content.match(/task_id: (\S+)/)
-      const ownerMatch = b.content.match(/owner_token: (\S+)/)
-      if (taskMatch?.[1] || ownerMatch?.[1]) {
-        return {
-          ...(taskMatch?.[1] ? { taskId: taskMatch[1] } : {}),
-          ...(ownerMatch?.[1] ? { ownerToken: ownerMatch[1] } : {}),
-        }
-      }
-    }
-  }
-  return {}
+const taskFieldsFromResult = (content: string): { taskId?: string; ownerToken?: string } => {
+  const taskId = content.match(/task_id: (\S+)/)?.[1]
+  const ownerToken = content.match(/owner_token: (\S+)/)?.[1]
+  return { ...(taskId ? { taskId } : {}), ...(ownerToken ? { ownerToken } : {}) }
 }
+
+const findLastTaskFields = (input: StreamInput): { taskId?: string; ownerToken?: string } =>
+  input.messages
+    .toReversed()
+    .flatMap((message) => message.content)
+    .filter((block) => block.type === "tool_result")
+    .map((block) => taskFieldsFromResult(block.content))
+    .find((fields) => fields.taskId || fields.ownerToken) ?? {}
 
 /** Replace `__PLACEHOLDER__` task_id / owner_token on tool_use_end events.
  *  Other events pass through unchanged. */
