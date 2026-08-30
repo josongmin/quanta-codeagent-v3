@@ -2,6 +2,7 @@ import type { AgentConfig, AgentMode } from "@/agent"
 import type { Message } from "@/llm"
 import { createCronSlashAdapter } from "@/scheduler"
 import { assembleAutomation } from "@/scheduler/runtime-wire"
+import type { RuntimeSession } from "@/sdk/runtime"
 import type { RuntimeFacadeComposeOptions } from "@/sdk/runtime/context"
 import { errMessage, runtimeConfig } from "@/shared"
 import type { AgentEvent } from "@/stream"
@@ -203,6 +204,42 @@ const buildAutomationCompose = (
   return { liveAutomationSlot, runtimeCompose, activeIdentityModeState, activeToolProfileState }
 }
 
+/** Install both transcript transitions over the same live kernel session.
+ * The identity, persistence target, and accounting authority must move together. */
+const installTranscriptTransitions = (
+  deps: RunSessionLoopDeps,
+  state: LoopStateHolder,
+  session: RuntimeSession,
+): void => {
+  const { setup, registerReplaceMessages, registerSessionSwitch } = deps
+  const replaceTranscript = async (msgs: readonly Message[]): Promise<readonly Message[]> => {
+    const result = await session.transcript.replace(msgs, undefined, { signal: setup.abort.signal })
+    return result.transcript?.messages ?? [...msgs]
+  }
+  installHistoryReplaceWire({
+    registerReplaceMessages,
+    replaceTranscript,
+    commitHistory: (nextHistory) => {
+      state.surfaceState = updateSessionState(state.surfaceState, { history: nextHistory })
+    },
+  })
+  installSessionSwitchWire({
+    registerSessionSwitch,
+    replaceTranscript,
+    idMeta: setup.idMeta,
+    objectiveStore: deps.objectiveStore,
+    usageAccounting: setup.usageAccounting,
+    runtimeSessionId: setup.sessionId,
+    goalWakeSlot: deps.goalWakeSlot,
+    commitSwitch: ({ sessionId, history: switchHistory }) => {
+      state.surfaceState = updateSessionState(state.surfaceState, {
+        sessionId,
+        history: switchHistory,
+      })
+    },
+  })
+}
+
 export const bootstrapSessionLoop = async (
   deps: RunSessionLoopDeps,
   state: LoopStateHolder,
@@ -210,8 +247,6 @@ export const bootstrapSessionLoop = async (
   const {
     setup,
     ux,
-    registerReplaceMessages,
-    registerSessionSwitch,
     registerSideConversationStart,
     registerPlanQueueSendNow,
     playbookSeam,
@@ -219,7 +254,7 @@ export const bootstrapSessionLoop = async (
     searchPipelineDispose,
     notify,
   } = deps
-  const { abort, runtimeContext, state: featureState, idMeta } = setup
+  const { runtimeContext, state: featureState, idMeta } = setup
 
   const { externalPromptQueue, enqueueWithHeartbeat, withInTurnCapture } = buildPromptPlumbing(
     deps,
@@ -288,36 +323,7 @@ export const bootstrapSessionLoop = async (
     }
   })
 
-  // The kernel transcript swap adapter both wiring installs share.
-  const replaceTranscript = async (msgs: readonly Message[]): Promise<readonly Message[]> => {
-    const result = await session.transcript.replace(msgs, undefined, { signal: abort.signal })
-    return result.transcript?.messages ?? [...msgs]
-  }
-  // ADR-0292 — install the `/rewind-conv` swap closure.
-  installHistoryReplaceWire({
-    registerReplaceMessages,
-    replaceTranscript,
-    commitHistory: (nextHistory) => {
-      state.surfaceState = updateSessionState(state.surfaceState, { history: nextHistory })
-    },
-  })
-  // UUX-4-07 — install the `/fork` switch closure. `idMeta` is repointed in
-  // place on switch so the NEXT persist writes under the fork id.
-  installSessionSwitchWire({
-    registerSessionSwitch,
-    replaceTranscript,
-    idMeta,
-    objectiveStore: deps.objectiveStore,
-    usageAccounting: setup.usageAccounting,
-    runtimeSessionId: setup.sessionId,
-    goalWakeSlot: deps.goalWakeSlot,
-    commitSwitch: ({ sessionId, history: switchHistory }) => {
-      state.surfaceState = updateSessionState(state.surfaceState, {
-        sessionId,
-        history: switchHistory,
-      })
-    },
-  })
+  installTranscriptTransitions(deps, state, session)
   // Audit R1 C-F1: attachPlaybookHandle() allocates a filesystem watcher that
   // can throw in the same init gap — guardInit drains on throw so the facade +
   // session don't leak.
