@@ -108,6 +108,32 @@ type DeltaWm = import("@/memory").WorkingMemory<Message> & {
   tokenReseed?(): void
 }
 
+const runTokenCounterFuzz = (wm: DeltaWm): void => {
+  let seed = 0x1234_5678 >>> 0
+  const random = (): number => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0
+    return seed / 0x100000000
+  }
+  for (let iteration = 0; iteration < 400; iteration++) {
+    const operation = Math.floor(random() * 4)
+    const length = 1 + Math.floor(random() * 80)
+    if (operation === 0) wm.append(userText("a".repeat(length)))
+    else if (operation === 1) wm.append(assistantText("b".repeat(length)))
+    else if (operation === 2)
+      wm.replace([userText("r".repeat(length)), assistantText("s".repeat(length))])
+    else {
+      const snapshot = [...wm.snapshot()]
+      if (snapshot.length > 0) {
+        wm.messages[0] = userText("c".repeat(length))
+        wm.tokenReseed?.()
+      }
+    }
+    const snapshot = [...wm.snapshot()]
+    expect(wm.tokenTotal?.()).toBe(estimateTokens(snapshot))
+    expect(estimateTokens(snapshot)).toBe(Math.ceil(charsOf(snapshot) / 4))
+  }
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // (a) ON ⇒ real composition root decorates wm; total() ≡ estimateTokens always
 // ════════════════════════════════════════════════════════════════════════════
@@ -151,37 +177,7 @@ describe("createRunAgentContext wires the delta counter (knob ON)", () => {
       const ctx = await createRunAgentContext(
         baseCfg({ llm: new ScriptedLLM([]), messages: [userText("seed")] }),
       )
-      const wm = ctx.wm as DeltaWm
-      // Deterministic LCG (no Math.random).
-      let s = 0x1234_5678 >>> 0
-      const rng = (): number => {
-        s = (Math.imul(s, 1664525) + 1013904223) >>> 0
-        return s / 0x100000000
-      }
-      for (let i = 0; i < 400; i++) {
-        const op = Math.floor(rng() * 4)
-        const len = 1 + Math.floor(rng() * 80)
-        if (op === 0) {
-          wm.append(userText("a".repeat(len)))
-        } else if (op === 1) {
-          wm.append(assistantText("b".repeat(len)))
-        } else if (op === 2) {
-          // replace with a fresh small set (reseed).
-          wm.replace([userText("r".repeat(len)), assistantText("s".repeat(len))])
-        } else {
-          // out-of-band rewrite of message 0 (if any), then reseed.
-          const snap = [...wm.snapshot()]
-          if (snap.length > 0) {
-            wm.messages[0] = userText("c".repeat(len))
-            wm.tokenReseed?.()
-          }
-        }
-        // Invariant after every mutation: memoized total === full re-scan.
-        const snap = [...wm.snapshot()]
-        expect(wm.tokenTotal?.()).toBe(estimateTokens(snap))
-        // And the pre-ceil contract: ceil(charsOf/4) === estimateTokens.
-        expect(estimateTokens(snap)).toBe(Math.ceil(charsOf(snap) / 4))
-      }
+      runTokenCounterFuzz(ctx.wm as DeltaWm)
     })
   })
 })
