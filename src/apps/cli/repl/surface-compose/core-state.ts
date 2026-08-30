@@ -212,17 +212,11 @@ const buildModelSurface = (
   }
 }
 
-export const buildSurfaceCoreState = (
+const buildShadowSurface = (
   setup: SessionSetupResult,
   env: NodeJS.ProcessEnv,
   convStore: ConversationCheckpointStore,
 ) => {
-  const mode = buildModeWire(setup, env)
-  let workingStateGet: (() => WorkingState | undefined) | undefined
-  let skillScopeGet: (() => SkillScopeView | undefined) | undefined
-  let lastStreamInput: StreamInput | undefined
-  const { retryCandidates, stickyModel, routing, modelCatalog, liveMode, pickedModel } =
-    buildModelSurface(setup, env, mode.store)
   const shadowOdb: ShadowOdb | undefined = isEnvTruthy(env.QUANTA_SHADOW)
     ? defaultShadowOdb()
     : undefined
@@ -237,6 +231,15 @@ export const buildSurfaceCoreState = (
   const shadowVerify = isEnvTruthy(env.QUANTA_SHADOW_VERIFY)
     ? createShadowVerify(createShadowVerifyAdapters(setup.cwd))
     : undefined
+  return { shadowOdb, perToolCkpt, shadowVerify }
+}
+
+const buildOperationalSurface = (
+  setup: SessionSetupResult,
+  env: NodeJS.ProcessEnv,
+  convStore: ConversationCheckpointStore,
+) => {
+  const shadow = buildShadowSurface(setup, env, convStore)
   const objectiveStore = resolveGatedObjectiveAuthority(env, {
     confirmationAvailable: true,
     ...(setup.restoredObjective !== undefined ? { restoreFrom: setup.restoredObjective } : {}),
@@ -251,19 +254,10 @@ export const buildSurfaceCoreState = (
           evidence: createWorkspaceEvidence(),
           workspaceCwd: setup.cwd,
         })
-  // One session holder, produced for either consumer. The agent loop remains
-  // the sole writer. Goal pursuit only needs it when both its continuation
-  // gate and its objective authority are present; otherwise no active-turn
-  // state is allocated on the default path.
   const goalPursuit = goalPursuitEnabled(env, objectiveStore)
-  const turnActivityRequired = isEnvTruthy(env.QUANTA_CONVERSATION_ACTIONS) || goalPursuit
-  const turnActivity = turnActivityRequired ? createTurnActivity() : undefined
-  // GOAL-04 — the host-owned attributed-attempt slot exists only when goal
-  // pursuit is composed (the wake controller claims it before each attributed turn).
+  const turnActivity =
+    isEnvTruthy(env.QUANTA_CONVERSATION_ACTIONS) || goalPursuit ? createTurnActivity() : undefined
   const objectiveAttemptSlot = goalPursuit ? createObjectiveAttemptSlot() : undefined
-  // GOAL-05A rail 16 — announce each settled attributed turn on this surface.
-  // Composed with the slot (same gate): no goal pursuit ⇒ no sink ⇒ silent,
-  // byte-identical.
   const objectiveSettlementSink = goalPursuit
     ? buildGoalCheckpointSink((line) => process.stderr.write(line))
     : undefined
@@ -272,16 +266,42 @@ export const buildSurfaceCoreState = (
     isEnvTruthy(env.QUANTA_CONVERSATION_ACTIONS) && turnActivity !== undefined
       ? createConversationActionSurface(turnActivity.activeTurnRef)
       : undefined
-  const interruptedTurnBuffer =
-    conversationActions === undefined ? undefined : createInterruptedTurnBuffer()
-  const inboundMode: { current: InboundMode } = {
-    current: parseInboundMode(env.QUANTA_INBOUND_MODE) ?? "queue",
+  return {
+    ...shadow,
+    objectiveStore,
+    objectiveVerification,
+    conversationActions,
+    turnActivity,
+    objectiveAttemptSlot,
+    objectiveSettlementSink,
+    goalWakeSlot,
+    interruptedTurnBuffer:
+      conversationActions === undefined ? undefined : createInterruptedTurnBuffer(),
+    inboundMode: { current: parseInboundMode(env.QUANTA_INBOUND_MODE) ?? "queue" } as {
+      current: InboundMode
+    },
+    backgroundPortal: gateOn(env, BG_TURN_ENV_GATE) ? createBackgroundTurnPortal() : undefined,
+    radarStore: buildRadarStore(env) as RadarStore | undefined,
+    browserNetHolder: gateOn(env, "QUANTA_BROWSER_NETWORK") ? createBrowserNetHolder() : undefined,
   }
-  const backgroundPortal = gateOn(env, BG_TURN_ENV_GATE) ? createBackgroundTurnPortal() : undefined
-  const radarStore: RadarStore | undefined = buildRadarStore(env)
-  const browserNetHolder = gateOn(env, "QUANTA_BROWSER_NETWORK")
-    ? createBrowserNetHolder()
-    : undefined
+}
+
+export const buildSurfaceCoreState = (
+  setup: SessionSetupResult,
+  env: NodeJS.ProcessEnv,
+  convStore: ConversationCheckpointStore,
+) => {
+  const mode = buildModeWire(setup, env)
+  let workingStateGet: (() => WorkingState | undefined) | undefined
+  let skillScopeGet: (() => SkillScopeView | undefined) | undefined
+  let lastStreamInput: StreamInput | undefined
+  const { retryCandidates, stickyModel, routing, modelCatalog, liveMode, pickedModel } =
+    buildModelSurface(setup, env, mode.store)
+  const operational = buildOperationalSurface(setup, env, convStore)
+  // One session holder, produced for either consumer. The agent loop remains
+  // the sole writer. Goal pursuit only needs it when both its continuation
+  // gate and its objective authority are present; otherwise no active-turn
+  // state is allocated on the default path.
 
   return {
     modeCycleStore: mode.store,
@@ -314,20 +334,8 @@ export const buildSurfaceCoreState = (
       lastStreamInput = input
     },
     lastStreamInput: () => lastStreamInput,
-    shadowOdb,
-    perToolCkpt,
-    shadowVerify,
+    ...operational,
     onPreCompact: buildPreCompactHook(setup, env),
-    conversationActions,
-    turnActivity,
-    objectiveAttemptSlot,
-    objectiveSettlementSink,
-    goalWakeSlot,
-    interruptedTurnBuffer,
-    inboundMode,
-    backgroundPortal,
-    radarStore,
-    browserNetHolder,
     // RFC-03 H1 — the objective authority is resolved through the ONE gated
     // surface builder: PRESENT only under `QUANTA_OBJECTIVE_TOOLS` (else undefined
     // ⇒ `/goal` prints its not-wired posture + no `objective_*` tools, matching
@@ -345,8 +353,6 @@ export const buildSurfaceCoreState = (
     // so the reopened authority reconstructs the goal / criterion-ids / revision /
     // provenance. Absent (fresh / legacy / no-objective) ⇒ a fresh empty authority
     // (byte-identical legacy).
-    objectiveStore,
-    objectiveVerification,
     presetResolver: createStickyPresetResolver(),
   }
 }
