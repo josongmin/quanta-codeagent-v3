@@ -535,6 +535,15 @@
     },
     "tests/unit/observability/new-slice-metrics-hellgate.test.ts#SRC": {
       "walked": 3357
+    },
+    "tests/unit/apps/bench/terminal/tb-2-0-retirement.test.ts#SRC": {
+      "walked": 3744
+    },
+    "tests/unit/apps/bench/terminal/tb-2-0-retirement.test.ts#TOOLS": {
+      "walked": 1368
+    },
+    "tests/unit/apps/bench/terminal/tb-2-0-retirement.test.ts#ADAPTERS": {
+      "walked": 15
     }
   }
 }
