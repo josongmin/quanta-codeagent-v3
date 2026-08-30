@@ -11,7 +11,6 @@
     "tests/unit/apps/bench/promax/promax-port-contract-unsuppressed.test.ts",
     "tests/unit/apps/bench/terminal/tb-2-0-retirement.test.ts",
     "tests/unit/cli/cli-feature-gates-drift-hellgate.test.ts",
-    "tests/unit/feature-catalog-reachability.test.ts",
     "tests/unit/no-benchmark-overfit-steer-ratchet.test.ts",
     "tests/unit/no-raw-nul-bytes-hellgate.test.ts",
     "tests/unit/observability/new-slice-metrics-hellgate.test.ts",
@@ -432,6 +431,9 @@
     "tests/unit/lint-debt-ratchet-reach.test.ts": [
       "tests/unit/lint-debt-ratchet-reach.test.ts#SRC",
       "tests/unit/lint-debt-ratchet-reach.test.ts#TESTS"
+    ],
+    "tests/unit/feature-catalog-reachability.test.ts": [
+      "tests/unit/feature-catalog-reachability.test.ts#FEATURE-YAMLS"
     ]
   }
 }

@@ -436,6 +436,9 @@
     },
     "tests/unit/lint-debt-ratchet-reach.test.ts#TESTS": {
       "walked": 3721
+    },
+    "tests/unit/feature-catalog-reachability.test.ts#FEATURE-YAMLS": {
+      "walked": 1068
     }
   }
 }
