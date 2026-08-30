@@ -118,13 +118,21 @@ describe("GOAL-08 rail 15 — web goal-work server wire", () => {
     ])
   })
 
-  test("NOT COMPOSED: the frame falls through to the adapter, byte-identical", () => {
+  // REVERSED (2026-08-30): this used to assert the not-composed frame falls
+  // through "byte-identical". That looked conservative and was a silent drop —
+  // the adapter's decoder cannot read a `goalWork` frame (no transport kind, no
+  // version), so it landed on the floor while the client, which has no timeout,
+  // waited forever. A frame this daemon owns is answered even when the answer is
+  // "not composed here". See goal-work-silent-drop-hellgate.test.ts.
+  test("NOT COMPOSED: the frame is answered, not dropped on the adapter floor", () => {
     const { adapter, pushed } = spyAdapter()
     const { ws, sent } = fakeWs(adapter)
-    const raw = frame("fix the flake")
-    buildHandlers(undefined).message(ws, raw)
-    expect(pushed).toEqual([raw])
-    expect(sent).toEqual([])
+    buildHandlers(undefined).message(ws, frame("fix the flake"))
+    expect(pushed).toEqual([])
+    const answers = sent.map((raw) => JSON.parse(raw) as Record<string, unknown>)
+    expect(answers).toHaveLength(1)
+    expect(answers[0]).toMatchObject({ kind: "goalWorkResult", ok: false })
+    expect(String(answers[0]?.reason)).toMatch(/not composed/i)
   })
 
   test("NON-MATCH: a foreign frame is forwarded even when the handler is wired (no frame stealing)", () => {

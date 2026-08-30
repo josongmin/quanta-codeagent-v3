@@ -28,6 +28,26 @@ export interface GoalWorkRequest {
   readonly requestId?: string
 }
 
+/** Is this frame OURS at all? Independent of whether the request inside it is
+ *  usable. The distinction is load-bearing: a frame we do not own must fall
+ *  through to the session bridge untouched, while a frame we DO own must be
+ *  answered even when its payload is unusable — otherwise the client, which has
+ *  no timeout, waits forever for an ack that is never coming. Returns the
+ *  correlation id (when the client sent one) so the refusal can carry it. */
+export const peekGoalWorkEnvelope = (raw: string): { readonly requestId?: string } | null => {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw) as unknown
+  } catch {
+    return null
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return null
+  const obj = parsed as Record<string, unknown>
+  if (obj.kind !== "goalWork") return null
+  const requestId = obj.requestId
+  return typeof requestId === "string" && requestId.length > 0 ? { requestId } : {}
+}
+
 export const peekGoalWork = (raw: string): GoalWorkRequest | null => {
   let parsed: unknown
   try {

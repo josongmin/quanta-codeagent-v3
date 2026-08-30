@@ -140,13 +140,21 @@ describe("GOAL-08 rail 15 — web goal work", () => {
     expect(String(replies()[0]?.reason)).toContain("too long")
   })
 
-  test("no handler composed (gate off) or a foreign frame ⇒ NOT consumed (falls through byte-identically)", async () => {
+  // REVERSED (2026-08-30): the not-composed case used to fall through
+  // "byte-identically", which was a silent drop — the adapter cannot decode a
+  // `goalWork` frame, and the client has no timeout. A frame this daemon owns is
+  // answered; only a FOREIGN frame falls through.
+  test("no handler composed ⇒ answered; a foreign frame ⇒ NOT consumed (falls through)", async () => {
     const { goalWork } = await harness()
-    const { ws } = fakeWs()
-    const { ws: ws2, replies } = fakeWs()
-    expect(consumeGoalWorkFrame(ws2, {}, frame("x"))).toBe(false)
-    expect(consumeGoalWorkFrame(ws2, { goalWork }, JSON.stringify({ kind: "connect" }))).toBe(false)
-    expect(replies()).toEqual([]) // nothing answered, nothing dispatched
-    void ws
+    const { ws: notComposed, replies: notComposedReplies } = fakeWs()
+    expect(consumeGoalWorkFrame(notComposed, {}, frame("x"))).toBe(true)
+    expect(notComposedReplies()).toHaveLength(1)
+    expect(notComposedReplies()[0]).toMatchObject({ kind: "goalWorkResult", ok: false })
+
+    const { ws: foreign, replies: foreignReplies } = fakeWs()
+    expect(consumeGoalWorkFrame(foreign, { goalWork }, JSON.stringify({ kind: "connect" }))).toBe(
+      false,
+    )
+    expect(foreignReplies()).toEqual([])
   })
 })

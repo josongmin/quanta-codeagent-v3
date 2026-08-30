@@ -21,7 +21,7 @@ import type { RuntimeSession } from "@/sdk/runtime"
 import { errMessage, logger } from "@/shared"
 import { peekControlRequest } from "../control-request-frame"
 import { peekFollowerVerb } from "../follower-verb-frame"
-import { peekGoalWork } from "../goal-work-frame"
+import { peekGoalWork, peekGoalWorkEnvelope } from "../goal-work-frame"
 import type { WebDaemonServerConfig } from "../server"
 import type { RegisteredSession, SessionRegistry } from "../session-registry"
 import { SUBAGENT_WS_TOPIC } from "../subagent-source"
@@ -213,30 +213,41 @@ const consumeFollowerVerbFrame = (
 /**
  * GOAL-08 rail 15 (web half) — peek + CONSUME a `goalWork` frame: ONE
  * user-requested goal turn on the live session (the web `/goal work`). Returns
- * `true` when the frame was a well-formed request (⇒ do NOT forward it to the
- * bridge), else `false`. No handler composed ⇒ always `false` and the frame
- * reaches the bridge (byte-identical).
+ * `true` when the frame was OURS (⇒ do NOT forward it to the bridge), else
+ * `false`.
  *
  * Every outcome — including a refusal — is answered on the REQUESTING socket
  * (`goalWorkResult`): a request that cannot be claimed is never accepted and
  * then silently dropped.
+ *
+ * REVERSED (2026-08-30): this used to `return false` when no handler was
+ * composed, or when the text was blank, and let the frame "fall through to the
+ * bridge (byte-identical)". That reads as conservative and is not: the frame
+ * carries no transport kind, so the bridge's decoder returns `undefined` and
+ * drops it, and it carries no recognizable version either, so the lenient reject
+ * path mints nothing. The client, whose `sendGoalWork` returns `true` on a
+ * successful write and has no timeout, then waits forever. Falling through is
+ * only right for a frame this daemon does not own; `kind:"goalWork"` is
+ * unambiguously ours, so both cases are refusals — and a refusal is a thing you
+ * say out loud.
  */
 export const consumeGoalWorkFrame = (
   ws: Pick<ServerWebSocket<WSData>, "send"> & { readonly data?: Pick<WSData, "registered"> },
   config: Pick<WebDaemonServerConfig, "goalWork">,
   raw: string,
 ): boolean => {
-  const handler = config.goalWork
-  if (handler === undefined) return false
+  const envelope = peekGoalWorkEnvelope(raw)
+  if (envelope === null) return false
   const request = peekGoalWork(raw)
-  if (request === null) return false
+  const requestId = request?.requestId ?? envelope.requestId
+  const handler = config.goalWork
   const answer = (result: Record<string, unknown>): void => {
     // A dead socket must not take the daemon down with it.
     try {
       ws.send(
         JSON.stringify({
           kind: "goalWorkResult",
-          ...(request.requestId !== undefined ? { requestId: request.requestId } : {}),
+          ...(requestId !== undefined ? { requestId } : {}),
           ...result,
         }),
       )
@@ -252,6 +263,19 @@ export const consumeGoalWorkFrame = (
       ok: false,
       reason: "the session is not ready yet — retry after the connect handshake",
     })
+    return true
+  }
+  if (handler === undefined) {
+    answer({
+      ok: false,
+      reason:
+        "goal work is not composed on this daemon " +
+        "(no objective authority — QUANTA_OBJECTIVE_TOOLS is off, so there is no goal to work on)",
+    })
+    return true
+  }
+  if (request === null) {
+    answer({ ok: false, reason: "goal work needs an instruction — the request was empty" })
     return true
   }
   // NO-THROW at the Bun boundary: `request` reads live domain state, and a
