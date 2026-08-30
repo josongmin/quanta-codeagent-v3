@@ -504,6 +504,12 @@
     },
     "tests/unit/cli/cli-feature-gates-drift-hellgate.test.ts#SRC": {
       "walked": 3656
+    },
+    "tests/unit/realtime/voice-session-hellgate.test.ts#SRC": {
+      "walked": 3656
+    },
+    "tests/unit/realtime/voice-session-hellgate.test.ts#VOICE-SESSION": {
+      "walked": 12
     }
   }
 }

@@ -21,20 +21,6 @@
       ]
     },
     {
-      "file": "tests/unit/realtime/voice-session-hellgate.test.ts",
-      "klass": "A-recursive-walk",
-      "enumerators": [
-        "new Glob"
-      ],
-      "recursive": true,
-      "absolutePaths": false,
-      "derived": false,
-      "roots": 0,
-      "floorLines": [
-        "422: expect(scanned, \"the glob matched almost no source files\").toBeGreaterThan(3000)"
-      ]
-    },
-    {
       "file": "tests/unit/tool-surface-manifest-hellgate.test.ts",
       "klass": "A-recursive-walk",
       "enumerators": [],
