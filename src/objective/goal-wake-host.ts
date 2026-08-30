@@ -26,8 +26,10 @@ import type { SystemObjectiveCommands } from "./capabilities"
 import { type ContinuationDeps, ContinuationSemaphore, runIdleContinuation } from "./continuation"
 import { createGoalWakeController, type GoalWakeAttempt } from "./goal-wake-controller"
 import {
+  type BudgetLimitSource,
   computeGoalWakeDelay,
   DEFAULT_GOAL_WAKE_POLICY,
+  type GoalWakeDelayDecision,
   type GoalWakeDelaySkip,
   type GoalWakePolicy,
   type GoalWakeSettlementHint,
@@ -70,8 +72,30 @@ export type GoalWakeStatus =
       readonly skipReason: GoalWakeDelaySkip | "not-quiescent" | "attempt-slot-fail-stopped"
       /** Operator-facing detail (the fail-stop reason). */
       readonly detail?: string | undefined
+      /** W3 — the absolute instant the skip can lift (usage window, infra
+       *  cooldown). The policy computes it; this used to be discarded here, so a
+       *  surface could say "idle (usage-limited)" and not whether that meant
+       *  thirty seconds or four hours. */
+      readonly retryAt?: number | undefined
+      /** W3 — which bound produced a cap skip, so a surface can say whether
+       *  raising the budget could help. Same field the `/goal` budget line
+       *  learned to render. */
+      readonly limitedBy?: BudgetLimitSource | undefined
     }
   | { readonly kind: "stopped" }
+
+/** W3 — project a SKIP decision onto the idle status, keeping the detail the
+ *  policy already computed. A unit (rather than an inline literal) so the
+ *  projection has one owner and a test can drive it against a real decision
+ *  instead of a hand-built object. */
+export const idleStatusFor = (
+  decision: Extract<GoalWakeDelayDecision, { skip: GoalWakeDelaySkip }>,
+): Extract<GoalWakeStatus, { kind: "idle" }> => ({
+  kind: "idle",
+  skipReason: decision.skip,
+  ...(decision.retryAt !== undefined ? { retryAt: decision.retryAt } : {}),
+  ...(decision.limitedBy !== undefined ? { limitedBy: decision.limitedBy } : {}),
+})
 
 export interface StartGoalWakeOpts {
   readonly enabled: boolean
@@ -328,7 +352,7 @@ export const startGoalWakeController = (opts: StartGoalWakeOpts): GoalWakeLifecy
         now(),
       )
       return "skip" in decision
-        ? { kind: "idle", skipReason: decision.skip }
+        ? idleStatusFor(decision)
         : { kind: "pending", delayMs: decision.delayMs }
     },
   }

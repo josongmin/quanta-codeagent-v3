@@ -35,7 +35,7 @@ const delayLabel = (ms: number): string => {
 }
 
 /** GOAL-06 — one typed line for the wake decision; never a predicted status. */
-export const renderWakeStatus = (wake: GoalWakeStatus | undefined): string => {
+export const renderWakeStatus = (wake: GoalWakeStatus | undefined, now?: number): string => {
   if (wake === undefined)
     return "wake: not composed (autonomous pursuit is not armed in this surface)"
   if (wake.kind === "stopped") return "wake: stopped"
@@ -43,9 +43,18 @@ export const renderWakeStatus = (wake: GoalWakeStatus | undefined): string => {
   if (wake.kind === "pending") {
     return `wake: pending ${delayLabel(wake.delayMs)} quiet after this input settles`
   }
-  return wake.detail === undefined
-    ? `wake: idle (${wake.skipReason})`
-    : `wake: idle (${wake.skipReason}: ${wake.detail})`
+  // W3 — the policy computes a retry instant and a limiting bound for several
+  // skips; the status used to drop both, so this line could say "idle
+  // (usage-limited)" without saying whether that meant thirty seconds or four
+  // hours. Each part is appended only when it exists — a bare idle line is
+  // byte-identical.
+  const detail = wake.detail === undefined ? "" : `: ${wake.detail}`
+  const bound = wake.limitedBy === undefined ? "" : ` · ${wake.limitedBy}`
+  const retry =
+    wake.retryAt === undefined
+      ? ""
+      : ` · retry in ${delayLabel(wake.retryAt - (now ?? Date.now()))}`
+  return `wake: idle (${wake.skipReason}${detail})${bound}${retry}`
 }
 
 export const renderGoalDomain = (

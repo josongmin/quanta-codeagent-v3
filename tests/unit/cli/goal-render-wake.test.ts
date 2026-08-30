@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { renderGoalDomain } from "@/apps/cli/slash/goal-render"
+import { renderGoalDomain, renderWakeStatus } from "@/apps/cli/slash/goal-render"
 import { createObjectiveAuthority } from "@/objective"
 
 describe("GOAL-06 — /goal report wake line", () => {
@@ -39,5 +39,38 @@ describe("GOAL-06 — /goal report wake line", () => {
         detail: "disk full",
       }),
     ).toContain("wake: idle (attempt-slot-fail-stopped: disk full)")
+  })
+})
+
+/**
+ * W3 — the wake decision computes a retry instant and a limiting bound for
+ * several skips, and `status()` used to discard both. The line could say
+ * "idle (usage-limited)" without saying whether that meant thirty seconds or
+ * four hours — the operator's actual question. Same defect as the
+ * `budget.limitedBy` one fixed earlier today, in a second place.
+ */
+describe("W3 — an idle wake line carries the detail the decision computed", () => {
+  test("it names the retry instant when there is one", () => {
+    const line = renderWakeStatus(
+      { kind: "idle", skipReason: "usage-limited", retryAt: 90_000 },
+      60_000,
+    )
+
+    expect(line).toContain("usage-limited")
+    expect(line).toContain("retry in 30s")
+  })
+
+  test("it names the limiting bound when there is one", () => {
+    const line = renderWakeStatus({
+      kind: "idle",
+      skipReason: "autonomous-turn-cap",
+      limitedBy: "product-hard-cap",
+    })
+
+    expect(line).toContain("product-hard-cap")
+  })
+
+  test("PAIRED CONTROL — a bare idle line is byte-identical", () => {
+    expect(renderWakeStatus({ kind: "idle", skipReason: "no-goal" })).toBe("wake: idle (no-goal)")
   })
 })
