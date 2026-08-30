@@ -291,16 +291,10 @@ describe("FoundryProviderAdapter — real-stream hellgate", () => {
     // packages); fs is the lowest-friction SSOT.
     const { readFile } = await import("node:fs/promises")
     const path = await import("node:path")
-    // Use require.resolve via Bun to find the installed location robustly.
-    // bun/node both expose package.json at the installed root.
-    const repoRoot = path.resolve(import.meta.dir, "..", "..", "..")
-    const pkgPath = path.join(
-      repoRoot,
-      "node_modules",
-      "@anthropic-ai",
-      "foundry-sdk",
-      "package.json",
-    )
+    // Resolve the package Bun actually loaded. Worktrees may share a parent
+    // checkout's dependency tree, so `${repo}/node_modules` is not authority.
+    const entry = Bun.resolveSync("@anthropic-ai/foundry-sdk", import.meta.dir)
+    const pkgPath = path.join(path.dirname(entry), "package.json")
     const raw = await readFile(pkgPath, "utf8")
     const pkg = JSON.parse(raw) as { dependencies?: Record<string, string> }
     const constraint = pkg.dependencies?.["@anthropic-ai/sdk"]

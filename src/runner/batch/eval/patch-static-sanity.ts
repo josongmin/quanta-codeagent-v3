@@ -1,6 +1,6 @@
 import { readFile, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { execArgv } from "./exec"
+import { type ExecResult, execArgv } from "./exec"
 
 /**
  * Differential undefined-name (F821) analyzer — the sole static-sanity probe.
@@ -436,10 +436,26 @@ const collectDiffEntries = async (
  * sandbox clean, which is only checkable when the write and the `finally` sit
  * in one function. Returns `null` (fail-open) for every backend problem.
  */
+export interface UndefinedNameBackendRequest {
+  readonly cwd: string
+  readonly payloadPath: string
+  readonly timeoutMs: number
+}
+
+export type UndefinedNameBackend = (request: UndefinedNameBackendRequest) => Promise<ExecResult>
+
+const execUndefinedNameBackend: UndefinedNameBackend = ({ cwd, timeoutMs }) =>
+  execArgv(
+    ["python3", "-c", PYTHON_UNDEFINED_NAME_DIFF_SCRIPT, UNDEFINED_DIFF_PAYLOAD_FILE],
+    cwd,
+    timeoutMs,
+  )
+
 const runUndefinedNameBackend = async (
   cwd: string,
   entries: readonly DiffEntry[],
   timeoutMs: number,
+  backend: UndefinedNameBackend,
 ): Promise<string[] | null> => {
   const payloadPath = join(cwd, UNDEFINED_DIFF_PAYLOAD_FILE)
   try {
@@ -448,11 +464,11 @@ const runUndefinedNameBackend = async (
     return null
   }
   try {
-    const result = await execArgv(
-      ["python3", "-c", PYTHON_UNDEFINED_NAME_DIFF_SCRIPT, UNDEFINED_DIFF_PAYLOAD_FILE],
+    const result = await backend({
       cwd,
+      payloadPath,
       timeoutMs,
-    ).catch(() => null)
+    }).catch(() => null)
     if (result === null || result.code !== 0) return null
     return parsePatchStaticSanityStdout(result.stdout)
   } finally {
@@ -469,6 +485,10 @@ export const probeUndefinedNameDiff = async (args: {
    *  before-image we simply failed to read (must FAIL-OPEN, never net-new).
    *  Absent ⇒ legacy behavior (missing before ⇒ empty before). */
   readonly patch?: string
+  /** Per-call seam for the Python analyzer only. Git baseline reads remain real,
+   *  so a backend-unavailable test cannot pass vacuously on an earlier git
+   *  failure. Production always uses the argv-form Python executor above. */
+  readonly undefinedNameBackend?: UndefinedNameBackend
 }): Promise<string[] | null> => {
   const pyFiles = args.files.filter((file) => file.endsWith(".py"))
   if (pyFiles.length === 0) return []
@@ -496,7 +516,12 @@ export const probeUndefinedNameDiff = async (args: {
   if (entries.length === 0) return []
   if (!anyBefore) return null
 
-  return await runUndefinedNameBackend(args.cwd, entries, args.timeoutMs)
+  return await runUndefinedNameBackend(
+    args.cwd,
+    entries,
+    args.timeoutMs,
+    args.undefinedNameBackend ?? execUndefinedNameBackend,
+  )
 }
 
 /**

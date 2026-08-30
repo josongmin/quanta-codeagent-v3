@@ -81,6 +81,15 @@ describe("per-model lines are ordered and complete", () => {
     expect(costSurfaceView(acct.snapshot()).byModel[0]?.model).toBe(expected)
     expect(acct.recent(1)[0]?.usage.model).toBe(raw)
     expect(acct.snapshot().byModel.has(raw)).toBe(true)
+
+    const straddled = `${"y".repeat(63)}🚀tail`
+    expect(acct.record(record("astral", { model: straddled })).admitted).toBe(true)
+    const astralWire = costSurfaceViewWire(acct)
+    if (astralWire.status !== "on") throw new Error("accounting unexpectedly disabled")
+    const astralLabel = astralWire.modelSlug
+    expect(astralLabel).toBe("y".repeat(63))
+    expect(astralLabel?.isWellFormed()).toBe(true)
+    expect(acct.recent(1)[0]?.usage.model).toBe(straddled)
   })
 
   test("lines sort by spend descending, ties broken by name", () => {

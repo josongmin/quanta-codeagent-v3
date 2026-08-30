@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test"
 import { execFileSync } from "node:child_process"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import {
@@ -265,13 +265,46 @@ describe("probeUndefinedNameDiff (differential F821)", () => {
       { "pkg/m.py": "x = 1\n" },
       { "pkg/m.py": "def f():\n    return missing_helper\n" },
     )
+    const actual = await probeUndefinedNameDiff({
+      cwd,
+      files: ["pkg/m.py"],
+      timeoutMs: 5_000,
+    })
+    expect(actual).toEqual([
+      "hard:staticSanity=pythonUndefinedNameIntroduced(missing_helper@pkg/m.py)",
+    ])
+
+    let calls = 0
+    let payloadPath = ""
     const reasons = await probeUndefinedNameDiff({
       cwd,
       files: ["pkg/m.py"],
-      // A 0ms timeout kills the python invocation ⇒ result code !== 0 ⇒ null.
-      timeoutMs: 0,
+      timeoutMs: 5_000,
+      undefinedNameBackend: async (request) => {
+        calls += 1
+        payloadPath = request.payloadPath
+        const payload = JSON.parse(readFileSync(request.payloadPath, "utf8")) as Array<{
+          rel: string
+          before: string
+          after: string
+        }>
+        expect(payload).toEqual([
+          {
+            rel: "pkg/m.py",
+            before: "x = 1\n",
+            after: "def f():\n    return missing_helper\n",
+          },
+        ])
+        return {
+          code: 127,
+          stdout: '["hard:staticSanity=pythonUndefinedNameIntroduced(missing_helper@pkg/m.py)"]',
+          stderr: "python3: unavailable",
+        }
+      },
     })
     expect(reasons).toBeNull()
+    expect(calls).toBe(1)
+    expect(existsSync(payloadPath)).toBe(false)
   })
 
   it("integrates into probePatchStaticSanity (third probe adds undefined-name veto on top of base probes)", async () => {

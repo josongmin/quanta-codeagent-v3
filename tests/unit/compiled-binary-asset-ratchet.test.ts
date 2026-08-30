@@ -61,7 +61,7 @@ import {
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
-import { join, relative, resolve } from "node:path"
+import { dirname, join, relative, resolve } from "node:path"
 import { stripComments } from "./_shared/strip-comments"
 
 const REPO_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "")
@@ -413,7 +413,7 @@ describe("compiled-binary asset ratchet", () => {
       const entry = join(REPO_ROOT, `__compiled-asset-ratchet-probe-${process.pid}.ts`)
       const out = mkdtempSync(join(tmpdir(), "compiled-asset-probe-"))
       const bin = join(out, "probe")
-      const grammarDir = join(REPO_ROOT, "node_modules/@vscode/tree-sitter-wasm/wasm")
+      const grammarDir = dirname(Bun.resolveSync("@vscode/tree-sitter-wasm", import.meta.dir))
       try {
         writeFileSync(
           entry,

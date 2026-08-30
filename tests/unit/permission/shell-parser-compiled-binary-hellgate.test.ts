@@ -30,7 +30,7 @@
 import { describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 
 const REPO_ROOT = new URL("../../../", import.meta.url).pathname
 
@@ -94,7 +94,7 @@ describe("I — the shell effect authority survives compilation", () => {
       const entry = join(REPO_ROOT, `__compiled-retrieval-probe-${process.pid}.ts`)
       const out = mkdtempSync(join(tmpdir(), "compiled-retrieval-"))
       const bin = join(out, "probe")
-      const grammarDir = join(REPO_ROOT, "node_modules/@vscode/tree-sitter-wasm/wasm")
+      const grammarDir = dirname(Bun.resolveSync("@vscode/tree-sitter-wasm", import.meta.dir))
       try {
         writeFileSync(
           entry,
