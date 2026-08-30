@@ -1,4 +1,3 @@
-import type { CostSurfaceViewWire } from "./types/protocol.session.generated"
 import { memo, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react"
 import {
   AgentStatePanel,
@@ -44,6 +43,7 @@ import type {
   ContextUsageMessage,
   SessionStateView,
 } from "./types/protocol"
+import type { CostSurfaceViewWire } from "./types/protocol.session.generated"
 import { type AgentStateSource, useAgentState } from "./ws/agent-state-hooks"
 import { type CanvasSource, useArtifacts, useContextUsage, useToolDiffs } from "./ws/canvas-hooks"
 import { type ConnectOptions, SessionClient } from "./ws/client"
@@ -58,6 +58,7 @@ import {
   type CumulativeTokenUsage,
   shouldContinueAfterApproval,
   useConnectionState,
+  useRequestGoalVerification,
   useSendApprovalDecision,
   useSendCancel,
   useSendObjectiveMutate,
@@ -392,6 +393,7 @@ export const App = (): JSX.Element => {
   const onSetPermission = useSendPermissionMode(client, learnedSessionId)
   // `/goal <text>` — the browser's only door to a durable goal (USER actor).
   const sendObjectiveMutate = useSendObjectiveMutate(client, learnedSessionId)
+  const requestGoalVerification = useRequestGoalVerification(client)
   // `/goal work` is answered ASYNCHRONOUSLY on the same socket, and the daemon
   // now answers every case including the refusals it used to drop. Without this
   // subscriber the browser would send the request and show nothing either way —
@@ -928,7 +930,10 @@ export const App = (): JSX.Element => {
         // `/goal <text>` — the ONLY route by which a browser can create an
         // objective: the host binds this command to the USER actor, and a model
         // `create` is refused on this surface in either gate posture.
-        sendObjectiveMutate: (mutation) => sendObjectiveMutate(mutation),
+        sendObjectiveMutate: (mutation, expectedObjectiveRevision) =>
+          sendObjectiveMutate(mutation, expectedObjectiveRevision),
+        requestGoalVerification: (expectedObjectiveRevision) =>
+          requestGoalVerification(expectedObjectiveRevision),
         // `/goal work <text>` — one attributed goal turn. The accept/refusal
         // arrives asynchronously on `goalWorkResult` (subscribed below).
         sendGoalWork: (text) => client.sendGoalWork(text),
@@ -952,6 +957,7 @@ export const App = (): JSX.Element => {
       openKnobsPanel,
       sendTurn,
       sendObjectiveMutate,
+      requestGoalVerification,
     ],
   )
 

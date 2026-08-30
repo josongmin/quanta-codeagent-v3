@@ -53,6 +53,10 @@ export {
   evaluateContinuation,
   runIdleContinuation,
 } from "./continuation"
+export {
+  DEFAULT_OBJECTIVE_CHECK_SUCCESS_EXIT_CODES,
+  DEFAULT_OBJECTIVE_CHECK_TIMEOUT_MS,
+} from "./criteria/defaults"
 // RFC-03 C4 — criterion declaration/provenance (manual/checked union + receipts)
 // and the verifier-only checked-completion transition.
 export type {

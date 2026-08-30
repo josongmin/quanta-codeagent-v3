@@ -181,7 +181,7 @@ const connect = async (handle: WebDaemonHandle, sessionId: string) => {
     ws,
     frames,
     rejected: () => frames.filter((f) => f.kind === "rejected" && f.target === "command"),
-    mutate: (mutation: unknown, commandId: string): void => {
+    mutate: (mutation: unknown, commandId: string, expectedObjectiveRevision?: number): void => {
       ws.send(
         JSON.stringify({
           version: SESSION_PROTOCOL_VERSION,
@@ -192,6 +192,7 @@ const connect = async (handle: WebDaemonHandle, sessionId: string) => {
             issuedAt: new Date().toISOString(),
             type: "session.objective.mutate",
             mutation,
+            ...(expectedObjectiveRevision !== undefined ? { expectedObjectiveRevision } : {}),
           },
         }),
       )
@@ -323,6 +324,106 @@ describe("web goal control — a real client drives the full lifecycle", () => {
     expect(client.rejected()).toEqual([])
   }, 30_000)
 
+  test("rich criteria and blocker ids survive the real wire without positional authority", async () => {
+    const { authority, handle, session } = await bootDaemon()
+    const thread = session.sessionId
+    const client = await connect(handle, thread)
+
+    client.mutate(
+      {
+        kind: "create",
+        definition: {
+          goal: "ship with evidence",
+          criteria: [
+            { text: "operator approved" },
+            {
+              text: "tests pass",
+              check: {
+                kind: "command",
+                argv: ["bun", "test", "a b", ""],
+                timeoutMs: 120_000,
+                successExitCodes: [0],
+              },
+            },
+          ],
+          budget: { maxTurns: 9, maxTokens: 5_000 },
+        },
+      },
+      "rich-create",
+      0,
+    )
+    expect(await until(() => authority.get(thread)?.successCriteria.length === 2)).toBe(true)
+    const created = authority.get(thread)
+    const [manual, checked] = created?.successCriteria ?? []
+    expect(manual?.kind).toBe("manual")
+    expect(checked?.kind).toBe("checked")
+    expect(checked?.kind === "checked" ? checked.check.argv : []).toEqual([
+      "bun",
+      "test",
+      "a b",
+      "",
+    ])
+    expect(created?.budget).toMatchObject({ maxTurns: 9, maxTokens: 5_000 })
+
+    const beforeManual = domainOf(authority, thread).revision
+    client.mutate(
+      { kind: "markCriterion", criterionId: manual?.id ?? "", met: true },
+      "manual-done",
+      beforeManual,
+    )
+    expect(await until(() => authority.get(thread)?.successCriteria[0]?.met === true)).toBe(true)
+
+    const beforeCheckedForgery = domainOf(authority, thread).revision
+    client.mutate(
+      { kind: "markCriterion", criterionId: checked?.id ?? "", met: true },
+      "checked-forgery",
+      beforeCheckedForgery,
+    )
+    expect(
+      await until(() => client.rejected().some((frame) => frame.commandId === "checked-forgery")),
+    ).toBe(true)
+    expect(authority.get(thread)?.successCriteria[1]?.met).toBe(false)
+    expect(domainOf(authority, thread).revision).toBe(beforeCheckedForgery)
+
+    client.mutate(
+      { kind: "addBlocker", reason: "one", waitingOn: "user" },
+      "block-one",
+      domainOf(authority, thread).revision,
+    )
+    expect(await until(() => authority.get(thread)?.blockers.length === 1)).toBe(true)
+    client.mutate(
+      { kind: "addBlocker", reason: "two", waitingOn: "network" },
+      "block-two",
+      domainOf(authority, thread).revision,
+    )
+    expect(await until(() => authority.get(thread)?.blockers.length === 2)).toBe(true)
+    const frozenIds = authority.get(thread)?.blockers.map((blocker) => blocker.id) ?? []
+
+    client.mutate(
+      { kind: "clearBlocker", blockerId: frozenIds[0] ?? "" },
+      "unblock-one",
+      domainOf(authority, thread).revision,
+    )
+    expect(await until(() => authority.get(thread)?.blockers.length === 1)).toBe(true)
+    client.mutate(
+      { kind: "addBlocker", reason: "arrived later", waitingOn: "tool" },
+      "block-late",
+      domainOf(authority, thread).revision,
+    )
+    expect(await until(() => authority.get(thread)?.blockers.length === 2)).toBe(true)
+    const lateId = authority
+      .get(thread)
+      ?.blockers.find((blocker) => blocker.reason === "arrived later")?.id
+    if (lateId === undefined) throw new Error("late blocker was not committed")
+    client.mutate(
+      { kind: "clearBlocker", blockerId: frozenIds[1] ?? "" },
+      "unblock-two",
+      domainOf(authority, thread).revision,
+    )
+    expect(await until(() => authority.get(thread)?.blockers.length === 1)).toBe(true)
+    expect(authority.get(thread)?.blockers.map((blocker) => blocker.id)).toEqual([lateId])
+  }, 30_000)
+
   test("a policy refusal names itself: resuming a goal that has no live objective", async () => {
     const { authority, handle, session } = await bootDaemon()
     const thread = session.sessionId
@@ -334,5 +435,35 @@ describe("web goal control — a real client drives the full lifecycle", () => {
 
     expect(String(client.rejected()[0]?.issue)).toMatch(/^objective:/)
     expect(authority.get(thread)).toBeNull()
+  }, 30_000)
+
+  test("two clients: viewed-revision CAS refuses a stale clear without touching the winner", async () => {
+    const { authority, handle, session } = await bootDaemon()
+    const thread = session.sessionId
+    authority.create(thread, { goal: "winner-v1", budget: { maxTurns: 7 } })
+    const clientA = await connect(handle, thread)
+    const clientB = await connect(handle, thread)
+    const viewedByA = domainOf(authority, thread).revision
+
+    clientB.mutate(
+      { kind: "replace", definition: { goal: "winner-v2", budget: { maxTurns: 7 } } },
+      "b-edit",
+      viewedByA,
+    )
+    expect(await until(() => authority.get(thread)?.goal === "winner-v2")).toBe(true)
+    const winner = authority.get(thread)
+    const winnerRevision = domainOf(authority, thread).revision
+
+    clientA.mutate({ kind: "clear" }, "a-stale-clear", viewedByA)
+    expect(await until(() => clientA.rejected().length >= 1)).toBe(true)
+    expect(clientA.rejected()[0]).toMatchObject({
+      reason: "revision_conflict",
+      commandId: "a-stale-clear",
+      expectedRevision: viewedByA,
+      actualRevision: winnerRevision,
+    })
+    expect(authority.get(thread)?.goal).toBe("winner-v2")
+    expect(authority.get(thread)?.objectiveId).toBe(winner?.objectiveId)
+    expect(domainOf(authority, thread).revision).toBe(winnerRevision)
   }, 30_000)
 })

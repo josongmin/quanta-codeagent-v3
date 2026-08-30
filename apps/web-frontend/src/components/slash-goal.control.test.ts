@@ -1,327 +1,357 @@
-/**
- * ★ HELLGATE — the browser can CONTROL the goal it can already read, set and work.
- *
- * The web reached read/create/work and stopped there, so an operator who set a
- * wrong goal from the browser had no way to pause, fix or drop it without opening
- * the CLI. Nothing new is needed underneath: the USER actor is allowed
- * `replace` / `clear` / `setExplicitStatus` in the policy table, and the host
- * binds `session.objective.mutate` to that actor and to THIS session. This is a
- * caller, not a mechanism.
- *
- * Two things this pins that the first cut of `/goal <text>` got wrong:
- *
- *  1. READ-BACK IS EXACT. `body.includes(text)` reads a goal's own words out of a
- *     blocker line, a criterion or a next-action and calls that success. The
- *     readout is parsed and the GOAL LINE and STATUS are compared.
- *  2. READ-BACK IS BOUNDED, NOT INSTANT. The write goes over the session socket
- *     and the read over HTTP; "sent" is not "landed". `/model` learned this and
- *     polls; so does this.
- *
- * Read-back proves the OBSERVED END STATE, never that the command was accepted.
- * A refusal is a rejected frame on the session channel and shows up there.
- */
-
 import { afterEach, describe, expect, it, vi } from "vitest"
+import type { GoalReadoutData } from "../types/protocol.readout.generated"
+import type { ObjectiveMutationReceipt } from "../ws/session-hooks"
 import type { SlashCommand } from "./SlashPalette"
-import { buildGoalSlashCommands, type GoalSlashDeps, parseGoalReadout } from "./slash-goal"
+import {
+  buildGoalSlashCommands,
+  type GoalSlashDeps,
+  parseCheckArgv,
+  parseGoalCommand,
+} from "./slash-goal"
 
 const realFetch = globalThis.fetch
 afterEach(() => {
   globalThis.fetch = realFetch
 })
 
-const GOAL_BODY = (goal: string, status = "active"): string =>
-  `goal   ${goal}\nstatus ${status} · rev 3 · validation manual-only\ncriteria 0/1 met   remaining: tests pass\nbudget 0/∞ turns · 0/∞ tokens\nlast attempt: none\n`
+const state = (): GoalReadoutData => ({
+  kind: "goal",
+  revision: 8,
+  validationContract: "checked",
+  objective: {
+    objectiveId: "objective-8",
+    goal: "ship safely",
+    status: "active",
+    budget: { turnsUsed: 1, tokensUsed: 20, maxTurns: 9, maxTokens: 5_000 },
+    blockers: [],
+    criteria: [
+      { id: "manual-1", kind: "manual", text: "reviewed", met: false },
+      {
+        id: "checked-1",
+        kind: "checked",
+        text: "tests pass",
+        met: false,
+        check: {
+          id: "check-1",
+          kind: "command",
+          argv: ["bun", "test"],
+          timeoutMs: 3_000,
+          successExitCodes: [0, 2],
+          cwdPolicy: "thread",
+        },
+      },
+    ],
+  },
+})
 
-const EMPTY_BODY =
-  "No goal is set for this session.\nAsk the agent to set one, or run `/goal <objective>` from the quanta CLI.\n"
-
-/** `fetchReadoutBody` (the printing path) always answers with the LAST body. */
-const stubPrintingFetch = (bodyRef: { current: string }) => {
-  const printed: string[] = []
-  globalThis.fetch = vi.fn(async () => ({
-    status: 200,
-    json: async () => ({ name: "goal", output: bodyRef.current, wired: true, isError: false }),
-  })) as unknown as typeof fetch
-  return printed
+const run = async (command: SlashCommand | undefined, rest: string): Promise<void> => {
+  if (command?.kind !== "local" && command?.kind !== "readout") {
+    throw new Error("missing /goal action")
+  }
+  await command.action(rest)
 }
 
-const harness = (over: Partial<GoalSlashDeps> = {}) => {
+type Mutable<T> = T extends readonly (infer U)[]
+  ? Mutable<U>[]
+  : T extends object
+    ? { -readonly [K in keyof T]: Mutable<T[K]> }
+    : T
+
+const harness = (
+  initial = state(),
+  receipt:
+    | ObjectiveMutationReceipt
+    | ((mutation: Record<string, unknown>) => ObjectiveMutationReceipt) = {
+    kind: "applied",
+    commandId: "cmd",
+  },
+  verification:
+    | Awaited<ReturnType<GoalSlashDeps["requestGoalVerification"]>>
+    | GoalSlashDeps["requestGoalVerification"] = { kind: "undelivered" },
+) => {
+  let current = structuredClone(initial) as Mutable<GoalReadoutData>
   const system: string[] = []
   const errors: string[] = []
-  const mutations: unknown[] = []
-  const work: string[] = []
-  const bodyRef = { current: EMPTY_BODY }
-  const reads: string[] = []
-  stubPrintingFetch(bodyRef)
-  const deps: GoalSlashDeps = {
-    httpUrl: "http://127.0.0.1:4096",
-    token: "tok",
-    appendSystem: (text) => system.push(text),
-    onError: (msg) => errors.push(msg),
-    sendObjectiveMutate: (mutation) => {
-      mutations.push(mutation)
-      return true
+  const sent: { mutation: Record<string, unknown>; revision: number }[] = []
+  globalThis.fetch = vi.fn(async () =>
+    Response.json({ output: "goal display", wired: true, data: current }),
+  ) as typeof fetch
+
+  const applyReplace = (
+    definition: {
+      goal: string
+      budget?: { maxTurns?: number; maxTokens?: number }
+      criteria?: { text: string; check?: Record<string, unknown> }[]
     },
-    sendGoalWork: (text) => {
-      work.push(text)
-      return true
-    },
-    readReadout: async (name) => {
-      reads.push(name)
-      return bodyRef.current
-    },
-    delay: async () => undefined,
-    ...over,
-  }
-  const goal = buildGoalSlashCommands(deps).find((c) => c.slug === "goal")
-  return { system, errors, mutations, work, bodyRef, reads, goal }
-}
-
-const run = async (cmd: SlashCommand | undefined, rest: string): Promise<void> => {
-  if (cmd === undefined || (cmd.kind !== "local" && cmd.kind !== "readout")) {
-    throw new Error("the /goal command must carry an action")
-  }
-  await cmd.action(rest)
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe("parseGoalReadout — the readout is parsed, not string-searched", () => {
-  it("reads the goal line and the status", () => {
-    expect(parseGoalReadout(GOAL_BODY("ship the release", "paused"))).toEqual({
-      present: true,
-      goal: "ship the release",
-      status: "paused",
-      attemptInFlight: false,
-      maxTurns: "∞",
-      maxTokens: "∞",
-    })
-  })
-
-  it("reports absence for the empty body", () => {
-    expect(parseGoalReadout(EMPTY_BODY)).toEqual({ present: false })
-  })
-
-  it("a goal's own words appearing ELSEWHERE do not become the goal", () => {
-    // The exact false positive `body.includes()` produced: the typed text shows
-    // up in a blocker line while the real goal is something else.
-    const body =
-      "goal   ship the release\nstatus active · rev 3 · validation manual-only\nblockers:\n  - [user] waiting on deploy the hotfix\n"
-
-    expect(parseGoalReadout(body)).toEqual({
-      present: true,
-      goal: "ship the release",
+    revision: number,
+  ): void => {
+    current.objective = {
+      objectiveId: `objective-${revision + 1}`,
+      goal: definition.goal,
       status: "active",
-      attemptInFlight: false,
-      maxTurns: "∞",
-      maxTokens: "∞",
-    })
-  })
+      budget: { turnsUsed: 0, tokensUsed: 0, ...definition.budget },
+      blockers: [],
+      criteria: (definition.criteria ?? []).map((criterion, index) =>
+        criterion.check === undefined
+          ? { id: `manual-new-${index}`, kind: "manual", text: criterion.text, met: false }
+          : {
+              id: `checked-new-${index}`,
+              kind: "checked",
+              text: criterion.text,
+              met: false,
+              check: {
+                id: `check-new-${index}`,
+                kind: "command",
+                argv: criterion.check.argv as string[],
+                timeoutMs: criterion.check.timeoutMs as number,
+                successExitCodes: criterion.check.successExitCodes as number[],
+                cwdPolicy: "thread",
+              },
+            },
+      ),
+    }
+  }
 
-  it("an unparseable body is absence, never a confident wrong answer", () => {
-    expect(parseGoalReadout("")).toEqual({ present: false })
-    expect(parseGoalReadout("something the daemon has never rendered")).toEqual({ present: false })
-  })
-})
+  const apply = (mutation: Record<string, unknown>, revision: number): void => {
+    const objective = current.objective
+    switch (mutation.kind) {
+      case "setExplicitStatus":
+        if (objective !== null) objective.status = mutation.status as "active" | "paused"
+        break
+      case "clear":
+        current.objective = null
+        break
+      case "amendBudget":
+        if (objective !== null) Object.assign(objective.budget, mutation.budget)
+        break
+      case "clearBlocker":
+        if (objective !== null) {
+          objective.blockers = objective.blockers.filter(
+            (blocker) => blocker.id !== mutation.blockerId,
+          )
+        }
+        break
+      case "markCriterion":
+        if (objective !== null) {
+          objective.criteria = objective.criteria.map((criterion) =>
+            criterion.id === mutation.criterionId ? { ...criterion, met: true } : criterion,
+          )
+        }
+        break
+      case "replace": {
+        applyReplace(
+          mutation.definition as {
+            goal: string
+            budget?: { maxTurns?: number; maxTokens?: number }
+            criteria?: { text: string; check?: Record<string, unknown> }[]
+          },
+          revision,
+        )
+        break
+      }
+    }
+    current = { ...current, revision: revision + 1 }
+  }
 
-describe("parseGoalReadout — the fields a control verb needs to see it land", () => {
-  it("reads a RUNNING attempt, the thing that refuses a definition change", () => {
-    const body = `${GOAL_BODY("ship it")}attempt: running attempt-77\n`
+  const deps: Omit<GoalSlashDeps, "readGoal"> & {
+    readGoal: NonNullable<GoalSlashDeps["readGoal"]>
+  } = {
+    httpUrl: "http://127.0.0.1:4096",
+    appendSystem: (text) => system.push(text),
+    onError: (text) => errors.push(text),
+    sendGoalWork: () => true,
+    requestGoalVerification: async (revision) =>
+      typeof verification === "function" ? verification(revision) : verification,
+    sendObjectiveMutate: async (value, revision) => {
+      const mutation = value as Record<string, unknown>
+      sent.push({ mutation, revision })
+      const result = typeof receipt === "function" ? receipt(mutation) : receipt
+      if (result.kind === "applied") apply(mutation, revision)
+      return result
+    },
+    readGoal: async () => ({ kind: "served", output: "goal display", data: current }),
+    delay: async () => undefined,
+  }
+  return {
+    deps,
+    sent,
+    system,
+    errors,
+    current: () => current,
+    goal: buildGoalSlashCommands(deps).find((command) => command.slug === "goal"),
+  }
+}
 
-    const readout = parseGoalReadout(body)
-
-    expect(readout.present && readout.attemptInFlight).toBe(true)
-  })
-
-  it("reads the declared budget caps", () => {
-    const body =
-      "goal   ship it\nstatus active · rev 3 · validation manual-only\nbudget 2/50 turns · 10/9000 tokens\n"
-
-    const readout = parseGoalReadout(body)
-
-    expect(readout.present && readout.maxTurns).toBe("50")
-    expect(readout.present && readout.maxTokens).toBe("9000")
-  })
-})
-
-describe("/goal abandon — free a stuck attempt from the browser", () => {
-  it("sends abandonAttempt and waits for the attempt to be gone", async () => {
+describe("structured goal control safety", () => {
+  it("malformed payload is not absence and sends no clear", async () => {
     const h = harness()
-    h.bodyRef.current = GOAL_BODY("ship it")
+    h.deps.readGoal = async () => ({ kind: "malformed", status: 200 })
+    await run(h.goal, "clear")
+    expect(h.sent).toHaveLength(0)
+    expect(h.errors[0]).toContain("malformed")
+  })
 
+  it("no-op clear/abandon/pause/budget send zero mutations", async () => {
+    const absent = structuredClone(state()) as Mutable<GoalReadoutData>
+    absent.objective = null
+    const clear = harness(absent)
+    await run(clear.goal, "clear")
+    expect(clear.sent).toHaveLength(0)
+
+    const h = harness()
     await run(h.goal, "abandon")
-
-    expect(h.mutations).toEqual([{ kind: "abandonAttempt" }])
-    expect(h.errors).toEqual([])
-  })
-
-  it("an attempt that is STILL running is reported, not called success", async () => {
-    const stuck = `${GOAL_BODY("ship it")}attempt: running attempt-77\n`
-    const h = harness({ readReadout: async () => stuck })
-    h.bodyRef.current = stuck
-
-    await run(h.goal, "abandon")
-
-    expect(h.errors.join("")).not.toBe("")
-  })
-})
-
-describe("/goal budget — raise the cap without leaving the browser", () => {
-  it("parses the CLI's own flag syntax and sends amendBudget", async () => {
-    const h = harness()
-    h.bodyRef.current =
-      "goal   ship it\nstatus active · rev 3 · validation manual-only\nbudget 0/50 turns · 0/∞ tokens\n"
-
-    await run(h.goal, "budget --max-turns=50")
-
-    expect(h.mutations).toEqual([{ kind: "amendBudget", budget: { maxTurns: 50 } }])
-    expect(h.errors).toEqual([])
-  })
-
-  it("both caps at once", async () => {
-    const h = harness()
-    h.bodyRef.current =
-      "goal   ship it\nstatus active · rev 3 · validation manual-only\nbudget 0/5 turns · 0/1000 tokens\n"
-
-    await run(h.goal, "budget --max-turns=5 --max-tokens=1000")
-
-    expect(h.mutations).toEqual([
-      { kind: "amendBudget", budget: { maxTurns: 5, maxTokens: 1000 } },
+    await run(h.goal, "pause")
+    await run(h.goal, "resume")
+    await run(h.goal, "budget --max-turns=9")
+    // pause applies; resume applies. abandon and budget are no-ops.
+    expect(h.sent.map((entry) => entry.mutation.kind)).toEqual([
+      "setExplicitStatus",
+      "setExplicitStatus",
     ])
   })
 
-  it("PAIRED CONTROL — no flags asks for the syntax instead of sending an empty amendment", async () => {
-    const h = harness()
-
-    await run(h.goal, "budget")
-
-    expect(h.mutations).toEqual([])
-    expect(h.errors.join("")).toMatch(/--max-turns/)
-  })
-
-  it("a malformed flag is refused, never guessed at", async () => {
-    const h = harness()
-
-    await run(h.goal, "budget bigger please")
-
-    expect(h.mutations).toEqual([])
-    expect(h.errors.join("")).toMatch(/--max-turns/)
-  })
-})
-
-describe("/goal pause | resume | clear — exact mutations", () => {
-  it("pause sends setExplicitStatus paused", async () => {
-    const h = harness()
-    h.bodyRef.current = GOAL_BODY("ship it", "paused")
-
-    await run(h.goal, "pause")
-
-    expect(h.mutations).toEqual([{ kind: "setExplicitStatus", status: "paused" }])
-    expect(h.errors).toEqual([])
-  })
-
-  it("resume sends setExplicitStatus active", async () => {
-    const h = harness()
-    h.bodyRef.current = GOAL_BODY("ship it", "active")
-
-    await run(h.goal, "resume")
-
-    expect(h.mutations).toEqual([{ kind: "setExplicitStatus", status: "active" }])
-  })
-
-  it("clear sends clear and waits for ABSENCE, not for a string", async () => {
-    const h = harness()
-    h.bodyRef.current = EMPTY_BODY
-
+  it("rejection is not converted to success and action adds no duplicate refusal", async () => {
+    const frame = {
+      target: "command",
+      reason: "protocol_validation",
+      commandId: "cmd-stale",
+      issue: "objective:stale",
+    } as const
+    const h = harness(state(), { kind: "rejected", commandId: "cmd-stale", frame })
     await run(h.goal, "clear")
-
-    expect(h.mutations).toEqual([{ kind: "clear" }])
+    expect(h.current().objective).not.toBeNull()
     expect(h.errors).toEqual([])
   })
 
-  it("edit sends replace with the new definition", async () => {
+  it("edit preserves only budget caps and intentionally resets criteria/evidence", async () => {
     const h = harness()
-    h.bodyRef.current = GOAL_BODY("ship v2")
-
-    await run(h.goal, "edit ship v2")
-
-    expect(h.mutations).toEqual([{ kind: "replace", definition: { goal: "ship v2" } }])
+    await run(h.goal, "edit ship differently")
+    expect(h.sent[0]).toMatchObject({
+      revision: 8,
+      mutation: {
+        kind: "replace",
+        definition: {
+          goal: "ship differently",
+          budget: { maxTurns: 9, maxTokens: 5_000 },
+        },
+      },
+    })
+    expect((h.sent[0]?.mutation.definition as Record<string, unknown>).criteria).toBeUndefined()
   })
 })
 
-describe("/goal — the verb table does not swallow a goal", () => {
-  it("PAIRED CONTROL — plain text is still a create", async () => {
+describe("criterion/check controls", () => {
+  it("criterion add preserves declarations and budget while resetting generation", async () => {
     const h = harness()
-    h.bodyRef.current = GOAL_BODY("ship v2")
-
-    await run(h.goal, "ship v2")
-
-    expect(h.mutations).toEqual([{ kind: "create", definition: { goal: "ship v2" } }])
+    await run(h.goal, "criterion add release tagged")
+    const definition = h.sent[0]?.mutation.definition as {
+      budget: unknown
+      criteria: { text: string; check?: { argv: string[] } }[]
+    }
+    expect(definition.budget).toEqual({ maxTurns: 9, maxTokens: 5_000 })
+    expect(definition.criteria).toHaveLength(3)
+    expect(definition.criteria[1]?.check?.argv).toEqual(["bun", "test"])
+    expect(definition.criteria[2]).toEqual({ text: "release tagged" })
   })
 
-  it("a no-argument verb with a tail is refused and points at edit", async () => {
+  it("check add preserves exact argv boundaries and canonical defaults", async () => {
+    expect(parseCheckArgv(`bun test "a b" '' --flag\\ value`)).toEqual([
+      "bun",
+      "test",
+      "a b",
+      "",
+      "--flag value",
+    ])
     const h = harness()
-
-    await run(h.goal, "pause the rollout")
-
-    expect(h.mutations).toEqual([])
-    expect(h.errors.join("")).toMatch(/edit/)
+    await run(h.goal, `check add smoke suite -- bun test "a b" ''`)
+    const definition = h.sent[0]?.mutation.definition as {
+      criteria: { check?: Record<string, unknown> }[]
+    }
+    expect(definition.criteria.at(-1)?.check).toMatchObject({
+      argv: ["bun", "test", "a b", ""],
+      timeoutMs: 120_000,
+      successExitCodes: [0],
+    })
   })
 
-  it("edit with no text asks for it instead of replacing with nothing", async () => {
+  it("criterion done resolves 1-based/manual ID and refuses checked criteria", async () => {
+    const manual = harness()
+    await run(manual.goal, "criterion done 1")
+    expect(manual.sent[0]?.mutation).toEqual({
+      kind: "markCriterion",
+      criterionId: "manual-1",
+      met: true,
+    })
+
+    const checked = harness()
+    await run(checked.goal, "criterion done checked-1")
+    expect(checked.sent).toHaveLength(0)
+    expect(checked.errors[0]).toContain("checked-criterion-needs-verify")
+  })
+
+  it("unknown criterion never mutates", async () => {
     const h = harness()
-
-    await run(h.goal, "edit")
-
-    expect(h.mutations).toEqual([])
-    expect(h.errors.join("")).toMatch(/edit/i)
+    await run(h.goal, "criterion done 99")
+    expect(h.sent).toHaveLength(0)
   })
 })
 
-describe("/goal — read-back is bounded, and honest when it does not land", () => {
-  it("an old body on the first read is polled until the new state appears", async () => {
-    const h = harness()
-    h.bodyRef.current = GOAL_BODY("ship it", "active")
-    let reads = 0
-    const deps = harness({
-      readReadout: async () => {
-        reads += 1
-        return reads < 3 ? GOAL_BODY("ship it", "active") : GOAL_BODY("ship it", "paused")
-      },
+describe("unblock freezes identity", () => {
+  it("clears only blocker IDs present at command start", async () => {
+    const initial = structuredClone(state()) as Mutable<GoalReadoutData>
+    if (initial.objective === null) throw new Error("fixture")
+    initial.objective.blockers = [
+      { id: "b1", reason: "one", waitingOn: "user" },
+      { id: "b2", reason: "two", waitingOn: "network" },
+    ]
+    const h = harness(initial, (mutation) => {
+      if (mutation.blockerId === "b1" && h.current().objective !== null) {
+        h.current().objective?.blockers.push({
+          id: "b-new",
+          reason: "arrived later",
+          waitingOn: "tool",
+        })
+      }
+      return { kind: "applied", commandId: String(mutation.blockerId) }
     })
-
-    await run(deps.goal, "pause")
-
-    expect(reads).toBeGreaterThanOrEqual(3)
-    expect(deps.errors).toEqual([])
-    void h
+    await run(h.goal, "unblock")
+    expect(h.sent.map((entry) => entry.mutation.blockerId)).toEqual(["b1", "b2"])
+    expect(h.current().objective?.blockers.map((blocker) => blocker.id)).toEqual(["b-new"])
   })
+})
 
-  it("a state that never lands reports it, and still prints the real readout", async () => {
-    const h = harness({ readReadout: async () => GOAL_BODY("ship it", "active") })
-    h.bodyRef.current = GOAL_BODY("ship it", "active")
-
-    await run(h.goal, "pause")
-
-    expect(h.errors.join("")).not.toBe("")
-    // The operator still sees the truth rather than only an error.
-    expect(h.system.join("")).toContain("ship it")
-  })
-
-  it("a socket that refuses the send is reported and NOT polled", async () => {
-    let reads = 0
-    const h = harness({
-      sendObjectiveMutate: () => false,
-      readReadout: async () => {
-        reads += 1
-        return EMPTY_BODY
-      },
+describe("parser coverage", () => {
+  it("recognizes every completed control family", () => {
+    expect(parseGoalCommand("unblock")).toEqual({ kind: "unblock" })
+    expect(parseGoalCommand("criterion add done means done")).toEqual({
+      kind: "criterion-add",
+      text: "done means done",
     })
+    expect(parseGoalCommand("criterion done abc")).toEqual({
+      kind: "criterion-done",
+      target: "abc",
+    })
+    expect(parseGoalCommand("verify")).toEqual({ kind: "verify" })
+  })
+})
 
-    await run(h.goal, "pause")
-
-    expect(h.errors.join("")).not.toBe("")
-    expect(reads).toBe(0)
+describe("verify", () => {
+  it("sends viewed revision and renders the correlated verified outcome", async () => {
+    const requested: number[] = []
+    const h = harness(state(), { kind: "applied", commandId: "unused" }, async (revision) => {
+      requested.push(revision)
+      return {
+        kind: "result",
+        frame: {
+          requestId: "verify-8",
+          status: "completed",
+          outcome: { kind: "verified", passed: 1, failed: 0, revision: 9 },
+        },
+      }
+    })
+    await run(h.goal, "verify")
+    expect(requested).toEqual([8])
+    expect(h.system[0]).toContain("1 passed, 0 failed")
+    expect(h.sent).toHaveLength(0)
   })
 })

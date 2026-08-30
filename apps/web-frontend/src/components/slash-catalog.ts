@@ -12,6 +12,7 @@
  *      stub shadowed the live llm-config `/effort`, making it dead).
  */
 
+import type { GoalVerificationReceipt, ObjectiveMutationReceipt } from "../ws/session-hooks"
 import {
   buildDefaultSlashCommands,
   isSlashMode,
@@ -20,9 +21,14 @@ import {
   splitDraft,
 } from "./SlashPalette"
 import { buildAuthSlashCommands } from "./slash-auth"
-import { buildLlmConfigSlashCommands, type RetryWithDeps } from "./slash-llm-config"
-import { buildReadoutSlashCommands, fetchReadoutBody, readReadoutBody } from "./slash-readout"
 import { buildGoalSlashCommands } from "./slash-goal"
+import { buildLlmConfigSlashCommands, type RetryWithDeps } from "./slash-llm-config"
+import {
+  buildReadoutSlashCommands,
+  fetchReadoutBody,
+  readGoalReadout,
+  readReadoutBody,
+} from "./slash-readout"
 
 export interface SlashCatalogDeps {
   readonly clearTranscript: () => void
@@ -43,9 +49,15 @@ export interface SlashCatalogDeps {
   /** The `session.objective.mutate` sender — the ONLY route by which a browser
    *  can create a goal (a model `create` is refused on this surface). Absent
    *  (offline/tests) ⇒ `/goal <text>` says it cannot set instead of pretending. */
-  readonly sendObjectiveMutate?: (mutation: unknown) => boolean
+  readonly sendObjectiveMutate?: (
+    mutation: unknown,
+    expectedObjectiveRevision: number,
+  ) => Promise<ObjectiveMutationReceipt>
   /** The out-of-band `goalWork` sender. Absent ⇒ `/goal work` says so. */
   readonly sendGoalWork?: (text: string) => boolean
+  readonly requestGoalVerification?: (
+    expectedObjectiveRevision: number,
+  ) => Promise<GoalVerificationReceipt>
 }
 
 export const assembleSlashCommands = (deps: SlashCatalogDeps): readonly SlashCommand[] => {
@@ -106,20 +118,19 @@ export const assembleSlashCommands = (deps: SlashCatalogDeps): readonly SlashCom
   // — rather than a read-only row plus a second goal vocabulary elsewhere.
   const goalCommands = buildGoalSlashCommands({
     ...readoutEndpoint,
-    // The non-printing read, so a control verb can wait for the END STATE
-    // instead of reporting optimistically — the same seam `/model` uses.
-    readReadout: (name: string) => readReadoutBody(readoutEndpoint, name),
+    // Control-grade structured read. Rendered text remains display-only.
+    readGoal: () => readGoalReadout(readoutEndpoint),
     onError: (msg: string): void => {
       deps.appendClientMessage("error", msg)
     },
     sendObjectiveMutate:
       deps.sendObjectiveMutate ??
-      ((): boolean => {
+      (async (): Promise<ObjectiveMutationReceipt> => {
         deps.appendClientMessage(
           "error",
           "/goal: not wired on this host (no session command sender was threaded)",
         )
-        return false
+        return { kind: "undelivered" }
       }),
     sendGoalWork:
       deps.sendGoalWork ??
@@ -129,6 +140,15 @@ export const assembleSlashCommands = (deps: SlashCatalogDeps): readonly SlashCom
           "/goal work: not wired on this host (no goalWork sender was threaded)",
         )
         return false
+      }),
+    requestGoalVerification:
+      deps.requestGoalVerification ??
+      (async (): Promise<GoalVerificationReceipt> => {
+        deps.appendClientMessage(
+          "error",
+          "/goal verify: not wired on this host (no verifier request sender was threaded)",
+        )
+        return { kind: "undelivered" }
       }),
   })
 

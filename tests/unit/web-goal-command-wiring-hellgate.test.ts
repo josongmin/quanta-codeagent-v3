@@ -41,16 +41,17 @@ describe("web /goal — the composition root threads live senders", () => {
   test("the catalogue assembles the goal builder", () => {
     const catalog = read(CATALOG)
 
-    expect(catalog).toContain("buildGoalSlashCommands")
+    expect(catalog).toMatch(/buildGoalSlashCommands\s*\(/)
     expect(catalog).toContain("sendObjectiveMutate")
     expect(catalog).toContain("sendGoalWork")
+    expect(catalog).toContain("requestGoalVerification")
   })
 
   test("App hands the catalogue a real objective-mutate sender, not the fallback", () => {
     const app = read(APP)
 
     expect(app).toContain("useSendObjectiveMutate")
-    expect(app).toMatch(/sendObjectiveMutate:\s*\(mutation\)\s*=>/)
+    expect(app).toMatch(/sendObjectiveMutate:\s*\(mutation,\s*expectedObjectiveRevision\)\s*=>/)
   })
 
   test("App hands the catalogue the client's own goalWork sender", () => {
@@ -62,19 +63,22 @@ describe("web /goal — the composition root threads live senders", () => {
     // Without a subscriber the browser would send and show nothing either way.
     expect(read(APP)).toContain("client.onGoalWorkResult")
   })
+
+  test("App threads the correlated verifier request into the catalogue", () => {
+    const app = read(APP)
+
+    expect(app).toMatch(/useRequestGoalVerification\s*\(client\)/)
+    expect(app).toMatch(/requestGoalVerification\s*\(expectedObjectiveRevision\)/)
+  })
 })
 
 describe("web /goal — the control verbs are threaded, not stubbed", () => {
-  test("the catalogue gives the goal builder a READER, so the read-back can poll", () => {
-    // Without it the builder must report optimistically — the exact posture
-    // `/model` was moved off when its first read-back kept reporting the old
-    // model. The `/model` builder already receives `readReadoutBody`; the goal
-    // builder has to as well, from the same endpoint.
+  test("the catalogue gives the goal builder the structured reader", () => {
     const catalog = read(CATALOG)
     const goalCall = catalog.slice(catalog.indexOf("buildGoalSlashCommands({"))
 
-    expect(goalCall).toContain("readReadout")
-    expect(goalCall.slice(0, goalCall.indexOf("})"))).toMatch(/readReadoutBody\(/)
+    expect(goalCall).toContain("readGoal")
+    expect(goalCall.slice(0, goalCall.indexOf("})"))).toMatch(/readGoalReadout\(/)
   })
 
   test("the builder owns the control verbs, not just show/set/work", () => {
@@ -92,17 +96,19 @@ describe("web /goal — the control verbs are threaded, not stubbed", () => {
     }
   })
 
-  test("the send truth is forwarded: the hook returns what the client reports", () => {
+  test("the send truth is forwarded into a correlated receipt", () => {
     const hooks = read(HOOKS)
-    const start = hooks.indexOf("export const useSendObjectiveMutate")
+    const start = hooks.indexOf("export const sendObjectiveMutation")
     const end = hooks.indexOf("export const useSendPermissionMode")
     const body = hooks.slice(start, end)
 
     // The defect this pins: the hook returned a bare `true` on the strength of
     // having a session id, while `client.send` silently drops on a closed or
     // pre-handshake socket.
-    expect(body).toMatch(/return client\.send\(/)
-    expect(body).not.toMatch(/\n\s*return true\b/)
+    expect(body).toContain("const sent = client.send(")
+    expect(body).toContain('finish({ kind: "undelivered" })')
+    expect(body).toContain("event.causedByCommandId === commandId")
+    expect(body).toContain("frame.commandId === commandId")
   })
 
   test("budget reuses the CLI's own flag syntax rather than inventing a second one", () => {
@@ -131,17 +137,39 @@ describe("web /goal — the mutate command is the USER-actor route", () => {
     expect(hooks).toContain('type: "session.objective.mutate"')
     // No session yet ⇒ the caller is told, rather than the write vanishing.
     expect(hooks).toMatch(
-      /useSendObjectiveMutate[\s\S]{0,900}?if \(sessionId === null\) return false/,
+      /sendObjectiveMutation[\s\S]{0,900}?if \(sessionId === null\)[\s\S]{0,80}?undelivered/,
     )
   })
 
-  test("it does NOT invent an expectedObjectiveRevision the browser cannot know", () => {
+  test("it sends the objective revision from the structured read", () => {
     const hooks = read(HOOKS)
     const start = hooks.indexOf("export const useSendObjectiveMutate")
     const end = hooks.indexOf("export const useSendPermissionMode")
 
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
-    expect(hooks.slice(start, end)).not.toContain("expectedObjectiveRevision")
+    expect(hooks.slice(start, end)).toContain("expectedObjectiveRevision")
+    const builder = read(GOAL_BUILDER)
+    expect(builder).toContain("snapshot.revision")
+    expect(builder).not.toContain("parseGoalReadout")
+  })
+
+  test("verify uses its dedicated correlated channel, not a user mutation", () => {
+    const builder = read(GOAL_BUILDER)
+    const start = builder.indexOf("const runVerify")
+    const end = builder.indexOf("const runControl")
+    const verifyBody = builder.slice(start, end)
+
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    expect(verifyBody).toMatch(/requestGoalVerification\s*\(snapshot\.revision\)/)
+    expect(verifyBody).not.toContain("sendObjectiveMutate")
+
+    const hooks = read(HOOKS)
+    const hookStart = hooks.indexOf("export const requestGoalVerification")
+    const hookEnd = hooks.indexOf("export const useRequestGoalVerification")
+    const hookBody = hooks.slice(hookStart, hookEnd)
+    expect(hookBody).toMatch(/sendGoalVerify\s*\(requestId,\s*expectedObjectiveRevision\)/)
+    expect(hookBody).toMatch(/frame\.requestId\s*===\s*requestId/)
   })
 })

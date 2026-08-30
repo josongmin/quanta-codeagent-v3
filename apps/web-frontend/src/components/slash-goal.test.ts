@@ -1,168 +1,127 @@
-/**
- * ★ HELLGATE — `/goal` in the browser: read, set, work.
- *
- * MEASURED DEFECT (2026-08-30, two audit rounds + probes): the SPA shipped the
- * whole goal-work transport — `SessionClient.sendGoalWork`, `onGoalWorkResult`,
- * a no-throw decoder, inbound dispatch, and its own eight-case suite — and no
- * component or hook called any of it. The palette had no `goal` entry at all,
- * not even one of the `unwired(...)` stubs that tell a user to run it from the
- * CLI.
- *
- * And a work verb alone would have been inert. A browser cannot create an
- * objective: a model `create` is `actor-forbidden` with the propose gate off and
- * `approval-unavailable` with it on, because the daemon composes no confirm
- * surface (both probed). The only route that works is `session.objective.mutate`,
- * which the host binds to the USER actor — a first-class session command that has
- * been generated into this package's own union since it shipped, with zero
- * callers. So set and work land together, or neither is reachable.
- */
-
 import { afterEach, describe, expect, it, vi } from "vitest"
+import type { GoalReadoutData } from "../types/protocol.readout.generated"
+import type { ObjectiveMutationReceipt } from "../ws/session-hooks"
 import type { SlashCommand } from "./SlashPalette"
-import { buildGoalSlashCommands, type GoalSlashDeps } from "./slash-goal"
+import { buildGoalSlashCommands, type GoalSlashDeps, parseGoalCommand } from "./slash-goal"
 
 const realFetch = globalThis.fetch
 afterEach(() => {
   globalThis.fetch = realFetch
 })
 
-const stubReadout = (output: string) => {
-  const calls: string[] = []
-  globalThis.fetch = vi.fn(async (url: string) => {
-    calls.push(url)
-    return {
-      status: 200,
-      json: async () => ({ name: "goal", output, wired: true, isError: false }),
-    } as unknown as Response
-  }) as unknown as typeof fetch
-  return calls
+const empty = (): GoalReadoutData => ({
+  kind: "goal",
+  revision: 0,
+  validationContract: "missing",
+  objective: null,
+})
+
+const live = (over: Partial<NonNullable<GoalReadoutData["objective"]>> = {}): GoalReadoutData => ({
+  kind: "goal",
+  revision: 3,
+  validationContract: "manual-only",
+  objective: {
+    objectiveId: "objective-1",
+    goal: "ship it",
+    status: "active",
+    budget: { turnsUsed: 0, tokensUsed: 0 },
+    blockers: [],
+    criteria: [],
+    ...over,
+  },
+})
+
+const run = async (command: SlashCommand | undefined, rest: string): Promise<void> => {
+  if (command?.kind !== "local" && command?.kind !== "readout") {
+    throw new Error("missing /goal action")
+  }
+  await command.action(rest)
 }
 
-const harness = (over: Partial<GoalSlashDeps> = {}) => {
-  const readBody = { current: "" }
+const harness = (initial = empty(), over: Partial<GoalSlashDeps> = {}) => {
+  let state = initial
   const system: string[] = []
   const errors: string[] = []
-  const mutations: unknown[] = []
+  const mutations: { mutation: unknown; revision: number }[] = []
   const work: string[] = []
+  globalThis.fetch = vi.fn(async () =>
+    Response.json({ name: "goal", output: "goal display", wired: true, data: state }),
+  ) as typeof fetch
+  const send = async (mutation: unknown, revision: number): Promise<ObjectiveMutationReceipt> => {
+    mutations.push({ mutation, revision })
+    const value = mutation as { kind?: string; definition?: { goal?: string } }
+    if (value.kind === "create") {
+      state = live({ goal: value.definition?.goal ?? "", objectiveId: "objective-created" })
+    }
+    state = { ...state, revision: revision + 1 }
+    return { kind: "applied", commandId: "cmd-1" }
+  }
   const deps: GoalSlashDeps = {
     httpUrl: "http://127.0.0.1:4096",
     token: "tok",
     appendSystem: (text) => system.push(text),
-    onError: (msg) => errors.push(msg),
-    sendObjectiveMutate: (mutation) => {
-      mutations.push(mutation)
-      return true
-    },
+    onError: (text) => errors.push(text),
+    sendObjectiveMutate: send,
     sendGoalWork: (text) => {
       work.push(text)
       return true
     },
-    // Required since the control verbs landed: a write reports the END STATE it
-    // observed, so the builder cannot be constructed without a reader.
-    readReadout: async () => readBody.current,
+    requestGoalVerification: async () => ({ kind: "undelivered" }),
+    readGoal: async () => ({ kind: "served", output: "goal display", data: state }),
     delay: async () => undefined,
     ...over,
   }
-  const commands = buildGoalSlashCommands(deps)
-  const goal = commands.find((c) => c.slug === "goal")
-  return { system, errors, mutations, work, readBody, goal }
-}
-
-const run = async (cmd: SlashCommand | undefined, rest: string): Promise<string> => {
-  if (cmd === undefined || (cmd.kind !== "local" && cmd.kind !== "readout")) {
-    throw new Error("the /goal command must carry an action")
+  return {
+    system,
+    errors,
+    mutations,
+    work,
+    goal: buildGoalSlashCommands(deps).find((command) => command.slug === "goal"),
   }
-  return await cmd.action(rest)
 }
 
-describe("/goal — the browser can read the goal", () => {
-  it("with no argument it fetches the daemon readout and prints it", async () => {
-    const calls = stubReadout("goal   ship it\nstatus active · rev 3 · validation manual-only\n")
-    const { goal, system } = harness()
+describe("/goal parser", () => {
+  it("show is a read and stop is the pause alias", () => {
+    expect(parseGoalCommand("show")).toEqual({ kind: "show" })
+    expect(parseGoalCommand("stop")).toEqual({ kind: "pause" })
+  })
 
-    await run(goal, "")
-
-    expect(calls[0]).toBe("http://127.0.0.1:4096/readout/goal")
-    expect(system.join("")).toContain("ship it")
-    expect(system.join("")).toContain("rev 3")
+  it("plain text remains create, while no-arg tails fail closed", () => {
+    expect(parseGoalCommand("ship release")).toEqual({ kind: "create", text: "ship release" })
+    expect(parseGoalCommand("show surprise").kind).toBe("error")
+    expect(parseGoalCommand("stop surprise").kind).toBe("error")
   })
 })
 
-describe("/goal <text> — the browser can SET the goal", () => {
-  it("sends session.objective.mutate carrying a create for the typed text", async () => {
-    stubReadout("goal   ship the release\nstatus active\n")
-    const { goal, mutations, readBody } = harness()
-    readBody.current = "goal   ship the release\nstatus active\n"
-
-    await run(goal, "ship the release")
-
-    expect(mutations).toHaveLength(1)
-    expect(mutations[0]).toMatchObject({
-      kind: "create",
-      definition: { goal: "ship the release" },
-    })
+describe("/goal basic execution", () => {
+  it("no args and explicit show only display; neither mutates", async () => {
+    const h = harness(live())
+    await run(h.goal, "")
+    await run(h.goal, "show")
+    expect(h.mutations).toHaveLength(0)
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2)
   })
 
-  it("reads the goal back so the operator sees what actually landed", async () => {
-    const calls = stubReadout("goal   ship the release\nstatus active\n")
-    const { goal, system, readBody } = harness()
-    readBody.current = "goal   ship the release\nstatus active\n"
-
-    await run(goal, "ship the release")
-
-    expect(calls).toContain("http://127.0.0.1:4096/readout/goal")
-    expect(system.join("")).toContain("ship the release")
+  it("create sends the revision the operator read and waits for application", async () => {
+    const h = harness()
+    await run(h.goal, "ship release")
+    expect(h.mutations).toEqual([
+      { mutation: { kind: "create", definition: { goal: "ship release" } }, revision: 0 },
+    ])
+    expect(h.errors).toEqual([])
   })
 
-  it("a socket that refuses the send is reported, never silently swallowed", async () => {
-    stubReadout("")
-    const { goal, errors } = harness({ sendObjectiveMutate: () => false })
-
-    await run(goal, "ship the release")
-
-    expect(errors.join("")).not.toBe("")
-  })
-})
-
-describe("/goal work <text> — the browser can ask for one goal turn", () => {
-  it("sends the goalWork frame with the instruction", async () => {
-    const { goal, work } = harness()
-
-    await run(goal, "work fix the flake")
-
-    expect(work).toEqual(["fix the flake"])
+  it("work uses the dedicated attributed-turn channel", async () => {
+    const h = harness(live())
+    await run(h.goal, "work fix the flake")
+    expect(h.work).toEqual(["fix the flake"])
+    expect(h.mutations).toHaveLength(0)
   })
 
-  it("PAIRED CONTROL — `work` with no instruction asks for one instead of sending a blank", async () => {
-    const { goal, work, errors } = harness()
-
-    await run(goal, "work")
-
-    expect(work).toEqual([])
-    expect(errors.join("")).toMatch(/instruction/i)
-  })
-
-  it("a socket that refuses the send is reported", async () => {
-    const { goal, errors } = harness({ sendGoalWork: () => false })
-
-    await run(goal, "work fix the flake")
-
-    expect(errors.join("")).not.toBe("")
-  })
-})
-
-describe("/goal — the palette entry is honest about the command it is", () => {
-  it("clears the draft on accept, as the palette invariant requires", async () => {
-    stubReadout("no goal\n")
-    const { goal } = harness()
-
-    expect(await run(goal, "")).toBe("")
-  })
-
-  it("its description names all three things it does", () => {
-    const { goal } = harness()
-
-    expect(goal?.description.toLowerCase()).toMatch(/goal/)
-    expect(goal?.kind).toBe("local")
+  it("existing goal refuses create and points to edit without a mutation", async () => {
+    const h = harness(live())
+    await run(h.goal, "replace by accident")
+    expect(h.mutations).toHaveLength(0)
+    expect(h.errors[0]).toContain("edit")
   })
 })

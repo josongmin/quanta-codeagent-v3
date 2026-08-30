@@ -8,14 +8,14 @@ import type {
   UserObjectiveMutation,
   VerificationOutcome,
 } from "@/objective"
-import { createObjectiveCapabilities } from "@/objective"
+import {
+  createObjectiveCapabilities,
+  DEFAULT_OBJECTIVE_CHECK_SUCCESS_EXIT_CODES,
+  DEFAULT_OBJECTIVE_CHECK_TIMEOUT_MS,
+} from "@/objective"
 import { readCliKnob } from "../cli-knobs-accessor"
 import type { SlashCommand } from "../slash-contract"
 import { runGoalCommand } from "./goal-cmd"
-
-// Operator-added checks get a bounded two-minute default unless a future
-// command surface exposes an explicit timeout policy.
-const DEFAULT_OBJECTIVE_CHECK_TIMEOUT_MS = 120_000
 
 export type GoalControlOutcome =
   | { readonly kind: "ok"; readonly domain: ObjectiveDomainSnapshot }
@@ -191,7 +191,7 @@ export const buildGoalControl = (
             kind: "command",
             argv: [...argv],
             timeoutMs: DEFAULT_OBJECTIVE_CHECK_TIMEOUT_MS,
-            successExitCodes: [0],
+            successExitCodes: DEFAULT_OBJECTIVE_CHECK_SUCCESS_EXIT_CODES,
           },
         },
       ]),
