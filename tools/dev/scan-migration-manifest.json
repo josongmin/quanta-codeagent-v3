@@ -1,0 +1,654 @@
+{
+  "note": "The enrollment migration's work plan, MEASURED rather than assumed. One row per unenrolled file in tools/dev/scan-enrollment-debt.json, classified by the properties that decide how it is migrated. `klass` A = a recursive walker; B = a single non-recursive listing (needs topLevelOnly: true); C = the verdict's list is filtered by file CONTENT, so the helper belongs on the RAW enumeration and not on the derived subset; D = more than one root or more than one independent scan, so more than one baseline id. `absolutePaths` says whether the enumerated values are already full paths — re-joining a root onto them is a live way to produce a reach of zero. `floorLines` is the exact line of the existing numeric corpus floor, which the migration DELETES; a floor that also checks something the generic helper does not (read-vs-walk, TOCTOU) stays. These numbers are a starting inventory, not a verdict: the true site count for a file is what it REPORTS at runtime, recorded in `expectedIds` when it is migrated. Counting enumerator syntax is wrong in both directions — a walker's inner readdirSync is one site not one per level, and a helper called in a loop reports three ids from one call.",
+  "counts": {
+    "A-recursive-walk": 38,
+    "B-top-level": 12,
+    "C-derived/content-filtered": 2,
+    "D-multi-root-or-multi-scan": 4
+  },
+  "rows": [
+    {
+      "file": "src/apps/bench/benchmark-suite.test.ts",
+      "klass": "A-recursive-walk",
+      "enumerators": ["readdirSync"],
+      "recursive": true,
+      "absolutePaths": true,
+      "derived": false,
+      "roots": 1,
+      "floorLines": [
+        "27: expect(BENCHMARK_SUITES.length).toBeGreaterThanOrEqual(2)",
+        "386: expect(files.length).toBeGreaterThan(40)"
+      ]
+    },
+    {
+      "file": "src/tool/terminal-surface.test.ts",
+      "klass": "A-recursive-walk",
+      "enumerators": ["Bun.Glob"],
+      "recursive": true,
+      "absolutePaths": false,
+      "derived": false,
+      "roots": 1,
+      "floorLines": []
+    },
+    {
+      "file": "tests/meta/no-test-js-artifacts-hellgate.test.ts",
+      "klass": "A-recursive-walk",
+      "enumerators": ["readdirSync"],
+      "recursive": true,
+      "absolutePaths": true,
+      "derived": false,
+      "roots": 1,
+      "floorLines": ["52: ).toBeGreaterThan(3054)"]
+    },
+    {
+      "file": "tests/unit/_arch/comment-scanner-burndown-ratchet.test.ts",
+      "klass": "A-recursive-walk",
+      "enumerators": ["readdirSync"],
+      "recursive": true,
+      "absolutePaths": true,
+      "derived": false,
+      "roots": 1,
+      "floorLines": [
+        "139: expect([\"tests\", \"tools\"].flatMap((r) => scan(join(REPO, r))).length).toBeGreaterThan(500)"
+      ]
+    },
+    {
+      "file": "tests/unit/_arch/real-quanta-home-escape-ratchet.test.ts",
+      "klass": "A-recursive-walk",
+      "enumerators": ["new Glob"],
+      "recursive": true,
+      "absolutePaths": false,
+      "derived": false,
+      "roots": 1,
+      "floorLines": ["110: expect(composingFiles().length).toBeGreaterThan(2)"]
+    },
+    {
+      "file": "tests/unit/_arch/self-skip-reports-as-pass-ratchet.test.ts",
+      "klass": "A-recursive-walk",
+      "enumerators": ["readdirSync"],
+      "recursive": true,
+      "absolutePaths": true,
+      "derived": false,
+      "roots": 1,
+      "floorLines": ["108: ).toBeGreaterThan(3000)"]
+    },
+    {
+      "file": "tests/unit/_arch/tool-context-isp-ratchet.test.ts",
+      "klass": "A-recursive-walk",
+      "enumerators": ["readdirSync"],
+      "recursive": true,
+      "absolutePaths": true,
+      "derived": false,
+      "roots": 1,
+      "floorLines": [
+        "90: expect(files.length).toBeGreaterThan(200) // anti-vacuity: the walk found the tree"
+      ]
+    },
+    {
+      "file": "tests/unit/_arch/ts-exports-ssot.test.ts",
+      "klass": "A-recursive-walk",
+      "enumerators": ["new Glob"],
+      "recursive": true,
+      "absolutePaths": false,
+      "derived": false,
+      "roots": 0,
+      "floorLines": [
+        "136: expect(ast.length).toBeGreaterThan(400)",
+        "327: expect(consumers.length).toBeGreaterThanOrEqual(3)",
+        "332: expect(consumers.length).toBeGreaterThanOrEqual(3) // OWN floor — see above.",
+        "388: expect(consumers.length).toBeGreaterThanOrEqual(3) // OWN floor — see above."
+      ]
+    },
+    {
+      "file": "tests/unit/apps/bench/terminal/tb-2-0-retirement.test.ts",
+      "klass": "A-recursive-walk",
+      "enumerators": ["Bun.Glob"],
+      "recursive": true,
+      "absolutePaths": true,
+      "derived": false,
+      "roots": 1,
+      "floorLines": [
+        "148: expect(allInventoryKnobs().length).toBeGreaterThan(100)",
+        "221: expect(shells.length, \"shell scan floor\").toBeGreaterThanOrEqual(10)",
+        "253: expect(ACTIVE.length, \"active-source scan floor\").toBeGreaterThanOrEqual(400)",
+        "255: expect(pinned.length, \"pinned 2.1 dataset id floor\").toBeGreaterThanOrEqual(3)",
+        "309: expect(all.length).toBeGreaterThanOrEqual(10)",
+        "520: expect(r4.length, \"the SWE R4 dataset-family citations must survive\").toBeGreaterThanOrEqu"
+      ]
+    },
+    {
+      "file": "tests/unit/cli/cli-feature-gates-drift-hellgate.test.ts",
+      "klass": "A-recursive-walk",
+      "enumerators": [],
+      "recursive": true,
+      "absolutePaths": false,
+      "derived": false,
+      "roots": 0,
+      "floorLines": ["110: ).toBeGreaterThan(3000)"]
+    },
+    {
+      "file": "tests/unit/cli/runtime-sdk-cutover-hellgate.test.ts",
+      "klass": "A-recursive-walk",
+      "enumerators": ["readdirSync"],
+      "recursive": true,
+      "absolutePaths": true,
+      "derived": false,
+      "roots": 1,
+      "floorLines": ["70: expect(files.length).toBeGreaterThan(100)"]
+    },
+    {
+      "file": "tests/unit/config-knob-inventory-leaf-hellgate.test.ts",
+      "klass": "A-recursive-walk",
+      "enumerators": ["readdirSync"],
+      "recursive": true,
+      "absolutePaths": true,
+      "derived": false,
+      "roots": 1,
+      "floorLines": [
+        "83: expect(files.length).toBeGreaterThan(3)",
+        "135: expect(files.length).toBeGreaterThan(3)"
+      ]
+    },
+    {
+      "file": "tests/unit/dangerous-gate-strict-ratchet-hellgate.test.ts",
+      "klass": "A-recursive-walk",
+      "enumerators": ["readdirSync"],
+      "recursive": true,
+      "absolutePaths": true,
+      "derived": false,
+      "roots": 1,
+      "floorLines": [
+        "92: expect(STRICT_ON_GATES.length + STRICT_DISABLE_GATES.length).toBeGreaterThanOrEqual(11)",
+        "358: expect(DANGEROUS_GATES.length).toBeGreaterThanOrEqual(13)",
+        "364: expect(ALL_SRC.length).toBeGreaterThan(100)"
+      ]
+    },
+    {
+      "file": "tests/unit/dataset-family-profile-ssot.test.ts",
+      "klass": "A-recursive-walk",
+      "enumerators": ["readdirSync"],
+      "recursive": true,
+      "absolutePaths": true,
+      "derived": false,
+      "roots": 1,
+      "floorLines": ["159: expect(SCANNED.length).toBeGreaterThan(40)"]
+    },
+    {
+      "file": "tests/unit/edit-fresh-hash-mutating-tool-completeness-ratchet.test.ts",
+      "klass": "A-recursive-walk",
+      "enumerators": ["readdirSync"],
+      "recursive": true,
+      "absolutePaths": true,
+      "derived": false,
+      "roots": 1,
+      "floorLines": [
+        "89: expect(writers.length).toBeGreaterThanOrEqual(6)",
+        "114: expect(reason.length).toBeGreaterThan(10) // a real documented reason"
+      ]
+    },
+    {
+      "file": "tests/unit/eval-no-sketchy-code.test.ts",
+      "klass": "A-recursive-walk",
+      "enumerators": ["readdirSync"],
+      "recursive": true,
+      "absolutePaths": true,
+      "derived": false,
+      "roots": 1,
+      "floorLines": ["150: expect(files.length).toBeGreaterThan(20)"]
+    },
+    {
+      "file": "tests/unit/feature-catalog-reachability.test.ts",
+      "klass": "A-recursive-walk",
+      "enumerators": ["readdirSync"],
+      "recursive": true,
+      "absolutePaths": true,
+      "derived": false,
+      "roots": 1,
+      "floorLines": [
+        "105: expect(r.reached.size).toBeGreaterThan(100)",
+        "114: expect(yamls.length, \"no feature YAML read — the ratchet below is vacuous\").toBeGreaterTha",
+        "137: expect(yamls.length, \"no feature YAML read — the ratchet below is vacuous\").toBeGreaterTha"
+      ]
+    },
+    {
+      "file": "tests/unit/god-code-ratchet.test.ts",
+      "klass": "A-recursive-walk",
+      "enumerators": ["readdirSync"],
+      "recursive": true,
+      "absolutePaths": true,
+      "derived": false,
+      "roots": 1,
+      "floorLines": [
+        "205: expect(files.length).toBeGreaterThan(1000) // the corpus is real",
+        "232: expect(files.length).toBeGreaterThan(1000)"
+      ]
+    },
+    {
+      "file": "tests/unit/host/bootstrap-host-extraction-hellgate.test.ts",
+      "klass": "A-recursive-walk",
+      "enumerators": ["readdirSync"],
+      "recursive": true,
+      "absolutePaths": true,
+      "derived": false,
+      "roots": 1,
+      "floorLines": [
+        "554: expect(files.length).toBeGreaterThanOrEqual(3)",
+        "666: expect(identityCalls).toBeGreaterThanOrEqual(1)"
+      ]
+    },
+    {
+      "file": "tests/unit/integrations/github/slice-fence-static-hellgate-r3.test.ts",
+      "klass": "A-recursive-walk",
+      "enumerators": ["readdirSync"],
+      "recursive": true,
+      "absolutePaths": false,
+      "derived": false,
+      "roots": 1,
+      "floorLines": []
+    },
+    {
+      "file": "tests/unit/lint-debt-ratchet-reach.test.ts",
+      "klass": "A-recursive-walk",
+      "enumerators": ["readdirSync"],
+      "recursive": true,
+      "absolutePaths": false,
+      "derived": false,
+      "roots": 1,
+      "floorLines": [
+        "130: expect(files.length).toBeGreaterThan(1000)",
+        "131: expect(targets.length).toBeGreaterThan(1000)",
+        "132: expect(rejected.length).toBeGreaterThan(10)"
+      ]
+    },
+    {
+      "file": "tests/unit/no-benchmark-overfit-steer-ratchet.test.ts",
+      "klass": "A-recursive-walk",
+      "enumerators": ["readdirSync"],
+      "recursive": true,
+      "absolutePaths": false,
+      "derived": false,
+      "roots": 1,
+      "floorLines": ["160: expect(steers.length).toBeGreaterThanOrEqual(10)"]
+    },
+    {
+      "file": "tests/unit/no-per-framework-heuristic-ratchet.test.ts",
+      "klass": "A-recursive-walk",
+      "enumerators": ["readdirSync"],
+      "recursive": true,
+      "absolutePaths": true,
+      "derived": false,
+      "roots": 1,
+      "floorLines": []
+    },
+    {
+      "file": "tests/unit/no-timebomb-auth-fixtures-hellgate.test.ts",
+      "klass": "A-recursive-walk",
+      "enumerators": ["readdirSync"],
+      "recursive": true,
+      "absolutePaths": true,
+      "derived": false,
+      "roots": 1,
+      "floorLines": []
+    },
+    {
+      "file": "tests/unit/observability/vocabulary-migration.test.ts",
+      "klass": "A-recursive-walk",
+      "enumerators": ["readdirSync"],
+      "recursive": true,
+      "absolutePaths": true,
+      "derived": false,
+      "roots": 1,
+      "floorLines": ["328: expect(ALL_ATTR_KEYS.length).toBeGreaterThanOrEqual(52)"]
+    },
+    {
+      "file": "tests/unit/orphan-orchestrator-ratchet.test.ts",
+      "klass": "A-recursive-walk",
+      "enumerators": ["readdirSync"],
+      "recursive": true,
+      "absolutePaths": true,
+      "derived": false,
+      "roots": 1,
+      "floorLines": ["252: expect(DRIVER_EXPORTS.length).toBeGreaterThan(20)"]
+    },
+    {
+      "file": "tests/unit/permission/posture/e3-direct-writer-ratchet.test.ts",
+      "klass": "A-recursive-walk",
+      "enumerators": ["readdirSync"],
+      "recursive": true,
+      "absolutePaths": true,
+      "derived": false,
+      "roots": 1,
+      "floorLines": [
+        "57: expect(SOURCES.length, \"the walk read almost none of src/\").toBeGreaterThan(3000)"
+      ]
+    },
+    {
+      "file": "tests/unit/realtime/voice-session-hellgate.test.ts",
+      "klass": "A-recursive-walk",
+      "enumerators": ["new Glob"],
+      "recursive": true,
+      "absolutePaths": false,
+      "derived": false,
+      "roots": 0,
+      "floorLines": [
+        "422: expect(scanned, \"the glob matched almost no source files\").toBeGreaterThan(3000)"
+      ]
+    },
+    {
+      "file": "tests/unit/runagent-callsite-authority-fence-hellgate.test.ts",
+      "klass": "A-recursive-walk",
+      "enumerators": ["readdirSync"],
+      "recursive": true,
+      "absolutePaths": true,
+      "derived": false,
+      "roots": 1,
+      "floorLines": [
+        "325: expect(sites.length).toBeGreaterThanOrEqual(10)",
+        "379: expect(gated.length).toBeGreaterThanOrEqual(2)"
+      ]
+    },
+    {
+      "file": "tests/unit/runtime-config-no-dead-knob-ratchet.test.ts",
+      "klass": "A-recursive-walk",
+      "enumerators": ["readdirSync"],
+      "recursive": true,
+      "absolutePaths": true,
+      "derived": false,
+      "roots": 1,
+      "floorLines": [
+        "172: expect(ALL_FIELDS.length).toBeGreaterThanOrEqual(150)",
+        "173: expect(DISTINCTIVE.length).toBeGreaterThanOrEqual(50)",
+        "174: expect(PROD_SOURCES.length).toBeGreaterThan(500) // production tree is actually loaded"
+      ]
+    },
+    {
+      "file": "tests/unit/runtime/exec-cluster-spawn-env-scrub-ban-hellgate.test.ts",
+      "klass": "A-recursive-walk",
+      "enumerators": ["readdirSync"],
+      "recursive": true,
+      "absolutePaths": true,
+      "derived": false,
+      "roots": 1,
+      "floorLines": [
+        "472: expect(cluster.length).toBeGreaterThanOrEqual(2)",
+        "480: expect(totalCalls).toBeGreaterThanOrEqual(2)",
+        "490: expect(cluster.filter((c) => !LEGACY_LIST.includes(c.file)).length).toBeGreaterThanOrEqual",
+        "515: expect(rule.why.length).toBeGreaterThan(40)"
+      ]
+    },
+    {
+      "file": "tests/unit/runtime/single-pid-kill-ban-hellgate.test.ts",
+      "klass": "A-recursive-walk",
+      "enumerators": ["readdirSync"],
+      "recursive": true,
+      "absolutePaths": true,
+      "derived": false,
+      "roots": 1,
+      "floorLines": [
+        "307: expect(why.trim().length, `allowlist entry ${file} has no justification`).toBeGreaterThan("
+      ]
+    },
+    {
+      "file": "tests/unit/runtime/worktree-checkout-progress-retired.test.ts",
+      "klass": "A-recursive-walk",
+      "enumerators": ["readdirSync"],
+      "recursive": true,
+      "absolutePaths": true,
+      "derived": false,
+      "roots": 1,
+      "floorLines": ["98: expect(SRC_FILES.length).toBeGreaterThan(500)"]
+    },
+    {
+      "file": "tests/unit/slice-boundary-config-parity.test.ts",
+      "klass": "A-recursive-walk",
+      "enumerators": ["readdirSync"],
+      "recursive": true,
+      "absolutePaths": false,
+      "derived": false,
+      "roots": 1,
+      "floorLines": ["90: ).toBeGreaterThan(1)"]
+    },
+    {
+      "file": "tests/unit/src-no-sketchy-code.test.ts",
+      "klass": "A-recursive-walk",
+      "enumerators": ["readdirSync"],
+      "recursive": true,
+      "absolutePaths": true,
+      "derived": false,
+      "roots": 1,
+      "floorLines": ["832: expect(files.length).toBeGreaterThan(80)"]
+    },
+    {
+      "file": "tests/unit/surface-coupling-ratchet.test.ts",
+      "klass": "A-recursive-walk",
+      "enumerators": ["readdirSync"],
+      "recursive": true,
+      "absolutePaths": false,
+      "derived": false,
+      "roots": 1,
+      "floorLines": []
+    },
+    {
+      "file": "tests/unit/test-fixtures-do-not-leak-tmp.test.ts",
+      "klass": "A-recursive-walk",
+      "enumerators": ["readdirSync"],
+      "recursive": true,
+      "absolutePaths": true,
+      "derived": false,
+      "roots": 1,
+      "floorLines": ["96: expect(all.length).toBeGreaterThan(500)"]
+    },
+    {
+      "file": "tests/unit/tool-surface-manifest-hellgate.test.ts",
+      "klass": "A-recursive-walk",
+      "enumerators": [],
+      "recursive": true,
+      "absolutePaths": false,
+      "derived": false,
+      "roots": 0,
+      "floorLines": [
+        "117: expect(expected.length).toBeGreaterThanOrEqual(7) // container_exec + 6 pty_*"
+      ]
+    },
+    {
+      "file": "tests/unit/_arch/capability-literal-ratchet.test.ts",
+      "klass": "B-top-level",
+      "enumerators": ["[\"git\", \"ls-files\""],
+      "recursive": false,
+      "absolutePaths": false,
+      "derived": false,
+      "roots": 0,
+      "floorLines": ["122: if (files.length < 3244) {"]
+    },
+    {
+      "file": "tests/unit/_arch/gate-manifest-workflow-parity.test.ts",
+      "klass": "B-top-level",
+      "enumerators": ["readdirSync"],
+      "recursive": false,
+      "absolutePaths": false,
+      "derived": false,
+      "roots": 1,
+      "floorLines": [
+        "177: expect(REQUIRED_GATE_IDS.length).toBeGreaterThanOrEqual(16) // anti-vacuity",
+        "263: expect(steps.length).toBeGreaterThanOrEqual(28)",
+        "269: expect(gatesForStage(\"precommit\").length).toBeGreaterThan(5)"
+      ]
+    },
+    {
+      "file": "tests/unit/_arch/repo-index-hygiene.test.ts",
+      "klass": "B-top-level",
+      "enumerators": ["[\"git\", \"ls-files\""],
+      "recursive": false,
+      "absolutePaths": false,
+      "derived": false,
+      "roots": 0,
+      "floorLines": ["166: if (entries.length < 12695) {"]
+    },
+    {
+      "file": "tests/unit/gate-vocabulary-ratchet-hellgate.test.ts",
+      "klass": "B-top-level",
+      "enumerators": ["readdirSync"],
+      "recursive": false,
+      "absolutePaths": true,
+      "derived": false,
+      "roots": 1,
+      "floorLines": ["130: ).toBeGreaterThan(2984)"]
+    },
+    {
+      "file": "tests/unit/knob-registry-completeness-ratchet-hellgate.test.ts",
+      "klass": "B-top-level",
+      "enumerators": ["readdirSync"],
+      "recursive": false,
+      "absolutePaths": true,
+      "derived": false,
+      "roots": 1,
+      "floorLines": ["376: ).toBeGreaterThan(400)"]
+    },
+    {
+      "file": "tests/unit/no-raw-nul-bytes-hellgate.test.ts",
+      "klass": "B-top-level",
+      "enumerators": ["readdirSync"],
+      "recursive": false,
+      "absolutePaths": true,
+      "derived": false,
+      "roots": 1,
+      "floorLines": [
+        "61: expect(scanned, \"the walk read no files — the NUL check below is vacuous\").toBeGreaterThan"
+      ]
+    },
+    {
+      "file": "tests/unit/no-raw-process-env-knob-ratchet-hellgate.test.ts",
+      "klass": "B-top-level",
+      "enumerators": ["readdirSync"],
+      "recursive": false,
+      "absolutePaths": true,
+      "derived": false,
+      "roots": 1,
+      "floorLines": []
+    },
+    {
+      "file": "tests/unit/objective/authority-boundary-ratchet.test.ts",
+      "klass": "B-top-level",
+      "enumerators": ["readdirSync"],
+      "recursive": false,
+      "absolutePaths": true,
+      "derived": false,
+      "roots": 1,
+      "floorLines": ["98: expect(ALLOWED.size).toBeGreaterThanOrEqual(3)"]
+    },
+    {
+      "file": "tests/unit/repair-shadow-js-ratchet.test.ts",
+      "klass": "B-top-level",
+      "enumerators": ["readdirSync"],
+      "recursive": false,
+      "absolutePaths": false,
+      "derived": false,
+      "roots": 1,
+      "floorLines": ["23: ).toBeGreaterThan(3)"]
+    },
+    {
+      "file": "tests/unit/runner/knobs/knobs-import-bundle.test.ts",
+      "klass": "B-top-level",
+      "enumerators": ["readdir"],
+      "recursive": false,
+      "absolutePaths": false,
+      "derived": false,
+      "roots": 1,
+      "floorLines": [
+        "207: expect(knobFileCount, \"the per-knob directory read almost nothing\").toBeGreaterThan(50)"
+      ]
+    },
+    {
+      "file": "tests/unit/side-agent-stopall-wiring-guard.test.ts",
+      "klass": "B-top-level",
+      "enumerators": ["readdirSync"],
+      "recursive": false,
+      "absolutePaths": false,
+      "derived": false,
+      "roots": 1,
+      "floorLines": ["90: expect(callSites.length).toBeGreaterThanOrEqual(1)"]
+    },
+    {
+      "file": "tests/unit/test-quality-ratchet-hellgate.test.ts",
+      "klass": "B-top-level",
+      "enumerators": ["readdirSync"],
+      "recursive": false,
+      "absolutePaths": true,
+      "derived": false,
+      "roots": 1,
+      "floorLines": ["135: expect(scan().filesScanned).toBeGreaterThan(2000)"]
+    },
+    {
+      "file": "tests/unit/apps/bench/promax/promax-bootstrap-phase-reachability.test.ts",
+      "klass": "C-derived/content-filtered",
+      "enumerators": ["readdirSync"],
+      "recursive": true,
+      "absolutePaths": true,
+      "derived": true,
+      "roots": 1,
+      "floorLines": [
+        "214: expect(found.length).toBeGreaterThanOrEqual(3)",
+        "283: expect(kinds.size).toBeGreaterThanOrEqual(2)"
+      ]
+    },
+    {
+      "file": "tests/unit/apps/bench/promax/promax-port-contract-unsuppressed.test.ts",
+      "klass": "C-derived/content-filtered",
+      "enumerators": ["readdirSync"],
+      "recursive": true,
+      "absolutePaths": true,
+      "derived": true,
+      "roots": 1,
+      "floorLines": ["96: expect(found.length).toBeGreaterThan(5)"]
+    },
+    {
+      "file": "tests/unit/_arch/gated-test-scope-ratchet.test.ts",
+      "klass": "D-multi-root-or-multi-scan",
+      "enumerators": ["readdirSync"],
+      "recursive": true,
+      "absolutePaths": true,
+      "derived": false,
+      "roots": 2,
+      "floorLines": [
+        "349: expect(dirs.length).toBeGreaterThan(150) // 211 on 2026-08-27",
+        "350: expect(files).toBeGreaterThan(3000) // 3765 on 2026-08-27",
+        "394: expect(Object.keys(all).length).toBeGreaterThan(10) // the read is real",
+        "419: ).toBeGreaterThan(4)",
+        "439: ).toBeGreaterThan(10)"
+      ]
+    },
+    {
+      "file": "tests/unit/_arch/repo-path-anchor-ratchet.test.ts",
+      "klass": "D-multi-root-or-multi-scan",
+      "enumerators": ["readdirSync", "Bun.Glob", "new Glob", "globSync", "opendirSync"],
+      "recursive": true,
+      "absolutePaths": true,
+      "derived": false,
+      "roots": 8,
+      "floorLines": ["520: expect(files.length).toBeGreaterThan(2000)"]
+    },
+    {
+      "file": "tests/unit/observability-audit-ratchet.test.ts",
+      "klass": "D-multi-root-or-multi-scan",
+      "enumerators": ["readdirSync"],
+      "recursive": true,
+      "absolutePaths": true,
+      "derived": false,
+      "roots": 2,
+      "floorLines": []
+    },
+    {
+      "file": "tests/unit/observability/new-slice-metrics-hellgate.test.ts",
+      "klass": "D-multi-root-or-multi-scan",
+      "enumerators": ["readdirSync"],
+      "recursive": true,
+      "absolutePaths": true,
+      "derived": false,
+      "roots": 2,
+      "floorLines": [
+        "168: expect(files.length, `${slice}: the slice read almost nothing`).toBeGreaterThan(5)",
+        "284: expect(all.length, \"the walk read almost none of src/\").toBeGreaterThan(3000)"
+      ]
+    }
+  ]
+}
