@@ -71,63 +71,95 @@ const respond = (res: ServerResponse<IncomingMessage>, status: number, body: unk
   res.end(json)
 }
 
+type LanceFixtureState = {
+  readonly tables: Map<string, Map<string, StoredDoc>>
+}
+
+type LanceRoute = { readonly table: string; readonly action: string }
+
+const lanceRoute = (method: string, path: string): LanceRoute | undefined => {
+  const parts = path.split("/").filter((part) => part.length > 0)
+  if (method !== "POST" || parts.length !== 4 || parts[0] !== "v1" || parts[1] !== "table") {
+    return undefined
+  }
+  return { table: decodeURIComponent(parts[2] ?? ""), action: parts[3] ?? "" }
+}
+
+const docsFromBody = (body: unknown): readonly StoredDoc[] => {
+  const docs = (body as { docs?: unknown[] }).docs
+  return Array.isArray(docs) ? (docs as StoredDoc[]) : []
+}
+
+const idsFromBody = (body: unknown): readonly string[] => {
+  const ids = (body as { ids?: unknown[] }).ids
+  return Array.isArray(ids) ? (ids as string[]) : []
+}
+
+const queryFromBody = (
+  body: unknown,
+): { readonly vector: readonly number[]; readonly k: number } => {
+  const vector = (body as { vector?: unknown[] }).vector
+  const rawK = (body as { k?: unknown }).k
+  return {
+    vector: Array.isArray(vector) ? vector.map((value) => Number(value)) : [],
+    k: typeof rawK === "number" ? rawK : 10,
+  }
+}
+
+const upsertDocs = (docs: Map<string, StoredDoc>, body: unknown): void => {
+  for (const doc of docsFromBody(body)) {
+    docs.set(doc.id, { id: doc.id, vector: [...doc.vector], metadata: { ...(doc.metadata ?? {}) } })
+  }
+}
+
+const queryDocs = (docs: ReadonlyMap<string, StoredDoc>, body: unknown) => {
+  const { vector, k } = queryFromBody(body)
+  return [...docs.values()]
+    .map((doc) => ({ id: doc.id, score: dot(doc.vector, vector), metadata: doc.metadata }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, k)
+}
+
+const handleLanceRequest = (
+  state: LanceFixtureState,
+  method: string,
+  path: string,
+  body: unknown,
+  res: ServerResponse<IncomingMessage>,
+): void => {
+  const route = lanceRoute(method, path)
+  if (route === undefined) {
+    respond(res, 404, { error: "not-found" })
+    return
+  }
+  const docs = state.tables.get(route.table) ?? new Map<string, StoredDoc>()
+  state.tables.set(route.table, docs)
+  if (route.action === "upsert") {
+    upsertDocs(docs, body)
+    respond(res, 200, { ok: true })
+    return
+  }
+  if (route.action === "delete") {
+    for (const id of idsFromBody(body)) docs.delete(id)
+    respond(res, 200, { ok: true })
+    return
+  }
+  if (route.action === "query") {
+    respond(res, 200, { hits: queryDocs(docs, body) })
+    return
+  }
+  respond(res, 404, { error: "unknown-action" })
+}
+
 const startLanceRestFixture = async (): Promise<LanceRestFixture> => {
   const calls: RecordedCall[] = []
-  const tables = new Map<string, Map<string, StoredDoc>>()
+  const state: LanceFixtureState = { tables: new Map<string, Map<string, StoredDoc>>() }
   const server = createServer(async (req, res) => {
     const method = req.method ?? "GET"
     const path = req.url ?? "/"
     const body = method === "POST" ? await readJsonBody(req) : undefined
     calls.push({ path, method, body })
-    const parts = path.split("/").filter((part) => part.length > 0)
-    if (method !== "POST" || parts.length !== 4 || parts[0] !== "v1" || parts[1] !== "table") {
-      respond(res, 404, { error: "not-found" })
-      return
-    }
-    const table = decodeURIComponent(parts[2] ?? "")
-    const action = parts[3]
-    const docs = tables.get(table) ?? new Map<string, StoredDoc>()
-    tables.set(table, docs)
-    if (action === "upsert") {
-      const items = Array.isArray((body as { docs?: unknown[] }).docs)
-        ? ((body as { docs: unknown[] }).docs as StoredDoc[])
-        : []
-      for (const doc of items) {
-        docs.set(doc.id, {
-          id: doc.id,
-          vector: [...doc.vector],
-          metadata: { ...(doc.metadata ?? {}) },
-        })
-      }
-      respond(res, 200, { ok: true })
-      return
-    }
-    if (action === "delete") {
-      const ids = Array.isArray((body as { ids?: unknown[] }).ids)
-        ? ((body as { ids: unknown[] }).ids as string[])
-        : []
-      for (const id of ids) docs.delete(id)
-      respond(res, 200, { ok: true })
-      return
-    }
-    if (action === "query") {
-      const vector = Array.isArray((body as { vector?: unknown[] }).vector)
-        ? (((body as { vector: unknown[] }).vector as number[]).map((v) => Number(v)) as number[])
-        : []
-      const kRaw = (body as { k?: unknown }).k
-      const k = typeof kRaw === "number" ? kRaw : 10
-      const hits = [...docs.values()]
-        .map((doc) => ({
-          id: doc.id,
-          score: dot(doc.vector, vector),
-          metadata: doc.metadata,
-        }))
-        .sort((a, b) => b.score - a.score)
-        .slice(0, k)
-      respond(res, 200, { hits })
-      return
-    }
-    respond(res, 404, { error: "unknown-action" })
+    handleLanceRequest(state, method, path, body, res)
   })
   server.listen(0, "127.0.0.1")
   await once(server, "listening")
@@ -139,10 +171,10 @@ const startLanceRestFixture = async (): Promise<LanceRestFixture> => {
       calls.length = 0
     },
     tableIds(table: string): readonly string[] {
-      return [...(tables.get(table)?.keys() ?? [])].sort()
+      return [...(state.tables.get(table)?.keys() ?? [])].sort()
     },
     tableTexts(table: string): readonly string[] {
-      return [...(tables.get(table)?.values() ?? [])]
+      return [...(state.tables.get(table)?.values() ?? [])]
         .map((doc) => String(doc.metadata.text ?? ""))
         .sort()
     },
