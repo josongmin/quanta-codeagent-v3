@@ -30,7 +30,6 @@
     "tests/unit/knob-registry-completeness-ratchet-hellgate.test.ts",
     "tests/unit/lint-debt-ratchet-reach.test.ts",
     "tests/unit/no-benchmark-overfit-steer-ratchet.test.ts",
-    "tests/unit/no-per-framework-heuristic-ratchet.test.ts",
     "tests/unit/no-raw-nul-bytes-hellgate.test.ts",
     "tests/unit/no-raw-process-env-knob-ratchet-hellgate.test.ts",
     "tests/unit/no-timebomb-auth-fixtures-hellgate.test.ts",
@@ -205,6 +204,11 @@
     ],
     "tests/unit/migration-slice-boundary.test.ts": [
       "slice-boundary:migration"
+    ],
+    "tests/unit/no-per-framework-heuristic-ratchet.test.ts": [
+      "tests/unit/no-per-framework-heuristic-ratchet.test.ts#agent/repro-test",
+      "tests/unit/no-per-framework-heuristic-ratchet.test.ts#runner/batch/corpus",
+      "tests/unit/no-per-framework-heuristic-ratchet.test.ts#runner/batch/eval"
     ],
     "tests/unit/objective-slice-boundary.test.ts": [
       "slice-boundary:objective"

@@ -40,7 +40,9 @@
 
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
-import { join } from "node:path"
+import { join, relative } from "node:path"
+
+import { assertScanPopulation } from "./_shared/scan-population"
 
 // ---------------------------------------------------------------------------
 // File-system walker (vendored — tests should not import the src under scan).
@@ -80,12 +82,32 @@ const walk = (dir: string, out: string[]): void => {
   }
 }
 
+/**
+ * The three scan roots, each held to its own MEASURED reach.
+ *
+ * This file had no corpus floor at all: `hits.length === 0` is what a clean tree
+ * and an unread one both produce. Filed as a single recursive walk during
+ * classification and re-read here — it is three independent roots, so it is
+ * three ids. One aggregate number would let `agent/repro-test` disappear behind
+ * `runner/batch/eval` staying large.
+ *
+ * `collectable` and `skipDirs` restate `walk` exactly: `.ts`/`.tsx`, never a
+ * test file, never inside `__tests__`.
+ */
 const scanFiles = (): string[] => {
   const out: string[] = []
   for (const dir of SCAN_DIRS) {
     // statSync throws if the dir is missing — all three are expected to exist;
     // if one is renamed away, the ratchet should loudly fail to scan.
-    if (statSync(dir).isDirectory()) walk(dir, out)
+    if (statSync(dir).isDirectory()) {
+      const before = out.length
+      walk(dir, out)
+      assertScanPopulation(out.slice(before), dir, {
+        id: `tests/unit/no-per-framework-heuristic-ratchet.test.ts#${relative(SRC_ROOT, dir)}`,
+        collectable: (n) => (n.endsWith(".ts") || n.endsWith(".tsx")) && !isExcludedTsFile(n),
+        skipDirs: ["__tests__"],
+      })
+    }
   }
   return out
 }

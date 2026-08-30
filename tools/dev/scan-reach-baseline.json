@@ -238,6 +238,15 @@
     "tests/unit/memory/cross-session-inject-removed-ratchet.test.ts#SRC-ROOT": {
       "walked": 3642
     },
+    "tests/unit/no-per-framework-heuristic-ratchet.test.ts#agent/repro-test": {
+      "walked": 9
+    },
+    "tests/unit/no-per-framework-heuristic-ratchet.test.ts#runner/batch/corpus": {
+      "walked": 12
+    },
+    "tests/unit/no-per-framework-heuristic-ratchet.test.ts#runner/batch/eval": {
+      "walked": 164
+    },
     "tests/unit/objective/constructor-owner-ratchet.test.ts#SRC-DIR": {
       "walked": 3338
     },
