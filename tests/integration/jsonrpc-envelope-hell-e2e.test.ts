@@ -88,6 +88,44 @@ const deferred = <T>(): Deferred<T> => {
   return { promise, resolve, reject }
 }
 
+const deferredSlots = (
+  count: number,
+): { slots: Map<number, Deferred<number>>; promises: Promise<number>[] } => {
+  const slots = new Map<number, Deferred<number>>()
+  const promises: Promise<number>[] = []
+  const ids = createRequestIdGenerator(1)
+  for (let index = 0; index < count; index += 1) {
+    const id = ids.next() as unknown as number
+    const slot = deferred<number>()
+    slots.set(id, slot)
+    promises.push(slot.promise)
+  }
+  return { slots, promises }
+}
+
+const shuffledSuccessResponses = (count: number): string[] => {
+  const responses = Array.from({ length: count }, (_, index) => {
+    const id = index + 1
+    return encodeResponse({ id, result: id * 7 })
+  })
+  return shuffleInPlace(responses, mulberry32(0xbeef))
+}
+
+const resolveSuccessResponses = (
+  slots: ReadonlyMap<number, Deferred<number>>,
+  wires: readonly string[],
+): void => {
+  for (const wire of wires) {
+    const decoded = decodeResponse(wire)
+    if (!decoded.ok) throw new Error("decode failed")
+    const id = decoded.value.id as number
+    const slot = slots.get(id)
+    if (slot === undefined) throw new Error(`orphan ${id}`)
+    if (!("result" in decoded.value)) throw new Error("not success")
+    slot.resolve(decoded.value.result as number)
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* Scenario 1 — 1000 concurrent correlations                           */
 /* ------------------------------------------------------------------ */
@@ -157,33 +195,8 @@ describe("JSON-RPC hell — 1000 concurrent correlations with shuffled replies",
   test("captured deferreds resolve before the dispatch loop returns (real Promise.all)", async () => {
     // Tighter variant of scenario 1 that exercises the Promise.all join point.
     const N = 1000
-    const gen = createRequestIdGenerator(1)
-    const slots = new Map<number, Deferred<number>>()
-    const promises: Promise<number>[] = []
-    for (let i = 0; i < N; i += 1) {
-      const id = gen.next() as unknown as number
-      const d = deferred<number>()
-      slots.set(id, d)
-      promises.push(d.promise)
-    }
-
-    const wireResponses: string[] = []
-    for (let i = 0; i < N; i += 1) {
-      const id = i + 1
-      wireResponses.push(encodeResponse({ id, result: id * 7 }))
-    }
-    const rng = mulberry32(0xbeef)
-    shuffleInPlace(wireResponses, rng)
-
-    for (const wire of wireResponses) {
-      const dec = decodeResponse(wire)
-      if (!dec.ok) throw new Error("decode failed")
-      const id = dec.value.id as number
-      const slot = slots.get(id)
-      if (slot === undefined) throw new Error(`orphan ${id}`)
-      if (!("result" in dec.value)) throw new Error("not success")
-      slot.resolve(dec.value.result as number)
-    }
+    const { slots, promises } = deferredSlots(N)
+    resolveSuccessResponses(slots, shuffledSuccessResponses(N))
     const all = await Promise.all(promises)
     // Each entry must be id * 7 in id order (1..N).
     for (let i = 0; i < N; i += 1) {
