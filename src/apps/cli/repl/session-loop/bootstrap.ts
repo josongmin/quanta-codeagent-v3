@@ -308,6 +308,8 @@ export const bootstrapSessionLoop = async (
     replaceTranscript,
     idMeta,
     objectiveStore: deps.objectiveStore,
+    usageAccounting: setup.usageAccounting,
+    runtimeSessionId: setup.sessionId,
     goalWakeSlot: deps.goalWakeSlot,
     commitSwitch: ({ sessionId, history: switchHistory }) => {
       state.surfaceState = updateSessionState(state.surfaceState, {

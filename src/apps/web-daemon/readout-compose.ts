@@ -13,7 +13,7 @@
  *
  * The runtime FACADE cannot own the goal accessor: it is built before any
  * session exists, so it has no thread id to read the domain for. That is the
- * same reason `cost` is composed here — the server owns the fold.
+ * same reason `cost` is composed here — the server owns the authority projection.
  */
 
 import {

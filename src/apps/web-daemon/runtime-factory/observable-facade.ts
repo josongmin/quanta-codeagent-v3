@@ -155,7 +155,7 @@ export interface ObservableRuntimeFacade extends RuntimeFacade {
    * Threads the SAME live sources the session runs on (subagent TaskRegistry /
    * plan store / skills discovery / durable memory store / context-usage
    * holder) so `/agents`, `/plan`, `/skills`, `/memory`, `/context` serve real
-   * data instead of the "not wired" stub. `/cost` is folded server-side from
+   * data instead of the "not wired" stub. `/cost` is projected server-side from
    * `turn.completed` events (see `startWebDaemon`) — not here. Test factories
    * that do not expose this simply degrade every readout to the honest
    * missing-source line (never an error).

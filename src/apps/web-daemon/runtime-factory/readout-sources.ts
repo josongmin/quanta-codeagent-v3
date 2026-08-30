@@ -71,7 +71,8 @@ const toMemoryReadoutEntry = (entry: {
  *                store the CLI writes; READ-ONLY here — this surface composes
  *                no memory config, so web turns do not write memories yet)
  *  - `context` → the always-on prompt-usage holder (`onPromptAssembled` sink)
- * `/cost` is deliberately absent: it is folded server-side in `startWebDaemon`
+ * `/cost` is deliberately absent: `startWebDaemon` projects the facade's
+ * canonical usage authority and owns the independent turn tally
  * from `turn.completed` events (the daemon-native usage truth).
  */
 export const buildReadoutSources = (args: {

@@ -5,13 +5,14 @@
  * the legacy `tokenUsage` delta is folded would double-count the whole
  * session on every turn — the exact independent-ledger failure the web
  * surface had. The legacy fold survives ONLY for events with no snapshot
- * (old daemons / accounting off).
+ * (old daemons); modern accounting-off hosts send `{status:"off"}`.
  */
 import { describe, expect, it } from "vitest"
 import type { CostSurfaceViewWire } from "../types/protocol.session.generated"
 import { applySessionEventToTranscript, initialTranscript } from "./session-hooks"
 
 const view = (totalUsd: number, calls: number): CostSurfaceViewWire => ({
+  status: "on",
   totalUsd,
   estimatedUsd: 0,
   unpricedCalls: 0,
@@ -22,6 +23,7 @@ const view = (totalUsd: number, calls: number): CostSurfaceViewWire => ({
   calls,
   rootUsd: totalUsd,
   subagentUsd: 0,
+  continuityLost: false,
 })
 
 const completed = (over: Record<string, unknown>) =>
@@ -42,8 +44,8 @@ describe("A7 — costView replace semantics", () => {
     state = applySessionEventToTranscript(state, completed({ costView: view(3, 1) }))
     state = applySessionEventToTranscript(state, completed({ costView: view(6, 2) }))
     // Additive handling would read 9 here — the mutation this test exists for.
-    expect(state.costView?.totalUsd).toBe(6)
-    expect(state.costView?.calls).toBe(2)
+    expect(state.costView?.status === "on" ? state.costView.totalUsd : undefined).toBe(6)
+    expect(state.costView?.status === "on" ? state.costView.calls : undefined).toBe(2)
   })
 
   it("a snapshot-carrying event does NOT also fold the legacy delta", () => {
@@ -57,7 +59,7 @@ describe("A7 — costView replace semantics", () => {
     )
     // Folding both would double-count; the legacy counter stays untouched.
     expect(state.tokenUsage.promptTokens).toBe(0)
-    expect(state.costView?.totalUsd).toBe(3)
+    expect(state.costView?.status === "on" ? state.costView.totalUsd : undefined).toBe(3)
   })
 
   it("legacy events (no snapshot) keep the additive fallback exactly as before", () => {
@@ -82,6 +84,6 @@ describe("A7 — costView replace semantics", () => {
       state,
       completed({ tokenUsage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 } }),
     )
-    expect(state.costView?.totalUsd).toBe(3)
+    expect(state.costView?.status === "on" ? state.costView.totalUsd : undefined).toBe(3)
   })
 })

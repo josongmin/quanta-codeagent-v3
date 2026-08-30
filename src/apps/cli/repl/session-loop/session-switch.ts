@@ -27,6 +27,7 @@
 import { prepareObjectiveSnapshotForAttach } from "@/host/runtime/objective-store-wire"
 import type { Message } from "@/llm"
 import type { ObjectivePort } from "@/objective"
+import type { UsageAccountingPort } from "@/observability/usage-accounting"
 import { attachSessionToLive, type PersistedObjectiveSnapshot, type SessionMeta } from "@/session"
 import type { GoalWakeSignalSlot } from "../goal-wake-signal"
 
@@ -49,6 +50,7 @@ export interface SessionSwitchDeps {
         meta: SessionMeta
         messages: readonly Message[]
         objective?: PersistedObjectiveSnapshot | undefined
+        usageAccounting?: string | undefined
       }
     | undefined
   >
@@ -64,6 +66,10 @@ export interface SessionSwitchDeps {
   readonly commit: (next: { sessionId: string; history: readonly Message[] }) => void
   readonly currentSessionId?: (() => string | undefined) | undefined
   readonly objectiveStore?: ObjectivePort | undefined
+  readonly usageAccounting?: UsageAccountingPort | undefined
+  /** Session id stamped onto new model-call provenance by the already-live
+   * runtime. Restored books are rebound to this id after a live attach. */
+  readonly runtimeSessionId?: string | undefined
   readonly goalWakeSlot?: GoalWakeSignalSlot | undefined
 }
 
@@ -95,27 +101,39 @@ export const performSessionSwitch = async (
 ): Promise<SessionSwitchReceipt> => {
   const previousSessionId = deps.currentSessionId?.()
   let attached = false
+  const hasAttachedState = deps.objectiveStore !== undefined || deps.usageAccounting !== undefined
   const outcome = await attachSessionToLive(newSessionId, {
     loadSession: deps.loadSession,
     onAttachStart: () => deps.goalWakeSlot?.current?.onActivity(),
-    prepareAttachedState:
-      deps.objectiveStore === undefined
-        ? undefined
-        : (saved) => {
-            const prepared = prepareObjectiveSnapshotForAttach(
-              deps.objectiveStore,
-              saved.objective,
-              newSessionId,
-              previousSessionId,
-            )
-            if (!prepared.ok) return null
-            return {
-              commit: () => {
-                const committed = prepared.prepared.commit()
-                return committed
-              },
-            }
-          },
+    prepareAttachedState: !hasAttachedState
+      ? undefined
+      : (saved) => {
+          const preparedObjective =
+            deps.objectiveStore === undefined
+              ? undefined
+              : prepareObjectiveSnapshotForAttach(
+                  deps.objectiveStore,
+                  saved.objective,
+                  newSessionId,
+                  previousSessionId,
+                )
+          if (preparedObjective !== undefined && !preparedObjective.ok) return null
+          return {
+            commit: () => {
+              if (preparedObjective?.ok === true && !preparedObjective.prepared.commit())
+                return false
+              if (deps.usageAccounting === undefined) return true
+              if (saved.usageAccounting === undefined) {
+                deps.usageAccounting.reset()
+                return true
+              }
+              deps.usageAccounting.hydrate(saved.usageAccounting, {
+                rebindSessionId: deps.runtimeSessionId,
+              })
+              return true
+            },
+          }
+        },
     replaceTranscript: deps.replaceTranscript,
     onReplaced: ({ sessionId, history }) => deps.commit({ sessionId, history }),
     // In-place mirror onto the facade-aliased SessionMeta (the aliasing is the

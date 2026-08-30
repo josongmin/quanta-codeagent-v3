@@ -40,6 +40,14 @@ import type { WebDaemonServerConfig } from "@/apps/web-daemon/server"
 import { startWebDaemon } from "@/apps/web-daemon/server"
 import type { WebDaemonHandle } from "@/apps/web-daemon/types"
 import type { ConnectedSessionTransport, SessionTransport } from "@/ipc/session"
+import { MODEL_RATE_CARD, PRICING_VERSION } from "@/observability/pricing"
+import {
+  createUsageAccounting,
+  normalizeUsage,
+  priceUsage,
+  type UsageAccountingPort,
+  type UsageProvenance,
+} from "@/observability/usage-accounting"
 import type { SessionEvent, SessionSnapshotLite } from "@/protocol/session"
 import { supported } from "@/protocol/session"
 import type { RuntimeFacade, RuntimeSession, SessionDispatchResult } from "@/sdk/runtime"
@@ -88,7 +96,9 @@ const okResult = (snap: SessionSnapshotLite): SessionDispatchResult => ({
  * a real `turn.run` directly (no WS handshake needed: the route reads the
  * snapshot, not the WS channel).
  */
-const createControllableFactory = (): {
+const createControllableFactory = (
+  usageAccounting?: UsageAccountingPort,
+): {
   factory: () => Promise<RuntimeFacade>
   getSession: () => RuntimeSession
   /** Resolves once a turn has BEGUN running (status flipped to "running"). */
@@ -96,7 +106,7 @@ const createControllableFactory = (): {
   /** Release the in-flight turn so it completes back to idle. */
   releaseTurn: () => void
   /** UUX-1-11 — push a SessionEvent to every live subscriber (feeds the
-   *  server-side `/cost` fold exactly the way the real session would). */
+   *  server-owned `/cost` turn tally exactly the way the real session would). */
   emitEvent: (event: SessionEvent) => void
 } => {
   let session: RuntimeSession | undefined
@@ -109,6 +119,7 @@ const createControllableFactory = (): {
   const listenersRef: { current: Set<(event: SessionEvent) => void> } = { current: new Set() }
 
   const factory = async (): Promise<RuntimeFacade> => ({
+    ...(usageAccounting !== undefined ? { usageAccounting } : {}),
     createSession: async (): Promise<RuntimeSession> => {
       let snapshot: SessionSnapshotLite = makeSnapshotLite({
         sessionId: "ctl-session-1",
@@ -210,6 +221,27 @@ const createControllableFactory = (): {
       for (const listener of listenersRef.current) listener(event)
     },
   }
+}
+
+const admitUsage = (
+  accounting: UsageAccountingPort,
+  inputTokens: number,
+  outputTokens: number,
+): void => {
+  const provenance: UsageProvenance = {
+    sessionId: "ctl-session-1",
+    agentId: "root",
+    agentKind: "root",
+    depth: 0,
+  }
+  const usage = normalizeUsage({ model: "claude-sonnet-4-6", inputTokens, outputTokens })
+  accounting.record({
+    callId: accounting.mintCallId(provenance),
+    at: 1,
+    usage,
+    cost: priceUsage(usage, MODEL_RATE_CARD, { pricingVersion: PRICING_VERSION }),
+    provenance,
+  })
 }
 
 const boot = async (over: {
@@ -361,13 +393,13 @@ describe("GET /readout/:name — real HTTP route (web daemon)", () => {
       expect(body.output.length, `${name} real copy, not a stub token`).toBeGreaterThan(20)
     }
 
-    // `/cost` — server-owned fold: wired with honest zero totals (no turns yet).
+    // `/cost` — server-owned projection: explicit off when no authority exists.
     const cost = await fetch(`http://127.0.0.1:${handle.port}/readout/cost`)
     expect(cost.status).toBe(200)
     const costBody = (await cost.json()) as ReadoutBody
     expect(costBody.wired).toBe(true)
     expect(costBody.isError).toBe(false)
-    expect(costBody.output).toContain("no completed turns yet")
+    expect(costBody.output).toContain("accounting         off")
   })
 
   test("HR-06 UUX-1-11: a facade with readout sources serves LIVE data; a THROWING source degrades to 200 (never 500)", async () => {
@@ -406,12 +438,15 @@ describe("GET /readout/:name — real HTTP route (web daemon)", () => {
     expect(agentsBody.output).toContain("registry exploded mid-read")
   })
 
-  test("HR-07 UUX-1-11: the server-owned /cost fold accumulates turn.completed usage", async () => {
-    const ctl = createControllableFactory()
+  test("HR-07 UUX-1-11: /cost projects the authority and never folds event deltas", async () => {
+    const accounting = createUsageAccounting()
+    admitUsage(accounting, 100, 40)
+    admitUsage(accounting, 50, 10)
+    const ctl = createControllableFactory(accounting)
     const handle = await boot({ factory: ctl.factory, authToken: undefined })
 
-    // Feed the shared session two completed turns the way the real kernel
-    // emits them (the daemon subscribed at boot — the fold sees these).
+    // Deliberately bogus event deltas: only the turn tally may come from these;
+    // token/cost/model values must come from the authority above.
     ctl.emitEvent({
       type: "turn.completed",
       eventId: "tc-1",
@@ -419,8 +454,13 @@ describe("GET /readout/:name — real HTTP route (web daemon)", () => {
       revision: 2,
       emittedAt: "2026-07-10T00:00:01.000Z",
       outcomeReason: "completed",
-      tokenUsage: { promptTokens: 100, completionTokens: 40, totalTokens: 140, costMicroUsd: 700 },
-      modelSlug: "gpt-5",
+      tokenUsage: {
+        promptTokens: 999,
+        completionTokens: 999,
+        totalTokens: 1998,
+        costMicroUsd: 700,
+      },
+      modelSlug: "wrong-event-model",
     })
     ctl.emitEvent({
       type: "turn.completed",
@@ -429,7 +469,7 @@ describe("GET /readout/:name — real HTTP route (web daemon)", () => {
       revision: 3,
       emittedAt: "2026-07-10T00:00:02.000Z",
       outcomeReason: "completed",
-      tokenUsage: { promptTokens: 50, completionTokens: 10, totalTokens: 60 },
+      tokenUsage: { promptTokens: 999, completionTokens: 999, totalTokens: 1998 },
     })
     // Non-usage events must NOT count as turns.
     ctl.emitEvent({
@@ -449,8 +489,28 @@ describe("GET /readout/:name — real HTTP route (web daemon)", () => {
     expect(body.output).toMatch(/prompt tokens\s+150/)
     expect(body.output).toMatch(/completion tokens\s+50/)
     expect(body.output).toMatch(/total tokens\s+200/)
-    expect(body.output).toContain("0.0007") // 700 µUSD
-    expect(body.output).toContain("gpt-5")
+    expect(body.output).toContain("claude-sonnet-4-6")
+    expect(body.output).not.toContain("wrong-event-model")
+    expect(body.output).not.toContain("999")
+  })
+
+  test("HR-07b: no authority is explicit accounting off, not confident zero", async () => {
+    const ctl = createControllableFactory()
+    const handle = await boot({ factory: ctl.factory, authToken: undefined })
+    ctl.emitEvent({
+      type: "turn.completed",
+      eventId: "tc-off",
+      seq: 1,
+      revision: 1,
+      emittedAt: "2026-07-10T00:00:00.000Z",
+      outcomeReason: "completed",
+      tokenUsage: { promptTokens: 100, completionTokens: 10, totalTokens: 110 },
+    })
+    const body = (await (
+      await fetch(`http://127.0.0.1:${handle.port}/readout/cost`)
+    ).json()) as ReadoutBody
+    expect(body.output).toContain("accounting         off")
+    expect(body.output).not.toContain("prompt tokens")
   })
 
   test("HR-05: UNKNOWN readout name ⇒ 404 (typo); a non-matching path ⇒ plain 404", async () => {

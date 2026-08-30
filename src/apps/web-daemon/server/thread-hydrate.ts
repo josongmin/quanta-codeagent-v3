@@ -32,6 +32,7 @@ export interface ThreadHydrateDeps {
         // (from `SavedSession.objective`). Optional: a thread that never had a goal
         // reads back absent. Surfaced so the success path can restore it.
         readonly objective?: PersistedObjectiveSnapshot | undefined
+        readonly usageAccounting?: string | undefined
       }
     | undefined
   >
@@ -49,6 +50,9 @@ export interface ThreadHydrateDeps {
     | ((
         snapshot: PersistedObjectiveSnapshot | undefined,
       ) => { readonly commit: () => boolean } | null)
+    | undefined
+  readonly prepareUsageAccountingAttach?:
+    | ((snapshot: string | undefined) => { readonly commit: () => boolean })
     | undefined
   readonly cancelGoalWake?: (() => void) | undefined
   readonly rearmGoalWake?: (() => void) | undefined
@@ -78,9 +82,19 @@ export const hydrateThreadIntoLiveSession = async (
     loadSession: async () => loaded,
     onAttachStart: deps.cancelGoalWake,
     prepareAttachedState:
-      deps.prepareObjectiveAttach === undefined
+      deps.prepareObjectiveAttach === undefined && deps.prepareUsageAccountingAttach === undefined
         ? undefined
-        : (saved) => deps.prepareObjectiveAttach?.(saved.objective) ?? null,
+        : (saved) => {
+            const objective = deps.prepareObjectiveAttach?.(saved.objective)
+            if (objective === null) return null
+            const accounting = deps.prepareUsageAccountingAttach?.(saved.usageAccounting)
+            return {
+              commit: () => {
+                if (objective !== undefined && !objective.commit()) return false
+                return accounting?.commit() ?? true
+              },
+            }
+          },
     replaceTranscript: async (messages) => {
       await deps.replaceTranscript(messages)
       return messages

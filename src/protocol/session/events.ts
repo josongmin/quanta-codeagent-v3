@@ -83,7 +83,8 @@ export interface TurnCompletedEvent extends SessionEventEnvelope<"turn.completed
    *  from the usage authority. A SNAPSHOT: consumers REPLACE their state with
    *  it, never add (the per-turn `tokenUsage` delta above stays for legacy
    *  folds; a snapshot-aware consumer prefers this and must not do both).
-   *  Absent ⇒ the host has no authority (accounting off) ⇒ byte-identical. */
+   *  `{status:"off"}` means accounting is explicitly disabled. Absent is
+   *  reserved for old hosts that predate this wire. */
   readonly costView?: CostSurfaceViewWire
 }
 
@@ -95,7 +96,12 @@ export interface TurnCompletedEvent extends SessionEventEnvelope<"turn.completed
  * it, never adds. Declared structurally, flat numbers only, so the frontend
  * generator carries it without a narrowing-manifest entry.
  */
-export interface CostSurfaceViewWire {
+export interface CostSurfaceOffWire {
+  readonly status: "off"
+}
+
+export interface CostSurfaceOnWire {
+  readonly status: "on"
   readonly totalUsd: number
   /** Portion of `totalUsd` priced by a stand-in rate (estimate, not measure). */
   readonly estimatedUsd: number
@@ -108,9 +114,14 @@ export interface CostSurfaceViewWire {
   readonly calls: number
   readonly rootUsd: number
   readonly subagentUsd: number
+  /** Prior durable totals could not be restored; current numbers begin after
+   * the loss boundary and are not lifetime-complete. */
+  readonly continuityLost: boolean
   /** Model of the newest recorded call, when any. */
   readonly modelSlug?: string
 }
+
+export type CostSurfaceViewWire = CostSurfaceOffWire | CostSurfaceOnWire
 
 export interface TurnOutputDeltaEvent extends SessionEventEnvelope<"turn.output.delta"> {
   readonly delta: string

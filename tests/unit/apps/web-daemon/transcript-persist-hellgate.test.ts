@@ -83,6 +83,22 @@ describe("HELLGATE P1 Phase 1 — daemon lossless transcript persistence", () =>
     wire.unsub()
   })
 
+  test("a completed turn persists the canonical usage-accounting snapshot", async () => {
+    const session = fakeSession("web-books")
+    const wire = attachTranscriptPersistence(session, {
+      enabled: true,
+      rootProvider: provider(root ?? ""),
+      cwd: "/repo",
+      usageAccountingSnapshot: () => "durable-books",
+    })
+    session.emit(turnCompleted())
+    await wire.flush()
+    expect((await loadSessionById("web-books", provider(root ?? "")))?.usageAccounting).toBe(
+      "durable-books",
+    )
+    wire.unsub()
+  })
+
   test("gate OFF ⇒ NO SavedSession write (byte-identical)", async () => {
     const session = fakeSession("web-2")
     const wire = attachTranscriptPersistence(session, {

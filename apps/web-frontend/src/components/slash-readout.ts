@@ -51,7 +51,7 @@ const READOUT_COMMANDS: readonly {
   { slug: "mcp", description: "MCP server status (no MCP bridge on web)" },
   { slug: "memory", description: "Durable memory store, read-only (live)" },
   { slug: "why", description: "Why the last tool ran (needs the CLI's LLM meta-query)" },
-  { slug: "cost", description: "Cumulative session cost / token fold (live)" },
+  { slug: "cost", description: "Canonical cumulative session cost / tokens (live)" },
   { slug: "context", description: "Context-window usage breakdown (live)" },
   { slug: "doctor", description: "Session-store health check (live)" },
 ]

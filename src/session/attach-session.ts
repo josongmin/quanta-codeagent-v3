@@ -43,6 +43,7 @@ export interface AttachSessionDeps {
         readonly meta: SessionMeta
         readonly messages: readonly Message[]
         readonly objective?: import("./types").PersistedObjectiveSnapshot | undefined
+        readonly usageAccounting?: string | undefined
       }
     | undefined
   >
@@ -55,6 +56,7 @@ export interface AttachSessionDeps {
         readonly meta: SessionMeta
         readonly messages: readonly Message[]
         readonly objective?: import("./types").PersistedObjectiveSnapshot | undefined
+        readonly usageAccounting?: string | undefined
       }) => { readonly commit: () => boolean } | null)
     | undefined
   /** Kernel transcript swap (`session.transcript.replace` adapter). Throws an

@@ -11,6 +11,14 @@
 import { describe, expect, test } from "bun:test"
 import { hydrateThreadIntoLiveSession } from "@/apps/web-daemon/server/thread-hydrate"
 import type { Message } from "@/llm"
+import { MODEL_RATE_CARD, PRICING_VERSION } from "@/observability/pricing"
+import {
+  createUsageAccounting,
+  normalizeUsage,
+  priceUsage,
+  type UsageAccountingPort,
+  type UsageProvenance,
+} from "@/observability/usage-accounting"
 import type { SessionMeta } from "@/session"
 
 const msgs: Message[] = [{ role: "user", content: [{ type: "text", text: "hi" }] } as never]
@@ -22,6 +30,25 @@ const meta = (id: string): SessionMeta => ({
   lastTouched: 0,
   archived: false,
 })
+
+const provenance = (sessionId: string): UsageProvenance => ({
+  sessionId,
+  agentId: "root",
+  agentKind: "root",
+  depth: 0,
+})
+
+const admit = (accounting: UsageAccountingPort, sessionId: string, tokens: number) => {
+  const prov = provenance(sessionId)
+  const usage = normalizeUsage({ model: "claude-sonnet-4-6", inputTokens: tokens, outputTokens: 0 })
+  return accounting.record({
+    callId: accounting.mintCallId(prov),
+    at: 1,
+    usage,
+    cost: priceUsage(usage, MODEL_RATE_CARD, { pricingVersion: PRICING_VERSION }),
+    provenance: prov,
+  })
+}
 
 describe("HELLGATE P1 Phase 2 — swap live session onto a thread", () => {
   test("cancel, validate, transcript, persist, objective, rearm order is fixed", async () => {
@@ -73,6 +100,53 @@ describe("HELLGATE P1 Phase 2 — swap live session onto a thread", () => {
     expect(activeThreadId()).toBe("t-abc")
   })
 
+  test("hydrated thread switches usage books and rebinds them to the live daemon session", async () => {
+    const live = createUsageAccounting()
+    admit(live, "daemon-live", 1_000_000)
+    const target = createUsageAccounting()
+    admit(target, "old-daemon", 2_000_000)
+    const out = await hydrateThreadIntoLiveSession("t-cost", {
+      loadThread: async () => ({
+        meta: meta("t-cost"),
+        messages: msgs,
+        usageAccounting: target.serialize(),
+      }),
+      replaceTranscript: async () => undefined,
+      setActiveThreadId: () => undefined,
+      prepareUsageAccountingAttach: (snapshot) => ({
+        commit: () => {
+          if (snapshot === undefined) live.reset()
+          else live.hydrate(snapshot, { rebindSessionId: "daemon-live" })
+          return true
+        },
+      }),
+    })
+    expect(out.kind).toBe("hydrated")
+    expect(live.snapshot()).toMatchObject({
+      calls: 1,
+      freshInputTokens: 2_000_000,
+      boundSessionId: "daemon-live",
+    })
+    expect(admit(live, "daemon-live", 3_000_000)).toEqual({ admitted: true })
+  })
+
+  test("thread with no durable books resets prior live totals", async () => {
+    const live = createUsageAccounting()
+    admit(live, "daemon-live", 1_000_000)
+    await hydrateThreadIntoLiveSession("fresh", {
+      loadThread: async () => ({ meta: meta("fresh"), messages: msgs }),
+      replaceTranscript: async () => undefined,
+      setActiveThreadId: () => undefined,
+      prepareUsageAccountingAttach: (snapshot) => ({
+        commit: () => {
+          if (snapshot === undefined) live.reset()
+          return true
+        },
+      }),
+    })
+    expect(live.snapshot()).toMatchObject({ calls: 0, totalUsd: 0 })
+  })
+
   test("unknown thread: clean no-op (no replace, no repoint)", async () => {
     const replaced: unknown[] = []
     let active: string | null = null
@@ -97,6 +171,32 @@ describe("HELLGATE P1 Phase 2 — swap live session onto a thread", () => {
     })
     expect(out).toEqual({ kind: "refused-mid-turn", threadId: "t-mid" })
     expect(active).toBeNull() // NOT repointed — parent thread stays live
+  })
+
+  test("mid-turn refusal leaves usage books untouched", async () => {
+    const live = createUsageAccounting()
+    admit(live, "daemon-live", 1_000_000)
+    const target = createUsageAccounting()
+    admit(target, "old-daemon", 2_000_000)
+    const out = await hydrateThreadIntoLiveSession("t-mid-cost", {
+      loadThread: async () => ({
+        meta: meta("t-mid-cost"),
+        messages: msgs,
+        usageAccounting: target.serialize(),
+      }),
+      replaceTranscript: async () => {
+        throw new Error("transcript_replace_unavailable")
+      },
+      setActiveThreadId: () => undefined,
+      prepareUsageAccountingAttach: (snapshot) => ({
+        commit: () => {
+          if (snapshot !== undefined) live.hydrate(snapshot, { rebindSessionId: "daemon-live" })
+          return true
+        },
+      }),
+    })
+    expect(out.kind).toBe("refused-mid-turn")
+    expect(live.snapshot().freshInputTokens).toBe(1_000_000)
   })
 
   test("a non-guard error propagates (never silently swallowed)", async () => {

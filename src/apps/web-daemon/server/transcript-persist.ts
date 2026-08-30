@@ -44,6 +44,10 @@ export interface TranscriptPersistOptions {
    *  from `runtime.objective` via `buildObjectiveSnapshotProvider` (which returns
    *  `undefined` when no authority is present — passed through verbatim here). */
   readonly objectiveSnapshot?: (() => PersistedObjectiveSnapshot | undefined) | undefined
+  /** Lazy durable usage-book snapshot from the SAME authority that records
+   * model calls. Saved with every completed turn so a later live attach can
+   * switch transcript and accounting as one session boundary. */
+  readonly usageAccountingSnapshot?: (() => string | undefined) | undefined
 }
 
 export interface TranscriptPersistence {
@@ -94,6 +98,16 @@ export const attachTranscriptPersistence = (
         logger.warn("web-daemon: objective snapshot encode failed", { error: errMessage(error) })
       }
     }
+    let usageAccounting: string | undefined
+    if (opts.usageAccountingSnapshot !== undefined) {
+      try {
+        usageAccounting = opts.usageAccountingSnapshot()
+      } catch (error) {
+        logger.warn("web-daemon: usage accounting snapshot encode failed", {
+          error: errMessage(error),
+        })
+      }
+    }
     await saveSessionById(
       meta,
       {
@@ -101,6 +115,7 @@ export const attachTranscriptPersistence = (
         turns,
         messages: [...s.transcript.messages()],
         ...(objective !== undefined ? { objective } : {}),
+        ...(usageAccounting !== undefined ? { usageAccounting } : {}),
       },
       opts.rootProvider,
     )

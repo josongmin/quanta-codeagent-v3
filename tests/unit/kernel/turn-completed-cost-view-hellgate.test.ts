@@ -34,6 +34,7 @@ const messagesOf = (userText: string, assistantText: string): readonly Message[]
 ]
 
 const VIEW: CostSurfaceViewWire = {
+  status: "on",
   totalUsd: 4.975,
   estimatedUsd: 0,
   unpricedCalls: 1,
@@ -44,6 +45,7 @@ const VIEW: CostSurfaceViewWire = {
   calls: 4,
   rootUsd: 3.375,
   subagentUsd: 1.6,
+  continuityLost: true,
   modelSlug: "claude-sonnet-4-6",
 }
 
@@ -106,7 +108,7 @@ describe("A7 — turn.completed carries the host's cumulative cost view", () => 
     expect(completed?.costView).toEqual(VIEW)
   })
 
-  test("no view on the result ⇒ no field on the wire (byte-identical off)", async () => {
+  test("old host with no view still yields no field on the wire", async () => {
     const completed = await runOneTurn(undefined)
     expect(completed).toBeDefined()
     expect(completed !== undefined && "costView" in completed).toBe(false)
@@ -124,7 +126,7 @@ describe("A7 — the HOST side of the carry (static tripwire)", () => {
       resolve(__dirname, "../../../src/host/runtime/internal/context-binding.ts"),
       "utf8",
     )
-    expect(src).toContain("costView: costSurfaceViewWire(accounting)")
+    expect(src).toContain("costView: accounting === undefined ? costAccountingOffWire()")
     expect(src).toContain('from "@/observability/usage-accounting"')
   })
 })

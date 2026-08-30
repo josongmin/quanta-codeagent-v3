@@ -21,6 +21,14 @@
 import { describe, expect, test } from "bun:test"
 import type { Message } from "@/llm"
 import { asObjectiveAuthority, createObjectiveStore } from "@/objective"
+import { MODEL_RATE_CARD, PRICING_VERSION } from "@/observability/pricing"
+import {
+  createUsageAccounting,
+  normalizeUsage,
+  priceUsage,
+  type UsageAccountingPort,
+  type UsageProvenance,
+} from "@/observability/usage-accounting"
 import { encodeObjectiveSnapshot } from "@/runner/assemble/session-authorities"
 import type { SessionMeta } from "@/session"
 import {
@@ -44,6 +52,29 @@ const mkMsg = (id: string): Message => ({
   content: [{ type: "text", text: id }],
   id,
 })
+
+const usageProvenance = (sessionId: string): UsageProvenance => ({
+  sessionId,
+  agentId: "root",
+  agentKind: "root",
+  depth: 0,
+})
+
+const admitUsage = (accounting: UsageAccountingPort, sessionId: string, inputTokens: number) => {
+  const provenance = usageProvenance(sessionId)
+  const usage = normalizeUsage({
+    model: "claude-sonnet-4-6",
+    inputTokens,
+    outputTokens: 0,
+  })
+  return accounting.record({
+    callId: accounting.mintCallId(provenance),
+    at: 1,
+    usage,
+    cost: priceUsage(usage, MODEL_RATE_CARD, { pricingVersion: PRICING_VERSION }),
+    provenance,
+  })
+}
 
 /* ------------------------------------------------------------------ */
 /* repointSessionMeta                                                  */
@@ -185,6 +216,52 @@ describe("performSessionSwitch", () => {
     expect(events).toEqual(["cancel", "attach:fork"])
   })
 
+  test("attach replaces usage books with the target and rebinds future live calls", async () => {
+    const live = createUsageAccounting()
+    admitUsage(live, "runtime-live", 1_000_000)
+    const target = createUsageAccounting()
+    admitUsage(target, "target-old-runtime", 2_000_000)
+
+    await performSessionSwitch(
+      {
+        loadSession: async () => ({
+          meta: mkMeta("fork"),
+          messages: forkMsgs,
+          usageAccounting: target.serialize(),
+        }),
+        replaceTranscript: async (messages) => messages,
+        idMeta: mkMeta("parent"),
+        usageAccounting: live,
+        runtimeSessionId: "runtime-live",
+        commit: () => undefined,
+      },
+      "fork",
+    )
+
+    expect(live.snapshot().calls).toBe(1)
+    expect(live.snapshot().freshInputTokens).toBe(2_000_000)
+    expect(live.snapshot().boundSessionId).toBe("runtime-live")
+    expect(admitUsage(live, "runtime-live", 3_000_000)).toEqual({ admitted: true })
+    expect(live.snapshot().freshInputTokens).toBe(5_000_000)
+  })
+
+  test("attaching a fresh fork with no durable books resets the parent totals", async () => {
+    const live = createUsageAccounting()
+    admitUsage(live, "runtime-live", 1_000_000)
+    await performSessionSwitch(
+      {
+        loadSession: async () => ({ meta: mkMeta("fork"), messages: forkMsgs }),
+        replaceTranscript: async (messages) => messages,
+        idMeta: mkMeta("parent"),
+        usageAccounting: live,
+        runtimeSessionId: "runtime-live",
+        commit: () => undefined,
+      },
+      "fork",
+    )
+    expect(live.snapshot()).toMatchObject({ calls: 0, totalUsd: 0, continuityLost: false })
+  })
+
   test("mid-turn refusal leaves transcript-owned objective and persistence identity unchanged", async () => {
     const store = createObjectiveStore()
     store.create("parent", { goal: "parent goal" })
@@ -209,6 +286,33 @@ describe("performSessionSwitch", () => {
     expect(store.get("fork")).toBeNull()
     expect(idMeta.id).toBe("parent")
     expect(commits).toEqual([])
+  })
+
+  test("mid-turn refusal leaves the current usage books unchanged", async () => {
+    const live = createUsageAccounting()
+    admitUsage(live, "runtime-live", 1_000_000)
+    const target = createUsageAccounting()
+    admitUsage(target, "target-old-runtime", 2_000_000)
+    await expect(
+      performSessionSwitch(
+        {
+          loadSession: async () => ({
+            meta: mkMeta("fork"),
+            messages: forkMsgs,
+            usageAccounting: target.serialize(),
+          }),
+          replaceTranscript: async () => {
+            throw new Error("transcript_replace_unavailable")
+          },
+          idMeta: mkMeta("parent"),
+          usageAccounting: live,
+          runtimeSessionId: "runtime-live",
+          commit: () => undefined,
+        },
+        "fork",
+      ),
+    ).rejects.toThrow("transcript_replace_unavailable")
+    expect(live.snapshot().freshInputTokens).toBe(1_000_000)
   })
 })
 

@@ -162,7 +162,7 @@ const hydrateSessionBooks = (
   sessionId: string,
 ): void => {
   if (usageAccounting === undefined || saved === undefined) return
-  if (!usageAccounting.hydrate(saved)) {
+  if (!usageAccounting.hydrate(saved, { rebindSessionId: sessionId })) {
     slog.warn("usage-accounting.resume.corrupt", {
       sessionId,
       note: "prior totals could not be restored; starting empty books (continuity lost)",

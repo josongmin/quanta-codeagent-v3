@@ -19,8 +19,11 @@ export type {
 } from "./port"
 export { type PriceUsageOpts, priceUsage } from "./price"
 export {
+  type CostSurfaceOffWireShape,
+  type CostSurfaceOnWireShape,
   type CostSurfaceView,
   type CostSurfaceViewWireShape,
+  costAccountingOffWire,
   costSurfaceView,
   costSurfaceViewWire,
   type ModelCostLine,

@@ -21,7 +21,7 @@ import {
   buildObjectiveSnapshotProvider,
   prepareObjectiveSnapshotForAttach,
 } from "@/host/runtime/objective-store-wire"
-import { costSurfaceViewWire } from "@/observability/usage-accounting"
+import { costAccountingOffWire, costSurfaceViewWire } from "@/observability/usage-accounting"
 import type { SupportedReadModels } from "@/protocol/session"
 import type { RuntimeFacade, RuntimeSession } from "@/sdk/runtime"
 import { loadSessionById, type PersistedObjectiveSnapshot } from "@/session"
@@ -305,17 +305,10 @@ const attachDaemonCostProjection = (
     unsub,
     totals: (): CostReadoutTotals => {
       if (costAuthority === undefined) {
-        return { turns, promptTokens: 0, completionTokens: 0, totalTokens: 0, costMicroUsd: 0 }
+        return { turns, ...costAccountingOffWire() }
       }
       const wire = costSurfaceViewWire(costAuthority)
-      return {
-        turns,
-        promptTokens: wire.promptTokens,
-        completionTokens: wire.outputTokens,
-        totalTokens: wire.promptTokens + wire.outputTokens,
-        costMicroUsd: Math.round(wire.totalUsd * 1_000_000),
-        ...(wire.modelSlug !== undefined ? { modelSlug: wire.modelSlug } : {}),
-      }
+      return { turns, ...wire }
     },
   }
 }
@@ -393,6 +386,28 @@ const buildOnAttachThread = (deps: {
             )
             return prepared.ok ? prepared.prepared : null
           },
+          prepareUsageAccountingAttach: (snapshot) => ({
+            commit: () => {
+              const accounting = (
+                deps.runtime as {
+                  usageAccounting?: import("@/observability/usage-accounting").UsageAccountingPort
+                }
+              ).usageAccounting
+              if (accounting === undefined) return true
+              if (snapshot === undefined) {
+                accounting.reset()
+                return true
+              }
+              if (
+                !accounting.hydrate(snapshot, { rebindSessionId: deps.sharedSession.sessionId })
+              ) {
+                logger.warn("web-daemon: attached usage accounting state was corrupt", {
+                  threadId,
+                })
+              }
+              return true
+            },
+          }),
           cancelGoalWake: deps.goalWake?.onAttachStart,
           rearmGoalWake: deps.goalWake?.onAttachSettled,
         })
@@ -442,8 +457,8 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
   // runtime-factory exposes a `readoutSources` getter (agents / plan / skills /
   // memory / context over the SAME live session collaborators); duck-read it so
   // a test stub facade simply degrades every readout to the honest
-  // missing-source line. `/cost` is folded HERE from the shared session's
-  // `turn.completed` events — a daemon-owned source, present for any facade.
+  // missing-source line. `/cost` projects the runtime's canonical usage
+  // authority HERE; only its turn tally comes from `turn.completed` events.
   // A7 — /cost + turn tally as ONE projection attachment (see the helper).
   const cost = attachDaemonCostProjection(runtime, sharedSession)
   let costAggregatorUnsub: (() => void) | null = cost.unsub
@@ -455,6 +470,12 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
     cwd: config.sessionConfig.cwd ?? process.cwd(),
     // RFC-03 C2 — durable objective snapshot from the live web authority.
     objectiveSnapshot: webObjectiveSnapshot(runtime),
+    usageAccountingSnapshot: () =>
+      (
+        runtime as {
+          usageAccounting?: import("@/observability/usage-accounting").UsageAccountingPort
+        }
+      ).usageAccounting?.serialize(),
   })
   let transcriptPersistUnsub: (() => void) | null = transcriptPersist.unsub
   // P1 Phase 2 — swap-on-attach closure (extracted to buildOnAttachThread to keep
@@ -531,7 +552,7 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
       // (optional-call form, mirroring `threadStore?.close()` below).
       approvalContinuationUnsub?.()
       approvalContinuationUnsub = null
-      // UUX-1-11 — stop the cost fold so it never fires against a closed session.
+      // UUX-1-11 — stop the cost turn tally so it never fires after close.
       if (transcriptPersistUnsub !== null) {
         transcriptPersistUnsub()
         transcriptPersistUnsub = null

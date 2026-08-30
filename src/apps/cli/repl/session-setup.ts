@@ -231,6 +231,9 @@ export interface SessionSetupResult {
    *  surface. Absent ⇒ `/attention` prints "not wired". */
   readonly lifecycleAttention?: SessionBootstrapResult["lifecycleAttention"]
   readonly sessionId: string
+  /** The session-stable usage authority used by model-call recording and every
+   * cost surface. Live attach must switch these books with the transcript. */
+  readonly usageAccounting?: SessionBootstrapResult["usageAccounting"]
   readonly history: readonly Message[]
   readonly pendingImages: readonly ImageBlock[]
   readonly idMeta: SessionBootstrapResult["idMeta"]
@@ -757,6 +760,7 @@ const assembleSetupResult = (
     lifecycleActivityStore: boot.lifecycleActivityStore,
     lifecycleFollowUpQueue: boot.lifecycleFollowUpQueue,
     sessionId: boot.sessionId,
+    ...(boot.usageAccounting !== undefined ? { usageAccounting: boot.usageAccounting } : {}),
     history: boot.history,
     pendingImages: boot.pendingImages,
     idMeta: boot.idMeta,

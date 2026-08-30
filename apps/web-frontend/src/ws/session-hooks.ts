@@ -10,7 +10,6 @@
  * isolation and avoids React-tree-scoped reconnect loops.
  */
 
-import type { CostSurfaceViewWire } from "../types/protocol.session.generated"
 import { useCallback, useEffect, useReducer, useRef, useState } from "react"
 import type {
   ConnectionState,
@@ -24,6 +23,7 @@ import type {
   StopCategoryWire,
   UiMessage,
 } from "../types/protocol"
+import type { CostSurfaceViewWire } from "../types/protocol.session.generated"
 import type { SessionClient } from "./client"
 
 /**
@@ -99,7 +99,8 @@ export interface TranscriptState {
    *  REPLACED wholesale on every carrying event, never added: it already IS
    *  the running total, and adding a snapshot to a snapshot double-counts the
    *  whole session each turn. `null` until a carrying event arrives (legacy
-   *  daemons / accounting off) — the additive `tokenUsage` fold above remains
+   *  daemons only) — modern accounting-off hosts send an explicit off view;
+   *  the additive `tokenUsage` fold above remains
    *  as the fallback for exactly that case. */
   readonly costView: CostSurfaceViewWire | null
 }

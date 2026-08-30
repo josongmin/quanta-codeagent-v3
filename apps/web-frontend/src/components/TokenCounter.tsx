@@ -6,7 +6,8 @@ export interface TokenCounterProps {
   readonly usage: CumulativeTokenUsage
   /** A7 — the server's cumulative cost SNAPSHOT (replace-semantics). When
    *  present it is the source of truth and the additive fold is ignored;
-   *  `null` keeps the legacy pill (old daemons / accounting off). */
+   *  `null` keeps the legacy pill for old daemons; modern daemons send an
+   *  explicit `status:"off"` state when accounting is disabled. */
   readonly costView?: CostSurfaceViewWire | null
 }
 
@@ -21,30 +22,7 @@ export interface TokenCounterProps {
  */
 export const TokenCounter = ({ usage, costView }: TokenCounterProps): JSX.Element | null => {
   if (costView !== null && costView !== undefined) {
-    if (costView.calls === 0) return null
-    const totalTok = costView.promptTokens + costView.outputTokens
-    return (
-      <div
-        className={cx(
-          "flex items-center gap-1.5 rounded-full border border-line px-2 py-0.5",
-          "text-xs text-ink-secondary",
-        )}
-        title={renderViewTooltip(costView)}
-      >
-        <span className="text-ink-tertiary">tok</span>
-        <span className="font-mono">{formatTokens(totalTok)}</span>
-        <span className="text-ink-tertiary">·</span>
-        <span className="font-mono">
-          {costView.unpricedCalls > 0 && costView.totalUsd === 0
-            ? "cost incomplete"
-            : formatUsd(costView.totalUsd)}
-        </span>
-        {costView.estimatedUsd > 0 ? <span className="text-ink-tertiary">~est</span> : null}
-        {costView.unpricedCalls > 0 && costView.totalUsd > 0 ? (
-          <span className="text-ink-tertiary">+{costView.unpricedCalls} unpriced</span>
-        ) : null}
-      </div>
-    )
+    return renderAccountingView(costView)
   }
   if (usage.turns === 0) return null
   const total = usage.totalTokens
@@ -69,6 +47,46 @@ export const TokenCounter = ({ usage, costView }: TokenCounterProps): JSX.Elemen
   )
 }
 
+const renderAccountingView = (view: CostSurfaceViewWire): JSX.Element | null => {
+  if (view.status === "off") {
+    return (
+      <div
+        className={cx(
+          "flex items-center gap-1.5 rounded-full border border-line px-2 py-0.5",
+          "text-xs text-ink-secondary",
+        )}
+        title="Usage accounting is disabled for this session."
+      >
+        <span className="text-ink-tertiary">cost</span>
+        <span className="font-mono">off</span>
+      </div>
+    )
+  }
+  if (view.calls === 0) return null
+  const totalTok = view.promptTokens + view.outputTokens
+  const costLabel =
+    view.unpricedCalls > 0 && view.totalUsd === 0 ? "cost incomplete" : formatUsd(view.totalUsd)
+  return (
+    <div
+      className={cx(
+        "flex items-center gap-1.5 rounded-full border border-line px-2 py-0.5",
+        "text-xs text-ink-secondary",
+      )}
+      title={renderViewTooltip(view)}
+    >
+      <span className="text-ink-tertiary">tok</span>
+      <span className="font-mono">{formatTokens(totalTok)}</span>
+      <span className="text-ink-tertiary">·</span>
+      <span className="font-mono">{costLabel}</span>
+      {view.estimatedUsd > 0 ? <span className="text-ink-tertiary">~est</span> : null}
+      {view.unpricedCalls > 0 && view.totalUsd > 0 ? (
+        <span className="text-ink-tertiary">+{view.unpricedCalls} unpriced</span>
+      ) : null}
+      {view.continuityLost ? <span className="text-ink-tertiary">partial history</span> : null}
+    </div>
+  )
+}
+
 const formatTokens = (n: number): string => {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`
@@ -83,7 +101,7 @@ const formatUsd = (usd: number): string => {
 
 const formatCost = (microUsd: number): string => formatUsd(microUsd / 1_000_000)
 
-const renderViewTooltip = (v: CostSurfaceViewWire): string =>
+const renderViewTooltip = (v: Extract<CostSurfaceViewWire, { status: "on" }>): string =>
   [
     `calls: ${v.calls}`,
     `prompt: ${v.promptTokens}`,
@@ -93,6 +111,7 @@ const renderViewTooltip = (v: CostSurfaceViewWire): string =>
     `total: ${formatUsd(v.totalUsd)}`,
     v.estimatedUsd > 0 ? `estimated: ${formatUsd(v.estimatedUsd)}` : null,
     v.unpricedCalls > 0 ? `unpriced calls: ${v.unpricedCalls}` : null,
+    v.continuityLost ? "continuity: prior totals lost; current total is partial" : null,
     v.subagentUsd > 0
       ? `root ${formatUsd(v.rootUsd)} · subagents ${formatUsd(v.subagentUsd)}`
       : null,

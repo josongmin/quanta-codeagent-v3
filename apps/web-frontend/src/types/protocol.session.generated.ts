@@ -339,7 +339,12 @@ export interface TurnCompletedEvent extends SessionEventEnvelope<"turn.completed
   readonly costView?: CostSurfaceViewWire
 }
 
-export interface CostSurfaceViewWire {
+export interface CostSurfaceOffWire {
+  readonly status: "off"
+}
+
+export interface CostSurfaceOnWire {
+  readonly status: "on"
   readonly totalUsd: number
   readonly estimatedUsd: number
   readonly unpricedCalls: number
@@ -350,6 +355,7 @@ export interface CostSurfaceViewWire {
   readonly calls: number
   readonly rootUsd: number
   readonly subagentUsd: number
+  readonly continuityLost: boolean
   readonly modelSlug?: string
 }
 
@@ -494,6 +500,8 @@ export const SESSION_EVENT_TYPES = [
     "turn.recovery",
     "turn.started",
 ] as const
+
+export type CostSurfaceViewWire = CostSurfaceOffWire | CostSurfaceOnWire
 
 export type SessionEvent = ApprovalRequestedEvent | ApprovalResolvedEvent | ArtifactReadyEvent | BudgetBreachEvent | ContextCompactedEvent | ItemCompletedEvent | ItemDeltaEvent | ItemStartedEvent | SessionClosedEvent | SessionCreatedEvent | SessionStateUpdatedEvent | SkillScopeDecisionEvent | ToolCompletedEvent | ToolInvokedEvent | ToolProgressEvent | TurnAbortedEvent | TurnCompletedEvent | TurnLlmContinuationEvent | TurnLlmRequestEvent | TurnOutputDeltaEvent | TurnFailedEvent | TurnRecoveryEvent | TurnStartedEvent
 

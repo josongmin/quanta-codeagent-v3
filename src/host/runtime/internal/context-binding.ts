@@ -14,7 +14,7 @@ import {
   type ObjectivePort,
   type UserObjectiveMutation,
 } from "@/objective"
-import { costSurfaceViewWire } from "@/observability/usage-accounting"
+import { costAccountingOffWire, costSurfaceViewWire } from "@/observability/usage-accounting"
 import { isPermissionMode } from "@/permission"
 import type { PostureControl } from "@/permission/posture/control"
 import type {
@@ -204,7 +204,7 @@ const runSessionHostTurn = async (deps: {
   const accounting = base.usageAccounting
   return {
     ...toSessionHostTurnResult(result),
-    ...(accounting !== undefined ? { costView: costSurfaceViewWire(accounting) } : {}),
+    costView: accounting === undefined ? costAccountingOffWire() : costSurfaceViewWire(accounting),
   }
 }
 

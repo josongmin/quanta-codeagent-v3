@@ -1,5 +1,6 @@
 import type { Message } from "@/llm"
 import type { ObjectivePort } from "@/objective"
+import type { UsageAccountingPort } from "@/observability/usage-accounting"
 import { loadSessionById, type SessionMeta } from "@/session"
 import { errMessage, logger } from "@/shared"
 import type { PlaybookPlanQueueSink } from "@/skill/playbook"
@@ -51,6 +52,8 @@ export const installSessionSwitchWire = (args: {
   readonly commitSwitch: (next: { sessionId: string; history: readonly Message[] }) => void
   readonly currentSessionId?: (() => string | undefined) | undefined
   readonly objectiveStore?: ObjectivePort | undefined
+  readonly usageAccounting?: UsageAccountingPort | undefined
+  readonly runtimeSessionId?: string | undefined
   readonly goalWakeSlot?: GoalWakeSignalSlot | undefined
 }): void => {
   const { registerSessionSwitch, replaceTranscript, idMeta, commitSwitch } = args
@@ -64,6 +67,8 @@ export const installSessionSwitchWire = (args: {
           idMeta,
           currentSessionId: args.currentSessionId ?? (() => idMeta?.id),
           objectiveStore: args.objectiveStore,
+          usageAccounting: args.usageAccounting,
+          runtimeSessionId: args.runtimeSessionId,
           goalWakeSlot: args.goalWakeSlot,
           commit: ({ sessionId, history }) => {
             commitSwitch({ sessionId, history })

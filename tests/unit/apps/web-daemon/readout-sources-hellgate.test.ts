@@ -176,10 +176,18 @@ describe("resolveReadout — source-backed readouts serve live data", () => {
   test("RS-05: /cost renders the cumulative session totals", async () => {
     const totals: CostReadoutTotals = {
       turns: 3,
+      status: "on",
       promptTokens: 1200,
-      completionTokens: 400,
-      totalTokens: 1600,
-      costMicroUsd: 12_500,
+      outputTokens: 400,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      calls: 2,
+      totalUsd: 0.0125,
+      estimatedUsd: 0,
+      unpricedCalls: 0,
+      rootUsd: 0.01,
+      subagentUsd: 0.0025,
+      continuityLost: false,
       modelSlug: "gpt-5",
     }
     const r = await resolveReadout("cost", snap(), { cost: () => totals })
@@ -190,6 +198,33 @@ describe("resolveReadout — source-backed readouts serve live data", () => {
     expect(r.output).toContain("1600")
     expect(r.output).toContain("0.0125") // 12_500 µUSD = $0.0125
     expect(r.output).toContain("gpt-5")
+    expect(r.output).toContain("root / subagents")
+  })
+
+  test("RS-05b: /cost distinguishes off and partial/incomplete accounting", async () => {
+    const off = await resolveReadout("cost", snap(), { cost: () => ({ turns: 1, status: "off" }) })
+    expect(off.output).toContain("accounting         off")
+
+    const partial = await resolveReadout("cost", snap(), {
+      cost: () => ({
+        turns: 2,
+        status: "on",
+        totalUsd: 0,
+        estimatedUsd: 0,
+        unpricedCalls: 1,
+        promptTokens: 10,
+        outputTokens: 2,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        calls: 1,
+        rootUsd: 0,
+        subagentUsd: 0,
+        continuityLost: true,
+      }),
+    })
+    expect(partial.output).toContain("prior totals lost")
+    expect(partial.output).toContain("incomplete")
+    expect(partial.output).toContain("unpriced calls")
   })
 
   test("RS-06: /context renders the segmented usage breakdown", async () => {

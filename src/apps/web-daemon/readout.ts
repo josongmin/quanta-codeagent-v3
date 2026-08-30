@@ -24,7 +24,7 @@
  * Snapshot-served: `/state`, `/capabilities`. Source-backed (live once the
  * composition root threads the accessor): `/agents` (subagent TaskRegistry),
  * `/plan` (session plan store), `/skills` (disk discovery), `/memory`
- * (durable store, read-only), `/cost` (server-side turn-usage fold), `/context`
+ * (durable store, read-only), `/cost` (canonical usage-authority projection), `/context`
  * (onPromptAssembled usage holder), `/doctor` (store-health report), `/mcp` (the
  * live MCP server rows, once the root threads the accessor — this list was stale:
  * `/mcp` moved from SKIPPED to source-backed and the docblock kept saying "the
@@ -42,7 +42,12 @@
 import type { ContextUsageBreakdown } from "@/agent/context/usage-breakdown"
 import type { Plan, TodoItem } from "@/agent/plan/types"
 import type { ObjectiveDomainSnapshot } from "@/objective"
-import type { CapabilityManifest, SessionSnapshotLite, SessionStateView } from "@/protocol/session"
+import type {
+  CapabilityManifest,
+  CostSurfaceViewWire,
+  SessionSnapshotLite,
+  SessionStateView,
+} from "@/protocol/session"
 import type { StoreHealthReport } from "@/session"
 import { errMessage, type ThinClientRoute } from "@/shared"
 import { renderWebModelReadout } from "./web-model-switch"
@@ -87,14 +92,7 @@ export interface MemoryReadoutEntry {
 }
 
 /** Cumulative session usage folded server-side from `turn.completed` events. */
-export interface CostReadoutTotals {
-  readonly turns: number
-  readonly promptTokens: number
-  readonly completionTokens: number
-  readonly totalTokens: number
-  readonly costMicroUsd: number
-  readonly modelSlug?: string
-}
+export type CostReadoutTotals = { readonly turns: number } & CostSurfaceViewWire
 
 /**
  * The read-accessor bundle the composition root threads to the readout route.
@@ -259,7 +257,7 @@ const MISSING_SOURCE_COPY: Readonly<Record<(typeof SOURCE_BACKED_READOUTS)[numbe
   memory:
     "/memory: durable memory store unavailable on this daemon " +
     "(QUANTA_MEMORY=off, or the readout store handle was not composed)",
-  cost: "/cost: usage aggregator not attached (the server-side turn-usage fold is absent)",
+  cost: "/cost: canonical usage-accounting projection is not attached",
   context:
     "/context: context-usage holder not composed " +
     "(the onPromptAssembled seam was not threaded on this daemon)",
@@ -403,15 +401,31 @@ const renderMemory = (entries: readonly MemoryReadoutEntry[]): string => {
 }
 
 const renderCost = (t: CostReadoutTotals): string => {
+  if (t.status === "off") {
+    return ["session cost", `  turns              ${t.turns}`, "  accounting         off"].join(
+      "\n",
+    )
+  }
+  const totalTokens = t.promptTokens + t.outputTokens
   const lines = [
     "session cost (cumulative)",
     `  turns              ${t.turns}`,
     `  prompt tokens      ${t.promptTokens}`,
-    `  completion tokens  ${t.completionTokens}`,
-    `  total tokens       ${t.totalTokens}`,
+    `  completion tokens  ${t.outputTokens}`,
+    `  total tokens       ${totalTokens}`,
   ]
-  if (t.costMicroUsd > 0)
-    lines.push(`  est. cost          $${(t.costMicroUsd / 1_000_000).toFixed(4)}`)
+  if (t.continuityLost)
+    lines.push("  continuity         prior totals lost; current total is partial")
+  if (t.totalUsd > 0) {
+    lines.push(`  cost               $${t.totalUsd.toFixed(4)}`)
+  } else if (t.unpricedCalls > 0) {
+    lines.push("  cost               incomplete")
+  }
+  if (t.estimatedUsd > 0) lines.push(`  estimated portion  $${t.estimatedUsd.toFixed(4)}`)
+  if (t.unpricedCalls > 0) lines.push(`  unpriced calls     ${t.unpricedCalls}`)
+  if (t.subagentUsd > 0) {
+    lines.push(`  root / subagents   $${t.rootUsd.toFixed(4)} / $${t.subagentUsd.toFixed(4)}`)
+  }
   if (t.modelSlug !== undefined) lines.push(`  model              ${t.modelSlug}`)
   if (t.turns === 0) lines.push("  (no completed turns yet)")
   return lines.join("\n")

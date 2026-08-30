@@ -52,6 +52,9 @@ export interface CostSurfaceView {
   /** Root vs. subagent spend, so a surface can show WHERE the money went
    *  instead of only how much. */
   readonly byKind: Readonly<Record<"root" | "subagent", number>>
+  /** Durable state could not be restored. Current totals start after the loss
+   * boundary and must never be presented as lifetime-complete. */
+  readonly continuityLost: boolean
 }
 
 const lineOf = (model: string, a: UsageAggregate): ModelCostLine => ({
@@ -86,6 +89,7 @@ export const costSurfaceView = (snap: UsageAccountingSnapshot): CostSurfaceView 
     .map(([model, agg]) => lineOf(model, agg))
     .sort((a, b) => b.totalUsd - a.totalUsd || byteCompare(a.model, b.model)),
   byKind: { root: snap.byKind.root.totalUsd, subagent: snap.byKind.subagent.totalUsd },
+  continuityLost: snap.continuityLost,
 })
 
 /**
@@ -93,7 +97,12 @@ export const costSurfaceView = (snap: UsageAccountingSnapshot): CostSurfaceView 
  * protocol's `CostSurfaceViewWire`, produced HERE so the host adapter and the
  * web daemon share ONE mapping instead of each hand-building the literal).
  */
-export interface CostSurfaceViewWireShape {
+export interface CostSurfaceOffWireShape {
+  readonly status: "off"
+}
+
+export interface CostSurfaceOnWireShape {
+  readonly status: "on"
   readonly totalUsd: number
   readonly estimatedUsd: number
   readonly unpricedCalls: number
@@ -104,8 +113,15 @@ export interface CostSurfaceViewWireShape {
   readonly calls: number
   readonly rootUsd: number
   readonly subagentUsd: number
+  readonly continuityLost: boolean
   readonly modelSlug?: string
 }
+
+export type CostSurfaceViewWireShape = CostSurfaceOffWireShape | CostSurfaceOnWireShape
+
+/** Explicit accounting-off state. Field absence is reserved for old daemons
+ * that predate the cumulative cost wire. */
+export const costAccountingOffWire = (): CostSurfaceOffWireShape => ({ status: "off" })
 
 /** Project an authority into the flat cumulative wire shape. */
 export const costSurfaceViewWire = (port: {
@@ -115,6 +131,7 @@ export const costSurfaceViewWire = (port: {
   const view = costSurfaceView(port.snapshot())
   const modelSlug = port.recent(1)[0]?.usage.model
   return {
+    status: "on",
     totalUsd: view.totalUsd,
     estimatedUsd: view.estimatedUsd,
     unpricedCalls: view.unpricedCalls,
@@ -125,6 +142,7 @@ export const costSurfaceViewWire = (port: {
     calls: view.calls,
     rootUsd: view.byKind.root,
     subagentUsd: view.byKind.subagent,
+    continuityLost: view.continuityLost,
     ...(modelSlug !== undefined ? { modelSlug } : {}),
   }
 }
