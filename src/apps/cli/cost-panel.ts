@@ -22,7 +22,6 @@
  *    only. No `@/agent`, no `@/llm`, no `@/stream`.
  */
 
-import { costUsd } from "@/observability"
 import {
   type CostSurfaceView,
   costSurfaceView,
@@ -50,27 +49,6 @@ export interface CostPanelState {
   model: string
 }
 
-export interface CostPanelUsageDelta {
-  inputTokens: number
-  outputTokens: number
-  cacheReadTokens?: number
-  /** Pre-computed USD cost for THIS turn. When omitted we derive it via
-   *  `costUsd(model, ...)` so the panel still produces a value when the caller
-   *  only hands us tokens. */
-  costUsd?: number | null
-  /**
-   * The model THIS usage ran on (MR-05), as reported by the adapter that streamed
-   * it. Absent ⇒ `state.model`, the session's boot label.
-   *
-   * The panel used to have no way to learn a model at all: `state.model` was set
-   * once at session start and NOTHING in production ever called `update({model})`
-   * — grep found zero callers. So after a `/model` switch every turn was priced
-   * with the boot model's rates and bucketed under its name, which is worse than a
-   * missing number because it looks like data.
-   */
-  model?: string
-}
-
 /** §23.5 — per-model cumulative bucket. One per distinct model id seen across
  *  the session (attributed to whichever model was active at each turn). */
 export interface ModelCostBucket {
@@ -85,6 +63,10 @@ export interface ModelCostBucket {
 export interface CostPanel {
   /** Read-only snapshot for tests + the slash command. */
   snapshot(): CostPanelState
+  /** A3 — count one TURN. A turn is a UI fact (one turn can hold several
+   *  model calls), so it is panel-local and independent of any metrics feed;
+   *  the dashboard sink calls this BEFORE its metrics guard. */
+  noteTurn(): void
   /** §23.5 — per-model cumulative breakdown, sorted by model id
    *  (deterministic). Empty when disabled or before any turn. A
    *  heterogeneous-model session is no longer collapsed to the last model. */
@@ -94,11 +76,6 @@ export interface CostPanel {
    *  omitted we derive it from the current model + the new token counts;
    *  unknown model ⇒ contributes nothing to `totalCostUsd` (the running
    *  sum is preserved). */
-  /** A3-S1 — count one TURN. A turn is a UI fact (a turn can hold several
-   *  model calls), so it is panel-local and independent of any metrics feed.
-   *  The dashboard sink calls this BEFORE its metrics guard. */
-  noteTurn(): void
-  incrementTurn(usage: CostPanelUsageDelta): void
   /** Single-line render — used as a status-bar slot. Empty string when the
    *  panel is disabled. */
   render(): string
@@ -265,7 +242,11 @@ const panelState = (opts: CostPanelOptions) => {
   /** The authority's current numbers, or `undefined` when this panel is not
    *  the projecting reader (no authority, or shadow). */
   const projected = (): CostSurfaceView | undefined =>
-    accounting === undefined || !authoritative ? undefined : costSurfaceView(accounting.snapshot())
+    // A disabled panel is a FULL no-op — it must not even read the authority,
+    // so `snapshot()` keeps the historical pristine-state contract.
+    !enabled || accounting === undefined || !authoritative
+      ? undefined
+      : costSurfaceView(accounting.snapshot())
 
   /**
    * The ONE state every read path renders from.
@@ -318,18 +299,8 @@ type PanelCtx = ReturnType<typeof panelState>
 
 /** Accounting: the totals, their per-model breakdown, and the two mutators
  *  that advance them. */
-const accountingOps = (
-  ctx: PanelCtx,
-): Pick<CostPanel, "snapshot" | "byModel" | "noteTurn" | "incrementTurn"> => {
-  const {
-    enabled,
-    state,
-    sortedModelEntries,
-    accounting,
-    authoritative,
-    projected,
-    effectiveState,
-  } = ctx
+const accountingOps = (ctx: PanelCtx): Pick<CostPanel, "snapshot" | "byModel" | "noteTurn"> => {
+  const { enabled, state, sortedModelEntries, projected, effectiveState } = ctx
 
   return {
     snapshot: () => effectiveState(),
@@ -352,48 +323,6 @@ const accountingOps = (
       if (!enabled) return
       state.turns += 1
     },
-
-    incrementTurn: (usage) => {
-      if (!enabled) return
-      // A3-S1 — the turn count moved to noteTurn() (the dashboard sink calls
-      // it unconditionally); this legacy entry now carries ONLY the legacy
-      // accumulation, and dies with it in A3-S2.
-      if (accounting === undefined || !authoritative) accumulateLegacyTurn(ctx, usage)
-    },
-  }
-}
-
-/** The pre-MR-04 accumulation path: fold one turn's counter DELTA into the
- *  panel's own state. Reached only when no accounting authority is wired, and
- *  deleted outright once the authority is the only feed (MR-07). Kept whole and
- *  separate rather than interleaved with the projected branch, so the two feeds
- *  never half-mix. */
-const accumulateLegacyTurn = (ctx: PanelCtx, usage: CostPanelUsageDelta): void => {
-  const { state, bucketFor, accumulateCost } = ctx
-  const inTok = Math.max(0, usage.inputTokens ?? 0)
-  const outTok = Math.max(0, usage.outputTokens ?? 0)
-  const cacheTok = Math.max(0, usage.cacheReadTokens ?? 0)
-  state.inputTokens += inTok
-  state.outputTokens += outTok
-  state.cacheReadTokens += cacheTok
-  // Resolve cost ONCE: caller-provided > derived via pricing > null. Used
-  // for BOTH the aggregate and the per-model bucket so they never diverge.
-  // MR-05 — price and bucket by the model THIS usage ran on.
-  const usageModel = usage.model !== undefined && usage.model.length > 0 ? usage.model : state.model
-  const rawCost =
-    usage.costUsd !== undefined ? usage.costUsd : costUsd(usageModel, inTok, outTok, cacheTok)
-  // Clamp a finite negative cost to 0 — symmetric with the Math.max(0, …)
-  // token clamps above. A negative bill (from a buggy/hostile upstream cost)
-  // must never drive the cumulative total below zero.
-  const turnCost = rawCost !== null && Number.isFinite(rawCost) ? Math.max(0, rawCost) : rawCost
-  accumulateCost(turnCost)
-  // §23.5 — attribute to the model active at this turn.
-  const b = bucketFor(usageModel)
-  b.inputTokens += inTok
-  b.outputTokens += outTok
-  b.cacheReadTokens += cacheTok
-  if (turnCost !== null && Number.isFinite(turnCost)) {
-    b.costUsd = (b.costUsd ?? 0) + turnCost
   }
 }
 
@@ -466,6 +395,19 @@ const totalCostLine = (totalCostUsd: number | null, view: CostSurfaceView | unde
   return `${base} (${marks.join(" · ")})`
 }
 
+/**
+ * A2 — the status line's cost cell. An unpriced call makes every dollar
+ * figure a FLOOR, and an unknown-only session must never read as an exact
+ * $0.00 — that is an absence wearing a number's confidence.
+ */
+const statusCostCell = (totalCostUsd: number | null, unpriced: number): string => {
+  if (unpriced <= 0) return formatUsd(totalCostUsd)
+  if (totalCostUsd !== null && totalCostUsd > 0) {
+    return `${formatUsd(totalCostUsd)} (+${unpriced} unpriced)`
+  }
+  return "cost incomplete"
+}
+
 /** Presentation + teardown. Rendering reads the accounting state and never
  *  mutates it. */
 const renderOps = (ctx: PanelCtx): Pick<CostPanel, "render" | "renderDetailed" | "dispose"> => {
@@ -508,23 +450,29 @@ const renderOps = (ctx: PanelCtx): Pick<CostPanel, "render" | "renderDetailed" |
     render: () => {
       if (!enabled) return renderDisabled()
       const s = effectiveState()
-      const unpriced = projected()?.unpricedCalls ?? 0
-      // A2 — an unpriced call makes every dollar figure a FLOOR. An
-      // unknown-only session must never read as an exact $0.00: that is an
-      // absence wearing a number's confidence.
-      const cost =
-        unpriced > 0
-          ? s.totalCostUsd !== null && s.totalCostUsd > 0
-            ? `${formatUsd(s.totalCostUsd)} (+${unpriced} unpriced)`
-            : "cost incomplete"
-          : formatUsd(s.totalCostUsd)
       const turnLabel = `${s.turns} turn${s.turns === 1 ? "" : "s"}`
+      // A3 — no authority means NO BOOKS. The legacy fold that used to fill
+      // this in is gone, and rendering its absence as zeros would be a wrong
+      // number wearing confidence; the off state is shown as what it is.
+      if (accounting === undefined) return `accounting off · ${turnLabel} · ${s.model}`
+      const cost = statusCostCell(s.totalCostUsd, projected()?.unpricedCalls ?? 0)
       const tokens = `${formatTokens(s.inputTokens)} in / ${formatTokens(s.outputTokens)} out`
       return `${cost} · ${turnLabel} · ${tokens} · ${s.model}`
     },
 
     renderDetailed: () => {
       if (!enabled) return renderDisabled()
+      if (accounting === undefined) {
+        const s = effectiveState()
+        return renderBox(
+          [
+            `${padLabel("Accounting:")}off (QUANTA_USAGE_ACCOUNTING_V2=off)`,
+            `${padLabel("Turns:")}${s.turns.toLocaleString("en-US")}`,
+            `${padLabel("Model:")}${s.model}`,
+          ],
+          { title: "session cost", titleStyle: gray, borderStyle: dim, minInner: 42 },
+        )
+      }
       const s = effectiveState()
       const duration = formatDuration(now() - s.sessionStart)
       const perTurn =

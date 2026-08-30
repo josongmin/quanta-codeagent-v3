@@ -1,5 +1,5 @@
 import type { Message } from "@/llm"
-import { buildCostDashboard, GEN_AI_ATTRS, renderDashboardText } from "@/observability"
+import { buildCostDashboard, renderDashboardText } from "@/observability"
 import { errMessage } from "@/shared"
 import type { ImageQueue } from "../../image-queue"
 import { overlayServerHealth } from "../../mcp-health"
@@ -9,17 +9,10 @@ import { deriveMcpPillServers } from "../factories/lifecycle"
 import type { SessionLoopSinks } from "../session-loop"
 import type { SessionSetupResult } from "../session-setup"
 
-interface CostPanelDeltaBaseline {
-  inputTokens: number
-  outputTokens: number
-  cacheReadTokens: number
-}
-
 export interface SurfaceState {
   readonly imageQueue: ImageQueue | undefined
   readonly rewindState: RewindSlashState | undefined
   history: readonly Message[]
-  readonly costDeltaPrev: CostPanelDeltaBaseline
 }
 
 export const createSurfaceState = (args: {
@@ -30,66 +23,7 @@ export const createSurfaceState = (args: {
   imageQueue: args.imageQueue,
   rewindState: args.rewindState,
   history: args.history,
-  costDeltaPrev: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 },
 })
-
-/**
- * MR-07 — SUPERSEDED, NOT YET REMOVABLE. With the authority ON (the default)
- * this fold's `incrementTurn` only advances the turn count. It stays because
- * `off` (the kill switch) and `shadow` (the diagnostic mode) still render from
- * this legacy feed. Removal is gated on retiring those modes, and takes
- * `cost-panel-usage-tee` with it — one feed, one deletion.
- */
-const foldCostPanelDelta = (
-  panel: {
-    incrementTurn: (delta: {
-      inputTokens: number
-      outputTokens: number
-      cacheReadTokens: number
-      model?: string
-    }) => void
-  },
-  snap: { counters: Record<string, number> },
-  prev: CostPanelDeltaBaseline,
-  model: string | undefined,
-): void => {
-  const curIn = snap.counters[GEN_AI_ATTRS.usage.inputTokens] ?? 0
-  const curOut = snap.counters[GEN_AI_ATTRS.usage.outputTokens] ?? 0
-  const curCache = snap.counters[GEN_AI_ATTRS.usage.cacheReadInputTokens] ?? 0
-  const dIn = Math.max(0, curIn - prev.inputTokens)
-  const dOut = Math.max(0, curOut - prev.outputTokens)
-  const dCache = Math.max(0, curCache - prev.cacheReadTokens)
-  prev.inputTokens = curIn
-  prev.outputTokens = curOut
-  prev.cacheReadTokens = curCache
-  panel.incrementTurn({
-    inputTokens: dIn,
-    outputTokens: dOut,
-    cacheReadTokens: dCache,
-    // MR-05 — attribute to the model that actually streamed this turn. Absent
-    // (no usage event carried one) ⇒ the panel falls back to its seeded label.
-    ...(model !== undefined ? { model } : {}),
-  })
-}
-
-const foldCostPanelIfWired = (
-  panel:
-    | {
-        incrementTurn: (delta: {
-          inputTokens: number
-          outputTokens: number
-          cacheReadTokens: number
-          model?: string
-        }) => void
-      }
-    | undefined,
-  metrics: { snapshot: () => { counters: Record<string, number> } } | undefined,
-  prev: CostPanelDeltaBaseline,
-  model: string | undefined,
-): void => {
-  if (panel === undefined || metrics === undefined) return
-  foldCostPanelDelta(panel, metrics.snapshot(), prev, model)
-}
 
 const snapshotAndFlushLifecyclePills = (
   setup: SessionSetupResult,
@@ -149,12 +83,6 @@ export const composeTurnSinks = (
       const snap = metrics.snapshot()
       slog.info("metrics.snapshot", { snapshot: snap })
       process.stderr.write(`${renderDashboardText(buildCostDashboard(snap, { model }))}\n`)
-      foldCostPanelIfWired(
-        setup.costPanel,
-        metrics,
-        state.costDeltaPrev,
-        setup.lastUsageModel.get(),
-      )
     },
     renderAndResetSummary: (outcome): void => {
       state.history = outcome.messages

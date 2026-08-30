@@ -17,13 +17,6 @@
  * `gen_ai.usage.cache_creation_input_tokens` even though the vocabulary
  * defines it. Cache-write is therefore structurally unpriceable on the panel.
  *
- * WIRING GAP THIS TEST CANNOT CLOSE, stated plainly: `foldCostPanelDelta` is
- * private to turn-sinks.ts and the only exported seam, `composeTurnSinks`,
- * needs a whole `SessionSetupResult`. The fold below is therefore REPLICATED
- * from turn-sinks.ts:49-66 rather than driven. MR-04 removes the replication
- * by routing the panel off the accounting snapshot instead of off counters —
- * at which point this helper is deleted, not re-pointed.
- *
  * REVERT/MUTATION POINTS (must re-RED after MR-03/MR-04):
  *   - stop inheriting the accounting slot into child configs ⇒ "every cost
  *     surface reports the same total" REDs.
@@ -36,11 +29,10 @@ import { AgentRecorder } from "@/agent/metrics"
 import { buildChildConfig } from "@/agent/subagent-runner-child-config"
 import type { AgentConfig } from "@/agent/types"
 import { TurnWorkMetricsCollector } from "@/agent/work-metrics-collector"
-import { type CostPanel, createCostPanel } from "@/apps/cli/cost-panel"
+import { createCostPanel } from "@/apps/cli/cost-panel"
 import type { StreamEvent } from "@/llm"
 import { Metrics } from "@/observability/metrics"
 import { createUsageAccounting } from "@/observability/usage-accounting"
-import { GEN_AI_ATTRS } from "@/observability/vocabulary"
 
 type UsageEv = Extract<StreamEvent, { type: "usage" }>
 
@@ -53,30 +45,6 @@ const round = (n: number) => Math.round(n * 1e6) / 1e6
 
 const usage = (inputTokens: number): UsageEv =>
   ({ type: "usage", model: MODEL, inputTokens, outputTokens: 0 }) as UsageEv
-
-/** REPLICATED from turn-sinks.ts:49-66 — see the wiring-gap note above. */
-const foldPanelFromCounters = (
-  panel: Pick<CostPanel, "incrementTurn">,
-  counters: Record<string, number>,
-  prev: { inputTokens: number; outputTokens: number; cacheReadTokens: number },
-  // The model the turn actually ran on. Hardcoding it here priced an Anthropic
-  // turn at gpt rates and produced a $1.60-vs-$3.12 "divergence" that was this
-  // fixture's, not production's — the shipped fold reads it off the usage event.
-  model: string = MODEL,
-): void => {
-  const curIn = counters[GEN_AI_ATTRS.usage.inputTokens] ?? 0
-  const curOut = counters[GEN_AI_ATTRS.usage.outputTokens] ?? 0
-  const curCache = counters[GEN_AI_ATTRS.usage.cacheReadInputTokens] ?? 0
-  panel.incrementTurn({
-    inputTokens: Math.max(0, curIn - prev.inputTokens),
-    outputTokens: Math.max(0, curOut - prev.outputTokens),
-    cacheReadTokens: Math.max(0, curCache - prev.cacheReadTokens),
-    model,
-  })
-  prev.inputTokens = curIn
-  prev.outputTokens = curOut
-  prev.cacheReadTokens = curCache
-}
 
 /** One session: a root turn plus a subagent turn, driven through the shipped
  *  `emitUsage` fan-out, then read back from every surface that shows cost.
@@ -277,132 +245,6 @@ describe("every CLI cost surface reports the same total", () => {
     expect(panel.renderDetailed()).not.toContain("By agent:")
   })
 
-  test("SHADOW: the panel renders the legacy feed and prints a reconciliation receipt", () => {
-    // Hell-audit finding: `reconcileUsageAccounting` had ZERO production
-    // callers, so shadow mode recorded into an authority nobody read and
-    // produced no evidence — the entire reason the middle position exists was
-    // unreachable. This drives the mode end to end.
-    const metrics = new Metrics()
-    const usageAccounting = createUsageAccounting()
-    const panel = createCostPanel({
-      model: MODEL,
-      now: () => 1_700_000_000_000,
-      accounting: usageAccounting,
-      accountingAuthoritative: false, // shadow
-    })
-    const config = {
-      llm: { stream: async function* () {} },
-      registry: { get: () => undefined, specs: () => [], isReadOnly: () => true },
-      stream: { emit: () => undefined },
-      permission: { mode: "acceptEdits" },
-      messages: [],
-      system: "t",
-      cwd: process.cwd(),
-      maxTurns: 1,
-      signal: new AbortController().signal,
-      sessionId: "sess-1",
-      metrics,
-      usageAccounting,
-    } as unknown as AgentConfig
-    const child = buildChildConfig(config, { prompt: "x" } as never, process.cwd(), {
-      agentId: "child-1",
-      parentId: "root",
-    } as never)
-
-    emitUsage(config, usage(PARENT_INPUT), new AgentRecorder(metrics), undefined, undefined)
-    emitUsage(child, usage(CHILD_INPUT), undefined, undefined, undefined)
-    const prev = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 }
-    foldPanelFromCounters(panel, metrics.snapshot().counters, prev)
-
-    // The panel still shows the LEGACY number — shadow changes nothing a user
-    // was already looking at.
-    expect(round(panel.snapshot().totalCostUsd ?? 0)).toBe(0.25)
-    // …and the receipt names the divergence the authority can see.
-    const detailed = panel.renderDetailed()
-    expect(detailed).toContain("usage-accounting shadow")
-    expect(detailed).toContain("DIVERGES")
-  })
-
-  test("SHADOW does not cry wolf on an Anthropic session that used the cache", () => {
-    // The false alarm this closes: the legacy input counter is provider-shaped,
-    // so an Anthropic turn with cache reads made the receipt report a
-    // divergence the feeds did not actually have. Both providers must read
-    // "agrees" on a healthy session, or the receipt is noise.
-    for (const model of ["gpt-5.4", "claude-sonnet-4-6"]) {
-      const metrics = new Metrics()
-      const usageAccounting = createUsageAccounting()
-      const panel = createCostPanel({
-        model,
-        now: () => 1_700_000_000_000,
-        accounting: usageAccounting,
-        accountingAuthoritative: false,
-      })
-      const config = {
-        llm: { stream: async function* () {} },
-        registry: { get: () => undefined, specs: () => [], isReadOnly: () => true },
-        stream: { emit: () => undefined },
-        permission: { mode: "acceptEdits" },
-        messages: [],
-        system: "t",
-        cwd: process.cwd(),
-        maxTurns: 1,
-        signal: new AbortController().signal,
-        sessionId: "sess-1",
-        metrics,
-        usageAccounting,
-      } as unknown as AgentConfig
-      emitUsage(
-        config,
-        {
-          type: "usage",
-          model,
-          inputTokens: 1_000_000,
-          outputTokens: 0,
-          cacheReadTokens: 400_000,
-        } as UsageEv,
-        new AgentRecorder(metrics),
-        undefined,
-        undefined,
-      )
-      const prev = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 }
-      foldPanelFromCounters(panel, metrics.snapshot().counters, prev, model)
-      expect(panel.renderDetailed()).toContain("agrees across 1 calls")
-    }
-  })
-
-  test("SHADOW on an agreeing session reports agreement, with a call count", () => {
-    // Paired control: no subagent, so the two feeds see the same calls.
-    const metrics = new Metrics()
-    const usageAccounting = createUsageAccounting()
-    const panel = createCostPanel({
-      model: MODEL,
-      now: () => 1_700_000_000_000,
-      accounting: usageAccounting,
-      accountingAuthoritative: false,
-    })
-    const config = {
-      llm: { stream: async function* () {} },
-      registry: { get: () => undefined, specs: () => [], isReadOnly: () => true },
-      stream: { emit: () => undefined },
-      permission: { mode: "acceptEdits" },
-      messages: [],
-      system: "t",
-      cwd: process.cwd(),
-      maxTurns: 1,
-      signal: new AbortController().signal,
-      sessionId: "sess-1",
-      metrics,
-      usageAccounting,
-    } as unknown as AgentConfig
-    emitUsage(config, usage(PARENT_INPUT), new AgentRecorder(metrics), undefined, undefined)
-    const prev = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 }
-    foldPanelFromCounters(panel, metrics.snapshot().counters, prev)
-
-    const detailed = panel.renderDetailed()
-    expect(detailed).toContain("agrees across 1 calls")
-    expect(detailed).not.toContain("DIVERGES")
-  })
-
   test("the RENDERED status line and /cost header show the projected totals", () => {
     // The hole this pins: `snapshot()` was projected but `render()` and
     // `renderDetailed()` read the raw legacy state — so with the authority ON,
@@ -410,7 +252,7 @@ describe("every CLI cost surface reports the same total", () => {
     // zeros while snapshot() reported the real total. Asserting snapshot()
     // alone let that ship; these assertions are on the STRINGS a user sees.
     const { panel } = runSession()
-    panel.incrementTurn({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 })
+    panel.noteTurn()
 
     const line = panel.render()
     expect(line).toContain("$1.50")
@@ -555,85 +397,7 @@ describe("every CLI cost surface reports the same total", () => {
     // The row is still there, just declawed — not silently dropped.
     expect(panel.renderDetailed()).toContain("evil")
 
-    // The LEGACY feed renders per-model rows too, from its own map, and needs
-    // the same defense — the fix is at the render boundary, so both arms must
-    // be exercised or one of them can regress unnoticed.
-    const legacy = createCostPanel({ model: MODEL, now: () => 1_700_000_000_000 })
-    legacy.incrementTurn({ inputTokens: 1_000, outputTokens: 0, cacheReadTokens: 0, model: MODEL })
-    legacy.incrementTurn({
-      inputTokens: 1_000,
-      outputTokens: 0,
-      cacheReadTokens: 0,
-      model: hostile,
-    })
-    expect(legacy.renderDetailed()).not.toContain(ESC)
-    expect(legacy.byModel().some((b) => b.model.includes(ESC))).toBe(false)
-    expect(legacy.renderDetailed()).toContain("evil")
-  })
-
-  test("the panel and the ledger agree on a turn that used the prompt cache", () => {
-    // Root-only, so subagent coverage is NOT the variable here — this isolates
-    // the SECOND way the surfaces drift apart: the panel prices cache reads via
-    // `costUsd` (provider-aware, carves cached tokens out of input for OpenAI)
-    // while the ledger adds them on top. Same turn, same tokens, two totals —
-    // this is what a user sees as "the status line and /cost disagree".
-    const metrics = new Metrics()
-    const budgetLedger = defaultBudgetLedger()
-    const panel = createCostPanel({ model: MODEL, now: () => 1_700_000_000_000 })
-    const config = {
-      llm: { stream: async function* () {} },
-      registry: { get: () => undefined, specs: () => [], isReadOnly: () => true },
-      stream: { emit: () => undefined },
-      permission: { mode: "acceptEdits" },
-      messages: [],
-      system: "t",
-      cwd: process.cwd(),
-      maxTurns: 1,
-      signal: new AbortController().signal,
-      sessionId: "sess-1",
-      metrics,
-      budgetLedger,
-    } as unknown as AgentConfig
-
-    const cached = { ...usage(1_000_000), cacheReadTokens: 400_000 } as UsageEv
-    emitUsage(config, cached, new AgentRecorder(metrics), undefined, undefined)
-    const prev = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 }
-    foldPanelFromCounters(panel, metrics.snapshot().counters, prev)
-
-    // REDs: panel $1.60 vs ledger $2.60 on one turn's single usage event.
-    expect(round(panel.snapshot().totalCostUsd ?? 0)).toBe(round(budgetLedger.snapshot().totalCost))
-  })
-
-  // PAIRED CONTROL — a session with NO subagent already agrees end to end.
-  // Green today and must stay green: it isolates the RED to child coverage
-  // rather than to pricing, the fold, or this fixture.
-  test("PAIRED CONTROL: a root-only session already agrees (must stay green)", () => {
-    const metrics = new Metrics()
-    const budgetLedger = defaultBudgetLedger()
-    const collector = new TurnWorkMetricsCollector()
-    const panel = createCostPanel({ model: MODEL, now: () => 1_700_000_000_000 })
-    const config = {
-      llm: { stream: async function* () {} },
-      registry: { get: () => undefined, specs: () => [], isReadOnly: () => true },
-      stream: { emit: () => undefined },
-      permission: { mode: "acceptEdits" },
-      messages: [],
-      system: "t",
-      cwd: process.cwd(),
-      maxTurns: 1,
-      signal: new AbortController().signal,
-      sessionId: "sess-1",
-      metrics,
-      budgetLedger,
-    } as unknown as AgentConfig
-
-    emitUsage(config, usage(PARENT_INPUT), new AgentRecorder(metrics), collector, undefined)
-    const prev = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 }
-    foldPanelFromCounters(panel, metrics.snapshot().counters, prev)
-
-    const rootOnly = 0.25
-    expect(round(panel.snapshot().totalCostUsd ?? 0)).toBe(rootOnly)
-    expect(round(budgetLedger.snapshot().totalCost)).toBe(rootOnly)
-    expect(round(collector.finalize(MODEL).estimatedCostUsd ?? 0)).toBe(rootOnly)
+    // (A3 removed the legacy per-model map; the projection above is now the
+    // only feed, so this single arm IS the whole render boundary.)
   })
 })

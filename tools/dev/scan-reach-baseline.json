@@ -191,7 +191,7 @@
       "walked": 16
     },
     "tests/unit/apps/cli/repl-host-slim-hellgate.test.ts#FACTORIES-DIR": {
-      "walked": 12
+      "walked": 11
     },
     "tests/unit/apps/cli/repl-orphan-resolution-hellgate.test.ts#src-apps-cli-repl": {
       "walked": 53
@@ -239,6 +239,9 @@
     "tests/unit/quanta-home-root-ssot-ratchet-hellgate.test.ts#SRC": {
       "walked": 3338
     },
+    "tests/unit/repair-shadow-js-ratchet.test.ts#REPAIR-DIR": {
+      "walked": 14
+    },
     "tests/unit/retrieval-bridge-deleted-ratchet.test.ts#SRC-ROOT": {
       "walked": 3642
     },
@@ -255,6 +258,9 @@
       "walked": 14
     },
     "tests/unit/runner/knobs/cross-slice-cycle.test.ts#PER-KNOB-DIR": {
+      "walked": 68
+    },
+    "tests/unit/runner/knobs/knobs-import-bundle.test.ts#PER-KNOB-DIR": {
       "walked": 68
     },
     "tests/unit/runner/session-authorities-task-registry-identity.test.ts#SRC-DIR": {

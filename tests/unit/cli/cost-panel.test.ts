@@ -1,12 +1,18 @@
 /**
- * cost-panel hellgate — cumulative session cost sticky panel contract.
+ * cost-panel hellgate — the panel as a PROJECTION of the usage authority.
  *
- * Pins {@link createCostPanel}: accumulation across multiple turns,
- * single-line render shape, boxed `/cost` detailed render, ENV/TTY gate,
- * cost = N/A fallback for unknown models, disabled-instance no-op, and the
- * model-swap mid-session path.
+ * A3 removed the panel's own accumulation: every token and dollar it renders
+ * comes from `UsageAccountingPort` records, and its only mutation is
+ * `noteTurn()` (a turn is a UI fact). These tests therefore seed the
+ * AUTHORITY and assert the RENDERED surfaces — the same direction production
+ * data flows.
+ *
+ * Contracts retired with the legacy feed, deliberately and not re-tested:
+ *   - `incrementTurn` delta folding (explicit/null `costUsd`, negative-cost
+ *     clamps): the seam no longer exists; the equivalent guards live at the
+ *     authority boundary (non-finite REJECTED — authority tests) and at
+ *     normalization (negative clamps — normalize-price tests).
  */
-
 import { describe, expect, test } from "bun:test"
 import {
   type CostPanel,
@@ -14,6 +20,14 @@ import {
   createCostPanel,
   isCostPanelEnabled,
 } from "../../../src/apps/cli/cost-panel"
+import { MODEL_RATE_CARD, PRICING_VERSION } from "../../../src/observability/pricing"
+import {
+  createUsageAccounting,
+  normalizeUsage,
+  priceUsage,
+  type UsageAccountingPort,
+  type UsageCost,
+} from "../../../src/observability/usage-accounting"
 import { setColorPolicy, stripAnsi } from "../../../src/ui/ui-helpers"
 
 // Force ANSI off so render assertions don't see colour escapes.
@@ -29,8 +43,58 @@ const makeClock = (start = 1_000_000): { now: () => number; advance: (ms: number
   }
 }
 
-const make = (overrides: Partial<CostPanelOptions> = {}): CostPanel =>
-  createCostPanel({ model: "claude-sonnet-4-6", ...overrides })
+interface Harness {
+  readonly panel: CostPanel
+  readonly accounting: UsageAccountingPort
+  /** Record one model call into the authority and count one turn — the
+   *  production pairing (emitUsage sink + dashboard noteTurn). */
+  turn(tokens: {
+    model?: string
+    input?: number
+    output?: number
+    cacheRead?: number
+    /** Hand-built total ⇒ the cost arrives pre-priced (the record-level
+     *  equivalent of the old caller-supplied costUsd). */
+    costUsd?: number
+  }): void
+}
+
+let callSeq = 0
+
+const make = (overrides: Partial<CostPanelOptions> = {}): Harness => {
+  const accounting = createUsageAccounting()
+  const panel = createCostPanel({ model: "claude-sonnet-4-6", accounting, ...overrides })
+  const turn: Harness["turn"] = (t) => {
+    const usage = normalizeUsage({
+      model: t.model ?? "claude-sonnet-4-6",
+      inputTokens: t.input ?? 0,
+      outputTokens: t.output ?? 0,
+      ...(t.cacheRead !== undefined ? { cacheReadTokens: t.cacheRead } : {}),
+    })
+    const cost: UsageCost =
+      t.costUsd !== undefined
+        ? {
+            totalUsd: t.costUsd,
+            freshInputUsd: t.costUsd,
+            cacheReadUsd: 0,
+            cacheWriteUsd: 0,
+            outputUsd: 0,
+            pricingKnown: true,
+            pricingModel: usage.model,
+            pricingVersion: PRICING_VERSION,
+          }
+        : priceUsage(usage, MODEL_RATE_CARD, { pricingVersion: PRICING_VERSION })
+    accounting.record({
+      callId: `t${++callSeq}`,
+      at: 1,
+      usage,
+      cost,
+      provenance: { sessionId: "s", agentId: "root", agentKind: "root", depth: 0 },
+    })
+    panel.noteTurn()
+  }
+  return { panel, accounting, turn }
+}
 
 // ── ENV gate ────────────────────────────────────────────────────────────
 
@@ -57,83 +121,46 @@ describe("isCostPanelEnabled: env + TTY gate", () => {
   })
 })
 
-// ── accumulation ────────────────────────────────────────────────────────
+// ── projection ──────────────────────────────────────────────────────────
 
-describe("createCostPanel: accumulation across turns", () => {
-  test("incrementTurn folds tokens; noteTurn bumps the turn count (A3-S1 split)", () => {
-    const panel = make()
-    panel.incrementTurn({ inputTokens: 1000, outputTokens: 200 })
-    panel.noteTurn()
-    panel.incrementTurn({ inputTokens: 500, outputTokens: 100, cacheReadTokens: 50 })
-    panel.noteTurn()
+describe("projection: the snapshot IS the authority's numbers", () => {
+  test("tokens and priced cost accumulate across recorded calls", () => {
+    const { panel, turn } = make()
+    turn({ input: 1000, output: 200 })
+    turn({ input: 500, output: 100, cacheRead: 50 })
     const s = panel.snapshot()
     expect(s.turns).toBe(2)
-    expect(s.inputTokens).toBe(1500)
+    // sonnet: (1500 in × $3 + 300 out × $15 + 50 cacheRead × $0.30) / 1M
+    expect(s.inputTokens).toBe(1550) // prompt = fresh + cacheRead (anthropic additive)
     expect(s.outputTokens).toBe(300)
     expect(s.cacheReadTokens).toBe(50)
+    expect(s.totalCostUsd).toBeCloseTo(0.009_015, 9)
   })
 
-  test("cost accumulates across known-model turns", () => {
-    const panel = make({ model: "claude-sonnet-4-6" })
-    // claude-sonnet-4-6: $3 in / $15 out / $0.30 cache-read per 1M.
-    // Turn 1: 1000 in, 200 out ⇒ 0.003 + 0.003 = 0.006
-    panel.incrementTurn({ inputTokens: 1000, outputTokens: 200 })
-    // Turn 2: 500 in, 100 out, 50 cache_read ⇒ 0.0015 + 0.0015 + 0.000015
-    panel.incrementTurn({ inputTokens: 500, outputTokens: 100, cacheReadTokens: 50 })
-    const s = panel.snapshot()
-    expect(s.totalCostUsd).not.toBeNull()
-    if (s.totalCostUsd === null) throw new Error("unreachable")
-    expect(s.totalCostUsd).toBeCloseTo(0.009015, 6)
+  test("hand-priced records fold verbatim (the record-level costUsd contract)", () => {
+    const { panel, turn } = make()
+    turn({ input: 1000, output: 200, costUsd: 0.5 })
+    turn({ input: 100, output: 50, costUsd: 0.25 })
+    expect(panel.snapshot().totalCostUsd).toBeCloseTo(0.75, 9)
   })
 
-  test("caller-provided costUsd is used verbatim (not re-derived)", () => {
-    const panel = make({ model: "claude-sonnet-4-6" })
-    panel.incrementTurn({ inputTokens: 1000, outputTokens: 200, costUsd: 0.5 })
-    panel.incrementTurn({ inputTokens: 100, outputTokens: 50, costUsd: 0.25 })
-    expect(panel.snapshot().totalCostUsd).toBeCloseTo(0.75, 6)
-  })
-
-  test("null costUsd contribution is skipped (no NaN)", () => {
-    const panel = make({ model: "claude-sonnet-4-6" })
-    panel.incrementTurn({ inputTokens: 1000, outputTokens: 200, costUsd: 0.5 })
+  test("an authority-less panel is 'accounting off', never fake zeros", () => {
+    const panel = createCostPanel({ model: "claude-sonnet-4-6" })
     panel.noteTurn()
-    panel.incrementTurn({ inputTokens: 100, outputTokens: 50, costUsd: null })
-    panel.noteTurn()
-    const s = panel.snapshot()
-    expect(s.totalCostUsd).toBeCloseTo(0.5, 6)
-    expect(s.turns).toBe(2)
-  })
-
-  test("a turn is priced by the model IT ran on, not the session label", () => {
-    // The model rides on the usage delta — that is the shipped seam, and the
-    // reason a turn that switches models is priced correctly. `update()` used
-    // to be the way to express this in tests, but production never called it,
-    // so the test was exercising a path no session took.
-    const panel = make({ model: "claude-sonnet-4-6" })
-    panel.incrementTurn({ inputTokens: 1000, outputTokens: 200 })
-    // Subsequent turn uses the OTHER model's pricing.
-    panel.incrementTurn({ inputTokens: 1000, outputTokens: 100, model: "gpt-4o-mini" })
-    // gpt-4o-mini: $0.15 in / $0.60 out per 1M ⇒ 0.00015 + 0.00006 = 0.00021
-    // Combined with the sonnet turn (0.006): ≈ 0.00621
-    const s = panel.snapshot()
-    expect(s.totalCostUsd).not.toBeNull()
-    if (s.totalCostUsd === null) throw new Error("unreachable")
-    expect(s.totalCostUsd).toBeCloseTo(0.00621, 6)
+    expect(panel.snapshot().totalCostUsd).toBeNull()
+    expect(stripAnsi(panel.render())).toContain("accounting off")
+    expect(stripAnsi(panel.renderDetailed())).toMatch(/Accounting:\s+off/)
   })
 })
 
 // ── single-line render ──────────────────────────────────────────────────
 
-describe("createCostPanel.render(): single-line status form", () => {
+describe("render(): single-line status form", () => {
   test("shape includes cost · turns · in/out · model", () => {
-    const panel = make({ model: "claude-sonnet-4-6" })
-    panel.incrementTurn({ inputTokens: 45_000, outputTokens: 12_000 })
-    panel.noteTurn()
-    panel.incrementTurn({ inputTokens: 234, outputTokens: 891 })
-    panel.noteTurn()
+    const { panel, turn } = make()
+    turn({ input: 45_000, output: 12_000 })
+    turn({ input: 234, output: 891 })
     const line = stripAnsi(panel.render())
-    // $X.XXXX format for sub-cent ranges expected for tiny totals; check
-    // the structural separators + tokens label + model.
     expect(line).toMatch(/^\$\d/)
     expect(line).toMatch(/2 turns/)
     expect(line).toMatch(/in/)
@@ -142,35 +169,36 @@ describe("createCostPanel.render(): single-line status form", () => {
   })
 
   test("singular 'turn' on the first turn", () => {
-    const panel = make()
-    panel.incrementTurn({ inputTokens: 100, outputTokens: 20 })
-    panel.noteTurn()
+    const { panel, turn } = make()
+    turn({ input: 100, output: 20 })
     expect(panel.render()).toMatch(/1 turn(?!s)/)
   })
 
-  test("unknown model ⇒ cost reads 'n/a'", () => {
-    const panel = make({ model: "fictional-model-9000" })
-    panel.incrementTurn({ inputTokens: 1000, outputTokens: 200 })
+  test("an unknown-only session reads 'cost incomplete', never an exact figure", () => {
+    // A2 — the unknown model admits at $0 / pricingKnown:false. That zero is
+    // an ABSENCE; rendering it as "$0.0000" (or the old "n/a") hid real spend.
+    const { panel, turn } = make({ model: "fictional-model-9000" })
+    turn({ model: "fictional-model-9000", input: 1000, output: 200 })
     const line = stripAnsi(panel.render())
-    expect(line).toMatch(/^n\/a /)
+    expect(line).toContain("cost incomplete")
+    expect(line).not.toMatch(/^\$/)
     expect(line).toContain("fictional-model-9000")
   })
 })
 
 // ── boxed detailed render ───────────────────────────────────────────────
 
-describe("createCostPanel.renderDetailed(): boxed /cost form", () => {
+describe("renderDetailed(): boxed /cost form", () => {
   test("contains every documented row", () => {
     const clock = makeClock()
-    const panel = make({ model: "claude-sonnet-4-6", now: clock.now })
-    panel.incrementTurn({ inputTokens: 45_234, outputTokens: 12_891, cacheReadTokens: 8123 })
-    panel.noteTurn()
+    const { panel, turn } = make({ now: clock.now })
+    turn({ input: 45_234, output: 12_891, cacheRead: 8123 })
     clock.advance(12 * 60 * 1000 + 34 * 1000) // 12m 34s
     const body = stripAnsi(panel.renderDetailed())
     expect(body).toContain("session cost")
     expect(body).toMatch(/Duration:\s+12m 34s/)
     expect(body).toMatch(/Turns:\s+1/)
-    expect(body).toMatch(/Input:\s+45,234 tok/)
+    expect(body).toMatch(/Input:\s+53,357 tok/) // prompt = 45,234 fresh + 8,123 cached
     expect(body).toMatch(/Output:\s+12,891 tok/)
     expect(body).toMatch(/Cache read:\s+8,123 tok/)
     expect(body).toMatch(/Total cost:\s+\$/)
@@ -178,164 +206,128 @@ describe("createCostPanel.renderDetailed(): boxed /cost form", () => {
     expect(body).toContain("claude-sonnet-4-6")
   })
 
-  test("per-turn avg is n/a until first known-cost turn", () => {
-    const panel = make({ model: "fictional-model-9000" })
-    panel.incrementTurn({ inputTokens: 100, outputTokens: 50 })
+  test("unknown-only session: the Total-cost cell says incomplete", () => {
+    const { panel, turn } = make({ model: "fictional-model-9000" })
+    turn({ model: "fictional-model-9000", input: 100, output: 50 })
     const body = stripAnsi(panel.renderDetailed())
-    expect(body).toMatch(/Total cost:\s+n\/a/)
-    expect(body).toMatch(/Per turn avg:\s+n\/a/)
+    expect(body).toMatch(/Total cost:\s+incomplete/)
+    expect(body).toContain("1 unpriced")
   })
 
   test("duration formats as 5s / 2m 30s / 1h 5m", () => {
     const clock = makeClock()
-    const panel = make({ now: clock.now })
+    const { panel } = make({ now: clock.now })
     clock.advance(5_000)
     expect(stripAnsi(panel.renderDetailed())).toMatch(/Duration:\s+5s/)
-    clock.advance(2 * 60 * 1000 + 25 * 1000) // total 2m 30s
+    clock.advance(2 * 60 * 1000 + 25 * 1000)
     expect(stripAnsi(panel.renderDetailed())).toMatch(/Duration:\s+2m 30s/)
-    clock.advance(2 * 60 * 60 * 1000) // jump >1h ahead
+    clock.advance(2 * 60 * 60 * 1000)
     expect(stripAnsi(panel.renderDetailed())).toMatch(/Duration:\s+\d+h \d+m/)
   })
 })
 
 // ── disabled instance ───────────────────────────────────────────────────
 
-describe("createCostPanel: disabled instance is fully no-op", () => {
-  test("enabled=false ⇒ render + renderDetailed return ''", () => {
-    const panel = make({ enabled: false })
-    panel.incrementTurn({ inputTokens: 1000, outputTokens: 200, costUsd: 0.5, model: "gpt-4o" })
-    // mutations are dropped when disabled — state stays pristine.
+describe("disabled instance is fully no-op", () => {
+  test("enabled=false ⇒ no turns, no projection read, empty renders", () => {
+    const { panel, turn } = make({ enabled: false })
+    turn({ input: 1000, output: 200, costUsd: 0.5 })
+    // The authority recorded (it is session truth, not panel state) — but the
+    // DISABLED panel neither counts nor projects it.
     expect(panel.snapshot().turns).toBe(0)
     expect(panel.snapshot().inputTokens).toBe(0)
+    expect(panel.snapshot().totalCostUsd).toBeNull()
     expect(panel.render()).toBe("")
     expect(panel.renderDetailed()).toBe("")
   })
 })
 
-// ── §23.5 per-model breakdown ─────────────────────────────────────────────
+// ── per-model breakdown ─────────────────────────────────────────────────
 
-describe("createCostPanel.byModel(): per-model attribution (§23.5)", () => {
-  test("single-model session ⇒ one bucket; renderDetailed byte-identical (no 'By model')", () => {
-    const panel = make({ model: "claude-sonnet-4-6" })
-    panel.incrementTurn({ inputTokens: 1000, outputTokens: 200 })
-    panel.incrementTurn({ inputTokens: 500, outputTokens: 100 })
+describe("byModel(): per-model attribution", () => {
+  test("single-model session ⇒ one bucket; no 'By model' section", () => {
+    const { panel, turn } = make()
+    turn({ input: 1000, output: 200 })
+    turn({ input: 500, output: 100 })
     const buckets = panel.byModel()
     expect(buckets.length).toBe(1)
     expect(buckets[0]?.model).toBe("claude-sonnet-4-6")
     expect(buckets[0]?.inputTokens).toBe(1500)
     expect(buckets[0]?.outputTokens).toBe(300)
-    // Invariant: single model ⇒ NO breakdown section in the detailed box.
     expect(stripAnsi(panel.renderDetailed())).not.toContain("By model:")
   })
 
-  test("heterogeneous session attributes tokens/cost to the active model per turn", () => {
-    const panel = make({ model: "claude-sonnet-4-6" })
-    panel.incrementTurn({ inputTokens: 1000, outputTokens: 200, costUsd: 0.5 })
-    panel.incrementTurn({
-      inputTokens: 2000,
-      outputTokens: 400,
-      costUsd: 0.25,
-      model: "gpt-4o-mini",
-    })
-    panel.incrementTurn({ inputTokens: 100, outputTokens: 50, costUsd: 0.05, model: "gpt-4o-mini" })
+  test("heterogeneous session attributes tokens/cost to the model of each call", () => {
+    const { panel, turn } = make()
+    turn({ input: 1000, output: 200, costUsd: 0.5 })
+    turn({ model: "gpt-4o-mini", input: 2000, output: 400, costUsd: 0.25 })
+    turn({ model: "gpt-4o-mini", input: 100, output: 50, costUsd: 0.05 })
     const buckets = panel.byModel()
     expect(buckets.length).toBe(2)
-    // sorted by model id (byte) — 'claude…' < 'gpt…'
-    expect(buckets.map((b) => b.model)).toEqual(["claude-sonnet-4-6", "gpt-4o-mini"])
     const sonnet = buckets.find((b) => b.model === "claude-sonnet-4-6")
     const gpt = buckets.find((b) => b.model === "gpt-4o-mini")
     expect(sonnet?.inputTokens).toBe(1000)
     expect(sonnet?.costUsd).toBeCloseTo(0.5, 6)
     expect(gpt?.inputTokens).toBe(2100)
     expect(gpt?.costUsd).toBeCloseTo(0.3, 6)
-  })
-
-  test("heterogeneous session ⇒ renderDetailed includes a 'By model' section", () => {
-    const panel = make({ model: "claude-sonnet-4-6" })
-    panel.incrementTurn({ inputTokens: 1000, outputTokens: 200, costUsd: 0.5 })
-    panel.incrementTurn({
-      inputTokens: 2000,
-      outputTokens: 400,
-      costUsd: 0.25,
-      model: "gpt-4o-mini",
-    })
     const body = stripAnsi(panel.renderDetailed())
     expect(body).toContain("By model:")
     expect(body).toContain("claude-sonnet-4-6:")
     expect(body).toContain("gpt-4o-mini:")
   })
 
-  test("unknown-model turn contributes tokens but null cost to its bucket", () => {
-    const panel = make({ model: "fictional-9000" })
-    panel.incrementTurn({ inputTokens: 100, outputTokens: 50 })
+  test("an unknown model's bucket carries tokens and a ZERO floor, counted unpriced", () => {
+    // The old contract rendered null; the authority admits at $0 +
+    // unpricedCalls so the surface can say incomplete instead.
+    const { panel, accounting, turn } = make({ model: "fictional-9000" })
+    turn({ model: "fictional-9000", input: 100, output: 50 })
     const b = panel.byModel()[0]
     expect(b?.inputTokens).toBe(100)
-    expect(b?.costUsd).toBeNull()
+    expect(b?.costUsd).toBe(0)
+    expect(accounting.snapshot().unpricedCalls).toBe(1)
   })
 
   test("disabled instance ⇒ byModel() empty", () => {
-    const panel = make({ enabled: false })
-    panel.incrementTurn({ inputTokens: 100, outputTokens: 50, costUsd: 0.5 })
+    const { panel, turn } = make({ enabled: false })
+    turn({ input: 100, output: 50, costUsd: 0.5 })
     expect(panel.byModel()).toEqual([])
   })
 })
 
-// ── §23.5 audit hardening (model sanitize / cost clamp / fmt / cache-read) ──
+// ── audit hardening (sanitize / fmt / cache-read) ───────────────────────
 
-describe("createCostPanel: audit hardening", () => {
+describe("audit hardening", () => {
   // biome-ignore lint/suspicious/noControlCharactersInRegex: asserting control bytes are stripped
   const CONTROL = /[\x00-\x1f\x7f-\x9f]/
 
-  test("model id with ESC/OSC bytes is sanitized at construction (no terminal injection)", () => {
-    const panel = make({ model: "evil\x1b]0;PWNED\x07\nFAKE" })
+  test("model id with ESC/OSC bytes is sanitized at construction", () => {
+    const panel = createCostPanel({ model: "evil\x1b]0;PWNED\x07\nFAKE" })
     expect(CONTROL.test(panel.snapshot().model)).toBe(false)
     expect(CONTROL.test(panel.render())).toBe(false)
   })
 
-  test("a hostile model id on a usage delta is sanitized in the per-model row", () => {
-    // The model on a usage event is provider-supplied text, and the per-model
-    // rows print it. Sanitization is at the RENDER boundary now (the bucket key
-    // stays verbatim so the accounting stays exact).
-    const panel = make({ model: "ok" })
-    panel.incrementTurn({ inputTokens: 10, outputTokens: 0, model: "x\x1b[31mRED" })
+  test("a hostile RECORDED model id is sanitized at every render boundary", () => {
+    const { panel, turn } = make()
+    turn({ model: "x\x1b[31mRED", input: 10 })
     const row = panel.byModel().find((b) => b.model.startsWith("x"))
-    // only the ESC byte is stripped; the literal "[31m" text remains
-    expect(row?.model).toBe("x[31mRED")
+    expect(row?.model).toBe("x[31mRED") // only the ESC byte is stripped
     expect(panel.renderDetailed()).not.toContain("\x1b[31m")
+    expect(panel.render()).not.toContain("\x1b[31m") // the label follows the newest record
   })
 
-  test("negative caller cost is clamped to 0 (no negative bill)", () => {
-    const panel = make({ model: "claude-sonnet-4-6" })
-    panel.incrementTurn({ inputTokens: 1, outputTokens: 1, costUsd: 1 })
-    panel.incrementTurn({ inputTokens: 1, outputTokens: 1, costUsd: -5 })
-    expect(panel.snapshot().totalCostUsd).toBeCloseTo(1, 6)
-    expect(panel.byModel()[0]?.costUsd).toBeCloseTo(1, 6)
-  })
-
-  test("formatTokens: <10k stays comma-grouped, >=10k goes k-form (via render)", () => {
+  test("formatTokens: <10k comma-grouped, >=10k k-form (via render)", () => {
     const a = make()
-    a.incrementTurn({ inputTokens: 9999, outputTokens: 0 })
-    expect(stripAnsi(a.render())).toContain("9,999 in")
+    a.turn({ input: 9999 })
+    expect(stripAnsi(a.panel.render())).toContain("9,999 in")
     const b = make()
-    b.incrementTurn({ inputTokens: 12_000, outputTokens: 0 })
-    expect(stripAnsi(b.render())).toContain("12.0k in")
+    b.turn({ input: 12_000 })
+    expect(stripAnsi(b.panel.render())).toContain("12.0k in")
   })
 
   test("per-model breakdown row includes cache-read (reconciles with aggregate)", () => {
-    const panel = make({ model: "claude-sonnet-4-6" })
-    panel.incrementTurn({
-      inputTokens: 1000,
-      outputTokens: 200,
-      cacheReadTokens: 500,
-      costUsd: 0.5,
-    })
-    panel.incrementTurn({
-      inputTokens: 2000,
-      outputTokens: 400,
-      cacheReadTokens: 800,
-      costUsd: 0.25,
-      model: "gpt-4o-mini",
-    })
+    const { panel, turn } = make()
+    turn({ input: 1000, output: 200, cacheRead: 500, costUsd: 0.5 })
+    turn({ model: "gpt-4o-mini", input: 2000, output: 400, cacheRead: 800, costUsd: 0.25 })
     const body = stripAnsi(panel.renderDetailed())
     expect(body).toMatch(/claude-sonnet-4-6:.*500 cache/)
     expect(body).toMatch(/gpt-4o-mini:.*800 cache/)
@@ -344,20 +336,12 @@ describe("createCostPanel: audit hardening", () => {
 
 // ── color-OFF determinism ───────────────────────────────────────────────
 
-describe("createCostPanel: deterministic render under color=none", () => {
-  test("render() output contains no ANSI escapes when policy=none", () => {
+describe("deterministic render under color=none", () => {
+  test("render() and renderDetailed() carry no ANSI escapes", () => {
     setColorPolicy("off")
-    const panel = make()
-    panel.incrementTurn({ inputTokens: 100, outputTokens: 50 })
-    const line = panel.render()
-    expect(line).toBe(stripAnsi(line))
-  })
-
-  test("renderDetailed() output contains no ANSI escapes when policy=none", () => {
-    setColorPolicy("off")
-    const panel = make()
-    panel.incrementTurn({ inputTokens: 100, outputTokens: 50 })
-    const body = panel.renderDetailed()
-    expect(body).toBe(stripAnsi(body))
+    const { panel, turn } = make()
+    turn({ input: 100, output: 50 })
+    expect(panel.render()).toBe(stripAnsi(panel.render()))
+    expect(panel.renderDetailed()).toBe(stripAnsi(panel.renderDetailed()))
   })
 })

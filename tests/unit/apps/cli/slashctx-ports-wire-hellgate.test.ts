@@ -26,6 +26,8 @@
 
 import { describe, expect, test } from "bun:test"
 import type { Message } from "@/llm"
+import { MODEL_RATE_CARD, PRICING_VERSION } from "@/observability/pricing"
+import { createUsageAccounting, normalizeUsage, priceUsage } from "@/observability/usage-accounting"
 import {
   type BranchProgressState,
   createBranchProgressTracker,
@@ -62,8 +64,22 @@ describe("/cost: cost-panel port wire", () => {
   })
 
   test("PRESENT cost ⇒ renders detailed panel body (Duration/Turns/Total cost)", async () => {
-    const panel = createCostPanel({ model: "claude-3-5-sonnet-20241022", enabled: true })
-    panel.incrementTurn({ inputTokens: 1000, outputTokens: 200, cacheReadTokens: 0 })
+    // A3 — the panel is a projection: seed the AUTHORITY, not the panel.
+    const accounting = createUsageAccounting()
+    const usage = normalizeUsage({
+      model: "claude-sonnet-4-6",
+      inputTokens: 1000,
+      outputTokens: 200,
+    })
+    accounting.record({
+      callId: "c1",
+      at: 1,
+      usage,
+      cost: priceUsage(usage, MODEL_RATE_CARD, { pricingVersion: PRICING_VERSION }),
+      provenance: { sessionId: "s", agentId: "root", agentKind: "root", depth: 0 },
+    })
+    const panel = createCostPanel({ model: "claude-sonnet-4-6", enabled: true, accounting })
+    panel.noteTurn()
     const cap: CapturedCtx = { out: "", err: "" }
     const ctx: SlashContext = { ...makeBase(cap), cost: () => panel.renderDetailed() }
     const code = await runSlashCommand("/cost", ctx)

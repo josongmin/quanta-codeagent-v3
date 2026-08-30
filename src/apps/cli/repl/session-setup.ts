@@ -45,7 +45,6 @@ import { BG_TURN_ENV_GATE } from "./background-turn-portal"
 import { type CliFeatureConfig, readCliFeatureConfig } from "./cli-feature-config"
 import { type ContextUsageHolder, createContextUsageHolder } from "./context-usage-snapshot"
 import { maybeRunEnvProbeWire } from "./env-probe-wire"
-import { buildCostPanelUsageTee } from "./factories/cost-panel-usage-tee"
 import type { IndicatorUsageObserver } from "./factories/indicator-stream-port"
 import { composeCliRuntimeContext } from "./runtime-context-compose"
 import { readSessionRuntimeConfig } from "./session-runtime-config"
@@ -282,9 +281,6 @@ export interface SessionSetupResult {
     | import("@/runner/hunk-mutation-journal").HunkMutationJournalStore
     | undefined
   readonly costPanel: CostPanel | undefined
-  /** MR-05 — the model of the most recent `usage` event, for cost attribution.
-   *  See `factories/cost-panel-usage-tee.ts` (including its honest limit). */
-  readonly lastUsageModel: import("./factories/cost-panel-usage-tee").LastUsageModelCell
   readonly branchProgress: BranchProgressTracker | undefined
   readonly planStore: PlanStore | undefined
   readonly abort: AbortController
@@ -464,14 +460,9 @@ const setupStatus = (ctx: Awaited<ReturnType<typeof setupBoot>>) => {
     "    Esc Esc · cancel    Ctrl+C · exit"
   const statusBar = installStatusBar(statusDefault)
 
-  // MR-05 — record WHICH model each `usage` event came from, so the cost panel can
-  // price and bucket a turn by the model that actually ran it instead of the boot
-  // label it was seeded with (nothing in production ever updated that label). A
-  // pure pass-through tee: no event added, dropped, reordered or delayed.
-  const { stream: costModelStream, lastUsageModel } = buildCostPanelUsageTee(boot.stream)
   const { collector: turnSummary, stream: summaryStream } = deps.buildTurnSummaryAndStream(
     featureCfg,
-    costModelStream,
+    boot.stream,
   )
   // Track D — interpose the debug tracer BEFORE the indicator so the
   // debug emit sees the same upstream events the indicator does. When
@@ -521,7 +512,6 @@ const setupStatus = (ctx: Awaited<ReturnType<typeof setupBoot>>) => {
   return {
     statusDefault,
     statusBar,
-    lastUsageModel,
     turnSummary,
     summaryStream,
     debugStream,
@@ -703,7 +693,6 @@ const assembleSetupResult = (
     hunkUndoStore,
     pills,
     liveModelSource,
-    lastUsageModel,
     mut,
   } = parts
   return {
@@ -788,7 +777,6 @@ const assembleSetupResult = (
     permissionStore,
     hunkUndoStore,
     costPanel: boot.costPanel as CostPanel | undefined,
-    lastUsageModel,
     branchProgress: boot.branchProgress as BranchProgressTracker | undefined,
     planStore: boot.planStore,
     abort: boot.abort,

@@ -408,7 +408,6 @@ const buildSetup = async (
     // MR-05 — the cost panel's model source. A fake session has streamed nothing,
     // so "no usage observed yet" is the honest answer and the panel falls back to
     // its seeded label, exactly as a real session does before its first turn.
-    lastUsageModel: { get: () => undefined },
     __statusBar: statusBar,
     __pillsDisposeCalls: pillsDisposeCalls,
   }
