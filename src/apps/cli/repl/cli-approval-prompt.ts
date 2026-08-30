@@ -190,54 +190,84 @@ const buildConfirmContext = async (deps: CliHitlDeps, action: ToolAction): Promi
   return context
 }
 
+const withTeamEscalationContext = (action: ToolAction, context: string): string => {
+  const team = action.teamEscalation
+  if (team === undefined) return context
+  return (
+    context +
+    `Subagent '${team.workerId}' asks to run '${action.tool}' — scope: ${team.scope}\n` +
+    `  reason: ${team.reason}\n`
+  )
+}
+
+const actionPrefixLabel = (action: ToolAction): string | null =>
+  typeof action.shellCommand === "string" && action.shellCommand.length > 0
+    ? prefixGrantLabel(`${action.tool}|${action.shellCommand}`)
+    : null
+
+const grantDurablePrefix = (
+  deps: CliHitlDeps,
+  action: ToolAction,
+  prefixLabel: string | null,
+): void => {
+  if (deps.trustScope === undefined || prefixLabel === null) return
+  deps.trustScope.registry.grant(deps.trustScope.projectKey, {
+    tool: action.tool,
+    scope: "project",
+    commandPattern: prefixLabel,
+  })
+}
+
+const resolveNormalActionApproval = async (
+  deps: CliHitlDeps,
+  action: ToolAction,
+  context: string,
+): Promise<boolean | ConfirmDecision> => {
+  const hunkOption = await maybeHunkOption(deps, action)
+  const prefixLabel = actionPrefixLabel(action)
+  const answer = await promptNormalApprovalVerbs(deps, {
+    subject: action.tool,
+    ...(context.length > 0 ? { contextHeader: context } : {}),
+    ...(hunkOption !== undefined ? { hunk: hunkOption } : {}),
+    prefixLabel,
+    durable: prefixLabel !== null && deps.trustScope !== undefined,
+  })
+  if (answer.kind === "hunk_select") {
+    return hunkOption === undefined
+      ? false
+      : runHunkSelect(deps, hunkOption.diff, hunkOption.ids, askLine)
+  }
+  if (answer.kind === "allow") {
+    return answer.scope === "session" ? { decision: "allow", scope: "session" } : true
+  }
+  if (answer.kind === "allow_prefix") {
+    if (answer.durable) grantDurablePrefix(deps, action, prefixLabel)
+    return { decision: "allow", scope: "session_prefix" }
+  }
+  return answer.steer !== undefined ? { decision: "deny_and_steer", steer: answer.steer } : false
+}
+
+const pendingApprovalResult = (decision: ConfirmDecision): ApprovalDecisionResult => {
+  if (decision.decision === "allow") {
+    return {
+      decision: "approve",
+      ...(decision.scope !== undefined ? { scope: decision.scope } : {}),
+    }
+  }
+  return decision.decision === "deny_and_steer"
+    ? { decision: "deny", steer: decision.steer }
+    : { decision: "deny" }
+}
+
 export const buildCliOnConfirm =
   (deps: CliHitlDeps) =>
   async (action: ToolAction): Promise<boolean | ConfirmDecision> => {
-    let context = await buildConfirmContext(deps, action)
+    const context = withTeamEscalationContext(action, await buildConfirmContext(deps, action))
     const scope = action.scopeContext
     if (scope !== undefined) {
       return promptEscalationVerbs(deps, { ...scope, tool: action.tool }, context)
     }
-    const team = action.teamEscalation
-    if (team !== undefined) {
-      context +=
-        `Subagent '${team.workerId}' asks to run '${action.tool}' — scope: ${team.scope}\n` +
-        `  reason: ${team.reason}\n`
-    }
-    const hunkOption = await maybeHunkOption(deps, action)
-    const prefixLabel =
-      typeof action.shellCommand === "string" && action.shellCommand.length > 0
-        ? prefixGrantLabel(`${action.tool}|${action.shellCommand}`)
-        : null
-    const durable = prefixLabel !== null && deps.trustScope !== undefined
-    const answer = await promptNormalApprovalVerbs(deps, {
-      subject: action.tool,
-      ...(context.length > 0 ? { contextHeader: context } : {}),
-      ...(hunkOption !== undefined ? { hunk: hunkOption } : {}),
-      prefixLabel,
-      durable,
-    })
-    switch (answer.kind) {
-      case "hunk_select":
-        return hunkOption !== undefined
-          ? runHunkSelect(deps, hunkOption.diff, hunkOption.ids, askLine)
-          : false
-      case "allow":
-        return answer.scope === "session" ? { decision: "allow", scope: "session" } : true
-      case "allow_prefix":
-        if (answer.durable && deps.trustScope !== undefined && prefixLabel !== null) {
-          deps.trustScope.registry.grant(deps.trustScope.projectKey, {
-            tool: action.tool,
-            scope: "project",
-            commandPattern: prefixLabel,
-          })
-        }
-        return { decision: "allow", scope: "session_prefix" }
-      case "deny":
-        return answer.steer !== undefined
-          ? { decision: "deny_and_steer", steer: answer.steer }
-          : false
-    }
+    return resolveNormalActionApproval(deps, action, context)
   }
 
 export const buildCliApprovalPrompt =
@@ -245,28 +275,15 @@ export const buildCliApprovalPrompt =
   async (approval: PendingApprovalView): Promise<ApprovalDecisionResult> => {
     const scope = approval.scopeContext
     if (scope !== undefined) {
-      const decision = await promptEscalationVerbs(deps, scope)
-      if (decision.decision === "allow") {
-        return {
-          decision: "approve",
-          ...(decision.scope !== undefined ? { scope: decision.scope } : {}),
-        }
-      }
-      if (decision.decision === "deny_and_steer") {
-        return { decision: "deny", steer: decision.steer }
-      }
-      return { decision: "deny" }
+      return pendingApprovalResult(await promptEscalationVerbs(deps, scope))
     }
     const answer = await promptNormalApprovalVerbs(deps, {
       subject: "pending action",
       contextHeader: `Approval required: ${approval.reason}\n`,
     })
-    switch (answer.kind) {
-      case "allow":
-        return answer.scope === "session" ? { decision: "approve", scope: "session" } : "approve"
-      case "deny":
-        return answer.steer !== undefined ? { decision: "deny", steer: answer.steer } : "deny"
-      default:
-        return "deny"
-    }
+    if (answer.kind === "allow")
+      return answer.scope === "session" ? { decision: "approve", scope: "session" } : "approve"
+    return answer.kind === "deny" && answer.steer !== undefined
+      ? { decision: "deny", steer: answer.steer }
+      : "deny"
   }
