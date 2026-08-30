@@ -593,9 +593,14 @@ const main = async (): Promise<number> => {
   // import, or one of the ratchet's OTHER arms (the pinned-label tests) going
   // red. The script has never looked at this exit code at all.
   if (testRun.exit !== 0 && plan.tightened.length === 0) {
+    // Preserve the child diagnosis. This wrapper used to replace an import,
+    // assertion, or process-launch failure with only "exited 1", forcing a
+    // second run that often no longer reproduced the original condition.
+    const diagnosis = captured.trim()
     process.stderr.write(
       `${tag(check)} FATAL: bun test ${target} exited ${testRun.exit}, and no baseline\n` +
-        "  regression or tighten explains it. Run the test directly and read the failure.\n",
+        "  regression or tighten explains it. Captured child output follows:\n" +
+        (diagnosis.length === 0 ? "  <no output>\n" : `${diagnosis}\n`),
     )
     return EXIT_TARGET_TEST_FAILED
   }
