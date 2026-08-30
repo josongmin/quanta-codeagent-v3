@@ -491,6 +491,9 @@
     },
     "tests/unit/_arch/gate-manifest-workflow-parity.test.ts#WORKFLOWS": {
       "walked": 6
+    },
+    "tests/unit/_arch/capability-literal-ratchet.test.ts#TESTS": {
+      "walked": 3578
     }
   }
 }

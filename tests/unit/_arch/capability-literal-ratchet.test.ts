@@ -43,6 +43,7 @@
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
+import { assertScanPopulation } from "../_shared/scan-population"
 
 const REPO_ROOT = resolve(import.meta.dir, "../../..")
 
@@ -115,6 +116,14 @@ function listTrackedTestFiles(): string[] {
     .split("\n")
     .map((l) => l.trim())
     .filter((l) => l.endsWith(".ts"))
+  assertScanPopulation(
+    files.map((file) => resolve(REPO_ROOT, file)),
+    resolve(REPO_ROOT, "tests"),
+    {
+      collectable: (name) => name.endsWith(".ts"),
+      id: "tests/unit/_arch/capability-literal-ratchet.test.ts#TESTS",
+    },
+  )
   // Anti-vacuity: `git ls-files` exits 0 with no output on no match, so the exit
   // check is not a floor. The five matcher controls below prove the DETECTOR
   // works while the corpus is empty — which is exactly how this file passed 6/0

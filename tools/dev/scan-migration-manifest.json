@@ -76,20 +76,6 @@
       ]
     },
     {
-      "file": "tests/unit/_arch/capability-literal-ratchet.test.ts",
-      "klass": "B-top-level",
-      "enumerators": [
-        "[\"git\", \"ls-files\""
-      ],
-      "recursive": false,
-      "absolutePaths": false,
-      "derived": false,
-      "roots": 0,
-      "floorLines": [
-        "122: if (files.length < 3244) {"
-      ]
-    },
-    {
       "file": "tests/unit/_arch/repo-index-hygiene.test.ts",
       "klass": "B-top-level",
       "enumerators": [

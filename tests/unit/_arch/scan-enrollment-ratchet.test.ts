@@ -152,10 +152,10 @@ describe("scan enrollment", () => {
       ).rows.map((r) => r.file),
     )
     const owed = new Set(debtList())
-    expect(
-      planned.size,
-      "the manifest read is empty — this check would be vacuous",
-    ).toBeGreaterThan(10)
+    // No non-zero floor belongs here: success deliberately drains BOTH sets to
+    // empty. The two directional differences below remain non-vacuous because
+    // the census above proves the guarded population is real, and either ledger
+    // becoming empty while the other has work still fails with named files.
     expect(
       [...owed].filter((f) => !planned.has(f)).sort(),
       "these are owed but the manifest plans no work for them",
