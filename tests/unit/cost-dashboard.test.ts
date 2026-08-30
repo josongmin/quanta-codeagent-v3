@@ -9,6 +9,7 @@ import {
   renderDashboardText,
 } from "@/observability/cost-dashboard"
 import type { MetricsSnapshot, TimerStats } from "@/observability/types"
+import { GEN_AI_ATTRS, QUANTA_ATTRS } from "@/observability/vocabulary"
 
 const timer = (over: Partial<TimerStats> = {}): TimerStats => ({
   count: 3,
@@ -121,5 +122,43 @@ describe("renderers", () => {
   test("unknown model renders n/a cost without throwing", () => {
     const text = renderDashboardText(buildCostDashboard(snap()))
     expect(text).toContain("n/a (unknown model)")
+  })
+})
+
+describe("estimatedCostUsd prefers the RECORDED cost over re-deriving", () => {
+  test("a recorded cost wins, even when the label would price it differently", () => {
+    // The counter carries what `emitUsage` actually billed: each call priced at
+    // the model IT ran on, cache-write included. Re-deriving from the aggregate
+    // tokens under one label is wrong the moment a session switches models —
+    // that is the inflated figure this replaces.
+    const snap = {
+      counters: {
+        [GEN_AI_ATTRS.usage.inputTokens]: 1_000_000,
+        [GEN_AI_ATTRS.usage.outputTokens]: 0,
+        [QUANTA_ATTRS.work.costUsd]: 1.23,
+      },
+      gauges: {},
+      timers: {},
+    }
+    // The label alone would say $15 (opus input); the recorded number is $1.23.
+    expect(buildCostDashboard(snap, { model: "claude-opus-4-7" }).estimatedCostUsd).toBeCloseTo(
+      1.23,
+      9,
+    )
+  })
+
+  test("without a recorded cost it still derives, so a metrics-less caller is unchanged", () => {
+    const snap = {
+      counters: {
+        [GEN_AI_ATTRS.usage.inputTokens]: 1_000_000,
+        [GEN_AI_ATTRS.usage.outputTokens]: 0,
+      },
+      gauges: {},
+      timers: {},
+    }
+    expect(buildCostDashboard(snap, { model: "claude-sonnet-4-6" }).estimatedCostUsd).toBeCloseTo(
+      3,
+      9,
+    )
   })
 })

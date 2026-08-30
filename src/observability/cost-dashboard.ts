@@ -1,6 +1,6 @@
 import { costUsd } from "./pricing"
 import type { MetricsSnapshot, TimerStats } from "./types"
-import { GEN_AI_ATTRS } from "./vocabulary"
+import { GEN_AI_ATTRS, QUANTA_ATTRS } from "./vocabulary"
 
 /**
  * Cost & cache dashboard (ADR-0085) — a PURE aggregator over a
@@ -70,6 +70,7 @@ export const buildCostDashboard = (
   const output = c[K_OUT] ?? 0
   const cacheRead = c[K_CACHE] ?? 0
   const denom = input + cacheRead
+  const recordedCost = c[QUANTA_ATTRS.work.costUsd]
   return {
     model: opts.model,
     tokens: {
@@ -78,8 +79,18 @@ export const buildCostDashboard = (
       cacheRead,
       cacheHitRate: denom > 0 ? cacheRead / denom : null,
     },
+    // MR-04/06 — prefer the RECORDED cost. `emitUsage` prices each call at the
+    // model that call actually ran on and ticks it into this counter, cache
+    // -write included. Re-deriving here instead priced the whole session's
+    // aggregated tokens at ONE label — the boot model — which is wrong the
+    // moment a session switches models, and silently drops cache-write.
+    //
+    // The derivation stays as a fallback for snapshots taken without a
+    // recorder wired (the counter is simply absent there), so an older or
+    // metrics-less caller keeps the number it used to get.
     estimatedCostUsd:
-      opts.model !== undefined ? costUsd(opts.model, input, output, cacheRead) : null,
+      recordedCost ??
+      (opts.model !== undefined ? costUsd(opts.model, input, output, cacheRead) : null),
     turns: c["agent.turns"] ?? 0,
     toolCalls: {
       total: c["agent.tool_calls"] ?? 0,
