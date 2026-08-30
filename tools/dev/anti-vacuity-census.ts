@@ -69,6 +69,15 @@ const WRAPPED_SCAN_FLOOR =
   /expect\(\s*\n[\s\S]{0,200}?(?:count\w*\(|\.(?:length|size)\b|\bfiles?\b|\bentries\b|\bscanned\b|\bdeclared\b)[\s\S]{0,200}?\n\s*\)\s*\.toBeGreaterThan(?:OrEqual)?\(\s*([1-9]\d*)\s*,?\s*\)/
 
 /**
+ * An exact positive anchor on a scan-shaped Map. A call-site census commonly
+ * records counts by path, then proves both a required live site and the total
+ * population. `Map#get` is stronger than a loose numeric lower bound, but the
+ * generic `.length` scanner cannot see it.
+ */
+const MAP_ENTRY_FLOOR =
+  /expect\(\s*\b(?:files?|entries|paths?|matches|scanned|declared|all|found|sources?|tracked|dirs?|count)\w*\.get\([^)]*\)\s*\)\s*\.toBe\(\s*([1-9]\d*)\s*\)/
+
+/**
  * The canonical floor helper. Stronger than a numeric floor: reach is the
  * intersection of the scan with `git ls-files` (an untracked or gitignored twin
  * is not evidence the corpus was read), coverage is recursive over the tracked
@@ -162,6 +171,7 @@ const hasScanFloor = (text: string): boolean =>
   HELPER_FLOOR.test(text) ||
   SCAN_FLOOR.test(text) ||
   WRAPPED_SCAN_FLOOR.test(text) ||
+  MAP_ENTRY_FLOOR.test(text) ||
   THROW_FLOOR.test(text)
 
 export const isFloorless = (rawSource: string): boolean => {

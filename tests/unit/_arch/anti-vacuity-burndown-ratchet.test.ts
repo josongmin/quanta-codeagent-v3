@@ -171,6 +171,13 @@ describe("anti-vacuity burn-down", () => {
       `  expect(seen.filter((f) => f.endsWith(".zzz"))).toEqual([])\n})\n`
     expect(isFloorless(scanWith("expect(seen.length).toBeGreaterThan(0)"))).toBe(true)
     expect(isFloorless(scanWith("expect(seen.length).toBeGreaterThan(2500)"))).toBe(false)
+    const mapAnchored =
+      `import { ${fsCall} } from "node:fs"\n` +
+      `test("x", () => {\n  const found = new Map([["live.ts", 1]])\n` +
+      `  const seen = ${fsCall}("${root}")\n` +
+      `  expect(found.get("live.ts")).toBe(1)\n` +
+      `  expect(seen.filter((f) => f.endsWith(".zzz"))).toEqual([])\n})\n`
+    expect(isFloorless(mapAnchored)).toBe(false)
     // A floor on something UNRELATED must not vouch for the scan. The binding is
     // named `seen` and not `all` on purpose: `all` is itself one of the
     // scan-shaped names the file-wide backstop accepts, so a fixture using it
