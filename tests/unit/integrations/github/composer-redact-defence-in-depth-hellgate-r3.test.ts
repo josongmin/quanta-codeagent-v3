@@ -95,51 +95,66 @@ interface GhStubOpts {
   readonly postBodySink: { last: string | undefined }
 }
 
-const buildStub = (o: GhStubOpts): GhCliPort => ({
-  async run(args): Promise<GhCliResult> {
-    if (args[0] === "pr" && args[1] === "view") {
-      return {
-        stdout: JSON.stringify({
-          title: o.view.title ?? "T",
-          body: o.view.body ?? "",
-          baseRefName: o.view.baseRefName ?? "main",
-          headRefName: o.view.headRefName ?? "feat",
-          baseRefOid: o.view.baseRefOid ?? "b",
-          headRefOid: o.view.headRefOid ?? "h",
+const ghResult = (stdout: string, exitCode = 0, stderr = ""): GhCliResult => ({
+  stdout,
+  stderr,
+  exitCode,
+})
+
+const prViewResult = (args: readonly string[], options: GhStubOpts): GhCliResult | undefined =>
+  args[0] === "pr" && args[1] === "view"
+    ? ghResult(
+        JSON.stringify({
+          title: options.view.title ?? "T",
+          body: options.view.body ?? "",
+          baseRefName: options.view.baseRefName ?? "main",
+          headRefName: options.view.headRefName ?? "feat",
+          baseRefOid: options.view.baseRefOid ?? "b",
+          headRefOid: options.view.headRefOid ?? "h",
           number: 42,
         }),
-        stderr: "",
-        exitCode: 0,
-      }
-    }
-    if (args[0] === "pr" && args[1] === "diff") {
-      return { stdout: o.diff, stderr: "", exitCode: 0 }
-    }
-    if (args[0] === "api" && args[1]?.includes("/pulls/") === true && args[1].endsWith("/files")) {
-      return { stdout: JSON.stringify([...o.files]), stderr: "", exitCode: 0 }
-    }
-    if (
-      args[0] === "api" &&
-      args[1] === "--method" &&
-      args[2] === "POST" &&
-      args[3]?.includes("/comments") === true
-    ) {
-      const idx = args.indexOf("-f")
-      const ba = idx >= 0 ? args[idx + 1] : undefined
-      if (ba?.startsWith("body=")) {
-        o.postBodySink.last = ba.slice("body=".length)
-      }
-      return {
-        stdout: JSON.stringify({ html_url: "https://github.com/owner/repo/issuecomment-1" }),
-        stderr: "",
-        exitCode: 0,
-      }
-    }
-    if (args[0] === "api" && args[1]?.includes("/issues/") === true) {
-      return { stdout: JSON.stringify([...o.comments]), stderr: "", exitCode: 0 }
-    }
-    return { stdout: "", stderr: "unhandled", exitCode: 1 }
-  },
+      )
+    : undefined
+
+const pullFilesResult = (args: readonly string[], options: GhStubOpts): GhCliResult | undefined =>
+  args[0] === "api" && args[1]?.includes("/pulls/") === true && args[1].endsWith("/files")
+    ? ghResult(JSON.stringify([...options.files]))
+    : undefined
+
+const commentPostResult = (
+  args: readonly string[],
+  options: GhStubOpts,
+): GhCliResult | undefined => {
+  const isPost =
+    args[0] === "api" &&
+    args[1] === "--method" &&
+    args[2] === "POST" &&
+    args[3]?.includes("/comments") === true
+  if (!isPost) return undefined
+  const bodyIndex = args.indexOf("-f")
+  const bodyArg = bodyIndex >= 0 ? args[bodyIndex + 1] : undefined
+  if (bodyArg?.startsWith("body=")) options.postBodySink.last = bodyArg.slice("body=".length)
+  return ghResult(JSON.stringify({ html_url: "https://github.com/owner/repo/issuecomment-1" }))
+}
+
+const issueCommentsResult = (
+  args: readonly string[],
+  options: GhStubOpts,
+): GhCliResult | undefined =>
+  args[0] === "api" && args[1]?.includes("/issues/") === true
+    ? ghResult(JSON.stringify([...options.comments]))
+    : undefined
+
+const ghStubResult = (args: readonly string[], options: GhStubOpts): GhCliResult =>
+  prViewResult(args, options) ??
+  (args[0] === "pr" && args[1] === "diff" ? ghResult(options.diff) : undefined) ??
+  pullFilesResult(args, options) ??
+  commentPostResult(args, options) ??
+  issueCommentsResult(args, options) ??
+  ghResult("", 1, "unhandled")
+
+const buildStub = (o: GhStubOpts): GhCliPort => ({
+  run: async (args) => ghStubResult(args, o),
 })
 
 interface RunCtx {
