@@ -146,6 +146,27 @@ describe("one rule decides root vs subagent, and both call sites use it", () => 
   })
 })
 
+describe("A6 — the LOOP mints from the authority, so a resume cannot collide", () => {
+  test("emitUsage after hydrate keeps admitting (ids continue, never restart)", () => {
+    // The durable codec owns the sequence — but only if the LOOP asks the
+    // authority for ids. A loop minting from its own counter restarts at 1
+    // after a resume and every early call is silently dropped as "duplicate",
+    // which is real spend vanishing from the books.
+    const first = createUsageAccounting()
+    const { config: c1 } = makeConfig({ usageAccounting: first })
+    emit(c1, usage(100))
+    emit(c1, usage(100))
+    expect(first.snapshot().calls).toBe(2)
+
+    const resumed = createUsageAccounting()
+    resumed.hydrate(first.serialize())
+    const { config: c2 } = makeConfig({ usageAccounting: resumed })
+    emit(c2, usage(100))
+    emit(c2, usage(100))
+    expect(resumed.snapshot().calls).toBe(4) // 2 restored + 2 NEW, none eaten
+  })
+})
+
 describe("A5 — a rejected record is visible, not swallowed", () => {
   test("a non-finite event warns ONCE per authority and ticks the rejected counter", () => {
     const accounting = createUsageAccounting()
