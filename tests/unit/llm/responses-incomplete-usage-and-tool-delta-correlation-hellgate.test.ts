@@ -33,6 +33,25 @@ const collect = async (it: AsyncIterable<StreamEvent>): Promise<StreamEvent[]> =
   return out
 }
 
+const routeToolInputEvents = (
+  events: StreamEvent[],
+  seam: ReturnType<typeof buildToolInputSeam>,
+): void => {
+  for (const event of events) {
+    if (event.type === "tool_use_start") seam.start(event.id, event.name)
+    else if (event.type === "tool_use_delta") seam.delta(event.id, event.delta)
+    else if (event.type === "tool_use_end") seam.available(event.id, event.input)
+  }
+}
+
+const assertToolDeltaIds = (events: StreamEvent[]): void => {
+  const deltaEvents = events.filter((event) => event.type === "tool_use_delta")
+  expect(deltaEvents).toHaveLength(2)
+  for (const event of deltaEvents) {
+    if (event.type === "tool_use_delta") expect(event.id).toBe("call_42")
+  }
+}
+
 describe("responses-wire incomplete-usage + tool-delta correlation hellgate", () => {
   test("#2: incomplete-only stream carrying usage emits a usage event with the right output tokens", async () => {
     // NO response.completed — the only terminal event is response.incomplete,
@@ -145,19 +164,11 @@ describe("responses-wire incomplete-usage + tool-delta correlation hellgate", ()
     )
 
     // Route the emitted tool_use_* events into the seam (mirrors the loop).
-    for (const ev of events) {
-      if (ev.type === "tool_use_start") seam.start(ev.id, ev.name)
-      else if (ev.type === "tool_use_delta") seam.delta(ev.id, ev.delta)
-      else if (ev.type === "tool_use_end") seam.available(ev.id, ev.input)
-    }
+    routeToolInputEvents(events, seam)
 
     // Deltas must be emitted keyed by call_id (consistent with start/end), so
     // the seam — keyed by call_id — actually finds the tool and fires.
-    const deltaEvents = events.filter((e) => e.type === "tool_use_delta")
-    expect(deltaEvents.length).toBe(2)
-    for (const de of deltaEvents) {
-      if (de.type === "tool_use_delta") expect(de.id).toBe("call_42")
-    }
+    assertToolDeltaIds(events)
     // Pre-fix: deltas were keyed by item_id ("fc_42") so the call_id-keyed seam
     // missed → deltaSeen stayed empty.
     expect(deltaSeen).toEqual(['{"cmd":', '"ls -la"}'])
