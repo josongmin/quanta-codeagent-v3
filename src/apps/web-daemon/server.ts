@@ -21,6 +21,7 @@ import {
   buildObjectiveSnapshotProvider,
   prepareObjectiveSnapshotForAttach,
 } from "@/host/runtime/objective-store-wire"
+import { costSurfaceViewWire } from "@/observability/usage-accounting"
 import type { SupportedReadModels } from "@/protocol/session"
 import type { RuntimeFacade, RuntimeSession } from "@/sdk/runtime"
 import { loadSessionById, type PersistedObjectiveSnapshot } from "@/session"
@@ -30,7 +31,6 @@ import { composeWebGoalWork, type WebGoalWorkHandler } from "./goal-work-compose
 import type { CostReadoutTotals, WebReadoutSources } from "./readout"
 import { buildDaemonReadoutSources } from "./readout-compose"
 import { setupApprovalContinuation } from "./server/approval-continuation"
-import { costSurfaceViewWire } from "@/observability/usage-accounting"
 import { type CanvasArtifactFeed, setupCanvasArtifactBridge } from "./server/canvas-artifact-bridge"
 import { buildFetchHandler } from "./server/fetch-handler"
 import { setupFollowerApproval } from "./server/follower-approval"
@@ -161,7 +161,6 @@ export interface WebDaemonServerConfig extends WebDaemonConfig {
    */
   readonly goalWork?: WebGoalWorkHandler
 }
-
 
 /**
  * god-code split — the `Bun.serve` listener construction (fetch + websocket
@@ -416,7 +415,13 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
   ).usageAccounting
   const costTotals = (): CostReadoutTotals => {
     if (costAuthority === undefined) {
-      return { turns: costTurns, promptTokens: 0, completionTokens: 0, totalTokens: 0, costMicroUsd: 0 }
+      return {
+        turns: costTurns,
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+        costMicroUsd: 0,
+      }
     }
     const wire = costSurfaceViewWire(costAuthority)
     return {

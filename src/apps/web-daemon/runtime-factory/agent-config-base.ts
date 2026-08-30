@@ -62,6 +62,14 @@ export const buildDaemonToolRegistry = (
     ...extraTools,
   ])
 
+/** A7 — optional usage-accounting slot. A helper (not an inline spread) for
+ *  the same reason as {@link objectiveSlot}: the base builder sits at biome's
+ *  cognitive-complexity cap, and every inline conditional pushes it over. */
+const usageAccountingSlot = (
+  usageAccounting: UsageAccountingPort | undefined,
+): Partial<Pick<AgentConfig, "usageAccounting">> =>
+  usageAccounting !== undefined ? { usageAccounting } : {}
+
 /** RFC-03 H1 (web parity fix) — presence-only projection of the session-stable
  *  objective authority onto the config base. Extracted (mirrors
  *  {@link observabilitySlots}) so the `buildAgentConfigBase` closure stays under
@@ -237,7 +245,7 @@ export const buildAgentConfigBase = async ({
       envPosture: webEnvPosture,
     }),
     ...(repoRules !== undefined ? { repoRules } : {}),
-    ...(usageAccounting !== undefined ? { usageAccounting } : {}),
+    ...usageAccountingSlot(usageAccounting),
     cwd,
     maxTurns: 200,
     signal: abort.signal,

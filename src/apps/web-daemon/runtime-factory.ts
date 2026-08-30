@@ -39,16 +39,13 @@ import {
 import { resolveGatedObjectiveAuthority } from "@/host/runtime/objective-store-wire"
 import { type LLMPort, type Provider, resolveBootSelection, tryCreateLLM } from "@/llm"
 import { applyGoalPreset, type ObjectiveAttemptSlot, type ObjectivePort } from "@/objective"
+import { createUsageAccounting, resolveUsageAccounting } from "@/observability/usage-accounting"
 import { getDefaultPermissionStore, type PermissionStore } from "@/permission"
 import { createRuntimeFromAgentConfigBase } from "@/sdk/runtime"
 import { errMessage, gateDisabled, gateOn, logger } from "@/shared"
 import { buildWebSkillAuthority } from "./authority-readouts"
 import { createCanvasToolDiffSource } from "./canvas-tool-diff-source"
 import { buildAgentConfigBase } from "./runtime-factory/agent-config-base"
-import {
-  createUsageAccounting,
-  resolveUsageAccounting,
-} from "@/observability/usage-accounting"
 import { loadDaemonMcp } from "./runtime-factory/daemon-mcp"
 import {
   attachObservabilityPorts,
