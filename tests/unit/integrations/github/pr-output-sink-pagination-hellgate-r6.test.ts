@@ -22,6 +22,18 @@ interface CommentRow {
   body?: string
 }
 
+const commentListPage = (args: readonly string[]): number | undefined => {
+  const url = args[1] ?? ""
+  if (!url.includes("/comments?per_page=100&page=")) return undefined
+  const match = /[?&]page=(\d+)/.exec(url)
+  return match ? Number.parseInt(match[1] ?? "0", 10) : 0
+}
+
+const apiMethod = (args: readonly string[]): string | undefined =>
+  args[0] === "api" && args[1] === "--method" ? args[2] : undefined
+
+const successfulResult = (stdout: string): GhCliResult => ({ stdout, stderr: "", exitCode: 0 })
+
 const makePort = (
   pages: ReadonlyArray<ReadonlyArray<CommentRow>>,
 ): {
@@ -31,25 +43,19 @@ const makePort = (
   const pagesRequested: number[] = []
   const port: GhCliPort = {
     async run(args): Promise<GhCliResult> {
-      const url = args[1] ?? ""
-      if (url.includes("/comments?per_page=100&page=")) {
+      const page = commentListPage(args)
+      if (page !== undefined) {
         // Match `&page=N` strictly — naive /page=(\d+)/ catches `per_page=100`
         // first. This is exactly the kind of off-by-one stub bug R6 catches.
-        const m = /[?&]page=(\d+)/.exec(url)
-        const page = m ? Number.parseInt(m[1] ?? "0", 10) : 0
         pagesRequested.push(page)
         const rows = pages[page - 1] ?? []
-        return { stdout: JSON.stringify(rows), stderr: "", exitCode: 0 }
+        return successfulResult(JSON.stringify(rows))
       }
-      if (args[0] === "api" && args[1] === "--method" && args[2] === "POST") {
-        return { stdout: JSON.stringify({ id: 999, html_url: "u999" }), stderr: "", exitCode: 0 }
-      }
-      if (args[0] === "api" && args[1] === "--method" && args[2] === "PATCH") {
-        return { stdout: JSON.stringify({ html_url: "patched" }), stderr: "", exitCode: 0 }
-      }
-      if (args[0] === "api" && args[1] === "--method" && args[2] === "DELETE") {
-        return { stdout: "", stderr: "", exitCode: 0 }
-      }
+      if (apiMethod(args) === "POST")
+        return successfulResult(JSON.stringify({ id: 999, html_url: "u999" }))
+      if (apiMethod(args) === "PATCH")
+        return successfulResult(JSON.stringify({ html_url: "patched" }))
+      if (apiMethod(args) === "DELETE") return successfulResult("")
       return { stdout: "", stderr: "unhandled", exitCode: 1 }
     },
   }
@@ -75,6 +81,18 @@ const markerRow = (id: number): CommentRow => ({
   html_url: `u${id}`,
   body: `mine\n${MARKER}`,
 })
+
+const paginationReply = (page: number, page1: CommentRow[], page2: CommentRow[]): GhCliResult => {
+  if (page === 1) return successfulResult(JSON.stringify(page1))
+  if (page === 2) return successfulResult(JSON.stringify(page2))
+  return successfulResult("[]")
+}
+
+const deleteCommentId = (args: readonly string[]): number | undefined => {
+  if (apiMethod(args) !== "DELETE") return undefined
+  const match = /comments\/(\d+)/.exec(args[3] ?? "")
+  return match?.[1] === undefined ? undefined : Number.parseInt(match[1], 10)
+}
 
 describe("R6 — comment-list pagination (ADR-0313)", () => {
   test("marker on page 1 → no page 2 fetch (early-exit)", async () => {
@@ -208,21 +226,12 @@ describe("R6 — comment-list pagination (ADR-0313)", () => {
     const deletes: number[] = []
     const port: GhCliPort = {
       async run(args): Promise<GhCliResult> {
-        if (args[1]?.includes("/comments?per_page=100&page=1")) {
-          return { stdout: JSON.stringify(page1), stderr: "", exitCode: 0 }
-        }
-        if (args[1]?.includes("/comments?per_page=100&page=2")) {
-          return { stdout: JSON.stringify(page2), stderr: "", exitCode: 0 }
-        }
-        if (args[1]?.includes("/comments?per_page=100&page=")) {
-          return { stdout: "[]", stderr: "", exitCode: 0 }
-        }
-        if (args[0] === "api" && args[1] === "--method" && args[2] === "DELETE") {
-          const m = /comments\/(\d+)/.exec(args[3] ?? "")
-          if (m?.[1] !== undefined) deletes.push(Number.parseInt(m[1], 10))
-          return { stdout: "", stderr: "", exitCode: 0 }
-        }
-        return { stdout: JSON.stringify({ html_url: "patched" }), stderr: "", exitCode: 0 }
+        const page = commentListPage(args)
+        if (page !== undefined) return paginationReply(page, page1, page2)
+        const deletedId = deleteCommentId(args)
+        if (deletedId !== undefined) deletes.push(deletedId)
+        if (apiMethod(args) === "DELETE") return successfulResult("")
+        return successfulResult(JSON.stringify({ html_url: "patched" }))
       },
     }
     const sink = createPrOutputSink(baseOpts(port))
