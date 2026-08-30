@@ -72,70 +72,104 @@ interface WorkflowStep {
   readonly lines: readonly string[]
 }
 
+const localUsesStep = (file: string, line: string): WorkflowStep | undefined => {
+  const match = /^\s*(?:- )?uses:\s*(\.[^\s]+)\s*$/.exec(line)
+  if (match === null) return undefined
+  const command = `uses ${match[1] ?? ""}`
+  return { file, raw: line, lines: [command] }
+}
+
+const externalUsesStep = (file: string, line: string): WorkflowStep | undefined => {
+  const match = /^\s*(?:- )?uses: (\S+)/.exec(line)
+  if (match === null) return undefined
+  const command = `uses: ${match[1] ?? ""}`
+  return { file, raw: command, lines: [command] }
+}
+
+type ParsedRunStep = {
+  readonly step: WorkflowStep
+  /** Last consumed line: a block scalar owns its indented body. */
+  readonly lastLine: number
+}
+
+const nextLineRunStep = (
+  file: string,
+  lines: readonly string[],
+  index: number,
+): ParsedRunStep | undefined => {
+  const next = (lines[index + 1] ?? "").trim()
+  if (next === "" || next.startsWith("-") || next.startsWith("#")) return undefined
+  return { step: { file, raw: next, lines: [next] }, lastLine: index + 1 }
+}
+
+const blockRunStep = (
+  file: string,
+  lines: readonly string[],
+  index: number,
+  indent: number,
+  indicator: string,
+): ParsedRunStep => {
+  const body: string[] = []
+  let lastLine = index
+  for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+    const line = lines[cursor] ?? ""
+    if (line.trim() === "") continue
+    const lead = line.length - line.trimStart().length
+    if (lead <= indent) break
+    body.push(line.trim())
+    lastLine = cursor
+  }
+  return {
+    step: {
+      file,
+      raw: body.join(" "),
+      lines: indicator === ">-" ? [body.join(" ")] : body,
+    },
+    lastLine,
+  }
+}
+
+const parseRunStep = (
+  file: string,
+  lines: readonly string[],
+  index: number,
+): ParsedRunStep | undefined => {
+  const match = /^(\s*)(?:- )?run:(.*)$/.exec(lines[index] ?? "")
+  if (match === null) return undefined
+  const indent = (match[1] ?? "").length
+  const head = (match[2] ?? "").trim()
+  if (head === "") {
+    const nextLine = nextLineRunStep(file, lines, index)
+    if (nextLine !== undefined) return nextLine
+  }
+  if (head !== ">-" && head !== "|") {
+    return { step: { file, raw: head, lines: [head] }, lastLine: index }
+  }
+  return blockRunStep(file, lines, index, indent, head)
+}
+
+const workflowStepsInFile = (file: string): readonly WorkflowStep[] => {
+  const out: WorkflowStep[] = []
+  const lines = readFileSync(join(WORKFLOW_DIR, file), "utf8").split("\n")
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? ""
+    const uses = localUsesStep(file, line) ?? externalUsesStep(file, line)
+    if (uses !== undefined) {
+      out.push(uses)
+      continue
+    }
+    const run = parseRunStep(file, lines, index)
+    if (run === undefined) continue
+    out.push(run.step)
+    index = run.lastLine
+  }
+  return out
+}
+
 const workflowSteps = (): readonly WorkflowStep[] => {
   const out: WorkflowStep[] = []
   for (const file of GATING_WORKFLOWS) {
-    const lines = readFileSync(join(WORKFLOW_DIR, file), "utf8").split("\n")
-    for (let i = 0; i < lines.length; i += 1) {
-      const line = lines[i] ?? ""
-      // A `uses:` step runs code exactly as a `run:` step does — a local
-      // composite action or a reusable workflow — and was invisible here, so a
-      // blocking gate could be added as `uses: ./.github/actions/x` and never
-      // classified. Captured under its own token so the containment test names
-      // it rather than silently accepting it.
-      const usesMatch = /^\s*(?:- )?uses:\s*(\.[^\s]+)\s*$/.exec(line)
-      if (usesMatch !== null) {
-        const cmd = `uses ${usesMatch[1] ?? ""}`
-        out.push({ file, raw: line, lines: [cmd] })
-        continue
-      }
-      // A third-party `uses:` step BLOCKS a job exactly as `run:` does. The
-      // parser saw only `run:`, so `uses: evil/blocking-action@v1` was invisible.
-      // Local (`./…`) and the setup actions the exempt list already admits are
-      // handled through the same universe as everything else.
-      const u = /^\s*(?:- )?uses: (\S+)/.exec(line)
-      if (u !== null) {
-        const spec = `uses: ${u[1]}`
-        out.push({ file, raw: spec, lines: [spec] })
-        continue
-      }
-      const m = /^(\s*)(?:- )?run:(.*)$/.exec(line)
-      if (m === null) continue
-      const indent = (m[1] ?? "").length
-      const head = (m[2] ?? "").trim()
-      // `run:` with the value on the NEXT line is a plain multi-line scalar —
-      // valid YAML, valid in Actions, and invisible to a `run: (.*)$` regex. An
-      // injected `run:\n  bun run probe` shipped past this test un-gated.
-      if (head === "") {
-        const next = (lines[i + 1] ?? "").trim()
-        if (next !== "" && !next.startsWith("-") && !next.startsWith("#")) {
-          out.push({ file, raw: next, lines: [next] })
-          i += 1
-          continue
-        }
-      }
-      // Block indicators this parser does NOT fold (`|-`, `>`, `>+`, …) must fail
-      // CLOSED: keep the marker as the command so the containment test names it,
-      // rather than silently reading an empty step.
-      if (head !== ">-" && head !== "|") {
-        out.push({ file, raw: head, lines: [head] })
-        continue
-      }
-      const body: string[] = []
-      for (let j = i + 1; j < lines.length; j += 1) {
-        const l = lines[j] ?? ""
-        if (l.trim() === "") continue
-        const lead = l.length - l.trimStart().length
-        if (lead <= indent) break
-        body.push(l.trim())
-        i = j
-      }
-      out.push({
-        file,
-        raw: body.join(" "),
-        lines: head === ">-" ? [body.join(" ")] : body,
-      })
-    }
+    out.push(...workflowStepsInFile(file))
   }
   return out
 }
@@ -227,6 +261,37 @@ describe("gate manifest ↔ workflow parity", () => {
     },
   ]
 
+  const isConditionalOrNonBlocking = (line: string): boolean =>
+    /^\s*continue-on-error\s*:\s*true\s*$/.test(line) || /^\s*if\s*:/.test(line)
+
+  const precedingStepName = (lines: readonly string[], index: number): string => {
+    const nameLine = lines
+      .slice(0, index)
+      .reverse()
+      .find((line) => /^\s*-\s*name\s*:/.test(line))
+    return (nameLine ?? "").replace(/^\s*-\s*name\s*:\s*/, "").trim()
+  }
+
+  const conditionalStepBody = (lines: readonly string[], index: number): string =>
+    [
+      ...lines.slice(Math.max(0, index - 8), index).reverse(),
+      ...lines.slice(index, index + 8),
+    ].join("\n")
+
+  const conditionalGateOffenders = (file: string): readonly string[] => {
+    const offenders: string[] = []
+    const lines = readFileSync(join(WORKFLOW_DIR, file), "utf8").split("\n")
+    for (const [index, line] of lines.entries()) {
+      if (!isConditionalOrNonBlocking(line)) continue
+      const stepName = precedingStepName(lines, index)
+      const carriesGate = GATES.some((gate) => conditionalStepBody(lines, index).includes(gate.run))
+      if (!carriesGate || CONDITION_ALLOWED.some((allowed) => stepName.includes(allowed.step)))
+        continue
+      offenders.push(`${file}: ${stepName || `line ${index + 1}`} — ${line.trim()}`)
+    }
+    return offenders
+  }
+
   test("🔴 no MANIFEST gate is neutered in place with continue-on-error or if:", () => {
     // The parity checks assert PRESENCE, never blocking-ness. An audit turned the
     // non-vacuity gate off with `continue-on-error: true` and both directions
@@ -238,24 +303,7 @@ describe("gate manifest ↔ workflow parity", () => {
     // registered is a scheduling decision, and forbidding those outright would
     // flag five legitimate PR-only / schedule-only steps and get the rule
     // deleted rather than followed.
-    const offenders: string[] = []
-    for (const file of GATING_WORKFLOWS) {
-      const lines = readFileSync(join(WORKFLOW_DIR, file), "utf8").split("\n")
-      for (const [i, line] of lines.entries()) {
-        const conditional =
-          /^\s*continue-on-error\s*:\s*true\s*$/.test(line) || /^\s*if\s*:/.test(line)
-        if (!conditional) continue
-        const before = lines.slice(0, i).reverse()
-        const nameLine = before.find((l) => /^\s*-\s*name\s*:/.test(l)) ?? ""
-        const stepName = nameLine.replace(/^\s*-\s*name\s*:\s*/, "").trim()
-        // The step's own `run:` — look forward too, since `if:` may precede it.
-        const body = [...before.slice(0, 8), ...lines.slice(i, i + 8)].join("\n")
-        const carriesGate = GATES.some((g) => body.includes(g.run))
-        if (!carriesGate) continue
-        if (CONDITION_ALLOWED.some((a) => stepName.includes(a.step))) continue
-        offenders.push(`${file}: ${stepName || `line ${i + 1}`} — ${line.trim()}`)
-      }
-    }
+    const offenders = GATING_WORKFLOWS.flatMap(conditionalGateOffenders)
     expect(
       offenders,
       offenders.length === 0
