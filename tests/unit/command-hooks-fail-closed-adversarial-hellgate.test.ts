@@ -571,54 +571,75 @@ describe("G7 property — spawn happens IFF the gate is genuinely armed", () => 
     [],
   ]
 
+  const configForGateCase = (
+    enabled: boolean | undefined,
+    acknowledgedRisk: string | undefined,
+    bindings: readonly CommandHookBinding[],
+  ): CommandHookConfig => ({
+    ...(enabled !== undefined ? { enabled } : {}),
+    ...(acknowledgedRisk !== undefined ? { acknowledgedRisk } : {}),
+    bindings: bindings.map((binding) => ({
+      ...binding,
+      command: binding.command === "" ? "" : uniqueCommand("g7"),
+    })),
+  })
+
+  const validBindingCount = (bindings: readonly CommandHookBinding[]): number =>
+    bindings.filter((binding) => binding.command.trim().length > 0).length
+
+  const shouldArmGate = (
+    enabled: boolean | undefined,
+    acknowledgedRisk: string | undefined,
+    bindings: readonly CommandHookBinding[],
+  ): boolean =>
+    enabled === true &&
+    typeof acknowledgedRisk === "string" &&
+    acknowledgedRisk.trim().length > 0 &&
+    validBindingCount(bindings) > 0
+
+  const requiresAcknowledgementError = (
+    enabled: boolean | undefined,
+    acknowledgedRisk: string | undefined,
+  ): boolean =>
+    enabled === true &&
+    (acknowledgedRisk === undefined ||
+      (typeof acknowledgedRisk === "string" && acknowledgedRisk.trim().length === 0))
+
+  const assertGateCase = async (
+    enabled: boolean | undefined,
+    acknowledgedRisk: string | undefined,
+    bindings: readonly CommandHookBinding[],
+  ): Promise<void> => {
+    const config = configForGateCase(enabled, acknowledgedRisk, bindings)
+    const expectedArmed = shouldArmGate(enabled, acknowledgedRisk, config.bindings)
+    let gate: ReturnType<typeof normalizeCommandHookGate> | undefined
+    let threw = false
+    try {
+      gate = normalizeCommandHookGate(config)
+    } catch {
+      threw = true
+    }
+    if (requiresAcknowledgementError(enabled, acknowledgedRisk)) {
+      expect(threw).toBe(true)
+      return
+    }
+    expect(threw).toBe(false)
+    const resolvedGate = present(gate, "gate")
+    expect(resolvedGate.armed).toBe(expectedArmed)
+    const { port, calls } = recordingExec()
+    await runCommandHooks(
+      resolvedGate,
+      { exec: port, permission: allow, cwd: "/repo" },
+      { type: "pre_tool_use", toolName: "write", payload: {} },
+    )
+    expect(calls.length > 0).toBe(expectedArmed)
+  }
+
   test("fuzz {enabled × ack × bindings}: exec called ⇔ (enabled && non-empty-ack && ≥1 valid binding)", async () => {
     for (const enabled of ENABLED) {
       for (const ack of ACKS) {
         for (const bindings of BINDINGS) {
-          const cfg: CommandHookConfig = {
-            ...(enabled !== undefined ? { enabled } : {}),
-            ...(ack !== undefined ? { acknowledgedRisk: ack } : {}),
-            bindings: bindings.map((b) => ({
-              ...b,
-              command: b.command === "" ? "" : uniqueCommand("g7"),
-            })),
-          }
-          const validBindings = present(cfg.bindings, "cfg.bindings").filter(
-            (b) => b.command.trim().length > 0,
-          ).length
-          const shouldArm =
-            enabled === true &&
-            typeof ack === "string" &&
-            ack.trim().length > 0 &&
-            validBindings > 0
-
-          let gate: ReturnType<typeof normalizeCommandHookGate> | undefined
-          let threw = false
-          try {
-            gate = normalizeCommandHookGate(cfg)
-          } catch {
-            threw = true
-          }
-
-          if (
-            enabled === true &&
-            (ack === undefined || (typeof ack === "string" && ack.trim().length === 0))
-          ) {
-            // enabled with a blank/missing ack ALWAYS throws before it can arm.
-            expect(threw).toBe(true)
-            continue
-          }
-          expect(threw).toBe(false)
-          expect(present(gate, "gate").armed).toBe(shouldArm)
-
-          const { port, calls } = recordingExec()
-          await runCommandHooks(
-            present(gate, "gate"),
-            { exec: port, permission: allow, cwd: "/repo" },
-            { type: "pre_tool_use", toolName: "write", payload: {} },
-          )
-          // The property: exec fired IFF the gate is armed.
-          expect(calls.length > 0).toBe(shouldArm)
+          await assertGateCase(enabled, ack, bindings)
         }
       }
     }
