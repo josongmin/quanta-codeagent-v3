@@ -504,9 +504,16 @@ function assertStandardYaml(text: string, path: string): void {
  */
 export async function loadFeatures(dir: string = FEATURES_DIR): Promise<LoadedFeature[]> {
   const files = await gatherYamlFiles(dir)
+  // Read the catalog concurrently, then validate in the canonical path order.
+  // Serial reads make the 1k+ file catalog scale with filesystem latency and
+  // caused cold CI runs to spend almost a minute before the first assertion.
+  // Keeping parse/validation in this loop preserves deterministic first-error
+  // reporting and the stable output order.
+  const sources = await Promise.all(
+    files.map(async (path) => ({ path, text: await readFile(path, "utf8") })),
+  )
   const loaded: LoadedFeature[] = []
-  for (const path of files) {
-    const text = await readFile(path, "utf8")
+  for (const { path, text } of sources) {
     let raw: unknown
     try {
       assertStandardYaml(text, path)
