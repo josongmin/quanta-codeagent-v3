@@ -80,6 +80,46 @@ const makePostReply = (commentId: number): GhCliResult => ({
   exitCode: 0,
 })
 
+interface RaceComment {
+  readonly id: number
+  readonly html_url: string
+  readonly body: string
+}
+
+const deleteCommentId = (args: readonly string[]): number | undefined => {
+  if (!isDelete(args)) return undefined
+  const match = /comments\/(\d+)/.exec(args[3] ?? "")
+  return match?.[1] === undefined ? undefined : Number.parseInt(match[1], 10)
+}
+
+const liveRaceRows = (liveSet: ReadonlySet<number>, rows: readonly RaceComment[]): RaceComment[] =>
+  rows.filter((row) => liveSet.has(row.id))
+
+const makeRacePort = (options: {
+  readonly myId: number
+  readonly liveSet: Set<number>
+  readonly rows: readonly RaceComment[]
+  readonly onDelete?: (id: number) => void
+}): GhCliPort => {
+  let listCalls = 0
+  return {
+    async run(args): Promise<GhCliResult> {
+      if (isList(args)) {
+        listCalls++
+        return makeListReply(listCalls === 1 ? [] : liveRaceRows(options.liveSet, options.rows))
+      }
+      if (isPost(args)) return makePostReply(options.myId)
+      const deletedId = deleteCommentId(args)
+      if (deletedId !== undefined) {
+        options.onDelete?.(deletedId)
+        options.liveSet.delete(deletedId)
+        return { stdout: "", stderr: "", exitCode: 0 }
+      }
+      return { stdout: "", stderr: "unhandled", exitCode: 1 }
+    },
+  }
+}
+
 describe("post-then-reconcile (R4)", () => {
   it("sequential POST: list returns just my comment → no deletes", async () => {
     const { port, calls } = makeGh([
@@ -136,34 +176,19 @@ describe("post-then-reconcile (R4)", () => {
   })
 
   it("3-way race: I'm winner (smallest id) → 2 deletes, my URL returned", async () => {
-    let listCall = 0
     const deletes: number[] = []
     // Simulate GH state: delete removes from subsequent listings.
     const liveSet = new Set<number>([100, 200, 300])
-    const port: GhCliPort = {
-      async run(args) {
-        if (isList(args)) {
-          listCall++
-          if (listCall === 1) return makeListReply([]) // pre-POST
-          const live: { id: number; html_url: string; body: string }[] = []
-          if (liveSet.has(100)) live.push({ id: 100, html_url: "u100", body: `a\n${MARKER}` })
-          if (liveSet.has(200)) live.push({ id: 200, html_url: "u200", body: `b\n${MARKER}` })
-          if (liveSet.has(300)) live.push({ id: 300, html_url: "u300", body: `c\n${MARKER}` })
-          return makeListReply(live)
-        }
-        if (isPost(args)) return makePostReply(100)
-        if (isDelete(args)) {
-          const m = /comments\/(\d+)/.exec(args[3] ?? "")
-          if (m?.[1] !== undefined) {
-            const id = Number.parseInt(m[1], 10)
-            deletes.push(id)
-            liveSet.delete(id)
-          }
-          return { stdout: "", stderr: "", exitCode: 0 }
-        }
-        return { stdout: "", stderr: "unhandled", exitCode: 1 }
-      },
-    }
+    const port = makeRacePort({
+      myId: 100,
+      liveSet,
+      rows: [
+        { id: 100, html_url: "u100", body: `a\n${MARKER}` },
+        { id: 200, html_url: "u200", body: `b\n${MARKER}` },
+        { id: 300, html_url: "u300", body: `c\n${MARKER}` },
+      ],
+      onDelete: (id) => deletes.push(id),
+    })
     const sink = createPrOutputSink({
       ghCliPort: port,
       repoCwd: "/tmp",
@@ -180,33 +205,18 @@ describe("post-then-reconcile (R4)", () => {
   })
 
   it("3-way race: I'm a loser → my comment deleted, winner URL returned", async () => {
-    let listCall = 0
     const deletes: number[] = []
     const liveSet = new Set<number>([50, 100, 200])
-    const port: GhCliPort = {
-      async run(args) {
-        if (isList(args)) {
-          listCall++
-          if (listCall === 1) return makeListReply([]) // pre-POST
-          const live: { id: number; html_url: string; body: string }[] = []
-          if (liveSet.has(50)) live.push({ id: 50, html_url: "u50", body: `winner\n${MARKER}` })
-          if (liveSet.has(100)) live.push({ id: 100, html_url: "u100", body: `me\n${MARKER}` })
-          if (liveSet.has(200)) live.push({ id: 200, html_url: "u200", body: `another\n${MARKER}` })
-          return makeListReply(live)
-        }
-        if (isPost(args)) return makePostReply(100)
-        if (isDelete(args)) {
-          const m = /comments\/(\d+)/.exec(args[3] ?? "")
-          if (m?.[1] !== undefined) {
-            const id = Number.parseInt(m[1], 10)
-            deletes.push(id)
-            liveSet.delete(id)
-          }
-          return { stdout: "", stderr: "", exitCode: 0 }
-        }
-        return { stdout: "", stderr: "unhandled", exitCode: 1 }
-      },
-    }
+    const port = makeRacePort({
+      myId: 100,
+      liveSet,
+      rows: [
+        { id: 50, html_url: "u50", body: `winner\n${MARKER}` },
+        { id: 100, html_url: "u100", body: `me\n${MARKER}` },
+        { id: 200, html_url: "u200", body: `another\n${MARKER}` },
+      ],
+      onDelete: (id) => deletes.push(id),
+    })
     const sink = createPrOutputSink({
       ghCliPort: port,
       repoCwd: "/tmp",
@@ -391,28 +401,16 @@ describe("post-then-reconcile (R4)", () => {
     const observers = [100, 200, 300]
     const winners: number[] = []
     for (const myId of observers) {
-      let listCount = 0
       const liveSet = new Set<number>([100, 200, 300])
-      const port: GhCliPort = {
-        async run(args) {
-          if (isList(args)) {
-            listCount++
-            if (listCount === 1) return makeListReply([])
-            const live: { id: number; html_url: string; body: string }[] = []
-            if (liveSet.has(100)) live.push({ id: 100, html_url: "u100", body: `a\n${MARKER}` })
-            if (liveSet.has(200)) live.push({ id: 200, html_url: "u200", body: `b\n${MARKER}` })
-            if (liveSet.has(300)) live.push({ id: 300, html_url: "u300", body: `c\n${MARKER}` })
-            return makeListReply(live)
-          }
-          if (isPost(args)) return makePostReply(myId)
-          if (isDelete(args)) {
-            const m = /comments\/(\d+)/.exec(args[3] ?? "")
-            if (m?.[1] !== undefined) liveSet.delete(Number.parseInt(m[1], 10))
-            return { stdout: "", stderr: "", exitCode: 0 }
-          }
-          return { stdout: "", stderr: "unhandled", exitCode: 1 }
-        },
-      }
+      const port = makeRacePort({
+        myId,
+        liveSet,
+        rows: [
+          { id: 100, html_url: "u100", body: `a\n${MARKER}` },
+          { id: 200, html_url: "u200", body: `b\n${MARKER}` },
+          { id: 300, html_url: "u300", body: `c\n${MARKER}` },
+        ],
+      })
       const sink = createPrOutputSink({
         ghCliPort: port,
         repoCwd: "/tmp",
