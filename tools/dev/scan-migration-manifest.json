@@ -64,20 +64,6 @@
       ]
     },
     {
-      "file": "tests/unit/no-benchmark-overfit-steer-ratchet.test.ts",
-      "klass": "A-recursive-walk",
-      "enumerators": [
-        "readdirSync"
-      ],
-      "recursive": true,
-      "absolutePaths": false,
-      "derived": false,
-      "roots": 1,
-      "floorLines": [
-        "160: expect(steers.length).toBeGreaterThanOrEqual(10)"
-      ]
-    },
-    {
       "file": "tests/unit/orphan-orchestrator-ratchet.test.ts",
       "klass": "A-recursive-walk",
       "enumerators": [

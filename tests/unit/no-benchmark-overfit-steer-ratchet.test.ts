@@ -31,6 +31,8 @@ import { describe, expect, it } from "bun:test"
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
+import { assertScanPopulation } from "./_shared/scan-population"
+
 const root = (rel: string) => join(import.meta.dir, "../../", rel)
 const read = (rel: string) => readFileSync(root(rel), "utf8")
 /** Read a `driver.ts` barrel PLUS every `driver/*.ts` lane sibling (the barrel
@@ -43,9 +45,17 @@ const readDriverAggregate = (barrelRel: string): string => {
   const lanes = existsSync(dirAbs)
     ? readdirSync(dirAbs)
         .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
-        .map((f) => readFileSync(join(dirAbs, f), "utf8"))
+        .map((f) => join(dirAbs, f))
     : []
-  return [read(barrelRel), ...lanes].join("\n")
+  const id = barrelRel.startsWith("src/runner/")
+    ? "tests/unit/no-benchmark-overfit-steer-ratchet.test.ts#BATCH-DRIVER-LANES"
+    : "tests/unit/no-benchmark-overfit-steer-ratchet.test.ts#BENCH-DRIVER-LANES"
+  assertScanPopulation(lanes, dirAbs, {
+    collectable: (path) => path.endsWith(".ts") && !path.endsWith(".test.ts"),
+    id,
+    topLevelOnly: true,
+  })
+  return [read(barrelRel), ...lanes.map((lane) => readFileSync(lane, "utf8"))].join("\n")
 }
 
 // Every source file that declares a static string injected into the agent prompt.
