@@ -274,6 +274,10 @@ describe("criterion/check controls", () => {
     })
   })
 
+  it("preserves escaped quotes inside double-quoted argv", () => {
+    expect(parseCheckArgv(String.raw`printf "a\"b" 'c\d'`)).toEqual(["printf", 'a"b', "c\\d"])
+  })
+
   it("criterion done resolves 1-based/manual ID and refuses checked criteria", async () => {
     const manual = harness()
     await run(manual.goal, "criterion done 1")
@@ -297,6 +301,34 @@ describe("criterion/check controls", () => {
 })
 
 describe("unblock freezes identity", () => {
+  it("uses the initially viewed revision for the first blocker CAS", async () => {
+    const initial = structuredClone(state()) as Mutable<GoalReadoutData>
+    if (initial.objective === null) throw new Error("fixture")
+    initial.objective.blockers = [{ id: "b1", reason: "one", waitingOn: "user" }]
+    const h = harness(initial, {
+      kind: "rejected",
+      commandId: "stale-unblock",
+      frame: {
+        target: "command",
+        reason: "revision_conflict",
+        commandId: "stale-unblock",
+        expectedRevision: 8,
+        actualRevision: 9,
+      },
+    })
+    let reads = 0
+    h.deps.readGoal = async () => {
+      reads += 1
+      const data = structuredClone(initial) as Mutable<GoalReadoutData>
+      data.revision = reads === 1 ? 8 : 9
+      return { kind: "served", output: "goal display", data }
+    }
+
+    await run(h.goal, "unblock")
+
+    expect(h.sent.map((entry) => entry.revision)).toEqual([8])
+  })
+
   it("clears only blocker IDs present at command start", async () => {
     const initial = structuredClone(state()) as Mutable<GoalReadoutData>
     if (initial.objective === null) throw new Error("fixture")

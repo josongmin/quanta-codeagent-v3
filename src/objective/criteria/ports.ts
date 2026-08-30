@@ -128,10 +128,13 @@ export type ReconcileOutcome =
 /** What a surface (model tool / CLI / web) may ask the host verifier to do. It
  *  never receives argv — only the stored immutable checks run. */
 export interface ObjectiveVerificationPort {
+  /** `expectedRevision` pins the caller's viewed objective at verifier entry.
+   * A mismatch must be refused before workspace capture or command execution. */
   verify(
     threadId: string,
     criterionIds?: readonly string[],
     signal?: AbortSignal,
+    expectedRevision?: number,
   ): Promise<VerificationOutcome>
   reconcile(threadId: string): Promise<ReconcileOutcome>
 }

@@ -207,6 +207,27 @@ const setupCoordinator = (
 }
 
 describe("GOAL-03 — verification coordinator", () => {
+  test("an expected revision moved before verifier entry is rejected before evidence or command execution", async () => {
+    let captures = 0
+    const evidence: WorkspaceEvidencePort = {
+      precheck: async () => "pre:D",
+      capture: async () => {
+        captures += 1
+        return { sourceDigest: "D", precheck: "pre:D", capturedAt: 1, fileCount: 1 }
+      },
+    }
+    const runner = fakeRunner(() => ({}))
+    const setup = setupCoordinator(runner, evidence)
+    const viewedRevision = setup.authority.readDomain("t").revision
+    setup.caps.user.commit("t", { kind: "setNextActions", actions: ["concurrent"] })
+
+    const out = await setup.coordinator.verify("t", undefined, undefined, viewedRevision)
+
+    expect(out).toEqual({ kind: "rejected", reason: "stale-revision:2" })
+    expect(captures).toBe(0)
+    expect(runner.calls).toHaveLength(0)
+  })
+
   test("a passing run completes the checked criterion with the stable digest; a failing run leaves it unmet", async () => {
     const state = { digest: "D1" }
     const runner = fakeRunner((input) => ({ exitCode: input.argv[0] === "fail" ? 1 : 0 }))

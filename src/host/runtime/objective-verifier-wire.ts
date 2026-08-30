@@ -406,6 +406,22 @@ const commitBatch = (
   return { kind: "freshness-unresolved" }
 }
 
+/** Select the immutable stored checks this run covers. */
+const selectChecks = (
+  objective: Objective,
+  criterionIds: readonly string[] | undefined,
+): CheckedCriterion[] | Extract<VerificationOutcome, { kind: "no-checks" | "cap-exceeded" }> => {
+  const wanted = criterionIds === undefined ? null : new Set(criterionIds)
+  const checked = objective.successCriteria
+    .filter(isChecked)
+    .filter((c) => wanted === null || wanted.has(c.id))
+  if (checked.length === 0) return { kind: "no-checks" }
+  if (checked.length > MAX_CHECKS_PER_BATCH) {
+    return { kind: "cap-exceeded", reason: `more than ${MAX_CHECKS_PER_BATCH} checks` }
+  }
+  return checked
+}
+
 export const createObjectiveVerificationCoordinator = (
   deps: CoordinatorDeps,
 ): ObjectiveVerificationCoordinator => {
@@ -440,22 +456,6 @@ export const createObjectiveVerificationCoordinator = (
     return full.sourceDigest
   }
 
-  /** Select the immutable stored checks this run covers. */
-  const selectChecks = (
-    objective: Objective,
-    criterionIds: readonly string[] | undefined,
-  ): CheckedCriterion[] | Extract<VerificationOutcome, { kind: "no-checks" | "cap-exceeded" }> => {
-    const wanted = criterionIds === undefined ? null : new Set(criterionIds)
-    const checked = objective.successCriteria
-      .filter(isChecked)
-      .filter((c) => wanted === null || wanted.has(c.id))
-    if (checked.length === 0) return { kind: "no-checks" }
-    if (checked.length > MAX_CHECKS_PER_BATCH) {
-      return { kind: "cap-exceeded", reason: `more than ${MAX_CHECKS_PER_BATCH} checks` }
-    }
-    return checked
-  }
-
   /** After the checks ran: the tree must be byte-identical to the pre-run capture. */
   const settleRun = async (
     threadId: string,
@@ -488,8 +488,17 @@ export const createObjectiveVerificationCoordinator = (
     )
   }
 
-  const verify: ObjectiveVerificationPort["verify"] = async (threadId, criterionIds, signal) => {
-    const objective = deps.read.readDomain(threadId).state?.objective
+  const verify: ObjectiveVerificationPort["verify"] = async (
+    threadId,
+    criterionIds,
+    signal,
+    expectedRevision,
+  ) => {
+    const domain = deps.read.readDomain(threadId)
+    if (expectedRevision !== undefined && domain.revision !== expectedRevision) {
+      return { kind: "rejected", reason: `stale-revision:${domain.revision}` }
+    }
+    const objective = domain.state?.objective
     if (objective === undefined) return { kind: "rejected", reason: "objective-missing" }
     const checked = selectChecks(objective, criterionIds)
     if (!Array.isArray(checked)) return checked

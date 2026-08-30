@@ -83,7 +83,8 @@ interface ArgvLexerState {
 }
 
 const consumeQuoted = (state: ArgvLexerState, char: string): void => {
-  if (char === state.quote) state.quote = null
+  if (state.quote === '"' && char === "\\") state.escaped = true
+  else if (char === state.quote) state.quote = null
   else state.current += char
   state.started = true
 }
@@ -316,9 +317,8 @@ const runUnblock = async (deps: GoalSlashDeps, initial: GoalReadoutData): Promis
     return
   }
   let cleared = 0
-  for (const blockerId of frozenIds) {
-    const current = await requireSnapshot(deps)
-    if (current === null) return
+  let current = initial
+  for (const [index, blockerId] of frozenIds.entries()) {
     if (!current.objective?.blockers.some((blocker) => blocker.id === blockerId)) continue
     const outcome = await runMutation(
       deps,
@@ -329,11 +329,19 @@ const runUnblock = async (deps: GoalSlashDeps, initial: GoalReadoutData): Promis
     )
     if (outcome !== "applied") {
       deps.onError(
-        `/goal unblock: stopped after clearing ${cleared}; ${frozenIds.length - cleared} frozen blocker(s) remain`,
+        `/goal unblock: stopped after clearing ${cleared}; ${frozenIds.length - cleared} frozen blocker(s) were not cleared by this command`,
       )
       return
     }
     cleared += 1
+    if (index < frozenIds.length - 1) {
+      const refreshed = await requireSnapshot(deps)
+      if (refreshed === null) {
+        deps.onError(`/goal unblock: readback failed after clearing ${cleared} blocker(s)`)
+        return
+      }
+      current = refreshed
+    }
   }
   deps.appendSystem(`Cleared ${cleared} blocker${cleared === 1 ? "" : "s"}.`)
   await fetchReadoutBody(deps, "goal")

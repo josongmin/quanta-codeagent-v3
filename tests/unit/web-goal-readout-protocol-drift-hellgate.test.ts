@@ -61,4 +61,41 @@ describe("web goal readout protocol drift hellgate", () => {
     delete (objective.criteria[0]?.check as Record<string, unknown>).successExitCodes
     expect(decodeGoalReadoutData(partial)).toBeNull()
   })
+
+  test("red-on-injection: ambiguous identities and impossible domain values are rejected", () => {
+    const duplicateCriterion = structuredClone(valid) as Record<string, unknown>
+    const duplicateCriterionObjective = duplicateCriterion.objective as {
+      criteria: Record<string, unknown>[]
+    }
+    duplicateCriterionObjective.criteria.push({ ...duplicateCriterionObjective.criteria[0] })
+    expect(decodeGoalReadoutData(duplicateCriterion)).toBeNull()
+
+    const duplicateCheck = structuredClone(valid) as Record<string, unknown>
+    const duplicateCheckObjective = duplicateCheck.objective as {
+      criteria: Record<string, unknown>[]
+    }
+    duplicateCheckObjective.criteria.push({
+      ...duplicateCheckObjective.criteria[0],
+      id: "criterion:t:2",
+    })
+    expect(decodeGoalReadoutData(duplicateCheck)).toBeNull()
+
+    const duplicateBlocker = structuredClone(valid) as Record<string, unknown>
+    const duplicateBlockerObjective = duplicateBlocker.objective as {
+      blockers: Record<string, unknown>[]
+    }
+    duplicateBlockerObjective.blockers.push({ ...duplicateBlockerObjective.blockers[0] })
+    expect(decodeGoalReadoutData(duplicateBlocker)).toBeNull()
+
+    const emptyGoal = structuredClone(valid) as Record<string, unknown>
+    const emptyGoalObjective = emptyGoal.objective as Record<string, unknown>
+    emptyGoalObjective.goal = ""
+    expect(decodeGoalReadoutData(emptyGoal)).toBeNull()
+
+    const zeroTimeout = structuredClone(valid) as Record<string, unknown>
+    const zeroTimeoutObjective = zeroTimeout.objective as { criteria: Record<string, unknown>[] }
+    const zeroTimeoutCheck = zeroTimeoutObjective.criteria[0]?.check as Record<string, unknown>
+    zeroTimeoutCheck.timeoutMs = 0
+    expect(decodeGoalReadoutData(zeroTimeout)).toBeNull()
+  })
 })

@@ -148,7 +148,7 @@ const decodeCheck = (value: unknown): GoalReadoutCheckView | null => {
   if (!isRecord(value) || !isNonEmptyString(value.id)) return null
   if (value.kind !== "command" || value.cwdPolicy !== "thread") return null
   if (!Array.isArray(value.argv) || !value.argv.every((arg) => typeof arg === "string")) return null
-  if (!isNonNegativeInteger(value.timeoutMs)) return null
+  if (!isNonNegativeInteger(value.timeoutMs) || value.timeoutMs === 0) return null
   if (
     !Array.isArray(value.successExitCodes) ||
     !value.successExitCodes.every(Number.isSafeInteger)
@@ -180,7 +180,7 @@ const decodeCriterion = (value: unknown): GoalReadoutCriterionView | null => {
 
 const decodeObjective = (value: unknown): GoalReadoutObjectiveView | null => {
   if (!isRecord(value) || !isNonEmptyString(value.objectiveId)) return null
-  if (typeof value.goal !== "string") return null
+  if (!isNonEmptyString(value.goal)) return null
   if (typeof value.status !== "string" || !STATUS.has(value.status as GoalReadoutStatus))
     return null
   const budget = decodeBudget(value.budget)
@@ -191,6 +191,16 @@ const decodeObjective = (value: unknown): GoalReadoutObjectiveView | null => {
   const criteria = value.criteria.map(decodeCriterion)
   if (blockers.some((entry) => entry === null) || criteria.some((entry) => entry === null))
     return null
+  const blockerIds = blockers.map((entry) => entry?.id)
+  const criterionIds = criteria.map((entry) => entry?.id)
+  const checkIds = criteria.flatMap((entry) => (entry?.kind === "checked" ? [entry.check.id] : []))
+  if (
+    new Set(blockerIds).size !== blockerIds.length ||
+    new Set(criterionIds).size !== criterionIds.length ||
+    new Set(checkIds).size !== checkIds.length
+  ) {
+    return null
+  }
   return {
     objectiveId: value.objectiveId,
     goal: value.goal,

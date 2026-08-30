@@ -106,8 +106,12 @@ describe("goalVerify coordinator", () => {
 
   test("preserves verifier outcomes instead of flattening operational failures", async () => {
     const authority = checkedAuthority()
+    let expectedRevision: number | undefined
     const verifier: ObjectiveVerificationPort = {
-      verify: async () => ({ kind: "runner-unavailable", reason: "sandbox missing" }),
+      verify: async (...args) => {
+        expectedRevision = args[3]
+        return { kind: "runner-unavailable", reason: "sandbox missing" }
+      },
       reconcile: async () => ({ kind: "fresh", verified: 0 }),
     }
     const handler = composeWebGoalVerify({
@@ -125,6 +129,7 @@ describe("goalVerify coordinator", () => {
         outcome: { kind: "runner-unavailable", reason: "sandbox missing" },
       },
     ])
+    expect(expectedRevision).toBe(1)
   })
 })
 

@@ -58,7 +58,7 @@ export const composeWebGoalVerify = (args: {
       }
       const controller = new AbortController()
       const task = verifier
-        .verify(args.threadId, undefined, controller.signal)
+        .verify(args.threadId, undefined, controller.signal, expectedObjectiveRevision)
         .then((outcome) => reply({ status: "completed", outcome }))
         .catch((error: unknown) => reply(rejected(`verifier-failed:${errMessage(error)}`)))
         .finally(() => {
