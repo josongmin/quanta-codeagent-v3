@@ -21,25 +21,22 @@ const REPO_ROOT = join(import.meta.dir, "..", "..")
 const SRC_AGENT = join(REPO_ROOT, "src", "agent")
 const ALLOWED_OWNER = join(SRC_AGENT, "deny-reason-wire.ts")
 
+const ignoredAgentDirectory = (name: string): boolean =>
+  name === "__tests__" || name === "node_modules" || name.startsWith(".")
+
+const isAgentSourceFile = (name: string): boolean =>
+  name.endsWith(".ts") && !name.endsWith(".test.ts") && !name.endsWith(".hellgate.test.ts")
+
 const collectAgentTs = (): string[] => {
   const out: string[] = []
   const walk = (dir: string): void => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const full = join(dir, entry.name)
       if (entry.isDirectory()) {
-        if (
-          entry.name === "__tests__" ||
-          entry.name === "node_modules" ||
-          entry.name.startsWith(".")
-        ) {
-          continue
-        }
-        walk(full)
+        if (!ignoredAgentDirectory(entry.name)) walk(full)
         continue
       }
-      if (!entry.isFile() || !entry.name.endsWith(".ts")) continue
-      if (entry.name.endsWith(".test.ts") || entry.name.endsWith(".hellgate.test.ts")) continue
-      out.push(full)
+      if (entry.isFile() && isAgentSourceFile(entry.name)) out.push(full)
     }
   }
   walk(SRC_AGENT)
