@@ -160,6 +160,16 @@ describe("mcp-oauth port — knob / default", () => {
 // store is COMPOSED (Keychain/libsecret over the file store). We drive the
 // compose observation with a FAKE darwin keychain exec (no real `security`).
 
+const serviceAccountFrom = (args: readonly string[]): [string, string] => [
+  args[args.indexOf("-s") + 1] ?? "",
+  args[args.indexOf("-a") + 1] ?? "",
+]
+
+const secretLeakedOnArgv = (args: readonly string[]): string | undefined => {
+  const secretIndex = args.indexOf("-w")
+  return secretIndex >= 0 ? args[secretIndex + 1] : undefined
+}
+
 /** A fake darwin `security` exec: an in-memory keychain keyed by service+account.
  *  Mirrors the macOS adapter's argv protocol (add/find/delete/default-keychain).
  *  The secret rides STDIN (never argv) — asserted below. */
@@ -169,29 +179,29 @@ const fakeMacKeyringExec = () => {
   const key = (s: string, a: string) => `${s}\x00${a}`
   const exec: KeyringExec = async (input) => {
     const a = input.args
-    if (a[0] === "default-keychain") return { ok: true, stdout: "" }
-    if (a[0] === "add-generic-password") {
-      const svc = a[a.indexOf("-s") + 1] ?? ""
-      const acc = a[a.indexOf("-a") + 1] ?? ""
+    const [service, account] = serviceAccountFrom(a)
+    const addGenericPassword = () => {
       // record any positional value after `-w` to PROVE the secret is NOT on argv
-      const wIdx = a.indexOf("-w")
-      if (wIdx >= 0 && a[wIdx + 1] !== undefined) argvSecrets.push(a[wIdx + 1] as string)
-      if (input.stdin !== undefined) vault.set(key(svc, acc), input.stdin)
+      const leakedSecret = secretLeakedOnArgv(a)
+      if (leakedSecret !== undefined) argvSecrets.push(leakedSecret)
+      if (input.stdin !== undefined) vault.set(key(service, account), input.stdin)
       return { ok: true, stdout: "" }
     }
-    if (a[0] === "find-generic-password") {
-      const svc = a[a.indexOf("-s") + 1] ?? ""
-      const acc = a[a.indexOf("-a") + 1] ?? ""
-      const v = vault.get(key(svc, acc))
+    const findGenericPassword = () => {
+      const v = vault.get(key(service, account))
       return v !== undefined ? { ok: true, stdout: `${v}\n` } : { ok: false, stdout: "" }
     }
-    if (a[0] === "delete-generic-password") {
-      const svc = a[a.indexOf("-s") + 1] ?? ""
-      const acc = a[a.indexOf("-a") + 1] ?? ""
-      vault.delete(key(svc, acc))
+    const deleteGenericPassword = () => {
+      vault.delete(key(service, account))
       return { ok: true, stdout: "" }
     }
-    return { ok: false, stdout: "" }
+    const handlers: Record<string, () => { ok: boolean; stdout: string }> = {
+      "default-keychain": () => ({ ok: true, stdout: "" }),
+      "add-generic-password": addGenericPassword,
+      "find-generic-password": findGenericPassword,
+      "delete-generic-password": deleteGenericPassword,
+    }
+    return handlers[a[0] ?? ""]?.() ?? { ok: false, stdout: "" }
   }
   return { exec, vault, argvSecrets }
 }
