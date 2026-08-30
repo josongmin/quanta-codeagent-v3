@@ -14,7 +14,7 @@
  *      child's spend as a duplicate, reintroducing the bug through the back
  *      door.
  */
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import { BudgetMeter } from "@/agent/budget/meter"
 import {
   __rejectedWarnedFor,
@@ -28,6 +28,7 @@ import type { AgentConfig } from "@/agent/types"
 import type { StreamEvent } from "@/llm"
 import { Metrics } from "@/observability/metrics"
 import { createUsageAccounting } from "@/observability/usage-accounting"
+import { logger } from "@/shared"
 import type { AgentEvent } from "@/stream/types"
 
 type UsageEv = Extract<StreamEvent, { type: "usage" }>
@@ -62,6 +63,19 @@ type EmittedUsage = Extract<AgentEvent, { type: "usage" }>
 
 const usageEvents = (events: readonly AgentEvent[]) =>
   events.filter((e) => e.type === "usage") as ReadonlyArray<EmittedUsage>
+
+/** Observe the production warning call, not merely its suppression latch. */
+const withWarnings = (body: (warnings: string[]) => void): void => {
+  const warnings: string[] = []
+  const warn = spyOn(logger, "warn").mockImplementation((message) => {
+    warnings.push(message)
+  })
+  try {
+    body(warnings)
+  } finally {
+    warn.mockRestore()
+  }
+}
 
 describe("default-OFF: no accountant, no behaviour change", () => {
   test("emitting with no accountant still emits exactly one usage event", () => {
@@ -172,56 +186,107 @@ describe("A6 — the LOOP mints from the authority, so a resume cannot collide",
 })
 
 describe("A5 — a rejected record is visible, not swallowed", () => {
-  test("a non-finite event warns once per authority+reason and ticks both counters", () => {
-    const accounting = createUsageAccounting()
-    const metrics = new Metrics()
-    const { config } = makeConfig({ usageAccounting: accounting })
-    const poison = { ...usage(Number.NaN) }
-    emitUsage(config, poison, new AgentRecorder(metrics), undefined, undefined)
-    emitUsage(config, poison, new AgentRecorder(metrics), undefined, undefined)
+  test("a non-finite event warns once per authority+reason and ticks both counters", () =>
+    withWarnings((warnings) => {
+      const accounting = createUsageAccounting()
+      const metrics = new Metrics()
+      const { config } = makeConfig({ usageAccounting: accounting })
+      const poison = { ...usage(Number.NaN) }
+      emitUsage(config, poison, new AgentRecorder(metrics), undefined, undefined)
+      emitUsage(config, poison, new AgentRecorder(metrics), undefined, undefined)
 
-    expect(accounting.snapshot().calls).toBe(0) // still rejected
-    // The aggregate remains compatible while the bounded reason counter
-    // identifies the actual failure mode.
-    expect(metrics.snapshot().counters["quanta.usage.rejected"]).toBe(2)
-    expect(metrics.snapshot().counters["quanta.usage.rejected.non_finite"]).toBe(2)
-    expect(__rejectedWarnedFor(accounting, "non-finite")).toBe(true)
-    expect(__rejectedWarnedReasonCountFor(accounting)).toBe(1)
-  })
+      expect(accounting.snapshot().calls).toBe(0) // still rejected
+      // The aggregate remains compatible while the bounded reason counter
+      // identifies the actual failure mode.
+      expect(metrics.snapshot().counters["quanta.usage.rejected"]).toBe(2)
+      expect(metrics.snapshot().counters["quanta.usage.rejected.non_finite"]).toBe(2)
+      expect(__rejectedWarnedFor(accounting, "non-finite")).toBe(true)
+      expect(__rejectedWarnedReasonCountFor(accounting)).toBe(1)
+      expect(warnings).toHaveLength(1)
+      expect(warnings[0]).toContain("usage accounting rejected a record (non-finite)")
+    }))
 
-  test("a second rejection reason is not hidden by the first reason's warn latch", () => {
-    const accounting = createUsageAccounting()
-    const metrics = new Metrics()
-    const recorder = new AgentRecorder(metrics)
-    const { config: bound } = makeConfig({ usageAccounting: accounting, sessionId: "sess-1" })
-    const { config: mismatched } = makeConfig({ usageAccounting: accounting, sessionId: "sess-2" })
+  test("repeated non-finite and session-mismatch refusals each call logger.warn exactly once", () =>
+    withWarnings((warnings) => {
+      const accounting = createUsageAccounting()
+      const metrics = new Metrics()
+      const recorder = new AgentRecorder(metrics)
+      const { config: bound } = makeConfig({ usageAccounting: accounting, sessionId: "sess-1" })
+      const { config: mismatched } = makeConfig({
+        usageAccounting: accounting,
+        sessionId: "sess-2",
+      })
 
-    emitUsage(bound, usage(1), recorder, undefined, undefined) // establish sess-1 binding
-    emitUsage(bound, usage(Number.NaN), recorder, undefined, undefined)
-    emitUsage(mismatched, usage(1), recorder, undefined, undefined)
+      emitUsage(bound, usage(1), recorder, undefined, undefined) // establish sess-1 binding
+      emitUsage(bound, usage(Number.NaN), recorder, undefined, undefined)
+      emitUsage(mismatched, usage(1), recorder, undefined, undefined)
+      emitUsage(bound, usage(Number.NaN), recorder, undefined, undefined)
+      emitUsage(mismatched, usage(1), recorder, undefined, undefined)
 
-    const counters = metrics.snapshot().counters
-    expect(counters["quanta.usage.rejected"]).toBe(2)
-    expect(counters["quanta.usage.rejected.non_finite"]).toBe(1)
-    expect(counters["quanta.usage.rejected.session_mismatch"]).toBe(1)
-    expect(__rejectedWarnedFor(accounting, "non-finite")).toBe(true)
-    expect(__rejectedWarnedFor(accounting, "session-mismatch")).toBe(true)
-    expect(__rejectedWarnedReasonCountFor(accounting)).toBe(2)
-  })
+      const counters = metrics.snapshot().counters
+      expect(counters["quanta.usage.rejected"]).toBe(4)
+      expect(counters["quanta.usage.rejected.non_finite"]).toBe(2)
+      expect(counters["quanta.usage.rejected.session_mismatch"]).toBe(2)
+      expect(__rejectedWarnedFor(accounting, "non-finite")).toBe(true)
+      expect(__rejectedWarnedFor(accounting, "session-mismatch")).toBe(true)
+      expect(__rejectedWarnedReasonCountFor(accounting)).toBe(2)
+      expect(warnings).toHaveLength(2)
+      expect(warnings.filter((message) => message.includes("(non-finite)"))).toHaveLength(1)
+      expect(warnings.filter((message) => message.includes("(session-mismatch)"))).toHaveLength(1)
+    }))
 
-  test("the warn latch is per-instance: a fresh authority warns again", () => {
-    // Two authorities, one poisoned event each ⇒ two warns would have fired.
-    // A module-global latch would collapse them to one. The latch itself is
-    // observable through __rejectedWarnedFor (a WeakSet keyed by instance).
-    const a = createUsageAccounting()
-    const b = createUsageAccounting()
-    const { config: ca } = makeConfig({ usageAccounting: a })
-    const { config: cb } = makeConfig({ usageAccounting: b })
-    emitUsage(ca, usage(Number.NaN), undefined, undefined, undefined)
-    emitUsage(cb, usage(Number.NaN), undefined, undefined, undefined)
-    expect(__rejectedWarnedFor(a, "non-finite")).toBe(true)
-    expect(__rejectedWarnedFor(b, "non-finite")).toBe(true)
-  })
+  test("without a recorder, independent authorities still warn once each", () =>
+    withWarnings((warnings) => {
+      const a = createUsageAccounting()
+      const b = createUsageAccounting()
+      const { config: ca } = makeConfig({ usageAccounting: a })
+      const { config: cb } = makeConfig({ usageAccounting: b })
+      emitUsage(ca, usage(Number.NaN), undefined, undefined, undefined)
+      emitUsage(cb, usage(Number.NaN), undefined, undefined, undefined)
+      emitUsage(ca, usage(Number.NaN), undefined, undefined, undefined)
+      emitUsage(cb, usage(Number.NaN), undefined, undefined, undefined)
+      expect(__rejectedWarnedFor(a, "non-finite")).toBe(true)
+      expect(__rejectedWarnedFor(b, "non-finite")).toBe(true)
+      expect(warnings).toHaveLength(2)
+      expect(warnings.every((message) => message.includes("(non-finite)"))).toBe(true)
+    }))
+
+  test("a replayed callId is a real duplicate and adds no rejection metric or warning", () =>
+    withWarnings((warnings) => {
+      const first = createUsageAccounting()
+      const { config: initial } = makeConfig({ usageAccounting: first })
+      emit(initial, usage(100))
+      const callId = first.recent(1)[0]?.callId
+      if (callId === undefined) throw new Error("the control call was not admitted")
+      const restored = createUsageAccounting()
+      expect(restored.hydrate(first.serialize())).toBe(true)
+      const metrics = new Metrics()
+      const recorder = new AgentRecorder(metrics)
+      const { config: replay } = makeConfig({ usageAccounting: restored })
+      // Only the id mint is controlled: record() and the restored dedup book are REAL.
+      const mint = spyOn(restored, "mintCallId").mockReturnValue(callId)
+      const record = spyOn(restored, "record")
+      try {
+        emitUsage(replay, usage(100), recorder, undefined, undefined)
+        emitUsage(replay, usage(100), recorder, undefined, undefined)
+        expect(record.mock.results.map((result) => result.value)).toEqual([
+          { admitted: false, reason: "duplicate" },
+          { admitted: false, reason: "duplicate" },
+        ])
+        expect(restored.snapshot().calls).toBe(1)
+        expect(restored.snapshot().freshInputTokens).toBe(100)
+        expect(
+          Object.keys(metrics.snapshot().counters).filter((name) =>
+            name.startsWith("quanta.usage.rejected"),
+          ),
+        ).toEqual([])
+        expect(warnings).toEqual([])
+        expect(__rejectedWarnedReasonCountFor(restored)).toBe(0)
+      } finally {
+        record.mockRestore()
+        mint.mockRestore()
+      }
+    }))
 })
 
 describe("parent and child share one accountant without colliding", () => {
