@@ -544,6 +544,15 @@
     },
     "tests/unit/apps/bench/terminal/tb-2-0-retirement.test.ts#ADAPTERS": {
       "walked": 15
+    },
+    "tests/unit/_arch/repo-path-anchor-ratchet.test.ts#TESTS": {
+      "walked": 3501
+    },
+    "tests/unit/_arch/repo-path-anchor-ratchet.test.ts#TOOLS": {
+      "walked": 115
+    },
+    "tests/unit/_arch/repo-path-anchor-ratchet.test.ts#SRC": {
+      "walked": 299
     }
   }
 }

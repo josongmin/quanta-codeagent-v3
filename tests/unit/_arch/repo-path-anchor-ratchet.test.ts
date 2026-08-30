@@ -54,6 +54,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
+import { assertScanPopulation } from "../_shared/scan-population"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 
@@ -493,8 +494,19 @@ const filesUnder = (root: string, suffix: string): readonly string[] => {
   return out.sort()
 }
 
+const POPULATION_FILES = new Map(
+  POPULATIONS.map((population) => {
+    const files = filesUnder(population.root, population.suffix)
+    assertScanPopulation(files, join(REPO_ROOT, population.root), {
+      collectable: (name) => name.endsWith(population.suffix),
+      id: `tests/unit/_arch/repo-path-anchor-ratchet.test.ts#${population.root.toUpperCase()}`,
+    })
+    return [population.root, files] as const
+  }),
+)
+
 const scannedFiles = (): readonly string[] =>
-  POPULATIONS.flatMap((p) => filesUnder(p.root, p.suffix)).sort()
+  POPULATIONS.flatMap((population) => POPULATION_FILES.get(population.root) ?? []).sort()
 
 /**
  * Sites admitted deliberately. Empty today — the nine found on 2026-08-25/26
