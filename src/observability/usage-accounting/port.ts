@@ -88,6 +88,12 @@ export interface UsageRecordResult {
   readonly reason?: UsageRejection
 }
 
+export interface UsageHydrateOptions {
+  /** Bind restored books to the currently running session. Retained records
+   *  are rebound too, so the next serialization remains internally valid. */
+  readonly rebindSessionId?: string | undefined
+}
+
 export interface UsageAccountingPort {
   /**
    * A6 — mint the next call id. The SEQUENCE lives inside the authority (and
@@ -99,15 +105,16 @@ export interface UsageAccountingPort {
   /** Admit one priced, attributed model call. Idempotent on `callId`. */
   record(record: UsageRecord): UsageRecordResult
   /**
-   * A6 — the durable codec pair. `serialize()` captures aggregates, buckets,
-   * the retained log, the FULL dedup memory, the mint sequence and the session
-   * binding; `hydrate()` restores them into this instance. Corrupt or
-   * wrong-shape input leaves the books EMPTY, sets `continuityLost`, and
-   * returns `false` so the caller can warn — a resume proceeds, but never
-   * silently as an exact $0.
+   * A6/P2 — the durable codec pair. `serialize()` captures aggregates,
+   * buckets, the retained log, the FULL exact dedup memory, the mint high-water
+   * and the session binding. Authority-minted IDs use exact intervals;
+   * arbitrary caller IDs remain a sparse exact set. `hydrate()` accepts legacy
+   * V1 and current V2. Corrupt or wrong-shape input leaves the books EMPTY,
+   * sets `continuityLost`, and returns `false` so the caller can warn — a
+   * resume proceeds, but never silently as an exact $0.
    */
   serialize(): string
-  hydrate(json: string): boolean
+  hydrate(json: string, options?: UsageHydrateOptions): boolean
   /** Current totals. Cheap enough to call per render. */
   snapshot(): UsageAccountingSnapshot
   /** Most recent records, newest last, bounded by the retention limit. For

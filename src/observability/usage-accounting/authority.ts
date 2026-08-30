@@ -7,6 +7,16 @@
  * path that derives a total by iterating the log — that is what let eviction
  * shrink a bill and un-trip a ceiling in the accountant this replaces.
  */
+
+import {
+  addSequenceToRanges,
+  type DurableUsageBucket,
+  decodeDurableUsage,
+  encodeMintedCallId,
+  type MintedSequenceRange,
+  parseMintedCallId,
+  sequenceInRanges,
+} from "./durable-codec"
 import type {
   UsageAccountingPort,
   UsageAccountingSnapshot,
@@ -25,16 +35,7 @@ export interface UsageAccountingOpts {
 }
 
 /** A mutable counter set. One per aggregation key. */
-interface Bucket {
-  totalUsd: number
-  estimatedUsd: number
-  unpricedCalls: number
-  freshInputTokens: number
-  cacheReadTokens: number
-  cacheWriteTokens: number
-  outputTokens: number
-  calls: number
-}
+type Bucket = DurableUsageBucket
 
 const emptyBucket = (): Bucket => ({
   totalUsd: 0,
@@ -90,68 +91,6 @@ const frozenMap = (map: Map<string, Bucket>): ReadonlyMap<string, UsageAggregate
   return out
 }
 
-/** A6 — parse + shape-gate one serialized v1 payload. `undefined` ⇒ corrupt
- *  (the caller clears the books and marks continuity lost). Module-level so
- *  the factory closure stays under the god-function ceiling. */
-const parseDurableUsageV1 = (
-  json: string,
-):
-  | {
-      boundSessionId: string | undefined
-      seq: number
-      seen: unknown[]
-      retained: unknown[]
-      total: Bucket
-      byModel: Array<[string, Bucket]>
-      byAgent: Array<[string, Bucket]>
-      byKind: Record<"root" | "subagent", Bucket>
-    }
-  | undefined => {
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(json)
-  } catch {
-    return undefined
-  }
-  const d = parsed as {
-    v?: number
-    boundSessionId?: string
-    seq?: number
-    seen?: unknown
-    retained?: unknown
-    total?: Bucket
-    byModel?: Array<[string, Bucket]>
-    byAgent?: Array<[string, Bucket]>
-    byKind?: Record<"root" | "subagent", Bucket>
-  }
-  const sane =
-    d !== null &&
-    typeof d === "object" &&
-    d.v === 1 &&
-    Array.isArray(d.seen) &&
-    Array.isArray(d.retained) &&
-    typeof d.total === "object" &&
-    d.total !== null &&
-    Number.isFinite(d.total.totalUsd) &&
-    typeof d.seq === "number" &&
-    Number.isFinite(d.seq) &&
-    Array.isArray(d.byModel) &&
-    Array.isArray(d.byAgent) &&
-    typeof d.byKind === "object" &&
-    d.byKind !== null
-  if (!sane) return undefined
-  return {
-    boundSessionId: d.boundSessionId,
-    seq: d.seq as number,
-    seen: d.seen as unknown[],
-    retained: d.retained as unknown[],
-    total: d.total as Bucket,
-    byModel: d.byModel as Array<[string, Bucket]>,
-    byAgent: d.byAgent as Array<[string, Bucket]>,
-    byKind: d.byKind as Record<"root" | "subagent", Bucket>,
-  }
-}
-
 /** Every token bucket that participates in a total must be a real number. */
 const isFinitelyCounted = (u: NormalizedUsage, c: UsageCost): boolean =>
   Number.isFinite(u.freshInputTokens) &&
@@ -167,15 +106,15 @@ export const createUsageAccounting = (opts: UsageAccountingOpts = {}): UsageAcco
   let byModel = new Map<string, Bucket>()
   let byAgent = new Map<string, Bucket>()
   let boundSessionId: string | undefined
-  // A6 — the mint sequence and the continuity flag, both part of the durable
-  // state. The sequence is authority-owned so a resume CONTINUES it; an
-  // external counter restarting at 1 would collide with restored ids.
-  let seq = 0
+  // P2 — normal authority IDs occupy one private monotonic namespace. Their
+  // admitted sequences compress into exact intervals; only arbitrary caller
+  // IDs pay the sparse-set cost.
+  let mintNamespace: string = crypto.randomUUID()
+  let mintHighWater = 0
+  let mintedRanges: MintedSequenceRange[] = []
+  let externalSeen = new Set<string>()
   let continuityLost = false
   let byKind: Record<"root" | "subagent", Bucket> = { root: emptyBucket(), subagent: emptyBucket() }
-  // Admitted call ids. Grows with the session; a call id is small and the
-  // alternative — forgetting one — is a double-billed retry.
-  let seen = new Set<string>()
   let retained: UsageRecord[] = []
 
   const clearBooks = (): void => {
@@ -184,19 +123,36 @@ export const createUsageAccounting = (opts: UsageAccountingOpts = {}): UsageAcco
     byAgent = new Map()
     boundSessionId = undefined
     byKind = { root: emptyBucket(), subagent: emptyBucket() }
-    seen = new Set()
+    mintNamespace = crypto.randomUUID()
+    mintHighWater = 0
+    mintedRanges = []
+    externalSeen = new Set()
     retained = []
-    seq = 0
   }
 
   return {
-    mintCallId(provenance): string {
-      seq += 1
-      return `${provenance.sessionId}:${provenance.agentId}:${seq}`
+    mintCallId(_provenance): string {
+      // Provenance remains on the record itself. The opaque private namespace
+      // lets durable dedup prove which IDs are compressible without parsing
+      // caller-controlled session/agent strings.
+      do {
+        if (mintHighWater === Number.MAX_SAFE_INTEGER) {
+          throw new Error("usage-accounting call-id sequence exhausted")
+        }
+        mintHighWater += 1
+      } while (externalSeen.has(encodeMintedCallId(mintNamespace, mintHighWater)))
+      return encodeMintedCallId(mintNamespace, mintHighWater)
     },
 
     record(record: UsageRecord): UsageRecordResult {
-      if (seen.has(record.callId)) return { admitted: false, reason: "duplicate" }
+      const mintedSequence = parseMintedCallId(record.callId, mintNamespace)
+      const isMinted = mintedSequence !== undefined && mintedSequence <= mintHighWater
+      if (
+        externalSeen.has(record.callId) ||
+        (isMinted && sequenceInRanges(mintedRanges, mintedSequence))
+      ) {
+        return { admitted: false, reason: "duplicate" }
+      }
       if (!isFinitelyCounted(record.usage, record.cost)) {
         return { admitted: false, reason: "non-finite" }
       }
@@ -207,7 +163,8 @@ export const createUsageAccounting = (opts: UsageAccountingOpts = {}): UsageAcco
       } else if (record.provenance.sessionId !== boundSessionId) {
         return { admitted: false, reason: "session-mismatch" }
       }
-      seen.add(record.callId)
+      if (isMinted) addSequenceToRanges(mintedRanges, mintedSequence)
+      else externalSeen.add(record.callId)
 
       const { usage, cost, provenance } = record
       add(total, usage, cost)
@@ -240,14 +197,18 @@ export const createUsageAccounting = (opts: UsageAccountingOpts = {}): UsageAcco
     },
 
     serialize(): string {
-      // v1. The FULL dedup memory rides along — rebuilding `seen` from the
-      // retained slice would re-bill exactly the callIds old enough to have
-      // been evicted from it.
+      // V2. Authority-minted monotonic IDs serialize as exact intervals;
+      // arbitrary caller IDs remain a sparse exact set. Neither is rebuilt
+      // from the bounded retained log.
       return JSON.stringify({
-        v: 1,
+        v: 2,
         boundSessionId,
-        seq,
-        seen: [...seen],
+        mint: {
+          namespace: mintNamespace,
+          highWater: mintHighWater,
+          admitted: mintedRanges,
+        },
+        externalSeen: [...externalSeen],
         retained,
         total,
         byModel: [...byModel.entries()],
@@ -256,25 +217,44 @@ export const createUsageAccounting = (opts: UsageAccountingOpts = {}): UsageAcco
       })
     },
 
-    hydrate(json: string): boolean {
+    hydrate(json: string, options = {}): boolean {
       // Corrupt or wrong-shape state: the books stay EMPTY and SAY so — a
       // resume proceeds, but never silently as an exact $0.
-      const d = parseDurableUsageV1(json)
+      const d = decodeDurableUsage(json)
       if (d === undefined) {
         clearBooks()
         continuityLost = true
         return false
       }
-      boundSessionId = d.boundSessionId
-      seq = Math.max(0, Math.floor(d.seq))
-      seen = new Set(d.seen.filter((x): x is string => typeof x === "string"))
-      retained = (d.retained as UsageRecord[]).slice(-maxRetained)
-      total = { ...emptyBucket(), ...d.total }
-      byModel = new Map(d.byModel.map(([k, b]) => [k, { ...emptyBucket(), ...b }]))
-      byAgent = new Map(d.byAgent.map(([k, b]) => [k, { ...emptyBucket(), ...b }]))
+      const reboundSessionId = options.rebindSessionId ?? d.boundSessionId
+      boundSessionId = reboundSessionId
+      if (d.version === 2) {
+        mintNamespace = d.mint.namespace
+        mintHighWater = d.mint.highWater
+        mintedRanges = d.mint.admitted.map(([start, end]) => [start, end])
+        externalSeen = new Set(d.externalSeen)
+      } else {
+        // V1 had no authenticated mint namespace, so every restored ID stays
+        // in the exact sparse set. New V2 mints start in a fresh namespace.
+        mintNamespace = crypto.randomUUID()
+        mintHighWater = 0
+        mintedRanges = []
+        externalSeen = new Set(d.seen)
+      }
+      retained = d.retained.slice(-maxRetained).map((record) =>
+        options.rebindSessionId === undefined
+          ? record
+          : {
+              ...record,
+              provenance: { ...record.provenance, sessionId: options.rebindSessionId },
+            },
+      )
+      total = { ...d.total }
+      byModel = new Map(d.byModel.map(([key, bucket]) => [key, { ...bucket }]))
+      byAgent = new Map(d.byAgent.map(([key, bucket]) => [key, { ...bucket }]))
       byKind = {
-        root: { ...emptyBucket(), ...d.byKind.root },
-        subagent: { ...emptyBucket(), ...d.byKind.subagent },
+        root: { ...d.byKind.root },
+        subagent: { ...d.byKind.subagent },
       }
       continuityLost = false
       return true

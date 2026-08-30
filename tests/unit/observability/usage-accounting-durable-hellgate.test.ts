@@ -39,6 +39,30 @@ const record = (acct: UsageAccountingPort, callId: string, inputTokens = 1_000_0
   })
 }
 
+const mutateSerialized = (
+  acct: UsageAccountingPort,
+  mutate: (durable: Record<string, unknown>) => void,
+): string => {
+  const durable = JSON.parse(acct.serialize()) as Record<string, unknown>
+  mutate(durable)
+  return JSON.stringify(durable)
+}
+
+const serializeAsLegacyV1 = (acct: UsageAccountingPort, seq: number): string => {
+  const snapshot = acct.snapshot()
+  return JSON.stringify({
+    v: 1,
+    boundSessionId: snapshot.boundSessionId,
+    seq,
+    seen: acct.recent().map((entry) => entry.callId),
+    retained: acct.recent(),
+    total: snapshot,
+    byModel: [...snapshot.byModel.entries()],
+    byAgent: [...snapshot.byAgent.entries()],
+    byKind: snapshot.byKind,
+  })
+}
+
 describe("A6 — serialize → fresh authority → hydrate", () => {
   test("totals, buckets and the binding survive the round trip", () => {
     const a = createUsageAccounting()
@@ -95,7 +119,205 @@ describe("A6 — serialize → fresh authority → hydrate", () => {
     expect(b.snapshot().continuityLost).toBe(false)
   })
 
+  test("nested bucket poison is rejected, clears prior books, and never throws", () => {
+    const source = createUsageAccounting()
+    record(source, source.mintCallId(PROV))
+    const poisoned = mutateSerialized(source, (durable) => {
+      ;(durable.total as Record<string, unknown>).freshInputTokens = "poison"
+    })
+
+    const target = createUsageAccounting()
+    record(target, target.mintCallId(PROV))
+    expect(() => target.hydrate(poisoned)).not.toThrow()
+    expect(target.hydrate(poisoned)).toBe(false)
+    expect(target.snapshot()).toMatchObject({
+      calls: 0,
+      totalUsd: 0,
+      retained: 0,
+      boundSessionId: undefined,
+      continuityLost: true,
+    })
+  })
+
+  test("malformed map entries and exact-set members are rejected without throwing", () => {
+    const source = createUsageAccounting()
+    record(source, source.mintCallId(PROV))
+    const malformedMap = mutateSerialized(source, (durable) => {
+      durable.byModel = [42]
+    })
+    const malformedSeen = mutateSerialized(source, (durable) => {
+      durable.externalSeen = [42]
+    })
+    const malformedRanges = mutateSerialized(source, (durable) => {
+      ;(durable.mint as Record<string, unknown>).admitted = [[2, 1]]
+    })
+    const duplicateRepresentation = mutateSerialized(source, (durable) => {
+      const retained = durable.retained as Array<{ callId: string }>
+      durable.externalSeen = [retained[0]?.callId]
+    })
+
+    for (const payload of [malformedMap, malformedSeen, malformedRanges, duplicateRepresentation]) {
+      const target = createUsageAccounting()
+      expect(() => target.hydrate(payload)).not.toThrow()
+      expect(target.hydrate(payload)).toBe(false)
+      expect(target.snapshot().continuityLost).toBe(true)
+    }
+  })
+
+  test("a poisoned retained record and inconsistent aggregate are rejected", () => {
+    const source = createUsageAccounting()
+    record(source, source.mintCallId(PROV))
+    const poisonedRecord = mutateSerialized(source, (durable) => {
+      const retained = durable.retained as Array<Record<string, unknown>>
+      const usage = retained[0]?.usage as Record<string, unknown>
+      usage.freshInputTokens = "poison"
+    })
+    const inconsistentTotal = mutateSerialized(source, (durable) => {
+      ;(durable.total as Record<string, unknown>).calls = 2
+    })
+
+    for (const payload of [poisonedRecord, inconsistentTotal]) {
+      const target = createUsageAccounting()
+      expect(target.hydrate(payload)).toBe(false)
+      expect(target.snapshot()).toMatchObject({ calls: 0, continuityLost: true })
+    }
+  })
+
+  test("valid legacy V1 state migrates and can rebind to the live runtime session", () => {
+    const source = createUsageAccounting()
+    record(source, source.mintCallId(PROV))
+    const target = createUsageAccounting()
+
+    expect(target.hydrate(serializeAsLegacyV1(source, 1), { rebindSessionId: "sess-live" })).toBe(
+      true,
+    )
+    expect(target.snapshot().boundSessionId).toBe("sess-live")
+    const liveProvenance = { ...PROV, sessionId: "sess-live" }
+    const usage = normalizeUsage({
+      model: "claude-sonnet-4-6",
+      inputTokens: 1_000_000,
+      outputTokens: 0,
+    })
+    expect(
+      target.record({
+        callId: target.mintCallId(liveProvenance),
+        at: 2,
+        usage,
+        cost: priceUsage(usage, MODEL_RATE_CARD, { pricingVersion: PRICING_VERSION }),
+        provenance: liveProvenance,
+      }),
+    ).toEqual({ admitted: true })
+    expect(target.snapshot().calls).toBe(2)
+
+    // Rebound state remains valid durable V1, including its retained records.
+    const resumed = createUsageAccounting()
+    expect(resumed.hydrate(target.serialize())).toBe(true)
+    expect(resumed.snapshot()).toMatchObject({ calls: 2, boundSessionId: "sess-live" })
+  })
+
   test("a healthy authority reports continuityLost:false", () => {
     expect(createUsageAccounting().snapshot().continuityLost).toBe(false)
   })
+
+  test("V2 preserves exact gaps, merges out-of-order admissions, and skips external collisions", () => {
+    const source = createUsageAccounting({ maxRetainedRecords: 1 })
+    const first = source.mintCallId(PROV)
+    const second = source.mintCallId(PROV)
+    const third = source.mintCallId(PROV)
+    expect(record(source, third)).toEqual({ admitted: true })
+    expect(record(source, first)).toEqual({ admitted: true })
+    expect(
+      (JSON.parse(source.serialize()) as { mint: { admitted: number[][] } }).mint.admitted,
+    ).toEqual([
+      [1, 1],
+      [3, 3],
+    ])
+    expect(record(source, second)).toEqual({ admitted: true })
+    expect(
+      (JSON.parse(source.serialize()) as { mint: { admitted: number[][] } }).mint.admitted,
+    ).toEqual([[1, 3]])
+
+    const collisionSource = createUsageAccounting({ maxRetainedRecords: 1 })
+    const mintedFirst = collisionSource.mintCallId(PROV)
+    const prefix = mintedFirst.slice(0, mintedFirst.lastIndexOf(":") + 1)
+    const externalFuture = `${prefix}3`
+    expect(record(collisionSource, externalFuture)).toEqual({ admitted: true })
+    const mintedSecond = collisionSource.mintCallId(PROV)
+    const mintedAfterCollision = collisionSource.mintCallId(PROV)
+    expect(mintedSecond.endsWith(":2")).toBe(true)
+    expect(mintedAfterCollision.endsWith(":4")).toBe(true)
+    expect(record(collisionSource, mintedSecond)).toEqual({ admitted: true })
+    expect(record(collisionSource, mintedAfterCollision)).toEqual({ admitted: true })
+
+    const restored = createUsageAccounting()
+    expect(restored.hydrate(collisionSource.serialize())).toBe(true)
+    for (const duplicate of [externalFuture, mintedSecond, mintedAfterCollision]) {
+      expect(record(restored, duplicate)).toEqual({ admitted: false, reason: "duplicate" })
+    }
+  })
+
+  test(
+    "P2: one million authority-minted calls persist as one exact interval",
+    () => {
+      const calls = 1_000_000
+      const source = createUsageAccounting({ maxRetainedRecords: 1 })
+      const usage = normalizeUsage({
+        model: "claude-sonnet-4-6",
+        inputTokens: 0,
+        outputTokens: 0,
+      })
+      const cost = priceUsage(usage, MODEL_RATE_CARD, { pricingVersion: PRICING_VERSION })
+      let first = ""
+      let last = ""
+      let admittedCalls = 0
+      const buildStarted = performance.now()
+      for (let index = 0; index < calls; index += 1) {
+        const callId = source.mintCallId(PROV)
+        if (index === 0) first = callId
+        last = callId
+        if (source.record({ callId, at: index, usage, cost, provenance: PROV }).admitted) {
+          admittedCalls += 1
+        }
+      }
+      const buildMs = performance.now() - buildStarted
+      expect(admittedCalls).toBe(calls)
+      expect(source.record({ callId: first, at: 0, usage, cost, provenance: PROV })).toEqual({
+        admitted: false,
+        reason: "duplicate",
+      })
+
+      const externalCallId = "external:caller-owned:id"
+      expect(
+        source.record({ callId: externalCallId, at: calls, usage, cost, provenance: PROV }),
+      ).toEqual({ admitted: true })
+      const blob = source.serialize()
+      const durable = JSON.parse(blob) as {
+        v: number
+        mint: { admitted: Array<[number, number]> }
+        externalSeen: string[]
+      }
+      expect(durable.v).toBe(2)
+      expect(durable.mint.admitted).toEqual([[1, calls]])
+      expect(durable.externalSeen).toEqual([externalCallId])
+      expect(blob.length).toBeLessThan(10_000)
+      expect(buildMs).toBeLessThan(15_000)
+
+      const restored = createUsageAccounting({ maxRetainedRecords: 1 })
+      const hydrateStarted = performance.now()
+      expect(restored.hydrate(blob)).toBe(true)
+      const hydrateMs = performance.now() - hydrateStarted
+      expect(hydrateMs).toBeLessThan(2_000)
+      expect(restored.snapshot().calls).toBe(calls + 1)
+      for (const duplicate of [first, last, externalCallId]) {
+        expect(
+          restored.record({ callId: duplicate, at: calls + 1, usage, cost, provenance: PROV }),
+        ).toEqual({ admitted: false, reason: "duplicate" })
+      }
+      const fresh = restored.mintCallId(PROV)
+      expect(
+        restored.record({ callId: fresh, at: calls + 2, usage, cost, provenance: PROV }),
+      ).toEqual({ admitted: true })
+    },
+    { timeout: 30_000 },
+  )
 })

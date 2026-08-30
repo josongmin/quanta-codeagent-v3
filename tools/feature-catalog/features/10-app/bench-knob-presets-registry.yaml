@@ -32,6 +32,7 @@ purpose: |
   `QUANTA_BENCH_*` env vars override preset values.
 evidence:
   code:
+    - src/runner/knobs/derive.ts
     - src/runner/knobs/presets.ts
     - src/runner/knobs/knobs/index.ts
     - src/config/knob-inventory.ts

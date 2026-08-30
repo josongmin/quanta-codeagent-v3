@@ -33,17 +33,25 @@ purpose: |
   shows "prior totals lost", and `QUANTA_USAGE_ACCOUNTING_V2=off` renders an
   explicit "accounting off" box. Subagent spend appears as a "By agent:"
   split — the authority covers root+children, which the old counter feed
-  never saw.
+  never saw. Durable V2 stores normal authority-minted call ids as exact
+  monotonic intervals and arbitrary external ids in a sparse exact set; the
+  one-million-call rail keeps dedup exact while the blob stays sublinear.
 evidence:
   code:
     - src/apps/cli/cost-panel.ts
     - src/apps/cli/slash-commands.ts
+    - src/observability/usage-accounting/durable-codec.ts
   adrs: []
   tests:
     unit:
       - tests/unit/cli/cost-panel.test.ts
       - tests/unit/slash-commands.test.ts
-    integration: []
+      - tests/unit/observability/usage-accounting-durable-hellgate.test.ts
+    integration:
+      - tests/integration/cli-cost-accounting-e2e.test.ts
+      - tests/integration/usage-accounting-resume-e2e.test.ts
+      - tests/integration/readout-http-route-web-daemon-e2e.test.ts
+      - tests/e2e-pty/cli-usage-accounting-resume-e2e.test.ts
     contract: []
 knobs:
   - name: QUANTA_COST_PANEL
