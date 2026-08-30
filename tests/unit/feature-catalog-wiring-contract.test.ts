@@ -126,6 +126,83 @@ const withWiring = features.filter(
     f.feature.wiring !== undefined,
 )
 
+type WiredFeature = (typeof withWiring)[number]["feature"]
+type LabeledSite = { readonly where: string; readonly ref: SiteRef }
+
+const wiringSites = (feature: WiredFeature): readonly LabeledSite[] => {
+  const wiring = feature.wiring
+  const sites: LabeledSite[] = [
+    ...wiring.producer.map((ref) => ({ where: "producer[]", ref })),
+    ...wiring.consumer.map((ref) => ({ where: "consumer[]", ref })),
+  ]
+  for (const [surface, contract] of Object.entries(wiring.contracts)) {
+    if (contract.producer)
+      sites.push({ where: `contracts.${surface}.producer`, ref: contract.producer })
+    if (contract.consumer)
+      sites.push({ where: `contracts.${surface}.consumer`, ref: contract.consumer })
+  }
+  return sites
+}
+
+const unresolvedWiringSites = async (): Promise<readonly string[]> => {
+  const offenders: string[] = []
+  for (const { feature } of withWiring) {
+    for (const { where, ref } of wiringSites(feature)) {
+      const resolution = await resolveSite(ref)
+      if (!resolution.ok) offenders.push(`${feature.id} @ ${where}: ${resolution.reason}`)
+    }
+  }
+  return offenders
+}
+
+const wireStatusOffenders = (feature: WiredFeature): readonly string[] => {
+  const { wiring, id } = feature
+  const producers = wiring.producer.length
+  const consumers = wiring.consumer.length
+  if (wiring.wireStatus === "wired") {
+    return [
+      ...(producers === 0 ? [`${id}: wireStatus=wired but NO producer`] : []),
+      ...(consumers === 0 ? [`${id}: wireStatus=wired but NO consumer`] : []),
+    ]
+  }
+  if (wiring.wireStatus === "seam-only") {
+    return [
+      ...(producers === 0 ? [`${id}: wireStatus=seam-only but NO producer`] : []),
+      ...(consumers > 0
+        ? [
+            `${id}: wireStatus=seam-only but declares ${consumers} consumer(s) — a wired consumer contradicts "seam-only"`,
+          ]
+        : []),
+    ]
+  }
+  return producers > 0 || consumers > 0
+    ? [`${id}: wireStatus=forward-contract must have NO producer/consumer`]
+    : []
+}
+
+const fullContractOffenders = async (feature: WiredFeature): Promise<readonly string[]> => {
+  const offenders: string[] = []
+  for (const [surface, contract] of Object.entries(feature.wiring.contracts)) {
+    if (contract.status !== "full") continue
+    const label = `${feature.id}.${surface}`
+    if (!contract.producer) {
+      offenders.push(`${label}: status=full but no producer SiteRef`)
+      continue
+    }
+    if (!contract.consumer) {
+      offenders.push(`${label}: status=full but no consumer SiteRef`)
+      continue
+    }
+    const [producer, consumer] = await Promise.all([
+      resolveSite(contract.producer),
+      resolveSite(contract.consumer),
+    ])
+    if (!producer.ok) offenders.push(`${label} producer: ${producer.reason}`)
+    if (!consumer.ok) offenders.push(`${label} consumer: ${consumer.reason}`)
+  }
+  return offenders
+}
+
 // ---------------------------------------------------------------------------
 // Schema-shape sanity (pure zod — no fs).
 // ---------------------------------------------------------------------------
@@ -186,22 +263,7 @@ describe("wiring — contract ratchet (static symbol resolution)", () => {
   // {module, exportedSymbol}. This is the anti-drift core: a rename/delete of
   // the producer/consumer symbol fires here.
   test("WC-10: every SiteRef in every wiring block resolves to a real exported symbol", async () => {
-    const offenders: string[] = []
-    for (const { feature: f } of withWiring) {
-      const w = f.wiring
-      const sites: Array<{ where: string; ref: SiteRef }> = [
-        ...w.producer.map((ref) => ({ where: "producer[]", ref })),
-        ...w.consumer.map((ref) => ({ where: "consumer[]", ref })),
-      ]
-      for (const [surface, c] of Object.entries(w.contracts)) {
-        if (c.producer) sites.push({ where: `contracts.${surface}.producer`, ref: c.producer })
-        if (c.consumer) sites.push({ where: `contracts.${surface}.consumer`, ref: c.consumer })
-      }
-      for (const { where, ref } of sites) {
-        const res = await resolveSite(ref)
-        if (!res.ok) offenders.push(`${f.id} @ ${where}: ${res.reason}`)
-      }
-    }
+    const offenders = await unresolvedWiringSites()
     expect(offenders).toEqual([])
   })
 
@@ -212,28 +274,7 @@ describe("wiring — contract ratchet (static symbol resolution)", () => {
   //                      (a wired consumer would contradict "seam-only").
   //   forward-contract ⇒ MUST declare NO producer and NO consumer (placeholder).
   test("WC-11: wireStatus is honest about producer/consumer presence", async () => {
-    const offenders: string[] = []
-    for (const { feature: f } of withWiring) {
-      const w = f.wiring
-      const nProd = w.producer.length
-      const nCons = w.consumer.length
-      if (w.wireStatus === "wired") {
-        if (nProd === 0) offenders.push(`${f.id}: wireStatus=wired but NO producer`)
-        if (nCons === 0) offenders.push(`${f.id}: wireStatus=wired but NO consumer`)
-      } else if (w.wireStatus === "seam-only") {
-        if (nProd === 0) offenders.push(`${f.id}: wireStatus=seam-only but NO producer`)
-        if (nCons > 0) {
-          offenders.push(
-            `${f.id}: wireStatus=seam-only but declares ${nCons} consumer(s) — a wired consumer contradicts "seam-only"`,
-          )
-        }
-      } else {
-        // forward-contract
-        if (nProd > 0 || nCons > 0) {
-          offenders.push(`${f.id}: wireStatus=forward-contract must have NO producer/consumer`)
-        }
-      }
-    }
+    const offenders = withWiring.flatMap(({ feature }) => wireStatusOffenders(feature))
     expect(offenders).toEqual([])
   })
 
@@ -243,23 +284,10 @@ describe("wiring — contract ratchet (static symbol resolution)", () => {
   // contract without naming the two ends and having them exist. `partial`
   // requires a producer only (the seam is real but the render/consume is weak).
   test("WC-12: a surface contract status=full needs a resolving producer AND consumer", async () => {
-    const offenders: string[] = []
-    for (const { feature: f } of withWiring) {
-      for (const [surface, c] of Object.entries(f.wiring.contracts)) {
-        if (c.status !== "full") continue
-        if (!c.producer) {
-          offenders.push(`${f.id}.${surface}: status=full but no producer SiteRef`)
-          continue
-        }
-        if (!c.consumer) {
-          offenders.push(`${f.id}.${surface}: status=full but no consumer SiteRef`)
-          continue
-        }
-        const [pr, cr] = await Promise.all([resolveSite(c.producer), resolveSite(c.consumer)])
-        if (!pr.ok) offenders.push(`${f.id}.${surface} producer: ${pr.reason}`)
-        if (!cr.ok) offenders.push(`${f.id}.${surface} consumer: ${cr.reason}`)
-      }
-    }
+    const groups = await Promise.all(
+      withWiring.map(({ feature }) => fullContractOffenders(feature)),
+    )
+    const offenders = groups.flat()
     expect(offenders).toEqual([])
   })
 
