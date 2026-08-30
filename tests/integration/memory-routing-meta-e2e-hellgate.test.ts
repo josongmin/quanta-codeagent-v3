@@ -206,7 +206,8 @@ describe("§10.6 recall weighting — live recallContext seam (env-gated)", () =
   test("routing ON but no meta on rows ⇒ identical order to routing OFF", async () => {
     // Gate on, but the stored memories have NO routing meta ⇒ zero boost ⇒ the
     // recall block is identical to the gate-off run (nothing to weight).
-    const store = freshStore()
+    const onStore = freshStore()
+    const offStore = freshStore()
     const baseFields = {
       kind: "fact" as const,
       text: "the build front door is `bun test`",
@@ -214,13 +215,15 @@ describe("§10.6 recall weighting — live recallContext seam (env-gated)", () =
       createdAt: NOW,
       importance: 0.5,
     }
-    await store.save({ ...baseFields, id: "a-x" })
-    await store.save({ ...baseFields, id: "z-y" })
+    for (const store of [onStore, offStore]) {
+      await store.save({ ...baseFields, id: "a-x" })
+      await store.save({ ...baseFields, id: "z-y" })
+    }
     const placedOn: string[] = []
     const placedOff: string[] = []
     await recallContext(
       {
-        store,
+        store: onStore,
         now,
         onPlaced: (p) => {
           p.forEach((x) => {
@@ -233,7 +236,7 @@ describe("§10.6 recall weighting — live recallContext seam (env-gated)", () =
     )
     await recallContext(
       {
-        store,
+        store: offStore,
         now,
         onPlaced: (p) => {
           p.forEach((x) => {
@@ -245,7 +248,8 @@ describe("§10.6 recall weighting — live recallContext seam (env-gated)", () =
       { limit: 5 },
     )
     expect(placedOn).toEqual(placedOff)
-    store.close()
+    onStore.close()
+    offStore.close()
   })
 })
 
