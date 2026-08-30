@@ -82,6 +82,20 @@ const ALLOW: StreamEvent[] = text("<block>no</block>")
 const block = (reason: string): StreamEvent[] =>
   text(`<block>yes</block><reason>${reason}</reason>`)
 
+const classifierResponse = (
+  system: string,
+  transcript: string,
+  secretPath: string,
+): StreamEvent[] => {
+  if (system.includes(CIRCUMVENTION_TAXONOMY_LINE)) {
+    return block("circumvention advisory present")
+  }
+  if (transcript.includes("write") && transcript.includes(secretPath)) {
+    return block("seed deny of the protected path")
+  }
+  return ALLOW
+}
+
 /**
  * One LLM double for BOTH the main agent turns (positional model script) AND the
  * classifier round-trips. The classifier verdict is deterministically derived
@@ -114,18 +128,7 @@ class CircumventionLLM implements LLMPort {
       const txt = transcriptText(input)
       this.classifierPrompts.push(sys)
       // (1) Circumvention advisory reached the prompt ⇒ block. Load-bearing.
-      if (sys.includes(CIRCUMVENTION_TAXONOMY_LINE)) {
-        for (const e of block("circumvention advisory present")) yield e
-        return
-      }
-      // (2) Seed: the first-party `write` to SECRET is soft-denied so the
-      // tracker records the effect a later tool-switch must be caught against.
-      if (txt.includes("write") && txt.includes(this.secretPath)) {
-        for (const e of block("seed deny of the protected path")) yield e
-        return
-      }
-      // (3) Otherwise allow — a plain bash write to a NON-protected path.
-      for (const e of ALLOW) yield e
+      for (const event of classifierResponse(sys, txt, this.secretPath)) yield event
       return
     }
     const next = this.modelScript.shift() ?? text("done")
