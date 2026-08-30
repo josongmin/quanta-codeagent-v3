@@ -5,7 +5,7 @@
       "walked": 12
     },
     "slice-boundary:agent": {
-      "walked": 725
+      "walked": 727
     },
     "slice-boundary:artifact": {
       "walked": 3
@@ -35,7 +35,7 @@
       "walked": 23
     },
     "slice-boundary:host": {
-      "walked": 77
+      "walked": 78
     },
     "slice-boundary:integrations": {
       "walked": 13
@@ -65,10 +65,10 @@
       "walked": 17
     },
     "slice-boundary:objective": {
-      "walked": 32
+      "walked": 33
     },
     "slice-boundary:observability": {
-      "walked": 82
+      "walked": 90
     },
     "slice-boundary:patch": {
       "walked": 8
@@ -101,7 +101,7 @@
       "walked": 11
     },
     "slice-boundary:runner": {
-      "walked": 321
+      "walked": 322
     },
     "slice-boundary:runtime": {
       "walked": 86
@@ -119,7 +119,7 @@
       "walked": 24
     },
     "slice-boundary:shared": {
-      "walked": 64
+      "walked": 65
     },
     "slice-boundary:side-agent": {
       "walked": 6
@@ -152,70 +152,108 @@
       "walked": 10
     },
     "src/agent/prompt-graph/role-drift.ratchet.test.ts#src": {
-      "walked": 3343
+      "walked": 3357
     },
     "src/apps/bench/benchmark-suite.test.ts#BENCH": {
       "walked": 213
     },
     "src/tool/terminal-surface.test.ts#SRC-NON-APPS": {
-      "walked": 2704
+      "walked": 2705
     },
     "tests/adversarial/aug02-feeder-deferred-status.test.ts#SRC": {
-      "walked": 3343
+      "walked": 3357
     },
     "tests/integration/cli-attention-navigation.test.ts#root": {
-      "walked": 3343
+      "walked": 3357
     },
     "tests/meta/no-test-js-artifacts-hellgate.test.ts#TESTS": {
-      "walked": 3500
+      "walked": 3501
     },
-    "tests/unit/integrations/github/slice-fence-static-hellgate-r3.test.ts#SLICE-DIR": {
-      "walked": 12
+    "tests/unit/_arch/capability-literal-ratchet.test.ts#TESTS": {
+      "walked": 3578
+    },
+    "tests/unit/_arch/comment-scanner-burndown-ratchet.test.ts#SRC": {
+      "walked": 3656,
+      "matched": 5
+    },
+    "tests/unit/_arch/comment-scanner-burndown-ratchet.test.ts#TESTS": {
+      "walked": 3578,
+      "matched": 2
+    },
+    "tests/unit/_arch/comment-scanner-burndown-ratchet.test.ts#TOOLS": {
+      "walked": 115,
+      "matched": 2
     },
     "tests/unit/_arch/cost-pricing-callsite-ratchet.test.ts#SRC-ROOT": {
-      "walked": 3650
+      "walked": 3651
+    },
+    "tests/unit/_arch/gate-manifest-workflow-parity.test.ts#WORKFLOWS": {
+      "walked": 6
+    },
+    "tests/unit/_arch/gated-test-scope-ratchet.test.ts#REPO-TEST-FILES": {
+      "walked": 3900
+    },
+    "tests/unit/_arch/no-leftover-backup-files.test.ts#src": {
+      "walked": 3748
+    },
+    "tests/unit/_arch/no-leftover-backup-files.test.ts#tests": {
+      "walked": 3721
+    },
+    "tests/unit/_arch/no-leftover-backup-files.test.ts#tools": {
+      "walked": 1373
     },
     "tests/unit/_arch/real-quanta-home-escape-ratchet.test.ts#SRC": {
       "walked": 299
     },
     "tests/unit/_arch/real-quanta-home-escape-ratchet.test.ts#TESTS": {
-      "walked": 3500
+      "walked": 3501
+    },
+    "tests/unit/_arch/repo-index-hygiene.test.ts#INDEX": {
+      "walked": 14290
+    },
+    "tests/unit/_arch/repo-path-anchor-ratchet.test.ts#SRC": {
+      "walked": 299
+    },
+    "tests/unit/_arch/repo-path-anchor-ratchet.test.ts#TESTS": {
+      "walked": 3501
+    },
+    "tests/unit/_arch/repo-path-anchor-ratchet.test.ts#TOOLS": {
+      "walked": 115
     },
     "tests/unit/_arch/self-skip-reports-as-pass-ratchet.test.ts#SRC": {
       "walked": 299
     },
     "tests/unit/_arch/self-skip-reports-as-pass-ratchet.test.ts#TESTS": {
-      "walked": 3500
-    },
-    "tests/unit/_arch/gated-test-scope-ratchet.test.ts#REPO-TEST-FILES": {
-      "walked": 3892
-    },
-    "tests/unit/_arch/no-leftover-backup-files.test.ts#src": {
-      "walked": 3747
-    },
-    "tests/unit/_arch/no-leftover-backup-files.test.ts#tests": {
-      "walked": 3692
-    },
-    "tests/unit/_arch/no-leftover-backup-files.test.ts#tools": {
-      "walked": 1370
+      "walked": 3501
     },
     "tests/unit/_arch/tool-context-isp-ratchet.test.ts#TOOL-DIR": {
       "walked": 305
     },
+    "tests/unit/_arch/ts-exports-ssot.test.ts#TOOLS": {
+      "walked": 98,
+      "matched": 3
+    },
     "tests/unit/activity/activity-store-constructor-owner-ratchet.test.ts#SRC-DIR": {
-      "walked": 3338
+      "walked": 3352
     },
     "tests/unit/agent-import-cycle.test.ts#src-agent-toplevel": {
-      "walked": 157
+      "walked": 159
     },
     "tests/unit/apps/bench/batch-sdk-parity.test.ts#APP-DRIVER-DIR": {
       "walked": 5
     },
     "tests/unit/apps/bench/canonical-report-envelope.test.ts#src": {
-      "walked": 3343
+      "walked": 3357
     },
     "tests/unit/apps/bench/canonical-report-envelope.test.ts#tools": {
-      "walked": 95
+      "walked": 98
+    },
+    "tests/unit/apps/bench/promax/promax-bootstrap-phase-reachability.test.ts#SRC": {
+      "walked": 3656,
+      "matched": 2
+    },
+    "tests/unit/apps/bench/promax/promax-port-contract-unsuppressed.test.ts#PROFILES": {
+      "walked": 20
     },
     "tests/unit/apps/bench/shared-verify-select-adapters.test.ts#APP-DRIVER-DIR": {
       "walked": 5
@@ -223,17 +261,29 @@
     "tests/unit/apps/bench/shared-verify-select-adapters.test.ts#DRIVER-DIR": {
       "walked": 16
     },
+    "tests/unit/apps/bench/terminal/tb-2-0-retirement.test.ts#ADAPTERS": {
+      "walked": 15
+    },
+    "tests/unit/apps/bench/terminal/tb-2-0-retirement.test.ts#SRC": {
+      "walked": 3744
+    },
+    "tests/unit/apps/bench/terminal/tb-2-0-retirement.test.ts#TOOLS": {
+      "walked": 1368
+    },
     "tests/unit/apps/cli/repl-host-slim-hellgate.test.ts#FACTORIES-DIR": {
       "walked": 11
     },
     "tests/unit/apps/cli/repl-orphan-resolution-hellgate.test.ts#src-apps-cli-repl": {
-      "walked": 53
+      "walked": 54
     },
     "tests/unit/apps/cli/session-cmd-shim-removal-hellgate.test.ts#srcRoot": {
-      "walked": 3642
+      "walked": 3656
     },
     "tests/unit/audit-ratchet/error-message-canonical-hellgate.test.ts#SRC-DIR": {
-      "walked": 3642
+      "walked": 3656
+    },
+    "tests/unit/cli/cli-feature-gates-drift-hellgate.test.ts#SRC": {
+      "walked": 3656
     },
     "tests/unit/cli/cli-knob-readsite-domain-hellgate.test.ts#cliRoot": {
       "walked": 352
@@ -250,14 +300,14 @@
     "tests/unit/config-knob-inventory-leaf-hellgate.test.ts#SCHEMA": {
       "walked": 11
     },
-    "tests/unit/deny-reason-authority-ratchet-hellgate.test.ts#SRC-AGENT": {
-      "walked": 726
-    },
-    "tests/unit/god-code-ratchet.test.ts#SRC": {
-      "walked": 3351
+    "tests/unit/dangerous-gate-strict-ratchet-hellgate.test.ts#SRC": {
+      "walked": 3656
     },
     "tests/unit/dataset-family-profile-ssot.test.ts#BENCH": {
       "walked": 213
+    },
+    "tests/unit/deny-reason-authority-ratchet-hellgate.test.ts#SRC-AGENT": {
+      "walked": 728
     },
     "tests/unit/edit-fresh-hash-mutating-tool-completeness-ratchet.test.ts#TOOL": {
       "walked": 306
@@ -265,29 +315,41 @@
     "tests/unit/eval-no-sketchy-code.test.ts#EVAL": {
       "walked": 63
     },
+    "tests/unit/feature-catalog-reachability.test.ts#FEATURE-YAMLS": {
+      "walked": 1068
+    },
+    "tests/unit/gate-vocabulary-ratchet-hellgate.test.ts#SRC": {
+      "walked": 3460
+    },
+    "tests/unit/god-code-ratchet.test.ts#SRC": {
+      "walked": 3352
+    },
+    "tests/unit/host/bootstrap-host-extraction-hellgate.test.ts#CLI-REPL": {
+      "walked": 113
+    },
+    "tests/unit/host/bootstrap-host-extraction-hellgate.test.ts#HOST-BOOTSTRAP": {
+      "walked": 11
+    },
     "tests/unit/identity-mid-session-rebuilder-owner-wire-hellgate.test.ts#dir": {
       "walked": 6
+    },
+    "tests/unit/integrations/github/slice-fence-static-hellgate-r3.test.ts#SLICE-DIR": {
+      "walked": 12
     },
     "tests/unit/kernel/knob-schema-ssot-lock-ratchet.test.ts#src-runner-knobs-knobs": {
       "walked": 67
     },
+    "tests/unit/knob-registry-completeness-ratchet-hellgate.test.ts#SRC": {
+      "walked": 3357
+    },
+    "tests/unit/lint-debt-ratchet-reach.test.ts#SRC": {
+      "walked": 3748
+    },
+    "tests/unit/lint-debt-ratchet-reach.test.ts#TESTS": {
+      "walked": 3721
+    },
     "tests/unit/manifest-codex-compat-hellgate.test.ts#SYSTEM-SKILLS": {
       "walked": 22
-    },
-    "tests/unit/no-raw-process-env-knob-ratchet-hellgate.test.ts#SRC": {
-      "walked": 3351
-    },
-    "tests/unit/no-timebomb-auth-fixtures-hellgate.test.ts#TESTS": {
-      "walked": 3662
-    },
-    "tests/unit/observability-audit-ratchet.test.ts#AGENT-STORES": {
-      "walked": 4
-    },
-    "tests/unit/observability-audit-ratchet.test.ts#TOOL": {
-      "walked": 306
-    },
-    "tests/unit/observability-audit-ratchet.test.ts#SUBAGENT": {
-      "walked": 24
     },
     "tests/unit/memory-fence-no-llm-import-hellgate.test.ts#MEMORY-ROOT": {
       "walked": 49
@@ -296,7 +358,13 @@
       "walked": 49
     },
     "tests/unit/memory/cross-session-inject-removed-ratchet.test.ts#SRC-ROOT": {
-      "walked": 3642
+      "walked": 3656
+    },
+    "tests/unit/no-benchmark-overfit-steer-ratchet.test.ts#BATCH-DRIVER-LANES": {
+      "walked": 14
+    },
+    "tests/unit/no-benchmark-overfit-steer-ratchet.test.ts#BENCH-DRIVER-LANES": {
+      "walked": 5
     },
     "tests/unit/no-per-framework-heuristic-ratchet.test.ts#agent/repro-test": {
       "walked": 9
@@ -307,162 +375,8 @@
     "tests/unit/no-per-framework-heuristic-ratchet.test.ts#runner/batch/eval": {
       "walked": 164
     },
-    "tests/unit/objective/constructor-owner-ratchet.test.ts#SRC-DIR": {
-      "walked": 3338
-    },
-    "tests/unit/objective/authority-boundary-ratchet.test.ts#SRC": {
-      "walked": 3352
-    },
-    "tests/unit/permission/single-pep-fence-hellgate.test.ts#SRC": {
-      "walked": 3343,
-      "matched": 6
-    },
-    "tests/unit/permission/posture/e3-direct-writer-ratchet.test.ts#SRC": {
-      "walked": 3356
-    },
-    "tests/unit/quanta-home-root-ssot-ratchet-hellgate.test.ts#SRC": {
-      "walked": 3338
-    },
-    "tests/unit/repair-shadow-js-ratchet.test.ts#REPAIR-DIR": {
-      "walked": 14
-    },
-    "tests/unit/retrieval-bridge-deleted-ratchet.test.ts#SRC-ROOT": {
-      "walked": 3642
-    },
-    "tests/unit/retrieval/budget-probe-hellgate.test.ts#/Users/songmin/quanta-codeagent-v3/src/agent": {
-      "walked": 834
-    },
-    "tests/unit/retrieval/budget-probe-hellgate.test.ts#/Users/songmin/quanta-codeagent-v3/src/apps": {
-      "walked": 754
-    },
-    "tests/unit/retrieval/budget-probe-hellgate.test.ts#/Users/songmin/quanta-codeagent-v3/src/runner": {
-      "walked": 341
-    },
-    "tests/unit/runner/closure-repair-driver-parity.test.ts#DRIVER-DIR": {
-      "walked": 14
-    },
-    "tests/unit/runner/knobs/cross-slice-cycle.test.ts#PER-KNOB-DIR": {
-      "walked": 68
-    },
-    "tests/unit/runner/knobs/knobs-batch-layering.test.ts#KNOBS-DIR": {
-      "walked": 79
-    },
-    "tests/unit/runner/knobs/knobs-import-bundle.test.ts#PER-KNOB-DIR": {
-      "walked": 68
-    },
-    "tests/unit/runner/session-authorities-task-registry-identity.test.ts#SRC-DIR": {
-      "walked": 3338
-    },
-    "tests/unit/runner/verify-select-driver-parity.test.ts#APP-DRIVER-DIR": {
-      "walked": 5
-    },
-    "tests/unit/runner/verify-select-driver-parity.test.ts#DRIVER-DIR": {
-      "walked": 16
-    },
-    "tests/unit/session-turn-driver-thin-surface-hellgate.test.ts#session-loop-slice": {
-      "walked": 14
-    },
-    "tests/unit/side-agent-stopall-wiring-guard.test.ts#SRC": {
-      "walked": 3656
-    },
-    "tests/unit/silent-catch-24h-ratchet.test.ts#dir": {
-      "walked": 27
-    },
-    "tests/unit/skill/runtime/f4-discovery-owner-ratchet.test.ts#WEB-DAEMON-DIR": {
-      "walked": 52
-    },
-    "tests/unit/surrogate-safe-truncation-guard.test.ts#SRC-DIR": {
-      "walked": 3637
-    },
-    "tests/unit/surface-coupling-ratchet.test.ts#APPS-DIR": {
-      "walked": 653
-    },
-    "tests/unit/terminal-defaults-ratchet.test.ts#SRC-DIR": {
-      "walked": 3642
-    },
-    "tests/unit/tool-no-throw-contract-guard.test.ts#TOOL-DIR": {
-      "walked": 305
-    },
-    "tests/unit/gate-vocabulary-ratchet-hellgate.test.ts#SRC": {
-      "walked": 3459
-    },
-    "tests/unit/test-quality-ratchet-hellgate.test.ts#SRC": {
-      "walked": 299
-    },
-    "tests/unit/test-quality-ratchet-hellgate.test.ts#TESTS": {
-      "walked": 3499
-    },
-    "tests/unit/test-fixtures-do-not-leak-tmp.test.ts#SRC": {
-      "walked": 3655
-    },
-    "tests/unit/test-fixtures-do-not-leak-tmp.test.ts#TESTS": {
-      "walked": 3577
-    },
-    "tests/unit/test-fixtures-do-not-leak-tmp.test.ts#TOOLS": {
-      "walked": 115
-    },
-    "tests/unit/wire-batch-mode-focus-fork-otel-hellgate.test.ts#loopDir": {
-      "walked": 27
-    },
-    "tests/unit/runtime/worktree-checkout-progress-retired.test.ts#SRC": {
-      "walked": 3356
-    },
-    "tests/unit/runtime/single-pid-kill-ban-hellgate.test.ts#SRC": {
-      "walked": 3651
-    },
-    "tests/unit/runagent-callsite-authority-fence-hellgate.test.ts#SRC": {
-      "walked": 3352
-    },
-    "tests/unit/dangerous-gate-strict-ratchet-hellgate.test.ts#SRC": {
-      "walked": 3656
-    },
-    "tests/unit/observability/vocabulary-migration.test.ts#SRC": {
-      "walked": 3656
-    },
-    "tests/unit/host/bootstrap-host-extraction-hellgate.test.ts#CLI-REPL": {
-      "walked": 113
-    },
-    "tests/unit/host/bootstrap-host-extraction-hellgate.test.ts#HOST-BOOTSTRAP": {
-      "walked": 11
-    },
-    "tests/unit/knob-registry-completeness-ratchet-hellgate.test.ts#SRC": {
-      "walked": 3357
-    },
-    "tests/unit/src-no-sketchy-code.test.ts#SRC": {
-      "walked": 3357
-    },
-    "tests/unit/lint-debt-ratchet-reach.test.ts#SRC": {
-      "walked": 3748
-    },
-    "tests/unit/lint-debt-ratchet-reach.test.ts#TESTS": {
-      "walked": 3721
-    },
-    "tests/unit/feature-catalog-reachability.test.ts#FEATURE-YAMLS": {
-      "walked": 1068
-    },
-    "tests/unit/no-benchmark-overfit-steer-ratchet.test.ts#BATCH-DRIVER-LANES": {
-      "walked": 14
-    },
-    "tests/unit/no-benchmark-overfit-steer-ratchet.test.ts#BENCH-DRIVER-LANES": {
-      "walked": 5
-    },
-    "tests/unit/slice-boundary-config-parity.test.ts#UNIT-ENTRYPOINTS": {
-      "walked": 1722
-    },
-    "tests/unit/runtime-config-no-dead-knob-ratchet.test.ts#SRC": {
-      "walked": 3352
-    },
-    "tests/unit/_arch/comment-scanner-burndown-ratchet.test.ts#SRC": {
-      "walked": 3656,
-      "matched": 5
-    },
-    "tests/unit/_arch/comment-scanner-burndown-ratchet.test.ts#TESTS": {
-      "walked": 3578,
-      "matched": 2
-    },
-    "tests/unit/_arch/comment-scanner-burndown-ratchet.test.ts#TOOLS": {
-      "walked": 115,
-      "matched": 2
+    "tests/unit/no-raw-nul-bytes-hellgate.test.ts#DOCS": {
+      "walked": 2745
     },
     "tests/unit/no-raw-nul-bytes-hellgate.test.ts#SRC": {
       "walked": 3680
@@ -470,56 +384,26 @@
     "tests/unit/no-raw-nul-bytes-hellgate.test.ts#TESTS": {
       "walked": 3590
     },
-    "tests/unit/no-raw-nul-bytes-hellgate.test.ts#DOCS": {
-      "walked": 2745
-    },
-    "tests/unit/orphan-orchestrator-ratchet.test.ts#SRC": {
+    "tests/unit/no-raw-process-env-knob-ratchet-hellgate.test.ts#SRC": {
       "walked": 3352
     },
-    "tests/unit/orphan-orchestrator-ratchet.test.ts#SDK": {
-      "walked": 23
+    "tests/unit/no-timebomb-auth-fixtures-hellgate.test.ts#TESTS": {
+      "walked": 3663
     },
-    "tests/unit/orphan-orchestrator-ratchet.test.ts#TESTS": {
-      "walked": 3578
+    "tests/unit/objective/authority-boundary-ratchet.test.ts#SRC": {
+      "walked": 3352
     },
-    "tests/unit/orphan-orchestrator-ratchet.test.ts#DRIVER": {
-      "walked": 14
+    "tests/unit/objective/constructor-owner-ratchet.test.ts#SRC-DIR": {
+      "walked": 3352
     },
-    "tests/unit/runtime/exec-cluster-spawn-env-scrub-ban-hellgate.test.ts#SRC": {
-      "walked": 3357,
-      "matched": 3
+    "tests/unit/observability-audit-ratchet.test.ts#AGENT-STORES": {
+      "walked": 4
     },
-    "tests/unit/_arch/gate-manifest-workflow-parity.test.ts#WORKFLOWS": {
-      "walked": 6
+    "tests/unit/observability-audit-ratchet.test.ts#SUBAGENT": {
+      "walked": 24
     },
-    "tests/unit/_arch/capability-literal-ratchet.test.ts#TESTS": {
-      "walked": 3578
-    },
-    "tests/unit/_arch/repo-index-hygiene.test.ts#INDEX": {
-      "walked": 14290
-    },
-    "tests/unit/_arch/ts-exports-ssot.test.ts#TOOLS": {
-      "walked": 98,
-      "matched": 3
-    },
-    "tests/unit/cli/cli-feature-gates-drift-hellgate.test.ts#SRC": {
-      "walked": 3656
-    },
-    "tests/unit/realtime/voice-session-hellgate.test.ts#SRC": {
-      "walked": 3656
-    },
-    "tests/unit/realtime/voice-session-hellgate.test.ts#VOICE-SESSION": {
-      "walked": 12
-    },
-    "tests/unit/tool-surface-manifest-hellgate.test.ts#FEATURE-YAMLS": {
-      "walked": 1068
-    },
-    "tests/unit/apps/bench/promax/promax-bootstrap-phase-reachability.test.ts#SRC": {
-      "walked": 3656,
-      "matched": 2
-    },
-    "tests/unit/apps/bench/promax/promax-port-contract-unsuppressed.test.ts#PROFILES": {
-      "walked": 20
+    "tests/unit/observability-audit-ratchet.test.ts#TOOL": {
+      "walked": 306
     },
     "tests/unit/observability/new-slice-metrics-hellgate.test.ts#AGENT/ERROR-ROUTING": {
       "walked": 7
@@ -536,23 +420,139 @@
     "tests/unit/observability/new-slice-metrics-hellgate.test.ts#SRC": {
       "walked": 3357
     },
-    "tests/unit/apps/bench/terminal/tb-2-0-retirement.test.ts#SRC": {
-      "walked": 3744
+    "tests/unit/observability/vocabulary-migration.test.ts#SRC": {
+      "walked": 3656
     },
-    "tests/unit/apps/bench/terminal/tb-2-0-retirement.test.ts#TOOLS": {
-      "walked": 1368
+    "tests/unit/orphan-orchestrator-ratchet.test.ts#DRIVER": {
+      "walked": 14
     },
-    "tests/unit/apps/bench/terminal/tb-2-0-retirement.test.ts#ADAPTERS": {
-      "walked": 15
+    "tests/unit/orphan-orchestrator-ratchet.test.ts#SDK": {
+      "walked": 23
     },
-    "tests/unit/_arch/repo-path-anchor-ratchet.test.ts#TESTS": {
-      "walked": 3501
+    "tests/unit/orphan-orchestrator-ratchet.test.ts#SRC": {
+      "walked": 3352
     },
-    "tests/unit/_arch/repo-path-anchor-ratchet.test.ts#TOOLS": {
+    "tests/unit/orphan-orchestrator-ratchet.test.ts#TESTS": {
+      "walked": 3578
+    },
+    "tests/unit/permission/posture/e3-direct-writer-ratchet.test.ts#SRC": {
+      "walked": 3357
+    },
+    "tests/unit/permission/single-pep-fence-hellgate.test.ts#SRC": {
+      "walked": 3357,
+      "matched": 6
+    },
+    "tests/unit/quanta-home-root-ssot-ratchet-hellgate.test.ts#SRC": {
+      "walked": 3352
+    },
+    "tests/unit/realtime/voice-session-hellgate.test.ts#SRC": {
+      "walked": 3656
+    },
+    "tests/unit/realtime/voice-session-hellgate.test.ts#VOICE-SESSION": {
+      "walked": 12
+    },
+    "tests/unit/repair-shadow-js-ratchet.test.ts#REPAIR-DIR": {
+      "walked": 14
+    },
+    "tests/unit/retrieval-bridge-deleted-ratchet.test.ts#SRC-ROOT": {
+      "walked": 3656
+    },
+    "tests/unit/retrieval/budget-probe-hellgate.test.ts#/Users/songmin/quanta-codeagent-v3/src/agent": {
+      "walked": 836
+    },
+    "tests/unit/retrieval/budget-probe-hellgate.test.ts#/Users/songmin/quanta-codeagent-v3/src/apps": {
+      "walked": 754
+    },
+    "tests/unit/retrieval/budget-probe-hellgate.test.ts#/Users/songmin/quanta-codeagent-v3/src/runner": {
+      "walked": 342
+    },
+    "tests/unit/runagent-callsite-authority-fence-hellgate.test.ts#SRC": {
+      "walked": 3352
+    },
+    "tests/unit/runner/closure-repair-driver-parity.test.ts#DRIVER-DIR": {
+      "walked": 14
+    },
+    "tests/unit/runner/knobs/cross-slice-cycle.test.ts#PER-KNOB-DIR": {
+      "walked": 68
+    },
+    "tests/unit/runner/knobs/knobs-batch-layering.test.ts#KNOBS-DIR": {
+      "walked": 79
+    },
+    "tests/unit/runner/knobs/knobs-import-bundle.test.ts#PER-KNOB-DIR": {
+      "walked": 68
+    },
+    "tests/unit/runner/session-authorities-task-registry-identity.test.ts#SRC-DIR": {
+      "walked": 3352
+    },
+    "tests/unit/runner/verify-select-driver-parity.test.ts#APP-DRIVER-DIR": {
+      "walked": 5
+    },
+    "tests/unit/runner/verify-select-driver-parity.test.ts#DRIVER-DIR": {
+      "walked": 16
+    },
+    "tests/unit/runtime-config-no-dead-knob-ratchet.test.ts#SRC": {
+      "walked": 3352
+    },
+    "tests/unit/runtime/exec-cluster-spawn-env-scrub-ban-hellgate.test.ts#SRC": {
+      "walked": 3357,
+      "matched": 3
+    },
+    "tests/unit/runtime/single-pid-kill-ban-hellgate.test.ts#SRC": {
+      "walked": 3651
+    },
+    "tests/unit/runtime/worktree-checkout-progress-retired.test.ts#SRC": {
+      "walked": 3357
+    },
+    "tests/unit/session-turn-driver-thin-surface-hellgate.test.ts#session-loop-slice": {
+      "walked": 14
+    },
+    "tests/unit/side-agent-stopall-wiring-guard.test.ts#SRC": {
+      "walked": 3656
+    },
+    "tests/unit/silent-catch-24h-ratchet.test.ts#dir": {
+      "walked": 27
+    },
+    "tests/unit/skill/runtime/f4-discovery-owner-ratchet.test.ts#WEB-DAEMON-DIR": {
+      "walked": 53
+    },
+    "tests/unit/slice-boundary-config-parity.test.ts#UNIT-ENTRYPOINTS": {
+      "walked": 1722
+    },
+    "tests/unit/src-no-sketchy-code.test.ts#SRC": {
+      "walked": 3357
+    },
+    "tests/unit/surface-coupling-ratchet.test.ts#APPS-DIR": {
+      "walked": 653
+    },
+    "tests/unit/surrogate-safe-truncation-guard.test.ts#SRC-DIR": {
+      "walked": 3651
+    },
+    "tests/unit/terminal-defaults-ratchet.test.ts#SRC-DIR": {
+      "walked": 3656
+    },
+    "tests/unit/test-fixtures-do-not-leak-tmp.test.ts#SRC": {
+      "walked": 3656
+    },
+    "tests/unit/test-fixtures-do-not-leak-tmp.test.ts#TESTS": {
+      "walked": 3578
+    },
+    "tests/unit/test-fixtures-do-not-leak-tmp.test.ts#TOOLS": {
       "walked": 115
     },
-    "tests/unit/_arch/repo-path-anchor-ratchet.test.ts#SRC": {
+    "tests/unit/test-quality-ratchet-hellgate.test.ts#SRC": {
       "walked": 299
+    },
+    "tests/unit/test-quality-ratchet-hellgate.test.ts#TESTS": {
+      "walked": 3500
+    },
+    "tests/unit/tool-no-throw-contract-guard.test.ts#TOOL-DIR": {
+      "walked": 305
+    },
+    "tests/unit/tool-surface-manifest-hellgate.test.ts#FEATURE-YAMLS": {
+      "walked": 1068
+    },
+    "tests/unit/wire-batch-mode-focus-fork-otel-hellgate.test.ts#loopDir": {
+      "walked": 27
     }
   }
 }
