@@ -204,6 +204,46 @@ export interface BuildPtyEnvArgs {
   readonly inheritEnv: boolean
 }
 
+const copyDefinedEnv = (env: Record<string, string | undefined>): Record<string, string> => {
+  const copied: Record<string, string> = {}
+  for (const [name, value] of Object.entries(env)) {
+    if (value !== undefined) copied[name] = value
+  }
+  return copied
+}
+
+const overlayDeclaredEnv = (
+  env: Record<string, string>,
+  declared: Readonly<Record<string, string>> | undefined,
+): Record<string, string> => {
+  if (declared === undefined) return env
+  for (const [name, value] of Object.entries(declared)) env[name] = value
+  return env
+}
+
+const allowlistedParentEnv = (
+  parentEnv: Record<string, string | undefined>,
+): Record<string, string> => {
+  const allowed: Record<string, string> = {}
+  for (const name of DEFAULT_ENV_ALLOWLIST) {
+    const value = parentEnv[name]
+    if (value !== undefined) allowed[name] = value
+  }
+  return allowed
+}
+
+const overlayAllowlistedDeclaredEnv = (
+  env: Record<string, string>,
+  declared: Readonly<Record<string, string>> | undefined,
+): Record<string, string> => {
+  if (declared === undefined) return env
+  const allowed = new Set(DEFAULT_ENV_ALLOWLIST)
+  for (const [name, value] of Object.entries(declared)) {
+    if (allowed.has(name)) env[name] = value
+  }
+  return env
+}
+
 /**
  * D3 — build the PTY child env through the SAME chokepoint as `runShell`.
  *
@@ -222,34 +262,16 @@ export interface BuildPtyEnvArgs {
  */
 export const buildPtyEnv = (args: BuildPtyEnvArgs): Record<string, string> => {
   const { parentEnv, declared, inheritEnv } = args
-  const allow = new Set(DEFAULT_ENV_ALLOWLIST)
 
   if (inheritEnv) {
     // Full inherit (escape hatch): copy every defined parent var, then overlay
     // the declared vars unfiltered — byte-identical to the legacy spread.
-    const out: Record<string, string> = {}
-    for (const [k, v] of Object.entries(parentEnv)) {
-      if (v !== undefined) out[k] = v
-    }
-    if (declared !== undefined) {
-      for (const [k, v] of Object.entries(declared)) out[k] = v
-    }
-    return out
+    return overlayDeclaredEnv(copyDefinedEnv(parentEnv), declared)
   }
 
   // Scrubbed (default): only allowlisted names from the parent, then overlay
   // only allowlisted declared names — the same allowlist that scrubbed the base.
-  const out: Record<string, string> = {}
-  for (const name of DEFAULT_ENV_ALLOWLIST) {
-    const v = parentEnv[name]
-    if (v !== undefined) out[name] = v
-  }
-  if (declared !== undefined) {
-    for (const [k, v] of Object.entries(declared)) {
-      if (allow.has(k)) out[k] = v
-    }
-  }
-  return out
+  return overlayAllowlistedDeclaredEnv(allowlistedParentEnv(parentEnv), declared)
 }
 
 /** D1 — whole-tree killer for PTY children. An attached interactive shell
