@@ -60,119 +60,152 @@ const makeFakeTime = () => {
 
 const MAX_MS = 50
 
+type FuzzHarness = {
+  readonly rng: () => number
+  readonly time: ReturnType<typeof makeFakeTime>
+  readonly source: AbortController
+  readonly derived: AbortController
+  readonly router: ReturnType<typeof makeInterruptRouter>
+  readonly abortCount: () => number
+}
+
+type FuzzOracle = {
+  openDepth: number
+  sourceAborted: boolean
+  abortCapturedAt: number | undefined
+  disposed: boolean
+  abortFiredWhileClosed: boolean
+  readonly sections: Array<{ end(): void }>
+}
+
+const makeFuzzHarness = (seed: number): FuzzHarness => {
+  const rng = lcg(seed * 2654435761)
+  const time = makeFakeTime()
+  const source = new AbortController()
+  const derived = new AbortController()
+  let count = 0
+  derived.signal.addEventListener("abort", () => {
+    count++
+  })
+  const router = makeInterruptRouter({
+    source: source.signal,
+    derived,
+    now: time.now,
+    maxMs: MAX_MS,
+    scheduler: time.scheduler,
+  })
+  return { rng, time, source, derived, router, abortCount: () => count }
+}
+
+const makeFuzzOracle = (): FuzzOracle => ({
+  openDepth: 0,
+  sourceAborted: false,
+  abortCapturedAt: undefined,
+  disposed: false,
+  abortFiredWhileClosed: false,
+  sections: [],
+})
+
+const beginFuzzSection = (harness: FuzzHarness, oracle: FuzzOracle): void => {
+  oracle.sections.push(harness.router.seam.begin())
+  oracle.openDepth++
+}
+
+const endFuzzSection = (oracle: FuzzOracle): void => {
+  const handle = oracle.sections.pop()
+  handle?.end()
+  oracle.openDepth = Math.max(0, oracle.openDepth - 1)
+}
+
+const abortFuzzSource = (harness: FuzzHarness, oracle: FuzzOracle): void => {
+  oracle.sourceAborted = true
+  if (oracle.openDepth > 0) {
+    oracle.abortCapturedAt = harness.time.now()
+  } else {
+    oracle.abortFiredWhileClosed = true
+  }
+  harness.source.abort(new Error("esc"))
+}
+
+/** Execute exactly one randomized operation; no branch changes the generated
+ * operation space, and op 5 stays an intentional ordering-jitter no-op. */
+const executeFuzzOperation = (op: number, harness: FuzzHarness, oracle: FuzzOracle): void => {
+  if (op === 0 && !oracle.disposed) {
+    beginFuzzSection(harness, oracle)
+  } else if (op === 1 && oracle.sections.length > 0 && !oracle.disposed) {
+    endFuzzSection(oracle)
+  } else if (op === 2 && !oracle.sourceAborted && !oracle.disposed) {
+    abortFuzzSource(harness, oracle)
+  } else if (op === 3) {
+    harness.time.advance(1 + Math.floor(harness.rng() * (MAX_MS + 20)))
+  } else if (op === 4 && !oracle.disposed) {
+    harness.router.dispose()
+    oracle.disposed = true
+  }
+}
+
+const assertFuzzStepInvariants = (
+  seed: number,
+  step: number,
+  harness: FuzzHarness,
+  oracle: FuzzOracle,
+): void => {
+  if (!oracle.sourceAborted) {
+    if (harness.derived.signal.aborted) {
+      throw new Error(
+        `R2 FALSE-DELIVER seed=${seed} step=${step}: derived aborted with no source abort`,
+      )
+    }
+    expect(harness.derived.signal.aborted).toBe(false)
+  }
+  if (oracle.abortFiredWhileClosed && !oracle.disposed) {
+    if (!harness.derived.signal.aborted) {
+      throw new Error(
+        `R1 SWALLOW (closed) seed=${seed} step=${step}: closed-time abort not delivered`,
+      )
+    }
+    expect(harness.derived.signal.aborted).toBe(true)
+  }
+  if (harness.abortCount() > 1) {
+    throw new Error(`R3 DOUBLE-ABORT seed=${seed} step=${step}: abortCount=${harness.abortCount()}`)
+  }
+}
+
+const assertFuzzTerminalInvariant = (
+  seed: number,
+  harness: FuzzHarness,
+  oracle: FuzzOracle,
+): void => {
+  if (oracle.sourceAborted && !oracle.disposed) {
+    harness.time.advance(MAX_MS + 1)
+    if (!harness.derived.signal.aborted) {
+      throw new Error(
+        `R1 SWALLOW (watchdog) seed=${seed}: source aborted, advanced past cap, still not delivered ` +
+          `(capturedAt=${oracle.abortCapturedAt} closed=${oracle.abortFiredWhileClosed})`,
+      )
+    }
+    expect(harness.derived.signal.aborted).toBe(true)
+  }
+  harness.router.dispose()
+  harness.router.dispose()
+  expect(harness.abortCount()).toBeLessThanOrEqual(1)
+}
+
+const runFuzzSequence = (seed: number): void => {
+  const harness = makeFuzzHarness(seed)
+  const oracle = makeFuzzOracle()
+  const steps = 4 + Math.floor(harness.rng() * 28)
+  for (let step = 0; step < steps; step++) {
+    executeFuzzOperation(Math.floor(harness.rng() * 6), harness, oracle)
+    assertFuzzStepInvariants(seed, step, harness, oracle)
+  }
+  assertFuzzTerminalInvariant(seed, harness, oracle)
+}
+
 describe("interrupt-router property fuzz R2 — never-swallow / never-false-deliver", () => {
   test("R1+R2+R3: ≥500 random begin/end/abort/advance/dispose interleavings", () => {
     const SEQUENCES = 800
-    for (let seed = 1; seed <= SEQUENCES; seed++) {
-      const rng = lcg(seed * 2654435761)
-      const time = makeFakeTime()
-      const source = new AbortController()
-      const derived = new AbortController()
-      let abortCount = 0
-      // Count how many times derived is aborted (must be ≤ 1).
-      derived.signal.addEventListener("abort", () => {
-        abortCount++
-      })
-
-      const router = makeInterruptRouter({
-        source: source.signal,
-        derived,
-        now: time.now,
-        maxMs: MAX_MS,
-        scheduler: time.scheduler,
-      })
-
-      // Oracle state.
-      let openDepth = 0
-      let sourceAborted = false
-      let abortCapturedAt: number | undefined // when an abort was captured while open
-      let disposed = false
-      let abortFiredWhileClosed = false
-
-      // A stack of live section handles (begin returns {end}).
-      const sections: Array<{ end(): void }> = []
-
-      const steps = 4 + Math.floor(rng() * 28)
-      for (let st = 0; st < steps; st++) {
-        const op = Math.floor(rng() * 6)
-        if (op === 0 && !disposed) {
-          // begin()
-          sections.push(router.seam.begin())
-          openDepth++
-        } else if (op === 1 && sections.length > 0 && !disposed) {
-          // end() — close the most-recent open section
-          const handle = sections.pop()
-          handle?.end()
-          openDepth = Math.max(0, openDepth - 1)
-        } else if (op === 2 && !sourceAborted && !disposed) {
-          // abort the source
-          sourceAborted = true
-          if (openDepth > 0) {
-            abortCapturedAt = time.now() // withheld; watchdog starts NOW
-          } else {
-            abortFiredWhileClosed = true // immediate
-          }
-          source.abort(new Error("esc"))
-        } else if (op === 3) {
-          // advance the clock a random amount
-          time.advance(1 + Math.floor(rng() * (MAX_MS + 20)))
-        } else if (op === 4 && !disposed) {
-          // dispose
-          router.dispose()
-          disposed = true
-        }
-        // op===5 ⇒ no-op (pure ordering jitter)
-
-        // --- INVARIANT CHECKS at every step ---
-
-        // R2: if source NEVER aborted, derived is NEVER aborted.
-        if (!sourceAborted) {
-          if (derived.signal.aborted) {
-            throw new Error(
-              `R2 FALSE-DELIVER seed=${seed} step=${st}: derived aborted with no source abort`,
-            )
-          }
-          expect(derived.signal.aborted).toBe(false)
-        }
-
-        // R1: a closed-time abort propagates immediately (unless disposed first).
-        if (abortFiredWhileClosed && !disposed) {
-          if (!derived.signal.aborted) {
-            throw new Error(
-              `R1 SWALLOW (closed) seed=${seed} step=${st}: closed-time abort not delivered`,
-            )
-          }
-          expect(derived.signal.aborted).toBe(true)
-        }
-
-        // R3: derived aborted at most once.
-        if (abortCount > 1) {
-          throw new Error(`R3 DOUBLE-ABORT seed=${seed} step=${st}: abortCount=${abortCount}`)
-        }
-      }
-
-      // --- TERMINAL never-swallow check ---
-      // Drive the system to quiescence: if a section was holding a captured abort
-      // and the router was NOT disposed before delivery, advancing well past the
-      // cap MUST force-deliver it (the watchdog can never hold forever). We close
-      // any still-open sections first OR rely purely on the watchdog cap.
-      if (sourceAborted && !disposed) {
-        // Advance comfortably past any capture-anchored watchdog deadline.
-        time.advance(MAX_MS + 1)
-        if (!derived.signal.aborted) {
-          throw new Error(
-            `R1 SWALLOW (watchdog) seed=${seed}: source aborted, advanced past cap, still not delivered ` +
-              `(capturedAt=${abortCapturedAt} closed=${abortFiredWhileClosed})`,
-          )
-        }
-        expect(derived.signal.aborted).toBe(true)
-      }
-
-      // R3: dispose is idempotent + never double-aborts.
-      router.dispose()
-      router.dispose()
-      expect(abortCount).toBeLessThanOrEqual(1)
-    }
+    for (let seed = 1; seed <= SEQUENCES; seed++) runFuzzSequence(seed)
   })
 
   test("R1 minimal: long abort-free section, THEN abort, must deliver within maxMs of capture", () => {
