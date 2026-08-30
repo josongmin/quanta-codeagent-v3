@@ -327,26 +327,37 @@ describe("in-process family env-AUTHORITY rail (typed config is the only authori
     },
   ]
 
+  const scanFileOffenders = (file: string): string[] => {
+    const base = file.slice(BENCH_DIR.length + 1)
+    if (ALLOWED.has(base)) return []
+    const text = readFileSync(file, "utf8")
+    // Detector 2 (computed key) is scoped to files that NAME the family key,
+    // so unrelated ambient-env writers (the dotenv shim) are not flagged while
+    // the realistic injection — which necessarily names the key to build it —
+    // still is. A key assembled from fragments would evade this scan; that is
+    // exactly why the BEHAVIORAL rails above, not this one, are primary.
+    const offenders: string[] = []
+    const namesFamilyKey = text.includes(FAMILY_KEY)
+    for (const [i, line] of text.split("\n").entries()) {
+      // Skip prose: comment-only lines describing the forbidden pattern.
+      if (/^\s*(\/\/|\*|\/\*)/.test(line)) continue
+      for (const detector of matchingDetectors(line, namesFamilyKey)) {
+        offenders.push(`${base}:${i + 1} [${detector.id}] ${line.trim()}`)
+      }
+    }
+    return offenders
+  }
+
+  const matchingDetectors = (line: string, namesFamilyKey: boolean) =>
+    DETECTORS.filter(
+      (detector) =>
+        (detector.id !== "computed-key-on-ambient-env" || namesFamilyKey) && detector.re.test(line),
+    )
+
   const scanOffenders = (files: readonly string[] = walk(BENCH_DIR)): string[] => {
     const offenders: string[] = []
     for (const file of files) {
-      const base = file.slice(BENCH_DIR.length + 1)
-      if (ALLOWED.has(base)) continue
-      const text = readFileSync(file, "utf8")
-      // Detector 2 (computed key) is scoped to files that NAME the family key,
-      // so unrelated ambient-env writers (the dotenv shim) are not flagged while
-      // the realistic injection — which necessarily names the key to build it —
-      // still is. A key assembled from fragments would evade this scan; that is
-      // exactly why the BEHAVIORAL rails above, not this one, are primary.
-      const namesFamilyKey = text.includes(FAMILY_KEY)
-      for (const [i, line] of text.split("\n").entries()) {
-        // Skip prose: comment-only lines describing the forbidden pattern.
-        if (/^\s*(\/\/|\*|\/\*)/.test(line)) continue
-        for (const d of DETECTORS) {
-          if (d.id === "computed-key-on-ambient-env" && !namesFamilyKey) continue
-          if (d.re.test(line)) offenders.push(`${base}:${i + 1} [${d.id}] ${line.trim()}`)
-        }
-      }
+      offenders.push(...scanFileOffenders(file))
     }
     return offenders
   }
