@@ -3,7 +3,6 @@ import {
   createKernelSessionState,
   isDurableSessionEventLog,
   type KernelDispatchContext,
-  toSessionSnapshotLite,
 } from "@/kernel/session"
 import type { Message } from "@/llm"
 import type { GoalContinuationProvenance, TurnSubmitCommand } from "@/protocol/session"
@@ -23,7 +22,9 @@ import {
 import {
   attachSessionTransport,
   closeSession,
+  currentSessionSnapshot,
   dispatch,
+  refreshSessionSnapshot,
   type SessionEngineDeps,
   type SessionRuntimeState,
 } from "./session/engine"
@@ -158,7 +159,8 @@ export const createRuntimeSession = (args: CreateRuntimeSessionArgs): RuntimeSes
     sessionId,
     dispatch: (command, options) => dispatch(engine, command, options),
     subscribe: (listener) => subscriptions.subscribe(listener),
-    snapshot: async () => toSessionSnapshotLite(box.state),
+    snapshot: async () => currentSessionSnapshot(engine),
+    refreshSnapshot: async () => refreshSessionSnapshot(engine),
     attachSessionTransport: (transport, options) =>
       attachSessionTransport(engine, transport, options),
     close: async () => {

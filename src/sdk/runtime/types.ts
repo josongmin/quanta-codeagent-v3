@@ -70,6 +70,8 @@ export interface RuntimeSession {
   ): Promise<SessionDispatchResult>
   subscribe(listener: (event: SessionEvent) => void): () => void
   snapshot(): Promise<SessionSnapshotLite>
+  /** Publish current out-of-band authority projections without minting an event. */
+  refreshSnapshot(): Promise<void>
   attachSessionTransport(
     transport: SessionTransport,
     options?: { readonly replayWindow?: number },

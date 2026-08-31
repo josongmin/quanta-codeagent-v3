@@ -927,23 +927,20 @@ const createAuthorityDomainLifecycle = (state: AuthorityRuntimeState): Authority
     previousLiveThreadId,
     persistedDomain,
   }) => {
-    if (
-      !isNonEmptyString(liveThreadId) ||
-      (persistedDomain !== null && persistedDomain.state === null)
-    ) {
-      return { ok: false, reason: "invalid" }
-    }
-    const restored = core.restoreThread(liveThreadId, persistedDomain?.state ?? null)
-    if (!restored && !(persistedDomain === null && core.get(liveThreadId) === null)) {
+    if (!isNonEmptyString(liveThreadId)) return { ok: false, reason: "invalid" }
+    // A persisted tombstone is a valid cleared domain with a revision fence.
+    const restoredState = persistedDomain?.state ?? null
+    const restored = core.restoreThread(liveThreadId, restoredState)
+    if (!restored && !(restoredState === null && core.get(liveThreadId) === null)) {
       return { ok: false, reason: "invalid" }
     }
     const revision = Math.max(revisionOf(liveThreadId) + 1, persistedDomain?.revision ?? 0)
     revisions.set(liveThreadId, revision)
-    if (persistedDomain === null) progress.delete(liveThreadId)
+    if (restoredState === null) progress.delete(liveThreadId)
     else {
       progress.set(
         liveThreadId,
-        receiptsForGeneration(core, liveThreadId, persistedDomain.progressReceipts),
+        receiptsForGeneration(core, liveThreadId, persistedDomain?.progressReceipts),
       )
     }
     const attachGeneration = (attachGenerations.get(liveThreadId) ?? 0) + 1
