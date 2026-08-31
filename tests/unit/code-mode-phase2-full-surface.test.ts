@@ -17,6 +17,7 @@
 
 import { expect, test } from "bun:test"
 import {
+  CODE_MODE_DEFAULTS,
   type DispatchOutcome,
   isCellToolIdentifier,
   PHASE1_CELL_TOOLS,
@@ -25,7 +26,10 @@ import {
 
 const LIMITS = {
   memoryBytes: 64 * 1024 * 1024,
-  timeoutMs: 2000,
+  // This suite verifies surface binding, not deadline behavior.  Use the
+  // production cell deadline so VM compilation under a loaded CI worker does
+  // not turn a correct binding assertion into a scheduler-sensitive timeout.
+  timeoutMs: CODE_MODE_DEFAULTS.timeoutMs,
   maxCalls: 64,
   outputCap: 16 * 1024,
 }
