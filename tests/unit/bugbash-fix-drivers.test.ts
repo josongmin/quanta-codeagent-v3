@@ -22,6 +22,12 @@ import { runInstance } from "@/apps/bench/eval"
 import type { Instance } from "@/apps/bench/types"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 
+// This rail proves the production telemetry wire, not a 20-second latency
+// target. Keep the inner agent deadline below Bun's 60s test watchdog while
+// leaving enough room for a loaded host to prepare the sandbox and execute the
+// real production path before the fake edit is sampled.
+const TELEMETRY_RUN_TIMEOUT_MS = 50_000
+
 class EditOnceLLM implements LLMPort {
   async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
     const text = input.messages
@@ -82,7 +88,7 @@ describe("apps (production SDK) bench driver knobs_applied telemetry", () => {
       const result = await runInstance(instance, {
         llm: new EditOnceLLM(),
         maxTurns: 3,
-        timeoutMs: 20_000,
+        timeoutMs: TELEMETRY_RUN_TIMEOUT_MS,
         observe: { dir: observeDir, runId, attempt: 0 },
       })
 
