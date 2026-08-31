@@ -24,6 +24,7 @@
  * exactOptionalPropertyTypes: optional fields are typed `x?: T | undefined`.
  */
 
+import type { BlockerDependencyResolverPort } from "./blocker-dependency"
 import type { ObjectiveIdFactory } from "./identity"
 import type { ObjectiveDomainSnapshot } from "./model"
 import type { ObjectiveActor, ObjectiveMutation } from "./mutations"
@@ -92,6 +93,9 @@ export type CommitRejection =
    *  in flight. The attempt id is host-stamped from `attempts.started`, so there
    *  is nothing to attribute the observation to; the objective itself is live. */
   | "attempt-missing"
+  /** The model named a dependency the injected host registry cannot resolve as
+   * active and owned by this thread. */
+  | "dependency-unresolved"
   /** GOAL-01 — the goal text exceeds the domain ceiling (`MAX_GOAL_CHARS`). */
   | "goal-too-long"
   /** The bound actor may not issue this mutation kind. */
@@ -192,6 +196,8 @@ export interface ObjectiveAuthorityOptions {
   productAutonomousTurnCap?: number | undefined
   gateOn?: boolean | undefined
   confirmationAvailable?: boolean | undefined
+  /** Host-owned registry resolver for model blocker observations. */
+  blockerDependencyResolver?: BlockerDependencyResolverPort | undefined
   /**
    * RFC-03 C2 — restore-at-construction seam. When present, each per-thread
    * {@link ObjectiveDomainSnapshot} is loaded into the fresh authority as part of

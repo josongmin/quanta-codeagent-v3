@@ -44,6 +44,7 @@ export interface GoalReadoutBudgetView {
 
 export interface GoalReadoutBlockerView {
   readonly id: string
+  readonly dependencyId?: string | undefined
   readonly reason: string
   readonly waitingOn: GoalReadoutWaitingOn
 }
@@ -157,6 +158,7 @@ const decodeBudget = (value: unknown): GoalReadoutBudgetView | null => {
 const decodeBlocker = (value: unknown): GoalReadoutBlockerView | null => {
   if (!isRecord(value)) return null
   if (!isNonEmptyString(value.id) || !isNonEmptyString(value.reason)) return null
+  if (value.dependencyId !== undefined && !isNonEmptyString(value.dependencyId)) return null
   if (
     typeof value.waitingOn !== "string" ||
     !WAITING_ON.has(value.waitingOn as GoalReadoutWaitingOn)
@@ -179,6 +181,7 @@ const decodeCheck = (value: unknown): GoalReadoutCheckView | null => {
   }
   return {
     id: value.id,
+    ...(isNonEmptyString(value.dependencyId) ? { dependencyId: value.dependencyId } : {}),
     kind: "command",
     argv: value.argv,
     timeoutMs: value.timeoutMs,

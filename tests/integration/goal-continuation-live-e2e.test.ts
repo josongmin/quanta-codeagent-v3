@@ -3,9 +3,11 @@ import { runAgent } from "@/agent"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import {
   asObjectiveAuthority,
+  type BlockerDependencyResolverPort,
   buildPursuitContinuationPrompt,
   type ContinuationDeps,
   ContinuationSemaphore,
+  createObjectiveAuthority,
   createObjectiveStore,
   type ObjectiveAuthority,
   type ObjectivePort,
@@ -64,6 +66,14 @@ import { cfg, RecordingStream, text, toolUse, withTimeout } from "./_harness"
  */
 
 const TID = "thread-goal-live"
+
+const blockerResolver: BlockerDependencyResolverPort = {
+  resolve: ({ attemptId, target }) => ({
+    kind: "resolved",
+    dependencyId: `run:exec:${target.ref}`,
+    occurrenceEvidenceId: `occ:${target.ref}:${attemptId}`,
+  }),
+}
 
 /** Route each `runAgent` pass by the conversation text so distinct passes can
  *  script distinct behaviour. Records every `StreamInput` (so we can assert the
@@ -298,7 +308,7 @@ describe("objective-goal-continuation-live — runIdleContinuation decision logi
   })
 
   test("verified progress clears two blocker observations; recurrence restarts at one of three", () => {
-    const store = createObjectiveStore()
+    const store = createObjectiveAuthority({ blockerDependencyResolver: blockerResolver })
     store.create(TID, {
       goal: "ship with verified checks",
       criteria: [
@@ -362,8 +372,8 @@ describe("objective-goal-continuation-live — runIdleContinuation decision logi
           mutation: {
             kind: "addBlocker",
             reason: "approval pending",
-            waitingOn: "user",
-            target: { kind: "approval", ref: "deploy" },
+            waitingOn: "tool",
+            target: { kind: "tool", ref: "deploy" },
           },
         }),
         { admitted: true },
@@ -372,7 +382,7 @@ describe("objective-goal-continuation-live — runIdleContinuation decision logi
 
     expect(commitObservation("attempt-1").ok).toBe(true)
     expect(commitObservation("attempt-2").ok).toBe(true)
-    expect(store.get(TID)?.blockerObservations[0]?.distinctAttemptIds).toHaveLength(2)
+    expect(store.get(TID)?.blockerObservations[0]?.occurrences).toHaveLength(2)
 
     const domain = authority.readDomain(TID)
     const checked = domain.state?.objective.successCriteria.filter(
@@ -410,6 +420,8 @@ describe("objective-goal-continuation-live — runIdleContinuation decision logi
     expect(store.get(TID)?.blockerObservations).toEqual([])
 
     expect(commitObservation("attempt-3").ok).toBe(true)
-    expect(store.get(TID)?.blockerObservations[0]?.distinctAttemptIds).toEqual(["attempt-3"])
+    expect(
+      store.get(TID)?.blockerObservations[0]?.occurrences.map((item) => item.attemptId),
+    ).toEqual(["attempt-3"])
   })
 })

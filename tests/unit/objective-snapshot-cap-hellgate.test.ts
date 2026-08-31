@@ -47,10 +47,15 @@ const makeBlocker = (i: number) => ({
 })
 const makeObservation = (i: number) => ({
   observationId: `o-${i}`,
-  dependencyRef: `["user","approval","dependency-${i}"]`,
+  dependencyId: `run:exec:dependency-${i}`,
   waitingOn: "user" as const,
-  distinctAttemptIds: [`attempt-${i}`],
-  lastObservedAt: 2_000_000 + i,
+  occurrences: [
+    {
+      attemptId: `attempt-${i}`,
+      occurrenceEvidenceId: `occurrence-${i}`,
+      observedAt: 2_000_000 + i,
+    },
+  ],
 })
 
 describe("R4 audit-M — objective snapshot reapply caps", () => {

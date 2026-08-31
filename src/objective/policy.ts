@@ -197,6 +197,7 @@ const NON_RESUMABLE = new Set<Objective["status"]>([
 
 const BLOCKER_TARGET_KINDS: ReadonlySet<string> = new Set([
   "approval",
+  "child-agent",
   "external",
   "user-input",
   "tool",

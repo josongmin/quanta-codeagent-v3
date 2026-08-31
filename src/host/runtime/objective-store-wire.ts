@@ -13,14 +13,17 @@
  */
 
 import type { AgentConfig } from "@/agent"
+import type { RunLedgerPort } from "@/agent/run-ledger"
 import { asObjectiveAuthority, type ObjectivePort } from "@/objective"
 import {
   buildObjectiveAuthority,
+  createRegistryBlockerDependencyResolver,
   decodeObjectiveSnapshot,
   encodeObjectiveSnapshot,
 } from "@/runner/assemble/session-authorities"
 import { type PersistedObjectiveSnapshot, updateSessionAtomic } from "@/session"
 import { gateOn } from "@/shared"
+import type { TaskRegistry } from "@/subagent"
 
 /** Minimal env view — same record shape the assembler threads everywhere. */
 type Env = Record<string, string | undefined>
@@ -63,11 +66,23 @@ export const resolveGatedObjectiveAuthority = (
      *  preserved; forged completions fail-closed on decode). Absent ⇒ a fresh
      *  empty authority (byte-identical legacy). */
     readonly restoreFrom?: PersistedObjectiveSnapshot | undefined
+    /** Existing session registry providers. They are read lazily so a later
+     * observability wire can bind its canonical ledger without rebuilding the
+     * objective authority. */
+    readonly runLedger?: (() => RunLedgerPort | undefined) | undefined
+    readonly taskRegistry?: (() => TaskRegistry | undefined) | undefined
   },
 ): ObjectivePort | undefined => {
   if (!gateOn(env, "QUANTA_OBJECTIVE_TOOLS")) return undefined
   const enforceBudget = gateOn(env, "QUANTA_OBJECTIVE_BUDGET_ENFORCE")
   const gateProposal = gateOn(env, "QUANTA_PROPOSE_GOAL")
+  const blockerDependencyResolver =
+    opts.runLedger === undefined && opts.taskRegistry === undefined
+      ? undefined
+      : createRegistryBlockerDependencyResolver({
+          ...(opts.runLedger !== undefined ? { runLedger: opts.runLedger } : {}),
+          ...(opts.taskRegistry !== undefined ? { tasks: opts.taskRegistry } : {}),
+        })
   // RFC-03 C2 — construct through the ONE objective-authority builder (assembly
   // owns lifetime/restore), never a surface-local `createObjectiveStore()`. A
   // present `restoreFrom` rebuilds a byte-equivalent authority from the reopened
@@ -76,6 +91,7 @@ export const resolveGatedObjectiveAuthority = (
     ...(enforceBudget ? { enforceBudget: true } : {}),
     ...(gateProposal ? { gateOn: true, confirmationAvailable: opts.confirmationAvailable } : {}),
     ...(opts.restoreFrom !== undefined ? { restoreFrom: opts.restoreFrom } : {}),
+    ...(blockerDependencyResolver !== undefined ? { blockerDependencyResolver } : {}),
   })
 }
 

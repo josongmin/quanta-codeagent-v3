@@ -37,6 +37,7 @@ import {
   plantDomain,
   receiptsForGeneration,
 } from "./authority-hydration"
+import type { BlockerDependencyResolverPort } from "./blocker-dependency"
 import {
   applyBlockerMutation,
   clearObservationsAfterProgress,
@@ -101,6 +102,7 @@ interface MutationContext {
   readonly evidence: EvidenceContext
   /** GOAL-06 — the effective product autonomous cap for this authority. */
   readonly productAutonomousTurnCap: number
+  readonly blockerDependencyResolver?: BlockerDependencyResolverPort | undefined
 }
 
 /** Outcome of applying one mutation to the core. `applied:false` ⇒ the op did
@@ -309,8 +311,12 @@ const DISPATCH: DispatchTable = {
     m.status === "active" || m.status === "paused"
       ? applied(core.setExplicitStatus(threadId, m.status))
       : refused(core, threadId, "invalid"),
-  addBlocker: (core, threadId, m, ctx) =>
-    applied(applyBlockerMutation(core, threadId, m, ctx.actor)),
+  addBlocker: (core, threadId, m, ctx) => {
+    const result = applyBlockerMutation(core, threadId, m, ctx.actor, ctx.blockerDependencyResolver)
+    return result.kind === "applied"
+      ? { applied: true, result: result.objective }
+      : refused(core, threadId, result.reason)
+  },
   clearBlocker: (core, threadId, m) => applied(core.clearBlocker(threadId, m.blockerId)),
   setNextActions: (core, threadId, m) => applied(core.setNextActions(threadId, m.actions)),
   // RFC-03 C4 — the MANUAL/provenance completion path. A CHECKED criterion is
@@ -669,6 +675,9 @@ const createAuthorityRuntimeState = (
       mintId,
       evidence,
       productAutonomousTurnCap,
+      ...(opts?.blockerDependencyResolver !== undefined
+        ? { blockerDependencyResolver: opts.blockerDependencyResolver }
+        : {}),
     }
     const outcome = applyMutation(core, threadId, mutation, ctx)
     if (outcome.applied) {

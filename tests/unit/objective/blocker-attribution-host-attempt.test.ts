@@ -25,6 +25,7 @@
 
 import { describe, expect, test } from "bun:test"
 import {
+  type BlockerDependencyResolverPort,
   type CommitResult,
   createObjectiveAuthority,
   createObjectiveCapabilities,
@@ -34,8 +35,19 @@ import {
 import type { Tool, ToolContext } from "@/tool"
 import { objectiveTools } from "@/tool/objective"
 
+const resolver: BlockerDependencyResolverPort = {
+  resolve: ({ attemptId, target }) => ({
+    kind: "resolved",
+    dependencyId: `run:exec:${target.ref}`,
+    occurrenceEvidenceId: `occ:${target.ref}:${attemptId}`,
+  }),
+}
+
 const setup = () => {
-  const authority = createObjectiveAuthority({ now: () => 7 })
+  const authority = createObjectiveAuthority({
+    now: () => 7,
+    blockerDependencyResolver: resolver,
+  })
   authority.create("t", { goal: "ship it", successCriteria: ["c"] })
   const caps = createObjectiveCapabilities(authority)
   const objectiveId = () => authority.get("t")?.objectiveId ?? ""
@@ -79,7 +91,7 @@ const observe = (authority: ObjectiveAuthority, claimed?: string): CommitResult 
         kind: "addBlocker",
         reason: "deployment approval is pending",
         waitingOn: "user",
-        target: { kind: "approval", ref: "approval:deploy" },
+        target: { kind: "tool", ref: "deploy" },
         ...(claimed === undefined ? {} : { attemptId: claimed }),
       },
     }),
@@ -98,7 +110,9 @@ describe("GOAL P0-A — the host attributes a blocker observation to the live at
 
     expect(res.ok).toBe(true)
     expect(observations(authority)).toHaveLength(1)
-    expect(observations(authority)[0]?.distinctAttemptIds).toEqual(["attempt-1"])
+    expect(observations(authority)[0]?.occurrences.map((item) => item.attemptId)).toEqual([
+      "attempt-1",
+    ])
     expect(authority.get("t")?.status).toBe("active")
   })
 
@@ -112,7 +126,9 @@ describe("GOAL P0-A — the host attributes a blocker observation to the live at
 
     expect(authority.get("t")?.status).toBe("active")
     expect(authority.get("t")?.blockers).toEqual([])
-    expect(observations(authority)[0]?.distinctAttemptIds).toEqual(["attempt-1"])
+    expect(observations(authority)[0]?.occurrences.map((item) => item.attemptId)).toEqual([
+      "attempt-1",
+    ])
   })
 
   test("PAIRED CONTROL — three real attempts still promote exactly one blocker", () => {
@@ -173,7 +189,7 @@ const ADD_BLOCKER_INPUT = {
     kind: "addBlocker",
     reason: "deployment approval is pending",
     waiting_on: "user",
-    dependency_target: { kind: "approval", ref: "approval:deploy" },
+    dependency_target: { kind: "tool", ref: "deploy" },
   },
 }
 
@@ -185,7 +201,9 @@ describe("GOAL P0-A — the CLI tool surface is no longer dead", () => {
     const res = await drain(updateTool(authority), ADD_BLOCKER_INPUT, cliCtx())
 
     expect(res.ok).toBe(true)
-    expect(observations(authority)[0]?.distinctAttemptIds).toEqual(["attempt-1"])
+    expect(observations(authority)[0]?.occurrences.map((item) => item.attemptId)).toEqual([
+      "attempt-1",
+    ])
   })
 
   test("with no attempt in flight the tool does not tell the model the objective is missing", async () => {

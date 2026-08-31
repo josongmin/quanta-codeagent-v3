@@ -16,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { asObjectiveAuthority } from "@/objective"
+import { asObjectiveAuthority, type BlockerDependencyResolverPort } from "@/objective"
 import {
   buildObjectiveAuthority,
   encodeObjectiveSnapshot,
@@ -33,6 +33,14 @@ const mkMeta = (id: string): SessionMeta => ({
   lastTouched: 1_000,
   archived: false,
 })
+
+const blockerResolver: BlockerDependencyResolverPort = {
+  resolve: ({ attemptId }) => ({
+    kind: "resolved",
+    dependencyId: "run:exec:persisted-build",
+    occurrenceEvidenceId: `occ:persisted-build:${attemptId}`,
+  }),
+}
 
 describe("RFC-03 C2 — objective persistence roundtrip", () => {
   let dir: string
@@ -55,8 +63,45 @@ describe("RFC-03 C2 — objective persistence roundtrip", () => {
 
   test("save→close→reopen preserves objective ids / revision / provenance (byte-equivalent)", async () => {
     // A FROZEN clock so createdAt/updatedAt are deterministic across the restore.
-    const auth = buildObjectiveAuthority({ now: () => 4_242 })
+    const auth = buildObjectiveAuthority({
+      now: () => 4_242,
+      blockerDependencyResolver: blockerResolver,
+    })
     auth.create("thr-1", { goal: "ship the feature", successCriteria: ["compiles", "tests pass"] })
+    const authority = asObjectiveAuthority(auth)
+    const objectiveId = auth.get("thr-1")?.objectiveId ?? ""
+    const begin = authority.prepare({
+      threadId: "thr-1",
+      actor: "system",
+      mutation: {
+        kind: "beginAttempt",
+        attempt: {
+          objectiveId,
+          attemptId: "attempt-persisted",
+          provenance: "user-requested-goal-work",
+          executionMode: "foreground",
+          startedRevision: authority.readDomain("thr-1").revision,
+        },
+      },
+    })
+    expect(authority.commit(begin, { admitted: true }).ok).toBe(true)
+    const observation = authority.prepare({
+      threadId: "thr-1",
+      actor: "model",
+      mutation: {
+        kind: "addBlocker",
+        reason: "build still running",
+        waitingOn: "tool",
+        target: { kind: "tool", ref: "persisted-build" },
+      },
+    })
+    expect(authority.commit(observation, { admitted: true }).ok).toBe(true)
+    const abandon = authority.prepare({
+      threadId: "thr-1",
+      actor: "system",
+      mutation: { kind: "abandonAttempt" },
+    })
+    expect(authority.commit(abandon, { admitted: true }).ok).toBe(true)
     // Provenance: an EXPLICIT paused intent (must survive, not default to active).
     auth.setExplicitStatus("thr-1", "paused")
     // Bump the per-thread revision a few times through real mutations.
@@ -99,6 +144,15 @@ describe("RFC-03 C2 — objective persistence roundtrip", () => {
     // next actions / goal / timestamps preserved.
     expect(after?.goal).toBe("ship the feature")
     expect(after?.nextActions).toEqual(["wire it", "test it"])
+    expect(after?.blockerObservations[0]).toMatchObject({
+      dependencyId: "run:exec:persisted-build",
+      occurrences: [
+        {
+          attemptId: "attempt-persisted",
+          occurrenceEvidenceId: "occ:persisted-build:attempt-persisted",
+        },
+      ],
+    })
     expect(after?.createdAt).toBe(4_242)
     expect(after?.updatedAt).toBe(4_242)
     // second thread preserved.

@@ -28,12 +28,12 @@ const promoteObservedBlocker = (cell: Cell, observation: ObservationInput, now: 
   // grew with the agent's retries, so the escape hatch got further away the
   // longer the agent tried.
   const alreadyLive = cell.blockers.some(
-    (blocker) =>
-      blocker.reason === observation.reason && blocker.waitingOn === observation.waitingOn,
+    (blocker) => blocker.dependencyId === observation.dependencyId,
   )
   if (alreadyLive) return
   cell.blockers.push({
     id: randomUUID(),
+    dependencyId: observation.dependencyId,
     reason: observation.reason,
     waitingOn: observation.waitingOn,
     since: now,
@@ -46,21 +46,27 @@ const recordDistinctObservation = (
   now: number,
 ): void => {
   const existingIndex = cell.blockerObservations.findIndex(
-    (candidate) => candidate.dependencyRef === observation.dependencyRef,
+    (candidate) => candidate.dependencyId === observation.dependencyId,
   )
   const existing = existingIndex < 0 ? undefined : cell.blockerObservations[existingIndex]
-  const attempts = [...(existing?.distinctAttemptIds ?? []), observation.attemptId].slice(-3)
+  const occurrences = [
+    ...(existing?.occurrences ?? []),
+    {
+      attemptId: observation.attemptId,
+      occurrenceEvidenceId: observation.occurrenceEvidenceId,
+      observedAt: now,
+    },
+  ].slice(-3)
   if (existingIndex >= 0) cell.blockerObservations.splice(existingIndex, 1)
-  if (attempts.length >= 3) {
+  if (occurrences.length >= 3) {
     promoteObservedBlocker(cell, observation, now)
     return
   }
   cell.blockerObservations.push({
     observationId: existing?.observationId ?? randomUUID(),
-    dependencyRef: observation.dependencyRef,
+    dependencyId: observation.dependencyId,
     waitingOn: observation.waitingOn,
-    distinctAttemptIds: attempts,
-    lastObservedAt: now,
+    occurrences,
   })
   if (cell.blockerObservations.length > MAX_BLOCKER_OBSERVATIONS) {
     cell.blockerObservations.shift()
@@ -108,15 +114,24 @@ export const criteriaOps = (
       const cell = cells.get(threadId)
       if (
         cell === undefined ||
-        !isNonEmptyString(observation.dependencyRef) ||
-        !isNonEmptyString(observation.attemptId)
+        !isNonEmptyString(observation.dependencyId) ||
+        !isNonEmptyString(observation.attemptId) ||
+        !isNonEmptyString(observation.occurrenceEvidenceId)
       ) {
         return null
       }
       const prior = cell.blockerObservations.find(
-        (candidate) => candidate.dependencyRef === observation.dependencyRef,
+        (candidate) => candidate.dependencyId === observation.dependencyId,
       )
-      if (prior?.distinctAttemptIds.includes(observation.attemptId) === true) return null
+      if (
+        prior?.occurrences.some(
+          (item) =>
+            item.attemptId === observation.attemptId ||
+            item.occurrenceEvidenceId === observation.occurrenceEvidenceId,
+        ) === true
+      ) {
+        return null
+      }
       return mutate(threadId, (current) =>
         recordDistinctObservation(current, observation, clockNow()),
       )

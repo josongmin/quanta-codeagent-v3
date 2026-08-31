@@ -52,14 +52,18 @@ purpose: |
     cooldown, explicit budgets, and a product hard cap.
   - Host quiescence blocks plan mode, approval, draft, attach, queued input,
     foreground work, and detached/background work.
-  - Model/continuation blockers become state only after three distinct turn
-    attempts report the same typed dependency; user/system blockers remain
-    immediate.
+  - Model/continuation blockers become state only after three distinct host
+    attempts report the same active RunLedger/TaskRegistry dependency. Stable
+    dependency identity and opaque occurrence evidence come from a host resolver;
+    model prose/ref never groups or deduplicates blockers. User/system blockers
+    remain immediate, while unsupported/unknown/inactive/wrong-thread targets are
+    typed unresolved.
 evidence:
   code:
     - src/objective/goal-preset.ts
     - src/objective/authority.ts
     - src/objective/blocker-observation.ts
+    - src/objective/blocker-dependency.ts
     - src/objective/continuation.ts
     - src/objective/goal-wake-controller.ts
     - src/objective/goal-wake-host.ts
@@ -87,6 +91,8 @@ evidence:
     - src/sdk/runtime/session/turn-submit-authority.ts
     - src/objective/policy.ts
     - src/objective/core-store/criteria-ops.ts
+    - src/runner/assemble/session-authorities/blocker-dependency-resolver.ts
+    - src/session/objective-blocker-schema.ts
     - src/apps/web-daemon/readout-compose.ts
     - src/apps/web-daemon/readout.ts
     - apps/web-frontend/src/components/slash-goal.ts
@@ -114,6 +120,8 @@ evidence:
       - tests/unit/observability/objective-decision-counter.test.ts
       - tests/unit/session/fork-objective.test.ts
       - tests/unit/objective/blocker-attribution-host-attempt.test.ts
+      - tests/unit/runner/assemble/blocker-dependency-resolver.test.ts
+      - tests/unit/objective/persistence-roundtrip.test.ts
       - tests/unit/cli/goal-unblock.test.ts
       - tests/unit/ipc/objective-reject-reason-on-wire.test.ts
       - tests/unit/cli/goal-budget-limit-visible.test.ts

@@ -123,7 +123,8 @@ const migrateThreadV1 = (t: PersistedObjectiveThread): PersistedObjectiveThreadV
     ...(t.usageLimitedUntil !== undefined ? { usageLimitedUntil: t.usageLimitedUntil } : {}),
     budget: t.budget,
     blockers: t.blockers,
-    ...(t.blockerObservations !== undefined ? { blockerObservations: t.blockerObservations } : {}),
+    // Legacy observations used model-derived dependencyRef identity. They are
+    // intentionally not migrated into host-registry authority.
     nextActions: t.nextActions,
     createdAt: t.createdAt,
     updatedAt: t.updatedAt,
@@ -283,18 +284,30 @@ const toCriterion = (c: PersistedObjectiveCriterion, objectiveId: string): Succe
 
 const toBlocker = (b: PersistedObjectiveBlocker): Blocker => ({
   id: b.id,
+  ...(b.dependencyId !== undefined ? { dependencyId: b.dependencyId } : {}),
   reason: b.reason,
   waitingOn: toWaitingOn(b.waitingOn),
   since: b.since,
 })
 
-const toBlockerObservation = (item: PersistedBlockerObservation): BlockerObservation => ({
-  observationId: item.observationId,
-  dependencyRef: item.dependencyRef,
-  waitingOn: toWaitingOn(item.waitingOn),
-  distinctAttemptIds: [...new Set(item.distinctAttemptIds)].slice(0, 2),
-  lastObservedAt: item.lastObservedAt,
-})
+const toBlockerObservation = (item: PersistedBlockerObservation): BlockerObservation | null => {
+  if (item.dependencyId === undefined || item.occurrences === undefined) return null
+  const occurrences = item.occurrences.filter(
+    (occurrence, index, all) =>
+      all.findIndex(
+        (candidate) =>
+          candidate.attemptId === occurrence.attemptId ||
+          candidate.occurrenceEvidenceId === occurrence.occurrenceEvidenceId,
+      ) === index,
+  )
+  if (occurrences.length === 0) return null
+  return {
+    observationId: item.observationId,
+    dependencyId: item.dependencyId,
+    waitingOn: toWaitingOn(item.waitingOn),
+    occurrences: occurrences.slice(0, 2).map((occurrence) => ({ ...occurrence })),
+  }
+}
 
 /** Reconstruct the full public `Objective` from a persisted v2 body. Every field
  *  round-trips verbatim; ids are NEVER re-minted (they carry from the DTO). */
@@ -315,7 +328,9 @@ const toObjective = (threadId: string, body: PersistedObjectiveBodyV2): Objectiv
     status: toStatus(body.status, body.explicitStatus),
     budget,
     blockers: body.blockers.map(toBlocker),
-    blockerObservations: (body.blockerObservations ?? []).map(toBlockerObservation),
+    blockerObservations: (body.blockerObservations ?? [])
+      .map(toBlockerObservation)
+      .filter((item): item is BlockerObservation => item !== null),
     nextActions: [...body.nextActions],
     attempts: {
       autonomousTurnsStarted: body.attempts?.autonomousTurnsStarted ?? 0,

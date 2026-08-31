@@ -242,6 +242,7 @@ const buildOperationalSurface = (
   const shadow = buildShadowSurface(setup, env, convStore)
   const objectiveStore = resolveGatedObjectiveAuthority(env, {
     confirmationAvailable: true,
+    taskRegistry: () => setup.lifecycleTaskRegistry,
     ...(setup.restoredObjective !== undefined ? { restoreFrom: setup.restoredObjective } : {}),
   })
   const objectiveVerification =

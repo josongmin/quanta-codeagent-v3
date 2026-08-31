@@ -159,8 +159,14 @@ export const objectiveUpdateSchema = z.object({
       reason: z.string().min(1).max(MAX_REASON_CHARS),
       waiting_on: z.enum(WAITING_ENUM),
       dependency_target: z.object({
-        kind: z.enum(["approval", "external", "user-input", "tool"]),
-        ref: z.string().min(1).max(MAX_LIST_ITEM_CHARS),
+        kind: z.enum(["approval", "child-agent", "external", "user-input", "tool"]),
+        ref: z
+          .string()
+          .min(1)
+          .max(MAX_LIST_ITEM_CHARS)
+          .describe(
+            "Exact active RunLedger id for kind=tool or TaskRegistry id for kind=child-agent; optional run:/task: prefix is accepted. Other kinds are typed unresolved.",
+          ),
       }),
     }),
     z.object({
@@ -221,7 +227,7 @@ const renderObjective = (o: Objective): string => {
     }
   }
   for (const observation of o.blockerObservations) {
-    lines.push(`observing: ${observation.waitingOn} ${observation.distinctAttemptIds.length}/3`)
+    lines.push(`observing: ${observation.waitingOn} ${observation.occurrences.length}/3`)
   }
   if (o.successCriteria.length > 0) {
     lines.push("criteria:")
@@ -295,6 +301,8 @@ const COMMIT_ERROR_MESSAGE: Record<CommitRejection, string> = {
   "attempt-in-flight": "an attributed attempt is still running; wait for it to settle",
   "attempt-missing":
     "no attributed attempt is in flight — a blocker observation is attributed to an attempt, so raise it while the goal work is running",
+  "dependency-unresolved":
+    "dependency is not an active host-owned registry entry for this thread; approval, user-input, external, unknown, settled, and foreign-thread references cannot enter blocker hysteresis",
   "hard-cap-exhausted": "the product autonomous attempt cap for this goal is exhausted",
   "budget-exhausted": "the goal's turn budget is exhausted",
   invalid: "the objective mutation is malformed for this operation",
@@ -477,7 +485,7 @@ const buildObjectiveUpdate = (ports: ObjectiveToolPorts): Tool<ObjectiveUpdateIn
   name: "objective_update",
   description:
     "Partially mutate the per-thread Objective. `op.kind` selects: " +
-    "addBlocker (reason + waiting_on + typed dependency_target; three distinct attempts required) / " +
+    "addBlocker (reason + waiting_on + host-resolved tool/child-agent dependency_target; three distinct attempts required; approval/user-input/external targets are refused) / " +
     "nextActions (list of strings). Status, criterion completion and usage are " +
     "OWNED BY THE HOST: completion is derived from user attestations and verifier " +
     "receipts, never from a model update. Returns the NEW objective state.",

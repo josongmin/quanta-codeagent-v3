@@ -9,6 +9,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   assertMutationPolicyComplete,
+  type BlockerDependencyResolverPort,
   createObjectiveAuthority,
   MUTATION_POLICY,
   OBJECTIVE_ACTORS,
@@ -19,8 +20,21 @@ import {
   STRICT_VERIFIER_EXECUTION_POSTURE,
 } from "@/objective"
 
+const blockerResolver: BlockerDependencyResolverPort = {
+  resolve: ({ attemptId, target }) => ({
+    kind: "resolved",
+    dependencyId: `run:exec:${target.ref}`,
+    occurrenceEvidenceId: `occ:${target.ref}:${attemptId}`,
+  }),
+}
+
 const authority = (gateOn = false): ObjectiveAuthority =>
-  createObjectiveAuthority({ now: () => 7, gateOn, confirmationAvailable: true })
+  createObjectiveAuthority({
+    now: () => 7,
+    gateOn,
+    confirmationAvailable: true,
+    blockerDependencyResolver: blockerResolver,
+  })
 
 const run = (
   auth: ObjectiveAuthority,
@@ -271,8 +285,8 @@ describe("GOAL-02 — definition ownership and terminal state", () => {
           run(auth, "model", {
             kind: "addBlocker",
             reason: "r",
-            waitingOn: "user",
-            target: { kind: "user-input", ref: "operator" },
+            waitingOn: "tool",
+            target: { kind: "tool", ref: "operator" },
           }),
         ),
       ).toBe("ok")

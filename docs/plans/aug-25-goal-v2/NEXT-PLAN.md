@@ -27,7 +27,7 @@ historical evidence이며 현재 미구현 목록으로 사용하지 않는다.
 |---|---|---|---|
 | 1 | [R1 verifier sandbox](tickets/current/R1-verifier-sandbox-posture.md) | **FOCUSED GREEN · main integration pending** | `workspace-write`, network deny, unavailable/degrade fail-closed, persistent versioned posture |
 | 2 | [R2 read freshness](tickets/current/R2-read-time-source-freshness.md) | **FOCUSED GREEN · main integration pending** | CLI/web canonical reconcile, closed freshness payload, unresolved checked-completion masking, single wake rearm |
-| 3 | [R3 blocker identity](tickets/current/R3-blocker-dependency-authority.md) | dependency grouping/dedupe가 model-provided ref 문자열에 의존 | host registry `dependencyId` + occurrence evidence + distinct-attempt hysteresis |
+| 3 | [R3 blocker identity](tickets/current/R3-blocker-dependency-authority.md) | **FOCUSED GREEN · main integration pending** | host registry `dependencyId`, bounded occurrence pairs, dependency-based dedupe, typed unresolved |
 | 4 | [R7 attach/close seam](tickets/current/R7-cli-attach-close-seam.md) | dead `attachingOrClosing` seam, close-start와 disposer 사이 teardown window | attach hook 단일 truth, dead field 삭제, interactive `finally` 첫 동작 synchronous stop |
 | 5 | [R4 web always-on state](tickets/current/R4-web-always-on-goal-state.md) | structured payload에 freshness/wake/latest settlement가 없고 wake status가 버려짐 | existing `progressReceipts`를 포함한 canonical `goal.state` snapshot/delta와 absolute `wakeAt` |
 | 6 | [R5 lifecycle telemetry](tickets/current/R5-objective-lifecycle-telemetry.md) | settlement decision counter 외 lifecycle producer가 없음 | bounded stage/outcome sink와 metrics adapter, identifier/text label 금지 |

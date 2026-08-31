@@ -100,7 +100,8 @@ export interface ObjectiveCore extends ObjectivePort {
   observeBlocker(
     threadId: string,
     observation: {
-      readonly dependencyRef: string
+      readonly dependencyId: string
+      readonly occurrenceEvidenceId: string
       readonly reason: string
       readonly waitingOn: WaitingOn
       readonly attemptId: string

@@ -151,7 +151,12 @@ const assembleWebRuntimeParts = async (
   // per-connection park ⇒ NO `restoreFrom` (mint fresh). This replaces the old
   // mint that lived INSIDE `wireSessionObservability`, which left `base.objective`
   // undefined whenever observability was OFF (cross-turn goal amnesia).
-  const objective = resolveGatedObjectiveAuthority(env, { confirmationAvailable: false })
+  let objectiveRunLedger: import("@/agent/run-ledger").RunLedgerPort | undefined
+  const objective = resolveGatedObjectiveAuthority(env, {
+    confirmationAvailable: false,
+    runLedger: () => objectiveRunLedger,
+    taskRegistry: () => taskRegistry,
+  })
   // A7 — the session's usage-accounting authority, minted at THIS root (the
   // third composition root, after the assembler and the CLI bundle) so the
   // daemon can PROJECT it: the /cost readout and the cumulative wire frame
@@ -169,6 +174,7 @@ const assembleWebRuntimeParts = async (
   // same instance threaded onto the base) so obs attribution and the base share
   // ONE authority.
   const observability = wireSessionObservability(env, cwd, objective)
+  objectiveRunLedger = observability.handle.runLedger
   // ADR-0440 wire-finish — tool-diff source. Gate OFF ⇒ undefined ⇒ no
   // `onToolDiff` wired (no tool captures, byte-identical) + no facade port ⇒
   // the server forwards no `tool.diff` frames.

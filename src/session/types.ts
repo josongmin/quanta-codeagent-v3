@@ -348,17 +348,28 @@ export interface PersistedObjectiveCriterion {
 /** A single persisted blocker (mirrors `@/objective` `Blocker` structurally). */
 export interface PersistedObjectiveBlocker {
   readonly id: string
+  readonly dependencyId?: string
   readonly reason: string
   readonly waitingOn: string
   readonly since: number
 }
 
+export interface PersistedBlockerOccurrenceEvidence {
+  readonly attemptId: string
+  readonly occurrenceEvidenceId: string
+  readonly observedAt: number
+}
+
 export interface PersistedBlockerObservation {
   readonly observationId: string
-  readonly dependencyRef: string
   readonly waitingOn: string
-  readonly distinctAttemptIds: readonly string[]
-  readonly lastObservedAt: number
+  /** Current host-registry identity. */
+  readonly dependencyId?: string
+  readonly occurrences?: readonly PersistedBlockerOccurrenceEvidence[]
+  /** Legacy model-derived fields: loadable only so decode can drop them. */
+  readonly dependencyRef?: string
+  readonly distinctAttemptIds?: readonly string[]
+  readonly lastObservedAt?: number
 }
 
 /** Persisted budget envelope (mirrors `@/objective` `ObjectiveBudget`). */

@@ -228,7 +228,9 @@ export const toObjective = (
       cell.blockerObservations.map((observation) =>
         Object.freeze({
           ...observation,
-          distinctAttemptIds: Object.freeze([...observation.distinctAttemptIds]),
+          occurrences: Object.freeze(
+            observation.occurrences.map((occurrence) => Object.freeze({ ...occurrence })),
+          ),
         }),
       ),
     ),

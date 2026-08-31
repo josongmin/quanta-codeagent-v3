@@ -160,10 +160,12 @@ describe("ObservabilityPane — goal authority projection", () => {
       blockerObservations: [
         {
           observationId: "obs-1",
-          dependencyRef: "approval:deploy",
+          dependencyId: "run:exec:deploy",
           waitingOn: "user",
-          distinctAttemptIds: ["a1", "a2"],
-          lastObservedAt: 5,
+          occurrences: [
+            { attemptId: "a1", occurrenceEvidenceId: "occ-1", observedAt: 4 },
+            { attemptId: "a2", occurrenceEvidenceId: "occ-2", observedAt: 5 },
+          ],
         },
       ],
       nextActions: [],

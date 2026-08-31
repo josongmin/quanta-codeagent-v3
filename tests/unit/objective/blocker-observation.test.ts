@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  type BlockerDependencyResolverPort,
   createObjectiveAuthority,
   type ObjectiveActor,
   type ObjectiveAuthority,
@@ -10,6 +11,17 @@ import {
   buildObjectiveAuthority,
   encodeObjectiveSnapshot,
 } from "@/runner/assemble/session-authorities"
+
+const resolver: BlockerDependencyResolverPort = {
+  resolve: ({ attemptId, target }) =>
+    target.kind === "tool"
+      ? {
+          kind: "resolved",
+          dependencyId: `run:exec:${target.ref}`,
+          occurrenceEvidenceId: `occ:${target.ref}:${attemptId}`,
+        }
+      : { kind: "dependency-unresolved", reason: "unsupported-kind" },
+}
 
 const seed = (authority: ObjectiveAuthority, checked = false): void => {
   authority.create("t", {
@@ -65,21 +77,21 @@ const enterAttempt = (authority: ObjectiveAuthority, attemptId: string): void =>
 const observe = (
   authority: ObjectiveAuthority,
   attemptId: string,
-  ref = "approval:deploy",
-  waitingOn: "user" | "tool" = "user",
+  ref = "deploy",
+  waitingOn: "tool" = "tool",
 ) => {
   enterAttempt(authority, attemptId)
   return commit(authority, "model", {
     kind: "addBlocker",
     reason: "deployment approval is pending",
     waitingOn,
-    target: { kind: waitingOn === "user" ? "approval" : "tool", ref },
+    target: { kind: "tool", ref },
   })
 }
 
 describe("GOAL-09 blocker observation authority", () => {
   test("duplicate calls from one attempt do not satisfy the three-attempt threshold", () => {
-    const authority = createObjectiveAuthority()
+    const authority = createObjectiveAuthority({ blockerDependencyResolver: resolver })
     seed(authority)
     expect(observe(authority, "attempt-1").ok).toBe(true)
     for (let i = 0; i < 9; i += 1) expect(observe(authority, "attempt-1").ok).toBe(false)
@@ -88,19 +100,20 @@ describe("GOAL-09 blocker observation authority", () => {
     expect(objective?.status).toBe("active")
     expect(objective?.blockers).toEqual([])
     expect(objective?.blockerObservations).toHaveLength(1)
-    expect(objective?.blockerObservations[0]?.distinctAttemptIds).toEqual(["attempt-1"])
+    expect(objective?.blockerObservations[0]?.occurrences.map((item) => item.attemptId)).toEqual([
+      "attempt-1",
+    ])
   })
 
   test("two distinct attempts remain active; the third promotes exactly one blocker", () => {
-    const authority = createObjectiveAuthority()
+    const authority = createObjectiveAuthority({ blockerDependencyResolver: resolver })
     seed(authority)
     expect(observe(authority, "attempt-1").ok).toBe(true)
     expect(observe(authority, "attempt-2").ok).toBe(true)
     expect(authority.get("t")).toMatchObject({ status: "active", blockers: [] })
-    expect(authority.get("t")?.blockerObservations[0]?.distinctAttemptIds).toEqual([
-      "attempt-1",
-      "attempt-2",
-    ])
+    expect(
+      authority.get("t")?.blockerObservations[0]?.occurrences.map((item) => item.attemptId),
+    ).toEqual(["attempt-1", "attempt-2"])
 
     expect(observe(authority, "attempt-3").ok).toBe(true)
     expect(authority.get("t")).toMatchObject({ status: "blocked" })
@@ -109,20 +122,20 @@ describe("GOAL-09 blocker observation authority", () => {
   })
 
   test("waitingOn and typed target changes create independent observations", () => {
-    const authority = createObjectiveAuthority()
+    const authority = createObjectiveAuthority({ blockerDependencyResolver: resolver })
     seed(authority)
     observe(authority, "a", "approval:one")
     observe(authority, "b", "approval:two")
     observe(authority, "c", "tool:one", "tool")
     expect(authority.get("t")?.blockerObservations).toHaveLength(3)
-    expect(
-      authority.get("t")?.blockerObservations.map((item) => item.distinctAttemptIds.length),
-    ).toEqual([1, 1, 1])
+    expect(authority.get("t")?.blockerObservations.map((item) => item.occurrences.length)).toEqual([
+      1, 1, 1,
+    ])
   })
 
   test("user and system blockers remain immediate", () => {
     for (const actor of ["user", "system"] as const) {
-      const authority = createObjectiveAuthority()
+      const authority = createObjectiveAuthority({ blockerDependencyResolver: resolver })
       seed(authority)
       expect(
         commit(authority, actor, {
@@ -138,26 +151,30 @@ describe("GOAL-09 blocker observation authority", () => {
 
   test("observation retention is capped at eight and evicts the oldest", () => {
     let now = 1
-    const authority = createObjectiveAuthority({ now: () => now++ })
+    const authority = createObjectiveAuthority({
+      now: () => now++,
+      blockerDependencyResolver: resolver,
+    })
     seed(authority)
     for (let i = 0; i < 9; i += 1) observe(authority, `attempt-${i}`, `dependency-${i}`)
     const observations = authority.get("t")?.blockerObservations ?? []
     expect(observations).toHaveLength(8)
-    expect(observations.some((item) => item.dependencyRef.includes("dependency-0"))).toBe(false)
-    expect(observations.some((item) => item.dependencyRef.includes("dependency-8"))).toBe(true)
+    expect(observations.some((item) => item.dependencyId.includes("dependency-0"))).toBe(false)
+    expect(observations.some((item) => item.dependencyId.includes("dependency-8"))).toBe(true)
   })
 
   test("observations survive persistence and legacy snapshots restore an empty list", () => {
-    const authority = buildObjectiveAuthority() as ObjectiveAuthority
+    const authority = buildObjectiveAuthority({
+      blockerDependencyResolver: resolver,
+    }) as ObjectiveAuthority
     seed(authority)
     observe(authority, "attempt-1")
     observe(authority, "attempt-2")
     const snapshot = encodeObjectiveSnapshot(authority)
     const reopened = buildObjectiveAuthority({ restoreFrom: snapshot }) as ObjectiveAuthority
-    expect(reopened.get("t")?.blockerObservations[0]?.distinctAttemptIds).toEqual([
-      "attempt-1",
-      "attempt-2",
-    ])
+    expect(
+      reopened.get("t")?.blockerObservations[0]?.occurrences.map((item) => item.attemptId),
+    ).toEqual(["attempt-1", "attempt-2"])
 
     const legacy = {
       ...snapshot,
@@ -166,7 +183,18 @@ describe("GOAL-09 blocker observation authority", () => {
         objective:
           thread.objective === null
             ? null
-            : (({ blockerObservations: _, ...body }) => body)(thread.objective),
+            : {
+                ...thread.objective,
+                blockerObservations: [
+                  {
+                    observationId: "legacy-observation",
+                    dependencyRef: '["tool","tool","model-controlled"]',
+                    waitingOn: "tool",
+                    distinctAttemptIds: ["legacy-attempt"],
+                    lastObservedAt: 1,
+                  },
+                ],
+              },
       })),
     }
     expect(
@@ -176,7 +204,7 @@ describe("GOAL-09 blocker observation authority", () => {
   })
 
   test("new verifier evidence clears pending observations", () => {
-    const authority = createObjectiveAuthority()
+    const authority = createObjectiveAuthority({ blockerDependencyResolver: resolver })
     seed(authority, true)
     observe(authority, "attempt-1")
     observe(authority, "attempt-2")
@@ -210,7 +238,7 @@ describe("GOAL-09 blocker observation authority", () => {
   })
 
   test("settlement clears observations when the attempt gained criterion progress", () => {
-    const authority = createObjectiveAuthority()
+    const authority = createObjectiveAuthority({ blockerDependencyResolver: resolver })
     authority.create("t", { goal: "ship", successCriteria: ["done"] })
     observe(authority, "attempt-1")
     observe(authority, "attempt-2")
@@ -246,7 +274,7 @@ describe("GOAL-09 blocker observation authority", () => {
   })
 
   test("model observations fail closed without a typed target or a host attempt", () => {
-    const authority = createObjectiveAuthority()
+    const authority = createObjectiveAuthority({ blockerDependencyResolver: resolver })
     seed(authority)
     // No typed target ⇒ malformed, whether or not an attempt is running.
     expect(

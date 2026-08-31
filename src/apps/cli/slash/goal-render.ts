@@ -139,7 +139,7 @@ export const renderGoalDomain = (
     `status: ${renderedStatus} · rev ${domain.revision} · id ${short(objective.objectiveId)}\n` +
     `freshness: ${renderFreshness(freshness)}\n` +
     `validation: ${validation}\n` +
-    `remaining: ${verification.remaining.length === 0 ? "none" : verification.remaining.join(", ")}   next: ${objective.nextActions[0] ?? "none"}   blocked: ${objective.blockers[0]?.waitingOn ?? "none"}${objective.blockerObservations[0] === undefined ? "" : ` (observing ${objective.blockerObservations[0].distinctAttemptIds.length}/3)`}\n` +
+    `remaining: ${verification.remaining.length === 0 ? "none" : verification.remaining.join(", ")}   next: ${objective.nextActions[0] ?? "none"}   blocked: ${objective.blockers[0]?.waitingOn ?? "none"}${objective.blockerObservations[0] === undefined ? "" : ` (observing ${objective.blockerObservations[0].occurrences.length}/3)`}\n` +
     blockerLines(objective) +
     `budget: ${budget.turnsUsed}/${budget.maxTurns ?? "∞"} turns · ${budget.tokensUsed}/${budget.maxTokens ?? "∞"} tokens` +
     // GOAL P1-D — WHICH bound applies. The store derives this precisely so a

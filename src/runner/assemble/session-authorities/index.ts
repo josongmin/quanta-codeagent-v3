@@ -4,6 +4,10 @@
  * the task/question/attention arms, later packets extend it.
  */
 
+export {
+  createRegistryBlockerDependencyResolver,
+  type RegistryBlockerDependencySources,
+} from "./blocker-dependency-resolver"
 export { buildSessionAuthorities } from "./build"
 // RFC-03 C2 — the single objective-authority builder + persistence encode/decode
 // adapter. Surfaces construct the per-session objective HERE (no surface-local

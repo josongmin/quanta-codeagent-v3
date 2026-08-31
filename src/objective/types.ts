@@ -106,18 +106,25 @@ export type SuccessCriterion = ManualCriterion | CheckedCriterion
 /** Something preventing forward progress. `since` is an epoch-ms stamp. */
 export interface Blocker {
   readonly id: string
+  /** Stable host-registry identity for a hysteresis-promoted blocker. */
+  readonly dependencyId?: string | undefined
   readonly reason: string
   readonly waitingOn: WaitingOn
   readonly since: number // epoch ms
 }
 
+export interface BlockerOccurrenceEvidence {
+  readonly attemptId: string
+  readonly occurrenceEvidenceId: string
+  readonly observedAt: number
+}
+
 /** Host-owned evidence that the same dependency prevented progress in distinct attempts. */
 export interface BlockerObservation {
   readonly observationId: string
-  readonly dependencyRef: string
+  readonly dependencyId: string
   readonly waitingOn: WaitingOn
-  readonly distinctAttemptIds: readonly string[]
-  readonly lastObservedAt: number
+  readonly occurrences: readonly BlockerOccurrenceEvidence[]
 }
 
 /** Budget envelope. `max*` are optional caps; `*Used` are running totals. */

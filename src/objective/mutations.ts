@@ -38,7 +38,12 @@ export type { CriterionDeclaration } from "./criteria/model"
 export type { ObjectiveActor } from "./provenance"
 export { isObjectiveActor, OBJECTIVE_ACTORS } from "./provenance"
 
-export type BlockerDependencyTargetKind = "approval" | "external" | "user-input" | "tool"
+export type BlockerDependencyTargetKind =
+  | "approval"
+  | "child-agent"
+  | "external"
+  | "user-input"
+  | "tool"
 
 export interface BlockerDependencyTarget {
   readonly kind: BlockerDependencyTargetKind

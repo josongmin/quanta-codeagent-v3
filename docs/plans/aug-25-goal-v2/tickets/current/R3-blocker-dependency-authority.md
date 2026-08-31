@@ -1,19 +1,27 @@
 # R3 — Host-resolved blocker dependency identity and occurrence evidence
 
-**Status:** READY · **Priority:** P1 · **Owner:** objective blocker authority + host registries
+**Status:** FOCUSED GREEN · MAIN INTEGRATION PENDING · **Priority:** P1 · **Owner:** objective blocker authority + host registries
 
 ## 목적
 
 모델 prose/reference가 blocker identity를 제조하지 못하게 하고, 동일 dependency의 세 번의 실제
 host-attributed occurrence만 hysteresis를 통과하게 한다.
 
-## 현재 사실
+## 구현 결과
 
-- distinct attempt ID는 live objective attempt에서 host가 읽는다.
-- dependency key는 모델 입력 `[waitingOn,target.kind,target.ref]`의 JSON 문자열이다.
-- promotion 후 live blocker dedupe는 `reason + waitingOn`이다.
-- approval state machine은 실제 approval ID를 소유하며 이미 blocker를 즉시 추가/해제한다.
-- RunLedger와 TaskRegistry에는 host-known active work identity가 있다.
+- `BlockerDependencyResolverPort`는 objective authority construction에 주입되는 sync/no-throw port다.
+- Layer-2 registry adapter는 existing `RunLedger`와 `TaskRegistry`만 조회한다. 별도 dependency store를
+  만들지 않는다.
+- tool dependency는 same-thread active RunLedger record, child-agent dependency는 active TaskRegistry record와
+  same-thread active subagent RunLedger record가 모두 있을 때만 resolve된다.
+- approval/user-input/external, unknown, settled, wrong-thread record는 `dependency-unresolved`로 거절된다.
+- authority는 live attempt ID를 host state에서 읽고 resolver가 반환한 stable `dependencyId`와 opaque
+  `occurrenceEvidenceId`만 pending evidence에 기록한다.
+- observation과 promoted blocker dedupe는 `dependencyId`가 소유한다. reason은 display copy다.
+- persisted occurrence pair는 `attemptId + occurrenceEvidenceId + observedAt`이며 legacy model-derived
+  `dependencyRef` observation은 loadable하되 복원 시 drop된다.
+- approval state machine의 실제 owner blocker는 기존대로 즉시 추가/해제되며 model hysteresis 경로로
+  들어가지 않는다.
 
 ## 권한 결정
 
@@ -25,17 +33,34 @@ host-attributed occurrence만 hysteresis를 통과하게 한다.
 - external/network는 owning registry가 없는 동안 `dependency-unresolved`; 티켓을 만족시키려고 새 registry를
   만들지 않는다.
 
-## 구조 작업
+## 확정 구조
 
-1. objective slice에 sync, no-throw resolver port/result union을 정의하고 authority construction에 주입한다.
-2. model/continuation `addBlocker`를 authority에서 resolve한 뒤 observation input으로 변환한다.
-3. `BlockerObservation`을 stable dependency와 bounded occurrence pair 목록으로 변경한다.
+1. objective slice의 sync/no-throw resolver port/result union을 authority construction에 주입한다.
+2. model/continuation `addBlocker`는 authority 안에서 resolve한 뒤 observation input으로 변환한다.
+3. `BlockerObservation`은 stable dependency와 bounded occurrence pair 목록을 가진다.
    각 pair는 `attemptId + occurrenceEvidenceId + observedAt`을 가진다.
 4. promoted `Blocker`에 optional `dependencyId`를 기록한다.
-5. live dedupe와 pending observation grouping을 `dependencyId`로 통일한다. reason은 display copy일 뿐이다.
-6. session schema/rehydrate/migration을 갱신한다. legacy model-derived `dependencyRef`는 current registry
+5. live dedupe와 pending observation grouping은 `dependencyId`만 사용한다.
+6. session schema/rehydrate/migration이 current occurrence shape를 보존한다. legacy model-derived `dependencyRef`는 current registry
    identity로 신뢰 승격하지 않고 drop/degraded 처리한다.
-7. tool schema의 target kind/ref 설명을 실제 resolver capability와 일치시킨다.
+7. tool schema는 exact active RunLedger/TaskRegistry ID와 optional `run:`/`task:` alias만 지원한다고
+   명시한다.
+
+## 검증 receipt
+
+- source typecheck: PASS
+- test typecheck: PASS
+- focused battery: PASS (125 tests / 11 files) + adversarial approval isolation (15/0)
+- modified-file Biome + god-code ratchet: PASS (`src/session/store.ts` split back to 981 lines)
+- registry/authority focused rails: same dependency copy drift, distinct dependency same reason,
+  same-attempt/occurrence replay, wrong-thread/inactive/unknown, child-agent dual-registry proof
+- persistence: real session save/load + authority reopen preserves dependency/occurrence/attempt identity
+- migration: legacy model-derived dependency observation restores as empty
+- approval owner rail: model approval/user-input/external targets produce no observation; owner immediate
+  blocker tests remain green
+
+이 receipt는 R3 branch의 focused closure다. main 통합과 R6 동일-HEAD full gate 전에는 최종 promotion
+완료로 간주하지 않는다.
 
 ## 예상 write set
 
@@ -48,7 +73,7 @@ host-attributed occurrence만 hysteresis를 통과하게 한다.
 - `src/objective/core-store/rehydrate.ts`
 - host adapters for ApprovalStateMachine/RunLedger/TaskRegistry
 
-## RED rails
+## 고정된 RED rails
 
 1. 동일 registry dependency, 서로 다른 reason/ref, 3 attempts → blocker 1.
 2. 서로 다른 dependencies, 동일 reason/waitingOn → blocker 2.

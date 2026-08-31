@@ -278,6 +278,7 @@ const rebuildBlockers = (raw: unknown): Blocker[] => {
     if (out.length >= MAX_BLOCKERS_PER_OBJECTIVE) break
     out.push({
       id: isNonEmptyString(b.id) ? b.id : randomUUID(),
+      ...(isNonEmptyString(b.dependencyId) ? { dependencyId: b.dependencyId } : {}),
       reason: typeof b.reason === "string" ? b.reason : "",
       waitingOn: b.waitingOn,
       since: finiteOrZero(b.since),
@@ -305,29 +306,45 @@ const rebuildBlockerObservations = (raw: unknown): BlockerObservation[] => {
     const candidate = item as Partial<BlockerObservation>
     const waitingOn = normalizeWaitingOn(candidate.waitingOn)
     if (
-      !isNonEmptyString(candidate.dependencyRef) ||
-      candidate.dependencyRef.length > 2_100 ||
+      !isNonEmptyString(candidate.dependencyId) ||
+      candidate.dependencyId.length > 512 ||
       waitingOn === null ||
-      !Array.isArray(candidate.distinctAttemptIds)
+      !Array.isArray(candidate.occurrences)
     ) {
       continue
     }
-    const attempts = [
-      ...new Set(
-        candidate.distinctAttemptIds.filter(
-          (attempt): attempt is string => isNonEmptyString(attempt) && attempt.length <= 512,
-        ),
-      ),
-    ].slice(0, 2)
-    if (attempts.length === 0) continue
+    const occurrences = candidate.occurrences
+      .filter(
+        (occurrence) =>
+          occurrence !== null &&
+          typeof occurrence === "object" &&
+          isNonEmptyString(occurrence.attemptId) &&
+          occurrence.attemptId.length <= 512 &&
+          isNonEmptyString(occurrence.occurrenceEvidenceId) &&
+          occurrence.occurrenceEvidenceId.length <= 512 &&
+          Number.isFinite(occurrence.observedAt),
+      )
+      .filter(
+        (occurrence, index, all) =>
+          all.findIndex(
+            (candidateOccurrence) =>
+              candidateOccurrence.attemptId === occurrence.attemptId ||
+              candidateOccurrence.occurrenceEvidenceId === occurrence.occurrenceEvidenceId,
+          ) === index,
+      )
+      .slice(0, 2)
+    if (occurrences.length === 0) continue
     out.push({
       observationId: isNonEmptyString(candidate.observationId)
         ? candidate.observationId
         : randomUUID(),
-      dependencyRef: candidate.dependencyRef,
+      dependencyId: candidate.dependencyId,
       waitingOn,
-      distinctAttemptIds: attempts,
-      lastObservedAt: finiteOrZero(candidate.lastObservedAt),
+      occurrences: occurrences.map((occurrence) => ({
+        attemptId: occurrence.attemptId,
+        occurrenceEvidenceId: occurrence.occurrenceEvidenceId,
+        observedAt: finiteOrZero(occurrence.observedAt),
+      })),
     })
   }
   return out

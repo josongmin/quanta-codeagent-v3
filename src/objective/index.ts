@@ -27,6 +27,11 @@ export {
   isObjectiveAuthority,
   objectiveMutationDispatchKeys,
 } from "./authority"
+export {
+  type BlockerDependencyResolution,
+  type BlockerDependencyResolverPort,
+  resolveBlockerDependency,
+} from "./blocker-dependency"
 export { effectiveBudgetLimit, PRODUCT_BUDGET_CEILING } from "./budget-limits"
 export type {
   CommitOptions,

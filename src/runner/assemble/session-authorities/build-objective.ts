@@ -26,6 +26,7 @@
 
 import {
   asObjectiveAuthority,
+  type BlockerDependencyResolverPort,
   createObjectiveAuthority,
   type ObjectiveDomainSnapshot,
   type ObjectiveIdFactory,
@@ -58,6 +59,8 @@ export interface BuildObjectiveAuthorityInput {
   /** Whether the surface can raise an approval dialog (fail-closed under the
    *  gate when false). */
   readonly confirmationAvailable?: boolean
+  /** Host registry authority for model blocker dependency resolution. */
+  readonly blockerDependencyResolver?: BlockerDependencyResolverPort
   /** RFC-03 C2 — durable resume: a previously persisted objective snapshot (v1
    *  or v2) to restore at construction (ids / revision / provenance preserved).
    *  Absent ⇒ a fresh empty authority. */
@@ -80,6 +83,9 @@ export const buildObjectiveAuthority = (input: BuildObjectiveAuthorityInput = {}
     ...(input.gateOn !== undefined ? { gateOn: input.gateOn } : {}),
     ...(input.confirmationAvailable !== undefined
       ? { confirmationAvailable: input.confirmationAvailable }
+      : {}),
+    ...(input.blockerDependencyResolver !== undefined
+      ? { blockerDependencyResolver: input.blockerDependencyResolver }
       : {}),
     ...(input.restoreFrom !== undefined
       ? { restoreDomains: decodeObjectiveSnapshot(input.restoreFrom) }
@@ -169,6 +175,7 @@ const encodeThread = (dom: ObjectiveDomainSnapshot): PersistedObjectiveThreadV2 
     },
     blockers: obj.blockers.map((b) => ({
       id: b.id,
+      ...(b.dependencyId !== undefined ? { dependencyId: b.dependencyId } : {}),
       reason: b.reason,
       waitingOn: b.waitingOn,
       since: b.since,
@@ -177,10 +184,9 @@ const encodeThread = (dom: ObjectiveDomainSnapshot): PersistedObjectiveThreadV2 
       ? {
           blockerObservations: obj.blockerObservations.map((observation) => ({
             observationId: observation.observationId,
-            dependencyRef: observation.dependencyRef,
+            dependencyId: observation.dependencyId,
             waitingOn: observation.waitingOn,
-            distinctAttemptIds: [...observation.distinctAttemptIds],
-            lastObservedAt: observation.lastObservedAt,
+            occurrences: observation.occurrences.map((occurrence) => ({ ...occurrence })),
           })),
         }
       : {}),

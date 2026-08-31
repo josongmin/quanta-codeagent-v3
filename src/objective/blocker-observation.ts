@@ -1,13 +1,13 @@
+import { type BlockerDependencyResolverPort, resolveBlockerDependency } from "./blocker-dependency"
 import type { ObjectiveActor, ObjectiveAttemptSettlement, ObjectiveMutation } from "./mutations"
 import type { ObjectiveCore } from "./store"
 import type { Objective } from "./types"
 
 type AddBlockerMutation = Extract<ObjectiveMutation, { kind: "addBlocker" }>
 
-const dependencyRef = (mutation: AddBlockerMutation): string | null =>
-  mutation.target === undefined
-    ? null
-    : JSON.stringify([mutation.waitingOn, mutation.target.kind, mutation.target.ref.trim()])
+export type BlockerMutationResult =
+  | { readonly kind: "applied"; readonly objective: Objective }
+  | { readonly kind: "refused"; readonly reason: "dependency-unresolved" | "invalid" }
 
 /** Apply immediate trusted blockers or host-attributed model observations. */
 export const applyBlockerMutation = (
@@ -15,26 +15,44 @@ export const applyBlockerMutation = (
   threadId: string,
   mutation: AddBlockerMutation,
   actor: ObjectiveActor,
-): Objective | null => {
+  resolver: BlockerDependencyResolverPort | undefined,
+): BlockerMutationResult => {
   if (actor !== "model" && actor !== "continuation") {
-    return core.addBlocker(threadId, {
+    const objective = core.addBlocker(threadId, {
       reason: mutation.reason,
       waitingOn: mutation.waitingOn,
     })
+    return objective === null
+      ? { kind: "refused", reason: "invalid" }
+      : { kind: "applied", objective }
   }
-  const ref = dependencyRef(mutation)
   // GOAL P0-A — the attempt id is DOMAIN state, reserved by `beginAttempt`
   // before any paid call. Reading it here (instead of trusting `mutation.attemptId`,
   // which the tool layer could only ever fill from a per-tool-call id) is what
   // makes "three distinct attempts" mean three attempts.
   const attemptId = core.get(threadId)?.attempts.started?.attemptId
-  if (ref === null || attemptId === undefined || attemptId.length === 0) return null
-  return core.observeBlocker(threadId, {
-    dependencyRef: ref,
+  if (mutation.target === undefined || attemptId === undefined || attemptId.length === 0) {
+    return { kind: "refused", reason: "invalid" }
+  }
+  const resolution = resolveBlockerDependency(resolver, {
+    threadId,
+    attemptId,
+    waitingOn: mutation.waitingOn,
+    target: mutation.target,
+  })
+  if (resolution.kind !== "resolved") {
+    return { kind: "refused", reason: "dependency-unresolved" }
+  }
+  const objective = core.observeBlocker(threadId, {
+    dependencyId: resolution.dependencyId,
+    occurrenceEvidenceId: resolution.occurrenceEvidenceId,
     reason: mutation.reason,
     waitingOn: mutation.waitingOn,
     attemptId,
   })
+  return objective === null
+    ? { kind: "refused", reason: "invalid" }
+    : { kind: "applied", objective }
 }
 
 /** Clear pending observations only after an operation actually gained progress. */

@@ -211,6 +211,7 @@ export interface VerifierCompletionReceipt {
 
 export interface Blocker {
   readonly id: string
+  readonly dependencyId?: string
   readonly reason: string
   readonly waitingOn: WaitingOnTarget
   readonly since: number
@@ -219,10 +220,13 @@ export interface Blocker {
 /** Already on the wire: evidence that one dependency blocked distinct attempts. */
 export interface BlockerObservation {
   readonly observationId: string
-  readonly dependencyRef: string
+  readonly dependencyId: string
   readonly waitingOn: WaitingOnTarget
-  readonly distinctAttemptIds: readonly string[]
-  readonly lastObservedAt: number
+  readonly occurrences: readonly {
+    readonly attemptId: string
+    readonly occurrenceEvidenceId: string
+    readonly observedAt: number
+  }[]
 }
 
 /** Already on the wire: the attributed-attempt accounting. */

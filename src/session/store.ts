@@ -8,6 +8,10 @@ import type { SessionEnvelopeRecord } from "./envelope"
 import { appendSessionLine, encodeSessionLine } from "./envelope-encoder"
 import { cloneObjectiveForFork } from "./fork-objective"
 import { listSessions, removeFromIndex, upsertMeta } from "./index-store"
+import {
+  persistedBlockerObservationSchema,
+  persistedObjectiveBlockerSchema,
+} from "./objective-blocker-schema"
 import { persistedVerifierExecutionPostureSchema } from "./objective-posture-schema"
 import {
   archivedFilePath,
@@ -292,19 +296,6 @@ const persistedObjectiveCriterionSchema = z.object({
   check: persistedObjectiveCheckSpecSchema.optional(),
   completion: persistedObjectiveCompletionSchema.optional(),
 })
-const persistedObjectiveBlockerSchema = z.object({
-  id: z.string(),
-  reason: z.string(),
-  waitingOn: z.string(),
-  since: z.number().finite(),
-})
-const persistedBlockerObservationSchema = z.object({
-  observationId: z.string().min(1),
-  dependencyRef: z.string().min(1).max(2_100),
-  waitingOn: z.enum(["user", "tool", "network", "child_agent"]),
-  distinctAttemptIds: z.array(z.string().min(1).max(512)).min(1).max(2),
-  lastObservedAt: z.number().finite().nonnegative(),
-})
 const persistedObjectiveBudgetSchema = z.object({
   maxTokens: z.number().finite().optional(),
   tokensUsed: z.number().finite(),
@@ -371,6 +362,7 @@ const persistedObjectiveBodyV2Schema = z.object({
   usageLimitedUntil: z.number().finite().optional(),
   budget: persistedObjectiveBudgetSchema,
   blockers: z.array(persistedObjectiveBlockerSchema),
+  blockerObservations: z.array(persistedBlockerObservationSchema).max(8).optional(),
   nextActions: z.array(z.string()),
   attempts: z
     .object({

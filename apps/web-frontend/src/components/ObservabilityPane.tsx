@@ -172,7 +172,7 @@ const ObjectiveCard = memo(({ objective }: { objective: Objective | null }): JSX
           <div>
             <dt className="inline text-ink-tertiary">Observing: </dt>
             <dd className="inline">
-              {objective.blockerObservations[0]?.distinctAttemptIds.length ?? 0}/3 attempts on one
+              {objective.blockerObservations[0]?.occurrences.length ?? 0}/3 attempts on one
               dependency
             </dd>
           </div>

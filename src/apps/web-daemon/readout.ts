@@ -311,6 +311,7 @@ export const toGoalReadoutData = (
               : {}),
             blockers: objective.blockers.map((blocker) => ({
               id: blocker.id,
+              ...(blocker.dependencyId !== undefined ? { dependencyId: blocker.dependencyId } : {}),
               reason: blocker.reason,
               waitingOn: blocker.waitingOn,
             })),
