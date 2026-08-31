@@ -11,7 +11,7 @@
  *   - corrupt state silently rendering as an exact $0 hides the loss; the
  *     books stay empty but SAY continuity was lost.
  */
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import { MODEL_RATE_CARD, PRICING_VERSION } from "@/observability/pricing"
 import {
   createUsageAccounting,
@@ -230,6 +230,47 @@ describe("R1 — durable token and conservation mutation rails", () => {
 })
 
 describe("A6 — serialize → fresh authority → hydrate", () => {
+  test("prepared restore decodes and rebinds before commit without touching the live books", () => {
+    const source = createUsageAccounting()
+    record(source, source.mintCallId(PROV), 2_000_000)
+    const live = createUsageAccounting()
+    record(live, live.mintCallId(PROV))
+    const before = live.serialize()
+    const options = { rebindSessionId: "live-runtime" }
+    const prepared = live.prepareHydrate(source.serialize(), options)
+    expect(prepared.restored).toBe(true)
+    expect(live.serialize()).toBe(before)
+    options.rebindSessionId = "changed-after-prepare"
+    const parse = spyOn(JSON, "parse").mockImplementation(() => {
+      throw new Error("decode attempted during commit")
+    })
+    try {
+      expect(() => prepared.commit()).not.toThrow()
+    } finally {
+      parse.mockRestore()
+    }
+    expect(live.snapshot()).toMatchObject({ totalUsd: 6, boundSessionId: "live-runtime" })
+    expect(live.recent()[0]?.provenance.sessionId).toBe("live-runtime")
+    live.reset()
+    prepared.commit()
+    expect(live.snapshot().calls).toBe(0) // consumed attach cannot resurrect an old book
+  })
+
+  test("absent and corrupt books prepare distinct empty states without changing live state", () => {
+    const live = createUsageAccounting()
+    record(live, live.mintCallId(PROV))
+    const before = live.serialize()
+    const corrupt = live.prepareHydrate("{ corrupt")
+    const absent = live.prepareHydrate(undefined)
+    expect(corrupt.restored).toBe(false)
+    expect(absent.restored).toBe(true)
+    expect(live.serialize()).toBe(before)
+    corrupt.commit()
+    expect(live.snapshot()).toMatchObject({ calls: 0, continuityLost: true })
+    absent.commit()
+    expect(live.snapshot()).toMatchObject({ calls: 0, continuityLost: false })
+  })
+
   test("totals, buckets and the binding survive the round trip", () => {
     const a = createUsageAccounting()
     record(a, a.mintCallId(PROV))

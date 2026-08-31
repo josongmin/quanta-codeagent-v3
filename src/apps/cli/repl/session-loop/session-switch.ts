@@ -29,6 +29,7 @@ import type { Message } from "@/llm"
 import type { ObjectivePort } from "@/objective"
 import type { UsageAccountingPort } from "@/observability/usage-accounting"
 import { attachSessionToLive, type PersistedObjectiveSnapshot, type SessionMeta } from "@/session"
+import { logger } from "@/shared"
 import type { GoalWakeSignalSlot } from "../goal-wake-signal"
 
 /** Receipt the switch hands back to `/fork` so the printed copy states
@@ -101,6 +102,7 @@ export const performSessionSwitch = async (
 ): Promise<SessionSwitchReceipt> => {
   const previousSessionId = deps.currentSessionId?.()
   let attached = false
+  let corruptAccounting = false
   const hasAttachedState = deps.objectiveStore !== undefined || deps.usageAccounting !== undefined
   const outcome = await attachSessionToLive(newSessionId, {
     loadSession: deps.loadSession,
@@ -118,18 +120,15 @@ export const performSessionSwitch = async (
                   previousSessionId,
                 )
           if (preparedObjective !== undefined && !preparedObjective.ok) return null
+          const preparedAccounting = deps.usageAccounting?.prepareHydrate(saved.usageAccounting, {
+            rebindSessionId: deps.runtimeSessionId,
+          })
           return {
             commit: () => {
               if (preparedObjective?.ok === true && !preparedObjective.prepared.commit())
                 return false
-              if (deps.usageAccounting === undefined) return true
-              if (saved.usageAccounting === undefined) {
-                deps.usageAccounting.reset()
-                return true
-              }
-              deps.usageAccounting.hydrate(saved.usageAccounting, {
-                rebindSessionId: deps.runtimeSessionId,
-              })
+              preparedAccounting?.commit()
+              corruptAccounting = preparedAccounting?.restored === false
               return true
             },
           }
@@ -143,6 +142,11 @@ export const performSessionSwitch = async (
     },
     onAttached: () => {
       attached = true
+      if (corruptAccounting) {
+        logger.warn("CLI: attached usage accounting state was corrupt; prior totals lost", {
+          sessionId: newSessionId,
+        })
+      }
     },
     onAttachSettled: () => {
       if (attached) deps.goalWakeSlot?.current?.onAttach?.(newSessionId)

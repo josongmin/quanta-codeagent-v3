@@ -1,10 +1,15 @@
 /** Real production daemon → actual TCP WebSocket → production root/child loops
  * → durable SavedSession → HTTP cost readout. Only the LLM is in-memory.
  * No emitted usage injection, facade stub, paid provider, or silent skip. */
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import { MODEL_RATE_CARD, PRICING_VERSION } from "@/observability/pricing"
-import { createUsageAccounting, normalizeUsage, priceUsage } from "@/observability/usage-accounting"
+import {
+  createUsageAccounting,
+  normalizeUsage,
+  priceUsage,
+  type UsageAccountingPort,
+} from "@/observability/usage-accounting"
 import type { CostSurfaceViewWire } from "@/protocol/session"
 import { saveSessionById } from "@/session"
 import {
@@ -109,6 +114,54 @@ const historicalEstimate = (sessionId: string): string => {
 }
 
 describe("web production usage accounting — HTTP/WS/live attach", () => {
+  test("production attach prepares books before the real transcript swap, then commits once", async () => {
+    const original = await persistedTargetFromPriorDaemon()
+    const order: string[] = []
+    const restore: Array<() => void> = []
+    const daemon = await bootUsageDaemon(new ScriptedUsageLlm(), "on", (runtime) => {
+      const accounting = (runtime as { usageAccounting?: UsageAccountingPort }).usageAccounting
+      if (accounting === undefined) throw new Error("production authority missing")
+      const prepare = accounting.prepareHydrate.bind(accounting)
+      const preparedSpy = spyOn(accounting, "prepareHydrate").mockImplementation((...args) => {
+        order.push("prepare")
+        const prepared = prepare(...args)
+        expect(accounting.snapshot().calls).toBe(0)
+        return {
+          ...prepared,
+          commit: () => {
+            order.push("commit")
+            prepared.commit()
+          },
+        }
+      })
+      restore.push(() => preparedSpy.mockRestore())
+      const create = runtime.createSession.bind(runtime)
+      const createSpy = spyOn(runtime, "createSession").mockImplementation(async (...args) => {
+        const session = await create(...args)
+        const replace = session.transcript.replace.bind(session.transcript)
+        const replaceSpy = spyOn(session.transcript, "replace").mockImplementation((...input) => {
+          order.push("transcript")
+          expect(order).toEqual(["prepare", "transcript"])
+          expect(accounting.snapshot().calls).toBe(0)
+          return replace(...input)
+        })
+        restore.push(() => replaceSpy.mockRestore())
+        return session
+      })
+      restore.push(() => createSpy.mockRestore())
+    })
+    try {
+      await saveSessionById(original.meta, original, daemon.sessionRoot)
+      await daemon.connect(original.meta.id)
+      await until(() => order.includes("commit"), "prepared accounting commit")
+      expect(order).toEqual(["prepare", "transcript", "commit"])
+      expect((await daemon.cost()).output).toContain("$3.0000")
+    } finally {
+      await daemon.cleanup()
+      for (const undo of restore.reverse()) undo()
+    }
+  }, 30_000)
+
   test("two real turns publish cumulative replacement totals and persist the same book", async () => {
     const llm = new ScriptedUsageLlm()
     const daemon = await bootUsageDaemon(llm)

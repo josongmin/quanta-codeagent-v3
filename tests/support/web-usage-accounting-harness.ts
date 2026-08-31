@@ -9,6 +9,7 @@ import { decodeSessionTransportMessage, encodeSessionTransportMessage } from "@/
 import type { LLMPort } from "@/llm"
 import type { CostSurfaceViewWire, SessionEvent, SessionSnapshotLite } from "@/protocol/session"
 import { supported } from "@/protocol/session"
+import type { RuntimeFacade } from "@/sdk/runtime"
 import { loadSessionById, type SavedSession, staticSessionRootProvider } from "@/session"
 import { __resetRuntimeConfig } from "@/shared"
 
@@ -57,7 +58,11 @@ export const renderSnapshotHeader = async (snapshot: SessionSnapshotLite): Promi
 
 /** Test-owned environment and sockets; only the boot LLM is replaced. The
  * production factory, agent loops, session host, persistence and daemon run. */
-export const bootUsageDaemon = async (llm: LLMPort, mode: "on" | "off" = "on") => {
+export const bootUsageDaemon = async (
+  llm: LLMPort,
+  mode: "on" | "off" = "on",
+  observeRuntime?: (runtime: RuntimeFacade) => void,
+) => {
   const root = mkdtempSync(join(tmpdir(), "quanta-web-usage-live-"))
   const priorCwd = process.cwd()
   const priorEnv = { ...process.env }
@@ -117,9 +122,13 @@ export const bootUsageDaemon = async (llm: LLMPort, mode: "on" | "off" = "on") =
       port: 0,
       bind: "127.0.0.1",
       authToken: "usage-e2e",
-      runtimeFactory: buildProductionRuntimeFactory({
-        boot: { provider: "anthropic", model: llm.model ?? "claude-sonnet-4-6", llm },
-      }),
+      runtimeFactory: async () => {
+        const runtime = await buildProductionRuntimeFactory({
+          boot: { provider: "anthropic", model: llm.model ?? "claude-sonnet-4-6", llm },
+        })()
+        observeRuntime?.(runtime)
+        return runtime
+      },
       sessionConfig: { cwd: root, permissionMode: "acceptEdits" },
       supportedReadModels: {
         session: supported("session.v1"),
