@@ -95,6 +95,10 @@ export interface ShellOptions {
     readonly sandboxApplied: boolean
     readonly degradeReason?: string
   }>
+  /** Whether the process-wide installed shell sandbox also wraps this call.
+   * Default `inherit` preserves every existing caller. A strict per-call owner
+   * uses `skip` so two independent profiles are never nested. */
+  installedSandbox?: "inherit" | "skip"
   /** ADR-0428 socket-level egress proxy. When set with a bound `address`,
    *  `runShell` injects `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` into the child env
    *  (via `withProxyEnv`) so the spawned shell's OWN sockets are funneled

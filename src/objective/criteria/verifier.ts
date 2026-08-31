@@ -26,7 +26,12 @@
  */
 
 import type { ObjectiveAuthority } from "../ports"
-import type { CheckSpec, VerifierCompletionReceipt, VerifierResult } from "./model"
+import type {
+  CheckSpec,
+  VerifierCompletionReceipt,
+  VerifierExecutionPosture,
+  VerifierResult,
+} from "./model"
 
 /** Context handed to a check execution (C5): the thread it runs against and the
  *  source digest captured at execution time (used to CAS the completion). */
@@ -63,6 +68,7 @@ export interface VerifierCompletionInput {
   readonly criterionId: string
   readonly checkId: string
   readonly sourceDigest: string
+  readonly executionPosture: VerifierExecutionPosture
   readonly result: VerifierResult
   readonly expectedRevision?: number | undefined
 }
@@ -95,6 +101,7 @@ export const createVerifierCompletion = (
         checkId: input.checkId,
         objectiveRevision: revision,
         sourceDigest: input.sourceDigest,
+        executionPosture: input.executionPosture,
         verifierResult: input.result,
         verifiedAt: now(),
       }

@@ -4,6 +4,7 @@ import {
   type ObjectiveActor,
   type ObjectiveAuthority,
   type ObjectiveMutation,
+  STRICT_VERIFIER_EXECUTION_POSTURE,
 } from "@/objective"
 import {
   buildObjectiveAuthority,
@@ -190,6 +191,7 @@ describe("GOAL-09 blocker observation authority", () => {
         expectedRevision: domain.revision,
         sourceDigest: "sha256:current",
         verifiedAt: 1,
+        executionPosture: STRICT_VERIFIER_EXECUTION_POSTURE,
         results: [
           {
             criterionId: criterion.id,

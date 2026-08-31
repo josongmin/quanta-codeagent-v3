@@ -51,7 +51,6 @@ export const compileSeatbeltProfile = (
     return null
   }
 
-  const escWs = escapeSbpl(workspace)
   // Network: allowed when profile is *-net OR explicit override.
   const allowNetwork = policy.profile === "workspace-write-net" || policy.allowNetwork === true
 
@@ -75,6 +74,8 @@ export const compileSeatbeltProfile = (
     "(allow pseudo-tty)",
     '(allow file-read* file-write* file-ioctl (literal "/dev/ptmx"))',
     "(allow user-preference-read)",
+    ";; Bun reads the compatibility page size during startup; keep this to the exact key.",
+    '(allow sysctl-read (sysctl-name "hw.pagesize_compat"))',
     ";; file reads (read-only by write denial)",
     "(allow file-read*)",
   ]
@@ -93,7 +94,11 @@ export const compileSeatbeltProfile = (
     }
   }
 
-  const writeLine = writeAllowLine(policy.profile, escWs, extraWrites)
+  const writeLine = writeAllowLine(
+    policy.profile,
+    unique(seatbeltPathAliases(workspace)),
+    extraWrites,
+  )
   if (writeLine !== null) {
     lines.push(";; workspace + extra writes")
     lines.push(writeLine)
@@ -119,11 +124,16 @@ export const compileSeatbeltProfile = (
  */
 const writeAllowLine = (
   profile: SandboxPolicy["profile"],
-  escWs: string,
+  workspaceWrites: readonly string[],
   extraWrites: readonly string[],
 ): string | null => {
   if (profile === "read-only" && extraWrites.length === 0) return null
-  const writeSubpaths: string[] = profile !== "read-only" ? [`(subpath "${escWs}")`] : []
+  const writeSubpaths: string[] = []
+  if (profile !== "read-only") {
+    for (const path of workspaceWrites) {
+      writeSubpaths.push(`(subpath "${escapeSbpl(path)}")`)
+    }
+  }
   for (const p of extraWrites) {
     const escaped = escapeSbpl(p)
     writeSubpaths.push(`(literal "${escaped}")`, `(subpath "${escaped}")`)

@@ -9,6 +9,7 @@
  * (`applyUsage`) — there is no self-reported `recordUsage` on the port.
  */
 
+import { isStrictVerifierExecutionPosture } from "../criteria/model"
 import type { ObjectiveCore } from "../store"
 import type { Objective } from "../types"
 import { type CritCell, finiteNonNegInt } from "./cell"
@@ -54,6 +55,7 @@ export const completionOps = (
       }
       if (receipt.checkId !== c.check.id) return null
       if (receipt.objectiveId !== cell.objectiveId) return null
+      if (!isStrictVerifierExecutionPosture(receipt.executionPosture)) return null
       if (receipt.verifierResult.passed !== true) return null
       return mutate(threadId, (live) => {
         live.criteria = live.criteria.map((x) =>

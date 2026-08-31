@@ -8,6 +8,7 @@ import type { SessionEnvelopeRecord } from "./envelope"
 import { appendSessionLine, encodeSessionLine } from "./envelope-encoder"
 import { cloneObjectiveForFork } from "./fork-objective"
 import { listSessions, removeFromIndex, upsertMeta } from "./index-store"
+import { persistedVerifierExecutionPostureSchema } from "./objective-posture-schema"
 import {
   archivedFilePath,
   archivedFilePathAsync,
@@ -278,6 +279,7 @@ const persistedObjectiveCompletionSchema = z.discriminatedUnion("source", [
     checkId: z.string().min(1),
     objectiveRevision: z.number().finite(),
     sourceDigest: z.string().min(1),
+    executionPosture: persistedVerifierExecutionPostureSchema.optional(),
     verifierResult: z.object({ exitCode: z.number().finite(), passed: z.boolean() }),
     verifiedAt: z.number().finite(),
   }),

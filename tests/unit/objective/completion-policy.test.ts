@@ -7,6 +7,7 @@ import { describe, expect, test } from "bun:test"
 import {
   completionSatisfied,
   type Objective,
+  STRICT_VERIFIER_EXECUTION_POSTURE,
   type SuccessCriterion,
   validationContractOf,
 } from "@/objective"
@@ -58,6 +59,7 @@ const checked = (
           checkId: over.checkId ?? "chk-1",
           objectiveRevision: 1,
           sourceDigest: "sha256:d",
+          executionPosture: STRICT_VERIFIER_EXECUTION_POSTURE,
           verifierResult: { exitCode: 0, passed: over.passed ?? true },
           verifiedAt: 1,
         },

@@ -7,7 +7,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
@@ -96,10 +96,15 @@ describe("GOAL-03 E2E — real commands in a real git workspace", () => {
     const mutating = build(dir, [
       {
         text: "mutates",
-        argv: ["bun", "-e", `require("fs").writeFileSync("src.txt", "tampered\\n")`],
+        argv: [
+          "bun",
+          "-e",
+          `const fs=require("fs"); fs.writeFileSync("src.txt", "tampered\\n"); if(fs.readFileSync("src.txt","utf8")!=="tampered\\n") process.exit(91)`,
+        ],
       },
     ])
     const out = await mutating.coordinator.verify("t")
+    expect(readFileSync(join(dir, "src.txt"), "utf8")).toBe("tampered\n")
     expect(out.kind).toBe("stale-source")
     expect(mutating.authority.get("t")?.successCriteria[0]?.met).toBe(false)
     expect(mutating.authority.get("t")?.status).toBe("active")

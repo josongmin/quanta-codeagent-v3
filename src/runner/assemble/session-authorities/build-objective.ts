@@ -101,6 +101,7 @@ const encodeCriterion = (c: SuccessCriterion): PersistedObjectiveCriterion => {
             checkId: c.completion.checkId,
             objectiveRevision: c.completion.objectiveRevision,
             sourceDigest: c.completion.sourceDigest,
+            executionPosture: c.completion.executionPosture,
             verifierResult: {
               exitCode: c.completion.verifierResult.exitCode,
               passed: c.completion.verifierResult.passed,

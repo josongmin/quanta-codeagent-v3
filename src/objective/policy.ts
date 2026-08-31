@@ -15,6 +15,7 @@
  * SLICE FENCE: pure — imports ONLY sibling modules.
  */
 
+import { isStrictVerifierExecutionPosture } from "./criteria/model"
 import type { ObjectiveDomainSnapshot, ValidationContract } from "./model"
 import {
   OBJECTIVE_ACTORS,
@@ -162,6 +163,7 @@ export const criterionSatisfied = (c: SuccessCriterion, objectiveId: string): bo
     c.completion.source === "verifier" &&
     c.completion.objectiveId === objectiveId &&
     c.completion.checkId === c.check.id &&
+    isStrictVerifierExecutionPosture(c.completion.executionPosture) &&
     c.completion.verifierResult.passed === true
   )
 }

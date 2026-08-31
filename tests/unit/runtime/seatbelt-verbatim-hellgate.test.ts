@@ -83,6 +83,12 @@ describe("ADR-0199 — Seatbelt verbatim parity (HELL-SB-01..04, 10)", () => {
     expect(writeLine).toContain('(subpath "/private/tmp/quanta-scope")')
   })
 
+  test("HELL-SB-02e: /tmp workspace includes the /private/tmp Seatbelt alias", () => {
+    const profile = compileSeatbeltProfile({ profile: "workspace-write" }, "/tmp/work")
+    expect(profile).toContain('(subpath "/tmp/work")')
+    expect(profile).toContain('(subpath "/private/tmp/work")')
+  })
+
   test('HELL-SB-03: workspace path with `"` and `\\` escapes cleanly — no premature sexp close', () => {
     const tricky = `/we"ird\\path`
     const out = compileSeatbeltProfile({ profile: "workspace-write" }, tricky) as string

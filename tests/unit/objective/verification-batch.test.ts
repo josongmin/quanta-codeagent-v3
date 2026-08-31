@@ -11,7 +11,9 @@ import {
   type CommitRejection,
   createObjectiveAuthority,
   createObjectiveCapabilities,
+  LEGACY_UNKNOWN_VERIFIER_POSTURE,
   type ObjectiveAuthority,
+  STRICT_VERIFIER_EXECUTION_POSTURE,
   type VerificationBatch,
   type VerificationBatchResult,
 } from "@/objective"
@@ -65,6 +67,7 @@ const batchFor = (
   expectedRevision: auth.readDomain("t").revision,
   sourceDigest: "sha256:src",
   verifiedAt: 9,
+  executionPosture: STRICT_VERIFIER_EXECUTION_POSTURE,
   results,
   ...over,
 })
@@ -125,6 +128,12 @@ describe("GOAL-03 — applyVerificationBatch", () => {
         reason: "invalid",
       },
       { batch: batchFor(auth, [result(unit)], { sourceDigest: "" }), reason: "invalid" },
+      {
+        batch: batchFor(auth, [result(unit)], {
+          executionPosture: LEGACY_UNKNOWN_VERIFIER_POSTURE,
+        }),
+        reason: "invalid",
+      },
     ]
     for (const { batch, reason } of cases) {
       const res = caps.verifier.commit("t", { kind: "applyVerificationBatch", batch })

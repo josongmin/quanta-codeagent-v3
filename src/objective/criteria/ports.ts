@@ -10,7 +10,7 @@
  * SLICE FENCE: pure types (+ one pure predicate). No runtime/tool imports.
  */
 
-import type { CheckSpec } from "./model"
+import type { CheckSpec, VerifierExecutionPosture } from "./model"
 
 export interface CheckRunInput {
   /** Exact argv elements — never joined, never shell-interpolated. */
@@ -30,6 +30,7 @@ export interface CheckRunResult {
   readonly stderrDigest: string
   readonly stderrBytes: number
   readonly durationMs: number
+  readonly executionPosture: VerifierExecutionPosture
 }
 
 export interface ObjectiveCheckRunner {
@@ -82,6 +83,7 @@ export interface VerificationBatch {
   /** The workspace digest that was STABLE across the whole batch. */
   readonly sourceDigest: string
   readonly verifiedAt: number
+  readonly executionPosture: VerifierExecutionPosture
   readonly results: readonly VerificationBatchResult[]
 }
 
@@ -113,6 +115,7 @@ export type VerificationOutcome =
   | { readonly kind: "source-unavailable"; readonly reason: string }
   | { readonly kind: "cap-exceeded"; readonly reason: string }
   | { readonly kind: "runner-unavailable"; readonly reason: string }
+  | { readonly kind: "sandbox-unavailable"; readonly reason: string }
   | { readonly kind: "cancelled" }
   | { readonly kind: "freshness-unresolved" }
   | { readonly kind: "rejected"; readonly reason: string }

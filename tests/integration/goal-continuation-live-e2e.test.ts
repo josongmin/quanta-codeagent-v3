@@ -10,6 +10,7 @@ import {
   type ObjectiveAuthority,
   type ObjectivePort,
   runIdleContinuation,
+  STRICT_VERIFIER_EXECUTION_POSTURE,
 } from "@/objective"
 import { defaultTools, ToolRegistry } from "@/tool"
 import { seedObjective } from "../unit/objective/v2-helpers"
@@ -322,8 +323,39 @@ describe("objective-goal-continuation-live — runIdleContinuation decision logi
       ],
     })
     const authority = asObjectiveAuthority(store) as ObjectiveAuthority
-    const commitObservation = (attemptId: string) =>
-      authority.commit(
+    const commitObservation = (attemptId: string) => {
+      const objective = authority.get(TID)
+      if (objective === null) throw new Error("objective missing")
+      if (objective.attempts.started?.attemptId !== attemptId) {
+        if (objective.attempts.started !== undefined) {
+          authority.commit(
+            authority.prepare({
+              threadId: TID,
+              actor: "system",
+              mutation: { kind: "abandonAttempt" },
+            }),
+            { admitted: true },
+          )
+        }
+        authority.commit(
+          authority.prepare({
+            threadId: TID,
+            actor: "system",
+            mutation: {
+              kind: "beginAttempt",
+              attempt: {
+                objectiveId: objective.objectiveId,
+                attemptId,
+                provenance: "user-requested-goal-work",
+                executionMode: "foreground",
+                startedRevision: authority.readDomain(TID).revision,
+              },
+            },
+          }),
+          { admitted: true },
+        )
+      }
+      return authority.commit(
         authority.prepare({
           threadId: TID,
           actor: "model",
@@ -332,11 +364,11 @@ describe("objective-goal-continuation-live — runIdleContinuation decision logi
             reason: "approval pending",
             waitingOn: "user",
             target: { kind: "approval", ref: "deploy" },
-            attemptId,
           },
         }),
         { admitted: true },
       )
+    }
 
     expect(commitObservation("attempt-1").ok).toBe(true)
     expect(commitObservation("attempt-2").ok).toBe(true)
@@ -358,6 +390,7 @@ describe("objective-goal-continuation-live — runIdleContinuation decision logi
             expectedRevision: domain.revision,
             sourceDigest: "sha256:live",
             verifiedAt: 1,
+            executionPosture: STRICT_VERIFIER_EXECUTION_POSTURE,
             results: checked.map((criterion, index) => ({
               criterionId: criterion.id,
               checkId: criterion.kind === "checked" ? criterion.check.id : "",

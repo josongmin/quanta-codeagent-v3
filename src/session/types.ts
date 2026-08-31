@@ -286,6 +286,22 @@ export interface PersistedObjectiveCheckSpec {
   readonly successExitCodes: readonly number[]
 }
 
+export type PersistedVerifierExecutionPosture =
+  | {
+      readonly contractVersion: 1
+      readonly profile: "workspace-write"
+      readonly network: "deny"
+      readonly sandboxApplied: true
+      readonly runnerVersion: string
+    }
+  | {
+      readonly contractVersion: 0
+      readonly profile: "unknown"
+      readonly network: "unknown"
+      readonly sandboxApplied: false
+      readonly runnerVersion: "unknown"
+    }
+
 /** RFC-03 C4 — a persisted completion receipt (manual OR verifier evidence),
  *  mirroring `@/objective` `CompletionReceipt`. The `verifier` variant carries
  *  the full check id + objective revision + source digest + verifier result. */
@@ -305,6 +321,8 @@ export type PersistedObjectiveCompletion =
       readonly checkId: string
       readonly objectiveRevision: number
       readonly sourceDigest: string
+      /** Optional only for legacy snapshots; decode materializes v0 unknown. */
+      readonly executionPosture?: PersistedVerifierExecutionPosture
       readonly verifierResult: { readonly exitCode: number; readonly passed: boolean }
       readonly verifiedAt: number
     }

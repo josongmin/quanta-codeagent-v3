@@ -39,6 +39,8 @@ import type {
 import {
   isObjectiveActor,
   isObjectiveAttemptProvenance,
+  isStrictVerifierExecutionPosture,
+  LEGACY_UNKNOWN_VERIFIER_POSTURE,
   legacyObjectiveId,
   MAX_GOAL_CHARS,
   normalizeCheckDeclaration,
@@ -184,6 +186,7 @@ const toCompletion = (
       checkId: raw.checkId,
       objectiveRevision: raw.objectiveRevision,
       sourceDigest: raw.sourceDigest,
+      executionPosture: raw.executionPosture ?? LEGACY_UNKNOWN_VERIFIER_POSTURE,
       verifierResult: { exitCode: raw.verifierResult.exitCode, passed: raw.verifierResult.passed },
       verifiedAt: raw.verifiedAt,
     }
@@ -213,13 +216,18 @@ const toCheckedCriterion = (
     c.completion !== undefined && c.completion.source === "verifier"
       ? toCompletion(c.completion, objectiveId)
       : undefined
-  const bound =
+  const identityBound =
     receipt !== undefined &&
     receipt.source === "verifier" &&
     receipt.checkId === checkId &&
     receipt.objectiveId === objectiveId &&
     receipt.verifierResult.passed === true
-  const met = c.met === true && bound
+  const met =
+    c.met === true &&
+    identityBound &&
+    receipt !== undefined &&
+    receipt.source === "verifier" &&
+    isStrictVerifierExecutionPosture(receipt.executionPosture)
   return {
     kind: "checked",
     id: c.id,
@@ -233,7 +241,7 @@ const toCheckedCriterion = (
       timeoutMs: decl.timeoutMs,
       successExitCodes: [...decl.successExitCodes],
     },
-    ...(met && receipt !== undefined ? { completion: receipt } : {}),
+    ...(identityBound && receipt !== undefined ? { completion: receipt } : {}),
   }
 }
 

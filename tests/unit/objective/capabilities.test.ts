@@ -12,6 +12,7 @@ import {
   createObjectiveAuthority,
   createObjectiveCapabilities,
   type ObjectiveMutation,
+  STRICT_VERIFIER_EXECUTION_POSTURE,
 } from "@/objective"
 
 const setup = (gateOn = false) => {
@@ -99,6 +100,7 @@ describe("GOAL-02 — capabilities", () => {
       checkId: c?.kind === "checked" ? c.check.id : "",
       objectiveRevision: caps.read.readDomain("t").revision,
       sourceDigest: "sha256:d",
+      executionPosture: STRICT_VERIFIER_EXECUTION_POSTURE,
       verifierResult: { exitCode: 0, passed: true },
       verifiedAt: 1,
     }

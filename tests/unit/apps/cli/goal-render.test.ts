@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { renderGoalDomain } from "@/apps/cli/slash/goal-render"
-import { createObjectiveAuthority } from "@/objective"
+import { createObjectiveAuthority, STRICT_VERIFIER_EXECUTION_POSTURE } from "@/objective"
 
 describe("goal status renderer", () => {
   test("renders verifier source and checkpoint only from authority evidence", () => {
@@ -43,6 +43,7 @@ describe("goal status renderer", () => {
             expectedRevision: revision,
             sourceDigest: "sha256:old",
             verifiedAt: 1,
+            executionPosture: STRICT_VERIFIER_EXECUTION_POSTURE,
             results: [
               {
                 criterionId: criterion.id,

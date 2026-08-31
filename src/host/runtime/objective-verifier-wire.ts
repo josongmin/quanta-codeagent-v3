@@ -32,6 +32,7 @@ import {
   type CheckRunResult,
   createObjectiveCapabilities,
   isEvidenceFailure,
+  isStrictVerifierExecutionPosture,
   MAX_BATCH_DEADLINE_MS,
   MAX_CHECK_TIMEOUT_MS,
   MAX_CHECKS_PER_BATCH,
@@ -42,14 +43,18 @@ import {
   type ObjectiveReadPort,
   type ObjectiveVerificationPort,
   type ReconcileOutcome,
+  STRICT_VERIFIER_EXECUTION_POSTURE,
   type VerificationBatchResult,
   type VerificationOutcome,
+  type VerifierExecutionPosture,
   type VerifierObjectiveMutation,
   type WorkspaceEvidence,
   type WorkspaceEvidenceFailure,
   type WorkspaceEvidencePort,
 } from "@/objective"
+import { defaultPerCallSandbox, type PerCallSandboxPort } from "@/runtime/os-sandbox"
 import { type RunArgvOptions, runArgv } from "@/runtime/run-argv"
+import { SandboxUnavailableError } from "@/runtime/sandbox"
 import { errMessage, logger } from "@/shared"
 
 const sha256 = (input: Uint8Array | string): string =>
@@ -60,40 +65,58 @@ const sha256 = (input: Uint8Array | string): string =>
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface ObjectiveCheckRunnerOptions {
-  readonly perCallWrap?: RunArgvOptions["perCallWrap"]
+  readonly sandbox?: PerCallSandboxPort
   readonly spawner?: RunArgvOptions["spawner"]
   readonly localEnv?: RunArgvOptions["localEnv"]
 }
 
+export const OBJECTIVE_VERIFIER_RUNNER_VERSION = STRICT_VERIFIER_EXECUTION_POSTURE.runnerVersion
+export const OBJECTIVE_VERIFIER_POSTURE = STRICT_VERIFIER_EXECUTION_POSTURE
+
 /** The production runner: exact argv, session cwd, scrubbed env, bounded time. */
 export const createObjectiveCheckRunner = (
   options: ObjectiveCheckRunnerOptions = {},
-): ObjectiveCheckRunner => ({
-  async run(input: CheckRunInput): Promise<CheckRunResult> {
-    const res = await runArgv([...input.argv], {
-      cwd: input.cwd,
-      timeoutMs: Math.min(
-        Number.isFinite(input.timeoutMs) && input.timeoutMs > 0
-          ? input.timeoutMs
-          : MAX_CHECK_TIMEOUT_MS,
-        MAX_CHECK_TIMEOUT_MS,
-      ),
-      ...(input.signal !== undefined ? { signal: input.signal } : {}),
-      ...(options.perCallWrap !== undefined ? { perCallWrap: options.perCallWrap } : {}),
-      ...(options.spawner !== undefined ? { spawner: options.spawner } : {}),
-      ...(options.localEnv !== undefined ? { localEnv: options.localEnv } : {}),
-    })
-    return {
-      exitCode: res.exitCode,
-      timedOut: res.timedOut || res.aborted,
-      stdoutDigest: sha256(res.stdout),
-      stdoutBytes: res.stdout.byteLength,
-      stderrDigest: sha256(res.stderr),
-      stderrBytes: res.stderr.byteLength,
-      durationMs: res.durationMs,
-    }
-  },
-})
+): ObjectiveCheckRunner => {
+  const sandbox = options.sandbox ?? defaultPerCallSandbox("workspace-write")
+  return {
+    async run(input: CheckRunInput): Promise<CheckRunResult> {
+      const availability = sandbox.availability()
+      if (!availability.supported) {
+        throw new SandboxUnavailableError(availability.reason)
+      }
+      let observedApplied = false
+      const res = await runArgv([...input.argv], {
+        cwd: input.cwd,
+        timeoutMs: Math.min(
+          Number.isFinite(input.timeoutMs) && input.timeoutMs > 0
+            ? input.timeoutMs
+            : MAX_CHECK_TIMEOUT_MS,
+          MAX_CHECK_TIMEOUT_MS,
+        ),
+        ...(input.signal !== undefined ? { signal: input.signal } : {}),
+        perCallWrap: async (argv, cwd) => await sandbox.wrap(argv, cwd),
+        installedSandbox: "skip",
+        onSandboxStatus: (status) => {
+          if (!status.applied) throw new SandboxUnavailableError(status.reason)
+          observedApplied = true
+        },
+        ...(options.spawner !== undefined ? { spawner: options.spawner } : {}),
+        ...(options.localEnv !== undefined ? { localEnv: options.localEnv } : {}),
+      })
+      if (!observedApplied) throw new SandboxUnavailableError("sandbox posture was not observed")
+      return {
+        exitCode: res.exitCode,
+        timedOut: res.timedOut || res.aborted,
+        stdoutDigest: sha256(res.stdout),
+        stdoutBytes: res.stdout.byteLength,
+        stderrDigest: sha256(res.stderr),
+        stderrBytes: res.stderr.byteLength,
+        durationMs: res.durationMs,
+        executionPosture: OBJECTIVE_VERIFIER_POSTURE,
+      }
+    },
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Workspace evidence
@@ -327,6 +350,49 @@ const failureOutcome = (
 const isChecked = (c: Objective["successCriteria"][number]): c is CheckedCriterion =>
   c.kind === "checked"
 
+type CheckAttempt =
+  | { readonly kind: "ok"; readonly result: CheckRunResult }
+  | {
+      readonly kind: "runner-unavailable" | "sandbox-unavailable"
+      readonly reason: string
+    }
+
+const runCheck = async (
+  deps: CoordinatorDeps,
+  criterion: CheckedCriterion,
+  timeoutMs: number,
+  signal: AbortSignal | undefined,
+): Promise<CheckAttempt> => {
+  try {
+    return {
+      kind: "ok",
+      result: await deps.runner.run({
+        argv: criterion.check.argv,
+        cwd: deps.workspaceCwd,
+        timeoutMs,
+        ...(signal !== undefined ? { signal } : {}),
+      }),
+    }
+  } catch (error) {
+    const reason = errMessage(error)
+    logger.warn(`objective.verifier.runner: ${reason}`)
+    return {
+      kind: error instanceof SandboxUnavailableError ? "sandbox-unavailable" : "runner-unavailable",
+      reason,
+    }
+  }
+}
+
+const sameExecutionPosture = (
+  left: VerifierExecutionPosture,
+  right: VerifierExecutionPosture,
+): boolean =>
+  left.contractVersion === right.contractVersion &&
+  left.profile === right.profile &&
+  left.network === right.network &&
+  left.sandboxApplied === right.sandboxApplied &&
+  left.runnerVersion === right.runnerVersion
+
 /** Run the selected checks sequentially under the batch deadline. */
 const runChecks = async (
   deps: CoordinatorDeps,
@@ -335,26 +401,34 @@ const runChecks = async (
   now: () => number,
   signal: AbortSignal | undefined,
 ): Promise<
-  | VerificationBatchResult[]
-  | { readonly kind: "cancelled" | "runner-unavailable"; readonly reason: string }
+  | {
+      readonly kind: "ok"
+      readonly results: readonly VerificationBatchResult[]
+      readonly executionPosture: VerifierExecutionPosture
+    }
+  | {
+      readonly kind: "cancelled" | "runner-unavailable" | "sandbox-unavailable"
+      readonly reason: string
+    }
 > => {
   const results: VerificationBatchResult[] = []
+  let executionPosture: VerifierExecutionPosture | undefined
   for (const c of checked) {
     const remaining = deadline - now()
     if (signal?.aborted === true || remaining <= 0) return { kind: "cancelled", reason: "" }
-    let run: CheckRunResult
-    try {
-      run = await deps.runner.run({
-        argv: c.check.argv,
-        cwd: deps.workspaceCwd,
-        timeoutMs: Math.min(c.check.timeoutMs, remaining),
-        ...(signal !== undefined ? { signal } : {}),
-      })
-    } catch (e) {
-      const reason = errMessage(e)
-      logger.warn(`objective.verifier.runner: ${reason}`)
-      return { kind: "runner-unavailable", reason }
+    const attempt = await runCheck(deps, c, Math.min(c.check.timeoutMs, remaining), signal)
+    if (attempt.kind !== "ok") return attempt
+    const run = attempt.result
+    if (!isStrictVerifierExecutionPosture(run.executionPosture)) {
+      return { kind: "sandbox-unavailable", reason: "strict execution posture missing" }
     }
+    if (
+      executionPosture !== undefined &&
+      !sameExecutionPosture(executionPosture, run.executionPosture)
+    ) {
+      return { kind: "sandbox-unavailable", reason: "execution posture changed within batch" }
+    }
+    executionPosture = run.executionPosture
     results.push({
       criterionId: c.id,
       checkId: c.check.id,
@@ -365,7 +439,9 @@ const runChecks = async (
       stderrDigest: run.stderrDigest,
     })
   }
-  return results
+  return executionPosture === undefined
+    ? { kind: "runner-unavailable", reason: "verification batch produced no posture" }
+    : { kind: "ok", results, executionPosture }
 }
 
 /** Commit the batch; a concurrent NON-generation mutation is absorbed by one
@@ -377,6 +453,7 @@ const commitBatch = (
   checked: readonly CheckedCriterion[],
   sourceDigest: string,
   results: readonly VerificationBatchResult[],
+  executionPosture: VerifierExecutionPosture,
   now: () => number,
 ): VerificationOutcome => {
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -391,6 +468,7 @@ const commitBatch = (
         expectedRevision: live.revision,
         sourceDigest,
         verifiedAt: now(),
+        executionPosture,
         results,
       },
     })
@@ -432,7 +510,7 @@ export const createObjectiveVerificationCoordinator = (
     threadId: string,
     objectiveId: string,
     checkIds: readonly string[],
-    reason: "stale-source" | "runner-unavailable" | "cancelled",
+    reason: "stale-source" | "runner-unavailable" | "sandbox-unavailable" | "cancelled",
     observed?: string,
   ): void => {
     if (checkIds.length === 0) return
@@ -463,6 +541,7 @@ export const createObjectiveVerificationCoordinator = (
     checked: readonly CheckedCriterion[],
     beforeDigest: string,
     results: readonly VerificationBatchResult[],
+    executionPosture: VerifierExecutionPosture,
   ): Promise<VerificationOutcome> => {
     const after = await deps.evidence.capture(deps.workspaceCwd)
     if (isEvidenceFailure(after)) return failureOutcome(after)
@@ -484,6 +563,7 @@ export const createObjectiveVerificationCoordinator = (
       checked,
       after.sourceDigest,
       results,
+      executionPosture,
       now,
     )
   }
@@ -505,7 +585,7 @@ export const createObjectiveVerificationCoordinator = (
     const before = await deps.evidence.capture(deps.workspaceCwd)
     if (isEvidenceFailure(before)) return failureOutcome(before)
     const results = await runChecks(deps, checked, now() + MAX_BATCH_DEADLINE_MS, now, signal)
-    if (!Array.isArray(results)) {
+    if (results.kind !== "ok") {
       invalidate(
         threadId,
         objective.objectiveId,
@@ -514,7 +594,14 @@ export const createObjectiveVerificationCoordinator = (
       )
       return results.kind === "cancelled" ? { kind: "cancelled" } : results
     }
-    return settleRun(threadId, objective, checked, before.sourceDigest, results)
+    return settleRun(
+      threadId,
+      objective,
+      checked,
+      before.sourceDigest,
+      results.results,
+      results.executionPosture,
+    )
   }
 
   /** Invalidate the named checks (bounded CAS retry). */

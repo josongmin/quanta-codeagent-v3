@@ -25,7 +25,7 @@ historical evidence이며 현재 미구현 목록으로 사용하지 않는다.
 
 | 실행 순서 | 티켓 | 현재 gap | 확정 종료 형태 |
 |---|---|---|---|
-| 1 | [R1 verifier sandbox](tickets/current/R1-verifier-sandbox-posture.md) | verifier command가 sandbox 없이 spawn 가능하고 receipt에 posture가 없음 | `workspace-write`, network deny, unavailable/degrade fail-closed, persistent versioned posture |
+| 1 | [R1 verifier sandbox](tickets/current/R1-verifier-sandbox-posture.md) | **FOCUSED GREEN · main integration pending** | `workspace-write`, network deny, unavailable/degrade fail-closed, persistent versioned posture |
 | 2 | [R2 read freshness](tickets/current/R2-read-time-source-freshness.md) | reconcile production caller가 attributed settlement에 한정 | CLI/web operator read 전에 canonical reconcile, unresolved를 completion으로 표시하지 않음 |
 | 3 | [R3 blocker identity](tickets/current/R3-blocker-dependency-authority.md) | dependency grouping/dedupe가 model-provided ref 문자열에 의존 | host registry `dependencyId` + occurrence evidence + distinct-attempt hysteresis |
 | 4 | [R7 attach/close seam](tickets/current/R7-cli-attach-close-seam.md) | dead `attachingOrClosing` seam, close-start와 disposer 사이 teardown window | attach hook 단일 truth, dead field 삭제, interactive `finally` 첫 동작 synchronous stop |

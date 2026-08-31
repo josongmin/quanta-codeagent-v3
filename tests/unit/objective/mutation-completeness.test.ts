@@ -29,6 +29,7 @@ import {
   isObjectiveOperationKind,
   OBJECTIVE_OPERATION_KINDS,
   objectiveMutationDispatchKeys,
+  STRICT_VERIFIER_EXECUTION_POSTURE,
 } from "@/objective"
 import { nextAttemptId } from "./v2-helpers"
 
@@ -234,6 +235,7 @@ describe("C1 — every operation routes through the authority with a live effect
               checkId,
               objectiveRevision: rev,
               sourceDigest: "sha256:d",
+              executionPosture: STRICT_VERIFIER_EXECUTION_POSTURE,
               verifierResult: { exitCode: 0, passed: true },
               verifiedAt: 1,
             },
@@ -309,6 +311,7 @@ describe("C1 — every operation routes through the authority with a live effect
               expectedRevision: a.readDomain("t").revision,
               sourceDigest: "sha256:src",
               verifiedAt: 1,
+              executionPosture: STRICT_VERIFIER_EXECUTION_POSTURE,
               results: [
                 {
                   criterionId: c?.id ?? "",
@@ -363,6 +366,7 @@ describe("C1 — every operation routes through the authority with a live effect
               expectedRevision: a.readDomain("t").revision,
               sourceDigest: "sha256:src",
               verifiedAt: 1,
+              executionPosture: STRICT_VERIFIER_EXECUTION_POSTURE,
               results: [
                 {
                   criterionId: c?.id ?? "",

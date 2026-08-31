@@ -24,8 +24,11 @@ surface_integration:
     web: "The shared runtime objective authority attaches the same verifier port used by web-daemon sessions and objective tools."
 purpose: |
   Executes every checked success criterion as token-preserving argv in the
-  workspace cwd with a bounded timeout and a scrubbed environment. Captures a
-  deterministic Git-worktree source digest before and after the batch, hashes
+  workspace cwd with a bounded timeout and a scrubbed environment. Every check
+  runs under a verifier-owned `workspace-write`, network-deny OS sandbox; an
+  unavailable or degraded backend fails before command spawn, and the verifier
+  explicitly skips the installed CLI sandbox slot to prevent double wrapping.
+  It captures a deterministic Git-worktree source digest before and after the batch, hashes
   stdout/stderr instead of retaining output text, and atomically applies the
   result only when objective identity, revision, check identity, and source
   digest are still current.
@@ -43,6 +46,7 @@ evidence:
     - src/runtime/run-argv.ts
     - src/objective/authority.ts
     - src/objective/criteria/model.ts
+    - src/objective/verification-batch.ts
     - src/objective/core-store/completion-ops.ts
     - src/apps/cli/slash/objective.ts
   adrs: [394]
@@ -51,6 +55,7 @@ evidence:
       - tests/unit/host/objective-verifier-wire.test.ts
       - tests/unit/objective/checked-completion-forgery-m8-hellgate.test.ts
       - tests/unit/runtime/run-argv.test.ts
+      - tests/unit/runtime/seatbelt-verbatim-hellgate.test.ts
     integration:
       - tests/integration/objective-verifier-real-command-e2e.test.ts
     contract: []
@@ -66,9 +71,10 @@ knobs:
 deliberate_hold: null
 notes: |
   The verifier is deterministic authority, not an LLM judge. It records only
-  exit/timing metadata and hashes; command output text is not persisted in the
-  objective. The production verifier does not currently require a per-call OS
-  sandbox; absent an installed global sandbox slot, checked commands run with
-  env scrubbing and timeout/digest fences but without network/read-root/resource
-  isolation. Monitoring remains partial because production decision counters
-  are not yet a promotion-grade telemetry pipeline.
+  exit/timing metadata, hashes, and a versioned execution posture; command output
+  text is not persisted in the objective. Legacy receipts without posture restore
+  as explicit v0 unknown and cannot satisfy checked completion. The strict posture
+  claims workspace-write fencing, network deny, sandbox application, and runner
+  version; it does not claim CPU or memory isolation. Monitoring remains partial
+  because production decision counters are not yet a promotion-grade telemetry
+  pipeline.

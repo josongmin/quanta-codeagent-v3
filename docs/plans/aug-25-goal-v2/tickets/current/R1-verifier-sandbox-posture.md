@@ -1,13 +1,13 @@
 # R1 — Verifier fail-closed sandbox and persistent execution posture
 
-**Status:** READY · **Priority:** P1 · **Owner:** host verifier/runtime sandbox
+**Status:** FOCUSED GREEN · MAIN INTEGRATION PENDING · **Priority:** P1 · **Owner:** host verifier/runtime sandbox
 
 ## 목적
 
 checked criterion command가 기본-ON Goal 표면에서 무샌드박스로 실행될 수 있는 경로를 닫고,
 나중에 receipt만 보고도 어떤 execution contract에서 검증됐는지 판별 가능하게 한다.
 
-## 현재 사실
+## 감사 당시 사실
 
 - exact argv, scrubbed env, timeout/tree kill, before/after source digest는 구현돼 있다.
 - `maybeWireObjectiveVerifier()`는 `createObjectiveCheckRunner()`를 무옵션으로 조립한다.
@@ -74,3 +74,31 @@ checked criterion command가 기본-ON Goal 표면에서 무샌드박스로 실�
 - global mutable sandbox slot을 verifier 보안의 유일한 전제조건으로 삼는 경우.
 - unavailable을 runner-unavailable 또는 failed check로 축약하는 경우.
 - sandbox receipt를 별도 parallel store에 저장하려는 경우.
+
+## 2026-08-31 구현 receipt
+
+- verifier는 `defaultPerCallSandbox("workspace-write")`를 항상 조립하며 network-deny profile만
+  strict posture로 인정한다.
+- backend unavailable/degraded는 `sandbox-unavailable`으로 분리되고 spawn 전에 종료된다.
+- verifier의 `runArgv` 호출은 installed CLI sandbox를 `skip`해 이중 wrapping을 막는다.
+- receipt/session snapshot에는 contract version, profile, network, applied, runner version이 저장된다.
+  posture가 없는 legacy receipt는 explicit v0 unknown으로 복원되며 completion을 만족하지 않는다.
+- macOS live execution에서 확인된 Bun startup `sysctl-read hw.pagesize_compat`와 `/tmp` →
+  `/private/tmp` workspace alias를 최소 Seatbelt rule로 보완했다. workspace 외 write 및 network deny는
+  유지된다.
+- `authority.ts`는 verification batch/hydration owner를 sibling module로 분리해 981 → 858줄,
+  `session/store.ts`는 posture schema를 분리해 1004 → 989줄로 낮췄다.
+
+동일 worktree source에서 실행한 rail:
+
+```sh
+bun run typecheck
+bun run typecheck:tests
+bun test <R1 affected 14 files>
+bunx biome check <all modified TypeScript files>
+git diff --check
+```
+
+결과: typecheck 2종 통과, focused **149 pass / 0 fail / 14 files**, god-code ratchet 통과,
+Biome modified-file check 0 diagnostics, `git diff --check` 통과. full unit/integration/PTY 및 최종
+promotion gate는 R6에서 동일 integration HEAD로 다시 실행한다.

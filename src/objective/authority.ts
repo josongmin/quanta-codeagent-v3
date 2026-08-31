@@ -32,6 +32,12 @@ import { errMessage, logger } from "@/shared"
 import type { ObjectiveAttemptProvenance } from "./attempt"
 import { objectiveCoreFromPort } from "./authority-core-adapter"
 import {
+  hydrateDomains,
+  hydrateProgressReceipts,
+  plantDomain,
+  receiptsForGeneration,
+} from "./authority-hydration"
+import {
   applyBlockerMutation,
   clearObservationsAfterProgress,
   settlementGainedProgress,
@@ -39,7 +45,6 @@ import {
 import type { CellProvenance } from "./core-store/cell"
 import type { ManualCompletionReceipt } from "./criteria/model"
 import { isVerifierReceipt } from "./criteria/model"
-import { checkPassed, MAX_CHECKS_PER_BATCH, type VerificationBatch } from "./criteria/ports"
 import { autonomousAllowance, resolveProductAutonomousTurnCap } from "./goal-wake-policy"
 import { defaultObjectiveIdFactory, MAX_GOAL_CHARS, normalizeGoalText } from "./identity"
 import type { ObjectiveDomainSnapshot, ValidationContract } from "./model"
@@ -62,13 +67,13 @@ import type {
 } from "./ports"
 import {
   appendProgressReceipt,
-  MAX_PROGRESS_RECEIPTS,
   normalizeProgressReceipt,
   type ProgressReceipt,
   verifierReceiptRef,
 } from "./progress-receipt"
 import { createObjectiveCoreStore, type ObjectiveCore } from "./store"
 import type { GoalDefinition, Objective, ObjectivePort } from "./types"
+import { applyVerificationBatchMutation } from "./verification-batch"
 
 const isNonEmptyString = (v: unknown): v is string => typeof v === "string" && v.length > 0
 
@@ -293,69 +298,6 @@ const settleAttempt = (
   return { applied: true, result }
 }
 
-/** GOAL-03 — validate a whole batch against the live objective BEFORE anything
- *  is touched (all-or-nothing). Returns the per-criterion pass plan or a code. */
-const planVerificationBatch = (
-  current: Objective,
-  batch: VerificationBatch,
-  revision: number,
-): { criterionId: string; passed: boolean; exitCode: number | null }[] | CommitRejection => {
-  if (batch === null || typeof batch !== "object" || !Array.isArray(batch.results)) return "invalid"
-  if (batch.objectiveId !== current.objectiveId) return "objective-mismatch"
-  if (batch.expectedRevision !== revision) return "stale"
-  if (!isNonEmptyString(batch.sourceDigest) || batch.results.length > MAX_CHECKS_PER_BATCH) {
-    return "invalid"
-  }
-  const plan: { criterionId: string; passed: boolean; exitCode: number | null }[] = []
-  for (const r of batch.results) {
-    const c = current.successCriteria.find((x) => x.id === r.criterionId)
-    if (c === undefined || c.kind !== "checked" || c.check.id !== r.checkId) return "invalid"
-    plan.push({ criterionId: c.id, passed: checkPassed(c.check, r), exitCode: r.exitCode })
-  }
-  return plan
-}
-
-/** GOAL-03 — the verifier's batch commit. The authority re-validates EVERY
- *  identity (generation, revision, criterion, check) and RECOMPUTES `passed`
- *  from the immutable `successExitCodes`; a supplied verdict is never trusted. */
-const applyVerificationBatch = (
-  core: ObjectiveCore,
-  threadId: string,
-  batch: VerificationBatch,
-  ctx: MutationContext,
-): ApplyOutcome => {
-  if (ctx.actor !== "verifier") return refused(core, threadId, "actor-forbidden")
-  const current = core.get(threadId)
-  if (current === null) return refused(core, threadId, "objective-missing")
-  const plan = planVerificationBatch(current, batch, ctx.revision)
-  if (typeof plan === "string") return refused(core, threadId, plan)
-  const gainedProgress = plan.some(
-    ({ criterionId, passed }) =>
-      passed &&
-      current.successCriteria.find((criterion) => criterion.id === criterionId)?.met !== true,
-  )
-  let result: Objective | null = current
-  for (const { criterionId, passed, exitCode } of plan) {
-    const c = current.successCriteria.find((x) => x.id === criterionId)
-    if (c === undefined || c.kind !== "checked") continue
-    result = passed
-      ? (core.applyVerifierCompletion(threadId, criterionId, {
-          source: "verifier",
-          objectiveId: current.objectiveId,
-          checkId: c.check.id,
-          objectiveRevision: ctx.revision,
-          sourceDigest: batch.sourceDigest,
-          verifierResult: { exitCode: exitCode ?? -1, passed: true },
-          verifiedAt: Number.isFinite(batch.verifiedAt) ? batch.verifiedAt : ctx.now,
-        }) ?? result)
-      : (core.resetCheckedCriterion(threadId, criterionId) ?? result)
-  }
-  return {
-    applied: true,
-    result: clearObservationsAfterProgress(core, threadId, result, gainedProgress),
-  }
-}
-
 const DISPATCH: DispatchTable = {
   create: mintGeneration,
   replace: mintGeneration,
@@ -455,8 +397,12 @@ const DISPATCH: DispatchTable = {
     }
     return applied(core.clearStartedAttempt(threadId))
   },
-  applyVerificationBatch: (core, threadId, m, ctx) =>
-    applyVerificationBatch(core, threadId, m.batch, ctx),
+  applyVerificationBatch: (core, threadId, m, ctx) => {
+    const outcome = applyVerificationBatchMutation(core, threadId, m.batch, ctx)
+    return outcome.kind === "rejected"
+      ? refused(core, threadId, outcome.reason)
+      : { applied: true, result: outcome.result }
+  },
   invalidateVerification: (core, threadId, m, ctx) => {
     if (ctx.actor !== "verifier") return refused(core, threadId, "actor-forbidden")
     const current = core.get(threadId)
@@ -574,73 +520,6 @@ const wrapPortAsAuthority = (
   port: ObjectivePort,
   opts?: ObjectiveAuthorityOptions,
 ): ObjectiveAuthority => createObjectiveAuthorityWithCore(objectiveCoreFromPort(port), opts)
-
-/** RFC-03 C2 — restore-at-construction. Load each persisted per-thread domain
- *  snapshot verbatim into the core and restore its EXACT revision (NOT the
- *  `fromSnapshot` reset-to-1). A `state: null` entry with a positive revision is
- *  a TOMBSTONE: only the revision is planted. Malformed entries are skipped. */
-const hydrateDomains = (
-  core: ObjectiveCore,
-  revisions: Map<string, number>,
-  domains: readonly ObjectiveDomainSnapshot[] | undefined,
-): void => {
-  if (domains === undefined) return
-  for (const dom of domains) plantDomain(core, revisions, dom)
-}
-
-const plantDomain = (
-  core: ObjectiveCore,
-  revisions: Map<string, number>,
-  dom: ObjectiveDomainSnapshot,
-): boolean => {
-  const threadId = isNonEmptyString(dom?.threadId) ? dom.threadId : ""
-  if (threadId === "") return false
-  const revision = Number.isFinite(dom.revision) && dom.revision >= 0 ? dom.revision : 1
-  if (dom.state === null) {
-    if (revision <= 0) return false
-    core.clear(threadId)
-    revisions.set(threadId, revision)
-    return true
-  }
-  if (!core.restoreThread(threadId, dom.state)) return false
-  revisions.set(threadId, revision)
-  return true
-}
-
-const normalizeProgressReceipts = (
-  receipts: readonly ProgressReceipt[] | undefined,
-): readonly ProgressReceipt[] =>
-  Object.freeze(
-    (receipts ?? [])
-      .map(normalizeProgressReceipt)
-      .filter((receipt): receipt is ProgressReceipt => receipt !== null)
-      .slice(-MAX_PROGRESS_RECEIPTS),
-  )
-
-/** GOAL-01 — only receipts bound to the live generation survive a hydrate. */
-const receiptsForGeneration = (
-  core: ObjectiveCore,
-  threadId: string,
-  receipts: readonly ProgressReceipt[] | undefined,
-): readonly ProgressReceipt[] => {
-  const live = core.get(threadId)?.objectiveId
-  return Object.freeze(normalizeProgressReceipts(receipts).filter((r) => r.objectiveId === live))
-}
-
-const hydrateProgressReceipts = (
-  core: ObjectiveCore,
-  progress: Map<string, readonly ProgressReceipt[]>,
-  domains: readonly ObjectiveDomainSnapshot[] | undefined,
-): void => {
-  for (const domain of domains ?? []) {
-    if (isNonEmptyString(domain.threadId) && domain.progressReceipts !== undefined) {
-      progress.set(
-        domain.threadId,
-        receiptsForGeneration(core, domain.threadId, domain.progressReceipts),
-      )
-    }
-  }
-}
 
 const safeClockNow = (now: () => number): number => {
   try {

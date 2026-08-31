@@ -22,7 +22,9 @@ import {
   type CompletionReceipt,
   type CriterionKind,
   isManualReceipt,
+  isStrictVerifierExecutionPosture,
   isVerifierReceipt,
+  LEGACY_UNKNOWN_VERIFIER_POSTURE,
   normalizeCheckDeclaration,
 } from "../criteria/model"
 import { isObjectiveIdLike, legacyObjectiveId } from "../identity"
@@ -184,7 +186,14 @@ const rebuildCompletion = (
   kind: CriterionKind,
   objectiveId: string,
 ): CompletionReceipt | undefined => {
-  const bound = withObjectiveId(raw, objectiveId)
+  const withId = withObjectiveId(raw, objectiveId)
+  const bound =
+    kind === "checked" &&
+    withId !== null &&
+    typeof withId === "object" &&
+    !("executionPosture" in withId)
+      ? { ...withId, executionPosture: LEGACY_UNKNOWN_VERIFIER_POSTURE }
+      : withId
   if (kind === "checked") return isVerifierReceipt(bound) ? Object.freeze({ ...bound }) : undefined
   return isManualReceipt(bound) ? Object.freeze({ ...bound }) : undefined
 }
@@ -215,15 +224,20 @@ const rebuildCritCell = (raw: unknown, objectiveId: string): CritCell | null => 
     // path. A forged `met:true` with an absent/mismatched/failed receipt
     // (hand-edited snapshot) is downgraded to the un-completed checked state.
     const comp = rebuildCompletion(r.completion, "checked", objectiveId)
-    const bound =
+    const identityBound =
       comp !== undefined &&
       comp.source === "verifier" &&
       comp.checkId === check.id &&
       comp.objectiveId === objectiveId &&
       comp.verifierResult.passed === true
-    const metChecked = met && bound
+    const metChecked =
+      met &&
+      identityBound &&
+      comp !== undefined &&
+      comp.source === "verifier" &&
+      isStrictVerifierExecutionPosture(comp.executionPosture)
     const cell: CritCell = { id, text, met: metChecked, kind: "checked", check }
-    if (metChecked && comp !== undefined) cell.completion = comp
+    if (identityBound && comp !== undefined) cell.completion = comp
     return cell
   }
   const cell: CritCell = { id, text, met, kind: "manual" }

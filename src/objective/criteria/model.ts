@@ -74,6 +74,61 @@ export interface VerifierResult {
   readonly passed: boolean
 }
 
+/** Auditable execution contract for a verifier command. Current receipts are
+ * accepted only when the strict v1 arm is present; the v0 arm exists solely so
+ * legacy persisted receipts can be restored honestly without being promoted to
+ * current proof. */
+export type VerifierExecutionPosture =
+  | {
+      readonly contractVersion: 1
+      readonly profile: "workspace-write"
+      readonly network: "deny"
+      readonly sandboxApplied: true
+      readonly runnerVersion: string
+    }
+  | {
+      readonly contractVersion: 0
+      readonly profile: "unknown"
+      readonly network: "unknown"
+      readonly sandboxApplied: false
+      readonly runnerVersion: "unknown"
+    }
+
+export const LEGACY_UNKNOWN_VERIFIER_POSTURE: VerifierExecutionPosture = Object.freeze({
+  contractVersion: 0,
+  profile: "unknown",
+  network: "unknown",
+  sandboxApplied: false,
+  runnerVersion: "unknown",
+})
+
+export const STRICT_VERIFIER_EXECUTION_POSTURE: Extract<
+  VerifierExecutionPosture,
+  { contractVersion: 1 }
+> = Object.freeze({
+  contractVersion: 1,
+  profile: "workspace-write",
+  network: "deny",
+  sandboxApplied: true,
+  runnerVersion: "objective-check-runner/v1",
+})
+
+export const isStrictVerifierExecutionPosture = (
+  value: unknown,
+): value is Extract<VerifierExecutionPosture, { contractVersion: 1 }> => {
+  if (value === null || typeof value !== "object") return false
+  const posture = value as Partial<VerifierExecutionPosture>
+  return (
+    posture.contractVersion === 1 &&
+    posture.profile === "workspace-write" &&
+    posture.network === "deny" &&
+    posture.sandboxApplied === true &&
+    typeof posture.runnerVersion === "string" &&
+    posture.runnerVersion.length > 0 &&
+    posture.runnerVersion.length <= 128
+  )
+}
+
 /**
  * Evidence that a MANUAL criterion was completed: an explicit actor attestation
  * bound to the objective generation + revision at attestation time. Advisory (a
@@ -110,6 +165,8 @@ export interface VerifierCompletionReceipt {
   readonly objectiveRevision: number
   /** Digest of the workspace/source state at verification time (non-empty). */
   readonly sourceDigest: string
+  /** Fail-closed sandbox/runner contract that produced this evidence. */
+  readonly executionPosture: VerifierExecutionPosture
   /** The verifier result (exit code + pass verdict). */
   readonly verifierResult: VerifierResult
   /** Clock-stamped verification time (epoch ms). */
@@ -135,6 +192,14 @@ export const isVerifierReceipt = (v: unknown): v is VerifierCompletionReceipt =>
     typeof r.objectiveRevision === "number" &&
     Number.isFinite(r.objectiveRevision) &&
     isNonEmptyString(r.sourceDigest) &&
+    (isStrictVerifierExecutionPosture(r.executionPosture) ||
+      (r.executionPosture !== null &&
+        typeof r.executionPosture === "object" &&
+        r.executionPosture.contractVersion === 0 &&
+        r.executionPosture.profile === "unknown" &&
+        r.executionPosture.network === "unknown" &&
+        r.executionPosture.sandboxApplied === false &&
+        r.executionPosture.runnerVersion === "unknown")) &&
     r.verifierResult !== undefined &&
     r.verifierResult !== null &&
     typeof r.verifierResult.exitCode === "number" &&

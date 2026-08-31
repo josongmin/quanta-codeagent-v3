@@ -67,12 +67,16 @@ export type {
   CriterionKind,
   ManualCompletionReceipt,
   VerifierCompletionReceipt,
+  VerifierExecutionPosture,
   VerifierResult,
 } from "./criteria/model"
 export {
   isManualReceipt,
+  isStrictVerifierExecutionPosture,
   isVerifierReceipt,
+  LEGACY_UNKNOWN_VERIFIER_POSTURE,
   normalizeCheckDeclaration,
+  STRICT_VERIFIER_EXECUTION_POSTURE,
 } from "./criteria/model"
 export type {
   CheckRunInput,

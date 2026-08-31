@@ -16,6 +16,7 @@ import {
   type ObjectiveActor,
   type ObjectiveAuthority,
   type ObjectiveMutation,
+  STRICT_VERIFIER_EXECUTION_POSTURE,
 } from "@/objective"
 
 const authority = (gateOn = false): ObjectiveAuthority =>
@@ -205,6 +206,7 @@ describe("GOAL-02 — completion is a deterministic projection of trusted eviden
       checkId,
       objectiveRevision: auth.readDomain("t").revision,
       sourceDigest: "sha256:d",
+      executionPosture: STRICT_VERIFIER_EXECUTION_POSTURE,
       verifierResult: { exitCode: 0, passed: true },
       verifiedAt: 2,
     }

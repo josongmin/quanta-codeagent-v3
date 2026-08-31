@@ -27,7 +27,9 @@ import { join } from "node:path"
 import {
   createObjectiveAuthority,
   createVerifierCompletion,
+  LEGACY_UNKNOWN_VERIFIER_POSTURE,
   type ObjectiveAuthority,
+  STRICT_VERIFIER_EXECUTION_POSTURE,
   unsupportedCheckExecutionPort,
 } from "@/objective"
 import {
@@ -132,6 +134,7 @@ describe("C4 (a) — a checked criterion is verifier-only (model cannot self-mar
       criterionId: cid,
       checkId,
       sourceDigest: "sha256:abc",
+      executionPosture: STRICT_VERIFIER_EXECUTION_POSTURE,
       result: { exitCode: 0, passed: true },
     })
     expect(res.ok).toBe(true)
@@ -158,6 +161,7 @@ describe("C4 (a) — a checked criterion is verifier-only (model cannot self-mar
       criterionId: cid,
       checkId,
       sourceDigest: "sha256:zzz",
+      executionPosture: STRICT_VERIFIER_EXECUTION_POSTURE,
       result: { exitCode: 1, passed: false },
     })
     expect(res.ok).toBe(false)
@@ -172,6 +176,7 @@ describe("C4 (a) — a checked criterion is verifier-only (model cannot self-mar
       criterionId: cid,
       checkId: "forged-check-id",
       sourceDigest: "sha256:abc",
+      executionPosture: STRICT_VERIFIER_EXECUTION_POSTURE,
       result: { exitCode: 0, passed: true },
     })
     expect(res.ok).toBe(false)
@@ -291,6 +296,7 @@ describe("C4 (b) — completion provenance + check spec survive a real save→re
       criterionId: checked?.id ?? "",
       checkId,
       sourceDigest: "sha256:deadbeef",
+      executionPosture: STRICT_VERIFIER_EXECUTION_POSTURE,
       result: { exitCode: 0, passed: true },
     })
     return { auth, checkId }
@@ -299,6 +305,9 @@ describe("C4 (b) — completion provenance + check spec survive a real save→re
   test("checked check spec + verifier receipt round-trip byte-equivalently", async () => {
     const { auth, checkId } = seedCompleted()
     const snapshot = encodeObjectiveSnapshot(auth)
+    const persistedJson = JSON.stringify(snapshot)
+    expect(persistedJson).not.toContain('"stdout"')
+    expect(persistedJson).not.toContain('"stderr"')
     await saveSessionById(mkMeta("s"), { reason: "x", turns: 1, messages: [], objective: snapshot })
     const reopened = await loadSessionById("s")
     // zod decoder does NOT strip the new provenance keys.
@@ -315,10 +324,33 @@ describe("C4 (b) — completion provenance + check spec survive a real save→re
     const comp = rChecked?.completion
     expect(comp?.source === "verifier" ? comp.sourceDigest : "").toBe("sha256:deadbeef")
     expect(comp?.source === "verifier" ? comp.checkId : "").toBe(checkId)
+    expect(comp?.source === "verifier" ? comp.executionPosture : undefined).toEqual(
+      STRICT_VERIFIER_EXECUTION_POSTURE,
+    )
     // manual provenance also survives.
     expect(fresh.get("thr")?.successCriteria[0]?.completion?.source).toBe("manual")
     // byte-equivalent re-encode.
     expect(encodeObjectiveSnapshot(fresh)).toEqual(snapshot)
+  })
+
+  test("a legacy verifier receipt restores as explicit unknown posture and cannot satisfy completion", () => {
+    const { auth } = seedCompleted()
+    const snapshot = encodeObjectiveSnapshot(auth)
+    const strictField = `,"executionPosture":${JSON.stringify(STRICT_VERIFIER_EXECUTION_POSTURE)}`
+    const legacyJson = JSON.stringify(snapshot).replace(strictField, "")
+    expect(legacyJson).not.toContain('"executionPosture"')
+    const legacy = JSON.parse(legacyJson) as typeof snapshot
+
+    const fresh = buildObjectiveAuthority({ restoreFrom: legacy }) as unknown as ObjectiveAuthority
+    const checked = fresh.get("thr")?.successCriteria[1]
+    expect(checked?.kind).toBe("checked")
+    expect(checked?.met).toBe(false)
+    expect(checked?.completion?.source).toBe("verifier")
+    expect(
+      checked?.completion?.source === "verifier" ? checked.completion.executionPosture : undefined,
+    ).toEqual(LEGACY_UNKNOWN_VERIFIER_POSTURE)
+    expect(fresh.get("thr")?.status).toBe("active")
+    expect(JSON.stringify(encodeObjectiveSnapshot(fresh))).toContain('"contractVersion":0')
   })
 })
 
@@ -341,6 +373,7 @@ describe("C4 adversarial — no forged/placeholder receipt can complete a checke
             checkId,
             objectiveRevision: auth.readDomain("t").revision,
             sourceDigest: "sha256:abc",
+            executionPosture: STRICT_VERIFIER_EXECUTION_POSTURE,
             verifierResult: { exitCode: 0, passed: true },
             verifiedAt: 1,
           },
@@ -365,6 +398,7 @@ describe("C4 adversarial — no forged/placeholder receipt can complete a checke
       criterionId: cid,
       checkId,
       sourceDigest: "", // missing evidence
+      executionPosture: STRICT_VERIFIER_EXECUTION_POSTURE,
       result: { exitCode: 0, passed: true },
     })
     expect(res.ok).toBe(false)
@@ -388,6 +422,7 @@ describe("C4 adversarial — no forged/placeholder receipt can complete a checke
             checkId,
             objectiveRevision: 999, // does not match current
             sourceDigest: "sha256:abc",
+            executionPosture: STRICT_VERIFIER_EXECUTION_POSTURE,
             verifierResult: { exitCode: 0, passed: true },
             verifiedAt: 1,
           },

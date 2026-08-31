@@ -116,7 +116,7 @@ export const wrapSandboxArgv = async (
     perCallArgv = restoredArgv
   }
 
-  const slot = getShellSandbox()
+  const slot = options.installedSandbox === "skip" ? undefined : getShellSandbox()
   let sandboxedArgv: string[]
   if (slot !== undefined) {
     const wrapped = await slot.wrap(perCallArgv, cwd)
@@ -149,6 +149,7 @@ export interface RunArgvOptions {
   readonly timeoutMs: number
   readonly signal?: AbortSignal | undefined
   readonly perCallWrap?: ShellOptions["perCallWrap"]
+  readonly installedSandbox?: "inherit" | "skip"
   readonly localEnv?: ShellOptions["localEnv"]
   readonly proxyEnv?: ShellOptions["proxyEnv"]
   readonly onSandboxStatus?: (status: ShellSandboxStatus) => void
@@ -195,6 +196,9 @@ export const runArgv = async (
   const shellOptions: ShellOptionsWithSandboxStatus = {
     cwd: options.cwd,
     ...(options.perCallWrap !== undefined ? { perCallWrap: options.perCallWrap } : {}),
+    ...(options.installedSandbox !== undefined
+      ? { installedSandbox: options.installedSandbox }
+      : {}),
     ...(options.localEnv !== undefined ? { localEnv: options.localEnv } : {}),
     ...(options.proxyEnv !== undefined ? { proxyEnv: options.proxyEnv } : {}),
     ...(options.onSandboxStatus !== undefined ? { onSandboxStatus: options.onSandboxStatus } : {}),

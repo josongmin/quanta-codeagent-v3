@@ -23,10 +23,13 @@ import {
   createObjectiveCapabilities,
   isEvidenceFailure,
   type ObjectiveCheckRunner,
+  STRICT_VERIFIER_EXECUTION_POSTURE,
   type WorkspaceEvidence,
   type WorkspaceEvidenceFailure,
   type WorkspaceEvidencePort,
 } from "@/objective"
+import { __resetShellSandbox, installShellSandbox, SandboxUnavailableError } from "@/runtime"
+import type { PerCallSandboxPort } from "@/runtime/os-sandbox"
 
 const git = (cwd: string, ...args: string[]): void => {
   const res = Bun.spawnSync(["git", ...args], {
@@ -173,6 +176,7 @@ const fakeRunner = (
         stderrDigest: "sha256:e",
         stderrBytes: 0,
         durationMs: 1,
+        executionPosture: STRICT_VERIFIER_EXECUTION_POSTURE,
         ...over,
       }
     },
@@ -262,6 +266,7 @@ describe("GOAL-03 — verification coordinator", () => {
         expectedRevision: authority.readDomain("t").revision,
         sourceDigest: "D1",
         verifiedAt: 1,
+        executionPosture: STRICT_VERIFIER_EXECUTION_POSTURE,
         results: [
           {
             criterionId: c?.id ?? "",
@@ -300,6 +305,16 @@ describe("GOAL-03 — verification coordinator", () => {
       fakeEvidence({ digest: "D", fail: { kind: "source-unavailable", reason: "no tree" } }),
     )
     expect((await cc.coordinator.verify("t")).kind).toBe("source-unavailable")
+  })
+
+  test("sandbox enforcement failure is a distinct typed outcome", async () => {
+    const runner = fakeRunner(() => {
+      throw new SandboxUnavailableError("no strict backend")
+    })
+    const setup = setupCoordinator(runner, fakeEvidence({ digest: "D" }))
+    const out = await setup.coordinator.verify("t")
+    expect(out).toMatchObject({ kind: "sandbox-unavailable" })
+    expect(setup.authority.get("t")?.successCriteria[0]?.met).toBe(false)
   })
 
   test("cancellation stops before the next check and leaves zero receipts", async () => {
@@ -395,8 +410,15 @@ describe("GOAL-03 — verification coordinator", () => {
 })
 
 describe("GOAL-03 — production check runner", () => {
+  afterEach(() => __resetShellSandbox())
+
+  const appliedSandbox: PerCallSandboxPort = {
+    availability: () => ({ supported: true }),
+    wrap: async (argv) => ({ argv: [...argv], sandboxApplied: true }),
+  }
+
   test("digests output (never raw), reports exit code, honours the timeout ceiling", async () => {
-    const runner = createObjectiveCheckRunner()
+    const runner = createObjectiveCheckRunner({ sandbox: appliedSandbox })
     const ok = await runner.run({
       argv: ["bun", "-e", "console.log('secret output'); process.exit(4)"],
       cwd: process.cwd(),
@@ -412,5 +434,56 @@ describe("GOAL-03 — production check runner", () => {
       timeoutMs: 200,
     })
     expect(slow.timedOut).toBe(true)
+  })
+
+  test("an unavailable or degraded strict sandbox fails before spawn", async () => {
+    for (const sandbox of [
+      {
+        availability: () => ({ supported: false as const, reason: "backend-missing" }),
+        wrap: appliedSandbox.wrap,
+      },
+      {
+        availability: () => ({ supported: true as const }),
+        wrap: async (argv: ReadonlyArray<string>) => ({
+          argv: [...argv],
+          sandboxApplied: true,
+          degradeReason: "network-policy-not-enforced",
+        }),
+      },
+    ] satisfies PerCallSandboxPort[]) {
+      let spawned = 0
+      const runner = createObjectiveCheckRunner({
+        sandbox,
+        spawner: (() => {
+          spawned += 1
+          throw new Error("must not spawn")
+        }) as never,
+      })
+      await expect(
+        runner.run({ argv: ["bun", "--version"], cwd: process.cwd(), timeoutMs: 1_000 }),
+      ).rejects.toBeInstanceOf(SandboxUnavailableError)
+      expect(spawned).toBe(0)
+    }
+  })
+
+  test("a strict per-call verifier sandbox never inherits the installed CLI wrapper", async () => {
+    let installedWraps = 0
+    installShellSandbox({
+      policy: { profile: "read-only" },
+      config: { platform: "darwin", sandboxExecPath: "/usr/bin/sandbox-exec" },
+      wrap: async (argv) => {
+        installedWraps += 1
+        return { argv: [...argv], sandboxApplied: true }
+      },
+    })
+    const runner = createObjectiveCheckRunner({ sandbox: appliedSandbox })
+    const result = await runner.run({
+      argv: ["bun", "-e", "process.exit(0)"],
+      cwd: process.cwd(),
+      timeoutMs: 20_000,
+    })
+    expect(result.exitCode).toBe(0)
+    expect(installedWraps).toBe(0)
+    expect(result.executionPosture).toEqual(STRICT_VERIFIER_EXECUTION_POSTURE)
   })
 })
