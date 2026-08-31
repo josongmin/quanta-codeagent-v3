@@ -1,5 +1,7 @@
 # GOAL-09 — Typed dependency blockers and transient-observation hysteresis
 
+> **ARCHIVED TICKET** — 당시 실행 입력이다. 현재 판정은 **PARTIAL**이며 distinct-attempt
+> hysteresis는 완료, host dependency identity/evidence는 [`../NEXT-PLAN.md`](../NEXT-PLAN.md)의 R3이다.
 
 > **구현 대조 (2026-08-30, 코드 확인)** — 히스테리시스(3회 distinct attempt)는 진짜이고, **의존성 식별 절반이 명세와 반대**다.
 > - `observeBlocker`는 mutation kind가 아니다. 하나의 `addBlocker` mutation(+선택적 `attemptId`/`target`)을 actor로 라우팅한다(`src/objective/blocker-observation.ts`). `mutations.ts`/`policy.ts`의 관련 주석은 아직 옛 설명을 담고 있다.

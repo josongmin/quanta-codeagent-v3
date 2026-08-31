@@ -1,3 +1,4 @@
+# ARCHIVED RECEIPT: point-in-time evidence, not current HEAD status. See ../README.md and ../NEXT-PLAN.md.
 ticket: GOAL-07
 kind: self-audit receipt (implementation by the Codex lane: 280419815 "make session attach objective-atomic", merged via 9b21d2fd2)
 recordedAt: 2026-08-27T02:45:00Z

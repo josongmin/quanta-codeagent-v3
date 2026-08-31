@@ -1,5 +1,7 @@
 # GOAL-05 — CLI facade: /goal 단일 control, preset gate, status renderer
 
+> **ARCHIVED TICKET** — 당시 실행 입력이다. 현재 CLI control 판정은 **DONE**이고 read-time
+> freshness만 별도 잔여다. [`../NEXT-PLAN.md`](../NEXT-PLAN.md)의 R2를 따른다.
 
 > **구현 대조 (2026-08-30, 코드 확인)** — 대부분 구현됐고 두 가지가 다르다.
 > - `currentSourceStale`과 렌더러 `(stale!)` 마커는 **미구현**(`src/apps/cli/slash/goal-render.ts`는 `source: <digest>|unverified`만 출력). RED 9의 후반부는 검증 불가.

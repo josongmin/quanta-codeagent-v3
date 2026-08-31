@@ -1,5 +1,7 @@
 # GOAL-07 — Transactional attach/fork and session-epoch fence
 
+> **ARCHIVED TICKET** — 당시 설계안이다. 현재 판정은 **BEHAVIOR DONE / SPEC DIVERGED**이며
+> 실제 authority는 `attachGeneration`과 lifecycle cancellation이다. 현재 잔여는 R7을 따른다.
 
 > **구현 대조 (2026-08-30, 코드 확인)** — 이 티켓의 **Epoch fence / Transaction 섹션은 구현되지 않았다.**
 > - `sessionEpoch`, `WakeLifecyclePort` 는 repo 전체에 존재하지 않는다(grep 0). 실제 fence는 objective별 `attachGeneration` 카운터(`src/objective/authority.ts`)다.

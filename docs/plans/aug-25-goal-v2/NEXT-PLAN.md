@@ -1,10 +1,12 @@
 # aug-25 /goal v2 — 현재 잔여 작업 계획
 
-기준: `main` `08fb52c175b0289cb26d794bbab9862851b9904d`, 2026-08-31 KST.
+제품 소스 재대조 기준: `08fb52c175b0289cb26d794bbab9862851b9904d` (`origin/main`, 2026-08-31).
+이후 이 폴더를 갱신한 commit은 문서·feature catalog 변경뿐이며, 이 문서의 current plan은 아래
+8개 항목이다.
 
 이 문서는 과거 티켓의 미구현 목록을 복사하지 않는다. 현재 코드에서 생산자·소비자·프로덕션
 조립·테스트를 다시 확인한 결과만 남긴 실행 계획이다. 과거 결함과 커밋 기록은
-[`README.md`](README.md)의 실행 기록과 Git 이력에 보존한다.
+[`HISTORY.md`](HISTORY.md), 티켓·receipt와 Git 이력에 보존한다.
 
 ## 완료 경계
 

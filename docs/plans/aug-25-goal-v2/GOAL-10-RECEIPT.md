@@ -1,5 +1,9 @@
 # GOAL-10 verification receipt
 
+> **ARCHIVED RECEIPT** — 2026-08-26 SHA의 point-in-time evidence다. 현재 HEAD의 green receipt나
+> 현재 잔여 목록이 아니다. 현재 판정은 [`README.md`](README.md), 실행 계획은
+> [`NEXT-PLAN.md`](NEXT-PLAN.md)를 따른다.
+
 Date: 2026-08-26 · **superseded in part — see the addendum at the bottom (2026-08-30)**
 
 Branch: `codex/goal-v2-main-integration` (landed on `main`; the goal lane was
@@ -94,8 +98,15 @@ build objective authority and expose the `objective_*` tools
 controller — `startGoalWakeController` still has exactly two production callers
 (`interactive-setup.ts`, `goal-wake-compose.ts`).
 
-What this receipt claimed as delivered scope but the code does not have:
-`tests/smoke/goal/`, the telemetry decision-counter set and its label-allowlist
-test, and 9 of the 14 PTY battery items. Those are tracked in `README.md`
-"현재 상태 — 열린 항목 (2026-08-30)".
+At the 2026-08-30 addendum, the observed gaps were `tests/smoke/goal/`, the
+telemetry decision-counter set and its label-allowlist test, and 9 of the 14
+planned PTY items. This point-in-time statement is superseded by the correction
+below and is not the current gap list.
 
+## Addendum — 2026-08-31 current-doc correction
+
+- turn-scoped settlement decision counter와 bounded `{kind,outcome}` labels는 후속 구현으로 live다.
+  wake/enqueue/completion/verifier lifecycle telemetry는 여전히 열려 있다.
+- PTY 파일은 현재 11개 case다. 과거 9/10 case 수와 "9 of 14" 문구는 current count가 아니다.
+- browser mutation/verification controls와 approval-resume goal attribution은 후속 구현으로 닫혔다.
+- 정확한 현재 gap은 `NEXT-PLAN.md`의 R1~R8에서만 관리한다.

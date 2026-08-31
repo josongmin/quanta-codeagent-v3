@@ -1,5 +1,7 @@
 # GOAL-03 — Read-only verifier runtime and source-evidence reconciliation
 
+> **ARCHIVED TICKET** — 당시 실행 입력이다. 현재 판정은 **PARTIAL**이며 열린 범위는
+> sandbox/posture와 read-time freshness다. [`../NEXT-PLAN.md`](../NEXT-PLAN.md)의 R1/R2를 따른다.
 
 > **구현 대조 (2026-08-30, 코드 확인)** — 이 티켓의 **읽기전용 실행 계약 절반이 미구현**이다.
 > - `maybeWireObjectiveVerifier`(`src/host/runtime/objective-verifier-wire.ts`)가 `perCallWrap` 없이 runner를 만든다 ⇒ `wrapSandboxArgv`가 통과되어 **샌드박스 없이 spawn**. readable-root allowlist / network deny / 격리 temp / CPU·메모리·fan-out·출력 바이트 캡 전부 없음(벽시계 타임아웃만).

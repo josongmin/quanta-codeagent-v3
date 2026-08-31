@@ -1,5 +1,7 @@
 # GOAL-01 — Domain v2, snapshot migration, and public mutator closure
 
+> **ARCHIVED TICKET** — 당시 실행 입력이다. 현재 판정은 **DONE**이다. 세부 잔여 계획은
+> [`../NEXT-PLAN.md`](../NEXT-PLAN.md)를 따른다.
 
 > **구현 대조 (2026-08-30, 코드 확인)** — 도메인은 명세대로 랜딩했고 이름이 여럿 다르다.
 > - `OBJECTIVE_MUTATION_KINDS` → `OBJECTIVE_OPERATION_KINDS`(`src/objective/mutations.ts`) · `ObjectiveReadPort`에 `getRevision` 없음(`get/list/readDomain`) · 명세된 6개 이름있는 capability(`VerifierCommitPort` 등)는 존재하지 않고 actor-keyed `ObjectiveCapabilities` 하나로 통합됐다(`src/objective/capabilities.ts`).

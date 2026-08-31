@@ -1,3 +1,6 @@
+# ARCHIVED RECEIPT: point-in-time evidence, not current HEAD status. See ../README.md and ../NEXT-PLAN.md.
+# 2026-08-31 correction: browser mutation/verify producers and approval-resume goal attribution are live;
+# ticketRedRailsVacuous below is superseded. Browser always-on wake/checkpoint projection remains open.
 ticket: GOAL-08
 kind: self-audit receipt (implementation by the Codex lane: b0f2e1c87 "atomically submit web goal turns", merged via 9b21d2fd2)
 recordedAt: 2026-08-27T02:45:00Z

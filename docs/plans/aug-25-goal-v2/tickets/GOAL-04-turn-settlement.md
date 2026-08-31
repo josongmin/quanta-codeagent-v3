@@ -1,5 +1,7 @@
 # GOAL-04 — Attributed turn settlement and durable outcome ordering
 
+> **ARCHIVED TICKET** — 당시 실행 입력이다. 현재 판정은 **DONE**이다. 현재 상태는
+> [`../README.md`](../README.md)를 따른다.
 
 > **구현 대조 (2026-08-30, 코드 확인)** — 귀속·정산은 명세대로이고 형태가 둘 다르다.
 > - 런타임 입력의 `objectiveAttempt?: {...}`는 **capability 객체** `objectiveAttemptSlot`(claim/take/release/failStop/recover/status)로 구현됐다(`src/objective/attempt.ts`).

@@ -1,5 +1,7 @@
 # GOAL-02 — Exhaustive authority policy and deterministic completion
 
+> **ARCHIVED TICKET** — 당시 실행 입력이다. 현재 판정은 **DONE**이다. 세부 잔여 계획은
+> [`../NEXT-PLAN.md`](../NEXT-PLAN.md)를 따른다.
 
 > **구현 대조 (2026-08-30, 코드 확인)** — 정책표·완료 판정은 구현됐고 세 가지가 다르다.
 > - `MutationVerdict`는 `"allow" | "approval" | { deny: CommitRejection }`로 진화했다(deny가 타입코드를 실음).

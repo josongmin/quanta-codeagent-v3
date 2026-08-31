@@ -1,10 +1,13 @@
 # GOAL-10 — evidence + catalog: 실제 PTY/web E2E, fc 게이트, promotion 판정
 
+> **ARCHIVED TICKET** — 당시 실행 입력이다. 현재 판정은 **PARTIAL**이며 최신 evidence gap은
+> [`../NEXT-PLAN.md`](../NEXT-PLAN.md)의 R5/R6을 따른다.
 
-> **구현 대조 (2026-08-30, 코드 확인)** — 카탈로그·승격·바이너리 parity는 구현됐고, 두 덩어리가 미구현이다.
-> - **텔레메트리 섹션 전부 미구현**: decision counter(armed/skipped(reason)/enqueue/attempt/completion/verifier)와 label allowlist 테스트가 하나도 없다(`src/objective/**`, `src/apps/web-daemon/goal-*.ts`에 카운터 0, `tests/unit/observability`에 goal label 테스트 0).
+> **구현 대조 (2026-08-30, 2026-08-31 정정)** — 카탈로그·승격·바이너리 parity는 구현됐다.
+> - **텔레메트리 부분 구현**: turn-scoped settlement decision counter와 bounded `{kind,outcome}`
+>   labels는 live다. wake/enqueue/completion/verifier lifecycle counters와 producer별 guard는 남는다.
 > - **`tests/smoke/goal/` 없음**(`tests/smoke/`엔 swebench와 LSP 관측 스위트뿐).
-> - PTY 배터리 14항목 중 실제 존재는 약 5항목(1 부분, 2, 7, 10 부분, 11 부분). 없는 것: 3(check add→verify→stale), 4(자율 멀티턴 완료), 5(pause/resume), 6(edit), 8(예산 소진), 9(no-progress 간격), 12(blocker 2/3→3/3), 13(zero-criteria 완료 거절), 14(attach B).
+> - 현재 PTY 파일은 11개 case다. 정확한 누락 public matrix는 `NEXT-PLAN.md` R6에서 관리한다.
 > - receipt는 `receipts/GOAL-10.yaml`이 아니라 플랜 루트의 `GOAL-10-RECEIPT.md`다.
 
 **Priority:** P1 · **Depends on:** GOAL-01~09 전부 · **크기:** ~30 tool-use, main-direct

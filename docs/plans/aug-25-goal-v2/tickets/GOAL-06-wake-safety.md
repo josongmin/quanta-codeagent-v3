@@ -1,5 +1,7 @@
 # GOAL-06 — Bounded event-driven wake controller and hard product cap
 
+> **ARCHIVED TICKET** — 당시 실행 입력이다. 현재 판정은 **CORE DONE / SEAM DEBT**이며
+> CLI attach/close seam은 [`../NEXT-PLAN.md`](../NEXT-PLAN.md)의 R7을 따른다.
 
 > **구현 대조 (2026-08-30, 코드 확인)** — 핵심 안전 rail은 구현됐고 세 가지가 다르다.
 > - CLI의 `attachingOrClosing`은 **상시 false**다: `armGoalWake` 호출부가 그 함수를 넘기지 않아 `?? false`로 떨어진다(`src/apps/cli/repl/session-loop/interactive-setup.ts`). 8개 quiescence 저장소 중 attach/close만 실투영이 아니다. 웹 데몬은 투영한다.

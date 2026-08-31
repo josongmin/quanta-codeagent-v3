@@ -1,3 +1,6 @@
+# ARCHIVED RECEIPT: point-in-time evidence, not current HEAD status. See ../README.md and ../NEXT-PLAN.md.
+# 2026-08-31 correction: PRODUCT_BUDGET_CEILING and automatic CLI settlement checkpoint are live;
+# the contrary docAudit/ticketRedRails claims below are superseded historical observations.
 ticket: GOAL-05A
 kind: implementation
 lineage: authored on codex/main-goal04-overlay; merged into main by 9b21d2fd2 (reconcile parallel goal and verification lanes). The merge kept the Codex lane's controller/facade shape and this lane's attempt slot, SETTLEMENT_OUTCOME, onPush fix; the GOAL-06 remediation on 2026-08-27 re-landed the dropped guards (see GOAL-06.yaml).
