@@ -44,6 +44,7 @@ import { stripComments } from "@/shared/source-text"
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 const DEBT = join(REPO_ROOT, "tools", "dev", "scan-enrollment-debt.json")
 const MANIFEST = join(REPO_ROOT, "tools", "dev", "scan-migration-manifest.json")
+const FULL_SCAN_TIMEOUT_MS = 30_000
 
 type DebtFile = {
   readonly unenrolled?: readonly string[]
@@ -66,6 +67,13 @@ const failsClosed = (): readonly {
   readonly site: string
   readonly why: string
 }[] => debtFile().failsClosed ?? []
+
+// The three assertions below inspect one immutable source snapshot. Re-reading
+// the full guard census for each adds no coverage but makes the default 5s Bun
+// timeout depend on host contention.
+let cachedScanVerdictGuards: readonly string[] | undefined
+const scanVerdictGuardPopulation = (): readonly string[] =>
+  (cachedScanVerdictGuards ??= scanVerdictGuards())
 
 /**
  * An absolute path that is not inside this repo — a HOST corpus.
@@ -125,20 +133,26 @@ const callsHelper = (rel: string): boolean =>
   /\bassertScanPopulation\s*\(/.test(stripComments(readFileSync(join(REPO_ROOT, rel), "utf8")))
 
 describe("scan enrollment", () => {
-  test("anti-vacuity: the population is real and the debt list is a subset of it", () => {
-    // Both directions matter. A population that came back empty would make the
-    // ratchet below pass over nothing, and a debt entry naming a file that is not
-    // in the population is a permission for something the rule never covered.
-    const population = scanVerdictGuards()
-    expect(population.length, "the census found no scan-verdict guards at all").toBeGreaterThan(50)
-    const known = new Set(population)
-    const strays = debtList().filter((f) => !known.has(f))
-    expect(
-      strays,
-      `these are listed as enrollment debt but are not scan-verdict guards — ` +
-        `remove them:\n  ${strays.join("\n  ")}`,
-    ).toEqual([])
-  })
+  test(
+    "anti-vacuity: the population is real and the debt list is a subset of it",
+    () => {
+      // Both directions matter. A population that came back empty would make the
+      // ratchet below pass over nothing, and a debt entry naming a file that is not
+      // in the population is a permission for something the rule never covered.
+      const population = scanVerdictGuardPopulation()
+      expect(population.length, "the census found no scan-verdict guards at all").toBeGreaterThan(
+        50,
+      )
+      const known = new Set(population)
+      const strays = debtList().filter((f) => !known.has(f))
+      expect(
+        strays,
+        `these are listed as enrollment debt but are not scan-verdict guards — ` +
+          `remove them:\n  ${strays.join("\n  ")}`,
+      ).toEqual([])
+    },
+    FULL_SCAN_TIMEOUT_MS,
+  )
 
   test("🔴 the migration manifest and the debt list name the SAME files", () => {
     // Two hand-maintained lists of the same set drift, and this pair already had:
@@ -244,26 +258,30 @@ describe("scan enrollment", () => {
     expect(faults, faults.join("\n  ")).toEqual([])
   })
 
-  test("🔴 no NEW scanning guard states a verdict without an enrolled reach", () => {
-    const owed = new Set([
-      ...debtList(),
-      ...externalCorpus().map((e) => e.file),
-      ...failsClosed().map((e) => e.file),
-    ])
-    const added = scanVerdictGuards()
-      .filter((f) => !owed.has(f))
-      .filter((f) => !isEnrolled(f))
-    expect(
-      added,
-      added.length === 0
-        ? ""
-        : "these scan the repo and state a zero-verdict, but their floor is a number written " +
-            "at the call site — which cannot see a subtree disappear. Call " +
-            "`assertScanPopulation` from tests/unit/_shared/scan-population.ts and pin the " +
-            "MEASURED reach in tools/dev/scan-reach-baseline.json:\n  " +
-            added.join("\n  "),
-    ).toEqual([])
-  })
+  test(
+    "🔴 no NEW scanning guard states a verdict without an enrolled reach",
+    () => {
+      const owed = new Set([
+        ...debtList(),
+        ...externalCorpus().map((e) => e.file),
+        ...failsClosed().map((e) => e.file),
+      ])
+      const added = scanVerdictGuardPopulation()
+        .filter((f) => !owed.has(f))
+        .filter((f) => !isEnrolled(f))
+      expect(
+        added,
+        added.length === 0
+          ? ""
+          : "these scan the repo and state a zero-verdict, but their floor is a number written " +
+              "at the call site — which cannot see a subtree disappear. Call " +
+              "`assertScanPopulation` from tests/unit/_shared/scan-population.ts and pin the " +
+              "MEASURED reach in tools/dev/scan-reach-baseline.json:\n  " +
+              added.join("\n  "),
+      ).toEqual([])
+    },
+    FULL_SCAN_TIMEOUT_MS,
+  )
 
   test("🔴 a MENTION is not an enrollment", () => {
     // The instrument's own vacuity, found by attacking it: a file whose only
@@ -275,23 +293,27 @@ describe("scan enrollment", () => {
     expect(/\bassertScanPopulation\s*\(/.test(stripComments(mention))).toBe(false)
   })
 
-  test("🔴 a file that CALLS the helper must own an id", () => {
-    // The gap between migrating a guard and pinning its reach. A call with no
-    // baseline row throws at runtime (the closed universe), but a call whose row
-    // exists while no ledger entry claims it is silent: `scan-reach` would never
-    // expect anything from that file, so it stops reporting unnoticed.
-    const orphans = scanVerdictGuards()
-      .filter((f) => callsHelper(f))
-      .filter((f) => !isEnrolled(f))
-      .sort()
-    expect(
-      orphans,
-      orphans.length === 0
-        ? ""
-        : "these call the helper but claim no baseline id in scan-enrollment-debt.json, so " +
-            `nothing notices when they stop reporting:\n  ${orphans.join("\n  ")}`,
-    ).toEqual([])
-  })
+  test(
+    "🔴 a file that CALLS the helper must own an id",
+    () => {
+      // The gap between migrating a guard and pinning its reach. A call with no
+      // baseline row throws at runtime (the closed universe), but a call whose row
+      // exists while no ledger entry claims it is silent: `scan-reach` would never
+      // expect anything from that file, so it stops reporting unnoticed.
+      const orphans = scanVerdictGuardPopulation()
+        .filter((f) => callsHelper(f))
+        .filter((f) => !isEnrolled(f))
+        .sort()
+      expect(
+        orphans,
+        orphans.length === 0
+          ? ""
+          : "these call the helper but claim no baseline id in scan-enrollment-debt.json, so " +
+              `nothing notices when they stop reporting:\n  ${orphans.join("\n  ")}`,
+      ).toEqual([])
+    },
+    FULL_SCAN_TIMEOUT_MS,
+  )
 
   test("🔴 no expectedIds entry names a file that is not enrolled", () => {
     // The other direction: an entry for a file that no longer calls the helper
