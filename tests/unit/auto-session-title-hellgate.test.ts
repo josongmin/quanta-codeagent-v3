@@ -92,10 +92,12 @@ describe("auto-title · TURN-BLOCK guard (the #1 pin)", () => {
       ports({ llm, rename: async (_id, t) => void writes.push(t) }),
     )
     // If maybeTitle awaited the LLM this would hang the test. It must return now.
-    const before = Date.now()
-    port.maybeTitle("s1", "build me a web server")
-    const after = Date.now()
-    expect(after - before).toBeLessThan(50) // returned immediately, did not await
+    const returned = port.maybeTitle("s1", "build me a web server")
+    // Structural contract, not a host-load benchmark: an async/awaiting
+    // implementation would return a Promise. The hanging stream makes a
+    // synchronous wait impossible, while `undefined` pins the fire-and-forget
+    // API without a flaky wall-clock threshold.
+    expect(returned).toBeUndefined()
     expect(writes).toEqual([]) // nothing written yet (and never will be)
   })
 

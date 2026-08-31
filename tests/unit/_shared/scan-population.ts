@@ -1,5 +1,5 @@
 import { expect } from "bun:test"
-import { appendFileSync, existsSync } from "node:fs"
+import { appendFileSync } from "node:fs"
 import { join, relative, resolve } from "node:path"
 import { readScanReachBaseline, type ScanReach } from "../../../tools/dev/scan-reach-baseline"
 
@@ -101,12 +101,22 @@ const trackedUnder = (
   // macOS `/tmp` ↔ `/private/tmp` canonicalisation cannot change how paths are
   // joined back to the caller's filesystem spelling.
   gitOutput(key, ["rev-parse", "--show-toplevel"], sourceEnv)
+  // Ask Git for deleted index entries instead of consulting the process-global
+  // filesystem module. Hermetic production tests deliberately spy on fs reads;
+  // caching a transient mocked `existsSync() === false` here poisoned every
+  // later scan in the Bun worker with an empty tracked set. Both commands are
+  // one index snapshot, and the existing deleted-path hellgate keeps the
+  // "tracked but absent is not reach" contract.
+  const deleted = new Set(
+    gitOutput(key, ["ls-files", "--deleted", "-z", "--", "."], sourceEnv)
+      .split("\0")
+      .filter((p) => p !== ""),
+  )
   const paths = new Set(
     gitOutput(key, ["ls-files", "-z", "--", "."], sourceEnv)
       .split("\0")
-      .filter((p) => p !== "")
-      .map((p) => join(key, p))
-      .filter((p) => existsSync(p)),
+      .filter((p) => p !== "" && !deleted.has(p))
+      .map((p) => join(key, p)),
   )
   trackedCache.set(key, paths)
   return paths
