@@ -1,4 +1,4 @@
-import type { GoalWakeStatus } from "@/objective"
+import type { GoalWakeStatus, ObjectiveLifecycleSink } from "@/objective"
 import type { CliPromptInput } from "./prompt-types"
 
 /**
@@ -31,10 +31,16 @@ export interface GoalWakeSignal {
 
 export interface GoalWakeSignalSlot {
   current: GoalWakeSignal | undefined
+  readonly lifecycleSink?: ObjectiveLifecycleSink | undefined
   /** GOAL-05/08 rail 15 — late-bound by the session loop once the external
    *  prompt queue exists: `/goal work` pushes ONE foreground prompt carrying
    *  host-minted `user-requested-goal-work` provenance through it. */
   enqueueWork?: ((input: CliPromptInput) => void) | undefined
 }
 
-export const createGoalWakeSignalSlot = (): GoalWakeSignalSlot => ({ current: undefined })
+export const createGoalWakeSignalSlot = (
+  lifecycleSink?: ObjectiveLifecycleSink,
+): GoalWakeSignalSlot => ({
+  current: undefined,
+  ...(lifecycleSink !== undefined ? { lifecycleSink } : {}),
+})

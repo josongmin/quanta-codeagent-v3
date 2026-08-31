@@ -4,6 +4,7 @@ import {
   createObjectiveCapabilities,
   DEFAULT_GOAL_WAKE_POLICY,
   type ObjectiveAttemptSlot,
+  type ObjectiveLifecycleSink,
   type ObjectivePort,
   type ObjectiveReadPort,
   startGoalWakeController,
@@ -24,6 +25,7 @@ export interface WebGoalWakeRuntimePorts {
   readonly objectiveAuthority?: ObjectivePort
   /** The daemon base's attributed-attempt slot (fail-stop gate for the wake). */
   readonly objectiveAttemptSlot?: ObjectiveAttemptSlot
+  readonly objectiveLifecycleSink?: ObjectiveLifecycleSink
   readonly activeTurnRef?: ActiveTurnRefHolder
 }
 
@@ -118,6 +120,9 @@ export const composeWebGoalWake = async (args: {
     readDomain: (id) => read.readDomain(id),
     isQuiescent: () => quiescent(view, args.runtime.activeTurnRef),
     ...(attemptSlot !== undefined ? { attemptSlot } : {}),
+    ...(args.runtime.objectiveLifecycleSink !== undefined
+      ? { lifecycleSink: args.runtime.objectiveLifecycleSink }
+      : {}),
     ...(args.setTimeoutFn !== undefined ? { setTimeoutFn: args.setTimeoutFn } : {}),
     ...(args.clearTimeoutFn !== undefined ? { clearTimeoutFn: args.clearTimeoutFn } : {}),
     ...(args.onStateChange !== undefined ? { onStatusChange: args.onStateChange } : {}),

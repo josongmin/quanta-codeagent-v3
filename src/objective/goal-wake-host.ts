@@ -35,6 +35,7 @@ import {
   type GoalWakeSettlementHint,
   safePolicy,
 } from "./goal-wake-policy"
+import type { ObjectiveLifecycleSink } from "./lifecycle-telemetry"
 import type { ObjectiveDomainSnapshot } from "./model"
 
 /** The host-bound probes + resume sink (everything in `ContinuationDeps` except
@@ -127,6 +128,8 @@ export interface StartGoalWakeOpts {
   readonly onClampWarning?: ((message: string) => void) | undefined
   /** Host projection refresh edge. No identity-bearing payload. */
   readonly onStatusChange?: (() => void) | undefined
+  /** Optional bounded lifecycle telemetry. */
+  readonly lifecycleSink?: ObjectiveLifecycleSink | undefined
   /** Optional typed queue hand-off. The CLI uses this to retain the captured
    * revision through dequeue; legacy hosts may keep the plain resume sink. */
   readonly resumeAttempt?: (threadId: string, attempt: GoalWakeAttempt) => Promise<void>
@@ -295,6 +298,7 @@ export const startGoalWakeController = (opts: StartGoalWakeOpts): GoalWakeLifecy
       if (!outcome.launched) throw new Error(`goal wake not launched: ${outcome.skipReason}`)
     },
     ...(opts.onStatusChange !== undefined ? { onStatusChange: opts.onStatusChange } : {}),
+    ...(opts.lifecycleSink !== undefined ? { lifecycleSink: opts.lifecycleSink } : {}),
   })
 
   const resetForNextCheckpoint = (): void => {

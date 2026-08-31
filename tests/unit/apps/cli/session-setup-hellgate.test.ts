@@ -241,7 +241,7 @@ const makeStubDeps = (
     },
     buildTurnSummaryAndStream: (_featureCfg, stream) => {
       probe.buildTurnSummaryAndStreamCalls += 1
-      return { collector: stubSummary as never, stream }
+      return { collector: stubSummary as never, stream, decisionMetrics: undefined }
     },
     buildTurnIndicatorAndStream: (_featureCfg, _statusBar, stream, usageObserver) => {
       probe.buildTurnIndicatorAndStreamCalls += 1

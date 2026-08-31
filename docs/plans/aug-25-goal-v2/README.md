@@ -28,7 +28,7 @@
 | GOAL-07 attach/fork | **BEHAVIOR DONE / SPEC DIVERGED** | 실제 fence는 `attachGeneration`과 attach lifecycle cancellation. 과거 `sessionEpoch` 설계는 현행 계약이 아님 |
 | GOAL-08 browser controls | **DONE** | work attribution, approval resume attribution, revision CAS, receipt correlation, 전체 browser `/goal` verb가 live |
 | GOAL-09 blockers | **IMPLEMENTED / PROMOTION PENDING** | host RunLedger/TaskRegistry dependency identity와 opaque occurrence evidence, typed unresolved가 focused green. main/R6 gate 대기 |
-| GOAL-10 evidence | **PARTIAL** | settlement decision counter와 feature catalog는 live. lifecycle telemetry 나머지와 PTY/smoke matrix는 미완료 |
+| GOAL-10 evidence | **IMPLEMENTED / PROMOTION PENDING** | settlement decision counter와 bounded lifecycle counter가 live. R6 PTY/smoke/full-gate receipt 대기 |
 | Browser always-on state | **IMPLEMENTED / PROMOTION PENDING** | canonical `goal.state` push/reconnect replay, freshness/wake/latest settlement, observability-independent UI가 focused green. main/R6 gate 대기 |
 
 ## 남은 작업
@@ -36,9 +36,8 @@
 우선순위와 dependency order는 [`NEXT-PLAN.md`](NEXT-PLAN.md), 상세 실행 계약은
 [`tickets/current/`](tickets/current/README.md)에 있다.
 
-1. settlement 외 lifecycle telemetry
-2. PTY public matrix와 Goal-aware dedicated smoke harness
-3. R1/R2/R3/R7/R4를 포함한 same-HEAD full promotion gate와 main 반영
+1. PTY public matrix와 Goal-aware dedicated smoke harness
+2. R1~R5/R7을 포함한 same-HEAD full promotion gate와 main 반영
 
 headless/batch autonomous pursuit는 남은 구현 티켓이 아니라 deliberate hold다. 제품이 persistent
 goal-runner semantics를 승인할 때만 별도 promotion 작업으로 연다.
@@ -65,6 +64,8 @@ goal-runner semantics를 승인할 때만 별도 promotion 작업으로 연다.
 - settlement: `src/host/runtime/internal/context-binding/objective-settlement.ts`,
   `src/host/runtime/internal/context-binding/turn-runner.ts`
 - wake: `src/objective/goal-wake-host.ts`, `src/objective/goal-wake-policy.ts`
+- lifecycle telemetry: `src/objective/lifecycle-telemetry.ts`,
+  `src/observability/metrics/objective-lifecycle.ts`
 - browser controls: `apps/web-frontend/src/components/slash-goal.ts`,
   `tests/integration/goal-control-ws-daemon-e2e.test.ts`
 - public CLI: `tests/e2e-pty/cli-goal-pursuit-e2e.test.ts`

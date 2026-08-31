@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import { composeWebGoalWake } from "@/apps/web-daemon/goal-wake-compose"
-import { asObjectiveAuthority, createObjectiveAttemptSlot, createObjectiveStore } from "@/objective"
+import {
+  asObjectiveAuthority,
+  createObjectiveAttemptSlot,
+  createObjectiveStore,
+  type ObjectiveLifecycleEvent,
+} from "@/objective"
 import type { SessionEvent, SessionSnapshotLite } from "@/protocol/session"
 import type { RuntimeSession } from "@/sdk/runtime"
 import { capabilitiesFor } from "../../../support/session-fixtures"
@@ -104,6 +109,29 @@ describe("web goal wake composition", () => {
     expect(submissions[0]?.text).toContain("Remaining criterion IDs:")
     handle?.stop()
     expect(fake.unsubscribed()).toBe(1)
+  })
+
+  test("R5 threads the facade lifecycle sink into the web wake controller", async () => {
+    const store = createObjectiveStore()
+    store.create("web-goal", { goal: "ship", successCriteria: ["tests pass"] })
+    const timer = fakeTimer()
+    const events: ObjectiveLifecycleEvent[] = []
+    const fake = fakeSession(async () => ({ revision: 1, seq: 2, events: [] }))
+    const handle = await composeWebGoalWake({
+      session: fake.session,
+      runtime: {
+        objectiveAuthority: store,
+        objectiveLifecycleSink: { record: (event) => events.push(event) },
+      },
+      env: { QUANTA_GOAL_ENFORCE: "1" },
+      setTimeoutFn: timer.set,
+      clearTimeoutFn: timer.clear,
+    })
+    expect(events).toEqual([{ stage: "wake", outcome: "armed" }])
+    timer.fire()
+    await flush()
+    expect(events).toContainEqual({ stage: "enqueue", outcome: "admitted" })
+    handle?.stop()
   })
 
   test("authority revision drift invalidates the issued capability", async () => {

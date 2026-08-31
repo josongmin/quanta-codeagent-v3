@@ -28,6 +28,7 @@ import type { LLMPort } from "@/llm"
 import {
   createObjectiveAttemptSlot,
   type ObjectiveAttemptSlot,
+  type ObjectiveLifecycleSink,
   type ObjectivePort,
 } from "@/objective"
 import type { UsageAccountingPort } from "@/observability/usage-accounting"
@@ -84,6 +85,11 @@ const objectiveSlot = (
       // (no budget, no receipt, no hard-cap consumption).
       { objective, objectiveAttemptSlot: createObjectiveAttemptSlot() }
     : {}
+
+const objectiveLifecycleSlot = (
+  sink: ObjectiveLifecycleSink | undefined,
+): { objectiveLifecycleSink?: ObjectiveLifecycleSink } =>
+  sink === undefined ? {} : { objectiveLifecycleSink: sink }
 
 const turnActivitySlot = (
   activeTurnRef: ActiveTurnRefHolder | undefined,
@@ -150,6 +156,7 @@ export const buildAgentConfigBase = async ({
   activeTurnRef,
   observability,
   objective,
+  objectiveLifecycleSink,
   postureControl,
   questionGuard,
   usageAccounting,
@@ -198,6 +205,8 @@ export const buildAgentConfigBase = async ({
   // gate off) ⇒ omitted ⇒ `base.objective` undefined (byte-identical legacy,
   // whatever observability is).
   readonly objective?: ObjectivePort | undefined
+  /** R5 — optional bounded lifecycle sink shared by authority and verifier. */
+  readonly objectiveLifecycleSink?: ObjectiveLifecycleSink | undefined
   // RFC-05 E4 — the surface-owned posture FRONT-DOOR control; present ⇒ the host
   // `session.posture.set` applies the FULL lossless patch through the SAME live
   // authority the gate reads. Absent ⇒ mode-only compat (byte-identical).
@@ -211,7 +220,7 @@ export const buildAgentConfigBase = async ({
    *  share ONE book. Absent ⇒ the kill switch was thrown at the root; the
    *  assembler resolves the same env, so off stays off everywhere. */
   readonly usageAccounting?: UsageAccountingPort | undefined
-}): Promise<RuntimeAgentConfigBase> => {
+}): Promise<RuntimeAgentConfigBase & { objectiveLifecycleSink?: ObjectiveLifecycleSink }> => {
   const webEnvPosture = resolveCliDefaultEnvPosture(env)
   // WS4 R7/R8 — the web/Tauri surface runs on the user's OWN cwd
   // (interactive-class trust), so it honors the repo's AGENTS.md/CLAUDE.md like
@@ -336,6 +345,7 @@ export const buildAgentConfigBase = async ({
     // (single authority, no split-brain). Absent (TOOLS off) ⇒ omitted ⇒
     // undefined (byte-identical legacy). Sourced here, NOT from `observabilitySlots`.
     ...objectiveSlot(objective),
+    ...objectiveLifecycleSlot(objectiveLifecycleSink),
     ...observabilitySlots(observability),
   }
   return base

@@ -31,6 +31,7 @@ import {
   type CheckRunInput,
   type CheckRunResult,
   createObjectiveCapabilities,
+  emitObjectiveLifecycle,
   isEvidenceFailure,
   isStrictVerifierExecutionPosture,
   MAX_BATCH_DEADLINE_MS,
@@ -39,6 +40,7 @@ import {
   type Objective,
   type ObjectiveCheckRunner,
   type ObjectiveCommands,
+  type ObjectiveLifecycleSink,
   type ObjectivePort,
   type ObjectiveReadPort,
   type ObjectiveVerificationPort,
@@ -336,6 +338,7 @@ export interface CoordinatorDeps {
   readonly evidence: WorkspaceEvidencePort
   readonly workspaceCwd: string
   readonly now?: () => number
+  readonly lifecycleSink?: ObjectiveLifecycleSink | undefined
 }
 
 type CheckedCriterion = Extract<Objective["successCriteria"][number], { kind: "checked" }>
@@ -349,6 +352,33 @@ const failureOutcome = (
 
 const isChecked = (c: Objective["successCriteria"][number]): c is CheckedCriterion =>
   c.kind === "checked"
+
+const emitVerifierOutcome = (
+  sink: ObjectiveLifecycleSink | undefined,
+  outcome: VerificationOutcome | ReconcileOutcome,
+): void => {
+  switch (outcome.kind) {
+    case "verified":
+      emitObjectiveLifecycle(sink, { stage: "verifier", outcome: "verified" })
+      return
+    case "stale-source":
+    case "invalidated":
+      emitObjectiveLifecycle(sink, { stage: "verifier", outcome: "stale-source" })
+      return
+    case "sandbox-unavailable":
+      emitObjectiveLifecycle(sink, { stage: "verifier", outcome: "sandbox-unavailable" })
+      return
+    case "runner-unavailable":
+      emitObjectiveLifecycle(sink, { stage: "verifier", outcome: "runner-unavailable" })
+      return
+    case "source-unavailable":
+    case "cap-exceeded":
+      emitObjectiveLifecycle(sink, { stage: "verifier", outcome: "source-unavailable" })
+      return
+    default:
+      return
+  }
+}
 
 type CheckAttempt =
   | { readonly kind: "ok"; readonly result: CheckRunResult }
@@ -500,154 +530,184 @@ const selectChecks = (
   return checked
 }
 
+interface CoordinatorState {
+  cached?: { precheck: string; digest: string } | undefined
+}
+
+const invalidateChecks = (
+  deps: CoordinatorDeps,
+  threadId: string,
+  objectiveId: string,
+  checkIds: readonly string[],
+  reason: "stale-source" | "runner-unavailable" | "sandbox-unavailable" | "cancelled",
+  observed?: string,
+): void => {
+  if (checkIds.length === 0) return
+  deps.verifier.commit(threadId, {
+    kind: "invalidateVerification",
+    objectiveId,
+    checkIds,
+    reason,
+    ...(observed !== undefined ? { observedSourceDigest: observed } : {}),
+  })
+}
+
+const currentSourceDigest = async (
+  deps: CoordinatorDeps,
+  state: CoordinatorState,
+): Promise<string | WorkspaceEvidenceFailure> => {
+  const pre = await deps.evidence.precheck(deps.workspaceCwd)
+  if (isEvidenceFailure(pre)) return pre
+  if (state.cached?.precheck === pre) return state.cached.digest
+  const full = await deps.evidence.capture(deps.workspaceCwd)
+  if (isEvidenceFailure(full)) return full
+  state.cached = { precheck: pre, digest: full.sourceDigest }
+  return full.sourceDigest
+}
+
+const settleVerificationRun = async (
+  deps: CoordinatorDeps,
+  state: CoordinatorState,
+  now: () => number,
+  threadId: string,
+  objective: Objective,
+  checked: readonly CheckedCriterion[],
+  beforeDigest: string,
+  results: readonly VerificationBatchResult[],
+  executionPosture: VerifierExecutionPosture,
+): Promise<VerificationOutcome> => {
+  const after = await deps.evidence.capture(deps.workspaceCwd)
+  if (isEvidenceFailure(after)) return failureOutcome(after)
+  if (after.sourceDigest !== beforeDigest) {
+    invalidateChecks(
+      deps,
+      threadId,
+      objective.objectiveId,
+      checked.map((c) => c.check.id),
+      "stale-source",
+      after.sourceDigest,
+    )
+    return { kind: "stale-source" }
+  }
+  state.cached = undefined
+  return commitBatch(
+    deps,
+    threadId,
+    objective.objectiveId,
+    checked,
+    after.sourceDigest,
+    results,
+    executionPosture,
+    now,
+  )
+}
+
+const verifyObjective = async (
+  deps: CoordinatorDeps,
+  state: CoordinatorState,
+  now: () => number,
+  ...args: Parameters<ObjectiveVerificationPort["verify"]>
+): ReturnType<ObjectiveVerificationPort["verify"]> => {
+  const [threadId, criterionIds, signal, expectedRevision] = args
+  const domain = deps.read.readDomain(threadId)
+  if (expectedRevision !== undefined && domain.revision !== expectedRevision) {
+    return { kind: "rejected", reason: `stale-revision:${domain.revision}` }
+  }
+  const objective = domain.state?.objective
+  if (objective === undefined) return { kind: "rejected", reason: "objective-missing" }
+  const checked = selectChecks(objective, criterionIds)
+  if (!Array.isArray(checked)) return checked
+  const before = await deps.evidence.capture(deps.workspaceCwd)
+  if (isEvidenceFailure(before)) return failureOutcome(before)
+  const results = await runChecks(deps, checked, now() + MAX_BATCH_DEADLINE_MS, now, signal)
+  if (results.kind !== "ok") {
+    invalidateChecks(
+      deps,
+      threadId,
+      objective.objectiveId,
+      checked.map((c) => c.check.id),
+      results.kind,
+    )
+    return results.kind === "cancelled" ? { kind: "cancelled" } : results
+  }
+  return settleVerificationRun(
+    deps,
+    state,
+    now,
+    threadId,
+    objective,
+    checked,
+    before.sourceDigest,
+    results.results,
+    results.executionPosture,
+  )
+}
+
+const invalidateStaleChecks = (
+  deps: CoordinatorDeps,
+  threadId: string,
+  objectiveId: string,
+  checkIds: readonly string[],
+  digest: string,
+): ReconcileOutcome => {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const res = deps.verifier.commit(threadId, {
+      kind: "invalidateVerification",
+      objectiveId,
+      checkIds,
+      reason: "stale-source",
+      observedSourceDigest: digest,
+    })
+    if (res.ok || res.reason !== "stale") return { kind: "invalidated", checkIds }
+  }
+  return { kind: "freshness-unresolved" }
+}
+
+const reconcileObjective = async (
+  deps: CoordinatorDeps,
+  state: CoordinatorState,
+  threadId: string,
+): ReturnType<ObjectiveVerificationPort["reconcile"]> => {
+  const objective = deps.read.readDomain(threadId).state?.objective
+  if (objective === undefined) return { kind: "no-objective" }
+  const verified = objective.successCriteria
+    .filter(isChecked)
+    .filter((c) => c.met && c.completion?.source === "verifier")
+  if (verified.length === 0) return { kind: "fresh", verified: 0 }
+  const digest = await currentSourceDigest(deps, state)
+  if (isEvidenceFailure(digest)) {
+    return digest.kind === "cap-exceeded"
+      ? { kind: "cap-exceeded", reason: digest.reason }
+      : { kind: "source-unavailable", reason: digest.reason }
+  }
+  const stale = verified.filter((c) => c.completion?.sourceDigest !== digest)
+  if (stale.length === 0) return { kind: "fresh", verified: verified.length }
+  return invalidateStaleChecks(
+    deps,
+    threadId,
+    objective.objectiveId,
+    stale.map((c) => c.check.id),
+    digest,
+  )
+}
+
 export const createObjectiveVerificationCoordinator = (
   deps: CoordinatorDeps,
 ): ObjectiveVerificationCoordinator => {
   const now = deps.now ?? Date.now
-  let cached: { precheck: string; digest: string } | undefined
-
-  const invalidate = (
-    threadId: string,
-    objectiveId: string,
-    checkIds: readonly string[],
-    reason: "stale-source" | "runner-unavailable" | "sandbox-unavailable" | "cancelled",
-    observed?: string,
-  ): void => {
-    if (checkIds.length === 0) return
-    deps.verifier.commit(threadId, {
-      kind: "invalidateVerification",
-      objectiveId,
-      checkIds,
-      reason,
-      ...(observed !== undefined ? { observedSourceDigest: observed } : {}),
-    })
+  const state: CoordinatorState = {}
+  return {
+    verify: async (...args) => {
+      const outcome = await verifyObjective(deps, state, now, ...args)
+      emitVerifierOutcome(deps.lifecycleSink, outcome)
+      return outcome
+    },
+    reconcile: async (threadId) => {
+      const outcome = await reconcileObjective(deps, state, threadId)
+      emitVerifierOutcome(deps.lifecycleSink, outcome)
+      return outcome
+    },
   }
-
-  /** Full digest, skipping the manifest rehash when the cheap precheck is unchanged. */
-  const currentDigest = async (): Promise<string | WorkspaceEvidenceFailure> => {
-    const pre = await deps.evidence.precheck(deps.workspaceCwd)
-    if (isEvidenceFailure(pre)) return pre
-    if (cached !== undefined && cached.precheck === pre) return cached.digest
-    const full = await deps.evidence.capture(deps.workspaceCwd)
-    if (isEvidenceFailure(full)) return full
-    cached = { precheck: pre, digest: full.sourceDigest }
-    return full.sourceDigest
-  }
-
-  /** After the checks ran: the tree must be byte-identical to the pre-run capture. */
-  const settleRun = async (
-    threadId: string,
-    objective: Objective,
-    checked: readonly CheckedCriterion[],
-    beforeDigest: string,
-    results: readonly VerificationBatchResult[],
-    executionPosture: VerifierExecutionPosture,
-  ): Promise<VerificationOutcome> => {
-    const after = await deps.evidence.capture(deps.workspaceCwd)
-    if (isEvidenceFailure(after)) return failureOutcome(after)
-    if (after.sourceDigest !== beforeDigest) {
-      invalidate(
-        threadId,
-        objective.objectiveId,
-        checked.map((c) => c.check.id),
-        "stale-source",
-        after.sourceDigest,
-      )
-      return { kind: "stale-source" }
-    }
-    cached = undefined
-    return commitBatch(
-      deps,
-      threadId,
-      objective.objectiveId,
-      checked,
-      after.sourceDigest,
-      results,
-      executionPosture,
-      now,
-    )
-  }
-
-  const verify: ObjectiveVerificationPort["verify"] = async (
-    threadId,
-    criterionIds,
-    signal,
-    expectedRevision,
-  ) => {
-    const domain = deps.read.readDomain(threadId)
-    if (expectedRevision !== undefined && domain.revision !== expectedRevision) {
-      return { kind: "rejected", reason: `stale-revision:${domain.revision}` }
-    }
-    const objective = domain.state?.objective
-    if (objective === undefined) return { kind: "rejected", reason: "objective-missing" }
-    const checked = selectChecks(objective, criterionIds)
-    if (!Array.isArray(checked)) return checked
-    const before = await deps.evidence.capture(deps.workspaceCwd)
-    if (isEvidenceFailure(before)) return failureOutcome(before)
-    const results = await runChecks(deps, checked, now() + MAX_BATCH_DEADLINE_MS, now, signal)
-    if (results.kind !== "ok") {
-      invalidate(
-        threadId,
-        objective.objectiveId,
-        checked.map((c) => c.check.id),
-        results.kind,
-      )
-      return results.kind === "cancelled" ? { kind: "cancelled" } : results
-    }
-    return settleRun(
-      threadId,
-      objective,
-      checked,
-      before.sourceDigest,
-      results.results,
-      results.executionPosture,
-    )
-  }
-
-  /** Invalidate the named checks (bounded CAS retry). */
-  const invalidateStale = (
-    threadId: string,
-    objectiveId: string,
-    checkIds: readonly string[],
-    digest: string,
-  ): ReconcileOutcome => {
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      const res = deps.verifier.commit(threadId, {
-        kind: "invalidateVerification",
-        objectiveId,
-        checkIds,
-        reason: "stale-source",
-        observedSourceDigest: digest,
-      })
-      if (res.ok || res.reason !== "stale") return { kind: "invalidated", checkIds }
-    }
-    return { kind: "freshness-unresolved" }
-  }
-
-  const reconcile: ObjectiveVerificationPort["reconcile"] = async (threadId) => {
-    const objective = deps.read.readDomain(threadId).state?.objective
-    if (objective === undefined) return { kind: "no-objective" }
-    const verified = objective.successCriteria
-      .filter(isChecked)
-      .filter((c) => c.met && c.completion?.source === "verifier")
-    if (verified.length === 0) return { kind: "fresh", verified: 0 }
-    const digest = await currentDigest()
-    if (isEvidenceFailure(digest)) {
-      return digest.kind === "cap-exceeded"
-        ? { kind: "cap-exceeded", reason: digest.reason }
-        : { kind: "source-unavailable", reason: digest.reason }
-    }
-    const stale = verified.filter((c) => c.completion?.sourceDigest !== digest)
-    if (stale.length === 0) return { kind: "fresh", verified: verified.length }
-    return invalidateStale(
-      threadId,
-      objective.objectiveId,
-      stale.map((c) => c.check.id),
-      digest,
-    )
-  }
-
-  return { verify, reconcile }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -660,6 +720,7 @@ export const maybeWireObjectiveVerifier = (cfg: {
   objective?: ObjectivePort | undefined
   objectiveVerifier?: ObjectiveVerificationPort | undefined
   cwd?: string | undefined
+  objectiveLifecycleSink?: ObjectiveLifecycleSink | undefined
 }): void => {
   if (cfg.objectiveVerifier !== undefined || cfg.objective === undefined) return
   const caps = createObjectiveCapabilities(cfg.objective)
@@ -669,6 +730,9 @@ export const maybeWireObjectiveVerifier = (cfg: {
     runner: createObjectiveCheckRunner(),
     evidence: createWorkspaceEvidence(),
     workspaceCwd: cfg.cwd ?? process.cwd(),
+    ...(cfg.objectiveLifecycleSink !== undefined
+      ? { lifecycleSink: cfg.objectiveLifecycleSink }
+      : {}),
   })
 }
 

@@ -242,6 +242,7 @@ export const makeFakeSessionSetup = (
   planMode: false,
   providerRateLimitRemainingPercent: undefined,
   metrics: undefined,
+  decisionMetrics: undefined,
   state: undefined,
   mcpClients: [],
   mcpTools: [],

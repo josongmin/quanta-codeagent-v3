@@ -30,7 +30,7 @@ historical evidence이며 현재 미구현 목록으로 사용하지 않는다.
 | 3 | [R3 blocker identity](tickets/current/R3-blocker-dependency-authority.md) | **FOCUSED GREEN · main integration pending** | host registry `dependencyId`, bounded occurrence pairs, dependency-based dedupe, typed unresolved |
 | 4 | [R7 attach/close seam](tickets/current/R7-cli-attach-close-seam.md) | **FOCUSED GREEN · main integration pending** | attach hook 단일 truth, dead field 삭제, interactive `finally` 첫 동작 synchronous stop |
 | 5 | [R4 web always-on state](tickets/current/R4-web-always-on-goal-state.md) | **FOCUSED GREEN · main integration pending** | canonical HTTP/WS encoder, default-ON `goal.state`, absolute wake time, reconnect replay |
-| 6 | [R5 lifecycle telemetry](tickets/current/R5-objective-lifecycle-telemetry.md) | settlement decision counter 외 lifecycle producer가 없음 | bounded stage/outcome sink와 metrics adapter, identifier/text label 금지 |
+| 6 | [R5 lifecycle telemetry](tickets/current/R5-objective-lifecycle-telemetry.md) | **FOCUSED GREEN · main integration pending** | 14-series closed vocabulary, CLI/web shared metrics sink, producer removal ratchet |
 | 7 | [R6 public proof battery](tickets/current/R6-pty-and-smoke-proof.md) | public control/verify/budget/attach rail과 Goal-aware smoke가 부족 | PTY/integration 분리, production authority를 조립한 dedicated Goal smoke, full gate receipt |
 
 ### 의도적 보류
@@ -66,6 +66,8 @@ R8 headless/batch: deliberate hold, DAG 밖
 - R4는 새 settlement sink/store를 만들지 않고 objective domain `progressReceipts`를 투영한다.
 - 실제 wake union은 `armed|pending|idle|stopped`이며, reconnect 가능한 absolute `wakeAt/retryAt`을 쓴다.
 - R5 metric label은 closed enum만 허용하고 goal text나 각종 ID를 싣지 않는다.
+- R5는 `QUANTA_DECISION_METRICS`가 켜진 composition root에서만 registry/sink를 만들고,
+  authority/verifier/wake가 같은 no-throw sink를 공유한다. settlement는 기존 decision counter만 사용한다.
 - R6 generic smoke runner는 ObjectiveAuthority/verifier/wake가 없어 Goal proof로 사용하지 않는다.
 - R7은 existing attach lifecycle hooks만 truth로 유지하고 dead boolean seam을 삭제했다. close-start
   stop과 clear-failure generation fence의 focused rail이 green이며 R6 same-HEAD promotion을 기다린다.

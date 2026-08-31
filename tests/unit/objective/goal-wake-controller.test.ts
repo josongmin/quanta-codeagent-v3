@@ -397,4 +397,59 @@ describe("goal wake controller lifecycle", () => {
     controller.stop() // idempotent
     expect(transitions).toEqual(["armed", "idle", "stopped"])
   })
+
+  test("R5 lifecycle producer emits closed wake/enqueue outcomes without identity", async () => {
+    const timer = fakeTimer()
+    const events: Array<{ stage: string; outcome: string }> = []
+    let current = domain(1)
+    const controller = createGoalWakeController({
+      enabled: true,
+      quietWindowMs: 100,
+      timer,
+      readDomain: () => current,
+      stillQuiescent: () => true,
+      enqueue: () => undefined,
+      lifecycleSink: { record: (event) => events.push(event) },
+    })
+
+    controller.arm({ threadId: "thread-1", checkpointOrdinal: 0 })
+    controller.cancel()
+    controller.arm({ threadId: "thread-1", checkpointOrdinal: 1 })
+    current = domain(2)
+    timer.fire()
+    current = domain(2, "paused")
+    controller.reset({ threadId: "thread-1", checkpointOrdinal: 2 })
+    current = domain(2)
+    controller.reset({ threadId: "thread-1", checkpointOrdinal: 3 })
+    timer.fire()
+    await Promise.resolve()
+
+    expect(events).toEqual([
+      { stage: "wake", outcome: "armed" },
+      { stage: "wake", outcome: "canceled" },
+      { stage: "wake", outcome: "armed" },
+      { stage: "enqueue", outcome: "stale" },
+      { stage: "wake", outcome: "skipped" },
+      { stage: "wake", outcome: "armed" },
+      { stage: "enqueue", outcome: "admitted" },
+    ])
+    expect(JSON.stringify(events)).not.toContain("thread-1")
+  })
+
+  test("R5 default-OFF controller emits no lifecycle event", () => {
+    const events: unknown[] = []
+    const controller = createGoalWakeController({
+      enabled: false,
+      quietWindowMs: 100,
+      timer: fakeTimer(),
+      readDomain: () => domain(1),
+      stillQuiescent: () => true,
+      enqueue: () => undefined,
+      lifecycleSink: { record: (event) => events.push(event) },
+    })
+    controller.arm({ threadId: "thread-1", checkpointOrdinal: 0 })
+    controller.cancel()
+    controller.stop()
+    expect(events).toEqual([])
+  })
 })

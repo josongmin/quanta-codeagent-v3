@@ -42,9 +42,14 @@ import { type LLMPort, type Provider, resolveBootSelection, tryCreateLLM } from 
 import {
   applyGoalPreset,
   type ObjectiveAttemptSlot,
+  type ObjectiveLifecycleSink,
   type ObjectivePort,
   type ObjectiveVerificationPort,
 } from "@/objective"
+import {
+  createObjectiveLifecycleMetricsSink,
+  defaultMetricsRegistry,
+} from "@/observability/metrics/index"
 import { createUsageAccounting, resolveUsageAccounting } from "@/observability/usage-accounting"
 import { getDefaultPermissionStore, type PermissionStore } from "@/permission"
 import { createRuntimeFromAgentConfigBase } from "@/sdk/runtime"
@@ -151,11 +156,18 @@ const assembleWebRuntimeParts = async (
   // per-connection park ⇒ NO `restoreFrom` (mint fresh). This replaces the old
   // mint that lived INSIDE `wireSessionObservability`, which left `base.objective`
   // undefined whenever observability was OFF (cross-turn goal amnesia).
+  const objectiveLifecycleSink: ObjectiveLifecycleSink | undefined = gateOn(
+    env,
+    "QUANTA_DECISION_METRICS",
+  )
+    ? createObjectiveLifecycleMetricsSink(defaultMetricsRegistry())
+    : undefined
   let objectiveRunLedger: import("@/agent/run-ledger").RunLedgerPort | undefined
   const objective = resolveGatedObjectiveAuthority(env, {
     confirmationAvailable: false,
     runLedger: () => objectiveRunLedger,
     taskRegistry: () => taskRegistry,
+    ...(objectiveLifecycleSink !== undefined ? { lifecycleSink: objectiveLifecycleSink } : {}),
   })
   // A7 — the session's usage-accounting authority, minted at THIS root (the
   // third composition root, after the assembler and the CLI bundle) so the
@@ -229,6 +241,7 @@ const assembleWebRuntimeParts = async (
     skillAuthority,
     skillsWithAuthority,
     objective,
+    objectiveLifecycleSink,
     usageAccounting,
     observability,
     canvasToolDiff,
@@ -324,6 +337,7 @@ const buildFacadeGetters = (
     // undefined-skip removes the need for a guard ternary here.
     ...objectivePorts(parts.objective, base.objectiveAttemptSlot),
     ...(base.objectiveVerifier !== undefined ? { objectiveVerifier: base.objectiveVerifier } : {}),
+    objectiveLifecycleSink: parts.objectiveLifecycleSink,
     // A7 — the read-only cost authority for the daemon's projection surfaces.
     ...(parts.usageAccounting !== undefined ? { usageAccounting: parts.usageAccounting } : {}),
     canvasUsage: parts.canvasUsage,
@@ -425,6 +439,7 @@ export const buildProductionRuntimeFactory = (
       usageHolder,
       skillsWithAuthority,
       objective,
+      objectiveLifecycleSink,
       observability,
       canvasToolDiff,
       artifactRegistry,
@@ -472,6 +487,7 @@ export const buildProductionRuntimeFactory = (
       // ADOPTS the SAME port (no per-turn re-mint ⇒ durable goal + live snapshot +
       // a real out-of-band `session.objective.mutate`).
       objective,
+      objectiveLifecycleSink,
       // A7 — same-instance threading: the assembler ADOPTS a caller authority,
       // so the daemon's readout/emitter and the loop's sink share one book.
       usageAccounting: parts.usageAccounting,

@@ -14,7 +14,7 @@
 
 import type { AgentConfig } from "@/agent"
 import type { RunLedgerPort } from "@/agent/run-ledger"
-import { asObjectiveAuthority, type ObjectivePort } from "@/objective"
+import { asObjectiveAuthority, type ObjectiveLifecycleSink, type ObjectivePort } from "@/objective"
 import {
   buildObjectiveAuthority,
   createRegistryBlockerDependencyResolver,
@@ -71,6 +71,7 @@ export const resolveGatedObjectiveAuthority = (
      * objective authority. */
     readonly runLedger?: (() => RunLedgerPort | undefined) | undefined
     readonly taskRegistry?: (() => TaskRegistry | undefined) | undefined
+    readonly lifecycleSink?: ObjectiveLifecycleSink | undefined
   },
 ): ObjectivePort | undefined => {
   if (!gateOn(env, "QUANTA_OBJECTIVE_TOOLS")) return undefined
@@ -92,6 +93,7 @@ export const resolveGatedObjectiveAuthority = (
     ...(gateProposal ? { gateOn: true, confirmationAvailable: opts.confirmationAvailable } : {}),
     ...(opts.restoreFrom !== undefined ? { restoreFrom: opts.restoreFrom } : {}),
     ...(blockerDependencyResolver !== undefined ? { blockerDependencyResolver } : {}),
+    ...(opts.lifecycleSink !== undefined ? { lifecycleSink: opts.lifecycleSink } : {}),
   })
 }
 

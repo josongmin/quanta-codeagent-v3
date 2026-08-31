@@ -340,6 +340,7 @@ const buildSetup = async (
     mcpHealth: undefined,
     liveModelSource: { source: () => "test-model" },
     contextUsageHolder: undefined as never,
+    decisionMetrics: undefined,
     permissionStore: undefined,
     // RFC-def `/undo` — durable hunk-mutation journal store; absent by default
     // (gate off) in the fixture. Required on SessionSetupResult.

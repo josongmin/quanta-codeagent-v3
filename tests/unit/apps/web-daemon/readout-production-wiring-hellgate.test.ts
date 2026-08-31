@@ -41,6 +41,7 @@ const ENV_KEYS = [
   "QUANTA_CONFIG_DIR",
   "QUANTA_SESSIONS_DIR",
   "QUANTA_MCP_CONFIG",
+  "QUANTA_DECISION_METRICS",
 ] as const
 const saved = new Map<string, string | undefined>(ENV_KEYS.map((k) => [k, process.env[k]]))
 const realFetch = globalThis.fetch
@@ -207,5 +208,20 @@ describe("production runtime factory — readout sources are LIVE on the facade"
     expect((await resolveReadout("plan", SNAP, sources)).wired).toBe(true)
     expect(networkAttempts).toBe(0)
     delete process.env.QUANTA_MEMORY
+  })
+
+  test("R5 lifecycle metrics sink is absent by default and present only behind its gate", async () => {
+    delete process.env.QUANTA_DECISION_METRICS
+    __resetRuntimeConfig()
+    const off = await buildHermeticFactory()()
+    expect((off as { objectiveLifecycleSink?: unknown }).objectiveLifecycleSink).toBeUndefined()
+    await off.close()
+
+    process.env.QUANTA_DECISION_METRICS = "1"
+    __resetRuntimeConfig()
+    const on = await buildHermeticFactory()()
+    expect((on as { objectiveLifecycleSink?: unknown }).objectiveLifecycleSink).toBeDefined()
+    await on.close()
+    delete process.env.QUANTA_DECISION_METRICS
   })
 })

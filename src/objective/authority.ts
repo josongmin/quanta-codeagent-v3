@@ -48,6 +48,7 @@ import type { ManualCompletionReceipt } from "./criteria/model"
 import { isVerifierReceipt } from "./criteria/model"
 import { autonomousAllowance, resolveProductAutonomousTurnCap } from "./goal-wake-policy"
 import { defaultObjectiveIdFactory, MAX_GOAL_CHARS, normalizeGoalText } from "./identity"
+import { emitObjectiveLifecycle } from "./lifecycle-telemetry"
 import type { ObjectiveDomainSnapshot, ValidationContract } from "./model"
 import {
   isGenerationMutationKind,
@@ -453,6 +454,43 @@ const applyMutation = (
   return handler(core, threadId, m as never, ctx)
 }
 
+const requestsCompletion = (mutation: ObjectiveMutation): boolean =>
+  (mutation.kind === "markCriterion" && mutation.met === true) ||
+  mutation.kind === "markCriterionVerified" ||
+  mutation.kind === "applyVerificationBatch"
+
+const emitMutationLifecycle = (
+  sink: ObjectiveAuthorityOptions["lifecycleSink"],
+  mutation: ObjectiveMutation,
+  outcome: ApplyOutcome,
+  statusBefore: Objective["status"] | undefined,
+): void => {
+  if (!outcome.applied) {
+    if (requestsCompletion(mutation)) {
+      emitObjectiveLifecycle(sink, { stage: "completion", outcome: "refused" })
+    }
+    return
+  }
+  if (mutation.kind === "beginAttempt") {
+    emitObjectiveLifecycle(sink, { stage: "attempt", outcome: "started" })
+  }
+  if (statusBefore !== "completed" && outcome.result?.status === "completed") {
+    emitObjectiveLifecycle(sink, { stage: "completion", outcome: "satisfied" })
+  }
+}
+
+const rejectedCommit = (
+  sink: ObjectiveAuthorityOptions["lifecycleSink"],
+  mutation: ObjectiveMutation,
+  reason: CommitRejection,
+  currentRevision: number,
+): CommitResult => {
+  if (requestsCompletion(mutation)) {
+    emitObjectiveLifecycle(sink, { stage: "completion", outcome: "refused" })
+  }
+  return { ok: false, reason, currentRevision }
+}
+
 /** GOAL-02 — resolve the policy verdict for a bound command into a commit
  *  rejection (or `null` to proceed to CAS). `approval` needs an admitted receipt
  *  AND a confirmation-capable surface (fail-closed, never a bypass). */
@@ -663,6 +701,7 @@ const createAuthorityRuntimeState = (
     mutation: ObjectiveMutation,
     actor: ObjectiveActor,
   ): ApplyOutcome => {
+    const statusBefore = core.get(threadId)?.status
     const evidence: EvidenceContext = {
       receipts: progress.get(threadId) ?? [],
       append: (receipt) =>
@@ -686,6 +725,7 @@ const createAuthorityRuntimeState = (
       if (isGenerationMutationKind(mutation.kind)) progress.delete(threadId)
       bump(threadId)
     }
+    emitMutationLifecycle(opts?.lifecycleSink, mutation, outcome, statusBefore)
     return outcome
   }
   // The `ObjectivePort` surface commits as a trusted `system` actor. A REFUSED
@@ -737,12 +777,11 @@ const createAuthorityMutationProtocol = (
   const commit = (prepared: PreparedObjectiveMutation, approval: ApprovalReceipt): CommitResult => {
     const command = prepared.command
     const threadId = isNonEmptyString(command.threadId) ? command.threadId : ""
-    if (threadId === "") return { ok: false, reason: "invalid", currentRevision: 0 }
+    if (threadId === "") return rejectedCommit(opts?.lifecycleSink, command.mutation, "invalid", 0)
     const current = revisionOf(threadId)
     // CAS — the domain must still be at the prepared revision.
-    if (current !== prepared.expectedRevision) {
-      return { ok: false, reason: "stale", currentRevision: current }
-    }
+    if (current !== prepared.expectedRevision)
+      return rejectedCommit(opts?.lifecycleSink, command.mutation, "stale", current)
     // GOAL-02 — policy runs AFTER CAS: a writer that lost the race sees `stale`
     // (it must re-read), a current writer sees the policy verdict.
     const rejected = policyRejection(
@@ -752,7 +791,8 @@ const createAuthorityMutationProtocol = (
       gateOn,
       confirmationAvailable,
     )
-    if (rejected !== null) return { ok: false, reason: rejected, currentRevision: current }
+    if (rejected !== null)
+      return rejectedCommit(opts?.lifecycleSink, command.mutation, rejected, current)
     const outcome = route(threadId, command.mutation, command.actor)
     if (!outcome.applied) {
       return { ok: false, reason: outcome.rejection ?? "invalid", currentRevision: current }

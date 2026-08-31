@@ -30,6 +30,7 @@ import {
   createObjectiveAuthority,
   type ObjectiveDomainSnapshot,
   type ObjectiveIdFactory,
+  type ObjectiveLifecycleSink,
   type ObjectivePort,
   type SuccessCriterion,
 } from "@/objective"
@@ -61,6 +62,8 @@ export interface BuildObjectiveAuthorityInput {
   readonly confirmationAvailable?: boolean
   /** Host registry authority for model blocker dependency resolution. */
   readonly blockerDependencyResolver?: BlockerDependencyResolverPort
+  /** Optional bounded lifecycle sink owned by the composition root. */
+  readonly lifecycleSink?: ObjectiveLifecycleSink
   /** RFC-03 C2 — durable resume: a previously persisted objective snapshot (v1
    *  or v2) to restore at construction (ids / revision / provenance preserved).
    *  Absent ⇒ a fresh empty authority. */
@@ -87,6 +90,7 @@ export const buildObjectiveAuthority = (input: BuildObjectiveAuthorityInput = {}
     ...(input.blockerDependencyResolver !== undefined
       ? { blockerDependencyResolver: input.blockerDependencyResolver }
       : {}),
+    ...(input.lifecycleSink !== undefined ? { lifecycleSink: input.lifecycleSink } : {}),
     ...(input.restoreFrom !== undefined
       ? { restoreDomains: decodeObjectiveSnapshot(input.restoreFrom) }
       : {}),

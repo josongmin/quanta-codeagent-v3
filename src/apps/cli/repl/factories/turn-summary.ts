@@ -59,7 +59,11 @@ const appendDecisionCounterSink = (
 export const buildTurnSummaryAndStream = (
   featureCfg: CliFeatureConfig,
   stream: StreamPort,
-): { collector: TurnSummaryCollector; stream: StreamPort } => {
+): {
+  collector: TurnSummaryCollector
+  stream: StreamPort
+  decisionMetrics: MetricsRegistry | undefined
+} => {
   const { enabled, verbose } = featureCfg.turnSummary
   const collector = createTurnSummary({ enabled, verbose })
   const decisionMetrics = resolveDecisionMetricsRegistry(featureCfg.decisionMetricsEnabled)
@@ -68,7 +72,11 @@ export const buildTurnSummaryAndStream = (
     // if the operator opts in via the env knob. When both are OFF (the
     // default), the returned stream is the literal input (byte-identical
     // no-tee path).
-    return { collector, stream: appendDecisionCounterSink(stream, decisionMetrics) }
+    return {
+      collector,
+      stream: appendDecisionCounterSink(stream, decisionMetrics),
+      decisionMetrics,
+    }
   }
   // WS-G (UUX-1-18) — this is the INNERMOST tee wrapping the recorder leg on
   // the default-ON TTY path, so a silently-swallowed recorder/collector
@@ -83,5 +91,5 @@ export const buildTurnSummaryAndStream = (
       })
     },
   })
-  return { collector, stream: appendDecisionCounterSink(teed, decisionMetrics) }
+  return { collector, stream: appendDecisionCounterSink(teed, decisionMetrics), decisionMetrics }
 }

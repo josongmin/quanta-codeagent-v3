@@ -331,6 +331,9 @@ const armGoalWake = (args: {
           // GOAL-08 round 3 — a fail-stopped attempt slot is a binding skip
           // (never arm) and is reported on the `/goal` wake line.
           ...(attemptSlot !== undefined ? { attemptSlot } : {}),
+          ...(goalWakeSlot?.lifecycleSink !== undefined
+            ? { lifecycleSink: goalWakeSlot.lifecycleSink }
+            : {}),
           resumeAttempt: async (tid, attempt) => {
             const domain = objectiveCapabilities.read.readDomain(tid)
             const criteria = domain.state?.objective.successCriteria ?? []

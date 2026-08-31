@@ -266,6 +266,12 @@ describe("CLI-06 — repl.ts host slim-down (ADR-0307)", () => {
     expect(barrel.buildWorkMetricsSink(false)).toBeUndefined()
     const sum = barrel.buildTurnSummaryAndStream(offCfg, stubStream)
     expect(sum.stream).toBe(stubStream)
+    expect(sum.decisionMetrics).toBeUndefined()
+    const metricsOn = barrel.buildTurnSummaryAndStream(
+      { ...offCfg, decisionMetricsEnabled: true },
+      stubStream,
+    )
+    expect(metricsOn.decisionMetrics).toBeDefined()
     const ind = barrel.buildTurnIndicatorAndStream(offCfg, stubStatusBar, stubStream)
     expect(ind.turnStream).toBe(stubStream)
     const dbg = barrel.buildDebugTracerAndStream(offCfg, stubStream)

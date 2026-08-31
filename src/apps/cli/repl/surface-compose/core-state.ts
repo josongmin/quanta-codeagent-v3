@@ -20,6 +20,7 @@ import {
 } from "@/llm"
 import type { ModelCatalogWire } from "@/llm/model-catalog"
 import { createObjectiveAttemptSlot, createObjectiveCapabilities } from "@/objective"
+import { createObjectiveLifecycleMetricsSink } from "@/observability/metrics/index"
 import type { RadarStore } from "@/radar"
 import { decorateSwappableModelPort } from "@/runner/assemble"
 import { isApprovedDecision } from "@/runner/orchestrate"
@@ -234,27 +235,40 @@ const buildShadowSurface = (
   return { shadowOdb, perToolCkpt, shadowVerify }
 }
 
+const buildObjectiveRuntime = (setup: SessionSetupResult, env: NodeJS.ProcessEnv) => {
+  const lifecycleSink = setup.decisionMetrics
+    ? createObjectiveLifecycleMetricsSink(setup.decisionMetrics)
+    : undefined
+  const store = resolveGatedObjectiveAuthority(env, {
+    confirmationAvailable: true,
+    taskRegistry: () => setup.lifecycleTaskRegistry,
+    ...(setup.restoredObjective !== undefined ? { restoreFrom: setup.restoredObjective } : {}),
+    ...(lifecycleSink !== undefined ? { lifecycleSink } : {}),
+  })
+  if (store === undefined) return { lifecycleSink, store, verification: undefined }
+  const capabilities = createObjectiveCapabilities(store)
+  return {
+    lifecycleSink,
+    store,
+    verification: createObjectiveVerificationCoordinator({
+      read: capabilities.read,
+      verifier: capabilities.verifier,
+      runner: createObjectiveCheckRunner(),
+      evidence: createWorkspaceEvidence(),
+      workspaceCwd: setup.cwd,
+      ...(lifecycleSink !== undefined ? { lifecycleSink } : {}),
+    }),
+  }
+}
+
 const buildOperationalSurface = (
   setup: SessionSetupResult,
   env: NodeJS.ProcessEnv,
   convStore: ConversationCheckpointStore,
 ) => {
   const shadow = buildShadowSurface(setup, env, convStore)
-  const objectiveStore = resolveGatedObjectiveAuthority(env, {
-    confirmationAvailable: true,
-    taskRegistry: () => setup.lifecycleTaskRegistry,
-    ...(setup.restoredObjective !== undefined ? { restoreFrom: setup.restoredObjective } : {}),
-  })
-  const objectiveVerification =
-    objectiveStore === undefined
-      ? undefined
-      : createObjectiveVerificationCoordinator({
-          read: createObjectiveCapabilities(objectiveStore).read,
-          verifier: createObjectiveCapabilities(objectiveStore).verifier,
-          runner: createObjectiveCheckRunner(),
-          evidence: createWorkspaceEvidence(),
-          workspaceCwd: setup.cwd,
-        })
+  const objective = buildObjectiveRuntime(setup, env)
+  const objectiveStore = objective.store
   const goalPursuit = goalPursuitEnabled(env, objectiveStore)
   const turnActivity =
     isEnvTruthy(env.QUANTA_CONVERSATION_ACTIONS) || goalPursuit ? createTurnActivity() : undefined
@@ -262,7 +276,7 @@ const buildOperationalSurface = (
   const objectiveSettlementSink = goalPursuit
     ? buildGoalCheckpointSink((line) => process.stderr.write(line))
     : undefined
-  const goalWakeSlot = goalPursuit ? createGoalWakeSignalSlot() : undefined
+  const goalWakeSlot = goalPursuit ? createGoalWakeSignalSlot(objective.lifecycleSink) : undefined
   const conversationActions =
     isEnvTruthy(env.QUANTA_CONVERSATION_ACTIONS) && turnActivity !== undefined
       ? createConversationActionSurface(turnActivity.activeTurnRef)
@@ -270,7 +284,7 @@ const buildOperationalSurface = (
   return {
     ...shadow,
     objectiveStore,
-    objectiveVerification,
+    objectiveVerification: objective.verification,
     conversationActions,
     turnActivity,
     objectiveAttemptSlot,

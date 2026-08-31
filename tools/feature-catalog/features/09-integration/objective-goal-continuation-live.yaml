@@ -6,12 +6,13 @@ order: 97
 maturity: L3
 status: new
 ui_surfaces: [cli, web]
-monitoring: partial
+monitoring: integrated
 modes: [interactive, ide, daemon]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "codex-parity"]
 depends_on: [objective-first-class, objective-tools, objective-budget-enforce, objective-verifier-runtime]
+telemetry_keys: [quanta.objective.lifecycle.total]
 config_refs:
   env:
     - QUANTA_GOAL
@@ -21,6 +22,7 @@ config_refs:
     - QUANTA_GOAL_QUIET_MS
     - QUANTA_GOAL_MAX_BACKOFF_MS
     - QUANTA_GOAL_MAX_AUTONOMOUS_TURNS
+    - QUANTA_DECISION_METRICS
 surface_integration:
   cli: full
   web: full
@@ -71,6 +73,8 @@ evidence:
     - src/objective/goal-wake-controller.ts
     - src/objective/goal-wake-host.ts
     - src/objective/goal-wake-policy.ts
+    - src/objective/lifecycle-telemetry.ts
+    - src/observability/metrics/objective-lifecycle.ts
     - src/objective/progress-receipt.ts
     - src/objective/pursuit-prompt.ts
     - src/apps/cli/slash/goal-cmd.ts
@@ -138,6 +142,12 @@ evidence:
       - tests/unit/apps/web-daemon/readout-goal-hellgate.test.ts
       - tests/unit/apps/web-daemon/goal-work-silent-drop-hellgate.test.ts
       - tests/unit/web-goal-command-wiring-hellgate.test.ts
+      - tests/unit/objective/lifecycle-telemetry.test.ts
+      - tests/unit/objective/lifecycle-producers.test.ts
+      - tests/unit/objective/lifecycle-producer-wiring-ratchet.test.ts
+      - tests/unit/observability/objective-lifecycle-metrics.test.ts
+      - tests/unit/apps/web-daemon/goal-wake-compose.test.ts
+      - tests/unit/apps/web-daemon/readout-production-wiring-hellgate.test.ts
     integration:
       - tests/integration/goal-control-ws-daemon-e2e.test.ts
       - apps/web-frontend/src/components/slash-goal.control.test.ts
@@ -184,6 +194,10 @@ knobs:
     where: src/shared/runtime-config.ts
     default: 'off'
     purpose: Advanced shadow-only completion judge (enum; "shadow" observes, anything else is off). It can never mutate objective state — the authority owns completion.
+  - name: QUANTA_DECISION_METRICS
+    where: src/apps/cli/repl/factories/turn-summary.ts and src/apps/web-daemon/runtime-factory.ts
+    default: 'off'
+    purpose: Opts CLI/web composition into the shared decision and bounded objective lifecycle metrics registry; OFF allocates no lifecycle sink.
 deliberate_hold:
   reason: |
     Autonomous pursuit is deliberately limited to interactive CLI and web
@@ -201,10 +215,12 @@ notes: |
   modes. Headless and batch are excluded because no front-door goal-pursuit E2E
   exists for those surfaces and the deliberate-hold contract is recorded in
   docs/plans/aug-25-goal-v2/tickets/current/R8-headless-batch-deliberate-hold.md.
-  Monitoring is partial: typed skip reasons,
-  deterministic receipts, and a turn-scoped settlement decision counter exist;
-  wake/enqueue/completion/verifier lifecycle counters and live efficacy
-  measurement remain operational follow-ups. Web always-on state is complete:
+  Monitoring is integrated: typed skip reasons, deterministic receipts, the
+  turn-scoped settlement decision counter, and the bounded 14-series
+  `quanta.objective.lifecycle.total` funnel cover wake, enqueue, attempt,
+  completion, and verifier outcomes. The lifecycle metric is opt-in through
+  `QUANTA_DECISION_METRICS`; it carries only closed stage/outcome labels and
+  never duplicates settlement. Web always-on state is complete:
   canonical changed-only Goal snapshots include freshness, wake and the latest
   settlement and replay independently of the observability pane. Default-ON is bounded
   by the user-created-goal precondition, explicit opt-out, quiescence fences,

@@ -18,6 +18,7 @@
  * queues, clocks and the actual enqueue path are injected by the host.
  */
 
+import { emitObjectiveLifecycle, type ObjectiveLifecycleSink } from "./lifecycle-telemetry"
 import type { ObjectiveDomainSnapshot } from "./model"
 
 export type GoalWakeSkipReason =
@@ -115,6 +116,8 @@ export interface GoalWakeControllerDeps {
   /** Status-transition notification. Carries no objective/user identity and
    * cannot affect scheduling when it throws. */
   readonly onStatusChange?: (() => void) | undefined
+  /** Optional bounded lifecycle telemetry. */
+  readonly lifecycleSink?: ObjectiveLifecycleSink | undefined
 }
 
 export interface GoalWakeController {
@@ -318,11 +321,18 @@ const dispatchClaimedAttempt = (
 ): void => {
   try {
     Promise.resolve(deps.enqueue(attempt)).then(
-      () => reservation.commit(),
-      () => reservation.release(),
+      () => {
+        reservation.commit()
+        emitObjectiveLifecycle(deps.lifecycleSink, { stage: "enqueue", outcome: "admitted" })
+      },
+      () => {
+        reservation.release()
+        emitObjectiveLifecycle(deps.lifecycleSink, { stage: "enqueue", outcome: "rejected" })
+      },
     )
   } catch (_error) {
     reservation.release()
+    emitObjectiveLifecycle(deps.lifecycleSink, { stage: "enqueue", outcome: "rejected" })
   }
 }
 
@@ -400,6 +410,63 @@ const createStatusChangeEmitter = (
   }
 }
 
+const enqueueOutcomeForSkip = (reason: GoalWakeSkipReason | undefined): "stale" | "rejected" =>
+  reason === "revision-changed" ||
+  reason === "activity-epoch-changed" ||
+  reason === "no-longer-quiescent"
+    ? "stale"
+    : "rejected"
+
+interface FireAttemptState {
+  readonly stopped: () => boolean
+  readonly generation: () => number
+  readonly epoch: () => number
+  readonly markFired: () => void
+  readonly emitStatusChange: () => void
+  readonly reportSkip: (attempt: GoalWakeAttempt, reason: GoalWakeSkipReason) => void
+}
+
+const fireGoalWakeAttempt = (
+  deps: GoalWakeControllerDeps,
+  attempts: GoalWakeAttemptRegistry,
+  attempt: GoalWakeAttempt,
+  callbackGeneration: number,
+  state: FireAttemptState,
+): void => {
+  if (state.stopped()) return
+  if (callbackGeneration !== state.generation()) {
+    if (attempt.activityEpoch !== state.epoch()) {
+      state.reportSkip(attempt, "activity-epoch-changed")
+    }
+    return
+  }
+  state.markFired()
+  state.emitStatusChange()
+  const fire = evaluateGoalWakeFire({
+    enabled: deps.enabled,
+    stopped: state.stopped(),
+    expected: attempt,
+    current: readDomainSafe(deps, attempt.threadId),
+    activityEpoch: state.epoch(),
+    stillQuiescent: readHostQuiescence(deps, attempt.threadId),
+  })
+  if (!fire.arm) {
+    if (fire.skipReason !== undefined) state.reportSkip(attempt, fire.skipReason)
+    emitObjectiveLifecycle(deps.lifecycleSink, {
+      stage: "enqueue",
+      outcome: enqueueOutcomeForSkip(fire.skipReason),
+    })
+    return
+  }
+  const reservation = attempts.tryClaim(attempt)
+  if (reservation === null) {
+    state.reportSkip(attempt, "attempt-already-claimed")
+    emitObjectiveLifecycle(deps.lifecycleSink, { stage: "enqueue", outcome: "rejected" })
+    return
+  }
+  dispatchClaimedAttempt(deps, attempt, reservation)
+}
+
 export const createGoalWakeController = (deps: GoalWakeControllerDeps): GoalWakeController => {
   const attempts = deps.attempts ?? createInMemoryGoalWakeAttemptRegistry()
   const delayMs =
@@ -428,8 +495,8 @@ export const createGoalWakeController = (deps: GoalWakeControllerDeps): GoalWake
     }
   }
 
-  const clearPending = (): void => {
-    if (pending === undefined) return
+  const clearPending = (): boolean => {
+    if (pending === undefined) return false
     const handle = pending
     pending = undefined
     pendingWakeAt = 0
@@ -438,44 +505,26 @@ export const createGoalWakeController = (deps: GoalWakeControllerDeps): GoalWake
     } catch (_error) {
       // Generation fencing below still makes an uncleared callback inert.
     }
+    return true
   }
 
-  const readCurrent = (threadId: string): ObjectiveDomainSnapshot | null =>
-    readDomainSafe(deps, threadId)
   const captureAttempt = (
     input: GoalWakeArm,
   ): { readonly attempt: GoalWakeAttempt; readonly delayMs: number } | undefined =>
     captureWakeAttempt(deps, attempts, input, { stopped, epoch, delayMs })
 
   const fireAttempt = (attempt: GoalWakeAttempt, callbackGeneration: number): void => {
-    if (stopped) return
-    if (callbackGeneration !== generation) {
-      // A stale callback (the arm was replaced or cancelled). When raw input
-      // moved the epoch since the arm, say so typed instead of vanishing.
-      if (attempt.activityEpoch !== epoch) reportSkip(attempt, "activity-epoch-changed")
-      return
-    }
-    pending = undefined
-    pendingWakeAt = 0
-    emitStatusChange()
-    const fire = evaluateGoalWakeFire({
-      enabled: deps.enabled,
-      stopped,
-      expected: attempt,
-      current: readCurrent(attempt.threadId),
-      activityEpoch: epoch,
-      stillQuiescent: readHostQuiescence(deps, attempt.threadId),
+    fireGoalWakeAttempt(deps, attempts, attempt, callbackGeneration, {
+      stopped: () => stopped,
+      generation: () => generation,
+      epoch: () => epoch,
+      markFired: () => {
+        pending = undefined
+        pendingWakeAt = 0
+      },
+      emitStatusChange,
+      reportSkip,
     })
-    if (!fire.arm) {
-      if (fire.skipReason !== undefined) reportSkip(attempt, fire.skipReason)
-      return
-    }
-    const reservation = attempts.tryClaim(attempt)
-    if (reservation === null) {
-      reportSkip(attempt, "attempt-already-claimed")
-      return
-    }
-    dispatchClaimedAttempt(deps, attempt, reservation)
   }
 
   const scheduleAttempt = (
@@ -489,8 +538,10 @@ export const createGoalWakeController = (deps: GoalWakeControllerDeps): GoalWake
       pendingDelayMs = scheduleDelayMs
       pendingWakeAt = now() + scheduleDelayMs
       if (typeof handle === "object" && handle !== null) handle.unref?.()
+      emitObjectiveLifecycle(deps.lifecycleSink, { stage: "wake", outcome: "armed" })
       return attempt
     } catch (_error) {
+      emitObjectiveLifecycle(deps.lifecycleSink, { stage: "wake", outcome: "skipped" })
       return undefined
     }
   }
@@ -500,10 +551,16 @@ export const createGoalWakeController = (deps: GoalWakeControllerDeps): GoalWake
     if (pending !== undefined && !replace) return undefined
     if (replace) {
       generation += 1
-      clearPending()
+      if (clearPending()) {
+        emitObjectiveLifecycle(deps.lifecycleSink, { stage: "wake", outcome: "canceled" })
+      }
     }
     const captured = captureAttempt(input)
-    return captured === undefined ? undefined : scheduleAttempt(captured.attempt, captured.delayMs)
+    if (captured === undefined) {
+      emitObjectiveLifecycle(deps.lifecycleSink, { stage: "wake", outcome: "skipped" })
+      return undefined
+    }
+    return scheduleAttempt(captured.attempt, captured.delayMs)
   }
 
   return {
@@ -520,12 +577,16 @@ export const createGoalWakeController = (deps: GoalWakeControllerDeps): GoalWake
     onActivity: (): void => {
       epoch += 1
       generation += 1
-      clearPending()
+      if (clearPending()) {
+        emitObjectiveLifecycle(deps.lifecycleSink, { stage: "wake", outcome: "canceled" })
+      }
       emitStatusChange()
     },
     cancel: (): void => {
       generation += 1
-      clearPending()
+      if (clearPending()) {
+        emitObjectiveLifecycle(deps.lifecycleSink, { stage: "wake", outcome: "canceled" })
+      }
       emitStatusChange()
     },
     clearAttempts: (threadId): void => attempts.clearThread(threadId),
@@ -533,7 +594,9 @@ export const createGoalWakeController = (deps: GoalWakeControllerDeps): GoalWake
       if (stopped) return
       stopped = true
       generation += 1
-      clearPending()
+      if (clearPending()) {
+        emitObjectiveLifecycle(deps.lifecycleSink, { stage: "wake", outcome: "canceled" })
+      }
       emitStatusChange()
     },
     activityEpoch: (): number => epoch,

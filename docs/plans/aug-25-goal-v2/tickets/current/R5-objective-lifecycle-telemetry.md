@@ -1,6 +1,6 @@
 # R5 — Bounded Objective lifecycle telemetry beyond settlement
 
-**Status:** READY · **Priority:** P1 · **Depends on:** R1-R4 producer contracts
+**Status:** FOCUSED GREEN · MAIN/R6 PROMOTION PENDING · **Priority:** P1 · **Depends on:** R1-R4 producer contracts
 · **Owner:** objective lifecycle port + observability metrics adapter
 
 ## 목적
@@ -13,7 +13,7 @@ settled attempt만이 아니라 wake/enqueue/start/completion/verifier lifecycle
 - settled attributed attempt는 existing DecisionEvent `kind:"objective"`로 allow/ask/deny 계수된다.
 - decision counter label은 `{kind,outcome}` closed set이다.
 - wake/verifier 사건은 turn 밖이므로 turn index가 필수인 DecisionEvent에 맞지 않는다.
-- objective lifecycle 전용 sink/producer는 없다.
+- objective lifecycle 전용 sink/producer가 없었던 audit gap은 아래 구현 receipt로 닫혔다.
 
 ## 이벤트 계약
 
@@ -71,3 +71,25 @@ thread/objective/attempt/check/tool-call ID는 event와 label 모두 금지한�
 - lifecycle 사건을 가짜 turn 번호로 DecisionEvent에 넣는 경우.
 - metric name/label에 동적 ID 또는 원문 reason을 쓰는 경우.
 - objective slice가 observability 구현을 직접 import하는 경우.
+
+## 구현 receipt — 2026-08-31
+
+- objective-owned `ObjectiveLifecycleSink`와 runtime allowlist는 정확히 14개 `{stage,outcome}`
+  series만 허용한다. 추가 field, ID, text, free-form reason은 거절한다.
+- authority는 accepted attempt start와 derived completion satisfied/refused를, verifier는 typed final
+  outcome을, wake controller는 arm/cancel/skip/enqueue 결과를 각 owner boundary에서 기록한다.
+- observability adapter는 `quanta.objective.lifecycle.total` 하나와 `stage`,`outcome` label만 쓴다.
+  settlement는 기존 `DecisionEvent(kind:"objective")`에 남아 lifecycle counter에 중복되지 않는다.
+- CLI와 web daemon은 `QUANTA_DECISION_METRICS`가 켜졌을 때만 registry/sink를 만들고, 같은 sink를
+  authority/verifier/wake에 전달한다. OFF 경로는 sink/metric allocation과 wake telemetry가 없다.
+- producer-call ratchet은 live call pattern 21개, owner별 floor, anti-vacuum RED injection을 고정한다.
+
+검증:
+
+- `bun run typecheck`: green
+- `bun run typecheck:tests`: green
+- focused R5 + CLI/web composition: **129 pass, 0 fail, 10 files**
+- `bun test tests/unit/god-code-ratchet.test.ts`: **9 pass, 0 fail**
+- `bun run lint:debt`: **91 inherited diagnostics, 0 regression, complexity 0/0**
+
+이 receipt는 R5 branch의 focused closure다. 최종 promotion은 R6 full gate와 main 반영 뒤에만 확정한다.

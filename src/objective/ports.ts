@@ -26,6 +26,7 @@
 
 import type { BlockerDependencyResolverPort } from "./blocker-dependency"
 import type { ObjectiveIdFactory } from "./identity"
+import type { ObjectiveLifecycleSink } from "./lifecycle-telemetry"
 import type { ObjectiveDomainSnapshot } from "./model"
 import type { ObjectiveActor, ObjectiveMutation } from "./mutations"
 import type { ProgressReceipt } from "./progress-receipt"
@@ -198,6 +199,8 @@ export interface ObjectiveAuthorityOptions {
   confirmationAvailable?: boolean | undefined
   /** Host-owned registry resolver for model blocker observations. */
   blockerDependencyResolver?: BlockerDependencyResolverPort | undefined
+  /** Optional bounded lifecycle telemetry. Absent allocates and emits nothing. */
+  lifecycleSink?: ObjectiveLifecycleSink | undefined
   /**
    * RFC-03 C2 — restore-at-construction seam. When present, each per-thread
    * {@link ObjectiveDomainSnapshot} is loaded into the fresh authority as part of

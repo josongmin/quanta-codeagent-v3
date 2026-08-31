@@ -174,6 +174,17 @@ export {
   normalizeGoalText,
 } from "./identity"
 export type {
+  ObjectiveLifecycleEvent,
+  ObjectiveLifecycleSink,
+  ObjectiveLifecycleStage,
+} from "./lifecycle-telemetry"
+export {
+  emitObjectiveLifecycle,
+  isObjectiveLifecycleEvent,
+  OBJECTIVE_LIFECYCLE_CARDINALITY,
+  OBJECTIVE_LIFECYCLE_OUTCOMES,
+} from "./lifecycle-telemetry"
+export type {
   ExplicitStatus,
   ObjectiveDomainSnapshot,
   ObjectiveThreadSnapshot,

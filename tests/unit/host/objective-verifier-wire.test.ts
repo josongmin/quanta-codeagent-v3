@@ -189,6 +189,7 @@ const setupCoordinator = (
   checks: readonly { text: string; argv: string[]; ok?: number[] }[] = [
     { text: "unit", argv: ["u"] },
   ],
+  lifecycleSink?: import("@/objective").ObjectiveLifecycleSink,
 ) => {
   const authority = createObjectiveAuthority({ now: () => 5 })
   authority.create("t", {
@@ -206,6 +207,7 @@ const setupCoordinator = (
     evidence,
     workspaceCwd: "/work",
     now: () => 10,
+    ...(lifecycleSink !== undefined ? { lifecycleSink } : {}),
   })
   return { authority, caps, coordinator }
 }
@@ -315,6 +317,35 @@ describe("GOAL-03 — verification coordinator", () => {
     const out = await setup.coordinator.verify("t")
     expect(out).toMatchObject({ kind: "sandbox-unavailable" })
     expect(setup.authority.get("t")?.successCriteria[0]?.met).toBe(false)
+  })
+
+  test("typed verifier outcomes emit one bounded lifecycle event each", async () => {
+    const events: import("@/objective").ObjectiveLifecycleEvent[] = []
+    const sink = {
+      record: (event: import("@/objective").ObjectiveLifecycleEvent) => events.push(event),
+    }
+    const verified = setupCoordinator(
+      fakeRunner(() => ({})),
+      fakeEvidence({ digest: "D" }),
+      undefined,
+      sink,
+    )
+    expect((await verified.coordinator.verify("t")).kind).toBe("verified")
+
+    const unavailable = setupCoordinator(
+      fakeRunner(() => {
+        throw new Error("runner down")
+      }),
+      fakeEvidence({ digest: "D" }),
+      undefined,
+      sink,
+    )
+    expect((await unavailable.coordinator.verify("t")).kind).toBe("runner-unavailable")
+
+    expect(events).toEqual([
+      { stage: "verifier", outcome: "verified" },
+      { stage: "verifier", outcome: "runner-unavailable" },
+    ])
   })
 
   test("cancellation stops before the next check and leaves zero receipts", async () => {

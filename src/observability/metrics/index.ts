@@ -15,6 +15,11 @@ export {
 export { defaultMetricsRegistry, type InMemoryRegistryOpts } from "./in-memory-registry"
 export { jsonlMetricsSink } from "./jsonl-sink"
 export {
+  createObjectiveLifecycleMetricsSink,
+  OBJECTIVE_LIFECYCLE_COUNTER,
+  type ObjectiveLifecycleMetricSink,
+} from "./objective-lifecycle"
+export {
   type OtelAttributes,
   type OtelCounter,
   type OtelHistogram,

@@ -72,7 +72,11 @@ export interface SetupSessionDeps extends SessionBootstrapDeps {
   readonly buildTurnSummaryAndStream: (
     featureCfg: CliFeatureConfig,
     stream: StreamPort,
-  ) => { collector: TurnSummaryCollector; stream: StreamPort }
+  ) => {
+    collector: TurnSummaryCollector
+    stream: StreamPort
+    decisionMetrics: import("@/observability/metrics/index").MetricsRegistry | undefined
+  }
   /** Build the live turn indicator + indicator-tee'd stream. S3 (jul-03) — the
    *  optional `usageObserver` is threaded onto the indicator port so a live
    *  `usage` AgentEvent's reasoning-token split feeds the `/context` gauge
@@ -253,6 +257,8 @@ export interface SessionSetupResult {
    *  gauge reads the same retained snapshot the tee feeds. */
   readonly contextUsageHolder: ContextUsageHolder
   readonly turnSummary: TurnSummaryCollector
+  /** Registry shared by gate-decision and Objective lifecycle counters. */
+  readonly decisionMetrics: import("@/observability/metrics/index").MetricsRegistry | undefined
   /** Track D — present iff `QUANTA_DEBUG` enabled the debug tracer at
    *  boot AND stderr is a TTY. Absent ⇒ `/debug` slash prints "not wired". */
   readonly debugHandle: DebugTracerHandle | undefined
@@ -463,10 +469,11 @@ const setupStatus = (ctx: Awaited<ReturnType<typeof setupBoot>>) => {
     "    Esc Esc · cancel    Ctrl+C · exit"
   const statusBar = installStatusBar(statusDefault)
 
-  const { collector: turnSummary, stream: summaryStream } = deps.buildTurnSummaryAndStream(
-    featureCfg,
-    boot.stream,
-  )
+  const {
+    collector: turnSummary,
+    stream: summaryStream,
+    decisionMetrics,
+  } = deps.buildTurnSummaryAndStream(featureCfg, boot.stream)
   // Track D — interpose the debug tracer BEFORE the indicator so the
   // debug emit sees the same upstream events the indicator does. When
   // the env disables it, the builder returns the literal `summaryStream`
@@ -516,6 +523,7 @@ const setupStatus = (ctx: Awaited<ReturnType<typeof setupBoot>>) => {
     statusDefault,
     statusBar,
     turnSummary,
+    decisionMetrics,
     summaryStream,
     debugStream,
     debugHandle,
@@ -684,6 +692,7 @@ const assembleSetupResult = (
     sessionLlm,
     statusBar,
     turnSummary,
+    decisionMetrics,
     debugHandle,
     timelinePanel,
     contextUsageHolder,
@@ -772,6 +781,7 @@ const assembleSetupResult = (
     turnIndicator,
     contextUsageHolder,
     turnSummary,
+    decisionMetrics,
     debugHandle,
     timelinePanel,
     backgroundStreamCapture,
