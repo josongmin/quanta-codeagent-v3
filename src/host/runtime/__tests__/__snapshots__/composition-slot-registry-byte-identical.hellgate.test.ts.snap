@@ -38,7 +38,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,hydrate=fn,reset=fn}
+usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,prepareHydrate=fn,hydrate=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -83,7 +83,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,hydrate=fn,reset=fn}
+usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,prepareHydrate=fn,hydrate=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -128,7 +128,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,hydrate=fn,reset=fn}
+usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,prepareHydrate=fn,hydrate=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -175,7 +175,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,hydrate=fn,reset=fn}
+usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,prepareHydrate=fn,hydrate=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -220,7 +220,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,hydrate=fn,reset=fn}
+usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,prepareHydrate=fn,hydrate=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -267,7 +267,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,hydrate=fn,reset=fn}
+usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,prepareHydrate=fn,hydrate=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -314,7 +314,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,hydrate=fn,reset=fn}
+usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,prepareHydrate=fn,hydrate=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -361,7 +361,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,hydrate=fn,reset=fn}
+usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,prepareHydrate=fn,hydrate=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -414,7 +414,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,hydrate=fn,reset=fn}
+usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,prepareHydrate=fn,hydrate=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -461,7 +461,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,hydrate=fn,reset=fn}
+usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,prepareHydrate=fn,hydrate=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -508,7 +508,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,hydrate=fn,reset=fn}
+usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,prepareHydrate=fn,hydrate=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -555,7 +555,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,hydrate=fn,reset=fn}
+usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,prepareHydrate=fn,hydrate=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -604,7 +604,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,hydrate=fn,reset=fn}
+usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,prepareHydrate=fn,hydrate=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -649,7 +649,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,hydrate=fn,reset=fn}
+usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,prepareHydrate=fn,hydrate=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -692,7 +692,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,hydrate=fn,reset=fn}
+usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,prepareHydrate=fn,hydrate=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -737,7 +737,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,hydrate=fn,reset=fn}
+usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,prepareHydrate=fn,hydrate=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -784,7 +784,7 @@ bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOw
 contentCaptureEnabled :: bool:false
 objective :: obj{readDomain=fn,prepare=fn,commit=fn,restore=fn,restoreDomain=fn,replaceDomainForAttach=fn,knownThreadIds=fn,recordProgressReceipt=fn,create=fn,replace=fn,clear=fn,get=fn,setExplicitStatus=fn,amendBudget=fn,addBlocker=fn,clearBlocker=fn,setNextActions=fn,markCriterion=fn,markUsageLimited=fn,list=fn,toSnapshot=fn,fromSnapshot=fn}
 objectiveVerifier :: obj{verify=fn,reconcile=fn}
-usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,hydrate=fn,reset=fn}
+usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,prepareHydrate=fn,hydrate=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -831,7 +831,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,hydrate=fn,reset=fn}
+usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,prepareHydrate=fn,hydrate=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -874,7 +874,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,hydrate=fn,reset=fn}
+usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,prepareHydrate=fn,hydrate=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -920,7 +920,7 @@ secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
 diagnosticsProvider :: obj{unavailableReason=fn,open=fn}
-usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,hydrate=fn,reset=fn}
+usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,prepareHydrate=fn,hydrate=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -966,7 +966,7 @@ secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
 promptCacheObserver :: obj{attributeBreakpoint=fn,record=fn,snapshot=fn,reset=fn}
-usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,hydrate=fn,reset=fn}
+usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,prepareHydrate=fn,hydrate=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -1012,7 +1012,7 @@ secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
 vcsEventSink :: obj{emit=fn}
-usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,hydrate=fn,reset=fn}
+usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,prepareHydrate=fn,hydrate=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -1058,7 +1058,7 @@ secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
 redaction :: obj{pii=obj{enabled=bool:true}}
-usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,hydrate=fn,reset=fn}
+usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,prepareHydrate=fn,hydrate=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -1105,7 +1105,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,hydrate=fn,reset=fn}
+usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,prepareHydrate=fn,hydrate=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -1152,7 +1152,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,hydrate=fn,reset=fn}
+usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,prepareHydrate=fn,hydrate=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -1199,7 +1199,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,hydrate=fn,reset=fn}
+usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,prepareHydrate=fn,hydrate=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -1250,7 +1250,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,hydrate=fn,reset=fn}
+usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,prepareHydrate=fn,hydrate=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -1297,7 +1297,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,hydrate=fn,reset=fn}
+usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,prepareHydrate=fn,hydrate=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -1344,7 +1344,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,hydrate=fn,reset=fn}
+usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,prepareHydrate=fn,hydrate=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -1390,7 +1390,7 @@ secretCheckToolEnabled :: bool:false
 dispatchGuard :: obj{check=fn}
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,hydrate=fn,reset=fn}
+usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,prepareHydrate=fn,hydrate=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -1451,7 +1451,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,hydrate=fn,reset=fn}
+usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,prepareHydrate=fn,hydrate=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -1500,7 +1500,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,hydrate=fn,reset=fn}
+usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,prepareHydrate=fn,hydrate=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -1552,7 +1552,7 @@ objectiveVerifier :: obj{verify=fn,reconcile=fn}
 diagnosticsProvider :: obj{unavailableReason=fn,open=fn}
 promptCacheObserver :: obj{attributeBreakpoint=fn,record=fn,snapshot=fn,reset=fn}
 redaction :: obj{pii=obj{enabled=bool:true}}
-usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,hydrate=fn,reset=fn}
+usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,prepareHydrate=fn,hydrate=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn
@@ -1615,7 +1615,7 @@ lspDiagnosticsHookEnabled :: bool:false
 secretCheckToolEnabled :: bool:false
 bgShellRegistry :: obj{register=fn,adopt=fn,get=fn,awaitHandle=fn,kill=fn,listOwned=fn,killOwned=fn,killAll=fn,size=fn,oldestId=fn}
 contentCaptureEnabled :: bool:false
-usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,hydrate=fn,reset=fn}
+usageAccounting :: obj{mintCallId=fn,record=fn,snapshot=fn,recent=fn,serialize=fn,prepareHydrate=fn,hydrate=fn,reset=fn}
 activeSkillCursor :: obj{ids=arr[]}
 contextEventsForTurn :: fn
 mentionInjector :: fn

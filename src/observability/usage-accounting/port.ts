@@ -63,9 +63,10 @@ export interface UsageAccountingSnapshot extends UsageAggregate {
   /** Root vs. subagent spend. Both arms always present, zeroed when unused,
    *  so a surface never has to distinguish "no subagents" from "no data". */
   readonly byKind: Readonly<Record<"root" | "subagent", UsageAggregate>>
-  /** A6 — `true` when a hydrate found corrupt/unreadable state: the books are
-   *  EMPTY, and a surface must say the prior totals were lost rather than
-   *  render a confident $0.00. Cleared by `reset()`. */
+  /** A6 — `true` when prior totals were lost to corrupt/unreadable state.
+   *  Preserved through later spend and save/restore; surfaces must not claim
+   *  the remaining counters cover the full session. Cleared by `reset()` or
+   *  by attaching a different healthy book. */
   readonly continuityLost: boolean
 }
 
@@ -94,6 +95,13 @@ export interface UsageHydrateOptions {
   readonly rebindSessionId?: string | undefined
 }
 
+export interface PreparedUsageHydrate {
+  /** False only for a corrupt payload; commit then publishes empty, partial books. */
+  readonly restored: boolean
+  /** One-shot synchronous owner swap. No decoding, allocation or admission remains. */
+  readonly commit: () => void
+}
+
 export interface UsageAccountingPort {
   /**
    * A6 — mint the next call id. The SEQUENCE lives inside the authority (and
@@ -114,6 +122,9 @@ export interface UsageAccountingPort {
    * resume proceeds, but never silently as an exact $0.
    */
   serialize(): string
+  /** Decode/build without changing live state. Absent payload prepares healthy
+   * empty books for a new fork; callers commit only after attach succeeds. */
+  prepareHydrate(json: string | undefined, options?: UsageHydrateOptions): PreparedUsageHydrate
   hydrate(json: string, options?: UsageHydrateOptions): boolean
   /** Current totals. Cheap enough to call per render. */
   snapshot(): UsageAccountingSnapshot
