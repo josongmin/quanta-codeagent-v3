@@ -59,7 +59,9 @@ describe("feature catalog — a scan cannot report clean over a catalog it never
     // this file would pass for free.
     const real = await loadFeaturesStrict(FEATURES)
     expect(real.length).toBeGreaterThan(500)
-  })
+    // This parses the full >1k-feature corpus. Preserve that anti-vacuity
+    // coverage, but leave shared eight-shard CI adequate I/O headroom.
+  }, 120000)
 
   test("🔴 a RELATIVE path is refused — the cwd is not an answer", async () => {
     // The exact literal three consumers hardcode. Under a foreign cwd it resolved
@@ -98,5 +100,5 @@ describe("feature catalog — a scan cannot report clean over a catalog it never
       expect(p.startsWith("/"), `${p} must be absolute`).toBe(true)
     }
     expect((await loadFeaturesStrict(FEATURES_DIR)).length).toBeGreaterThan(500)
-  })
+  }, 120000)
 })
