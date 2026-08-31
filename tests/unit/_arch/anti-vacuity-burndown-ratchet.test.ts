@@ -94,15 +94,9 @@ describe("anti-vacuity burn-down", () => {
    *
    * This list may only shrink or be re-justified; each entry names the evidence.
    */
-  const REFUTED: ReadonlySet<string> = new Set([
-    // `repro-grounding` was removed 2026-08-30: it never scanned at all. The
-    // census matched the bare token `ls-files` inside `throw new Error("git
-    // ls-files failed")`, so the file joined the population on a failure message
-    // and then earned an exemption for a corpus it does not have.
-    "src/tool/terminal-surface.test.ts",
-    // verdict compares against a non-empty expected set, so empty ≠ clean
-    "tests/unit/surface-coupling-ratchet.test.ts",
-  ])
+  // The remaining terminal/surface-coupling guards now have recognized corpus
+  // protection. Any future exemption must still earn its place below.
+  const REFUTED: ReadonlySet<string> = new Set()
 
   test("🔴 no NEW guard derives a verdict from an unfloored scan", () => {
     // The static census is a CANDIDATE detector and no longer the authority.

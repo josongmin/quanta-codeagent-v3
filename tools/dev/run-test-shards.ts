@@ -1,4 +1,6 @@
-import { readFileSync, rmSync, writeFileSync } from "node:fs"
+import { closeSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import {
   assertShardCoverage,
   parseShardDiscovery,
@@ -148,24 +150,6 @@ const mergeJunit = (junitOut: string): void => {
   )
 }
 
-const relay = async (
-  stream: ReadableStream<Uint8Array>,
-  write: (text: string) => void,
-  observe: (text: string) => void,
-): Promise<void> => {
-  const decoder = new TextDecoder()
-  for await (const chunk of stream) {
-    const text = decoder.decode(chunk, { stream: true })
-    observe(text)
-    write(text)
-  }
-  const tail = decoder.decode()
-  if (tail !== "") {
-    observe(tail)
-    write(tail)
-  }
-}
-
 const runShard = async (
   index: number,
   opts: RunnerOptions,
@@ -180,43 +164,52 @@ const runShard = async (
       ? []
       : ["--reporter=junit", `--reporter-outfile=${junitShardPath(opts.junitOut, index)}`]
   process.stdout.write(`\n[test:shards] START shard=${shard}\n`)
-  const proc = Bun.spawn({
-    cmd: [
-      "bun",
-      "test",
-      ...SUITE_ROOTS[opts.suite],
-      "--timeout=60000",
-      "--parallel=1",
-      `--shard=${shard}`,
-      ...junitArgs,
-    ],
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  let banner = ""
-  let discovery: ShardDiscovery | undefined
-  const observe = (text: string): void => {
-    if (discovery !== undefined) return
-    banner = `${banner}${text}`.slice(-512)
-    discovery = parseShardDiscovery(banner, shard)
-  }
-  const stdout = relay(proc.stdout, (text) => process.stdout.write(text), observe)
-  const stderr = relay(proc.stderr, (text) => process.stderr.write(text), observe)
-  let timedOut = false
-  const timeout = setTimeout(() => {
-    timedOut = true
-    process.stderr.write(
-      `[test:shards] TIMEOUT shard=${shard} after=${SHARD_TIMEOUT_MS}ms; killing worker\n`,
+  // Native file descriptors keep the child off a JS relay/backpressure path.
+  // Relaying every Bun test chunk through this process more than doubled a
+  // measured full shard (375s direct versus the 720s kill boundary) and turned
+  // a green worker into a runner timeout. Spool natively, then replay once so
+  // the receipt still contains the complete worker output and discovery banner.
+  const spoolDir = mkdtempSync(join(tmpdir(), "quanta-test-shard-"))
+  const spoolPath = join(spoolDir, `shard-${index}.log`)
+  const spoolFd = openSync(spoolPath, "w")
+  let closed = false
+  try {
+    const proc = Bun.spawn({
+      cmd: [
+        "bun",
+        "test",
+        ...SUITE_ROOTS[opts.suite],
+        "--timeout=60000",
+        "--parallel=1",
+        `--shard=${shard}`,
+        ...junitArgs,
+      ],
+      stdout: spoolFd,
+      stderr: spoolFd,
+    })
+    let timedOut = false
+    const timeout = setTimeout(() => {
+      timedOut = true
+      process.stderr.write(
+        `[test:shards] TIMEOUT shard=${shard} after=${SHARD_TIMEOUT_MS}ms; killing worker\n`,
+      )
+      proc.kill(9)
+    }, SHARD_TIMEOUT_MS)
+    const code = await proc.exited
+    clearTimeout(timeout)
+    closeSync(spoolFd)
+    closed = true
+    const output = readFileSync(spoolPath, "utf8")
+    process.stdout.write(output)
+    const discovery = parseShardDiscovery(output, shard)
+    process.stdout.write(
+      `[test:shards] END shard=${shard} exit=${code}${timedOut ? " timeout" : ""}\n`,
     )
-    proc.kill(9)
-  }, SHARD_TIMEOUT_MS)
-  const code = await proc.exited
-  clearTimeout(timeout)
-  await Promise.all([stdout, stderr])
-  process.stdout.write(
-    `[test:shards] END shard=${shard} exit=${code}${timedOut ? " timeout" : ""}\n`,
-  )
-  return discovery === undefined ? { code, timedOut } : { code, timedOut, discovery }
+    return discovery === undefined ? { code, timedOut } : { code, timedOut, discovery }
+  } finally {
+    if (!closed) closeSync(spoolFd)
+    rmSync(spoolDir, { recursive: true, force: true })
+  }
 }
 
 const main = async (): Promise<void> => {
