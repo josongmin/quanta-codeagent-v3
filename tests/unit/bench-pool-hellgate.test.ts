@@ -651,6 +651,10 @@ describe("runPool — persistent box, amortised bootstrap", () => {
     const firstRunDone = new Promise<void>((resolve) => {
       releaseFirstRun = resolve
     })
+    let signalFirstBenchStart: (() => void) | undefined
+    const firstBenchStartObserved = new Promise<void>((resolve) => {
+      signalFirstBenchStart = resolve
+    })
     let firstBenchStarted = false
     const { fn, calls } = createPoolSpawnRecorder(
       whenArgsInclude("describe-security-groups", ok("sg-abc")),
@@ -677,6 +681,7 @@ describe("runPool — persistent box, amortised bootstrap", () => {
         (remote) => remote.includes("setsid bash -c") && remote.includes("cli.ts run"),
         ({ remote, onData }) => {
           firstBenchStarted = true
+          signalFirstBenchStart?.()
           const runId = remote.match(/~\/runs\/([^/]+)\/instances\.jsonl/)?.[1] ?? "unknown"
           onData?.(`[info] ${runId} started\n`)
           onData?.(`[PASS] ${runId}__inst-1 (turns=2)\n`)
@@ -700,12 +705,13 @@ describe("runPool — persistent box, amortised bootstrap", () => {
         singleBoxGuardDir,
       }),
     )
-    expect(
-      await waitForCondition(
-        () => firstBenchStarted && calls.some((c) => c.args.includes("run-instances")),
-        { timeoutMs: 1_000 },
-      ),
-    ).toBe(true)
+    // The competing run must start only after the first one holds the real
+    // single-box guard. Resolve this at the launched-run boundary rather than
+    // polling scheduler progress: a loaded CI worker can legitimately delay a
+    // 1s poll.
+    await firstBenchStartObserved
+    expect(firstBenchStarted).toBe(true)
+    expect(calls.some((c) => c.args.includes("run-instances"))).toBe(true)
 
     await expect(
       runPool(
