@@ -38,6 +38,8 @@ export interface ThreadHydrateDeps {
   >
   readonly replaceTranscript: (messages: readonly Message[]) => Promise<void>
   readonly setActiveThreadId: (id: string) => void
+  /** Publish earlier completed turns before reading a possibly just-saved target. */
+  readonly flushPersistence?: (() => Promise<void>) | undefined
   /**
    * RFC-03 C2 (web parity) — restore the reopened thread's durable objective into
    * the live objective authority. Called ONLY on the `attached`/`hydrated` success
@@ -74,12 +76,13 @@ export const hydrateThreadIntoLiveSession = async (
   threadId: string,
   deps: ThreadHydrateDeps,
 ): Promise<ThreadHydrateOutcome> => {
-  // Load the SavedSession ONCE (it carries the durable objective snapshot too) and
-  // reuse it for the attach — so the objective restore below reads the SAME disk
-  // read the transcript swap did (no second `loadSessionById`).
-  const loaded = await deps.loadThread(threadId)
   const outcome = await attachSessionToLive(threadId, {
-    loadSession: async () => loaded,
+    // Shared core cancels wake first. Drain prior completion snapshots before
+    // the ONE disk read used by transcript, objective, and accounting together.
+    loadSession: async (id) => {
+      await deps.flushPersistence?.()
+      return deps.loadThread(id)
+    },
     onAttachStart: deps.cancelGoalWake,
     prepareAttachedState:
       deps.prepareObjectiveAttach === undefined && deps.prepareUsageAccountingAttach === undefined

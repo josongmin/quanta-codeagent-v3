@@ -376,16 +376,21 @@ const applySessionStateToTranscript = (
   sessionState: SessionStateView,
   timestamp: string,
   eventId?: string,
-): TranscriptState =>
-  applyStreamingSessionStateToTranscript(state, sessionState, timestamp, eventId) ??
-  applyAssistantSignatureToTranscript({
-    state,
-    sessionState,
-    timestamp,
-    ...(eventId !== undefined ? { eventId } : {}),
-  }) ??
-  settlePendingCompletionOnIdle(state, sessionState) ??
-  state
+): TranscriptState => {
+  const next =
+    sessionState.costView === undefined ? state : { ...state, costView: sessionState.costView }
+  return (
+    applyStreamingSessionStateToTranscript(next, sessionState, timestamp, eventId) ??
+    applyAssistantSignatureToTranscript({
+      state: next,
+      sessionState,
+      timestamp,
+      ...(eventId !== undefined ? { eventId } : {}),
+    }) ??
+    settlePendingCompletionOnIdle(next, sessionState) ??
+    next
+  )
+}
 
 const cloneImages = (images: readonly ImageBlock[]): readonly ImageBlock[] =>
   images.map((image) => ({ ...image }))

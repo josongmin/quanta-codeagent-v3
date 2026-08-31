@@ -277,7 +277,7 @@ describe("createSubagentRunner — child config overrides", () => {
     expect(at(seen, 1).maxTurns).toBe(17)
   })
 
-  test("store / hooks / metrics / run / sessionId / memory are dropped; subagent is PROPAGATED", async () => {
+  test("store / hooks / metrics / run / memory are dropped; session identity and subagent are inherited", async () => {
     const { run, seen } = capturing()
     // biome-ignore lint/suspicious/noExplicitAny: opaque runner stub, identity is what matters
     const subagentBlock = { runner: (async () => ({})) as any, maxDepth: 2 }
@@ -304,7 +304,9 @@ describe("createSubagentRunner — child config overrides", () => {
     expect(child.hooks).toBeUndefined()
     expect(child.metrics).toBeUndefined()
     expect(child.run).toBeUndefined()
-    expect(child.sessionId).toBeUndefined()
+    // Root and child share the session accounting authority. Durable store
+    // ownership is dropped above, but accounting provenance is inherited.
+    expect(child.sessionId).toBe(parent.sessionId)
     expect(child.memory).toBeUndefined()
     // ADR-0011: `subagent` is now PROPAGATED into the child (same
     // object/value as the parent) so a forked child can itself spawn

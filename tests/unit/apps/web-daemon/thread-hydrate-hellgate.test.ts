@@ -51,6 +51,41 @@ const admit = (accounting: UsageAccountingPort, sessionId: string, tokens: numbe
 }
 
 describe("HELLGATE P1 Phase 2 — swap live session onto a thread", () => {
+  test("attach cancels wake then drains pending saves before reading its target", async () => {
+    const released = Promise.withResolvers<void>()
+    const order: string[] = []
+    const attaching = hydrateThreadIntoLiveSession("same-thread", {
+      cancelGoalWake: () => {
+        order.push("cancel")
+      },
+      flushPersistence: async () => {
+        order.push("drain")
+        await released.promise
+      },
+      loadThread: async () => {
+        order.push("load")
+        return { meta: meta("same-thread"), messages: msgs }
+      },
+      replaceTranscript: async () => {
+        order.push("replace")
+      },
+      setActiveThreadId: () => {
+        order.push("persist")
+      },
+      rearmGoalWake: () => {
+        order.push("rearm")
+      },
+    })
+    try {
+      await Promise.resolve()
+      expect(order).toEqual(["cancel", "drain"])
+    } finally {
+      released.resolve()
+      await attaching
+    }
+    expect(order).toEqual(["cancel", "drain", "load", "replace", "persist", "rearm"])
+  })
+
   test("cancel, validate, transcript, persist, objective, rearm order is fixed", async () => {
     const order: string[] = []
     const out = await hydrateThreadIntoLiveSession("t-order", {

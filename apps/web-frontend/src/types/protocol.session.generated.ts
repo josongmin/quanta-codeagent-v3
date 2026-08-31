@@ -162,6 +162,7 @@ export interface SessionTokenUsageView {
 }
 
 export interface SessionStateView {
+  readonly costView?: CostSurfaceViewWire
   readonly status: "idle" | "running" | "awaiting_approval" | "failed" | "closed"
   readonly draftInput: string
   readonly permissionMode: string

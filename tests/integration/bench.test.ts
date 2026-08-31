@@ -4,12 +4,14 @@ import { chmod } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
+import { __resetRuntimeConfig } from "@/shared"
 import {
   type Prediction,
   parseSwebenchJsonl,
   writePredictions,
 } from "../../src/apps/bench/corpus/dataset"
 import { loadCorpus, writeSyntheticCorpus } from "../../src/apps/bench/corpus/loader"
+import { benchInstanceWorkSlug, benchWorkRoot } from "../../src/apps/bench/corpus/paths"
 import { runInstance } from "../../src/apps/bench/eval"
 import type { Instance } from "../../src/apps/bench/types"
 
@@ -399,24 +401,33 @@ describe("HC-B. predictions.jsonl integrity", () => {
 
 describe("HC-C. sandbox cleanup", () => {
   let dir: string
+  let savedBenchHome: string | undefined
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "bench-hc-c-"))
+    savedBenchHome = process.env.QUANTA_BENCH_HOME
+    process.env.QUANTA_BENCH_HOME = join(dir, "bench-home")
+    __resetRuntimeConfig()
   })
   afterEach(() => {
+    if (savedBenchHome === undefined) delete process.env.QUANTA_BENCH_HOME
+    else process.env.QUANTA_BENCH_HOME = savedBenchHome
+    __resetRuntimeConfig()
     rmSync(dir, { recursive: true, force: true })
   })
 
-  /** Count live `bench-*` tmpdirs (sandbox-leak telltale). The runner names
-   *  its sandbox `bench-<id>-<rand>`; if cleanup misses, we'd see them
-   *  accumulate after each call. */
-  const countBenchTmps = (): number =>
-    readdirSync(tmpdir()).filter((n) => n.startsWith("bench-")).length
+  /** Exact sandbox parents owned by this instance. Counting global `/tmp`
+   * makes unrelated parallel tests part of the verdict; the production owner
+   * is `benchWorkRoot()/bench-<opaque-instance>-*`, so assert that namespace. */
+  const ownedSandboxParents = (id: string): readonly string[] => {
+    const prefix = `bench-${benchInstanceWorkSlug(id)}-`
+    return readdirSync(benchWorkRoot()).filter((name) => name.startsWith(prefix))
+  }
 
   test(
     "LLM throws mid-run → sandbox tmp dir is cleaned via finally",
     async () => {
       const inst = makeMiniInstance(dir, "throw-cleanup")
-      const before = countBenchTmps()
+      expect(ownedSandboxParents(inst.id)).toEqual([])
       const r = await runInstance(inst, { ...DEPS, llm: new ThrowingLLM() })
       // Result is returned (no throw escape). The agent loop has internal
       // retry/PTL handling that may swallow the LLM throw into a max-turns
@@ -424,25 +435,22 @@ describe("HC-C. sandbox cleanup", () => {
       // cleanup", not the shape of the error field.
       expect(r.passed).toBe(false)
       // Sandbox tmp dirs MUST have been cleaned up via the runInstance finally.
-      const after = countBenchTmps()
-      expect(after).toBeLessThanOrEqual(before)
+      expect(ownedSandboxParents(inst.id)).toEqual([])
     },
     RUN_INSTANCE_TIMEOUT_MS,
   )
 
   test("50 sequential bench instances → no tmp-dir accumulation", async () => {
     const inst = makeMiniInstance(dir, "no-accum")
-    const before = countBenchTmps()
+    expect(ownedSandboxParents(inst.id)).toEqual([])
     // Use NoopEndLLM (deterministic, no real agent loop overhead).
     const llm = new NoopEndLLM()
     for (let i = 0; i < 50; i++) {
       const r = await runInstance(inst, { ...DEPS, llm })
       expect(r.id).toBe("no-accum")
+      expect(ownedSandboxParents(inst.id)).toEqual([])
     }
-    const after = countBenchTmps()
-    // Allow a small slack (a concurrent process might create one) — pin the
-    // strong invariant: NO net growth from 50 successive runs.
-    expect(after - before).toBeLessThanOrEqual(2)
+    expect(ownedSandboxParents(inst.id)).toEqual([])
   }, 60_000) // 50 instances × ~150ms each on cold spawn = 7-10s; leave headroom.
 })
 

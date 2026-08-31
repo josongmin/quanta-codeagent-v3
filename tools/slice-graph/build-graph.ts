@@ -32,6 +32,7 @@
  * the JSON graph to stdout (callers downstream can pipe to `jq`).
  */
 
+import type { Dirent } from "node:fs"
 import { readdir, readFile, stat } from "node:fs/promises"
 import { join, relative, resolve } from "node:path"
 
@@ -68,6 +69,7 @@ export interface SliceGraph {
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..")
 const DEFAULT_ROOT = join(REPO_ROOT, "src")
+const FILE_READ_CONCURRENCY = 32
 
 /** Skip-list for filenames we must not parse. Mirrors the
  *  `agent-slice-boundary.test.ts` exclusion set (see
@@ -91,25 +93,33 @@ const isSkippedDir = (name: string): boolean => name === "__tests__"
 
 const walk = async (dir: string): Promise<string[]> => {
   const out: string[] = []
-  let entries: string[]
+  let entries: Dirent[]
   try {
-    entries = await readdir(dir)
+    entries = await readdir(dir, { withFileTypes: true })
   } catch {
     return out
   }
-  for (const name of entries) {
+  for (const entry of entries) {
+    const name = entry.name
     const full = join(dir, name)
-    let st: Awaited<ReturnType<typeof stat>>
-    try {
-      st = await stat(full)
-    } catch {
-      continue
+    let isDirectory = entry.isDirectory()
+    let isFile = entry.isFile()
+    // `Dirent` avoids one stat syscall for every ordinary entry. Preserve the
+    // old walk's symlink-following behavior by resolving only symlink entries.
+    if (entry.isSymbolicLink()) {
+      try {
+        const target = await stat(full)
+        isDirectory = target.isDirectory()
+        isFile = target.isFile()
+      } catch {
+        continue
+      }
     }
-    if (st.isDirectory()) {
+    if (isDirectory) {
       if (isSkippedDir(name)) continue
       const sub = await walk(full)
       out.push(...sub)
-    } else if (st.isFile() && !isSkippedName(name)) {
+    } else if (isFile && !isSkippedName(name)) {
       out.push(full)
     }
   }
@@ -181,20 +191,46 @@ const recordSpec = (acc: GraphAcc, file: string, fromSlice: string, spec: string
   acc.sources.push({ file, from: fromSlice, to: toSlice, spec })
 }
 
-const processFile = async (acc: GraphAcc, file: string, absRoot: string): Promise<void> => {
+interface ParsedFile {
+  readonly file: string
+  readonly fromSlice: string
+  readonly specs: readonly string[]
+}
+
+const parseFile = async (file: string, absRoot: string): Promise<ParsedFile | undefined> => {
   const fromSlice = sliceOfFile(file, absRoot)
-  if (fromSlice === null) return
-  acc.sliceSet.add(fromSlice)
+  if (fromSlice === null) return undefined
   let content: string
   try {
     content = await readFile(file, "utf8")
   } catch {
-    return
+    // The old implementation recorded the source slice before attempting the
+    // read. Keep that behavior while treating an unreadable file as edge-free.
+    return { file, fromSlice, specs: [] }
   }
-  const specs = extractSpecifiers(content)
-  for (const spec of specs) {
-    recordSpec(acc, file, fromSlice, spec)
+  return { file, fromSlice, specs: extractSpecifiers(content) }
+}
+
+/** Parse files concurrently without making output order depend on completion
+ * order. Each worker claims a stable array index; results are folded later in
+ * the original walk order. */
+const parseFilesBounded = async (
+  files: readonly string[],
+  absRoot: string,
+): Promise<readonly (ParsedFile | undefined)[]> => {
+  const parsed: (ParsedFile | undefined)[] = new Array(files.length)
+  let nextIndex = 0
+  const worker = async (): Promise<void> => {
+    while (nextIndex < files.length) {
+      const index = nextIndex
+      nextIndex += 1
+      const file = files[index]
+      if (file !== undefined) parsed[index] = await parseFile(file, absRoot)
+    }
   }
+  const workerCount = Math.min(FILE_READ_CONCURRENCY, files.length)
+  await Promise.all(Array.from({ length: workerCount }, () => worker()))
+  return parsed
 }
 
 export const buildSliceGraph = async (opts?: BuildGraphOpts): Promise<SliceGraph> => {
@@ -208,8 +244,13 @@ export const buildSliceGraph = async (opts?: BuildGraphOpts): Promise<SliceGraph
   for (const root of roots) {
     const absRoot = resolve(root)
     const files = await walk(absRoot)
-    for (const file of files) {
-      await processFile(acc, file, absRoot)
+    const parsedFiles = await parseFilesBounded(files, absRoot)
+    for (const parsed of parsedFiles) {
+      if (parsed === undefined) continue
+      acc.sliceSet.add(parsed.fromSlice)
+      for (const spec of parsed.specs) {
+        recordSpec(acc, parsed.file, parsed.fromSlice, spec)
+      }
     }
   }
 

@@ -1,5 +1,6 @@
 import type { LlmContinuationObservation, LlmRequestObservation } from "@/shared/llm-route-types"
 import type { CapabilityManifest } from "./capabilities"
+import type { CostSurfaceViewWire } from "./events"
 import type { PostureProjectionView } from "./posture-projection"
 
 export interface ArtifactRef {
@@ -80,6 +81,9 @@ export interface SessionTokenUsageView {
 }
 
 export interface SessionStateView {
+  /** Live cumulative authority projection on snapshots, including before any
+   * turn. Explicit off is not legacy absence; clients replace, never sum. */
+  readonly costView?: CostSurfaceViewWire
   readonly status: "idle" | "running" | "awaiting_approval" | "failed" | "closed"
   readonly draftInput: string
   readonly permissionMode: string

@@ -5,23 +5,23 @@ subsystem: REPL panels (R10)
 order: 20
 maturity: L4
 status: new
-ui_surfaces: [cli]
+ui_surfaces: [cli, web]
 monitoring: n-a
-modes: [interactive]
+modes: [interactive, daemon]
 configurable: integrated
 config_refs:
-  env: [QUANTA_COST_PANEL]
+  env: [QUANTA_COST_PANEL, QUANTA_USAGE_ACCOUNTING_V2]
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:claude-code"]
 depends_on: [slashctx-6-ports-wire-completion, built-in-slash-commands, chatgpt-oauth-provider, idle-monitor-snooze, slash-permission-inspect]
 surface_integration:
   cli: full
-  web: partial
+  web: full
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-08-31"
   evidence:
-    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "the /cost slash panel mechanism is CLI-only (B2); the web renders the SAME authority via turn.completed.costView (A7) — TokenCounter replaces its state with the cumulative snapshot (total/~est/unpriced + subagent split in tooltip), and the daemon /cost readout projects the same instance"
+    cli: "interactive /cost projects the session authority; resume and successful live attach restore/rebind the target book, while a fresh fork starts a new book"
+    web: "GET /readout/cost, snapshot.state.costView and turn.completed.costView project the same authority; live TCP WebSocket plus durable save/attach/restart evidence reaches the actual reducer and React header"
 purpose: |
   Sticky cumulative session-spend dashboard surfaced via `/cost`. A3 (aug-30)
   rebuilt it as a pure PROJECTION of the session usage-accounting authority
@@ -33,34 +33,88 @@ purpose: |
   shows "prior totals lost", and `QUANTA_USAGE_ACCOUNTING_V2=off` renders an
   explicit "accounting off" box. Subagent spend appears as a "By agent:"
   split — the authority covers root+children, which the old counter feed
-  never saw. Durable V2 stores normal authority-minted call ids as exact
-  monotonic intervals and arbitrary external ids in a sparse exact set; the
-  one-million-call rail keeps dedup exact while the blob stays sublinear.
+  never saw.
+
+  CLI resume and live CLI/Web attach replace the current book with the target
+  SavedSession book and rebind new calls to the live runtime identity; they
+  never add source and target totals. Transcript replacement succeeds before
+  the book and persistence target change. A target without accounting state,
+  including a fresh fork, resets to an empty healthy book. Failed/mid-turn
+  attach leaves the current book and persistence target intact.
+
+  Corrupt durable state restores an empty partial book without throwing.
+  `continuityLost` remains true through later calls, serialization and another
+  daemon lifetime. The Web header keeps "partial history" visible before the
+  first recovered call. Unknown-only/empty-partial books never display exact
+  $0; mixed priced/unpriced spend is a priced subtotal. Explicit accounting-off
+  replaces an earlier on snapshot; absent snapshots retain old-daemon
+  compatibility. Initial/reconnect/attach snapshots replace frontend state.
+  Model labels are display-only sanitized to 64 UTF-16 units without controls;
+  raw model keys remain unchanged in durable records.
+
+  Durable V2 stores authority-minted call ids as exact monotonic intervals and
+  arbitrary external ids in a sparse exact set. The one-million-call rail proves
+  compact exact dedup for contiguous minted calls; it does not claim bounded
+  storage for arbitrary external ids or unbounded distinct dimensions.
 evidence:
   code:
     - src/apps/cli/cost-panel.ts
     - src/apps/cli/slash-commands.ts
+    - src/apps/cli/repl/session-loop/session-switch.ts
+    - src/host/bootstrap/bootstrap-session.ts
+    - src/observability/usage-accounting/authority.ts
+    - src/observability/usage-accounting/port.ts
     - src/observability/usage-accounting/durable-codec.ts
+    - src/observability/usage-accounting/activation.ts
+    - src/observability/usage-accounting/projection.ts
+    - src/shared/model-display.ts
+    - src/stream/adapters/stdout.ts
+    - src/sdk/runtime/session/engine.ts
+    - src/protocol/session/snapshot.ts
+    - src/apps/web-daemon/runtime-factory.ts
+    - src/apps/web-daemon/readout.ts
+    - src/apps/web-daemon/server.ts
+    - src/apps/web-daemon/server/thread-hydrate.ts
+    - src/apps/web-daemon/server/transcript-persist.ts
+    - src/session/attach-session.ts
+    - src/session/store.ts
+    - apps/web-frontend/src/components/TokenCounter.tsx
+    - apps/web-frontend/src/ws/session-hooks.ts
   adrs: []
   tests:
     unit:
       - tests/unit/cli/cost-panel.test.ts
       - tests/unit/slash-commands.test.ts
       - tests/unit/observability/usage-accounting-durable-hellgate.test.ts
+      - tests/unit/observability/usage-accounting-projection.test.ts
+      - tests/unit/stdout.test.ts
+      - tests/unit/objective/attach-replace.test.ts
+      - tests/unit/apps/cli/repl/session-switch-hellgate.test.ts
+      - tests/unit/apps/web-daemon/thread-hydrate-hellgate.test.ts
+      - tests/unit/apps/web-daemon/transcript-persist-hellgate.test.ts
+      - tests/unit/apps/web-daemon/readout-production-wiring-hellgate.test.ts
+      - apps/web-frontend/src/components/TokenCounter.test.tsx
+      - apps/web-frontend/src/ws/cost-view-replace.test.ts
     integration:
       - tests/integration/cli-cost-accounting-e2e.test.ts
       - tests/integration/usage-accounting-resume-e2e.test.ts
       - tests/integration/readout-http-route-web-daemon-e2e.test.ts
+      - tests/integration/web-usage-accounting-live-e2e.test.ts
       - tests/e2e-pty/cli-usage-accounting-resume-e2e.test.ts
     contract: []
 knobs:
   - name: QUANTA_COST_PANEL
-    default: 'undefined'
-    purpose: '(no description)'
+    default: 'on for TTY'
+    purpose: 'CLI panel visibility; 0|false|off|no disables the panel independently of accounting'
+  - name: QUANTA_USAGE_ACCOUNTING_V2
+    default: 'on'
+    purpose: 'Session accounting authority; off is explicit on CLI/Web surfaces'
 deliberate_hold: null
 notes: |
   Pure DI — `now` injectable so tests drive duration clock without `Date.now()`.
-  Slice fence: imports `@/observability` + `@/ui/ui-helpers` only (no `@/agent`,
-  `@/llm`, `@/stream`). SlashContext.cost is `() => string | undefined` — absent
-  ⇒ `/cost` no-op exit 0. Byte-identical default: disabling the panel (env=0 or
-  non-TTY) returns the same bytes the surface produced before the R10 wire-up.
+  The CLI panel imports `@/observability` + `@/ui/ui-helpers` only (no `@/agent`,
+  `@/llm`, `@/stream`). Panel visibility is distinct from authority activation.
+  The live Web E2E replaces only the LLM with an in-memory scripted port: it
+  drives real root/child loops, WS frames, HTTP readouts and SavedSession files.
+  The production-composition unit test rejects/counts real user-home reads and
+  external fetch attempts, with paired refusal probes.

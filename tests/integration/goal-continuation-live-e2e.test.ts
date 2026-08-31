@@ -6,10 +6,12 @@ import {
   buildPursuitContinuationPrompt,
   type ContinuationDeps,
   ContinuationSemaphore,
+  createObjectiveCapabilities,
   createObjectiveStore,
   type ObjectiveAuthority,
   type ObjectivePort,
   runIdleContinuation,
+  verifierReceiptRef,
 } from "@/objective"
 import { defaultTools, ToolRegistry } from "@/tool"
 import { seedObjective } from "../unit/objective/v2-helpers"
@@ -63,6 +65,65 @@ import { cfg, RecordingStream, text, toolUse, withTimeout } from "./_harness"
  */
 
 const TID = "thread-goal-live"
+
+/** Observations belong to a host-started attempt, not a model-supplied id.
+ * Settle each attempt before the next observation or verifier pass. */
+const observeBlockerDuringAttempt = (authority: ObjectiveAuthority, attemptId: string) => {
+  const system = createObjectiveCapabilities(authority).system
+  const before = authority.get(TID)
+  if (before === null) throw new Error("objective missing before attempt")
+  const objectiveId = before.objectiveId
+  const criterionIdsBefore = before.successCriteria.filter((c) => c.met).map((c) => c.id)
+  const verifierReceiptIdsBefore = before.successCriteria.flatMap((c) =>
+    c.kind === "checked" && c.completion !== undefined
+      ? [verifierReceiptRef({ criterionId: c.id, ...c.completion })]
+      : [],
+  )
+  const startedRevision = authority.readDomain(TID).revision
+  expect(
+    system.commit(TID, {
+      kind: "beginAttempt",
+      attempt: {
+        objectiveId,
+        attemptId,
+        startedRevision,
+        provenance: "user-requested-goal-work",
+        executionMode: "foreground",
+      },
+    }).ok,
+  ).toBe(true)
+  const result = authority.commit(
+    authority.prepare({
+      threadId: TID,
+      actor: "model",
+      mutation: {
+        kind: "addBlocker",
+        reason: "approval pending",
+        waitingOn: "user",
+        target: { kind: "approval", ref: "deploy" },
+      },
+    }),
+    { admitted: true },
+  )
+  expect(
+    system.commit(TID, {
+      kind: "settleAttempt",
+      settlement: {
+        objectiveId,
+        attemptId,
+        startedRevision,
+        tokensUsed: 0,
+        turnsUsed: 1,
+        outcome: "completed",
+        executionMode: "foreground",
+        criterionIdsBefore,
+        verifierReceiptIdsBefore,
+        recordedAt: 1,
+      },
+    }).ok,
+  ).toBe(true)
+  return result
+}
 
 /** Route each `runAgent` pass by the conversation text so distinct passes can
  *  script distinct behaviour. Records every `StreamInput` (so we can assert the
@@ -323,20 +384,7 @@ describe("objective-goal-continuation-live — runIdleContinuation decision logi
     })
     const authority = asObjectiveAuthority(store) as ObjectiveAuthority
     const commitObservation = (attemptId: string) =>
-      authority.commit(
-        authority.prepare({
-          threadId: TID,
-          actor: "model",
-          mutation: {
-            kind: "addBlocker",
-            reason: "approval pending",
-            waitingOn: "user",
-            target: { kind: "approval", ref: "deploy" },
-            attemptId,
-          },
-        }),
-        { admitted: true },
-      )
+      observeBlockerDuringAttempt(authority, attemptId)
 
     expect(commitObservation("attempt-1").ok).toBe(true)
     expect(commitObservation("attempt-2").ok).toBe(true)

@@ -178,9 +178,14 @@ describe("budget-probe hellgate (12 cases)", () => {
     const roots = ["src/agent", "src/runner", "src/apps"]
     const repoRoot = join(import.meta.dir, "..", "..", "..")
     const absRoots = roots.map((r) => join(repoRoot, r))
-    for (const root of absRoots) {
+    for (const [index, root] of absRoots.entries()) {
+      const repoRelativeRoot = roots[index]
+      if (repoRelativeRoot === undefined) throw new Error(`missing root identity for ${root}`)
       assertScanPopulation(visitedUnder(root), root, {
-        id: `tests/unit/retrieval/budget-probe-hellgate.test.ts#${root}`,
+        // A committed scan identity must survive clones and linked worktrees.
+        // Absolute roots made the same scan appear stale + unpinned whenever
+        // verification ran outside the checkout that authored the baseline.
+        id: `tests/unit/retrieval/budget-probe-hellgate.test.ts#${repoRelativeRoot}`,
         collectable: (n) => n.endsWith(".ts"),
       })
     }

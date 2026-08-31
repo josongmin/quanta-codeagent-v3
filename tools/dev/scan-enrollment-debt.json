@@ -231,9 +231,9 @@
       "slice-boundary:retrieval"
     ],
     "tests/unit/retrieval/budget-probe-hellgate.test.ts": [
-      "tests/unit/retrieval/budget-probe-hellgate.test.ts#/Users/songmin/quanta-codeagent-v3/src/agent",
-      "tests/unit/retrieval/budget-probe-hellgate.test.ts#/Users/songmin/quanta-codeagent-v3/src/apps",
-      "tests/unit/retrieval/budget-probe-hellgate.test.ts#/Users/songmin/quanta-codeagent-v3/src/runner"
+      "tests/unit/retrieval/budget-probe-hellgate.test.ts#src/agent",
+      "tests/unit/retrieval/budget-probe-hellgate.test.ts#src/apps",
+      "tests/unit/retrieval/budget-probe-hellgate.test.ts#src/runner"
     ],
     "tests/unit/rules-slice-boundary.test.ts": [
       "slice-boundary:rules"
@@ -414,6 +414,9 @@
     ],
     "tests/unit/feature-catalog-reachability.test.ts": [
       "tests/unit/feature-catalog-reachability.test.ts#FEATURE-YAMLS"
+    ],
+    "tests/unit/feature-catalog-yaml-hellgate.test.ts": [
+      "tests/unit/feature-catalog-yaml-hellgate.test.ts#FEATURE-YAMLS"
     ],
     "tests/unit/no-benchmark-overfit-steer-ratchet.test.ts": [
       "tests/unit/no-benchmark-overfit-steer-ratchet.test.ts#BATCH-DRIVER-LANES",

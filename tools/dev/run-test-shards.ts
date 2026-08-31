@@ -1,9 +1,20 @@
-import { readFileSync, rmSync, writeFileSync } from "node:fs"
+import {
+  closeSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import {
   assertShardCoverage,
   parseShardDiscovery,
   type ShardDiscovery,
 } from "./test-shard-coverage"
+import { acquireTestShardLease, selectRepositoryLeaseIdentity } from "./test-shard-lease"
 
 /**
  * Authoritative local full-suite runner.
@@ -148,24 +159,6 @@ const mergeJunit = (junitOut: string): void => {
   )
 }
 
-const relay = async (
-  stream: ReadableStream<Uint8Array>,
-  write: (text: string) => void,
-  observe: (text: string) => void,
-): Promise<void> => {
-  const decoder = new TextDecoder()
-  for await (const chunk of stream) {
-    const text = decoder.decode(chunk, { stream: true })
-    observe(text)
-    write(text)
-  }
-  const tail = decoder.decode()
-  if (tail !== "") {
-    observe(tail)
-    write(tail)
-  }
-}
-
 const runShard = async (
   index: number,
   opts: RunnerOptions,
@@ -180,79 +173,120 @@ const runShard = async (
       ? []
       : ["--reporter=junit", `--reporter-outfile=${junitShardPath(opts.junitOut, index)}`]
   process.stdout.write(`\n[test:shards] START shard=${shard}\n`)
-  const proc = Bun.spawn({
-    cmd: [
-      "bun",
-      "test",
-      ...SUITE_ROOTS[opts.suite],
-      "--timeout=60000",
-      "--parallel=1",
-      `--shard=${shard}`,
-      ...junitArgs,
-    ],
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  let banner = ""
-  let discovery: ShardDiscovery | undefined
-  const observe = (text: string): void => {
-    if (discovery !== undefined) return
-    banner = `${banner}${text}`.slice(-512)
-    discovery = parseShardDiscovery(banner, shard)
-  }
-  const stdout = relay(proc.stdout, (text) => process.stdout.write(text), observe)
-  const stderr = relay(proc.stderr, (text) => process.stderr.write(text), observe)
-  let timedOut = false
-  const timeout = setTimeout(() => {
-    timedOut = true
-    process.stderr.write(
-      `[test:shards] TIMEOUT shard=${shard} after=${SHARD_TIMEOUT_MS}ms; killing worker\n`,
+  // Native file descriptors keep the child off a JS relay/backpressure path.
+  // Relaying every Bun test chunk through this process more than doubled a
+  // measured full shard (375s direct versus the 720s kill boundary) and turned
+  // a green worker into a runner timeout. Spool natively, then replay once so
+  // the receipt still contains the complete worker output and discovery banner.
+  const spoolDir = mkdtempSync(join(tmpdir(), "quanta-test-shard-"))
+  const spoolPath = join(spoolDir, `shard-${index}.log`)
+  const spoolFd = openSync(spoolPath, "w")
+  let closed = false
+  try {
+    const startedAt = performance.now()
+    const proc = Bun.spawn({
+      cmd: [
+        "bun",
+        "test",
+        ...SUITE_ROOTS[opts.suite],
+        "--timeout=60000",
+        "--parallel=1",
+        `--shard=${shard}`,
+        ...junitArgs,
+      ],
+      stdout: spoolFd,
+      stderr: spoolFd,
+    })
+    const progress = setInterval(() => {
+      const elapsedSeconds = Math.round((performance.now() - startedAt) / 1_000)
+      const spoolBytes = statSync(spoolPath).size
+      process.stdout.write(
+        `[test:shards] PROGRESS shard=${shard} elapsed=${elapsedSeconds}s spool_bytes=${spoolBytes}\n`,
+      )
+    }, 60_000)
+    progress.unref()
+    let timedOut = false
+    const timeout = setTimeout(() => {
+      timedOut = true
+      process.stderr.write(
+        `[test:shards] TIMEOUT shard=${shard} after=${SHARD_TIMEOUT_MS}ms; killing worker\n`,
+      )
+      proc.kill(9)
+    }, SHARD_TIMEOUT_MS)
+    const code = await proc.exited
+    clearTimeout(timeout)
+    clearInterval(progress)
+    closeSync(spoolFd)
+    closed = true
+    const spoolBytes = statSync(spoolPath).size
+    const output = readFileSync(spoolPath, "utf8")
+    process.stdout.write(output)
+    const discovery = parseShardDiscovery(output, shard)
+    const elapsedMs = Math.round(performance.now() - startedAt)
+    const usage = proc.resourceUsage()
+    const maxRssBytes = usage?.maxRSS ?? 0
+    process.stdout.write(
+      `[test:shards] END shard=${shard} exit=${code}${timedOut ? " timeout" : ""} ` +
+        `elapsed_ms=${elapsedMs} max_rss_bytes=${maxRssBytes} spool_bytes=${spoolBytes}\n`,
     )
-    proc.kill(9)
-  }, SHARD_TIMEOUT_MS)
-  const code = await proc.exited
-  clearTimeout(timeout)
-  await Promise.all([stdout, stderr])
-  process.stdout.write(
-    `[test:shards] END shard=${shard} exit=${code}${timedOut ? " timeout" : ""}\n`,
-  )
-  return discovery === undefined ? { code, timedOut } : { code, timedOut, discovery }
+    return discovery === undefined ? { code, timedOut } : { code, timedOut, discovery }
+  } finally {
+    if (!closed) closeSync(spoolFd)
+    rmSync(spoolDir, { recursive: true, force: true })
+  }
 }
 
 const main = async (): Promise<void> => {
   const opts = parseOptions(process.argv.slice(2))
-  const before = await gitSnapshot()
-  if (before.status !== "") {
-    throw new Error(
-      "[test:shards] INVALID — authoritative receipts require a clean checkout. Commit or stash changes first.",
-    )
-  }
-  if (opts.junitOut !== undefined) prepareJunit(opts.junitOut)
-  process.stdout.write(`[test:shards] frozen head=${before.head} suite=${opts.suite} dirty=no\n`)
+  const [remote, commonDir] = await Promise.all([
+    capture(["git", "remote", "get-url", "origin"]),
+    capture(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"]),
+  ])
+  const identity = selectRepositoryLeaseIdentity({ remote, commonDir, cwd: process.cwd() })
+  const lease = await acquireTestShardLease({
+    identity,
+    onWait: (port) =>
+      process.stdout.write(
+        `[test:shards] WAIT repository lease port=${port}; another checkout owns the full-suite lane\n`,
+      ),
+  })
+  process.stdout.write(`[test:shards] LEASE acquired port=${lease.port}\n`)
+  try {
+    const before = await gitSnapshot()
+    if (before.status !== "") {
+      throw new Error(
+        "[test:shards] INVALID — authoritative receipts require a clean checkout. Commit or stash changes first.",
+      )
+    }
+    if (opts.junitOut !== undefined) prepareJunit(opts.junitOut)
+    process.stdout.write(`[test:shards] frozen head=${before.head} suite=${opts.suite} dirty=no\n`)
 
-  const failed: number[] = []
-  const discoveries: ShardDiscovery[] = []
-  for (let index = 1; index <= SHARD_COUNT; index += 1) {
-    const result = await runShard(index, opts)
-    if (result.code !== 0 || result.timedOut) failed.push(index)
-    if (result.discovery !== undefined) discoveries.push(result.discovery)
-  }
+    const failed: number[] = []
+    const discoveries: ShardDiscovery[] = []
+    for (let index = 1; index <= SHARD_COUNT; index += 1) {
+      const result = await runShard(index, opts)
+      if (result.code !== 0 || result.timedOut) failed.push(index)
+      if (result.discovery !== undefined) discoveries.push(result.discovery)
+    }
 
-  const after = await gitSnapshot()
-  if (!sameSnapshot(before, after)) {
-    throw new Error(
-      `[test:shards] INVALID — checkout changed during run (start=${before.head}, end=${after.head}). ` +
-        "Re-run against one stable snapshot; this receipt cannot describe a single source state.",
+    const after = await gitSnapshot()
+    if (!sameSnapshot(before, after)) {
+      throw new Error(
+        `[test:shards] INVALID — checkout changed during run (start=${before.head}, end=${after.head}). ` +
+          "Re-run against one stable snapshot; this receipt cannot describe a single source state.",
+      )
+    }
+    if (failed.length > 0) {
+      throw new Error(`[test:shards] FAILED shard(s): ${failed.join(", ")}/${SHARD_COUNT}`)
+    }
+    assertShardCoverage(discoveries, SHARD_COUNT)
+    if (opts.junitOut !== undefined) mergeJunit(opts.junitOut)
+    process.stdout.write(
+      `[test:shards] PASS suite=${opts.suite} shards=1-${SHARD_COUNT}/${SHARD_COUNT} head=${before.head}\n`,
     )
+  } finally {
+    lease.release()
   }
-  if (failed.length > 0) {
-    throw new Error(`[test:shards] FAILED shard(s): ${failed.join(", ")}/${SHARD_COUNT}`)
-  }
-  assertShardCoverage(discoveries, SHARD_COUNT)
-  if (opts.junitOut !== undefined) mergeJunit(opts.junitOut)
-  process.stdout.write(
-    `[test:shards] PASS suite=${opts.suite} shards=1-${SHARD_COUNT}/${SHARD_COUNT} head=${before.head}\n`,
-  )
 }
 
 await main()

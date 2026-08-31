@@ -510,6 +510,79 @@ export const canaryHolds = (mirror: string, root: CorpusRoot): boolean => {
   return verdict === "red"
 }
 
+export interface EmptyMirrorOps {
+  readonly buildMirror: (root: CorpusRoot, guard: string) => string
+  readonly canaryHolds: (mirror: string, root: CorpusRoot) => boolean
+  readonly corpusOverlap: (mirror: string, root: CorpusRoot) => number
+  readonly realCorpusSize: (root: CorpusRoot) => number
+  readonly runInMirror: (mirror: string, guard: string) => Verdict
+  readonly removeMirror: (mirror: string) => void
+}
+
+export interface GuardGroupAudit {
+  readonly checked: number
+  readonly vacuous: readonly string[]
+  readonly unusable: readonly string[]
+  readonly unsupported: readonly string[]
+}
+
+const DEFAULT_EMPTY_MIRROR_OPS: EmptyMirrorOps = {
+  buildMirror,
+  canaryHolds,
+  corpusOverlap,
+  realCorpusSize,
+  runInMirror,
+  removeMirror: (mirror) => rmSync(mirror, { recursive: true, force: true }),
+}
+
+/**
+ * Judge one non-empty corpus group. Every build is bound to an actual guard's
+ * import closure, and that exact mirror must pass its canary before its guard
+ * verdict can count. A guard-less group mirror cannot prove either property and
+ * is deliberately absent from this contract.
+ */
+export const auditGuardGroup = (
+  root: CorpusRoot,
+  group: readonly GuardCase[],
+  ops: EmptyMirrorOps = DEFAULT_EMPTY_MIRROR_OPS,
+): GuardGroupAudit => {
+  if (group.length === 0) {
+    throw new Error(`empty-mirror: empty guard group for corpus ${root}`)
+  }
+
+  const vacuous: string[] = []
+  const unusable: string[] = []
+  const unsupported: string[] = []
+
+  for (const guard of group) {
+    // One mirror PER GUARD: the kept import closure is that guard's, so sharing
+    // a mirror across guards would refill the corpus with another guard's imports.
+    const mirror = ops.buildMirror(root, guard.file)
+    try {
+      // The canary belongs on THIS mirror. Its guard-specific import closure can
+      // refill enough corpus to make the oracle unable to distinguish empty from
+      // present; that state is unsupported, never a successful RED verdict.
+      if (!ops.canaryHolds(mirror, root)) {
+        unsupported.push(`${guard.file} (its mirror failed the canary — corpus not empty enough)`)
+        continue
+      }
+      const overlap = ops.corpusOverlap(mirror, root)
+      if (overlap > ops.realCorpusSize(root) * OVERLAP_FRACTION) {
+        unsupported.push(`${guard.file} (${overlap} corpus files kept by its own imports)`)
+        continue
+      }
+      const verdict = ops.runInMirror(mirror, guard.file)
+      if (verdict === "red") continue
+      if (verdict === "green") vacuous.push(guard.file)
+      else unusable.push(`${guard.file} (${verdict})`)
+    } finally {
+      ops.removeMirror(mirror)
+    }
+  }
+
+  return { checked: group.length, vacuous, unusable, unsupported }
+}
+
 /** This is a CLI: its findings ARE its output. One seam, one suppression. */
 // biome-ignore lint/suspicious/noConsole: the tool reports to the operator
 const say = (line: string): void => console.error(line)
@@ -530,57 +603,12 @@ if (import.meta.main) {
   let checked = 0
 
   for (const [root, group] of byRoot) {
-    // One mirror PER GUARD: the kept import closure is that guard's, so sharing a
-    // mirror across guards would refill the corpus with another guard's imports.
-    const canaryMirror = buildMirror(root)
-    try {
-      if (!canaryHolds(canaryMirror, root)) {
-        say(
-          `empty-mirror: the ${root} mirror FAILED its canary — it cannot tell an empty ` +
-            `corpus from a full one, so its ${group.length} verdict(s) are worthless.`,
-        )
-        process.exit(1)
-      }
-      rmSync(canaryMirror, { recursive: true, force: true })
-      for (const c of group) {
-        checked++
-        const mirror = buildMirror(root, c.file)
-        // A guard that IMPORTS most of the corpus it scans cannot be judged this
-        // way: its own import closure refills the tree. `knobs-import-bundle`
-        // imports 68 per-knob modules and then asserts about the 68 files it
-        // enumerated, so the mirror keeps 67 of them and the arm is not empty.
-        // Saying "not vacuous" there would be a lie — the oracle simply has no
-        // verdict, and an overlap it cannot see through must be reported, never
-        // silently counted as a pass.
-        // The canary belongs on THIS mirror, not on a guard-less one built
-        // earlier. The per-guard mirror keeps that guard's import closure, so it
-        // can be far fuller than the one the canary was run against — measured:
-        // the canary REJECTS the mirror used for `voice-session-hellgate`, and
-        // the oracle never asked.
-        if (!canaryHolds(mirror, root)) {
-          unsupported.push(`${c.file} (its mirror failed the canary — corpus not empty enough)`)
-          rmSync(mirror, { recursive: true, force: true })
-          continue
-        }
-        const overlap = corpusOverlap(mirror, root)
-        if (overlap > realCorpusSize(root) * OVERLAP_FRACTION) {
-          unsupported.push(`${c.file} (${overlap} corpus files kept by its own imports)`)
-          rmSync(mirror, { recursive: true, force: true })
-          continue
-        }
-        const v = runInMirror(mirror, c.file)
-        rmSync(mirror, { recursive: true, force: true })
-        if (v === "red") continue
-        if (v === "green") {
-          vacuous.push(c.file)
-          say(`  VACUOUS ${c.file} — green with ${root} emptied`)
-        } else {
-          unusable.push(`${c.file} (${v})`)
-        }
-      }
-    } finally {
-      rmSync(canaryMirror, { recursive: true, force: true })
-    }
+    const result = auditGuardGroup(root, group)
+    checked += result.checked
+    vacuous.push(...result.vacuous)
+    unusable.push(...result.unusable)
+    unsupported.push(...result.unsupported)
+    for (const file of result.vacuous) say(`  VACUOUS ${file} — green with ${root} emptied`)
   }
 
   const unlisted = vacuous.filter((v) => !known.has(v))

@@ -10,6 +10,7 @@
 
 import {
   addSequenceToRanges,
+  type DecodedDurableUsage,
   type DurableUsageBucket,
   decodeDurableUsage,
   encodeMintedCallId,
@@ -18,9 +19,11 @@ import {
   sequenceInRanges,
 } from "./durable-codec"
 import type {
+  PreparedUsageHydrate,
   UsageAccountingPort,
   UsageAccountingSnapshot,
   UsageAggregate,
+  UsageHydrateOptions,
   UsageRecordResult,
 } from "./port"
 import type { NormalizedUsage, UsageCost, UsageRecord } from "./types"
@@ -130,9 +133,58 @@ const freshUsageBooks = (): UsageBooks => ({
   retained: [],
 })
 
+/** Build every mutable owner before the attach boundary. Decoded state already
+ * owns fresh validated objects; no temporary authority or JSON round trip. */
+const restoredUsageBooks = (
+  durable: DecodedDurableUsage,
+  options: UsageHydrateOptions,
+  maxRetained: number,
+): UsageBooks => ({
+  total: durable.total,
+  byModel: new Map(durable.byModel),
+  byAgent: new Map(durable.byAgent),
+  boundSessionId:
+    durable.total.calls === 0 ? undefined : (options.rebindSessionId ?? durable.boundSessionId),
+  mintNamespace: durable.version === 2 ? durable.mint.namespace : crypto.randomUUID(),
+  mintHighWater: durable.version === 2 ? durable.mint.highWater : 0,
+  mintedRanges:
+    durable.version === 2 ? durable.mint.admitted.map(([start, end]) => [start, end]) : [],
+  // Legacy V1 has no authenticated mint namespace; retain all its IDs exactly.
+  externalSeen: new Set(durable.version === 2 ? durable.externalSeen : durable.seen),
+  continuityLost: durable.continuityLost,
+  byKind: { root: durable.byKind.root, subagent: durable.byKind.subagent },
+  retained: durable.retained
+    .slice(-maxRetained)
+    .map((record) =>
+      options.rebindSessionId === undefined
+        ? record
+        : { ...record, provenance: { ...record.provenance, sessionId: options.rebindSessionId } },
+    ),
+})
+
 export const createUsageAccounting = (opts: UsageAccountingOpts = {}): UsageAccountingPort => {
   const maxRetained = Math.max(1, Math.floor(opts.maxRetainedRecords ?? DEFAULT_RETAINED_RECORDS))
   let books = freshUsageBooks()
+
+  const prepareHydrate = (
+    json: string | undefined,
+    options: UsageHydrateOptions = {},
+  ): PreparedUsageHydrate => {
+    const durable = json === undefined ? undefined : decodeDurableUsage(json)
+    const restored = json === undefined || durable !== undefined
+    const prepared =
+      durable === undefined ? freshUsageBooks() : restoredUsageBooks(durable, options, maxRetained)
+    if (!restored) prepared.continuityLost = true
+    let committed = false
+    return {
+      restored,
+      commit: () => {
+        if (committed) return
+        books = prepared
+        committed = true
+      },
+    }
+  }
 
   return {
     mintCallId(_provenance): string {
@@ -207,6 +259,7 @@ export const createUsageAccounting = (opts: UsageAccountingOpts = {}): UsageAcco
       // from the bounded retained log.
       return JSON.stringify({
         v: 2,
+        continuityLost: books.continuityLost,
         boundSessionId: books.boundSessionId,
         mint: {
           namespace: books.mintNamespace,
@@ -222,47 +275,12 @@ export const createUsageAccounting = (opts: UsageAccountingOpts = {}): UsageAcco
       })
     },
 
+    prepareHydrate,
+
     hydrate(json: string, options = {}): boolean {
-      // Corrupt or wrong-shape state: the books stay EMPTY and SAY so — a
-      // resume proceeds, but never silently as an exact $0.
-      const d = decodeDurableUsage(json)
-      if (d === undefined) {
-        books = freshUsageBooks()
-        books.continuityLost = true
-        return false
-      }
-      const reboundSessionId = options.rebindSessionId ?? d.boundSessionId
-      books.boundSessionId = reboundSessionId
-      if (d.version === 2) {
-        books.mintNamespace = d.mint.namespace
-        books.mintHighWater = d.mint.highWater
-        books.mintedRanges = d.mint.admitted.map(([start, end]) => [start, end])
-        books.externalSeen = new Set(d.externalSeen)
-      } else {
-        // V1 had no authenticated mint namespace, so every restored ID stays
-        // in the exact sparse set. New V2 mints start in a fresh namespace.
-        books.mintNamespace = crypto.randomUUID()
-        books.mintHighWater = 0
-        books.mintedRanges = []
-        books.externalSeen = new Set(d.seen)
-      }
-      books.retained = d.retained.slice(-maxRetained).map((record) =>
-        options.rebindSessionId === undefined
-          ? record
-          : {
-              ...record,
-              provenance: { ...record.provenance, sessionId: options.rebindSessionId },
-            },
-      )
-      books.total = { ...d.total }
-      books.byModel = new Map(d.byModel.map(([key, bucket]) => [key, { ...bucket }]))
-      books.byAgent = new Map(d.byAgent.map(([key, bucket]) => [key, { ...bucket }]))
-      books.byKind = {
-        root: { ...d.byKind.root },
-        subagent: { ...d.byKind.subagent },
-      }
-      books.continuityLost = false
-      return true
+      const prepared = prepareHydrate(json, options)
+      prepared.commit()
+      return prepared.restored
     },
 
     reset(): void {
