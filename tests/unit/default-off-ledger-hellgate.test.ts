@@ -10,6 +10,10 @@ import { loadFeatures } from "../../tools/feature-catalog/schema"
 const ROOT = join(import.meta.dir, "..", "..")
 const LEDGER_PATH = join(ROOT, "tools/feature-catalog/default-off-ledger.yaml")
 const CATALOG_DIR = join(ROOT, "tools/feature-catalog/features")
+// This rail loads the whole 1k+ YAML catalog through the production parser.
+// It is an integrity census, not a latency budget; retain the same finite
+// eight-shard I/O allowance as the companion full-catalog scan rail.
+const FULL_CATALOG_CENSUS_TIMEOUT_MS = 300_000
 
 const clone = (ledger: DefaultOffLedger): DefaultOffLedger => structuredClone(ledger)
 
@@ -23,21 +27,25 @@ const opts = async (): Promise<{ readonly catalog: Awaited<typeof catalogOnce> }
 })
 
 describe("DOF-00 default-off authority ledger hellgate", () => {
-  test("anti-vacuum: both live CLI seed authorities and the catalog denominator are populated", async () => {
-    const ledger = await loadDefaultOffLedger(LEDGER_PATH)
-    const report = await checkDefaultOffLedger(ledger, await opts())
+  test(
+    "anti-vacuum: both live CLI seed authorities and the catalog denominator are populated",
+    async () => {
+      const ledger = await loadDefaultOffLedger(LEDGER_PATH)
+      const report = await checkDefaultOffLedger(ledger, await opts())
 
-    expect(report.runtimeCliSeedCount).toBe(31)
-    expect(report.eligibleFeatureIds.length).toBeGreaterThanOrEqual(150)
-    expect(report.eligibleFeatureIds).toEqual([...report.eligibleFeatureIds].sort())
-    // DOF-00 completion invariant: every eligible row resolves every surface
-    // default (zero `unknown` cells). Construction-phase allowed unknowns; the
-    // finished ledger must not. Remaining `unknown` *values* are proof tiers
-    // only (features with genuinely no ON-path test), never surface cells.
-    expect(report.unknownSurfaceCount).toBe(0)
-    expect(report.summary).toContain(`eligible=${report.eligibleFeatureIds.length}`)
-    expect(report.errors).toEqual([])
-  })
+      expect(report.runtimeCliSeedCount).toBe(31)
+      expect(report.eligibleFeatureIds.length).toBeGreaterThanOrEqual(150)
+      expect(report.eligibleFeatureIds).toEqual([...report.eligibleFeatureIds].sort())
+      // DOF-00 completion invariant: every eligible row resolves every surface
+      // default (zero `unknown` cells). Construction-phase allowed unknowns; the
+      // finished ledger must not. Remaining `unknown` *values* are proof tiers
+      // only (features with genuinely no ON-path test), never surface cells.
+      expect(report.unknownSurfaceCount).toBe(0)
+      expect(report.summary).toContain(`eligible=${report.eligibleFeatureIds.length}`)
+      expect(report.errors).toEqual([])
+    },
+    { timeout: FULL_CATALOG_CENSUS_TIMEOUT_MS },
+  )
 
   test("missing row and duplicate feature id are rejected", async () => {
     const ledger = await loadDefaultOffLedger(LEDGER_PATH)
