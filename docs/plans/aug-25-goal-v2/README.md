@@ -55,38 +55,38 @@ rail 재실행: arch+ratchet 69/0 · typecheck src/tests pass · goal 유닛 9�
 PTY `cli-goal-pursuit-e2e` 8 pass/1 fail (`uses its own quiet window…`, `No matching recording`;
 단독 `-t` 재실행 2/2 pass → 순서의존, 원인 미측정).
 
-## 구현 대조 감사 (2026-08-30) — 티켓 명세 vs 실제 코드
+## 현재 코드 대조 — 2026-08-31
 
-3바퀴 병렬 어딧(receipts / tickets / README+catalog) 후 각 주장을 직접 프로브로 확인했다.
-**티켓은 명세 원본이라 고쳐 쓰지 않고, 각 티켓 상단에 "구현 대조" 콜아웃을 달았다.** 요약:
+기준: `main` `08fb52c175b0289cb26d794bbab9862851b9904d`.
+과거 티켓의 심볼 이름을 그대로 찾는 방식이 아니라 현재 production 조립과 소비자를 기준으로 다시
+확인했다. 실행 가능한 잔여 티켓, write set, RED rail과 중단 조건은
+[`NEXT-PLAN.md`](NEXT-PLAN.md)가 단일 현재 계획이다.
 
-| 티켓 | 실제와 다른 핵심 | 근거 |
+| 영역 | 현재 판정 | 근거와 경계 |
 |---|---|---|
-| GOAL-03 | **샌드박스 절반이 미구현**: verifier는 `perCallWrap` 없이 실행 → readable-root allowlist / network deny / 자원 캡 없음. 소스 쓰기는 사후 digest 비교로 *감지*할 뿐 차단하지 않는다. receipt가 저장하기로 한 필드(타임아웃 플래그·duration·stdout digest·runner version·posture)도 commit에서 버려진다. `sandbox-unavailable`은 어휘만 존재 | `objective-verifier-wire.ts` `maybeWireObjectiveVerifier`, `criteria/model.ts`, `criteria/ports.ts` |
-| GOAL-05 | `currentSourceStale` / 렌더러 `(stale!)` 마커 미구현. RED 8번("`QUANTA_GOAL` 미설정 → `/goal` 미등록")은 default-ON 승격으로 **반전**됐고 테스트가 반대를 단언한다 | `slash/goal-render.ts`, `objective-frontdoor.hellgate.test.ts` |
-| GOAL-06 | CLI의 `attachingOrClosing`은 **상시 false**(`armGoalWake`가 넘기지 않음) → 8개 quiescence 저장소 중 attach/close만 미투영. 렌더러가 `limitedBy`(제한 주체)를 버린다. fire 순서에 reconcile 단계 없음 | `interactive-setup.ts`, `goal-wake-host.ts`, `goal-wake-controller.ts` |
-| GOAL-07 | **`sessionEpoch`·`WakeLifecyclePort`·역순 롤백 전부 미구현**(grep 0). 실제는 objective별 `attachGeneration` 카운터 + 114줄 선형 `attach-session.ts`이고, 순서 보장 7단계는 웹 데몬(`server/thread-hydrate.ts`)에 있다 | `src/objective/authority.ts`, `src/session/attach-session.ts` |
-| GOAL-08 | `session.objective.work` 커맨드·`GoalContinuationAdmissionPort`·프롬프트 digest 바인딩은 미구현(대신 out-of-band `goalWork` 프레임 + `turnSubmitAuthority`/`consumeTurnSubmitProvenance` 분리, provenance 4필드). 웹 `/goal` 컨트롤은 generated structured readout, USER mutation CAS/receipt, dedicated verifier frame 위에서 show/create/work/pause/stop/resume/edit/clear/abandon/budget/unblock/criterion/check/verify 생산자를 모두 보유한다. | `goal-work-frame.ts`, `goal-verify-compose.ts`, `src/protocol/readout/goal.ts`, `apps/web-frontend/**` |
-| GOAL-09 | `observeBlocker`는 mutation kind가 아니라 actor 라우팅. `dependencyKey`(host 파생)가 아니라 **모델이 준 문자열의 `JSON.stringify`**이고 레지스트리 조회가 없다 — 티켓 자신의 stop condition("prose가 의존성을 식별") 위반. `occurrenceEvidenceId` 미구현, 등록된 생산자 0 | `blocker-observation.ts`, `policy.ts`, `tool/objective/index.ts` |
-| GOAL-10 | `tests/smoke/goal/` 없음, **텔레메트리 섹션 전부 미구현**(decision counter 0, label allowlist 테스트 0). PTY 배터리 14항목 중 약 5항목만 존재 | `tests/smoke/`, `tests/e2e-pty/cli-goal-pursuit-e2e.test.ts` |
+| GOAL-03 verifier | **PARTIAL** | exact argv·bounded timeout·env scrub·before/after source digest·CAS commit은 live. 다만 verifier가 sandbox wrapper를 요구하지 않고 웹은 CLI sandbox installer를 호출하지 않는다. later-source `reconcile()` production caller도 attempt settlement 한 곳뿐이라 read-time freshness는 미보장 |
+| GOAL-05 CLI control/visibility | **DONE (CLI)** | default-ON `/goal`, product budget ceiling, manual attestation, abandon/unblock, settlement checkpoint 자동 한 줄과 PTY가 있다. 과거 `verificationState` 필드는 producer 없는 유령이어서 제거됨 |
+| GOAL-06 bounded wake | **CORE DONE / SEAM DEBT** | revision/attachGeneration/dequeue fence, backoff, budget/hard cap, draft/approval/foreground/background quiescence는 live. `armGoalWake.attachingOrClosing` optional callback은 production에서 미전달이고 attach는 별도 cancellation hooks로 방어하므로 dead seam을 정리해야 함 |
+| GOAL-07 attach/fork | **BEHAVIOR DONE / SPEC DIVERGED** | 실제 authority는 `attachGeneration`과 attach start/settled cancellation을 사용한다. 원문 이름인 `sessionEpoch`/`WakeLifecyclePort`를 구현하지 않았다는 사실만으로 새 기능을 만들지 않으며, 현재 owner rail이 증명하지 못하는 rollback/dequeue 행동만 후속 대상 |
+| GOAL-08 work + browser controls | **DONE (CLI + web)** | CLI와 web의 user-requested work attribution, approval resume, generated structured readout, viewed-revision CAS, correlated mutation/verify receipt, 전체 `/goal` verb와 real daemon E2E가 있다. out-of-band `goalWork` frame은 현재 선택된 transport이며 `session.objective.work` 심볼 부재는 자체 결함이 아님 |
+| GOAL-09 blocker hysteresis | **PARTIAL** | distinct attempt ID는 host가 찍고 threshold/dedupe/persistence가 live. dependency grouping identity는 여전히 모델의 typed `target.ref` 문자열이라 host registry identity/occurrence evidence가 없음 |
+| GOAL-10 telemetry/tests | **PARTIAL** | turn-scoped settlement counter와 bounded `{kind,outcome}` labels는 구현됨. wake/enqueue/completion/verifier의 turn 밖 counters, Goal smoke corpus, control/verify/budget/blocker PTY matrix는 남음 |
+| Browser `/goal` control | **DONE** | show/create/work/pause/stop/resume/edit/clear/abandon/budget/unblock/criterion add+done/check add/verify 모두 main에 포함 |
+| Browser always-on goal state | **PARTIAL** | `/goal` readout은 완전하지만 `WebGoalWakeHandle`이 status를 노출하지 않고 web settlement sink가 없으며 ObjectiveCard는 default-OFF observability gate 뒤에 있음 |
 
-반증된 어딧 주장(문서에 반영하지 않음): "웹 런타임이 `activeTurnRef`를 채우지 않는다" — `runtime-factory.ts`가 파사드에 노출한다.
+## 현재 열린 항목
 
-## 현재 상태 — 열린 항목 (2026-08-30)
+1. **P1 — verifier execution posture**: checked command의 fail-closed sandbox 여부와 receipt provenance 계약 결정/구현.
+2. **P1 — read-time source freshness**: source edit 후 다음 turn 없이 CLI/web read가 stale completion을 성공으로 표시하지 않게 shared reconcile 배선.
+3. **P1 — blocker dependency authority**: 모델 문자열 대신 host-resolved dependency identity와 occurrence evidence로 3-attempt hysteresis 결합.
+4. **P1 — web always-on wake/checkpoint**: default observability OFF에서도 typed wake 상태와 최근 settlement가 명령 없이 갱신되는 projection.
+5. **P1 — lifecycle telemetry remainder**: settlement 이외 wake/enqueue/completion/verifier 사건의 bounded counters.
+6. **P2 — PTY/smoke battery**: 실행시간 정책 확정 후 verify/control/budget/blocker/attach public rails와 `tests/smoke/goal` 추가.
+7. **P2 — CLI attach/close quiescence truth source**: dead optional callback 제거 또는 실제 lifecycle cell 배선.
+8. **P3 — headless/batch autonomous pursuit**: 제품 요구가 확정될 때만 별도 front door와 E2E를 설계.
 
-> 실행 계획(각 항목의 근거·프로브 실측치·헬게이트 RED 정의·크기·순서): [`NEXT-PLAN.md`](NEXT-PLAN.md)
-
-안전 rail(귀속·하드캡·CAS·verifier receipt·quiescence)은 닫혀 있다. 남은 것은 아래가 전부다.
-
-1. **정산 후 체크포인트 리포트 방출** (GOAL-05A rail 16). 데이터 모델은 있고 `/goal`이 on-demand로 렌더하지만 **자동 방출 훅이 없다** — 유저가 `/goal`을 쳐야만 진행 상황을 본다. 05A가 "06/10으로 이월"이라 적었으나 둘 다 지키지 않은 죽은 이월. ROI 높음(agent-state 가시성 북극성 직결, 배선만 남음).
-2. **웹 approval 재개가 미귀속**. 승인 후 재개는 `session.turn.run`(맨 턴)이라 goal provenance도 claim도 없다 — goal 턴이 승인에서 멈췄다 재개되면 예산·하드캡·receipt에 안 잡힌다. GOAL-08 자신의 stop condition 위반. ROI 높음(정확성).
-3. **텔레메트리** (GOAL-10). armed/skip(reason)·enqueue admitted/rejected·attempt started/settled·completion satisfied/rejected 카운터와 label allowlist 테스트가 전무. ROI 중간~높음("왜 안 깨어났나"를 세는 수단이 `/goal` 한 줄뿐).
-4. **PTY 배터리 결손** (GOAL-05 E2E / GOAL-10 1~14). `check add → verify → pause → resume → edit`, 예산 소진, no-progress 간격 증가, blocker 2/3→3/3, zero-criteria 완료 거절, attach B가 PTY에 없다. ROI 중간(표면 회귀의 유일한 실경로).
-5. **제품 예산 상한 부재**. `PRODUCT_BUDGET_CEILING`/`clampBudgetLimit`이 머지 `9b21d2fd2`에서 사라진 뒤 복귀 안 함 — 유저가 `maxTurns`를 무한정 넣을 수 있다(자율 하드캡 20은 무관하게 유지). ROI 중간(`merge-symbol-loss-ratchet`이 사건을 고정).
-6. **GOAL-03 샌드박스 절반**. 위 표 참조. ROI 중간~높음이지만 "설치 슬롯 계약" 결정으로 이월된 상태 — 되살리려면 결정부터.
-7. **`tests/smoke/goal/`** (GOAL-10). ROI 낮음~중간, 운영 측정.
-8. **headless/batch goal 추적 없음**. GOAL-10 receipt가 명시적으로 claim 밖으로 뒀다(단, stdio door는 default-ON 승격 이후 objective *authority*는 노출한다 — 자율 *추적*만 없다). ROI 낮음.
-9. ~~번들 웹 UI goal control 결손~~ → **해결**(2026-08-30). `/goal work`뿐 아니라 unblock/criterion/check/verify까지 complete; structured readout이 ID/revision/check spec을 보존하고 mutation/verify 모두 exact correlation을 사용한다. broader web 가시성(wake 상태·settlement checkpoint·default-OFF ObjectiveCard)은 별도 잔여다.
+완료로 정정된 과거 항목: 승인 후 재개, manual attestation, stuck attempt abandon, CLI checkpoint,
+제품 budget ceiling, 웹 read-model drift, 브라우저 전체 control, turn-scoped settlement decision counter.
 
 
 ## 순서와 의존

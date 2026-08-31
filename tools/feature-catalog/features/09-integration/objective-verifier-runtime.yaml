@@ -18,13 +18,13 @@ surface_integration:
   cli: full
   web: full
   method: audited
-  verified: "2026-08-26"
+  verified: "2026-08-31"
   evidence:
     cli: "The CLI goal facade attaches the verifier and exposes `/goal verify`; the objective tool uses the same port."
     web: "The shared runtime objective authority attaches the same verifier port used by web-daemon sessions and objective tools."
 purpose: |
   Executes every checked success criterion as token-preserving argv in the
-  workspace cwd with a bounded timeout and an isolated environment. Captures a
+  workspace cwd with a bounded timeout and a scrubbed environment. Captures a
   deterministic Git-worktree source digest before and after the batch, hashes
   stdout/stderr instead of retaining output text, and atomically applies the
   result only when objective identity, revision, check identity, and source
@@ -32,8 +32,10 @@ purpose: |
 
   A missing Git validation contract, source mutation during verification,
   timeout, non-zero exit, duplicate attempt, or revision race cannot produce a
-  checked-completion receipt. A later source change marks the prior completion
-  stale and returns the objective to active when read against current evidence.
+  checked-completion receipt. Freshness reconciliation before attributed-attempt
+  settlement invalidates a prior receipt whose source digest no longer matches.
+  Read surfaces do not yet force that reconciliation, so immediate read-time
+  stale detection after an out-of-band source edit is not claimed.
 evidence:
   code:
     - src/host/runtime/objective-verifier-wire.ts
@@ -65,5 +67,8 @@ deliberate_hold: null
 notes: |
   The verifier is deterministic authority, not an LLM judge. It records only
   exit/timing metadata and hashes; command output text is not persisted in the
-  objective. Monitoring remains partial because production decision counters
+  objective. The production verifier does not currently require a per-call OS
+  sandbox; absent an installed global sandbox slot, checked commands run with
+  env scrubbing and timeout/digest fences but without network/read-root/resource
+  isolation. Monitoring remains partial because production decision counters
   are not yet a promotion-grade telemetry pipeline.

@@ -25,7 +25,7 @@ surface_integration:
   cli: full
   web: partial
   method: audited
-  verified: "2026-08-30"
+  verified: "2026-08-31"
   evidence:
     cli: "Real PTY boots the source or installed CLI, proves default-ON command discovery, explicit QUANTA_GOAL=0 opt-out, goal create/show, autonomous queue execution, draft/background/foreground quiescence fences, and goal-only quiet-window behavior; a real process kill plus resume-by-id proves the objective — and a clear — survive a restart; a settled attributed turn ANNOUNCES itself, so progress is visible without typing /goal; and the operator can attest a manual criterion (`criterion done`) or free a stuck attempt (`abandon`)."
     web: "Web-daemon composition submits authority-validated autonomous and user-requested goal turns, and the browser `/goal` controls are now complete under the separate `web-goal-controls` feature: generated structured identity-bearing readout, viewed-revision CAS, correlated receipts, unblock/criterion/check, and the shared verifier all have real-daemon evidence. This broader continuation feature remains PARTIAL on web because wake status and settlement checkpoints are not projected into the browser's always-on state surface, and the ObservabilityPane ObjectiveCard remains behind the default-OFF QUANTA_OBSERVABILITY gate. `pause` also fences the next autonomous resume; it does not cancel a turn already running."
@@ -171,9 +171,13 @@ deliberate_hold: null
 notes: |
   Evidence is intentionally limited to interactive CLI and web-daemon/IDE
   modes. Headless and batch are excluded because no front-door goal-pursuit E2E
-  exists for those surfaces. Monitoring is partial: typed skip reasons and
-  deterministic receipts exist, but production decision counters and live
-  efficacy measurement remain an operational follow-up. Default-ON is bounded
+  exists for those surfaces. Monitoring is partial: typed skip reasons,
+  deterministic receipts, and a turn-scoped settlement decision counter exist;
+  wake/enqueue/completion/verifier lifecycle counters and live efficacy
+  measurement remain operational follow-ups. Web always-on state is also
+  partial: the complete `/goal` readout is on demand, while wake status and the
+  latest settlement checkpoint are not projected outside the default-OFF
+  observability pane. Default-ON is bounded
   by the user-created-goal precondition, explicit opt-out, quiescence fences,
   revision/attach-generation checks, verifier evidence, backoff, and hard caps.
   The optional completion judge remains shadow-only and cannot mutate objective state.
