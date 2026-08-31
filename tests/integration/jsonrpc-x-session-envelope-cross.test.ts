@@ -165,6 +165,51 @@ const recordRejection = async (
   return rec
 }
 
+const parametersFor = (method: string, index: number): Record<string, unknown> => {
+  const parameterFactories: Record<string, (i: number) => Record<string, unknown>> = {
+    "math.add": (i) => ({ a: i, b: i + 1 }),
+    "math.mul": (i) => ({ a: i, b: 2 }),
+    "str.upper": (i) => ({ s: `hello-${i}` }),
+    "str.length": (i) => ({ s: `len-${i}` }),
+    "agent.ping": () => ({}),
+  }
+  return parameterFactories[method]?.(index) ?? {}
+}
+
+const readEnvelopeRecords = async (sessionId: string): Promise<SessionEnvelopeRecord[]> => {
+  const records: SessionEnvelopeRecord[] = []
+  for await (const result of iterateSessionFile(sessionEnvelopePath(sessionId))) {
+    if (!result.ok) throw new Error(`decode failed: ${result.error.message}`)
+    records.push(result.value)
+  }
+  return records
+}
+
+const assertRequestResponsePair = (
+  records: readonly SessionEnvelopeRecord[],
+  index: number,
+  requestWire: string,
+  responseWire: string,
+): void => {
+  const request = records[index * 2]
+  const response = records[index * 2 + 1]
+  if (request?.type !== "response_item" || request.item_kind !== "assistant_tool_use") {
+    throw new Error(`request slot wrong type at i=${index}: ${JSON.stringify(request)}`)
+  }
+  if (response?.type !== "response_item" || response.item_kind !== "assistant_text") {
+    throw new Error(`response slot wrong type at i=${index}: ${JSON.stringify(response)}`)
+  }
+  expect(request.index).toBe(index * 2)
+  expect(response.index).toBe(index * 2 + 1)
+  expect(request.turn_id).toBe(`t-${index}`)
+  expect(response.turn_id).toBe(`t-${index}`)
+  expect(request.content).toBe(requestWire)
+  expect(response.content).toBe(responseWire)
+  expect((JSON.parse(response.content) as JsonRpcResponse).id).toBe(
+    (JSON.parse(request.content) as { id: number }).id,
+  )
+}
+
 /* ------------------------------------------------------------------ */
 /* Scenario A — 200 well-formed calls round-trip into envelope log     */
 /* ------------------------------------------------------------------ */
@@ -206,24 +251,7 @@ describe("JSON-RPC × session envelope — 200 calls produce 400 ordered envelop
     for (let i = 0; i < N; i += 1) {
       const id = i + 1
       const method = methodKeys[i % methodKeys.length] as string
-      let params: Record<string, unknown>
-      switch (method) {
-        case "math.add":
-          params = { a: i, b: i + 1 }
-          break
-        case "math.mul":
-          params = { a: i, b: 2 }
-          break
-        case "str.upper":
-          params = { s: `hello-${i}` }
-          break
-        case "str.length":
-          params = { s: `len-${i}` }
-          break
-        default:
-          params = {}
-      }
-      const reqWire = encodeRequest({ id, method, params })
+      const reqWire = encodeRequest({ id, method, params: parametersFor(method, i) })
       requestWires.push(reqWire)
       // 1) Record the request as a response_item.
       const reqRec = await recordRequest(sessionId, `t-${i}`, i * 2, reqWire)
@@ -239,41 +267,12 @@ describe("JSON-RPC × session envelope — 200 calls produce 400 ordered envelop
     expect(responseRecs.length).toBe(N)
 
     // Read back the JSONL and assert exact 400-record ordering.
-    const path = sessionEnvelopePath(sessionId)
-    const readBack: SessionEnvelopeRecord[] = []
-    for await (const r of iterateSessionFile(path)) {
-      if (!r.ok) throw new Error(`decode failed: ${r.error.message}`)
-      readBack.push(r.value)
-    }
+    const readBack = await readEnvelopeRecords(sessionId)
     expect(readBack.length).toBe(2 * N)
     expect(readBack.length).toBe(400)
 
     for (let i = 0; i < N; i += 1) {
-      const reqIdx = i * 2
-      const respIdx = i * 2 + 1
-      const reqRead = readBack[reqIdx]
-      const respRead = readBack[respIdx]
-      if (reqRead === undefined || respRead === undefined) {
-        throw new Error(`missing record at i=${i}`)
-      }
-      if (reqRead.type !== "response_item" || reqRead.item_kind !== "assistant_tool_use") {
-        throw new Error(`request slot wrong type at i=${i}: ${JSON.stringify(reqRead)}`)
-      }
-      if (respRead.type !== "response_item" || respRead.item_kind !== "assistant_text") {
-        throw new Error(`response slot wrong type at i=${i}: ${JSON.stringify(respRead)}`)
-      }
-      // Indexes preserved exactly.
-      expect(reqRead.index).toBe(i * 2)
-      expect(respRead.index).toBe(i * 2 + 1)
-      expect(reqRead.turn_id).toBe(`t-${i}`)
-      expect(respRead.turn_id).toBe(`t-${i}`)
-      // Wire content preserved byte-stably.
-      expect(reqRead.content).toBe(requestWires[i] as string)
-      expect(respRead.content).toBe(responseWires[i] as string)
-      // The response's id MUST match the request's id.
-      const reqParsed = JSON.parse(reqRead.content) as { id: number }
-      const respParsed = JSON.parse(respRead.content) as JsonRpcResponse
-      expect(respParsed.id).toBe(reqParsed.id)
+      assertRequestResponsePair(readBack, i, requestWires[i] as string, responseWires[i] as string)
     }
   })
 })

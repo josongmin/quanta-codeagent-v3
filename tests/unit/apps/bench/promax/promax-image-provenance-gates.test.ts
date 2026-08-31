@@ -308,6 +308,43 @@ interface FakeOpts {
   readonly containerExists?: boolean
 }
 
+type DockerResult = { code: number; stdout: string; stderr: string }
+
+const dockerOk = (): DockerResult => ({ code: 0, stdout: "", stderr: "" })
+
+const faultResult = (argv: readonly string[], opts: FakeOpts): DockerResult | null => {
+  const outcome = [...(opts.faults ?? new Map())].find(([needle]) =>
+    argv.join(" ").includes(needle),
+  )?.[1]
+  return outcome
+    ? { code: outcome.code, stdout: outcome.stdout ?? "", stderr: outcome.stderr ?? "" }
+    : null
+}
+
+const inspectContainer = (exists: boolean): DockerResult =>
+  exists
+    ? { code: 0, stdout: `${LOCAL_ID}\n`, stderr: "" }
+    : { code: 1, stdout: "", stderr: "Error: No such container" }
+
+const removeContainer = (exists: boolean): DockerResult =>
+  exists ? dockerOk() : { code: 1, stdout: "", stderr: "Error: No such container: qpmx_…" }
+
+const inspectImage = (): DockerResult => ({
+  code: 0,
+  stdout: `${JSON.stringify(inspectDefault)}\n`,
+  stderr: "",
+})
+
+const dockerResponse = (argv: readonly string[], exists: boolean): DockerResult => {
+  if (argv[0] === "container" && argv[1] === "inspect") return inspectContainer(exists)
+  if (argv[0] === "rm") return removeContainer(exists)
+  if (argv[0] === "image" && argv[1] === "inspect") return inspectImage()
+  if (argv[0] === "exec") {
+    return { code: 0, stdout: "__QPMX_SENTINEL__=ABSENT\n__QPMX_CP__=OK\n", stderr: "" }
+  }
+  return dockerOk()
+}
+
 const makeDocker = (calls: Recorded[], opts: FakeOpts = {}): DockerPort => {
   // Models the daemon's actual bookkeeping, which is the whole point of P5: a
   // container exists only after a SUCCESSFUL `run -d` (or because the caller said
@@ -317,33 +354,13 @@ const makeDocker = (calls: Recorded[], opts: FakeOpts = {}): DockerPort => {
   let exists = opts.containerExists === true
   return async (argv) => {
     calls.push({ argv: [...argv] })
-    const joined = argv.join(" ")
-    for (const [needle, outcome] of opts.faults ?? new Map()) {
-      if (joined.includes(needle)) {
-        return { code: outcome.code, stdout: outcome.stdout ?? "", stderr: outcome.stderr ?? "" }
-      }
-    }
+    const fault = faultResult(argv, opts)
+    if (fault) return fault
     if (argv[0] === "run") {
       exists = true
-      return { code: 0, stdout: "", stderr: "" }
+      return dockerOk()
     }
-    if (argv[0] === "container" && argv[1] === "inspect") {
-      return exists
-        ? { code: 0, stdout: `${LOCAL_ID}\n`, stderr: "" }
-        : { code: 1, stdout: "", stderr: "Error: No such container" }
-    }
-    if (argv[0] === "rm") {
-      return exists
-        ? { code: 0, stdout: "", stderr: "" }
-        : { code: 1, stdout: "", stderr: "Error: No such container: qpmx_…" }
-    }
-    if (argv[0] === "image" && argv[1] === "inspect") {
-      return { code: 0, stdout: `${JSON.stringify(inspectDefault)}\n`, stderr: "" }
-    }
-    if (argv[0] === "exec") {
-      return { code: 0, stdout: "__QPMX_SENTINEL__=ABSENT\n__QPMX_CP__=OK\n", stderr: "" }
-    }
-    return { code: 0, stdout: "", stderr: "" }
+    return dockerResponse(argv, exists)
   }
 }
 

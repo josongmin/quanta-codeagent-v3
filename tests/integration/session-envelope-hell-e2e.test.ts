@@ -164,6 +164,50 @@ const buildEventByKind = (
   }
 }
 
+const allEventKinds: readonly EventKind[] = [
+  "task_started",
+  "user_message",
+  "token_count",
+  "turn_aborted",
+  "tool_invoke",
+  "tool_result",
+  "custom",
+]
+
+const buildAllTypeSequence = (sessionId: string): SessionEnvelopeRecord[] => [
+  buildMeta(sessionId),
+  ...Array.from({ length: 5 }, (_, index) => buildTurnContext(`turn-${index}`)),
+  ...Array.from({ length: 50 }, (_, index) =>
+    buildEventByKind(
+      allEventKinds[index % allEventKinds.length] as EventKind,
+      isoAt(100 + index),
+      `turn-${index % 5}`,
+      index,
+    ),
+  ),
+  ...Array.from({ length: 3 }, (_, index) => buildResponseItem(`turn-${index}`, index)),
+  buildThreadSpawn(sessionId, "turn-0", "child-A", "explore", 200),
+  buildThreadSpawn(sessionId, "turn-1", "child-B", "fix", 201),
+]
+
+const readEnvelopeRecords = async (sessionId: string): Promise<SessionEnvelopeRecord[]> => {
+  const records: SessionEnvelopeRecord[] = []
+  for await (const result of iterateSessionFile(sessionEnvelopePath(sessionId))) {
+    if (!result.ok) throw new Error(`unexpected decode failure: ${result.error.message}`)
+    records.push(result.value)
+  }
+  return records
+}
+
+const countBy = <T>(items: readonly T[], keyOf: (item: T) => string): Map<string, number> => {
+  const counts = new Map<string, number>()
+  for (const item of items) {
+    const key = keyOf(item)
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+  return counts
+}
+
 /* ------------------------------------------------------------------ */
 /* Scenario 1 — every top-level type in one file                       */
 /* ------------------------------------------------------------------ */
@@ -171,30 +215,7 @@ const buildEventByKind = (
 describe("session envelope hell — all 5 top-level types, exact order preserved", () => {
   test("1× session_meta, 5× turn_context, 50× event_msg (7 kinds), 3× response_item, 2× thread_spawn", async () => {
     const sessionId = "all-types-001"
-    const sequence: SessionEnvelopeRecord[] = []
-    sequence.push(buildMeta(sessionId))
-    for (let i = 0; i < 5; i += 1) {
-      sequence.push(buildTurnContext(`turn-${i}`))
-    }
-    // 50 events split across all 7 kinds, distributed evenly.
-    const eventKinds: EventKind[] = [
-      "task_started",
-      "user_message",
-      "token_count",
-      "turn_aborted",
-      "tool_invoke",
-      "tool_result",
-      "custom",
-    ]
-    for (let i = 0; i < 50; i += 1) {
-      const kind = eventKinds[i % eventKinds.length] as EventKind
-      sequence.push(buildEventByKind(kind, isoAt(100 + i), `turn-${i % 5}`, i))
-    }
-    for (let i = 0; i < 3; i += 1) {
-      sequence.push(buildResponseItem(`turn-${i}`, i))
-    }
-    sequence.push(buildThreadSpawn(sessionId, "turn-0", "child-A", "explore", 200))
-    sequence.push(buildThreadSpawn(sessionId, "turn-1", "child-B", "fix", 201))
+    const sequence = buildAllTypeSequence(sessionId)
 
     // Sanity on the sequence we built:
     expect(sequence.length).toBe(1 + 5 + 50 + 3 + 2)
@@ -204,12 +225,7 @@ describe("session envelope hell — all 5 top-level types, exact order preserved
       await appendEnvelope(sessionId, rec)
     }
 
-    const path = sessionEnvelopePath(sessionId)
-    const readBack: SessionEnvelopeRecord[] = []
-    for await (const r of iterateSessionFile(path)) {
-      if (!r.ok) throw new Error(`unexpected decode failure: ${r.error.message}`)
-      readBack.push(r.value)
-    }
+    const readBack = await readEnvelopeRecords(sessionId)
     expect(readBack.length).toBe(sequence.length)
     for (let i = 0; i < sequence.length; i += 1) {
       // Deep-equality of the full schema-validated record.
@@ -217,10 +233,7 @@ describe("session envelope hell — all 5 top-level types, exact order preserved
     }
 
     // Exact-count assertions per type:
-    const byType = new Map<string, number>()
-    for (const r of readBack) {
-      byType.set(r.type, (byType.get(r.type) ?? 0) + 1)
-    }
+    const byType = countBy(readBack, (record) => record.type)
     expect(byType.get("session_meta")).toBe(1)
     expect(byType.get("turn_context")).toBe(5)
     expect(byType.get("event_msg")).toBe(50)
@@ -228,12 +241,10 @@ describe("session envelope hell — all 5 top-level types, exact order preserved
     expect(byType.get("thread_spawn")).toBe(2)
 
     // Per-kind exact counts across the 50 events:
-    const byEventKind = new Map<string, number>()
-    for (const r of readBack) {
-      if (r.type === "event_msg") {
-        byEventKind.set(r.kind, (byEventKind.get(r.kind) ?? 0) + 1)
-      }
-    }
+    const byEventKind = countBy(
+      readBack.filter((record): record is EventMsgRecord => record.type === "event_msg"),
+      (record) => record.kind,
+    )
     // 50 / 7 = 7 remainder 1 → first kind gets 8, rest get 7.
     expect(byEventKind.get("task_started")).toBe(8)
     expect(byEventKind.get("user_message")).toBe(7)

@@ -292,31 +292,41 @@ const EXCEPTIONS: ReadonlyMap<string, string> = new Map<string, string>([
   ],
 ])
 
-const scan = (): { declared: Set<string>; orphans: Map<string, string> } => {
+const collectDeclaredKnobs = (files: Iterable<string>): Set<string> => {
   const declared = new Set<string>()
-  const reads = new Map<string, string>() // token -> first file:line
-  for (const file of walk(join(import.meta.dir, "..", "..", "src"))) {
-    const rel = file.replace(/^.*\/quanta-codeagent-v3\//, "")
-    const text = readFileSync(file, "utf8")
-    if (isDeclarationFile(file)) {
-      for (const tok of declaredTokensIn(text)) declared.add(tok)
-      continue
-    }
-    if (isExcludedFromScan(file)) continue
-    const lines = text.split("\n")
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i] as string
-      if (!isReadLine(line)) continue
-      for (const tok of knobsOnLine(line)) {
-        if (!reads.has(tok)) reads.set(tok, `${rel}:${i + 1}`)
-      }
+  for (const file of files) {
+    if (!isDeclarationFile(file)) continue
+    for (const token of declaredTokensIn(readFileSync(file, "utf8"))) declared.add(token)
+  }
+  return declared
+}
+
+const recordKnobReads = (reads: Map<string, string>, file: string): void => {
+  const relativeFile = file.replace(/^.*\/quanta-codeagent-v3\//, "")
+  for (const [index, line] of readFileSync(file, "utf8").split("\n").entries()) {
+    if (!isReadLine(line)) continue
+    for (const token of knobsOnLine(line)) {
+      if (!reads.has(token)) reads.set(token, `${relativeFile}:${index + 1}`)
     }
   }
-  const orphans = new Map<string, string>()
-  for (const [tok, loc] of reads) {
-    if (!declared.has(tok) && !EXCEPTIONS.has(tok)) orphans.set(tok, loc)
+}
+
+const collectKnobReads = (files: Iterable<string>): Map<string, string> => {
+  const reads = new Map<string, string>()
+  for (const file of files) {
+    if (isDeclarationFile(file) || isExcludedFromScan(file)) continue
+    recordKnobReads(reads, file)
   }
-  return { declared, orphans }
+  return reads
+}
+
+const findOrphanKnobs = (declared: ReadonlySet<string>, reads: ReadonlyMap<string, string>) =>
+  new Map([...reads].filter(([token]) => !declared.has(token) && !EXCEPTIONS.has(token)))
+
+const scan = (): { declared: Set<string>; orphans: Map<string, string> } => {
+  const files = [...walk(join(import.meta.dir, "..", "..", "src"))]
+  const declared = collectDeclaredKnobs(files)
+  return { declared, orphans: findOrphanKnobs(declared, collectKnobReads(files)) }
 }
 
 /** Frozen ceiling = current orphan high-water mark (ADR-0503 P0 baseline).
