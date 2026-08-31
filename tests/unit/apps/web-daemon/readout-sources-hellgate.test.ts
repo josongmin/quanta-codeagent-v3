@@ -263,7 +263,7 @@ describe("resolveReadout — degrade copy NAMES what is missing", () => {
       ["plan", "plan store"],
       ["skills", "skills discovery"],
       ["memory", "memory store"],
-      ["cost", "usage aggregator"],
+      ["cost", "canonical usage-accounting projection"],
       ["context", "context-usage"],
     ]
     for (const [name, needle] of cases) {
