@@ -85,6 +85,11 @@ export const QUANTA_ATTRS = {
     kind: "quanta.task.kind",
     status: "quanta.task.status",
   },
+  objective: {
+    /** R5 — bounded goal lifecycle funnel counter. Labels are the closed
+     *  `stage` and `outcome` vocabularies owned by the objective slice. */
+    lifecycleTotal: "quanta.objective.lifecycle.total",
+  },
   multiAgent: {
     /** `"explorer" | "worker" | "none"`. */
     agentRole: "quanta.multi_agent.agent_role",

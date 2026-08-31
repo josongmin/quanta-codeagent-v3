@@ -1,8 +1,9 @@
 /** MetricsRegistry adapter for the bounded Objective lifecycle vocabulary. */
 
+import { QUANTA_ATTRS } from "../vocabulary"
 import type { MetricsRegistry } from "./port"
 
-export const OBJECTIVE_LIFECYCLE_COUNTER = "quanta.objective.lifecycle.total"
+export const OBJECTIVE_LIFECYCLE_COUNTER = QUANTA_ATTRS.objective.lifecycleTotal
 
 /** Structural mirror of the domain port: the composition root performs the
  * binding so the two library slices never cross-import. */

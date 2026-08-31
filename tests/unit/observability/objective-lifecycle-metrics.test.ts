@@ -9,8 +9,13 @@ import {
   defaultMetricsRegistry,
   OBJECTIVE_LIFECYCLE_COUNTER,
 } from "@/observability/metrics/index"
+import { QUANTA_ATTRS } from "@/observability/vocabulary"
 
 describe("R5 Objective lifecycle metrics adapter", () => {
+  test("counter name is owned by the canonical observability vocabulary", () => {
+    expect(OBJECTIVE_LIFECYCLE_COUNTER).toBe(QUANTA_ATTRS.objective.lifecycleTotal)
+  })
+
   test("uses one counter and only closed stage/outcome labels", () => {
     const metrics = defaultMetricsRegistry({ now: () => 1 })
     const sink = createObjectiveLifecycleMetricsSink(metrics)
