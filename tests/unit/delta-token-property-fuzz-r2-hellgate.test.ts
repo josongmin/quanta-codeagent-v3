@@ -140,7 +140,7 @@ const assertCounterMatchesScan = (
   current: readonly Message[],
   counter: ReturnType<typeof createTokenDeltaCounter>,
 ): void => {
-  const scan = estimateTokens(current)
+  const scan = estimateTokens([...current])
   if (counter.total() !== scan) {
     throw new Error(
       `INVARIANT VIOLATION seed=${seed} step=${step}: counter=${counter.total()} scan=${scan} len=${current.length}`,

@@ -611,7 +611,7 @@ describe("G7 property — spawn happens IFF the gate is genuinely armed", () => 
     bindings: readonly CommandHookBinding[],
   ): Promise<void> => {
     const config = configForGateCase(enabled, acknowledgedRisk, bindings)
-    const expectedArmed = shouldArmGate(enabled, acknowledgedRisk, config.bindings)
+    const expectedArmed = shouldArmGate(enabled, acknowledgedRisk, config.bindings ?? [])
     let gate: ReturnType<typeof normalizeCommandHookGate> | undefined
     let threw = false
     try {

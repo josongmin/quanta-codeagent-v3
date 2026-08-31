@@ -68,7 +68,13 @@ const readJsonl = (file: string): unknown[] =>
     .filter((l) => l.trim() !== "")
     .map((l) => JSON.parse(l) as unknown)
 
-const scoreCounterOf = (scoreLabel: string | undefined): string => {
+type ScoreCounter =
+  | "officialHarness"
+  | "localStructural"
+  | "researchContaminated"
+  | "unlabeledPassed"
+
+const scoreCounterOf = (scoreLabel: string | undefined): ScoreCounter => {
   if (scoreLabel === "official_harness") return "officialHarness"
   if (scoreLabel === "local_structural") return "localStructural"
   if (scoreLabel === "research_contaminated") return "researchContaminated"
