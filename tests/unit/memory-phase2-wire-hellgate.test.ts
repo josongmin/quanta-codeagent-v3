@@ -109,7 +109,7 @@ const makeStore = (init: {
 }
 
 const makePort = (
-  opts: { throwOnConsolidate?: boolean; delayMs?: number } = {},
+  opts: { throwOnConsolidate?: boolean; waitFor?: Promise<void> } = {},
 ): Phase2Port & { consolidateCalls: number } => {
   let calls = 0
   return {
@@ -118,9 +118,7 @@ const makePort = (
     },
     async consolidate() {
       calls += 1
-      if (opts.delayMs && opts.delayMs > 0) {
-        await new Promise((r) => setTimeout(r, opts.delayMs))
-      }
+      if (opts.waitFor !== undefined) await opts.waitFor
       if (opts.throwOnConsolidate) throw new Error("consolidate boom")
       return {
         memoryMd: "# memory",
@@ -134,9 +132,7 @@ const makePort = (
 // Minimal writer fake — runPhase2's contract on `writer.writeAtomic`
 // returns `{ gitCommitSha: string | null }`. We do not touch disk; the
 // hook only forwards the writer to runPhase2.
-const makeWriter = (
-  opts: { writeAtomicDelayMs?: number; writeAtomicThrows?: boolean } = {},
-): MemoryWriter & { writeCalls: number } => {
+const makeWriter = (): MemoryWriter & { writeCalls: number } => {
   let writeCalls = 0
   const paths = {
     root: "/tmp/memwriter-fake",
@@ -152,10 +148,6 @@ const makeWriter = (
     },
     async writeAtomic() {
       writeCalls += 1
-      if (opts.writeAtomicDelayMs && opts.writeAtomicDelayMs > 0) {
-        await new Promise((r) => setTimeout(r, opts.writeAtomicDelayMs))
-      }
-      if (opts.writeAtomicThrows) throw new Error("writer boom")
       return { gitCommitSha: null }
     },
     get writeCalls() {
@@ -364,11 +356,21 @@ describe("memory-phase2-wire-hellgate — threshold arms", () => {
 
 describe("memory-phase2-wire-hellgate — non-blocking semantics", () => {
   test("scheduled hook resolves BEFORE background runPhase2 finishes", async () => {
-    const writer = makeWriter({ writeAtomicDelayMs: 25 })
-    const port = makePort({ delayMs: 25 })
-    const { log, events } = collectLogger()
-    // Mark T0
-    const t0 = Date.now()
+    let releaseConsolidate = (): void => {}
+    const consolidateBlocked = new Promise<void>((resolve) => {
+      releaseConsolidate = resolve
+    })
+    let observeCompletion = (): void => {}
+    const completionObserved = new Promise<void>((resolve) => {
+      observeCompletion = resolve
+    })
+    const writer = makeWriter()
+    const port = makePort({ waitFor: consolidateBlocked })
+    const events: Parameters<Phase2AutoTriggerLogger>[0][] = []
+    const log: Phase2AutoTriggerLogger = (event) => {
+      events.push(event)
+      if (event.kind === "completed") observeCompletion()
+    }
     const out = await runMemoryPhase2AutoTrigger(
       {
         phase2: {
@@ -384,16 +386,12 @@ describe("memory-phase2-wire-hellgate — non-blocking semantics", () => {
       },
       log,
     )
-    const tHookDone = Date.now()
-    // The hook MUST return well before the 25ms+25ms background work.
-    expect(tHookDone - t0).toBeLessThan(20)
     expect(out.kind).toBe("scheduled")
-    // At this point the background runPhase2 has NOT yet resolved.
-    // Only the synchronous "scheduled" log line should be visible.
+    // The background owner is structurally blocked, so returning here proves the
+    // hook did not await runPhase2. No wall-clock race can decide this verdict.
     expect(events.find((e) => e.kind === "completed")).toBeUndefined()
-    // Now wait long enough for the background to finish + drain
-    // microtasks. The log should contain the `completed` event.
-    await new Promise((r) => setTimeout(r, 120))
+    releaseConsolidate()
+    await completionObserved
     const completed = events.find((e) => e.kind === "completed")
     expect(completed).toBeDefined()
     expect(port.consolidateCalls).toBe(1)
@@ -403,7 +401,15 @@ describe("memory-phase2-wire-hellgate — non-blocking semantics", () => {
 
   test("background runPhase2 rejection surfaces via log; hook NEVER throws", async () => {
     const writer = makeWriter()
-    const { log, events } = collectLogger()
+    let observeError = (): void => {}
+    const errorObserved = new Promise<void>((resolve) => {
+      observeError = resolve
+    })
+    const events: Parameters<Phase2AutoTriggerLogger>[0][] = []
+    const log: Phase2AutoTriggerLogger = (event) => {
+      events.push(event)
+      if (event.kind === "error") observeError()
+    }
     const port = makePort({ throwOnConsolidate: true })
     let caught: unknown = null
     try {
@@ -426,8 +432,7 @@ describe("memory-phase2-wire-hellgate — non-blocking semantics", () => {
       caught = e
     }
     expect(caught).toBeNull()
-    // Drain background.
-    await new Promise((r) => setTimeout(r, 60))
+    await errorObserved
     const err = events.find((e) => e.kind === "error")
     expect(err).toBeDefined()
     expect((err as { kind: "error"; message: string }).message).toContain("consolidate")
@@ -435,8 +440,19 @@ describe("memory-phase2-wire-hellgate — non-blocking semantics", () => {
   })
 
   test("idempotent — concurrent schedule against same writer skips already_running", async () => {
-    const writer = makeWriter({ writeAtomicDelayMs: 50 })
-    const port = makePort({ delayMs: 50 })
+    let releaseConsolidate = (): void => {}
+    const consolidateBlocked = new Promise<void>((resolve) => {
+      releaseConsolidate = resolve
+    })
+    let observeCompletion = (): void => {}
+    const completionObserved = new Promise<void>((resolve) => {
+      observeCompletion = resolve
+    })
+    const log: Phase2AutoTriggerLogger = (event) => {
+      if (event.kind === "completed") observeCompletion()
+    }
+    const writer = makeWriter()
+    const port = makePort({ waitFor: consolidateBlocked })
     const phase2 = {
       enabled: true as const,
       port,
@@ -447,13 +463,13 @@ describe("memory-phase2-wire-hellgate — non-blocking semantics", () => {
       }),
       writer,
     }
-    const out1 = await runMemoryPhase2AutoTrigger({ phase2 })
+    const out1 = await runMemoryPhase2AutoTrigger({ phase2 }, log)
     expect(out1.kind).toBe("scheduled")
     // Immediately try again — the background is still in-flight.
     const out2 = await runMemoryPhase2AutoTrigger({ phase2 })
     expect(out2).toEqual({ kind: "skipped", reason: "already_running" })
-    // Drain.
-    await new Promise((r) => setTimeout(r, 200))
+    releaseConsolidate()
+    await completionObserved
     expect(port.consolidateCalls).toBe(1)
     __resetPhase2InflightForTests(writer)
   })
