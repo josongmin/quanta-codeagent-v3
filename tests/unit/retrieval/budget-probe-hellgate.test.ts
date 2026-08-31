@@ -177,14 +177,17 @@ describe("budget-probe hellgate (12 cases)", () => {
   test("HELL-BP-09 default-OFF — no agent/runner/apps imports @/retrieval/budget-probe", () => {
     const roots = ["src/agent", "src/runner", "src/apps"]
     const repoRoot = join(import.meta.dir, "..", "..", "..")
-    const absRoots = roots.map((r) => join(repoRoot, r))
-    for (const root of absRoots) {
-      assertScanPopulation(visitedUnder(root), root, {
-        id: `tests/unit/retrieval/budget-probe-hellgate.test.ts#${root}`,
+    const rooted = roots.map((relativeRoot) => ({
+      relativeRoot,
+      absoluteRoot: join(repoRoot, relativeRoot),
+    }))
+    for (const { relativeRoot, absoluteRoot } of rooted) {
+      assertScanPopulation(visitedUnder(absoluteRoot), absoluteRoot, {
+        id: `tests/unit/retrieval/budget-probe-hellgate.test.ts#${relativeRoot}`,
         collectable: (n) => n.endsWith(".ts"),
       })
     }
-    const offenders = collectOffenders(absRoots)
+    const offenders = collectOffenders(rooted.map(({ absoluteRoot }) => absoluteRoot))
     expect(offenders).toEqual([])
   })
 
