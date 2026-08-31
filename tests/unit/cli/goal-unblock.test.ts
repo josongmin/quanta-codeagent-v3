@@ -25,14 +25,26 @@ import { goalCmd } from "@/apps/cli/slash/goal-cmd"
 import { buildGoalControl } from "@/apps/cli/slash/objective"
 import type { SlashContext } from "@/apps/cli/slash-contract"
 import {
+  type BlockerDependencyResolverPort,
   createObjectiveAuthority,
   createObjectiveCapabilities,
   type ObjectiveAuthority,
 } from "@/objective"
 
+const blockerResolver: BlockerDependencyResolverPort = {
+  resolve: ({ attemptId, target }) => ({
+    kind: "resolved",
+    dependencyId: `${target.kind}:${target.ref}`,
+    occurrenceEvidenceId: `occ:${target.kind}:${target.ref}:${attemptId}`,
+  }),
+}
+
 const harness = () => {
   let sequence = 0
-  const authority = createObjectiveAuthority({ idFactory: () => `goal-${++sequence}` })
+  const authority = createObjectiveAuthority({
+    idFactory: () => `goal-${++sequence}`,
+    blockerDependencyResolver: blockerResolver,
+  })
   const out: string[] = []
   const err: string[] = []
   const ctx: SlashContext = {
