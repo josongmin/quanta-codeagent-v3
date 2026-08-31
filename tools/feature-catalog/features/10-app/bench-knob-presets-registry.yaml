@@ -30,6 +30,8 @@ purpose: |
   `agentless-v3-select-regression-doubt`), plus `knob-inventory.ts` bench
   declarations for discoverability / completeness ratchets. Individual
   `QUANTA_BENCH_*` env vars override preset values.
+  `deriveKnob` is owned by `src/runner/knobs/derive.ts`, removing the
+  batch-to-knobs import cycle; batch evaluation consumes this shared owner.
 evidence:
   code:
     - src/runner/knobs/derive.ts
