@@ -35,10 +35,12 @@ import { readScanReachBaseline, type ScanReach } from "../../../tools/dev/scan-r
  * sides of the comparison.
  */
 
-/** Absolute paths git tracks under `root` that still exist on disk. Cached per
- *  root: the index does not change mid-run, and if it did, a stale cache can
- *  only UNDER-count, which fails closed. */
-const trackedCache = new Map<string, ReadonlySet<string>>()
+/** Absolute paths git tracks under `root` that still exist on disk.
+ *
+ * Do not cache this across assertions. The reach harvester intentionally runs
+ * Git-fixture tests in the same Bun worker; a temporary/fixture index observed
+ * by one guard must not become the repository truth for every later guard.
+ * Each verdict is bound to one fresh index snapshot instead. */
 
 // Git exports repository-local variables to hooks. In a pre-push hook an
 // inherited GIT_INDEX_FILE/GIT_DIR can redirect a nested `git ls-files` away
@@ -94,8 +96,6 @@ const trackedUnder = (
   sourceEnv: Readonly<Record<string, string | undefined>>,
 ): ReadonlySet<string> => {
   const key = resolve(root)
-  const hit = trackedCache.get(key)
-  if (hit !== undefined) return hit
   // Validate repository ownership explicitly, then list from the measured root
   // with a relative pathspec. `-- .` makes git's output relative to `key`, so
   // macOS `/tmp` ↔ `/private/tmp` canonicalisation cannot change how paths are
@@ -118,7 +118,6 @@ const trackedUnder = (
       .filter((p) => p !== "" && !deleted.has(p))
       .map((p) => join(key, p)),
   )
-  trackedCache.set(key, paths)
   return paths
 }
 

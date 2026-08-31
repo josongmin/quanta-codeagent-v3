@@ -8,7 +8,7 @@
  * one thing that went wrong.
  */
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { assertFailsClosedOnEmpty, assertScanPopulation } from "../_shared/scan-population"
@@ -114,6 +114,30 @@ describe("population floor", () => {
           GIT_INDEX_FILE: emptyIndex,
         },
       }),
+    ).not.toThrow()
+  })
+
+  test("a restored index is re-read; a prior partial snapshot cannot poison later guards", () => {
+    const fx = build()
+    const index = join(fx.root, "..", ".git", "index")
+    const savedIndex = join(fx.root, "..", ".git", "index.full")
+    copyFileSync(index, savedIndex)
+    const remove = Bun.spawnSync(["git", "rm", "-q", "--cached", "src/beta/mod.ts"], {
+      cwd: join(fx.root, ".."),
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    expect(remove.exitCode).toBe(0)
+    expect(() =>
+      assertScanPopulation(walk(fx.root, "beta"), fx.root, {
+        id: "fx",
+        baselinePath: fx.pin(1),
+      }),
+    ).not.toThrow()
+
+    copyFileSync(savedIndex, index)
+    expect(() =>
+      assertScanPopulation(walk(fx.root), fx.root, { id: "fx", baselinePath: fx.pin(2) }),
     ).not.toThrow()
   })
 
