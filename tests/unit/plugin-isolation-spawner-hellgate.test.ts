@@ -21,7 +21,7 @@
  * fixture files on disk.
  */
 
-import { describe, expect, test } from "bun:test"
+import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -33,6 +33,12 @@ import {
 } from "@/plugin-isolation"
 
 const BUN = process.execPath
+// These tests exercise process semantics, not scheduler latency. Keep the
+// product watchdog bounded, but let a contended CI worker actually schedule
+// the child before deciding whether it exited or emitted its ready frame.
+const FIXTURE_SPAWN_TIMEOUT_MS = 10_000
+const FIXTURE_TEST_TIMEOUT_MS = FIXTURE_SPAWN_TIMEOUT_MS + 5_000
+setDefaultTimeout(FIXTURE_TEST_TIMEOUT_MS)
 
 /** Write a tiny JS file in a tmp dir; return the file path + cleanup. */
 const writeScript = async (
@@ -151,7 +157,7 @@ describe("ADR-0162 spawner hellgate — B. Spawn-timeout", () => {
           entry: BUN,
           args: [path],
           serviceName: "die-early",
-          spawnTimeoutMs: 1000,
+          spawnTimeoutMs: FIXTURE_SPAWN_TIMEOUT_MS,
         })
       } catch (e) {
         caught = e as IsolatedSpawnError
@@ -197,19 +203,15 @@ describe("ADR-0162 spawner hellgate — C. Wire", () => {
         entry: BUN,
         args: [path],
         serviceName: "echo",
-        spawnTimeoutMs: 2000,
+        spawnTimeoutMs: FIXTURE_SPAWN_TIMEOUT_MS,
       })
-      const received: unknown[] = []
-      const unsub = handle.onMessage((m) => received.push(m))
+      const response = Promise.withResolvers<unknown>()
+      const unsub = handle.onMessage(response.resolve)
       handle.send({ hello: "world" })
-      // Wait briefly for the round-trip + microtask dispatch.
-      const deadline = Date.now() + 1500
-      while (received.length < 1 && Date.now() < deadline) {
-        await new Promise((r) => setTimeout(r, 25))
-      }
+      const received = await response.promise
       unsub()
       await handle.kill()
-      expect(received).toEqual([{ echoed: { hello: "world" } }])
+      expect(received).toEqual({ echoed: { hello: "world" } })
     } finally {
       await cleanup()
     }
@@ -230,14 +232,15 @@ describe("ADR-0162 spawner hellgate — C. Wire", () => {
         entry: BUN,
         args: [path],
         serviceName: "nul",
-        spawnTimeoutMs: 2000,
+        spawnTimeoutMs: FIXTURE_SPAWN_TIMEOUT_MS,
       })
       const received: unknown[] = []
-      handle.onMessage((m) => received.push(m))
-      const deadline = Date.now() + 800
-      while (received.length < 1 && Date.now() < deadline) {
-        await new Promise((r) => setTimeout(r, 25))
-      }
+      const cleanFrame = Promise.withResolvers<void>()
+      handle.onMessage((m) => {
+        received.push(m)
+        if (typeof m === "object" && m !== null && "after" in m) cleanFrame.resolve()
+      })
+      await cleanFrame.promise
       await handle.kill()
       // We must see the legitimate { after: "nul" } but NOT the NUL-line.
       expect(received).toContainEqual({ after: "nul" })
@@ -260,6 +263,7 @@ describe("ADR-0162 spawner hellgate — C. Wire", () => {
       const big = "x".repeat(${MAX_MESSAGE_BYTES + 1024})
       process.stdout.write(big + "\\n")
       process.stdout.write(JSON.stringify({ ready: true }) + "\\n")
+      process.stdout.write(JSON.stringify({ after: "oversize" }) + "\\n")
       setInterval(() => {}, 10000)
     `
     const { path, cleanup } = await writeScript(body)
@@ -268,18 +272,14 @@ describe("ADR-0162 spawner hellgate — C. Wire", () => {
         entry: BUN,
         args: [path],
         serviceName: "oversize",
-        spawnTimeoutMs: 5000,
+        spawnTimeoutMs: FIXTURE_SPAWN_TIMEOUT_MS,
       })
-      const received: unknown[] = []
-      handle.onMessage((m) => received.push(m))
-      // Give the pump a tick.
-      await new Promise((r) => setTimeout(r, 50))
+      const cleanFrame = Promise.withResolvers<unknown>()
+      handle.onMessage(cleanFrame.resolve)
+      const received = await cleanFrame.promise
       await handle.kill()
-      // Oversize was dropped; ready line is not JSON-dispatched (handle is
-      // already returned). No payload should have surfaced.
-      for (const m of received) {
-        expect(typeof m).toBe("object")
-      }
+      // The sentinel proves the stdout pump advanced past the rejected frame.
+      expect(received).toEqual({ after: "oversize" })
     } finally {
       await cleanup()
     }
@@ -292,11 +292,15 @@ describe("ADR-0162 spawner hellgate — C. Wire", () => {
         entry: BUN,
         args: [path],
         serviceName: "send-cap",
-        spawnTimeoutMs: 2000,
+        spawnTimeoutMs: FIXTURE_SPAWN_TIMEOUT_MS,
       })
       // > MAX_MESSAGE_BYTES character string → encoded ≥ that many bytes.
       const huge = "y".repeat(MAX_MESSAGE_BYTES + 1024)
       expect(() => handle.send({ huge })).not.toThrow()
+      const response = Promise.withResolvers<unknown>()
+      handle.onMessage(response.resolve)
+      handle.send({ after: "oversize-send" })
+      expect(await response.promise).toEqual({ echoed: { after: "oversize-send" } })
       await handle.kill()
     } finally {
       await cleanup()
@@ -314,7 +318,7 @@ describe("ADR-0162 spawner hellgate — D. Lifecycle", () => {
         entry: BUN,
         args: [path],
         serviceName: "idem",
-        spawnTimeoutMs: 2000,
+        spawnTimeoutMs: FIXTURE_SPAWN_TIMEOUT_MS,
       })
       await handle.kill()
       await handle.kill()
@@ -341,7 +345,7 @@ describe("ADR-0162 spawner hellgate — D. Lifecycle", () => {
         entry: BUN,
         args: [path],
         serviceName: "trap-term",
-        spawnTimeoutMs: 2000,
+        spawnTimeoutMs: FIXTURE_SPAWN_TIMEOUT_MS,
         gracefulKillMs: 150,
       })
       const t0 = Date.now()
@@ -368,7 +372,7 @@ describe("ADR-0162 spawner hellgate — D. Lifecycle", () => {
         entry: BUN,
         args: [path],
         serviceName: "exit-42",
-        spawnTimeoutMs: 2000,
+        spawnTimeoutMs: FIXTURE_SPAWN_TIMEOUT_MS,
       })
       const res = await handle.exitPromise
       expect(res).toBeDefined()
