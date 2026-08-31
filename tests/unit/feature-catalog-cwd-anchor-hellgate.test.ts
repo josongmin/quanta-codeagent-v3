@@ -51,17 +51,24 @@ import { loadFeatures, loadFeaturesStrict } from "@/../tools/feature-catalog/sch
 
 const REPO_ROOT = join(import.meta.dir, "..", "..")
 const FEATURES = join(REPO_ROOT, "tools", "feature-catalog", "features")
+// Full-corpus parsing competes with eight CI shards for filesystem bandwidth.
+// The assertion is an anti-vacuity correctness rail, not a latency budget.
+const FULL_CATALOG_SCAN_TIMEOUT_MS = 300_000
 
 describe("feature catalog — a scan cannot report clean over a catalog it never read", () => {
-  test("anti-vacuity: the real catalog is large, so the cases below are not empty-vs-empty", async () => {
-    // Every assertion here is about telling "zero features" from "many". If the
-    // real catalog were itself near-empty the distinction would be untestable and
-    // this file would pass for free.
-    const real = await loadFeaturesStrict(FEATURES)
-    expect(real.length).toBeGreaterThan(500)
-    // This parses the full >1k-feature corpus. Preserve that anti-vacuity
-    // coverage, but leave shared eight-shard CI adequate I/O headroom.
-  }, 120000)
+  test(
+    "anti-vacuity: the real catalog is large, so the cases below are not empty-vs-empty",
+    async () => {
+      // Every assertion here is about telling "zero features" from "many". If the
+      // real catalog were itself near-empty the distinction would be untestable and
+      // this file would pass for free.
+      const real = await loadFeaturesStrict(FEATURES)
+      expect(real.length).toBeGreaterThan(500)
+      // This parses the full >1k-feature corpus. Preserve that anti-vacuity
+      // coverage, but leave shared eight-shard CI adequate I/O headroom.
+    },
+    FULL_CATALOG_SCAN_TIMEOUT_MS,
+  )
 
   test("🔴 a RELATIVE path is refused — the cwd is not an answer", async () => {
     // The exact literal three consumers hardcode. Under a foreign cwd it resolved
@@ -90,15 +97,19 @@ describe("feature catalog — a scan cannot report clean over a catalog it never
     }
   })
 
-  test("the anchored constants resolve to the real catalog, from any cwd", async () => {
-    // Pins the consumers' side of the fix: the shared anchored paths must point at
-    // a populated directory, not merely be absolute.
-    const { FEATURES_DIR, PROSE_DIR, BASELINE_PATH } = await import(
-      "@/../tools/feature-catalog/paths"
-    )
-    for (const p of [FEATURES_DIR, PROSE_DIR, BASELINE_PATH]) {
-      expect(p.startsWith("/"), `${p} must be absolute`).toBe(true)
-    }
-    expect((await loadFeaturesStrict(FEATURES_DIR)).length).toBeGreaterThan(500)
-  }, 120000)
+  test(
+    "the anchored constants resolve to the real catalog, from any cwd",
+    async () => {
+      // Pins the consumers' side of the fix: the shared anchored paths must point at
+      // a populated directory, not merely be absolute.
+      const { FEATURES_DIR, PROSE_DIR, BASELINE_PATH } = await import(
+        "@/../tools/feature-catalog/paths"
+      )
+      for (const p of [FEATURES_DIR, PROSE_DIR, BASELINE_PATH]) {
+        expect(p.startsWith("/"), `${p} must be absolute`).toBe(true)
+      }
+      expect((await loadFeaturesStrict(FEATURES_DIR)).length).toBeGreaterThan(500)
+    },
+    FULL_CATALOG_SCAN_TIMEOUT_MS,
+  )
 })
