@@ -138,6 +138,9 @@ describe("bench v5 adaptive routing", () => {
         expect(llm.routeCalls).toBe(2)
       })
     }),
-    20_000,
+    // Deadlock backstop only. runInstance owns a 30s operation timeout and this
+    // real Pyright route starts multiple language-server processes, so the test
+    // harness must not preempt the product timeout under sharded load.
+    90_000,
   )
 })
