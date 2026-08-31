@@ -62,6 +62,13 @@ const TEST_BACKSTOP_MS = 180_000
  * cases that DO exercise a heartbeat set their own interval explicitly.
  */
 const HEARTBEAT_PARKED_MS = 3_600_000
+/**
+ * These tests assert accounting against the production default of 16 units,
+ * but a sharded Bun process can concurrently exercise config/env readers. Pass
+ * the limit explicitly at every lease/state boundary so a transient
+ * QUANTA_BENCH_PATCH_GEN_BUDGET value cannot change this fixture's contract.
+ */
+const TEST_BUDGET_LIMIT = 16
 const CONDITION_POLL_MS = 10
 
 /** Await a real observable condition instead of sleeping for a guessed duration.
@@ -115,7 +122,7 @@ describe("patch-gen budget lease", () => {
         label: "first",
         requestedUnits: 12,
         dir: DIR,
-        limit: 16,
+        limit: TEST_BUDGET_LIMIT,
         waitMs: ACQUIRE_BACKSTOP_MS,
         pollMs: 10,
         heartbeatMs: HEARTBEAT_PARKED_MS,
@@ -124,7 +131,7 @@ describe("patch-gen budget lease", () => {
         label: "second",
         requestedUnits: 16,
         dir: DIR,
-        limit: 16,
+        limit: TEST_BUDGET_LIMIT,
         waitMs: ACQUIRE_BACKSTOP_MS,
         pollMs: 10,
         heartbeatMs: HEARTBEAT_PARKED_MS,
@@ -132,7 +139,7 @@ describe("patch-gen budget lease", () => {
       try {
         expect(first.units).toBe(12)
         expect(second.units).toBe(4)
-        const state = await readPatchGenBudgetState({ dir: DIR, limit: 16 })
+        const state = await readPatchGenBudgetState({ dir: DIR, limit: TEST_BUDGET_LIMIT })
         expect(state.limit).toBe(16)
         expect(state.inUse).toBe(16)
         expect(state.available).toBe(0)
@@ -155,12 +162,13 @@ describe("patch-gen budget lease", () => {
         label: "only",
         requestedUnits: 7,
         dir: DIR,
+        limit: TEST_BUDGET_LIMIT,
         waitMs: ACQUIRE_BACKSTOP_MS,
         pollMs: 10,
         heartbeatMs: HEARTBEAT_PARKED_MS,
       })
       await lease.release()
-      const state = await readPatchGenBudgetState({ dir: DIR })
+      const state = await readPatchGenBudgetState({ dir: DIR, limit: TEST_BUDGET_LIMIT })
       expect(state.inUse).toBe(0)
       expect(state.available).toBe(16)
       expect(state.leases).toEqual([])
@@ -175,6 +183,7 @@ describe("patch-gen budget lease", () => {
         label: "only",
         requestedUnits: 7,
         dir: DIR,
+        limit: TEST_BUDGET_LIMIT,
         waitMs: ACQUIRE_BACKSTOP_MS,
         pollMs: 10,
         heartbeatMs: HEARTBEAT_PARKED_MS,
@@ -194,6 +203,7 @@ describe("patch-gen budget lease", () => {
         label: "retryable",
         requestedUnits: 7,
         dir: DIR,
+        limit: TEST_BUDGET_LIMIT,
         waitMs: 20,
         pollMs: 5,
         heartbeatMs: HEARTBEAT_PARKED_MS,
@@ -209,7 +219,7 @@ describe("patch-gen budget lease", () => {
       )
       rmSync(lockDir, { recursive: true, force: true })
       await lease.release()
-      const state = await readPatchGenBudgetState({ dir: DIR })
+      const state = await readPatchGenBudgetState({ dir: DIR, limit: TEST_BUDGET_LIMIT })
       expect(state.inUse).toBe(0)
       expect(state.available).toBe(16)
       expect(state.leases).toEqual([])
@@ -234,6 +244,7 @@ describe("patch-gen budget lease", () => {
       )
       const state = await readPatchGenBudgetState({
         dir: DIR,
+        limit: TEST_BUDGET_LIMIT,
         staleLeaseMs: 1_000,
         now: () => Date.parse("2026-06-20T00:10:00.000Z"),
       })
@@ -255,6 +266,7 @@ describe("patch-gen budget lease", () => {
           label: "fresh",
           requestedUnits: 16,
           dir: DIR,
+          limit: TEST_BUDGET_LIMIT,
           waitMs: ACQUIRE_BACKSTOP_MS,
           pollMs: 10,
           heartbeatMs: HEARTBEAT_PARKED_MS,
@@ -283,6 +295,7 @@ describe("patch-gen budget lease", () => {
           label: "fresh",
           requestedUnits: 1,
           dir: DIR,
+          limit: TEST_BUDGET_LIMIT,
           waitMs: 250,
           pollMs: 250,
           heartbeatMs: HEARTBEAT_PARKED_MS,
@@ -309,6 +322,7 @@ describe("patch-gen budget lease", () => {
         label: "first",
         requestedUnits: 12,
         dir: DIR,
+        limit: TEST_BUDGET_LIMIT,
         waitMs: ACQUIRE_BACKSTOP_MS,
         pollMs: 10,
         heartbeatMs: 1_000,
@@ -332,12 +346,13 @@ describe("patch-gen budget lease", () => {
           label: "second",
           requestedUnits: 16,
           dir: DIR,
+          limit: TEST_BUDGET_LIMIT,
           waitMs: ACQUIRE_BACKSTOP_MS,
           pollMs: 10,
           heartbeatMs: HEARTBEAT_PARKED_MS,
         })
         expect(second.units).toBe(4)
-        const state = await readPatchGenBudgetState({ dir: DIR })
+        const state = await readPatchGenBudgetState({ dir: DIR, limit: TEST_BUDGET_LIMIT })
         expect(state.inUse).toBe(16)
         expect(state.leases.map((lease) => lease.label)).toEqual(["first", "second"])
       } finally {
@@ -365,6 +380,7 @@ describe("patch-gen budget lease", () => {
         label: "first",
         requestedUnits: 12,
         dir: DIR,
+        limit: TEST_BUDGET_LIMIT,
         waitMs: ACQUIRE_BACKSTOP_MS,
         pollMs: 10,
         // The premise of this case is that NO heartbeat lands while it runs. A
@@ -382,12 +398,13 @@ describe("patch-gen budget lease", () => {
           label: "second",
           requestedUnits: 16,
           dir: DIR,
+          limit: TEST_BUDGET_LIMIT,
           waitMs: ACQUIRE_BACKSTOP_MS,
           pollMs: 10,
           heartbeatMs: HEARTBEAT_PARKED_MS,
         })
         expect(second.units).toBe(4)
-        const state = await readPatchGenBudgetState({ dir: DIR })
+        const state = await readPatchGenBudgetState({ dir: DIR, limit: TEST_BUDGET_LIMIT })
         expect(state.inUse).toBe(16)
         expect(state.leases.map((lease) => lease.label)).toEqual(["first", "second"])
       } finally {
@@ -415,6 +432,7 @@ describe("patch-gen budget lease", () => {
         label: "holder",
         requestedUnits: 16,
         dir: DIR,
+        limit: TEST_BUDGET_LIMIT,
         waitMs: ACQUIRE_BACKSTOP_MS,
         pollMs: 10,
         heartbeatMs: HEARTBEAT_PARKED_MS,
@@ -433,6 +451,7 @@ describe("patch-gen budget lease", () => {
             label: "waiter",
             requestedUnits: 1,
             dir: ${JSON.stringify(DIR)},
+            limit: ${JSON.stringify(TEST_BUDGET_LIMIT)},
             waitMs: 20,
             pollMs: 5,
           })
@@ -488,6 +507,7 @@ describe("patch-gen budget lease", () => {
         label: "holder",
         requestedUnits: 1,
         dir: ${JSON.stringify(DIR)},
+        limit: ${JSON.stringify(TEST_BUDGET_LIMIT)},
         waitMs: 20,
         pollMs: 5,
         heartbeatMs: 5,
