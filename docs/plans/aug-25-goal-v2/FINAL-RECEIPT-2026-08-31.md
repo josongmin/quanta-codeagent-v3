@@ -37,8 +37,8 @@ bun run typecheck:tests
 bun run lint
 bun run lint:debt
 bun test tests/unit/god-code-ratchet.test.ts tests/unit/_arch --parallel=1
-bun test tests/unit --parallel=1 --timeout=60000
-bun test tests/integration --parallel=1 --timeout=60000
+bun run test:unit
+bun run test:integration
 bun run smoke:goal
 bun test tests/e2e-pty/cli-goal-pursuit-e2e.test.ts --parallel=1
 QUANTA_E2E_CLI_BIN="$PWD/dist/agent" bun test tests/e2e-pty/cli-goal-pursuit-e2e.test.ts --parallel=1
