@@ -14,6 +14,8 @@ const valid = {
   revision: 7,
   freshness: "fresh",
   validationContract: "checked",
+  wake: { kind: "armed", delayMs: 15_000, wakeAt: 20_000 },
+  latestSettlement: null,
   objective: {
     objectiveId: "objective:t:1",
     goal: "ship it",

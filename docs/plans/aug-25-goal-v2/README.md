@@ -29,17 +29,16 @@
 | GOAL-08 browser controls | **DONE** | work attribution, approval resume attribution, revision CAS, receipt correlation, 전체 browser `/goal` verb가 live |
 | GOAL-09 blockers | **IMPLEMENTED / PROMOTION PENDING** | host RunLedger/TaskRegistry dependency identity와 opaque occurrence evidence, typed unresolved가 focused green. main/R6 gate 대기 |
 | GOAL-10 evidence | **PARTIAL** | settlement decision counter와 feature catalog는 live. lifecycle telemetry 나머지와 PTY/smoke matrix는 미완료 |
-| Browser always-on state | **PARTIAL** | `/goal` 조회는 완전하지만 wake status/최근 settlement의 default surface push는 없음 |
+| Browser always-on state | **IMPLEMENTED / PROMOTION PENDING** | canonical `goal.state` push/reconnect replay, freshness/wake/latest settlement, observability-independent UI가 focused green. main/R6 gate 대기 |
 
 ## 남은 작업
 
 우선순위와 dependency order는 [`NEXT-PLAN.md`](NEXT-PLAN.md), 상세 실행 계약은
 [`tickets/current/`](tickets/current/README.md)에 있다.
 
-1. browser always-on wake/checkpoint/freshness projection
-2. settlement 외 lifecycle telemetry
-3. PTY public matrix와 Goal-aware dedicated smoke harness
-4. R1/R2/R3/R7을 포함한 same-HEAD full promotion gate와 main 반영
+1. settlement 외 lifecycle telemetry
+2. PTY public matrix와 Goal-aware dedicated smoke harness
+3. R1/R2/R3/R7/R4를 포함한 same-HEAD full promotion gate와 main 반영
 
 headless/batch autonomous pursuit는 남은 구현 티켓이 아니라 deliberate hold다. 제품이 persistent
 goal-runner semantics를 승인할 때만 별도 promotion 작업으로 연다.

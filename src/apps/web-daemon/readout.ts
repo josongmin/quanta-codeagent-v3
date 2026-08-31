@@ -41,7 +41,12 @@
  */
 import type { ContextUsageBreakdown } from "@/agent/context/usage-breakdown"
 import type { Plan, TodoItem } from "@/agent/plan/types"
-import type { ObjectiveDomainSnapshot, ObjectiveFreshness, ObjectiveFreshRead } from "@/objective"
+import type {
+  GoalWakeStatus,
+  ObjectiveDomainSnapshot,
+  ObjectiveFreshness,
+  ObjectiveFreshRead,
+} from "@/objective"
 import type { GoalReadoutData } from "@/protocol/readout"
 import type {
   CapabilityManifest,
@@ -150,6 +155,8 @@ export interface WebReadoutSources {
    *  objective frame. Bound to the LIVE session id by the composition root.
    *  Absent ⇒ honest missing-source line. */
   readonly goal?: () => Promise<ObjectiveFreshRead>
+  /** Scheduling projection from the same controller the daemon drives. */
+  readonly goalWakeStatus?: (() => GoalWakeStatus) | undefined
   /** Injectable clock for deterministic age rendering under test. */
   readonly now?: () => number
 }
@@ -273,9 +280,11 @@ export const renderGoalReadout = (
 export const toGoalReadoutData = (
   domain: ObjectiveDomainSnapshot,
   freshness: ObjectiveFreshness = { kind: "freshness-unresolved" },
+  wake: GoalWakeStatus | null = null,
 ): GoalReadoutData => {
   const objective = domain.state?.objective
   const currentProof = checkedProofIsCurrent(domain, freshness)
+  const latest = domain.progressReceipts?.at(-1)
   return {
     kind: "goal",
     revision: domain.revision,
@@ -283,6 +292,18 @@ export const toGoalReadoutData = (
     // The authority's empty-domain snapshot predates the derived contract and
     // leaves it undefined. The wire contract is total: absence means missing.
     validationContract: domain.validationContract ?? "missing",
+    wake,
+    latestSettlement:
+      latest === undefined
+        ? null
+        : {
+            turnOutcome: latest.turnOutcome,
+            objectiveRevisionBefore: latest.objectiveRevisionBefore,
+            objectiveRevisionAfter: latest.objectiveRevisionAfter,
+            recordedAt: latest.recordedAt,
+            criterionTransitions: latest.criterionTransitions.length,
+            remainingCriteria: latest.remainingCriterionIds.length,
+          },
     objective:
       objective === undefined
         ? null
@@ -674,7 +695,7 @@ const LIVE_READOUTS: Readonly<Record<(typeof SOURCE_BACKED_READOUTS)[number], Li
     if (s.goal === undefined) return undefined
     return mapAwaited(s.goal(), ({ domain, freshness }) => ({
       output: renderGoalReadout(domain, s.now?.() ?? Date.now(), freshness),
-      data: toGoalReadoutData(domain, freshness),
+      data: toGoalReadoutData(domain, freshness, s.goalWakeStatus?.() ?? null),
     }))
   },
 }

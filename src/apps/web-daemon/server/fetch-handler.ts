@@ -466,6 +466,7 @@ const makeTryUpgrade = (config: WebDaemonServerConfig) => {
         observability: undefined,
         canvas: undefined,
         agentState: undefined,
+        goalStateDetach: undefined,
         threadId,
       },
     })

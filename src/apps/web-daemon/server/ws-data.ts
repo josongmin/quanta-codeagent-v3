@@ -41,6 +41,8 @@ export interface WSData {
    * unsubscribes from the shared agent-state source.
    */
   agentState: { detach: () => void } | undefined
+  /** Default-ON Goal snapshot subscriber (not observability-gated). */
+  goalStateDetach: (() => void) | undefined
   /** P1 Phase 2 (jul-11) — the `?thread=<id>` the client asked to OPEN, read
    *  at WS upgrade. `open()` swaps the live session onto it (hydrate). Absent ⇒
    *  no swap (byte-identical: the client joins the current live session). */

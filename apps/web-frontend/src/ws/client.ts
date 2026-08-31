@@ -39,10 +39,12 @@ import type {
   SurfaceSubscription,
 } from "../types/protocol"
 import { DEFAULT_SESSION_CLIENT_SURFACE_SUBSCRIPTION } from "../types/protocol"
+import type { GoalStateMessage } from "../types/protocol.readout.generated"
 import {
   decodeAgentStateFromEnvelope,
   decodeCanvasFromEnvelope,
   decodeEventFromEnvelope,
+  decodeGoalStateFromEnvelope,
   decodeObservabilityFromEnvelope,
   decodeRejectedFromEnvelope,
   decodeSnapshotFromEnvelope,
@@ -103,6 +105,7 @@ export type ObservabilityHandler = (message: ObservabilityMessage) => void
 export type CanvasHandler = (message: CanvasMessage) => void
 export type AgentStateHandler = (message: AgentStateMessage) => void
 export type SubagentHandler = (message: SubagentMessage) => void
+export type GoalStateHandler = (message: GoalStateMessage) => void
 
 /**
  * Minimal interface SessionClient depends on — the global `WebSocket` ctor
@@ -241,6 +244,7 @@ export class SessionClient {
   readonly #canvasHandlers = new Set<CanvasHandler>()
   readonly #agentStateHandlers = new Set<AgentStateHandler>()
   readonly #subagentHandlers = new Set<SubagentHandler>()
+  readonly #goalStateHandlers = new Set<GoalStateHandler>()
   readonly #wsCtor: WebSocketCtor
   readonly #setTimer: (cb: () => void, ms: number) => unknown
   readonly #clearTimer: (handle: unknown) => void
@@ -277,6 +281,7 @@ export class SessionClient {
   #resuming = false
   #lastSnapshot: SessionSnapshotLite | null = null
   #lastObservability: ObservabilityMessage | null = null
+  #lastGoalState: GoalStateMessage | null = null
   /** Last canvas message, replayed to late `onCanvas` subscribers. */
   #lastCanvas: CanvasMessage | null = null
   /** GOAL-08 rail 15 — `goalWorkResult` subscribers (accept + late refusal). */
@@ -621,6 +626,20 @@ export class SessionClient {
     }
   }
 
+  /** Subscribe to the default-ON canonical Goal projection. The latest
+   * snapshot replays to late mounts and survives reconnects until replaced. */
+  onGoalState(handler: GoalStateHandler): () => void {
+    this.#goalStateHandlers.add(handler)
+    if (this.#lastGoalState !== null) {
+      try {
+        handler(this.#lastGoalState)
+      } catch {
+        // Isolate panel failures from the client transport.
+      }
+    }
+    return () => this.#goalStateHandlers.delete(handler)
+  }
+
   /**
    * Subscribe to canvas channel frames (`tool.diff` / `context.usage`,
    * ADR-0440). Mirrors {@link onObservability}: the last canvas message is
@@ -853,6 +872,21 @@ export class SessionClient {
             handler(subagent)
           } catch (err) {
             this.#log("warn", `[SessionClient] subagent handler threw: ${String(err)}`)
+          }
+        }
+      }
+      return
+    }
+    if (kind === "goalState") {
+      const goalState = decodeGoalStateFromEnvelope(parsed)
+      if (goalState !== null) {
+        this.#lastGoalState = goalState
+        this.#settleResume()
+        for (const handler of [...this.#goalStateHandlers]) {
+          try {
+            handler(goalState)
+          } catch (err) {
+            this.#log("warn", `[SessionClient] goal-state handler threw: ${String(err)}`)
           }
         }
       }

@@ -404,6 +404,7 @@ describe("goal wake host binding", () => {
       enabled: true,
       threadId: TID,
       quietWindowMs: 15_000,
+      now: () => 1_000,
       probes: probes(store, async () => undefined),
       readDomain: (id) => asObjectiveAuthority(store).readDomain(id),
       isQuiescent: () => quiet,
@@ -413,10 +414,10 @@ describe("goal wake host binding", () => {
     expect(wake?.status()).toEqual({ kind: "idle", skipReason: "validation-contract-missing" })
     store.replace(TID, { goal: "ship", successCriteria: ["c"] })
     wake?.onGoalMutation()
-    expect(wake?.status()).toEqual({ kind: "armed", delayMs: 15_000 })
+    expect(wake?.status()).toEqual({ kind: "armed", delayMs: 15_000, wakeAt: 16_000 })
     // raw input cancels the timer: the report says the next settled edge arms
     wake?.onActivity()
-    expect(wake?.status()).toEqual({ kind: "pending", delayMs: 15_000 })
+    expect(wake?.status()).toEqual({ kind: "pending", delayMs: 15_000, retryAt: 16_000 })
     quiet = false
     wake?.onGoalMutation()
     expect(wake?.status()).toEqual({ kind: "idle", skipReason: "not-quiescent" })
@@ -456,7 +457,7 @@ describe("goal wake host binding", () => {
     slot.recover()
     wake?.onTurnSettled()
     expect(timer.delays()).toEqual([15_000])
-    expect(wake?.status()).toEqual({ kind: "armed", delayMs: 15_000 })
+    expect(wake?.status()).toMatchObject({ kind: "armed", delayMs: 15_000 })
   })
 
   test("GOAL-08 round 4 — a NEW objective generation lifts the fail-stop (same generation keeps it); a timer armed before the fail-stop never fires through", async () => {
@@ -502,7 +503,7 @@ describe("goal wake host binding", () => {
     wake?.onGoalMutation()
     expect(slot.status().kind).toBe("empty")
     expect(timer.delays().at(-1)).toBe(15_000)
-    expect(wake?.status()).toEqual({ kind: "armed", delayMs: 15_000 })
+    expect(wake?.status()).toMatchObject({ kind: "armed", delayMs: 15_000 })
   })
 
   test("GOAL-04 rail 9 — a pause DURING an attributed turn still records the cost, and the settled turn does NOT re-arm", () => {
@@ -576,6 +577,6 @@ describe("goal wake host binding", () => {
     store.setExplicitStatus(TID, "active")
     wake?.onGoalMutation()
     expect(timer.delays().length).toBe(armsBefore + 1)
-    expect(wake?.status()).toEqual({ kind: "armed", delayMs: 30_000 })
+    expect(wake?.status()).toMatchObject({ kind: "armed", delayMs: 30_000 })
   })
 })

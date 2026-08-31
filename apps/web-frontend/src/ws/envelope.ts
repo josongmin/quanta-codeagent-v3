@@ -25,6 +25,11 @@ import type {
   SessionSnapshotLite,
   SurfaceSubscription,
 } from "../types/protocol"
+import {
+  decodeGoalStateMessage,
+  GOAL_STATE_PROTOCOL_VERSION,
+  type GoalStateMessage,
+} from "../types/protocol.readout.generated"
 import type { SubagentMessage } from "./subagent-model"
 
 /**
@@ -306,6 +311,14 @@ export const decodeObservabilityFromEnvelope = (
   if (parsed.kind !== "observability") return null
   if (!isString(parsed.version) || parsed.version.length === 0) return null
   return isObservabilityMessage(parsed.payload) ? parsed.payload : null
+}
+
+/** Default-ON Goal state channel, independent of observability subscription. */
+export const decodeGoalStateFromEnvelope = (
+  parsed: Record<string, unknown>,
+): GoalStateMessage | null => {
+  if (parsed.kind !== "goalState" || parsed.version !== GOAL_STATE_PROTOCOL_VERSION) return null
+  return decodeGoalStateMessage(parsed.payload)
 }
 
 /* ------------------------------------------------------------------ */

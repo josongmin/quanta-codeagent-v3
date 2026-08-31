@@ -21,6 +21,7 @@ import type { RuntimeSession } from "@/sdk/runtime"
 import { errMessage, logger } from "@/shared"
 import { peekControlRequest } from "../control-request-frame"
 import { peekFollowerVerb } from "../follower-verb-frame"
+import { attachGoalStateSink } from "../goal-state-source"
 import { peekGoalVerify, peekGoalVerifyEnvelope } from "../goal-verify-frame"
 import { peekGoalWork, peekGoalWorkEnvelope } from "../goal-work-frame"
 import type { WebDaemonServerConfig } from "../server"
@@ -450,6 +451,12 @@ export const buildWebSocketHandlers = (deps: WsHandlerDeps): WsHandlers => {
             }),
           )
         }
+        // Default-ON Goal state is independent of the observability
+        // subscription. Refresh after any requested live attach, then replay
+        // the canonical current snapshot immediately to this socket.
+        await config.goalStateSource?.refresh()
+        ws.data.goalStateDetach =
+          attachGoalStateSink((frame) => ws.send(frame), config.goalStateSource) ?? undefined
       } catch (error) {
         logger.error("web-daemon: failed to create runtime session", {
           error: errMessage(error),
@@ -488,6 +495,8 @@ export const buildWebSocketHandlers = (deps: WsHandlerDeps): WsHandlers => {
       // before evicting so no frame targets a dead socket.
       ws.data.agentState?.detach()
       ws.data.agentState = undefined
+      ws.data.goalStateDetach?.()
+      ws.data.goalStateDetach = undefined
       // QUANTA_WEB_AGENT_STATE — cancel every pending `request_user_input` so
       // a paused agent's `await` settles with `{decision:"cancelled"}` instead
       // of hanging forever for an answer this (now-dead) socket can never

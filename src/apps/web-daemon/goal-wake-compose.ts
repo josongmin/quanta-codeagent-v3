@@ -16,6 +16,7 @@ export interface WebGoalWakeHandle {
   onGoalMutation(): void
   onAttachStart(): void
   onAttachSettled(): void
+  status(): import("@/objective").GoalWakeStatus
   stop(): void
 }
 
@@ -86,6 +87,7 @@ export const composeWebGoalWake = async (args: {
   readonly env: Record<string, string | undefined>
   readonly setTimeoutFn?: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>
   readonly clearTimeoutFn?: (handle: ReturnType<typeof setTimeout>) => void
+  readonly onStateChange?: (() => void) | undefined
 }): Promise<WebGoalWakeHandle | undefined> => {
   const config = runtimeConfigFromEnv(args.env)
   const authorityPort = args.runtime.objectiveAuthority
@@ -118,6 +120,7 @@ export const composeWebGoalWake = async (args: {
     ...(attemptSlot !== undefined ? { attemptSlot } : {}),
     ...(args.setTimeoutFn !== undefined ? { setTimeoutFn: args.setTimeoutFn } : {}),
     ...(args.clearTimeoutFn !== undefined ? { clearTimeoutFn: args.clearTimeoutFn } : {}),
+    ...(args.onStateChange !== undefined ? { onStatusChange: args.onStateChange } : {}),
     resumeAttempt: async (id, attempt) => {
       const sessionSnapshot = await args.session.snapshot()
       const domain = read.readDomain(id)
@@ -191,6 +194,7 @@ export const composeWebGoalWake = async (args: {
       wake.onActivity()
     },
     onAttachSettled,
+    status: () => wake.status(),
     stop: () => {
       if (stopped) return
       stopped = true

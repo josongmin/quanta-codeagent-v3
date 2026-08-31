@@ -12,18 +12,18 @@ describe("GOAL-06 — /goal report wake line", () => {
     const authority = createObjectiveAuthority({ now: () => 1 })
     authority.create("t", { goal: "ship", successCriteria: ["c"] })
     const domain = authority.readDomain("t")
-    expect(renderGoalDomain(domain, 1, { kind: "armed", delayMs: 15_000 })).toContain(
-      "wake: armed in 15s",
-    )
-    expect(renderGoalDomain(domain, 1, { kind: "armed", delayMs: 900_000 })).toContain(
-      "wake: armed in 15m",
-    )
+    expect(
+      renderGoalDomain(domain, 1, { kind: "armed", delayMs: 15_000, wakeAt: 15_001 }),
+    ).toContain("wake: armed in 15s")
+    expect(
+      renderGoalDomain(domain, 1, { kind: "armed", delayMs: 900_000, wakeAt: 900_001 }),
+    ).toContain("wake: armed in 15m")
     expect(
       renderGoalDomain(domain, 1, { kind: "idle", skipReason: "validation-contract-missing" }),
     ).toContain("wake: idle (validation-contract-missing)")
-    expect(renderGoalDomain(domain, 1, { kind: "pending", delayMs: 15_000 })).toContain(
-      "wake: pending 15s quiet",
-    )
+    expect(
+      renderGoalDomain(domain, 1, { kind: "pending", delayMs: 15_000, retryAt: 15_001 }),
+    ).toContain("wake: pending 15s quiet")
     expect(renderGoalDomain(domain, 1, { kind: "stopped" })).toContain("wake: stopped")
     expect(renderGoalDomain(domain, 1, undefined)).toContain("wake: not composed")
     expect(renderGoalDomain(domain, 1)).toContain("wake: not composed")

@@ -14,6 +14,8 @@ const empty = (): GoalReadoutData => ({
   revision: 0,
   freshness: "fresh",
   validationContract: "missing",
+  wake: null,
+  latestSettlement: null,
   objective: null,
 })
 
@@ -22,6 +24,8 @@ const live = (over: Partial<NonNullable<GoalReadoutData["objective"]>> = {}): Go
   revision: 3,
   freshness: "fresh",
   validationContract: "manual-only",
+  wake: null,
+  latestSettlement: null,
   objective: {
     objectiveId: "objective-1",
     goal: "ship it",

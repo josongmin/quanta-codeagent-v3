@@ -203,7 +203,72 @@ const connect = async (handle: WebDaemonHandle, sessionId: string) => {
 const domainOf = (authority: ObjectiveAuthority, threadId: string) =>
   createObjectiveCapabilities(authority).read.readDomain(threadId)
 
+const goalStatesOf = (frames: readonly Record<string, unknown>[]) =>
+  frames.flatMap((frame) => {
+    if (frame.kind !== "goalState") return []
+    const payload = frame.payload
+    if (payload === null || typeof payload !== "object" || Array.isArray(payload)) return []
+    const state = (payload as Record<string, unknown>).state
+    return state !== null && typeof state === "object" && !Array.isArray(state)
+      ? [state as Record<string, unknown>]
+      : []
+  })
+
 describe("web goal control — a real client drives the full lifecycle", () => {
+  test("default-on goal state pushes mutations and replays the current snapshot on reconnect", async () => {
+    const { authority, handle, session } = await bootDaemon()
+    const thread = session.sessionId
+    const client = await connect(handle, thread)
+
+    expect(goalStatesOf(client.frames).at(-1)).toMatchObject({
+      kind: "goal",
+      revision: 0,
+      objective: null,
+    })
+
+    client.mutate({ kind: "create", definition: { goal: "push this state" } }, "state-create")
+    expect(await until(() => authority.get(thread)?.goal === "push this state")).toBe(true)
+    expect(
+      await until(() => {
+        const latest = goalStatesOf(client.frames).at(-1)
+        const objective = latest?.objective
+        return (
+          objective !== null &&
+          typeof objective === "object" &&
+          !Array.isArray(objective) &&
+          (objective as Record<string, unknown>).goal === "push this state"
+        )
+      }),
+    ).toBe(true)
+
+    const replayClient = await connect(handle, thread)
+    const replayed = goalStatesOf(replayClient.frames).at(-1)
+    expect(replayed).toMatchObject({
+      kind: "goal",
+      revision: domainOf(authority, thread).revision,
+      objective: { goal: "push this state", status: "active" },
+    })
+
+    client.mutate(
+      { kind: "setExplicitStatus", status: "paused" },
+      "state-pause",
+      domainOf(authority, thread).revision,
+    )
+    expect(await until(() => authority.get(thread)?.status === "paused")).toBe(true)
+    expect(
+      await until(() => {
+        const latest = goalStatesOf(replayClient.frames).at(-1)
+        const objective = latest?.objective
+        return (
+          objective !== null &&
+          typeof objective === "object" &&
+          !Array.isArray(objective) &&
+          (objective as Record<string, unknown>).status === "paused"
+        )
+      }),
+    ).toBe(true)
+  }, 30_000)
+
   test("create → pause → resume → edit → clear, each observed on the REAL authority", async () => {
     const { authority, handle, session } = await bootDaemon()
     const thread = session.sessionId

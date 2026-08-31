@@ -99,6 +99,9 @@ export interface GoalWakeControllerDeps {
   /** Optional dynamic delay derived from durable objective evidence. Undefined skips arming. */
   readonly resolveDelayMs?: ((current: ObjectiveDomainSnapshot) => number | undefined) | undefined
   readonly timer: GoalWakeTimer
+  /** Clock paired with the timer. Used only to publish reconnect-stable
+   * absolute scheduling state; defaults to `Date.now`. */
+  readonly now?: (() => number) | undefined
   /** Read-only authority projection. It must be the same owner used by /goal. */
   readonly readDomain: (threadId: string) => ObjectiveDomainSnapshot
   /** Re-read at fire time to close input/turn/queue races. Throwing blocks wake. */
@@ -109,6 +112,9 @@ export interface GoalWakeControllerDeps {
   readonly enqueue: (attempt: GoalWakeAttempt) => void | Promise<void>
   /** Optional observability seam. It must not throw out of the controller. */
   readonly onSkip?: ((attempt: GoalWakeAttempt, reason: GoalWakeSkipReason) => void) | undefined
+  /** Status-transition notification. Carries no objective/user identity and
+   * cannot affect scheduling when it throws. */
+  readonly onStatusChange?: (() => void) | undefined
 }
 
 export interface GoalWakeController {
@@ -132,7 +138,7 @@ export interface GoalWakeController {
 }
 
 export type GoalWakeControllerStatus =
-  | { readonly kind: "armed"; readonly delayMs: number }
+  | { readonly kind: "armed"; readonly delayMs: number; readonly wakeAt: number }
   | { readonly kind: "idle" }
   | { readonly kind: "stopped" }
 
@@ -377,6 +383,23 @@ const captureWakeAttempt = (
   }
 }
 
+const createStatusChangeEmitter = (
+  deps: Pick<GoalWakeControllerDeps, "onStatusChange">,
+  readStatus: () => GoalWakeControllerStatus,
+): (() => void) => {
+  let lastStatusKey = JSON.stringify(readStatus())
+  return (): void => {
+    const key = JSON.stringify(readStatus())
+    if (key === lastStatusKey) return
+    lastStatusKey = key
+    try {
+      deps.onStatusChange?.()
+    } catch {
+      // Projection/telemetry observers are not scheduling authority.
+    }
+  }
+}
+
 export const createGoalWakeController = (deps: GoalWakeControllerDeps): GoalWakeController => {
   const attempts = deps.attempts ?? createInMemoryGoalWakeAttemptRegistry()
   const delayMs =
@@ -386,6 +409,16 @@ export const createGoalWakeController = (deps: GoalWakeControllerDeps): GoalWake
   let epoch = 0
   let pending: GoalWakeTimerHandle | undefined
   let pendingDelayMs = 0
+  let pendingWakeAt = 0
+  const now = deps.now ?? Date.now
+
+  const currentStatus = (): GoalWakeControllerStatus =>
+    stopped
+      ? { kind: "stopped" }
+      : pending === undefined
+        ? { kind: "idle" }
+        : { kind: "armed", delayMs: pendingDelayMs, wakeAt: pendingWakeAt }
+  const emitStatusChange = createStatusChangeEmitter(deps, currentStatus)
 
   const reportSkip = (attempt: GoalWakeAttempt, reason: GoalWakeSkipReason): void => {
     try {
@@ -399,6 +432,7 @@ export const createGoalWakeController = (deps: GoalWakeControllerDeps): GoalWake
     if (pending === undefined) return
     const handle = pending
     pending = undefined
+    pendingWakeAt = 0
     try {
       deps.timer.clear(handle)
     } catch (_error) {
@@ -422,6 +456,8 @@ export const createGoalWakeController = (deps: GoalWakeControllerDeps): GoalWake
       return
     }
     pending = undefined
+    pendingWakeAt = 0
+    emitStatusChange()
     const fire = evaluateGoalWakeFire({
       enabled: deps.enabled,
       stopped,
@@ -451,6 +487,7 @@ export const createGoalWakeController = (deps: GoalWakeControllerDeps): GoalWake
       const handle = deps.timer.set(() => fireAttempt(attempt, callbackGeneration), scheduleDelayMs)
       pending = handle
       pendingDelayMs = scheduleDelayMs
+      pendingWakeAt = now() + scheduleDelayMs
       if (typeof handle === "object" && handle !== null) handle.unref?.()
       return attempt
     } catch (_error) {
@@ -470,16 +507,26 @@ export const createGoalWakeController = (deps: GoalWakeControllerDeps): GoalWake
   }
 
   return {
-    arm: (input): GoalWakeAttempt | undefined => armInternal(input, false),
-    reset: (input): GoalWakeAttempt | undefined => armInternal(input, true),
+    arm: (input): GoalWakeAttempt | undefined => {
+      const result = armInternal(input, false)
+      emitStatusChange()
+      return result
+    },
+    reset: (input): GoalWakeAttempt | undefined => {
+      const result = armInternal(input, true)
+      emitStatusChange()
+      return result
+    },
     onActivity: (): void => {
       epoch += 1
       generation += 1
       clearPending()
+      emitStatusChange()
     },
     cancel: (): void => {
       generation += 1
       clearPending()
+      emitStatusChange()
     },
     clearAttempts: (threadId): void => attempts.clearThread(threadId),
     stop: (): void => {
@@ -487,11 +534,9 @@ export const createGoalWakeController = (deps: GoalWakeControllerDeps): GoalWake
       stopped = true
       generation += 1
       clearPending()
+      emitStatusChange()
     },
     activityEpoch: (): number => epoch,
-    status: (): GoalWakeControllerStatus => {
-      if (stopped) return { kind: "stopped" }
-      return pending === undefined ? { kind: "idle" } : { kind: "armed", delayMs: pendingDelayMs }
-    },
+    status: currentStatus,
   }
 }

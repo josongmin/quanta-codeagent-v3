@@ -130,6 +130,25 @@ const encodeObservabilityFrame = (): string =>
     },
   })
 
+const encodeGoalStateFrame = (revision: number): string =>
+  JSON.stringify({
+    version: "goal-state.v1",
+    kind: "goalState",
+    payload: {
+      kind: "goal.state",
+      emittedAt: 123,
+      state: {
+        kind: "goal",
+        revision,
+        freshness: "fresh",
+        validationContract: "missing",
+        wake: { kind: "stopped" },
+        latestSettlement: null,
+        objective: null,
+      },
+    },
+  })
+
 const encodeEventFrame = (seq: number): string =>
   JSON.stringify({
     version: SESSION_PROTOCOL_VERSION,
@@ -507,6 +526,18 @@ describe("SessionClient", () => {
     })
 
     expect(seen).toEqual(["observability.snapshot"])
+  })
+
+  it("replays canonical Goal state to late subscribers independently of observability", () => {
+    const h = buildHarness()
+    const seen: number[] = []
+
+    h.client.connect({ url: "ws://localhost/x" })
+    h.fakes[0]?._simulateOpen()
+    h.fakes[0]?._simulateMessage(encodeGoalStateFrame(7))
+    h.client.onGoalState((message) => seen.push(message.state.revision))
+
+    expect(seen).toEqual([7])
   })
 
   it("keeps the last observability snapshot across reconnects until a fresh frame arrives", () => {

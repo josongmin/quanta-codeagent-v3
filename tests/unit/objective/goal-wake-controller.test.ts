@@ -356,6 +356,7 @@ describe("goal wake controller lifecycle", () => {
     const controller = createGoalWakeController({
       enabled: true,
       quietWindowMs: 15_000,
+      now: () => 1_000,
       resolveDelayMs: () => 30_000,
       timer,
       readDomain: () => domain(1),
@@ -364,7 +365,7 @@ describe("goal wake controller lifecycle", () => {
     })
     expect(controller.status()).toEqual({ kind: "idle" })
     controller.arm({ threadId: "thread-1", checkpointOrdinal: 0 })
-    expect(controller.status()).toEqual({ kind: "armed", delayMs: 30_000 })
+    expect(controller.status()).toEqual({ kind: "armed", delayMs: 30_000, wakeAt: 31_000 })
     controller.cancel()
     expect(controller.status()).toEqual({ kind: "idle" })
     controller.reset({ threadId: "thread-1", checkpointOrdinal: 1 })
@@ -372,5 +373,28 @@ describe("goal wake controller lifecycle", () => {
     expect(controller.status()).toEqual({ kind: "idle" })
     controller.stop()
     expect(controller.status()).toEqual({ kind: "stopped" })
+  })
+
+  test("R4 status transition seam emits one edge per effective state change", () => {
+    const timer = fakeTimer()
+    const transitions: string[] = []
+    let controller: ReturnType<typeof createGoalWakeController>
+    controller = createGoalWakeController({
+      enabled: true,
+      quietWindowMs: 100,
+      now: () => 1_000,
+      timer,
+      readDomain: () => domain(1),
+      stillQuiescent: () => true,
+      enqueue: () => undefined,
+      onStatusChange: () => transitions.push(controller.status().kind),
+    })
+    controller.arm({ threadId: "thread-1", checkpointOrdinal: 0 })
+    controller.arm({ threadId: "thread-1", checkpointOrdinal: 0 }) // unchanged
+    timer.fire()
+    controller.cancel() // already idle
+    controller.stop()
+    controller.stop() // idempotent
+    expect(transitions).toEqual(["armed", "idle", "stopped"])
   })
 })

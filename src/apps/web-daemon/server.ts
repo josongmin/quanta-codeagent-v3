@@ -26,10 +26,11 @@ import type { SupportedReadModels } from "@/protocol/session"
 import type { RuntimeFacade, RuntimeSession } from "@/sdk/runtime"
 import { loadSessionById, type PersistedObjectiveSnapshot } from "@/session"
 import { errMessage, logger } from "@/shared"
+import { createGoalStateSource, type GoalStateSource } from "./goal-state-source"
 import { composeWebGoalVerify, type WebGoalVerifyHandler } from "./goal-verify-compose"
 import { composeWebGoalWake, type WebGoalWakeHandle } from "./goal-wake-compose"
 import { composeWebGoalWork, type WebGoalWorkHandler } from "./goal-work-compose"
-import type { CostReadoutTotals, WebReadoutSources } from "./readout"
+import { type CostReadoutTotals, toGoalReadoutData, type WebReadoutSources } from "./readout"
 import { buildDaemonReadoutSources } from "./readout-compose"
 import { setupApprovalContinuation } from "./server/approval-continuation"
 import { type CanvasArtifactFeed, setupCanvasArtifactBridge } from "./server/canvas-artifact-bridge"
@@ -163,6 +164,8 @@ export interface WebDaemonServerConfig extends WebDaemonConfig {
   readonly goalWork?: WebGoalWorkHandler
   /** Daemon-owned checked-criterion verifier request surface. */
   readonly goalVerify?: WebGoalVerifyHandler
+  /** Default-ON typed Goal snapshot/push source. Independent of observability. */
+  readonly goalStateSource?: GoalStateSource
 }
 
 /**
@@ -324,12 +327,21 @@ const buildDaemonReadoutSurface = (
   sharedSession: RuntimeSession,
   cost: () => CostReadoutTotals,
   goalWake?: WebGoalWakeHandle | undefined,
+  onGoalStateChange?: (() => void) | undefined,
 ): WebReadoutSources =>
   buildDaemonReadoutSources({
     runtime,
     threadId: sharedSession.sessionId,
     cost,
-    ...(goalWake !== undefined ? { onGoalMutation: goalWake.onGoalMutation } : {}),
+    ...(goalWake !== undefined || onGoalStateChange !== undefined
+      ? {
+          onGoalMutation: () => {
+            goalWake?.onGoalMutation()
+            onGoalStateChange?.()
+          },
+        }
+      : {}),
+    ...(goalWake !== undefined ? { goalWakeStatus: goalWake.status } : {}),
   })
 
 /** Tear the two goal surfaces down together: cancel the autonomous wake, then
@@ -339,8 +351,10 @@ const stopGoalSurfaces = async (surfaces: {
   goalWake: WebGoalWakeHandle | undefined
   goalWork: WebGoalWorkHandler | undefined
   goalVerify: WebGoalVerifyHandler | undefined
+  goalStateSource: GoalStateSource | undefined
 }): Promise<void> => {
   surfaces.goalWake?.stop()
+  await surfaces.goalStateSource?.refresh()
   surfaces.goalVerify?.stop()
   await Promise.all([surfaces.goalWork?.settled(), surfaces.goalVerify?.settled()])
 }
@@ -348,6 +362,7 @@ const stopGoalSurfaces = async (surfaces: {
 const composeGoalSurfaces = async (
   runtime: RuntimeFacade,
   sharedSession: RuntimeSession,
+  onGoalStateChange: () => void,
 ): Promise<{
   goalWake: WebGoalWakeHandle | undefined
   goalWork: WebGoalWorkHandler | undefined
@@ -357,6 +372,7 @@ const composeGoalSurfaces = async (
     session: sharedSession,
     runtime: runtime as Parameters<typeof composeWebGoalWake>[0]["runtime"],
     env: process.env,
+    onStateChange: onGoalStateChange,
   }),
   goalWork: composeWebGoalWork({
     session: sharedSession,
@@ -382,11 +398,13 @@ const bindGoalHandlers = (
   surfaces: {
     readonly goalWork: WebGoalWorkHandler | undefined
     readonly goalVerify: WebGoalVerifyHandler | undefined
+    readonly goalStateSource: GoalStateSource | undefined
   },
 ): WebDaemonServerConfig => ({
   ...bindObjectivePaneThread(config, sessionId),
   ...(surfaces.goalWork !== undefined ? { goalWork: surfaces.goalWork } : {}),
   ...(surfaces.goalVerify !== undefined ? { goalVerify: surfaces.goalVerify } : {}),
+  ...(surfaces.goalStateSource !== undefined ? { goalStateSource: surfaces.goalStateSource } : {}),
 })
 
 /** P1 Phase 2 — the swap-on-attach closure (module-scope to keep `startWebDaemon`
@@ -464,6 +482,8 @@ const createDaemonStop = (resources: {
   readonly goalWake: WebGoalWakeHandle | undefined
   readonly goalWork: WebGoalWorkHandler | undefined
   readonly goalVerify: WebGoalVerifyHandler | undefined
+  readonly goalStateSource: GoalStateSource | undefined
+  readonly goalStateSessionUnsub: (() => void) | null
   readonly unsubPersist: (() => void) | null
   readonly canvasArtifactUnsub: (() => void) | null
   readonly followerApprovalUnsub: (() => void) | null
@@ -481,12 +501,15 @@ const createDaemonStop = (resources: {
     approvalContinuationUnsub,
     transcriptPersistUnsub,
     costAggregatorUnsub,
+    goalStateSessionUnsub,
   } = resources
   return async () => {
     if (stopped) return
     stopped = true
     await stopGoalSurfaces(resources)
     await resources.server.stop(true)
+    goalStateSessionUnsub?.()
+    resources.goalStateSource?.stop()
     await resources.registry.closeAll()
     if (unsubPersist !== null) {
       unsubPersist()
@@ -527,7 +550,10 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
   // join the same session instead of minting a fresh one — see the
   // `buildRegisteredSession` comment above.
   const sharedSession = await runtime.createSession(config.sessionConfig)
-  const { goalWake, goalWork, goalVerify } = await composeGoalSurfaces(runtime, sharedSession)
+  let requestGoalStateRefresh = (): void => undefined
+  const { goalWake, goalWork, goalVerify } = await composeGoalSurfaces(runtime, sharedSession, () =>
+    requestGoalStateRefresh(),
+  )
   const registry = createSessionRegistry()
   const startedAt = performance.now()
 
@@ -582,10 +608,40 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
     runtime,
     ...(goalWake !== undefined ? { goalWake } : {}),
   })
-  const readoutSources = buildDaemonReadoutSurface(runtime, sharedSession, cost.totals, goalWake)
+  const readoutSources = buildDaemonReadoutSurface(
+    runtime,
+    sharedSession,
+    cost.totals,
+    goalWake,
+    () => requestGoalStateRefresh(),
+  )
+  const goalRead = readoutSources.goal
+  const goalStateSource =
+    goalRead === undefined
+      ? undefined
+      : createGoalStateSource({
+          read: async () => {
+            const { domain, freshness } = await goalRead()
+            return toGoalReadoutData(domain, freshness, readoutSources.goalWakeStatus?.() ?? null)
+          },
+        })
+  await goalStateSource?.refresh()
+  requestGoalStateRefresh = () => {
+    void goalStateSource?.refresh()
+  }
+  const goalStateSessionUnsub0 =
+    goalStateSource === undefined
+      ? null
+      : sharedSession.subscribe(() => {
+          void goalStateSource.refresh()
+        })
 
   const { server, boundPort, boundHost } = buildDaemonListener({
-    config: bindGoalHandlers(config, sharedSession.sessionId, { goalWork, goalVerify }),
+    config: bindGoalHandlers(config, sharedSession.sessionId, {
+      goalWork,
+      goalVerify,
+      goalStateSource,
+    }),
     registry,
     startedAt,
     threadStore,
@@ -604,6 +660,8 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
     goalWake,
     goalWork,
     goalVerify,
+    goalStateSource,
+    goalStateSessionUnsub: goalStateSessionUnsub0,
     unsubPersist: unsubPersist0,
     canvasArtifactUnsub: canvasArtifactUnsub0,
     followerApprovalUnsub: followerApprovalUnsub0,

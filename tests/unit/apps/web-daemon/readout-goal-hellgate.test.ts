@@ -30,6 +30,7 @@ import {
   renderGoalReadout,
   resolveReadout,
   SOURCE_BACKED_READOUTS,
+  toGoalReadoutData,
 } from "@/apps/web-daemon/readout"
 import { buildDaemonReadoutSources } from "@/apps/web-daemon/readout-compose"
 import {
@@ -85,6 +86,8 @@ describe("W1b — /goal is a readout the daemon answers", () => {
       revision: 0,
       freshness: "fresh",
       validationContract: "missing",
+      wake: null,
+      latestSettlement: null,
       objective: null,
     })
   })
@@ -234,5 +237,50 @@ describe("R2 — verifier read failures are typed freshness, not a failed readou
     expect(result.wired).toBe(true)
     expect(result.isError).toBe(false)
     expect(result.data?.freshness).toBe("freshness-unresolved")
+  })
+})
+
+describe("R4 — canonical always-on projection", () => {
+  test("includes wake absolute time and latest settlement summary without raw attempt identity", () => {
+    const authority = createObjectiveAuthority({ now: () => 1 })
+    authority.create(THREAD, { goal: "ship", successCriteria: ["tests pass"] })
+    const base = authority.readDomain(THREAD)
+    const objectiveId = base.state?.objective.objectiveId ?? ""
+    const domain = {
+      ...base,
+      progressReceipts: [
+        {
+          objectiveId,
+          attemptKey: "private-attempt-key",
+          objectiveRevisionBefore: base.revision,
+          objectiveRevisionAfter: base.revision + 1,
+          turnOutcome: "completed" as const,
+          criterionTransitions: ["criterion-1"],
+          verifierReceiptRefs: [],
+          remainingCriterionIds: ["criterion-2"],
+          recordedAt: 5_000,
+        },
+      ],
+    }
+    const data = toGoalReadoutData(
+      domain,
+      { kind: "fresh" },
+      {
+        kind: "armed",
+        delayMs: 15_000,
+        wakeAt: 20_000,
+      },
+    )
+
+    expect(data.wake).toEqual({ kind: "armed", delayMs: 15_000, wakeAt: 20_000 })
+    expect(data.latestSettlement).toEqual({
+      turnOutcome: "completed",
+      objectiveRevisionBefore: base.revision,
+      objectiveRevisionAfter: base.revision + 1,
+      recordedAt: 5_000,
+      criterionTransitions: 1,
+      remainingCriteria: 1,
+    })
+    expect(JSON.stringify(data)).not.toContain("private-attempt-key")
   })
 })

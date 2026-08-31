@@ -23,12 +23,12 @@ config_refs:
     - QUANTA_GOAL_MAX_AUTONOMOUS_TURNS
 surface_integration:
   cli: full
-  web: partial
+  web: full
   method: audited
   verified: "2026-08-31"
   evidence:
     cli: "Real PTY boots the source or installed CLI, proves default-ON command discovery, explicit QUANTA_GOAL=0 opt-out, goal create/show, autonomous queue execution, draft/background/foreground quiescence fences, and goal-only quiet-window behavior; a real process kill plus resume-by-id proves the objective — and a clear — survive a restart; a settled attributed turn ANNOUNCES itself, so progress is visible without typing /goal; and the operator can attest a manual criterion (`criterion done`) or free a stuck attempt (`abandon`)."
-    web: "Web-daemon composition submits authority-validated autonomous and user-requested goal turns, and the browser `/goal` controls are now complete under the separate `web-goal-controls` feature: generated structured identity-bearing readout, viewed-revision CAS, correlated receipts, unblock/criterion/check, and the shared verifier all have real-daemon evidence. This broader continuation feature remains PARTIAL on web because wake status and settlement checkpoints are not projected into the browser's always-on state surface, and the ObservabilityPane ObjectiveCard remains behind the default-OFF QUANTA_OBSERVABILITY gate. `pause` also fences the next autonomous resume; it does not cancel a turn already running."
+    web: "Web-daemon composition submits authority-validated autonomous and user-requested goal turns. The browser has complete `/goal` controls plus a default-ON typed state surface using the same canonical encoder as HTTP: current freshness, absolute wake scheduling, and latest settlement are pushed on effective transitions and replayed on reconnect independently of QUANTA_OBSERVABILITY. `pause` fences the next autonomous resume; it does not cancel a turn already running."
 purpose: |
   The complete goal preset is enabled by default in CLI and web-daemon roots:
   objective tools, budget enforcement, and bounded autonomous continuation.
@@ -83,6 +83,7 @@ evidence:
     - src/apps/web-daemon/goal-work-compose.ts
     - src/apps/web-daemon/goal-work-frame.ts
     - src/apps/web-daemon/server.ts
+    - src/apps/web-daemon/goal-state-source.ts
     - src/apps/cli/repl/goal-checkpoint-line.ts
     - src/agent/objective-decision.ts
     - src/objective/budget-limits.ts
@@ -91,6 +92,7 @@ evidence:
     - src/kernel/session/ports.ts
     - src/host/runtime/internal/context-binding/objective-settlement.ts
     - apps/web-frontend/src/ws/client.ts
+    - apps/web-frontend/src/components/GoalStateBar.tsx
     - src/runner/orchestrate/session-turn-driver.ts
     - src/sdk/runtime/session/turn-submit-authority.ts
     - src/objective/policy.ts
@@ -116,6 +118,7 @@ evidence:
       - tests/unit/sdk/goal-turn-attribution.test.ts
       - tests/unit/apps/web-daemon/goal-work-frame.test.ts
       - tests/unit/apps/web-daemon/goal-work-server-wire-hellgate.test.ts
+      - tests/unit/apps/web-daemon/goal-state-source.test.ts
       - tests/unit/apps/web-daemon/objective-ports.test.ts
       - tests/unit/host/objective-settlement-measured-usage.test.ts
       - tests/unit/host/objective-settlement-checkpoint-emit.test.ts
@@ -201,10 +204,9 @@ notes: |
   Monitoring is partial: typed skip reasons,
   deterministic receipts, and a turn-scoped settlement decision counter exist;
   wake/enqueue/completion/verifier lifecycle counters and live efficacy
-  measurement remain operational follow-ups. Web always-on state is also
-  partial: the complete `/goal` readout is on demand, while wake status and the
-  latest settlement checkpoint are not projected outside the default-OFF
-  observability pane. Default-ON is bounded
+  measurement remain operational follow-ups. Web always-on state is complete:
+  canonical changed-only Goal snapshots include freshness, wake and the latest
+  settlement and replay independently of the observability pane. Default-ON is bounded
   by the user-created-goal precondition, explicit opt-out, quiescence fences,
   revision/attach-generation checks, verifier evidence, backoff, and hard caps.
   The optional completion judge remains shadow-only and cannot mutate objective state.

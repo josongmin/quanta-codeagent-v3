@@ -7,6 +7,7 @@ import {
 import { ChatPanel } from "./components/ChatPanel"
 import { ConnectionUrlPill } from "./components/ConnectionUrlPill"
 import type { EscalationDecision } from "./components/EscalationCard"
+import { GoalStateBar } from "./components/GoalStateBar"
 import { HeaderTitle } from "./components/HeaderTitle"
 import { HotkeyToast } from "./components/HotkeyToast"
 import { KnobsPanel } from "./components/KnobsPanel"
@@ -47,6 +48,7 @@ import type { CostSurfaceViewWire } from "./types/protocol.session.generated"
 import { type AgentStateSource, useAgentState } from "./ws/agent-state-hooks"
 import { type CanvasSource, useArtifacts, useContextUsage, useToolDiffs } from "./ws/canvas-hooks"
 import { type ConnectOptions, SessionClient } from "./ws/client"
+import { type GoalStateSource, useGoalState } from "./ws/goal-state-hooks"
 import { useItemStream } from "./ws/item-stream-hooks"
 import {
   type ObservabilitySource,
@@ -985,6 +987,11 @@ export const App = (): JSX.Element => {
     [client],
   )
   const observability = useObservabilityState(observabilitySource)
+  const goalStateSource = useMemo<GoalStateSource>(
+    () => ({ subscribe: (handler) => client.onGoalState(handler) }),
+    [client],
+  )
+  const goalState = useGoalState(goalStateSource)
 
   // QUANTA_WEB_AGENT_STATE — the out-of-band agent-state channel (the 9 events
   // the in-band session protocol DROPS: plan.* / mode.changed / tool.progress /
@@ -1144,6 +1151,9 @@ export const App = (): JSX.Element => {
         onOpen={setResumeThreadId}
         liveSessionId={learnedSessionId}
       />
+      {/* Default-ON Goal visibility is a dedicated typed channel. It does not
+          depend on the default-OFF observability pane. */}
+      {goalState !== null ? <GoalStateBar state={goalState} /> : null}
       {/* WS-F move 2 — connection banner (mirrors the resume-status banner
           chrome): `degraded` explains a partial failure (e.g. history hydrate
           — UUX-5-07); `failed` explains the capped bootstrap give-up

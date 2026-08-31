@@ -63,10 +63,10 @@ export interface GoalWakeLifecycle {
 /** The wake decision as the surface renders it: never a predicted status —
  *  an armed timer with its delay, or WHY nothing is armed, or stopped. */
 export type GoalWakeStatus =
-  | { readonly kind: "armed"; readonly delayMs: number }
+  | { readonly kind: "armed"; readonly delayMs: number; readonly wakeAt: number }
   /** No timer right now (raw input cancelled it) but the policy and the host
    *  are ready: the next settled edge arms `delayMs`. */
-  | { readonly kind: "pending"; readonly delayMs: number }
+  | { readonly kind: "pending"; readonly delayMs: number; readonly retryAt: number }
   | {
       readonly kind: "idle"
       readonly skipReason: GoalWakeDelaySkip | "not-quiescent" | "attempt-slot-fail-stopped"
@@ -125,6 +125,8 @@ export interface StartGoalWakeOpts {
   /** GOAL-06 rail 7 — receives ONE bounded warning when the configured quiet
    *  window is below the public 15 s minimum (default: `logger.warn`). */
   readonly onClampWarning?: ((message: string) => void) | undefined
+  /** Host projection refresh edge. No identity-bearing payload. */
+  readonly onStatusChange?: (() => void) | undefined
   /** Optional typed queue hand-off. The CLI uses this to retain the captured
    * revision through dequeue; legacy hosts may keep the plain resume sink. */
   readonly resumeAttempt?: (threadId: string, attempt: GoalWakeAttempt) => Promise<void>
@@ -258,6 +260,7 @@ export const startGoalWakeController = (opts: StartGoalWakeOpts): GoalWakeLifecy
       set: (fn, ms) => setFn(fn, ms),
       clear: (handle) => clearFn(handle as ReturnType<typeof setTimeout>),
     },
+    now,
     readDomain: opts.readDomain,
     // The controller rechecks the SAME host guards before claiming an attempt;
     // runIdleContinuation repeats them at enqueue time to close the last race.
@@ -291,6 +294,7 @@ export const startGoalWakeController = (opts: StartGoalWakeOpts): GoalWakeLifecy
       // rather than silently consuming a retry opportunity.
       if (!outcome.launched) throw new Error(`goal wake not launched: ${outcome.skipReason}`)
     },
+    ...(opts.onStatusChange !== undefined ? { onStatusChange: opts.onStatusChange } : {}),
   })
 
   const resetForNextCheckpoint = (): void => {
@@ -353,7 +357,7 @@ export const startGoalWakeController = (opts: StartGoalWakeOpts): GoalWakeLifecy
       )
       return "skip" in decision
         ? idleStatusFor(decision)
-        : { kind: "pending", delayMs: decision.delayMs }
+        : { kind: "pending", delayMs: decision.delayMs, retryAt: now() + decision.delayMs }
     },
   }
 }

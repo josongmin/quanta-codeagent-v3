@@ -45,6 +45,7 @@ export interface DaemonReadoutComposeArgs {
   readonly objectiveVerifier?: ObjectiveVerificationPort | undefined
   /** Rearm the existing wake owner after reconcile invalidates a receipt. */
   readonly onGoalMutation?: (() => void) | undefined
+  readonly goalWakeStatus?: WebReadoutSources["goalWakeStatus"] | undefined
   /** The LIVE session id — the key the objective domain is stored under. */
   readonly threadId: string
   /** The server-owned turn-usage fold. */
@@ -75,6 +76,7 @@ export const buildDaemonReadoutSources = (args: DaemonReadoutComposeArgs): WebRe
     ...(args.facade ?? facadeExt.readoutSources ?? {}),
     ...(args.cost !== undefined ? { cost: args.cost } : {}),
     ...(goal !== undefined ? { goal } : {}),
+    ...(args.goalWakeStatus !== undefined ? { goalWakeStatus: args.goalWakeStatus } : {}),
     ...(args.now !== undefined ? { now: args.now } : {}),
   }
 }

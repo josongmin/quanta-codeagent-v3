@@ -34,6 +34,35 @@ export type GoalReadoutFreshness =
   | "cap-exceeded"
   | "freshness-unresolved"
 
+export type GoalReadoutWakeView =
+  | { readonly kind: "armed"; readonly delayMs: number; readonly wakeAt: number }
+  | { readonly kind: "pending"; readonly delayMs: number; readonly retryAt: number }
+  | {
+      readonly kind: "idle"
+      readonly skipReason: string
+      readonly detail?: string | undefined
+      readonly retryAt?: number | undefined
+      readonly limitedBy?: GoalReadoutLimitedBy | undefined
+    }
+  | { readonly kind: "stopped" }
+
+export interface GoalReadoutSettlementView {
+  readonly turnOutcome:
+    | "completed"
+    | "max_turns"
+    | "aborted"
+    | "error"
+    | "budget_exhausted"
+    | "refusal"
+    | "awaiting_approval"
+    | "backgrounded"
+  readonly objectiveRevisionBefore: number
+  readonly objectiveRevisionAfter: number
+  readonly recordedAt: number
+  readonly criterionTransitions: number
+  readonly remainingCriteria: number
+}
+
 export interface GoalReadoutBudgetView {
   readonly turnsUsed: number
   readonly tokensUsed: number
@@ -92,7 +121,17 @@ export interface GoalReadoutData {
   readonly revision: number
   readonly freshness: GoalReadoutFreshness
   readonly validationContract: GoalReadoutValidationContract
+  readonly wake: GoalReadoutWakeView | null
+  readonly latestSettlement: GoalReadoutSettlementView | null
   readonly objective: GoalReadoutObjectiveView | null
+}
+
+export const GOAL_STATE_PROTOCOL_VERSION = "goal-state.v1" as const
+
+export interface GoalStateMessage {
+  readonly kind: "goal.state"
+  readonly emittedAt: number
+  readonly state: GoalReadoutData
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -131,6 +170,9 @@ const FRESHNESS = new Set<GoalReadoutFreshness>([
 const optionalNonNegativeInteger = (value: unknown): value is number | undefined =>
   value === undefined || isNonNegativeInteger(value)
 
+const isFiniteNonNegative = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0
+
 const decodeBudget = (value: unknown): GoalReadoutBudgetView | null => {
   if (!isRecord(value)) return null
   if (!isNonNegativeInteger(value.turnsUsed) || !isNonNegativeInteger(value.tokensUsed)) return null
@@ -165,7 +207,12 @@ const decodeBlocker = (value: unknown): GoalReadoutBlockerView | null => {
   ) {
     return null
   }
-  return { id: value.id, reason: value.reason, waitingOn: value.waitingOn as GoalReadoutWaitingOn }
+  return {
+    id: value.id,
+    ...(value.dependencyId !== undefined ? { dependencyId: value.dependencyId } : {}),
+    reason: value.reason,
+    waitingOn: value.waitingOn as GoalReadoutWaitingOn,
+  }
 }
 
 const decodeCheck = (value: unknown): GoalReadoutCheckView | null => {
@@ -237,10 +284,90 @@ const decodeObjective = (value: unknown): GoalReadoutObjectiveView | null => {
   }
 }
 
-/** Total runtime boundary for untrusted HTTP JSON. */
-export const decodeGoalReadoutData = (value: unknown): GoalReadoutData | null => {
-  if (!isRecord(value) || value.kind !== "goal" || !isNonNegativeInteger(value.revision))
+const decodeIdleWake = (value: Record<string, unknown>): GoalReadoutWakeView | null => {
+  if (!isNonEmptyString(value.skipReason)) return null
+  if (value.detail !== undefined && typeof value.detail !== "string") return null
+  if (value.retryAt !== undefined && !isFiniteNonNegative(value.retryAt)) return null
+  if (
+    value.limitedBy !== undefined &&
+    (typeof value.limitedBy !== "string" ||
+      !LIMITED_BY.has(value.limitedBy as GoalReadoutLimitedBy))
+  ) {
     return null
+  }
+  return {
+    kind: "idle",
+    skipReason: value.skipReason,
+    ...(value.detail !== undefined ? { detail: value.detail } : {}),
+    ...(value.retryAt !== undefined ? { retryAt: value.retryAt } : {}),
+    ...(value.limitedBy !== undefined
+      ? { limitedBy: value.limitedBy as GoalReadoutLimitedBy }
+      : {}),
+  }
+}
+
+const decodeWake = (value: unknown): GoalReadoutWakeView | null => {
+  if (!isRecord(value) || typeof value.kind !== "string") return null
+  switch (value.kind) {
+    case "stopped":
+      return { kind: "stopped" }
+    case "armed":
+      return isFiniteNonNegative(value.delayMs) && isFiniteNonNegative(value.wakeAt)
+        ? { kind: "armed", delayMs: value.delayMs, wakeAt: value.wakeAt }
+        : null
+    case "pending":
+      return isFiniteNonNegative(value.delayMs) && isFiniteNonNegative(value.retryAt)
+        ? { kind: "pending", delayMs: value.delayMs, retryAt: value.retryAt }
+        : null
+    case "idle":
+      return decodeIdleWake(value)
+    default:
+      return null
+  }
+}
+
+const SETTLEMENT_OUTCOMES = new Set<GoalReadoutSettlementView["turnOutcome"]>([
+  "completed",
+  "max_turns",
+  "aborted",
+  "error",
+  "budget_exhausted",
+  "refusal",
+  "awaiting_approval",
+  "backgrounded",
+])
+
+const decodeSettlement = (value: unknown): GoalReadoutSettlementView | null => {
+  if (!isRecord(value)) return null
+  if (
+    typeof value.turnOutcome !== "string" ||
+    !SETTLEMENT_OUTCOMES.has(value.turnOutcome as GoalReadoutSettlementView["turnOutcome"])
+  ) {
+    return null
+  }
+  if (
+    !isNonNegativeInteger(value.objectiveRevisionBefore) ||
+    !isNonNegativeInteger(value.objectiveRevisionAfter) ||
+    !isFiniteNonNegative(value.recordedAt) ||
+    !isNonNegativeInteger(value.criterionTransitions) ||
+    !isNonNegativeInteger(value.remainingCriteria)
+  ) {
+    return null
+  }
+  return {
+    turnOutcome: value.turnOutcome as GoalReadoutSettlementView["turnOutcome"],
+    objectiveRevisionBefore: value.objectiveRevisionBefore,
+    objectiveRevisionAfter: value.objectiveRevisionAfter,
+    recordedAt: value.recordedAt,
+    criterionTransitions: value.criterionTransitions,
+    remainingCriteria: value.remainingCriteria,
+  }
+}
+
+const decodeGoalReadoutMetadata = (
+  value: Record<string, unknown>,
+): Pick<GoalReadoutData, "revision" | "freshness" | "validationContract"> | null => {
+  if (!isNonNegativeInteger(value.revision)) return null
   if (
     typeof value.freshness !== "string" ||
     !FRESHNESS.has(value.freshness as GoalReadoutFreshness)
@@ -253,15 +380,65 @@ export const decodeGoalReadoutData = (value: unknown): GoalReadoutData | null =>
   ) {
     return null
   }
-  const objective = value.objective === null ? null : decodeObjective(value.objective)
-  if (value.objective !== null && objective === null) return null
   return {
-    kind: "goal",
     revision: value.revision,
     freshness: value.freshness as GoalReadoutFreshness,
     validationContract: value.validationContract as GoalReadoutValidationContract,
+  }
+}
+
+const decodeGoalReadoutRecord = (value: Record<string, unknown>): GoalReadoutData | null => {
+  const metadata = decodeGoalReadoutMetadata(value)
+  if (metadata === null) return null
+  const objective = value.objective === null ? null : decodeObjective(value.objective)
+  if (value.objective !== null && objective === null) return null
+  const wake = value.wake === null || value.wake === undefined ? null : decodeWake(value.wake)
+  if (value.wake !== null && value.wake !== undefined && wake === null) return null
+  const latestSettlement =
+    value.latestSettlement === null || value.latestSettlement === undefined
+      ? null
+      : decodeSettlement(value.latestSettlement)
+  if (
+    value.latestSettlement !== null &&
+    value.latestSettlement !== undefined &&
+    latestSettlement === null
+  ) {
+    return null
+  }
+  return {
+    kind: "goal",
+    ...metadata,
+    wake,
+    latestSettlement,
     objective,
   }
+}
+
+/** Total runtime boundary for untrusted HTTP JSON. */
+export const decodeGoalReadoutData = (value: unknown): GoalReadoutData | null => {
+  if (!isRecord(value) || value.kind !== "goal" || !isNonNegativeInteger(value.revision)) {
+    return null
+  }
+  return decodeGoalReadoutRecord(value)
+}
+
+/** Goal state envelope codec for the default-ON browser channel. */
+export const encodeGoalStateFrame = (message: GoalStateMessage): string =>
+  JSON.stringify({
+    version: GOAL_STATE_PROTOCOL_VERSION,
+    kind: "goalState",
+    payload: message,
+  })
+
+export const decodeGoalStateMessage = (value: unknown): GoalStateMessage | null => {
+  if (!isRecord(value) || value.kind !== "goal.state" || !isFiniteNonNegative(value.emittedAt)) {
+    return null
+  }
+  if (!isRecord(value.state) || !("wake" in value.state) || !("latestSettlement" in value.state)) {
+    return null
+  }
+  const state = decodeGoalReadoutData(value.state)
+  return state === null ? null : { kind: "goal.state", emittedAt: value.emittedAt, state }
 }
 
 /** Generated from the canonical objective check defaults. */

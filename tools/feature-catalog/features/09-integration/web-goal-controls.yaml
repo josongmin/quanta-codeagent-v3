@@ -20,7 +20,7 @@ surface_integration:
   method: audited
   verified: "2026-08-31"
   evidence:
-    web: "The browser consumes a generated, total structured goal readout and exposes show/create/work/pause/stop/resume/edit/clear/abandon/budget/unblock/criterion add+done/check add/verify. Every mutation is USER-actor bound, carries the objective revision the operator viewed, waits for its own command-correlated receipt, and confirms a newer structured readback. Verify uses a separate correlated daemon frame and the production ObjectiveVerificationPort. Real TCP-WebSocket E2Es prove lifecycle mutation, policy refusal, rich criterion/check identity, blocker-ID clearing, two-client stale-write rejection, and verifier receipt commit against the live authority."
+    web: "The browser consumes one generated canonical Goal contract for HTTP reads and default-ON typed goal.state pushes. It exposes show/create/work/pause/stop/resume/edit/clear/abandon/budget/unblock/criterion add+done/check add/verify; persistent state includes freshness, absolute wake scheduling, and the latest authority settlement summary. Real TCP-WebSocket E2Es prove initial snapshot, mutation push, reconnect replay, lifecycle mutation, policy refusal, rich identity, stale-write rejection, and verifier receipt commit against the live authority."
 purpose: |
   Provides the browser's complete `/goal` control surface without introducing a
   second objective store or parsing rendered text as state. Structured readout
@@ -30,19 +30,21 @@ purpose: |
   current source through that verifier and returns a closed freshness state; the
   host masks unresolved checked completion instead of asking the browser to infer it.
 
-  This feature is narrower than bounded autonomous continuation. It does not
-  claim full web visibility for wake state, settlement checkpoints, or the
-  default-OFF observability ObjectiveCard.
+  The default-ON Goal bar is independent of the default-OFF observability pane.
+  Its cache is a changed-only projection with reconnect replay, not another
+  completion or settlement store; absolute wake time avoids daemon countdown ticks.
 evidence:
   code:
     - src/protocol/readout/goal.ts
     - src/apps/web-daemon/readout.ts
     - src/apps/web-daemon/goal-verify-frame.ts
     - src/apps/web-daemon/goal-verify-compose.ts
+    - src/apps/web-daemon/goal-state-source.ts
     - src/apps/web-daemon/server/ws-handlers.ts
     - apps/web-frontend/src/types/protocol.readout.generated.ts
     - apps/web-frontend/src/components/slash-readout.ts
     - apps/web-frontend/src/components/slash-goal.ts
+    - apps/web-frontend/src/components/GoalStateBar.tsx
     - apps/web-frontend/src/components/slash-catalog.ts
     - apps/web-frontend/src/ws/client.ts
     - apps/web-frontend/src/ws/session-hooks.ts
@@ -55,6 +57,9 @@ evidence:
       - tests/unit/apps/web-daemon/readout-production-wiring-hellgate.test.ts
       - tests/unit/apps/web-daemon/goal-freshness-authority-hellgate.test.ts
       - tests/unit/apps/web-daemon/goal-verify-hellgate.test.ts
+      - tests/unit/apps/web-daemon/goal-state-source.test.ts
+      - apps/web-frontend/src/components/GoalStateBar.test.tsx
+      - apps/web-frontend/src/ws/goal-state-envelope.test.ts
       - apps/web-frontend/src/components/slash-goal.control.test.ts
       - apps/web-frontend/src/components/slash-goal.test.ts
       - apps/web-frontend/src/ws/objective-mutation-receipt.test.ts

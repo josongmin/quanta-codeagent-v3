@@ -19,6 +19,8 @@ const state = (): GoalReadoutData => ({
   revision: 8,
   freshness: "fresh",
   validationContract: "checked",
+  wake: null,
+  latestSettlement: null,
   objective: {
     objectiveId: "objective-8",
     goal: "ship safely",
