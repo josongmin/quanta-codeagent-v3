@@ -35,6 +35,9 @@ import { assertScanPopulation } from "../_shared/scan-population"
 import { stripComments } from "../_shared/strip-comments"
 
 const ROOT = resolve(import.meta.dir, "../../..")
+// Both assertions scan the complete source/test corpus.  They prove hermetic
+// composition, not scan latency, and CI runs them from a second cwd under load.
+const FULL_REPO_SCAN_TIMEOUT_MS = 300_000
 
 /** Composition roots that take an env bag AND resolve the Quanta home from it
  *  UNCONDITIONALLY — calling one at all reads the home. */
@@ -138,13 +141,21 @@ describe("no test composes a real surface against the developer's ~/.quanta", ()
   // gate, and it cost a real misattribution on 2026-08-28 before the four were
   // re-run serially and all passed. A genuine hang is still bounded by the
   // outer `timeout` on the suite command.
-  test("every composing test roots the Quanta home at a scratch dir", () => {
-    // Adding a suite here is not a lint nit: it means `bun test` can read — and
-    // on a dispatched set, WRITE — the config of whoever runs it.
-    expect(unhermetic(composingFiles())).toEqual([])
-  }, 60_000)
+  test(
+    "every composing test roots the Quanta home at a scratch dir",
+    () => {
+      // Adding a suite here is not a lint nit: it means `bun test` can read — and
+      // on a dispatched set, WRITE — the config of whoever runs it.
+      expect(unhermetic(composingFiles())).toEqual([])
+    },
+    FULL_REPO_SCAN_TIMEOUT_MS,
+  )
 
-  test("the headless root + the FS-backed store is hermetic too (the latent combination)", () => {
-    expect(unhermetic(fsStoreRootFiles())).toEqual([])
-  }, 60_000)
+  test(
+    "the headless root + the FS-backed store is hermetic too (the latent combination)",
+    () => {
+      expect(unhermetic(fsStoreRootFiles())).toEqual([])
+    },
+    FULL_REPO_SCAN_TIMEOUT_MS,
+  )
 })
