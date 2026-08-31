@@ -234,7 +234,10 @@ const SRC = join(__dirname, "..", "..", "src")
 // re-raise it for that file: the precedent is that a leaf slice with no logger
 // still has to bind, because `@/skill` can fold the reason into the error it
 // already throws.
-const BARE_CATCH_BASELINE = 1147
+// TIGHTENED 2026-09-01 (1147 -> 1143): Goal lifecycle/freshness, web projection,
+// metrics, and host dependency-resolution catches now bind and attribute their
+// failures instead of silently swallowing them. Keep the recovered headroom.
+const BARE_CATCH_BASELINE = 1143
 // Re-measured 2026-06-25 (repo-cache GC + committed in-flight bench work): the
 // `reapStaleMirrorTemps` `stat(p).catch(() => null)` not-found PROBE (handled via
 // `if (st !== null …)`, a vanished orphan tmp is simply skipped) plus one further

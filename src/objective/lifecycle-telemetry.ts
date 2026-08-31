@@ -7,6 +7,8 @@
  * behavior.
  */
 
+import { errMessage, logger } from "@/shared"
+
 export const OBJECTIVE_LIFECYCLE_OUTCOMES = {
   wake: ["armed", "canceled", "skipped"],
   enqueue: ["admitted", "rejected", "stale"],
@@ -55,7 +57,7 @@ export const emitObjectiveLifecycle = (
   if (sink === undefined) return
   try {
     sink.record(event)
-  } catch {
-    // Telemetry is not objective authority.
+  } catch (error) {
+    logger.warn(`objective.lifecycle-telemetry.emit: ${errMessage(error)}`)
   }
 }

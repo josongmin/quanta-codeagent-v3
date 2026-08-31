@@ -1,5 +1,6 @@
 /** MetricsRegistry adapter for the bounded Objective lifecycle vocabulary. */
 
+import { errMessage, logger } from "@/shared"
 import { QUANTA_ATTRS } from "../vocabulary"
 import type { MetricsRegistry } from "./port"
 
@@ -20,8 +21,8 @@ export const createObjectiveLifecycleMetricsSink = (
         stage: event.stage,
         outcome: event.outcome,
       })
-    } catch {
-      // A broken registry/exporter is not execution authority.
+    } catch (error) {
+      logger.warn(`observability.objective-lifecycle.record: ${errMessage(error)}`)
     }
   },
 })

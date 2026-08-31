@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto"
 import type { RunEntry, RunLedgerPort } from "@/agent/run-ledger"
 import type { BlockerDependencyResolution, BlockerDependencyResolverPort } from "@/objective"
+import { errMessage, logger } from "@/shared"
 import type { TaskRecord, TaskRegistry } from "@/subagent"
 
 export interface RegistryBlockerDependencySources {
@@ -101,7 +102,8 @@ export const createRegistryBlockerDependencyResolver = (
   resolve(input): BlockerDependencyResolution {
     try {
       return resolveKnownTarget(sources, input)
-    } catch {
+    } catch (error) {
+      logger.warn(`session-authorities.blocker-dependency.resolve: ${errMessage(error)}`)
       return unresolved("unknown")
     }
   },

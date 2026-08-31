@@ -1,3 +1,4 @@
+import { errMessage, logger } from "@/shared"
 import type { BlockerDependencyTarget } from "./mutations"
 import type { WaitingOn } from "./types"
 
@@ -43,7 +44,8 @@ export const resolveBlockerDependency = (
     return boundedIdentity(result.dependencyId) && boundedIdentity(result.occurrenceEvidenceId)
       ? result
       : unresolved("unknown")
-  } catch {
+  } catch (error) {
+    logger.warn(`objective.blocker-dependency.resolve: ${errMessage(error)}`)
     return unresolved("unknown")
   }
 }

@@ -18,6 +18,7 @@
  * queues, clocks and the actual enqueue path are injected by the host.
  */
 
+import { errMessage, logger } from "@/shared"
 import { emitObjectiveLifecycle, type ObjectiveLifecycleSink } from "./lifecycle-telemetry"
 import type { ObjectiveDomainSnapshot } from "./model"
 
@@ -404,8 +405,8 @@ const createStatusChangeEmitter = (
     lastStatusKey = key
     try {
       deps.onStatusChange?.()
-    } catch {
-      // Projection/telemetry observers are not scheduling authority.
+    } catch (error) {
+      logger.warn(`objective.goal-wake.status-change: ${errMessage(error)}`)
     }
   }
 }

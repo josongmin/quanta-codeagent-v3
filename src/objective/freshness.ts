@@ -1,3 +1,4 @@
+import { errMessage, logger } from "@/shared"
 import type { ObjectiveVerificationPort, ReconcileOutcome } from "./criteria/ports"
 import type { ObjectiveDomainSnapshot } from "./model"
 import type { ObjectiveReadPort } from "./ports"
@@ -41,7 +42,8 @@ export const reconcileObjectiveRead = async (
   try {
     const freshness = objectiveFreshnessFromReconcile(await verifier.reconcile(threadId))
     return { domain: read.readDomain(threadId), freshness }
-  } catch {
+  } catch (error) {
+    logger.warn(`objective.freshness.reconcile: ${errMessage(error)}`)
     return { domain: read.readDomain(threadId), freshness: { kind: "freshness-unresolved" } }
   }
 }

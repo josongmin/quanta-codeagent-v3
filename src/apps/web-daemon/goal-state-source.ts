@@ -3,6 +3,7 @@ import {
   type GoalReadoutData,
   type GoalStateMessage,
 } from "@/protocol/readout"
+import { errMessage, logger } from "@/shared"
 
 export interface GoalStateSource {
   latest(): GoalStateMessage | null
@@ -43,8 +44,10 @@ export const createGoalStateSource = (args: {
       for (const subscriber of [...subscribers]) {
         try {
           subscriber(current)
-        } catch {
-          // A failed socket/panel is not projection authority.
+        } catch (error) {
+          logger.warn("web-daemon.goal-state-source: subscriber failed", {
+            error: errMessage(error),
+          })
         }
       }
     } while (refreshAgain)
@@ -70,8 +73,10 @@ export const createGoalStateSource = (args: {
       if (current !== null) {
         try {
           handler(current)
-        } catch {
-          // Late replay is best-effort for this subscriber only.
+        } catch (error) {
+          logger.warn("web-daemon.goal-state-source: replay subscriber failed", {
+            error: errMessage(error),
+          })
         }
       }
       return () => subscribers.delete(handler)
@@ -92,8 +97,10 @@ export const attachGoalStateSink = (
   return source.subscribe((message) => {
     try {
       send(encodeGoalStateFrame(message))
-    } catch {
-      // Dead sockets do not destabilize the daemon.
+    } catch (error) {
+      logger.warn("web-daemon.goal-state-source: socket send failed", {
+        error: errMessage(error),
+      })
     }
   })
 }
