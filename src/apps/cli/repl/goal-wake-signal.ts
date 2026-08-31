@@ -10,6 +10,10 @@ import type { CliPromptInput } from "./prompt-types"
  * to the controller installed by the session loop.
  */
 export interface GoalWakeSignal {
+  /** Permanently fence this controller. Used synchronously at interactive
+   * close-start, before any warning, await, or disposer can open a dispatch
+   * window. Idempotent; the close-stack owner calls it again during teardown. */
+  stop(): void
   onGoalMutation(): void
   onInfrastructureUnavailable?(objectiveRevision: number, observedAt: number): void
   onAttach?(threadId: string): void

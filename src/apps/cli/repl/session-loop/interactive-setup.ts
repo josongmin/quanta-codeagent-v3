@@ -277,7 +277,6 @@ const armGoalWake = (args: {
   readonly planQueueStore: import("@/agent/plan-queue").PlanQueueStore | undefined
   readonly activeIdentityModeState: IdentityModeCell | undefined
   readonly currentThreadId: () => string | undefined
-  readonly attachingOrClosing?: (() => boolean) | undefined
 }): void => {
   const {
     setup,
@@ -309,7 +308,6 @@ const armGoalWake = (args: {
           ) ?? 0) > 0
         : false,
     approvalPending: (setup.midTurnApprovalChannel.pendingLabels?.().length ?? 0) > 0,
-    attachingOrClosing: args.attachingOrClosing?.() ?? false,
   })
   const hostIsQuiescent = (): boolean => isQuiescent(quiescenceSnapshot())
   const objectiveCapabilities =
@@ -378,8 +376,7 @@ const armGoalWake = (args: {
                 snapshot.imagePending ||
                 snapshot.planPending ||
                 snapshot.followupPending ||
-                snapshot.approvalPending ||
-                snapshot.attachingOrClosing
+                snapshot.approvalPending
               )
             },
             mailboxInputPending: () => quiescenceSnapshot().textPending,

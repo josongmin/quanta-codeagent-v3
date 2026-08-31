@@ -10,11 +10,10 @@ const idle = (): GoalQuiescenceSnapshot => ({
   planPending: false,
   followupPending: false,
   approvalPending: false,
-  attachingOrClosing: false,
 })
 
 describe("goal quiescence projection", () => {
-  test("is true only when all nine host activity sources are absent", () => {
+  test("is true only when all eight host activity sources are absent", () => {
     expect(isQuiescent(idle())).toBe(true)
     for (const key of Object.keys(idle()) as Array<keyof GoalQuiescenceSnapshot>) {
       expect(isQuiescent({ ...idle(), [key]: true })).toBe(false)

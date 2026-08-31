@@ -70,6 +70,10 @@ export const runInteractiveBranch = async (ctx: InteractiveBranchCtx): Promise<v
       process.stderr.write(`\x1b[2mResume: quanta --resume ${setup.idMeta.id}\x1b[0m\n`)
     }
   } finally {
+    // R7 — close truth begins HERE, synchronously. The close-stack disposer
+    // repeats this idempotent stop and clears the slot later, but no warning or
+    // awaited cleanup may leave a live continuation controller in between.
+    goalWakeSlot?.current?.stop()
     // WS-H / UUX-3-12 — REPL-exit honesty: if backgrounded turns are still
     // running, say so (one warning line, id + label) instead of silently
     // abandoning them. No-throw; silent when the portal is absent/idle.

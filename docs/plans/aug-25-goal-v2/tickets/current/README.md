@@ -13,16 +13,16 @@
 | 순서 | 티켓 | 판정 | 종료 형태 |
 |---|---|---|---|
 | 1 | [R1 verifier sandbox](R1-verifier-sandbox-posture.md) | FOCUSED GREEN · main pending | fail-closed sandbox + persistent posture |
-| 2 | [R2 read freshness](R2-read-time-source-freshness.md) | P1 completion authority | CLI/web read-time reconcile |
-| 3 | [R3 blocker identity](R3-blocker-dependency-authority.md) | P1 dependency authority | registry identity + occurrence evidence |
-| 4 | [R7 attach/close seam](R7-cli-attach-close-seam.md) | P2 structural repair | one lifecycle truth + close-start stop |
+| 2 | [R2 read freshness](R2-read-time-source-freshness.md) | FOCUSED GREEN · main pending | CLI/web read-time reconcile |
+| 3 | [R3 blocker identity](R3-blocker-dependency-authority.md) | FOCUSED GREEN · main pending | registry identity + occurrence evidence |
+| 4 | [R7 attach/close seam](R7-cli-attach-close-seam.md) | FOCUSED GREEN · main pending | one lifecycle truth + close-start stop |
 | 5 | [R4 web always-on state](R4-web-always-on-goal-state.md) | P1 projection | default-ON typed snapshot/push |
 | 6 | [R5 lifecycle telemetry](R5-objective-lifecycle-telemetry.md) | P1 operations | bounded stage/outcome counters |
 | 7 | [R6 public proof battery](R6-pty-and-smoke-proof.md) | P2 evidence | PTY/integration/dedicated Goal smoke |
 | hold | [R8 headless/batch](R8-headless-batch-deliberate-hold.md) | product hold | explicit exclusion until semantics change |
 
-동결 audit 판정은 R1~R7 **OPEN**, R8 **DELIBERATE HOLD**였다. 후속 R1 packet은 source/test
-typecheck와 focused 149/0까지 green이며 main integration을 기다린다. full promotion gate는 아직
+동결 audit 판정은 R1~R7 **OPEN**, R8 **DELIBERATE HOLD**였다. 후속 R1/R2/R3/R7 packet은 각
+티켓의 focused·typecheck·owner-local rail이 green이며 main integration을 기다린다. full promotion gate는 아직
 실행하지 않았으므로 전체 Goal v2 완료 판정으로 승격하지 않는다.
 
 ## 공통 불변식

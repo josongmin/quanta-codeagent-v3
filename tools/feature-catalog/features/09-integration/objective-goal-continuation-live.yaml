@@ -41,7 +41,9 @@ purpose: |
   - An active goal can schedule another turn after a quiet window on both the
     interactive CLI and web-daemon runtime.
   - Attach/session switch replaces the objective atomically with transcript
-    ownership and cancels the prior generation before re-arming.
+    ownership and cancels the prior generation before re-arming. The shared
+    attach start/settled hooks are the sole attach lifecycle truth; interactive
+    close synchronously stops wake before warnings or awaited teardown.
 
   Quanta safety extensions:
   - Objective mutations and completion use revision CAS. Queued continuations
@@ -50,8 +52,9 @@ purpose: |
     source digest; model text cannot forge it.
   - The wake policy enforces exponential no-progress backoff, infrastructure
     cooldown, explicit budgets, and a product hard cap.
-  - Host quiescence blocks plan mode, approval, draft, attach, queued input,
-    foreground work, and detached/background work.
+  - Host quiescence blocks plan mode, approval, draft, queued input, foreground
+    work, and detached/background work. Attach is fenced by its paired lifecycle
+    cancel/rearm hooks instead of a second boolean cell.
   - Model/continuation blockers become state only after three distinct host
     attempts report the same active RunLedger/TaskRegistry dependency. Stable
     dependency identity and opaque occurrence evidence come from a host resolver;
@@ -73,6 +76,7 @@ evidence:
     - src/apps/cli/slash/goal-cmd.ts
     - src/apps/cli/slash/goal-render.ts
     - src/apps/cli/repl/session-loop/interactive-setup.ts
+    - src/apps/cli/repl/session-loop/interactive-branch.ts
     - src/apps/cli/repl/session-loop/session-switch.ts
     - src/apps/cli/repl/runtime-context-compose.ts
     - src/apps/web-daemon/goal-wake-compose.ts
@@ -106,6 +110,8 @@ evidence:
       - tests/unit/objective/blocker-observation.test.ts
       - tests/unit/objective/attempt-lifecycle.test.ts
       - tests/unit/apps/cli/repl/session-switch-hellgate.test.ts
+      - tests/unit/apps/cli/session-loop-hellgate.test.ts
+      - tests/unit/apps/cli/goal-wake-hook.test.ts
       - tests/unit/sdk/turn-submit-authority.test.ts
       - tests/unit/sdk/goal-turn-attribution.test.ts
       - tests/unit/apps/web-daemon/goal-work-frame.test.ts

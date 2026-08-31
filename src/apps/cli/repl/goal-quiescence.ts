@@ -8,7 +8,6 @@ export interface GoalQuiescenceSnapshot {
   readonly planPending: boolean
   readonly followupPending: boolean
   readonly approvalPending: boolean
-  readonly attachingOrClosing: boolean
 }
 
 /** Pure fail-closed projection used both when arming and immediately before fire. */
@@ -20,5 +19,4 @@ export const isQuiescent = (snapshot: GoalQuiescenceSnapshot): boolean =>
   !snapshot.imagePending &&
   !snapshot.planPending &&
   !snapshot.followupPending &&
-  !snapshot.approvalPending &&
-  !snapshot.attachingOrClosing
+  !snapshot.approvalPending

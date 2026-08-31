@@ -31,6 +31,7 @@ import {
 } from "@/observability/usage-accounting"
 import { encodeObjectiveSnapshot } from "@/runner/assemble/session-authorities"
 import type { SessionMeta } from "@/session"
+import type { GoalWakeSignalSlot } from "../../../../../src/apps/cli/repl/goal-wake-signal"
 import {
   performSessionSwitch,
   repointSessionMeta,
@@ -188,13 +189,14 @@ describe("performSessionSwitch", () => {
     const events: string[] = []
     const goalWakeSlot = {
       current: {
+        stop: () => events.push("stop"),
         onActivity: () => events.push("cancel"),
         onGoalMutation: () => events.push("rearm-parent"),
         onLocalInputSettled: () => {},
         onTurnSettled: () => {},
         onAttach: (id: string) => events.push(`attach:${id}`),
       },
-    }
+    } satisfies GoalWakeSignalSlot
     await performSessionSwitch(
       {
         loadSession: async () => ({
@@ -214,6 +216,58 @@ describe("performSessionSwitch", () => {
     expect(authority.readDomain("parent").state).toBeNull()
     expect(authority.readDomain("fork").state?.objective.goal).toBe("fork goal")
     expect(events).toEqual(["cancel", "attach:fork"])
+  })
+
+  test("unknown and mid-turn-refused attach rearm the unchanged parent exactly once", async () => {
+    const events: string[] = []
+    const goalWakeSlot = {
+      current: {
+        stop: () => events.push("stop"),
+        onActivity: () => events.push("cancel"),
+        onGoalMutation: () => events.push("rearm-parent"),
+        onLocalInputSettled: () => undefined,
+        onTurnSettled: () => undefined,
+        onAttach: (id: string) => events.push(`attach:${id}`),
+      },
+    } satisfies GoalWakeSignalSlot
+    const idMeta = mkMeta("parent")
+    const common = {
+      idMeta,
+      currentSessionId: () => "parent",
+      goalWakeSlot,
+      commit: () => {
+        throw new Error("commit must remain untouched")
+      },
+    }
+
+    await expect(
+      performSessionSwitch(
+        {
+          ...common,
+          loadSession: async () => undefined,
+          replaceTranscript: async (messages) => messages,
+        },
+        "unknown",
+      ),
+    ).rejects.toThrow("session not found")
+    expect(events).toEqual(["cancel", "rearm-parent"])
+    expect(idMeta.id).toBe("parent")
+
+    events.length = 0
+    await expect(
+      performSessionSwitch(
+        {
+          ...common,
+          loadSession: async () => ({ meta: mkMeta("fork"), messages: forkMsgs }),
+          replaceTranscript: async () => {
+            throw new Error("transcript_replace_unavailable")
+          },
+        },
+        "fork",
+      ),
+    ).rejects.toThrow("transcript_replace_unavailable")
+    expect(events).toEqual(["cancel", "rearm-parent"])
+    expect(idMeta.id).toBe("parent")
   })
 
   test("attach replaces usage books with the target and rebinds future live calls", async () => {

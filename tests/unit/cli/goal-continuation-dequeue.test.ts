@@ -21,6 +21,7 @@ describe("GOAL-06 rail 11 — dequeue epoch guard", () => {
     const slot = createGoalWakeSignalSlot()
     let epoch = 3
     slot.current = {
+      stop: () => {},
       onGoalMutation: () => {},
       onActivity: () => {},
       onLocalInputSettled: () => {},

@@ -21,13 +21,13 @@
 | 영역 | 판정 | 현재 경계 |
 |---|---|---|
 | GOAL-01/02 domain·policy | **DONE** | objective authority, actor별 capability, derived completion이 live |
-| GOAL-03 verifier | **PARTIAL** | exact argv, timeout, env scrub, source digest, CAS 적용은 live. fail-closed sandbox posture와 read-time freshness는 미완료 |
+| GOAL-03 verifier | **IMPLEMENTED / PROMOTION PENDING** | fail-closed sandbox posture와 canonical read-time freshness reconcile focused rail이 green. main/R6 same-HEAD gate 대기 |
 | GOAL-04 settlement | **DONE** | host-attributed attempt, measured usage, durable settlement ordering이 live |
 | GOAL-05 CLI control | **DONE** | default-ON `/goal`, product ceiling, manual attestation, abandon/unblock, settlement checkpoint가 live |
-| GOAL-06 wake | **CORE DONE / SEAM DEBT** | bounded edge wake와 quiescence fence는 live. dead `attachingOrClosing` seam 제거와 close-start synchronous stop이 남음 |
+| GOAL-06 wake | **IMPLEMENTED / PROMOTION PENDING** | dead attach/close boolean을 제거했고 attach hooks와 close-start synchronous stop을 lifecycle truth로 고정. main/R6 gate 대기 |
 | GOAL-07 attach/fork | **BEHAVIOR DONE / SPEC DIVERGED** | 실제 fence는 `attachGeneration`과 attach lifecycle cancellation. 과거 `sessionEpoch` 설계는 현행 계약이 아님 |
 | GOAL-08 browser controls | **DONE** | work attribution, approval resume attribution, revision CAS, receipt correlation, 전체 browser `/goal` verb가 live |
-| GOAL-09 blockers | **PARTIAL** | distinct-attempt hysteresis는 live. dependency identity는 아직 model-provided `target.ref` 문자열 |
+| GOAL-09 blockers | **IMPLEMENTED / PROMOTION PENDING** | host RunLedger/TaskRegistry dependency identity와 opaque occurrence evidence, typed unresolved가 focused green. main/R6 gate 대기 |
 | GOAL-10 evidence | **PARTIAL** | settlement decision counter와 feature catalog는 live. lifecycle telemetry 나머지와 PTY/smoke matrix는 미완료 |
 | Browser always-on state | **PARTIAL** | `/goal` 조회는 완전하지만 wake status/최근 settlement의 default surface push는 없음 |
 
@@ -36,13 +36,10 @@
 우선순위와 dependency order는 [`NEXT-PLAN.md`](NEXT-PLAN.md), 상세 실행 계약은
 [`tickets/current/`](tickets/current/README.md)에 있다.
 
-1. verifier fail-closed sandbox/posture 계약
-2. read-time source freshness reconciliation
-3. host-resolved blocker dependency identity와 occurrence evidence
-4. CLI attach/close lifecycle truth-source 정리와 close-start stop
-5. browser always-on wake/checkpoint/freshness projection
-6. settlement 외 lifecycle telemetry
-7. PTY public matrix와 Goal-aware dedicated smoke harness
+1. browser always-on wake/checkpoint/freshness projection
+2. settlement 외 lifecycle telemetry
+3. PTY public matrix와 Goal-aware dedicated smoke harness
+4. R1/R2/R3/R7을 포함한 same-HEAD full promotion gate와 main 반영
 
 headless/batch autonomous pursuit는 남은 구현 티켓이 아니라 deliberate hold다. 제품이 persistent
 goal-runner semantics를 승인할 때만 별도 promotion 작업으로 연다.

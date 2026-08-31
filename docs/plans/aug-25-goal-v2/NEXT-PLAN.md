@@ -28,7 +28,7 @@ historical evidence이며 현재 미구현 목록으로 사용하지 않는다.
 | 1 | [R1 verifier sandbox](tickets/current/R1-verifier-sandbox-posture.md) | **FOCUSED GREEN · main integration pending** | `workspace-write`, network deny, unavailable/degrade fail-closed, persistent versioned posture |
 | 2 | [R2 read freshness](tickets/current/R2-read-time-source-freshness.md) | **FOCUSED GREEN · main integration pending** | CLI/web canonical reconcile, closed freshness payload, unresolved checked-completion masking, single wake rearm |
 | 3 | [R3 blocker identity](tickets/current/R3-blocker-dependency-authority.md) | **FOCUSED GREEN · main integration pending** | host registry `dependencyId`, bounded occurrence pairs, dependency-based dedupe, typed unresolved |
-| 4 | [R7 attach/close seam](tickets/current/R7-cli-attach-close-seam.md) | dead `attachingOrClosing` seam, close-start와 disposer 사이 teardown window | attach hook 단일 truth, dead field 삭제, interactive `finally` 첫 동작 synchronous stop |
+| 4 | [R7 attach/close seam](tickets/current/R7-cli-attach-close-seam.md) | **FOCUSED GREEN · main integration pending** | attach hook 단일 truth, dead field 삭제, interactive `finally` 첫 동작 synchronous stop |
 | 5 | [R4 web always-on state](tickets/current/R4-web-always-on-goal-state.md) | structured payload에 freshness/wake/latest settlement가 없고 wake status가 버려짐 | existing `progressReceipts`를 포함한 canonical `goal.state` snapshot/delta와 absolute `wakeAt` |
 | 6 | [R5 lifecycle telemetry](tickets/current/R5-objective-lifecycle-telemetry.md) | settlement decision counter 외 lifecycle producer가 없음 | bounded stage/outcome sink와 metrics adapter, identifier/text label 금지 |
 | 7 | [R6 public proof battery](tickets/current/R6-pty-and-smoke-proof.md) | public control/verify/budget/attach rail과 Goal-aware smoke가 부족 | PTY/integration 분리, production authority를 조립한 dedicated Goal smoke, full gate receipt |
@@ -66,7 +66,8 @@ R8 headless/batch: deliberate hold, DAG 밖
 - 실제 wake union은 `armed|pending|idle|stopped`이며, reconnect 가능한 absolute `wakeAt/retryAt`을 쓴다.
 - R5 metric label은 closed enum만 허용하고 goal text나 각종 ID를 싣지 않는다.
 - R6 generic smoke runner는 ObjectiveAuthority/verifier/wake가 없어 Goal proof로 사용하지 않는다.
-- R7은 existing attach lifecycle hooks만 truth로 유지하고 dead boolean seam을 삭제한다.
+- R7은 existing attach lifecycle hooks만 truth로 유지하고 dead boolean seam을 삭제했다. close-start
+  stop과 clear-failure generation fence의 focused rail이 green이며 R6 same-HEAD promotion을 기다린다.
 
 ## 공통 중단 조건
 

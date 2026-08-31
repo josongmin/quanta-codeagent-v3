@@ -1,6 +1,6 @@
 # R7 — CLI attach/close wake seam cleanup
 
-**Status:** READY · **Priority:** P2 · **Owner:** CLI session lifecycle
+**Status:** FOCUSED GREEN · main integration pending · **Priority:** P2 · **Owner:** CLI session lifecycle
 
 ## 목적
 
@@ -60,3 +60,27 @@ goal continuation dispatch가 발생할 수 있는 짧은 teardown window를 닫
 - attach hooks와 별도 boolean cell을 동시에 authority로 유지하는 경우.
 - closeStack 순서만 근거로 close-start fence를 주장하는 경우.
 - user draft/queued user input을 attach safety를 위해 삭제하는 경우.
+
+## 구현 receipt — 2026-08-31
+
+- `GoalQuiescenceSnapshot.attachingOrClosing`과 `armGoalWake` optional callback을 삭제했다.
+- attach truth는 `attachSessionToLive`의 `onAttachStart`/`onAttachSettled`와 CLI의
+  success/failure mapping 하나만 유지한다.
+- `GoalWakeSignal.stop()`을 lifecycle 계약으로 명시하고 interactive `finally` 첫 동작에서
+  synchronous stop한다. close-stack disposer는 같은 handle을 idempotent stop한 뒤 identity-match일 때
+  slot을 clear한다.
+- unknown session과 mid-turn refusal은 parent identity를 유지하고 parent rearm을 정확히 한 번 수행한다.
+- timer clear가 throw해도 stopped/generation fence 뒤 stale callback은 resume body를 실행하지 않는다.
+
+검증:
+
+```text
+focused: 65 pass / 0 fail / 5 files
+source typecheck: pass
+test typecheck: pass
+god-code ratchet: 9 pass / 0 fail
+lint-debt: pass (91 diagnostics, pinned ceiling regression 0)
+Biome changed files: pass
+```
+
+최종 완료 판정은 R6 same-HEAD full gate와 main 반영 뒤에만 승격한다.

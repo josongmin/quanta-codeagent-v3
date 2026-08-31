@@ -3,6 +3,8 @@ import type { AgentOutcome } from "../../../../src/agent"
 import type { IdleMonitor } from "../../../../src/apps/cli/idle-monitor"
 import type { LifecyclePills } from "../../../../src/apps/cli/lifecycle-pills"
 import type { RejectCounter } from "../../../../src/apps/cli/reject-counter"
+import { createBackgroundTurnPortal } from "../../../../src/apps/cli/repl/background-turn-portal"
+import type { GoalWakeSignalSlot } from "../../../../src/apps/cli/repl/goal-wake-signal"
 import { createMidTurnApprovalChannel } from "../../../../src/apps/cli/repl/mid-turn-approval-channel"
 import type {
   RunSessionLoopDeps,
@@ -942,6 +944,42 @@ describe("session-loop — interactive branch (no argPrompt)", () => {
     })
     expect(runtimeCalls.prompts).toEqual([])
     expect(runtimeCalls.turnRun).toBe(0)
+  })
+
+  test("interactive close synchronously stops goal wake before background warning", async () => {
+    const { runSessionLoop } = await import("../../../../src/apps/cli/repl/session-loop")
+    const setup = await buildSetup(undefined)
+    const sinks = buildSinks()
+    const events: string[] = []
+    const goalWakeSlot = {
+      current: {
+        stop: () => events.push("wake-stop"),
+        onGoalMutation: () => undefined,
+        onActivity: () => undefined,
+        onLocalInputSettled: () => undefined,
+        onTurnSettled: () => undefined,
+      },
+    } satisfies GoalWakeSignalSlot
+    const backgroundPortal = createBackgroundTurnPortal()
+    backgroundPortal.detach({
+      label: "still-live",
+      promise: new Promise(() => undefined),
+      abort: new AbortController(),
+    })
+    process.stderr.write = ((chunk: string | Uint8Array) => {
+      if (String(chunk).includes("background turn")) events.push("background-warning")
+      return true
+    }) as typeof process.stderr.write
+
+    await runSessionLoop({
+      setup,
+      dispatchSlash: async () => false,
+      sinks,
+      goalWakeSlot,
+      backgroundPortal,
+    })
+
+    expect(events).toEqual(["wake-stop", "background-warning"])
   })
 
   test("registerExitTeardown registers a callback that disposes pills + tears down status bar", async () => {

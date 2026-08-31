@@ -237,6 +237,36 @@ describe("goal wake host binding", () => {
     expect(resumed).toEqual([TID])
   })
 
+  test("a timer clear failure cannot fire through the stopped generation fence", async () => {
+    const store = createObjectiveStore()
+    store.create(TID, { goal: "ship", successCriteria: ["c"] })
+    let callback: (() => void) | undefined
+    let resumed = 0
+    const wake = startGoalWakeController({
+      enabled: true,
+      threadId: TID,
+      quietWindowMs: 15_000,
+      probes: probes(store, async () => {
+        resumed += 1
+      }),
+      readDomain: (id) => asObjectiveAuthority(store).readDomain(id),
+      setTimeoutFn: (fn) => {
+        callback = fn
+        return {} as ReturnType<typeof setTimeout>
+      },
+      clearTimeoutFn: () => {
+        throw new Error("timer backend unavailable")
+      },
+    })
+    expect(callback).toBeDefined()
+    wake?.stop()
+    callback?.()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(resumed).toBe(0)
+    expect(wake?.status()).toEqual({ kind: "stopped" })
+  })
+
   test("a handled local command restores pursuit after a fresh quiet window", async () => {
     const store = createObjectiveStore()
     store.create(TID, { goal: "ship", successCriteria: ["c"] })
