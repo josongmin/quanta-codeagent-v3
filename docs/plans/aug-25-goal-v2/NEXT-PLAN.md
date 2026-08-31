@@ -1,7 +1,9 @@
 # aug-25 /goal v2 — 현재 잔여 작업 계획
 
 제품 소스 재대조 기준: `08fb52c175b0289cb26d794bbab9862851b9904d` (2026-08-31).
-그 이후 `main`의 `2c2f88fbc`, `b6cbf4332`는 Goal 계획·catalog 정리이며 제품 구현 변경이 아니다.
+최종 audit checkout `32ea147dba3eb2daf429f762cce6e35a3d4c4933`까지 제품 경로 diff는 비어 있고,
+그 사이 commit은 Goal 계획·catalog 정리다. SHA, focused 85/0 rail, 실행하지 않은 gate는
+[`tickets/current/AUDIT-2026-08-31.md`](tickets/current/AUDIT-2026-08-31.md)에 동결했다.
 
 이 문서는 현재 우선순위와 dependency order의 진실원이다. 패킷별 owner, write set, RED rail,
 DoD는 [`tickets/current/`](tickets/current/README.md)가 소유한다. 과거 GOAL-01~10 티켓과 receipt는

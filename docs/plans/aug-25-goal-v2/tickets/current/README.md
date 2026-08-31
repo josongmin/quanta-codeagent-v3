@@ -2,7 +2,8 @@
 
 기준 소스 감사일: 2026-08-31. 제품 소스 기준 commit은
 `08fb52c175b0289cb26d794bbab9862851b9904d`이며, 이후 `main`의 Goal 관련 변경은
-문서와 feature catalog 정리다.
+문서와 feature catalog 정리다. 최종 재감사 checkout과 실행 evidence는
+[`AUDIT-2026-08-31.md`](AUDIT-2026-08-31.md)에 동결했다.
 
 이 디렉터리는 현재 남은 작업의 상세 실행 계약이다. 상위
 [`NEXT-PLAN.md`](../../NEXT-PLAN.md)는 우선순위와 실행 순서를 소유하고, 이 티켓들은 각
@@ -19,6 +20,9 @@
 | 6 | [R5 lifecycle telemetry](R5-objective-lifecycle-telemetry.md) | P1 operations | bounded stage/outcome counters |
 | 7 | [R6 public proof battery](R6-pty-and-smoke-proof.md) | P2 evidence | PTY/integration/dedicated Goal smoke |
 | hold | [R8 headless/batch](R8-headless-batch-deliberate-hold.md) | product hold | explicit exclusion until semantics change |
+
+최종 audit 판정은 R1~R7 **OPEN**, R8 **DELIBERATE HOLD**다. focused rail은 85 pass/0 fail이지만
+full promotion gate는 실행하지 않았으므로 구현 완료 판정으로 승격하지 않는다.
 
 ## 공통 불변식
 

@@ -6,9 +6,11 @@
 
 ## 현재 기준
 
-- 제품 소스 재대조 기준: `08fb52c175b0289cb26d794bbab9862851b9904d` (`origin/main`, 2026-08-31).
+- 제품 소스 재대조 기준: `08fb52c175b0289cb26d794bbab9862851b9904d` (2026-08-31).
 - 그 이후 이 폴더를 갱신한 커밋은 문서·feature catalog 변경뿐이다. 현재 문서의 자기 SHA를
   다시 기준으로 적어 생기는 순환 갱신은 하지 않는다.
+- 최종 plan audit checkout, R1~R8 재판정, focused 85/0 evidence와 미실행 gate는
+  [`tickets/current/AUDIT-2026-08-31.md`](tickets/current/AUDIT-2026-08-31.md)에 기록했다.
 - production 조립과 실제 consumer를 기준으로 대조했다. 과거 티켓의 예정 심볼명 존재 여부만으로
   완료나 미완료를 판정하지 않았다.
 - 현재 우선순위와 dependency order의 진실원은 [`NEXT-PLAN.md`](NEXT-PLAN.md)다.
