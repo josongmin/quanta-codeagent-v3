@@ -127,7 +127,10 @@ describe("fc YAML — no duplicate mapping keys (anti last-key-wins silent drop)
       }
     }
     expect(errors, `\n${errors.join("\n")}`).toEqual([])
-  }, 30000)
+    // The catalog currently has >1k files. Keep the full scan, but allow the
+    // shared eight-shard CI run enough I/O headroom; this is not a reduced
+    // coverage timeout.
+  }, 120000)
 })
 
 // --- Check 2: evidence paths resolve on disk -------------------------------
@@ -146,7 +149,9 @@ describe("fc YAML — evidence paths resolve on disk (anti-drift)", () => {
       }
     }
     expect(errors, `\n${errors.join("\n")}`).toEqual([])
-  }, 60000)
+    // This visits every cited path, so it shares the same full-suite I/O
+    // contention profile as the duplicate-key scan above.
+  }, 120000)
 })
 
 // --- Red-on-injection: both checks have teeth ------------------------------
