@@ -6,10 +6,10 @@
 
 ## 현재 기준
 
-- 제품 소스 재대조 기준: `08fb52c175b0289cb26d794bbab9862851b9904d` (2026-08-31).
-- 그 이후 이 폴더를 갱신한 커밋은 문서·feature catalog 변경뿐이다. 현재 문서의 자기 SHA를
-  다시 기준으로 적어 생기는 순환 갱신은 하지 않는다.
-- 최종 plan audit checkout, R1~R8 재판정, focused 85/0 evidence와 미실행 gate는
+- 현재 판정 기준은 R1~R7 구현과 이 문서를 함께 담은 final receipt-bearing tree다. 자기 SHA를
+  문서에 다시 써서 생기는 순환 갱신은 하지 않으며 `git rev-parse HEAD`로 식별한다.
+- `08fb52c17` 제품 소스와 `32ea147db` audit checkout은 최초 gap 재판정의 historical baseline이다.
+- 최초 plan audit, R1~R8 재판정, 당시 focused 85/0 evidence는
   [`tickets/current/AUDIT-2026-08-31.md`](tickets/current/AUDIT-2026-08-31.md)에 기록했다.
 - production 조립과 실제 consumer를 기준으로 대조했다. 과거 티켓의 예정 심볼명 존재 여부만으로
   완료나 미완료를 판정하지 않았다.
@@ -21,25 +21,25 @@
 | 영역 | 판정 | 현재 경계 |
 |---|---|---|
 | GOAL-01/02 domain·policy | **DONE** | objective authority, actor별 capability, derived completion이 live |
-| GOAL-03 verifier | **IMPLEMENTED / PROMOTION PENDING** | fail-closed sandbox posture와 canonical read-time freshness reconcile focused rail이 green. main/R6 same-HEAD gate 대기 |
+| GOAL-03 verifier | **DONE** | fail-closed sandbox posture, persistent posture receipt, canonical read-time freshness reconcile이 promotion green |
 | GOAL-04 settlement | **DONE** | host-attributed attempt, measured usage, durable settlement ordering이 live |
 | GOAL-05 CLI control | **DONE** | default-ON `/goal`, product ceiling, manual attestation, abandon/unblock, settlement checkpoint가 live |
-| GOAL-06 wake | **IMPLEMENTED / PROMOTION PENDING** | dead attach/close boolean을 제거했고 attach hooks와 close-start synchronous stop을 lifecycle truth로 고정. main/R6 gate 대기 |
+| GOAL-06 wake | **DONE** | attach hooks와 close-start synchronous stop이 단일 lifecycle truth이며 public PTY/attach fence가 green |
 | GOAL-07 attach/fork | **BEHAVIOR DONE / SPEC DIVERGED** | 실제 fence는 `attachGeneration`과 attach lifecycle cancellation. 과거 `sessionEpoch` 설계는 현행 계약이 아님 |
 | GOAL-08 browser controls | **DONE** | work attribution, approval resume attribution, revision CAS, receipt correlation, 전체 browser `/goal` verb가 live |
-| GOAL-09 blockers | **IMPLEMENTED / PROMOTION PENDING** | host RunLedger/TaskRegistry dependency identity와 opaque occurrence evidence, typed unresolved가 focused green. main/R6 gate 대기 |
-| GOAL-10 evidence | **IMPLEMENTED / PROMOTION PENDING** | settlement decision counter와 bounded lifecycle counter가 live. R6 PTY/smoke/full-gate receipt 대기 |
-| Browser always-on state | **IMPLEMENTED / PROMOTION PENDING** | canonical `goal.state` push/reconnect replay, freshness/wake/latest settlement, observability-independent UI가 focused green. main/R6 gate 대기 |
+| GOAL-09 blockers | **DONE** | host RunLedger/TaskRegistry dependency identity, opaque occurrence evidence, typed unresolved가 promotion green |
+| GOAL-10 evidence | **DONE** | settlement decision counter, bounded lifecycle counter, 16-case PTY, dedicated Goal smoke, full gate receipt가 있음 |
+| Browser always-on state | **DONE** | canonical `goal.state` push/reconnect replay, freshness/wake/latest settlement, observability-independent UI가 promotion green |
 
 ## 남은 작업
 
 우선순위와 dependency order는 [`NEXT-PLAN.md`](NEXT-PLAN.md), 상세 실행 계약은
 [`tickets/current/`](tickets/current/README.md)에 있다.
 
-1. PTY public matrix와 Goal-aware dedicated smoke harness
-2. R1~R5/R7을 포함한 same-HEAD full promotion gate와 main 반영
+R1~R7의 구현·검증 작업은 완료됐다. 최종 증거는
+[`FINAL-RECEIPT-2026-08-31.md`](FINAL-RECEIPT-2026-08-31.md)에 있다.
 
-headless/batch autonomous pursuit는 남은 구현 티켓이 아니라 deliberate hold다. 제품이 persistent
+headless/batch autonomous pursuit만 남은 구현 티켓이 아닌 deliberate hold다. 제품이 persistent
 goal-runner semantics를 승인할 때만 별도 promotion 작업으로 연다.
 
 ## 문서 역할
@@ -69,5 +69,6 @@ goal-runner semantics를 승인할 때만 별도 promotion 작업으로 연다.
 - browser controls: `apps/web-frontend/src/components/slash-goal.ts`,
   `tests/integration/goal-control-ws-daemon-e2e.test.ts`
 - public CLI: `tests/e2e-pty/cli-goal-pursuit-e2e.test.ts`
+- dedicated Goal smoke: `tests/smoke/goal/goal-pursuit-smoke.test.ts`
 - catalog truth source: `tools/feature-catalog/features/09-integration/objective-*.yaml`,
   `tools/feature-catalog/features/09-integration/web-goal-controls.yaml`

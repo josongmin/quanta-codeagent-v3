@@ -29,7 +29,7 @@ surface_integration:
   method: audited
   verified: "2026-08-31"
   evidence:
-    cli: "Real PTY boots the source or installed CLI, proves default-ON command discovery, explicit QUANTA_GOAL=0 opt-out, goal create/show, autonomous queue execution, draft/background/foreground quiescence fences, and goal-only quiet-window behavior; a real process kill plus resume-by-id proves the objective — and a clear — survive a restart; a settled attributed turn ANNOUNCES itself, so progress is visible without typing /goal; and the operator can attest a manual criterion (`criterion done`) or free a stuck attempt (`abandon`)."
+    cli: "A 16-case real PTY corpus boots both source and compiled CLI. It proves default-ON discovery, explicit opt-out, create/show, pause/resume/edit, checked verify then source-stale invalidation, user-budget stop, unblock, autonomous execution, draft/background/foreground quiescence, restart persistence, attach cancellation, and unsolicited settlement visibility. The source corpus passed three complete runs (median 200.77s, max 216.16s); the compiled binary passed the same corpus."
     web: "Web-daemon composition submits authority-validated autonomous and user-requested goal turns. The browser has complete `/goal` controls plus a default-ON typed state surface using the same canonical encoder as HTTP: current freshness, absolute wake scheduling, and latest settlement are pushed on effective transitions and replayed on reconnect independently of QUANTA_OBSERVABILITY. `pause` fences the next autonomous resume; it does not cancel a turn already running."
 purpose: |
   The complete goal preset is enabled by default in CLI and web-daemon roots:
@@ -161,6 +161,7 @@ evidence:
       - tests/integration/objective-verifier-real-command-e2e.test.ts
     contract:
       - tests/e2e-pty/cli-goal-pursuit-e2e.test.ts
+      - tests/smoke/goal/goal-pursuit-smoke.test.ts
 knobs:
   - name: QUANTA_GOAL
     where: src/shared/runtime-config-knobs/knobs-b.ts (the preset in src/objective/goal-preset.ts seeds the three internal gates from it)
@@ -226,3 +227,6 @@ notes: |
   by the user-created-goal precondition, explicit opt-out, quiescence fences,
   revision/attach-generation checks, verifier evidence, backoff, and hard caps.
   The optional completion judge remains shadow-only and cannot mutate objective state.
+  A dedicated production-composition Goal smoke proves pursuit settlement,
+  strict verifier execution, budget stop/no-extra-wake, and a five-component
+  anti-vacuum floor; it deliberately does not reuse the generic runAgent fixture.

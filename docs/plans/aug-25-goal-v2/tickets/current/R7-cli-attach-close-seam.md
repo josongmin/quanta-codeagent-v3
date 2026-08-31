@@ -1,6 +1,6 @@
 # R7 — CLI attach/close wake seam cleanup
 
-**Status:** FOCUSED GREEN · main integration pending · **Priority:** P2 · **Owner:** CLI session lifecycle
+**Status:** DONE · FINAL PROMOTION GREEN · **Priority:** P2 · **Owner:** CLI session lifecycle
 
 ## 목적
 

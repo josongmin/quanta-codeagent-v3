@@ -1,6 +1,6 @@
 # R1 — Verifier fail-closed sandbox and persistent execution posture
 
-**Status:** FOCUSED GREEN · MAIN INTEGRATION PENDING · **Priority:** P1 · **Owner:** host verifier/runtime sandbox
+**Status:** DONE · FINAL PROMOTION GREEN · **Priority:** P1 · **Owner:** host verifier/runtime sandbox
 
 ## 목적
 

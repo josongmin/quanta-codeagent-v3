@@ -1,19 +1,21 @@
 # R6 — Public PTY, integration, and dedicated Goal smoke proof
 
-**Status:** READY AFTER R1-R5/R7 · **Priority:** P2 · **Owner:** Goal promotion evidence
+**Status:** DONE · FINAL PROMOTION GREEN · **Priority:** P2 · **Owner:** Goal promotion evidence
 
 ## 목적
 
 이미 있는 unit behavior를 중복 구현하지 않고 실제 front door와 production composition에서 Goal의
 보안·freshness·budget·attach 계약을 증명한다.
 
-## 현재 사실
+## 구현 결과
 
-- PTY file은 11 case이며 discovery/create/show/default-off/autonomous continuation/quiescence/restart/
-  checkpoint를 다룬다.
-- control/verify/budget/blocker/attach public matrix 일부가 없다.
-- 일반 smoke runner는 plain `runAgent`만 조립하며 ObjectiveAuthority/verifier/wake가 없다.
-- 따라서 기존 `tests/smoke/fixtures`에 goal prompt만 추가하면 Goal smoke가 아니라 vacuous agent smoke다.
+- PTY file은 16 case다. 기존 11 case에 pause/resume/edit, check/verify/stale,
+  user budget stop, attach cancellation, unblock public rail을 추가했다.
+- `tests/smoke/goal/goal-pursuit-smoke.test.ts`가 production authority, attempt slot,
+  strict verifier runner, wake controller, runtime host, replay LLM을 직접 조립한다.
+- `bun run smoke:goal`은 default pursuit/settlement, strict checked verification,
+  budget stop/no-extra-wake, component omission anti-vacuum을 4 case로 고정한다.
+- 일반 smoke runner는 계속 generic agent fixture를 소유한다. Goal completion 증거로 사용하지 않는다.
 
 ## rail 배치
 
@@ -74,6 +76,20 @@ attempt slot, verifier, wake, replay LLM을 조립하는 dedicated host-level ha
 - source CLI와 built CLI의 public behavior가 동일.
 - full unit/integration/typecheck/lint/fc gate와 최종 clean state receipt가 있다.
 - evidence가 없는 headless/batch mode를 catalog에 추가하지 않는다.
+
+## 최종 evidence — 2026-08-31
+
+- focused integration + dedicated smoke: **71 pass, 0 fail, 8 files**.
+- source PTY 16-case 전체 3회: **199.57s / 200.77s / 216.16s**;
+  median **200.77s**, max **216.16s**, skipped 0.
+- compiled `dist/agent` 동일 16-case: **16 pass, 0 fail, 186.07s**, skipped 0.
+- production quiet-window minimum 15초를 우회하지 않았다. budget case timeout은 120초,
+  attach/restart 계열 timeout은 최대 180초다.
+- anti-vacuum/revert rails: dedicated harness component omission, lifecycle producer live-call
+  injection ratchet, strict sandbox unavailable/degraded spawn 0, read-time source mutation,
+  attach generation cancellation이 각 owner test에서 fail-closed를 고정한다.
+- 전체 promotion command와 최종 clean-tree 증거는
+  [`../../FINAL-RECEIPT-2026-08-31.md`](../../FINAL-RECEIPT-2026-08-31.md)에 있다.
 
 ## 중단 조건
 

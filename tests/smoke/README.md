@@ -16,6 +16,18 @@ bun run smoke:record <id> --dry # record + print, write nothing
 The battery also runs inside `bun test` via `tests/unit/smoke-battery.test.ts`,
 so every PR gates on tier-0.
 
+Goal pursuit has a separate production-composition smoke:
+
+```sh
+bun run smoke:goal
+```
+
+`tests/smoke/goal/` composes the objective authority, attributed-attempt slot,
+strict verifier runner, wake controller, runtime host, and deterministic replay
+LLM. It asserts authority snapshots, receipts, and exact spawn/wake counts. It
+does not use the generic fixture runner because that runner has no Goal
+authority/verifier/wake composition.
+
 **Catalog (15 scenarios — single 4 · medium 4 · tikitaka 7):**
 - single — `01-read-summarize` · `02-glob-list` · `03-grep-symbol` · `04-bash-inspect`
 - medium — `05-read-then-edit` · `06-grep-then-fix` · `07-test-then-impl` · `08-plan-then-go`

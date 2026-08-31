@@ -1,6 +1,6 @@
 # R2 — Read-time current-source freshness on CLI and web
 
-**Status:** FOCUSED GREEN · MAIN INTEGRATION PENDING · **Priority:** P1 · **Depends on:** R1 receipt contract
+**Status:** DONE · FINAL PROMOTION GREEN · **Priority:** P1 · **Depends on:** R1 receipt contract
 · **Owner:** ObjectiveVerificationPort + surface adapters
 
 ## 목적

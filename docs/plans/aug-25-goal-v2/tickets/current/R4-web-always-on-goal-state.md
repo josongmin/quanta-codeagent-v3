@@ -1,6 +1,6 @@
 # R4 — Default-ON web Goal state, wake, freshness, and checkpoint projection
 
-**Status:** FOCUSED GREEN · MAIN INTEGRATION PENDING · **Priority:** P1 · **Depends on:** R2, R7
+**Status:** DONE · FINAL PROMOTION GREEN · **Priority:** P1 · **Depends on:** R2, R7
 · **Owner:** goal readout protocol + web daemon/frontend projection
 
 ## 목적

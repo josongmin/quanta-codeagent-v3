@@ -1,29 +1,28 @@
 # Goal v2 current execution tickets
 
-기준 소스 감사일: 2026-08-31. 제품 소스 기준 commit은
-`08fb52c175b0289cb26d794bbab9862851b9904d`이며, 이후 `main`의 Goal 관련 변경은
-문서와 feature catalog 정리다. 최종 재감사 checkout과 실행 evidence는
-[`AUDIT-2026-08-31.md`](AUDIT-2026-08-31.md)에 동결했다.
+기준 소스 감사일: 2026-08-31. 현재 기준은 R1~R7 구현과 final receipt를 함께 담은 tree이며
+`git rev-parse HEAD`로 식별한다. `08fb52c17`/`32ea147db`는 최초 gap 재판정의 historical baseline이고,
+당시 audit evidence는 [`AUDIT-2026-08-31.md`](AUDIT-2026-08-31.md)에 동결했다.
 
-이 디렉터리는 현재 남은 작업의 상세 실행 계약이다. 상위
-[`NEXT-PLAN.md`](../../NEXT-PLAN.md)는 우선순위와 실행 순서를 소유하고, 이 티켓들은 각
+이 디렉터리는 완료된 작업과 deliberate hold의 상세 실행 계약이다. 상위
+[`NEXT-PLAN.md`](../../NEXT-PLAN.md)는 dependency order를 소유하고, 이 티켓들은 각
 패킷의 owner/write set/RED/DoD를 소유한다. `tickets/GOAL-01~10`은 historical input이며
 현행 구현 명세가 아니다.
 
 | 순서 | 티켓 | 판정 | 종료 형태 |
 |---|---|---|---|
-| 1 | [R1 verifier sandbox](R1-verifier-sandbox-posture.md) | FOCUSED GREEN · main pending | fail-closed sandbox + persistent posture |
-| 2 | [R2 read freshness](R2-read-time-source-freshness.md) | FOCUSED GREEN · main pending | CLI/web read-time reconcile |
-| 3 | [R3 blocker identity](R3-blocker-dependency-authority.md) | FOCUSED GREEN · main pending | registry identity + occurrence evidence |
-| 4 | [R7 attach/close seam](R7-cli-attach-close-seam.md) | FOCUSED GREEN · main pending | one lifecycle truth + close-start stop |
-| 5 | [R4 web always-on state](R4-web-always-on-goal-state.md) | FOCUSED GREEN · main pending | default-ON typed snapshot/push |
-| 6 | [R5 lifecycle telemetry](R5-objective-lifecycle-telemetry.md) | FOCUSED GREEN · main pending | bounded stage/outcome counters |
-| 7 | [R6 public proof battery](R6-pty-and-smoke-proof.md) | P2 evidence | PTY/integration/dedicated Goal smoke |
+| 1 | [R1 verifier sandbox](R1-verifier-sandbox-posture.md) | DONE | fail-closed sandbox + persistent posture |
+| 2 | [R2 read freshness](R2-read-time-source-freshness.md) | DONE | CLI/web read-time reconcile |
+| 3 | [R3 blocker identity](R3-blocker-dependency-authority.md) | DONE | registry identity + occurrence evidence |
+| 4 | [R7 attach/close seam](R7-cli-attach-close-seam.md) | DONE | one lifecycle truth + close-start stop |
+| 5 | [R4 web always-on state](R4-web-always-on-goal-state.md) | DONE | default-ON typed snapshot/push |
+| 6 | [R5 lifecycle telemetry](R5-objective-lifecycle-telemetry.md) | DONE | bounded stage/outcome counters |
+| 7 | [R6 public proof battery](R6-pty-and-smoke-proof.md) | DONE | PTY/integration/dedicated Goal smoke |
 | hold | [R8 headless/batch](R8-headless-batch-deliberate-hold.md) | product hold | explicit exclusion until semantics change |
 
-동결 audit 판정은 R1~R7 **OPEN**, R8 **DELIBERATE HOLD**였다. 후속 R1/R2/R3/R7/R4/R5 packet은 각
-티켓의 focused·typecheck·owner-local rail이 green이며 main integration을 기다린다. full promotion gate는 아직
-실행하지 않았으므로 전체 Goal v2 완료 판정으로 승격하지 않는다.
+동결 audit 당시 판정은 R1~R7 **OPEN**, R8 **DELIBERATE HOLD**였다. 후속 R1~R7 packet은 구현,
+owner-local/integration, source+built PTY, dedicated smoke, 전체 promotion gate를 통과했다. 최종 receipt는
+[`../../FINAL-RECEIPT-2026-08-31.md`](../../FINAL-RECEIPT-2026-08-31.md)다.
 
 ## 공통 불변식
 

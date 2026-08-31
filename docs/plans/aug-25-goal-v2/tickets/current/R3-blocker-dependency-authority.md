@@ -1,6 +1,6 @@
 # R3 — Host-resolved blocker dependency identity and occurrence evidence
 
-**Status:** FOCUSED GREEN · MAIN INTEGRATION PENDING · **Priority:** P1 · **Owner:** objective blocker authority + host registries
+**Status:** DONE · FINAL PROMOTION GREEN · **Priority:** P1 · **Owner:** objective blocker authority + host registries
 
 ## 목적
 

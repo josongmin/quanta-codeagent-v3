@@ -185,6 +185,92 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
   )
 
   test(
+    "public pause → resume → edit controls mutate the live goal in order",
+    async () => {
+      const c = await boot()
+      await submitLine(c, "/goal ship v1")
+      await c.waitFor("Goal created", T)
+      await submitLine(c, "/goal criterion add release is verified")
+      await c.waitFor("Criterion added.", T)
+      await submitLine(c, "/goal pause")
+      await c.waitFor("Goal paused.", T)
+      await submitLine(c, "/goal")
+      await c.waitFor("status: paused", T)
+      await submitLine(c, "/goal resume")
+      await c.waitFor("Goal resumed.", T)
+      await submitLine(c, "/goal edit ship v2")
+      await c.waitFor("Goal replaced.", T)
+      await submitLine(c, "/goal")
+      const screen = await c.waitFor("Goal: ship v2", T)
+      expect(screen).toContain("status: active")
+    },
+    T,
+  )
+
+  test(
+    "/goal unblock is a reachable operator escape hatch even when there is nothing stale to clear",
+    async () => {
+      const c = await boot()
+      await submitLine(c, "/goal recover blocked work")
+      await c.waitFor("Goal created", T)
+      await submitLine(c, "/goal unblock")
+      const screen = await c.waitFor("Goal: no blocker to clear.", T)
+      expect(screen).not.toContain("goal control unavailable")
+    },
+    T,
+  )
+
+  test("public check add → verify → source edit invalidates completion on the next read", async () => {
+    writeFileSync(join(cwd, "proof.txt"), "v1\n")
+    for (const args of [
+      ["init", "-q"],
+      ["add", "-A"],
+      ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "init"],
+    ]) {
+      const result = Bun.spawnSync(["git", ...args], { cwd })
+      expect(result.exitCode).toBe(0)
+    }
+    const c = await boot()
+    await submitLine(c, "/goal prove current source")
+    await c.waitFor("Goal created", T)
+    await submitLine(c, "/goal check add proof passes -- bun -e process.exit(0)")
+    await c.waitFor("Check added.", T)
+    await submitLine(c, "/goal verify")
+    await c.waitFor("Goal verification applied.", T)
+    await submitLine(c, "/goal")
+    await c.waitFor("status: completed", T)
+    writeFileSync(join(cwd, "proof.txt"), "v2\n")
+    await submitLine(c, "/goal")
+    const stale = await c.waitFor("freshness: invalidated", T)
+    expect(stale).toContain("status: active")
+    expect(stale).toContain("0/1 verified")
+  }, 120_000)
+
+  test("--max-turns=2 stops autonomous pursuit after two settled attempts", async () => {
+    const c = await bootWithGoalContinuation({
+      cassette: `${replayEntry("BUDGET_ATTEMPT_ONE")}\n${replayEntry("BUDGET_ATTEMPT_TWO")}\n`,
+      idleMs: 15_000,
+    })
+    await submitLine(c, "/goal bounded pursuit")
+    await c.waitFor("Goal created", T)
+    await submitLine(c, "/goal criterion add never auto-attested")
+    await c.waitFor("Criterion added.", T)
+    await submitLine(c, "/goal budget --max-turns=2")
+    await c.waitFor("Goal budget updated.", T)
+    await c.waitFor("BUDGET_ATTEMPT_ONE", 30_000)
+    await c.waitFor("BUDGET_ATTEMPT_TWO", 40_000)
+    await c.waitFor("goal: completed · 2 tok", T)
+    // Two real 15 s quiet windows also trip the REPL's independent idle
+    // suppression. Wake that UI gate before exercising the public Goal query.
+    await submitLine(c, "/resume")
+    await c.waitFor("ready.", T)
+    await submitLine(c, "/goal")
+    const stopped = await c.waitFor("limited by: user-budget", T)
+    expect(stopped).toContain("status: budget_limited")
+    expect(stopped).toContain("budget: 2/2 turns")
+  }, 120_000)
+
+  test(
     "QUANTA_GOAL_ENFORCE: an idle active goal drives a replayed continuation through the real CLI queue",
     async () => {
       // No user model prompt is submitted in this test. Seeing the marker
@@ -445,6 +531,63 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
     await submitLine(third, "/goal")
     await third.waitFor("No goal set.", T)
     expect(third.screen()).not.toContain("Goal: survive the restart")
+  }, 180_000)
+
+  test("attach to thread B cancels thread A's pending continuation before its body can run", async () => {
+    const first = await bootWithGoalContinuation({
+      cassette: `${replayEntry("A_SAVE")}\n`,
+      idleMs: 15_000,
+      argv: ["--new-session"],
+    })
+    await submitLine(first, "/goal thread A must not wake after attach")
+    await first.waitFor("Goal created", T)
+    await submitLine(first, "/goal criterion add remains unmet")
+    await first.waitFor("Criterion added.", T)
+    await submitLine(first, "persist A")
+    await first.waitFor("A_SAVE", T)
+    expect(await waitForDurableGoal((raw) => raw.includes("thread A must not wake"))).toBe(true)
+    first.kill()
+    await Promise.race([first.exited, sleep(3_000)])
+    cli = undefined
+    const aId = readdirSync(sessionsDir)
+      .find((name) => name.endsWith(".json"))
+      ?.slice(0, -5)
+    expect(aId).toBeDefined()
+
+    const second = await bootWithGoalContinuation({
+      cassette: `${replayEntry("B_SAVE")}\n`,
+      idleMs: 15_000,
+      argv: ["--new-session"],
+    })
+    await submitLine(second, "persist B")
+    await second.waitFor("B_SAVE", T)
+    const countDeadline = Date.now() + 20_000
+    while (
+      Date.now() < countDeadline &&
+      readdirSync(sessionsDir).filter((name) => name.endsWith(".json")).length < 2
+    ) {
+      await sleep(100)
+    }
+    second.kill()
+    await Promise.race([second.exited, sleep(3_000)])
+    cli = undefined
+    const bId = readdirSync(sessionsDir)
+      .filter((name) => name.endsWith(".json"))
+      .map((name) => name.slice(0, -5))
+      .find((id) => id !== aId)
+    expect(bId).toBeDefined()
+
+    const attached = await bootWithGoalContinuation({
+      cassette: `${replayEntry("A_CONTINUATION_MUST_NOT_RUN")}\n`,
+      idleMs: 15_000,
+      argv: ["--resume", aId as string],
+    })
+    await submitLine(attached, `/fork attach ${bId as string}`)
+    await attached.waitFor(`now editing ${bId as string}`, T)
+    await sleep(16_000)
+    expect(attached.screen()).not.toContain("A_CONTINUATION_MUST_NOT_RUN")
+    await submitLine(attached, "/goal")
+    await attached.waitFor("No goal set.", T)
   }, 180_000)
 
   test("GOAL-05A rail 16 — a settled autonomous turn ANNOUNCES itself without being asked", async () => {

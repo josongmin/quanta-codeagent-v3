@@ -1,6 +1,6 @@
 # R5 — Bounded Objective lifecycle telemetry beyond settlement
 
-**Status:** FOCUSED GREEN · MAIN/R6 PROMOTION PENDING · **Priority:** P1 · **Depends on:** R1-R4 producer contracts
+**Status:** DONE · FINAL PROMOTION GREEN · **Priority:** P1 · **Depends on:** R1-R4 producer contracts
 · **Owner:** objective lifecycle port + observability metrics adapter
 
 ## 목적

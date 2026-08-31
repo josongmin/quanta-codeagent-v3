@@ -1,11 +1,11 @@
-# aug-25 /goal v2 — 현재 잔여 작업 계획
+# aug-25 /goal v2 — 최종 실행 상태
 
-제품 소스 재대조 기준: `08fb52c175b0289cb26d794bbab9862851b9904d` (2026-08-31).
-최종 audit checkout `32ea147dba3eb2daf429f762cce6e35a3d4c4933`까지 제품 경로 diff는 비어 있고,
-그 사이 commit은 Goal 계획·catalog 정리다. SHA, focused 85/0 rail, 실행하지 않은 gate는
+현재 기준은 R1~R7 구현과 final receipt를 함께 담은 tree다. 자기 SHA는 문서에 고정하지 않고
+`git rev-parse HEAD`로 식별한다. `08fb52c17` 제품 소스와 `32ea147db` checkout, focused 85/0 rail은
+최초 gap 재판정의 historical baseline으로
 [`tickets/current/AUDIT-2026-08-31.md`](tickets/current/AUDIT-2026-08-31.md)에 동결했다.
 
-이 문서는 현재 우선순위와 dependency order의 진실원이다. 패킷별 owner, write set, RED rail,
+이 문서는 완료된 dependency order와 현재 hold의 진실원이다. 패킷별 owner, write set, RED rail,
 DoD는 [`tickets/current/`](tickets/current/README.md)가 소유한다. 과거 GOAL-01~10 티켓과 receipt는
 historical evidence이며 현재 미구현 목록으로 사용하지 않는다.
 
@@ -21,17 +21,17 @@ historical evidence이며 현재 미구현 목록으로 사용하지 않는다.
   abandon/unblock, bounded wake와 attach-generation fencing.
 - CLI/web default-ON Goal preset과 explicit `QUANTA_GOAL=0` opt-out.
 
-### 남은 구현
+### 완료된 promotion packet
 
 | 실행 순서 | 티켓 | 현재 gap | 확정 종료 형태 |
 |---|---|---|---|
-| 1 | [R1 verifier sandbox](tickets/current/R1-verifier-sandbox-posture.md) | **FOCUSED GREEN · main integration pending** | `workspace-write`, network deny, unavailable/degrade fail-closed, persistent versioned posture |
-| 2 | [R2 read freshness](tickets/current/R2-read-time-source-freshness.md) | **FOCUSED GREEN · main integration pending** | CLI/web canonical reconcile, closed freshness payload, unresolved checked-completion masking, single wake rearm |
-| 3 | [R3 blocker identity](tickets/current/R3-blocker-dependency-authority.md) | **FOCUSED GREEN · main integration pending** | host registry `dependencyId`, bounded occurrence pairs, dependency-based dedupe, typed unresolved |
-| 4 | [R7 attach/close seam](tickets/current/R7-cli-attach-close-seam.md) | **FOCUSED GREEN · main integration pending** | attach hook 단일 truth, dead field 삭제, interactive `finally` 첫 동작 synchronous stop |
-| 5 | [R4 web always-on state](tickets/current/R4-web-always-on-goal-state.md) | **FOCUSED GREEN · main integration pending** | canonical HTTP/WS encoder, default-ON `goal.state`, absolute wake time, reconnect replay |
-| 6 | [R5 lifecycle telemetry](tickets/current/R5-objective-lifecycle-telemetry.md) | **FOCUSED GREEN · main integration pending** | 14-series closed vocabulary, CLI/web shared metrics sink, producer removal ratchet |
-| 7 | [R6 public proof battery](tickets/current/R6-pty-and-smoke-proof.md) | public control/verify/budget/attach rail과 Goal-aware smoke가 부족 | PTY/integration 분리, production authority를 조립한 dedicated Goal smoke, full gate receipt |
+| 1 | [R1 verifier sandbox](tickets/current/R1-verifier-sandbox-posture.md) | **DONE** | `workspace-write`, network deny, unavailable/degrade fail-closed, persistent versioned posture |
+| 2 | [R2 read freshness](tickets/current/R2-read-time-source-freshness.md) | **DONE** | CLI/web canonical reconcile, closed freshness payload, unresolved checked-completion masking, single wake rearm |
+| 3 | [R3 blocker identity](tickets/current/R3-blocker-dependency-authority.md) | **DONE** | host registry `dependencyId`, bounded occurrence pairs, dependency-based dedupe, typed unresolved |
+| 4 | [R7 attach/close seam](tickets/current/R7-cli-attach-close-seam.md) | **DONE** | attach hook 단일 truth, dead field 삭제, interactive `finally` 첫 동작 synchronous stop |
+| 5 | [R4 web always-on state](tickets/current/R4-web-always-on-goal-state.md) | **DONE** | canonical HTTP/WS encoder, default-ON `goal.state`, absolute wake time, reconnect replay |
+| 6 | [R5 lifecycle telemetry](tickets/current/R5-objective-lifecycle-telemetry.md) | **DONE** | 14-series closed vocabulary, CLI/web shared metrics sink, producer removal ratchet |
+| 7 | [R6 public proof battery](tickets/current/R6-pty-and-smoke-proof.md) | **DONE** | 16-case PTY source 3회 + built parity, dedicated production Goal smoke, same-tree full gate receipt |
 
 ### 의도적 보류
 
@@ -90,3 +90,7 @@ lint-debt, architecture/god-code ratchet, full unit/integration, Goal PTY, dedic
 feature-catalog validate/build/diff/evidence, `git diff --check`를 current HEAD에서 통과한다.
 
 실행하지 않은 rail, skipped trajectory, stale SHA, product semantics 미결정을 완료로 보고하지 않는다.
+
+R1~R7은 위 종료 조건을 충족했다. 실행 결과와 clean-tree 계약은
+[`FINAL-RECEIPT-2026-08-31.md`](FINAL-RECEIPT-2026-08-31.md)에 고정했다. R8은 제품 의미론이
+바뀌지 않는 한 이 완료 판정의 blocker가 아니다.

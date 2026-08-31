@@ -45,6 +45,7 @@
     "test:web-frontend": "cd apps/web-frontend && ([ -x ./node_modules/.bin/vitest ] || bun install --frozen-lockfile) && ./node_modules/.bin/vitest run",
     "test:watch": "bun run test:clean-js && bun test --watch tests/unit --parallel=1",
     "smoke": "bun run tests/smoke/index.ts",
+    "smoke:goal": "bun test tests/smoke/goal --parallel=1",
     "smoke:live": "bun run tests/smoke/index.ts --tier=live",
     "smoke:report": "bun run tests/smoke/index.ts --report",
     "smoke:record": "bun run tests/smoke/record-cli.ts",
