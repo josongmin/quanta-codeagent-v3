@@ -11,9 +11,10 @@ import { ResultStore } from "@/../src/apps/eval/storage"
  * `spawnSync` child alive indefinitely; callers receive a diagnostic instead of
  * an opaque `status === null`. */
 const EVAL_CLI_CHILD_TIMEOUT_MS = 30_000
+const REPO_ROOT = join(import.meta.dir, "..", "..")
 const runEval = (...args: string[]) => {
   const out = spawnSync(process.execPath, ["run", "src/apps/eval/index.ts", ...args], {
-    cwd: "/Users/songmin/quanta-codeagent-v3",
+    cwd: REPO_ROOT,
     encoding: "utf8",
     timeout: EVAL_CLI_CHILD_TIMEOUT_MS,
     killSignal: "SIGKILL",
@@ -76,6 +77,85 @@ const payload = (over: Partial<GroundingPayload> = {}): GroundingPayload => {
 
 const readJson = (path: string): unknown => JSON.parse(readFileSync(path, "utf8"))
 
+const INVALID_ARGUMENT_CASES = [
+  {
+    name: "run rejects an invalid suite",
+    args: ["grounding", "run", "--suite", "bogus"],
+    error: "--suite must be canary or nightly",
+  },
+  {
+    name: "run rejects an invalid corpus",
+    args: ["grounding", "run", "--corpus", "bogus"],
+    error: "--corpus must be one of",
+  },
+  {
+    name: "run rejects an invalid mode",
+    args: ["grounding", "run", "--mode", "bogus"],
+    error: "--mode must be one of",
+  },
+  {
+    name: "report requires a run id",
+    args: ["grounding", "report"],
+    error: "--run-id <id> is required",
+  },
+  {
+    name: "baseline requires a candidate id",
+    args: ["grounding", "baseline"],
+    error: "--candidate <id> is required",
+  },
+  {
+    name: "gate requires a run id",
+    args: ["grounding", "gate", "--profile", "canary"],
+    error: "--run-id <id> is required",
+  },
+  {
+    name: "gate rejects an invalid profile",
+    args: ["grounding", "gate", "--run-id", "x", "--profile", "nightly"],
+    error: "--profile must be one of canary",
+  },
+  {
+    name: "route-matrix gate requires run ids",
+    args: ["grounding", "gate", "--route-matrix", "primary-openai", "--profile", "canary"],
+    error: "--run-ids <id1,id2,...> is required",
+  },
+  {
+    name: "compare requires both run ids",
+    args: ["grounding", "compare", "--baseline", "a"],
+    error: "--baseline <id> and --candidate <id> are required",
+  },
+  {
+    name: "scaffold-replay requires its complete input",
+    args: ["grounding", "scaffold-replay", "--source", "x"],
+    error: "--source, --id, --target-utterance, --bucket, --severity, --out are required",
+  },
+  {
+    name: "promote-replay requires its complete input",
+    args: ["grounding", "promote-replay", "--draft", "x"],
+    error: "--draft, --gold-json, --corpus, --out are required",
+  },
+  {
+    name: "regress rejects an invalid profile",
+    args: ["grounding", "regress", "--baseline", "a", "--candidate", "b", "--profile", "loose"],
+    error: "--profile must be one of strict",
+  },
+  {
+    name: "promote-replay rejects an invalid corpus",
+    args: [
+      "grounding",
+      "promote-replay",
+      "--draft",
+      "x",
+      "--gold-json",
+      "y",
+      "--corpus",
+      "bogus",
+      "--out",
+      "z",
+    ],
+    error: "--corpus must be replay_critical or replay_nightly",
+  },
+] as const
+
 describe("eval grounding CLI", () => {
   test(
     "--help includes the grounding subcommands",
@@ -111,93 +191,17 @@ describe("eval grounding CLI", () => {
     EVAL_CLI_CHILD_TIMEOUT_MS,
   )
 
-  test("grounding run rejects invalid suites and report/gate validate required args", () => {
-    const badSuite = runEval("grounding", "run", "--suite", "bogus")
-    expect(badSuite.status).toBe(1)
-    expect(badSuite.stderr).toContain("--suite must be canary or nightly")
-
-    const badCorpus = runEval("grounding", "run", "--corpus", "bogus")
-    expect(badCorpus.status).toBe(1)
-    expect(badCorpus.stderr).toContain("--corpus must be one of")
-
-    const badMode = runEval("grounding", "run", "--mode", "bogus")
-    expect(badMode.status).toBe(1)
-    expect(badMode.stderr).toContain("--mode must be one of")
-
-    const missingRunId = runEval("grounding", "report")
-    expect(missingRunId.status).toBe(1)
-    expect(missingRunId.stderr).toContain("--run-id <id> is required")
-
-    const missingCandidate = runEval("grounding", "baseline")
-    expect(missingCandidate.status).toBe(1)
-    expect(missingCandidate.stderr).toContain("--candidate <id> is required")
-
-    const missingGateRunId = runEval("grounding", "gate", "--profile", "canary")
-    expect(missingGateRunId.status).toBe(1)
-    expect(missingGateRunId.stderr).toContain("--run-id <id> is required")
-
-    const badProfile = runEval("grounding", "gate", "--run-id", "x", "--profile", "nightly")
-    expect(badProfile.status).toBe(1)
-    expect(badProfile.stderr).toContain("--profile must be one of canary")
-
-    const missingRouteRunIds = runEval(
-      "grounding",
-      "gate",
-      "--route-matrix",
-      "primary-openai",
-      "--profile",
-      "canary",
+  for (const invalid of INVALID_ARGUMENT_CASES) {
+    test(
+      invalid.name,
+      () => {
+        const out = runEval(...invalid.args)
+        expect(out.status).toBe(1)
+        expect(out.stderr).toContain(invalid.error)
+      },
+      EVAL_CLI_CHILD_TIMEOUT_MS,
     )
-    expect(missingRouteRunIds.status).toBe(1)
-    expect(missingRouteRunIds.stderr).toContain("--run-ids <id1,id2,...> is required")
-
-    const missingCompare = runEval("grounding", "compare", "--baseline", "a")
-    expect(missingCompare.status).toBe(1)
-    expect(missingCompare.stderr).toContain("--baseline <id> and --candidate <id> are required")
-
-    const missingScaffoldReplay = runEval("grounding", "scaffold-replay", "--source", "x")
-    expect(missingScaffoldReplay.status).toBe(1)
-    expect(missingScaffoldReplay.stderr).toContain(
-      "--source, --id, --target-utterance, --bucket, --severity, --out are required",
-    )
-
-    const missingPromoteReplay = runEval("grounding", "promote-replay", "--draft", "x")
-    expect(missingPromoteReplay.status).toBe(1)
-    expect(missingPromoteReplay.stderr).toContain(
-      "--draft, --gold-json, --corpus, --out are required",
-    )
-
-    const badRegressionProfile = runEval(
-      "grounding",
-      "regress",
-      "--baseline",
-      "a",
-      "--candidate",
-      "b",
-      "--profile",
-      "loose",
-    )
-    expect(badRegressionProfile.status).toBe(1)
-    expect(badRegressionProfile.stderr).toContain("--profile must be one of strict")
-
-    const badReplayCorpus = runEval(
-      "grounding",
-      "promote-replay",
-      "--draft",
-      "x",
-      "--gold-json",
-      "y",
-      "--corpus",
-      "bogus",
-      "--out",
-      "z",
-    )
-    expect(badReplayCorpus.status).toBe(1)
-    expect(badReplayCorpus.stderr).toContain("--corpus must be replay_critical or replay_nightly")
-    // Each assertion cold-spawns the full eval harness. Under a contended unit
-    // run, the aggregate can exceed 60s despite every child staying within its
-    // own 30s kill cap; retain all validation cases with a total-test budget.
-  }, 180_000)
+  }
 
   test(
     "grounding run rejects invalid concurrency",

@@ -80,7 +80,7 @@ evidence:
       - tests/unit/eval-grounding-report.test.ts
       - tests/unit/eval-grounding-compare.test.ts
       - tests/unit/eval-grounding-storage-roundtrip.test.ts
-      - tests/unit/eval-grounding-cli.test.ts
+      - tests/integration/eval-grounding-cli.test.ts
       - tests/unit/eval-grounding-corpus.test.ts
       - tests/unit/workflows/yaml-validity.test.ts
       - tests/unit/workflows/permission-bounds.test.ts
