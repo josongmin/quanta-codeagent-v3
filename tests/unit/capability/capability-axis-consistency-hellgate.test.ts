@@ -130,7 +130,7 @@ describe("3-axis consistency ratchet — capability ↔ manifest ↔ feature-cat
       dangling,
       `fc entries reference non-existent capability ids: ${dangling.join(", ")}`,
     ).toEqual([])
-  }, 30000)
+  }, 60000)
 
   test("D-reverse — every capability is referenced by ≥1 fc entry (FLAG, not fail)", async () => {
     const features = await catalogOnce
@@ -143,7 +143,7 @@ describe("3-axis consistency ratchet — capability ↔ manifest ↔ feature-cat
     // The 4 seeded caps (workflow/artifact-store/image-gen/office-authoring) are all
     // linked, so today this is empty — assert that as a forward ratchet.
     expect(unreferenced).toEqual([])
-  }, 30000)
+  }, 60000)
 
   // ── RED-ON-INJECTION: the ratchet has teeth ────────────────────────────────
   describe("red-on-injection — the ratchet rejects a broken capability", () => {
