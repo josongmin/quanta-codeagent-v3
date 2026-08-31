@@ -31,15 +31,17 @@ jobs:
         # Cache ONLY .tsbuildinfo. The local skip stamps are content-hash
         # snapshots of the local tree and are not cached, so CI always re-runs
         # tsc; tsc incremental state still helps repeated PR/main runs re-check
-        # less work.
+        # less work. This job runs only `typecheck:all`, so caching the split
+        # src/tests buildinfo files creates dead cache entries. The SHA suffix is
+        # required because Actions caches are immutable: each run restores the
+        # newest branch/cross-branch predecessor, then publishes an updated
+        # buildinfo snapshot under its own key.
         uses: actions/cache@v4
         with:
-          path: |
-            .cache/typescript/typecheck-src.tsbuildinfo
-            .cache/typescript/typecheck-tests.tsbuildinfo
-            .cache/typescript/typecheck-all.tsbuildinfo
-          key: ${{ runner.os }}-typecheck-${{ hashFiles('package.json', 'bun.lock', 'tsconfig.json', 'tsconfig.base.json', 'tsconfig.typecheck.src.json', 'tsconfig.typecheck.tests.json', 'tools/dev/typecheck.ts') }}-${{ github.ref_name }}
+          path: .cache/typescript/typecheck-all.tsbuildinfo
+          key: ${{ runner.os }}-typecheck-${{ hashFiles('package.json', 'bun.lock', 'tsconfig.json', 'tsconfig.base.json', 'tsconfig.typecheck.src.json', 'tsconfig.typecheck.tests.json', 'tools/dev/typecheck.ts') }}-${{ github.ref_name }}-${{ github.sha }}
           restore-keys: |
+            ${{ runner.os }}-typecheck-${{ hashFiles('package.json', 'bun.lock', 'tsconfig.json', 'tsconfig.base.json', 'tsconfig.typecheck.src.json', 'tsconfig.typecheck.tests.json', 'tools/dev/typecheck.ts') }}-${{ github.ref_name }}-
             ${{ runner.os }}-typecheck-${{ hashFiles('package.json', 'bun.lock', 'tsconfig.json', 'tsconfig.base.json', 'tsconfig.typecheck.src.json', 'tsconfig.typecheck.tests.json', 'tools/dev/typecheck.ts') }}-
       - name: typecheck
         run: bun run typecheck:all

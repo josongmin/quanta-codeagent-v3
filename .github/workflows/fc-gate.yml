@@ -1,13 +1,11 @@
 # feature-catalog PR-time gate.
 #
-# Complements the always-on fc steps in `ci.yml` (validate + diff + lint +
-# check-changed). This workflow adds the maturity-promotion-gate audit and
-# scopes triggering to the paths that can change the catalog signal.
+# Complements the always-on fc steps in `ci.yml` (validate + diff + lint in the
+# pyramid job, check-changed in the PR job). This workflow owns reachability,
+# the Definition-of-Done ratchet, and the maturity-promotion-gate audit, scoped
+# to paths that can change those signals.
 #
-#   validate        — every evidence file/ADR/test exists                   FAIL
-#   check-changed   — new src/*.ts must be referenced by a feature YAML     FAIL
 #   reachability    — no L4+ feature is unreachable OR dead-API (real graph) FAIL
-#   lint            — empty-stub count + orphan Accepted ADRs do not grow   FAIL
 #   dod-ratchet     — new/touched feature meets the Definition of Done      FAIL
 #                     (catalog + TDD + e2e hellgate). Baseline-aware: only
 #                     NET-NEW holes block; grandfathered debt shrinks
@@ -35,24 +33,16 @@ permissions:
 
 jobs:
   fc-gate:
+    # Keep this historical context name: branch protection may require it
+    # verbatim even though validate/check-changed are owned by ci.yml.
     name: fc-gate (validate + check-changed + dod-ratchet + gates audit)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          # Need merge-base for `fc check-changed` to diff against.
-          fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
       - run: bun install --frozen-lockfile
-
-      - name: fc validate (every evidence file/ADR/test exists)
-        run: bun fc validate
-
-      - name: fc check-changed (PR only — added src must be catalog'd)
-        if: github.event_name == 'pull_request'
-        run: bun fc check-changed origin/${{ github.event.pull_request.base.ref }}
 
       - name: fc reachability (no L4+ feature unreachable or dead-API — real import graph)
         run: bun fc reachability --strict --symbols
@@ -66,10 +56,6 @@ jobs:
             bun fc gates || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: fc lint (empty-stub + orphan-ADR ratchet)
-        run: bun fc lint
-
       - name: Definition-of-Done ratchet (new/touched feature ⇒ catalog + TDD + e2e hellgate)
         # tools/pm — baseline-aware: a feature failing the DoD that is NOT
         # grandfathered in tools/pm/baseline.json fails the gate, and a

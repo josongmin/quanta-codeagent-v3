@@ -39,6 +39,7 @@ import { describe, expect, test } from "bun:test"
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { isScanVerdictGuard, scanVerdictGuards } from "@/../tools/dev/anti-vacuity-census"
+import { readScanReachBaseline } from "@/../tools/dev/scan-reach-baseline"
 import { stripComments } from "@/shared/source-text"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
@@ -123,6 +124,11 @@ const isEnrolled = (rel: string): boolean => (expectedIds()[rel] ?? []).length >
 /** A literal call, which is what a freshly migrated file has before it is pinned. */
 const callsHelper = (rel: string): boolean =>
   /\bassertScanPopulation\s*\(/.test(stripComments(readFileSync(join(REPO_ROOT, rel), "utf8")))
+
+/** Scan identities are committed cross-checkout data. An absolute-path suffix
+ *  binds the baseline to one clone and makes every linked worktree report the
+ *  same live scan as both stale and unpinned. */
+const hasAbsolutePathIdentity = (id: string): boolean => /(?:^|#)(?:\/|[A-Za-z]:[\\/])/.test(id)
 
 describe("scan enrollment", () => {
   test("anti-vacuity: the population is real and the debt list is a subset of it", () => {
@@ -303,6 +309,22 @@ describe("scan enrollment", () => {
     expect(stray, `these have expectedIds but no longer exist:\n  ${stray.join("\n  ")}`).toEqual(
       [],
     )
+  })
+
+  test("🔴 committed scan identities are clone- and worktree-portable", () => {
+    const baselineIds = Object.keys(readScanReachBaseline().scans)
+    const ledgerIds = Object.values(expectedIds()).flat()
+    const absolute = [...baselineIds, ...ledgerIds].filter(hasAbsolutePathIdentity).sort()
+    expect(
+      absolute,
+      "these committed scan ids contain absolute paths; use a repo-relative identity",
+    ).toEqual([])
+
+    // RED-ON-INJECTION: the exact shape that escaped — a test id with a clone
+    // path appended after `#` — must be rejected, while its relative twin stays valid.
+    expect(hasAbsolutePathIdentity("guard#/tmp/clone/src/agent")).toBe(true)
+    expect(hasAbsolutePathIdentity("guard#C:\\clone\\src\\agent")).toBe(true)
+    expect(hasAbsolutePathIdentity("guard#src/agent")).toBe(false)
   })
 
   test("the debt list has no stale entries — an enrolled guard must be removed from it", () => {

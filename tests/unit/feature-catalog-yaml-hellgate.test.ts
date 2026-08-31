@@ -2,28 +2,25 @@
 //
 // HELLGATE — durable lock against feature-catalog YAML SSOT CORRUPTION.
 //
-// Two rot classes this ratchet locks out:
-//
-//  (A) DUPLICATE MAPPING KEYS. The compact parser's last-key-wins behavior
+// This ratchet locks out DUPLICATE MAPPING KEYS. The compact parser's
+// last-key-wins behavior
 //      would silently overwrite the first value, so `loadFeatures` now first
 //      requires standard YAML with unique keys. The raw-text scan below keeps
 //      a pinpointed regression signal for duplicated test evidence keys.
-//
-//  (B) STALE EVIDENCE PATHS.  Every evidence.code + evidence.tests.* citation
-//      must resolve to a real file on disk (mirrors `fc validate --strict`).
+// Stale evidence paths have one stronger owner in
+// `feature-catalog-evidence-existence-hellgate.test.ts`: it de-duplicates the
+// citations, probes them concurrently, and carries its own red-on-injection
+// and CLI exit-code contracts. Repeating that full sweep here added no witness.
 //
 // Anti-vacuous: asserts the real catalog has >0 YAML files before scanning, so
-// an empty glob can't make either check pass by iterating nothing.
+// an empty glob can't make the check pass by iterating nothing.
 //
-// Red-on-injection: a temp fixture YAML with (1) a duplicate mapping key and
-// (2) a fabricated dangling path proves each check actually goes RED — the
-// gates have teeth and cannot vacuously pass.
+// Red-on-injection: a synthetic YAML block with a duplicate mapping key proves
+// the check actually goes RED and cannot vacuously pass.
 import { describe, expect, test } from "bun:test"
-import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { readFile } from "node:fs/promises"
 import { join, relative, resolve } from "node:path"
-import type { Feature } from "../../tools/feature-catalog/schema"
-import { loadFeaturesStrict } from "../../tools/feature-catalog/schema"
+import { assertScanPopulation } from "./_shared/scan-population"
 
 const REPO_ROOT = resolve(import.meta.dir, "../..")
 const FEATURES_DIR = resolve(REPO_ROOT, "tools/feature-catalog/features")
@@ -90,30 +87,15 @@ async function gatherYamlFiles(dir: string): Promise<string[]> {
   return out
 }
 
-async function pathExists(repoRelative: string): Promise<boolean> {
-  try {
-    await access(resolve(REPO_ROOT, repoRelative))
-    return true
-  } catch {
-    return false
-  }
-}
-
-function evidencePaths(feature: Feature): Array<{ kind: string; path: string }> {
-  return [
-    ...feature.evidence.code.map((p) => ({ kind: "code", path: p })),
-    ...feature.evidence.tests.unit.map((p) => ({ kind: "test.unit", path: p })),
-    ...feature.evidence.tests.integration.map((p) => ({ kind: "test.integration", path: p })),
-    ...feature.evidence.tests.contract.map((p) => ({ kind: "test.contract", path: p })),
-  ]
-}
-
-// --- Check 1: no duplicate mapping keys ------------------------------------
+// --- No duplicate mapping keys ---------------------------------------------
 
 describe("fc YAML — no duplicate mapping keys (anti last-key-wins silent drop)", () => {
   test("no fc YAML declares unit/integration/contract twice at the same indent", async () => {
     const files = await gatherYamlFiles(FEATURES_DIR)
-    expect(files.length).toBeGreaterThan(0) // anti-vacuous
+    assertScanPopulation(files, FEATURES_DIR, {
+      collectable: (name) => name.endsWith(".yaml"),
+      id: "tests/unit/feature-catalog-yaml-hellgate.test.ts#FEATURE-YAMLS",
+    })
 
     const errors: string[] = []
     for (const file of files) {
@@ -133,38 +115,10 @@ describe("fc YAML — no duplicate mapping keys (anti last-key-wins silent drop)
   }, 120000)
 })
 
-// --- Check 2: evidence paths resolve on disk -------------------------------
-
-describe("fc YAML — evidence paths resolve on disk (anti-drift)", () => {
-  test("every evidence.code + evidence.tests.* path exists", async () => {
-    const features = await loadFeaturesStrict(FEATURES_DIR)
-    expect(features.length).toBeGreaterThan(0) // anti-vacuous
-
-    const errors: string[] = []
-    for (const { feature, path } of features) {
-      for (const { kind, path: p } of evidencePaths(feature)) {
-        if (!(await pathExists(p))) {
-          errors.push(`${relative(REPO_ROOT, path)}: stale evidence.${kind} "${p}"`)
-        }
-      }
-    }
-    expect(errors, `\n${errors.join("\n")}`).toEqual([])
-    // This visits every cited path, so it shares the same full-suite I/O
-    // contention profile as the duplicate-key scan above.
-  }, 120000)
-})
-
-// --- Red-on-injection: both checks have teeth ------------------------------
+// --- Red-on-injection: the check has teeth ---------------------------------
 
 describe("fc YAML hellgate — red-on-injection (has teeth)", () => {
-  const FIXTURE_UNIT = "tests/unit/probe.test.ts" // a real file (no false path fail)
-  const FIXTURE_FAKE = "tests/unit/this-fc-hellgate-fixture-does-not-exist-zzz.test.ts"
-
-  function fixtureYaml({
-    withDuplicate = true,
-  }: {
-    readonly withDuplicate?: boolean
-  } = {}): string {
+  function fixtureYaml(): string {
     return [
       "id: fc-hellgate-injection-probe",
       "title: injection probe",
@@ -175,19 +129,15 @@ describe("fc YAML hellgate — red-on-injection (has teeth)", () => {
       "evidence:",
       "  code: []",
       "  tests:",
-      // (1) duplicate `unit:` key at indent 4 → first list silently dropped.
-      // The dangling-evidence rail below deliberately disables this separate
-      // syntax violation so it can reach its own assertion.
-      `    unit: ["${FIXTURE_UNIT}"]`,
-      ...(withDuplicate ? [`    unit: ["${FIXTURE_UNIT}"]`] : []),
-      // (2) a fabricated dangling path
-      `    integration: ["${FIXTURE_FAKE}"]`,
+      '    unit: ["tests/unit/probe.test.ts"]',
+      '    unit: ["tests/unit/probe.test.ts"]',
+      "    integration: []",
       "    contract: []",
       "",
     ].join("\n")
   }
 
-  test("check-1 scanner flags the injected duplicate `unit:` key", () => {
+  test("scanner flags the injected duplicate `unit:` key", () => {
     const hits = findDuplicateKeys(fixtureYaml())
     const unitDup = hits.find((h) => h.key === "unit")
     expect(unitDup).toBeDefined()
@@ -204,28 +154,5 @@ describe("fc YAML hellgate — red-on-injection (has teeth)", () => {
       "",
     ].join("\n")
     expect(findDuplicateKeys(clean)).toEqual([])
-  })
-
-  test("check-2 existence gate flags the injected dangling path", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "fc-yaml-hellgate-"))
-    try {
-      const featDir = join(dir, "01-agent-loop")
-      const { mkdir } = await import("node:fs/promises")
-      await mkdir(featDir, { recursive: true })
-      await writeFile(join(featDir, "probe.yaml"), fixtureYaml({ withDuplicate: false }), "utf8")
-
-      const features = await loadFeaturesStrict(dir)
-      expect(features.length).toBe(1)
-
-      const missing: string[] = []
-      for (const { feature } of features) {
-        for (const { path: p } of evidencePaths(feature)) {
-          if (!(await pathExists(p))) missing.push(p)
-        }
-      }
-      expect(missing).toContain(FIXTURE_FAKE)
-    } finally {
-      await rm(dir, { recursive: true, force: true })
-    }
   })
 })

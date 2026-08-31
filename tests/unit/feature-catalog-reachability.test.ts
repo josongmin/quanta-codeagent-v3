@@ -68,6 +68,13 @@ const l4plus = (s: string): boolean => {
 }
 
 describe("fc reachability — import-graph ground truth", () => {
+  test("REACH-00: module graph is one immutable process-local snapshot", async () => {
+    // Strict mode requests module + symbol analysis together. Rebuilding the
+    // same graph there was duplicate work and allowed one verdict to observe
+    // two different source snapshots.
+    expect(await computeReachability()).toBe(r)
+  })
+
   test("REACH-01: entrypoint + core modules are reached", () => {
     expect(r.reached.has("src/apps/cli/index.ts")).toBe(true)
     expect(r.reached.has("src/agent/loop.ts")).toBe(true)

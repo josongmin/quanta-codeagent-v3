@@ -32,12 +32,15 @@ import { checkFeatureDoD } from "../../tools/pm/definition-of-done"
 // (`2845e206c`). The anchored constant is the SSOT both the tool and this test
 // must read.
 const FEATURES_DIR = ANCHORED_FEATURES_DIR
+// Both ratchet directions judge one immutable on-disk catalog snapshot. A
+// second full load adds no authority and doubles the 1,069-file parse cost.
+const catalogOnce = loadFeaturesStrict(FEATURES_DIR)
 
 describe("Definition-of-Done ratchet (tools/pm)", () => {
   const baselineSet = new Set(baseline as string[])
 
   test("NO NEW HOLES — every DoD failure is grandfathered in baseline.json", async () => {
-    const features = await loadFeaturesStrict(FEATURES_DIR)
+    const features = await catalogOnce
     const failingNow = features
       .map((lf) => checkFeatureDoD(lf.feature))
       .filter((r) => r.verdict === "fail")
@@ -57,7 +60,7 @@ describe("Definition-of-Done ratchet (tools/pm)", () => {
   })
 
   test("MONOTONIC SHRINK — no stale baseline entries (a fixed/removed feature must leave baseline)", async () => {
-    const features = await loadFeaturesStrict(FEATURES_DIR)
+    const features = await catalogOnce
     const byId = new Map(features.map((lf) => [lf.feature.id, lf.feature]))
     const verdict = new Map(
       features.map((lf) => [lf.feature.id, checkFeatureDoD(lf.feature).verdict]),
