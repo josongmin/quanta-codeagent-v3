@@ -284,10 +284,11 @@ describe("dedicated Goal smoke", () => {
     expect(h.spawnCount()).toBe(1)
     const objective = h.authority.get(h.session.sessionId)
     expect(objective?.status).toBe("completed")
-    expect(objective?.successCriteria[0]?.completion?.source).toBe("verifier")
-    expect(objective?.successCriteria[0]?.completion?.sourceDigest).toMatch(
-      /^quanta-workspace-manifest-v1:/,
-    )
+    const criterion = objective?.successCriteria[0]
+    expect(criterion?.kind).toBe("checked")
+    if (criterion?.kind !== "checked") throw new Error("checked criterion missing")
+    expect(criterion.completion?.source).toBe("verifier")
+    expect(criterion.completion?.sourceDigest).toMatch(/^quanta-workspace-manifest-v1:/)
   })
 
   test("an exhausted one-turn budget settles once and arms no extra wake", async () => {
