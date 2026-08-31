@@ -53,6 +53,10 @@ const gateEnv = (entry: ToolSurfaceEntry): string | undefined => {
 const manifestEntriesForEnv = (env: string): readonly ToolSurfaceEntry[] =>
   GATED_TOOLS.filter((e) => gateEnv(e) === env)
 
+// Both directions judge the same immutable catalog snapshot. Loading it twice
+// repeats the full YAML read/parse without adding an independent witness.
+const catalogOnce = loadFeaturesStrict()
+
 // ── PURE predicate helpers (re-used by the red-on-injection proof) ──────────
 
 /** A — gate.envKey is a declared knob. */
@@ -113,7 +117,7 @@ describe("3-axis consistency ratchet — capability ↔ manifest ↔ feature-cat
   // 30s: loadFeaturesStrict() parses the WHOLE feature-catalog (cold ~21s) — the
   // default 5s budget cold-times-out under load (flake). Explicit, not heuristic.
   test("D — every fc capability: ref resolves to a real capability id (no dangling ref)", async () => {
-    const features = await loadFeaturesStrict()
+    const features = await catalogOnce
     const capIds = new Set(CAPABILITIES.map((c) => c.id))
     const dangling: string[] = []
     for (const { feature } of features) {
@@ -129,7 +133,7 @@ describe("3-axis consistency ratchet — capability ↔ manifest ↔ feature-cat
   }, 30000)
 
   test("D-reverse — every capability is referenced by ≥1 fc entry (FLAG, not fail)", async () => {
-    const features = await loadFeaturesStrict()
+    const features = await catalogOnce
     const referenced = new Set(
       features.map(({ feature }) => feature.capability).filter((c): c is string => c !== undefined),
     )
