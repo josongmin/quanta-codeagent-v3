@@ -20,7 +20,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { createObjectiveAuthority } from "@/objective"
+import { createObjectiveAuthority, STRICT_VERIFIER_EXECUTION_POSTURE } from "@/objective"
 import { buildObjectiveAuthority } from "@/runner/assemble/session-authorities"
 import type { PersistedObjectiveSnapshot } from "@/session"
 
@@ -38,6 +38,7 @@ const verifierReceipt = (over: Record<string, unknown> = {}) => ({
   checkId: "chk-1",
   objectiveRevision: 1,
   sourceDigest: "sha256:deadbeef",
+  executionPosture: STRICT_VERIFIER_EXECUTION_POSTURE,
   verifierResult: { exitCode: 0, passed: true },
   verifiedAt: 1_000,
   ...over,
