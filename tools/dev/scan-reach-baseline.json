@@ -167,17 +167,17 @@
       "walked": 3358
     },
     "tests/meta/no-test-js-artifacts-hellgate.test.ts#TESTS": {
-      "walked": 3502
+      "walked": 3503
     },
     "tests/unit/_arch/capability-literal-ratchet.test.ts#TESTS": {
-      "walked": 3580
+      "walked": 3581
     },
     "tests/unit/_arch/comment-scanner-burndown-ratchet.test.ts#SRC": {
       "walked": 3657,
       "matched": 5
     },
     "tests/unit/_arch/comment-scanner-burndown-ratchet.test.ts#TESTS": {
-      "walked": 3580,
+      "walked": 3581,
       "matched": 2
     },
     "tests/unit/_arch/comment-scanner-burndown-ratchet.test.ts#TOOLS": {
@@ -191,13 +191,13 @@
       "walked": 6
     },
     "tests/unit/_arch/gated-test-scope-ratchet.test.ts#REPO-TEST-FILES": {
-      "walked": 3902
+      "walked": 3903
     },
     "tests/unit/_arch/no-leftover-backup-files.test.ts#src": {
       "walked": 3749
     },
     "tests/unit/_arch/no-leftover-backup-files.test.ts#tests": {
-      "walked": 3723
+      "walked": 3724
     },
     "tests/unit/_arch/no-leftover-backup-files.test.ts#tools": {
       "walked": 1373
@@ -206,16 +206,16 @@
       "walked": 299
     },
     "tests/unit/_arch/real-quanta-home-escape-ratchet.test.ts#TESTS": {
-      "walked": 3502
+      "walked": 3503
     },
     "tests/unit/_arch/repo-index-hygiene.test.ts#INDEX": {
-      "walked": 14294
+      "walked": 14295
     },
     "tests/unit/_arch/repo-path-anchor-ratchet.test.ts#SRC": {
       "walked": 299
     },
     "tests/unit/_arch/repo-path-anchor-ratchet.test.ts#TESTS": {
-      "walked": 3502
+      "walked": 3503
     },
     "tests/unit/_arch/repo-path-anchor-ratchet.test.ts#TOOLS": {
       "walked": 115
@@ -224,7 +224,7 @@
       "walked": 299
     },
     "tests/unit/_arch/self-skip-reports-as-pass-ratchet.test.ts#TESTS": {
-      "walked": 3502
+      "walked": 3503
     },
     "tests/unit/_arch/tool-context-isp-ratchet.test.ts#TOOL-DIR": {
       "walked": 305
@@ -346,7 +346,7 @@
       "walked": 3749
     },
     "tests/unit/lint-debt-ratchet-reach.test.ts#TESTS": {
-      "walked": 3723
+      "walked": 3724
     },
     "tests/unit/manifest-codex-compat-hellgate.test.ts#SYSTEM-SKILLS": {
       "walked": 22
@@ -382,13 +382,13 @@
       "walked": 3681
     },
     "tests/unit/no-raw-nul-bytes-hellgate.test.ts#TESTS": {
-      "walked": 3592
+      "walked": 3593
     },
     "tests/unit/no-raw-process-env-knob-ratchet-hellgate.test.ts#SRC": {
       "walked": 3353
     },
     "tests/unit/no-timebomb-auth-fixtures-hellgate.test.ts#TESTS": {
-      "walked": 3665
+      "walked": 3666
     },
     "tests/unit/objective/authority-boundary-ratchet.test.ts#SRC": {
       "walked": 3353
@@ -433,7 +433,7 @@
       "walked": 3353
     },
     "tests/unit/orphan-orchestrator-ratchet.test.ts#TESTS": {
-      "walked": 3580
+      "walked": 3581
     },
     "tests/unit/permission/posture/e3-direct-writer-ratchet.test.ts#SRC": {
       "walked": 3358
@@ -534,7 +534,7 @@
       "walked": 3657
     },
     "tests/unit/test-fixtures-do-not-leak-tmp.test.ts#TESTS": {
-      "walked": 3580
+      "walked": 3581
     },
     "tests/unit/test-fixtures-do-not-leak-tmp.test.ts#TOOLS": {
       "walked": 115
@@ -543,7 +543,7 @@
       "walked": 299
     },
     "tests/unit/test-quality-ratchet-hellgate.test.ts#TESTS": {
-      "walked": 3501
+      "walked": 3502
     },
     "tests/unit/tool-no-throw-contract-guard.test.ts#TOOL-DIR": {
       "walked": 305
