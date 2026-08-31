@@ -123,7 +123,6 @@ writeDatasetJsonlAtPath(DATASET_PATH, [
 ])
 
 const TOKEN_BUDGET_DIR = allocTempDir("bench-full-budget-")
-const DEFAULT_SINGLE_BOX_GUARD_DIR = join(allocTempDir("bench-full-single-box-root-"), "guard")
 const RUN_EXIT_OK = ok("0\n==XQ-RUN-EXIT-XQ==\n")
 const DEFAULT_FULL_REPORT = JSON.stringify({ resolved_ids: ["psf__requests-5414"] })
 
@@ -246,7 +245,12 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     authJson: FULL_AUTH,
     datasetPath: DATASET_PATH,
     instanceIds: ["psf__requests-5414"],
-    singleBoxGuardDir: DEFAULT_SINGLE_BOX_GUARD_DIR,
+    // Each backend fixture needs an independent owner lease.  Full CI shards
+    // can schedule async cases in this file together; sharing one default
+    // directory turns scheduler overlap into a false production contention.
+    get singleBoxGuardDir() {
+      return join(allocTempDir("bench-full-single-box-case-"), "guard")
+    },
     tokenBudgetDir: TOKEN_BUDGET_DIR,
     tokenBudgetWaitMs: 5_000,
     tokenBudgetPollMs: 10,
@@ -616,6 +620,10 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     const firstRunDone = new Promise<void>((resolve) => {
       releaseFirstRun = resolve
     })
+    let signalFirstBenchStart: (() => void) | undefined
+    const firstBenchStartObserved = new Promise<void>((resolve) => {
+      signalFirstBenchStart = resolve
+    })
     let firstBenchStarted = false
     const { fn, calls } = createFullSpawnRecorder(
       whenArgsInclude("describe-security-groups", ok("sg-abc")),
@@ -644,6 +652,7 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
         (remote) => remote.includes("setsid bash -c") && remote.includes("run --swebench"),
         () => {
           firstBenchStarted = true
+          signalFirstBenchStart?.()
           return ok("LAUNCHED")
         },
       ),
@@ -666,12 +675,11 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
         tokenBudgetDir,
         singleBoxGuardDir,
       }).run()
-      expect(
-        await waitForCondition(
-          () => firstBenchStarted && calls.some((c) => c.args.includes("run-instances")),
-          { timeoutMs: 250 },
-        ),
-      ).toBe(true)
+      // Synchronize on the actual launched-run seam instead of making the
+      // ownership proof depend on a scheduler-dependent 250ms polling window.
+      await firstBenchStartObserved
+      expect(firstBenchStarted).toBe(true)
+      expect(calls.some((c) => c.args.includes("run-instances"))).toBe(true)
 
       await expect(
         createFullRemoteBackend({
