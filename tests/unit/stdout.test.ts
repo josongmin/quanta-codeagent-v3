@@ -198,6 +198,16 @@ describe("StdoutStream", () => {
     expect(out()).toBe(`${DIM}↺ continuation (full_retry/retry: resume_rejected 400)${RESET}\n`)
   })
 
+  test("usage model labels strip terminal controls and cap display length", () => {
+    const raw = `bad\n\r\t\u001b\u007f\u0085\u2028\u2029${"x".repeat(100)}`
+    new StdoutStream().emit({ type: "usage", inputTokens: 1, outputTokens: 2, model: raw })
+    expect(out()).toBe(`${DIM}— usage in 1, out 2 (bad${"x".repeat(61)}) —${RESET}\n`)
+    expect(out()).not.toContain("x".repeat(62))
+    for (const control of ["\r", "\t", "\u007f", "\u0085", "\u2028", "\u2029"])
+      expect(out()).not.toContain(control)
+    expect(out().split("\u001b").length - 1).toBe(2)
+  })
+
   test("implements StreamPort.emit and renders all variants once each", () => {
     const events: AgentEvent[] = [
       { type: "turn_start", turn: 1 },

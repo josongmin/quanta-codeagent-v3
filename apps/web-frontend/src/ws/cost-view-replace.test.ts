@@ -8,8 +8,12 @@
  * (old daemons); modern accounting-off hosts send `{status:"off"}`.
  */
 import { describe, expect, it } from "vitest"
-import type { CostSurfaceViewWire } from "../types/protocol.session.generated"
-import { applySessionEventToTranscript, initialTranscript } from "./session-hooks"
+import type { CostSurfaceViewWire, SessionSnapshotLite } from "../types/protocol.session.generated"
+import {
+  applySessionEventToTranscript,
+  initialTranscript,
+  transcriptReducer,
+} from "./session-hooks"
 
 const view = (totalUsd: number, calls: number): CostSurfaceViewWire => ({
   status: "on",
@@ -85,5 +89,62 @@ describe("A7 — costView replace semantics", () => {
       completed({ tokenUsage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 } }),
     )
     expect(state.costView?.status === "on" ? state.costView.totalUsd : undefined).toBe(3)
+  })
+
+  it("an attach/reconnect snapshot replaces the prior thread cost before another turn", () => {
+    const previous = applySessionEventToTranscript(
+      initialTranscript,
+      completed({ costView: view(99, 90) }),
+    )
+    const current = { ...view(2, 1), unpricedCalls: 1, continuityLost: true }
+    const snapshot = {
+      sessionId: "target",
+      revision: 1,
+      seq: 1,
+      pendingApproval: null,
+      openArtifacts: [],
+      capabilities: {} as SessionSnapshotLite["capabilities"],
+      state: {
+        status: "idle",
+        draftInput: "",
+        permissionMode: "default",
+        messageCount: 0,
+        costView: current,
+      },
+    } as SessionSnapshotLite
+    const state = transcriptReducer(previous, {
+      type: "snapshot",
+      snapshot,
+      receivedAt: "now",
+    })
+    expect(state.costView).toEqual(current)
+  })
+
+  it("explicit off replaces prior on without folding a co-delivered legacy delta", () => {
+    let state = applySessionEventToTranscript(
+      initialTranscript,
+      completed({ costView: view(3, 1) }),
+    )
+    state = applySessionEventToTranscript(
+      state,
+      completed({
+        costView: { status: "off" },
+        tokenUsage: { promptTokens: 500, completionTokens: 50, totalTokens: 550 },
+      }),
+    )
+    expect(state.costView).toEqual({ status: "off" })
+    expect(state.tokenUsage).toEqual(initialTranscript.tokenUsage)
+  })
+
+  it("the entire smaller snapshot replaces prior totals and duplicate delivery is idempotent", () => {
+    const current = { ...view(2, 1), estimatedUsd: 0.5, unpricedCalls: 1, continuityLost: true }
+    let state = applySessionEventToTranscript(
+      initialTranscript,
+      completed({ costView: view(99, 90) }),
+    )
+    state = applySessionEventToTranscript(state, completed({ costView: current }))
+    expect(state.costView).toEqual(current)
+    state = applySessionEventToTranscript(state, completed({ costView: current }))
+    expect(state.costView).toEqual(current)
   })
 })

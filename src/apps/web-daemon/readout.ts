@@ -51,6 +51,7 @@ import type {
 } from "@/protocol/session"
 import type { StoreHealthReport } from "@/session"
 import { errMessage, type ThinClientRoute } from "@/shared"
+import { sanitizeModelDisplayLabel } from "@/shared/model-display"
 import { renderWebModelReadout } from "./web-model-switch"
 
 export interface ReadoutResult {
@@ -495,7 +496,8 @@ const renderCost = (t: CostReadoutTotals): string => {
   if (t.subagentUsd > 0) {
     lines.push(`  root / subagents   $${t.rootUsd.toFixed(4)} / $${t.subagentUsd.toFixed(4)}`)
   }
-  if (t.modelSlug !== undefined) lines.push(`  model              ${t.modelSlug}`)
+  if (t.modelSlug !== undefined)
+    lines.push(`  model              ${sanitizeModelDisplayLabel(t.modelSlug)}`)
   if (t.turns === 0) lines.push("  (no completed turns yet)")
   return lines.join("\n")
 }
