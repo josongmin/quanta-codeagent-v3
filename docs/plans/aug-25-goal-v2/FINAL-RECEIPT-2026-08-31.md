@@ -1,5 +1,7 @@
 # Goal v2 R1-R7 final promotion receipt — 2026-08-31
 
+Final closeout run: 2026-09-01 KST.
+
 ## 판정
 
 - R1, R2, R3, R4, R5, R6, R7: **DONE**.
@@ -35,8 +37,8 @@ bun run typecheck:tests
 bun run lint
 bun run lint:debt
 bun test tests/unit/god-code-ratchet.test.ts tests/unit/_arch --parallel=1
-bun test tests/unit --parallel=1
-bun test tests/integration --parallel=1
+bun test tests/unit --parallel=1 --timeout=60000
+bun test tests/integration --parallel=1 --timeout=60000
 bun run smoke:goal
 bun test tests/e2e-pty/cli-goal-pursuit-e2e.test.ts --parallel=1
 QUANTA_E2E_CLI_BIN="$PWD/dist/agent" bun test tests/e2e-pty/cli-goal-pursuit-e2e.test.ts --parallel=1

@@ -2,10 +2,9 @@ import { describe, expect, test } from "bun:test"
 import { loadGroundingCases } from "@/../src/apps/eval/grounding"
 
 describe("grounding corpus governance", () => {
-  // four → five (aug-26): `pair-stale-objective-generation` landed with the
-  // goal-control evidence work. Both roles are still required per pair, so the
-  // count change cannot smuggle in a half-formed pair.
-  test("canary ships five raw/summary pair groups", () => {
+  // Pin identities, not only a count: b3610af2a added stale-objective to three
+  // existing pairs (26 -> 28 cases). A replacement or missing pair must fail.
+  test("canary ships every governed raw/summary pair", () => {
     const cases = loadGroundingCases({ suite: "canary" })
     const pairs = new Map<string, Set<string>>()
     for (const groundingCase of cases) {
@@ -14,7 +13,12 @@ describe("grounding corpus governance", () => {
       roles.add(groundingCase.pairRole)
       pairs.set(groundingCase.pairId, roles)
     }
-    expect(pairs.size).toBe(5)
+    expect([...pairs.keys()].sort()).toEqual([
+      "pair-oauth-rerun",
+      "pair-prompt-rules-status",
+      "pair-screenshot-failure",
+      "pair-stale-objective-generation",
+    ])
     for (const roles of pairs.values()) {
       expect([...roles].sort()).toEqual(["raw", "summary"])
     }

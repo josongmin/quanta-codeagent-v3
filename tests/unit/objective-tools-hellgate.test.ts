@@ -458,14 +458,28 @@ describe("objective tools — op variant round-trip (ADR-0402)", () => {
   })
 
   test("addBlocker promotes only after three distinct host-attributed attempts", async () => {
-    const { port, tools } = await seed()
+    const port = createObjectiveAuthority({
+      blockerDependencyResolver: {
+        resolve: ({ attemptId, target }) => ({
+          kind: "resolved",
+          dependencyId: `run:exec:${target.ref}`,
+          occurrenceEvidenceId: `occ:${target.ref}:${attemptId}`,
+        }),
+      },
+    })
+    const created = port.create("t", {
+      goal: "build feature",
+      successCriteria: ["tests pass", "tsc 0"],
+    })
+    if (created === null) throw new Error("seed refused")
+    const tools = toolsOver(port)
     const input = {
       thread_id: "t",
       op: {
         kind: "addBlocker" as const,
         reason: "needs key",
-        waiting_on: "user" as const,
-        dependency_target: { kind: "approval" as const, ref: "deploy-key" },
+        waiting_on: "tool" as const,
+        dependency_target: { kind: "tool" as const, ref: "deploy-key" },
       },
     }
     // GOAL P0-A — the attempts are the HOST's, reserved through the system
