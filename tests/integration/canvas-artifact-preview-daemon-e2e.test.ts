@@ -99,18 +99,8 @@ interface FactoryOpts {
   readonly useRegisterTool?: boolean
 }
 
-const buildFactory = (
-  cwd: string,
-  artifactPath: string,
-  bag: { sessionId?: string; registry?: ArtifactRegistry },
-  opts: FactoryOpts = {},
-): (() => Promise<ObservableRuntimeFacade>) => {
-  const wireArtifactSource = opts.wireArtifactSource ?? true
-  const wireResolver = opts.wireResolver ?? true
-  const wireRegistry = opts.wireRegistry ?? true
-  // When exercising the reachable producer, script the model to call the real
-  // `artifact_register` tool with the real jailed path (in scope here).
-  const scripts: StreamEvent[][] | undefined = opts.useRegisterTool
+const scriptsFor = (artifactPath: string, opts: FactoryOpts): StreamEvent[][] | undefined =>
+  opts.useRegisterTool
     ? [
         toolUseScript("call-reg-1", "artifact_register", {
           kind: "image",
@@ -120,61 +110,93 @@ const buildFactory = (
         textScript("registered"),
       ]
     : undefined
+
+const permissionFor = (useRegisterTool: boolean): PermissionContext => {
+  let mode: PermissionContext["mode"] = useRegisterTool ? "bypass" : "acceptEdits"
+  return {
+    get mode() {
+      return mode
+    },
+    set mode(next) {
+      mode = next
+    },
+  }
+}
+
+const prepareRegistry = (
+  artifactPath: string,
+  scripts: StreamEvent[][] | undefined,
+  bag: { registry?: ArtifactRegistry },
+  wireRegistry: boolean,
+): ArtifactRegistry | undefined => {
+  if (!wireRegistry) return undefined
+  const registry = createArtifactRegistry({ now: () => 1, idFactory: monotonicIdFactory("art") })
+  if (scripts === undefined) {
+    registry.register({ kind: "image", path: artifactPath, mediaType: "image/png" })
+  }
+  bag.registry = registry
+  return registry
+}
+
+const runtimeBaseFor = (
+  cwd: string,
+  registry: ArtifactRegistry | undefined,
+  scripts: StreamEvent[][] | undefined,
+  opts: FactoryOpts,
+): RuntimeAgentConfigBase => {
+  const abort = new AbortController()
+  return {
+    llm: new RecordingLLM(scripts),
+    registry: new ToolRegistry(buildDefaultTools(registry ? { artifactRegistry: registry } : {})),
+    stream: new StdoutStream(),
+    permission: permissionFor(opts.useRegisterTool === true),
+    messages: [],
+    system: buildSystemPrompt(cwd),
+    cwd,
+    maxTurns: 8,
+    signal: abort.signal,
+    hitl: { enabled: true },
+    ...(opts.useRegisterTool ? { onConfirm: async () => true } : {}),
+    ...(registry ? { artifactRegistry: registry } : {}),
+  }
+}
+
+const exposeArtifactPorts = (
+  facade: ObservableRuntimeFacade,
+  canvasArtifact: ReturnType<typeof createCanvasArtifactSource>,
+  resolver: ReturnType<typeof createArtifactPreviewResolver> | undefined,
+  opts: FactoryOpts,
+): void => {
+  if (opts.wireArtifactSource ?? true) {
+    Object.defineProperty(facade, "canvasArtifact", { get: () => canvasArtifact, enumerable: true })
+  }
+  if ((opts.wireResolver ?? true) && resolver !== undefined) {
+    Object.defineProperty(facade, "artifactPreviewResolver", {
+      get: () => resolver,
+      enumerable: true,
+    })
+  }
+}
+
+const buildFactory = (
+  cwd: string,
+  artifactPath: string,
+  bag: { sessionId?: string; registry?: ArtifactRegistry },
+  opts: FactoryOpts = {},
+): (() => Promise<ObservableRuntimeFacade>) => {
+  const wireArtifactSource = opts.wireArtifactSource ?? true
+  const wireResolver = opts.wireResolver ?? true
+  const wireRegistry = opts.wireRegistry ?? true
   return async (): Promise<ObservableRuntimeFacade> => {
-    const abort = new AbortController()
-    // `bypass` so the mutating `artifact_register` tool auto-allows (the reachable
-    // producer path); the HITL gate still enforces hand-off/always-confirm tiers.
-    let permMode: PermissionContext["mode"] = opts.useRegisterTool ? "bypass" : "acceptEdits"
-    const permission: PermissionContext = {
-      get mode() {
-        return permMode
-      },
-      set mode(next) {
-        permMode = next
-      },
-    }
-    const registry = wireRegistry
-      ? createArtifactRegistry({ now: () => 1, idFactory: monotonicIdFactory("art") })
-      : undefined
-    // Pre-register ONE artifact so the FIRST completed turn's drain surfaces it
-    // as a session `artifact.ready` event (the SSOT producer path). When `scripts`
-    // are supplied the model registers via the real `artifact_register` tool
-    // instead (the reachable producer), so we do NOT pre-register.
-    if (registry !== undefined) {
-      if (scripts === undefined) {
-        registry.register({ kind: "image", path: artifactPath, mediaType: "image/png" })
-      }
-      bag.registry = registry
-    }
+    const scripts = scriptsFor(artifactPath, opts)
+    const registry = prepareRegistry(artifactPath, scripts, bag, wireRegistry)
     const canvasArtifact = createCanvasArtifactSource()
     const resolver =
       registry !== undefined
         ? createArtifactPreviewResolver({ registry, jailRoot: cwd })
         : undefined
 
-    const base: RuntimeAgentConfigBase = {
-      llm: new RecordingLLM(scripts),
-      // Thread the SHARED registry into the tools so `artifact_register` is
-      // registered into the SAME instance the drain reads (mirrors the daemon
-      // factory's real wiring — proves the reachable producer, no split-brain).
-      registry: new ToolRegistry(
-        buildDefaultTools(registry !== undefined ? { artifactRegistry: registry } : {}),
-      ),
-      stream: new StdoutStream(),
-      permission,
-      messages: [],
-      system: buildSystemPrompt(cwd),
-      cwd,
-      maxTurns: 8,
-      signal: abort.signal,
-      hitl: { enabled: true },
-      // `artifact_register` is a mutating `always-confirm` tool; auto-approve so
-      // the reachable-producer turn completes (the register lands, the drain
-      // surfaces it). Absent for the pre-registered paths (they never confirm).
-      ...(opts.useRegisterTool ? { onConfirm: async () => true } : {}),
-      // The PRODUCER: the turn runner drains this on completion into result.artifacts.
-      ...(registry !== undefined ? { artifactRegistry: registry } : {}),
-    }
+    const base = runtimeBaseFor(cwd, registry, scripts, opts)
     const { runtime } = await createRuntimeFromAgentConfigBase({
       base,
       turnAssembler: buildInteractiveTurnAssembler(),
@@ -184,19 +206,7 @@ const buildFactory = (
       shutdown: async () => undefined,
     })
     const facade = runtime as ObservableRuntimeFacade
-    // Expose the sources so main()'s buildCanvasPorts + config wiring read them.
-    if (wireArtifactSource) {
-      Object.defineProperty(facade, "canvasArtifact", {
-        get: () => canvasArtifact,
-        enumerable: true,
-      })
-    }
-    if (wireResolver && resolver !== undefined) {
-      Object.defineProperty(facade, "artifactPreviewResolver", {
-        get: () => resolver,
-        enumerable: true,
-      })
-    }
+    exposeArtifactPorts(facade, canvasArtifact, resolver, { wireArtifactSource, wireResolver })
     const realCreate = facade.createSession.bind(facade)
     facade.createSession = (async (cfg) => {
       const session = await realCreate(cfg)

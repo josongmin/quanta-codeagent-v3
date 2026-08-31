@@ -1108,21 +1108,15 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
   })
 
   test("ALWAYS terminates the box — even when the remote run throws", async () => {
-    const calls: Array<{ cmd: string; args: string[] }> = []
-    const fn: SpawnFn = async (cmd, args): Promise<SpawnResult> => {
-      calls.push({ cmd, args: [...args] })
-      if (args.includes("describe-security-groups"))
-        return { code: 0, stdout: "sg-abc", stderr: "" }
-      if (cmd === "curl") return { code: 0, stdout: "9.9.9.9", stderr: "" }
-      if (args.includes("get-parameter"))
-        return { code: 0, stdout: `${SSM_RESOLVED_AMI}\n`, stderr: "" }
-      if (args.includes("run-instances")) return { code: 0, stdout: "i-xyz", stderr: "" }
-      if (args.includes("describe-instances")) return { code: 0, stdout: "1.2.3.4", stderr: "" }
-      // make every ssh FAIL (incl. the readiness probe) — the run never gets going,
-      // but the box must STILL be terminated.
-      if (cmd === "ssh") return { code: 1, stdout: "", stderr: "boom" }
-      return { code: 0, stdout: "", stderr: "" }
-    }
+    const { fn, calls } = createFullSpawnRecorder(
+      whenArgsInclude("describe-security-groups", ok("sg-abc")),
+      whenCmd("curl", ok("9.9.9.9")),
+      whenArgsInclude("run-instances", ok("i-xyz")),
+      whenArgsInclude("describe-instances", ok("1.2.3.4")),
+      // Make every ssh FAIL (incl. readiness): the run never gets going, but
+      // the box must STILL be terminated.
+      whenCmd("ssh", fail(1, "boom")),
+    )
     await createFullRemoteBackend({ ...baseCfg, spawn: fn })
       .run()
       .catch(() => undefined)

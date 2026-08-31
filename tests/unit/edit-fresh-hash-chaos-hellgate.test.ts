@@ -131,6 +131,73 @@ const advertisedHash = (r: ToolResult): string => {
 
 const CWD = "/in-mem"
 
+type ChaosState = {
+  readonly version: number[]
+  readonly lastHash: string[]
+  readonly staleHash: Array<string | undefined>
+  goodOps: number
+  badOps: number
+  goodStaleViolations: number
+  badPassViolations: number
+}
+
+const runStaleChaosEdit = async (
+  tool: ReturnType<typeof makeEditTool>,
+  files: ReadonlyMap<string, string>,
+  paths: readonly string[],
+  state: ChaosState,
+  fileIndex: number,
+): Promise<void> => {
+  const path = nth(paths, fileIndex, "chaos path")
+  const current = nth(state.version, fileIndex, "chaos version")
+  state.badOps += 1
+  const result = await run(
+    tool,
+    {
+      path,
+      old_string: `v = ${current}`,
+      new_string: `v = ${current + 1}`,
+      expected_hash: state.staleHash[fileIndex],
+    },
+    CWD,
+    true,
+  )
+  if (result.failure?.mode !== "stale_precondition") state.badPassViolations += 1
+  expect(result.ok).toBe(false)
+  expect(result.failure?.mode).toBe("stale_precondition")
+  expect(files.get(path)).toBe(`v = ${current}`)
+}
+
+const runFreshChaosEdit = async (
+  tool: ReturnType<typeof makeEditTool>,
+  files: ReadonlyMap<string, string>,
+  paths: readonly string[],
+  state: ChaosState,
+  fileIndex: number,
+): Promise<void> => {
+  const path = nth(paths, fileIndex, "chaos path")
+  const current = nth(state.version, fileIndex, "chaos version")
+  state.goodOps += 1
+  const result = await run(
+    tool,
+    {
+      path,
+      old_string: `v = ${current}`,
+      new_string: `v = ${current + 1}`,
+      expected_hash: nth(state.lastHash, fileIndex, "fresh hash"),
+    },
+    CWD,
+    true,
+  )
+  if (result.failure?.mode === "stale_precondition") state.goodStaleViolations += 1
+  expect(result.ok).toBe(true)
+  expect(result.failure).toBeUndefined()
+  state.staleHash[fileIndex] = nth(state.lastHash, fileIndex, "prior fresh hash")
+  state.version[fileIndex] = current + 1
+  state.lastHash[fileIndex] = advertisedHash(result)
+  expect(state.lastHash[fileIndex]).toBe(sha256Hex(files.get(path) ?? ""))
+}
+
 describe("jul-13 edit-fresh-hash CHAOS — deep chain", () => {
   test("1. DEEP CHAIN: N=20 same-file edits, each fed the prior fresh hash, ALL succeed with ZERO stale", async () => {
     const path = `${CWD}/deep.txt`
@@ -318,75 +385,34 @@ describe("jul-13 edit-fresh-hash CHAOS — seeded property (interleaved multi-fi
     //  (GOOD) supplies that file's CORRECT last-advertised hash → must SUCCEED, or
     //  (BAD)  supplies a captured STALE hash for that file       → must STALE.
     // Counters prove BOTH branches actually fired (non-vacuous coverage).
-    let goodOps = 0
-    let badOps = 0
-    let goodStaleViolations = 0 // GOOD op that wrongly went stale (fix broken under interleave)
-    let badPassViolations = 0 // BAD op that wrongly passed (staleness not enforced)
+    const state: ChaosState = {
+      version,
+      lastHash,
+      staleHash,
+      goodOps: 0,
+      badOps: 0,
+      goodStaleViolations: 0,
+      badPassViolations: 0,
+    }
 
     for (let op = 0; op < OPS; op++) {
       const f = randInt(rng, FILE_COUNT)
-      const p = nth(paths, f, "p")
-      const cur = nth(version, f, "cur")
       const useStale = staleHash[f] !== undefined && rng() < 0.4
 
       if (useStale) {
-        // BAD branch: a hash captured before an intervening edit to THIS file.
-        badOps++
-        const r = await run(
-          tool,
-          {
-            path: p,
-            old_string: `v = ${cur}`,
-            new_string: `v = ${cur + 1}`,
-            expected_hash: staleHash[f],
-          },
-          CWD,
-          true,
-        )
-        // INVARIANT (BAD direction): a stale hash ALWAYS rejects. The file must be
-        // UNTOUCHED (version unchanged), and staleHash stays armed for retry.
-        if (r.failure?.mode !== "stale_precondition") badPassViolations++
-        expect(r.ok).toBe(false)
-        expect(r.failure?.mode).toBe("stale_precondition")
-        expect(files.get(p)).toBe(`v = ${cur}`)
+        await runStaleChaosEdit(tool, files, paths, state, f)
       } else {
-        // GOOD branch: the file's CORRECT last-advertised hash.
-        goodOps++
-        const r = await run(
-          tool,
-          {
-            path: p,
-            old_string: `v = ${cur}`,
-            new_string: `v = ${cur + 1}`,
-            expected_hash: lastHash[f],
-          },
-          CWD,
-          true,
-        )
-        // INVARIANT (GOOD direction): the correct last-advertised hash NEVER stales.
-        if (r.failure?.mode === "stale_precondition") goodStaleViolations++
-        expect(r.ok).toBe(true)
-        expect(r.failure).toBeUndefined()
-        // The edit landed: bump version, capture the PRIOR lastHash as the new
-        // stale witness (it is now genuinely stale — an intervening edit occurred),
-        // and record the fresh hash as the new correct precondition.
-        staleHash[f] = lastHash[f]
-        version[f] = cur + 1
-        lastHash[f] = advertisedHash(r)
-        // Real-effect check: the advertised hash equals the digest of the file's
-        // actual current bytes (the chain never advertised a hash that would
-        // stale its own next same-file edit).
-        expect(lastHash[f]).toBe(sha256Hex(files.get(p) ?? ""))
+        await runFreshChaosEdit(tool, files, paths, state, f)
       }
     }
 
     // Both directions must have been EXERCISED (guards against a vacuous property:
     // e.g. the coin never flipping BAD would make the stale-enforcement claim empty).
-    expect(goodOps).toBeGreaterThan(0)
-    expect(badOps).toBeGreaterThan(0)
+    expect(state.goodOps).toBeGreaterThan(0)
+    expect(state.badOps).toBeGreaterThan(0)
     // Zero violations in either direction.
-    expect(goodStaleViolations).toBe(0)
-    expect(badPassViolations).toBe(0)
+    expect(state.goodStaleViolations).toBe(0)
+    expect(state.badPassViolations).toBe(0)
     // Final consistency: every file's recorded lastHash matches its on-disk bytes.
     for (let f = 0; f < FILE_COUNT; f++) {
       expect(lastHash[f]).toBe(sha256Hex(files.get(nth(paths, f, "paths")) ?? ""))

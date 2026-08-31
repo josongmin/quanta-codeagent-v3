@@ -47,19 +47,19 @@ const makeFakeAdapter = (
       })
     const respond = (body?: unknown, ok = true, message?: string) =>
       respondTo(req.seq, req.command, body, ok, message)
-    switch (req.command) {
-      case "initialize":
+    const handlers: Record<string, () => void> = {
+      initialize: () => {
         // Faithful to real debugpy: NO `initialized` event until launch arrives,
         // and the launch RESPONSE is deferred until configurationDone.
         respond({ supportsConfigurationDoneRequest: true })
-        break
-      case "launch":
+      },
+      launch: () => {
         deferredLaunchSeq = req.seq // do NOT respond yet (red-on-injection: an
         // `await launch` driver deadlocks here — exactly the real-debugpy bug)
         initialized = true
         send({ type: "event", event: "initialized" }) // launch makes adapter config-ready
-        break
-      case "setBreakpoints":
+      },
+      setBreakpoints: () => {
         if (!initialized) return respond(undefined, false, "setBreakpoints before initialized")
         bpSet = true
         // failSetBreakpoints models an adapter that ERRORS/times out on the
@@ -68,16 +68,16 @@ const makeFakeAdapter = (
         // unverifiedBp models an adapter that can't bind the breakpoint (missing
         // debug info / source-path mismatch) → verified:false.
         respond({ breakpoints: [{ verified: opts.unverifiedBp !== true, line: 10 }] })
-        break
-      case "configurationDone":
+      },
+      configurationDone: () => {
         if (!bpSet) return respond(undefined, false, "configurationDone before breakpoints")
         respond()
         if (deferredLaunchSeq !== undefined) respondTo(deferredLaunchSeq, "launch") // NOW the launch resp
-        if (opts.stallStopped) break // emit neither stopped nor terminated (hang unless aborted)
+        if (opts.stallStopped) return // emit neither stopped nor terminated (hang unless aborted)
         if (opts.neverStops) send({ type: "event", event: "terminated", body: {} })
         else send({ type: "event", event: "stopped", body: { reason: "breakpoint", threadId: 1 } })
-        break
-      case "threads":
+      },
+      threads: () => {
         // Two threads model a concurrency dump (dlv reports goroutines here).
         respond({
           threads: [
@@ -85,8 +85,8 @@ const makeFakeAdapter = (
             { id: 2, name: "goroutine 2" },
           ],
         })
-        break
-      case "stackTrace":
+      },
+      stackTrace: () => {
         // FOUR frames — real adapters give each frame DISTINCT scope/var refs.
         // The driver captures only the top MAX_FRAMES_WITH_LOCALS (3): the 4th
         // (<module>) must never have its scopes/vars queried.
@@ -98,8 +98,8 @@ const makeFakeAdapter = (
             { id: 103, name: "<module>", line: 40 },
           ],
         })
-        break
-      case "scopes": {
+      },
+      scopes: () => {
         // Per-frame distinct refs (faithful to real adapters).
         const byFrame: Record<number, unknown[]> = {
           100: [
@@ -111,9 +111,8 @@ const makeFakeAdapter = (
           103: [{ name: "Locals", variablesReference: 4000 }], // never captured (frame cap)
         }
         respond({ scopes: byFrame[Number(req.arguments?.frameId)] ?? [] })
-        break
-      }
-      case "variables": {
+      },
+      variables: () => {
         // 1000 = compute Locals: `n` (scalar w/ type) + `acc` (aggregate w/ a
         // nested child ref → expansion). 1002 = acc's elements.
         const byRef: Record<number, unknown[]> = {
@@ -132,20 +131,23 @@ const makeFakeAdapter = (
         }
         capturedVarRefs.push(Number(req.arguments?.variablesReference))
         respond({ variables: byRef[Number(req.arguments?.variablesReference)] ?? [] })
-        break
-      }
-      case "evaluate":
+      },
+      evaluate: () => {
         if (opts.failEvaluate) return respond(undefined, false, "not available")
         respond({ result: "84", variablesReference: 0 })
-        break
-      case "terminate":
-      case "disconnect":
+      },
+      terminate: () => {
         respond()
         send({ type: "event", event: "terminated", body: {} })
-        break
-      default:
-        respond(undefined, false, `unknown command ${req.command}`)
+      },
+      disconnect: () => {
+        respond()
+        send({ type: "event", event: "terminated", body: {} })
+      },
     }
+    const handler = handlers[req.command]
+    if (handler === undefined) return respond(undefined, false, `unknown command ${req.command}`)
+    handler()
   }
 
   const transport: DapTransport = {
@@ -363,36 +365,36 @@ const makeWideDeepAdapter = () => {
       })
     const respond = (body?: unknown, ok = true, message?: string) =>
       respondTo(req.seq, req.command, body, ok, message)
-    switch (req.command) {
-      case "initialize":
+    const handlers: Record<string, () => void> = {
+      initialize: () => {
         respond({ supportsConfigurationDoneRequest: true })
-        break
-      case "launch":
+      },
+      launch: () => {
         deferredLaunchSeq = req.seq
         initialized = true
         send({ type: "event", event: "initialized" })
-        break
-      case "setBreakpoints":
+      },
+      setBreakpoints: () => {
         if (!initialized) return respond(undefined, false, "before initialized")
         bpSet = true
         respond({ breakpoints: [{ verified: true, line: 1 }] })
-        break
-      case "configurationDone":
+      },
+      configurationDone: () => {
         if (!bpSet) return respond(undefined, false, "before breakpoints")
         respond()
         if (deferredLaunchSeq !== undefined) respondTo(deferredLaunchSeq, "launch")
         send({ type: "event", event: "stopped", body: { reason: "breakpoint", threadId: 1 } })
-        break
-      case "threads":
+      },
+      threads: () => {
         respond({ threads: [{ id: 1, name: "main" }] })
-        break
-      case "stackTrace":
+      },
+      stackTrace: () => {
         respond({ stackFrames: [{ id: 1, name: "f", line: 1, source: { path: "/p/x.py" } }] })
-        break
-      case "scopes":
+      },
+      scopes: () => {
         respond({ scopes: [{ name: "Locals", variablesReference: 500 }] })
-        break
-      case "variables": {
+      },
+      variables: () => {
         const ref = Number(req.arguments?.variablesReference)
         // 500: `deep` (a 3-level chain) FIRST, then 20 scalars (21 total > the
         // breadth cap of 16). 600→601→602 is the depth chain.
@@ -408,15 +410,19 @@ const makeWideDeepAdapter = () => {
           return respond({ variables: [{ name: "b", value: "B", variablesReference: 602 }] })
         if (ref === 602) return respond({ variables: [{ name: "c", value: "C" }] })
         return respond({ variables: [] })
-      }
-      case "terminate":
-      case "disconnect":
+      },
+      terminate: () => {
         respond()
         send({ type: "event", event: "terminated", body: {} })
-        break
-      default:
-        respond(undefined, false, `unknown ${req.command}`)
+      },
+      disconnect: () => {
+        respond()
+        send({ type: "event", event: "terminated", body: {} })
+      },
     }
+    const handler = handlers[req.command]
+    if (handler === undefined) return respond(undefined, false, `unknown ${req.command}`)
+    handler()
   }
   const transport: DapTransport = {
     send: (data) => {

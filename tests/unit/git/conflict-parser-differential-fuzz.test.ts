@@ -546,6 +546,23 @@ describe("conflict-parser differential fuzz — PART 2: constructed adversarial"
     expect(r.diagnostics.some((d) => d.kind === "marker_at_offset")).toBe(true)
   })
 
+  const assertNoiseParse = (source: string): void => {
+    const result = parseConflicts(source)
+    for (const block of result.blocks) {
+      const slice = source.slice(block.startOffset, block.endOffset)
+      expect(slice.startsWith("<")).toBe(true)
+      expect(slice.includes(">>>")).toBe(true)
+      expect(block.endOffset).toBeGreaterThan(block.startOffset)
+      expect(block.endLine).toBeGreaterThanOrEqual(block.startLine)
+      expect("base" in block).toBe(block.style !== "two-way")
+    }
+    for (const diagnostic of result.diagnostics) {
+      expect(diagnostic.line).toBeGreaterThanOrEqual(1)
+      expect(typeof diagnostic.message).toBe("string")
+      expect(diagnostic.message.length).toBeGreaterThan(0)
+    }
+  }
+
   // ── 2h. Pure fuzz: arbitrary marker-ish noise must NEVER throw ──
   for (let idx = 0; idx < 80; idx++) {
     test(`F${idx}: arbitrary marker-noise input degrades typed, never throws`, () => {
@@ -565,28 +582,7 @@ describe("conflict-parser differential fuzz — PART 2: constructed adversarial"
       const trailing = rng.bool() ? eol : ""
       const src = lines.join(eol) + trailing
 
-      // Contract: parseConflicts never throws on string input.
-      const r = parseConflicts(src)
-      // Every block must reproduce verbatim from its offsets and be internally
-      // consistent (start < end, marker prefix/suffix).
-      for (const b of r.blocks) {
-        const slice = src.slice(b.startOffset, b.endOffset)
-        expect(slice.startsWith("<")).toBe(true)
-        expect(slice.includes(">>>")).toBe(true)
-        expect(b.endOffset).toBeGreaterThan(b.startOffset)
-        expect(b.endLine).toBeGreaterThanOrEqual(b.startLine)
-        if (b.style === "two-way") {
-          expect("base" in b).toBe(false)
-        } else {
-          expect("base" in b).toBe(true)
-        }
-      }
-      // Diagnostics must all carry a sane 1-indexed line and a non-empty message.
-      for (const d of r.diagnostics) {
-        expect(d.line).toBeGreaterThanOrEqual(1)
-        expect(typeof d.message).toBe("string")
-        expect(d.message.length).toBeGreaterThan(0)
-      }
+      assertNoiseParse(src)
     })
   }
 

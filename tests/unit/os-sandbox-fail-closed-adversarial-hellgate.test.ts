@@ -335,6 +335,26 @@ describe("S7 property — no restrictive-profile + missing-backend ever spawns",
     "danger-full-access",
   ]
 
+  const assertPolicyOutcome = (
+    result: Awaited<ReturnType<ReturnType<typeof linuxOsSandbox>["spawn"]>>,
+    calls: readonly unknown[],
+    profile: SandboxPolicy["profile"],
+    backendPresent: boolean,
+  ): void => {
+    const isOptOut = profile === "off" || profile === "danger-full-access"
+    const shouldSpawn = isOptOut || backendPresent
+    expect(calls.length > 0).toBe(shouldSpawn)
+    if (!shouldSpawn) {
+      expect(result.exitCode).toBe(126)
+      expect(result.stdout).toBe("")
+      expect(result.sandboxApplied).toBe(false)
+    }
+    if (isOptOut) {
+      expect(result.sandboxApplied).toBe(false)
+      expect(result.degradeReason).toBeUndefined()
+    }
+  }
+
   test("linux fuzz {profile × bwrap-present?}: spawn IFF off/danger OR bwrap present", async () => {
     for (const profile of ALL_PROFILES) {
       for (const bwrapPresent of [true, false]) {
@@ -342,20 +362,7 @@ describe("S7 property — no restrictive-profile + missing-backend ever spawns",
         const which = bwrapPresent ? whichBwrapOnly : whichNone
         const sb = linuxOsSandbox({ spawner, which })
         const r = await sb.spawn({ command: ["echo", "hi"], cwd: "/ws" }, { profile })
-        const isOptOut = profile === "off" || profile === "danger-full-access"
-        const shouldSpawn = isOptOut || bwrapPresent
-        expect(calls.length > 0).toBe(shouldSpawn)
-        if (!shouldSpawn) {
-          // The refusal path: exit-126, empty stdout, not-applied.
-          expect(r.exitCode).toBe(126)
-          expect(r.stdout).toBe("")
-          expect(r.sandboxApplied).toBe(false)
-        }
-        if (isOptOut) {
-          // opt-out ⇒ ran, honestly reported not-applied, NO degradeReason.
-          expect(r.sandboxApplied).toBe(false)
-          expect(r.degradeReason).toBeUndefined()
-        }
+        assertPolicyOutcome(r, calls, profile, bwrapPresent)
       }
     }
   })
@@ -367,10 +374,7 @@ describe("S7 property — no restrictive-profile + missing-backend ever spawns",
         const which = present ? whichSandboxExecOnly : whichNone
         const sb = defaultOsSandbox({ spawner, platform: "darwin", which })
         const r = await sb.spawn({ command: ["echo", "hi"], cwd: "/ws" }, { profile })
-        const isOptOut = profile === "off" || profile === "danger-full-access"
-        const shouldSpawn = isOptOut || present
-        expect(calls.length > 0).toBe(shouldSpawn)
-        if (!shouldSpawn) expect(r.exitCode).toBe(126)
+        assertPolicyOutcome(r, calls, profile, present)
       }
     }
   })

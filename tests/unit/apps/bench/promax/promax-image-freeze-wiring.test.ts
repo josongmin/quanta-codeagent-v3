@@ -64,6 +64,35 @@ interface DockerOpts {
   readonly inspectOverride?: ReadonlyMap<string, Record<string, unknown>>
 }
 
+type DockerResult = { code: number; stdout: string; stderr: string }
+
+const dockerOk = (): DockerResult => ({ code: 0, stdout: "", stderr: "" })
+
+const inspectFacts = (ref: string, opts: DockerOpts): DockerResult => {
+  const digest = ref.includes("@sha256:") ? ref : digestFor(ref)
+  const facts = opts.inspectOverride?.get(ref) ?? {
+    Id: `sha256:${"1".repeat(64)}`,
+    Os: "linux",
+    Architecture: "amd64",
+    RepoDigests: [digest],
+  }
+  return { code: 0, stdout: `${JSON.stringify(facts)}\n`, stderr: "" }
+}
+
+const standardDockerResponse = (argv: readonly string[], opts: DockerOpts): DockerResult | null => {
+  if (["pull", "run", "cp", "rm"].includes(argv[0] ?? "")) return dockerOk()
+  if (argv[0] === "image" && argv[1] === "inspect") {
+    return inspectFacts(argv[argv.length - 1] as string, opts)
+  }
+  if (argv[0] === "exec") {
+    return { code: 0, stdout: "__QPMX_SENTINEL__=ABSENT\n__QPMX_CP__=OK\n", stderr: "" }
+  }
+  if (argv[0] === "container" && argv[1] === "inspect") {
+    return { code: 1, stdout: "", stderr: "No such container" }
+  }
+  return null
+}
+
 /**
  * A recording Docker fake. Anything outside the four verbs this chain is allowed
  * to use THROWS — the spend-safety assertion is structural, not a comment.
@@ -71,29 +100,8 @@ interface DockerOpts {
 const makeDocker = (calls: Recorded[], opts: DockerOpts = {}): DockerSpawn => {
   return async (argv) => {
     calls.push({ argv: [...argv] })
-    const verb = argv[0]
-    if (verb === "pull") return { code: 0, stdout: "", stderr: "" }
-    if (verb === "image" && argv[1] === "inspect") {
-      const ref = argv[argv.length - 1] as string
-      const isDigest = ref.includes("@sha256:")
-      const digest = isDigest ? ref : digestFor(ref)
-      const facts = opts.inspectOverride?.get(ref) ?? {
-        Id: `sha256:${"1".repeat(64)}`,
-        Os: "linux",
-        Architecture: "amd64",
-        RepoDigests: [digest],
-      }
-      return { code: 0, stdout: `${JSON.stringify(facts)}\n`, stderr: "" }
-    }
-    if (verb === "run") return { code: 0, stdout: "", stderr: "" }
-    if (verb === "cp") return { code: 0, stdout: "", stderr: "" }
-    if (verb === "exec") {
-      return { code: 0, stdout: "__QPMX_SENTINEL__=ABSENT\n__QPMX_CP__=OK\n", stderr: "" }
-    }
-    if (verb === "rm") return { code: 0, stdout: "", stderr: "" }
-    if (verb === "container" && argv[1] === "inspect") {
-      return { code: 1, stdout: "", stderr: "No such container" }
-    }
+    const response = standardDockerResponse(argv, opts)
+    if (response) return response
     throw new Error(`SPEND SAFETY: the freeze reached an unexpected docker verb: ${argv.join(" ")}`)
   }
 }

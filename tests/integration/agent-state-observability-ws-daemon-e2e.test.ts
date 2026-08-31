@@ -169,6 +169,34 @@ const agentStatePortsFor = (
   source: ReturnType<typeof createAgentStateSource>,
 ): AgentStatePorts => ({ source })
 
+type Waiter<T> = {
+  pred: (message: T) => boolean
+  resolve: (message: T) => void
+  timer: ReturnType<typeof setTimeout>
+}
+
+const resolveWaiters = <T>(waiters: Set<Waiter<T>>, message: T): void => {
+  for (const waiter of [...waiters]) {
+    if (!waiter.pred(message)) continue
+    clearTimeout(waiter.timer)
+    waiters.delete(waiter)
+    waiter.resolve(message)
+  }
+}
+
+const deliverFrame = <T>(
+  wire: string,
+  decode: (input: string) => T | null,
+  messages: T[],
+  waiters: Set<Waiter<T>>,
+): boolean => {
+  const message = decode(wire)
+  if (message === null) return false
+  messages.push(message)
+  resolveWaiters(waiters, message)
+  return true
+}
+
 /** A real WebSocket whose observability frames are collected (decoded). */
 const connect = (
   handle: WebDaemonHandle,
@@ -191,39 +219,13 @@ const connect = (
   sockets.push(ws)
   const observability: ObservabilityMessage[] = []
   const agentState: AgentStateMessage[] = []
-  type Waiter<T> = {
-    pred: (m: T) => boolean
-    resolve: (m: T) => void
-    timer: ReturnType<typeof setTimeout>
-  }
   const obsWaiters = new Set<Waiter<ObservabilityMessage>>()
   const asWaiters = new Set<Waiter<AgentStateMessage>>()
 
   ws.addEventListener("message", (event: MessageEvent) => {
     if (typeof event.data !== "string") return
-    const obs = decodeObservabilityFrame(event.data)
-    if (obs !== null) {
-      observability.push(obs)
-      for (const w of [...obsWaiters]) {
-        if (w.pred(obs)) {
-          clearTimeout(w.timer)
-          obsWaiters.delete(w)
-          w.resolve(obs)
-        }
-      }
-      return
-    }
-    const as = decodeAgentStateFrame(event.data)
-    if (as !== null) {
-      agentState.push(as)
-      for (const w of [...asWaiters]) {
-        if (w.pred(as)) {
-          clearTimeout(w.timer)
-          asWaiters.delete(w)
-          w.resolve(as)
-        }
-      }
-    }
+    if (deliverFrame(event.data, decodeObservabilityFrame, observability, obsWaiters)) return
+    deliverFrame(event.data, decodeAgentStateFrame, agentState, asWaiters)
   })
 
   const open = new Promise<void>((resolve, reject) => {

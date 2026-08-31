@@ -12,10 +12,10 @@
     },
     "lint/complexity/noExcessiveCognitiveComplexity": {
       "prod": 0,
-      "tests": 10
+      "tests": 0
     }
   },
-  "worstComplexity": 25,
+  "worstComplexity": 0,
   "justifications": {
     "lint/correctness/noUnusedVariables": "1 site: `src/apps/bench/profiles/promax.ts` `refuseOnBoxBootstrap` — a helper whose own doc says it is 'shared by the admission gate and the bootstrap port so the two can never drift', called by NEITHER. Pinned, not fixed: those two call sites do not exist in the file, so wiring it is a guess, and deleting it would discard an active lane's in-flight intent. This is the ceiling file's documented path for a newly-firing rule (admit at the true count; it only goes DOWN), NOT a raise to absorb new debt. When that lane wires or removes the helper, `bun run lint:debt --tighten` locks in 0.",
     "lint/suspicious/noConsole": "ALREADY CLASSIFIED, not unreviewed debt: the rule is `error` repo-wide and biome.json downgrades it to `warn` for six named files. 70 of the 71 sites are `src/apps/eval/index.ts` — a CLI entrypoint whose stdout IS its product — and the 71st is one allowlisted test. Routing them through a logger port would be churn that makes the tool worse. Pinned so the count cannot GROW without someone widening the biome override, which is a reviewable edit.",

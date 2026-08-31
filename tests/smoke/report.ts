@@ -22,31 +22,76 @@ const readExpect = (dir: string): ExpectSpec => {
   return JSON.parse(readFileSync(p, "utf8")) as ExpectSpec
 }
 
-export const renderCoverage = (
-  scenarios: readonly ScenarioMeta[],
-  results: readonly ScenarioResult[],
-): string => {
-  const toolByDepth = new Map<string, Record<string, number>>()
-  const forbidden = new Map<string, number>()
-  let withJudge = 0
-  let withContextRetention = 0
-  let withForbidden = 0
+type CoverageFacts = {
+  readonly toolByDepth: Map<string, Record<string, number>>
+  readonly forbidden: Map<string, number>
+  readonly withJudge: number
+  readonly withContextRetention: number
+  readonly withForbidden: number
+}
 
+const addCount = (counts: Map<string, number>, key: string): void => {
+  counts.set(key, (counts.get(key) ?? 0) + 1)
+}
+
+const collectToolCoverage = (
+  scenarios: readonly ScenarioMeta[],
+): Map<string, Record<string, number>> => {
+  const toolByDepth = new Map<string, Record<string, number>>()
   for (const meta of scenarios) {
-    const spec = readExpect(meta.dir)
-    for (const tool of spec.toolCalls?.required ?? []) {
+    for (const tool of readExpect(meta.dir).toolCalls?.required ?? []) {
       const row = toolByDepth.get(tool) ?? {}
       row[meta.depth] = (row[meta.depth] ?? 0) + 1
       toolByDepth.set(tool, row)
     }
-    for (const tool of spec.toolCalls?.forbidden ?? []) {
-      forbidden.set(tool, (forbidden.get(tool) ?? 0) + 1)
-    }
+  }
+  return toolByDepth
+}
+
+const collectAssertionCoverage = (
+  scenarios: readonly ScenarioMeta[],
+): Omit<CoverageFacts, "toolByDepth"> => {
+  const forbidden = new Map<string, number>()
+  let withJudge = 0
+  let withContextRetention = 0
+  let withForbidden = 0
+  for (const meta of scenarios) {
+    const spec = readExpect(meta.dir)
+    for (const tool of spec.toolCalls?.forbidden ?? []) addCount(forbidden, tool)
     if ((spec.toolCalls?.forbidden ?? []).length > 0) withForbidden += 1
     if (spec.judge !== undefined) withJudge += 1
     if ((spec.contextRetention ?? []).length > 0) withContextRetention += 1
   }
+  return { forbidden, withJudge, withContextRetention, withForbidden }
+}
 
+const collectCoverage = (scenarios: readonly ScenarioMeta[]): CoverageFacts => {
+  return { toolByDepth: collectToolCoverage(scenarios), ...collectAssertionCoverage(scenarios) }
+}
+
+const toolDepthRows = (toolByDepth: ReadonlyMap<string, Record<string, number>>): string[] => {
+  const pad = (value: string, width: number): string => value.padEnd(width)
+  return [
+    `  ${pad("tool", 16)}${DEPTHS.map((depth) => pad(depth, 10)).join("")}`,
+    ...[...toolByDepth.keys()].sort().map((tool) => {
+      const row = toolByDepth.get(tool) ?? {}
+      return `  ${pad(tool, 16)}${DEPTHS.map((depth) => pad(String(row[depth] ?? 0), 10)).join("")}`
+    }),
+  ]
+}
+
+const resultSummary = (results: readonly ScenarioResult[]): string | null => {
+  if (results.length === 0) return null
+  const count = (status: ScenarioResult["status"]): number =>
+    results.filter((result) => result.status === status).length
+  return `results: ${count("passed")} passed · ${count("failed")} failed · ${count("skipped")} skipped`
+}
+
+export const renderCoverage = (
+  scenarios: readonly ScenarioMeta[],
+  results: readonly ScenarioResult[],
+): string => {
+  const facts = collectCoverage(scenarios)
   const lines: string[] = []
   lines.push("── coverage ──────────────────────────────")
   const byDepth = DEPTHS.map((d) => `${d}=${scenarios.filter((s) => s.depth === d).length}`).join(
@@ -55,28 +100,20 @@ export const renderCoverage = (
   lines.push(`scenarios: ${scenarios.length}  (${byDepth})`)
   lines.push("")
   lines.push("tool × depth (required):")
-  const tools = [...toolByDepth.keys()].sort()
-  const pad = (s: string, n: number): string => s.padEnd(n)
-  lines.push(`  ${pad("tool", 16)}${DEPTHS.map((d) => pad(d, 10)).join("")}`)
-  for (const tool of tools) {
-    const row = toolByDepth.get(tool) ?? {}
-    lines.push(`  ${pad(tool, 16)}${DEPTHS.map((d) => pad(String(row[d] ?? 0), 10)).join("")}`)
-  }
+  lines.push(...toolDepthRows(facts.toolByDepth))
   lines.push("")
   lines.push(
-    `assertions: ${withForbidden} use forbidden-tool sentinels · ${withContextRetention} context-retention · ${withJudge} llm-judge`,
+    `assertions: ${facts.withForbidden} use forbidden-tool sentinels · ${facts.withContextRetention} context-retention · ${facts.withJudge} llm-judge`,
   )
-  if (forbidden.size > 0) {
-    const fb = [...forbidden.entries()].map(([t, n]) => `${t}(${n})`).join(" ")
+  if (facts.forbidden.size > 0) {
+    const fb = [...facts.forbidden.entries()].map(([t, n]) => `${t}(${n})`).join(" ")
     lines.push(`forbidden sentinels: ${fb}`)
   }
 
-  if (results.length > 0) {
-    const passed = results.filter((r) => r.status === "passed").length
-    const failed = results.filter((r) => r.status === "failed").length
-    const skipped = results.filter((r) => r.status === "skipped").length
+  const summary = resultSummary(results)
+  if (summary) {
     lines.push("")
-    lines.push(`results: ${passed} passed · ${failed} failed · ${skipped} skipped`)
+    lines.push(summary)
   }
   lines.push("──────────────────────────────────────────")
   return lines.join("\n")
