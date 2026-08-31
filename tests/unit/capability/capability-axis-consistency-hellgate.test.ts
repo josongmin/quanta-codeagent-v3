@@ -32,6 +32,14 @@ import { RUNTIME_CONFIG_KNOBS } from "@/shared/runtime-config-knobs"
 import { entryToolNames, GATED_TOOLS, type ToolSurfaceEntry } from "@/tool"
 import { loadFeaturesStrict } from "../../../tools/feature-catalog/schema"
 
+// Both axis-D assertions judge the immutable catalog snapshot. Parse it once so
+// the reverse-coverage observation cannot contend for the same full-corpus I/O
+// a second time; its correctness remains the production strict loader's result.
+const featuresOnce = loadFeaturesStrict()
+// This is the same whole-catalog integrity scan as the anchored catalog rail.
+// Under eight sequential CI shards it is I/O-bound, not a latency contract.
+const FULL_CATALOG_SCAN_TIMEOUT_MS = 300_000
+
 // ── shared axis projections ────────────────────────────────────────────────
 
 /** Every env key the knob registries actually declare (axis A — "real knob"). */
@@ -110,36 +118,44 @@ describe("3-axis consistency ratchet — capability ↔ manifest ↔ feature-cat
   })
 
   // ── Axis D: fc `capability:` references resolve; reverse coverage flagged ───
-  // 30s: loadFeaturesStrict() parses the WHOLE feature-catalog (cold ~21s) — the
-  // default 5s budget cold-times-out under load (flake). Explicit, not heuristic.
-  test("D — every fc capability: ref resolves to a real capability id (no dangling ref)", async () => {
-    const features = await loadFeaturesStrict()
-    const capIds = new Set(CAPABILITIES.map((c) => c.id))
-    const dangling: string[] = []
-    for (const { feature } of features) {
-      if (feature.capability === undefined) continue
-      if (!capIds.has(feature.capability)) {
-        dangling.push(`${feature.id} → capability:"${feature.capability}"`)
+  test(
+    "D — every fc capability: ref resolves to a real capability id (no dangling ref)",
+    async () => {
+      const features = await featuresOnce
+      const capIds = new Set(CAPABILITIES.map((c) => c.id))
+      const dangling: string[] = []
+      for (const { feature } of features) {
+        if (feature.capability === undefined) continue
+        if (!capIds.has(feature.capability)) {
+          dangling.push(`${feature.id} → capability:"${feature.capability}"`)
+        }
       }
-    }
-    expect(
-      dangling,
-      `fc entries reference non-existent capability ids: ${dangling.join(", ")}`,
-    ).toEqual([])
-  }, 30000)
+      expect(
+        dangling,
+        `fc entries reference non-existent capability ids: ${dangling.join(", ")}`,
+      ).toEqual([])
+    },
+    FULL_CATALOG_SCAN_TIMEOUT_MS,
+  )
 
-  test("D-reverse — every capability is referenced by ≥1 fc entry (FLAG, not fail)", async () => {
-    const features = await loadFeaturesStrict()
-    const referenced = new Set(
-      features.map(({ feature }) => feature.capability).filter((c): c is string => c !== undefined),
-    )
-    const unreferenced = CAPABILITIES.map((c) => c.id).filter((id) => !referenced.has(id))
-    if (unreferenced.length > 0) {
-    }
-    // The 4 seeded caps (workflow/artifact-store/image-gen/office-authoring) are all
-    // linked, so today this is empty — assert that as a forward ratchet.
-    expect(unreferenced).toEqual([])
-  }, 30000)
+  test(
+    "D-reverse — every capability is referenced by ≥1 fc entry (FLAG, not fail)",
+    async () => {
+      const features = await featuresOnce
+      const referenced = new Set(
+        features
+          .map(({ feature }) => feature.capability)
+          .filter((c): c is string => c !== undefined),
+      )
+      const unreferenced = CAPABILITIES.map((c) => c.id).filter((id) => !referenced.has(id))
+      if (unreferenced.length > 0) {
+      }
+      // The 4 seeded caps (workflow/artifact-store/image-gen/office-authoring) are all
+      // linked, so today this is empty — assert that as a forward ratchet.
+      expect(unreferenced).toEqual([])
+    },
+    FULL_CATALOG_SCAN_TIMEOUT_MS,
+  )
 
   // ── RED-ON-INJECTION: the ratchet has teeth ────────────────────────────────
   describe("red-on-injection — the ratchet rejects a broken capability", () => {
