@@ -424,6 +424,11 @@ describe("ADR-0187 fresh bag every tick", () => {
   test("[12] getBag changes between intervals → snapshot reflects latest state", async () => {
     const iv = makeIntervalCapture()
     const target = join(dir, "health.json")
+    const writes: string[] = []
+    let observeSecondWrite = (): void => {}
+    const secondWrite = new Promise<void>((resolve) => {
+      observeSecondWrite = resolve
+    })
     // Mutable bag — first poll has nothing wired; after we flip the flag,
     // subsequent polls see planQueue wired.
     let planQueueWired = false
@@ -437,17 +442,25 @@ describe("ADR-0187 fresh bag every tick", () => {
       hotReloadOnSighup: false,
       setInterval: iv.setInterval,
       clearInterval: iv.clearInterval,
-      snapshot: { write: { path: target } },
+      snapshot: {
+        write: {
+          path: target,
+          writeFile: async (_path, content) => {
+            writes.push(content)
+            if (writes.length === 2) observeSecondWrite()
+          },
+        },
+      },
     })
     // First emit: empty.
     await h.emitNow()
-    let parsed = JSON.parse(await readFile(target, "utf8")) as HealthSnapshot
+    let parsed = JSON.parse(writes[0] ?? "") as HealthSnapshot
     expect(parsed.summary.wiredCount).toBe(0)
     // Flip the wiring and re-emit (simulate the interval firing).
     planQueueWired = true
     iv.intervals[0]?.handler()
-    await new Promise<void>((r) => setTimeout(r, 5))
-    parsed = JSON.parse(await readFile(target, "utf8")) as HealthSnapshot
+    await secondWrite
+    parsed = JSON.parse(writes[1] ?? "") as HealthSnapshot
     expect(parsed.summary.wiredCount).toBe(1)
     const pq = parsed.slices.find((s) => s.slice === "planQueue")
     expect(pq?.wired).toBe(true)
