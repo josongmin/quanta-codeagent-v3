@@ -24,8 +24,8 @@
  *  - `python -c "import swebench"`        → exit 0 (or 1, scripted).
  *  - `python -m swebench.harness.run_evaluation \
  *       --predictions_path P --run_id R --instance_ids I … `
- *       → record every argv element (RS-separated) into `$ARGV_LOG`
- *         (an env var the test points at a file outside the harness's
+ *       → record every argv element (RS-separated) into a fixture-configured
+ *         log file outside the harness's
  *         tmp `work` dir, which is `rm -rf`'d immediately after the call),
  *         then emit a report JSON shaped like the upstream harness
  *         (`{ "resolved_ids": [...] }`) into the harness's cwd (= `work`),
@@ -33,8 +33,9 @@
  *
  * The stub is created in a per-test tmpdir, made executable, and the test's
  * `process.env.PATH` is prepended with that dir so `Bun.spawn(["python", …])`
- * resolves to it. `process.env.PATH` is restored in `afterEach` so nothing
- * leaks across tests (and across other suites — bun runs tests in one proc).
+ * resolves to it. Fixture controls are files beside the executable, because
+ * the production child deliberately receives a scrubbed environment.
+ * `process.env.PATH` is restored in `afterEach` so nothing leaks across tests.
  *
  * No real Python, no Docker, no network. Cleaned up in `afterEach`.
  */
@@ -82,31 +83,42 @@ describe("bench python harness e2e — stub `python` binary on PATH", () => {
     // Restore PATH BEFORE rm — never leak the stub PATH into other suites.
     if (savedPath === undefined) delete process.env.PATH
     else process.env.PATH = savedPath
-    delete process.env.QUANTA_HARNESS_ARGV_LOG
-    delete process.env.QUANTA_HARNESS_REPORT_BODY
-    delete process.env.QUANTA_HARNESS_SLEEP_S
-    delete process.env.QUANTA_HARNESS_EXIT
-    delete process.env.QUANTA_HARNESS_IMPORT_OK
     rmSync(dir, { recursive: true, force: true })
   })
 
   /**
    * Write a `python` shell script to `${dir}/python` (and a `python3` symlink-
    * by-copy) that:
-   *  - handles `-c "import swebench"` per `QUANTA_HARNESS_IMPORT_OK`
+   *  - handles `-c "import swebench"` per its fixture control file
    *  - handles `-m swebench.harness.run_evaluation ...` by recording argv to
-   *    `$QUANTA_HARNESS_ARGV_LOG` (RS-separated) and writing the JSON in
-   *    `$QUANTA_HARNESS_REPORT_BODY` to `report.json` in cwd, then either
-   *    sleeping (`$QUANTA_HARNESS_SLEEP_S`) or exiting with
-   *    `$QUANTA_HARNESS_EXIT` (default 0).
+   *    a fixture-configured log (RS-separated) and writing configured JSON to
+   *    `report.json` in cwd, then either sleeping or exiting with the
+   *    configured code (default 0).
    */
-  const writeStub = (): void => {
+  const writeStub = (
+    opts: {
+      readonly argvLog?: string
+      readonly reportBody?: string
+      readonly sleepSeconds?: string
+      readonly exitCode?: number
+      readonly importOk?: boolean
+    } = {},
+  ): void => {
+    const writeControl = (name: string, value: string | undefined): void => {
+      if (value !== undefined) writeFileSync(join(dir, name), value)
+    }
+    writeControl("argv-log", opts.argvLog)
+    writeControl("report-body", opts.reportBody)
+    writeControl("sleep-seconds", opts.sleepSeconds)
+    writeControl("exit-code", opts.exitCode?.toString())
+    writeControl("import-ok", opts.importOk === undefined ? undefined : opts.importOk ? "1" : "0")
     const stubPath = join(dir, "python")
     // `exec sleep` PID-replace trick (same as docker-sandbox-e2e): SIGTERM
     // reaches sleep directly so timeoutMs cancellation is observable.
     const lines = [
       "#!/usr/bin/env bash",
       "set -u",
+      'stub_dir="$(cd "$(dirname "$0")" && pwd)"',
       // jun-28: buildArgv now invokes the harness via a `python -c <shim>` (the
       // SPHINX_RA_SHIM that appends -rA then runpy.run_module). The import-PROBE
       // is ALSO `python -c "import swebench"`. Both start with `-c`, so we route
@@ -116,18 +128,19 @@ describe("bench python harness e2e — stub `python` binary on PATH", () => {
       `  case "$2" in`,
       // Run path: `python -c "<...run_evaluation...>" --predictions_path ...`.
       `    *run_evaluation*)`,
-      `      if [ -n "\${QUANTA_HARNESS_ARGV_LOG:-}" ]; then`,
-      `        printf '%s\\x1e' "$0" >> "$QUANTA_HARNESS_ARGV_LOG"`,
-      `        for arg in "$@"; do printf '%s\\x1e' "$arg" >> "$QUANTA_HARNESS_ARGV_LOG"; done`,
+      '      if [ -f "$stub_dir/argv-log" ]; then',
+      '        argv_log="$(cat "$stub_dir/argv-log")"',
+      `        printf '%s\\x1e' "$0" >> "$argv_log"`,
+      `        for arg in "$@"; do printf '%s\\x1e' "$arg" >> "$argv_log"; done`,
       "      fi",
-      // Write the report JSON into the harness cwd (= work dir). The body is
-      // ALWAYS set by the test (bash default-value with `{...}` is fragile).
-      `      printf '%s' "$QUANTA_HARNESS_REPORT_BODY" > report.json`,
-      `      if [ -n "\${QUANTA_HARNESS_SLEEP_S:-}" ]; then exec sleep "$QUANTA_HARNESS_SLEEP_S"; fi`,
-      `      exit "\${QUANTA_HARNESS_EXIT:-0}" ;;`,
+      // Write the report JSON into the harness cwd (= work dir). Control files
+      // keep this test hermetic without weakening the production env scrub.
+      '      if [ -f "$stub_dir/report-body" ]; then cat "$stub_dir/report-body" > report.json; else : > report.json; fi',
+      '      if [ -f "$stub_dir/sleep-seconds" ]; then exec sleep "$(cat "$stub_dir/sleep-seconds")"; fi',
+      '      if [ -f "$stub_dir/exit-code" ]; then exit "$(cat "$stub_dir/exit-code")"; else exit 0; fi ;;',
       // Probe path: `python -c "import swebench"`.
       `    *)`,
-      `      if [ "\${QUANTA_HARNESS_IMPORT_OK:-1}" = "1" ]; then exit 0; else exit 1; fi ;;`,
+      '      if [ -f "$stub_dir/import-ok" ] && [ "$(cat "$stub_dir/import-ok")" != "1" ]; then exit 1; else exit 0; fi ;;',
       `  esac`,
       "fi",
       // Anything else (defensive): exit 0.
@@ -148,9 +161,7 @@ describe("bench python harness e2e — stub `python` binary on PATH", () => {
 
   // (a) happy path — stub reports the id resolved.
   test("(a) happy path: stub returns resolved_ids:[id] → resolved:true via real spawn", async () => {
-    writeStub()
-    process.env.QUANTA_HARNESS_ARGV_LOG = argvLog
-    process.env.QUANTA_HARNESS_REPORT_BODY = JSON.stringify({ resolved_ids: ["case-1"] })
+    writeStub({ argvLog, reportBody: JSON.stringify({ resolved_ids: ["case-1"] }) })
 
     const r = await evaluateWithPythonSwebench(
       mkInstance("case-1"),
@@ -165,9 +176,7 @@ describe("bench python harness e2e — stub `python` binary on PATH", () => {
 
   // (b) failure path — stub returns empty resolved_ids.
   test("(b) failure path: stub returns empty resolved_ids → resolved:false", async () => {
-    writeStub()
-    process.env.QUANTA_HARNESS_ARGV_LOG = argvLog
-    process.env.QUANTA_HARNESS_REPORT_BODY = JSON.stringify({ resolved_ids: [] })
+    writeStub({ argvLog, reportBody: JSON.stringify({ resolved_ids: [] }) })
 
     const r = await evaluateWithPythonSwebench(
       mkInstance("case-2"),
@@ -181,9 +190,7 @@ describe("bench python harness e2e — stub `python` binary on PATH", () => {
 
   // (c) argv contract — exact argv reaches the real subprocess.
   test("(c) argv contract: -c <run_evaluation shim> with --predictions_path/--instance_ids/--run_id", async () => {
-    writeStub()
-    process.env.QUANTA_HARNESS_ARGV_LOG = argvLog
-    process.env.QUANTA_HARNESS_REPORT_BODY = JSON.stringify({ resolved_ids: ["case-c"] })
+    writeStub({ argvLog, reportBody: JSON.stringify({ resolved_ids: ["case-c"] }) })
 
     // Inject an explicit HarnessConfig to pin the argv contract independent
     // of runtime-config defaults (which now flow from env via
@@ -248,10 +255,8 @@ describe("bench python harness e2e — stub `python` binary on PATH", () => {
 
   // (d) malformed report — never throws; resolved:false with log.
   test("(d) malformed report.json → resolved:false, never throws (graceful skip)", async () => {
-    writeStub()
-    process.env.QUANTA_HARNESS_ARGV_LOG = argvLog
     // Intentionally broken JSON the tolerant reader will skip.
-    process.env.QUANTA_HARNESS_REPORT_BODY = "{not valid json"
+    writeStub({ argvLog, reportBody: "{not valid json" })
 
     const r = await evaluateWithPythonSwebench(
       mkInstance("case-d"),
@@ -266,11 +271,12 @@ describe("bench python harness e2e — stub `python` binary on PATH", () => {
 
   // (e) timeout — stub hangs; opts.timeoutMs fires.
   test("(e) timeout: stub hangs, opts.timeoutMs kills the real child", async () => {
-    writeStub()
-    process.env.QUANTA_HARNESS_ARGV_LOG = argvLog
-    process.env.QUANTA_HARNESS_REPORT_BODY = JSON.stringify({ resolved_ids: ["case-e"] })
     // exec sleep 3 — the PID-replace trick means SIGTERM lands on sleep.
-    process.env.QUANTA_HARNESS_SLEEP_S = "3"
+    writeStub({
+      argvLog,
+      reportBody: JSON.stringify({ resolved_ids: ["case-e"] }),
+      sleepSeconds: "3",
+    })
 
     const start = Date.now()
     const r = await evaluateWithPythonSwebench(
@@ -294,9 +300,7 @@ describe("bench python harness e2e — stub `python` binary on PATH", () => {
   // (f) probe negative — `import swebench` exits 1 → unavailable path; no
   //     run-mode invocation happens (proves probe wiring through real spawn).
   test("(f) probe fails (import swebench exit 1) → unavailable, run-mode never spawned", async () => {
-    writeStub()
-    process.env.QUANTA_HARNESS_ARGV_LOG = argvLog
-    process.env.QUANTA_HARNESS_IMPORT_OK = "0"
+    writeStub({ argvLog, importOk: false })
 
     const r = await evaluateWithPythonSwebench(
       mkInstance("case-f"),
@@ -320,8 +324,7 @@ describe("bench python harness e2e — stub `python` binary on PATH", () => {
 
   // (g) non-swebench instance — short-circuits before any spawn.
   test("(g) non-swebench instance → resolved:false, harness never invoked", async () => {
-    writeStub()
-    process.env.QUANTA_HARNESS_ARGV_LOG = argvLog
+    writeStub({ argvLog })
 
     const r = await evaluateWithPythonSwebench(
       mkInstance("case-g", {}, { noSwebench: true }),
