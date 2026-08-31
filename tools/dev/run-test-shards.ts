@@ -17,11 +17,13 @@ import {
 
 const SHARD_COUNT = 8
 // The shard corpus contains cold-path source scans and real CLI integration
-// rails. A normal shard has exceeded seven minutes without any failed test, so
-// five minutes turns ordinary host variance into a false timeout. Twelve
-// minutes still bounds a CPU-bound Bun worker that ignores Bun's per-test
-// timeout while leaving headroom for the measured cold path.
-const SHARD_TIMEOUT_MS = 12 * 60_000
+// rails. A normal shard can exceed twelve minutes while continuously reporting
+// completed tests on a contended host, so a total wall-clock cap discards valid
+// coverage. This is instead a *progress* watchdog: a CPU-bound Bun worker that
+// ignores Bun's per-test timeout eventually goes silent and is still killed,
+// while an active shard retains its complete corpus verdict.
+const SHARD_INACTIVITY_TIMEOUT_MS = 12 * 60_000
+const SHARD_WATCHDOG_POLL_MS = 1_000
 const SUITE_ROOTS = {
   full: [
     "tests/unit",
@@ -195,7 +197,9 @@ const runShard = async (
   })
   let banner = ""
   let discovery: ShardDiscovery | undefined
+  let lastProgressAt = Date.now()
   const observe = (text: string): void => {
+    lastProgressAt = Date.now()
     if (discovery !== undefined) return
     banner = `${banner}${text}`.slice(-512)
     discovery = parseShardDiscovery(banner, shard)
@@ -203,15 +207,17 @@ const runShard = async (
   const stdout = relay(proc.stdout, (text) => process.stdout.write(text), observe)
   const stderr = relay(proc.stderr, (text) => process.stderr.write(text), observe)
   let timedOut = false
-  const timeout = setTimeout(() => {
+  const timeout = setInterval(() => {
+    const idleMs = Date.now() - lastProgressAt
+    if (idleMs < SHARD_INACTIVITY_TIMEOUT_MS) return
     timedOut = true
     process.stderr.write(
-      `[test:shards] TIMEOUT shard=${shard} after=${SHARD_TIMEOUT_MS}ms; killing worker\n`,
+      `[test:shards] TIMEOUT shard=${shard} idle=${idleMs}ms; killing worker\n`,
     )
     proc.kill(9)
-  }, SHARD_TIMEOUT_MS)
+  }, SHARD_WATCHDOG_POLL_MS)
   const code = await proc.exited
-  clearTimeout(timeout)
+  clearInterval(timeout)
   await Promise.all([stdout, stderr])
   process.stdout.write(
     `[test:shards] END shard=${shard} exit=${code}${timedOut ? " timeout" : ""}\n`,
