@@ -167,11 +167,24 @@ knobs:
     where: src/shared/runtime-config.ts
     default: 'off'
     purpose: Advanced shadow-only completion judge (enum; "shadow" observes, anything else is off). It can never mutate objective state — the authority owns completion.
-deliberate_hold: null
+deliberate_hold:
+  reason: |
+    Autonomous pursuit is deliberately limited to interactive CLI and web
+    daemon. Headless is a one-shot/single-trajectory surface and batch is an
+    externally-owned corpus/verdict surface; adding the wake controller would
+    change their termination and budget semantics.
+  promotion_path: |
+    Promote headless only after defining a persistent goal-runner front door
+    with host-owned dispatch/admission, persistence/resume,
+    approval/cancellation, output-protocol versioning, and bounded
+    crash/restart E2E. Batch remains excluded unless its benchmark owner
+    explicitly adopts Goal semantics.
 notes: |
   Evidence is intentionally limited to interactive CLI and web-daemon/IDE
   modes. Headless and batch are excluded because no front-door goal-pursuit E2E
-  exists for those surfaces. Monitoring is partial: typed skip reasons,
+  exists for those surfaces and the deliberate-hold contract is recorded in
+  docs/plans/aug-25-goal-v2/tickets/current/R8-headless-batch-deliberate-hold.md.
+  Monitoring is partial: typed skip reasons,
   deterministic receipts, and a turn-scoped settlement decision counter exist;
   wake/enqueue/completion/verifier lifecycle counters and live efficacy
   measurement remain operational follow-ups. Web always-on state is also
