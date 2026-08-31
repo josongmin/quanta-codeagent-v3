@@ -75,7 +75,7 @@ describe("goal status renderer", () => {
       }),
     ).toBe(true)
 
-    const text = renderGoalDomain(authority.readDomain("t"), 61_000)
+    const text = renderGoalDomain(authority.readDomain("t"), 61_000, undefined, { kind: "fresh" })
     expect(text).toContain("source: sha256:old")
     expect(text).toContain("last verified: 1m ago")
     expect(text).toContain(`checkpoint: rev ${currentRevision} · 1 receipts`)

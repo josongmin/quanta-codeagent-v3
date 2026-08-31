@@ -17,6 +17,7 @@ afterEach(() => {
 const state = (): GoalReadoutData => ({
   kind: "goal",
   revision: 8,
+  freshness: "fresh",
   validationContract: "checked",
   objective: {
     objectiveId: "objective-8",

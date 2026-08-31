@@ -13,6 +13,7 @@ import type { RuntimeSession } from "@/sdk/runtime"
 import { runtimeConfigFromEnv } from "@/shared"
 
 export interface WebGoalWakeHandle {
+  onGoalMutation(): void
   onAttachStart(): void
   onAttachSettled(): void
   stop(): void
@@ -181,6 +182,10 @@ export const composeWebGoalWake = async (args: {
     wake.onAttach(threadId)
   }
   return {
+    onGoalMutation: () => {
+      observedObjectiveRevision = read.readDomain(threadId).revision
+      wake.onGoalMutation()
+    },
     onAttachStart: () => {
       view.attaching = true
       wake.onActivity()

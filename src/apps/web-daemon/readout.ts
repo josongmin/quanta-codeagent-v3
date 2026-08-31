@@ -41,7 +41,7 @@
  */
 import type { ContextUsageBreakdown } from "@/agent/context/usage-breakdown"
 import type { Plan, TodoItem } from "@/agent/plan/types"
-import type { ObjectiveDomainSnapshot } from "@/objective"
+import type { ObjectiveDomainSnapshot, ObjectiveFreshness, ObjectiveFreshRead } from "@/objective"
 import type { GoalReadoutData } from "@/protocol/readout"
 import type {
   CapabilityManifest,
@@ -149,7 +149,7 @@ export interface WebReadoutSources {
    *  to answer "what is this goal doing" — none of them ride the observability
    *  objective frame. Bound to the LIVE session id by the composition root.
    *  Absent ⇒ honest missing-source line. */
-  readonly goal?: () => ObjectiveDomainSnapshot
+  readonly goal?: () => Promise<ObjectiveFreshRead>
   /** Injectable clock for deterministic age rendering under test. */
   readonly now?: () => number
 }
@@ -203,12 +203,24 @@ const age = (at: number, now: number): string => {
   return minutes < 60 ? `${minutes}m ago` : `${Math.floor(minutes / 60)}h ago`
 }
 
+const checkedProofIsCurrent = (
+  domain: ObjectiveDomainSnapshot,
+  freshness: ObjectiveFreshness,
+): boolean =>
+  !domain.state?.objective.successCriteria.some((criterion) => criterion.kind === "checked") ||
+  freshness.kind === "fresh" ||
+  freshness.kind === "invalidated"
+
 /** W1b — the goal, rendered from the DOMAIN snapshot. Deliberately not shared
  *  with the CLI's `renderGoalDomain`: the biome slice fence forbids this daemon
  *  from importing `@/apps/cli`, and the two surfaces answer different questions
  *  (the CLI line sits under an interactive prompt; this is a standalone page a
  *  person opens mid-turn). */
-export const renderGoalReadout = (domain: ObjectiveDomainSnapshot, now: number): string => {
+export const renderGoalReadout = (
+  domain: ObjectiveDomainSnapshot,
+  now: number,
+  freshness: ObjectiveFreshness = { kind: "freshness-unresolved" },
+): string => {
   const objective = domain.state?.objective
   if (objective === undefined) {
     return (
@@ -217,20 +229,28 @@ export const renderGoalReadout = (domain: ObjectiveDomainSnapshot, now: number):
     )
   }
   const criteria = objective.successCriteria
-  const met = criteria.filter((criterion) => criterion.met).length
-  const remaining = criteria.filter((criterion) => !criterion.met).map((c) => c.text)
+  const currentProof = checkedProofIsCurrent(domain, freshness)
+  const met = criteria.filter(
+    (criterion) => criterion.met && (criterion.kind === "manual" || currentProof),
+  ).length
+  const remaining = criteria
+    .filter((criterion) => !criterion.met || (criterion.kind === "checked" && !currentProof))
+    .map((criterion) => criterion.text)
   const budget = objective.budget
   const last = domain.progressReceipts?.at(-1)
   const started = objective.attempts.started
   const blockers = objective.blockers
     .slice(0, 3)
     .map((blocker) => `  - [${blocker.waitingOn}] ${blocker.reason}`)
+  const status =
+    objective.status === "completed" && !currentProof ? "completion unconfirmed" : objective.status
   return (
     // ONE line, always: a goal may contain newlines, and a wrapped goal would put
     // arbitrary operator text where the next field belongs — which is how a
     // reader ends up parsing a criterion as the status.
     `goal   ${objective.goal.replace(/\s+/g, " ").trim()}\n` +
-    `status ${objective.status} · rev ${domain.revision} · validation ${domain.validationContract}\n` +
+    `status ${status} · rev ${domain.revision} · validation ${domain.validationContract}\n` +
+    `freshness ${freshness.kind}\n` +
     `criteria ${met}/${criteria.length} met` +
     (remaining.length === 0 ? "\n" : `   remaining: ${remaining.join(", ")}\n`) +
     `budget ${budget.turnsUsed}/${budget.maxTurns ?? "\u221e"} turns · ` +
@@ -250,11 +270,16 @@ export const renderGoalReadout = (domain: ObjectiveDomainSnapshot, now: number):
 
 /** Project the objective domain onto the browser-safe readout contract. Every
  *  identity needed by a write is preserved; completion receipts stay host-side. */
-export const toGoalReadoutData = (domain: ObjectiveDomainSnapshot): GoalReadoutData => {
+export const toGoalReadoutData = (
+  domain: ObjectiveDomainSnapshot,
+  freshness: ObjectiveFreshness = { kind: "freshness-unresolved" },
+): GoalReadoutData => {
   const objective = domain.state?.objective
+  const currentProof = checkedProofIsCurrent(domain, freshness)
   return {
     kind: "goal",
     revision: domain.revision,
+    freshness: freshness.kind,
     // The authority's empty-domain snapshot predates the derived contract and
     // leaves it undefined. The wire contract is total: absence means missing.
     validationContract: domain.validationContract ?? "missing",
@@ -264,7 +289,10 @@ export const toGoalReadoutData = (domain: ObjectiveDomainSnapshot): GoalReadoutD
         : {
             objectiveId: objective.objectiveId,
             goal: objective.goal,
-            status: objective.status,
+            status:
+              objective.status === "completed" && !currentProof
+                ? "completion_unconfirmed"
+                : objective.status,
             budget: {
               turnsUsed: objective.budget.turnsUsed,
               tokensUsed: objective.budget.tokensUsed,
@@ -298,7 +326,7 @@ export const toGoalReadoutData = (domain: ObjectiveDomainSnapshot): GoalReadoutD
                     id: criterion.id,
                     kind: "checked" as const,
                     text: criterion.text,
-                    met: criterion.met,
+                    met: criterion.met && currentProof,
                     check: {
                       id: criterion.check.id,
                       kind: criterion.check.kind,
@@ -616,7 +644,7 @@ type LiveReadoutRow = (
  *  the table without making its row an `async` arrow — an `async` row would
  *  turn the ABSENT case (`undefined`) into a promise too, adding a microtask
  *  the original `break` never paid. */
-const mapAwaited = async <T>(value: Promise<T>, render: (v: T) => string): Promise<string> =>
+const mapAwaited = async <T, R>(value: Promise<T>, render: (v: T) => R): Promise<R> =>
   render(await value)
 
 /**
@@ -643,11 +671,10 @@ const LIVE_READOUTS: Readonly<Record<(typeof SOURCE_BACKED_READOUTS)[number], Li
   model: (s) => (s.model === undefined ? undefined : mapAwaited(s.model(), renderWebModelReadout)),
   goal: (s) => {
     if (s.goal === undefined) return undefined
-    const domain = s.goal()
-    return {
-      output: renderGoalReadout(domain, s.now?.() ?? Date.now()),
-      data: toGoalReadoutData(domain),
-    }
+    return mapAwaited(s.goal(), ({ domain, freshness }) => ({
+      output: renderGoalReadout(domain, s.now?.() ?? Date.now(), freshness),
+      data: toGoalReadoutData(domain, freshness),
+    }))
   },
 }
 

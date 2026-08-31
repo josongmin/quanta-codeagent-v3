@@ -12,6 +12,7 @@ const REPO_ROOT = join(import.meta.dir, "..", "..")
 const valid = {
   kind: "goal",
   revision: 7,
+  freshness: "fresh",
   validationContract: "checked",
   objective: {
     objectiveId: "objective:t:1",
@@ -53,6 +54,13 @@ describe("web goal readout protocol drift hellgate", () => {
   test("red-on-injection: a missing revision is rejected rather than read as absent", () => {
     const { revision: _removed, ...withoutRevision } = valid
     expect(decodeGoalReadoutData(withoutRevision)).toBeNull()
+  })
+
+  test("red-on-injection: a missing or unknown freshness state is rejected", () => {
+    const missing = { ...valid, freshness: undefined }
+    const unknown = { ...valid, freshness: "stale-ish" }
+    expect(decodeGoalReadoutData(missing)).toBeNull()
+    expect(decodeGoalReadoutData(unknown)).toBeNull()
   })
 
   test("red-on-injection: a partial checked criterion is rejected", () => {

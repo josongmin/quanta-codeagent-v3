@@ -32,7 +32,11 @@ import {
   SOURCE_BACKED_READOUTS,
 } from "@/apps/web-daemon/readout"
 import { buildDaemonReadoutSources } from "@/apps/web-daemon/readout-compose"
-import { createObjectiveAuthority, createObjectiveCapabilities } from "@/objective"
+import {
+  createObjectiveAuthority,
+  createObjectiveCapabilities,
+  type ObjectiveVerificationPort,
+} from "@/objective"
 import type { SessionSnapshotLite } from "@/protocol/session"
 import { makeSnapshotLite } from "../../../support/session-fixtures"
 
@@ -44,6 +48,10 @@ const SNAP: SessionSnapshotLite = makeSnapshotLite({
 })
 
 const THREAD = "goal-readout-1"
+const freshVerifier: ObjectiveVerificationPort = {
+  verify: async () => ({ kind: "no-checks" }),
+  reconcile: async () => ({ kind: "fresh", verified: 0 }),
+}
 
 /** Compose the readout sources the way `startWebDaemon` does — the objective
  *  accessor is bound to the LIVE session id, which is the hop that broke for the
@@ -52,6 +60,7 @@ const setup = () => {
   const authority = createObjectiveAuthority({ now: () => 1_000 })
   const sources = buildDaemonReadoutSources({
     objectiveAuthority: authority,
+    objectiveVerifier: freshVerifier,
     threadId: THREAD,
     now: () => 10_000,
   })
@@ -74,6 +83,7 @@ describe("W1b — /goal is a readout the daemon answers", () => {
     expect(result.data).toEqual({
       kind: "goal",
       revision: 0,
+      freshness: "fresh",
       validationContract: "missing",
       objective: null,
     })
@@ -202,5 +212,27 @@ describe("W1b — an absent accessor is honest about WHAT is missing", () => {
     expect(wired.output).not.toBe(unwired.output)
     expect(wired.wired).toBe(true)
     expect(unwired.wired).toBe(false)
+  })
+})
+
+describe("R2 — verifier read failures are typed freshness, not a failed readout", () => {
+  test("a throwing reconcile returns a served freshness-unresolved payload", async () => {
+    const authority = createObjectiveAuthority()
+    const sources = buildDaemonReadoutSources({
+      objectiveAuthority: authority,
+      objectiveVerifier: {
+        verify: async () => ({ kind: "no-checks" }),
+        reconcile: async () => {
+          throw new Error("evidence backend failed")
+        },
+      },
+      threadId: THREAD,
+    })
+
+    const result = await resolveReadout("goal", SNAP, sources)
+
+    expect(result.wired).toBe(true)
+    expect(result.isError).toBe(false)
+    expect(result.data?.freshness).toBe("freshness-unresolved")
   })
 })

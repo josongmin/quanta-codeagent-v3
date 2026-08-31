@@ -12,6 +12,7 @@ afterEach(() => {
 const empty = (): GoalReadoutData => ({
   kind: "goal",
   revision: 0,
+  freshness: "fresh",
   validationContract: "missing",
   objective: null,
 })
@@ -19,6 +20,7 @@ const empty = (): GoalReadoutData => ({
 const live = (over: Partial<NonNullable<GoalReadoutData["objective"]>> = {}): GoalReadoutData => ({
   kind: "goal",
   revision: 3,
+  freshness: "fresh",
   validationContract: "manual-only",
   objective: {
     objectiveId: "objective-1",

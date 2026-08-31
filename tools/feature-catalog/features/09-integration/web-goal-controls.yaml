@@ -26,7 +26,9 @@ purpose: |
   second objective store or parsing rendered text as state. Structured readout
   data preserves objective, blocker, criterion and check identities; mutations
   use viewed-revision CAS and exact command correlation; checked criteria can be
-  completed only through the shared host verifier.
+  completed only through the shared host verifier. Every goal read first reconciles
+  current source through that verifier and returns a closed freshness state; the
+  host masks unresolved checked completion instead of asking the browser to infer it.
 
   This feature is narrower than bounded autonomous continuation. It does not
   claim full web visibility for wake state, settlement checkpoints, or the
@@ -51,6 +53,7 @@ evidence:
       - tests/unit/web-goal-command-wiring-hellgate.test.ts
       - tests/unit/apps/web-daemon/readout-goal-hellgate.test.ts
       - tests/unit/apps/web-daemon/readout-production-wiring-hellgate.test.ts
+      - tests/unit/apps/web-daemon/goal-freshness-authority-hellgate.test.ts
       - tests/unit/apps/web-daemon/goal-verify-hellgate.test.ts
       - apps/web-frontend/src/components/slash-goal.control.test.ts
       - apps/web-frontend/src/components/slash-goal.test.ts
@@ -59,6 +62,7 @@ evidence:
     integration:
       - tests/integration/goal-control-ws-daemon-e2e.test.ts
       - tests/integration/goal-verify-ws-daemon-e2e.test.ts
+      - tests/integration/objective-read-freshness-e2e.test.ts
     contract: []
 knobs:
   - name: QUANTA_GOAL

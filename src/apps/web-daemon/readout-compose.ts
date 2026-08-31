@@ -18,8 +18,9 @@
 
 import {
   createObjectiveCapabilities,
-  type ObjectiveDomainSnapshot,
   type ObjectivePort,
+  type ObjectiveVerificationPort,
+  reconcileObjectiveRead,
 } from "@/objective"
 import type { WebReadoutSources } from "./readout"
 
@@ -29,6 +30,7 @@ import type { WebReadoutSources } from "./readout"
 interface FacadeExtensions {
   readonly readoutSources?: WebReadoutSources
   readonly objectiveAuthority?: ObjectivePort
+  readonly objectiveVerifier?: ObjectiveVerificationPort
 }
 
 export interface DaemonReadoutComposeArgs {
@@ -39,6 +41,10 @@ export interface DaemonReadoutComposeArgs {
   readonly facade?: WebReadoutSources | undefined
   /** The objective authority, when this daemon composed one. */
   readonly objectiveAuthority?: ObjectivePort | undefined
+  /** The same verifier coordinator used by settlement and browser verify. */
+  readonly objectiveVerifier?: ObjectiveVerificationPort | undefined
+  /** Rearm the existing wake owner after reconcile invalidates a receipt. */
+  readonly onGoalMutation?: (() => void) | undefined
   /** The LIVE session id — the key the objective domain is stored under. */
   readonly threadId: string
   /** The server-owned turn-usage fold. */
@@ -50,12 +56,20 @@ export interface DaemonReadoutComposeArgs {
 export const buildDaemonReadoutSources = (args: DaemonReadoutComposeArgs): WebReadoutSources => {
   const facadeExt = (args.runtime ?? {}) as FacadeExtensions
   const authority = args.objectiveAuthority ?? facadeExt.objectiveAuthority
-  const goal: (() => ObjectiveDomainSnapshot) | undefined =
+  const verifier = args.objectiveVerifier ?? facadeExt.objectiveVerifier
+  const goal: WebReadoutSources["goal"] =
     authority === undefined
       ? undefined
       : (() => {
           const read = createObjectiveCapabilities(authority).read
-          return () => read.readDomain(args.threadId)
+          return async () => {
+            const before = read.readDomain(args.threadId).revision
+            const result = await reconcileObjectiveRead(read, verifier, args.threadId)
+            if (result.freshness.kind === "invalidated" && result.domain.revision !== before) {
+              args.onGoalMutation?.()
+            }
+            return result
+          }
         })()
   return {
     ...(args.facade ?? facadeExt.readoutSources ?? {}),

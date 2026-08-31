@@ -1,4 +1,9 @@
-import type { GoalWakeStatus, ObjectiveDomainSnapshot, SuccessCriterion } from "@/objective"
+import type {
+  GoalWakeStatus,
+  ObjectiveDomainSnapshot,
+  ObjectiveFreshness,
+  SuccessCriterion,
+} from "@/objective"
 
 const short = (value: string): string => (value.length <= 8 ? value : value.slice(0, 8))
 
@@ -13,6 +18,56 @@ const validationContract = (criteria: readonly SuccessCriterion[]): string => {
   if (criteria.length === 0) return "missing"
   return criteria.some((criterion) => criterion.kind === "checked") ? "checked" : "manual-only"
 }
+
+const checkedProofIsCurrent = (
+  criteria: readonly SuccessCriterion[],
+  freshness: ObjectiveFreshness,
+): boolean =>
+  !criteria.some((criterion) => criterion.kind === "checked") ||
+  freshness.kind === "fresh" ||
+  freshness.kind === "invalidated"
+
+const currentVerificationView = (
+  criteria: readonly SuccessCriterion[],
+  freshness: ObjectiveFreshness,
+): {
+  readonly met: number
+  readonly remaining: readonly string[]
+  readonly verifiedAt: number | undefined
+  readonly sourceDigest: string | undefined
+  readonly currentProof: boolean
+} => {
+  const currentProof = checkedProofIsCurrent(criteria, freshness)
+  const current = (criterion: SuccessCriterion): boolean =>
+    criterion.kind === "manual" || currentProof
+  return {
+    met: criteria.filter((criterion) => criterion.met && current(criterion)).length,
+    remaining: criteria
+      .filter((criterion) => !criterion.met || !current(criterion))
+      .map((criterion) => criterion.id),
+    verifiedAt: (currentProof ? criteria : [])
+      .map((criterion) => criterion.completion?.verifiedAt)
+      .filter((value): value is number => value !== undefined)
+      .sort((a, b) => b - a)[0],
+    sourceDigest: (currentProof ? criteria : [])
+      .map((criterion) =>
+        criterion.completion?.source === "verifier" ? criterion.completion.sourceDigest : undefined,
+      )
+      .find((value): value is string => value !== undefined),
+    currentProof,
+  }
+}
+
+const renderFreshness = (freshness: ObjectiveFreshness): string => {
+  const reason =
+    freshness.kind === "source-unavailable" || freshness.kind === "cap-exceeded"
+      ? ` (${freshness.reason})`
+      : ""
+  return `${freshness.kind}${reason}`
+}
+
+const renderObjectiveStatus = (status: string, currentProof: boolean): string =>
+  status === "completed" && !currentProof ? "completion unconfirmed" : status
 
 /** GOAL P0-B — the operator has to see WHY the goal stopped before being told
  *  to clear it. Bounded: the store caps blockers at 64, and a wall of them is
@@ -61,37 +116,30 @@ export const renderGoalDomain = (
   domain: ObjectiveDomainSnapshot,
   now = Date.now(),
   wake?: GoalWakeStatus | undefined,
+  freshness: ObjectiveFreshness = { kind: "freshness-unresolved" },
 ): string => {
   const objective = domain.state?.objective
   if (objective === undefined) return "No goal set. Usage: /goal <objective>\n"
   const criteria = objective.successCriteria
-  const met = criteria.filter((criterion) => criterion.met).length
-  const remaining = criteria.filter((criterion) => !criterion.met).map((criterion) => criterion.id)
+  const verification = currentVerificationView(criteria, freshness)
   const contract = validationContract(criteria)
   const validation =
     contract === "missing"
       ? "validation contract missing — add a check or criterion"
-      : `${met}/${criteria.length} verified (contract: ${contract})`
+      : `${verification.met}/${criteria.length} verified (contract: ${contract})`
   const budget = objective.budget
   const receipts = domain.progressReceipts ?? []
   const last = receipts.at(-1)
-  const verifiedAt = criteria
-    .map((criterion) => criterion.completion?.verifiedAt)
-    .filter((value): value is number => value !== undefined)
-    .sort((a, b) => b - a)[0]
-  const sourceDigest = criteria
-    .map((criterion) =>
-      criterion.completion?.source === "verifier" ? criterion.completion.sourceDigest : undefined,
-    )
-    .find((value): value is string => value !== undefined)
   const checkpoint =
     last === undefined ? "none" : `rev ${last.objectiveRevisionAfter} · ${receipts.length} receipts`
-  const source = sourceDigest ?? "unverified"
+  const source = verification.sourceDigest ?? "unverified"
+  const renderedStatus = renderObjectiveStatus(objective.status, verification.currentProof)
   return (
     `🎯 Goal: ${objective.goal}\n` +
-    `status: ${objective.status} · rev ${domain.revision} · id ${short(objective.objectiveId)}\n` +
+    `status: ${renderedStatus} · rev ${domain.revision} · id ${short(objective.objectiveId)}\n` +
+    `freshness: ${renderFreshness(freshness)}\n` +
     `validation: ${validation}\n` +
-    `remaining: ${remaining.length === 0 ? "none" : remaining.join(", ")}   next: ${objective.nextActions[0] ?? "none"}   blocked: ${objective.blockers[0]?.waitingOn ?? "none"}${objective.blockerObservations[0] === undefined ? "" : ` (observing ${objective.blockerObservations[0].distinctAttemptIds.length}/3)`}\n` +
+    `remaining: ${verification.remaining.length === 0 ? "none" : verification.remaining.join(", ")}   next: ${objective.nextActions[0] ?? "none"}   blocked: ${objective.blockers[0]?.waitingOn ?? "none"}${objective.blockerObservations[0] === undefined ? "" : ` (observing ${objective.blockerObservations[0].distinctAttemptIds.length}/3)`}\n` +
     blockerLines(objective) +
     `budget: ${budget.turnsUsed}/${budget.maxTurns ?? "∞"} turns · ${budget.tokensUsed}/${budget.maxTokens ?? "∞"} tokens` +
     // GOAL P1-D — WHICH bound applies. The store derives this precisely so a
@@ -101,7 +149,7 @@ export const renderGoalDomain = (
     (last === undefined
       ? "   last attempt: none\n"
       : `   last attempt: ${last.turnOutcome} · ${age(last.recordedAt, now)} (attempt ${short(last.attemptKey)})\n`) +
-    `last verified: ${verifiedAt === undefined ? "never" : age(verifiedAt, now)}   checkpoint: ${checkpoint}   source: ${source}\n` +
+    `last verified: ${verification.verifiedAt === undefined ? "never" : age(verification.verifiedAt, now)}   checkpoint: ${checkpoint}   source: ${source}\n` +
     `${renderWakeStatus(wake)}\n`
   )
 }

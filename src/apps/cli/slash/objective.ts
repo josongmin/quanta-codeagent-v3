@@ -2,6 +2,7 @@ import type {
   CriterionDeclaration,
   ObjectiveBudget,
   ObjectiveDomainSnapshot,
+  ObjectiveFreshRead,
   ObjectivePort,
   ObjectiveStatus,
   ObjectiveVerificationPort,
@@ -12,6 +13,7 @@ import {
   createObjectiveCapabilities,
   DEFAULT_OBJECTIVE_CHECK_SUCCESS_EXIT_CODES,
   DEFAULT_OBJECTIVE_CHECK_TIMEOUT_MS,
+  reconcileObjectiveRead,
 } from "@/objective"
 import { readCliKnob } from "../cli-knobs-accessor"
 import type { SlashCommand } from "../slash-contract"
@@ -28,6 +30,7 @@ export type GoalControlOutcome =
 
 export interface GoalControl {
   read(): ObjectiveDomainSnapshot
+  reconcileAndRead(): Promise<ObjectiveFreshRead>
   create(goal: string): GoalControlOutcome
   replace(goal: string): GoalControlOutcome
   pause(): GoalControlOutcome
@@ -118,6 +121,14 @@ export const buildGoalControl = (
     commit({ kind: "setExplicitStatus", status })
   return {
     read,
+    reconcileAndRead: async () => {
+      const before = read().revision
+      const result = await reconcileObjectiveRead(capabilities.read, verifier, threadId)
+      if (result.freshness.kind === "invalidated" && result.domain.revision !== before) {
+        onMutation?.()
+      }
+      return result
+    },
     create: (goal) => commit({ kind: "create", definition: { goal } }),
     replace: (goal) => {
       const current = read().state?.objective

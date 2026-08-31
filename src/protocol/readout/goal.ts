@@ -15,11 +15,18 @@ export type GoalReadoutStatus =
   | "usage_limited"
   | "budget_limited"
   | "completed"
+  | "completion_unconfirmed"
   | "blocked"
 
 export type GoalReadoutValidationContract = "missing" | "manual-only" | "checked"
 export type GoalReadoutWaitingOn = "user" | "tool" | "network" | "child_agent"
 export type GoalReadoutLimitedBy = "user-budget" | "product-hard-cap" | "product-budget-ceiling"
+export type GoalReadoutFreshness =
+  | "fresh"
+  | "invalidated"
+  | "source-unavailable"
+  | "cap-exceeded"
+  | "freshness-unresolved"
 
 export interface GoalReadoutBudgetView {
   readonly turnsUsed: number
@@ -76,6 +83,7 @@ export interface GoalReadoutObjectiveView {
 export interface GoalReadoutData {
   readonly kind: "goal"
   readonly revision: number
+  readonly freshness: GoalReadoutFreshness
   readonly validationContract: GoalReadoutValidationContract
   readonly objective: GoalReadoutObjectiveView | null
 }
@@ -95,6 +103,7 @@ const STATUS = new Set<GoalReadoutStatus>([
   "usage_limited",
   "budget_limited",
   "completed",
+  "completion_unconfirmed",
   "blocked",
 ])
 const VALIDATION = new Set<GoalReadoutValidationContract>(["missing", "manual-only", "checked"])
@@ -103,6 +112,13 @@ const LIMITED_BY = new Set<GoalReadoutLimitedBy>([
   "user-budget",
   "product-hard-cap",
   "product-budget-ceiling",
+])
+const FRESHNESS = new Set<GoalReadoutFreshness>([
+  "fresh",
+  "invalidated",
+  "source-unavailable",
+  "cap-exceeded",
+  "freshness-unresolved",
 ])
 
 const optionalNonNegativeInteger = (value: unknown): value is number | undefined =>
@@ -217,6 +233,12 @@ export const decodeGoalReadoutData = (value: unknown): GoalReadoutData | null =>
   if (!isRecord(value) || value.kind !== "goal" || !isNonNegativeInteger(value.revision))
     return null
   if (
+    typeof value.freshness !== "string" ||
+    !FRESHNESS.has(value.freshness as GoalReadoutFreshness)
+  ) {
+    return null
+  }
+  if (
     typeof value.validationContract !== "string" ||
     !VALIDATION.has(value.validationContract as GoalReadoutValidationContract)
   ) {
@@ -227,6 +249,7 @@ export const decodeGoalReadoutData = (value: unknown): GoalReadoutData | null =>
   return {
     kind: "goal",
     revision: value.revision,
+    freshness: value.freshness as GoalReadoutFreshness,
     validationContract: value.validationContract as GoalReadoutValidationContract,
     objective,
   }

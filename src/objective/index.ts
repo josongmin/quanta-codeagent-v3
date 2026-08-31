@@ -110,6 +110,8 @@ export {
   UNSUPPORTED_CHECK_EXECUTION,
   unsupportedCheckExecutionPort,
 } from "./criteria/verifier"
+export type { ObjectiveFreshness, ObjectiveFreshRead } from "./freshness"
+export { objectiveFreshnessFromReconcile, reconcileObjectiveRead } from "./freshness"
 export { applyGoalPreset } from "./goal-preset"
 export type {
   GoalWakeArm,

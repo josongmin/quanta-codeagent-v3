@@ -37,8 +37,9 @@ purpose: |
   timeout, non-zero exit, duplicate attempt, or revision race cannot produce a
   checked-completion receipt. Freshness reconciliation before attributed-attempt
   settlement invalidates a prior receipt whose source digest no longer matches.
-  Read surfaces do not yet force that reconciliation, so immediate read-time
-  stale detection after an out-of-band source edit is not claimed.
+  CLI and web operator reads also run the canonical reconciliation before their
+  post-reconcile authority read. Their closed freshness state prevents unresolved
+  or stale checked completion from being presented as current proof.
 evidence:
   code:
     - src/host/runtime/objective-verifier-wire.ts
@@ -47,8 +48,11 @@ evidence:
     - src/objective/authority.ts
     - src/objective/criteria/model.ts
     - src/objective/verification-batch.ts
+    - src/objective/freshness.ts
     - src/objective/core-store/completion-ops.ts
     - src/apps/cli/slash/objective.ts
+    - src/apps/web-daemon/readout-compose.ts
+    - src/protocol/readout/goal.ts
   adrs: [394]
   tests:
     unit:
@@ -56,8 +60,11 @@ evidence:
       - tests/unit/objective/checked-completion-forgery-m8-hellgate.test.ts
       - tests/unit/runtime/run-argv.test.ts
       - tests/unit/runtime/seatbelt-verbatim-hellgate.test.ts
+      - tests/unit/apps/cli/goal-read-freshness.test.ts
+      - tests/unit/apps/web-daemon/goal-freshness-authority-hellgate.test.ts
     integration:
       - tests/integration/objective-verifier-real-command-e2e.test.ts
+      - tests/integration/objective-read-freshness-e2e.test.ts
     contract: []
 knobs:
   - name: QUANTA_GOAL

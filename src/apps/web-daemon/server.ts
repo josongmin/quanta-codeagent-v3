@@ -323,11 +323,13 @@ const buildDaemonReadoutSurface = (
   runtime: RuntimeFacade,
   sharedSession: RuntimeSession,
   cost: () => CostReadoutTotals,
+  goalWake?: WebGoalWakeHandle | undefined,
 ): WebReadoutSources =>
   buildDaemonReadoutSources({
     runtime,
     threadId: sharedSession.sessionId,
     cost,
+    ...(goalWake !== undefined ? { onGoalMutation: goalWake.onGoalMutation } : {}),
   })
 
 /** Tear the two goal surfaces down together: cancel the autonomous wake, then
@@ -580,7 +582,7 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
     runtime,
     ...(goalWake !== undefined ? { goalWake } : {}),
   })
-  const readoutSources = buildDaemonReadoutSurface(runtime, sharedSession, cost.totals)
+  const readoutSources = buildDaemonReadoutSurface(runtime, sharedSession, cost.totals, goalWake)
 
   const { server, boundPort, boundHost } = buildDaemonListener({
     config: bindGoalHandlers(config, sharedSession.sessionId, { goalWork, goalVerify }),
