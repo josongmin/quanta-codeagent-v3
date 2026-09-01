@@ -35,13 +35,24 @@ const FEATURES_DIR = ANCHORED_FEATURES_DIR
 
 describe("Definition-of-Done ratchet (tools/pm)", () => {
   const baselineSet = new Set(baseline as string[])
+  // Both monotonic directions inspect the same immutable catalog. Share the
+  // one expensive evidence walk so host contention cannot turn the second
+  // assertion into a duplicate full-corpus scan.
+  let verdictsOnce:
+    | Promise<readonly { readonly id: string; readonly verdict: "pass" | "fail" }[]>
+    | undefined
+  const featureVerdicts = () =>
+    (verdictsOnce ??= loadFeaturesStrict(FEATURES_DIR).then((features) =>
+      features.map((loaded) => {
+        const result = checkFeatureDoD(loaded.feature)
+        return { id: result.id, verdict: result.verdict }
+      }),
+    ))
 
   test("NO NEW HOLES — every DoD failure is grandfathered in baseline.json", async () => {
-    const features = await loadFeaturesStrict(FEATURES_DIR)
-    const failingNow = features
-      .map((lf) => checkFeatureDoD(lf.feature))
-      .filter((r) => r.verdict === "fail")
-      .map((r) => r.id)
+    const failingNow = (await featureVerdicts())
+      .filter((result) => result.verdict === "fail")
+      .map((result) => result.id)
 
     const newFailures = failingNow.filter((id) => !baselineSet.has(id))
     if (newFailures.length > 0) {
@@ -54,14 +65,12 @@ describe("Definition-of-Done ratchet (tools/pm)", () => {
       )
     }
     expect(newFailures).toEqual([])
-  })
+  }, 300_000)
 
   test("MONOTONIC SHRINK — no stale baseline entries (a fixed/removed feature must leave baseline)", async () => {
-    const features = await loadFeaturesStrict(FEATURES_DIR)
-    const byId = new Map(features.map((lf) => [lf.feature.id, lf.feature]))
-    const verdict = new Map(
-      features.map((lf) => [lf.feature.id, checkFeatureDoD(lf.feature).verdict]),
-    )
+    const results = await featureVerdicts()
+    const byId = new Set(results.map((result) => result.id))
+    const verdict = new Map(results.map((result) => [result.id, result.verdict]))
 
     const stale = (baseline as string[]).filter((id) => {
       const exists = byId.has(id)
@@ -76,7 +85,7 @@ describe("Definition-of-Done ratchet (tools/pm)", () => {
       )
     }
     expect(stale).toEqual([])
-  })
+  }, 300_000)
 
   test("baseline is a clean string[] with no duplicates", () => {
     const arr = baseline as string[]

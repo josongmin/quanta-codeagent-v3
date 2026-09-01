@@ -364,11 +364,40 @@ describe("memory-phase2-wire-hellgate — threshold arms", () => {
 
 describe("memory-phase2-wire-hellgate — non-blocking semantics", () => {
   test("scheduled hook resolves BEFORE background runPhase2 finishes", async () => {
-    const writer = makeWriter({ writeAtomicDelayMs: 25 })
-    const port = makePort({ delayMs: 25 })
-    const { log, events } = collectLogger()
-    // Mark T0
-    const t0 = Date.now()
+    const writer = makeWriter()
+    let calls = 0
+    let markStarted: (() => void) | undefined
+    let release: (() => void) | undefined
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve
+    })
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const port = {
+      get consolidateCalls() {
+        return calls
+      },
+      async consolidate() {
+        calls += 1
+        markStarted?.()
+        await gate
+        return {
+          memoryMd: "# memory",
+          rawMemoriesMd: "# raw",
+          memorySummaryMd: "# summary",
+        }
+      },
+    } as Phase2Port & { readonly consolidateCalls: number }
+    const events: Parameters<Phase2AutoTriggerLogger>[0][] = []
+    let markCompleted: (() => void) | undefined
+    const completed = new Promise<void>((resolve) => {
+      markCompleted = resolve
+    })
+    const log: Phase2AutoTriggerLogger = (event) => {
+      events.push(event)
+      if (event.kind === "completed") markCompleted?.()
+    }
     const out = await runMemoryPhase2AutoTrigger(
       {
         phase2: {
@@ -384,18 +413,15 @@ describe("memory-phase2-wire-hellgate — non-blocking semantics", () => {
       },
       log,
     )
-    const tHookDone = Date.now()
-    // The hook MUST return well before the 25ms+25ms background work.
-    expect(tHookDone - t0).toBeLessThan(20)
     expect(out.kind).toBe("scheduled")
-    // At this point the background runPhase2 has NOT yet resolved.
-    // Only the synchronous "scheduled" log line should be visible.
+    // The injected gate keeps runPhase2 pending without relying on wall-clock
+    // scheduling; returning here proves the hook did not await that work.
+    await started
     expect(events.find((e) => e.kind === "completed")).toBeUndefined()
-    // Now wait long enough for the background to finish + drain
-    // microtasks. The log should contain the `completed` event.
-    await new Promise((r) => setTimeout(r, 120))
-    const completed = events.find((e) => e.kind === "completed")
-    expect(completed).toBeDefined()
+    if (release === undefined) throw new Error("background consolidation did not start")
+    release()
+    await completed
+    expect(events.find((e) => e.kind === "completed")).toBeDefined()
     expect(port.consolidateCalls).toBe(1)
     expect(writer.writeCalls).toBe(1)
     __resetPhase2InflightForTests(writer)
