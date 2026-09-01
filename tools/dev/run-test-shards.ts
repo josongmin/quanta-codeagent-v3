@@ -242,12 +242,10 @@ const runShard = async (
   const workerHome = join(workerRoot, "home")
   const quantaHome = join(workerHome, ".quanta")
   const prefsHome = join(workerRoot, "prefs-home")
-  const benchHome = join(workerRoot, "bench-home")
   const benchResults = join(workerRoot, "bench-results")
   mkdirSync(workerTmp, { recursive: true })
   mkdirSync(quantaHome, { recursive: true })
   mkdirSync(prefsHome, { recursive: true })
-  mkdirSync(benchHome, { recursive: true })
   mkdirSync(benchResults, { recursive: true })
   const spoolPath = join(workerRoot, `shard-${plan.index}.log`)
   const scanReachSink = join(workerRoot, `scan-reach-${plan.index}.jsonl`)
@@ -271,9 +269,7 @@ const runShard = async (
         HOME: workerHome,
         TMPDIR: workerTmp,
         QUANTA_HOME: quantaHome,
-        QUANTA_CONFIG_DIR: quantaHome,
         QUANTA_PREFS_HOME: prefsHome,
-        QUANTA_BENCH_HOME: benchHome,
         QUANTA_BENCH_RESULTS_DIR: benchResults,
         QUANTA_SCAN_REACH_RECORD: scanReachSink,
         QUANTA_TEST_TIMEOUT_SCALE: String(testTimeoutMs / 60_000),

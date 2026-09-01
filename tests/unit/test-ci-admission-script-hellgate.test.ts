@@ -101,9 +101,12 @@ describe("test:ci admission gate", () => {
     expect(shardRunner).toContain("QUANTA_SCAN_REACH_RECORD: scanReachSink")
     expect(shardRunner).toContain("HOME: workerHome")
     expect(shardRunner).toContain("QUANTA_HOME: quantaHome")
-    expect(shardRunner).toContain("QUANTA_CONFIG_DIR: quantaHome")
+    expect(shardRunner).not.toContain("QUANTA_CONFIG_DIR: quantaHome")
     expect(shardRunner).toContain("QUANTA_PREFS_HOME: prefsHome")
-    expect(shardRunner).toContain("QUANTA_BENCH_HOME: benchHome")
+    // QUANTA_HOME already isolates the derived bench root. Injecting the more
+    // specific override would hide the production precedence contract from
+    // tests that intentionally mutate QUANTA_HOME.
+    expect(shardRunner).not.toContain("QUANTA_BENCH_HOME: benchHome")
     expect(shardRunner).toContain("writeScanReachReceipt(")
     expect(planSource).toContain("chooseShardConcurrency")
     expect(planSource).toContain("TWO_WORKER_MIN_AVAILABLE_BYTES")
