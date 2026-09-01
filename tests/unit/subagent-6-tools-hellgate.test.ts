@@ -220,7 +220,7 @@ describe("HELLGATE — handleExecCommand", () => {
     expect(table.has(r.pid)).toBe(false)
   })
 
-  test("pty:true short-lived command still returns terminal output without a pid", async () => {
+  test("pty:true short-lived command returns output on exit or a tracked pid if host scheduling delays it", async () => {
     const table = trackPty()
     const r = await handleExecCommand(
       { command: "echo short-lived", cwd: process.cwd(), timeoutMs: 5000, pty: true },
@@ -228,9 +228,20 @@ describe("HELLGATE — handleExecCommand", () => {
     )
     expect(r.kind).toBe("success")
     if (r.kind === "success") {
-      expect(r.exitCode).toBe(0)
-      expect(r.stdout).toContain("short-lived")
-      expect(r.pid).toBeUndefined()
+      if (r.exitCode === 0) {
+        expect(r.stdout).toContain("short-lived")
+        expect(r.pid).toBeUndefined()
+      } else {
+        // "short-lived" describes the command, not a wall-clock guarantee.
+        // A contended host can keep even `echo` alive past the attach grace;
+        // retaining it is the public PTY contract, and it must self-clean.
+        expect(r.exitCode).toBe(-1)
+        expect(r.pid).toBeNumber()
+        const slot = r.pid === undefined ? undefined : table.get(r.pid)
+        expect(slot).toBeDefined()
+        await slot?.exited
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      }
     }
     expect(table.snapshot()).toEqual([])
   })

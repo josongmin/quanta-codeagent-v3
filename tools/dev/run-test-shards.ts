@@ -416,7 +416,9 @@ const main = async (): Promise<void> => {
     const manifestDigest = manifestSha256(manifest)
     const plans = createTestShardPlan(manifest, SHARD_COUNT)
     const concurrency = await workerConcurrency()
-    const exclusiveFiles = plans.find(({ exclusive }) => exclusive)?.files.length ?? 0
+    const exclusiveFiles = plans
+      .filter(({ exclusive }) => exclusive)
+      .reduce((count, plan) => count + plan.files.length, 0)
     process.stdout.write(
       `[test:shards] frozen head=${before.head} suite=${opts.suite} dirty=no ` +
         `manifest_files=${manifest.length} manifest_sha256=${manifestDigest} ` +

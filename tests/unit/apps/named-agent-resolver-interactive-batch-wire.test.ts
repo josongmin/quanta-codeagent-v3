@@ -25,13 +25,43 @@
  *      and thread the result (source assertion — the silent no-op was a MISSING
  *      call site, so its presence is the regression guard).
  */
-import { describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import type { NamedAgentResolver } from "@/agent"
 import { assembleAgentConfig, buildInteractiveTurnAssembler } from "@/host/runtime"
 import { buildBaseFromArgs } from "@/host/runtime/agent-arg-builder"
+import { __resetRuntimeConfig } from "@/shared/runtime-config"
 import { defaultTools, ToolRegistry } from "@/tool"
+
+const DRIVEN_ENV = ["QUANTA_PROVIDER", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"] as const
+const savedEnv: Record<(typeof DRIVEN_ENV)[number], string | undefined> = {
+  QUANTA_PROVIDER: undefined,
+  OPENAI_API_KEY: undefined,
+  ANTHROPIC_API_KEY: undefined,
+}
+
+beforeEach(() => {
+  for (const key of DRIVEN_ENV) {
+    savedEnv[key] = process.env[key]
+    delete process.env[key]
+  }
+  // buildBaseFromArgs owns provider construction even though these tests only
+  // inspect the named-agent slot. Drive that dependency explicitly instead of
+  // borrowing an operator credential from the parent process or real HOME.
+  process.env.QUANTA_PROVIDER = "openai"
+  process.env.OPENAI_API_KEY = "test-key"
+  __resetRuntimeConfig()
+})
+
+afterEach(() => {
+  for (const key of DRIVEN_ENV) {
+    const value = savedEnv[key]
+    if (value === undefined) delete process.env[key]
+    else process.env[key] = value
+  }
+  __resetRuntimeConfig()
+})
 
 // A trivial structural resolver — the runner depends only on the port shape.
 const fakeResolver: NamedAgentResolver = { resolve: () => undefined }
