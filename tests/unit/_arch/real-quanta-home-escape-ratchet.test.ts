@@ -65,7 +65,7 @@ const HERMETIC_MARKERS = [
   "stickyModelPath",
 ]
 
-const testFiles = (): readonly string[] => {
+const discoverTestFiles = (): readonly string[] => {
   const out: string[] = []
   for (const dir of ["tests", "src"]) {
     for (const rel of new Glob("**/*.test.ts").scanSync(join(ROOT, dir))) {
@@ -74,6 +74,12 @@ const testFiles = (): readonly string[] => {
   }
   return out.sort()
 }
+
+// This rail has three arms and each needs the same complete source snapshot.
+// Re-scanning and re-reading every file per arm makes a filesystem-contention
+// failure look like a policy failure in CWD parity. The snapshot is safe here:
+// this test does not mutate the corpus it guards.
+const TEST_FILES = discoverTestFiles()
 
 /** Files that CALL a composition root (not merely mention one in prose). A
  *  docblock naming `composeSurfaceWires` is not an exposure, so the scan requires
@@ -84,7 +90,15 @@ const testFiles = (): readonly string[] => {
  *  repo's own burn-down ratchet: a guard that rolls its own comment scan is the
  *  documented way guards get defeated, and the line-prefix version this had
  *  first would also mis-read a trailing `// composeSurfaceWires(` as a call. */
-const codeOf = (file: string): string => stripComments(readFileSync(join(ROOT, file), "utf8"))
+const codeCache = new Map<string, string>()
+
+const codeOf = (file: string): string => {
+  const cached = codeCache.get(file)
+  if (cached !== undefined) return cached
+  const code = stripComments(readFileSync(join(ROOT, file), "utf8"))
+  codeCache.set(file, code)
+  return code
+}
 
 const containsAny = (file: string, needles: readonly string[]): boolean => {
   const code = codeOf(file)
@@ -92,12 +106,12 @@ const containsAny = (file: string, needles: readonly string[]): boolean => {
 }
 
 const composingFiles = (): readonly string[] =>
-  testFiles().filter((file) => containsAny(file, ROOT_CALLS))
+  TEST_FILES.filter((file) => containsAny(file, ROOT_CALLS))
 
 /** Files that drive the headless root WITH the fs-backed store — exposed only in
  *  that combination (see {@link CONDITIONAL_ROOT_CALLS}). */
 const fsStoreRootFiles = (): readonly string[] =>
-  testFiles().filter(
+  TEST_FILES.filter(
     // BOTH probes skip comment-only lines: a docblock that merely NAMES the root
     // or explains why the suite avoids the fs store is not an exposure, and a
     // ratchet that reds on prose gets edited around instead of obeyed.
@@ -109,7 +123,7 @@ const unhermetic = (files: readonly string[]): readonly string[] =>
 
 describe("no test composes a real surface against the developer's ~/.quanta", () => {
   test("the scan is non-degenerate (a rename fails loud, not vacuously)", () => {
-    const files = testFiles()
+    const files = TEST_FILES
     assertScanPopulation(
       files.filter((file) => file.startsWith("tests/")).map((file) => join(ROOT, file)),
       join(ROOT, "tests"),

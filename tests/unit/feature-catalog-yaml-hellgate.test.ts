@@ -112,7 +112,7 @@ describe("fc YAML — no duplicate mapping keys (anti last-key-wins silent drop)
     // The catalog currently has >1k files. Keep the full scan, but allow the
     // shared eight-shard CI run enough I/O headroom; this is not a reduced
     // coverage timeout.
-  }, 120000)
+  }, 300000)
 })
 
 // --- Red-on-injection: the check has teeth ---------------------------------
