@@ -5,9 +5,12 @@
  * EventEmitter listeners without bound.
  */
 
+import { errMessage, logger } from "@/shared"
+
 export interface ProcessExitBoundary {
   add(listener: () => void): void
   remove(listener: () => void): void
+  reportKillError(error: unknown): void
 }
 
 export const createProcessExitKillGuard = (
@@ -24,8 +27,10 @@ export const createProcessExitKillGuard = (
     for (const kill of kills) {
       try {
         kill()
-      } catch {
-        // The child already exited or cannot be signalled. Host exit continues.
+      } catch (error) {
+        // The child already exited or cannot be signalled. Attribute the failed
+        // ownership action, but keep reaping the remaining children.
+        boundary.reportKillError(error)
       }
     }
   }
@@ -53,4 +58,13 @@ export const createProcessExitKillGuard = (
 export const registerProcessExitKill = createProcessExitKillGuard({
   add: (listener) => process.once("exit", listener),
   remove: (listener) => process.off("exit", listener),
+  reportKillError: (error) => {
+    try {
+      logger.warn("browser.cdp.process_exit_kill_failed", { error: errMessage(error) })
+    } catch (reportError) {
+      // The host-owned logging sink may already be closed during process exit.
+      // Do not let diagnostics prevent later children from being reaped.
+      void reportError
+    }
+  },
 })

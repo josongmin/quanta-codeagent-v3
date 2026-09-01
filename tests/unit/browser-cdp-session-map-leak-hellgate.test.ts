@@ -270,9 +270,11 @@ describe("HELLGATE cdp-adapter — session Map leak reaping", () => {
   test("LEAK-06: every live Chrome shares one host-exit listener and unregisters cleanly", () => {
     const listeners = new Set<() => void>()
     const killed: number[] = []
+    const killErrors: unknown[] = []
     const register = createProcessExitKillGuard({
       add: (listener) => listeners.add(listener),
       remove: (listener) => listeners.delete(listener),
+      reportKillError: (error) => killErrors.push(error),
     })
 
     const unregister1 = register(() => killed.push(1))
@@ -285,11 +287,16 @@ describe("HELLGATE cdp-adapter — session Map leak reaping", () => {
     unregister2()
     expect(listeners.size).toBe(0)
 
-    register(() => killed.push(3))
+    const expectedError = new Error("already exited")
+    register(() => {
+      killed.push(3)
+      throw expectedError
+    })
     register(() => killed.push(4))
     expect(listeners.size).toBe(1)
     listeners.values().next().value?.()
     expect(killed).toEqual([3, 4])
+    expect(killErrors).toEqual([expectedError])
     expect(listeners.size).toBe(0)
   })
 })
