@@ -279,8 +279,8 @@ const checkCredentials = (ports: DoctorPorts, provider: TerminalProvider): Docto
       ok,
       detail: bound(
         ok
-          ? `${provider}: token bundle present at ${path}`
-          : `${provider} authenticates from ${path}, which is absent — run \`quanta login\``,
+          ? `${provider}: chatgpt.json token bundle present · path: ${path}`
+          : `run \`quanta login\` · ${provider} needs chatgpt.json · absent path: ${path}`,
       ),
     }
   }

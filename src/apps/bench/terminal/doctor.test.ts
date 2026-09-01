@@ -291,13 +291,23 @@ describe("credentials — provider-aware", () => {
 
   test("chatgpt-oauth with NO bundle on disk is still refused", () => {
     const report = runTerminalDoctor(
-      makePorts({ env: { OPENAI_API_KEY: SECRET, PATH: "/usr/bin" }, fileExists: false }),
+      makePorts({
+        env: {
+          OPENAI_API_KEY: SECRET,
+          PATH: "/usr/bin",
+          // The bounded receipt must retain both identity and remedy even when
+          // a worker-isolated home makes the resolved path very long.
+          QUANTA_HOME: `/tmp/${"deep-worker-home/".repeat(12)}`,
+        },
+        fileExists: false,
+      }),
       { ...INPUT, provider: "chatgpt-oauth" },
     )
     const cred = report.checks.find((c) => c.id === "credentials")
     // An env key must NOT rescue a provider that never reads one.
     expect(cred?.ok).toBe(false)
     expect(cred?.detail).toContain("chatgpt.json")
+    expect(cred?.detail).toContain("quanta login")
   })
 
   test("PRESENCE ONLY — no credential VALUE reaches a detail, on any arm", () => {
