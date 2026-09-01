@@ -45,6 +45,20 @@ const sleep = async (ms: number): Promise<void> => {
   await new Promise<void>((resolve) => setTimeout(resolve, ms))
 }
 
+const waitForScreenTextAfter = async (
+  cli: PtyCli,
+  text: string,
+  offset: number,
+  timeoutMs: number,
+): Promise<void> => {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (cli.screen().indexOf(text, offset) >= offset) return
+    await sleep(25)
+  }
+  throw new Error(`waitForScreenTextAfter timed out (${timeoutMs}ms) for ${text}`)
+}
+
 /** Drive the raw editor as real keystrokes. A whole command in one PTY write can
  * outrun slash-palette state transitions and turn this into a chunking test. */
 const typeText = async (cli: PtyCli, text: string): Promise<void> => {
@@ -260,6 +274,14 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
     await c.waitFor("BUDGET_ATTEMPT_ONE", 30_000)
     await c.waitFor("BUDGET_ATTEMPT_TWO", 40_000)
     await c.waitFor("goal: completed · 2 tok", T)
+    const settlementOffset = c.screen().lastIndexOf("goal: completed · 2 tok")
+    await waitForScreenTextAfter(c, BOOT, settlementOffset, T)
+    // The prompt is painted immediately before raw mode is fully active. The
+    // compiled binary can reach the settlement footer before that transition;
+    // sending `/` in this gap drops only the slash and submits `resume` as a
+    // model prompt. Synchronize to the post-settlement prompt, then let the
+    // raw-mode transition settle just as the boot helpers do.
+    await sleep(50)
     // Two real 15 s quiet windows also trip the REPL's independent idle
     // suppression. Wake that UI gate before exercising the public Goal query.
     await submitLine(c, "/resume")
