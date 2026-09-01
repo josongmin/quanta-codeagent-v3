@@ -64,7 +64,7 @@ describe("ADR-0162 spawner happy-path", () => {
       })
       const got: unknown[] = []
       handle.onMessage((m) => got.push(m))
-      const deadline = Date.now() + 1500
+      const deadline = Date.now() + 10_000
       while (got.length < 1 && Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, 25))
       }

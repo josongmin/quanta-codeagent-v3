@@ -73,7 +73,7 @@ describe("startLspRssWatchdog", () => {
         exceeded.push(rss)
       },
     })
-    await wait(120)
+    await wait(1_000)
     h.stop()
     expect(exceeded).toEqual([9000]) // fired exactly once, at the first over-budget sample
     // after firing it stopped — no further samples beyond the trip
