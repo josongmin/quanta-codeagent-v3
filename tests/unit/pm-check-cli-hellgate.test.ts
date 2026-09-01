@@ -36,6 +36,10 @@ const REPO = join(import.meta.dir, "..", "..")
 // (`2845e206c`). The anchored constant is the SSOT both the tool and this test
 // must read.
 const FEATURES_DIR = ANCHORED_FEATURES_DIR
+// This guard re-parses the whole production catalog to verify the subprocess
+// fixtures. It is an integrity census, so use the established finite full-scan
+// allowance rather than a latency budget under an eight-shard host.
+const FULL_CATALOG_SCAN_TIMEOUT_MS = 300_000
 
 /** Run the REAL CLI composition root as a subprocess (the path CI/pre-push runs). */
 const runCheck = (...args: string[]) =>
@@ -107,31 +111,35 @@ describe("tools/pm/check.ts CLI — exit-code contract end-to-end", () => {
 })
 
 describe("tools/pm/check.ts CLI — fixture self-consistency (keeps this honest if catalog shifts)", () => {
-  test("the chosen fixtures still have the verdicts the exit-code tests assume", async () => {
-    const features = await loadFeaturesStrict(FEATURES_DIR)
-    const byId = new Map(features.map((lf) => [lf.feature.id, lf.feature]))
+  test(
+    "the chosen fixtures still have the verdicts the exit-code tests assume",
+    async () => {
+      const features = await loadFeaturesStrict(FEATURES_DIR)
+      const byId = new Map(features.map((lf) => [lf.feature.id, lf.feature]))
 
-    const passing = byId.get(PASSING_ID)
-    expect(passing, `${PASSING_ID} must exist in the catalog`).toBeDefined()
-    if (passing) {
-      expect(checkFeatureDoD(passing).verdict).toBe("pass")
-    }
+      const passing = byId.get(PASSING_ID)
+      expect(passing, `${PASSING_ID} must exist in the catalog`).toBeDefined()
+      if (passing) {
+        expect(checkFeatureDoD(passing).verdict).toBe("pass")
+      }
 
-    const failing = byId.get(FAILING_ID)
-    expect(failing, `${FAILING_ID} must exist in the catalog`).toBeDefined()
-    if (failing) {
-      expect(checkFeatureDoD(failing).verdict).toBe("fail")
-    }
+      const failing = byId.get(FAILING_ID)
+      expect(failing, `${FAILING_ID} must exist in the catalog`).toBeDefined()
+      if (failing) {
+        expect(checkFeatureDoD(failing).verdict).toBe("fail")
+      }
 
-    const seam = byId.get(L2_SEAM_ID)
-    expect(seam, `${L2_SEAM_ID} must exist in the catalog`).toBeDefined()
-    if (seam) {
-      // L2 seam: catalog-only bar passes lax, full bar fails under strict.
-      expect(checkFeatureDoD(seam, false).verdict).toBe("pass")
-      expect(checkFeatureDoD(seam, true).verdict).toBe("fail")
-    }
+      const seam = byId.get(L2_SEAM_ID)
+      expect(seam, `${L2_SEAM_ID} must exist in the catalog`).toBeDefined()
+      if (seam) {
+        // L2 seam: catalog-only bar passes lax, full bar fails under strict.
+        expect(checkFeatureDoD(seam, false).verdict).toBe("pass")
+        expect(checkFeatureDoD(seam, true).verdict).toBe("fail")
+      }
 
-    // The "unknown" id must genuinely be absent.
-    expect(byId.has(UNKNOWN_ID)).toBe(false)
-  })
+      // The "unknown" id must genuinely be absent.
+      expect(byId.has(UNKNOWN_ID)).toBe(false)
+    },
+    FULL_CATALOG_SCAN_TIMEOUT_MS,
+  )
 })

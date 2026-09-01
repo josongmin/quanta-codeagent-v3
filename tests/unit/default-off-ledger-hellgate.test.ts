@@ -11,9 +11,9 @@ const ROOT = join(import.meta.dir, "..", "..")
 const LEDGER_PATH = join(ROOT, "tools/feature-catalog/default-off-ledger.yaml")
 const CATALOG_DIR = join(ROOT, "tools/feature-catalog/features")
 // This rail loads the whole 1k+ YAML catalog through the production parser.
-// It is an integrity census, not a 5s latency budget; keep the bound finite
-// while allowing the initial filesystem read under a contended full-suite host.
-const FULL_CATALOG_CENSUS_TIMEOUT_MS = 30_000
+// It is an integrity census, not a latency budget; retain the same finite
+// eight-shard I/O allowance as the companion full-catalog scan rail.
+const FULL_CATALOG_CENSUS_TIMEOUT_MS = 300_000
 
 const clone = (ledger: DefaultOffLedger): DefaultOffLedger => structuredClone(ledger)
 

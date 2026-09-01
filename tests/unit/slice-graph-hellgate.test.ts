@@ -195,8 +195,10 @@ describe("B. validateGraph rule matching", () => {
 
 describe("C. Real-graph audit over <repo>/src", () => {
   // Share one graph build across the 4 real-graph tests — building takes
-  // ~5s over ~840 files; per-test rebuild would push us past bun's 5s
-  // default timeout.
+  // ~5s over ~840 files when idle. The graph is a complete source-corpus scan;
+  // under host contention it has exceeded 30s without becoming silent, so the
+  // shared build gets the same finite 5-minute ceiling used by sibling corpus
+  // rails. Per-test rebuild would still be needlessly expensive.
   let realGraphPromise: Promise<Awaited<ReturnType<typeof buildSliceGraph>>> | null = null
   const getRealGraph = () => {
     if (realGraphPromise === null) realGraphPromise = buildSliceGraph()
@@ -206,7 +208,7 @@ describe("C. Real-graph audit over <repo>/src", () => {
   test("12. buildSliceGraph(real-src) → at least 25 slices observed", async () => {
     const g = await getRealGraph()
     expect(g.slices.length).toBeGreaterThanOrEqual(25)
-  }, 30_000)
+  }, 300_000)
 
   test("13. validateGraph(real-src) → snapshot count of violations", async () => {
     // EXPECTED (9): type-only reverse-layering imports, all TOLERATED.

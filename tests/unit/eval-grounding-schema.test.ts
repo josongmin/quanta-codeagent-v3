@@ -139,9 +139,10 @@ describe("grounding schema", () => {
     expect(parseGroundingCase(minimalCase()).id).toBe("sample")
   })
 
-  // b3610af2a's committed corpus grew from 26/50 to 28/52. The later count-only
-  // edit double-counted that pair; the companion test pins pair identities.
-  test("governed corpora stay at canary=28 and nightly=52", () => {
+  // `bench-*.json` files are ignored local evaluator artifacts, not committed
+  // corpus fixtures. Counts agree in a developer worktree and fresh CI; the
+  // companion governance test pins the four committed pair identities.
+  test("governed corpora stay at committed canary=28 and nightly=52", () => {
     expect(loadGroundingCases({ suite: "canary" })).toHaveLength(28)
     expect(loadGroundingCases({ suite: "nightly" })).toHaveLength(52)
   })

@@ -54,6 +54,10 @@ const FEATURES = join(REPO_ROOT, "tools", "feature-catalog", "features")
 // Full-corpus parsing competes with eight CI shards for filesystem bandwidth.
 // The assertion is an anti-vacuity correctness rail, not a latency budget.
 const FULL_CATALOG_SCAN_TIMEOUT_MS = 300_000
+// The two full-corpus assertions below judge the same immutable catalog. Keep
+// their production-loader evidence identical while avoiding a second I/O-bound
+// parse under the same shard's host contention.
+const realCatalogOnce = loadFeaturesStrict(FEATURES)
 
 describe("feature catalog — a scan cannot report clean over a catalog it never read", () => {
   test(
@@ -62,7 +66,7 @@ describe("feature catalog — a scan cannot report clean over a catalog it never
       // Every assertion here is about telling "zero features" from "many". If the
       // real catalog were itself near-empty the distinction would be untestable and
       // this file would pass for free.
-      const real = await loadFeaturesStrict(FEATURES)
+      const real = await realCatalogOnce
       expect(real.length).toBeGreaterThan(500)
       // This parses the full >1k-feature corpus. Preserve that anti-vacuity
       // coverage, but leave shared eight-shard CI adequate I/O headroom.
@@ -108,7 +112,8 @@ describe("feature catalog — a scan cannot report clean over a catalog it never
       for (const p of [FEATURES_DIR, PROSE_DIR, BASELINE_PATH]) {
         expect(p.startsWith("/"), `${p} must be absolute`).toBe(true)
       }
-      expect((await loadFeaturesStrict(FEATURES_DIR)).length).toBeGreaterThan(500)
+      expect(FEATURES_DIR).toBe(FEATURES)
+      expect((await realCatalogOnce).length).toBeGreaterThan(500)
     },
     FULL_CATALOG_SCAN_TIMEOUT_MS,
   )

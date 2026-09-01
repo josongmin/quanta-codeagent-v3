@@ -333,39 +333,51 @@ describe("objective-goal-continuation-live — runIdleContinuation decision logi
       ],
     })
     const authority = asObjectiveAuthority(store) as ObjectiveAuthority
-    const commitObservation = (attemptId: string) => {
-      const objective = authority.get(TID)
-      if (objective === null) throw new Error("objective missing")
-      if (objective.attempts.started?.attemptId !== attemptId) {
-        if (objective.attempts.started !== undefined) {
-          authority.commit(
-            authority.prepare({
-              threadId: TID,
-              actor: "system",
-              mutation: { kind: "abandonAttempt" },
-            }),
-            { admitted: true },
-          )
-        }
-        authority.commit(
-          authority.prepare({
-            threadId: TID,
-            actor: "system",
-            mutation: {
-              kind: "beginAttempt",
-              attempt: {
-                objectiveId: objective.objectiveId,
-                attemptId,
-                provenance: "user-requested-goal-work",
-                executionMode: "foreground",
-                startedRevision: authority.readDomain(TID).revision,
-              },
-            },
-          }),
-          { admitted: true },
-        )
-      }
+    const startAttempt = (attemptId: string) => {
+      const domain = authority.readDomain(TID)
       return authority.commit(
+        authority.prepare({
+          threadId: TID,
+          actor: "system",
+          mutation: {
+            kind: "beginAttempt",
+            attempt: {
+              objectiveId: domain.state?.objective.objectiveId ?? "",
+              attemptId,
+              provenance: "autonomous-continuation",
+              executionMode: "foreground",
+              startedRevision: domain.revision,
+            },
+          },
+        }),
+        { admitted: true },
+      )
+    }
+    const settleAttempt = (attemptId: string) =>
+      authority.commit(
+        authority.prepare({
+          threadId: TID,
+          actor: "system",
+          mutation: {
+            kind: "settleAttempt",
+            settlement: {
+              objectiveId: store.get(TID)?.objectiveId ?? "",
+              attemptId,
+              startedRevision: authority.readDomain(TID).revision,
+              tokensUsed: 0,
+              turnsUsed: 1,
+              outcome: "completed",
+              executionMode: "foreground",
+              criterionIdsBefore: [],
+              verifierReceiptIdsBefore: [],
+              recordedAt: 1,
+            },
+          },
+        }),
+        { admitted: true },
+      )
+    const commitObservation = () =>
+      authority.commit(
         authority.prepare({
           threadId: TID,
           actor: "model",
@@ -378,10 +390,13 @@ describe("objective-goal-continuation-live — runIdleContinuation decision logi
         }),
         { admitted: true },
       )
-    }
 
-    expect(commitObservation("attempt-1").ok).toBe(true)
-    expect(commitObservation("attempt-2").ok).toBe(true)
+    expect(startAttempt("attempt-1").ok).toBe(true)
+    expect(commitObservation().ok).toBe(true)
+    expect(settleAttempt("attempt-1").ok).toBe(true)
+    expect(startAttempt("attempt-2").ok).toBe(true)
+    expect(commitObservation().ok).toBe(true)
+    expect(settleAttempt("attempt-2").ok).toBe(true)
     expect(store.get(TID)?.blockerObservations[0]?.occurrences).toHaveLength(2)
 
     const domain = authority.readDomain(TID)
@@ -419,6 +434,7 @@ describe("objective-goal-continuation-live — runIdleContinuation decision logi
     expect(store.get(TID)?.status).toBe("active")
     expect(store.get(TID)?.blockerObservations).toEqual([])
 
+    expect(startAttempt("attempt-3").ok).toBe(true)
     expect(commitObservation("attempt-3").ok).toBe(true)
     expect(
       store.get(TID)?.blockerObservations[0]?.occurrences.map((item) => item.attemptId),

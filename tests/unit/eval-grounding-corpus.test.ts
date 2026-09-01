@@ -2,9 +2,11 @@ import { describe, expect, test } from "bun:test"
 import { loadGroundingCases } from "@/../src/apps/eval/grounding"
 
 describe("grounding corpus governance", () => {
-  // Pin identities, not only a count: b3610af2a added stale-objective to three
-  // existing pairs (26 -> 28 cases). A replacement or missing pair must fail.
-  test("canary ships every governed raw/summary pair", () => {
+  // Four committed raw/summary pairs. `bench-*.json` is a local ignored
+  // evaluator artifact, never corpus evidence; the loader excludes it so this
+  // governance rail is invariant across developer worktrees and clean CI. Pin
+  // identities, not only a count: replacement or omission must fail.
+  test("canary ships every committed governed raw/summary pair", () => {
     const cases = loadGroundingCases({ suite: "canary" })
     const pairs = new Map<string, Set<string>>()
     for (const groundingCase of cases) {
