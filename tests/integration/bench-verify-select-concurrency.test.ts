@@ -21,7 +21,7 @@ class ParallelEditLLM implements LLMPort {
       .flatMap((m) => m.content)
       .map((b) => (b.type === "text" ? b.text : ""))
       .join(" ")
-    const sandbox = text.match(/Work inside (\S+?)\./)?.[1] ?? ""
+    const sandbox = text.match(/Work inside (.+?)\.(?:\n| When done)/)?.[1] ?? ""
     const phase = this.phaseBySandbox.get(sandbox) ?? 0
     this.inFlight += 1
     this.maxInFlight = Math.max(this.maxInFlight, this.inFlight)

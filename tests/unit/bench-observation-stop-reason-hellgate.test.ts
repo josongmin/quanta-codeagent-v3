@@ -19,7 +19,10 @@ class FixingLLM implements LLMPort {
       .flatMap((m) => m.content)
       .map((b) => (b.type === "text" ? b.text : ""))
       .join(" ")
-    const sandbox = text.match(/Work inside (\S+?)\./)?.[1] ?? ""
+    // Stop at the prompt sentence terminator, not the first dot in the path.
+    // The canonical isolated home contains `/.quanta/`, so `\S+?\.` silently
+    // redirected edits outside the sandbox under the authoritative runner.
+    const sandbox = text.match(/Work inside (.+?)\.(?:\n| When done)/)?.[1] ?? ""
     if (this.calls === 1) {
       yield { type: "tool_use_start", id: "e1", name: "edit" }
       yield {

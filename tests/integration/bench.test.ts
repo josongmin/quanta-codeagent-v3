@@ -36,7 +36,7 @@ class FixingLLM implements LLMPort {
       .flatMap((m) => m.content)
       .map((b) => (b.type === "text" ? b.text : ""))
       .join(" ")
-    const m = text.match(/Work inside (\S+?)\./)
+    const m = text.match(/Work inside (.+?)\.(?:\n| When done)/)
     const sandbox = m?.[1] ?? ""
     if (this.calls === 1) {
       const path = join(sandbox, this.file)
@@ -82,7 +82,7 @@ class FlakyLLM implements LLMPort {
       .flatMap((m) => m.content)
       .map((b) => (b.type === "text" ? b.text : ""))
       .join(" ")
-    const sandbox = text.match(/Work inside (\S+?)\./)?.[1] ?? ""
+    const sandbox = text.match(/Work inside (.+?)\.(?:\n| When done)/)?.[1] ?? ""
     if (shouldFix && this.callsInAttempt === 1) {
       yield { type: "tool_use_start", id: "f1", name: "edit" }
       yield {

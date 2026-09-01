@@ -34,7 +34,7 @@ class EditOnceLLM implements LLMPort {
       .flatMap((m) => m.content)
       .map((b) => (b.type === "text" ? b.text : ""))
       .join(" ")
-    const sandbox = text.match(/Work inside (\S+?)\./)?.[1] ?? ""
+    const sandbox = text.match(/Work inside (.+?)\.(?:\n| When done)/)?.[1] ?? ""
     yield { type: "tool_use_start", id: "e1", name: "edit" }
     yield {
       type: "tool_use_end",

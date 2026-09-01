@@ -132,7 +132,7 @@ class ScriptedLLM implements LLMPort {
       .flatMap((m) => m.content)
       .map((b) => (b.type === "text" ? b.text : ""))
       .join("\n")
-    const sandbox = text.match(/Work inside (\S+?)\./)?.[1] ?? ""
+    const sandbox = text.match(/Work inside (.+?)\.(?:\n| When done)/)?.[1] ?? ""
     const scene = this.scenes[Math.min(this.sceneIdx, this.scenes.length - 1)] ?? {
       kind: "noop" as const,
     }

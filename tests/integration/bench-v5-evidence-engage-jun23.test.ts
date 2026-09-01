@@ -111,7 +111,7 @@ class CapturingRouteLLM implements LLMPort {
       .flatMap((message) => message.content)
       .map((block) => (block.type === "text" ? block.text : ""))
       .join(" ")
-    const sandbox = prompt.match(/Work inside (\S+?)\./)?.[1] ?? ""
+    const sandbox = prompt.match(/Work inside (.+?)\.(?:\n| When done)/)?.[1] ?? ""
     if (sandbox === "") {
       yield {
         type: "text_delta",

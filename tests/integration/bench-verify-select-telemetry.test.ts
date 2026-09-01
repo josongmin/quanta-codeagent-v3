@@ -31,7 +31,7 @@ class ReadLoopLLM implements LLMPort {
       .flatMap((m) => m.content)
       .map((b) => (b.type === "text" ? b.text : ""))
       .join(" ")
-    const sandbox = text.match(/Work inside (\S+?)\./)?.[1] ?? ""
+    const sandbox = text.match(/Work inside (.+?)\.(?:\n| When done)/)?.[1] ?? ""
     yield { type: "tool_use_start", id: "r1", name: "read" }
     yield {
       type: "tool_use_end",
@@ -66,7 +66,7 @@ class SequentialEditLLM implements LLMPort {
       .flatMap((m) => m.content)
       .map((b) => (b.type === "text" ? b.text : ""))
       .join(" ")
-    const sandbox = text.match(/Work inside (\S+?)\./)?.[1] ?? ""
+    const sandbox = text.match(/Work inside (.+?)\.(?:\n| When done)/)?.[1] ?? ""
     if (sandbox === "") {
       yield { type: "text_delta", delta: 'print("Issue reproduced")' }
       yield { type: "message_stop", stop_reason: "end_turn" }
@@ -103,7 +103,7 @@ class EditThenThrowThenNoopLLM implements LLMPort {
       .flatMap((m) => m.content)
       .map((b) => (b.type === "text" ? b.text : ""))
       .join(" ")
-    const sandbox = text.match(/Work inside (\S+?)\./)?.[1] ?? ""
+    const sandbox = text.match(/Work inside (.+?)\.(?:\n| When done)/)?.[1] ?? ""
     if (sandbox === "") {
       yield { type: "text_delta", delta: 'print("Issue reproduced")' }
       yield { type: "message_stop", stop_reason: "end_turn" }
@@ -140,7 +140,7 @@ class EditThenRefuseThenNoopLLM implements LLMPort {
       .flatMap((m) => m.content)
       .map((b) => (b.type === "text" ? b.text : ""))
       .join(" ")
-    const sandbox = text.match(/Work inside (\S+?)\./)?.[1] ?? ""
+    const sandbox = text.match(/Work inside (.+?)\.(?:\n| When done)/)?.[1] ?? ""
     if (sandbox === "") {
       yield { type: "text_delta", delta: 'print("Issue reproduced")' }
       yield { type: "message_stop", stop_reason: "end_turn" }
