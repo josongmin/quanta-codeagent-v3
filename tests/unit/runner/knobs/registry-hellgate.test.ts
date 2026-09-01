@@ -232,47 +232,41 @@ describe("hellgate / registry — mutation guards on returned views", () => {
 })
 
 describe("hellgate / registry — scale + perf regression guard", () => {
-  test("1000 knobs register + filter in under 250ms", () => {
-    const start = performance.now()
+  test("1000 knobs register + filter consume under 250ms CPU", () => {
+    // This rail guards synchronous registry cost, so measure CPU consumed by
+    // the operation instead of wall time. Whole-suite host contention can
+    // preempt this worker without making the registry itself more expensive.
+    const start = process.cpuUsage()
     for (let i = 0; i < 1000; i++) {
       registerKnob(mk(`scale-${i}`, i % 2 === 0 ? ["bench"] : ["cli"]))
     }
-    const filterStart = performance.now()
+    const filterStart = process.cpuUsage()
     const bench = knobsForSurface("bench")
     const cli = knobsForSurface("cli")
-    const elapsed = performance.now() - start
-    const filterSamples = [performance.now() - filterStart]
-    // A single sub-50ms wall-clock sample is vulnerable to scheduler
-    // preemption in the full 8-shard suite. Keep the 250ms end-to-end ceiling,
-    // but use the best of several identical filter samples for the micro-perf
-    // assertion so the rail measures the operation rather than host pressure.
-    for (let i = 0; i < 4; i++) {
-      const sampleStart = performance.now()
-      knobsForSurface("bench")
-      knobsForSurface("cli")
-      filterSamples.push(performance.now() - sampleStart)
-    }
-    const filterElapsed = Math.min(...filterSamples)
+    const elapsed = process.cpuUsage(start)
+    const filterElapsed = process.cpuUsage(filterStart)
     expect(allKnobs().size).toBe(1000)
     expect(bench.size).toBe(500)
     expect(cli.size).toBe(500)
-    expect(elapsed).toBeLessThan(250)
-    expect(filterElapsed).toBeLessThan(50)
+    expect((elapsed.user + elapsed.system) / 1000).toBeLessThan(250)
+    expect((filterElapsed.user + filterElapsed.system) / 1000).toBeLessThan(50)
   })
 
   test("inserting a 1001st distinct knob still O(1)", () => {
     for (let i = 0; i < 1000; i++) registerKnob(mk(`s-${i}`))
-    const t = performance.now()
+    const started = process.cpuUsage()
     registerKnob(mk("late"))
-    expect(performance.now() - t).toBeLessThan(5)
+    const elapsed = process.cpuUsage(started)
+    expect((elapsed.user + elapsed.system) / 1000).toBeLessThan(5)
     expect(allKnobs().has("late")).toBe(true)
   })
 
   test("collision check on 1001st against existing 1000 still throws fast", () => {
     for (let i = 0; i < 1000; i++) registerKnob(mk(`s-${i}`))
-    const t = performance.now()
+    const started = process.cpuUsage()
     expect(() => registerKnob(mk("s-500"))).toThrow()
-    expect(performance.now() - t).toBeLessThan(5)
+    const elapsed = process.cpuUsage(started)
+    expect((elapsed.user + elapsed.system) / 1000).toBeLessThan(5)
   })
 })
 
