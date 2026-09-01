@@ -51,6 +51,8 @@ evidence:
     - src/browser/port.ts
     - src/browser/types.ts
     - src/browser/cdp-adapter.ts
+    - src/browser/cdp-adapter/lifecycle-ops.ts
+    - src/browser/cdp-adapter/session-state.ts
     - src/browser/headless-stub.ts
     - src/browser/cdp/cdp-session.ts
     - src/browser/cdp/collect.ts
@@ -58,6 +60,7 @@ evidence:
     - src/browser/cdp/defaults.ts
     - src/browser/cdp/dev-tools-endpoint.ts
     - src/browser/cdp/ports.ts
+    - src/browser/cdp/process-exit-kill-guard.ts
     - src/browser/cdp/network-buffer.ts
     - src/tool/browser/index.ts
     - src/tool/browser/net-guard.ts
@@ -73,6 +76,7 @@ evidence:
       - tests/unit/browser-cdp-adapter-hellgate.test.ts
       - tests/unit/browser-cdp-adapter-branches-hellgate.test.ts
       - tests/unit/browser-cdp-session-hellgate.test.ts
+      - tests/unit/browser-cdp-session-map-leak-hellgate.test.ts
       - tests/unit/browser-cdp-allowlist-hellgate.test.ts
       - tests/unit/browser-edge-ssrf-hellgate.test.ts
       - tests/unit/browser-edge-parse-hellgate.test.ts
