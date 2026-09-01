@@ -2,7 +2,7 @@
  * Hellgate — CDP flat-session routing (ADR-0427 R3 audit [4][5][10]).
  *
  * Pins the page-session protocol the real-chrome bring-up depends on:
- *   - requests after useSessionId carry the sessionId envelope field;
+ *   - requests after setActiveSessionId carry the sessionId envelope field;
  *   - events are delivered ONLY when their sessionId matches the page session;
  *   - Target.detachedFromTarget / Target.targetCrashed mark the session dead:
  *     in-flight calls settle fast (cdp-error) and later calls fail fast (no
@@ -42,7 +42,7 @@ const fakeConn = () => {
 const idleScheduler: Scheduler = { schedule: () => () => {} }
 
 describe("HELLGATE flat-session — sessionId stamping [10]", () => {
-  test("requests after useSessionId carry the sessionId; before, they do not", async () => {
+  test("requests after setActiveSessionId carry the sessionId; before, they do not", async () => {
     const f = fakeConn()
     const s = createCdpSession({ conn: f.conn, scheduler: idleScheduler })
     // browser-level (no sessionId yet)
@@ -51,7 +51,7 @@ describe("HELLGATE flat-session — sessionId stamping [10]", () => {
     await p0
     expect(f.sent[0]?.sessionId).toBeUndefined()
     // attach → page session
-    s.useSessionId("s1")
+    s.setActiveSessionId("s1")
     const p1 = s.request("Page.enable")
     f.reply(1, {})
     await p1
@@ -63,7 +63,7 @@ describe("HELLGATE flat-session — event sessionId filter [4]", () => {
   test("foreign-session event does NOT satisfy a page-scoped waiter; matching one does", async () => {
     const f = fakeConn()
     const s = createCdpSession({ conn: f.conn, scheduler: idleScheduler })
-    s.useSessionId("s1")
+    s.setActiveSessionId("s1")
     const p = s.waitForEvent("Page.loadEventFired")
     f.emit("Page.loadEventFired", "OTHER", { t: 1 }) // wrong session — must be ignored
     f.emit("Page.loadEventFired", undefined, { t: 2 }) // browser-level — must be ignored
@@ -73,7 +73,7 @@ describe("HELLGATE flat-session — event sessionId filter [4]", () => {
     if (r.ok) expect(r.value).toEqual({ t: 3 })
   })
 
-  test("before useSessionId, an event with no sessionId is delivered (bring-up phase)", async () => {
+  test("before setActiveSessionId, an event with no sessionId is delivered (bring-up phase)", async () => {
     const f = fakeConn()
     const s = createCdpSession({ conn: f.conn, scheduler: idleScheduler })
     const p = s.waitForEvent("Some.event")
@@ -87,7 +87,7 @@ describe("HELLGATE flat-session — detach/crash dead-session [5]", () => {
   test("Target.detachedFromTarget settles in-flight + fails later calls fast", async () => {
     const f = fakeConn()
     const s = createCdpSession({ conn: f.conn, scheduler: idleScheduler })
-    s.useSessionId("s1")
+    s.setActiveSessionId("s1")
     const inFlight = s.request("Page.captureScreenshot")
     f.emit("Target.detachedFromTarget", undefined, { sessionId: "s1" })
     const r = await inFlight
@@ -102,7 +102,7 @@ describe("HELLGATE flat-session — detach/crash dead-session [5]", () => {
   test("Target.targetCrashed marks dead; a waiting event settles closed", async () => {
     const f = fakeConn()
     const s = createCdpSession({ conn: f.conn, scheduler: idleScheduler })
-    s.useSessionId("s1")
+    s.setActiveSessionId("s1")
     const waiting = s.waitForEvent("Page.loadEventFired")
     f.emit("Target.targetCrashed", undefined, {})
     const r = await waiting
@@ -113,7 +113,7 @@ describe("HELLGATE flat-session — detach/crash dead-session [5]", () => {
   test("a detach for a DIFFERENT session does NOT kill ours", async () => {
     const f = fakeConn()
     const s = createCdpSession({ conn: f.conn, scheduler: idleScheduler })
-    s.useSessionId("s1")
+    s.setActiveSessionId("s1")
     f.emit("Target.detachedFromTarget", undefined, { sessionId: "other" }) // not ours
     const p = s.request("DOM.getDocument")
     f.reply(0, { ok: true })

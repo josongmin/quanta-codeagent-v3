@@ -139,7 +139,7 @@ describe("HELLGATE cdp-session onEvent — persistent subscription seam", () => 
   test("HELL-ONEVENT-01: cb fires for EVERY matching event (stays registered)", () => {
     const f = fakeConn()
     const s = createCdpSession({ conn: f.conn, scheduler: idleScheduler })
-    s.useSessionId("s1")
+    s.setActiveSessionId("s1")
     const seen: number[] = []
     s.onEvent("Runtime.consoleAPICalled", (p) => seen.push(p.n as number))
     f.emit("Runtime.consoleAPICalled", "s1", { n: 1 })
@@ -151,7 +151,7 @@ describe("HELLGATE cdp-session onEvent — persistent subscription seam", () => 
   test("HELL-ONEVENT-02: unsubscribe stops delivery; foreign session filtered", () => {
     const f = fakeConn()
     const s = createCdpSession({ conn: f.conn, scheduler: idleScheduler })
-    s.useSessionId("s1")
+    s.setActiveSessionId("s1")
     const seen: number[] = []
     const off = s.onEvent("X", (p) => seen.push(p.n as number))
     f.emit("X", "OTHER", { n: 9 }) // foreign session — filtered out
@@ -164,7 +164,7 @@ describe("HELLGATE cdp-session onEvent — persistent subscription seam", () => 
   test("HELL-ONEVENT-03: dispose clears subscribers (no post-dispose delivery)", () => {
     const f = fakeConn()
     const s = createCdpSession({ conn: f.conn, scheduler: idleScheduler })
-    s.useSessionId("s1")
+    s.setActiveSessionId("s1")
     const seen: number[] = []
     s.onEvent("X", (p) => seen.push(p.n as number))
     s.dispose()
@@ -177,7 +177,7 @@ describe("HELLGATE cdp-session onEvent — persistent subscription seam", () => 
   test("HELL-ONEVENT-04: waitForEvent and onEvent both fire for the same event", () => {
     const f = fakeConn()
     const s = createCdpSession({ conn: f.conn, scheduler: idleScheduler })
-    s.useSessionId("s1")
+    s.setActiveSessionId("s1")
     const subSeen: number[] = []
     s.onEvent("E", (p) => subSeen.push(p.n as number))
     const wait = s.waitForEvent("E")

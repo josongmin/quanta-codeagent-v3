@@ -119,7 +119,7 @@ export const connectAndEnable = async (
   // DevToolsActivePort gives the BROWSER-level endpoint, where Page.*/Runtime.*
   // do not exist. Create + attach a page target (flat protocol) and route all
   // subsequent page calls through its sessionId (real-chrome e2e bug fix). The
-  // Target.* calls below are browser-level — made BEFORE useSessionId.
+  // Target.* calls below are browser-level — made BEFORE setActiveSessionId.
   const created = await session.request("Target.createTarget", { url: "about:blank" }, opts)
   if (!created.ok) {
     session.dispose()
@@ -140,7 +140,7 @@ export const connectAndEnable = async (
     session.dispose()
     return err({ kind: "spawn-failed", detail: "Target.attachToTarget returned no sessionId" })
   }
-  session.useSessionId(sessionId)
+  session.setActiveSessionId(sessionId)
   // R2 audit [3]: thread the abort signal into the bring-up request too — a turn
   // aborted during a hung Page.enable must cancel promptly, not wait the timeout.
   const enabled = await session.request("Page.enable", undefined, opts)

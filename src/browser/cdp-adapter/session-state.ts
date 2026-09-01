@@ -22,7 +22,7 @@ import type { CdpBrowserDeps } from "./deps"
 /** TICKET-24 Wave B — one open tab. The `refMap` is PER-TAB so a ref minted on
  *  tab A fails closed when tab B is active (same invariant a navigation enforces).
  *  `sessionId` is the flat-protocol page session the single {@link CdpSession}
- *  routes to when this tab is active (via `useSessionId`) or per-request. */
+ *  routes to when this tab is active (via `setActiveSessionId`) or per-request. */
 export interface TabState {
   readonly targetId: string
   readonly sessionId: string
