@@ -98,10 +98,11 @@ describe("feature-catalog evidence existence (durable anti-rot lock)", () => {
     // recur across the catalog; de-duplicate and issue the remaining disk probes
     // concurrently so this full-catalog rail stays deterministic under CI I/O.
     expect(errors, errors.join("\n")).toEqual([])
-    // Catalog grew past ~980 entries; the per-path fs.stat sweep (thousands of
-    // stats) needs more than the 5s default — bump so this anti-rot lock stays a
-    // real disk check, not a timeout flake.
-  }, 30000)
+    // Catalog grew past ~980 entries; the per-path fs.stat sweep performs
+    // thousands of real disk probes. Under host contention it exceeds 30s
+    // while making progress, so retain the complete sweep behind the same
+    // finite five-minute ceiling used by sibling full-catalog rails.
+  }, 300_000)
 })
 
 describe("evidence-existence checker — red-on-injection (has teeth)", () => {
