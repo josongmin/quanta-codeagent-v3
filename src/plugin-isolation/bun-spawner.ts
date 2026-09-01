@@ -404,11 +404,12 @@ const buildHandle = (params: BuildHandleParams): IsolatedProcess => {
 interface SpawnWatchdog {
   readonly firstLinePromise: Promise<void>
   readonly notifyFirstLine: () => void
+  readonly notifyExit: (code: number) => void
+  readonly notifyExitError: (error: unknown) => void
   readonly cancel: () => void
 }
 
 const createSpawnWatchdog = (
-  proc: Subprocess<"pipe", "pipe", "pipe">,
   serviceName: string,
   spawnTimeoutMs: number,
   signal: AbortSignal | undefined,
@@ -434,6 +435,24 @@ const createSpawnWatchdog = (
     cancel()
     resolve()
   }
+  const notifyExit = (code: number): void => {
+    cancel()
+    reject(
+      new IsolatedSpawnError(
+        "spawn-failed",
+        `plugin "${serviceName}" exited before first message (code=${code})`,
+      ),
+    )
+  }
+  const notifyExitError = (error: unknown): void => {
+    cancel()
+    reject(
+      new IsolatedSpawnError(
+        "spawn-failed",
+        `plugin "${serviceName}" exit observation failed: ${errMessage(error)}`,
+      ),
+    )
+  }
   timer = setTimeout(() => {
     timer = undefined
     reject(
@@ -456,27 +475,7 @@ const createSpawnWatchdog = (
       signal.addEventListener("abort", onAbort)
     }
   }
-  void proc.exited.then(
-    (code) => {
-      cancel()
-      reject(
-        new IsolatedSpawnError(
-          "spawn-failed",
-          `plugin "${serviceName}" exited before first message (code=${code})`,
-        ),
-      )
-    },
-    (e) => {
-      cancel()
-      reject(
-        new IsolatedSpawnError(
-          "spawn-failed",
-          `plugin "${serviceName}" exit observation failed: ${errMessage(e)}`,
-        ),
-      )
-    },
-  )
-  return { firstLinePromise, notifyFirstLine, cancel }
+  return { firstLinePromise, notifyFirstLine, notifyExit, notifyExitError, cancel }
 }
 
 const tryParseJson = (line: string): unknown | undefined => {
@@ -517,7 +516,7 @@ export const createBunSpawner = (): IsolatedProcessSpawnerPort => ({
     const registry = createListenerRegistry()
     let sawFirstLine = false
 
-    const watchdog = createSpawnWatchdog(proc, serviceName, spawnTimeoutMs, opts.signal)
+    const watchdog = createSpawnWatchdog(serviceName, spawnTimeoutMs, opts.signal)
 
     const pump = createMessagePump(proc.stdout, serviceName, (line) => {
       if (!sawFirstLine) {
@@ -541,18 +540,21 @@ export const createBunSpawner = (): IsolatedProcessSpawnerPort => ({
       registry.dispatch(parsed)
     })
 
-    // Explicit exit watcher registered BEFORE the pump-death handler so a
-    // natural child death is observable by the time we make the liveness call.
-    // (Mirrors stdio.ts `watchExit` ordering, but here the flag alone is not
-    // enough — see PUMP_DEATH_EXIT_GRACE_MS — because Bun fans out `proc.exited`
-    // a full macrotask AFTER stdout EOF, so we also race the settlement below.)
+    // A short-lived child can publish READY and exit before Bun schedules the
+    // stdout consumer. Drain the finite stdout pump before declaring that the
+    // child exited without a first message; otherwise registration order makes
+    // `proc.exited` win over already-buffered READY bytes under host pressure.
     let childExited = false
     void proc.exited.then(
-      () => {
+      async (code) => {
         childExited = true
+        await pump.done
+        if (!sawFirstLine) watchdog.notifyExit(code)
       },
-      () => {
+      async (error) => {
         childExited = true
+        await pump.done
+        if (!sawFirstLine) watchdog.notifyExitError(error)
       },
     )
 
