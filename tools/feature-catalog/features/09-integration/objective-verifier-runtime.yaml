@@ -6,9 +6,10 @@ order: 96
 maturity: L3
 status: new
 ui_surfaces: [cli, web]
-monitoring: partial
+monitoring: integrated
 modes: [interactive, ide]
 configurable: integrated
+telemetry_keys: [quanta.objective.lifecycle.total]
 owners: ["@songmin"]
 labels: ["surface:core", "verification"]
 depends_on: [objective-first-class, objective-tools]
@@ -18,7 +19,7 @@ surface_integration:
   cli: full
   web: full
   method: audited
-  verified: "2026-08-31"
+  verified: "2026-09-01"
   evidence:
     cli: "The CLI goal facade attaches the verifier and exposes `/goal verify`; the objective tool uses the same port."
     web: "The shared runtime objective authority attaches the same verifier port used by web-daemon sessions and objective tools."
@@ -82,6 +83,6 @@ notes: |
   text is not persisted in the objective. Legacy receipts without posture restore
   as explicit v0 unknown and cannot satisfy checked completion. The strict posture
   claims workspace-write fencing, network deny, sandbox application, and runner
-  version; it does not claim CPU or memory isolation. Monitoring remains partial
-  because production decision counters are not yet a promotion-grade telemetry
-  pipeline.
+  version; it does not claim CPU or memory isolation. The optional no-throw
+  lifecycle sink records only the verifier's closed stage/outcome vocabulary;
+  it carries no objective text or identifiers and cannot alter verification.

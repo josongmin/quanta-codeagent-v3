@@ -11,14 +11,14 @@ depends_on: [objective-goal-continuation-live, objective-verifier-runtime]
 lifecycle_stage: active
 supersedes: []
 ui_surfaces: [web]
-monitoring: partial
+monitoring: integrated
 modes: [ide, daemon]
 configurable: integrated
-telemetry_keys: []
+telemetry_keys: [quanta.objective.lifecycle.total]
 surface_integration:
   web: full
   method: audited
-  verified: "2026-08-31"
+  verified: "2026-09-01"
   evidence:
     web: "The browser consumes one generated canonical Goal contract for HTTP reads and default-ON typed goal.state pushes. It exposes show/create/work/pause/stop/resume/edit/clear/abandon/budget/unblock/criterion add+done/check add/verify; persistent state includes freshness, absolute wake scheduling, and the latest authority settlement summary. Real TCP-WebSocket E2Es prove initial snapshot, mutation push, reconnect replay, lifecycle mutation, policy refusal, rich identity, stale-write rejection, and verifier receipt commit against the live authority."
 purpose: |
@@ -76,7 +76,7 @@ knobs:
     purpose: Public preset that composes the shared objective authority and verifier.
 deliberate_hold: null
 notes: |
-  Monitoring is partial because this control surface returns typed outcomes but
-  does not itself provide promotion-grade lifecycle counters. This does not
-  reduce its control-surface completeness; always-on wake/checkpoint projection
-  belongs to the broader `objective-goal-continuation-live` feature.
+  The web composition shares the optional no-throw bounded lifecycle sink with
+  the objective authority, wake controller, and verifier. The control frames
+  remain typed authority outcomes; always-on wake/checkpoint projection belongs
+  to the broader `objective-goal-continuation-live` feature.

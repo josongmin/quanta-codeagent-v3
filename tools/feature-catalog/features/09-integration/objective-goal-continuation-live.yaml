@@ -27,7 +27,7 @@ surface_integration:
   cli: full
   web: full
   method: audited
-  verified: "2026-08-31"
+  verified: "2026-09-01"
   evidence:
     cli: "A 16-case real PTY corpus boots both source and compiled CLI. It proves default-ON discovery, explicit opt-out, create/show, pause/resume/edit, checked verify then source-stale invalidation, user-budget stop, unblock, autonomous execution, draft/background/foreground quiescence, restart persistence, attach cancellation, and unsolicited settlement visibility. The source corpus passed three complete runs (median 200.77s, max 216.16s); the compiled binary passed the same corpus."
     web: "Web-daemon composition submits authority-validated autonomous and user-requested goal turns. The browser has complete `/goal` controls plus a default-ON typed state surface using the same canonical encoder as HTTP: current freshness, absolute wake scheduling, and latest settlement are pushed on effective transitions and replayed on reconnect independently of QUANTA_OBSERVABILITY. `pause` fences the next autonomous resume; it does not cancel a turn already running."
