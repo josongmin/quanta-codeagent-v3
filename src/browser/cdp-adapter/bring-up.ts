@@ -114,7 +114,11 @@ export const connectAndEnable = async (
 ): Promise<Result<BringUp, BrowserError>> => {
   const conn = await deps.transport.connect(wsUrl, signal)
   if (!conn.ok) return err({ kind: "spawn-failed", detail: conn.error.detail })
-  const session = createCdpSession({ conn: conn.value, scheduler: deps.scheduler })
+  const session = createCdpSession({
+    conn: conn.value,
+    scheduler: deps.scheduler,
+    ...(deps.commandTimeoutMs !== undefined ? { defaultTimeoutMs: deps.commandTimeoutMs } : {}),
+  })
   const opts = signal ? { signal } : undefined
   // DevToolsActivePort gives the BROWSER-level endpoint, where Page.*/Runtime.*
   // do not exist. Create + attach a page target (flat protocol) and route all

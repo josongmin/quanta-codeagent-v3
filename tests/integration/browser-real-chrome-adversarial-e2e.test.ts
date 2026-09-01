@@ -78,6 +78,10 @@ import {
 } from "@/browser"
 import { parseDomModel } from "@/browser/cdp/collect"
 import { guardPageText } from "@/tool/browser/result-map"
+import { pressureScaledTimeoutMs } from "./_host-pressure"
+
+const ENDPOINT_TIMEOUT_MS = pressureScaledTimeoutMs(15_000)
+const CDP_COMMAND_TIMEOUT_MS = pressureScaledTimeoutMs(30_000)
 
 // ---- chrome detection --------------------------------------------------------
 const MAC_PATHS = [
@@ -303,7 +307,8 @@ beforeAll(async () => {
     scheduler: realScheduler,
     clock: realClock,
     profileRoot,
-    endpointTimeoutMs: 15000,
+    endpointTimeoutMs: ENDPOINT_TIMEOUT_MS,
+    commandTimeoutMs: CDP_COMMAND_TIMEOUT_MS,
   })
   const spawned = await port.spawn()
   if (spawned.ok) {
@@ -403,7 +408,8 @@ describe("adversarial e2e — chrome-independent invariants", () => {
       scheduler: realScheduler,
       clock: realClock,
       profileRoot: tmpdir(),
-      endpointTimeoutMs: 15000,
+      endpointTimeoutMs: ENDPOINT_TIMEOUT_MS,
+      commandTimeoutMs: CDP_COMMAND_TIMEOUT_MS,
     })
     expect(p.availability()).toBe(HAS_CHROME ? "chromium" : null)
   })

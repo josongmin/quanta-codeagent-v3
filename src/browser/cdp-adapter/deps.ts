@@ -31,6 +31,10 @@ export interface CdpBrowserDeps {
   readonly chromeCandidates?: readonly string[]
   readonly macPaths?: readonly string[]
   readonly endpointTimeoutMs?: number
+  /** Default deadline for one connected CDP command. Production callers may
+   *  omit it to retain the session's 30-second default; pressure-aware test
+   *  composition roots can inject the same bounded budget as their watchdog. */
+  readonly commandTimeoutMs?: number
 }
 
 export const resolveChromeBinary = (

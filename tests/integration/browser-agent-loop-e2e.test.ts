@@ -53,6 +53,10 @@ import {
 import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { defaultTools, ToolRegistry } from "@/tool"
+import { pressureScaledTimeoutMs } from "./_host-pressure"
+
+const ENDPOINT_TIMEOUT_MS = pressureScaledTimeoutMs(15_000)
+const CDP_COMMAND_TIMEOUT_MS = pressureScaledTimeoutMs(30_000)
 
 // ── fixtures ────────────────────────────────────────────────────────────────
 
@@ -509,7 +513,8 @@ const REAL_CHROME_RAN = await (async (): Promise<boolean> => {
     scheduler: realScheduler,
     clock: realClock,
     profileRoot: TEMP_ROOT,
-    endpointTimeoutMs: 15000,
+    endpointTimeoutMs: ENDPOINT_TIMEOUT_MS,
+    commandTimeoutMs: CDP_COMMAND_TIMEOUT_MS,
   })
   if (probe.availability() === null) return false
   const sp = await probe.spawn()

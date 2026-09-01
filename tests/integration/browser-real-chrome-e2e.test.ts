@@ -47,6 +47,10 @@ import {
   realClock,
   realScheduler,
 } from "@/browser"
+import { pressureScaledTimeoutMs } from "./_host-pressure"
+
+const ENDPOINT_TIMEOUT_MS = pressureScaledTimeoutMs(15_000)
+const CDP_COMMAND_TIMEOUT_MS = pressureScaledTimeoutMs(30_000)
 
 // ── chrome detection ───────────────────────────────────────────────────────
 // Use the adapter's OWN availability() probe as the source of truth (it walks
@@ -61,7 +65,8 @@ const HAS_CHROME =
     scheduler: realScheduler,
     clock: realClock,
     profileRoot: probeRoot,
-    endpointTimeoutMs: 15000,
+    endpointTimeoutMs: ENDPOINT_TIMEOUT_MS,
+    commandTimeoutMs: CDP_COMMAND_TIMEOUT_MS,
   }).availability() !== null ||
   Boolean(
     Bun.which("google-chrome") ||
@@ -88,7 +93,8 @@ const spawnProbe = async (): Promise<{ usable: boolean; detail: string }> => {
       scheduler: realScheduler,
       clock: realClock,
       profileRoot: root,
-      endpointTimeoutMs: 15000,
+      endpointTimeoutMs: ENDPOINT_TIMEOUT_MS,
+      commandTimeoutMs: CDP_COMMAND_TIMEOUT_MS,
     })
     const r = await p.spawn()
     if (r.ok) {
@@ -247,7 +253,8 @@ describe.skipIf(!CHROME_USABLE)("browser real-chrome adapter e2e (ADR-0427)", ()
       scheduler: realScheduler,
       clock: realClock,
       profileRoot,
-      endpointTimeoutMs: 15000,
+      endpointTimeoutMs: ENDPOINT_TIMEOUT_MS,
+      commandTimeoutMs: CDP_COMMAND_TIMEOUT_MS,
     })
     const spawned = await port.spawn()
     expect(spawned.ok).toBe(true)

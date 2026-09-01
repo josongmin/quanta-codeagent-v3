@@ -16,6 +16,7 @@
  *  HELL-ADP-08: click(known ref) ⇒ ok; click(unknown ref) ⇒ element-not-found (no eval)
  *  HELL-ADP-09: cdp allowlist enforced end-to-end through the real adapter
  *  HELL-ADP-10: close ⇒ proc killed + profile removed + idempotent; post-close ⇒ closed
+ *  HELL-ADP-11: injected command deadline reaches every connected CDP request
  */
 
 import { describe, expect, test } from "bun:test"
@@ -298,5 +299,22 @@ describe("HELLGATE CDP adapter — orchestration over fakes", () => {
     const after = await b.navigate(h.value, "https://app.test/login")
     expect(after.ok).toBe(false)
     if (!after.ok) expect(after.error.kind).toBe("closed")
+  })
+
+  test("HELL-ADP-11: commandTimeoutMs owns the connected session deadline", async () => {
+    const scheduledMs: number[] = []
+    const recordingScheduler: Scheduler = {
+      schedule: (ms) => {
+        scheduledMs.push(ms)
+        return () => {}
+      },
+    }
+    const { deps } = baseDeps({ scheduler: recordingScheduler })
+    const b = createCdpBrowser({ ...deps, commandTimeoutMs: 90_000 })
+    const h = await b.spawn()
+    expect(h.ok).toBe(true)
+    expect(scheduledMs.length).toBeGreaterThanOrEqual(6)
+    expect(new Set(scheduledMs)).toEqual(new Set([90_000]))
+    if (h.ok) await b.close(h.value)
   })
 })
