@@ -172,11 +172,24 @@ export type TurnScript =
 export const turnScript = (scripts: TurnScript[]): Step[] =>
   scripts.map((s) => (s.type === "text" ? ev(text(s.text)) : ev(toolUse(s.id, s.name, s.input))))
 
-/** Hard guard: a hang here is a real loop bug, not a slow test. */
+const hostPressureTimeoutScale = (): number => {
+  const parsed = Number(process.env.QUANTA_TEST_TIMEOUT_SCALE ?? "1")
+  return Number.isSafeInteger(parsed) && parsed >= 1 && parsed <= 5 ? parsed : 1
+}
+
+/**
+ * Hard guard: a hang here is a real loop bug, not a slow test. The authoritative
+ * shard runner may supply its bounded host-pressure scale so this watchdog and
+ * Bun's per-test watchdog use the same clock budget under external starvation.
+ */
 export const withTimeout = async <T>(p: Promise<T>, ms: number, label: string): Promise<T> => {
+  const effectiveMs = ms * hostPressureTimeoutScale()
   let timer: ReturnType<typeof setTimeout> | undefined
   const guard = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`HANG: ${label} did not terminate in ${ms}ms`)), ms)
+    timer = setTimeout(
+      () => reject(new Error(`HANG: ${label} did not terminate in ${effectiveMs}ms`)),
+      effectiveMs,
+    )
   })
   try {
     return await Promise.race([p, guard])

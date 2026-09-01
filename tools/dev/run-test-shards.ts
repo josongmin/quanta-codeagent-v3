@@ -276,6 +276,7 @@ const runShard = async (
         QUANTA_BENCH_HOME: benchHome,
         QUANTA_BENCH_RESULTS_DIR: benchResults,
         QUANTA_SCAN_REACH_RECORD: scanReachSink,
+        QUANTA_TEST_TIMEOUT_SCALE: String(testTimeoutMs / 60_000),
       },
       stdout: spoolFd,
       stderr: spoolFd,
