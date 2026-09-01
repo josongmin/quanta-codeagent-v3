@@ -82,28 +82,6 @@ describe("anti-vacuity burn-down", () => {
     ).toBeGreaterThan(3000)
   })
 
-  /**
-   * Candidates the census flags that ground truth REFUTED.
-   *
-   * The census is a candidate detector, not a verdict. Each entry here was run
-   * against a mirror in which the tree it scans was empty and went RED, so it is
-   * protected by something the regex cannot see — a positive assertion
-   * (`expect(entries).toContain(…)`), a non-empty expected list, or a floor
-   * expressed in a shape no pattern matches. Listing them keeps the ledger an
-   * honest statement of remaining debt instead of a 20%-wrong one.
-   *
-   * This list may only shrink or be re-justified; each entry names the evidence.
-   */
-  const REFUTED: ReadonlySet<string> = new Set([
-    // `repro-grounding` was removed 2026-08-30: it never scanned at all. The
-    // census matched the bare token `ls-files` inside `throw new Error("git
-    // ls-files failed")`, so the file joined the population on a failure message
-    // and then earned an exemption for a corpus it does not have.
-    "src/tool/terminal-surface.test.ts",
-    // verdict compares against a non-empty expected set, so empty ≠ clean
-    "tests/unit/surface-coupling-ratchet.test.ts",
-  ])
-
   test("🔴 no NEW guard derives a verdict from an unfloored scan", () => {
     // The static census is a CANDIDATE detector and no longer the authority.
     // Measured 2026-08-29: it still flags four guards that the execution-based
@@ -118,9 +96,7 @@ describe("anti-vacuity burn-down", () => {
     // yet been pointed at must be bound in the manifest, so nothing enters the
     // tree unjudged.
     const bound = new Set(manifestFiles())
-    const added = addedEntries(found, known)
-      .filter((f) => !REFUTED.has(f))
-      .filter((f) => !bound.has(f))
+    const added = addedEntries(found, known).filter((f) => !bound.has(f))
     expect(
       added,
       added.length === 0
@@ -244,19 +220,6 @@ describe("anti-vacuity burn-down", () => {
       `test("t", () => { expect(offenders).toEqual([]) })\n`
     expect(isScanVerdictGuard(arrayForm), "the array call form must still count").toBe(true)
     expect(isScanVerdictGuard(stringForm), "the shell-string call form must still count").toBe(true)
-  })
-
-  test("every REFUTED entry is still refuted — ground truth, not a permanent excuse", () => {
-    // An entry earns its place by going RED on an empty mirror. If the census
-    // stops flagging it at all, the exemption is dead weight and must go, or it
-    // silently re-admits the file when the census changes again.
-    const dead = [...REFUTED].filter((f) => !found.includes(f)).sort()
-    expect(
-      dead,
-      dead.length === 0
-        ? ""
-        : `the census no longer flags these — remove them from REFUTED:\n  ${dead.join("\n  ")}`,
-    ).toEqual([])
   })
 
   test("a completed burn-down is GREEN, not red", () => {

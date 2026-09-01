@@ -322,6 +322,49 @@ describe("objective-goal-continuation-live — runIdleContinuation decision logi
       ],
     })
     const authority = asObjectiveAuthority(store) as ObjectiveAuthority
+    const startAttempt = (attemptId: string) => {
+      const domain = authority.readDomain(TID)
+      return authority.commit(
+        authority.prepare({
+          threadId: TID,
+          actor: "system",
+          mutation: {
+            kind: "beginAttempt",
+            attempt: {
+              objectiveId: domain.state?.objective.objectiveId ?? "",
+              attemptId,
+              provenance: "autonomous-continuation",
+              executionMode: "foreground",
+              startedRevision: domain.revision,
+            },
+          },
+        }),
+        { admitted: true },
+      )
+    }
+    const settleAttempt = (attemptId: string) =>
+      authority.commit(
+        authority.prepare({
+          threadId: TID,
+          actor: "system",
+          mutation: {
+            kind: "settleAttempt",
+            settlement: {
+              objectiveId: store.get(TID)?.objectiveId ?? "",
+              attemptId,
+              startedRevision: authority.readDomain(TID).revision,
+              tokensUsed: 0,
+              turnsUsed: 1,
+              outcome: "completed",
+              executionMode: "foreground",
+              criterionIdsBefore: [],
+              verifierReceiptIdsBefore: [],
+              recordedAt: 1,
+            },
+          },
+        }),
+        { admitted: true },
+      )
     const commitObservation = (attemptId: string) =>
       authority.commit(
         authority.prepare({
@@ -338,8 +381,12 @@ describe("objective-goal-continuation-live — runIdleContinuation decision logi
         { admitted: true },
       )
 
+    expect(startAttempt("attempt-1").ok).toBe(true)
     expect(commitObservation("attempt-1").ok).toBe(true)
+    expect(settleAttempt("attempt-1").ok).toBe(true)
+    expect(startAttempt("attempt-2").ok).toBe(true)
     expect(commitObservation("attempt-2").ok).toBe(true)
+    expect(settleAttempt("attempt-2").ok).toBe(true)
     expect(store.get(TID)?.blockerObservations[0]?.distinctAttemptIds).toHaveLength(2)
 
     const domain = authority.readDomain(TID)
@@ -376,6 +423,7 @@ describe("objective-goal-continuation-live — runIdleContinuation decision logi
     expect(store.get(TID)?.status).toBe("active")
     expect(store.get(TID)?.blockerObservations).toEqual([])
 
+    expect(startAttempt("attempt-3").ok).toBe(true)
     expect(commitObservation("attempt-3").ok).toBe(true)
     expect(store.get(TID)?.blockerObservations[0]?.distinctAttemptIds).toEqual(["attempt-3"])
   })
