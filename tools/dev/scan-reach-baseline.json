@@ -318,6 +318,9 @@
     "tests/unit/feature-catalog-reachability.test.ts#FEATURE-YAMLS": {
       "walked": 1068
     },
+    "tests/unit/feature-catalog-yaml-hellgate.test.ts#FEATURE-YAMLS": {
+      "walked": 1069
+    },
     "tests/unit/gate-vocabulary-ratchet-hellgate.test.ts#SRC": {
       "walked": 3460
     },

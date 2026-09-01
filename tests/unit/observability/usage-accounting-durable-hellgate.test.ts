@@ -11,7 +11,7 @@
  *   - corrupt state silently rendering as an exact $0 hides the loss; the
  *     books stay empty but SAY continuity was lost.
  */
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import { MODEL_RATE_CARD, PRICING_VERSION } from "@/observability/pricing"
 import {
   createUsageAccounting,
@@ -63,7 +63,179 @@ const serializeAsLegacyV1 = (acct: UsageAccountingPort, seq: number): string => 
   })
 }
 
+type MutableDurable = {
+  total: Record<string, unknown>
+  byModel: Array<[string, Record<string, unknown>]>
+  byAgent: Array<[string, Record<string, unknown>]>
+  byKind: { root: Record<string, unknown>; subagent: Record<string, unknown> }
+  retained: Array<{
+    callId: string
+    usage: Record<string, unknown>
+    cost: Record<string, unknown>
+  }>
+}
+
+const withConservedToken = (payload: MutableDurable, token: string, count: number): void => {
+  for (const bucket of [
+    payload.total,
+    payload.byKind.root,
+    payload.byModel[0]?.[1],
+    payload.byAgent[0]?.[1],
+  ]) {
+    if (bucket === undefined) throw new Error("valid fixture bucket missing")
+    bucket[token] = count
+  }
+}
+
+const TOKEN_FIELDS = [
+  "freshInputTokens",
+  "cacheReadTokens",
+  "cacheWriteTokens",
+  "outputTokens",
+] as const
+
+describe("R1 — durable token and conservation mutation rails", () => {
+  for (const token of TOKEN_FIELDS) {
+    test(`${token}: even conserved aggregate counts reject fractional or unsafe integers`, () => {
+      const source = createUsageAccounting()
+      record(source, source.mintCallId(PROV))
+      for (const count of [0.5, Number.MAX_SAFE_INTEGER + 1]) {
+        const payload = JSON.parse(source.serialize()) as MutableDurable
+        withConservedToken(payload, token, count)
+        expect(createUsageAccounting().hydrate(JSON.stringify(payload))).toBe(false)
+      }
+    })
+
+    test(`${token}: retained counts reject fractional, unsafe, negative, and non-finite values`, () => {
+      const source = createUsageAccounting()
+      record(source, source.mintCallId(PROV))
+      for (const count of [
+        0.5,
+        Number.MAX_SAFE_INTEGER + 1,
+        -1,
+        Number.NaN,
+        Number.POSITIVE_INFINITY,
+      ]) {
+        const payload = JSON.parse(source.serialize()) as MutableDurable
+        const retained = payload.retained[0]
+        if (retained === undefined) throw new Error("valid fixture record missing")
+        retained.usage[token] = count
+        expect(createUsageAccounting().hydrate(JSON.stringify(payload))).toBe(false)
+      }
+    })
+  }
+
+  for (const dimension of ["byModel", "byAgent", "byKind"] as const) {
+    test(`${dimension}: a one-token disagreement is not hidden by USD tolerance`, () => {
+      const source = createUsageAccounting()
+      record(source, source.mintCallId(PROV))
+      const payload = JSON.parse(source.serialize()) as MutableDurable
+      withConservedToken(payload, "freshInputTokens", 1_000_000_000_000)
+      const bucket = dimension === "byKind" ? payload.byKind.root : payload[dimension][0]?.[1]
+      if (bucket === undefined) throw new Error("valid fixture bucket missing")
+      bucket.freshInputTokens = 1_000_000_000_001
+      expect(createUsageAccounting().hydrate(JSON.stringify(payload))).toBe(false)
+    })
+
+    test(`${dimension}: finite USD buckets whose sum overflows cannot conserve a finite total`, () => {
+      const source = createUsageAccounting()
+      record(source, source.mintCallId(PROV))
+      record(source, source.mintCallId(PROV))
+      const payload = JSON.parse(source.serialize()) as MutableDurable
+      const half = { ...payload.total, totalUsd: 1e308, freshInputTokens: 1_000_000, calls: 1 }
+      if (dimension === "byKind") payload.byKind = { root: half, subagent: { ...half } }
+      else
+        payload[dimension] = [
+          ["first", half],
+          ["second", { ...half }],
+        ]
+      const restored = createUsageAccounting()
+      const blob = JSON.stringify(payload)
+      expect(() => restored.hydrate(blob)).not.toThrow()
+      expect(restored.hydrate(blob)).toBe(false)
+      expect(restored.snapshot()).toMatchObject({ calls: 0, continuityLost: true })
+    })
+  }
+
+  test("finite retained cost components whose sum overflows are rejected", () => {
+    const source = createUsageAccounting()
+    record(source, source.mintCallId(PROV))
+    const payload = JSON.parse(source.serialize()) as MutableDurable
+    const retained = payload.retained[0]
+    if (retained === undefined) throw new Error("valid fixture record missing")
+    retained.cost.freshInputUsd = 1e308
+    retained.cost.cacheReadUsd = 1e308
+    const restored = createUsageAccounting()
+    const blob = JSON.stringify(payload)
+    expect(() => restored.hydrate(blob)).not.toThrow()
+    expect(restored.hydrate(blob)).toBe(false)
+    expect(restored.snapshot()).toMatchObject({ calls: 0, continuityLost: true })
+  })
+
+  test("optional retained reasoningTokens obey the same safe-integer contract", () => {
+    const source = createUsageAccounting()
+    record(source, source.mintCallId(PROV))
+    for (const count of [0.5, Number.MAX_SAFE_INTEGER + 1, -1, Number.NaN]) {
+      const payload = JSON.parse(source.serialize()) as MutableDurable
+      const retained = payload.retained[0]
+      if (retained === undefined) throw new Error("valid fixture record missing")
+      retained.usage.reasoningTokens = count
+      expect(createUsageAccounting().hydrate(JSON.stringify(payload))).toBe(false)
+    }
+  })
+
+  test("a retained callId absent from exact dedup memory is rejected", () => {
+    const source = createUsageAccounting()
+    record(source, source.mintCallId(PROV))
+    const payload = JSON.parse(source.serialize()) as MutableDurable
+    const retained = payload.retained[0]
+    if (retained === undefined) throw new Error("valid fixture record missing")
+    retained.callId = "not-admitted"
+    expect(createUsageAccounting().hydrate(JSON.stringify(payload))).toBe(false)
+  })
+})
+
 describe("A6 — serialize → fresh authority → hydrate", () => {
+  test("prepared restore decodes and rebinds before commit without touching the live books", () => {
+    const source = createUsageAccounting()
+    record(source, source.mintCallId(PROV), 2_000_000)
+    const live = createUsageAccounting()
+    record(live, live.mintCallId(PROV))
+    const before = live.serialize()
+    const options = { rebindSessionId: "live-runtime" }
+    const prepared = live.prepareHydrate(source.serialize(), options)
+    expect(prepared.restored).toBe(true)
+    expect(live.serialize()).toBe(before)
+    options.rebindSessionId = "changed-after-prepare"
+    const parse = spyOn(JSON, "parse").mockImplementation(() => {
+      throw new Error("decode attempted during commit")
+    })
+    try {
+      expect(() => prepared.commit()).not.toThrow()
+    } finally {
+      parse.mockRestore()
+    }
+    expect(live.snapshot()).toMatchObject({ totalUsd: 6, boundSessionId: "live-runtime" })
+    expect(live.recent()[0]?.provenance.sessionId).toBe("live-runtime")
+    live.reset()
+    prepared.commit()
+    expect(live.snapshot().calls).toBe(0)
+  })
+
+  test("absent and corrupt books prepare distinct empty states without changing live state", () => {
+    const live = createUsageAccounting()
+    record(live, live.mintCallId(PROV))
+    const before = live.serialize()
+    const corrupt = live.prepareHydrate("{ corrupt")
+    const absent = live.prepareHydrate(undefined)
+    expect(corrupt.restored).toBe(false)
+    expect(absent.restored).toBe(true)
+    expect(live.serialize()).toBe(before)
+    corrupt.commit()
+    expect(live.snapshot()).toMatchObject({ calls: 0, continuityLost: true })
+    absent.commit()
+    expect(live.snapshot()).toMatchObject({ calls: 0, continuityLost: false })
+  })
   test("totals, buckets and the binding survive the round trip", () => {
     const a = createUsageAccounting()
     record(a, a.mintCallId(PROV))
@@ -117,6 +289,71 @@ describe("A6 — serialize → fresh authority → hydrate", () => {
     // …and the flag is not sticky across an explicit reset.
     b.reset()
     expect(b.snapshot().continuityLost).toBe(false)
+  })
+
+  test("continuity loss survives repeated empty save, restore, and live rebind", () => {
+    const source = createUsageAccounting()
+    expect(source.hydrate("{ corrupt")).toBe(false)
+    let blob = source.serialize()
+    for (const sessionId of ["live-1", "live-2", "live-3"]) {
+      const restored = createUsageAccounting()
+      expect(restored.hydrate(blob, { rebindSessionId: sessionId })).toBe(true)
+      expect(restored.snapshot()).toMatchObject({
+        calls: 0,
+        continuityLost: true,
+        boundSessionId: undefined,
+      })
+      blob = restored.serialize()
+    }
+  })
+
+  test("new spend does not erase lost-history provenance across restore and rebind", () => {
+    const source = createUsageAccounting()
+    source.hydrate("{ corrupt")
+    record(source, source.mintCallId(PROV))
+    const restored = createUsageAccounting()
+    expect(restored.hydrate(source.serialize(), { rebindSessionId: "live-restored" })).toBe(true)
+    expect(restored.snapshot()).toMatchObject({
+      calls: 1,
+      totalUsd: 3,
+      continuityLost: true,
+      boundSessionId: "live-restored",
+    })
+    const again = createUsageAccounting()
+    expect(again.hydrate(restored.serialize())).toBe(true)
+    expect(again.snapshot().continuityLost).toBe(true)
+    again.reset()
+    expect(again.snapshot()).toMatchObject({ calls: 0, continuityLost: false })
+    expect(restored.hydrate(again.serialize())).toBe(true)
+    expect(restored.snapshot().continuityLost).toBe(false)
+  })
+
+  test("legacy V1 and V2 without a continuity marker restore as healthy", () => {
+    const source = createUsageAccounting()
+    record(source, source.mintCallId(PROV))
+    const legacyV2 = mutateSerialized(source, (durable) => {
+      delete durable.continuityLost
+    })
+    for (const blob of [serializeAsLegacyV1(source, 1), legacyV2]) {
+      const restored = createUsageAccounting()
+      restored.hydrate("{ corrupt")
+      expect(restored.hydrate(blob)).toBe(true)
+      expect(restored.snapshot()).toMatchObject({ calls: 1, continuityLost: false })
+    }
+  })
+
+  test("non-boolean continuity markers are rejected in both durable versions", () => {
+    const source = createUsageAccounting()
+    record(source, source.mintCallId(PROV))
+    for (const blob of [serializeAsLegacyV1(source, 1), source.serialize()]) {
+      for (const invalid of [null, "true", 0, {}, []]) {
+        const payload = JSON.parse(blob) as Record<string, unknown>
+        payload.continuityLost = invalid
+        const restored = createUsageAccounting()
+        expect(restored.hydrate(JSON.stringify(payload))).toBe(false)
+        expect(restored.snapshot()).toMatchObject({ calls: 0, continuityLost: true })
+      }
+    }
   })
 
   test("nested bucket poison is rejected, clears prior books, and never throws", () => {

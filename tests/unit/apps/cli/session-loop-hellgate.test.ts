@@ -231,6 +231,7 @@ const buildSetup = async (
                 },
               }),
             attachSessionTransport: async () => ({ close: async () => undefined }),
+            refreshSnapshot: async () => undefined,
             close: async () => {
               runtimeCalls.sessionClose += 1
               bridgeState.closeCalls += 1

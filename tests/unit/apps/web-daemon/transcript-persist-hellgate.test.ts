@@ -173,4 +173,56 @@ describe("HELLGATE P1 Phase 1 — daemon lossless transcript persistence", () =>
     expect(await loadSessionById("web-3", provider(root ?? ""))).toBeUndefined()
     wire.unsub()
   })
+
+  test("queued saves retain completion-time identity, transcript, turns, and books across attach", async () => {
+    const entered = Promise.withResolvers<void>()
+    const released = Promise.withResolvers<void>()
+    let first = true
+    const sessionRoot = provider(root ?? "")
+    const blockedRoot = {
+      resolve: async () => {
+        if (first) {
+          first = false
+          entered.resolve()
+          await released.promise
+        }
+        return sessionRoot.resolve()
+      },
+    }
+    const message = (text: string): Message => ({ role: "user", content: [{ type: "text", text }] })
+    const ref = { messages: [message("A1")] }
+    let book = "A1-book"
+    const session = fakeSession("A", ref)
+    const wire = attachTranscriptPersistence(session, {
+      enabled: true,
+      cwd: "/repo",
+      rootProvider: blockedRoot,
+      usageAccountingSnapshot: () => book,
+    })
+    try {
+      session.emit(turnCompleted())
+      await entered.promise
+      ref.messages = [message("A1"), message("A2")]
+      book = "A2-book"
+      session.emit(turnCompleted())
+      Object.assign(ref.messages[1]?.content[0] ?? {}, { text: "not part of completed A2" })
+      ref.messages = [message("B1")]
+      book = "B1-book"
+      wire.setActiveThreadId("B")
+      session.emit(turnCompleted())
+    } finally {
+      released.resolve()
+    }
+    await wire.flush()
+    expect(await loadSessionById("A", sessionRoot)).toMatchObject({
+      messages: [message("A1"), message("A2")],
+      turns: 2,
+      usageAccounting: "A2-book",
+    })
+    expect(await loadSessionById("B", sessionRoot)).toMatchObject({
+      messages: [message("B1")],
+      usageAccounting: "B1-book",
+    })
+    wire.unsub()
+  })
 })

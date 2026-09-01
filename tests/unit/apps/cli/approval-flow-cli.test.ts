@@ -76,6 +76,7 @@ const stubSetup = (approvalDecisions: readonly ApprovalDecisionResult[]) => {
             state: { messageCount: outcome.messages.length },
             capabilities: { approvals: "operator", tools: true },
           }),
+        refreshSnapshot: async () => undefined,
         attachSessionTransport: async () => ({ close: async () => undefined }),
         close: async () => {
           counters.sessionClose += 1

@@ -18,7 +18,7 @@
  *      aliasing IS the mechanism; a new object would silently detach the
  *      facade's persist target).
  */
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import type { Message } from "@/llm"
 import { asObjectiveAuthority, createObjectiveStore } from "@/objective"
 import { MODEL_RATE_CARD, PRICING_VERSION } from "@/observability/pricing"
@@ -31,6 +31,7 @@ import {
 } from "@/observability/usage-accounting"
 import { encodeObjectiveSnapshot } from "@/runner/assemble/session-authorities"
 import type { SessionMeta } from "@/session"
+import { logger } from "@/shared"
 import type { GoalWakeSignalSlot } from "../../../../../src/apps/cli/repl/goal-wake-signal"
 import {
   performSessionSwitch,
@@ -314,6 +315,90 @@ describe("performSessionSwitch", () => {
       "fork",
     )
     expect(live.snapshot()).toMatchObject({ calls: 0, totalUsd: 0, continuityLost: false })
+  })
+
+  test("usage restore is fully prepared before transcript and persistence switch", async () => {
+    const live = createUsageAccounting()
+    const target = createUsageAccounting()
+    admitUsage(live, "runtime-live", 1_000_000)
+    admitUsage(target, "old-runtime", 2_000_000)
+    const blob = target.serialize()
+    const idMeta = mkMeta("parent")
+    const parse = spyOn(JSON, "parse")
+    try {
+      await performSessionSwitch(
+        {
+          loadSession: async () => ({
+            meta: mkMeta("fork"),
+            messages: forkMsgs,
+            usageAccounting: blob,
+          }),
+          replaceTranscript: async (messages) => {
+            expect(parse).toHaveBeenCalledWith(blob)
+            expect(live.snapshot().totalUsd).toBe(3)
+            expect(idMeta.id).toBe("parent")
+            parse.mockImplementation(() => {
+              throw new Error("late accounting decode")
+            })
+            return messages
+          },
+          idMeta,
+          usageAccounting: live,
+          runtimeSessionId: "runtime-live",
+          commit: () => undefined,
+        },
+        "fork",
+      )
+    } finally {
+      parse.mockRestore()
+    }
+    expect(live.snapshot()).toMatchObject({ totalUsd: 6, boundSessionId: "runtime-live" })
+  })
+
+  test("corrupt attach warns only after success; refusals preserve books and stay silent", async () => {
+    const live = createUsageAccounting()
+    admitUsage(live, "runtime-live", 1_000_000)
+    const before = live.serialize()
+    const idMeta = mkMeta("parent")
+    const warn = spyOn(logger, "warn").mockImplementation(() => undefined)
+    const deps = {
+      loadSession: async () => ({
+        meta: mkMeta("fork"),
+        messages: forkMsgs,
+        usageAccounting: "{ corrupt",
+      }),
+      replaceTranscript: async (messages: readonly Message[]) => messages,
+      idMeta,
+      usageAccounting: live,
+      runtimeSessionId: "runtime-live",
+      commit: () => undefined,
+    }
+    try {
+      await expect(
+        performSessionSwitch(
+          {
+            ...deps,
+            replaceTranscript: async () => {
+              throw new Error("transcript_replace_unavailable")
+            },
+          },
+          "fork",
+        ),
+      ).rejects.toThrow("transcript_replace_unavailable")
+      await expect(
+        performSessionSwitch({ ...deps, loadSession: async () => undefined }, "ghost"),
+      ).rejects.toThrow("session not found")
+      expect(live.serialize()).toBe(before)
+      expect(idMeta.id).toBe("parent")
+      expect(warn).not.toHaveBeenCalled()
+      await performSessionSwitch(deps, "fork")
+      expect(live.snapshot()).toMatchObject({ calls: 0, continuityLost: true })
+      expect(idMeta.id).toBe("fork")
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(warn.mock.calls[0]?.[0]).toContain("usage accounting state was corrupt")
+    } finally {
+      warn.mockRestore()
+    }
   })
 
   test("mid-turn refusal leaves transcript-owned objective and persistence identity unchanged", async () => {

@@ -68,6 +68,7 @@ const runtimeFactory = async ({ host }: CreateRuntimeOptions): Promise<RuntimeFa
           pendingApproval: null,
           openArtifacts: [],
         }),
+        refreshSnapshot: async () => undefined,
         attachSessionTransport: async () => ({ close: async () => undefined }) as never,
         close: async () => {
           sdkCalls.sessionClose += 1

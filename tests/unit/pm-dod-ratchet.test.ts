@@ -32,7 +32,6 @@ import { checkFeatureDoD } from "../../tools/pm/definition-of-done"
 // (`2845e206c`). The anchored constant is the SSOT both the tool and this test
 // must read.
 const FEATURES_DIR = ANCHORED_FEATURES_DIR
-
 describe("Definition-of-Done ratchet (tools/pm)", () => {
   const baselineSet = new Set(baseline as string[])
   // Both monotonic directions inspect the same immutable catalog. Share the

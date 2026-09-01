@@ -29,6 +29,7 @@
  *   bun run tools/dev/gate.ts --list
  */
 
+import { createHash } from "node:crypto"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -38,17 +39,23 @@ const REPO_ROOT = join(dirname(dirname(dirname(fileURLToPath(import.meta.url))))
 
 const argv = process.argv.slice(2)
 const wants = (flag: string): boolean => argv.includes(flag)
+const printOut = (line: string): void => {
+  process.stdout.write(`${line}\n`)
+}
+const printErr = (line: string): void => {
+  process.stderr.write(`${line}\n`)
+}
 
 if (wants("--list")) {
   for (const g of gatesForStage("prepush")) {
-    console.log(`${g.stage.padEnd(9)} ${g.id.padEnd(22)} ${g.run}`)
+    printOut(`${g.stage.padEnd(9)} ${g.id.padEnd(22)} ${g.run}`)
   }
   process.exit(0)
 }
 
 const stageArg = argv.find((a) => !a.startsWith("-"))
 if (stageArg !== "precommit" && stageArg !== "prepush") {
-  console.error("usage: gate.ts <precommit|prepush> [--bail] [--quiet] | --list")
+  printErr("usage: gate.ts <precommit|prepush> [--bail] [--quiet] | --list")
   process.exit(2)
 }
 const stage: GateStage = stageArg
@@ -82,6 +89,145 @@ interface GateRun {
   readonly out: string
   readonly err: string
 }
+
+interface GitSnapshot {
+  readonly head: string
+  readonly status: string
+}
+
+type ReceiptGateStatus = "passed" | "failed" | "skipped" | "not_run"
+type ReceiptStatus = "passed" | "failed" | "invalid"
+
+interface GateReceipt {
+  readonly schema: "quanta.gate-receipt.v1"
+  readonly stage: "prepush"
+  readonly head: string | null
+  readonly endHead: string | null
+  readonly manifestSha256: string
+  readonly snapshotStable: boolean
+  readonly startClean: boolean
+  readonly endClean: boolean | null
+  readonly gates: readonly {
+    readonly id: string
+    readonly run: string
+    readonly status: ReceiptGateStatus
+    readonly elapsedMs: number
+  }[]
+  readonly elapsedMs: number
+  readonly status: ReceiptStatus
+  readonly error?: string
+}
+
+const sha256 = (value: string): string => createHash("sha256").update(value).digest("hex")
+
+const manifestIdentity = (gates: readonly Gate[]): string =>
+  sha256(
+    JSON.stringify(
+      gates.map(({ id, stage, run, consumes, hostDependent, notInWorkflow }) => ({
+        id,
+        stage,
+        run,
+        consumes: consumes ?? null,
+        hostDependent: hostDependent ?? null,
+        notInWorkflow: notInWorkflow ?? null,
+      })),
+    ),
+  )
+
+const gitOutput = (args: readonly string[]): string => {
+  const proc = Bun.spawnSync(["git", ...args], {
+    cwd: REPO_ROOT,
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  if (proc.exitCode !== 0) {
+    throw new Error(
+      `\`git ${args.join(" ")}\` failed (exit ${proc.exitCode}): ${proc.stderr.toString().trim()}`,
+    )
+  }
+  return proc.stdout.toString()
+}
+
+const gitSnapshot = (): GitSnapshot => ({
+  head: gitOutput(["rev-parse", "HEAD"]).trim(),
+  status: gitOutput(["status", "--porcelain=v1", "-uall", "-z"]),
+})
+
+const statusPreview = (status: string): string =>
+  status
+    .split("\0")
+    .filter((entry) => entry !== "")
+    .slice(0, 20)
+    .join("\n  ")
+
+const emitReceipt = (receipt: GateReceipt): void => {
+  // One compact JSON object on one line. Consumers select by `schema`; no cache
+  // file is read or written, so a previous green can never skip current gates.
+  printOut(JSON.stringify(receipt))
+}
+
+const receiptGates = (
+  planned: readonly Gate[],
+  results: readonly { gate: Gate; ok: boolean; ms: number }[],
+  skipped: readonly Gate[],
+): GateReceipt["gates"] => {
+  const byId = new Map(results.map((result) => [result.gate.id, result]))
+  const skippedIds = new Set(skipped.map((gate) => gate.id))
+  return planned.map((gate) => {
+    const result = byId.get(gate.id)
+    if (result !== undefined) {
+      return {
+        id: gate.id,
+        run: gate.run,
+        status: result.ok ? "passed" : "failed",
+        elapsedMs: Math.round(result.ms),
+      }
+    }
+    return {
+      id: gate.id,
+      run: gate.run,
+      status: skippedIds.has(gate.id) ? "skipped" : "not_run",
+      elapsedMs: 0,
+    }
+  })
+}
+
+interface ReceiptArgs {
+  readonly planned: readonly Gate[]
+  readonly results?: readonly { gate: Gate; ok: boolean; ms: number }[]
+  readonly skipped?: readonly Gate[]
+  readonly frozen?: GitSnapshot | undefined
+  readonly ending?: GitSnapshot | undefined
+  readonly manifestSha256: string
+  readonly overallStarted: number
+  readonly snapshotStable: boolean
+  readonly status: ReceiptStatus
+  readonly error?: string
+}
+
+const makeReceipt = (args: ReceiptArgs): GateReceipt => ({
+  schema: "quanta.gate-receipt.v1",
+  stage: "prepush",
+  head: args.frozen?.head ?? null,
+  endHead: args.ending?.head ?? null,
+  manifestSha256: args.manifestSha256,
+  snapshotStable: args.snapshotStable,
+  startClean: args.frozen?.status === "",
+  endClean: args.ending === undefined ? null : args.ending.status === "",
+  gates: receiptGates(args.planned, args.results ?? [], args.skipped ?? []),
+  elapsedMs: Math.round((Bun.nanoseconds() - args.overallStarted) / 1e6),
+  status: args.status,
+  ...(args.error === undefined ? {} : { error: args.error }),
+})
+
+const snapshotInvalidMessage = (
+  frozen: GitSnapshot | undefined,
+  ending: GitSnapshot | undefined,
+  snapshotError: string | undefined,
+): string =>
+  snapshotError ??
+  `checkout changed during prepush (start=${frozen?.head ?? "unknown"}, ` +
+    `end=${ending?.head ?? "unknown"}, endDirty=${ending?.status !== ""})`
 
 const runGate = (gate: Gate): GateRun => {
   const started = Bun.nanoseconds()
@@ -122,12 +268,14 @@ const runGate = (gate: Gate): GateRun => {
  * the other stage, is loud instead of reassuring.
  */
 const planned = gatesForStage(stage)
+const overallStarted = Bun.nanoseconds()
+const plannedManifestSha256 = manifestIdentity(planned)
 const ownedPrecommit = GATES.filter((g) => g.stage === "precommit").length
 const ownedPrepush = GATES.filter((g) => g.stage === "prepush").length
 const owned = { precommit: ownedPrecommit, prepush: ownedPrepush }
 for (const st of ["precommit", "prepush"] as const) {
   if (owned[st] < MIN_OWNED[st]) {
-    console.error(
+    printErr(
       `gate.ts: the manifest owns ${owned[st]} ${st} gate(s), below the floor of ` +
         `${MIN_OWNED[st]}. Gates were deleted or mis-staged — refusing to report a ` +
         `verdict over it. (owned: precommit=${ownedPrecommit}, prepush=${ownedPrepush})`,
@@ -145,12 +293,54 @@ const danglingConsumes = planned
   .filter((g) => g.consumes !== undefined && !plannedIds.has(g.consumes))
   .map((g) => `${g.id} consumes "${g.consumes}"`)
 if (danglingConsumes.length > 0) {
-  console.error(
+  printErr(
     `gate.ts: ${danglingConsumes.length} gate(s) name a producer that does not run in ` +
       `this stage — the SKIP-on-failed-input protection would be silently off:\n  ` +
       danglingConsumes.join("\n  "),
   )
   process.exit(1)
+}
+
+let frozenSnapshot: GitSnapshot | undefined
+if (stage === "prepush") {
+  try {
+    frozenSnapshot = gitSnapshot()
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    printErr(`gate.ts: prepush snapshot failed before gate 1 — ${message}`)
+    emitReceipt(
+      makeReceipt({
+        planned,
+        manifestSha256: plannedManifestSha256,
+        overallStarted,
+        snapshotStable: false,
+        status: "invalid",
+        error: message,
+      }),
+    )
+    process.exit(1)
+  }
+  if (frozenSnapshot.status !== "") {
+    const preview = statusPreview(frozenSnapshot.status)
+    const message =
+      "authoritative prepush receipts require a clean checkout; refusing before gate 1" +
+      (preview === "" ? "" : `:\n  ${preview}`)
+    printErr(`gate.ts: ${message}`)
+    emitReceipt(
+      makeReceipt({
+        planned,
+        frozen: frozenSnapshot,
+        ending: frozenSnapshot,
+        manifestSha256: plannedManifestSha256,
+        overallStarted,
+        snapshotStable: true,
+        status: "invalid",
+        error: message,
+      }),
+    )
+    process.exit(1)
+  }
+  printOut(`prepush: frozen head=${frozenSnapshot.head} dirty=no`)
 }
 
 const results: { gate: Gate; ok: boolean; ms: number; out: string; err: string }[] = []
@@ -171,7 +361,7 @@ for (const gate of planned) {
     poisoned.add(gate.id)
     continue
   }
-  if (!quiet) console.log(`\n──── ${stage}: ${gate.id} — ${gate.run}`)
+  if (!quiet) printOut(`\n──── ${stage}: ${gate.id} — ${gate.run}`)
   const { ok, ms, out, err } = runGate(gate)
   results.push({ gate, ok, ms, out, err })
   if (!ok) {
@@ -186,25 +376,85 @@ const notRun = planned.filter(
   (g) => !results.some((r) => r.gate.id === g.id) && !skipped.includes(g),
 )
 
+let endingSnapshot: GitSnapshot | undefined
+let snapshotError: string | undefined
+if (stage === "prepush") {
+  try {
+    endingSnapshot = gitSnapshot()
+  } catch (error) {
+    snapshotError = error instanceof Error ? error.message : String(error)
+  }
+}
+const snapshotStable =
+  frozenSnapshot !== undefined &&
+  endingSnapshot !== undefined &&
+  frozenSnapshot.head === endingSnapshot.head &&
+  frozenSnapshot.status === endingSnapshot.status
+
 const failed = results.filter((r) => !r.ok)
-console.log(`\n──── ${stage} summary`)
+printOut(`\n──── ${stage} summary`)
 for (const r of results) {
   const hd = r.ok && r.gate.hostDependent !== undefined ? "  [host-dependent]" : ""
-  console.log(`  ${r.ok ? "PASS" : "FAIL"}  ${r.gate.id.padEnd(22)} ${Math.round(r.ms)}ms${hd}`)
+  printOut(`  ${r.ok ? "PASS" : "FAIL"}  ${r.gate.id.padEnd(22)} ${Math.round(r.ms)}ms${hd}`)
 }
 for (const g of skipped) {
-  console.log(`  SKIP  ${g.id.padEnd(22)} its input gate \`${g.consumes}\` failed`)
+  printOut(`  SKIP  ${g.id.padEnd(22)} its input gate \`${g.consumes}\` failed`)
 }
-for (const g of notRun) console.log(`  ----  ${g.id.padEnd(22)} not run (--bail)`)
-if (failed.length === 0 && skipped.length === 0 && notRun.length === 0) {
+for (const g of notRun) printOut(`  ----  ${g.id.padEnd(22)} not run (--bail)`)
+if (
+  failed.length === 0 &&
+  skipped.length === 0 &&
+  notRun.length === 0 &&
+  (stage !== "prepush" || snapshotStable)
+) {
   const marked = results.filter((r) => r.gate.hostDependent !== undefined)
   const note =
     marked.length === 0
       ? ""
       : ` (${marked.length} host-dependent: ${marked.map((r) => r.gate.id).join(", ")} ` +
         "— may have passed by finding nothing to check here)"
-  console.log(`${stage}: ok — ${results.length} of ${planned.length} gate(s) passed${note}`)
+  printOut(`${stage}: ok — ${results.length} of ${planned.length} gate(s) passed${note}`)
+  if (stage === "prepush") {
+    emitReceipt(
+      makeReceipt({
+        planned,
+        results,
+        skipped,
+        frozen: frozenSnapshot,
+        ending: endingSnapshot,
+        manifestSha256: plannedManifestSha256,
+        overallStarted,
+        snapshotStable: true,
+        status: "passed",
+      }),
+    )
+  }
   process.exit(0)
+}
+if (
+  stage === "prepush" &&
+  !snapshotStable &&
+  failed.length === 0 &&
+  skipped.length === 0 &&
+  notRun.length === 0
+) {
+  const message = snapshotInvalidMessage(frozenSnapshot, endingSnapshot, snapshotError)
+  printErr(`\nprepush: INVALID — ${message}`)
+  emitReceipt(
+    makeReceipt({
+      planned,
+      results,
+      skipped,
+      frozen: frozenSnapshot,
+      ending: endingSnapshot,
+      manifestSha256: plannedManifestSha256,
+      overallStarted,
+      snapshotStable: false,
+      status: "invalid",
+      error: message,
+    }),
+  )
+  process.exit(1)
 }
 // No INCOMPLETE branch: a skip requires a failed producer and a not-run requires
 // `--bail` to have fired, so `failed.length === 0` alongside either is
@@ -214,8 +464,8 @@ if (failed.length === 0 && skipped.length === 0 && notRun.length === 0) {
 // The denominator is what the STAGE asked for, not what happened to run. The
 // first fix changed only the "ok" line, so `--bail` still reported
 // "1 of 1 gate(s) FAILED" while seven never ran.
-console.error(`\n${stage}: ${failed.length} FAILED of ${planned.length} gate(s) in this stage:`)
-for (const r of failed) console.error(`  ${r.gate.id} — ${r.gate.why}`)
+printErr(`\n${stage}: ${failed.length} FAILED of ${planned.length} gate(s) in this stage:`)
+for (const r of failed) printErr(`  ${r.gate.id} — ${r.gate.why}`)
 for (const r of failed) {
   // Both streams, each with its own window. The first version tested only
   // `tail[0] === ""` and dropped the WHOLE replay when a blank line happened to
@@ -233,14 +483,48 @@ for (const r of failed) {
     const head = all.slice(0, REPLAY_HEAD_LINES)
     const tail = all.slice(-REPLAY_TAIL_LINES)
     const elided = all.length - head.length - tail.length
-    console.error(`\n──── ${r.gate.id} ${label} (${all.length} line(s))`)
+    printErr(`\n──── ${r.gate.id} ${label} (${all.length} line(s))`)
     if (elided <= 0) {
-      for (const line of all) console.error(`  ${line}`)
+      for (const line of all) printErr(`  ${line}`)
       continue
     }
-    for (const line of head) console.error(`  ${line}`)
-    console.error(`  … ${elided} line(s) elided …`)
-    for (const line of tail) console.error(`  ${line}`)
+    for (const line of head) printErr(`  ${line}`)
+    printErr(`  … ${elided} line(s) elided …`)
+    for (const line of tail) printErr(`  ${line}`)
+  }
+}
+if (stage === "prepush") {
+  if (!snapshotStable) {
+    const message = snapshotInvalidMessage(frozenSnapshot, endingSnapshot, snapshotError)
+    printErr(`\nprepush: INVALID — ${message}`)
+    emitReceipt(
+      makeReceipt({
+        planned,
+        results,
+        skipped,
+        frozen: frozenSnapshot,
+        ending: endingSnapshot,
+        manifestSha256: plannedManifestSha256,
+        overallStarted,
+        snapshotStable: false,
+        status: "invalid",
+        error: message,
+      }),
+    )
+  } else {
+    emitReceipt(
+      makeReceipt({
+        planned,
+        results,
+        skipped,
+        frozen: frozenSnapshot,
+        ending: endingSnapshot,
+        manifestSha256: plannedManifestSha256,
+        overallStarted,
+        snapshotStable: true,
+        status: "failed",
+      }),
+    )
   }
 }
 process.exit(1)

@@ -435,7 +435,7 @@ describe("objective-goal-continuation-live — runIdleContinuation decision logi
     expect(store.get(TID)?.blockerObservations).toEqual([])
 
     expect(startAttempt("attempt-3").ok).toBe(true)
-    expect(commitObservation("attempt-3").ok).toBe(true)
+    expect(commitObservation().ok).toBe(true)
     expect(
       store.get(TID)?.blockerObservations[0]?.occurrences.map((item) => item.attemptId),
     ).toEqual(["attempt-3"])

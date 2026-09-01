@@ -9,6 +9,7 @@
  * a snapshot becomes numbers.
  */
 import { byteCompare } from "@/shared/byte-compare"
+import { sanitizeModelDisplayLabel } from "@/shared/model-display"
 import type { UsageAccountingSnapshot, UsageAggregate } from "./port"
 
 /** One model's line in a per-model breakdown, newest-heaviest first. */
@@ -58,7 +59,7 @@ export interface CostSurfaceView {
 }
 
 const lineOf = (model: string, a: UsageAggregate): ModelCostLine => ({
-  model,
+  model: sanitizeModelDisplayLabel(model),
   totalUsd: a.totalUsd,
   estimatedUsd: a.estimatedUsd,
   unpricedCalls: a.unpricedCalls,
@@ -86,8 +87,8 @@ export const costSurfaceView = (snap: UsageAccountingSnapshot): CostSurfaceView 
   outputTokens: snap.outputTokens,
   calls: snap.calls,
   byModel: [...snap.byModel]
-    .map(([model, agg]) => lineOf(model, agg))
-    .sort((a, b) => b.totalUsd - a.totalUsd || byteCompare(a.model, b.model)),
+    .sort(([left, a], [right, b]) => b.totalUsd - a.totalUsd || byteCompare(left, right))
+    .map(([model, agg]) => lineOf(model, agg)),
   byKind: { root: snap.byKind.root.totalUsd, subagent: snap.byKind.subagent.totalUsd },
   continuityLost: snap.continuityLost,
 })
@@ -143,6 +144,6 @@ export const costSurfaceViewWire = (port: {
     rootUsd: view.byKind.root,
     subagentUsd: view.byKind.subagent,
     continuityLost: view.continuityLost,
-    ...(modelSlug !== undefined ? { modelSlug } : {}),
+    ...(modelSlug !== undefined ? { modelSlug: sanitizeModelDisplayLabel(modelSlug) } : {}),
   }
 }

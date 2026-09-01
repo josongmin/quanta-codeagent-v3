@@ -1,4 +1,5 @@
 import { redactValue, sanitizeLogText, type TerminalWriter, writeStdout } from "@/shared"
+import { sanitizeModelDisplayLabel } from "@/shared/model-display"
 import type { StreamPort } from "../ports"
 import type { AgentEvent } from "../types"
 
@@ -308,7 +309,7 @@ export class StdoutStream implements StreamPort {
         break
       case "usage":
         this.write(
-          `${DIM}— usage in ${formatTokenCount(event.inputTokens)}, out ${formatTokenCount(event.outputTokens)} (${event.model}) —${RESET}\n`,
+          `${DIM}— usage in ${formatTokenCount(event.inputTokens)}, out ${formatTokenCount(event.outputTokens)} (${sanitizeModelDisplayLabel(event.model)}) —${RESET}\n`,
         )
         break
       case "budget_breach":

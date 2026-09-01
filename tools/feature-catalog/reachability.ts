@@ -240,19 +240,46 @@ export interface ReachResult {
   readonly adj: ReadonlyMap<string, ReadonlyArray<string>>
 }
 
-export const computeReachability = async (): Promise<ReachResult> => {
-  const files = await walk(SRC)
+interface SourceModule {
+  readonly absolutePath: string
+  readonly relativePath: string
+  readonly content: string
+}
+
+/** One immutable source snapshot per process.
+ *
+ * Strict reachability asks for the module graph and then the symbol graph. The
+ * symbol pass used to call the module pass again and then walk/read every
+ * source file a third time. Authoritative callers already freeze the checkout,
+ * so repeated reads add latency and can only make one verdict observe multiple
+ * source snapshots. */
+let sourceCorpusPromise: Promise<readonly SourceModule[]> | undefined
+const sourceCorpus = (): Promise<readonly SourceModule[]> => {
+  sourceCorpusPromise ??= (async () => {
+    const files = await walk(SRC)
+    return Promise.all(
+      files.map(async (absolutePath) => ({
+        absolutePath,
+        relativePath: relative(REPO_ROOT, absolutePath),
+        content: await readFile(absolutePath, "utf8").catch(() => ""),
+      })),
+    )
+  })()
+  return sourceCorpusPromise
+}
+
+const computeReachabilityFresh = async (): Promise<ReachResult> => {
+  const corpus = await sourceCorpus()
   const rel = (f: string): string => relative(REPO_ROOT, f)
   const adj = new Map<string, string[]>()
-  for (const f of files) {
-    const content = await readFile(f, "utf8").catch(() => "")
+  for (const { absolutePath: f, relativePath, content } of corpus) {
     const targets: string[] = []
     for (const spec of specifiers(content)) {
       const t = await resolveSpec(spec, f)
       if (t !== null) targets.push(rel(t))
     }
     for (const t of await templateImportTargets(content, f)) targets.push(rel(t))
-    adj.set(rel(f), targets)
+    adj.set(relativePath, targets)
   }
   // BFS from auto-discovered entrypoints.
   const entrypoints = await discoverEntrypoints()
@@ -274,6 +301,13 @@ export const computeReachability = async (): Promise<ReachResult> => {
     }
   }
   return { allFiles: new Set(adj.keys()), reached, adj }
+}
+
+let reachabilityPromise: Promise<ReachResult> | undefined
+/** Process-local immutable graph shared by module and symbol analysis. */
+export const computeReachability = (): Promise<ReachResult> => {
+  reachabilityPromise ??= computeReachabilityFresh()
+  return reachabilityPromise
 }
 
 // ---------------------------------------------------------------------------
@@ -412,15 +446,11 @@ export interface SymbolReachResult {
 }
 
 export const computeSymbolReachability = async (): Promise<SymbolReachResult> => {
-  const base = await computeReachability()
-  const files = await walk(SRC)
-  const rel = (f: string): string => relative(REPO_ROOT, f)
+  const [base, corpus] = await Promise.all([computeReachability(), sourceCorpus()])
   const sym = new Map<string, ParsedSymbols>()
   // resolve each spec relative to its file → repo-rel target
   const resolved = new Map<string, Map<string, string>>() // file → spec → target
-  for (const f of files) {
-    const r = rel(f)
-    const content = await readFile(f, "utf8").catch(() => "")
+  for (const { absolutePath: f, relativePath: r, content } of corpus) {
     const p = parseSymbols(content)
     sym.set(r, p)
     const rmap = new Map<string, string>()
@@ -433,7 +463,7 @@ export const computeSymbolReachability = async (): Promise<SymbolReachResult> =>
     for (const spec of allSpecs) {
       if (rmap.has(spec)) continue
       const t = await resolveSpec(spec, f)
-      if (t !== null) rmap.set(spec, rel(t))
+      if (t !== null) rmap.set(spec, relative(REPO_ROOT, t))
     }
     resolved.set(r, rmap)
   }

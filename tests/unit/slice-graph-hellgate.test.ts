@@ -1,7 +1,7 @@
 /**
- * tests/unit/slice-graph-hellgate.test.ts — 18-case hellgate for the
+ * tests/unit/slice-graph-hellgate.test.ts — 20-case hellgate for the
  * slice-graph tool (ADR-0190 fence enforcement). Three buckets:
- *   A. buildSliceGraph parsing semantics (8, incl. 5a–5c: comments are not code)
+ *   A. buildSliceGraph parsing/walk semantics (10, incl. comments, symlinks, order)
  *   B. validateGraph rule-matching (6)
  *   C. Real-graph audit over `<repo>/src` (4)
  *
@@ -11,7 +11,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { buildSliceGraph } from "../../tools/slice-graph/build-graph"
@@ -125,6 +125,31 @@ describe("A. buildSliceGraph parsing", () => {
     )
     const g = await buildSliceGraph({ roots: [root] })
     expect(g.edges.map((e) => e.to).sort()).toEqual(["llm", "tool"])
+  })
+
+  test("5d. A symlinked source file is still followed by the optimized walker", async () => {
+    const root = makeTmpSrc()
+    writeFile(root, "fixtures/target.ts", `import { x } from "@/llm"\n`)
+    mkdirSync(join(root, "agent"), { recursive: true })
+    symlinkSync(join(root, "fixtures", "target.ts"), join(root, "agent", "linked.ts"))
+    const g = await buildSliceGraph({ roots: [root] })
+    expect(g.sources).toContainEqual({
+      file: join(root, "agent", "linked.ts"),
+      from: "agent",
+      to: "llm",
+      spec: "@/llm",
+    })
+  })
+
+  test("5e. Concurrent reads preserve the walk's deterministic source order", async () => {
+    const root = makeTmpSrc()
+    for (let index = 0; index < 64; index += 1) {
+      writeFile(root, `agent/source-${index.toString().padStart(2, "0")}.ts`, `import "@/llm"\n`)
+    }
+    const first = await buildSliceGraph({ roots: [root] })
+    const second = await buildSliceGraph({ roots: [root] })
+    expect(first.sources).toHaveLength(64)
+    expect(second.sources).toEqual(first.sources)
   })
 })
 

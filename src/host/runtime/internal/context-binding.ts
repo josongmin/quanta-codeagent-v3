@@ -350,6 +350,10 @@ const buildSessionHostDescription = (
   args: { readonly options: CreateRuntimeContextHostArgs },
   capabilityManifest: ReturnType<typeof buildCapabilityManifest>,
 ): ReturnType<SessionHost["describe"]> => ({
+  costView:
+    base.usageAccounting === undefined
+      ? costAccountingOffWire()
+      : costSurfaceViewWire(base.usageAccounting),
   sessionId: base.sessionId ?? crypto.randomUUID(),
   permissionMode: base.permission.mode,
   capabilityManifest,

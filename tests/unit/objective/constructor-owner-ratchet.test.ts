@@ -61,28 +61,57 @@ function* walk(dir: string): Generator<string> {
   }
 }
 
-/** Pure detector — reused by the red-on-injection self-test. */
-const findUnauthorizedOwners = (srcRoot: string, allowed: ReadonlySet<string>): string[] => {
-  const hits: string[] = []
-  for (const abs of walk(srcRoot)) {
-    const rel = posix(relative(REPO_ROOT, abs))
-    if (allowed.has(rel)) continue
-    if (CALL.test(stripComments(readFileSync(abs, "utf8")))) hits.push(rel)
-  }
-  return hits
+interface SourceCorpusEntry {
+  readonly absolutePath: string
+  readonly relativePath: string
+  readonly strippedSource: string
 }
+
+let sourceCorpus: readonly SourceCorpusEntry[] | undefined
+
+/** Read and strip the production corpus once. The normal detector and its
+ * red-on-injection control must evaluate the exact same frozen bytes. Keep the
+ * initial cost inside the anti-vacuity test so the unit speed budget sees it. */
+const getSourceCorpus = (): readonly SourceCorpusEntry[] => {
+  if (sourceCorpus !== undefined) return sourceCorpus
+  sourceCorpus = [...walk(SRC_DIR)].map((absolutePath) => ({
+    absolutePath,
+    relativePath: posix(relative(REPO_ROOT, absolutePath)),
+    strippedSource: stripComments(readFileSync(absolutePath, "utf8")),
+  }))
+  return sourceCorpus
+}
+
+/** Pure detector — reused by the red-on-injection self-test. */
+const findUnauthorizedOwners = (
+  corpus: readonly SourceCorpusEntry[],
+  allowed: ReadonlySet<string>,
+): string[] =>
+  corpus
+    .filter(
+      ({ relativePath, strippedSource }) => !allowed.has(relativePath) && CALL.test(strippedSource),
+    )
+    .map(({ relativePath }) => relativePath)
+
+const sourceAt = (relativePath: string): string | undefined =>
+  getSourceCorpus().find((entry) => entry.relativePath === relativePath)?.strippedSource
 
 describe("RFC-03 C2 — objective authority constructor-owner ratchet", () => {
   test("ANTI-VACUITY: the walk reaches a real, populated `src/` tree", () => {
     // "No unauthorized constructor" and "no file was read" are the same result.
-    assertScanPopulation([...walk(SRC_DIR)], SRC_DIR, {
-      id: "tests/unit/objective/constructor-owner-ratchet.test.ts#SRC-DIR",
-      collectable: (n) => n.endsWith(".ts") && !n.endsWith(".d.ts") && !n.endsWith(".test.ts"),
-    })
+    const corpus = getSourceCorpus()
+    assertScanPopulation(
+      corpus.map(({ absolutePath }) => absolutePath),
+      SRC_DIR,
+      {
+        id: "tests/unit/objective/constructor-owner-ratchet.test.ts#SRC-DIR",
+        collectable: (n) => n.endsWith(".ts") && !n.endsWith(".d.ts") && !n.endsWith(".test.ts"),
+      },
+    )
   })
 
   test("no surface/command-local objective constructor outside the authority builder", () => {
-    const unauthorized = findUnauthorizedOwners(SRC_DIR, ALLOWED_OWNERS)
+    const unauthorized = findUnauthorizedOwners(getSourceCorpus(), ALLOWED_OWNERS)
     if (unauthorized.length > 0) {
       throw new Error(
         `Unauthorized objective constructors (route through buildObjectiveAuthority DI):\n${unauthorized
@@ -94,11 +123,9 @@ describe("RFC-03 C2 — objective authority constructor-owner ratchet", () => {
   })
 
   test("the authority builder DOES construct the session objective (non-vacuous)", () => {
-    const build = readFileSync(
-      join(SRC_DIR, "runner/assemble/session-authorities/build-objective.ts"),
-      "utf8",
-    )
-    expect(CALL.test(stripComments(build))).toBe(true)
+    const build = sourceAt("src/runner/assemble/session-authorities/build-objective.ts")
+    expect(build).toBeDefined()
+    expect(CALL.test(build ?? "")).toBe(true)
   })
 
   test("red-on-injection: the library home IS flagged when de-allowlisted", () => {
@@ -106,7 +133,7 @@ describe("RFC-03 C2 — objective authority constructor-owner ratchet", () => {
     // from the allowlist MUST surface it — proving the scan reads real call
     // sites (not a vacuous always-empty result).
     const withoutLibraryAllowed = findUnauthorizedOwners(
-      SRC_DIR,
+      getSourceCorpus(),
       new Set<string>([...ALLOWED_OWNERS].filter((f) => f !== "src/objective/authority.ts")),
     )
     expect(withoutLibraryAllowed).toContain("src/objective/authority.ts")

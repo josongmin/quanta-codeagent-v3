@@ -47,6 +47,7 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { BASELINE_PATH, FEATURES_DIR, PROSE_DIR } from "@/../tools/feature-catalog/paths"
 import { loadFeatures, loadFeaturesStrict } from "@/../tools/feature-catalog/schema"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..")
@@ -57,7 +58,7 @@ const FULL_CATALOG_SCAN_TIMEOUT_MS = 300_000
 // The two full-corpus assertions below judge the same immutable catalog. Keep
 // their production-loader evidence identical while avoiding a second I/O-bound
 // parse under the same shard's host contention.
-const realCatalogOnce = loadFeaturesStrict(FEATURES)
+const realCatalogOnce = loadFeaturesStrict(FEATURES_DIR)
 
 describe("feature catalog — a scan cannot report clean over a catalog it never read", () => {
   test(
@@ -106,9 +107,6 @@ describe("feature catalog — a scan cannot report clean over a catalog it never
     async () => {
       // Pins the consumers' side of the fix: the shared anchored paths must point at
       // a populated directory, not merely be absolute.
-      const { FEATURES_DIR, PROSE_DIR, BASELINE_PATH } = await import(
-        "@/../tools/feature-catalog/paths"
-      )
       for (const p of [FEATURES_DIR, PROSE_DIR, BASELINE_PATH]) {
         expect(p.startsWith("/"), `${p} must be absolute`).toBe(true)
       }

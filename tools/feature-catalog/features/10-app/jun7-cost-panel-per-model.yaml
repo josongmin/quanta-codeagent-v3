@@ -46,4 +46,4 @@ knobs:
     default: "1"
     purpose: TTY-default-ON cost panel gate (0/false/off/no disables)
 deliberate_hold: null
-notes: 'jun-7 Wave R (R5). Gap doc §23.5. Per-model buckets are additive closure state; aggregate totalCostUsd + snapshot() unchanged; breakdown gated on perModel.size > 1 for the single-model byte-identical invariant.'
+notes: 'jun-7 Wave R (R5), updated A3 aug-30. Gap doc §23.5. Per-model rows are read-only projections of usage-accounting aggregates, not additive panel closure state. The detailed breakdown is shown only when more than one model is present; single-model sessions omit the block.'

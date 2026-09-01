@@ -13,10 +13,14 @@
  * network nor the user's real ~/.quanta tree is reachable. No session/turn is
  * run — composition only.
  */
-import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test"
+import * as fs from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import * as fsp from "node:fs/promises"
+import { readdir } from "node:fs/promises"
 import { homedir, tmpdir } from "node:os"
-import { join } from "node:path"
+import { join, resolve, sep } from "node:path"
+import { fileURLToPath } from "node:url"
 import {
   resolveReadout,
   SOURCE_BACKED_READOUTS,
@@ -42,10 +46,38 @@ const ENV_KEYS = [
   "QUANTA_SESSIONS_DIR",
   "QUANTA_MCP_CONFIG",
   "QUANTA_DECISION_METRICS",
+  "QUANTA_OBJECTIVE_TOOLS",
+  "QUANTA_GOAL_ENFORCE",
+  "QUANTA_OBJECTIVE_BUDGET_ENFORCE",
 ] as const
 const saved = new Map<string, string | undefined>(ENV_KEYS.map((k) => [k, process.env[k]]))
+const savedCwd = process.cwd()
 const realFetch = globalThis.fetch
 let networkAttempts = 0
+const realQuantaHome = join(homedir(), ".quanta")
+const homeReadAttempts: string[] = []
+const restoreReadGuards: (() => void)[] = []
+
+const refuseUserHomeRead = (input: unknown): void => {
+  const path =
+    input instanceof URL ? fileURLToPath(input) : Buffer.isBuffer(input) ? input.toString() : input
+  if (typeof path !== "string") return
+  const absolute = resolve(path)
+  if (absolute !== realQuantaHome && !absolute.startsWith(`${realQuantaHome}${sep}`)) return
+  homeReadAttempts.push(absolute)
+  throw new Error(`hermetic readout: refused user-home read ${absolute}`)
+}
+
+const guardReadBoundary = (owner: object, method: string): void => {
+  const boundary = owner as Record<string, (...args: unknown[]) => unknown>
+  const original = boundary[method]
+  if (original === undefined) throw new Error(`missing filesystem boundary: ${method}`)
+  const spy = spyOn(boundary, method).mockImplementation((...args: unknown[]) => {
+    refuseUserHomeRead(args[0])
+    return Reflect.apply(original, owner, args)
+  })
+  restoreReadGuards.push(() => spy.mockRestore())
+}
 
 const hermeticLlm: LLMPort = {
   provider: "openai",
@@ -62,6 +94,23 @@ const buildHermeticFactory = () =>
 beforeAll(() => {
   writeFileSync(mcpConfig, '{"mcpServers":{}}\n')
   process.env.QUANTA_MCP_CONFIG = mcpConfig
+  process.chdir(tmp)
+  for (const name of [
+    "readFile",
+    "readdir",
+    "open",
+    "stat",
+    "lstat",
+    "realpath",
+    "readlink",
+    "access",
+  ] as const) {
+    guardReadBoundary(fs, name)
+    guardReadBoundary(fs, `${name}Sync`)
+    guardReadBoundary(fsp, name)
+  }
+  guardReadBoundary(fs, "existsSync")
+  guardReadBoundary(Bun, "file")
   // Any accidental adapter call is counted and rejected before it can leave
   // the process. The injected boot port's catalog is in-memory, so the final
   // zero assertion proves the production composition never touched a network.
@@ -78,6 +127,8 @@ afterAll(() => {
   }
   __resetRuntimeConfig()
   globalThis.fetch = realFetch
+  for (const restore of restoreReadGuards.reverse()) restore()
+  process.chdir(savedCwd)
   rmSync(tmp, { recursive: true, force: true })
 })
 
@@ -89,6 +140,15 @@ const SNAP: SessionSnapshotLite = makeSnapshotLite({
 })
 
 describe("production runtime factory — readout sources are LIVE on the facade", () => {
+  test("paired RED injection: user-home reads are refused and counted on every I/O family", () => {
+    const target = join(realQuantaHome, "sessions", "hermetic-tripwire.json")
+    expect(() => readFileSync(target)).toThrow("refused user-home read")
+    expect(() => readdir(realQuantaHome)).toThrow("refused user-home read")
+    expect(() => Bun.file(target)).toThrow("refused user-home read")
+    expect(homeReadAttempts).toEqual([target, realQuantaHome, target])
+    homeReadAttempts.length = 0
+  })
+
   test("facade exposes readoutSources whose accessors serve real data", async () => {
     process.env.OPENAI_API_KEY = "sk-test-dummy-not-a-real-key"
     process.env.QUANTA_PROVIDER = "openai"
@@ -189,9 +249,12 @@ describe("production runtime factory — readout sources are LIVE on the facade"
     expect(doctor.output).toContain(`root: ${join(tmp, "sessions")}`)
     expect(doctor.output).not.toContain(join(homedir(), ".quanta"))
     expect(networkAttempts).toBe(0)
+    expect(homeReadAttempts).toEqual([])
   })
 
   test("QUANTA_MEMORY=off degrades ONLY the memory readout (honest copy)", async () => {
+    process.env.OPENAI_API_KEY = "sk-test-dummy-not-a-real-key"
+    process.env.QUANTA_PROVIDER = "openai"
     process.env.QUANTA_MEMORY = "off"
     process.env.QUANTA_CONFIG_DIR = join(tmp, "config-off")
     process.env.QUANTA_SESSIONS_DIR = join(tmp, "sessions-off")
@@ -207,6 +270,7 @@ describe("production runtime factory — readout sources are LIVE on the facade"
     // Siblings stay wired.
     expect((await resolveReadout("plan", SNAP, sources)).wired).toBe(true)
     expect(networkAttempts).toBe(0)
+    expect(homeReadAttempts).toEqual([])
     delete process.env.QUANTA_MEMORY
   })
 

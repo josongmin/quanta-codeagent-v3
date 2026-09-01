@@ -47,7 +47,6 @@ import { evaluateWithPythonSwebench } from "../../src/apps/bench/python-swebench
 import type { Instance } from "../../src/apps/bench/types"
 
 const RS = "\x1e"
-
 const mkInstance = (
   id: string,
   over: Partial<Instance> = {},
@@ -264,6 +263,11 @@ describe("bench python harness e2e — stub `python` binary on PATH", () => {
     )
 
     expect(r.resolved).toBe(false)
+    // The stub must finish successfully; an env/spawn error is not evidence
+    // that malformed-report parsing was exercised.
+    expect(r.log).toContain("exit: 0")
+    expect(r.log).toContain("retried: false")
+    expect(readArgv()).toContain("--predictions_path")
     // Module's log uses resolved_ids: [] when the only report file is
     // unparseable — proves tolerance, not crash.
     expect(r.log).toContain("resolved_ids: []")
@@ -309,7 +313,7 @@ describe("bench python harness e2e — stub `python` binary on PATH", () => {
 
     expect(r.resolved).toBe(false)
     expect(r.log).toContain("unavailable")
-    // The stub records argv ONLY on -m runs. Probe-only calls never write.
+    // The stub records argv ONLY on run_evaluation shims. Probes never write.
     let probeOnly = true
     try {
       const argv = readArgv()

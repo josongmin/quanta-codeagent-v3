@@ -39,14 +39,42 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
+  auditGuardGroup,
   buildMirror,
   CORPUS_ROOTS,
   canaryHolds,
   classifyOutput,
+  type EmptyMirrorOps,
   importClosure,
   ledgerEntries,
   manifest,
 } from "@/../tools/dev/empty-mirror-check"
+
+const fakeOps = (
+  overrides: Partial<EmptyMirrorOps> = {},
+): { readonly ops: EmptyMirrorOps; readonly builds: string[]; readonly verdicts: string[] } => {
+  const builds: string[] = []
+  const verdicts: string[] = []
+  return {
+    builds,
+    verdicts,
+    ops: {
+      buildMirror: (_root, guard) => {
+        builds.push(guard)
+        return `mirror:${guard}`
+      },
+      canaryHolds: () => true,
+      corpusOverlap: () => 0,
+      realCorpusSize: () => 100,
+      runInMirror: (_mirror, guard) => {
+        verdicts.push(guard)
+        return "red"
+      },
+      removeMirror: () => {},
+      ...overrides,
+    },
+  }
+}
 
 /** Files under a mirrored root, split by guard vs corpus. */
 const corpusFiles = (dir: string): { nonTest: number; tests: number } => {
@@ -66,6 +94,56 @@ const corpusFiles = (dir: string): { nonTest: number; tests: number } => {
 }
 
 describe("empty-corpus oracle", () => {
+  describe("per-guard group audit", () => {
+    test("builds and canaries exactly one actual mirror per guard — never a guard-less mirror", () => {
+      const canaries: string[] = []
+      const { ops, builds, verdicts } = fakeOps({
+        canaryHolds: (mirror) => {
+          canaries.push(mirror)
+          return true
+        },
+      })
+      const result = auditGuardGroup(
+        "src",
+        [
+          { file: "tests/unit/a.test.ts", corpus: "src" },
+          { file: "tests/unit/b.test.ts", corpus: "src" },
+        ],
+        ops,
+      )
+
+      expect(builds).toEqual(["tests/unit/a.test.ts", "tests/unit/b.test.ts"])
+      expect(canaries).toEqual(["mirror:tests/unit/a.test.ts", "mirror:tests/unit/b.test.ts"])
+      expect(verdicts).toEqual(["tests/unit/a.test.ts", "tests/unit/b.test.ts"])
+      expect(result).toEqual({ checked: 2, vacuous: [], unusable: [], unsupported: [] })
+    })
+
+    test("red-on-injection: a failed actual-mirror canary is unsupported, never credited RED", () => {
+      const removed: string[] = []
+      const { ops, verdicts } = fakeOps({
+        canaryHolds: () => false,
+        removeMirror: (mirror) => removed.push(mirror),
+      })
+      const result = auditGuardGroup(
+        "src",
+        [{ file: "tests/unit/broken.test.ts", corpus: "src" }],
+        ops,
+      )
+
+      expect(verdicts).toEqual([])
+      expect(result.unsupported).toEqual([
+        "tests/unit/broken.test.ts (its mirror failed the canary — corpus not empty enough)",
+      ])
+      expect(removed).toEqual(["mirror:tests/unit/broken.test.ts"])
+    })
+
+    test("anti-vacuity: an empty corpus group is refused before any mirror build", () => {
+      const { ops, builds } = fakeOps()
+      expect(() => auditGuardGroup("src", [], ops)).toThrow(/empty guard group/)
+      expect(builds).toEqual([])
+    })
+  })
+
   describe("verdict classification", () => {
     test("🔴 an unresolved import is INFRA, never a verdict", () => {
       // The precise bug: this output carries `1 fail`, and reading that as "the

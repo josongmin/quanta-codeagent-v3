@@ -15,6 +15,24 @@ const packageJson = (await Bun.file(
 const shardRunner = await Bun.file(
   join(import.meta.dir, "..", "..", "tools", "dev", "run-test-shards.ts"),
 ).text()
+const runShardSource = shardRunner.slice(
+  shardRunner.indexOf("const runShard ="),
+  shardRunner.indexOf("const main ="),
+)
+const mainSource = shardRunner.slice(
+  shardRunner.indexOf("const main ="),
+  shardRunner.indexOf("await main()"),
+)
+
+const usesNativeShardSpool = (source: string): boolean =>
+  (source.match(/Bun\.spawn\s*\(/g) ?? []).length === 1 &&
+  /stdout:\s*spoolFd/.test(source) &&
+  /stderr:\s*spoolFd/.test(source) &&
+  /readFileSync\s*\(\s*spoolPath/.test(source)
+
+const wiresRepositoryLease = (source: string): boolean =>
+  (source.match(/acquireTestShardLease\s*\(/g) ?? []).length === 1 &&
+  /finally\s*\{\s*lease\.release\s*\(\s*\)/.test(source)
 
 describe("test:ci admission gate", () => {
   test("uses the live feature-catalog changed-file authority", () => {
@@ -65,5 +83,26 @@ describe("test:ci admission gate", () => {
     expect(shardRunner).toContain("checkout changed during run")
     expect(shardRunner).toContain("require a clean checkout")
     expect(shardRunner).toContain("--junit-out")
+  })
+
+  test("the full-suite worker writes natively instead of relaying output through JS", () => {
+    // Anti-vacuum: bind the scan to the one live worker spawn, not the small
+    // git-capture helper or a comment/import mentioning the same identifiers.
+    expect(runShardSource.match(/Bun\.spawn\s*\(/g)).toHaveLength(1)
+    expect(usesNativeShardSpool(runShardSource)).toBe(true)
+
+    // Red-on-injection: restoring the pipe that caused child backpressure must
+    // make this guard fail even if the spool variables and comments remain.
+    const piped = runShardSource.replace("stdout: spoolFd", 'stdout: "pipe"')
+    expect(usesNativeShardSpool(piped)).toBe(false)
+  })
+
+  test("the full-suite runner serializes the repository lane across worktrees", () => {
+    expect(mainSource.match(/acquireTestShardLease\s*\(/g)).toHaveLength(1)
+    expect(wiresRepositoryLease(mainSource)).toBe(true)
+
+    // Red-on-injection: an imported but unwired lease owner is not sufficient.
+    const unwired = mainSource.replace("acquireTestShardLease({", "Promise.resolve({")
+    expect(wiresRepositoryLease(unwired)).toBe(false)
   })
 })

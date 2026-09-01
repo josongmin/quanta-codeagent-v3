@@ -21,7 +21,13 @@ describe("typecheck contract", () => {
     expect(pkg.scripts.test).toContain("bun run typecheck")
     expect(pkg.scripts["test:unit"]).toContain("bun run typecheck")
     expect(pkg.scripts["test:fast"]).toContain("bun run typecheck")
-    expect(pkg.scripts["test:ci"]).toContain("bun run typecheck:all")
+    const ci = pkg.scripts["test:ci"] ?? ""
+    expect(ci).toContain("bun run typecheck:all")
+    expect(ci).toContain("bun run test:clean-js")
+    expect(ci).toContain("bun run tools/dev/run-test-shards.ts --suite=full --parallel=1")
+    // `typecheck:all` already covers src+tests+tools. Routing through the public
+    // `test` script here would immediately repeat the src+tools typecheck.
+    expect(ci).not.toMatch(/\bbun run test(?:\s|$)/)
   })
 
   test("split tsconfig targets keep tests out of the fast lane", () => {
@@ -54,15 +60,30 @@ describe("typecheck contract", () => {
     expect(workflow).toContain("run: bun run typecheck:all")
   })
 
-  test("ci caches portable tsc buildinfo but never the local content-hash skip stamps", () => {
+  test("ci advances the full-tree tsc buildinfo but never caches split targets or skip stamps", () => {
     const workflow = readText(".github/workflows/ci.yml")
-    expect(workflow).toContain("name: restore typecheck incremental cache")
-    expect(workflow).toContain("uses: actions/cache@v4")
-    expect(workflow).toContain(".cache/typescript/typecheck-src.tsbuildinfo")
-    expect(workflow).toContain(".cache/typescript/typecheck-tests.tsbuildinfo")
-    expect(workflow).toContain(".cache/typescript/typecheck-all.tsbuildinfo")
-    expect(workflow).not.toContain(".cache/typescript/typecheck-src.stamp.json")
-    expect(workflow).not.toContain(".cache/typescript/typecheck-tests.stamp.json")
-    expect(workflow).not.toContain(".cache/typescript/typecheck-all.stamp.json")
+    const githubRefName = ["$", "{{ github.ref_name }}"].join("")
+    const githubSha = ["$", "{{ github.sha }}"].join("")
+    const cacheStart = workflow.indexOf("- name: restore typecheck incremental cache")
+    const cacheEnd = workflow.indexOf("- name: typecheck", cacheStart + 1)
+    expect(cacheStart).toBeGreaterThanOrEqual(0)
+    expect(cacheEnd).toBeGreaterThan(cacheStart)
+    const cacheStep = workflow.slice(cacheStart, cacheEnd)
+    const keyLine = cacheStep.split("\n").find((line) => line.trimStart().startsWith("key:")) ?? ""
+    const restoreBlock = cacheStep.slice(cacheStep.indexOf("restore-keys:"))
+    const restoreKeys = restoreBlock
+      .split("\n")
+      .filter((line) => line.includes("runner.os") && line.includes("typecheck-"))
+
+    expect(cacheStep).toContain("uses: actions/cache@v4")
+    expect(cacheStep).toContain("path: .cache/typescript/typecheck-all.tsbuildinfo")
+    expect(cacheStep).not.toContain(".cache/typescript/typecheck-src.tsbuildinfo")
+    expect(cacheStep).not.toContain(".cache/typescript/typecheck-tests.tsbuildinfo")
+    expect(keyLine).toContain(`${githubRefName}-${githubSha}`)
+    expect(restoreKeys).toHaveLength(2)
+    expect(restoreKeys[0]).toContain(`${githubRefName}-`)
+    expect(restoreKeys[0]).not.toContain(githubSha)
+    expect(restoreKeys[1]).not.toContain(githubRefName)
+    expect(cacheStep).not.toContain(".stamp.json")
   })
 })
