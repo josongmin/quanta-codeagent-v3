@@ -20,10 +20,15 @@ const REQUIRED_CANARY_CRITICAL_BUCKETS = [
   "wrong_thread_adversarial",
 ] as const
 
+// `.gitignore` reserves `bench-*.json` for local run artifacts. They may be
+// written beside fixtures by an evaluator, but must never alter the governed
+// corpus a CLI or CI run executes.
+const LOCAL_BENCH_ARTIFACT = /^bench-.*\.json$/
+
 const listJson = (dir: string): readonly string[] => {
   if (!existsSync(dir)) return []
   return readdirSync(dir)
-    .filter((name) => name.endsWith(".json"))
+    .filter((name) => name.endsWith(".json") && !LOCAL_BENCH_ARTIFACT.test(name))
     .map((name) => join(dir, name))
     .sort()
 }
