@@ -18,6 +18,7 @@ import type {
   Scheduler,
   SpawnedProcess,
 } from "./ports"
+import { registerProcessExitKill } from "./process-exit-kill-guard"
 
 export const realScheduler: Scheduler = {
   schedule: (ms, cb) => {
@@ -53,10 +54,23 @@ export const defaultProcessSpawner: ProcessSpawner = {
   which: (cmd) => Bun.which(cmd),
   spawn: (argv): SpawnedProcess => {
     const proc = Bun.spawn([...argv], { stdout: "ignore", stderr: "ignore" })
+    const unregisterExitKill = registerProcessExitKill(() => proc.kill("SIGKILL"))
+    void proc.exited.then(unregisterExitKill, unregisterExitKill)
     return {
       pid: proc.pid,
-      kill: () => proc.kill(),
+      kill: (signal) => (signal === undefined ? proc.kill() : proc.kill(signal)),
       exited: proc.exited,
+      waitForExit: async (timeoutMs) => {
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const timedOut = new Promise<false>((resolve) => {
+          timer = setTimeout(() => resolve(false), timeoutMs)
+        })
+        try {
+          return await Promise.race([proc.exited.then(() => true as const), timedOut])
+        } finally {
+          if (timer !== undefined) clearTimeout(timer)
+        }
+      },
     }
   },
 }

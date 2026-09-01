@@ -22,14 +22,43 @@ import type { CdpBrowserCtx, SessionState, TabState } from "./session-state"
 // per-instance seq so concurrent adapters sharing a profileRoot never collide.
 const uniqueNonce = (): string => `${process.pid}-${crypto.randomUUID().slice(0, 8)}`
 
+const PROCESS_EXIT_GRACE_MS = 500
+const PROCESS_EXIT_FORCE_MS = 2_000
+
 // Best-effort kill — Bun's Subprocess.kill() can throw (ESRCH/EPERM-style proc
-// states); a throw must NOT skip the profile rmrf that follows (R3 audit [3]).
-const killQuietly = (proc: SpawnedProcess): void => {
+// states); a throw must NOT skip the bounded wait/profile cleanup that follows.
+const killQuietly = (proc: SpawnedProcess, signal?: "SIGTERM" | "SIGKILL"): void => {
   try {
-    proc.kill()
+    proc.kill(signal)
   } catch {
     // proc already gone / unkillable — the profile cleanup still runs
   }
+}
+
+/** Acquire terminal ownership of a spawned Chrome root. Production processes
+ *  expose waitForExit; legacy fakes have synchronous kill semantics and omit
+ *  it. A stuck Chrome gets one bounded graceful window, then SIGKILL, then one
+ *  final bounded reap window. */
+const terminateProcess = async (proc: SpawnedProcess): Promise<void> => {
+  killQuietly(proc, "SIGTERM")
+  if (proc.waitForExit === undefined) return
+  if (await proc.waitForExit(PROCESS_EXIT_GRACE_MS)) return
+  killQuietly(proc, "SIGKILL")
+  await proc.waitForExit(PROCESS_EXIT_FORCE_MS)
+}
+
+const cleanupProfile = (state: SessionState, rmrf: (path: string) => void): void => {
+  if (state.profileCleaned) return
+  state.profileCleaned = true
+  rmrf(state.profileDir)
+}
+
+const terminateAndCleanupState = async (
+  state: SessionState,
+  rmrf: (path: string) => void,
+): Promise<void> => {
+  await terminateProcess(state.proc)
+  cleanupProfile(state, rmrf)
 }
 
 export const lifecycleOps = (
@@ -56,8 +85,8 @@ export const lifecycleOps = (
       // R4 audit [6]: proc may never be created if spawner.spawn() throws
       // (EMFILE/EACCES); keep it nullable so teardown still rmrf's the mkdir'd dir.
       let proc: SpawnedProcess | null = null
-      const teardown = (): void => {
-        if (proc !== null) killQuietly(proc)
+      const teardown = async (): Promise<void> => {
+        if (proc !== null) await terminateProcess(proc)
         deps.fs.rmrf(profileDir)
       }
       try {
@@ -79,12 +108,12 @@ export const lifecycleOps = (
           ...(deps.endpointTimeoutMs !== undefined ? { timeoutMs: deps.endpointTimeoutMs } : {}),
         })
         if (!endpoint.ok) {
-          teardown()
+          await teardown()
           return endpoint
         }
         const brought = await connectAndEnable(deps, endpoint.value, opts?.signal)
         if (!brought.ok) {
-          teardown()
+          await teardown()
           return brought
         }
         const session = brought.value.session
@@ -99,6 +128,7 @@ export const lifecycleOps = (
         }
         const state: SessionState = {
           closed: false,
+          profileCleaned: false,
           proc,
           session,
           profileDir,
@@ -120,8 +150,8 @@ export const lifecycleOps = (
           // entry. killQuietly swallows ESRCH/EPERM; rmrf is best-effort.
           if (!state.closed) {
             state.closed = true
-            killQuietly(state.proc)
-            deps.fs.rmrf(state.profileDir)
+            state.session.dispose()
+            void terminateAndCleanupState(state, deps.fs.rmrf)
           }
           // Reap the (bounded) Map entry only after teardown. live()/isLive()
           // already treat a missing entry as closed, so dropping it is
@@ -136,13 +166,17 @@ export const lifecycleOps = (
           if (!state.closed) {
             state.closed = true
             session.dispose()
-            deps.fs.rmrf(state.profileDir)
           }
+          // close() used to rmrf immediately after SIGTERM. Chrome could keep
+          // running, recreate the directory, then exit after the test process,
+          // leaving both an orphan and a residual profile. The process-exit
+          // observer is the final cleanup authority on every death path.
+          cleanupProfile(state, deps.fs.rmrf)
           sessions.delete(id)
         })
         return ok({ id, backend: "chromium" })
       } catch (e) {
-        teardown()
+        await teardown()
         return err({ kind: "spawn-failed", detail: errMessage(e) })
       }
     },
@@ -157,8 +191,7 @@ export const lifecycleOps = (
       if (!s.closed) {
         s.closed = true
         s.session.dispose()
-        killQuietly(s.proc)
-        deps.fs.rmrf(s.profileDir)
+        await terminateAndCleanupState(s, deps.fs.rmrf)
       }
       sessions.delete(h.id)
       return ok(undefined)

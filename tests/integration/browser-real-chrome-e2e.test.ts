@@ -266,8 +266,7 @@ describe.skipIf(!CHROME_USABLE)("browser real-chrome adapter e2e (ADR-0427)", ()
   // ── navigate + snapshot perception (COLLECT_SCRIPT) ──────────────────────
   test("navigate /login returns the real <title>", async () => {
     const r = await port.navigate(handle, `${base}/login`)
-    expect(r.ok).toBe(true)
-    if (!r.ok) throw new Error("nav failed")
+    if (!r.ok) throw new Error(`navigate failed: ${JSON.stringify(r.error)}`)
     expect(r.value.title).toBe("Login Page")
   })
 

@@ -17,9 +17,13 @@ import type { Result } from "@/shared"
 
 export interface SpawnedProcess {
   readonly pid: number
-  kill(): void
+  kill(signal?: number | "SIGTERM" | "SIGKILL"): void
   /** Resolves with the exit code when the process ends. */
   readonly exited: Promise<number>
+  /** Production process owners provide a bounded liveness check so teardown
+   *  can wait for SIGTERM and escalate to SIGKILL without ever hanging. Fakes
+   *  may omit it when kill() is synchronous by contract. */
+  waitForExit?(timeoutMs: number): Promise<boolean>
 }
 
 export interface ProcessSpawner {

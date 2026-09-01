@@ -33,6 +33,10 @@ export interface TabState {
 
 export interface SessionState {
   closed: boolean
+  /** Guards the close/onDead/proc.exited race. Chrome may recreate profile
+   *  files until its root process has actually exited, so rmrf must happen once
+   *  after terminal process ownership is established. */
+  profileCleaned: boolean
   readonly proc: SpawnedProcess
   readonly session: CdpSession
   readonly profileDir: string

@@ -31,6 +31,7 @@ import type {
   Scheduler,
   SpawnedProcess,
 } from "@/browser/cdp/ports"
+import { createProcessExitKillGuard } from "@/browser/cdp/process-exit-kill-guard"
 import { createCdpBrowser } from "@/browser/cdp-adapter"
 import { ok } from "@/shared"
 
@@ -101,13 +102,13 @@ const makeSpawner = (kills: number[], exiters: Array<(code: number) => void>): P
   },
 })
 
-const makeBrowser = () => {
+const makeBrowser = (spawner?: ProcessSpawner) => {
   const rmrf: string[] = []
   const kills: number[] = []
   const closeCbs: Array<() => void> = []
   const exiters: Array<(code: number) => void> = []
   const b = createCdpBrowser({
-    spawner: makeSpawner(kills, exiters),
+    spawner: spawner ?? makeSpawner(kills, exiters),
     transport: makeTransport(closeCbs),
     fs: recordingFs(rmrf),
     scheduler: idleScheduler,
@@ -231,5 +232,64 @@ describe("HELLGATE cdp-adapter — session Map leak reaping", () => {
     expect(c2.ok).toBe(true)
     expect(kills[0]).toBe(1)
     expect(rmrf).toHaveLength(1)
+  })
+
+  test("LEAK-05: close waits for Chrome, escalates SIGTERM to SIGKILL, then removes profile", async () => {
+    const events: string[] = []
+    let resolveExit!: (code: number) => void
+    const exited = new Promise<number>((resolve) => {
+      resolveExit = resolve
+    })
+    const spawner: ProcessSpawner = {
+      which: () => "/usr/bin/google-chrome",
+      spawn: () => ({
+        pid: 4242,
+        exited,
+        kill: (signal) => events.push(`kill:${signal ?? "default"}`),
+        waitForExit: async (timeoutMs) => {
+          events.push(`wait:${timeoutMs}`)
+          if (timeoutMs === 500) return false
+          resolveExit(137)
+          return true
+        },
+      }),
+    }
+    const { b, rmrf } = makeBrowser(spawner)
+    const h = await b.spawn()
+    expect(h.ok).toBe(true)
+    if (!h.ok) return
+
+    const closed = await b.close(h.value)
+
+    expect(closed.ok).toBe(true)
+    expect(events).toEqual(["kill:SIGTERM", "wait:500", "kill:SIGKILL", "wait:2000"])
+    expect(rmrf).toEqual([`/jail/.quanta/browser/${h.value.id}`])
+    expect(b.isLive(h.value)).toBe(false)
+  })
+
+  test("LEAK-06: every live Chrome shares one host-exit listener and unregisters cleanly", () => {
+    const listeners = new Set<() => void>()
+    const killed: number[] = []
+    const register = createProcessExitKillGuard({
+      add: (listener) => listeners.add(listener),
+      remove: (listener) => listeners.delete(listener),
+    })
+
+    const unregister1 = register(() => killed.push(1))
+    const unregister2 = register(() => killed.push(2))
+    expect(listeners.size).toBe(1)
+
+    unregister1()
+    expect(listeners.size).toBe(1)
+    unregister2()
+    unregister2()
+    expect(listeners.size).toBe(0)
+
+    register(() => killed.push(3))
+    register(() => killed.push(4))
+    expect(listeners.size).toBe(1)
+    listeners.values().next().value?.()
+    expect(killed).toEqual([3, 4])
+    expect(listeners.size).toBe(0)
   })
 })
