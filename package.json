@@ -38,7 +38,7 @@
     "test:shard": "bun run test:clean-js && bun test tests/unit tests/meta tests/adversarial tests/measurement tests/integration ./src/ ./tools/ --timeout=60000 --parallel=1 --shard=\"${SHARD:-1/1}\"",
     "test:real-toolchain": "QUANTA_REAL_TOOLCHAIN_E2E=1 bun test $(find tests/unit -name '*-real-e2e.test.ts') --parallel=1",
     "test:contract": "bun run test:clean-js && bun test tests/contract --parallel=1",
-    "test:ci": "bun run test:admission && bun run test:cwd-parity:arch && bun run test:non-vacuity && bun run typecheck:all && bun run test:clean-js && bun run tools/dev/run-test-shards.ts --suite=full --parallel=1 && bun run test:contract --parallel=1",
+    "test:ci": "bun run test:admission && bun run test:cwd-parity:arch && bun run test:non-vacuity && bun run typecheck:all && bun run test:clean-js && bun run tools/dev/run-test-shards.ts --suite=full --parallel=1 && bun run scan-reach && bun test tests/contract --parallel=1",
     "test:cov": "bun run typecheck && bun run test:clean-js && bun test --coverage tests/unit tests/integration --parallel=1",
     "test:eval": "bun run src/apps/bench/index.ts",
     "e2e:pty": "bun test tests/e2e-pty",

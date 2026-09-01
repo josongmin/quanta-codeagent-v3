@@ -23,6 +23,7 @@ import { spawnSync } from "node:child_process"
 import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
+import { createFeatureEvidenceSnapshot } from "../../tools/feature-catalog/evidence-snapshot"
 import type { Feature } from "../../tools/feature-catalog/schema"
 import { loadFeaturesStrict } from "../../tools/feature-catalog/schema"
 
@@ -169,6 +170,27 @@ describe("evidence-existence checker — red-on-injection (has teeth)", () => {
     })
     const dangling = await danglingEvidence(f)
     expect(dangling).toEqual([])
+  })
+
+  test("a fresh command snapshot observes same-process create/delete injection", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fc-evidence-snapshot-"))
+    const relativePath = "injected.ts"
+    const absolutePath = join(root, relativePath)
+    try {
+      const before = createFeatureEvidenceSnapshot(root)
+      expect(await before.pathExists(relativePath)).toBe(false)
+
+      await writeFile(absolutePath, "export {}\n", "utf8")
+      // One command owns one immutable view; a second command gets fresh truth.
+      expect(await before.pathExists(relativePath)).toBe(false)
+      const afterCreate = createFeatureEvidenceSnapshot(root)
+      expect(await afterCreate.pathExists(relativePath)).toBe(true)
+
+      await rm(absolutePath)
+      expect(await createFeatureEvidenceSnapshot(root).pathExists(relativePath)).toBe(false)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 })
 

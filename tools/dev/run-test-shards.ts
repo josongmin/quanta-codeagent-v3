@@ -1,5 +1,6 @@
 import {
   closeSync,
+  mkdirSync,
   mkdtempSync,
   openSync,
   readFileSync,
@@ -7,26 +8,31 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
-import {
-  assertShardCoverage,
-  parseShardDiscovery,
-  type ShardDiscovery,
-} from "./test-shard-coverage"
+import { freemem, tmpdir, totalmem } from "node:os"
+import { join, relative, resolve } from "node:path"
+import { expandTestFiles } from "./sandboxed-test"
 import { acquireTestShardLease, selectRepositoryLeaseIdentity } from "./test-shard-lease"
+import {
+  chooseShardConcurrency,
+  createTestShardPlan,
+  parseExecutedFileCount,
+  type TestShardPlan,
+} from "./test-shard-plan"
+import { writeScanReachReceiptAtomic } from "./test-shard-receipt"
 
 /**
  * Authoritative local full-suite runner.
  *
  * Bun's one-process full run exhausts JSC on this repository. The worker
  * script remains available as `test:shard`, but this runner owns the full
- * verdict: it runs every one of Bun's eight deterministic file shards
- * SEQUENTIALLY, records every exit, and refuses to bless a result if another
- * session changed the checkout while it was running.
+ * verdict: it discovers the manifest exactly once, gives each worker explicit
+ * file paths, overlaps at most two resource-isolated workers, records every
+ * exit, and refuses to bless a result if another session changed the checkout.
  */
 
 const SHARD_COUNT = 8
+const REPO_ROOT = resolve(import.meta.dir, "..", "..")
+const SCAN_REACH_RECEIPT = join(REPO_ROOT, ".cache", "scan-reach-receipt.json")
 // The shard corpus contains cold-path source scans and real CLI integration
 // rails. A normal shard can exceed twelve minutes while continuously reporting
 // completed tests on a contended host, so a total wall-clock cap discards valid
@@ -72,7 +78,7 @@ interface GitSnapshot {
 const capture = async (
   cmd: readonly string[],
 ): Promise<{ readonly code: number; readonly text: string }> => {
-  const proc = Bun.spawn({ cmd: [...cmd], stdout: "pipe", stderr: "pipe" })
+  const proc = Bun.spawn({ cmd: [...cmd], cwd: REPO_ROOT, stdout: "pipe", stderr: "pipe" })
   const [stdout, stderr, code] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
@@ -94,6 +100,51 @@ const gitSnapshot = async (): Promise<GitSnapshot> => {
 
 const sameSnapshot = (left: GitSnapshot, right: GitSnapshot): boolean =>
   left.head === right.head && left.status === right.status
+
+const manifestSha256 = (manifest: readonly string[]): string =>
+  new Bun.CryptoHasher("sha256")
+    .update(manifest.map((file) => relative(REPO_ROOT, file)).join("\0"))
+    .digest("hex")
+
+const macAvailableMemory = async (): Promise<number | undefined> => {
+  if (process.platform !== "darwin") return undefined
+  const result = await capture(["vm_stat"])
+  if (result.code !== 0) return undefined
+  const pageSize = /page size of (\d+) bytes/.exec(result.text)?.[1]
+  if (pageSize === undefined) return undefined
+  const reclaimable = ["Pages free", "Pages inactive", "Pages speculative", "Pages purgeable"]
+  let pages = 0
+  for (const label of reclaimable) {
+    const value = new RegExp(`^${label}:\\s+(\\d+)\\.`, "m").exec(result.text)?.[1]
+    if (value !== undefined) pages += Number.parseInt(value, 10)
+  }
+  return pages * Number.parseInt(pageSize, 10)
+}
+
+const workerConcurrency = async (): Promise<1 | 2> =>
+  chooseShardConcurrency({
+    totalBytes: totalmem(),
+    availableBytes: (await macAvailableMemory()) ?? freemem(),
+  })
+
+const writeScanReachReceipt = (input: {
+  readonly head: string
+  readonly suite: SuiteName
+  readonly manifestSha256: string
+  readonly sinks: readonly string[]
+}): void => {
+  // Only full covers every enrolled scan id. A unit receipt is internally
+  // successful but incomplete and would make the closed-universe consumer
+  // report src/integration ids as stale.
+  if (input.suite !== "full") return
+  writeScanReachReceiptAtomic({
+    path: SCAN_REACH_RECEIPT,
+    head: input.head,
+    suite: input.suite,
+    manifestSha256: input.manifestSha256,
+    sinks: input.sinks,
+  })
+}
 
 const suiteOption = (arg: string): SuiteName | undefined => {
   if (!arg.startsWith("--suite=")) return undefined
@@ -162,40 +213,61 @@ const mergeJunit = (junitOut: string): void => {
 }
 
 const runShard = async (
-  index: number,
+  plan: TestShardPlan,
   opts: RunnerOptions,
+  runRoot: string,
 ): Promise<{
   readonly code: number
   readonly timedOut: boolean
-  readonly discovery?: ShardDiscovery
+  readonly executedFiles?: number
+  readonly scanReachSink: string
 }> => {
-  const shard = `${index}/${SHARD_COUNT}`
+  const shard = `${plan.index}/${SHARD_COUNT}`
   const junitArgs =
     opts.junitOut === undefined
       ? []
-      : ["--reporter=junit", `--reporter-outfile=${junitShardPath(opts.junitOut, index)}`]
-  process.stdout.write(`\n[test:shards] START shard=${shard}\n`)
+      : ["--reporter=junit", `--reporter-outfile=${junitShardPath(opts.junitOut, plan.index)}`]
+  process.stdout.write(
+    `\n[test:shards] START shard=${shard} files=${plan.files.length} exclusive=${plan.exclusive ? "yes" : "no"}\n`,
+  )
   // Native file descriptors keep the child off a JS relay/backpressure path.
   // Relaying every Bun test chunk through this process more than doubled a
   // measured full shard (375s direct versus the 720s kill boundary) and turned
   // a green worker into a runner timeout. Spool natively, then replay once so
   // the receipt still contains the complete worker output and discovery banner.
-  const spoolDir = mkdtempSync(join(tmpdir(), "quanta-test-shard-"))
-  const spoolPath = join(spoolDir, `shard-${index}.log`)
+  const workerRoot = join(runRoot, `worker-${plan.index}`)
+  const workerTmp = join(workerRoot, "tmp")
+  const workerHome = join(workerRoot, "home")
+  const quantaHome = join(workerHome, ".quanta")
+  const prefsHome = join(workerRoot, "prefs-home")
+  const benchHome = join(workerRoot, "bench-home")
+  const benchResults = join(workerRoot, "bench-results")
+  mkdirSync(workerTmp, { recursive: true })
+  mkdirSync(quantaHome, { recursive: true })
+  mkdirSync(prefsHome, { recursive: true })
+  mkdirSync(benchHome, { recursive: true })
+  mkdirSync(benchResults, { recursive: true })
+  const spoolPath = join(workerRoot, `shard-${plan.index}.log`)
+  const scanReachSink = join(workerRoot, `scan-reach-${plan.index}.jsonl`)
+  writeFileSync(scanReachSink, "")
   const spoolFd = openSync(spoolPath, "w")
   let closed = false
   try {
     const startedAt = performance.now()
     const proc = Bun.spawn({
-      cmd: [
-        "bun",
-        "test",
-        ...SUITE_ROOTS[opts.suite],
-        "--timeout=60000",
-        "--parallel=1",
-        `--shard=${shard}`,
-        ...junitArgs,
-      ],
+      cmd: ["bun", "test", ...plan.files, "--timeout=60000", "--parallel=1", ...junitArgs],
+      cwd: REPO_ROOT,
+      env: {
+        ...process.env,
+        HOME: workerHome,
+        TMPDIR: workerTmp,
+        QUANTA_HOME: quantaHome,
+        QUANTA_CONFIG_DIR: quantaHome,
+        QUANTA_PREFS_HOME: prefsHome,
+        QUANTA_BENCH_HOME: benchHome,
+        QUANTA_BENCH_RESULTS_DIR: benchResults,
+        QUANTA_SCAN_REACH_RECORD: scanReachSink,
+      },
       stdout: spoolFd,
       stderr: spoolFd,
     })
@@ -233,7 +305,7 @@ const runShard = async (
     const spoolBytes = statSync(spoolPath).size
     const output = readFileSync(spoolPath, "utf8")
     process.stdout.write(output)
-    const discovery = parseShardDiscovery(output, shard)
+    const executedFiles = parseExecutedFileCount(output)
     const elapsedMs = Math.round(performance.now() - startedAt)
     const usage = proc.resourceUsage()
     const maxRssBytes = usage?.maxRSS ?? 0
@@ -241,11 +313,73 @@ const runShard = async (
       `[test:shards] END shard=${shard} exit=${code}${timedOut ? " timeout" : ""} ` +
         `elapsed_ms=${elapsedMs} max_rss_bytes=${maxRssBytes} spool_bytes=${spoolBytes}\n`,
     )
-    return discovery === undefined ? { code, timedOut } : { code, timedOut, discovery }
+    return executedFiles === undefined
+      ? { code, timedOut, scanReachSink }
+      : { code, timedOut, executedFiles, scanReachSink }
   } finally {
     if (!closed) closeSync(spoolFd)
-    rmSync(spoolDir, { recursive: true, force: true })
   }
+}
+
+interface CompletedShard {
+  readonly plan: TestShardPlan
+  readonly result: Awaited<ReturnType<typeof runShard>>
+  readonly snapshot: GitSnapshot
+}
+
+const validateCompletedShard = (before: GitSnapshot, completed: CompletedShard): string => {
+  const { plan, result, snapshot } = completed
+  if (!sameSnapshot(before, snapshot)) {
+    throw new Error(
+      `[test:shards] INVALID — checkout changed after shard ${plan.index}/${SHARD_COUNT} ` +
+        `(start=${before.head}, current=${snapshot.head}). Aborting remaining shards.`,
+    )
+  }
+  if (result.code === 0 && !result.timedOut && result.executedFiles === plan.files.length) {
+    return result.scanReachSink
+  }
+  const discovery =
+    result.executedFiles === undefined ? "missing" : `${result.executedFiles}/${plan.files.length}`
+  throw new Error(
+    `[test:shards] FAILED shard=${plan.index}/${SHARD_COUNT} exit=${result.code} ` +
+      `timeout=${result.timedOut ? "yes" : "no"} discovery=${discovery}; ` +
+      "aborting remaining shards",
+  )
+}
+
+const nextPlanBatch = (
+  plans: readonly TestShardPlan[],
+  cursor: number,
+  concurrency: 1 | 2,
+): readonly TestShardPlan[] => {
+  const first = plans[cursor]
+  if (first === undefined) return []
+  if (first.exclusive) return [first]
+  return plans.slice(cursor, cursor + concurrency).filter(({ exclusive }) => !exclusive)
+}
+
+const executePlans = async (input: {
+  readonly plans: readonly TestShardPlan[]
+  readonly opts: RunnerOptions
+  readonly runRoot: string
+  readonly before: GitSnapshot
+  readonly concurrency: 1 | 2
+}): Promise<readonly string[]> => {
+  const scanReachSinks: string[] = []
+  for (let cursor = 0; cursor < input.plans.length; ) {
+    const batch = nextPlanBatch(input.plans, cursor, input.concurrency)
+    if (batch.length === 0) throw new Error("[test:shards] scheduler produced an empty batch")
+    cursor += batch.length
+    const completed = await Promise.all(
+      batch.map(async (plan) => ({
+        plan,
+        result: await runShard(plan, input.opts, input.runRoot),
+        snapshot: await gitSnapshot(),
+      })),
+    )
+    for (const shard of completed) scanReachSinks.push(validateCompletedShard(input.before, shard))
+  }
+  return scanReachSinks
 }
 
 const main = async (): Promise<void> => {
@@ -257,13 +391,18 @@ const main = async (): Promise<void> => {
   const identity = selectRepositoryLeaseIdentity({ remote, commonDir, cwd: process.cwd() })
   const lease = await acquireTestShardLease({
     identity,
-    onWait: (port) =>
+    onWait: (port, elapsedMs) =>
       process.stdout.write(
-        `[test:shards] WAIT repository lease port=${port}; another checkout owns the full-suite lane\n`,
+        `[test:shards] WAIT repository lease port=${port} elapsed=${Math.round(elapsedMs / 1_000)}s; ` +
+          "another checkout owns the full-suite lane\n",
       ),
   })
   process.stdout.write(`[test:shards] LEASE acquired port=${lease.port}\n`)
+  const runRoot = mkdtempSync(join(tmpdir(), "quanta-test-shards-"))
   try {
+    // A red or interrupted run must never leave a previous green receipt looking
+    // current. The repository lease makes this deletion race-free across clones.
+    if (opts.suite === "full") rmSync(SCAN_REACH_RECEIPT, { force: true })
     const before = await gitSnapshot()
     if (before.status !== "") {
       throw new Error(
@@ -271,15 +410,20 @@ const main = async (): Promise<void> => {
       )
     }
     if (opts.junitOut !== undefined) prepareJunit(opts.junitOut)
-    process.stdout.write(`[test:shards] frozen head=${before.head} suite=${opts.suite} dirty=no\n`)
+    const manifest = expandTestFiles(
+      SUITE_ROOTS[opts.suite].map((root) => resolve(REPO_ROOT, root)),
+    )
+    const manifestDigest = manifestSha256(manifest)
+    const plans = createTestShardPlan(manifest, SHARD_COUNT)
+    const concurrency = await workerConcurrency()
+    const exclusiveFiles = plans.find(({ exclusive }) => exclusive)?.files.length ?? 0
+    process.stdout.write(
+      `[test:shards] frozen head=${before.head} suite=${opts.suite} dirty=no ` +
+        `manifest_files=${manifest.length} manifest_sha256=${manifestDigest} ` +
+        `workers=${concurrency} exclusive_files=${exclusiveFiles}\n`,
+    )
 
-    const failed: number[] = []
-    const discoveries: ShardDiscovery[] = []
-    for (let index = 1; index <= SHARD_COUNT; index += 1) {
-      const result = await runShard(index, opts)
-      if (result.code !== 0 || result.timedOut) failed.push(index)
-      if (result.discovery !== undefined) discoveries.push(result.discovery)
-    }
+    const scanReachSinks = await executePlans({ plans, opts, runRoot, before, concurrency })
 
     const after = await gitSnapshot()
     if (!sameSnapshot(before, after)) {
@@ -288,15 +432,19 @@ const main = async (): Promise<void> => {
           "Re-run against one stable snapshot; this receipt cannot describe a single source state.",
       )
     }
-    if (failed.length > 0) {
-      throw new Error(`[test:shards] FAILED shard(s): ${failed.join(", ")}/${SHARD_COUNT}`)
-    }
-    assertShardCoverage(discoveries, SHARD_COUNT)
+    writeScanReachReceipt({
+      head: before.head,
+      suite: opts.suite,
+      manifestSha256: manifestDigest,
+      sinks: scanReachSinks,
+    })
     if (opts.junitOut !== undefined) mergeJunit(opts.junitOut)
     process.stdout.write(
-      `[test:shards] PASS suite=${opts.suite} shards=1-${SHARD_COUNT}/${SHARD_COUNT} head=${before.head}\n`,
+      `[test:shards] PASS suite=${opts.suite} shards=1-${SHARD_COUNT}/${SHARD_COUNT} ` +
+        `manifest_files=${manifest.length} head=${before.head}\n`,
     )
   } finally {
+    rmSync(runRoot, { recursive: true, force: true })
     lease.release()
   }
 }

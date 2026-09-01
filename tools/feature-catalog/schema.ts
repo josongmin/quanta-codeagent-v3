@@ -5,7 +5,7 @@
  * Mini-YAML parser lives in ./yaml.ts (no external yaml dep).
  */
 import type { Dirent } from "node:fs"
-import { readdir, readFile } from "node:fs/promises"
+import { readdir, readFile, stat } from "node:fs/promises"
 import { isAbsolute, join, relative } from "node:path"
 import { parseDocument } from "yaml"
 import { z } from "zod"
@@ -486,6 +486,34 @@ export interface LoadedFeature {
 }
 
 /**
+ * Process-local parse snapshot for one catalog file.
+ *
+ * A Bun shard imports this module once but several independent catalog guards
+ * call `loadFeaturesStrict()` against the same >1k immutable YAML corpus. Reading
+ * and parsing every byte again made those guards multiply the same work. The
+ * cache key is the file's kernel identity, not just its pathname: replacing or
+ * rewriting a fixture changes at least ctime/mtime/size/inode and therefore
+ * cannot inherit a prior parse verdict.
+ */
+interface ParsedFeatureSnapshot {
+  readonly identity: string
+  readonly value: Promise<LoadedFeature>
+}
+
+const parsedFeatureSnapshots = new Map<string, ParsedFeatureSnapshot>()
+
+const featureFileIdentity = async (path: string): Promise<string> => {
+  const info = await stat(path, { bigint: true })
+  return [info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs].join(":")
+}
+
+const deepFreeze = <T>(value: T): T => {
+  if (value === null || typeof value !== "object" || Object.isFrozen(value)) return value
+  for (const child of Object.values(value as Record<string, unknown>)) deepFreeze(child)
+  return Object.freeze(value)
+}
+
+/**
  * The catalog's compact parser owns the supported feature subset, but its
  * permissive scalar handling must not let a file cease to be YAML for every
  * standard consumer. Validate the original bytes first so duplicate keys and
@@ -498,38 +526,61 @@ function assertStandardYaml(text: string, path: string): void {
   throw new Error(`YAML syntax failed at ${relative(REPO_ROOT, path)}: ${details}`)
 }
 
+class FeatureSourceChanged extends Error {}
+
+const parseFeatureFile = async (path: string): Promise<LoadedFeature> => {
+  // Retry only a concurrent replacement. Parse/schema failures are stable for
+  // the same exact file identity and remain cached like successful parses.
+  for (;;) {
+    const identity = await featureFileIdentity(path)
+    const cached = parsedFeatureSnapshots.get(path)
+    if (cached?.identity === identity) return cached.value
+
+    const value = (async (): Promise<LoadedFeature> => {
+      const text = await readFile(path, "utf8")
+      if ((await featureFileIdentity(path)) !== identity) throw new FeatureSourceChanged(path)
+      let raw: unknown
+      try {
+        assertStandardYaml(text, path)
+        raw = parseYaml(text)
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        throw new Error(`YAML parse failed at ${relative(REPO_ROOT, path)}: ${msg}`)
+      }
+      const result = FeatureSchema.safeParse(raw)
+      if (!result.success) {
+        const issues = result.error.issues
+          .map((i) => `  - ${i.path.join(".")}: ${i.message}`)
+          .join("\n")
+        throw new Error(`Schema validation failed at ${relative(REPO_ROOT, path)}:\n${issues}`)
+      }
+      return deepFreeze({ feature: result.data, path })
+    })()
+    parsedFeatureSnapshots.set(path, { identity, value })
+    try {
+      return await value
+    } catch (error) {
+      if (!(error instanceof FeatureSourceChanged)) throw error
+      const current = parsedFeatureSnapshots.get(path)
+      if (current?.value === value) parsedFeatureSnapshots.delete(path)
+    }
+  }
+}
+
 /**
  * Load + validate all features under `dir`. Throws on first parse/zod error
  * with a clear message including the source path.
  */
 export async function loadFeatures(dir: string = FEATURES_DIR): Promise<LoadedFeature[]> {
   const files = await gatherYamlFiles(dir)
-  // Read the catalog concurrently, then validate in the canonical path order.
-  // Serial reads make the 1k+ file catalog scale with filesystem latency and
-  // caused cold CI runs to spend almost a minute before the first assertion.
-  // Keeping parse/validation in this loop preserves deterministic first-error
-  // reporting and the stable output order.
-  const sources = await Promise.all(
-    files.map(async (path) => ({ path, text: await readFile(path, "utf8") })),
-  )
+  // Start exact-file snapshot loads concurrently, then await them in canonical
+  // path order. The order keeps deterministic first-error reporting while the
+  // process-local promises let sibling guards consume one immutable parse.
+  const snapshots = await Promise.allSettled(files.map((path) => parseFeatureFile(path)))
   const loaded: LoadedFeature[] = []
-  for (const { path, text } of sources) {
-    let raw: unknown
-    try {
-      assertStandardYaml(text, path)
-      raw = parseYaml(text)
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      throw new Error(`YAML parse failed at ${relative(REPO_ROOT, path)}: ${msg}`)
-    }
-    const result = FeatureSchema.safeParse(raw)
-    if (!result.success) {
-      const issues = result.error.issues
-        .map((i) => `  - ${i.path.join(".")}: ${i.message}`)
-        .join("\n")
-      throw new Error(`Schema validation failed at ${relative(REPO_ROOT, path)}:\n${issues}`)
-    }
-    loaded.push({ feature: result.data, path })
+  for (const snapshot of snapshots) {
+    if (snapshot.status === "rejected") throw snapshot.reason
+    loaded.push(snapshot.value)
   }
   return loaded
 }

@@ -11,6 +11,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { readScanReachBaseline } from "@/../tools/dev/scan-reach-baseline"
 import { assertFailsClosedOnEmpty, assertScanPopulation } from "../_shared/scan-population"
 
 const made: string[] = []
@@ -75,6 +76,17 @@ const twinFiles = (root: string): string[] =>
   Array.from({ length: 50 }, (_, i) => join(root, "twin", `m${i}.ts`))
 
 describe("population floor", () => {
+  test("exact-file baseline cache invalidates a same-path, same-size rewrite", () => {
+    const fx = build()
+    const baseline = fx.pin(1)
+    expect(readScanReachBaseline(baseline).scans.fx?.walked).toBe(1)
+
+    // A path/size-only cache would keep the pre-injection floor and let the
+    // second assertion consume stale authority.
+    fx.pin(2)
+    expect(readScanReachBaseline(baseline).scans.fx?.walked).toBe(2)
+  })
+
   test("a walk that reached everything passes (paired control)", () => {
     const fx = build()
     expect(() =>

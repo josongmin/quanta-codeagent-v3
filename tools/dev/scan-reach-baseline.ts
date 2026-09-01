@@ -26,8 +26,8 @@
  * something. A matcher that rotted after a refactor selects nothing while the
  * walk stays full, so a floor on `walked` alone clears it.
  */
-import { readFileSync, writeFileSync } from "node:fs"
-import { join } from "node:path"
+import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { join, resolve } from "node:path"
 
 export interface ScanReach {
   readonly walked: number
@@ -39,10 +39,105 @@ export interface ScanReachBaseline {
   readonly scans: Readonly<Record<string, ScanReach>>
 }
 
-export const BASELINE_PATH = join(import.meta.dir, "scan-reach-baseline.json")
+export interface ScanReachReceiptRecord extends ScanReach {
+  readonly id: string
+}
 
-export const readScanReachBaseline = (path: string = BASELINE_PATH): ScanReachBaseline =>
-  JSON.parse(readFileSync(path, "utf8")) as ScanReachBaseline
+/**
+ * Exact-checkout receipt emitted by the authoritative shard runner.
+ *
+ * A receipt is only a replacement for the dedicated scan-reach child when the
+ * complete shard suite passed against one clean, unchanged HEAD. The consumer
+ * therefore binds it to the current Git snapshot instead of treating `.cache`
+ * as trusted state.
+ */
+export interface ScanReachReceipt {
+  readonly schema: "quanta.scan-reach-receipt.v1"
+  readonly head: string
+  readonly suite: "unit" | "full"
+  readonly manifestSha256: string
+  readonly childExit: 0
+  readonly records: readonly ScanReachReceiptRecord[]
+}
+
+export interface ReceiptSnapshot {
+  readonly head: string
+  readonly status: string
+}
+
+export const observedFromReceipt = (
+  receipt: ScanReachReceipt,
+  snapshot: ReceiptSnapshot,
+): ReadonlyMap<string, ScanReach> | undefined => {
+  if (
+    receipt.schema !== "quanta.scan-reach-receipt.v1" ||
+    receipt.childExit !== 0 ||
+    receipt.head !== snapshot.head ||
+    snapshot.status !== "" ||
+    receipt.manifestSha256.length !== 64 ||
+    receipt.records.length === 0
+  ) {
+    return undefined
+  }
+  const observed = new Map<string, ScanReach>()
+  for (const { id, walked, matched } of receipt.records) {
+    if (id === "" || !Number.isSafeInteger(walked) || walked < 0) return undefined
+    if (matched !== undefined && (!Number.isSafeInteger(matched) || matched < 0)) return undefined
+    observed.set(
+      id,
+      mergeReach(observed.get(id), { walked, ...(matched === undefined ? {} : { matched }) }),
+    )
+  }
+  return observed
+}
+
+export const BASELINE_PATH = join(import.meta.dir, "scan-reach-baseline.json")
+export const SHARD_RECEIPT_PATH = join(
+  import.meta.dir,
+  "..",
+  "..",
+  ".cache",
+  "scan-reach-receipt.json",
+)
+
+interface BaselineSnapshot {
+  readonly identity: string
+  readonly baseline: ScanReachBaseline
+}
+
+const baselineSnapshots = new Map<string, BaselineSnapshot>()
+
+const baselineIdentity = (path: string): string => {
+  const info = statSync(path, { bigint: true })
+  return [info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs].join(":")
+}
+
+const freezeBaseline = (baseline: ScanReachBaseline): ScanReachBaseline => {
+  for (const reach of Object.values(baseline.scans)) Object.freeze(reach)
+  Object.freeze(baseline.scans)
+  return Object.freeze(baseline)
+}
+
+/**
+ * Parse an exact on-disk baseline identity once per Bun process.
+ *
+ * `assertScanPopulation` calls this for every scan assertion. Path-only caching
+ * would make same-path RED injections stale, so size/mtime/ctime/inode are part
+ * of the key and a write immediately selects a fresh JSON snapshot.
+ */
+export const readScanReachBaseline = (path: string = BASELINE_PATH): ScanReachBaseline => {
+  const absolute = resolve(path)
+  for (;;) {
+    const identity = baselineIdentity(absolute)
+    const cached = baselineSnapshots.get(absolute)
+    if (cached?.identity === identity) return cached.baseline
+    const raw = readFileSync(absolute, "utf8")
+    if (baselineIdentity(absolute) !== identity) continue
+    const baseline = freezeBaseline(JSON.parse(raw) as ScanReachBaseline)
+    baselineSnapshots.set(absolute, { identity, baseline })
+    return baseline
+  }
+}
 
 export interface ReachVerdict {
   /** The scan shrank below its committed floor. */
@@ -155,7 +250,7 @@ const mergeReach = (
   return both.length === 0 ? { walked } : { walked, matched: Math.min(...both) }
 }
 
-const harvest = (sink: string): Map<string, ScanReach> => {
+export const harvest = (sink: string): Map<string, ScanReach> => {
   const observed = new Map<string, ScanReach>()
   for (const line of readFileSync(sink, "utf8").split("\n")) {
     if (line === "") continue
@@ -164,6 +259,30 @@ const harvest = (sink: string): Map<string, ScanReach> => {
     observed.set(r.id, mergeReach(prev, r))
   }
   return observed
+}
+
+const currentGitSnapshot = (): ReceiptSnapshot | undefined => {
+  const head = Bun.spawnSync(["git", "rev-parse", "HEAD"], { stdout: "pipe", stderr: "pipe" })
+  const status = Bun.spawnSync(["git", "status", "--porcelain=v1", "-uall"], {
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  if (head.exitCode !== 0 || status.exitCode !== 0) return undefined
+  return { head: head.stdout.toString().trim(), status: status.stdout.toString() }
+}
+
+export const readUsableShardReceipt = (
+  path: string = SHARD_RECEIPT_PATH,
+): ReadonlyMap<string, ScanReach> | undefined => {
+  if (!existsSync(path)) return undefined
+  const snapshot = currentGitSnapshot()
+  if (snapshot === undefined) return undefined
+  try {
+    const receipt = JSON.parse(readFileSync(path, "utf8")) as ScanReachReceipt
+    return observedFromReceipt(receipt, snapshot)
+  } catch {
+    return undefined
+  }
 }
 
 /**
@@ -303,49 +422,60 @@ export const decide = (run: ReachRun): ReachDecision => {
 }
 
 if (import.meta.main) {
-  const sink = `${process.env.TMPDIR ?? "/tmp"}/quanta-scan-reach-${process.pid}.jsonl`
-  writeFileSync(sink, "")
-  // The guards that CALL the helper, plus the tests that reach it through a
-  // shared suite. `slice-boundary-scanner.ts` is not a test file and its 49
-  // entrypoints never name the helper, so a list built from the direct string
-  // alone leaves 49 pinned rows reporting nothing — which the STALE check then
-  // fails on, correctly and unhelpfully.
-  const grep = (pattern: string): readonly string[] =>
-    new TextDecoder()
-      .decode(
-        Bun.spawnSync(["git", "grep", "-l", pattern, "--", "tests", "src"], { stdout: "pipe" })
-          .stdout,
-      )
-      .split("\n")
-      .filter((f) => f !== "")
-  const direct = grep("assertScanPopulation")
-  const indirect = direct
-    .filter((f) => !f.endsWith(".test.ts"))
-    .flatMap((mod) => grep(`from "[^"]*${mod.replace(/^.*\//, "").replace(/\.ts$/, "")}"`))
-  const files = [...new Set([...direct, ...indirect])].filter(
-    (f) =>
-      f.endsWith(".test.ts") &&
-      !f.includes("_shared/scan-population") &&
-      !f.includes("floor-hellgate"),
-  )
-  // The repo's own suites run at `--timeout=15000` (`test:ci`) and `60000`
-  // (`test:shard`); this child ran at bun's 5s default, TIGHTER than any gate.
-  // That went unnoticed while the exit code was printed and never checked — once
-  // it was, two guards read as failures for being slower than a budget nothing
-  // else imposes. Both pass at 60s, so a timeout here now means what it means
-  // elsewhere: the guard hung, not that it is a scanning guard.
-  const child = Bun.spawnSync(scanReachChildArgs(files), {
-    env: { ...process.env, QUANTA_SCAN_REACH_RECORD: sink },
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  const observed = harvest(sink)
+  const receiptObserved = readUsableShardReceipt()
+  let observed: ReadonlyMap<string, ScanReach>
+  let childExit = 0
+  let childOutput = ""
+  if (receiptObserved !== undefined) {
+    observed = receiptObserved
+    // biome-ignore lint/suspicious/noConsole: the CLI reports its evidence source
+    console.error(`scan-reach: consuming exact-HEAD shard receipt (${observed.size} scans)`)
+  } else {
+    const sink = `${process.env.TMPDIR ?? "/tmp"}/quanta-scan-reach-${process.pid}.jsonl`
+    writeFileSync(sink, "")
+    // The guards that CALL the helper, plus the tests that reach it through a
+    // shared suite. `slice-boundary-scanner.ts` is not a test file and its 49
+    // entrypoints never name the helper, so a list built from the direct string
+    // alone leaves 49 pinned rows reporting nothing — which the STALE check then
+    // fails on, correctly and unhelpfully.
+    const grep = (pattern: string): readonly string[] =>
+      new TextDecoder()
+        .decode(
+          Bun.spawnSync(["git", "grep", "-l", pattern, "--", "tests", "src"], {
+            stdout: "pipe",
+          }).stdout,
+        )
+        .split("\n")
+        .filter((f) => f !== "")
+    const direct = grep("assertScanPopulation")
+    const indirect = direct
+      .filter((f) => !f.endsWith(".test.ts"))
+      .flatMap((mod) => grep(`from "[^"]*${mod.replace(/^.*\//, "").replace(/\.ts$/, "")}"`))
+    const files = [...new Set([...direct, ...indirect])].filter(
+      (f) =>
+        f.endsWith(".test.ts") &&
+        !f.includes("_shared/scan-population") &&
+        !f.includes("floor-hellgate"),
+    )
+    // The repo's own suites run at `--timeout=60000`. Keep the fallback child
+    // equivalent to the authoritative runner: a tighter private timeout turns
+    // ordinary contention into a false regression.
+    const child = Bun.spawnSync(scanReachChildArgs(files), {
+      env: { ...process.env, QUANTA_SCAN_REACH_RECORD: sink },
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    childExit = child.exitCode
+    childOutput = `${child.stdout.toString()}${child.stderr.toString()}`
+    observed = harvest(sink)
+    rmSync(sink, { force: true })
+  }
   const baseline = readScanReachBaseline()
   const debt = JSON.parse(
     readFileSync(join(import.meta.dir, "scan-enrollment-debt.json"), "utf8"),
   ) as { expectedIds?: Readonly<Record<string, readonly string[]>> }
   const verdict = decide({
-    childExit: child.exitCode,
+    childExit,
     observed,
     baseline,
     tighten: process.argv.includes("--tighten"),
@@ -355,10 +485,10 @@ if (import.meta.main) {
     // biome-ignore lint/suspicious/noConsole: the CLI reports to the operator
     console.error(line)
   }
-  if (verdict.exit !== 0 && child.exitCode !== 0) {
+  if (verdict.exit !== 0 && childExit !== 0) {
     // The child's own output is the actionable part when the guards failed.
     // biome-ignore lint/suspicious/noConsole: the CLI reports to the operator
-    console.error(`${child.stdout.toString()}${child.stderr.toString()}`.slice(-4000))
+    console.error(childOutput.slice(-4000))
   }
   if (verdict.doTighten) tighten(observed, baseline)
   process.exit(verdict.exit)

@@ -241,6 +241,29 @@ describe("loadFeatures / loadFeaturesStrict — filesystem", () => {
     expect(first?.feature.id).toBe("my-feature")
   })
 
+  test("exact-file cache invalidates a same-path, same-size YAML rewrite", async () => {
+    const dir = join(tmp, "rewrite")
+    await mkdir(dir, { recursive: true })
+    const file = join(dir, "f.yaml")
+    const yaml = (title: string) =>
+      [
+        "id: rewritten-feature",
+        `title: ${title}`,
+        "section: 1",
+        "subsystem: x",
+        "maturity: L3",
+        "purpose: x",
+        "",
+      ].join("\n")
+    await writeFile(file, yaml("first"), "utf8")
+    expect((await loadFeatures(dir))[0]?.feature.title).toBe("first")
+
+    // Same path and byte length: a pathname/size-only cache would stay stale and
+    // make mutation-based guards consume the pre-injection catalog.
+    await writeFile(file, yaml("other"), "utf8")
+    expect((await loadFeatures(dir))[0]?.feature.title).toBe("other")
+  })
+
   test("loadFeaturesStrict throws on duplicate id", async () => {
     const dir = join(tmp, "dup")
     await mkdir(dir, { recursive: true })

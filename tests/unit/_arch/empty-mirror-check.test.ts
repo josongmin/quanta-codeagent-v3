@@ -25,7 +25,7 @@
  * present.
  */
 
-import { describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
 import {
   lstatSync,
   mkdirSync,
@@ -235,18 +235,29 @@ describe("empty-corpus oracle", () => {
     // execute at all (`grep -c buildMirror` was 0). The two properties the
     // header argues hardest for, materialise-don't-symlink and use-our-own-bunfig,
     // were both unpinned.
-    const mirrorOf = (root: "src") => buildMirror(root)
+    // All four assertions are read-only views over the same exact construction.
+    // Building the 3k+ file APFS clone once retains the production builder proof
+    // while avoiding four byte-identical full-repo fixtures in one test file.
+    let immutableMirror = ""
+    afterAll(() => {
+      if (immutableMirror !== "") rmSync(immutableMirror, { recursive: true, force: true })
+    })
+    const mirrorOf = (root: "src") => {
+      expect(root).toBe("src")
+      // Lazy construction inherits the first test's explicit 180s budget. A
+      // beforeAll hook uses Bun's short default timeout, which turned the one
+      // retained full-repo clone into a hook timeout on an otherwise healthy
+      // checkout.
+      if (immutableMirror === "") immutableMirror = buildMirror(root)
+      return immutableMirror
+    }
 
     test("🔴 the blanked root is EMPTY of corpus, and guards survive", () => {
       // M1: inverting `isCorpus` (delete the guards, keep the corpus) survived.
       const dir = mirrorOf("src")
-      try {
-        const kept = corpusFiles(join(dir, "src"))
-        expect(kept.nonTest, "corpus files survived the blank").toBe(0)
-        expect(kept.tests, "the guards were deleted instead of the corpus").toBeGreaterThan(100)
-      } finally {
-        rmSync(dir, { recursive: true, force: true })
-      }
+      const kept = corpusFiles(join(dir, "src"))
+      expect(kept.nonTest, "corpus files survived the blank").toBe(0)
+      expect(kept.tests, "the guards were deleted instead of the corpus").toBeGreaterThan(100)
     }, 180_000)
 
     test("🔴 src and tests are MATERIALISED, never symlinked", () => {
@@ -254,12 +265,8 @@ describe("empty-corpus oracle", () => {
       // "returned twice in this file's history" — a guard's `import.meta.dir`
       // follows the link back to the real repo and reads the real corpus.
       const dir = mirrorOf("src")
-      try {
-        for (const root of ["src", "tests"]) {
-          expect(lstatSync(join(dir, root)).isSymbolicLink(), `${root} is a symlink`).toBe(false)
-        }
-      } finally {
-        rmSync(dir, { recursive: true, force: true })
+      for (const root of ["src", "tests"]) {
+        expect(lstatSync(join(dir, root)).isSymbolicLink(), `${root} is a symlink`).toBe(false)
       }
     }, 180_000)
 
@@ -272,12 +279,8 @@ describe("empty-corpus oracle", () => {
       // A mirror whose contents depend on which filesystem it was built on is two
       // oracles wearing one name.
       const dir = mirrorOf("src")
-      try {
-        const strays = ["src", "tests"].flatMap((root) => skippablePaths(dir, root))
-        expect(strays, "the clone kept paths the walk would never have copied").toEqual([])
-      } finally {
-        rmSync(dir, { recursive: true, force: true })
-      }
+      const strays = ["src", "tests"].flatMap((root) => skippablePaths(dir, root))
+      expect(strays, "the clone kept paths the walk would never have copied").toEqual([])
     }, 180_000)
 
     test("🔴 the mirror uses its OWN bunfig with no preload", () => {
@@ -285,13 +288,9 @@ describe("empty-corpus oracle", () => {
       // decision the whole engine rests on — the repo's preload loads production
       // slices, so a mirror using it cannot have those slices emptied.
       const dir = mirrorOf("src")
-      try {
-        const cfg = readFileSync(join(dir, "bunfig.toml"), "utf8")
-        expect(lstatSync(join(dir, "bunfig.toml")).isSymbolicLink()).toBe(false)
-        expect(cfg).not.toContain("preload")
-      } finally {
-        rmSync(dir, { recursive: true, force: true })
-      }
+      const cfg = readFileSync(join(dir, "bunfig.toml"), "utf8")
+      expect(lstatSync(join(dir, "bunfig.toml")).isSymbolicLink()).toBe(false)
+      expect(cfg).not.toContain("preload")
     }, 180_000)
   })
 

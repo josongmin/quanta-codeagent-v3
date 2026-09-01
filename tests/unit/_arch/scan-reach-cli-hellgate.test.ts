@@ -28,6 +28,7 @@ import { join } from "node:path"
 
 import {
   decide,
+  observedFromReceipt,
   type ScanReach,
   type ScanReachBaseline,
   scanReachChildArgs,
@@ -41,6 +42,46 @@ const baselineOf = (scans: Record<string, ScanReach>): ScanReachBaseline => ({
 })
 
 describe("scan-reach CLI decision", () => {
+  test("exact-HEAD clean shard receipt replaces the dedicated child", () => {
+    const observed = observedFromReceipt(
+      {
+        schema: "quanta.scan-reach-receipt.v1",
+        head: "abc",
+        suite: "unit",
+        manifestSha256: "a".repeat(64),
+        childExit: 0,
+        records: [
+          { id: "f#one", walked: 10 },
+          { id: "f#one", walked: 8 },
+        ],
+      },
+      { head: "abc", status: "" },
+    )
+    expect(observed?.get("f#one")).toEqual({ walked: 8 })
+  })
+
+  test("stale, dirty, malformed, or failed shard receipts are never consumed", () => {
+    const base = {
+      schema: "quanta.scan-reach-receipt.v1" as const,
+      head: "abc",
+      suite: "unit" as const,
+      manifestSha256: "a".repeat(64),
+      childExit: 0 as const,
+      records: [{ id: "f#one", walked: 10 }],
+    }
+    expect(observedFromReceipt(base, { head: "different", status: "" })).toBeUndefined()
+    expect(observedFromReceipt(base, { head: "abc", status: " M changed.ts" })).toBeUndefined()
+    expect(
+      observedFromReceipt({ ...base, manifestSha256: "short" }, { head: "abc", status: "" }),
+    ).toBeUndefined()
+    expect(
+      observedFromReceipt(
+        { ...base, records: [{ id: "f#one", walked: -1 }] },
+        { head: "abc", status: "" },
+      ),
+    ).toBeUndefined()
+  })
+
   test("harvest runs in one isolated worker — parallel test state cannot erase an observed scan", () => {
     expect(scanReachChildArgs(["one.test.ts", "two.test.ts"])).toEqual([
       "bun",

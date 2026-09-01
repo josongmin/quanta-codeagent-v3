@@ -32,17 +32,19 @@ describe("full-suite repository lease", () => {
   test("a contender waits and acquires only after the current owner releases", async () => {
     const identity = `lease-self-test-${process.pid}-${Date.now()}`
     const first = await acquireTestShardLease({ identity, waitMs: 500, pollMs: 5 })
-    let waiting = false
+    let heartbeats = 0
     const secondPending = acquireTestShardLease({
       identity,
       waitMs: 500,
       pollMs: 5,
-      onWait: () => {
-        waiting = true
+      heartbeatMs: 10,
+      onWait: (_port, elapsedMs) => {
+        expect(elapsedMs).toBeGreaterThanOrEqual(0)
+        heartbeats += 1
       },
     })
-    await Bun.sleep(20)
-    expect(waiting).toBe(true)
+    await Bun.sleep(30)
+    expect(heartbeats).toBeGreaterThanOrEqual(2)
     first.release()
     const second = await secondPending
     expect(second.port).toBe(first.port)

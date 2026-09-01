@@ -11,7 +11,8 @@ export interface TestShardLeaseOptions {
   readonly identity: string
   readonly waitMs?: number
   readonly pollMs?: number
-  readonly onWait?: (port: number) => void
+  readonly heartbeatMs?: number
+  readonly onWait?: (port: number, elapsedMs: number) => void
 }
 
 export interface RepositoryIdentityInputs {
@@ -64,8 +65,10 @@ export const acquireTestShardLease = async (
   const port = testShardLeasePort(normalizeRepositoryIdentity(options.identity))
   const waitMs = options.waitMs ?? 90 * 60_000
   const pollMs = options.pollMs ?? 1_000
+  const heartbeatMs = options.heartbeatMs ?? 30_000
+  const startedAt = Date.now()
   const deadline = Date.now() + waitMs
-  let announced = false
+  let nextHeartbeatAt = 0
 
   while (true) {
     const listener = tryListen(port)
@@ -80,9 +83,10 @@ export const acquireTestShardLease = async (
         },
       }
     }
-    if (!announced) {
-      announced = true
-      options.onWait?.(port)
+    const elapsedMs = Date.now() - startedAt
+    if (elapsedMs >= nextHeartbeatAt) {
+      options.onWait?.(port, elapsedMs)
+      nextHeartbeatAt = elapsedMs + heartbeatMs
     }
     if (Date.now() >= deadline) {
       throw new Error(`[test:shards] repository lease timed out on ${LEASE_HOST}:${port}`)

@@ -10,12 +10,14 @@
  * survived a full `bun test tests/unit/` pass plus a `typecheck:all` pass.
  *
  * This wraps the SHIPPED script — spawning it, not reimplementing its counting —
- * so it can never drift from what `bun run lint:debt` reports. A
- * reimplementation would be a second authority, which is the failure mode the
- * ratchet itself exists to prevent.
+ * so it can never drift from what `bun run lint:debt` reports. After `bun run
+ * lint`, the script consumes that command's exact-input, integrity-sealed JSON
+ * diagnostics; in a standalone test run it performs its original full Biome
+ * scan. A reimplementation would be a second authority, which is the failure
+ * mode the ratchet itself exists to prevent.
  *
- * WHY tests/integration AND NOT tests/unit. It shells out to biome across
- * ~7,200 files: measured 9,297ms on an idle machine and 20,868ms under load,
+ * WHY tests/integration AND NOT tests/unit. Its standalone fallback shells out
+ * to biome across ~7,200 files: measured 9,297ms on an idle machine and 20,868ms under load,
  * against a per-test unit budget of 8,529ms (`tools/dev/unit-speed-budget.json`)
  * that may only ever go DOWN. That budget's own error text names the remedy —
  * "Move it to tests/integration or fake the slow dependency" — and faking is

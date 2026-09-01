@@ -32,6 +32,7 @@ import {
   parseUntrackedFiles,
   runCheckChanged,
 } from "./check-changed"
+import { createFeatureEvidenceSnapshot, type FeatureEvidenceSnapshot } from "./evidence-snapshot"
 import { loadFcBaseline, runLint, saveFcBaseline, snapshotBaseline } from "./lint"
 import { computeReachability, computeSymbolReachability } from "./reachability"
 import { loadBaseline, loadProse, renderCatalog } from "./render"
@@ -150,28 +151,44 @@ async function cmdBuild(): Promise<void> {
   console.log(`wrote ${OUTPUT_MD} (${md.length} bytes, ${features.length} features)`)
 }
 
-async function collectFeatureEvidenceErrors(feature: Feature, path: string): Promise<string[]> {
+async function collectFeatureEvidenceErrors(
+  feature: Feature,
+  path: string,
+  snapshot: FeatureEvidenceSnapshot,
+): Promise<string[]> {
   const errors: string[] = []
   for (const code of feature.evidence.code) {
-    if (!(await pathExists(code))) {
+    if (!(await snapshot.pathExists(code))) {
       errors.push(`${rel(path)}: missing evidence.code "${code}"`)
     }
   }
   for (const adr of feature.evidence.adrs) {
     if (typeof adr === "string" && adr.includes("/")) {
-      if (!(await pathExists(adr))) {
+      if (!(await snapshot.pathExists(adr))) {
         errors.push(`${rel(path)}: missing ADR path "${adr}"`)
       }
       continue
     }
     const padded = String(adr).padStart(4, "0")
-    if (!(await adrExists(padded))) {
+    if (!(await snapshot.adrExists(padded))) {
       errors.push(`${rel(path)}: missing ADR-${adr} (docs/decisions/${padded}-*.md)`)
     }
   }
-  await collectMissingTests(feature.evidence.tests.unit, "unit test", path, errors)
-  await collectMissingTests(feature.evidence.tests.integration, "integration test", path, errors)
-  await collectMissingTests(feature.evidence.tests.contract, "contract test", path, errors)
+  await collectMissingTests(feature.evidence.tests.unit, "unit test", path, errors, snapshot)
+  await collectMissingTests(
+    feature.evidence.tests.integration,
+    "integration test",
+    path,
+    errors,
+    snapshot,
+  )
+  await collectMissingTests(
+    feature.evidence.tests.contract,
+    "contract test",
+    path,
+    errors,
+    snapshot,
+  )
   return errors
 }
 
@@ -180,9 +197,10 @@ async function collectMissingTests(
   label: string,
   path: string,
   out: string[],
+  snapshot: FeatureEvidenceSnapshot,
 ): Promise<void> {
   for (const t of tests) {
-    if (!(await pathExists(t))) out.push(`${rel(path)}: missing ${label} "${t}"`)
+    if (!(await snapshot.pathExists(t))) out.push(`${rel(path)}: missing ${label} "${t}"`)
   }
 }
 
@@ -195,10 +213,16 @@ async function cmdValidate(argv: string[] = []): Promise<void> {
     }
   }
   const features = await loadFeaturesStrict(FEATURES_DIR)
-  const errors: string[] = []
-  for (const { feature, path } of features) {
-    errors.push(...(await collectFeatureEvidenceErrors(feature, path)))
-  }
+  const evidenceSnapshot = createFeatureEvidenceSnapshot(ROOT)
+  // Evidence paths recur across the catalog. Probe each exact ROOT+path once,
+  // concurrently, while Promise.all preserves feature order for diagnostics.
+  const errors = (
+    await Promise.all(
+      features.map(({ feature, path }) =>
+        collectFeatureEvidenceErrors(feature, path, evidenceSnapshot),
+      ),
+    )
+  ).flat()
   // Structural invariants (advisory by default; promoted to errors via --strict).
   const invariantViolations = validateInvariants(features)
   const invariantLines = invariantViolations.map(
@@ -885,31 +909,6 @@ async function pathExists(p: string): Promise<boolean> {
   } catch {
     return false
   }
-}
-
-async function adrExists(padded: string): Promise<boolean> {
-  // docs/decisions/NNNN-*.md — check by listing.
-  //
-  // Two defects lived here at once. The directory was cwd-relative, so from any
-  // working directory but the repo root the listing failed; and the `catch`
-  // returned `false`, which reports "could not read the decisions directory" as
-  // "that ADR does not exist". Together they turned every evidence reference into
-  // a missing-ADR error — 726 of them — while the repo was untouched.
-  //
-  // Anchored on ROOT, and an unreadable decisions directory now THROWS: a
-  // catalogue check that cannot reach the decisions has no verdict to give.
-  const dir = resolve(ROOT, "docs/decisions")
-  let entries: string[]
-  try {
-    const { readdir } = await import("node:fs/promises")
-    entries = await readdir(dir)
-  } catch (err) {
-    throw new Error(
-      `feature catalog: cannot read ${dir} — an unreachable decisions directory is ` +
-        `not an absent ADR. (${err instanceof Error ? err.message : String(err)})`,
-    )
-  }
-  return entries.some((e) => e.startsWith(`${padded}-`) && e.endsWith(".md"))
 }
 
 function rel(p: string): string {

@@ -23,6 +23,9 @@ const mainSource = shardRunner.slice(
   shardRunner.indexOf("const main ="),
   shardRunner.indexOf("await main()"),
 )
+const planSource = await Bun.file(
+  join(import.meta.dir, "..", "..", "tools", "dev", "test-shard-plan.ts"),
+).text()
 
 const usesNativeShardSpool = (source: string): boolean =>
   (source.match(/Bun\.spawn\s*\(/g) ?? []).length === 1 &&
@@ -32,7 +35,7 @@ const usesNativeShardSpool = (source: string): boolean =>
 
 const wiresRepositoryLease = (source: string): boolean =>
   (source.match(/acquireTestShardLease\s*\(/g) ?? []).length === 1 &&
-  /finally\s*\{\s*lease\.release\s*\(\s*\)/.test(source)
+  /finally\s*\{[\s\S]*?lease\.release\s*\(\s*\)/.test(source)
 
 describe("test:ci admission gate", () => {
   test("uses the live feature-catalog changed-file authority", () => {
@@ -72,6 +75,13 @@ describe("test:ci admission gate", () => {
     }
   })
 
+  test("validates the shard reach receipt without repeating contract cleanup", () => {
+    const script = packageJson.scripts?.["test:ci"] ?? ""
+    expect(script).toContain("run-test-shards.ts --suite=full --parallel=1 && bun run scan-reach")
+    expect(script).toContain("bun test tests/contract --parallel=1")
+    expect(script).not.toContain("bun run test:contract")
+  })
+
   test("the authoritative full-suite runner bounds a wedged shard worker", () => {
     expect(packageJson.scripts?.test).toContain("tools/dev/run-test-shards.ts")
     expect(shardRunner).toContain("const SHARD_COUNT = 8")
@@ -79,10 +89,25 @@ describe("test:ci admission gate", () => {
     expect(shardRunner).toContain("lastProgressAt = Date.now()")
     expect(shardRunner).toContain("idle=$" + "{idleMs}ms")
     expect(shardRunner).toContain("proc.kill(9)")
-    expect(shardRunner).toContain("assertShardCoverage(discoveries, SHARD_COUNT)")
+    expect(shardRunner).toContain("expandTestFiles(")
+    expect(shardRunner).toContain("createTestShardPlan(manifest, SHARD_COUNT)")
+    expect(shardRunner).toContain("result.executedFiles === plan.files.length")
+    expect(shardRunner).toContain("aborting remaining shards")
+    expect(shardRunner).not.toContain(["--shard=", "{shard}"].join("$"))
     expect(shardRunner).toContain("checkout changed during run")
+    expect(shardRunner).toContain("checkout changed after shard")
     expect(shardRunner).toContain("require a clean checkout")
     expect(shardRunner).toContain("--junit-out")
+    expect(shardRunner).toContain("QUANTA_SCAN_REACH_RECORD: scanReachSink")
+    expect(shardRunner).toContain("HOME: workerHome")
+    expect(shardRunner).toContain("QUANTA_HOME: quantaHome")
+    expect(shardRunner).toContain("QUANTA_CONFIG_DIR: quantaHome")
+    expect(shardRunner).toContain("QUANTA_PREFS_HOME: prefsHome")
+    expect(shardRunner).toContain("QUANTA_BENCH_HOME: benchHome")
+    expect(shardRunner).toContain("writeScanReachReceipt(")
+    expect(planSource).toContain("chooseShardConcurrency")
+    expect(planSource).toContain("TWO_WORKER_MIN_AVAILABLE_BYTES")
+    expect(planSource).toContain("proportionalExclusive")
   })
 
   test("the full-suite worker writes natively instead of relaying output through JS", () => {

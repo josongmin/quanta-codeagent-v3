@@ -63,6 +63,7 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
+import { loadFreshBiomeReceipt } from "./biome-diagnostics-receipt"
 import { collectBiomeTargets } from "./biome-targets"
 
 const COMPLEXITY_RULE = "lint/complexity/noExcessiveCognitiveComplexity"
@@ -355,7 +356,11 @@ if (import.meta.main) {
     process.exit(1)
   }
 
-  const diagnostics = runBiome(targets)
+  const receipt = loadFreshBiomeReceipt({ repoRoot, targets })
+  const diagnostics = receipt === null ? runBiome(targets) : receipt.diagnostics
+  if (receipt !== null) {
+    console.log(`lint-debt: reused exact-input biome receipt ${receipt.receiptSha256.slice(0, 12)}`)
+  }
   const counts = new Map<string, number>()
   const worstBySite = new Map<string, number>()
   let worstComplexity = 0
