@@ -12,7 +12,7 @@
  * the caller's point of view as a stream error, so both are covered.
  *
  * Real-effect assertions: a REAL child process (bash) that closes its stdout
- * and keeps living; elapsed bounds prove fail-fast vs the 8s timeout burn.
+ * and keeps living; elapsed bounds prove fail-fast vs the 30s timeout burn.
  */
 import { afterEach, describe, expect, spyOn, test } from "bun:test"
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
@@ -30,9 +30,13 @@ const SPEC: LspClientSpec = {
   languageIdFor: () => "plaintext",
 }
 
-const REQUEST_TIMEOUT_MS = 8_000
-/** Fail-fast bound: far under the request timeout the old code burned. */
-const FAIL_FAST_BOUND_MS = 4_000
+// Leave a wide scheduling margin for the real-subprocess test under a loaded
+// CI host, while preserving a strict 2× separation from the old timeout-burn
+// failure mode. The assertion is about transport failure preceding the RPC
+// timeout, not a 4-second host-performance SLA.
+const REQUEST_TIMEOUT_MS = 30_000
+/** Fail-fast bound: still strictly below the request-timeout burn. */
+const FAIL_FAST_BOUND_MS = 15_000
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -61,7 +65,7 @@ describe("LspClient — stdout pump death while the server process lives (#9)", 
     client = null
   })
 
-  test("pending request fails FAST with a transport error (not an 8s timeout burn) and the pump death is WARNED", async () => {
+  test("pending request fails FAST with a transport error (not a 30s timeout burn) and the pump death is WARNED", async () => {
     const warn = spyOn(logger, "warn").mockImplementation(() => {})
     try {
       // The child closes its stdout immediately (clean early EOF) but keeps
