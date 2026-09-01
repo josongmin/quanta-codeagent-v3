@@ -11,7 +11,11 @@ import {
 import { availableParallelism, freemem, loadavg, tmpdir, totalmem } from "node:os"
 import { join, relative, resolve } from "node:path"
 import { expandTestFiles } from "./sandboxed-test"
-import { acquireTestShardLease, selectRepositoryLeaseIdentity } from "./test-shard-lease"
+import {
+  acquireTestShardLease,
+  readCommittedRepositoryLeaseId,
+  selectRepositoryLeaseIdentity,
+} from "./test-shard-lease"
 import {
   chooseShardConcurrency,
   chooseShardTestTimeoutMs,
@@ -261,6 +265,12 @@ const runShard = async (
         ...plan.files,
         `--timeout=${testTimeoutMs}`,
         "--parallel=1",
+        // A failed real-browser/LSP setup often poisons the remaining tests in
+        // that file and turns one actionable failure into minutes of derivative
+        // timeouts. The shard verdict is already red after the first failure;
+        // stop the Bun child immediately instead of spending time on evidence
+        // that cannot change the verdict.
+        "--bail=1",
         ...junitArgs,
       ],
       cwd: REPO_ROOT,
@@ -395,7 +405,12 @@ const main = async (): Promise<void> => {
     capture(["git", "remote", "get-url", "origin"]),
     capture(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"]),
   ])
-  const identity = selectRepositoryLeaseIdentity({ remote, commonDir, cwd: process.cwd() })
+  const identity = selectRepositoryLeaseIdentity({
+    repositoryId: readCommittedRepositoryLeaseId(REPO_ROOT),
+    remote,
+    commonDir,
+    cwd: process.cwd(),
+  })
   const lease = await acquireTestShardLease({
     identity,
     onWait: (port, elapsedMs) =>

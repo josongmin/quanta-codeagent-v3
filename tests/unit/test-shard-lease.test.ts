@@ -1,12 +1,37 @@
 import { describe, expect, test } from "bun:test"
+import { join } from "node:path"
 import {
   acquireTestShardLease,
   normalizeRepositoryIdentity,
+  readCommittedRepositoryLeaseId,
   selectRepositoryLeaseIdentity,
   testShardLeasePort,
 } from "../../tools/dev/test-shard-lease"
 
 describe("full-suite repository lease", () => {
+  test("committed identity survives remote aliases, copies, and worktree paths", () => {
+    const repositoryId = readCommittedRepositoryLeaseId(join(import.meta.dir, "..", ".."))
+    expect(repositoryId).toBe("quanta-codeagent-v3")
+    const left = selectRepositoryLeaseIdentity({
+      repositoryId,
+      remote: { code: 0, text: "https://example.invalid/left.git" },
+      commonDir: { code: 0, text: "/tmp/left/.git" },
+      cwd: "/tmp/left",
+    })
+    const right = selectRepositoryLeaseIdentity({
+      repositoryId,
+      remote: { code: 1, text: "missing" },
+      commonDir: { code: 0, text: "/tmp/right/.git" },
+      cwd: "/tmp/right",
+    })
+    expect(left).toBe("repository-id:quanta-codeagent-v3")
+    expect(right).toBe(left)
+    // Cross-version compatibility: existing verification campaigns already
+    // hold this kernel-owned port. Changing the identity/hash silently would
+    // allow two worktrees to run destructive/shared-resource tests together.
+    expect(testShardLeasePort(left)).toBe(42_523)
+  })
+
   test("SSH aliases and HTTPS remotes resolve to one repository identity and port", () => {
     const ssh = normalizeRepositoryIdentity("git@github-personal:josongmin/quanta-codeagent-v3.git")
     const https = normalizeRepositoryIdentity(

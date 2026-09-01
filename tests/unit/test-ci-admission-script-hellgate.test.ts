@@ -33,6 +33,11 @@ const usesNativeShardSpool = (source: string): boolean =>
   /stderr:\s*spoolFd/.test(source) &&
   /readFileSync\s*\(\s*spoolPath/.test(source)
 
+const workerBailsAfterFirstFailure = (source: string): boolean =>
+  (source.match(/Bun\.spawn\s*\(/g) ?? []).length === 1 &&
+  (source.match(/["']--bail=1["']/g) ?? []).length === 1 &&
+  /cmd:\s*\[[\s\S]*?["']bun["']\s*,\s*["']test["'][\s\S]*?["']--bail=1["']/.test(source)
+
 const wiresRepositoryLease = (source: string): boolean =>
   (source.match(/acquireTestShardLease\s*\(/g) ?? []).length === 1 &&
   /finally\s*\{[\s\S]*?lease\.release\s*\(\s*\)/.test(source)
@@ -123,6 +128,16 @@ describe("test:ci admission gate", () => {
     // make this guard fail even if the spool variables and comments remain.
     const piped = runShardSource.replace("stdout: spoolFd", 'stdout: "pipe"')
     expect(usesNativeShardSpool(piped)).toBe(false)
+  })
+
+  test("the shard child stops after its first failure", () => {
+    expect(runShardSource.match(/Bun\.spawn\s*\(/g)).toHaveLength(1)
+    expect(workerBailsAfterFirstFailure(runShardSource)).toBe(true)
+
+    // Red-on-injection: a comment mentioning bail cannot preserve the guard if
+    // the executable child argument is removed.
+    const withoutBail = runShardSource.replace('"--bail=1",', "")
+    expect(workerBailsAfterFirstFailure(withoutBail)).toBe(false)
   })
 
   test("the full-suite runner serializes the repository lane across worktrees", () => {

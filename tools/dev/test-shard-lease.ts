@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
+
 const LEASE_HOST = "127.0.0.1"
 const LEASE_PORT_BASE = 42_000
 const LEASE_PORT_SPAN = 6_000
@@ -16,9 +19,23 @@ export interface TestShardLeaseOptions {
 }
 
 export interface RepositoryIdentityInputs {
+  readonly repositoryId?: string | undefined
   readonly remote: { readonly code: number; readonly text: string }
   readonly commonDir: { readonly code: number; readonly text: string }
   readonly cwd: string
+}
+
+const REPOSITORY_ID_FILE = ".quanta-verification-id"
+const REPOSITORY_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{2,127}$/
+
+/** A committed identity follows worktrees, local copies, and remote aliases. */
+export const readCommittedRepositoryLeaseId = (repoRoot: string): string | undefined => {
+  try {
+    const value = readFileSync(join(repoRoot, REPOSITORY_ID_FILE), "utf8").trim()
+    return REPOSITORY_ID_PATTERN.test(value) ? value : undefined
+  } catch {
+    return undefined
+  }
 }
 
 /** Normalize SSH aliases and HTTPS remotes to the same owner/repository key. */
@@ -29,6 +46,7 @@ export const normalizeRepositoryIdentity = (remote: string): string => {
 }
 
 export const selectRepositoryLeaseIdentity = (inputs: RepositoryIdentityInputs): string => {
+  if (inputs.repositoryId !== undefined) return `repository-id:${inputs.repositoryId}`
   if (inputs.remote.code === 0) return inputs.remote.text.trim()
   if (inputs.commonDir.code === 0) return `git-common:${inputs.commonDir.text.trim()}`
   return inputs.cwd
