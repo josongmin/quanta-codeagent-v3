@@ -125,7 +125,15 @@ const childEnv = (extra: Record<string, string>): Record<string, string> => {
   delete base.ANTHROPIC_API_KEY
   delete base.OPENAI_API_KEY
   delete base.QUANTA_PROVIDER
-  return { ...base, ...extra }
+  // Replay still crosses the real provider bootstrap, which requires a
+  // non-empty credential before the cassette adapter takes over. Use an
+  // intentionally invalid test credential: if replay wiring regresses, the
+  // child fails authentication instead of reaching a paid API with a real key.
+  const replayBootstrap =
+    extra.QUANTA_LLM_REPLAY === undefined
+      ? {}
+      : { QUANTA_PROVIDER: "openai", OPENAI_API_KEY: "test-key" }
+  return { ...base, ...replayBootstrap, ...extra }
 }
 
 const tempDirs: string[] = []

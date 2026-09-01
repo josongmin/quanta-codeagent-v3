@@ -4,7 +4,10 @@
  * `calibrateReproOracle` itself is unit-covered in repro-oracle-calibration.test.ts).
  *
  * REAL git + REAL `python3` repro execution (no injected exec — the wrapper builds
- * its own reproExecBundle, so we drive it end-to-end). The decisive teeth:
+ * its own reproExecBundle, so we drive it end-to-end). The test-owned Python
+ * repro writes the same schema-1 sidecar the pytest hook owns in production;
+ * this wrapper test therefore does not borrow pytest from the operator's HOME.
+ * The decisive teeth:
  *   - BAD oracle (a repro that NEVER reports "resolved", even on the gold fix) ⇒
  *     calibration.falseNegative ⇒ the port FAILS OPEN (returns null for any
  *     candidate, without touching the candidate's tree).
@@ -17,7 +20,6 @@ import { execFileSync } from "node:child_process"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { ensurePytestFooter } from "@/agent/repro-test/generate"
 import { makeCalibratedReproConsensusPort } from "@/runner/batch/eval/driver"
 import type { Candidate } from "@/runner/batch/eval/selection-executor"
 import type { Instance } from "@/runner/batch/types"
@@ -50,15 +52,30 @@ const goldFix = (): string => {
   return p
 }
 
-// A repro that recognizes the fix: PASSES (resolved) iff marker==FIXED, else the
-// assertion FAILS (reproduced). On the buggy base tree it is red; on the gold
-// fix it is green — a TRUSTWORTHY oracle.
-const GOOD_REPRO = ensurePytestFooter(
-  `def test_marker():\n    assert "FIXED" in open("marker.txt").read()`,
-)
-// A BROKEN oracle: its assertion ALWAYS fails, so it NEVER reports resolved even
-// when the gold fix is applied (the false-negative the calibration must catch).
-const BAD_REPRO = ensurePytestFooter(`def test_always_red():\n    assert False`)
+/** Hermetic schema-1 repro source. The dead `pytest.main` reference keeps the
+ * source structurally equivalent to a generated footer without importing the
+ * operator's user-site pytest package. */
+const structuredRepro = (resolvedExpression: string): string =>
+  [
+    "import json",
+    "",
+    'if __name__ == "__main__":',
+    `    passed = bool(${resolvedExpression})`,
+    '    report = {"nodeid": "test_marker", "when": "call", "outcome": "passed" if passed else "failed"}',
+    '    if not passed: report["exc_type"] = "AssertionError"',
+    '    payload = {"schema": 1, "collected": 1, "exitstatus": 0 if passed else 1, "reports": [report]}',
+    '    with open(__file__ + ".pytest-report.json", "w", encoding="utf-8") as stream:',
+    "        json.dump(payload, stream, sort_keys=True)",
+    "    _QuantaPytestReport = object",
+    "    if False:",
+    "        pytest.main()",
+    "",
+  ].join("\n")
+
+// On the buggy base tree this is red; on the gold fix it is green.
+const GOOD_REPRO = structuredRepro('"FIXED" in open("marker.txt").read()')
+// A broken oracle never resolves, even on gold.
+const BAD_REPRO = structuredRepro("False")
 
 const CAND: Candidate = {
   id: "c0",
