@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test"
 import { execFileSync } from "node:child_process"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import {
@@ -265,13 +265,27 @@ describe("probeUndefinedNameDiff (differential F821)", () => {
       { "pkg/m.py": "x = 1\n" },
       { "pkg/m.py": "def f():\n    return missing_helper\n" },
     )
-    const reasons = await probeUndefinedNameDiff({
-      cwd,
-      files: ["pkg/m.py"],
-      // A 0ms timeout kills the python invocation ⇒ result code !== 0 ⇒ null.
-      timeoutMs: 0,
-    })
-    expect(reasons).toBeNull()
+    const gitPath = Bun.which("git")
+    if (gitPath === null) throw new Error("git is required by this fixture")
+    const bin = mkdtempSync(join(tmpdir(), "patch-static-sanity-bin-"))
+    tempDirs.push(bin)
+    symlinkSync(gitPath, join(bin, "git"))
+    const savedPath = process.env.PATH
+    try {
+      // Keep git available for the before-image gate while making python3
+      // deterministically unavailable. A zero-ms timer races a fast child and
+      // intermittently lets the backend finish under full-suite contention.
+      process.env.PATH = bin
+      const reasons = await probeUndefinedNameDiff({
+        cwd,
+        files: ["pkg/m.py"],
+        timeoutMs: 5_000,
+      })
+      expect(reasons).toBeNull()
+    } finally {
+      if (savedPath === undefined) delete process.env.PATH
+      else process.env.PATH = savedPath
+    }
   })
 
   it("integrates into probePatchStaticSanity (third probe adds undefined-name veto on top of base probes)", async () => {
