@@ -2,7 +2,7 @@
  * CDP adapter — multi-tab (TICKET-24 Wave B).
  *
  * One CdpSession multiplexes every tab: `Target.*` calls are BROWSER-level
- * (`sessionId: null`) and page calls route to the active tab via `useSessionId`.
+ * (`sessionId: null`) and page calls route to the active tab via `setActiveSessionId`.
  * Each tab owns its refMap, so a ref minted on tab A fails closed while tab B
  * is active.
  */
@@ -82,7 +82,7 @@ export const tabOps = (
   return {
     // ── TICKET-24 Wave B — multi-tab. The single CdpSession multiplexes: every
     //    Target.* call is BROWSER-LEVEL (sessionId:null), page calls route to the
-    //    active tab (useSessionId). Each tab owns its refMap (ref isolation).
+    //    active tab (setActiveSessionId). Each tab owns its refMap (ref isolation).
     async newTab(h: BrowserHandle, url?: string, signal?: AbortSignal) {
       return newTabImpl(ctx, h, url, signal)
     },
@@ -98,12 +98,12 @@ export const tabOps = (
       if (tab === null) {
         return err({ kind: "tab-not-found", id: idOrIndex, open: [...s.value.tabs.keys()] })
       }
-      // The CORRECTNESS-bearing mutation is useSessionId: it repoints every
+      // The CORRECTNESS-bearing mutation is setActiveSessionId: it repoints every
       // subsequent page request at this tab, and activeTabId repoints ref
       // resolution at its OWN refMap (a prior-tab ref now fails closed). Both
       // happen here, unconditionally.
       s.value.activeTabId = tab.targetId
-      s.value.session.useSessionId(tab.sessionId)
+      s.value.session.setActiveSessionId(tab.sessionId)
       // Target.activateTarget is COSMETIC (z-order foreground) — and a no-op
       // under --headless=new. Intentionally best-effort + result UNCHECKED: a
       // failure must NOT undo the routing switch above (which already succeeded),
@@ -145,7 +145,7 @@ export const tabOps = (
         const next = s.value.tabs.values().next().value
         if (next !== undefined) {
           s.value.activeTabId = next.targetId
-          s.value.session.useSessionId(next.sessionId)
+          s.value.session.setActiveSessionId(next.sessionId)
         }
       }
       return ok(undefined)

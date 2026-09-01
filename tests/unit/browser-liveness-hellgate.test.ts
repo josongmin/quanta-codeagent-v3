@@ -66,7 +66,7 @@ describe("HELLGATE liveness — cdp-session death observability", () => {
   test("Inspector.detached on our session ⇒ markDead", async () => {
     const f = fakeConn()
     const s = createCdpSession({ conn: f.conn, scheduler: idleScheduler })
-    s.useSessionId("sess-1")
+    s.setActiveSessionId("sess-1")
     let dead = false
     s.onDead(() => {
       dead = true
@@ -86,7 +86,7 @@ describe("HELLGATE liveness — cdp-session death observability", () => {
   test("Inspector.detached for a DIFFERENT session is ignored", async () => {
     const f = fakeConn()
     const s = createCdpSession({ conn: f.conn, scheduler: idleScheduler })
-    s.useSessionId("sess-1")
+    s.setActiveSessionId("sess-1")
     let dead = false
     s.onDead(() => {
       dead = true

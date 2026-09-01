@@ -74,7 +74,7 @@ rmSync(probeRoot, { recursive: true, force: true })
 // ── adapter-usable probe (REAL spawn gate) ───────────────────────────────────
 // Chrome being PRESENT is not the same as the adapter bringing a session up.
 // The cdp-adapter flat-session bring-up (Target.createTarget +
-// Target.attachToTarget{flatten:true} + useSessionId + Page.enable) was fixed,
+// Target.attachToTarget{flatten:true} + setActiveSessionId + Page.enable) was fixed,
 // so real headless Chrome now spawns. We still gate on a REAL `spawn()` probe so
 // the file is green on machines where chrome genuinely cannot come up.
 const spawnProbe = async (): Promise<{ usable: boolean; detail: string }> => {

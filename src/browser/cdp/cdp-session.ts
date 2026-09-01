@@ -22,7 +22,7 @@ export interface CdpRequestOpts {
    *  that page session (a specific tab). `null` ⇒ send BROWSER-LEVEL (no
    *  sessionId — for `Target.*` domain calls issued AFTER a page session is
    *  active, e.g. opening/closing a second tab). Omitted ⇒ the active
-   *  {@link CdpSession.useSessionId} page session (back-compat: every existing
+   *  {@link CdpSession.setActiveSessionId} page session (back-compat: every existing
    *  caller omits it, so its envelope is byte-identical). */
   readonly sessionId?: string | null
 }
@@ -48,7 +48,7 @@ export interface CdpSession {
    *  this `sessionId` so the Page / Runtime / Input domains route to the
    *  attached page target rather than the browser-level connection.
    *  Browser-level calls (the Target domain) must be made BEFORE this is set. */
-  useSessionId(sessionId: string): void
+  setActiveSessionId(sessionId: string): void
   /** Register a callback fired ONCE when the session dies (page target
    *  detach/crash, or transport close). Lets the adapter mark its SessionState
    *  closed so the holder can re-spawn (R3 audit [7]). */
@@ -352,7 +352,7 @@ const requestOps = (ctx: SessionCtx): Pick<CdpSession, "request" | "waitForEvent
 /** Subscriptions, session routing, and teardown. */
 const subscriptionOps = (
   ctx: SessionCtx,
-): Pick<CdpSession, "onEvent" | "onDead" | "useSessionId" | "dispose"> => {
+): Pick<CdpSession, "onEvent" | "onDead" | "setActiveSessionId" | "dispose"> => {
   const { deps, pending, eventWaiters, eventSubs, deadCbs, mut } = ctx
   return {
     onEvent(method: string, cb: (params: Readonly<Record<string, unknown>>) => void): () => void {
@@ -376,7 +376,7 @@ const subscriptionOps = (
       else deadCbs.push(cb)
     },
 
-    useSessionId(sessionId: string): void {
+    setActiveSessionId(sessionId: string): void {
       mut.pageSessionId = sessionId
     },
 

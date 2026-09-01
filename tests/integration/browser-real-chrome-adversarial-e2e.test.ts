@@ -5,7 +5,7 @@
  * This drives the PRODUCTION `createCdpBrowser` port against a REAL system
  * Chrome, navigating to a local fixture server that serves attacker pages and
  * a `/report` sink. The flat-session spawn path is now fixed (the adapter does
- * Target.createTarget + attachToTarget{flatten} + useSessionId before
+ * Target.createTarget + attachToTarget{flatten} + setActiveSessionId before
  * Page.enable), so a real headless Chrome spawns and the Page domain works.
  *
  * READ-BACK DISCIPLINE — why we do NOT use port.cdp("Runtime.evaluate"):
