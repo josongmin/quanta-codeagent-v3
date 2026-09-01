@@ -38,6 +38,21 @@ const collect = async (it: AsyncIterable<StreamEvent>): Promise<StreamEvent[]> =
   return out
 }
 
+/** Abort only after production has attached its abort listener. This proves the
+ * default sleep is abort-aware without a wall-clock race against a loaded test
+ * shard: a plain timer never attaches the listener and therefore times out. */
+const abortWhenObserved = (controller: AbortController): void => {
+  const signal = controller.signal
+  const addEventListener = signal.addEventListener.bind(signal)
+  Object.defineProperty(signal, "addEventListener", {
+    configurable: true,
+    value: (...args: Parameters<typeof signal.addEventListener>): void => {
+      addEventListener(...args)
+      if (args[0] === "abort") queueMicrotask(() => controller.abort())
+    },
+  })
+}
+
 describe("isRetryable classification", () => {
   test("retryable: 429/5xx/timeout/ECONNRESET/overloaded/rate", () => {
     for (const m of [
@@ -142,27 +157,34 @@ describe("RetryingLLM", () => {
   // setTimeout that ignored the abort signal, so Esc/Ctrl+C during a real
   // 429 backoff hung up to 60s on the main LLM hot path. These two tests
   // construct RetryingLLM WITHOUT a sleep injection so the default backoff
-  // timer itself is on trial, and bound the wall-clock wake-up latency.
-  test("abort mid-DEFAULT-backoff (no injected sleep) → wakes promptly, typed aborted, no next attempt", async () => {
-    const inner = new ScriptedLLM([{ kind: "throw", error: transient() }])
-    const ac = new AbortController()
-    // random()=>1 pins full jitter to its upper bound: delay = baseDelayMs = 3s.
-    const r = new RetryingLLM({ inner, signal: ac.signal, baseDelayMs: 3_000, random: () => 1 })
-    const startedAt = Date.now()
-    setTimeout(() => ac.abort(), 25)
-    const err = await collect(r.stream({ messages: [], tools: [] })).then(
-      () => null,
-      (e: unknown) => e,
-    )
-    const elapsedMs = Date.now() - startedAt
-    // Established abort semantics of the loop: typed LLMError kind "aborted".
-    expect(err).toBeInstanceOf(LLMError)
-    expect((err as LLMError).kind).toBe("aborted")
-    // Woke up on the abort, not the 3s timer.
-    expect(elapsedMs).toBeLessThan(1_000)
-    // Did NOT proceed to the next attempt after abort.
-    expect(inner.calls).toBe(1)
-  })
+  // timer itself is on trial. The abort is armed by listener attachment rather
+  // than a competing 25ms wall timer, so host CPU pressure cannot make it flaky.
+  test(
+    "abort mid-DEFAULT-backoff (no injected sleep) → wakes promptly, typed aborted, no next attempt",
+    async () => {
+      const inner = new ScriptedLLM([{ kind: "throw", error: transient() }])
+      const ac = new AbortController()
+      abortWhenObserved(ac)
+      // If production regresses to a plain timer, no listener is attached and
+      // this 10s backoff exceeds the test timeout below.
+      const r = new RetryingLLM({
+        inner,
+        signal: ac.signal,
+        baseDelayMs: 10_000,
+        random: () => 1,
+      })
+      const err = await collect(r.stream({ messages: [], tools: [] })).then(
+        () => null,
+        (e: unknown) => e,
+      )
+      // Established abort semantics of the loop: typed LLMError kind "aborted".
+      expect(err).toBeInstanceOf(LLMError)
+      expect((err as LLMError).kind).toBe("aborted")
+      // Did NOT proceed to the next attempt after abort.
+      expect(inner.calls).toBe(1)
+    },
+    { timeout: 2_500 },
+  )
 
   test(
     "abort during a server-instructed 60s retry-after delay (DEFAULT sleep) → no hang",
@@ -175,7 +197,7 @@ describe("RetryingLLM", () => {
       ])
       const ac = new AbortController()
       const r = new RetryingLLM({ inner, signal: ac.signal, random: () => 1 })
-      setTimeout(() => ac.abort(), 25)
+      abortWhenObserved(ac)
       const err = await collect(r.stream({ messages: [], tools: [] })).then(
         () => null,
         (e: unknown) => e,
