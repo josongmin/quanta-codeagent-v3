@@ -361,10 +361,15 @@ describe("ADR-0200 stream-timeout watchdog hellgate", () => {
     snooze.pause(5_000) // park for 5s
     const ac = new AbortController()
     const policy: TimeoutPolicy = { idleMs: 100, action: "abort", snooze }
-    // Abort after 30ms — well within the 5s snooze.
-    setTimeout(() => ac.abort(), 30)
+    // Abort after 30ms — well within the 5s snooze. Measure from the callback's
+    // actual dispatch: a saturated full-suite event loop may delay the timer,
+    // which says nothing about whether the watchdog observes an emitted abort.
+    let abortedAt: number | undefined
+    setTimeout(() => {
+      abortedAt = Date.now()
+      ac.abort()
+    }, 30)
     let caught: unknown
-    const startedAt = Date.now()
     try {
       for await (const _ of wd.wrap(iter, policy, ac.signal)) {
         // unreachable
@@ -372,9 +377,10 @@ describe("ADR-0200 stream-timeout watchdog hellgate", () => {
     } catch (e) {
       caught = e
     }
-    const elapsed = Date.now() - startedAt
     expect(caught).toBeInstanceOf(StreamAbortError)
-    // Must NOT have waited 5s for snooze.
-    expect(elapsed).toBeLessThan(500)
+    // Once abort is actually emitted, it must NOT wait for the 5s snooze.
+    const abortResolutionMs =
+      abortedAt === undefined ? Number.POSITIVE_INFINITY : Date.now() - abortedAt
+    expect(abortResolutionMs).toBeLessThan(500)
   })
 })

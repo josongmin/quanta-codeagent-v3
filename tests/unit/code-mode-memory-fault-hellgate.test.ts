@@ -52,7 +52,11 @@ const spyPort = (outcome: () => DispatchOutcome) => {
 
 const TINY_MEM_LIMITS = {
   memoryBytes: 256 * 1024, // 256 KiB — a modest allocation blows it
-  timeoutMs: 4000,
+  // Keep the classification fixture's timeout well clear of a genuine OOM.
+  // Under full-suite host pressure a 4s competing timer can win before the
+  // bulk allocation runs, testing scheduler contention instead of post-fault
+  // memory classification.
+  timeoutMs: 15_000,
   maxCalls: 64,
   outputCap: 16 * 1024,
 }

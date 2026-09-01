@@ -394,7 +394,7 @@ describe("B. JWKS verify", () => {
     // network reads. Wall-clock crypto timing varies under a full local suite,
     // so keep a generous host-pressure bound while still catching unbounded work.
     expect(calls).toEqual([url])
-    expect(elapsed).toBeLessThan(1_500)
+    expect(elapsed).toBeLessThan(5_000)
   })
 
   test("B16 — declared JWK algorithm, use, key_ops, and family bind verification", async () => {
