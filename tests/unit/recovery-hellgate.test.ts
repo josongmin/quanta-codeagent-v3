@@ -280,7 +280,10 @@ describe("A3 maxTurns — recovery storm consumes exactly one turn slot", () => 
       thr(retryable()),
       ev(text("recovered after storm")),
     ])
-    const out = await withTimeout(runAgent(cfg({ llm, maxTurns: 1 })), 20_000, "storm-one-turn")
+    // This rail proves turn accounting, not wall-clock performance. A full
+    // 8-shard run can delay the three real backoff timers substantially under
+    // host contention, so keep only a generous deadlock ceiling here.
+    const out = await withTimeout(runAgent(cfg({ llm, maxTurns: 1 })), 60_000, "storm-one-turn")
     expect(out.reason).toBe("completed")
     expect(out.turns).toBe(1)
     expect(llm.calls).toBe(4) // 3 retries + 1 success, all within one turn slot
@@ -288,7 +291,7 @@ describe("A3 maxTurns — recovery storm consumes exactly one turn slot", () => 
     expect(last?.content.some((b) => b.type === "text" && b.text === "recovered after storm")).toBe(
       true,
     )
-  }, 25_000)
+  }, 65_000)
 
   test("mixed storm (backoff + max_tokens nudge + empty nudge) then success = ONE turn slot", async () => {
     // Pile every retry-flavoured recovery into a single logical turn, then

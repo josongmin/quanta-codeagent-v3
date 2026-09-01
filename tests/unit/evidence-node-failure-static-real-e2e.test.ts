@@ -8,9 +8,16 @@
  * AUTO-SKIPS without `bun` + `typescript-language-server`. Verified 2026-06-10.
  */
 import { describe, expect, test } from "bun:test"
-import { existsSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { evidenceLspStatic } from "@/agent/lsp-bridge"
 import { buildEvidence } from "@/tool/evidence/builder"
 import { runToolchain, type Toolchain } from "@/tool/testrun"
@@ -29,6 +36,9 @@ const D =
 
 const project = (): string => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "evnode-")))
+  const typescriptDir = dirname(Bun.resolveSync("typescript/package.json", import.meta.dir))
+  mkdirSync(join(dir, "node_modules"))
+  symlinkSync(typescriptDir, join(dir, "node_modules", "typescript"), "dir")
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "t", version: "0.0.0" }))
   writeFileSync(
     join(dir, "tsconfig.json"),
