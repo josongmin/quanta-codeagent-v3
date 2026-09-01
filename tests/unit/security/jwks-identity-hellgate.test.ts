@@ -384,15 +384,16 @@ describe("B. JWKS verify", () => {
       privateKey,
       "RS256",
     )
-    const start = performance.now()
+    const start = process.cpuUsage()
     for (let i = 0; i < 100; i++) {
       const r = await client.verify(jwt)
       expect(r.ok).toBe(true)
     }
-    const elapsed = performance.now() - start
+    const cpu = process.cpuUsage(start)
+    const elapsed = (cpu.user + cpu.system) / 1_000
     // The functional cache contract is that verification issues no further
-    // network reads. Wall-clock crypto timing varies under a full local suite,
-    // so keep a generous host-pressure bound while still catching unbounded work.
+    // network reads. This path is local Web Crypto work, so measure process CPU
+    // rather than host-preemption wall time while retaining the original bound.
     expect(calls).toEqual([url])
     expect(elapsed).toBeLessThan(5_000)
   })
