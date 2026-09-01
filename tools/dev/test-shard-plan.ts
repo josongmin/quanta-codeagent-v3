@@ -11,6 +11,11 @@ export interface MemoryBudget {
   readonly availableBytes: number
 }
 
+export interface CpuBudget {
+  readonly loadAverage1m: number
+  readonly cpuCount: number
+}
+
 const TWO_WORKER_MIN_TOTAL_BYTES = 32 * 1024 ** 3
 const TWO_WORKER_MIN_AVAILABLE_BYTES = 16 * 1024 ** 3
 
@@ -22,6 +27,28 @@ export const chooseShardConcurrency = (memory: MemoryBudget): 1 | 2 =>
   memory.availableBytes >= TWO_WORKER_MIN_AVAILABLE_BYTES
     ? 2
     : 1
+
+const BASE_TEST_TIMEOUT_MS = 60_000
+const MAX_TEST_TIMEOUT_MS = 300_000
+
+/**
+ * Preserve the normal 60 s defect signal, but avoid false timeouts when an
+ * externally-contended host gives the single safe worker only a fraction of a
+ * CPU. Each 2x oversubscription adds one bounded timeout quantum; even extreme
+ * pressure can never widen an individual test beyond five minutes.
+ */
+export const chooseShardTestTimeoutMs = (cpu: CpuBudget): number => {
+  if (
+    !Number.isFinite(cpu.loadAverage1m) ||
+    cpu.loadAverage1m < 0 ||
+    !Number.isSafeInteger(cpu.cpuCount) ||
+    cpu.cpuCount < 1
+  ) {
+    return BASE_TEST_TIMEOUT_MS
+  }
+  const pressureFactor = Math.max(1, Math.ceil(cpu.loadAverage1m / (cpu.cpuCount * 2)))
+  return Math.min(MAX_TEST_TIMEOUT_MS, BASE_TEST_TIMEOUT_MS * pressureFactor)
+}
 
 const SHARED_RESOURCE_PATH =
   /(?:^|\/)(?:integration|e2e)(?:\/|$)|(?:git|worktree|mcp|lsp|server|socket|process-tree|multi-process)/i

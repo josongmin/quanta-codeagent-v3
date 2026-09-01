@@ -8,12 +8,13 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs"
-import { freemem, tmpdir, totalmem } from "node:os"
+import { availableParallelism, freemem, loadavg, tmpdir, totalmem } from "node:os"
 import { join, relative, resolve } from "node:path"
 import { expandTestFiles } from "./sandboxed-test"
 import { acquireTestShardLease, selectRepositoryLeaseIdentity } from "./test-shard-lease"
 import {
   chooseShardConcurrency,
+  chooseShardTestTimeoutMs,
   createTestShardPlan,
   parseExecutedFileCount,
   type TestShardPlan,
@@ -216,6 +217,7 @@ const runShard = async (
   plan: TestShardPlan,
   opts: RunnerOptions,
   runRoot: string,
+  testTimeoutMs: number,
 ): Promise<{
   readonly code: number
   readonly timedOut: boolean
@@ -255,7 +257,14 @@ const runShard = async (
   try {
     const startedAt = performance.now()
     const proc = Bun.spawn({
-      cmd: ["bun", "test", ...plan.files, "--timeout=60000", "--parallel=1", ...junitArgs],
+      cmd: [
+        "bun",
+        "test",
+        ...plan.files,
+        `--timeout=${testTimeoutMs}`,
+        "--parallel=1",
+        ...junitArgs,
+      ],
       cwd: REPO_ROOT,
       env: {
         ...process.env,
@@ -364,6 +373,7 @@ const executePlans = async (input: {
   readonly runRoot: string
   readonly before: GitSnapshot
   readonly concurrency: 1 | 2
+  readonly testTimeoutMs: number
 }): Promise<readonly string[]> => {
   const scanReachSinks: string[] = []
   for (let cursor = 0; cursor < input.plans.length; ) {
@@ -373,7 +383,7 @@ const executePlans = async (input: {
     const completed = await Promise.all(
       batch.map(async (plan) => ({
         plan,
-        result: await runShard(plan, input.opts, input.runRoot),
+        result: await runShard(plan, input.opts, input.runRoot, input.testTimeoutMs),
         snapshot: await gitSnapshot(),
       })),
     )
@@ -416,16 +426,27 @@ const main = async (): Promise<void> => {
     const manifestDigest = manifestSha256(manifest)
     const plans = createTestShardPlan(manifest, SHARD_COUNT)
     const concurrency = await workerConcurrency()
+    const cpuCount = availableParallelism()
+    const loadAverage1m = loadavg()[0] ?? 0
+    const testTimeoutMs = chooseShardTestTimeoutMs({ loadAverage1m, cpuCount })
     const exclusiveFiles = plans
       .filter(({ exclusive }) => exclusive)
       .reduce((count, plan) => count + plan.files.length, 0)
     process.stdout.write(
       `[test:shards] frozen head=${before.head} suite=${opts.suite} dirty=no ` +
         `manifest_files=${manifest.length} manifest_sha256=${manifestDigest} ` +
-        `workers=${concurrency} exclusive_files=${exclusiveFiles}\n`,
+        `workers=${concurrency} test_timeout_ms=${testTimeoutMs} ` +
+        `load_1m=${loadAverage1m.toFixed(2)} cpus=${cpuCount} exclusive_files=${exclusiveFiles}\n`,
     )
 
-    const scanReachSinks = await executePlans({ plans, opts, runRoot, before, concurrency })
+    const scanReachSinks = await executePlans({
+      plans,
+      opts,
+      runRoot,
+      before,
+      concurrency,
+      testTimeoutMs,
+    })
 
     const after = await gitSnapshot()
     if (!sameSnapshot(before, after)) {

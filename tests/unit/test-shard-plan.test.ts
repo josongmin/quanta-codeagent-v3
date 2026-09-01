@@ -5,6 +5,7 @@ import { join } from "node:path"
 import {
   assertTestShardPlan,
   chooseShardConcurrency,
+  chooseShardTestTimeoutMs,
   createTestShardPlan,
   parseExecutedFileCount,
   usesSharedTestResource,
@@ -74,6 +75,13 @@ describe("explicit full-suite shard plan", () => {
     expect(
       chooseShardConcurrency({ totalBytes: 16 * 1024 ** 3, availableBytes: 16 * 1024 ** 3 }),
     ).toBe(1)
+  })
+
+  test("bounds per-test timeout scaling under external CPU pressure", () => {
+    expect(chooseShardTestTimeoutMs({ loadAverage1m: 12, cpuCount: 12 })).toBe(60_000)
+    expect(chooseShardTestTimeoutMs({ loadAverage1m: 48, cpuCount: 12 })).toBe(120_000)
+    expect(chooseShardTestTimeoutMs({ loadAverage1m: 300, cpuCount: 12 })).toBe(300_000)
+    expect(chooseShardTestTimeoutMs({ loadAverage1m: Number.NaN, cpuCount: 12 })).toBe(60_000)
   })
 
   test("requires Bun's final executed-file receipt and ignores nested earlier footers", () => {
