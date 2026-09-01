@@ -108,6 +108,7 @@
     "csv-parse": "6.2.1",
     "openai": "^6.38.0",
     "quickjs-emscripten": "0.32.0",
+    "turndown": "7.2.4",
     "web-tree-sitter": "0.26.9",
     "yaml": "2.9.0",
     "zod": "^3.23.0"
