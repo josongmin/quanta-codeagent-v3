@@ -1,6 +1,6 @@
 import { expect } from "bun:test"
-import { appendFileSync, existsSync } from "node:fs"
-import { join, relative, resolve } from "node:path"
+import { appendFileSync, existsSync, realpathSync } from "node:fs"
+import { isAbsolute, join, relative, resolve, sep } from "node:path"
 import { readScanReachBaseline, type ScanReach } from "../../../tools/dev/scan-reach-baseline"
 
 /**
@@ -35,32 +35,69 @@ import { readScanReachBaseline, type ScanReach } from "../../../tools/dev/scan-r
  * sides of the comparison.
  */
 
-/** Absolute paths git tracks under `root` that still exist on disk. Cached per
- *  root: the index does not change mid-run, and if it did, a stale cache can
- *  only UNDER-count, which fails closed. */
-const trackedCache = new Map<string, ReadonlySet<string>>()
+/** Absolute tracked paths, cached once per Git worktree rather than once per
+ * scan root. Slice-boundary tests cover 49 sibling roots; asking Git to parse
+ * the same index 49 times is pure duplicate work. */
+const repositoryTrackedCache = new Map<string, ReadonlySet<string>>()
+const rootRepositoryCache = new Map<string, string>()
+
+const gitRepositoryRoot = (root: string): string => {
+  const cached = rootRepositoryCache.get(root)
+  if (cached !== undefined) return cached
+  const result = Bun.spawnSync(["git", "rev-parse", "--show-toplevel"], {
+    cwd: root,
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const repository = new TextDecoder().decode(result.stdout).trim()
+  if (result.exitCode !== 0 || !isAbsolute(repository)) {
+    throw new Error(
+      `assertScanPopulation: \`git rev-parse\` failed under ${root} — reach cannot be measured, ` +
+        "so no verdict below it means anything",
+    )
+  }
+  rootRepositoryCache.set(root, repository)
+  return repository
+}
+
+const trackedRepositoryFiles = (repository: string): ReadonlySet<string> => {
+  const cached = repositoryTrackedCache.get(repository)
+  if (cached !== undefined) return cached
+  // --full-name makes output relative to the repository root regardless of the
+  // caller's scan directory. The old per-root command could emit a different
+  // prefix shape and then cache a false empty intersection for the whole run.
+  const result = Bun.spawnSync(["git", "ls-files", "--full-name", "-z"], {
+    cwd: repository,
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `assertScanPopulation: \`git ls-files\` failed under ${repository} — reach cannot be ` +
+        "measured, so no verdict below it means anything",
+    )
+  }
+  const tracked = new Set(
+    new TextDecoder()
+      .decode(result.stdout)
+      .split("\0")
+      .filter((path) => path !== "")
+      .map((path) => join(repository, path))
+      .filter((path) => existsSync(path)),
+  )
+  repositoryTrackedCache.set(repository, tracked)
+  return tracked
+}
+
+const isWithin = (root: string, path: string): boolean => {
+  const rel = relative(root, path)
+  return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
+}
 
 const trackedUnder = (root: string): ReadonlySet<string> => {
   const key = resolve(root)
-  const hit = trackedCache.get(key)
-  if (hit !== undefined) return hit
-  const out = Bun.spawnSync(["git", "ls-files", "-z", "--", key], { cwd: key, stdout: "pipe" })
-  if (out.exitCode !== 0) {
-    throw new Error(
-      `assertScanPopulation: \`git ls-files\` failed under ${key} — reach cannot be measured, ` +
-        `so no verdict below it means anything`,
-    )
-  }
-  const paths = new Set(
-    new TextDecoder()
-      .decode(out.stdout)
-      .split("\0")
-      .filter((p) => p !== "")
-      .map((p) => join(key, p))
-      .filter((p) => existsSync(p)),
-  )
-  trackedCache.set(key, paths)
-  return paths
+  const repository = gitRepositoryRoot(key)
+  return new Set([...trackedRepositoryFiles(repository)].filter((path) => isWithin(key, path)))
 }
 
 export interface ScanPopulationOptions {
@@ -150,7 +187,14 @@ export const assertScanPopulation = (
   const collectable =
     opts.collectable ?? ((n: string) => n.endsWith(".ts") && !n.endsWith(".test.ts"))
   const skip = new Set(["node_modules", "__tests__", ...(opts.skipDirs ?? [])])
-  const abs = resolve(root)
+  const requestedRoot = resolve(root)
+  // macOS exposes /tmp as a symlink to /private/tmp while Git reports its
+  // physical worktree root. Canonicalize the root once, then translate caller
+  // paths relative to it; resolving every file separately would both repeat I/O
+  // and accidentally follow file-level symlinks into a tracked target.
+  const abs = realpathSync(requestedRoot)
+  const canonicalUnderRoot = (path: string): string =>
+    resolve(abs, relative(requestedRoot, resolve(path)))
   const tracked = trackedUnder(abs)
 
   // Reach is a SET of files the guard would actually collect.
@@ -179,7 +223,7 @@ export const assertScanPopulation = (
   const reachedFiles = [
     ...new Set(
       files
-        .map((f) => resolve(f))
+        .map(canonicalUnderRoot)
         .filter((f) => tracked.has(f))
         .filter((f) => collectable(f.slice(f.lastIndexOf("/") + 1)))
         .filter((f) => !skippedByPolicy(f)),
@@ -227,7 +271,7 @@ export const assertScanPopulation = (
     // one name, or names of files the scan never returned — so a predicate proof
     // could be met without the predicate selecting anything real.
     const reachedSet = new Set(reachedFiles)
-    const matchedAbs = [...new Set(opts.matched.map((m) => resolve(m)))]
+    const matchedAbs = [...new Set(opts.matched.map(canonicalUnderRoot))]
     const strangers = matchedAbs.filter((m) => !reachedSet.has(m))
     expect(
       strangers,
