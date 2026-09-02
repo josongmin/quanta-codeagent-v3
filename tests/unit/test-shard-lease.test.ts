@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
 import {
   acquireTestShardLease,
+  inheritedTestShardLeaseState,
   normalizeRepositoryIdentity,
   readCommittedRepositoryLeaseId,
   selectRepositoryLeaseIdentity,
@@ -56,11 +57,11 @@ describe("full-suite repository lease", () => {
 
   test("a contender waits and acquires only after the current owner releases", async () => {
     const identity = `lease-self-test-${process.pid}-${Date.now()}`
-    const first = await acquireTestShardLease({ identity, waitMs: 500, pollMs: 5 })
+    const first = await acquireTestShardLease({ identity, waitMs: 5_000, pollMs: 5 })
     let heartbeats = 0
     const secondPending = acquireTestShardLease({
       identity,
-      waitMs: 500,
+      waitMs: 5_000,
       pollMs: 5,
       heartbeatMs: 10,
       onWait: (_port, elapsedMs) => {
@@ -68,7 +69,9 @@ describe("full-suite repository lease", () => {
         heartbeats += 1
       },
     })
-    await Bun.sleep(30)
+    // Repeated heartbeats while waiting — bounded wait, not a fixed sleep, so
+    // per-iteration probe latency cannot flake the assertion.
+    for (let attempt = 0; attempt < 400 && heartbeats < 2; attempt += 1) await Bun.sleep(5)
     expect(heartbeats).toBeGreaterThanOrEqual(2)
     first.release()
     const second = await secondPending
@@ -79,5 +82,110 @@ describe("full-suite repository lease", () => {
     const third = await acquireTestShardLease({ identity, waitMs: 100, pollMs: 5 })
     expect(third.port).toBe(first.port)
     third.release()
+  })
+
+  test("only a live ancestor-owned campaign lease may suppress reacquisition", () => {
+    const valid = inheritedTestShardLeaseState(
+      {
+        QUANTA_VERIFICATION_LEASE_TOKEN: "a".repeat(64),
+        QUANTA_VERIFICATION_LEASE_OWNER_PID: "42",
+      },
+      100,
+      (pid) => (pid === 100 ? 42 : undefined),
+    )
+    expect(valid).toBe("valid")
+
+    // Owner pid NOT in the ancestor chain: a copied/stray env fails closed.
+    expect(
+      inheritedTestShardLeaseState(
+        {
+          QUANTA_VERIFICATION_LEASE_TOKEN: "a".repeat(64),
+          QUANTA_VERIFICATION_LEASE_OWNER_PID: "77",
+        },
+        100,
+        (pid) => (pid === 100 ? 42 : undefined),
+      ),
+    ).toBe("invalid")
+    // Malformed token with an owner pid present is invalid, never absent.
+    expect(
+      inheritedTestShardLeaseState({ QUANTA_VERIFICATION_LEASE_OWNER_PID: "42" }, 100, (pid) =>
+        pid === 100 ? 42 : undefined,
+      ),
+    ).toBe("invalid")
+    expect(inheritedTestShardLeaseState({}, 100, () => undefined)).toBe("absent")
+  })
+
+  test("an unrelated listener on the hashed port fails fast as a collision", async () => {
+    const identity = `lease-collision-self-test-${process.pid}-${Date.now()}`
+    const port = testShardLeasePort(normalizeRepositoryIdentity(identity))
+    const unrelated = Bun.listen({
+      hostname: "127.0.0.1",
+      port,
+      socket: {
+        data(socket) {
+          socket.end("not-a-quanta-lease\n")
+        },
+      },
+    })
+    try {
+      const started = performance.now()
+      await expect(acquireTestShardLease({ identity, waitMs: 5_000, pollMs: 5 })).rejects.toThrow(
+        "repository lease port collision",
+      )
+      // The old bind-only lease waited the FULL budget behind a foreign
+      // listener; the handshake must diagnose it in one probe round.
+      expect(performance.now() - started).toBeLessThan(1_000)
+    } finally {
+      unrelated.stop(true)
+    }
+  })
+
+  test("a legacy bind-only repository lease is treated as busy until release", async () => {
+    const identity = `lease-legacy-self-test-${process.pid}-${Date.now()}`
+    const port = testShardLeasePort(normalizeRepositoryIdentity(identity))
+    // Older runner code in a concurrent session: binds the port, answers nothing.
+    const legacy = Bun.listen({
+      hostname: "127.0.0.1",
+      port,
+      socket: { data() {} },
+    })
+    let waiting = false
+    try {
+      const pending = acquireTestShardLease({
+        identity,
+        waitMs: 5_000,
+        pollMs: 5,
+        onWait: () => {
+          waiting = true
+        },
+      })
+      for (let attempt = 0; attempt < 300 && !waiting; attempt += 1) await Bun.sleep(5)
+      expect(waiting).toBe(true)
+      legacy.stop(true)
+      const acquired = await pending
+      expect(acquired.port).toBe(port)
+      acquired.release()
+    } finally {
+      legacy.stop(true)
+    }
+  })
+
+  test("an aborted wait raises instead of parking behind a busy lane", async () => {
+    const identity = `lease-abort-self-test-${process.pid}-${Date.now()}`
+    const owner = await acquireTestShardLease({ identity, waitMs: 500, pollMs: 5 })
+    const aborter = new AbortController()
+    try {
+      const pending = acquireTestShardLease({
+        identity,
+        waitMs: 5_000,
+        pollMs: 5,
+        signal: aborter.signal,
+      })
+      await Bun.sleep(20)
+      aborter.abort()
+      await expect(pending).rejects.toThrow("lease wait aborted")
+    } finally {
+      owner.release()
+    }
   })
 })
