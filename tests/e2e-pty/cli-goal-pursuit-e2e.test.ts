@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { submitPtyLine, typePtyLine } from "../../tools/dev/pty-slash-submit"
 import { drivePtyCli, PTY_AVAILABLE, type PtyCli } from "./pty-harness"
 
 // Wait for the readline prompt rendered after setRawMode, not the welcome
@@ -60,19 +61,18 @@ const waitForScreenTextAfter = async (
 }
 
 /** Drive the raw editor as real keystrokes. A whole command in one PTY write can
- * outrun slash-palette state transitions and turn this into a chunking test. */
+ * outrun slash-palette state transitions and turn this into a chunking test.
+ *
+ * The leading `/` used to be guarded by `sleep(500)` — a guess that loses under
+ * load, after which the line submits as an ordinary model prompt. The shared
+ * helper waits for the slash to REGISTER in the input lane and throws at the
+ * drop instead. */
 const typeText = async (cli: PtyCli, text: string): Promise<void> => {
-  for (const [index, character] of [...text].entries()) {
-    cli.send(character)
-    // `/` opens the async slash palette; wait for its key handler before typing
-    // the filter text, otherwise a large feature set can legitimately drop it.
-    await sleep(index === 0 && character === "/" ? 500 : 20)
-  }
+  await typePtyLine(cli, text, { keyDelayMs: 20 })
 }
 
 const submitLine = async (cli: PtyCli, line: string): Promise<void> => {
-  await typeText(cli, line)
-  cli.send("\r")
+  await submitPtyLine(cli, line, { keyDelayMs: 20 })
 }
 
 describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {

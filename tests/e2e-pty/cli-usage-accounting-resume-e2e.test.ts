@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { submitPtyLine } from "../../tools/dev/pty-slash-submit"
 import { drivePtyCli, PTY_AVAILABLE, type PtyCli } from "./pty-harness"
 
 const BOOT = "ask before every edit"
@@ -35,12 +36,12 @@ const sleep = async (ms: number): Promise<void> => {
   await new Promise<void>((resolve) => setTimeout(resolve, ms))
 }
 
+/** A dropped leading `/` used to be guarded by `sleep(500)` — a guess that
+ *  loses under load and then submits the line as an ordinary model prompt,
+ *  burning the one-record cassette and failing 60s later as a ReplayMiss. The
+ *  shared helper waits for the slash to REGISTER and throws at the drop. */
 const submitLine = async (cli: PtyCli, line: string): Promise<void> => {
-  for (const [index, character] of [...line].entries()) {
-    cli.send(character)
-    await sleep(index === 0 && character === "/" ? 500 : 15)
-  }
-  cli.send("\r")
+  await submitPtyLine(cli, line, { keyDelayMs: 15 })
 }
 
 describe.skipIf(!PTY_AVAILABLE)("CLI usage accounting resume e2e (PTY)", () => {
