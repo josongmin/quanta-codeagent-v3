@@ -83,23 +83,35 @@ const CALL_RE = /\b(?:costUsd|priceUsage)\s*\(/g
 const ALIAS_RE = /\b(?:costUsd|priceUsage)\s+as\s+\w+/g
 const NAME_RE = /(?<![.\w$])(?:costUsd|priceUsage)\b/g
 
+/** Is this bare-name occurrence one of the five LEGAL look-alikes? */
+const isLegalBareName = (src: string, idx: number, matchLen: number): boolean => {
+  const after = src.slice(idx + matchLen)
+  if (/^\s*\(/.test(after)) return true // a CALL — the call census owns those
+  if (/^\s*\??\s*:/.test(after)) return true // object key / field annotation
+  const lineStart = src.lastIndexOf("\n", idx) + 1
+  const nl = src.indexOf("\n", idx)
+  const line = src.slice(lineStart, nl === -1 ? src.length : nl)
+  if (/^\s*(?:import|export)\b/.test(line) || /\bfrom\s+["']/.test(line)) return true
+  if (/\btypeof\s+(?:costUsd|priceUsage)\b/.test(line)) return true
+  // Multi-line import/export SPECIFIER lines are exactly the bare name plus a
+  // comma; anything else around the name is value smuggling.
+  return /^\s*(?:type\s+)?(?:costUsd|priceUsage)\s*,?\s*$/.test(line)
+}
+
 const indirectionsOf = (src: string): string[] => {
   const out: string[] = []
   for (const m of src.matchAll(ALIAS_RE)) out.push(`alias: ${m[0]}`)
   for (const m of src.matchAll(NAME_RE)) {
     const idx = m.index ?? 0
-    const after = src.slice(idx + m[0].length)
-    if (/^\s*\(/.test(after)) continue // a CALL — the call census owns those
-    if (/^\s*\??\s*:/.test(after)) continue // object key / field annotation
+    if (isLegalBareName(src, idx, m[0].length)) continue
     const lineStart = src.lastIndexOf("\n", idx) + 1
     const nl = src.indexOf("\n", idx)
-    const line = src.slice(lineStart, nl === -1 ? src.length : nl)
-    if (/^\s*(?:import|export)\b/.test(line) || /\bfrom\s+["']/.test(line)) continue
-    if (/\btypeof\s+(?:costUsd|priceUsage)\b/.test(line)) continue
-    // Multi-line import/export SPECIFIER lines are exactly the bare name plus
-    // a comma; anything else around the name is value smuggling.
-    if (/^\s*(?:type\s+)?(?:costUsd|priceUsage)\s*,?\s*$/.test(line)) continue
-    out.push(`bare ref: ${line.trim().slice(0, 80)}`)
+    out.push(
+      `bare ref: ${src
+        .slice(lineStart, nl === -1 ? src.length : nl)
+        .trim()
+        .slice(0, 80)}`,
+    )
   }
   return out
 }
