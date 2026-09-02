@@ -45,6 +45,7 @@ import {
   type TestShardCacheIdentity,
   testEnvironmentSha256,
   testToolchainSha256,
+  trackedTreeSha256,
   writeScanReachReceiptAtomic,
   writeSuccessfulTestShardReceiptAtomic,
 } from "./test-shard-receipt"
@@ -141,32 +142,6 @@ const gitSnapshot = async (): Promise<GitSnapshot> => {
 
 const sameSnapshot = (left: GitSnapshot, right: GitSnapshot): boolean =>
   left.head === right.head && left.status === right.status
-
-/**
- * Content hash of the code under test. This is what the cache identity used to
- * approximate with the git HEAD sha — badly, since HEAD moves on a docs-only
- * commit and threw away every chunk. Colocated `*.test.ts` files are excluded:
- * they are already bound per-chunk by `shardFilesSha256`, so including them here
- * would make every test edit invalidate every chunk, which is the coarseness
- * being removed.
- */
-const srcTreeSha256 = (): string => {
-  const hasher = new Bun.CryptoHasher("sha256")
-  const files: string[] = []
-  for (const root of ["src", "tools"]) {
-    for (const file of new Bun.Glob("**/*.ts").scanSync(join(REPO_ROOT, root))) {
-      if (file.endsWith(".test.ts") || file.includes("/__tests__/")) continue
-      files.push(join(root, file))
-    }
-  }
-  for (const file of files.sort()) {
-    hasher.update(file)
-    hasher.update("\0")
-    hasher.update(readFileSync(join(REPO_ROOT, file)))
-    hasher.update("\0")
-  }
-  return hasher.digest("hex")
-}
 
 const manifestSha256 = (manifest: readonly string[]): string =>
   new Bun.CryptoHasher("sha256")
@@ -793,7 +768,7 @@ const main = async (): Promise<void> => {
       SUITE_ROOTS[opts.suite].map((root) => resolve(REPO_ROOT, root)),
     )
     const manifestDigest = manifestSha256(manifest)
-    const srcSha256 = srcTreeSha256()
+    const treeSha256 = trackedTreeSha256(REPO_ROOT)
     const timings = loadTestTimings(TIMING_STORE)
     const chunks = planTestChunks(manifest, {
       predictMs: (file) => timings.get(relative(REPO_ROOT, file)),
@@ -838,7 +813,7 @@ const main = async (): Promise<void> => {
         intraParallel,
         cachePath: chunkCachePath(opts.suite, filesSha256),
         identity: {
-          srcSha256,
+          treeSha256,
           suite: opts.suite,
           manifestSha256: manifestDigest,
           shardIndex: chunk.index,

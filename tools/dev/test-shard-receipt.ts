@@ -7,20 +7,13 @@ export const TEST_SHARD_CACHE_TTL_MS = 24 * 60 * 60_000
 
 export interface TestShardCacheIdentity {
   /**
-   * Content hash of the code under test (`src` + `tools`).
-   *
-   * This replaced the git HEAD sha on 2026-09-02. HEAD was a PROXY for "the code
-   * under test changed" — the identity could not see source at all, since
-   * `shardFilesSha256` hashes the chunk's own TEST files and `manifestSha256`
-   * hashes only the path list. The proxy was far too coarse: every commit
-   * invalidated every chunk, so a docs-only commit discarded a 19-minute suite.
-   * Measured on a real run: 63 receipts on disk, 31/31 `CACHE MISS`.
-   *
-   * Soundness is unchanged. A source edit invalidated everything before (HEAD
-   * moved) and invalidates everything now (this hash moves). Nothing became more
-   * permissive; the waste of discarding byte-identical inputs went away.
+   * Content hash of everything tracked that a test can read, minus prose and
+   * minus the chunk-bound test files. See {@link trackedTreeSha256}: this
+   * replaced a `src`+`tools` scan that could not see `tests/setup.ts`,
+   * `bunfig.toml` or any fixture, and therefore replayed green receipts across
+   * changes that alter every test's behaviour.
    */
-  readonly srcSha256: string
+  readonly treeSha256: string
   readonly suite: string
   readonly manifestSha256: string
   readonly shardIndex: number
@@ -68,6 +61,61 @@ export const shardFilesSha256 = (repoRoot: string, files: readonly string[]): st
     hasher.update(relative(repoRoot, file))
     hasher.update("\0")
     hasher.update(sha256(readFileSync(file)))
+    hasher.update("\0")
+  }
+  return hasher.digest("hex")
+}
+
+/**
+ * Paths that cannot change what a test observes.
+ *
+ * Prose only. Everything else tracked by Git is part of the identity, so a new
+ * file TYPE is included by default and the list fails closed.
+ */
+const PROSE_ONLY = /^docs\/|\.md$/
+
+/** Per-chunk bound by `shardFilesSha256`; hashing them here would make one
+ *  test edit invalidate every chunk, which is the coarseness this replaced. */
+const CHUNK_BOUND = /(?:^|\/)__tests__\/|\.test\.ts$/
+
+/**
+ * Content identity of everything the tests can read.
+ *
+ * MEASURED HOLE THIS CLOSES. The previous version hashed `src` and `tools`
+ * `.ts` files only. `tests/setup.ts` — which bunfig preloads into EVERY test —
+ * `tests/_helpers/*`, `bunfig.toml`, `package.json` and every JSON fixture a
+ * ratchet reads were all invisible. Reproduced: append a line to
+ * `tests/setup.ts`, commit, re-run — every chunk reported CACHE HIT and the
+ * suite printed PASS having executed zero tests.
+ *
+ * Git already content-addresses the tree, so this is one `ls-tree` (0.2s for
+ * 14k files) rather than 14k reads. The runner refuses a dirty checkout, so
+ * HEAD and the working tree are the same thing here.
+ */
+export const trackedTreeSha256 = (repoRoot: string): string => {
+  const result = Bun.spawnSync(["git", "ls-tree", "-r", "HEAD", "--format=%(path) %(objectname)"], {
+    cwd: repoRoot,
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `[test:shards] cannot read the tree for cache identity: ${result.stderr.toString()}`,
+    )
+  }
+  const hasher = new Bun.CryptoHasher("sha256")
+  const lines = result.stdout
+    .toString()
+    .split("\n")
+    .filter((line) => line !== "")
+    .filter((line) => {
+      const path = line.slice(0, line.lastIndexOf(" "))
+      return !PROSE_ONLY.test(path) && !CHUNK_BOUND.test(path)
+    })
+    .sort()
+  if (lines.length === 0) throw new Error("[test:shards] empty tree listing for cache identity")
+  for (const line of lines) {
+    hasher.update(line)
     hasher.update("\0")
   }
   return hasher.digest("hex")
@@ -143,7 +191,7 @@ const sameIdentity = (
   // is bound by shardFilesSha256 (path + content of every file), while the
   // ordinal is a presentation label that can shift when a NEIGHBOR chunk
   // changes. Everything else must match exactly.
-  receipt.srcSha256 === expected.srcSha256 &&
+  receipt.treeSha256 === expected.treeSha256 &&
   receipt.suite === expected.suite &&
   receipt.manifestSha256 === expected.manifestSha256 &&
   receipt.shardFileCount === expected.shardFileCount &&
@@ -175,7 +223,7 @@ const parseSuccessfulShardReceipt = (value: unknown): SuccessfulTestShardReceipt
   const row = value as Record<string, unknown>
   if (
     row.schema !== "quanta.test-shard-success.v1" ||
-    !validSha256(row.srcSha256) ||
+    !validSha256(row.treeSha256) ||
     typeof row.suite !== "string" ||
     !validSha256(row.manifestSha256) ||
     !Number.isSafeInteger(row.shardIndex) ||

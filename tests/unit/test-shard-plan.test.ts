@@ -525,7 +525,7 @@ describe("same-INPUTS successful shard cache", () => {
     const receiptPath = join(directory, "cache", "shard-1.json")
     writeFileSync(testFile, "test('a', () => expect(1).toBe(1))\n")
     const identity = {
-      srcSha256: "a".repeat(64),
+      treeSha256: "a".repeat(64),
       suite: "full",
       manifestSha256: "b".repeat(64),
       shardIndex: 1,
@@ -554,7 +554,7 @@ describe("same-INPUTS successful shard cache", () => {
     const identityMutations = [
       // The code under test — this REPLACED the git HEAD sha, which invalidated
       // every chunk on any commit including docs-only ones (2026-09-02).
-      { ...identity, srcSha256: "d".repeat(64) },
+      { ...identity, treeSha256: "d".repeat(64) },
       { ...identity, suite: "unit" },
       { ...identity, manifestSha256: "d".repeat(64) },
       { ...identity, shardFileCount: 2 },
@@ -616,7 +616,7 @@ describe("same-INPUTS successful shard cache", () => {
     temporaryDirectories.push(directory)
     const receiptPath = join(directory, "shard.json")
     const identity = {
-      srcSha256: "a".repeat(64),
+      treeSha256: "a".repeat(64),
       suite: "full",
       manifestSha256: "b".repeat(64),
       shardIndex: 1,

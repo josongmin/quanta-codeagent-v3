@@ -14,7 +14,7 @@
  * real dependency — a content hash of `src`/`tools` — and drop the proxy.
  *
  * Soundness is unchanged, and that is the point: a source edit invalidated
- * everything before (HEAD moved) and invalidates everything now (`srcSha256`
+ * everything before (HEAD moved) and invalidates everything now (`treeSha256`
  * moves). Nothing became more permissive; what disappeared is the waste of
  * discarding receipts whose inputs are byte-identical.
  *
@@ -40,7 +40,7 @@ const identity = (over: Partial<TestShardCacheIdentity> = {}): TestShardCacheIde
   shardFilesSha256: "b".repeat(64),
   toolchainSha256: "c".repeat(64),
   testEnvSha256: "d".repeat(64),
-  srcSha256: "e".repeat(64),
+  treeSha256: "e".repeat(64),
   junit: false,
   filesRunConcurrently: false,
   ...over,
@@ -90,14 +90,14 @@ describe("shard cache identity — what may and may not invalidate a receipt", (
         unknown
       >
       expect(Object.keys(parsed)).not.toContain("head")
-      expect(parsed.srcSha256).toBe("e".repeat(64))
+      expect(parsed.treeSha256).toBe("e".repeat(64))
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
   })
 
   test("a SOURCE change still invalidates — soundness is unchanged", () => {
-    const lookup = roundTrip(identity(), identity({ srcSha256: "f".repeat(64) }))
+    const lookup = roundTrip(identity(), identity({ treeSha256: "f".repeat(64) }))
 
     expect(lookup.kind).toBe("miss")
     if (lookup.kind === "miss") expect(lookup.reason).toBe("input-mismatch")
@@ -153,7 +153,7 @@ describe("shard cache identity — what may and may not invalidate a receipt", (
 
   test("a receipt whose src hash is malformed is REJECTED, not trusted", () => {
     // Without a schema check on this field a hand-edited or truncated receipt
-    // could carry `srcSha256: ""` and then match any expectation that also
+    // could carry `treeSha256: ""` and then match any expectation that also
     // degraded — the field would be present but meaningless.
     const dir = mkdtempSync(join(tmpdir(), "shard-cache-badsrc-"))
     try {
@@ -166,12 +166,12 @@ describe("shard cache identity — what may and may not invalidate a receipt", (
       })
       const fs = require("node:fs") as typeof import("node:fs")
       const parsed = JSON.parse(fs.readFileSync(path, "utf8")) as Record<string, unknown>
-      parsed.srcSha256 = "not-a-sha"
+      parsed.treeSha256 = "not-a-sha"
       fs.writeFileSync(path, JSON.stringify(parsed))
 
       const lookup = loadSuccessfulTestShardReceipt({
         path,
-        expected: identity({ srcSha256: "not-a-sha" as string }),
+        expected: identity({ treeSha256: "not-a-sha" as string }),
       })
 
       expect(lookup.kind).toBe("miss")
