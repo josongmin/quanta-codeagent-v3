@@ -53,12 +53,26 @@ export type IsolationParityResult =
  */
 export const parseJunitOutcomes = (xml: string): ReadonlyMap<string, TestOutcome> => {
   const outcomes = new Map<string, TestOutcome>()
-  for (const match of xml.matchAll(/<testcase\b([^>]*)>([\s\S]*?)(?:<\/testcase>|$)/g)) {
+  // Bun writes a SELF-CLOSING `<testcase … />` for a pass and an open tag with a
+  // `<failure>` child for a failure. Matching only `<testcase …>` caught the
+  // second shape and silently dropped the first: a real 2,251-case run compared
+  // as 2. The `/?` and the optional body are what make both shapes parse.
+  // Bun writes a SELF-CLOSING `<testcase … />` for a pass and an OPEN tag with a
+  // `<failure>` / `<error>` child for a failure. Scan tag-by-tag rather than
+  // trying to match a tag AND its optional body in one expression: the combined
+  // pattern consumed the text between a self-closing tag and the next open one,
+  // and a real 2,251-case run parsed as 212.
+  for (const match of xml.matchAll(/<testcase\b([^>]*?)(\/?)>/g)) {
     const attrs = match[1] ?? ""
-    const body = match[2] ?? ""
+    const selfClosing = match[2] === "/"
     const name = /\bname="([^"]*)"/.exec(attrs)?.[1]
     if (name === undefined) continue
     const file = /\bfile="([^"]*)"/.exec(attrs)?.[1] ?? "<unknown>"
+    // Only an OPEN tag can carry a failure child; look no further than the next
+    // `</testcase>` so a later failure cannot be attributed to this case.
+    const after = xml.slice((match.index ?? 0) + match[0].length)
+    const end = after.indexOf("</testcase>")
+    const body = selfClosing || end < 0 ? "" : after.slice(0, end)
     const failed = body.includes("<failure") || body.includes("<error")
     outcomes.set(`${file} ${name}`, failed ? "fail" : "pass")
   }
@@ -79,7 +93,10 @@ const split = (key: string): { file: string; name: string } => {
  * genuinely failing test is not an isolation defect, and surfacing it here would
  * drown the signal.
  */
-export const compareIsolationRuns = (isolatedXml: string, sharedXml: string): IsolationParityResult => {
+export const compareIsolationRuns = (
+  isolatedXml: string,
+  sharedXml: string,
+): IsolationParityResult => {
   const isolated = parseJunitOutcomes(isolatedXml)
   const shared = parseJunitOutcomes(sharedXml)
   if (isolated.size === 0 && shared.size === 0) return { kind: "empty" }

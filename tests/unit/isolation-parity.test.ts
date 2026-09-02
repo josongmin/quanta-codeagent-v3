@@ -27,13 +27,23 @@
 import { describe, expect, test } from "bun:test"
 import { compareIsolationRuns, parseJunitOutcomes } from "../../tools/dev/isolation-parity"
 
+/**
+ * Bun's REAL shape, not a convenient one: a passing case is a SELF-CLOSING
+ * `<testcase … />` and a failing case is an open tag with a `<failure>` child.
+ *
+ * The first fixture here emitted an open tag for both, so the parser's inability
+ * to read a self-closing tag was invisible — a real 2,251-case run compared as
+ * 212, and every test still passed. A fixture that cannot express the producer's
+ * output does not test the parser.
+ */
 const junit = (cases: readonly (readonly [string, string, boolean])[]): string =>
   [
     '<?xml version="1.0"?>',
     "<testsuites>",
-    ...cases.map(
-      ([file, name, ok]) =>
-        `<testcase file="${file}" name="${name}" time="0.01">${ok ? "" : "<failure/>"}</testcase>`,
+    ...cases.map(([file, name, ok]) =>
+      ok
+        ? `<testcase name="${name}" classname="c" time="0.01" file="${file}" line="1" assertions="1" />`
+        : `<testcase name="${name}" classname="c" time="0.01" file="${file}" line="1"><failure message="x" /></testcase>`,
     ),
     "</testsuites>",
   ].join("\n")
@@ -61,6 +71,34 @@ describe("parseJunitOutcomes — a verdict per test, keyed by file+name", () => 
     )
 
     expect(out.size).toBe(2)
+  })
+
+  test("a SELF-CLOSING passing case is read — the shape Bun actually emits", () => {
+    // The regression this pins: a parser that only matched `<testcase …>` read
+    // failures (open tags) and dropped every pass. On a real chunk that turned
+    // 2,251 cases into 212 while reporting "parity".
+    const out = parseJunitOutcomes(
+      '<testsuites><testcase name="p" classname="c" time="0.01" file="a.test.ts" /></testsuites>',
+    )
+
+    expect(out.get("a.test.ts p")).toBe("pass")
+    expect(out.size).toBe(1)
+  })
+
+  test("a failure child belongs to its OWN case, not the next one", () => {
+    // A self-closing pass followed by a failing case: scanning past the first
+    // tag for a `<failure>` would mark the pass as failed.
+    const out = parseJunitOutcomes(
+      [
+        "<testsuites>",
+        '<testcase name="p" classname="c" file="a.test.ts" />',
+        '<testcase name="f" classname="c" file="a.test.ts"><failure message="x" /></testcase>',
+        "</testsuites>",
+      ].join("\n"),
+    )
+
+    expect(out.get("a.test.ts p")).toBe("pass")
+    expect(out.get("a.test.ts f")).toBe("fail")
   })
 
   test("ANTI-VACUITY — an empty document yields nothing, never a confident empty agreement", () => {
@@ -107,6 +145,44 @@ describe("compareIsolationRuns — what counts as parity", () => {
     if (result.kind === "divergence") {
       expect(result.rows).toEqual([
         { file: "a.test.ts", name: "two", isolated: "pass", shared: "absent" },
+      ])
+    }
+  })
+
+  test("a test present only in the SHARED run is also a divergence", () => {
+    // The mirror of the case above. Checking one direction only would let a
+    // comparator that walks just the isolated keys call this parity — which is
+    // exactly what an intersection-based implementation does.
+    const isolated = junit([["a.test.ts", "one", true]])
+    const shared = junit([
+      ["a.test.ts", "one", true],
+      ["a.test.ts", "two", true],
+    ])
+
+    const result = compareIsolationRuns(isolated, shared)
+
+    expect(result.kind).toBe("divergence")
+    if (result.kind === "divergence") {
+      expect(result.rows).toEqual([
+        { file: "a.test.ts", name: "two", isolated: "absent", shared: "pass" },
+      ])
+    }
+  })
+
+  test("an absent side is reported as absent, never borrowed from the other run", () => {
+    // Guards the shape where a missing outcome silently inherits the peer's
+    // verdict: the row would then read pass/pass and vanish as parity.
+    const isolated = junit([["a.test.ts", "only-here", true]])
+    const shared = junit([["b.test.ts", "only-there", true]])
+
+    const result = compareIsolationRuns(isolated, shared)
+
+    expect(result.kind).toBe("divergence")
+    if (result.kind === "divergence") {
+      expect(result.rows).toHaveLength(2)
+      expect(result.rows.map((r) => `${r.isolated}/${r.shared}`).sort()).toEqual([
+        "absent/pass",
+        "pass/absent",
       ])
     }
   })
