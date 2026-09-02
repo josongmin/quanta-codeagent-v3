@@ -66,6 +66,44 @@ const SANCTIONED: Readonly<Record<string, { calls: number; reason: string }>> = 
 
 const CALL_RE = /\b(?:costUsd|priceUsage)\s*\(/g
 
+/**
+ * INDIRECTION guards (final-audit finding). The call census counts the two
+ * names followed by `(` — which an adversarial audit defeated two ways
+ * without tripping a single test:
+ *
+ *   import { costUsd as sneaky } from "@/observability"   // alias
+ *   const p = costUsd                                     // bare reference
+ *
+ * Both re-derive prices under a name the census never sees. Aliasing the
+ * pricing functions is banned outright (no sanctioned alias exists), and a
+ * bare FUNCTION-VALUE reference is banned too. Field names, object keys and
+ * property accesses spelled `costUsd` are not the function and stay legal;
+ * property-access CALLS (`pricing.costUsd(...)`) already land in CALL_RE.
+ */
+const ALIAS_RE = /\b(?:costUsd|priceUsage)\s+as\s+\w+/g
+const NAME_RE = /(?<![.\w$])(?:costUsd|priceUsage)\b/g
+
+const indirectionsOf = (src: string): string[] => {
+  const out: string[] = []
+  for (const m of src.matchAll(ALIAS_RE)) out.push(`alias: ${m[0]}`)
+  for (const m of src.matchAll(NAME_RE)) {
+    const idx = m.index ?? 0
+    const after = src.slice(idx + m[0].length)
+    if (/^\s*\(/.test(after)) continue // a CALL — the call census owns those
+    if (/^\s*\??\s*:/.test(after)) continue // object key / field annotation
+    const lineStart = src.lastIndexOf("\n", idx) + 1
+    const nl = src.indexOf("\n", idx)
+    const line = src.slice(lineStart, nl === -1 ? src.length : nl)
+    if (/^\s*(?:import|export)\b/.test(line) || /\bfrom\s+["']/.test(line)) continue
+    if (/\btypeof\s+(?:costUsd|priceUsage)\b/.test(line)) continue
+    // Multi-line import/export SPECIFIER lines are exactly the bare name plus
+    // a comma; anything else around the name is value smuggling.
+    if (/^\s*(?:type\s+)?(?:costUsd|priceUsage)\s*,?\s*$/.test(line)) continue
+    out.push(`bare ref: ${line.trim().slice(0, 80)}`)
+  }
+  return out
+}
+
 const walk = (dir: string, out: string[] = []): string[] => {
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry)
@@ -126,6 +164,28 @@ describe("A5 — pricing call-site census", () => {
       .filter(([file, s]) => s.calls > 0 && found.get(file) !== s.calls)
       .map(([file, s]) => `${file}: expected ${s.calls}, found ${found.get(file) ?? 0}`)
     expect(drifted).toEqual([])
+  })
+
+  test("no alias and no bare reference can smuggle a pricing call past the census", () => {
+    const offenders: string[] = []
+    for (const file of sources) {
+      for (const hit of indirectionsOf(stripComments(readFileSync(file, "utf8")))) {
+        offenders.push(`${relative(SRC_ROOT, file)} — ${hit}`)
+      }
+    }
+    expect(offenders).toEqual([])
+  })
+
+  test("SELF-TEST: the indirection scanner catches both evasion shapes", () => {
+    // Anti-vacuum for the rule itself — the two literal shapes the final
+    // audit used to walk straight past the call census.
+    expect(indirectionsOf('import { costUsd as sneaky } from "@/observability"')).toHaveLength(1)
+    expect(indirectionsOf("const p = costUsd\n")).toHaveLength(1)
+    expect(indirectionsOf('import {\n  costUsd,\n} from "@/observability"')).toEqual([])
+    expect(indirectionsOf("costUsd(model, a, b)")).toEqual([])
+    expect(indirectionsOf("const t: typeof costUsd = impl")).toEqual([])
+    expect(indirectionsOf("row.costUsd")).toEqual([])
+    expect(indirectionsOf("costUsd: null,")).toEqual([])
   })
 
   test("inside src/agent/loop only the two sanctioned files price", () => {

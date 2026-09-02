@@ -254,7 +254,9 @@ export class BudgetMeter {
   /** Snapshot of every counter. Stable — every call returns a fresh object. */
   snapshot(): BudgetUsage {
     const wallClockMs = this.clock() - this.startedAtMs
-    const costUsd = this.costUsdAccum
+    // Named to stay clear of the pricing-callsite census: `costUsd` in src is
+    // reserved for the pricing function; this is the meter's accumulated total.
+    const costUsdTotal = this.costUsdAccum
     return {
       turns: this.turns,
       modelCalls: this.modelCalls,
@@ -269,7 +271,7 @@ export class BudgetMeter {
       retries: this.retries,
       consecutiveFailures: this.consecutiveFailures,
       wallClockMs,
-      costUsd,
+      costUsd: costUsdTotal,
     }
   }
 
