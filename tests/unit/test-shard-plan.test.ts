@@ -11,8 +11,13 @@ import {
   usesSharedTestResource,
 } from "../../tools/dev/test-shard-plan"
 import {
+  loadSuccessfulTestShardReceipt,
   mergeScanReachSinks,
+  shardFilesSha256,
+  TEST_SHARD_CACHE_TTL_MS,
+  testEnvironmentSha256,
   writeScanReachReceiptAtomic,
+  writeSuccessfulTestShardReceiptAtomic,
 } from "../../tools/dev/test-shard-receipt"
 
 const temporaryDirectories: string[] = []
@@ -133,5 +138,134 @@ describe("scan-reach shard receipt", () => {
     const sink = join(directory, "bad.jsonl")
     writeFileSync(sink, '{"id":"scan","walked":-1}\n')
     expect(() => mergeScanReachSinks([sink])).toThrow("invalid scan-reach record")
+  })
+})
+
+describe("same-HEAD successful shard cache", () => {
+  test("normalizes runner-owned paths but keys every inherited test input", () => {
+    const left = testEnvironmentSha256(
+      { HOME: "/tmp/one", TMPDIR: "/tmp/a", QUANTA_MODE: "strict" },
+      120_000,
+    )
+    const right = testEnvironmentSha256(
+      { HOME: "/tmp/two", TMPDIR: "/tmp/b", QUANTA_MODE: "strict" },
+      120_000,
+    )
+    expect(left).toBe(right)
+    expect(testEnvironmentSha256({ QUANTA_MODE: "relaxed" }, 120_000)).not.toBe(left)
+    expect(testEnvironmentSha256({ QUANTA_MODE: "strict" }, 240_000)).not.toBe(left)
+  })
+
+  test("hits only for an intact bounded exact-input receipt", () => {
+    const directory = mkdtempSync(join(tmpdir(), "shard-success-cache-test-"))
+    temporaryDirectories.push(directory)
+    const testFile = join(directory, "a.test.ts")
+    const receiptPath = join(directory, "cache", "shard-1.json")
+    writeFileSync(testFile, "test('a', () => expect(1).toBe(1))\n")
+    const identity = {
+      head: "a".repeat(40),
+      suite: "full",
+      manifestSha256: "b".repeat(64),
+      shardIndex: 1,
+      shardFileCount: 1,
+      shardFilesSha256: shardFilesSha256(directory, [testFile]),
+      toolchainSha256: "c".repeat(64),
+      testEnvSha256: testEnvironmentSha256(
+        { QUANTA_TEST_KNOB: "super-secret-cache-input" },
+        120_000,
+      ),
+      junit: false,
+    }
+    const nowMs = 1_800_000_000_000
+    writeSuccessfulTestShardReceiptAtomic({
+      path: receiptPath,
+      identity,
+      executedFiles: 1,
+      scanReachRecords: [{ id: "guard", walked: 4, matched: 2 }],
+      nowMs,
+    })
+
+    expect(
+      loadSuccessfulTestShardReceipt({ path: receiptPath, expected: identity, nowMs }).kind,
+    ).toBe("hit")
+    const identityMutations = [
+      { ...identity, head: "d".repeat(40) },
+      { ...identity, suite: "unit" },
+      { ...identity, manifestSha256: "d".repeat(64) },
+      { ...identity, shardIndex: 2 },
+      { ...identity, shardFileCount: 2 },
+      { ...identity, shardFilesSha256: "d".repeat(64) },
+      { ...identity, toolchainSha256: "d".repeat(64) },
+      { ...identity, testEnvSha256: "d".repeat(64) },
+      { ...identity, junit: true },
+    ]
+    for (const expected of identityMutations) {
+      expect(loadSuccessfulTestShardReceipt({ path: receiptPath, expected, nowMs })).toEqual({
+        kind: "miss",
+        reason: "input-mismatch",
+      })
+    }
+    expect(
+      loadSuccessfulTestShardReceipt({
+        path: receiptPath,
+        expected: identity,
+        nowMs: nowMs + TEST_SHARD_CACHE_TTL_MS,
+      }),
+    ).toEqual({ kind: "miss", reason: "expired" })
+
+    // Red-on-injection: changing a file changes the content identity even when
+    // the path and overall manifest path digest stay fixed.
+    writeFileSync(testFile, "test('a', () => expect(2).toBe(2))\n")
+    expect(shardFilesSha256(directory, [testFile])).not.toBe(identity.shardFilesSha256)
+    const raw = readFileSync(receiptPath, "utf8")
+    expect(raw).not.toContain("super-secret-cache-input")
+    const hit = loadSuccessfulTestShardReceipt({ path: receiptPath, expected: identity, nowMs })
+    expect(hit.kind === "hit" ? hit.receipt.scanReachRecords : []).toEqual([
+      { id: "guard", walked: 4, matched: 2 },
+    ])
+  })
+
+  test("treats corrupt, tampered, and incomplete receipts as misses", () => {
+    const directory = mkdtempSync(join(tmpdir(), "shard-success-cache-test-"))
+    temporaryDirectories.push(directory)
+    const receiptPath = join(directory, "shard.json")
+    const identity = {
+      head: "a".repeat(40),
+      suite: "full",
+      manifestSha256: "b".repeat(64),
+      shardIndex: 1,
+      shardFileCount: 1,
+      shardFilesSha256: "c".repeat(64),
+      toolchainSha256: "d".repeat(64),
+      testEnvSha256: "e".repeat(64),
+      junit: false,
+    }
+    writeFileSync(receiptPath, "not-json")
+    expect(loadSuccessfulTestShardReceipt({ path: receiptPath, expected: identity })).toEqual({
+      kind: "miss",
+      reason: "absent-or-corrupt",
+    })
+    expect(() =>
+      writeSuccessfulTestShardReceiptAtomic({
+        path: receiptPath,
+        identity,
+        executedFiles: 0,
+        scanReachRecords: [],
+      }),
+    ).toThrow("refusing to cache")
+
+    writeSuccessfulTestShardReceiptAtomic({
+      path: receiptPath,
+      identity,
+      executedFiles: 1,
+      scanReachRecords: [],
+    })
+    const tampered = JSON.parse(readFileSync(receiptPath, "utf8")) as Record<string, unknown>
+    tampered.executedFiles = 2
+    writeFileSync(receiptPath, JSON.stringify(tampered))
+    expect(loadSuccessfulTestShardReceipt({ path: receiptPath, expected: identity })).toEqual({
+      kind: "miss",
+      reason: "integrity",
+    })
   })
 })

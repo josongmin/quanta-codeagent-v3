@@ -23,7 +23,17 @@ import {
   parseExecutedFileCount,
   type TestShardPlan,
 } from "./test-shard-plan"
-import { writeScanReachReceiptAtomic } from "./test-shard-receipt"
+import {
+  loadSuccessfulTestShardReceipt,
+  mergeScanReachSinks,
+  type SuccessfulTestShardReceipt,
+  shardFilesSha256,
+  type TestShardCacheIdentity,
+  testEnvironmentSha256,
+  testToolchainSha256,
+  writeScanReachReceiptAtomic,
+  writeSuccessfulTestShardReceiptAtomic,
+} from "./test-shard-receipt"
 
 /**
  * Authoritative local full-suite runner.
@@ -38,6 +48,7 @@ import { writeScanReachReceiptAtomic } from "./test-shard-receipt"
 const SHARD_COUNT = 8
 const REPO_ROOT = resolve(import.meta.dir, "..", "..")
 const SCAN_REACH_RECEIPT = join(REPO_ROOT, ".cache", "scan-reach-receipt.json")
+const SHARD_CACHE_ROOT = join(REPO_ROOT, ".cache", "test-shards", "v1")
 // The shard corpus contains cold-path source scans and real CLI integration
 // rails. A normal shard can exceed twelve minutes while continuously reporting
 // completed tests on a contended host, so a total wall-clock cap discards valid
@@ -192,6 +203,9 @@ const parseOptions = (args: readonly string[]): RunnerOptions => {
 
 const junitShardPath = (junitOut: string, index: number): string => `${junitOut}.shard-${index}.xml`
 
+const shardCachePath = (suite: SuiteName, index: number): string =>
+  join(SHARD_CACHE_ROOT, suite, `shard-${index}.json`)
+
 const prepareJunit = (junitOut: string): void => {
   rmSync(junitOut, { force: true })
   for (let index = 1; index <= SHARD_COUNT; index += 1) {
@@ -199,17 +213,20 @@ const prepareJunit = (junitOut: string): void => {
   }
 }
 
+const junitBody = (xml: string, index: number): string => {
+  const root = xml.indexOf("<testsuites")
+  const open = root < 0 ? -1 : xml.indexOf(">", root)
+  const close = xml.lastIndexOf("</testsuites>")
+  if (root < 0 || open < 0 || close < 0 || !xml.includes("<testcase")) {
+    throw new Error(`[test:shards] invalid JUnit receipt from shard ${index}/${SHARD_COUNT}`)
+  }
+  return xml.slice(open + 1, close).trim()
+}
+
 const mergeJunit = (junitOut: string): void => {
   const bodies: string[] = []
   for (let index = 1; index <= SHARD_COUNT; index += 1) {
-    const xml = readFileSync(junitShardPath(junitOut, index), "utf8")
-    const root = xml.indexOf("<testsuites")
-    const open = root < 0 ? -1 : xml.indexOf(">", root)
-    const close = xml.lastIndexOf("</testsuites>")
-    if (root < 0 || open < 0 || close < 0 || !xml.includes("<testcase")) {
-      throw new Error(`[test:shards] invalid JUnit receipt from shard ${index}/${SHARD_COUNT}`)
-    }
-    bodies.push(xml.slice(open + 1, close).trim())
+    bodies.push(junitBody(readFileSync(junitShardPath(junitOut, index), "utf8"), index))
   }
   writeFileSync(
     junitOut,
@@ -278,6 +295,7 @@ const runShard = async (
         ...process.env,
         HOME: workerHome,
         TMPDIR: workerTmp,
+        PWD: REPO_ROOT,
         QUANTA_HOME: quantaHome,
         QUANTA_PREFS_HOME: prefsHome,
         QUANTA_BENCH_RESULTS_DIR: benchResults,
@@ -343,6 +361,12 @@ interface CompletedShard {
   readonly snapshot: GitSnapshot
 }
 
+interface CachedShardPlan {
+  readonly plan: TestShardPlan
+  readonly identity: TestShardCacheIdentity
+  readonly cachePath: string
+}
+
 const validateCompletedShard = (before: GitSnapshot, completed: CompletedShard): string => {
   const { plan, result, snapshot } = completed
   if (!sameSnapshot(before, snapshot)) {
@@ -363,6 +387,52 @@ const validateCompletedShard = (before: GitSnapshot, completed: CompletedShard):
   )
 }
 
+const materializeCachedScanReachSink = (
+  runRoot: string,
+  receipt: SuccessfulTestShardReceipt,
+): string => {
+  const cacheWorkerRoot = join(runRoot, `cached-worker-${receipt.shardIndex}`)
+  mkdirSync(cacheWorkerRoot, { recursive: true })
+  const sink = join(cacheWorkerRoot, `scan-reach-${receipt.shardIndex}.jsonl`)
+  writeFileSync(
+    sink,
+    receipt.scanReachRecords.map((record) => JSON.stringify(record)).join("\n") +
+      (receipt.scanReachRecords.length === 0 ? "" : "\n"),
+  )
+  return sink
+}
+
+const materializeCachedJunit = (opts: RunnerOptions, receipt: SuccessfulTestShardReceipt): void => {
+  if (opts.junitOut === undefined) return
+  if (receipt.junitXml === undefined) {
+    throw new Error(`[test:shards] cached shard ${receipt.shardIndex} lost its JUnit receipt`)
+  }
+  junitBody(receipt.junitXml, receipt.shardIndex)
+  writeFileSync(junitShardPath(opts.junitOut, receipt.shardIndex), receipt.junitXml)
+}
+
+const cacheSuccessfulShard = (
+  cachedPlan: CachedShardPlan,
+  result: Awaited<ReturnType<typeof runShard>>,
+  opts: RunnerOptions,
+): void => {
+  if (result.executedFiles === undefined) {
+    throw new Error(`[test:shards] shard ${cachedPlan.plan.index} has no executed-file receipt`)
+  }
+  const junitXml =
+    opts.junitOut === undefined
+      ? undefined
+      : readFileSync(junitShardPath(opts.junitOut, cachedPlan.plan.index), "utf8")
+  if (junitXml !== undefined) junitBody(junitXml, cachedPlan.plan.index)
+  writeSuccessfulTestShardReceiptAtomic({
+    path: cachedPlan.cachePath,
+    identity: cachedPlan.identity,
+    executedFiles: result.executedFiles,
+    scanReachRecords: mergeScanReachSinks([result.scanReachSink]),
+    ...(junitXml === undefined ? {} : { junitXml }),
+  })
+}
+
 const nextPlanBatch = (
   plans: readonly TestShardPlan[],
   cursor: number,
@@ -375,28 +445,67 @@ const nextPlanBatch = (
 }
 
 const executePlans = async (input: {
-  readonly plans: readonly TestShardPlan[]
+  readonly plans: readonly CachedShardPlan[]
   readonly opts: RunnerOptions
   readonly runRoot: string
   readonly before: GitSnapshot
   readonly concurrency: 1 | 2
   readonly testTimeoutMs: number
 }): Promise<readonly string[]> => {
-  const scanReachSinks: string[] = []
-  for (let cursor = 0; cursor < input.plans.length; ) {
-    const batch = nextPlanBatch(input.plans, cursor, input.concurrency)
+  const scanReachSinks = new Map<number, string>()
+  const misses: CachedShardPlan[] = []
+  for (const cachedPlan of input.plans) {
+    const lookup = loadSuccessfulTestShardReceipt({
+      path: cachedPlan.cachePath,
+      expected: cachedPlan.identity,
+    })
+    if (lookup.kind === "miss") {
+      process.stdout.write(
+        `[test:shards] CACHE MISS shard=${cachedPlan.plan.index}/${SHARD_COUNT} reason=${lookup.reason}\n`,
+      )
+      misses.push(cachedPlan)
+      continue
+    }
+    materializeCachedJunit(input.opts, lookup.receipt)
+    scanReachSinks.set(
+      cachedPlan.plan.index,
+      materializeCachedScanReachSink(input.runRoot, lookup.receipt),
+    )
+    process.stdout.write(
+      `[test:shards] CACHE HIT shard=${cachedPlan.plan.index}/${SHARD_COUNT} ` +
+        `receipt=${lookup.receipt.receiptSha256.slice(0, 12)}\n`,
+    )
+  }
+
+  for (let cursor = 0; cursor < misses.length; ) {
+    const batch = nextPlanBatch(
+      misses.map(({ plan }) => plan),
+      cursor,
+      input.concurrency,
+    )
     if (batch.length === 0) throw new Error("[test:shards] scheduler produced an empty batch")
     cursor += batch.length
     const completed = await Promise.all(
-      batch.map(async (plan) => ({
-        plan,
-        result: await runShard(plan, input.opts, input.runRoot, input.testTimeoutMs),
-        snapshot: await gitSnapshot(),
-      })),
+      batch.map(async (plan) => {
+        const cachedPlan = misses.find((candidate) => candidate.plan.index === plan.index)
+        if (cachedPlan === undefined) throw new Error("[test:shards] missing cache plan")
+        const result = await runShard(plan, input.opts, input.runRoot, input.testTimeoutMs)
+        const completedShard = { plan, result, snapshot: await gitSnapshot() }
+        const sink = validateCompletedShard(input.before, completedShard)
+        cacheSuccessfulShard(cachedPlan, result, input.opts)
+        return { index: plan.index, sink }
+      }),
     )
-    for (const shard of completed) scanReachSinks.push(validateCompletedShard(input.before, shard))
+    for (const shard of completed) scanReachSinks.set(shard.index, shard.sink)
   }
-  return scanReachSinks
+  if (scanReachSinks.size !== input.plans.length) {
+    throw new Error(`[test:shards] cache/execution coverage incomplete: ${scanReachSinks.size}`)
+  }
+  return input.plans.map(({ plan }) => {
+    const sink = scanReachSinks.get(plan.index)
+    if (sink === undefined) throw new Error(`[test:shards] missing sink for shard ${plan.index}`)
+    return sink
+  })
 }
 
 const main = async (): Promise<void> => {
@@ -451,8 +560,26 @@ const main = async (): Promise<void> => {
         `load_1m=${loadAverage1m.toFixed(2)} cpus=${cpuCount} exclusive_files=${exclusiveFiles}\n`,
     )
 
+    const toolchainSha256 = testToolchainSha256()
+    const envSha256 = testEnvironmentSha256(process.env, testTimeoutMs)
+    const cachedPlans: readonly CachedShardPlan[] = plans.map((plan) => ({
+      plan,
+      cachePath: shardCachePath(opts.suite, plan.index),
+      identity: {
+        head: before.head,
+        suite: opts.suite,
+        manifestSha256: manifestDigest,
+        shardIndex: plan.index,
+        shardFileCount: plan.files.length,
+        shardFilesSha256: shardFilesSha256(REPO_ROOT, plan.files),
+        toolchainSha256,
+        testEnvSha256: envSha256,
+        junit: opts.junitOut !== undefined,
+      },
+    }))
+
     const scanReachSinks = await executePlans({
-      plans,
+      plans: cachedPlans,
       opts,
       runRoot,
       before,
