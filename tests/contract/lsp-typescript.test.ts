@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { TypescriptAdapter } from "@/lsp"
@@ -36,9 +36,21 @@ const tsServerAvailable = async (): Promise<boolean> => {
 const available = requireContract("typescript-language-server", await tsServerAvailable())
 
 const tmpDirs: string[] = []
+const REPO_TYPESCRIPT = join(import.meta.dir, "..", "..", "node_modules", "typescript")
 const makeTmpDir = (): string => {
   const dir = mkdtempSync(join(tmpdir(), "quanta-lsp-ts-"))
   tmpDirs.push(dir)
+  // typescript-language-server resolves the `typescript` package FROM THE
+  // WORKSPACE (or an explicit tsserver.path), never from its own global
+  // install — an empty temp workspace fails `initialize` with "Could not find
+  // a valid TypeScript installation" on any host where typescript is not
+  // globally adjacent (CI installs both side by side; a dev machine usually
+  // does not). Provision the workspace with the repo's real typescript so the
+  // contract exercises the adapter, not the host's global-install layout.
+  if (existsSync(REPO_TYPESCRIPT)) {
+    mkdirSync(join(dir, "node_modules"))
+    symlinkSync(REPO_TYPESCRIPT, join(dir, "node_modules", "typescript"))
+  }
   return dir
 }
 
