@@ -309,6 +309,9 @@
     "tests/unit/deny-reason-authority-ratchet-hellgate.test.ts#SRC-AGENT": {
       "walked": 728
     },
+    "tests/unit/dev/external-toolchain-coverage.test.ts#REAL_E2E": {
+      "walked": 16
+    },
     "tests/unit/edit-fresh-hash-mutating-tool-completeness-ratchet.test.ts#TOOL": {
       "walked": 306
     },

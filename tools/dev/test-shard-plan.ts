@@ -222,12 +222,6 @@ export const resourceClassesOverlap = (a: TestResourceClass, b: TestResourceClas
     ? false
     : a === "pure" || b === "pure" || VALIDATED_NONPURE_OVERLAPS.has(overlapKey(a, b))
 
-/** Compatibility shim for the previous binary classifier. */
-export const usesSharedTestResource = (
-  file: string,
-  source: string = readFileSync(file, "utf8"),
-): boolean => classifyTestResource(file, source) !== "pure"
-
 export interface TestChunk {
   readonly index: number
   readonly files: readonly string[]

@@ -16,7 +16,6 @@ import {
   planTestChunks,
   resourceClassesOverlap,
   TEST_RESOURCE_CLASSES,
-  usesSharedTestResource,
 } from "../../tools/dev/test-shard-plan"
 import {
   loadSuccessfulTestShardReceipt,
@@ -214,9 +213,6 @@ describe("resource-classed chunk plan", () => {
     expect(classifyTestResource("tests/unit/plain.test.ts", "process.kill(pid, 0)")).toBe(
       "process-global",
     )
-    // The binary shim keeps its old meaning for any remaining caller.
-    expect(usesSharedTestResource("tests/unit/plain.test.ts", "expect(1).toBe(1)")).toBe(false)
-    expect(usesSharedTestResource("tests/integration/plain.test.ts", "")).toBe(true)
   })
 
   test("pure overlaps everything EXCEPT the exclusive classes; non-pure serialize until validated", () => {
@@ -509,7 +505,9 @@ describe("same-INPUTS successful shard cache", () => {
     expect(testToolchainSha256({ git: "<missing>" })).not.toBe(present)
     // The live probe covers the tools the suites shell out to.
     const fingerprint = externalToolchainFingerprint()
-    for (const tool of ["git", "docker", "python3", "typescript-language-server", "pyright"]) {
+    // `pyright` was the wrong binary — the tests resolve `pyright-langserver`;
+    // the coverage drift guard now keeps this list honest against the corpus.
+    for (const tool of ["git", "docker", "python3", "typescript-language-server", "cargo"]) {
       expect(typeof fingerprint[tool]).toBe("string")
       expect(fingerprint[tool]?.length).toBeGreaterThan(0)
     }

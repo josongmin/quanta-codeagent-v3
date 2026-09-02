@@ -96,6 +96,7 @@ const makeRepo = (runs: readonly string[]): string => {
     "verification-receipt.ts",
     "verification-receipt-probe.ts",
     "external-toolchain.ts",
+    "verdict-env.ts",
   ]) {
     copyFileSync(join(SOURCE_DIR, dependency), join(root, "tools", "dev", dependency))
   }

@@ -34,6 +34,7 @@ const CAMPAIGN_MODULES = [
   "verification-receipt-probe.ts",
   "verification-campaign-receipt.ts",
   "external-toolchain.ts",
+  "verdict-env.ts",
 ] as const
 
 // Campaign startup spawns bun twice and hashes the tree; on a box already

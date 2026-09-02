@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { EXTERNAL_TOOLS } from "../../../tools/dev/external-toolchain"
+import { assertScanPopulation } from "../_shared/scan-population"
 
 /**
  * DRIFT GUARD — the capability fingerprint must know every binary whose
@@ -33,6 +34,20 @@ const trackedRealE2eFiles = (): readonly string[] => {
   return result.stdout.toString().split("\n").filter(Boolean)
 }
 
+const REAL_E2E_FILES = trackedRealE2eFiles()
+
+// The house rule for a guard that states a zero-verdict over a scanned corpus:
+// a floor written at the call site cannot see a subtree disappear, so the
+// MEASURED reach is pinned in tools/dev/scan-reach-baseline.json instead.
+assertScanPopulation(
+  REAL_E2E_FILES.map((file) => join(REPO_ROOT, file)),
+  join(REPO_ROOT, "tests"),
+  {
+    collectable: (name) => name.endsWith("real-e2e.test.ts"),
+    id: "tests/unit/dev/external-toolchain-coverage.test.ts#REAL_E2E",
+  },
+)
+
 /**
  * Names that appear in a gating-shaped call but are NOT host binaries.
  * Each is a deliberate admission, so a genuinely new tool cannot hide here.
@@ -44,7 +59,7 @@ const NOT_A_HOST_BINARY: ReadonlySet<string> = new Set([
 
 describe("capability fingerprint covers what actually gates a skip", () => {
   test("every binary the real-toolchain lane resolves is fingerprinted", () => {
-    const files = trackedRealE2eFiles()
+    const files = REAL_E2E_FILES
     // ANTI-VACUITY: an empty or collapsed corpus must fail here rather than
     // report perfect coverage over nothing.
     expect(files.length).toBeGreaterThanOrEqual(10)
