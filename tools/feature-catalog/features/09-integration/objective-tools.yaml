@@ -27,10 +27,16 @@ purpose: |
   itself can declare its objective, surface blockers, and list next actions —
   closing the consumer side of the substrate ADR-0394 shipped. Wave-1 (ADR-0394)
   was MODEL ONLY; this wave (ADR-0402) is the FIRST consumer wire: a new
-  `src/tool/objective/` slice (1 file) exposes `objective_set` (set/replace per-
-  thread goal + optional success_criteria + optional budget), `objective_update`
-  (6-arm discriminated-union mutate: status / addBlocker / clearBlocker /
-  nextActions / markCriterion / recordUsage), and `objective_get` (read-only).
+  `src/tool/objective/` slice exposes `objective_set` (propose a goal +
+  optional success_criteria + optional budget — REPLACE is refused: a live
+  objective belongs to the user, and the tool says so), `objective_update`, and
+  `objective_get` (read-only).
+
+  CORRECTED 2026-09-01: `objective_update` shipped as a 6-arm union (status /
+  addBlocker / clearBlocker / nextActions / markCriterion / recordUsage) and is
+  now TWO arms — `addBlocker` and `nextActions`. Status, criterion completion and
+  usage became host-owned, so the model can no longer write them at all; the
+  removed arms are schema rejections, not no-ops.
 
   All 3 tools declare `hitlTier: "pre-approval-ok"` (information-class — no FS,
   shell, or network side effect). NO-THROW: schema validation via `safeParse`
@@ -57,11 +63,12 @@ purpose: |
   features / types). The tool slice does not mutate the substrate slice; it
   consumes the port verbatim.
 
-  Status derivation rule is NOT overridden — `objective_update { kind:"status",
-  status:"blocked" }` is a no-op on the explicit status (the substrate stores
-  only "active"|"completed" as explicit intent; "blocked" derives from
-  `blockers.length > 0`). Tools surface this honestly via re-render after the
-  call.
+  Status derivation rule is NOT overridden, and since the 2-arm narrowing the
+  model cannot express a status intent at all: `objective_update
+  { kind:"status" }` is a SCHEMA REJECTION (it used to be an accepted no-op).
+  "blocked" still derives from `blockers.length > 0`, and a model blocker now
+  needs a host-resolvable tool/child-agent dependency plus three distinct
+  attempts — approval / user-input / external targets are typed unresolved.
 evidence:
   code:
     - src/tool/objective/index.ts
@@ -80,10 +87,12 @@ knobs:
     where: src/agent/types.ts
     default: 'undefined'
     purpose: |
-      Per-session port slot. Absent ⇒ 3 tools NOT registered (default-OFF
-      byte-identical). Present ⇒ 3 tools registered and bound to the same
-      port instance. Caller-wire — the composition root constructs the
-      reference store via `createObjectiveStore()`.
+      Per-session port slot. Absent ⇒ 3 tools NOT registered. Present ⇒ 3 tools
+      registered and bound to the same port instance. CORRECTED 2026-09-01: this
+      is no longer default-OFF — the goal preset seeds `QUANTA_OBJECTIVE_TOOLS=1`
+      when unset (opt out with `QUANTA_GOAL=0`), so the tools are ON out of the
+      box. And the composition root must NOT construct a surface-local store:
+      `resolveGatedObjectiveAuthority` builds the ONE revisioned authority.
 deliberate_hold:
   reason: |
     Since ADR-0402 the "ZERO downstream consumers" premise has been overtaken —
@@ -100,9 +109,11 @@ deliberate_hold:
     L4 when the remaining consumers (subagent attribution + per-turn reminder) are
     wired and the objective is on operational monitoring.
 notes: |
-  30 hellgate cases / 62 expects pin: tier1 barrel re-export; AgentConfig
+  38 hellgate cases / 136 expects pin (re-measured 2026-09-01; the 30/62 below
+  was the landing figure): tier1 barrel re-export; AgentConfig
   slot + FeaturesConfig Pick; default-OFF (slot absent ⇒ no tools); wired
   (slot present ⇒ all 3 tools); same-port binding (set/get round-trip);
   schema rejection of unknown ops + bad enums + missing thread_id; each of
-  6 op variants round-trips; NO-THROW on throwing fake port; HITL tier
+  the 2 surviving op variants round-trip (the other four are rejections now);
+  NO-THROW on throwing fake port; HITL tier
   surface. Sibling-shaped to delegate-tool-hellgate (ADR-0393).

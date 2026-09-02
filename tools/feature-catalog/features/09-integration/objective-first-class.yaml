@@ -19,7 +19,7 @@ surface_integration:
   verified: "2026-06-09"
   evidence:
     cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "pure internal typed store/port primitive, no UI affordance on any surface"
+    web: "na — this record is the SUBSTRATE. The browser affordance is real but belongs to web-goal-controls / objective-goal-continuation-live, which own the /goal command and the default-ON GoalStateBar"
 purpose: |
   First-class per-thread Objective — closes quanta's biggest structural gap:
   there was no typed object tying a thread's work together (goal / what "done"
@@ -28,10 +28,14 @@ purpose: |
   scrollback instead of reading a typed object. This wave ships the SUBSTRATE
   ONLY — the typed model (Objective / SuccessCriterion / Blocker /
   ObjectiveBudget / ObjectiveStatus / ObjectiveSnapshot), the closed
-  `ObjectivePort`, and a zero-dep in-memory `createObjectiveStore`. NOT wired
-  into the agent loop / dispatch / prompt / features / any tool (in-flight
-  work on those shared files). Pure new slice `src/objective/`, no
-  cross-slice imports (only `node:crypto` for randomUUID).
+  `ObjectivePort`, and the in-memory store. CORRECTED 2026-09-01: the
+  "NOT wired into the agent loop / dispatch / prompt / features / any tool"
+  clause was true for this wave and is now false — the agent loop reads it
+  (`emit-helpers.ts` applyMeasuredUsageLimit), tier-1 wires it
+  (`agent/tier1/objective.ts`), three LLM tools consume it, and a default-ON
+  browser surface reads and mutates it. The slice fence also permits `@/shared`
+  (pinned as legitimate by tests/unit/objective-slice-boundary.test.ts), not
+  only `node:crypto`. This record stays scoped to the substrate.
 
   Status is DERIVED, never stored as truth: (1) blockers non-empty ⇒ "blocked"
   (highest priority); (2) else all criteria met (>=1) ⇒ "completed"
@@ -45,9 +49,10 @@ purpose: |
   mutation. recordUsage accumulates non-negative finite integer deltas and
   clamps negative/NaN to a no-op. toSnapshot/fromSnapshot round-trips
   deep-equal + JSON byte-stable; fromSnapshot REPLACES (does not merge) and
-  tolerates a hostile snapshot. Default-OFF: importing the barrel allocates
-  nothing until a host calls createObjectiveStore — the agent stays
-  byte-identical until a later wave wires it.
+  tolerates a hostile snapshot. The barrel still allocates nothing until a host
+  constructs the authority, but "default-OFF … until a later wave wires it" no
+  longer describes the tree: the goal preset seeds `QUANTA_OBJECTIVE_TOOLS=1`
+  when unset, so the substrate is live out of the box (opt out `QUANTA_GOAL=0`).
 evidence:
   code:
     - src/objective/types.ts
@@ -66,23 +71,25 @@ knobs:
     purpose: injected clock seam for deterministic createdAt/updatedAt/since stamps
 deliberate_hold:
   reason: |
-    MODEL ONLY wave. The slice is a closed port + in-memory store with full
-    hellgate coverage, but it is NOT yet referenced by any code path: not the
-    agent loop, dispatch, prompt, features, nor any tool. Wiring is held back
-    because there is in-flight work on those shared agent files and the
-    attribution semantics (which lifecycle events set goal / criteria /
-    blockers / usage) belong to a dedicated wave.
+    RESOLVED 2026-09-01 — this hold's subject is gone. It said the slice "is NOT
+    yet referenced by any code path"; it is now referenced by the agent loop,
+    tier-1 features, three LLM tools, the kernel, and a default-ON browser
+    surface. Kept as a record rather than deleted because the promotion condition
+    below was met many waves before anyone re-read this line.
   promotion_path: |
     A later wave wires `createObjectiveStore` into the composition root so
     compaction preserves { goal, successCriteria, nextActions, blockers }
     verbatim across a summarize, resume re-hydrates via fromSnapshot, and
     subagent results attribute to the parent's objective. Promote to L3 once
     at least one real lifecycle producer/consumer is wired and a surface reads
-    the objective.
+    the objective. MET: 21 live lifecycle producers (pinned by
+    tests/unit/objective/lifecycle-producer-wiring-ratchet.test.ts) and two
+    surfaces that read it (CLI /goal, browser GoalStateBar).
 notes: |
   Slice fence verified: no imports from @/agent core (loop/dispatch/prompt/
   features/types), @/apps, or sibling slices. IDs via crypto.randomUUID().
-  33 hellgate cases / 101 expects pin the status-derivation rule, NO-THROW,
+  44 hellgate cases / 168 expects pin (re-measured 2026-09-01; 33/101 was the
+  landing figure) the status-derivation rule, NO-THROW,
   frozen snapshots, usage accumulation, snapshot round-trip, and multi-thread
   isolation. Sibling-shaped to the Stage1Store (ADR-0216) agent-side
   no-throw store pattern but synchronous + null-degrade (no Promise / no

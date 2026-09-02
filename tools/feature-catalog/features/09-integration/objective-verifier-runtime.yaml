@@ -43,6 +43,7 @@ purpose: |
   or stale checked completion from being presented as current proof.
 evidence:
   code:
+    - src/session/objective-posture-schema.ts
     - src/host/runtime/objective-verifier-wire.ts
     - src/host/runtime/objective-store-wire.ts
     - src/runtime/run-argv.ts

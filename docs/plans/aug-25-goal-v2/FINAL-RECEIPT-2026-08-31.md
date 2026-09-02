@@ -8,7 +8,7 @@ canonical sharded gates were exercised.
 
 - R1, R2, R3, R4, R5, R6, R7: **DONE**.
 - R8 headless/batch autonomous pursuit: **DELIBERATE HOLD**, 완료 blocker 아님.
-- 검증 대상은 이 receipt를 포함한 commit tree다. 아래 gate 이후 source/doc/catalog 수정 없이
+- 검증 대상은 이 receipt를 포함한 commit tree다. **2026-09-01 범위 주석**: 그 이후 30여 커밋이 랜딩했고 그중 `4c50b2a5c`는 goal 웹 표면을 건드린다(readback 판정 가드 추가). 아래 게이트 수치는 receipt 커밋 시점의 것이며, 재측정에서 값이 바뀐 항목은 각 receipt에 개별 정정으로 적었다(예: cohort 266→326, PTY 10→16, lint:debt now green). 아래 gate 이후 source/doc/catalog 수정 없이
   `main`을 fast-forward하고 `git push --no-verify origin main`한다.
 
 ## Public proof

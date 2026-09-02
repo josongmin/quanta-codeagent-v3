@@ -105,6 +105,8 @@ evidence:
     - src/session/objective-blocker-schema.ts
     - src/apps/web-daemon/readout-compose.ts
     - src/apps/web-daemon/readout.ts
+    - src/apps/cli/repl/goal-quiescence.ts
+    - src/apps/cli/repl/goal-wake-signal.ts
     - apps/web-frontend/src/components/slash-goal.ts
     - apps/web-frontend/src/components/slash-catalog.ts
     - apps/web-frontend/src/ws/session-hooks.ts

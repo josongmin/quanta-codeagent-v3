@@ -21,7 +21,7 @@ surface_integration:
   verified: "2026-06-09"
   evidence:
     cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "the objective (incl status) reaches the web-only ObjectiveCard via observability-emitter (objective.get), but the budget ratio/enforcement is mostly loop-internal continuation suppression; the card renders goal/blockers/next-actions, budget render is thin"
+    web: "CORRECTED 2026-09-01. The browser now has a first-class budget CONTROL, not a thin render: `/goal budget --max-turns=N --max-tokens=N` sends `amendBudget` under revision CAS and waits for the cap to be observed in the readout (apps/web-frontend/src/components/slash-goal.ts). Status/limit visibility is default-ON through GoalStateBar, independent of the default-OFF ObjectiveCard this line used to describe. Enforcement itself remains authority-side (beginAttempt bounds BOTH counters)."
 purpose: |
   Makes the ADR-0394 `ObjectiveBudget` (maxTokens / maxTurns) a HARD GATE
   instead of stored-but-never-read informational state. Before H17 the budget

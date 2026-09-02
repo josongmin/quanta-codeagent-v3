@@ -48,6 +48,9 @@ evidence:
     - apps/web-frontend/src/components/slash-catalog.ts
     - apps/web-frontend/src/ws/client.ts
     - apps/web-frontend/src/ws/session-hooks.ts
+    - apps/web-frontend/src/ws/goal-state-hooks.ts
+    - src/kernel/session/objective-command.ts
+    - src/protocol/session/objective-projection.ts
   adrs: [394]
   tests:
     unit:
@@ -56,6 +59,7 @@ evidence:
       - tests/unit/apps/web-daemon/readout-goal-hellgate.test.ts
       - tests/unit/apps/web-daemon/readout-production-wiring-hellgate.test.ts
       - tests/unit/apps/web-daemon/goal-freshness-authority-hellgate.test.ts
+      - apps/web-frontend/src/components/slash-goal.landing-guard.test.ts
       - tests/unit/apps/web-daemon/goal-verify-hellgate.test.ts
       - tests/unit/apps/web-daemon/goal-state-source.test.ts
       - apps/web-frontend/src/components/GoalStateBar.test.tsx

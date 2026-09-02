@@ -70,9 +70,9 @@ R8 headless/batch: deliberate hold, DAG 밖
   authority/verifier/wake가 같은 no-throw sink를 공유한다. settlement는 기존 decision counter만 사용한다.
 - R6 generic smoke runner는 ObjectiveAuthority/verifier/wake가 없어 Goal proof로 사용하지 않는다.
 - R7은 existing attach lifecycle hooks만 truth로 유지하고 dead boolean seam을 삭제했다. close-start
-  stop과 clear-failure generation fence의 focused rail이 green이며 R6 same-HEAD promotion을 기다린다.
+  stop과 clear-failure generation fence의 focused rail이 green이고 R6 same-HEAD promotion에서 확정됐다(이 문서 자신이 R6를 DONE으로 적고 있어 '기다린다'는 서술이 모순이었다 — 2026-09-01 정정).
 - R4는 mutation/session/attach/wake/stop refresh edge, changed-only dedupe, reconnect replay,
-  observability-independent persistent UI의 focused rail이 green이며 R6 same-HEAD promotion을 기다린다.
+  observability-independent persistent UI의 focused rail이 green이고 R6 same-HEAD promotion에서 확정됐다(이 문서 자신이 R6를 DONE으로 적고 있어 '기다린다'는 서술이 모순이었다 — 2026-09-01 정정).
 
 ## 공통 중단 조건
 
