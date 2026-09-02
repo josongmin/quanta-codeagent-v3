@@ -126,8 +126,29 @@ const VALIDATED_NONPURE_OVERLAPS: ReadonlySet<string> = new Set()
 
 const overlapKey = (a: TestResourceClass, b: TestResourceClass): string => [a, b].sort().join("+")
 
+/**
+ * Classes measured unsafe even against `pure`.
+ *
+ * `pure` overlapping everything is this plan's whole parallelism win, and it
+ * holds for every resource whose hazard is its KIND — two `port` chunks fight
+ * over sockets, a `pure` peer cannot. A real browser is the exception: what
+ * breaks it is the peer's CPU appetite, which `pure` says nothing about. The
+ * 2026-09-02 gate audit measured it twice — a real-Chrome file lost an HONORED,
+ * pressure-scaled 60,000ms CDP budget by 1.88ms while scheduled beside a 137-file
+ * `pure` chunk, and passed 3/3 alone. Another timeout multiplier would only
+ * record the contention as if it were a property of the code.
+ *
+ * Safe because the scheduler starts a task unconditionally when nothing is
+ * running (`test-shard-lifecycle.ts` `startEligibleTasks`), so an exclusive
+ * chunk waits for an empty box rather than starving. Pinned by
+ * "an exclusive class still runs" in tests/unit/test-shard-plan.test.ts.
+ */
+const EXCLUSIVE_CLASSES: ReadonlySet<TestResourceClass> = new Set<TestResourceClass>(["browser"])
+
 export const resourceClassesOverlap = (a: TestResourceClass, b: TestResourceClass): boolean =>
-  a === "pure" || b === "pure" || VALIDATED_NONPURE_OVERLAPS.has(overlapKey(a, b))
+  EXCLUSIVE_CLASSES.has(a) || EXCLUSIVE_CLASSES.has(b)
+    ? false
+    : a === "pure" || b === "pure" || VALIDATED_NONPURE_OVERLAPS.has(overlapKey(a, b))
 
 /** Compatibility shim for the previous binary classifier. */
 export const usesSharedTestResource = (

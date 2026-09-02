@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { runResourceAwareSchedule } from "../../tools/dev/test-shard-lifecycle"
 import {
   assertTestChunkPlan,
   chooseShardConcurrency,
@@ -98,6 +99,69 @@ describe("resource-classed chunk plan", () => {
   })
 
   test("classifier names the owned resource; path fallback stays serialized", () => {
+    // ★ A real browser must not share the box with ANYTHING, `pure` included.
+    //
+    // MEASURED DEFECT (2026-09-02 gate audit, second pass): classifying the
+    // real-Chrome files correctly was necessary and NOT sufficient. The overlap
+    // rule lets `pure` run beside every class unconditionally and the validated
+    // non-pure pair set is empty, so the 12-file `browser` chunk is always
+    // scheduled against a `pure` chunk of ~137 files. Chrome then lost an
+    // HONORED, pressure-scaled 60,000ms CDP budget by 1.88ms
+    // (`browser-real-chrome-adversarial-e2e.test.ts` declares
+    // `pressureScaledTimeoutMs(30_000)`, the run had scale 2) — while the same
+    // file passes 3/3 in isolation. The peer's CPU appetite is what breaks a
+    // browser, not its resource KIND, which is the one case `pure` cannot model.
+    //
+    // Raising the multiplier again would record contention as a code property.
+    expect(resourceClassesOverlap("browser", "pure")).toBe(false)
+    expect(resourceClassesOverlap("pure", "browser")).toBe(false)
+    expect(resourceClassesOverlap("browser", "browser")).toBe(false)
+    // PAIRED CONTROL — the design's parallelism win is a carve-out, not a
+    // reversal: `pure` still overlaps every OTHER class.
+    expect(resourceClassesOverlap("pure", "port")).toBe(true)
+    expect(resourceClassesOverlap("pure", "integration-path")).toBe(true)
+    expect(resourceClassesOverlap("pure", "pure")).toBe(true)
+    // PAIRED CONTROL — unrelated non-pure pairs are unchanged (still serial).
+    expect(resourceClassesOverlap("port", "lsp")).toBe(false)
+  })
+
+  test("an exclusive class still runs — it waits for an empty box, it does not deadlock", async () => {
+    // `browser` overlapping NOTHING is only safe because the scheduler starts a
+    // task unconditionally when nothing is running. Without that this change
+    // would hang the suite instead of serializing it.
+    const started: string[] = []
+    const release = new Map<string, () => void>()
+    const gate = (key: string) =>
+      new Promise<void>((resolve) => {
+        release.set(key, resolve)
+      })
+    const task = (key: number, name: string, resourceClass: string) => ({
+      key,
+      resourceClass,
+      run: async (): Promise<string> => {
+        started.push(name)
+        await gate(name)
+        return name
+      },
+    })
+    const done = runResourceAwareSchedule({
+      tasks: [task(1, "browser-chunk", "browser"), task(2, "pure-chunk", "pure")],
+      overlap: (a, b) => resourceClassesOverlap(a as never, b as never),
+      desiredConcurrency: async () => 2,
+      cancelAll: async () => undefined,
+    })
+    // Only the browser chunk may hold the box; the pure peer must WAIT.
+    while (started.length === 0) await new Promise((r) => setTimeout(r, 1))
+    expect(started).toEqual(["browser-chunk"])
+    release.get("browser-chunk")?.()
+    // Once it frees the box the peer runs — so nothing is starved.
+    while (started.length < 2) await new Promise((r) => setTimeout(r, 1))
+    expect(started).toEqual(["browser-chunk", "pure-chunk"])
+    release.get("pure-chunk")?.()
+    await done
+  })
+
+  test("classifier names the owned resource (real browser edition)", () => {
     // ★ A test that SPAWNS A REAL BROWSER must be classed `browser` so the
     // scheduler serializes it against browser-owning peers.
     //
@@ -152,10 +216,15 @@ describe("resource-classed chunk plan", () => {
     expect(usesSharedTestResource("tests/integration/plain.test.ts", "")).toBe(true)
   })
 
-  test("pure overlaps everything; non-pure classes serialize until validated", () => {
+  test("pure overlaps everything EXCEPT the exclusive classes; non-pure serialize until validated", () => {
+    // The carve-out is named here rather than removing the rule: `pure` still
+    // overlaps every class whose hazard is its KIND. A real browser's hazard is
+    // the peer's CPU appetite, which `pure` cannot model (2026-09-02 audit).
+    const exclusive = new Set(["browser"])
     for (const resourceClass of TEST_RESOURCE_CLASSES) {
-      expect(resourceClassesOverlap("pure", resourceClass)).toBe(true)
-      expect(resourceClassesOverlap(resourceClass, "pure")).toBe(true)
+      expect(resourceClassesOverlap("pure", resourceClass)).toBe(!exclusive.has(resourceClass))
+      // Symmetric: the rule is order-independent, carve-out included.
+      expect(resourceClassesOverlap(resourceClass, "pure")).toBe(!exclusive.has(resourceClass))
     }
     const nonPure = TEST_RESOURCE_CLASSES.filter((resourceClass) => resourceClass !== "pure")
     for (const left of nonPure) {
