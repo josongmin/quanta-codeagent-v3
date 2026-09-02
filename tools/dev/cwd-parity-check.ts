@@ -133,7 +133,7 @@ export const parseParityArgs = (
   }
 }
 
-export const parityArmCommand = (file: string): readonly string[] => {
+export const parityArmCommand = (file: string): string[] => {
   const preloads = PRELOADS.flatMap((preload) => ["--preload", join(REPO_ROOT, preload)])
   return ["bun", "test", ...preloads, file, `--timeout=${ARM_TEST_TIMEOUT_MS}`]
 }
