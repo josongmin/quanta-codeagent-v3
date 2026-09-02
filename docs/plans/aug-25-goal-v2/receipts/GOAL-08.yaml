@@ -1,6 +1,11 @@
 # ARCHIVED RECEIPT: point-in-time evidence, not current HEAD status. See ../README.md and ../NEXT-PLAN.md.
 # 2026-08-31 correction: browser mutation/verify producers and approval-resume goal attribution are live;
-# ticketRedRailsVacuous below is superseded. Browser always-on wake/checkpoint projection remains open.
+# ticketRedRailsVacuous below is superseded.
+# 2026-09-01 correction: "browser always-on wake/checkpoint projection remains open" is ALSO superseded —
+# the chain is live end to end and ungated: the daemon pushes a goal-state frame (server.ts goalStateSource),
+# the client exposes onGoalState, useGoalState holds it, and GoalStateBar renders wake + latestSettlement,
+# mounted unconditionally in App.tsx with an explicit note that it does not depend on the default-OFF
+# observability pane.
 ticket: GOAL-08
 kind: self-audit receipt (implementation by the Codex lane: b0f2e1c87 "atomically submit web goal turns", merged via 9b21d2fd2)
 recordedAt: 2026-08-27T02:45:00Z
