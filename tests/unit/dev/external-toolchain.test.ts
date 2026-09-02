@@ -92,7 +92,8 @@ describe("host capability fingerprint", () => {
       expect(fingerprint[tool]?.length).toBeGreaterThan(0)
     }
     expect(EXTERNAL_TOOLS).toContain("docker")
-    expect(EXTERNAL_TOOLS).toContain("pyright")
+    // The binary the tests actually resolve — see the coverage drift guard.
+    expect(EXTERNAL_TOOLS).toContain("pyright-langserver")
 
     const injected = externalToolchainFingerprint(() => "<missing>")
     expect(new Set(Object.values(injected))).toEqual(new Set(["<missing>"]))

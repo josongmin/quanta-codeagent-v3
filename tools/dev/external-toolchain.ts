@@ -25,13 +25,40 @@ import { realpathSync, statSync } from "node:fs"
  * mtime) and the whole "the probe hung" class is gone.
  */
 
-/** Executables the host-dependent gates actually invoke. */
+/**
+ * Executables whose PRESENCE decides whether a host-dependent test runs.
+ *
+ * Harvested from the corpus, not guessed: these are the names the
+ * `*-real-e2e.test.ts` lane and the contract suites resolve before deciding
+ * to skip. The first version listed five plausible tools and missed `cargo`,
+ * `go`, `gopls`, `rust-analyzer`, `clangd`, `lldb-dap`, `node` and `npm` — the
+ * whole 43-case real-toolchain lane — so installing a Rust or Go toolchain
+ * left the fingerprint identical and replayed a green earned while those
+ * cases skipped. It also probed `pyright`, while the tests gate on
+ * `pyright-langserver`.
+ *
+ * `tests/unit/dev/external-toolchain-coverage.test.ts` fails when the corpus
+ * gains a gating binary this list does not carry.
+ */
 export const EXTERNAL_TOOLS = [
-  "git",
+  "bun",
+  "cargo",
+  "clang++",
+  "clangd",
+  "dlv",
   "docker",
+  "g++",
+  "git",
+  "go",
+  "gopls",
+  "lldb-dap",
+  "node",
+  "npm",
+  "pyright-langserver",
   "python3",
+  "rust-analyzer",
   "typescript-language-server",
-  "pyright",
+  "uv",
 ] as const
 
 export const probeToolVersion = (tool: string): string => {
