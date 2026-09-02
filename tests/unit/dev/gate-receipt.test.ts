@@ -92,7 +92,11 @@ const makeRepo = (runs: readonly string[]): string => {
   roots.push(root)
   mkdirSync(join(root, "tools", "dev"), { recursive: true })
   copyFileSync(SOURCE_GATE, join(root, "tools", "dev", "gate.ts"))
-  for (const dependency of ["verification-receipt.ts", "verification-receipt-probe.ts"]) {
+  for (const dependency of [
+    "verification-receipt.ts",
+    "verification-receipt-probe.ts",
+    "external-toolchain.ts",
+  ]) {
     copyFileSync(join(SOURCE_DIR, dependency), join(root, "tools", "dev", dependency))
   }
   writeFileSync(join(root, "tools", "dev", "gate-manifest.ts"), manifestSource(runs))

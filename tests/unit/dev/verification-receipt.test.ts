@@ -10,6 +10,7 @@ import {
   validateExactVerificationReceipt,
   verificationEnvironmentSha256,
   verificationReceiptPath,
+  verificationToolchainSha256,
 } from "../../../tools/dev/verification-receipt"
 
 const context = (overrides: Partial<VerificationContext> = {}): VerificationContext => ({
@@ -55,6 +56,19 @@ describe("content-bound exact verification receipt", () => {
       reason: "receipt expired",
     })
     expect(validateExactVerificationReceipt({ schema: "wrong" }, context(), 2_000).ok).toBe(false)
+  })
+
+  test("a host capability change invalidates the receipt that skips every gate", () => {
+    // An exact receipt skips `contract` and `real-toolchain-e2e` wholesale, so
+    // losing (or gaining) the tools those gates drive must invalidate it. The
+    // fingerprint was wired into the shard cache first and MISSED here.
+    const withDocker = verificationToolchainSha256({ docker: "/usr/bin/docker 27.0.0" })
+    expect(verificationToolchainSha256({ docker: "/usr/bin/docker 27.0.0" })).toBe(withDocker)
+    expect(verificationToolchainSha256({ docker: "<missing>" })).not.toBe(withDocker)
+    expect(verificationToolchainSha256({ docker: "/usr/bin/docker 28.0.0" })).not.toBe(withDocker)
+    expect(verificationToolchainSha256({ docker: "/usr/bin/docker <unresponsive>" })).not.toBe(
+      withDocker,
+    )
   })
 
   test("nested bun-run PATH duplication is fingerprint-equivalent", () => {

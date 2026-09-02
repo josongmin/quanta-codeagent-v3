@@ -2,6 +2,7 @@ import { createHash } from "node:crypto"
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs"
 import { arch, hostname, platform, release } from "node:os"
 import { delimiter, dirname, join } from "node:path"
+import { externalToolchainFingerprint } from "./external-toolchain"
 
 export const EXACT_RECEIPT_SCHEMA = "quanta.exact-verification-receipt.v1" as const
 export const DEFAULT_RECEIPT_TTL_MS = 6 * 60 * 60_000
@@ -125,7 +126,18 @@ const relevantEnvironment = (env: NodeJS.ProcessEnv): readonly [string, string][
 export const verificationDependencySha256 = (repoRoot: string): string =>
   hashFiles(repoRoot, ["package.json", "bun.lock", "bun.lockb", "bunfig.toml"])
 
-export const verificationToolchainSha256 = (): string =>
+/**
+ * An exact receipt skips EVERY gate, `contract` and `real-toolchain-e2e`
+ * included — the two that shell out to docker / python / the language servers.
+ * So the host's capability set is part of the receipt's identity: a box that
+ * has since lost docker must not replay a green it can no longer earn, and one
+ * that just gained pyright must not keep reusing a green that skipped it.
+ * (Measured gap: the fingerprint was wired into the shard cache first and left
+ * out of the receipt that actually does the skipping.)
+ */
+export const verificationToolchainSha256 = (
+  externalTools: Record<string, string> = externalToolchainFingerprint(),
+): string =>
   sha256(
     JSON.stringify({
       bun: Bun.version,
@@ -134,6 +146,7 @@ export const verificationToolchainSha256 = (): string =>
       arch: arch(),
       release: release(),
       host: hostname(),
+      externalTools,
     }),
   )
 

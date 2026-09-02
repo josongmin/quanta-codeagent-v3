@@ -32,6 +32,7 @@ const CAMPAIGN_MODULES = [
   "gate-manifest.ts",
   "verification-receipt.ts",
   "verification-receipt-probe.ts",
+  "external-toolchain.ts",
 ] as const
 
 const waitFor = async (predicate: () => boolean, timeoutMs = 5_000): Promise<void> => {
