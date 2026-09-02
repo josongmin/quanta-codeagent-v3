@@ -6,9 +6,11 @@ import { externalToolchainFingerprint } from "../../tools/dev/external-toolchain
 import { runResourceAwareSchedule } from "../../tools/dev/test-shard-lifecycle"
 import {
   assertTestChunkPlan,
+  chooseIntraWorkerParallelism,
   chooseShardConcurrency,
   chooseShardTestTimeoutMs,
   classifyTestResource,
+  MAX_INTRA_WORKER_PARALLELISM,
   nextOverloadDelayMs,
   parseExecutedFileCount,
   planTestChunks,
@@ -233,6 +235,68 @@ describe("resource-classed chunk plan", () => {
         expect(resourceClassesOverlap(left, right)).toBe(false)
       }
     }
+  })
+
+  test("only pure chunks may overlap files inside one worker", () => {
+    const idle = { cpuCount: 16, workers: 1, pressure: 1 } as const
+    // MEASURED (24-file pure sample): identical verdicts at 1 and at 8 — 295
+    // pass / 0 fail / exit 0, repeated — with wall time 27s -> 11s.
+    expect(chooseIntraWorkerParallelism({ resourceClass: "pure", ...idle })).toBe(8)
+
+    // THE SAFETY PROPERTY: every class that names a process-global or
+    // checkout-global resource stays strictly serial, however idle the box.
+    // Overlapping two of those inside one process is exactly what the class
+    // system exists to prevent.
+    for (const resourceClass of TEST_RESOURCE_CLASSES) {
+      if (resourceClass === "pure") continue
+      expect(chooseIntraWorkerParallelism({ resourceClass, ...idle })).toBe(1)
+      expect(
+        chooseIntraWorkerParallelism({ resourceClass, cpuCount: 64, workers: 1, pressure: 1 }),
+      ).toBe(1)
+    }
+  })
+
+  test("the intra-worker budget is CPU headroom shared by the live workers", () => {
+    // Two overlapping workers split the same box.
+    expect(
+      chooseIntraWorkerParallelism({
+        resourceClass: "pure",
+        cpuCount: 16,
+        workers: 2,
+        pressure: 1,
+      }),
+    ).toBe(4)
+    // An oversubscribed host is not piled on further.
+    expect(
+      chooseIntraWorkerParallelism({
+        resourceClass: "pure",
+        cpuCount: 16,
+        workers: 1,
+        pressure: 4,
+      }),
+    ).toBe(2)
+    // Small boxes fall back to serial rather than thrash.
+    expect(
+      chooseIntraWorkerParallelism({ resourceClass: "pure", cpuCount: 2, workers: 2, pressure: 1 }),
+    ).toBe(1)
+    // Capped however large the box is: these tests spawn real subprocesses.
+    expect(
+      chooseIntraWorkerParallelism({
+        resourceClass: "pure",
+        cpuCount: 256,
+        workers: 1,
+        pressure: 1,
+      }),
+    ).toBe(MAX_INTRA_WORKER_PARALLELISM)
+    // Nonsense input fails closed to serial.
+    expect(
+      chooseIntraWorkerParallelism({
+        resourceClass: "pure",
+        cpuCount: Number.NaN,
+        workers: 1,
+        pressure: 1,
+      }),
+    ).toBe(1)
   })
 
   test("yielding to a loaded host is a campaign budget, not a per-start one", () => {

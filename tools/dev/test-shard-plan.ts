@@ -50,6 +50,54 @@ export const chooseShardTestTimeoutMs = (cpu: CpuBudget): number => {
   return Math.min(MAX_TEST_TIMEOUT_MS, BASE_TEST_TIMEOUT_MS * pressureFactor)
 }
 
+export interface IntraWorkerParallelismInput {
+  readonly resourceClass: TestResourceClass
+  readonly cpuCount: number
+  /** How many worker PROCESSES the runner will overlap. */
+  readonly workers: number
+  /** load/(2*cpus) quanta, 1 when the host is idle. */
+  readonly pressure: number
+}
+
+/** Never more in flight inside one worker than this, whatever the box. */
+export const MAX_INTRA_WORKER_PARALLELISM = 8
+
+/**
+ * How many test FILES one worker may run concurrently inside its process.
+ *
+ * The runner used to pin every worker to `--parallel=1`, which is the correct
+ * and only safe answer for a corpus you cannot classify — and this runner can
+ * classify it. Measured on a 24-file `pure` sample, identical verdicts (295
+ * pass / 0 fail / exit 0, repeated) at 1 and at 8, with wall time 27s -> 11s;
+ * under host load the same comparison was 77-92s -> 12s.
+ *
+ * ONLY `pure` gets it. Every other class names a process-global or
+ * checkout-global resource — a port, a browser, the repo working tree, HOME —
+ * and running two such files inside one process is precisely what the class
+ * system exists to prevent. That asymmetry is the whole safety argument, so it
+ * is expressed as a hard branch rather than a tuned number.
+ *
+ * The budget is CPU headroom shared across workers, halved because these tests
+ * spawn real subprocesses (CLIs, language servers, git) and so cost more than
+ * one core each, then divided again by measured pressure so a box that is
+ * already oversubscribed does not get piled on.
+ */
+export const chooseIntraWorkerParallelism = (input: IntraWorkerParallelismInput): number => {
+  if (input.resourceClass !== "pure") return 1
+  if (
+    !Number.isSafeInteger(input.cpuCount) ||
+    input.cpuCount < 1 ||
+    !Number.isSafeInteger(input.workers) ||
+    input.workers < 1 ||
+    !Number.isFinite(input.pressure) ||
+    input.pressure < 1
+  ) {
+    return 1
+  }
+  const budget = Math.floor(input.cpuCount / (2 * input.workers * input.pressure))
+  return Math.max(1, Math.min(MAX_INTRA_WORKER_PARALLELISM, budget))
+}
+
 export interface OverloadDelayInput {
   /** load/(2*cpus) quanta — the same measure that scales the test timeout. */
   readonly pressure: number

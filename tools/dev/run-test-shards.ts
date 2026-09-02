@@ -26,6 +26,7 @@ import {
   terminateCampaignOnSignal,
 } from "./test-shard-lifecycle"
 import {
+  chooseIntraWorkerParallelism,
   chooseShardConcurrency,
   chooseShardTestTimeoutMs,
   nextOverloadDelayMs,
@@ -339,7 +340,16 @@ const runShard = async (
   runRoot: string,
   testTimeoutMs: number,
   registry: ShardProcessRegistry,
+  workers: number,
 ): Promise<ShardRunResult> => {
+  // `pure` chunks own nothing process-global, so their files may overlap
+  // INSIDE the worker; every other class stays strictly serial.
+  const intraParallel = chooseIntraWorkerParallelism({
+    resourceClass: plan.resourceClass,
+    cpuCount: availableParallelism(),
+    workers,
+    pressure: loadPressure(),
+  })
   const shard = `${plan.index}/${totalChunks}`
   const workerRootEarly = join(runRoot, `worker-${plan.index}`)
   // Every chunk writes a JUnit receipt: the consumer lane (unit) merges it,
@@ -352,7 +362,7 @@ const runShard = async (
   const junitArgs = ["--reporter=junit", `--reporter-outfile=${junitPath}`]
   process.stdout.write(
     `\n[test:shards] START chunk=${shard} files=${plan.files.length} class=${plan.resourceClass} ` +
-      `predicted_ms=${plan.predictedMs}\n`,
+      `predicted_ms=${plan.predictedMs} intra_parallel=${intraParallel}\n`,
   )
   // Native file descriptors keep the child off a JS relay/backpressure path.
   // Relaying every Bun test chunk through this process more than doubled a
@@ -385,7 +395,7 @@ const runShard = async (
         "test",
         ...plan.files,
         `--timeout=${testTimeoutMs}`,
-        "--parallel=1",
+        `--parallel=${intraParallel}`,
         // A failed real-browser/LSP setup often poisons the remaining tests in
         // that file and turns one actionable failure into minutes of derivative
         // timeouts. The shard verdict is already red after the first failure;
@@ -605,6 +615,9 @@ const loadPressure = (): number => {
  * off running slowly than not running.
  */
 let overloadDelayBudgetMs = START_DELAY_MAX_MS
+/** What the most recent host measurement chose; the intra-worker budget is
+ *  shared across however many worker processes are actually overlapping. */
+let lastMeasuredWorkers = 1
 
 const measuredConcurrency = async (runningCount: number): Promise<number> => {
   if (runningCount === 0) {
@@ -632,8 +645,9 @@ const measuredConcurrency = async (runningCount: number): Promise<number> => {
       })
     }
   }
-  if (loadPressure() > 1) return 1
-  return workerConcurrency()
+  const decided = loadPressure() > 1 ? 1 : await workerConcurrency()
+  lastMeasuredWorkers = decided
+  return decided
 }
 
 const executeChunks = async (input: {
@@ -690,6 +704,7 @@ const executeChunks = async (input: {
           input.runRoot,
           input.testTimeoutMs,
           input.registry,
+          lastMeasuredWorkers,
         )
         const completedShard = {
           plan: cached.chunk,
