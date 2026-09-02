@@ -122,28 +122,32 @@ const unhermetic = (files: readonly string[]): readonly string[] =>
   files.filter((file) => !containsAny(file, HERMETIC_MARKERS))
 
 describe("no test composes a real surface against the developer's ~/.quanta", () => {
-  test("the scan is non-degenerate (a rename fails loud, not vacuously)", () => {
-    const files = TEST_FILES
-    assertScanPopulation(
-      files.filter((file) => file.startsWith("tests/")).map((file) => join(ROOT, file)),
-      join(ROOT, "tests"),
-      {
-        id: "tests/unit/_arch/real-quanta-home-escape-ratchet.test.ts#TESTS",
-        collectable: (name) => name.endsWith(".test.ts"),
-      },
-    )
-    assertScanPopulation(
-      files.filter((file) => file.startsWith("src/")).map((file) => join(ROOT, file)),
-      join(ROOT, "src"),
-      {
-        id: "tests/unit/_arch/real-quanta-home-escape-ratchet.test.ts#SRC",
-        collectable: (name) => name.endsWith(".test.ts"),
-      },
-    )
-    // If the composition roots are renamed this list empties and the parity
-    // assertion below would trivially pass — so pin that it cannot be empty.
-    expect(composingFiles().length).toBeGreaterThan(2)
-  })
+  test(
+    "the scan is non-degenerate (a rename fails loud, not vacuously)",
+    () => {
+      const files = TEST_FILES
+      assertScanPopulation(
+        files.filter((file) => file.startsWith("tests/")).map((file) => join(ROOT, file)),
+        join(ROOT, "tests"),
+        {
+          id: "tests/unit/_arch/real-quanta-home-escape-ratchet.test.ts#TESTS",
+          collectable: (name) => name.endsWith(".test.ts"),
+        },
+      )
+      assertScanPopulation(
+        files.filter((file) => file.startsWith("src/")).map((file) => join(ROOT, file)),
+        join(ROOT, "src"),
+        {
+          id: "tests/unit/_arch/real-quanta-home-escape-ratchet.test.ts#SRC",
+          collectable: (name) => name.endsWith(".test.ts"),
+        },
+      )
+      // If the composition roots are renamed this list empties and the parity
+      // assertion below would trivially pass — so pin that it cannot be empty.
+      expect(composingFiles().length).toBeGreaterThan(2)
+    },
+    FULL_REPO_SCAN_TIMEOUT_MS,
+  )
 
   // BUDGET, not decoration. Measured on a full `bun test tests/unit tests/meta
   // tests/adversarial` run (39,118 arms, 3,034 files): this arm took 5,973ms
