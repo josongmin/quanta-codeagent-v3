@@ -98,6 +98,33 @@ describe("resource-classed chunk plan", () => {
   })
 
   test("classifier names the owned resource; path fallback stays serialized", () => {
+    // ★ A test that SPAWNS A REAL BROWSER must be classed `browser` so the
+    // scheduler serializes it against browser-owning peers.
+    //
+    // MEASURED DEFECT (2026-09-02 gate audit): the browser detector matched
+    // `puppeteer|playwright|chromium|--headless` — none of which this repo's own
+    // CDP adapter uses. `tests/integration/browser-agent-loop-e2e.test.ts`
+    // spawns real Chrome at module load and scored ZERO matches, so it fell
+    // through to `integration-path` and was overlapped with 135 integration
+    // files. It then failed the full suite on a 60s CDP navigate timeout
+    // (2 x DEFAULT_CDP_COMMAND_MS) that reproduces 0/4 in isolation.
+    //
+    // The token is the real-spawn gate, not the word "chrome": matching
+    // `cdp`/`chrome` broadly would reclassify 56 files — mostly pure unit tests
+    // with no browser at all — and serialize the suite for nothing.
+    expect(
+      classifyTestResource(
+        "tests/integration/browser-agent-loop-e2e.test.ts",
+        "const REAL_CHROME_RAN = await probe.spawn()",
+      ),
+    ).toBe("browser")
+    // PAIRED CONTROL — a CDP UNIT test owns no browser and must stay cheap.
+    expect(
+      classifyTestResource(
+        "tests/unit/browser-cdp-session-hellgate.test.ts",
+        "const session = new CdpSession(fakeTransport)",
+      ),
+    ).toBe("pure")
     expect(classifyTestResource("tests/unit/plain.test.ts", "expect(1).toBe(1)")).toBe("pure")
     expect(classifyTestResource("tests/integration/plain.test.ts", "")).toBe("integration-path")
     expect(classifyTestResource("tests/unit/plain.test.ts", "Bun.listen({ port: 0 })")).toBe("port")

@@ -78,7 +78,15 @@ const CLASS_SOURCE_DETECTORS: readonly (readonly [TestResourceClass, RegExp])[] 
     "repo-write",
     /\b(?:writeFileSync|rmSync|renameSync|unlinkSync)\s*\([^\n]*(?:REPO_ROOT|repoRoot|process\.cwd\s*\(\s*\))/,
   ],
-  ["browser", /puppeteer|playwright|chromium|--headless/i],
+  // `REAL_CHROME` is this repo's own real-spawn gate: the browser e2e flips it
+  // only once a live CDP session exists. It is listed because the four tokens
+  // beside it are OTHER projects' vocabulary — our CDP adapter says `cdp` and
+  // `chrome`, so the one test that actually spawns Chrome scored zero matches
+  // and got overlapped with 135 integration files (2026-09-02 gate audit: a 60s
+  // navigate timeout that reproduces 0/4 in isolation). Deliberately NOT a bare
+  // /cdp|chrome/ — that reclassifies 56 files, nearly all pure unit tests with
+  // no browser, and serializes the suite for nothing.
+  ["browser", /puppeteer|playwright|chromium|--headless|REAL_CHROME/i],
   ["lsp", /\b(?:typescript-language-server|pyright|rust-analyzer|gopls|lldb|lsp)\b/i],
   [
     "port",
