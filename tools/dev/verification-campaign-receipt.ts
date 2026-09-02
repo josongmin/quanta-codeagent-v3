@@ -20,7 +20,12 @@ import { dirname } from "node:path"
 
 export const CAMPAIGN_RECEIPT_SCHEMA = "quanta.verification-campaign-receipt.v1" as const
 
-export type CampaignOutcome = "passed" | "failed" | "terminated"
+/**
+ * `reused` is a real outcome, not a non-event: a campaign that returned on the
+ * exact receipt did happen, and leaving it out let `last-campaign.json`
+ * describe some older run while the operator was looking at a fresh reuse.
+ */
+export type CampaignOutcome = "passed" | "failed" | "terminated" | "reused"
 
 export interface CampaignHostSample {
   readonly cpus: number

@@ -63,6 +63,10 @@ if (command.length === 0) {
   process.exit(2)
 }
 
+const campaignStartedAtMs = Date.now()
+const hostAtStart = sampleCampaignHost()
+let campaignHead = capture(["git", "rev-parse", "HEAD"]).text.trim()
+
 const isExactPrepushReuse =
   basename(command[0] ?? "") === "bun" &&
   command[1] === "run" &&
@@ -79,6 +83,26 @@ if (isExactPrepushReuse) {
     if (probe.ok) {
       process.stdout.write(
         `[verification] REUSED exact receipt before repository lease head=${probe.head} path=${probe.path}\n`,
+      )
+      campaignHead = probe.head
+      writeCampaignReceipt(
+        CAMPAIGN_RECEIPT,
+        buildCampaignReceipt({
+          pid: process.pid,
+          head: campaignHead,
+          command: command.join(" "),
+          // No lane was taken: that IS the outcome being recorded.
+          leasePort: null,
+          leaseWaitMs: 0,
+          startedAtMs: campaignStartedAtMs,
+          finishedAtMs: Date.now(),
+          outcome: "reused",
+          exitCode: 0,
+          drained: true,
+          survivingGroups: [],
+          hostAtStart,
+          hostAtEnd: sampleCampaignHost(),
+        }),
       )
       process.exit(0)
     }
@@ -121,10 +145,7 @@ const registry = new ShardProcessRegistry({ termGraceMs: 60_000, killGraceMs: 10
 let lease: TestShardLease | undefined
 let sidecarWritten = false
 let terminating = false
-const campaignStartedAtMs = Date.now()
-const hostAtStart = sampleCampaignHost()
 let leaseWaitMs = 0
-let campaignHead = ""
 
 /** One place that turns "what just happened" into the campaign receipt. */
 const recordCampaign = (input: {
@@ -201,7 +222,6 @@ lease = await acquireTestShardLease({
 })
 
 leaseWaitMs = Date.now() - leaseWaitStartedAtMs
-campaignHead = capture(["git", "rev-parse", "HEAD"]).text.trim()
 
 process.stdout.write(
   `[verification] LEASE acquired port=${lease.port} scope=whole-campaign ` +

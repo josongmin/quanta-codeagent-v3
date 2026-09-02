@@ -347,6 +347,54 @@ describe("whole verification campaign lease", () => {
     expect(failed.cancellationReason).toBeUndefined()
   }, 30_000)
 
+  test("a reuse is recorded as its own outcome, not left as the previous run", () => {
+    // Without this, `last-campaign.json` described some older campaign while
+    // the operator was looking at a fresh reuse — the file silently lagged the
+    // thing it exists to explain.
+    const root = mkdtempSync(join(tmpdir(), "quanta-verification-reused-"))
+    roots.push(root)
+    const runner = copyCampaignOwner(root)
+    const env = cleanLeaseEnv()
+    const receiptPath = join(root, ".git", "quanta-verification-cache", "last-campaign.json")
+    const nestedGateEnv = {
+      ...env,
+      PATH: [env.PATH, env.PATH].filter((value) => value !== undefined).join(delimiter),
+    }
+    const head = git(root, ["rev-parse", "HEAD"])
+    writeExactVerificationReceipt(
+      verificationReceiptPath(root),
+      mintExactVerificationReceipt(
+        verificationContextForSnapshot(
+          root,
+          { head, status: "" },
+          verificationManifestSha256(gatesForStage("prepush")),
+          nestedGateEnv,
+        ),
+      ),
+    )
+
+    const reuse = Bun.spawnSync(
+      [
+        process.execPath,
+        runner,
+        "--",
+        process.execPath,
+        "run",
+        "tools/dev/gate.ts",
+        "prepush",
+        "--reuse-receipt",
+      ],
+      { cwd: root, env, stdout: "pipe", stderr: "pipe" },
+    )
+    expect(reuse.exitCode, `${reuse.stdout.toString()}\n${reuse.stderr.toString()}`).toBe(0)
+    const recorded = JSON.parse(readFileSync(receiptPath, "utf8")) as Record<string, unknown>
+    expect(recorded.outcome).toBe("reused")
+    expect(recorded.head).toBe(head)
+    // No lane was taken — that is the point of the reuse path.
+    expect(recorded.leasePort).toBeNull()
+    expect(recorded.exitCode).toBe(0)
+  }, 30_000)
+
   test("two concurrent same-HEAD campaigns execute the gates exactly once", async () => {
     // The measured P0: a contender that waited behind a green same-HEAD
     // campaign used to re-run the ENTIRE gate set. Under the campaign lease +
