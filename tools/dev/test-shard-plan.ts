@@ -28,13 +28,19 @@ export const chooseShardConcurrency = (memory: MemoryBudget): 1 | 2 =>
     ? 2
     : 1
 
-const BASE_TEST_TIMEOUT_MS = 60_000
+// A passing test pays none of this budget. Keep the normal watchdog at two
+// minutes so a load average sampled before a long serial campaign cannot leave
+// late real-process tests with only the historical 60-second ceiling. Internal
+// pressure-aware guards receive BASE/60_000 = 2 and retain half this budget for
+// command failure, leaving Bun time to run teardown.
+const BASE_TEST_TIMEOUT_MS = 120_000
 const MAX_TEST_TIMEOUT_MS = 300_000
 
 /**
- * Preserve the normal 60 s defect signal, but avoid false timeouts when an
- * externally-contended host gives the single safe worker only a fraction of a
- * CPU. Each 2x oversubscription adds one bounded timeout quantum; even extreme
+ * Preserve a bounded defect signal, but avoid false timeouts when an externally
+ * contended host gives the single safe worker only a fraction of a CPU. The
+ * two-minute floor also covers pressure that rises after this one-time sample.
+ * Each 2x oversubscription adds one bounded timeout quantum; even extreme
  * pressure can never widen an individual test beyond five minutes.
  */
 export const chooseShardTestTimeoutMs = (cpu: CpuBudget): number => {

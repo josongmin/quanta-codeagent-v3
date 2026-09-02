@@ -78,10 +78,12 @@ describe("explicit full-suite shard plan", () => {
   })
 
   test("bounds per-test timeout scaling under external CPU pressure", () => {
-    expect(chooseShardTestTimeoutMs({ loadAverage1m: 12, cpuCount: 12 })).toBe(60_000)
-    expect(chooseShardTestTimeoutMs({ loadAverage1m: 48, cpuCount: 12 })).toBe(120_000)
+    // Low load still retains enough late-campaign headroom for a 60s internal
+    // process deadline plus teardown; the former 60s outer ceiling raced it.
+    expect(chooseShardTestTimeoutMs({ loadAverage1m: 12, cpuCount: 12 })).toBe(120_000)
+    expect(chooseShardTestTimeoutMs({ loadAverage1m: 48, cpuCount: 12 })).toBe(240_000)
     expect(chooseShardTestTimeoutMs({ loadAverage1m: 300, cpuCount: 12 })).toBe(300_000)
-    expect(chooseShardTestTimeoutMs({ loadAverage1m: Number.NaN, cpuCount: 12 })).toBe(60_000)
+    expect(chooseShardTestTimeoutMs({ loadAverage1m: Number.NaN, cpuCount: 12 })).toBe(120_000)
   })
 
   test("requires Bun's final executed-file receipt and ignores nested earlier footers", () => {
