@@ -16,7 +16,8 @@ import { join } from "node:path"
  * line carried absolute paths) merged the way the runner merges chunks.
  */
 
-const SCRIPT = join(import.meta.dir, "..", "..", "..", "tools", "dev", "unit-speed-budget.ts")
+const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
+const SCRIPT = join(REPO_ROOT, "tools", "dev", "unit-speed-budget.ts")
 const roots: string[] = []
 
 afterEach(() => {
@@ -99,6 +100,33 @@ describe("unit speed budget over the full-suite receipt", () => {
     const unscoped = run(xml, [])
     expect(unscoped.code).toBe(1)
     expect(unscoped.err).toContain("REGRESSION")
+  })
+
+  test("a FAILING standalone re-run cannot downgrade a regression", () => {
+    // The re-run's exit code was captured and used only inside a message
+    // string, so a re-run that died at module load came back fast and the gate
+    // reported "[screen only] … Contention, not a slow test" over a genuine
+    // 60s case. A red re-run measures nothing.
+    const dir = mkdtempSync(join(tmpdir(), "quanta-speed-red-"))
+    roots.push(dir)
+    // A real file that EXISTS (so the confirm path is taken) and always fails.
+    const failing = join("tests", "unit", "dev", "__speed-probe-that-fails.test.ts")
+    writeFileSync(
+      join(REPO_ROOT, failing),
+      'import { test } from "bun:test"\ntest("boom", () => { throw new Error("boom") })\n',
+    )
+    try {
+      const xml = mergedJunit([
+        ...fastUnitSuites(),
+        suite(failing, [{ name: "slow and red", seconds: 60 }]),
+      ])
+      const result = run(xml, ["--scope=tests/unit/"])
+      expect(result.code).toBe(1)
+      expect(result.err).toContain("REGRESSION")
+      expect(result.err).toContain("re-run FAILED")
+    } finally {
+      rmSync(join(REPO_ROOT, failing), { force: true })
+    }
   })
 
   test("a scope that matches nothing fails closed instead of passing empty", () => {

@@ -159,6 +159,17 @@ const confirmStandalone = (c: Case): { readonly ms: number; readonly how: string
     if (Number.isFinite(t)) worst = Math.max(worst, t * 1000)
   }
   if (worst < 0) return { ms: c.ms, how: "re-run parsed no cases — screen number stands" }
+  // A RED re-run is not evidence about speed. The exit code was captured and
+  // used only inside a message string, so a re-run that died at module load —
+  // e.g. because the confirm spawn does not reproduce the env the shard runner
+  // gives its workers — came back fast, and the gate downgraded a real
+  // regression to "contention, not a slow test".
+  if (run.exitCode !== 0) {
+    return {
+      ms: c.ms,
+      how: `re-run FAILED (exit ${run.exitCode}) — screen number stands; a red re-run measures nothing`,
+    }
+  }
   // The FILE's wall time counts too. junit `time` is per-test and excludes module
   // load, so a file whose cost is at module scope confirms at ~1ms: a probe with
   // `Bun.spawnSync(["sleep","4"])` at module scope took 4.06s wall and reported

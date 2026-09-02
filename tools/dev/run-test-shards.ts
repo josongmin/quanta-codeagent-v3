@@ -105,6 +105,21 @@ const SUITE_ROOTS = {
   integration: ["tests/integration"],
 } as const
 
+/**
+ * One-directional floors on what each suite must DISCOVER.
+ *
+ * Measured from a real full run (3,822 files) with headroom for churn, in the
+ * repo's own idiom: raise when the corpus grows, never lower to make a red go
+ * away. A run that finds fewer files than this is reporting on a corpus that
+ * quietly lost coverage.
+ */
+const SUITE_FLOORS: Record<keyof typeof SUITE_ROOTS, number> = {
+  full: 3_600,
+  core: 3_200,
+  unit: 2_900,
+  integration: 330,
+}
+
 type SuiteName = keyof typeof SUITE_ROOTS
 
 interface RunnerOptions {
@@ -767,6 +782,20 @@ const main = async (): Promise<void> => {
     const manifest = expandTestFiles(
       SUITE_ROOTS[opts.suite].map((root) => resolve(REPO_ROOT, root)),
     )
+    // A FLOOR, not a printout. `manifest_files=N` was reported and compared to
+    // nothing: a suite root that still exists but stops yielding test files —
+    // a naming change, a bad merge, a directory renamed under a dot prefix —
+    // shrinks the corpus silently and the campaign still prints PASS. This is
+    // the same argument scan-reach-baseline.json makes for scanning guards,
+    // applied to the suite the whole verdict rests on.
+    const floor = SUITE_FLOORS[opts.suite]
+    if (manifest.length < floor) {
+      throw new Error(
+        `[test:shards] INVALID — suite=${opts.suite} discovered ${manifest.length} test files, ` +
+          `below the pinned floor of ${floor}. The corpus shrank under the runner; a green over ` +
+          "it would describe a smaller universe than the one this gate claims.",
+      )
+    }
     const manifestDigest = manifestSha256(manifest)
     const treeSha256 = trackedTreeSha256(REPO_ROOT)
     const timings = loadTestTimings(TIMING_STORE)
