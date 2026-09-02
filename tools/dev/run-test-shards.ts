@@ -12,6 +12,7 @@ import {
 import { availableParallelism, freemem, loadavg, tmpdir, totalmem } from "node:os"
 import { dirname, join, relative, resolve } from "node:path"
 import { expandTestFiles } from "./sandboxed-test"
+import { sampleTreeRssBytes } from "./shard-rss"
 import {
   acquireTestShardLease,
   inheritedTestShardLeaseState,
@@ -317,12 +318,6 @@ const pruneStaleChunkReceipts = (suite: SuiteName, nowMs = Date.now()): void => 
   }
 }
 
-const sampleRssBytes = (pid: number): number => {
-  const result = Bun.spawnSync(["ps", "-o", "rss=", "-p", String(pid)])
-  const kib = Number.parseInt(result.stdout.toString().trim(), 10)
-  return Number.isSafeInteger(kib) && kib > 0 ? kib * 1024 : 0
-}
-
 interface ShardRunResult {
   readonly code: number
   readonly timedOut: boolean
@@ -436,7 +431,7 @@ const runShard = async (
     const timeout = setInterval(() => {
       watchdogTicks += 1
       if (watchdogTicks % 15 === 0) {
-        peakRssBytes = Math.max(peakRssBytes, sampleRssBytes(handle.pid))
+        peakRssBytes = Math.max(peakRssBytes, sampleTreeRssBytes(handle.pid))
       }
       const spoolBytes = statSync(spoolPath).size
       if (spoolBytes !== lastSpoolBytes) {

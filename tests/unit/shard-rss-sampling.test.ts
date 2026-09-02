@@ -22,7 +22,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { sumRssKib } from "../../tools/dev/shard-rss"
+import { descendantPids, sumRssKib } from "../../tools/dev/shard-rss"
 
 describe("shard RSS sampling — a worker is its whole tree", () => {
   test("sums every row `ps` returns, not just the first", () => {
@@ -42,6 +42,26 @@ describe("shard RSS sampling — a worker is its whole tree", () => {
   test("a malformed row is skipped rather than poisoning the total", () => {
     // `ps` can emit a header or a warning line if the pid vanished mid-sample.
     expect(sumRssKib("RSS\n  2048\n(not a number)\n  1024\n")).toBe(3072)
+  })
+
+  test("the tree walk finds a worker's children, and grandchildren", () => {
+    // `ps -Ao pid=,ppid=` shape: 100 is the worker, 101/102 its Bun workers,
+    // 103 a helper one of them spawned, 200 an unrelated process.
+    const psAll = ["  100 1", "  101 100", "  102 100", "  103 101", "  200 1"].join("\n")
+
+    expect([...descendantPids(100, psAll)].sort()).toEqual([101, 102, 103])
+  })
+
+  test("PAIRED CONTROL — an unrelated tree is not swept in", () => {
+    const psAll = ["  100 1", "  200 1", "  201 200"].join("\n")
+
+    expect(descendantPids(100, psAll)).toEqual([])
+  })
+
+  test("a cyclic or self-parented row cannot hang the watchdog", () => {
+    const psAll = ["  100 1", "  101 100", "  100 101"].join("\n")
+
+    expect(descendantPids(100, psAll)).toEqual([101])
   })
 
   test("negative or absurd values are ignored", () => {

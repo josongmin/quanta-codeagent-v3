@@ -33,14 +33,12 @@ export const sumRssKib = (psOutput: string): number => {
 /** Every descendant of `pid`, breadth-first. Bun's worker children are direct
  *  children today; the walk is general so a worker that spawns its own helper
  *  is still counted. Bounded so a pathological tree cannot stall the watchdog. */
-export const descendantPids = (
-  pid: number,
-  psAll: string,
-  maxNodes = 512,
-): readonly number[] => {
+export const descendantPids = (pid: number, psAll: string, maxNodes = 512): readonly number[] => {
   const childrenOf = new Map<number, number[]>()
   for (const line of psAll.split("\n")) {
-    const [child, parent] = line.trim().split(/\s+/).map((v) => Number.parseInt(v, 10))
+    const fields = line.trim().split(/\s+/)
+    const child = Number.parseInt(fields[0] ?? "", 10)
+    const parent = Number.parseInt(fields[1] ?? "", 10)
     if (!Number.isSafeInteger(child) || !Number.isSafeInteger(parent)) continue
     const siblings = childrenOf.get(parent) ?? []
     siblings.push(child)
