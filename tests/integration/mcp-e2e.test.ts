@@ -153,10 +153,16 @@ process.stdin.on("data", (c) => {
         // wait forever — external killer (SIGKILL) ends the process.
         setTimeout(() => {}, 1 << 30)
       } else if (mode === "slow") {
-        // wait 5s before answering — caller's withTimeout(client.callTool, 2s) traps the hang.
+        // Answer far later than any caller is willing to wait. It was 5s
+        // against the caller's 2s cap, which RACES the host: starve the event
+        // loop for ~3s — a full-suite worker beside a 135-file peer chunk does
+        // exactly that — and both the timer and the reply come ready in the
+        // same tick, so the reply can win and the assertion flips. The gap is
+        // now larger than the test's own 10s deadline, so the wrapper tripping
+        // is the only outcome that can be observed at all.
         setTimeout(() => {
           reply({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: "late" }] } })
-        }, 5000)
+        }, 60000)
       } else if (mode === "nulInResult") {
         const evil = "before\\x00mid\\x01\\x02after"
         reply({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: evil }] } })
@@ -428,13 +434,16 @@ describe("MCP e2e hell-cases — server lifecycle chaos", () => {
     }
   }, 15_000)
 
-  test("server is slow (5s response): our withTimeout traps the hang at 2s instead of the 30s default", async () => {
+  test("a server that never answers in time: our withTimeout traps the hang at 2s instead of the 30s default", async () => {
     // CURRENT BEHAVIOUR: DEFAULT_REQUEST_TIMEOUT_MS is 30s (client.ts L8) and
     // not configurable per-call. To prove "doesn't hang forever" without
     // a 30s wait we wrap the callTool in withTimeout(2s) and assert that
     // wrapper trips — confirming the call is in-flight and the underlying
     // socket isn't deadlocked. The real 30s timeout itself is covered by
     // the client unit tests.
+    // The server's delay is deliberately far past this test's own deadline:
+    // an assertion that races a timer against a real reply is decided by host
+    // load, not by the code under test.
     // FOLLOW-UP: expose a per-call timeout knob so adversarial servers can be
     // bounded tighter than 30s in production agents.
     const c = advClient("slow")
