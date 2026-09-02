@@ -38,6 +38,7 @@ import { DATASET_FAMILY_FLAG, readDatasetFamilySelector } from "./run-config"
 const FAMILY_KEY = "QUANTA_SWEBENCH_DATASET_FAMILY"
 const CLI = join(import.meta.dir, "cli.ts")
 const SPAWN_BUDGET_MS = 240_000
+const CLI_BATCH_CONCURRENCY = 2
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Fixtures + the REAL CLI child-process harness
@@ -84,6 +85,52 @@ const runCli = (args: readonly string[], env: Record<string, string> = {}): CliR
     code: proc.exitCode ?? -1,
     out: `${proc.stdout.toString()}${proc.stderr.toString()}`,
   }
+}
+
+interface CliInvocation {
+  readonly args: readonly string[]
+  readonly env?: Record<string, string>
+}
+
+/** Run independent CLI cases with a deliberately small process fan-out.
+ *
+ * Each case still gets a fresh REAL `bun cli.ts` process, so argv/env/module
+ * state cannot leak between cases. Two-at-a-time removes scheduler-idle wall
+ * time without turning this already large matrix into an unbounded fork bomb
+ * on the memory-constrained full-suite runner. Results preserve input order. */
+const runCliBatch = async (invocations: readonly CliInvocation[]): Promise<CliResult[]> => {
+  const results = new Array<CliResult>(invocations.length)
+  let cursor = 0
+
+  const worker = async (): Promise<void> => {
+    while (cursor < invocations.length) {
+      const index = cursor
+      cursor += 1
+      const invocation = invocations[index]
+      if (invocation === undefined) continue
+
+      const childEnv: Record<string, string | undefined> = {
+        ...process.env,
+        ...invocation.env,
+      }
+      if (!(FAMILY_KEY in (invocation.env ?? {}))) delete childEnv[FAMILY_KEY]
+      const proc = Bun.spawn([process.execPath, CLI, ...invocation.args], {
+        env: childEnv as Record<string, string>,
+        stdout: "pipe",
+        stderr: "pipe",
+      })
+      const [code, stdout, stderr] = await Promise.all([
+        proc.exited,
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ])
+      results[index] = { code, out: `${stdout}${stderr}` }
+    }
+  }
+
+  const workerCount = Math.min(CLI_BATCH_CONCURRENCY, invocations.length)
+  await Promise.all(Array.from({ length: workerCount }, () => worker()))
+  return results
 }
 
 /** The family-bearing subcommands, each with the CHEAPEST argv that still
@@ -159,10 +206,16 @@ describe("LOW-10 — every family-bearing composition root fails closed on an ex
   for (const sub of FAMILY_BEARING) {
     test(
       `${sub.name}: all ${BAD_SELECTORS.length} adversarial selectors are refused`,
-      () => {
+      async () => {
         const survivors: string[] = []
-        for (const sel of BAD_SELECTORS) {
-          const r = runCli([...sub.argv, ...sel.args], sub.env)
+        const results = await runCliBatch(
+          BAD_SELECTORS.map((sel) => ({ args: [...sub.argv, ...sel.args], env: sub.env })),
+        )
+        expect(results).toHaveLength(BAD_SELECTORS.length)
+        for (const [index, sel] of BAD_SELECTORS.entries()) {
+          const r = results[index]
+          expect(r, `missing CLI result for ${sub.name}/${sel.label}`).toBeDefined()
+          if (r === undefined) continue
           if (r.code === 0 || !FAMILY_REFUSAL.test(r.out)) {
             survivors.push(
               `${sel.label} (${sel.args.join(" ")}) -> exit ${r.code}: ${r.out.slice(0, 200)}`,
@@ -180,15 +233,26 @@ describe("LOW-10 — every family-bearing composition root fails closed on an ex
 
   test(
     "PAIRED CONTROL — a VALID selector is never caught by the family gate",
-    () => {
+    async () => {
       const leaked: string[] = []
+      const cases: Array<CliInvocation & { label: string }> = []
       for (const sub of FAMILY_BEARING) {
         if (sub.name === "terminal") continue // terminal refuses ANY family selector, by design
         for (const family of ["verified", "live", "pro", "promax"]) {
-          const r = runCli([...sub.argv, "--dataset-family", family], sub.env)
-          if (/unknown dataset family|is blank|requires a value/i.test(r.out)) {
-            leaked.push(`${sub.name} --dataset-family ${family}: ${r.out.slice(0, 200)}`)
-          }
+          cases.push({
+            args: [...sub.argv, "--dataset-family", family],
+            env: sub.env,
+            label: `${sub.name} --dataset-family ${family}`,
+          })
+        }
+      }
+      const results = await runCliBatch(cases)
+      expect(results).toHaveLength(cases.length)
+      for (const [index, invocation] of cases.entries()) {
+        const r = results[index]
+        expect(r, `missing CLI result for ${invocation.label}`).toBeDefined()
+        if (r !== undefined && /unknown dataset family|is blank|requires a value/i.test(r.out)) {
+          leaked.push(`${invocation.label}: ${r.out.slice(0, 200)}`)
         }
       }
       expect(leaked, `family gate rejected a VALID family:\n${leaked.join("\n")}`).toEqual([])
@@ -198,7 +262,7 @@ describe("LOW-10 — every family-bearing composition root fails closed on an ex
 
   test(
     "PAIRED CONTROL — the same roots SUCCEED (or refuse for their OWN reason) with no selector",
-    () => {
+    async () => {
       // A blanket-failing gate would make this red. `run`/`pool`/`grade --mode
       // full` must reach their dry-run plans (exit 0); `grade`/`bestk-passk`
       // must refuse on their OWN missing inputs (exit 2), never on the family.
@@ -212,8 +276,14 @@ describe("LOW-10 — every family-bearing composition root fails closed on an ex
         terminal: (r) => r.code === 0,
       }
       const wrong: string[] = []
-      for (const sub of FAMILY_BEARING) {
-        const r = runCli([...sub.argv], sub.env)
+      const results = await runCliBatch(
+        FAMILY_BEARING.map((sub) => ({ args: [...sub.argv], env: sub.env })),
+      )
+      expect(results).toHaveLength(FAMILY_BEARING.length)
+      for (const [index, sub] of FAMILY_BEARING.entries()) {
+        const r = results[index]
+        expect(r, `missing CLI result for ${sub.name}`).toBeDefined()
+        if (r === undefined) continue
         const ok = expectations[sub.name]
         expect(ok, `no expectation registered for ${sub.name}`).toBeDefined()
         if (!ok?.(r)) wrong.push(`${sub.name} -> exit ${r.code}: ${r.out.slice(0, 300)}`)
@@ -239,27 +309,29 @@ const planLine = (out: string, key: string): string | undefined => {
 const planToken = (out: string, key: string): string | undefined =>
   new RegExp(`\\b${key}=([^\\s,)]+)`).exec(out)?.[1]
 
-const runPlan = (family: string | undefined): CliResult =>
-  runCli([
+const runPlanInvocation = (family: string | undefined): CliInvocation => ({
+  args: [
     "run",
     "--swebench",
     fixtures.dataset,
     "--dry-run",
     ...(family !== undefined ? ["--dataset-family", family] : []),
-  ])
+  ],
+})
 
-const poolPlan = (family: string | undefined): CliResult =>
-  runCli([
+const poolPlanInvocation = (family: string | undefined): CliInvocation => ({
+  args: [
     "pool",
     "--allow-remote-secrets",
     "--datasets",
     fixtures.dataset,
     "--dry-run",
     ...(family !== undefined ? ["--dataset-family", family] : []),
-  ])
+  ],
+})
 
-const fullRemotePlan = (family: string | undefined): CliResult =>
-  runCli([
+const fullRemotePlanInvocation = (family: string | undefined): CliInvocation => ({
+  args: [
     "grade",
     "--mode",
     "full",
@@ -268,17 +340,18 @@ const fullRemotePlan = (family: string | undefined): CliResult =>
     fixtures.dataset,
     "--dry-run",
     ...(family !== undefined ? ["--dataset-family", family] : []),
-  ])
+  ],
+})
 
 describe("LOW-10 — the resolved family reaches an OBSERVABLE decision at each root", () => {
   test(
     "run: preset + verifier + family line follow the argv selector (full union, paired)",
-    () => {
-      const absent = runPlan(undefined)
-      const verified = runPlan("verified")
-      const live = runPlan("live")
-      const pro = runPlan("pro")
-      const promax = runPlan("promax")
+    async () => {
+      const [absent, verified, live, pro, promax] = await runCliBatch(
+        [undefined, "verified", "live", "pro", "promax"].map(runPlanInvocation),
+      )
+      expect([absent, verified, live, pro, promax].every(Boolean)).toBe(true)
+      if (!absent || !verified || !live || !pro || !promax) return
       for (const r of [absent, verified, live, pro, promax]) expect(r.code).toBe(0)
 
       // The resolved family is stated explicitly — the ONLY way `live` is
@@ -318,11 +391,12 @@ describe("LOW-10 — the resolved family reaches an OBSERVABLE decision at each 
 
   test(
     "pool: the box-provision plan carries the resolved family + preset (full union, paired)",
-    () => {
-      const absent = poolPlan(undefined)
-      const verified = poolPlan("verified")
-      const live = poolPlan("live")
-      const pro = poolPlan("pro")
+    async () => {
+      const [absent, verified, live, pro] = await runCliBatch(
+        [undefined, "verified", "live", "pro"].map(poolPlanInvocation),
+      )
+      expect([absent, verified, live, pro].every(Boolean)).toBe(true)
+      if (!absent || !verified || !live || !pro) return
       for (const r of [absent, verified, live, pro]) expect(r.code).toBe(0)
 
       expect(planToken(absent.out, "dataset-family")).toBe("verified")
@@ -340,11 +414,12 @@ describe("LOW-10 — the resolved family reaches an OBSERVABLE decision at each 
 
   test(
     "grade --mode full: the box plan carries the resolved family + preset (full union, paired)",
-    () => {
-      const absent = fullRemotePlan(undefined)
-      const verified = fullRemotePlan("verified")
-      const live = fullRemotePlan("live")
-      const pro = fullRemotePlan("pro")
+    async () => {
+      const [absent, verified, live, pro] = await runCliBatch(
+        [undefined, "verified", "live", "pro"].map(fullRemotePlanInvocation),
+      )
+      expect([absent, verified, live, pro].every(Boolean)).toBe(true)
+      if (!absent || !verified || !live || !pro) return
       for (const r of [absent, verified, live, pro]) expect(r.code).toBe(0)
 
       expect(planToken(absent.out, "dataset-family")).toBe("verified")
@@ -361,35 +436,46 @@ describe("LOW-10 — the resolved family reaches an OBSERVABLE decision at each 
 
   test(
     "whitespace-padded / mixed-case selectors reach the root CANONICALIZED",
-    () => {
+    async () => {
       // LOW-8's documented trim+case-fold semantics, observed on the real roots
       // rather than re-asserted on the resolver.
-      for (const raw of ["  PRO  ", "\tpro\n", " Pro "]) {
-        expect(planLine(runPlan(raw).out, "dataset family")).toBe("pro")
-        expect(planToken(poolPlan(raw).out, "dataset-family")).toBe("pro")
-      }
-      expect(planLine(runPlan(" LIVE ").out, "dataset family")).toBe("live")
-      // The `=`-form spelling must reach the SAME decision as the space form
-      // (it is a separate branch in the selector reader).
-      expect(
-        planLine(
-          runCli(["run", "--swebench", fixtures.dataset, "--dry-run", "--dataset-family=pro"]).out,
-          "dataset family",
-        ),
-      ).toBe("pro")
-      expect(
-        planToken(
-          runCli([
+      const padded = ["  PRO  ", "\tpro\n", " Pro "]
+      const cases: CliInvocation[] = padded.flatMap((raw) => [
+        runPlanInvocation(raw),
+        poolPlanInvocation(raw),
+      ])
+      cases.push(
+        runPlanInvocation(" LIVE "),
+        {
+          args: ["run", "--swebench", fixtures.dataset, "--dry-run", "--dataset-family=pro"],
+        },
+        {
+          args: [
             "pool",
             "--allow-remote-secrets",
             "--datasets",
             fixtures.dataset,
             "--dry-run",
             "--dataset-family=live",
-          ]).out,
-          "dataset-family",
-        ),
-      ).toBe("live")
+          ],
+        },
+      )
+      const results = await runCliBatch(cases)
+      expect(results).toHaveLength(9)
+      for (let i = 0; i < padded.length; i += 1) {
+        const run = results[i * 2]
+        const pool = results[i * 2 + 1]
+        expect(run).toBeDefined()
+        expect(pool).toBeDefined()
+        if (!run || !pool) continue
+        expect(planLine(run.out, "dataset family")).toBe("pro")
+        expect(planToken(pool.out, "dataset-family")).toBe("pro")
+      }
+      expect(planLine(results[6]?.out ?? "", "dataset family")).toBe("live")
+      // The `=`-form spelling must reach the SAME decision as the space form
+      // (it is a separate branch in the selector reader).
+      expect(planLine(results[7]?.out ?? "", "dataset family")).toBe("pro")
+      expect(planToken(results[8]?.out ?? "", "dataset-family")).toBe("live")
     },
     SPAWN_BUDGET_MS,
   )
@@ -401,65 +487,64 @@ describe("LOW-10 — the resolved family reaches an OBSERVABLE decision at each 
 describe("LOW-10 — argv beats env at every family-bearing root", () => {
   test(
     "run / pool / grade --mode full: argv wins, env is the fallback, env-garbage still refuses",
-    () => {
+    async () => {
+      const [envRun, argvVerified, argvPro, envPool, argvPool, envGarbage] = await runCliBatch([
+        {
+          args: ["run", "--swebench", fixtures.dataset, "--dry-run"],
+          env: { [FAMILY_KEY]: "pro" },
+        },
+        {
+          args: [
+            "run",
+            "--swebench",
+            fixtures.dataset,
+            "--dry-run",
+            "--dataset-family",
+            "verified",
+          ],
+          env: { [FAMILY_KEY]: "pro" },
+        },
+        {
+          args: ["run", "--swebench", fixtures.dataset, "--dry-run", "--dataset-family", "pro"],
+          env: { [FAMILY_KEY]: "live" },
+        },
+        {
+          args: ["pool", "--allow-remote-secrets", "--datasets", fixtures.dataset, "--dry-run"],
+          env: { [FAMILY_KEY]: "live" },
+        },
+        {
+          args: [
+            "pool",
+            "--allow-remote-secrets",
+            "--datasets",
+            fixtures.dataset,
+            "--dry-run",
+            "--dataset-family",
+            "pro",
+          ],
+          env: { [FAMILY_KEY]: "live" },
+        },
+        {
+          args: ["run", "--swebench", fixtures.dataset, "--dry-run"],
+          env: { [FAMILY_KEY]: "prow" },
+        },
+      ])
+      expect([envRun, argvVerified, argvPro, envPool, argvPool, envGarbage].every(Boolean)).toBe(
+        true,
+      )
+      if (!envRun || !argvVerified || !argvPro || !envPool || !argvPool || !envGarbage) return
       // env alone ⇒ env is honoured.
-      expect(
-        planLine(
-          runCli(["run", "--swebench", fixtures.dataset, "--dry-run"], { [FAMILY_KEY]: "pro" }).out,
-          "dataset family",
-        ),
-      ).toBe("pro")
+      expect(planLine(envRun.out, "dataset family")).toBe("pro")
       // argv + a CONFLICTING env ⇒ argv wins, in BOTH directions.
-      expect(
-        planLine(
-          runCli(
-            ["run", "--swebench", fixtures.dataset, "--dry-run", "--dataset-family", "verified"],
-            { [FAMILY_KEY]: "pro" },
-          ).out,
-          "dataset family",
-        ),
-      ).toBe("verified")
-      expect(
-        planLine(
-          runCli(["run", "--swebench", fixtures.dataset, "--dry-run", "--dataset-family", "pro"], {
-            [FAMILY_KEY]: "live",
-          }).out,
-          "dataset family",
-        ),
-      ).toBe("pro")
+      expect(planLine(argvVerified.out, "dataset family")).toBe("verified")
+      expect(planLine(argvPro.out, "dataset family")).toBe("pro")
 
       // Same three-way contract on the pool root.
-      expect(
-        planToken(
-          runCli(["pool", "--allow-remote-secrets", "--datasets", fixtures.dataset, "--dry-run"], {
-            [FAMILY_KEY]: "live",
-          }).out,
-          "dataset-family",
-        ),
-      ).toBe("live")
-      expect(
-        planToken(
-          runCli(
-            [
-              "pool",
-              "--allow-remote-secrets",
-              "--datasets",
-              fixtures.dataset,
-              "--dry-run",
-              "--dataset-family",
-              "pro",
-            ],
-            { [FAMILY_KEY]: "live" },
-          ).out,
-          "dataset-family",
-        ),
-      ).toBe("pro")
+      expect(planToken(envPool.out, "dataset-family")).toBe("live")
+      expect(planToken(argvPool.out, "dataset-family")).toBe("pro")
 
       // A VALID argv selector does NOT rescue a garbage env value on a root that
       // never reads argv... and a garbage ENV value alone still fails closed.
-      const envGarbage = runCli(["run", "--swebench", fixtures.dataset, "--dry-run"], {
-        [FAMILY_KEY]: "prow",
-      })
       expect(envGarbage.code).not.toBe(0)
       expect(envGarbage.out).toMatch(/unknown dataset family/i)
     },
