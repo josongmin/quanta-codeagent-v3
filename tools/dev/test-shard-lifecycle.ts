@@ -71,6 +71,31 @@ export const processGroupAlive = (pgid: number): boolean => {
   }
 }
 
+/**
+ * Identity of a process group's LEADER, as start time + command.
+ *
+ * A pgid is just a recycled pid. Between a group emptying and the registry
+ * observing it, the OS can hand that pid to an unrelated process which then
+ * leads a group with the same number — and a campaign that kills by pgid alone
+ * would SIGKILL a stranger's process tree. A full suite spawns thousands of
+ * processes, so this is narrow but not fanciful, and the blast radius is
+ * someone else's work.
+ *
+ * `undefined` means the leader is gone. That case is SAFE to kill: anything
+ * still in the group is our own descendant, and a recycled pid that had
+ * claimed this group number would itself be alive and caught by the
+ * comparison instead.
+ */
+const leaderIdentity = (pgid: number): string | undefined => {
+  const result = Bun.spawnSync(["ps", "-o", "lstart=,comm=", "-p", String(pgid)], {
+    stdout: "pipe",
+    stderr: "ignore",
+  })
+  if (result.exitCode !== 0) return undefined
+  const line = result.stdout.toString().trim()
+  return line === "" ? undefined : line
+}
+
 const signalGroup = (pgid: number, signal: NodeJS.Signals): void => {
   try {
     process.kill(-pgid, signal)
@@ -111,6 +136,8 @@ export const killProcessTree = async (
 
 interface TrackedWorker {
   readonly pgid: number
+  /** Leader identity at spawn; `undefined` when it exited before we looked. */
+  readonly leader: string | undefined
   cancelled: boolean
 }
 
@@ -168,7 +195,7 @@ export class ShardProcessRegistry {
         cancel: () => Promise.resolve(true),
       }
     }
-    const worker: TrackedWorker = { pgid: pid, cancelled: false }
+    const worker: TrackedWorker = { pgid: pid, leader: leaderIdentity(pid), cancelled: false }
     this.tracked.add(worker)
     const registry = this
     return {
@@ -179,9 +206,7 @@ export class ShardProcessRegistry {
       },
       async cancel(): Promise<boolean> {
         worker.cancelled = true
-        const emptied = await killProcessTree(worker.pgid, registry.killOptions)
-        if (emptied) registry.tracked.delete(worker)
-        return emptied
+        return registry.killTracked(worker)
       },
     }
   }
@@ -191,13 +216,31 @@ export class ShardProcessRegistry {
    * Returns the groups that survived even SIGKILL; those keep the campaign's
    * run root on disk so a live descendant never has its cwd deleted.
    */
+  /**
+   * Kill one tracked group, but only after confirming it is still OURS.
+   *
+   * If the leader is alive with a DIFFERENT identity than the one recorded at
+   * spawn, the pid was recycled: the group now belongs to a stranger. Killing
+   * it would be the worst kind of bug this file can have, so the worker is
+   * dropped from tracking untouched and the campaign continues.
+   */
+  private async killTracked(worker: TrackedWorker): Promise<boolean> {
+    const current = leaderIdentity(worker.pgid)
+    if (current !== undefined && worker.leader !== undefined && current !== worker.leader) {
+      this.tracked.delete(worker)
+      return true
+    }
+    const emptied = await killProcessTree(worker.pgid, this.killOptions)
+    if (emptied) this.tracked.delete(worker)
+    return emptied
+  }
+
   async cancelAll(): Promise<DrainOutcome> {
     this.sweep()
     await Promise.all(
       [...this.tracked].map(async (worker) => {
         worker.cancelled = true
-        const emptied = await killProcessTree(worker.pgid, this.killOptions)
-        if (emptied) this.tracked.delete(worker)
+        await this.killTracked(worker)
       }),
     )
     this.sweep()

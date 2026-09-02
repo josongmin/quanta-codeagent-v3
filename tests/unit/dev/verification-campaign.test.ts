@@ -265,13 +265,14 @@ describe("whole verification campaign lease", () => {
 
   test("the campaign hands its child a real stdin", async () => {
     // Test workers get no stdin by design, but the campaign's child is the
-    // gate runner an operator talks to. Spawning it with stdin ignored handed
-    // every gate an EOF; this asserts the child sees a TTY-or-pipe rather than
-    // a closed descriptor.
+    // gate runner an operator talks to, and spawning it with stdin ignored
+    // handed every gate an EOF. Asserting merely that a read SUCCEEDS is
+    // vacuous — an ignored stdin is /dev/null, which reads clean and empty.
+    // The discriminator is the BYTES: they only arrive through inherit.
     const root = mkdtempSync(join(tmpdir(), "quanta-verification-stdin-"))
     roots.push(root)
     const runner = copyCampaignOwner(root)
-    const marker = join(root, "stdin-kind")
+    const marker = join(root, "stdin-bytes")
     const child = Bun.spawn({
       cmd: [
         process.execPath,
@@ -279,11 +280,7 @@ describe("whole verification campaign lease", () => {
         "--",
         process.execPath,
         "-e",
-        `import { readFileSync } from "node:fs"; ` +
-          `let kind = "closed"; ` +
-          `try { readFileSync(0); kind = "readable" } catch (error) { ` +
-          `kind = (error as { code?: string }).code === "EAGAIN" ? "readable" : "closed" } ` +
-          `await Bun.write(${JSON.stringify(marker)}, kind)`,
+        `await Bun.write(${JSON.stringify(marker)}, await Bun.stdin.text())`,
       ],
       cwd: root,
       env: cleanLeaseEnv(),
@@ -291,10 +288,10 @@ describe("whole verification campaign lease", () => {
       stdout: "pipe",
       stderr: "pipe",
     })
-    child.stdin.write("hello\n")
+    child.stdin.write("campaign-stdin-probe\n")
     child.stdin.end()
     expect(await child.exited).toBe(0)
-    expect(readFileSync(marker, "utf8")).toBe("readable")
+    expect(readFileSync(marker, "utf8")).toBe("campaign-stdin-probe\n")
   }, 20_000)
 
   test("two concurrent same-HEAD campaigns execute the gates exactly once", async () => {

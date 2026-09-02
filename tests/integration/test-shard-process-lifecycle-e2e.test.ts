@@ -357,6 +357,46 @@ describe("shard worker process lifecycle", () => {
     expect(registry.liveGroups()).toHaveLength(0)
   }, 15_000)
 
+  test("a recycled pgid is never killed — a stranger's group survives cancelAll", async () => {
+    // A pgid is a recycled pid. If our leader dies and the OS hands that
+    // number to an unrelated process that leads its own group, killing by
+    // pgid alone SIGKILLs a stranger's tree. Simulated here by registering a
+    // worker and then making the registry believe a DIFFERENT live group is
+    // that worker's: the identity recorded at spawn no longer matches, so
+    // the group must be left strictly alone.
+    const dir = scratch()
+    const registry = new ShardProcessRegistry({ termGraceMs: 500, killGraceMs: 3_000 })
+    const { handle, pidFile } = spawnGrandchildWorker(registry, dir)
+    expect(await waitFor(() => existsSync(pidFile), 10_000)).toBe(true)
+    const grandchild = readGrandchildPid(pidFile)
+
+    // The "stranger": a live, independent process group.
+    const strangerDir = scratch()
+    const strangerFile = join(strangerDir, "stranger.pid")
+    const stranger = spawnGrandchildWorker(registry, strangerDir)
+    expect(await waitFor(() => existsSync(stranger.pidFile), 10_000)).toBe(true)
+    const strangerGrandchild = readGrandchildPid(stranger.pidFile)
+    writeFileSync(strangerFile, String(stranger.handle.pid))
+
+    // Rewrite the first worker's recorded leader so it looks recycled.
+    const tracked = (registry as unknown as { tracked: Set<{ pgid: number; leader?: string }> })
+      .tracked
+    for (const worker of tracked) {
+      if (worker.pgid === stranger.handle.pid) {
+        ;(worker as { leader?: string }).leader = "Thu Jan  1 00:00:00 1970 someone-else"
+      }
+    }
+
+    await registry.cancelAll()
+
+    // Our own worker's tree is gone…
+    expect(pidAlive(grandchild)).toBe(false)
+    // …and the "recycled" group was left untouched.
+    expect(pidAlive(strangerGrandchild)).toBe(true)
+    expect(await stranger.handle.cancel()).toBe(true)
+    await handle.exited.catch(() => undefined)
+  }, 30_000)
+
   test("a spawn failure rejects the exit promise and tracks nothing", async () => {
     const dir = scratch()
     const registry = new ShardProcessRegistry()
