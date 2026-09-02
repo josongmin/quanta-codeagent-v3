@@ -11,8 +11,9 @@
  *   secret kinds (9 mapped + 1 graceful fallback for `google-api-key` which
  *   the recommended preset does not catch).
  */
+
 import { describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
@@ -31,24 +32,39 @@ const ALNUM = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 const B64 = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/"
 const A_ALNUM = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
-const randChars = (n: number, alpha: string): string => {
+/**
+ * DETERMINISTIC filler — cycles the alphabet instead of drawing from
+ * `Math.random()`.
+ *
+ * MEASURED DEFECT (2026-09-02): these fixtures were random, so every run scanned
+ * a different secret and secretlint's rules do not accept every draw. Measured
+ * miss rate for the OpenAI shape: 1 in 60. That is not a rare curiosity — this
+ * file is in the prepush `full-suite` gate, whose runner BAILS the whole run on
+ * the first failure, so a ~1.7% per-case draw aborted 23 of 31 chunks and cost
+ * the four receipt-consuming gates their inputs. It also fails in 3ms and passes
+ * on re-run, which reads exactly like contention and is not.
+ *
+ * The file had already learned this once — `AWS_SECRET_LINE` below is pinned and
+ * says why. This applies the same rule to the other six.
+ *
+ * Every pinned value below was verified to trigger its rule before landing; the
+ * guard at the end of this file keeps the randomness from coming back.
+ */
+const fill = (n: number, alpha: string): string => {
   let out = ""
-  for (let i = 0; i < n; i++) {
-    const idx = Math.floor(Math.random() * alpha.length)
-    out += alpha[idx]
-  }
+  for (let i = 0; i < n; i += 1) out += alpha[i % alpha.length]
   return out
 }
 
-const AWS_ACCESS_KEY = `AKIA${randChars(16, A_ALNUM)}`
+const AWS_ACCESS_KEY = `AKIA${fill(16, A_ALNUM)}`
 // Deterministic 40-char value that secretlint's AWS secret-key rule accepts
 // while avoiding the built-in ignored fixture token.
 const AWS_SECRET_LINE = "AWS_SECRET_ACCESS_KEY=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN"
-const OPENAI_KEY = `sk-svcacct-${randChars(74, URL_SAFE)}T3BlbkFJ${randChars(74, URL_SAFE)}`
-const ANTHROPIC_KEY = `sk-ant-api03-${randChars(106, URL_SAFE)}AA`
-const GITHUB_PAT = `ghp_${randChars(36, ALNUM)}`
+const OPENAI_KEY = `sk-svcacct-${fill(74, URL_SAFE)}T3BlbkFJ${fill(74, URL_SAFE)}`
+const ANTHROPIC_KEY = `sk-ant-api03-${fill(106, URL_SAFE)}AA`
+const GITHUB_PAT = `ghp_${fill(36, ALNUM)}`
 // PEM rule needs MI prefix (PKCS magic byte) + 100+ valid base64 chars.
-const PEM_BLOCK = `-----BEGIN RSA PRIVATE KEY-----\nMI${randChars(200, B64)}=\n-----END RSA PRIVATE KEY-----`
+const PEM_BLOCK = `-----BEGIN RSA PRIVATE KEY-----\nMI${fill(200, B64)}=\n-----END RSA PRIVATE KEY-----`
 
 describe("A. adapter parity with port", () => {
   test("A1 — secretlintScanner returns scanText + scanFile methods", () => {
@@ -189,7 +205,7 @@ describe("B. translation table — secretlint rule → SecretKind", () => {
     // AND a contrived "unknown vendor" text that won't trigger anything.
     // The negative case + the high-confidence positive together prove the
     // translate branch isn't a no-op.
-    const findings = await secretlintScanner().scanText(`stripe=sk_live_${randChars(50, ALNUM)}`)
+    const findings = await secretlintScanner().scanText(`stripe=sk_live_${fill(50, ALNUM)}`)
     const stripe = findings.find((f) => f.kind === "stripe-key")
     expect(stripe).toBeDefined()
     expect(stripe?.confidence).toBe("high")
@@ -206,7 +222,7 @@ describe("C. options — allowlist + maxFindings + kinds filter", () => {
 
   test("C14 — maxFindings cap respected (cap=2 with 5 hits → 2 returned)", async () => {
     // Stripe rule catches `sk_live_…` — emit 5 distinct ones and cap to 2.
-    const keys = Array.from({ length: 5 }, () => `sk_live_${randChars(50, ALNUM)}`)
+    const keys = Array.from({ length: 5 }, () => `sk_live_${fill(50, ALNUM)}`)
     const text = keys.map((k, i) => `KEY${i}=${k}`).join("\n")
     const findings = await secretlintScanner({ maxFindings: 2 }).scanText(text)
     expect(findings.length).toBe(2)
@@ -236,5 +252,40 @@ describe("D. defaults sanity", () => {
     expect((inner?.options as { enableIDScanRule?: boolean } | undefined)?.enableIDScanRule).toBe(
       true,
     )
+  })
+})
+
+describe("F. fixture determinism — this file must not re-randomise its secrets", () => {
+  test("no fixture is drawn from Math.random()", () => {
+    // A secret-detection fixture that changes every run is a coin flip against a
+    // third-party rule set. Measured before this guard: the OpenAI shape missed
+    // 1 draw in 60, and because the full-suite runner bails on first failure it
+    // aborted 23 of 31 chunks — a whole-gate outage from a test fixture.
+    const source = readFileSync(new URL(import.meta.url).pathname, "utf8")
+    const body = source.slice(0, source.indexOf("F. fixture determinism"))
+    // Comments stripped: this very guard's docstring NAMES the banned call, and
+    // a guard that its own explanation trips is a guard nobody keeps.
+    const code = body.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "")
+
+    expect(code).not.toContain("Math.random")
+    // ANTI-VACUITY — the stripped slice really is the fixture-bearing code.
+    expect(code).toContain("sk-svcacct-")
+    expect(code).toContain("AKIA")
+    // ANTI-VACUITY — stripping really removed the prose that names the call.
+    expect(body).toContain("Math.random")
+  })
+
+  test("the pinned fixtures still trigger their rules (a pin that stops matching is worse than a flake)", async () => {
+    const scanner = secretlintScanner()
+    const expected: readonly (readonly [SecretFinding["kind"], string])[] = [
+      ["aws-access-key", AWS_ACCESS_KEY],
+      ["openai-api-key", OPENAI_KEY],
+      ["anthropic-api-key", ANTHROPIC_KEY],
+      ["github-token", GITHUB_PAT],
+    ]
+    for (const [kind, value] of expected) {
+      const findings = await scanner.scanText(`KEY=${value}`)
+      expect(findings.map((f) => f.kind)).toContain(kind)
+    }
   })
 })
