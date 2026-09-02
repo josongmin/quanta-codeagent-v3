@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { externalToolchainFingerprint } from "../../tools/dev/external-toolchain"
 import { runResourceAwareSchedule } from "../../tools/dev/test-shard-lifecycle"
 import {
   assertTestChunkPlan,
@@ -15,7 +16,6 @@ import {
   usesSharedTestResource,
 } from "../../tools/dev/test-shard-plan"
 import {
-  externalToolchainFingerprint,
   loadSuccessfulTestShardReceipt,
   mergeScanReachSinks,
   shardFilesSha256,
@@ -351,7 +351,7 @@ describe("scan-reach shard receipt", () => {
   })
 })
 
-describe("same-HEAD successful shard cache", () => {
+describe("same-INPUTS successful shard cache", () => {
   test("keys only verdict-relevant environment; runner-owned paths normalize", () => {
     const left = testEnvironmentSha256(
       { HOME: "/tmp/one", TMPDIR: "/tmp/a", QUANTA_MODE: "strict" },
@@ -418,7 +418,7 @@ describe("same-HEAD successful shard cache", () => {
     const receiptPath = join(directory, "cache", "shard-1.json")
     writeFileSync(testFile, "test('a', () => expect(1).toBe(1))\n")
     const identity = {
-      head: "a".repeat(40),
+      srcSha256: "a".repeat(64),
       suite: "full",
       manifestSha256: "b".repeat(64),
       shardIndex: 1,
@@ -444,7 +444,9 @@ describe("same-HEAD successful shard cache", () => {
       loadSuccessfulTestShardReceipt({ path: receiptPath, expected: identity, nowMs }).kind,
     ).toBe("hit")
     const identityMutations = [
-      { ...identity, head: "d".repeat(40) },
+      // The code under test — this REPLACED the git HEAD sha, which invalidated
+      // every chunk on any commit including docs-only ones (2026-09-02).
+      { ...identity, srcSha256: "d".repeat(64) },
       { ...identity, suite: "unit" },
       { ...identity, manifestSha256: "d".repeat(64) },
       { ...identity, shardFileCount: 2 },
@@ -494,7 +496,7 @@ describe("same-HEAD successful shard cache", () => {
     temporaryDirectories.push(directory)
     const receiptPath = join(directory, "shard.json")
     const identity = {
-      head: "a".repeat(40),
+      srcSha256: "a".repeat(64),
       suite: "full",
       manifestSha256: "b".repeat(64),
       shardIndex: 1,
