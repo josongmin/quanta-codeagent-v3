@@ -45,8 +45,16 @@ import { assertPreloadsMatchBunfig, expandTestFiles } from "./sandboxed-test"
 const REPO_ROOT = join(import.meta.dir, "..", "..")
 const PRELOADS = ["tests/preload-clean-source-js.ts", "tests/setup.ts"] as const
 
-/** Generous — the slowest real file here is ~12s cold — but finite. */
-const ARM_TIMEOUT_MS = 120_000
+/**
+ * Keep Bun's per-test deadline separate from the whole-process watchdog.
+ *
+ * Without an explicit `--timeout`, Bun's short default made CPU-bound static
+ * guards fail one arm under host contention even though the same guard passed
+ * in the adjacent arm. The process watchdog retains thirty seconds for Bun to
+ * print its counters and exit after a timed-out test.
+ */
+const ARM_TEST_TIMEOUT_MS = 90_000
+const ARM_PROCESS_TIMEOUT_MS = 120_000
 
 export type ArmResult = { readonly ok: boolean; readonly pass: number; readonly fail: number }
 
@@ -125,9 +133,13 @@ export const parseParityArgs = (
   }
 }
 
+export const parityArmCommand = (file: string): readonly string[] => {
+  const preloads = PRELOADS.flatMap((preload) => ["--preload", join(REPO_ROOT, preload)])
+  return ["bun", "test", ...preloads, file, `--timeout=${ARM_TEST_TIMEOUT_MS}`]
+}
+
 const runArm = (file: string, cwd: string): ArmResult => {
-  const preloads = PRELOADS.flatMap((p) => ["--preload", join(REPO_ROOT, p)])
-  const proc = Bun.spawnSync(["bun", "test", ...preloads, file], {
+  const proc = Bun.spawnSync(parityArmCommand(file), {
     cwd,
     stdout: "pipe",
     stderr: "pipe",
@@ -139,7 +151,7 @@ const runArm = (file: string, cwd: string): ArmResult => {
     // the one form it could not report: with no timeout the harness waited
     // forever, produced no verdict, and the interrupt skipped the `finally` that
     // removes the sandbox.
-    timeout: ARM_TIMEOUT_MS,
+    timeout: ARM_PROCESS_TIMEOUT_MS,
   })
   return parseCounters(`${proc.stdout.toString()}${proc.stderr.toString()}`)
 }

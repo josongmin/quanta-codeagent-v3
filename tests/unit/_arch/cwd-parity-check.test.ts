@@ -28,12 +28,22 @@ import { describe, expect, test } from "bun:test"
 import {
   armsDiffer,
   classify,
+  parityArmCommand,
   parseCounters,
   parseParityArgs,
   shardOf,
 } from "@/../tools/dev/cwd-parity-check"
 
 describe("cwd-parity harness", () => {
+  test("each arm gives Bun a bounded per-test deadline below the process watchdog", () => {
+    const file = "/repo/tests/unit/static-scan.test.ts"
+    const command = parityArmCommand(file)
+    expect(command.slice(0, 2)).toEqual(["bun", "test"])
+    expect(command).toContain(file)
+    expect(command.filter((arg) => arg.startsWith("--preload"))).toHaveLength(2)
+    expect(command.filter((arg) => arg.startsWith("--timeout="))).toEqual(["--timeout=90000"])
+  })
+
   describe("argv", () => {
     test("🔴 a lone root survives when --shard is absent (it used to be dropped)", () => {
       expect(parseParityArgs(["tests/unit/_arch"])).toEqual({
