@@ -446,8 +446,18 @@ describe("ADR-0187 fresh bag every tick", () => {
     // Flip the wiring and re-emit (simulate the interval firing).
     planQueueWired = true
     iv.intervals[0]?.handler()
-    await new Promise<void>((r) => setTimeout(r, 5))
-    parsed = JSON.parse(await readFile(target, "utf8")) as HealthSnapshot
+    // The handler STARTS an async write and does not return it, so the file
+    // lands on its own schedule. Sleeping a fixed 5ms raced the host: inside a
+    // full-suite worker running beside a peer chunk the write had not arrived
+    // and the assertion read the PREVIOUS snapshot. Poll for the state the
+    // handler is supposed to produce — the assertion below is unchanged, so a
+    // handler that never updates still fails, it just fails for that reason.
+    const wiredDeadline = Date.now() + 10_000
+    while (Date.now() < wiredDeadline) {
+      parsed = JSON.parse(await readFile(target, "utf8")) as HealthSnapshot
+      if (parsed.summary.wiredCount === 1) break
+      await new Promise<void>((r) => setTimeout(r, 10))
+    }
     expect(parsed.summary.wiredCount).toBe(1)
     const pq = parsed.slices.find((s) => s.slice === "planQueue")
     expect(pq?.wired).toBe(true)
