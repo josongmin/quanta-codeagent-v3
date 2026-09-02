@@ -42,6 +42,7 @@ const identity = (over: Partial<TestShardCacheIdentity> = {}): TestShardCacheIde
   testEnvSha256: "d".repeat(64),
   srcSha256: "e".repeat(64),
   junit: false,
+  filesRunConcurrently: false,
   ...over,
 })
 
@@ -115,6 +116,35 @@ describe("shard cache identity — what may and may not invalidate a receipt", (
     for (const over of fields) {
       expect(roundTrip(identity(), identity(over)).kind).toBe("miss")
     }
+  })
+
+  test("a concurrent green answers for a serial plan, but never the reverse", () => {
+    // IMPLICATION, not equality. Running a chunk's files concurrently is the
+    // strictly harder condition — it is the one that can interleave shared
+    // module state — so that green also covers a serial plan. A serial green
+    // covers only serial: without this the cache had a blind spot where a
+    // loaded box banked serial receipts and an idle box, planning `pure`
+    // chunks concurrently, HIT them and never exercised the interleaving.
+    expect(
+      roundTrip(identity({ filesRunConcurrently: true }), identity({ filesRunConcurrently: true }))
+        .kind,
+    ).toBe("hit")
+    expect(
+      roundTrip(identity({ filesRunConcurrently: true }), identity({ filesRunConcurrently: false }))
+        .kind,
+    ).toBe("hit")
+    expect(
+      roundTrip(
+        identity({ filesRunConcurrently: false }),
+        identity({ filesRunConcurrently: false }),
+      ).kind,
+    ).toBe("hit")
+    const blindSpot = roundTrip(
+      identity({ filesRunConcurrently: false }),
+      identity({ filesRunConcurrently: true }),
+    )
+    expect(blindSpot.kind).toBe("miss")
+    if (blindSpot.kind === "miss") expect(blindSpot.reason).toBe("input-mismatch")
   })
 
   test("shardIndex still does NOT invalidate — a neighbour chunk may renumber it", () => {

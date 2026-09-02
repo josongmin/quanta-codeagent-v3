@@ -335,16 +335,8 @@ const runShard = async (
   runRoot: string,
   testTimeoutMs: number,
   registry: ShardProcessRegistry,
-  workers: number,
+  intraParallel: number,
 ): Promise<ShardRunResult> => {
-  // `pure` chunks own nothing process-global, so their files may overlap
-  // INSIDE the worker; every other class stays strictly serial.
-  const intraParallel = chooseIntraWorkerParallelism({
-    resourceClass: plan.resourceClass,
-    cpuCount: availableParallelism(),
-    workers,
-    pressure: loadPressure(),
-  })
   const shard = `${plan.index}/${totalChunks}`
   const workerRootEarly = join(runRoot, `worker-${plan.index}`)
   // Every chunk writes a JUnit receipt: the consumer lane (unit) merges it,
@@ -483,6 +475,8 @@ interface CachedChunk {
   readonly chunk: TestChunk
   readonly identity: TestShardCacheIdentity
   readonly cachePath: string
+  /** Decided once, at plan time, so the receipt's identity and the run agree. */
+  readonly intraParallel: number
 }
 
 const validateCompletedShard = (before: GitSnapshot, completed: CompletedShard): string => {
@@ -610,9 +604,6 @@ const loadPressure = (): number => {
  * off running slowly than not running.
  */
 let overloadDelayBudgetMs = START_DELAY_MAX_MS
-/** What the most recent host measurement chose; the intra-worker budget is
- *  shared across however many worker processes are actually overlapping. */
-let lastMeasuredWorkers = 1
 
 const measuredConcurrency = async (runningCount: number): Promise<number> => {
   if (runningCount === 0) {
@@ -640,9 +631,7 @@ const measuredConcurrency = async (runningCount: number): Promise<number> => {
       })
     }
   }
-  const decided = loadPressure() > 1 ? 1 : await workerConcurrency()
-  lastMeasuredWorkers = decided
-  return decided
+  return loadPressure() > 1 ? 1 : workerConcurrency()
 }
 
 const executeChunks = async (input: {
@@ -699,7 +688,7 @@ const executeChunks = async (input: {
           input.runRoot,
           input.testTimeoutMs,
           input.registry,
-          lastMeasuredWorkers,
+          cached.intraParallel,
         )
         const completedShard = {
           plan: cached.chunk,
@@ -832,10 +821,21 @@ const main = async (): Promise<void> => {
 
     const toolchainSha256 = testToolchainSha256()
     const envSha256 = testEnvironmentSha256(process.env, testTimeoutMs)
+    // One decision per chunk, made here so the receipt's identity describes the
+    // schedule the run will actually use. `workers` is the concurrency the host
+    // measured at campaign start; the per-start measurement can still drop the
+    // WORKER count later, but a chunk's own file concurrency stays fixed.
     const cachedChunks: readonly CachedChunk[] = chunks.map((chunk) => {
       const filesSha256 = shardFilesSha256(REPO_ROOT, chunk.files)
+      const intraParallel = chooseIntraWorkerParallelism({
+        resourceClass: chunk.resourceClass,
+        cpuCount,
+        workers: concurrency,
+        pressure: loadPressure(),
+      })
       return {
         chunk,
+        intraParallel,
         cachePath: chunkCachePath(opts.suite, filesSha256),
         identity: {
           srcSha256,
@@ -847,6 +847,7 @@ const main = async (): Promise<void> => {
           toolchainSha256,
           testEnvSha256: envSha256,
           junit: opts.junitOut !== undefined,
+          filesRunConcurrently: intraParallel > 1,
         },
       }
     })

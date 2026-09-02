@@ -29,6 +29,16 @@ export interface TestShardCacheIdentity {
   readonly toolchainSha256: string
   readonly testEnvSha256: string
   readonly junit: boolean
+  /**
+   * Did this chunk's files run CONCURRENTLY inside the worker?
+   *
+   * Without it the cache had a systematic blind spot: a loaded box plans
+   * serial, banks a green, and a later idle box plans `pure` chunks
+   * concurrently but HITS those serial receipts — so the concurrent schedule
+   * is never actually exercised, and a file that only breaks when interleaved
+   * with a peer is passed by a receipt that never interleaved it.
+   */
+  readonly filesRunConcurrently: boolean
 }
 
 export interface SuccessfulTestShardReceipt extends TestShardCacheIdentity {
@@ -140,7 +150,12 @@ const sameIdentity = (
   receipt.shardFilesSha256 === expected.shardFilesSha256 &&
   receipt.toolchainSha256 === expected.toolchainSha256 &&
   receipt.testEnvSha256 === expected.testEnvSha256 &&
-  receipt.junit === expected.junit
+  receipt.junit === expected.junit &&
+  // IMPLICATION, not equality. Running files concurrently is the strictly
+  // harder condition — it is the one that can interleave shared module state —
+  // so a green earned that way also answers for a serial plan. A serial green
+  // answers only for a serial plan.
+  (receipt.filesRunConcurrently || !expected.filesRunConcurrently)
 
 const isScanReachRecord = (value: unknown): value is ScanReachRecord => {
   if (typeof value !== "object" || value === null) return false
@@ -171,6 +186,7 @@ const parseSuccessfulShardReceipt = (value: unknown): SuccessfulTestShardReceipt
     !validSha256(row.toolchainSha256) ||
     !validSha256(row.testEnvSha256) ||
     typeof row.junit !== "boolean" ||
+    typeof row.filesRunConcurrently !== "boolean" ||
     !Number.isSafeInteger(row.createdAtMs) ||
     !Number.isSafeInteger(row.expiresAtMs) ||
     !Number.isSafeInteger(row.executedFiles) ||
