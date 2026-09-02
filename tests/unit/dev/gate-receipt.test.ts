@@ -10,8 +10,10 @@ import {
 } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { verificationReceiptPath } from "../../../tools/dev/verification-receipt"
 
 const SOURCE_GATE = join(import.meta.dir, "..", "..", "..", "tools", "dev", "gate.ts")
+const SOURCE_DIR = join(import.meta.dir, "..", "..", "..", "tools", "dev")
 const roots: string[] = []
 const BEHAVIOR_TIMEOUT_MS = 15_000
 const behaviorTest = (name: string, run: () => void): void => {
@@ -64,7 +66,7 @@ const git = (root: string, args: readonly string[]): string => {
 const manifestSource = (runs: readonly string[]): string => {
   const entries = runs.map((run, index) => ({
     id: `gate-${index + 1}`,
-    stage: index < 9 ? "precommit" : "prepush",
+    stage: index < 10 ? "precommit" : "prepush",
     run,
     why: `behavioral fixture gate ${index + 1}`,
   }))
@@ -90,7 +92,13 @@ const makeRepo = (runs: readonly string[]): string => {
   roots.push(root)
   mkdirSync(join(root, "tools", "dev"), { recursive: true })
   copyFileSync(SOURCE_GATE, join(root, "tools", "dev", "gate.ts"))
+  for (const dependency of ["verification-receipt.ts", "verification-receipt-probe.ts"]) {
+    copyFileSync(join(SOURCE_DIR, dependency), join(root, "tools", "dev", dependency))
+  }
   writeFileSync(join(root, "tools", "dev", "gate-manifest.ts"), manifestSource(runs))
+  // The exact receipt lands under .cache/; an untracked receipt must not dirty
+  // the NEXT run's frozen snapshot (mirrors the real repository's ignore).
+  writeFileSync(join(root, ".gitignore"), ".cache/\n")
   writeFileSync(join(root, "tracked.txt"), "baseline\n")
   git(root, ["init", "-q"])
   git(root, ["config", "user.email", "gate-test@example.invalid"])
@@ -137,7 +145,7 @@ afterEach(() => {
 
 describe("prepush clean-head receipt", () => {
   behaviorTest("clean run emits one complete machine-readable receipt", () => {
-    const root = makeRepo(Array.from({ length: 19 }, () => "true"))
+    const root = makeRepo(Array.from({ length: 21 }, () => "true"))
     const expectedHead = git(root, ["rev-parse", "HEAD"])
 
     const result = runGate(root, "prepush")
@@ -151,7 +159,7 @@ describe("prepush clean-head receipt", () => {
     expect(receipt.snapshotStable).toBe(true)
     expect(receipt.startClean).toBe(true)
     expect(receipt.endClean).toBe(true)
-    expect(receipt.gates).toHaveLength(19)
+    expect(receipt.gates).toHaveLength(21)
     expect(receipt.gates.every((gate) => gate.status === "passed" && gate.elapsedMs >= 0)).toBe(
       true,
     )
@@ -160,7 +168,7 @@ describe("prepush clean-head receipt", () => {
 
   behaviorTest("dirty start fails before spending gate 1", () => {
     const spend = "printf spent >> spend.log"
-    const root = makeRepo(Array.from({ length: 19 }, () => spend))
+    const root = makeRepo(Array.from({ length: 21 }, () => spend))
     writeFileSync(join(root, "dirty.txt"), "dirty\n")
 
     const result = runGate(root, "prepush")
@@ -175,7 +183,7 @@ describe("prepush clean-head receipt", () => {
   })
 
   behaviorTest("tracked status drift invalidates an otherwise green gate set", () => {
-    const runs = Array.from({ length: 19 }, () => "true")
+    const runs = Array.from({ length: 21 }, () => "true")
     runs[0] = "printf drift >> tracked.txt"
     const root = makeRepo(runs)
 
@@ -192,7 +200,7 @@ describe("prepush clean-head receipt", () => {
   })
 
   behaviorTest("HEAD drift invalidates a clean ending tree", () => {
-    const runs = Array.from({ length: 19 }, () => "true")
+    const runs = Array.from({ length: 21 }, () => "true")
     runs[0] = "git commit --allow-empty -qm drift"
     const root = makeRepo(runs)
 
@@ -209,7 +217,7 @@ describe("prepush clean-head receipt", () => {
   behaviorTest(
     "--bail still stops after the first failed gate and receipts the remainder as not-run",
     () => {
-      const runs = Array.from({ length: 19 }, () => "printf spent >> spend.log")
+      const runs = Array.from({ length: 21 }, () => "printf spent >> spend.log")
       runs[0] = "false"
       const root = makeRepo(runs)
 
@@ -227,7 +235,7 @@ describe("prepush clean-head receipt", () => {
   behaviorTest(
     "a same-head rerun executes every gate again instead of reusing the prior receipt",
     () => {
-      const runs = Array.from({ length: 19 }, () => "true")
+      const runs = Array.from({ length: 21 }, () => "true")
       runs[0] = "printf x >> .git/gate-count"
       const root = makeRepo(runs)
 
@@ -242,16 +250,60 @@ describe("prepush clean-head receipt", () => {
     },
   )
 
+  behaviorTest("--reuse-receipt skips every gate only behind a green same-state run", () => {
+    const runs = Array.from({ length: 21 }, () => "true")
+    runs[0] = "printf x >> .git/gate-count"
+    const root = makeRepo(runs)
+
+    // Cold: no receipt exists — every gate runs, then the receipt is minted.
+    const first = runGate(root, "prepush", ["--reuse-receipt"])
+    expect(first.code).toBe(0)
+    expect(first.stdout).toContain("receipt not reusable")
+    expect(first.stdout).toContain("exact receipt stored")
+
+    // Warm same state: zero gates execute.
+    const second = runGate(root, "prepush", ["--reuse-receipt"])
+    expect(second.code).toBe(0)
+    expect(second.stdout).toContain("REUSED exact receipt")
+    expect(readFileSync(join(root, ".git", "gate-count"), "utf8")).toBe("x")
+
+    // HEAD drift: the receipt is content-bound, so the gates run again.
+    git(root, ["commit", "--allow-empty", "-qm", "drift"])
+    const third = runGate(root, "prepush", ["--reuse-receipt"])
+    expect(third.code).toBe(0)
+    expect(third.stdout).toContain("receipt not reusable")
+    expect(readFileSync(join(root, ".git", "gate-count"), "utf8")).toBe("xx")
+  })
+
+  behaviorTest("a red run destroys the previous green exact receipt", () => {
+    const runs = Array.from({ length: 21 }, () => "true")
+    const root = makeRepo(runs)
+    const first = runGate(root, "prepush", ["--reuse-receipt"])
+    expect(first.code).toBe(0)
+    expect(existsSync(verificationReceiptPath(root))).toBe(true)
+
+    // Break one prepush gate, then run WITHOUT reuse: the stale green receipt
+    // must be deleted before gate 1 so a later --reuse-receipt cannot resurrect it.
+    const broken = Array.from({ length: 21 }, () => "true")
+    broken[18] = "false"
+    writeFileSync(join(root, "tools", "dev", "gate-manifest.ts"), manifestSource(broken))
+    git(root, ["add", "."])
+    git(root, ["commit", "-qm", "break gate"])
+    const red = runGate(root, "prepush")
+    expect(red.code).toBe(1)
+    expect(existsSync(verificationReceiptPath(root))).toBe(false)
+  })
+
   behaviorTest(
     "precommit keeps its existing dirty-tree behavior and emits no prepush receipt",
     () => {
-      const root = makeRepo(Array.from({ length: 19 }, () => "true"))
+      const root = makeRepo(Array.from({ length: 21 }, () => "true"))
       writeFileSync(join(root, "dirty.txt"), "dirty\n")
 
       const result = runGate(root, "precommit")
 
       expect(result.code).toBe(0)
-      expect(result.stdout).toContain("precommit: ok — 9 of 9 gate(s) passed")
+      expect(result.stdout).toContain("precommit: ok — 10 of 10 gate(s) passed")
       expect(result.stdout).not.toContain('"schema":"quanta.gate-receipt.v1"')
     },
   )

@@ -21,13 +21,20 @@ describe("typecheck contract", () => {
     expect(pkg.scripts.test).toContain("bun run typecheck")
     expect(pkg.scripts["test:unit"]).toContain("bun run typecheck")
     expect(pkg.scripts["test:fast"]).toContain("bun run typecheck")
-    const ci = pkg.scripts["test:ci"] ?? ""
-    expect(ci).toContain("bun run typecheck:all")
-    expect(ci).toContain("bun run test:clean-js")
-    expect(ci).toContain("bun run tools/dev/run-test-shards.ts --suite=full --parallel=1")
+    // test:ci delegates to the manifest executor; the full-typecheck invariant
+    // now lives in the gate manifest (its `typecheck` gate) and the clean-js +
+    // full-runner invariant in the one script the `full-suite` gate runs.
+    expect(pkg.scripts["test:ci"]).toBe("bun run prepush")
+    const manifest = readText("tools/dev/gate-manifest.ts")
+    expect(manifest).toContain('run: "bun run typecheck:all"')
+    const full = pkg.scripts["test:full:ci"] ?? ""
+    expect(full).toContain("bun run test:clean-js")
+    expect(full).toContain(
+      "bun run tools/dev/run-test-shards.ts --suite=full --junit-out=.cache/full-junit.xml --parallel=1",
+    )
     // `typecheck:all` already covers src+tests+tools. Routing through the public
     // `test` script here would immediately repeat the src+tools typecheck.
-    expect(ci).not.toMatch(/\bbun run test(?:\s|$)/)
+    expect(full).not.toMatch(/\bbun run test(?:\s|$)/)
   })
 
   test("split tsconfig targets keep tests out of the fast lane", () => {

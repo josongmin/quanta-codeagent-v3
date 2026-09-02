@@ -61,7 +61,12 @@ jobs:
         # rule that fires while ABSENT from that file fails as "unpinned" so a
         # biome upgrade / newly-enabled rule cannot add debt silently.
         run: bun run lint:debt
-      - name: unit (guarded — a test may not leave files in the worktree)
+      - name: full suite (guarded — one chunked run of every test tier)
+        # ONE authoritative execution: unit + integration + meta/adversarial/
+        # measurement + colocated src/tools tests through the chunked runner.
+        # This replaced separate unit/integration steps (and folded in the
+        # 321-file "rest" tier that no merge gate ran) so every receipt-consuming
+        # step below derives its verdict from THIS run instead of re-executing.
         # Wrapping costs nothing: the guard snapshots `git status` either side of
         # the SAME run. aug-23: five fixtures written to the repo root by tests
         # using bare relative paths (`rel.txt`, `src/x.ts`, ...) broke typecheck,
@@ -69,7 +74,7 @@ jobs:
         # contains -- so neither review nor `git log` could ever have caught it.
         # `.cache/` is gitignored, so the junit outfile below is not a leak.
         run: >-
-          bun run tools/dev/worktree-pollution-guard.ts -- bun run test:unit:ci
+          bun run tools/dev/worktree-pollution-guard.ts -- bun run test:full:ci
       - name: cwd parity (a guard must give the same verdict from any directory)
         # Runs each arch/meta guard from the repo root AND from a throwaway working
         # directory, and fails only on the DIFFERENCE -- a single-arm run cannot
@@ -105,7 +110,10 @@ jobs:
         # before every test file, which made a mirror with src/tool emptied
         # impossible to start and blocked the oracle above. Inspects a real bun
         # child's module set, not the source text. ~1s.
-        run: bun test tests/meta/preload-runtime-closure-hellgate.test.ts
+        # child's module set, not the source text — and it already ran inside the
+        # full suite above; this consumes that run's junit receipt instead of
+        # executing the file a second time.
+        run: bun run tools/dev/junit-file-green.ts .cache/full-junit.xml tests/meta/preload-runtime-closure-hellgate.test.ts
 
       - name: unit speed budget (slowest single test, one-directional)
         # The old gate asserted the WHOLE suite finished in <8000ms. That number
@@ -115,10 +123,9 @@ jobs:
         # is the one the old error message named -- "move slow cases to
         # integration" -- i.e. no SINGLE unit test may be slow. Pinned in
         # tools/dev/unit-speed-budget.json; may only go DOWN.
-        run: bun run tools/dev/unit-speed-budget.ts .cache/unit-junit.xml
-      - name: integration (guarded — a test may not leave files in the worktree)
-        run: >-
-          bun run tools/dev/worktree-pollution-guard.ts -- bun run test:integration
+        run: bun run tools/dev/unit-speed-budget.ts .cache/full-junit.xml --scope=tests/unit/
+      - name: pm DoD ratchet (receipt-derived — the test ran in the full suite)
+        run: bun run tools/dev/junit-file-green.ts .cache/full-junit.xml tests/unit/pm-dod-ratchet.test.ts
       - name: interactive CLI e2e (PTY)
         # aug-23 audit — this suite was the ONLY coverage of the raw-mode
         # interactive input layer and ran in NO workflow, so it rotted unseen.

@@ -29,11 +29,23 @@
  *   bun run tools/dev/gate.ts --list
  */
 
-import { createHash } from "node:crypto"
+import { rmSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
 import { GATES, type Gate, type GateStage, gatesForStage } from "./gate-manifest"
+import {
+  cleanStatusSha256,
+  mintExactVerificationReceipt,
+  readExactVerificationReceipt,
+  validateExactVerificationReceipt,
+  verificationReceiptPath,
+  writeExactVerificationReceipt,
+} from "./verification-receipt"
+import {
+  verificationContextForSnapshot,
+  verificationManifestSha256,
+} from "./verification-receipt-probe"
 
 const REPO_ROOT = join(dirname(dirname(dirname(fileURLToPath(import.meta.url)))))
 
@@ -80,8 +92,10 @@ const REPLAY_HEAD_LINES = 20
  * docstring claimed mis-staging was loud.
  *
  * Owned counts, derived from the real manifest: 10 precommit, 11 prepush-only.
+ * The floors sit AT the real counts — deleting any gate trips them, and adding
+ * one is expected to raise them in the same diff.
  */
-const MIN_OWNED: Record<GateStage, number> = { precommit: 9, prepush: 10 }
+const MIN_OWNED: Record<GateStage, number> = { precommit: 10, prepush: 11 }
 
 interface GateRun {
   readonly ok: boolean
@@ -117,22 +131,6 @@ interface GateReceipt {
   readonly status: ReceiptStatus
   readonly error?: string
 }
-
-const sha256 = (value: string): string => createHash("sha256").update(value).digest("hex")
-
-const manifestIdentity = (gates: readonly Gate[]): string =>
-  sha256(
-    JSON.stringify(
-      gates.map(({ id, stage, run, consumes, hostDependent, notInWorkflow }) => ({
-        id,
-        stage,
-        run,
-        consumes: consumes ?? null,
-        hostDependent: hostDependent ?? null,
-        notInWorkflow: notInWorkflow ?? null,
-      })),
-    ),
-  )
 
 const gitOutput = (args: readonly string[]): string => {
   const proc = Bun.spawnSync(["git", ...args], {
@@ -269,7 +267,7 @@ const runGate = (gate: Gate): GateRun => {
  */
 const planned = gatesForStage(stage)
 const overallStarted = Bun.nanoseconds()
-const plannedManifestSha256 = manifestIdentity(planned)
+const plannedManifestSha256 = verificationManifestSha256(planned)
 const ownedPrecommit = GATES.filter((g) => g.stage === "precommit").length
 const ownedPrepush = GATES.filter((g) => g.stage === "prepush").length
 const owned = { precommit: ownedPrecommit, prepush: ownedPrepush }
@@ -300,6 +298,31 @@ if (danglingConsumes.length > 0) {
   )
   process.exit(1)
 }
+
+// Exact-receipt reuse (opt-in): a durable, content-bound record of a green
+// same-state prepush. Probed HERE — i.e. under the campaign lease when the
+// wrapper launched this runner — so a contender that waited behind a green
+// same-HEAD campaign exits without executing a single gate.
+const exactReceiptPath = verificationReceiptPath(REPO_ROOT)
+if (stage === "prepush" && wants("--reuse-receipt")) {
+  try {
+    const current = gitSnapshot()
+    const validation = validateExactVerificationReceipt(
+      readExactVerificationReceipt(exactReceiptPath),
+      verificationContextForSnapshot(REPO_ROOT, current, plannedManifestSha256),
+    )
+    if (validation.ok) {
+      printOut(`prepush: REUSED exact receipt head=${current.head} path=${exactReceiptPath}`)
+      process.exit(0)
+    }
+    printOut(`prepush: receipt not reusable (${validation.reason}); running gates`)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    printOut(`prepush: receipt check failed closed (${message}); running gates`)
+  }
+}
+// A red or interrupted run must never leave a previous green receipt current.
+if (stage === "prepush") rmSync(exactReceiptPath, { force: true })
 
 let frozenSnapshot: GitSnapshot | undefined
 if (stage === "prepush") {
@@ -415,6 +438,18 @@ if (
         "— may have passed by finding nothing to check here)"
   printOut(`${stage}: ok — ${results.length} of ${planned.length} gate(s) passed${note}`)
   if (stage === "prepush") {
+    if (endingSnapshot !== undefined) {
+      const current = verificationContextForSnapshot(
+        REPO_ROOT,
+        endingSnapshot,
+        plannedManifestSha256,
+      )
+      if (current.statusSha256 !== cleanStatusSha256) {
+        throw new Error("internal error: refusing to persist a dirty exact receipt")
+      }
+      writeExactVerificationReceipt(exactReceiptPath, mintExactVerificationReceipt(current))
+      printOut(`prepush: exact receipt stored path=${exactReceiptPath}`)
+    }
     emitReceipt(
       makeReceipt({
         planned,

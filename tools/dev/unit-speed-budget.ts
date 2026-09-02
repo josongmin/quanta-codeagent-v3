@@ -44,9 +44,16 @@ type Case = { readonly name: string; readonly ms: number; readonly file: string 
 
 const xmlPath = process.argv[2]
 if (!xmlPath || xmlPath.startsWith("--")) {
-  console.error("usage: unit-speed-budget.ts <junit.xml> [--tighten]")
+  console.error("usage: unit-speed-budget.ts <junit.xml> [--scope=<path-prefix>] [--tighten]")
   process.exit(1)
 }
+
+// `--scope=tests/unit/` lets this budget consume the FULL-suite junit receipt
+// (one execution for every gate) while still judging only the unit tier —
+// integration files are legitimately slow and live outside this ceiling.
+const scope = process.argv
+  .find((argument) => argument.startsWith("--scope="))
+  ?.slice("--scope=".length)
 
 const xml = readFileSync(xmlPath, "utf8")
 
@@ -71,6 +78,9 @@ for (const tag of xml.match(/<testcase\b[^>]*>/g) ?? []) {
   // branch hid it.
   const label = /\b(?:file|classname)="([^"]*)"/.exec(tag)?.[1]
   const rawFile = /\bfile="([^"]*)"/.exec(tag)?.[1]
+  // Scoped consumption: a case outside the scope prefix (or one the reporter
+  // could not attribute to a file) is another tier's business, not this budget's.
+  if (scope !== undefined && !(rawFile ?? "").startsWith(scope)) continue
   const file =
     rawFile !== undefined && rawFile.endsWith(".ts") && existsSync(join(repoRoot, rawFile))
       ? rawFile

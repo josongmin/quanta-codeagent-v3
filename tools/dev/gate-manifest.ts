@@ -133,23 +133,22 @@ export const GATES: readonly Gate[] = [
 
   // ── prepush: everything above, plus the suites ─────────────────────────────
   {
-    id: "unit",
+    id: "full-suite",
     stage: "prepush",
-    run: "bun run tools/dev/worktree-pollution-guard.ts -- bun run test:unit:ci",
-    why: "the unit suite, wrapped so a test that leaves a file in the worktree is caught at the source",
+    run: "bun run tools/dev/worktree-pollution-guard.ts -- bun run test:full:ci",
+    why:
+      "ONE authoritative execution of unit + integration + meta/adversarial/measurement + " +
+      "colocated src/tools tests (the chunked runner), wrapped so a test that leaves a file " +
+      "in the worktree is caught at the source. It replaced three separate suite gates that " +
+      "each re-bought discovery and re-queued on the repository lane; every receipt-consuming " +
+      "gate below derives its verdict from this run's junit/scan-reach receipts",
   },
   {
     id: "unit-speed-budget",
     stage: "prepush",
-    consumes: "unit",
-    run: "bun run tools/dev/unit-speed-budget.ts .cache/unit-junit.xml",
-    why: "no SINGLE unit test may exceed the pinned ceiling; consumes the junit the `unit` gate writes",
-  },
-  {
-    id: "integration",
-    stage: "prepush",
-    run: "bun run tools/dev/worktree-pollution-guard.ts -- bun run test:integration",
-    why: "the integration suite (also the home of the cases too slow for the unit budget)",
+    consumes: "full-suite",
+    run: "bun run tools/dev/unit-speed-budget.ts .cache/full-junit.xml --scope=tests/unit/",
+    why: "no SINGLE unit test may exceed the pinned ceiling; consumes the full-suite junit receipt scoped to the unit tier",
   },
   {
     id: "e2e-pty",
@@ -166,8 +165,9 @@ export const GATES: readonly Gate[] = [
   {
     id: "scan-reach",
     stage: "prepush",
+    consumes: "full-suite",
     run: "bun run scan-reach",
-    why: "a scanning guard whose corpus shrank under it — the floors are measured numbers in tools/dev/scan-reach-baseline.json, so a scan that quietly stopped reaching fails instead of reporting clean",
+    why: "a scanning guard whose corpus shrank under it — the floors are measured numbers in tools/dev/scan-reach-baseline.json, so a scan that quietly stopped reaching fails instead of reporting clean; consumes the scan-reach receipt the full-suite run writes",
   },
   {
     id: "non-vacuity-oracle",
@@ -178,8 +178,9 @@ export const GATES: readonly Gate[] = [
   {
     id: "preload-runtime-closure",
     stage: "prepush",
-    run: "bun test tests/meta/preload-runtime-closure-hellgate.test.ts",
-    why: "the bunfig preload dragging production slices into every test — it was 1,259 files of src/, and it made the non-vacuity mirror impossible to start",
+    consumes: "full-suite",
+    run: "bun run tools/dev/junit-file-green.ts .cache/full-junit.xml tests/meta/preload-runtime-closure-hellgate.test.ts",
+    why: "the bunfig preload dragging production slices into every test — it was 1,259 files of src/. The hellgate already runs inside the full suite; this consumes its receipt instead of executing the file a second time",
   },
   {
     id: "real-toolchain-e2e",
@@ -196,22 +197,15 @@ export const GATES: readonly Gate[] = [
   {
     id: "pm-dod-ratchet",
     stage: "prepush",
-    run: "bun run pm:gate",
-    why: "a new/touched feature that does not meet the Definition of Done",
+    consumes: "full-suite",
+    run: "bun run tools/dev/junit-file-green.ts .cache/full-junit.xml tests/unit/pm-dod-ratchet.test.ts",
+    why: "a new/touched feature that does not meet the Definition of Done. The ratchet test already runs inside the full suite; this consumes its receipt instead of executing the file a second time",
   },
   {
     id: "contract",
     stage: "prepush",
     run: "bun test tests/contract",
     why: 'real docker + language servers + python/lancedb. LOCALLY THIS PASSES BY SKIPPING: the ci.yml job sets REQUIRE_CONTRACT=1 at the JOB level ("absent dependency = hard fail, never a silent skip") and the manifest pins the command string, not the env — so a local PASS here means "nothing was missing that I checked", not "the contracts hold"',
-  },
-  {
-    id: "rest-suites",
-    stage: "prepush",
-    run: "bun test tests/meta tests/adversarial tests/measurement ./src/ ./tools/",
-    why: "the colocated src/ tests plus the meta/adversarial/measurement tiers, which no other gate covers",
-    notInWorkflow:
-      "no workflow runs these paths; `bun run test` and `test:ci` do, so they are a real part of the local gate",
   },
 ]
 
@@ -303,6 +297,11 @@ export const WORKFLOW_EXEMPT: readonly {
     match: "bun fc gates",
     why: "advisory maturity-promotion audit, explicitly warn-only",
   },
+  {
+    file: "fc-gate.yml",
+    match: "bun run pm:gate",
+    why: "standalone DoD-ratchet execution in the fc job; the merge gate consumes the full-suite junit receipt for the same test file instead",
+  },
 ]
 
 /**
@@ -316,6 +315,10 @@ export const WORKFLOW_EXEMPT: readonly {
  * side effect of an exemption.
  */
 export const REQUIRED_GATE_IDS: readonly string[] = [
+  // EVERY gate id, deliberately: with only a subset listed, the seven unlisted
+  // gates were open to the exact delete+exempt regression this ratchet exists
+  // for. Removing a gate now requires editing this list in the same reviewable
+  // diff.
   "typecheck",
   "lint",
   "lint-debt",
@@ -324,12 +327,17 @@ export const REQUIRED_GATE_IDS: readonly string[] = [
   "fc-diff",
   "fc-lint",
   "fc-reachability",
-  "unit",
+  "silent-catch-baseline",
+  "protocol-generated",
+  "full-suite",
   "unit-speed-budget",
-  "integration",
   "e2e-pty",
-  "contract",
-  "rest-suites",
-  "pm-dod-ratchet",
+  "cwd-parity-arch",
+  "scan-reach",
+  "non-vacuity-oracle",
+  "preload-runtime-closure",
   "real-toolchain-e2e",
+  "web-frontend",
+  "pm-dod-ratchet",
+  "contract",
 ]
