@@ -50,6 +50,30 @@ export const chooseShardTestTimeoutMs = (cpu: CpuBudget): number => {
   return Math.min(MAX_TEST_TIMEOUT_MS, BASE_TEST_TIMEOUT_MS * pressureFactor)
 }
 
+export interface OverloadDelayInput {
+  /** load/(2*cpus) quanta — the same measure that scales the test timeout. */
+  readonly pressure: number
+  readonly budgetLeftMs: number
+  readonly pollMs: number
+  readonly thresholdPressure: number
+}
+
+/**
+ * How long to yield to an overloaded host before starting the next worker.
+ *
+ * The budget is CAMPAIGN-wide, and that is the whole point: the first version
+ * granted a fresh 10-minute deadline on every start with an empty box — which,
+ * in a serial campaign, is every chunk — so a host that stayed loaded could
+ * stretch 30 chunks by 10 minutes each and spend five hours mostly asleep,
+ * having reported nothing but "delaying" lines. Yielding is worth a bounded
+ * amount of time in TOTAL; past that, running slowly beats not running.
+ */
+export const nextOverloadDelayMs = (input: OverloadDelayInput): number => {
+  if (!Number.isFinite(input.pressure) || input.pressure < input.thresholdPressure) return 0
+  if (!(input.budgetLeftMs > 0)) return 0
+  return Math.min(input.pollMs, input.budgetLeftMs)
+}
+
 /**
  * Resource classes. A class names the process-global or checkout-global
  * resource a test file observably uses; only INCOMPATIBLE classes serialize.

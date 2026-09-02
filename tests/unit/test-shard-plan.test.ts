@@ -9,6 +9,7 @@ import {
   chooseShardConcurrency,
   chooseShardTestTimeoutMs,
   classifyTestResource,
+  nextOverloadDelayMs,
   parseExecutedFileCount,
   planTestChunks,
   resourceClassesOverlap,
@@ -232,6 +233,48 @@ describe("resource-classed chunk plan", () => {
         expect(resourceClassesOverlap(left, right)).toBe(false)
       }
     }
+  })
+
+  test("yielding to a loaded host is a campaign budget, not a per-start one", () => {
+    const pollMs = 30_000
+    const thresholdPressure = 4
+    // Below the threshold the runner never sleeps.
+    expect(
+      nextOverloadDelayMs({ pressure: 3, budgetLeftMs: 600_000, pollMs, thresholdPressure }),
+    ).toBe(0)
+    // At or above it, one poll interval at a time.
+    expect(
+      nextOverloadDelayMs({ pressure: 4, budgetLeftMs: 600_000, pollMs, thresholdPressure }),
+    ).toBe(pollMs)
+    // The last slice is clipped to what is left, and an exhausted budget stops
+    // the yielding entirely.
+    expect(
+      nextOverloadDelayMs({ pressure: 9, budgetLeftMs: 5_000, pollMs, thresholdPressure }),
+    ).toBe(5_000)
+    expect(nextOverloadDelayMs({ pressure: 9, budgetLeftMs: 0, pollMs, thresholdPressure })).toBe(0)
+    expect(
+      nextOverloadDelayMs({
+        pressure: Number.NaN,
+        budgetLeftMs: 600_000,
+        pollMs,
+        thresholdPressure,
+      }),
+    ).toBe(0)
+
+    // THE PROPERTY: however many starts a serial campaign makes, the TOTAL
+    // yielded time cannot exceed the budget. The per-start version granted a
+    // fresh 10 minutes to each of 30 chunks — five hours of sleeping.
+    let budgetLeftMs = 600_000
+    let totalSlept = 0
+    for (let start = 0; start < 30; start += 1) {
+      let slice = nextOverloadDelayMs({ pressure: 9, budgetLeftMs, pollMs, thresholdPressure })
+      while (slice > 0) {
+        totalSlept += slice
+        budgetLeftMs -= slice
+        slice = nextOverloadDelayMs({ pressure: 9, budgetLeftMs, pollMs, thresholdPressure })
+      }
+    }
+    expect(totalSlept).toBe(600_000)
   })
 
   test("bounds concurrency at two and falls back when reclaimable memory is insufficient", () => {

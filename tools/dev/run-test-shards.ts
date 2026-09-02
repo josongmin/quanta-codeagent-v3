@@ -28,6 +28,7 @@ import {
 import {
   chooseShardConcurrency,
   chooseShardTestTimeoutMs,
+  nextOverloadDelayMs,
   parseExecutedFileCount,
   planTestChunks,
   resourceClassesOverlap,
@@ -593,17 +594,42 @@ const loadPressure = (): number => {
  * regime (pressure >= START_DELAY_PRESSURE) with NOTHING running, the runner
  * waits (bounded) for the host to recover before occupying it.
  */
+/**
+ * The overload delay is a CAMPAIGN budget, not a per-start one.
+ *
+ * It used to be a fresh 10-minute deadline on every start with an empty box —
+ * which, in a serial campaign, is every chunk. A host that stays loaded could
+ * therefore stretch 30 chunks by 10 minutes each and spend five hours mostly
+ * asleep, having reported nothing but "delaying" lines. Yielding to a busy box
+ * is worth a bounded amount of time in total; past that the campaign is better
+ * off running slowly than not running.
+ */
+let overloadDelayBudgetMs = START_DELAY_MAX_MS
+
 const measuredConcurrency = async (runningCount: number): Promise<number> => {
   if (runningCount === 0) {
-    const waitDeadline = Date.now() + START_DELAY_MAX_MS
     let pressure = loadPressure()
-    while (pressure >= START_DELAY_PRESSURE && Date.now() < waitDeadline) {
+    let sleepMs = nextOverloadDelayMs({
+      pressure,
+      budgetLeftMs: overloadDelayBudgetMs,
+      pollMs: START_DELAY_POLL_MS,
+      thresholdPressure: START_DELAY_PRESSURE,
+    })
+    while (sleepMs > 0) {
       process.stdout.write(
         `[test:shards] OVERLOADED load_pressure=${pressure} load_1m=${(loadavg()[0] ?? 0).toFixed(2)}; ` +
-          `delaying next worker start ${Math.round(START_DELAY_POLL_MS / 1_000)}s\n`,
+          `delaying next worker start ${Math.round(sleepMs / 1_000)}s ` +
+          `(campaign delay budget left ${Math.round(overloadDelayBudgetMs / 1_000)}s)\n`,
       )
-      await Bun.sleep(START_DELAY_POLL_MS)
+      await Bun.sleep(sleepMs)
+      overloadDelayBudgetMs -= sleepMs
       pressure = loadPressure()
+      sleepMs = nextOverloadDelayMs({
+        pressure,
+        budgetLeftMs: overloadDelayBudgetMs,
+        pollMs: START_DELAY_POLL_MS,
+        thresholdPressure: START_DELAY_PRESSURE,
+      })
     }
   }
   if (loadPressure() > 1) return 1
