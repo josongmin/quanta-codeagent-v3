@@ -3,25 +3,36 @@ import {
   mkdirSync,
   mkdtempSync,
   openSync,
+  readdirSync,
   readFileSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs"
 import { availableParallelism, freemem, loadavg, tmpdir, totalmem } from "node:os"
-import { join, relative, resolve } from "node:path"
+import { dirname, join, relative, resolve } from "node:path"
 import { expandTestFiles } from "./sandboxed-test"
 import {
   acquireTestShardLease,
+  inheritedTestShardLeaseState,
   readCommittedRepositoryLeaseId,
   selectRepositoryLeaseIdentity,
+  type TestShardLease,
 } from "./test-shard-lease"
+import {
+  drainCampaign,
+  runResourceAwareSchedule,
+  ShardProcessRegistry,
+  terminateCampaignOnSignal,
+} from "./test-shard-lifecycle"
 import {
   chooseShardConcurrency,
   chooseShardTestTimeoutMs,
-  createTestShardPlan,
   parseExecutedFileCount,
-  type TestShardPlan,
+  planTestChunks,
+  resourceClassesOverlap,
+  type TestChunk,
+  type TestResourceClass,
 } from "./test-shard-plan"
 import {
   loadSuccessfulTestShardReceipt,
@@ -34,6 +45,8 @@ import {
   writeScanReachReceiptAtomic,
   writeSuccessfulTestShardReceiptAtomic,
 } from "./test-shard-receipt"
+import { harvestChunkTimings, loadTestTimings, mergeTestTimings } from "./test-shard-timings"
+import { sharedVerificationCacheRoot } from "./verification-receipt"
 
 /**
  * Authoritative local full-suite runner.
@@ -45,10 +58,19 @@ import {
  * exit, and refuses to bless a result if another session changed the checkout.
  */
 
-const SHARD_COUNT = 8
 const REPO_ROOT = resolve(import.meta.dir, "..", "..")
 const SCAN_REACH_RECEIPT = join(REPO_ROOT, ".cache", "scan-reach-receipt.json")
-const SHARD_CACHE_ROOT = join(REPO_ROOT, ".cache", "test-shards", "v1")
+// Shard receipts and timings live in the git-common-dir cache: keyed by exact
+// HEAD + file content + toolchain, a green from any worktree serves them all.
+const SHARED_CACHE_ROOT = sharedVerificationCacheRoot(REPO_ROOT)
+const SHARD_CACHE_ROOT = join(SHARED_CACHE_ROOT, "test-shards", "v2")
+const TIMING_STORE = join(SHARED_CACHE_ROOT, "test-timings-v1.json")
+// Extreme-load regime: the same load/(2*cpus) pressure formula that saturates
+// the per-test timeout cap. At or beyond it, starting a fresh worker mostly
+// deepens the thrash, so the runner briefly WAITS (bounded) instead.
+const START_DELAY_PRESSURE = 4
+const START_DELAY_POLL_MS = 30_000
+const START_DELAY_MAX_MS = 10 * 60_000
 // The shard corpus contains cold-path source scans and real CLI integration
 // rails. A normal shard can exceed twelve minutes while continuously reporting
 // completed tests on a contended host, so a total wall-clock cap discards valid
@@ -77,6 +99,7 @@ const SUITE_ROOTS = {
   ],
   unit: ["tests/unit"],
   integration: ["tests/integration"],
+  rest: ["tests/meta", "tests/adversarial", "tests/measurement", "./src/", "./tools/"],
 } as const
 
 type SuiteName = keyof typeof SUITE_ROOTS
@@ -195,22 +218,26 @@ const parseOptions = (args: readonly string[]): RunnerOptions => {
     }
     throw new Error(`unknown shard runner argument: ${arg}`)
   }
-  if (junitOut !== undefined && suite !== "unit") {
-    throw new Error("JUnit shard receipts are reserved for --suite=unit")
+  if (junitOut !== undefined && suite !== "unit" && suite !== "full") {
+    throw new Error("JUnit shard receipts are reserved for --suite=unit or --suite=full")
   }
   return junitOut === undefined ? { suite } : { suite, junitOut }
 }
 
 const junitShardPath = (junitOut: string, index: number): string => `${junitOut}.shard-${index}.xml`
 
-const shardCachePath = (suite: SuiteName, index: number): string =>
-  join(SHARD_CACHE_ROOT, suite, `shard-${index}.json`)
+/** Content-addressed: the same chunk composition reuses its receipt even when
+ *  the chunk's ordinal shifted because a NEIGHBOR chunk changed. */
+const chunkCachePath = (suite: SuiteName, filesSha256: string): string =>
+  join(SHARD_CACHE_ROOT, suite, `chunk-${filesSha256.slice(0, 16)}.json`)
 
-const prepareJunit = (junitOut: string): void => {
+const prepareJunit = (junitOut: string, indices: readonly number[]): void => {
+  // Bun's JUnit reporter does not create the target directory; on a fresh
+  // checkout (no .cache/ yet) the worker would pass its tests and then die
+  // writing the receipt.
+  mkdirSync(dirname(resolve(REPO_ROOT, junitOut)), { recursive: true })
   rmSync(junitOut, { force: true })
-  for (let index = 1; index <= SHARD_COUNT; index += 1) {
-    rmSync(junitShardPath(junitOut, index), { force: true })
-  }
+  for (const index of indices) rmSync(junitShardPath(junitOut, index), { force: true })
 }
 
 const junitBody = (xml: string, index: number): string => {
@@ -218,14 +245,14 @@ const junitBody = (xml: string, index: number): string => {
   const open = root < 0 ? -1 : xml.indexOf(">", root)
   const close = xml.lastIndexOf("</testsuites>")
   if (root < 0 || open < 0 || close < 0 || !xml.includes("<testcase")) {
-    throw new Error(`[test:shards] invalid JUnit receipt from shard ${index}/${SHARD_COUNT}`)
+    throw new Error(`[test:shards] invalid JUnit receipt from chunk ${index}`)
   }
   return xml.slice(open + 1, close).trim()
 }
 
-const mergeJunit = (junitOut: string): void => {
+const mergeJunit = (junitOut: string, indices: readonly number[]): void => {
   const bodies: string[] = []
-  for (let index = 1; index <= SHARD_COUNT; index += 1) {
+  for (const index of indices) {
     bodies.push(junitBody(readFileSync(junitShardPath(junitOut, index), "utf8"), index))
   }
   writeFileSync(
@@ -234,31 +261,79 @@ const mergeJunit = (junitOut: string): void => {
   )
 }
 
+/**
+ * TTL-based garbage collection. The cache directory is SHARED across
+ * worktrees, so "not part of MY current plan" is not evidence of staleness —
+ * a sibling checkout at another HEAD may still be resuming from its receipts.
+ * Only receipts past their own expiry (or unreadable) are dropped.
+ */
+const pruneStaleChunkReceipts = (suite: SuiteName, nowMs = Date.now()): void => {
+  const dir = join(SHARD_CACHE_ROOT, suite)
+  let entries: string[]
+  try {
+    entries = readdirSync(dir)
+  } catch {
+    return
+  }
+  for (const entry of entries) {
+    const path = join(dir, entry)
+    let expired = true
+    try {
+      const parsed = JSON.parse(readFileSync(path, "utf8")) as { expiresAtMs?: unknown }
+      expired = !(
+        Number.isSafeInteger(parsed.expiresAtMs) && (parsed.expiresAtMs as number) > nowMs
+      )
+    } catch {
+      expired = true
+    }
+    if (expired) rmSync(path, { force: true })
+  }
+}
+
+const sampleRssBytes = (pid: number): number => {
+  const result = Bun.spawnSync(["ps", "-o", "rss=", "-p", String(pid)])
+  const kib = Number.parseInt(result.stdout.toString().trim(), 10)
+  return Number.isSafeInteger(kib) && kib > 0 ? kib * 1024 : 0
+}
+
+interface ShardRunResult {
+  readonly code: number
+  readonly timedOut: boolean
+  readonly cancelled: boolean
+  readonly executedFiles?: number
+  readonly scanReachSink: string
+  readonly junitPath: string
+  readonly elapsedMs: number
+}
+
 const runShard = async (
-  plan: TestShardPlan,
+  plan: TestChunk,
+  totalChunks: number,
   opts: RunnerOptions,
   runRoot: string,
   testTimeoutMs: number,
-): Promise<{
-  readonly code: number
-  readonly timedOut: boolean
-  readonly executedFiles?: number
-  readonly scanReachSink: string
-}> => {
-  const shard = `${plan.index}/${SHARD_COUNT}`
-  const junitArgs =
+  registry: ShardProcessRegistry,
+): Promise<ShardRunResult> => {
+  const shard = `${plan.index}/${totalChunks}`
+  const workerRootEarly = join(runRoot, `worker-${plan.index}`)
+  // Every chunk writes a JUnit receipt: the consumer lane (unit) merges it,
+  // and EVERY green chunk feeds the measured per-file timing store the LPT
+  // planner reads next run.
+  const junitPath =
     opts.junitOut === undefined
-      ? []
-      : ["--reporter=junit", `--reporter-outfile=${junitShardPath(opts.junitOut, plan.index)}`]
+      ? join(workerRootEarly, `junit-${plan.index}.xml`)
+      : junitShardPath(opts.junitOut, plan.index)
+  const junitArgs = ["--reporter=junit", `--reporter-outfile=${junitPath}`]
   process.stdout.write(
-    `\n[test:shards] START shard=${shard} files=${plan.files.length} exclusive=${plan.exclusive ? "yes" : "no"}\n`,
+    `\n[test:shards] START chunk=${shard} files=${plan.files.length} class=${plan.resourceClass} ` +
+      `predicted_ms=${plan.predictedMs}\n`,
   )
   // Native file descriptors keep the child off a JS relay/backpressure path.
   // Relaying every Bun test chunk through this process more than doubled a
   // measured full shard (375s direct versus the 720s kill boundary) and turned
   // a green worker into a runner timeout. Spool natively, then replay once so
   // the receipt still contains the complete worker output and discovery banner.
-  const workerRoot = join(runRoot, `worker-${plan.index}`)
+  const workerRoot = workerRootEarly
   const workerTmp = join(workerRoot, "tmp")
   const workerHome = join(workerRoot, "home")
   const quantaHome = join(workerHome, ".quanta")
@@ -268,14 +343,17 @@ const runShard = async (
   mkdirSync(quantaHome, { recursive: true })
   mkdirSync(prefsHome, { recursive: true })
   mkdirSync(benchResults, { recursive: true })
-  const spoolPath = join(workerRoot, `shard-${plan.index}.log`)
+  const spoolPath = join(workerRoot, `chunk-${plan.index}.log`)
   const scanReachSink = join(workerRoot, `scan-reach-${plan.index}.jsonl`)
   writeFileSync(scanReachSink, "")
   const spoolFd = openSync(spoolPath, "w")
   let closed = false
   try {
     const startedAt = performance.now()
-    const proc = Bun.spawn({
+    // Detached: the worker leads its OWN process group, so cancellation and
+    // the watchdog can kill the whole descendant tree (browsers, language
+    // servers) with one kill(-pgid) instead of only the direct Bun child.
+    const handle = registry.spawnWorker({
       cmd: [
         "bun",
         "test",
@@ -302,21 +380,28 @@ const runShard = async (
         QUANTA_SCAN_REACH_RECORD: scanReachSink,
         QUANTA_TEST_TIMEOUT_SCALE: String(testTimeoutMs / 60_000),
       },
-      stdout: spoolFd,
-      stderr: spoolFd,
+      stdoutFd: spoolFd,
+      stderrFd: spoolFd,
     })
+    let peakRssBytes = 0
     const progress = setInterval(() => {
       const elapsedSeconds = Math.round((performance.now() - startedAt) / 1_000)
       const spoolBytes = statSync(spoolPath).size
       process.stdout.write(
-        `[test:shards] PROGRESS shard=${shard} elapsed=${elapsedSeconds}s spool_bytes=${spoolBytes}\n`,
+        `[test:shards] PROGRESS chunk=${shard} class=${plan.resourceClass} elapsed=${elapsedSeconds}s ` +
+          `spool_bytes=${spoolBytes} peak_rss_sampled_bytes=${peakRssBytes}\n`,
       )
     }, 60_000)
     progress.unref()
     let timedOut = false
     let lastProgressAt = Date.now()
     let lastSpoolBytes = 0
+    let watchdogTicks = 0
     const timeout = setInterval(() => {
+      watchdogTicks += 1
+      if (watchdogTicks % 15 === 0) {
+        peakRssBytes = Math.max(peakRssBytes, sampleRssBytes(handle.pid))
+      }
       const spoolBytes = statSync(spoolPath).size
       if (spoolBytes !== lastSpoolBytes) {
         lastSpoolBytes = spoolBytes
@@ -327,61 +412,71 @@ const runShard = async (
       if (idleMs < SHARD_INACTIVITY_TIMEOUT_MS) return
       timedOut = true
       process.stderr.write(
-        `[test:shards] TIMEOUT shard=${shard} idle=${idleMs}ms; killing worker\n`,
+        `[test:shards] TIMEOUT chunk=${shard} idle=${idleMs}ms; killing worker process tree\n`,
       )
-      proc.kill(9)
+      void handle.cancel()
     }, SHARD_WATCHDOG_POLL_MS)
-    const code = await proc.exited
+    const exit = await handle.exited
     clearTimeout(timeout)
     clearInterval(progress)
     closeSync(spoolFd)
     closed = true
+    const code = exit.code ?? -1
     const spoolBytes = statSync(spoolPath).size
     const output = readFileSync(spoolPath, "utf8")
     process.stdout.write(output)
     const executedFiles = parseExecutedFileCount(output)
     const elapsedMs = Math.round(performance.now() - startedAt)
-    const usage = proc.resourceUsage()
-    const maxRssBytes = usage?.maxRSS ?? 0
     process.stdout.write(
-      `[test:shards] END shard=${shard} exit=${code}${timedOut ? " timeout" : ""} ` +
-        `elapsed_ms=${elapsedMs} max_rss_bytes=${maxRssBytes} spool_bytes=${spoolBytes}\n`,
+      `[test:shards] END chunk=${shard} exit=${code} signal=${exit.signal ?? "none"}` +
+        `${timedOut ? " timeout" : ""}${handle.cancelled && !timedOut ? " cancelled" : ""} ` +
+        `elapsed_ms=${elapsedMs} peak_rss_sampled_bytes=${peakRssBytes} spool_bytes=${spoolBytes}\n`,
     )
+    const cancelled = handle.cancelled
     return executedFiles === undefined
-      ? { code, timedOut, scanReachSink }
-      : { code, timedOut, executedFiles, scanReachSink }
+      ? { code, timedOut, cancelled, scanReachSink, junitPath, elapsedMs }
+      : { code, timedOut, cancelled, executedFiles, scanReachSink, junitPath, elapsedMs }
   } finally {
     if (!closed) closeSync(spoolFd)
   }
 }
 
 interface CompletedShard {
-  readonly plan: TestShardPlan
-  readonly result: Awaited<ReturnType<typeof runShard>>
+  readonly plan: TestChunk
+  readonly totalChunks: number
+  readonly result: ShardRunResult
   readonly snapshot: GitSnapshot
 }
 
-interface CachedShardPlan {
-  readonly plan: TestShardPlan
+interface CachedChunk {
+  readonly chunk: TestChunk
   readonly identity: TestShardCacheIdentity
   readonly cachePath: string
 }
 
 const validateCompletedShard = (before: GitSnapshot, completed: CompletedShard): string => {
-  const { plan, result, snapshot } = completed
+  const { plan, totalChunks, result, snapshot } = completed
   if (!sameSnapshot(before, snapshot)) {
     throw new Error(
-      `[test:shards] INVALID — checkout changed after shard ${plan.index}/${SHARD_COUNT} ` +
+      `[test:shards] INVALID — checkout changed after chunk ${plan.index}/${totalChunks} ` +
         `(start=${before.head}, current=${snapshot.head}). Aborting remaining shards.`,
     )
   }
   if (result.code === 0 && !result.timedOut && result.executedFiles === plan.files.length) {
     return result.scanReachSink
   }
+  if (result.cancelled && !result.timedOut) {
+    // Derivative outcome: this worker was killed because a PEER failed (or the
+    // campaign was signalled). Keep it distinguishable from a genuine red.
+    throw new Error(
+      `[test:shards] CANCELLED chunk=${plan.index}/${totalChunks} after peer failure or ` +
+        "termination; aborting remaining shards",
+    )
+  }
   const discovery =
     result.executedFiles === undefined ? "missing" : `${result.executedFiles}/${plan.files.length}`
   throw new Error(
-    `[test:shards] FAILED shard=${plan.index}/${SHARD_COUNT} exit=${result.code} ` +
+    `[test:shards] FAILED chunk=${plan.index}/${totalChunks} exit=${result.code} ` +
       `timeout=${result.timedOut ? "yes" : "no"} discovery=${discovery}; ` +
       "aborting remaining shards",
   )
@@ -402,134 +497,238 @@ const materializeCachedScanReachSink = (
   return sink
 }
 
-const materializeCachedJunit = (opts: RunnerOptions, receipt: SuccessfulTestShardReceipt): void => {
+const materializeCachedJunit = (
+  opts: RunnerOptions,
+  chunkIndex: number,
+  receipt: SuccessfulTestShardReceipt,
+): void => {
   if (opts.junitOut === undefined) return
   if (receipt.junitXml === undefined) {
-    throw new Error(`[test:shards] cached shard ${receipt.shardIndex} lost its JUnit receipt`)
+    throw new Error(`[test:shards] cached chunk ${chunkIndex} lost its JUnit receipt`)
   }
-  junitBody(receipt.junitXml, receipt.shardIndex)
-  writeFileSync(junitShardPath(opts.junitOut, receipt.shardIndex), receipt.junitXml)
+  junitBody(receipt.junitXml, chunkIndex)
+  // The CURRENT chunk index, not the receipt's: the ordinal can shift when a
+  // neighbor chunk's composition changed while this one stayed identical.
+  writeFileSync(junitShardPath(opts.junitOut, chunkIndex), receipt.junitXml)
 }
 
 const cacheSuccessfulShard = (
-  cachedPlan: CachedShardPlan,
-  result: Awaited<ReturnType<typeof runShard>>,
+  cached: CachedChunk,
+  result: ShardRunResult,
   opts: RunnerOptions,
 ): void => {
   if (result.executedFiles === undefined) {
-    throw new Error(`[test:shards] shard ${cachedPlan.plan.index} has no executed-file receipt`)
+    throw new Error(`[test:shards] chunk ${cached.chunk.index} has no executed-file receipt`)
   }
   const junitXml =
     opts.junitOut === undefined
       ? undefined
-      : readFileSync(junitShardPath(opts.junitOut, cachedPlan.plan.index), "utf8")
-  if (junitXml !== undefined) junitBody(junitXml, cachedPlan.plan.index)
+      : readFileSync(junitShardPath(opts.junitOut, cached.chunk.index), "utf8")
+  if (junitXml !== undefined) junitBody(junitXml, cached.chunk.index)
   writeSuccessfulTestShardReceiptAtomic({
-    path: cachedPlan.cachePath,
-    identity: cachedPlan.identity,
+    path: cached.cachePath,
+    identity: cached.identity,
     executedFiles: result.executedFiles,
     scanReachRecords: mergeScanReachSinks([result.scanReachSink]),
     ...(junitXml === undefined ? {} : { junitXml }),
   })
 }
 
-const nextPlanBatch = (
-  plans: readonly TestShardPlan[],
-  cursor: number,
-  concurrency: 1 | 2,
-): readonly TestShardPlan[] => {
-  const first = plans[cursor]
-  if (first === undefined) return []
-  if (first.exclusive) return [first]
-  return plans.slice(cursor, cursor + concurrency).filter(({ exclusive }) => !exclusive)
+/** Every green chunk feeds measured per-file wall time back to the planner. */
+const harvestTimings = (chunk: TestChunk, result: ShardRunResult): void => {
+  try {
+    const junitXml = readFileSync(result.junitPath, "utf8")
+    // Bun writes the JUnit `file` attribute RELATIVE to the worker's cwd (the
+    // repo root) even when the command line carried absolute paths, so the
+    // harvest must look suites up by the same relative key (measured on 1.3.14).
+    const relFiles = chunk.files.map((file) => relative(REPO_ROOT, file))
+    const estimates = harvestChunkTimings(junitXml, relFiles, result.elapsedMs)
+    mergeTestTimings(TIMING_STORE, estimates)
+  } catch (error) {
+    // Timing is a scheduler hint, never a verdict input; a harvest failure is
+    // reported and the campaign continues.
+    const message = error instanceof Error ? error.message : String(error)
+    process.stderr.write(
+      `[test:shards] WARN timing harvest failed for chunk ${chunk.index}: ${message}\n`,
+    )
+  }
 }
 
-const executePlans = async (input: {
-  readonly plans: readonly CachedShardPlan[]
+const loadPressure = (): number => {
+  const cpuCount = availableParallelism()
+  const loadAverage1m = loadavg()[0] ?? 0
+  return Math.max(1, Math.ceil(loadAverage1m / (cpuCount * 2)))
+}
+
+/**
+ * Measured before EVERY worker start: reclaimable memory picks 1 or 2 workers
+ * (same validated thresholds as before), and CPU pressure above 1 quantum —
+ * the same load/(2*cpus) formula that scales test timeouts — drops overlap to
+ * a single worker instead of inflating timeouts further. In the extreme
+ * regime (pressure >= START_DELAY_PRESSURE) with NOTHING running, the runner
+ * waits (bounded) for the host to recover before occupying it.
+ */
+const measuredConcurrency = async (runningCount: number): Promise<number> => {
+  if (runningCount === 0) {
+    const waitDeadline = Date.now() + START_DELAY_MAX_MS
+    let pressure = loadPressure()
+    while (pressure >= START_DELAY_PRESSURE && Date.now() < waitDeadline) {
+      process.stdout.write(
+        `[test:shards] OVERLOADED load_pressure=${pressure} load_1m=${(loadavg()[0] ?? 0).toFixed(2)}; ` +
+          `delaying next worker start ${Math.round(START_DELAY_POLL_MS / 1_000)}s\n`,
+      )
+      await Bun.sleep(START_DELAY_POLL_MS)
+      pressure = loadPressure()
+    }
+  }
+  if (loadPressure() > 1) return 1
+  return workerConcurrency()
+}
+
+const executeChunks = async (input: {
+  readonly chunks: readonly CachedChunk[]
   readonly opts: RunnerOptions
   readonly runRoot: string
   readonly before: GitSnapshot
-  readonly concurrency: 1 | 2
   readonly testTimeoutMs: number
+  readonly registry: ShardProcessRegistry
 }): Promise<readonly string[]> => {
+  const totalChunks = input.chunks.length
   const scanReachSinks = new Map<number, string>()
-  const misses: CachedShardPlan[] = []
-  for (const cachedPlan of input.plans) {
+  const misses: CachedChunk[] = []
+  for (const cached of input.chunks) {
     const lookup = loadSuccessfulTestShardReceipt({
-      path: cachedPlan.cachePath,
-      expected: cachedPlan.identity,
+      path: cached.cachePath,
+      expected: cached.identity,
     })
     if (lookup.kind === "miss") {
       process.stdout.write(
-        `[test:shards] CACHE MISS shard=${cachedPlan.plan.index}/${SHARD_COUNT} reason=${lookup.reason}\n`,
+        `[test:shards] CACHE MISS chunk=${cached.chunk.index}/${totalChunks} reason=${lookup.reason}\n`,
       )
-      misses.push(cachedPlan)
+      misses.push(cached)
       continue
     }
-    materializeCachedJunit(input.opts, lookup.receipt)
+    materializeCachedJunit(input.opts, cached.chunk.index, lookup.receipt)
     scanReachSinks.set(
-      cachedPlan.plan.index,
+      cached.chunk.index,
       materializeCachedScanReachSink(input.runRoot, lookup.receipt),
     )
     process.stdout.write(
-      `[test:shards] CACHE HIT shard=${cachedPlan.plan.index}/${SHARD_COUNT} ` +
+      `[test:shards] CACHE HIT chunk=${cached.chunk.index}/${totalChunks} ` +
         `receipt=${lookup.receipt.receiptSha256.slice(0, 12)}\n`,
     )
   }
 
-  for (let cursor = 0; cursor < misses.length; ) {
-    const batch = nextPlanBatch(
-      misses.map(({ plan }) => plan),
-      cursor,
-      input.concurrency,
-    )
-    if (batch.length === 0) throw new Error("[test:shards] scheduler produced an empty batch")
-    cursor += batch.length
-    const completed = await Promise.all(
-      batch.map(async (plan) => {
-        const cachedPlan = misses.find((candidate) => candidate.plan.index === plan.index)
-        if (cachedPlan === undefined) throw new Error("[test:shards] missing cache plan")
-        const result = await runShard(plan, input.opts, input.runRoot, input.testTimeoutMs)
-        const completedShard = { plan, result, snapshot: await gitSnapshot() }
+  // Longest predicted chunks start first (online LPT); the scheduler overlaps
+  // only resource-compatible classes and re-measures the host before every
+  // start. The first failure cancels every peer group and reaps the schedule
+  // before the primary error propagates.
+  const queue = [...misses].sort(
+    (left, right) =>
+      right.chunk.predictedMs - left.chunk.predictedMs || left.chunk.index - right.chunk.index,
+  )
+  const completed = await runResourceAwareSchedule<{ index: number; sink: string }>({
+    tasks: queue.map((cached) => ({
+      key: cached.chunk.index,
+      resourceClass: cached.chunk.resourceClass,
+      run: async () => {
+        const result = await runShard(
+          cached.chunk,
+          totalChunks,
+          input.opts,
+          input.runRoot,
+          input.testTimeoutMs,
+          input.registry,
+        )
+        const completedShard = {
+          plan: cached.chunk,
+          totalChunks,
+          result,
+          snapshot: await gitSnapshot(),
+        }
         const sink = validateCompletedShard(input.before, completedShard)
-        cacheSuccessfulShard(cachedPlan, result, input.opts)
-        return { index: plan.index, sink }
-      }),
-    )
-    for (const shard of completed) scanReachSinks.set(shard.index, shard.sink)
-  }
-  if (scanReachSinks.size !== input.plans.length) {
+        cacheSuccessfulShard(cached, result, input.opts)
+        harvestTimings(cached.chunk, result)
+        return { index: cached.chunk.index, sink }
+      },
+    })),
+    overlap: (left, right) =>
+      resourceClassesOverlap(left as TestResourceClass, right as TestResourceClass),
+    desiredConcurrency: measuredConcurrency,
+    cancelAll: () => input.registry.cancelAll(),
+    onReapTimeout: (pending) =>
+      process.stderr.write(
+        `[test:shards] WARN schedule reap timed out with ${pending} task(s) outstanding\n`,
+      ),
+  })
+  for (const shard of completed.values()) scanReachSinks.set(shard.index, shard.sink)
+
+  if (scanReachSinks.size !== input.chunks.length) {
     throw new Error(`[test:shards] cache/execution coverage incomplete: ${scanReachSinks.size}`)
   }
-  return input.plans.map(({ plan }) => {
-    const sink = scanReachSinks.get(plan.index)
-    if (sink === undefined) throw new Error(`[test:shards] missing sink for shard ${plan.index}`)
+  return input.chunks.map(({ chunk }) => {
+    const sink = scanReachSinks.get(chunk.index)
+    if (sink === undefined) throw new Error(`[test:shards] missing sink for chunk ${chunk.index}`)
     return sink
   })
 }
 
 const main = async (): Promise<void> => {
   const opts = parseOptions(process.argv.slice(2))
-  const [remote, commonDir] = await Promise.all([
-    capture(["git", "remote", "get-url", "origin"]),
-    capture(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"]),
-  ])
-  const identity = selectRepositoryLeaseIdentity({
-    repositoryId: readCommittedRepositoryLeaseId(REPO_ROOT),
-    remote,
-    commonDir,
-    cwd: process.cwd(),
-  })
-  const lease = await acquireTestShardLease({
-    identity,
-    onWait: (port, elapsedMs) =>
-      process.stdout.write(
-        `[test:shards] WAIT repository lease port=${port} elapsed=${Math.round(elapsedMs / 1_000)}s; ` +
-          "another checkout owns the full-suite lane\n",
-      ),
-  })
-  process.stdout.write(`[test:shards] LEASE acquired port=${lease.port}\n`)
+  // A campaign wrapper (verification-campaign.ts) may already own the
+  // repository lane for this whole verification run. A live ancestor-owned
+  // token means "do not reacquire" — reacquiring would deadlock against the
+  // wrapper's own lease. A token that fails validation fails CLOSED.
+  const inheritedLease = inheritedTestShardLeaseState(process.env)
+  if (inheritedLease === "invalid") {
+    throw new Error(
+      "[test:shards] invalid inherited verification lease; refusing to bypass serialization",
+    )
+  }
+  let lease: TestShardLease | undefined
+  if (inheritedLease === "valid") {
+    process.stdout.write("[test:shards] LEASE inherited scope=whole-campaign\n")
+  } else {
+    const [remote, commonDir] = await Promise.all([
+      capture(["git", "remote", "get-url", "origin"]),
+      capture(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"]),
+    ])
+    const identity = selectRepositoryLeaseIdentity({
+      repositoryId: readCommittedRepositoryLeaseId(REPO_ROOT),
+      remote,
+      commonDir,
+      cwd: process.cwd(),
+    })
+    lease = await acquireTestShardLease({
+      identity,
+      onWait: (port, elapsedMs) =>
+        process.stdout.write(
+          `[test:shards] WAIT repository lease port=${port} elapsed=${Math.round(elapsedMs / 1_000)}s; ` +
+            "another checkout owns the full-suite lane\n",
+        ),
+    })
+    process.stdout.write(`[test:shards] LEASE acquired port=${lease.port} scope=shards-only\n`)
+  }
   const runRoot = mkdtempSync(join(tmpdir(), "quanta-test-shards-"))
+  const registry = new ShardProcessRegistry()
+  // SIGINT/SIGTERM must not orphan the worker trees: cancel every group,
+  // wait for descendants to drain, only then delete the run root and release
+  // the lease. Without a handler the runner dies instantly and leaves live
+  // workers overlapping the next campaign.
+  let terminating = false
+  const onTerminationSignal = (signal: NodeJS.Signals): void => {
+    if (terminating) return
+    terminating = true
+    void terminateCampaignOnSignal({
+      registry,
+      runRoot,
+      signal,
+      releaseLease: () => lease?.release(),
+      log: (line) => process.stderr.write(line),
+    }).then((code) => process.exit(code))
+  }
+  process.on("SIGINT", () => onTerminationSignal("SIGINT"))
+  process.on("SIGTERM", () => onTerminationSignal("SIGTERM"))
   try {
     // A red or interrupted run must never leave a previous green receipt looking
     // current. The repository lease makes this deletion race-free across clones.
@@ -540,51 +739,63 @@ const main = async (): Promise<void> => {
         "[test:shards] INVALID — authoritative receipts require a clean checkout. Commit or stash changes first.",
       )
     }
-    if (opts.junitOut !== undefined) prepareJunit(opts.junitOut)
     const manifest = expandTestFiles(
       SUITE_ROOTS[opts.suite].map((root) => resolve(REPO_ROOT, root)),
     )
     const manifestDigest = manifestSha256(manifest)
-    const plans = createTestShardPlan(manifest, SHARD_COUNT)
+    const timings = loadTestTimings(TIMING_STORE)
+    const chunks = planTestChunks(manifest, {
+      predictMs: (file) => timings.get(relative(REPO_ROOT, file)),
+    })
+    if (opts.junitOut !== undefined) {
+      prepareJunit(
+        opts.junitOut,
+        chunks.map(({ index }) => index),
+      )
+    }
     const concurrency = await workerConcurrency()
     const cpuCount = availableParallelism()
     const loadAverage1m = loadavg()[0] ?? 0
     const testTimeoutMs = chooseShardTestTimeoutMs({ loadAverage1m, cpuCount })
-    const exclusiveFiles = plans
-      .filter(({ exclusive }) => exclusive)
-      .reduce((count, plan) => count + plan.files.length, 0)
+    const nonPureFiles = chunks
+      .filter(({ resourceClass }) => resourceClass !== "pure")
+      .reduce((count, chunk) => count + chunk.files.length, 0)
     process.stdout.write(
       `[test:shards] frozen head=${before.head} suite=${opts.suite} dirty=no ` +
         `manifest_files=${manifest.length} manifest_sha256=${manifestDigest} ` +
-        `workers=${concurrency} test_timeout_ms=${testTimeoutMs} ` +
-        `load_1m=${loadAverage1m.toFixed(2)} cpus=${cpuCount} exclusive_files=${exclusiveFiles}\n`,
+        `chunks=${chunks.length} timed_files=${timings.size} workers=${concurrency} ` +
+        `test_timeout_ms=${testTimeoutMs} load_1m=${loadAverage1m.toFixed(2)} cpus=${cpuCount} ` +
+        `non_pure_files=${nonPureFiles}\n`,
     )
 
     const toolchainSha256 = testToolchainSha256()
     const envSha256 = testEnvironmentSha256(process.env, testTimeoutMs)
-    const cachedPlans: readonly CachedShardPlan[] = plans.map((plan) => ({
-      plan,
-      cachePath: shardCachePath(opts.suite, plan.index),
-      identity: {
-        head: before.head,
-        suite: opts.suite,
-        manifestSha256: manifestDigest,
-        shardIndex: plan.index,
-        shardFileCount: plan.files.length,
-        shardFilesSha256: shardFilesSha256(REPO_ROOT, plan.files),
-        toolchainSha256,
-        testEnvSha256: envSha256,
-        junit: opts.junitOut !== undefined,
-      },
-    }))
+    const cachedChunks: readonly CachedChunk[] = chunks.map((chunk) => {
+      const filesSha256 = shardFilesSha256(REPO_ROOT, chunk.files)
+      return {
+        chunk,
+        cachePath: chunkCachePath(opts.suite, filesSha256),
+        identity: {
+          head: before.head,
+          suite: opts.suite,
+          manifestSha256: manifestDigest,
+          shardIndex: chunk.index,
+          shardFileCount: chunk.files.length,
+          shardFilesSha256: filesSha256,
+          toolchainSha256,
+          testEnvSha256: envSha256,
+          junit: opts.junitOut !== undefined,
+        },
+      }
+    })
 
-    const scanReachSinks = await executePlans({
-      plans: cachedPlans,
+    const scanReachSinks = await executeChunks({
+      chunks: cachedChunks,
       opts,
       runRoot,
       before,
-      concurrency,
       testTimeoutMs,
+      registry,
     })
 
     const after = await gitSnapshot()
@@ -600,14 +811,23 @@ const main = async (): Promise<void> => {
       manifestSha256: manifestDigest,
       sinks: scanReachSinks,
     })
-    if (opts.junitOut !== undefined) mergeJunit(opts.junitOut)
+    if (opts.junitOut !== undefined) {
+      mergeJunit(
+        opts.junitOut,
+        chunks.map(({ index }) => index),
+      )
+    }
+    pruneStaleChunkReceipts(opts.suite)
     process.stdout.write(
-      `[test:shards] PASS suite=${opts.suite} shards=1-${SHARD_COUNT}/${SHARD_COUNT} ` +
+      `[test:shards] PASS suite=${opts.suite} chunks=${chunks.length}/${chunks.length} ` +
         `manifest_files=${manifest.length} head=${before.head}\n`,
     )
   } finally {
-    rmSync(runRoot, { recursive: true, force: true })
-    lease.release()
+    // Drain before release: the run root is deleted only once every worker
+    // group is confirmed empty, and the lease is released only after that —
+    // a surviving descendant must never overlap the next campaign.
+    await drainCampaign({ registry, runRoot, log: (line) => process.stderr.write(line) })
+    lease?.release()
   }
 }
 

@@ -1,11 +1,5 @@
 import { readFileSync } from "node:fs"
 
-export interface TestShardPlan {
-  readonly index: number
-  readonly files: readonly string[]
-  readonly exclusive: boolean
-}
-
 export interface MemoryBudget {
   readonly totalBytes: number
   readonly availableBytes: number
@@ -56,110 +50,246 @@ export const chooseShardTestTimeoutMs = (cpu: CpuBudget): number => {
   return Math.min(MAX_TEST_TIMEOUT_MS, BASE_TEST_TIMEOUT_MS * pressureFactor)
 }
 
+/**
+ * Resource classes. A class names the process-global or checkout-global
+ * resource a test file observably uses; only INCOMPATIBLE classes serialize.
+ * "pure" files (no detected shared resource) may overlap anything — they
+ * already overlap each other today, and a file that touches nothing shared
+ * cannot corrupt a resource-owning peer.
+ */
+export const TEST_RESOURCE_CLASSES = [
+  "pure",
+  "worktree",
+  "repo-write",
+  "browser",
+  "lsp",
+  "port",
+  "process-global",
+  "integration-path",
+] as const
+
+export type TestResourceClass = (typeof TEST_RESOURCE_CLASSES)[number]
+
+/** Source detectors, most specific first; the first match names the class. */
+const CLASS_SOURCE_DETECTORS: readonly (readonly [TestResourceClass, RegExp])[] = [
+  // Shell form ("git worktree add …") AND argv-array form (["worktree", "add"]).
+  ["worktree", /\bgit\s+worktree\b|\bworktree\b[^\n]{0,40}\b(?:add|remove|prune|lock)\b/],
+  [
+    "repo-write",
+    /\b(?:writeFileSync|rmSync|renameSync|unlinkSync)\s*\([^\n]*(?:REPO_ROOT|repoRoot|process\.cwd\s*\(\s*\))/,
+  ],
+  ["browser", /puppeteer|playwright|chromium|--headless/i],
+  ["lsp", /\b(?:typescript-language-server|pyright|rust-analyzer|gopls|lldb|lsp)\b/i],
+  [
+    "port",
+    /\bBun\.listen\s*\(|\b(?:createServer|createConnection)\s*\(|\b(?:localhost|127\.0\.0\.1):\d{2,5}\b/,
+  ],
+  [
+    "process-global",
+    /\b(?:killProcessTree|process\.kill)\s*\(|\b(?:QUANTA_HOME|QUANTA_BENCH_HOME|process\.env\.HOME)\b/,
+  ],
+] as const
+
 const SHARED_RESOURCE_PATH =
   /(?:^|\/)(?:integration|e2e)(?:\/|$)|(?:git|worktree|mcp|lsp|server|socket|process-tree|multi-process)/i
 
-const SHARED_RESOURCE_SOURCE = [
-  /\bBun\.listen\s*\(/,
-  /\b(?:createServer|createConnection)\s*\(/,
-  /\b(?:git\s+worktree|worktree\s+(?:add|remove|prune))\b/,
-  /\b(?:QUANTA_HOME|QUANTA_BENCH_HOME|process\.env\.HOME)\b/,
-  /\b(?:localhost|127\.0\.0\.1):\d{2,5}\b/,
-  /\b(?:killProcessTree|process\.kill)\s*\(/,
-  /\b(?:writeFileSync|rmSync|renameSync|unlinkSync)\s*\([^\n]*(?:REPO_ROOT|repoRoot|process\.cwd\s*\(\s*\))/,
-] as const
+/**
+ * Classify one test file. Source evidence wins over the path heuristic: a
+ * path-only match (integration/e2e naming) with no specific marker lands in
+ * "integration-path", which stays serialized against every non-pure class.
+ */
+export const classifyTestResource = (
+  file: string,
+  source: string = readFileSync(file, "utf8"),
+): TestResourceClass => {
+  for (const [resourceClass, pattern] of CLASS_SOURCE_DETECTORS) {
+    if (pattern.test(source)) return resourceClass
+  }
+  return SHARED_RESOURCE_PATH.test(file) ? "integration-path" : "pure"
+}
 
 /**
- * Tests with an observable process-global or checkout-global resource run in
- * one exclusive worker. A false positive costs parallelism; a false negative
- * creates nondeterministic corruption or port collisions, so this is
- * intentionally conservative.
+ * Non-pure classes serialize against EVERY non-pure class until a specific
+ * pair is measured safe under real contention. This is already strictly more
+ * parallel than the previous binary plan: the exclusive corpus (19.6% of the
+ * suite, formerly 100% serial waves) now overlaps the pure corpus.
  */
+const VALIDATED_NONPURE_OVERLAPS: ReadonlySet<string> = new Set()
+
+const overlapKey = (a: TestResourceClass, b: TestResourceClass): string => [a, b].sort().join("+")
+
+export const resourceClassesOverlap = (a: TestResourceClass, b: TestResourceClass): boolean =>
+  a === "pure" || b === "pure" || VALIDATED_NONPURE_OVERLAPS.has(overlapKey(a, b))
+
+/** Compatibility shim for the previous binary classifier. */
 export const usesSharedTestResource = (
   file: string,
   source: string = readFileSync(file, "utf8"),
-): boolean =>
-  SHARED_RESOURCE_PATH.test(file) || SHARED_RESOURCE_SOURCE.some((pattern) => pattern.test(source))
+): boolean => classifyTestResource(file, source) !== "pure"
 
-const roundRobin = (files: readonly string[], count: number): string[][] => {
-  const groups = Array.from({ length: count }, () => [] as string[])
-  for (const [position, file] of files.entries()) groups[position % count]?.push(file)
-  return groups
+export interface TestChunk {
+  readonly index: number
+  readonly files: readonly string[]
+  readonly resourceClass: TestResourceClass
+  /** Sum of measured per-file wall estimates (fallback-weighted when unmeasured). */
+  readonly predictedMs: number
+}
+
+export interface PlanTestChunksOptions {
+  readonly targetChunkCount?: number
+  /** Measured per-file wall time; undefined = no measurement for that file. */
+  readonly predictMs?: (file: string) => number | undefined
+  readonly classify?: (file: string) => TestResourceClass
+}
+
+const DEFAULT_TARGET_CHUNK_COUNT = 24
+/** Checkpoint bound: a failed campaign forfeits at most this many files of
+ *  green coverage per chunk, however small a group's time share is. */
+const MAX_CHUNK_FILES = 160
+
+const median = (values: readonly number[]): number | undefined => {
+  if (values.length === 0) return undefined
+  const sorted = [...values].sort((left, right) => left - right)
+  return sorted[Math.floor(sorted.length / 2)]
+}
+
+interface WeightedFile {
+  readonly file: string
+  readonly weightMs: number
+  readonly measured: boolean
+}
+
+/** Longest-processing-time-first into `binCount` bins; deterministic ties. */
+const lptBins = (files: readonly WeightedFile[], binCount: number): WeightedFile[][] => {
+  const bins = Array.from({ length: binCount }, () => [] as WeightedFile[])
+  const sums = new Array<number>(binCount).fill(0)
+  const ordered = [...files].sort(
+    (left, right) => right.weightMs - left.weightMs || left.file.localeCompare(right.file),
+  )
+  for (const entry of ordered) {
+    let target = 0
+    for (let bin = 1; bin < binCount; bin += 1) {
+      const currentSum = sums[bin] ?? 0
+      const targetSum = sums[target] ?? 0
+      if (currentSum < targetSum) target = bin
+    }
+    bins[target]?.push(entry)
+    sums[target] = (sums[target] ?? 0) + entry.weightMs
+  }
+  return bins.filter((bin) => bin.length > 0)
 }
 
 /**
- * Produce an exact, disjoint partition from the one pre-expanded manifest.
- * Shared-resource tests occupy the final shard; every other shard is safe to
- * overlap with one peer process.
+ * Partition the manifest into resource-classed, timing-balanced chunks.
+ *
+ * - Every file appears in exactly one chunk (asserted).
+ * - A chunk holds files of ONE class, so the scheduler can overlap chunks
+ *   whose classes are compatible.
+ * - Chunk sizes follow measured per-file wall time (LPT) where available;
+ *   unmeasured files carry the manifest's median measured weight so a cold
+ *   store degrades to file-count balancing, never to a crash or a skew.
+ * - Finer chunks than the old 8 fixed shards double as resume checkpoints:
+ *   a failed campaign re-runs only the chunks without a green receipt.
  */
-export const createTestShardPlan = (
-  manifest: readonly string[],
-  shardCount: number,
-  classify: (file: string) => boolean = usesSharedTestResource,
-): readonly TestShardPlan[] => {
-  if (!Number.isSafeInteger(shardCount) || shardCount < 1) {
-    throw new Error(`[test:shards] invalid shard count: ${shardCount}`)
-  }
-  const sorted = [...manifest].sort()
-  if (sorted.length < shardCount || new Set(sorted).size !== sorted.length) {
-    throw new Error(
-      `[test:shards] invalid manifest: files=${sorted.length} unique=${new Set(sorted).size} shards=${shardCount}`,
-    )
-  }
+const validWeight = (ms: number | undefined): ms is number =>
+  ms !== undefined && Number.isFinite(ms) && ms > 0
 
-  const exclusive: string[] = []
-  const regular: string[] = []
-  for (const file of sorted) (classify(file) ? exclusive : regular).push(file)
-  if (shardCount === 1) {
-    const only = [{ index: 1, files: sorted, exclusive: exclusive.length > 0 }]
-    assertTestShardPlan(manifest, only, shardCount)
-    return only
+/** Group weighted files by class; unmeasured files carry the measured median. */
+const groupWeightedFiles = (
+  sorted: readonly string[],
+  classify: (file: string) => TestResourceClass,
+  predictMs: (file: string) => number | undefined,
+): Map<TestResourceClass, WeightedFile[]> => {
+  const measured = sorted.map(predictMs).filter(validWeight)
+  const fallbackWeightMs = median(measured) ?? 1_000
+  const groups = new Map<TestResourceClass, WeightedFile[]>()
+  for (const file of sorted) {
+    const ms = predictMs(file)
+    const entry: WeightedFile = validWeight(ms)
+      ? { file, weightMs: ms, measured: true }
+      : { file, weightMs: fallbackWeightMs, measured: false }
+    const group = groups.get(classify(file))
+    if (group === undefined) groups.set(classify(file), [entry])
+    else group.push(entry)
   }
-  const proportionalExclusive = Math.round((exclusive.length / sorted.length) * shardCount)
-  const exclusiveShardCount =
-    exclusive.length === 0
-      ? 0
-      : regular.length === 0
-        ? shardCount
-        : Math.max(1, Math.min(shardCount - 1, proportionalExclusive))
-  const regularShardCount = shardCount - exclusiveShardCount
-  if (
-    regular.length < regularShardCount ||
-    exclusive.length < exclusiveShardCount ||
-    regularShardCount < 0
-  ) {
-    throw new Error(
-      `[test:shards] cannot isolate shared resources: regular=${regular.length}/${regularShardCount} ` +
-        `exclusive=${exclusive.length}/${exclusiveShardCount}`,
-    )
-  }
-  const plans: TestShardPlan[] = roundRobin(regular, regularShardCount).map((files, offset) => ({
-    index: offset + 1,
-    files,
-    exclusive: false,
-  }))
-  plans.push(
-    ...roundRobin(exclusive, exclusiveShardCount).map((files, offset) => ({
-      index: regularShardCount + offset + 1,
-      files,
-      exclusive: true,
-    })),
-  )
-  assertTestShardPlan(manifest, plans, shardCount)
-  return plans
+  return groups
 }
 
-export const assertTestShardPlan = (
+interface UnindexedChunk {
+  readonly files: readonly string[]
+  readonly resourceClass: TestResourceClass
+  readonly predictedMs: number
+}
+
+/** Per-class LPT bins; count follows the class's time share, bounded by the
+ *  checkpoint size cap. */
+const chunkOneGroup = (
+  resourceClass: TestResourceClass,
+  group: readonly WeightedFile[],
+  totalWeight: number,
+  targetChunkCount: number,
+): UnindexedChunk[] => {
+  const groupWeight = group.reduce((sum, entry) => sum + entry.weightMs, 0)
+  const proportional = Math.round((groupWeight / totalWeight) * targetChunkCount)
+  const checkpointFloor = Math.ceil(group.length / MAX_CHUNK_FILES)
+  const binCount = Math.max(1, checkpointFloor, Math.min(group.length, proportional))
+  return lptBins(group, binCount).map((bin) => ({
+    files: bin.map(({ file }) => file).sort(),
+    resourceClass,
+    predictedMs: Math.round(bin.reduce((sum, entry) => sum + entry.weightMs, 0)),
+  }))
+}
+
+export const planTestChunks = (
   manifest: readonly string[],
-  plans: readonly TestShardPlan[],
-  shardCount: number,
-): void => {
-  if (plans.length !== shardCount || plans.some((plan) => plan.files.length === 0)) {
+  options: PlanTestChunksOptions = {},
+): readonly TestChunk[] => {
+  const sorted = [...manifest].sort()
+  if (sorted.length === 0 || new Set(sorted).size !== sorted.length) {
     throw new Error(
-      `[test:shards] partition missing: expected=${shardCount} actual=${plans.length} empty=${plans.filter((p) => p.files.length === 0).length}`,
+      `[test:shards] invalid manifest: files=${sorted.length} unique=${new Set(sorted).size}`,
     )
   }
-  const selected = plans.flatMap((plan) => plan.files)
+  const classify = options.classify ?? classifyTestResource
+  const predictMs = options.predictMs ?? (() => undefined)
+  const targetChunkCount = options.targetChunkCount ?? DEFAULT_TARGET_CHUNK_COUNT
+  if (!Number.isSafeInteger(targetChunkCount) || targetChunkCount < 1) {
+    throw new Error(`[test:shards] invalid target chunk count: ${targetChunkCount}`)
+  }
+
+  const groups = groupWeightedFiles(sorted, classify, predictMs)
+  const totalWeight = [...groups.values()].flat().reduce((sum, entry) => sum + entry.weightMs, 0)
+  const chunks = [...groups.entries()].flatMap(([resourceClass, group]) =>
+    chunkOneGroup(resourceClass, group, totalWeight, targetChunkCount),
+  )
+
+  // Deterministic indices derived from composition (class + first file), so a
+  // stable corpus keeps stable chunk identities across runs. The scheduler
+  // orders execution by predictedMs, not by this label.
+  chunks.sort(
+    (left, right) =>
+      left.resourceClass.localeCompare(right.resourceClass) ||
+      (left.files[0] ?? "").localeCompare(right.files[0] ?? ""),
+  )
+  const indexed: TestChunk[] = chunks.map((chunk, offset) => ({ index: offset + 1, ...chunk }))
+  assertTestChunkPlan(manifest, indexed)
+  return indexed
+}
+
+export const assertTestChunkPlan = (
+  manifest: readonly string[],
+  chunks: readonly TestChunk[],
+): void => {
+  if (chunks.length === 0 || chunks.some((chunk) => chunk.files.length === 0)) {
+    throw new Error(
+      `[test:shards] partition missing: chunks=${chunks.length} empty=${chunks.filter((c) => c.files.length === 0).length}`,
+    )
+  }
+  const indices = chunks.map((chunk) => chunk.index)
+  if (new Set(indices).size !== chunks.length || indices.some((index) => index < 1)) {
+    throw new Error("[test:shards] chunk indices must be unique and positive")
+  }
+  const selected = chunks.flatMap((chunk) => chunk.files)
   const expected = [...manifest].sort()
   const actual = [...selected].sort()
   if (

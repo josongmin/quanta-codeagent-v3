@@ -28,19 +28,51 @@ const planSource = await Bun.file(
 ).text()
 
 const usesNativeShardSpool = (source: string): boolean =>
-  (source.match(/Bun\.spawn\s*\(/g) ?? []).length === 1 &&
-  /stdout:\s*spoolFd/.test(source) &&
-  /stderr:\s*spoolFd/.test(source) &&
+  (source.match(/registry\.spawnWorker\s*\(/g) ?? []).length === 1 &&
+  // No direct Bun.spawn: the worker must go through the registry so it leads
+  // its own process group and cancellation can kill the whole tree.
+  (source.match(/Bun\.spawn\s*\(/g) ?? []).length === 0 &&
+  /stdoutFd:\s*spoolFd/.test(source) &&
+  /stderrFd:\s*spoolFd/.test(source) &&
   /readFileSync\s*\(\s*spoolPath/.test(source)
 
 const workerBailsAfterFirstFailure = (source: string): boolean =>
-  (source.match(/Bun\.spawn\s*\(/g) ?? []).length === 1 &&
+  (source.match(/registry\.spawnWorker\s*\(/g) ?? []).length === 1 &&
   (source.match(/["']--bail=1["']/g) ?? []).length === 1 &&
   /cmd:\s*\[[\s\S]*?["']bun["']\s*,\s*["']test["'][\s\S]*?["']--bail=1["']/.test(source)
 
+const watchdogKillsWorkerTree = (source: string): boolean =>
+  /void\s+handle\.cancel\s*\(\s*\)/.test(source) && !/proc\.kill\s*\(/.test(source)
+
+const scheduleCancelsPeersAndReapsAll = (source: string): boolean =>
+  (source.match(/runResourceAwareSchedule\s*(?:<[^\n>]*>\s*)?\(/g) ?? []).length === 1 &&
+  /cancelAll:\s*\(\)\s*=>\s*input\.registry\.cancelAll\s*\(\s*\)/.test(source) &&
+  /desiredConcurrency:\s*measuredConcurrency/.test(source) &&
+  /resourceClassesOverlap\s*\(/.test(source) &&
+  !/await\s+Promise\.all\s*\(/.test(source)
+
+const mainDrainsBeforeRelease = (source: string): boolean => {
+  const finallyBlock = /finally\s*\{([\s\S]*?)\}\s*\}/.exec(source)?.[1]
+  if (finallyBlock === undefined) return false
+  const drainAt = finallyBlock.indexOf("await drainCampaign(")
+  const releaseAt = finallyBlock.indexOf("lease?.release()")
+  // Descendants drained first, run root handled inside drainCampaign, lease
+  // released only after — and never a bare rmSync racing live workers.
+  return drainAt >= 0 && releaseAt > drainAt && !finallyBlock.includes("rmSync(runRoot")
+}
+
+const mainHandlesTerminationSignals = (source: string): boolean =>
+  /process\.on\(\s*["']SIGINT["']/.test(source) &&
+  /process\.on\(\s*["']SIGTERM["']/.test(source) &&
+  (source.match(/terminateCampaignOnSignal\s*\(/g) ?? []).length === 1
+
 const wiresRepositoryLease = (source: string): boolean =>
   (source.match(/acquireTestShardLease\s*\(/g) ?? []).length === 1 &&
-  /finally\s*\{[\s\S]*?lease\.release\s*\(\s*\)/.test(source)
+  // A campaign wrapper may hand down the lane (inherited token, owner-pid
+  // validated); a stray token fails closed instead of bypassing serialization.
+  /inheritedTestShardLeaseState\s*\(/.test(source) &&
+  /===\s*["']invalid["']/.test(source) &&
+  /finally\s*\{[\s\S]*?lease\?\.release\s*\(\s*\)/.test(source)
 
 describe("test:ci admission gate", () => {
   test("uses the live feature-catalog changed-file authority", () => {
@@ -69,9 +101,9 @@ describe("test:ci admission gate", () => {
       "test:unit:ci",
       "test:fast",
       "test:integration",
+      "test:full:ci",
       "test:shard",
       "test:contract",
-      "test:ci",
       "test:cov",
       "test:watch",
     ]
@@ -80,27 +112,38 @@ describe("test:ci admission gate", () => {
     }
   })
 
-  test("validates the shard reach receipt without repeating contract cleanup", () => {
-    const script = packageJson.scripts?.["test:ci"] ?? ""
-    expect(script).toContain("run-test-shards.ts --suite=full --parallel=1 && bun run scan-reach")
-    expect(script).toContain("bun test tests/contract --parallel=1")
-    expect(script).not.toContain("bun run test:contract")
+  test("test:ci IS the manifest executor — one verification authority", () => {
+    // The old test:ci was a hand-maintained chain that overlapped but did not
+    // equal the prepush gate set, so "test:ci green" and "prepush green" were
+    // different claims. It now delegates to the campaign-wrapped gate runner.
+    expect(packageJson.scripts?.["test:ci"]).toBe("bun run prepush")
+    expect(packageJson.scripts?.prepush).toBe(
+      "bun run tools/dev/verification-campaign.ts -- bun run tools/dev/gate.ts prepush --reuse-receipt",
+    )
+    expect(packageJson.scripts?.["prepush:cold"]).toBe(
+      "bun run tools/dev/verification-campaign.ts -- bun run tools/dev/gate.ts prepush",
+    )
+    // The one authoritative execution the receipt-consuming gates derive from.
+    const full = packageJson.scripts?.["test:full:ci"] ?? ""
+    expect(full).toContain(
+      "run-test-shards.ts --suite=full --junit-out=.cache/full-junit.xml --parallel=1",
+    )
   })
 
   test("the authoritative full-suite runner bounds a wedged shard worker", () => {
     expect(packageJson.scripts?.test).toContain("tools/dev/run-test-shards.ts")
-    expect(shardRunner).toContain("const SHARD_COUNT = 8")
     expect(shardRunner).toContain("const SHARD_INACTIVITY_TIMEOUT_MS = 12 * 60_000")
     expect(shardRunner).toContain("lastProgressAt = Date.now()")
     expect(shardRunner).toContain("idle=$" + "{idleMs}ms")
-    expect(shardRunner).toContain("proc.kill(9)")
     expect(shardRunner).toContain("expandTestFiles(")
-    expect(shardRunner).toContain("createTestShardPlan(manifest, SHARD_COUNT)")
+    expect(shardRunner).toContain("planTestChunks(manifest")
+    expect(shardRunner).toContain("loadTestTimings(TIMING_STORE)")
+    expect(shardRunner).toContain("harvestTimings(cached.chunk, result)")
     expect(shardRunner).toContain("result.executedFiles === plan.files.length")
     expect(shardRunner).toContain("aborting remaining shards")
     expect(shardRunner).not.toContain(["--shard=", "{shard}"].join("$"))
     expect(shardRunner).toContain("checkout changed during run")
-    expect(shardRunner).toContain("checkout changed after shard")
+    expect(shardRunner).toContain("checkout changed after chunk")
     expect(shardRunner).toContain("require a clean checkout")
     expect(shardRunner).toContain("--junit-out")
     expect(shardRunner).toContain("QUANTA_SCAN_REACH_RECORD: scanReachSink")
@@ -115,29 +158,93 @@ describe("test:ci admission gate", () => {
     expect(shardRunner).toContain("writeScanReachReceipt(")
     expect(planSource).toContain("chooseShardConcurrency")
     expect(planSource).toContain("TWO_WORKER_MIN_AVAILABLE_BYTES")
-    expect(planSource).toContain("proportionalExclusive")
+    // Class-aware chunk planning: the classifier, the conservative overlap
+    // matrix, and the LPT bin placement must all remain live exports.
+    expect(planSource).toContain("classifyTestResource")
+    expect(planSource).toContain("VALIDATED_NONPURE_OVERLAPS")
+    expect(planSource).toContain("lptBins")
   })
 
   test("the full-suite worker writes natively instead of relaying output through JS", () => {
     // Anti-vacuum: bind the scan to the one live worker spawn, not the small
     // git-capture helper or a comment/import mentioning the same identifiers.
-    expect(runShardSource.match(/Bun\.spawn\s*\(/g)).toHaveLength(1)
+    expect(runShardSource.match(/registry\.spawnWorker\s*\(/g)).toHaveLength(1)
     expect(usesNativeShardSpool(runShardSource)).toBe(true)
 
     // Red-on-injection: restoring the pipe that caused child backpressure must
     // make this guard fail even if the spool variables and comments remain.
-    const piped = runShardSource.replace("stdout: spoolFd", 'stdout: "pipe"')
+    const piped = runShardSource.replace("stdoutFd: spoolFd", 'stdout: "pipe"')
     expect(usesNativeShardSpool(piped)).toBe(false)
+
+    // Red-on-injection: a direct Bun.spawn worker shares the runner's process
+    // group and cannot be tree-killed; the guard must reject it.
+    const ungrouped = runShardSource.replace("registry.spawnWorker({", "Bun.spawn({")
+    expect(usesNativeShardSpool(ungrouped)).toBe(false)
   })
 
   test("the shard child stops after its first failure", () => {
-    expect(runShardSource.match(/Bun\.spawn\s*\(/g)).toHaveLength(1)
+    expect(runShardSource.match(/registry\.spawnWorker\s*\(/g)).toHaveLength(1)
     expect(workerBailsAfterFirstFailure(runShardSource)).toBe(true)
 
     // Red-on-injection: a comment mentioning bail cannot preserve the guard if
     // the executable child argument is removed.
     const withoutBail = runShardSource.replace('"--bail=1",', "")
     expect(workerBailsAfterFirstFailure(withoutBail)).toBe(false)
+  })
+
+  test("the watchdog kills the worker's whole process tree, not just the Bun pid", () => {
+    expect(watchdogKillsWorkerTree(runShardSource)).toBe(true)
+
+    // Red-on-injection: restoring the direct-pid kill (which orphans browser/
+    // LSP grandchildren) must fail even while the cancel identifier remains
+    // mentioned in comments.
+    const directKill = runShardSource.replace("void handle.cancel()", "proc.kill(9)")
+    expect(watchdogKillsWorkerTree(directKill)).toBe(false)
+  })
+
+  test("a failing chunk cancels its peer group and the schedule is fully reaped", () => {
+    expect(scheduleCancelsPeersAndReapsAll(runShardSource)).toBe(true)
+
+    // Red-on-injection: reverting to bare Promise.all (the measured orphan
+    // path — the peer worker and its grandchildren kept running after the
+    // first shard verdict threw) must fail the guard.
+    const orphaning = runShardSource.replace(
+      /runResourceAwareSchedule\s*<[^\n>]*>\s*\(/,
+      "await Promise.all((",
+    )
+    expect(scheduleCancelsPeersAndReapsAll(orphaning)).toBe(false)
+
+    // Red-on-injection: dropping the per-start host measurement (memory/load
+    // re-sampled before every worker) must fail the guard even while the
+    // scheduler call remains.
+    const unmeasured = runShardSource.replace(
+      "desiredConcurrency: measuredConcurrency",
+      "desiredConcurrency: () => Promise.resolve(2)",
+    )
+    expect(scheduleCancelsPeersAndReapsAll(unmeasured)).toBe(false)
+  })
+
+  test("the runner drains descendants before deleting the run root or releasing the lease", () => {
+    expect(mainDrainsBeforeRelease(mainSource)).toBe(true)
+
+    // Red-on-injection: the original shape — rmSync + release with no drain —
+    // deleted the live workers' TMPDIR/HOME and let the next campaign overlap.
+    const undrained = mainSource.replace(
+      /await drainCampaign\([\s\S]*?\)\n/,
+      "rmSync(runRoot, { recursive: true, force: true })\n",
+    )
+    expect(mainDrainsBeforeRelease(undrained)).toBe(false)
+  })
+
+  test("SIGINT/SIGTERM terminate the campaign through the draining path", () => {
+    expect(mainHandlesTerminationSignals(mainSource)).toBe(true)
+
+    // Red-on-injection: removing the handlers reverts to the default signal
+    // disposition, which kills the runner instantly and orphans worker trees.
+    const unhandled = mainSource
+      .replace(/process\.on\(\s*["']SIGINT["']/, "noSignal(")
+      .replace(/process\.on\(\s*["']SIGTERM["']/, "noSignal(")
+    expect(mainHandlesTerminationSignals(unhandled)).toBe(false)
   })
 
   test("the full-suite runner serializes the repository lane across worktrees", () => {
