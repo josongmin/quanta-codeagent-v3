@@ -387,13 +387,19 @@ describe("shard worker process lifecycle", () => {
       }
     }
 
-    await registry.cancelAll()
+    const outcome = await registry.cancelAll()
 
     // Our own worker's tree is gone…
     expect(pidAlive(grandchild)).toBe(false)
     // …and the "recycled" group was left untouched.
     expect(pidAlive(strangerGrandchild)).toBe(true)
-    expect(await stranger.handle.cancel()).toBe(true)
+    // Cancelling a group we no longer recognise reports FALSE, not "emptied".
+    // Claiming success there was a false attestation: `drained: true` let the
+    // campaign delete a run root out from under processes it could not
+    // identify, and release the lane on evidence it never had.
+    expect(await stranger.handle.cancel()).toBe(false)
+    expect(outcome.drained).toBe(false)
+    expect(outcome.survivors).toContain(stranger.handle.pid)
     await handle.exited.catch(() => undefined)
   }, 30_000)
 

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { testEnvironmentSha256 } from "../../../tools/dev/test-shard-receipt"
 import {
   cleanStatusSha256,
   mintExactVerificationReceipt,
@@ -76,6 +77,27 @@ describe("content-bound exact verification receipt", () => {
     const direct = verificationEnvironmentSha256({ PATH: search.join(":") })
     const nested = verificationEnvironmentSha256({ PATH: [...search, ...search].join(":") })
     expect(nested).toBe(direct)
+  })
+
+  test("locale and zone key BOTH receipts — they used to disagree", () => {
+    // The drift: the shard cache keyed TZ and LANG, the exact receipt did not,
+    // so `TZ=Asia/Seoul bun run prepush` reused a green minted under UTC
+    // without running one date- or locale-sensitive test. Both now read the
+    // same definition.
+    const utc = verificationEnvironmentSha256({ PATH: "/a", TZ: "UTC" })
+    expect(verificationEnvironmentSha256({ PATH: "/a", TZ: "Asia/Seoul" })).not.toBe(utc)
+    const enUs = verificationEnvironmentSha256({ PATH: "/a", LANG: "en_US.UTF-8" })
+    expect(verificationEnvironmentSha256({ PATH: "/a", LANG: "ko_KR.UTF-8" })).not.toBe(enUs)
+    // …and the shard receipt agrees, key for key.
+    const shardUtc = testEnvironmentSha256({ PATH: "/a", TZ: "UTC" }, 120_000)
+    expect(testEnvironmentSha256({ PATH: "/a", TZ: "Asia/Seoul" }, 120_000)).not.toBe(shardUtc)
+    // An unrelated terminal variable still keys nothing, in either.
+    expect(verificationEnvironmentSha256({ PATH: "/a", TZ: "UTC", ITERM_SESSION_ID: "w0" })).toBe(
+      utc,
+    )
+    expect(testEnvironmentSha256({ PATH: "/a", TZ: "UTC", ITERM_SESSION_ID: "w0" }, 120_000)).toBe(
+      shardUtc,
+    )
   })
 
   test("PATH order and real entries still invalidate the environment fingerprint", () => {

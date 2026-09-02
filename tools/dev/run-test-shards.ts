@@ -864,7 +864,22 @@ const main = async (): Promise<void> => {
     // Drain before release: the run root is deleted only once every worker
     // group is confirmed empty, and the lease is released only after that —
     // a surviving descendant must never overlap the next campaign.
-    await drainCampaign({ registry, runRoot, log: (line) => process.stderr.write(line) })
+    // A campaign that could not account for its own descendants has not
+    // finished: the lane is about to be released to the next contender while
+    // processes from this one may still hold ports, worktrees and HOME. The
+    // PASS line above is not the verdict — the exit code is.
+    const drain = await drainCampaign({
+      registry,
+      runRoot,
+      log: (line) => process.stderr.write(line),
+    })
+    if (!drain.drained) {
+      process.exitCode = 1
+      process.stderr.write(
+        `[test:shards] INVALID — worker group(s) unaccounted for: ${drain.survivors.join(", ")}; ` +
+          "refusing to bless this run\n",
+      )
+    }
     lease?.release()
   }
 }

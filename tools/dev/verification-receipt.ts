@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { arch, hostname, platform, release } from "node:os"
 import { delimiter, dirname, join } from "node:path"
 import { externalToolchainFingerprint } from "./external-toolchain"
+import { isVerdictRelevantEnvKey } from "./verdict-env"
 
 export const EXACT_RECEIPT_SCHEMA = "quanta.exact-verification-receipt.v1" as const
 export const DEFAULT_RECEIPT_TTL_MS = 6 * 60 * 60_000
@@ -104,15 +105,11 @@ const canonicalPath = (value: string): string => {
 const relevantEnvironment = (env: NodeJS.ProcessEnv): readonly [string, string][] =>
   Object.entries(env)
     .filter((entry): entry is [string, string] => entry[1] !== undefined)
-    .filter(
-      ([key]) =>
-        key === "CI" ||
-        key === "NODE_ENV" ||
-        key === "PATH" ||
-        key === "REQUIRE_CONTRACT" ||
-        key.startsWith("BUN_") ||
-        key.startsWith("QUANTA_"),
-    )
+    // ONE definition, shared with the shard receipt. They were written
+    // separately and drifted: the shard layer keyed TZ and LANG, this one did
+    // not, so `TZ=Asia/Seoul bun run prepush` reused a green minted under UTC
+    // without running a single date- or locale-sensitive test.
+    .filter(([key]) => isVerdictRelevantEnvKey(key))
     .filter(([key]) => !key.startsWith("QUANTA_VERIFICATION_LEASE_"))
     // `bun run` prepends its node_modules/.bin search chain on every nesting
     // level, even when those exact entries already lead PATH. Duplicate PATH

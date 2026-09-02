@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, relative } from "node:path"
 import { externalToolchainFingerprint } from "./external-toolchain"
+import { isVerdictRelevantEnvKey } from "./verdict-env"
 
 export const TEST_SHARD_CACHE_TTL_MS = 24 * 60 * 60_000
 
@@ -121,8 +122,6 @@ export const trackedTreeSha256 = (repoRoot: string): string => {
   return hasher.digest("hex")
 }
 
-const RELEVANT_ENV_EXACT = new Set(["CI", "NODE_ENV", "PATH", "REQUIRE_CONTRACT", "TZ", "LANG"])
-
 const dedupePath = (value: string): string => {
   const seen = new Set<string>()
   return value
@@ -157,9 +156,7 @@ export const testEnvironmentSha256 = (
   })
   const canonical = Object.entries(effective)
     .filter((entry): entry is [string, string] => entry[1] !== undefined)
-    .filter(
-      ([key]) => RELEVANT_ENV_EXACT.has(key) || key.startsWith("BUN_") || key.startsWith("QUANTA_"),
-    )
+    .filter(([key]) => isVerdictRelevantEnvKey(key))
     .filter(([key]) => !key.startsWith("QUANTA_VERIFICATION_LEASE_"))
     .map(([key, value]): [string, string] => [key, key === "PATH" ? dedupePath(value) : value])
     .sort(([left], [right]) => left.localeCompare(right))

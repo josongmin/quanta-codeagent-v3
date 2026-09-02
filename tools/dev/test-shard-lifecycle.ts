@@ -149,6 +149,8 @@ interface TrackedWorker {
  */
 export class ShardProcessRegistry {
   private readonly tracked = new Set<TrackedWorker>()
+  /** Groups abandoned because their leader pid was recycled by the OS. */
+  private readonly recycled = new Set<number>()
   private readonly killOptions: KillProcessTreeOptions
 
   constructor(killOptions: KillProcessTreeOptions = {}) {
@@ -227,8 +229,13 @@ export class ShardProcessRegistry {
   private async killTracked(worker: TrackedWorker): Promise<boolean> {
     const current = leaderIdentity(worker.pgid)
     if (current !== undefined && worker.leader !== undefined && current !== worker.leader) {
+      // The pid was recycled: this group is a stranger's, so it is neither
+      // killed nor tracked. It is also NOT evidence that our descendants
+      // drained — claiming "emptied" here would let the campaign delete a run
+      // root out from under processes it can no longer identify.
       this.tracked.delete(worker)
-      return true
+      this.recycled.add(worker.pgid)
+      return false
     }
     const emptied = await killProcessTree(worker.pgid, this.killOptions)
     if (emptied) this.tracked.delete(worker)
@@ -245,7 +252,13 @@ export class ShardProcessRegistry {
     )
     this.sweep()
     const survivors = [...this.tracked].map((worker) => worker.pgid)
-    return { drained: survivors.length === 0, survivors }
+    // A recycled group was never observed empty, so the campaign cannot claim
+    // a clean drain — it can only report which groups it had to abandon.
+    const abandoned = [...this.recycled]
+    return {
+      drained: survivors.length === 0 && abandoned.length === 0,
+      survivors: [...survivors, ...abandoned],
+    }
   }
 }
 
