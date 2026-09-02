@@ -215,6 +215,88 @@ describe("whole verification campaign lease", () => {
     expect(await holder.exited).toBe(0)
   }, 15_000)
 
+  test("a signal during lease acquisition is never swallowed", async () => {
+    // The window this pins: `terminate` used to be a wait-aborting stub until
+    // the lease was acquired, so a signal landing between acquisition and the
+    // real handler's installation hit a no-op — and the default disposition
+    // was already replaced, so the campaign just kept running. Here the lane is
+    // HELD by a first campaign, the contender is signalled while it waits, and
+    // it must die rather than sit on a swallowed signal.
+    const root = mkdtempSync(join(tmpdir(), "quanta-verification-signal-"))
+    roots.push(root)
+    const runner = copyCampaignOwner(root)
+    const env = cleanLeaseEnv()
+    const holderStarted = join(root, ".git", "holder-started")
+    const holder = Bun.spawn({
+      cmd: [
+        process.execPath,
+        runner,
+        "--",
+        process.execPath,
+        "-e",
+        `await Bun.write(${JSON.stringify(holderStarted)}, "1"); await Bun.sleep(4000)`,
+      ],
+      cwd: root,
+      env,
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    await waitFor(() => existsSync(holderStarted))
+
+    const contender = Bun.spawn({
+      cmd: [process.execPath, runner, "--", process.execPath, "-e", "await Bun.sleep(4000)"],
+      cwd: root,
+      env,
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    // Give it time to enter the wait, then signal it.
+    await Bun.sleep(400)
+    contender.kill("SIGTERM")
+    const contenderExit = await Promise.race([
+      contender.exited,
+      Bun.sleep(6_000).then(() => "still-running" as const),
+    ])
+    expect(contenderExit).not.toBe("still-running")
+
+    holder.kill("SIGTERM")
+    await holder.exited
+  }, 20_000)
+
+  test("the campaign hands its child a real stdin", async () => {
+    // Test workers get no stdin by design, but the campaign's child is the
+    // gate runner an operator talks to. Spawning it with stdin ignored handed
+    // every gate an EOF; this asserts the child sees a TTY-or-pipe rather than
+    // a closed descriptor.
+    const root = mkdtempSync(join(tmpdir(), "quanta-verification-stdin-"))
+    roots.push(root)
+    const runner = copyCampaignOwner(root)
+    const marker = join(root, "stdin-kind")
+    const child = Bun.spawn({
+      cmd: [
+        process.execPath,
+        runner,
+        "--",
+        process.execPath,
+        "-e",
+        `import { readFileSync } from "node:fs"; ` +
+          `let kind = "closed"; ` +
+          `try { readFileSync(0); kind = "readable" } catch (error) { ` +
+          `kind = (error as { code?: string }).code === "EAGAIN" ? "readable" : "closed" } ` +
+          `await Bun.write(${JSON.stringify(marker)}, kind)`,
+      ],
+      cwd: root,
+      env: cleanLeaseEnv(),
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    child.stdin.write("hello\n")
+    child.stdin.end()
+    expect(await child.exited).toBe(0)
+    expect(readFileSync(marker, "utf8")).toBe("readable")
+  }, 20_000)
+
   test("two concurrent same-HEAD campaigns execute the gates exactly once", async () => {
     // The measured P0: a contender that waited behind a green same-HEAD
     // campaign used to re-run the ENTIRE gate set. Under the campaign lease +

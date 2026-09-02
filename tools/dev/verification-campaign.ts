@@ -7,6 +7,7 @@ import {
   acquireTestShardLease,
   readCommittedRepositoryLeaseId,
   selectRepositoryLeaseIdentity,
+  type TestShardLease,
   VERIFICATION_LEASE_OWNER_PID_ENV,
   VERIFICATION_LEASE_TOKEN_ENV,
 } from "./test-shard-lease"
@@ -92,23 +93,52 @@ const identity = selectRepositoryLeaseIdentity({
   cwd: REPO_ROOT,
 })
 
-// While WAITING for the lane, a termination signal aborts the wait cleanly
-// instead of leaving the contender parked; once running, the same signals
-// cancel the campaign's whole process tree before releasing the lane.
+/**
+ * ONE termination path, installed before anything can be signalled.
+ *
+ * The first version swapped `terminate` from a wait-aborting stub to the real
+ * drainer after the lease was acquired, and a signal landing in that window
+ * was SWALLOWED — the default disposition was already replaced, so Ctrl-C did
+ * nothing at all. This handler is correct in every phase instead: aborting the
+ * wait is a no-op once the lease is held, cancelling an empty registry is a
+ * no-op before the child is spawned, and releasing an unheld lease is a no-op
+ * via the optional chain.
+ */
 const waitAborter = new AbortController()
-let phase: "waiting" | "running" = "waiting"
-let terminate: (signal: NodeJS.Signals) => void = () => waitAborter.abort()
-const onSignal = (signal: NodeJS.Signals): void => {
-  if (phase === "waiting") {
-    waitAborter.abort()
-    return
-  }
-  terminate(signal)
-}
-process.on("SIGINT", () => onSignal("SIGINT"))
-process.on("SIGTERM", () => onSignal("SIGTERM"))
+// Generous SIGTERM grace: a nested shard runner drains its own detached worker
+// groups on SIGTERM (bounded ~10s per group); killing it early would re-create
+// the orphan class this wrapper exists to close.
+const registry = new ShardProcessRegistry({ termGraceMs: 60_000, killGraceMs: 10_000 })
+let lease: TestShardLease | undefined
+let sidecarWritten = false
+let terminating = false
 
-const lease = await acquireTestShardLease({
+const removeOwnerSidecar = (): void => {
+  if (!sidecarWritten) return
+  rmSync(LEASE_OWNER_SIDECAR, { force: true })
+}
+
+const terminate = (signal: NodeJS.Signals): void => {
+  if (terminating) return
+  terminating = true
+  waitAborter.abort()
+  process.stderr.write(`[verification] SIGNAL ${signal}; cancelling campaign process tree\n`)
+  void (async () => {
+    const outcome = await registry.cancelAll()
+    if (!outcome.drained) {
+      process.stderr.write(
+        `[verification] WARN campaign group(s) survived SIGKILL: ${outcome.survivors.join(", ")}\n`,
+      )
+    }
+    removeOwnerSidecar()
+    lease?.release()
+    process.exit(terminationExitCode(signal))
+  })()
+}
+process.on("SIGINT", () => terminate("SIGINT"))
+process.on("SIGTERM", () => terminate("SIGTERM"))
+
+lease = await acquireTestShardLease({
   identity,
   signal: waitAborter.signal,
   onWait: (port, elapsedMs) =>
@@ -117,7 +147,6 @@ const lease = await acquireTestShardLease({
         "another checkout owns the verification lane\n",
     ),
 })
-phase = "running"
 
 process.stdout.write(`[verification] LEASE acquired port=${lease.port} scope=whole-campaign\n`)
 
@@ -139,36 +168,12 @@ const writeOwnerSidecar = (): void => {
       })}\n`,
       { mode: 0o600 },
     )
+    sidecarWritten = true
   } catch {
     // Diagnostics must never fail a campaign.
   }
 }
-const removeOwnerSidecar = (): void => {
-  rmSync(LEASE_OWNER_SIDECAR, { force: true })
-}
 writeOwnerSidecar()
-
-// Generous SIGTERM grace: a nested shard runner drains its own detached
-// worker groups on SIGTERM (bounded ~10s per group); killing it early would
-// re-create the orphan class this wrapper exists to close.
-const registry = new ShardProcessRegistry({ termGraceMs: 60_000, killGraceMs: 10_000 })
-let terminating = false
-terminate = (signal: NodeJS.Signals): void => {
-  if (terminating) return
-  terminating = true
-  process.stderr.write(`[verification] SIGNAL ${signal}; cancelling campaign process tree\n`)
-  void (async () => {
-    const outcome = await registry.cancelAll()
-    if (!outcome.drained) {
-      process.stderr.write(
-        `[verification] WARN campaign group(s) survived SIGKILL: ${outcome.survivors.join(", ")}\n`,
-      )
-    }
-    removeOwnerSidecar()
-    lease.release()
-    process.exit(terminationExitCode(signal))
-  })()
-}
 
 try {
   const handle = registry.spawnWorker({
@@ -181,6 +186,10 @@ try {
     },
     stdoutFd: 1,
     stderrFd: 2,
+    // The gate runner is what an operator interacts with; spawning it without
+    // stdin (the lifecycle default for test workers) would hand every gate an
+    // EOF instead of the terminal.
+    stdin: "inherit",
   })
   const exit = await handle.exited
   process.exitCode = exit.code ?? 1
@@ -192,5 +201,5 @@ try {
     )
   }
   removeOwnerSidecar()
-  lease.release()
+  lease?.release()
 }

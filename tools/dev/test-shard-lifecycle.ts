@@ -42,6 +42,12 @@ export interface SpawnShardWorkerOptions {
   readonly env: Readonly<Record<string, string | undefined>>
   readonly stdoutFd: number
   readonly stderrFd: number
+  /**
+   * Test workers get no stdin (the default): a suite that reads it is hung,
+   * not interactive. The campaign wrapper, whose child is the gate runner an
+   * operator actually talks to, passes "inherit".
+   */
+  readonly stdin?: "ignore" | "inherit"
 }
 
 export interface KillProcessTreeOptions {
@@ -141,7 +147,7 @@ export class ShardProcessRegistry {
       env: options.env as NodeJS.ProcessEnv,
       // Own process group: one kill(-pgid) reaches every descendant.
       detached: true,
-      stdio: ["ignore", options.stdoutFd, options.stderrFd],
+      stdio: [options.stdin ?? "ignore", options.stdoutFd, options.stderrFd],
     })
     const exited = new Promise<ShardWorkerExit>((resolve, reject) => {
       child.once("error", reject)

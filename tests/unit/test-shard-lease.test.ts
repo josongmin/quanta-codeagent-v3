@@ -11,8 +11,14 @@ import {
 
 describe("full-suite repository lease", () => {
   test("committed identity survives remote aliases, copies, and worktree paths", () => {
-    const repositoryId = readCommittedRepositoryLeaseId(join(import.meta.dir, "..", ".."))
-    expect(repositoryId).toBe("quanta-codeagent-v3")
+    // A FIXED literal, not this checkout's own id. Asserting the repo's current
+    // `.quanta-verification-id` made the rail unable to verify itself: an
+    // isolated copy needs its own lease id so it cannot fight the real
+    // checkout's campaign for the same kernel port, and giving it one turned
+    // this test red and killed a full cold run mid-flight. The port hash is
+    // what needs pinning for cross-version compatibility, and that is a
+    // property of the FUNCTION, not of whatever the working copy declares.
+    const repositoryId = "quanta-codeagent-v3"
     const left = selectRepositoryLeaseIdentity({
       repositoryId,
       remote: { code: 0, text: "https://example.invalid/left.git" },
@@ -31,6 +37,20 @@ describe("full-suite repository lease", () => {
     // hold this kernel-owned port. Changing the identity/hash silently would
     // allow two worktrees to run destructive/shared-resource tests together.
     expect(testShardLeasePort(left)).toBe(42_523)
+  })
+
+  test("this checkout declares a usable lease id, whatever it is", () => {
+    // The half that SHOULD depend on the working copy: a committed id must
+    // exist and be well-formed, so worktrees and clones share a lane. Its
+    // VALUE is deliberately not asserted — an isolated verification copy is
+    // supposed to carry a different one.
+    const declared = readCommittedRepositoryLeaseId(join(import.meta.dir, "..", ".."))
+    expect(declared).toBeDefined()
+    expect(declared ?? "").toMatch(/^[a-z0-9][a-z0-9._-]{2,127}$/)
+    // Whatever it is, it must resolve to a port in the lease range.
+    const port = testShardLeasePort(`repository-id:${declared ?? ""}`)
+    expect(port).toBeGreaterThanOrEqual(42_000)
+    expect(port).toBeLessThan(48_000)
   })
 
   test("SSH aliases and HTTPS remotes resolve to one repository identity and port", () => {
