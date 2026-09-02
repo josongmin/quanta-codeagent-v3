@@ -32,6 +32,7 @@ const CAMPAIGN_MODULES = [
   "gate-manifest.ts",
   "verification-receipt.ts",
   "verification-receipt-probe.ts",
+  "verification-campaign-receipt.ts",
   "external-toolchain.ts",
 ] as const
 
@@ -302,6 +303,49 @@ describe("whole verification campaign lease", () => {
     expect(await child.exited).toBe(0)
     expect(readFileSync(marker, "utf8")).toBe("campaign-stdin-probe\n")
   }, 20_000)
+
+  test("every campaign leaves a machine-readable record of what happened", async () => {
+    // P2: lease wait, drain result, cancellation reason and host load existed
+    // only as log lines, so diagnosing a stalled run meant grepping a
+    // multi-megabyte transcript and reconstructing the order by eye.
+    const root = mkdtempSync(join(tmpdir(), "quanta-verification-record-"))
+    roots.push(root)
+    const runner = copyCampaignOwner(root)
+    const receiptPath = join(root, ".git", "quanta-verification-cache", "last-campaign.json")
+
+    const green = Bun.spawn({
+      cmd: [process.execPath, runner, "--", process.execPath, "-e", "process.exit(0)"],
+      cwd: root,
+      env: cleanLeaseEnv(),
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    expect(await green.exited).toBe(0)
+    const passed = JSON.parse(readFileSync(receiptPath, "utf8")) as Record<string, unknown>
+    expect(passed.schema).toBe("quanta.verification-campaign-receipt.v1")
+    expect(passed.outcome).toBe("passed")
+    expect(passed.exitCode).toBe(0)
+    expect(passed.drained).toBe(true)
+    expect(passed.survivingGroups).toEqual([])
+    expect(passed.head).toMatch(/^[a-f0-9]{40}$/)
+    expect(typeof passed.leaseWaitMs).toBe("number")
+    expect(passed.leasePort).toBeGreaterThan(0)
+    expect((passed.hostAtStart as { cpus: number }).cpus).toBeGreaterThan(0)
+
+    // A red campaign is recorded as red, with the child's exit code.
+    const red = Bun.spawn({
+      cmd: [process.execPath, runner, "--", process.execPath, "-e", "process.exit(3)"],
+      cwd: root,
+      env: cleanLeaseEnv(),
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    expect(await red.exited).toBe(3)
+    const failed = JSON.parse(readFileSync(receiptPath, "utf8")) as Record<string, unknown>
+    expect(failed.outcome).toBe("failed")
+    expect(failed.exitCode).toBe(3)
+    expect(failed.cancellationReason).toBeUndefined()
+  }, 30_000)
 
   test("two concurrent same-HEAD campaigns execute the gates exactly once", async () => {
     // The measured P0: a contender that waited behind a green same-HEAD

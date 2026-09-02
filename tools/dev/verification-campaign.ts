@@ -12,6 +12,12 @@ import {
   VERIFICATION_LEASE_TOKEN_ENV,
 } from "./test-shard-lease"
 import { ShardProcessRegistry, terminationExitCode } from "./test-shard-lifecycle"
+import {
+  buildCampaignReceipt,
+  type CampaignOutcome,
+  sampleCampaignHost,
+  writeCampaignReceipt,
+} from "./verification-campaign-receipt"
 import { sharedVerificationCacheRoot } from "./verification-receipt"
 import { probeExactVerificationReceipt } from "./verification-receipt-probe"
 
@@ -35,6 +41,9 @@ const REPO_ROOT = join(dirname(dirname(dirname(fileURLToPath(import.meta.url))))
 // Shared across worktrees, so "who is holding the verification lane" is
 // answerable from ANY checkout waiting on it.
 const LEASE_OWNER_SIDECAR = join(sharedVerificationCacheRoot(REPO_ROOT), "lease-owner.json")
+// Diagnostic history, one file per campaign outcome. Never read to decide
+// whether to re-run — that is the exact receipt's job.
+const CAMPAIGN_RECEIPT = join(sharedVerificationCacheRoot(REPO_ROOT), "last-campaign.json")
 
 const capture = (args: readonly string[]): { readonly code: number; readonly text: string } => {
   const result = Bun.spawnSync([...args], { cwd: REPO_ROOT, stdout: "pipe", stderr: "pipe" })
@@ -112,6 +121,41 @@ const registry = new ShardProcessRegistry({ termGraceMs: 60_000, killGraceMs: 10
 let lease: TestShardLease | undefined
 let sidecarWritten = false
 let terminating = false
+const campaignStartedAtMs = Date.now()
+const hostAtStart = sampleCampaignHost()
+let leaseWaitMs = 0
+let campaignHead = ""
+
+/** One place that turns "what just happened" into the campaign receipt. */
+const recordCampaign = (input: {
+  readonly outcome: CampaignOutcome
+  readonly exitCode: number | null
+  readonly cancellationReason?: string
+  readonly drained: boolean
+  readonly survivingGroups: readonly number[]
+}): void => {
+  writeCampaignReceipt(
+    CAMPAIGN_RECEIPT,
+    buildCampaignReceipt({
+      pid: process.pid,
+      head: campaignHead,
+      command: command.join(" "),
+      leasePort: lease?.port ?? null,
+      leaseWaitMs,
+      startedAtMs: campaignStartedAtMs,
+      finishedAtMs: Date.now(),
+      outcome: input.outcome,
+      exitCode: input.exitCode,
+      ...(input.cancellationReason === undefined
+        ? {}
+        : { cancellationReason: input.cancellationReason }),
+      drained: input.drained,
+      survivingGroups: input.survivingGroups,
+      hostAtStart,
+      hostAtEnd: sampleCampaignHost(),
+    }),
+  )
+}
 
 const removeOwnerSidecar = (): void => {
   if (!sidecarWritten) return
@@ -130,6 +174,13 @@ const terminate = (signal: NodeJS.Signals): void => {
         `[verification] WARN campaign group(s) survived SIGKILL: ${outcome.survivors.join(", ")}\n`,
       )
     }
+    recordCampaign({
+      outcome: "terminated",
+      exitCode: terminationExitCode(signal),
+      cancellationReason: `signal:${signal}`,
+      drained: outcome.drained,
+      survivingGroups: outcome.survivors,
+    })
     removeOwnerSidecar()
     lease?.release()
     process.exit(terminationExitCode(signal))
@@ -138,6 +189,7 @@ const terminate = (signal: NodeJS.Signals): void => {
 process.on("SIGINT", () => terminate("SIGINT"))
 process.on("SIGTERM", () => terminate("SIGTERM"))
 
+const leaseWaitStartedAtMs = Date.now()
 lease = await acquireTestShardLease({
   identity,
   signal: waitAborter.signal,
@@ -148,7 +200,13 @@ lease = await acquireTestShardLease({
     ),
 })
 
-process.stdout.write(`[verification] LEASE acquired port=${lease.port} scope=whole-campaign\n`)
+leaseWaitMs = Date.now() - leaseWaitStartedAtMs
+campaignHead = capture(["git", "rev-parse", "HEAD"]).text.trim()
+
+process.stdout.write(
+  `[verification] LEASE acquired port=${lease.port} scope=whole-campaign ` +
+    `lease_wait_ms=${leaseWaitMs}\n`,
+)
 
 // Diagnostic sidecar only — never an authority. The kernel-owned port is the
 // lease; this file answers "who is holding the lane and since when" while the
@@ -162,7 +220,7 @@ const writeOwnerSidecar = (): void => {
         schema: "quanta.verification-lease-owner.v1",
         pid: process.pid,
         port: lease.port,
-        head: capture(["git", "rev-parse", "HEAD"]).text.trim(),
+        head: campaignHead,
         command: command.join(" "),
         startedAt: new Date().toISOString(),
       })}\n`,
@@ -175,6 +233,7 @@ const writeOwnerSidecar = (): void => {
 }
 writeOwnerSidecar()
 
+let campaignExitCode: number | null = null
 try {
   const handle = registry.spawnWorker({
     cmd: command,
@@ -193,12 +252,22 @@ try {
   })
   const exit = await handle.exited
   process.exitCode = exit.code ?? 1
+  campaignExitCode = exit.code
 } finally {
   const outcome = await registry.cancelAll()
   if (!outcome.drained) {
     process.stderr.write(
       `[verification] WARN campaign group(s) survived SIGKILL: ${outcome.survivors.join(", ")}\n`,
     )
+  }
+  // A signal path already wrote its own receipt and exits; do not overwrite it.
+  if (!terminating) {
+    recordCampaign({
+      outcome: campaignExitCode === 0 ? "passed" : "failed",
+      exitCode: campaignExitCode,
+      drained: outcome.drained,
+      survivingGroups: outcome.survivors,
+    })
   }
   removeOwnerSidecar()
   lease?.release()

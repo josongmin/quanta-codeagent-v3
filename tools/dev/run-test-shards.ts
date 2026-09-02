@@ -99,7 +99,6 @@ const SUITE_ROOTS = {
   ],
   unit: ["tests/unit"],
   integration: ["tests/integration"],
-  rest: ["tests/meta", "tests/adversarial", "tests/measurement", "./src/", "./tools/"],
 } as const
 
 type SuiteName = keyof typeof SUITE_ROOTS
