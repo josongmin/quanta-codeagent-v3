@@ -35,7 +35,10 @@ const CAMPAIGN_MODULES = [
   "external-toolchain.ts",
 ] as const
 
-const waitFor = async (predicate: () => boolean, timeoutMs = 5_000): Promise<void> => {
+// Campaign startup spawns bun twice and hashes the tree; on a box already
+// running a suite that is comfortably past 5s. These waits gate on an EVENT
+// having happened, never on it happening fast.
+const waitFor = async (predicate: () => boolean, timeoutMs = 20_000): Promise<void> => {
   const deadline = Date.now() + timeoutMs
   while (!predicate()) {
     if (Date.now() >= deadline) throw new Error("condition timed out")
@@ -209,9 +212,15 @@ describe("whole verification campaign lease", () => {
       ],
       { cwd: root, env, stdout: "pipe", stderr: "pipe" },
     )
-    expect(reuse.exitCode, `${reuse.stdout.toString()}\n${reuse.stderr.toString()}`).toBe(0)
-    expect(reuse.stdout.toString()).toContain("before repository lease")
-    expect(existsSync(holderFinished)).toBe(false)
+    const reuseOut = reuse.stdout.toString()
+    expect(reuse.exitCode, `${reuseOut}\n${reuse.stderr.toString()}`).toBe(0)
+    // The invariant is that the reuse path returned WITHOUT taking the lane —
+    // which the markers state directly. The first version asserted that the
+    // 800ms holder had not finished yet, i.e. it raced the host: on a loaded
+    // box the probe's own process startup outlives the holder and the test
+    // fails while the product is correct.
+    expect(reuseOut).toContain("REUSED exact receipt before repository lease")
+    expect(reuseOut).not.toContain("LEASE acquired")
     expect(await holder.exited).toBe(0)
   }, 15_000)
 
