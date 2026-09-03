@@ -15,6 +15,7 @@ import {
   parseExecutedFileCount,
   planTestChunks,
   resourceClassesOverlap,
+  spoolTail,
   TEST_RESOURCE_CLASSES,
 } from "../../tools/dev/test-shard-plan"
 import {
@@ -663,5 +664,33 @@ describe("same-INPUTS successful shard cache", () => {
       kind: "miss",
       reason: "integrity",
     })
+  })
+})
+
+describe("what a watchdog kill reports", () => {
+  test("the tail is the last non-empty output, stripped of colour", () => {
+    // The kill notice used to carry only `idle=600000ms` over a chunk of ~100
+    // files, which names no suspect. This is the evidence that is always
+    // present — unlike a `path.test.ts:` header, which Bun 1.3.14 prints ONLY
+    // for files that fail, i.e. never in the case a hang produces.
+    const output = [
+      "bun test v1.3.14",
+      "",
+      "\u001b[32m✓\u001b[0m connected to the language server",
+      "   ",
+      "[info] lsp: waiting for initialize response",
+    ].join("\n")
+    expect(spoolTail(output, 2)).toBe(
+      "✓ connected to the language server\n[info] lsp: waiting for initialize response",
+    )
+  })
+
+  test("a worker that produced nothing says so, rather than an empty line", () => {
+    expect(spoolTail("", 20)).toBe("<no output>")
+    expect(spoolTail("\n  \n\n", 20)).toBe("<no output>")
+  })
+
+  test("short output is returned whole, not padded or truncated", () => {
+    expect(spoolTail("only line", 20)).toBe("only line")
   })
 })

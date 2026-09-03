@@ -1,4 +1,4 @@
-import { realpathSync, statSync } from "node:fs"
+import { statSync } from "node:fs"
 
 /**
  * Host capability fingerprint for verification receipts.
@@ -69,11 +69,22 @@ export const probeToolVersion = (tool: string): string => {
   const path = Bun.which(tool, { PATH: process.env.PATH ?? "" })
   if (path === null) return "<missing>"
   try {
-    // Follow the symlink: `~/.bun/bin/<tool>` and `/usr/local/bin/<tool>` are
-    // usually links, and an upgrade repoints them or replaces the target.
-    const target = realpathSync(path)
-    const stat = statSync(target)
-    return `${path} -> ${target} ${stat.size} ${Math.round(stat.mtimeMs)}`
+    // `statSync` FOLLOWS the link, which is the point: `~/.bun/bin/<tool>` and
+    // `/usr/local/bin/<tool>` are usually links, and an upgrade repoints them
+    // or replaces the target — either way dev:ino, size or mtime moves.
+    //
+    // NOT `realpathSync`. MEASURED on this box: sampling the 18 tools twice a
+    // second while a 4-wide test run went on, `/usr/bin/python3` resolved to
+    // `/usr/bin/git` and back. They are HARDLINKS to one inode — the Command
+    // Line Tools shim, 78 names on a single file — and Bun's realpath answers
+    // per inode, so under concurrency it returns whichever name it resolved
+    // first. That made the fingerprint a non-function of the host state: it
+    // flipped between two campaigns 475ms apart and turned a reusable exact
+    // receipt into `toolchainSha256 mismatch`, i.e. 21 gates re-run for
+    // nothing. dev:ino carries the identity realpath was reached for, and it
+    // is a value the kernel reports rather than a path a cache guesses.
+    const stat = statSync(path)
+    return `${path} ${stat.dev}:${stat.ino} ${stat.size} ${Math.round(stat.mtimeMs)}`
   } catch {
     // Present on PATH but unreadable is its own state — never silently equal
     // to a healthy tool.
@@ -92,3 +103,21 @@ export const externalToolchainFingerprint = (
   if (probe === probeToolVersion) cachedFingerprint = fingerprint
   return fingerprint
 }
+
+/**
+ * Which of those tools this box does NOT have.
+ *
+ * The fingerprint already makes absence part of the cache identity, so a green
+ * earned without docker cannot be replayed on a box that has it. What it does
+ * not do is TELL anyone. A run where `real-toolchain-e2e` silently skipped 43
+ * cases prints the same `PASS` as one where they all ran, and the number of
+ * gates passed is identical — so the strength of a green was unreadable from
+ * its own report.
+ */
+export const missingExternalTools = (
+  probe: (tool: string) => string = probeToolVersion,
+): readonly string[] =>
+  Object.entries(externalToolchainFingerprint(probe))
+    .filter(([, value]) => value === "<missing>" || value.endsWith("<unreadable>"))
+    .map(([tool]) => tool)
+    .sort()

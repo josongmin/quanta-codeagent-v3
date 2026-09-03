@@ -39,6 +39,7 @@ interface GateReceipt {
   readonly gates: readonly ReceiptGate[]
   readonly elapsedMs: number
   readonly status: "passed" | "failed" | "invalid"
+  readonly missingCapabilities: readonly string[]
   readonly error?: string
 }
 
@@ -161,6 +162,31 @@ const receiptFrom = (stdout: string): GateReceipt => {
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
+})
+
+describe("a green states what it could not check", () => {
+  behaviorTest("absent host tools reach both the summary and the receipt", () => {
+    // MEASURED on this box: dlv, gopls and lldb-dap are absent, so the DAP and
+    // gopls lanes sit out — and before this, the run printed the same `ok — 21
+    // of 21 gate(s) passed` it would print with every tool installed. Absence
+    // was already part of the receipt's IDENTITY (a box that gains one cannot
+    // replay this green); what was missing was saying so.
+    const root = makeRepo(Array.from({ length: 21 }, () => "true"))
+    const result = runGate(root, "prepush")
+    expect(result.code, result.stderr).toBe(0)
+    const receipt = receiptFrom(result.stdout)
+    expect(Array.isArray(receipt.missingCapabilities)).toBe(true)
+
+    // The two must agree: a reader of the log and a reader of the receipt are
+    // told the same thing, or one of them is being misled.
+    if (receipt.missingCapabilities.length === 0) {
+      expect(result.stdout).not.toContain("[capabilities]")
+      return
+    }
+    const line = result.stdout.split("\n").find((text) => text.includes("[capabilities]"))
+    expect(line, `no capability line in:\n${result.stdout}`).toBeDefined()
+    for (const tool of receipt.missingCapabilities) expect(line).toContain(tool)
+  })
 })
 
 describe("a gate that declares it needs a quiet box", () => {

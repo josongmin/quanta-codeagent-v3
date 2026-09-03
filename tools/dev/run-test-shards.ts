@@ -36,6 +36,7 @@ import {
   parseExecutedFileCount,
   planTestChunks,
   resourceClassesOverlap,
+  spoolTail,
   type TestChunk,
   type TestResourceClass,
 } from "./test-shard-plan"
@@ -84,6 +85,10 @@ const START_DELAY_MAX_MS = 10 * 60_000
 // ignores Bun's per-test timeout eventually goes silent and is still killed,
 // while an active shard retains its complete corpus verdict.
 const SHARD_INACTIVITY_TIMEOUT_MS = 12 * 60_000
+/** Enough to carry a stack or a stuck server's last exchange, short enough
+ *  that the kill notice stays readable in a 30-chunk log. */
+const WATCHDOG_TAIL_LINES = 20
+
 const SHARD_WATCHDOG_POLL_MS = 1_000
 const SUITE_ROOTS = {
   full: [
@@ -470,8 +475,12 @@ const runShard = async (
       const idleMs = Date.now() - lastProgressAt
       if (idleMs < SHARD_INACTIVITY_TIMEOUT_MS) return
       timedOut = true
+      // Say what it was doing. A chunk holds ~100 files, and "idle=600000ms"
+      // over all of them is not a lead; the last thing the worker wrote is.
       process.stderr.write(
-        `[test:shards] TIMEOUT chunk=${shard} idle=${idleMs}ms; killing worker process tree\n`,
+        `[test:shards] TIMEOUT chunk=${shard} idle=${idleMs}ms; ` +
+          `killing worker process tree. Last output:\n` +
+          `${spoolTail(readFileSync(spoolPath, "utf8"), WATCHDOG_TAIL_LINES)}\n`,
       )
       void handle.cancel()
     }, SHARD_WATCHDOG_POLL_MS)

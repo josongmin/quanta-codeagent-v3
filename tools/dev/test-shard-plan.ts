@@ -408,3 +408,20 @@ export const parseExecutedFileCount = (output: string): number | undefined => {
   }
   return count
 }
+
+/**
+ * What the worker was last saying, for a watchdog kill.
+ *
+ * NOT the test file: measured on Bun 1.3.14, the console reporter prints a
+ * `path.test.ts:` header only for files that FAIL, so a regex for it finds
+ * nothing in exactly the case a hang produces — an inert feature that reads
+ * like a working one. The spool tail is always there.
+ */
+export const spoolTail = (output: string, lines: number): string => {
+  const kept = output
+    .split("\n")
+    .map((line) => line.replace(/\u001b\[[0-9;]*m/g, "").trimEnd())
+    .filter((line) => line.trim() !== "")
+    .slice(-lines)
+  return kept.length === 0 ? "<no output>" : kept.join("\n")
+}

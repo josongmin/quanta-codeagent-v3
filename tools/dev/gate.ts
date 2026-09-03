@@ -34,6 +34,7 @@ import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
 import { describeQuietBoxWait, loadPerCore, waitForQuietBox } from "./box-load"
+import { missingExternalTools } from "./external-toolchain"
 import { GATES, type Gate, type GateStage, gatesForStage } from "./gate-manifest"
 import {
   cleanStatusSha256,
@@ -133,6 +134,10 @@ interface GateReceipt {
   }[]
   readonly elapsedMs: number
   readonly status: ReceiptStatus
+  /** External tools this box does not have. A gate that skipped a whole lane
+   *  for want of one prints the same PASS as a gate that ran it, so the
+   *  strength of this green is not readable without them. */
+  readonly missingCapabilities: readonly string[]
   readonly error?: string
 }
 
@@ -219,6 +224,7 @@ const makeReceipt = (args: ReceiptArgs): GateReceipt => ({
   gates: receiptGates(args.planned, args.results ?? [], args.skipped ?? []),
   elapsedMs: Math.round((Bun.nanoseconds() - args.overallStarted) / 1e6),
   status: args.status,
+  missingCapabilities: missingExternalTools(),
   ...(args.error === undefined ? {} : { error: args.error }),
 })
 
@@ -501,6 +507,15 @@ if (
       ? ""
       : ` (${marked.length} host-dependent: ${marked.map((r) => r.gate.id).join(", ")} ` +
         "— may have passed by finding nothing to check here)"
+  const absent = missingExternalTools()
+  if (absent.length > 0) {
+    // Say what this green could NOT check. Absence is already part of the
+    // receipt's identity, so a box that later gains one of these cannot replay
+    // this result — but nothing told the reader that a whole lane sat out.
+    printOut(
+      `  [capabilities] absent on this host, so anything gated on them was skipped: ${absent.join(", ")}`,
+    )
+  }
   printOut(`${stage}: ok — ${results.length} of ${planned.length} gate(s) passed${note}`)
   if (stage === "prepush") {
     if (endingSnapshot !== undefined) {
