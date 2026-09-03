@@ -57,7 +57,9 @@ export const validateExactVerificationReceipt = (
   current: VerificationContext,
   nowMs = Date.now(),
 ): ReceiptValidation => {
-  if (typeof candidate !== "object" || candidate === null) {
+  if (candidate === undefined) return { ok: false, reason: "no receipt stored" }
+  if (candidate === null) return { ok: false, reason: "receipt file is unreadable" }
+  if (typeof candidate !== "object") {
     return { ok: false, reason: "receipt is not an object" }
   }
   const receipt = candidate as Partial<ExactVerificationReceipt>
@@ -190,11 +192,21 @@ export const sharedVerificationCacheRoot = (repoRoot: string): string => {
 export const verificationReceiptPath = (repoRoot: string): string =>
   join(sharedVerificationCacheRoot(repoRoot), "prepush-exact-v1.json")
 
+/**
+ * `undefined` = no receipt stored. `null` = a file is there and could not be
+ * read as JSON.
+ *
+ * The two used to collapse, and the message they collapsed into was
+ * "receipt is not an object" — so the ordinary first-run state, and the state
+ * after a receipt is deliberately destroyed, both read as corruption. That is
+ * the wrong thing to hand someone at the top of a 45-minute run.
+ */
 export const readExactVerificationReceipt = (path: string): unknown => {
+  if (!existsSync(path)) return undefined
   try {
     return JSON.parse(readFileSync(path, "utf8")) as unknown
   } catch {
-    return undefined
+    return null
   }
 }
 

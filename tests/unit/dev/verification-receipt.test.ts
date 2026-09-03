@@ -6,6 +6,7 @@ import { testEnvironmentSha256 } from "../../../tools/dev/test-shard-receipt"
 import {
   cleanStatusSha256,
   mintExactVerificationReceipt,
+  readExactVerificationReceipt,
   sharedVerificationCacheRoot,
   type VerificationContext,
   validateExactVerificationReceipt,
@@ -149,5 +150,48 @@ describe("shared verification cache root", () => {
     const bare = mkdtempSync(join(tmpdir(), "quanta-no-git-"))
     roots.push(bare)
     expect(sharedVerificationCacheRoot(bare)).toBe(join(bare, ".cache", "verification"))
+  })
+
+  test("a miss says which of absent, unreadable and wrong-shape it is", () => {
+    // All three collapsed into "receipt is not an object", so the ordinary
+    // first-run state — and the state right after a receipt is deliberately
+    // destroyed for a mismatch — read as corruption. Measured live: a warm run
+    // after the receipt was destroyed reported "receipt is not an object",
+    // which is a message that sends someone hunting for a broken file that was
+    // simply not there.
+    const dir = mkdtempSync(join(tmpdir(), "quanta-receipt-miss-"))
+    const path = join(dir, "prepush-exact-v1.json")
+    const context = {
+      head: "a".repeat(40),
+      statusSha256: "b".repeat(64),
+      manifestSha256: "c".repeat(64),
+      dependencySha256: "d".repeat(64),
+      toolchainSha256: "e".repeat(64),
+      environmentSha256: "f".repeat(64),
+    }
+    try {
+      expect(readExactVerificationReceipt(path)).toBeUndefined()
+      const absent = validateExactVerificationReceipt(readExactVerificationReceipt(path), context)
+      expect(absent).toEqual({ ok: false, reason: "no receipt stored" })
+
+      writeFileSync(path, "{ truncated")
+      expect(readExactVerificationReceipt(path)).toBeNull()
+      expect(validateExactVerificationReceipt(readExactVerificationReceipt(path), context)).toEqual(
+        {
+          ok: false,
+          reason: "receipt file is unreadable",
+        },
+      )
+
+      writeFileSync(path, '"a bare string"')
+      expect(validateExactVerificationReceipt(readExactVerificationReceipt(path), context)).toEqual(
+        {
+          ok: false,
+          reason: "receipt is not an object",
+        },
+      )
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
