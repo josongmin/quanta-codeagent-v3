@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -45,11 +45,13 @@ const mergedJunit = (bodies: readonly string[]): string => {
   return path
 }
 
-/** 1,200 fast unit cases: comfortably over the script's anti-vacuity floor. */
-const fastUnitSuites = (): string[] =>
+/** 1,200 fast cases: comfortably over the script's anti-vacuity floor. The
+ *  prefix is a parameter because one case scopes to a gitignored directory,
+ *  and the floor applies AFTER the scope filter. */
+const fastUnitSuites = (prefix = "tests/unit/"): string[] =>
   Array.from({ length: 12 }, (_, index) =>
     suite(
-      `tests/unit/fixture-${index}.test.ts`,
+      `${prefix}fixture-${index}.test.ts`,
       Array.from({ length: 100 }, (_, caseIndex) => ({
         name: `case ${caseIndex}`,
         seconds: 0.001,
@@ -110,20 +112,30 @@ describe("unit speed budget over the full-suite receipt", () => {
     const dir = mkdtempSync(join(tmpdir(), "quanta-speed-red-"))
     roots.push(dir)
     // A real file that EXISTS (so the confirm path is taken) and always fails.
-    const failing = join("tests", "unit", "dev", "__speed-probe-that-fails.test.ts")
+    // It lives under .cache/ — gitignored — because the authoritative runner
+    // demands a CLEAN checkout and re-snapshots `git status` after every
+    // chunk: writing a probe into the test tree raced that invariant and could
+    // invalidate a whole campaign from another chunk.
+    const failing = join(".cache", "__speed-probe-that-fails.test.ts")
+    mkdirSync(join(REPO_ROOT, ".cache"), { recursive: true })
     writeFileSync(
       join(REPO_ROOT, failing),
       'import { test } from "bun:test"\ntest("boom", () => { throw new Error("boom") })\n',
     )
     try {
       const xml = mergedJunit([
-        ...fastUnitSuites(),
+        ...fastUnitSuites(".cache/"),
         suite(failing, [{ name: "slow and red", seconds: 60 }]),
       ])
-      const result = run(xml, ["--scope=tests/unit/"])
+      const result = run(xml, ["--scope=.cache/"])
+      // Assert the INVARIANT, not which fail-closed branch fired. Both "the
+      // re-run exited non-zero" and "the re-run wrote no junit" are correct
+      // refusals; binding the assertion to one message made it depend on how
+      // early the child died, which differs between a bare shell and the
+      // runner's worker env.
       expect(result.code).toBe(1)
       expect(result.err).toContain("REGRESSION")
-      expect(result.err).toContain("re-run FAILED")
+      expect(result.err).toContain("screen number stands")
     } finally {
       rmSync(join(REPO_ROOT, failing), { force: true })
     }
