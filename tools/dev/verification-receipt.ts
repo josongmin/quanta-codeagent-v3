@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { arch, hostname, platform, release } from "node:os"
 import { delimiter, dirname, join } from "node:path"
 import { externalToolchainFingerprint } from "./external-toolchain"
-import { isVerdictRelevantEnvKey } from "./verdict-env"
+import { isVerdictRelevantEnvKey, verdictDotenvSha256 } from "./verdict-env"
 
 export const EXACT_RECEIPT_SCHEMA = "quanta.exact-verification-receipt.v1" as const
 export const DEFAULT_RECEIPT_TTL_MS = 6 * 60 * 60_000
@@ -121,7 +121,15 @@ const relevantEnvironment = (env: NodeJS.ProcessEnv): readonly [string, string][
     .sort(([left], [right]) => left.localeCompare(right)) as [string, string][]
 
 export const verificationDependencySha256 = (repoRoot: string): string =>
-  hashFiles(repoRoot, ["package.json", "bun.lock", "bun.lockb", "bunfig.toml"])
+  sha256(
+    JSON.stringify([
+      hashFiles(repoRoot, ["package.json", "bun.lock", "bun.lockb", "bunfig.toml"]),
+      // Untracked dotenv files become environment INSIDE the test process, so
+      // no amount of hashing THIS process's env can see them. See
+      // `verdict-env.ts` for the 13 cases they were hiding.
+      verdictDotenvSha256(repoRoot),
+    ]),
+  )
 
 /**
  * An exact receipt skips EVERY gate, `contract` and `real-toolchain-e2e`

@@ -870,7 +870,7 @@ const main = async (): Promise<void> => {
     )
 
     const toolchainSha256 = testToolchainSha256()
-    const envSha256 = testEnvironmentSha256(process.env, testTimeoutMs)
+    const envSha256 = testEnvironmentSha256(process.env, testTimeoutMs, REPO_ROOT)
     // One decision per chunk, made here so the receipt's identity describes the
     // schedule the run will actually use. `workers` is the concurrency the host
     // measured at campaign start; the per-start measurement can still drop the

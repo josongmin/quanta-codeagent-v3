@@ -34,6 +34,10 @@ import {
   TEST_TIMING_MAX_AGE_MS,
 } from "../../tools/dev/test-shard-timings"
 
+/** A root with no dotenv files, so the dotenv half of the fingerprint is a
+ *  constant and these comparisons stay about the ENV half. */
+const NO_DOTENV = join(import.meta.dir, "__fixture-root-without-dotenv__")
+
 const temporaryDirectories: string[] = []
 
 afterEach(() => {
@@ -459,14 +463,16 @@ describe("same-INPUTS successful shard cache", () => {
     const left = testEnvironmentSha256(
       { HOME: "/tmp/one", TMPDIR: "/tmp/a", QUANTA_MODE: "strict" },
       120_000,
+      NO_DOTENV,
     )
     const right = testEnvironmentSha256(
       { HOME: "/tmp/two", TMPDIR: "/tmp/b", QUANTA_MODE: "strict" },
       120_000,
+      NO_DOTENV,
     )
     expect(left).toBe(right)
-    expect(testEnvironmentSha256({ QUANTA_MODE: "relaxed" }, 120_000)).not.toBe(left)
-    expect(testEnvironmentSha256({ QUANTA_MODE: "strict" }, 240_000)).not.toBe(left)
+    expect(testEnvironmentSha256({ QUANTA_MODE: "relaxed" }, 120_000, NO_DOTENV)).not.toBe(left)
+    expect(testEnvironmentSha256({ QUANTA_MODE: "strict" }, 240_000, NO_DOTENV)).not.toBe(left)
 
     // An unrelated terminal variable must NOT be a cache miss: hashing all
     // inherited env made every new ITERM_SESSION_ID/SSH socket a full re-run.
@@ -474,26 +480,30 @@ describe("same-INPUTS successful shard cache", () => {
       testEnvironmentSha256(
         { QUANTA_MODE: "strict", ITERM_SESSION_ID: "w0t1p0", SSH_AUTH_SOCK: "/tmp/agent.9" },
         120_000,
+        NO_DOTENV,
       ),
     ).toBe(left)
     // Verdict-relevant switches still key.
-    expect(testEnvironmentSha256({ QUANTA_MODE: "strict", CI: "1" }, 120_000)).not.toBe(left)
+    expect(testEnvironmentSha256({ QUANTA_MODE: "strict", CI: "1" }, 120_000, NO_DOTENV)).not.toBe(
+      left,
+    )
     expect(
-      testEnvironmentSha256({ QUANTA_MODE: "strict", REQUIRE_CONTRACT: "1" }, 120_000),
+      testEnvironmentSha256({ QUANTA_MODE: "strict", REQUIRE_CONTRACT: "1" }, 120_000, NO_DOTENV),
     ).not.toBe(left)
     // The campaign lease token never keys: it differs on every campaign.
     expect(
       testEnvironmentSha256(
         { QUANTA_MODE: "strict", QUANTA_VERIFICATION_LEASE_TOKEN: "a".repeat(64) },
         120_000,
+        NO_DOTENV,
       ),
     ).toBe(left)
     // Nested `bun run` PATH duplication is fingerprint-equivalent; order and
     // real entry changes still invalidate.
-    const base = testEnvironmentSha256({ PATH: "/a:/b" }, 120_000)
-    expect(testEnvironmentSha256({ PATH: "/a:/b:/a:/b" }, 120_000)).toBe(base)
-    expect(testEnvironmentSha256({ PATH: "/b:/a" }, 120_000)).not.toBe(base)
-    expect(testEnvironmentSha256({ PATH: "/a:/b:/c" }, 120_000)).not.toBe(base)
+    const base = testEnvironmentSha256({ PATH: "/a:/b" }, 120_000, NO_DOTENV)
+    expect(testEnvironmentSha256({ PATH: "/a:/b:/a:/b" }, 120_000, NO_DOTENV)).toBe(base)
+    expect(testEnvironmentSha256({ PATH: "/b:/a" }, 120_000, NO_DOTENV)).not.toBe(base)
+    expect(testEnvironmentSha256({ PATH: "/a:/b:/c" }, 120_000, NO_DOTENV)).not.toBe(base)
   })
 
   test("external tool capability changes invalidate the toolchain fingerprint", () => {
@@ -533,6 +543,7 @@ describe("same-INPUTS successful shard cache", () => {
       testEnvSha256: testEnvironmentSha256(
         { QUANTA_TEST_KNOB: "super-secret-cache-input" },
         120_000,
+        NO_DOTENV,
       ),
       junit: false,
       filesRunConcurrently: false,

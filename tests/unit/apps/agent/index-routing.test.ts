@@ -13,6 +13,7 @@
 import { describe, expect, test } from "bun:test"
 import { type ModeDispatcher, runMain, toAssembleRequest } from "@/../src/apps/agent/index"
 import type { RunMode } from "@/agent"
+import { pinHermeticBootCredential } from "../../../_support/boot-credential"
 
 type Capture = {
   stdout: string
@@ -60,6 +61,11 @@ const makeHarness = (
     },
   }
 }
+
+// This suite builds a REAL boot port, so it must satisfy provider selection.
+// It brings its own credential rather than borrowing the operator's — see the
+// helper for the 13 cases this was silently hiding on a clean checkout.
+pinHermeticBootCredential()
 
 describe("runMain — routing", () => {
   test("--mode interactive routes to interactive dispatcher and forwards exitCode", async () => {

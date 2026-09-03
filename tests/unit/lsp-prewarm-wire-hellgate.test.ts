@@ -13,6 +13,7 @@
  */
 import { afterEach, describe, expect, it } from "bun:test"
 import { buildBaseFromArgs } from "@/../src/apps/agent/index"
+import { pinHermeticBootCredential } from "../_support/boot-credential"
 
 const KEYS = ["QUANTA_LSP_PREWARM", "QUANTA_LSP_TOOLS", "QUANTA_BENCH_LSP"] as const
 const PRIOR: Record<string, string | undefined> = {}
@@ -31,6 +32,11 @@ const clear = (): void => {
 
 const base = (): { lspPrewarm?: { enabled: boolean } } =>
   buildBaseFromArgs({ mode: "interactive", dials: {} }) as { lspPrewarm?: { enabled: boolean } }
+
+// This suite builds a REAL boot port, so it must satisfy provider selection.
+// It brings its own credential rather than borrowing the operator's — see the
+// helper for the 13 cases this was silently hiding on a clean checkout.
+pinHermeticBootCredential()
 
 describe("RFC jun-17 wire — QUANTA_LSP_PREWARM default-on, nav-gated, =0 off-switch", () => {
   it("LP-01: nav off + prewarm unset ⇒ absent (nav gate)", () => {

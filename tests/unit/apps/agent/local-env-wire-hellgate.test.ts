@@ -24,8 +24,14 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { buildBaseFromArgs, resolveLocalEnvSelection } from "@/../src/apps/agent/index"
+import { pinHermeticBootCredential } from "../../../_support/boot-credential"
 
 const SEL = { vars: { FOO: "bar" }, pathPrepend: ["/opt/x/bin"] }
+
+// This suite builds a REAL boot port, so it must satisfy provider selection.
+// It brings its own credential rather than borrowing the operator's — see the
+// helper for the 13 cases this was silently hiding on a clean checkout.
+pinHermeticBootCredential()
 
 describe("ADR-0455 wire — local-env loader at the agent composition root", () => {
   it("HELL-LEW-01: no partial.localEnv ⇒ base.localEnv absent (default-OFF)", () => {

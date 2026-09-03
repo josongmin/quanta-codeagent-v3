@@ -14,6 +14,10 @@ import {
   verificationToolchainSha256,
 } from "../../../tools/dev/verification-receipt"
 
+/** A root with no dotenv files, so the dotenv half of the fingerprint is a
+ *  constant and these comparisons stay about the ENV half. */
+const NO_DOTENV = join(import.meta.dir, "__fixture-root-without-dotenv__")
+
 const context = (overrides: Partial<VerificationContext> = {}): VerificationContext => ({
   head: "a".repeat(40),
   statusSha256: cleanStatusSha256,
@@ -89,15 +93,17 @@ describe("content-bound exact verification receipt", () => {
     const enUs = verificationEnvironmentSha256({ PATH: "/a", LANG: "en_US.UTF-8" })
     expect(verificationEnvironmentSha256({ PATH: "/a", LANG: "ko_KR.UTF-8" })).not.toBe(enUs)
     // …and the shard receipt agrees, key for key.
-    const shardUtc = testEnvironmentSha256({ PATH: "/a", TZ: "UTC" }, 120_000)
-    expect(testEnvironmentSha256({ PATH: "/a", TZ: "Asia/Seoul" }, 120_000)).not.toBe(shardUtc)
+    const shardUtc = testEnvironmentSha256({ PATH: "/a", TZ: "UTC" }, 120_000, NO_DOTENV)
+    expect(testEnvironmentSha256({ PATH: "/a", TZ: "Asia/Seoul" }, 120_000, NO_DOTENV)).not.toBe(
+      shardUtc,
+    )
     // An unrelated terminal variable still keys nothing, in either.
     expect(verificationEnvironmentSha256({ PATH: "/a", TZ: "UTC", ITERM_SESSION_ID: "w0" })).toBe(
       utc,
     )
-    expect(testEnvironmentSha256({ PATH: "/a", TZ: "UTC", ITERM_SESSION_ID: "w0" }, 120_000)).toBe(
-      shardUtc,
-    )
+    expect(
+      testEnvironmentSha256({ PATH: "/a", TZ: "UTC", ITERM_SESSION_ID: "w0" }, 120_000, NO_DOTENV),
+    ).toBe(shardUtc)
   })
 
   test("PATH order and real entries still invalidate the environment fingerprint", () => {

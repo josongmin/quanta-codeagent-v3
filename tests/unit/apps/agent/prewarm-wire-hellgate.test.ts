@@ -16,6 +16,7 @@
  */
 import { afterEach, describe, expect, it } from "bun:test"
 import { buildBaseFromArgs } from "@/../src/apps/agent/index"
+import { pinHermeticBootCredential } from "../../../_support/boot-credential"
 
 const PRIOR = process.env.QUANTA_PREWARM
 
@@ -23,6 +24,11 @@ afterEach(() => {
   if (PRIOR === undefined) delete process.env.QUANTA_PREWARM
   else process.env.QUANTA_PREWARM = PRIOR
 })
+
+// This suite builds a REAL boot port, so it must satisfy provider selection.
+// It brings its own credential rather than borrowing the operator's — see the
+// helper for the 13 cases this was silently hiding on a clean checkout.
+pinHermeticBootCredential()
 
 describe("ADR-0452 wire — QUANTA_PREWARM at the agent composition root", () => {
   it("HELL-PW-01: knob unset ⇒ base.prewarm absent (default-OFF byte-identical)", () => {

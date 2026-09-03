@@ -219,7 +219,30 @@ describe("gate manifest ↔ workflow parity", () => {
     const have = new Set(GATES.map((g) => g.id))
     const gone = REQUIRED_GATE_IDS.filter((id) => !have.has(id))
     expect({ gone }).toEqual({ gone: [] })
-    expect(REQUIRED_GATE_IDS.length).toBeGreaterThanOrEqual(16) // anti-vacuity
+
+    // …and the other direction, which a count floor cannot express. The list
+    // says of itself that it holds EVERY gate id — "with only a subset listed,
+    // the seven unlisted gates were open to the exact delete+exempt regression
+    // this ratchet exists for". A floor of 16 under a manifest of 21 leaves
+    // five gates in precisely that hole, and every gate added from now on lands
+    // there by default. Set equality is the invariant, and it needs no number
+    // to go stale.
+    const required = new Set(REQUIRED_GATE_IDS)
+    const unprotected = [...have].filter((id) => !required.has(id)).sort()
+    expect(
+      { unprotected },
+      unprotected.length === 0
+        ? ""
+        : "these gates are in the manifest but not in REQUIRED_GATE_IDS, so each " +
+            "can still be deleted while a WORKFLOW_EXEMPT entry covers its command " +
+            "in the same commit — the regression this ratchet exists to stop: " +
+            unprotected.join(", "),
+    ).toEqual({ unprotected: [] })
+
+    // ANTI-VACUITY, bound to the corpus rather than to a constant that ages:
+    // an emptied manifest must fail here, not satisfy set equality trivially.
+    expect(REQUIRED_GATE_IDS.length).toBe(GATES.length)
+    expect(GATES.length).toBeGreaterThanOrEqual(16)
   })
 
   test("an exemption may not retire a gate (the two sets are disjoint)", () => {

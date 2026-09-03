@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto"
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, relative } from "node:path"
 import { externalToolchainFingerprint } from "./external-toolchain"
-import { isVerdictRelevantEnvKey } from "./verdict-env"
+import { isVerdictRelevantEnvKey, verdictDotenvSha256 } from "./verdict-env"
 
 export const TEST_SHARD_CACHE_TTL_MS = 24 * 60 * 60_000
 
@@ -145,6 +145,10 @@ const dedupePath = (value: string): string => {
 export const testEnvironmentSha256 = (
   env: Readonly<Record<string, string | undefined>>,
   testTimeoutMs: number,
+  /** REQUIRED, not optional: the untracked dotenv files under this root become
+   *  environment inside the worker, and an argument that can be omitted is one
+   *  that will be. */
+  repoRoot: string,
 ): string => {
   const effective: Record<string, string | undefined> = { ...env }
   Object.assign(effective, {
@@ -160,7 +164,7 @@ export const testEnvironmentSha256 = (
     .filter(([key]) => !key.startsWith("QUANTA_VERIFICATION_LEASE_"))
     .map(([key, value]): [string, string] => [key, key === "PATH" ? dedupePath(value) : value])
     .sort(([left], [right]) => left.localeCompare(right))
-  return sha256(JSON.stringify(canonical))
+  return sha256(JSON.stringify([canonical, verdictDotenvSha256(repoRoot)]))
 }
 
 export const testToolchainSha256 = (
