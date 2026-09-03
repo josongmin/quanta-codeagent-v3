@@ -90,11 +90,16 @@ describe("capability fingerprint covers what actually gates a skip", () => {
     // The measured off-by-one: the fingerprint probed `pyright`, the tests
     // resolve `pyright-langserver`, so installing the language server changed
     // nothing about the receipt.
-    expect(EXTERNAL_TOOLS).toContain("pyright-langserver")
-    expect(EXTERNAL_TOOLS).not.toContain("pyright")
+    const names = new Set<string>(EXTERNAL_TOOLS)
+    expect(names.has("pyright-langserver")).toBe(true)
+    expect(names.has("pyright")).toBe(false)
     // The lane the gate manifest calls out by name as running in NO other gate.
+    // Compared as a SET of strings: `toContain` on the readonly tuple narrows
+    // its argument to the union it already holds, which makes the assertion
+    // unable to express "this name is missing" — the only thing it is for.
+    const covered = new Set<string>(EXTERNAL_TOOLS)
     for (const tool of ["cargo", "go", "rust-analyzer", "lldb-dap", "node", "npm"]) {
-      expect(EXTERNAL_TOOLS).toContain(tool)
+      expect(covered.has(tool), `${tool} gates a real-toolchain skip`).toBe(true)
     }
   })
 })
