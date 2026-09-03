@@ -287,6 +287,30 @@ for (const st of ["precommit", "prepush"] as const) {
 // input and PASSED. Validated here, against the STAGE the caller asked for,
 // because a producer in the other stage is just as absent at run time.
 const plannedIds = new Set(planned.map((g) => g.id))
+// ORDER, not just membership. `consumes` reports SKIP when the producer
+// FAILED — but a consumer placed BEFORE its producer never sees a failure to
+// react to: it runs first and reads whatever the previous campaign left in
+// `.cache/`, which is exactly the stale-input false green this mechanism was
+// built to stop (the manifest's own scar: a junit file dated 2020 accepted
+// without comment). Membership was checked; sequence never was.
+const plannedIndex = new Map(planned.map((g, index) => [g.id, index]))
+const misorderedConsumes = planned
+  .filter((g) => {
+    if (g.consumes === undefined) return false
+    const producer = plannedIndex.get(g.consumes)
+    const consumer = plannedIndex.get(g.id)
+    return producer !== undefined && consumer !== undefined && producer > consumer
+  })
+  .map((g) => `${g.id} runs BEFORE the "${g.consumes}" it consumes`)
+if (misorderedConsumes.length > 0) {
+  printErr(
+    `gate.ts: ${misorderedConsumes.length} gate(s) consume a producer that has not run yet, ` +
+      `so they would read the PREVIOUS campaign's artifact and report a verdict over it:\n  ` +
+      misorderedConsumes.join("\n  "),
+  )
+  process.exit(1)
+}
+
 const danglingConsumes = planned
   .filter((g) => g.consumes !== undefined && !plannedIds.has(g.consumes))
   .map((g) => `${g.id} consumes "${g.consumes}"`)

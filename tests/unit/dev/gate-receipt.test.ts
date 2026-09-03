@@ -63,12 +63,16 @@ const git = (root: string, args: readonly string[]): string => {
   return proc.stdout.toString().trim()
 }
 
-const manifestSource = (runs: readonly string[]): string => {
+const manifestSource = (
+  runs: readonly string[],
+  consumesByIndex: Readonly<Record<number, string>> = {},
+): string => {
   const entries = runs.map((run, index) => ({
     id: `gate-${index + 1}`,
     stage: index < 10 ? "precommit" : "prepush",
     run,
     why: `behavioral fixture gate ${index + 1}`,
+    ...(consumesByIndex[index] === undefined ? {} : { consumes: consumesByIndex[index] }),
   }))
   return `
 export type GateStage = "precommit" | "prepush"
@@ -87,7 +91,10 @@ export const gatesForStage = (stage: GateStage): readonly Gate[] =>
 `
 }
 
-const makeRepo = (runs: readonly string[]): string => {
+const makeRepo = (
+  runs: readonly string[],
+  consumesByIndex: Readonly<Record<number, string>> = {},
+): string => {
   const root = mkdtempSync(join(tmpdir(), "quanta-gate-receipt-"))
   roots.push(root)
   mkdirSync(join(root, "tools", "dev"), { recursive: true })
@@ -100,7 +107,10 @@ const makeRepo = (runs: readonly string[]): string => {
   ]) {
     copyFileSync(join(SOURCE_DIR, dependency), join(root, "tools", "dev", dependency))
   }
-  writeFileSync(join(root, "tools", "dev", "gate-manifest.ts"), manifestSource(runs))
+  writeFileSync(
+    join(root, "tools", "dev", "gate-manifest.ts"),
+    manifestSource(runs, consumesByIndex),
+  )
   // The exact receipt lands under .cache/; an untracked receipt must not dirty
   // the NEXT run's frozen snapshot (mirrors the real repository's ignore).
   writeFileSync(join(root, ".gitignore"), ".cache/\n")
@@ -169,6 +179,31 @@ describe("prepush clean-head receipt", () => {
       true,
     )
     expect(receipt.elapsedMs).toBeGreaterThanOrEqual(0)
+  })
+
+  behaviorTest("a consumer placed BEFORE its producer refuses to run at all", () => {
+    // `consumes` reports SKIP when the producer FAILED — but a consumer that
+    // runs FIRST never sees a failure to react to. It reads whatever the
+    // previous campaign left in .cache/ and reports a verdict over it, which
+    // is the stale-input false green the mechanism exists to stop. Membership
+    // was validated; sequence never was.
+    const runs = Array.from({ length: 21 }, () => "printf spent >> spend.log")
+    // gate-12 consumes gate-15, i.e. its producer runs three gates LATER.
+    const root = makeRepo(runs, { 11: "gate-15" })
+
+    const result = runGate(root, "prepush")
+
+    expect(result.code).toBe(1)
+    expect(result.stderr).toContain("consume a producer that has not run yet")
+    expect(result.stderr).toContain("gate-12 runs BEFORE")
+    // Refused before spending anything — no gate executed.
+    expect(existsSync(join(root, "spend.log"))).toBe(false)
+  })
+
+  behaviorTest("a consumer placed AFTER its producer is accepted", () => {
+    const runs = Array.from({ length: 21 }, () => "true")
+    const root = makeRepo(runs, { 15: "gate-12" })
+    expect(runGate(root, "prepush").code).toBe(0)
   })
 
   behaviorTest("dirty start fails before spending gate 1", () => {

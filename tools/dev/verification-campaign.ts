@@ -276,8 +276,17 @@ try {
 } finally {
   const outcome = await registry.cancelAll()
   if (!outcome.drained) {
+    // The RUNNER already refuses to bless a campaign whose descendants it
+    // cannot account for; the wrapper was only warning, which is the weaker
+    // half of the same rule and the half that matters more — this process is
+    // what hands the lane to the next contender. A campaign that leaves
+    // processes behind releases the lane to someone whose ports, worktrees and
+    // HOME are still in use.
+    process.exitCode = 1
+    campaignExitCode = process.exitCode
     process.stderr.write(
-      `[verification] WARN campaign group(s) survived SIGKILL: ${outcome.survivors.join(", ")}\n`,
+      `[verification] INVALID — campaign group(s) unaccounted for: ${outcome.survivors.join(", ")}; ` +
+        "refusing to bless this campaign\n",
     )
   }
   // A signal path already wrote its own receipt and exits; do not overwrite it.

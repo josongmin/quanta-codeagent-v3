@@ -246,8 +246,19 @@ const junitShardPath = (junitOut: string, index: number): string => `${junitOut}
 
 /** Content-addressed: the same chunk composition reuses its receipt even when
  *  the chunk's ordinal shifted because a NEIGHBOR chunk changed. */
-const chunkCachePath = (suite: SuiteName, filesSha256: string): string =>
-  join(SHARD_CACHE_ROOT, suite, `chunk-${filesSha256.slice(0, 16)}.json`)
+/**
+ * The path must separate what the IDENTITY separates.
+ *
+ * It was keyed on the chunk's own test files alone, while a hit additionally
+ * requires the tree, manifest, toolchain and env to match. Most commits do not
+ * touch test files, so two worktrees at different commits mapped to the SAME
+ * file: each read the other's receipt, missed on identity, re-ran, and
+ * overwrote it — so the shared cache thrashed to zero hits in exactly the
+ * many-worktree case it was built for. Adding the tree keeps them side by side;
+ * TTL pruning still bounds the directory.
+ */
+const chunkCachePath = (suite: SuiteName, filesSha256: string, treeSha256: string): string =>
+  join(SHARD_CACHE_ROOT, suite, `chunk-${treeSha256.slice(0, 12)}-${filesSha256.slice(0, 16)}.json`)
 
 const prepareJunit = (junitOut: string, indices: readonly number[]): void => {
   // Bun's JUnit reporter does not create the target directory; on a fresh
@@ -840,7 +851,7 @@ const main = async (): Promise<void> => {
       return {
         chunk,
         intraParallel,
-        cachePath: chunkCachePath(opts.suite, filesSha256),
+        cachePath: chunkCachePath(opts.suite, filesSha256, treeSha256),
         identity: {
           treeSha256,
           suite: opts.suite,
