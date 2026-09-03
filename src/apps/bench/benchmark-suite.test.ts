@@ -265,6 +265,42 @@ describe("in-process family env-AUTHORITY rail (typed config is the only authori
     expect(process.env.QUANTA_SWEBENCH_DATASET_FAMILY).toBeUndefined()
   })
 
+  /**
+   * REGRESSION (sep-03): the refusal must survive a `process.env` REPLACEMENT.
+   *
+   * The guard compared against a MODULE-LOAD capture (`const ambientEnv =
+   * process.env`). Ten test files in this repo "restore" the environment with
+   * `process.env = { ...saved }` — which swaps the BINDING, not the object.
+   * After any of them runs, the capture points at a dead object, `env ===
+   * ambientEnv` is false forever, and the rail silently stops refusing. Measured
+   * with a paired control: it then WROTE `QUANTA_SWEBENCH_DATASET_FAMILY=pro`
+   * into the live ambient env — the exact in-process authority channel this
+   * module exists to abolish.
+   *
+   * Per-file ISOLATION is what hid it. Under `--isolate` every file gets a fresh
+   * global, so the capture is never stale and this can never go red; it surfaced
+   * only when the full corpus ran shared. `wireRuntimePorts` learned the same
+   * lesson — see the call-time default in `context-binding/base.ts`.
+   */
+  test("REGRESSION: the refusal survives a process.env REPLACEMENT (binding swap)", () => {
+    const original = process.env
+    try {
+      // Verbatim what those afterEach hooks do, calling it "restore".
+      ;(process as { env: NodeJS.ProcessEnv }).env = { ...original }
+
+      expect(() =>
+        serializeFamilyForSubprocess("pro", process.env as Record<string, string | undefined>),
+      ).toThrow(/REFUSES to write into the ambient env/i)
+      // PAIRED CONTROL for the throw: a guard that merely stopped throwing would
+      // still be caught here, because the silent write is the actual damage.
+      expect(process.env.QUANTA_SWEBENCH_DATASET_FAMILY).toBeUndefined()
+    } finally {
+      // Restore the ORIGINAL object, never a copy: a copy would leave the very
+      // stale-binding hazard this test names behind for every later test here.
+      ;(process as { env: NodeJS.ProcessEnv }).env = original
+    }
+  })
+
   test("BEHAVIORAL: the sanctioned envelope builder copies, never mutates the parent", () => {
     const parent: NodeJS.ProcessEnv = { HOME: "/home/x" }
     const envelope = buildSubprocessFamilyEnv(

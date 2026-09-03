@@ -26,11 +26,6 @@ import {
 } from "./dataset-family-token"
 import { type ProMaxSettings, resolveProMaxSettings } from "./promax/settings"
 
-// The ambient env OBJECT, bound once for an IDENTITY comparison only (see
-// `serializeFamilyForSubprocess`). No env VALUE is ever read in this module —
-// `resolveBenchRunConfig` takes the env it should consult as a parameter.
-const ambientEnv: NodeJS.ProcessEnv = process.env
-
 /**
  * The ONE owner of the ABSENT-selector default (aug-22 re-audit R4).
  *
@@ -218,7 +213,16 @@ export const serializeFamilyForSubprocess = (
   // must be a FRESH Record built for one specific subprocess/SSH invocation (a
   // spread copy of the parent env is exactly that). This is an IDENTITY check on
   // the object, never a value read, so an aliased binding is refused too.
-  if (env === (ambientEnv as Record<string, string | undefined>)) {
+  // Read `process.env` HERE, at call time, never from a module-load capture.
+  // A capture (`const ambientEnv = process.env`) is correct only until something
+  // REPLACES the binding — `process.env = { ...saved }`, which ten test files in
+  // this repo do in afterEach and call "restore". That swaps the binding, not
+  // the object, so a capture is left pointing at a dead one, this comparison is
+  // false forever, and the rail silently stops refusing while the family gets
+  // written straight into the live ambient env. Per-file isolation hid that for
+  // as long as it held; `wireRuntimePorts` takes its env the same way for the
+  // same reason (see `context-binding/base.ts`).
+  if (env === (process.env as Record<string, string | undefined>)) {
     throw new Error(
       "bench: serializeFamilyForSubprocess REFUSES to write into the ambient env object — " +
         "that is an in-process authority channel, not a subprocess wire. Build a per-call env " +
