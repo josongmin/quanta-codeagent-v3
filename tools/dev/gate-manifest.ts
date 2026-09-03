@@ -64,6 +64,15 @@ export interface Gate {
    * silently expanding the local-only set.
    */
   readonly notInWorkflow?: string
+  /**
+   * This gate drives a REAL external toolchain and loses to CPU contention
+   * rather than slowing down under it. Set to the reason; the runner then waits
+   * (bounded) for the box to stop being oversubscribed before starting it.
+   *
+   * Never a longer timeout: a starved language server returns EMPTY, not late,
+   * so more time buys a differently-timed wrong answer.
+   */
+  readonly needsQuietBox?: string
 }
 
 export const GATES: readonly Gate[] = [
@@ -187,6 +196,8 @@ export const GATES: readonly Gate[] = [
     stage: "prepush",
     run: "QUANTA_REAL_TOOLCHAIN_E2E=1 bun run test:real-toolchain",
     why: "the `*-real-e2e.test.ts` lane — 43 cases that run in NO other gate, because the env gate that keeps them out of the unit speed budget also kept them out of every gate",
+    needsQuietBox:
+      "real rust-analyzer/gopls/pyright indexing a fixture project. MEASURED on this 16-core box, same commit and command: at load 52 evidence-lsp-bridge-real-e2e goes 1 pass / 1 fail (a starved server answers with an EMPTY hover); at load 3.9 it goes 2 pass in 5.2s. The lane was already moved out of the parallel suite for exactly this, but it starts right after a 30-chunk full suite",
   },
   {
     id: "web-frontend",

@@ -66,6 +66,7 @@ const git = (root: string, args: readonly string[]): string => {
 const manifestSource = (
   runs: readonly string[],
   consumesByIndex: Readonly<Record<number, string>> = {},
+  quietBoxByIndex: Readonly<Record<number, string>> = {},
 ): string => {
   const entries = runs.map((run, index) => ({
     id: `gate-${index + 1}`,
@@ -73,6 +74,7 @@ const manifestSource = (
     run,
     why: `behavioral fixture gate ${index + 1}`,
     ...(consumesByIndex[index] === undefined ? {} : { consumes: consumesByIndex[index] }),
+    ...(quietBoxByIndex[index] === undefined ? {} : { needsQuietBox: quietBoxByIndex[index] }),
   }))
   return `
 export type GateStage = "precommit" | "prepush"
@@ -84,6 +86,7 @@ export interface Gate {
   readonly consumes?: string
   readonly hostDependent?: string
   readonly notInWorkflow?: string
+  readonly needsQuietBox?: string
 }
 export const GATES: readonly Gate[] = ${JSON.stringify(entries, null, 2)}
 export const gatesForStage = (stage: GateStage): readonly Gate[] =>
@@ -94,12 +97,14 @@ export const gatesForStage = (stage: GateStage): readonly Gate[] =>
 const makeRepo = (
   runs: readonly string[],
   consumesByIndex: Readonly<Record<number, string>> = {},
+  quietBoxByIndex: Readonly<Record<number, string>> = {},
 ): string => {
   const root = mkdtempSync(join(tmpdir(), "quanta-gate-receipt-"))
   roots.push(root)
   mkdirSync(join(root, "tools", "dev"), { recursive: true })
   copyFileSync(SOURCE_GATE, join(root, "tools", "dev", "gate.ts"))
   for (const dependency of [
+    "box-load.ts",
     "verification-receipt.ts",
     "verification-receipt-probe.ts",
     "external-toolchain.ts",
@@ -109,7 +114,7 @@ const makeRepo = (
   }
   writeFileSync(
     join(root, "tools", "dev", "gate-manifest.ts"),
-    manifestSource(runs, consumesByIndex),
+    manifestSource(runs, consumesByIndex, quietBoxByIndex),
   )
   // The exact receipt lands under .cache/; an untracked receipt must not dirty
   // the NEXT run's frozen snapshot (mirrors the real repository's ignore).
@@ -156,6 +161,54 @@ const receiptFrom = (stdout: string): GateReceipt => {
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
+})
+
+describe("a gate that declares it needs a quiet box", () => {
+  // WIRING PROOF. `waitForQuietBox` is unit-tested on its own, which says
+  // nothing about whether the gate loop calls it — the shape of an inert
+  // surface change. This drives the REAL gate.ts over a synthetic manifest and
+  // reads what it printed.
+  behaviorTest("the runner waits for the box and reports what it found", () => {
+    const root = makeRepo(
+      Array.from({ length: 21 }, () => "true"),
+      {},
+      {
+        20: "fixture: a real toolchain that loses to contention",
+      },
+    )
+    const result = runGate(root, "prepush")
+    expect(result.code, result.stderr).toBe(0)
+    // Either outcome is correct — what must never happen is silence, because
+    // silence is what made a saturated box read as a code defect.
+    const line = result.stdout
+      .split("\n")
+      .find((text) => text.includes("[gate-21]") && text.includes("load/core"))
+    expect(line, `no quiet-box line in:\n${result.stdout}`).toBeDefined()
+    expect(/box quiet|waited \d+s for a quiet box|RAN HOT/.test(line ?? "")).toBe(true)
+  })
+
+  behaviorTest("a FAILING gate reports the load it competed with", () => {
+    // The fact whose absence cost a 45-minute campaign: two rust-analyzer cases
+    // failed while the box sat at load 52 (16 cores) under another session's
+    // forty orphaned busy-loops, and the summary said only FAIL. It was
+    // investigated as a code defect for as long as that took.
+    const runs = Array.from({ length: 21 }, (_, index) => (index === 20 ? "false" : "true"))
+    const root = makeRepo(runs)
+    const result = runGate(root, "prepush")
+    expect(result.code).not.toBe(0)
+    const line = result.stdout
+      .split("\n")
+      .find((text) => text.includes("FAIL") && text.includes("gate-21"))
+    expect(line, `no FAIL line in:\n${result.stdout}`).toBeDefined()
+    expect(line).toContain("load/core")
+  })
+
+  behaviorTest("gates that do NOT declare it are not made to wait", () => {
+    const root = makeRepo(Array.from({ length: 21 }, () => "true"))
+    const result = runGate(root, "prepush")
+    expect(result.code).toBe(0)
+    expect(result.stdout).not.toContain("quiet box")
+  })
 })
 
 describe("prepush clean-head receipt", () => {

@@ -27,6 +27,7 @@ const source = (name: string): string =>
 
 const CAMPAIGN_MODULES = [
   "verification-campaign.ts",
+  "box-load.ts",
   "test-shard-lease.ts",
   "test-shard-lifecycle.ts",
   "gate-manifest.ts",

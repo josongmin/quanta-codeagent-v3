@@ -33,6 +33,7 @@ import { rmSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
+import { describeQuietBoxWait, loadPerCore, waitForQuietBox } from "./box-load"
 import { GATES, type Gate, type GateStage, gatesForStage } from "./gate-manifest"
 import {
   cleanStatusSha256,
@@ -102,6 +103,9 @@ interface GateRun {
   readonly ms: number
   readonly out: string
   readonly err: string
+  /** Per-core run-queue while this gate ran. The one fact that decides whether
+   *  a red is about the code at all. */
+  readonly peakLoadPerCore: number
 }
 
 interface GitSnapshot {
@@ -229,6 +233,7 @@ const snapshotInvalidMessage = (
 
 const runGate = (gate: Gate): GateRun => {
   const started = Bun.nanoseconds()
+  const loadAtStart = loadPerCore()
   const proc = Bun.spawnSync({
     // Through the shell: several gates carry a `--` pass-through the argv form
     // would have to re-tokenize, and re-tokenizing is how a runner drifts from
@@ -255,6 +260,9 @@ const runGate = (gate: Gate): GateRun => {
     ms: (Bun.nanoseconds() - started) / 1e6,
     out: quiet ? decode(proc.stdout) : "",
     err: quiet ? decode(proc.stderr) : "",
+    // The 1-minute average is a trailing window, so the higher of the two ends
+    // is the honest summary of what this gate competed with.
+    peakLoadPerCore: Math.max(loadAtStart, loadPerCore()),
   }
 }
 
@@ -390,7 +398,25 @@ if (stage === "prepush") {
   printOut(`prepush: frozen head=${frozenSnapshot.head} dirty=no`)
 }
 
-const results: { gate: Gate; ok: boolean; ms: number; out: string; err: string }[] = []
+/**
+ * How long a load-sensitive gate may wait for the box to stop being
+ * oversubscribed. Sized against what it is actually waiting for: the 1-minute
+ * load average this reads decays over minutes, and the campaign's OWN 30-chunk
+ * full suite is usually what it is decaying from. Past this, the load is
+ * foreign and waiting longer buys nothing but a later start.
+ */
+const QUIET_BOX_BUDGET_MS = 180_000
+
+const results: {
+  gate: Gate
+  ok: boolean
+  ms: number
+  out: string
+  err: string
+  peakLoadPerCore: number
+}[] = []
+/** Gates that gave up waiting and ran on a saturated box. */
+const hotGates = new Map<string, number>()
 const failedIds = new Set<string>()
 /** Gate ids whose output cannot be trusted: failed, or skipped because their own
  *  input could not be trusted. */
@@ -409,8 +435,15 @@ for (const gate of planned) {
     continue
   }
   if (!quiet) printOut(`\n──── ${stage}: ${gate.id} — ${gate.run}`)
-  const { ok, ms, out, err } = runGate(gate)
-  results.push({ gate, ok, ms, out, err })
+  if (gate.needsQuietBox !== undefined) {
+    // Bounded, and it never refuses to run: a rail that unrelated load on the
+    // host can stop is a rail that cannot be used on a working machine.
+    const wait = await waitForQuietBox({ budgetMs: QUIET_BOX_BUDGET_MS })
+    printOut(`  [${gate.id}] ${describeQuietBoxWait(wait)}`)
+    if (!wait.settled) hotGates.set(gate.id, wait.endPerCore)
+  }
+  const { ok, ms, out, err, peakLoadPerCore } = runGate(gate)
+  results.push({ gate, ok, ms, out, err, peakLoadPerCore })
   if (!ok) {
     failedIds.add(gate.id)
     poisoned.add(gate.id)
@@ -442,7 +475,15 @@ const failed = results.filter((r) => !r.ok)
 printOut(`\n──── ${stage} summary`)
 for (const r of results) {
   const hd = r.ok && r.gate.hostDependent !== undefined ? "  [host-dependent]" : ""
-  printOut(`  ${r.ok ? "PASS" : "FAIL"}  ${r.gate.id.padEnd(22)} ${Math.round(r.ms)}ms${hd}`)
+  // A red on a saturated box is reported WITH the saturation. The last time it
+  // was not, a green 45-minute campaign's two starved rust-analyzer cases were
+  // investigated as a code defect; the box was held at load 52 by forty
+  // orphaned busy-loops another session had left running for nine hours.
+  const load =
+    r.ok && r.peakLoadPerCore <= 1
+      ? ""
+      : `  [load/core ${r.peakLoadPerCore.toFixed(2)}${r.peakLoadPerCore > 1 ? " — OVERSUBSCRIBED" : ""}]`
+  printOut(`  ${r.ok ? "PASS" : "FAIL"}  ${r.gate.id.padEnd(22)} ${Math.round(r.ms)}ms${hd}${load}`)
 }
 for (const g of skipped) {
   printOut(`  SKIP  ${g.id.padEnd(22)} its input gate \`${g.consumes}\` failed`)
