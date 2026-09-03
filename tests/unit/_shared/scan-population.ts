@@ -139,6 +139,15 @@ export interface ScanPopulationOptions {
 const record = (opts: ScanPopulationOptions, walked: number): void => {
   const sink = process.env.QUANTA_SCAN_REACH_RECORD
   if (sink === undefined || sink === "") return
+  // A call that points `baselinePath` elsewhere is this helper's OWN hellgate
+  // exercising it over a temp directory, not a guard measuring the repository.
+  // Recording those put synthetic ids ("fx", "not-pinned") into the shared sink,
+  // where `bun run scan-reach` found scans no file in scan-enrollment-debt.json
+  // owns and refused the run — a red that says "an enrolled scan nobody is
+  // accountable for" about a fixture that was never enrolled and never should
+  // be. Invisible until the full suite began completing and the gate started
+  // consuming its receipt.
+  if (opts.baselinePath !== undefined) return
   const line = { id: opts.id, walked, matched: opts.matched?.length }
   appendFileSync(sink, `${JSON.stringify(line)}\n`)
 }

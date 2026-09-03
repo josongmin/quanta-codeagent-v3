@@ -8,9 +8,9 @@
  * one thing that went wrong.
  */
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { readScanReachBaseline } from "@/../tools/dev/scan-reach-baseline"
 import { assertFailsClosedOnEmpty, assertScanPopulation } from "../_shared/scan-population"
 
@@ -322,5 +322,35 @@ describe("population floor", () => {
     expect(() => assertScanPopulation([], bare, { id: "fx", baselinePath: bl })).toThrow(
       /reach cannot be measured/,
     )
+  })
+
+  test("the helper's OWN fixtures never reach the shared reach ledger", () => {
+    // MEASURED in a cold campaign: `bun run scan-reach` refused an otherwise
+    // 20-of-21 green run over ids "fx" and "not-pinned" — this file's synthetic
+    // fixtures — reporting "an enrolled scan with no ledger entry is one nobody
+    // is accountable for". They were never enrolled and never should be; the
+    // recorder simply did not distinguish a guard measuring the repository from
+    // the helper measuring itself. Invisible until the full suite began
+    // completing and the gate started consuming its receipt.
+    const fx = build()
+    const sink = join(mkdtempSync(join(tmpdir(), "scan-sink-")), "reach.jsonl")
+    made.push(dirname(sink))
+    const prior = process.env.QUANTA_SCAN_REACH_RECORD
+    process.env.QUANTA_SCAN_REACH_RECORD = sink
+    try {
+      assertScanPopulation(walk(fx.root), fx.root, { id: "fx", baselinePath: fx.pin(2) })
+      expect(existsSync(sink), `a fixture wrote to the shared ledger: ${sink}`).toBe(false)
+
+      // PAIRED CONTROL: the seam is what suppresses it, not the sink being
+      // broken. The same call WITHOUT `baselinePath` still records — that path
+      // is how every real guard reports its reach.
+      expect(() =>
+        assertScanPopulation(walk(fx.root), fx.root, { id: "an-unpinned-real-guard" }),
+      ).toThrow(/no reach floor pinned/)
+      expect(readFileSync(sink, "utf8")).toContain('"an-unpinned-real-guard"')
+    } finally {
+      if (prior === undefined) delete process.env.QUANTA_SCAN_REACH_RECORD
+      else process.env.QUANTA_SCAN_REACH_RECORD = prior
+    }
   })
 })
