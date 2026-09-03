@@ -33,7 +33,7 @@ import { rmSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
-import { describeQuietBoxWait, loadPerCore, waitForQuietBox } from "./box-load"
+import { describeQuietBoxWait, loadPerCore, quietBoxBudgetMs, waitForQuietBox } from "./box-load"
 import { missingExternalTools } from "./external-toolchain"
 import { GATES, type Gate, type GateStage, gatesForStage } from "./gate-manifest"
 import {
@@ -444,7 +444,9 @@ for (const gate of planned) {
   if (gate.needsQuietBox !== undefined) {
     // Bounded, and it never refuses to run: a rail that unrelated load on the
     // host can stop is a rail that cannot be used on a working machine.
-    const wait = await waitForQuietBox({ budgetMs: QUIET_BOX_BUDGET_MS })
+    const wait = await waitForQuietBox({
+      budgetMs: quietBoxBudgetMs(process.env, QUIET_BOX_BUDGET_MS),
+    })
     printOut(`  [${gate.id}] ${describeQuietBoxWait(wait)}`)
     if (!wait.settled) hotGates.set(gate.id, wait.endPerCore)
   }

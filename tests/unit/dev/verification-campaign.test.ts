@@ -461,12 +461,19 @@ describe("whole verification campaign lease", () => {
     initCommittedRepo(root)
     const result = Bun.spawnSync(
       [process.execPath, join(root, "tools", "dev", "verification-campaign.ts"), "--", "true"],
-      { cwd: root, env: cleanLeaseEnv(), stdout: "pipe", stderr: "pipe" },
+      {
+        cwd: root,
+        // Budget zero: prove the wait is WIRED without making the test's
+        // duration a function of what else this machine is doing.
+        env: { ...cleanLeaseEnv(), QUANTA_QUIET_BOX_BUDGET_MS: "0" },
+        stdout: "pipe",
+        stderr: "pipe",
+      },
     )
     const out = `${result.stdout.toString()}${result.stderr.toString()}`
     expect(result.exitCode, out).toBe(0)
     const line = out.split("\n").find((text) => text.includes("load/core"))
     expect(line, `no load line in:\n${out}`).toBeDefined()
     expect(/box quiet|waited \d+s for a quiet box|RAN HOT/.test(line ?? "")).toBe(true)
-  }, 240_000)
+  }, 60_000)
 })

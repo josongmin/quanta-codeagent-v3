@@ -97,3 +97,29 @@ export const describeQuietBoxWait = (wait: QuietBoxWait): string =>
         `(load/core ${wait.startPerCore.toFixed(2)} → ${wait.endPerCore.toFixed(2)})`
     : `RAN HOT — load/core still ${wait.endPerCore.toFixed(2)} after ` +
       `${Math.round(wait.waitedMs / 1000)}s; a failure below may be contention, not code`
+
+/**
+ * How long to wait, with a TEST SEAM.
+ *
+ * A fixture that drives the real runner must be able to prove the wait is
+ * WIRED without paying it: the first version of that test made a synthetic
+ * gate wait on this machine's actual load and blew a 15s test timeout after
+ * 58 seconds inside a campaign — a test whose duration is a function of what
+ * else the box is doing.
+ *
+ * Production never sets this. When it is set, the resulting wait is still
+ * printed, so a zero budget shows up as `RAN HOT` rather than as silence.
+ */
+export const quietBoxBudgetMs = (
+  env: Readonly<Record<string, string | undefined>>,
+  fallbackMs: number,
+): number => {
+  const raw = env.QUANTA_QUIET_BOX_BUDGET_MS
+  if (raw === undefined) return fallbackMs
+  // STRICT, because `Number.parseInt` is not: it reads "1e9999" as 1, which
+  // would turn a typo into a one-millisecond budget — the wait disabled, in
+  // silence, by a value that looks enormous.
+  if (!/^\d+$/.test(raw)) return fallbackMs
+  const parsed = Number.parseInt(raw, 10)
+  return Number.isSafeInteger(parsed) ? parsed : fallbackMs
+}

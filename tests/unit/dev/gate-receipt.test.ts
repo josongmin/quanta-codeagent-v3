@@ -133,12 +133,13 @@ const runGate = (
   root: string,
   stage: "precommit" | "prepush",
   extraArgs: readonly string[] = [],
+  extraEnv: Readonly<Record<string, string>> = {},
 ): { readonly code: number; readonly stdout: string; readonly stderr: string } => {
   const proc = Bun.spawnSync(
     [process.execPath, join(root, "tools", "dev", "gate.ts"), stage, "--quiet", ...extraArgs],
     {
       cwd: root,
-      env: cleanGitEnv(),
+      env: { ...cleanGitEnv(), ...extraEnv },
       stdout: "pipe",
       stderr: "pipe",
     },
@@ -202,7 +203,11 @@ describe("a gate that declares it needs a quiet box", () => {
         20: "fixture: a real toolchain that loses to contention",
       },
     )
-    const result = runGate(root, "prepush")
+    // Budget zero: this proves the wait is WIRED, not that the box is quiet.
+    // The first version waited on the machine's real load and blew a 15s
+    // timeout after 58 seconds inside a campaign — a test whose duration is a
+    // function of what else the box is doing.
+    const result = runGate(root, "prepush", [], { QUANTA_QUIET_BOX_BUDGET_MS: "0" })
     expect(result.code, result.stderr).toBe(0)
     // Either outcome is correct — what must never happen is silence, because
     // silence is what made a saturated box read as a code defect.

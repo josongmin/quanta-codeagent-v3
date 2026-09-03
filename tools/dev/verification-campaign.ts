@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto"
 import { mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { basename, dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { describeQuietBoxWait, waitForQuietBox } from "./box-load"
+import { describeQuietBoxWait, quietBoxBudgetMs, waitForQuietBox } from "./box-load"
 import { gatesForStage } from "./gate-manifest"
 import {
   acquireTestShardLease,
@@ -273,7 +273,9 @@ writeOwnerSidecar()
  * later. It never refuses — a rail that unrelated load can stop is a rail
  * nobody can use on a working machine.
  */
-const startWait = await waitForQuietBox({ budgetMs: CAMPAIGN_QUIET_BOX_BUDGET_MS })
+const startWait = await waitForQuietBox({
+  budgetMs: quietBoxBudgetMs(process.env, CAMPAIGN_QUIET_BOX_BUDGET_MS),
+})
 process.stdout.write(`[verification] ${describeQuietBoxWait(startWait)}\n`)
 
 let campaignExitCode: number | null = null

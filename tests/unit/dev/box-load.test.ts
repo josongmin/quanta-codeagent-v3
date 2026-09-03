@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import { cpus, loadavg } from "node:os"
-import { describeQuietBoxWait, loadPerCore, waitForQuietBox } from "../../../tools/dev/box-load"
+import {
+  describeQuietBoxWait,
+  loadPerCore,
+  quietBoxBudgetMs,
+  waitForQuietBox,
+} from "../../../tools/dev/box-load"
 
 /**
  * The wait that keeps a real-toolchain gate off a saturated box.
@@ -111,5 +116,17 @@ describe("waiting for a box that is not oversubscribed", () => {
     // survives whatever this box happens to be doing while the suite runs.
     const expected = (loadavg()[0] ?? 0) / cpus().length
     expect(Math.abs(measured - expected)).toBeLessThan(Math.max(0.5, expected * 0.5 + 0.01))
+  })
+
+  test("the budget seam is honoured only for a value that parses", () => {
+    // Production never sets this; a fixture sets 0 so it can prove the wait is
+    // wired without its duration depending on what else the box is doing. A
+    // typo must fall back to the real budget rather than silently disable it.
+    expect(quietBoxBudgetMs({}, 180_000)).toBe(180_000)
+    expect(quietBoxBudgetMs({ QUANTA_QUIET_BOX_BUDGET_MS: "0" }, 180_000)).toBe(0)
+    expect(quietBoxBudgetMs({ QUANTA_QUIET_BOX_BUDGET_MS: "5000" }, 180_000)).toBe(5_000)
+    for (const bad of ["", "abc", "-1", "1e9999"]) {
+      expect(quietBoxBudgetMs({ QUANTA_QUIET_BOX_BUDGET_MS: bad }, 180_000), bad).toBe(180_000)
+    }
   })
 })
