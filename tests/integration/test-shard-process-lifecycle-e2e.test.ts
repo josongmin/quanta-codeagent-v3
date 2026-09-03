@@ -4,8 +4,12 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
   drainCampaign,
+  groupHasRunningMemberFromPs,
+  groupStateLines,
+  hasRunningMember,
   killProcessTree,
   processGroupAlive,
+  processGroupHoldsResources,
   runResourceAwareSchedule,
   ShardProcessRegistry,
   terminateCampaignOnSignal,
@@ -96,7 +100,10 @@ describe("shard worker process lifecycle", () => {
     expect(await handle.cancel()).toBe(true)
     expect(handle.cancelled).toBe(true)
     expect(pidAlive(grandchild)).toBe(false)
-    expect(processGroupAlive(handle.pid)).toBe(false)
+    // What a drain can promise is that nothing in the group is RUNNING. The
+    // group may still exist for a moment as unreaped zombies, which own
+    // nothing and cannot be killed; waiting for those is waiting forever.
+    expect(processGroupHoldsResources(handle.pid)).toBe(false)
     expect(registry.liveGroups()).toHaveLength(0)
   }, 20_000)
 
@@ -117,7 +124,9 @@ describe("shard worker process lifecycle", () => {
     await expect(Promise.all([failing, peer])).rejects.toThrow("primary failure")
     const grandchild = readGrandchildPid(pidFile)
     expect(pidAlive(grandchild)).toBe(true)
+    // With a real process running the two predicates agree.
     expect(processGroupAlive(handle.pid)).toBe(true)
+    expect(processGroupHoldsResources(handle.pid)).toBe(true)
     // Manual cleanup — exactly the burden the runner used to leave behind.
     expect(await handle.cancel()).toBe(true)
     await peer.catch(() => {})
@@ -159,7 +168,7 @@ describe("shard worker process lifecycle", () => {
     expect(peerSettled).toBe(true)
     const grandchild = readGrandchildPid(pidFile)
     expect(pidAlive(grandchild)).toBe(false)
-    expect(processGroupAlive(handle.pid)).toBe(false)
+    expect(processGroupHoldsResources(handle.pid)).toBe(false)
     expect(registry.liveGroups()).toHaveLength(0)
   }, 20_000)
 
@@ -352,7 +361,7 @@ describe("shard worker process lifecycle", () => {
     })
     const exit = await handle.exited
     expect(exit.code).toBe(0)
-    expect(await waitFor(() => !processGroupAlive(handle.pid), 5_000)).toBe(true)
+    expect(await waitFor(() => !processGroupHoldsResources(handle.pid), 5_000)).toBe(true)
     expect(await killProcessTree(handle.pid)).toBe(true)
     expect(registry.liveGroups()).toHaveLength(0)
   }, 15_000)
@@ -402,6 +411,46 @@ describe("shard worker process lifecycle", () => {
     expect(outcome.survivors).toContain(stranger.handle.pid)
     await handle.exited.catch(() => undefined)
   }, 30_000)
+
+  test("a group of zombies is drained, not 'survived SIGKILL'", () => {
+    // MEASURED on the first full-suite campaign that reached the end: the
+    // suite passed 30/30 and the drain check then refused it over four
+    // `<defunct>` entries plus one exiting Chrome. A zombie answers
+    // kill(-pgid, 0) — it is a reaped-pending table entry — but it is
+    // unkillable by definition and holds no fd, port or working directory, so
+    // counting it as alive turns a green 45-minute run red and leaves 97MB of
+    // run root behind for nothing.
+    const ps = [
+      "  71030 Z",
+      "  71030 ?E",
+      "  71030 Z",
+      "  99999 S", // another group, still running — must not leak in
+    ].join("\n")
+    expect(groupStateLines(ps, 71030)).toEqual(["Z", "?E", "Z"])
+    expect(hasRunningMember(groupStateLines(ps, 71030))).toBe(false)
+
+    // A genuinely running member still counts, whatever else is in the group.
+    const withLive = `${ps}\n  71030 S`
+    expect(hasRunningMember(groupStateLines(withLive, 71030))).toBe(true)
+    // Common live states are not mistaken for exiting.
+    for (const state of ["S", "R", "S+", "SN", "U"]) {
+      expect(hasRunningMember([state]), state).toBe(true)
+    }
+    // An empty group is drained.
+    expect(hasRunningMember(groupStateLines(ps, 12345))).toBe(false)
+  })
+
+  test("a ps that did not run is 'still alive', never 'drained'", () => {
+    // The asymmetry matters: this predicate decides whether a campaign may be
+    // blessed and its run root deleted. Reading a failed probe as "drained"
+    // would bless a run whose workers are still executing — silently, and
+    // exactly on the boxes where the probe is most likely to fail.
+    expect(groupHasRunningMemberFromPs({ exitCode: 1, stdout: "" }, 71030)).toBe(true)
+    expect(groupHasRunningMemberFromPs({ exitCode: 127, stdout: "garbage" }, 71030)).toBe(true)
+    // And a probe that DID run is believed, in both directions.
+    expect(groupHasRunningMemberFromPs({ exitCode: 0, stdout: "  71030 Z" }, 71030)).toBe(false)
+    expect(groupHasRunningMemberFromPs({ exitCode: 0, stdout: "  71030 S" }, 71030)).toBe(true)
+  })
 
   test("a spawn failure rejects the exit promise and tracks nothing", async () => {
     const dir = scratch()

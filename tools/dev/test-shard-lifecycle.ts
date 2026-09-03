@@ -61,7 +61,56 @@ export interface DrainOutcome {
   readonly survivors: readonly number[]
 }
 
-/** kill(-pgid, 0) — EPERM still means "someone is alive in that group". */
+/**
+ * Does this process group still hold a RUNNING member?
+ *
+ * `kill(-pgid, 0)` answers "does the kernel still know this group", and a
+ * ZOMBIE answers yes: it is a reaped-pending table entry, unkillable by
+ * definition (SIGKILL to a zombie is a no-op) and holding no fds, ports or
+ * working directory. Counting them as alive made the drain check report
+ * "survived SIGKILL" over four `<defunct>` entries and refuse an otherwise
+ * green 45-minute campaign — measured, on the first full-suite run that
+ * reached the end.
+ *
+ * So the cheap syscall stays the fast path, and only when it says "yes" is the
+ * group's actual membership inspected.
+ */
+export const groupStateLines = (psOutput: string, pgid: number): readonly string[] =>
+  psOutput
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "")
+    .filter((line) => Number.parseInt(line.split(/\s+/)[0] ?? "", 10) === pgid)
+    .map((line) => line.split(/\s+/)[1] ?? "")
+
+/** A member is live unless the kernel has it in Z (zombie) or E (exiting). */
+export const hasRunningMember = (states: readonly string[]): boolean =>
+  states.some((state) => !state.startsWith("Z") && !state.includes("E"))
+
+/**
+ * The decision, separated from the spawn so BOTH branches are testable.
+ *
+ * A `ps` that did not run answers nothing, and "nothing" must not read as
+ * "drained": that is the direction in which a wrong answer blesses a campaign
+ * whose workers are still executing.
+ */
+export const groupHasRunningMemberFromPs = (
+  ps: { readonly exitCode: number; readonly stdout: string },
+  pgid: number,
+): boolean => {
+  if (ps.exitCode !== 0) return true // cannot tell — fail closed to "alive"
+  return hasRunningMember(groupStateLines(ps.stdout, pgid))
+}
+
+const groupHasRunningMember = (pgid: number): boolean => {
+  const result = Bun.spawnSync(["ps", "-Ao", "pgid=,stat="], { stdout: "pipe", stderr: "ignore" })
+  return groupHasRunningMemberFromPs(
+    { exitCode: result.exitCode ?? 1, stdout: result.stdout.toString() },
+    pgid,
+  )
+}
+
+/** Literal existence: does the kernel still know this group at all. */
 export const processGroupAlive = (pgid: number): boolean => {
   try {
     process.kill(-pgid, 0)
@@ -70,6 +119,16 @@ export const processGroupAlive = (pgid: number): boolean => {
     return (error as NodeJS.ErrnoException).code === "EPERM"
   }
 }
+
+/**
+ * Does the group still HOLD anything — the question a drain actually asks.
+ *
+ * Deliberately weaker than existence: a group of zombies exists and cannot be
+ * killed, but owns no fd, port or working directory, so waiting for it is
+ * waiting forever and refusing the campaign over it is refusing over nothing.
+ */
+export const processGroupHoldsResources = (pgid: number): boolean =>
+  processGroupAlive(pgid) && groupHasRunningMember(pgid)
 
 /**
  * Identity of a process group's LEADER, as start time + command.
@@ -109,7 +168,7 @@ const waitForEmptyGroup = async (
   deadline: number,
   pollMs: number,
 ): Promise<boolean> => {
-  while (processGroupAlive(pgid)) {
+  while (processGroupHoldsResources(pgid)) {
     if (Date.now() >= deadline) return false
     await Bun.sleep(pollMs)
   }
@@ -127,7 +186,7 @@ export const killProcessTree = async (
   const termGraceMs = options.termGraceMs ?? 2_000
   const killGraceMs = options.killGraceMs ?? 5_000
   const pollMs = options.pollMs ?? 50
-  if (!processGroupAlive(pgid)) return true
+  if (!processGroupHoldsResources(pgid)) return true
   signalGroup(pgid, "SIGTERM")
   if (await waitForEmptyGroup(pgid, Date.now() + termGraceMs, pollMs)) return true
   signalGroup(pgid, "SIGKILL")
@@ -164,7 +223,7 @@ export class ShardProcessRegistry {
 
   private sweep(): void {
     for (const worker of [...this.tracked]) {
-      if (!processGroupAlive(worker.pgid)) this.tracked.delete(worker)
+      if (!processGroupHoldsResources(worker.pgid)) this.tracked.delete(worker)
     }
   }
 
