@@ -1,5 +1,6 @@
 import {
   closeSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   openSync,
@@ -7,9 +8,10 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs"
-import { availableParallelism, freemem, loadavg, tmpdir, totalmem } from "node:os"
+import { availableParallelism, freemem, homedir, loadavg, tmpdir, totalmem } from "node:os"
 import { dirname, join, relative, resolve } from "node:path"
 import { expandTestFiles } from "./sandboxed-test"
 import { sampleTreeRssBytes } from "./shard-rss"
@@ -319,6 +321,38 @@ const pruneStaleChunkReceipts = (suite: SuiteName, nowMs = Date.now()): void => 
   }
 }
 
+/**
+ * Lend the worker HOME the real `~/Library`, and nothing else.
+ *
+ * The scratch HOME exists so a test cannot read the developer's real
+ * `~/.quanta`; QUANTA_HOME and QUANTA_PREFS_HOME are set explicitly, so that
+ * protection never depended on HOME being empty — only on those pointing
+ * somewhere else, which they still do.
+ *
+ * What DID depend on it was Chrome, and the failure is environmental rather
+ * than ours. Measured with a raw CDP probe (no adapter involved), six cold
+ * HOMEs each: `Page.navigate` completed 2/6 times. When it failed, NOTHING
+ * arrived — no `responseReceived`, no `frameStoppedLoading`, no
+ * `loadEventFired` — so the fetch never started and there is no alternative
+ * completion signal to wait on instead. With the real Library lent in, the
+ * same probe was 6/6. Neither `--disable-background-networking`/
+ * `--disable-component-update` nor forcing an inert `about:blank` initial
+ * target moved the rate; an EMPTY Library skeleton measures like no Library
+ * at all, which is why an earlier persistent-but-cold directory did not help.
+ *
+ * Best effort: if the link cannot be made the tests still run, they just
+ * inherit that 1-in-3 navigate.
+ */
+const lendRealUserLibrary = (workerHome: string): void => {
+  try {
+    const real = join(homedir(), "Library")
+    if (!existsSync(real)) return
+    symlinkSync(real, join(workerHome, "Library"))
+  } catch {
+    // Already linked, or a platform without this convention.
+  }
+}
+
 interface ShardRunResult {
   readonly code: number
   readonly timedOut: boolean
@@ -365,6 +399,7 @@ const runShard = async (
   const benchResults = join(workerRoot, "bench-results")
   mkdirSync(workerTmp, { recursive: true })
   mkdirSync(quantaHome, { recursive: true })
+  lendRealUserLibrary(workerHome)
   mkdirSync(prefsHome, { recursive: true })
   mkdirSync(benchResults, { recursive: true })
   const spoolPath = join(workerRoot, `chunk-${plan.index}.log`)
