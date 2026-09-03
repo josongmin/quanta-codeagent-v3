@@ -359,8 +359,38 @@ if (stage === "prepush" && wants("--reuse-receipt")) {
     printOut(`prepush: receipt check failed closed (${message}); running gates`)
   }
 }
-// A red or interrupted run must never leave a previous green receipt current.
-if (stage === "prepush") rmSync(exactReceiptPath, { force: true })
+/**
+ * A red or interrupted run must never leave a previous green receipt current —
+ * but ONLY the receipt this run is about to supersede.
+ *
+ * The delete used to be unconditional, and the cache is shared across every
+ * worktree of the repository (one git common-dir, by design). So a prepush from
+ * a checkout with any uncommitted file destroyed a green another checkout had
+ * just earned at the same HEAD — while being unable to mint a replacement,
+ * because minting requires a clean status. MEASURED: `git push` from this
+ * working copy, dirty with one unrelated file from another session, threw away
+ * a 21-of-21 receipt earned minutes earlier in a pristine worktree and started
+ * the 45 minutes again.
+ *
+ * A receipt that does not validate against this run's context describes a
+ * different state. It is not about to be mistaken for this run's result — the
+ * validation above already rejects it — so it is not ours to delete.
+ */
+if (stage === "prepush") {
+  const supersedes = (): boolean => {
+    try {
+      return validateExactVerificationReceipt(
+        readExactVerificationReceipt(exactReceiptPath),
+        verificationContextForSnapshot(REPO_ROOT, gitSnapshot(), plannedManifestSha256),
+      ).ok
+    } catch {
+      // Cannot tell whose it is — leave it. A stale receipt is rejected by
+      // validation; a deleted one costs someone a full campaign.
+      return false
+    }
+  }
+  if (supersedes()) rmSync(exactReceiptPath, { force: true })
+}
 
 let frozenSnapshot: GitSnapshot | undefined
 if (stage === "prepush") {

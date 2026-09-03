@@ -399,23 +399,67 @@ describe("prepush clean-head receipt", () => {
     expect(readFileSync(join(root, ".git", "gate-count"), "utf8")).toBe("xx")
   })
 
-  behaviorTest("a red run destroys the previous green exact receipt", () => {
+  behaviorTest("a red run destroys the green receipt for the SAME state", () => {
+    // The gate goes red on a file under .git — untracked, so the checkout stays
+    // clean and both runs describe the identical state. That is the case the
+    // delete exists for: a receipt that WOULD validate, superseded by a run
+    // that failed.
     const runs = Array.from({ length: 21 }, () => "true")
+    runs[18] = "test ! -f .git/make-me-red"
     const root = makeRepo(runs)
-    const first = runGate(root, "prepush", ["--reuse-receipt"])
-    expect(first.code).toBe(0)
+    expect(runGate(root, "prepush", ["--reuse-receipt"]).code).toBe(0)
     expect(existsSync(verificationReceiptPath(root))).toBe(true)
 
-    // Break one prepush gate, then run WITHOUT reuse: the stale green receipt
-    // must be deleted before gate 1 so a later --reuse-receipt cannot resurrect it.
-    const broken = Array.from({ length: 21 }, () => "true")
-    broken[18] = "false"
-    writeFileSync(join(root, "tools", "dev", "gate-manifest.ts"), manifestSource(broken))
-    git(root, ["add", "."])
-    git(root, ["commit", "-qm", "break gate"])
+    writeFileSync(join(root, ".git", "make-me-red"), "")
     const red = runGate(root, "prepush")
     expect(red.code).toBe(1)
     expect(existsSync(verificationReceiptPath(root))).toBe(false)
+  })
+
+  behaviorTest("a checkout it cannot read is not a licence to delete", () => {
+    // END-TO-END, and labelled for what it does and does not show: it proves a
+    // run that cannot read the checkout leaves the receipt alone. It does NOT
+    // discriminate the fail-closed `catch` on its own — with a HEAD this
+    // broken, the receipt PATH is derived from git too, so an injected
+    // fail-open deletes something else and this case still passes. The reason
+    // the catch returns false stands on its own: a stale receipt is rejected by
+    // validation on the way in, while a deleted one costs whoever earned it a
+    // full campaign.
+    const root = makeRepo(Array.from({ length: 21 }, () => "true"))
+    expect(runGate(root, "prepush", ["--reuse-receipt"]).code).toBe(0)
+    const receipt = verificationReceiptPath(root)
+    const before = readFileSync(receipt, "utf8")
+
+    // A HEAD git cannot resolve: `gitSnapshot()` throws, and the receipt file
+    // itself is still perfectly readable.
+    writeFileSync(join(root, ".git", "HEAD"), "not a ref\n")
+    const confused = runGate(root, "prepush")
+    expect(confused.code).not.toBe(0)
+    expect(existsSync(receipt), "a run that could not read the checkout deleted it").toBe(true)
+    expect(readFileSync(receipt, "utf8")).toBe(before)
+  })
+
+  behaviorTest("a red run does NOT destroy a receipt for a DIFFERENT state", () => {
+    // The cache is shared by every worktree of the repository — one git
+    // common-dir, by design. The delete used to be unconditional, so a prepush
+    // from a checkout carrying any uncommitted file threw away a green another
+    // checkout had just earned, while being unable to mint a replacement
+    // (minting requires a clean status). MEASURED: `git push` from a working
+    // copy dirty with one unrelated file discarded a 21-of-21 receipt earned
+    // minutes earlier in a pristine worktree, and started the 45 minutes again.
+    const root = makeRepo(Array.from({ length: 21 }, () => "true"))
+    expect(runGate(root, "prepush", ["--reuse-receipt"]).code).toBe(0)
+    const receipt = verificationReceiptPath(root)
+    expect(existsSync(receipt)).toBe(true)
+    const before = readFileSync(receipt, "utf8")
+
+    // A dirty checkout at the same HEAD: it cannot match this receipt, cannot
+    // mint one, and must not delete one.
+    writeFileSync(join(root, "tracked.txt"), "locally modified\n")
+    const dirty = runGate(root, "prepush")
+    expect(dirty.code).not.toBe(0)
+    expect(existsSync(receipt), "a dirty peer deleted a clean checkout's green").toBe(true)
+    expect(readFileSync(receipt, "utf8")).toBe(before)
   })
 
   behaviorTest(
