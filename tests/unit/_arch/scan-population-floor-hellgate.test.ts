@@ -90,15 +90,19 @@ describe("population floor", () => {
   test("a walk that reached everything passes (paired control)", () => {
     const fx = build()
     expect(() =>
-      assertScanPopulation(walk(fx.root), fx.root, { id: "fx", baselinePath: fx.pin(2) }),
+      assertScanPopulation(walk(fx.root), fx.root, {
+        id: "fx",
+        fixture: true,
+        baselinePath: fx.pin(2),
+      }),
     ).not.toThrow()
   })
 
   test("INJECTION: an empty walk is red — 'found nothing' is not 'nothing to find'", () => {
     const fx = build()
-    expect(() => assertScanPopulation([], fx.root, { id: "fx", baselinePath: fx.pin(2) })).toThrow(
-      /reached 0 TRACKED files/,
-    )
+    expect(() =>
+      assertScanPopulation([], fx.root, { id: "fx", fixture: true, baselinePath: fx.pin(2) }),
+    ).toThrow(/reached 0 TRACKED files/)
   })
 
   test("INJECTION: an IGNORED twin is not reach, even 50 files of it", () => {
@@ -107,7 +111,11 @@ describe("population floor", () => {
     // gone and only a gitignored twin remains. The walk-backed form of this
     // helper PASSED here — measured, in this repo, before the rewrite.
     expect(() =>
-      assertScanPopulation(twinFiles(fx.root), fx.root, { id: "fx", baselinePath: fx.pin(2) }),
+      assertScanPopulation(twinFiles(fx.root), fx.root, {
+        id: "fx",
+        fixture: true,
+        baselinePath: fx.pin(2),
+      }),
     ).toThrow(/reached 0 TRACKED files/)
   })
 
@@ -120,14 +128,18 @@ describe("population floor", () => {
     // INDEX, so it would count both and report a healthy corpus over an empty
     // checkout.
     expect(() =>
-      assertScanPopulation(walk(fx.root), fx.root, { id: "fx", baselinePath: bl }),
+      assertScanPopulation(walk(fx.root), fx.root, { id: "fx", fixture: true, baselinePath: bl }),
     ).toThrow(/reached 0 TRACKED files/)
   })
 
   test("INJECTION: losing ONE subtree is red, which a count floor cannot see", () => {
     const fx = build()
     expect(() =>
-      assertScanPopulation(walk(fx.root, "beta"), fx.root, { id: "fx", baselinePath: fx.pin(1) }),
+      assertScanPopulation(walk(fx.root, "beta"), fx.root, {
+        id: "fx",
+        fixture: true,
+        baselinePath: fx.pin(1),
+      }),
     ).toThrow(/enumerated none of them/)
   })
 
@@ -139,7 +151,11 @@ describe("population floor", () => {
     // `alpha` is still reached and the count is still full — the exact hole
     // measured on the PEP fence when `src/agent/loop` was dropped.
     expect(() =>
-      assertScanPopulation(walk(fx.root), fx.root, { id: "fx", baselinePath: fx.pin(2) }),
+      assertScanPopulation(walk(fx.root), fx.root, {
+        id: "fx",
+        fixture: true,
+        baselinePath: fx.pin(2),
+      }),
     ).toThrow(/alpha\/deep/)
   })
 
@@ -148,7 +164,11 @@ describe("population floor", () => {
     // `docs/` is tracked but holds only `.md`. A floor that reds here is a floor
     // people delete.
     expect(() =>
-      assertScanPopulation(walk(fx.root), fx.root, { id: "fx", baselinePath: fx.pin(2) }),
+      assertScanPopulation(walk(fx.root), fx.root, {
+        id: "fx",
+        fixture: true,
+        baselinePath: fx.pin(2),
+      }),
     ).not.toThrow()
   })
 
@@ -156,7 +176,11 @@ describe("population floor", () => {
     const fx = build()
     // `twin/` holds 50 `.ts` on disk. Demanding it would red every clean tree.
     expect(() =>
-      assertScanPopulation(walk(fx.root), fx.root, { id: "fx", baselinePath: fx.pin(2) }),
+      assertScanPopulation(walk(fx.root), fx.root, {
+        id: "fx",
+        fixture: true,
+        baselinePath: fx.pin(2),
+      }),
     ).not.toThrow()
   })
 
@@ -166,7 +190,7 @@ describe("population floor", () => {
     writeFileSync(join(fx.root, "b.ts"), "export const b = 2\n")
     stage(fx.root)
     const bl = fx.pin(1)
-    const opts = { id: "fx", baselinePath: bl, topLevelOnly: true } as const
+    const opts = { id: "fx", fixture: true, baselinePath: bl, topLevelOnly: true } as const
     expect(() =>
       assertScanPopulation([join(fx.root, "a.ts"), join(fx.root, "b.ts")], fx.root, opts),
     ).not.toThrow()
@@ -182,17 +206,31 @@ describe("population floor", () => {
     // The walk is full; the guard's own matcher has rotted to zero hits. A floor
     // on the walk alone clears this, which is why there are two numbers.
     expect(() =>
-      assertScanPopulation(files, fx.root, { id: "fx", baselinePath: bl, matched: [] }),
+      assertScanPopulation(files, fx.root, {
+        id: "fx",
+        fixture: true,
+        baselinePath: bl,
+        matched: [],
+      }),
     ).toThrow(/selected 0 of 2/)
     expect(() =>
-      assertScanPopulation(files, fx.root, { id: "fx", baselinePath: bl, matched: files }),
+      assertScanPopulation(files, fx.root, {
+        id: "fx",
+        fixture: true,
+        baselinePath: bl,
+        matched: files,
+      }),
     ).not.toThrow()
   })
 
   test("PREDICATE: a pinned matched floor that the guard never reports is refused", () => {
     const fx = build()
     expect(() =>
-      assertScanPopulation(walk(fx.root), fx.root, { id: "fx", baselinePath: fx.pin(2, 1) }),
+      assertScanPopulation(walk(fx.root), fx.root, {
+        id: "fx",
+        fixture: true,
+        baselinePath: fx.pin(2, 1),
+      }),
     ).toThrow(/pins a matched floor .* but the guard passed no matched set/)
   })
 
@@ -201,6 +239,7 @@ describe("population floor", () => {
     expect(() =>
       assertScanPopulation(walk(fx.root), fx.root, {
         id: "fx",
+        fixture: true,
         baselinePath: fx.pin(2),
         matched: [],
       }),
@@ -219,6 +258,7 @@ describe("population floor", () => {
     expect(() =>
       assertScanPopulation([...two, ...two, ...two], fx.root, {
         id: "fx",
+        fixture: true,
         baselinePath: fx.pin(6),
       }),
     ).toThrow(/reached 2 TRACKED/)
@@ -234,6 +274,7 @@ describe("population floor", () => {
     expect(() =>
       assertScanPopulation(withNote, fx.root, {
         id: "fx",
+        fixture: true,
         collectable: (n) => n.endsWith(".ts"),
         baselinePath: fx.pin(3),
       }),
@@ -247,6 +288,7 @@ describe("population floor", () => {
     expect(() =>
       assertScanPopulation(withBeta, fx.root, {
         id: "fx",
+        fixture: true,
         skipDirs: ["beta"],
         baselinePath: fx.pin(2),
       }),
@@ -263,6 +305,7 @@ describe("population floor", () => {
     expect(() =>
       assertScanPopulation(files, fx.root, {
         id: "fx",
+        fixture: true,
         matched: ["nope-1", "nope-2"],
         baselinePath: fx.pin(2, 2),
       }),
@@ -270,6 +313,7 @@ describe("population floor", () => {
     expect(() =>
       assertScanPopulation(files, fx.root, {
         id: "fx",
+        fixture: true,
         matched: [files[0] as string, files[0] as string],
         baselinePath: fx.pin(2, 2),
       }),
@@ -283,6 +327,7 @@ describe("population floor", () => {
     expect(() =>
       assertScanPopulation(files, fx.root, {
         id: "fx",
+        fixture: true,
         matched: files,
         baselinePath: fx.pin(2, 2),
       }),
@@ -310,7 +355,11 @@ describe("population floor", () => {
   test("CLOSED UNIVERSE: an unpinned scan fails rather than defaulting to 1", () => {
     const fx = build()
     expect(() =>
-      assertScanPopulation(walk(fx.root), fx.root, { id: "not-pinned", baselinePath: fx.pin(2) }),
+      assertScanPopulation(walk(fx.root), fx.root, {
+        id: "not-pinned",
+        fixture: true,
+        baselinePath: fx.pin(2),
+      }),
     ).toThrow(/no reach floor pinned for "not-pinned"/)
   })
 
@@ -319,9 +368,9 @@ describe("population floor", () => {
     made.push(bare)
     const bl = join(bare, "bl.json")
     writeFileSync(bl, JSON.stringify({ note: "fixture", scans: { fx: { walked: 1 } } }))
-    expect(() => assertScanPopulation([], bare, { id: "fx", baselinePath: bl })).toThrow(
-      /reach cannot be measured/,
-    )
+    expect(() =>
+      assertScanPopulation([], bare, { id: "fx", fixture: true, baselinePath: bl }),
+    ).toThrow(/reach cannot be measured/)
   })
 
   test("the helper's OWN fixtures never reach the shared reach ledger", () => {
@@ -338,14 +387,22 @@ describe("population floor", () => {
     const prior = process.env.QUANTA_SCAN_REACH_RECORD
     process.env.QUANTA_SCAN_REACH_RECORD = sink
     try {
-      assertScanPopulation(walk(fx.root), fx.root, { id: "fx", baselinePath: fx.pin(2) })
+      assertScanPopulation(walk(fx.root), fx.root, {
+        id: "fx",
+        fixture: true,
+        baselinePath: fx.pin(2),
+      })
       expect(existsSync(sink), `a fixture wrote to the shared ledger: ${sink}`).toBe(false)
 
-      // PAIRED CONTROL: the seam is what suppresses it, not the sink being
-      // broken. The same call WITHOUT `baselinePath` still records — that path
-      // is how every real guard reports its reach.
+      // PAIRED CONTROL: `fixture` is what suppresses it, not the sink being
+      // broken — and NOT `baselinePath`, which `scan-reach-cli-hellgate` sets
+      // in a child whose whole premise is that reach IS recorded before the
+      // assertion fails. The same call without `fixture` still records.
       expect(() =>
-        assertScanPopulation(walk(fx.root), fx.root, { id: "an-unpinned-real-guard" }),
+        assertScanPopulation(walk(fx.root), fx.root, {
+          id: "an-unpinned-real-guard",
+          baselinePath: fx.pin(2),
+        }),
       ).toThrow(/no reach floor pinned/)
       expect(readFileSync(sink, "utf8")).toContain('"an-unpinned-real-guard"')
     } finally {

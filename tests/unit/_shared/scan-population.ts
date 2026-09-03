@@ -130,6 +130,29 @@ export interface ScanPopulationOptions {
    * that is visible in a diff.
    */
   readonly baselinePath?: string
+  /**
+   * TEST SEAM — this call measures a temp fixture, not this repository, so its
+   * reach is not recorded.
+   *
+   * MEASURED: a cold campaign, otherwise 20 of 21 green, was refused by
+   * `bun run scan-reach` over the ids "fx" and "not-pinned" — the synthetic
+   * fixtures in this helper's own hellgate, appended to the shared sink on
+   * every full run. The message was "an enrolled scan with no ledger entry is
+   * one nobody is accountable for", about scans that were never enrolled and
+   * never should be.
+   *
+   * `baselinePath` is NOT the discriminator, though it looks like one:
+   * `scan-reach-cli-hellgate` sets it in a child fixture whose whole premise is
+   * that reach IS recorded before the assertion fails. Nor can the hellgate
+   * redirect the sink through the environment — a chunk runs its files
+   * concurrently in one process, so it would capture its peers' rows and drop
+   * them from the real ledger.
+   *
+   * A guard that set this by mistake does not vanish quietly: its pinned floor
+   * then has no reporter, which `scan-reach` refuses as "pinned but no guard
+   * reported it".
+   */
+  readonly fixture?: boolean
 }
 
 /**
@@ -139,15 +162,7 @@ export interface ScanPopulationOptions {
 const record = (opts: ScanPopulationOptions, walked: number): void => {
   const sink = process.env.QUANTA_SCAN_REACH_RECORD
   if (sink === undefined || sink === "") return
-  // A call that points `baselinePath` elsewhere is this helper's OWN hellgate
-  // exercising it over a temp directory, not a guard measuring the repository.
-  // Recording those put synthetic ids ("fx", "not-pinned") into the shared sink,
-  // where `bun run scan-reach` found scans no file in scan-enrollment-debt.json
-  // owns and refused the run — a red that says "an enrolled scan nobody is
-  // accountable for" about a fixture that was never enrolled and never should
-  // be. Invisible until the full suite began completing and the gate started
-  // consuming its receipt.
-  if (opts.baselinePath !== undefined) return
+  if (opts.fixture === true) return
   const line = { id: opts.id, walked, matched: opts.matched?.length }
   appendFileSync(sink, `${JSON.stringify(line)}\n`)
 }
