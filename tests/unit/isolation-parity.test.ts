@@ -1,27 +1,27 @@
 /**
- * ★ HELLGATE — a `pure` chunk means the same thing with and without isolation.
+ * ★ HELLGATE — a `pure` chunk means the same thing however its files share a
+ * process.
  *
- * WHY THIS EXISTS. The shard runner passes `--parallel=1` to every worker, and
- * in Bun that flag IMPLIES `--isolate`: one worker process, but a fresh global
- * per test file. So the suite pays the entire isolation cost and gets none of
- * the parallelism. Measured by counting preload evaluations (a count, which load
- * cannot distort): 5 test files ran the bunfig preload ONCE with no flag and
- * FIVE times under `--parallel=1`. On a real 156-file `pure` chunk, back to back
- * at load 40-47: 82.5s isolated vs 40.5s not — 2x.
+ * WHY THIS EXISTS. The runner packs `pure` files into one chunk and hands that
+ * chunk `--parallel=N` (up to 8), so N of them run CONCURRENTLY inside a single
+ * worker; every other class gets `--parallel=1`, because two files that own a
+ * port, a browser or the working tree must not share a process. That asymmetry
+ * rests entirely on the `pure` definition, and the measurement behind it covered
+ * 24 files.
  *
- * The classifier already answers whether that is safe. `pure` is defined as
- * owning no process-global or checkout-global resource, and the runner's own
- * comment says running two NON-pure files in one process "is precisely what the
- * class system exists to prevent". Isolation buys a `pure` file nothing.
+ * MEASURED at corpus scale (2026-09-03, 2,946 files / 36,359 cases, both sides
+ * at the runner's 120,000 ms timeout): `--parallel=1` 10m10s, no flag 3m34s,
+ * `--parallel=8` 2m14s — all three 36,325 pass / 2 fail, PARITY in every pairing
+ * (36,188 compared, zero divergences). The runner's configuration is the fastest
+ * AND verdict-clean; removing isolation would be a 60% regression, since the win
+ * came from concurrency rather than from dropping isolation.
  *
- * But "buys nothing" is a claim about 2,946 files, and dropping isolation is a
- * SEMANTIC change, not a tuning knob. So this is the evidence the change rests
- * on: run a corpus both ways and compare per-test outcomes. A disagreement does
- * not mean "keep isolation" — it means that file is not `pure` and the
- * CLASSIFIER is wrong.
+ * A disagreement would NOT mean "share less" — it would mean that file owns
+ * shared state and the CLASSIFIER is wrong.
  *
  * This file pins the comparison logic. The rail that runs a real corpus through
- * it is `tools/dev/isolation-parity.ts`.
+ * it is `tools/dev/isolation-parity.ts`, whose header carries the measurement
+ * and the timeout confound that ruined the first attempt.
  */
 
 import { describe, expect, test } from "bun:test"

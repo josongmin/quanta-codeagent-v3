@@ -92,6 +92,9 @@
     "tests/unit/agent-slice-boundary.test.ts": [
       "slice-boundary:agent"
     ],
+    "tests/unit/ambient-global-capture-ratchet.test.ts": [
+      "tests/unit/ambient-global-capture-ratchet.test.ts#SRC-DIR"
+    ],
     "tests/unit/apps/bench/batch-sdk-parity.test.ts": [
       "tests/unit/apps/bench/batch-sdk-parity.test.ts#APP-DRIVER-DIR"
     ],

@@ -239,6 +239,9 @@
     "tests/unit/agent-import-cycle.test.ts#src-agent-toplevel": {
       "walked": 159
     },
+    "tests/unit/ambient-global-capture-ratchet.test.ts#SRC-DIR": {
+      "walked": 3374
+    },
     "tests/unit/apps/bench/batch-sdk-parity.test.ts#APP-DRIVER-DIR": {
       "walked": 5
     },

@@ -1,31 +1,54 @@
 /**
  * `tools/dev/isolation-parity` — evidence that a `pure` corpus means the same
- * thing with and without Bun's per-file isolation.
+ * thing however its files share a process.
  *
  * # Why
- * The shard runner passes `--parallel=1`, and in Bun that flag implies
- * `--isolate`: one worker process, but a fresh global per test file. The suite
- * therefore pays the whole isolation cost for none of the parallelism. Counted
- * (a count, which host load cannot distort): five test files evaluated the
- * bunfig preload ONCE with no flag and FIVE times under `--parallel=1`. On a
- * real 156-file `pure` chunk, back to back at load 40-47: 82.5s isolated vs
- * 40.5s shared.
+ * `pure` is defined as owning no process-global or checkout-global resource, and
+ * the runner leans on that definition twice: it packs `pure` files into one
+ * chunk, and it hands that chunk `--parallel=N` (up to 8) so N of them run
+ * CONCURRENTLY inside a single worker. Every other class gets `--parallel=1`,
+ * because running two files that own a port, a browser or the working tree in
+ * one process is what the class system exists to prevent.
  *
- * The classifier already decides whether that is safe — `pure` is defined as
- * owning no process-global or checkout-global resource. But that is a claim
- * about thousands of files, and removing isolation changes semantics rather than
- * tuning a number, so it needs evidence rather than an argument.
+ * That is a claim about thousands of files resting on a definition, and the
+ * measurement that justified it covered 24. This rail is the corpus-scale
+ * version: run the same corpus under different sharing and compare per-test
+ * outcomes.
+ *
+ * # Measured (2026-09-03, 2,946 files / 36,359 cases, all at the runner's
+ * 120,000 ms timeout, idle box)
+ *
+ *   --parallel=1   isolated, sequential   10m10s
+ *   no flag        shared,   sequential    3m34s
+ *   --parallel=8   isolated, concurrent    2m14s   <- what the runner does
+ *
+ * All three: 36,325 pass / 2 fail, and PARITY in every pairing (36,188 compared,
+ * zero divergences). So the corpus really is insensitive to how it shares a
+ * process, and the runner's configuration is both the fastest and verdict-clean.
+ *
+ * Dropping isolation is therefore NOT an optimisation — at 3m34s it is a 60%
+ * regression against the 2m14s the runner already achieves. Concurrency, not the
+ * absence of isolation, is where the time went.
  *
  * # What a divergence means
- * NOT "put isolation back". It means the file mutates shared state and is
- * therefore not `pure` — the classifier is what should change. Reporting the
- * file is the point: a rail that only said "differs" would send someone hunting.
+ * NOT "share less". It means the file owns shared state and is therefore not
+ * `pure` — the CLASSIFIER is what should change. Reporting the file is the
+ * point: a rail that only said "differs" would send someone hunting.
  *
  * # Why absence is a divergence
- * A shared run that dies early emits fewer testcases. Comparing only the
- * intersection would call the survivors parity and hide exactly the crash this
- * rail exists to catch, so a test present on one side and missing on the other
- * is a divergence with `absent` named as its outcome.
+ * A run that dies early emits fewer testcases. Comparing only the intersection
+ * would call the survivors parity and hide exactly the crash this rail exists to
+ * catch, so a test present on one side and missing on the other is a divergence
+ * with `absent` named as its outcome.
+ *
+ * # Run both sides at the SAME timeout
+ * The first attempt did not, and reported 321 divergences that were all
+ * artefact. It used bare `bun test`, taking Bun's 5,000 ms default while the
+ * runner scales from a 120,000 ms base — 24x tighter. Isolation is ~2.8x slower,
+ * so the confound did not cancel: hooks timed out 56 times against 1, and a
+ * timed-out `beforeEach` aborts the whole FILE, collapsing 125 cases into a
+ * single `(unnamed)` failure that reads as mass absence. Pinning both sides at
+ * the runner's timeout is what makes this a difference measurement.
  */
 
 export type TestOutcome = "pass" | "fail"
