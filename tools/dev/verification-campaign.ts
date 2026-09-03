@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto"
 import { mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { basename, dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
+import { describeQuietBoxWait, waitForQuietBox } from "./box-load"
 import { gatesForStage } from "./gate-manifest"
 import {
   acquireTestShardLease,
@@ -62,6 +63,10 @@ if (command.length === 0) {
   process.stderr.write("usage: verification-campaign.ts -- <command> [args...]\n")
   process.exit(2)
 }
+
+/** Long enough for this repository's own 30-chunk suite to decay out of the
+ *  1-minute average; past that the load is foreign and waiting buys nothing. */
+const CAMPAIGN_QUIET_BOX_BUDGET_MS = 180_000
 
 const campaignStartedAtMs = Date.now()
 const hostAtStart = sampleCampaignHost()
@@ -252,6 +257,24 @@ const writeOwnerSidecar = (): void => {
   }
 }
 writeOwnerSidecar()
+
+/**
+ * Start on a box that is not oversubscribed, or say plainly that we did not.
+ *
+ * TWICE IN ONE DAY, on this machine, by processes that had nothing to do with
+ * this repository: forty orphaned busy-loop shells another session left running
+ * for nine and a half hours held a 16-core box at load 52, and an abandoned
+ * watchman spun 15 dead jest roots at 1,267% CPU. Both cost a whole campaign —
+ * the first through starved rust-analyzer cases that read as a code defect, the
+ * second by making a fresh 45-minute run worthless from its first second.
+ *
+ * The lease is already held here on purpose: the wait is bounded, and losing
+ * our place in line to a peer would be a worse trade than starting a little
+ * later. It never refuses — a rail that unrelated load can stop is a rail
+ * nobody can use on a working machine.
+ */
+const startWait = await waitForQuietBox({ budgetMs: CAMPAIGN_QUIET_BOX_BUDGET_MS })
+process.stdout.write(`[verification] ${describeQuietBoxWait(startWait)}\n`)
 
 let campaignExitCode: number | null = null
 try {

@@ -446,4 +446,27 @@ describe("whole verification campaign lease", () => {
     // The counting gate did not run a second time.
     expect(readFileSync(join(root, ".git", "gate-count"), "utf8")).toBe("x")
   }, 60_000)
+
+  test("the campaign says what load it started under", () => {
+    // Twice in one day this box was held saturated by processes unrelated to
+    // this repository — forty orphaned busy-loops for nine and a half hours,
+    // and an abandoned watchman spinning dead jest roots at 1,267% CPU. Each
+    // cost a full campaign, and neither run said a word about it. The line is
+    // cheap; a 45-minute run that cannot be attributed is not.
+    const root = mkdtempSync(join(tmpdir(), "quanta-campaign-quiet-"))
+    roots.push(root)
+    mkdirSync(join(root, "tools", "dev"), { recursive: true })
+    for (const file of CAMPAIGN_MODULES)
+      copyFileSync(source(file), join(root, "tools", "dev", file))
+    initCommittedRepo(root)
+    const result = Bun.spawnSync(
+      [process.execPath, join(root, "tools", "dev", "verification-campaign.ts"), "--", "true"],
+      { cwd: root, env: cleanLeaseEnv(), stdout: "pipe", stderr: "pipe" },
+    )
+    const out = `${result.stdout.toString()}${result.stderr.toString()}`
+    expect(result.exitCode, out).toBe(0)
+    const line = out.split("\n").find((text) => text.includes("load/core"))
+    expect(line, `no load line in:\n${out}`).toBeDefined()
+    expect(/box quiet|waited \d+s for a quiet box|RAN HOT/.test(line ?? "")).toBe(true)
+  }, 240_000)
 })
