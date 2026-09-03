@@ -53,6 +53,13 @@ const cleanLeaseEnv = (): NodeJS.ProcessEnv => {
   const env = { ...process.env }
   delete env.QUANTA_VERIFICATION_LEASE_TOKEN
   delete env.QUANTA_VERIFICATION_LEASE_OWNER_PID
+  // Every fixture here spawns a REAL campaign, and a real campaign waits for a
+  // box that is not oversubscribed before running its command. Standalone that
+  // is instant; inside a full-suite chunk it is not, and two lease cases blew
+  // their 15s timeouts waiting on this machine's load — a fixture whose
+  // duration is a function of what else the box is doing. The one case that
+  // PROVES the wait is wired sets the same zero and reads the line it prints.
+  env.QUANTA_QUIET_BOX_BUDGET_MS = "0"
   return env
 }
 
@@ -463,9 +470,9 @@ describe("whole verification campaign lease", () => {
       [process.execPath, join(root, "tools", "dev", "verification-campaign.ts"), "--", "true"],
       {
         cwd: root,
-        // Budget zero: prove the wait is WIRED without making the test's
-        // duration a function of what else this machine is doing.
-        env: { ...cleanLeaseEnv(), QUANTA_QUIET_BOX_BUDGET_MS: "0" },
+        // The zero budget comes from `cleanLeaseEnv`; this case reads the
+        // line the wait prints, which is the wiring it proves.
+        env: cleanLeaseEnv(),
         stdout: "pipe",
         stderr: "pipe",
       },

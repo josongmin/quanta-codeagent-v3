@@ -114,6 +114,17 @@ export const quietBoxBudgetMs = (
   env: Readonly<Record<string, string | undefined>>,
   fallbackMs: number,
 ): number => {
+  // NESTED. A campaign or gate started from inside a shard worker is a test
+  // fixture, and a fixture must not wait on the machine: twice in one
+  // afternoon a fixture's duration became a function of what else this box was
+  // doing — one gate fixture took 58 seconds against a 15s timeout, and after
+  // that was fixed two campaign lease fixtures did the same — each failing a
+  // cold campaign at a different chunk while passing standalone every time.
+  //
+  // `QUANTA_TEST_TIMEOUT_SCALE` is set by `run-test-shards` on every worker and
+  // by nothing else, so it answers "am I inside the test rail" exactly, with no
+  // source-text guessing about which files spawn what.
+  if (env.QUANTA_TEST_TIMEOUT_SCALE !== undefined) return 0
   const raw = env.QUANTA_QUIET_BOX_BUDGET_MS
   if (raw === undefined) return fallbackMs
   // STRICT, because `Number.parseInt` is not: it reads "1e9999" as 1, which

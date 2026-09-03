@@ -123,6 +123,17 @@ describe("waiting for a box that is not oversubscribed", () => {
     // wired without its duration depending on what else the box is doing. A
     // typo must fall back to the real budget rather than silently disable it.
     expect(quietBoxBudgetMs({}, 180_000)).toBe(180_000)
+    // Inside a shard worker the budget is zero whatever else is set: a fixture
+    // campaign must not wait on the machine, and this answers "am I inside the
+    // test rail" exactly — `run-test-shards` sets it on every worker and
+    // nothing else does.
+    expect(quietBoxBudgetMs({ QUANTA_TEST_TIMEOUT_SCALE: "2" }, 180_000)).toBe(0)
+    expect(
+      quietBoxBudgetMs(
+        { QUANTA_TEST_TIMEOUT_SCALE: "2", QUANTA_QUIET_BOX_BUDGET_MS: "90000" },
+        180_000,
+      ),
+    ).toBe(0)
     expect(quietBoxBudgetMs({ QUANTA_QUIET_BOX_BUDGET_MS: "0" }, 180_000)).toBe(0)
     expect(quietBoxBudgetMs({ QUANTA_QUIET_BOX_BUDGET_MS: "5000" }, 180_000)).toBe(5_000)
     for (const bad of ["", "abc", "-1", "1e9999"]) {
