@@ -197,7 +197,7 @@
       "walked": 3765
     },
     "tests/unit/_arch/no-leftover-backup-files.test.ts#tests": {
-      "walked": 3753
+      "walked": 3754
     },
     "tests/unit/_arch/no-leftover-backup-files.test.ts#tools": {
       "walked": 1391
@@ -209,13 +209,13 @@
       "walked": 3530
     },
     "tests/unit/_arch/repo-index-hygiene.test.ts#INDEX": {
-      "walked": 14379
+      "walked": 14380
     },
     "tests/unit/_arch/repo-path-anchor-ratchet.test.ts#SRC": {
       "walked": 299
     },
     "tests/unit/_arch/repo-path-anchor-ratchet.test.ts#TESTS": {
-      "walked": 3530
+      "walked": 3531
     },
     "tests/unit/_arch/repo-path-anchor-ratchet.test.ts#TOOLS": {
       "walked": 132
