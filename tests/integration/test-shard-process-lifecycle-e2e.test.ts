@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
+  describeProcessGroup,
   drainCampaign,
   groupHasRunningMemberFromPs,
   groupStateLines,
@@ -464,5 +465,43 @@ describe("shard worker process lifecycle", () => {
     })
     await expect(handle.exited).rejects.toThrow()
     expect(registry.liveGroups()).toHaveLength(0)
+  })
+
+  test("a watchdog kill can name the worker's children", () => {
+    // The one hang this watchdog has caught was diagnosed by hand, and the two
+    // facts that did it were in no log: the worker sat at 100% CPU inside
+    // kevent64 while holding one `<defunct>` child — a worker awaiting a
+    // subprocess that had already exited, which narrows ~150 candidate files to
+    // the ones that spawn.
+    const ps = [
+      "  4242   4242      1 Ss+     0.1    12:00 bun",
+      "  4242   4310   4242 Z       0.0    11:37 (bun)",
+      "  9999   9999      1 S       0.0    01:00 someone-else",
+    ].join("\n")
+    const rendered = describeProcessGroup(4242, { exitCode: 0, stdout: ps })
+    expect(rendered).toContain("4310")
+    expect(rendered).toContain("Z") // the zombie is the lead, so it must survive
+    expect(rendered).not.toContain("someone-else") // another group must not leak in
+    expect(rendered.split("\n")).toHaveLength(2)
+
+    // A group with nothing in it, and a `ps` that did not run, each say so
+    // rather than rendering an empty block that reads like "nothing wrong".
+    expect(describeProcessGroup(1234, { exitCode: 0, stdout: ps })).toBe("  <no members>")
+    expect(describeProcessGroup(4242, { exitCode: 1, stdout: "" })).toBe("  <ps unavailable>")
+  })
+
+  test("the real probe renders this process's own group", () => {
+    // WIRING: the default argument must actually run `ps`, not hand back a
+    // placeholder — the failure mode of a diagnostic nobody exercises.
+    const own = Number.parseInt(
+      Bun.spawnSync(["ps", "-o", "pgid=", "-p", String(process.pid)], {
+        stdout: "pipe",
+      }).stdout.toString(),
+      10,
+    )
+    const rendered = describeProcessGroup(own)
+    expect(rendered).not.toBe("  <no members>")
+    expect(rendered).not.toBe("  <ps unavailable>")
+    expect(rendered).toContain(String(own))
   })
 })

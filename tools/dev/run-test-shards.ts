@@ -23,6 +23,7 @@ import {
   type TestShardLease,
 } from "./test-shard-lease"
 import {
+  describeProcessGroup,
   drainCampaign,
   runResourceAwareSchedule,
   ShardProcessRegistry,
@@ -39,6 +40,7 @@ import {
   spoolTail,
   type TestChunk,
   type TestResourceClass,
+  watchdogAction,
 } from "./test-shard-plan"
 import {
   loadSuccessfulTestShardReceipt,
@@ -467,19 +469,27 @@ const runShard = async (
         peakRssBytes = Math.max(peakRssBytes, sampleTreeRssBytes(handle.pid))
       }
       const spoolBytes = statSync(spoolPath).size
-      if (spoolBytes !== lastSpoolBytes) {
+      const idleMs = Date.now() - lastProgressAt
+      const action = watchdogAction({
+        spoolBytes,
+        lastSpoolBytes,
+        idleMs,
+        inactivityTimeoutMs: SHARD_INACTIVITY_TIMEOUT_MS,
+        alreadyKilling: timedOut,
+      })
+      if (action === "progressed") {
         lastSpoolBytes = spoolBytes
         lastProgressAt = Date.now()
         return
       }
-      const idleMs = Date.now() - lastProgressAt
-      if (idleMs < SHARD_INACTIVITY_TIMEOUT_MS) return
+      if (action !== "kill") return
       timedOut = true
       // Say what it was doing. A chunk holds ~100 files, and "idle=600000ms"
       // over all of them is not a lead; the last thing the worker wrote is.
       process.stderr.write(
         `[test:shards] TIMEOUT chunk=${shard} idle=${idleMs}ms; ` +
-          `killing worker process tree. Last output:\n` +
+          `killing worker process tree.\nProcess group (pgid pid ppid stat %cpu elapsed cmd):\n` +
+          `${describeProcessGroup(handle.pid)}\nLast output:\n` +
           `${spoolTail(readFileSync(spoolPath, "utf8"), WATCHDOG_TAIL_LINES)}\n`,
       )
       void handle.cancel()

@@ -425,3 +425,30 @@ export const spoolTail = (output: string, lines: number): string => {
     .slice(-lines)
   return kept.length === 0 ? "<no output>" : kept.join("\n")
 }
+
+/** One watchdog observation of a running worker. */
+export interface WatchdogTick {
+  readonly spoolBytes: number
+  readonly lastSpoolBytes: number
+  readonly idleMs: number
+  readonly inactivityTimeoutMs: number
+  /** A kill has already been ordered for this worker. */
+  readonly alreadyKilling: boolean
+}
+
+export type WatchdogAction = "progressed" | "waiting" | "kill" | "already-killing"
+
+/**
+ * What the watchdog should do with this tick.
+ *
+ * `already-killing` is not a nicety. A hung worker keeps its spool still BY
+ * DEFINITION, so every tick after the first meets the kill condition too: the
+ * first real hang caught by this watchdog printed its 20-line diagnostic tail
+ * twice, a second apart, and would have kept printing until the process tree
+ * finally died.
+ */
+export const watchdogAction = (tick: WatchdogTick): WatchdogAction => {
+  if (tick.spoolBytes !== tick.lastSpoolBytes) return "progressed"
+  if (tick.idleMs < tick.inactivityTimeoutMs) return "waiting"
+  return tick.alreadyKilling ? "already-killing" : "kill"
+}

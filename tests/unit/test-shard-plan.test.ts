@@ -17,6 +17,7 @@ import {
   resourceClassesOverlap,
   spoolTail,
   TEST_RESOURCE_CLASSES,
+  watchdogAction,
 } from "../../tools/dev/test-shard-plan"
 import {
   loadSuccessfulTestShardReceipt,
@@ -692,5 +693,28 @@ describe("what a watchdog kill reports", () => {
 
   test("short output is returned whole, not padded or truncated", () => {
     expect(spoolTail("only line", 20)).toBe("only line")
+  })
+
+  test("a hung worker is reported and killed exactly once", () => {
+    // MEASURED: the first real hang this watchdog caught — a worker spinning in
+    // its event loop at 100% CPU with an unreaped child, 12 minutes without a
+    // byte of output — printed its 20-line diagnostic tail TWICE, a second
+    // apart. A hung worker keeps its spool still by definition, so every tick
+    // after the first met the kill condition too, and it would have kept
+    // printing until the tree died.
+    const base = { spoolBytes: 3282, lastSpoolBytes: 3282, inactivityTimeoutMs: 720_000 }
+    expect(watchdogAction({ ...base, idleMs: 719_999, alreadyKilling: false })).toBe("waiting")
+    expect(watchdogAction({ ...base, idleMs: 720_000, alreadyKilling: false })).toBe("kill")
+    expect(watchdogAction({ ...base, idleMs: 721_434, alreadyKilling: true })).toBe(
+      "already-killing",
+    )
+  })
+
+  test("any new output resets the clock, even mid-kill", () => {
+    const base = { lastSpoolBytes: 3282, inactivityTimeoutMs: 720_000, idleMs: 900_000 }
+    expect(watchdogAction({ ...base, spoolBytes: 3283, alreadyKilling: false })).toBe("progressed")
+    // A worker that starts talking again while being killed is still making
+    // progress; the caller resets the clock rather than counting it as idle.
+    expect(watchdogAction({ ...base, spoolBytes: 3283, alreadyKilling: true })).toBe("progressed")
   })
 })

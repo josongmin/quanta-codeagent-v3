@@ -487,3 +487,34 @@ export const terminateCampaignOnSignal = async (
   input.releaseLease()
   return terminationExitCode(input.signal)
 }
+
+/**
+ * The worker's process tree, for a watchdog kill.
+ *
+ * The one hang this watchdog has caught was diagnosed by hand, and the two
+ * facts that did it were not in any log: the worker sat at 100% CPU inside
+ * `kevent64` — spinning in its event loop, not blocked on IO — while holding
+ * ONE `<defunct>` child. That is a worker awaiting a subprocess that has
+ * already exited, which narrows ~150 candidate files to the ones that spawn.
+ *
+ * Printing it costs one `ps` at the moment of death and saves that hour.
+ */
+export const describeProcessGroup = (
+  pgid: number,
+  ps: { readonly exitCode: number; readonly stdout: string } = psSnapshot(),
+): string => {
+  if (ps.exitCode !== 0) return "  <ps unavailable>"
+  const rows = ps.stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => Number.parseInt(line.split(/\s+/)[0] ?? "", 10) === pgid)
+  return rows.length === 0 ? "  <no members>" : rows.map((row) => `  ${row}`).join("\n")
+}
+
+const psSnapshot = (): { exitCode: number; stdout: string } => {
+  const result = Bun.spawnSync(["ps", "-Ao", "pgid=,pid=,ppid=,stat=,pcpu=,etime=,comm="], {
+    stdout: "pipe",
+    stderr: "ignore",
+  })
+  return { exitCode: result.exitCode ?? 1, stdout: result.stdout.toString() }
+}
