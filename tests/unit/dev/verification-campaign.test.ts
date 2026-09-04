@@ -41,6 +41,20 @@ const CAMPAIGN_MODULES = [
 // Campaign startup spawns bun twice and hashes the tree; on a box already
 // running a suite that is comfortably past 5s. These waits gate on an EVENT
 // having happened, never on it happening fast.
+/**
+ * Child-side source that publishes a marker a peer can only ever see COMPLETE.
+ *
+ * `Bun.write` creates the file and then fills it, so a watcher polling on
+ * existence can read it empty. MEASURED inside a campaign: the lease case read
+ * `""` where it expected `"valid"`, while passing standalone every time.
+ * Writing beside the path and renaming makes appearance and content one event —
+ * rename is atomic within a directory.
+ */
+const publishMarker = (path: string, valueExpression: string): string =>
+  `{ const p = ${JSON.stringify(path)}; const t = p + ".partial"; ` +
+  `await Bun.write(t, ${valueExpression}); ` +
+  `(await import("node:fs")).renameSync(t, p); }`
+
 const waitFor = async (predicate: () => boolean, timeoutMs = 20_000): Promise<void> => {
   const deadline = Date.now() + timeoutMs
   while (!predicate()) {
@@ -132,7 +146,7 @@ describe("whole verification campaign lease", () => {
         process.execPath,
         "-e",
         `const m = await import(${JSON.stringify(join(root, "tools", "dev", "test-shard-lease.ts"))}); ` +
-          `await Bun.write(${JSON.stringify(firstMarker)}, m.inheritedTestShardLeaseState(process.env)); ` +
+          `${publishMarker(firstMarker, "m.inheritedTestShardLeaseState(process.env)")} ` +
           "await Bun.sleep(300)",
       ],
       cwd: root,
@@ -140,7 +154,11 @@ describe("whole verification campaign lease", () => {
       stdout: "pipe",
       stderr: "pipe",
     })
-    await waitFor(() => existsSync(firstMarker))
+    // Wait for the CONTENT, not the file. `Bun.write` creates the file and
+    // then fills it, so existence alone let this read land in between: inside a
+    // campaign it failed with `Expected: "valid" / Received: ""` while passing
+    // standalone every time.
+    await waitFor(() => existsSync(firstMarker) && readFileSync(firstMarker, "utf8") !== "")
     expect(readFileSync(firstMarker, "utf8")).toBe("valid")
 
     const second = Bun.spawn({
@@ -150,7 +168,7 @@ describe("whole verification campaign lease", () => {
         "--",
         process.execPath,
         "-e",
-        `await Bun.write(${JSON.stringify(secondMarker)}, "1")`,
+        publishMarker(secondMarker, '"1"'),
       ],
       cwd: root,
       env: cleanLeaseEnv(),
@@ -199,8 +217,8 @@ describe("whole verification campaign lease", () => {
         "--",
         process.execPath,
         "-e",
-        `await Bun.write(${JSON.stringify(holderStarted)}, "1"); ` +
-          `await Bun.sleep(800); await Bun.write(${JSON.stringify(holderFinished)}, "1")`,
+        `${publishMarker(holderStarted, '"1"')} ` +
+          `await Bun.sleep(800); ${publishMarker(holderFinished, '"1"')}`,
       ],
       cwd: root,
       env,
@@ -253,7 +271,7 @@ describe("whole verification campaign lease", () => {
         "--",
         process.execPath,
         "-e",
-        `await Bun.write(${JSON.stringify(holderStarted)}, "1"); await Bun.sleep(4000)`,
+        `${publishMarker(holderStarted, '"1"')} await Bun.sleep(4000)`,
       ],
       cwd: root,
       env,
