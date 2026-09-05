@@ -476,7 +476,7 @@
       "walked": 757
     },
     "tests/unit/retrieval/budget-probe-hellgate.test.ts#src/runner": {
-      "walked": 343
+      "walked": 342
     },
     "tests/unit/runagent-callsite-authority-fence-hellgate.test.ts#SRC": {
       "walked": 3368
