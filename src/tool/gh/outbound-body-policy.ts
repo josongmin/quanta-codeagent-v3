@@ -8,6 +8,7 @@
  */
 
 import { redactSecrets } from "@/security/redaction"
+import { errMessage } from "@/shared"
 
 export const GH_COMMENT_BODY_MAX_BYTES = 65_000
 
@@ -41,8 +42,7 @@ export const createGhCommentBodyPolicy = (opts: {
       const cap = Math.max(256, opts.maxBytes ?? GH_COMMENT_BODY_MAX_BYTES)
       return { ok: true, body: utf8Truncate(redacted, cap) }
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e)
-      return { ok: false, error: message }
+      return { ok: false, error: errMessage(e) }
     }
   },
 })

@@ -1,6 +1,10 @@
 /**
  * Mandatory outbound PR-comment body policy: redact, then UTF-8 cap.
  *
+ * Plane-clean: this slice may import only `@/reactor`, `node:crypto`, or `./*`
+ * (ADR-0311 R3). `errMessage` from `@/shared` is forbidden, so the catch
+ * keeps the canonical-equivalent ternary (same allowlist as `idempotency.ts`).
+ *
  * Automation additionally stamps a hidden idempotency marker that is reserved
  * inside the byte budget. HITL one-off comments use the same redact/cap
  * contract without the marker (create-new semantics).

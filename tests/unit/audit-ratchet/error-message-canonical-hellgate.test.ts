@@ -87,6 +87,9 @@ const ALLOWED_TERNARY_INLINE_SITES = new Set<string>([
   // FORBIDS any `@/shared` import, so `errMessage` cannot reach this file. The
   // inline ternary is the canonical-equivalent form kept by design.
   "integrations/github/idempotency.ts",
+  // Same plane-clean fence as `idempotency.ts`: outbound body policy lives in
+  // the github leaf and cannot import `@/shared`.
+  "integrations/github/outbound-body-policy.ts",
   // jun-6 CLUSTER D #5 — `permission_propose_pattern` LLM-callable surface.
   // The slice imports ONLY `zod` + its sibling `../types` port (no `@/shared`),
   // matching the port-only discipline of the other plane-clean entries above:
