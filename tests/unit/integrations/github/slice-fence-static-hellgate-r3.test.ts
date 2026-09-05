@@ -21,7 +21,8 @@
  * The `from-pr-cmd*.ts` CLI files live one layer up but follow a related
  * rule: the LIB (`from-pr-cmd.ts`) is port-only, the ADAPTERS file
  * (`from-pr-cmd-adapters.ts`) is the ONE permitted boundary that touches
- * node:fs / process.env / Bun.spawn / @/security/redaction.
+ * node:fs / process.env / `@/security/redaction` / the canonical
+ * `@/tool/gh` executor (SEP5-01). It must not `Bun.spawn` `gh` itself.
  *
  * This test reads every slice file at runtime and asserts the invariant
  * with a regex pass over each file's import lines. A regression here
@@ -262,10 +263,16 @@ describe("ADR-0311 hellgate R3 — slice fence (static)", () => {
     // @/security/redaction (otherwise the redact wire is broken).
     expect(/from\s+["']node:fs\/promises["']/.test(CLI_ADAPTERS_TEXT())).toBe(true)
     expect(/from\s+["']@\/security\/redaction["']/.test(CLI_ADAPTERS_TEXT())).toBe(true)
-    // And adapters MUST not pull trunk modules.
+    // SEP5-01: adapters translate result shape over the canonical executor.
+    expect(/from\s+["']@\/tool\/gh["']/.test(CLI_ADAPTERS_TEXT())).toBe(true)
+    // And adapters MUST not pull trunk modules other than that executor.
     for (const banned of FORBIDDEN_TRUNK_PREFIXES) {
       // `@/apps` is itself the adapters' own surface — skip self-reference.
       if (banned === "@/apps") continue
+      if (banned === "@/tool") {
+        expect(/from\s+["']@\/tool\/(?!gh(?:["']|\/))/.test(CLI_ADAPTERS_TEXT())).toBe(false)
+        continue
+      }
       const re = new RegExp(`from\\s+["']${banned.replace(/[/]/g, "\\/")}(?:\\/|["'])`)
       expect(re.test(CLI_ADAPTERS_TEXT())).toBe(false)
     }
@@ -297,10 +304,15 @@ describe("ADR-0311 hellgate R3 — slice fence (static)", () => {
   })
 
   test("self-loop marker SoT is shared across mention-filter and pr-output-sink", () => {
+    const policy = SLICE_FILES.find((f) => f.relPath === "outbound-body-policy.ts")?.content ?? ""
     const mf = SLICE_FILES.find((f) => f.relPath === "mention-filter.ts")?.content ?? ""
     const sink = SLICE_FILES.find((f) => f.relPath === "pr-output-sink.ts")?.content ?? ""
-    // Both files must reference the same marker literal `<!-- quanta:idempotency=`.
-    expect(mf).toContain("<!-- quanta:idempotency=")
-    expect(sink).toContain("<!-- quanta:idempotency=")
+    expect(policy).toContain('IDEMPOTENCY_MARKER_PREFIX = "<!-- quanta:idempotency="')
+    expect(mf).toMatch(/from\s+["']\.\/outbound-body-policy["']/)
+    expect(mf).toContain("IDEMPOTENCY_MARKER_PREFIX")
+    expect(sink).toMatch(/from\s+["']\.\/outbound-body-policy["']/)
+    expect(sink).toContain("IDEMPOTENCY_MARKER_PREFIX")
+    expect(mf).not.toContain("<!-- quanta:idempotency=")
+    expect(sink).not.toContain("<!-- quanta:idempotency=")
   })
 })

@@ -22,7 +22,7 @@
 
 import { describe, expect, test } from "bun:test"
 import { BENCH } from "@/config/knob-inventory/bench"
-import type { KnobInventoryEntry } from "@/config/knob-inventory/types"
+import type { KnobDeclaration } from "@/config/knob-inventory/types"
 import type { AnyKnobSchema } from "@/config/knob-schema/contracts"
 import { deriveInventoryEntry, isDefaultOff } from "@/config/knob-schema/derive-inventory"
 import {
@@ -46,7 +46,7 @@ import { noPatchForceFractionKnob } from "@/runner/knobs/knobs/no-patch-force-fr
 import { type AnyKnob, asAnyKnob } from "@/runner/knobs/types"
 
 /** Index the live inventory by envKey for O(1) lookup. */
-const inventoryByEnvKey = new Map<string, KnobInventoryEntry>(BENCH.map((e) => [e.envKey, e]))
+const inventoryByEnvKey = new Map<string, KnobDeclaration>(BENCH.map((e) => [e.envKey, e]))
 
 /** A spread of raw values exercising active / off / garbage / boundary for every
  *  parser shape (bool / int / enum / string / float). */
@@ -146,7 +146,7 @@ describe("Pillar A derive parity (GAP-3) — inventory entry", () => {
       // Defensive: the entry MUST exist, else the parity claim is vacuous.
       expect(current, `bench.ts has an entry for ${schema.envKey}`).toBeDefined()
       const derived = deriveInventoryEntry(schema)
-      expect(derived).toEqual(current as KnobInventoryEntry)
+      expect(derived).toEqual(current as KnobDeclaration)
     })
   }
 })
@@ -177,7 +177,7 @@ describe("Pillar A derive parity (GAP-3) — knob parse semantics (live knobs on
 describe("Pillar A derive parity (GAP-3) — default-OFF proof", () => {
   for (const { name, schema } of ALL_SCHEMAS) {
     test(`isDefaultOff(${name}) agrees with inventory default OFF-ness`, () => {
-      const current = inventoryByEnvKey.get(schema.envKey) as KnobInventoryEntry
+      const current = inventoryByEnvKey.get(schema.envKey) as KnobDeclaration
       const inventoryOff =
         current.default === undefined ||
         current.default === false ||
@@ -191,7 +191,7 @@ describe("Pillar A derive parity (GAP-3) — default-OFF proof", () => {
     // Guards against a silent default flip: a kill-switch knob must NOT be
     // mistaken for a default-OFF opt-in.
     expect(isDefaultOff(benchProtectTestsSchema)).toBe(false)
-    const current = inventoryByEnvKey.get(benchProtectTestsSchema.envKey) as KnobInventoryEntry
+    const current = inventoryByEnvKey.get(benchProtectTestsSchema.envKey) as KnobDeclaration
     expect(current.default).toBe(true)
   })
 })
@@ -201,7 +201,7 @@ describe("Pillar A derive parity (GAP-3) — RED on injection (the assert has te
     // Corrupt ONLY the default (bench-sota is false in bench.ts → inject true).
     const corrupted: AnyKnobSchema = { ...benchSotaSchema, default: true }
     const derived = deriveInventoryEntry(corrupted)
-    const current = inventoryByEnvKey.get(benchSotaSchema.envKey) as KnobInventoryEntry
+    const current = inventoryByEnvKey.get(benchSotaSchema.envKey) as KnobDeclaration
     // The deep-equal that the parity test relies on MUST reject this.
     expect(derived).not.toEqual(current)
     expect(() => expect(derived).toEqual(current)).toThrow()
@@ -210,14 +210,14 @@ describe("Pillar A derive parity (GAP-3) — RED on injection (the assert has te
   test("a wrong describe in a schema makes deriveInventoryEntry parity FAIL", () => {
     const corrupted: AnyKnobSchema = { ...benchConcurrencySchema, describe: "WRONG describe" }
     const derived = deriveInventoryEntry(corrupted)
-    const current = inventoryByEnvKey.get(benchConcurrencySchema.envKey) as KnobInventoryEntry
+    const current = inventoryByEnvKey.get(benchConcurrencySchema.envKey) as KnobDeclaration
     expect(derived).not.toEqual(current)
   })
 
   test("a wrong readSite in a schema makes deriveInventoryEntry parity FAIL", () => {
     const corrupted: AnyKnobSchema = { ...benchReplayOnMissSchema, readSite: "apps/WRONG.ts" }
     const derived = deriveInventoryEntry(corrupted)
-    const current = inventoryByEnvKey.get(benchReplayOnMissSchema.envKey) as KnobInventoryEntry
+    const current = inventoryByEnvKey.get(benchReplayOnMissSchema.envKey) as KnobDeclaration
     expect(derived).not.toEqual(current)
   })
 })

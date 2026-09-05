@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
 import { readFile, writeFile } from "node:fs/promises"
-import { refreshTokenTransaction } from "../../src/auth/chatgpt-oauth/refresh-transaction.ts"
-import { isExpired, type TokenRecord } from "../../src/auth/chatgpt-oauth/token-store.ts"
-import { FileBasedLock } from "../../src/auth/lock-file-based.ts"
-import { createNodeLockFileStore } from "../../src/auth/node-lock-file-store.ts"
+import { refreshTokenTransaction } from "../../src/auth/chatgpt-oauth/refresh-transaction"
+import { isExpired, type TokenRecord } from "../../src/auth/chatgpt-oauth/token-store"
+import { FileBasedLock } from "../../src/auth/lock-file-based"
+import { createNodeLockFileStore } from "../../src/auth/node-lock-file-store"
 
 const [tokenPath, lockDir, issuer] = process.argv.slice(2)
 if (tokenPath === undefined || lockDir === undefined || issuer === undefined) {

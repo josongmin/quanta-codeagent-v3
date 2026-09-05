@@ -146,16 +146,19 @@ describe("gh exec policy — abort and tree-kill", () => {
       cwd: process.cwd(),
       timeoutMs: 400,
     })
-    const [parent, child] = r.stdout.trim().split(/\s+/).map(Number)
+    const pids = r.stdout.trim().split(/\s+/).map(Number)
+    const parent = pids[0]
+    const child = pids[1]
+    if (parent === undefined) throw new Error("tree fixture did not print parent pid")
     expect(Number.isInteger(parent) && parent > 0).toBe(true)
     const deadline = Date.now() + 3_000
     while (Date.now() < deadline) {
-      const parentGone = parent === undefined || !alive(parent)
+      const parentGone = !alive(parent)
       const childGone = child === undefined || child === 0 || !alive(child)
       if (parentGone && childGone) break
       await Bun.sleep(50)
     }
-    if (parent !== undefined && parent > 0) expect(alive(parent)).toBe(false)
+    expect(alive(parent)).toBe(false)
     if (child !== undefined && child > 0) expect(alive(child)).toBe(false)
   })
 

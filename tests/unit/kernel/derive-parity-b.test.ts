@@ -20,7 +20,7 @@
 
 import { describe, expect, test } from "bun:test"
 import { BENCH } from "@/config/knob-inventory/bench"
-import type { KnobInventoryEntry } from "@/config/knob-inventory/types"
+import type { KnobDeclaration } from "@/config/knob-inventory/types"
 import type { AnyKnobSchema } from "@/config/knob-schema/contracts"
 import { deriveInventoryEntry, isDefaultOff } from "@/config/knob-schema/derive-inventory"
 import {
@@ -62,7 +62,7 @@ import { verifySelectLlmRiskGateKnob } from "@/runner/knobs/knobs/verify-select-
 import { type AnyKnob, asAnyKnob } from "@/runner/knobs/types"
 
 /** Index the live inventory by envKey for O(1) lookup. */
-const inventoryByEnvKey = new Map<string, KnobInventoryEntry>(BENCH.map((e) => [e.envKey, e]))
+const inventoryByEnvKey = new Map<string, KnobDeclaration>(BENCH.map((e) => [e.envKey, e]))
 
 /** A spread of raw values that exercises active / off / garbage / boundary for
  *  every parser shape in this slice (int / bool / enum / list-string). */
@@ -183,7 +183,7 @@ describe("Pillar A derive parity (slice B) — inventory entry", () => {
       // Defensive: the entry MUST exist, else the parity claim is vacuous.
       expect(current, `bench.ts has an entry for ${schema.envKey}`).toBeDefined()
       const derived = deriveInventoryEntry(schema)
-      expect(derived).toEqual(current as KnobInventoryEntry)
+      expect(derived).toEqual(current as KnobDeclaration)
     })
   }
 })
@@ -214,7 +214,7 @@ describe("Pillar A derive parity (slice B) — knob parse semantics", () => {
 describe("Pillar A derive parity (slice B) — default-OFF proof", () => {
   for (const { name, schema } of PAIRS) {
     test(`isDefaultOff(${name}) agrees with inventory default OFF-ness`, () => {
-      const current = inventoryByEnvKey.get(schema.envKey) as KnobInventoryEntry
+      const current = inventoryByEnvKey.get(schema.envKey) as KnobDeclaration
       const inventoryOff =
         current.default === undefined ||
         current.default === false ||
@@ -255,7 +255,7 @@ describe("Pillar A derive parity (slice B) — RED on injection (the assert has 
     // closure-repair default is undefined in bench.ts → inject a bogus default.
     const corrupted: AnyKnobSchema = { ...closureRepairSchema, default: 99 }
     const derived = deriveInventoryEntry(corrupted)
-    const current = inventoryByEnvKey.get(closureRepairSchema.envKey) as KnobInventoryEntry
+    const current = inventoryByEnvKey.get(closureRepairSchema.envKey) as KnobDeclaration
     expect(derived).not.toEqual(current)
     expect(() => expect(derived).toEqual(current)).toThrow()
   })
@@ -263,14 +263,14 @@ describe("Pillar A derive parity (slice B) — RED on injection (the assert has 
   test("a wrong describe in a schema makes deriveInventoryEntry parity FAIL", () => {
     const corrupted: AnyKnobSchema = { ...verifySelectSchema, describe: "WRONG describe" }
     const derived = deriveInventoryEntry(corrupted)
-    const current = inventoryByEnvKey.get(verifySelectSchema.envKey) as KnobInventoryEntry
+    const current = inventoryByEnvKey.get(verifySelectSchema.envKey) as KnobDeclaration
     expect(derived).not.toEqual(current)
   })
 
   test("a wrong readSite in a schema makes deriveInventoryEntry parity FAIL", () => {
     const corrupted: AnyKnobSchema = { ...patchBudgetSchema, readSite: "runner/WRONG.ts" }
     const derived = deriveInventoryEntry(corrupted)
-    const current = inventoryByEnvKey.get(patchBudgetSchema.envKey) as KnobInventoryEntry
+    const current = inventoryByEnvKey.get(patchBudgetSchema.envKey) as KnobDeclaration
     expect(derived).not.toEqual(current)
   })
 

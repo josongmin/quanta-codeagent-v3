@@ -6,8 +6,6 @@
  * contract without the marker (create-new semantics).
  */
 
-import { errMessage } from "@/shared"
-
 import { asIdempotencyKey, type IdempotencyKey } from "./types"
 
 export const COMMENT_BODY_MAX_BYTES = 65_000
@@ -68,7 +66,8 @@ export const createOutboundBodyPolicy = (opts: OutboundBodyPolicyOpts): Outbound
         marker === undefined ? utf8Truncate(redacted, cap) : clampWithMarker(redacted, marker, cap)
       return { ok: true, body: prepared }
     } catch (e) {
-      return { ok: false, error: errMessage(e) }
+      const message = e instanceof Error ? e.message : String(e)
+      return { ok: false, error: message }
     }
   },
 })

@@ -17,7 +17,7 @@
 
 import { describe, expect, test } from "bun:test"
 import { BENCH } from "@/config/knob-inventory/bench"
-import type { KnobInventoryEntry } from "@/config/knob-inventory/types"
+import type { KnobDeclaration } from "@/config/knob-inventory/types"
 import type { AnyKnobSchema } from "@/config/knob-schema/contracts"
 import { deriveInventoryEntry, isDefaultOff } from "@/config/knob-schema/derive-inventory"
 import {
@@ -45,7 +45,7 @@ import { selectorModeKnob } from "@/runner/knobs/knobs/selector-mode"
 import { type AnyKnob, asAnyKnob } from "@/runner/knobs/types"
 
 /** Index the live inventory by envKey for O(1) lookup. */
-const inventoryByEnvKey = new Map<string, KnobInventoryEntry>(BENCH.map((e) => [e.envKey, e]))
+const inventoryByEnvKey = new Map<string, KnobDeclaration>(BENCH.map((e) => [e.envKey, e]))
 
 /** A spread of raw values that exercises active / off / garbage / boundary for
  *  every parser shape (int / bool / enum / string / float-ish). */
@@ -138,7 +138,7 @@ describe("Pillar A derive parity — inventory entry", () => {
       // Defensive: the entry MUST exist, else the parity claim is vacuous.
       expect(current, `bench.ts has an entry for ${schema.envKey}`).toBeDefined()
       const derived = deriveInventoryEntry(schema)
-      expect(derived).toEqual(current as KnobInventoryEntry)
+      expect(derived).toEqual(current as KnobDeclaration)
     })
   }
 })
@@ -169,7 +169,7 @@ describe("Pillar A derive parity — knob parse semantics", () => {
 describe("Pillar A derive parity — default-OFF proof", () => {
   for (const { name, schema } of PAIRS) {
     test(`isDefaultOff(${name}) agrees with inventory default OFF-ness`, () => {
-      const current = inventoryByEnvKey.get(schema.envKey) as KnobInventoryEntry
+      const current = inventoryByEnvKey.get(schema.envKey) as KnobDeclaration
       const inventoryOff =
         current.default === undefined ||
         current.default === false ||
@@ -187,7 +187,7 @@ describe("Pillar A derive parity — RED on injection (the assert has teeth)", (
     // Corrupt ONLY the default (repro-vote is false in bench.ts → inject true).
     const corrupted: AnyKnobSchema = { ...reproVoteSchema, default: true }
     const derived = deriveInventoryEntry(corrupted)
-    const current = inventoryByEnvKey.get(reproVoteSchema.envKey) as KnobInventoryEntry
+    const current = inventoryByEnvKey.get(reproVoteSchema.envKey) as KnobDeclaration
     // The deep-equal that the parity test relies on MUST reject this.
     expect(derived).not.toEqual(current)
     expect(() => expect(derived).toEqual(current)).toThrow()
@@ -196,14 +196,14 @@ describe("Pillar A derive parity — RED on injection (the assert has teeth)", (
   test("a wrong describe in a schema makes deriveInventoryEntry parity FAIL", () => {
     const corrupted: AnyKnobSchema = { ...reproTestSchema, describe: "WRONG describe" }
     const derived = deriveInventoryEntry(corrupted)
-    const current = inventoryByEnvKey.get(reproTestSchema.envKey) as KnobInventoryEntry
+    const current = inventoryByEnvKey.get(reproTestSchema.envKey) as KnobDeclaration
     expect(derived).not.toEqual(current)
   })
 
   test("a wrong readSite in a schema makes deriveInventoryEntry parity FAIL", () => {
     const corrupted: AnyKnobSchema = { ...repoMapSchema, readSite: "runner/WRONG.ts" }
     const derived = deriveInventoryEntry(corrupted)
-    const current = inventoryByEnvKey.get(repoMapSchema.envKey) as KnobInventoryEntry
+    const current = inventoryByEnvKey.get(repoMapSchema.envKey) as KnobDeclaration
     expect(derived).not.toEqual(current)
   })
 

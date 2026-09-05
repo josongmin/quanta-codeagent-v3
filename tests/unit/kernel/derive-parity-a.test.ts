@@ -19,7 +19,7 @@
 
 import { describe, expect, test } from "bun:test"
 import { BENCH } from "@/config/knob-inventory/bench"
-import type { KnobInventoryEntry } from "@/config/knob-inventory/types"
+import type { KnobDeclaration } from "@/config/knob-inventory/types"
 import type { AnyKnobSchema } from "@/config/knob-schema/contracts"
 import { deriveInventoryEntry, isDefaultOff } from "@/config/knob-schema/derive-inventory"
 import {
@@ -53,7 +53,7 @@ import { verificationPlanKnob } from "@/runner/knobs/knobs/verification-plan"
 import { type AnyKnob, asAnyKnob } from "@/runner/knobs/types"
 
 /** Index the live inventory by envKey for O(1) lookup. */
-const inventoryByEnvKey = new Map<string, KnobInventoryEntry>(BENCH.map((e) => [e.envKey, e]))
+const inventoryByEnvKey = new Map<string, KnobDeclaration>(BENCH.map((e) => [e.envKey, e]))
 
 /** A spread of raw values exercising active / off / garbage / boundary across
  *  every parser shape in this slice (int / bool / enum / string tri-state). */
@@ -141,7 +141,7 @@ describe("Pillar A derive parity (slice A) — inventory entry", () => {
       // Defensive: the entry MUST exist, else the parity claim is vacuous.
       expect(current, `bench.ts has an entry for ${schema.envKey}`).toBeDefined()
       const derived = deriveInventoryEntry(schema)
-      expect(derived).toEqual(current as KnobInventoryEntry)
+      expect(derived).toEqual(current as KnobDeclaration)
     })
   }
 })
@@ -203,7 +203,7 @@ describe("Pillar A derive parity (slice A) — FULL-Knob data parity (BURN-DOWN 
 describe("Pillar A derive parity (slice A) — default-OFF proof", () => {
   for (const { name, schema } of PAIRS) {
     test(`isDefaultOff(${name}) agrees with inventory default OFF-ness`, () => {
-      const current = inventoryByEnvKey.get(schema.envKey) as KnobInventoryEntry
+      const current = inventoryByEnvKey.get(schema.envKey) as KnobDeclaration
       const inventoryOff =
         current.default === undefined ||
         current.default === false ||
@@ -224,7 +224,7 @@ describe("Pillar A derive parity (slice A) — RED on injection (the assert has 
     // Corrupt ONLY the default (subagent is false in bench.ts → inject true).
     const corrupted: AnyKnobSchema = { ...subagentSchema, default: true }
     const derived = deriveInventoryEntry(corrupted)
-    const current = inventoryByEnvKey.get(subagentSchema.envKey) as KnobInventoryEntry
+    const current = inventoryByEnvKey.get(subagentSchema.envKey) as KnobDeclaration
     expect(derived).not.toEqual(current)
     expect(() => expect(derived).toEqual(current)).toThrow()
   })
@@ -232,14 +232,14 @@ describe("Pillar A derive parity (slice A) — RED on injection (the assert has 
   test("a wrong describe makes deriveInventoryEntry parity FAIL", () => {
     const corrupted: AnyKnobSchema = { ...branchSearchSchema, describe: "WRONG describe" }
     const derived = deriveInventoryEntry(corrupted)
-    const current = inventoryByEnvKey.get(branchSearchSchema.envKey) as KnobInventoryEntry
+    const current = inventoryByEnvKey.get(branchSearchSchema.envKey) as KnobDeclaration
     expect(derived).not.toEqual(current)
   })
 
   test("a wrong readSite makes deriveInventoryEntry parity FAIL", () => {
     const corrupted: AnyKnobSchema = { ...primaryRailSchema, readSite: "runner/WRONG.ts" }
     const derived = deriveInventoryEntry(corrupted)
-    const current = inventoryByEnvKey.get(primaryRailSchema.envKey) as KnobInventoryEntry
+    const current = inventoryByEnvKey.get(primaryRailSchema.envKey) as KnobDeclaration
     expect(derived).not.toEqual(current)
   })
 
@@ -247,9 +247,7 @@ describe("Pillar A derive parity (slice A) — RED on injection (the assert has 
     // issue-hint-expected-actual is kind="string" in bench.ts; force "bool".
     const corrupted: AnyKnobSchema = { ...issueHintExpectedActualSchema, kind: "bool" }
     const derived = deriveInventoryEntry(corrupted)
-    const current = inventoryByEnvKey.get(
-      issueHintExpectedActualSchema.envKey,
-    ) as KnobInventoryEntry
+    const current = inventoryByEnvKey.get(issueHintExpectedActualSchema.envKey) as KnobDeclaration
     expect(derived).not.toEqual(current)
   })
 

@@ -1,4 +1,6 @@
 #!/usr/bin/env bun
+export {}
+
 const child = Bun.spawn(["/bin/sleep", "30"], {
   stdout: "ignore",
   stderr: "ignore",

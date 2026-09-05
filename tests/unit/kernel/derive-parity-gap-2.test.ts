@@ -22,7 +22,7 @@
 
 import { describe, expect, test } from "bun:test"
 import { BENCH } from "@/config/knob-inventory/bench"
-import type { KnobInventoryEntry } from "@/config/knob-inventory/types"
+import type { KnobDeclaration } from "@/config/knob-inventory/types"
 import type { AnyKnobSchema } from "@/config/knob-schema/contracts"
 import { deriveInventoryEntry, isDefaultOff } from "@/config/knob-schema/derive-inventory"
 import {
@@ -44,7 +44,7 @@ import {
 } from "@/config/knob-schema/schemas/bench-gap-2"
 
 /** Index the live inventory by envKey for O(1) lookup. */
-const inventoryByEnvKey = new Map<string, KnobInventoryEntry>(BENCH.map((e) => [e.envKey, e]))
+const inventoryByEnvKey = new Map<string, KnobDeclaration>(BENCH.map((e) => [e.envKey, e]))
 
 interface Entry {
   readonly name: string
@@ -76,7 +76,7 @@ describe("Pillar A derive parity (slice GAP-2, env-direct) — inventory entry",
       // Defensive: the entry MUST exist, else the parity claim is vacuous.
       expect(current, `bench.ts has an entry for ${schema.envKey}`).toBeDefined()
       const derived = deriveInventoryEntry(schema)
-      expect(derived).toEqual(current as KnobInventoryEntry)
+      expect(derived).toEqual(current as KnobDeclaration)
     })
   }
 })
@@ -84,7 +84,7 @@ describe("Pillar A derive parity (slice GAP-2, env-direct) — inventory entry",
 describe("Pillar A derive parity (slice GAP-2) — default-OFF proof", () => {
   for (const { name, schema } of SCHEMAS) {
     test(`isDefaultOff(${name}) agrees with inventory default OFF-ness`, () => {
-      const current = inventoryByEnvKey.get(schema.envKey) as KnobInventoryEntry
+      const current = inventoryByEnvKey.get(schema.envKey) as KnobDeclaration
       const inventoryOff =
         current.default === undefined ||
         current.default === false ||
@@ -101,7 +101,7 @@ describe("Pillar A derive parity (slice GAP-2) — RED on injection (the assert 
     // non-undefined default that passes through verbatim for a string kind.
     const corrupted: AnyKnobSchema = { ...fullRemoteAmiSchema, default: "ami-WRONG" }
     const derived = deriveInventoryEntry(corrupted)
-    const current = inventoryByEnvKey.get(fullRemoteAmiSchema.envKey) as KnobInventoryEntry
+    const current = inventoryByEnvKey.get(fullRemoteAmiSchema.envKey) as KnobDeclaration
     expect(derived).not.toEqual(current)
     expect(() => expect(derived).toEqual(current)).toThrow()
   })
@@ -110,21 +110,21 @@ describe("Pillar A derive parity (slice GAP-2) — RED on injection (the assert 
     // full-remote-ready-polls records `default: 90`; inject 7.
     const corrupted: AnyKnobSchema = { ...fullRemoteReadyPollsSchema, default: 7 }
     const derived = deriveInventoryEntry(corrupted)
-    const current = inventoryByEnvKey.get(fullRemoteReadyPollsSchema.envKey) as KnobInventoryEntry
+    const current = inventoryByEnvKey.get(fullRemoteReadyPollsSchema.envKey) as KnobDeclaration
     expect(derived).not.toEqual(current)
   })
 
   test("a wrong describe makes deriveInventoryEntry parity FAIL", () => {
     const corrupted: AnyKnobSchema = { ...resumeSchema, describe: "WRONG describe" }
     const derived = deriveInventoryEntry(corrupted)
-    const current = inventoryByEnvKey.get(resumeSchema.envKey) as KnobInventoryEntry
+    const current = inventoryByEnvKey.get(resumeSchema.envKey) as KnobDeclaration
     expect(derived).not.toEqual(current)
   })
 
   test("a wrong readSite makes deriveInventoryEntry parity FAIL", () => {
     const corrupted: AnyKnobSchema = { ...instanceIdSchema, readSite: "apps/bench/WRONG.ts" }
     const derived = deriveInventoryEntry(corrupted)
-    const current = inventoryByEnvKey.get(instanceIdSchema.envKey) as KnobInventoryEntry
+    const current = inventoryByEnvKey.get(instanceIdSchema.envKey) as KnobDeclaration
     expect(derived).not.toEqual(current)
   })
 
@@ -134,7 +134,7 @@ describe("Pillar A derive parity (slice GAP-2) — RED on injection (the assert 
     const widened: AnyKnobSchema = { ...modelLanesSchema, surfaces: ["bench", "cli"] }
     expect(deriveInventoryEntry(widened).home).toBe("runner-knobs")
     expect(deriveInventoryEntry(widened)).not.toEqual(
-      inventoryByEnvKey.get(modelLanesSchema.envKey) as KnobInventoryEntry,
+      inventoryByEnvKey.get(modelLanesSchema.envKey) as KnobDeclaration,
     )
   })
 })

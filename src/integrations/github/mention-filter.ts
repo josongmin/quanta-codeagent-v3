@@ -20,11 +20,8 @@
  * a comment we posted cannot wake us up.
  */
 
+import { IDEMPOTENCY_MARKER_PREFIX } from "./outbound-body-policy"
 import type { MentionMatch, NormalizedGhEvent, TrustScope } from "./types"
-
-/** Marker that proves a body is an output of OUR sink. Hardcoded SoT — must
- *  stay in sync with `pr-output-sink.ts#IDEMPOTENCY_MARKER_PREFIX`. */
-const SELF_OUTPUT_MARKER = "<!-- quanta:idempotency="
 
 export interface MentionFilterOpts {
   readonly triggerPhrases: readonly string[]
@@ -56,7 +53,7 @@ export const matchMention = (
   phrases: readonly string[],
 ): MentionMatch => {
   if (typeof body !== "string" || body.length === 0) return { matched: false }
-  if (body.includes(SELF_OUTPUT_MARKER)) return { matched: false }
+  if (body.includes(IDEMPOTENCY_MARKER_PREFIX)) return { matched: false }
   const cleanedPhrases = cleanPhrases(phrases)
   if (cleanedPhrases.length === 0) return { matched: false }
 
