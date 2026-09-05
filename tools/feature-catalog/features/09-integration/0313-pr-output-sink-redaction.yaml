@@ -55,6 +55,7 @@ purpose: |
 evidence:
   code:
     - src/integrations/github/pr-output-sink.ts
+    - src/integrations/github/outbound-body-policy.ts
     - src/integrations/github/pr-context-loader.ts
   adrs: [313]
   tests:

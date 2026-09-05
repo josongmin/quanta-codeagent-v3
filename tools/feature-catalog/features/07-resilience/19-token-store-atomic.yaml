@@ -33,6 +33,8 @@ evidence:
     - src/auth/chatgpt-oauth/token-store.ts
     - src/auth/chatgpt-oauth/index.ts
     - src/auth/chatgpt-oauth/refresh.ts
+    - src/auth/chatgpt-oauth/refresh-transaction.ts
+    - src/auth/private-file-atomic.ts
     - src/auth/chatgpt-oauth/paths.ts
     - src/auth/chatgpt-oauth/browser-flow.ts
     - src/auth/chatgpt-oauth/config.ts

@@ -73,10 +73,15 @@ export const defaultPrivateFileIo: PrivateFileIoPort = {
     try {
       handle = await open(dir, "r")
       await handle.sync()
-    } catch {
+    } catch (e) {
       // Directory fsync is best-effort on platforms that reject it.
+      void e
     } finally {
-      if (handle !== undefined) await handle.close().catch(() => undefined)
+      if (handle !== undefined) {
+        await handle.close().catch((closeErr: unknown) => {
+          void closeErr
+        })
+      }
     }
   },
 }
@@ -111,10 +116,14 @@ export const writePrivateFileAtomic = async (
     await io.syncDir(parent)
   } catch (e) {
     if (handle !== undefined) {
-      await handle.close().catch(() => undefined)
+      await handle.close().catch((closeErr: unknown) => {
+        void closeErr
+      })
     }
     if (!renamed) {
-      await io.unlink(temp).catch(() => undefined)
+      await io.unlink(temp).catch((unlinkErr: unknown) => {
+        void unlinkErr
+      })
     }
     throw e
   }

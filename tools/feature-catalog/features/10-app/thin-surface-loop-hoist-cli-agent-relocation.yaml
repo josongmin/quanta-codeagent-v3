@@ -57,6 +57,7 @@ purpose: |
 evidence:
   code:
     - src/host/runtime/agent-config-assembler.ts
+    - src/host/runtime/agent-config-assemble-types.ts
     - src/host/runtime/agent-args.ts
     - src/host/runtime/agent-arg-builder.ts
     - src/runner/orchestrate/session-turn-driver.ts

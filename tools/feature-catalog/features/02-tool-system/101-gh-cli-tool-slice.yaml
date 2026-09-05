@@ -34,6 +34,7 @@ purpose: |
 evidence:
   code:
     - src/tool/gh/index.ts
+    - src/tool/gh/outbound-body-policy.ts
     - src/tool/index.ts
     - src/apps/agent/mode-presets/ci-bot.ts
   adrs: []

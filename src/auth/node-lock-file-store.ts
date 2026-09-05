@@ -36,7 +36,11 @@ export const createNodeLockFileStore = (dir: string): LockFileStorePort => ({
         if (isEexist(e)) return "exists"
         throw e
       } finally {
-        if (handle !== undefined) await handle.close().catch(() => undefined)
+        if (handle !== undefined) {
+          await handle.close().catch((closeErr: unknown) => {
+            void closeErr
+          })
+        }
       }
     }
     const tmp = `${path}.${process.pid}.tmp`

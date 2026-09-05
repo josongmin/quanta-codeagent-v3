@@ -50,6 +50,7 @@ evidence:
     - src/migration/persistence.ts
     - src/migration/translators/claude-code.ts
     - src/migration/translators/claude-code-config.ts
+    - src/migration/claude-config-decode.ts
     - src/apps/cli/session-import-handler.ts
     - src/apps/cli/repl.ts
   adrs: ["docs/decisions/0430-competitor-import-persistence.md"]

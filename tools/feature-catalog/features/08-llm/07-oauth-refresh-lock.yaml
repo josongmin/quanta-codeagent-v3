@@ -44,6 +44,7 @@ evidence:
     - src/auth/lock-in-memory.ts
     - src/auth/lock-file-based.ts
     - src/auth/lock-redis-stub.ts
+    - src/auth/node-lock-file-store.ts
   adrs:
     - docs/decisions/0163-multicloud-oauth-lock.md
   tests:

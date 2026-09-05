@@ -35,6 +35,7 @@ purpose: |
 evidence:
   code:
     - src/permission/permission-store.ts
+    - src/permission/thread-permission-decode.ts
     - src/permission/per-thread-store.ts
     - src/permission/policy.ts
     - src/agent/admissibility-gate.ts

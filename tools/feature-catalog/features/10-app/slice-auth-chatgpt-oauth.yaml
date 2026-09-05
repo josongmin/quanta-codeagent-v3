@@ -44,6 +44,7 @@ evidence:
     - src/auth/chatgpt-oauth/browser-flow-error.ts
     - src/auth/chatgpt-oauth/token-store.ts
     - src/auth/chatgpt-oauth/refresh.ts
+    - src/auth/chatgpt-oauth/refresh-transaction.ts
     - src/auth/chatgpt-oauth/config.ts
     - src/auth/chatgpt-oauth/paths.ts
   adrs: [94]

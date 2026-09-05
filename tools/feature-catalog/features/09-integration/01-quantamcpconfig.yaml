@@ -27,6 +27,7 @@ evidence:
   code:
     - src/mcp/client.ts
     - src/mcp/index.ts
+    - src/mcp/naming.ts
     - src/apps/cli/internal.ts
     - src/mcp/types.ts
   adrs: [7]
