@@ -1,7 +1,7 @@
 # SEP5-01 — one `gh` process-execution authority
 
 **Priority:** P1
-**Status:** PLANNED
+**Status:** LANDED
 **Depends on:** SEP5-00
 **Finding coverage:** D3
 

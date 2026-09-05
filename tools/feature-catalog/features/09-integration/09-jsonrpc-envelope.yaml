@@ -33,6 +33,7 @@ evidence:
   tests:
     unit:
       - tests/unit/jsonrpc-envelope.test.ts
+      - tests/unit/shared/jsonrpc-envelope.test.ts
       - tests/unit/jsonrpc-codec.test.ts
       - tests/unit/jsonrpc-correlation.test.ts
       - tests/unit/jsonrpc-channel-naming.test.ts

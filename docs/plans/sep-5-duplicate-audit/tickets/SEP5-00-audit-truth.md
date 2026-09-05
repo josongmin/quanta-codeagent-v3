@@ -1,7 +1,7 @@
 # SEP5-00 — correct the duplicate-development audit truth
 
 **Priority:** P0 documentation gate
-**Status:** PLANNED
+**Status:** LANDED (2026-09-06 closeout; index matches live code)
 **Depends on:** none
 **Finding coverage:** D0, D9, D12, D14, D18, D20, D24, D28, D29, D30 and global rules
 
@@ -23,8 +23,8 @@ This ticket changes audit truth only; it must not change runtime behavior.
 - `KNOB_INVENTORY.length === 353`, `RUNTIME_CONFIG_KNOBS.length === 192`, their
   env-key intersection is zero, and inventory entries with
   `home:"runtime-config"` are 228, not 227.
-- The raw `process.env.QUANTA_*` ratchet ceiling is 49; current measured usage is
-  45.
+- The raw `process.env.QUANTA_*` ratchet ceiling is 43; current measured usage is
+  43.
 - `SessionVerbSurface<R>` plus source-level positive/negative type pins already
   enforce the D9 key/result-grade shape.
 - MCP OAuth's outer `inFlightToken` covers fresh interactive authorization, while
@@ -48,7 +48,7 @@ Do not touch the existing dirty `docs/bugbash/aug-25-wave1.md`.
 4. Move D29 to intentional separation.
 5. Change D28's count to 228 and explain that `home` is a target typed owner,
    not proof that a typed field currently exists.
-6. Report raw-env actual and ceiling separately: `45 / ceiling 49`.
+6. Report raw-env actual and ceiling separately: `43 / ceiling 43`.
 7. Replace the old PR list with SEP5-01 through SEP5-10.
 8. Preserve unresolved scope: HTTPS secret egress remains opaque without MITM;
    focused green tests are not full-CI closure.

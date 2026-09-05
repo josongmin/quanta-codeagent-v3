@@ -3,6 +3,8 @@
  * Help, default seed, and /knobs lookup are projections, not a second list.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import {
   CLI_FEATURE_GATE_NAMES,
   CLI_FEATURE_GATES,
@@ -11,6 +13,7 @@ import {
 import { CLI_KNOBS, cliKnob } from "@/apps/cli/cli-knobs"
 import { renderHelp } from "@/apps/cli/help-render"
 import { BUILTINS } from "@/apps/cli/slash-commands"
+import { KNOB_INVENTORY } from "@/config/knob-inventory"
 import { setColorPolicy, stripAnsi } from "@/ui/ui-helpers"
 
 beforeEach(() => setColorPolicy("off"))
@@ -48,5 +51,21 @@ describe("CLI seeded-surface knob projections", () => {
     const clone = CLI_SEEDED_SURFACE_KNOBS.filter((r) => r.gate !== "QUANTA_AT_AUTOCOMPLETE")
     expect(clone.length).toBe(6)
     expect(clone.some((r) => r.gate === "QUANTA_AT_AUTOCOMPLETE")).toBe(false)
+  })
+
+  test("CLI-seeded gates are not described as NOT seeded", () => {
+    for (const gate of CLI_FEATURE_GATES) {
+      const entry = KNOB_INVENTORY.find((k) => k.envKey === gate.gate)
+      if (entry === undefined) continue
+      expect(entry.describe).not.toMatch(/NOT CLI-seeded|NOT seeded/)
+    }
+    const root = join(import.meta.dir, "../../..")
+    const liveWire = readFileSync(
+      join(root, "src/apps/cli/repl/spinner-stall-live-wire.ts"),
+      "utf8",
+    )
+    const setup = readFileSync(join(root, "src/apps/cli/repl/session-setup.ts"), "utf8")
+    expect(liveWire).not.toMatch(/NEW default-OFF gate/)
+    expect(setup).not.toMatch(/NEW default-OFF gate `QUANTA_SPINNER_STALL`/)
   })
 })

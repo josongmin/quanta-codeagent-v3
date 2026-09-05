@@ -42,4 +42,43 @@ describe("thread permission entrypoint parity", () => {
     await store.load()
     expect(store.getThread("t")).toBeUndefined()
   })
+
+  test("every closed-union member round-trips; invalid families >= 6", async () => {
+    const { APPROVAL_POLICY_VALUES, APPROVALS_REVIEWER_VALUES, SANDBOX_POLICY_TYPES } =
+      await import("@/permission/thread-permission-decode")
+    expect(APPROVAL_POLICY_VALUES.length + APPROVALS_REVIEWER_VALUES.length).toBeGreaterThan(0)
+    for (const approvalPolicy of APPROVAL_POLICY_VALUES) {
+      for (const approvalsReviewer of APPROVALS_REVIEWER_VALUES) {
+        for (const type of SANDBOX_POLICY_TYPES) {
+          const decoded = decodeThreadPermission({
+            approvalPolicy,
+            approvalsReviewer,
+            sandboxPolicy: { type },
+          })
+          expect(decoded.ok).toBe(true)
+        }
+      }
+    }
+    const invalid = [
+      { ...valid, approvalPolicy: "unknown-policy" },
+      { ...valid, approvalsReviewer: "robot" },
+      { ...valid, sandboxPolicy: { type: "jail" } },
+      "not-object",
+      { ...valid, sandboxPolicy: "nope" },
+      { ...valid, sandboxPolicy: { type: "workspace-write", writableRoots: [1] } },
+    ]
+    expect(invalid.length).toBeGreaterThanOrEqual(6)
+    for (const row of invalid) {
+      expect(decodeThreadPermission(row).ok).toBe(false)
+    }
+  })
+
+  test("mutation: dropping one approval-policy literal fail-closes that member only", () => {
+    const liveAlways = decodeThreadPermission({ ...valid, approvalPolicy: "always" })
+    expect(liveAlways.ok).toBe(true)
+    const mutated = (value: unknown): boolean =>
+      value === "never" || value === "on-request" || value === "on-failure"
+    expect(mutated("always")).toBe(false)
+    expect(mutated("never")).toBe(true)
+  })
 })

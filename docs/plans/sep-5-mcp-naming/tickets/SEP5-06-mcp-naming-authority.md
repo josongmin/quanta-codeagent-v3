@@ -1,7 +1,7 @@
 # SEP5-06 — MCP identifier and tool-name authority
 
 **Priority:** P2
-**Status:** PLANNED
+**Status:** LANDED
 **Depends on:** SEP5-00
 **Finding coverage:** D6
 

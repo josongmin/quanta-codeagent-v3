@@ -68,4 +68,35 @@ describe("refreshRemoteAuthJson", () => {
     const persisted = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>
     expect(persisted.access_token).toBe("ACCESS-old")
   })
+
+  test("expired refresh acquires and releases the ChatGPT lock transaction", async () => {
+    const path = tempAuthFile({
+      access_token: "ACCESS-old",
+      refresh_token: "REFRESH-local-only",
+      expires_at: "2026-06-21T00:00:00.000Z",
+    })
+    let acquired = 0
+    let released = 0
+    const out = await refreshRemoteAuthJson(path, {
+      env: {},
+      nowMs: () => Date.parse("2026-06-21T00:00:00.000Z"),
+      lock: {
+        tryAcquire: async () => {
+          acquired++
+          return "acquired"
+        },
+        release: async () => {
+          released++
+        },
+      },
+      fetchImpl: async () =>
+        new Response(JSON.stringify({ access_token: "ACCESS-new", expires_in: 3600 }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    })
+    expect(acquired).toBe(1)
+    expect(released).toBe(1)
+    expect(JSON.parse(out).access_token).toBe("ACCESS-new")
+  })
 })

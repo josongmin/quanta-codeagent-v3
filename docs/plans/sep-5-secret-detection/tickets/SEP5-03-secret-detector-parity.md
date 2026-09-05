@@ -1,7 +1,7 @@
 # SEP5-03 — secret detector three-plane parity
 
 **Priority:** P1
-**Status:** PLANNED
+**Status:** LANDED
 **Depends on:** SEP5-00
 **Finding coverage:** D1
 

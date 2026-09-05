@@ -1,7 +1,7 @@
 # SEP5-04A — private atomic token-file commit
 
 **Priority:** P1
-**Status:** PLANNED
+**Status:** LANDED
 **Depends on:** SEP5-00
 **Finding coverage:** D11
 

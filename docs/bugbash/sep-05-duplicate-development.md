@@ -1,7 +1,7 @@
 # Sep-05 — 중복 개발 어딧 (근거 원본)
 
 > 2026-08-29 ~ 2026-09-05 병렬 어딧. **목적:** 같은 역할의 모듈/로직이 여러 곳에 복제·드리프트되는 지점을 코드 위치·인용·헬게이트 공백·조질 방법과 함께 남김.
-> **재현 기준:** 라이브 `src/` (`.zz-audit-*` 스냅샷 제외). 2026-09-05 재검증으로 “이미 끝난 것 / 아직 산 것”을 갈랐음.
+> **재현 기준:** 라이브 `src/` (`.zz-audit-*` 스냅샷 제외). 2026-09-06 closeout이 착지 후 인덱스 상태를 코드에 맞춤.
 > **관련:** [aug-25-wave1.md](./aug-25-wave1.md)는 god-code/lint/arch-debt. 이 문서는 **역할 중복**만.
 
 ## Snapshot
@@ -28,7 +28,7 @@ Closed duplicate-removal proposals must not return as unscoped cleanup (see SEP5
 
 1. 병렬 glob/grep + 서브에이전트 (compose, auth, git/media, knobs, subagent, stream/LSP, retrieval, prompt/plugin, SDK/session, permission/security).
 2. “같은 basename”은 제외. **같은 계약·같은 알고리즘이 두 곳 이상 유지**되는지만 잡음.
-3. 2026-09-05에 라이브 경로를 다시 열어 **인용·라인**을 고정. 추측으로 적힌 항목은 삭제하거나 RESOLVED로 표기.
+3. 2026-09-06 closeout이 라이브 경로를 다시 열어 인덱스 status를 코드에 맞춤. 추측으로 적힌 항목은 삭제하거나 RESOLVED로 표기.
 
 ## 조질 때 공통 규칙
 
@@ -60,7 +60,7 @@ Closed duplicate-removal proposals must not return as unscoped cleanup (see SEP5
 
 ### R4. gh `CI_ENV_ALLOWLIST`
 
-삼중 복사는 `src/shared/env-scrub.ts`로 이미 합쳐짐. **spawn 본체는 아직 삼중** (D3).
+삼중 복사는 `src/shared/env-scrub.ts`로 이미 합쳐짐. spawn 본체는 `src/tool/gh/runner.ts` `defaultGhExec` (SEP5-01). `createBunGhCliPort` / ci-bot 기본값이 그걸 쓴다.
 
 ### R5. trajectory ↔ `redactSecrets` parity
 
@@ -69,7 +69,7 @@ Closed duplicate-removal proposals must not return as unscoped cleanup (see SEP5
 > They cannot be merged into one module (`@/shared` is a leaf and may not import `@/security`), so this test is the anti-drift device.
 
 커버: `redactValue` ↔ `redactSecrets` corpus (stripe/openai/anthropic/gh/slack/gitlab/google/aws/bearer).
-**미커버:** `src/security/secret-detection/pattern-scanner.ts` (D1).
+`tests/unit/secret-sink-parity-hellgate.test.ts`가 `patternScanner().scanText`까지 같은 corpus를 강제 (SEP5-03). 세 모듈 병합은 펜스 때문에 하지 않음.
 
 ### R6. 3종 batch orchestrator 본체
 
@@ -89,26 +89,26 @@ headless/SDK/batch vs CLI per-turn. `capability-wire-path-parity` hellgate가 �
 
 | # | status | 등급 | 분류 | 코드 위치 | 제목 |
 |---|---|---|---|---|---|
-| [D0](#d0) | execute | 🟢 p3 | docs | `spinner-stall-live-wire.ts` / `knob-inventory/host.ts` / `cli-feature-gates.ts` | `QUANTA_SPINNER_STALL` “NOT seeded” 거짓말 |
-| [D1](#d1) | execute | 🔴 p0 | security | `redaction.ts` / `trajectory.ts` / `pattern-scanner.ts` | secret regex 3포크 — scanner parity 없음 |
-| [D2](#d2) | execute | 🟠 p1 | auth | `chatgpt-oauth/refresh.ts` vs `github-token-rotation.ts` | ChatGPT refresh에 cross-process lock 없음 |
-| [D3](#d3) | execute | 🟠 p1 | gh | `tool/gh/runner.ts` / `from-pr-cmd-adapters.ts` / `ci-bot.ts` | `gh` spawn 3경로, from-pr는 scrub 없음 |
-| [D4](#d4) | execute | 🟠 p1 | gh | `pr-output-sink.ts` / `ghPrCommentTool` / `ci-bot.postPrComment` | PR comment write 안전 계약 3개 |
-| [D5](#d5) | execute | 🟠 p1 | migration | `external-config/convert.ts` vs `translators/claude-code-config.ts` | 주석은 REUSES, 코드는 복붙 |
-| [D6](#d6) | execute | 🟠 p1 | mcp | `mcp-health.ts` / `mcp-surface-wire.ts` / `mcp-tool-adapter.ts` | `sanitizeServerKey` 3벌 |
+| [D0](#d0) | closed | 🟢 p3 | docs | `spinner-stall-live-wire.ts` / `knob-inventory/host.ts` / `cli-feature-gates.ts` | `QUANTA_SPINNER_STALL` CLI-seeded; comment lie fixed |
+| [D1](#d1) | closed | 🔴 p0 | security | `redaction.ts` / `trajectory.ts` / `pattern-scanner.ts` | secret regex 3포크 — scanner parity hellgate (tables stay fence-split) |
+| [D2](#d2) | closed | 🟠 p1 | auth | `chatgpt-oauth/refresh.ts` vs `github-token-rotation.ts` | ChatGPT refresh is `refreshTokenTransaction` + file lock |
+| [D3](#d3) | closed | 🟠 p1 | gh | `tool/gh/runner.ts` / `from-pr-cmd-adapters.ts` / `ci-bot.ts` | `gh` spawn SSOT `defaultGhExec` |
+| [D4](#d4) | closed | 🟠 p1 | gh | `pr-output-sink.ts` / `ghPrCommentTool` / `ci-bot.postPrComment` | PR comment redact/cap; automation idempotency |
+| [D5](#d5) | closed | 🟠 p1 | migration | `external-config/convert.ts` vs `translators/claude-code-config.ts` | Claude MCP/hooks decoder SSOT |
+| [D6](#d6) | closed | 🟠 p1 | mcp | `mcp/naming.ts` / `mcp-health.ts` / `mcp-surface-wire.ts` | `sanitizeMcpNameSegment` SSOT; thin aliases remain |
 | [D7](#d7) | conditional | 🟠 p1 | media | `media/stt/*` vs `voice/transcriber/*` | Whisper/Deepgram REST sibling |
 | [D8](#d8) | conditional | 🟠 p1 | mention | `mention-runner/skill-resolver.ts` vs `plugin-app-resolver/*` | `firstLineOf`/`safeLookup` 복제 + warn 드리프트 |
 | [D9](#d9) | closed | 🟡 p2 | session | `ipc/session/handle.ts` vs `sdk/runtime/handle-adapter.ts` | verb-table 쌍둥이 — `SessionVerbSurface<R>` already enforces shape |
-| [D10](#d10) | execute | 🟡 p2 | permission | `permission-store.ts` vs `posture-persistence.ts` | `ThreadPermission` validator 복제 |
-| [D11](#d11) | execute | 🟡 p2 | auth | `chatgpt-oauth/token-store.ts` vs `mcp-composition.createFileMcpTokenStore` | atomic 0600 write 패턴 복제 |
+| [D10](#d10) | closed | 🟡 p2 | permission | `permission-store.ts` vs `posture-persistence.ts` | `decodeThreadPermission` SSOT |
+| [D11](#d11) | closed | 🟡 p2 | auth | `chatgpt-oauth/token-store.ts` vs `mcp-composition.createFileMcpTokenStore` | `writePrivateFileAtomic` SSOT |
 | [D12](#d12) | closed | 🟡 p2 | rg | `tool/grep` / `tool/glob` / `retrieval/lexical/ripgrep-impl` | `rg` spawn 3구현 — different output/fallback/jail contracts |
 | [D13](#d13) | conditional | 🟡 p2 | git | `storage/git-runner` vs rewind/consolidate/worktree | git spawn 4+경로 |
 | [D14](#d14) | closed | 🟡 p2 | hash | `storage/atomic-write.ts` vs llm hash×2 vs migration persist vs bench digest | `sha256Hex` 선언 다수 — fence-local one-liners |
-| [D15](#d15) | execute | 🟡 p2 | retrieval | `embedders/` vs `engines/embedder/`; `rerank/` vs `reranker/` | 이중 스택 + 이름 충돌 |
+| [D15](#d15) | conditional | 🟡 p2 | retrieval | `embedders/` vs `engines/embedder/`; `rerank/` vs `reranker/` | assembler retired; barrel public-compat dual stack remains |
 | [D16](#d16) | conditional | 🟡 p2 | tools | `gated-tool-ports.buildBaseRegistry` vs `tooling.buildToolingCore` | ToolRegistry 조립 2파이프 |
 | [D17](#d17) | conditional | 🟡 p2 | compose | `apps/agent/mode-presets/build*Base` | 5개 preset 공통 조립 |
 | [D18](#d18) | closed | 🟡 p2 | test | `_support/bootstrap-fake-deps` / `headless/fake-deps` / `brain-mode-session-scaffold` | SessionBootstrapDeps 3벌 — keep surface fakes local |
-| [D19](#d19) | execute | 🟡 p2 | jsonrpc | `mcp/jsonrpc.ts` vs `lsp/adapters/jsonrpc.ts` | 타입/envelope 복제, framing만 다름 |
+| [D19](#d19) | closed | 🟡 p2 | jsonrpc | `mcp/jsonrpc.ts` vs `lsp/adapters/jsonrpc.ts` | shared `isJsonRpcEnvelope`; framing stays local |
 | [D20](#d20) | closed | 🟡 p2 | jsonl | replay / subagent-persist / custom-3p / radar / jsonl-recorder | JSONL IO 패턴 5곳 — different durability/corruption contracts |
 | [D21](#d21) | conditional | 🟡 p2 | boot | CLI `session-setup` vs web `runtime-factory` | interactive boot 평행 |
 | [D22](#d22) | conditional | 🟢 p3 | util | `safeJsonParse` / debug `withTimeout` / `sleepReal` / `edit/eol` | 작은 hoist |
@@ -116,8 +116,8 @@ headless/SDK/batch vs CLI per-turn. `capability-wire-path-parity` hellgate가 �
 | [D24](#d24) | closed | 🟡 p2 | remote | `mcp/skybridge` vs `remote/runner` | lima/docker/vz CLI 평행 — different lifecycle/policy |
 | [D25](#d25) | conditional | 🟡 p2 | spawn | plugin-isolation / mcp stdio / lsp transport | pump-death judge (grace는 공유됨) |
 | [D26](#d26) | conditional | 🟡 p2 | stream | stdout / jsonl-recorder / agent-state / item-stream … | `AgentEvent` switch ~10곳 |
-| [D27](#d27) | execute | 🟡 p2 | knobs | `runtimeConfig()` vs raw `process.env` / CLI_KNOBS∩GATES | typed 우회 + 이중 선언 |
-| [D28](#d28) | execute | 🟢 p3 | knobs | inventory `home:"runtime-config"` **228** | typed field 없는 home 거짓말 |
+| [D27](#d27) | closed | 🟡 p2 | knobs | `runtimeConfig()` vs raw `process.env` / CLI_KNOBS∩GATES | `readAuthority` + raw-env 43/43 |
+| [D28](#d28) | closed | 🟢 p3 | knobs | inventory `home:"runtime-config"` **228** | `home` is target owner; `readAuthority` is current read |
 | [D29](#d29) | intentional | 🟡 p2 | atomic | `storage/atomic-write.ts` vs `lsp/adapters/file-write-atomic.ts` | 알고리즘 동일, port 다름 (문서화됨) |
 | [D30](#d30) | closed | 🟢 p3 | oauth | `chatgpt-oauth/refresh.ts` vs `mcp-oauth-provider.ts` vs `token-rotation.ts` | MCP outer mutex ≠ token rotator; SEP5-04B is ChatGPT only |
 
@@ -125,38 +125,19 @@ headless/SDK/batch vs CLI per-turn. `capability-wire-path-parity` hellgate가 �
 
 ## D0. `QUANTA_SPINNER_STALL` “NOT seeded” 거짓말
 
-**배경:** CLI 기본 ON 시딩과 inventory/composition 주석이 반대.
+**상태 (2026-09-06):** closed. inventory describe는 `CLI-seeded default-ON`. live-wire / session-setup 주석은 slice `gateOn` default-OFF + CLI seed ON. 가드: `tests/unit/cli/cli-seeded-surface-knob-projections.test.ts`.
 
-**근거 (라이브):**
+**배경:** CLI 기본 ON 시딩과 inventory/composition 주석이 반대였음.
 
-`src/apps/cli/repl/spinner-stall-live-wire.ts` L20–21:
+**근거 (pre-fix):** live-wire / host inventory가 “NOT CLI-seeded”라고 썼고 `cli-feature-gates.ts`는 키를 seed함.
 
-> NOT seeded by `cli-feature-gates.ts` — strictly operator opt-in.
-
-`src/config/knob-inventory/host.ts` L23–29:
-
-> `envKey: "QUANTA_SPINNER_STALL"` … “opt-in, **NOT CLI-seeded**.”
-
-`src/apps/cli/cli-feature-gates.ts` L142–145:
-
-```ts
-{
-  gate: "QUANTA_SPINNER_STALL",
-  describe: "LLM stream stall detector → operator notice (per-episode latch)",
-},
-```
-
-CLI `index.ts`가 `CLI_FEATURE_GATES`를 `"1"`로 seed함. 주석이 거짓.
-
-**헬게이트:** 없음 (주석-시딩 불일치).
-
-**조질지:** inventory + live-wire 주석을 “CLI-seeded default-ON, operator can flip off”로 고침. 동작 변경 없음.
-
-**검증:** `cli-feature-gates.ts`에 있는 키가 inventory describe와 모순되면 RED인 source ratchet.
+**라이브:** `src/config/knob-inventory/host.ts` describe “CLI-seeded default-ON”; `cli-feature-gates.ts` L208 `QUANTA_SPINNER_STALL`.
 
 ---
 
 ## D1. Secret regex 3포크 — scanner parity 없음
+
+**상태 (2026-09-06):** closed as parity, not merge. `SECRET_PATTERN_CATALOG`에 gitlab-pat/jwt/bearer-token/url-userinfo. `secret-sink-parity-hellgate`가 세 plane corpus를 강제. `@/shared` leaf라 테이블 단일 모듈은 불가 (R5).
 
 **배경:** 같은 secret 모양이 싱크마다 다른 카탈로그를 탐. 한쪽만 고치면 다른 plane으로 샘.
 
@@ -186,7 +167,7 @@ CLI `index.ts`가 `CLI_FEATURE_GATES`를 `"1"`로 seed함. 주석이 거짓.
 
 ## D2. ChatGPT refresh에 cross-process lock 없음
 
-**배경:** 같은 OAuth refresh인데 GitHub만 파일락, ChatGPT는 프로세스 내 Map.
+**상태 (2026-09-06):** closed. `refreshTokenTransaction` + `FileBasedLock`/`createNodeLockFileStore`. LLM `ensureFreshToken`과 bench `refreshRemoteAuthJson`이 같은 트랜잭션을 씀. MCP outer mutex는 D30 — 손대지 않음.
 
 **근거:**
 
@@ -210,6 +191,8 @@ CLI `index.ts`가 `CLI_FEATURE_GATES`를 `"1"`로 seed함. 주석이 거짓.
 ---
 
 ## D3. `gh` spawn 3경로 — from-pr는 scrub 없음
+
+**상태 (2026-09-06):** closed. `src/tool/gh/runner.ts` `defaultGhExec`가 scrub+timeout+tree-kill SSOT. `createBunGhCliPort(binary, exec=defaultGhExec)`, ci-bot `spawnGhRunner`도 동일 기본값. `Bun.spawn(["gh"` 본체는 runner.ts만.
 
 **배경:** 같은 `gh` 바이너리, argv 모양·env 정책이 다름.
 
@@ -240,6 +223,8 @@ allowlist 삼중 복사는 R4로 해소. **wrapper는 남음.**
 
 ## D4. PR comment write 안전 계약 3개
 
+**상태 (2026-09-06):** closed. ci-bot은 `createPrOutputSink` + `automatedPrCommentKey` (runId 없으면 fail-closed skip). HITL `ghPrCommentTool`은 `defaultGhCommentBodyPolicy.prepare` 후 runner. 펜스 때문에 integrations/github와 tool/gh body policy는 구조적 쌍둥이 (cap 65000; automation만 marker).
+
 **배경:** 사용자에게는 같은 “PR에 댓글”. 재시도·secret 처리가 갈림.
 
 **근거:**
@@ -266,7 +251,7 @@ allowlist 삼중 복사는 R4로 해소. **wrapper는 남음.**
 
 ## D5. Migration MCP/hooks — 주석은 REUSES, 코드는 복붙
 
-**배경:** 세션 import와 config import가 같은 Claude `.mcp.json` / hooks를 두 함수로 파싱.
+**상태 (2026-09-06):** closed. `src/migration/claude-config-decode.ts` ← convert.ts / translators/claude-code-config.ts.
 
 **근거:**
 
@@ -309,7 +294,7 @@ const classifyTransport = (entry: Record<string, unknown>): TranslatedMcpServer[
 
 ## D6. `sanitizeServerKey` 3벌
 
-**배경:** MCP 서버 이름을 identifier로 만드는 정규식이 세 곳에 있음. 한쪽만 바꾸면 `/mcp` 슬래시 조인과 bridged tool name이 어긋남.
+**상태 (2026-09-06):** closed. regex SSOT `sanitizeMcpNameSegment` (`mcp/naming.ts`). health/CLI `sanitizeServerKey`는 thin alias.
 
 **근거:**
 
@@ -437,7 +422,7 @@ plugin 쪽은 silent catch (warn 없음) → 드리프트.
 
 ## D10. `ThreadPermission` validator 복제
 
-**배경:** store↔posture 사이클 피하려고 가드를 복사.
+**상태 (2026-09-06):** closed. `permission/thread-permission-decode.ts` ← store + posture.
 
 **근거:**
 
@@ -460,7 +445,7 @@ plugin 쪽은 silent catch (warn 없음) → 드리프트.
 
 ## D11. Token file atomic-write 패턴
 
-**배경:** 스키마는 다름 (snake ChatGPT vs camel MCP). mkdir/tmp/chmod 0600/rename만 같음.
+**상태 (2026-09-06):** closed. `writePrivateFileAtomic` ← ChatGPT `writeToken` + MCP `createFileMcpTokenStore.write`. 스키마는 분리.
 
 **근거:** `src/auth/chatgpt-oauth/token-store.ts` — `access_token`, `expires_at` ISO, 0600 assert.
 `src/host/mcp-composition.ts` `createFileMcpTokenStore` — `TokenRecord` camel, tmp+chmod+rename.
@@ -531,6 +516,8 @@ plugin 쪽은 silent catch (warn 없음) → 드리프트.
 ---
 
 ## D15. Retrieval 이중 스택
+
+**상태 (2026-09-06):** conditional. `runner/assemble/retrieval.ts` / `buildRetrievalStackCore` 삭제. live 조립은 `createEmbedderFromEnv` / `createRerankerFromEnv`. `embedders/**` + `embedding-port`는 barrel public-compat로 분류됨 (`retrieval-authority-manifest.test.ts`). 스택 병합은 외부 소비자 증거 전까지 하지 않음.
 
 **근거:**
 
@@ -605,6 +592,8 @@ activityStore 드리프트: terminal/stdio=`buildSessionAuthorities`, headless=`
 ---
 
 ## D19. MCP vs LSP jsonrpc 타입
+
+**상태 (2026-09-06):** closed. `shared/jsonrpc-envelope.ts` `isJsonRpcEnvelope`. MCP/LSP framing과 로컬 `JsonRpcMessage` 별칭은 유지.
 
 **근거:**
 
@@ -720,6 +709,8 @@ Web: `apps/web-daemon/runtime-factory.ts` — `bootstrapSession` **없음**. `bu
 
 ## D27. Knob raw env / 이중 선언
 
+**상태 (2026-09-06):** closed. `readAuthority` closed universe. raw `process.env.QUANTA_*` **43 / ceiling 43**. CLI 7 overlap은 `CLI_SEEDED_SURFACE_KNOBS`. dual-channel 4키 유지. `QUANTA_GOAL`은 startup-seed.
+
 **근거 (2026-09-05 재검증):**
 
 typed인데 raw `process.env` (최소):
@@ -742,6 +733,8 @@ runner ∩ runtime-config-knobs **4키** (apply no-op, 문서화 dual-channel):
 ---
 
 ## D28. inventory `home:"runtime-config"` 228
+
+**상태 (2026-09-06):** closed. `home` 리네임은 하지 않음. `readAuthority`가 current read를 구분. `types.ts` 주석: home is target typed owner.
 
 **근거:** `KNOB_INVENTORY` ∩ `RUNTIME_CONFIG_KNOBS` by envKey = **0** (의도적 disjoint). 그런데 inventory **228**개가 `home: "runtime-config"`라 운영자가 typed SSOT로 착각. `home` is a **target** typed owner, not proof a typed field currently exists. Executable under `tests/unit/knob-read-authority-parity.test.ts`.
 
@@ -821,13 +814,13 @@ The source-audit PR list is retired. Execute via
 12. SEP5-11 closed/conditional register (no impl of closed items)
 13. SEP5-12 receipts + `bun run test:ci` last
 
-Unresolved scope: HTTPS secret egress remains opaque without MITM; focused green tests are not full-CI closure until SEP5-12.
+Unresolved scope: HTTPS secret egress remains opaque without MITM. Dual retrieval public-compat barrel (`embedders/**`) stays until a deprecation consumer inventory. SEP5-12 is closed only with an exact-HEAD `bun run test:ci` receipt.
 
 ---
 
 ## 세션 메타
 
 - 어딧 기간: 2026-08-29 ~ 2026-09-05
-- 라이브 재검증: 2026-09-05
+- 라이브 재검증: 2026-09-05; closeout 문서 정합: 2026-09-06
 - 이 파일이 근거 SSOT. 채팅 요약보다 이 인용을 믿을 것.
 - 코드가 이 문서와 달라지면 **코드를 이기고 이 섹션을 고침.**

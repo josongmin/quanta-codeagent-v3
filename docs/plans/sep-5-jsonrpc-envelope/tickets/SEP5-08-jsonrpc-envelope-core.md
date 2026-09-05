@@ -1,7 +1,7 @@
 # SEP5-08 — shared JSON-RPC envelope core
 
 **Priority:** P2
-**Status:** PLANNED
+**Status:** LANDED
 **Depends on:** SEP5-00
 **Finding coverage:** D19
 

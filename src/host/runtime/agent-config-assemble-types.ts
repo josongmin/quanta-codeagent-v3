@@ -95,7 +95,7 @@ export interface AssembleRequestSeams {
   runInstance?: (instance: unknown) => Promise<unknown>
   /** Replace `loadCorpus` (same untyped-here-typed-in-preset pattern). */
   loadCorpus?: (root: string) => Promise<unknown[]>
-  /** GitHub `gh` runner for ci-bot. Default = a real `Bun.spawn(["gh", …])`. */
+  /** GitHub `gh` runner for ci-bot. Default = `defaultGhExec` (scrub + tree-kill). */
   ghRun?: (args: string[]) => Promise<{ stdout: string; stderr: string; exitCode: number }>
   /** Inner git runner for ci-bot (BEFORE the branch-only guard wraps it).
    *  Default = the real `defaultGitRunner`. Tests inject a fake to assert the

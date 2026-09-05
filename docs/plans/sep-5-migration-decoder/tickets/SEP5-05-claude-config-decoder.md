@@ -1,7 +1,7 @@
 # SEP5-05 — one pure Claude MCP/hooks decoder
 
 **Priority:** P2
-**Status:** PLANNED
+**Status:** LANDED
 **Depends on:** SEP5-00
 **Finding coverage:** D5
 

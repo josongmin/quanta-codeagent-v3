@@ -412,12 +412,13 @@ const setupBoot = async (
   }
 
   // Spinner-stall live wire (ADR-0227 → operator-notice, follow-up from
-  // e81010371). NEW default-OFF gate `QUANTA_SPINNER_STALL`: when on, the
-  // session LLM is decorated so every stream call is stall-tracked and one
-  // 1s poll timer surfaces stall/recover edges as latched operator notices.
-  // Gate OFF ⇒ `undefined` ⇒ the LITERAL `boot.llm` is forwarded and no
-  // timer exists (byte-identical; pinned by session-setup-hellgate). The
-  // timer is cancelled in `shutdownMcp` below (no leaked interval).
+  // e81010371). Slice `gateOn` is default-OFF; the interactive CLI seeds
+  // `QUANTA_SPINNER_STALL=1` via `cli-feature-gates.ts`. When the gate is
+  // on, the session LLM is decorated so every stream call is stall-tracked
+  // and one 1s poll timer surfaces stall/recover edges as latched operator
+  // notices. Gate OFF ⇒ `undefined` ⇒ the LITERAL `boot.llm` is forwarded
+  // and no timer exists (byte-identical; pinned by session-setup-hellgate).
+  // The timer is cancelled in `shutdownMcp` below (no leaked interval).
   const spinnerStallWire = buildSpinnerStallLiveWire(gateOn(runtime.env, SPINNER_STALL_ENV_GATE))
   const sessionLlm = spinnerStallWire === undefined ? boot.llm : spinnerStallWire.wrapLlm(boot.llm)
 

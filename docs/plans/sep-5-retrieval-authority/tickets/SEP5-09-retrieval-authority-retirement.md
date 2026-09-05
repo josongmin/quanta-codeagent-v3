@@ -1,7 +1,7 @@
 # SEP5-09 — retrieval authority and legacy retirement
 
 **Priority:** P2 design-and-removal
-**Status:** PLANNED; removal gated on public-consumer inventory
+**Status:** LANDED (assembler retired; embedders barrel remains public-compat)
 **Depends on:** SEP5-00
 **Finding coverage:** D15
 

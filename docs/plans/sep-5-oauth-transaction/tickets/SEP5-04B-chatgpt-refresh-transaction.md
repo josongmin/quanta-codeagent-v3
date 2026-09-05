@@ -1,7 +1,7 @@
 # SEP5-04B — ChatGPT cross-process refresh transaction
 
 **Priority:** P1
-**Status:** PLANNED
+**Status:** LANDED
 **Depends on:** SEP5-04A
 **Finding coverage:** D2; excludes D30's intentional MCP fresh-auth mutex
 
@@ -66,6 +66,7 @@ Add a production Node implementation of `LockFileStorePort` in `@/auth`:
 | `src/auth/chatgpt-oauth/token-store.ts` | Expose the narrow read/persist functions consumed by the transaction |
 | `src/llm/adapters/chatgpt-oauth.ts` | Replace read→refresh→write sequence with injected transaction |
 | ChatGPT OAuth composition/factory files | Construct one file lock from the resolved Quanta home and inject it |
+| `src/apps/bench/remote/fresh-auth.ts` | Same transaction; last ChatGPT persist-without-lock production caller |
 | `tests/unit/auth/chatgpt-refresh-transaction.test.ts` | Independent-holder concurrency and failure battery |
 | `tests/integration/chatgpt-refresh-cross-process.test.ts` | Real child-process same-token-file proof |
 

@@ -1,7 +1,7 @@
 # SEP5-07 — permission primitive validation authority
 
 **Priority:** P2
-**Status:** PLANNED
+**Status:** LANDED
 **Depends on:** SEP5-00
 **Finding coverage:** D10
 

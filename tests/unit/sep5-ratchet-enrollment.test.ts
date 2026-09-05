@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test"
-import { existsSync, readdirSync, statSync } from "node:fs"
-import { join } from "node:path"
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
+import { join, relative, resolve } from "node:path"
+import { GATES } from "../../tools/dev/gate-manifest"
+import { expandTestFiles } from "../../tools/dev/sandboxed-test"
 import { assertScanPopulation } from "./_shared/scan-population"
 
 const ROOT = join(import.meta.dir, "..", "..")
@@ -12,6 +14,7 @@ const EXPECTED = [
   "tests/unit/secret-sink-parity-hellgate.test.ts",
   "tests/unit/auth/private-file-atomic.test.ts",
   "tests/unit/auth/chatgpt-refresh-transaction.test.ts",
+  "tests/integration/chatgpt-refresh-cross-process.test.ts",
   "tests/unit/migration/claude-config-entrypoint-parity.test.ts",
   "tests/unit/cli/mcp-name-surface-parity.test.ts",
   "tests/unit/permission/thread-permission-entrypoint-parity.test.ts",
@@ -40,19 +43,45 @@ const assertSelected = (
   return { ok: true }
 }
 
+const parseFullSuiteRoots = (shardsSrc: string): string[] => {
+  const block = shardsSrc.match(/full:\s*\[([\s\S]*?)\],\s*core:/)
+  if (block?.[1] === undefined) {
+    throw new Error("SUITE_ROOTS.full array not found in run-test-shards.ts")
+  }
+  return [...block[1].matchAll(/"([^"]+)"/g)].map((m) => m[1] ?? "").filter((r) => r !== "")
+}
+
+const resolvedFullSuiteSelection = (roots: readonly string[]): string[] => {
+  const abs = roots.map((root) => resolve(ROOT, root)).filter((dir) => existsSync(dir))
+  return expandTestFiles(abs).map((file) => relative(ROOT, file))
+}
+
 describe("SEP5 ratchet enrollment", () => {
   test("expected file list length equals landed implementation tickets", () => {
-    expect(EXPECTED.length).toBe(12)
+    expect(EXPECTED.length).toBe(13)
     for (const path of EXPECTED) {
       expect(existsSync(join(ROOT, path))).toBe(true)
     }
   })
 
-  test("resolved bun unit/integration selection includes every primary file", () => {
+  test("prepush full-suite selection includes every primary file", () => {
+    const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
+      scripts: Record<string, string>
+    }
+    expect(pkg.scripts["test:ci"]).toBe("bun run prepush")
+    const fullGate = GATES.find((g) => g.id === "full-suite")
+    expect(fullGate?.run.includes("test:full:ci")).toBe(true)
+    expect(pkg.scripts["test:full:ci"] ?? "").toContain("--suite=full")
+
+    const shardsSrc = readFileSync(join(ROOT, "tools/dev/run-test-shards.ts"), "utf8")
+    const roots = parseFullSuiteRoots(shardsSrc)
+    expect(roots).toContain("tests/unit")
+    expect(roots).toContain("tests/integration")
+
+    const selected = resolvedFullSuiteSelection(roots)
     const testsRoot = join(ROOT, "tests")
-    const selected = walkTests(testsRoot)
     assertScanPopulation(
-      selected.map((p) => join(ROOT, p)),
+      walkTests(testsRoot).map((p) => join(ROOT, p)),
       testsRoot,
       {
         id: "tests/unit/sep5-ratchet-enrollment.test.ts#TESTS",
@@ -69,7 +98,17 @@ describe("SEP5 ratchet enrollment", () => {
   })
 
   test("removing one expected path from a cloned selection fails for that path", () => {
-    const selected = walkTests(join(ROOT, "tests")).filter((p) => p !== EXPECTED[0])
+    const shardsSrc = readFileSync(join(ROOT, "tools/dev/run-test-shards.ts"), "utf8")
+    const selected = resolvedFullSuiteSelection(parseFullSuiteRoots(shardsSrc)).filter(
+      (p) => p !== EXPECTED[0],
+    )
+    const r = assertSelected(selected, EXPECTED)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.missing).toBe(EXPECTED[0])
+  })
+
+  test("mutation: dropping tests/unit from parsed full roots misses a primary", () => {
+    const selected = resolvedFullSuiteSelection(["tests/integration", "tests/meta"])
     const r = assertSelected(selected, EXPECTED)
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.missing).toBe(EXPECTED[0])

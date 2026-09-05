@@ -47,4 +47,19 @@ describe("jsonrpc envelope", () => {
     const mixed = { jsonrpc: "2.0", id: 1, result: 1, error: { code: 1, message: "e" } }
     expect(isJsonRpcEnvelope(mixed)).toBe(true)
   })
+
+  test("mutation: weakening the version literal would accept jsonrpc 1.0", () => {
+    const weakened = (value: unknown): boolean => {
+      if (typeof value !== "object" || value === null) return false
+      const o = value as Record<string, unknown>
+      if (typeof o.jsonrpc !== "string") return false
+      const hasId = "id" in o
+      const hasMethod = "method" in o
+      if (!hasId && !hasMethod) return false
+      return true
+    }
+    const v1 = { jsonrpc: "1.0", method: "x" }
+    expect(isJsonRpcEnvelope(v1)).toBe(false)
+    expect(weakened(v1)).toBe(true)
+  })
 })

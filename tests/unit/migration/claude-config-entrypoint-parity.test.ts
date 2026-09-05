@@ -47,4 +47,23 @@ describe("claude config entrypoint parity", () => {
     const malformed = await convertMcp(join(root, "missing.json"))
     expect(malformed.ok).toBe(false)
   })
+
+  test("mutation: restoring a local url-as-sse branch diverges from the canonical decoder", async () => {
+    const { classifyClaudeTransport, decodeClaudeMcpServers } = await import(
+      "@/migration/claude-config-decode"
+    )
+    const entry = { url: "https://ex/mcp" }
+    const drifted = (raw: Record<string, unknown>): "http" | "sse" | "stdio" | "unknown" => {
+      const type = raw.type
+      if (type === "http" || type === "sse" || type === "stdio") return type
+      if (typeof raw.url === "string") return "sse"
+      if (typeof raw.command === "string") return "stdio"
+      return "unknown"
+    }
+    expect(classifyClaudeTransport(entry)).toBe("http")
+    expect(drifted(entry)).toBe("sse")
+    expect(drifted(entry)).not.toBe(classifyClaudeTransport(entry))
+    const live = decodeClaudeMcpServers({ mcpServers: { b: entry } })
+    expect(live).toEqual([{ name: "b", transport: "http" }])
+  })
 })

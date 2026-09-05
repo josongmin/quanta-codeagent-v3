@@ -1,7 +1,7 @@
 # SEP5-10 — knob read-authority classification and raw-env burn-down
 
 **Priority:** P2
-**Status:** PLANNED
+**Status:** LANDED
 **Depends on:** SEP5-00
 **Finding coverage:** D27, D28
 

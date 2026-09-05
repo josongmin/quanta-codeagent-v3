@@ -13,13 +13,14 @@
  * mid-turn surfaces as a latched operator notice ("model stream stalled…")
  * and its recovery as one info clear — the agent-state-visibility north star.
  *
- * # Gate (NEW, default-OFF — same discipline as `QUANTA_BG_TURN`)
+ * # Gate (slice default-OFF; interactive CLI seeds ON)
  *
  * `QUANTA_SPINNER_STALL`, registered in `src/config/knob-inventory/host.ts`
  * with THIS file as the readSite (the literal below is the canonical
- * declaration the knob-registry completeness ratchet counts). Seeded default-ON
- * by `cli-feature-gates.ts` on the interactive CLI; other surfaces stay
- * operator opt-in. Gate OFF ⇒
+ * declaration the knob-registry completeness ratchet counts). Same discipline
+ * as `QUANTA_BG_TURN`: `gateOn` is off unless seeded. `cli-feature-gates.ts`
+ * seeds it default-ON on the interactive CLI; other surfaces stay operator
+ * opt-in. Gate OFF ⇒
  * {@link buildSpinnerStallLiveWire} returns `undefined`, session-setup keeps
  * the LITERAL `boot.llm` reference and no timer is ever scheduled
  * (byte-identical; pinned by `session-setup-hellgate.test.ts`).
@@ -57,8 +58,8 @@ import {
   wireStallDetectorToOperatorNotices,
 } from "@/llm/spinner-stall"
 
-/** The NEW default-OFF gate (knob-inventory host.ts entry; this literal is
- *  the canonical read-site declaration). */
+/** Canonical read-site env key (knob-inventory host.ts). Slice `gateOn` is
+ *  default-OFF; the interactive CLI seeds this ON via cli-feature-gates. */
 export const SPINNER_STALL_ENV_GATE = "QUANTA_SPINNER_STALL"
 
 /** Poll cadence for the stall emitter. 1s mirrors the CLI turn-indicator

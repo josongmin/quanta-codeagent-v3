@@ -1,17 +1,22 @@
 import { readFile } from "node:fs/promises"
+import { dirname, join } from "node:path"
+import { createNodeLockFileStore, FileBasedLock } from "@/auth"
 import {
   type FetchLike,
   refreshToken,
+  refreshTokenTransaction,
   resolveOAuthConfig,
   type TokenRecord,
   writeToken,
 } from "@/auth/chatgpt-oauth"
+import type { OAuthRefreshLockPort } from "@/auth/oauth-refresh-lock"
 import { errMessage, isRecord } from "@/shared"
 
 export interface RefreshRemoteAuthJsonOptions {
   readonly env?: Record<string, string | undefined>
   readonly fetchImpl?: FetchLike
   readonly nowMs?: () => number
+  readonly lock?: OAuthRefreshLockPort
 }
 
 /** The shipped access token must outlast the whole remote run (provision +
@@ -28,10 +33,41 @@ const remainingMs = (rec: TokenRecord, nowMs: number): number => {
   return Number.isFinite(exp) ? exp - nowMs : 0
 }
 
+const asTokenRecord = (parsed: unknown): TokenRecord | null => {
+  if (!isRecord(parsed) || typeof parsed.access_token !== "string") return null
+  if (typeof parsed.refresh_token !== "string" || typeof parsed.expires_at !== "string") {
+    return null
+  }
+  return parsed as unknown as TokenRecord
+}
+
+const defaultRefreshLock = (authFile: string, nowMs: () => number): OAuthRefreshLockPort =>
+  new FileBasedLock({
+    store: createNodeLockFileStore(join(dirname(authFile), "locks")),
+    clock: { now: nowMs },
+    pid: process.pid,
+  })
+
+const sleepClosed = async (ms: number, signal?: AbortSignal): Promise<void> => {
+  if (signal?.aborted) throw new Error("refresh transaction aborted")
+  await new Promise<void>((resolve, reject) => {
+    const t = setTimeout(resolve, ms)
+    const onAbort = (): void => {
+      clearTimeout(t)
+      reject(new Error("refresh transaction aborted"))
+    }
+    signal?.addEventListener("abort", onAbort, { once: true })
+  })
+}
+
 /**
  * Full-remote boxes receive only a stripped short-lived access token and cannot
  * refresh it. Refresh locally before provisioning so a revoked/stale access
  * token fails before we pay the box bootstrap tax.
+ *
+ * Refresh is the same ChatGPT transaction as the LLM adapter: acquire, re-read,
+ * refresh only if still expired, persist, release. Two bench/LLM holders must
+ * not rotate the same refresh token without the lock.
  *
  * FALLBACK (jun-25): the issuer (auth.openai.com) can be unreachable LOCALLY —
  * a corp proxy / endpoint-security stack (e.g. Veraport/MagicLine) resets the
@@ -47,19 +83,32 @@ export const refreshRemoteAuthJson = async (
   opts: RefreshRemoteAuthJsonOptions = {},
 ): Promise<string> => {
   const parsed: unknown = JSON.parse(await readFile(authFile, "utf8"))
-  if (!isRecord(parsed) || typeof parsed.access_token !== "string") {
+  const current = asTokenRecord(parsed)
+  if (current === null) {
     throw new Error("[full-remote] auth file malformed: missing access_token")
   }
-  const current = parsed as unknown as TokenRecord
-  const now = opts.nowMs?.() ?? Date.now()
+  const nowMs = opts.nowMs ?? Date.now
+  const now = nowMs()
+  const lock = opts.lock ?? defaultRefreshLock(authFile, nowMs)
   try {
-    const next = await refreshToken({
-      cfg: resolveOAuthConfig(opts.env ?? process.env),
-      current,
-      ...(opts.fetchImpl !== undefined ? { fetchImpl: opts.fetchImpl } : {}),
-      ...(opts.nowMs !== undefined ? { nowMs: opts.nowMs } : {}),
+    const next = await refreshTokenTransaction(authFile, {
+      lock,
+      holderId: `${process.pid}-bench-fresh-auth`,
+      nowMs,
+      readCurrent: async () => {
+        const latest: unknown = JSON.parse(await readFile(authFile, "utf8"))
+        return asTokenRecord(latest)
+      },
+      persist: (token) => writeToken(authFile, token),
+      refresh: (rec) =>
+        refreshToken({
+          cfg: resolveOAuthConfig(opts.env ?? process.env),
+          current: rec,
+          ...(opts.fetchImpl !== undefined ? { fetchImpl: opts.fetchImpl } : {}),
+          nowMs,
+        }),
+      sleep: sleepClosed,
     })
-    await writeToken(authFile, next)
     return JSON.stringify(next)
   } catch (err) {
     const remaining = remainingMs(current, now)

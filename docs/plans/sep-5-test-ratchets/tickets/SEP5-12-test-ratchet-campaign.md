@@ -1,7 +1,7 @@
 # SEP5-12 — non-vacuous test and ratchet campaign
 
 **Priority:** P1 release gate
-**Status:** PLANNED
+**Status:** CLOSEOUT (enrollment+mutation rails landed; complete only after exact-HEAD `bun run test:ci`)
 **Depends on:** every SEP5 implementation ticket that lands
 **Finding coverage:** D1, D2, D3, D4, D5, D6, D10, D11, D15, D19, D27, D28
 

@@ -1,6 +1,6 @@
 # Sep-05 duplicate-development remediation — execution index
 
-**Status:** IN PROGRESS (SEP5 campaign)
+**Status:** CLOSEOUT (code+docs landed; exact-HEAD `bun run test:ci` receipt still required)
 **Truth snapshot:** `59ad4f9b3850b89c0417ef3d12d0c27d64917ba1`
 **Source audit:** `docs/bugbash/sep-05-duplicate-development.md`
 
