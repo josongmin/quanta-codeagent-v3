@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { existsSync, readdirSync, statSync } from "node:fs"
 import { join } from "node:path"
+import { assertScanPopulation } from "./_shared/scan-population"
 
 const ROOT = join(import.meta.dir, "..", "..")
 
@@ -48,7 +49,16 @@ describe("SEP5 ratchet enrollment", () => {
   })
 
   test("resolved bun unit/integration selection includes every primary file", () => {
-    const selected = walkTests(join(ROOT, "tests"))
+    const testsRoot = join(ROOT, "tests")
+    const selected = walkTests(testsRoot)
+    assertScanPopulation(
+      selected.map((p) => join(ROOT, p)),
+      testsRoot,
+      {
+        id: "tests/unit/sep5-ratchet-enrollment.test.ts#TESTS",
+        collectable: (name) => name.endsWith(".test.ts"),
+      },
+    )
     expect(selected.length).toBeGreaterThan(0)
     expect(assertSelected(selected, EXPECTED)).toEqual({ ok: true })
   })

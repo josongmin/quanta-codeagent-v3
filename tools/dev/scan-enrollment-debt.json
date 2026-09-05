@@ -357,6 +357,9 @@
     "tests/unit/repair-shadow-js-ratchet.test.ts": [
       "tests/unit/repair-shadow-js-ratchet.test.ts#REPAIR-DIR"
     ],
+    "tests/unit/retrieval-authority-manifest.test.ts": [
+      "tests/unit/retrieval-authority-manifest.test.ts#SRC"
+    ],
     "tests/unit/retrieval-bridge-deleted-ratchet.test.ts": [
       "tests/unit/retrieval-bridge-deleted-ratchet.test.ts#SRC-ROOT"
     ],
@@ -419,6 +422,9 @@
     ],
     "tests/unit/security-slice-boundary.test.ts": [
       "slice-boundary:security"
+    ],
+    "tests/unit/sep5-ratchet-enrollment.test.ts": [
+      "tests/unit/sep5-ratchet-enrollment.test.ts#TESTS"
     ],
     "tests/unit/session-slice-boundary.test.ts": [
       "slice-boundary:session"

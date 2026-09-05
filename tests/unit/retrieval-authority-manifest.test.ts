@@ -5,6 +5,7 @@ import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
 import ts from "typescript"
+import { assertScanPopulation } from "./_shared/scan-population"
 
 const SRC = join(import.meta.dir, "..", "..", "src")
 
@@ -56,6 +57,10 @@ const callNames = (file: string): string[] => {
 describe("retrieval authority manifest", () => {
   const files = walk(SRC)
   test("scanned production files > 0", () => {
+    assertScanPopulation(files, SRC, {
+      id: "tests/unit/retrieval-authority-manifest.test.ts#SRC",
+      collectable: (name) => name.endsWith(".ts") && !name.endsWith(".d.ts"),
+    })
     expect(files.length).toBeGreaterThan(0)
   })
 

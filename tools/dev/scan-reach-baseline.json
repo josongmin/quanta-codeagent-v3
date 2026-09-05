@@ -463,6 +463,9 @@
     "tests/unit/repair-shadow-js-ratchet.test.ts#REPAIR-DIR": {
       "walked": 14
     },
+    "tests/unit/retrieval-authority-manifest.test.ts#SRC": {
+      "walked": 3677
+    },
     "tests/unit/retrieval-bridge-deleted-ratchet.test.ts#SRC-ROOT": {
       "walked": 3673
     },
@@ -511,6 +514,9 @@
     },
     "tests/unit/runtime/worktree-checkout-progress-retired.test.ts#SRC": {
       "walked": 3374
+    },
+    "tests/unit/sep5-ratchet-enrollment.test.ts#TESTS": {
+      "walked": 3554
     },
     "tests/unit/session-turn-driver-thin-surface-hellgate.test.ts#session-loop-slice": {
       "walked": 14
