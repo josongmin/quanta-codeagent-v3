@@ -154,6 +154,13 @@ const ciBotExtrasFrom = (
 ): NonNullable<AssembleRequest["ciBot"]> => ({
   pr,
   ...(p.ciBotDryRun ? { dryRun: true } : {}),
+  ...(typeof process.env.GITHUB_RUN_ID === "string" && process.env.GITHUB_RUN_ID.trim() !== ""
+    ? { runId: process.env.GITHUB_RUN_ID }
+    : {}),
+  ...(typeof process.env.GITHUB_REPOSITORY === "string" &&
+  process.env.GITHUB_REPOSITORY.trim() !== ""
+    ? { repoSlug: process.env.GITHUB_REPOSITORY }
+    : {}),
 })
 
 const applyModeSpecificRequestFields = (out: AssembleRequest, p: AssembleRequestPartial): void => {

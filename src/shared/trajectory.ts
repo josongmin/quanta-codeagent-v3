@@ -327,6 +327,7 @@ const SECRET_VALUE_RES: readonly RegExp[] = [
   // role `AROA`, user `AIDA` (parity with @/security redactSecrets — trajectory
   // was AKIA-only, so session/role creds leaked on the JSONL/Plane-B sink).
   /\b(?:AKIA|ASIA|AROA|AIDA)[0-9A-Z]{16}\b/,
+  /aws_secret_access_key\s*=\s*[A-Za-z0-9/+=]{40}/i,
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
   // JWT: three base64url segments separated by dots.
   /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/,

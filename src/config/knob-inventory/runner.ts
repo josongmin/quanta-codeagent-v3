@@ -1,6 +1,6 @@
-import type { KnobInventoryEntry } from "./types"
+import type { KnobDeclaration } from "./types"
 
-export const RUNNER: readonly KnobInventoryEntry[] = [
+export const RUNNER: readonly KnobDeclaration[] = [
   {
     envKey: "QUANTA_INDEX",
     kind: "bool",

@@ -37,7 +37,7 @@ evidence:
   code:
     - src/retrieval/hybrid-query.ts
     - src/retrieval/index.ts
-    - src/runner/assemble/retrieval.ts
+    - src/runner/assemble/pipeline.ts
   adrs: ["docs/decisions/0159-retrieval-sota-stack.md"]
   tests:
     unit:

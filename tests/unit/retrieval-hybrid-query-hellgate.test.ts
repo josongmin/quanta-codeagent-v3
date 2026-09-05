@@ -14,7 +14,7 @@
 
 import { describe, expect, test } from "bun:test"
 import {
-  identityReranker,
+  identityRerankPort,
   type RerankInput,
   type RerankPort,
   RerankRegistry,
@@ -182,7 +182,7 @@ describe("hybrid-query hellgate", () => {
       type: "keywords",
       bm25Source: async () => [c("a")],
       embeddingSource: async () => [],
-      rerank: identityReranker,
+      rerank: identityRerankPort,
       limit: 0,
     })
     expect(out).toEqual([])
@@ -329,7 +329,7 @@ describe("runHybridQuery", () => {
 
   test("works alongside RerankRegistry-resolved port", async () => {
     const reg = new RerankRegistry()
-    reg.register(identityReranker)
+    reg.register(identityRerankPort)
     const out = await runHybridQuery({
       query: "q",
       type: "keywords",

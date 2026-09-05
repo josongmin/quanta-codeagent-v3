@@ -1,4 +1,4 @@
-import type { KnobInventoryEntry } from "./types"
+import type { KnobDeclaration } from "./types"
 
 /**
  * `@`-mention resolver knob inventory (ADR-0418 file/symbol caps + §10.3
@@ -12,7 +12,7 @@ import type { KnobInventoryEntry } from "./types"
  * app/plugin opt-in gate (`QUANTA_MENTION_APP_PLUGIN`, default-OFF) stays in
  * `extra.ts` next to the other opt-in bench/box gates.
  */
-export const MENTION: readonly KnobInventoryEntry[] = [
+export const MENTION: readonly KnobDeclaration[] = [
   // @-mention resolver caps — all default-ON; numeric caps optional
   {
     envKey: "QUANTA_MENTION_FILE_MAX_BYTES",

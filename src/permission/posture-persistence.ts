@@ -33,6 +33,12 @@ import {
   type PosturePatch,
   type PostureRecord,
 } from "./posture/types"
+import {
+  decodeSandboxPolicy,
+  decodeThreadPermission,
+  isApprovalPolicy,
+  isApprovalsReviewer,
+} from "./thread-permission-decode"
 import { isPermissionMode } from "./types"
 
 /** Current on-disk posture-section schema version. This is INDEPENDENT of the
@@ -77,41 +83,16 @@ export const freezePostureSection = (s: MutablePostureSection): PosturePersisted
   })
 
 /* ------------------------------------------------------------------------- *
- * Fail-closed shape guards (small, local — no value import from the store, to
- * avoid a runtime cycle; the store's own `validateThreadPermission` stays
- * private there).
+ * Fail-closed shape guards. Primitive ThreadPermission checks live in
+ * `thread-permission-decode.ts`; this module maps them onto posture's
+ * fail-closed null policy.
  * ------------------------------------------------------------------------- */
-
-const isApprovalPolicy = (v: unknown): v is ThreadPermission["approvalPolicy"] =>
-  v === "never" || v === "on-request" || v === "on-failure" || v === "always"
-
-const isApprovalsReviewer = (v: unknown): v is ThreadPermission["approvalsReviewer"] =>
-  v === "user" || v === "agent"
-
-const isStringArray = (v: unknown): v is string[] =>
-  Array.isArray(v) && v.every((e) => typeof e === "string")
 
 /** Validate a sandbox policy value, returning the canonical value or `null`
  *  (fail-closed) for any malformed shape. */
 const parseSandboxPolicy = (v: unknown): ThreadPermission["sandboxPolicy"] | null => {
-  if (!isRecord(v)) return null
-  switch (v.type) {
-    case "danger-full-access":
-      return { type: "danger-full-access" }
-    case "read-only":
-      return { type: "read-only" }
-    case "workspace-write": {
-      if (v.writableRoots !== undefined && !isStringArray(v.writableRoots)) return null
-      if (v.networkAccess !== undefined && typeof v.networkAccess !== "boolean") return null
-      return {
-        type: "workspace-write",
-        ...(v.writableRoots !== undefined ? { writableRoots: [...v.writableRoots] } : {}),
-        ...(v.networkAccess !== undefined ? { networkAccess: v.networkAccess } : {}),
-      }
-    }
-    default:
-      return null
-  }
+  const decoded = decodeSandboxPolicy(v, "$")
+  return decoded.ok ? decoded.value : null
 }
 
 /** Validate the THREAD-PERMISSION axes of a posture patch — approval policy,
@@ -181,24 +162,13 @@ const parsePosturePatch = (v: unknown): PosturePatch | null => {
  *  the canonical record or `null` (fail-closed) for any malformed field. */
 const parsePostureRecord = (v: unknown): PostureRecord | null => {
   if (!isRecord(v)) return null
-  const tp = v.threadPermission
-  if (!isRecord(tp)) return null
-  if (!isApprovalPolicy(tp.approvalPolicy)) return null
-  if (!isApprovalsReviewer(tp.approvalsReviewer)) return null
-  const sandbox = parseSandboxPolicy(tp.sandboxPolicy)
-  if (sandbox === null) return null
+  const decoded = decodeThreadPermission(v.threadPermission, "threadPermission")
+  if (!decoded.ok) return null
   if (typeof v.askOutsidePlan !== "boolean") return null
-  // The permission-mode axis (RFC-05 E2b). Legacy-absent ⇒ current-behavior mode
-  // (additive migration — a default written before the mode axis still loads);
-  // PRESENT-but-invalid ⇒ fail-closed (the whole default is rejected).
   if (v.mode !== undefined && !isPermissionMode(v.mode)) return null
   const mode = v.mode === undefined ? CURRENT_BEHAVIOR_MODE : v.mode
   return {
-    threadPermission: {
-      approvalPolicy: tp.approvalPolicy,
-      approvalsReviewer: tp.approvalsReviewer,
-      sandboxPolicy: sandbox,
-    },
+    threadPermission: decoded.value,
     askOutsidePlan: v.askOutsidePlan,
     mode,
   }

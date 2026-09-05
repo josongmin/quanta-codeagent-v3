@@ -40,7 +40,7 @@ evidence:
     - src/retrieval/commit-embedder.ts
     - src/retrieval/index.ts
     - src/retrieval/types.ts
-    - src/runner/assemble/retrieval.ts
+    - src/runner/assemble/search-index-backend.ts
   adrs: ["docs/decisions/0159-retrieval-sota-stack.md"]
   tests:
     unit:

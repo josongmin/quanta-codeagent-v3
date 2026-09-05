@@ -77,6 +77,8 @@ export {
   ITEM_TYPE_BY_TOOL_NAME,
   itemStreamEnabled,
 } from "./item-stream"
+export type { JsonRpcEnvelope, JsonRpcErrorObject, JsonRpcId } from "./jsonrpc-envelope"
+export { isJsonRpcEnvelope } from "./jsonrpc-envelope"
 export {
   __resetKnobOverrides,
   filterSessionForbidden,

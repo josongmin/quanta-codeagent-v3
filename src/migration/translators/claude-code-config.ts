@@ -20,14 +20,9 @@
  */
 
 import { join } from "node:path"
+import { asObject, decodeClaudeHookMap, decodeClaudeMcpServers } from "../claude-config-decode"
 import { contentSha256OfText, readImportFile } from "../dedup"
 import type { TranslatedHook, TranslatedMcpServer, TranslatedRule } from "../types"
-
-/** Coerce an unknown into a non-null plain object, else undefined. */
-const asObject = (v: unknown): Record<string, unknown> | undefined =>
-  typeof v === "object" && v !== null && !Array.isArray(v)
-    ? (v as Record<string, unknown>)
-    : undefined
 
 /** Read + JSON.parse a file. ENOENT ⇒ undefined (absent is not an error);
  *  malformed JSON ⇒ undefined (skip, never throw). Other read errors (e.g.
@@ -48,66 +43,9 @@ const readJsonIfPresent = async (path: string): Promise<unknown | undefined> => 
   }
 }
 
-/** Classify a Claude Code MCP server entry's transport. stdio is the default
- *  when a `command` is present and no explicit `type`/`url` says otherwise. */
-const classifyTransport = (entry: Record<string, unknown>): TranslatedMcpServer["transport"] => {
-  const type = entry.type
-  if (type === "http" || type === "sse" || type === "stdio") return type
-  if (typeof entry.url === "string") return "http"
-  if (typeof entry.command === "string") return "stdio"
-  return "unknown"
-}
-
-/** Translate `.mcp.json` (`<root>/.mcp.json`) into typed MCP server entries.
- *  Absent file ⇒ `[]`. Each entry carries name + transport; stdio entries
- *  also carry command+args. `env` is deliberately dropped (may hold secrets;
- *  N10 spirit — we never carry credentials across). */
 export const translateMcpServers = async (root: string): Promise<TranslatedMcpServer[]> => {
   const parsed = await readJsonIfPresent(join(root, ".mcp.json"))
-  const obj = asObject(parsed)
-  const servers = asObject(obj?.mcpServers)
-  if (servers === undefined) return []
-  const out: TranslatedMcpServer[] = []
-  for (const [name, rawEntry] of Object.entries(servers)) {
-    const entry = asObject(rawEntry)
-    if (entry === undefined) continue
-    const transport = classifyTransport(entry)
-    const command = typeof entry.command === "string" ? entry.command : undefined
-    const args = Array.isArray(entry.args)
-      ? entry.args.filter((a): a is string => typeof a === "string")
-      : undefined
-    out.push({
-      name,
-      transport,
-      ...(command !== undefined ? { command } : {}),
-      ...(args !== undefined ? { args } : {}),
-    })
-  }
-  return out
-}
-
-/** Extract the `{ type:"command", command }` shell commands from one Claude
- *  Code hook group's `hooks[]` array. Non-command hook types are skipped. */
-const commandsOf = (group: Record<string, unknown>): string[] => {
-  const hooks = group.hooks
-  if (!Array.isArray(hooks)) return []
-  const cmds: string[] = []
-  for (const h of hooks) {
-    const ho = asObject(h)
-    if (ho?.type === "command" && typeof ho.command === "string") cmds.push(ho.command)
-  }
-  return cmds
-}
-
-/** Translate one Claude Code hook group into a typed hook binding, or
- *  undefined to skip (not an object, or zero command hooks ⇒ no signal). */
-const translateHookGroup = (event: string, rawGroup: unknown): TranslatedHook | undefined => {
-  const group = asObject(rawGroup)
-  if (group === undefined) return undefined
-  const commands = commandsOf(group)
-  if (commands.length === 0) return undefined
-  const matcher = typeof group.matcher === "string" ? group.matcher : undefined
-  return { event, commands, ...(matcher !== undefined ? { matcher } : {}) }
+  return decodeClaudeMcpServers(parsed)
 }
 
 /** Translate `settings.json#hooks` into typed hook bindings. Claude Code shape:
@@ -117,17 +55,7 @@ const translateHookGroup = (event: string, rawGroup: unknown): TranslatedHook | 
 export const translateHooks = async (root: string): Promise<TranslatedHook[]> => {
   const parsed = await readJsonIfPresent(join(root, "settings.json"))
   const obj = asObject(parsed)
-  const hooks = asObject(obj?.hooks)
-  if (hooks === undefined) return []
-  const out: TranslatedHook[] = []
-  for (const [event, rawGroups] of Object.entries(hooks)) {
-    if (!Array.isArray(rawGroups)) continue
-    for (const rawGroup of rawGroups) {
-      const translated = translateHookGroup(event, rawGroup)
-      if (translated !== undefined) out.push(translated)
-    }
-  }
-  return out
+  return decodeClaudeHookMap(obj?.hooks)
 }
 
 /** Candidate CLAUDE.md memory locations under a Claude Code source root. The

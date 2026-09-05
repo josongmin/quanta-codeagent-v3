@@ -27,6 +27,7 @@ import type { CiFindingStore } from "../ci-finding"
 import { ciFindingTool } from "../ci-finding"
 import type { GitRunner } from "../git/types"
 import type { CoreToolContext, Tool, ToolEvent } from "../types"
+import { defaultGhCommentBodyPolicy, type OutboundBodyPolicyPort } from "./outbound-body-policy"
 import { ghPrBlameTool } from "./pr-blame"
 import { ghPrCodeTourTool } from "./pr-code-tour"
 import { ghPrEditLabelsTool } from "./pr-edit-labels"
@@ -35,14 +36,34 @@ import { ghPrResolveThreadTool } from "./pr-resolve-thread"
 import { normalizeRef, refRejected } from "./ref"
 import { DEFAULT_TIMEOUT_MS, defaultGhRunner, type GhRunner } from "./runner"
 
+export type { OutboundBodyPolicyPort, OutboundBodyPrepareResult } from "./outbound-body-policy"
+export {
+  createGhCommentBodyPolicy,
+  defaultGhCommentBodyPolicy,
+  GH_COMMENT_BODY_MAX_BYTES,
+} from "./outbound-body-policy"
 export { ghPrBlameTool } from "./pr-blame"
 export { ghPrCodeTourTool, parseDiffToTour, type TourStop } from "./pr-code-tour"
 export { ghPrEditLabelsTool } from "./pr-edit-labels"
 export { ghPrOpenTool } from "./pr-open"
 export { ghPrResolveThreadTool } from "./pr-resolve-thread"
-export type { GhRunner, GhRunResult } from "./runner"
-// Barrel re-exports — historical import path for outside callers.
-export { defaultGhRunner } from "./runner"
+export type {
+  GhExecDeps,
+  GhExecPort,
+  GhExecRequest,
+  GhExecResult,
+  GhRunner,
+  GhRunResult,
+  GhSpawnFn,
+  GhSpawnHandle,
+} from "./runner"
+export {
+  createGhExec,
+  createGhRunner,
+  DEFAULT_TIMEOUT_MS,
+  defaultGhExec,
+  defaultGhRunner,
+} from "./runner"
 
 // ── Read tools ─────────────────────────────────────────────────────────────
 
@@ -156,7 +177,10 @@ const prCommentSchema = z.object({
 })
 type PrCommentInput = z.infer<typeof prCommentSchema>
 
-export const ghPrCommentTool = (runner: GhRunner = defaultGhRunner): Tool<PrCommentInput> => ({
+export const ghPrCommentTool = (
+  runner: GhRunner = defaultGhRunner,
+  policy: OutboundBodyPolicyPort = defaultGhCommentBodyPolicy,
+): Tool<PrCommentInput> => ({
   name: "gh_pr_comment",
   description:
     "Post a comment on a GitHub PR via `gh pr comment`. Write — gated by " +
@@ -174,7 +198,15 @@ export const ghPrCommentTool = (runner: GhRunner = defaultGhRunner): Tool<PrComm
       yield { type: "result", result: { ok: false, output: refRejected("PR", input.pr) } }
       return
     }
-    const argv = ["gh", "pr", "comment", ref, "--body", input.body]
+    const prepared = policy.prepare(input.body)
+    if (!prepared.ok) {
+      yield {
+        type: "result",
+        result: { ok: false, output: `gh pr comment body policy rejected: ${prepared.error}` },
+      }
+      return
+    }
+    const argv = ["gh", "pr", "comment", ref, "--body", prepared.body]
     yield { type: "progress", message: `gh pr comment #${input.pr}` }
     const r = await runner(argv, ctx.cwd, DEFAULT_TIMEOUT_MS)
     if (r.code !== 0) {

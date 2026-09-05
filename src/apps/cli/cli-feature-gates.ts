@@ -22,7 +22,9 @@
  * the tool-surface SSOT (`seedEnvVarsForSurface("cli")`) and are NOT listed
  * here. Deleting a feature ⇒ delete its entry (drift hellgate red otherwise).
  *
- * Slice pin: pure data leaf, ZERO imports.
+ * Slice pin: pure data leaf, ZERO external imports. Overlap knob projections
+ * are declared here so `cli-knobs.ts` can derive `/knobs` rows without a
+ * second copy of the env key.
  */
 
 export interface CliFeatureGate {
@@ -34,11 +36,92 @@ export interface CliFeatureGate {
   readonly describe: string
 }
 
-export const CLI_FEATURE_GATES: readonly CliFeatureGate[] = [
+/** Keys that are both seeded gates and CLI_KNOBS declarations. Gate list owns
+ *  seed + `/help` copy; `cli-knobs.ts` projects kind/default/readSite. */
+export interface CliSeededSurfaceKnob extends CliFeatureGate {
+  readonly kind: "bool"
+  readonly default: boolean
+  readonly group: "input" | "session"
+  readonly readSite: string
+  readonly knobDescribe: string
+}
+
+export const CLI_SEEDED_SURFACE_KNOBS: readonly CliSeededSurfaceKnob[] = [
   {
     gate: "QUANTA_ENABLE_ENV_PROBE",
     describe: "Runtime env probe: snapshot shell/tooling facts for the system prompt",
+    kind: "bool",
+    default: false,
+    group: "session",
+    readSite: "repl/env-probe-wire.ts",
+    knobDescribe: "Shell environment probe (opt-in).",
   },
+  {
+    gate: "QUANTA_AT_AUTOCOMPLETE",
+    describe: "@-file/@-symbol mention autocomplete dropdown at the prompt",
+    kind: "bool",
+    default: false,
+    group: "input",
+    readSite: "at-autocomplete/env.ts",
+    knobDescribe: "@-mention autocomplete (opt-in).",
+  },
+  {
+    gate: "QUANTA_EXTERNAL_EDITOR",
+    describe: "Ctrl+X Ctrl+E composes the draft in $EDITOR",
+    kind: "bool",
+    default: false,
+    group: "input",
+    readSite: "repl/surface-compose.ts",
+    knobDescribe: "External-editor gesture (opt-in).",
+  },
+  {
+    gate: "QUANTA_KEYBINDINGS",
+    describe: "~/.quanta/keybindings.json action remap (no-throw merge)",
+    kind: "bool",
+    default: false,
+    group: "input",
+    readSite: "repl/surface-compose.ts",
+    knobDescribe: "Load ~/.quanta/keybindings.json (opt-in).",
+  },
+  {
+    gate: "QUANTA_MODE_CYCLE",
+    describe: "Shift+Tab cycles permission mode (default → acceptEdits → plan → bypass)",
+    kind: "bool",
+    default: false,
+    group: "input",
+    readSite: "mode-cycle.ts",
+    knobDescribe: "Shift+Tab mode-cycle (opt-in).",
+  },
+  {
+    gate: "QUANTA_PREFLIGHT_CHECK",
+    describe: "Warn in the confirm prompt when a mutating edit would not cleanly apply",
+    kind: "bool",
+    default: true,
+    group: "input",
+    readSite: "preflight.ts",
+    knobDescribe: "Approval-time edit applicability pre-flight (CLI default-ON; =0 disables).",
+  },
+  {
+    gate: "QUANTA_BRACKETED_PASTE",
+    describe: "Bracketed-paste mode: a multi-line paste submits only on a real Enter",
+    kind: "bool",
+    default: true,
+    group: "input",
+    readSite: "repl/surface-compose.ts",
+    knobDescribe: "Bracketed-paste — multi-line paste submits as one buffer (CLI default-ON).",
+  },
+]
+
+const overlapGate = (gate: string): CliFeatureGate => {
+  const row = CLI_SEEDED_SURFACE_KNOBS.find((r) => r.gate === gate)
+  if (row === undefined) {
+    throw new Error(`CLI seeded surface knob missing: ${gate}`)
+  }
+  return { gate: row.gate, describe: row.describe }
+}
+
+export const CLI_FEATURE_GATES: readonly CliFeatureGate[] = [
+  overlapGate("QUANTA_ENABLE_ENV_PROBE"),
   // ADR-0474 — protective correctness guard.
   {
     gate: "QUANTA_STALE_READ_GUARD",
@@ -85,18 +168,9 @@ export const CLI_FEATURE_GATES: readonly CliFeatureGate[] = [
   },
   // jun-11 CLI-UX default-ON (R3-hardened worklist) — consumers pinned by the
   // cli-feature-gates drift hellgate.
-  {
-    gate: "QUANTA_AT_AUTOCOMPLETE",
-    describe: "@-file/@-symbol mention autocomplete dropdown at the prompt",
-  },
-  {
-    gate: "QUANTA_EXTERNAL_EDITOR",
-    describe: "Ctrl+X Ctrl+E composes the draft in $EDITOR",
-  },
-  {
-    gate: "QUANTA_KEYBINDINGS",
-    describe: "~/.quanta/keybindings.json action remap (no-throw merge)",
-  },
+  overlapGate("QUANTA_AT_AUTOCOMPLETE"),
+  overlapGate("QUANTA_EXTERNAL_EDITOR"),
+  overlapGate("QUANTA_KEYBINDINGS"),
   {
     gate: "QUANTA_RATELIMIT_NOTICE",
     describe: "Transient status notice when the provider rate-limit is reached",
@@ -104,10 +178,7 @@ export const CLI_FEATURE_GATES: readonly CliFeatureGate[] = [
   // The operator EXPLICITLY opted into the full 4-rung cycle INCLUDING the
   // no-confirm `bypass` rung — deliberate trade-off; the red BYPASS pill is
   // the guard (see index.ts history).
-  {
-    gate: "QUANTA_MODE_CYCLE",
-    describe: "Shift+Tab cycles permission mode (default → acceptEdits → plan → bypass)",
-  },
+  overlapGate("QUANTA_MODE_CYCLE"),
   // #5/#6 — paired (capture alone = blind typing).
   {
     gate: "QUANTA_MIDTURN_CAPTURE",
@@ -118,16 +189,10 @@ export const CLI_FEATURE_GATES: readonly CliFeatureGate[] = [
     describe: "Visible bottom input lane for mid-turn typing (pairs with capture)",
   },
   // #19 — approval-time applicability pre-flight (never mutates).
-  {
-    gate: "QUANTA_PREFLIGHT_CHECK",
-    describe: "Warn in the confirm prompt when a mutating edit would not cleanly apply",
-  },
+  overlapGate("QUANTA_PREFLIGHT_CHECK"),
   // #10 — correctness fix: multi-line paste no longer submits at the first
   // embedded newline (DECSET 2004 accumulation).
-  {
-    gate: "QUANTA_BRACKETED_PASTE",
-    describe: "Bracketed-paste mode: a multi-line paste submits only on a real Enter",
-  },
+  overlapGate("QUANTA_BRACKETED_PASTE"),
   // SOTA++ (jul-10, decision #3) — mid-turn control is table stakes (Claude
   // Code Esc-interrupt / Codex mid-turn input): /cancel + /summarize-now +
   // the mid-loop drain all ride this surface; byte-identity of the OFF path
@@ -159,7 +224,7 @@ export const CLI_FEATURE_GATES: readonly CliFeatureGate[] = [
     gate: "QUANTA_PEER_MSG_SURFACE",
     describe: "Surface peer/side-agent mail to the user as a transcript notice at enqueue time",
   },
-] as const
+]
 
 /** The seed-loop projection (what `index.ts` iterates). */
 export const CLI_FEATURE_GATE_NAMES: readonly string[] = CLI_FEATURE_GATES.map((g) => g.gate)

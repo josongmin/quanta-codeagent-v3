@@ -26,7 +26,7 @@
  *  This transport is OPT-IN: the client defaults to stdio, so existing
  *  deployments are byte-identical. */
 
-import { errMessage, logger, throwIfAborted } from "@/shared"
+import { errMessage, isJsonRpcEnvelope, logger, throwIfAborted } from "@/shared"
 import { isResponse, type JsonRpcMessage, MAX_LINE_BYTES } from "../jsonrpc"
 import { LATEST_PROTOCOL_VERSION } from "../protocol-version"
 import type {
@@ -767,23 +767,7 @@ export class HttpSseMcpTransport implements McpTransport {
   }
 }
 
-/** Strict JSON-RPC 2.0 envelope check, mirroring `../jsonrpc.ts` `LineReader`.
- *  Duplicated locally (not exported from jsonrpc) so the HTTP path applies the
- *  same fail-closed discipline a hostile server would otherwise bypass. */
-const isValidEnvelope = (m: unknown): m is JsonRpcMessage => {
-  if (typeof m !== "object" || m === null) return false
-  const o = m as Record<string, unknown>
-  if (o.jsonrpc !== "2.0") return false
-  const hasId = "id" in o
-  const hasMethod = "method" in o
-  if (!hasId && !hasMethod) return false
-  if (hasId) {
-    const id = o.id
-    if (typeof id !== "string" && typeof id !== "number") return false
-  }
-  if (hasMethod && typeof o.method !== "string") return false
-  return true
-}
+const isValidEnvelope = (m: unknown): m is JsonRpcMessage => isJsonRpcEnvelope(m)
 
 /** Re-export so callers can narrow inbound HTTP messages with the same helper
  *  the stdio path uses. Kept here to avoid a second import site in wire code. */

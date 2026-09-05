@@ -68,6 +68,7 @@ import {
   type PosturePersistedSection,
   parsePostureSection,
 } from "./posture-persistence"
+import { decodeThreadPermission } from "./thread-permission-decode"
 
 /** Current on-disk schema version. Bump when the JSON shape changes; add a
  *  parallel branch in {@link parseState} so older versions can be migrated
@@ -220,68 +221,13 @@ const validationError = <T = never>(reason: string): ValidationResult<T> => ({
 const isFiniteNumber = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value)
 
-const isStringArray = (value: unknown): value is string[] =>
-  Array.isArray(value) && value.every((entry) => typeof entry === "string")
-
-const isApprovalPolicy = (value: unknown): value is ThreadPermission["approvalPolicy"] =>
-  value === "never" || value === "on-request" || value === "on-failure" || value === "always"
-
-const isApprovalsReviewer = (value: unknown): value is ThreadPermission["approvalsReviewer"] =>
-  value === "user" || value === "agent"
-
-const validateSandboxPolicy = (
-  value: unknown,
-  path: string,
-): ValidationResult<ThreadPermission["sandboxPolicy"]> => {
-  if (!isRecord(value)) {
-    return validationError(`${path}.sandboxPolicy must be an object`)
-  }
-  switch (value.type) {
-    case "danger-full-access":
-      return validationOk({ type: "danger-full-access" })
-    case "read-only":
-      return validationOk({ type: "read-only" })
-    case "workspace-write": {
-      const writableRoots = value.writableRoots
-      if (writableRoots !== undefined && !isStringArray(writableRoots)) {
-        return validationError(`${path}.sandboxPolicy.writableRoots must be a string array`)
-      }
-      const networkAccess = value.networkAccess
-      if (networkAccess !== undefined && typeof networkAccess !== "boolean") {
-        return validationError(`${path}.sandboxPolicy.networkAccess must be boolean`)
-      }
-      return validationOk({
-        type: "workspace-write",
-        ...(writableRoots !== undefined ? { writableRoots: [...writableRoots] } : {}),
-        ...(networkAccess !== undefined ? { networkAccess } : {}),
-      })
-    }
-    default:
-      return validationError(`${path}.sandboxPolicy.type must be a known sandbox policy`)
-  }
-}
-
 const validateThreadPermission = (
   value: unknown,
   path: string,
 ): ValidationResult<ThreadPermission> => {
-  if (!isRecord(value)) return validationError(`${path} must be an object`)
-  const approvalPolicy = value.approvalPolicy
-  if (!isApprovalPolicy(approvalPolicy)) {
-    return validationError(`${path}.approvalPolicy must be a known policy string`)
-  }
-  const approvalsReviewer = value.approvalsReviewer
-  if (!isApprovalsReviewer(approvalsReviewer)) {
-    return validationError(`${path}.approvalsReviewer must be 'user' or 'agent'`)
-  }
-  const sandboxPolicyResult = validateSandboxPolicy(value.sandboxPolicy, path)
-  if (!sandboxPolicyResult.ok) return sandboxPolicyResult
-
-  return validationOk({
-    approvalPolicy,
-    approvalsReviewer,
-    sandboxPolicy: sandboxPolicyResult.value,
-  })
+  const decoded = decodeThreadPermission(value, path)
+  if (!decoded.ok) return validationError(decoded.reason)
+  return validationOk(decoded.value)
 }
 
 const validateHostAgentMode = (value: unknown, path: string): ValidationResult<HostAgentMode> => {

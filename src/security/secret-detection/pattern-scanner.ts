@@ -24,7 +24,7 @@ import {
   SecretScanReadError,
 } from "./port"
 
-interface Pattern {
+export interface NamedSecretPattern {
   readonly kind: Exclude<SecretKind, "generic-high-entropy">
   readonly regex: RegExp
 }
@@ -34,7 +34,7 @@ interface Pattern {
  * on shapes embedded inside a key block), `sk-ant-` before generic `sk-`, GCP
  * JSON before any generic `private_key` keyword match.
  */
-const PATTERNS: ReadonlyArray<Pattern> = [
+export const SECRET_PATTERN_CATALOG: ReadonlyArray<NamedSecretPattern> = [
   // PEM / RSA / EC / DSA / OpenSSH private-key block — match begin-to-end so
   // an `AKIA…`-shaped string inside the block does not double-hit.
   {
@@ -67,6 +67,15 @@ const PATTERNS: ReadonlyArray<Pattern> = [
     kind: "github-token",
     regex: /(?:ghp|gho|ghs|ghr|ghu)_[A-Za-z0-9]{36,255}\b/g,
   },
+  {
+    kind: "github-token",
+    regex: /github_pat_[A-Za-z0-9_]{20,}\b/g,
+  },
+  // GitLab personal/project/group access token.
+  {
+    kind: "gitlab-pat",
+    regex: /glpat-[A-Za-z0-9_-]{20,}\b/g,
+  },
   // Google API key — `AIza` + 35 url-safe base64.
   {
     kind: "google-api-key",
@@ -90,18 +99,35 @@ const PATTERNS: ReadonlyArray<Pattern> = [
     kind: "openai-api-key",
     regex: /sk-proj-[A-Za-z0-9_-]{20,}\b/g,
   },
-  // OpenAI classic API key — `sk-` followed by ≥32 alphanumerics. Negative-
-  // lookahead on `ant-` / `proj-` / `live_` / `test_` so anthropic, the
-  // proj-key matcher above, and stripe forms each win their respective shape.
+  // OpenAI service-account key — named signature, not entropy.
   {
     kind: "openai-api-key",
-    regex: /\bsk-(?!ant-)(?!proj-)(?!live_)(?!test_)[A-Za-z0-9]{32,}\b/g,
+    regex: /sk-svcacct-[A-Za-z0-9_-]{20,}\b/g,
+  },
+  // OpenAI classic API key — `sk-` followed by ≥32 alphanumerics. Negative-
+  // lookahead on `ant-` / `proj-` / `svcacct-` / `live_` / `test_` so sibling
+  // shapes win.
+  {
+    kind: "openai-api-key",
+    regex: /\bsk-(?!ant-)(?!proj-)(?!svcacct-)(?!live_)(?!test_)[A-Za-z0-9]{32,}\b/g,
   },
   // Slack token — `xox[baprse]-` prefix + ≥10 token chars. The prefix is
   // distinctive enough that this carries no false-positive risk in prose.
   {
     kind: "slack-token",
     regex: /\bxox[baprse]-[A-Za-z0-9-]{10,}\b/g,
+  },
+  {
+    kind: "bearer-token",
+    regex: /\b[Aa]uthorization\s*:\s*Bearer\s+[A-Za-z0-9\-._~+/]{20,}=*/g,
+  },
+  {
+    kind: "url-userinfo",
+    regex: /\b[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^\s/:@]+:[^\s/@]+@[^\s]+/g,
+  },
+  {
+    kind: "jwt",
+    regex: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
   },
 ]
 
@@ -142,7 +168,7 @@ const buildFinding = (
 
 /** Drain one pattern against `text`, pushing findings until `max`. */
 const drainPattern = (
-  pat: Pattern,
+  pat: NamedSecretPattern,
   text: string,
   file: string | undefined,
   allow: ReadonlySet<string>,
@@ -161,20 +187,27 @@ const drainPattern = (
   }
 }
 
-const scanTextWithPatterns = (
+export const scanTextWithCatalog = (
   text: string,
+  catalog: ReadonlyArray<NamedSecretPattern>,
   file: string | undefined,
   opts: SecretScannerOpts,
 ): SecretFinding[] => {
   const max = opts.maxFindings ?? DEFAULT_MAX_FINDINGS
   const allow = new Set(opts.allowlist ?? [])
   const findings: SecretFinding[] = []
-  for (const pat of PATTERNS) {
+  for (const pat of catalog) {
     if (findings.length >= max) break
     drainPattern(pat, text, file, allow, findings, max)
   }
   return findings
 }
+
+const scanTextWithPatterns = (
+  text: string,
+  file: string | undefined,
+  opts: SecretScannerOpts,
+): SecretFinding[] => scanTextWithCatalog(text, SECRET_PATTERN_CATALOG, file, opts)
 
 /**
  * Construct a pattern-based SecretScanner. The returned object is a fresh

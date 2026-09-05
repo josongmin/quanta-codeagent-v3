@@ -1,6 +1,6 @@
-import type { KnobInventoryEntry } from "./types"
+import type { KnobDeclaration } from "./types"
 
-export const DAEMON: readonly KnobInventoryEntry[] = [
+export const DAEMON: readonly KnobDeclaration[] = [
   {
     envKey: "QUANTA_WEB_PORT",
     kind: "int",

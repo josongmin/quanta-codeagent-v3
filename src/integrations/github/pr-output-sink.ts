@@ -34,6 +34,12 @@
 
 import type { GhCliPort, GhCliResult } from "@/reactor"
 
+import {
+  COMMENT_BODY_MAX_BYTES,
+  createOutboundBodyPolicy,
+  IDEMPOTENCY_MARKER_PREFIX,
+  IDEMPOTENCY_MARKER_SUFFIX,
+} from "./outbound-body-policy"
 import type { IdempotencyKey, OutputPostResult, RedactPort, ReviewVerdict } from "./types"
 
 /**
@@ -53,10 +59,6 @@ const isValidRepoSlug = (slug: string): boolean =>
   typeof slug === "string" && REPO_SLUG_RE.test(slug)
 const isValidPrNumber = (n: number): boolean =>
   typeof n === "number" && Number.isInteger(n) && n > 0 && n <= Number.MAX_SAFE_INTEGER
-
-const COMMENT_BODY_MAX_BYTES = 65_000
-const IDEMPOTENCY_MARKER_PREFIX = "<!-- quanta:idempotency="
-const IDEMPOTENCY_MARKER_SUFFIX = " -->"
 
 export interface PrOutputSink {
   postComment(input: { body: string; key: IdempotencyKey }): Promise<OutputPostResult>
@@ -141,27 +143,35 @@ export const createPrOutputSink = (opts: PrOutputSinkOpts): PrOutputSink => {
   const reconcileEnabled = opts.reconcileConcurrentPosts ?? true
   const reconcileMaxRetries = Math.max(0, opts.reconcileMaxRetries ?? 3)
 
-  const prepareBody = (body: string, key: IdempotencyKey): string => {
-    const redacted = opts.redactPort.redact(body)
-    const marker = `${prefix}${key}${IDEMPOTENCY_MARKER_SUFFIX}`
-    return clampWithMarker(redacted, marker, cap)
+  const prepareBody = (
+    body: string,
+    key: IdempotencyKey,
+  ): { ok: true; body: string } | { ok: false; error: string } => {
+    const policy = createOutboundBodyPolicy({
+      redact: (text) => opts.redactPort.redact(text),
+      maxBytes: cap,
+      marker: `${prefix}${key}${IDEMPOTENCY_MARKER_SUFFIX}`,
+    })
+    return policy.prepare(body)
   }
 
   return {
     async postComment({ body, key }): Promise<OutputPostResult> {
       const prepared = prepareBody(body, key)
+      if (!prepared.ok) return Object.freeze({ ok: false, error: prepared.error })
       if (hiddenMarkerEnabled) {
         const existing = await findExistingComment(opts, key, prefix, opts.signal)
         if (existing !== undefined) {
-          return await patchComment(opts, existing.id, prepared, opts.signal)
+          return await patchComment(opts, existing.id, prepared.body, opts.signal)
         }
       }
-      const posted = await postNewComment(opts, prepared, opts.signal)
+      const posted = await postNewComment(opts, prepared.body, opts.signal)
       if (!posted.ok || !reconcileEnabled || !hiddenMarkerEnabled) return posted
       return await reconcileAfterPost(opts, key, prefix, posted, opts.signal, reconcileMaxRetries)
     },
     async postReview({ verdict, body, key }): Promise<OutputPostResult> {
       const prepared = prepareBody(body, key)
+      if (!prepared.ok) return Object.freeze({ ok: false, error: prepared.error })
       // Audit L9 H10: a review's body is immutable once submitted (GH has no
       // edit-review-body API), so dedup is idempotent SKIP — if a review
       // carrying THIS marker already exists, we return it instead of POSTing a
@@ -175,41 +185,23 @@ export const createPrOutputSink = (opts: PrOutputSinkOpts): PrOutputSink => {
           })
         }
       }
-      return await postReview(opts, verdict, prepared, opts.signal)
+      return await postReview(opts, verdict, prepared.body, opts.signal)
     },
     async postReviewComment({ file, line, body, key }): Promise<OutputPostResult> {
       const prepared = prepareBody(body, key)
+      if (!prepared.ok) return Object.freeze({ ok: false, error: prepared.error })
       // Audit L9 H10: inline review comments DO support PATCH, so we mirror the
       // issue-comment path — find-existing → PATCH, else POST. Without this a
       // retry stamps the same marker and POSTs a duplicate inline comment.
       if (hiddenMarkerEnabled) {
         const existing = await findExistingReviewComment(opts, key, prefix, opts.signal)
         if (existing !== undefined) {
-          return await patchReviewComment(opts, existing.id, prepared, opts.signal)
+          return await patchReviewComment(opts, existing.id, prepared.body, opts.signal)
         }
       }
-      return await postReviewComment(opts, file, line, prepared, opts.signal)
+      return await postReviewComment(opts, file, line, prepared.body, opts.signal)
     },
   }
-}
-
-/**
- * Clamp `body+marker` to `maxBytes`. The marker is appended UNCONDITIONALLY
- * (it's the dedup primary key) — the body is what gets trimmed.
- */
-const clampWithMarker = (body: string, marker: string, maxBytes: number): string => {
-  const markerBuf = Buffer.from(`\n${marker}`, "utf8")
-  if (markerBuf.length >= maxBytes) return marker // pathological — just the marker
-  const bodyBudget = maxBytes - markerBuf.length
-  const bodyBuf = Buffer.from(body, "utf8")
-  if (bodyBuf.length <= bodyBudget) return `${body}\n${marker}`
-  // Trim respecting utf-8 — Buffer.subarray + .toString may produce a broken
-  // surrogate on the boundary. We accept that and append an ellipsis. Reserve
-  // the 3 bytes "…" occupies in UTF-8 so the final string stays within cap.
-  const ELLIPSIS_BYTES = 3
-  const trimBudget = Math.max(0, bodyBudget - ELLIPSIS_BYTES)
-  const trimmed = bodyBuf.subarray(0, trimBudget).toString("utf8")
-  return `${trimmed}…\n${marker}`
 }
 
 /** GH `/issues/<n>/comments` pagination cap. Each request fetches 100 rows

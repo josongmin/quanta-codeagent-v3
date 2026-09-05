@@ -1,6 +1,6 @@
-import type { KnobInventoryEntry } from "./types"
+import type { KnobDeclaration } from "./types"
 
-export const HOST: readonly KnobInventoryEntry[] = [
+export const HOST: readonly KnobDeclaration[] = [
   {
     envKey: "QUANTA_BG_MAX_QUEUED",
     kind: "int",
@@ -26,7 +26,7 @@ export const HOST: readonly KnobInventoryEntry[] = [
     group: "host-gate",
     home: "runtime-config",
     describe:
-      "Live spinner-stall notice — latched operator warn when the model stream goes silent mid-turn, info on recovery (ADR-0227; opt-in, NOT CLI-seeded).",
+      "Live spinner-stall notice — latched operator warn when the model stream goes silent mid-turn, info on recovery (ADR-0227; CLI-seeded default-ON).",
     readSite: "apps/cli/repl/spinner-stall-live-wire.ts",
   },
   {

@@ -107,7 +107,7 @@ export {
 } from "./lexical"
 export type { Bm25SecondaryOptions } from "./rerank/bm25-secondary"
 export { createBm25SecondaryReranker } from "./rerank/bm25-secondary"
-export { identityReranker } from "./rerank/identity"
+export { identityRerankPort } from "./rerank/identity"
 export {
   fuseByRrf,
   RRF_K,

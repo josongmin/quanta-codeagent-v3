@@ -157,7 +157,10 @@ const scan = (): { total: number; byFile: Record<string, number>; files: number 
 // reduction (a composition-root re-classification, NOT a ceiling bump to silence a
 // count): the ceiling drops to the new floor per the decreasing-ratchet contract so
 // a re-introduced raw read of a PRODUCTION-slice knob still trips the guard.
-const CEILING = 49
+// Then 49 → 43 (SEP5-10): session-registry cleanup dry-run stopped reading
+// `process.env.QUANTA_SESSION_REGISTRY_*` and consumed injected runtime-config
+// paths instead. Ceiling tracks the new measured floor.
+const CEILING = 43
 
 describe("no-raw-process.env-knob ratchet (ADR-0503 P4)", () => {
   test(`raw process.env.QUANTA_* reads stay <= ${CEILING} (decreasing burn-down)`, () => {

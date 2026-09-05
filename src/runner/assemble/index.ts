@@ -64,13 +64,6 @@ export {
   type PipelineWireOverrides,
 } from "./pipeline"
 export {
-  buildRetrievalStackCore,
-  DEFAULT_RETRIEVAL_RERANKER,
-  RETRIEVAL_BUILTIN_RERANKERS,
-  type RetrievalAssembleInput,
-  type RetrievalStack,
-} from "./retrieval"
-export {
   buildSemanticBackend,
   type ChunkUpsertPort,
   hashEmbed,

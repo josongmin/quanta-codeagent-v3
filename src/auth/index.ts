@@ -1,1 +1,5 @@
 export * as chatgptOAuth from "./chatgpt-oauth"
+export { FileBasedLock, type LockFileStorePort } from "./lock-file-based"
+export { createNodeLockFileStore } from "./node-lock-file-store"
+export type { PrivateAtomicWriteDeps, PrivateFileIoPort } from "./private-file-atomic"
+export { writePrivateFileAtomic } from "./private-file-atomic"

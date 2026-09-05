@@ -23,7 +23,7 @@
  *      today (it logs + skips), so we surface a stable hint instead of an
  *      empty string.
  *    - Tool→server mapping uses the bridged tool's name prefix
- *      (`mcp__<server>__<tool>` — `mcp-bridge.ts` `mcpToolName`). The
+ *      (`mcp__<server>__<tool>` — `@/mcp` `mcpToolName`). The
  *      sanitizer replaces non-`[A-Za-z0-9_]` chars with `_`, so we compare
  *      against the SANITIZED server name from the config.
  *
@@ -32,14 +32,11 @@
  *  this surface" (same fallback as other surface-wired commands).
  */
 
-import type { McpServerConfig } from "@/mcp"
+import { type McpServerConfig, sanitizeMcpNameSegment } from "@/mcp"
 import type { Tool } from "@/tool"
 import type { McpServerInfo, McpSurfaceInfo, McpToolInfo } from "../mcp-cmd"
 
-/** Sanitize a config server name the same way `mcpToolName` does (private
- *  helper in `@/agent/mcp-bridge`). Kept in lockstep here so the join below
- *  matches the BRIDGED tool name's `<server>` slot exactly. */
-const sanitizeServerKey = (name: string): string => name.replace(/[^A-Za-z0-9_]+/g, "_")
+export const sanitizeServerKey = (name: string): string => sanitizeMcpNameSegment(name)
 
 /** Strip an `mcp__<server>__` prefix from a bridged tool name. Returns the
  *  trailing tool name when the prefix matches, else `null`. The pattern is

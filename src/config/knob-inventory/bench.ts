@@ -15,6 +15,6 @@
 
 import { deriveInventoryEntry } from "@/config/knob-schema/derive-inventory"
 import { ALL_BENCH_SCHEMAS } from "@/config/knob-schema/schemas"
-import type { KnobInventoryEntry } from "./types"
+import type { KnobDeclaration } from "./types"
 
-export const BENCH: readonly KnobInventoryEntry[] = ALL_BENCH_SCHEMAS.map(deriveInventoryEntry)
+export const BENCH: readonly KnobDeclaration[] = ALL_BENCH_SCHEMAS.map(deriveInventoryEntry)

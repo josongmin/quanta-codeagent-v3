@@ -7,7 +7,7 @@
  */
 import type { RerankInput, RerankPort, RetrievalCandidate } from "../types"
 
-export const identityReranker: RerankPort = {
+export const identityRerankPort: RerankPort = {
   kind: "identity",
   async rerank(input: RerankInput): Promise<readonly RetrievalCandidate[]> {
     const limit = input.limit

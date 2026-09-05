@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs"
-import { chmod, mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises"
-import { dirname } from "node:path"
+import { readFile, stat, unlink } from "node:fs/promises"
 import { errMessage } from "@/shared"
+import { writePrivateFileAtomic } from "../private-file-atomic"
 import { decodeJwtClaims } from "./jwt"
 import { chatgptTokenPath, codexAuthPath, resolveCodexHome, resolveQuantaHome } from "./paths"
 
@@ -234,16 +234,9 @@ export const readResolvedToken = async (
   return null
 }
 
-/** Write the token record atomically with 0600 permissions. Atomic =
- *  write-to-tmp + rename, so a reader never sees a half-written file. */
+/** Write the token record atomically with 0600 permissions. */
 export const writeToken = async (path: string, t: TokenRecord): Promise<void> => {
-  await mkdir(dirname(path), { recursive: true })
-  const tmp = `${path}.tmp`
-  await writeFile(tmp, `${JSON.stringify(t, null, 2)}\n`, "utf8")
-  if (process.platform !== "win32") {
-    await chmod(tmp, 0o600)
-  }
-  await rename(tmp, path)
+  await writePrivateFileAtomic(path, `${JSON.stringify(t, null, 2)}\n`)
 }
 
 /** Delete the token file. Idempotent — absent file is fine. */

@@ -6,9 +6,7 @@
  *  buffer and only emits a message once the full `Content-Length` body bytes
  *  have arrived, so partial reads and coalesced messages are both handled. */
 
-/** Raw JSON-RPC message shapes we care about. The LSP spec defines far more,
- *  but for a diagnostics round-trip we only distinguish responses (by `id`)
- *  from notifications (by `method`). Anything else is ignored by callers. */
+import { isJsonRpcEnvelope } from "@/shared"
 export type JsonRpcMessage =
   | JsonRpcResponse
   | { jsonrpc: "2.0"; method: string; params?: unknown }
@@ -47,20 +45,7 @@ const MAX_HEADER_BYTES = 64 * 1024
 /** S15: strict JSON-RPC 2.0 envelope validator. Spec requires `jsonrpc:"2.0"`
  *  on every message; accepting any parseable JSON as a message let a buggy or
  *  hostile server inject id-spoofed responses or wedge the dispatcher. */
-const isValidEnvelope = (m: unknown): m is JsonRpcMessage => {
-  if (typeof m !== "object" || m === null) return false
-  const o = m as Record<string, unknown>
-  if (o.jsonrpc !== "2.0") return false
-  const hasId = "id" in o
-  const hasMethod = "method" in o
-  if (!hasId && !hasMethod) return false
-  if (hasId) {
-    const id = o.id
-    if (typeof id !== "string" && typeof id !== "number") return false
-  }
-  if (hasMethod && typeof o.method !== "string") return false
-  return true
-}
+const isValidEnvelope = (m: unknown): m is JsonRpcMessage => isJsonRpcEnvelope(m)
 
 /** Encode a JSON value into a single Content-Length framed buffer. */
 export const encodeMessage = (payload: unknown): Uint8Array => {

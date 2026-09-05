@@ -234,7 +234,7 @@
       "matched": 3
     },
     "tests/unit/activity/activity-store-constructor-owner-ratchet.test.ts#SRC-DIR": {
-      "walked": 3369
+      "walked": 3368
     },
     "tests/unit/agent-import-cycle.test.ts#src-agent-toplevel": {
       "walked": 159
@@ -331,7 +331,7 @@
       "walked": 3477
     },
     "tests/unit/god-code-ratchet.test.ts#SRC": {
-      "walked": 3369
+      "walked": 3368
     },
     "tests/unit/host/bootstrap-host-extraction-hellgate.test.ts#CLI-REPL": {
       "walked": 113
@@ -394,16 +394,16 @@
       "walked": 3622
     },
     "tests/unit/no-raw-process-env-knob-ratchet-hellgate.test.ts#SRC": {
-      "walked": 3369
+      "walked": 3368
     },
     "tests/unit/no-timebomb-auth-fixtures-hellgate.test.ts#TESTS": {
       "walked": 3695
     },
     "tests/unit/objective/authority-boundary-ratchet.test.ts#SRC": {
-      "walked": 3369
+      "walked": 3368
     },
     "tests/unit/objective/constructor-owner-ratchet.test.ts#SRC-DIR": {
-      "walked": 3369
+      "walked": 3368
     },
     "tests/unit/observability-audit-ratchet.test.ts#AGENT-STORES": {
       "walked": 4
@@ -439,7 +439,7 @@
       "walked": 23
     },
     "tests/unit/orphan-orchestrator-ratchet.test.ts#SRC": {
-      "walked": 3369
+      "walked": 3368
     },
     "tests/unit/orphan-orchestrator-ratchet.test.ts#TESTS": {
       "walked": 3610
@@ -452,7 +452,7 @@
       "matched": 6
     },
     "tests/unit/quanta-home-root-ssot-ratchet-hellgate.test.ts#SRC": {
-      "walked": 3369
+      "walked": 3368
     },
     "tests/unit/realtime/voice-session-hellgate.test.ts#SRC": {
       "walked": 3673
@@ -476,7 +476,7 @@
       "walked": 343
     },
     "tests/unit/runagent-callsite-authority-fence-hellgate.test.ts#SRC": {
-      "walked": 3369
+      "walked": 3368
     },
     "tests/unit/runner/closure-repair-driver-parity.test.ts#DRIVER-DIR": {
       "walked": 14
@@ -491,7 +491,7 @@
       "walked": 68
     },
     "tests/unit/runner/session-authorities-task-registry-identity.test.ts#SRC-DIR": {
-      "walked": 3369
+      "walked": 3368
     },
     "tests/unit/runner/verify-select-driver-parity.test.ts#APP-DRIVER-DIR": {
       "walked": 5
@@ -500,7 +500,7 @@
       "walked": 16
     },
     "tests/unit/runtime-config-no-dead-knob-ratchet.test.ts#SRC": {
-      "walked": 3369
+      "walked": 3368
     },
     "tests/unit/runtime/exec-cluster-spawn-env-scrub-ban-hellgate.test.ts#SRC": {
       "walked": 3374,

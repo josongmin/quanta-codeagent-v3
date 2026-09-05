@@ -34,11 +34,15 @@ export type SecretKind =
   | "openai-api-key"
   | "anthropic-api-key"
   | "github-token"
+  | "gitlab-pat"
   | "google-api-key"
   | "gcp-service-account"
   | "slack-token"
   | "stripe-key"
   | "private-key-block"
+  | "jwt"
+  | "bearer-token"
+  | "url-userinfo"
   | "generic-high-entropy"
 
 /**

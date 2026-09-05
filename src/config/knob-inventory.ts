@@ -28,15 +28,36 @@ import { DAEMON } from "./knob-inventory/daemon"
 import { EXTRA } from "./knob-inventory/extra"
 import { HOST } from "./knob-inventory/host"
 import { RUNNER } from "./knob-inventory/runner"
-import type { KnobInventoryEntry } from "./knob-inventory/types"
+import type { KnobDeclaration, KnobInventoryEntry, KnobReadAuthority } from "./knob-inventory/types"
 
-// Contract types + per-home knob entries moved to ./knob-inventory/ (god-module
-// split). Re-export the contract so importers of @/config/knob-inventory stay
-// byte-compatible.
-export type { InventoryKind, KnobHome, KnobInventoryEntry } from "./knob-inventory/types"
+export type {
+  InventoryKind,
+  KnobHome,
+  KnobInventoryEntry,
+  KnobReadAuthority,
+} from "./knob-inventory/types"
 
-/** Full knob inventory — per-home sub-registries concatenated in declaration
- *  order (identical to the prior single array). */
+const STARTUP_SEED = new Set<string>(["QUANTA_GOAL"])
+const COMPOSITION_GATE = new Set<string>([
+  "QUANTA_SPINNER_STALL",
+  "QUANTA_BG_TURN",
+  "QUANTA_WORKTREE_TOOL",
+  "QUANTA_BROWSER_TOOL",
+])
+
+export const classifyKnobReadAuthority = (entry: KnobDeclaration): KnobReadAuthority => {
+  if (STARTUP_SEED.has(entry.envKey)) return "startup-seed"
+  if (COMPOSITION_GATE.has(entry.envKey)) return "composition-gate"
+  if (entry.home === "bench") return "bench"
+  if (entry.home === "runner-knobs") return "runner-knob"
+  return "runtime-config"
+}
+
+export const withReadAuthority = (entry: KnobDeclaration): KnobInventoryEntry => ({
+  ...entry,
+  readAuthority: classifyKnobReadAuthority(entry),
+})
+
 export const KNOB_INVENTORY: readonly KnobInventoryEntry[] = [
   ...HOST,
   ...RUNNER,
@@ -44,7 +65,7 @@ export const KNOB_INVENTORY: readonly KnobInventoryEntry[] = [
   ...BENCH,
   ...EXTRA,
   ...CONST_KEYED,
-]
+].map(withReadAuthority)
 
 export const allInventoryKnobs = (): readonly KnobInventoryEntry[] => KNOB_INVENTORY
 export const inventoryKnob = (envKey: string): KnobInventoryEntry | undefined =>

@@ -17,7 +17,7 @@ import {
   createBm25SecondaryReranker,
   createTierAwareReranker,
   fuseByRrf,
-  identityReranker,
+  identityRerankPort,
   RerankRegistry,
   type RetrievalCandidate,
   RetrievalError,
@@ -41,30 +41,30 @@ describe("RerankRegistry", () => {
   test("register + has + get round-trip", () => {
     const reg = new RerankRegistry()
     expect(reg.has("identity")).toBe(false)
-    reg.register(identityReranker)
+    reg.register(identityRerankPort)
     expect(reg.has("identity")).toBe(true)
-    expect(reg.get("identity")).toBe(identityReranker)
+    expect(reg.get("identity")).toBe(identityRerankPort)
   })
 
   test("kinds() returns sorted unique list", () => {
     const reg = new RerankRegistry()
     reg.register(rrfReranker)
-    reg.register(identityReranker)
+    reg.register(identityRerankPort)
     expect(reg.kinds()).toEqual(["identity", "score-fusion-rrf"])
   })
 
   test("re-registering replaces (idempotent)", () => {
     const reg = new RerankRegistry()
-    reg.register(identityReranker)
-    const fake = { ...identityReranker } // same kind, different reference
+    reg.register(identityRerankPort)
+    const fake = { ...identityRerankPort } // same kind, different reference
     reg.register(fake)
     expect(reg.get("identity")).toBe(fake)
   })
 })
 
-describe("identityReranker", () => {
+describe("identityRerankPort", () => {
   test("preserves order", async () => {
-    const out = await identityReranker.rerank({
+    const out = await identityRerankPort.rerank({
       query: "q",
       candidates: [c("b", "B"), c("a", "A"), c("c", "C")],
     })
@@ -72,7 +72,7 @@ describe("identityReranker", () => {
   })
 
   test("limit truncates", async () => {
-    const out = await identityReranker.rerank({
+    const out = await identityRerankPort.rerank({
       query: "q",
       candidates: [c("a", "A"), c("b", "B"), c("c", "C")],
       limit: 2,
@@ -82,7 +82,7 @@ describe("identityReranker", () => {
   })
 
   test("empty input returns empty", async () => {
-    expect(await identityReranker.rerank({ query: "q", candidates: [] })).toEqual([])
+    expect(await identityRerankPort.rerank({ query: "q", candidates: [] })).toEqual([])
   })
 })
 
@@ -215,13 +215,13 @@ describe("fuseByRrf + rrfReranker", () => {
 describe("rerank-registry hellgate", () => {
   test("registry NEVER silently falls back to identity on unknown kind", () => {
     const reg = new RerankRegistry()
-    reg.register(identityReranker) // even with identity registered
+    reg.register(identityRerankPort) // even with identity registered
     expect(() => reg.get("score-fusion-rrf")).toThrow(RetrievalError)
   })
 
   test("registry refuses to leak Map mutability through kinds()", () => {
     const reg = new RerankRegistry()
-    reg.register(identityReranker)
+    reg.register(identityRerankPort)
     const kinds = reg.kinds()
     // Mutating the returned array must not affect the registry.
     ;(kinds as unknown as { push(v: unknown): number }).push("score-fusion-rrf")
@@ -233,12 +233,12 @@ describe("identity reranker hellgate", () => {
   test("input array is not mutated even when limit slices", async () => {
     const arr = [c("a", "A"), c("b", "B"), c("c", "C")]
     const orig = [...arr]
-    await identityReranker.rerank({ query: "q", candidates: arr, limit: 1 })
+    await identityRerankPort.rerank({ query: "q", candidates: arr, limit: 1 })
     expect(arr).toEqual(orig)
   })
 
   test("limit=0 yields empty result (NOT the full array)", async () => {
-    const out = await identityReranker.rerank({
+    const out = await identityRerankPort.rerank({
       query: "q",
       candidates: [c("a", "A")],
       limit: 0,
@@ -247,7 +247,7 @@ describe("identity reranker hellgate", () => {
   })
 
   test("limit > candidates is a no-op (no padding)", async () => {
-    const out = await identityReranker.rerank({
+    const out = await identityRerankPort.rerank({
       query: "q",
       candidates: [c("a", "A")],
       limit: 999,

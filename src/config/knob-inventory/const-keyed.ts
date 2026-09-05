@@ -1,6 +1,6 @@
-import type { KnobInventoryEntry } from "./types"
+import type { KnobDeclaration } from "./types"
 
-export const CONST_KEYED: readonly KnobInventoryEntry[] = [
+export const CONST_KEYED: readonly KnobDeclaration[] = [
   {
     envKey: "QUANTA_CONTEXT_1M",
     kind: "bool",

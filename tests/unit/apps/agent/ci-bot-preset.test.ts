@@ -86,9 +86,8 @@ describe("CI env allowlist — divergent-copy drift guard", () => {
     // allowlist reintroduction (this is exactly what drifted before G5-02).
     expect(src).not.toContain("CI_ENV_ALLOWLIST_LOCAL")
     expect(src).not.toMatch(/=\s*(?:Object\.freeze\()?\s*\[[^\]]*"GH_TOKEN"/)
-    // The live spawn site scrubs with the imported SSOT constant.
-    expect(src).toMatch(/import\s*\{[^}]*\bCI_ENV_ALLOWLIST\b[^}]*\}\s*from\s*"@\/shared"/)
-    expect(src).toContain("scrubEnv(CI_ENV_ALLOWLIST)")
+    expect(src).toMatch(/defaultGhExec|createGhExec|GhExecPort/)
+    expect(src).not.toContain('Bun.spawn(["gh"')
   })
 
   test("dead parallel implementation ci-bot-policy.ts stays deleted", () => {

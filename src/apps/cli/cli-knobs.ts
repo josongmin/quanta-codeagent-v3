@@ -16,9 +16,11 @@
  * later phase). Declaring it here makes it (a) non-orphan to the completeness
  * ratchet (ADR-0503), (b) surfaceable in `--help` / `/knobs` (W3).
  *
- * Slice note: PURE DATA — no imports, no env reads. The composition root / help
- * renderer consumes `CLI_KNOBS`; this module performs zero work at import.
+ * Slice note: declaration data. The seven seeded-gate overlaps are projected
+ * from `cli-feature-gates.ts` so env keys are not copied. No env reads.
  */
+
+import { CLI_SEEDED_SURFACE_KNOBS } from "./cli-feature-gates"
 
 export type CliKnobKind = "bool" | "int" | "string" | "enum"
 
@@ -44,6 +46,21 @@ export interface CliKnob {
     | "misc"
   /** Where the knob is actually read today (traceability; read-routing is P4). */
   readonly readSite: string
+}
+
+const overlapKnob = (gate: `QUANTA_${string}`): CliKnob => {
+  const row = CLI_SEEDED_SURFACE_KNOBS.find((r) => r.gate === gate)
+  if (row === undefined) {
+    throw new Error(`CLI seeded surface knob missing: ${gate}`)
+  }
+  return {
+    envKey: row.gate as `QUANTA_${string}`,
+    kind: row.kind,
+    default: row.default,
+    group: row.group,
+    describe: row.knobDescribe,
+    readSite: row.readSite,
+  }
 }
 
 /**
@@ -352,54 +369,12 @@ export const CLI_KNOBS: readonly CliKnob[] = [
     describe: "ask-user tool (TTY only, opt-in).",
     readSite: "ask-user-wire.ts",
   },
-  {
-    envKey: "QUANTA_AT_AUTOCOMPLETE",
-    kind: "bool",
-    default: false,
-    group: "input",
-    describe: "@-mention autocomplete (opt-in).",
-    readSite: "at-autocomplete/env.ts",
-  },
-  {
-    envKey: "QUANTA_EXTERNAL_EDITOR",
-    kind: "bool",
-    default: false,
-    group: "input",
-    describe: "External-editor gesture (opt-in).",
-    readSite: "repl/surface-compose.ts",
-  },
-  {
-    envKey: "QUANTA_KEYBINDINGS",
-    kind: "bool",
-    default: false,
-    group: "input",
-    describe: "Load ~/.quanta/keybindings.json (opt-in).",
-    readSite: "repl/surface-compose.ts",
-  },
-  {
-    envKey: "QUANTA_MODE_CYCLE",
-    kind: "bool",
-    default: false,
-    group: "input",
-    describe: "Shift+Tab mode-cycle (opt-in).",
-    readSite: "mode-cycle.ts",
-  },
-  {
-    envKey: "QUANTA_PREFLIGHT_CHECK",
-    kind: "bool",
-    default: true,
-    group: "input",
-    describe: "Approval-time edit applicability pre-flight (CLI default-ON; =0 disables).",
-    readSite: "preflight.ts",
-  },
-  {
-    envKey: "QUANTA_BRACKETED_PASTE",
-    kind: "bool",
-    default: true,
-    group: "input",
-    describe: "Bracketed-paste — multi-line paste submits as one buffer (CLI default-ON).",
-    readSite: "repl/surface-compose.ts",
-  },
+  overlapKnob("QUANTA_AT_AUTOCOMPLETE"),
+  overlapKnob("QUANTA_EXTERNAL_EDITOR"),
+  overlapKnob("QUANTA_KEYBINDINGS"),
+  overlapKnob("QUANTA_MODE_CYCLE"),
+  overlapKnob("QUANTA_PREFLIGHT_CHECK"),
+  overlapKnob("QUANTA_BRACKETED_PASTE"),
   {
     envKey: "QUANTA_AUTOMATION_INBOX",
     kind: "bool",
@@ -722,14 +697,7 @@ export const CLI_KNOBS: readonly CliKnob[] = [
     describe: "Custom memory embedding model.",
     readSite: "memory-compose.ts",
   },
-  {
-    envKey: "QUANTA_ENABLE_ENV_PROBE",
-    kind: "bool",
-    default: false,
-    group: "session",
-    describe: "Shell environment probe (opt-in).",
-    readSite: "repl/env-probe-wire.ts",
-  },
+  overlapKnob("QUANTA_ENABLE_ENV_PROBE"),
   {
     envKey: "QUANTA_ENV_PROBE_TIMEOUT_MS",
     kind: "int",

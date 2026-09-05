@@ -13,11 +13,10 @@
  * re-derive their view per flush. Chrome-only: never gates a tool call.
  */
 
-/** Sanitize a config server name the same way `agent/mcp-bridge.ts#mcpToolName`
- *  does (kept in lockstep with `repl/mcp-surface-wire.ts#sanitizeServerKey`),
- *  so a down-mark keyed on the RAW config name joins a pill/readout row keyed
- *  on the sanitized bridged-tool slot. */
-export const sanitizeServerKey = (name: string): string => name.replace(/[^A-Za-z0-9_]+/g, "_")
+import { sanitizeMcpNameSegment } from "@/mcp"
+
+/** Sanitize a config server name the same way `@/mcp` `mcpToolName` does. */
+export const sanitizeServerKey = (name: string): string => sanitizeMcpNameSegment(name)
 
 export interface McpHealthHolder {
   /** Record `server` (RAW config name) as down. Last reason wins. */

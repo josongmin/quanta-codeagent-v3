@@ -7,11 +7,12 @@
  *  {@link LineReader} owns a byte buffer and only emits a message once a full
  *  `\n`-terminated line has arrived. */
 
-import { logger } from "@/shared"
+import { isJsonRpcEnvelope, logger } from "@/shared"
 
 /** Raw JSON-RPC shapes we read off the wire. The spec defines more, but the
  *  client only distinguishes responses (by `id`) from notifications (by
- *  `method` without `id`). Anything else is ignored by callers. */
+ *  `method` without `id`). Anything else is ignored by callers. Shape matches
+ *  `@/shared` `JsonRpcEnvelope` without tightening live acceptance. */
 export type JsonRpcMessage =
   | JsonRpcResponse
   | { jsonrpc: "2.0"; method: string; params?: unknown }
@@ -65,20 +66,7 @@ const EMPTY = (): Uint8Array<ArrayBuffer> => new Uint8Array(new ArrayBuffer(0))
  *  carry `jsonrpc:"2.0"` AND either an `id` (response) or a `method`
  *  (notification/request). Without this, a hostile or buggy MCP server can
  *  spoof responses with arbitrary `id`. */
-const isValidEnvelope = (m: unknown): m is JsonRpcMessage => {
-  if (typeof m !== "object" || m === null) return false
-  const o = m as Record<string, unknown>
-  if (o.jsonrpc !== "2.0") return false
-  const hasId = "id" in o
-  const hasMethod = "method" in o
-  if (!hasId && !hasMethod) return false
-  if (hasId) {
-    const id = o.id
-    if (typeof id !== "string" && typeof id !== "number") return false
-  }
-  if (hasMethod && typeof o.method !== "string") return false
-  return true
-}
+const isValidEnvelope = (m: unknown): m is JsonRpcMessage => isJsonRpcEnvelope(m)
 
 /** Accumulates raw stdout bytes and yields fully-received JSON-RPC messages.
  *

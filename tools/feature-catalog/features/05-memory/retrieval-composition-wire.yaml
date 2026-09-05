@@ -27,7 +27,8 @@ purpose: |
   catalog history stays honest; it no longer describes shipped behavior.
 
   What it was: the ADR-0159 "composition-root wire" — `buildRetrievalStackCore`
-  (still present in `src/runner/assemble/retrieval.ts`, consumer-less),
+  (deleted SEP5-09; live factories are `createEmbedderFromEnv` /
+  `createRerankerFromEnv`),
   `rankWithRetrievalStack` (memory↔retrieval bridge), `runLocalizeHybrid`
   (localize bridge, already deleted jul-3 D2), an `AgentConfig.retrievalStack`
   slot, and the host-root `QUANTA_RETRIEVAL_HYBRID="1"` env gate.
@@ -39,7 +40,8 @@ purpose: |
   default reranker is `identity` (measured relevant-in-top-5: 1 → 1).
 evidence:
   code:
-    - src/runner/assemble/retrieval.ts
+    - src/runner/assemble/search-index-backend.ts
+    - src/runner/assemble/pipeline.ts
   adrs:
     - "docs/decisions/0159-retrieval-sota-stack.md"
     - "docs/decisions/0553-delete-retrieval-memory-bridge.md"
@@ -54,6 +56,6 @@ notes: |
   Retired, not held: there is no promotion path for this entry. A future
   BM25-over-memory feature is a NEW catalog entry and must (per ADR-0553)
   rerank BEFORE its clip, promote a non-identity default reranker, and keep
-  the RFC §3.1 fence (`@/memory` may not import `@/retrieval` — bridge from
-  `@/runner`). The `buildRetrievalStackCore` assembler remains exported from
-  `@/runner/assemble` for such a consumer; it is dead until one appears.
+  The `buildRetrievalStackCore` assembler was removed in SEP5-09; live
+  embedding/rerank composition is `search-index-backend.ts` /
+  `pipeline.ts`. A future BM25-over-memory feature is a NEW catalog entry.

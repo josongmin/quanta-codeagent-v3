@@ -1,7 +1,7 @@
 import { MENTION } from "./mention"
-import type { KnobInventoryEntry } from "./types"
+import type { KnobDeclaration } from "./types"
 
-export const EXTRA: readonly KnobInventoryEntry[] = [
+export const EXTRA: readonly KnobDeclaration[] = [
   // jul-9 — general-CLI default env posture. OFF (default) ⇒ "frozen" (SWE-bench
   // don't-install / stop-when-env-blocked, byte-identical to today). ON ⇒ "default"
   // (install-permitted local-dev posture) so an interactive user at their OWN repo is not

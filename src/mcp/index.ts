@@ -35,6 +35,7 @@ export {
   type UrlRequest,
   urlRequestSchema,
 } from "./elicitation"
+export { mcpToolName, sanitizeMcpNameSegment } from "./naming"
 export { headlessOAuthRejecter, type McpOAuthProviderPort } from "./oauth"
 export {
   isProgressMethod,

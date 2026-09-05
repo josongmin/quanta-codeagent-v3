@@ -8,6 +8,7 @@ import {
   type McpProgressHandler,
   type McpReconnectSupervisor,
   type McpToolDef,
+  mcpToolName,
   tasksPortOver,
 } from "@/mcp"
 import { errMessage, sliceWholeChars } from "@/shared"
@@ -40,10 +41,7 @@ import { toToolResult } from "./mcp-media-guard"
  */
 
 /** `mcp__<server>__<tool>`, sanitized so the name is a safe identifier. */
-export const mcpToolName = (server: string, tool: string): string => {
-  const clean = (s: string): string => s.replace(/[^A-Za-z0-9_]+/g, "_")
-  return `mcp__${clean(server)}__${clean(tool)}`
-}
+export { mcpToolName } from "@/mcp"
 
 /** Ceiling on a server-supplied tool description, in UTF-16 code units.
  *

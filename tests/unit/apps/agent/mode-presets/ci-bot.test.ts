@@ -53,7 +53,7 @@ const baseReq = (over: Partial<AssembleRequest> = {}): AssembleRequest => ({
     maxTurns: 5,
     signal: new AbortController().signal,
   },
-  ciBot: { pr: "owner/repo#42" },
+  ciBot: { pr: "owner/repo#42", runId: "run-1", repoSlug: "owner/repo" },
   ...over,
 })
 
@@ -69,7 +69,31 @@ const fakeOutcome = (
   ],
 })
 
-const okGh = async () => ({ stdout: '{"title":"x"}', stderr: "", exitCode: 0 })
+const okGh = async (args: string[] = []) => {
+  if (args[0] === "api") {
+    if (args.includes("GET") || (typeof args[1] === "string" && args[1].includes("/comments"))) {
+      return { stdout: "[]", stderr: "", exitCode: 0 }
+    }
+    if (args.includes("POST")) {
+      return {
+        stdout: JSON.stringify({
+          id: 1,
+          html_url: "https://github.com/owner/repo/pull/42#issuecomment-1",
+        }),
+        stderr: "",
+        exitCode: 0,
+      }
+    }
+  }
+  return {
+    stdout: '{"title":"x","number":42,"nameWithOwner":"owner/repo"}',
+    stderr: "",
+    exitCode: 0,
+  }
+}
+
+const isApiPost = (args: string[]): boolean =>
+  args[0] === "api" && args.includes("--method") && args.includes("POST")
 
 describe("ci-bot.runMode — guard", () => {
   test("rejects a wrong req.mode", async () => {
@@ -180,27 +204,25 @@ describe("buildCiBotWiring — restricted tool surface", () => {
 })
 
 describe("ci-bot.runMode — gh + runAgent flow", () => {
-  test("calls gh pr view BEFORE runAgent, gh pr comment AFTER", async () => {
+  test("calls gh pr view BEFORE runAgent, automated sink AFTER", async () => {
     const ghCalls: string[][] = []
     let runAgentCalledAfterView = false
     const seams = {
       ghRun: async (args: string[]) => {
         ghCalls.push(args)
-        return { stdout: '{"title":"t"}', stderr: "", exitCode: 0 }
+        return okGh(args)
       },
       runAgent: async () => {
-        // gh pr view must already have run.
         runAgentCalledAfterView = ghCalls.some((a) => a[0] === "pr" && a[1] === "view")
         return fakeOutcome("completed")
       },
     }
     const out = await runMode(baseReq({ seams }))
     expect(runAgentCalledAfterView).toBe(true)
-    // gh pr view first, gh pr comment second
     expect(ghCalls[0]?.[0]).toBe("pr")
     expect(ghCalls[0]?.[1]).toBe("view")
-    expect(ghCalls[ghCalls.length - 1]?.[0]).toBe("pr")
-    expect(ghCalls[ghCalls.length - 1]?.[1]).toBe("comment")
+    expect(ghCalls.some(isApiPost)).toBe(true)
+    expect(ghCalls.some((a) => a[0] === "pr" && a[1] === "comment")).toBe(false)
     expect(out.exitCode).toBe(0)
   })
 
@@ -322,29 +344,36 @@ describe("ci-bot.runMode — gh + runAgent flow", () => {
     const seams = {
       ghRun: async (args: string[]) => {
         ghCalls.push(args)
-        return { stdout: '{"title":"t"}', stderr: "", exitCode: 0 }
+        return okGh(args)
       },
       runAgent: async () => fakeOutcome("completed"),
     }
-    const out = await runMode(baseReq({ seams, ciBot: { pr: "owner/repo#42", dryRun: true } }))
+    const out = await runMode(
+      baseReq({
+        seams,
+        ciBot: { pr: "owner/repo#42", dryRun: true, runId: "run-1", repoSlug: "owner/repo" },
+      }),
+    )
     expect(out.exitCode).toBe(0)
-    // gh pr view ran...
     expect(ghCalls.some((a) => a[0] === "pr" && a[1] === "view")).toBe(true)
-    // ...but gh pr comment did NOT.
+    expect(ghCalls.some(isApiPost)).toBe(false)
     expect(ghCalls.some((a) => a[0] === "pr" && a[1] === "comment")).toBe(false)
   })
 
-  test("without --dry-run a comment IS posted", async () => {
+  test("without --dry-run an automated comment IS posted via the sink", async () => {
     const ghCalls: string[][] = []
     const seams = {
       ghRun: async (args: string[]) => {
         ghCalls.push(args)
-        return { stdout: '{"title":"t"}', stderr: "", exitCode: 0 }
+        return okGh(args)
       },
       runAgent: async () => fakeOutcome("completed"),
     }
-    await runMode(baseReq({ seams, ciBot: { pr: "owner/repo#42" } }))
-    expect(ghCalls.some((a) => a[0] === "pr" && a[1] === "comment")).toBe(true)
+    await runMode(
+      baseReq({ seams, ciBot: { pr: "owner/repo#42", runId: "run-1", repoSlug: "owner/repo" } }),
+    )
+    expect(ghCalls.some(isApiPost)).toBe(true)
+    expect(ghCalls.some((a) => a[0] === "pr" && a[1] === "comment")).toBe(false)
   })
 
   test("aborted reason maps to exitCode 130", async () => {

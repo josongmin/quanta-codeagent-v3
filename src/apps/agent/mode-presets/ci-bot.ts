@@ -25,14 +25,16 @@
  */
 
 import type { AgentConfig } from "@/agent"
+import { automatedPrCommentKey, createPrOutputSink, type RedactPort } from "@/integrations/github"
 import type { LLMPort, Message } from "@/llm"
 import { DEFAULT_PROTECTED_BRANCHES, decideBranchOnly, type PermissionContext } from "@/permission"
-import { scrubEnv } from "@/runtime"
-import { CI_ENV_ALLOWLIST, gateOn, logger } from "@/shared"
+import type { GhCliPort } from "@/reactor"
+import { redactSecrets } from "@/security/redaction"
+import { gateOn, logger } from "@/shared"
 import { StdoutStream, type StreamPort } from "@/stream"
 import { defaultGitRunner, type GitRunner, gitTools, ToolRegistry } from "@/tool"
 import { createCiFindingStore } from "@/tool/ci-finding"
-import { ghTools, type GhRunner as ToolGhRunner } from "@/tool/gh"
+import { defaultGhExec, type GhExecPort, ghTools, type GhRunner as ToolGhRunner } from "@/tool/gh"
 import { resolveGitBudget } from "@/tool/git"
 import {
   type AssembleRequest,
@@ -64,7 +66,7 @@ export interface CiBotWiring {
   gh: (args: string[]) => Promise<{ stdout: string; stderr: string; exitCode: number }>
 }
 
-/** Default `gh` spawner — `Bun.spawn(["gh", ...args])` with a bounded timeout
+/** Default `gh` adapter — canonical {@link GhExecPort} with a bounded timeout
  *  and a scrubbed env. Wrapped in a closure so tests can inject a stub. */
 /** Hard wall-clock cap on a single `gh` invocation. 30s covers the slowest
  *  observed `gh pr view` against a large PR (~5s p95); past 30s implies the
@@ -72,49 +74,35 @@ export interface CiBotWiring {
  *  rather than blocking the whole turn. */
 const GH_SUBPROCESS_TIMEOUT_MS = 30_000
 
-const spawnGh = async (
-  repoCwd: string,
-  argv: readonly string[],
-  timeoutMs: number,
-): Promise<{ stdout: string; stderr: string; exitCode: number }> => {
-  const proc = Bun.spawn([...argv], {
-    cwd: repoCwd,
-    env: scrubEnv(CI_ENV_ALLOWLIST),
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  const timer = setTimeout(() => {
-    try {
-      proc.kill()
-    } catch {
-      // already exited
-    }
-  }, timeoutMs)
-  try {
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    const exitCode = await proc.exited
-    return { stdout, stderr, exitCode }
-  } finally {
-    clearTimeout(timer)
+const ghExecToCli =
+  (repoCwd: string, exec: GhExecPort, timeoutMs: number) =>
+  async (args: string[]): Promise<{ stdout: string; stderr: string; exitCode: number }> => {
+    const result = await exec({ argv: ["gh", ...args], cwd: repoCwd, timeoutMs })
+    return { stdout: result.stdout, stderr: result.stderr, exitCode: result.code }
   }
+
+const ciBotRedactPort: RedactPort = {
+  redact: (text) => redactSecrets(text, { origin: "tool_result" }).text,
 }
 
-const spawnGhRunner =
-  (
-    repoCwd: string,
-  ): ((args: string[]) => Promise<{ stdout: string; stderr: string; exitCode: number }>) =>
-  async (args) =>
-    spawnGh(repoCwd, ["gh", ...args], GH_SUBPROCESS_TIMEOUT_MS)
+export const createCiBotGhAdapter = (
+  repoCwd: string,
+  exec: GhExecPort = defaultGhExec,
+  timeoutMs: number = GH_SUBPROCESS_TIMEOUT_MS,
+): CiBotWiring["gh"] => ghExecToCli(repoCwd, exec, timeoutMs)
+
+const spawnGhRunner = (
+  repoCwd: string,
+  exec: GhExecPort = defaultGhExec,
+): ((args: string[]) => Promise<{ stdout: string; stderr: string; exitCode: number }>) =>
+  createCiBotGhAdapter(repoCwd, exec)
 
 const spawnToolGhRunner =
-  (repoCwd: string): ToolGhRunner =>
-  async (argv, _cwd, timeoutMs) => {
-    const result = await spawnGh(repoCwd, argv, timeoutMs)
+  (_repoCwd: string, exec: GhExecPort = defaultGhExec): ToolGhRunner =>
+  async (argv, cwd, timeoutMs) => {
+    const result = await exec({ argv, cwd, timeoutMs })
     return {
-      code: result.exitCode,
+      code: result.code,
       stdout: result.stdout,
       stderr: result.stderr,
     }
@@ -330,13 +318,89 @@ const buildCiBotBase = async (
   }
 }
 
-/** Post a summary comment to the PR via `gh pr comment`. Best-effort: a
- *  failure is logged but does NOT change the exit code (the agent's run
- *  already produced its verdict). */
-const postPrComment = async (pr: string, body: string, gh: CiBotWiring["gh"]): Promise<void> => {
-  const out = await gh(["pr", "comment", pr, "--body", body])
-  if (out.exitCode !== 0) {
-    logger.warn(`ci-bot: gh pr comment failed (exit ${out.exitCode}): ${out.stderr.trim()}`)
+/** Post a summary comment to the PR via the automated sink (redact + cap +
+ *  idempotent reconcile). Best-effort: a failure is logged but does NOT change
+ *  the exit code. Missing run identity or repo slug fails closed (no raw post). */
+const parsePositiveInt = (raw: string): number | undefined => {
+  const n = Number.parseInt(raw, 10)
+  return Number.isInteger(n) && n > 0 ? n : undefined
+}
+
+const jsonField = (stdout: string, key: string): string | undefined => {
+  try {
+    const parsed: unknown = JSON.parse(stdout)
+    if (typeof parsed !== "object" || parsed === null) return undefined
+    const value = (parsed as Record<string, unknown>)[key]
+    return typeof value === "string" || typeof value === "number" ? String(value) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+const resolvePrNumber = async (pr: string, gh: CiBotWiring["gh"]): Promise<number | undefined> => {
+  const direct = parsePositiveInt(pr)
+  if (direct !== undefined) return direct
+  const out = await gh(["pr", "view", pr, "--json", "number"])
+  if (out.exitCode !== 0) return undefined
+  return parsePositiveInt(jsonField(out.stdout, "number") ?? "")
+}
+
+const resolveRepoSlug = async (
+  hint: string | undefined,
+  gh: CiBotWiring["gh"],
+): Promise<string | undefined> => {
+  if (typeof hint === "string" && /^[\w.-]+\/[\w.-]+$/.test(hint)) return hint
+  const out = await gh(["repo", "view", "--json", "nameWithOwner"])
+  if (out.exitCode !== 0) return undefined
+  const slug = jsonField(out.stdout, "nameWithOwner")
+  return typeof slug === "string" && /^[\w.-]+\/[\w.-]+$/.test(slug) ? slug : undefined
+}
+
+const ghAsCliPort = (gh: CiBotWiring["gh"]): GhCliPort => ({
+  run: async (args) => {
+    const out = await gh([...args])
+    return { stdout: out.stdout, stderr: out.stderr, exitCode: out.exitCode }
+  },
+})
+
+const postPrComment = async (input: {
+  readonly pr: string
+  readonly body: string
+  readonly gh: CiBotWiring["gh"]
+  readonly cwd: string
+  readonly runId: string | undefined
+  readonly repoSlug: string | undefined
+  readonly kind?: string
+}): Promise<void> => {
+  const runId = input.runId?.trim()
+  if (runId === undefined || runId === "") {
+    logger.warn("ci-bot: skipping PR comment — run identity is required for idempotent posting")
+    return
+  }
+  const prNumber = await resolvePrNumber(input.pr, input.gh)
+  const repoSlug = await resolveRepoSlug(input.repoSlug, input.gh)
+  if (prNumber === undefined || repoSlug === undefined) {
+    logger.warn("ci-bot: skipping PR comment — could not resolve repo slug or PR number")
+    return
+  }
+  const sink = createPrOutputSink({
+    ghCliPort: ghAsCliPort(input.gh),
+    repoCwd: input.cwd,
+    repoSlug,
+    prNumber,
+    redactPort: ciBotRedactPort,
+  })
+  const posted = await sink.postComment({
+    body: input.body,
+    key: automatedPrCommentKey({
+      repo: repoSlug,
+      pr: prNumber,
+      runId,
+      kind: input.kind ?? "summary",
+    }),
+  })
+  if (!posted.ok) {
+    logger.warn(`ci-bot: PR comment failed: ${posted.error ?? "unknown"}`)
   }
 }
 
@@ -405,9 +469,19 @@ export const runMode = async (req: AssembleRequest): Promise<RunOutcome> => {
   // `CiBotExtras` had no slot, so it was dropped and the comment always
   // posted). When set, read the PR + run the agent but DO NOT write back.
   if (req.ciBot?.dryRun === true) {
-    logger.info(`ci-bot: --dry-run, skipping PR comment. would post:\n${summary}`)
+    logger.info(
+      `ci-bot: --dry-run, skipping PR comment. would post:\n${ciBotRedactPort.redact(summary)}`,
+    )
   } else {
-    await postPrComment(pr, summary, wiring.gh)
+    await postPrComment({
+      pr,
+      body: summary,
+      gh: wiring.gh,
+      cwd,
+      runId: req.ciBot?.runId,
+      repoSlug: req.ciBot?.repoSlug,
+      kind: "summary",
+    })
   }
 
   // Exit-code table is the SINGLE canonical map in `../run` (audit R2: each

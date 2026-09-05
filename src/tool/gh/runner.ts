@@ -23,33 +23,97 @@ export interface GhRunResult {
 }
 export type GhRunner = (argv: string[], cwd: string, timeoutMs: number) => Promise<GhRunResult>
 
+export interface GhExecRequest {
+  readonly argv: readonly string[]
+  readonly cwd: string
+  readonly timeoutMs: number
+  readonly signal?: AbortSignal
+}
+
+export interface GhExecResult {
+  readonly code: number
+  readonly stdout: string
+  readonly stderr: string
+}
+
+export type GhExecPort = (request: GhExecRequest) => Promise<GhExecResult>
+
+export interface GhSpawnHandle {
+  readonly stdout: ReadableStream<Uint8Array>
+  readonly stderr: ReadableStream<Uint8Array>
+  readonly exited: Promise<number>
+  readonly kill: (signal?: number | NodeJS.Signals) => void
+}
+
+export type GhSpawnFn = (
+  argv: readonly string[],
+  opts: {
+    readonly cwd: string
+    readonly env: Record<string, string>
+    readonly stdout: "pipe"
+    readonly stderr: "pipe"
+  },
+) => GhSpawnHandle
+
+export interface GhExecDeps {
+  readonly spawn?: GhSpawnFn
+}
+
+const GH_TREE_KILLER = defaultPpidWalkKiller()
+
+const bunGhSpawn: GhSpawnFn = (argv, opts) =>
+  Bun.spawn([...argv], {
+    cwd: opts.cwd,
+    env: opts.env,
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+
+export const createGhExec = (deps: GhExecDeps = {}): GhExecPort => {
+  const spawn = deps.spawn ?? bunGhSpawn
+  return async (request) => {
+    if (request.signal?.aborted) {
+      return { code: 1, stdout: "", stderr: "aborted before spawn" }
+    }
+    const proc = spawn(request.argv, {
+      cwd: request.cwd,
+      env: scrubEnv(CI_ENV_ALLOWLIST),
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    const { kill, disarm } = escalatingKill(proc, GH_TREE_KILLER)
+    const onAbort = (): void => {
+      kill()
+    }
+    request.signal?.addEventListener("abort", onAbort, { once: true })
+    const deadline = setTimeout(kill, request.timeoutMs)
+    try {
+      const [stdout, stderr] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ])
+      const code = await proc.exited
+      return { code, stdout, stderr }
+    } finally {
+      clearTimeout(deadline)
+      request.signal?.removeEventListener("abort", onAbort)
+      disarm()
+    }
+  }
+}
+
+export const defaultGhExec: GhExecPort = createGhExec()
+
+export const createGhRunner =
+  (exec: GhExecPort = defaultGhExec): GhRunner =>
+  async (argv, cwd, timeoutMs) =>
+    exec({ argv, cwd, timeoutMs })
+
 // G3-02: a `gh` invocation can fan out (credential helpers, git subprocesses),
 // and a bare `proc.kill()` deadline signals only the root — a surviving child
 // holds the stdout pipe open and the `.text()` await outlives the timeout. The
 // deadline therefore tree-kills via the canonical escalating SIGTERM→SIGKILL
 // (same primitive as `runner/batch/eval/exec.ts`).
-const GH_TREE_KILLER = defaultPpidWalkKiller()
-
-export const defaultGhRunner: GhRunner = async (argv, cwd, timeoutMs) => {
-  const proc = Bun.spawn(argv, {
-    cwd,
-    stdout: "pipe",
-    stderr: "pipe",
-    env: scrubEnv(CI_ENV_ALLOWLIST),
-  })
-  const { kill, disarm } = escalatingKill(proc, GH_TREE_KILLER)
-  const deadline = setTimeout(kill, timeoutMs)
-  try {
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    const code = await proc.exited
-    return { code, stdout, stderr }
-  } finally {
-    clearTimeout(deadline)
-    disarm()
-  }
-}
+export const defaultGhRunner: GhRunner = createGhRunner()
 
 export const DEFAULT_TIMEOUT_MS = 60_000

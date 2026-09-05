@@ -68,6 +68,7 @@ import {
 } from "@/agent/session-resource-registry/inspector"
 import { countSqliteRegistryCleanupCandidates } from "@/agent/session-resource-registry/sqlite-adapter/gc"
 import { errMessage } from "@/shared"
+import { runtimeConfig } from "@/shared/runtime-config"
 import { sweepSessionTranscripts, type TranscriptSweepResult } from "./session-transcript-retention"
 import type { SlashCommand, SlashContext } from "./slash-commands"
 
@@ -331,7 +332,13 @@ export const sessionRegistryCmd: SlashCommand = {
       const transcripts = subArgs.includes("--transcripts")
       // ADR-0387 — `--dry-run` flag preview mode. Any position in the
       // sub-args list counts; extra unrelated flags are ignored.
-      if (dryRun) return renderCleanupDryRun(ctx, transcripts)
+      if (dryRun) {
+        return renderCleanupDryRun(
+          ctx,
+          transcripts,
+          sessionRegistryCleanupPathsFrom(runtimeConfig()),
+        )
+      }
       return renderCleanup(ctx, transcripts)
     }
     return renderStats(ctx)
@@ -396,10 +403,27 @@ const renderCleanup = async (ctx: SlashContext, transcripts: boolean): Promise<n
  * On failure, exit 1 + render the error on stderr (operator explicitly
  * requested the preview).
  */
-const renderCleanupDryRun = async (ctx: SlashContext, transcripts: boolean): Promise<number> => {
+export type SessionRegistryCleanupPaths = {
+  readonly diskDir: string | undefined
+  readonly sqlitePath: string | undefined
+}
+
+export const sessionRegistryCleanupPathsFrom = (snapshot: {
+  readonly sessionRegistryDiskDir?: string | undefined
+  readonly sessionRegistrySqlitePath?: string | undefined
+}): SessionRegistryCleanupPaths => ({
+  diskDir: snapshot.sessionRegistryDiskDir,
+  sqlitePath: snapshot.sessionRegistrySqlitePath,
+})
+
+export const renderCleanupDryRun = async (
+  ctx: SlashContext,
+  transcripts: boolean,
+  paths: SessionRegistryCleanupPaths,
+): Promise<number> => {
   try {
-    const diskDir = process.env.QUANTA_SESSION_REGISTRY_DISK_DIR
-    const sqlitePath = process.env.QUANTA_SESSION_REGISTRY_SQLITE_PATH
+    const diskDir = paths.diskDir
+    const sqlitePath = paths.sqlitePath
 
     const lines: string[] = ["## Session Registry — Dry-run", ""]
 

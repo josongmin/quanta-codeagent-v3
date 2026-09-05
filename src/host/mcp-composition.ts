@@ -1,5 +1,5 @@
 import { spawn as spawnChild } from "node:child_process"
-import { chmod, mkdir, readFile, realpath, rename, unlink, writeFile } from "node:fs/promises"
+import { mkdir, readFile, realpath, unlink } from "node:fs/promises"
 import { join as joinPath } from "node:path"
 import type { ElicitationPrompterFactory, McpReloadableSource, SamplingWiringInput } from "@/agent"
 import { applyMcpClientWiring, loadMcpTools, type McpStoppable } from "@/agent"
@@ -10,6 +10,7 @@ import {
   generateState,
   resolveQuantaHome,
 } from "@/auth/chatgpt-oauth"
+import { writePrivateFileAtomic } from "@/auth/private-file-atomic"
 import {
   canonicalizeTrustedPaths,
   filterMcpServersByPolicy,
@@ -163,7 +164,7 @@ const mcpSupervisorDepsFor = (
  *  they live only in the 0600 file and the in-memory record. NO-THROW reads
  *  (a corrupt/absent file ⇒ `undefined` ⇒ the provider re-auths) so a bad file
  *  never crashes the MCP load. */
-const createFileMcpTokenStore = (dir: string): TokenStorePort => {
+export const createFileMcpTokenStore = (dir: string): TokenStorePort => {
   const safe = (id: string): string => id.replace(/[^A-Za-z0-9_.-]+/g, "_")
   const fileFor = (id: string): string => joinPath(dir, `${safe(id)}.json`)
   return {
@@ -186,11 +187,7 @@ const createFileMcpTokenStore = (dir: string): TokenStorePort => {
     },
     async write(id: string, record: TokenRecord): Promise<void> {
       await mkdir(dir, { recursive: true })
-      const path = fileFor(id)
-      const tmp = `${path}.tmp`
-      await writeFile(tmp, `${JSON.stringify(record)}\n`, "utf8")
-      if (process.platform !== "win32") await chmod(tmp, 0o600)
-      await rename(tmp, path)
+      await writePrivateFileAtomic(fileFor(id), `${JSON.stringify(record)}\n`)
     },
     async delete(id: string): Promise<void> {
       try {

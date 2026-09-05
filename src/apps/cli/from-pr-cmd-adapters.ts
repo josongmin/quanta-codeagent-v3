@@ -14,6 +14,7 @@ import type { FsPort, RedactPort } from "@/integrations/github"
 
 import type { ClockPort, EnvPort, GhCliPort, GhCliResult } from "@/reactor"
 import { redactSecrets } from "@/security/redaction"
+import { DEFAULT_TIMEOUT_MS, defaultGhExec, type GhExecPort } from "@/tool/gh"
 
 export const createNodeEnvPort = (): EnvPort => ({
   get(name) {
@@ -52,47 +53,20 @@ export const createRedactPort = (): RedactPort => ({
 })
 
 /**
- * Production `gh` CLI adapter via Bun.spawn. Tests pass a fake `GhCliPort`
- * directly; this is the boundary impl. Mirrors the pattern in
- * `src/reactor/trigger-source-ci.ts`.
+ * Production `gh` CLI adapter over the canonical {@link GhExecPort}.
+ * Tests pass a fake `GhCliPort` directly; this is the boundary impl.
  */
-export const createBunGhCliPort = (binary: string = "gh"): GhCliPort => ({
+export const createBunGhCliPort = (
+  binary: string = "gh",
+  exec: GhExecPort = defaultGhExec,
+): GhCliPort => ({
   async run(args, cwd, signal): Promise<GhCliResult> {
-    type SpawnFn = (
-      cmd: readonly string[],
-      opts: Record<string, unknown>,
-    ) => {
-      readonly exited: Promise<number>
-      readonly stdout: ReadableStream<Uint8Array>
-      readonly stderr: ReadableStream<Uint8Array>
-    }
-    const bun = (globalThis as unknown as { Bun?: { spawn: SpawnFn } }).Bun
-    if (bun === undefined) {
-      return { stdout: "", stderr: "Bun runtime unavailable", exitCode: 127 }
-    }
-    const spawnOpts: Record<string, unknown> = {
+    const result = await exec({
+      argv: [binary, ...args],
       cwd,
-      stdout: "pipe",
-      stderr: "pipe",
-    }
-    if (signal !== undefined) spawnOpts.signal = signal
-    const proc = bun.spawn([binary, ...args], spawnOpts)
-    const [exitCode, stdout, stderr] = await Promise.all([
-      proc.exited,
-      readStream(proc.stdout),
-      readStream(proc.stderr),
-    ])
-    return { stdout, stderr, exitCode }
+      timeoutMs: DEFAULT_TIMEOUT_MS,
+      ...(signal !== undefined ? { signal } : {}),
+    })
+    return { stdout: result.stdout, stderr: result.stderr, exitCode: result.code }
   },
 })
-
-const readStream = async (s: ReadableStream<Uint8Array>): Promise<string> => {
-  const chunks: Uint8Array[] = []
-  const reader = s.getReader()
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    if (value !== undefined) chunks.push(value)
-  }
-  return Buffer.concat(chunks).toString("utf8")
-}

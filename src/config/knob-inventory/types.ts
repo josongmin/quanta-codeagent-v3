@@ -2,6 +2,14 @@
  *  (god-module split). Pure types. */
 export type InventoryKind = "bool" | "int" | "float" | "string" | "enum"
 export type KnobHome = "runtime-config" | "runner-knobs" | "bench"
+export type KnobReadAuthority =
+  | "startup-seed"
+  | "runtime-config"
+  | "injected-env"
+  | "composition-gate"
+  | "runner-knob"
+  | "bench"
+  | "credential-exempt"
 
 export interface KnobInventoryEntry {
   readonly envKey: `QUANTA_${string}`
@@ -27,7 +35,13 @@ export interface KnobInventoryEntry {
     | "security"
     | "agent-feature"
     | "integration"
+  /** Target typed owner — not proof a typed field currently exists. */
   readonly home: KnobHome
+  /** Current temporal read authority. Distinct from {@link home}. */
+  readonly readAuthority: KnobReadAuthority
   readonly describe: string
   readonly readSite: string
 }
+
+/** Source declaration before read-authority classification. */
+export type KnobDeclaration = Omit<KnobInventoryEntry, "readAuthority">

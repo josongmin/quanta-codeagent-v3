@@ -40,6 +40,19 @@ export {
 } from "./idempotency"
 export type { MentionFilter, MentionFilterOpts } from "./mention-filter"
 export { createMentionFilter } from "./mention-filter"
+export type {
+  AutomatedPrCommentPort,
+  OutboundBodyPolicyPort,
+  OutboundBodyPrepareResult,
+} from "./outbound-body-policy"
+export {
+  automatedPrCommentKey,
+  COMMENT_BODY_MAX_BYTES,
+  clampWithMarker,
+  createOutboundBodyPolicy,
+  idempotencyMarker,
+  utf8Truncate,
+} from "./outbound-body-policy"
 export type { LoadPrContextOpts } from "./pr-context-loader"
 export { loadPrContext } from "./pr-context-loader"
 export type { PrOutputSink, PrOutputSinkOpts } from "./pr-output-sink"

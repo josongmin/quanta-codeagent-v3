@@ -29,12 +29,16 @@ import {
   isExpired,
   readResolvedToken,
   refreshToken,
+  refreshTokenTransaction,
   resolveOAuthConfig,
   resolveQuantaHome,
   TokenExchangeError,
   type TokenRecord,
   writeToken,
 } from "@/auth/chatgpt-oauth"
+import { FileBasedLock } from "@/auth/lock-file-based"
+import { createNodeLockFileStore } from "@/auth/node-lock-file-store"
+import type { OAuthRefreshLockPort } from "@/auth/oauth-refresh-lock"
 import { errMessage, LLMError, type LLMErrorKind, logger } from "@/shared"
 import { buildResponsesBody } from "../openai-responses-wire"
 import type { LLMPort } from "../ports"
@@ -118,6 +122,7 @@ export interface ChatGPTOAuthConfig extends AdapterStreamTimeoutConfig {
    *  (`QUANTA_DEBUG_OAUTH`) at the composition root — the slice itself takes a
    *  plain boolean and routes through the logger port, never raw stderr. */
   readonly debugOAuth?: boolean
+  readonly refreshLock?: OAuthRefreshLockPort
 }
 
 /** Refresh the access token if it expires within this many ms — a 1-minute
@@ -224,6 +229,8 @@ export class ChatGPTOAuthAdapter implements LLMPort {
    *  token and re-refresh (issuer-budget churn). Cleared on a successful persist
    *  so the normal path keeps re-reading disk (picks up other-process rotations). */
   private memTokenFallback: TokenRecord | undefined
+  private readonly refreshLock: OAuthRefreshLockPort
+  private readonly holderId: string
 
   constructor(config: ChatGPTOAuthConfig) {
     this.model = config.model
@@ -248,6 +255,14 @@ export class ChatGPTOAuthAdapter implements LLMPort {
       ? defaultResponsesReasoningCarryoverStore()
       : undefined
     this.debugOAuth = config.debugOAuth ?? false
+    this.holderId = `${process.pid}-${this.nowMs()}`
+    this.refreshLock =
+      config.refreshLock ??
+      new FileBasedLock({
+        store: createNodeLockFileStore(`${resolveQuantaHome(config.env)}/locks`),
+        clock: { now: () => this.nowMs() },
+        pid: process.pid,
+      })
   }
 
   private async ensureFreshToken(): Promise<TokenRecord> {
@@ -277,16 +292,48 @@ export class ChatGPTOAuthAdapter implements LLMPort {
     const cfg = resolveOAuthConfig(this.env)
     let next: TokenRecord
     try {
-      next = await refreshToken({
-        cfg,
-        current: rec,
-        fetchImpl: this.fetchImpl,
+      next = await refreshTokenTransaction(path, {
+        lock: this.refreshLock,
+        holderId: this.holderId,
         nowMs: this.nowMs,
+        skewMs: TOKEN_REFRESH_SKEW_MS,
+        readCurrent: async () => {
+          const latest = await readResolvedToken(this.env)
+          return latest?.record ?? null
+        },
+        persist: async (token) => {
+          try {
+            await writeToken(path, token)
+            this.memTokenFallback = undefined
+          } catch (e) {
+            this.memTokenFallback = token
+            logger.warn(
+              `chatgpt-oauth: refreshed token persist failed (${errMessage(e)}) — ` +
+                "proceeding with the in-memory token; will reuse it until it expires.",
+            )
+          }
+        },
+        refresh: (current) =>
+          refreshToken({
+            cfg,
+            current,
+            fetchImpl: this.fetchImpl,
+            nowMs: this.nowMs,
+          }),
+        sleep: (ms, signal) =>
+          new Promise((resolve, reject) => {
+            const t = setTimeout(resolve, ms)
+            signal?.addEventListener(
+              "abort",
+              () => {
+                clearTimeout(t)
+                reject(new Error("refresh transaction aborted"))
+              },
+              { once: true },
+            )
+          }),
       })
     } catch (e) {
-      // Audit #15 — branch on the TYPED statusCode: only invalid_grant/401/403
-      // means "the refresh token is dead, re-login"; a 429/5xx/network blip
-      // keeps its transient kind so retry/fallback can route it.
       const classified = classifyRefreshFailure(e)
       const advice =
         classified.kind === "auth"
@@ -300,25 +347,6 @@ export class ChatGPTOAuthAdapter implements LLMPort {
         ...(classified.retryAfterMs !== undefined ? { retryAfterMs: classified.retryAfterMs } : {}),
         ...(classified.errorCode !== undefined ? { providerCode: classified.errorCode } : {}),
       })
-    }
-    // D7 — the refresh itself SUCCEEDED; the new bundle is valid in memory. The
-    // on-disk copy is a cache (it lets the NEXT process reuse the token), NOT
-    // load-bearing for THIS call. A persist failure (EACCES, full disk, etc.)
-    // must NOT discard the fresh token and re-classify the success as a
-    // retryable "network" error — that burned the issuer budget on a full
-    // re-refresh ×maxRetries and threw away a perfectly good access token.
-    // Log + proceed on the in-memory token.
-    try {
-      await writeToken(path, next)
-      this.memTokenFallback = undefined // disk is fresh — keep re-reading it.
-    } catch (e) {
-      // Disk copy is now stale; hold the fresh token in memory so subsequent
-      // calls in THIS process reuse it instead of re-refreshing off stale disk.
-      this.memTokenFallback = next
-      logger.warn(
-        `chatgpt-oauth: refreshed token persist failed (${errMessage(e)}) — ` +
-          "proceeding with the in-memory token; will reuse it until it expires.",
-      )
     }
     return next
   }

@@ -17,8 +17,9 @@
  *
  * `QUANTA_SPINNER_STALL`, registered in `src/config/knob-inventory/host.ts`
  * with THIS file as the readSite (the literal below is the canonical
- * declaration the knob-registry completeness ratchet counts). NOT seeded by
- * `cli-feature-gates.ts` — strictly operator opt-in. Gate OFF ⇒
+ * declaration the knob-registry completeness ratchet counts). Seeded default-ON
+ * by `cli-feature-gates.ts` on the interactive CLI; other surfaces stay
+ * operator opt-in. Gate OFF ⇒
  * {@link buildSpinnerStallLiveWire} returns `undefined`, session-setup keeps
  * the LITERAL `boot.llm` reference and no timer is ever scheduled
  * (byte-identical; pinned by `session-setup-hellgate.test.ts`).

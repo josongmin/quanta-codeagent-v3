@@ -1,0 +1,96 @@
+import { describe, expect, test } from "bun:test"
+import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { type PrivateFileIoPort, writePrivateFileAtomic } from "@/auth/private-file-atomic"
+
+const posixMode = process.platform !== "win32"
+
+describe("private-file-atomic", () => {
+  test("32 concurrent writers never share a temp path; final is complete JSON + 0600", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "quanta-atomic-"))
+    const finalPath = join(dir, "token.json")
+    await writeFile(finalPath, JSON.stringify({ generation: "old" }), { mode: 0o600 })
+    const temps = new Set<string>()
+    const ioWrap: PrivateFileIoPort = {
+      mkdirParent: async (d) => {
+        await mkdir(d, { recursive: true, mode: 0o700 })
+      },
+      statKind: async (path) => {
+        try {
+          const s = await stat(path)
+          return s.isDirectory() ? "dir" : "file"
+        } catch {
+          return "absent"
+        }
+      },
+      openExclusive: async (path) => {
+        temps.add(path)
+        const { defaultPrivateFileIo } = await import("@/auth/private-file-atomic")
+        return defaultPrivateFileIo.openExclusive(path)
+      },
+      rename: async (from, to) => {
+        const { defaultPrivateFileIo } = await import("@/auth/private-file-atomic")
+        return defaultPrivateFileIo.rename(from, to)
+      },
+      unlink: async (path) => {
+        const { defaultPrivateFileIo } = await import("@/auth/private-file-atomic")
+        return defaultPrivateFileIo.unlink(path)
+      },
+      syncDir: async (d) => {
+        const { defaultPrivateFileIo } = await import("@/auth/private-file-atomic")
+        return defaultPrivateFileIo.syncDir(d)
+      },
+    }
+    const barrier = Promise.withResolvers<void>()
+    const writers = Array.from({ length: 32 }, (_, i) =>
+      (async () => {
+        await barrier.promise
+        await writePrivateFileAtomic(finalPath, `${JSON.stringify({ generation: i })}\n`, {
+          io: ioWrap,
+        })
+      })(),
+    )
+    barrier.resolve()
+    await Promise.all(writers)
+    expect(temps.size).toBe(32)
+    const raw = await readFile(finalPath, "utf8")
+    const parsed: unknown = JSON.parse(raw)
+    expect(parsed).toEqual(expect.objectContaining({ generation: expect.any(Number) }))
+    if (posixMode) {
+      const mode = (await stat(finalPath)).mode & 0o777
+      expect(mode).toBe(0o600)
+    }
+  })
+
+  test("file-sync failure performs zero renames and leaves final intact", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "quanta-atomic-fault-"))
+    const finalPath = join(dir, "token.json")
+    await writeFile(finalPath, "OLD\n", { mode: 0o600 })
+    let renameCalls = 0
+    const io: PrivateFileIoPort = {
+      mkdirParent: async () => undefined,
+      statKind: async () => "file",
+      openExclusive: async () => ({
+        write: async () => undefined,
+        sync: async () => {
+          throw new Error("sync-fail")
+        },
+        close: async () => undefined,
+      }),
+      rename: async () => {
+        renameCalls++
+      },
+      unlink: async () => undefined,
+      syncDir: async () => undefined,
+    }
+    await expect(writePrivateFileAtomic(finalPath, "NEW\n", { io })).rejects.toThrow("sync-fail")
+    expect(renameCalls).toBe(0)
+    expect(await readFile(finalPath, "utf8")).toBe("OLD\n")
+  })
+
+  test("directory target is rejected", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "quanta-atomic-dir-"))
+    await expect(writePrivateFileAtomic(`${dir}/`, "x")).rejects.toThrow(/file path/)
+  })
+})

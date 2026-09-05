@@ -18,7 +18,7 @@
  * @see @/config/knob-inventory/types — the inventory entry shape we reproduce.
  */
 
-import type { KnobInventoryEntry } from "@/config/knob-inventory/types"
+import type { KnobDeclaration, KnobInventoryEntry } from "@/config/knob-inventory/types"
 import type { AnyKnobSchema } from "./contracts"
 
 /**
@@ -90,7 +90,7 @@ export const deriveInventoryDefault = (schema: AnyKnobSchema): KnobInventoryEntr
  *   - `describe`   ← schema.describe (the inventory describe IS the SSOT describe)
  *   - `readSite`   ← schema.readSite
  */
-export const deriveInventoryEntry = (schema: AnyKnobSchema): KnobInventoryEntry => ({
+export const deriveInventoryEntry = (schema: AnyKnobSchema): KnobDeclaration => ({
   envKey: schema.envKey as KnobInventoryEntry["envKey"],
   kind: schema.kind,
   default: deriveInventoryDefault(schema),

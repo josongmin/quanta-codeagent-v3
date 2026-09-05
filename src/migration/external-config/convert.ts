@@ -23,21 +23,9 @@ import { basename, join } from "node:path"
 import { type GlobRule, loadGlobRules } from "@/agent/glob-rules"
 import { loadRepoRules } from "@/agent/repo-rules"
 import { parseFrontmatter, parseSkillMarkdown } from "@/skill/frontmatter"
+import { asObject, decodeClaudeHookMap, decodeClaudeMcpServers } from "../claude-config-decode"
 import { readImportFile } from "../dedup"
-import type {
-  ConvertedHook,
-  ConvertedItem,
-  ConvertedMcpServer,
-  ConvertedSkill,
-  ConvertedSubagent,
-  MigrationWarning,
-} from "./types"
-
-/** Coerce an unknown into a non-null plain object, else undefined. */
-const asObject = (v: unknown): Record<string, unknown> | undefined =>
-  typeof v === "object" && v !== null && !Array.isArray(v)
-    ? (v as Record<string, unknown>)
-    : undefined
+import type { ConvertedItem, ConvertedSkill, ConvertedSubagent, MigrationWarning } from "./types"
 
 /** Filter an unknown into a string[] (drops non-strings). Absent ⇒ []. */
 const asStringList = (v: unknown): string[] =>
@@ -121,52 +109,6 @@ export const convertSettings = async (path: string): Promise<ConvertedItem> => {
   }
 }
 
-// ─── hooks (settings.json#hooks OR standalone hooks.json) → hook config ──
-
-/** Extract the `{type:"command", command}` commands from one hook group. */
-const commandsOf = (group: Record<string, unknown>): string[] => {
-  const hooks = group.hooks
-  if (!Array.isArray(hooks)) return []
-  const cmds: string[] = []
-  for (const h of hooks) {
-    const ho = asObject(h)
-    if (ho?.type === "command" && typeof ho.command === "string") cmds.push(ho.command)
-  }
-  return cmds
-}
-
-/** Translate one hook group into a typed binding, or undefined to skip. */
-const translateHookGroup = (event: string, rawGroup: unknown): ConvertedHook | undefined => {
-  const group = asObject(rawGroup)
-  if (group === undefined) return undefined
-  const commands = commandsOf(group)
-  if (commands.length === 0) return undefined
-  const matcher = typeof group.matcher === "string" ? group.matcher : undefined
-  return { event, commands, ...(matcher !== undefined ? { matcher } : {}) }
-}
-
-/** Translate a `hooks` map (`{ <Event>: [ { matcher?, hooks:[…] } ] }`) into
- *  typed bindings. */
-const translateHookMap = (hooks: Record<string, unknown>): ConvertedHook[] => {
-  const out: ConvertedHook[] = []
-  for (const [event, rawGroups] of Object.entries(hooks)) {
-    if (!Array.isArray(rawGroups)) continue
-    for (const rawGroup of rawGroups) {
-      const t = translateHookGroup(event, rawGroup)
-      if (t !== undefined) out.push(t)
-    }
-  }
-  return out
-}
-
-/**
- * Translate Claude Code hooks → quanta hook config. Accepts BOTH the modern
- * inline shape (`settings.json#hooks`) AND a standalone `hooks.json` whose
- * TOP LEVEL is the hook map. We detect which by basename: a `hooks.json` is
- * the map directly; anything else is read as `settings.json` and we descend
- * into its `hooks` key. Empty result is still `ok:true` (an empty hooks block
- * is valid — the converter found nothing to import but did not fail).
- */
 export const convertHooks = async (path: string): Promise<ConvertedItem> => {
   const parsed = await readJson(path)
   if (!parsed.ok) return { type: "hooks", ok: false, warning: parsed.warning }
@@ -174,21 +116,8 @@ export const convertHooks = async (path: string): Promise<ConvertedItem> => {
   if (obj === undefined) {
     return { type: "hooks", ok: false, warning: malformed(path, "not an object") }
   }
-  const hookMap = basename(path) === "hooks.json" ? obj : asObject(obj.hooks)
-  if (hookMap === undefined) return { type: "hooks", ok: true, value: [] }
-  return { type: "hooks", ok: true, value: translateHookMap(hookMap) }
-}
-
-// ─── .mcp.json → MCP server config (passthrough/normalize) ───────────────
-
-/** Classify a Claude Code MCP entry's transport. stdio is the default when a
- *  `command` is present and no explicit type/url overrides. */
-const classifyTransport = (entry: Record<string, unknown>): ConvertedMcpServer["transport"] => {
-  const type = entry.type
-  if (type === "http" || type === "sse" || type === "stdio") return type
-  if (typeof entry.url === "string") return "http"
-  if (typeof entry.command === "string") return "stdio"
-  return "unknown"
+  const hookMap = basename(path) === "hooks.json" ? obj : obj.hooks
+  return { type: "hooks", ok: true, value: decodeClaudeHookMap(hookMap) }
 }
 
 /**
@@ -200,26 +129,7 @@ const classifyTransport = (entry: Record<string, unknown>): ConvertedMcpServer["
 export const convertMcp = async (path: string): Promise<ConvertedItem> => {
   const parsed = await readJson(path)
   if (!parsed.ok) return { type: "mcp", ok: false, warning: parsed.warning }
-  const obj = asObject(parsed.value)
-  const servers = asObject(obj?.mcpServers)
-  if (servers === undefined) return { type: "mcp", ok: true, value: [] }
-  const out: ConvertedMcpServer[] = []
-  for (const [name, rawEntry] of Object.entries(servers)) {
-    const entry = asObject(rawEntry)
-    if (entry === undefined) continue
-    const transport = classifyTransport(entry)
-    const command = typeof entry.command === "string" ? entry.command : undefined
-    const args = Array.isArray(entry.args)
-      ? entry.args.filter((a): a is string => typeof a === "string")
-      : undefined
-    out.push({
-      name,
-      transport,
-      ...(command !== undefined ? { command } : {}),
-      ...(args !== undefined ? { args } : {}),
-    })
-  }
-  return { type: "mcp", ok: true, value: out }
+  return { type: "mcp", ok: true, value: decodeClaudeMcpServers(parsed.value) }
 }
 
 // ─── .claude/agents/<name>.md → subagent spec ────────────────────────────
