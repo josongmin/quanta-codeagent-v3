@@ -1,7 +1,7 @@
 # SEP5-12 — non-vacuous test and ratchet campaign
 
 **Priority:** P1 release gate
-**Status:** COMPLETE IN WORKTREE — exact clean CI green; delivery commit pending
+**Status:** COMPLETE — implementation is on `main`; exact clean CI green
 **Depends on:** every SEP5 implementation ticket that lands
 **Finding coverage:** D1, D2, D3, D4, D5, D6, D10, D11, D15, D19, D27, D28
 
@@ -161,9 +161,10 @@ resolved selection as the receipt and do not add a redundant scanner.
 ## Verification update — 2026-09-06
 
 Verification was run from a detached clean worktree. The final synthetic commit
-`16a9349d22d90fac8a0838354084235ee9e05fb7` contains the SEP5 implementation,
-the required runner scan-reach floor tighten, and the two verification-lifecycle
-repairs below. It is a verification snapshot, not a delivery commit.
+`7e0528d0f0ed756affcc9f05db896011b003796d` contains the complete current
+working-tree union, the SEP5 implementation, the required runner scan-reach
+floor tighten, and the verification-lifecycle repairs below. It is a
+verification snapshot, not a delivery commit.
 
 | Rail | Result |
 |---|---|
@@ -174,10 +175,10 @@ repairs below. It is a verification snapshot, not a delivery commit.
 | `lint` / `lint:debt` | PASS; existing warnings only; complexity debt 0 |
 | god-code ratchet | `9 pass, 0 fail` |
 | `bun fc validate` / `bun fc diff` | 1069 resolved / no drift |
-| Complete clean `test:full:ci` receipt | PASS, chunks `35/35`, manifest files `3850` |
+| Complete clean `test:full:ci` receipt | PASS, chunks `34/34`, manifest files `3850` |
 | Complete clean `bun run test:ci` receipt | PASS, gates `21/21`, stable clean snapshot |
 
-Two failures found during closeout were repaired at their actual owners:
+Three failures found during closeout were repaired at their actual owners:
 
 1. `tests/unit/eval-cancellation-hellgate.test.ts` completed both assertions,
    then a shard retained an open handle. `src/shared/abortable.ts` now has one
@@ -189,6 +190,12 @@ Two failures found during closeout were repaired at their actual owners:
    authority now uses `--reinstall-package astropy --no-cache` only for the
    exact native-extension repo override. The real upstream base+candidate rail
    passed three consecutive standalone runs and the final full campaign.
+3. The default-off completeness guard discovered
+   `QUANTA_SESSION_REGISTRY_WAL_CHECKPOINT_MODE` but its generic reflection
+   vocabulary never supplied either legal enum token, falsely classifying the
+   live field as a dead read. The guard now probes `RESTART` and `TRUNCATE`, so
+   it proves the live mapping and the unset `undefined` default. Its focused
+   rail passed `10/10`, and the repaired rail passed in the complete full suite.
 
 Final `bun run test:ci` passed all 21 gates, including full-suite, PTY,
 non-vacuity, real-toolchain (`41 pass, 2 visible capability skips, 0 fail`), web

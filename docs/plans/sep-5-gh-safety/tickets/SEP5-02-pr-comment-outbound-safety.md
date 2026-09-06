@@ -133,5 +133,6 @@ cannot make the rail green.
 
 **Current receipt:** the focused PR policy tests and the combined 23-file SEP5
 bundle passed (`273 pass, 0 fail`) on the working implementation. The clean
-synthetic snapshot `16a9349d22d90fac8a0838354084235ee9e05fb7` also completed
-the 35/35 full suite and all 21 `test:ci` gates. Commit is still pending.
+synthetic snapshot `7e0528d0f0ed756affcc9f05db896011b003796d` also completed
+the 34/34 full suite and all 21 `test:ci` gates. The implementation is delivered
+on `main`; the ticket-only closeout is verified again at its own exact HEAD.

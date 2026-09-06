@@ -181,5 +181,6 @@ identical winner tokens, valid final JSON, and no residual lock.
 silent-failure rail was included); the wider 23-file SEP5 bundle passed
 `273/273`. Auth, LLM, integration, and tool slice fences passed `39/39`.
 The final clean synthetic snapshot
-`16a9349d22d90fac8a0838354084235ee9e05fb7` passed all 21 `test:ci` gates.
-Implementation is not branch-delivered until committed.
+`7e0528d0f0ed756affcc9f05db896011b003796d` passed all 21 `test:ci` gates.
+The implementation is branch-delivered on `main`; the ticket-only closeout is
+verified again at its own exact HEAD.

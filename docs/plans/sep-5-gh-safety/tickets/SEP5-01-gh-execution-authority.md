@@ -154,8 +154,9 @@ five consecutive executions. Process-tree and environment-scrub rails remain
 enrolled in the normal full-suite manifest.
 
 **Current receipt:** implementation is present in the working tree. A clean
-synthetic verification snapshot at `16a9349d22d90fac8a0838354084235ee9e05fb7`
+synthetic verification snapshot at `7e0528d0f0ed756affcc9f05db896011b003796d`
 passed the focused SEP5 bundle, typecheck, lint debt, slice fences, god-code,
-feature-catalog validation, one complete 35/35 full-suite run, and all 21
-`test:ci` gates. Do not call
-this branch-delivered until the working-tree changes are committed.
+feature-catalog validation, one complete 34/34 full-suite run, and all 21
+`test:ci` gates. The implementation is branch-delivered on `main` through
+`fd4bad9976712b0584c18dd359263890d86f6803`; the final ticket-only closeout is
+verified again at its own exact HEAD.
