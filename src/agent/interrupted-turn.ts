@@ -28,6 +28,13 @@ export interface InFlightToolRef {
   readonly name: string
 }
 
+/** Stream-assembled partial that has NOT been appended to working memory.
+ *  Omitted fields mean there was nothing to salvage. */
+export interface AbortSalvage {
+  readonly partialText?: string
+  readonly inFlightTools?: readonly InFlightToolRef[]
+}
+
 /** One captured interrupted turn. */
 export interface InterruptedTurn {
   /** The user prompt that started the interrupted turn (last user message). */
@@ -233,6 +240,31 @@ export const buildResumeMessage = (turn: InterruptedTurn): string => {
  *  throws (capture is pure; the buffer's `capture` is a plain slot write). The
  *  `cfg`/`wm` are STRUCTURAL (not `AgentConfig`/`WorkingMemory`) so this leaf
  *  module stays decoupled from `@/agent` types and the `@/memory` slice. */
+const joinPartialAssistantText = (base: string, extra: string): string => {
+  if (extra.length === 0) return base
+  if (base.length === 0) return extra
+  if (base === extra) return base
+  return `${base}\n${extra}`
+}
+
+const mergeAbortSalvage = (
+  base: InterruptedTurn,
+  salvage: AbortSalvage | undefined,
+): InterruptedTurn => {
+  if (salvage === undefined) return base
+  const extra = salvage.partialText ?? ""
+  const partialAssistantText = joinPartialAssistantText(base.partialAssistantText, extra)
+  const inFlightTools =
+    base.inFlightTools !== undefined && base.inFlightTools.length > 0
+      ? base.inFlightTools
+      : salvage.inFlightTools
+  return {
+    ...base,
+    partialAssistantText,
+    ...(inFlightTools !== undefined && inFlightTools.length > 0 ? { inFlightTools } : {}),
+  }
+}
+
 export const captureAbortedTurn = (
   cfg: { readonly interruptedTurnBuffer?: InterruptedTurnBuffer },
   wm: { snapshot(): ReadonlyArray<Message> },
@@ -242,6 +274,9 @@ export const captureAbortedTurn = (
   // `(now ?? Date.now)()` seam as the sibling runner/orchestrate/crash-resume-wire.ts.
   // Default `Date.now` keeps production byte-identical.
   now: () => number = Date.now,
+  salvage?: AbortSalvage,
 ): void => {
-  cfg.interruptedTurnBuffer?.capture(captureInterruptedTurn(wm.snapshot(), reason, now()))
+  cfg.interruptedTurnBuffer?.capture(
+    mergeAbortSalvage(captureInterruptedTurn(wm.snapshot(), reason, now()), salvage),
+  )
 }

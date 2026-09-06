@@ -1,7 +1,9 @@
 /**
  * SEP5-10 — cleanup --dry-run uses injected typed paths, not a later process.env write.
+ * Live cleanup must use the same runtime snapshot via autoSweepConfigFromRuntime.
  */
 import { describe, expect, test } from "bun:test"
+import { readFileSync } from "node:fs"
 import { mkdtemp } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -61,10 +63,22 @@ describe("session-registry cleanup dry-run injection", () => {
     const leaked = process.env.QUANTA_SESSION_REGISTRY_DISK_DIR
     const injected = sessionRegistryCleanupPathsFrom({
       sessionRegistryDiskDir: "/injected/disk",
+      sessionRegistrySqlitePath: undefined,
     })
     expect(leaked).toBe("/tmp/conflicting-env-disk")
     expect(injected.diskDir).toBe("/injected/disk")
     expect(injected.diskDir).not.toBe(leaked)
     delete process.env.QUANTA_SESSION_REGISTRY_DISK_DIR
+  })
+})
+
+describe("session-registry live cleanup snapshot authority", () => {
+  test("renderCleanup starts auto-sweep from autoSweepConfigFromRuntime(runtimeConfig())", () => {
+    const src = readFileSync(
+      join(import.meta.dir, "../../../src/apps/cli/session-registry-cmd.ts"),
+      "utf8",
+    )
+    expect(src).toContain("startAutoSweep(autoSweepConfigFromRuntime(runtimeConfig()))")
+    expect(src).not.toMatch(/startAutoSweep\(\s*\)/)
   })
 })

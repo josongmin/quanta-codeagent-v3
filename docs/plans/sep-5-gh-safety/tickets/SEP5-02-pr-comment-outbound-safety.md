@@ -1,7 +1,7 @@
 # SEP5-02 — PR comment outbound safety contracts
 
 **Priority:** P1
-**Status:** LANDED
+**Status:** IMPLEMENTED IN WORKTREE — strict-cap hardening commit pending
 **Depends on:** SEP5-01, SEP5-03
 **Finding coverage:** D4
 
@@ -110,3 +110,28 @@ bun run lint:debt
 - The proposed API forces idempotency on explicit user-authored comments.
 - The sink requires `@/tool` or another lower slice to import an app surface.
 - A body can be externally sent when policy construction is missing.
+
+## Closeout update — 2026-09-06
+
+The remaining cap ambiguity is removed from both outbound policy projections:
+
+- `src/integrations/github/outbound-body-policy.ts` owns a byte-safe UTF-8
+  prefix operation and reserves marker bytes before truncation;
+- `src/tool/gh/outbound-body-policy.ts` enforces the same strict final-byte cap
+  for explicit HITL comments;
+- an oversized required marker is a typed policy failure, never an over-cap
+  body or a markerless success;
+- no `cap + 5` tolerance remains.
+
+The precise rails cover cap-1, cap, cap+1, multibyte boundaries, marker
+preservation, and zero external calls on policy failure in
+`tests/unit/integrations/github/pr-output-sink-loop-hellgate-r2.test.ts` and
+`tests/unit/tool/gh-pr-comment-outbound-policy.test.ts`. Assertions use encoded
+UTF-8 bytes rather than JavaScript character counts. The shared truncation
+helper is exercised through both production consumers, so a copied test helper
+cannot make the rail green.
+
+**Current receipt:** the focused PR policy tests and the combined 23-file SEP5
+bundle passed (`273 pass, 0 fail`) on the working implementation. The clean
+synthetic snapshot `16a9349d22d90fac8a0838354084235ee9e05fb7` also completed
+the 35/35 full suite and all 21 `test:ci` gates. Commit is still pending.

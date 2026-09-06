@@ -24,6 +24,8 @@
 export {
   type AutoSweepConfig,
   type AutoSweepHandle,
+  type AutoSweepRuntimeSnapshot,
+  autoSweepConfigFromRuntime,
   DEFAULT_AUTO_SWEEP_INTERVAL_MS,
   startAutoSweep,
 } from "./auto-sweep"

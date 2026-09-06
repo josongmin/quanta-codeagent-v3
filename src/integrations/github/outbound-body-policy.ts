@@ -39,22 +39,34 @@ export interface OutboundBodyPolicyOpts {
 
 const ELLIPSIS_BYTES = 3
 
+const utf8Prefix = (buf: Buffer, maxBytes: number): string => {
+  let end = Math.max(0, Math.min(maxBytes, buf.length))
+  // `end` is the first excluded byte. If it points into a UTF-8 continuation
+  // sequence, back up to the lead byte so decoding never manufactures U+FFFD
+  // (which is itself three bytes and can exceed the requested cap).
+  while (end > 0 && end < buf.length && ((buf[end] ?? 0) & 0xc0) === 0x80) end--
+  return buf.subarray(0, end).toString("utf8")
+}
+
 export const utf8Truncate = (text: string, maxBytes: number): string => {
   const buf = Buffer.from(text, "utf8")
   if (buf.length <= maxBytes) return text
-  const trimBudget = Math.max(0, maxBytes - ELLIPSIS_BYTES)
-  return `${buf.subarray(0, trimBudget).toString("utf8")}…`
+  if (maxBytes <= 0) return ""
+  if (maxBytes < ELLIPSIS_BYTES) return ".".repeat(maxBytes)
+  return `${utf8Prefix(buf, maxBytes - ELLIPSIS_BYTES)}…`
 }
 
 export const clampWithMarker = (body: string, marker: string, maxBytes: number): string => {
   const markerBuf = Buffer.from(`\n${marker}`, "utf8")
-  if (markerBuf.length >= maxBytes) return marker
+  if (markerBuf.length > maxBytes) {
+    throw new Error("outbound body policy: idempotency marker exceeds byte cap")
+  }
+  if (markerBuf.length === maxBytes) return `\n${marker}`
   const bodyBudget = maxBytes - markerBuf.length
   const bodyBuf = Buffer.from(body, "utf8")
   if (bodyBuf.length <= bodyBudget) return `${body}\n${marker}`
-  const trimBudget = Math.max(0, bodyBudget - ELLIPSIS_BYTES)
-  const trimmed = bodyBuf.subarray(0, trimBudget).toString("utf8")
-  return `${trimmed}…\n${marker}`
+  const trimmed = utf8Truncate(body, bodyBudget)
+  return `${trimmed}\n${marker}`
 }
 
 export const createOutboundBodyPolicy = (opts: OutboundBodyPolicyOpts): OutboundBodyPolicyPort => ({

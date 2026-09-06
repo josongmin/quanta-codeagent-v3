@@ -265,6 +265,115 @@ describe("finding #11 — GET handshake failure is a death, not silent POST-only
     expect(exits).toHaveLength(0)
   })
 
+  test("GET 500 without a resume cursor → exit exactly once", async () => {
+    const transport = new HttpSseMcpTransport({
+      url: "https://srv.example/mcp",
+      name: "pump-probe",
+      fetch: async (_url, init) => {
+        if (init.method === "GET") {
+          return {
+            ok: false,
+            status: 500,
+            headers: { get: () => null },
+            text: async () => "boom",
+            body: null,
+          }
+        }
+        return accepted202()
+      },
+    })
+    const exits: (string | undefined)[] = []
+    transport.onExit((reason) => exits.push(reason))
+    await transport.start()
+    await tick()
+    expect(exits).toHaveLength(1)
+    expect(exits[0]).toMatch(/standalone SSE GET failed/)
+    expect(exits[0]).toMatch(/HTTP 500/)
+  })
+
+  test("stale cursor + GET 500 → one retry without Last-Event-ID, then one exit", async () => {
+    const gets: Array<string | undefined> = []
+    const transport = new HttpSseMcpTransport({
+      url: "https://srv.example/mcp",
+      name: "pump-probe",
+      resumeFromEventId: "stale-cursor",
+      fetch: async (_url, init) => {
+        if (init.method === "GET") {
+          gets.push(init.headers?.["Last-Event-ID"])
+          return {
+            ok: false,
+            status: 500,
+            headers: { get: () => null },
+            text: async () => "stale",
+            body: null,
+          }
+        }
+        return accepted202()
+      },
+    })
+    const exits: (string | undefined)[] = []
+    transport.onExit((reason) => exits.push(reason))
+    await transport.start()
+    await tick()
+    expect(gets).toEqual(["stale-cursor", undefined])
+    expect(exits).toHaveLength(1)
+    expect(exits[0]).toMatch(/standalone SSE GET failed/)
+    expect(exits[0]).toMatch(/HTTP 500/)
+  })
+
+  test("GET 200 with application/json content-type → exit exactly once", async () => {
+    const transport = new HttpSseMcpTransport({
+      url: "https://srv.example/mcp",
+      name: "pump-probe",
+      fetch: async (_url, init) => {
+        if (init.method === "GET") return jsonResponse({ error: "not sse" })
+        return accepted202()
+      },
+    })
+    const exits: (string | undefined)[] = []
+    transport.onExit((reason) => exits.push(reason))
+    await transport.start()
+    await tick()
+    expect(exits).toHaveLength(1)
+    expect(exits[0]).toMatch(/standalone SSE GET failed/)
+    expect(exits[0]).toMatch(/unexpected content-type/)
+  })
+
+  test("close() during a failing GET response adds no crash exit", async () => {
+    const transport = new HttpSseMcpTransport({
+      url: "https://srv.example/mcp",
+      name: "pump-probe",
+      fetch: async (_url, init) => {
+        if (init.method === "GET") {
+          return new Promise<HttpFetchResponse>((resolve) => {
+            init.signal?.addEventListener(
+              "abort",
+              () =>
+                resolve({
+                  ok: false,
+                  status: 500,
+                  headers: { get: () => null },
+                  text: async () => "late",
+                  body: null,
+                }),
+              { once: true },
+            )
+          })
+        }
+        return accepted202()
+      },
+    })
+    const exits: (string | undefined)[] = []
+    transport.onExit((reason) => exits.push(reason))
+    await transport.start()
+    await tick()
+    await transport.close()
+    await tick()
+    expect(exits).toHaveLength(1)
+    expect(exits[0]).toMatch(/closed/)
+    expect(exits[0]).not.toMatch(/GET failed/)
+  })
+
   test("paired control — close()-abort of an in-flight handshake stays quiet (single 'closed' exit)", async () => {
     const transport = new HttpSseMcpTransport({
       url: "https://srv.example/mcp",

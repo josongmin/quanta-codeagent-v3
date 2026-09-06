@@ -42,8 +42,8 @@
  *   - Config knobs (maxEntries / idleTtlMs) on the singleton
  */
 
-import { runtimeConfig } from "@/shared"
-import { type AutoSweepHandle, startAutoSweep } from "./auto-sweep"
+import { type RuntimeConfig, runtimeConfig } from "@/shared"
+import { type AutoSweepHandle, autoSweepConfigFromRuntime, startAutoSweep } from "./auto-sweep"
 import { createDiskSessionResourceRegistry } from "./disk-adapter/disk-store"
 import { createInMemorySessionResourceRegistry } from "./in-memory-registry"
 import { createSqliteSessionResourceRegistry } from "./sqlite-adapter"
@@ -82,14 +82,14 @@ let autoSweepHandle: AutoSweepHandle | null = null
  * instance per the usual lazy-init contract (env read EXACTLY ONCE
  * per process or per `resetGlobalSessionResourceRegistry()`).
  */
-const buildDefaultRegistry = (): SessionResourceRegistry => {
-  // ADR-0503 P4 — the backend-selection paths are routed through the typed
-  // runtimeConfig() (sessionRegistrySqlitePath / sessionRegistryDiskDir) so a
-  // `/config set` reaches them and the lazy-init is testable without mutating the
-  // real environment. The non-empty guards + NO-THROW fallback chain (sqlite →
-  // disk → in-memory) are byte-identical to the prior raw process.env reads.
-  const cfg = runtimeConfig()
-  // 1. SQLite (ADR-0367) — most durable backend wins when both env vars set.
+const buildDefaultRegistry = (cfg: RuntimeConfig): SessionResourceRegistry => {
+  // ADR-0503 P4 — backend selection is routed through the typed runtimeConfig()
+  // snapshot (sessionRegistrySqlitePath / sessionRegistryDiskDir) so a
+  // `/config set` reaches it. The non-empty guards + NO-THROW fallback chain
+  // (sqlite → disk → in-memory) stay byte-identical. Callers MUST pass the
+  // same snapshot they hand to `startAutoSweep` — never a second runtimeConfig()
+  // read that could diverge.
+  // 1. SQLite (ADR-0367) — most durable backend wins when both paths are set.
   const sqlitePath = cfg.sessionRegistrySqlitePath
   if (sqlitePath !== undefined && sqlitePath.length > 0) {
     try {
@@ -122,15 +122,17 @@ const buildDefaultRegistry = (): SessionResourceRegistry => {
  */
 export const getGlobalSessionResourceRegistry = (): SessionResourceRegistry => {
   if (instance === null) {
-    instance = buildDefaultRegistry()
+    const cfg = runtimeConfig()
+    instance = buildDefaultRegistry(cfg)
     // ADR-0369 — Schedule the retention sweep on the SAME first-call
-    // path. `startAutoSweep` returns a NO-OP handle when neither env
-    // var is set, so the in-memory default path pays zero cost (no
-    // setInterval registered). The handle is stored so `reset…` can
+    // path, from the SAME runtimeConfig() snapshot that selected the
+    // backend. `startAutoSweep` returns a NO-OP handle when neither
+    // durable path is set, so the in-memory default path pays zero cost
+    // (no setInterval registered). The handle is stored so `reset…` can
     // tear it down for test isolation.
     if (autoSweepHandle === null) {
       try {
-        autoSweepHandle = startAutoSweep()
+        autoSweepHandle = startAutoSweep(autoSweepConfigFromRuntime(cfg))
       } catch {
         // NO-THROW — a sweep wire failure must not break the registry
         // singleton bootstrap. The registry is fully usable without it.
@@ -139,6 +141,10 @@ export const getGlobalSessionResourceRegistry = (): SessionResourceRegistry => {
   }
   return instance
 }
+
+/** Test seam — the auto-sweep handle minted on the same first-call path as
+ *  the registry singleton. `null` before first get / after reset. */
+export const peekGlobalAutoSweepHandle = (): AutoSweepHandle | null => autoSweepHandle
 
 /**
  * Test reset — drop the singleton so the next

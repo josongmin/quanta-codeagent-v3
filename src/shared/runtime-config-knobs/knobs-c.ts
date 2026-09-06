@@ -124,6 +124,22 @@ export const KNOBS_C: readonly RuntimeConfigKnob[] = [
       "Session-resource-registry disk-JSONL backend directory (ADR-0351); absent ⇒ in-memory fallback.",
   },
   {
+    envKey: "QUANTA_SESSION_REGISTRY_WAL_THRESHOLD_BYTES",
+    kind: "int",
+    default: undefined,
+    group: "session",
+    describe:
+      "WAL size threshold in bytes (ADR-0375/0390); absent ⇒ PASSIVE-only checkpoint. 0 is valid.",
+  },
+  {
+    envKey: "QUANTA_SESSION_REGISTRY_WAL_CHECKPOINT_MODE",
+    kind: "enum",
+    default: undefined,
+    group: "session",
+    describe:
+      'WAL checkpoint upgrade mode (ADR-0385/0390): "RESTART" | "TRUNCATE"; absent/unknown ⇒ PASSIVE-only.',
+  },
+  {
     envKey: "QUANTA_BENCH_CACHE_PATHSPECS_EXTRA",
     kind: "list",
     default: [],

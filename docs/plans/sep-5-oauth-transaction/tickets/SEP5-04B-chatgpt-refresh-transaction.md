@@ -1,7 +1,7 @@
 # SEP5-04B — ChatGPT cross-process refresh transaction
 
 **Priority:** P1
-**Status:** LANDED
+**Status:** IMPLEMENTED IN WORKTREE — CAS hardening commit pending
 **Depends on:** SEP5-04A
 **Finding coverage:** D2; excludes D30's intentional MCP fresh-auth mutex
 
@@ -151,3 +151,35 @@ bun run lint:debt
 - The lock key includes a token in plaintext.
 - A test uses two calls against the same process-local coordinator and labels it
   cross-process proof.
+
+## Closeout update — 2026-09-06
+
+The original file-lock implementation still had read/overwrite and read/delete
+TOCTOU windows. The closeout changes the auth-owned store contract itself:
+
+- `LockFileStorePort` now exposes `writeExclusive` and exact-body
+  `compareAndSwap`; unconditional overwrite/delete are removed;
+- stale/corrupt takeover, same-holder renewal, and release all succeed only if
+  the body observed by the caller is still current;
+- `createNodeLockFileStore` serializes CAS with a private exclusive claim and
+  commits replacement through the existing private atomic-file authority;
+- holder IDs are minted per transaction with a monotonic suffix, preventing
+  same-process/same-millisecond aliasing;
+- auth owns one abortable backoff implementation; bench and LLM adapters no
+  longer carry duplicate sleeps, and listener cleanup covers elapsed and abort
+  exits.
+
+The new `tests/unit/auth/node-lock-file-store.test.ts` proves exclusive create,
+0600 mode, successful CAS, stale-expected rejection, delete CAS, and competing
+CAS single-winner behavior against the real filesystem. Transaction tests add
+same-clock holder uniqueness, abort-registration race settlement, and ownership
+safe release. The cross-process integration fixture writes through the
+production token store, requires one issuer request for two Bun processes,
+identical winner tokens, valid final JSON, and no residual lock.
+
+**Current receipt:** related OAuth suites passed (`46 pass, 0 fail` after the
+silent-failure rail was included); the wider 23-file SEP5 bundle passed
+`273/273`. Auth, LLM, integration, and tool slice fences passed `39/39`.
+The final clean synthetic snapshot
+`16a9349d22d90fac8a0838354084235ee9e05fb7` passed all 21 `test:ci` gates.
+Implementation is not branch-delivered until committed.

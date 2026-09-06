@@ -1,7 +1,7 @@
 # SEP5-01 — one `gh` process-execution authority
 
 **Priority:** P1
-**Status:** LANDED
+**Status:** IMPLEMENTED IN WORKTREE — hardening commit pending
 **Depends on:** SEP5-00
 **Finding coverage:** D3
 
@@ -134,3 +134,28 @@ bun run lint:debt
 - Preserving a caller requires dropping its `AbortSignal` or timeout semantics.
 - The implementation introduces shell-string execution.
 - A source scan is the only evidence that scrubbing occurs.
+
+## Closeout update — 2026-09-06
+
+The canonical executor was already landed. This closeout hardens its remaining
+abort/deadline registration race in `src/tool/gh/runner.ts`:
+
+- caller abort and deadline now share one terminal latch;
+- listener registration is followed by an abort recheck, closing the
+  preflight-to-registration window;
+- process-tree termination can be initiated at most once even when abort and
+  deadline become ready together.
+
+The regression rail is behavioral, not a symbol scan. The fake signal fires
+during listener registration, and
+`tests/unit/cli/gh-exec-policy-hellgate.test.ts` requires one settled result,
+one tree-kill initiation, and listener removal. The focused GH battery passed
+five consecutive executions. Process-tree and environment-scrub rails remain
+enrolled in the normal full-suite manifest.
+
+**Current receipt:** implementation is present in the working tree. A clean
+synthetic verification snapshot at `16a9349d22d90fac8a0838354084235ee9e05fb7`
+passed the focused SEP5 bundle, typecheck, lint debt, slice fences, god-code,
+feature-catalog validation, one complete 35/35 full-suite run, and all 21
+`test:ci` gates. Do not call
+this branch-delivered until the working-tree changes are committed.

@@ -80,10 +80,7 @@ describe("ADR-0313 hellgate R2 — sink loop / cap / abort", () => {
     expect(patches).toBe(1)
   })
 
-  test("65000 bytes exact (cap inclusive) ⇒ body trimmed within +5 bytes of cap (source slack documented)", async () => {
-    // SOURCE-LEVEL HOLE: clampWithMarker may overshoot the cap by ~3 bytes
-    // (ellipsis "…" = 3 UTF-8 bytes) in the trim branch. We pin the actual
-    // behavior so a fix is a deliberate decision; the hole is reported.
+  test("65000 bytes exact (cap inclusive) ⇒ final body including marker stays within cap", async () => {
     const gh = fakeGhPort([
       { match: (a) => a.includes("POST"), result: ok({ html_url: "u" }) },
       { match: (a) => a[0] === "api", result: ok([]) },
@@ -101,12 +98,11 @@ describe("ADR-0313 hellgate R2 — sink loop / cap / abort", () => {
     await sink.postComment({ body: body65k, key })
     const arg = findBody(findCalls(gh.calls, "POST")[0])
     const final = arg.slice("body=".length)
-    // Pin the actual slack (cap + ellipsis overshoot, ≤5 bytes).
-    expect(Buffer.byteLength(final, "utf8")).toBeLessThanOrEqual(65005)
+    expect(Buffer.byteLength(final, "utf8")).toBeLessThanOrEqual(65000)
     expect(final).toContain("<!-- quanta:idempotency=")
   })
 
-  test("body 65001 bytes ⇒ trimmed, marker still appended (pins source overshoot)", async () => {
+  test("body 65001 bytes ⇒ trimmed, marker retained, strict cap preserved", async () => {
     const gh = fakeGhPort([
       { match: (a) => a.includes("POST"), result: ok({ html_url: "u" }) },
       { match: (a) => a[0] === "api", result: ok([]) },
@@ -124,8 +120,27 @@ describe("ADR-0313 hellgate R2 — sink loop / cap / abort", () => {
     await sink.postComment({ body: huge, key })
     const arg = findBody(findCalls(gh.calls, "POST")[0])
     const final = arg.slice("body=".length)
-    // Same documented overshoot as the previous case.
-    expect(Buffer.byteLength(final, "utf8")).toBeLessThanOrEqual(65005)
+    expect(Buffer.byteLength(final, "utf8")).toBeLessThanOrEqual(65000)
+    expect(final).toContain("<!-- quanta:idempotency=")
+  })
+
+  test("multibyte body cut mid-codepoint stays valid UTF-8 and within the exact cap", async () => {
+    const gh = fakeGhPort([
+      { match: (a) => a.includes("POST"), result: ok({ html_url: "u" }) },
+      { match: (a) => a[0] === "api", result: ok([]) },
+    ])
+    const sink = createPrOutputSink({
+      ghCliPort: gh.port,
+      repoCwd: "/r",
+      repoSlug: "o/r",
+      prNumber: 1,
+      redactPort: identityRedact,
+      bodyMaxBytes: 65000,
+    })
+    await sink.postComment({ body: "가".repeat(30_000), key: k("multibyte-cap") })
+    const final = findBody(findCalls(gh.calls, "POST")[0]).slice("body=".length)
+    expect(Buffer.byteLength(final, "utf8")).toBeLessThanOrEqual(65000)
+    expect(final).not.toContain("�")
     expect(final).toContain("<!-- quanta:idempotency=")
   })
 

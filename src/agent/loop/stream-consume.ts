@@ -15,7 +15,7 @@ import type { AgentMode, buildTurnContext } from "../prompt"
 import { withActiveSpanScope } from "../session-resources"
 import { isRootAgent } from "../spawn-depth"
 import { createStreamDispatcher, type TurnTimingAnchors } from "../stream-callbacks"
-import { streamingTurn } from "../streaming-dispatch"
+import { type StreamingTurnResult, streamingTurn } from "../streaming-dispatch"
 import { consumeTurnSignals, resolveToolChoice } from "../tool-choice"
 import { buildToolInputSeam } from "../tool-input-streaming"
 import type { TurnSession, TurnState } from "../turn-context"
@@ -326,6 +326,21 @@ const classifyStreamTurnError = (e: unknown, config: AgentConfig): StreamTurnErr
   return { status: "error", result: { error: e, message }, errorKind: classify(e) }
 }
 
+const abortedStreamResult = (
+  outcome: Extract<StreamingTurnResult, { kind: "aborted" }>,
+): StreamConsumeResult => {
+  if (outcome.partialText === undefined && outcome.inFlightTools === undefined) {
+    return { aborted: true }
+  }
+  return {
+    aborted: true,
+    salvage: {
+      ...(outcome.partialText !== undefined ? { partialText: outcome.partialText } : {}),
+      ...(outcome.inFlightTools !== undefined ? { inFlightTools: outcome.inFlightTools } : {}),
+    },
+  }
+}
+
 /** Hide the tools this mode's dispatch gate would refuse.
  *
  *  Returns the SAME array reference when nothing is hidden (a write-capable
@@ -552,7 +567,7 @@ export const streamConsume = async (
     })
     if (outcome.kind === "aborted") {
       samplingStatus = "aborted"
-      return { aborted: true }
+      return abortedStreamResult(outcome)
     }
     capturedFinish = outcome.stopReason
     capturedMessage = outcome.message

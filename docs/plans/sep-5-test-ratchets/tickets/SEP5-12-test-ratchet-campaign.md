@@ -1,7 +1,7 @@
 # SEP5-12 — non-vacuous test and ratchet campaign
 
 **Priority:** P1 release gate
-**Status:** CLOSEOUT (enrollment+mutation rails landed; complete only after exact-HEAD `bun run test:ci`)
+**Status:** COMPLETE IN WORKTREE — exact clean CI green; delivery commit pending
 **Depends on:** every SEP5 implementation ticket that lands
 **Finding coverage:** D1, D2, D3, D4, D5, D6, D10, D11, D15, D19, D27, D28
 
@@ -157,3 +157,42 @@ resolved selection as the receipt and do not add a redundant scanner.
 - A mutation can pass because the production entrypoint is not wired to the
   tested owner.
 - Full CI lacks a terminal exit/footer receipt.
+
+## Verification update — 2026-09-06
+
+Verification was run from a detached clean worktree. The final synthetic commit
+`16a9349d22d90fac8a0838354084235ee9e05fb7` contains the SEP5 implementation,
+the required runner scan-reach floor tighten, and the two verification-lifecycle
+repairs below. It is a verification snapshot, not a delivery commit.
+
+| Rail | Result |
+|---|---|
+| Focused SEP5 bundle (23 explicit files) | `273 pass, 0 fail` |
+| OAuth related bundle including silent-failure ratchet | `46 pass, 0 fail` |
+| Slice boundaries (auth/llm/integrations/tool) | `39 pass, 0 fail` |
+| `typecheck:all` | PASS |
+| `lint` / `lint:debt` | PASS; existing warnings only; complexity debt 0 |
+| god-code ratchet | `9 pass, 0 fail` |
+| `bun fc validate` / `bun fc diff` | 1069 resolved / no drift |
+| Complete clean `test:full:ci` receipt | PASS, chunks `35/35`, manifest files `3850` |
+| Complete clean `bun run test:ci` receipt | PASS, gates `21/21`, stable clean snapshot |
+
+Two failures found during closeout were repaired at their actual owners:
+
+1. `tests/unit/eval-cancellation-hellgate.test.ts` completed both assertions,
+   then a shard retained an open handle. `src/shared/abortable.ts` now has one
+   terminal settle path that clears the timer and removes the abort listener on
+   both outcomes, plus a post-registration abort recheck. The injected
+   registration-race rail proves cleanup and settlement.
+2. `tests/unit/project-env-astropy-real-e2e.test.ts` could reuse an editable uv
+   artifact after `git clean -fdx` removed native extensions. The project-env
+   authority now uses `--reinstall-package astropy --no-cache` only for the
+   exact native-extension repo override. The real upstream base+candidate rail
+   passed three consecutive standalone runs and the final full campaign.
+
+Final `bun run test:ci` passed all 21 gates, including full-suite, PTY,
+non-vacuity, real-toolchain (`41 pass, 2 visible capability skips, 0 fail`), web
+frontend (`807/807`), and contract (`13/13`). Missing host capabilities were
+reported as `dlv`, `gopls`, and `lldb-dap`; they were not silently counted as
+executed coverage. Branch delivery remains pending because the owned working
+tree has not been committed.

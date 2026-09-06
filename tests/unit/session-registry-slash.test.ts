@@ -35,11 +35,13 @@
 
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
 import {
+  autoSweepConfigFromRuntime,
   getGlobalSessionResourceRegistry,
   resetGlobalSessionResourceRegistry,
-} from "@/agent/session-resource-registry/global"
+} from "@/agent/session-resource-registry"
 import { BUILTINS } from "@/apps/cli/slash-commands"
 import type { SlashContext } from "@/apps/cli/slash-contract"
+import { __resetKnobOverrides, runtimeConfig, setKnobOverride } from "@/shared"
 
 const findCmd = () => BUILTINS.find((c) => c.name === "/session-registry")
 
@@ -74,6 +76,7 @@ beforeEach(() => {
 
 afterEach(() => {
   resetGlobalSessionResourceRegistry()
+  __resetKnobOverrides()
 })
 
 describe("ADR-0370 /session-registry slash wire", () => {
@@ -427,37 +430,23 @@ describe("ADR-0376 /session-registry help discovery", () => {
   // env→sweep wire; slash hellgate proved the slash→sweep wire; this
   // case proves the combined chain so the cleanup slash honors ADR-0390
   // env knobs through the whole transitive call graph.
-  test("[40] cleanup honors ADR-0390 env vars (slash + auto-sweep + sweep chain)", async () => {
+  test("[40] cleanup honors ADR-0390 knobs via the runtime snapshot mapper", async () => {
     const cmd = findCmd()
     expect(cmd).toBeDefined()
     if (cmd === undefined) return
-    const prevSqlite = process.env.QUANTA_SESSION_REGISTRY_SQLITE_PATH
-    const prevThreshold = process.env.QUANTA_SESSION_REGISTRY_WAL_THRESHOLD_BYTES
-    const prevMode = process.env.QUANTA_SESSION_REGISTRY_WAL_CHECKPOINT_MODE
-    process.env.QUANTA_SESSION_REGISTRY_SQLITE_PATH = ":memory:"
-    process.env.QUANTA_SESSION_REGISTRY_WAL_THRESHOLD_BYTES = "1024"
-    process.env.QUANTA_SESSION_REGISTRY_WAL_CHECKPOINT_MODE = "TRUNCATE"
-    try {
-      const ctx = makeCtx()
-      const exit = await cmd.run(["cleanup"], ctx)
-      // Slash MUST exit 0 + render the ADR-0379 sweep marker; the env
-      // vars MUST reach the sqlite sweep (proven indirectly by the
-      // sweep completing NO-THROW under the threshold+mode combination
-      // — startAutoSweep's resolver would silently drop a malformed
-      // threshold, but "1024" is valid + reachable).
-      expect(exit).toBe(0)
-      const out = ctx.outBuf.join("")
-      expect(out).toContain("Sweep complete.")
-      expect(ctx.errBuf.join("")).toBe("")
-    } finally {
-      if (prevSqlite === undefined) delete process.env.QUANTA_SESSION_REGISTRY_SQLITE_PATH
-      else process.env.QUANTA_SESSION_REGISTRY_SQLITE_PATH = prevSqlite
-      if (prevThreshold === undefined)
-        delete process.env.QUANTA_SESSION_REGISTRY_WAL_THRESHOLD_BYTES
-      else process.env.QUANTA_SESSION_REGISTRY_WAL_THRESHOLD_BYTES = prevThreshold
-      if (prevMode === undefined) delete process.env.QUANTA_SESSION_REGISTRY_WAL_CHECKPOINT_MODE
-      else process.env.QUANTA_SESSION_REGISTRY_WAL_CHECKPOINT_MODE = prevMode
-    }
+    expect(setKnobOverride("QUANTA_SESSION_REGISTRY_SQLITE_PATH", ":memory:")).toBe(true)
+    expect(setKnobOverride("QUANTA_SESSION_REGISTRY_WAL_THRESHOLD_BYTES", "1024")).toBe(true)
+    expect(setKnobOverride("QUANTA_SESSION_REGISTRY_WAL_CHECKPOINT_MODE", "TRUNCATE")).toBe(true)
+    const projected = autoSweepConfigFromRuntime(runtimeConfig())
+    expect(projected.sqlitePath).toBe(":memory:")
+    expect(projected.walSizeThresholdBytes).toBe(1024)
+    expect(projected.walCheckpointUpgradeMode).toBe("TRUNCATE")
+    const ctx = makeCtx()
+    const exit = await cmd.run(["cleanup"], ctx)
+    expect(exit).toBe(0)
+    const out = ctx.outBuf.join("")
+    expect(out).toContain("Sweep complete.")
+    expect(ctx.errBuf.join("")).toBe("")
   })
 })
 

@@ -274,22 +274,4 @@ export const DAEMON: readonly KnobDeclaration[] = [
       "bash→pwsh→cmd) | 'bash' | 'pwsh' | 'cmd'.",
     readSite: "runtime/shell-argv.ts",
   },
-  {
-    envKey: "QUANTA_SESSION_REGISTRY_WAL_THRESHOLD_BYTES",
-    kind: "int",
-    default: undefined,
-    group: "session-registry",
-    home: "runtime-config",
-    describe: "WAL size threshold (bytes).",
-    readSite: "agent/session-resource-registry/auto-sweep.ts",
-  },
-  {
-    envKey: "QUANTA_SESSION_REGISTRY_WAL_CHECKPOINT_MODE",
-    kind: "enum",
-    default: undefined,
-    group: "session-registry",
-    home: "runtime-config",
-    describe: "WAL checkpoint upgrade mode.",
-    readSite: "agent/session-resource-registry/auto-sweep.ts",
-  },
 ]

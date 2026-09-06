@@ -511,15 +511,15 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
     slice: "side-agent",
     denyImports: [...PEER_LIBRARY_DENY, ...LAYER2_DENY],
     allowImports: [
-      "@/agent/side-agent-runner",
-      "@/agent/subagent-runner",
+      { spec: "@/agent/side-agent-runner", files: ["worker-charter-runner.ts"] },
+      { spec: "@/agent/subagent-runner", files: ["worker-charter-runner.ts"] },
       // Reviewed: the OS-process worker charter derives its own spawn-depth
       // containment (childDepthOf/effectiveCap) from the shared authority leaf so
       // a forked daemon is never a fresh unbounded root (rev.4 §4 defense-in-depth).
-      "@/agent/spawn-depth",
-      "@/llm",
-      "@/llm/replay",
-      "@/tool",
+      { spec: "@/agent/spawn-depth", files: ["worker-charter-runner.ts"] },
+      { spec: "@/llm", files: ["worker-charter-runner.ts"] },
+      { spec: "@/llm/replay", files: ["worker-charter-runner.ts"] },
+      { spec: "@/tool", files: ["worker-charter-runner.ts"] },
     ],
     requireSliceBarrel: true,
   },

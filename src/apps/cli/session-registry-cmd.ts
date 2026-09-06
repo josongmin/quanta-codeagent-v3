@@ -59,7 +59,10 @@
  * because the operator explicitly asked for the mutation.
  */
 
-import { startAutoSweep } from "@/agent/session-resource-registry/auto-sweep"
+import {
+  autoSweepConfigFromRuntime,
+  startAutoSweep,
+} from "@/agent/session-resource-registry/auto-sweep"
 import { countDiskRegistryCleanupCandidates } from "@/agent/session-resource-registry/disk-adapter/gc"
 import { getGlobalSessionResourceRegistry } from "@/agent/session-resource-registry/global"
 import {
@@ -348,10 +351,10 @@ export const sessionRegistryCmd: SlashCommand = {
 /**
  * ADR-0379 — `/session-registry cleanup` handler.
  *
- * Runs an immediate sweep via `startAutoSweep().sweepNow()` then stops
- * the returned handle so we do NOT leak a periodic timer registered by
- * this slash invocation. Env-var detection (sqlite > disk > none) is
- * delegated to `startAutoSweep`; an unset registry env ⇒ NOOP handle ⇒
+ * Runs an immediate sweep via `startAutoSweep(autoSweepConfigFromRuntime(runtimeConfig()))`
+ * then stops the returned handle so we do NOT leak a periodic timer registered by
+ * this slash invocation. Paths + WAL knobs come from the same runtimeConfig()
+ * snapshot dry-run already uses; unset registry paths ⇒ NOOP handle ⇒
  * the sweep is a fast no-op + we still render the current stats.
  *
  * The sweep is fire-and-await so the operator sees the post-sweep
@@ -362,7 +365,7 @@ export const sessionRegistryCmd: SlashCommand = {
 const renderCleanup = async (ctx: SlashContext, transcripts: boolean): Promise<number> => {
   let handle: ReturnType<typeof startAutoSweep> | undefined
   try {
-    handle = startAutoSweep()
+    handle = startAutoSweep(autoSweepConfigFromRuntime(runtimeConfig()))
     await handle.sweepNow()
     // Render post-sweep stats so the operator sees what changed.
     const stats = await inspectGlobalRegistry()
@@ -409,8 +412,8 @@ export type SessionRegistryCleanupPaths = {
 }
 
 export const sessionRegistryCleanupPathsFrom = (snapshot: {
-  readonly sessionRegistryDiskDir?: string | undefined
-  readonly sessionRegistrySqlitePath?: string | undefined
+  readonly sessionRegistryDiskDir: string | undefined
+  readonly sessionRegistrySqlitePath: string | undefined
 }): SessionRegistryCleanupPaths => ({
   diskDir: snapshot.sessionRegistryDiskDir,
   sqlitePath: snapshot.sessionRegistrySqlitePath,

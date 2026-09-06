@@ -497,6 +497,43 @@ export class HttpSseMcpTransport implements McpTransport {
     this.fireExit(`mcp server "${this.name}" standalone SSE GET failed: ${errMessage(e)}`)
   }
 
+  /** Classify a completed standalone GET handshake. `retry` is the one-shot
+   *  stale-cursor reset; `stop` covers 405 (legal POST-only) and reported
+   *  non-SSE failures; `sse` means the body is an event stream to pump. */
+  private async classifyStandaloneGetResponse(
+    res: HttpFetchResponse,
+    abort: AbortController,
+    isResumeRetry: boolean,
+  ): Promise<"retry" | "stop" | "sse"> {
+    if (!res.ok) {
+      // §1.2 — a NON-405 failure WHILE CARRYING a resume cursor may mean the id
+      // is unknown/expired. Drop the stale cursor + retry the GET exactly ONCE.
+      if (!isResumeRetry && !this.closed && res.status !== 405 && this.lastEventId !== null) {
+        logger.info("mcp: SSE resume reset (cursor rejected on reconnect)", {
+          server: this.name,
+          status: res.status,
+          staleEventId: this.lastEventId,
+        })
+        this.lastEventId = null
+        await this.drainBody(res.body)
+        return "retry"
+      }
+      await this.drainBody(res.body)
+      if (res.status !== 405) {
+        this.reportStandaloneGetFailure(new Error(`HTTP ${res.status}`), abort.signal)
+      }
+      return "stop"
+    }
+    const contentType = (res.headers.get("content-type") ?? "").toLowerCase()
+    if (contentType.includes("text/event-stream")) return "sse"
+    await this.drainBody(res.body)
+    this.reportStandaloneGetFailure(
+      new Error(`unexpected content-type ${contentType.length > 0 ? contentType : "<empty>"}`),
+      abort.signal,
+    )
+    return "stop"
+  }
+
   private async openStandaloneStream(isResumeRetry = false): Promise<void> {
     const abort = new AbortController()
     this.serverStreamAbort = abort
@@ -541,31 +578,9 @@ export class HttpSseMcpTransport implements McpTransport {
       this.reportStandaloneGetFailure(e, abort.signal)
       return
     }
-    // 405 = server has no standalone stream; that's spec-legal, proceed.
-    if (!res.ok) {
-      // §1.2 — a NON-405 failure WHILE CARRYING a resume cursor may mean the id
-      // is unknown/expired (the server restarted with a fresh session, or the id
-      // aged out). Drop the stale cursor + retry the GET exactly ONCE without
-      // `Last-Event-ID` so a bad cursor can't wedge the server stream. The
-      // `isResumeRetry` guard makes this strictly one extra attempt — no loop.
-      if (
-        !isResumeRetry &&
-        !this.closed && // Audit R1 #6 — never start the retry on a torn-down transport.
-        res.status !== 405 &&
-        this.lastEventId !== null
-      ) {
-        logger.info("mcp: SSE resume reset (cursor rejected on reconnect)", {
-          server: this.name,
-          status: res.status,
-          staleEventId: this.lastEventId,
-        })
-        this.lastEventId = null
-        return this.openStandaloneStream(true)
-      }
-      return
-    }
-    const contentType = (res.headers.get("content-type") ?? "").toLowerCase()
-    if (!contentType.includes("text/event-stream")) return
+    const handshake = await this.classifyStandaloneGetResponse(res, abort, isResumeRetry)
+    if (handshake === "retry") return this.openStandaloneStream(true)
+    if (handshake === "stop") return
     // close() may have fired while the GET handshake was in flight — don't open
     // a reader on a torn-down transport (the abort already fired; this is the
     // belt-and-braces guard so the standalone-GET lifetime is owned exactly as

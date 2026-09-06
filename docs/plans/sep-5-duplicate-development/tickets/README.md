@@ -1,6 +1,6 @@
 # Sep-05 duplicate-development remediation — execution index
 
-**Status:** CLOSEOUT (code+docs landed; exact-HEAD `bun run test:ci` receipt still required)
+**Status:** COMPLETE IN WORKTREE — exact clean CI green; delivery commit pending
 **Truth snapshot:** `59ad4f9b3850b89c0417ef3d12d0c27d64917ba1`
 **Source audit:** `docs/bugbash/sep-05-duplicate-development.md`
 
@@ -112,3 +112,41 @@ tickets should edit that generated Markdown directly.
 - Full CI completes on the final exact HEAD with an exit/footer receipt.
 - SEP5-00 is refreshed to the final code state and does not claim deferred work
   as implemented.
+
+## Situation update — 2026-09-06
+
+The final audit found three narrow defects in already-landed P1 implementations
+and repaired them at their authority owners:
+
+- GH abort/deadline termination now has one race-safe terminal latch.
+- PR comment policies now enforce a strict final UTF-8 byte cap, including the
+  mandatory automation marker.
+- OAuth lock mutation is now exact-body CAS; unconditional stale overwrite and
+  read-then-delete release are gone.
+
+No new generic framework or parallel authority was introduced. The only
+ratchet metadata change is `tools/dev/scan-reach-baseline.json` runner reach
+`323 -> 322`, matching the previously deleted
+`src/runner/assemble/retrieval.ts`; this lowers a stale floor rather than
+relaxing a ceiling.
+
+Owned proof is green: focused SEP5 `273/273`, relevant slice fences `39/39`,
+typecheck, lint debt, god-code, feature-catalog validation, and a clean exact
+synthetic full-suite receipt (`35/35`, 3850 files). The working-tree changes are
+not committed, so the real branch HEAD remains
+`54b704d12b91808733709e942593ec5304cb6df3` and must not inherit that synthetic
+receipt.
+
+The two repository-wide blockers discovered during closeout were also repaired:
+the shared abortable sleep now closes its registration race and cleans both
+timer/listener resources through one settle path, and the exact Astropy repo
+override forces a cache-independent native editable rebuild after source reset.
+The Astropy base+candidate rail passed three consecutive focused runs.
+
+Final clean verification snapshot
+`16a9349d22d90fac8a0838354084235ee9e05fb7` passed `bun run test:ci` with all
+21 gates green, including full-suite 35/35, real-toolchain 41 pass / 2 visible
+capability skips / 0 fail, web frontend 807/807, and contract 13/13. This SHA is
+a detached verification commit. The real branch remains uncommitted, so final
+delivery still requires committing the owned working-tree changes and rerunning
+or reusing only a receipt bound to that resulting real HEAD.

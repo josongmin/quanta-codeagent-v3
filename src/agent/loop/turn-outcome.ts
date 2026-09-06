@@ -74,7 +74,8 @@ export const resolveTurnLoopOutcome = async (args: {
     // (`captured:true`, the mid-turn `/cancel` drain): the buffer is single-slot
     // last-wins, so re-capturing here would clobber conversation_cancel with the
     // generic turn_result_abort (the ALBB-06 double-capture class).
-    if (args.result.captured !== true) captureAbortedTurn(args.cfg, args.wm, "turn_result_abort")
+    if (args.result.captured !== true)
+      captureAbortedTurn(args.cfg, args.wm, "turn_result_abort", Date.now, args.result.salvage)
     clearQueuedPlanLifecycle(args)
     return {
       kind: "finish",

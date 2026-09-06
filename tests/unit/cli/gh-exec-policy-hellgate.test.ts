@@ -197,4 +197,41 @@ describe("gh exec policy — abort and tree-kill", () => {
       expect(kills).toBeLessThanOrEqual(1)
     }
   })
+
+  test("abort between preflight and listener registration is not lost", async () => {
+    let kills = 0
+    const ac = new AbortController()
+    const exec = createGhExec({
+      spawn: (_argv, opts): GhSpawnHandle => {
+        const proc = Bun.spawn(["/bin/sleep", "2"], {
+          cwd: opts.cwd,
+          env: opts.env,
+          stdout: "pipe",
+          stderr: "pipe",
+        })
+        ac.abort()
+        return {
+          stdout: proc.stdout,
+          stderr: proc.stderr,
+          exited: proc.exited,
+          kill: (signal) => {
+            kills++
+            proc.kill(signal)
+          },
+        }
+      },
+    })
+
+    const startedAt = Date.now()
+    const result = await exec({
+      argv: ["/bin/sleep", "2"],
+      cwd: process.cwd(),
+      timeoutMs: 1_000,
+      signal: ac.signal,
+    })
+
+    expect(typeof result.code).toBe("number")
+    expect(kills).toBe(1)
+    expect(Date.now() - startedAt).toBeLessThan(900)
+  })
 })

@@ -50,6 +50,16 @@ const settleTurnAbort = (session: TurnSession, gate: TurnGateView): TurnResult =
   return classifyTurnAbort(gate, session.config.signal)
 }
 
+const settleStreamAbort = (
+  session: TurnSession,
+  gate: TurnGateView,
+  salvage: Extract<TurnResult, { kind: "aborted" }>["salvage"],
+): TurnResult => {
+  const settled = settleTurnAbort(session, gate)
+  if (settled.kind !== "aborted" || salvage === undefined) return settled
+  return { ...settled, salvage }
+}
+
 /** Take — and clear — the hook-prompt injects queued for THIS turn.
  *
  *  UNIT because read-then-drain is one indivisible hand-off: the copy MUST be
@@ -248,7 +258,7 @@ export const runTurn = async (
       // A stream-originated abort ends the turn before its normal boundary, so
       // speculative compaction no longer has a consumer — same early-exit
       // contract as the pre-round, mid-loop-action and post-prep abort paths.
-      if ("aborted" in result) return settleTurnAbort(session, gate)
+      if ("aborted" in result) return settleStreamAbort(session, gate, result.salvage)
       // T08 — refusal-fallback recovery input (undefined ⇒ OFF, byte-identical).
       const refusalFallback = buildRefusalFallbackInput(turnConfig, state)
       const action = resolveTurnAction(turnConfig.stopReasonPolicy, result, rec, refusalFallback)

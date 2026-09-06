@@ -115,15 +115,26 @@ export const abortableSleep = (
   }
   return new Promise<void>((resolve, reject) => {
     let handle: unknown
-    const onAbort = (): void => {
+    let settled = false
+    const finish = (outcome: "elapsed" | "aborted"): void => {
+      if (settled) return
+      settled = true
       timers.clear(handle)
-      reject(new AbortError("abort", undefined, signal?.reason))
+      signal?.removeEventListener("abort", onAbort)
+      if (outcome === "aborted") {
+        reject(new AbortError("abort", undefined, signal?.reason))
+      } else {
+        resolve()
+      }
     }
-    handle = timers.set(() => {
-      if (signal !== undefined) signal.removeEventListener("abort", onAbort)
-      resolve()
-    }, ms)
+    const onAbort = (): void => {
+      finish("aborted")
+    }
+    handle = timers.set(() => finish("elapsed"), ms)
     if (signal !== undefined) signal.addEventListener("abort", onAbort, { once: true })
+    // Close the preflight-to-registration race. AbortSignal dispatch is
+    // synchronous, so an abort that landed inside addEventListener is visible.
+    if (signal?.aborted) onAbort()
   })
 }
 

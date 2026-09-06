@@ -200,7 +200,11 @@ export type StreamingTurnResult =
       stopReason: string
       resultBlocks: ResultBlocks
     }
-  | { kind: "aborted" }
+  | {
+      kind: "aborted"
+      partialText?: string
+      inFlightTools?: ReadonlyArray<{ readonly id: string; readonly name: string }>
+    }
 
 /** One scheduled call slot. `order` is the model-call index and is the SOLE
  *  key the final `resultBlocks` is sorted by, so the ordering invariant holds
@@ -272,6 +276,26 @@ const resetForTombstone = (state: TurnState): void => {
 const abandonInFlight = (state: TurnState): void => {
   for (const slot of state.slots) {
     if (slot.promise) slot.promise.catch(() => undefined)
+  }
+}
+
+/** Lifetime-abort salvage: assemble whatever streamed so far WITHOUT appending
+ *  it to working memory. Empty fields are omitted so a no-content abort stays
+ *  byte-identical to `{kind:"aborted"}`. */
+const abortWithSalvage = (state: TurnState): StreamingTurnResult => {
+  abandonInFlight(state)
+  const { message } = assembleFromEvents(state.rawEvents)
+  const texts: string[] = []
+  const inFlightTools: Array<{ id: string; name: string }> = []
+  for (const b of message.content) {
+    if (b.type === "text") texts.push(b.text)
+    else if (b.type === "tool_use") inFlightTools.push({ id: b.id, name: b.name })
+  }
+  const partialText = texts.join("")
+  return {
+    kind: "aborted",
+    ...(partialText.length > 0 ? { partialText } : {}),
+    ...(inFlightTools.length > 0 ? { inFlightTools } : {}),
   }
 }
 
@@ -586,15 +610,13 @@ export const streamingTurn = async (args: StreamingTurnArgs): Promise<StreamingT
 
   for await (const ev of events) {
     if (isAborted(signal)) {
-      abandonInFlight(state)
-      return { kind: "aborted" }
+      return abortWithSalvage(state)
     }
     handleStreamEvent(state, ev, args)
   }
 
   if (isAborted(signal)) {
-    abandonInFlight(state)
-    return { kind: "aborted" }
+    return abortWithSalvage(state)
   }
 
   const { message, stopReason } = assembleFromEvents(state.rawEvents)
@@ -615,8 +637,7 @@ export const streamingTurn = async (args: StreamingTurnArgs): Promise<StreamingT
   if (pendingApproval?.status === "rejected") throw pendingApproval.reason
 
   if (isAborted(signal)) {
-    abandonInFlight(state)
-    return { kind: "aborted" }
+    return abortWithSalvage(state)
   }
 
   // ADR-0076 Gap-5 / ALBB-03 — refusal-class in-stream short-circuit. When the
@@ -633,12 +654,10 @@ export const streamingTurn = async (args: StreamingTurnArgs): Promise<StreamingT
   // tool_use blocks in `message.content` never carry to the next turn.
   if (!isRefusalStopReason(stopReason)) {
     if (!(await drainDeferredSlots(state.slots, dispatch, onToolStart, signal))) {
-      abandonInFlight(state)
-      return { kind: "aborted" }
+      return abortWithSalvage(state)
     }
     if (isAborted(signal)) {
-      abandonInFlight(state)
-      return { kind: "aborted" }
+      return abortWithSalvage(state)
     }
   }
 

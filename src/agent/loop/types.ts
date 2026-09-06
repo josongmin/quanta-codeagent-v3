@@ -13,6 +13,7 @@ import type { CompactionBreaker } from "../compaction-breaker"
 import type { buildSessionFeatures } from "../features"
 import type { TurnDiffSession } from "../git-observability"
 import type { HookPromptInject } from "../hooks"
+import type { AbortSalvage } from "../interrupted-turn"
 import type { buildGitDirectiveEmit } from "../loop-helpers"
 import type { AgentRecorder } from "../metrics"
 import type { PlanExitOutcome } from "../plan-exit"
@@ -35,7 +36,7 @@ export type TurnResult =
    *  (single-slot last-wins buffer — a second capture clobbers; the ALBB-06
    *  double-capture class at the mid-loop seam). Omitted ⇒ the arm captures as
    *  before (byte-identical for every pre-existing producer). */
-  | { kind: "aborted"; captured?: true }
+  | { kind: "aborted"; captured?: true; salvage?: AbortSalvage }
   | { kind: "interrupted" }
   | { kind: "error"; reason: string }
   | { kind: "refusal"; rationale: string; message: AssembledMessage }
@@ -50,7 +51,7 @@ export type StreamSuccess = {
 export type StreamConsumeResult =
   | StreamSuccess
   | { error: unknown; message: string }
-  | { aborted: true }
+  | { aborted: true; salvage?: AbortSalvage }
 
 export type PendingPlanExit = {
   readonly plan: string

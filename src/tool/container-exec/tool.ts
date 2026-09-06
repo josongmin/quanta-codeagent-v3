@@ -22,6 +22,7 @@
  * NO-THROW (a misbehaving transport maps to a typed error result, never rejects dispatch).
  */
 import { z } from "zod"
+import { classifyCommandShape } from "@/security"
 import { errMessage, sliceTailWholeChars, sliceWholeChars } from "@/shared"
 import { neutralizeTerminalOutput } from "../terminal-sanitize"
 import type { Tool, ToolEvent, ToolResult } from "../types"
@@ -186,6 +187,7 @@ export const containerExecTool = (port: ContainerExec): Tool<ContainerExecInput>
   // Expose the command to the host HARD_DENY denylist (rm -rf / curl|sh / fork-bomb) — a
   // shell-equivalent tool that omits this silently evades the categorical command gate.
   extractShellCommand: (input: ContainerExecInput): string => input.command,
+  classifySource: (input: ContainerExecInput) => classifyCommandShape(input.command),
   execute(input, ctx) {
     const parsed = schema.safeParse(input)
     if (!parsed.success) return one({ ok: false, output: `invalid input: ${parsed.error.message}` })

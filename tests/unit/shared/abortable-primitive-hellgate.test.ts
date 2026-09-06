@@ -116,6 +116,31 @@ describe("abortableSleep — rejects promptly and never leaks", () => {
     expect(timers.live.size).toBe(0)
   })
 
+  test("an abort during listener registration is rechecked and fully cleaned", async () => {
+    const timers = fakeTimers()
+    const controller = new AbortController()
+    let removed = 0
+    const signal = {
+      get aborted() {
+        return controller.signal.aborted
+      },
+      get reason() {
+        return controller.signal.reason
+      },
+      addEventListener: () => controller.abort("registration-race"),
+      removeEventListener: () => {
+        removed++
+      },
+    } as unknown as AbortSignal
+
+    await expect(abortableSleep(10_000, signal, timers)).rejects.toMatchObject({
+      name: "AbortError",
+      reason: "abort",
+    })
+    expect(timers.live.size).toBe(0)
+    expect(removed).toBe(1)
+  })
+
   test("does not accumulate listeners on a long-lived signal across many sleeps", async () => {
     const timers = fakeTimers()
     const c = new AbortController()

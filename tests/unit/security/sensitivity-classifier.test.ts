@@ -179,4 +179,22 @@ describe("classifyCommandShape — first-token + arg shape", () => {
     expect(classifyCommandShape("ls -la")).toBe("public")
     expect(classifyCommandShape("git status")).toBe("public")
   })
+
+  // T1 — one-level shell -c/-lc unwrap. The first token of `bash -c 'printenv'`
+  // is `bash`, so a head-only classifier treated credential dumps as public and
+  // Layer-1 never substituted the whole output. Bounded: only bash/sh + -c/-lc,
+  // payload reclassified once. Paired controls keep benign wrappers public.
+  test("bash/sh -c credential printers unwrap to secret", () => {
+    expect(classifyCommandShape("bash -c 'printenv'")).toBe("secret")
+    expect(classifyCommandShape("sh -c 'gh auth token'")).toBe("secret")
+    expect(classifyCommandShape("bash -lc 'gcloud auth print-access-token'")).toBe("secret")
+  })
+
+  test("bash -c of a benign command stays public", () => {
+    expect(classifyCommandShape("bash -c 'ls -la'")).toBe("public")
+  })
+
+  test("bash script.sh without -c keeps the existing public classification", () => {
+    expect(classifyCommandShape("bash script.sh")).toBe("public")
+  })
 })

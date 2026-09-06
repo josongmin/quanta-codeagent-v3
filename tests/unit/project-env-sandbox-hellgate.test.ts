@@ -664,12 +664,17 @@ describe("buildProjectEnvUvRunArgv — build-dep mechanism moved to pyproject", 
     // astropy's official install is `pip install -e .[test]`, so the editable
     // target carries the `[test]` extra (not a bare `.`).
     expect(argv[argv.indexOf("--with-editable") + 1]).toBe(".[test]")
+    expect(argv).toContain("--reinstall-package")
+    expect(argv[argv.indexOf("--reinstall-package") + 1]).toBe("astropy")
+    expect(argv).toContain("--no-cache")
   })
 
   test("xarray RUNTIME pin stays a --with (it is NOT a build dep)", () => {
     const argv = buildProjectEnvUvRunArgv("pydata/xarray", "2022.03")
     expect(hasWithDep(argv, "numpy<2")).toBe(true)
     expect(argv).not.toContain("--no-build-isolation")
+    expect(argv).not.toContain("--reinstall-package")
+    expect(argv).not.toContain("--no-cache")
   })
 
   test("an unlisted repo gets only the base env", () => {

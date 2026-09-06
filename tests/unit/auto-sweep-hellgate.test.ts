@@ -22,6 +22,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
+  autoSweepConfigFromRuntime,
   DEFAULT_AUTO_SWEEP_INTERVAL_MS,
   resetGlobalSessionResourceRegistry,
   startAutoSweep,
@@ -121,6 +122,7 @@ describe("ADR-0369 — startAutoSweep", () => {
     process.env.QUANTA_SESSION_REGISTRY_DISK_DIR = dir
     const timer = makeFakeTimer()
     const h = startAutoSweep({
+      diskDir: dir,
       setIntervalImpl: timer.setIntervalImpl,
       clearIntervalImpl: timer.clearIntervalImpl,
     })
@@ -137,6 +139,7 @@ describe("ADR-0369 — startAutoSweep", () => {
     process.env.QUANTA_SESSION_REGISTRY_SQLITE_PATH = ":memory:"
     const timer = makeFakeTimer()
     const h = startAutoSweep({
+      sqlitePath: ":memory:",
       setIntervalImpl: timer.setIntervalImpl,
       clearIntervalImpl: timer.clearIntervalImpl,
     })
@@ -153,6 +156,8 @@ describe("ADR-0369 — startAutoSweep", () => {
     process.env.QUANTA_SESSION_REGISTRY_SQLITE_PATH = ":memory:"
     const timer = makeFakeTimer()
     const h = startAutoSweep({
+      diskDir: dir,
+      sqlitePath: ":memory:",
       setIntervalImpl: timer.setIntervalImpl,
       clearIntervalImpl: timer.clearIntervalImpl,
     })
@@ -168,6 +173,7 @@ describe("ADR-0369 — startAutoSweep", () => {
     process.env.QUANTA_SESSION_REGISTRY_SQLITE_PATH = ":memory:"
     const timer = makeFakeTimer()
     const h = startAutoSweep({
+      sqlitePath: ":memory:",
       setIntervalImpl: timer.setIntervalImpl,
       clearIntervalImpl: timer.clearIntervalImpl,
     })
@@ -179,6 +185,7 @@ describe("ADR-0369 — startAutoSweep", () => {
     process.env.QUANTA_SESSION_REGISTRY_SQLITE_PATH = ":memory:"
     const timer = makeFakeTimer()
     const h = startAutoSweep({
+      sqlitePath: ":memory:",
       intervalMs: 12_345,
       setIntervalImpl: timer.setIntervalImpl,
       clearIntervalImpl: timer.clearIntervalImpl,
@@ -191,6 +198,7 @@ describe("ADR-0369 — startAutoSweep", () => {
     process.env.QUANTA_SESSION_REGISTRY_SQLITE_PATH = ":memory:"
     const timer = makeFakeTimer()
     const h = startAutoSweep({
+      sqlitePath: ":memory:",
       intervalMs: 0,
       setIntervalImpl: timer.setIntervalImpl,
       clearIntervalImpl: timer.clearIntervalImpl,
@@ -207,6 +215,8 @@ describe("ADR-0369 — startAutoSweep", () => {
     process.env.QUANTA_SESSION_REGISTRY_SQLITE_PATH = ""
     const timer = makeFakeTimer()
     const h = startAutoSweep({
+      diskDir: "",
+      sqlitePath: "",
       setIntervalImpl: timer.setIntervalImpl,
       clearIntervalImpl: timer.clearIntervalImpl,
     })
@@ -233,6 +243,7 @@ describe("ADR-0369 — startAutoSweep", () => {
     process.env.QUANTA_SESSION_REGISTRY_SQLITE_PATH = ":memory:"
     const timer = makeFakeTimer()
     const h = startAutoSweep({
+      sqlitePath: ":memory:",
       setIntervalImpl: timer.setIntervalImpl,
       clearIntervalImpl: timer.clearIntervalImpl,
     })
@@ -258,10 +269,42 @@ describe("ADR-0369 — startAutoSweep", () => {
     h.stop()
   })
 
+  test("L2. no-arg startAutoSweep ignores process.env (fail-closed)", () => {
+    process.env.QUANTA_SESSION_REGISTRY_SQLITE_PATH = ":memory:"
+    process.env.QUANTA_SESSION_REGISTRY_WAL_THRESHOLD_BYTES = "12345"
+    const h = startAutoSweep()
+    expect(h.scheduled).toBe(false)
+  })
+
+  test("L3. autoSweepConfigFromRuntime maps snapshot WAL; env is not an input", () => {
+    process.env.QUANTA_SESSION_REGISTRY_SQLITE_PATH = "/tmp/from-env.sqlite"
+    process.env.QUANTA_SESSION_REGISTRY_WAL_THRESHOLD_BYTES = "999"
+    expect(
+      autoSweepConfigFromRuntime({
+        sessionRegistryDiskDir: undefined,
+        sessionRegistrySqlitePath: undefined,
+      }),
+    ).toEqual({ diskDir: "", sqlitePath: "" })
+    expect(
+      autoSweepConfigFromRuntime({
+        sessionRegistryDiskDir: undefined,
+        sessionRegistrySqlitePath: ":memory:",
+        sessionRegistryWalThresholdBytes: 1024,
+        sessionRegistryWalCheckpointMode: "TRUNCATE",
+      }),
+    ).toEqual({
+      diskDir: "",
+      sqlitePath: ":memory:",
+      walSizeThresholdBytes: 1024,
+      walCheckpointUpgradeMode: "TRUNCATE",
+    })
+  })
+
   test("M. sweepNow is awaitable on a started handle", async () => {
     process.env.QUANTA_SESSION_REGISTRY_SQLITE_PATH = ":memory:"
     const timer = makeFakeTimer()
     const h = startAutoSweep({
+      sqlitePath: ":memory:",
       setIntervalImpl: timer.setIntervalImpl,
       clearIntervalImpl: timer.clearIntervalImpl,
     })
@@ -273,6 +316,7 @@ describe("ADR-0369 — startAutoSweep", () => {
     process.env.QUANTA_SESSION_REGISTRY_SQLITE_PATH = ":memory:"
     const timer = makeFakeTimer()
     const h = startAutoSweep({
+      sqlitePath: ":memory:",
       setIntervalImpl: timer.setIntervalImpl,
       clearIntervalImpl: timer.clearIntervalImpl,
     })
@@ -374,6 +418,7 @@ describe("ADR-0373 — auto-sweep telemetry", () => {
     const timer = makeFakeTimer()
     // No emitter → scheduled like before, sweepNow works.
     const h = startAutoSweep({
+      diskDir: dir,
       setIntervalImpl: timer.setIntervalImpl,
       clearIntervalImpl: timer.clearIntervalImpl,
     })
@@ -388,6 +433,7 @@ describe("ADR-0373 — auto-sweep telemetry", () => {
     const emitter = makeRecordingEmitter()
     const timer = makeFakeTimer()
     const h = startAutoSweep({
+      diskDir: dir,
       setIntervalImpl: timer.setIntervalImpl,
       clearIntervalImpl: timer.clearIntervalImpl,
       metricsEmitter: emitter.port,
@@ -407,6 +453,7 @@ describe("ADR-0373 — auto-sweep telemetry", () => {
     const emitter = makeRecordingEmitter()
     const timer = makeFakeTimer()
     const h = startAutoSweep({
+      sqlitePath: ":memory:",
       setIntervalImpl: timer.setIntervalImpl,
       clearIntervalImpl: timer.clearIntervalImpl,
       metricsEmitter: emitter.port,
@@ -427,6 +474,7 @@ describe("ADR-0373 — auto-sweep telemetry", () => {
     const withHist = makeRecordingEmitter({ withHistogram: true })
     const timer1 = makeFakeTimer()
     const h1 = startAutoSweep({
+      sqlitePath: ":memory:",
       setIntervalImpl: timer1.setIntervalImpl,
       clearIntervalImpl: timer1.clearIntervalImpl,
       metricsEmitter: withHist.port,
@@ -441,6 +489,7 @@ describe("ADR-0373 — auto-sweep telemetry", () => {
     const noHist = makeRecordingEmitter({ withHistogram: false })
     const timer2 = makeFakeTimer()
     const h2 = startAutoSweep({
+      sqlitePath: ":memory:",
       setIntervalImpl: timer2.setIntervalImpl,
       clearIntervalImpl: timer2.clearIntervalImpl,
       metricsEmitter: noHist.port,
@@ -467,6 +516,7 @@ describe("ADR-0373 — auto-sweep telemetry", () => {
     }
     const timer = makeFakeTimer()
     const h = startAutoSweep({
+      sqlitePath: ":memory:",
       setIntervalImpl: timer.setIntervalImpl,
       clearIntervalImpl: timer.clearIntervalImpl,
       metricsEmitter: throwing,
@@ -486,6 +536,8 @@ describe("ADR-0373 — auto-sweep telemetry", () => {
     const emitter = makeRecordingEmitter()
     const timer = makeFakeTimer()
     const h = startAutoSweep({
+      diskDir: dir,
+      sqlitePath: ":memory:",
       setIntervalImpl: timer.setIntervalImpl,
       clearIntervalImpl: timer.clearIntervalImpl,
       metricsEmitter: emitter.port,
@@ -505,6 +557,7 @@ describe("ADR-0373 — auto-sweep telemetry", () => {
     const emitter = makeRecordingEmitter()
     const timer = makeFakeTimer()
     const h = startAutoSweep({
+      diskDir: dir,
       setIntervalImpl: timer.setIntervalImpl,
       clearIntervalImpl: timer.clearIntervalImpl,
       metricsEmitter: emitter.port,
@@ -523,6 +576,7 @@ describe("ADR-0373 — auto-sweep telemetry", () => {
     const emitter = makeRecordingEmitter()
     const timer = makeFakeTimer()
     const h = startAutoSweep({
+      sqlitePath: ":memory:",
       setIntervalImpl: timer.setIntervalImpl,
       clearIntervalImpl: timer.clearIntervalImpl,
       metricsEmitter: emitter.port,
@@ -545,6 +599,7 @@ describe("ADR-0373 — auto-sweep telemetry", () => {
     const emitter = makeRecordingEmitter()
     const timer = makeFakeTimer()
     const h = startAutoSweep({
+      sqlitePath,
       setIntervalImpl: timer.setIntervalImpl,
       clearIntervalImpl: timer.clearIntervalImpl,
       metricsEmitter: emitter.port,
@@ -563,6 +618,7 @@ describe("ADR-0373 — auto-sweep telemetry", () => {
     const timer = makeFakeTimer()
     // No metricsEmitter on the config — sweep MUST still succeed but emit nothing.
     const h = startAutoSweep({
+      sqlitePath,
       setIntervalImpl: timer.setIntervalImpl,
       clearIntervalImpl: timer.clearIntervalImpl,
     })
@@ -579,6 +635,7 @@ describe("ADR-0373 — auto-sweep telemetry", () => {
     const emitter = makeRecordingEmitter()
     const timer = makeFakeTimer()
     const h = startAutoSweep({
+      diskDir: dir,
       setIntervalImpl: timer.setIntervalImpl,
       clearIntervalImpl: timer.clearIntervalImpl,
       metricsEmitter: emitter.port,
@@ -597,6 +654,7 @@ describe("ADR-0373 — auto-sweep telemetry", () => {
     const emitter = makeRecordingEmitter()
     const timer = makeFakeTimer()
     const h = startAutoSweep({
+      sqlitePath: ":memory:",
       setIntervalImpl: timer.setIntervalImpl,
       clearIntervalImpl: timer.clearIntervalImpl,
       metricsEmitter: emitter.port,
@@ -618,20 +676,22 @@ describe("ADR-0373 — auto-sweep telemetry", () => {
     h.stop()
   })
 
-  test("CB. ADR-0390 — env var QUANTA_SESSION_REGISTRY_WAL_THRESHOLD_BYTES is honored", async () => {
+  test("CB. ADR-0390 — cfg.walSizeThresholdBytes is honored", async () => {
     process.env.QUANTA_SESSION_REGISTRY_SQLITE_PATH = ":memory:"
     process.env.QUANTA_SESSION_REGISTRY_WAL_THRESHOLD_BYTES = "12345"
     const emitter = makeRecordingEmitter()
     const timer = makeFakeTimer()
     const h = startAutoSweep({
+      sqlitePath: ":memory:",
+      walSizeThresholdBytes: 12345,
       setIntervalImpl: timer.setIntervalImpl,
       clearIntervalImpl: timer.clearIntervalImpl,
       metricsEmitter: emitter.port,
     })
     await h.sweepNow()
-    // Counter call proves the threshold env reached the sweep (NO-THROW
+    // Counter call proves the threshold reached the sweep (NO-THROW
     // path; the actual checkpoint may not fire on :memory: but the counter
-    // is unconditional once the threshold is parsed).
+    // is unconditional once the threshold is supplied on cfg).
     const restarted = emitter.counters.filter(
       (c) => c.name === "codex_r2.sweep.sqlite_wal_restarted",
     )
@@ -648,6 +708,7 @@ describe("ADR-0373 — auto-sweep telemetry", () => {
     // Pass a negative threshold via cfg; resolver MUST coerce to undefined
     // so the sweep stays in PASSIVE-only (byte-identical to pre-R15 wire).
     const h = startAutoSweep({
+      sqlitePath: ":memory:",
       setIntervalImpl: timer.setIntervalImpl,
       clearIntervalImpl: timer.clearIntervalImpl,
       metricsEmitter: emitter.port,
@@ -673,6 +734,7 @@ describe("ADR-0373 — auto-sweep telemetry", () => {
     const emitter = makeRecordingEmitter()
     const timer = makeFakeTimer()
     const h = startAutoSweep({
+      sqlitePath: ":memory:",
       setIntervalImpl: timer.setIntervalImpl,
       clearIntervalImpl: timer.clearIntervalImpl,
       metricsEmitter: emitter.port,
@@ -700,6 +762,7 @@ describe("ADR-0373 — auto-sweep telemetry", () => {
     const emitter = makeRecordingEmitter()
     const timer = makeFakeTimer()
     const h = startAutoSweep({
+      sqlitePath: ":memory:",
       setIntervalImpl: timer.setIntervalImpl,
       clearIntervalImpl: timer.clearIntervalImpl,
       metricsEmitter: emitter.port,
@@ -717,6 +780,7 @@ describe("ADR-0373 — auto-sweep telemetry", () => {
     const emitter = makeRecordingEmitter()
     const timer = makeFakeTimer()
     const h = startAutoSweep({
+      diskDir: dir,
       setIntervalImpl: timer.setIntervalImpl,
       clearIntervalImpl: timer.clearIntervalImpl,
       metricsEmitter: emitter.port,
@@ -747,6 +811,7 @@ describe("ADR-0373 — auto-sweep telemetry", () => {
     const emitter = makeRecordingEmitter()
     const timer = makeFakeTimer()
     const h = startAutoSweep({
+      sqlitePath: dbPath,
       setIntervalImpl: timer.setIntervalImpl,
       clearIntervalImpl: timer.clearIntervalImpl,
       metricsEmitter: emitter.port,

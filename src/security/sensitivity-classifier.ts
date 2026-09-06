@@ -366,7 +366,25 @@ const readsSecretPathArg = (tokens: readonly string[]): boolean => {
   return false
 }
 
-export const classifyCommandShape = (cmd: string): SensitivityClass => {
+/** Closed set of shells whose `-c` / `-lc` payload is the real command. */
+const SHELL_WRAPPER_HEADS: ReadonlySet<string> = new Set(["bash", "sh"])
+/** Closed set of flags that introduce a command-string payload. */
+const SHELL_COMMAND_FLAGS: ReadonlySet<string> = new Set(["-c", "-lc"])
+/** One unwrap only — never walk nested `bash -c "bash -c …"` wrappers. */
+const MAX_SHELL_UNWRAP_DEPTH = 1
+
+/** Payload after the first `-c` / `-lc` flag, or undefined when absent/empty. */
+const shellCommandPayload = (tokens: readonly string[]): string | undefined => {
+  for (let i = 1; i < tokens.length; i++) {
+    const flag = tokens[i]
+    if (flag === undefined || !SHELL_COMMAND_FLAGS.has(flag)) continue
+    const payload = tokens[i + 1]
+    return payload !== undefined && payload.length > 0 ? payload : undefined
+  }
+  return undefined
+}
+
+const classifyCommandShapeAt = (cmd: string, unwrapDepth: number): SensitivityClass => {
   const head = firstToken(cmd)
   if (head.length === 0) return "public"
   const tokens = tokenize(cmd)
@@ -378,8 +396,17 @@ export const classifyCommandShape = (cmd: string): SensitivityClass => {
   if (FILE_READERS.has(head) && readsSecretPathArg(tokens)) return "secret"
 
   const rule = SECRET_COMMAND_RULES.get(head)
-  return rule?.(tokens) === true ? "secret" : "public"
+  if (rule?.(tokens) === true) return "secret"
+
+  if (unwrapDepth < MAX_SHELL_UNWRAP_DEPTH && SHELL_WRAPPER_HEADS.has(head)) {
+    const payload = shellCommandPayload(tokens)
+    if (payload !== undefined) return classifyCommandShapeAt(payload, unwrapDepth + 1)
+  }
+  return "public"
 }
+
+export const classifyCommandShape = (cmd: string): SensitivityClass =>
+  classifyCommandShapeAt(cmd, 0)
 
 // Re-exported for tests that want to assert behavior on the helpers; the
 // public API is `classifyPath` / `classifyCommandShape`.

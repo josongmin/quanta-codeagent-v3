@@ -15,13 +15,17 @@
  * in-memory.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { existsSync } from "node:fs"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
+  autoSweepConfigFromRuntime,
   getGlobalSessionResourceRegistry,
   resetGlobalSessionResourceRegistry,
 } from "@/agent/session-resource-registry"
+import { peekGlobalAutoSweepHandle } from "@/agent/session-resource-registry/global"
+import { __resetKnobOverrides, runtimeConfig, setKnobOverride } from "@/shared"
 
 let prevDiskEnv: string | undefined
 let prevSqliteEnv: string | undefined
@@ -34,10 +38,12 @@ beforeEach(() => {
   delete process.env.QUANTA_SESSION_REGISTRY_DISK_DIR
   delete process.env.QUANTA_SESSION_REGISTRY_SQLITE_PATH
   resetGlobalSessionResourceRegistry()
+  __resetKnobOverrides()
 })
 
 afterEach(async () => {
   resetGlobalSessionResourceRegistry()
+  __resetKnobOverrides()
   if (prevDiskEnv === undefined) delete process.env.QUANTA_SESSION_REGISTRY_DISK_DIR
   else process.env.QUANTA_SESSION_REGISTRY_DISK_DIR = prevDiskEnv
   if (prevSqliteEnv === undefined) delete process.env.QUANTA_SESSION_REGISTRY_SQLITE_PATH
@@ -188,5 +194,59 @@ describe("ADR-0367 — SQLite env-var swap", () => {
     process.env.QUANTA_SESSION_REGISTRY_SQLITE_PATH = join(tempSqliteRoot, "late.sqlite")
     const reg2 = getGlobalSessionResourceRegistry()
     expect(reg2).toBe(reg1) // SAME reference, env mutation ignored
+  })
+})
+
+describe("T4 — one runtimeConfig snapshot drives backend AND auto-sweep", () => {
+  test("disk override with env unset ⇒ scheduled sweep on the same first call", async () => {
+    tempRoot = await mkdtemp(join(tmpdir(), "t4-disk-"))
+    expect(setKnobOverride("QUANTA_SESSION_REGISTRY_DISK_DIR", tempRoot)).toBe(true)
+    const reg = getGlobalSessionResourceRegistry()
+    expect(peekGlobalAutoSweepHandle()?.scheduled).toBe(true)
+    const r = reg.getOrCreate("t4-disk-session")
+    expect(reg.getOrCreate("t4-disk-session")).toBe(r)
+  })
+
+  test("sqlite override with env unset ⇒ sqlite file + scheduled sweep", async () => {
+    tempSqliteRoot = await mkdtemp(join(tmpdir(), "t4-sqlite-"))
+    const sqlitePath = join(tempSqliteRoot, "sessions.sqlite")
+    expect(setKnobOverride("QUANTA_SESSION_REGISTRY_SQLITE_PATH", sqlitePath)).toBe(true)
+    const reg = getGlobalSessionResourceRegistry()
+    expect(peekGlobalAutoSweepHandle()?.scheduled).toBe(true)
+    expect(existsSync(sqlitePath)).toBe(true)
+    const r = reg.getOrCreate("t4-sqlite-session")
+    expect(reg.getOrCreate("t4-sqlite-session")).toBe(r)
+  })
+
+  test("env unset + override unset ⇒ in-memory and no timer", () => {
+    const reg = getGlobalSessionResourceRegistry()
+    expect(reg.getOrCreate("x")).toBeDefined()
+    expect(peekGlobalAutoSweepHandle()?.scheduled).toBe(false)
+  })
+
+  test("override after first mint is ignored until reset", async () => {
+    const reg1 = getGlobalSessionResourceRegistry()
+    expect(peekGlobalAutoSweepHandle()?.scheduled).toBe(false)
+    tempRoot = await mkdtemp(join(tmpdir(), "t4-late-"))
+    expect(setKnobOverride("QUANTA_SESSION_REGISTRY_DISK_DIR", tempRoot)).toBe(true)
+    const reg2 = getGlobalSessionResourceRegistry()
+    expect(reg2).toBe(reg1)
+    expect(peekGlobalAutoSweepHandle()?.scheduled).toBe(false)
+    resetGlobalSessionResourceRegistry()
+    const reg3 = getGlobalSessionResourceRegistry()
+    expect(reg3).not.toBe(reg1)
+    expect(peekGlobalAutoSweepHandle()?.scheduled).toBe(true)
+  })
+
+  test("WAL knobs ride the same runtime snapshot into auto-sweep", () => {
+    expect(setKnobOverride("QUANTA_SESSION_REGISTRY_SQLITE_PATH", ":memory:")).toBe(true)
+    expect(setKnobOverride("QUANTA_SESSION_REGISTRY_WAL_THRESHOLD_BYTES", "2048")).toBe(true)
+    expect(setKnobOverride("QUANTA_SESSION_REGISTRY_WAL_CHECKPOINT_MODE", "RESTART")).toBe(true)
+    getGlobalSessionResourceRegistry()
+    expect(peekGlobalAutoSweepHandle()?.scheduled).toBe(true)
+    const projected = autoSweepConfigFromRuntime(runtimeConfig())
+    expect(projected.sqlitePath).toBe(":memory:")
+    expect(projected.walSizeThresholdBytes).toBe(2048)
+    expect(projected.walCheckpointUpgradeMode).toBe("RESTART")
   })
 })

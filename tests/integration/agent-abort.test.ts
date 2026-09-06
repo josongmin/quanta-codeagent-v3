@@ -136,6 +136,37 @@ describe("agent abort branches — C7 coverage", () => {
     expect(ac.signal.aborted).toBe(true)
   })
 
+  test("mid-stream abort captures streamed partial into the resume buffer (T2)", async () => {
+    const { createInterruptedTurnBuffer } = await import("@/agent/interrupted-turn")
+    const ac = new AbortController()
+    const buffer = createInterruptedTurnBuffer()
+    const llm: LLMPort = {
+      async *stream(_i: StreamInput): AsyncIterable<StreamEvent> {
+        yield { type: "text_delta", delta: "partial..." }
+        ac.abort()
+        yield { type: "text_delta", delta: "...never observed" }
+        yield { type: "message_stop", stop_reason: "end_turn" }
+      },
+    }
+    const out = await noUnhandledRejection(() =>
+      withTimeout(
+        runAgent(
+          cfg({
+            llm,
+            signal: ac.signal,
+            interruptedTurnBuffer: buffer,
+            messages: [{ role: "user", content: [{ type: "text", text: "go" }] }] as Message[],
+          }),
+        ),
+        10_000,
+        "mid-stream-abort-partial",
+      ),
+    )
+    expect(out.reason).toBe("aborted")
+    expect(buffer.peek()?.userText).toBe("go")
+    expect(buffer.peek()?.partialAssistantText).toBe("partial...")
+  })
+
   test("abort AFTER one productive tool turn → aborted, turns 1 (corrected C11)", async () => {
     // Turn 1 is a real tool turn (productive → counts). Then abort before the
     // second turn streams: the `runTurn`-top guard returns `{kind:"aborted"}`

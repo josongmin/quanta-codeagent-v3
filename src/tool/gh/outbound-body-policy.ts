@@ -22,11 +22,18 @@ export interface OutboundBodyPolicyPort {
 
 const ELLIPSIS_BYTES = 3
 
+const utf8Prefix = (buf: Buffer, maxBytes: number): string => {
+  let end = Math.max(0, Math.min(maxBytes, buf.length))
+  while (end > 0 && end < buf.length && ((buf[end] ?? 0) & 0xc0) === 0x80) end--
+  return buf.subarray(0, end).toString("utf8")
+}
+
 const utf8Truncate = (text: string, maxBytes: number): string => {
   const buf = Buffer.from(text, "utf8")
   if (buf.length <= maxBytes) return text
-  const trimBudget = Math.max(0, maxBytes - ELLIPSIS_BYTES)
-  return `${buf.subarray(0, trimBudget).toString("utf8")}…`
+  if (maxBytes <= 0) return ""
+  if (maxBytes < ELLIPSIS_BYTES) return ".".repeat(maxBytes)
+  return `${utf8Prefix(buf, maxBytes - ELLIPSIS_BYTES)}…`
 }
 
 export const createGhCommentBodyPolicy = (opts: {

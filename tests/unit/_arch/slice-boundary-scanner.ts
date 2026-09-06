@@ -12,14 +12,17 @@ import { assertScanPopulation } from "../_shared/scan-population"
 
 const REPO_ROOT = join(import.meta.dir, "../../..")
 
+export type SliceAllowImport = string | { readonly spec: string; readonly files: readonly string[] }
+
 export interface SliceBoundaryConfig {
   readonly slice: string
   /** Import specifiers denied under this slice (exact or `@/slice/...` prefix). */
   readonly denyImports: readonly string[]
   /** Documented carve-outs: imports that match a `denyImports` prefix but are
-   *  explicitly allowed as named sub-barrels. Use sparingly — each entry is a
-   *  declared cross-slice contract that must be defended at review time. */
-  readonly allowImports?: readonly string[]
+   *  explicitly allowed as named sub-barrels. A bare string applies to every
+   *  file in the slice. A `{spec, files}` entry is limited to those slice-
+   *  relative paths (posix, OS-independent). */
+  readonly allowImports?: readonly SliceAllowImport[]
   readonly stdioAllowFiles?: readonly string[]
   readonly envAllowFiles?: readonly string[]
   readonly consoleAllowFiles?: readonly string[]
@@ -559,16 +562,53 @@ const isDeniedImport = (
   return false
 }
 
+/** Posix-slash relative path, independent of the host path separator. */
+const posixNorm = (p: string): string => p.replaceAll("\\", "/").replace(/^\.\//, "")
+
+const posixRel = (from: string, to: string): string => posixNorm(relative(from, to))
+
+const fileMatchesAllow = (fromFile: string, files: readonly string[]): boolean => {
+  const norm = posixNorm(fromFile)
+  const leaf = norm.split("/").pop() ?? norm
+  for (const raw of files) {
+    const f = posixNorm(raw)
+    if (norm === f || leaf === f || norm.endsWith(`/${f}`)) return true
+  }
+  return false
+}
+
+/** Specifiers allowed for `fromFile`. File-scoped entries apply only when a
+ *  file is supplied; omitting the file keeps them denied (fail closed). */
+export const allowSpecsForFile = (
+  entries: readonly SliceAllowImport[] | undefined,
+  fromFile: string | undefined,
+): Set<string> => {
+  const allow = new Set<string>()
+  for (const e of entries ?? []) {
+    if (typeof e === "string") {
+      allow.add(e)
+      continue
+    }
+    if (fromFile !== undefined && fileMatchesAllow(fromFile, e.files)) allow.add(e.spec)
+  }
+  return allow
+}
+
 /** Policy-level predicate: would `config`'s deny-list flag a VALUE import of
  *  `spec`? Composed EXACTLY as `registerSliceBoundarySuite` does (same
  *  self-prefix strip + deny/allow sets), so a negative test that drives this
  *  proves the LIVE guard fires on a synthetic violation without needing an
  *  on-disk fixture. (Type-only imports never reach this — `extractImports`
- *  skips `import type` upstream.) */
-export const isImportDeniedByConfig = (spec: string, config: SliceBoundaryConfig): boolean => {
+ *  skips `import type` upstream.) `fromFile` is a slice-relative posix path
+ *  or basename; omit it to apply only global string allows. */
+export const isImportDeniedByConfig = (
+  spec: string,
+  config: SliceBoundaryConfig,
+  fromFile?: string,
+): boolean => {
   const selfPrefix = `@/${config.slice}`
   const deny = new Set(config.denyImports.filter((d) => d !== selfPrefix))
-  const allow = new Set(config.allowImports ?? [])
+  const allow = allowSpecsForFile(config.allowImports, fromFile)
   return isDeniedImport(spec, deny, allow)
 }
 
@@ -701,7 +741,6 @@ export const registerSliceBoundarySuite = (config: SliceBoundaryConfig): void =>
   // intent universal without per-slice config maintenance.
   const selfPrefix = `@/${config.slice}`
   const deny = new Set(config.denyImports.filter((d) => d !== selfPrefix))
-  const allow = new Set(config.allowImports ?? [])
   const stdioAllow = new Set(config.stdioAllowFiles ?? [])
   const envAllow = new Set(config.envAllowFiles ?? [])
   const consoleAllow = new Set(config.consoleAllowFiles ?? [])
@@ -759,9 +798,10 @@ export const registerSliceBoundarySuite = (config: SliceBoundaryConfig): void =>
     test("no file imports from the slice deny-list", () => {
       const violations: string[] = []
       for (const { file: f, src } of scanned("deny-list")) {
+        const allow = allowSpecsForFile(config.allowImports, posixRel(dir, f))
         for (const { line, spec } of extractImports(src)) {
           if (isDeniedImport(spec, deny, allow)) {
-            violations.push(`${relative(dir, f)}:${line}  import "${spec}"`)
+            violations.push(`${posixRel(dir, f)}:${line}  import "${spec}"`)
           }
         }
       }

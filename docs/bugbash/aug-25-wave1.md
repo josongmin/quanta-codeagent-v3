@@ -845,6 +845,273 @@
 15. **P2 migration:** #100-104 throttle/digest/IPC import unification
 16. **Backlog:** #93-98 search/skill wiring, #79-85 transport/obs determinism
 
+---
+
+## Master Execution Plan (최종 통합 계획)
+
+> 111건 전체를 **6개 프로그램 · 8주 로드맵**으로 묶은 실행 계획. 각 프로그램은 배경·목적·액션·완료 기준·관련 #을 포함.
+
+### North Star
+
+| | |
+|---|---|
+| **배경** | quanta-codeagent-v3는 ~627k LOC, 3,312 tests, 50 slices. 아키텍처(헥사고날+slice fence)는 업계 상위권이나, **규모 성장**·**surface 분화**(CLI / apps/agent / web-daemon / bench)·**ratchet full cohort**가 동시에 압박 중. 3-wave bugbash에서 111건 식별. |
+| **목적** | (1) **CI unblock** — 다음 feature 전 cohort headroom 확보 (2) **correctness** — user-visible / security / bench grading (3) **composition SSOT** — surface마다 다른 wiring 제거 (4) **catalog truth** — L4인데 unwired인 false-green 제거 (5) **ratchet burn-down** — env/Date.now/complexity 단방향 감소 |
+| **원칙** | ratchet는 **올리지 않음** (allowlist/ceiling). wire-or-hold (seam-only는 catalog demote). split-before-grow (900-band). every fix ships **hellgate**. PR은 프로그램 단위(1–3일). |
+
+### 프로그램 맵
+
+```mermaid
+flowchart LR
+  subgraph P0["Program 0 — Unblock (Week 1)"]
+    A1[god-code splits]
+  end
+  subgraph P1["Program 1 — Agent Core (Week 2-3)"]
+    B1[loop correctness]
+    B2[compaction/DI]
+  end
+  subgraph P2["Program 2 — Security (Week 2-3)"]
+    C1[Layer-1 redaction]
+    C2[jail parity]
+  end
+  subgraph P3["Program 3 — Composition SSOT (Week 3-4)"]
+    D1[permissionStore]
+    D2[surface parity]
+  end
+  subgraph P4["Program 4 — Transport (Week 4-5)"]
+    E1[MCP/LLM]
+    E2[session round-trip]
+  end
+  subgraph P5["Program 5 — Truth & Fence (Week 5-6)"]
+    F1[catalog]
+    F2[slice/mirrors]
+  end
+  subgraph P6["Program 6 — Burn-down (Week 6-8)"]
+    G1[env/now]
+    G2[P2 backlog]
+  end
+  P0 --> P1 & P2
+  P1 & P2 --> P3
+  P3 --> P4
+  P4 --> P5
+  P5 --> P6
+```
+
+---
+
+### Program 0 — CI Unblock (Week 1) 🔴
+
+| | |
+|---|---|
+| **배경** | 900–999줄 cohort **24/24 full**. `run-main.ts` 998줄, `runTurn` body 150줄 cliff. 새 코드 merge 전 **반드시 split**. |
+| **목적** | god-module/function ratchet RED 방지. cohort `max` 24→23 이상 확보. |
+| **관련 #** | #1–4, #3, #6, #7 (partial) |
+
+**액션**
+
+| PR | 작업 | 파일 | 완료 기준 |
+|----|------|------|-----------|
+| 0-A | `run-main.ts` 분할 | `apps/bench/run-main-*.ts` | <850줄; cohort -1; bench tests green |
+| 0-B | `runTurn` extract helpers | `agent/loop/same-turn-engine.ts` | body <140줄; turn hellgates green |
+| 0-C | `tool/index.ts` re-export cluster 추출 | `tool/exports/*.ts` | index <700줄 |
+| 0-D | (선택) `agent-config-assembler` or `compaction` split | host/agent | cohort -1 |
+
+**게이트:** `bun test tests/unit/god-code-ratchet.test.ts` + `bun run test:ci` subset.
+
+---
+
+### Program 1 — Agent Core Correctness (Week 2–3) 🟠
+
+| | |
+|---|---|
+| **배경** | ReAct loop는 제품 핵심. Jul-2 6건 fixed 확인했으나 abort/resume/compaction/bench wiring gap 잔존. `AgentConfig` 220 fields, compaction 983줄. |
+| **목적** | turn lifecycle 정합성. compaction token baseline 정확성. bench가 interactive와 동일 permission/admissibility 경로 사용. |
+| **관련 #** | #5–6, #8–9, #10–11, #30–34, #38, #43–44 |
+
+**액션**
+
+| PR | 작업 | 완료 기준 |
+|----|------|-----------|
+| 1-A **Abort/resume** | #30 partial stream capture on abort; #44 interrupted capture 정책 결정 | hellgate: mid-turn Ctrl+C → `/resume`에 text 존재 |
+| 1-B **Compaction** | #31 `recordSendCount` in `compactNowOnDemand`; #6 split + `now` inject (#11) | `compact-now-baseline-invalidation.test.ts` + new send-count test |
+| 1-C **Permission DI** | #10 #32–33 bench `permissionStore` inject; remove `getDefaultPermissionStore` fallback | `no-getDefaultPermissionStore` allowlist → 0 |
+| 1-D **ADR-0061** | #38 #21 pending-permission queue in `dispatch.ts` | `remember-patterns-cascade-hell` passes in prod path |
+| 1-E **Bench SSOT** | #34 #57 wire or delete `decidePrimaryRailFinishGate`; unify `repairCandidateClears` | primary-rail.test + repair integration |
+| 1-F **Complexity** | #8 #9 split `dap-client.ingest`, `gitBranchSwitchTool.execute` | lint-debt prod complexity -2, worst score unchanged or ↓ |
+| 1-G **Dead exports** | #36 wire `run-once` or delete; #37 wire or delete `withRetryPRetry`, `globWriteGuardEnabled` | grep prod importers >0 or file deleted |
+
+**게이트:** `bun test tests/unit/agent tests/integration` + `crash-resume-hellgate`.
+
+---
+
+### Program 2 — Security Hardening (Week 2–3, parallel) 🟠
+
+| | |
+|---|---|
+| **배경** | Layer-1 redaction은 `classifySource` 선언에 의존. `grep`/`container_exec` gap. sensitivity classifier wrapper bypass. DXT plugin env inject. |
+| **목적** | secret leak 경로 차단. jail parity across read tools. plugin spawn env allowlist. |
+| **관련 #** | #70–72, #71, #108, #109 |
+
+**액션**
+
+| PR | 작업 | 완료 기준 |
+|----|------|-----------|
+| 2-A **classifySource** | #70 `container_exec` + audit other shell tools | dispatch Layer-1 redaction hellgate per tool |
+| 2-B **Classifier** | #71 `-c`/`-lc` unwrap in `sensitivity-classifier.ts` | `bash -c printenv` → secret |
+| 2-C **Grep jail** | #72 reuse `collectSurvivors` pattern | `grep-jail-symlink-hellgate.test.ts` RED-on-injection |
+| 2-D **Plugin env** | #108 DXT manifest env allowlist | block `LD_PRELOAD`/`NODE_OPTIONS` in manifest |
+| 2-E **Env inject** | #109 container_exec cap from `ctx.env` | no module-load `process.env` |
+
+**게이트:** `tests/unit/security/*` + `permission/git-write-guard`.
+
+---
+
+### Program 3 — Composition SSOT (Week 3–4) 🟠
+
+| | |
+|---|---|
+| **배경** | 4+ composition roots (CLI, apps/agent, web-daemon, serve-stdio, bench)가 bootstrap/gates/skills/memory를 **다르게** wire. `wired≠engages` 반복. |
+| **목적** | 단일 composition contract. `apps/agent` = degraded가 아닌 first-class 또는 explicit non-prod. SDK = protocol parity. |
+| **관련 #** | #14, #15, #17, #35, #47, #59, #73–75, #86–92, #89–90 |
+
+**액션**
+
+| PR | 작업 | 완료 기준 |
+|----|------|-----------|
+| 3-A **Shared boot** | `apps/shared/boot-env.ts` — gate seeding (#89) + doc | `agent:*` ≡ `quanta` default gates |
+| 3-B **apps/agent bootstrap** | #75 route through `bootstrapSession` / `setupSession` | posture/skills/MCP parity test |
+| 3-C **SDK verbs** | #73 extend `SessionVerbSurface` + `ipc/session/handle` | compile pin: handle ⊆ command union |
+| 3-D **Web-daemon** | #86 stdio/web skills; #88 user-input cancel on turn abort; #87 protocol doc or promote | web integration smoke |
+| 3-E **Memory web** | #47 #92 explicit `QUANTA_WEB_MEMORY_WRITE` or catalog demote | fc reachability honest |
+| 3-F **AgentConfig** | #5 narrow Pick ratchet (static scan: new field ⇒ owning Pick) | new field PR fails without Pick |
+| 3-G **Host wires** | #17 move `deny-reason-wire`, `verify-checkpoint-bridge` → `host/runtime/` | slice-boundary unchanged |
+
+**게이트:** `all-campaign-gates-on-e2e` or surface parity hellgate suite.
+
+---
+
+### Program 4 — Transport & Session Integrity (Week 4–5) 🟠🟡
+
+| | |
+|---|---|
+| **배경** | MCP isolated ≠ in-process. HTTP-SSE half-dead. retry policy bypasses HITL table. session import/export sidecar broken round-trip. ADR-0217 unwired. |
+| **목적** | transport correctness. session envelope trust. typed error routing in production. |
+| **관련 #** | #13, #67–69, #68, #78, #76–77, #79–85, #99–104 |
+
+**액션**
+
+| PR | 작업 | 완료 기준 |
+|----|------|-----------|
+| 4-A **MCP** | #67 downgrade in isolated; #69 SSE `fireExit`; #84 capabilities negotiator | isolated protocol-version hellgate |
+| 4-B **LLM retry** | #68 `hitl_handoff` → `no_retry`; #78 wire error routing at `assemble/llm.ts` | red-on-injection: cyber_policy+429 no retry |
+| 4-C **Session I/O** | #76–77 sidecar hydrate/export; #103 digest default; #104 IPC unify | round-trip integration: export→import→checkpoint restored |
+| 4-D **LSP/stream** | #79 EXDEV fallback; #80 TeeStream degrade all surfaces; #83 signature_delta | lsp atomic-write + stream degrade hellgates |
+| 4-E **Migration** | #100–102 throttle ledger durability + warnings | migration hellgate interleave |
+| 4-F **Assemble env** | #99 remove `runtimeConfig()` from assemble — inject deps | assemble slice-boundary test |
+
+**게이트:** `bun test tests/contract` (if MCP/LSP touched) + session import-export integration.
+
+---
+
+### Program 5 — Truth, Fence & Test Teeth (Week 5–6) 🟡
+
+| | |
+|---|---|
+| **배경** | Feature catalog false-green (L4 + cli missing). baseline.json stale. slice mirror 4/47 only. hellgates weak on revert. 181 process.env allowlist. |
+| **목적** | catalog = runtime truth. fence enforced at IDE + CI. tests fail on revert. |
+| **관련 #** | #16, #19, #20, #23, #35, #58, #59, #60–61, #39–41, #74 |
+
+**액션**
+
+| PR | 작업 | 완료 기준 |
+|----|------|-----------|
+| 5-A **Catalog audit** | #35 #58 #59 #74 fix YAML or wire; refresh `baseline.json` (#19) | `bun fc validate` + `bun fc diff` + `bun fc reachability --strict` |
+| 5-B **Wire-or-hold** | #20 deferred-tool-registry, dockersandbox, memory-telemetry — wire scheduler or `status: hold` | fc gates warn → 0 for promoted items |
+| 5-C **Mirrors** | #16 extend `cross-slice-mirrors.test.ts` (+10 closed unions) | tsc fails on mirror drift |
+| 5-D **Slice fence** | #15 PEER_LIBRARY_DENY + security/auth; #14 side-agent allowImports narrow; #23 biome S4b overrides | slice-boundary tests + biome local catch |
+| 5-E **Hellgate teeth** | #39–40 merge contract tests; #41 deferred-async integration; #61 R10 batch (top 20 env tests) | red-on-injection verified per merged hellgate |
+| 5-F **StreamEvent** | #13 shared `collectAssistantTurn` + adapter contract test | duplicate collectText removed |
+
+**게이트:** `bun run test:ci` + `bun run pm:gate` + `bun fc check-changed`.
+
+---
+
+### Program 6 — Burn-down & Backlog (Week 6–8) 🟡🟢
+
+| | |
+|---|---|
+| **배경** | 51 P2 + 20 P3 잔여. complexity 143 prod. permission/session P2 (lock, rewind, shell assess). search/skill unwired. |
+| **목적** | ratchet 단방향 감소. 운영 혼란 제거. skill/search either works or honest hold. |
+| **관련 #** | #12, #22, #42–66, #93–111 (P2/P3 잔여) |
+
+**액션 (배치)**
+
+| Batch | 테마 | # | 목표 |
+|-------|------|---|------|
+| 6-A | env burn-down | #12 #22 #60 #82 | process.env allowlist 181→<150 |
+| 6-B | session hardening | #49–52 #62 | cross-process lock spike; rewind envelope; integration smoke |
+| 6-C | permission depth | #45–46 #53–54 | flushDurable; shell assess split; parser ready gate |
+| 6-D | search/skill | #93–98 #95 | scope in pipeline; plan-writeback wire; shadow_verify bench |
+| 6-E | observability | #80–81 #111 | degrade signals; GenAI `now` inject |
+| 6-F | docs/P3 | #24 #63–66 #109–110 | comment fixes; sotaOn delete; accepted debt documented |
+
+**게이트:** `bun run lint:debt --tighten` (only when regressing=0).
+
+---
+
+### 8-Week Calendar
+
+| Week | Programs | Primary deliverables | # closed (target) |
+|------|----------|---------------------|-------------------|
+| **1** | P0 | cohort headroom +3 splits | #1–4, partial #6–7 |
+| **2** | P1 + P2 start | abort/resume, security 2-A–C, permission DI | #10, #30–33, #70–72 |
+| **3** | P1 finish + P2 + P3 start | ADR-0061, bench SSOT, apps/agent bootstrap | #34, #38, #75, #89 |
+| **4** | P3 + P4 start | SDK verbs, web-daemon, MCP/LLM transport | #67–69, #73, #86–88 |
+| **5** | P4 | session round-trip, error routing, migration | #76–78, #100–104 |
+| **6** | P5 | catalog truth, mirrors, hellgate teeth | #16, #19, #35, #39–41, #58–59 |
+| **7** | P6 A–C | env/session/permission burn-down | #45–46, #49–52, #60 |
+| **8** | P6 D–F | search/skill, P3 backlog, tighten | residual P2/P3 |
+
+**Target:** Week 8 end — P0=0, P1=0, P2<20, P3 documented/deferred.
+
+---
+
+### PR 규칙 (모든 프로그램 공통)
+
+1. **Scope:** 1 프로그램 서브-PR = 1 concern. god-split과 behavior fix 분리.
+2. **Test:** behavior fix ⇒ hellgate or integration. split-only ⇒ god-code ratchet + existing suite.
+3. **Catalog:** feature touch ⇒ `bun fc validate` + evidence update.
+4. **Ratchet:** allowlist/ceiling **never raised**. improvement ⇒ `lint:debt --tighten` or allowlist entry removal.
+5. **Hold:** wire 비용 > ROI ⇒ `deliberate_hold` in YAML + reachability exclude (not silent L4).
+
+---
+
+### 성공 지표 (Week 8)
+
+| Metric | Now | Target |
+|--------|-----|--------|
+| 900-band cohort | 24/24 | ≤20/20 (lower ceiling) |
+| P1 open | 36 | 0 |
+| `no-process-env` allowlist | 181 | <120 |
+| `cross-slice-mirrors` pairs | 4 | ≥15 |
+| Catalog `cli: missing` @ L4 | ≥3 | 0 |
+| Session import/export round-trip | broken | integration green |
+| `getDefaultPermissionStore` prod calls | >0 | 0 |
+
+---
+
+### 리스크 & 의존성
+
+| Risk | Mitigation |
+|------|------------|
+| split PR conflicts with feature work | P0 first; freeze 900-band files during week 1 |
+| apps/agent bootstrap = large refactor | 3-B can ship read-only doc first, then wire |
+| StreamEvent telemetry split (#13) high effort | defer to P5-F; not blocking P1 |
+| session cross-process lock scope creep | spike in 6-B; ADR if OS lock needed |
+| 111 items scope creep | P3+ strict wire-or-hold; P6 is best-effort |
+
+**Out of scope (explicit):** LoC reduction target, coverage % gate, eval/SWE-bench resolution%, FSM/workflow engine (RFC non-goals).
+
 ## 참고 문서
 
 - [docs/ARCHITECTURE.md](../ARCHITECTURE.md) — ports/adapters, slice fence

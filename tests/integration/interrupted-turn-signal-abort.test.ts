@@ -152,6 +152,34 @@ describe("path (c) — resolveTurnLoopOutcome result.kind==='aborted'", () => {
     const res = await runOutcome(cfg, wm)
     expect(res.kind).toBe("finish")
   })
+
+  test("captured:true does not recapture stream salvage (duplicate-capture control)", async () => {
+    const buffer = createInterruptedTurnBuffer()
+    buffer.capture({
+      userText: "go",
+      partialAssistantText: "partial...",
+      reason: "conversation_cancel",
+      interruptedAt: 1,
+    })
+    const cfg = buildCfg({ buffer, aborted: false })
+    const wm = fakeWm([msg("user", "go")])
+    const res = await resolveTurnLoopOutcome({
+      cfg,
+      stream: noopStream as never,
+      wm: wm as never,
+      breaker: undefined,
+      recorder: undefined,
+      turn: 5,
+      result: { kind: "aborted", captured: true, salvage: { partialText: "partial..." } },
+      pendingPlanExitRef: { current: [] },
+      pendingPlanEntryRef: { current: [] },
+      hookPromptPending: [],
+    })
+    expect(res.kind).toBe("finish")
+    expect(buffer.peek()?.reason).toBe("conversation_cancel")
+    expect(buffer.peek()?.partialAssistantText).toBe("partial...")
+    expect(buffer.peek()?.interruptedAt).toBe(1)
+  })
 })
 
 describe("inFlightTools — in-flight tool_use summary (ids/names ONLY)", () => {

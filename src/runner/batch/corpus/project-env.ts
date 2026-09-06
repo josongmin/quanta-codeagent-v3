@@ -132,6 +132,10 @@ interface RepoEnvOverride {
    * This is the dist name (`astropy`), NOT the import name of the build dep.
    */
   readonly distName?: string
+  /** Rebuild this editable distribution after every source reset. Required for
+   * native-extension repos where uv may otherwise reuse an artifact compiled
+   * from a different checkout state. */
+  readonly reinstallEditable?: boolean
   /** Env-only source import rewrites materialized into matching repo files. */
   readonly sourceImportShims?: readonly RepoSourceImportShim[]
 }
@@ -173,6 +177,7 @@ const REPO_ENV_OVERRIDES: Record<string, RepoEnvOverride> = {
     },
     buildDeps: ["extension-helpers"],
     distName: "astropy",
+    reinstallEditable: true,
     sourceImportShims: [
       {
         targetBasenames: ["setup.py", "setup_package.py"],
@@ -268,6 +273,14 @@ export const buildProjectEnvUvRunArgv = (
   }
   argv.push("uv", "run", "--no-project")
   argv.push("--python", pythonForRepoVersion(repo, version))
+  const override = REPO_ENV_OVERRIDES[repo]
+  if (override?.reinstallEditable === true && override.distName !== undefined) {
+    // `--reinstall-package` alone can still relink uv's cached editable artifact
+    // after `git clean -fdx` removed its native extensions. Native-extension
+    // rematerialization must compile from the current checkout, not that cache.
+    argv.push("--no-cache")
+    argv.push("--reinstall-package", override.distName)
+  }
   for (const dep of deps) argv.push("--with", dep)
   // editable install with the official `.[extra]` (e.g. sphinx `.[test]`) so the
   // env pulls the extras the tests import; bare `.` when the spec has no extra OR

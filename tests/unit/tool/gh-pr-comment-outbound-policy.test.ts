@@ -75,4 +75,13 @@ describe("gh_pr_comment outbound policy", () => {
     )
     expect(calls.some((a) => a.join(" ").includes("fixture-pass-not-live"))).toBe(false)
   })
+
+  test("multibyte truncation is valid UTF-8 and never exceeds the byte cap", () => {
+    const policy = createGhCommentBodyPolicy({ redact: (text) => text, maxBytes: 256 })
+    const prepared = policy.prepare("가".repeat(200))
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(Buffer.byteLength(prepared.body, "utf8")).toBeLessThanOrEqual(256)
+    expect(prepared.body).not.toContain("�")
+  })
 })

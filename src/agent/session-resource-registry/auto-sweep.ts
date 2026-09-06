@@ -13,12 +13,13 @@
  *
  * This file owns the auto-wire seam: on `getGlobalSessionResourceRegistry()`
  * first call we may also start a periodic sweep handle. The handle is
- * env-gated so the in-memory default path stays byte-identical.
+ * cfg-gated (the first-call `runtimeConfig()` snapshot from `global.ts`)
+ * so the in-memory default path stays byte-identical.
  *
- * # Trigger policy (env-gated)
+ * # Trigger policy (explicit config)
  *
- *   - `QUANTA_SESSION_REGISTRY_DISK_DIR`         ⇒ schedule disk sweep
- *   - `QUANTA_SESSION_REGISTRY_SQLITE_PATH`      ⇒ schedule sqlite sweep
+ *   - non-empty `cfg.diskDir`     ⇒ schedule disk sweep
+ *   - non-empty `cfg.sqlitePath`  ⇒ schedule sqlite sweep
  *
  * If BOTH are set, BOTH are swept on every tick (one sweep does not
  * preclude the other — they target different backends). If NEITHER is
@@ -55,10 +56,11 @@
  *
  * # Default-OFF
  *
- * `startAutoSweep` is a leaf — only `global.ts` calls it, and only when
- * one of the gated env vars is set. The in-memory default path never
- * hits this file's `setInterval`, so a process that never sets the env
- * var is byte-identical to pre-ADR-0369.
+ * `startAutoSweep` is a leaf — `global.ts` and the CLI cleanup slash call it
+ * with an explicit {@link AutoSweepConfig} projected from one `runtimeConfig()`
+ * snapshot. The in-memory default path never hits this file's `setInterval`,
+ * so a process that never sets a durable registry path is byte-identical to
+ * pre-ADR-0369.
  *
  * # Test reset
  *
@@ -87,15 +89,14 @@ export interface AutoSweepConfig {
    */
   readonly intervalMs?: number
   /**
-   * Explicit override for the disk dir env var. When provided, used
-   * verbatim (empty string still means "not set"). When omitted, the
-   * value of `process.env.QUANTA_SESSION_REGISTRY_DISK_DIR` is read.
+   * Disk registry directory. Empty / omitted means "not set". Callers
+   * (only `global.ts`) MUST pass the `runtimeConfig()` snapshot field —
+   * this leaf does not re-read env.
    */
   readonly diskDir?: string
   /**
-   * Explicit override for the sqlite path env var. When provided, used
-   * verbatim. When omitted,
-   * `process.env.QUANTA_SESSION_REGISTRY_SQLITE_PATH` is read.
+   * Sqlite registry path. Empty / omitted means "not set". Same
+   * snapshot-authority contract as {@link diskDir}.
    */
   readonly sqlitePath?: string
   /**
@@ -131,7 +132,7 @@ export interface AutoSweepConfig {
   readonly metricsEmitter?: MetricEmitterPort
   /**
    * ADR-0390 — forward to {@link SqliteRegistryConfig.walSizeThresholdBytes}.
-   * When supplied (and the env-resolved sqlitePath is non-empty), the
+   * When supplied (and sqlitePath is non-empty), the
    * auto-sweep's sqlite pass runs the ADR-0375 RESTART check (or ADR-0385
    * TRUNCATE when {@link walCheckpointUpgradeMode} is also set). Default
    * absent ⇒ PASSIVE-only checkpoint, byte-identical to pre-R15 auto-sweep.
@@ -148,6 +149,34 @@ export interface AutoSweepConfig {
    */
   readonly walCheckpointUpgradeMode?: SqliteRegistryConfig["walCheckpointUpgradeMode"]
 }
+
+/**
+ * Project one `runtimeConfig()` snapshot into an explicit {@link AutoSweepConfig}.
+ * Auto-sweep never re-reads env; callers (global singleton + CLI cleanup)
+ * MUST pass this projection of the same snapshot that selected the backend.
+ */
+export type AutoSweepRuntimeSnapshot = {
+  readonly sessionRegistryDiskDir: string | undefined
+  readonly sessionRegistrySqlitePath: string | undefined
+  readonly sessionRegistryWalThresholdBytes?: number | undefined
+  readonly sessionRegistryWalCheckpointMode?:
+    | SqliteRegistryConfig["walCheckpointUpgradeMode"]
+    | undefined
+}
+
+export const autoSweepConfigFromRuntime = (
+  snapshot: AutoSweepRuntimeSnapshot,
+): AutoSweepConfig => ({
+  diskDir: snapshot.sessionRegistryDiskDir ?? "",
+  sqlitePath: snapshot.sessionRegistrySqlitePath ?? "",
+  ...(typeof snapshot.sessionRegistryWalThresholdBytes === "number"
+    ? { walSizeThresholdBytes: snapshot.sessionRegistryWalThresholdBytes }
+    : {}),
+  ...(snapshot.sessionRegistryWalCheckpointMode === "RESTART" ||
+  snapshot.sessionRegistryWalCheckpointMode === "TRUNCATE"
+    ? { walCheckpointUpgradeMode: snapshot.sessionRegistryWalCheckpointMode }
+    : {}),
+})
 
 /**
  * Handle for a running auto-sweep loop. Returned by `startAutoSweep`.
@@ -196,59 +225,33 @@ const NOOP_HANDLE: AutoSweepHandle = {
   scheduled: false,
 }
 
-/** Env var names — kept here so the wire is single-sourced. */
-const DISK_DIR_ENV = "QUANTA_SESSION_REGISTRY_DISK_DIR"
-const SQLITE_PATH_ENV = "QUANTA_SESSION_REGISTRY_SQLITE_PATH"
-/** ADR-0390 — env override for ADR-0375 WAL size threshold. Parsed as base-10 integer; non-finite ⇒ unset. */
-const WAL_THRESHOLD_ENV = "QUANTA_SESSION_REGISTRY_WAL_THRESHOLD_BYTES"
-/** ADR-0390 — env override for ADR-0385 WAL upgrade mode. Whitelist enforced downstream. */
-const WAL_MODE_ENV = "QUANTA_SESSION_REGISTRY_WAL_CHECKPOINT_MODE"
+const resolveDiskDir = (cfg: AutoSweepConfig | undefined): string =>
+  typeof cfg?.diskDir === "string" ? cfg.diskDir : ""
 
-const resolveDiskDir = (cfg: AutoSweepConfig | undefined): string => {
-  // Explicit cfg field wins over env. Empty string is treated as unset
-  // (same convention as ADR-0351's disk-dir env var).
-  if (typeof cfg?.diskDir === "string") return cfg.diskDir
-  const fromEnv = process.env[DISK_DIR_ENV]
-  return typeof fromEnv === "string" ? fromEnv : ""
-}
-
-const resolveSqlitePath = (cfg: AutoSweepConfig | undefined): string => {
-  if (typeof cfg?.sqlitePath === "string") return cfg.sqlitePath
-  const fromEnv = process.env[SQLITE_PATH_ENV]
-  return typeof fromEnv === "string" ? fromEnv : ""
-}
+const resolveSqlitePath = (cfg: AutoSweepConfig | undefined): string =>
+  typeof cfg?.sqlitePath === "string" ? cfg.sqlitePath : ""
 
 /**
  * ADR-0390 — resolve the WAL size threshold for the sqlite sweep.
- * cfg wins over env. Negative / NaN / non-finite ⇒ undefined so
- * `sweepSqliteRegistry` falls back to PASSIVE-only (byte-identical
- * to pre-R15 auto-sweep).
+ * Negative / NaN / non-finite ⇒ undefined so `sweepSqliteRegistry` falls
+ * back to PASSIVE-only (byte-identical to pre-R15 auto-sweep).
  */
 const resolveWalThresholdBytes = (cfg: AutoSweepConfig | undefined): number | undefined => {
-  if (typeof cfg?.walSizeThresholdBytes === "number") {
-    return Number.isFinite(cfg.walSizeThresholdBytes) && cfg.walSizeThresholdBytes >= 0
-      ? cfg.walSizeThresholdBytes
-      : undefined
-  }
-  const fromEnv = process.env[WAL_THRESHOLD_ENV]
-  if (typeof fromEnv !== "string" || fromEnv.length === 0) return undefined
-  const parsed = Number.parseInt(fromEnv, 10)
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined
+  if (typeof cfg?.walSizeThresholdBytes !== "number") return undefined
+  return Number.isFinite(cfg.walSizeThresholdBytes) && cfg.walSizeThresholdBytes >= 0
+    ? cfg.walSizeThresholdBytes
+    : undefined
 }
 
 /**
- * ADR-0390 — resolve the WAL upgrade mode. cfg wins over env. Unknown
- * strings forwarded as-is; `sweepSqliteRegistry`'s `ALLOWED_UPGRADE_MODES`
- * whitelist silently coerces them to noop (defense in depth).
+ * ADR-0390 — resolve the WAL upgrade mode. Unknown strings forwarded
+ * as-is; `sweepSqliteRegistry`'s `ALLOWED_UPGRADE_MODES` whitelist
+ * silently coerces them to noop (defense in depth).
  */
 const resolveWalUpgradeMode = (
   cfg: AutoSweepConfig | undefined,
-): SqliteRegistryConfig["walCheckpointUpgradeMode"] => {
-  if (typeof cfg?.walCheckpointUpgradeMode === "string") return cfg.walCheckpointUpgradeMode
-  const fromEnv = process.env[WAL_MODE_ENV]
-  if (typeof fromEnv !== "string" || fromEnv.length === 0) return undefined
-  return fromEnv as SqliteRegistryConfig["walCheckpointUpgradeMode"]
-}
+): SqliteRegistryConfig["walCheckpointUpgradeMode"] =>
+  typeof cfg?.walCheckpointUpgradeMode === "string" ? cfg.walCheckpointUpgradeMode : undefined
 
 /**
  * NO-THROW wrapper around emitter calls. ADR-0373 contract says emit is
@@ -397,9 +400,9 @@ const sweepOnce = async (
  * Start the auto-sweep loop.
  *
  * Behaviour:
- *   - If neither env var is set ⇒ returns a no-op handle. No timer
+ *   - If neither diskDir nor sqlitePath is set ⇒ returns a no-op handle. No timer
  *     scheduled, no on-startup sweep.
- *   - If at least one env var is set ⇒ run one immediate sweep
+ *   - If at least one path is set ⇒ run one immediate sweep
  *     (fire-and-forget; the returned `sweepNow()` can be awaited to
  *     synchronise) AND schedule a periodic sweep every `intervalMs`.
  *
@@ -426,8 +429,7 @@ export const startAutoSweep = (cfg?: AutoSweepConfig): AutoSweepHandle => {
   const cancel = cfg?.clearIntervalImpl ?? clearInterval
   const emitter = cfg?.metricsEmitter
   // ADR-0390 — Resolve once at start. Periodic ticks pin the values they
-  // saw at `startAutoSweep` time; env changes mid-process require a
-  // restart (same convention as `diskDir` / `sqlitePath`).
+  // saw at `startAutoSweep` time; a later snapshot requires reset + remint.
   const walSizeThresholdBytes = resolveWalThresholdBytes(cfg)
   const walCheckpointUpgradeMode = resolveWalUpgradeMode(cfg)
 

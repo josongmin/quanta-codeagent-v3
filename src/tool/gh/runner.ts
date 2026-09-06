@@ -82,11 +82,21 @@ export const createGhExec = (deps: GhExecDeps = {}): GhExecPort => {
       stderr: "pipe",
     })
     const { kill, disarm } = escalatingKill(proc, GH_TREE_KILLER)
-    const onAbort = (): void => {
+    let terminationStarted = false
+    const terminateOnce = (): void => {
+      if (terminationStarted) return
+      terminationStarted = true
       kill()
     }
+    const onAbort = (): void => {
+      terminateOnce()
+    }
     request.signal?.addEventListener("abort", onAbort, { once: true })
-    const deadline = setTimeout(kill, request.timeoutMs)
+    // The signal can flip after the pre-spawn check but before the listener is
+    // installed. Re-check after registration so that race cannot leave a child
+    // running until its deadline. Both sources share the same one-shot latch.
+    if (request.signal?.aborted) terminateOnce()
+    const deadline = setTimeout(terminateOnce, request.timeoutMs)
     try {
       const [stdout, stderr] = await Promise.all([
         new Response(proc.stdout).text(),

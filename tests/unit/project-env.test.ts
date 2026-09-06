@@ -46,6 +46,9 @@ describe("buildProjectEnvUvRunArgv — astropy env parity (SCAFF-07 / P0 mechani
     // carries the `[test]` extra (not a bare `.`).
     expect(argv).toContain("--with-editable")
     expect(argv[argv.indexOf("--with-editable") + 1]).toBe(".[test]")
+    expect(argv).toContain("--reinstall-package")
+    expect(argv[argv.indexOf("--reinstall-package") + 1]).toBe("astropy")
+    expect(argv).toContain("--no-cache")
   })
 
   test("extraWith deps coexist with the base env (pytest path), still no build flags", () => {
@@ -67,6 +70,8 @@ describe("buildProjectEnvUvRunArgv — astropy env parity (SCAFF-07 / P0 mechani
     expect(argv).toContain("--no-project")
     expect(hasWithDep(argv, "setuptools")).toBe(true)
     expect(argv).toContain("--with-editable")
+    expect(argv).not.toContain("--reinstall-package")
+    expect(argv).not.toContain("--no-cache")
   })
 
   // Slug match must be exact: `astropy/astropy`, not a substring/other form.

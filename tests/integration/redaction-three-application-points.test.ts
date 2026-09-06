@@ -167,6 +167,42 @@ describe("ADR-0078 — three application points", () => {
     expect(rollup?.count ?? 0).toBeGreaterThan(0)
   })
 
+  test("point 1: container_exec Layer-1 substitutes opaque secret output (no Layer-2 pattern)", async () => {
+    const OPAQUE = "opaque-unformatted-secret-value-not-a-regex-shape"
+    const { containerExecTool } = await import("@/tool/container-exec/tool")
+    const tool = containerExecTool({
+      exec: async () => ({ stdout: `${OPAQUE}\nDEBUG=true`, stderr: null, code: 0 }),
+    })
+    const llm = new FakeLLM([
+      toolUse("c1", "container_exec", { command: "bash -c 'printenv'" }),
+      text("done"),
+    ])
+    const stream = new RecordingStream()
+    const outcome = await runAgent(
+      baseConfig({
+        llm,
+        registry: new ToolRegistry([tool]),
+        stream,
+        cwd: dir,
+        permission: { mode: "acceptEdits" } as PermissionContext,
+        system: "test",
+      }),
+    )
+
+    expect(outcome.reason).toBe("completed")
+    const toolResults = stream.events.filter((e) => e.type === "tool_result")
+    const previewText = toolResults
+      .map((e) => (e.type === "tool_result" ? e.preview : ""))
+      .join("\n")
+    expect(previewText).toContain("[REDACTED:source_class_secret]")
+    expect(previewText).not.toContain(OPAQUE)
+    expect(previewText).not.toContain("DEBUG=true")
+    const rollup = outcome.redactions?.find(
+      (r) => r.origin === "tool_result" && r.kind === "source_class_secret",
+    )
+    expect(rollup?.count ?? 0).toBeGreaterThan(0)
+  })
+
   test("ALBB-09 site 5: a THROWING classifySource is fail-safe (dispatch unbroken) AND surfaces a logger.warn(dispatch.classifySource)", async () => {
     // A tool whose `classifySource` throws. The dispatch catch must (a) stay
     // fail-safe — treat as no source class, complete the turn — AND (b) no

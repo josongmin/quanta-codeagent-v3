@@ -148,6 +148,10 @@ const FIELD_OVERRIDES: Readonly<Record<string, FieldOverride>> = {
   // Production safety floor clamps every generic probe (largest is 9999) to the
   // 15000 default, so reflection cannot observe the otherwise live field.
   QUANTA_GOAL_QUIET_MS: { mode: "field", field: "goalQuietMs" },
+  QUANTA_SESSION_REGISTRY_WAL_CHECKPOINT_MODE: {
+    mode: "field",
+    field: "sessionRegistryWalCheckpointMode",
+  },
 }
 
 // ---------------------------------------------------------------------------

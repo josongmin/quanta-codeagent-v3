@@ -176,6 +176,11 @@ const PROBE_VALUES = [
   "background",
   "prompt",
   "shadow",
+  // Session-registry WAL checkpoint enum. Keep both legal tokens so reflection
+  // proves the knob controls a live RuntimeConfig field instead of reporting a
+  // false dead-read violation when generic probe words are all rejected.
+  "RESTART",
+  "TRUNCATE",
   "15001",
 ]
 

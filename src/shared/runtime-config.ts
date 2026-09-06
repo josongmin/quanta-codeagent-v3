@@ -519,6 +519,15 @@ const parseSessionBenchSlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> =
     webDbDir: stringOrUndef(env.QUANTA_WEB_DB_DIR),
     sessionRegistrySqlitePath: stringOrUndef(env.QUANTA_SESSION_REGISTRY_SQLITE_PATH),
     sessionRegistryDiskDir: stringOrUndef(env.QUANTA_SESSION_REGISTRY_DISK_DIR),
+    sessionRegistryWalThresholdBytes: parseNonNegativeInt(
+      env.QUANTA_SESSION_REGISTRY_WAL_THRESHOLD_BYTES,
+      "QUANTA_SESSION_REGISTRY_WAL_THRESHOLD_BYTES",
+    ),
+    sessionRegistryWalCheckpointMode:
+      env.QUANTA_SESSION_REGISTRY_WAL_CHECKPOINT_MODE === "RESTART" ||
+      env.QUANTA_SESSION_REGISTRY_WAL_CHECKPOINT_MODE === "TRUNCATE"
+        ? env.QUANTA_SESSION_REGISTRY_WAL_CHECKPOINT_MODE
+        : undefined,
     cachePathspecsExtra: parseStringList(env.QUANTA_BENCH_CACHE_PATHSPECS_EXTRA),
     dedupEnvPrefixesExtra: parseStringList(env.QUANTA_DEDUP_ENV_PREFIXES_EXTRA),
     permissionStateFile: stringOrUndef(env.QUANTA_PERMISSION_STATE),

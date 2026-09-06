@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   buildResumeMessage,
+  captureAbortedTurn,
   captureInterruptedTurn,
   createInterruptedTurnBuffer,
   type InterruptedTurn,
@@ -95,6 +96,49 @@ describe("InterruptedTurnBuffer", () => {
     b.capture({ userText: "a", partialAssistantText: "", reason: "r", interruptedAt: 1 })
     b.clear()
     expect(b.has()).toBe(false)
+  })
+})
+
+describe("captureAbortedTurn — AbortSalvage merge", () => {
+  const fakeWm = (initial: Message[]) => {
+    const buf = [...initial]
+    return { snapshot: () => buf }
+  }
+
+  test("empty WM partial + salvage text uses salvage", () => {
+    const buffer = createInterruptedTurnBuffer()
+    captureAbortedTurn(
+      { interruptedTurnBuffer: buffer },
+      fakeWm([msg("user", "go")]),
+      "signal_abort",
+      () => 1,
+      { partialText: "streamed so far" },
+    )
+    expect(buffer.peek()?.partialAssistantText).toBe("streamed so far")
+  })
+
+  test("equal WM and salvage keep a single copy", () => {
+    const buffer = createInterruptedTurnBuffer()
+    captureAbortedTurn(
+      { interruptedTurnBuffer: buffer },
+      fakeWm([msg("user", "go"), msg("assistant", "same text")]),
+      "signal_abort",
+      () => 1,
+      { partialText: "same text" },
+    )
+    expect(buffer.peek()?.partialAssistantText).toBe("same text")
+  })
+
+  test("different WM and salvage join even when WM contains salvage as a substring", () => {
+    const buffer = createInterruptedTurnBuffer()
+    captureAbortedTurn(
+      { interruptedTurnBuffer: buffer },
+      fakeWm([msg("user", "go"), msg("assistant", "I said partial... already")]),
+      "signal_abort",
+      () => 1,
+      { partialText: "partial..." },
+    )
+    expect(buffer.peek()?.partialAssistantText).toBe("I said partial... already\npartial...")
   })
 })
 

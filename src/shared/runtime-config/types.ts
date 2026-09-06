@@ -818,6 +818,16 @@ export interface RuntimeConfig extends RuntimeConfigPaths {
    *  the registry falls through to in-memory (byte-identical). Routed through
    *  runtimeConfig() (ADR-0503 P4). */
   readonly sessionRegistryDiskDir: string | undefined
+  /** WAL size threshold in bytes (`QUANTA_SESSION_REGISTRY_WAL_THRESHOLD_BYTES`,
+   *  ADR-0375 / ADR-0390). Absent ⇒ `undefined` ⇒ PASSIVE-only checkpoint.
+   *  `0` is a valid threshold (escalate immediately). Routed through
+   *  runtimeConfig() so auto-sweep and `/session-registry cleanup` share one
+   *  snapshot (ADR-0503 P4). */
+  readonly sessionRegistryWalThresholdBytes: number | undefined
+  /** WAL checkpoint upgrade mode (`QUANTA_SESSION_REGISTRY_WAL_CHECKPOINT_MODE`,
+   *  ADR-0385 / ADR-0390). Only `"RESTART"` | `"TRUNCATE"` are accepted; anything
+   *  else is `undefined` (PASSIVE-only). Routed through runtimeConfig(). */
+  readonly sessionRegistryWalCheckpointMode: "RESTART" | "TRUNCATE" | undefined
   /** FS jail disable flag (`QUANTA_FS_JAIL=off`). Default false (jail ON). */
   readonly fsJailDisabled: boolean
   /** ADR-0062 cap-as-instruction dispatch enforcement (`QUANTA_CAP_ENFORCE=1`).

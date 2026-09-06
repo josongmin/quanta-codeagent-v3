@@ -329,8 +329,6 @@ const RULES: readonly Rule[] = [
         "Composition-root lazy-init — reads session-registry backend paths (QUANTA_SESSION_REGISTRY_*) EXACTLY ONCE per process to pick the durable backend; degrades to in-memory on a hosed value. Composition posture, not a per-turn feature read.",
       "agent/session-resource-registry/caller-owned-builder.ts":
         "Caller-owned registry builder composition root — same session-registry backend-path reads as global.ts.",
-      "agent/session-resource-registry/auto-sweep.ts":
-        "Auto-sweep composition root — reads session-registry backend/WAL knobs (named *_ENV consts) at boot; same posture as global.ts.",
       "agent/session-resource-registry/inspector.ts":
         "Inspector composition root — reads the same session-registry backend env by key; same posture as global.ts.",
       "host/runtime/pty-backend.ts":
