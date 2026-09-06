@@ -1,8 +1,9 @@
 import { readFile } from "node:fs/promises"
-import { dirname, join } from "node:path"
-import { createNodeLockFileStore, FileBasedLock } from "@/auth"
 import {
+  createChatgptRefreshLock,
+  createRefreshHolderId,
   type FetchLike,
+  RefreshTransactionError,
   refreshToken,
   refreshTokenTransaction,
   resolveOAuthConfig,
@@ -41,24 +42,10 @@ const asTokenRecord = (parsed: unknown): TokenRecord | null => {
   return parsed as unknown as TokenRecord
 }
 
-const defaultRefreshLock = (authFile: string, nowMs: () => number): OAuthRefreshLockPort =>
-  new FileBasedLock({
-    store: createNodeLockFileStore(join(dirname(authFile), "locks")),
-    clock: { now: nowMs },
-    pid: process.pid,
-  })
-
-const sleepClosed = async (ms: number, signal?: AbortSignal): Promise<void> => {
-  if (signal?.aborted) throw new Error("refresh transaction aborted")
-  await new Promise<void>((resolve, reject) => {
-    const t = setTimeout(resolve, ms)
-    const onAbort = (): void => {
-      clearTimeout(t)
-      reject(new Error("refresh transaction aborted"))
-    }
-    signal?.addEventListener("abort", onAbort, { once: true })
-  })
-}
+const defaultRefreshLock = (
+  env: Record<string, string | undefined>,
+  nowMs: () => number,
+): OAuthRefreshLockPort => createChatgptRefreshLock({ env, nowMs, pid: process.pid })
 
 /**
  * Full-remote boxes receive only a stripped short-lived access token and cannot
@@ -77,6 +64,8 @@ const sleepClosed = async (ms: number, signal?: AbortSignal): Promise<void> => {
  * whole run by a comfortable margin, ship it as-is rather than aborting a run
  * the box could complete. The fallback is announced on stderr (never silent) so
  * a genuinely-revoked-but-unexpired token still surfaces as a box-side 401.
+ * Lock timeout, abort, and post-lock missing token are not issuer/network
+ * failures — those rethrow even when remaining lifetime is ≥ 1h.
  */
 export const refreshRemoteAuthJson = async (
   authFile: string,
@@ -89,11 +78,11 @@ export const refreshRemoteAuthJson = async (
   }
   const nowMs = opts.nowMs ?? Date.now
   const now = nowMs()
-  const lock = opts.lock ?? defaultRefreshLock(authFile, nowMs)
+  const lock = opts.lock ?? defaultRefreshLock(opts.env ?? process.env, nowMs)
   try {
     const next = await refreshTokenTransaction(authFile, {
       lock,
-      holderId: `${process.pid}-bench-fresh-auth`,
+      holderId: createRefreshHolderId("bench-fresh-auth", process.pid, nowMs()),
       nowMs,
       readCurrent: async () => {
         const latest: unknown = JSON.parse(await readFile(authFile, "utf8"))
@@ -107,10 +96,10 @@ export const refreshRemoteAuthJson = async (
           ...(opts.fetchImpl !== undefined ? { fetchImpl: opts.fetchImpl } : {}),
           nowMs,
         }),
-      sleep: sleepClosed,
     })
     return JSON.stringify(next)
   } catch (err) {
+    if (err instanceof RefreshTransactionError) throw err
     const remaining = remainingMs(current, now)
     if (
       typeof current.access_token === "string" &&

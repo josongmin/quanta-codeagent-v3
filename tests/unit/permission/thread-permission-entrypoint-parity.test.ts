@@ -73,12 +73,18 @@ describe("thread permission entrypoint parity", () => {
     }
   })
 
-  test("mutation: dropping one approval-policy literal fail-closes that member only", () => {
-    const liveAlways = decodeThreadPermission({ ...valid, approvalPolicy: "always" })
-    expect(liveAlways.ok).toBe(true)
+  test("mutation: dropping one approval-policy literal fail-closes that member only", async () => {
+    const { APPROVAL_POLICY_VALUES, isApprovalPolicy } = await import(
+      "@/permission/thread-permission-decode"
+    )
+    const assertAlwaysAccepted = (isPolicy: (value: unknown) => boolean): void => {
+      expect(isPolicy("always")).toBe(true)
+    }
+    const dropped = APPROVAL_POLICY_VALUES.filter((v) => v !== "always")
     const mutated = (value: unknown): boolean =>
-      value === "never" || value === "on-request" || value === "on-failure"
-    expect(mutated("always")).toBe(false)
-    expect(mutated("never")).toBe(true)
+      typeof value === "string" && (dropped as readonly string[]).includes(value)
+    assertAlwaysAccepted(isApprovalPolicy)
+    expect(() => assertAlwaysAccepted(mutated)).toThrow()
+    expect(decodeThreadPermission({ ...valid, approvalPolicy: "always" }).ok).toBe(true)
   })
 })

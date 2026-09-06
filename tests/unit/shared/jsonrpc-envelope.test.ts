@@ -49,6 +49,10 @@ describe("jsonrpc envelope", () => {
   })
 
   test("mutation: weakening the version literal would accept jsonrpc 1.0", () => {
+    const v1 = { jsonrpc: "1.0", method: "x" }
+    const assertRejectsV1 = (guard: (value: unknown) => boolean): void => {
+      expect(guard(v1)).toBe(false)
+    }
     const weakened = (value: unknown): boolean => {
       if (typeof value !== "object" || value === null) return false
       const o = value as Record<string, unknown>
@@ -58,8 +62,7 @@ describe("jsonrpc envelope", () => {
       if (!hasId && !hasMethod) return false
       return true
     }
-    const v1 = { jsonrpc: "1.0", method: "x" }
-    expect(isJsonRpcEnvelope(v1)).toBe(false)
-    expect(weakened(v1)).toBe(true)
+    assertRejectsV1(isJsonRpcEnvelope)
+    expect(() => assertRejectsV1(weakened)).toThrow()
   })
 })

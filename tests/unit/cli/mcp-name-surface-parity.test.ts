@@ -63,12 +63,13 @@ describe("mcp name surface parity", () => {
   })
 
   test("mutation: restoring the old per-char regex in one consumer diverges on runs", () => {
+    const assertRunsCollapse = (fn: (value: string) => string): void => {
+      expect(fn("a--b")).toBe("a_b")
+    }
     const old = (value: string): string => value.replace(/[^A-Za-z0-9_]/g, "_")
-    const live = sanitizeMcpNameSegment("a--b")
-    const drifted = old("a--b")
-    expect(live).toBe("a_b")
-    expect(drifted).toBe("a__b")
-    expect(sanitizeHealthKey("a--b")).toBe(live)
-    expect(sanitizeCliServerKey("a--b")).toBe(live)
+    assertRunsCollapse(sanitizeMcpNameSegment)
+    assertRunsCollapse(sanitizeHealthKey)
+    assertRunsCollapse(sanitizeCliServerKey)
+    expect(() => assertRunsCollapse(old)).toThrow()
   })
 })

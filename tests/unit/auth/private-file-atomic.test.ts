@@ -146,27 +146,8 @@ describe("private-file-atomic", () => {
   test("mutation: restored fixed temp name collides under concurrent exclusive create", async () => {
     const dir = await mkdtemp(join(tmpdir(), "quanta-atomic-fixed-"))
     const finalPath = join(dir, "token.json")
-    const temps: string[] = []
-    let exclusiveHits = 0
-    const io: PrivateFileIoPort = {
-      mkdirParent: async () => undefined,
-      statKind: async () => "absent",
-      openExclusive: async (path) => {
-        temps.push(path)
-        exclusiveHits++
-        if (exclusiveHits > 1 && temps[0] === path) {
-          throw Object.assign(new Error("EEXIST"), { code: "EEXIST" })
-        }
-        return {
-          write: async () => undefined,
-          sync: async () => undefined,
-          close: async () => undefined,
-        }
-      },
-      rename: async () => undefined,
-      unlink: async () => undefined,
-      syncDir: async () => undefined,
-    }
+    const temps = new Set<string>()
+    const io = recordingIo(temps)
     const fixed = (): Uint8Array => new Uint8Array(8)
     const barrier = Promise.withResolvers<void>()
     const first = (async () => {
@@ -179,7 +160,7 @@ describe("private-file-atomic", () => {
     })()
     barrier.resolve()
     const results = await Promise.allSettled([first, second])
-    expect(temps[0]).toBe(temps[1])
-    expect(results.filter((r) => r.status === "rejected").length).toBe(1)
+    expect(temps.size).toBe(1)
+    expect(results.every((r) => r.status === "fulfilled")).toBe(false)
   })
 })

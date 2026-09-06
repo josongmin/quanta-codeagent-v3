@@ -30,11 +30,12 @@ const isStringArray = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every((entry) => typeof entry === "string")
 
 export const isApprovalPolicy = (value: unknown): value is ThreadPermission["approvalPolicy"] =>
-  value === "never" || value === "on-request" || value === "on-failure" || value === "always"
+  typeof value === "string" && (APPROVAL_POLICY_VALUES as readonly string[]).includes(value)
 
 export const isApprovalsReviewer = (
   value: unknown,
-): value is ThreadPermission["approvalsReviewer"] => value === "user" || value === "agent"
+): value is ThreadPermission["approvalsReviewer"] =>
+  typeof value === "string" && (APPROVALS_REVIEWER_VALUES as readonly string[]).includes(value)
 
 export const decodeSandboxPolicy = (value: unknown, path: string): SandboxDecodeResult => {
   if (!isRecord(value)) {

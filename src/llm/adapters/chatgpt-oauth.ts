@@ -24,6 +24,8 @@
 
 import {
   chatgptTokenPath,
+  createChatgptRefreshLock,
+  createRefreshHolderId,
   deleteToken,
   type FetchLike,
   isExpired,
@@ -36,8 +38,6 @@ import {
   type TokenRecord,
   writeToken,
 } from "@/auth/chatgpt-oauth"
-import { FileBasedLock } from "@/auth/lock-file-based"
-import { createNodeLockFileStore } from "@/auth/node-lock-file-store"
 import type { OAuthRefreshLockPort } from "@/auth/oauth-refresh-lock"
 import { errMessage, LLMError, type LLMErrorKind, logger } from "@/shared"
 import { buildResponsesBody } from "../openai-responses-wire"
@@ -230,7 +230,6 @@ export class ChatGPTOAuthAdapter implements LLMPort {
    *  so the normal path keeps re-reading disk (picks up other-process rotations). */
   private memTokenFallback: TokenRecord | undefined
   private readonly refreshLock: OAuthRefreshLockPort
-  private readonly holderId: string
 
   constructor(config: ChatGPTOAuthConfig) {
     this.model = config.model
@@ -255,12 +254,11 @@ export class ChatGPTOAuthAdapter implements LLMPort {
       ? defaultResponsesReasoningCarryoverStore()
       : undefined
     this.debugOAuth = config.debugOAuth ?? false
-    this.holderId = `${process.pid}-${this.nowMs()}`
     this.refreshLock =
       config.refreshLock ??
-      new FileBasedLock({
-        store: createNodeLockFileStore(`${resolveQuantaHome(config.env)}/locks`),
-        clock: { now: () => this.nowMs() },
+      createChatgptRefreshLock({
+        env: config.env,
+        nowMs: () => this.nowMs(),
         pid: process.pid,
       })
   }
@@ -294,7 +292,7 @@ export class ChatGPTOAuthAdapter implements LLMPort {
     try {
       next = await refreshTokenTransaction(path, {
         lock: this.refreshLock,
-        holderId: this.holderId,
+        holderId: createRefreshHolderId("llm", process.pid, this.nowMs()),
         nowMs: this.nowMs,
         skewMs: TOKEN_REFRESH_SKEW_MS,
         readCurrent: async () => {
@@ -319,18 +317,6 @@ export class ChatGPTOAuthAdapter implements LLMPort {
             current,
             fetchImpl: this.fetchImpl,
             nowMs: this.nowMs,
-          }),
-        sleep: (ms, signal) =>
-          new Promise((resolve, reject) => {
-            const t = setTimeout(resolve, ms)
-            signal?.addEventListener(
-              "abort",
-              () => {
-                clearTimeout(t)
-                reject(new Error("refresh transaction aborted"))
-              },
-              { once: true },
-            )
           }),
       })
     } catch (e) {

@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { refreshRemoteAuthJson } from "@/apps/bench/remote/fresh-auth"
+import { chatgptTokenPath, hashRefreshLockKey } from "@/auth/chatgpt-oauth"
+import { FileBasedLock } from "@/auth/lock-file-based"
+import { createNodeLockFileStore } from "@/auth/node-lock-file-store"
 
 const TEMP_DIRS = new Set<string>()
 
@@ -98,5 +101,63 @@ describe("refreshRemoteAuthJson", () => {
     expect(acquired).toBe(1)
     expect(released).toBe(1)
     expect(JSON.parse(out).access_token).toBe("ACCESS-new")
+  })
+
+  test("lock acquire timeout is not the 1h remaining issuer fallback", async () => {
+    const now = Date.parse("2026-06-21T00:00:00.000Z")
+    const path = tempAuthFile({
+      access_token: "ACCESS-live",
+      refresh_token: "REFRESH-local-only",
+      expires_at: "2026-06-21T02:00:00.000Z",
+    })
+    await expect(
+      refreshRemoteAuthJson(path, {
+        env: {},
+        nowMs: () => now,
+        lock: {
+          tryAcquire: async () => "would-wait",
+          release: async () => undefined,
+        },
+        fetchImpl: async () => {
+          throw new Error("issuer must not be called")
+        },
+      }),
+    ).rejects.toThrow(/lock acquire timed out/)
+  })
+
+  test("default lock contends on QUANTA_PREFS_HOME/locks, not auth/locks", async () => {
+    const home = mkdtempSync(join(tmpdir(), "bench-lock-home-"))
+    TEMP_DIRS.add(home)
+    const env = { QUANTA_PREFS_HOME: home }
+    mkdirSync(join(home, "auth"), { recursive: true, mode: 0o700 })
+    const authFile = chatgptTokenPath(home)
+    writeFileSync(
+      authFile,
+      `${JSON.stringify({
+        access_token: "ACCESS-old",
+        refresh_token: "REFRESH-local-only",
+        expires_at: "2026-06-21T00:00:00.000Z",
+      })}\n`,
+    )
+    const nowMs = () => Date.parse("2026-06-21T00:00:00.000Z")
+    const blocker = new FileBasedLock({
+      store: createNodeLockFileStore(join(home, "locks")),
+      clock: { now: nowMs },
+      pid: 1,
+    })
+    expect(await blocker.tryAcquire(hashRefreshLockKey(authFile), "blocker", 60_000)).toBe(
+      "acquired",
+    )
+    await expect(
+      refreshRemoteAuthJson(authFile, {
+        env,
+        nowMs,
+        fetchImpl: async () =>
+          new Response(JSON.stringify({ access_token: "ACCESS-new", expires_in: 3600 }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+      }),
+    ).rejects.toThrow(/lock acquire timed out/)
   })
 })

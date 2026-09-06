@@ -14,6 +14,11 @@ export const resolveQuantaHome = (env: Record<string, string | undefined>): stri
 /** Disk path for the ChatGPT-OAuth token JSON. */
 export const chatgptTokenPath = (home: string): string => join(home, "auth", "chatgpt.json")
 
+/** Cross-process refresh lock directory. Shared by the LLM adapter and bench
+ *  fresh-auth so the same token file serializes even when the token lives under
+ *  `home/auth/` rather than `home/`. */
+export const chatgptRefreshLockDir = (home: string): string => join(home, "locks")
+
 /** Resolve the home directory used for Codex state. The desktop app exports
  *  `CODEX_HOME`; when absent we mirror its default `~/.codex`. */
 export const resolveCodexHome = (env: Record<string, string | undefined>): string => {

@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import type { TokenRecord } from "@/auth/chatgpt-oauth"
 import {
+  createRefreshHolderId,
   hashRefreshLockKey,
   refreshTokenTransaction,
+  sleepRefreshBackoff,
 } from "@/auth/chatgpt-oauth/refresh-transaction"
 import { FileBasedLock, type LockFileStorePort } from "@/auth/lock-file-based"
 import type { OAuthRefreshLockPort } from "@/auth/oauth-refresh-lock"
@@ -23,18 +25,64 @@ const memoryStore = (): LockFileStorePort => {
   const files = new Map<string, string>()
   return {
     read: async (key) => files.get(key) ?? null,
-    write: async (key, content, mode) => {
-      if (mode === "exclusive" && files.has(key)) return "exists"
+    writeExclusive: async (key, content) => {
+      if (files.has(key)) return "exists"
       files.set(key, content)
       return "ok"
     },
-    delete: async (key) => {
-      files.delete(key)
+    compareAndSwap: async (key, expected, next) => {
+      if (files.get(key) !== expected) return "changed"
+      if (next === null) files.delete(key)
+      else files.set(key, next)
+      return "ok"
     },
   }
 }
 
 describe("chatgpt refresh transaction", () => {
+  test("backoff does not lose an abort during listener registration", async () => {
+    let aborted = false
+    const signal = {
+      get aborted() {
+        return aborted
+      },
+      addEventListener: (
+        _type: string,
+        listener: ((event: unknown) => void) | { handleEvent(event: unknown): void },
+      ) => {
+        aborted = true
+        if (typeof listener === "function") listener(undefined)
+        else listener.handleEvent(undefined)
+      },
+      removeEventListener: () => undefined,
+    } as unknown as AbortSignal
+
+    await expect(sleepRefreshBackoff(60_000, signal)).rejects.toThrow(/aborted/)
+  })
+
+  test("backoff removes the abort listener after elapsed completion", async () => {
+    let registered = 0
+    let removed = 0
+    const signal = {
+      aborted: false,
+      addEventListener: () => {
+        registered++
+      },
+      removeEventListener: () => {
+        removed++
+      },
+    } as unknown as AbortSignal
+
+    await sleepRefreshBackoff(0, signal)
+    expect(registered).toBe(1)
+    expect(removed).toBe(1)
+  })
+
+  test("holder ids stay unique for the same pid and millisecond", () => {
+    const ids = Array.from({ length: 100 }, () => createRefreshHolderId("test", 7, 1234))
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
   test("two independent holders share one lock store → issuer count 1", async () => {
     const store = memoryStore()
     const clock = { now: () => Date.now() }

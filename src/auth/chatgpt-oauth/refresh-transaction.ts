@@ -15,7 +15,7 @@ export interface RefreshTransactionDeps {
   readonly persist: (next: TokenRecord) => Promise<void>
   readonly refresh: (current: TokenRecord) => Promise<TokenRecord>
   readonly nowMs: () => number
-  readonly sleep: (ms: number, signal?: AbortSignal) => Promise<void>
+  readonly sleep?: (ms: number, signal?: AbortSignal) => Promise<void>
   readonly holderId: string
   readonly signal?: AbortSignal
   readonly ttlMs?: number
@@ -27,18 +27,49 @@ const DEFAULT_TTL_MS = 30_000
 const DEFAULT_SKEW_MS = 60_000
 const DEFAULT_ATTEMPTS = 8
 
+export type RefreshTransactionFailureKind = "aborted" | "lock-timeout" | "token-missing"
+
+export class RefreshTransactionError extends Error {
+  readonly kind: RefreshTransactionFailureKind
+  constructor(kind: RefreshTransactionFailureKind, message: string) {
+    super(message)
+    this.name = "RefreshTransactionError"
+    this.kind = kind
+  }
+}
+
+let holderSequence = 0
+
+/** Mint a transaction-scoped holder id without reading process globals in the
+ * auth domain. The suffix prevents same-pid/same-millisecond re-entrant aliasing. */
+export const createRefreshHolderId = (scope: string, pid: number, nowMs: number): string => {
+  holderSequence++
+  return `${scope}-${pid}-${nowMs}-${holderSequence}`
+}
+
 export const hashRefreshLockKey = (raw: string): string =>
   createHash("sha256").update(raw).digest("hex").slice(0, 32)
 
-const sleepClosed = async (ms: number, signal?: AbortSignal): Promise<void> => {
-  if (signal?.aborted) throw new Error("refresh transaction aborted")
+export const sleepRefreshBackoff = async (ms: number, signal?: AbortSignal): Promise<void> => {
+  if (signal?.aborted) throw new RefreshTransactionError("aborted", "refresh transaction aborted")
   await new Promise<void>((resolve, reject) => {
-    const t = setTimeout(resolve, ms)
-    const onAbort = (): void => {
+    let settled = false
+    const finish = (outcome: "elapsed" | "aborted"): void => {
+      if (settled) return
+      settled = true
       clearTimeout(t)
-      reject(new Error("refresh transaction aborted"))
+      signal?.removeEventListener("abort", onAbort)
+      if (outcome === "aborted")
+        reject(new RefreshTransactionError("aborted", "refresh transaction aborted"))
+      else resolve()
+    }
+    const t = setTimeout(() => finish("elapsed"), ms)
+    const onAbort = (): void => {
+      finish("aborted")
     }
     signal?.addEventListener("abort", onAbort, { once: true })
+    // Close the preflight-to-listener-registration race.
+    if (signal?.aborted) onAbort()
   })
 }
 
@@ -49,12 +80,14 @@ export const refreshTokenTransaction = async (
   const ttlMs = deps.ttlMs ?? DEFAULT_TTL_MS
   const skewMs = deps.skewMs ?? DEFAULT_SKEW_MS
   const maxAttempts = deps.maxAttempts ?? DEFAULT_ATTEMPTS
-  const sleep = deps.sleep ?? sleepClosed
+  const sleep = deps.sleep ?? sleepRefreshBackoff
   const lockKey = hashRefreshLockKey(key)
   let acquired = false
   try {
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      if (deps.signal?.aborted) throw new Error("refresh transaction aborted")
+      if (deps.signal?.aborted) {
+        throw new RefreshTransactionError("aborted", "refresh transaction aborted")
+      }
       const result = await deps.lock.tryAcquire(lockKey, deps.holderId, ttlMs)
       if (result === "acquired") {
         acquired = true
@@ -63,11 +96,17 @@ export const refreshTokenTransaction = async (
       await sleep(25 * (attempt + 1), deps.signal)
     }
     if (!acquired) {
-      throw new Error("refresh transaction: lock acquire timed out")
+      throw new RefreshTransactionError(
+        "lock-timeout",
+        "refresh transaction: lock acquire timed out",
+      )
     }
     const current = await deps.readCurrent()
     if (current === null) {
-      throw new Error("refresh transaction: token missing after lock")
+      throw new RefreshTransactionError(
+        "token-missing",
+        "refresh transaction: token missing after lock",
+      )
     }
     if (!isExpired(current, deps.nowMs(), skewMs)) {
       return current

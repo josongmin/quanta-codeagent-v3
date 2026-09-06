@@ -53,6 +53,11 @@ describe("claude config entrypoint parity", () => {
       "@/migration/claude-config-decode"
     )
     const entry = { url: "https://ex/mcp" }
+    const assertUrlHttp = (
+      classify: (raw: Record<string, unknown>) => "http" | "sse" | "stdio" | "unknown",
+    ): void => {
+      expect(classify(entry)).toBe("http")
+    }
     const drifted = (raw: Record<string, unknown>): "http" | "sse" | "stdio" | "unknown" => {
       const type = raw.type
       if (type === "http" || type === "sse" || type === "stdio") return type
@@ -60,10 +65,10 @@ describe("claude config entrypoint parity", () => {
       if (typeof raw.command === "string") return "stdio"
       return "unknown"
     }
-    expect(classifyClaudeTransport(entry)).toBe("http")
-    expect(drifted(entry)).toBe("sse")
-    expect(drifted(entry)).not.toBe(classifyClaudeTransport(entry))
-    const live = decodeClaudeMcpServers({ mcpServers: { b: entry } })
-    expect(live).toEqual([{ name: "b", transport: "http" }])
+    assertUrlHttp(classifyClaudeTransport)
+    expect(() => assertUrlHttp(drifted)).toThrow()
+    expect(decodeClaudeMcpServers({ mcpServers: { b: entry } })).toEqual([
+      { name: "b", transport: "http" },
+    ])
   })
 })
