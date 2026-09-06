@@ -1,7 +1,7 @@
 # SEP5-04B — ChatGPT cross-process refresh transaction
 
 **Priority:** P1
-**Status:** IMPLEMENTED IN WORKTREE — CAS hardening commit pending
+**Status:** LANDED — exact clean CI green
 **Depends on:** SEP5-04A
 **Finding coverage:** D2; excludes D30's intentional MCP fresh-auth mutex
 
@@ -180,7 +180,6 @@ identical winner tokens, valid final JSON, and no residual lock.
 **Current receipt:** related OAuth suites passed (`46 pass, 0 fail` after the
 silent-failure rail was included); the wider 23-file SEP5 bundle passed
 `273/273`. Auth, LLM, integration, and tool slice fences passed `39/39`.
-The final clean synthetic snapshot
-`7e0528d0f0ed756affcc9f05db896011b003796d` passed all 21 `test:ci` gates.
-The implementation is branch-delivered on `main`; the ticket-only closeout is
-verified again at its own exact HEAD.
+Exact clean closeout `9139626f93763ce3b52f2b05a2224e30ebde0dd6` passed all 21
+`test:ci` gates, including the real cross-process and Astropy toolchain rails.
+The implementation is branch-delivered on `main`.

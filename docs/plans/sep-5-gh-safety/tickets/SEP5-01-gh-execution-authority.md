@@ -1,7 +1,7 @@
 # SEP5-01 — one `gh` process-execution authority
 
 **Priority:** P1
-**Status:** IMPLEMENTED IN WORKTREE — hardening commit pending
+**Status:** LANDED — exact clean CI green
 **Depends on:** SEP5-00
 **Finding coverage:** D3
 
@@ -153,10 +153,7 @@ one tree-kill initiation, and listener removal. The focused GH battery passed
 five consecutive executions. Process-tree and environment-scrub rails remain
 enrolled in the normal full-suite manifest.
 
-**Current receipt:** implementation is present in the working tree. A clean
-synthetic verification snapshot at `7e0528d0f0ed756affcc9f05db896011b003796d`
-passed the focused SEP5 bundle, typecheck, lint debt, slice fences, god-code,
-feature-catalog validation, one complete 34/34 full-suite run, and all 21
-`test:ci` gates. The implementation is branch-delivered on `main` through
-`fd4bad9976712b0584c18dd359263890d86f6803`; the final ticket-only closeout is
-verified again at its own exact HEAD.
+**Current receipt:** implementation is branch-delivered on `main`. Exact clean
+closeout `9139626f93763ce3b52f2b05a2224e30ebde0dd6` passed the focused SEP5
+bundle, typecheck, lint debt, slice fences, god-code, feature-catalog validation,
+one complete 37/37 full-suite run, and all 21 `test:ci` gates.

@@ -1,7 +1,7 @@
 # SEP5-02 — PR comment outbound safety contracts
 
 **Priority:** P1
-**Status:** IMPLEMENTED IN WORKTREE — strict-cap hardening commit pending
+**Status:** LANDED — exact clean CI green
 **Depends on:** SEP5-01, SEP5-03
 **Finding coverage:** D4
 
@@ -132,7 +132,6 @@ helper is exercised through both production consumers, so a copied test helper
 cannot make the rail green.
 
 **Current receipt:** the focused PR policy tests and the combined 23-file SEP5
-bundle passed (`273 pass, 0 fail`) on the working implementation. The clean
-synthetic snapshot `7e0528d0f0ed756affcc9f05db896011b003796d` also completed
-the 34/34 full suite and all 21 `test:ci` gates. The implementation is delivered
-on `main`; the ticket-only closeout is verified again at its own exact HEAD.
+bundle passed (`273 pass, 0 fail`). Exact clean closeout
+`9139626f93763ce3b52f2b05a2224e30ebde0dd6` completed the 37/37 full suite and
+all 21 `test:ci` gates. The implementation is delivered on `main`.

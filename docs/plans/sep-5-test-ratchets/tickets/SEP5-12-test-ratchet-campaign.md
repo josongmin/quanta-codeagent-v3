@@ -160,11 +160,10 @@ resolved selection as the receipt and do not add a redundant scanner.
 
 ## Verification update — 2026-09-06
 
-Verification was run from a detached clean worktree. The final synthetic commit
-`7e0528d0f0ed756affcc9f05db896011b003796d` contains the complete current
-working-tree union, the SEP5 implementation, the required runner scan-reach
-floor tighten, and the verification-lifecycle repairs below. It is a
-verification snapshot, not a delivery commit.
+Verification was run from a detached clean worktree at delivered closeout
+`9139626f93763ce3b52f2b05a2224e30ebde0dd6`. It contains the SEP5
+implementation, the required runner scan-reach floor tighten, the
+verification-lifecycle repairs below, and the terminal ticket updates.
 
 | Rail | Result |
 |---|---|
@@ -175,7 +174,7 @@ verification snapshot, not a delivery commit.
 | `lint` / `lint:debt` | PASS; existing warnings only; complexity debt 0 |
 | god-code ratchet | `9 pass, 0 fail` |
 | `bun fc validate` / `bun fc diff` | 1069 resolved / no drift |
-| Complete clean `test:full:ci` receipt | PASS, chunks `34/34`, manifest files `3850` |
+| Complete clean `test:full:ci` receipt | PASS, chunks `37/37`, manifest files `3850` |
 | Complete clean `bun run test:ci` receipt | PASS, gates `21/21`, stable clean snapshot |
 
 Three failures found during closeout were repaired at their actual owners:
@@ -201,5 +200,5 @@ Final `bun run test:ci` passed all 21 gates, including full-suite, PTY,
 non-vacuity, real-toolchain (`41 pass, 2 visible capability skips, 0 fail`), web
 frontend (`807/807`), and contract (`13/13`). Missing host capabilities were
 reported as `dlv`, `gopls`, and `lldb-dap`; they were not silently counted as
-executed coverage. Branch delivery remains pending because the owned working
-tree has not been committed.
+executed coverage. Local, tracking, and remote `main` all resolved to the exact
+closeout SHA when the receipt was recorded.

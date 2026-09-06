@@ -12,7 +12,7 @@ Route each knob through the correct temporal authority and reduce raw
 snapshots. Clarify inventory metadata so `home` is not mistaken for a current
 typed implementation.
 
-## Frozen baseline
+## Frozen audit baseline (historical; not the delivered count)
 
 ```text
 KNOB_INVENTORY                 353
@@ -23,6 +23,9 @@ raw process.env actual/ceiling 43 / 43
 CLI_KNOBS ∩ CLI_FEATURE_GATES   7
 runner knobs ∩ runtime knobs     4
 ```
+
+Delivered closeout: 194 runtime-config knobs, 194 enumerated by the parity
+guard, 0 violations; raw `process.env.QUANTA_*` remains 43/43.
 
 Recompute these values at ticket start; they are snapshot-specific.
 

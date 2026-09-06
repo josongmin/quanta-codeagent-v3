@@ -20,8 +20,10 @@ This ticket changes audit truth only; it must not change runtime behavior.
   custom deny rules.
 - App fences are surface-specific. `terminal -> headless` is forbidden, while
   CLI currently imports `@/apps/headless` in `serve-stdio-cmd.ts`.
-- `KNOB_INVENTORY.length === 353`, `RUNTIME_CONFIG_KNOBS.length === 192`, their
-  env-key intersection is zero, and inventory entries with
+- At the frozen audit snapshot, `KNOB_INVENTORY.length === 353` and
+  `RUNTIME_CONFIG_KNOBS.length === 192`; the delivered closeout has 194 runtime
+  knobs and a live default/kind parity rail over the complete catalog. The audit
+  snapshot's env-key intersection is zero, and inventory entries with
   `home:"runtime-config"` are 228, not 227.
 - The raw `process.env.QUANTA_*` ratchet ceiling is 43; current measured usage is
   43.

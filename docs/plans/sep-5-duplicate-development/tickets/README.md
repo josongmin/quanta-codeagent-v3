@@ -1,13 +1,18 @@
 # Sep-05 duplicate-development remediation — execution index
 
 **Status:** COMPLETE — implementation is on `main`; exact clean CI green
-**Truth snapshot:** `59ad4f9b3850b89c0417ef3d12d0c27d64917ba1`
+**Audit truth snapshot:** `59ad4f9b3850b89c0417ef3d12d0c27d64917ba1`
+**Delivered closeout:** `9139626f93763ce3b52f2b05a2224e30ebde0dd6`
 **Source audit:** `docs/bugbash/sep-05-duplicate-development.md`
 
 This packet replaces the source audit's draft PR order. The source audit is useful
 evidence, but several entries confuse a repeated primitive with a duplicated
 contract, propose imports that violate the live slice fence, or prescribe a
 source-regex rail that does not prove runtime behavior.
+
+Terminal classification: `execute=0`, `closed=19`, `conditional=11`,
+`intentional=1`. Conditional entries remain governed by SEP5-11 trigger + RED
+rail requirements; none is authorized implementation work without that evidence.
 
 Copy/paste task handoffs are in the
 [worker prompt pack](../prompts/README.md). Commit this currently untracked plan
@@ -132,10 +137,9 @@ relaxing a ceiling.
 
 Owned proof is green: focused SEP5 `273/273`, relevant slice fences `39/39`,
 typecheck, lint debt, god-code, feature-catalog validation, and a clean exact
-full-suite receipt (`34/34`, 3850 files). The implementation landed on `main`
-through `fd4bad9976712b0584c18dd359263890d86f6803`; the final documentation-only
-closeout commit must retain an exact-HEAD green receipt before this ticket is
-published as terminal.
+full-suite receipt (`37/37`, 3850 files). The implementation landed on `main`
+through `fd4bad9976712b0584c18dd359263890d86f6803`; terminal ticket closeout
+`9139626f93763ce3b52f2b05a2224e30ebde0dd6` has its own exact-HEAD receipt.
 
 The repository-wide blockers discovered during closeout were also repaired:
 the shared abortable sleep now closes its registration race and cleans both
@@ -146,9 +150,7 @@ The default-off completeness guard also now probes the legal WAL checkpoint
 enum values (`RESTART` and `TRUNCATE`), eliminating a false dead-read result
 while preserving the live unset-default assertion and red-on-injection rails.
 
-Final clean verification snapshot
-`7e0528d0f0ed756affcc9f05db896011b003796d` passed `bun run test:ci` with all
-21 gates green, including full-suite 34/34, real-toolchain 41 pass / 2 visible
-capability skips / 0 fail, web frontend 807/807, and contract 13/13. This SHA is
-the detached pre-documentation verification snapshot; the terminal receipt is
-recorded against the final closeout commit after these ticket updates land.
+Final clean closeout `9139626f93763ce3b52f2b05a2224e30ebde0dd6` passed
+`bun run test:ci` with all 21 gates green, including full-suite 37/37,
+real-toolchain 41 pass / 2 visible capability skips / 0 fail, web frontend
+807/807, and contract 13/13. Local, tracking, and remote `main` matched that SHA.

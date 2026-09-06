@@ -12,9 +12,10 @@
 | 어딧 범위 | `src/**/*.ts` 전 슬라이스 + 해당 hellgate |
 | 원칙 | SSOT + thin adapter + hellgate. slice fence 깨고 합치지 않음 |
 | fence SSOT | `tests/unit/_arch/slice-boundary-configs.ts` |
-| truth snapshot | `59ad4f9b3850b89c0417ef3d12d0c27d64917ba1` |
+| audit truth snapshot | `59ad4f9b3850b89c0417ef3d12d0c27d64917ba1` |
+| delivered closeout | `9139626f93763ce3b52f2b05a2224e30ebde0dd6` (`main`/`origin/main`, exact clean CI 21/21) |
 | KNOB_INVENTORY | 353 |
-| RUNTIME_CONFIG_KNOBS | 192 |
+| RUNTIME_CONFIG_KNOBS | 194 |
 | env-key intersection | 0 |
 | inventory `home:"runtime-config"` | **228** (`home` is a target typed owner, not proof a typed field exists) |
 | raw `process.env.QUANTA_*` | **43 / ceiling 43** |
@@ -23,6 +24,10 @@
 
 Every index row is exactly one of: `execute` | `conditional` | `intentional` | `closed`.
 Closed duplicate-removal proposals must not return as unscoped cleanup (see SEP5-11).
+
+**Closeout scorecard:** `execute=0`, `closed=19`, `conditional=11`,
+`intentional=1`. `conditional`은 미구현 빚이 아니라 SEP5-11에 구체 trigger와
+owner-local RED rail이 등록된 보류 판단이다. 현재 즉시 실행 가능한 미해결 항목은 0개다.
 
 ## 방법
 
@@ -709,7 +714,7 @@ Web: `apps/web-daemon/runtime-factory.ts` — `bootstrapSession` **없음**. `bu
 
 ## D27. Knob raw env / 이중 선언
 
-**상태 (2026-09-06):** closed. `readAuthority` closed universe. raw `process.env.QUANTA_*` **43 / ceiling 43**. CLI 7 overlap은 `CLI_SEEDED_SURFACE_KNOBS`. dual-channel 4키 유지. `QUANTA_GOAL`은 startup-seed.
+**상태 (2026-09-06):** closed. `readAuthority` closed universe. raw `process.env.QUANTA_*` **43 / ceiling 43**. runtime-config knob catalog은 **194**이며 default/kind parity rail이 194개 전부를 열거하고 0 violation을 증명한다. CLI 7 overlap은 `CLI_SEEDED_SURFACE_KNOBS`. dual-channel 4키 유지. `QUANTA_GOAL`은 startup-seed.
 
 **근거 (2026-09-05 재검증):**
 
