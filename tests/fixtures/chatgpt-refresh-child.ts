@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
-import { readFile, writeFile } from "node:fs/promises"
+import { readFile } from "node:fs/promises"
 import { refreshTokenTransaction } from "../../src/auth/chatgpt-oauth/refresh-transaction"
-import { isExpired, type TokenRecord } from "../../src/auth/chatgpt-oauth/token-store"
+import { isExpired, type TokenRecord, writeToken } from "../../src/auth/chatgpt-oauth/token-store"
 import { FileBasedLock } from "../../src/auth/lock-file-based"
 import { createNodeLockFileStore } from "../../src/auth/node-lock-file-store"
 
@@ -29,9 +29,7 @@ const next = await refreshTokenTransaction(tokenPath, {
   nowMs: () => Date.now(),
   sleep: (ms) => Bun.sleep(ms),
   readCurrent,
-  persist: async (token) => {
-    await writeFile(tokenPath, `${JSON.stringify(token, null, 2)}\n`, { mode: 0o600 })
-  },
+  persist: (token) => writeToken(tokenPath, token),
   refresh: async (_current) => {
     const res = await fetch(issuer, { method: "POST" })
     const body = (await res.json()) as {

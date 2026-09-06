@@ -15,11 +15,10 @@
  *     direct touch inside this module).
  *   - `ClockPort` (reused from oidc-federation) for `now()`.
  *
- * Atomicity caveat: file write is NOT atomic with respect to other writers.
- * The store impl SHOULD use `open(O_CREAT|O_EXCL)` semantics — this port
- * leaves that to the implementer because the tradeoff (tmpfile + rename vs
- * O_EXCL) is platform-dependent and we do not want to bake it into the
- * domain layer.
+ * Store mutations are conditional. Stale takeover, renewal, and release all
+ * compare the exact body previously read before replacing/deleting it. Without
+ * that CAS contract two stale observers can both return `acquired`, or an old
+ * holder can delete a newer holder's lock after a read/delete race.
  *
  * Plane-clean: imports only the port (sibling) + the leaf ClockPort. No SDK,
  * no `node:fs` direct touch.
@@ -34,12 +33,11 @@ import type { LockResult, OAuthRefreshLockPort } from "./oauth-refresh-lock"
 export interface LockFileStorePort {
   /** Read the lock file's JSON content, or `null` if it does not exist. */
   read(key: string): Promise<string | null>
-  /** Write the lock file atomically (e.g. tmpfile + rename, or O_EXCL).
-   *  When `mode === "exclusive"`, the write MUST fail with `"exists"` if
-   *  the file is already present and live (not stale-reaped). */
-  write(key: string, content: string, mode: "exclusive" | "overwrite"): Promise<"ok" | "exists">
-  /** Delete the lock file. Idempotent — missing file is success. */
-  delete(key: string): Promise<void>
+  /** Create only when absent. */
+  writeExclusive(key: string, content: string): Promise<"ok" | "exists">
+  /** Replace or delete only while the exact body read by the caller is still
+   * current. `null` deletes. */
+  compareAndSwap(key: string, expected: string, next: string | null): Promise<"ok" | "changed">
 }
 
 interface FileLockPayload {
@@ -76,6 +74,21 @@ export interface FileBasedLockOptions {
   readonly pid: number
 }
 
+const tryReplaceExisting = async (
+  store: LockFileStorePort,
+  key: string,
+  raw: string,
+  payload: FileLockPayload,
+  now: number,
+): Promise<LockResult> => {
+  const parsed = parseLockPayload(raw)
+  if (parsed !== null && parsed.expiresAt > now && parsed.holderId !== payload.holderId) {
+    return "would-wait"
+  }
+  const replaced = await store.compareAndSwap(key, raw, JSON.stringify(payload))
+  return replaced === "ok" ? "acquired" : "would-wait"
+}
+
 export class FileBasedLock implements OAuthRefreshLockPort {
   private readonly store: LockFileStorePort
   private readonly clock: ClockPort
@@ -99,25 +112,13 @@ export class FileBasedLock implements OAuthRefreshLockPort {
     // Inspect existing file.
     const raw = await this.store.read(key)
     if (raw !== null) {
-      const parsed = parseLockPayload(raw)
-      // Live lock branch: same holder renews, different holder waits.
-      if (parsed !== null && parsed.expiresAt > now) {
-        if (parsed.holderId === holderId) {
-          await this.store.write(key, JSON.stringify(payload), "overwrite")
-          return "acquired"
-        }
-        return "would-wait"
-      }
-      // Stale / corrupt: we own the right to overwrite (read already narrowed
-      // the race window; last-write-wins is the documented tradeoff).
-      await this.store.write(key, JSON.stringify(payload), "overwrite")
-      return "acquired"
+      return tryReplaceExisting(this.store, key, raw, payload, now)
     }
 
     // No file at all — try exclusive write. Race window: another process
     // could insert between our read and write. Exclusive mode reports it
     // via `"exists"` and we return would-wait.
-    const writeResult = await this.store.write(key, JSON.stringify(payload), "exclusive")
+    const writeResult = await this.store.writeExclusive(key, JSON.stringify(payload))
     return writeResult === "ok" ? "acquired" : "would-wait"
   }
 
@@ -127,6 +128,6 @@ export class FileBasedLock implements OAuthRefreshLockPort {
     const parsed = parseLockPayload(raw)
     if (parsed === null) return // Corrupt file — leave for next tryAcquire's reap.
     if (parsed.holderId !== holderId) return // Wrong holder — no-op (safety).
-    await this.store.delete(key)
+    await this.store.compareAndSwap(key, raw, null)
   }
 }

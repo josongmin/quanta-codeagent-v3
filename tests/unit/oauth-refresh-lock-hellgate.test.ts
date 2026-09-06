@@ -29,17 +29,22 @@ const mkClock = (start: number): { clock: ClockPort; advance: (ms: number) => vo
   }
 }
 
-const mkInMemoryStore = (): LockFileStorePort => {
-  const map = new Map<string, string>()
+const mkInMemoryStore = (
+  initial: ReadonlyArray<readonly [string, string]> = [],
+): LockFileStorePort => {
+  const map = new Map<string, string>(initial)
   return {
     read: async (key) => map.get(key) ?? null,
-    write: async (key, content, mode) => {
-      if (mode === "exclusive" && map.has(key)) return "exists"
+    writeExclusive: async (key, content) => {
+      if (map.has(key)) return "exists"
       map.set(key, content)
       return "ok"
     },
-    delete: async (key) => {
-      map.delete(key)
+    compareAndSwap: async (key, expected, next) => {
+      if (map.get(key) !== expected) return "changed"
+      if (next === null) map.delete(key)
+      else map.set(key, next)
+      return "ok"
     },
   }
 }
@@ -154,7 +159,7 @@ describe("FileBasedLock — hellgate", () => {
 
   test("HELL-F3: corrupt JSON treated as released", async () => {
     const store = mkInMemoryStore()
-    await store.write("k", "this is not json {{{", "overwrite")
+    await store.writeExclusive("k", "this is not json {{{")
     const { clock } = mkClock(1000)
     const lock = new FileBasedLock({ store, clock, pid: 100 })
     expect(await lock.tryAcquire("k", "holder-A", 60_000)).toBe("acquired")
@@ -203,6 +208,40 @@ describe("FileBasedLock — hellgate", () => {
     const { clock } = mkClock(1000)
     const lock = new FileBasedLock({ store, clock, pid: 100 })
     await expect(lock.tryAcquire("k", "h", 0)).rejects.toThrow(/ttlMs/)
+  })
+
+  test("HELL-F9: two stale observers cannot both acquire", async () => {
+    const stale = JSON.stringify({ holderId: "dead", expiresAt: 0, pid: 99 })
+    const store = mkInMemoryStore([["stale", stale]])
+    const { clock } = mkClock(1_000)
+    const a = new FileBasedLock({ store, clock, pid: 1 })
+    const b = new FileBasedLock({ store, clock, pid: 2 })
+    const outcomes = await Promise.all([
+      a.tryAcquire("stale", "holder-a", 60_000),
+      b.tryAcquire("stale", "holder-b", 60_000),
+    ])
+    expect(outcomes.filter((result) => result === "acquired")).toHaveLength(1)
+    expect(outcomes.filter((result) => result === "would-wait")).toHaveLength(1)
+  })
+
+  test("HELL-F10: release CAS cannot delete a newer holder", async () => {
+    const oldBody = JSON.stringify({ holderId: "old", expiresAt: 2_000, pid: 1 })
+    const newBody = JSON.stringify({ holderId: "new", expiresAt: 3_000, pid: 2 })
+    let current: string | null = oldBody
+    const store: LockFileStorePort = {
+      read: async () => oldBody,
+      writeExclusive: async () => "exists",
+      compareAndSwap: async (_key, expected, next) => {
+        current = newBody
+        if (current !== expected) return "changed"
+        current = next
+        return "ok"
+      },
+    }
+    const { clock } = mkClock(1_000)
+    const lock = new FileBasedLock({ store, clock, pid: 1 })
+    await lock.release("k", "old")
+    expect(current).toBe(newBody)
   })
 })
 
@@ -264,8 +303,8 @@ describe("FallbackLock — hellgate", () => {
       read: async () => {
         throw new Error("disk full")
       },
-      write: async () => "ok",
-      delete: async () => {},
+      writeExclusive: async () => "ok",
+      compareAndSwap: async () => "ok",
     }
     const { clock } = mkClock(1000)
     // FileLock with failing store — its read throws, which propagates. We
