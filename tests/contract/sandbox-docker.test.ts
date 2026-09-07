@@ -6,6 +6,8 @@ import { DockerSandbox, SandboxUnavailableError } from "@/runtime"
 import { requireContract } from "./_guard"
 
 const sb = new DockerSandbox()
+const DOCKER_RUN_TIMEOUT_MS = 60_000
+const DOCKER_TEST_WATCHDOG_MS = 75_000
 
 // Probe Docker ONCE at module load so we can use `test.skipIf` — skipped tests
 // are reported by the bun:test runner itself (no console needed). Locally the
@@ -47,19 +49,27 @@ describe("DockerSandbox", () => {
     await expect(fake.run("echo hi")).rejects.toBeInstanceOf(SandboxUnavailableError)
   })
 
-  skipIfNoDocker("echo hi inside a container → stdout 'hi', exit 0", async () => {
-    const res = await sb.run("echo hi", { timeoutMs: 60_000 })
-    expect(res.exitCode).toBe(0)
-    expect(res.stdout.trim()).toBe("hi")
-  })
+  skipIfNoDocker(
+    "echo hi inside a container → stdout 'hi', exit 0",
+    async () => {
+      const res = await sb.run("echo hi", { timeoutMs: DOCKER_RUN_TIMEOUT_MS })
+      expect(res.exitCode).toBe(0)
+      expect(res.stdout.trim()).toBe("hi")
+    },
+    DOCKER_TEST_WATCHDOG_MS,
+  )
 
-  skipIfNoDocker("--network none blocks an outbound network attempt", async () => {
-    const res = await sb.run("getent hosts example.com || echo NET_BLOCKED", {
-      allowNetwork: false,
-      timeoutMs: 60_000,
-    })
-    expect(res.stdout).toContain("NET_BLOCKED")
-  })
+  skipIfNoDocker(
+    "--network none blocks an outbound network attempt",
+    async () => {
+      const res = await sb.run("getent hosts example.com || echo NET_BLOCKED", {
+        allowNetwork: false,
+        timeoutMs: DOCKER_RUN_TIMEOUT_MS,
+      })
+      expect(res.stdout).toContain("NET_BLOCKED")
+    },
+    DOCKER_TEST_WATCHDOG_MS,
+  )
 
   skipIfNoDocker(
     "env allowlist: a non-allowlisted parent var never enters the container",
@@ -68,7 +78,7 @@ describe("DockerSandbox", () => {
       try {
         const res = await sb.run("env", {
           envAllowlist: ["PATH"],
-          timeoutMs: 60_000,
+          timeoutMs: DOCKER_RUN_TIMEOUT_MS,
         })
         expect(res.stdout).not.toContain("DOCKER_SANDBOX_SECRET")
         expect(res.stdout).not.toContain("do-not-leak")
@@ -76,5 +86,6 @@ describe("DockerSandbox", () => {
         delete process.env.DOCKER_SANDBOX_SECRET
       }
     },
+    DOCKER_TEST_WATCHDOG_MS,
   )
 })
