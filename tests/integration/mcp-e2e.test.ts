@@ -461,7 +461,13 @@ describe("MCP e2e hell-cases — server lifecycle chaos", () => {
     } finally {
       await c.stop().catch(() => undefined)
     }
-  }, 10_000)
+    // Keep the runner watchdog strictly outside the 2s product-observation
+    // deadline. Under repository-wide parallel load the event loop can be
+    // descheduled for several seconds; the assertion above still requires the
+    // named 2s withTimeout sentinel, while this outer budget catches a genuine
+    // leaked child or never-settling wrapper without racing the behavior under
+    // test.
+  }, 30_000)
 })
 
 describe("MCP e2e hell-cases — adversarial tool arguments and results", () => {
