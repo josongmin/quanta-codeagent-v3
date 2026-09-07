@@ -15,8 +15,8 @@ Terminal classification: `execute=0`, `closed=19`, `conditional=11`,
 rail requirements; none is authorized implementation work without that evidence.
 
 Copy/paste task handoffs are in the
-[worker prompt pack](../prompts/README.md). Commit this currently untracked plan
-packet before dispatching workers into fresh worktrees.
+[worker prompt pack](../prompts/README.md). The packet is tracked; future
+dispatches must start from a commit containing both ticket and prompt revisions.
 
 ## Outcome
 
@@ -150,7 +150,9 @@ The default-off completeness guard also now probes the legal WAL checkpoint
 enum values (`RESTART` and `TRUNCATE`), eliminating a false dead-read result
 while preserving the live unset-default assertion and red-on-injection rails.
 
-Final clean closeout `9139626f93763ce3b52f2b05a2224e30ebde0dd6` passed
+Implementation closeout `9139626f93763ce3b52f2b05a2224e30ebde0dd6` passed
 `bun run test:ci` with all 21 gates green, including full-suite 37/37,
 real-toolchain 41 pass / 2 visible capability skips / 0 fail, web frontend
-807/807, and contract 13/13. Local, tracking, and remote `main` matched that SHA.
+807/807, and contract 13/13. Later documentation/governance-only commits require
+their own exact-HEAD receipt; they do not rewrite this historical implementation
+receipt.

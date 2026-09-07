@@ -6,6 +6,11 @@ import { expandTestFiles } from "../../tools/dev/sandboxed-test"
 import { assertScanPopulation } from "./_shared/scan-population"
 
 const ROOT = join(import.meta.dir, "..", "..")
+const AUDIT_PATH = "docs/bugbash/sep-05-duplicate-development.md"
+const REGISTER_PATH =
+  "docs/plans/sep-5-duplicate-audit/tickets/SEP5-11-deferred-and-closed-register.md"
+const EXECUTION_INDEX_PATH = "docs/plans/sep-5-duplicate-development/tickets/README.md"
+const PROMPT_PACK_PATH = "docs/plans/sep-5-duplicate-development/prompts/README.md"
 
 const EXPECTED = [
   "tests/unit/cli/gh-exec-policy-hellgate.test.ts",
@@ -54,6 +59,43 @@ const parseFullSuiteRoots = (shardsSrc: string): string[] => {
 const resolvedFullSuiteSelection = (roots: readonly string[]): string[] => {
   const abs = roots.map((root) => resolve(ROOT, root)).filter((dir) => existsSync(dir))
   return expandTestFiles(abs).map((file) => relative(ROOT, file))
+}
+
+type AuditDisposition = "execute" | "conditional" | "intentional" | "closed"
+
+const auditDispositionIds = (
+  markdown: string,
+): Readonly<Record<AuditDisposition, readonly string[]>> => {
+  const result: Record<AuditDisposition, string[]> = {
+    execute: [],
+    conditional: [],
+    intentional: [],
+    closed: [],
+  }
+  for (const match of markdown.matchAll(
+    /^\| \[D(\d+)\]\(#d\d+\) \| (execute|conditional|intentional|closed) \|/gm,
+  )) {
+    result[match[2] as AuditDisposition].push(`D${match[1]}`)
+  }
+  for (const ids of Object.values(result)) ids.sort()
+  return result
+}
+
+const registerIds = (markdown: string, heading: string): readonly string[] => {
+  const start = markdown.indexOf(`## ${heading}`)
+  if (start < 0) throw new Error(`missing register heading: ${heading}`)
+  const next = markdown.indexOf("\n## ", start + 4)
+  const section = markdown.slice(start, next < 0 ? undefined : next)
+  return [...section.matchAll(/^\| (D\d+) \|/gm)].map((m) => m[1] ?? "").sort()
+}
+
+const isTracked = (path: string): boolean => {
+  const result = Bun.spawnSync(["git", "ls-files", "--error-unmatch", path], {
+    cwd: ROOT,
+    stdout: "ignore",
+    stderr: "ignore",
+  })
+  return result.exitCode === 0
 }
 
 describe("SEP5 ratchet enrollment", () => {
@@ -112,5 +154,41 @@ describe("SEP5 ratchet enrollment", () => {
     const r = assertSelected(selected, EXPECTED)
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.missing).toBe(EXPECTED[0])
+  })
+
+  test("audit dispositions and SEP5-11 register are a closed, exact universe", () => {
+    const audit = auditDispositionIds(readFileSync(join(ROOT, AUDIT_PATH), "utf8"))
+    const register = readFileSync(join(ROOT, REGISTER_PATH), "utf8")
+
+    expect(audit.execute).toEqual([])
+    expect(audit.closed).toHaveLength(19)
+    expect(audit.conditional).toHaveLength(11)
+    expect(audit.intentional).toEqual(["D29"])
+    expect(registerIds(register, "Conditional items")).toEqual(audit.conditional)
+    expect(registerIds(register, "Closed items")).toEqual(
+      [...audit.closed, ...audit.intentional]
+        .filter(
+          (id) =>
+            !["D0", "D1", "D2", "D3", "D4", "D5", "D6", "D10", "D11", "D19", "D27", "D28"].includes(
+              id,
+            ),
+        )
+        .sort(),
+    )
+  })
+
+  test("governance packet tracking and terminal copy cannot regress", () => {
+    const index = readFileSync(join(ROOT, EXECUTION_INDEX_PATH), "utf8")
+    expect(isTracked(PROMPT_PACK_PATH)).toBe(true)
+    expect(index).not.toContain("currently untracked")
+    expect(index).not.toContain("commit pending")
+    expect(index).not.toContain("delivery remains pending")
+  })
+
+  test("mutation: omitting one conditional item breaks exact register parity", () => {
+    const audit = auditDispositionIds(readFileSync(join(ROOT, AUDIT_PATH), "utf8"))
+    const register = readFileSync(join(ROOT, REGISTER_PATH), "utf8")
+    const mutated = register.replace(/^\| D15 \|.*\n/m, "")
+    expect(registerIds(mutated, "Conditional items")).not.toEqual(audit.conditional)
   })
 })
