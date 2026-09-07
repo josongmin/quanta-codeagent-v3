@@ -1,7 +1,7 @@
 # SEP5-04B — ChatGPT cross-process refresh transaction
 
 **Priority:** P1
-**Status:** LANDED — exact clean CI green
+**Status:** LANDED — historical exact-HEAD CI receipt recorded below
 **Depends on:** SEP5-04A
 **Finding coverage:** D2; excludes D30's intentional MCP fresh-auth mutex
 

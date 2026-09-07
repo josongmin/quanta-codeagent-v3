@@ -13,7 +13,7 @@
 | 원칙 | SSOT + thin adapter + hellgate. slice fence 깨고 합치지 않음 |
 | fence SSOT | `tests/unit/_arch/slice-boundary-configs.ts` |
 | audit truth snapshot | `59ad4f9b3850b89c0417ef3d12d0c27d64917ba1` |
-| delivered closeout | `9139626f93763ce3b52f2b05a2224e30ebde0dd6` (`main`/`origin/main`, exact clean CI 21/21) |
+| delivered closeout | `9139626f93763ce3b52f2b05a2224e30ebde0dd6` (historical exact clean CI 21/21 receipt; branch refs may advance) |
 | KNOB_INVENTORY | 353 |
 | RUNTIME_CONFIG_KNOBS | 194 |
 | env-key intersection | 0 |

@@ -2,12 +2,18 @@
 
 ## Dispatch prerequisite
 
-These plan files are currently untracked in the source checkout. Commit the
-plan packet first, or run workers in the same checkout. A fresh worktree created
-from `59ad4f9b3850b89c0417ef3d12d0c27d64917ba1` will not contain uncommitted
-ticket files.
+The SEP-5 campaign is closed. Do not dispatch these historical implementation
+prompts unless a finding is explicitly reopened under SEP5-11 with new live
+evidence and an owner-local RED rail.
 
-Safe first-wave parallel lanes:
+This packet is tracked. The audit SHA
+`59ad4f9b3850b89c0417ef3d12d0c27d64917ba1` is a historical truth snapshot,
+not a reusable dispatch base. Before reusing any prompt, freeze the current
+`HEAD`/`origin/main`, verify that both its ticket and prompt revision are in that
+commit, and re-check the live implementation. A fresh worktree created from the
+historical audit SHA is stale by definition.
+
+Historical first-wave parallel lanes:
 
 - SEP5-01
 - SEP5-03

@@ -11,6 +11,25 @@ const REGISTER_PATH =
   "docs/plans/sep-5-duplicate-audit/tickets/SEP5-11-deferred-and-closed-register.md"
 const EXECUTION_INDEX_PATH = "docs/plans/sep-5-duplicate-development/tickets/README.md"
 const PROMPT_PACK_PATH = "docs/plans/sep-5-duplicate-development/prompts/README.md"
+const AUDIT_IDS = Array.from({ length: 31 }, (_, index) => `D${index}`)
+
+// Findings closed by a landed implementation ticket. The remaining closed
+// false-positive/intentional findings belong in SEP5-11 so they cannot return
+// as unscoped cleanup.
+const IMPLEMENTED_FINDINGS = [
+  "D0",
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5",
+  "D6",
+  "D10",
+  "D11",
+  "D19",
+  "D27",
+  "D28",
+] as const
 
 const EXPECTED = [
   "tests/unit/cli/gh-exec-policy-hellgate.test.ts",
@@ -81,6 +100,13 @@ const auditDispositionIds = (
   return result
 }
 
+const auditHeadingIds = (markdown: string): readonly string[] =>
+  [...markdown.matchAll(/^## (D\d+)\./gm)].map((match) => match[1] ?? "").sort()
+
+const allDispositionIds = (
+  dispositions: Readonly<Record<AuditDisposition, readonly string[]>>,
+): readonly string[] => Object.values(dispositions).flat().sort()
+
 const registerIds = (markdown: string, heading: string): readonly string[] => {
   const start = markdown.indexOf(`## ${heading}`)
   if (start < 0) throw new Error(`missing register heading: ${heading}`)
@@ -99,7 +125,7 @@ const isTracked = (path: string): boolean => {
 }
 
 describe("SEP5 ratchet enrollment", () => {
-  test("expected file list length equals landed implementation tickets", () => {
+  test("expected primary-file list is frozen and every path exists", () => {
     expect(EXPECTED.length).toBe(13)
     for (const path of EXPECTED) {
       expect(existsSync(join(ROOT, path))).toBe(true)
@@ -157,9 +183,12 @@ describe("SEP5 ratchet enrollment", () => {
   })
 
   test("audit dispositions and SEP5-11 register are a closed, exact universe", () => {
-    const audit = auditDispositionIds(readFileSync(join(ROOT, AUDIT_PATH), "utf8"))
+    const auditMarkdown = readFileSync(join(ROOT, AUDIT_PATH), "utf8")
+    const audit = auditDispositionIds(auditMarkdown)
     const register = readFileSync(join(ROOT, REGISTER_PATH), "utf8")
 
+    expect(allDispositionIds(audit)).toEqual([...AUDIT_IDS].sort())
+    expect(auditHeadingIds(auditMarkdown)).toEqual([...AUDIT_IDS].sort())
     expect(audit.execute).toEqual([])
     expect(audit.closed).toHaveLength(19)
     expect(audit.conditional).toHaveLength(11)
@@ -167,22 +196,24 @@ describe("SEP5 ratchet enrollment", () => {
     expect(registerIds(register, "Conditional items")).toEqual(audit.conditional)
     expect(registerIds(register, "Closed items")).toEqual(
       [...audit.closed, ...audit.intentional]
-        .filter(
-          (id) =>
-            !["D0", "D1", "D2", "D3", "D4", "D5", "D6", "D10", "D11", "D19", "D27", "D28"].includes(
-              id,
-            ),
-        )
+        .filter((id) => !IMPLEMENTED_FINDINGS.includes(id as (typeof IMPLEMENTED_FINDINGS)[number]))
         .sort(),
     )
   })
 
   test("governance packet tracking and terminal copy cannot regress", () => {
     const index = readFileSync(join(ROOT, EXECUTION_INDEX_PATH), "utf8")
+    const promptPack = readFileSync(join(ROOT, PROMPT_PACK_PATH), "utf8")
     expect(isTracked(PROMPT_PACK_PATH)).toBe(true)
-    expect(index).not.toContain("currently untracked")
-    expect(index).not.toContain("commit pending")
-    expect(index).not.toContain("delivery remains pending")
+    expect(isTracked(REGISTER_PATH)).toBe(true)
+    for (const markdown of [index, promptPack]) {
+      expect(markdown).not.toContain("currently untracked")
+      expect(markdown).not.toContain("commit pending")
+      expect(markdown).not.toContain("delivery remains pending")
+    }
+    expect(promptPack).toContain("historical truth snapshot")
+    expect(promptPack).toContain("freeze the current")
+    expect(promptPack).toContain("Do not dispatch these historical implementation")
   })
 
   test("mutation: omitting one conditional item breaks exact register parity", () => {
@@ -190,5 +221,11 @@ describe("SEP5 ratchet enrollment", () => {
     const register = readFileSync(join(ROOT, REGISTER_PATH), "utf8")
     const mutated = register.replace(/^\| D15 \|.*\n/m, "")
     expect(registerIds(mutated, "Conditional items")).not.toEqual(audit.conditional)
+  })
+
+  test("mutation: a duplicate disposition ID cannot hide a missing audit finding", () => {
+    const auditMarkdown = readFileSync(join(ROOT, AUDIT_PATH), "utf8")
+    const mutated = auditMarkdown.replace("| [D15](#d15) |", "| [D14](#d14) |")
+    expect(allDispositionIds(auditDispositionIds(mutated))).not.toEqual([...AUDIT_IDS].sort())
   })
 })

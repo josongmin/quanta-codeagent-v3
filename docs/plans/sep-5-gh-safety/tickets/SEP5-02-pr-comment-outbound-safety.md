@@ -1,7 +1,7 @@
 # SEP5-02 — PR comment outbound safety contracts
 
 **Priority:** P1
-**Status:** LANDED — exact clean CI green
+**Status:** LANDED — historical exact-HEAD CI receipt recorded below
 **Depends on:** SEP5-01, SEP5-03
 **Finding coverage:** D4
 

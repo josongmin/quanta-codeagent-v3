@@ -1,6 +1,6 @@
 # Sep-05 duplicate-development remediation — execution index
 
-**Status:** COMPLETE — implementation is on `main`; exact clean CI green
+**Status:** COMPLETE — implementation is on `main`; historical exact-HEAD CI receipt recorded below
 **Audit truth snapshot:** `59ad4f9b3850b89c0417ef3d12d0c27d64917ba1`
 **Delivered closeout:** `9139626f93763ce3b52f2b05a2224e30ebde0dd6`
 **Source audit:** `docs/bugbash/sep-05-duplicate-development.md`
