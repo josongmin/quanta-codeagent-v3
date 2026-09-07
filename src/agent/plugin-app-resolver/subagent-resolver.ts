@@ -25,17 +25,7 @@
 
 import type { MentionResolverPort } from "@/agent/mention-injection"
 import type { NamedAgentResolver } from "@/agent/named-agent-registry"
-import { errMessage, logger } from "@/shared"
-
-/** First non-empty line of a role system prompt (LF / CRLF tolerant). Empty
- *  when the body is blank (the definition loader drops empty-body defs, so this
- *  is defence-in-depth). Pure. */
-const firstLineOf = (body: string): string => {
-  if (typeof body !== "string" || body.length === 0) return ""
-  const nl = body.indexOf("\n")
-  const slice = nl === -1 ? body : body.slice(0, nl)
-  return (slice.endsWith("\r") ? slice.slice(0, -1) : slice).trim()
-}
+import { errMessage, logger, mentionFirstLine } from "@/shared"
 
 /**
  * Build the `resolveSubagent` method of a {@link MentionResolverPort}.
@@ -53,7 +43,7 @@ export const createSubagentResolver = (
     try {
       const def = registry.resolve(target)
       if (def === undefined || def === null) return null
-      const desc = firstLineOf(def.system)
+      const desc = mentionFirstLine(def.system)
       // Handle line is always present; the role description line only when the
       // body yields a non-empty first line.
       const bodyText =

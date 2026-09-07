@@ -14,8 +14,9 @@ unreachable from production.
 
 ## Decision
 
-Read `process.env.QUANTA_SESSION_REGISTRY_DISK_DIR` exactly once at first
-`getGlobalSessionResourceRegistry()` call. If set (non-empty), mint
+At the first `getGlobalSessionResourceRegistry()` call, consume the shared
+`runtimeConfig()` snapshot containing
+`QUANTA_SESSION_REGISTRY_DISK_DIR`. If set (non-empty), mint
 `createDiskSessionResourceRegistry({ storageDir })`. Otherwise legacy
 in-memory. NO-THROW: a malformed env var (path that disk-adapter cannot
 mkdir-under) falls back to in-memory silently rather than abort process
@@ -30,9 +31,9 @@ Env-var contract:
 | valid dir path | disk-backed (jsonl) |
 | invalid path (mkdir fails) | in-memory (NO-THROW fallback) |
 
-The env is read inside the singleton mint, so runtime mutation after the
-first call is ignored (per the lazy-init contract). Tests use
-`resetGlobalSessionResourceRegistry()` to re-trigger env read.
+The snapshot is captured inside the singleton mint, so runtime mutation after
+the first call is ignored (per the lazy-init contract). Tests use
+`resetGlobalSessionResourceRegistry()` to re-trigger snapshot construction.
 
 ## Non-goals
 

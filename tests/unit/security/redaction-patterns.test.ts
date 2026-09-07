@@ -163,6 +163,19 @@ describe("Layer-2 format patterns — positive matches", () => {
     expect(r.text).toContain("origin: /Users/x/.aws/credentials")
     expect(r.text).not.toContain("AKIAIOSFODNN7EXAMPLE")
   })
+
+  test("source_class_secret never reintroduces control bytes through its origin label", () => {
+    const r = redactSecrets("secret body", {
+      origin: "tool_result",
+      sourceClass: "secret",
+      sourceLabel: "<pty:tmux:quanta-\u001b[32mGREEN\u0007\nforged>",
+    })
+    expect(r.text).toContain("[REDACTED:source_class_secret]")
+    expect(r.text).toContain("origin: <pty:tmux:quanta-GREEN??forged>")
+    expect(r.text).not.toContain("\u001b")
+    expect(r.text).not.toContain("\u0007")
+    expect(r.text).not.toContain("\n")
+  })
 })
 
 describe("Determinism and ordering invariants", () => {

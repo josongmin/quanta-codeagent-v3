@@ -1,7 +1,7 @@
 # SEP5-11 — deferred and closed duplicate findings register
 
 **Priority:** governance
-**Status:** ACTIVE REGISTER; no implementation by default
+**Status:** GOVERNANCE REGISTER; 0 active implementation items
 **Depends on:** SEP5-00
 **Finding coverage:** D7–D9, D12–D18, D20–D26, D29–D30
 
@@ -16,7 +16,6 @@ an owner-local failing rail.
 | ID | Current decision | Reopen trigger | Allowed scope |
 |---|---|---|---|
 | D7 | Do not build `voice -> media` REST core | Proven live/public consumer of both STT contracts, or decision to delete media stack | Delete unused stack; otherwise extract a neutral injected transport without peer import |
-| D8 | Leave helpers local | Observed first-line output or error-policy drift | Extract only pure first-line helper; warning policy remains caller-owned |
 | D13 | Do not force all git domains onto one `GitRunner` | Reproduced env leak, shell injection, orphan child, or missing timeout | Share execution policy/argv runner at a legal composition seam; retain domain ports |
 | D15 | Keep the classified public-compat retrieval barrels; the dead assembler is already retired | A concrete supported external consumer can migrate, or a compatibility-removal boundary is approved with consumer evidence | Remove or adapt only the classified legacy exports; preserve canonical `engines/embedder` and `reranker` runtime owners |
 | D16 | Do not merge tool registries | Concrete tool missing/duplicated between surfaces against an agreed capability manifest | Extract group registration primitive, not one mega optional builder |
@@ -31,6 +30,7 @@ an owner-local failing rail.
 
 | ID | Why closed | Guard against recurrence |
 |---|---|---|
+| D8 | Sep-06 S8 resolved the measured trim drift through fence-legal `src/shared/mention-text.ts`; warning, lookup, and fallback policies remain caller-owned | `tests/unit/mention-first-line-parity-hellgate.test.ts` pins the value contract, all seven live callers, and rejects an arbitrarily named eighth local projection owner by red-on-injection |
 | D9 | `SessionVerbSurface<R>` and source-level compile pins already enforce verb key/argument/result-grade parity | Keep typecheck pins; require a semantic drift reproduction before a factory |
 | D12 | grep, glob, and lexical ripgrep have different output/fallback/jail contracts | Track shell/argv execution hardening under D13-style policy, not DRY |
 | D14 | One-line SHA-256 wrappers are stable and intentionally fence-local | Do not create a dependency solely to share `createHash(...).digest("hex")` |

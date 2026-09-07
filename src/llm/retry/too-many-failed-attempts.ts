@@ -1,5 +1,5 @@
 /**
- * ADR-0237 — `tooManyFailedAttempts` layer-owned arm wire (LLM error 16-kind
+ * ADR-0237 — `tooManyFailedAttempts` layer-owned arm wire (LLM error 18-kind
  * close-out, slice A of 3).
  *
  * # What this is
@@ -12,13 +12,13 @@
  *   3. When the count reaches `maxConsecutiveFailures`, re-throws the failure
  *      RE-WRAPPED as `LLMError("too_many_failed_attempts", ...)` with the
  *      original error preserved on `cause` so downstream consumers (the
- *      `CodexSpecRouter` 16-kind switch — already maps this kind to `fatal`)
+ *      `CodexSpecRouter` 18-kind switch — already maps this kind to `fatal`)
  *      can route it without re-classifying.
  *
  * # Why this lives in `src/llm/retry/`
  *
  * `too_many_failed_attempts` is one of the THREE layer-owned arms in the
- * ADR-0214 16-kind `LLMErrorKind` taxonomy that the adapter boundary cannot
+ * ADR-0214 18-kind `LLMErrorKind` taxonomy that the adapter boundary cannot
  * emit (the provider has no "you burned the retry budget" return code — only
  * the retry layer KNOWS the budget was burned). ADR-0234 wired the two
  * provider-emitable arms (`cyber_policy` / `context_window_exceeded`) at the

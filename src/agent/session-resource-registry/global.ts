@@ -30,37 +30,46 @@
  *
  * # Config
  *
- * Default `createInMemorySessionResourceRegistry()` — no `maxEntries`,
- * no `idleTtlMs`. Production callers responsible for size if it matters.
- * A follow-up ADR can expose knobs (env vars, config slot) without
- * changing the call-site shape here.
+ * Runtime-config selects SQLite, disk, or the in-memory default. The selected
+ * backend descriptor and sweep config are stored beside the registry so every
+ * observer/cleanup consumer shares the same first-call snapshot.
  *
  * # NOT in scope
  *
- *   - Disk persistence (separate ADR; sqlite/jsonl)
  *   - Per-host distributed sharing (Redis-class — out of scope)
- *   - Config knobs (maxEntries / idleTtlMs) on the singleton
+ *   - Runtime mutation after first use (reset + remint is required)
  */
 
 import { type RuntimeConfig, runtimeConfig } from "@/shared"
-import { type AutoSweepHandle, autoSweepConfigFromRuntime, startAutoSweep } from "./auto-sweep"
+import {
+  type AutoSweepConfig,
+  type AutoSweepHandle,
+  autoSweepConfigFromRuntime,
+  startAutoSweep,
+} from "./auto-sweep"
 import { createDiskSessionResourceRegistry } from "./disk-adapter/disk-store"
 import { createInMemorySessionResourceRegistry } from "./in-memory-registry"
 import { createSqliteSessionResourceRegistry } from "./sqlite-adapter"
 import type { SessionResourceRegistry } from "./types"
 
-let instance: SessionResourceRegistry | null = null
+export type GlobalRegistryBackend =
+  | { readonly kind: "in-memory" }
+  | { readonly kind: "disk"; readonly path: string }
+  | { readonly kind: "sqlite"; readonly path: string }
+
+export interface GlobalSessionResourceRegistryState {
+  readonly registry: SessionResourceRegistry
+  /** The backend that was actually constructed after the fallback chain. */
+  readonly backend: GlobalRegistryBackend
+  /** The first-call runtime snapshot projected for every sweep consumer. */
+  readonly sweepConfig: AutoSweepConfig
+  readonly autoSweepHandle: AutoSweepHandle | null
+}
+
+let state: GlobalSessionResourceRegistryState | null = null
 
 /**
- * ADR-0369 — Periodic auto-sweep handle. Lazy-init: minted on the same
- * first `getGlobalSessionResourceRegistry()` call that mints the
- * registry singleton. NULL when the env vars are unset (the auto-sweep
- * itself decides; we just hold the handle so `reset…` can stop it).
- */
-let autoSweepHandle: AutoSweepHandle | null = null
-
-/**
- * ADR-0351 (disk) + ADR-0367 (sqlite) — env-var backend swap.
+ * ADR-0351 (disk) + ADR-0367 (sqlite) — runtime-config backend swap.
  *
  * Priority order on first `getGlobalSessionResourceRegistry()` call:
  *
@@ -73,16 +82,18 @@ let autoSweepHandle: AutoSweepHandle | null = null
  *   3. otherwise ⇒ `createInMemorySessionResourceRegistry()`
  *      (ADR-0345 default, byte-identical to pre-ADR-0351).
  *
- * Both env vars set ⇒ SQLite wins (more durable + Codex parity).
+ * Both paths set ⇒ SQLite wins (more durable + Codex parity).
  *
  * NO-THROW invariant: if any backend's constructor throws (unreadable
  * file, parent dir missing, disk full, etc.) the next fallback in the
- * chain is tried, terminating at in-memory. A misconfigured env var
+ * chain is tried, terminating at in-memory. A misconfigured path
  * MUST NOT abort process startup. Subsequent calls reuse the same
- * instance per the usual lazy-init contract (env read EXACTLY ONCE
+ * instance per the usual lazy-init contract (runtime snapshot EXACTLY ONCE
  * per process or per `resetGlobalSessionResourceRegistry()`).
  */
-const buildDefaultRegistry = (cfg: RuntimeConfig): SessionResourceRegistry => {
+const buildDefaultRegistry = (
+  cfg: RuntimeConfig,
+): Pick<GlobalSessionResourceRegistryState, "registry" | "backend"> => {
   // ADR-0503 P4 — backend selection is routed through the typed runtimeConfig()
   // snapshot (sessionRegistrySqlitePath / sessionRegistryDiskDir) so a
   // `/config set` reaches it. The non-empty guards + NO-THROW fallback chain
@@ -93,58 +104,104 @@ const buildDefaultRegistry = (cfg: RuntimeConfig): SessionResourceRegistry => {
   const sqlitePath = cfg.sessionRegistrySqlitePath
   if (sqlitePath !== undefined && sqlitePath.length > 0) {
     try {
-      return createSqliteSessionResourceRegistry({ databasePath: sqlitePath })
+      return {
+        registry: createSqliteSessionResourceRegistry({ databasePath: sqlitePath }),
+        backend: { kind: "sqlite", path: sqlitePath },
+      }
     } catch {
       // SQLite adapter unavailable ⇒ fall through to disk / in-memory
-      // so a hosed env var cannot break every quanta process.
+      // so a hosed runtime path cannot break every quanta process.
     }
   }
   // 2. Disk JSONL (ADR-0351).
   const diskDir = cfg.sessionRegistryDiskDir
   if (diskDir !== undefined && diskDir.length > 0) {
     try {
-      return createDiskSessionResourceRegistry({ storageDir: diskDir })
+      return {
+        registry: createDiskSessionResourceRegistry({ storageDir: diskDir }),
+        backend: { kind: "disk", path: diskDir },
+      }
     } catch {
       // Disk adapter unavailable ⇒ silently fall back so a hosed env
       // var cannot break every quanta process on the machine.
     }
   }
   // 3. In-memory default (ADR-0345).
-  return createInMemorySessionResourceRegistry()
+  return {
+    registry: createInMemorySessionResourceRegistry(),
+    backend: { kind: "in-memory" },
+  }
 }
+
+const getOrCreateGlobalState = (): GlobalSessionResourceRegistryState => {
+  if (state !== null) return state
+  const cfg = runtimeConfig()
+  const mounted = buildDefaultRegistry(cfg)
+  const sweepConfig = autoSweepConfigFromRuntime(cfg)
+  let autoSweepHandle: AutoSweepHandle | null = null
+  try {
+    autoSweepHandle = startAutoSweep(sweepConfig)
+  } catch {
+    // Registry construction succeeded; a timer wiring failure must not discard it.
+  }
+  state = { ...mounted, sweepConfig, autoSweepHandle }
+  return state
+}
+
+/** Canonical process state for registry consumers that need backend provenance. */
+export const getGlobalSessionResourceRegistryState = (): GlobalSessionResourceRegistryState =>
+  getOrCreateGlobalState()
 
 /**
  * Get-or-mint the process-level singleton. First call constructs the
- * default registry (disk-backed when `QUANTA_SESSION_REGISTRY_DISK_DIR`
- * is set, in-memory otherwise); every subsequent call returns the SAME
+ * default registry (SQLite, disk, then in-memory fallback from the frozen
+ * runtime snapshot); every subsequent call returns the SAME
  * reference. Composition roots call this exactly once per
  * `installCodexR2Wires` to look up (or mint) the session resources.
  */
 export const getGlobalSessionResourceRegistry = (): SessionResourceRegistry => {
-  if (instance === null) {
-    const cfg = runtimeConfig()
-    instance = buildDefaultRegistry(cfg)
-    // ADR-0369 — Schedule the retention sweep on the SAME first-call
-    // path, from the SAME runtimeConfig() snapshot that selected the
-    // backend. `startAutoSweep` returns a NO-OP handle when neither
-    // durable path is set, so the in-memory default path pays zero cost
-    // (no setInterval registered). The handle is stored so `reset…` can
-    // tear it down for test isolation.
-    if (autoSweepHandle === null) {
-      try {
-        autoSweepHandle = startAutoSweep(autoSweepConfigFromRuntime(cfg))
-      } catch {
-        // NO-THROW — a sweep wire failure must not break the registry
-        // singleton bootstrap. The registry is fully usable without it.
-      }
-    }
-  }
-  return instance
+  return getOrCreateGlobalState().registry
 }
 
 /** Test seam — the auto-sweep handle minted on the same first-call path as
  *  the registry singleton. `null` before first get / after reset. */
-export const peekGlobalAutoSweepHandle = (): AutoSweepHandle | null => autoSweepHandle
+export const peekGlobalAutoSweepHandle = (): AutoSweepHandle | null =>
+  state?.autoSweepHandle ?? null
+
+export type GlobalRegistrySweepOutcome =
+  | { readonly kind: "swept" }
+  | { readonly kind: "not-configured" }
+  | { readonly kind: "unavailable" }
+  | { readonly kind: "failed"; readonly attempted: number }
+  | {
+      readonly kind: "partial"
+      readonly attempted: number
+      readonly succeeded: number
+      readonly failed: number
+    }
+
+/**
+ * Run an immediate sweep through the handle owned by the singleton lifecycle.
+ * This prevents operator cleanup from minting a second timer or re-reading a
+ * newer runtime-config snapshot than the mounted registry.
+ */
+export const sweepGlobalSessionResourceRegistryNow =
+  async (): Promise<GlobalRegistrySweepOutcome> => {
+    const current = getOrCreateGlobalState()
+    const hasDurableBackend =
+      (current.sweepConfig.sqlitePath?.length ?? 0) > 0 ||
+      (current.sweepConfig.diskDir?.length ?? 0) > 0
+    if (!hasDurableBackend) return { kind: "not-configured" }
+    if (current.autoSweepHandle === null) return { kind: "unavailable" }
+    const result = await current.autoSweepHandle.sweepNowWithOutcome()
+    if (result.failed === result.attempted) {
+      return { kind: "failed", attempted: result.attempted }
+    }
+    if (result.failed > 0) {
+      return { kind: "partial", ...result }
+    }
+    return { kind: "swept" }
+  }
 
 /**
  * Test reset — drop the singleton so the next
@@ -157,9 +214,8 @@ export const resetGlobalSessionResourceRegistry = (): void => {
   // the next `getGlobalSessionResourceRegistry()` call mints a fresh
   // registry AND a fresh sweep handle. `stop()` is NO-THROW + idempotent
   // (see `auto-sweep.ts`), so it is safe whether or not a handle exists.
-  if (autoSweepHandle !== null) {
-    autoSweepHandle.stop()
-    autoSweepHandle = null
+  if (state?.autoSweepHandle !== null && state?.autoSweepHandle !== undefined) {
+    state.autoSweepHandle.stop()
   }
-  instance = null
+  state = null
 }

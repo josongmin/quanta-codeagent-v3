@@ -97,6 +97,8 @@ export interface SweepResult {
    * ADR-0375 threshold tuning needs.
    */
   readonly walSize: number
+  /** False only when the configured database could not be opened/migrated. */
+  readonly backendAvailable: boolean
 }
 
 const EMPTY_RESULT: SweepResult = {
@@ -106,6 +108,7 @@ const EMPTY_RESULT: SweepResult = {
   walRestarted: false,
   walTruncated: false,
   walSize: 0,
+  backendAvailable: false,
 }
 
 /**
@@ -209,6 +212,8 @@ export interface SqliteCleanupCandidates {
   readonly inspectedSessions: number
   /** WAL file size at count time. Mirrors `SweepResult.walSize`. */
   readonly walSize: number
+  /** False when the configured database could not be opened/migrated. */
+  readonly backendAvailable: boolean
 }
 
 const EMPTY_CANDIDATES: SqliteCleanupCandidates = {
@@ -216,6 +221,7 @@ const EMPTY_CANDIDATES: SqliteCleanupCandidates = {
   wouldEvictBySize: 0,
   inspectedSessions: 0,
   walSize: 0,
+  backendAvailable: false,
 }
 
 /**
@@ -313,7 +319,13 @@ export const countSqliteRegistryCleanupCandidates = (
     // NO-THROW.
   }
 
-  return { wouldEvictByTtl, wouldEvictBySize, inspectedSessions, walSize }
+  return {
+    wouldEvictByTtl,
+    wouldEvictBySize,
+    inspectedSessions,
+    walSize,
+    backendAvailable: true,
+  }
 }
 
 /**
@@ -409,5 +421,13 @@ export const sweepSqliteRegistry = (cfg: SqliteRegistryConfig): SweepResult => {
     // NO-THROW.
   }
 
-  return { evictedByTtl, evictedBySize, checkpointed, walRestarted, walTruncated, walSize }
+  return {
+    evictedByTtl,
+    evictedBySize,
+    checkpointed,
+    walRestarted,
+    walTruncated,
+    walSize,
+    backendAvailable: true,
+  }
 }

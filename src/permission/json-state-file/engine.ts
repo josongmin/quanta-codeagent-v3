@@ -99,8 +99,9 @@ export const rereadForMerge = async <T>(st: EngineState<T>): Promise<T | null> =
  * Concurrency:
  *   - Intra-process: serialized externally via {@link enqueueWrite} so two
  *     back-to-back mutations never `rename` over each other.
- *   - Multi-process: per-instance tmp suffix avoids tmp clobber; the final
- *     rename is still last-write-wins (see module comment).
+ *   - Multi-process: merge-enabled stores hold the advisory lock across the
+ *     read-merge-rename window. Failure to acquire it is a typed non-durable
+ *     outcome; the engine never writes outside the protected section.
  */
 export const writeToDisk = async <T>(st: EngineState<T>): Promise<PersistOutcome> => {
   // Cross-process lock ONLY guards the merge path's read-merge-rename window
@@ -109,7 +110,14 @@ export const writeToDisk = async <T>(st: EngineState<T>): Promise<PersistOutcome
   let locked = false
   try {
     await mkdir(dirname(st.filePath), { recursive: true })
-    if (useLock) locked = await acquireLock(st.lockPath, st.tmpSuffix, st.lockNow)
+    if (useLock) {
+      locked = await acquireLock(st.lockPath, st.tmpSuffix, st.lockNow)
+      if (!locked) {
+        const reason = "cross-process lock unavailable"
+        stderrWarn(`flush blocked (${st.filePath}): ${reason}`)
+        return { durable: false, reason }
+      }
+    }
     const inMemory = st.snapshotState()
     // Read-reconcile-MERGE: fold any peer-written records on disk into our
     // payload so a concurrent flush is last-write-MERGE, not -WINS. Absent
@@ -167,12 +175,21 @@ export const enqueueWrite = <T>(st: EngineState<T>): Promise<PersistOutcome> => 
   // we're awaiting `prior` still gets its own write (it re-sets dirty).
   st.dirty = false
   const next = prior.then(() => writeToDisk(st))
-  st.pendingFlush = next.finally(() => {
-    // Clear the slot ONLY if we were the most recent enqueue. A later
-    // enqueue would have overwritten `pendingFlush` already.
-    if (st.pendingFlush === next) st.pendingFlush = null
-  })
-  return next
+  let tracked: Promise<PersistOutcome>
+  tracked = next
+    .then((outcome) => {
+      // Preserve retryability for the newest failed generation. If a newer
+      // write is already queued, that write owns the dirty state instead.
+      if (!outcome.durable && st.pendingFlush === tracked) st.dirty = true
+      return outcome
+    })
+    .finally(() => {
+      // Clear the slot ONLY if we were the most recent enqueue. A later
+      // enqueue would have overwritten `pendingFlush` already.
+      if (st.pendingFlush === tracked) st.pendingFlush = null
+    })
+  st.pendingFlush = tracked
+  return tracked
 }
 
 export const flushDurable = async <T>(

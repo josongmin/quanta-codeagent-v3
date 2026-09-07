@@ -43,6 +43,8 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { mkdir, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { __resetKnobOverrides, setKnobOverride } from "@/shared"
+import { getGlobalSessionResourceRegistry, resetGlobalSessionResourceRegistry } from "../global"
 import { createInMemorySessionResourceRegistry } from "../in-memory-registry"
 import {
   formatRegistryStats,
@@ -75,6 +77,8 @@ const TRACKED_ENV = [
 ] as const
 
 beforeEach(() => {
+  resetGlobalSessionResourceRegistry()
+  __resetKnobOverrides()
   for (const k of TRACKED_ENV) {
     ORIGINAL_ENV[k] = process.env[k]
     delete process.env[k]
@@ -82,6 +86,8 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  resetGlobalSessionResourceRegistry()
+  __resetKnobOverrides()
   for (const k of TRACKED_ENV) {
     const v = ORIGINAL_ENV[k]
     if (v === undefined) delete process.env[k]
@@ -228,6 +234,42 @@ describe("ADR-0370 session-registry inspector — hellgate", () => {
     process.env.QUANTA_SESSION_REGISTRY_DISK_DIR = diskDir
     const s = await inspectGlobalRegistry()
     expect(s.backend).toBe("sqlite")
+    cleanup()
+  })
+
+  test("[11a] runtime override and inspector share the mounted sqlite authority", async () => {
+    const { dir, cleanup } = makeTmpDir("runtime-override")
+    const sqlitePath = join(dir, "override.db")
+    const diskDir = join(dir, "ambient-disk")
+    await mkdir(diskDir, { recursive: true })
+    const seed = new Database(sqlitePath)
+    applyMigrations(seed)
+    seed.close()
+    process.env.QUANTA_SESSION_REGISTRY_DISK_DIR = diskDir
+    expect(setKnobOverride("QUANTA_SESSION_REGISTRY_SQLITE_PATH", sqlitePath)).toBe(true)
+
+    getGlobalSessionResourceRegistry()
+    const s = await inspectGlobalRegistry()
+
+    expect(s.backend).toBe("sqlite")
+    expect(s.path).toBe(sqlitePath)
+    cleanup()
+  })
+
+  test("[11b] inspector reports the actual disk fallback after sqlite mount failure", async () => {
+    const { dir, cleanup } = makeTmpDir("mount-fallback")
+    const invalidSqlitePath = join(dir, "sqlite-is-a-directory")
+    const diskDir = join(dir, "disk")
+    await mkdir(invalidSqlitePath, { recursive: true })
+    await mkdir(diskDir, { recursive: true })
+    expect(setKnobOverride("QUANTA_SESSION_REGISTRY_SQLITE_PATH", invalidSqlitePath)).toBe(true)
+    expect(setKnobOverride("QUANTA_SESSION_REGISTRY_DISK_DIR", diskDir)).toBe(true)
+
+    getGlobalSessionResourceRegistry()
+    const s = await inspectGlobalRegistry()
+
+    expect(s.backend).toBe("disk")
+    expect(s.path).toBe(diskDir)
     cleanup()
   })
 

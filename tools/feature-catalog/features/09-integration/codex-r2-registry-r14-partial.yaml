@@ -29,8 +29,10 @@ purpose: |
   gauge — closes the observability gap that ADR-0375 threshold tuning
   needs (operators measure actual workload before guessing). ADR-0379
   adds `/session-registry cleanup` for manual on-demand sweep — delegates
-  to ADR-0369 `startAutoSweep().sweepNow()` + stop() in finally to
-  prevent timer leak. ADR-0383 ships `getOrCreateRegistry(opts)` unified
+  to the singleton lifecycle's owned `sweepNowWithOutcome()` path, so it
+  reuses the frozen runtime snapshot, never mints a second timer, and
+  reports unavailable/partial backend failures honestly. ADR-0383 ships
+  `getOrCreateRegistry(opts)` unified
   mint API — additive non-breaking, opts-driven routing between ADR-0347
   global singleton and ADR-0372 caller-owned-with-telemetry; case F
   (emitter-alone) explicitly routes to global to avoid the anti-pattern

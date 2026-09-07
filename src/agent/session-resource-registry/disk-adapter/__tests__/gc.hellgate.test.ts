@@ -107,7 +107,7 @@ describe("ADR-0348-gc §D — missing storageDir ⇒ {0,0}", () => {
     const res = await sweepDiskRegistry({
       storageDir: "/no/such/path/for/adr0348/gc/test",
     })
-    expect(res).toEqual({ evicted: 0, truncated: 0 })
+    expect(res).toEqual({ evicted: 0, truncated: 0, backendAvailable: false })
   })
 })
 

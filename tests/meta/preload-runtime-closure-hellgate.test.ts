@@ -42,22 +42,33 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..")
+const PROBE_ROOT = join(REPO_ROOT, "tests", ".tmp")
+
+const makeProbeDir = (prefix: string): string => {
+  // Keep the probe under tests/ so Bun applies the real bunfig preload, but
+  // stage it in the repo's ignored .tmp namespace. A visible transient
+  // `tests/zz-*` directory made a concurrent authoritative shard observe a
+  // dirty checkout and abort even though this test removed it in finally.
+  mkdirSync(PROBE_ROOT, { recursive: true })
+  return mkdtempSync(join(PROBE_ROOT, prefix))
+}
 
 /**
  * Run a probe under the REAL bunfig and report every `src/` module the runtime
  * ended up with.
  *
- * The probe is written into the repo's own `tests/` tree, not a temp directory,
+ * The probe is written into the repo's ignored `tests/.tmp/` tree, not a system
+ * temp directory,
  * so it is preloaded exactly like any other test file — a probe outside the tree
  * would not pick up `bunfig.toml` at all and would report a clean closure for
  * the wrong reason.
  */
 const loadedSrcModules = (): readonly string[] => {
-  const dir = mkdtempSync(join(REPO_ROOT, "tests", "zz-preload-probe-"))
+  const dir = makeProbeDir("preload-probe-")
   const probe = join(dir, "probe.test.ts")
   writeFileSync(
     probe,
@@ -168,7 +179,7 @@ describe("preload runtime closure", () => {
       if (branchRunAgentOverride() !== null) throw new Error("reset did not clear")
       process.stdout.write("RESET-OK\\n")
     `
-    const dir = mkdtempSync(join(REPO_ROOT, "tests", "zz-reset-probe-"))
+    const dir = makeProbeDir("reset-probe-")
     try {
       const file = join(dir, "probe.ts")
       writeFileSync(file, probe)

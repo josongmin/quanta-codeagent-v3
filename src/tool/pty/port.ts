@@ -12,6 +12,7 @@
  * slice is fully testable over a Fake backend with no real process/tmux.
  * NO-THROW: every op resolves a typed `PtyResult`, never throws at the boundary.
  */
+import type { SensitivityClass } from "@/security"
 
 /** A backend-tagged opaque handle. `tmux:<session>` or `pty:<seq>`. */
 export type PtyHandle = string
@@ -33,6 +34,8 @@ export interface PtyHandleInfo {
 export interface PtyChunk {
   readonly seq: number
   readonly data: string
+  /** Source class active when this output chunk was produced. */
+  readonly sourceClass?: SensitivityClass
 }
 
 export interface AttachResult {
@@ -62,6 +65,20 @@ export type PtyResult<T> =
 
 export interface PtyWriteOpts {
   readonly appendNewline?: boolean
+  /** Classification of the command/data that can produce subsequent output. */
+  readonly sourceClass?: SensitivityClass
+}
+
+/** Conservative join for asynchronous terminal output. A session never
+ * downgrades: output from an earlier secret write can arrive after later input. */
+export const strongestPtySourceClass = (
+  left: SensitivityClass | undefined,
+  right: SensitivityClass | undefined,
+): SensitivityClass | undefined => {
+  if (left === "secret" || right === "secret") return "secret"
+  if (left === "internal" || right === "internal") return "internal"
+  if (left === "public" || right === "public") return "public"
+  return undefined
 }
 
 /** The closed port the 6 tools call. Every method is NO-THROW (returns a typed

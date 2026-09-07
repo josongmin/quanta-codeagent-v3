@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { classifyCommandShape, classifyPath } from "@/security"
+import { classifyCodeShape, classifyCommandShape, classifyPath } from "@/security"
 
 const HOME = "/home/alice"
 
@@ -194,7 +194,44 @@ describe("classifyCommandShape — first-token + arg shape", () => {
     expect(classifyCommandShape("bash -c 'ls -la'")).toBe("public")
   })
 
+  test("nested shell wrappers cannot hide a credential-printing command", () => {
+    expect(classifyCommandShape(`bash -c "bash -c 'printenv'"`)).toBe("secret")
+    expect(classifyCommandShape(`sh -lc "bash -c 'gh auth token'"`)).toBe("secret")
+  })
+
+  test("interpreter eval that reads environment or .env is secret", () => {
+    expect(classifyCommandShape(`node -e 'console.log(process.env)'`)).toBe("secret")
+    expect(classifyCommandShape(`python -c 'print(os.environ)'`)).toBe("secret")
+    expect(classifyCommandShape(`node -e 'require("fs").readFileSync(".env")'`)).toBe("secret")
+  })
+
+  test("benign interpreter eval remains public", () => {
+    expect(classifyCommandShape(`node -e 'console.log(1 + 1)'`)).toBe("public")
+    expect(classifyCommandShape(`python -c 'print(2 + 2)'`)).toBe("public")
+  })
+
   test("bash script.sh without -c keeps the existing public classification", () => {
     expect(classifyCommandShape("bash script.sh")).toBe("public")
+  })
+})
+
+describe("classifyCodeShape — host runtime eval", () => {
+  test("environment and secret-path reads are secret", () => {
+    expect(classifyCodeShape("console.log(process.env.ANTHROPIC_API_KEY)")).toBe("secret")
+    expect(classifyCodeShape("console.log(import.meta.env.ANTHROPIC_API_KEY)")).toBe("secret")
+    expect(classifyCodeShape(`require("fs").readFileSync(".env", "utf8")`)).toBe("secret")
+    expect(classifyCodeShape(`require("child_process").execSync("gh auth token")`)).toBe("secret")
+  })
+
+  test("dynamic file-read paths fail closed", () => {
+    expect(classifyCodeShape("require('fs').readFileSync(userPath, 'utf8')")).toBe("secret")
+    expect(classifyCodeShape("require('fs').readFileSync(`" + "$" + "{root}/token`)")).toBe(
+      "secret",
+    )
+    expect(classifyCodeShape("require('fs').readFileSync('package.json', 'utf8')")).toBe("public")
+  })
+
+  test("ordinary computation remains public", () => {
+    expect(classifyCodeShape("const answer = 40 + 2; answer")).toBe("public")
   })
 })

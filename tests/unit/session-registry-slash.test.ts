@@ -33,7 +33,11 @@
  *     17. unknown sub-command stderr includes "evict" in the known list
  */
 
+import { Database } from "bun:sqlite"
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
+import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import {
   autoSweepConfigFromRuntime,
   getGlobalSessionResourceRegistry,
@@ -324,7 +328,7 @@ describe("ADR-0376 /session-registry help discovery", () => {
     expect(err).not.toContain("unknown subcommand")
   })
 
-  test("[19] cleanup renders stats + 'Sweep complete' marker", async () => {
+  test("[19] cleanup reports honestly when no durable backend is configured", async () => {
     const cmd = findCmd()
     expect(cmd).toBeDefined()
     if (cmd === undefined) return
@@ -332,7 +336,8 @@ describe("ADR-0376 /session-registry help discovery", () => {
     await cmd.run(["cleanup"], ctx)
     const out = ctx.outBuf.join("")
     expect(out).toContain("Session Registry")
-    expect(out).toContain("Sweep complete.")
+    expect(out).toContain("No durable backend configured")
+    expect(out).not.toContain("Sweep complete.")
   })
 
   test("[20] help menu lists the new `cleanup` sub-command", async () => {
@@ -397,7 +402,7 @@ describe("ADR-0376 /session-registry help discovery", () => {
     expect(reg.size()).toBe(2)
   })
 
-  test("[35] cleanup (no flag) preserves ADR-0379 behavior — sweep marker present", async () => {
+  test("[35] cleanup (no flag) does not claim a sweep for the in-memory backend", async () => {
     const cmd = findCmd()
     expect(cmd).toBeDefined()
     if (cmd === undefined) return
@@ -405,8 +410,8 @@ describe("ADR-0376 /session-registry help discovery", () => {
     const exit = await cmd.run(["cleanup"], ctx)
     expect(exit).toBe(0)
     const out = ctx.outBuf.join("")
-    // ADR-0379 contract — the sweep ran + the marker is rendered.
-    expect(out).toContain("Sweep complete.")
+    expect(out).toContain("No durable backend configured")
+    expect(out).not.toContain("Sweep complete.")
     expect(out).not.toContain("Dry-run:")
   })
 
@@ -434,19 +439,97 @@ describe("ADR-0376 /session-registry help discovery", () => {
     const cmd = findCmd()
     expect(cmd).toBeDefined()
     if (cmd === undefined) return
-    expect(setKnobOverride("QUANTA_SESSION_REGISTRY_SQLITE_PATH", ":memory:")).toBe(true)
-    expect(setKnobOverride("QUANTA_SESSION_REGISTRY_WAL_THRESHOLD_BYTES", "1024")).toBe(true)
-    expect(setKnobOverride("QUANTA_SESSION_REGISTRY_WAL_CHECKPOINT_MODE", "TRUNCATE")).toBe(true)
-    const projected = autoSweepConfigFromRuntime(runtimeConfig())
-    expect(projected.sqlitePath).toBe(":memory:")
-    expect(projected.walSizeThresholdBytes).toBe(1024)
-    expect(projected.walCheckpointUpgradeMode).toBe("TRUNCATE")
+    const dir = mkdtempSync(join(tmpdir(), "quanta-slash-wal-"))
+    const sqlitePath = join(dir, "registry.sqlite")
+    const db = new Database(sqlitePath)
+    try {
+      db.exec("PRAGMA journal_mode=WAL")
+      db.exec("PRAGMA wal_autocheckpoint=0")
+      db.exec("CREATE TABLE probe (payload BLOB)")
+      db.exec("INSERT INTO probe VALUES (randomblob(131072))")
+      const walPath = `${sqlitePath}-wal`
+      expect(statSync(walPath).size).toBeGreaterThan(0)
+
+      expect(setKnobOverride("QUANTA_SESSION_REGISTRY_SQLITE_PATH", sqlitePath)).toBe(true)
+      expect(setKnobOverride("QUANTA_SESSION_REGISTRY_WAL_THRESHOLD_BYTES", "0")).toBe(true)
+      expect(setKnobOverride("QUANTA_SESSION_REGISTRY_WAL_CHECKPOINT_MODE", "TRUNCATE")).toBe(true)
+      const projected = autoSweepConfigFromRuntime(runtimeConfig())
+      expect(projected.sqlitePath).toBe(sqlitePath)
+      expect(projected.walSizeThresholdBytes).toBe(0)
+      expect(projected.walCheckpointUpgradeMode).toBe("TRUNCATE")
+
+      const ctx = makeCtx()
+      const exit = await cmd.run(["cleanup"], ctx)
+      expect(exit).toBe(0)
+      expect(ctx.outBuf.join("")).toContain("Sweep complete.")
+      expect(ctx.errBuf.join("")).toBe("")
+      const walBytesAfter = existsSync(walPath) ? statSync(walPath).size : 0
+      expect(walBytesAfter).toBe(0)
+    } finally {
+      db.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("[41] cleanup never reports success when every configured sweep fails", async () => {
+    const cmd = findCmd()
+    expect(cmd).toBeDefined()
+    if (cmd === undefined) return
+    const dir = mkdtempSync(join(tmpdir(), "quanta-slash-failed-sweep-"))
+    try {
+      const unreachable = join(dir, "missing-parent", "registry.sqlite")
+      expect(setKnobOverride("QUANTA_SESSION_REGISTRY_SQLITE_PATH", unreachable)).toBe(true)
+      const ctx = makeCtx()
+      const exit = await cmd.run(["cleanup"], ctx)
+      expect(exit).toBe(1)
+      expect(ctx.errBuf.join("")).toContain("cleanup failed for all 1")
+      expect(ctx.outBuf.join("")).not.toContain("Sweep complete.")
+    } finally {
+      resetGlobalSessionResourceRegistry()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("[42] cleanup reports partial failure when only one durable sweep succeeds", async () => {
+    const cmd = findCmd()
+    expect(cmd).toBeDefined()
+    if (cmd === undefined) return
+    const dir = mkdtempSync(join(tmpdir(), "quanta-slash-partial-sweep-"))
+    try {
+      expect(setKnobOverride("QUANTA_SESSION_REGISTRY_DISK_DIR", dir)).toBe(true)
+      expect(
+        setKnobOverride(
+          "QUANTA_SESSION_REGISTRY_SQLITE_PATH",
+          join(dir, "missing-parent", "registry.sqlite"),
+        ),
+      ).toBe(true)
+      const ctx = makeCtx()
+      const exit = await cmd.run(["cleanup"], ctx)
+      expect(exit).toBe(1)
+      expect(ctx.errBuf.join("")).toContain("cleanup incomplete — 1/2")
+      expect(ctx.outBuf.join("")).not.toContain("Sweep complete.")
+    } finally {
+      resetGlobalSessionResourceRegistry()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("[43] cleanup --dry-run does not turn an unreadable backend into zero candidates", async () => {
+    const cmd = findCmd()
+    expect(cmd).toBeDefined()
+    if (cmd === undefined) return
+    expect(
+      setKnobOverride(
+        "QUANTA_SESSION_REGISTRY_SQLITE_PATH",
+        "/dev/null/no-such-parent/registry.sqlite",
+      ),
+    ).toBe(true)
     const ctx = makeCtx()
-    const exit = await cmd.run(["cleanup"], ctx)
-    expect(exit).toBe(0)
-    const out = ctx.outBuf.join("")
-    expect(out).toContain("Sweep complete.")
-    expect(ctx.errBuf.join("")).toBe("")
+    const exit = await cmd.run(["cleanup", "--dry-run"], ctx)
+    expect(exit).toBe(1)
+    expect(ctx.outBuf.join("")).toContain("sqlite backend unavailable")
+    expect(ctx.outBuf.join("")).toContain("preview incomplete")
+    expect(ctx.errBuf.join("")).toContain("dry-run failed for 1 backend")
   })
 })
 

@@ -15,11 +15,59 @@
 
 const SEP = "\r\n\r\n"
 const SEP_BYTES = Buffer.from(SEP, "utf8")
+/** Bound retained protocol state from a buggy or hostile debug adapter. */
+export const DAP_MAX_FRAME_BYTES = 32 * 1024 * 1024
+export const DAP_MAX_HEADER_BYTES = 64 * 1024
 
 /** Encode a DAP message to its on-wire framed form. */
 export const encodeDapMessage = (msg: unknown): string => {
   const body = JSON.stringify(msg)
   return `Content-Length: ${Buffer.byteLength(body, "utf8")}\r\n\r\n${body}`
+}
+
+type FrameProbe =
+  | { readonly kind: "wait"; readonly buffer: Buffer }
+  | { readonly kind: "skip"; readonly buffer: Buffer }
+  | { readonly kind: "frame"; readonly body: Buffer; readonly buffer: Buffer }
+
+/** Inspect one frame boundary without mutating decoder state. */
+const probeFrame = (buf: Buffer): FrameProbe => {
+  const sepIdx = buf.indexOf(SEP_BYTES)
+  if (sepIdx === -1) {
+    if (buf.length <= DAP_MAX_HEADER_BYTES) return { kind: "wait", buffer: buf }
+    const recovered = resyncToNextHeader(buf, 1)
+    return {
+      kind: "wait",
+      buffer: recovered.length <= DAP_MAX_HEADER_BYTES ? recovered : Buffer.alloc(0),
+    }
+  }
+  if (sepIdx > DAP_MAX_HEADER_BYTES) {
+    return { kind: "skip", buffer: resyncToNextHeader(buf, 1) }
+  }
+  const len = parseContentLength(buf.subarray(0, sepIdx).toString("utf8"))
+  if (len === undefined) {
+    return { kind: "skip", buffer: resyncToNextHeader(buf, 1) }
+  }
+  const bodyStart = sepIdx + SEP_BYTES.length
+  if (len > DAP_MAX_FRAME_BYTES) {
+    return { kind: "skip", buffer: resyncToNextHeader(buf, bodyStart) }
+  }
+  if (buf.length - bodyStart < len) return { kind: "wait", buffer: buf }
+  return {
+    kind: "frame",
+    body: buf.subarray(bodyStart, bodyStart + len),
+    buffer: buf.subarray(bodyStart + len),
+  }
+}
+
+type JsonDecode = { readonly ok: true; readonly value: unknown } | { readonly ok: false }
+
+const decodeJson = (body: Buffer): JsonDecode => {
+  try {
+    return { ok: true, value: JSON.parse(body.toString("utf8")) }
+  } catch {
+    return { ok: false }
+  }
 }
 
 /**
@@ -37,41 +85,25 @@ export class DapFrameDecoder {
     const out: unknown[] = []
     // Drain every complete frame currently buffered.
     for (;;) {
-      const sepIdx = this.buf.indexOf(SEP_BYTES)
-      if (sepIdx === -1) return out // header not fully arrived yet
-      const headerText = this.buf.subarray(0, sepIdx).toString("utf8")
-      const len = parseContentLength(headerText)
-      if (len === undefined) {
-        // Malformed/absent Content-Length. RESYNC: drop to the next
-        // `Content-Length:` marker (skipping any leftover body bytes that would
-        // otherwise corrupt the following header); if there is no later marker,
-        // discard through this separator. Either way the buffer shrinks ⇒ no
-        // infinite loop, and a subsequent valid frame decodes.
-        const next = nextHeaderMarker(this.buf)
-        this.buf = next > 0 ? this.buf.subarray(next) : this.buf.subarray(sepIdx + SEP_BYTES.length)
-        continue
-      }
-      const bodyStart = sepIdx + SEP_BYTES.length
-      if (this.buf.length - bodyStart < len) return out // body still incomplete
-      const bodyBytes = this.buf.subarray(bodyStart, bodyStart + len)
-      this.buf = this.buf.subarray(bodyStart + len)
-      try {
-        out.push(JSON.parse(bodyBytes.toString("utf8")))
-      } catch {
-        // Non-JSON body — drop this frame, keep draining the rest of the buffer.
-      }
+      const probe = probeFrame(this.buf)
+      this.buf = probe.buffer
+      if (probe.kind === "wait") return out
+      if (probe.kind === "skip") continue
+      const decoded = decodeJson(probe.body)
+      if (decoded.ok) out.push(decoded.value)
     }
   }
 }
 
-/** Index of the next `Content-Length:` header marker at offset > 0, or -1. Used
- *  to resync the stream after a malformed frame. */
+/** Canonical header marker used only as a recovery boundary. */
 const CL_MARKER = Buffer.from("Content-Length:", "utf8")
-const nextHeaderMarker = (buf: Buffer): number => {
-  // Case-sensitive is fine: every real adapter emits the canonical casing, and
-  // resync only needs to find a fresh frame boundary, not validate it.
-  const idx = buf.indexOf(CL_MARKER, 1)
-  return idx
+
+/** Retain bytes from the next canonical header marker, or clear the buffer. */
+const resyncToNextHeader = (buf: Buffer, from: number): Buffer => {
+  // Case-sensitive is fine: every real adapter emits canonical casing. This is
+  // recovery, not validation; a false marker is bounded and rejected next pass.
+  const idx = buf.indexOf(CL_MARKER, from)
+  return idx >= 0 ? buf.subarray(idx) : Buffer.alloc(0)
 }
 
 /** Parse the integer Content-Length from a header block, or `undefined` if it

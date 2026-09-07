@@ -522,6 +522,7 @@ describe("ADR-0361 sweepSqliteRegistry — hellgate", () => {
     expect(res.walRestarted).toBe(false)
     expect(res.walTruncated).toBe(false)
     expect(res.checkpointed).toBe(false)
+    expect(res.backendAvailable).toBe(false)
   })
 
   test("[PP] backward compat — all ADR-0375 cases (Y..DD) keep walTruncated = false", () => {

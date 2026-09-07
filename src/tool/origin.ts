@@ -75,12 +75,21 @@ const FILE_CONTENT_TOOLS: ReadonlySet<string> = new Set<string>([
 /** Built-in tool names whose OUTPUT is a fetched web body — attacker-controllable. */
 const WEB_TOOLS: ReadonlySet<string> = new Set<string>(["web_fetch", "web_search"])
 
+/** Built-ins whose model-facing body is subprocess / terminal output. */
+const SHELL_OUTPUT_TOOLS: ReadonlySet<string> = new Set<string>([
+  "container_exec",
+  "node_repl",
+  "pty_read",
+  "test_runner",
+])
+
 /** Map a built-in tool NAME to its provenance. Origin is already known to be
  *  `builtin` here, so the only remaining question is WHICH built-in. */
 const deriveBuiltinProvenance = (name: string): Provenance => {
   if (WEB_TOOLS.has(name)) return "web_fetch"
   // `bash`, `bash_await`, `bash_kill` (any async-shell sibling) → shell stdout.
   if (name === "bash" || name.startsWith("bash_")) return "bash"
+  if (SHELL_OUTPUT_TOOLS.has(name)) return "bash"
   if (FILE_CONTENT_TOOLS.has(name)) return "file"
   // edit / write / grep / glob / agent / harness tools → agent-own, trusted.
   return "internal"

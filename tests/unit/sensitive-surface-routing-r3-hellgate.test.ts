@@ -216,7 +216,11 @@ describe("D. surface output is masked at the dispatch seam", () => {
     )
     expect(res.ok).toBe(true)
     expect(res.preview).not.toContain(GH_PAT)
-    expect(res.preview).toContain("[REDACTED:github_pat_classic]")
+    // Unattributed pre-existing PTY scrollback is now producer-classified as
+    // secret. Layer 1 must therefore replace the entire payload before the
+    // weaker token-pattern classifier can name an individual credential.
+    expect(res.preview).toContain("[REDACTED:source_class_secret]")
+    expect(res.preview).toContain("origin: <pty:tmux:work>")
   })
 
   test("D3 — side_agent_findings: a child's secret-bearing finding is masked", async () => {

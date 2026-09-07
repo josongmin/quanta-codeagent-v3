@@ -15,23 +15,13 @@
  *   - Miss ⇒ `null` (skip).
  *   - NO-THROW boundary.
  *
- * Why duplicate instead of importing from `@/agent/mention-runner`:
- * ADR-0330's exported helper is the full-port builder. Extracting
- * the kind-specific factory there would mutate the ADR-0330 slice,
- * which the spec forbids ("ADR-0330 mention-runner 슬라이스
- * mutate X"). Code duplication is intentional and minimal — both
- * helpers share the identical first-line policy.
+ * The first-line projection is owned by the fence-legal `@/shared` leaf so
+ * this resolver cannot drift from the other mention consumers.
  */
 
 import type { MentionResolverPort } from "@/agent/mention-injection"
+import { mentionFirstLine } from "@/shared"
 import type { SkillRegistryReadOnly } from "./types"
-
-const firstLineOf = (description: string): string => {
-  if (typeof description !== "string" || description.length === 0) return ""
-  const nl = description.indexOf("\n")
-  const slice = nl === -1 ? description : description.slice(0, nl)
-  return slice.endsWith("\r") ? slice.slice(0, -1) : slice
-}
 
 const safeLookup = (
   skills: SkillRegistryReadOnly | undefined,
@@ -61,6 +51,6 @@ export const createSkillResolver = (
     if (typeof target !== "string" || target.length === 0) return null
     const entry = safeLookup(skills, target)
     if (entry === null) return null
-    return { bodyText: firstLineOf(entry.description) }
+    return { bodyText: mentionFirstLine(entry.description) }
   }
 }

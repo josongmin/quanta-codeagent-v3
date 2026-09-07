@@ -36,7 +36,7 @@ export const EXTRA: readonly KnobDeclaration[] = [
     home: "runtime-config",
     describe:
       "ast_grep tool gate (opt-in everywhere) — structural AST code search; requires ast-grep binary on PATH, read-only, 50-match cap. Gate SSOT = tool/surface/manifest.ts (GATED_TOOLS data split into gated-tools.ts).",
-    readSite: "tool/surface/gated-tools.ts",
+    readSite: "apps/cli/internal/argv.ts",
   },
   {
     // container_exec tool gate. Opt-in on cli/bench/web/ide/headless; DEFAULT-ON
@@ -160,7 +160,7 @@ export const EXTRA: readonly KnobDeclaration[] = [
     group: "bench",
     home: "bench",
     describe: "Bench model id (--model).",
-    readSite: "apps/bench/index.ts",
+    readSite: "llm/boot-selection.ts",
   },
   {
     envKey: "QUANTA_OBSERVE_DIR",
@@ -169,7 +169,7 @@ export const EXTRA: readonly KnobDeclaration[] = [
     group: "bench",
     home: "bench",
     describe: "Bench observation output dir.",
-    readSite: "apps/bench/run-main.ts",
+    readSite: "apps/bench/run-main-helpers.ts",
   },
   {
     envKey: "QUANTA_REPAIR_ROUNDS",
@@ -211,7 +211,7 @@ export const EXTRA: readonly KnobDeclaration[] = [
     group: "bench",
     home: "bench",
     describe: "SWE-bench dataset file.",
-    readSite: "apps/bench/index.ts",
+    readSite: "apps/bench/run-main.ts",
   },
   {
     envKey: "QUANTA_SWEBENCH_DATASET_NAME",
@@ -220,7 +220,7 @@ export const EXTRA: readonly KnobDeclaration[] = [
     group: "bench",
     home: "bench",
     describe: "SWE-bench dataset name.",
-    readSite: "apps/bench/index.ts",
+    readSite: "apps/bench/python-verifier-wiring.ts",
   },
   {
     envKey: "QUANTA_SWEBENCH_PYTHON",
@@ -229,7 +229,7 @@ export const EXTRA: readonly KnobDeclaration[] = [
     group: "bench",
     home: "bench",
     describe: "SWE-bench python harness gate.",
-    readSite: "apps/bench/index.ts",
+    readSite: "apps/bench/python-verifier-wiring.ts",
   },
   {
     envKey: "QUANTA_SWEBENCH_CORPUS_ROOT",
@@ -238,7 +238,7 @@ export const EXTRA: readonly KnobDeclaration[] = [
     group: "bench",
     home: "bench",
     describe: "SWE-bench corpus root.",
-    readSite: "apps/bench/index.ts",
+    readSite: "apps/bench/run-main.ts",
   },
   // PMX-01 — SWE-bench ProMax's OWN settings. Deliberately NOT spelled
   // `QUANTA_SWEBENCH_PRO_*`: ProMax and ScaleAI Pro are different corpora with
@@ -466,7 +466,7 @@ export const EXTRA: readonly KnobDeclaration[] = [
     home: "bench",
     describe:
       "Opt-in GenAI content capture on the chat span: emit the pinned structured `gen_ai.input.messages`/`gen_ai.output.messages` + `gen_ai.system_instructions` attrs and the prompt/completion previews, ALL redacted. Mirrors OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT. Default-OFF ⇒ no content emitted, byte-identical; the cassette (Plane A) stays unredacted and untouched.",
-    readSite: "agent/span-content-redact.ts",
+    readSite: "host/runtime/agent-config-assembler.ts",
   },
   {
     envKey: "QUANTA_BENCH_WAIT_FOR_IDLE",
@@ -503,7 +503,7 @@ export const EXTRA: readonly KnobDeclaration[] = [
     group: "web-daemon",
     home: "runtime-config",
     describe: "Web-daemon static dist dir.",
-    readSite: "apps/web-daemon/server/fetch-handler.ts",
+    readSite: "apps/web-daemon/server/http.ts",
   },
   {
     envKey: "QUANTA_WEB_STRICT_PORT",
@@ -589,15 +589,6 @@ export const EXTRA: readonly KnobDeclaration[] = [
     readSite: "apps/cli/repl/surface-compose/wire-builders.ts",
   },
   {
-    envKey: "QUANTA_RADAR_PRUNE_MS",
-    kind: "int",
-    default: undefined,
-    group: "agent-feature",
-    home: "runtime-config",
-    describe: "Radar `/radar prune` cutoff (ms); cards older than this expire.",
-    readSite: "apps/cli/slash/registry-surface.ts",
-  },
-  {
     envKey: "QUANTA_GITHUB_WEBHOOK",
     kind: "bool",
     default: false,
@@ -614,7 +605,7 @@ export const EXTRA: readonly KnobDeclaration[] = [
     group: "integration",
     home: "runtime-config",
     describe: "GitHub webhook HMAC shared secret (empty ⇒ host refuses to boot).",
-    readSite: "apps/cli/webhook-server-setup.ts",
+    readSite: "integrations/github/webhook-secret-resolver.ts",
   },
   {
     envKey: "QUANTA_GITHUB_WEBHOOK_SECRETS",
@@ -624,7 +615,7 @@ export const EXTRA: readonly KnobDeclaration[] = [
     home: "runtime-config",
     describe:
       "Multi-installation HMAC secret map ('k1=s1,k2=s2'); each App posts to /webhook/<k> (PATH routing). Wins over single secret.",
-    readSite: "apps/cli/webhook-server-setup.ts",
+    readSite: "integrations/github/webhook-secret-resolver.ts",
   },
   {
     envKey: "QUANTA_GITHUB_WEBHOOK_SECRETS_FILE",
@@ -634,7 +625,7 @@ export const EXTRA: readonly KnobDeclaration[] = [
     home: "runtime-config",
     describe:
       "Path to a JSON '{key:secret}' webhook secret map (alternative to QUANTA_GITHUB_WEBHOOK_SECRETS; inline wins).",
-    readSite: "apps/cli/webhook-server-setup.ts",
+    readSite: "integrations/github/webhook-secret-resolver.ts",
   },
   {
     envKey: "QUANTA_GITHUB_WEBHOOK_PORT",
@@ -827,7 +818,7 @@ export const EXTRA: readonly KnobDeclaration[] = [
     home: "bench",
     describe:
       "TB2.1 agent provenance: `<package.json version>+g<sha>[.dirty]` (sha 7-40 lowercase hex; `.dirty` REQUIRED iff `git status --porcelain` is non-empty and FORBIDDEN when clean). DERIVED by `quanta-bench terminal run` and delivered as a per-run agent env override (`--ae`). The upstream leaderboard keys a submission on (agent, agent_version, model, reasoning_effort), so a trial without it is unattributable and the Python agent adapter refuses to construct.",
-    readSite: "apps/bench/terminal/manifest.ts",
+    readSite: "apps/bench/terminal/harbor-command.ts",
   },
   {
     envKey: "QUANTA_TERMINAL_BRAIN_CMD",

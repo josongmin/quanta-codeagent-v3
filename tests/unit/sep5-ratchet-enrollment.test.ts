@@ -15,7 +15,7 @@ const AUDIT_IDS = Array.from({ length: 31 }, (_, index) => `D${index}`)
 
 const EXPECTED_DISPOSITIONS = {
   execute: [],
-  conditional: ["D7", "D8", "D13", "D15", "D16", "D17", "D21", "D22", "D23", "D25", "D26"],
+  conditional: ["D7", "D13", "D15", "D16", "D17", "D21", "D22", "D23", "D25", "D26"],
   intentional: ["D29"],
   closed: [
     "D0",
@@ -25,6 +25,7 @@ const EXPECTED_DISPOSITIONS = {
     "D4",
     "D5",
     "D6",
+    "D8",
     "D9",
     "D10",
     "D11",
@@ -156,7 +157,7 @@ const TICKETS = [
   {
     id: "SEP5-11",
     path: "docs/plans/sep-5-duplicate-audit/tickets/SEP5-11-deferred-and-closed-register.md",
-    status: "ACTIVE REGISTER",
+    status: "GOVERNANCE REGISTER",
     rails: [] as const,
   },
   {

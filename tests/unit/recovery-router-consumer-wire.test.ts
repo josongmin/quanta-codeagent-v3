@@ -1,7 +1,7 @@
 /**
  * WIRE-PROOF for DOF-30a (recovery-router disposition = WIRE).
  *
- * The 16-kind → 6-action `codexSpecRoute` table (src/llm/retry/codex-spec-router.ts)
+ * The 18-kind → 6-action `codexSpecRoute` table (src/llm/retry/codex-spec-router.ts)
  * was, at base revision b92b3798f, ONLY barrel-exported and had ZERO production
  * consumer: the live turn-recovery owner `decideOnStreamError` (src/agent/recovery.ts)
  * routed purely through the 3-way `classifyLLMError` (retryable/prompt_too_long/fatal)

@@ -207,11 +207,11 @@ const safeLower = (e: unknown): string => {
  * documented heuristic ladder (abort → context_window → sandbox → cyber_policy
  * → too_many_failed_attempts → thread_rollback_failed → status-based).
  *
- * High cyclomatic-complexity is intrinsic: the 16-kind output × the heuristic
+ * High cyclomatic-complexity is intrinsic: the 18-kind output × the heuristic
  * ladder is the contract. Splitting would obscure precedence (the WHOLE POINT
  * of the function), so the biome rule is suppressed here.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: 16-kind closed-vocabulary classifier (see header)
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: 18-kind closed-vocabulary classifier (see header)
 export const classify = (e: unknown): LLMErrorKind => {
   // Pre-wrapped LLMError: trust the boundary's tag unless it was the catch-all.
   if (e instanceof LLMError && e.kind !== "unknown") {

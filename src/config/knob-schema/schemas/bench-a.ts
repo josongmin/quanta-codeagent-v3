@@ -136,7 +136,7 @@ export const issueHintSchema: KnobSchema<IssueHintMode | "off"> = {
   knobDescribe: "Issue verbatim/agentless localization hint",
   unit: "mode",
   source: "Agentless paper §3.1",
-  readSite: "runner/knobs/knobs/issue-hint-expected-actual.ts",
+  readSite: "runner/batch/eval/knobs-bench.ts",
   surfaces: BENCH,
   parse: parseIssueHint,
 }

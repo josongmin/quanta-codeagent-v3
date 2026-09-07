@@ -310,7 +310,7 @@ Current rules:
 ## 9. Open debt
 
 - **Reviewer authority fallback**: CLI now honors explicit per-thread permission authority (`approvalPolicy` + `approvalsReviewer`) and injects the same `PermissionStore` into admissibility, but threads with no stored record still fall back to the older `PermissionMode.default` proxy for `"on-request"` reviewer selection.
-- **Multi-process permission flock**: the current `read-reconcile-merge` defends against last-write-wins clobber but not true concurrent-flush atomicity. OS lockfile is v4 scope (ADR-0046).
+- **Multi-process permission flock**: merge-enabled permission stores hold an O_EXCL advisory lock across read-reconcile-rename. Acquisition failure is typed non-durable and never writes outside the protected section; stale locks remain reclaimable (ADR-0046).
 - **Cost dashboard `cacheHitRate` denominator**: cosmetic understatement for OpenAI (`prompt_tokens` includes cached). Not a billing bug.
 - **Some `@/agent` callsites still call `Date.now()` directly** — burn-down list in the scanner rule; migrate to injected clocks per round.
 - **`AgentConfig` god-container**: still too large; narrow `Pick<>` sub-configs exist (`RecoveryConfig`, `MemoryConfig`, `FeaturesConfig`, `TurnContextConfig`, `BudgetConfig`) and newer gate knobs are now grouped under `admissibility` to stop further flat-surface drift. More consumers should migrate off the full bag.

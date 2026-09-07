@@ -120,6 +120,88 @@ describe("ADR-0078 — three application points", () => {
     expect(rollup?.count ?? 0).toBeGreaterThan(0)
   })
 
+  test("point 1: producer-owned result provenance replaces deferred secret output", async () => {
+    const deferredSecretTool: Tool<Record<string, never>> = {
+      name: "deferred_secret_probe",
+      description: "test-only deferred source probe",
+      inputSchema: z.object({}),
+      isReadOnly: () => true,
+      isConcurrencySafe: () => true,
+      async *execute() {
+        yield {
+          type: "result",
+          result: {
+            ok: true,
+            output: "ordinary-looking deferred secret body",
+            source: { class: "secret", label: "<deferred-probe>" },
+          },
+        }
+      },
+    }
+    const llm = new FakeLLM([toolUse("c1", "deferred_secret_probe", {}), text("done")])
+    const stream = new RecordingStream()
+    const registry = new ToolRegistry([...defaultTools, deferredSecretTool])
+    const outcome = await runAgent(
+      baseConfig({
+        llm,
+        registry,
+        stream,
+        cwd: dir,
+        permission: { mode: "acceptEdits" } as PermissionContext,
+        system: "test",
+      }),
+    )
+
+    expect(outcome.reason).toBe("completed")
+    const preview = stream.events
+      .filter((e) => e.type === "tool_result")
+      .map((e) => (e.type === "tool_result" ? e.preview : ""))
+      .join("\n")
+    expect(preview).toContain("[REDACTED:source_class_secret]")
+    expect(preview).not.toContain("ordinary-looking deferred secret body")
+  })
+
+  test("point 1: secret input source survives a public producer downgrade", async () => {
+    const producerDowngrade: Tool<Record<string, never>> = {
+      name: "producer_downgrade_probe",
+      description: "test-only merge probe",
+      inputSchema: z.object({}),
+      isReadOnly: () => true,
+      isConcurrencySafe: () => true,
+      classifySource: () => "secret",
+      async *execute() {
+        yield {
+          type: "result",
+          result: {
+            ok: true,
+            output: "secret body despite public producer label",
+            source: { class: "public", label: "<public-producer>" },
+          },
+        }
+      },
+    }
+    const llm = new FakeLLM([toolUse("c1", producerDowngrade.name, {}), text("done")])
+    const stream = new RecordingStream()
+    const outcome = await runAgent(
+      baseConfig({
+        llm,
+        registry: new ToolRegistry([producerDowngrade]),
+        stream,
+        cwd: dir,
+        permission: { mode: "acceptEdits" } as PermissionContext,
+        system: "test",
+      }),
+    )
+
+    expect(outcome.reason).toBe("completed")
+    const preview = stream.events
+      .filter((e) => e.type === "tool_result")
+      .map((e) => (e.type === "tool_result" ? e.preview : ""))
+      .join("\n")
+    expect(preview).toContain("[REDACTED:source_class_secret]")
+    expect(preview).not.toContain("secret body despite public producer label")
+  })
+
   test("point 1: command-shape secret read glob (~/.env*) replaces entire tool output", async () => {
     const bashStub: Tool<{ command: string }> = {
       name: "bash",
@@ -212,7 +294,7 @@ describe("ADR-0078 — three application points", () => {
     const cap = captureStderr()
     try {
       const throwingClassifierTool: Tool<{ command: string }> = {
-        name: "bash",
+        name: "throwing_classifier_observability_probe",
         description: "test bash stub w/ throwing classifier",
         inputSchema: z.object({ command: z.string() }),
         isReadOnly: () => true,
@@ -222,10 +304,20 @@ describe("ADR-0078 — three application points", () => {
           throw new Error("classifier-boom")
         },
         async *execute() {
-          yield { type: "result", result: { ok: true, output: "plain output, no secret" } }
+          yield {
+            type: "result",
+            result: {
+              ok: true,
+              output: "ordinary-looking producer secret after classifier failure",
+              source: { class: "secret", label: "<throwing-classifier-producer>" },
+            },
+          }
         },
       }
-      const llm = new FakeLLM([toolUse("c1", "bash", { command: "echo hi" }), text("done")])
+      const llm = new FakeLLM([
+        toolUse("c1", throwingClassifierTool.name, { command: "echo hi" }),
+        text("done"),
+      ])
       const stream = new RecordingStream()
       const outcome = await runAgent(
         baseConfig({
@@ -241,6 +333,9 @@ describe("ADR-0078 — three application points", () => {
       expect(outcome.reason).toBe("completed")
       const toolResults = stream.events.filter((e) => e.type === "tool_result")
       expect(toolResults.length).toBeGreaterThan(0)
+      const preview = toolResults.map((e) => (e.type === "tool_result" ? e.preview : "")).join("\n")
+      expect(preview).toContain("[REDACTED:source_class_secret]")
+      expect(preview).not.toContain("ordinary-looking producer secret")
       // Observability: the swallowed classifier throw is now visible.
       expect(cap.lines.some((l) => l.includes("dispatch.classifySource"))).toBe(true)
       expect(cap.lines.some((l) => l.includes("classifier-boom"))).toBe(true)

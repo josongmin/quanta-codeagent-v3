@@ -25,15 +25,18 @@ Add `cleanup` to the `/session-registry` sub-command set:
 
 Behaviour:
 
-1. Call `startAutoSweep()` (delegates env-var detection to ADR-0369).
-2. `await handle.sweepNow()` — fire-and-await so post-sweep state is
+1. Call `sweepGlobalSessionResourceRegistryNow()`. The global lifecycle owns
+   the mounted registry, frozen sweep config, and periodic handle; cleanup does
+   not re-read config or mint a second timer.
+2. `await handle.sweepNow()` inside that owner — fire-and-await so post-sweep state is
    visible in the rendered output.
-3. **`handle.stop()` in `finally`** — critical: we MUST NOT leak a
-   periodic timer per slash invocation. The handle's `stop()` is
-   NO-THROW + idempotent per ADR-0369, safe to call in every path.
-4. Render `formatRegistryStats(await inspectGlobalRegistry())` + the
-   string `Sweep complete.` for an unambiguous "operator-requested
-   sweep ran successfully" marker.
+3. Render `formatRegistryStats(await inspectGlobalRegistry())`.
+4. Render `Sweep complete.` only when a durable backend was actually swept.
+   An in-memory-only process instead renders
+   `No durable backend configured — nothing swept.`; handle initialization
+   failure is explicit and exits non-zero. Backend sweep outcomes are retained:
+   all-failed and partial-success runs also exit non-zero and never print the
+   success marker.
 
 ## Why include stats in the cleanup output
 
@@ -42,16 +45,11 @@ The whole point of the manual trigger is to see what changed. A bare
 sweep evicted anything. Folding stats into the output makes the
 slash self-contained — no need to chain `cleanup; stats`.
 
-## Why no `--dry-run` (yet)
+## Follow-up: `--dry-run`
 
-ADR-0369 / ADR-0348 / ADR-0361 do not separate "what would be evicted"
-from "what is evicted" — `sweepDiskRegistry` + `sweepSqliteRegistry`
-commit immediately. Adding `--dry-run` would require either:
-- A separate `countCandidatesForSweep(cfg)` function per backend; or
-- A `dry` flag threaded through every sweep path.
-
-Both are larger than this slash needs. `--dry-run` is a sibling ADR
-candidate when an operator actually asks for it.
+ADR-0387 subsequently added `cleanup --dry-run` using backend-specific
+candidate counters. It shares the global lifecycle's frozen path snapshot and
+does not call the mutating sweep path.
 
 ## Why no confirmation prompt
 
@@ -62,7 +60,6 @@ auto-sweep would have deleted anyway. No confirm needed.
 
 ## Non-goals
 
-- `--dry-run` (above).
 - `--force` (no-op — cleanup is always non-destructive of in-window data).
 - Per-backend cleanup (cleanup always runs both backends — same as
   ADR-0369's auto-sweep).

@@ -77,35 +77,60 @@ const evidenceOf = (
  * `extractSourceLabel`.
  *
  * Never throws — a tool that throws inside `classifySource` is caught and
- * treated as `null` (Layer-2 only) so a tool-side bug cannot break dispatch.
+ * treated as an absent input source; execution-owned provenance is still kept.
  */
 /** ALBB-09 site 5 — tools whose `classifySource` has already thrown once, so
  *  the observability warn fires ONCE per tool (a buggy classifier called every
  *  dispatch would otherwise spam the log). Never affects dispatch behavior. */
 const classifierWarned = new Set<string>()
 
-const deriveSourceClass = (
-  call: ToolUseBlock,
-  config: AgentConfig,
-): { cls: SensitivityClass; label: string } | null => {
-  const tool = config.registry.get(call.name)
-  if (tool === undefined || tool.classifySource === undefined) return null
-  let cls: SensitivityClass | null
+type DerivedSource = { readonly cls: SensitivityClass; readonly label: string }
+
+const producerSource = (source: ToolResult["source"] | undefined): DerivedSource | null =>
+  source === undefined ? null : { cls: source.class, label: source.label }
+
+const classifyCallInput = (call: ToolUseBlock, config: AgentConfig): SensitivityClass | null => {
+  const classify = config.registry.get(call.name)?.classifySource
+  if (classify === undefined) return null
   try {
-    cls = tool.classifySource(call.input)
+    return classify(call.input)
   } catch (e) {
-    // Tool-side bug must not break dispatch — treat as no source class (fail-safe,
-    // behavior UNCHANGED). But no longer swallow SILENTLY: surface the classifier
-    // throw ONCE per tool so a redaction/sensitivity-classification drop is
-    // visible instead of vanishing. This is pure observability — the `return null`
-    // fail-safe below is preserved.
     if (!classifierWarned.has(call.name)) {
       classifierWarned.add(call.name)
       logger.warn(`dispatch.classifySource: tool "${call.name}" threw: ${errMessage(e)}`)
     }
     return null
   }
-  if (cls === null) return null
+}
+
+const sourceLabel = (call: ToolUseBlock, config: AgentConfig): string => {
+  const shellCmd = config.registry.extractShellCommand(call.name, call.input)
+  const inputPath =
+    call.input !== null && typeof call.input === "object" && "path" in call.input
+      ? (call.input as { path: unknown }).path
+      : null
+  if (typeof shellCmd === "string" && shellCmd.length > 0) return shellCmd
+  if (typeof inputPath === "string" && inputPath.length > 0) return inputPath
+  return `<${call.name}>`
+}
+
+const stricterSource = (left: DerivedSource, right: DerivedSource): DerivedSource => {
+  const rank: Readonly<Record<SensitivityClass, number>> = {
+    public: 0,
+    internal: 1,
+    secret: 2,
+  }
+  return rank[right.cls] > rank[left.cls] ? right : left
+}
+
+const deriveSourceClass = (
+  call: ToolUseBlock,
+  config: AgentConfig,
+  resultSource?: ToolResult["source"],
+): DerivedSource | null => {
+  const result = producerSource(resultSource)
+  const cls = classifyCallInput(call, config)
+  if (cls === null) return result
   // Label derivation: prefer the tool's declared shell-command extractor
   // (already used by HARD_DENY); fall back to a `path` field on the input
   // for filesystem tools. A tool exposing neither still gets Layer-1 by
@@ -115,18 +140,8 @@ const deriveSourceClass = (
   // exactly the contract HARD_DENY relies on. Calling the tool method with the
   // RAW `call.input` here would hand it the uncoerced/maybe-invalid shape the
   // schema would have rejected/normalized.
-  const shellCmd = config.registry.extractShellCommand(call.name, call.input)
-  const inputPath =
-    call.input !== null && typeof call.input === "object" && "path" in call.input
-      ? (call.input as { path: unknown }).path
-      : null
-  const label =
-    typeof shellCmd === "string" && shellCmd.length > 0
-      ? shellCmd
-      : typeof inputPath === "string" && inputPath.length > 0
-        ? inputPath
-        : `<${call.name}>`
-  return { cls, label }
+  const inputSource = { cls, label: sourceLabel(call, config) }
+  return result === null ? inputSource : stricterSource(inputSource, result)
 }
 
 /**
@@ -155,11 +170,12 @@ const applyRedaction = (
   text: string,
   call: ToolUseBlock,
   config: AgentConfig,
+  resultSource?: ToolResult["source"],
 ): { output: string; hits: ReadonlyArray<RedactionHit> } => {
   let postSecret = text
   let hits: ReadonlyArray<RedactionHit> = []
   if (config.redaction?.disabled !== true) {
-    const src = deriveSourceClass(call, config)
+    const src = deriveSourceClass(call, config, resultSource)
     const result = redactSecrets(text, {
       origin: "tool_result",
       ...(src !== null ? { sourceClass: src.cls, sourceLabel: src.label } : {}),
@@ -201,7 +217,7 @@ const decorateToolOutput = async (
   config: AgentConfig,
   lintBracket: Awaited<ReturnType<typeof openLintBracket>>,
 ): Promise<{ output: string; hits: readonly RedactionHit[] }> => {
-  const { output: redacted, hits } = applyRedaction(result.output, call, config)
+  const { output: redacted, hits } = applyRedaction(result.output, call, config, result.source)
   const enveloped = wrapToolResult(
     redacted,
     deriveProvenance(call.name, config.registry.originOf(call.name)),
@@ -248,7 +264,7 @@ const shapeDispatchResult = (a: {
   const contentBlocks = typeof composed === "string" ? undefined : composed
   const failureRedaction =
     result.failure?.mode === "error" && result.failure.modelVisibleError !== undefined
-      ? applyRedaction(result.failure.modelVisibleError, call, config)
+      ? applyRedaction(result.failure.modelVisibleError, call, config, result.source)
       : undefined
   const finalFailure =
     failureRedaction !== undefined

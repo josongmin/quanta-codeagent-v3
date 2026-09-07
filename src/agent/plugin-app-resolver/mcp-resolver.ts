@@ -21,7 +21,7 @@
  */
 
 import type { MentionResolverPort } from "@/agent/mention-injection"
-import { errMessage, logger } from "@/shared"
+import { errMessage, logger, mentionFirstLine } from "@/shared"
 
 /** One tool a server exposes (the read-only projection the port yields). */
 export interface McpToolInfo {
@@ -53,19 +53,11 @@ const resolveMaxTools = (raw: number | undefined): number =>
     ? Math.trunc(raw)
     : DEFAULT_MCP_MAX_TOOLS
 
-/** First line of a tool description (LF / CRLF tolerant). Pure. */
-const firstLineOf = (description: string | undefined): string => {
-  if (typeof description !== "string" || description.length === 0) return ""
-  const nl = description.indexOf("\n")
-  const slice = nl === -1 ? description : description.slice(0, nl)
-  return (slice.endsWith("\r") ? slice.slice(0, -1) : slice).trim()
-}
-
 /** Project one tool into its body line (`- name — first-line-desc`), or `null`
  *  for a nameless tool (skipped). Pure. */
 const toolLine = (t: McpToolInfo): string | null => {
   if (typeof t?.name !== "string" || t.name.length === 0) return null
-  const desc = firstLineOf(t.description)
+  const desc = mentionFirstLine(t.description)
   return desc.length > 0 ? `- ${t.name} — ${desc}` : `- ${t.name}`
 }
 

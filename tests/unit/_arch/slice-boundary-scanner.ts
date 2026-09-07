@@ -646,6 +646,19 @@ const scanProcessEnvArgv = (src: string): Array<{ line: number; hit: string }> =
     return node.expression.getText() === "process" ? `process.${node.name.text}` : null
   })
 
+export const findStaleEnvAllowEntries = (
+  entries: readonly string[],
+  sliceDirPath: string,
+  files: ReadonlyArray<{ readonly file: string; readonly src: string }>,
+): string[] =>
+  entries.filter((entry) => {
+    const one = new Set([entry])
+    return !files.some(
+      ({ file, src }) =>
+        isEnvAllowed(one, sliceDirPath, file) && scanProcessEnvArgv(src).length > 0,
+    )
+  })
+
 const scanProcessStdio = (src: string): Array<{ line: number; hit: string }> =>
   collectAstHits(src, (node) => {
     if (!isPropertyAccessLike(node)) return null
@@ -822,6 +835,14 @@ export const registerSliceBoundarySuite = (config: SliceBoundaryConfig): void =>
         throw new Error(
           `@/${config.slice} must not read process.env / process.argv:\n\n${violations.join("\n")}`,
         )
+      }
+    })
+
+    test("every process.env allow entry covers a live read", () => {
+      const read = scanned("process.env allow hygiene")
+      const stale = findStaleEnvAllowEntries([...envAllow], dir, read)
+      if (stale.length > 0) {
+        throw new Error(`@/${config.slice} has stale envAllowFiles:\n\n${stale.join("\n")}`)
       }
     })
 

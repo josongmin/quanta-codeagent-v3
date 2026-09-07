@@ -64,13 +64,13 @@ failure, to in-memory. A misconfigured env var MUST NOT abort process
 startup.
 
 ```typescript
-const buildDefaultRegistry = (): SessionResourceRegistry => {
-  const sqlitePath = process.env.QUANTA_SESSION_REGISTRY_SQLITE_PATH
+const buildDefaultRegistry = (cfg: RuntimeConfig): SessionResourceRegistry => {
+  const sqlitePath = cfg.sessionRegistrySqlitePath
   if (sqlitePath !== undefined && sqlitePath.length > 0) {
     try { return createSqliteSessionResourceRegistry({ databasePath: sqlitePath }) }
     catch { /* fall through to disk */ }
   }
-  const diskDir = process.env.QUANTA_SESSION_REGISTRY_DISK_DIR
+  const diskDir = cfg.sessionRegistryDiskDir
   if (diskDir !== undefined && diskDir.length > 0) {
     try { return createDiskSessionResourceRegistry({ storageDir: diskDir }) }
     catch { /* fall through to in-memory */ }
@@ -81,11 +81,11 @@ const buildDefaultRegistry = (): SessionResourceRegistry => {
 
 ### Read EXACTLY ONCE per process
 
-Both env vars are read at the FIRST call to
-`getGlobalSessionResourceRegistry()` (lazy-init). Subsequent env
+Both values come from one `runtimeConfig()` snapshot at the FIRST call to
+`getGlobalSessionResourceRegistry()` (lazy-init). Subsequent config
 mutations are ignored — the singleton is already minted. The
 test-only `resetGlobalSessionResourceRegistry()` knob drops the
-singleton so a fresh env read happens on the next call (hellgate L
+singleton so a fresh snapshot is built on the next call (hellgate L
 verifies this for the SQLite var).
 
 ## Consequences

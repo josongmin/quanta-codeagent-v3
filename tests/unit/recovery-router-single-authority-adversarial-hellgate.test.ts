@@ -1,7 +1,7 @@
 /**
  * ★ HELLGATE (SECOND LAYER, ADVERSARIAL) — recovery-router SINGLE AUTHORITY.
  *
- * The FIRST layer proved the 16-kind→action table (recovery-router-hellgate)
+ * The FIRST layer proves the 18-kind→action table (recovery-router-hellgate)
  * and the decorator derivation parity vs the historical hardcoded sets
  * (retry-decorator-policy-hellgate). This SECOND layer proves the SYSTEM-LEVEL
  * invariant the task calls out: the OBSERVABLE decisions of the two live
@@ -17,17 +17,16 @@
  *      for every kind, with a MESSAGE that carries no marker (so only the kind
  *      axis can decide). Zero drift.
  *   R3 RETRY DECISIVE == DERIVED (all decisive kinds, opaque + hostile message) —
- *      for the 11 kinds whose disposition is decisive (retry / no_retry),
+ *      for the 14 kinds whose disposition is decisive (retry / no_retry),
  *      `isRetryable` equals the derived verdict EVEN when the message carries a
  *      CONTRADICTORY marker (a `no_retry` kind with "503 overloaded" still does
  *      NOT retry; a `retry` kind with "invalid api key" still retries). The
  *      kind-level table wins over the message — anti-drift teeth.
- *   R4 THE 7 MARKER-SCAN KINDS PINNED — for exactly `unknown`,
- *      `context_window_exceeded`, `cyber_policy`, `too_many_failed_attempts`,
- *      `thread_rollback_failed`, `sandbox_error`, `sandbox_blocked`: disposition
- *      is `consult_markers` AND the message-marker scan (not the table) decides.
- *      This is the intentional latent divergence — pinned so a measure-first flip
- *      is a visible edit.
+ *   R4 THE 4 RESIDUAL MARKER-SCAN KINDS PINNED — for exactly `unknown`,
+ *      `context_window_exceeded`, `too_many_failed_attempts`, and
+ *      `thread_rollback_failed`: disposition is `consult_markers` and the
+ *      message-marker scan decides. Every `hitl_handoff` kind is decisive
+ *      no-retry, so message text cannot bypass the handoff boundary.
  *   R5 OBSERVABLE DECORATOR BEHAVIOR == TABLE (drive the REAL streams) — for
  *      every kind, wrap a throwing inner in RetryingLLM and in FallbackLLM and
  *      assert the observed retry-count / swap matches the table projection. This
@@ -158,6 +157,9 @@ describe("R3 retry decisive == table — kind beats a contradictory message mark
     "not_implemented",
     "stream_corrupt",
     "aborted",
+    "cyber_policy",
+    "sandbox_error",
+    "sandbox_blocked",
     "invalid_image",
   ]
 
@@ -175,39 +177,36 @@ describe("R3 retry decisive == table — kind beats a contradictory message mark
     })
   }
 
-  test("every decisive kind's disposition is decisive, and the two groups partition the 11", () => {
+  test("every decisive kind's disposition is decisive, and the two groups partition the 14", () => {
     const decisive = ALL_KINDS.filter((k) => retryDispositionForKind(k) !== "consult_markers")
     expect(decisive.sort()).toEqual([...DECISIVE_RETRY, ...DECISIVE_NO_RETRY].sort())
-    expect(decisive.length).toBe(11)
+    expect(decisive.length).toBe(14)
   })
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// R4 — the 7 marker-scan divergence kinds pinned.
+// R4 — the 4 residual marker-scan kinds pinned.
 // ─────────────────────────────────────────────────────────────────────────────
-describe("R4 the 7 marker-scan kinds — message decides, NOT the table (latent divergence pinned)", () => {
+describe("R4 the 4 residual marker-scan kinds — message decides", () => {
   const MARKER_KINDS: readonly LLMErrorKind[] = [
     "unknown",
     "context_window_exceeded",
-    "cyber_policy",
     "too_many_failed_attempts",
     "thread_rollback_failed",
-    "sandbox_error",
-    "sandbox_blocked",
   ]
 
-  test("exactly these 7 kinds are consult_markers (no more, no fewer)", () => {
+  test("exactly these 4 kinds are consult_markers (no more, no fewer)", () => {
     const markerKinds = ALL_KINDS.filter((k) => retryDispositionForKind(k) === "consult_markers")
     expect(markerKinds.sort()).toEqual([...MARKER_KINDS].sort())
-    expect(markerKinds.length).toBe(7)
+    expect(markerKinds.length).toBe(4)
   })
 
   for (const kind of MARKER_KINDS) {
     test(`${kind}: retryable marker in message ⇒ retries (legacy behavior, NOT the table action)`, () => {
-      // These route to a NON-retry action in the table (hitl/compaction/fatal),
-      // yet a "overloaded" marker resurrects a retry — the documented divergence.
+      // These route to a non-retry outer action, but their same-provider
+      // decorator disposition intentionally retains the legacy marker fallback.
       const tableAction = codexSpecRoute(kind)
-      expect(["hitl_handoff", "reactive_compaction", "fatal"]).toContain(tableAction)
+      expect(["reactive_compaction", "fatal"]).toContain(tableAction)
       expect(isRetryable(new LLMError("the model is overloaded, try again", { kind }))).toBe(true)
       // No marker ⇒ falls to fatal (no retry).
       expect(isRetryable(new LLMError("some opaque failure", { kind }))).toBe(false)

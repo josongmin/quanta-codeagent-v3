@@ -26,13 +26,9 @@
  * set, `startAutoSweep` returns a no-op handle and never schedules a
  * timer (no setInterval cost).
  *
- * Note: `QUANTA_SESSION_REGISTRY_SQLITE_PATH` does NOT swap the global
- * registry to the SQLite backend — that is out of scope for this ADR
- * (a follow-up ADR may add the swap on the ADR-0351 pattern). The env
- * var only tells THIS slice "if you are scheduling sweeps anyway,
- * include this path in the sqlite sweep". A composition root that
- * manually mounted the SQLite backend via the factory therefore opts
- * into retention by also setting the env var.
+ * The global lifecycle uses the same runtime snapshot to mount its preferred
+ * backend and to build this sweep config. SQLite therefore mounts when its path
+ * is selected, while a simultaneously configured disk path is still swept.
  *
  * # Timing
  *
@@ -56,9 +52,10 @@
  *
  * # Default-OFF
  *
- * `startAutoSweep` is a leaf — `global.ts` and the CLI cleanup slash call it
- * with an explicit {@link AutoSweepConfig} projected from one `runtimeConfig()`
- * snapshot. The in-memory default path never hits this file's `setInterval`,
+ * `startAutoSweep` is a leaf — only `global.ts` calls it, with an explicit
+ * {@link AutoSweepConfig} projected from the lifecycle's first
+ * `runtimeConfig()` snapshot. CLI cleanup reuses that owned handle. The
+ * in-memory default path never hits this file's `setInterval`,
  * so a process that never sets a durable registry path is byte-identical to
  * pre-ADR-0369.
  *
@@ -152,8 +149,8 @@ export interface AutoSweepConfig {
 
 /**
  * Project one `runtimeConfig()` snapshot into an explicit {@link AutoSweepConfig}.
- * Auto-sweep never re-reads env; callers (global singleton + CLI cleanup)
- * MUST pass this projection of the same snapshot that selected the backend.
+ * Auto-sweep never re-reads env; the global singleton passes the same snapshot
+ * that selected the backend, and CLI cleanup reuses its owned handle.
  */
 export type AutoSweepRuntimeSnapshot = {
   readonly sessionRegistryDiskDir: string | undefined
@@ -197,11 +194,19 @@ export interface AutoSweepHandle {
    * still resolves.
    */
   readonly sweepNow: () => Promise<void>
+  /** Operator-facing variant retaining per-backend success/failure truth. */
+  readonly sweepNowWithOutcome: () => Promise<AutoSweepRunResult>
   /**
    * Convenience read for tests + observability: was the periodic timer
    * actually scheduled? `false` when env was unset OR `intervalMs <= 0`.
    */
   readonly scheduled: boolean
+}
+
+export interface AutoSweepRunResult {
+  readonly attempted: number
+  readonly succeeded: number
+  readonly failed: number
 }
 
 /**
@@ -211,9 +216,8 @@ export interface AutoSweepHandle {
 export const DEFAULT_AUTO_SWEEP_INTERVAL_MS = 60_000
 
 /**
- * Idempotent no-op handle returned when no env var is set (so no
- * sweep is required). Sharing one constant avoids allocating a closure
- * per call when neither backend is gated.
+ * Idempotent no-op handle returned when no durable path is configured.
+ * Sharing one constant avoids allocating a closure per call.
  */
 const NOOP_HANDLE: AutoSweepHandle = {
   stop: () => {
@@ -222,22 +226,23 @@ const NOOP_HANDLE: AutoSweepHandle = {
   sweepNow: async () => {
     // No-op — nothing to sweep.
   },
+  sweepNowWithOutcome: async () => ({ attempted: 0, succeeded: 0, failed: 0 }),
   scheduled: false,
 }
 
-const resolveDiskDir = (cfg: AutoSweepConfig | undefined): string =>
-  typeof cfg?.diskDir === "string" ? cfg.diskDir : ""
+const resolveDiskDir = (cfg: AutoSweepConfig): string =>
+  typeof cfg.diskDir === "string" ? cfg.diskDir : ""
 
-const resolveSqlitePath = (cfg: AutoSweepConfig | undefined): string =>
-  typeof cfg?.sqlitePath === "string" ? cfg.sqlitePath : ""
+const resolveSqlitePath = (cfg: AutoSweepConfig): string =>
+  typeof cfg.sqlitePath === "string" ? cfg.sqlitePath : ""
 
 /**
  * ADR-0390 — resolve the WAL size threshold for the sqlite sweep.
  * Negative / NaN / non-finite ⇒ undefined so `sweepSqliteRegistry` falls
  * back to PASSIVE-only (byte-identical to pre-R15 auto-sweep).
  */
-const resolveWalThresholdBytes = (cfg: AutoSweepConfig | undefined): number | undefined => {
-  if (typeof cfg?.walSizeThresholdBytes !== "number") return undefined
+const resolveWalThresholdBytes = (cfg: AutoSweepConfig): number | undefined => {
+  if (typeof cfg.walSizeThresholdBytes !== "number") return undefined
   return Number.isFinite(cfg.walSizeThresholdBytes) && cfg.walSizeThresholdBytes >= 0
     ? cfg.walSizeThresholdBytes
     : undefined
@@ -249,9 +254,9 @@ const resolveWalThresholdBytes = (cfg: AutoSweepConfig | undefined): number | un
  * silently coerces them to noop (defense in depth).
  */
 const resolveWalUpgradeMode = (
-  cfg: AutoSweepConfig | undefined,
+  cfg: AutoSweepConfig,
 ): SqliteRegistryConfig["walCheckpointUpgradeMode"] =>
-  typeof cfg?.walCheckpointUpgradeMode === "string" ? cfg.walCheckpointUpgradeMode : undefined
+  typeof cfg.walCheckpointUpgradeMode === "string" ? cfg.walCheckpointUpgradeMode : undefined
 
 /**
  * NO-THROW wrapper around emitter calls. ADR-0373 contract says emit is
@@ -305,7 +310,7 @@ const runSqliteSweep = (
   metricsEmitter: MetricEmitterPort | undefined,
   walSizeThresholdBytes: number | undefined,
   walCheckpointUpgradeMode: SqliteRegistryConfig["walCheckpointUpgradeMode"],
-): void => {
+): boolean => {
   const sqliteCfg: SqliteRegistryConfig = { databasePath: sqlitePath, now }
   if (walSizeThresholdBytes !== undefined) {
     ;(
@@ -328,6 +333,47 @@ const runSqliteSweep = (
   // the sweep even on a quiet workload.
   safeCounter(metricsEmitter, "codex_r2.sweep.sqlite_wal_restarted", result.walRestarted ? 1 : 0)
   safeCounter(metricsEmitter, "codex_r2.sweep.sqlite_wal_truncated", result.walTruncated ? 1 : 0)
+  return result.backendAvailable
+}
+
+const attemptDiskSweep = async (
+  diskDir: string,
+  now: () => number,
+  metricsEmitter: MetricEmitterPort | undefined,
+): Promise<boolean> => {
+  try {
+    const result = await sweepDiskRegistry({ storageDir: diskDir, now })
+    safeCounter(metricsEmitter, "codex_r2.sweep.disk_evicted", result.evicted)
+    safeCounter(metricsEmitter, "codex_r2.sweep.disk_truncated", result.truncated)
+    safeCounter(metricsEmitter, "codex_r2.sweep.disk_failed", result.backendAvailable ? 0 : 1)
+    return result.backendAvailable
+  } catch {
+    safeCounter(metricsEmitter, "codex_r2.sweep.disk_failed", 1)
+    return false
+  }
+}
+
+const attemptSqliteSweep = (
+  sqlitePath: string,
+  now: () => number,
+  metricsEmitter: MetricEmitterPort | undefined,
+  walSizeThresholdBytes: number | undefined,
+  walCheckpointUpgradeMode: SqliteRegistryConfig["walCheckpointUpgradeMode"],
+): boolean => {
+  try {
+    const available = runSqliteSweep(
+      sqlitePath,
+      now,
+      metricsEmitter,
+      walSizeThresholdBytes,
+      walCheckpointUpgradeMode,
+    )
+    safeCounter(metricsEmitter, "codex_r2.sweep.sqlite_failed", available ? 0 : 1)
+    return available
+  } catch {
+    safeCounter(metricsEmitter, "codex_r2.sweep.sqlite_failed", 1)
+    return false
+  }
 }
 
 /**
@@ -346,7 +392,7 @@ const sweepOnce = async (
   metricsEmitter: MetricEmitterPort | undefined,
   walSizeThresholdBytes: number | undefined,
   walCheckpointUpgradeMode: SqliteRegistryConfig["walCheckpointUpgradeMode"],
-): Promise<void> => {
+): Promise<AutoSweepRunResult> => {
   // Use the injected `now` clock for the wall-clock measurement too so
   // tests can drive latency deterministically. ADR-0373 telemetry value
   // is not model-facing / replay-stable in the prompt sense, but routing
@@ -357,42 +403,32 @@ const sweepOnce = async (
   // emitter-absent path is byte-identical to ADR-0369 (no extra `now()`
   // call per tick).
   const wallStart = metricsEmitter !== undefined ? now() : 0
+  const outcomes: boolean[] = []
 
   if (diskDir.length > 0) {
-    try {
-      const result = await sweepDiskRegistry({ storageDir: diskDir, now })
-      safeCounter(metricsEmitter, "codex_r2.sweep.disk_evicted", result.evicted)
-      safeCounter(metricsEmitter, "codex_r2.sweep.disk_truncated", result.truncated)
-      // R2-audit fix — Wiring-proof zero-delta `disk_failed` counter so the
-      // gauge timeline distinguishes "ran OK" from "threw silently". The
-      // success path emits delta 0 unconditionally so a gap in the time
-      // series means "the timer is not ticking", not "we're not erroring".
-      safeCounter(metricsEmitter, "codex_r2.sweep.disk_failed", 0)
-    } catch {
-      // NO-THROW.
-      safeCounter(metricsEmitter, "codex_r2.sweep.disk_failed", 1)
-    }
+    outcomes.push(await attemptDiskSweep(diskDir, now, metricsEmitter))
   }
   if (sqlitePath.length > 0) {
-    try {
-      runSqliteSweep(
+    outcomes.push(
+      attemptSqliteSweep(
         sqlitePath,
         now,
         metricsEmitter,
         walSizeThresholdBytes,
         walCheckpointUpgradeMode,
-      )
-      // R2-audit fix — symmetrical zero-delta `sqlite_failed`.
-      safeCounter(metricsEmitter, "codex_r2.sweep.sqlite_failed", 0)
-    } catch {
-      // NO-THROW.
-      safeCounter(metricsEmitter, "codex_r2.sweep.sqlite_failed", 1)
-    }
+      ),
+    )
   }
 
   if (metricsEmitter !== undefined) {
     const elapsed = now() - wallStart
     safeLatency(metricsEmitter, elapsed >= 0 ? elapsed : 0)
+  }
+  const succeeded = outcomes.filter(Boolean).length
+  return {
+    attempted: outcomes.length,
+    succeeded,
+    failed: outcomes.length - succeeded,
   }
 }
 
@@ -411,11 +447,11 @@ const sweepOnce = async (
  * schedules TWO timers; callers (only `global.ts`) gate by the
  * singleton's null-check to avoid this.
  *
- * NO-THROW on construction. A misconfigured env var that points to a
+ * NO-THROW on construction. A misconfigured runtime path that points to a
  * filesystem the adapter cannot reach degrades to "sweep does nothing"
  * — the timer keeps ticking so a later filesystem change can take effect.
  */
-export const startAutoSweep = (cfg?: AutoSweepConfig): AutoSweepHandle => {
+export const startAutoSweep = (cfg: AutoSweepConfig): AutoSweepHandle => {
   const diskDir = resolveDiskDir(cfg)
   const sqlitePath = resolveSqlitePath(cfg)
 
@@ -423,11 +459,11 @@ export const startAutoSweep = (cfg?: AutoSweepConfig): AutoSweepHandle => {
     return NOOP_HANDLE
   }
 
-  const intervalMs = cfg?.intervalMs ?? DEFAULT_AUTO_SWEEP_INTERVAL_MS
-  const now = cfg?.now ?? Date.now
-  const sched = cfg?.setIntervalImpl ?? setInterval
-  const cancel = cfg?.clearIntervalImpl ?? clearInterval
-  const emitter = cfg?.metricsEmitter
+  const intervalMs = cfg.intervalMs ?? DEFAULT_AUTO_SWEEP_INTERVAL_MS
+  const now = cfg.now ?? Date.now
+  const sched = cfg.setIntervalImpl ?? setInterval
+  const cancel = cfg.clearIntervalImpl ?? clearInterval
+  const emitter = cfg.metricsEmitter
   // ADR-0390 — Resolve once at start. Periodic ticks pin the values they
   // saw at `startAutoSweep` time; a later snapshot requires reset + remint.
   const walSizeThresholdBytes = resolveWalThresholdBytes(cfg)
@@ -480,5 +516,8 @@ export const startAutoSweep = (cfg?: AutoSweepConfig): AutoSweepHandle => {
     )
   }
 
-  return { stop, sweepNow, scheduled: timer !== null }
+  const sweepNowWithOutcome = async (): Promise<AutoSweepRunResult> =>
+    sweepOnce(diskDir, sqlitePath, now, emitter, walSizeThresholdBytes, walCheckpointUpgradeMode)
+
+  return { stop, sweepNow, sweepNowWithOutcome, scheduled: timer !== null }
 }

@@ -370,8 +370,8 @@ const readsSecretPathArg = (tokens: readonly string[]): boolean => {
 const SHELL_WRAPPER_HEADS: ReadonlySet<string> = new Set(["bash", "sh"])
 /** Closed set of flags that introduce a command-string payload. */
 const SHELL_COMMAND_FLAGS: ReadonlySet<string> = new Set(["-c", "-lc"])
-/** One unwrap only — never walk nested `bash -c "bash -c …"` wrappers. */
-const MAX_SHELL_UNWRAP_DEPTH = 1
+/** Bound recursive shell-wrapper inspection; overflow fails closed as secret. */
+const MAX_SHELL_UNWRAP_DEPTH = 8
 
 /** Payload after the first `-c` / `-lc` flag, or undefined when absent/empty. */
 const shellCommandPayload = (tokens: readonly string[]): string | undefined => {
@@ -382,6 +382,33 @@ const shellCommandPayload = (tokens: readonly string[]): string | undefined => {
     return payload !== undefined && payload.length > 0 ? payload : undefined
   }
   return undefined
+}
+
+const INTERPRETER_EVAL_HEADS: ReadonlySet<string> = new Set([
+  "node",
+  "bun",
+  "deno",
+  "python",
+  "python3",
+  "ruby",
+])
+const INTERPRETER_EVAL_FLAGS: ReadonlySet<string> = new Set(["-e", "--eval", "-p", "--print", "-c"])
+
+const interpreterEvalReadsSecrets = (tokens: readonly string[]): boolean => {
+  for (let i = 1; i < tokens.length; i++) {
+    const flag = tokens[i]
+    if (flag === undefined || !INTERPRETER_EVAL_FLAGS.has(flag)) continue
+    const source = tokens[i + 1] ?? ""
+    return (
+      source.includes("process.env") ||
+      source.includes("Bun.env") ||
+      source.includes("Deno.env") ||
+      source.includes("os.environ") ||
+      source.includes("ENV[") ||
+      /(?:^|[^A-Za-z0-9_])\.env(?:[^A-Za-z0-9_]|$)/.test(source)
+    )
+  }
+  return false
 }
 
 const classifyCommandShapeAt = (cmd: string, unwrapDepth: number): SensitivityClass => {
@@ -397,16 +424,55 @@ const classifyCommandShapeAt = (cmd: string, unwrapDepth: number): SensitivityCl
 
   const rule = SECRET_COMMAND_RULES.get(head)
   if (rule?.(tokens) === true) return "secret"
+  if (INTERPRETER_EVAL_HEADS.has(head) && interpreterEvalReadsSecrets(tokens)) return "secret"
 
-  if (unwrapDepth < MAX_SHELL_UNWRAP_DEPTH && SHELL_WRAPPER_HEADS.has(head)) {
+  if (SHELL_WRAPPER_HEADS.has(head)) {
     const payload = shellCommandPayload(tokens)
-    if (payload !== undefined) return classifyCommandShapeAt(payload, unwrapDepth + 1)
+    if (payload !== undefined) {
+      if (unwrapDepth >= MAX_SHELL_UNWRAP_DEPTH) return "secret"
+      return classifyCommandShapeAt(payload, unwrapDepth + 1)
+    }
   }
   return "public"
 }
 
 export const classifyCommandShape = (cmd: string): SensitivityClass =>
   classifyCommandShapeAt(cmd, 0)
+
+const CODE_ENV_ACCESS =
+  /\b(?:process|Bun|Deno)\s*\.\s*env\b|\bprocess\s*\[\s*["'`]env["'`]\s*\]|\bimport\s*\.\s*meta\s*\.\s*env\b/
+const CODE_STRING_LITERAL = /(["'`])((?:\\.|(?!\1)[\s\S])*)\1/g
+const CODE_FILE_READ_ARG =
+  /\b(?:readFileSync|readFile|readTextFileSync|readTextFile|createReadStream|openSync|Bun\s*\.\s*file)\s*\(\s*((?:["'][^"'\\]*(?:\\.[^"'\\]*)*["'])|(?:`(?:\\.|[^`])*`)|[^,\n)]+)/g
+
+const hasDynamicFileRead = (code: string): boolean => {
+  for (const match of code.matchAll(CODE_FILE_READ_ARG)) {
+    const arg = (match[1] ?? "").trim()
+    const quote = arg[0]
+    const staticQuoted =
+      (quote === '"' || quote === "'" || quote === "`") &&
+      arg.endsWith(quote) &&
+      !(quote === "`" && arg.includes("${"))
+    if (!staticQuoted) return true
+  }
+  return false
+}
+
+/**
+ * Classify source code evaluated by a host-runtime REPL. This is deliberately
+ * closed and fail-safe: direct environment access or a quoted secret path /
+ * credential-printing command marks the resulting output secret.
+ */
+export const classifyCodeShape = (code: string): SensitivityClass => {
+  if (CODE_ENV_ACCESS.test(code) || hasDynamicFileRead(code)) return "secret"
+  for (const match of code.matchAll(CODE_STRING_LITERAL)) {
+    const literal = match[2] ?? ""
+    if (classifyPath(literal, "") === "secret" || classifyCommandShape(literal) === "secret") {
+      return "secret"
+    }
+  }
+  return "public"
+}
 
 // Re-exported for tests that want to assert behavior on the helpers; the
 // public API is `classifyPath` / `classifyCommandShape`.

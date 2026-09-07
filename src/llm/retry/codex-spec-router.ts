@@ -1,8 +1,8 @@
 /**
  * Codex-spec `RecoveryRouter` implementation (ADR-0214).
  *
- * Verbatim adoption of Codex 0.131.0-alpha.9's 16-kind `CodexErr` → action
- * mapping, ported to our `LLMErrorKind` vocabulary. This is the SINGLE
+ * Codex-derived 18-kind `CodexErr` → action mapping, ported and extended to
+ * our `LLMErrorKind` vocabulary. This is the SINGLE
  * canonical routing table — adding a new `LLMErrorKind` requires extending
  * the switch below (the exhaustiveness `assertNever` will fail compile if
  * a new union member is added without a route).

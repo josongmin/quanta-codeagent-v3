@@ -59,6 +59,8 @@ import { DEFAULT_MAX_SESSION_BYTES, DEFAULT_TTL_MS, type DiskRegistryConfig } fr
 export interface SweepResult {
   readonly evicted: number
   readonly truncated: number
+  /** False only when the configured root could not be opened/read. */
+  readonly backendAvailable: boolean
 }
 
 /** Per-session file names — kept here as a constant so the disk-store
@@ -484,6 +486,8 @@ export interface DiskCleanupCandidates {
   readonly inspectedSessions: number
   /** Echo of `cfg.storageDir` so the operator output identifies the path. */
   readonly storageDir: string
+  /** False when the configured root could not be opened/read. */
+  readonly backendAvailable: boolean
 }
 
 const EMPTY_CANDIDATES = (storageDir: string): DiskCleanupCandidates => ({
@@ -491,6 +495,7 @@ const EMPTY_CANDIDATES = (storageDir: string): DiskCleanupCandidates => ({
   wouldEvictBySize: 0,
   inspectedSessions: 0,
   storageDir,
+  backendAvailable: false,
 })
 
 /** Per-entry classification for the dry-run count. Distinguishes
@@ -573,7 +578,13 @@ export const countDiskRegistryCleanupCandidates = async (
     if (fate === "ttl-candidate") wouldEvictByTtl += 1
     else if (fate === "size-candidate") wouldEvictBySize += 1
   }
-  return { wouldEvictByTtl, wouldEvictBySize, inspectedSessions, storageDir: cfg.storageDir }
+  return {
+    wouldEvictByTtl,
+    wouldEvictBySize,
+    inspectedSessions,
+    storageDir: cfg.storageDir,
+    backendAvailable: true,
+  }
 }
 
 /**
@@ -599,7 +610,7 @@ export const sweepDiskRegistry = async (
   try {
     entries = await readdir(cfg.storageDir)
   } catch {
-    return { evicted: 0, truncated: 0 }
+    return { evicted: 0, truncated: 0, backendAvailable: false }
   }
 
   let evicted = 0
@@ -620,5 +631,5 @@ export const sweepDiskRegistry = async (
     if (fate === "evicted") evicted += 1
     else if (fate === "truncated") truncated += 1
   }
-  return { evicted, truncated }
+  return { evicted, truncated, backendAvailable: true }
 }

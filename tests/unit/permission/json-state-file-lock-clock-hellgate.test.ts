@@ -18,10 +18,9 @@
  *   - fresh-NOT-reclaimed (paired control) — an equal lock whose `ts` is NOT
  *     stale under the same injected clock is NOT stolen; acquire times out
  *     (⇒ false) and the foreign body survives untouched.
- *   - authority-unaffected-on-timeout — when the lock can never be acquired,
- *     `flushDurable()` degrades to a best-effort write (non-durability never
- *     blocks the in-memory authority): the bytes still land and the merged
- *     payload reflects the live in-memory state.
+ *   - fail-closed-on-timeout — when the lock can never be acquired,
+ *     `flushDurable()` returns `durable:false`, leaves existing disk bytes
+ *     untouched, and preserves the live in-memory state for a later retry.
  *   - mtime-fallback uses the injected clock too — an unreadable (non-JSON)
  *     lock body is reclaimed via mtime measured against `now()`.
  *
@@ -153,18 +152,30 @@ describe("json-state-file lock clock — stale reclaim is deterministic (injecte
     }
   })
 
-  test("authority-unaffected-on-timeout: an unstealable fresh lock makes flush best-effort, in-memory state still wins", async () => {
+  test("fail-closed-on-timeout: an unstealable fresh lock blocks disk write and remains retryable", async () => {
     const dir = await tmp()
     const filePath = join(dir, "state.json")
     const lockPath = `${filePath}.lock`
     try {
+      type S = { records: string[] }
       // A foreign lock that is NEVER stale under our injected clock ⇒ acquireLock
-      // inside writeToDisk times out ⇒ flush proceeds lock-free (best-effort).
+      // inside writeToDisk times out. Existing durable bytes must not change.
       const start = 50_000
       await plantForeignLock(lockPath, start - 1)
+      const original: S = { records: ["existing-durable-record"] }
+      await writeFile(filePath, JSON.stringify(original), "utf8")
       const step = Math.max(1, Math.floor(LOCK_TIMEOUT_MS / 4))
+      let clock = start
+      let peerAlive = true
+      const now = (): number => {
+        const value = clock
+        if (peerAlive) {
+          writeFileSync(lockPath, JSON.stringify({ pid: 999_999, ts: value }), { mode: 0o600 })
+        }
+        clock += step
+        return value
+      }
 
-      type S = { records: string[] }
       const store = createJsonStateFile<S>({
         filePath,
         debounceMs: 0,
@@ -178,20 +189,29 @@ describe("json-state-file lock clock — stale reclaim is deterministic (injecte
         // Supplying mergeWithDisk ⇒ the lock path is exercised. Identity merge
         // when nothing peer-wrote: write our in-memory state.
         mergeWithDisk: ({ inMemory }) => inMemory,
-        now: steppingClock(start, step),
+        now,
       })
 
       const live: S = { records: ["denial-must-survive"] }
       const outcome = await store.flushDurable(() => live)
 
-      // Best-effort: the bytes DID land (lock timeout degrades to write-anyway),
-      // so the outcome is durable AND the file reflects the live in-memory state.
-      expect(outcome.durable).toBe(true)
+      expect(outcome).toEqual({
+        durable: false,
+        reason: "cross-process lock unavailable",
+      })
       const onDisk = JSON.parse(await readFile(filePath, "utf8")) as S
-      expect(onDisk.records).toEqual(["denial-must-survive"])
+      expect(onDisk).toEqual(original)
 
       // In-memory authority is unchanged regardless of the lock outcome.
       expect(live.records).toEqual(["denial-must-survive"])
+
+      // Release the simulated peer and retry the SAME generation. A failed
+      // flush must not clear dirty state or report a false durable no-op.
+      peerAlive = false
+      await rm(lockPath, { force: true })
+      const retry = await store.flushDurable(() => live)
+      expect(retry).toEqual({ durable: true })
+      expect(JSON.parse(await readFile(filePath, "utf8"))).toEqual(live)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

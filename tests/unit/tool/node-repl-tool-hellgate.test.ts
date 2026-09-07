@@ -50,11 +50,18 @@ const ctx = (): ToolContext =>
   ({ cwd: "/tmp", signal: new AbortController().signal, turnId: "t1" }) as ToolContext
 
 /** Drive a tool's async-iterable execute to its terminal `result` event. */
-const run = async (tool: Tool, input: unknown): Promise<{ ok: boolean; output: string }> => {
+const run = async (
+  tool: Tool,
+  input: unknown,
+): Promise<{ ok: boolean; output: string; sourceClass?: string }> => {
   let last: ToolEvent | undefined
   for await (const ev of tool.execute(input, ctx())) last = ev
   if (last === undefined || last.type !== "result") throw new Error("no result event")
-  return { ok: last.result.ok, output: last.result.output }
+  return {
+    ok: last.result.ok,
+    output: last.result.output,
+    ...(last.result.source !== undefined ? { sourceClass: last.result.source.class } : {}),
+  }
 }
 
 const nodeReplTool = (kernel: NodeReplKernel): Tool => {
@@ -95,6 +102,40 @@ describe("node_repl — security posture", () => {
     expect(tool.isReadOnly()).toBe(false)
     expect(tool.isConcurrencySafe({} as never)).toBe(false)
     expect(tool.hitlTier?.({} as never)).toBe("always-confirm")
+  })
+
+  test("exec source classification covers env and secret-file reads", () => {
+    const tool = nodeReplTool(headlessStub())
+    expect(tool.classifySource?.({ op: "exec", code: "process.env.API_KEY" })).toBe("secret")
+    expect(tool.classifySource?.({ op: "exec", code: `require("fs").readFileSync(".env")` })).toBe(
+      "secret",
+    )
+    const benign = nodeReplTool(headlessStub())
+    expect(benign.classifySource?.({ op: "exec", code: "1 + 1" })).toBe("public")
+    expect(tool.classifySource?.({ op: "status", id: "node:1" })).toBeNull()
+  })
+
+  test("persistent session sensitivity is sticky across later variable reads", () => {
+    const tool = nodeReplTool(headlessStub())
+    expect(
+      tool.classifySource?.({
+        op: "exec",
+        code: `globalThis.cachedSecret = require("fs").readFileSync(".env")`,
+      }),
+    ).toBe("secret")
+    expect(tool.classifySource?.({ op: "exec", code: "cachedSecret" })).toBe("secret")
+
+    const fresh = nodeReplTool(headlessStub())
+    expect(fresh.classifySource?.({ op: "exec", code: "cachedSecret" })).toBe("public")
+  })
+
+  test("exec result carries producer-owned source even without dispatch classification", async () => {
+    const result = await run(nodeReplTool(headlessStub()), {
+      op: "exec",
+      code: "process.env.API_KEY",
+    })
+    expect(result.ok).toBe(true)
+    expect(result.sourceClass).toBe("secret")
   })
 })
 

@@ -60,16 +60,14 @@ describe("createSkillOnlyResolver — ADR-0330 hellgate", () => {
     expect(await port.resolveSkill("x")).toEqual({ bodyText: "First line tagline." })
   })
 
-  test("C2 — first line is preserved EXACTLY (no trim, no normalize)", async () => {
+  test("C2 — shared mention policy trims boundary whitespace", async () => {
     const port = createSkillOnlyResolver(
       stubRegistry(() => ({
         name: "x",
         description: "  leading spaces and trailing   \nrest body",
       })),
     )
-    expect(await port.resolveSkill("x")).toEqual({
-      bodyText: "  leading spaces and trailing   ",
-    })
+    expect(await port.resolveSkill("x")).toEqual({ bodyText: "leading spaces and trailing" })
   })
 
   // -------- D. empty description -------------------------------------

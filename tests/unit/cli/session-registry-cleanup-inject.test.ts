@@ -1,6 +1,6 @@
 /**
  * SEP5-10 — cleanup --dry-run uses injected typed paths, not a later process.env write.
- * Live cleanup must use the same runtime snapshot via autoSweepConfigFromRuntime.
+ * Live cleanup must use the singleton-owned sweep handle and first-call snapshot.
  */
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
@@ -73,12 +73,13 @@ describe("session-registry cleanup dry-run injection", () => {
 })
 
 describe("session-registry live cleanup snapshot authority", () => {
-  test("renderCleanup starts auto-sweep from autoSweepConfigFromRuntime(runtimeConfig())", () => {
+  test("renderCleanup invokes the singleton-owned sweep without minting a second timer", () => {
     const src = readFileSync(
       join(import.meta.dir, "../../../src/apps/cli/session-registry-cmd.ts"),
       "utf8",
     )
-    expect(src).toContain("startAutoSweep(autoSweepConfigFromRuntime(runtimeConfig()))")
-    expect(src).not.toMatch(/startAutoSweep\(\s*\)/)
+    expect(src).toMatch(/sweepGlobalSessionResourceRegistryNow\s*\(/)
+    expect(src).not.toMatch(/startAutoSweep\s*\(/)
+    expect(src).not.toMatch(/runtimeConfig\s*\(/)
   })
 })

@@ -68,6 +68,10 @@ describe("tool-origin-substrate / deriveProvenance (unit, exhaustive)", () => {
     ["builtin", "bash", "bash"],
     ["builtin", "bash_await", "bash"], // bash* prefix
     ["builtin", "bash_kill", "bash"],
+    ["builtin", "container_exec", "bash"],
+    ["builtin", "node_repl", "bash"],
+    ["builtin", "pty_read", "bash"],
+    ["builtin", "test_runner", "bash"],
     ["builtin", "read", "file"],
     ["builtin", "read_image", "file"],
     ["builtin", "csv_read", "file"],

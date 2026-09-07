@@ -256,7 +256,7 @@ describe("ADR-0369 — startAutoSweep", () => {
   })
 
   test("K. stop() after never-started handle is safe (no env, double-stop)", () => {
-    const h = startAutoSweep()
+    const h = startAutoSweep({})
     expect(h.scheduled).toBe(false)
     h.stop()
     h.stop()
@@ -264,15 +264,24 @@ describe("ADR-0369 — startAutoSweep", () => {
   })
 
   test("L. sweepNow resolves even when env unset", async () => {
-    const h = startAutoSweep()
+    const h = startAutoSweep({})
     await expect(h.sweepNow()).resolves.toBeUndefined()
     h.stop()
   })
 
-  test("L2. no-arg startAutoSweep ignores process.env (fail-closed)", () => {
+  test("L1. sweepNowWithOutcome reports no attempted backend when unconfigured", async () => {
+    const h = startAutoSweep({})
+    await expect(h.sweepNowWithOutcome()).resolves.toEqual({
+      attempted: 0,
+      succeeded: 0,
+      failed: 0,
+    })
+  })
+
+  test("L2. explicit empty config ignores process.env (fail-closed)", () => {
     process.env.QUANTA_SESSION_REGISTRY_SQLITE_PATH = ":memory:"
     process.env.QUANTA_SESSION_REGISTRY_WAL_THRESHOLD_BYTES = "12345"
-    const h = startAutoSweep()
+    const h = startAutoSweep({})
     expect(h.scheduled).toBe(false)
   })
 
@@ -310,6 +319,18 @@ describe("ADR-0369 — startAutoSweep", () => {
     })
     await expect(h.sweepNow()).resolves.toBeUndefined()
     h.stop()
+  })
+
+  test("M2. sweepNowWithOutcome preserves an unavailable backend failure", async () => {
+    const h = startAutoSweep({
+      sqlitePath: "/dev/null/no-such-parent/registry.sqlite",
+      intervalMs: 0,
+    })
+    await expect(h.sweepNowWithOutcome()).resolves.toEqual({
+      attempted: 1,
+      succeeded: 0,
+      failed: 1,
+    })
   })
 
   test("N. stop() clears the timer ⇒ subsequent fake tick is a no-op", () => {

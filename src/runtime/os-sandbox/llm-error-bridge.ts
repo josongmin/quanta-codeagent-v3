@@ -1,5 +1,5 @@
 /**
- * ADR-0237 — `sandboxError` layer-owned arm wire (LLM error 16-kind close-out,
+ * ADR-0237 — `sandboxError` layer-owned arm wire (LLM error taxonomy close-out,
  * slice C of 3).
  *
  * # What this is
@@ -13,7 +13,7 @@
  *
  * # Why this lives in `src/runtime/os-sandbox/`
  *
- * `sandbox_error` is one of the THREE layer-owned arms in the ADR-0214 16-kind
+ * `sandbox_error` is one of the layer-owned arms in the ADR-0214 error
  * `LLMErrorKind` taxonomy that the LLM ADAPTER boundary cannot emit (no
  * provider knows about Seatbelt / Landlock / Bubblewrap availability). Only
  * the sandbox port KNOWS when its enforcement degraded. ADR-0234 wired the

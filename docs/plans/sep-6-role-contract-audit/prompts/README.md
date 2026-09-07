@@ -1,5 +1,10 @@
 # Sep-06 role-contract architecture audit — dispatch pack
 
+> **RETIRED FOR DISPATCH (2026-09-07):** final code reconciliation and the four
+> retained repairs are complete. [`../tickets/README.md`](../tickets/README.md)
+> has 0 active rows. Do not rerun the 30-row prompt pack or recreate removed
+> findings without a new current-code reproduction.
+
 ## Goal
 
 Audit duplicate development and architecture drift by **role contract**, not by
@@ -48,7 +53,7 @@ Before dispatching workers in fresh worktrees, commit this prompt pack or provid
 the complete prompt text directly. A worktree created from an older commit will
 not see an uncommitted prompt file.
 
-## Complete active-index ownership
+## Historical active-index ownership — retired
 
 Every active Sep-06 row has exactly one finding owner. N9 is split into two
 file-disjoint sub-items and is recombined by W3.
@@ -70,8 +75,8 @@ file-disjoint sub-items and is recombined by W3.
 | K | N9b: `parseToolSurfaceSlice`, S6, N14 |
 | L | N16 |
 
-Closed and conditional D-items listed in a lane are status/reopen context, not
-additional active findings.
+Closed and conditional D-items listed in a lane were status/reopen context, not
+additional findings. Every assignment below is retained as audit history only.
 
 ## Finding contract
 
@@ -149,7 +154,7 @@ You are lane A of the Sep-06 role-contract architecture audit. Work read-only.
 Read AGENTS.md and require the parent's W0 TRUTH RECEIPT. If your checkout HEAD or
 authority-document hashes differ, return STALE without continuing.
 
-Owned active item: S4.
+Historical assignment: S4.
 Status context: D3 and D4 are closed; D13 and D25 are conditional; D12 and D24
 remain different-contract closures.
 
@@ -184,7 +189,7 @@ existing rails, proposed write set, and unverified conditions. Make no changes.
 You are lane B of the Sep-06 role-contract architecture audit. Work read-only.
 Read AGENTS.md and require the W0 TRUTH RECEIPT; return STALE on any snapshot drift.
 
-Owned active item: S1.
+Historical assignment: S1.
 Status context: D1 is closed as parity-not-merge. D2, D10, D11, and D30 are closed
 regression references, not implementation scope.
 
@@ -217,7 +222,7 @@ whether S1 is a merge finding, a parity-rail finding, or closed. Make no changes
 You are lane C of the Sep-06 role-contract architecture audit. Work read-only.
 Read AGENTS.md and require the W0 TRUTH RECEIPT; return STALE on snapshot drift.
 
-Owned active items: N1, N5, N6, N11, N12, S15.
+Historical assignment: N1, N5, N6, N11, N12, S15.
 Status context: D19 is closed for shared envelope plus local framing; D23 is
 conditional; D29 preserved separate ports but N11 may be a new durability drift.
 
@@ -254,7 +259,7 @@ merely because both use JSON-RPC or Content-Length. Make no changes.
 You are lane D of the Sep-06 role-contract architecture audit. Work read-only.
 Read AGENTS.md and require the W0 TRUTH RECEIPT; return STALE on snapshot drift.
 
-Owned active items: S3 and S13.
+Historical assignment: S3 and S13.
 Status context: D15 is conditional public-compat retirement; D7 is conditional and
 allows only a neutral injected transport after proving both STT contracts live.
 
@@ -288,7 +293,7 @@ delete/deprecate/share/keep decisions. Make no changes.
 You are lane E of the Sep-06 role-contract architecture audit. Work read-only.
 Read AGENTS.md and require the W0 TRUTH RECEIPT; return STALE on snapshot drift.
 
-Owned active items: N13, S11, S12.
+Historical assignment: N13, S11, S12.
 Status context: D16, D17, and D21 are conditional. R8-style assemble versus
 per-turn-fold contracts must not be force-merged.
 
@@ -322,7 +327,7 @@ owner, exact production path, and proposed write set. Make no changes.
 You are lane F of the Sep-06 role-contract architecture audit. Work read-only.
 Read AGENTS.md and require the W0 TRUTH RECEIPT; return STALE on snapshot drift.
 
-Owned active item: N7.
+Historical assignment: N7.
 Status context: D26 is conditional; no central AgentEvent mega-table is authorized.
 
 Evidence universe:
@@ -351,7 +356,7 @@ Include the exact missed consumer and a non-vacuous rail plan. Make no changes.
 You are lane G of the Sep-06 role-contract architecture audit. Work read-only.
 Read AGENTS.md and require the W0 TRUTH RECEIPT; return STALE on snapshot drift.
 
-Owned active items: N8, N10, S5, S9.
+Historical assignment: N8, N10, S5, S9.
 
 Evidence universe:
 - src/permission/**
@@ -383,7 +388,7 @@ fixtures, blast radius, existing rails, and proposed write sets. Make no changes
 You are lane H of the Sep-06 role-contract architecture audit. Work read-only.
 Read AGENTS.md and require the W0 TRUTH RECEIPT; return STALE on snapshot drift.
 
-Owned active items: N3, N4, N15, S10.
+Historical assignment: N3, N4, N15, S10.
 Evidence universe is strictly src/agent/loop/** plus tests that directly execute
 those files. Do not inspect agent/types or top-level *-wire files; those belong to
 W1b.
@@ -410,7 +415,7 @@ You are W1b lane I1. Start only after A-H are all complete. Work read-only.
 Read AGENTS.md and require the W0 receipt plus A-H receipts; return STALE on snapshot
 drift.
 
-Owned active item: S2.
+Historical assignment: S2.
 Evidence universe: src/agent/types.ts, src/agent/types/**, wire-slot type files, and
 direct producers/consumers needed to classify AgentConfig fields. Do not audit
 top-level *-wire implementation bodies or mention first-line helpers.
@@ -433,8 +438,8 @@ plan. Do not propose a generic options bag. Make no changes.
 You are W1b lane I2. Start after I1 completes. Work read-only.
 Read AGENTS.md and require the frozen W0 receipt; return STALE on snapshot drift.
 
-Owned active item: S8. Status context: D8 is conditional and its observed output or
-error-policy drift is the only reopen trigger.
+Historical assignment: S8. D8 is now closed by the shared first-line owner and
+is no longer a dispatchable assignment.
 
 Evidence universe:
 - src/agent/mention-runner/skill-resolver.ts
@@ -461,7 +466,7 @@ plan. Make no changes.
 You are W1b lane I3. Start after I2 completes. Work read-only.
 Read AGENTS.md and require W0 and prior W1b receipts; return STALE on snapshot drift.
 
-Owned active item: S14.
+Historical assignment: S14.
 Evidence universe: top-level src/agent/*-wire.ts and *-bridge.ts, their direct
 composition callers, docs/ARCHITECTURE.md composition rules, and existing wire/slice
 hellgates. Do not reopen loop internals already owned by H.
@@ -485,7 +490,7 @@ Make no changes.
 You are W2 lane J, an architecture lens. Start only after all W1/W1b lanes finish.
 Work read-only. Require W0 and prior receipts; return STALE on snapshot drift.
 
-Owned active items: N9a and S7 excluding src/shared/runtime-config.ts. K exclusively
+Historical assignment: N9a and S7 excluding src/shared/runtime-config.ts. K exclusively
 owns runtime-config, including N9b parseToolSurfaceSlice.
 
 Evidence universe:
@@ -514,7 +519,7 @@ stale entries or lower counts. Make no changes.
 You are W2 lane K, an architecture lens. Start after all W1/W1b lanes finish. Work
 read-only. Require W0 and prior receipts; return STALE on snapshot drift.
 
-Owned active items: N9b, S6, N14.
+Historical assignment: N9b, S6, N14.
 Exclusive file owner versus J: src/shared/runtime-config.ts, including
 parseToolSurfaceSlice.
 
@@ -548,7 +553,7 @@ split seam, existing guard gaps, and proposed write sets. Make no changes.
 You are W2 lane L, an architecture lens. Start after all W1/W1b lanes finish. Work
 read-only. Require W0 and prior receipts; return STALE on snapshot drift.
 
-Owned active item: N16. Use the referenced aug-25 #34/#36/#57 material only as
+Historical assignment: N16. Use the referenced aug-25 #34/#36/#57 material only as
 historical routing; live source is authoritative.
 
 Evidence universe:

@@ -23,18 +23,12 @@
  *     session-registry-cmd.ts`) renders the result in operator-
  *     friendly form.
  *
- * # Backend detection
+ * # Backend authority
  *
- * `inspectGlobalRegistry()` reads the SAME env vars `global.ts` uses
- * to pick a backend:
- *
- *   1. `QUANTA_SESSION_REGISTRY_SQLITE_PATH` — sqlite adapter
- *      (followup env-var swap planned by ADR-0361 §Default-OFF; this
- *      ADR predates the swap so the var is inspect-only — it does
- *      NOT cause `getGlobalSessionResourceRegistry` to mount the
- *      sqlite backend).
- *   2. `QUANTA_SESSION_REGISTRY_DISK_DIR` — disk adapter (ADR-0351).
- *   3. otherwise — the in-memory singleton.
+ * `inspectGlobalRegistry()` consumes the backend descriptor stored beside the
+ * process singleton in `global.ts`. It never re-reads env/runtimeConfig. The
+ * descriptor records the backend that actually mounted after the
+ * sqlite → disk → in-memory constructor fallback chain.
  *
  * Whichever wins, the inspector returns a `RegistryStats` snapshot
  * shaped to that backend. Fields the backend does not own are
@@ -63,7 +57,7 @@ import {
   DEFAULT_MAX_SESSION_BYTES,
   DEFAULT_TTL_MS as DISK_DEFAULT_TTL_MS,
 } from "./disk-adapter/types"
-import { getGlobalSessionResourceRegistry } from "./global"
+import { getGlobalSessionResourceRegistryState } from "./global"
 import {
   DEFAULT_MAX_TOTAL_BYTES as SQLITE_DEFAULT_MAX_TOTAL_BYTES,
   DEFAULT_TTL_MS as SQLITE_DEFAULT_TTL_MS,
@@ -354,36 +348,25 @@ export const inspectSqliteRegistryByPath = async (databasePath: string): Promise
   }
 }
 
-const readEnv = (key: string): string | undefined => {
-  const v = process.env[key]
-  return v !== undefined && v.length > 0 ? v : undefined
-}
-
 /**
- * Resolve the active backend from env vars + inspect it. Same
- * precedence as `global.ts`:
- *   1. sqlite path (env: `QUANTA_SESSION_REGISTRY_SQLITE_PATH`)
- *   2. disk dir (env: `QUANTA_SESSION_REGISTRY_DISK_DIR`)
- *   3. in-memory singleton fallback
+ * Inspect the backend actually mounted by the process singleton.
  *
- * The sqlite env var is NEW with this ADR — it is consulted only
- * by the inspector (NOT by `getGlobalSessionResourceRegistry`) so
- * the closed-port + default-OFF discipline ADR-0361 declared still
- * holds. A follow-up ADR can promote the var to a full mount on
- * the ADR-0351 pattern.
+ * Backend choice, runtime-config snapshotting, and constructor fallback belong
+ * to `global.ts`. Re-reading env or runtimeConfig here would create a second
+ * authority and can report a backend different from the one serving sessions.
  *
  * NO-THROW.
  */
 export const inspectGlobalRegistry = async (): Promise<RegistryStats> => {
-  const sqlitePath = readEnv("QUANTA_SESSION_REGISTRY_SQLITE_PATH")
-  if (sqlitePath !== undefined) {
-    return inspectSqliteRegistryByPath(sqlitePath)
+  const mounted = getGlobalSessionResourceRegistryState()
+  switch (mounted.backend.kind) {
+    case "sqlite":
+      return inspectSqliteRegistryByPath(mounted.backend.path)
+    case "disk":
+      return inspectDiskRegistryByPath(mounted.backend.path)
+    case "in-memory":
+      return inspectInMemoryRegistry(mounted.registry)
   }
-  const diskDir = readEnv("QUANTA_SESSION_REGISTRY_DISK_DIR")
-  if (diskDir !== undefined) {
-    return inspectDiskRegistryByPath(diskDir)
-  }
-  return inspectInMemoryRegistry(getGlobalSessionResourceRegistry())
 }
 
 const formatBytes = (n: number): string => {

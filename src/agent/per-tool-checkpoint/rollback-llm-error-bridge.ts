@@ -1,5 +1,5 @@
 /**
- * ADR-0237 — `threadRollbackFailed` layer-owned arm wire (LLM error 16-kind
+ * ADR-0237 — `threadRollbackFailed` layer-owned arm wire (LLM error taxonomy
  * close-out, slice B of 3).
  *
  * # What this is
@@ -15,7 +15,7 @@
  * # Why this lives in `src/agent/per-tool-checkpoint/`
  *
  * `thread_rollback_failed` is one of the THREE layer-owned arms in the
- * ADR-0214 16-kind `LLMErrorKind` taxonomy that the LLM ADAPTER boundary
+ * ADR-0214 `LLMErrorKind` taxonomy that the LLM ADAPTER boundary
  * cannot emit (no provider returns a "checkpoint rebuild failed" status —
  * only the conversation-checkpoint / shadow-ODB rollback API KNOWS). ADR-0234
  * wired the two provider-emitable arms; this slice closes the rollback-side

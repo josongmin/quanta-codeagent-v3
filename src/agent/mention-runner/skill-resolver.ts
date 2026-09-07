@@ -31,28 +31,8 @@
  */
 
 import type { MentionResolverPort } from "@/agent/mention-injection"
-import { errMessage, logger } from "@/shared"
+import { errMessage, logger, mentionFirstLine } from "@/shared"
 import type { SkillRegistryReadOnly } from "./types"
-
-/**
- * Project a description down to its FIRST LINE only. Matches the
- * progressive-disclosure policy in `src/skill/tool-search.ts`'s
- * `splitDescription`: the first line is "everything up to the first
- * newline (LF / CRLF)", with no trimming. Empty description ⇒ "".
- *
- * Why first-line: the SKILL.md description is the user-facing tagline;
- * deeper body is intentionally NOT injected by a mention (only by
- * skill invocation via the `Skill` tool).
- */
-const firstLineOf = (description: string): string => {
-  if (typeof description !== "string" || description.length === 0) return ""
-  const nl = description.indexOf("\n")
-  // Defensive: if the description begins with CR (`\r\n`), `\n` lookup
-  // still cuts at the LF; we strip a trailing CR so a CRLF file does
-  // not bleed a `\r` into the body.
-  const slice = nl === -1 ? description : description.slice(0, nl)
-  return slice.endsWith("\r") ? slice.slice(0, -1) : slice
-}
 
 /**
  * Safe wrapper around the registry's `lookup`. The registry IS supposed
@@ -91,7 +71,7 @@ export const createSkillOnlyResolver = (skills?: SkillRegistryReadOnly): Mention
     async resolveSkill(target: string) {
       const entry = safeLookup(skills, target)
       if (entry === null) return null
-      return { bodyText: firstLineOf(entry.description) }
+      return { bodyText: mentionFirstLine(entry.description) }
     },
     // Frozen by ADR-0330 — composite resolver closes plugin / app.
     async resolvePlugin(_target: string) {

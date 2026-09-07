@@ -6,18 +6,15 @@
  * classifier answers `"secret"`. It is the only layer that can mask a `.env`
  * body, because Layer-2 is format-based and `.env` values match no format.
  *
- * The audit measured the live default tool surface: **26 tools, exactly 2**
- * (`read`, `bash`) declare `classifySource`. So `grep -r AWS_SECRET .env`,
- * `csv_read .env`, `file_tree_summary` over a secrets dir — every one dumps the
- * bytes with Layer-1 structurally unreachable. The gap was invisible because
- * nothing asserted the correspondence between "takes a path" and "classifies
- * its source".
+ * The original audit found only `read` and `bash` classified. This guard now
+ * pins the path-bearing and direct-command families that dispatch can classify
+ * before execution.
  *
  * This hellgate pins that correspondence for the tools whose INPUT carries a
- * filesystem path. Deliberately NOT pinned: tools whose input is an opaque
- * handle (`bash_await` `{shell_id}`, `pty_read` `{handle}`) — there is nothing
- * in the input to classify, and the repo already adjudicated them as
- * non-channels in `shell-input-channel-completeness-hellgate.test.ts`.
+ * filesystem path. Opaque deferred handles use producer-owned provenance:
+ * `bash_await` resolves the registry's original command and also attaches
+ * `ToolResult.source`; `pty_read` joins chunk provenance and fails closed for
+ * unattributed pre-attach output.
  */
 
 import { describe, expect, test } from "bun:test"
@@ -25,7 +22,7 @@ import { buildDefaultTools } from "@/tool"
 
 interface ToolLike {
   readonly name: string
-  readonly classifySource?: unknown
+  readonly classifySource?: (input: unknown) => string | null
   readonly inputSchema?: unknown
 }
 
@@ -66,7 +63,6 @@ const ADJUDICATED_UNCLASSIFIED: Readonly<Record<string, string>> = {
     "path is a scope dir for fault localization; output is ranked paths/snippets, not a whole-file dump. Residual.",
   file_tree_summary:
     "path is an optional scope DIR; output is structure (paths + counts) plus first-line purpose hints, not file bodies. Residual (hints channel).",
-  test_runner: "path scopes which tests run; output is runner output, not the file at `path`.",
   diagnostics:
     "path selects the file to type-check; output is compiler diagnostics that may quote lines, not the body. Residual.",
   read_image:
@@ -132,5 +128,13 @@ describe("Layer-1 source-class coverage (aug-23 audit)", () => {
     expect(adjudicated.filter((n) => typeof byName.get(n)?.classifySource === "function")).toEqual(
       [],
     )
+  })
+
+  test("direct-output command tools classify the command that produced their output", () => {
+    const runner = liveTools().find((t) => t.name === "test_runner")
+    expect(runner).toBeDefined()
+    expect(typeof runner?.classifySource).toBe("function")
+    expect(runner?.classifySource?.({ command: "cat .env" })).toBe("secret")
+    expect(runner?.classifySource?.({ command: "bun test" })).toBe("public")
   })
 })

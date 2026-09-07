@@ -130,6 +130,7 @@ export {
   renderLspGroundingStatus,
   summarizeGroundingStatuses,
 } from "./lsp-grounding-receipt"
+export { mentionFirstLine } from "./mention-text"
 export type { NoThrowErrorSink } from "./no-throw-dispatch"
 export { dispatchNoThrow, dispatchNoThrowWith, notifyAllNoThrow } from "./no-throw-dispatch"
 export type { OperatorNotice, OperatorNoticeSink } from "./operator-notice"

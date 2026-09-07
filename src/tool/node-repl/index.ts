@@ -17,6 +17,9 @@
  *     tool never enters the menu (byte-identical).
  *   - `hitlTier: "always-confirm"` — EVERY call needs approval, exactly like
  *     `bash` / `debug_inspect`. There is no per-input relaxation.
+ *   - exec code is source-classified for environment and secret-path reads.
+ *     The strongest class is sticky for the persistent kernel and is attached
+ *     to each exec result as producer-owned Layer-1 provenance.
  * NEVER throws: the kernel port is no-throw (`Result<…, KernelError>`); a spawn
  * / eval / abort fault collapses to an `ok:false` tool_result.
  *
@@ -29,8 +32,9 @@
 
 import { z } from "zod"
 import type { KernelId, NodeReplKernel } from "@/runtime/node-repl"
+import { classifyCodeShape, type SensitivityClass } from "@/security"
 import { errMessage } from "@/shared"
-import type { CoreToolContext, Tool, ToolEvent } from "../types"
+import type { CoreToolContext, Tool, ToolEvent, ToolResult } from "../types"
 
 const schema = z.object({
   op: z
@@ -59,14 +63,21 @@ const schema = z.object({
 })
 type Input = z.infer<typeof schema>
 
-const fail = (output: string): ToolEvent => ({
+type ResultSource = NonNullable<ToolResult["source"]>
+
+const fail = (output: string, source?: ResultSource): ToolEvent => ({
   type: "result",
-  result: { ok: false, output, failure: { mode: "error", modelVisibleError: output } },
+  result: {
+    ok: false,
+    output,
+    failure: { mode: "error", modelVisibleError: output },
+    ...(source !== undefined ? { source } : {}),
+  },
 })
 
-const okEvent = (output: string, ok = true): ToolEvent => ({
+const okEvent = (output: string, ok = true, source?: ResultSource): ToolEvent => ({
   type: "result",
-  result: { ok, output },
+  result: { ok, output, ...(source !== undefined ? { source } : {}) },
 })
 
 /** Render a `KernelError` to a compact, model-readable line. */
@@ -97,6 +108,15 @@ const renderKernelError = (e: {
  *  `exec` can lazily populate it. */
 interface SessionSlot {
   id: KernelId | undefined
+}
+
+const strongestSourceClass = (
+  left: SensitivityClass | null,
+  right: SensitivityClass,
+): SensitivityClass => {
+  if (left === "secret" || right === "secret") return "secret"
+  if (left === "internal" || right === "internal") return "internal"
+  return "public"
 }
 
 /** Lazily spawn (once) the session's own kernel — the variable-persistence unit.
@@ -156,9 +176,10 @@ const handleExec = async (
   slot: SessionSlot,
   input: Input,
   ctx: CoreToolContext,
+  source: ResultSource,
 ): Promise<ToolEvent> => {
   if (input.code === undefined || input.code === "")
-    return fail("node_repl: op:'exec' requires non-empty `code`.")
+    return fail("node_repl: op:'exec' requires non-empty `code`.", source)
   // An explicit `id` targets a specific kernel; otherwise reuse/spawn the
   // session's own kernel (the variable-persistence path).
   let targetId: KernelId
@@ -166,7 +187,7 @@ const handleExec = async (
     targetId = input.id as KernelId
   } else {
     const ensured = await ensureSessionKernel(kernel, slot, ctx)
-    if (!ensured.ok) return fail(ensured.output)
+    if (!ensured.ok) return fail(ensured.output, source)
     targetId = ensured.id
   }
   try {
@@ -174,7 +195,7 @@ const handleExec = async (
       ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}),
       ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
     })
-    if (!result.ok) return fail(renderKernelError(result.error))
+    if (!result.ok) return fail(renderKernelError(result.error), source)
     const { stdout, stderr, hadError } = result.value
     const body = [
       stdout.length > 0 ? stdout : "(no stdout)",
@@ -182,11 +203,11 @@ const handleExec = async (
     ].join("")
     // hadError ⇒ the eval reported to stderr / threw; surface as ok:false so the
     // model treats it as a failing evaluation (not a tool crash).
-    return okEvent(body, hadError !== true)
+    return okEvent(body, hadError !== true, source)
   } catch (e) {
     // Belt-and-braces: the port is no-throw by contract, but a pathological throw
     // must still collapse to a tool_result, never a host fault.
-    return fail(`node_repl: unexpected failure — ${errMessage(e)}`)
+    return fail(`node_repl: unexpected failure — ${errMessage(e)}`, source)
   }
 }
 
@@ -202,6 +223,19 @@ export const makeNodeReplTool = (kernel: NodeReplKernel): Tool<Input> => {
   // One slot per tool instance ⇒ one per session (the composition root mints one
   // kernel + one tool per session).
   const slot: SessionSlot = { id: undefined }
+  let sessionSourceClass: SensitivityClass | null = null
+  const sourceByKernel = new Map<string, SensitivityClass>()
+
+  const classifyExecSource = (input: Input): SensitivityClass | null => {
+    if (input.op !== "exec" || input.code === undefined) return null
+    const observed = classifyCodeShape(input.code)
+    const prior =
+      input.id === undefined ? sessionSourceClass : (sourceByKernel.get(input.id) ?? null)
+    const next = strongestSourceClass(prior, observed)
+    if (input.id === undefined) sessionSourceClass = next
+    else if (kernel.status(input.id as KernelId) !== "dead") sourceByKernel.set(input.id, next)
+    return next
+  }
 
   return {
     name: "node_repl",
@@ -210,6 +244,7 @@ export const makeNodeReplTool = (kernel: NodeReplKernel): Tool<Input> => {
     inputSchema: schema,
     isReadOnly: () => false,
     isConcurrencySafe: () => false,
+    classifySource: classifyExecSource,
     // Arbitrary Node code exec (full host access, no sandbox) ⇒ confirm every call.
     hitlTier: (): "always-confirm" => "always-confirm",
 
@@ -226,10 +261,18 @@ export const makeNodeReplTool = (kernel: NodeReplKernel): Tool<Input> => {
           yield handleStatus(kernel, input.id)
           return
         case "kill":
-          yield await handleKill(kernel, slot, input.id)
+          {
+            const killedSession = input.id !== undefined && input.id === slot.id
+            yield await handleKill(kernel, slot, input.id)
+            if (input.id !== undefined) sourceByKernel.delete(input.id)
+            if (killedSession) sessionSourceClass = null
+          }
           return
         case "exec":
-          yield await handleExec(kernel, slot, input, ctx)
+          yield await handleExec(kernel, slot, input, ctx, {
+            class: classifyExecSource(input) ?? "public",
+            label: "<node_repl>",
+          })
           return
       }
     },

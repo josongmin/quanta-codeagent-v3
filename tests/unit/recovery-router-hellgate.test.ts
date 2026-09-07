@@ -2,15 +2,15 @@
  * Hellgate for `src/llm/retry/{port,recovery-router,codex-spec-router}.ts`
  * (ADR-0214).
  *
- * Pins the 16-kind → 6-action Codex-spec routing table and four negative
- * invariants. 20+ hard cases (well above the spec's "16+" floor).
+ * Pins the 18-kind → 6-action Codex-spec routing table and four negative
+ * invariants. 20+ hard cases.
  */
 
 import { describe, expect, test } from "bun:test"
 import { codexSpecRoute, codexSpecRouterEmittedActions, type RecoveryAction } from "@/llm"
 import type { LLMErrorKind } from "@/shared"
 
-describe("codexSpecRoute — 16 kinds × correct action", () => {
+describe("codexSpecRoute — 18 kinds × correct action", () => {
   const TABLE: ReadonlyArray<{ kind: LLMErrorKind; action: RecoveryAction }> = [
     { kind: "overloaded", action: "fallback_provider" },
     { kind: "rate_limit", action: "retry_after_backoff" },
@@ -28,6 +28,8 @@ describe("codexSpecRoute — 16 kinds × correct action", () => {
     { kind: "too_many_failed_attempts", action: "fatal" },
     { kind: "thread_rollback_failed", action: "reactive_compaction" },
     { kind: "sandbox_error", action: "hitl_handoff" },
+    { kind: "sandbox_blocked", action: "hitl_handoff" },
+    { kind: "invalid_image", action: "fatal" },
   ]
 
   for (const { kind, action } of TABLE) {
@@ -36,12 +38,12 @@ describe("codexSpecRoute — 16 kinds × correct action", () => {
     })
   }
 
-  test("the table covers exactly 16 kinds (compile-time exhaustiveness)", () => {
-    expect(TABLE.length).toBe(16)
+  test("the table covers exactly 18 kinds (compile-time exhaustiveness)", () => {
+    expect(TABLE.length).toBe(18)
     // Set-equivalence: every kind appears exactly once.
     const seen = new Set<LLMErrorKind>()
     for (const { kind } of TABLE) seen.add(kind)
-    expect(seen.size).toBe(16)
+    expect(seen.size).toBe(18)
   })
 })
 

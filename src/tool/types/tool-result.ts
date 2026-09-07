@@ -10,6 +10,7 @@
  * so every external importer of `@/tool/types` stays byte-compatible.
  */
 import type { DocumentBlock, ImageBlock } from "@/llm"
+import type { SensitivityClass } from "@/security"
 
 /**
  * ADR-0062 rule #3 — structured cap-as-instruction third channel.
@@ -39,6 +40,15 @@ export interface ToolResult {
   ok: boolean
   /** Text returned to the model as the tool_result content. */
   output: string
+  /**
+   * Producer-owned provenance for outputs whose source is resolved only during
+   * execution (for example an opaque background/PTY handle). Dispatch joins
+   * this with input-derived classification and applies the stricter class.
+   */
+  source?: {
+    readonly class: SensitivityClass
+    readonly label: string
+  }
   /** Optional execution evidence surfaced to RFC-0002 §5.2 trajectory.
    *  Tools that exec shell commands attach stderr/exitCode/log-spill paths
    *  here; tools that don't simply omit the field. Replaces the previous

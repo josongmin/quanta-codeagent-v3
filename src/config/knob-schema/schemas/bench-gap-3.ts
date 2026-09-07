@@ -209,7 +209,7 @@ export const benchSimplicitySchema: KnobSchema<boolean> = {
   default: false,
   describe:
     "Bench: minimal-mechanism simplicity steer in SWE-bench prompt (OpenHands/Linus philosophy). Default OFF; opt-in via QUANTA_BENCH_SIMPLICITY (unvalidated absorbed steer — A/B before promoting).",
-  readSite: "runner/batch/eval/acceptance-llm-rerank-wire.ts",
+  readSite: "runner/batch/eval/driver/config-build.ts",
   surfaces: BENCH,
   parse: parseGateBool,
 }
@@ -257,7 +257,7 @@ export const benchReproImageExecSchema: KnobSchema<boolean> = {
   parse: parseGateBool,
 }
 
-/* ── QUANTA_BENCH_VOTE_NORMALIZE (env-direct, driver.ts via gateOn) ────────── */
+/* ── QUANTA_BENCH_VOTE_NORMALIZE (env-direct, selection factory) ──────────── */
 export const benchVoteNormalizeSchema: KnobSchema<boolean> = {
   id: "bench-vote-normalize",
   envKey: "QUANTA_BENCH_VOTE_NORMALIZE",
@@ -267,12 +267,12 @@ export const benchVoteNormalizeSchema: KnobSchema<boolean> = {
     "Bench: stronger acceptance vote-key (Agentless rerank.py parity). Dedup candidate patches on a comment/blank/whitespace-insensitive key so cosmetic-variant samples reinforce the majority instead of splitting it (Agentless normalize_code does the AST round-trip; we compose the existing diff normalizer + whole-line comment strip, no AST). Only affects the acceptance selector's vote key. Default-OFF ⇒ raw-trim key ⇒ byte-identical.",
   knobDescribe:
     "Stronger acceptance vote-key: comment/blank/whitespace-insensitive patch dedup (Agentless majority-vote parity)",
-  readSite: "runner/batch/eval/acceptance-selector.ts",
+  readSite: "runner/batch/eval/driver/selection-port-factories.ts",
   surfaces: BENCH,
   parse: parseGateBool,
 }
 
-/* ── QUANTA_BENCH_SUBMIT_REVIEW (env-direct, driver.ts via gateOn) ─────────── */
+/* ── QUANTA_BENCH_SUBMIT_REVIEW (env-direct, selection factory) ───────────── */
 export const benchSubmitReviewSchema: KnobSchema<boolean> = {
   id: "bench-submit-review",
   envKey: "QUANTA_BENCH_SUBMIT_REVIEW",
@@ -282,7 +282,7 @@ export const benchSubmitReviewSchema: KnobSchema<boolean> = {
     "Bench: submission review (SWE-agent review_on_submit deterministic check). OBSERVE-ONLY verdict over the final captured patch (clean / empty / test-edits) surfaced in the report. The test-revert itself is ALREADY unconditional (sourceOnlyDiff strips test edits on every capture path) — this is the verdict/sentinel layer, reusing isTestFilePath+patchFiles (no re-implementation). Default-OFF ⇒ nothing attached ⇒ byte-identical.",
   knobDescribe:
     "Submission review verdict (clean/empty/test-edits) on the final patch — observe-only sentinel over the unconditional test-strip",
-  readSite: "runner/batch/eval/repro-viability-wire.ts",
+  readSite: "runner/batch/eval/driver/selection-port-factories.ts",
   surfaces: BENCH,
   parse: parseGateBool,
 }
@@ -338,7 +338,7 @@ export const benchLocationFanoutSchema: KnobSchema<boolean> = {
     "Bench: multi-location-set fanout (Agentless §4.2 absorption). With repair-breadth B>1, seed each breadth candidate to LEAD at a distinct ranked-localizer file (location diversity instead of B resamples of the top-1 site). Reuses the repair-breadth fork machinery + the localizer's ranked files; pure rotation, no-leak. Needs B>1 + ≥2 localized files. Default-OFF ⇒ candidates share the base seed ⇒ byte-identical.",
   knobDescribe:
     "Multi-location-set fanout: each breadth candidate leads at a distinct ranked file (Agentless edit-per-location)",
-  readSite: "runner/batch/eval/repair-breadth.ts",
+  readSite: "runner/batch/eval/knobs-bench.ts",
   surfaces: BENCH,
   source:
     "Agentless edit-per-location absorption (preset-addressable multi-file repair breadth diversity)",

@@ -65,7 +65,7 @@ export const retryTransientSchema: KnobSchema<number> = {
   describe: "Bench: transient retry cap.",
   knobDescribe:
     "Retry cap for transient failures (empty-patch / infra-fail; real-fail never retried)",
-  readSite: "runner/batch/eval/retry-policy.ts",
+  readSite: "runner/batch/eval/knobs-bench.ts",
   surfaces: BENCH,
   parse: parseRetryTransient,
   unit: "retries",

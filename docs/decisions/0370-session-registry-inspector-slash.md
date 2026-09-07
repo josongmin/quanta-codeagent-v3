@@ -26,10 +26,10 @@ Add a **sibling inspector slice** + an **operator-only slash command**. The clos
   - `inspectInMemoryRegistry(registry)` — reads `registry.size()`.
   - `inspectDiskRegistryByPath(storageDir)` — `readdir` + per-session `stat` of the 3 file names. NO JSONL parse → corrupt bodies do not poison the byte total.
   - `inspectSqliteRegistryByPath(databasePath)` — opens the DB **read-only** (`new Database(path, { readonly: true })`) + runs `COUNT(*)` against `sessions` / `events` / `cache_entries` + `SUM(total_estimated_bytes)` + `stat($path-wal).size`.
-- `inspectGlobalRegistry()` — env-var detection mirrors `global.ts` precedence:
-  1. `QUANTA_SESSION_REGISTRY_SQLITE_PATH` (NEW, **inspect-only** — does NOT mount; ADR-0361 §Default-OFF still holds).
-  2. `QUANTA_SESSION_REGISTRY_DISK_DIR` (ADR-0351).
-  3. else → in-memory singleton.
+- `inspectGlobalRegistry()` consumes the backend descriptor owned beside the
+  process singleton in `global.ts`. Runtime-config is snapshotted once there;
+  constructor fallback records the backend that actually mounted
+  (sqlite → disk → in-memory). The inspector never re-reads env/config.
 - `formatRegistryStats(s)` — pure formatter (Codex-style block).
 
 Every function NO-THROWS. SQL / fs errors degrade to `available: false` + zeroed numeric fields. The DB handle is always closed in `finally`.
@@ -60,9 +60,14 @@ Three reasons:
 ## Non-goals
 
 - **Write subcommands** (`/session-registry evict <id>`, `/session-registry clear`, `/session-registry vacuum`) — out of scope. The closed port's `evict` / `clear` are deliberately NOT exposed through a slash because an operator typo dropping a hot session is a foot-gun without a confirm gesture. A separate ADR can introduce them behind a `--yes` flag.
-- **Auto-mount on sqlite env var.** `QUANTA_SESSION_REGISTRY_SQLITE_PATH` is **inspect-only** in this ADR. ADR-0361 §Default-OFF declared a follow-up ADR for the mount swap on the ADR-0351 pattern; this ADR does NOT preempt it.
+- **A second inspector-side backend selector.** SQLite and disk mounting are
+  owned by the global registry lifecycle; observability must report that
+  lifecycle's actual descriptor.
 - **Continuous metrics emission.** ADR-0358 / 0360 already emit per-operation counters. The slash command is a **one-shot snapshot** for the operator at the prompt; a periodic Prometheus exporter is a separate concern.
-- **Multi-backend simultaneous inspect.** The env-var precedence picks ONE backend per call. A composition root running with the sqlite backend mounted but the disk dir also present will see ONLY the sqlite snapshot.
+- **Multi-backend simultaneous inspect.** The mounted descriptor names one
+  backend. If SQLite mounted while a disk path was also configured, stats report
+  SQLite; cleanup may still sweep every durable path from the same frozen
+  runtime snapshot.
 
 ## Wiring
 

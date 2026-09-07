@@ -79,6 +79,27 @@ describe("ADR-0249 node-repl-hellgate", () => {
     }
   })
 
+  test("HELL-NR-02A production kernel does not inherit provider credentials", async () => {
+    const previous = process.env.ANTHROPIC_API_KEY
+    process.env.ANTHROPIC_API_KEY = "ordinary-looking-parent-secret"
+    const k = createDefaultNodeReplKernel()
+    try {
+      const sp = await k.spawn({ sessionId: "env-scrub" })
+      expect(sp.ok).toBe(true)
+      if (!sp.ok) return
+      const out = await k.exec(
+        sp.value.id,
+        'console.log(process.env.ANTHROPIC_API_KEY ?? "SCRUBBED")',
+      )
+      expect(out.ok).toBe(true)
+      if (out.ok) expect(out.value.stdout).toContain("SCRUBBED")
+      await k.kill(sp.value.id)
+    } finally {
+      if (previous === undefined) delete process.env.ANTHROPIC_API_KEY
+      else process.env.ANTHROPIC_API_KEY = previous
+    }
+  })
+
   // ─── HELL-NR-03 — exec "1+1" returns "2" ───────────────────────────────
   test("HELL-NR-03 exec arithmetic literal returns the integer string", async () => {
     const k = headlessStub()

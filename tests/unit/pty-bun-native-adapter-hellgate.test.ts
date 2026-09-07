@@ -199,6 +199,18 @@ describe("write/read round-trip through the ring (monotone seq)", () => {
     expect(f.writes).toEqual(["ls", "ls\n"])
   })
 
+  test("source provenance never downgrades before delayed output arrives", async () => {
+    const f = mkFake()
+    const a = createBunPtyAdapter(f.factory)
+    const { handle } = await spawnOk(a)
+    expect((await a.write(handle, "cat .env", { sourceClass: "secret" })).ok).toBe(true)
+    expect((await a.write(handle, "echo ready", { sourceClass: "public" })).ok).toBe(true)
+    f.emit("delayed secret output")
+    const r = await a.read(handle, 0)
+    if (!r.ok) throw new Error("read failed")
+    expect(r.value.chunks[0]?.sourceClass).toBe("secret")
+  })
+
   test("multi-byte UTF-8 split across two data callbacks is decoded losslessly", async () => {
     const f = mkFake()
     const a = createBunPtyAdapter(f.factory)

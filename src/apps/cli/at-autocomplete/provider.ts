@@ -22,6 +22,7 @@
  * contributes `[]`.
  */
 
+import { mentionFirstLine } from "@/shared"
 import { rankByTier } from "./fuzzy"
 import type { AtCandidate, AtCandidateProvider } from "./port"
 import { createRecursiveFileLister, type RecursiveFileListerOptions } from "./recursive-file-list"
@@ -74,13 +75,6 @@ export interface CompositeAtProviderDeps {
 const DEFAULT_MAX = 8
 const DEFAULT_FILE_MAX = 50
 
-/** First line of a description (CRLF-tolerant) — mirrors the resolver
- *  `firstLineOf` idiom so detail columns match the resolve surface. */
-const firstLineOf = (description: string): string => {
-  const nl = description.search(/\r?\n/)
-  return (nl < 0 ? description : description.slice(0, nl)).trim()
-}
-
 /** The insertion sigil for each kebab-listed kind. `skill` ⇒ `@name`, `plugin`
  *  ⇒ `plugin://name`, `app` ⇒ `@@name`, and the RFC-12-2 colon-literals ⇒
  *  `@<literal>:<name>` (so submit-time `parseMentions` re-classifies them into
@@ -119,7 +113,7 @@ const listKebab = (
       kind,
       insertText: `${sigil}${payload}`,
       label: entry.name,
-      detail: firstLineOf(entry.description),
+      detail: mentionFirstLine(entry.description),
       score: r.tier,
     })
   }

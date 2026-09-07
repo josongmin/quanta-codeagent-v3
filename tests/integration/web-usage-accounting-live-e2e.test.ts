@@ -16,10 +16,12 @@ import {
   renderSnapshotHeader,
   until,
 } from "../support/web-usage-accounting-harness"
+import { pressureScaledTimeoutMs } from "./_host-pressure"
 
 const KNOWN = "claude-sonnet-4-6"
 const CHILD = "COST-CHILD-ONLY"
 const HOSTILE_MODEL = `bad\n\u001b[31m${"x".repeat(2_000)}`
+const TEST_TIMEOUT_MS = pressureScaledTimeoutMs(30_000)
 
 const textOf = (input: StreamInput) =>
   input.messages
@@ -155,7 +157,7 @@ describe("web production usage accounting — HTTP/WS/live attach", () => {
       await daemon.cleanup()
       for (const undo of restore.reverse()) undo()
     }
-  }, 30_000)
+  }, TEST_TIMEOUT_MS)
 
   test("two turns publish cumulative replacement totals and persist the same book", async () => {
     const llm = new ScriptedUsageLlm()
@@ -180,7 +182,7 @@ describe("web production usage accounting — HTTP/WS/live attach", () => {
     } finally {
       await daemon.cleanup()
     }
-  }, 30_000)
+  }, TEST_TIMEOUT_MS)
 
   test("child spend is split and unknown model usage stays explicitly incomplete", async () => {
     const llm = new ScriptedUsageLlm()
@@ -201,7 +203,7 @@ describe("web production usage accounting — HTTP/WS/live attach", () => {
     } finally {
       await daemon.cleanup()
     }
-  }, 30_000)
+  }, TEST_TIMEOUT_MS)
 
   test("attach replaces the live book and publishes target snapshots to peers", async () => {
     const target = await persistedTargetFromPriorDaemon()
@@ -244,7 +246,7 @@ describe("web production usage accounting — HTTP/WS/live attach", () => {
     } finally {
       await daemon.cleanup()
     }
-  }, 30_000)
+  }, TEST_TIMEOUT_MS)
 
   test("accounting-off survives usage as explicit off in WS, snapshots and HTTP", async () => {
     const llm = new ScriptedUsageLlm()
@@ -260,7 +262,7 @@ describe("web production usage accounting — HTTP/WS/live attach", () => {
     } finally {
       await daemon.cleanup()
     }
-  }, 30_000)
+  }, TEST_TIMEOUT_MS)
 
   test("restored estimates remain marked through HTTP, WS and a priced turn", async () => {
     const original = await persistedTargetFromPriorDaemon()
@@ -285,7 +287,7 @@ describe("web production usage accounting — HTTP/WS/live attach", () => {
     } finally {
       await daemon.cleanup()
     }
-  }, 30_000)
+  }, TEST_TIMEOUT_MS)
 
   test("hostile model identity stays exact on disk but bounded on display wires", async () => {
     const daemon = await bootUsageDaemon(new ScriptedUsageLlm())
@@ -305,7 +307,7 @@ describe("web production usage accounting — HTTP/WS/live attach", () => {
     } finally {
       await daemon.cleanup()
     }
-  }, 30_000)
+  }, TEST_TIMEOUT_MS)
 
   test("corrupt attach is partial before spend and survives another daemon", async () => {
     const original = await persistedTargetFromPriorDaemon()
@@ -355,5 +357,5 @@ describe("web production usage accounting — HTTP/WS/live attach", () => {
     } finally {
       await restarted.cleanup()
     }
-  }, 30_000)
+  }, TEST_TIMEOUT_MS)
 })

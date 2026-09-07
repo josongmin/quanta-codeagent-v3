@@ -6,11 +6,9 @@
  * same `SessionResourceRegistry` closed port (ADR-0345) on top of
  * `bun:sqlite` with WAL + Codex `logs_2.sqlite` parity.
  *
- * Default-OFF: the parent barrel (`../index.ts`) re-exports the
- * factory + helper types but the process-level singleton in
- * `../global.ts` does NOT auto-mount this backend. Composition
- * roots opt in by passing a custom registry — env-var swap follows
- * ADR-0351's pattern as a future ADR slot.
+ * Default-OFF: the parent barrel (`../index.ts`) re-exports the factory +
+ * helper types. The process singleton mounts this backend only when its frozen
+ * runtime-config snapshot contains a non-empty SQLite path.
  */
 
 export type { SweepResult } from "./gc"

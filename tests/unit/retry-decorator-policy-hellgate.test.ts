@@ -9,10 +9,9 @@
  * onto one.
  *
  * Layers of proof:
- *   1. DERIVATION PARITY — every one of the 18 `LLMErrorKind`s, the derived
- *      `retryDispositionForKind` / `isFallbackKind` reproduce the HISTORICAL
- *      hardcoded set membership byte-identically (the sets are re-declared here
- *      as the pre-dedup golden reference).
+ *   1. DERIVATION — every one of the 18 `LLMErrorKind`s is covered; the one
+ *      intentional post-dedup correction makes every table `hitl_handoff`
+ *      decisive no-retry while preserving the other historical decisions.
  *   2. ON-PROOF THROUGH THE REAL DECORATORS — drive `RetryingLLM` / `FallbackLLM`
  *      and assert their observable retry / provider-swap behaviour keys on the
  *      table.
@@ -93,10 +92,21 @@ const historicalDisposition = (k: string): "retry" | "no_retry" | "consult_marke
   return "consult_markers"
 }
 
-describe("DOF-30 derivation parity — derived == historical hardcoded sets (all 18 kinds)", () => {
+const HITL_NO_RETRY_KINDS = [
+  "auth",
+  "cyber_policy",
+  "sandbox_error",
+  "sandbox_blocked",
+] as const satisfies readonly LLMErrorKind[]
+const HITL_NO_RETRY = new Set<LLMErrorKind>(HITL_NO_RETRY_KINDS)
+
+const expectedDisposition = (kind: LLMErrorKind): ReturnType<typeof historicalDisposition> =>
+  codexSpecRoute(kind) === "hitl_handoff" ? "no_retry" : historicalDisposition(kind)
+
+describe("DOF-30/SEP6-01 derivation — table-owned HITL correction over historical parity", () => {
   for (const kind of ALL_KINDS) {
-    test(`retryDispositionForKind(${kind}) matches the removed RETRYABLE/FATAL sets`, () => {
-      expect(retryDispositionForKind(kind)).toBe(historicalDisposition(kind))
+    test(`retryDispositionForKind(${kind}) matches the corrected table projection`, () => {
+      expect(retryDispositionForKind(kind)).toBe(expectedDisposition(kind))
     })
 
     test(`isFallbackKind(${kind}) matches the removed FALLBACK_KINDS set`, () => {
@@ -108,6 +118,13 @@ describe("DOF-30 derivation parity — derived == historical hardcoded sets (all
     for (const kind of ALL_KINDS) {
       expect(isFallbackKind(kind)).toBe(codexSpecRoute(kind) === "fallback_provider")
     }
+  })
+
+  test("anti-vacuum: all four current HITL kinds are decisive no-retry", () => {
+    expect(HITL_NO_RETRY_KINDS).toHaveLength(4)
+    expect(new Set<LLMErrorKind>(HITL_NO_RETRY_KINDS)).toEqual(
+      new Set<LLMErrorKind>(ALL_KINDS.filter((kind) => codexSpecRoute(kind) === "hitl_handoff")),
+    )
   })
 })
 
@@ -239,6 +256,9 @@ describe("DOF-30 red-on-injection — decorator predicates equal the table proje
   ]
   const DECISIVE_NO_RETRY: readonly LLMErrorKind[] = [
     "auth",
+    "cyber_policy",
+    "sandbox_error",
+    "sandbox_blocked",
     "bad_request",
     "not_found",
     "not_implemented",
@@ -262,26 +282,37 @@ describe("DOF-30 red-on-injection — decorator predicates equal the table proje
   }
 })
 
-// ── PARITY CHARACTERIZATION — the marker-scan kinds are UNCHANGED ─────────────
-// The 7 kinds the table maps to a non-retry action but that legacy isRetryable
-// marker-scanned MUST still marker-scan (byte-identical). This is the flagged
-// measure-first NON-flip: a cyber_policy error whose message says "overloaded"
-// STILL retries today (latent divergence preserved on purpose).
-describe("DOF-30 parity — consult_markers kinds keep legacy message-scan behaviour", () => {
+// ── SEP6-01 HITL FAIL-CLOSED + residual marker parity ────────────────────────
+describe("SEP6-01 — typed HITL kinds cannot be resurrected by message markers", () => {
+  for (const kind of HITL_NO_RETRY_KINDS) {
+    test(`${kind}: retry-looking message still performs exactly one provider call`, async () => {
+      expect(HITL_NO_RETRY.has(kind)).toBe(true)
+      expect(retryDispositionForKind(kind)).toBe("no_retry")
+      expect(isRetryable(new LLMError("503 overloaded timeout, try again", { kind }))).toBe(false)
+
+      const inner = new ThrowingLLM(new LLMError("503 overloaded timeout, try again", { kind }))
+      const retrying = new RetryingLLM({
+        inner,
+        maxRetries: 4,
+        sleep: async () => {},
+        random: () => 0,
+      })
+      await expect(collect(retrying.stream({ messages: [], tools: [] }))).rejects.toThrow()
+      expect(inner.calls).toBe(1)
+    })
+  }
+})
+
+describe("DOF-30 residual parity — non-HITL consult_markers kinds remain unchanged", () => {
   const MARKER_KINDS: readonly LLMErrorKind[] = [
     "unknown",
     "context_window_exceeded",
-    "cyber_policy",
     "too_many_failed_attempts",
     "thread_rollback_failed",
-    "sandbox_error",
-    "sandbox_blocked",
   ]
   for (const kind of MARKER_KINDS) {
-    test(`${kind}: disposition is consult_markers ⇒ message markers still decide (parity, latent divergence preserved)`, () => {
+    test(`${kind}: disposition is consult_markers ⇒ message markers still decide`, () => {
       expect(retryDispositionForKind(kind)).toBe("consult_markers")
-      // retryable marker present ⇒ retries (legacy behaviour, NOT the table's
-      // action — flagged for measure-first in the catalog).
       expect(isRetryable(new LLMError("model overloaded, try again", { kind }))).toBe(true)
       // no marker ⇒ does not retry.
       expect(isRetryable(new LLMError("some opaque failure", { kind }))).toBe(false)

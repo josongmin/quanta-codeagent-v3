@@ -21,16 +21,7 @@
 
 import type { MentionResolverPort } from "@/agent/mention-injection"
 import type { PluginManifest, PluginRegistryPort } from "@/agent/plugin-discovery"
-
-/** Project a description to its first line. Mirrors the skill
- *  resolver's `firstLineOf` (CRLF-tolerant). Empty / non-string ⇒
- *  empty string. */
-const firstLineOf = (description: string | undefined): string => {
-  if (typeof description !== "string" || description.length === 0) return ""
-  const nl = description.indexOf("\n")
-  const slice = nl === -1 ? description : description.slice(0, nl)
-  return slice.endsWith("\r") ? slice.slice(0, -1) : slice
-}
+import { mentionFirstLine } from "@/shared"
 
 /** Build a fallback bodyText from the manifest itself when no
  *  description is provided. Format: `<name> (capabilities: <list>)`.
@@ -71,7 +62,7 @@ export const createPluginResolver = (
     if (typeof target !== "string" || target.length === 0) return null
     const manifest = safeLookup(registry, target)
     if (manifest === null) return null
-    const fromDesc = firstLineOf(manifest.description)
+    const fromDesc = mentionFirstLine(manifest.description)
     const bodyText = fromDesc.length === 0 ? fallbackBody(manifest) : fromDesc
     return { bodyText }
   }

@@ -7,6 +7,7 @@
  */
 
 import { z } from "zod"
+import { classifyCommandShape, type SensitivityClass } from "@/security"
 import { errMessage, sliceTailWholeChars, sliceWholeChars } from "@/shared"
 import { neutralizeTerminalOutput } from "../terminal-sanitize"
 import type { CoreToolContext, Tool, ToolEvent, ToolResult } from "../types"
@@ -16,6 +17,7 @@ import {
   PTY_MIN_DIM,
   type PtyResult,
   type PtySessionPort,
+  strongestPtySourceClass,
 } from "./port"
 
 /** Hard cap on a single `pty_read` model-facing payload (a huge scrolled pane
@@ -48,6 +50,39 @@ const capOutput = (s: string): string => {
   const tail = sliceTailWholeChars(s, keep)
   const dropped = s.length - head.length - tail.length
   return `${head}\n… [${dropped} chars truncated] …\n${tail}`
+}
+
+const strongestChunkClass = (
+  chunks: readonly { readonly sourceClass?: SensitivityClass }[],
+): SensitivityClass | undefined => {
+  if (chunks.some((chunk) => chunk.sourceClass === "secret")) return "secret"
+  if (chunks.some((chunk) => chunk.sourceClass === "internal")) return "internal"
+  if (chunks.some((chunk) => chunk.sourceClass === "public")) return "public"
+  // Output captured before this tool instance observed a write has unknown
+  // provenance (not public provenance). Fail closed so pre-existing tmux
+  // scrollback cannot bypass Layer-1 whole-output redaction.
+  return chunks.length > 0 ? "secret" : undefined
+}
+
+interface PtyInputProjection {
+  readonly sourceClass: SensitivityClass
+  readonly pending: string
+}
+
+const projectPtyInput = (
+  prior: string,
+  data: string,
+  appendNewline: boolean,
+): PtyInputProjection => {
+  const combined = `${prior}${data}${appendNewline ? "\n" : ""}`
+  const lines = combined.split(/\r?\n/)
+  const pending = appendNewline || combined.endsWith("\n") ? "" : (lines.pop() ?? "")
+  let sourceClass: SensitivityClass = "public"
+  for (const line of lines) {
+    sourceClass = strongestPtySourceClass(sourceClass, classifyCommandShape(line)) ?? "public"
+  }
+  sourceClass = strongestPtySourceClass(sourceClass, classifyCommandShape(pending)) ?? "public"
+  return { sourceClass, pending: sliceTailWholeChars(pending, PTY_MAX_WRITE_BYTES) }
 }
 
 const handleSchema = z.string().min(1).describe("Opaque session handle (tmux:<name> or pty:<seq>)")
@@ -151,7 +186,51 @@ const formatSessionList = (infos: Awaited<ReturnType<PtySessionPort["list"]>>): 
 const okOrFail = <T>(r: PtyResult<T>, ok: (value: T) => ToolResult): ToolResult =>
   r.ok ? ok(r.value) : failFromPty(r)
 
+const makePtyWriteTool = (
+  port: PtySessionPort,
+  pendingInput: Map<string, string>,
+): Tool<PtyWriteInput> => ({
+  name: "pty_write",
+  description:
+    "Write bytes to an attached session's stdin (live). `appendNewline` submits a line. 64 KiB cap.",
+  inputSchema: writeSchema,
+  isReadOnly: () => false,
+  isConcurrencySafe: () => false,
+  // SECURITY: expose live shell input to HARD_DENY. Provenance additionally
+  // assembles fragmented lines in `pendingInput` before classifying output.
+  extractShellCommand: (input: PtyWriteInput): string => input.data,
+  execute(input, ctx) {
+    const g = guard(writeSchema, input, ctx)
+    if (!g.ok) return one(g.result)
+    if (Buffer.byteLength(g.data.data, "utf8") > PTY_MAX_WRITE_BYTES) {
+      return one(
+        fail(`input exceeds ${PTY_MAX_WRITE_BYTES}-byte write cap`, {
+          mode: "rejected",
+          reason: "too_large",
+        }),
+      )
+    }
+    return fromPort(async () => {
+      const projected = projectPtyInput(
+        pendingInput.get(g.data.handle) ?? "",
+        g.data.data,
+        g.data.appendNewline === true,
+      )
+      const r = await port.write(g.data.handle, g.data.data, {
+        ...(g.data.appendNewline !== undefined ? { appendNewline: g.data.appendNewline } : {}),
+        sourceClass: projected.sourceClass,
+      })
+      if (r.ok) {
+        if (projected.pending.length === 0) pendingInput.delete(g.data.handle)
+        else pendingInput.set(g.data.handle, projected.pending)
+      }
+      return okOrFail(r, () => ({ ok: true, output: "ok" }))
+    })
+  },
+})
+
 export const ptyTools = (port: PtySessionPort): Tool[] => {
+  const pendingInput = new Map<string, string>()
   const ptyList: Tool<Record<string, never>> = {
     name: "pty_list",
     description:
@@ -189,44 +268,7 @@ export const ptyTools = (port: PtySessionPort): Tool[] => {
     },
   }
 
-  const ptyWrite: Tool<PtyWriteInput> = {
-    name: "pty_write",
-    description:
-      "Write bytes to an attached session's stdin (live). `appendNewline` submits a line. 64 KiB cap.",
-    inputSchema: writeSchema,
-    isReadOnly: () => false,
-    isConcurrencySafe: () => false,
-    // SECURITY (R5 privilege-boundary): `pty_write` feeds bytes straight into a
-    // LIVE shell's stdin — it is a shell-input channel equivalent to `bash`'s
-    // `command`. Surfacing `data` here lets the dispatch seam populate
-    // `ToolAction.shellCommand`, so the policy's HARD_DENY corpus (rm -rf /,
-    // curl|sh, fork-bombs, …) screens the typed bytes through the SAME denylist
-    // as `bash` — including in bypass mode, where HARD_DENY still wins. Without
-    // this, an attached terminal was a denylist-evading exec channel. The
-    // submit newline (`appendNewline`) is irrelevant to the verdict: the payload
-    // is what runs.
-    extractShellCommand: (input: PtyWriteInput): string => input.data,
-    execute(input, ctx) {
-      const g = guard(writeSchema, input, ctx)
-      if (!g.ok) return one(g.result)
-      if (Buffer.byteLength(g.data.data, "utf8") > PTY_MAX_WRITE_BYTES) {
-        return one(
-          fail(`input exceeds ${PTY_MAX_WRITE_BYTES}-byte write cap`, {
-            mode: "rejected",
-            reason: "too_large",
-          }),
-        )
-      }
-      return fromPort(async () => {
-        const r = await port.write(
-          g.data.handle,
-          g.data.data,
-          g.data.appendNewline !== undefined ? { appendNewline: g.data.appendNewline } : {},
-        )
-        return okOrFail(r, () => ({ ok: true, output: "ok" }))
-      })
-    },
-  }
+  const ptyWrite = makePtyWriteTool(port, pendingInput)
 
   const ptyRead: Tool<PtyReadInput> = {
     name: "pty_read",
@@ -245,7 +287,14 @@ export const ptyTools = (port: PtySessionPort): Tool[] => {
           // output. Defang them to visible caret forms BEFORE the surrogate-safe cap
           // so no raw control byte reaches the model-facing transcript (forge guard).
           const body = capOutput(neutralizeTerminalOutput(v.chunks.map((c) => c.data).join("")))
-          return { ok: true, output: `${body}\n[nextSeq=${v.nextSeq}]` }
+          const sourceClass = strongestChunkClass(v.chunks)
+          return {
+            ok: true,
+            output: `${body}\n[nextSeq=${v.nextSeq}]`,
+            ...(sourceClass !== undefined
+              ? { source: { class: sourceClass, label: `<pty:${g.data.handle}>` } }
+              : {}),
+          }
         })
       })
     },
@@ -278,6 +327,7 @@ export const ptyTools = (port: PtySessionPort): Tool[] => {
       if (!g.ok) return one(g.result)
       return fromPort(async () => {
         const r = await port.kill(g.data.handle)
+        if (r.ok) pendingInput.delete(g.data.handle)
         return okOrFail(r, () => ({ ok: true, output: `killed ${g.data.handle}` }))
       })
     },

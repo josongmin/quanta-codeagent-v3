@@ -1,3 +1,4 @@
+import { sanitizeLogText } from "@/shared"
 import type { SensitivityClass } from "./sensitivity-classifier"
 
 /**
@@ -298,7 +299,11 @@ export const redactSecrets = (input: string, opts: RedactOptions): RedactResult 
   // Layer 1 — source class short-circuit. Replace entire output.
   if (opts.sourceClass === "secret") {
     const placeholder = placeholderFor("source_class_secret")
-    const origin = opts.sourceLabel ? ` (origin: ${opts.sourceLabel})` : ""
+    // The label is attacker-influenced too (for example a tmux session handle
+    // or path). Never reintroduce terminal/log forge controls after replacing
+    // the secret body.
+    const safeSourceLabel = opts.sourceLabel ? sanitizeLogText(opts.sourceLabel) : ""
+    const origin = safeSourceLabel ? ` (origin: ${safeSourceLabel})` : ""
     const text = `${placeholder}${origin}`
     const hit: RedactionHit = {
       kind: "source_class_secret",

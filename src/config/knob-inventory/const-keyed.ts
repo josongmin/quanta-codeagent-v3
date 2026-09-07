@@ -140,7 +140,7 @@ export const CONST_KEYED: readonly KnobDeclaration[] = [
     group: "agent-feature",
     home: "runtime-config",
     describe: "Reflection tool (opt-in).",
-    readSite: "tool/surface/gated-tools.ts",
+    readSite: "host/runtime/agent-arg-builder/gated-tool-ports.ts",
   },
   // NB: QUANTA_LANG_DETECT / NOTEBOOK_EDIT / DEBUG_TOOLS / TEST_RUNNER / EVIDENCE
   // are declared in @/shared/runtime-config-knobs.ts (their `home`), NOT here —
@@ -164,7 +164,7 @@ export const CONST_KEYED: readonly KnobDeclaration[] = [
     group: "agent-feature",
     home: "runtime-config",
     describe: "Shadow-workspace tooling (opt-in).",
-    readSite: "tool/surface/gated-tools.ts",
+    readSite: "apps/cli/repl/surface-compose/core-state.ts",
   },
   {
     envKey: "QUANTA_THIN_CLIENT_DISPATCH",
@@ -174,7 +174,7 @@ export const CONST_KEYED: readonly KnobDeclaration[] = [
     home: "runtime-config",
     describe:
       "Thin-client dispatch routing + T02 thread-follower co-control verbs (steer/interrupt/approval-relay, timeout-bounded) (opt-in).",
-    readSite: "shared/thin-client-route.ts",
+    readSite: "agent/thin-client-dispatch/types.ts",
   },
   {
     envKey: "QUANTA_INBOUND_MODE",

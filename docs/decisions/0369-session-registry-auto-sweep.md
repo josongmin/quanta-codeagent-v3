@@ -56,12 +56,13 @@ export interface AutoSweepHandle {
 
 export const DEFAULT_AUTO_SWEEP_INTERVAL_MS = 60_000
 
-export function startAutoSweep(cfg?: AutoSweepConfig): AutoSweepHandle
+export function startAutoSweep(cfg: AutoSweepConfig): AutoSweepHandle
 ```
 
 ### Trigger policy
 
-Two env vars gate the loop independently:
+The global lifecycle projects one frozen `runtimeConfig()` snapshot into
+`AutoSweepConfig`. Two paths gate the loop independently:
 
 | Env var                                 | Effect                              |
 | --------------------------------------- | ----------------------------------- |
@@ -75,12 +76,10 @@ Two env vars gate the loop independently:
   `scheduled === false`, no `setInterval` registered, no allocations.
 - **Empty string** ⇒ treated as unset (same convention as ADR-0351).
 
-`QUANTA_SESSION_REGISTRY_SQLITE_PATH` is **new** and used **only by
-this ADR**. It does NOT swap the global registry to the SQLite backend
-— that is out of scope (a follow-up ADR may add the swap on the
-ADR-0351 pattern). A composition root that manually mounts the SQLite
-backend via the factory opts into retention by also setting this env
-var.
+Subsequent ADR-0367 mounted SQLite through the same global lifecycle.
+The mounted backend descriptor and sweep config therefore come from the same
+snapshot; when both durable paths are configured SQLite mounts and both paths
+remain eligible for retention sweeps.
 
 ### Timing
 
@@ -119,25 +118,11 @@ call leaves the old timer running against a dead registry. This ADR
 extends `global.ts` to:
 
 ```ts
-let autoSweepHandle: AutoSweepHandle | null = null
-
-export const getGlobalSessionResourceRegistry = () => {
-  if (instance === null) {
-    instance = buildDefaultRegistry()
-    if (autoSweepHandle === null) {
-      try { autoSweepHandle = startAutoSweep() } catch { /* NO-THROW */ }
-    }
-  }
-  return instance
-}
-
-export const resetGlobalSessionResourceRegistry = () => {
-  if (autoSweepHandle !== null) {
-    autoSweepHandle.stop()
-    autoSweepHandle = null
-  }
-  instance = null
-}
+const cfg = runtimeConfig()
+const mounted = buildDefaultRegistry(cfg)
+const sweepConfig = autoSweepConfigFromRuntime(cfg)
+const autoSweepHandle = startAutoSweep(sweepConfig)
+state = { ...mounted, sweepConfig, autoSweepHandle }
 ```
 
 ## Non-goals
@@ -147,18 +132,10 @@ export const resetGlobalSessionResourceRegistry = () => {
   line-aware idempotent; double sweeps cost CPU but cannot corrupt.
   A future ADR may add a multi-process flock around the sweep itself
   (we already have ADR-0356 lockfile for the per-session writes).
-- **`/registry-sweep` slash command.** A manual force-sweep CLI knob
-  is a separate ADR (the `sweepNow()` method on the handle is the
-  in-process equivalent — the slash command is just a CLI surface
-  on top).
-- **Sqlite backend auto-mount.** This ADR adds the sweep env var but
-  does NOT swap the global registry to the SQLite backend. Composition
-  roots that want the SQLite backend still call the factory directly.
-- **Telemetry.** Sweep counts (`SweepResult`) are returned by the
-  underlying sweep functions but this ADR does not forward them to
-  the metrics emitter. A follow-up ADR may wire them through
-  `MetricEmitterPort` once we have a baseline of how chatty the
-  emit would be.
+- Manual cleanup, SQLite auto-mount, and telemetry were subsequently added by
+  ADR-0379, ADR-0367, and ADR-0373. Operator cleanup reuses the singleton-owned
+  handle and retains backend availability outcomes; it does not mint another
+  timer.
 
 ## Consequences
 

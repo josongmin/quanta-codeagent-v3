@@ -1,5 +1,6 @@
 import { z } from "zod"
 import { runShell } from "@/runtime"
+import { classifyCommandShape } from "@/security"
 import { fileExists, readFile } from "@/storage"
 import type { Tool, ToolContext, ToolEvent, ToolResultEvidence } from "../types"
 
@@ -140,6 +141,11 @@ export const testRunnerTool: Tool<Input> = {
   // fixed prefix is the only non-model text, so the no-path case still yields
   // "" (nothing to deny).
   extractShellCommand: (input: Input): string => input.command ?? projectShellCommand(input.path),
+  // Layer-1 source classification must see the same command whose output is
+  // returned. Explicit commands are exact; projected auto-detect commands are
+  // conservative across the closed runner set.
+  classifySource: (input: Input) =>
+    classifyCommandShape(input.command ?? projectShellCommand(input.path)),
 
   async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
     const resolved = input.command ?? (await detectCommand(ctx.cwd, input.path))

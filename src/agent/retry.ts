@@ -145,15 +145,15 @@ const PTL_MARKERS = [
  *  one `codexSpecRoute` table via {@link retryDispositionForKind} — this file
  *  no longer carries its own `RETRYABLE_KINDS`/`FATAL_KINDS` sets (removed; the
  *  table + `decorator-policy.ts` is the sole source of truth). The derivation
- *  is proven byte-identical to the removed sets for all 18 kinds
+ *  preserves the removed-set behavior except for the explicit SEP6-01
+ *  correction: every typed `hitl_handoff` kind is now decisive no-retry
  *  (tests/unit/retry-decorator-policy-hellgate.test.ts).
  *
  *  Branches on the boundary-assigned `.kind` discriminator first: a
  *  `"retry"`/`"no_retry"` disposition decides without re-sniffing the message.
- *  A `"consult_markers"` disposition (the kinds the table has no decisive
- *  same-provider retry verdict for — `unknown` and the six Codex-spec kinds
- *  that legacy `isRetryable` also marker-scanned) falls back to the legacy
- *  message-marker scan, preserving prior behavior byte-for-byte. */
+ *  A `"consult_markers"` disposition (the four residual kinds whose outer
+ *  recovery action does not decide same-provider retry) falls back to the
+ *  legacy message-marker scan, preserving their prior behavior byte-for-byte. */
 export const isRetryable = (e: unknown): boolean => {
   if (!(e instanceof LLMError)) return false
   const disposition = retryDispositionForKind(e.kind)

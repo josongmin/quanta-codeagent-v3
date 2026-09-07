@@ -7,7 +7,12 @@
  * TDD (the framing is the hellgate-grade part).
  */
 import { describe, expect, test } from "bun:test"
-import { DapFrameDecoder, encodeDapMessage } from "@/tool/debug/dap-codec"
+import {
+  DAP_MAX_FRAME_BYTES,
+  DAP_MAX_HEADER_BYTES,
+  DapFrameDecoder,
+  encodeDapMessage,
+} from "@/tool/debug/dap-codec"
 
 const decodeAll = (chunks: string[]): unknown[] => {
   const dec = new DapFrameDecoder()
@@ -93,5 +98,43 @@ describe("DapFrameDecoder", () => {
     const dec = new DapFrameDecoder()
     const garbage = `Content-Length: 5\r\n\r\n{ bad`
     expect(() => dec.push(garbage)).not.toThrow()
+  })
+
+  test("SEP6-N12: an over-cap header is rejected instead of becoming a frame", () => {
+    const dec = new DapFrameDecoder()
+    const prefix = "Content-Length: 2\r\n"
+    const padding = `X-Pad: ${"x".repeat(DAP_MAX_HEADER_BYTES)}\r\n`
+    expect(dec.push(prefix)).toEqual([])
+    expect(dec.push(padding)).toEqual([])
+
+    // A decoder without the header ceiling interprets the original leading
+    // Content-Length and emits this `{}` body. The bounded decoder discarded
+    // that oversized header, so closing bytes cannot resurrect it.
+    expect(dec.push("\r\n{}")).toEqual([])
+
+    const ok = { seq: 40, event: "initialized" }
+    expect(dec.push(encodeDapMessage(ok))).toEqual([ok])
+  })
+
+  test("SEP6-N12: an over-cap declared body is rejected without waiting for it", () => {
+    const dec = new DapFrameDecoder()
+    expect(dec.push(`Content-Length: ${DAP_MAX_FRAME_BYTES + 1}\r\n\r\n`)).toEqual([])
+
+    const ok = { seq: 41, command: "threads" }
+    expect(dec.push(encodeDapMessage(ok))).toEqual([ok])
+  })
+
+  test("SEP6-N12: oversized header resyncs to a valid frame in the same chunk", () => {
+    const dec = new DapFrameDecoder()
+    const ok = { seq: 42, event: "stopped" }
+    const oversized = "x".repeat(DAP_MAX_HEADER_BYTES + 1)
+    expect(dec.push(oversized + encodeDapMessage(ok))).toEqual([ok])
+  })
+
+  test("SEP6-N12 anti-vacuum: both resource ceilings are finite and ordered", () => {
+    expect(Number.isFinite(DAP_MAX_HEADER_BYTES)).toBe(true)
+    expect(Number.isFinite(DAP_MAX_FRAME_BYTES)).toBe(true)
+    expect(DAP_MAX_HEADER_BYTES).toBeGreaterThan(0)
+    expect(DAP_MAX_FRAME_BYTES).toBeGreaterThan(DAP_MAX_HEADER_BYTES)
   })
 })

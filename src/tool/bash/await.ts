@@ -24,6 +24,7 @@ import {
   type BgShellSnapshot,
   getBashBgRegistry,
 } from "@/runtime/bash-bg-registry"
+import { classifyCommandShape } from "@/security"
 import { errMessage } from "@/shared"
 import type { CoreToolContext, Tool, ToolEvent, ToolResult, ToolResultEvidence } from "../types"
 export const bashAwaitInputSchema = z.object({
@@ -85,12 +86,18 @@ const compileRegexOrFail = (
   }
 }
 
+const deferredSource = (snap: BgShellSnapshot): NonNullable<ToolResult["source"]> => ({
+  class: classifyCommandShape(snap.command),
+  label: snap.command,
+})
+
 const buildTimeoutResult = (snap: BgShellSnapshot, timeoutMs: number | undefined): ToolResult => ({
   ok: false,
   output:
     `[bash_await await_timeout] shellId=${snap.id} (deadline ${timeoutMs ?? "∞"}ms)\n` +
     `--- output so far ---\n${buildOutputSoFar(snap) || "(no output yet)"}`,
   evidence: buildEvidence(snap),
+  source: deferredSource(snap),
   failure: { mode: "timeout", ...(timeoutMs !== undefined ? { timeoutMs } : {}) },
 })
 
@@ -100,6 +107,7 @@ const buildMatchResult = (snap: BgShellSnapshot): ToolResult => ({
     `[bash_await match] shellId=${snap.id} status=${snap.status}\n` +
     `--- output so far ---\n${buildOutputSoFar(snap) || "(no output yet)"}`,
   evidence: buildEvidence(snap),
+  source: deferredSource(snap),
 })
 
 const buildExitedResult = (snap: BgShellSnapshot): ToolResult => {
@@ -111,6 +119,7 @@ const buildExitedResult = (snap: BgShellSnapshot): ToolResult => {
     output:
       `[bash_await ${status}] shellId=${snap.id}\n` + `${buildOutputSoFar(snap) || "(no output)"}`,
     evidence: buildEvidence(snap),
+    source: deferredSource(snap),
   }
 }
 
@@ -140,6 +149,13 @@ export const makeBashAwaitTool = (
   isReadOnly: () => true,
   // Pure polling against an in-memory registry; safe to parallelize.
   isConcurrencySafe: () => true,
+  // The handle is opaque to dispatch, but the owning registry retains the
+  // exact command. Carry that provenance across the deferred boundary instead
+  // of classifying the handle string or dropping Layer-1 protection.
+  classifySource: (input) => {
+    const snapshot = registry.get(input.shell_id)
+    return snapshot === null ? null : classifyCommandShape(snapshot.command)
+  },
   async *execute(input, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = bashAwaitInputSchema.safeParse(input)
     if (!parsed.success) {

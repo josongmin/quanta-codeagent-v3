@@ -34,43 +34,9 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
   agent: {
     slice: "agent",
     denyImports: ["@/migration"],
-    // Documented env-boundary carve-outs (mirror of the `tool` slice's
-    // `from-env.ts`/`runner.ts` precedent). The session-resource-registry is a
-    // self-contained composition seam: ADR-0347's process-level lazy-init
-    // singleton + ADR-0368's caller-owned builder explicitly designed their
-    // env reads to live HERE — the header of `caller-owned-builder.ts` records
-    // that the four threading alternatives (env var / signature change /
-    // factory / etc.) all broke the first-call-wins lazy-init OR the
-    // multi-tenant observability invariant. These four files are the sanctioned
-    // env-resolution boundary for that subsystem. `inspector.hellgate.test.ts`
-    // legitimately save/restores `process.env` to drive the env-selected
-    // backend it is testing.
-    envAllowFiles: [
-      "global.ts",
-      "caller-owned-builder.ts",
-      "auto-sweep.ts",
-      "inspector.ts",
-      "inspector.hellgate.test.ts",
-      // `loop-helpers.ts` reads the DEFAULT-OFF OTel content-capture gate
-      // (`gateOn(process.env, "QUANTA_OTEL_CAPTURE_CONTENT")`) at the span-close
-      // seam — the same sanctioned default-OFF gate-at-a-seam class as the
-      // `tool` slice's `from-env.ts`/`port.ts` carve-outs. Unset/falsy ⇒ NO
-      // content leaves the process (byte-identical); the gate arms the redacted
-      // OTLP content plane only when a span sink is also live. (loop-helpers.ts is
-      // ALSO in `stdioAllowFiles` above for the git-directive sink default.)
-      "loop-helpers.ts",
-      // `span-content-redact.ts` (jul-28) is the ONE shared home of that same
-      // `contentCaptureEnabled()` gate — extracted from loop-helpers so the
-      // LLM-sampling AND tool-dispatch span paths redact identically. Same
-      // sanctioned default-OFF gate-at-a-seam read.
-      "span-content-redact.ts",
-      // `loop/control-poll.ts` gates the DEFAULT-OFF control-request drain on
-      // `isControlRequestEnabled(slot.env ?? process.env)` — the `process.env`
-      // token is ONLY the DI fallback for the injected `slot.env` (tests pass a
-      // fake env); an absent slot OR gate-off ⇒ the port is never even queried
-      // (byte-identical). Same injection-first default-OFF gate-at-a-seam class.
-      "control-poll.ts",
-    ],
+    // Environment reads stay in explicit composition seams. Session registry
+    // production files consume the shared runtimeConfig snapshot and therefore
+    // require no carve-out here; `__tests__` trees are not production-scanned.
     // `default-stdout-emitter.ts` (ADR-0220) deliberately exposes
     // `process.stderr` as the production default sink for git-directives.
     // The sink is injectable; the default literal is the documented
@@ -121,11 +87,6 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
     //    wholesale so no OTHER tool→llm value edge lands silently (jul-28 audit).
     // Reviewed exceptions.
     allowImports: ["@/observability/coverage", "@/observability/patch-trace", "@/llm/assemble"],
-    // debug/port.ts is a process SPAWNER (DAP adapters / `node --inspect-brk`): it
-    // must pass the parent env to the child so PATH resolves node/lldb/dlv — the
-    // same env-boundary carve-out as runner.ts. The gate VALUES come from cfg; only
-    // the spawned child's env inherits `process.env`.
-    //
     // `container-exec/tool.ts` is a PATH-SCOPED entry (not a bare basename): it
     // resolves the DEFAULT-OFF per-stream output cap dial `resolveStreamCap(
     // process.env)` (QUANTA_TB_STREAM_CAP) at module load — unset/≤0 ⇒ the fixed
@@ -134,7 +95,7 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
     // a unique basename (10 `*/tool.ts` under @/tool), so the path-scoped form
     // exempts EXACTLY this one file — a future env read in a sibling `*/tool.ts`
     // still trips the guard.
-    envAllowFiles: ["runner.ts", "from-env.ts", "port.ts", "container-exec/tool.ts"],
+    envAllowFiles: ["from-env.ts", "container-exec/tool.ts"],
     requireSliceBarrel: true,
   },
   memory: {
@@ -231,10 +192,8 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
     ],
     // `exec-command.ts` spreads the parent `process.env` INTO the spawned bash
     // child (`{ ...process.env, ...input.env }`) so PATH/HOME resolve for the
-    // subprocess — ENV PROPAGATION to a child, not a feature-flag read. Same
-    // spawner env-boundary carve-out as `handlers-6.ts` (and the `tool` slice's
-    // `port.ts`); the values only reach the child's environment.
-    envAllowFiles: ["handlers-6.ts", "exec-command.ts"],
+    // subprocess — ENV PROPAGATION to a child, not a feature-flag read.
+    envAllowFiles: ["exec-command.ts"],
     requireSliceBarrel: true,
   },
   skill: {
@@ -266,12 +225,12 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
     // — now fails this guard. The generic git-exec port was relocated to the
     // LEAF `@/storage/git-runner`; storage no longer crosses into `@/tool`.
     denyImports: [...PEER_LIBRARY_DENY],
-    // `shadow-odb/default.ts` resolves a workspace hash; `git-runner/runner.ts`
-    // is the relocated `Bun.spawn` adapter whose deterministic-env scrub reads
+    // `git-runner/runner.ts` is the relocated `Bun.spawn` adapter whose
+    // deterministic-env scrub reads
     // the parent `process.env` allowlist AT CALL TIME (the documented env
     // boundary for the git effect port — same precedent as `@/tool`'s
     // `runner.ts`/`from-env.ts`).
-    envAllowFiles: ["default.ts", "runner.ts"],
+    envAllowFiles: ["runner.ts"],
     requireSliceBarrel: true,
   },
   mcp: {
@@ -293,7 +252,7 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
       "@/stream",
       "@/objective",
     ],
-    envAllowFiles: ["client.ts", "isolated-client.ts", "stdio.ts"],
+    envAllowFiles: ["isolated-client.ts", "stdio.ts"],
     requireSliceBarrel: true,
   },
   rules: {
@@ -317,22 +276,19 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
     includeBackupArtifacts: true,
     // Documented env-resolution boundary (mirror of the `tool` slice's
     // `runner.ts`/`from-env.ts` precedent). These are the bench-surface
-    // entrypoint + env-knob seams of `@/runner`, each of which resolves
+    // env-knob seams of `@/runner`, each of which resolves
     // env-driven posture AT CALL TIME by design (so tests can mutate
     // `process.env` without re-importing):
-    //   • `core.ts` / `driver.ts` — the `agent:batch` / SWE-bench eval
+    //   • `core.ts` — the `agent:batch` / SWE-bench eval
     //     harness whose `collectBenchKnobsTelemetry` + per-instance knob
     //     resolution read the `QUANTA_BENCH_*` knob env directly (the
     //     bench surface IS the composition root for these knobs).
-    //   • `dataset.ts` — the official SWE-bench adapter's `defaultExec`
-    //     passes `env: process.env` straight into `Bun.spawn` (git child
-    //     processes inherit the ambient environment, never a param).
     //   • `diff-ops.ts` — `resolveEnvCaps()` reads `QUANTA_DIFF_MAX_*` at
     //     call time so the cap is hot-swappable in tests; the value is the
     //     documented default, never threaded through every diff call site.
     //   • `registry.ts` — `NODE_ENV === "production"` is a test-only
     //     reset/restore guard, not configurable posture.
-    // These four leaf names are unique within the slice, so the carve-out
+    // These leaf names are unique within the slice, so the carve-out
     // exempts exactly these files.
     //
     // W3-A (bench eval-DRIVER composition root): when the `agent:batch` /
@@ -358,8 +314,6 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
     // the guard.
     envAllowFiles: [
       "core.ts",
-      "driver.ts",
-      "dataset.ts",
       "diff-ops.ts",
       "registry.ts",
       "config-build.ts",
@@ -483,11 +437,10 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
   // full deny-list INCLUDES `@/agent`, so a TYPE-only ref stays allowed (the AST
   // scanner skips `import type`) while a VALUE import of `@/agent` — or any other
   // peer library / Layer-2 surface — FIRES. That locks the new edge: it can never
-  // silently widen into a runtime coupling. `types.ts` reads `REACTOR_ENV_FLAG`.
+  // silently widen into a runtime coupling.
   reactor: {
     slice: "reactor",
     denyImports: [...PEER_LIBRARY_DENY, ...LAYER2_DENY],
-    envAllowFiles: ["types.ts"],
     requireSliceBarrel: true,
   },
   // `@/side-agent` is the N1 background side-agent daemon (RFC
@@ -667,12 +620,12 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
     slice: "runtime",
     denyImports: [...PEER_LIBRARY_DENY, ...LAYER2_DENY],
     // Env-boundary leaves: `os-sandbox/env.ts` (sandbox env allowlist scrub),
-    // `sandbox.ts`, `shell-argv.ts`, `shell.ts` resolve shell/sandbox posture
+    // `sandbox.ts`, `shell-argv.ts` resolve shell/sandbox posture
     // from env at call time. `env.ts` basename also covers the clean
     // `network-proxy/env.ts` (no env read) — safe.
     // GOAL-03: `run-argv.ts` holds the env-scrub composition extracted from
     // `shell.ts` (the same `inheritEnv:true` opt-out, one chokepoint).
-    envAllowFiles: ["env.ts", "sandbox.ts", "shell-argv.ts", "shell.ts", "run-argv.ts"],
+    envAllowFiles: ["env.ts", "sandbox.ts", "shell-argv.ts", "run-argv.ts"],
     requireSliceBarrel: true,
   },
   shared: {

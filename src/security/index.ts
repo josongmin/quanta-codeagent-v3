@@ -21,4 +21,4 @@ export {
   RedactionConfigError,
 } from "./redaction-config"
 export type { SensitivityClass } from "./sensitivity-classifier"
-export { classifyCommandShape, classifyPath } from "./sensitivity-classifier"
+export { classifyCodeShape, classifyCommandShape, classifyPath } from "./sensitivity-classifier"

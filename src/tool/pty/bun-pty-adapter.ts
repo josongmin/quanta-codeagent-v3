@@ -44,6 +44,7 @@ import {
   type PtyTerminalHandle,
   type PtyWriteOpts,
   type ReadResult,
+  strongestPtySourceClass,
 } from "./port"
 
 const PTY_PREFIX = "pty:"
@@ -88,11 +89,28 @@ interface OwnedSession {
    *  `since < firstSeq - 1` lost chunks — the read reports the gap rather than
    *  silently dropping (RFC §4.2 missed-bytes signal). */
   firstSeq: number
+  /** Strongest classification written during this session (never downgraded). */
+  sourceClass: PtyChunk["sourceClass"]
   decode: (bytes: Uint8Array) => string
   /** Whether the child has exited (so `list` can reflect liveness if desired). */
   exited: boolean
   /** Whether the terminal has been closed (kill / closeAll). */
   closed: boolean
+}
+
+const ownedChunk = (seq: number, data: string, sourceClass: PtyChunk["sourceClass"]): PtyChunk => ({
+  seq,
+  data,
+  ...(sourceClass !== undefined ? { sourceClass } : {}),
+})
+
+const trimOversizedLoneChunk = (s: OwnedSession, head: PtyChunk): boolean => {
+  if (s.ring.length !== 1 || head.data.length <= PTY_RING_BYTES) return false
+  const trimmed = tailWhole(head.data, PTY_RING_BYTES)
+  s.ring[0] = ownedChunk(head.seq, trimmed, head.sourceClass)
+  s.ringChars = trimmed.length
+  s.firstSeq = head.seq
+  return true
 }
 
 /**
@@ -121,21 +139,14 @@ const ptyState = (factory: PtyFactoryPort) => {
   const pushChunk = (s: OwnedSession, data: string): void => {
     if (data.length === 0) return
     const seq = ++s.seq
-    s.ring.push({ seq, data })
+    s.ring.push(ownedChunk(seq, data, s.sourceClass))
     s.ringChars += data.length
     // Head-truncate oldest chunks until the retained char budget fits. A single
     // chunk that ALONE exceeds the budget is itself trimmed to the tail so one
     // flood-write cannot blow the bound (RFC §6.2 leak invariant).
     while (s.ringChars > PTY_RING_BYTES && s.ring.length > 0) {
       const head = s.ring[0] as PtyChunk
-      if (s.ring.length === 1 && head.data.length > PTY_RING_BYTES) {
-        // The lone chunk is over budget: keep only its tail (surrogate-safe).
-        const trimmed = tailWhole(head.data, PTY_RING_BYTES)
-        s.ring[0] = { seq: head.seq, data: trimmed }
-        s.ringChars = trimmed.length
-        s.firstSeq = head.seq
-        break
-      }
+      if (trimOversizedLoneChunk(s, head)) break
       s.ring.shift()
       s.ringChars -= head.data.length
       s.firstSeq = head.seq + 1
@@ -187,6 +198,7 @@ const ptyLifecycleOps = (
           ringChars: 0,
           seq: 0,
           firstSeq: 0,
+          sourceClass: undefined,
           decode: mkDecoder(),
           exited: false,
           closed: false,
@@ -299,10 +311,13 @@ const ptyIoOps = (ctx: PtyCtx): Pick<BunPtyAdapter, "write" | "read" | "resize">
       if (Buffer.byteLength(payload, "utf8") > PTY_MAX_WRITE_BYTES) {
         return errR("too-large", `write exceeds ${PTY_MAX_WRITE_BYTES} bytes`)
       }
+      const previousSourceClass = r.value.sourceClass
       try {
+        r.value.sourceClass = strongestPtySourceClass(previousSourceClass, wopts?.sourceClass)
         r.value.terminal.write(payload)
         return okR(undefined)
       } catch (e) {
+        r.value.sourceClass = previousSourceClass
         return errR("backend-error", `terminal write failed: ${errMessage(e)}`)
       }
     },

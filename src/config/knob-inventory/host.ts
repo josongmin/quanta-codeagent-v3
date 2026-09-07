@@ -17,7 +17,7 @@ export const HOST: readonly KnobDeclaration[] = [
     group: "host-gate",
     home: "runtime-config",
     describe: "Ctrl+B detach + `/background` turn portal (ticket-18; opt-in).",
-    readSite: "apps/cli/repl/background-turn-portal.ts",
+    readSite: "apps/cli/repl/session-setup.ts",
   },
   {
     envKey: "QUANTA_SPINNER_STALL",
@@ -27,7 +27,7 @@ export const HOST: readonly KnobDeclaration[] = [
     home: "runtime-config",
     describe:
       "Live spinner-stall notice — latched operator warn when the model stream goes silent mid-turn, info on recovery (ADR-0227; CLI-seeded default-ON).",
-    readSite: "apps/cli/repl/spinner-stall-live-wire.ts",
+    readSite: "apps/cli/repl/session-setup.ts",
   },
   {
     envKey: "QUANTA_WORKTREE_TOOL",
@@ -95,7 +95,7 @@ export const HOST: readonly KnobDeclaration[] = [
     home: "runtime-config",
     describe:
       "/init slash command — scaffold AGENTS.md/CLAUDE.md from the repo (ticket-16; opt-in, writes cwd).",
-    readSite: "apps/cli/slash/registry-surface.ts",
+    readSite: "apps/cli/init-scaffold.ts",
   },
   {
     envKey: "QUANTA_PROC_PANEL",
@@ -134,7 +134,7 @@ export const HOST: readonly KnobDeclaration[] = [
     group: "host-gate",
     home: "runtime-config",
     describe: "Disk-configured command-hook execution gate.",
-    readSite: "host/runtime/agent-arg-builder.ts",
+    readSite: "host/runtime/agent-arg-builder/command-hooks-wire.ts",
   },
   {
     envKey: "QUANTA_COMMAND_HOOKS_ACK",
@@ -209,7 +209,7 @@ export const HOST: readonly KnobDeclaration[] = [
     group: "host-gate",
     home: "runtime-config",
     describe: "System-prompt identity-mode injection gate.",
-    readSite: "host/runtime/agent-arg-builder.ts",
+    readSite: "host/runtime/agent-arg-builder/identity-wire.ts",
   },
   {
     envKey: "QUANTA_IDENTITY_MODE",
@@ -277,7 +277,7 @@ export const HOST: readonly KnobDeclaration[] = [
     group: "host-gate",
     home: "runtime-config",
     describe: "Stale-read freshness guard (write-blocking); DEFAULT-ON, set =off to disable.",
-    readSite: "host/runtime/agent-config-assembler.ts",
+    readSite: "tool/stale-read-guard/gate.ts",
   },
   {
     envKey: "QUANTA_CONVERSATION_ACTIONS",
@@ -287,7 +287,7 @@ export const HOST: readonly KnobDeclaration[] = [
     home: "runtime-config",
     describe:
       "Mid-turn typed control surface (/cancel, /summarize-now) + same-turn drain (jul-10 SOTA++ #3); CLI-seeded DEFAULT-ON, set =0 to disable.",
-    readSite: "apps/cli/cli-feature-gates.ts",
+    readSite: "apps/cli/repl/surface-compose/core-state.ts",
   },
   {
     envKey: "QUANTA_PROMPT_CACHE_STATUS",
@@ -305,7 +305,7 @@ export const HOST: readonly KnobDeclaration[] = [
     group: "permission",
     home: "runtime-config",
     describe: "Named permission profile.",
-    readSite: "host/runtime/agent-arg-builder.ts",
+    readSite: "host/runtime/agent-arg-builder/permission-profile.ts",
   },
   {
     envKey: "QUANTA_PERMISSION_PROFILES_JSON",
@@ -359,7 +359,7 @@ export const HOST: readonly KnobDeclaration[] = [
     group: "host-gate",
     home: "runtime-config",
     describe: "LLM prewarming clock gate.",
-    readSite: "host/runtime/agent-arg-builder.ts",
+    readSite: "host/runtime/agent-arg-builder-config-slots.ts",
   },
   {
     envKey: "QUANTA_LSP_PREWARM",
@@ -369,7 +369,7 @@ export const HOST: readonly KnobDeclaration[] = [
     home: "runtime-config",
     describe:
       "Session-start background LSP workspace prewarm (RFC jun-17). DEFAULT-ON when the nav tools are enabled (QUANTA_LSP_TOOLS=full / QUANTA_BENCH_LSP); off-switch via `=0` (gateDisabled), which is also the cold arm for the bench A/B.",
-    readSite: "host/runtime/agent-arg-builder.ts",
+    readSite: "host/runtime/agent-arg-builder-config-slots.ts",
   },
   {
     envKey: "QUANTA_IMAGE_DOWNSAMPLE",
@@ -480,7 +480,7 @@ export const HOST: readonly KnobDeclaration[] = [
     home: "runtime-config",
     describe:
       "Automation engine gate. Wires the automation-engine port ⇒ the `automation_update` + `threads_handoff` (B2) tools register. Required for QUANTA_AUTOMATION_STORE to have any effect (the store selector is inert without the engine on).",
-    readSite: "host/runtime/agent-arg-builder.ts",
+    readSite: "scheduler/runtime-wire.ts",
   },
   {
     envKey: "QUANTA_AUTOMATION_STORE",
@@ -577,7 +577,7 @@ export const HOST: readonly KnobDeclaration[] = [
     group: "search",
     home: "runtime-config",
     describe: "DuckDuckGo web-search provider gate.",
-    readSite: "host/runtime/agent-config-assembler.ts",
+    readSite: "tool/web/providers/from-env.ts",
   },
   {
     envKey: "QUANTA_NETWORK_PROXY",
@@ -586,7 +586,7 @@ export const HOST: readonly KnobDeclaration[] = [
     group: "host-gate",
     home: "runtime-config",
     describe: "Socket egress proxy config.",
-    readSite: "host/runtime/agent-arg-builder.ts",
+    readSite: "runner/knobs/knobs/network-proxy.ts",
   },
   {
     envKey: "QUANTA_PROVIDER",
@@ -595,7 +595,7 @@ export const HOST: readonly KnobDeclaration[] = [
     group: "llm",
     home: "runtime-config",
     describe: "LLM provider override (anthropic/openai).",
-    readSite: "host/runtime/agent-arg-builder.ts",
+    readSite: "llm/factory.ts",
   },
   {
     envKey: "QUANTA_PII_REDACTION",

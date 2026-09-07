@@ -25,10 +25,22 @@ import {
 const ctx = (): ToolContext =>
   ({ cwd: "/repo", signal: new AbortController().signal }) as ToolContext
 
-const run = async (tool: Tool, input: unknown): Promise<{ ok: boolean; output: string }> => {
-  let last = { ok: false, output: "no result" }
+const run = async (
+  tool: Tool,
+  input: unknown,
+): Promise<{ ok: boolean; output: string; source?: { class: string; label: string } }> => {
+  let last: { ok: boolean; output: string; source?: { class: string; label: string } } = {
+    ok: false,
+    output: "no result",
+  }
   for await (const ev of tool.execute(input as never, ctx()) as AsyncIterable<ToolEvent>) {
-    if (ev.type === "result") last = { ok: ev.result.ok, output: ev.result.output }
+    if (ev.type === "result") {
+      last = {
+        ok: ev.result.ok,
+        output: ev.result.output,
+        ...(ev.result.source !== undefined ? { source: ev.result.source } : {}),
+      }
+    }
   }
   return last
 }
@@ -54,10 +66,16 @@ const mkFake = (
   const resizes: { handle: string; cols: number; rows: number }[] = []
   const writes: { handle: string; data: string }[] = []
   const killed = new Set<string>()
+  const sourceClasses = new Map<string, PtyChunk["sourceClass"]>()
   let seq = 0
   const feed = (handle: PtyHandle, data: string) => {
     const ring = rings.get(handle) ?? []
-    ring.push({ seq: ++seq, data })
+    const sourceClass = sourceClasses.get(handle)
+    ring.push({
+      seq: ++seq,
+      data,
+      ...(sourceClass !== undefined ? { sourceClass } : {}),
+    })
     rings.set(handle, ring)
   }
   const base: PtySessionPort = {
@@ -73,9 +91,11 @@ const mkFake = (
       const ring = rings.get(handle) ?? []
       return ok({ handle, cursor: ring.length === 0 ? 0 : (ring[ring.length - 1] as PtyChunk).seq })
     },
-    write: async (handle, data): Promise<PtyResult<void>> => {
+    write: async (handle, data, opts): Promise<PtyResult<void>> => {
       if (!known.has(handle)) return err("not-found", "no session")
       writes.push({ handle, data })
+      if (opts?.sourceClass === undefined) sourceClasses.delete(handle)
+      else sourceClasses.set(handle, opts.sourceClass)
       return ok(undefined)
     },
     read: async (handle, sinceSeq): Promise<PtyResult<ReadResult>> => {
@@ -124,6 +144,45 @@ describe("pty tools — surface + risk split", () => {
     for (const n of ["pty_attach", "pty_write", "pty_resize", "pty_kill"]) {
       expect(byName(tools, n).isReadOnly?.()).toBe(false)
     }
+  })
+
+  test("pty_read carries secret command provenance from pty_write output", async () => {
+    const fake = mkFake()
+    const tools = ptyTools(fake.port)
+    const write = byName(tools, "pty_write")
+    const read = byName(tools, "pty_read")
+
+    expect((await run(write, { handle: "pty:1", data: "cat .env", appendNewline: true })).ok).toBe(
+      true,
+    )
+    fake.feed("pty:1", "ordinary-looking secret body")
+    const result = await run(read, { handle: "pty:1", sinceSeq: 0 })
+
+    expect(result.source?.class).toBe("secret")
+    expect(result.source?.label).toContain("pty:1")
+  })
+
+  test("fragmented secret command retains provenance when submitted later", async () => {
+    const fake = mkFake()
+    const tools = ptyTools(fake.port)
+    const write = byName(tools, "pty_write")
+    const read = byName(tools, "pty_read")
+
+    expect((await run(write, { handle: "pty:1", data: "cat " })).ok).toBe(true)
+    expect((await run(write, { handle: "pty:1", data: ".env", appendNewline: true })).ok).toBe(true)
+    fake.feed("pty:1", "fragmented secret output")
+    const result = await run(read, { handle: "pty:1", sinceSeq: 0 })
+    expect(result.source?.class).toBe("secret")
+  })
+
+  test("unattributed pre-attach output fails closed instead of bypassing Layer-1", async () => {
+    const fake = mkFake()
+    const read = byName(ptyTools(fake.port), "pty_read")
+    fake.feed("tmux:quanta-a", "ordinary-looking pre-existing secret body")
+
+    const result = await run(read, { handle: "tmux:quanta-a", sinceSeq: 0 })
+    expect(result.source?.class).toBe("secret")
+    expect(result.source?.label).toContain("tmux:quanta-a")
   })
 })
 
@@ -331,5 +390,23 @@ describe("pty tmux-adapter — send-keys / resize / capture", () => {
     // No new output → no chunk, seq unchanged.
     const r3 = await adapter.read("tmux:quanta-a", 2)
     if (r3.ok) expect(r3.value.chunks.length).toBe(0)
+  })
+
+  test("tmux source provenance never downgrades before delayed capture", async () => {
+    const t = mkTmuxExec((a) =>
+      a[0] === "capture-pane"
+        ? { ok: true, stdout: "delayed secret output" }
+        : { ok: true, stdout: "" },
+    )
+    const adapter = createTmuxAdapter({ exec: t.exec })
+    expect((await adapter.write("tmux:quanta-a", "cat .env", { sourceClass: "secret" })).ok).toBe(
+      true,
+    )
+    expect((await adapter.write("tmux:quanta-a", "echo ready", { sourceClass: "public" })).ok).toBe(
+      true,
+    )
+    const r = await adapter.read("tmux:quanta-a", 0)
+    if (!r.ok) throw new Error("read failed")
+    expect(r.value.chunks[0]?.sourceClass).toBe("secret")
   })
 })

@@ -1,8 +1,8 @@
 /**
  * Hellgate for `src/shared/error-classifier.ts` (ADR-0214).
  *
- * Pins the documented heuristic ladder and the 16-kind enum's contract:
- * 16 enum-branch coverage cases · unknown-umbrella · HTTP 429 vs 5xx
+ * Pins the documented heuristic ladder and the 18-kind enum's contract:
+ * 18 enum-branch coverage cases · unknown-umbrella · HTTP 429 vs 5xx
  * separation · stream truncation kind · Codex-spec extension precedence ·
  * abort-name primacy · network code recovery · safe-on-circular.
  *
@@ -31,7 +31,7 @@ const fauxSdkError = (opts: {
 }
 
 describe("classify — pre-wrapped LLMError trust", () => {
-  // 16 enum kinds — every kind passed through as a pre-wrapped LLMError must
+  // 18 enum kinds — every kind passed through as a pre-wrapped LLMError must
   // round-trip identically (no message re-sniff when boundary already tagged).
   const ALL_KINDS: readonly LLMErrorKind[] = [
     "overloaded",
@@ -50,6 +50,8 @@ describe("classify — pre-wrapped LLMError trust", () => {
     "too_many_failed_attempts",
     "thread_rollback_failed",
     "sandbox_error",
+    "sandbox_blocked",
+    "invalid_image",
   ]
   for (const k of ALL_KINDS) {
     if (k === "unknown") continue // unknown falls through to heuristic
@@ -114,7 +116,7 @@ describe("classify — Codex-spec heuristic ladder precedence", () => {
   })
 })
 
-describe("classify — HTTP status separation (16-enum coverage via raw status)", () => {
+describe("classify — HTTP status separation (18-enum coverage via raw status)", () => {
   test("status 529 → overloaded (distinct from 5xx server_error)", () => {
     expect(classify(fauxSdkError({ status: 529, message: "overloaded" }))).toBe("overloaded")
   })

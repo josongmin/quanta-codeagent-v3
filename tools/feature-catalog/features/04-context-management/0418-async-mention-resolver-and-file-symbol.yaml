@@ -92,6 +92,7 @@ evidence:
     - src/agent/mention-injection/symbol-lookup-semantic.ts
     - src/agent/mention-injection/anchor-synth.ts
     - src/agent/mention-injection/index.ts
+    - src/shared/mention-text.ts
     - src/agent/lsp-bridge.ts
     - src/agent/mention-runner/default-resolver.ts
     - src/agent/mention-runner/skill-resolver.ts
@@ -126,6 +127,7 @@ evidence:
       - src/agent/plugin-app-resolver/__tests__/composite-resolver.hellgate.test.ts
       - src/agent/plugin-app-resolver/__tests__/composite-resolver-file.hellgate.test.ts
       - src/host/runtime/internal/__tests__/mention-wire.hellgate.test.ts
+      - tests/unit/mention-first-line-parity-hellgate.test.ts
     integration: []
     contract: []
 knobs:

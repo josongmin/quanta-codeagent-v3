@@ -24,6 +24,7 @@ import {
   type PtySessionPort,
   type PtyWriteOpts,
   type ReadResult,
+  strongestPtySourceClass,
 } from "./port"
 
 /** Run a `tmux` subcommand. Returns `{ ok, stdout }`; `ok:false` on non-zero
@@ -63,12 +64,93 @@ const errR = <T>(
 const diffCapture = (
   prev: { text: string; seq: number } | undefined,
   text: string,
+  sourceClass: PtyChunk["sourceClass"],
 ): { chunk: PtyChunk | undefined; seq: number } => {
-  if (prev === undefined) return { chunk: { seq: 1, data: text }, seq: 1 }
+  if (prev === undefined) {
+    return {
+      chunk: {
+        seq: 1,
+        data: text,
+        ...(sourceClass !== undefined ? { sourceClass } : {}),
+      },
+      seq: 1,
+    }
+  }
   if (text === prev.text) return { chunk: undefined, seq: prev.seq }
   const seq = prev.seq + 1
   const tail = text.startsWith(prev.text) ? text.slice(prev.text.length) : text
-  return { chunk: { seq, data: tail }, seq }
+  return {
+    chunk: {
+      seq,
+      data: tail,
+      ...(sourceClass !== undefined ? { sourceClass } : {}),
+    },
+    seq,
+  }
+}
+
+type TmuxGate = (handle: PtyHandle) => PtyResult<string>
+type CaptureState = Map<PtyHandle, { text: string; seq: number }>
+type SourceState = Map<PtyHandle, PtyChunk["sourceClass"]>
+
+const writeTmux = async (
+  opts: TmuxAdapterOpts,
+  gate: TmuxGate,
+  sourceClasses: SourceState,
+  maxAttached: number,
+  handle: PtyHandle,
+  data: string,
+  wopts?: PtyWriteOpts,
+): Promise<PtyResult<void>> => {
+  const g = gate(handle)
+  if (!g.ok) return g
+  if (!sourceClasses.has(handle) && sourceClasses.size >= maxAttached) {
+    return errR(
+      "cap-exceeded",
+      `attached-handle cap ${maxAttached} reached (detach a session before writing another)`,
+    )
+  }
+  const written = await opts.exec.run(["send-keys", "-t", g.value, "-l", "--", data])
+  if (!written.ok) return errR("backend-error", "tmux send-keys failed")
+  if (wopts?.appendNewline === true) {
+    const entered = await opts.exec.run(["send-keys", "-t", g.value, "Enter"])
+    if (!entered.ok) return errR("backend-error", "tmux send Enter failed")
+  }
+  const joinedClass = strongestPtySourceClass(sourceClasses.get(handle), wopts?.sourceClass)
+  if (joinedClass !== undefined) sourceClasses.set(handle, joinedClass)
+  return okR(undefined)
+}
+
+const readTmux = async (
+  opts: TmuxAdapterOpts,
+  gate: TmuxGate,
+  lastCapture: CaptureState,
+  sourceClasses: SourceState,
+  maxAttached: number,
+  handle: PtyHandle,
+  sinceSeq: number,
+): Promise<PtyResult<ReadResult>> => {
+  const g = gate(handle)
+  if (!g.ok) return g
+  if (!lastCapture.has(handle) && lastCapture.size >= maxAttached) {
+    return errR(
+      "cap-exceeded",
+      `attached-handle cap ${maxAttached} reached (detach a session before reading another)`,
+    )
+  }
+  const captured = await opts.exec.run(["capture-pane", "-t", g.value, "-p"])
+  if (!captured.ok) return errR("backend-error", "tmux capture-pane failed")
+  const prev = lastCapture.get(handle)
+  if (
+    prev !== undefined &&
+    (captured.stdout === prev.text || prev.text.startsWith(captured.stdout))
+  ) {
+    return okR({ chunks: [], nextSeq: prev.seq })
+  }
+  const { chunk, seq } = diffCapture(prev, captured.stdout, sourceClasses.get(handle))
+  lastCapture.set(handle, { text: captured.stdout, seq })
+  const fresh = chunk !== undefined && chunk.seq > sinceSeq ? [chunk] : []
+  return okR({ chunks: fresh, nextSeq: seq })
 }
 
 export const createTmuxAdapter = (opts: TmuxAdapterOpts): PtySessionPort => {
@@ -84,6 +166,7 @@ export const createTmuxAdapter = (opts: TmuxAdapterOpts): PtySessionPort => {
   // `maxAttached`: `read` refuses to admit a NEW handle past the cap so this map
   // cannot grow without limit over a long-running session; detach/kill evict.
   const lastCapture = new Map<PtyHandle, { text: string; seq: number }>()
+  const sourceClasses = new Map<PtyHandle, PtyChunk["sourceClass"]>()
 
   const gate = (handle: PtyHandle): PtyResult<string> => {
     const name = nameOf(handle)
@@ -136,36 +219,18 @@ export const createTmuxAdapter = (opts: TmuxAdapterOpts): PtySessionPort => {
     },
 
     async write(handle: PtyHandle, data: string, wopts?: PtyWriteOpts): Promise<PtyResult<void>> {
-      const g = gate(handle)
-      if (!g.ok) return g
       // `-l` = literal (no key-name interpretation); the `--` separator stops
       // tmux from parsing model `data` that begins with `-` as an OPTION
       // (arg-injection into tmux — args are an array so there is no SHELL
       // injection, but tmux still flag-parses its own argv). A submit is a
       // separate explicit `Enter` key.
-      const w = await opts.exec.run(["send-keys", "-t", g.value, "-l", "--", data])
-      if (!w.ok) return errR("backend-error", "tmux send-keys failed")
-      if (wopts?.appendNewline === true) {
-        const e = await opts.exec.run(["send-keys", "-t", g.value, "Enter"])
-        if (!e.ok) return errR("backend-error", "tmux send Enter failed")
-      }
-      return okR(undefined)
+      return writeTmux(opts, gate, sourceClasses, maxAttached, handle, data, wopts)
     },
 
     async read(handle: PtyHandle, sinceSeq: number): Promise<PtyResult<ReadResult>> {
-      const g = gate(handle)
-      if (!g.ok) return g
       // Cap the tracked-handle set: a read of a NEW handle past the cap is
       // rejected so `lastCapture` stays bounded (re-reading an already-tracked
       // handle never grows the map and is always allowed). detach/kill free slots.
-      if (!lastCapture.has(handle) && lastCapture.size >= maxAttached) {
-        return errR(
-          "cap-exceeded",
-          `attached-handle cap ${maxAttached} reached (detach a session before reading another)`,
-        )
-      }
-      const r = await opts.exec.run(["capture-pane", "-t", g.value, "-p"])
-      if (!r.ok) return errR("backend-error", "tmux capture-pane failed")
       // CONCURRENCY: two `read`s both `await` capture-pane and can RESOLVE OUT OF
       // ORDER — a slow capture started earlier may land AFTER a fast capture
       // started later, carrying STALE (older/shorter) pane text. The state read
@@ -175,14 +240,7 @@ export const createTmuxAdapter = (opts: TmuxAdapterOpts): PtySessionPort => {
       // `lastCapture` would REWIND the text + re-emit already-consumed output and
       // corrupt the monotone cursor. Treat a non-advancing capture as a no-op:
       // keep the stored (at-least-as-new) snapshot, emit nothing.
-      const prev = lastCapture.get(handle)
-      if (prev !== undefined && (r.stdout === prev.text || prev.text.startsWith(r.stdout))) {
-        return okR({ chunks: [], nextSeq: prev.seq })
-      }
-      const { chunk, seq } = diffCapture(prev, r.stdout)
-      lastCapture.set(handle, { text: r.stdout, seq })
-      const fresh = chunk !== undefined && chunk.seq > sinceSeq ? [chunk] : []
-      return okR({ chunks: fresh, nextSeq: seq })
+      return readTmux(opts, gate, lastCapture, sourceClasses, maxAttached, handle, sinceSeq)
     },
 
     async resize(handle: PtyHandle, cols: number, rows: number): Promise<PtyResult<void>> {
@@ -206,6 +264,7 @@ export const createTmuxAdapter = (opts: TmuxAdapterOpts): PtySessionPort => {
     async detach(handle: PtyHandle): Promise<PtyResult<void>> {
       // tmux sessions PREDATE us → detach is a local no-op (session survives).
       lastCapture.delete(handle)
+      sourceClasses.delete(handle)
       return okR(undefined)
     },
 
@@ -214,6 +273,7 @@ export const createTmuxAdapter = (opts: TmuxAdapterOpts): PtySessionPort => {
       if (!g.ok) return g
       const r = await opts.exec.run(["kill-session", "-t", g.value])
       lastCapture.delete(handle)
+      sourceClasses.delete(handle)
       return r.ok ? okR(undefined) : errR("backend-error", "tmux kill-session failed")
     },
   }

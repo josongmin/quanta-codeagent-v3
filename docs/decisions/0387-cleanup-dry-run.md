@@ -106,7 +106,7 @@ Dry-run: disk backend (/path/to/sessions)
 (no commit — re-run without --dry-run to apply)
 ```
 
-When neither backend env var is set the output is:
+When neither durable path is present in the frozen runtime snapshot the output is:
 
 ```
 ## Session Registry — Dry-run
@@ -116,10 +116,9 @@ Dry-run: no on-disk backend configured (in-memory only — nothing to preview).
 
 ## Backward compatibility
 
-`/session-registry cleanup` (no flag) is BYTE-IDENTICAL to ADR-0379.
-Case [25] of the slash hellgate explicitly pins this — the existing
-"Sweep complete." marker is rendered + the registry state mutates as
-before.
+`/session-registry cleanup` (no flag) retains ADR-0379 behavior on healthy
+backends. Follow-up availability reporting makes inaccessible and partial
+sweeps explicit non-zero outcomes; those paths never render `"Sweep complete."`.
 
 ## Wiring
 
@@ -133,15 +132,16 @@ reuse the count functions but that is out of scope for this ADR.
 
 Both count functions are wrapped:
 
-- Disk: missing `storageDir` ⇒ `{ wouldEvictByTtl: 0, wouldEvictBySize: 0,
-  inspectedSessions: 0, storageDir }`. Per-entry stat / readFile errors
-  classify as `"skip"` (same as sweep's `processEntry`).
-- SQLite: open-fail / corrupt DB ⇒ `EMPTY_CANDIDATES`. Each SQL step
-  is wrapped — a single failed query degrades to 0 for that axis.
+- Disk: missing `storageDir` returns zero counts with
+  `backendAvailable:false`. Per-entry stat / readFile errors classify as
+  `"skip"` (same as sweep's `processEntry`).
+- SQLite: open-fail / migration-fail returns `EMPTY_CANDIDATES` with
+  `backendAvailable:false`. Each later SQL step remains independently wrapped.
 
 The slash itself adds a defence-in-depth try/catch around the top-level
-call; failure ⇒ exit 1 + stderr message (operator explicitly requested
-the preview).
+call. Any unavailable configured backend renders an explicit
+`preview incomplete` marker, exits 1, and cannot masquerade as a healthy
+zero-candidate result.
 
 ## Idempotency
 

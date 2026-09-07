@@ -24,6 +24,7 @@
 export {
   type AutoSweepConfig,
   type AutoSweepHandle,
+  type AutoSweepRunResult,
   type AutoSweepRuntimeSnapshot,
   autoSweepConfigFromRuntime,
   DEFAULT_AUTO_SWEEP_INTERVAL_MS,
@@ -70,10 +71,8 @@ export { createInMemorySessionResourceRegistry } from "./in-memory-registry"
 export type { SqliteRegistryConfig, SweepResult as SqliteSweepResult } from "./sqlite-adapter"
 // ADR-0361 — SQLite-backed adapter (Codex `logs_2.sqlite` WAL parity).
 //   Sibling to the in-memory + JSONL adapters above; same closed
-//   `SessionResourceRegistry` port (ADR-0345). Default-OFF — global
-//   singleton does NOT auto-mount this backend; opt-in via direct
-//   factory call until a follow-up ADR adds an env-var swap on the
-//   ADR-0351 pattern.
+//   `SessionResourceRegistry` port (ADR-0345). Default-OFF — the global
+//   singleton mounts it only when the frozen runtime snapshot supplies a path.
 export {
   createSqliteSessionResourceRegistry,
   DEFAULT_MAX_TOTAL_BYTES as SQLITE_DEFAULT_MAX_TOTAL_BYTES,

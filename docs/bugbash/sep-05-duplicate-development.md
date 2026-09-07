@@ -1,5 +1,10 @@
 # Sep-05 — 중복 개발 어딧 (근거 원본)
 
+> **CURRENT QUEUE:** 이 파일은 근거 원본이며 구현 백로그가 아니다. 2026-09-07
+> 최종 코드 재검증에서 남았던 N7/N12/S8/S9도 구현·회귀 검증되었다.
+> [`sep-6-role-contract-audit/tickets/README.md`](../plans/sep-6-role-contract-audit/tickets/README.md)는
+> 0-active closeout이며, 이 문서에서 재실행할 구현 항목은 없다.
+>
 > 2026-08-29 ~ 2026-09-05 병렬 어딧. **목적:** 같은 역할의 모듈/로직이 여러 곳에 복제·드리프트되는 지점을 코드 위치·인용·헬게이트 공백·조질 방법과 함께 남김.
 > **재현 기준:** 라이브 `src/` (`.zz-audit-*` 스냅샷 제외). 2026-09-06 closeout이 착지 후 인덱스 상태를 코드에 맞춤.
 > **관련:** [aug-25-wave1.md](./aug-25-wave1.md)는 god-code/lint/arch-debt. 이 문서는 **역할 중복**만.
@@ -102,7 +107,7 @@ headless/SDK/batch vs CLI per-turn. `capability-wire-path-parity` hellgate가 �
 | [D5](#d5) | closed | 🟠 p1 | migration | `external-config/convert.ts` vs `translators/claude-code-config.ts` | Claude MCP/hooks decoder SSOT |
 | [D6](#d6) | closed | 🟠 p1 | mcp | `mcp/naming.ts` / `mcp-health.ts` / `mcp-surface-wire.ts` | `sanitizeMcpNameSegment` SSOT; thin aliases remain |
 | [D7](#d7) | conditional | 🟠 p1 | media | `media/stt/*` vs `voice/transcriber/*` | Whisper/Deepgram REST sibling |
-| [D8](#d8) | conditional | 🟠 p1 | mention | `mention-runner/skill-resolver.ts` vs `plugin-app-resolver/*` | `firstLineOf`/`safeLookup` 복제 + warn 드리프트 |
+| [D8](#d8) | closed | 🟠 p1 | mention | `mention-runner/skill-resolver.ts` vs `plugin-app-resolver/*` | `mentionFirstLine` value contract consolidated; caller policy remains local |
 | [D9](#d9) | closed | 🟡 p2 | session | `ipc/session/handle.ts` vs `sdk/runtime/handle-adapter.ts` | verb-table 쌍둥이 — `SessionVerbSurface<R>` already enforces shape |
 | [D10](#d10) | closed | 🟡 p2 | permission | `permission-store.ts` vs `posture-persistence.ts` | `decodeThreadPermission` SSOT |
 | [D11](#d11) | closed | 🟡 p2 | auth | `chatgpt-oauth/token-store.ts` vs `mcp-composition.createFileMcpTokenStore` | `writePrivateFileAtomic` SSOT |
@@ -385,7 +390,7 @@ export const mcpToolName = (server: string, tool: string): string => {
 > **Why duplicate instead of importing from `@/agent/mention-runner`:**
 > ADR-0330's exported helper is the full-port builder. … spec forbids ("ADR-0330 mention-runner 슬라이스 mutate X"). **Code duplication is intentional**
 
-같은 `firstLineOf`/`safeLookup`이 추가로:
+같은 `firstLineOf`/`safeLookup`이 추가로 존재했다:
 
 - `plugin-app-resolver/plugin-resolver.ts`
 - `plugin-app-resolver/mcp-resolver.ts` (`firstLineOf`)
@@ -393,13 +398,21 @@ export const mcpToolName = (server: string, tool: string): string => {
 - `apps/cli/at-autocomplete/provider.ts` (`.trim()` 변형)
 - `host/runtime/internal/mention-source-deps.ts` (`.trim()` 변형)
 
-plugin 쪽은 silent catch (warn 없음) → 드리프트.
+plugin 쪽은 silent catch (warn 없음)였고, first-line 값 계약과 오류 정책이
+한 helper에 섞이면 caller별 fallback/warn 정책까지 잘못 합쳐지는 구조였다.
 
-**헬게이트:** 없음.
+**현재 상태:** **closed.** 순수 값 계약만 fence-legal
+`src/shared/mention-text.ts`의 `mentionFirstLine`으로 통합했다. lookup,
+fallback, warning 정책은 각 caller 소유로 유지한다.
 
-**조질지:** `firstLineOf`+`safeLookup`을 `@/agent/mention-injection` (또는 `mention-text.ts`) leaf로. ADR-0330 슬라이스는 mutate하지 않음. 양쪽 import. warn 정책 통일.
+**헬게이트:** `tests/unit/mention-first-line-parity-hellgate.test.ts`가 CRLF,
+bare CR, trim, empty 입력의 값 계약과 일곱 production consumer의 실제 호출을
+TypeScript AST로 고정한다. comment/string/unused import는 인정하지 않는다.
+또한 mention `*resolver.ts`, autocomplete provider, host mention-source owner의
+bounded production universe를 스캔하고, 임의 이름의 8번째 newline projection
+helper를 주입했을 때 그 파일만 RED가 됨을 증명한다.
 
-**검증:** CRLF/`\r`/empty fixture 동치 + warn 복구 hellgate.
+**금지:** caller별 warning/lookup/fallback 정책을 generic factory로 합치지 않는다.
 
 ---
 
@@ -721,7 +734,9 @@ Web: `apps/web-daemon/runtime-factory.ts` — `bootstrapSession` **없음**. `bu
 typed인데 raw `process.env` (최소):
 
 - `QUANTA_GOAL` — `apps/cli/index.ts` (startup-seed; keep)
-- `QUANTA_SESSION_REGISTRY_SQLITE_PATH` / `DISK_DIR` — auto-sweep / inspector still raw; `/session-registry cleanup --dry-run` now injects typed runtime-config paths
+- Session-registry SQLite/disk/WAL knobs now flow through one first-call
+  `runtimeConfig()` snapshot. Mount selection, inspector, periodic/manual sweep,
+  and cleanup dry-run no longer re-read raw env independently.
 
 전체 raw ceiling: `tests/unit/no-raw-process-env-knob-ratchet-hellgate.test.ts` **43**.
 
@@ -731,7 +746,11 @@ typed인데 raw `process.env` (최소):
 runner ∩ runtime-config-knobs **4키** (apply no-op, 문서화 dual-channel):
 `QUANTA_MCP_TOOL_ANNOTATIONS`, `RATELIMIT_NOTICE`, `READ_OUTLINE`, `TEST_RUNNER`.
 
-**조질지 (SEP5-10 landed):** typed cleanup inject. 7키는 `CLI_SEEDED_SURFACE_KNOBS` SSOT에서 help/seed/`/knobs` projection. 4키 dual-channel은 runner discovery + runtimeConfig mutation, apply identity. raw ceiling **43/43**.
+**조질지 (SEP5-10 + 후속 landed):** typed cleanup inject와 registry lifecycle
+SSOT 정렬 완료. 7키는 `CLI_SEEDED_SURFACE_KNOBS` SSOT에서
+help/seed/`/knobs` projection. 4키 dual-channel은 runner discovery +
+runtimeConfig mutation, apply identity. 다른 잔여 지점 때문에 raw ceiling은
+여전히 **43/43**.
 
 **검증:** no-raw-env ceiling ↓. disjoint hellgate 확장.
 
@@ -819,7 +838,11 @@ The source-audit PR list is retired. Execute via
 12. SEP5-11 closed/conditional register (no impl of closed items)
 13. SEP5-12 receipts + `bun run test:ci` last
 
-Unresolved scope: HTTPS secret egress remains opaque without MITM. Dual retrieval public-compat barrel (`embedders/**`) stays until a deprecation consumer inventory. SEP5-12 is closed only with an exact-HEAD `bun run test:ci` receipt.
+Conditional scope only: HTTPS secret egress remains opaque without MITM. The
+dual retrieval public-compat barrel (`embedders/**`) stays until a deprecation
+consumer inventory supplies its reopen trigger. Neither is authorized current
+implementation work. The final current overlay has an exact-tree clean-mirror
+`bun run test:ci` receipt; the shared dirty checkout itself is not claimed clean.
 
 ---
 

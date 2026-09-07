@@ -59,19 +59,18 @@
  * because the operator explicitly asked for the mutation.
  */
 
-import {
-  autoSweepConfigFromRuntime,
-  startAutoSweep,
-} from "@/agent/session-resource-registry/auto-sweep"
 import { countDiskRegistryCleanupCandidates } from "@/agent/session-resource-registry/disk-adapter/gc"
-import { getGlobalSessionResourceRegistry } from "@/agent/session-resource-registry/global"
+import {
+  getGlobalSessionResourceRegistry,
+  getGlobalSessionResourceRegistryState,
+  sweepGlobalSessionResourceRegistryNow,
+} from "@/agent/session-resource-registry/global"
 import {
   formatRegistryStats,
   inspectGlobalRegistry,
 } from "@/agent/session-resource-registry/inspector"
 import { countSqliteRegistryCleanupCandidates } from "@/agent/session-resource-registry/sqlite-adapter/gc"
 import { errMessage } from "@/shared"
-import { runtimeConfig } from "@/shared/runtime-config"
 import { sweepSessionTranscripts, type TranscriptSweepResult } from "./session-transcript-retention"
 import type { SlashCommand, SlashContext } from "./slash-commands"
 
@@ -336,11 +335,11 @@ export const sessionRegistryCmd: SlashCommand = {
       // ADR-0387 — `--dry-run` flag preview mode. Any position in the
       // sub-args list counts; extra unrelated flags are ignored.
       if (dryRun) {
-        return renderCleanupDryRun(
-          ctx,
-          transcripts,
-          sessionRegistryCleanupPathsFrom(runtimeConfig()),
-        )
+        const { sweepConfig } = getGlobalSessionResourceRegistryState()
+        return renderCleanupDryRun(ctx, transcripts, {
+          diskDir: sweepConfig.diskDir || undefined,
+          sqlitePath: sweepConfig.sqlitePath || undefined,
+        })
       }
       return renderCleanup(ctx, transcripts)
     }
@@ -351,11 +350,10 @@ export const sessionRegistryCmd: SlashCommand = {
 /**
  * ADR-0379 — `/session-registry cleanup` handler.
  *
- * Runs an immediate sweep via `startAutoSweep(autoSweepConfigFromRuntime(runtimeConfig()))`
- * then stops the returned handle so we do NOT leak a periodic timer registered by
- * this slash invocation. Paths + WAL knobs come from the same runtimeConfig()
- * snapshot dry-run already uses; unset registry paths ⇒ NOOP handle ⇒
- * the sweep is a fast no-op + we still render the current stats.
+ * Runs an immediate sweep through the singleton-owned auto-sweep handle. The
+ * handler neither mints a timer nor re-reads runtimeConfig, so live cleanup,
+ * dry-run, mounted backend inspection, and periodic sweep share one first-call
+ * snapshot.
  *
  * The sweep is fire-and-await so the operator sees the post-sweep
  * stats (events evicted, WAL bytes, etc.) in the rendered output.
@@ -363,13 +361,31 @@ export const sessionRegistryCmd: SlashCommand = {
  * (operator explicitly requested the mutation; surface the failure).
  */
 const renderCleanup = async (ctx: SlashContext, transcripts: boolean): Promise<number> => {
-  let handle: ReturnType<typeof startAutoSweep> | undefined
   try {
-    handle = startAutoSweep(autoSweepConfigFromRuntime(runtimeConfig()))
-    await handle.sweepNow()
+    const sweep = await sweepGlobalSessionResourceRegistryNow()
+    if (sweep.kind === "unavailable") {
+      ctx.err("/session-registry: cleanup unavailable — auto-sweep initialization failed\n")
+      return 1
+    }
     // Render post-sweep stats so the operator sees what changed.
     const stats = await inspectGlobalRegistry()
-    ctx.out(`${formatRegistryStats(stats)}\nSweep complete.\n`)
+    if (sweep.kind === "failed") {
+      ctx.out(`${formatRegistryStats(stats)}\n`)
+      ctx.err(
+        `/session-registry: cleanup failed for all ${sweep.attempted} configured durable backend(s)\n`,
+      )
+      return 1
+    }
+    if (sweep.kind === "partial") {
+      ctx.out(`${formatRegistryStats(stats)}\n`)
+      ctx.err(
+        `/session-registry: cleanup incomplete — ${sweep.succeeded}/${sweep.attempted} backend(s) succeeded\n`,
+      )
+      return 1
+    }
+    const marker =
+      sweep.kind === "swept" ? "Sweep complete." : "No durable backend configured — nothing swept."
+    ctx.out(`${formatRegistryStats(stats)}\n${marker}\n`)
     // ADR-0379 transcript rail (opt-in): ALSO sweep the per-session `.jsonl`
     // transcript envelopes when `--transcripts` is passed. This is a DIFFERENT
     // rail than the resource registry above — it trims the oldest rows of an
@@ -379,11 +395,6 @@ const renderCleanup = async (ctx: SlashContext, transcripts: boolean): Promise<n
   } catch (e) {
     ctx.err(`/session-registry: cleanup failed: ${errMessage(e)}\n`)
     return 1
-  } finally {
-    // CRITICAL: stop() unregisters the periodic timer registered by
-    // `startAutoSweep` so the slash does not leak a setInterval per
-    // invocation. NO-THROW + idempotent (per ADR-0369).
-    handle?.stop()
   }
 }
 
@@ -392,7 +403,7 @@ const renderCleanup = async (ctx: SlashContext, transcripts: boolean): Promise<n
  *
  * Preview the sweep candidate counts WITHOUT committing the eviction.
  * Calls the leaf `count*RegistryCleanupCandidates` functions for whichever
- * backends are configured via the same env vars `startAutoSweep` consults:
+ * backends are configured in the global lifecycle's frozen runtime snapshot:
  *
  *   - `QUANTA_SESSION_REGISTRY_DISK_DIR`    — disk backend candidates
  *   - `QUANTA_SESSION_REGISTRY_SQLITE_PATH` — sqlite backend candidates
@@ -429,6 +440,7 @@ export const renderCleanupDryRun = async (
     const sqlitePath = paths.sqlitePath
 
     const lines: string[] = ["## Session Registry — Dry-run", ""]
+    let unavailableBackends = 0
 
     if (diskDir === undefined && sqlitePath === undefined && !transcripts) {
       lines.push("Dry-run: no on-disk backend configured (in-memory only — nothing to preview).")
@@ -438,31 +450,47 @@ export const renderCleanupDryRun = async (
 
     if (typeof diskDir === "string" && diskDir.length > 0) {
       const disk = await countDiskRegistryCleanupCandidates({ storageDir: diskDir })
-      lines.push(
-        `Dry-run: disk backend (${disk.storageDir})`,
-        `  would evict by TTL:    ${disk.wouldEvictByTtl}`,
-        `  would evict by size:   ${disk.wouldEvictBySize}`,
-        `  inspected sessions:    ${disk.inspectedSessions}`,
-        "",
-      )
+      if (!disk.backendAvailable) {
+        unavailableBackends++
+        lines.push(`Dry-run: disk backend unavailable (${disk.storageDir})`, "")
+      } else {
+        lines.push(
+          `Dry-run: disk backend (${disk.storageDir})`,
+          `  would evict by TTL:    ${disk.wouldEvictByTtl}`,
+          `  would evict by size:   ${disk.wouldEvictBySize}`,
+          `  inspected sessions:    ${disk.inspectedSessions}`,
+          "",
+        )
+      }
     }
 
     if (typeof sqlitePath === "string" && sqlitePath.length > 0) {
       const sqlite = countSqliteRegistryCleanupCandidates({ databasePath: sqlitePath })
-      lines.push(
-        `Dry-run: sqlite backend (${sqlitePath})`,
-        `  would evict by TTL:    ${sqlite.wouldEvictByTtl}`,
-        `  would evict by size:   ${sqlite.wouldEvictBySize}`,
-        `  inspected sessions:    ${sqlite.inspectedSessions}`,
-        `  WAL size (bytes):      ${sqlite.walSize}`,
-        "",
-      )
+      if (!sqlite.backendAvailable) {
+        unavailableBackends++
+        lines.push(`Dry-run: sqlite backend unavailable (${sqlitePath})`, "")
+      } else {
+        lines.push(
+          `Dry-run: sqlite backend (${sqlitePath})`,
+          `  would evict by TTL:    ${sqlite.wouldEvictByTtl}`,
+          `  would evict by size:   ${sqlite.wouldEvictBySize}`,
+          `  inspected sessions:    ${sqlite.inspectedSessions}`,
+          `  WAL size (bytes):      ${sqlite.walSize}`,
+          "",
+        )
+      }
     }
 
     // ADR-0379 transcript rail (opt-in dry-run): preview the `.jsonl`
     // transcript sweep WITHOUT committing it.
     if (transcripts) lines.push((await renderTranscriptSweep(true)).trimEnd(), "")
 
+    if (unavailableBackends > 0) {
+      lines.push("(preview incomplete — unavailable backend(s) were not inspected)")
+      ctx.out(`${lines.join("\n")}\n`)
+      ctx.err(`/session-registry: cleanup --dry-run failed for ${unavailableBackends} backend(s)\n`)
+      return 1
+    }
     lines.push("(no commit — re-run without --dry-run to apply)")
     ctx.out(`${lines.join("\n")}\n`)
     return 0

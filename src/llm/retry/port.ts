@@ -18,7 +18,7 @@
 
 /**
  * One of six closed actions the caller should take in response to an LLM error.
- * The router's job is to collapse the 16-kind `LLMErrorKind` space onto this
+ * The router's job is to collapse the 18-kind `LLMErrorKind` space onto this
  * six-action space so callers can branch on a small typed envelope.
  *
  *   - `retry_same_turn`     Retry without backoff (same provider, same prompt).

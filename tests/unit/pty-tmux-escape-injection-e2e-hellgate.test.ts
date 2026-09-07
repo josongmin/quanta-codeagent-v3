@@ -124,6 +124,19 @@ const call = (name: string, input: unknown): ToolUseBlock => ({
 const PLAIN_NAME = "quanta-e2e"
 const PLAIN_HANDLE = `tmux:${PLAIN_NAME}`
 
+/** Mark a handle's output as following an agent-authored public command. A
+ * capture with no observed write is deliberately secret-classified and wholly
+ * redacted, so escape-neutralization value assertions belong on this reachable
+ * public arm. */
+const markPublic = async (cfg: AgentConfig, handle: string): Promise<void> => {
+  const result = await dispatchTool(
+    call("pty_write", { handle, data: "echo ready", appendNewline: true }),
+    cfg,
+    BYPASS,
+  )
+  expect(result.ok).toBe(true)
+}
+
 // ════════════════════ (1) capture-pane escape neutralization ════════════════
 
 describe("H14 e2e — capture-pane escapes are defanged before the transcript", () => {
@@ -146,6 +159,7 @@ describe("H14 e2e — capture-pane escapes are defanged before the transcript", 
     test(`"${label}" pane never reaches the model as a live escape`, async () => {
       const tmux = mkAdversarialTmux(pane, PLAIN_NAME)
       const cfg = config(registryWith(tmux.exec))
+      await markPublic(cfg, PLAIN_HANDLE)
       const res = await dispatchTool(
         call("pty_read", { handle: PLAIN_HANDLE, sinceSeq: 0 }),
         cfg,
@@ -167,9 +181,11 @@ describe("H14 e2e — capture-pane escapes are defanged before the transcript", 
 
   test("the defanged ESC is rendered as the visible caret form `^[` (auditable, not silently dropped)", async () => {
     const tmux = mkAdversarialTmux(`${ESC}[32mGREEN`, PLAIN_NAME)
+    const cfg = config(registryWith(tmux.exec))
+    await markPublic(cfg, PLAIN_HANDLE)
     const res = await dispatchTool(
       call("pty_read", { handle: PLAIN_HANDLE, sinceSeq: 0 }),
-      config(registryWith(tmux.exec)),
+      cfg,
       BYPASS,
     )
     expect(res.ok).toBe(true)
@@ -203,9 +219,12 @@ describe("H14 e2e — an allow-prefixed session NAME carrying an escape is defan
 
   test("reading the hostile-named session ALSO defangs both name-origin and pane escapes", async () => {
     const tmux = mkAdversarialTmux(`${ESC}]0;t${BEL}data`, EVIL_NAME)
+    const handle = `tmux:${EVIL_NAME}`
+    const cfg = config(registryWith(tmux.exec))
+    await markPublic(cfg, handle)
     const res = await dispatchTool(
-      call("pty_read", { handle: `tmux:${EVIL_NAME}`, sinceSeq: 0 }),
-      config(registryWith(tmux.exec)),
+      call("pty_read", { handle, sinceSeq: 0 }),
+      cfg,
       BYPASS,
     )
     expect(res.ok).toBe(true)
@@ -222,9 +241,11 @@ describe("H14 e2e — benign pane output passes through unmangled (guard is not 
   test("plain multi-line text with TAB columns survives byte-identically (sans the appended nextSeq line)", async () => {
     const benign = "On branch main\n\tnothing to commit, working tree clean\n"
     const tmux = mkAdversarialTmux(benign, PLAIN_NAME)
+    const cfg = config(registryWith(tmux.exec))
+    await markPublic(cfg, PLAIN_HANDLE)
     const res = await dispatchTool(
       call("pty_read", { handle: PLAIN_HANDLE, sinceSeq: 0 }),
-      config(registryWith(tmux.exec)),
+      cfg,
       BYPASS,
     )
     expect(res.ok).toBe(true)
@@ -240,6 +261,23 @@ describe("H14 e2e — benign pane output passes through unmangled (guard is not 
     expect(res.ok).toBe(true)
     expect(res.preview).toContain("tmux:quanta-clean")
     expect(res.preview).not.toContain("^")
+  })
+})
+
+describe("H14 e2e — pre-existing scrollback stays fail-closed", () => {
+  test("unknown-source capture is wholly redacted and its hostile origin is control-safe", async () => {
+    const evilName = `quanta-${ESC}[32mGREEN${BEL}`
+    const rawPane = `${ESC}[2JRAW-SCROLLBACK-BODY`
+    const tmux = mkAdversarialTmux(rawPane, evilName)
+    const res = await dispatchTool(
+      call("pty_read", { handle: `tmux:${evilName}`, sinceSeq: 0 }),
+      config(registryWith(tmux.exec)),
+      BYPASS,
+    )
+    expect(res.ok).toBe(true)
+    expect(res.preview).toContain("[REDACTED:source_class_secret]")
+    expect(hasLiveEscape(res.preview)).toBe(false)
+    expect(res.preview).not.toContain("RAW-SCROLLBACK-BODY")
   })
 })
 

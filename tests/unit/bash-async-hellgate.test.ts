@@ -521,6 +521,24 @@ describe("ADR-0296 — bash background + bash_await + bash_kill (hellgate)", () 
     expect(await_.isReadOnly()).toBe(true)
   })
 
+  test("bash_await carries registered command sensitivity across its opaque handle", async () => {
+    const { port, children } = makeFakePort()
+    const registry = createBashBgRegistry({ port })
+    const handle = await registry.register({ command: "cat .env", cwd: dir })
+    const await_ = makeBashAwaitTool(registry)
+
+    expect(await_.classifySource?.({ shell_id: handle.id })).toBe("secret")
+    expect(await_.classifySource?.({ shell_id: "missing" })).toBeNull()
+    children[0]?.feedStdout("ordinary-looking deferred body")
+    const { result } = await collect(
+      await_,
+      { shell_id: handle.id, regex: "ordinary-looking" },
+      ctx(),
+    )
+    expect(result.source).toEqual({ class: "secret", label: "cat .env" })
+    await registry.killAll()
+  })
+
   // 21. Background output truncation respects MAX_OUTPUT.
   test("background placeholder output truncates to ≤MAX_OUTPUT (30 KB)", async () => {
     const { port, children } = makeFakePort()

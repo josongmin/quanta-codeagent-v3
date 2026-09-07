@@ -20,7 +20,8 @@ import { __resetRuntimeConfig } from "@/shared"
  *   1. Default path (knob unset) ⇒ "retention OFF" notice, recent transcripts
  *      left intact (byte-identical).
  *   2. Knob ON ⇒ over-cap envelope trimmed; report shows scanned/trimmed/rows/
- *      bytes; the registry-cleanup output is still present (additive rail).
+ *      bytes; the registry-cleanup no-backend result is still present
+ *      (additive rail, without falsely claiming a durable sweep).
  *   3. `--dry-run --transcripts` ⇒ "would trim" preview, disk unchanged.
  *   4. Plain `cleanup` (no `--transcripts`) ⇒ transcripts NOT swept (opt-in),
  *      even when the knob is set.
@@ -105,8 +106,10 @@ describe("session transcript retention — e2e hellgate", () => {
     // Transcript report present.
     expect(out).toContain("Transcripts:")
     expect(out).toContain("rows dropped:        1")
-    // Additive: the resource-registry sweep block is still emitted.
-    expect(out).toContain("Sweep complete.")
+    // Additive: the resource-registry result is still emitted, and an
+    // in-memory/no-backend run must not falsely claim a durable sweep.
+    expect(out).toContain("No durable backend configured — nothing swept.")
+    expect(out).not.toContain("Sweep complete.")
     // On disk: oldest row trimmed, newest two kept.
     expect(await readFile(p, "utf8")).toBe(jsonl([rows[1] as string, rows[2] as string]))
   })

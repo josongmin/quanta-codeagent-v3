@@ -19,7 +19,6 @@ const AUTHORITIES: readonly KnobReadAuthority[] = [
 
 export const validateKnobReadAuthorityParity = (
   inventory: readonly KnobInventoryEntry[],
-  runtimeKeys: readonly string[],
 ): { ok: true } | { ok: false; reason: string; key?: string } => {
   const seen = new Set<string>()
   for (const row of inventory) {
@@ -28,16 +27,6 @@ export const validateKnobReadAuthorityParity = (
     }
     if (seen.has(row.envKey)) return { ok: false, reason: "duplicate-key", key: row.envKey }
     seen.add(row.envKey)
-  }
-  const invKeys = new Set(inventory.map((r) => r.envKey))
-  for (const key of runtimeKeys) {
-    if (
-      key.startsWith("QUANTA_") &&
-      !invKeys.has(key as `QUANTA_${string}`) &&
-      inventory.length === 0
-    ) {
-      return { ok: false, reason: "orphan-runtime", key }
-    }
   }
   return { ok: true }
 }
@@ -52,20 +41,17 @@ describe("knob read-authority parity", () => {
       expect(keys.has(row.envKey)).toBe(false)
       keys.add(row.envKey)
     }
-    const live = validateKnobReadAuthorityParity(
-      KNOB_INVENTORY,
-      RUNTIME_CONFIG_KNOBS.map((k) => k.envKey),
-    )
+    const live = validateKnobReadAuthorityParity(KNOB_INVENTORY)
     expect(live).toEqual({ ok: true })
   })
 
-  test("injected missing authority / duplicate / orphan are named", () => {
+  test("injected missing authority / duplicate are named", () => {
     const first = KNOB_INVENTORY[0]
     if (first === undefined) throw new Error("empty knob inventory")
     const missing = [{ ...first, readAuthority: "nope" as KnobReadAuthority }]
-    expect(validateKnobReadAuthorityParity(missing, []).ok).toBe(false)
+    expect(validateKnobReadAuthorityParity(missing).ok).toBe(false)
     const dup = [first, first]
-    const dupR = validateKnobReadAuthorityParity(dup, [])
+    const dupR = validateKnobReadAuthorityParity(dup)
     expect(dupR.ok).toBe(false)
     if (!dupR.ok) expect(dupR.key).toBe(first.envKey)
   })

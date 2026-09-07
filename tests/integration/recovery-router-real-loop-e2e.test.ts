@@ -7,7 +7,7 @@ import { cfg, RecordingStream, text, withTimeout } from "./_harness"
 
 /**
  * REAL-LOOP FAKE-LLM e2e for `recovery-router-codex-spec` (ADR-0214 / feature
- * 07-resilience/recovery-router-codex-spec). The 16-kind → 6-action
+ * 07-resilience/recovery-router-codex-spec). The 18-kind → 6-action
  * `codexSpecRoute` table had TABLE-ONLY unit coverage (`runAgent = 0`): a pure
  * `route(kind) → action` assertion with nothing proving the ROUTED action ever
  * takes effect in a live loop.

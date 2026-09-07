@@ -56,7 +56,8 @@ export type PersistOutcome =
  * mid-section, e.g. SIGKILL) after `staleMs`, avoiding a permanent deadlock.
  * The retry spin yields to the event loop (`await` of a resolved microtask) so
  * it is cooperative, not a busy-CPU spin, and is bounded by `timeoutMs` so a
- * truly stuck peer degrades to "write anyway" rather than hanging the caller.
+ * truly stuck peer returns a typed acquisition failure rather than hanging or
+ * escaping the protected critical section.
  *
  * CLOCK: lock expiry compares a peer's written `ts` against now. In production
  * each process uses the real global clock (the default `now` param). Injecting
@@ -101,8 +102,8 @@ const classifyHeldLock = async (lockPath: string, now: () => number): Promise<He
   }
 }
 
-/** Acquire the lock or return false if we timed out (caller then proceeds
- *  best-effort — non-durability never blocks the in-memory authority).
+/** Acquire the lock or return false if acquisition fails or times out. The
+ *  caller must fail the durable write closed; in-memory authority is unchanged.
  *  `now` is injected so stale-lock STEALING is deterministically testable; the
  *  literal `Date.now` is only the default-factory fallback (no call form). */
 export const acquireLock = async (

@@ -55,7 +55,7 @@
 import type { NamedAgentResolver } from "@/agent"
 import type { BuildDefaultMentionResolverOptions } from "@/agent/mention-runner"
 import type { McpToolInfo, ThreadSummary } from "@/agent/plugin-app-resolver"
-import { errMessage, logger, parseEnvFlag } from "@/shared"
+import { errMessage, logger, mentionFirstLine, parseEnvFlag } from "@/shared"
 
 /** A `name + description` autocomplete registry entry (+ optional insert-payload
  *  override). Structurally identical to `apps/cli/at-autocomplete#NamedEntry`,
@@ -111,14 +111,6 @@ export interface MentionLiveSources {
  *  `isOn` and every other default-ON mention knob. */
 const isOn = (env: MentionSourceEnv, key: string): boolean =>
   parseEnvFlag(env[key], /* defaultOn */ true)
-
-/** First non-empty line of a description (LF / CRLF tolerant). Mirrors the
- *  resolver / provider `firstLineOf` idiom. Pure. */
-const firstLineOf = (text: string | undefined): string => {
-  if (typeof text !== "string" || text.length === 0) return ""
-  const nl = text.search(/\r?\n/)
-  return (nl < 0 ? text : text.slice(0, nl)).trim()
-}
 
 // ── RESOLVER owners ───────────────────────────────────────────────────────
 
@@ -290,7 +282,7 @@ const listSubagentsFor = (registry: NamedAgentResolver): (() => readonly NamedEn
     if (typeof all === "function") {
       return all.call(registry).map((d) => ({
         name: d.agentType,
-        description: firstLineOf(d.system),
+        description: mentionFirstLine(d.system),
       }))
     }
     const names = registry.names?.() ?? []
