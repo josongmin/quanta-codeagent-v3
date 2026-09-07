@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
-import { join, relative, resolve } from "node:path"
+import { dirname, join, relative, resolve } from "node:path"
 import { GATES } from "../../tools/dev/gate-manifest"
 import { expandTestFiles } from "../../tools/dev/sandboxed-test"
 import { assertScanPopulation } from "./_shared/scan-population"
@@ -12,6 +12,33 @@ const REGISTER_PATH =
 const EXECUTION_INDEX_PATH = "docs/plans/sep-5-duplicate-development/tickets/README.md"
 const PROMPT_PACK_PATH = "docs/plans/sep-5-duplicate-development/prompts/README.md"
 const AUDIT_IDS = Array.from({ length: 31 }, (_, index) => `D${index}`)
+
+const EXPECTED_DISPOSITIONS = {
+  execute: [],
+  conditional: ["D7", "D8", "D13", "D15", "D16", "D17", "D21", "D22", "D23", "D25", "D26"],
+  intentional: ["D29"],
+  closed: [
+    "D0",
+    "D1",
+    "D2",
+    "D3",
+    "D4",
+    "D5",
+    "D6",
+    "D9",
+    "D10",
+    "D11",
+    "D12",
+    "D14",
+    "D18",
+    "D19",
+    "D20",
+    "D24",
+    "D27",
+    "D28",
+    "D30",
+  ],
+} as const satisfies Readonly<Record<AuditDisposition, readonly string[]>>
 
 // Findings closed by a landed implementation ticket. The remaining closed
 // false-positive/intentional findings belong in SEP5-11 so they cannot return
@@ -45,6 +72,99 @@ const EXPECTED = [
   "tests/unit/shared/jsonrpc-envelope.test.ts",
   "tests/unit/retrieval-authority-manifest.test.ts",
   "tests/unit/knob-read-authority-parity.test.ts",
+] as const
+
+const TICKETS = [
+  {
+    id: "SEP5-00",
+    path: "docs/plans/sep-5-duplicate-audit/tickets/SEP5-00-audit-truth.md",
+    status: "LANDED",
+    rails: [] as const,
+  },
+  {
+    id: "SEP5-01",
+    path: "docs/plans/sep-5-gh-safety/tickets/SEP5-01-gh-execution-authority.md",
+    status: "LANDED",
+    rails: ["tests/unit/cli/gh-exec-policy-hellgate.test.ts"],
+  },
+  {
+    id: "SEP5-02",
+    path: "docs/plans/sep-5-gh-safety/tickets/SEP5-02-pr-comment-outbound-safety.md",
+    status: "LANDED",
+    rails: [
+      "tests/unit/tool/gh-pr-comment-outbound-policy.test.ts",
+      "tests/unit/apps/agent/ci-bot-pr-comment-safety.test.ts",
+    ],
+  },
+  {
+    id: "SEP5-03",
+    path: "docs/plans/sep-5-secret-detection/tickets/SEP5-03-secret-detector-parity.md",
+    status: "LANDED",
+    rails: ["tests/unit/secret-sink-parity-hellgate.test.ts"],
+  },
+  {
+    id: "SEP5-04A",
+    path: "docs/plans/sep-5-oauth-transaction/tickets/SEP5-04A-private-atomic-token-write.md",
+    status: "LANDED",
+    rails: ["tests/unit/auth/private-file-atomic.test.ts"],
+  },
+  {
+    id: "SEP5-04B",
+    path: "docs/plans/sep-5-oauth-transaction/tickets/SEP5-04B-chatgpt-refresh-transaction.md",
+    status: "LANDED",
+    rails: [
+      "tests/unit/auth/chatgpt-refresh-transaction.test.ts",
+      "tests/integration/chatgpt-refresh-cross-process.test.ts",
+    ],
+  },
+  {
+    id: "SEP5-05",
+    path: "docs/plans/sep-5-migration-decoder/tickets/SEP5-05-claude-config-decoder.md",
+    status: "LANDED",
+    rails: ["tests/unit/migration/claude-config-entrypoint-parity.test.ts"],
+  },
+  {
+    id: "SEP5-06",
+    path: "docs/plans/sep-5-mcp-naming/tickets/SEP5-06-mcp-naming-authority.md",
+    status: "LANDED",
+    rails: ["tests/unit/cli/mcp-name-surface-parity.test.ts"],
+  },
+  {
+    id: "SEP5-07",
+    path: "docs/plans/sep-5-permission-validation/tickets/SEP5-07-permission-validator-authority.md",
+    status: "LANDED",
+    rails: ["tests/unit/permission/thread-permission-entrypoint-parity.test.ts"],
+  },
+  {
+    id: "SEP5-08",
+    path: "docs/plans/sep-5-jsonrpc-envelope/tickets/SEP5-08-jsonrpc-envelope-core.md",
+    status: "LANDED",
+    rails: ["tests/unit/shared/jsonrpc-envelope.test.ts"],
+  },
+  {
+    id: "SEP5-09",
+    path: "docs/plans/sep-5-retrieval-authority/tickets/SEP5-09-retrieval-authority-retirement.md",
+    status: "LANDED",
+    rails: ["tests/unit/retrieval-authority-manifest.test.ts"],
+  },
+  {
+    id: "SEP5-10",
+    path: "docs/plans/sep-5-knob-authority/tickets/SEP5-10-knob-owner-burndown.md",
+    status: "LANDED",
+    rails: ["tests/unit/knob-read-authority-parity.test.ts"],
+  },
+  {
+    id: "SEP5-11",
+    path: "docs/plans/sep-5-duplicate-audit/tickets/SEP5-11-deferred-and-closed-register.md",
+    status: "ACTIVE REGISTER",
+    rails: [] as const,
+  },
+  {
+    id: "SEP5-12",
+    path: "docs/plans/sep-5-test-ratchets/tickets/SEP5-12-test-ratchet-campaign.md",
+    status: "COMPLETE",
+    rails: ["tests/unit/sep5-ratchet-enrollment.test.ts"],
+  },
 ] as const
 
 const walkTests = (dir: string, acc: string[] = []): string[] => {
@@ -124,6 +244,55 @@ const isTracked = (path: string): boolean => {
   return result.exitCode === 0
 }
 
+const ticketMarkdownPaths = (): readonly string[] => {
+  const plansRoot = join(ROOT, "docs", "plans")
+  const paths: string[] = []
+  for (const packet of readdirSync(plansRoot)) {
+    if (!packet.startsWith("sep-5-")) continue
+    const ticketsDir = join(plansRoot, packet, "tickets")
+    if (!existsSync(ticketsDir)) continue
+    for (const name of readdirSync(ticketsDir)) {
+      if (name.endsWith(".md") && name !== "README.md") {
+        paths.push(relative(ROOT, join(ticketsDir, name)))
+      }
+    }
+  }
+  return paths.sort()
+}
+
+const indexLinkedPaths = (markdown: string): ReadonlySet<string> =>
+  new Set(
+    [...markdown.matchAll(/\[[^\]]+\]\(([^)#]+)(?:#[^)]+)?\)/g)].map((match) =>
+      relative(ROOT, resolve(dirname(join(ROOT, EXECUTION_INDEX_PATH)), match[1] ?? "")),
+    ),
+  )
+
+const validateTicket = (
+  ticket: (typeof TICKETS)[number],
+  markdown: string | undefined,
+  linked: ReadonlySet<string>,
+): readonly string[] => {
+  if (markdown === undefined) return [`${ticket.id}:missing-ticket`]
+  const errors: string[] = []
+  const status = markdown.match(/^\*\*Status:\*\* ([^\n]+)/m)?.[1]
+  if (!status?.startsWith(ticket.status)) errors.push(`${ticket.id}:status`)
+  if (!linked.has(ticket.path)) errors.push(`${ticket.id}:index-link`)
+  if (!isTracked(ticket.path)) errors.push(`${ticket.id}:untracked`)
+  for (const rail of ticket.rails) {
+    if (!existsSync(join(ROOT, rail))) errors.push(`${ticket.id}:missing-rail:${rail}`)
+    if (!markdown.includes(`\`${rail}\``)) errors.push(`${ticket.id}:undocumented-rail:${rail}`)
+  }
+  return errors
+}
+
+const validateTicketManifest = (
+  contents: ReadonlyMap<string, string>,
+  indexMarkdown: string,
+): readonly string[] => {
+  const linked = indexLinkedPaths(indexMarkdown)
+  return TICKETS.flatMap((ticket) => validateTicket(ticket, contents.get(ticket.path), linked))
+}
+
 describe("SEP5 ratchet enrollment", () => {
   test("expected primary-file list is frozen and every path exists", () => {
     expect(EXPECTED.length).toBe(13)
@@ -189,16 +358,40 @@ describe("SEP5 ratchet enrollment", () => {
 
     expect(allDispositionIds(audit)).toEqual([...AUDIT_IDS].sort())
     expect(auditHeadingIds(auditMarkdown)).toEqual([...AUDIT_IDS].sort())
-    expect(audit.execute).toEqual([])
-    expect(audit.closed).toHaveLength(19)
-    expect(audit.conditional).toHaveLength(11)
-    expect(audit.intentional).toEqual(["D29"])
+    for (const disposition of Object.keys(EXPECTED_DISPOSITIONS) as AuditDisposition[]) {
+      expect(audit[disposition]).toEqual([...EXPECTED_DISPOSITIONS[disposition]].sort())
+    }
     expect(registerIds(register, "Conditional items")).toEqual(audit.conditional)
     expect(registerIds(register, "Closed items")).toEqual(
       [...audit.closed, ...audit.intentional]
         .filter((id) => !IMPLEMENTED_FINDINGS.includes(id as (typeof IMPLEMENTED_FINDINGS)[number]))
         .sort(),
     )
+  })
+
+  test("ticket manifest is an exact, tracked, linked status and proof universe", () => {
+    expect(TICKETS.map((ticket) => ticket.id)).toEqual([
+      "SEP5-00",
+      "SEP5-01",
+      "SEP5-02",
+      "SEP5-03",
+      "SEP5-04A",
+      "SEP5-04B",
+      "SEP5-05",
+      "SEP5-06",
+      "SEP5-07",
+      "SEP5-08",
+      "SEP5-09",
+      "SEP5-10",
+      "SEP5-11",
+      "SEP5-12",
+    ])
+    expect(ticketMarkdownPaths()).toEqual(TICKETS.map((ticket) => ticket.path).sort())
+    const contents = new Map(
+      TICKETS.map((ticket) => [ticket.path, readFileSync(join(ROOT, ticket.path), "utf8")]),
+    )
+    const index = readFileSync(join(ROOT, EXECUTION_INDEX_PATH), "utf8")
+    expect(validateTicketManifest(contents, index)).toEqual([])
   })
 
   test("governance packet tracking and terminal copy cannot regress", () => {
@@ -227,5 +420,44 @@ describe("SEP5 ratchet enrollment", () => {
     const auditMarkdown = readFileSync(join(ROOT, AUDIT_PATH), "utf8")
     const mutated = auditMarkdown.replace("| [D15](#d15) |", "| [D14](#d14) |")
     expect(allDispositionIds(auditDispositionIds(mutated))).not.toEqual([...AUDIT_IDS].sort())
+  })
+
+  test("mutation: swapping two finding dispositions is rejected by exact identity", () => {
+    const auditMarkdown = readFileSync(join(ROOT, AUDIT_PATH), "utf8")
+    const mutated = auditMarkdown
+      .replace("| [D7](#d7) | conditional |", "| [D7](#d7) | closed |")
+      .replace("| [D9](#d9) | closed |", "| [D9](#d9) | conditional |")
+    const dispositions = auditDispositionIds(mutated)
+    expect(dispositions.closed).toHaveLength(EXPECTED_DISPOSITIONS.closed.length)
+    expect(dispositions.conditional).toHaveLength(EXPECTED_DISPOSITIONS.conditional.length)
+    expect(dispositions.closed).not.toEqual([...EXPECTED_DISPOSITIONS.closed].sort())
+    expect(dispositions.conditional).not.toEqual([...EXPECTED_DISPOSITIONS.conditional].sort())
+  })
+
+  test("mutation: missing ticket, damaged status, and broken index link are each named", () => {
+    const contents = new Map(
+      TICKETS.map((ticket) => [ticket.path, readFileSync(join(ROOT, ticket.path), "utf8")]),
+    )
+    const index = readFileSync(join(ROOT, EXECUTION_INDEX_PATH), "utf8")
+
+    const missing = new Map(contents)
+    missing.delete(TICKETS[1].path)
+    expect(validateTicketManifest(missing, index)).toContain("SEP5-01:missing-ticket")
+
+    const damagedStatus = new Map(contents)
+    damagedStatus.set(
+      TICKETS[2].path,
+      (damagedStatus.get(TICKETS[2].path) ?? "").replace(
+        "**Status:** LANDED",
+        "**Status:** PLANNED",
+      ),
+    )
+    expect(validateTicketManifest(damagedStatus, index)).toContain("SEP5-02:status")
+
+    const brokenIndex = index.replace(
+      "../../sep-5-secret-detection/tickets/SEP5-03-secret-detector-parity.md",
+      "../../sep-5-secret-detection/tickets/missing.md",
+    )
+    expect(validateTicketManifest(contents, brokenIndex)).toContain("SEP5-03:index-link")
   })
 })
