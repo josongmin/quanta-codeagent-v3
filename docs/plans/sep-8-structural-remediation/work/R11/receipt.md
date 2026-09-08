@@ -1,6 +1,6 @@
 # R11 receipt — C-F1 + C-F9
 
-Status: **implemented** (owner-local GREEN). I-stage **not applied**.
+Status: **implemented** (owner-local GREEN). I-stage **applied on W2-I** (`29d7e4ff1`).
 
 Worker: W2-C R11  
 Worktree: `/Users/songmin/quanta-codeagent-v3-w2-r11`  
@@ -29,7 +29,7 @@ Policy: W0.5 freeze in `work/W0.md` (ready modes, same `McpClient` + `McpTranspo
 
 - Isolated path is the **same** `McpClient` + `McpTransport`. `IsolatedMcpClient` is a delegating facade (`dxt-ready-line`). Factory (`MCP_USE_ISOLATED_SPAWN`) selects `IsolatedMcpTransport` with **`process-ready`**. HTTP/`url` unchanged. Flag off → stdio.
 - bun-spawner: `process-ready` does not consume the first stdout line; `dxt-ready-line` still waits for a sentinel. `trySend` returns `Error`; `IsolatedProcess.send` stays NO-THROW. Isolated MCP transport maps drop → Error.
-- Production constructors (`mcp-composition`, `mcp-bridge`, `skill-mcp-wire`, plugin launcher) **not** switched. See UNAPPLIED `integration-delta.md`.
+- Production constructors (`mcp-composition`, `mcp-bridge`, `skill-mcp-wire`, plugin launcher): worker left them; **W2-I applied**. See `integration-delta.md`.
 
 ### C-F9 — reauth without initialize
 
@@ -78,10 +78,10 @@ Load-bearing GREEN (W0.5):
 
 ## Unverified / out of scope
 
-- I-stage host/agent/catalog/barrel (UNAPPLIED `integration-delta.md`).
-- repository prepush / lint-debt campaign / `bun fc build`.
+- I-stage host/agent/catalog/barrel: **applied on W2-I**. Catalog YAML was rewritten to the factory path.
+- repository prepush / lint-debt campaign not claimed as W2 closeout.
 - skybridge / whole plugin-isolation refactor.
-- Switching production constructors (explicitly I-stage).
+- G-F5.4 is R13, not this package.
 
 ## Files changed (this worker)
 

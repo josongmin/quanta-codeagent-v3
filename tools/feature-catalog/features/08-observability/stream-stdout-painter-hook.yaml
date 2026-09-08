@@ -35,9 +35,11 @@ purpose: |
   in-flight `**bold**` at end-of-turn would silently drop. When no
   painter is wired (recorders, Web surface) every delta is written
   verbatim — byte-identical to the pre-painter path (RFC §1.2
-  default-OFF). All assistant text + tool stderr / preview is funneled
+  default-OFF).   All assistant text + tool stderr / preview is funneled
   through `redactStr` before stdout so a leaked secret in model output
-  cannot hit the terminal.
+  cannot hit the terminal. `tool_progress` and provider `in_progress`
+  also run `redactStr` before `oneLine` (SEP7-D-11). `response_queued`
+  hint stays `oneLine` only — out of that finding's two-field scope.
 evidence:
   code:
     - src/stream/adapters/stdout.ts
@@ -47,6 +49,7 @@ evidence:
   tests:
     unit:
       - tests/unit/stdout.test.ts
+      - tests/unit/sep8-remediation/r01/d11-progress-redact-before-oneline.test.ts
     integration: []
     contract: []
 knobs: []

@@ -16,7 +16,7 @@ surface_integration:
   cli: full
   web: full
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-09-08"
   evidence:
     cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "agent calls to the side_agent_* tools render as tool cards via the bridged tool_call/tool_result events in session-hooks.ts"
@@ -27,9 +27,15 @@ purpose: |
   깨고, 깰 때마다 ONE bounded pass 돌리고, 결과를 mailbox로 PUSH(블로킹 X).
 
   코어 (`src/side-agent/`, PURE leaf, 모든 effect 주입 포트 — runner/mailbox/sink/
-  events/timers/clock, Date.now/setInterval/RNG 없음): `SideAgentDaemonRegistry`
-  spawn/findings/list/stop/stopAll, `SideAgentSpec{task,trigger(interval|event),
-  maxWakes,maxTurnsPerWake,idleReapMs?}`, runaway guard(maxConcurrent default 2).
+  events/timers/clock, Date.now/setInterval/RNG 없음). Cadence/bounds는
+  `createDaemonEngine` (`control.ts`)가 소유한다. in-process registry와 OS-process
+  registry는 둘 다 `runPass` adapter — wake count/timer를 각자 세지 않는다.
+  `wakesDone`은 완료 터미널(`findings`/`no_finding`/`failed`)당 1회; child-death는
+  `cancelled`(wakesDone 불변) + buffered finding은 feed에 남긴다. event trigger는
+  주입된 `events` 포트가 없으면 `invalid-spec`(빈 버스 = 좀비 daemon 금지,
+  ADR-0483). `SideAgentDaemonRegistry` spawn/findings/list/stop/stopAll,
+  `SideAgentSpec{task,trigger(interval|event), maxWakes,maxTurnsPerWake,idleReapMs?}`,
+  runaway guard(maxConcurrent default 2).
 
   도구 (`src/tool/side-agent/`, duck-typed `SideAgentDaemonPort`=@/tool fence clean):
   `side_agent_spawn`/`_list`/`_stop`/`_findings`. tier1 `buildSideAgentBlock`이
@@ -37,6 +43,7 @@ purpose: |
   미등록=byte-identical).
 evidence:
   code:
+    - src/side-agent/control.ts
     - src/side-agent/registry.ts
     - src/side-agent/types.ts
     - src/tool/side-agent/index.ts
@@ -48,6 +55,7 @@ evidence:
       - tests/unit/side-agent-hellgate.test.ts
       - tests/unit/side-agent-tools-hellgate.test.ts
       - tests/unit/side-agent-runner-hellgate.test.ts
+      - tests/unit/sep8-remediation/r05/h-sa-control-contract.test.ts
     integration:
       - tests/unit/side-agent-block-e2e-hellgate.test.ts
     contract: []
@@ -59,7 +67,7 @@ knobs:
     default: 'undefined'
     purpose: 'Optional — when set, wireSideAgentDaemons composes an idle-barrier (Capability C) so a leader can await teamIdle() over the resident daemons instead of polling; absent ⇒ legacy registry (byte-identical).'
 notes: |
-  L3: pure 데몬 registry 코어 + 4 도구 + tier1 블록 + AgentConfig slot + knob +
+  L3: shared `createDaemonEngine` + 4 도구 + tier1 블록 + AgentConfig slot + knob +
   **Phase-2 host runner adaptation 완료** (`src/agent/side-agent-runner.ts`):
   `subagentRunnerToSidePass`(read-biased SIDE_AGENT_READONLY_TOOLS toolFilter +
   bounded maxTurns, finalText→finding; summary=line-1 cap 200 / detail cap 8KB —

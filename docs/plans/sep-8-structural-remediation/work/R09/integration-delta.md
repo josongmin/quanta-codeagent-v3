@@ -1,6 +1,6 @@
-# R09 integration delta — UNAPPLIED
+# R09 integration delta — APPLIED (W1-I, `29d7e4ff1`)
 
-Status: **not applied**. Integrator-only. Worker did not edit reserved barrels.
+Status: **applied**. Worker originally left barrels UNAPPLIED; W1-I re-exported provenance helpers and `projectEvalCost` / `EvalCostPricing`.
 
 ## `src/observability/usage-accounting/index.ts`
 

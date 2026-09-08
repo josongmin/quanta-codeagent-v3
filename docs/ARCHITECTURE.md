@@ -263,6 +263,10 @@ Current rules:
 
 ## 6. Adding a new ...
 
+**...MCP transport** — implement `McpTransport` (`start`/`send`/`onMessage`/`onExit`/`close`). Live carriers: `StdioMcpTransport`, HTTP/SSE, `IsolatedMcpTransport`. JSON-RPC correlation stays in `McpClient`. `IsolatedMcpClient` is a delegating facade (`dxt-ready-line`); do not grow a second protocol core. `MCP_USE_ISOLATED_SPAWN` selects isolated `process-ready` for command servers; HTTP/`url` is unchanged. HTTP reauth is create→start→initialize→initialized→publish; `tools/call` is not auto-replayed.
+
+**...side-agent daemon** — both backers are `runPass` adapters under `createDaemonEngine` (`src/side-agent/control.ts`). `wakesDone` increments once per completed terminal (`findings`/`no_finding`/`failed`), never per finding and never on `cancelled`/child-death. Event triggers require an injected event source (`invalid-spec` otherwise). Process IPC terminals: `finding` (0..N) plus one of `no_finding`|`failed`|`cancelled`|`completed`; parent-owned wakes require matching `version` + `wakeId`.
+
 **...tool** — implement `Tool<I, O>` in `src/tool/<name>/index.ts`. Pick `hitlTier`. Add it to the `buildDefaultTools(ports)` array in `src/tool/index.ts`. Do NOT add to an external module-load const list.
 
 **...LLM adapter** — implement `LLMPort.stream` in `src/llm/adapters/<provider>.ts`. Honor the closed `StreamEvent` union exactly. Add an entry to `ADAPTER_REGISTRY` in `src/llm/factory.ts`. Exhaustiveness `default: assertNever(x, "ToolChoice")` on every switch over the `ToolChoice` / `ContentBlock` / `RawEvent` unions.

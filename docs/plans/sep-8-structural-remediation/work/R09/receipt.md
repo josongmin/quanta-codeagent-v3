@@ -73,7 +73,8 @@ Also green: persist/pricing-ssot hellgates, ledger-enforce unit+loop e2e, eval-a
 - `TokenCostRollup` 5-field object unchanged (existing `toEqual` suites).
 - Direct ledger record without `cost` still bills sonnet fallback for display.
 - Legacy `v:1` blobs without provenance: not known; next known tick does not inherit that USD into the hard cap.
-- `usage-accounting/index.ts` **not** edited. See UNAPPLIED `integration-delta.md`.
+- `usage-accounting/index.ts` **applied on W1-I** (`29d7e4ff1`). See `integration-delta.md`.
+- Production `costUsd: null` is unpriced (`unavailable`), not measured `$0`. Known-zero may still render `$0`.
 
 ## Unverified / out of scope
 

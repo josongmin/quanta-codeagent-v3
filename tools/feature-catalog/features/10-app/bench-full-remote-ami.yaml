@@ -18,7 +18,7 @@ surface_integration:
   cli: partial
   web: na
   method: audited
-  verified: "2026-06-19"
+  verified: "2026-09-08"
   evidence:
     cli: "bench full-remote subcommand; AMI override via --ami / env"
     web: "no browser affordance"
@@ -28,6 +28,17 @@ purpose: |
   artifacts under benchHome() (not /tmp), and reusable box-session/pool wiring
   so repeated chunks amortize the bootstrap tax instead of re-provisioning every
   wave.
+
+  Family-declared `remoteBootstrap` is resolved at every launch root by
+  `withResolvedFamilyBootstrap` (`full-remote`, `pool`, `box up`) from the typed
+  `BenchRunConfig` — not from a fresh env read. A family that declares a pin
+  (ProMax) and arrives without payload is refused on both fresh
+  `setupBoxForFamily` and warm attach. `boxGrade` skips the swebench shim only,
+  never family setup. Bootstrap order: common install → optional shim → always
+  family setup → profile readiness. Warm probe is the same profile-derived
+  string (`bun`+`src`; `~/swebench-python` only when the family grades through
+  the swebench harness). Actual EC2 RunInstances proof is a local-only gap
+  (fake SSH contract tests only).
 evidence:
   code:
     - src/apps/bench/remote/verdict-buckets.ts
@@ -38,6 +49,12 @@ evidence:
     - src/apps/bench/remote/ec2.ts
     - src/apps/bench/remote/full.ts
     - src/apps/bench/remote/pool.ts
+    - src/apps/bench/commands/box.ts
+    - src/apps/bench/commands/pool.ts
+    - src/apps/bench/remote/box-session/family-bootstrap-resolve.ts
+    - src/apps/bench/remote/box-session/bootstrap-phases.ts
+    - src/apps/bench/remote/box-session/family-box-setup.ts
+    - src/apps/bench/profiles/family-box-readiness.ts
     - src/apps/bench/cli.ts
   adrs: [536]
   tests:
@@ -49,8 +66,11 @@ evidence:
       - tests/unit/full-remote-bench-env-forward.test.ts
       - tests/unit/bench-remote-backend.test.ts
       - tests/unit/bench-concurrency-hellgate.test.ts
+      - tests/unit/sep8-remediation/r13/g-f5-bootstrap-phases.test.ts
+      - tests/unit/sep8-remediation/r13/g-f5-composition-ratchet.test.ts
     integration:
       - tests/integration/bench-box-ls-status.test.ts
+      - tests/integration/sep8-remediation/r13/g-f5-attach-warm-reuse.test.ts
     contract: []
 knobs: []
 deliberate_hold: null

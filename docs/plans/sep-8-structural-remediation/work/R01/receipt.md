@@ -66,7 +66,9 @@ Stdout `tool_progress` / `in_progress` rendered `ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0
 
 All six families + nested wrapper/prefix/redirect classify `secret`. Benign controls stay `public`: `bash -c echo hi`, `env FOO=1`, `printenv HOME`, `bash script.sh`.
 
-F-07.4: `classifyCommandShape` → `redactSecrets({ origin: "tool_result", sourceClass })` replaces the dump with `[REDACTED:source_class_secret]`; synth value gone. Layer-2-only pass keeps the synth. bash `classifySource` wiring is pinned by a call-pattern scan of `src/tool/bash/index.ts` (`classifyCommandShape(input.command`).
+F-07.4 **on integrated `main`:** live `makeBashTool().classifySource` → `dispatchTool` preview replaces the dump with `[REDACTED:source_class_secret]`; synth `SYNTH_ENV_NOT_A_FORMAT_SECRET_9f3a` is absent. Rail: `tests/integration/sep8-remediation/r01/f07-classify-redact-path.test.ts`. Layer-2-only pass keeps the synth. Worker-local worktree originally scanned `src/tool/bash/index.ts` (`classifyCommandShape(input.command`) because `zod` import failed; that scan is no longer the completion evidence.
+
+Follow-up unwraps (same owner, same HEAD): utility prefixes (`eval`/`command`/`builtin`/`nice`/`nohup`/`time`/`sudo`/`xargs`/`watch`/`busybox`/`timeout`/`stdbuf`), `ruby -e` + `ENV`, command substitution (`$(printenv)`, backticks) on the **raw cmd**, `perl -e` / `php -r` / `deno eval`. Unknown `-c` unwraps only if the payload classifies secret (`dash -c printenv` secret; `gcc -c foo.c` public). PHP `-r` is not in the global interpreter-eval flag set (`node -r` is require).
 
 Stdout progress: raw ghp_ token absent, `***REDACTED***` present, tool name / thinking / 40% / benign path still render.
 
@@ -77,10 +79,11 @@ Stdout progress: raw ghp_ token absent, `***REDACTED***` present, tool name / th
 
 ## Remaining proof gap
 
-- Integrator must re-run on merged source (`verified` is not claimed here).
-- Live `makeBashTool().classifySource` import was not executed (worktree has no `node_modules`; `zod` resolution failed). Producer wiring is scanned, not imported.
-- `tests/unit/security-slice-boundary.test.ts` could not run here (`typescript` package missing). File is inside `src/security/` and does not add peer imports.
-- Supported shells are `bash|sh|zsh` only. Not a POSIX parser: `$(printenv)` / unquoted glued forms outside the glued-head fail-closed set are not claimed.
+- W7 `verified` is not claimed. Global `prepush` is not a W1 closeout.
+- JSONL disk persist of a spawned bash dump is not a closeout rail; dispatch `preview`/`block.content` is the proven model-facing sink.
+- Nested `$()` uses first `)`. Unlisted language REPLs stay inventory-out.
+- `response_queued` hint is still `oneLine` without `redactStr` (out of SEP7-D-11 finding scope: the two progress fields only).
+- Supported shells are `bash|sh|zsh` only. Not a POSIX parser.
 
 ## Integration-delta
 

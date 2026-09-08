@@ -1,11 +1,13 @@
 # Sep-08 — disjoint write-set wave plan
 
-상태: **분할 계획. 구현 dispatch/제품 수정 없음.**
+상태: **분할 계획은 유지. W1·W2는 local `main` `29d7e4ff1`에 통합됨. W3+ 미착수. W7 verified 아님.**
 
 - 구조·근거: [README](/Users/songmin/quanta-codeagent-v3/docs/plans/sep-8-structural-remediation/README.md), [ACTIONS](/Users/songmin/quanta-codeagent-v3/docs/plans/sep-8-structural-remediation/ACTIONS.md).
 - 실행 배정의 machine-readable 원본: [waves.json](/Users/songmin/quanta-codeagent-v3/docs/plans/sep-8-structural-remediation/waves.json).
 - 검사기: [verify-waves.mjs](/Users/songmin/quanta-codeagent-v3/docs/plans/sep-8-structural-remediation/verify-waves.mjs).
-- 기준 HEAD: `f5f4875799141068af73e604129c8b9a09f76007`. audit digest는 manifest에 고정한다. 현재 dirty 문서도 함께 전달해야 하며 HEAD만 전달하면 계획 입력이 빠진다.
+- Plan baseline HEAD: `f5f4875799141068af73e604129c8b9a09f76007`.
+- Integrated source (W1+W2): `29d7e4ff1a2df3e925c1f3854432e3a741f5d2d7`. `waves.json` `sourceHead`는 이 값이다.
+- audit digest는 manifest에 고정한다. `docs/bugbash/sep-8-se-audit/`는 baseline 입력이지 구현 closeout이 아니다.
 
 ## 1. 전체 배정 — 39 finding / 16 package / 172 action
 
@@ -117,6 +119,8 @@ W0의 lock/platform/legacy writer 검토 결과가 R02 착수를 허용하지 �
 
 R01의 source sensitivity, R04의 patch operation, R09의 가격 provenance는 서로 다른 결정권자다. `src/tool/apply-patch.ts`는 W1-B worker write set에서 제외해 tool consumer 확장이 다른 security wiring과 경합하지 않게 한다.
 
+**구현 상태:** W1-P/I는 local `main` `29d7e4ff1`에 통합됨. G-F15 `costUsd:null`·F-07 follow-up unwrap·H-PATCH-02 tool-result rail도 같은 HEAD. W7 verified 아님.
+
 ### W2 — Side-agent / bench / MCP
 
 | Lane | Finding IDs | 병렬 source owner | I 단계 배선 |
@@ -126,6 +130,8 @@ R01의 source sensitivity, R04의 patch operation, R09의 가격 provenance는 �
 | W2-C / R11 | C-F1, C-F9 | MCP core/transports + plugin-isolation | host/agent/skill/plugin MCP constructors + feature YAML/build |
 
 R05와 R11은 모두 child process를 다루지만 공통 process helper를 병렬로 추출하지 않는다. side-agent는 charter/wake lifecycle, MCP는 carrier/RPC/session lifecycle을 소유한다. host 변경은 W2-I에 예약한다.
+
+**구현 상태:** W2-P/I는 같은 `29d7e4ff1`에 통합됨. G-F5.4 실제 EC2 proof는 열린 갭.
 
 ### W3 — Remote / transactions / session protocol
 

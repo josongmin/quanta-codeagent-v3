@@ -80,4 +80,4 @@ Mutation that must stay RED:
 
 ## Remaining gap (I-delta)
 
-See `integration-delta.md`. Host assembler still omits `setInterval`/`clearInterval`/`events`; process registry defaults to global timers so production interval re-wake works without I-stage. Barrel does not export `control.ts`. `autoCharterOnReady` default remains true for supervisor-direct tests.
+See `integration-delta.md`. **W2-I applied** barrel `createDaemonEngine`/`validateSideAgentSpec`/`normalizeRunnerResult` and assembler timer ports. Event-bus for process-backed `trigger.kind === "event"` is still uninjected (`invalid-spec` without `events`). `autoCharterOnReady` default remains true for supervisor-direct tests.

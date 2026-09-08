@@ -1,7 +1,6 @@
-# R05 integration-delta (UNAPPLIED)
+# R05 integration-delta — APPLIED (W2-I, `29d7e4ff1`)
 
-Status: **I-stage only**. Do not apply in this worker. `src/side-agent/index.ts` and
-`src/host/**` are reserved.
+Status: **applied** on integrated source. Worker originally left host/barrel for I-stage. W2-I applied `src/side-agent/index.ts` and assembler timer ports. Event-bus for process-backed `trigger.kind === "event"` remains uninjected (`invalid-spec` without `events`).
 
 ## Barrel (`src/side-agent/index.ts`)
 

@@ -30,8 +30,14 @@ purpose: |
   `JsonRpcMessage` discriminated union — response (by `id`) vs
   notification/request (by `method`). (2) `McpClient` — protocol version
   `"2025-06-18"`, `CLIENT_INFO` { name:"quanta", version:"0.1.0" },
-  default request timeout 30s, four lifecycle methods (`initialize` /
-  `tools/list` / `tools/call` / `shutdown`). (3) `McpError` typed
+  default request timeout 30s. Lifecycle: `start` / `initialize` /
+  `tools/list` / `tools/call` / `listResources` / `readResource` /
+  `listPrompts` / `shutdown`. HTTP OAuth 재인증은 `client/reauthorize.ts`:
+  create→start→initialize(raw, 401 재귀 없음)→initialized notification→
+  negotiated state publish. Replay allow-list는 idempotent initialize/list
+  계열뿐. `tools/call`은 완료 불명이면 auto-replay 금지. handshake 실패는
+  candidate만 close하고 old transport를 restore(old 세션을 먼저 파괴하지 않음).
+  stop은 candidate+old 둘 다 close. (3) `McpError` typed
   failure (extends `QuantaError`, code: "mcp") — stable code lets callers
   branch without string matching. (4) `MAX_RESULT_CHARS = 200_000` —
   max chars of joined tool-result text we hand back from `callTool` to
@@ -43,6 +49,7 @@ purpose: |
 evidence:
   code:
     - src/mcp/client.ts
+    - src/mcp/client/reauthorize.ts
     - src/mcp/jsonrpc.ts
     - src/mcp/types.ts
   adrs: [7]
@@ -50,6 +57,8 @@ evidence:
     unit:
       - tests/unit/mcp-jsonrpc.test.ts
       - tests/unit/mcp-client-errors.test.ts
+      - tests/unit/sep8-remediation/r11/c-f9-reauth-handshake.test.ts
+      - tests/unit/sep8-remediation/r11/c-f9-start-only-swap-mutation.test.ts
     integration: []
     contract: []
 knobs: []

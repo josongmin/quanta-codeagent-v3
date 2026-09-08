@@ -31,6 +31,7 @@ Tests:
 - `tests/unit/sep8-remediation/r04/h-patch-01-unified-rename.test.ts`
 - `tests/unit/sep8-remediation/r04/h-patch-02-rollback-truth.test.ts`
 - `tests/integration/sep8-remediation/r04/h-patch-01-apply-rename.test.ts`
+- `tests/integration/sep8-remediation/r04/h-patch-02-tool-result.test.ts` (I-stage follow-up: Incomplete throw reaches dispatch preview)
 
 Artifacts:
 
@@ -83,8 +84,7 @@ Mutation that must stay RED:
 
 ## Remaining gap
 
-- Barrel re-exports of `PatchConvertError` / `PatchRollbackIncompleteError` / `UndoFailure` — UNAPPLIED (see `integration-delta.md`).
-- `src/tool/apply-patch.ts` typed error/result projection (convert throw before parse; Incomplete vs clean rollback; fast-apply `classifyFastApplyError`) — UNAPPLIED.
+- Barrel / apply-patch projection: **applied on W1-I** (`29d7e4ff1`). See `integration-delta.md`.
 - No new multi-file crash-atomicity guarantee. Incomplete names uncertain paths only.
 - Symlink escape remains the jail port’s job; converter emits literal path strings.
 

@@ -40,11 +40,14 @@ evidence:
     - src/mcp/transports/isolated.ts
     - src/mcp/isolated-client.ts
     - src/plugin-isolation/bun-spawner.ts
+    - src/agent/plugin-mcp-launcher/isolated-launcher-port.ts
   adrs:
     - docs/decisions/0162-plugin-process-isolation.md
   tests:
     unit:
       - tests/unit/sep8-remediation/r11/c-f1-factory-seam.test.ts
+      - tests/unit/sep8-remediation/r11/c-f1-facade-delegate.test.ts
+      - tests/unit/sep8-remediation/r11/c-f1-isolated-send-failure.test.ts
       - tests/unit/plugin-isolation-mcp-integration-hellgate.test.ts
     integration:
       - tests/integration/sep8-remediation/r11/c-f1-process-ready-stdio.test.ts

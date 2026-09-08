@@ -1,6 +1,6 @@
 # Sep-08 structural remediation — 39 findings / 16 work packages
 
-상태: **계획만 작성. 제품 수정 및 해결 완료 판정 없음.**
+상태: **W1·W2 implemented on local `main` (`29d7e4ff1`). W3+ 미착수. W7 `verified` 39/39는 아님.**
 
 실행 체크리스트: [ACTIONS — 39건의 근거·수정·제거·실패 rail](/Users/songmin/quanta-codeagent-v3/docs/plans/sep-8-structural-remediation/ACTIONS.md). 이 README는 구조/소유권을, ACTIONS는 finding별 실행과 완료 증거를 관리한다.
 
@@ -8,12 +8,14 @@
 
 ## 1. 기준과 목표
 
-- Source HEAD: `f5f4875799141068af73e604129c8b9a09f76007`.
+- Plan baseline HEAD: `f5f4875799141068af73e604129c8b9a09f76007`.
+- Integrated source (W1+W2): `29d7e4ff1` on local `main`.
 - 입력: `docs/bugbash/sep-8-se-audit/agent-1.md`부터 `agent-7.md`까지 현재 재검증본. **39건 = P1 7 / P2 27 / P3 5**.
 - 입력 digest: `769530ddf9d76b68bdfdf740771155bd2b255a79c9319516956283469bbedba8`. SHA-256, 번호순으로 각 repo-relative path + NUL + 원문 bytes + NUL을 누적.
 - 작성 시 dirty: 위 audit 문서 7개. 제품 소스 변경 없음. 향후 worktree에 HEAD만 전달하면 이 입력 문서들은 누락된다. 착수 시 정확한 문서 snapshot도 전달한다.
 - 근거의 상세 `path:line`은 입력 문서에 유지한다. 아래 소스 경로는 현재 owner이며, 새 타입·모듈명은 **제안**이다.
 - 목표는 패치 개수 최소화가 아니라 **하나의 불변식에 하나의 결정권자, 모든 production consumer의 동일 계약 사용, 실패 시 사실에 맞는 결과**다.
+- **구현 상태 (2026-09-08):** W1(R01/R04/R09)과 W2(R05/R13/R11)는 local `main` `29d7e4ff1`에 통합됨. G-F5.4는 열린 갭. W3+·W0.3–W0.4·W0.6 R10 half는 미착수. W7 `verified` 39/39는 아님. audit `agent-*.md`는 이 HEAD의 closeout이 아니다.
 - 철회·미입증·inventory 항목은 재도입하지 않는다. 특히 C-F5 EOF wiring은 작업 대상이 아니다. 아래 구현 전제 검토는 새로운 확정 finding 추가가 아니다.
 
 ## 2. 설계 원칙과 금지선
@@ -212,7 +214,7 @@
 
 ## 5. 실행 순서 / 병렬 소유권
 
-이 절은 **후속 구현 dispatch 계획**이며 지금 worker 실행 또는 제품 변경을 지시한 기록이 아니다.
+이 절은 wave 절차다. W1·W2는 이미 수행됐다. 아래 규칙은 W3+에 그대로 적용한다.
 
 ### W0 — Integrator가 먼저 고정할 것
 
@@ -270,8 +272,12 @@
 
 ## 8. 계획 문서 검증
 
+계획 **작성 턴** 기록 (baseline HEAD `f5f48757`, 제품 변경 없음):
+
 - 입력 digest 일치, finding 39개 각각 정확히 한 package 배정, severity 일치, package 16개 확인.
 - 위에 명시한 source/test/tool/doc 경로 67개 참조 존재 확인. 새 API 이름은 구현된 것으로 세지 않았다.
-- 문서 whitespace 검사 통과. 제품 source/test/tool/package 변경 없음.
-- 이 턴에서는 제품 test suite를 실행하지 않았다. 앞선 audit baseline PASS를 이 계획의 회귀 rail PASS로 전용하지 않는다.
-- 후속 ACTIONS 보강은 현재 source HEAD 유지 상태에서 수행했다. finding별 4개 액션과 W0/통합 체크리스트를 추가했으며 source evidence 위치·기존 test path·coverage를 별도 검사한다.
+- 문서 whitespace 검사 통과. 그 턴의 제품 source/test/tool/package 변경 없음.
+- 그 턴에서는 제품 test suite를 실행하지 않았다. 앞선 audit baseline PASS를 이 계획의 회귀 rail PASS로 전용하지 않는다.
+- 후속 ACTIONS 보강은 당시 source HEAD 유지 상태에서 수행했다. finding별 4개 액션과 W0/통합 체크리스트를 추가했으며 source evidence 위치·기존 test path·coverage를 별도 검사한다.
+
+현재 local `main` `29d7e4ff1`은 W1·W2 제품 변경을 포함한다. 구현 증거는 `work/W1-I.md` / `work/W2-I.md`와 각 `work/Rxx/receipt.md`다.

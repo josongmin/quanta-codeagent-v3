@@ -28,9 +28,14 @@ purpose: |
   soft/hard × session/daily 4-arm `BudgetLimitKind`, per-session and per-
   day rollups, and disk persistence via `serialize()` / `hydrate()` (pure
   store, 0 I/O, 0 SQLite — caller pipes to disk). Contracts: NO-THROW
-  surface, exactOptional `OMITTED-not-undefined`, pricing fallback to
-  sonnet for unknown models (event STILL records its own model name so
-  operators see the breakdown), per-(scope,kind) breach debounce, LRU
+  surface, exactOptional `OMITTED-not-undefined`. `emitUsage` passes the
+  canonical event cost into the ledger; the ledger does not re-price that
+  event with sonnet `safeFallback`. Unknown (`pricingKnown:false`) is
+  excluded from USD hard stop; estimated fallback remains display-only
+  (not USD-enforced). Direct `ledger.record` without `cost` still bills
+  sonnet fallback for display. Missing hydrate provenance is not `known`.
+  The event STILL records its own model name so
+  operators see the breakdown. per-(scope,kind) breach debounce, LRU
   `maxEvents` cap (default 10 000) with aggregate recomputation over the
   retained slice, hydrate-as-known-empty on corrupt JSONL. Read-only
   `budget_status` tool surfaces the snapshot to the model. `defaultTier1`
@@ -39,13 +44,19 @@ purpose: |
 evidence:
   code:
     - src/agent/budget-ledger.ts
+    - src/agent/budget-ledger/canonical-cost.ts
+    - src/agent/budget-ledger/codec.ts
+    - src/observability/usage-accounting/provenance.ts
     - src/agent/budget-tool.ts
     - src/agent/tier1/budget.ts
   adrs: [138]
   tests:
     unit:
       - tests/unit/budget-ledger-hellgate.test.ts
-    integration: []
+      - tests/unit/sep8-remediation/r09/p1-a-02-meter-ledger-policy.test.ts
+    integration:
+      - tests/integration/sep8-remediation/r09/p1-a-02-emit-usage-loop.test.ts
+      - tests/integration/budget-ledger-real-loop-e2e.test.ts
     contract: []
 config_refs:
   env:

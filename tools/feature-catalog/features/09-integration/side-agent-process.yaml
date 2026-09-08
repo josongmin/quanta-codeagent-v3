@@ -16,7 +16,7 @@ surface_integration:
   cli: full
   web: na
   method: audited
-  verified: "2026-06-15"
+  verified: "2026-09-08"
   evidence:
     cli: "LIVE-wired: assembleAgentConfig reads runtimeConfig().sideAgentProcess (agent-config-assembler.ts:535) and mints cfg.sideAgentDaemons = createProcessSideAgentDaemonRegistry({...}) (:536) — a forked-child OS-process registry backed by nodeProcessForkPort + runCharterPassLLM, reachable from src/apps/cli/index.ts. QUANTA_SIDE_AGENT_PROCESS on ⇒ side-agent runs as a supervised OS child."
     web: "no web affordance — internal OS-process daemon; not produced on any web event."
@@ -28,17 +28,22 @@ purpose: |
   NON-GOAL("spawned as a separate OS process")으로 미룬 HIGH OS-integration 항목의
   V1 CORE.
 
+  Cadence는 in-process와 같은 `createDaemonEngine`이 소유한다. process registry는
+  charter IPC `runPass` adapter다. `wakesDone`은 finding 수가 아니라 완료 터미널당
+  1회. LLM null/empty → child `no_finding`(feed에 synthetic finding 없음).
+  import/provider/throw → `failed`. child-death → `cancelled`(wakesDone 불변).
+
   코어 (`src/side-agent/process.ts`, PURE LEAF — concrete import/IO/clock/timer/RNG
-  ZERO, 모든 effect 주입 포트, `@/side-agent`는 아무것도 안 닿음):
-  `SideAgentIpcMessage`(closed union: charter/shutdown parent→child, ready/finding
-  child→parent — auditable wire), `ProcessForkSpec`/`ChildProcessHandle`(send/
-  onMessage/onExit/kill, NO-THROW: dead child send/kill=no-op, onExit가 권위 liveness),
-  `ProcessForkPort`(단일 OS seam), `DelayScheduler`(주입 backoff timer),
-  `backoffForAttempt`(pure exponential `base*2^(n-1)` cap clamp + exponent≤30
-  overflow guard), `createSupervisedProcessDaemon`(supervisor: fork→ready→charter
-  hand→running; UNEXPECTED exit⇒backoff respawn bounded by maxRestarts⇒
-  crashed-permanently runaway guard; clean stop()=no respawn; stop() mid-backoff
-  cancels pending respawn).
+  ZERO, 모든 effect 주입 포트):
+  `SIDE_AGENT_IPC_VERSION = 1`. `SideAgentIpcMessage` closed union: parent→child
+  charter/shutdown; child→parent ready + finding(0..N) + 터미널
+  `no_finding`|`failed`|`cancelled`|`completed`. parent-owned wake는 `version`과
+  `wakeId`가 둘 다 맞아야 waiter가 받는다(누락 drop). supervisor-direct V1
+  charter-on-ready는 여전히 one-shot일 수 있다.
+  `ProcessForkSpec`/`ChildProcessHandle`(send/onMessage/onExit/kill, NO-THROW:
+  dead child send/kill=no-op, onExit가 권위 liveness), `ProcessForkPort`,
+  `DelayScheduler`, `backoffForAttempt`, `createSupervisedProcessDaemon`
+  (fork→ready→charter; UNEXPECTED exit⇒backoff respawn bounded by maxRestarts).
 
   REAL OS 어댑터 (`src/host/runtime/side-agent-fork-port.ts`, composition root —
   순수 supervisor를 `node:child_process.fork`에 커플하는 SINGLE place):
@@ -53,8 +58,10 @@ purpose: |
   transport (depth follow-up).
 evidence:
   code:
+    - src/side-agent/control.ts
     - src/side-agent/process.ts
     - src/side-agent/process-registry.ts
+    - src/side-agent/worker-entry.mjs
     - src/side-agent/worker-charter-runner.ts
     - src/host/runtime/side-agent-fork-port.ts
     - src/host/runtime/agent-config-assembler.ts
@@ -64,11 +71,13 @@ evidence:
       - tests/unit/side-agent-process-supervisor-hellgate.test.ts
       - tests/unit/side-agent-process-registry-hellgate.test.ts
       - tests/unit/side-agent-assembler-process-wire-hellgate.test.ts
+      - tests/unit/sep8-remediation/r05/h-sa-control-contract.test.ts
     integration:
       - tests/integration/side-agent-process-wire-e2e.test.ts
       - tests/integration/side-agent-process-os-fork-e2e.test.ts
       - tests/integration/side-agent-process-llm-charter-e2e.test.ts
       - tests/integration/side-agent-ipc-kill-mid-result-e2e.test.ts
+      - tests/integration/sep8-remediation/r05/h-sa-os-child-protocol.test.ts
     contract: []
 knobs:
   - name: QUANTA_SIDE_AGENT_PROCESS

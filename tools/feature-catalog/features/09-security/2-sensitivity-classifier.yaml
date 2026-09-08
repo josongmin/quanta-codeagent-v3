@@ -17,7 +17,7 @@ surface_integration:
   cli: full
   web: na
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-09-08"
   evidence:
     cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal classifier/policy library, no UI affordance on any surface"
@@ -26,8 +26,16 @@ purpose: |
   OR a shell-command shape to a closed-enum `SensitivityClass`
   (`public` / `internal` / `secret`). NEITHER layer is heuristic — paths
   match against an EXPLICIT list of dotfiles / config locations; commands
-  match on the FIRST TOKEN + a structural arg shape (no fuzzy keyword
-  search of the whole command line). `"secret"` is the strongest signal:
+  match on executable basename plus a structural unwrap (shell `-c` clusters,
+  utility prefixes, command substitution on the raw line, interpreter eval
+  source). Not a POSIX parser and not a raw first-token lookup (`/bin/bash`
+  classifies as `bash`). Command-shape helpers live in
+  `command-shape.ts` (wrappers, pipelines, env prefixes, interpreter `-e`/`-c`,
+  `php -r`, `deno eval`). Nested `bash -c` / interpreter eval / env dumps fail
+  closed as `secret`. Unknown `-c` unwraps only if the payload classifies secret.
+  `classifyCommandShape` is the bash/pty/container-exec `classifySource` seam;
+  a `secret` class short-circuits `redactSecrets({ origin: "tool_result" })`
+  so Layer-2 format regex never sees the dump. `"secret"` is the strongest signal:
   the redaction layer replaces the entire tool output with a single
   `[REDACTED:source_class_secret]` placeholder BEFORE running format-regex
   matching. This is structural — these paths and commands can ONLY produce
@@ -38,6 +46,7 @@ purpose: |
 evidence:
   code:
     - src/security/sensitivity-classifier.ts
+    - src/security/command-shape.ts
     - src/security/redaction.ts
     - src/security/index.ts
     - src/agent/session-resources.ts
@@ -46,10 +55,13 @@ evidence:
   tests:
     unit:
       - tests/unit/security/sensitivity-classifier.test.ts
+      - tests/unit/sep8-remediation/r01/f07-command-shape-ratchet.test.ts
+      - tests/unit/sep8-remediation/r01/f07-command-shape-bypass.test.ts
       - tests/unit/secret-detection-hellgate.test.ts
       - tests/unit/memory-distill-redaction-hellgate.test.ts
     integration:
       - tests/integration/redaction-three-application-points.test.ts
+      - tests/integration/sep8-remediation/r01/f07-classify-redact-path.test.ts
     contract: []
 knobs: []
 deliberate_hold: null

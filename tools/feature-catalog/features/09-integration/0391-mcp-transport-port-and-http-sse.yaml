@@ -21,19 +21,22 @@ surface_integration:
     cli: "runs in the interactive CLI — 7/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal transport abstraction (stdio/http-sse carrier behind McpTransport interface); no UI affordance on any surface"
 purpose: |
-  client.ts core(request/dispatch/pending/timeout)는 불변. stdio 4곳
-  (start/send/pumpStdout/stop)을 transport port 뒤로 분리 — `McpTransport`
-  interface(start/send/onMessage/onExit/close). 3 impl: stdio(verbatim
-  move), http-sse(MCP Streamable-HTTP — POST send + SSE/JSON reply +
-  Mcp-Session-Id capture/echo + DELETE-on-close). `.mcp.json`의 server
-  entry에 `url` 필드 적으면 자동 HTTP transport, 없으면 stdio (default
-  byte-identical). plugin manifest MCPServerSpecSchema에도 url/headers
-  optional 추가(refine: command non-empty OR url).
+  client.ts core(request/dispatch/pending/timeout)는 불변. stdio start/send/pump/
+  stop을 transport port 뒤로 분리 — `McpTransport`
+  interface(start/send/onMessage/onExit/close). Impl:
+  stdio, http-sse (Streamable-HTTP + SSE/JSON + Mcp-Session-Id + DELETE-on-close),
+  IsolatedMcpTransport (plugin-isolation spawn; readyMode `dxt-ready-line` 또는
+  `process-ready`). `.mcp.json`의 `url`이면 HTTP, `MCP_USE_ISOLATED_SPAWN`이면
+  command 서버에 isolated process-ready, 둘 다 없으면 stdio (default
+  byte-identical). `IsolatedMcpClient`는 별도 protocol core가 아니라
+  `McpClient`+isolated(`dxt-ready-line`) facade. plugin manifest MCPServerSpecSchema에도
+  url/headers optional (command non-empty OR url).
 evidence:
   code:
     - src/mcp/transports/port.ts
     - src/mcp/transports/stdio.ts
     - src/mcp/transports/http-sse.ts
+    - src/mcp/transports/isolated.ts
     - src/mcp/client.ts
     - src/mcp/types.ts
     - src/skill/plugin-manifest.ts

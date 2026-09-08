@@ -18,22 +18,23 @@ surface_integration:
   cli: full
   web: na
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-09-08"
   evidence:
     cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal process-spawn port, no UI affordance on any surface"
 purpose: |
   Closed `IsolatedProcessSpawnerPort` (W11 Claude DXT
   `UtilityProcess.fork({serviceName, allowLoadingUnsignedLibraries})` 흡수)
-  + `Bun.spawn` adapter. 5s spawn timeout (첫 stdout 라인 = ready sentinel),
-  5s SIGTERM→SIGKILL escalation (runtime/guarded-spawn 의 2s KILL_GRACE_MS
-  과 별개 — plugin 은 init/shutdown 비용이 크다), 10MB single-line cap
-  (DoS 방지), NUL-byte 라인 drop, ASCII serviceName regex
-  `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`, QUANTA_SERVICE_NAME / QUANTA_ALLOW_UNSIGNED
-  env wiring, early-buffer flush on first subscriber (post-ready race 방지).
-  NO-THROW handle: send/onMessage/kill 모두 process exit 후 idempotent.
-  Future: Electron `UtilityProcess` adapter 만 추가하면 desktop surface 진출
-  완료 (OCP).
+  + `Bun.spawn` adapter. Ready modes (W0.5 freeze):
+  - `dxt-ready-line` (default) — 첫 stdout 라인이 sentinel, onMessage로 안 감.
+  - `process-ready` — stdio 연결이면 ready; 첫 라인은 JSON-RPC (McpClient가
+    initialize). MCP factory 경로가 이걸 쓴다.
+  5s spawn timeout, 5s SIGTERM→SIGKILL, 10MB single-line cap, NUL-byte 라인 drop,
+  ASCII serviceName regex `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`, QUANTA_SERVICE_NAME /
+  QUANTA_ALLOW_UNSIGNED env. MCP `IsolatedMcpTransport.send`는 dead/oversize를
+  Error로 띄운다 (`trySend`가 있으면 그걸 씀). DXT `IsolatedProcess.send`는
+  NO-THROW 유지. Future: Electron `UtilityProcess` adapter 만 추가하면 desktop
+  surface 진출 완료 (OCP).
 evidence:
   code:
     - src/plugin-isolation/types.ts

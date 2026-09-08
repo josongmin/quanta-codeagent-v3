@@ -1,11 +1,11 @@
 # Sep-08 — evidence-backed action register
 
-상태: **W1 implemented on integrated source**. 나머지 33 finding은 미착수. 체크박스는 구현 수행이며 W7 전역 verified가 아니다.
+상태: **W1·W2 implemented on local `main` (`29d7e4ff1`)**. 나머지 28 finding(W3+)은 미착수. G-F5.4 EC2 실기 proof는 열린 갭. 체크박스는 구현 수행이며 W7 전역 verified가 아니다.
 
 설계·write set·병렬 통합 정책: [README](/Users/songmin/quanta-codeagent-v3/docs/plans/sep-8-structural-remediation/README.md).
 실행 wave/group 배정: [WAVES](/Users/songmin/quanta-codeagent-v3/docs/plans/sep-8-structural-remediation/WAVES.md). 172개 액션의 단일 owner와 병렬 write set은 `waves.json`/`verify-waves.mjs`로 검사한다. 액션 내용은 이 문서, 실행 배정은 manifest가 원본이다.
-기준 source: `f5f4875799141068af73e604129c8b9a09f76007`; audit 입력 digest는 README와 동일하다.
-이 문서의 근거는 현재 source 계약과 앞선 audit의 재현 기록이다. 이번 계획 보강에서 39건을 모두 동적으로 다시 재현한 것은 아니다. source 변경 시 관련 근거·rail을 다시 고정한다.
+기준 source (계획 작성): `f5f4875799141068af73e604129c8b9a09f76007`. 통합 source (W1+W2): `29d7e4ff1a2df3e925c1f3854432e3a741f5d2d7`. audit 입력 digest는 README와 동일하다.
+이 문서의 근거는 현재 source 계약과 앞선 audit의 재현 기록이다. `docs/bugbash/sep-8-se-audit/`는 baseline 입력이며 W1/W2 구현 후 재작성하지 않는다. source 변경 시 관련 근거·rail을 다시 고정한다.
 
 ## 0. 실행 방법과 선행 액션
 
@@ -43,7 +43,7 @@
 - [x] **F-07.1** 지원 executable/shell/options/compound/code grammar를 inventory하고, basename·shell option·nested command를 공통 구조로 해석한다. 기존 parser가 있으면 reuse하고 새 regex 목록 누적으로 처리하지 않는다.
 - [x] **F-07.2** env 읽기/code-shape 판정을 한 authority로 연결하고 raw-first-token 별도 규칙을 제거한다. unsupported 의심 구조의 sensitivity와 benign control을 명시한다.
 - [x] **F-07.3** 위 6개 bypass family + 정상 대조군을 RED→GREEN으로 고정한다. wrapper 중첩·prefix·redirect에서 판정이 사라지지 않는지 확인한다.
-- [x] **F-07.4** synthetic 비정형 secret을 실제 tool producer에 넣고 모델/JSONL consumer까지 노출되지 않음을 확인한다. classifier만 고치고 sink metadata가 유실되면 미완료다.
+- [x] **F-07.4** synthetic 비정형 secret을 실제 tool producer에 넣고 모델/JSONL consumer까지 노출되지 않음을 확인한다. classifier만 고치고 sink metadata가 유실되면 미완료다. 현재 증명: live `makeBashTool().classifySource` → `dispatchTool` preview. JSONL 디스크 persist는 별도 rail이 아님.
 
 ### SEP7-D-11 · P2 · Stdout progress redaction
 
@@ -423,15 +423,15 @@
 
 | Package | 확장할 기존 suite (repo-relative) | 별도로 확보할 proof |
 |---|---|---|
-| R01 | `tests/unit/security/sensitivity-classifier.test.ts`, `tests/unit/stdout.test.ts` | tool producer→모델/JSONL sensitivity 보존 |
+| R01 | `tests/unit/security/sensitivity-classifier.test.ts`, `tests/unit/stdout.test.ts`, `tests/unit/sep8-remediation/r01/`, `tests/integration/sep8-remediation/r01/f07-classify-redact-path.test.ts` | live bash `classifySource` → dispatch preview; JSONL 디스크는 미증명 |
 | R02 | `tests/unit/auth/node-lock-file-store.test.ts`, `tests/unit/permission/json-state-file-lock-clock-hellgate.test.ts`, `tests/unit/config-migration-persist-atomic-hellgate.test.ts`, `tests/unit/central-config-trust-store-hellgate.test.ts` | 실제 2/3-process contention/kill/legacy-writer 전환 |
 | R03 | `tests/unit/session-index.test.ts`, `tests/unit/session-store.test.ts`, `tests/integration/memory-sqlite.test.ts` | save/delete barrier, runtime durable resume, raw SQLite BLOB readback |
-| R04 | `tests/unit/patch/unified-to-v4a-scenarios.test.ts`, `tests/unit/patch/applier-rollback-rename-delete.test.ts` | apply-tool rename와 incomplete-rollback projection |
+| R04 | `tests/unit/patch/unified-to-v4a-scenarios.test.ts`, `tests/unit/patch/applier-rollback-rename-delete.test.ts`, `tests/unit/sep8-remediation/r04/`, `tests/integration/sep8-remediation/r04/` | apply-tool rename와 Incomplete → dispatch preview (`h-patch-02-tool-result.test.ts`) |
 | R05 | `tests/unit/side-agent-process-registry-hellgate.test.ts`, `tests/integration/side-agent-process-os-fork-e2e.test.ts`, `tests/integration/side-agent-process-llm-charter-e2e.test.ts` | 공통 backer contract + child no-finding terminal |
 | R06 | `tests/unit/automation-engine-hellgate.test.ts`, `tests/integration/automation-engine-tick-wire-hellgate.test.ts` | durable child kill/restart + live renewal |
 | R07 | `tests/unit/web-user-input-port-lifecycle-hellgate.test.ts`, `tests/integration/web-user-input-port-e2e.test.ts`, `tests/unit/auth/chatgpt-oauth-adapter.test.ts` | turn-scoped abort; 실제 loopback 재bind |
 | R08 | `tests/unit/shadow-verify-adapters-hellgate.test.ts`, `tests/unit/lsp-diagnostics-hook-hellgate.test.ts` | timed-out waiter retention/race rail |
-| R09 | `tests/unit/budget-ledger-pricing-ssot-hellgate.test.ts`, `tests/unit/budget-ledger-persist-hellgate.test.ts`, `tests/integration/budget-ledger-real-loop-e2e.test.ts` | unknown pricing cross-sink/stop, mixed eval report |
+| R09 | `tests/unit/budget-ledger-pricing-ssot-hellgate.test.ts`, `tests/unit/budget-ledger-persist-hellgate.test.ts`, `tests/integration/budget-ledger-real-loop-e2e.test.ts`, `tests/unit/sep8-remediation/r09/` | unknown pricing cross-sink/stop; eval `projectEvalCost` (`costUsd:null` = unpriced) |
 | R10 | `tests/unit/runner/search-index-backend.test.ts`, `tests/unit/runner/t06-search-backend-failclosed-hellgate.test.ts` | actual search/mention refusal + identity migration |
 | R11 | `tests/unit/mcp/transport-port-hellgate.test.ts`, `tests/unit/plugin-isolation-mcp-integration-hellgate.test.ts`, `tests/unit/mcp-oauth-coalesce-concurrency-r4-hellgate.test.ts`, `tests/unit/mcp/protocol-version-http-header-hellgate.test.ts` | no-sentinel stdio server, stateful HTTP auth/session generation |
 | R12 | `tests/unit/protocol/session-codec.test.ts`, `tests/unit/ipc/session-handle-conformance.test.ts`, `tests/integration/sdk-connect-session-handle-e2e.test.ts` | 새 세 verb의 wire/in-process 및 malformed persisted-event replay |

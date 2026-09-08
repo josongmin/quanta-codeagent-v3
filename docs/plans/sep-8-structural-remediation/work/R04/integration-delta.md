@@ -1,7 +1,6 @@
-# R04 integration-delta (UNAPPLIED)
+# R04 integration-delta — APPLIED (W1-I, `29d7e4ff1`)
 
-Status: **I-stage only**. Do not apply in this worker. `src/patch/index.ts` and
-`src/tool/apply-patch.ts` are reserved.
+Status: **applied** on integrated source. Worker originally left this UNAPPLIED; W1-I applied barrel + fallback-wire. Content below is the applied mapping.
 
 ## Barrel re-exports needed (`src/patch/index.ts`)
 

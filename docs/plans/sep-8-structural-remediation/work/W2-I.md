@@ -4,7 +4,7 @@ Status: **integrated**. W2 findings are `implemented` on merged source. Not W7 `
 
 Merge order: **R05 → R13 → R11**, then reserved/I wiring. `--group R05|R13|R11` undeclared-write checks: PASS. No commit.
 
-Source HEAD at integration: `16cabfde464e354a4c3e98f3b7ffbc6e57f1086f` plus uncommitted W1 follow-up (F-07.4 / G-F15 / H-PATCH-02.4) which does not overlap W2 write-sets.
+Source HEAD at integration: `16cabfde464e354a4c3e98f3b7ffbc6e57f1086f` plus W1 follow-up. All of that is now **committed on local `main` `29d7e4ff1a2df3e925c1f3854432e3a741f5d2d7`**.
 
 ## Findings
 

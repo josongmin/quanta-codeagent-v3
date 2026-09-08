@@ -70,6 +70,14 @@ purpose: |
   tests/unit/mcp-oauth-keyring-reachability-hellgate.test.ts (knob-on ⇒ bearer on
   the wire; knob-off ⇒ no provider, byte-identical).
 
+  In-session HTTP 401 reauth (C-F9): `src/mcp/client/reauthorize.ts`. Replacement
+  order is create → start → initialize (raw RPC, no nested 401→refresh) →
+  initialized notification → publish negotiated state. Replay is allow-listed to
+  idempotent initialize/list methods. `tools/call` is never auto-replayed.
+  Handshake failure closes the candidate only and restores the old transport;
+  stop closes candidate and old. Old pending requests fail closed (must not hang
+  on the rebuilt carrier).
+
   Remaining gap (honest): the interactive `/mcp login <server>` command
   (src/apps/cli/mcp-cmd.ts `ctx.mcp.login`) is NOT yet bound to this provider, so
   the on-demand re-auth command still reports "OAuth not enabled" — the provider
@@ -82,6 +90,7 @@ evidence:
     - src/mcp/oauth/headless-rejecter.ts
     - src/mcp/oauth/index.ts
     - src/mcp/client.ts
+    - src/mcp/client/reauthorize.ts
     - src/mcp/types.ts
     - src/mcp/index.ts
     - src/host/runtime/mcp-oauth-provider.ts

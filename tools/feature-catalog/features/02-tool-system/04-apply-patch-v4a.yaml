@@ -23,7 +23,7 @@ surface_integration:
   evidence:
     cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "apply_patch is a model-invokable tool; tool_call/tool_result render as the generic tool.invoked/completed card (session-hooks.ts:420-435). Rich diff not rendered (DiffPanel unmounted) but tool name+result preview show."
-purpose: '`*** Begin/End Patch` + `*** Add/Delete/Update File:` + `*** Move to:` (rename+edit atomic) + `@@ <context>` anchor + `*** End of File` 보존. parser는 grammar 위반에 PatchParseError(1-based line) — silent recovery 0. applier는 2-tier(exact → trim) 매칭 + 다중 hit 시 PatchApplyError("ambiguous context") + 0 hit 시 PatchAnchorNotFoundError. Move-to는 pre-flight(source 존재 + dest 미존재) → write + delete-source, intermediate failure는 typed throw.'
+purpose: '`*** Begin/End Patch` + `*** Add/Delete/Update File:` + `*** Move to:` (rename+edit atomic) + `@@ <context>` anchor + `*** End of File` 보존. parser는 grammar 위반에 PatchParseError(1-based line) — silent recovery 0. git unified rename (`rename from`/`rename to` + `---/+++`)은 `Update File`+`Move to` IR로 보존하며 inconsistent rename은 PatchConvertError (old-path in-place update로 degrade하지 않음). applier는 2-tier(exact → trim) 매칭 + 다중 hit 시 PatchApplyError("ambiguous context") + 0 hit 시 PatchAnchorNotFoundError. Move-to는 pre-flight(source 존재 + dest 미존재) → write + delete-source, intermediate failure는 typed throw. Incomplete undo는 PatchRollbackIncompleteError (`the file is unchanged` 금지); clean rollback만 empty-path PatchApplyError.'
 evidence:
   code:
     - src/patch/types.ts
@@ -31,6 +31,9 @@ evidence:
     - src/patch/applier.ts
     - src/patch/index.ts
     - src/patch/unified-to-v4a.ts
+    - src/patch/git-path.ts
+    - src/patch/commit-journal.ts
+    - src/patch/message-for-model.ts
   adrs: [28]
   tests:
     unit:
@@ -38,8 +41,12 @@ evidence:
       - tests/unit/patch/applier.test.ts
       - tests/unit/patch/unified-to-v4a-hellgate.test.ts
       - tests/unit/patch/unified-to-v4a-scenarios.test.ts
+      - tests/unit/sep8-remediation/r04/h-patch-01-unified-rename.test.ts
+      - tests/unit/sep8-remediation/r04/h-patch-02-rollback-truth.test.ts
     integration:
       - tests/unit/patch/integration.test.ts
+      - tests/integration/sep8-remediation/r04/h-patch-01-apply-rename.test.ts
+      - tests/integration/sep8-remediation/r04/h-patch-02-tool-result.test.ts
     contract: []
 knobs: []
 deliberate_hold: null

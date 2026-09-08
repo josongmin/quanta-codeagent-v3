@@ -34,11 +34,13 @@ evidence:
     - src/apps/eval/synthetic/index.ts
     - src/apps/eval/report/coverage-matrix.ts
     - src/apps/eval/report/markdown.ts
+    - src/apps/eval/report/index.ts
   adrs: [87]
   tests:
     unit:
       - tests/unit/eval-schema-additive.test.ts
       - tests/unit/eval-runner-token-cost.test.ts
+      - tests/unit/sep8-remediation/r09/g-f15-eval-cost-completeness.test.ts
     integration:
       - tests/integration/eval-additive-hellgate.test.ts
     contract: []
@@ -50,8 +52,11 @@ notes: |
   @/observability/pricing.costUsd(model,…) 호출, unknown model → null). index.ts가
   SyntheticPayload.tokens?/costUsd?로 conditional-spread하고 store.finish에
   status:"finished"+params:{model} 추가. report TokenCostRollup가 synthetic+public
-  payload의 tokens/costUsd를 합산 → CoverageMatrix.tokenCost?, markdown
-  "Token & Cost Summary" 섹션 + headline Tokens=/Cost=$. 전부 데이터 없으면 absent =
+  payload의 tokens/costUsd를 합산 → CoverageMatrix.tokenCost? + sibling
+  `costPricing` (completeness / known subtotal / unpriced count). Headline과
+  상세 table은 `projectEvalCost` 한 projection. all-unknown → `unavailable`
+  (not `$0`); mixed → partial + known subtotal; production `costUsd: null` is
+  unpriced; actual known-zero only may render `$0`. 전부 데이터 없으면 absent =
   byte-identical. score?를 교체가 아니라 보강(병존). PAYLOAD_KINDS 디스크리미네이터 불변 →
   result-store.readAll/coverage-matrix narrowing 무회귀. metrics[]는 아직 per-scenario
   manual emit이 없어 runner가 채우지 않음(named-axis 메트릭은 호출자가 향후 채울 seam).

@@ -1,6 +1,6 @@
-# R11 integration delta — UNAPPLIED
+# R11 integration delta — APPLIED (W2-I, `29d7e4ff1`)
 
-Status: **not applied**. Integrator-only. Worker did not edit reserved barrels, host, agent launchers, catalog YAML, or `docs/10.feature-catalog.md`.
+Status: **applied**. Worker originally left reserved barrels/host/agent/catalog UNAPPLIED. W2-I applied barrel + host/bridge comments + plugin launcher `McpClient` + isolated transport (`dxt-ready-line`) + catalog YAML `162-mcp-isolated-spawn.yaml` (`bun fc validate` + `bun fc build`).
 
 Live after W2 (no I yet):
 

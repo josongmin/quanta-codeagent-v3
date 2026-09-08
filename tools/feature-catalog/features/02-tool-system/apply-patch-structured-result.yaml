@@ -29,10 +29,12 @@ purpose: |
   실패해도 나머지는 적용되고, Result<StructuredApplyOutcome>를 RETURN한다.
   AppliedChange[] = { path, changeType(created|modified|deleted), movedTo?,
   beforeContent?, afterContent?, error?, messageForModel? } + allOk 플래그
-  (Cursor proto 필드 verbatim). messageForModel은 각 typed error를 compact한
+  (Cursor proto 필드 verbatim).   messageForModel은 각 typed error를 compact한
   model-facing 힌트로 매핑(anchor drift→"re-read & regenerate hunk", parse→"fix
-  V4A syntax at line N", jail→"outside workspace")해서 모델이 실패한 파일만
-  self-correct 재emit하게 한다. 기존 throwing applyPatch는 byte-identical로 불변 —
+  V4A syntax at line N", jail→"outside workspace", convert→rename headers,
+  rollbackIncomplete→dirty/uncertain paths)해서 모델이 실패한 파일만
+  self-correct 재emit하게 한다. Incomplete rollback은 `the file is unchanged`가
+  아니다. 기존 throwing applyPatch는 byte-identical로 불변 —
   새 entrypoint를 호출할 때만 동작. @/patch는 pure 유지(@/tool FsJailViolationError는
   structural duck-type으로 인식, upward import 없음).
 
