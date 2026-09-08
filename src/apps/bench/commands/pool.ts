@@ -17,9 +17,11 @@ import type { DatasetFamily } from "../dataset-family-token"
 import { resolveRemoteBenchExecutionPreset } from "../preset"
 import { loadFamilyCorpusRowsOrThrow, readFamilyCorpusText } from "../profiles/corpus-read"
 import { familyPlanNotes } from "../profiles/plan"
+import { withResolvedFamilyBootstrap } from "../remote/box-session/family-bootstrap-resolve"
+import type { FullRemoteConfig } from "../remote/box-session/types"
 import { refreshRemoteAuthJson } from "../remote/fresh-auth"
 import { buildForwardedBenchEnv } from "../remote/full"
-import { type PoolChunk, runPool } from "../remote/pool"
+import { type PoolChunk, type PoolConfig, runPool } from "../remote/pool"
 import { createLeasePoolAuthProvider, type PoolAuthProvider } from "../remote/pool-auth"
 import { clampPatchGenConcurrency, resolveGlobalPatchGenBudget } from "../remote/token-budget"
 import {
@@ -243,7 +245,59 @@ const resolvePoolRunConfig = (argvFamily: string | undefined): BenchRunConfig =>
   return cfg.swe
 }
 
-export const cmdPool = async (): Promise<void> => {
+/** The pool orchestrator port. Defaults to the real {@link runPool}; injected by
+ *  the hellgate so `pool`'s launch-config construction can be observed WITHOUT
+ *  `refreshRemoteAuthJson` or a RunInstances call. */
+export type RunPoolPort = (
+  chunks: readonly PoolChunk[],
+  cfg: PoolConfig,
+) => ReturnType<typeof runPool>
+
+export interface CmdPoolDeps {
+  readonly runPool?: RunPoolPort
+}
+
+const refreshPoolAuthUnlessTestSeam = async (src: AuthSource, injected: boolean): Promise<void> => {
+  if (hasFlag("--dry-run") || injected) return
+  await refreshPoolAuthSource(src)
+}
+
+/** T2 — typed family on the box provision config (argv, not a fresh env read).
+ *  re-audit R3: family field set ONLY for an EXPLICIT selector. PMX-04: the
+ *  declared bootstrap is resolved here so ProMax pool/fresh provision cannot
+ *  silently skip the pin. */
+const buildPoolProvisionConfig = (
+  runConfig: BenchRunConfig,
+  args: {
+    readonly datasets: readonly string[]
+    readonly preset: string
+    readonly model: string
+    readonly amiOverride: string | undefined
+    readonly onDemand: boolean
+  },
+): FullRemoteConfig =>
+  withResolvedFamilyBootstrap(
+    {
+      repoDir: process.cwd(),
+      authJson: "{}",
+      datasetPath: args.datasets[0] ?? "",
+      launchMode: "pool",
+      ...(runConfig.familySelector === "explicit"
+        ? { swebenchDatasetFamily: runConfig.datasetFamily }
+        : {}),
+      preset: args.preset,
+      model: args.model,
+      ...(args.amiOverride !== undefined && args.amiOverride !== ""
+        ? { ami: args.amiOverride }
+        : {}),
+      onDemand: args.onDemand,
+      keep: hasFlag("--keep"),
+      onLog: (m) => logger.info(m),
+    },
+    runConfig,
+  )
+
+export const cmdPool = async (deps: CmdPoolDeps = {}): Promise<void> => {
   // T2 — resolve the ONE typed config (fail-closed on an explicit-invalid family).
   // Threaded as the TYPED family into preset + box provision + the per-chunk box
   // command.
@@ -270,7 +324,7 @@ export const cmdPool = async (): Promise<void> => {
   // launch path stays single-account (byte-identical when no pool configured).
   const authSource = resolveCliAuthSource()
   const authFile = resolveAuthLaunchFile(authSource)
-  if (!hasFlag("--dry-run")) await refreshPoolAuthSource(authSource)
+  await refreshPoolAuthUnlessTestSeam(authSource, deps.runPool !== undefined)
   const preset = resolveRemoteBenchExecutionPreset({
     family: runConfig.datasetFamily,
     envVars: process.env,
@@ -316,28 +370,14 @@ export const cmdPool = async (): Promise<void> => {
     return
   }
   const wallMin = argValue("--max-box-wall-min")
-  const out = await runPool(chunks, {
-    provision: {
-      repoDir: process.cwd(),
-      authJson: "{}", // unused for provisioning; the per-chunk provider ships the real token
-      datasetPath: datasets[0] ?? "",
-      launchMode: "pool",
-      // T2 — thread the TYPED family onto the box provision config so the pool
-      // preflight reads it here instead of a fresh env read that dropped argv.
-      // re-audit R3: set ONLY for an EXPLICIT selector. `undefined` on this field
-      // means "the operator selected nothing", which is the provenance the
-      // subprocess wire encoder needs to reproduce HEAD's absent-selector shape;
-      // consumers that need a concrete family call `datasetFamilyOrDefault`.
-      ...(runConfig.familySelector === "explicit"
-        ? { swebenchDatasetFamily: runConfig.datasetFamily }
-        : {}),
+  const out = await (deps.runPool ?? runPool)(chunks, {
+    provision: buildPoolProvisionConfig(runConfig, {
+      datasets,
       preset,
       model,
-      ...(amiOverride !== undefined && amiOverride !== "" ? { ami: amiOverride } : {}),
+      amiOverride,
       onDemand,
-      keep: hasFlag("--keep"),
-      onLog: (m) => logger.info(m),
-    },
+    }),
     workers,
     allowExtraWorkers: workers > 1,
     allowExtraBoxes: extraBoxes,

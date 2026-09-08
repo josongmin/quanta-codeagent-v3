@@ -5,10 +5,16 @@
  * future Electron `UtilityProcess`) must implement {@link IsolatedProcessSpawnerPort}
  * and produce an {@link IsolatedProcess} that follows the lifecycle below.
  *
+ * Ready modes (W0.5 freeze):
+ *   - {@link IsolatedReadyMode} `dxt-ready-line` (default): wait for first stdout
+ *     line (NUL-byte free, ≤ {@link MAX_MESSAGE_BYTES}) within
+ *     {@link SpawnOpts.spawnTimeoutMs}; that line is a sentinel and is NOT
+ *     forwarded to `onMessage`.
+ *   - `process-ready`: spawn + stdio connected is ready. Do NOT consume the
+ *     first stdout line — it is JSON-RPC (MCP `initialize` owned by McpClient).
+ *
  * Lifecycle:
- *   spawn(opts) → wait for first ready line (NUL-byte free, ≤ {@link MAX_MESSAGE_BYTES})
- *                   within {@link SpawnOpts.spawnTimeoutMs} (default
- *                   {@link DEFAULT_SPAWN_TIMEOUT_MS}); on timeout, kill + reject
+ *   spawn(opts) → ready-mode wait (see above); on timeout, kill + reject
  *                 → on success, resolve with handle
  *   handle.send / handle.onMessage are noop / unsubscribe after child exit.
  *   handle.kill('SIGTERM') sends SIGTERM, escalates to SIGKILL after
@@ -29,6 +35,10 @@
  *   returned unsubscribe is still safe to call (idempotent).
  * - `kill` after exit: resolves immediately with the already-known exit.
  */
+
+/** How {@link IsolatedProcessSpawnerPort.spawn} decides the child is ready.
+ *  Default remains `dxt-ready-line` so DXT/plugin spawn is byte-identical. */
+export type IsolatedReadyMode = "dxt-ready-line" | "process-ready"
 
 /** Default first-message timeout. DXT standard; do not change without ADR. */
 export const DEFAULT_SPAWN_TIMEOUT_MS = 5_000
@@ -52,8 +62,14 @@ export interface IsolatedProcess {
   readonly serviceName: string
   /** Send one JSON-serialisable message (newline-framed) to the child.
    *  Silently dropped if the child has exited or the encoded payload exceeds
-   *  {@link MAX_MESSAGE_BYTES}. NO-THROW. */
+   *  {@link MAX_MESSAGE_BYTES}. NO-THROW (DXT plugin contract). MCP carriers
+   *  must use {@link IsolatedProcess.trySend} instead. */
   send(msg: unknown): void
+  /** MCP isolated carrier: same write as {@link IsolatedProcess.send} but
+   *  returns a typed `Error` on oversize/dead stdin instead of silent-drop.
+   *  Optional so existing test doubles remain valid; production bun-spawner
+   *  always implements it. */
+  trySend?(msg: unknown): Error | null
   /** Subscribe to incoming messages from the child. Returns an idempotent
    *  unsubscribe closure. Handler is NEVER invoked synchronously from inside
    *  `onMessage` — always microtask-deferred so a re-entrant `onMessage` /
@@ -85,6 +101,8 @@ export interface SpawnOpts {
   /** Opt-in flag (sets `QUANTA_ALLOW_UNSIGNED=1` so the child can detect it).
    *  Mirrors Claude DXT's `allowLoadingUnsignedLibraries`. */
   readonly allowLoadingUnsignedLibraries?: boolean
+  /** Ready-mode (default {@link IsolatedReadyMode} `dxt-ready-line`). */
+  readonly readyMode?: IsolatedReadyMode
   /** Override the first-message timeout (default {@link DEFAULT_SPAWN_TIMEOUT_MS}). */
   readonly spawnTimeoutMs?: number
   /** Override the SIGTERM grace (default {@link DEFAULT_GRACEFUL_KILL_MS}). */

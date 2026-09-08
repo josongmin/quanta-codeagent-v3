@@ -4,7 +4,8 @@
  * WHAT: builds the per-session `SkillMcpSession` the loop drives
  * (`reconcileSkillMcpForTurn` / `shutdownAll`), wiring the slice's transport-
  * agnostic `AttachMcpPort` onto REAL infra:
- *   - stdio carriers ➝ `@/agent/plugin-mcp-launcher` (`createIsolatedMcpLauncherPort`),
+ *   - stdio carriers ➝ `@/agent/plugin-mcp-launcher` (`createIsolatedMcpLauncherPort`
+ *     → `McpClient` + isolated transport, `dxt-ready-line`),
  *   - HTTP carriers  ➝ `@/mcp` `McpClient` over the ADR-0391 Streamable-HTTP/SSE
  *     transport (`HttpSseMcpTransport`).
  *

@@ -272,22 +272,24 @@ export const createMessagePump = (
   return { done: pump() }
 }
 
-/** Encode + write side: validates size, NO-THROW on closed stdin. */
+/** Encode + write side. Returns `Error` on oversize/dead stdin (MCP maps this
+ *  through `trySend`); DXT `IsolatedProcess.send` still wraps as NO-THROW. */
 const createSendBridge = (
   proc: Subprocess<"pipe", "pipe", "pipe">,
   serviceName: string,
-): ((msg: unknown) => void) => {
+): ((msg: unknown) => Error | null) => {
   const encoder = new TextEncoder()
-  return (msg: unknown): void => {
+  return (msg: unknown): Error | null => {
     let line: string
     try {
       line = JSON.stringify(msg)
     } catch (e) {
+      const error = errMessage(e)
       logger.warn("plugin-isolation: send dropped (json-encode failed)", {
         serviceName,
-        error: errMessage(e),
+        error,
       })
-      return
+      return new Error(`isolated send json-encode failed: ${error}`)
     }
     const payload = encoder.encode(`${line}\n`)
     if (payload.byteLength > MAX_MESSAGE_BYTES) {
@@ -296,17 +298,25 @@ const createSendBridge = (
         bytes: payload.byteLength,
         cap: MAX_MESSAGE_BYTES,
       })
-      return
+      return new Error(
+        `isolated send over cap (${payload.byteLength} > ${MAX_MESSAGE_BYTES} bytes)`,
+      )
     }
     const stdin = proc.stdin
-    if (!stdin) return
+    if (!stdin) {
+      logger.debug("plugin-isolation: stdin write skipped (child closed)", { serviceName })
+      return new Error(`isolated send failed: stdin closed (${serviceName})`)
+    }
     try {
       stdin.write(payload)
+      return null
     } catch (e) {
+      const error = errMessage(e)
       logger.debug("plugin-isolation: stdin write skipped (child closed)", {
         serviceName,
-        error: errMessage(e),
+        error,
       })
+      return new Error(`isolated send failed: stdin closed (${serviceName}): ${error}`)
     }
   }
 }
@@ -386,10 +396,14 @@ interface BuildHandleParams {
 
 const buildHandle = (params: BuildHandleParams): IsolatedProcess => {
   const { proc, serviceName, killer, registry } = params
+  const trySend = createSendBridge(proc, serviceName)
   return {
     pid: proc.pid,
     serviceName,
-    send: createSendBridge(proc, serviceName),
+    send: (msg) => {
+      void trySend(msg)
+    },
+    trySend,
     onMessage: (h) => registry.add(h),
     kill: (sig) => killer.kill(sig),
     exitPromise: proc.exited.then(
@@ -486,8 +500,30 @@ const tryParseJson = (line: string): unknown | undefined => {
   }
 }
 
-/** Concrete spawner backed by `Bun.spawn`. Stateless — multiple `spawn` calls
- *  produce independent {@link IsolatedProcess} handles. */
+const awaitSpawnReady = async (params: {
+  consumeFirstLineAsSentinel: boolean
+  watchdog: SpawnWatchdog
+  killer: KillController
+  markFirstLineSeen: () => void
+  signal: AbortSignal | undefined
+  serviceName: string
+}): Promise<void> => {
+  if (params.consumeFirstLineAsSentinel) {
+    try {
+      await params.watchdog.firstLinePromise
+    } catch (e) {
+      void params.killer.kill("SIGTERM")
+      throw e
+    }
+    return
+  }
+  params.markFirstLineSeen()
+  params.watchdog.notifyFirstLine()
+  if (params.signal?.aborted) {
+    void params.killer.kill("SIGTERM")
+    throw new IsolatedSpawnError("spawn-aborted", `plugin "${params.serviceName}" spawn aborted`)
+  }
+}
 export const createBunSpawner = (): IsolatedProcessSpawnerPort => ({
   spawn: async (opts: SpawnOpts): Promise<IsolatedProcess> => {
     validateOpts(opts)
@@ -515,29 +551,32 @@ export const createBunSpawner = (): IsolatedProcessSpawnerPort => ({
     const killer = createKillController(proc, gracefulKillMs)
     const registry = createListenerRegistry()
     let sawFirstLine = false
+    const readyMode = opts.readyMode ?? "dxt-ready-line"
+    const consumeFirstLineAsSentinel = readyMode === "dxt-ready-line"
 
     const watchdog = createSpawnWatchdog(serviceName, spawnTimeoutMs, opts.signal)
 
-    const pump = createMessagePump(proc.stdout, serviceName, (line) => {
-      if (!sawFirstLine) {
-        sawFirstLine = true
-        watchdog.notifyFirstLine()
-        // The first line is a READY sentinel (DXT semantics). It is NOT
-        // forwarded to onMessage listeners, because those subscriptions only
-        // become possible AFTER `spawn` resolves — dispatching the first line
-        // would race the user's first `onMessage()` call. Plugins that need
-        // to carry payload data should emit a second line after the ready
-        // sentinel.
-        return
-      }
+    const dispatchProtocolLine = (line: string): void => {
       const parsed = tryParseJson(line)
       if (parsed === undefined) {
-        // Non-JSON lines after ready are dropped silently — wire protocol is
-        // JSON-only, and tolerating noise here would invite split-payload
-        // corruption downstream.
+        // Non-JSON lines are dropped silently — wire protocol is JSON-only.
         return
       }
       registry.dispatch(parsed)
+    }
+
+    const pump = createMessagePump(proc.stdout, serviceName, (line) => {
+      if (consumeFirstLineAsSentinel && !sawFirstLine) {
+        sawFirstLine = true
+        watchdog.notifyFirstLine()
+        // DXT READY sentinel is NOT forwarded to onMessage listeners.
+        return
+      }
+      if (!sawFirstLine) {
+        sawFirstLine = true
+        watchdog.notifyFirstLine()
+      }
+      dispatchProtocolLine(line)
     })
 
     // A short-lived child can publish READY and exit before Bun schedules the
@@ -600,13 +639,16 @@ export const createBunSpawner = (): IsolatedProcessSpawnerPort => ({
       void killer.kill("SIGTERM")
     })
 
-    try {
-      await watchdog.firstLinePromise
-    } catch (e) {
-      // Kill child (idempotent) then rethrow original.
-      void killer.kill("SIGTERM")
-      throw e
-    }
+    await awaitSpawnReady({
+      consumeFirstLineAsSentinel,
+      watchdog,
+      killer,
+      markFirstLineSeen: () => {
+        sawFirstLine = true
+      },
+      signal: opts.signal,
+      serviceName,
+    })
 
     return buildHandle({ proc, serviceName, killer, registry })
   },

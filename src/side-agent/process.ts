@@ -28,18 +28,48 @@
  * is an injected port (slice isolation: `@/side-agent` reaches nothing).
  */
 
+/** Wire version for parent-owned wake protocol (H-SA-01/02). */
+export const SIDE_AGENT_IPC_VERSION = 1 as const
+export type SideAgentIpcVersion = typeof SIDE_AGENT_IPC_VERSION
+
 /** A message crossing the IPC boundary, in EITHER direction. The parent sends a
  *  control message (`start`/`stop`/`charter`); the child posts findings + a
- *  ready beacon. A closed union keeps the wire format auditable. */
+ *  ready beacon. A closed union keeps the wire format auditable.
+ *
+ *  Wake terminals are `finding` (0..N frames for one wake) plus exactly one of
+ *  `no_finding` | `failed` | `cancelled` | `completed`. `version` + `wakeId`
+ *  are required on parent-owned wakes; supervisor-direct V1 charters may omit
+ *  them (one-shot charter-on-ready). */
 export type SideAgentIpcMessage =
   /** Parent → child: the charter the child should run on each wake. */
-  | { readonly kind: "charter"; readonly task: string; readonly maxTurnsPerWake: number }
+  | {
+      readonly kind: "charter"
+      readonly task: string
+      readonly maxTurnsPerWake: number
+      readonly version?: SideAgentIpcVersion
+      readonly wakeId?: number
+    }
   /** Parent → child: request a graceful drain + exit. */
-  | { readonly kind: "shutdown" }
+  | { readonly kind: "shutdown"; readonly version?: SideAgentIpcVersion }
   /** Child → parent: the child booted and is ready to receive a charter. */
-  | { readonly kind: "ready" }
-  /** Child → parent: a finding from a wake (mirrors the in-process finding). */
-  | { readonly kind: "finding"; readonly summary: string; readonly detail?: string }
+  | { readonly kind: "ready"; readonly version?: SideAgentIpcVersion }
+  /** Child → parent: one finding from the current wake (not a wake terminal). */
+  | {
+      readonly kind: "finding"
+      readonly summary: string
+      readonly detail?: string
+      readonly version?: SideAgentIpcVersion
+      readonly wakeId?: number
+    }
+  | { readonly kind: "no_finding"; readonly version: SideAgentIpcVersion; readonly wakeId: number }
+  | {
+      readonly kind: "failed"
+      readonly version: SideAgentIpcVersion
+      readonly wakeId: number
+      readonly reason?: string
+    }
+  | { readonly kind: "cancelled"; readonly version: SideAgentIpcVersion; readonly wakeId: number }
+  | { readonly kind: "completed"; readonly version: SideAgentIpcVersion; readonly wakeId: number }
 
 /** Spec handed to {@link ProcessForkPort.fork}. */
 export interface ProcessForkSpec {
@@ -108,6 +138,13 @@ export interface SupervisedProcessDaemonOpts {
   readonly scheduler: DelayScheduler
   /** Finding sink — a child `finding` message is forwarded here. */
   readonly onFinding: (finding: { readonly summary: string; readonly detail?: string }) => void
+  /** When false, the parent control plane sends each charter (version + wakeId).
+   *  Default true preserves supervisor-direct one-shot charter-on-ready. */
+  readonly autoCharterOnReady?: boolean
+  /** Every child → parent frame (including terminals). Parent control uses this. */
+  readonly onIpc?: (msg: SideAgentIpcMessage) => void
+  /** Child process exited (expected or crash). Parent control invalidates the wake. */
+  readonly onChildExit?: () => void
   /** Max UNEXPECTED restarts before giving up (`crashed-permanently`). A clean
    *  `stop()` is NOT counted. Default 5. */
   readonly maxRestarts?: number
@@ -134,6 +171,8 @@ export interface SupervisedProcessDaemon {
   restarts(): number
   /** The current child's pid, or undefined when not running. */
   pid(): number | undefined
+  /** Post a message to the live child. No-op when no child is attached. */
+  send(msg: SideAgentIpcMessage): void
 }
 
 const DEFAULT_MAX_RESTARTS = 5
@@ -197,6 +236,7 @@ export const createSupervisedProcessDaemon = (
   }
 
   const handleChildMessage = (msg: SideAgentIpcMessage): void => {
+    opts.onIpc?.(msg)
     if (msg.kind === "finding") {
       // Trust boundary: a child killed mid-result-write (SIGKILL) can deliver a
       // COMPLETE IPC frame whose `finding` payload is half-built — `summary`
@@ -216,8 +256,9 @@ export const createSupervisedProcessDaemon = (
       return
     }
     if (msg.kind === "ready" && child !== undefined) {
-      // Hand the child its charter once it beacons ready.
-      child.send({ kind: "charter", task: opts.task, maxTurnsPerWake: opts.maxTurnsPerWake })
+      if (opts.autoCharterOnReady !== false) {
+        child.send({ kind: "charter", task: opts.task, maxTurnsPerWake: opts.maxTurnsPerWake })
+      }
       setStatus("running")
     }
   }
@@ -242,6 +283,7 @@ export const createSupervisedProcessDaemon = (
   }
 
   const handleChildExit = (): void => {
+    opts.onChildExit?.()
     detach()
     if (stopping) {
       // Expected exit after stop() — terminal.
@@ -286,5 +328,8 @@ export const createSupervisedProcessDaemon = (
     status: () => status,
     restarts: () => restartCount,
     pid: () => child?.pid,
+    send(msg: SideAgentIpcMessage): void {
+      child?.send(msg)
+    },
   }
 }

@@ -1,6 +1,6 @@
 /**
  * ADR-0338 — production {@link McpLauncherPort} factory backed by
- * `@/mcp` `IsolatedMcpClient`.
+ * `@/mcp` `McpClient` + `IsolatedMcpTransport` (`dxt-ready-line`).
  *
  * Default-OFF: nothing in `@/agent/loop` or `@/agent/dispatch` imports
  * this module. A composition root that wants plugin-declared MCP
@@ -21,15 +21,13 @@
  * deliberately out-of-scope for ADR-0338 (see ADR for justification +
  * the follow-up that wires the mention path).
  *
- * Why isolated and not the legacy `McpClient` (`@/mcp/client`)? The
- * isolated path adds spawn-timeout + SIGTERM grace + service-name
- * sanitiser — all directly useful when launching plugin-supplied
- * processes whose stability is unknown. The legacy client remains
- * available for hosts that already wire it; they can author their own
- * `McpLauncherPort` adapter in O(15 lines) following this template.
+ * Production plugin spawn uses the same `McpClient` protocol core as
+ * host/bridge, with an isolated transport in DXT ready-line mode.
+ * `MCP_USE_ISOLATED_SPAWN` factory path is `process-ready` and is not
+ * used here — plugin/DXT children emit a sentinel first line.
  */
 
-import { IsolatedMcpClient, type IsolatedMcpClientOpts } from "@/mcp/isolated-client"
+import { IsolatedMcpTransport, type IsolatedMcpTransportOpts, McpClient } from "@/mcp"
 import type { McpServerConfig } from "@/mcp/types"
 import { errMessage } from "@/shared"
 import type { McpLauncherPort, McpLaunchOpts, McpServerHandle, PluginMcpServerSpec } from "./types"
@@ -64,34 +62,36 @@ const toMcpConfig = (
 }
 
 /** Options shared across every launch this port performs. Forwarded
- *  verbatim into {@link IsolatedMcpClient}. */
+ *  into {@link IsolatedMcpTransport}; ready mode is always `dxt-ready-line`. */
 export interface IsolatedMcpLauncherPortOpts {
-  readonly clientOpts?: IsolatedMcpClientOpts
+  readonly transportOpts?: IsolatedMcpTransportOpts
 }
 
 /** Create a production launcher port. The returned port's `launch()`
- *  spawns one `IsolatedMcpClient` per call. Failures are caught and
- *  converted into `ready: false` handles per the NO-THROW contract.
+ *  spawns one `McpClient` + isolated transport per call. Failures are
+ *  caught and converted into `ready: false` handles per the NO-THROW
+ *  contract.
  *
- *  The returned handle's `shutdown()` calls `IsolatedMcpClient.stop()`,
- *  which is already idempotent (`if (this.stopped) return`). */
+ *  The returned handle's `shutdown()` calls `McpClient.stop()`, which
+ *  is already idempotent. */
 export const createIsolatedMcpLauncherPort = (
   opts: IsolatedMcpLauncherPortOpts = {},
 ): McpLauncherPort => {
-  const clientOpts = opts.clientOpts
+  const transportOpts = opts.transportOpts
   return {
     launch: async (
       spec: PluginMcpServerSpec,
       launchOpts: McpLaunchOpts,
     ): Promise<McpServerHandle> => {
       const serverId = composeServerId(launchOpts.pluginId, launchOpts.serverName)
-      let client: IsolatedMcpClient | null = null
+      let client: McpClient | null = null
       try {
         const cfg = toMcpConfig(spec, launchOpts.pluginId, launchOpts.serverName)
-        client =
-          clientOpts === undefined
-            ? new IsolatedMcpClient(cfg)
-            : new IsolatedMcpClient(cfg, clientOpts)
+        const transport = new IsolatedMcpTransport(cfg, {
+          ...(transportOpts ?? {}),
+          readyMode: "dxt-ready-line",
+        })
+        client = new McpClient(cfg, { transport })
         await client.start()
         const startedClient = client
         return {
@@ -101,27 +101,23 @@ export const createIsolatedMcpLauncherPort = (
             try {
               await startedClient.stop()
             } catch {
-              // IsolatedMcpClient.stop already swallows; defense-in-depth.
+              // McpClient.stop is idempotent; defense-in-depth.
             }
           },
         }
       } catch (e) {
-        // Best-effort cleanup of a partially-started client.
         if (client !== null) {
-          const partial = client
           try {
-            await partial.stop()
+            await client.stop()
           } catch {
-            // Ignore — we're already in the error path.
+            // already in error path
           }
         }
         return {
           serverId,
           ready: false,
           error: errMessage(e),
-          shutdown: async () => {
-            // Already stopped above.
-          },
+          shutdown: async () => {},
         }
       }
     },

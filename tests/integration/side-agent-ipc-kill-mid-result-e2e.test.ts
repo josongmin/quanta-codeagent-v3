@@ -113,7 +113,7 @@ beforeAll(() => {
   // valid findings (no over-correction) even when the child dies right after.
   writeWorker(
     "valid-then-kill",
-    `flushThenKill({ kind: "finding", summary: "real finding", detail: "d" })`,
+    `flushThenKill({ kind: "finding", summary: "real finding", detail: "d", version: msg.version, wakeId: msg.wakeId })`,
   )
 })
 

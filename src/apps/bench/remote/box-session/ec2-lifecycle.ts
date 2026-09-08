@@ -16,24 +16,23 @@ import { resolveDatasetFamilyProfile } from "../../profiles/registry"
 import { datasetFamilyOrDefault } from "../../run-config"
 import { defaultSpawn, type SpawnFn, type SpawnResult } from "../backend"
 import { type BootstrapTracer, createBootstrapTracer } from "../bootstrap-tracer"
-import { PHANTOM_DEPS } from "./auth"
+import { bootstrapBox, buildSwebenchShim } from "./bootstrap-phases"
 import { resolveMaxReadyPolls, waitForBoxReady } from "./box-readiness"
 import { readDatasetInstanceIds } from "./dataset-preflight"
-import {
-  assertFamilyAdmitsBox,
-  ensureWarmBoxFamilyBootstrap,
-  setupBoxForFamily,
-} from "./family-box-setup"
-import { probePyrightGrounding, verifyPyrightGrounding } from "./pyright-grounding"
-import { aws, BENCH_SSH_SAFE_OPTS, makeSsh, oneLine, shq } from "./shell"
+import { ensureWarmBoxFamilyBootstrap } from "./family-box-setup"
+import { isBoxProfileReady } from "./profile-readiness"
+import { probePyrightGrounding } from "./pyright-grounding"
+import { aws, makeSsh, oneLine, shq } from "./shell"
 import {
   type BoxSnapshotRead,
   readBoxRuntimeProbe,
   readBoxSnapshot,
   resolveSnapshotInspection,
 } from "./snapshot"
-import { buildSrcRsyncArgs, ensureBoxConfigCurrent, ensureBoxSrcCurrent } from "./src-sync-guard"
+import { ensureBoxConfigCurrent, ensureBoxSrcCurrent } from "./src-sync-guard"
 import { type BoxInspection, type BoxSession, D, type FullRemoteConfig } from "./types"
+
+export { bootstrapBox, buildSwebenchShim }
 
 /** Resolve a stable public SSM AMI reference just before launch. Explicit ami-*
  * overrides pass through byte-for-byte; malformed/failed SSM results fail loud
@@ -62,13 +61,6 @@ export const resolveLaunchAmi = async (
   }
   return imageId
 }
-
-/** The grading-shim file body. `shq` the spec (not bare single-quotes): QUANTA_SWEBENCH_PIP_SPEC
- *  is operator-controlled and a value with a `'` would break out of the quoting. The exact
- *  `--from ${shq(spec)} ` token is what {@link ensureBoxSwebenchShimCurrent} matches to detect
- *  a stale shim on a reused box. Pure + exported for unit test. */
-export const buildSwebenchShim = (pipSpec: string): string =>
-  `#!/usr/bin/env bash\nexec "$HOME/.local/bin/uvx" --from ${shq(pipSpec)} --python 3.11 --quiet python "$@"\n`
 
 /** The pip-spec a run WANTS. FAMILY is a TYPED param threaded from the launch
  *  config (aug-22 HIGH-1); it used to be an ambient-env read that only held the
@@ -399,143 +391,7 @@ const launchInstance = async (
   return iid
 }
 
-/** The reusable bootstrap surface: rsync src + config, bun install, phantom deps,
- *  swebench shim + warm, pyright nav-grounding probe. Runs on a ready box; throws
- *  on any hard failure (caller terminates). */
-const bootstrapBox = async (session: BoxSession, cfg: FullRemoteConfig): Promise<void> => {
-  const { host, keyPath, spawn, log } = session
-  const ssh = session.ssh.bind(session)
-  assertFamilyAdmitsBox({ family: datasetFamilyOrDefault(cfg.swebenchDatasetFamily), log }) // A-C
-  log(
-    "[full-remote] bootstrapped. Syncing src/ + config (SURGICAL — the monorepo's apps/crates/native are GBs and the bench needs only src)…",
-  )
-  // Same host-key/safety posture as makeSsh (SSOT) so the rsync transport
-  // connects identically to the readiness/grade ssh — a recycled-IP stale key
-  // must not refuse the rsync after readiness already succeeded.
-  const sshOpts = `ssh -i ${keyPath} ${BENCH_SSH_SAFE_OPTS.join(" ")} -o ConnectTimeout=15 -o ServerAliveInterval=15`
-  await ssh("mkdir -p ~/quanta")
-  // SSOT excludes/argv shared with the reuse self-heal (src-sync-guard) so the
-  // seed-sync and the verify-sync can never diverge. No opts ⇒ byte-identical to
-  // the historical bootstrap rsync.
-  const rsynced = await spawn("rsync", buildSrcRsyncArgs(cfg.repoDir, host, sshOpts))
-  if (rsynced.code !== 0) {
-    throw new Error(`[full-remote] rsync src failed (code ${rsynced.code}): ${rsynced.stderr}`)
-  }
-  const scpCfg = await spawn("scp", [
-    "-i",
-    keyPath,
-    ...BENCH_SSH_SAFE_OPTS,
-    "-o",
-    "ConnectTimeout=15",
-    `${cfg.repoDir}/package.json`,
-    `${cfg.repoDir}/bun.lock`,
-    `${cfg.repoDir}/tsconfig.json`,
-    `${cfg.repoDir}/tsconfig.base.json`,
-    `${cfg.repoDir}/bunfig.toml`,
-    `${host}:~/quanta/`,
-  ])
-  if (scpCfg.code !== 0) {
-    throw new Error(`[full-remote] scp config failed (code ${scpCfg.code}): ${scpCfg.stderr}`)
-  }
-  log("[full-remote] synced src + config; running bun install on box (full deps, ~1-2min)…")
-  // `set -o pipefail` so a FAILED install propagates through the `tail`.
-  const installed = await ssh(
-    "set -o pipefail; cd ~/quanta && ~/.bun/bin/bun install 2>&1 | tail -25",
-  )
-  if (installed.code !== 0) {
-    throw new Error(
-      `[full-remote] bun install failed (code ${installed.code}):\n${installed.stdout}${installed.stderr}`,
-    )
-  }
-  // PHANTOM DEPS: packages imported by src/ but undeclared in package.json.
-  const phantoms = PHANTOM_DEPS.join(" ")
-  log(`[full-remote] installing phantom deps (undeclared in package.json): ${phantoms}…`)
-  const added = await ssh(
-    `set -o pipefail; cd ~/quanta && ~/.bun/bin/bun add ${phantoms} 2>&1 | tail -15`,
-  )
-  if (added.code !== 0) {
-    throw new Error(
-      `[full-remote] bun add (phantom deps) failed (code ${added.code}):\n${added.stdout}${added.stderr}`,
-    )
-  }
-  // Grading toolchain: the swebench-python shim (uvx --from <spec> python) + warm the
-  // uvx cache so the first import-probe doesn't time out.
-  //
-  // RFC jun-29 (Live grading fix): stock PyPI `swebench` only knows the ORIGINAL
-  // SWE-bench repos — its `make_test_spec` does `MAP_REPO_VERSION_TO_SPECS[repo][version]`
-  // and KeyErrors on a SWE-bench-Live repo (measured: `KeyError: 'conan-io/conan'`). The
-  // SWE-bench-Live fork registers the Live repos, so for a Live `--dataset_name` we pull
-  // the fork instead. Derived from the forwarded QUANTA_SWEBENCH_DATASET_NAME so the one
-  // dataset signal drives BOTH grading params and the harness build; QUANTA_SWEBENCH_PIP_SPEC
-  // is an explicit operator override. Default `swebench` ⇒ Verified/Pro unchanged.
-  // HIGH-1 (aug-22): FAMILY comes from the TYPED launch config ONLY — the old
-  // ambient-env `??` tail papered over a dropped thread and would now resolve the
-  // WRONG harness fork. (DATASET_NAME / PIP_SPEC keep their env fallbacks: those
-  // are operator knobs on a different axis, not the family authority.)
-  // aug-22 HIGH-4: the pip-spec comes from the family PROFILE's `harnessSpec`
-  // port, and the ABSENT-selector default from its ONE owner (re-audit R4).
-  // PMX-04 — the swebench grading shim is the SWEBENCH harness. A family that
-  // grades in its own grader phase (ProMax: its pinned evaluator) never uses it,
-  // and `harnessSpec` REFUSES for such a family — deliberately, since returning
-  // the stock spec would make its box byte-indistinguishable from a Verified one.
-  // Asking for it here made that refusal fire immediately AFTER `RunInstances`:
-  // the run paid for a box and then died building a shim it would never use.
-  if (
-    resolveDatasetFamilyProfile(datasetFamilyOrDefault(cfg.swebenchDatasetFamily)).boxGrade !==
-    undefined
-  ) {
-    log(
-      "[full-remote] dataset-family grades with its own pinned evaluator — SKIPPING the swebench " +
-        "grading shim + uvx warm (neither is its grader).",
-    )
-    return
-  }
-  const swebenchPipSpec = resolveDatasetFamilyProfile(
-    datasetFamilyOrDefault(cfg.swebenchDatasetFamily),
-  ).harnessSpec({
-    datasetName: cfg.swebenchDatasetName ?? process.env.QUANTA_SWEBENCH_DATASET_NAME ?? "",
-    pipSpecOverride: cfg.swebenchPipSpec ?? process.env.QUANTA_SWEBENCH_PIP_SPEC,
-  }).pipSpec
-  log(
-    `[full-remote] creating swebench-python shim + warming uvx cache (from=${swebenchPipSpec}, first pull ~30-60s)…`,
-  )
-  const shim = buildSwebenchShim(swebenchPipSpec)
-  const wrote = await ssh("cat > ~/swebench-python && chmod +x ~/swebench-python", shim)
-  if (wrote.code !== 0) {
-    throw new Error(
-      `[full-remote] writing swebench-python shim failed (code ${wrote.code}): ${wrote.stderr}`,
-    )
-  }
-  const warm = await ssh(
-    'set -o pipefail; ~/swebench-python -c "import swebench; print(swebench.__version__)" 2>&1 | tail -3',
-  )
-  if (warm.code !== 0) {
-    throw new Error(
-      `[full-remote] swebench toolchain warm failed (code ${warm.code}):\n${warm.stdout}${warm.stderr}`,
-    )
-  }
-  // HIGH-1 (aug-22): typed launch config only — see the pip-spec note above.
-  // HIGH-4 (aug-22): the ON-BOX family bootstrap is the profile's `setupBox`
-  // port. This module no longer branches on `family === "pro"`.
-  await setupBoxForFamily({
-    family: datasetFamilyOrDefault(cfg.swebenchDatasetFamily),
-    // PMX-04: CARRIED, never re-derived here (see `family-bootstrap-exec.ts`).
-    ...(cfg.remoteBootstrap !== undefined ? { bootstrap: cfg.remoteBootstrap } : {}),
-    ssh: (cmd) => ssh(cmd),
-    log,
-  })
-  // #1-P0 (jun-19/20): prove LSP grounding is actually LIVE after bootstrap.
-  // The thin-strict family is fail-closed: proceeding with silent no-nav
-  // degrade would violate the preset's contract.
-  await verifyPyrightGrounding(ssh, log, cfg.preset ?? D.preset)
-}
-
-/** ON-BOX family bootstrap (aug-22 HIGH-4). `bootstrapBox`'s callee — the
- *  ordering (family ADMISSION GATE first, declared agent-phase bootstrap second)
- *  and the warm-box reuse gate live in `family-box-setup.ts`. Re-exported here
- *  because `bootstrapBox` is this module's, and callers import the callee from
- *  its owner. */
-export { setupBoxForFamily }
+export { setupBoxForFamily } from "./family-box-setup"
 
 const describeInstancePublicIp = async (
   awsFn: (args: readonly string[]) => Promise<SpawnResult>,
@@ -706,14 +562,13 @@ export const provisionBox = async (cfg: FullRemoteConfig): Promise<BoxSession> =
   }
 }
 
-/** Is this box fully bootstrapped (bun + swebench shim + synced src present)? A
- *  warm box from a prior run satisfies this; a half-provisioned one does not. */
-const isBootstrapped = async (ssh: (cmd: string) => Promise<SpawnResult>): Promise<boolean> => {
-  const probe = await ssh(
-    "test -x ~/.bun/bin/bun && test -x ~/swebench-python && test -d ~/quanta/src && echo OK",
-  )
-  return probe.code === 0 && probe.stdout.includes("OK")
-}
+/** Is this box fully bootstrapped for the launch family's profile readiness?
+ *  A warm box from a prior run satisfies this; a half-provisioned one does not.
+ *  Same probe as post-bootstrap — not a hardcoded ~/swebench-python for every family. */
+const isBootstrapped = async (
+  ssh: (cmd: string) => Promise<SpawnResult>,
+  family: DatasetFamily,
+): Promise<boolean> => isBoxProfileReady(ssh, family)
 
 const listRunningBoxes = async (
   cfg: FullRemoteConfig,
@@ -789,7 +644,13 @@ export const findIdleBox = async (cfg: FullRemoteConfig): Promise<string | undef
   if (rows === undefined) return undefined
   for (const { iid, ip } of rows) {
     const ssh = makeSsh(spawn, keyPath, `ubuntu@${ip}`)
-    if (!(await isBootstrapped((c) => ssh(c)).catch(() => false))) continue
+    if (
+      !(await isBootstrapped(
+        (c) => ssh(c),
+        datasetFamilyOrDefault(cfg.swebenchDatasetFamily),
+      ).catch(() => false))
+    )
+      continue
     // BUSY iff a grade process is live OR a FRESH grade lock is held. A lock with
     // NO live grade process AND older than 10min is a STALE leak — the orchestrator
     // was killed mid-grade so the box-side `finally rmdir` never ran (a real grade
@@ -810,7 +671,10 @@ export const inspectBox = async (
   const keyPath = cfg.keyPath ?? D.keyPath
   const spawn = cfg.spawn ?? defaultSpawn
   const ssh = makeSsh(spawn, keyPath, `ubuntu@${box.ip}`)
-  const bootstrapped = await isBootstrapped((c) => ssh(c)).catch(() => false)
+  const bootstrapped = await isBootstrapped(
+    (c) => ssh(c),
+    datasetFamilyOrDefault(cfg.swebenchDatasetFamily),
+  ).catch(() => false)
   if (!bootstrapped) {
     return {
       lifecycle: "bootstrapping",
@@ -886,8 +750,9 @@ export const attachBox = async (cfg: FullRemoteConfig, iid: string): Promise<Box
   }
   log(`[pool] reusing warm box ${iid} (${ip})`)
   const preset = cfg.preset ?? D.preset
+  const family = datasetFamilyOrDefault(cfg.swebenchDatasetFamily)
   let reBootstrapped = false
-  if (!(await isBootstrapped((c) => ssh(c)))) {
+  if (!(await isBootstrapped((c) => ssh(c), family))) {
     log(`[pool] box ${iid} missing bootstrap (stale) — re-bootstrapping…`)
     await bootstrapBox(session, cfg)
     reBootstrapped = true

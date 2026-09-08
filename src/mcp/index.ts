@@ -18,6 +18,7 @@ export {
   sanitizeAnnotations,
   unsupportedTypeMarker,
 } from "./client"
+export { ISOLATED_MCP_ENV_VAR, isolatedMcpEnabledFromEnv } from "./client/isolated-flag"
 export {
   type CliPrompterIO,
   cliPrompter,
@@ -144,6 +145,11 @@ export {
   HttpSseMcpTransport,
   type HttpSseTransportOpts,
 } from "./transports/http-sse"
+export {
+  IsolatedMcpTransport,
+  type IsolatedMcpTransportOpts,
+  sanitiseIsolatedServiceName,
+} from "./transports/isolated"
 export type {
   McpTransport,
   McpTransportExitHandler,

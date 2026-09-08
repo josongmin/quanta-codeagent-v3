@@ -14,6 +14,8 @@
  * the model context, the JSONL envelope, or the memory distill input.
  */
 import {
+  COMMAND_PREFIX_HEADS,
+  commandSubstitutionInners,
   executableBasename,
   firstToken,
   gluedSuspiciousHead,
@@ -24,6 +26,7 @@ import {
   shellCommandPayload,
   skipEnvPrefixArgs,
   skipLeadingAssignments,
+  skipUtilityPrefixArgs,
   splitCommandSegments,
   stripRedirects,
   tokenize,
@@ -332,6 +335,7 @@ const SUSPICIOUS_HEADS: ReadonlySet<string> = new Set([
   ...SECRET_COMMAND_RULES.keys(),
   ...INTERPRETER_EVAL_HEADS,
   ...SHELL_WRAPPER_HEADS,
+  ...COMMAND_PREFIX_HEADS,
 ])
 
 const segmentLooksGluedSecret = (tokens: readonly string[]): boolean => {
@@ -341,26 +345,77 @@ const segmentLooksGluedSecret = (tokens: readonly string[]): boolean => {
   return false
 }
 
+/** Ruby's env object is the identifier `ENV`, not `ENV[` / `os.environ`. */
+const RUBY_ENV_DUMP = /\bENV\b/
+
+const phpDashRSource = (stripped: readonly string[]): string | undefined => {
+  for (let i = 1; i < stripped.length; i++) {
+    if (stripped[i] !== "-r") continue
+    const source = stripped[i + 1]
+    return source !== undefined && source.length > 0 ? source : undefined
+  }
+  return undefined
+}
+
+const extraInterpreterSource = (head: string, stripped: readonly string[]): string | undefined => {
+  if (head === "php") return phpDashRSource(stripped)
+  if (head === "deno" && stripped[1] === "eval") {
+    return skipUtilityPrefixArgs(stripped.slice(2))[0]
+  }
+  return undefined
+}
+
+const classifyInterpreterSource = (
+  head: string,
+  stripped: readonly string[],
+): SensitivityClass | undefined => {
+  if (!INTERPRETER_EVAL_HEADS.has(head)) return undefined
+  const sources = [interpreterEvalSource(stripped), extraInterpreterSource(head, stripped)]
+  for (const source of sources) {
+    if (source === undefined) continue
+    if (classifyCodeShape(source) === "secret") return "secret"
+    if (head === "ruby" && RUBY_ENV_DUMP.test(source)) return "secret"
+  }
+  return undefined
+}
+
 const classifyEvalOrShell = (
   head: string,
   stripped: readonly string[],
   unwrapDepth: number,
 ): SensitivityClass | undefined => {
-  if (INTERPRETER_EVAL_HEADS.has(head)) {
-    const source = interpreterEvalSource(stripped)
-    if (source !== undefined && classifyCodeShape(source) === "secret") return "secret"
-  }
-  if (!SHELL_WRAPPER_HEADS.has(head)) return undefined
+  const interp = classifyInterpreterSource(head, stripped)
+  if (interp !== undefined) return interp
   const payload = shellCommandPayload(stripped)
   if (payload === undefined) return undefined
   if (unwrapDepth >= MAX_SHELL_UNWRAP_DEPTH) return "secret"
-  return classifyCommandShapeAt(payload, unwrapDepth + 1)
+  const inner = classifyCommandShapeAt(payload, unwrapDepth + 1)
+  // Known shells always unwrap (`bash -c echo hi` stays public).
+  // Unsupported wrappers (`dash -c printenv`) fail closed only when the
+  // payload itself is a secret command — `gcc -c file.c` stays public.
+  if (SHELL_WRAPPER_HEADS.has(head)) return inner
+  return inner === "secret" ? "secret" : undefined
+}
+
+const classifyForwardedCommand = (
+  head: string,
+  stripped: readonly string[],
+  unwrapDepth: number,
+): SensitivityClass | undefined => {
+  if (COMMAND_PREFIX_HEADS.has(head) && stripped.length > 1) {
+    const forwarded = skipUtilityPrefixArgs(stripped.slice(1))
+    if (forwarded.length > 0) return classifySimpleCommand(forwarded, unwrapDepth + 1)
+  }
+  if (head !== "env" || stripped.length <= 1) return undefined
+  const inner = skipEnvPrefixArgs(stripped.slice(1))
+  return inner.length > 0 ? classifySimpleCommand(inner, unwrapDepth + 1) : "public"
 }
 
 const classifySimpleCommand = (
   tokens: readonly string[],
   unwrapDepth: number,
 ): SensitivityClass => {
+  if (unwrapDepth >= MAX_SHELL_UNWRAP_DEPTH) return "secret"
   if (segmentLooksGluedSecret(tokens)) return "secret"
   const stripped = skipLeadingAssignments(stripRedirects(tokens))
   if (stripped.length === 0) return "public"
@@ -370,12 +425,14 @@ const classifySimpleCommand = (
   if (SECRET_COMMAND_RULES.get(head)?.(stripped) === true) return "secret"
   const wrapped = classifyEvalOrShell(head, stripped, unwrapDepth)
   if (wrapped !== undefined) return wrapped
-  if (head !== "env" || stripped.length <= 1) return "public"
-  const inner = skipEnvPrefixArgs(stripped.slice(1))
-  return inner.length > 0 ? classifySimpleCommand(inner, unwrapDepth) : "public"
+  return classifyForwardedCommand(head, stripped, unwrapDepth) ?? "public"
 }
 
 const classifyCommandShapeAt = (cmd: string, unwrapDepth: number): SensitivityClass => {
+  if (unwrapDepth >= MAX_SHELL_UNWRAP_DEPTH) return "secret"
+  for (const inner of commandSubstitutionInners(cmd)) {
+    if (classifyCommandShapeAt(inner, unwrapDepth + 1) === "secret") return "secret"
+  }
   const tokens = tokenize(cmd)
   if (tokens.length === 0) return "public"
   for (const segment of splitCommandSegments(tokens)) {
@@ -388,7 +445,7 @@ export const classifyCommandShape = (cmd: string): SensitivityClass =>
   classifyCommandShapeAt(cmd, 0)
 
 const CODE_ENV_ACCESS =
-  /\b(?:process|Bun|Deno)\s*\.\s*env\b|\bprocess\s*\[\s*["'`]env["'`]\s*\]|\bimport\s*\.\s*meta\s*\.\s*env\b|\bos\.environ\b|\bENV\s*\[/
+  /\b(?:process|Bun|Deno)\s*\.\s*env\b|\bprocess\s*\[\s*["'`]env["'`]\s*\]|\bimport\s*\.\s*meta\s*\.\s*env\b|\bos\.environ\b|\bENV\s*\[|%ENV\b|\$ENV\s*\{|\$_ENV\b/
 const CODE_STRING_LITERAL = /(["'`])((?:\\.|(?!\1)[\s\S])*)\1/g
 const CODE_FILE_READ_ARG =
   /\b(?:readFileSync|readFile|readTextFileSync|readTextFile|createReadStream|openSync|Bun\s*\.\s*file)\s*\(\s*((?:["'][^"'\\]*(?:\\.[^"'\\]*)*["'])|(?:`(?:\\.|[^`])*`)|[^,\n)]+)/g

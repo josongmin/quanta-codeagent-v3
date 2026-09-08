@@ -1,5 +1,5 @@
 id: mcp-isolated-spawn
-title: IsolatedMcpClient — opt-in MCP backed by plugin-isolation (ADR-0162)
+title: Isolated MCP transport — opt-in process-ready spawn (ADR-0162)
 section: 9
 subsystem: MCP (ADR-0007) + Plugin isolation (ADR-0162) — alternative spawn path
 order: 162
@@ -18,48 +18,46 @@ surface_integration:
   cli: full
   web: na
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-09-08"
   evidence:
     cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal IPC spawn primitive, no browser affordance"
 purpose: |
-  Mirror public API of legacy `McpClient` (start / listTools / callTool /
-  stop) but delegates spawn to `IsolatedProcessSpawnerPort` (+ PluginHost
-  for JSON-RPC). Default-OFF — gated by env flag `MCP_USE_ISOLATED_SPAWN=1`
-  (also accepts `true` / `yes`); when unset, the legacy McpClient is used
-  verbatim (byte-identical, no behavior change).
-  Adds 3 things over legacy:
-   1. typed 5s spawn timeout (vs legacy: only request-level timeout)
-   2. 5s SIGTERM→SIGKILL grace (vs legacy: single kill())
-   3. ASCII-sanitised serviceName surfaced via QUANTA_SERVICE_NAME
-      (visible in `ps` / Activity Monitor)
-  Typed `IsolatedMcpError` separate from legacy `McpError` — caller can
-  distinguish path. Sanitiser: replaces non-ASCII with `_`, prefixes `mcp_`
-  if first char invalid, truncates to 64 chars (regex
-  `[A-Za-z0-9._-]{1,64}` enforced by spawner).
+  When MCP_USE_ISOLATED_SPAWN=1 (also true/yes), McpClient's defaultTransportFor
+  selects IsolatedMcpTransport in process-ready mode for command servers.
+  HTTP/url selection is unchanged. Flag unset → StdioMcpTransport (byte-identical).
+  IsolatedMcpClient is a delegating facade (dxt-ready-line) for existing
+  hellgates. Production plugin launchers construct McpClient + IsolatedMcpTransport
+  (dxt-ready-line) directly. The env flag selects IsolatedMcpTransport process-ready
+  via McpClient's defaultTransportFor.
+  Adds vs stdio: typed spawn timeout, SIGTERM→SIGKILL grace, ASCII serviceName
+  via QUANTA_SERVICE_NAME. Send failures (dead/oversize) surface as Error on
+  McpTransport.send; DXT IsolatedProcess.send stays NO-THROW.
 evidence:
   code:
+    - src/mcp/client/transport-factory.ts
+    - src/mcp/client/isolated-flag.ts
+    - src/mcp/transports/isolated.ts
     - src/mcp/isolated-client.ts
-    - src/plugin-isolation/index.ts
     - src/plugin-isolation/bun-spawner.ts
-    - src/plugin-isolation/plugin-host.ts
   adrs:
     - docs/decisions/0162-plugin-process-isolation.md
   tests:
     unit:
+      - tests/unit/sep8-remediation/r11/c-f1-factory-seam.test.ts
       - tests/unit/plugin-isolation-mcp-integration-hellgate.test.ts
-      - tests/unit/plugin-isolation-mcp-integration.test.ts
-    integration: []
+    integration:
+      - tests/integration/sep8-remediation/r11/c-f1-process-ready-stdio.test.ts
     contract: []
 knobs:
   - name: MCP_USE_ISOLATED_SPAWN
-    where: src/mcp/isolated-client.ts (isolatedMcpEnabledFromEnv)
+    where: src/mcp/client/isolated-flag.ts (isolatedMcpEnabledFromEnv)
     default: ""
-    purpose: opt-in switch (accepts '1' | 'true' | 'yes' — case-sensitive)
+    purpose: opt-in factory switch (accepts '1' | 'true' | 'yes')
 deliberate_hold: null
 notes: |
-  Backward compat invariant: legacy `McpClient` from `@/mcp` barrel is
-  unchanged. The isolated client is NOT re-exported from the `@/mcp`
-  barrel by default — callers wire it explicitly via direct import. This
-  keeps the default code path byte-identical and the absorption opt-in for
-  plugins that need the hardening (unsigned libs / crash-loop history).
+  Backward compat: `McpClient` remains the `@/mcp` default. IsolatedMcpClient
+  is NOT re-exported from the barrel; IsolatedMcpTransport and
+  isolatedMcpEnabledFromEnv ARE. Plugin launchers construct McpClient +
+  IsolatedMcpTransport (dxt-ready-line). The env flag is owned by
+  transport-factory / isolated-flag, not by host composition.

@@ -91,7 +91,7 @@ describe("§4.3 OS-fork e2e — PRODUCTION worker via the process REGISTRY", () 
   const intervalSpec = (over: Partial<SideAgentSpec> = {}): SideAgentSpec => ({
     task: "audit the dependency tree",
     trigger: { kind: "interval", everyMs: 60_000 },
-    maxWakes: 1,
+    maxWakes: 5,
     maxTurnsPerWake: 3,
     ...over,
   })

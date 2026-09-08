@@ -99,7 +99,7 @@ const recordCassette = async (): Promise<void> => {
     { llmPort: recording },
   )
   // Sanity: the in-process recording pass itself produced the model finding.
-  if (finding === null || !finding.summary.includes(SENTINEL_TOKEN)) {
+  if (finding.outcome !== "finding" || !finding.finding.summary.includes(SENTINEL_TOKEN)) {
     throw new Error(
       `recording pass did not surface the sentinel finding (got ${JSON.stringify(finding)})`,
     )

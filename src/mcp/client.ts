@@ -9,15 +9,21 @@ import {
   serverSupportsTasks,
   serverSupportsToolsListChanged,
 } from "./client/capabilities-gate"
-import { isUnauthorizedError, McpError, unsupported } from "./client/errors"
+import { McpError, unsupported } from "./client/errors"
 import {
   type InboundRouterContext,
   type PendingRequest,
   dispatch as routeInbound,
 } from "./client/inbound-router"
-import { initializeWithDowngrade, pinNegotiatedVersion } from "./client/negotiate"
 import {
-  asRecord,
+  bindReauthSession,
+  handshakeOnTransport,
+  type ReauthBindTarget,
+  type ReauthSession,
+  recoverUnauthorized,
+  runReauthTransaction,
+} from "./client/reauthorize"
+import {
   capResultText,
   extractMedia,
   joinTextBlocks,
@@ -152,6 +158,12 @@ export class McpClient {
    *  carrier rebuild). `null` when idle; set while a re-auth runs so concurrent
    *  401s coalesce into a single rebuild rather than racing the carrier swap. */
   private reauthInFlight: Promise<boolean> | null = null
+  /** C-F9 — true while a replacement handshake is in flight. initialize 401
+   *  must not recurse into the same refresh. */
+  private refreshing = false
+  /** C-F9 — generation fence so stale responses from a replaced carrier cannot
+   *  overwrite the published session. */
+  private dispatchGeneration = 0
   /** Server-advertised capability record captured from the `initialize`
    *  response (ADR-0431). `null` until `start()` completes. Used to gate the
    *  optional `tasks/*` surface: tools are wired ONLY when a connected server
@@ -295,7 +307,11 @@ export class McpClient {
       this.transport = build(this.withBearer(this.config, token))
     }
     const transport = this.transport
-    this.unsubscribeMessage = transport.onMessage((msg) => this.dispatch(msg))
+    const generation = this.bumpGeneration()
+    this.unsubscribeMessage = transport.onMessage((msg) => {
+      if (this.dispatchGeneration !== generation) return
+      this.dispatch(msg)
+    })
     this.unsubscribeExit = transport.onExit(() => this.onTransportExit())
     await transport.start()
 
@@ -312,37 +328,34 @@ export class McpClient {
     // a standalone SSE GET. `stop()` is idempotent and closes the carrier, drops
     // the subscriptions, and fails any pending request.
     try {
-      const { result: initResult, offered } = await initializeWithDowngrade(
-        this.offeredVersion,
-        transport,
-        (version) => this.sendInitialize(version),
-      )
-      this.serverCapabilities = asRecord(initResult)?.capabilities
-        ? (asRecord(asRecord(initResult)?.capabilities) ?? {})
-        : {}
-      // Read + accept/legacy-tolerant/fail-closed the server's chosen
-      // protocolVersion (previously discarded), then pin the HTTP header to it.
-      this.negotiatedVersion = pinNegotiatedVersion(
-        initResult,
-        offered,
-        transport,
-        this.config.name,
-      )
+      const handshake = await handshakeOnTransport({
+        offeredVersion: this.offeredVersion,
+        getTransport: () => this.requireTransport(),
+        sendInitialize: (version) => this.sendInitialize(version),
+        notifyInitialized: () => this.notify("notifications/initialized", {}),
+        serverName: this.config.name,
+      })
+      this.serverCapabilities = handshake.capabilities
+      this.negotiatedVersion = handshake.negotiatedVersion
     } catch (err) {
       await this.stop().catch(() => {})
       throw err
     }
-    this.notify("notifications/initialized", {})
   }
 
   /** Emit a single `initialize` request with `version` as the offered
-   *  `protocolVersion`. Capabilities + clientInfo are unchanged by this ticket. */
+   *  `protocolVersion`. Uses {@link request} so an INITIAL start 401 can still
+   *  recover via OAuth. Reauth handshake uses {@link sendInitializeRaw}. */
   private sendInitialize(version: string): Promise<unknown> {
-    return this.request("initialize", {
+    return this.request("initialize", this.initializeParams(version))
+  }
+
+  private initializeParams(version: string): Record<string, unknown> {
+    return {
       protocolVersion: version,
       clientInfo: CLIENT_INFO,
       capabilities: this.negotiator.compile(),
-    })
+    }
   }
 
   /** Ticket misc-jun-7/01 — the protocol version pinned for this session (the
@@ -732,15 +745,14 @@ export class McpClient {
     try {
       return await this.requestRpc(method, params)
     } catch (err) {
-      // H18 — a mid-session 401 (the server revoked the bearer after we
-      // connected) is the single error we recover from, and ONLY when OAuth is
-      // active. We forget the stale token, rebuild the carrier with a freshly
-      // resolved bearer, and retry the SAME request once. Any other error — or a
-      // 401 on a non-OAuth client — propagates exactly as before.
-      if (!this.oauthActive || !isUnauthorizedError(err)) throw err
-      const reauthed = await this.reauthorize()
-      if (!reauthed) throw err // no fresh token obtained ⇒ surface the original 401
-      return this.requestRpc(method, params)
+      return recoverUnauthorized(
+        this.reauthSession(),
+        method,
+        err,
+        this.refreshing,
+        () => this.reauthorize(),
+        () => this.requestRpc(method, params),
+      )
     }
   }
 
@@ -797,52 +809,27 @@ export class McpClient {
     }
   }
 
-  /** H18 — recover from a mid-session 401: forget the (now-revoked) bearer, ask
-   *  the provider for a fresh one, and rebuild the carrier so the new
-   *  `Authorization` header reaches the wire (the HTTP transport reads static
-   *  headers at construction, so a header swap requires a fresh carrier).
-   *
-   *  Returns `true` IFF a fresh, DIFFERENT bearer was obtained and the carrier
-   *  was rebuilt; `false` when no token can be re-resolved (declined/failed
-   *  refresh+re-auth) — the caller then surfaces the original 401 rather than
-   *  retrying with the same (or no) credential. Only invoked on the OAuth-active
-   *  path. Never throws (the provider port is total; rebuild failures degrade to
-   *  `false`). Guarded against a rebuild with no factory (explicit-instance
-   *  transport) — there is no carrier to rebuild, so re-auth is a no-op `false`.
-   *
-   *  Reentrancy: a single in-flight re-auth is shared so concurrent 401s on
-   *  parallel requests rebuild the carrier exactly once. */
   private reauthorize(): Promise<boolean> {
-    this.reauthInFlight ??= this.doReauthorize().finally(() => {
+    this.reauthInFlight ??= runReauthTransaction(this.reauthSession()).finally(() => {
       this.reauthInFlight = null
     })
     return this.reauthInFlight
   }
 
-  private async doReauthorize(): Promise<boolean> {
-    if (this.stopped || this.exited) return false
-    if (this.transportFactory === null) return false // explicit-instance carrier
-    // Forget the revoked token so the next `tokenFor` refreshes/re-authorizes,
-    // then resolve a fresh bearer. The port is total (no throw, `undefined` on
-    // decline). The bearer is never logged.
-    await this.oauthProvider.invalidate(this.config.name)
-    const token = await this.oauthProvider.tokenFor(this.config.name)
-    if (token === undefined) return false
-    // Tear down the old carrier's subscriptions + connection, then rebuild with
-    // the bearer-merged config and re-wire the pumps. Pending requests stay
-    // queued (their ids are still valid) and resolve on the rebuilt carrier.
-    this.unsubscribeMessage?.()
-    this.unsubscribeExit?.()
-    const old = this.transport
-    const next = this.transportFactory(this.withBearer(this.config, token))
-    this.transport = next
-    this.unsubscribeMessage = next.onMessage((msg) => this.dispatch(msg))
-    this.unsubscribeExit = next.onExit(() => this.onTransportExit())
-    await next.start()
-    // Close the stale carrier last so a close-time error never blocks the rebuilt
-    // path; failures here are non-fatal (the connection is already replaced).
-    await old?.close().catch(() => {})
-    return true
+  private bumpGeneration(): number {
+    this.dispatchGeneration += 1
+    return this.dispatchGeneration
+  }
+
+  private requireTransport(): McpTransport {
+    if (this.transport === null) {
+      throw new McpError(`mcp server "${this.config.name}" transport not started`)
+    }
+    return this.transport
+  }
+
+  private reauthSession(): ReauthSession {
+    return bindReauthSession(this as unknown as ReauthBindTarget)
   }
 
   /** Route one decoded transport message through the receive-side router

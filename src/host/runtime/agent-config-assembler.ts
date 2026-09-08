@@ -485,6 +485,8 @@ const maybeWireSideAgent = (
       workerModulePath: sideAgentWorkerModulePath(),
       parentDepth: cfg.depth ?? 0,
       cwd: cfg.cwd,
+      setInterval: (handler, ms) => setInterval(handler, ms),
+      clearInterval: (handle) => clearInterval(handle as ReturnType<typeof setInterval>),
     })
     return
   }

@@ -93,10 +93,10 @@ export const mcpHotReloadEnabled = (): boolean =>
 
 /** Build the injected {@link SupervisorDeps} for one MCP server. The real
  *  clock/timer/RNG are injected ONLY here, at the composition root — the
- *  supervisor core itself never reaches for a global. The factory picks the
- *  legacy `McpClient`; the isolated client is selected by its own env knob
- *  inside `McpClient` construction is out of scope (the isolated path keeps its
- *  separate wire), so we use the default client here.
+ *  supervisor core itself never reaches for a global. The factory picks
+ *  `McpClient`. When `MCP_USE_ISOLATED_SPAWN` is on, `defaultTransportFor`
+ *  selects `IsolatedMcpTransport` (`process-ready`) for command servers.
+ *  HTTP/url is unchanged. Do not construct `IsolatedMcpClient` here.
  *
  *  B1 + H19 — the inbound-capability wiring bundle (`{ negotiator, handler?,
  *  rootsProvider? }`) is BAKED into the restart factory via the SAME

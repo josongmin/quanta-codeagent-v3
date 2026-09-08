@@ -45,7 +45,8 @@ export interface FamilyBoxSetupInput {
   readonly family: DatasetFamily
   /** PMX-04 — the family's DECLARED bootstrap, resolved at the launch root and
    *  CARRIED here. Runs AFTER the profile's imperative `setupBox` admission
-   *  gate; `undefined` ⇒ not one extra ssh (byte-identical). */
+   *  gate. `undefined` is byte-identical only for families that declare none;
+   *  a declaring family with no payload is refused (fresh and warm). */
   readonly bootstrap?: FamilyRemoteBootstrap | undefined
   readonly ssh: (cmd: string) => Promise<SpawnResult>
   readonly log: (m: string) => void
@@ -86,10 +87,23 @@ export const setupBoxForFamily = async (args: FamilyBoxSetupInput): Promise<void
   //    port issues no command) and keeps the ordering true for every OTHER
   //    caller of this callee, including the warm-box reuse gate below.
   assertFamilyAdmitsBox({ family: args.family, log: args.log })
-  // 1. The family's imperative on-box setup. Still second, and still ahead of
-  //    the declared bootstrap.
+  // 1. A family that DECLARES a bootstrap must CARRY it on the fresh path too.
+  //    Warm reuse already refused a missing payload (`ensureWarmBoxFamilyBootstrap`).
+  //    Fresh provision used to no-op inside `executeFamilyRemoteBootstrap`, so
+  //    `box up` / `pool` could skip the pin while the report still claimed it.
+  const declares = resolveDatasetFamilyProfile(args.family).remoteBootstrap !== undefined
+  if (declares && args.bootstrap === undefined) {
+    throw new Error(
+      `[full-remote] refusing to bootstrap dataset-family=${args.family}: the family ` +
+        "declares a remote bootstrap (a pinned checkout and an on-box digest verification), but " +
+        "the provision path carried none — so this box would skip the pin while the report " +
+        "still claimed it. Thread the resolved bootstrap onto the launch config " +
+        "(`withResolvedFamilyBootstrap`).",
+    )
+  }
+  // 2. The family's imperative on-box setup. Still ahead of the declared bootstrap.
   await resolveDatasetFamilyProfile(args.family).setupBox({ ssh: args.ssh, log: args.log })
-  // 2. The declared AGENT-phase bootstrap. Gold-bearing commands are grader
+  // 3. The declared AGENT-phase bootstrap. Gold-bearing commands are grader
   //    phase and are refused here by the executor's cross-check.
   //
   //    This is one of TWO non-test call sites of `executeFamilyRemoteBootstrap`,

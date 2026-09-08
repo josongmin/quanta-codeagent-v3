@@ -465,19 +465,19 @@ describe("PMX-01 — the promax remote bootstrap specification is fail-closed", 
     )
   })
 
-  test("the on-box bootstrap callee issues nothing for promax WITHOUT a carried bootstrap", async () => {
-    // PMX-04 wired ProMax's lane, so this no longer refuses. With no bootstrap
-    // carried there is simply nothing to run — and the property that mattered is
-    // unchanged: the profile's own `setupBox` provisions nothing by itself.
+  test("the on-box bootstrap callee REFUSES promax WITHOUT a carried bootstrap", async () => {
+    // ProMax's own `setupBox` is a no-op: the declared bootstrap is the pin.
+    // A missing payload used to no-op the executor too, which let `box up` /
+    // `pool` skip the pin. Fresh provision now fails closed like warm reuse.
     const seen: string[] = []
     const ssh = async (cmd: string) => {
       seen.push(cmd)
       return { code: 0, stdout: "", stderr: "" }
     }
-    await setupBoxForFamily({ family: "promax", ssh, log: () => {} })
-    expect(seen, "promax's setupBox must issue NO ssh of its own").toEqual([])
-    // …and the provisioning it declines to do really is DECLARED elsewhere, so
-    // the empty list above means "delegated", not "nothing provisions this box".
+    await expect(setupBoxForFamily({ family: "promax", ssh, log: () => {} })).rejects.toThrow(
+      /provision path carried none/,
+    )
+    expect(seen, "refusal must happen before any ssh").toEqual([])
     const declared = resolveDatasetFamilyProfile("promax").remoteBootstrap
     expect(
       declared,

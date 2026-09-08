@@ -294,4 +294,16 @@ describe("R1 — `box up` threads the TYPED resolved family into provisionBox", 
     expect(cfg.launchMode).toBe("warm-box")
     expect(cfg.keep).toBe(true)
   })
+
+  test("ProMax `box up` carries the declared remoteBootstrap onto provision", async () => {
+    const cfg = await capturedConfig(["up", "--dataset-family", "promax"])
+    expect(cfg.swebenchDatasetFamily).toBe("promax")
+    expect(cfg.remoteBootstrap?.family).toBe("promax")
+    expect(cfg.remoteBootstrap?.commands.length ?? 0).toBeGreaterThan(0)
+  })
+
+  test("verified `box up` does NOT fabricate a remoteBootstrap", async () => {
+    const cfg = await capturedConfig(["up", "--dataset-family", "verified"])
+    expect(cfg.remoteBootstrap).toBeUndefined()
+  })
 })

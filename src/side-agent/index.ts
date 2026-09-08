@@ -6,6 +6,13 @@
  */
 
 export {
+  createDaemonEngine,
+  type DaemonEngine,
+  normalizeRunnerResult,
+  type PassOutcome,
+  validateSideAgentSpec,
+} from "./control"
+export {
   backoffForAttempt,
   type ChildProcessHandle,
   createSupervisedProcessDaemon,

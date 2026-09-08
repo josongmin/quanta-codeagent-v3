@@ -18,7 +18,7 @@ const scopesFor = (g) => [...g.sourceScopes, ...g.existingTests, ...g.newTestSco
 const owns = (g, path) => !reserved(path) && scopesFor(g).some((scope) => contains(scope, path))
 const overlap = (a, b) => a === b ? a : contains(a, b) ? b : contains(b, a) ? a : null
 const duplicates = (xs) => xs.filter((x, i) => xs.indexOf(x) !== i)
-const actionIds = [...read(`${planDir}ACTIONS.md`).matchAll(/^- \[ \] \*\*([A-Z0-9.-]+)\*\*/gm)].map((m) => m[1])
+const actionIds = [...read(`${planDir}ACTIONS.md`).matchAll(/^- \[[ x]\] \*\*([A-Z0-9.-]+)\*\*/gm)].map((m) => m[1])
 const coverage = new Map([...read(`${planDir}README.md`).matchAll(/^\| ([A-Z][A-Z0-9-]*) \| P[123] \| (R\d+) \|/gm)].map((m) => [m[1], m[2]]))
 const assignedActions = [...manifest.preflight.actions, ...manifest.groups.flatMap((g) => g.actions), ...manifest.closeout.actions]
 check(coverage.size === 39 && manifest.groups.length === 16, "anti-vacuity: expected 39 findings/16 groups")

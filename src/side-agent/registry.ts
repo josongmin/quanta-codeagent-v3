@@ -2,8 +2,17 @@
  * N1 — the side-agent daemon registry: the supervise loop + runaway guards
  * (RFC §4). Pure orchestration over injected ports (runner/mailbox/sink/events/
  * timers/clock) — no concrete imports, no `Date.now()`/`setInterval` of its own.
+ *
+ * Cadence, spec validation, wake accounting, and lifetime bounds live in
+ * `./control` so the process backer cannot drift.
  */
 
+import {
+  createDaemonEngine,
+  type DaemonEngine,
+  normalizeRunnerResult,
+  validateSideAgentSpec,
+} from "./control"
 import {
   type SideAgentDaemonOpts,
   type SideAgentDaemonRegistry,
@@ -18,79 +27,16 @@ const DEFAULT_MAX_CONCURRENT = 2
 const DEFAULT_MAX_FINDINGS = 1000
 const DEFAULT_MAX_RETAINED = 100
 
-const isPositiveInt = (n: unknown): boolean =>
-  typeof n === "number" && Number.isInteger(n) && n >= 1
-
-/**
- * Reject a malformed spec BEFORE it is spawned. Without this, three real
- * footguns slip through (found in self-audit): an `interval` with `everyMs<=0`
- * spins the CPU; an `event` trigger with NO injected event source spawns a
- * zombie that holds a concurrency slot forever; and a non-positive
- * `maxWakes`/`maxTurnsPerWake` either no-ops or runs unbounded. NO-THROW
- * elsewhere — this is a programming-error throw (`invalid-spec`), distinct from
- * the runtime `cap-exceeded`.
- */
-const bad = (msg: string): never => {
-  throw new SideAgentError("invalid-spec", msg)
-}
-
-const validateTrigger = (trig: SideAgentSpec["trigger"], hasEventSource: boolean): void => {
-  if (trig.kind === "interval") {
-    if (!(typeof trig.everyMs === "number" && trig.everyMs > 0)) {
-      bad("interval trigger requires everyMs > 0")
-    }
-    return
-  }
-  if (typeof trig.topic !== "string" || trig.topic.length === 0) {
-    bad("event trigger requires a non-empty topic")
-  }
-  // No event source ⇒ the daemon could never wake → refuse rather than leak a
-  // concurrency slot on a permanently-asleep zombie.
-  if (!hasEventSource) bad("event trigger requires an injected event source (opts.events)")
-}
-
-const validateSpec = (spec: SideAgentSpec, hasEventSource: boolean): void => {
-  if (typeof spec.task !== "string" || spec.task.trim().length === 0) {
-    bad("spec.task must be a non-empty string")
-  }
-  if (!isPositiveInt(spec.maxWakes)) bad("spec.maxWakes must be an integer ≥ 1")
-  if (!isPositiveInt(spec.maxTurnsPerWake)) bad("spec.maxTurnsPerWake must be an integer ≥ 1")
-  if (
-    spec.idleReapMs !== undefined &&
-    !(typeof spec.idleReapMs === "number" && spec.idleReapMs > 0)
-  ) {
-    bad("spec.idleReapMs, when set, must be > 0")
-  }
-  validateTrigger(spec.trigger, hasEventSource)
-}
-
 interface DaemonState {
   readonly id: string
   readonly spec: SideAgentSpec
   status: SideAgentStatus
-  wakesDone: number
   readonly startedAt: number
-  lastFindingAt: number | undefined
   stoppedAt: number | undefined
-  readonly abort: AbortController
-  /** `setInterval` handle (interval trigger) — cleared on stop. */
-  timerHandle: unknown
-  /** Unsubscribe fn (event trigger) — called on stop. */
-  unsubscribe: (() => void) | undefined
-  /** A pass is in flight — drop overlapping wakes. */
-  inFlight: boolean
+  engine: DaemonEngine
 }
 
-/**
- * The registry's shared state: the daemon table and the helpers each operation
- * resolves through. Split out of `createSideAgentDaemonRegistry`
- * (god-function burndown).
- */
-/** The registry's tables and the cheap derivations over them. */
 const registryTables = (opts: SideAgentDaemonOpts) => {
-  /** The factory's MUTABLE state. `let` bindings cannot cross a function
-   *  boundary by value, so they live here and the groups mutate in place —
-   *  observationally identical to the closure they replace. */
   const mut = {
     idCounter: 0,
   }
@@ -107,8 +53,6 @@ const registryTables = (opts: SideAgentDaemonOpts) => {
     return n
   }
 
-  /** Capability C — the ids of currently-running daemons (the barrier's
-   *  "members": the team a leader fans IN over). */
   const runningIds = (): string[] => {
     const ids: string[] = []
     for (const d of daemons.values()) if (d.status === "running") ids.push(d.id)
@@ -128,35 +72,22 @@ const registryTables = (opts: SideAgentDaemonOpts) => {
   }
 }
 
-/** Daemon lifecycle: terminal transition, pruning, finding publication and
- *  the post-pass bounds. */
-const registryLifecycle = (ctx: ReturnType<typeof registryTables>) => {
+type Tables = ReturnType<typeof registryTables>
+
+const registryLifecycle = (ctx: Tables) => {
   const { opts, maxFindings, maxRetained, daemons, findingsLog } = ctx
 
-  /** Tear a daemon down to a terminal status. Idempotent. */
   const finish = (id: string, status: SideAgentStatus): boolean => {
     const d = daemons.get(id)
     if (d === undefined) return false
-    if (d.status !== "running") return true // already terminal — no-op
+    if (d.status !== "running") return true
     d.status = status
     d.stoppedAt = opts.now()
-    d.abort.abort()
-    if (d.timerHandle !== undefined) opts.clearInterval(d.timerHandle)
-    if (d.unsubscribe !== undefined) d.unsubscribe()
-    d.timerHandle = undefined
-    d.unsubscribe = undefined
-    // Capability C — a terminal daemon leaves the team; drop its beacon so it
-    // does not linger in the barrier (the query filters by running members, but
-    // clearing bounds the barrier's beacon set over a long session).
+    d.engine.disarm()
     opts.idleBarrier?.reactivate(id)
     return true
   }
 
-  /** Bound the daemon map: prune the OLDEST terminal daemons past `maxRetained`.
-   *  Called at the END of public methods (never mid-iteration of `daemons`, so
-   *  it can never invalidate `stopAll`'s loop).
-   *  Running daemons are never pruned (their slot is live). Insertion order in
-   *  the Map is oldest-first, so we evict the earliest terminal entries. */
   const pruneTerminal = (): void => {
     const terminal: string[] = []
     for (const d of daemons.values()) if (d.status !== "running") terminal.push(d.id)
@@ -166,7 +97,6 @@ const registryLifecycle = (ctx: ReturnType<typeof registryTables>) => {
     }
   }
 
-  /** Publish a non-null pass result to the mailbox + log + optional sink. */
   const publish = (
     d: DaemonState,
     wakeIndex: number,
@@ -180,7 +110,7 @@ const registryLifecycle = (ctx: ReturnType<typeof registryTables>) => {
       ...(result.detail !== undefined ? { detail: result.detail } : {}),
     }
     findingsLog.push(finding)
-    if (findingsLog.length > maxFindings) findingsLog.shift() // ring-buffer cap
+    if (findingsLog.length > maxFindings) findingsLog.shift()
     opts.mailbox.send({
       from: d.id,
       to: opts.mainRecipient,
@@ -189,99 +119,43 @@ const registryLifecycle = (ctx: ReturnType<typeof registryTables>) => {
       ...(finding.detail !== undefined ? { detail: finding.detail } : {}),
     })
     opts.sink?.emit(finding)
-    d.lastFindingAt = finding.at
   }
 
-  /** Hard wake ceiling, then idle reaper — applied AFTER a completed pass. */
-  const applyPostPassBounds = (d: DaemonState): void => {
-    if (d.status !== "running") return
-    if (d.wakesDone >= d.spec.maxWakes) {
-      finish(d.id, "stopped")
-      return
-    }
-    if (d.spec.idleReapMs !== undefined) {
-      const lastSignal = d.lastFindingAt ?? d.startedAt
-      if (opts.now() - lastSignal >= d.spec.idleReapMs) finish(d.id, "idle-reaped")
-    }
-  }
-  return { finish, pruneTerminal, publish, applyPostPassBounds }
+  return { finish, pruneTerminal, publish }
 }
 
-/** Concurrency scheduling: the wake pump and its trigger arming. */
-const registryScheduling = (
-  ctx: ReturnType<typeof registryTables> & ReturnType<typeof registryLifecycle>,
-) => {
-  const { opts, daemons, finish, pruneTerminal, publish, applyPostPassBounds } = ctx
-
-  /** Run ONE bounded pass for daemon `id` (drops overlapping wakes). */
-  const wake = async (id: string): Promise<void> => {
-    const d = daemons.get(id)
-    if (d === undefined || d.status !== "running" || d.inFlight) return
-    if (d.wakesDone >= d.spec.maxWakes) {
-      finish(id, "stopped")
-      return
-    }
-    d.inFlight = true
-    // Capability C — a pass is in flight ⇒ this daemon is NO LONGER idle.
-    opts.idleBarrier?.reactivate(id)
-    d.wakesDone += 1
-    const wakeIndex = d.wakesDone
-    try {
-      const result = await opts.runner.run({
-        task: d.spec.task,
-        wake: wakeIndex,
-        maxTurns: d.spec.maxTurnsPerWake,
-        signal: d.abort.signal,
-      })
-      if (!d.abort.signal.aborted && result !== null) publish(d, wakeIndex, result)
-    } catch {
-      d.inFlight = false
-      finish(id, "failed") // a thrown pass fails the daemon (not propagated)
-      return
-    }
-    d.inFlight = false
-    // Capability C — pass complete ⇒ idle again as of now (beacon the release ts).
-    // Skipped once `finish` made it terminal (a stopped daemon is not a team
-    // member; `applyPostPassBounds` may have just reaped it).
-    applyPostPassBounds(d)
-    if (d.status === "running") opts.idleBarrier?.beacon(id)
-    pruneTerminal()
-  }
-
-  const armTrigger = (d: DaemonState): void => {
-    const trig = d.spec.trigger
-    if (trig.kind === "interval") {
-      d.timerHandle = opts.setInterval(() => {
-        void wake(d.id)
-      }, trig.everyMs)
-    } else if (opts.events !== undefined) {
-      d.unsubscribe = opts.events.subscribe(trig.topic, () => {
-        void wake(d.id)
-      })
-    }
-  }
-  return { wake, armTrigger }
+const attachEngine = (ctx: Tables & ReturnType<typeof registryLifecycle>, d: DaemonState): void => {
+  const { opts, finish, pruneTerminal, publish } = ctx
+  d.engine = createDaemonEngine({
+    id: d.id,
+    spec: d.spec,
+    now: opts.now,
+    setInterval: opts.setInterval,
+    clearInterval: opts.clearInterval,
+    ...(opts.events !== undefined ? { events: opts.events } : {}),
+    ...(opts.idleBarrier !== undefined ? { idleBarrier: opts.idleBarrier } : {}),
+    isRunning: () => d.status === "running",
+    finish: (status) => finish(d.id, status),
+    prune: pruneTerminal,
+    publish: (wakeIndex, finding) => publish(d, wakeIndex, finding),
+    runPass: async ({ wakeId, task, maxTurns, signal }) => {
+      try {
+        const raw = await opts.runner.run({ task, wake: wakeId, maxTurns, signal })
+        return normalizeRunnerResult(raw)
+      } catch {
+        return { kind: "failed" }
+      }
+    },
+  })
 }
 
-/** Assemble the chained builders into the single shared context. */
-const registryState = (opts: SideAgentDaemonOpts) => {
-  const p0 = registryTables(opts)
-  const p1 = registryLifecycle({ ...p0 })
-  const p2 = registryScheduling({ ...p0, ...p1 })
-  return { ...p0, ...p1, ...p2 }
-}
-
-/** The state every operation group shares, inferred from {@link registryState} so it
- *  can never drift from what that function actually builds. */
-type RegistryCtx = ReturnType<typeof registryState>
-
-/** Spawn a side-agent daemon: allocate its record, start it, and register it
- *  so the query and stop paths can find it. */
-const spawnOps = (ctx: RegistryCtx): Pick<SideAgentDaemonRegistry, "spawn"> => {
-  const { opts, maxConcurrent, daemons, mintId, runningCount, pruneTerminal, armTrigger } = ctx
+const spawnOps = (
+  ctx: Tables & ReturnType<typeof registryLifecycle>,
+): Pick<SideAgentDaemonRegistry, "spawn"> => {
+  const { opts, maxConcurrent, daemons, mintId, runningCount, pruneTerminal } = ctx
   return {
     spawn(spec: SideAgentSpec): string {
-      validateSpec(spec, opts.events !== undefined)
+      validateSideAgentSpec(spec, opts.events !== undefined)
       if (runningCount() >= maxConcurrent) {
         throw new SideAgentError(
           "cap-exceeded",
@@ -293,34 +167,21 @@ const spawnOps = (ctx: RegistryCtx): Pick<SideAgentDaemonRegistry, "spawn"> => {
         id,
         spec,
         status: "running",
-        wakesDone: 0,
         startedAt: opts.now(),
-        lastFindingAt: undefined,
         stoppedAt: undefined,
-        abort: new AbortController(),
-        timerHandle: undefined,
-        unsubscribe: undefined,
-        inFlight: false,
+        engine: undefined as unknown as DaemonEngine,
       }
+      attachEngine(ctx, d)
       daemons.set(id, d)
-      // Capability C — beacon the fresh-idle daemon BEFORE arming its trigger.
-      // Ordering is load-bearing: an EVENT trigger whose source fires
-      // SYNCHRONOUSLY during `subscribe` would otherwise run `wake` (which
-      // `reactivate`s = clears the beacon) BEFORE this beacon line, leaving the
-      // beacon set AFTER the daemon is already in flight — falsely reporting a
-      // busy daemon as idle. Beacon-then-arm makes a synchronous first wake's
-      // `reactivate` correctly clear the just-set beacon.
-      opts.idleBarrier?.beacon(id)
-      armTrigger(d)
+      d.engine.arm()
       pruneTerminal()
       return id
     },
   }
 }
 
-/** Read-only views over the registered daemons. */
 const queryOps = (
-  ctx: RegistryCtx,
+  ctx: Tables,
 ): Pick<SideAgentDaemonRegistry, "findings" | "list" | "teamIdle" | "idleSince"> => {
   const { opts, daemons, findingsLog, runningIds } = ctx
   return {
@@ -334,20 +195,16 @@ const queryOps = (
         id: d.id,
         status: d.status,
         spec: d.spec,
-        wakesDone: d.wakesDone,
+        wakesDone: d.engine.wakesDone,
         startedAt: d.startedAt,
-        ...(d.lastFindingAt !== undefined ? { lastFindingAt: d.lastFindingAt } : {}),
+        ...(d.engine.lastFindingAt !== undefined ? { lastFindingAt: d.engine.lastFindingAt } : {}),
         ...(d.stoppedAt !== undefined ? { stoppedAt: d.stoppedAt } : {}),
       }))
-      // Newest-first by startedAt.
       snaps.sort((a, b) => b.startedAt - a.startedAt)
       return snaps
     },
 
     teamIdle(): boolean {
-      // The members are the RUNNING daemons. No barrier wired ⇒ false (team-idle
-      // is opt-in). Empty team ⇒ the barrier's own `teamIdle` returns false
-      // (never report a vacuous team as done).
       return opts.idleBarrier?.teamIdle(runningIds()) ?? false
     },
 
@@ -357,8 +214,9 @@ const queryOps = (
   }
 }
 
-/** Termination — single daemon and whole-registry. */
-const stopOps = (ctx: RegistryCtx): Pick<SideAgentDaemonRegistry, "stop" | "stopAll"> => {
+const stopOps = (
+  ctx: Tables & ReturnType<typeof registryLifecycle>,
+): Pick<SideAgentDaemonRegistry, "stop" | "stopAll"> => {
   const { daemons, finish, pruneTerminal } = ctx
   return {
     stop(id: string): boolean {
@@ -385,7 +243,9 @@ const stopOps = (ctx: RegistryCtx): Pick<SideAgentDaemonRegistry, "stop" | "stop
 export const createSideAgentDaemonRegistry = (
   opts: SideAgentDaemonOpts,
 ): SideAgentDaemonRegistry => {
-  const ctx = registryState(opts)
+  const tables = registryTables(opts)
+  const life = registryLifecycle(tables)
+  const ctx = { ...tables, ...life }
   return {
     ...spawnOps(ctx),
     ...queryOps(ctx),

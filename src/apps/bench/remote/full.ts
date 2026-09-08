@@ -22,7 +22,6 @@ import type {
   OfficialGradeReceiptFailure,
 } from "@/runner/batch/eval/official-grade"
 import { errMessage } from "@/shared"
-import { familyRemoteBootstrap } from "../profiles/bootstrap"
 import { familyPlanNotes } from "../profiles/plan"
 import { type BenchRunConfig, buildSubprocessFamilyEnv, resolveBenchRunConfig } from "../run-config"
 import { resolveBenchTrajectoryDefault } from "../trajectory"
@@ -45,6 +44,7 @@ import {
   provisionBox,
 } from "./box-session"
 import { FamilyBootstrapError } from "./box-session/family-bootstrap-exec"
+import { withResolvedFamilyBootstrap } from "./box-session/family-bootstrap-resolve"
 import {
   instancesCoveredByReceipts,
   type RelaunchCoverage,
@@ -80,6 +80,8 @@ export {
   pyrightLaunchProofVerdict,
   stripToAccessToken,
 } from "./box-session"
+
+export { withResolvedFamilyBootstrap }
 
 export interface RelaunchOutcome {
   readonly resolved: string[]
@@ -508,28 +510,6 @@ export const finalizeFullRemoteRun = (args: {
     throw new Error("[full-remote] internal error: run completed without result or error")
   }
   return args.result
-}
-
-/**
- * PMX-04: resolve the family's DECLARED bootstrap at the LAUNCH ROOT (which owns
- * the typed run config) and carry it onto the box config, so `ec2-lifecycle.ts`
- * executes it without ever naming a family. `undefined` for every family without
- * one ⇒ the returned config is byte-identical to the input.
- *
- * Exported so the ONE resolution point is directly assertable: the defect it
- * repairs was positional, not logical — the resolution used to sit AFTER the
- * idle-box early return, so a warm box reached the attach path with
- * `remoteBootstrap` undefined and a REUSED box ran neither the pinned checkout
- * nor the on-box hash verification while the report still claimed the pin.
- * `attachBox` now refuses an unknown bootstrap state, so a regression here is
- * fail-closed (a loud reuse refusal) rather than a silent skipped pin.
- */
-export const withResolvedFamilyBootstrap = (
-  cfg: FullRemoteConfig,
-  runConfig: BenchRunConfig,
-): FullRemoteConfig => {
-  const bootstrap = cfg.remoteBootstrap ?? familyRemoteBootstrap(runConfig)
-  return { ...cfg, ...(bootstrap !== undefined ? { remoteBootstrap: bootstrap } : {}) }
 }
 
 const attachOrProvisionFullRemoteBox = async (

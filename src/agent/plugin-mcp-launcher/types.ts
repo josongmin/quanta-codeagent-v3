@@ -6,8 +6,9 @@
  * itself NEVER calls `Bun.spawn` — it delegates to the injected
  * {@link McpLauncherPort}, which a composition root wires to either:
  *
- *   - production: a closure wrapping `@/mcp` `IsolatedMcpClient`
- *     (see `./isolated-launcher-port.ts` for the canonical factory).
+ *   - production: a closure wrapping `@/mcp` `McpClient` +
+ *     `IsolatedMcpTransport` (`dxt-ready-line`) (see
+ *     `./isolated-launcher-port.ts` for the canonical factory).
  *   - test: an in-memory stub returning pre-baked handles.
  *
  * No spawn-shape is assumed here so the slice stays plane-clean — the
@@ -42,14 +43,15 @@ export interface McpServerHandle {
   readonly error?: string
   /** Idempotent NO-THROW shutdown. A second call after the first resolves
    *  must be a no-op (subsequent stop on an underlying client must also
-   *  be tolerated by adapters — `IsolatedMcpClient.stop()` already is). */
+   *  be tolerated by adapters — `McpClient.stop()` already is). */
   shutdown(): Promise<void>
 }
 
 /** The single seam the launcher calls. Adapter authors implement this
- *  against the MCP client of their choice (legacy `McpClient`, isolated
- *  `IsolatedMcpClient`, or a mock). The port MUST NOT throw: failures
- *  are reported through `ready: false` on the returned handle. */
+ *  against the MCP client of their choice (`McpClient` + isolated
+ *  transport, the `IsolatedMcpClient` facade, or a mock). The port MUST
+ *  NOT throw: failures are reported through `ready: false` on the
+ *  returned handle. */
 export interface McpLauncherPort {
   launch(spec: PluginMcpServerSpec, opts: McpLaunchOpts): Promise<McpServerHandle>
 }

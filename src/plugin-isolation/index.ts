@@ -21,6 +21,7 @@ export { DEFAULT_CALL_TIMEOUT_MS, PluginHost, PluginHostError } from "./plugin-h
 export type {
   IsolatedProcess,
   IsolatedProcessSpawnerPort,
+  IsolatedReadyMode,
   SpawnOpts,
 } from "./types"
 export {

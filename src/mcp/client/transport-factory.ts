@@ -1,8 +1,10 @@
 import type { ProxyEnvInput } from "@/runtime/network-proxy"
 import { HttpSseMcpTransport } from "../transports/http-sse"
+import { IsolatedMcpTransport } from "../transports/isolated"
 import type { McpTransport } from "../transports/port"
 import { StdioMcpTransport } from "../transports/stdio"
 import type { McpServerConfig } from "../types"
+import { isolatedMcpEnabledFromEnv } from "./isolated-flag"
 
 /** How to construct the carrier for a `McpClient`. Omitting it (the
  *  default) selects the stdio transport, which is byte-identical to every
@@ -14,7 +16,8 @@ export type McpClientTransport = McpTransport | ((config: McpServerConfig) => Mc
 /** Build the default transport for a config. Stdio is the default carrier; the
  *  HTTP-SSE carrier is selected only when the config carries a `url` (an
  *  explicit opt-in), preserving stdio byte-identity for every command-based
- *  server. */
+ *  server. When `MCP_USE_ISOLATED_SPAWN` is on, command-based servers use the
+ *  isolated process carrier in `process-ready` mode (C-F1). HTTP is unchanged. */
 export const defaultTransportFor = (
   config: McpServerConfig,
   offeredVersion: string,
@@ -34,6 +37,12 @@ export const defaultTransportFor = (
       ...(config.resumeFromEventId !== undefined
         ? { resumeFromEventId: config.resumeFromEventId }
         : {}),
+    })
+  }
+  if (isolatedMcpEnabledFromEnv()) {
+    return new IsolatedMcpTransport(config, {
+      readyMode: "process-ready",
+      ...(proxyEnv !== undefined ? { proxyEnv } : {}),
     })
   }
   return new StdioMcpTransport(config, proxyEnv !== undefined ? { proxyEnv } : {})

@@ -104,6 +104,8 @@ const intervalSpec = (over: Partial<SideAgentSpec> = {}): SideAgentSpec => ({
   ...over,
 })
 
+const flush = () => new Promise((r) => setTimeout(r, 0))
+
 const mkRegistry = (
   fork: ProcessForkPort,
   over: Partial<Parameters<typeof createProcessSideAgentDaemonRegistry>[0]> = {},
@@ -114,12 +116,14 @@ const mkRegistry = (
     scheduler: mkScheduler(),
     now: () => ++clock,
     workerModulePath: "/abs/worker-entry.mjs",
+    setInterval: () => 0,
+    clearInterval: () => undefined,
     ...over,
   })
 }
 
 describe("§4.3 process-backed registry — spawn STARTS a supervised child", () => {
-  test("spawn ⇒ a child is forked via the injected port + charter handed on ready", () => {
+  test("spawn ⇒ a child is forked via the injected port + charter handed on ready", async () => {
     const fork = mkFakeFork()
     const reg = mkRegistry(fork.port)
     const id = reg.spawn(intervalSpec())
@@ -130,8 +134,15 @@ describe("§4.3 process-backed registry — spawn STARTS a supervised child", ()
     // Child beacons ready ⇒ the supervisor hands the charter (proves the worker
     // module path + task crossed the boundary).
     fork.children[0]?.emitMessage({ kind: "ready" })
+    await flush()
     const charter = fork.children[0]?.inbox.find((m) => m.kind === "charter")
-    expect(charter).toEqual({ kind: "charter", task: "monitor the build", maxTurnsPerWake: 2 })
+    expect(charter).toEqual({
+      kind: "charter",
+      version: 1,
+      wakeId: 1,
+      task: "monitor the build",
+      maxTurnsPerWake: 2,
+    })
   })
 
   test("the forked spec carries the configured worker module path", () => {
@@ -149,13 +160,22 @@ describe("§4.3 process-backed registry — spawn STARTS a supervised child", ()
 })
 
 describe("§4.3 process-backed registry — findings surface across IPC", () => {
-  test("a child finding ⇒ findings() returns it tagged with daemon id + wake", () => {
+  test("a child finding ⇒ findings() returns it tagged with daemon id + wake", async () => {
     const fork = mkFakeFork()
     const reg = mkRegistry(fork.port)
     const id = reg.spawn(intervalSpec())
     fork.children[0]?.emitMessage({ kind: "ready" })
-    fork.children[0]?.emitMessage({ kind: "finding", summary: "lint failing", detail: "3 errors" })
-    fork.children[0]?.emitMessage({ kind: "finding", summary: "ok now" })
+    await flush()
+    fork.children[0]?.emitMessage({
+      kind: "finding",
+      summary: "lint failing",
+      detail: "3 errors",
+      version: 1,
+      wakeId: 1,
+    })
+    fork.children[0]?.emitMessage({ kind: "finding", summary: "ok now", version: 1, wakeId: 1 })
+    fork.children[0]?.emitMessage({ kind: "completed", version: 1, wakeId: 1 })
+    await flush()
 
     const found = reg.findings()
     expect(found.length).toBe(2)
@@ -163,34 +183,44 @@ describe("§4.3 process-backed registry — findings surface across IPC", () => 
     expect(found[0]?.summary).toBe("lint failing")
     expect(found[0]?.detail).toBe("3 errors")
     expect(found[0]?.wake).toBe(1)
-    // RED-ON-INJECTION: the wake counter must increment per finding from a daemon.
+    // One completed wake — both findings share wake 1. Counting findings as
+    // wakes is the H-SA-02 bug this pins.
     expect(found[1]?.summary).toBe("ok now")
-    expect(found[1]?.wake).toBe(2)
+    expect(found[1]?.wake).toBe(1)
     expect(found[1]?.detail).toBeUndefined()
+    expect(reg.list()[0]?.wakesDone).toBe(1)
   })
 
-  test("findings({since}) filters by timestamp", () => {
+  test("findings({since}) filters by timestamp", async () => {
     const fork = mkFakeFork()
     const reg = mkRegistry(fork.port)
     reg.spawn(intervalSpec())
     fork.children[0]?.emitMessage({ kind: "ready" })
-    fork.children[0]?.emitMessage({ kind: "finding", summary: "first" })
-    const afterFirst = reg.findings().at(-1)?.at ?? 0
-    fork.children[0]?.emitMessage({ kind: "finding", summary: "second" })
+    await flush()
+    fork.children[0]?.emitMessage({ kind: "finding", summary: "first", version: 1, wakeId: 1 })
+    fork.children[0]?.emitMessage({ kind: "finding", summary: "second", version: 1, wakeId: 1 })
+    fork.children[0]?.emitMessage({ kind: "completed", version: 1, wakeId: 1 })
+    await flush()
+    const all = reg.findings()
+    const afterFirst = all[0]?.at ?? 0
 
     const since = reg.findings({ since: afterFirst })
     expect(since.map((f) => f.summary)).toEqual(["second"])
   })
 
-  test("findings are tagged by their OWN daemon when several run", () => {
+  test("findings are tagged by their OWN daemon when several run", async () => {
     const fork = mkFakeFork()
     const reg = mkRegistry(fork.port, { maxConcurrent: 3 })
     const a = reg.spawn(intervalSpec({ task: "A" }))
     const b = reg.spawn(intervalSpec({ task: "B" }))
     fork.children[0]?.emitMessage({ kind: "ready" })
     fork.children[1]?.emitMessage({ kind: "ready" })
-    fork.children[0]?.emitMessage({ kind: "finding", summary: "from-A" })
-    fork.children[1]?.emitMessage({ kind: "finding", summary: "from-B" })
+    await flush()
+    fork.children[0]?.emitMessage({ kind: "finding", summary: "from-A", version: 1, wakeId: 1 })
+    fork.children[0]?.emitMessage({ kind: "completed", version: 1, wakeId: 1 })
+    fork.children[1]?.emitMessage({ kind: "finding", summary: "from-B", version: 1, wakeId: 1 })
+    fork.children[1]?.emitMessage({ kind: "completed", version: 1, wakeId: 1 })
+    await flush()
 
     const byDaemon = new Map(reg.findings().map((f) => [f.summary, f.daemonId]))
     expect(byDaemon.get("from-A")).toBe(a)
@@ -199,12 +229,15 @@ describe("§4.3 process-backed registry — findings surface across IPC", () => 
 })
 
 describe("§4.3 process-backed registry — list() reflects status", () => {
-  test("a running daemon lists as running with its spec + wake progress", () => {
+  test("a running daemon lists as running with its spec + wake progress", async () => {
     const fork = mkFakeFork()
     const reg = mkRegistry(fork.port)
     const id = reg.spawn(intervalSpec())
     fork.children[0]?.emitMessage({ kind: "ready" })
-    fork.children[0]?.emitMessage({ kind: "finding", summary: "w1" })
+    await flush()
+    fork.children[0]?.emitMessage({ kind: "finding", summary: "w1", version: 1, wakeId: 1 })
+    fork.children[0]?.emitMessage({ kind: "completed", version: 1, wakeId: 1 })
+    await flush()
 
     const list = reg.list()
     expect(list.length).toBe(1)

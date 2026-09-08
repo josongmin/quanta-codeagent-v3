@@ -69,16 +69,21 @@ export class SideAgentError extends Error {
 
 // ── injected ports (Phase-2 host adapts the real subagent/mailbox/stream) ─────
 
-/** One bounded pass. Returns a finding, or `null` when the wake found nothing
- *  to report (idle accumulates on `null`). NO-THROW is NOT required — a throw is
- *  caught by the supervise loop and transitions the daemon to `failed`. */
+/** One finding produced by a wake. A pass may return one, a list (same wake), or null. */
+export interface SideAgentPassFinding {
+  readonly summary: string
+  readonly detail?: string
+}
+
+/** One bounded pass. Returns a finding, a list (same wake), or `null` when the
+ *  wake found nothing. A throw is caught by the supervise loop (`failed`). */
 export interface SideAgentRunnerPort {
   run(args: {
     readonly task: string
     readonly wake: number
     readonly maxTurns: number
     readonly signal: AbortSignal
-  }): Promise<{ readonly summary: string; readonly detail?: string } | null>
+  }): Promise<SideAgentPassFinding | readonly SideAgentPassFinding[] | null>
 }
 
 /** Where findings are published (ADR-0416 mailbox, adapted). */

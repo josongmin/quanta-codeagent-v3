@@ -126,6 +126,7 @@ const mockSpawn = () =>
     ),
     whenSshRemote((remote) => remote.includes("bun") && remote.includes("READY"), ok("READY")),
     whenSshRemoteIncludes("command -v pyright-langserver", ok("pyright 1.1.350\n")),
+    whenSshRemoteIncludes("echo OK", ok("OK\n")),
     whenSshRemoteIncludes("mkdir ~/.pool-grade.lock", ok("LOCKED")),
     whenSshRemoteMatches(/cat ~\/(?:runs\/[^/]+\/)?report\.json/, () =>
       ok(JSON.stringify({ resolved_ids: ["psf__requests-5414"] })),

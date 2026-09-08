@@ -150,6 +150,21 @@ describe("G-F15 — eval cost completeness", () => {
     expect(head).toContain(`Cost=${projected.headlineCost}`)
   })
 
+  test("production unknown-model costUsd:null is unpriced, not measured $0", () => {
+    const base = syn({ tokens: tokens(800, 100) })
+    const rec: EvalRecord = {
+      ...base,
+      payload: { ...base.payload, costUsd: null as unknown as number },
+    }
+    const m = buildCoverageMatrix([rec])
+    expect(m.costPricing?.completeness).toBe("unavailable")
+    expect(m.costPricing?.unpricedRecords).toBe(1)
+    expect(m.costPricing?.pricedRecords).toBe(0)
+    expect(renderMatrixMarkdown(m)).toMatch(/Estimated cost: unavailable/i)
+    expect(renderMatrixMarkdown(m)).not.toMatch(/Estimated cost: \$0/)
+    expect(renderHeadline(m)).toContain("Cost=unavailable")
+  })
+
   test("MUTATION: stripping completeness on all-unknown would render $0; production does not", () => {
     const m = buildCoverageMatrix([syn({ tokens: tokens(800, 100) })])
     const tc = m.tokenCost

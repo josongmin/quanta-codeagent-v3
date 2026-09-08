@@ -13,7 +13,7 @@
 - [x] **W0.2** 각 package write set을 실제 filename 단위로 확정한다. shared/public exports/composition roots/package/catalog는 integrator만 편집한다. 파일뿐 아니라 같은 정책/동일 테스트 fixture의 중복 소유도 금지한다.
 - [ ] **W0.3** R02의 lock primitive 후보를 지원 플랫폼에서 실험한다. FD lock의 lifetime, same-process 별도 opener, child inheritance, holder kill, stable inode, symlink/path identity, abort/wait timeout을 검증한다. 새 native dependency/지원 범위 변경은 별도 승인 대상이다.
 - [ ] **W0.4** legacy wx writer와 새 lock writer의 혼재 차단/전환 절차를 확정한다. process 종료가 필요하면 명시하고, 기존 lock 파일을 age만으로 삭제하지 않는다.
-- [ ] **W0.5** R11의 process-ready와 DXT-ready 분리, client core 기능 parity 목록을 확정한다. HTTP reauth의 replay 허용 조건과 pending request 종료 정책도 고정한다.
+- [x] **W0.5** R11의 process-ready와 DXT-ready 분리, client core 기능 parity 목록을 확정한다. HTTP reauth의 replay 허용 조건과 pending request 종료 정책도 고정한다.
 - [ ] **W0.6** R09의 unknown/known/estimated 및 legacy ledger hydration 정책, R10의 embedding-space identity와 old index 전환 정책을 확정한다.
 - [x] **W0.7** touched god-module/function을 detector 기준으로 목록화하고 해당 package의 책임 분리 안에 포함한다. line-count 낮추기용 wrapper 이동 또는 allowlist 증가는 금지한다.
 - [ ] **W0.8** owner-local RED test를 먼저 추가하고 실패 원인이 해당 finding인지 확인한다. 기존 suite PASS, source grep, test 파일 존재는 RED receipt가 아니다.
@@ -183,19 +183,19 @@
 
 근거: [shared contract](/Users/songmin/quanta-codeagent-v3/src/side-agent/types.ts:150), [process spawn](/Users/songmin/quanta-codeagent-v3/src/side-agent/process-registry.ts:227), [single charter send](/Users/songmin/quanta-codeagent-v3/src/side-agent/process.ts:218).
 
-- [ ] **H-SA-02.1** parent-owned spec validation/trigger admission/lifecycle state machine을 추출하고 양 backer를 runPass 실행 adapter로 둔다.
-- [ ] **H-SA-02.2** wakeId terminal당 1회 accounting, non-overlap, bounded event coalescing, interval/maxWakes/idle reap/stop을 구현한다. finding 수에 따른 wake count를 제거한다.
-- [ ] **H-SA-02.3** 같은 contract suite를 in-process/process backer에 적용해 invalid spec, repeated wake, max stop, idle reap, multiple finding 한 wake를 검증한다.
-- [ ] **H-SA-02.4** 실제 child readiness/kill/late terminal에서도 timer/listener/concurrency budget이 반환되는지 검증한다. registry가 running이라고만 하는 one-shot 경로를 제거한다.
+- [x] **H-SA-02.1** parent-owned spec validation/trigger admission/lifecycle state machine을 추출하고 양 backer를 runPass 실행 adapter로 둔다.
+- [x] **H-SA-02.2** wakeId terminal당 1회 accounting, non-overlap, bounded event coalescing, interval/maxWakes/idle reap/stop을 구현한다. finding 수에 따른 wake count를 제거한다.
+- [x] **H-SA-02.3** 같은 contract suite를 in-process/process backer에 적용해 invalid spec, repeated wake, max stop, idle reap, multiple finding 한 wake를 검증한다.
+- [x] **H-SA-02.4** 실제 child readiness/kill/late terminal에서도 timer/listener/concurrency budget이 반환되는지 검증한다. registry가 running이라고만 하는 one-shot 경로를 제거한다.
 
 ### H-SA-01 · P2 · Synthetic finding on null/failure
 
 근거: [null collapse](/Users/songmin/quanta-codeagent-v3/src/side-agent/worker-entry.mjs:68), [synthetic finding emission](/Users/songmin/quanta-codeagent-v3/src/side-agent/worker-entry.mjs:133), [null contract](/Users/songmin/quanta-codeagent-v3/src/side-agent/types.ts:39).
 
-- [ ] **H-SA-01.1** IPC terminal을 no_finding/failed/cancelled/completed-with-findings로 구별하고 version/wakeId 검증을 추가한다. 정확한 wire spelling은 R05 계약에서 한 번만 정의한다.
-- [ ] **H-SA-01.2** 정상 null과 LLM import/provider/pass failure를 다른 결과로 유지한다. 둘 다 finding feed에 synthetic text를 추가하지 않는다.
-- [ ] **H-SA-01.3** viable LLM seam의 null/throw/empty/real finding으로 OS-worker rail을 실행하고 feed 내용과 wake accounting을 검증한다.
-- [ ] **H-SA-01.4** failure는 status/diagnostic channel에서만 관측하고 no_finding은 정상 terminal임을 확인한다. parent/child의 구식 fallback decoder를 제거한다.
+- [x] **H-SA-01.1** IPC terminal을 no_finding/failed/cancelled/completed-with-findings로 구별하고 version/wakeId 검증을 추가한다. 정확한 wire spelling은 R05 계약에서 한 번만 정의한다.
+- [x] **H-SA-01.2** 정상 null과 LLM import/provider/pass failure를 다른 결과로 유지한다. 둘 다 finding feed에 synthetic text를 추가하지 않는다.
+- [x] **H-SA-01.3** viable LLM seam의 null/throw/empty/real finding으로 OS-worker rail을 실행하고 feed 내용과 wake accounting을 검증한다.
+- [x] **H-SA-01.4** failure는 status/diagnostic channel에서만 관측하고 no_finding은 정상 terminal임을 확인한다. parent/child의 구식 fallback decoder를 제거한다.
 
 ## 6. R06 — scheduler recovery
 
@@ -303,19 +303,19 @@
 
 근거: [flag parser](/Users/songmin/quanta-codeagent-v3/src/mcp/isolated-client.ts:56), [normal host client](/Users/songmin/quanta-codeagent-v3/src/host/mcp-composition.ts:121), [transport seam](/Users/songmin/quanta-codeagent-v3/src/mcp/client/transport-factory.ts:1). 추가 구현 전제: [DXT first-line consume](/Users/songmin/quanta-codeagent-v3/src/plugin-isolation/bun-spawner.ts:521).
 
-- [ ] **C-F1.1** 기존 McpClient core를 유지하고 isolated McpTransport adapter를 설계한다. 별도 client를 활성화해 protocol 기능이 줄어드는 교체는 피한다.
-- [ ] **C-F1.2** OS process-ready와 DXT ready-line mode를 분리해 initialize를 기다리는 표준 stdio server가 시작 가능하게 한다. dead/oversize send는 typed failure로 전달한다.
-- [ ] **C-F1.3** normal/supervised/skill/plugin construction에서 동일 factory를 사용하고 flag OFF/ON, 기존 manifest isolation 정책, timeout/TERM→KILL을 production 경로로 검증한다.
-- [ ] **C-F1.4** IsolatedMcpClient의 중복 protocol state를 delegating facade로 축소/제거하고 feature YAML을 실제 동작과 맞춰 build한다. DXT control과 실제 stdio child를 둘 다 통과해야 한다.
+- [x] **C-F1.1** 기존 McpClient core를 유지하고 isolated McpTransport adapter를 설계한다. 별도 client를 활성화해 protocol 기능이 줄어드는 교체는 피한다.
+- [x] **C-F1.2** OS process-ready와 DXT ready-line mode를 분리해 initialize를 기다리는 표준 stdio server가 시작 가능하게 한다. dead/oversize send는 typed failure로 전달한다.
+- [x] **C-F1.3** normal/supervised/skill/plugin construction에서 동일 factory를 사용하고 flag OFF/ON, 기존 manifest isolation 정책, timeout/TERM→KILL을 production 경로로 검증한다.
+- [x] **C-F1.4** IsolatedMcpClient의 중복 protocol state를 delegating facade로 축소/제거하고 feature YAML을 실제 동작과 맞춰 build한다. DXT control과 실제 stdio child를 둘 다 통과해야 한다.
 
 ### C-F9 · P2 · Reauth without initialize
 
 근거: [start-only replacement](/Users/songmin/quanta-codeagent-v3/src/mcp/client.ts:822), [fresh sessionId state](/Users/songmin/quanta-codeagent-v3/src/mcp/transports/http-sse.ts:231), [session/protocol negotiation](/Users/songmin/quanta-codeagent-v3/src/mcp/transports/http-sse.ts:336).
 
-- [ ] **C-F9.1** generation-scoped replacement transaction과 single-flight reauth를 정의한다. initialize 중 401이 자기 refresh를 기다리는 recursion을 막는다.
-- [ ] **C-F9.2** candidate start→initialize→initialized→publish 순서를 구현하고 old pending requests의 outcome, stale response, stop/failed candidate cleanup을 명시한다.
-- [ ] **C-F9.3** stateful HTTP fixture로 401→새 session id/protocol pin→허용된 retry를 검증한다. concurrent 401/initialize 실패/stop-during-refresh/old response를 포함한다.
-- [ ] **C-F9.4** 완료 불명 side-effecting tool call을 자동 replay하지 않는다. old close/DELETE가 새 session에 영향을 주지 않는지 확인하고 start-only swap을 제거한다.
+- [x] **C-F9.1** generation-scoped replacement transaction과 single-flight reauth를 정의한다. initialize 중 401이 자기 refresh를 기다리는 recursion을 막는다.
+- [x] **C-F9.2** candidate start→initialize→initialized→publish 순서를 구현하고 old pending requests의 outcome, stale response, stop/failed candidate cleanup을 명시한다.
+- [x] **C-F9.3** stateful HTTP fixture로 401→새 session id/protocol pin→허용된 retry를 검증한다. concurrent 401/initialize 실패/stop-during-refresh/old response를 포함한다.
+- [x] **C-F9.4** 완료 불명 side-effecting tool call을 자동 replay하지 않는다. old close/DELETE가 새 session에 영향을 주지 않는지 확인하고 start-only swap을 제거한다.
 
 ## 12. R12 — session typed boundary
 
@@ -343,9 +343,9 @@
 
 근거: [boxGrade early return](/Users/songmin/quanta-codeagent-v3/src/apps/bench/remote/box-session/ec2-lifecycle.ts:483), [skipped family setup](/Users/songmin/quanta-codeagent-v3/src/apps/bench/remote/box-session/ec2-lifecycle.ts:520), [swebench-only readiness](/Users/songmin/quanta-codeagent-v3/src/apps/bench/remote/box-session/ec2-lifecycle.ts:711).
 
-- [ ] **G-F5.1** 기존 dataset profile에서 required setup/probes를 정의하고 bootstrap와 warm selection이 같은 profile을 소비하게 한다.
-- [ ] **G-F5.2** common setup→optional grader shim→항상 family setup→profile readiness로 phase를 분리한다. boxGrade 전체 early return과 universal swebench probe를 제거한다.
-- [ ] **G-F5.3** fake SSH로 ProMax setup 1회 및 warm reuse, SWE-bench shim control, phase failure non-ready를 검증한다.
+- [x] **G-F5.1** 기존 dataset profile에서 required setup/probes를 정의하고 bootstrap와 warm selection이 같은 profile을 소비하게 한다.
+- [x] **G-F5.2** common setup→optional grader shim→항상 family setup→profile readiness로 phase를 분리한다. boxGrade 전체 early return과 universal swebench probe를 제거한다.
+- [x] **G-F5.3** fake SSH로 ProMax setup 1회 및 warm reuse, SWE-bench shim control, phase failure non-ready를 검증한다.
 - [ ] **G-F5.4** 실제 EC2 provision/reuse proof가 필요하면 승인된 환경에서 별도 수행한다. 비용 있는 실행을 자동 시작하지 않고 local-only proof gap을 명시한다.
 
 ## 14. R14 — remote production wiring

@@ -75,6 +75,8 @@ export const INTERPRETER_EVAL_HEADS: ReadonlySet<string> = new Set([
   "python",
   "python3",
   "ruby",
+  "perl",
+  "php",
 ])
 
 export const INTERPRETER_EVAL_FLAGS: ReadonlySet<string> = new Set([
@@ -148,6 +150,22 @@ export const skipLeadingAssignments = (tokens: readonly string[]): readonly stri
   return tokens.slice(i)
 }
 
+/** Closed set of utilities whose remaining argv is the forwarded command. */
+export const COMMAND_PREFIX_HEADS: ReadonlySet<string> = new Set([
+  "eval",
+  "command",
+  "builtin",
+  "nice",
+  "nohup",
+  "time",
+  "sudo",
+  "xargs",
+  "watch",
+  "busybox",
+  "timeout",
+  "stdbuf",
+])
+
 /** After `env`, skip flags and assignments so the remainder is the inner command. */
 export const skipEnvPrefixArgs = (tokens: readonly string[]): readonly string[] => {
   let i = 0
@@ -159,6 +177,29 @@ export const skipEnvPrefixArgs = (tokens: readonly string[]): readonly string[] 
     }
     break
   }
+  return tokens.slice(i)
+}
+
+/**
+ * After a {@link COMMAND_PREFIX_HEADS} head, drop flags and a leading duration
+ * operand (`timeout 1 …`, `nice -n 10 …`) so the remainder is the inner command.
+ */
+export const skipUtilityPrefixArgs = (tokens: readonly string[]): readonly string[] => {
+  let i = 0
+  while (i < tokens.length) {
+    const t = tokens[i] ?? ""
+    if (t === "--") {
+      i++
+      break
+    }
+    if (t.startsWith("-")) {
+      i++
+      continue
+    }
+    break
+  }
+  const next = tokens[i]
+  if (next !== undefined && /^[0-9]/.test(next)) i++
   return tokens.slice(i)
 }
 
@@ -204,4 +245,36 @@ export const gluedSuspiciousHead = (token: string, secretHeads: ReadonlySet<stri
   if (idx <= 0) return false
   const head = executableBasename(token.slice(0, idx))
   return secretHeads.has(head)
+}
+
+/**
+ * Inner command strings from `$(…)` / backtick substitutions in one token.
+ * Unclosed delimiters still yield the remainder so the caller can fail closed.
+ */
+export const commandSubstitutionInners = (token: string): readonly string[] => {
+  const out: string[] = []
+  let i = 0
+  while (i < token.length) {
+    const dollar = token.indexOf("$(", i)
+    const tick = token.indexOf("`", i)
+    if (dollar < 0 && tick < 0) break
+    if (tick >= 0 && (dollar < 0 || tick < dollar)) {
+      const end = token.indexOf("`", tick + 1)
+      if (end < 0) {
+        out.push(token.slice(tick + 1))
+        break
+      }
+      out.push(token.slice(tick + 1, end))
+      i = end + 1
+      continue
+    }
+    const end = token.indexOf(")", dollar + 2)
+    if (end < 0) {
+      out.push(token.slice(dollar + 2))
+      break
+    }
+    out.push(token.slice(dollar + 2, end))
+    i = end + 1
+  }
+  return out.filter((s) => s.length > 0)
 }

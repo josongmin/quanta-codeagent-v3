@@ -22,10 +22,8 @@
  *      factory (`pickProvider` + `createLLM`); prod uses the real credentials the
  *      child inherited (`{...process.env, ...spec.env}` from the fork port).
  *
- * NO-THROW: any failure (no LLM source, assembly error, replay miss, runner
- * error) ⇒ resolve `null` so the supervisor treats the wake as nothing-found
- * (and `worker-entry.mjs` can DEGRADE to the deterministic pass). The replay e2e
- * happy path succeeds because the cassette was recorded against this very path.
+ * Distinguishes a genuine miss (`no_finding`) from import/provider/pass
+ * failure (`failed`) so the worker never synthesizes a finding.
  *
  * Slice note: this lives UNDER `@/side-agent` but is NOT re-exported from the
  * pure-leaf barrel — it deliberately reaches into `@/agent`, `@/llm`, `@/tool`,
@@ -56,6 +54,12 @@ export interface CharterFinding {
   readonly summary: string
   readonly detail?: string
 }
+
+/** Typed charter outcome — null miss vs import/provider/throw stay distinct. */
+export type CharterPassResult =
+  | { readonly outcome: "finding"; readonly finding: CharterFinding }
+  | { readonly outcome: "no_finding" }
+  | { readonly outcome: "failed"; readonly reason: string }
 
 /** Hermetic test seams. Absent ⇒ real env-driven LLM resolution. */
 export interface CharterRunnerSeams {
@@ -222,29 +226,28 @@ export const assembleChildConfig = (
 }
 
 /**
- * Run ONE real bounded LLM-backed pass for `charter`. Returns the model-derived
- * finding, or `null` when nothing could run / nothing was found. NO-THROW.
+ * Run ONE real bounded LLM-backed pass for `charter`. Distinguishes a genuine
+ * miss (`no_finding`) from import/provider/pass failure (`failed`).
  */
 export const runCharterPassLLM = async (
   charter: CharterInput,
   env: EnvLike,
   seams: CharterRunnerSeams = {},
-): Promise<CharterFinding | null> => {
+): Promise<CharterPassResult> => {
   try {
     const task = typeof charter?.task === "string" ? charter.task.trim() : ""
-    if (task.length === 0) return null
+    if (task.length === 0) return { outcome: "no_finding" }
     const maxTurns =
       typeof charter?.maxTurnsPerWake === "number" && charter.maxTurnsPerWake > 0
         ? charter.maxTurnsPerWake
         : 1
 
     const llm = buildLlmPort(env, seams)
-    if (llm === null) return null
+    if (llm === null) return { outcome: "failed", reason: "llm provider unavailable" }
 
     const cwd = seams.cwd ?? process.cwd()
     const cfg = assembleChildConfig(llm, cwd, resolveDaemonDepth(env))
     const runner = createSubagentRunner(cfg)
-    // Reuse the in-process backer's mapping (finalText → finding) verbatim.
     const pass = subagentRunnerToSidePass(runner)
     const finding = await pass.run({
       task,
@@ -252,9 +255,13 @@ export const runCharterPassLLM = async (
       maxTurns,
       signal: new AbortController().signal,
     })
-    return finding
-  } catch {
-    // NO-THROW into the supervisor — a failed pass is a wake that found nothing.
-    return null
+    if (finding === null) return { outcome: "no_finding" }
+    if ("summary" in finding) return { outcome: "finding", finding }
+    const first = finding[0]
+    if (first === undefined) return { outcome: "no_finding" }
+    return { outcome: "finding", finding: first }
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : "charter pass threw"
+    return { outcome: "failed", reason }
   }
 }

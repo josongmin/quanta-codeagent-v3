@@ -100,8 +100,9 @@ export interface McpStoppable {
  *
  * `opts.transportFor` (ADR-0431) is an OPTIONAL per-server transport factory —
  * a test seam mirroring `McpClient`'s `transport` option. Absent ⇒ the client
- * builds its default carrier (stdio / HTTP-SSE per config), byte-identical to
- * the legacy load.
+ * builds its default carrier via `defaultTransportFor` (stdio / isolated
+ * process-ready when `MCP_USE_ISOLATED_SPAWN` is on / HTTP-SSE per config).
+ * ADR-0431 still wins when `transportFor` is supplied.
  *
  * When `opts.supervisorDepsFor` is injected (ADR-0435), each server is wrapped
  * in an auto-restart supervisor; the returned `clients` array then holds the
@@ -192,8 +193,8 @@ export const applyMcpClientWiring = (
 export interface LoadMcpToolsOpts {
   /** ADR-0431 — construct the transport for a server (test double / custom
    *  carrier). A test seam mirroring `McpClient`'s `transport` option. Absent ⇒
-   *  the client builds its default carrier (stdio / HTTP-SSE per config),
-   *  byte-identical to the legacy load. */
+   *  the client builds its default carrier via `defaultTransportFor` (stdio /
+   *  isolated process-ready when `MCP_USE_ISOLATED_SPAWN` is on / HTTP-SSE). */
   transportFor?: (config: McpServerConfig) => McpClientTransport
   /** ADR-0435 — per-server supervisor deps. When present, each server is
    *  wrapped in an auto-restart {@link McpReconnectSupervisor} and bridged via

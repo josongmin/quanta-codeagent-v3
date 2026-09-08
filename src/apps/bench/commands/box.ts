@@ -13,6 +13,7 @@
 import { errMessage, gateOn, logger, renderLspGroundingStatus } from "@/shared"
 import { resolveBenchmarkRunConfig } from "../benchmark-suite"
 import { boxRunLogPath, D, inspectBox, provisionBox } from "../remote/box-session"
+import { withResolvedFamilyBootstrap } from "../remote/box-session/family-bootstrap-resolve"
 import { BENCH_SSH_SAFE_OPTS } from "../remote/box-session/shell"
 import { type PatchGenBudgetState, readPatchGenBudgetState } from "../remote/token-budget"
 import { type BenchRunConfig, readDatasetFamilySelector } from "../run-config"
@@ -901,29 +902,34 @@ export interface CmdBoxDeps {
 const cmdBoxUp = async (runConfig: BenchRunConfig, provision: ProvisionBoxPort): Promise<void> => {
   const amiOverride = argValue("--ami") ?? process.env.QUANTA_FULL_REMOTE_AMI
   logger.info("[box] provisioning + bootstrapping ONE warm box (left alive for reuse)…")
-  const session = await provision({
-    repoDir: process.cwd(),
-    authJson: "{}", // no patch-gen here; pool ships the real token per chunk
-    datasetPath: "",
-    launchMode: "warm-box",
-    // aug-22 re-audit R1 — thread the TYPED family onto the launch config.
-    // `bootstrapBox` picks the swebench pip-spec / grading shim and runs the
-    // family profile's `setupBox` port off THIS field. It used to read
-    // `?? process.env.QUANTA_SWEBENCH_DATASET_FAMILY`; the T2 repair deleted that
-    // ambient tail without giving `box` a typed thread, so `box up` silently
-    // downgraded a Pro/Live box to Verified (stock harness, no Pro bootstrap).
-    //
-    // Set ONLY for an EXPLICIT selector: `undefined` means "the operator selected
-    // nothing", which is what keeps the downstream subprocess wire byte-identical
-    // to HEAD (see `buildSubprocessFamilyEnv`).
-    ...(runConfig.familySelector === "explicit"
-      ? { swebenchDatasetFamily: runConfig.datasetFamily }
-      : {}),
-    ...(amiOverride !== undefined && amiOverride !== "" ? { ami: amiOverride } : {}),
-    onDemand: gateOn(process.env, "QUANTA_FULL_REMOTE_ONDEMAND"),
-    keep: true, // leave it alive — that is the whole point of `box up`
-    onLog: (m) => logger.info(m),
-  })
+  const session = await provision(
+    withResolvedFamilyBootstrap(
+      {
+        repoDir: process.cwd(),
+        authJson: "{}", // no patch-gen here; pool ships the real token per chunk
+        datasetPath: "",
+        launchMode: "warm-box",
+        // aug-22 re-audit R1 — thread the TYPED family onto the launch config.
+        // `bootstrapBox` picks the swebench pip-spec / grading shim and runs the
+        // family profile's `setupBox` port off THIS field. It used to read
+        // `?? process.env.QUANTA_SWEBENCH_DATASET_FAMILY`; the T2 repair deleted that
+        // ambient tail without giving `box` a typed thread, so `box up` silently
+        // downgraded a Pro/Live box to Verified (stock harness, no Pro bootstrap).
+        //
+        // Set ONLY for an EXPLICIT selector: `undefined` means "the operator selected
+        // nothing", which is what keeps the downstream subprocess wire byte-identical
+        // to HEAD (see `buildSubprocessFamilyEnv`).
+        ...(runConfig.familySelector === "explicit"
+          ? { swebenchDatasetFamily: runConfig.datasetFamily }
+          : {}),
+        ...(amiOverride !== undefined && amiOverride !== "" ? { ami: amiOverride } : {}),
+        onDemand: gateOn(process.env, "QUANTA_FULL_REMOTE_ONDEMAND"),
+        keep: true, // leave it alive — that is the whole point of `box up`
+        onLog: (m) => logger.info(m),
+      },
+      runConfig,
+    ),
+  )
   logger.info(
     `[box] WARM box ready: ${session.iid} (${session.ip}) — pool will reuse it. TTL self-terminates.`,
   )

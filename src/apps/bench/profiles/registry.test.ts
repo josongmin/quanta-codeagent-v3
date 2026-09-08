@@ -20,6 +20,7 @@ import type { DatasetFamily } from "../dataset-family"
 import { RemoteDatasetPreflightError } from "../remote/box-session/dataset-rows"
 import type { Instance } from "../types"
 import { loadFamilyCorpusRowsOrThrow } from "./corpus-read"
+import { boxProfileReadinessProbe, familyRequiresSwebenchShim } from "./family-box-readiness"
 import { DATASET_FAMILY_PROFILES, resolveDatasetFamilyProfile } from "./registry"
 import type { PreflightInput } from "./types"
 
@@ -473,6 +474,26 @@ describe("behavior 4 — preflight (fail-closed Pro shape check)", () => {
       expect(() =>
         resolveDatasetFamilyProfile(family).preflight(preflightInput(path, family)),
       ).not.toThrow()
+    }
+  })
+})
+
+describe("G-F5 — bootstrap and warm selection share profile readiness", () => {
+  test("boxGrade families skip the swebench shim; swebench families require it", () => {
+    expect(familyRequiresSwebenchShim(resolveDatasetFamilyProfile("promax"))).toBe(false)
+    for (const family of SWEBENCH_HARNESS_FAMILIES) {
+      expect(familyRequiresSwebenchShim(resolveDatasetFamilyProfile(family))).toBe(true)
+    }
+  })
+
+  test("ProMax probe is bun+src only; swebench families keep the historical shim token", () => {
+    const promax = boxProfileReadinessProbe(resolveDatasetFamilyProfile("promax"))
+    expect(promax).toBe("test -x ~/.bun/bin/bun && test -d ~/quanta/src && echo OK")
+    expect(promax).not.toContain("swebench-python")
+    for (const family of SWEBENCH_HARNESS_FAMILIES) {
+      expect(boxProfileReadinessProbe(resolveDatasetFamilyProfile(family))).toBe(
+        "test -x ~/.bun/bin/bun && test -x ~/swebench-python && test -d ~/quanta/src && echo OK",
+      )
     }
   })
 })

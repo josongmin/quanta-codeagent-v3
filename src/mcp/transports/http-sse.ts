@@ -430,6 +430,8 @@ export class HttpSseMcpTransport implements McpTransport {
       })
 
       // Capture a server-assigned session id (typically on the initialize reply).
+      // First-wins is correct for a FRESH transport. Replacement after reauth
+      // MUST be a new instance (do not transplant the old session id).
       const assigned = res.headers.get(SESSION_HEADER)
       if (assigned !== null && assigned !== "" && this.sessionId === null) {
         this.sessionId = assigned
