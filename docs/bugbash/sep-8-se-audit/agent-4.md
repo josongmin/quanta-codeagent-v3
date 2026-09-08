@@ -74,7 +74,7 @@ Exclusive production `*.ts` excluding colocated tests:
 
 | Slice | Files | Approx lines | God-module >1000 | Cohort 900–999 |
 |---|---:|---:|---:|---|
-| llm | 90 | ~16.8k | 0 | `openai-responses-wire.ts` 943 |
+| llm | 90 | ~17.5k (17498 @`0b14f5cf` / 17489 @HEAD) | 0 | `openai-responses-wire.ts` 943 |
 | retrieval | 113 | ~9.7k | 0 | — |
 | runner | 322 | ~58.3k | 0 | `session-ops/index.ts` 972, `batch/report-official-grade.ts` 933, `batch/corpus/repo-version-specs.ts` 927 |
 | skill | 98 | ~12.9k | 0 | — (`skill-frontmatter.ts` 788) |
@@ -91,7 +91,7 @@ Exclusive production `*.ts` excluding colocated tests:
 
 | Bucket | Count |
 |---|---:|
-| unit `llm` | 84 |
+| unit `llm` | 83 |
 | unit `retrieval` | 27 |
 | unit `runner` | 90 |
 | unit `skill` | 66 |
@@ -108,7 +108,7 @@ Failure mode 있는 것만. 전부 **pre-existing**. 이 세션이 코드를 악
 
 ### P1
 
-#### E-N7 — HITL kinds still consult message markers on HEAD (SEP6-N7 재현)
+#### E-N7 — **CLOSED at `9b05cd33`** (캠페인 HEAD `0b14f5cf`에서만 재현)
 
 - **Owner (HEAD):** `src/llm/retry/decorator-policy.ts` `retryDispositionForKind`
   - `kind === "auth"` → `"no_retry"`
@@ -118,7 +118,7 @@ Failure mode 있는 것만. 전부 **pre-existing**. 이 세션이 코드를 악
   `RetryingLLM`가 outer `decideTypedStreamError`보다 먼저 재시도.
 - **Measured:** HEAD 주석 자체가 `cyber_policy` + `"429"` currently RETRIES.
   `"503 overloaded timeout, try again"` → `isRetryable === true`.
-- **Overlay:** WT는 `if (action === "hitl_handoff") return "no_retry"` 로 이미 고침.
+- **랜딩됨:** `9b05cd33`의 `decorator-policy.ts:84`가 `if (action === "hitl_handoff") return "no_retry"`. `src/agent/retry.ts` diff는 주석만 — 이 dump가 예측한 write set 그대로. 오버레이는 더 이상 uncommitted가 아님.
 - **Test honesty:** HEAD hellgate는 legacy consult_markers parity를 **고정**.
   overlay 테스트는 그 계약을 뒤집음.
 - **Write:** `src/llm/retry/decorator-policy.ts` only. Forbidden: `src/agent/retry.ts`
@@ -132,11 +132,10 @@ Failure mode 있는 것만. 전부 **pre-existing**. 이 세션이 코드를 악
 - **Live wire:** `src/shared/env-flag.ts` `GATE_TRUTHY` includes `"yes"` (`gateOn`)
   → `runtimeConfig().readOutline` / `testRunner`
 - **Consumer:** `src/runner/batch/eval/knobs-bench.ts` `resolveLiveOverrides`
-- **Measured:** `QUANTA_READ_OUTLINE=yes` → runtime **ON**, knob parse **undefined**
-  → bench overlay가 키를 빼는데 기능은 이미 켜짐.
-- **Negative control:** MCP / RATELIMIT dual-channel knobs는 `parseBool` 공유 → drift 없음.
-- **Write:** 두 knob 파일을 `parseBool`/`gateOn`에 맞출 것. Forbidden: `src/shared/env-flag.ts` (F).
-- **Proof limit:** token-set + consumer 사이트. process env fixture 미실행.
+- **Measured (실행 확인):** `QUANTA_READ_OUTLINE=yes` → `runtimeConfig().readOutline = true`, knob parse `undefined`, `state.inactive`에 `read-outline` 포함, `liveOverrides = []`.
+- **1차 서술 정정:** "bench overlay가 키를 뺀다"는 **거짓**. `applyLiveOverrides`(`config-build.ts:129-133`)는 set-only라 아무것도 지우지 않음 — 기능은 벤치 경로 내내 ON. 실제 잔여 결함은 **telemetry drift**뿐: `state.inactive`가 report.json `knobs.inactive`로 흘러 A/B 리포트가 "돌지 않은 knob"으로 오표기.
+- **Negative control:** MCP는 `parseBool` 공유. RATELIMIT은 `ratelimitNoticeWanted`(`parsers.ts:106`) 공유 — 술어는 다르지만 각자 live 채널과 동일하므로 drift 없음.
+- **Write:** 두 knob 파일을 `isTruthyToken`/`gateOn`에 맞출 것. **`parseBool`은 `yes`를 똑같이 거부하므로 그쪽에 맞추면 drift가 그대로 남음.** Forbidden: `src/shared/env-flag.ts` (F).
 
 #### E-SEARCH-01 — Explicit vector-store open-fail keeps `state:"ready"`
 
@@ -145,7 +144,7 @@ Failure mode 있는 것만. 전부 **pre-existing**. 이 세션이 코드를 악
 - **Behavior:** `QUANTA_VECTOR_STORE=sqlite|lance|qdrant` 철자는 맞는데 open 실패
   → per-op `[]` / no-op, **static `state: "ready"`**.
 - **Contrast:** 오타 경로는 `newDisabledBackend` `state:"failed"` (T06이 잡는 클래스).
-- **Consumers:** `search-pipeline.ts`; host mention-symbol-deps는 `state`를 안 봄 (G).
+- **Consumers — 결정적 정정:** `SemanticBackendState` / `.state` 리더가 `src/`·`tests/` 전체에 **0**. `search-pipeline.ts`와 host `mention-symbol-deps.ts` **둘 다** `.port`/`.upsert`만 씀. ⇒ `ready`와 `failed`는 행동상 구분 불가이고, 두 경로 모두 port에서 `[]`/no-op으로 동일. **fail-open이 아니라 dead typed-health 필드** — `state` 자신의 doc-comment는 "consumers MUST treat this as a hard config error"라고 약속하지만 그런 소비자가 없음 (E-SKILL-01과 동형).
 - **Test honesty:** `tests/unit/runner/t06-search-backend-failclosed-hellgate.test.ts`
   는 **invalid-explicit spelling only**. open-fail `failed` promotion을 지워도 RED 안 됨.
 - **Write:** `search-index-backend.ts`, optionally `search-pipeline.ts` refuse on `failed`.
@@ -154,8 +153,10 @@ Failure mode 있는 것만. 전부 **pre-existing**. 이 세션이 코드를 악
 
 - **Owner:** same file, `resolveIndexEmbedder` (~L266–326)
 - **Behavior:** recognised provider + `!ok`/throw → same-dim headless, else
-  **`hashEmbed` dim 64**. `capabilities()` catch → `HASH_EMBED_CAPS` (64) while
-  `providerLabel` stays `openai|voyage|…`.
+  **`hashEmbed` dim 64**.
+- **정정 — `capabilities()` catch 경로는 dead:** 레지스트리 4개 provider(openai/voyage/cohere/ollama) 전부 `async capabilities() { return caps }` (I/O 없는 클로저 상수)라 throw하지 않음. 실행 매트릭스: embed err→1536, embed throw→1536, capabilities throw→64(합성으로만), 33KiB+err→64, empty→1536.
+- **유일한 live 64-dim 경로**(문서가 지목하지 않았던 것): `fallbackHeadless` → `createHeadlessEmbedder({dim: caps.dim})`의 `maxInputBytes` 기본 32KiB(`headless-stub.ts:15`) 초과 → `input-too-large` → null → `hashEmbed`. 청크가 50줄 윈도(`chunker.ts:22`)라 줄당 ~655B, 즉 minified/generated 파일 한정.
+- 또한 `buildVectorStoreRuntime` L623-627이 open 전에 `negotiateCapabilities`를 돌리므로 dim 불일치 store는 애초에 열리지 않음.
 - **Consumer:** in-memory cosine `Math.min(lengths)` (~L349–355) + 이미 provider-dim
   을 가진 vector store.
 - **Failure:** silent wrong ranking, not empty/fail. Documented “wire never throws”.
@@ -170,12 +171,15 @@ Failure mode 있는 것만. 전부 **pre-existing**. 이 세션이 코드를 악
   - `src/rules/vendor-detector/normalizer.ts` — `data[key]` 직접 할당, forbid 없음,
     nested `metadata.*` 미보존. 주석은 “same subset as `@/skill/frontmatter`”.
 - **Consumers:** skill → `discover.ts`; vendor → `src/agent/glob-rules.ts` ADR-0233.
-  같은 `.mdc`가 로더에 따라 다르게 파싱됨.
-- **Measured drift:** `__proto__:` list key는 vendor에서 수락, skill에서 거절.
+- **Measured (직접 실행 재현):** `__proto__`는 **양쪽 다 드랍** — skill은 leading-letter key regex로 거절, vendor는 `data["__proto__"]=…`가 프로토타입 대입이라 own key가 안 생김. vendor만 수락하는 건 **`constructor` / `prototype`** 2키.
+  - SKILL → `{description, alwaysApply, allowed-tools, globs}`
+  - VENDOR metadata → `{"allowed-tools":"Read","constructor":"pwned-ctor","prototype":"pwned-proto"}`
+- **소비자 도달성 (1차 서술 정정):** "같은 `.mdc`가 로더에 따라 다르게 파싱됨"은 소비자에 도달하지 않음. ① `composeGlobRulesWithDetected`가 `sourcePath`로 dedup하는데 legacy가 quanta 우선순위(0)로 먼저 앉고 cursor는 1 ⇒ `placeDetectedRule`의 `if (pri >= existing.priority)`에 걸려 vendor 결과는 항상 `collision_lost`. ② 살아남아도 `detectedToGlobRule`(`glob-rules.ts:351-365`)이 `{sourcePath, description?, globs, alwaysApply, body}`만 반환 — **metadata를 버림**. `DetectedRule.metadata` 리더는 repo 전체 0.
+  ⇒ vendor 파서가 실제로 쓰이는 건 skill 파서가 안 읽는 `.clinerules` / `.windsurfrules` / `CONVENTIONS.md` / `.roo/rules-*` 뿐 = **이중 파싱 없음**.
+- **opt-in:** vendor 반쪽은 `vendorDetectorEnabled` 게이트. 유일 production enabler는 `src/apps/agent/mode-presets/system.ts:73`.
 - **Not D8:** D8은 mention first-line (closed). 이건 YAML-ish frontmatter.
 - **Write:** vendor normalizer에 forbid+nested 복사, 또는 W2-X fence-legal shared leaf.
   Forbidden: `rules`가 `@/skill` value-import; 검증 없는 `@/shared` 정책 덤프.
-- **Proof limit:** 소스 비교. hostile `__proto__` fixture 미실행.
 
 ### P2
 
@@ -225,9 +229,8 @@ Failure mode 있는 것만. 전부 **pre-existing**. 이 세션이 코드를 악
   - `skillScope(s) !== src.scope` → `{...s, scope: src.scope}`
   - 주석: “Explicit frontmatter still wins”
   - `skillScope` = `s.scope ?? "builtIn"` → frontmatter scope **짐**
-- **Failure:** user-dir `scope: admin` 스킬이 `installState:"required"`를 유지한 채
-  scope만 `user`로 덮임 → 관리 UI에 가짜 required. 집행은 이름 기준이라 disable
-  bypass는 아님. 관측 계약이 거짓.
+- **Failure:** user-dir `scope: admin` 스킬이 `installState:"required"`를 유지한 채 scope만 `user`로 덮임 (재현됨: projection이 `{scope:"user", installState:"required"}` 방출). `registry.ts:165` 주석 "Explicit frontmatter still wins"는 **거짓**.
+- **단, 표면화되지 않음:** `ManagedSkill.installState` 리더 0 — `skill-tool.ts:278`은 `name`/`enabled`만, `skills-surface.ts`의 `SkillRow`에는 `installState` 필드 자체가 없음. `grep installState src/apps` = 0. ⇒ "관리 UI에 가짜 required"는 **없음**. E-SKILL-01과 동형인 dead projection.
 - **Tests:** retag는 “misinferred → admin”만. frontmatter demotion 없음.
 - **Write:** `registry.ts` — 파생 필드 재계산 또는 주석대로 frontmatter 존중.
   Forbidden: mention-runner (D8 closed).
@@ -260,9 +263,9 @@ Failure mode 있는 것만. 전부 **pre-existing**. 이 세션이 코드를 악
 
 | ID | Why left closed/conditional |
 |---|---|
-| SEP6 N7 | **HEAD에서는 트리거 재현 → E-N7로 재개.** overlay에는 이미 수리. ID를 새로 만들지 말고 HEAD vs overlay를 구분 |
+| SEP6 N7 | `0b14f5cf`에서 트리거 재현 → E-N7. **`9b05cd33`에 수리가 랜딩되어 현재는 CLOSED.** ID를 새로 만들지 말 것 |
 | SEP6 N12 / S8 / S9 | Lane E 밖 |
-| SEP5 D8 | mention first-line. `src/shared/mention-text.ts` (untracked overlay). skill resolver 병합 금지 |
+| SEP5 D8 | mention first-line. `src/shared/mention-text.ts`는 `0b14f5cf`에 **untracked**였고 `9b05cd33`에서 tracked로 랜딩. skill resolver 병합 금지 |
 | SEP5 D12 | rg spawn 3구현, 계약 다름. X-E-RG comparison only |
 | SEP5 D14 | fence-local sha256Hex |
 | SEP5 D15 merge | dual barrel 유지. live SSOT는 engines. 외부 consumer 증거 전까지 merge 금지 |
@@ -350,16 +353,18 @@ Failure mode 있는 것만. 전부 **pre-existing**. 이 세션이 코드를 악
 실행하지 않은 것. 정적 발견을 런타임 GREEN으로 덮지 말 것.
 
 - Live Bedrock + `CLAUDE_CODE_USE_*`, Voyage/OpenAI embed 키, Lance/Qdrant open.
-- vendor detector에 `__proto__` 주입 실행.
-- `QUANTA_READ_OUTLINE=yes` process fixture vs knobs-bench.
+- (해소됨) vendor detector `__proto__` 주입 — 실행 완료, 결과는 E-FM-01 참조.
+- (해소됨) `QUANTA_READ_OUTLINE=yes` fixture vs knobs-bench — 실행 완료, 결과는 E-KNOB-01 참조.
 - `persistTurn` dual-save crash (`--state` + id-mode).
 - biome cognitive-complexity / lint-debt 함수 전수.
 - `batch/eval/{adaptive-escalation,kernel,repair,official-grade,posture,llm-evidence-packet}`
   본문 전수.
 - 68 knob 모듈 중 dual-channel 4 + repo-map 이외.
 - `@/retrieval` legacy barrel의 **repo 밖** importer.
-- Dirty overlay llm/retry의 CI 영수증 (HEAD 권위 밖). SEP6 closeout은 overlay를
-  detached worktree로 검증했다고 문서화되어 있음.
+- Dirty overlay llm/retry의 CI 영수증 (HEAD 권위 밖). **주의:** "SEP6 closeout이
+  overlay를 detached worktree로 검증했다고 문서화되어 있다"는 1차 서술은 인용
+  시점에서 거짓 — `0b14f5cf`의 `docs/` 전체에 "detached worktree" 문자열이 없음
+  (그 기록은 `9b05cd33`이 추가한 `SEP6-01-hitl-retry-fail-closed.md`에만 존재).
 
 ---
 
@@ -393,10 +398,12 @@ Failure mode 있는 것만. 전부 **pre-existing**. 이 세션이 코드를 악
    HEAD/tracked-diff를 적으면 W1-E와 이 dump는 STALE.
 2. **Dirty checkout.** uncommitted 파일을 완료 주장에 넣지 말 것. 특히 llm/retry
    overlay = SEP6-01.
-3. **E-N7 vs SEP6 closeout.** `docs/bugbash/sep-06-solid-se-audit.md`는 N7을
-   resolved로 적는다. 그건 **overlay + detached worktree CI** 기준이다. 깨끗한
-   HEAD tree만 보면 N7은 아직 열려 있다. W3는 “어느 스냅샷이 캠페인 진실인가”
-   를 한 줄로 고정해야 한다.
+3. **E-N7 vs SEP6 closeout — 1차 서술 철회.** "`docs/bugbash/sep-06-solid-se-audit.md`가
+   N7을 resolved로 적는다"는 **거짓**: `0b14f5cf`의 그 파일은 N7을 `still / 🟠 p1`로
+   적고 "resolved"라는 단어가 **0회**다. 즉 프리즈 시점엔 이 dump와 그 문서가
+   **일치**했다. `resolved`는 수리와 같은 커밋(`9b05cd33`)에서 쓰였다. W3는 여전히
+   “어느 스냅샷이 캠페인 진실인가”를 한 줄로 고정해야 하지만, 그 근거로 이
+   문서 불일치를 들면 안 된다.
 4. **형제 레인.** 이 세션 중 `W1-A`…`W1-H` 영수증이 같은 폴더에 쌓였다.
    untracked hash 변동은 그 때문이다. tracked production snapshot은 유지.
 5. **구현하지 않음.** 이 agent는 패치/테스트/티켓 파일을 만들지 않았다.
@@ -409,14 +416,14 @@ Failure mode 있는 것만. 전부 **pre-existing**. 이 세션이 코드를 악
 
 | ID | Pri | Owner file | One-line |
 |---|---|---|---|
-| E-N7 | P1 | `llm/retry/decorator-policy.ts` (HEAD) | HITL + retry-looking msg → auto retry |
-| E-KNOB-01 | P1 | `runner/knobs/knobs/read-outline.ts`, `test-runner.ts` | `yes` ∈ gateOn, ∉ knob ENABLING |
-| E-SEARCH-01 | P1 | `runner/assemble/search-index-backend.ts` | explicit store open-fail still `ready` |
-| E-EMBED-01 | P1 | same, `resolveIndexEmbedder` | fail → 64-dim hash mixed into index |
-| E-FM-01 | P1 | `rules/vendor-detector/normalizer.ts` | no `FORBIDDEN_KEYS` vs skill FM |
+| E-N7 | — | `llm/retry/decorator-policy.ts` | **CLOSED at `9b05cd33`** (`:84` `hitl_handoff → no_retry`). `0b14f5cf`에서만 재현 |
+| E-KNOB-01 | P3 | `runner/knobs/knobs/read-outline.ts`, `test-runner.ts` | `yes` ∈ gateOn, ∉ knob ENABLING ⇒ report.json `knobs.inactive` 오표기뿐 (기능은 계속 ON) |
+| E-SEARCH-01 | P3 | `runner/assemble/search-index-backend.ts` | `SemanticBackend.state` 리더 0 ⇒ dead typed-health 필드. fail-open 아님 |
+| E-EMBED-01 | P3 | same, `resolveIndexEmbedder` | 64-dim hash는 headless 32KiB 초과 경로만; `capabilities()` catch 경로는 dead |
+| E-FM-01 | P3 | `rules/vendor-detector/normalizer.ts` | vendor가 `constructor`/`prototype` 수락(=`__proto__` 아님). 단 metadata를 소비자가 안 봄 + sourcePath 충돌로 항상 폐기 |
 | E-PROV-01 | P2 | `llm/factory.ts` vs `providers/registry.ts` | status anthropic / live bedrock |
 | E-PERSIST-01 | P2 | `runner/orchestrate/persist-turn.ts` | usage snapshot can abort persist |
 | E-SKILL-01 | P2 | `skill/install-enforcement.ts` | `decideInstall` never called |
-| E-SKILL-02 | P2 | `skill/registry.ts` | retag drops frontmatter, keeps installState |
+| E-SKILL-02 | P3 | `skill/registry.ts` | retag drops frontmatter, keeps installState — 단 `installState` 리더 0 (dead projection) |
 
 **DONE (session classification). Not fixed.**

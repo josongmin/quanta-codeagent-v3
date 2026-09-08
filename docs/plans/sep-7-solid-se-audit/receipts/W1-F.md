@@ -4,45 +4,36 @@
 AUDIT_ASSIGNMENT|lane=F|scope=auth,security,permission,config,capability,migration|receipt=docs/plans/sep-7-solid-se-audit/receipts/W1-F.md
 ```
 
-Status: **DONE** (scope classified against committed HEAD; not fixed)
+Status: **DONE** (scope classified against committed HEAD; not fixed).
+Re-audited after HEAD advanced; see Snapshot.
 
 ## Snapshot
 
-W0 receipt was **absent** at start and still absent at write time. Coordinator
-dispatched this lane against a dirty shared checkout. Inspection used the
-dispatch-pack HEAD-only rule: committed `HEAD` is the immutable snapshot;
-uncommitted overlay is recorded and excluded from findings and completion claims.
+W0 receipt was **absent** throughout. The first write of this receipt classified
+`0b14f5cf`. Commit `9b05cd33` (`done`) then landed this receipt **together
+with** the SEP6 S9 / classifier bytes that the first write treated as dirty
+overlay. The first-write SHA table is therefore stale relative to the commit
+that contains it. **This amendment is the truth snapshot.**
 
 | Field | Value |
 |---|---|
-| HEAD | `0b14f5cf4f05ffaecf2fa1595bd2d7ba27f2b0dd` |
-| origin/main | `0b14f5cf4f05ffaecf2fa1595bd2d7ba27f2b0dd` |
+| HEAD = origin/main | `9b05cd33b008b52bf54c9f2391070afcbfbaa8fe` |
 | merge-base | same |
 | branch | `main` |
 | ahead/behind | `0 / 0` |
 | staged diff SHA-256 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` (empty) |
-| tracked diff SHA-256 (`git diff HEAD`) | `b693d4693650443b72d5910a98fa9573bc633bcda34171e261e37445d058918e` |
-| untracked manifest SHA-256 | `0c7b458ad8f96b46e912f3f8ea481537c22a6351b38fda8d40423c49e8e9d411` |
+| F production dirty | none |
+| tracked diff | sibling docs only (`agent-3.md`, `agent-5.md`, `W1-B.md`) — not F source |
 | AGENTS.md | `79de5da2fad6835f007654552180ba3c44312ab13f9049d6f04131f82411702c` |
 | AGENT_CORE.md | `d1f585c79692ee9ca27b2dde36da25d01df0c17883676b3c392f6ee035dd7d82` |
 | AGENT_PLAYBOOK.md | `288bb7e2fe1f2dbf60051d5ac0186f025e7b009dbbedefd29f2ca74afeb4f4b6` |
-| docs/ARCHITECTURE.md **HEAD** | `f190b0a28ddb1ce914772d3cf919b4dbce7ab411aaad2c7580364a32f2650fdd` |
-| docs/ARCHITECTURE.md working tree | `16626624c6001dc16093000f0a1071a44402391f2f3940e5dff3cd24109b0fcf` (dirty; not used) |
+| docs/ARCHITECTURE.md | `b401ec63be34bf4ed69682374e4e648cc204edfc` (HEAD = working tree) |
 | tests/README.md | `ba80760a592f1b3e70a2394bfa7f45ddecaf17f3b2cdec8468204eb61d351967` |
-| Pre-inspect vs post-inspect | HEAD / tracked-diff / AGENTS.md / ARCHITECTURE HEAD **unchanged** |
-| Untracked after this receipt | `7ea8becb8d817d8bbf9ceb3f98ccc48bd8ceef2dbab3d7d386020a7fcbca7a6b` — delta is campaign receipts (`W1-F.md`, sibling `W1-C.md`). Not source STALE. |
+| Prior classified SHA | `0b14f5cf4f05ffaecf2fa1595bd2d7ba27f2b0dd` (ancestor; F-01/F-02 triggers lived there) |
 
-Dirty F production overlay (excluded from truth; hashes differ from HEAD):
-
-- `src/permission/json-state-file/engine.ts`
-- `src/permission/json-state-file/locking.ts`
-- `src/security/index.ts`
-- `src/security/sensitivity-classifier.ts`
-- `src/config/knob-inventory/{const-keyed,extra,host}.ts`
-- `src/config/knob-schema/schemas/{bench-a,bench-gap-3,bench-loop}.ts`
-
-SEP6 closeout claimed S9 complete at this HEAD, but the S9 bytes live only in
-the working-tree overlay. This receipt classifies **committed HEAD**.
+F production overlay from the first write is **in this HEAD**. F-01 and F-02
+are closed because those triggers no longer reproduce. Remaining findings were
+rechecked on `9b05cd33` owner+consumer. Human dump: `docs/bugbash/sep-8-se-audit/agent-2.md`.
 
 ## Coverage
 
@@ -58,7 +49,7 @@ Slice production counts (HEAD, excluding colocated tests and `.d.ts`):
 auth 22, security 25, permission 63, config 28, capability 5, migration 18.
 Sum 161.
 
-No F god-module `>1000`. Cohort 900–999 members in F: `src/config/knob-inventory/extra.ts` (960), `src/migration/external-config/persist.ts` (914). Crude brace scan found no F function body `>150`.
+No F god-module `>1000`. Cohort 900–999 members in F: `src/config/knob-inventory/extra.ts` (951), `src/migration/external-config/persist.ts` (914). Crude brace scan found no F function body `>150`.
 
 ## Inspected consumers (owner → reachable consumer, not grep-close)
 
@@ -66,7 +57,7 @@ No F god-module `>1000`. Cohort 900–999 members in F: `src/config/knob-invento
 |---|---|---|
 | Permission JSON persist + lock | `json-state-file/engine.ts` `writeToDisk` L106–147; `locking.ts` `acquireLock` L104–130 | `permission-store.ts` L776 `mergeWithDisk`; `trust-scope-store.ts` L538/557 `createJsonStateFile` |
 | Inspector vs PEP | `inspector.ts` `explainHost` | tests + barrel; live CLI uses `inspect.ts` instead |
-| Sensitivity command class | `sensitivity-classifier.ts` `classifyCommandShapeAt` L387–406 (`MAX_SHELL_UNWRAP_DEPTH = 1`) | `src/tool/bash/index.ts` L701 `classifySource` (lane B; evidence only) |
+| Sensitivity command class | `sensitivity-classifier.ts` `classifyCommandShapeAt` (depth 8; exact argv0 heads) | `src/tool/bash/index.ts` `classifySource` (lane B; evidence only). Residual F-07 |
 | Capability probe | `capability/probe-all.ts` `runCapabilityProbe`; `resolve.ts` `resolveExposure` | `src/host/bootstrap/bootstrap-session/capability-probe.ts` L32–73 (lane G; observe-only) |
 | ChatGPT refresh | `refresh-transaction.ts` `refreshTokenTransaction`; `refresh.ts` `RefreshCoordinator` | `src/llm/adapters/chatgpt-oauth.ts` L293 (lane E) |
 | MCP launch filter | `config/mcp-governance.ts` `filterMcpServersByPolicy` | `src/host/mcp-composition.ts` L394 (lane G) |
@@ -80,36 +71,17 @@ No F god-module `>1000`. Cohort 900–999 members in F: `src/config/knob-invento
 
 ## Findings
 
-### F-01 — [P1] Permission merge flush writes without the advisory lock (SEP6 S9 trigger reproduced on HEAD)
+### F-01 — [P1] Permission merge flush writes without the advisory lock (SEP6 S9)
 
-- **status:** open
-- **attribution:** pre-existing on committed HEAD. SEP6 overlay repairs this in the dirty working tree and must not be treated as snapshot-closed.
-- **owner:** `src/permission/json-state-file/engine.ts` HEAD `writeToDisk` ~L112: `if (useLock) locked = await acquireLock(...)` then continues into snapshot / `rereadForMerge` / `writeFile` / `rename` even when `locked === false`. `enqueueWrite` HEAD ~L163–174 clears `dirty` before the write and does not restore it on `{durable:false}`.
-- **lock comment:** `locking.ts` HEAD L104–106: “caller then proceeds best-effort”.
-- **consumers:** `permission-store.ts` supplies `mergeWithDisk` (lock path is therefore live). `trust-scope-store.ts` same.
-- **failure mode:** two OS processes can both time out, both merge from the same on-disk snapshot, and the second `rename` last-write-WINS a security grant/denial. Failed durable writes are not retried (`dirty` stays false).
-- **test honesty:** HEAD `tests/unit/permission/json-state-file-lock-clock-hellgate.test.ts` pins the fail-open (`flush proceeds lock-free (best-effort)`). The rail would **not** turn RED if the hole remains; it would turn RED if S9 were applied without updating the test. Overlay test bytes (`reason: "cross-process lock unavailable"`) are outside this snapshot.
-- **retired-ID policy:** SEP6 S9 reopen is authorized because the documented trigger is reproduced on HEAD.
-- **proof_limit:** static owner+consumer+HEAD test text. Multi-process race was not re-executed in this worker.
-- **proposed write set (F-owned):**
-  - `src/permission/json-state-file/engine.ts`
-  - `src/permission/json-state-file/locking.ts` (comments/contract only as needed)
-  - `tests/unit/permission/json-state-file-lock-clock-hellgate.test.ts`
-- **forbidden:** `src/shared/**`; lane B/G stores that only consume the engine.
+- **status:** closed on `9b05cd33`
+- **attribution:** trigger reproduced on `0b14f5cf`; repair committed in `9b05cd33` (`writeToDisk` returns `{durable:false, reason:"cross-process lock unavailable"}`; `enqueueWrite` restores `dirty` on newest failed generation). Hellgate pins fail-closed.
+- **residual:** F-09 (lock steal ABA / no heartbeat). Do not reopen S9.
 
-### F-02 — [P1] Nested shell wrappers classify as `public` (secret command redaction fail-open)
+### F-02 — [P1] Nested shell wrappers classify as `public`
 
-- **status:** open
-- **attribution:** pre-existing on HEAD. Dirty overlay raises unwrap depth to 8 and fail-closes overflow; that overlay is not in the snapshot.
-- **owner:** `src/security/sensitivity-classifier.ts` HEAD L373–406. `MAX_SHELL_UNWRAP_DEPTH = 1`. Start depth 0 unwraps once; nested `bash -c "bash -c printenv"` returns `"public"`. Overflow does not fail closed.
-- **consumer:** `src/tool/bash/index.ts` HEAD L701 `classifySource: (input) => classifyCommandShape(input.command ?? "")`. Same classifier is also imported by container-exec (lane B).
-- **failure mode:** Layer-1 source class never marks nested credential printers `secret`, so raw env/token bytes can enter model context / JSONL / distill instead of `[REDACTED:source_class_secret]`.
-- **test honesty:** HEAD `tests/unit/security/sensitivity-classifier.test.ts` pins one-level unwrap only (`bash -c 'printenv'` → secret). Nested wrappers are untested on HEAD (negative control missing).
-- **proof_limit:** static. Did not execute bash tool redaction E2E on a nested wrapper.
-- **proposed write set (F-owned):**
-  - `src/security/sensitivity-classifier.ts`
-  - `tests/unit/security/sensitivity-classifier.test.ts`
-- **forbidden:** do not edit `src/tool/bash/**` (lane B). Consumer evidence only.
+- **status:** closed on `9b05cd33`
+- **attribution:** `MAX_SHELL_UNWRAP_DEPTH = 8`, overflow → `"secret"`, `node -e 'process.env'` → `"secret"`. bun reproduced `bash -c "bash -c printenv"` → `"secret"`.
+- **residual sibling universe:** F-07 (exact argv0; `/bin/bash` / zsh / `process["env"]` command path).
 
 ### F-03 — [P2] Duplicate wx-lock owners inside `@/migration` with measured stale-lock drift
 
@@ -174,22 +146,99 @@ No F god-module `>1000`. Cohort 900–999 members in F: `src/config/knob-invento
   - `src/permission/inspector.ts` (`explainHost` must use `hostMutationVerdict`; `defer` ⇒ deny)
   - `tests/unit/permission-inspector.test.ts` (custom host explain.outcome === evaluateStack.kind)
 - **forbidden:** do not change `evaluateStack` fail-closed; do not "fix" by making the PEP match the inspector.
+- **sibling (G, not F write):** live CLI uses `inspect.ts` (store-free SHAPE; does **not** evaluate host). That is a different invariant, not an F-06 sibling. `permission-explain.ts` “final verdict” label + host-mode dump without applying `custom` defer is G honesty / X-pep.
+
+### F-07 — [P1] Command-shape wrapper argv0 identity (F-02 residual fail-open)
+
+- **status:** open
+- **attribution:** remaining after F-02 closed. bun-reproduced on `9b05cd33`.
+- **owner:** `src/security/sensitivity-classifier.ts`. `SHELL_WRAPPER_HEADS` / `SECRET_COMMAND_RULES` / `INTERPRETER_EVAL_HEADS` key on **exact** `firstToken` (L184–188, L370, L387–394, L429). Path `basename()` exists (L41–44) and is unused for command heads.
+- **reproduced:** `/bin/bash -c printenv` → `"public"`; `zsh|dash|ksh -c printenv` → `"public"`; `bash -xc printenv` → `"public"` (`SHELL_COMMAND_FLAGS` is exact `-c`/`-lc`); `node -e 'console.log(process["env"])'` → `"public"` while `classifyCodeShape` of the same source → `"secret"` (`CODE_ENV_ACCESS` vs `interpreterEvalReadsSecrets` substring).
+- **consumer:** `src/tool/bash/index.ts` `classifySource`; container-exec (lane B; evidence).
+- **failure mode:** path-qualified bash / alt shells / combined `-xc` / bracket env access skip Layer-1 secret class; env/token bytes enter model/JSONL.
+- **out of contract:** `bash script.sh` → `"public"` is pinned and argv-shape-only (no file IO). Not F-07.
+- **test honesty:** nested bash + `process.env` are pinned; `/bin/bash`, zsh, `bash -xc`, command-path `process["env"]` have no RED.
+- **proof_limit:** bun classifier eval. Did not run live bash tool envelope.
+- **proposed write set (F-owned):**
+  - `src/security/sensitivity-classifier.ts`
+  - `tests/unit/security/sensitivity-classifier.test.ts` (RED: `/bin/bash -c printenv` and `bash -xc printenv` → secret)
+- **forbidden:** `src/tool/bash/**`.
+
+### F-08 — [P2] OAuth callback timeout leaves the loopback listener bound
+
+- **status:** open
+- **owner:** `src/auth/chatgpt-oauth/cli-callback.ts` teardown only on `received.then` (L306–314). `browser-flow.ts` `Promise.race` timeout (L145–171) does **not** settle/cancel `handle.received`. Comment L134–139 claims timeout tears the provider down.
+- **consumer:** `src/apps/cli/login-cmd.ts` (lane G; evidence).
+- **failure mode:** after login timeout the port stays in `EADDRINUSE`. A first non-callback HTTP request can set `handled=true` and leave the promise pending.
+- **proof_limit:** static. Bind-after-timeout not executed here.
+- **proposed write set (F-owned):** `cli-callback.ts`, `browser-flow.ts`, `callback-port.ts` contract, owner-local lifecycle hellgate.
+- **forbidden:** `src/apps/cli/**`.
+
+### F-09 — [P2] Permission advisory-lock steal ABA (S9 residual)
+
+- **status:** open
+- **owner:** `src/permission/json-state-file/locking.ts` `LOCK_STALE_MS = 5000` (L67). Holder never refreshes lock JSON `ts`. `releaseLock` unlinks whoever holds the path (L147–152).
+- **consumer:** `engine.ts` `writeToDisk` (L112–139).
+- **failure mode:** a live flush slower than 5s is stolen; original holder later unlinks the thief’s lock; concurrent merge-renames can drop grants/denials. S9 closed timeout fail-open only.
+- **test honesty:** lock-clock hellgate models a live holder by **externally** refreshing timestamps; production does not.
+- **proposed write set (F-owned):** `locking.ts` (lease/heartbeat or owner-token release), `engine.ts` if the acquire API changes, ABA hellgate.
+
+### F-10 — [P2] Migration `settings.json` persist is unlocked read-merge-write
+
+- **status:** open
+- **owner:** `src/migration/external-config/persist.ts` `persistSettings` / `persistHooks` (~L496–566): read existing JSON, union, `writeJsonAtomic` rename. No file lock.
+- **distinct from F-03:** F-03 is the ledger sidecar lock; this is the live settings file.
+- **consumer:** later `src/agent/command-hooks/settings-loader.ts` / `config/loader.ts` parse the merged file.
+- **failure mode:** two migrate processes last-write-WINS; one union (permissions vs hooks) disappears.
+- **proof_limit:** typical path is one CLI sequential persist. Finding is the dual-process `QUANTA_MIGRATE_CONFIG_IMPORT` race, not the happy path. [old SHA config hunt](4adbb5d0-388e-44b5-a4fc-7a940db71e4a) called that typical path so not a finding; this receipt keeps P2.
+- **proposed write set (F-owned):** `persist.ts` + concurrent-persist hellgate. Do not import `@/permission` lock types; migration-local helper only.
+
+### F-11 — [P2] Malformed ledger entries crash `isThrottled`
+
+- **status:** open
+- **owner:** `src/migration/external-config/ledger.ts` `loadMigrationLedger` L71–77 accepts any `version===1` object with an `entries` array (no per-entry shape). `isThrottled` L88 reads `e.sourceKey`.
+- **consumer:** `external-config/run.ts` throttle check.
+- **failure mode:** `{"version":1,"entries":[null]}` throws TypeError. Syntax errors already fail-soft to empty.
+- **proposed write set (F-owned):** `ledger.ts` + malformed-entry fixture on the existing migration hellgate.
+
+### F-12 — [P2] TrustStore full-map save can resurrect a revoke
+
+- **status:** open
+- **owner:** `src/config/trust-store.ts` `flush` L141–147 writes the entire in-memory map with no lock/merge.
+- **consumer:** `src/apps/agent/index.ts` persistence adapter (lane G; evidence).
+- **failure mode:** process A `setUntrusted(X)` + flush; process B’s stale snapshot save restores `trusted:true` (fail-open resurrection). Grants can also vanish.
+- **forbidden:** do not merge with `TrustScopeStore` (different contract).
+- **proposed write set (F-owned):** `trust-store.ts` + cross-process hellgate.
+
+### F-13 — [P2] Markdown/memory persist is in-place `writeFile`; only JSON is atomic
+
+- **status:** open
+- **attribution:** retained after [Gap-hunt config migration (old SHA)](4adbb5d0-388e-44b5-a4fc-7a940db71e4a); rechecked on `9b05cd33`.
+- **owner:** `src/migration/external-config/persist.ts` `writeNoClobber` L458–463; `persistMemory` L793 (read entire file, `writeFile(existing + block)`).
+- **JSON contrast:** `writeJsonAtomic` tmp+fsync+rename; crash leaves original; next run corrupt-refuse.
+- **consumer:** later `loadRepoRules` / glob-rules / memory trail (lanes A/D; evidence).
+- **failure mode:** crash mid-write leaves a torn `AGENTS.md` or `raw_memories.md` that the next loader accepts. Memory rewrite can also destroy prior evidence in the same file.
+- **distinct from F-10:** F-10 is two-process last-write-WINS on `settings.json`. This is single-process crash-torn bytes on markdown.
+- **proposed write set (F-owned):** `persist.ts` `writeNoClobber` + `persistMemory` (same tmp+fsync+rename as JSON). Do not import `@/storage`.
+- **forbidden:** `src/agent/**` / `src/memory/**`.
 
 ## Inventory smells (not findings)
 
-- `extra.ts` 960 and `persist.ts` 914 sit in the 900–999 cohort. Data table / persist module; no function `>150` found. No failure mode from size alone. Split-on-sight if those files are touched.
+- `extra.ts` 951 and `persist.ts` 914 sit in the 900–999 cohort. Data table / persist module; no function `>150` found. No failure mode from size alone. Split-on-sight if those files are touched.
 - Knob-schema comments still say “not wired into the live driver” while `bench.ts` derives from `ALL_BENCH_SCHEMAS`. Comment dual-truth; leaf ratchet (no `@/runner`) still holds. P3 honesty, not a runtime finding.
 - ChatGPT persist-fail swallow (`src/llm/adapters/chatgpt-oauth.ts`) is lane E. `writeToken` already throws. W2-X fingerprint only.
 - `profile-list-select.ts` 895, `permission-store.ts` 871, `trust-scope-store.ts` 807, `shell/assess.ts` 763, `policy.ts` 707 — SRP pressure, still below god-module.
-- `json-state-file.ts` HEAD comment still says a “true lockfile remains the v4 follow-up” while `locking.ts` already exists. Comment drift only.
+- `json-state-file.ts` comments vs `locking.ts` remain honesty drift; F-09 captures the remaining runtime hole.
 - `rereadForMerge` maps absent/corrupt/mismatch → `null` then merge writes our state. Intentional peer-crash posture; can clobber a corrupt peer file. Documented.
 - Capability layer is observe-only (`probeCapabilityConsistency` warns, never gates). Dual **readers** of env gates, one writable env. Not two writable owners.
 - `RedisLockStub` always returns `redis-error`; `FallbackLock` is designed for that LSP weakening. No live ChatGPT path depends on Redis.
 - `headlessStubAttestor` deny-all / `headlessJwksClient` `{ok:false, reason:"cache-miss"}` — fail-closed stubs; no production composition consumer found beyond tests.
-- Two inspectors: `inspect.ts` (stateless `/permission explain`, live CLI) vs `inspector.ts` (store-backed `explainResolution`, tests + barrel only). Different questions until F-06; do not merge the modules.
+- Two inspectors: `inspect.ts` (stateless `/permission explain`, live CLI) vs `inspector.ts` (store-backed `explainResolution`, tests + barrel only). Different questions; F-06 is the store-backed lie. `inspect.ts` `PERMISSION_AXES` comment claims to mirror `evaluateStack` order (HITL/mode vs post-denial/per-thread/per-host) — honesty smell; pipeline display is not live fail-open (`shellCommand` omitted, `finalDecisionFor` unused). CLI “final verdict” label is G (X-pep). Do not merge the modules.
+- In-memory trust-scope hellgate header claims deny wins coexistence; the test body pins deny as ask-skip-inert (`deny` then `once_only` first hit `true`). Persistent `scanExact` is first-match (deny if earlier). Honesty + X-trust; not a new F id.
+- `rereadForMerge` maps absent/corrupt/mismatch → `null` then merge writes our state. Documented peer-crash posture on this HEAD; not promoted.
 - `two-layer-manager` + `canAccess` are tested and built by host `agent-arg-builder`, but `getEffectiveAccess` is not called by the admissibility PEP. `profile-to-context.ts` documents FS pillar as non-dispatch. Stale two-layer-as-evaluateStack-step-4 comment is smell, not a second live PEP.
 - `profile-to-context`: `once|session|always` all map to `"default"` — approval-mode distinctions are not representable on live `PermissionContext.mode`.
-- `gitWriteProtectReason` is F-owned but applied by dispatch-guard on `path|file_path|target|file` only. Shell `command` writes are a lane A/B consumer gap (X-git-shell), not a second F writer.
+- `filterMcpServersByPolicy` empty allowlist is identity (documented no-cliff; hellgate pins). `types.ts` “Trust-gated” refers to settings `enabledServers` loosening, which `merge.ts` drops for untrusted repos. Project `.mcp.json` spawn is a separate host path (`readMcpConfig`); default `centralConfig` OFF ⇒ no filter. Not a second F writer. `enabledServers: [" "]` trim-to-empty is an F-05 sibling of the noop. X-mcp-policy for G.
 - `config/trust-store.ts` (path trust, default UNTRUSTED) vs `permission/trust-scope-store.ts` (tool grants + TTL) — different contracts.
 - Knob `home:"runtime-config"` vs typed `runtimeConfig()` remains the SEP5 D27/D28 governed split. `KNOB_INVENTORY` and `RUNTIME_CONFIG_KNOBS` are still two writable **declaration** lists; BENCH inventory is derived (`bench.ts` ← `ALL_BENCH_SCHEMAS`). Disjoint-by-envKey ratchet is live. Not reopened: no same-key runtime double-apply on HEAD. Shard claim that `knob-read-authority-parity` orphan-runtime is vacuous was **not reproduced** — that test only checks authority tags + duplicates on the live inventory.
 - SEP5 D1 redaction vs trajectory vs scanner stays fence-split; not reopened (no new HEAD reproduction beyond the historical known-gap note).
@@ -203,17 +252,18 @@ Fingerprint shape: `authority/invariant/input/output/state/effect/failure-policy
 
 | ID | Fingerprint | F owner | Foreign peer (do not edit) |
 |---|---|---|---|
-| X-lock-wx | advisory-lock / mutual-exclusion / path+ttl / acquired\|busy / lockfile / write-or-skip / fail-open-or-busy / stale-reclaim | F-03 ledger vs persistence; F-04 `.cas`; permission `acquireLock`; auth `FileBasedLock` | storage atomic-write (lane D) |
+| X-lock-wx | advisory-lock / mutual-exclusion / path+ttl / acquired\|busy / lockfile / write-or-skip / fail-open-or-busy / stale-reclaim | F-03 ledger vs persistence; F-04 `.cas`; F-09 ABA; F-10 persist RMW; F-12 TrustStore; permission `acquireLock`; auth `FileBasedLock` | storage atomic-write (lane D) |
 | X-claude-trim | settings-decode / whitespace-token / json-array / string[] / none / persist-then-reload / drop-vs-keep / none | F-05 loader vs convert vs decode | agent command-hooks settings-loader (lane A) |
-| X-atomic-bytes | durable-rename / crash-safe-bytes / path+payload / void\|error / tmp file / fsync+rename / fail-closed-before-rename / tmp-cleanup | `private-file-atomic.ts`; `persist.writeJsonAtomic`; permission engine | `@/storage` writeFileAtomic |
+| X-atomic-bytes | durable-rename / crash-safe-bytes / path+payload / void\|error / tmp file / fsync+rename / fail-closed-before-rename / tmp-cleanup | `private-file-atomic.ts`; `persist.writeJsonAtomic`; F-13 markdown gap; permission engine | `@/storage` writeFileAtomic |
 | X-secret-regex | secret-pattern / known-format-mask / string / redacted+hits / none / replace-spans / closed-union / none | `security/redaction.ts` vs `secret-detection/pattern-scanner.ts` vs `pii-redaction/pattern-scanner.ts` | `shared/trajectory.ts` `redactValue` (D1 closed; parity hellgate) |
 | X-path-canon | path-identity / alias-collapse / path+cwd / canonical string / none / compare / reject-relative / no-symlink | `config/trust-store.canonicalizeProjectPath`; `permission/circumvention` segments; `special-path-resolver` | git/path helpers (lane H) |
 | X-trust | trust-grant / default-untrusted-vs-ttl-allow / path-or-tool / boolean / file / persist / fail-closed-absent / flush | `TrustStore` vs `TrustScopeStore` | host/cli wire (lane G) |
 | X-knob-read | env-knob / declared-vs-typed-read / envKey / value / none / process.env or runtimeConfig / ratchet-43-raw / startup-seed | `knob-inventory/**` + `derive-inventory.ts` | `shared/runtime-config` (RESERVED) |
-| X-mcp-policy | mcp-launch-allowdeny / name-filter / server[]+policy / kept+dropped / none / drop / deny-wins / empty-allowlist-noop | `mcp-governance.ts` | host mcp-composition; permission MCP rules if any |
+| X-mcp-policy | mcp-launch-allowdeny / name-filter / server[]+policy / kept+dropped / none / drop / deny-wins / empty-allowlist-noop | `mcp-governance.ts`; merge loosening drop | host `readMcpConfig` / `.mcp.json` spawn (G); do not add a permission 2nd filter |
 | X-token-persist | token-durability / refresh-then-disk / TokenRecord / void\|mem-fallback / mem vs file / http+write / swallow-persist / lock-released | F writeToken throws | llm `chatgpt-oauth.ts` persist catch (lane E) |
-| X-pep | live-PEP vs unused two-layer / inspector-explain / named-profile FS | evaluateStack+decideFloor vs canAccess unused | agent admissibility-gate (lane A); host builder |
+| X-pep | live-PEP vs unused two-layer / inspector-explain / named-profile FS | evaluateStack+decideFloor vs canAccess unused; F-06 inspector | agent admissibility-gate (lane A); host builder; CLI permission-explain (G) |
 | X-git-shell | git-write-protect / path-fields-only / action / reason\|null / none / deny-or-proceed / default-OFF-helper / none | git-write-guard.ts | dispatch-guard + bash (lanes A/B) |
+| X-oauth-listen | oauth-callback / listener-lifetime / timeout / void / tcp-port / bind / leak-on-race / close-on-settle | F-08 cli-callback + browser-flow | `apps/cli/login-cmd.ts` (G) |
 
 ## No-finding bounded areas
 
@@ -227,24 +277,32 @@ Fingerprint shape: `authority/invariant/input/output/state/effect/failure-policy
 
 ## Uninspected conditions
 
-- Runtime two-process permission lock race (HEAD fail-open) not re-run; SEP6 overlay tests exist but are dirty.
-- Nested `bash -c` redaction through the live bash tool + model envelope not executed.
+- F-09 steal ABA not executed as two live writers.
+- `/bin/bash -c printenv` through the live bash tool + model envelope not executed (classifier bun-eval only).
 - Ledger stale-lock crash fixture not planted.
 - Full `shell/assess.ts` vs `@/tool/bash` permission vehicle (foreign SUT; fingerprint only).
 - Every bench knob schema semantic vs runner derive (`@/runner/batch/eval/kernel/derive` is lane E).
 - JWKS/attestor production composition outside tests (bounded absence in `src/` grep).
 - Cognitive-complexity scores / lint-debt per-function (lint-debt file is W0/W2-P authority; not re-measured here).
-- Working-tree overlay behavior (explicitly out of scope).
+- OAuth timeout → `EADDRINUSE` bind not executed (static).
 
 ## Exact proposed write sets
 
 | Finding | Files | Notes |
 |---|---|---|
-| F-01 | `src/permission/json-state-file/engine.ts`, `src/permission/json-state-file/locking.ts`, `tests/unit/permission/json-state-file-lock-clock-hellgate.test.ts` | Align HEAD with SEP6 S9 contract: no write outside lock; restore `dirty` on non-durable newest generation |
-| F-02 | `src/security/sensitivity-classifier.ts`, `tests/unit/security/sensitivity-classifier.test.ts` | Nested unwrap + overflow fail-closed; RED on `bash -c "bash -c printenv"` → secret |
+| F-01 | — | CLOSED on `9b05cd33` |
+| F-02 | — | CLOSED on `9b05cd33`; residual F-07 |
 | F-03 | `src/migration/external-config/ledger.ts`, owner-local hellgate under `src/migration/__tests__/` or `tests/unit/migration/` | Reclaim policy parity with `persistence.ts`; do not share permission/auth lock types |
 | F-04 | `src/auth/node-lock-file-store.ts`, `tests/unit/auth/node-lock-file-store.test.ts` | Stale `.cas` reclaim or TTL steal without claim; planted-orphan RED |
+| F-05 | `src/migration/claude-config-decode.ts`, `src/migration/external-config/convert.ts` `asStringList`, whitespace fixture on entrypoint-parity | Canonical trim in decode; convert delegates; do not import `@/config`; do not loosen loader |
 | F-06 | `src/permission/inspector.ts`, `tests/unit/permission-inspector.test.ts` | `hostMutationVerdict`; custom host RED vs `evaluateStack` |
+| F-07 | `src/security/sensitivity-classifier.ts`, `tests/unit/security/sensitivity-classifier.test.ts` | Basename head; alt shells; `/bin/bash`; `bash -xc`; share code-shape with interpreter-eval. RED: `/bin/bash -c printenv` and `bash -xc printenv` → secret |
+| F-08 | `src/auth/chatgpt-oauth/cli-callback.ts`, `browser-flow.ts`, callback lifecycle hellgate | Timeout/abort must settle `received` and `server.close` |
+| F-09 | `src/permission/json-state-file/locking.ts`, `engine.ts` if API changes, lock-clock hellgate | Lease heartbeat or owner-token release; ABA RED |
+| F-10 | `src/migration/external-config/persist.ts` + concurrent persist hellgate | settings.json RMW; migration-local lock only |
+| F-11 | `src/migration/external-config/ledger.ts` + malformed-entry fixture | Shape-filter entries; `isThrottled` no-throw |
+| F-12 | `src/config/trust-store.ts` + cross-process hellgate | Merge or lock; do not merge with TrustScopeStore |
+| F-13 | `src/migration/external-config/persist.ts` `writeNoClobber` + `persistMemory` | tmp+fsync+rename parity with JSON; do not import `@/storage` |
 
 W1 must not edit `src/shared/**`, feature catalog, architecture configs, or foreign slices.
 
@@ -272,8 +330,8 @@ Colocated tests (not production): `src/config/knob-schema/schemas/bench-repro-ac
 | src/auth/chatgpt-oauth/pkce.ts | 17 | decode | pkce pair | same | pkce/s256/none/verifier+challenge/none/hash/throw/ephemeral |
 | src/auth/chatgpt-oauth/jwt.ts | 89 | decode | decodeJwtClaims | same | jwt-claims/decode/string/claims/none/none/shape-throw/none |
 | src/auth/chatgpt-oauth/callback-port.ts | 62 | port | loopback callback | cli-callback tests | oauth-callback/redirect/url/code/none/http/timeout/bind |
-| src/auth/chatgpt-oauth/cli-callback.ts | 319 | adapter | createCliOAuthCallback | same | oauth-callback/cli/url/tokens/none/http+browser/error-typed/port-lifetime |
-| src/auth/chatgpt-oauth/browser-flow.ts | 179 | adapter | interactive login | same | oauth-browser/auth-code/cfg/tokens/none/browser+http/error/flow |
+| src/auth/chatgpt-oauth/cli-callback.ts | 319 | adapter | createCliOAuthCallback | same | oauth-callback/cli/url/tokens/none/http+browser/error-typed/port-lifetime **F-08** |
+| src/auth/chatgpt-oauth/browser-flow.ts | 179 | adapter | interactive login | same | oauth-browser/auth-code/cfg/tokens/none/browser+http/error/flow **F-08** |
 | src/auth/chatgpt-oauth/browser-flow-error.ts | 24 | types | errors | same | oauth-error/class/none/Error/none/none/typed/none |
 | src/auth/chatgpt-oauth/refresh.ts | 284 | policy | refreshToken / RefreshCoordinator | tests/unit/auth/t07-refresh-hellgate | oauth-refresh/in-proc-coalesce/RefreshInput/TokenRecord/inflight Map/http/throw-shape/clear-on-settle |
 | src/auth/chatgpt-oauth/refresh-lock.ts | 24 | adapter | createChatgptRefreshLock | chatgpt-refresh-transaction tests | lock/chatgpt-home/env/port/none/file-lock/none/shared-dir |
@@ -286,7 +344,7 @@ Colocated tests (not production): `src/config/knob-schema/schemas/bench-repro-ac
 | path | loc | role | ingress | test owner | fingerprint |
 |---|---:|---|---|---|---|
 | src/security/index.ts | 24 | barrel | redact/classify exports | tests/unit/security-slice-boundary.test.ts | n/a |
-| src/security/sensitivity-classifier.ts | 413 | policy | classifyPath/classifyCommandShape | tests/unit/security/sensitivity-classifier.test.ts | source-class/secret-path-or-cmd/path\|cmd/enum/none/none/fail-open-nested/none **F-02** |
+| src/security/sensitivity-classifier.ts | 479 | policy | classifyPath/classifyCommandShape | tests/unit/security/sensitivity-classifier.test.ts | source-class/secret-path-or-cmd/path\|cmd/enum/none/none/fail-open-argv0/none **F-07** |
 | src/security/redaction.ts | 359 | policy | redactSecrets | tests/unit/redaction-parity-hellgate.test.ts; security/redaction-*.test.ts | redact/known-format/string/text+hits/none/replace/closed-union/none |
 | src/security/redaction-config.ts | 117 | types | config | tests/unit/security/redaction-config.test.ts | redact-cfg/toggles/opts/cfg/none/none/default/none |
 | src/security/pii-redaction/index.ts | 16 | barrel | PII scanner | pii tests | n/a |
@@ -331,14 +389,14 @@ Colocated tests (not production): `src/config/knob-schema/schemas/bench-repro-ac
 | src/config/merge.ts | 318 | policy | merge layers | merge tests | config-merge/precedence/layers/ResolvedSettings/none/none/deny-wins/none |
 | src/config/mcp-governance.ts | 58 | policy | filterMcpServersByPolicy | host mcp-composition | mcp-filter/allowdeny/name/kept+dropped/none/filter/empty-allowlist-noop/none |
 | src/config/managed-path.ts | 38 | policy | osManagedSettingsPath | managed-path tests | managed-path/os-convention/platform/path/none/none/override-wins/none |
-| src/config/trust-store.ts | 167 | persist | TrustStore | trust-store tests | project-trust/default-untrusted/path/bool/map+file/flush/relative-throw/canonical-key |
+| src/config/trust-store.ts | 167 | persist | TrustStore | trust-store tests | project-trust/default-untrusted/path/bool/map+file/flush/relative-throw/canonical-key **F-12** |
 | src/config/knob-catalog.ts | 259 | registry | mergeKnobCatalog | knob catalog tests | knob-catalog/help-projection/decls/catalog/none/none/none/none |
 | src/config/knob-inventory.ts | 72 | registry | KNOB_INVENTORY concat | tests/unit/knob-read-authority-parity.test.ts | knob-decl/declaration-only/envKey/entry/none/none/home-is-target/none |
 | src/config/knob-inventory/types.ts | 47 | types | | same | n/a |
 | src/config/knob-inventory/bench.ts | 20 | registry | BENCH derived | derive-inventory tests | knob-decl/bench-schema-derived/schema/entry/none/none/none/none |
 | src/config/knob-inventory/const-keyed.ts | 339 | registry | CONST_KEYED | knob inventory hellgates | knob-decl/table/envKey/entry/none/none/none/none |
 | src/config/knob-inventory/daemon.ts | 277 | registry | DAEMON | same | knob-decl/table/envKey/entry/none/none/none/none |
-| src/config/knob-inventory/extra.ts | 960 | registry | EXTRA | same | knob-decl/table/envKey/entry/none/none/none/none **cohort 960** |
+| src/config/knob-inventory/extra.ts | 951 | registry | EXTRA | same | knob-decl/table/envKey/entry/none/none/none/none **cohort 951** |
 | src/config/knob-inventory/host.ts | 640 | registry | HOST | same | knob-decl/table/envKey/entry/none/none/none/none |
 | src/config/knob-inventory/mention.ts | 134 | registry | MENTION | same | knob-decl/table/envKey/entry/none/none/none/none |
 | src/config/knob-inventory/runner.ts | 314 | registry | RUNNER | same | knob-decl/table/envKey/entry/none/none/none/none |
@@ -364,9 +422,9 @@ Colocated tests (not production): `src/config/knob-schema/schemas/bench-repro-ac
 | src/permission/access-check.ts | 152 | policy | canAccess | fail-closed-base hellgate | fs-access/jail/path+policy/bool/none/none/empty-roots-deny/none |
 | src/permission/outcome.ts | 190 | types | verdicts | | n/a |
 | src/permission/deny-reason.ts | 189 | types | reasons | | n/a |
-| src/permission/json-state-file.ts | 176 | persist | createJsonStateFile | json-state-file-lock-clock hellgate | persist/json-state/opts/handle/file/debounce-rename/load-empty-corrupt/lock-if-merge **F-01** |
-| src/permission/json-state-file/engine.ts | 314 | persist | writeToDisk/enqueueWrite | same | persist/flush/EngineState/PersistOutcome/dirty+baseline/fs/lock-timeout-write-anyway/queue **F-01** |
-| src/permission/json-state-file/locking.ts | 152 | persist | acquireLock | same | lock/wx-stale-steal/lockPath/bool/lockfile/fs/timeout-false/stale-ms **F-01** |
+| src/permission/json-state-file.ts | 176 | persist | createJsonStateFile | json-state-file-lock-clock hellgate | persist/json-state/opts/handle/file/debounce-rename/load-empty-corrupt/lock-if-merge **F-09 residual** |
+| src/permission/json-state-file/engine.ts | 331 | persist | writeToDisk/enqueueWrite | same | persist/flush/EngineState/PersistOutcome/dirty+baseline/fs/lock-steal-aba/queue **F-09** |
+| src/permission/json-state-file/locking.ts | 152 | persist | acquireLock | same | lock/wx-stale-steal/lockPath/bool/lockfile/fs/timeout-false/stale-ms-no-heartbeat **F-09** |
 | src/permission/permission-store.ts | 871 | persist | createPermissionStore | permission-store concurrent e2e | perm-state/grants-denials/file/state/live+disk/mergeWithDisk/in-memory-authoritative/debounce |
 | src/permission/trust-scope.ts | 131 | policy | TrustScopeRegistry | trust-scope tests | trust-scope/cascade/tool+key/bool/memory/none/deny-short-circuit/ttl-read |
 | src/permission/trust-scope-store.ts | 807 | persist | file-backed registry | trust-scope concurrent e2e | trust-scope/persist/file/grants/json-state/merge/ttl-filter/debounce |
@@ -391,7 +449,7 @@ Colocated tests (not production): `src/config/knob-schema/schemas/bench-repro-ac
 | src/permission/policy-layers/index.ts | 438 | policy | layer stack | provenance tests | perm-layers/stack/action/verdict/none/none/none/none |
 | src/permission/policy-layers/provenance-guard.ts | 682 | policy | provenance | same | provenance/tool-origin/action/verdict/none/none/fail-closed/none |
 | src/permission/special-path-resolver.ts | 220 | adapter | createCachedResolver | fail-closed-base | special-path/kind→abs/ports/path/cache/none/missing-port/cache-lifetime |
-| src/permission/inspector.ts | 198 | inspect | inspect | inspect tests | inspect/explain/action/report/none/none/none/none |
+| src/permission/inspector.ts | 198 | inspect | inspect | inspect tests | inspect/explain/action/report/none/none/custom-host-lie/none **F-06** |
 | src/permission/inspect.ts | 433 | inspect | inspect API | same | inspect/explain/action/report/none/none/none/none |
 | src/permission/recorder.ts | 214 | persist | record decisions | recorder tests | record/audit/decision/void/ledger/flush/none/none |
 | src/permission/remember-patterns.ts | 296 | policy | remember | remember tests | remember/pattern-grant/pattern/void/state/flush/none/none |
@@ -442,8 +500,8 @@ Colocated tests (not production): `src/config/knob-schema/schemas/bench-repro-ac
 | src/migration/external-config/detect.ts | 255 | policy | detect configs | same | detect/settings-mcp/fs/items/none/stat/none/none |
 | src/migration/external-config/convert.ts | 446 | decode | convert via claude-config-decode | same | convert/mcp-hooks/items/converted/none/none/skip-bad/none |
 | src/migration/external-config/run.ts | 319 | adapter | run migration | same | run/offer-import/ctx/result/ledger/persist/throttle/none |
-| src/migration/external-config/persist.ts | 914 | persist | persistConvertedItems | persist/symlink/fsync tests | persist/merge-json/items/result/settings.json/atomic+fsync/corrupt-refuse/tmp-clean **cohort 914** |
-| src/migration/external-config/ledger.ts | 133 | persist | recordDisposition | **gap vs import-log hellgate** | throttle-ledger/disposition/home+key/bool/json/wx-lock/EEXIST-skip/no-stale-reclaim **F-03** |
+| src/migration/external-config/persist.ts | 914 | persist | persistConvertedItems | persist/symlink/fsync tests | persist/merge-json/items/result/settings.json/atomic+fsync/corrupt-refuse/unlocked-rmw+torn-md **cohort 914 F-10 F-13** |
+| src/migration/external-config/ledger.ts | 133 | persist | recordDisposition | **gap vs import-log hellgate** | throttle-ledger/disposition/home+key/bool/json/wx-lock/EEXIST-skip/no-stale-reclaim **F-03 F-11** |
 
 ## Mirrored tests (F SUT)
 

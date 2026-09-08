@@ -303,6 +303,8 @@ Fingerprint shape: `authority/invariant/input/output/state/effect/failure-policy
 | B-F8 | `src/runtime/os-sandbox/default.ts` `availabilityImpl` + honesty hellgate | changing spawn fail-closed back to passthrough |
 | B-F9 | `src/tool/glob/index.ts` | changing grep/ast-grep contracts (D12) |
 | B-F10 | `src/runtime/network-proxy/loopback-proxy.ts` + discriminating e2e | silent allow without a visible marker |
+| B-F11 | `src/tool/evidence/runtime.ts`, `src/tool/evidence/tool.ts` + sentinel-env hellgate | do not weaken testrun/debug scrub |
+| B-F12 | `src/runtime/run-argv.ts` + flood hellgate | do not put the cap only in `objective-verifier-wire.ts` |
 
 W1 does not implement these.
 
@@ -758,8 +760,27 @@ Fingerprint for sandbox cohort: `os-sandbox/enforcement/argv+profile/WrappedShel
 
 Union check: appendix tool entries + runtime/plugin-isolation/codemode lists = 416. Pairwise intersection with other W1 lanes is empty by path prefix. `src/shared/**` not inspected (reserved).
 
+## Post-DONE reverify (session dump)
+
+Same HEAD `0b14f5cf`. Coordinator re-Read via [Reverify P1](8989f63c-8a2e-46ed-8110-82ff63f52127) and [Reverify P2](6e18ac35-ddc9-419e-b566-9fe3a525d35b). Full prose: [`docs/bugbash/sep-8-se-audit/agent-6.md`](../../../bugbash/sep-8-se-audit/agent-6.md).
+
+| ID | Original | After reverify |
+|---|---|---|
+| B-F1 | 7 names | CONFIRMED. Also INCLUDE `run_tests`, `container_write_file`. EXCLUDE `pty_list`, `code_cell`, `read_image` |
+| B-F2 / B-F5 | P1 | CONFIRMED |
+| B-F4 / B-F6 / B-F7 / B-F9 | P2 | CONFIRMED |
+| B-F3 | P2 | WEAKEN → **P3** (no `src/**` `register` caller; live bash is `adopt`) |
+| B-F8 | P2 | WEAKEN → **inventory** (no live `OsSandbox.availability` consumer) |
+| B-F10 | P2 | DROP → **inventory** (ADR-0490 intentional DoS-vs-scan) |
+| B-F11 | — | **NEW P1** evidence `Bun.spawn` omits `scrubEnv` (`runtime.ts` cargo/cxx/ok/xcrun/rustc; `tool.ts` git). Contrast testrun/debug |
+| B-F12 | — | **NEW P1** `runArgv` `readAll` unbounded. Consumer G `objective-verifier-wire.ts`. Write B `run-argv.ts` |
+
+Gap-hunt: [Hunt missed Lane B defects](65731513-a0c6-4518-9d1a-5702ec869c27). Coordinator confirmed owners on this HEAD. Shard used colliding B-F1/B-F2 labels; receipt IDs are **B-F11 / B-F12**.
+
+W3-I retained set: **B-F1, B-F2, B-F5, B-F11, B-F12, B-F4, B-F6, B-F7, B-F9**. Do not ticket B-F8/B-F10 as P2. B-F3 is P3 optional.
+
 ## End state
 
-Scope classified on committed HEAD `0b14f5cf`. Ten retained findings (B-F1..B-F10). No production edits.
+Scope classified on committed HEAD `0b14f5cf`. Post-DONE reverify + gap-hunt keeps **nine** findings (P1×5 + P2×4). No production edits.
 
 DONE

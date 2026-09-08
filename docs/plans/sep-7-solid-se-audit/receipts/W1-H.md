@@ -261,6 +261,14 @@ Duplicate rule applied: two live owners + producer–consumer + measured drift o
 - **Not SEP6 reopen:** `allowImports` for `@/llm`/`@/tool` remain **file-narrowed** to `worker-charter-runner.ts` on HEAD. That is closed.
 - **Write set:** `src/side-agent/worker-entry.mjs`; optionally `worker-charter-runner.ts` comments/return type; new H-mirrored hellgate. **Forbidden:** `src/agent/**`, `src/tool/**`, `src/shared/**`.
 
+### SEP7-H-SA-02 — process registry omits in-process cadence/runaway guards (P2, LSP)
+
+- **Attribution:** pre-existing.
+- **Owners:** live A `src/side-agent/registry.ts` `validateSpec` / `applyPostPassBounds` / `armTrigger`; live B `src/side-agent/process-registry.ts` `spawn` L228–272 (no validateSpec/maxWakes/idleReap/armTrigger). Supervisor `process.ts` L218–221 one charter on `ready`.
+- **Consumer:** `src/tool/side-agent/index.ts` interval/event description + `wakesDone/maxWakes` list; host `maybeWireSideAgent` + `QUANTA_SIDE_AGENT_PROCESS`.
+- **Failure mode:** same `SideAgentDaemonRegistry` port; process path one-shots then idles; invalid spec not rejected; tool UI shows guards that do not fire.
+- **Write set:** `process-registry.ts` + `tests/unit/side-agent-process-registry-hellgate.test.ts`. **Forbidden:** weaken in-process; tool-copy-only fix.
+
 ### SEP7-H-PATCH-01 — unified rename converted to Update(fromPath) (P2, SE correctness)
 
 - **Attribution:** pre-existing, **test-locked**.
@@ -269,6 +277,14 @@ Duplicate rule applied: two live owners + producer–consumer + measured drift o
 - **Proof:** `tests/unit/patch/unified-to-v4a-scenarios.test.ts` S-OP-5 L269–286 expects `kind === "update"` on rename meta.
 - **Failure mode:** a git rename unified diff applies content onto the **old** path; destination is not created; Move op unused.
 - **Write set:** `src/patch/unified-to-v4a.ts` + `tests/unit/patch/unified-to-v4a*.test.ts`. **Forbidden:** `src/tool/**` (tool stays consumer).
+
+### SEP7-H-PATCH-03 — binary/mode-only unified becomes empty successful apply (P2)
+
+- **Attribution:** pre-existing, S-META-3 locks “no op”.
+- **Owner:** `unified-to-v4a.ts` discards `Binary files`/mode meta; no `---/+++` ⇒ empty Begin/End. `parsePatch` accepts `{ops:[]}`.
+- **Consumer:** `tool/apply-patch.ts` `guardedParseAndApply`.
+- **Failure mode:** apply_patch can report success with zero FS change for binary-only unified.
+- **Write set:** same converter + scenarios; empty-ops policy. Distinct from PATCH-01 (wrong Update vs silent no-op).
 
 ### SEP7-H-PATCH-02 — commit error claims rollback while undo is best-effort (P2, partial-update durability)
 
@@ -366,13 +382,17 @@ Duplicate rule applied: two live owners + producer–consumer + measured drift o
 
 | ID | H-owned writes | Forbidden |
 |---|---|---|
-| SEP7-H-SA-01 | `src/side-agent/worker-entry.mjs`; optional `worker-charter-runner.ts`; new `tests/unit/side-agent-*-hellgate.test.ts` or extend process e2e | `src/agent/**`, `src/tool/**`, `src/shared/**` |
+| SEP7-H-SA-01 | `src/side-agent/worker-entry.mjs`; optional `worker-charter-runner.ts`; new hellgate | `src/agent/**`, `src/tool/**`, `src/shared/**` |
+| SEP7-H-SA-02 | `src/side-agent/process-registry.ts`; `tests/unit/side-agent-process-registry-hellgate.test.ts` | weaken in-process; tool-copy-only |
 | SEP7-H-PATCH-01 | `src/patch/unified-to-v4a.ts`; `tests/unit/patch/unified-to-v4a*.test.ts` | `src/tool/**` |
+| SEP7-H-PATCH-03 | same converter + empty-ops policy | tool warning-only |
 | SEP7-H-PATCH-02 | `src/patch/applier.ts`; `tests/unit/patch/applier*.test.ts` | foreign atomic FS merge without W2-X |
 | SEP7-H-GIT-01 | wait for W2-X; if canonical = H: `src/git/directive-emit/**` + mirrored `tests/unit/git-directive-*` | H must not edit `src/agent/git-directives/**` or `src/tool/git/**`; no GitRunner mega-merge |
 | SEP7-H-MEDIA-01 | `src/media/**`; `tests/unit/media/**` | REST core; `src/shared` STT; `src/voice/**` deletion; peer import |
 
 W1 did not edit production, tests (except this receipt), catalog, git, or GitHub.
+
+Hole-check 2026-09-08: added SA-02, PATCH-03. Headless Map leak and voice-live mic-pump are inventory / G fingerprint.
 
 ---
 

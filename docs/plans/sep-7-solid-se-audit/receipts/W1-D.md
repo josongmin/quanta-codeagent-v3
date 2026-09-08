@@ -75,7 +75,7 @@ D29; SEP6 N12/S8/S9. Triggers were not reproduced as specified.
 | Cohort 900–999 in D | 1 (`src/session/store.ts` 981) |
 | God-FUNCTION >150 (allowlist has **no** D entries) | 0 confirmed (`runTurn` ~134) |
 | P0/P1 retained findings | 0 |
-| P2 retained findings | 5 |
+| P2 retained findings (after 2026-09-08 gap-fill) | 10 |
 | P3 retained findings | 0 (P3 items kept as inventory) |
 
 By slice (production files / lines):
@@ -320,18 +320,18 @@ mapped rail, not an exhaustive list.
 - **forbidden:** `src/apps/cli/session-cmd.ts` as D write.
 - **uninspected:** IPC import tamper e2e (lane C owner).
 
-### SEP7-D-05 — `deleteSession` outside per-session save lock
+### SEP7-D-05 — `deleteSession` and `forkSession` outside per-session save lock
 
 - **axis:** concurrency / lifecycle
 - **severity:** P2 (static interleaving; runtime race not executed this pass)
 - **attribution:** pre-existing
-- **owners:** `src/session/store.ts` `deleteSession` vs `withSessionSaveLock`
-- **consumers:** `cmdDelete` + same-process `persistTurn` → `saveSessionById`
-- **evidence:** save/update/archive/rename/rewind take `withSessionSaveLock` (`store.ts:578-591`, rewind `:943-950`). `deleteSession` `:874-878` unlinks + `removeFromIndex` only. Comment `:607-610` already admits no OS lock across processes.
-- **failure mode:** overlapping delete and save can resurrect the file after unlink (in-proc lock would have serialized if delete joined the chain).
-- **proposed D write set:** `src/session/store.ts` wrap `deleteSession` in `withSessionSaveLock`. Extend `store-save-lock-toctou.test.ts` with delete-vs-save.
+- **owners:** `src/session/store.ts` `deleteSession` `:874-878`; `forkSession` `:824-871` (gap-fill sibling)
+- **consumers:** `cmdDelete` + same-process `persistTurn` → `saveSessionById`; fork wrappers
+- **evidence:** save/update/archive/rename/rewind take `withSessionSaveLock` (`store.ts:578-591`, rewind `:943-950`). delete unlinks without the lock. fork loads source and writes dest without the lock. Comment `:607-610` already admits no OS lock across processes.
+- **failure mode:** overlapping delete and save can resurrect the file after unlink. Concurrent fork vs source save can clone a torn snapshot. `forkSessionAtMessage` exposes the untruncated clone between write and rewind.
+- **proposed D write set:** wrap `deleteSession` and `forkSession` in `withSessionSaveLock` (source id + dest id). Extend `store-save-lock-toctou.test.ts`.
 - **forbidden:** runner session-ops.
-- **uninspected:** actual concurrent delete+save; cross-process.
+- **uninspected:** actual concurrent delete+save / fork+save; cross-process.
 
 ## Candidate fingerprints for W2-X
 
@@ -390,7 +390,83 @@ D-owned only. Foreign files listed as W2-X handoff.
 | SEP7-D-02 | `src/session/store.ts`, `src/session/rewind.ts` | `tests/unit/session/rewind.test.ts`, `rewind-wrapper.test.ts` | `src/runner/session-ops/index.ts`, `src/apps/cli/rewind-cmd.ts` |
 | SEP7-D-03 | `src/session/store.ts`, `src/session/index.ts` | new D-owned caller-floor / dead-export rail | `src/runner/orchestrate/persist-turn.ts` (producer), inspect/why cmds (G) |
 | SEP7-D-04 | `src/session/import-export.ts`, `src/session/import-export-fs.ts` | `tests/unit/session/t06-digest-canonical-hellgate.test.ts` | `src/apps/cli/session-cmd.ts` |
-| SEP7-D-05 | `src/session/store.ts` | `src/session/store-save-lock-toctou.test.ts` | `src/runner/session-ops/index.ts` |
+| SEP7-D-05 | `src/session/store.ts` (`deleteSession` + `forkSession`) | `src/session/store-save-lock-toctou.test.ts` | `src/runner/session-ops/index.ts` |
+| SEP7-D-06 | `src/session/index-store.ts` | new corrupt-line+upsert RED | doctor probes (G) |
+| SEP7-D-07 | `src/session/store.ts` `readSavedSession` | miss-vs-corrupt typed result | `src/sdk/runtime/session/rehydrate.ts` (G) |
+| SEP7-D-08 | `src/session/inspect-source.ts` `readEnvelopes` | skip-count surface + hellgate | inspect-cmd / why-cmd (G) |
+| SEP7-D-09 | `src/kernel/session/scheduler-turn-terminals.ts` `onApprovalRequested` | terminal-append-hang hellgate covers approval | none |
+| SEP7-D-10 | `src/memory/adapters/sqlite.ts` `update` | write-back must not persist dropped embedding | `src/agent/memory.ts` (A) |
+| SEP7-D-11 | `src/stream/adapters/stdout.ts` | redact `tool_progress`/`in_progress`/`response_queued.hint` | `src/agent/stream-callbacks.ts` (A) |
+
+## Gap-fill 2026-09-08 (parallel hole hunt)
+
+Repo HEAD at gap-fill: `9b05cd33b008b52bf54c9f2391070afcbfbaa8fe`. D production tree vs original W1-D HEAD `0b14f5c` is **empty** (`git diff --stat` 0). Tracked D bytes unchanged. Original snapshot still valid for D.
+
+D-01 sibling sites (same persist-swallow invariant, not new IDs): `clearSessionInterrupted:170-175`; `detectInterruptedSessions:207-214` per-session skip; `withMarkerRmwLock:77-79` reject-tail. Readers of a missing marker: `detectInterruptedSessions` → CLI `bootstrapCrashResumeOffers`.
+
+D-05 sibling: `forkSession` (`store.ts:824-871`) load+write is **outside** `withSessionSaveLock`. `forkSessionAtMessage` writes a full clone then truncates.
+
+### SEP7-D-06 — index corrupt-line skip drops sessions on next upsert
+
+- **axis:** SE fail-open / derived cache destroying identity
+- **severity:** P2
+- **owners:** `src/session/index-store.ts` `readIndexMap` `:28-57`, `upsertMeta` `:109-118`
+- **consumers:** `listSessions` → CLI picker/`cmdLs`, crash-resume candidate list, doctor `indexValid` (list never throws ⇒ always true)
+- **evidence:** comment `:51` claims next upsert "heals"; `upsertMeta` rewrites **only surviving parsed lines**, so a corrupt line for id A is deleted when B upserts. Snapshot JSON for A remains. `store-health.ts` claims deleting the index rebuilds from files — **no rebuild-from-files path exists**.
+- **failure mode:** session vanishes from list/detect/picker; `--resume <id>` still works.
+- **D write:** `index-store.ts` (do not rewrite-drop unknown ids; or rebuild from `*.json`). Fix store-health comment.
+- **forbidden:** doctor probes as the only fix.
+
+### SEP7-D-07 — `loadSessionById` collapses missing ≡ malformed into `undefined`
+
+- **axis:** SE fail-open / invalid representability
+- **severity:** P2
+- **owners:** `src/session/store.ts` `readSavedSession` `:463-497`
+- **consumers:** `src/sdk/runtime/session/rehydrate.ts:90-94,130-136` treats `undefined` as **absent snapshot / empty transcript** even when `durableLog.tip()>0`. Fail-closed `ResumeRehydrateRefusedError` only runs if a snapshot object is returned.
+- **evidence:** missing file, EIO, JSON parse, schema mismatch all `return undefined` + warn.
+- **failure mode:** corrupt on-disk JSON + durable log present → empty resume, not refusal.
+- **D write:** typed miss vs corrupt. G rehydrate can then refuse corrupt.
+- **forbidden:** changing only sdk without distinguishing the store result.
+
+### SEP7-D-08 — envelope iterate Result is dropped by D reader (inspect/why silent truncate)
+
+- **axis:** fail-open / test honesty
+- **severity:** P2 (dormant while SEP7-D-03 producer count is 0; live if any jsonl exists)
+- **owners:** `src/session/inspect-source.ts` `readEnvelopes` `:301-313` (`if (r.ok) yield`; comment claims CLI warn channel, **no call**)
+- **consumers:** inspect-cmd `:343-345`, why-cmd. Contrast: `/replay` `wire-builders.ts` counts skips.
+- **D write:** surface skip-count from `readEnvelopes`.
+- **related:** SEP7-D-03.
+
+### SEP7-D-09 — approval persist throw reclassifies the turn as `turn.failed`
+
+- **axis:** SE outcome redefinition
+- **severity:** P2
+- **owners:** `scheduler-turn-terminals.ts:181` `onApprovalRequested` uses throwing `appendEvents`; completed/aborted/failed use `appendTerminalEvents` isolator.
+- **consumers:** `scheduler-turn-execution.ts:218-225` then catch `:242-261` → `onTurnFailed` for non-abort throws.
+- **failure mode:** host returned approval wait; eventLog append ENOSPC → subscriber sees failed turn, not `awaiting_approval`.
+- **evidence:** `kernel-terminal-append-hang.hellgate.test.ts` does not cover approval.
+- **D write:** route approval append through isolator. RED: append throw ⇒ still `awaiting_approval`.
+
+### SEP7-D-10 — sqlite `update` durable-writes a fail-open embedding drop
+
+- **axis:** SE stale cache / partial-update
+- **severity:** P2
+- **owners:** `src/memory/adapters/sqlite.ts` `update` `:233-241` uses `rowToEntry` (not `toEntry`) then `save`; corrupt BLOB → `embedding` omitted → INSERT `null`.
+- **consumers:** `src/agent/memory.ts` reinforce / eviction decay / memory_update.
+- **failure mode:** one corrupt BLOB + any update permanently destroys the vector. `onCorruptEmbedding` is not wired in `buildStoreCore` and is not invoked on this path.
+- **D write:** `update` must not persist dropped embeddings (refuse, or keep previous BLOB). Observer on write-back. RED: odd BLOB + update → embedding bytes unchanged.
+
+### SEP7-D-11 — stdout renders `tool_progress` / `in_progress` / `response_queued.hint` without `redactStr`
+
+- **axis:** SE secret leak at terminal boundary
+- **severity:** P2
+- **owners:** `src/stream/adapters/stdout.ts:261` `oneLine(event.message)` only; `:570` in_progress message; `:387` `response_queued.hint`.
+- **consumers:** `src/agent/stream-callbacks.ts` emits `tool_progress`; CLI `StdoutStream`.
+- **siblings:** `assistant_text` / `tool_result` / `error` / `decision` already `redactStr`.
+- **D write:** those three strings through `redactStr`.
+- **not D26** (render leak, not silent drop).
+
+Gap-fill inventory (not findings): jsonl emit-after-close (no live close→emit consumer); SseStream dead; Tee latch vs non-throwing recorder (X-DEGRADE); dream persistCompleted dead catch vs E `JsonFileDreamState` NO-THROW (X fingerprint); `file_history` restore `writeFile` (lane B); EXDEV copyFile dead; event-log-jsonl mid-file fail-loud; user-question PARKED; git-fingerprint per-field swallow by ADR-0106.
 
 ## Uninspected conditions
 
@@ -402,5 +478,8 @@ D-owned only. Foreign files listed as W2-X handoff.
 - Working-tree dirty ARCHITECTURE / slice-boundary-configs (W2/W3).
 - Runtime proof of git hang/orphan on `ChildProcessGitPort` (D13 trigger).
 - Full-suite execution (read-only audit; no tests run).
+- Runtime ENOSPC on kernel approval append (SEP7-D-09 static only).
+- Runtime sqlite odd-BLOB + reinforce write-back (SEP7-D-10 static only).
+- Live TTY secret in `tool_progress` (SEP7-D-11 static only).
 
-DONE
+DONE (gap-fill 2026-09-08; D production still classified; not fixed)

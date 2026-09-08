@@ -105,6 +105,25 @@ Lane A owners plus at least one reachable consumer per finding:
 
 ---
 
+## Gap-fill 2026-09-08 (corrects scores below)
+
+Campaign freeze remains HEAD `0b14f5cf`. Current repo HEAD later moved to `9b05cd33` (overlay commit). Do not mix.
+
+| ID | Original | Corrected | Note |
+|---|---|---|---|
+| N7 / S8 | not reopened | **REOPEN on `0b14f5cf`** | WT overlay only. N7 owner is E `decorator-policy.ts`. S8: five local `firstLineOf` on HEAD; `mention-text.ts` absent |
+| P1-A-01 | P1 | **P2** | production never takes caller-owned mint (`looksLikeMetricsRegistry` false on legacy `Metrics`) |
+| P1-A-02 | P1 | **KEEP P1** | batch/daemon/ci-bot meter caps + ledger env = dual-STOP |
+| P2-A-01 | P2 | **P3** | shared `classify` is span telemetry only; recovery does not compact on raw `"tokens exceed"` |
+| P2-A-02 / P2-A-03 | P2 | KEEP | |
+| **P2-A-04** | — | **new P2** | in-memory registry default mint has no maxEntries/TTL |
+| **P2-A-05** | — | **new P2** | `lsp-diagnostics-hook` caches null open forever |
+| git-directives / MCP mint / ticker / spawn-depth | fingerprints | closed as A write | parser dead; one Tool[] mint; different ticker contract; no production maxDepth omit |
+
+Full evidence: `docs/bugbash/sep-8-se-audit/agent-7.md` §7 and §16.
+
+---
+
 ## Findings
 
 P0: none.
