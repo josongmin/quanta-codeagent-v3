@@ -123,6 +123,14 @@ export type PostureCommandOutcome = {
     readonly detail: string;
 }
 
+export const SESSION_STATE_STATUSES = [
+    "idle",
+    "running",
+    "awaiting_approval",
+    "failed",
+    "closed",
+] as const
+
 export interface ArtifactRef {
   readonly artifactId: string
   readonly kind: string

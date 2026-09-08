@@ -259,7 +259,11 @@ interface EmittedFile {
 
 /** The discriminant-array value consts the frontend needs at runtime (the
  *  `SessionCommandType` / `SessionEventType` aliases derive from them). */
-const TYPE_ARRAY_CONST_NAMES = new Set(["SESSION_COMMAND_TYPES", "SESSION_EVENT_TYPES"])
+const TYPE_ARRAY_CONST_NAMES = new Set([
+  "SESSION_COMMAND_TYPES",
+  "SESSION_EVENT_TYPES",
+  "SESSION_STATE_STATUSES",
+])
 
 const emitCanonicalFile = (relPath: string): EmittedFile => {
   const source = readFileSync(join(REPO_ROOT, relPath), "utf8")
@@ -398,7 +402,7 @@ export const generateProtocolBundle = (): string => {
   sections.push("/* --- Snapshot views -------------------------------------------------- */")
   // Posture views FIRST — `SessionStateView.posture` references them.
   sections.push(...postureProjection.interfaces, ...postureProjection.typeAliases)
-  sections.push(...snapshot.interfaces, ...snapshot.typeAliases)
+  sections.push(...snapshot.typeConsts, ...snapshot.interfaces, ...snapshot.typeAliases)
   // `SessionStatus` — a NAMED alias the frontend consumes (StatusBar /
   // ThinkingIndicator / ChatPanel). Canonical inlines the union on
   // `SessionStateView.status`; derive the name FROM it so the two can never
