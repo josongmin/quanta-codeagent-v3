@@ -265,8 +265,9 @@ describe("GROUP 4: File operation types", () => {
   })
 
   // S-OP-5
-  // Red-on-injection: treat "rename from" lines as content => V4A gets bogus lines
-  it("S-OP-5: diff --git with rename meta lines skipped, file processed as update", () => {
+  // Red-on-injection: discard "rename from"/"rename to" and emit Update of old.py
+  // without Move to => op.moveTo is undefined (the locked-wrong behavior).
+  it("S-OP-5: git rename+edit becomes update of old.py with moveTo new.py", () => {
     const input = [
       "diff --git a/old.py b/new.py",
       "similarity index 89%",
@@ -279,10 +280,16 @@ describe("GROUP 4: File operation types", () => {
       "-old_content",
       "+new_content",
     ].join("\n")
-    const patch = parsePatch(unifiedDiffToV4A(input))
-    // Produces one update op (using fromPath = old.py since that's what --- gives)
+    const v4a = unifiedDiffToV4A(input)
+    expect(v4a).toContain("*** Update File: old.py")
+    expect(v4a).toContain("*** Move to: new.py")
+    const patch = parsePatch(v4a)
     expect(patch.ops).toHaveLength(1)
-    expect(patch.ops[0]?.kind).toBe("update")
+    const op = patch.ops[0]
+    expect(op?.kind).toBe("update")
+    if (op?.kind !== "update") throw new Error("expected update")
+    expect(op.path).toBe("old.py")
+    expect(op.moveTo).toBe("new.py")
   })
 })
 

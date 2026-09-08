@@ -65,10 +65,47 @@ export interface TokenCostRollup {
   prompt: number
   completion: number
   cacheRead: number
-  /** Summed estimated USD over records that carried a `costUsd`. */
+  /** Summed measured USD over records that carried a `costUsd`. */
   costUsd: number
   /** Number of records that contributed token data (for averaging upstream). */
   records: number
+}
+
+/** W0.6 / G-F15 — pricing completeness of {@link TokenCostRollup}. Sibling so
+ *  existing `{prompt,completion,cacheRead,costUsd,records}` equality stays
+ *  stable. */
+export type EvalCostCompleteness = "complete" | "partial" | "unavailable"
+
+export interface EvalCostPricing {
+  readonly completeness: EvalCostCompleteness
+  readonly knownSubtotalUsd: number
+  readonly pricedRecords: number
+  readonly unpricedRecords: number
+}
+
+export interface EvalCostProjection {
+  readonly headlineCost: string
+  readonly detailCost: string
+}
+
+/** Shared headline/detail projection. Completeness is required: a missing
+ *  stamp must not collapse to measured `$0`. */
+export const projectEvalCost = (
+  tokenCost: TokenCostRollup,
+  pricing: EvalCostPricing,
+): EvalCostProjection => {
+  void tokenCost
+  if (pricing.completeness === "unavailable") {
+    return { headlineCost: "unavailable", detailCost: "unavailable" }
+  }
+  const dollars = `$${pricing.knownSubtotalUsd.toFixed(4)}`
+  if (pricing.completeness === "partial") {
+    return {
+      headlineCost: `${dollars} (partial)`,
+      detailCost: `${dollars} (partial, ${pricing.unpricedRecords} unpriced)`,
+    }
+  }
+  return { headlineCost: dollars, detailCost: dollars }
 }
 
 export interface CoverageMatrix {
@@ -80,6 +117,8 @@ export interface CoverageMatrix {
   recordsSeen: number
   /** ADR-0087 — aggregate token/cost rollup; absent when no record had usage. */
   tokenCost?: TokenCostRollup
+  /** G-F15 — completeness of `tokenCost`. Present iff `tokenCost` is. */
+  costPricing?: EvalCostPricing
 }
 
 const verdictFromRecord = (rec: EvalRecord): Verdict => {
@@ -125,13 +164,22 @@ const emptyRow = (): Record<EvalTier, MatrixCell> => ({
  *  kind test was the largest single boolean sequence in the parent. Mutates
  *  `roll` in place (rather than returning a new one) so the accumulation order
  *  and float summation stay bit-for-bit what the inline version did. */
-const accumulateTokenCost = (roll: TokenCostRollup, p: EvalRecord["payload"]): void => {
+const accumulateTokenCost = (
+  roll: TokenCostRollup,
+  counts: { priced: number; unpriced: number },
+  p: EvalRecord["payload"],
+): void => {
   if (p.kind !== "synthetic" && p.kind !== "grounding" && p.kind !== "public") return
   if (p.tokens === undefined) return
   roll.prompt += p.tokens.prompt
   roll.completion += p.tokens.completion
   roll.cacheRead += p.tokens.cacheRead ?? 0
-  if (typeof p.costUsd === "number") roll.costUsd += p.costUsd
+  if (typeof p.costUsd === "number") {
+    roll.costUsd += p.costUsd
+    counts.priced += 1
+  } else {
+    counts.unpriced += 1
+  }
   roll.records += 1
 }
 
@@ -193,9 +241,10 @@ export const buildCoverageMatrix = (records: Iterable<EvalRecord>): CoverageMatr
     costUsd: 0,
     records: 0,
   }
+  const costCounts = { priced: 0, unpriced: 0 }
   for (const rec of records) {
     seen += 1
-    accumulateTokenCost(roll, rec.payload)
+    accumulateTokenCost(roll, costCounts, rec.payload)
     tallyRecord(byUsecase, rec)
   }
   // Mark unknown / unclassified (trajectory uses "unclassified" sentinel id).
@@ -204,10 +253,32 @@ export const buildCoverageMatrix = (records: Iterable<EvalRecord>): CoverageMatr
   void leafById
   void parseId
   void allLeaves
+  const costPricing: EvalCostPricing | undefined =
+    roll.records > 0
+      ? {
+          completeness:
+            costCounts.unpriced === 0
+              ? "complete"
+              : costCounts.priced === 0
+                ? "unavailable"
+                : "partial",
+          knownSubtotalUsd: roll.costUsd,
+          pricedRecords: costCounts.priced,
+          unpricedRecords: costCounts.unpriced,
+        }
+      : undefined
+  if (roll.records > 0 && costPricing !== undefined) {
+    return {
+      blocks: buildBlocks(byUsecase),
+      tiers: TIER_ORDER,
+      recordsSeen: seen,
+      tokenCost: roll,
+      costPricing,
+    }
+  }
   return {
     blocks: buildBlocks(byUsecase),
     tiers: TIER_ORDER,
     recordsSeen: seen,
-    ...(roll.records > 0 ? { tokenCost: roll } : {}),
   }
 }

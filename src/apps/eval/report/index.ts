@@ -4,11 +4,11 @@
  * shell redirect); programmatic callers receive the strings directly.
  */
 import { ResultStore } from "../storage"
-import { buildCoverageMatrix, type CoverageMatrix } from "./coverage-matrix"
+import { buildCoverageMatrix, type CoverageMatrix, projectEvalCost } from "./coverage-matrix"
 import { renderHeadline, renderMatrixMarkdown } from "./markdown"
 
-export type { CoverageMatrix }
-export { buildCoverageMatrix, renderHeadline, renderMatrixMarkdown }
+export type { CoverageMatrix, EvalCostPricing, TokenCostRollup } from "./coverage-matrix"
+export { buildCoverageMatrix, projectEvalCost, renderHeadline, renderMatrixMarkdown }
 
 export interface ReportOpts {
   /** Override store dir. */

@@ -3,7 +3,7 @@
  * and drops into a PR comment unchanged. One section per major.
  */
 import type { Verdict } from "../types"
-import type { CoverageMatrix } from "./coverage-matrix"
+import { type CoverageMatrix, projectEvalCost } from "./coverage-matrix"
 
 const SYMBOL: Record<Verdict, string> = {
   pass: "OK",
@@ -38,15 +38,16 @@ export const renderMatrixMarkdown = (m: CoverageMatrix): string => {
   // ADR-0087 — Token & Cost summary. Rendered ONLY when the matrix carried a
   // rollup (i.e. at least one payload reported usage); a usage-free corpus emits
   // no extra lines, keeping the report byte-identical to the pre-feature path.
-  if (m.tokenCost !== undefined) {
+  if (m.tokenCost !== undefined && m.costPricing !== undefined) {
     const tc = m.tokenCost
+    const projected = projectEvalCost(tc, m.costPricing)
     lines.push("## Token & Cost Summary")
     lines.push("")
     lines.push(`Runs with usage: ${tc.records}`)
     lines.push(`Prompt tokens: ${tc.prompt}`)
     lines.push(`Completion tokens: ${tc.completion}`)
     if (tc.cacheRead > 0) lines.push(`Cache-read tokens: ${tc.cacheRead}`)
-    lines.push(`Estimated cost: $${tc.costUsd.toFixed(4)}`)
+    lines.push(`Estimated cost: ${projected.detailCost}`)
     lines.push("")
   }
   return lines.join("\n")
@@ -70,7 +71,8 @@ export const renderHeadline = (m: CoverageMatrix): string => {
   }
   const base = `OK=${tally.pass} PARTIAL=${tally.partial} FAIL=${tally.fail} ERR=${tally.error} TBD=${tally.skipped}`
   // ADR-0087 — append token/cost only when present (byte-identical otherwise).
-  if (m.tokenCost === undefined) return base
+  if (m.tokenCost === undefined || m.costPricing === undefined) return base
   const totalTokens = m.tokenCost.prompt + m.tokenCost.completion + m.tokenCost.cacheRead
-  return `${base} Tokens=${totalTokens} Cost=$${m.tokenCost.costUsd.toFixed(4)}`
+  const projected = projectEvalCost(m.tokenCost, m.costPricing)
+  return `${base} Tokens=${totalTokens} Cost=${projected.headlineCost}`
 }

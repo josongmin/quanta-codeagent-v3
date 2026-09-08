@@ -28,6 +28,13 @@ export {
   costSurfaceViewWire,
   type ModelCostLine,
 } from "./projection"
+export {
+  hydratePricingProvenance,
+  livePricingProvenance,
+  type PricingProvenance,
+  pricingProvenanceOf,
+  usdEnforced,
+} from "./provenance"
 export type {
   ModelPrice,
   NormalizedUsage,

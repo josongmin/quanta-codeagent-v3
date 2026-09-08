@@ -44,9 +44,9 @@ import { cfg, RecordingStream, withTimeout } from "./_harness"
  *  loop CONTINUES to the next turn (the stop condition is post-continue). Each
  *  turn bills the same token amount, so N turns accrue N× the per-turn cost. */
 class UsageLLM implements LLMPort {
-  readonly model = "budget-ledger-test-model"
   turns = 0
   constructor(
+    readonly model: string,
     private readonly perTurnTokens: number,
     private readonly maxScriptedTurns: number,
   ) {}
@@ -77,17 +77,19 @@ class UsageLLM implements LLMPort {
   }
 }
 
-// The ledger bills unknown models at the sonnet fallback (~$3/1M input,
-// $15/1M output). 200k input + 200k output ≈ $0.6 + $3 = $3.6 per turn, so a
-// $2 hard session cap is crossed on the FIRST turn.
+// Known rate-card model (claude-sonnet-4-6): 200k input + 200k output ≈
+// $0.6 + $3 = $3.6 per turn, so a $2 hard session cap is crossed on the FIRST
+// turn. Unknown models must NOT USD-stop after P1-A-02 (W0.6).
 const FAT_TOKENS = 200_000
+const KNOWN_MODEL = "claude-sonnet-4-6"
+const UNKNOWN_MODEL = "budget-ledger-test-model"
 
 describe("budget-ledger — REAL runAgent loop records usage + hard breach stops the run", () => {
   test("gate ON (hard session policy): streamed usage crosses the cap ⇒ loop stops budget_exhausted", async () => {
     const ledger = defaultBudgetLedger({
       policy: { sessionHardLimit: 2 }, // USD
     })
-    const llm = new UsageLLM(FAT_TOKENS, 6)
+    const llm = new UsageLLM(KNOWN_MODEL, FAT_TOKENS, 6)
     const out = await withTimeout(
       runAgent(
         cfg({
@@ -123,7 +125,7 @@ describe("budget-ledger — REAL runAgent loop records usage + hard breach stops
   test("PAIRED CONTROL: same usage, NO hard policy ⇒ hardBreach undefined ⇒ loop runs to max_turns (NOT budget_exhausted)", async () => {
     // Pure-accountant ledger: it still RECORDS (cost accrues) but never breaches.
     const ledger = defaultBudgetLedger() // no policy
-    const llm = new UsageLLM(FAT_TOKENS, 6)
+    const llm = new UsageLLM(KNOWN_MODEL, FAT_TOKENS, 6)
     const out = await withTimeout(
       runAgent(
         cfg({
@@ -149,5 +151,33 @@ describe("budget-ledger — REAL runAgent loop records usage + hard breach stops
     const snap = ledger.snapshot()
     expect(snap.totalCost).toBeGreaterThan(2) // way over $2, but no policy to enforce
     expect(ledger.hardBreach()).toBeUndefined()
+  })
+
+  test("unknown model + low hard limit does NOT budget_exhausted (W0.6: unknown excluded from USD breach)", async () => {
+    const ledger = defaultBudgetLedger({
+      policy: { sessionHardLimit: 1 }, // well below the ~$3.6 sonnet fallback
+    })
+    const llm = new UsageLLM(UNKNOWN_MODEL, FAT_TOKENS, 6)
+    const out = await withTimeout(
+      runAgent(
+        cfg({
+          llm,
+          stream: new RecordingStream(),
+          registry: new ToolRegistry(defaultTools),
+          messages: [{ role: "user", content: [{ type: "text", text: "burn budget" }] }],
+          maxTurns: 3,
+          budgetLedger: ledger,
+          sessionId: "budget-session-unknown",
+        } as never),
+      ),
+      15_000,
+      "budget-ledger-unknown",
+    )
+
+    expect(out.reason).not.toBe("budget_exhausted")
+    expect(out.reason).toBe("max_turns")
+    expect(ledger.hardBreach()).toBeUndefined()
+    // Canonical unknown price is absence ($0), not the fallback estimate.
+    expect(ledger.snapshot().totalCost).toBe(0)
   })
 })

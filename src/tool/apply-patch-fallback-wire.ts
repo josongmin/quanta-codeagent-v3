@@ -7,8 +7,14 @@
 // be unit-tested in isolation. NO I/O here — the consumer reads the source
 // snapshot through the already-constructed `PatchFileSystemPort`.
 
-// biome-ignore lint/style/noRestrictedImports: @/patch is reachable by @/tool/apply-patch per the documented ADR slice carve-out.
-import { PatchAnchorNotFoundError, PatchApplyError, PatchParseError } from "@/patch"
+import {
+  PatchAnchorNotFoundError,
+  PatchApplyError,
+  PatchConvertError,
+  PatchParseError,
+  PatchRollbackIncompleteError,
+  // biome-ignore lint/style/noRestrictedImports: @/patch is reachable by @/tool/apply-patch per the documented ADR slice carve-out.
+} from "@/patch"
 import type { FastApplyFailureKind } from "./types"
 
 /**
@@ -19,24 +25,30 @@ import type { FastApplyFailureKind } from "./types"
  *   - PatchAnchorNotFoundError ⇒ "anchor_not_found"
  *   - PatchApplyError          ⇒ "apply_error"
  *   - PatchParseError          ⇒ "parse_error"
+ *   - PatchConvertError        ⇒ "parse_error" (rename metadata, not a
+ *     successful in-place update of the old path)
  *
  * NOT recoverable (fallback is never attempted — these surface immediately):
+ *   - PatchRollbackIncompleteError: leftover/uncertain bytes; a retry must
+ *     not assume a clean restore.
  *   - FsJailViolationError and any non-patch error: a re-emitted patch cannot
  *     escape a SECURITY boundary, so we never spend a side-conversation on it.
  */
 export const classifyFastApplyError = (err: unknown): FastApplyFailureKind | null => {
   if (err instanceof PatchAnchorNotFoundError) return "anchor_not_found"
-  // Order matters only for readability — the three patch classes are disjoint.
+  if (err instanceof PatchRollbackIncompleteError) return null
+  // Order matters only for readability — the patch classes are disjoint.
   if (err instanceof PatchApplyError) return "apply_error"
   if (err instanceof PatchParseError) return "parse_error"
+  if (err instanceof PatchConvertError) return "parse_error"
   return null
 }
 
 /**
  * Pull the target file path off a typed apply failure so the consumer can read
  * its current bytes (re-anchoring context for the model). Anchor + apply errors
- * carry `.path`; a parse error fails before any op is bound to a file, so it
- * has no target ⇒ `undefined` (the fallback prompt then omits the snapshot).
+ * carry `.path`; convert/parse/incomplete have no single restored file ⇒
+ * `undefined` (the fallback prompt then omits the snapshot).
  */
 export const failingTargetPath = (err: unknown): string | undefined => {
   if (err instanceof PatchAnchorNotFoundError) return err.path

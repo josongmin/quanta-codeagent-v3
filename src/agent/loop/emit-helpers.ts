@@ -118,7 +118,7 @@ const USAGE_SINKS: readonly UsageSink[] = [
   // ADVISORY sink below can surface EVERY crossed cap (soft AND hard) as a
   // `budget_breach` event without re-recording. Return dropped ⇒ no advisory
   // (the wired-but-inert trap this fix closes).
-  ({ config, ev, breachSlot }) => {
+  ({ config, ev, eventCost, breachSlot }) => {
     const result = config.budgetLedger?.record({
       model: ev.model,
       inputTokens: ev.inputTokens,
@@ -127,6 +127,7 @@ const USAGE_SINKS: readonly UsageSink[] = [
       ...(ev.cacheCreationTokens !== undefined ? { cacheWriteTokens: ev.cacheCreationTokens } : {}),
       sessionId: config.sessionId ?? "",
       at: Date.now(),
+      cost: eventCost,
     })
     if (result !== undefined) breachSlot.breaches = result.breaches
   },

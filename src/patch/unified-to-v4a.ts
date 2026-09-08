@@ -5,10 +5,13 @@
 // unified diff to the V4A format that parsePatch understands, without touching
 // the per-line +/-/space prefix (both formats share that prefix alphabet).
 //
-// Design: pure (no I/O), no-throw (caller gets best-effort V4A on malformed
-// input), deterministic (same input => byte-identical output).
+// Design: pure (no I/O), deterministic (same input => byte-identical output).
+// Best-effort (no throw) on truncated/missing +++ headers. Inconsistent or
+// malformed rename metadata is REJECTED via PatchConvertError — never degraded
+// to an in-place update of the old path.
 
-import { PATCH_SENTINELS } from "./types"
+import { normalizeDiffPath, pathAfterGitHeader } from "./git-path"
+import { PATCH_SENTINELS, PatchConvertError } from "./types"
 
 /** True iff text looks like a unified diff rather than a V4A patch.
  *  Heuristic: first non-blank line starts with "--- " or "diff --git ".
@@ -21,10 +24,6 @@ export const isUnifiedDiff = (text: string): boolean => {
   }
   return false
 }
-
-/** Strip the "a/" or "b/" git prefix from a unified diff path. */
-const stripGitPrefix = (p: string): string =>
-  p.startsWith("a/") || p.startsWith("b/") ? p.slice(2) : p
 
 /** True iff line begins a new file section in a unified diff.
  *  NOTE: this is ONLY safe for the outer loop context where we know we are
@@ -98,8 +97,8 @@ const isHunkAwareBoundary = (lines: string[], i: number): boolean => {
   return false
 }
 
-/** Git meta-header line prefixes that carry no V4A representation — every one
- *  of them is consumed and discarded by the outer scan. */
+/** Git meta-header line prefixes that carry no V4A representation. Rename
+ *  from/to are NOT discarded here — they are captured into file-section IR. */
 const GIT_META_PREFIXES = [
   "diff --git ",
   "index ",
@@ -108,8 +107,6 @@ const GIT_META_PREFIXES = [
   "old mode",
   "new mode",
   "similarity index",
-  "rename from",
-  "rename to",
   "Binary files",
 ] as const
 
@@ -123,15 +120,24 @@ type FilePairHeader = {
   readonly toPath: string
 }
 
+/** Rename/copy metadata captured while scanning one git file section. */
+type FileSectionMeta = {
+  renameFrom?: string
+  renameTo?: string
+  copy: boolean
+}
+
+const emptyMeta = (): FileSectionMeta => ({ copy: false })
+
 /** Responsibility: read the "--- <from>" / "+++ <to>" file-pair header whose
  *  "---" half sits at `i`. Returns null when the "+++" half is missing — the
  *  caller then treats the "---" line as noise and keeps scanning. */
 const readFilePairHeader = (lines: string[], i: number): FilePairHeader | null => {
-  const fromRaw = ((lines[i] ?? "").slice(4).split("\t")[0] ?? "").trimEnd()
+  const fromRaw = (lines[i] ?? "").slice(4)
   const toLine = lines[i + 1] ?? ""
   if (!toLine.startsWith("+++ ") && !toLine.startsWith("+++\t")) return null
-  const toRaw = (toLine.slice(4).split("\t")[0] ?? "").trimEnd()
-  return { fromPath: stripGitPrefix(fromRaw), toPath: stripGitPrefix(toRaw) }
+  const toRaw = toLine.slice(4)
+  return { fromPath: normalizeDiffPath(fromRaw), toPath: normalizeDiffPath(toRaw) }
 }
 
 /**
@@ -198,15 +204,58 @@ const emitUpdatedFileBody = (lines: string[], start: number, out: string[]): num
     return false
   })
 
+/** Reject incomplete or pair-disagreeing rename metadata. Never fall back to update. */
+const requireConsistentRename = (pair: FilePairHeader | null, meta: FileSectionMeta): void => {
+  const hasFrom = meta.renameFrom !== undefined
+  const hasTo = meta.renameTo !== undefined
+  if (hasFrom !== hasTo) {
+    throw new PatchConvertError(
+      "incomplete rename metadata: both 'rename from' and 'rename to' are required",
+    )
+  }
+  if (meta.renameFrom === undefined || meta.renameTo === undefined) return
+  if (meta.copy) {
+    throw new PatchConvertError("inconsistent metadata: copy and rename both present")
+  }
+  if (meta.renameFrom === meta.renameTo) {
+    throw new PatchConvertError("rename from and rename to are the same path")
+  }
+  if (pair === null) return
+  if (pair.fromPath === "/dev/null" || pair.toPath === "/dev/null") {
+    throw new PatchConvertError("rename metadata cannot combine with /dev/null add/delete")
+  }
+  if (pair.fromPath !== meta.renameFrom || pair.toPath !== meta.renameTo) {
+    throw new PatchConvertError(
+      `inconsistent rename metadata: rename from/to '${meta.renameFrom}'→'${meta.renameTo}' vs ---/+++ '${pair.fromPath}'→'${pair.toPath}'`,
+    )
+  }
+}
+
+const emitMoveUpdate = (fromPath: string, toPath: string, out: string[]): void => {
+  out.push(PATCH_SENTINELS.updateFile + fromPath)
+  out.push(PATCH_SENTINELS.moveTo + toPath)
+}
+
+const flushRenameOnly = (meta: FileSectionMeta, out: string[]): void => {
+  if (meta.renameFrom === undefined && meta.renameTo === undefined) return
+  requireConsistentRename(null, meta)
+  if (meta.renameFrom === undefined || meta.renameTo === undefined) return
+  emitMoveUpdate(meta.renameFrom, meta.renameTo, out)
+}
+
 /** Responsibility: emit ONE V4A file section (op sentinel + body) for an
- *  already-parsed file pair, choosing the add/delete/update op the pair's
- *  /dev/null placement implies. Returns the index just past the section. */
+ *  already-parsed file pair, choosing the add/delete/update/move the pair's
+ *  /dev/null placement and rename IR imply. Returns the index just past the
+ *  section. */
 const emitFileSection = (
   pair: FilePairHeader,
   lines: string[],
   start: number,
   out: string[],
+  meta: FileSectionMeta,
 ): number => {
+  requireConsistentRename(pair, meta)
+
   const isAdd = pair.fromPath === "/dev/null"
   const isDel = pair.toPath === "/dev/null"
   const filePath = isAdd ? pair.toPath : pair.fromPath
@@ -221,42 +270,89 @@ const emitFileSection = (
     return emitAddedFileBody(lines, start, out)
   }
 
-  // Normal update
+  if (meta.renameFrom !== undefined && meta.renameTo !== undefined) {
+    emitMoveUpdate(meta.renameFrom, meta.renameTo, out)
+    return emitUpdatedFileBody(lines, start, out)
+  }
+
+  // Paths differ without copy metadata: treat as rename+edit.
+  if (!meta.copy && pair.fromPath !== pair.toPath) {
+    emitMoveUpdate(pair.fromPath, pair.toPath, out)
+    return emitUpdatedFileBody(lines, start, out)
+  }
+
   out.push(PATCH_SENTINELS.updateFile + filePath)
   return emitUpdatedFileBody(lines, start, out)
 }
 
+const captureRenameMeta = (line: string, meta: FileSectionMeta): boolean => {
+  const from = pathAfterGitHeader(line, "rename from")
+  if (from !== null) {
+    if (meta.renameFrom !== undefined) {
+      throw new PatchConvertError("duplicate 'rename from' in one file section")
+    }
+    meta.renameFrom = from
+    return true
+  }
+  const to = pathAfterGitHeader(line, "rename to")
+  if (to !== null) {
+    if (meta.renameTo !== undefined) {
+      throw new PatchConvertError("duplicate 'rename to' in one file section")
+    }
+    meta.renameTo = to
+    return true
+  }
+  if (line.startsWith("copy from") || line.startsWith("copy to")) {
+    meta.copy = true
+    return true
+  }
+  return false
+}
+
 /** Convert a unified diff string to V4A format. Returns best-effort V4A even
- *  on malformed input — parsePatch will throw PatchParseError if the result
- *  is still invalid. Called only when isUnifiedDiff returns true. */
+ *  on truncated input (missing +++). Inconsistent rename metadata throws
+ *  {@link PatchConvertError}. Called only when isUnifiedDiff returns true. */
 export const unifiedDiffToV4A = (text: string): string => {
   const lines = text.split("\n")
   const out: string[] = [PATCH_SENTINELS.beginPatch]
   let i = 0
+  let meta = emptyMeta()
 
   while (i < lines.length) {
     const line = lines[i] ?? ""
 
-    // Skip git diff meta-header lines (no content in V4A)
+    if (line.startsWith("diff --git ")) {
+      flushRenameOnly(meta, out)
+      meta = emptyMeta()
+      i++
+      continue
+    }
+
+    if (captureRenameMeta(line, meta)) {
+      i++
+      continue
+    }
+
     if (isGitMetaHeader(line)) {
       i++
       continue
     }
 
-    // File pair: "--- <from>\n+++ <to>"
     if (line.startsWith("--- ") || line.startsWith("---\t")) {
       const pair = readFilePairHeader(lines, i)
       if (pair === null) {
         i++
         continue
       }
-      i = emitFileSection(pair, lines, i + 2, out)
+      i = emitFileSection(pair, lines, i + 2, out, meta)
+      meta = emptyMeta()
       continue
     }
 
     i++
   }
 
+  flushRenameOnly(meta, out)
   out.push(PATCH_SENTINELS.endPatch)
   return out.join("\n")
 }

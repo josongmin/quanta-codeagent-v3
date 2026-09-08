@@ -42,11 +42,13 @@
  *   3. exactOptionalPropertyTypes strict — `UsageEvent.turnId`,
  *      `ModelPricing.cacheReadPerM`, `BudgetPolicy.*Limit` are OMITTED on
  *      the wire when absent, never `undefined`.
- *   4. PRICING FALLBACK: an event for a model not in the price table records
- *      its tokens but bills at the `claude-sonnet-4-6` rate (documented in
- *      clause #4 of the ADR). This is a deliberate "fail safe-LOUD" — the
- *      ledger still reflects the event so the operator notices the unknown
- *      model in the breakdown, instead of silently billing $0.
+ *   4. PRICING FALLBACK (display only): an event for a model not in the price
+ *      table that arrives WITHOUT a canonical `cost` still records tokens and
+ *      bills the `claude-sonnet-4-6` stand-in so the operator sees spend
+ *      (HELL-3). That figure is `estimated` and is NEVER used for USD hard-cap
+ *      enforcement (W0.6). When `emitUsage` supplies the canonical `UsageCost`
+ *      (unknown ⇒ `{pricingKnown:false,totalUsd:0}`), the ledger must not
+ *      re-price with the stand-in.
  *   5. BREACH DEBOUNCE: each `(scope, kind)` pair fires AT MOST ONCE within
  *      the ledger's lifetime. The ledger keeps a `Set<string>` of already-
  *      fired keys (`session-soft:abc-123`, `daily-hard:2026-05-24`). `clear`
@@ -80,6 +82,15 @@
  *      reproducible across machines and matches typical billing windows.
  */
 
+import type { UsageCost } from "@/observability/usage-accounting"
+import {
+  hydratePricingProvenance,
+  livePricingProvenance,
+  type PricingProvenance,
+  usdEnforced,
+} from "@/observability/usage-accounting/provenance"
+import { mutableCostFromCanonical } from "./budget-ledger/canonical-cost"
+import { rehydrate, type SerializedLedger } from "./budget-ledger/codec"
 import {
   computeEventCost,
   emptyCost,
@@ -89,6 +100,7 @@ import {
 } from "./budget-ledger-cost"
 import { DEFAULT_MODEL_PRICING, type ModelPricing } from "./budget-ledger-pricing"
 
+export type { PricingProvenance } from "@/observability/usage-accounting/provenance"
 export { DEFAULT_MODEL_PRICING, type ModelPricing } from "./budget-ledger-pricing"
 
 const COMPACT_PREFIX_THRESHOLD = 1024
@@ -112,6 +124,14 @@ export interface UsageEvent {
   readonly sessionId: string
   /** Epoch ms when the event was recorded (typically caller-supplied clock). */
   readonly at: number
+  /**
+   * Canonical priced figure from `emitUsage` / `priceUsage`. When present the
+   * ledger MUST NOT re-price with the sonnet fallback for this event.
+   */
+  readonly cost?: UsageCost
+  /** W0.6 stamp. Absent on legacy serialized events — hydrate treats that as
+   *  NOT known. */
+  readonly pricingProvenance?: PricingProvenance
 }
 
 /** Per-model / per-session / per-day cost roll-up. All amounts in USD. */
@@ -248,13 +268,6 @@ const dayKeyFor = (epochMs: number): string => {
   return `${yyyy}-${mm}-${dd}`
 }
 
-/** Internal: shape stored on disk via `serialize()`. */
-interface SerializedLedger {
-  readonly v: 1
-  readonly events: ReadonlyArray<UsageEvent>
-  readonly firedBreaches: ReadonlyArray<string>
-}
-
 const SESSION_HARD_PREFIX = "session-hard:"
 const DAILY_HARD_PREFIX = "daily-hard:"
 
@@ -262,17 +275,21 @@ const reconstructHardBreach = (
   kind: "session-hard" | "daily-hard",
   scope: string,
   limit: number | undefined,
-  liveTotal: number,
+  liveKnown: number,
 ): BudgetBreach | undefined => {
   if (limit === undefined) return undefined
-  return { kind, limit, observed: liveTotal < limit ? limit : liveTotal, scope }
+  // W0.6: unknown/estimated USD is excluded. A fired key left over from an
+  // estimated fallback must not surface as a hard stop when known spend has
+  // not crossed the cap.
+  if (liveKnown <= limit) return undefined
+  return { kind, limit, observed: liveKnown, scope }
 }
 
 const hardBreachForKey = (
   key: string,
   policy: BudgetPolicy,
-  perSession: ReadonlyMap<string, MutableCost>,
-  perDay: ReadonlyMap<string, MutableCost>,
+  knownPerSession: ReadonlyMap<string, number>,
+  knownPerDay: ReadonlyMap<string, number>,
 ): BudgetBreach | undefined => {
   if (key.startsWith(SESSION_HARD_PREFIX)) {
     const scope = key.slice(SESSION_HARD_PREFIX.length)
@@ -280,7 +297,7 @@ const hardBreachForKey = (
       "session-hard",
       scope,
       policy.sessionHardLimit,
-      perSession.get(scope)?.totalCost ?? 0,
+      knownPerSession.get(scope) ?? 0,
     )
   }
   if (key.startsWith(DAILY_HARD_PREFIX)) {
@@ -289,7 +306,7 @@ const hardBreachForKey = (
       "daily-hard",
       scope,
       policy.dailyHardLimit,
-      perDay.get(scope)?.totalCost ?? 0,
+      knownPerDay.get(scope) ?? 0,
     )
   }
   return undefined
@@ -299,85 +316,11 @@ type RetainedEvent = {
   event: UsageEvent
   cost: MutableCost
   dayKey: string
+  provenance: PricingProvenance
 }
 
 /** Freeze a MutableCost into the public read-only shape. */
 const freezeCost = (c: MutableCost): CostBreakdown => Object.freeze({ ...c })
-
-/** Parse one raw event object out of a hydrated JSON payload. Returns
- *  `undefined` when the shape is invalid (caller skips). Pure — no I/O.
- *  Extracted from `hydrate` to keep that method below the cognitive-
- *  complexity budget. */
-const parseHydratedEvent = (raw: unknown): UsageEvent | undefined => {
-  if (typeof raw !== "object" || raw === null) return undefined
-  const r = raw as Partial<UsageEvent>
-  if (typeof r.model !== "string") return undefined
-  if (typeof r.sessionId !== "string") return undefined
-  if (typeof r.inputTokens !== "number") return undefined
-  if (typeof r.outputTokens !== "number") return undefined
-  if (typeof r.at !== "number") return undefined
-  const base: UsageEvent = {
-    model: r.model,
-    inputTokens: r.inputTokens,
-    outputTokens: r.outputTokens,
-    sessionId: r.sessionId,
-    at: r.at,
-  }
-  // exactOptionalPropertyTypes — only copy optional fields that were actually
-  // present (and the right type).
-  return {
-    ...base,
-    ...(typeof r.cacheReadTokens === "number" ? { cacheReadTokens: r.cacheReadTokens } : {}),
-    ...(typeof r.cacheWriteTokens === "number" ? { cacheWriteTokens: r.cacheWriteTokens } : {}),
-    ...(typeof r.turnId === "string" ? { turnId: r.turnId } : {}),
-  }
-}
-
-/** Validate the outer shape of a hydrated payload. Returns the raw events
- *  array on success; `undefined` on any shape mismatch. */
-const validateHydratedPayload = (parsed: unknown): Partial<SerializedLedger> | undefined => {
-  if (typeof parsed !== "object" || parsed === null) return undefined
-  const obj = parsed as Partial<SerializedLedger>
-  if (obj.v !== 1) return undefined
-  if (!Array.isArray(obj.events)) return undefined
-  return obj
-}
-
-/** Try to parse JSON; return `undefined` on failure (callers branch). */
-const safeJsonParse = (s: string): unknown => {
-  try {
-    return JSON.parse(s)
-  } catch {
-    return undefined
-  }
-}
-
-/** Helper: rebuild the (events, fired) state from a serialized JSON string.
- *  Extracted from `hydrate` to keep that method below the cognitive-complexity
- *  budget. Always mutates in-place — caller resets state first. */
-const rehydrate = (
-  jsonl: string,
-  events: UsageEvent[],
-  fired: Set<string>,
-  maxEvents: number,
-): void => {
-  const parsed = safeJsonParse(jsonl)
-  if (parsed === undefined) return
-  const obj = validateHydratedPayload(parsed)
-  if (obj === undefined) return
-  const rawEvents = obj.events ?? []
-  const retained =
-    rawEvents.length > maxEvents ? rawEvents.slice(rawEvents.length - maxEvents) : rawEvents
-  for (const raw of retained) {
-    const ev = parseHydratedEvent(raw)
-    if (ev !== undefined) events.push(ev)
-  }
-  if (Array.isArray(obj.firedBreaches)) {
-    for (const k of obj.firedBreaches) {
-      if (typeof k === "string") fired.add(k)
-    }
-  }
-}
 
 /** Helper: drop events matching the scope filter; evict matching breach
  *  keys so a re-cleared scope can re-fire. Returns the count evicted. */
@@ -447,6 +390,8 @@ const ledgerTables = (opts?: BudgetLedgerOpts) => {
   const mut = {
     start: 0,
     totalCost: 0,
+    /** Measured (known) USD only — USD hard caps compare against this. */
+    knownCost: 0,
     /** Events dropped from the retained log. Non-zero ⇒ the log is no longer
      *  the full history, so nothing may be rebuilt FROM it. */
     evicted: 0,
@@ -470,6 +415,8 @@ const ledgerTables = (opts?: BudgetLedgerOpts) => {
   const perModel = new Map<string, MutableCost>()
   const perSession = new Map<string, MutableCost>()
   const perDay = new Map<string, MutableCost>()
+  const knownPerSession = new Map<string, number>()
+  const knownPerDay = new Map<string, number>()
 
   const resolvePricing = (model: string): ModelPricing => pricing[model] ?? safeFallback
   const pricingIsKnown = (model: string): boolean => pricing[model] !== undefined
@@ -490,6 +437,8 @@ const ledgerTables = (opts?: BudgetLedgerOpts) => {
     perModel,
     perSession,
     perDay,
+    knownPerSession,
+    knownPerDay,
     resolvePricing,
     activeLength,
   }
@@ -498,7 +447,17 @@ const ledgerTables = (opts?: BudgetLedgerOpts) => {
 /** Bucket maintenance: apply and remove an entry, compact the event prefix,
  *  and reset. These are the ONLY writers of the tables above. */
 const ledgerBuckets = (ctx: ReturnType<typeof ledgerTables>) => {
-  const { mut, events, perModel, perSession, perDay, resolvePricing } = ctx
+  const {
+    mut,
+    events,
+    perModel,
+    perSession,
+    perDay,
+    knownPerSession,
+    knownPerDay,
+    resolvePricing,
+    pricingIsKnown,
+  } = ctx
 
   const ensureBucket = (map: Map<string, MutableCost>, key: string, model: string): MutableCost => {
     const existing = map.get(key)
@@ -517,11 +476,20 @@ const ledgerBuckets = (ctx: ReturnType<typeof ledgerTables>) => {
     if (isEmptyAggregate(agg)) map.delete(key)
   }
 
+  const addKnown = (map: Map<string, number>, key: string, usd: number): void => {
+    map.set(key, (map.get(key) ?? 0) + usd)
+  }
+
   const applyEntry = (entry: RetainedEvent): void => {
     mut.totalCost += entry.cost.totalCost
     foldInto(ensureBucket(perModel, entry.event.model, entry.event.model), entry.cost)
     foldInto(ensureBucket(perSession, entry.event.sessionId, entry.event.model), entry.cost)
     foldInto(ensureBucket(perDay, entry.dayKey, entry.event.model), entry.cost)
+    if (usdEnforced(entry.provenance)) {
+      mut.knownCost += entry.cost.totalCost
+      addKnown(knownPerSession, entry.event.sessionId, entry.cost.totalCost)
+      addKnown(knownPerDay, entry.dayKey, entry.cost.totalCost)
+    }
   }
 
   const compactPrefixIfNeeded = (): void => {
@@ -533,33 +501,63 @@ const ledgerBuckets = (ctx: ReturnType<typeof ledgerTables>) => {
     mut.start = 0
   }
 
-  const pushEvent = (event: UsageEvent): MutableCost => {
+  const pushEvent = (
+    event: UsageEvent,
+    origin: "live" | "hydrate",
+  ): { cost: MutableCost; provenance: PricingProvenance } => {
+    const provenance =
+      origin === "hydrate"
+        ? hydratePricingProvenance(event.pricingProvenance, event.cost, event.model)
+        : livePricingProvenance(
+            event.cost,
+            event.pricingProvenance,
+            event.model,
+            pricingIsKnown(event.model),
+          )
+    const cost =
+      event.cost !== undefined
+        ? mutableCostFromCanonical(event, event.cost)
+        : computeEventCost(event, resolvePricing(event.model))
+    const stored: UsageEvent = {
+      ...event,
+      pricingProvenance: provenance,
+      ...(event.cost !== undefined ? { cost: event.cost } : {}),
+    }
     const entry: RetainedEvent = {
-      event,
-      cost: computeEventCost(event, resolvePricing(event.model)),
+      event: stored,
+      cost,
       dayKey: dayKeyFor(event.at),
+      provenance,
     }
     events.push(entry)
     applyEntry(entry)
-    return entry.cost
+    return { cost: entry.cost, provenance }
+  }
+
+  const dropKnown = (map: Map<string, number>, key: string): void => {
+    const known = map.get(key)
+    if (known === undefined) return
+    mut.knownCost -= known
+    map.delete(key)
+  }
+
+  const dropAgg = (map: Map<string, MutableCost>, key: string): void => {
+    const agg = map.get(key)
+    if (agg === undefined) return
+    mut.totalCost -= agg.totalCost
+    map.delete(key)
   }
 
   /** Remove ONE scope's lifetime aggregate from the running totals. Used only
    *  by a scoped `clear` after eviction, where a rebuild is no longer safe. */
   const dropScopeAggregate = (scope: { session?: string; day?: string }): void => {
     if (scope.session !== undefined) {
-      const agg = perSession.get(scope.session)
-      if (agg !== undefined) {
-        mut.totalCost -= agg.totalCost
-        perSession.delete(scope.session)
-      }
+      dropAgg(perSession, scope.session)
+      dropKnown(knownPerSession, scope.session)
     }
     if (scope.day !== undefined) {
-      const agg = perDay.get(scope.day)
-      if (agg !== undefined) {
-        mut.totalCost -= agg.totalCost
-        perDay.delete(scope.day)
-      }
+      dropAgg(perDay, scope.day)
+      dropKnown(knownPerDay, scope.day)
     }
   }
 
@@ -567,9 +565,12 @@ const ledgerBuckets = (ctx: ReturnType<typeof ledgerTables>) => {
     events.length = 0
     mut.start = 0
     mut.totalCost = 0
+    mut.knownCost = 0
     perModel.clear()
     perSession.clear()
     perDay.clear()
+    knownPerSession.clear()
+    knownPerDay.clear()
   }
   return {
     ensureBucket,
@@ -594,6 +595,8 @@ const ledgerViews = (ctx: ReturnType<typeof ledgerTables> & ReturnType<typeof le
     perModel,
     perSession,
     perDay,
+    knownPerSession,
+    knownPerDay,
     activeLength,
     compactPrefixIfNeeded,
   } = ctx
@@ -642,8 +645,8 @@ const ledgerViews = (ctx: ReturnType<typeof ledgerTables> & ReturnType<typeof le
   const checkBreaches = (event: UsageEvent): ReadonlyArray<BudgetBreach> => {
     const breaches: BudgetBreach[] = []
     const day = dayKeyFor(event.at)
-    const session = perSession.get(event.sessionId)?.totalCost ?? 0
-    const daily = perDay.get(day)?.totalCost ?? 0
+    const session = knownPerSession.get(event.sessionId) ?? 0
+    const daily = knownPerDay.get(day) ?? 0
     tryEmitBreach(
       breaches,
       fired,
@@ -685,10 +688,9 @@ const recordOps = (ctx: LedgerCtx): Pick<BudgetLedger, "record" | "snapshot" | "
   const {
     policy,
     fired,
-    perSession,
-    perDay,
+    knownPerSession,
+    knownPerDay,
     pushEvent,
-    pricingIsKnown,
     buildSnapshot,
     evictIfOver,
     checkBreaches,
@@ -705,12 +707,13 @@ const recordOps = (ctx: LedgerCtx): Pick<BudgetLedger, "record" | "snapshot" | "
         // price — the honest answer, not a convenient default.
         return { cost: 0, breaches: [], pricingKnown: false }
       }
-      // Compute cost BEFORE pushing so the per-event histogram label is
-      // the event's own model (same pricing resolution path the aggregator
-      // takes, including the safe-LOUD unknown-model fallback).
-      const cost = pushEvent(event).totalCost
+      const { cost: billed, provenance } = pushEvent(event, "live")
       evictIfOver()
-      return { cost, breaches: checkBreaches(event), pricingKnown: pricingIsKnown(event.model) }
+      return {
+        cost: billed.totalCost,
+        breaches: checkBreaches(event),
+        pricingKnown: provenance === "known",
+      }
     },
 
     snapshot() {
@@ -734,7 +737,7 @@ const recordOps = (ctx: LedgerCtx): Pick<BudgetLedger, "record" | "snapshot" | "
       //    internally inconsistent breach. The breach genuinely fired, so the
       //    observed-at-stop is at least the limit.
       for (const key of fired) {
-        const breach = hardBreachForKey(key, policy, perSession, perDay)
+        const breach = hardBreachForKey(key, policy, knownPerSession, knownPerDay)
         if (breach !== undefined) return breach
       }
       return undefined
@@ -812,7 +815,7 @@ const stateOps = (ctx: LedgerCtx): Pick<BudgetLedger, "clear" | "serialize" | "h
       const hydratedEvents: UsageEvent[] = []
       rehydrate(jsonl, hydratedEvents, fired, maxEvents)
       for (const event of hydratedEvents) {
-        pushEvent(event)
+        pushEvent(event, "hydrate")
       }
       evictIfOver()
     },

@@ -236,11 +236,12 @@ function flushUpdate(
     state.current = undefined
   }
   if (state.hunks.length === 0) {
-    throw new PatchParseError(
-      `Update File '${state.path}' has no hunks (Move-only updates not allowed without rename target ` +
-        `OR rename without edits requires zero change lines — empty Update is rejected)`,
-      lineNo,
-    )
+    if (state.moveTo === undefined) {
+      throw new PatchParseError(
+        `Update File '${state.path}' has no hunks (empty Update is rejected)`,
+        lineNo,
+      )
+    }
   }
   const op: PatchOp = { kind: "update", path: state.path, hunks: state.hunks }
   if (state.moveTo !== undefined) op.moveTo = state.moveTo

@@ -258,7 +258,7 @@ export class StdoutStream implements StreamPort {
         this.write(`${CYAN}⚙ ${event.name}${RESET} ${DIM}${compact(event.input)}${RESET}\n`)
         break
       case "tool_progress":
-        this.write(`${DIM}  ↳ ${event.name}: ${oneLine(event.message)}${RESET}\n`)
+        this.write(`${DIM}  ↳ ${event.name}: ${oneLine(redactStr(event.message))}${RESET}\n`)
         break
       case "tool_result":
         this.onToolResult(event)
@@ -567,7 +567,9 @@ const renderEscalationCard = (
 const renderInProgress = (event: Extract<AgentEvent, { type: "in_progress" }>): string => {
   const pct = event.progress !== undefined ? ` ${Math.round(event.progress * 100)}%` : ""
   const msg =
-    event.message !== undefined && event.message !== "" ? `: ${oneLine(event.message)}` : ""
+    event.message !== undefined && event.message !== ""
+      ? `: ${oneLine(redactStr(event.message))}`
+      : ""
   return `${DIM}… thinking${pct}${msg}${RESET}\n`
 }
 

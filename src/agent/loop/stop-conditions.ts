@@ -69,7 +69,8 @@ export const costPreflightCondition: PreTurnStopCondition = async (ctx, turn) =>
  * L4 cross-run cost ledger enforcement — the turn is about to CONTINUE (neither park nor finish). If
  * the usage recorded this turn crossed a HARD session/daily cost ceiling, stop instead of looping —
  * the cross-run analogue of the per-run meter cap. Default-OFF / byte-identical when no ledger/policy
- * is wired (`hardBreach()` ⇒ undefined). `turn` (not `turn-1`): this turn DID run.
+ * is wired (`hardBreach()` ⇒ undefined). `hardBreach()` reports only known (rate-card) USD — unknown
+ * and estimated amounts are excluded (W0.6). `turn` (not `turn-1`): this turn DID run.
  */
 export const ledgerHardBreachCondition: PostContinueStopCondition = (ctx, turn) => {
   const ledgerHardBreach = ctx.cfg.budgetLedger?.hardBreach()

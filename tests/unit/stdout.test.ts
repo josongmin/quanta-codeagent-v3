@@ -173,6 +173,43 @@ describe("StdoutStream", () => {
     expect(rendered).toContain("***REDACTED***")
   })
 
+  test("S4: secret in tool_progress message is redacted; benign path still renders", () => {
+    const secret = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345"
+    const s = new StdoutStream()
+    s.emit({
+      type: "tool_progress",
+      id: "t1",
+      name: "lsp_nav",
+      message: `formatting ${secret}`,
+    })
+    s.emit({
+      type: "tool_progress",
+      id: "t1",
+      name: "lsp_nav",
+      message: "formatting src/app.ts",
+    })
+    const rendered = out()
+    expect(rendered).not.toContain(secret)
+    expect(rendered).toContain("***REDACTED***")
+    expect(rendered).toContain("lsp_nav")
+    expect(rendered).toContain("formatting src/app.ts")
+  })
+
+  test("S4: secret in in_progress provider message is redacted; status still renders", () => {
+    const secret = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345"
+    new StdoutStream().emit({
+      type: "in_progress",
+      timestamp: 0,
+      progress: 0.4,
+      message: `thinking about ${secret}`,
+    })
+    const rendered = out()
+    expect(rendered).not.toContain(secret)
+    expect(rendered).toContain("***REDACTED***")
+    expect(rendered).toContain("thinking")
+    expect(rendered).toContain("40%")
+  })
+
   test("new session_start / recovery variants render without throwing", () => {
     const s = new StdoutStream()
     expect(() => {

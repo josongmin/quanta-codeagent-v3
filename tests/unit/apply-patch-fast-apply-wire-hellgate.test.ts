@@ -26,9 +26,16 @@ import type {
   FastApplyFailure,
   FastApplyFallbackPort,
 } from "@/agent/fast-apply-fallback"
-import { PatchAnchorNotFoundError, PatchApplyError, PatchParseError } from "@/patch"
+import {
+  PatchAnchorNotFoundError,
+  PatchApplyError,
+  PatchConvertError,
+  PatchParseError,
+  PatchRollbackIncompleteError,
+} from "@/patch"
 import type { ToolContext, ToolResult } from "@/tool"
 import { applyPatchTool } from "@/tool/apply-patch"
+import { classifyFastApplyError, failingTargetPath } from "@/tool/apply-patch-fallback-wire"
 
 const root = mkdtempSync(join(tmpdir(), "apply-patch-fast-apply-"))
 afterAll(() => rmSync(root, { recursive: true, force: true }))
@@ -310,6 +317,37 @@ describe("apply_patch fast-apply wire — errorKind derivation", () => {
     const fb = makeFallback(() => ({ ok: false, newPatch: null, rationale: "n/a" }))
     await run({ patch: bad }, ctx(dir, fb)).catch(() => {})
     expect(fb.calls[0]?.failure.errorKind).toBe("parse_error")
+  })
+
+  test("PatchConvertError (inconsistent rename) ⇒ errorKind 'parse_error'", async () => {
+    const dir = tmpSub("kind-convert")
+    const bad = [
+      "diff --git a/old.py b/new.py",
+      "rename from old.py",
+      "rename to new.py",
+      "--- a/old.py",
+      "+++ b/other.py",
+      "@@ -1 +1 @@",
+      "-old_content",
+      "+new_content",
+    ].join("\n")
+    const fb = makeFallback(() => ({ ok: false, newPatch: null, rationale: "n/a" }))
+    const err = await run({ patch: bad }, ctx(dir, fb)).then(
+      () => null,
+      (e: unknown) => e,
+    )
+    expect(err).toBeInstanceOf(PatchConvertError)
+    expect(fb.calls[0]?.failure.errorKind).toBe("parse_error")
+    expect(fb.calls[0]?.sourceFile).toBeUndefined()
+  })
+
+  test("PatchRollbackIncompleteError is not fast-apply-recoverable", () => {
+    const incomplete = new PatchRollbackIncompleteError(new Error("commit boom"), [
+      { path: "a.txt", cause: "undo write failed" },
+    ])
+    expect(classifyFastApplyError(incomplete)).toBeNull()
+    expect(failingTargetPath(incomplete)).toBeUndefined()
+    expect(classifyFastApplyError(new PatchConvertError("rename mismatch"))).toBe("parse_error")
   })
 
   test("sourceFile + sourceContent are threaded for an Update target", async () => {

@@ -3,7 +3,7 @@
  * invariant — ADR-0078). Maps a file path OR a shell-command shape to a
  * closed-enum {@link SensitivityClass}. NEITHER layer is heuristic:
  *   - paths match against an EXPLICIT list of dotfiles / config locations;
- *   - commands match on the FIRST TOKEN + a structural arg shape — no
+ *   - commands match on the executable basename + a structural arg shape — no
  *     fuzzy keyword search of the whole command line.
  *
  * `"secret"` is the strongest signal: the redaction layer replaces the
@@ -13,6 +13,22 @@
  * commands can ONLY produce secrets — so we never let the raw bytes touch
  * the model context, the JSONL envelope, or the memory distill input.
  */
+import {
+  executableBasename,
+  firstToken,
+  gluedSuspiciousHead,
+  INTERPRETER_EVAL_HEADS,
+  interpreterEvalSource,
+  rest,
+  SHELL_WRAPPER_HEADS,
+  shellCommandPayload,
+  skipEnvPrefixArgs,
+  skipLeadingAssignments,
+  splitCommandSegments,
+  stripRedirects,
+  tokenize,
+} from "./command-shape"
+
 export type SensitivityClass = "public" | "internal" | "secret"
 
 /**
@@ -180,64 +196,6 @@ export const classifyPath = (absolutePath: string, home: string): SensitivityCla
   return "public"
 }
 
-/** First non-empty token of a command line (stops at the first whitespace). */
-const firstToken = (cmd: string): string => {
-  const trimmed = cmd.trim()
-  if (trimmed.length === 0) return ""
-  const m = trimmed.match(/^(\S+)/)
-  return m ? (m[1] ?? "") : ""
-}
-
-/** Rest of the command line after the first token, trimmed. */
-const rest = (cmd: string): string => {
-  const trimmed = cmd.trim()
-  const space = trimmed.search(/\s/)
-  if (space < 0) return ""
-  return trimmed.slice(space + 1).trim()
-}
-
-/** Tokenize a simple command line (no shell quoting magic — used only for
- *  structural arg-shape matching, NOT for execution). */
-const tokenize = (cmd: string): string[] => {
-  const trimmed = cmd.trim()
-  if (trimmed.length === 0) return []
-  // Split on whitespace, drop empties. Quoted args are kept as a single
-  // token sans quotes (good enough for shape-matching, e.g. `pass "my key"`).
-  const out: string[] = []
-  let buf = ""
-  let quote: '"' | "'" | null = null
-  // Emit the pending token and clear the buffer. A no-op on an empty buffer, which is
-  // what keeps a run of whitespace — and a trailing separator — from producing empty
-  // tokens; both the separator branch and the end-of-input tail need exactly this.
-  const flush = (): void => {
-    if (buf.length > 0) {
-      out.push(buf)
-      buf = ""
-    }
-  }
-  for (const c of trimmed) {
-    if (quote) {
-      if (c === quote) {
-        quote = null
-        continue
-      }
-      buf += c
-      continue
-    }
-    if (c === '"' || c === "'") {
-      quote = c
-      continue
-    }
-    if (/\s/.test(c)) {
-      flush()
-      continue
-    }
-    buf += c
-  }
-  flush()
-  return out
-}
-
 /**
  * Structural command-shape classifier. Matches on the FIRST token + a
  * declared arg shape — not a fuzzy keyword search of the whole command
@@ -366,72 +324,62 @@ const readsSecretPathArg = (tokens: readonly string[]): boolean => {
   return false
 }
 
-/** Closed set of shells whose `-c` / `-lc` payload is the real command. */
-const SHELL_WRAPPER_HEADS: ReadonlySet<string> = new Set(["bash", "sh"])
-/** Closed set of flags that introduce a command-string payload. */
-const SHELL_COMMAND_FLAGS: ReadonlySet<string> = new Set(["-c", "-lc"])
 /** Bound recursive shell-wrapper inspection; overflow fails closed as secret. */
 const MAX_SHELL_UNWRAP_DEPTH = 8
 
-/** Payload after the first `-c` / `-lc` flag, or undefined when absent/empty. */
-const shellCommandPayload = (tokens: readonly string[]): string | undefined => {
-  for (let i = 1; i < tokens.length; i++) {
-    const flag = tokens[i]
-    if (flag === undefined || !SHELL_COMMAND_FLAGS.has(flag)) continue
-    const payload = tokens[i + 1]
-    return payload !== undefined && payload.length > 0 ? payload : undefined
-  }
-  return undefined
-}
-
-const INTERPRETER_EVAL_HEADS: ReadonlySet<string> = new Set([
-  "node",
-  "bun",
-  "deno",
-  "python",
-  "python3",
-  "ruby",
+const SUSPICIOUS_HEADS: ReadonlySet<string> = new Set([
+  ...FILE_READERS,
+  ...SECRET_COMMAND_RULES.keys(),
+  ...INTERPRETER_EVAL_HEADS,
+  ...SHELL_WRAPPER_HEADS,
 ])
-const INTERPRETER_EVAL_FLAGS: ReadonlySet<string> = new Set(["-e", "--eval", "-p", "--print", "-c"])
 
-const interpreterEvalReadsSecrets = (tokens: readonly string[]): boolean => {
-  for (let i = 1; i < tokens.length; i++) {
-    const flag = tokens[i]
-    if (flag === undefined || !INTERPRETER_EVAL_FLAGS.has(flag)) continue
-    const source = tokens[i + 1] ?? ""
-    return (
-      source.includes("process.env") ||
-      source.includes("Bun.env") ||
-      source.includes("Deno.env") ||
-      source.includes("os.environ") ||
-      source.includes("ENV[") ||
-      /(?:^|[^A-Za-z0-9_])\.env(?:[^A-Za-z0-9_]|$)/.test(source)
-    )
+const segmentLooksGluedSecret = (tokens: readonly string[]): boolean => {
+  for (const t of tokens) {
+    if (gluedSuspiciousHead(t, SUSPICIOUS_HEADS)) return true
   }
   return false
 }
 
-const classifyCommandShapeAt = (cmd: string, unwrapDepth: number): SensitivityClass => {
-  const head = firstToken(cmd)
+const classifyEvalOrShell = (
+  head: string,
+  stripped: readonly string[],
+  unwrapDepth: number,
+): SensitivityClass | undefined => {
+  if (INTERPRETER_EVAL_HEADS.has(head)) {
+    const source = interpreterEvalSource(stripped)
+    if (source !== undefined && classifyCodeShape(source) === "secret") return "secret"
+  }
+  if (!SHELL_WRAPPER_HEADS.has(head)) return undefined
+  const payload = shellCommandPayload(stripped)
+  if (payload === undefined) return undefined
+  if (unwrapDepth >= MAX_SHELL_UNWRAP_DEPTH) return "secret"
+  return classifyCommandShapeAt(payload, unwrapDepth + 1)
+}
+
+const classifySimpleCommand = (
+  tokens: readonly string[],
+  unwrapDepth: number,
+): SensitivityClass => {
+  if (segmentLooksGluedSecret(tokens)) return "secret"
+  const stripped = skipLeadingAssignments(stripRedirects(tokens))
+  if (stripped.length === 0) return "public"
+  const head = executableBasename(stripped[0] ?? "")
   if (head.length === 0) return "public"
+  if (FILE_READERS.has(head) && readsSecretPathArg(stripped)) return "secret"
+  if (SECRET_COMMAND_RULES.get(head)?.(stripped) === true) return "secret"
+  const wrapped = classifyEvalOrShell(head, stripped, unwrapDepth)
+  if (wrapped !== undefined) return wrapped
+  if (head !== "env" || stripped.length <= 1) return "public"
+  const inner = skipEnvPrefixArgs(stripped.slice(1))
+  return inner.length > 0 ? classifySimpleCommand(inner, unwrapDepth) : "public"
+}
+
+const classifyCommandShapeAt = (cmd: string, unwrapDepth: number): SensitivityClass => {
   const tokens = tokenize(cmd)
-
-  // File-reading command (`cat` / pager / dumper) against a secret path.
-  // Any of these prints raw file bytes to stdout, so a secret-classified
-  // path argument leaks the same way `cat` does (`head ~/.ssh/id_rsa`,
-  // `less ~/.aws/credentials`, `xxd ~/.netrc`, …).
-  if (FILE_READERS.has(head) && readsSecretPathArg(tokens)) return "secret"
-
-  const rule = SECRET_COMMAND_RULES.get(head)
-  if (rule?.(tokens) === true) return "secret"
-  if (INTERPRETER_EVAL_HEADS.has(head) && interpreterEvalReadsSecrets(tokens)) return "secret"
-
-  if (SHELL_WRAPPER_HEADS.has(head)) {
-    const payload = shellCommandPayload(tokens)
-    if (payload !== undefined) {
-      if (unwrapDepth >= MAX_SHELL_UNWRAP_DEPTH) return "secret"
-      return classifyCommandShapeAt(payload, unwrapDepth + 1)
-    }
+  if (tokens.length === 0) return "public"
+  for (const segment of splitCommandSegments(tokens)) {
+    if (classifySimpleCommand(segment, unwrapDepth) === "secret") return "secret"
   }
   return "public"
 }
@@ -440,7 +388,7 @@ export const classifyCommandShape = (cmd: string): SensitivityClass =>
   classifyCommandShapeAt(cmd, 0)
 
 const CODE_ENV_ACCESS =
-  /\b(?:process|Bun|Deno)\s*\.\s*env\b|\bprocess\s*\[\s*["'`]env["'`]\s*\]|\bimport\s*\.\s*meta\s*\.\s*env\b/
+  /\b(?:process|Bun|Deno)\s*\.\s*env\b|\bprocess\s*\[\s*["'`]env["'`]\s*\]|\bimport\s*\.\s*meta\s*\.\s*env\b|\bos\.environ\b|\bENV\s*\[/
 const CODE_STRING_LITERAL = /(["'`])((?:\\.|(?!\1)[\s\S])*)\1/g
 const CODE_FILE_READ_ARG =
   /\b(?:readFileSync|readFile|readTextFileSync|readTextFile|createReadStream|openSync|Bun\s*\.\s*file)\s*\(\s*((?:["'][^"'\\]*(?:\\.[^"'\\]*)*["'])|(?:`(?:\\.|[^`])*`)|[^,\n)]+)/g

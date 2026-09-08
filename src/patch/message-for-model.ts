@@ -16,7 +16,13 @@
 // (including null/undefined/non-Error). It returns a string, always.
 
 import { errMessage } from "@/shared"
-import { PatchAnchorNotFoundError, PatchApplyError, PatchParseError } from "./types"
+import {
+  PatchAnchorNotFoundError,
+  PatchApplyError,
+  PatchConvertError,
+  PatchParseError,
+  PatchRollbackIncompleteError,
+} from "./types"
 
 /** Structural shape of a jail-boundary breach. `@/tool`'s `FsJailViolationError`
  *  cannot be imported here (upward dependency), so we duck-type it: a breach is
@@ -64,6 +70,13 @@ function isJailBreachLike(e: unknown): e is JailBreachLike {
  * regenerate, not to reconstruct the diff.
  */
 export function messageForModel(error: unknown): string {
+  if (error instanceof PatchRollbackIncompleteError) {
+    const paths = error.uncertainPaths.join(", ")
+    return `apply could not be committed and rollback was incomplete (${paths}): ${safeMessage(error.originalError)} — leftover/uncertain state at ${paths}; do not assume files are unchanged; inspect those paths before retrying.`
+  }
+  if (error instanceof PatchConvertError) {
+    return `unified diff conversion rejected: ${stripPrefix(error.message)} — correct the rename metadata and re-emit; this is not an in-place update of the old path.`
+  }
   if (error instanceof PatchAnchorNotFoundError) {
     return `${error.path}: hunk ${error.hunkIndex} context not found — the surrounding lines have drifted; re-read the file and regenerate this hunk with current context lines.`
   }
@@ -101,7 +114,11 @@ function stripPrefix(message: string): string {
   const head = message.slice(0, idx)
   // Only strip the applier's own framing, never arbitrary content that
   // happened to contain a colon.
-  if (head.startsWith("Patch apply error on ") || head.startsWith("Patch parse error at line ")) {
+  if (
+    head.startsWith("Patch apply error on ") ||
+    head.startsWith("Patch parse error at line ") ||
+    head === "Patch convert error"
+  ) {
     return message.slice(idx + 2)
   }
   return message

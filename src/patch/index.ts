@@ -20,6 +20,13 @@ export type {
   PatchObserver,
   PatchOp,
   PatchTracePort,
+  UndoFailure,
 } from "./types"
-export { PatchAnchorNotFoundError, PatchApplyError, PatchParseError } from "./types"
+export {
+  PatchAnchorNotFoundError,
+  PatchApplyError,
+  PatchConvertError,
+  PatchParseError,
+  PatchRollbackIncompleteError,
+} from "./types"
 export { isUnifiedDiff, unifiedDiffToV4A } from "./unified-to-v4a"

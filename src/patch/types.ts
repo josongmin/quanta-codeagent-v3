@@ -145,6 +145,64 @@ export class PatchApplyError extends Error {
   }
 }
 
+/** One inverse-journal step that itself failed while attempting rollback. */
+export interface UndoFailure {
+  readonly path: string
+  readonly cause: string
+}
+
+/**
+ * Thrown by `unifiedDiffToV4A` when rename metadata is present but unusable.
+ * Callers must NOT treat this as a successful conversion to an in-place
+ * update of the old path.
+ */
+export class PatchConvertError extends Error {
+  constructor(message: string) {
+    super(`Patch convert error: ${message}`)
+    this.name = "PatchConvertError"
+  }
+}
+
+/**
+ * Thrown when a commit-phase failure was followed by at least one inverse
+ * journal failure. Distinct from a clean {@link PatchApplyError} empty-path
+ * wrap (`Patch commit failed and was rolled back`) so callers MUST NOT assume
+ * the disk was restored. Does not claim multi-file crash atomicity.
+ */
+export class PatchRollbackIncompleteError extends Error {
+  public readonly outcome = "rollbackIncomplete" as const
+  public readonly originalError: unknown
+  public readonly failedUndos: readonly UndoFailure[]
+  public readonly uncertainPaths: readonly string[]
+  constructor(originalError: unknown, failedUndos: readonly UndoFailure[]) {
+    const paths = uniquePaths(failedUndos)
+    const detail = failedUndos.map((f) => `${f.path}: ${f.cause}`).join("; ")
+    super(
+      `Patch commit failed and rollback was incomplete (${paths.join(", ")}): ${stringifyUnknown(originalError)}; leftover/uncertain: ${detail}`,
+    )
+    this.name = "PatchRollbackIncompleteError"
+    this.originalError = originalError
+    this.failedUndos = failedUndos
+    this.uncertainPaths = paths
+  }
+}
+
+function uniquePaths(failedUndos: readonly UndoFailure[]): readonly string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const f of failedUndos) {
+    if (seen.has(f.path)) continue
+    seen.add(f.path)
+    out.push(f.path)
+  }
+  return out
+}
+
+function stringifyUnknown(error: unknown): string {
+  if (error instanceof Error) return error.message
+  return String(error)
+}
+
 /**
  * Thrown when the hunk's context (context + delete lines) cannot be located
  * in the target file even after the deterministic fuzzy pass. Distinct from

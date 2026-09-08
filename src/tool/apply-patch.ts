@@ -14,7 +14,8 @@
 //
 //   2. `applyPatchTool` — the `Tool` entry that parses + applies a V4A patch
 //      and propagates EVERY named error (PatchParseError /
-//      PatchAnchorNotFoundError / PatchApplyError / FsJailViolationError)
+//      PatchConvertError / PatchAnchorNotFoundError / PatchApplyError /
+//      PatchRollbackIncompleteError / FsJailViolationError)
 //      to the registry without silent catch.
 //
 // Determinism: the jail boundary check is delegated wholesale to
@@ -413,6 +414,8 @@ async function guardedParseAndApply(
   // Auto-convert standard unified diff (--- a/file / +++ b/file format) to V4A.
   // Models frequently produce unified diff; without this, parsePatch throws on a
   // structurally-valid patch that simply uses the wrong sentinel format.
+  // Inconsistent/incomplete rename metadata throws PatchConvertError here
+  // (parse-class — not a silent in-place update of the old path).
   const normalizedPatch = isUnifiedDiff(patchText) ? unifiedDiffToV4A(patchText) : patchText
   const patch = parsePatch(normalizedPatch)
   // Guard EVERY target BEFORE any filesystem mutation (hard-stop posture).
@@ -434,9 +437,11 @@ async function guardedParseAndApply(
     const budgetDeny = ctx ? writeBudgetEvent(ctx) : null
     if (budgetDeny) return { deny: budgetDeny }
   }
-  // applyPatch throws PatchApplyError / PatchAnchorNotFoundError on apply
-  // failure — propagate. FsJailFileSystemPort throws FsJailViolationError
-  // on boundary breach — propagate. `PATCH_TRACE` injects the OTel binding.
+  // applyPatch throws PatchApplyError / PatchAnchorNotFoundError /
+  // PatchRollbackIncompleteError on apply failure — propagate. unifiedDiffToV4A
+  // throws PatchConvertError on unusable rename metadata. FsJailFileSystemPort
+  // throws FsJailViolationError on boundary breach — propagate. `PATCH_TRACE`
+  // injects the OTel binding.
   //
   // [F6] jun-6 tool-interrupt-behavior — parity with `edit`/`write`'s
   // `commitEdit`. The COMMIT (a MULTI-FILE FS mutation) runs inside the OPTIONAL

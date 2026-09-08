@@ -213,6 +213,22 @@ describe("classifyCommandShape — first-token + arg shape", () => {
   test("bash script.sh without -c keeps the existing public classification", () => {
     expect(classifyCommandShape("bash script.sh")).toBe("public")
   })
+
+  // F-07 — wrapper basename / compound flags / redirect / pipeline / bracket env.
+  test("absolute shell, zsh, compound -xc, redirect, pipeline, and bracket env are secret", () => {
+    expect(classifyCommandShape("/bin/bash -c printenv")).toBe("secret")
+    expect(classifyCommandShape("zsh -c printenv")).toBe("secret")
+    expect(classifyCommandShape("bash -xc printenv")).toBe("secret")
+    expect(classifyCommandShape(`bash -c "printenv 2>&1"`)).toBe("secret")
+    expect(classifyCommandShape(`bash -c "printenv | cat"`)).toBe("secret")
+    expect(classifyCommandShape(`node -e 'console.log(process["env"])'`)).toBe("secret")
+  })
+
+  test("benign wrapper / env / printenv-one-var controls stay public", () => {
+    expect(classifyCommandShape("bash -c echo hi")).toBe("public")
+    expect(classifyCommandShape("env FOO=1")).toBe("public")
+    expect(classifyCommandShape("printenv HOME")).toBe("public")
+  })
 })
 
 describe("classifyCodeShape — host runtime eval", () => {
@@ -233,5 +249,9 @@ describe("classifyCodeShape — host runtime eval", () => {
 
   test("ordinary computation remains public", () => {
     expect(classifyCodeShape("const answer = 40 + 2; answer")).toBe("public")
+  })
+
+  test("bracket env access matches the same CODE_ENV_ACCESS contract as process.env", () => {
+    expect(classifyCodeShape(`console.log(process["env"])`)).toBe("secret")
   })
 })

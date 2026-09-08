@@ -1,8 +1,7 @@
-import { errMessage } from "@/shared"
+import { detectEol, type EolStyle, joinWithEol, splitEolAware } from "@/shared/eol"
 // EOL detection/splitting lives in `@/shared/eol` (SSOT) so `@/patch` does NOT
 // reach into `@/tool/edit` (slice fence). A parity ratchet test asserts this
 // `detectEol` stays byte-identical to the edit slice's so the two cannot drift.
-import { detectEol, type EolStyle, joinWithEol, splitEolAware } from "@/shared/eol"
 // V4A apply_patch — AST → filesystem side effects.
 //
 // `applyPatch(patch, fs)` is pure w.r.t. the host filesystem: all I/O goes
@@ -19,6 +18,7 @@ import { detectEol, type EolStyle, joinWithEol, splitEolAware } from "@/shared/e
 // Ambiguity (multiple matches at the same tier) -> PatchApplyError.
 // Zero matches at both tiers -> PatchAnchorNotFoundError.
 
+import { type InverseAction, rethrowCommitFailure, rollback } from "./commit-journal"
 import {
   type ApplyResult,
   type Hunk,
@@ -116,16 +116,19 @@ export async function applyPatch(
   // all-or-nothing across the WHOLE call, not merely within a single op. The
   // rename-edit path uses `fs.renameFile` (the atomic primitive): a partial
   // rename failure that leaks the destination is undone by the journal.
-  const journal: Array<() => Promise<void>> = []
+  // Execute the planned mutations, journaling an inverse action for each
+  // landed step. On ANY failure we replay the journal in reverse. When every
+  // required undo succeeds the original on-disk state is restored and the
+  // caller sees a rolled-back commit error. Undo failures are collected and
+  // surfaced as rollbackIncomplete — they are never swallowed, and the
+  // caller must not assume a clean disk. This is not a claim of multi-file
+  // crash atomicity.
+  const journal: InverseAction[] = []
   try {
     for (const plan of plans) await commitPlan(plan, fs, journal)
   } catch (err) {
-    await rollback(journal)
-    // A commit-phase I/O failure (e.g. a write/rename that the port rejects
-    // mid-flight) surfaces as a typed PatchApplyError so callers keep a single
-    // error contract — UNLESS it is already one of our typed patch errors.
-    if (err instanceof PatchApplyError || err instanceof PatchAnchorNotFoundError) throw err
-    throw new PatchApplyError(`Patch commit failed and was rolled back: ${errMessage(err)}`, "")
+    const failedUndos = await rollback(journal)
+    rethrowCommitFailure(err, failedUndos)
   }
 
   // Commit succeeded — only now are observations real. Flush in patch order.
@@ -223,21 +226,6 @@ class PatchOverlay implements PatchReadPort {
   }
 }
 
-/** Replay journaled inverse actions newest-first to restore the pre-commit
- *  on-disk state. Inverse-action failures are swallowed: rollback is
- *  best-effort and must never mask the original error that triggered it. */
-async function rollback(journal: Array<() => Promise<void>>): Promise<void> {
-  for (let i = journal.length - 1; i >= 0; i--) {
-    const undo = journal[i]
-    if (undo === undefined) continue
-    try {
-      await undo()
-    } catch {
-      // Best-effort: a failed undo must not eclipse the triggering error.
-    }
-  }
-}
-
 /** Validate + plan one op (no disk writes). Buffered observer events for
  *  landed hunks are recorded here but only flushed by the caller AFTER the
  *  whole patch commits. Each branch performs full pre-flight validation. */
@@ -262,31 +250,40 @@ async function planOp(
 async function commitPlan(
   plan: OpPlan,
   fs: PatchFileSystemPort,
-  journal: Array<() => Promise<void>>,
+  journal: InverseAction[],
 ): Promise<void> {
   // F5 — TRANSACTIONAL: every inverse action is journaled BEFORE the mutating
   // call it undoes. A port whose write/delete/rename PARTIALLY mutates the disk
   // and THEN throws mid-effect would, under the old journal-AFTER-write ordering,
   // leave that step un-journaled and therefore unrecoverable by rollback. The
   // restore content is already captured during planning, so the inverse closure
-  // is available pre-write. Inverse actions are best-effort (rollback swallows
-  // their throws), so an inverse for a write that never actually landed (the
-  // file is absent) must NOT itself throw — hence the existence-guarded delete.
+  // is available pre-write. Inverse actions that throw are collected by
+  // rollback (not swallowed). An inverse for a write that never actually landed
+  // (the file is absent) must NOT itself throw — hence the existence-guarded delete.
   switch (plan.kind) {
     case "add": {
-      journal.push(async () => {
-        if (await fs.exists(plan.path)) await fs.deleteFile(plan.path)
+      journal.push({
+        paths: [plan.path],
+        undo: async () => {
+          if (await fs.exists(plan.path)) await fs.deleteFile(plan.path)
+        },
       })
       await fs.writeFile(plan.path, plan.content)
       return
     }
     case "delete": {
-      journal.push(() => fs.writeFile(plan.path, plan.original))
+      journal.push({
+        paths: [plan.path],
+        undo: () => fs.writeFile(plan.path, plan.original),
+      })
       await fs.deleteFile(plan.path)
       return
     }
     case "update": {
-      journal.push(() => fs.writeFile(plan.path, plan.original))
+      journal.push({
+        paths: [plan.path],
+        undo: () => fs.writeFile(plan.path, plan.original),
+      })
       await fs.writeFile(plan.path, plan.next)
       return
     }
@@ -299,11 +296,17 @@ async function commitPlan(
       // that leaks the destination then fails has its destination reaped. The
       // rename-undo restores the source if the rename already removed it, so the
       // companion source-restore can then return it to its original content.
-      journal.push(() => fs.writeFile(plan.path, plan.original))
+      journal.push({
+        paths: [plan.path],
+        undo: () => fs.writeFile(plan.path, plan.original),
+      })
       await fs.writeFile(plan.path, plan.next)
-      journal.push(async () => {
-        if (await fs.exists(plan.moveTo)) await fs.deleteFile(plan.moveTo)
-        if (!(await fs.exists(plan.path))) await fs.writeFile(plan.path, plan.next)
+      journal.push({
+        paths: [plan.moveTo, plan.path],
+        undo: async () => {
+          if (await fs.exists(plan.moveTo)) await fs.deleteFile(plan.moveTo)
+          if (!(await fs.exists(plan.path))) await fs.writeFile(plan.path, plan.next)
+        },
       })
       await fs.renameFile(plan.path, plan.moveTo)
       return

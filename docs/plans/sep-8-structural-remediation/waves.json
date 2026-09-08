@@ -1,0 +1,841 @@
+{
+  "schemaVersion": 1,
+  "sourceHead": "f5f4875799141068af73e604129c8b9a09f76007",
+  "auditDigest": "769530ddf9d76b68bdfdf740771155bd2b255a79c9319516956283469bbedba8",
+  "status": "planned-not-executed",
+  "maxParallelWriters": 3,
+  "scopeSyntax": "trailing slash = subtree; otherwise exact file; no globs; reserved and index.ts basename always excluded",
+  "reservedScopes": [
+    "src/shared/",
+    "src/host/",
+    "src/apps/cli/index.ts",
+    "src/apps/cli/internal.ts",
+    "src/apps/cli/repl.ts",
+    "src/apps/cli/repl/",
+    "src/apps/agent/index.ts",
+    "src/apps/agent/mode-presets/system.ts",
+    "src/apps/web-daemon/authority-readouts.ts",
+    "src/apps/web-daemon/runtime-factory.ts",
+    "src/apps/web-daemon/runtime-factory/",
+    "src/apps/web-daemon/server/ws-handlers.ts",
+    "src/agent/mcp-bridge.ts",
+    "src/agent/skill-mcp-wire.ts",
+    "src/agent/plugin-mcp-launcher/",
+    "src/tool/apply-patch.ts",
+    "src/runner/orchestrate/persist-turn.ts",
+    "src/runner/session-ops/",
+    "src/sdk/runtime/runtime.ts",
+    "src/kernel/session/event-log-jsonl.ts",
+    "tests/unit/_arch/",
+    "tests/fixtures/",
+    "tests/helpers/",
+    "tests/unit/god-code-ratchet.test.ts",
+    "tests/unit/slice-boundary-config-parity.test.ts",
+    "tools/",
+    "package.json",
+    "bun.lock",
+    "bun.lockb",
+    "biome.json",
+    "biome.jsonc",
+    "tsconfig.json",
+    "tsconfig.tests.json",
+    "docs/10.feature-catalog.md"
+  ],
+  "reservedBasenames": [
+    "index.ts"
+  ],
+  "preflight": {
+    "wave": "W0",
+    "mode": "serial",
+    "actions": [
+      "W0.1",
+      "W0.2",
+      "W0.3",
+      "W0.4",
+      "W0.5",
+      "W0.6",
+      "W0.7",
+      "W0.8"
+    ]
+  },
+  "waves": [
+    {
+      "id": "W1",
+      "dependsOn": [
+        "W0"
+      ],
+      "phases": [
+        "P:parallel-owner-writes",
+        "I:serial-integrator-writes"
+      ],
+      "groups": [
+        "R01",
+        "R04",
+        "R09"
+      ],
+      "integrationOrder": [
+        "R01",
+        "R04",
+        "R09"
+      ]
+    },
+    {
+      "id": "W2",
+      "dependsOn": [
+        "W1"
+      ],
+      "phases": [
+        "P:parallel-owner-writes",
+        "I:serial-integrator-writes"
+      ],
+      "groups": [
+        "R05",
+        "R13",
+        "R11"
+      ],
+      "integrationOrder": [
+        "R05",
+        "R13",
+        "R11"
+      ]
+    },
+    {
+      "id": "W3",
+      "dependsOn": [
+        "W2"
+      ],
+      "phases": [
+        "P:parallel-owner-writes",
+        "I:serial-integrator-writes"
+      ],
+      "groups": [
+        "R14",
+        "R02",
+        "R12"
+      ],
+      "integrationOrder": [
+        "R14",
+        "R02",
+        "R12"
+      ]
+    },
+    {
+      "id": "W4",
+      "dependsOn": [
+        "W3"
+      ],
+      "phases": [
+        "P:parallel-owner-writes",
+        "I:serial-integrator-writes"
+      ],
+      "groups": [
+        "R03",
+        "R06",
+        "R10"
+      ],
+      "integrationOrder": [
+        "R03",
+        "R06",
+        "R10"
+      ]
+    },
+    {
+      "id": "W5",
+      "dependsOn": [
+        "W4"
+      ],
+      "phases": [
+        "P:parallel-owner-writes",
+        "I:serial-integrator-writes"
+      ],
+      "groups": [
+        "R07",
+        "R08",
+        "R15"
+      ],
+      "integrationOrder": [
+        "R07",
+        "R08",
+        "R15"
+      ]
+    },
+    {
+      "id": "W6",
+      "dependsOn": [
+        "W5"
+      ],
+      "phases": [
+        "P:parallel-owner-writes",
+        "I:serial-integrator-writes"
+      ],
+      "groups": [
+        "R16"
+      ],
+      "integrationOrder": [
+        "R16"
+      ]
+    }
+  ],
+  "groups": [
+    {
+      "id": "R01",
+      "lane": "W1-A",
+      "wave": "W1",
+      "findings": [
+        "F-07",
+        "SEP7-D-11"
+      ],
+      "actions": [
+        "F-07.1",
+        "F-07.2",
+        "F-07.3",
+        "F-07.4",
+        "SEP7-D-11.1",
+        "SEP7-D-11.2",
+        "SEP7-D-11.3",
+        "SEP7-D-11.4"
+      ],
+      "sourceScopes": [
+        "src/security/",
+        "src/stream/adapters/stdout.ts",
+        "src/stream/adapters/stdout/"
+      ],
+      "existingTests": [
+        "tests/unit/security/sensitivity-classifier.test.ts",
+        "tests/unit/stdout.test.ts"
+      ],
+      "newTestScopes": [
+        "tests/unit/sep8-remediation/r01/",
+        "tests/integration/sep8-remediation/r01/"
+      ],
+      "artifactScope": "docs/plans/sep-8-structural-remediation/work/R01/",
+      "integrationScopes": []
+    },
+    {
+      "id": "R04",
+      "lane": "W1-B",
+      "wave": "W1",
+      "findings": [
+        "H-PATCH-01",
+        "H-PATCH-02"
+      ],
+      "actions": [
+        "H-PATCH-01.1",
+        "H-PATCH-01.2",
+        "H-PATCH-01.3",
+        "H-PATCH-01.4",
+        "H-PATCH-02.1",
+        "H-PATCH-02.2",
+        "H-PATCH-02.3",
+        "H-PATCH-02.4"
+      ],
+      "sourceScopes": [
+        "src/patch/"
+      ],
+      "existingTests": [
+        "tests/unit/patch/unified-to-v4a-scenarios.test.ts",
+        "tests/unit/patch/applier-rollback-rename-delete.test.ts"
+      ],
+      "newTestScopes": [
+        "tests/unit/sep8-remediation/r04/",
+        "tests/integration/sep8-remediation/r04/"
+      ],
+      "artifactScope": "docs/plans/sep-8-structural-remediation/work/R04/",
+      "integrationScopes": [
+        "src/tool/apply-patch.ts"
+      ]
+    },
+    {
+      "id": "R09",
+      "lane": "W1-C",
+      "wave": "W1",
+      "findings": [
+        "P1-A-02",
+        "G-F15"
+      ],
+      "actions": [
+        "P1-A-02.1",
+        "P1-A-02.2",
+        "P1-A-02.3",
+        "P1-A-02.4",
+        "G-F15.1",
+        "G-F15.2",
+        "G-F15.3",
+        "G-F15.4"
+      ],
+      "sourceScopes": [
+        "src/observability/usage-accounting/",
+        "src/agent/budget-ledger.ts",
+        "src/agent/budget-ledger/",
+        "src/agent/loop/emit-helpers.ts",
+        "src/agent/loop/stop-conditions.ts",
+        "src/apps/eval/report/"
+      ],
+      "existingTests": [
+        "tests/unit/budget-ledger-pricing-ssot-hellgate.test.ts",
+        "tests/unit/budget-ledger-persist-hellgate.test.ts",
+        "tests/integration/budget-ledger-real-loop-e2e.test.ts"
+      ],
+      "newTestScopes": [
+        "tests/unit/sep8-remediation/r09/",
+        "tests/integration/sep8-remediation/r09/"
+      ],
+      "artifactScope": "docs/plans/sep-8-structural-remediation/work/R09/",
+      "integrationScopes": []
+    },
+    {
+      "id": "R05",
+      "lane": "W2-A",
+      "wave": "W2",
+      "findings": [
+        "H-SA-02",
+        "H-SA-01"
+      ],
+      "actions": [
+        "H-SA-02.1",
+        "H-SA-02.2",
+        "H-SA-02.3",
+        "H-SA-02.4",
+        "H-SA-01.1",
+        "H-SA-01.2",
+        "H-SA-01.3",
+        "H-SA-01.4"
+      ],
+      "sourceScopes": [
+        "src/side-agent/"
+      ],
+      "existingTests": [
+        "tests/unit/side-agent-process-registry-hellgate.test.ts",
+        "tests/integration/side-agent-process-os-fork-e2e.test.ts",
+        "tests/integration/side-agent-process-llm-charter-e2e.test.ts"
+      ],
+      "newTestScopes": [
+        "tests/unit/sep8-remediation/r05/",
+        "tests/integration/sep8-remediation/r05/"
+      ],
+      "artifactScope": "docs/plans/sep-8-structural-remediation/work/R05/",
+      "integrationScopes": [
+        "src/host/runtime/agent-config-assembler.ts"
+      ]
+    },
+    {
+      "id": "R13",
+      "lane": "W2-B",
+      "wave": "W2",
+      "findings": [
+        "G-F5"
+      ],
+      "actions": [
+        "G-F5.1",
+        "G-F5.2",
+        "G-F5.3",
+        "G-F5.4"
+      ],
+      "sourceScopes": [
+        "src/apps/bench/remote/box-session/",
+        "src/apps/bench/profiles/",
+        "src/apps/bench/remote/pool/launch-window.ts",
+        "src/apps/bench/remote/full.ts"
+      ],
+      "existingTests": [
+        "src/apps/bench/profiles/registry.test.ts"
+      ],
+      "newTestScopes": [
+        "tests/unit/sep8-remediation/r13/",
+        "tests/integration/sep8-remediation/r13/"
+      ],
+      "artifactScope": "docs/plans/sep-8-structural-remediation/work/R13/",
+      "integrationScopes": []
+    },
+    {
+      "id": "R11",
+      "lane": "W2-C",
+      "wave": "W2",
+      "findings": [
+        "C-F1",
+        "C-F9"
+      ],
+      "actions": [
+        "C-F1.1",
+        "C-F1.2",
+        "C-F1.3",
+        "C-F1.4",
+        "C-F9.1",
+        "C-F9.2",
+        "C-F9.3",
+        "C-F9.4"
+      ],
+      "sourceScopes": [
+        "src/mcp/",
+        "src/plugin-isolation/"
+      ],
+      "existingTests": [
+        "tests/unit/mcp/transport-port-hellgate.test.ts",
+        "tests/unit/plugin-isolation-mcp-integration-hellgate.test.ts",
+        "tests/unit/mcp-oauth-coalesce-concurrency-r4-hellgate.test.ts",
+        "tests/unit/mcp/protocol-version-http-header-hellgate.test.ts"
+      ],
+      "newTestScopes": [
+        "tests/unit/sep8-remediation/r11/",
+        "tests/integration/sep8-remediation/r11/"
+      ],
+      "artifactScope": "docs/plans/sep-8-structural-remediation/work/R11/",
+      "integrationScopes": [
+        "src/host/mcp-composition.ts",
+        "src/agent/mcp-bridge.ts",
+        "src/agent/skill-mcp-wire.ts",
+        "src/agent/plugin-mcp-launcher/",
+        "tools/feature-catalog/features/09-integration/162-mcp-isolated-spawn.yaml",
+        "docs/10.feature-catalog.md"
+      ]
+    },
+    {
+      "id": "R14",
+      "lane": "W3-A",
+      "wave": "W3",
+      "findings": [
+        "G-F9"
+      ],
+      "actions": [
+        "G-F9.1",
+        "G-F9.2",
+        "G-F9.3",
+        "G-F9.4"
+      ],
+      "sourceScopes": [
+        "src/remote/runner/",
+        "src/apps/cli/remote-cmd.ts",
+        "src/apps/cli/remote-dependencies/"
+      ],
+      "existingTests": [
+        "tests/unit/remote/runner-port-hellgate.test.ts",
+        "src/remote/runner/__tests__/lima-injection-hellgate.test.ts"
+      ],
+      "newTestScopes": [
+        "tests/unit/sep8-remediation/r14/",
+        "tests/integration/sep8-remediation/r14/"
+      ],
+      "artifactScope": "docs/plans/sep-8-structural-remediation/work/R14/",
+      "integrationScopes": [
+        "src/apps/cli/index.ts"
+      ]
+    },
+    {
+      "id": "R02",
+      "lane": "W3-B",
+      "wave": "W3",
+      "findings": [
+        "F-03",
+        "F-04",
+        "F-09",
+        "F-10",
+        "F-12",
+        "F-13",
+        "F-11"
+      ],
+      "actions": [
+        "F-03.1",
+        "F-03.2",
+        "F-03.3",
+        "F-03.4",
+        "F-04.1",
+        "F-04.2",
+        "F-04.3",
+        "F-04.4",
+        "F-09.1",
+        "F-09.2",
+        "F-09.3",
+        "F-09.4",
+        "F-10.1",
+        "F-10.2",
+        "F-10.3",
+        "F-10.4",
+        "F-12.1",
+        "F-12.2",
+        "F-12.3",
+        "F-12.4",
+        "F-13.1",
+        "F-13.2",
+        "F-13.3",
+        "F-13.4",
+        "F-11.1",
+        "F-11.2",
+        "F-11.3",
+        "F-11.4"
+      ],
+      "sourceScopes": [
+        "src/auth/node-lock-file-store.ts",
+        "src/auth/private-file-atomic.ts",
+        "src/auth/file-transaction/",
+        "src/permission/json-state-file.ts",
+        "src/permission/json-state-file/",
+        "src/migration/external-config/",
+        "src/config/trust-store.ts",
+        "src/config/trust-store/"
+      ],
+      "existingTests": [
+        "tests/unit/auth/node-lock-file-store.test.ts",
+        "tests/unit/permission/json-state-file-lock-clock-hellgate.test.ts",
+        "tests/unit/config-migration-persist-atomic-hellgate.test.ts",
+        "tests/unit/central-config-trust-store-hellgate.test.ts"
+      ],
+      "newTestScopes": [
+        "tests/unit/sep8-remediation/r02/",
+        "tests/integration/sep8-remediation/r02/"
+      ],
+      "artifactScope": "docs/plans/sep-8-structural-remediation/work/R02/",
+      "integrationScopes": [
+        "src/apps/agent/index.ts",
+        "src/apps/cli/repl/session-setup.ts",
+        "src/apps/web-daemon/runtime-factory.ts"
+      ]
+    },
+    {
+      "id": "R12",
+      "lane": "W3-C",
+      "wave": "W3",
+      "findings": [
+        "C-F2",
+        "C-F11"
+      ],
+      "actions": [
+        "C-F2.1",
+        "C-F2.2",
+        "C-F2.3",
+        "C-F2.4",
+        "C-F11.1",
+        "C-F11.2",
+        "C-F11.3",
+        "C-F11.4"
+      ],
+      "sourceScopes": [
+        "src/protocol/session/",
+        "src/ipc/session/",
+        "src/sdk/runtime/handle-adapter.ts",
+        "src/sdk/runtime/verb-surface/"
+      ],
+      "existingTests": [
+        "tests/unit/protocol/session-codec.test.ts",
+        "tests/unit/ipc/session-handle-conformance.test.ts",
+        "tests/integration/sdk-connect-session-handle-e2e.test.ts"
+      ],
+      "newTestScopes": [
+        "tests/unit/sep8-remediation/r12/",
+        "tests/integration/sep8-remediation/r12/"
+      ],
+      "artifactScope": "docs/plans/sep-8-structural-remediation/work/R12/",
+      "integrationScopes": [
+        "src/kernel/session/event-log-jsonl.ts"
+      ]
+    },
+    {
+      "id": "R03",
+      "lane": "W4-A",
+      "wave": "W4",
+      "findings": [
+        "SEP7-D-05",
+        "SEP7-D-06",
+        "SEP7-D-07",
+        "SEP7-D-10"
+      ],
+      "actions": [
+        "SEP7-D-05.1",
+        "SEP7-D-05.2",
+        "SEP7-D-05.3",
+        "SEP7-D-05.4",
+        "SEP7-D-06.1",
+        "SEP7-D-06.2",
+        "SEP7-D-06.3",
+        "SEP7-D-06.4",
+        "SEP7-D-07.1",
+        "SEP7-D-07.2",
+        "SEP7-D-07.3",
+        "SEP7-D-07.4",
+        "SEP7-D-10.1",
+        "SEP7-D-10.2",
+        "SEP7-D-10.3",
+        "SEP7-D-10.4"
+      ],
+      "sourceScopes": [
+        "src/session/",
+        "src/memory/adapters/sqlite.ts",
+        "src/memory/adapters/sqlite/",
+        "src/sdk/runtime/session/rehydrate.ts",
+        "src/sdk/runtime/session/snapshot-read/"
+      ],
+      "existingTests": [
+        "tests/unit/session-index.test.ts",
+        "tests/unit/session-store.test.ts",
+        "tests/integration/memory-sqlite.test.ts"
+      ],
+      "newTestScopes": [
+        "tests/unit/sep8-remediation/r03/",
+        "tests/integration/sep8-remediation/r03/"
+      ],
+      "artifactScope": "docs/plans/sep-8-structural-remediation/work/R03/",
+      "integrationScopes": [
+        "src/runner/orchestrate/persist-turn.ts",
+        "src/runner/session-ops/",
+        "src/sdk/runtime/runtime.ts"
+      ]
+    },
+    {
+      "id": "R06",
+      "lane": "W4-B",
+      "wave": "W4",
+      "findings": [
+        "G-F4"
+      ],
+      "actions": [
+        "G-F4.1",
+        "G-F4.2",
+        "G-F4.3",
+        "G-F4.4"
+      ],
+      "sourceScopes": [
+        "src/scheduler/"
+      ],
+      "existingTests": [
+        "tests/unit/automation-engine-hellgate.test.ts",
+        "tests/integration/automation-engine-tick-wire-hellgate.test.ts"
+      ],
+      "newTestScopes": [
+        "tests/unit/sep8-remediation/r06/",
+        "tests/integration/sep8-remediation/r06/"
+      ],
+      "artifactScope": "docs/plans/sep-8-structural-remediation/work/R06/",
+      "integrationScopes": [
+        "src/apps/cli/repl/",
+        "src/host/"
+      ]
+    },
+    {
+      "id": "R10",
+      "lane": "W4-C",
+      "wave": "W4",
+      "findings": [
+        "E-SEARCH-01",
+        "E-EMBED-01"
+      ],
+      "actions": [
+        "E-SEARCH-01.1",
+        "E-SEARCH-01.2",
+        "E-SEARCH-01.3",
+        "E-SEARCH-01.4",
+        "E-EMBED-01.1",
+        "E-EMBED-01.2",
+        "E-EMBED-01.3",
+        "E-EMBED-01.4"
+      ],
+      "sourceScopes": [
+        "src/retrieval/",
+        "src/runner/assemble/search-index-backend.ts",
+        "src/runner/assemble/search-index-backend/",
+        "src/runner/assemble/search-pipeline.ts",
+        "src/runner/assemble/search-pipeline/"
+      ],
+      "existingTests": [
+        "tests/unit/runner/search-index-backend.test.ts",
+        "tests/unit/runner/t06-search-backend-failclosed-hellgate.test.ts"
+      ],
+      "newTestScopes": [
+        "tests/unit/sep8-remediation/r10/",
+        "tests/integration/sep8-remediation/r10/"
+      ],
+      "artifactScope": "docs/plans/sep-8-structural-remediation/work/R10/",
+      "integrationScopes": [
+        "src/host/runtime/internal/mention-symbol-deps.ts",
+        "src/host/runtime/internal/__tests__/mention-symbol-deps.hellgate.test.ts"
+      ]
+    },
+    {
+      "id": "R07",
+      "lane": "W5-A",
+      "wave": "W5",
+      "findings": [
+        "G-F12",
+        "F-08"
+      ],
+      "actions": [
+        "G-F12.1",
+        "G-F12.2",
+        "G-F12.3",
+        "G-F12.4",
+        "F-08.1",
+        "F-08.2",
+        "F-08.3",
+        "F-08.4"
+      ],
+      "sourceScopes": [
+        "src/auth/chatgpt-oauth/",
+        "src/apps/web-daemon/web-user-input-port.ts",
+        "src/apps/web-daemon/web-user-input-port.test.ts",
+        "src/apps/web-daemon/web-user-input/"
+      ],
+      "existingTests": [
+        "tests/unit/web-user-input-port-lifecycle-hellgate.test.ts",
+        "tests/integration/web-user-input-port-e2e.test.ts",
+        "tests/unit/auth/chatgpt-oauth-adapter.test.ts"
+      ],
+      "newTestScopes": [
+        "tests/unit/sep8-remediation/r07/",
+        "tests/integration/sep8-remediation/r07/"
+      ],
+      "artifactScope": "docs/plans/sep-8-structural-remediation/work/R07/",
+      "integrationScopes": [
+        "src/apps/web-daemon/server/ws-handlers.ts",
+        "src/host/"
+      ]
+    },
+    {
+      "id": "R08",
+      "lane": "W5-B",
+      "wave": "W5",
+      "findings": [
+        "P2-A-02",
+        "P2-A-05",
+        "C-F12"
+      ],
+      "actions": [
+        "P2-A-02.1",
+        "P2-A-02.2",
+        "P2-A-02.3",
+        "P2-A-02.4",
+        "P2-A-05.1",
+        "P2-A-05.2",
+        "P2-A-05.3",
+        "P2-A-05.4",
+        "C-F12.1",
+        "C-F12.2",
+        "C-F12.3",
+        "C-F12.4"
+      ],
+      "sourceScopes": [
+        "src/agent/shadow-verify-adapters/",
+        "src/agent/lsp-diagnostics-hook.ts",
+        "src/agent/lsp-diagnostics-hook/",
+        "src/agent/lsp-bridge/",
+        "src/lsp/adapters/base.ts",
+        "src/lsp/adapters/base/"
+      ],
+      "existingTests": [
+        "tests/unit/shadow-verify-adapters-hellgate.test.ts",
+        "tests/unit/lsp-diagnostics-hook-hellgate.test.ts"
+      ],
+      "newTestScopes": [
+        "tests/unit/sep8-remediation/r08/",
+        "tests/integration/sep8-remediation/r08/"
+      ],
+      "artifactScope": "docs/plans/sep-8-structural-remediation/work/R08/",
+      "integrationScopes": []
+    },
+    {
+      "id": "R15",
+      "lane": "W5-C",
+      "wave": "W5",
+      "findings": [
+        "E-PROV-01",
+        "G-F6",
+        "E-KNOB-01"
+      ],
+      "actions": [
+        "E-PROV-01.1",
+        "E-PROV-01.2",
+        "E-PROV-01.3",
+        "E-PROV-01.4",
+        "G-F6.1",
+        "G-F6.2",
+        "G-F6.3",
+        "G-F6.4",
+        "E-KNOB-01.1",
+        "E-KNOB-01.2",
+        "E-KNOB-01.3",
+        "E-KNOB-01.4"
+      ],
+      "sourceScopes": [
+        "src/runner/assemble/llm.ts",
+        "src/runner/assemble/llm/",
+        "src/apps/cli/status-cmd.ts",
+        "src/apps/cli/doctor/",
+        "src/runner/knobs/knobs/read-outline.ts",
+        "src/runner/knobs/knobs/test-runner.ts"
+      ],
+      "existingTests": [
+        "tests/unit/bench-knobs-wiring-hellgate.test.ts",
+        "tests/unit/llm-providers/claude-use-quartet-wiring-hellgate.test.ts"
+      ],
+      "newTestScopes": [
+        "tests/unit/sep8-remediation/r15/",
+        "tests/integration/sep8-remediation/r15/"
+      ],
+      "artifactScope": "docs/plans/sep-8-structural-remediation/work/R15/",
+      "integrationScopes": [
+        "src/apps/cli/index.ts",
+        "src/apps/cli/internal.ts",
+        "src/apps/eval/index.ts",
+        "src/shared/env-files.ts",
+        "src/shared/env-flag.ts"
+      ]
+    },
+    {
+      "id": "R16",
+      "lane": "W6-A",
+      "wave": "W6",
+      "findings": [
+        "G-F11",
+        "G-F8",
+        "G-F13"
+      ],
+      "actions": [
+        "G-F11.1",
+        "G-F11.2",
+        "G-F11.3",
+        "G-F11.4",
+        "G-F8.1",
+        "G-F8.2",
+        "G-F8.3",
+        "G-F8.4",
+        "G-F13.1",
+        "G-F13.2",
+        "G-F13.3",
+        "G-F13.4"
+      ],
+      "sourceScopes": [
+        "src/runner/assemble/session-authorities/build-skills.ts",
+        "src/runner/assemble/session-authorities/skill-inputs/",
+        "src/skill/runtime/"
+      ],
+      "existingTests": [
+        "tests/unit/skill/runtime/skill-runtime-authority-hellgate.test.ts"
+      ],
+      "newTestScopes": [
+        "tests/unit/sep8-remediation/r16/",
+        "tests/integration/sep8-remediation/r16/"
+      ],
+      "artifactScope": "docs/plans/sep-8-structural-remediation/work/R16/",
+      "integrationScopes": [
+        "src/apps/cli/repl/session-setup.ts",
+        "src/apps/web-daemon/authority-readouts.ts",
+        "src/apps/cli/repl.ts",
+        "src/apps/agent/mode-presets/system.ts"
+      ]
+    }
+  ],
+  "closeout": {
+    "wave": "W7",
+    "dependsOn": [
+      "W6"
+    ],
+    "mode": "serial",
+    "actions": [
+      "I.1",
+      "I.2",
+      "I.3",
+      "I.4",
+      "I.5",
+      "I.6",
+      "I.7",
+      "I.8"
+    ]
+  }
+}

@@ -1,296 +1,80 @@
-# Sep-08 SE audit — agent-1 (lane G session dump)
-
-> **Role:** Sep-07 SOLID/SE campaign **lane G** worker (this Cursor session).
-> **Historical receipt:** [`docs/plans/sep-7-solid-se-audit/receipts/W1-G.md`](../../plans/sep-7-solid-se-audit/receipts/W1-G.md) — 분류는 `0b14f5cf` 기준. 891-row 매니페스트는 그쪽 appendix.
-> **Live dump:** 이 파일. `9b05cd33` hole-check 반영. W3-I 티켓 아님. 구현 권한 없음.
-> **Dispatch:** [`docs/plans/sep-7-solid-se-audit/prompts/README.md`](../../plans/sep-7-solid-se-audit/prompts/README.md).
-
-## 1. 세션이 한 일
-
-Sep-07 dispatch pack의 **레인 G**만 수행함. 프로덕션 미수정.
-
-- Exclusive production: `src/apps`, `src/host`, `src/sdk`, `src/ui`, `src/workflow`, `src/scheduler`, `src/reactor`, `src/observability`, `src/radar`
-- 1차: W0 없음 → **tracked HEAD-only** (`0b14f5cf`). 영수증 W1-G.
-- 2차 hole-check (이 턴): 형제 레인 dump(C/A/E/F/H) 교차 + 병렬 3워커. 코디가 **현재 HEAD `9b05cd33`**에서 owner+consumer 재읽음. grep-only 완료 청구 없음.
-  - [CLI composition](755a60b8-89b1-41c3-b01d-4197a00f3274)
-  - [Web+host boot](ebc5e6de-b4e6-4d83-8572-de729e630e35)
-  - [Bench/eval/scheduler/obs](794c7fb3-7823-4168-8d7f-cd5489b88595)
-
-## 2. 스냅샷
+# Sep-08 SE audit — agent-1 재검증 결과
 
-| Field | 1차 W1-G | 2차 hole-check (live) |
-|---|---|---|
-| HEAD = origin/main | `0b14f5cf4f05ffaecf2fa1595bd2d7ba27f2b0dd` | `9b05cd33b008b52bf54c9f2391070afcbfbaa8fe` |
-| ahead/behind | `0 0` | `0 0` |
-| G production dirty | 3 files (SEP6 overlay) | **empty** (overlay가 `9b05cd33`에 커밋됨) |
-| W0 | 없음 | 없음 |
+> 기준: `f5f4875799141068af73e604129c8b9a09f76007` (`origin/main`과 동일)
+> 범위: lane G (`src/apps`, `src/host`, `src/sdk`, `src/ui`, `src/workflow`, `src/scheduler`, `src/reactor`, `src/observability`, `src/radar`)
+> 처분 원칙: 현재 소스에서 실제 producer → consumer 경로와 실패 효과가 확인되는 미해결 항목만 유지한다.
 
-`9b05cd33` message=`done`. SEP6 closeout + W1-A..H + 이 dump 초안이 한 커밋에 들어감. **W1-G 본문은 옛 HEAD 기준이라 G-F2/G-F7 상태가 이 파일과 어긋남. live 처분은 여기.**
+## 유지 항목
 
-G production porcelain (2차): 없음. `docs/ARCHITECTURE.md` / `slice-boundary-configs.ts`는 그 커밋에서 HEAD=WT로 맞춰짐.
+| ID | Sev | 실제 실패 효과 |
+|---|---:|---|
+| G-F5 | P1 | ProMax 박스 bootstrap이 family setup 전에 반환되고, 그 박스는 warm-box probe도 영구 통과하지 못한다. |
+| G-F9 | P1 | 제품 CLI가 Docker/Lima runner seam을 주입하지 않아 두 backend를 선택해도 항상 `remote-not-configured`가 된다. |
+| G-F4 | P2 | 프로세스가 claim 후 죽으면 automation row가 `running`에 영구 고정된다. |
+| G-F6 | P2 | eval만 `.env` precedence가 다른 실행 surface와 반대다. |
+| G-F11 | P2 | CLI/web skill authority에서 조직 admin policy와 admin skills가 영구 비활성이다. |
+| G-F12 | P2 | 소켓을 유지한 turn abort가 pending `request_user_input`/`ask_user` resolver를 남긴다. |
+| G-F15 | P2 | unpriced eval usage가 보고서에서 실제 `$0` 측정값처럼 표시된다. |
+| G-F8 | P3 | CLI permission-store load 실패가 무경고 in-memory posture fallback으로 바뀐다. |
+| G-F13 | P3 | `apps/agent`의 repo-rules load 실패가 무경고로 규칙 없는 prompt를 만든다. |
 
-## 3. 커버리지 (1차 그대로, 파일 수 불변)
+### G-F5 [P1] ProMax bootstrap과 warm-box readiness 계약 분열
 
-| Universe | Count |
-|---|---:|
-| G production `*.ts` (HEAD-tracked, tests 제외) | **891** 전부 분류 |
-| colocated tests | 113 |
-| 총 라인 | 176959 (1차 `0b14f5cf`) / 176973 (2차 `9b05cd33`) |
-| god-MODULE >1000 | 0 |
-| god-FUNCTION >150 | 0 |
-| cohort 900–999 | **9** (인벤토리) |
+- 근거: `src/apps/bench/remote/box-session/ec2-lifecycle.ts:483-491`의 `boxGrade` 분기가 반환하므로 `setupBoxForFamily`(`:520-526`)를 건너뛴다. 동시에 `isBootstrapped`(`:711-715`)는 모든 family에 `~/swebench-python`을 요구한다.
+- 도달 경로: `src/apps/bench/remote/full.ts:542-549`와 `src/apps/bench/remote/pool/launch-window.ts:80-92`가 `findIdleBox`; `ec2-lifecycle.ts:785-792`가 위 probe 실패 박스를 제외한다.
+- 트리거/영향: ProMax 신규 provision은 family setup 미실행. 살아 있는 박스는 재사용되지 않으면서 single-box guard는 신규 launch를 거부한다.
+- 최소 수정/rail: grading shim skip만 family-aware하게 유지하고 family setup을 반환 밖에서 실행한다. readiness probe도 family profile 기준으로 만들고 `boxGrade` family bootstrap + warm reuse를 RED로 고정한다.
 
-2차에서 추가로 owner+consumer를 연 구멍: CLI remote/skill/slash, web WS userInput, pool abort settle, eval cost rollup, host assembler metrics→registry, C-F5 serve-stdio, H-SA-01 host 선택 분기.
+### G-F9 [P1] Docker/Lima remote backend의 production seam 미배선
 
-## 4. Finding 인덱스 (live HEAD `9b05cd33`)
+- 근거: 유일한 production 선택자는 `src/apps/cli/index.ts:95-101`에서 `selectRemoteRunner(process.env, {})`를 호출한다. registry는 Docker에는 `dockerProcess`, Lima에는 `limaProcess`와 `limaVm`이 없으면 `null`을 반환한다(`src/remote/runner/registry.ts:47-52,62-78`).
+- 트리거/영향: `QUANTA_REMOTE_RUNNER=docker|lima`로 `quanta remote` 실행 시 backend adapter에 도달하지 않고 exit 64 `remote-not-configured`.
+- 최소 수정/rail: CLI composition root에서 Node process adapter와 Lima VM 설정을 주입한다. 실제 route가 각 factory를 선택하는 integration rail을 추가한다.
 
-구현하지 않음.
+### G-F4 [P2] live ticker의 stale claim 복구 미사용
 
-| ID | Sev | Status | 한 줄 |
-|---|---|---|---|
-| G-F5 | P1 | **open** | ProMax `boxGrade` early-return이 family setup까지 skip. `isBootstrapped`는 여전히 `~/swebench-python` 요구 |
-| G-F9 | P1 | **open** | CLI `selectRemoteRunner(env, {})` — docker/lima seam 미주입 (C-F6 G half) |
-| G-F10 | P1 | **open** | CLI HELP가 `headless`를 제품 peer로 광고. empty seams로 합성 성공 (C-F7 G half) |
-| G-F16 | P3 | **latent (dead branch)** | assembler metrics 분기는 production producer 0 — `AgentConfig.metrics`가 legacy `Metrics`(=`increment` 없음)라 `looksLikeMetricsRegistry` 항상 false |
-| G-F1 | P3 | **inventory** | catch 유무 비대칭만 존재. 공유 producer가 양쪽 fail-soft라 도달 트리거 없음 |
-| G-F3 | P3 | **inventory (C 소유)** | `MCP_USE_ISOLATED_SPAWN`은 repo 전체 production reader 0. G 고유 배선 갭 아님 |
-| G-F4 | P2 | **open** | `tickScheduler`가 `claim(now)`만. `TickOpts`에 `reclaimBefore` 없음 |
-| G-F6 | P2 | **open** | eval dotenv 순서가 CLI/bench와 **반대** |
-| G-F11 | P2 | **open** | CLI+web skill authority가 `orgConfigDir`를 영구 null. ADR-0134 env 미읽음 |
-| G-F12 | P2 | **open** | web `turn.abort`가 `userInput.cancelAll`을 안 탐. 소켓 close만 (Aug-25 #88) |
-| G-F14 | P2 | **open** | pool worker abort 시 `lost:true` 합성 전에 throw. 부분 영수증 없음 |
-| G-F15 | P2 | **open** | eval coverage-matrix가 unpriced `costUsd`를 `$0`처럼 합산. bench는 `—` |
-| G-F8 | P3 | **open** | CLI permission store 로드 침묵 fail-soft vs 웹 `logger.warn` |
-| G-F13 | P3 | **open** | `apps/agent` repo-rules silent fail-open vs CLI/web warn |
-| G-F2 | P2 | **repaired** | `mentionFirstLine` (`src/shared/mention-text.ts`) 7 consumer 전부 HEAD |
-| G-F7 | P1 | **repaired** | `/session-registry cleanup` → `sweepGlobalSessionResourceRegistryNow()` 싱글톤 |
+- 근거: engine port는 `claim(now, { reclaimBefore })`를 지원한다(`src/scheduler/automation-engine/port.ts:205-220,232-235`). `TickOpts`에는 reclaim 입력이 없고 실제 ticker는 `engine.claim(now)`만 호출한다(`src/scheduler/automation-engine/ticker.ts:77-90,110-123`).
+- 트리거/영향: claim과 finalize 사이 프로세스 종료 시 durable row가 `running`으로 남고 이후 tick에서 다시 선택되지 않는다.
+- 최소 수정/rail: composition에서 정한 stale window를 ticker의 claim에 전달한다. restart 후 stale row는 재claim되고 fresh/live claim은 건드리지 않는 engine+ticker rail이 필요하다.
 
-### G-F5 [P1] ProMax boxGrade / isBootstrapped 계약 분열 — open
+### G-F6 [P2] eval dotenv precedence 역전
 
-- `ec2-lifecycle.ts:483-491` `return` → `:520-530` `setupBoxForFamily` / `verifyPyrightGrounding` 미실행.
-- `:711-715` `isBootstrapped`는 `test -x ~/swebench-python` 필수. ProMax는 shim을 안 만듦 → 영원히 false.
-- **`attachBox` 재실행 경로는 반증됨**: 호출 3곳(`full.ts:543`, `pool/worker.ts:327`, `:334`)이 전부 `findIdleBox` 경유이고 `:792`가 `isBootstrapped` false를 `continue`로 거름 ⇒ ProMax 박스는 애초에 idle로 반환되지 않음. 실효과는 **웜박스 재사용 영구 불가 + 그 박스가 살아있는 동안 신규 launch 거부**(`full.ts:546-550`, `launch-window.ts:59-68`).
-- 테스트: hellgate가 verified / no boxGrade라 early-return RED 못 함.
-- write: 해당 파일. shim skip은 유지하고 family setup은 호출하거나 probe를 family-aware로.
+- 근거: CLI와 agent는 `.env.dev → .env.local → .env` first-wins(`src/apps/cli/index.ts:30`, `src/apps/agent/index.ts:31`), bench도 동일하다(`src/apps/bench/run-main.ts:831-834`). eval만 `.env → .env.local → .env.dev`다(`src/apps/eval/index.ts:165-174`).
+- 트리거/영향: 같은 checkout과 shell에서 eval provider/model/credential 설정이 다른 surface와 다르게 해석된다.
+- 최소 수정/rail: eval도 shared env loader/동일 순서를 사용하고, 세 파일에 충돌 값을 둔 precedence test를 추가한다.
 
-### G-F9 [P1] remote composition root가 seam을 안 넣음 — open (C-F6 G half)
+### G-F11 [P2] CLI/web skill org policy 미배선
 
-- **Owner:** `src/apps/cli/index.ts:100` `selectRemoteRunner(process.env, {})`
-- **Contract:** `src/remote/runner/registry.ts:47-76` — docker/lima는 seam 없으면 `null`. 주석: composition root가 wiring 공급.
-- **Failure:** `QUANTA_REMOTE_RUNNER=docker|lima` → 항상 `remote-not-configured` (exit 64). 어댑터 dead. `apple-vz`는 `{}`여도 non-null → spawn `daemon-unavailable`.
-- **C vs G:** C = registry가 이름만 받고 seam 없으면 null. **G = 유일한 production caller가 `{}`를 넣음.**
-- write: `apps/cli/index.ts` (+ Docker/Lima factory를 CLI/host leaf에). Forbidden: registry에 암시 default docker; C registry 본문을 G가 “고침”.
-- proof: 정적 호출. live docker 미실행.
+- 근거: 두 composition root 모두 `snapshotInputs`에 user dir만 전달한다(`src/apps/cli/repl/session-setup.ts:350-363`, `src/apps/web-daemon/authority-readouts.ts:97-110`). builder는 입력이 없으면 `orgConfigDir`를 `null`로 내려 admin policy를 비활성화한다(`src/runner/assemble/session-authorities/build-skills.ts:68-80`).
+- 트리거/영향: `QUANTA_ORG_CONFIG_DIR` 또는 기본 org 디렉터리에 `org-policy.json`/`admin-skills`가 있어도 CLI/web active skill set과 banned/required enforcement에 반영되지 않는다.
+- 최소 수정/rail: composition root에서 org dir을 한 번 resolve해 `snapshotInputs.orgConfigDir`에 전달한다. 실제 temp org policy가 CLI/web authority의 active/policy projection을 바꾸는 integration rail을 추가한다.
 
-### G-F10 [P1] CLI가 headless를 제품 runner로 광고 — open (C-F7 G half)
+### G-F12 [P2] turn abort 시 web user-input resolver 누수
 
-- **Owner:** `remote-cmd.ts:63` HELP `docker|lima|apple-vz|headless|none`; route는 G-F9와 동일 `{}`.
-- **Failure:** `QUANTA_REMOTE_RUNNER=headless`는 seam 없이 선택됨 → stub가 `succeeded`/exit 0 (`headless-stub.ts:93-103`). docker/lima는 죽는데 headless만 성공.
-- **C vs G:** 합성 성공 본체 = C. env를 제품 HELP/route에 노출 = G.
-- write: HELP를 test-only로 표시하거나 `routeRemote`에서 headless 차단. Forbidden: stub만 고치고 CLI 광고 방치.
+- 근거: requester는 신호 입력 없이 resolver를 Map에 저장한다(`src/apps/web-daemon/web-user-input-port.ts:118-137`). `cancelAll()` production 호출은 socket close 경로뿐이며 소스도 turn-abort 잔여를 명시한다(`src/apps/web-daemon/server/ws-handlers.ts:500-510`).
+- 트리거/영향: 연결을 유지한 상태에서 pending `request_user_input`/`ask_user` turn을 abort하면 promise와 pending entry가 다음 answer/close까지 남는다.
+- 최소 수정/rail: shared-session의 `turn.aborted|failed|completed` terminal event에서 해당 turn의 pending request를 cancel한다. 소켓 유지 + abort 후 promise settled/pendingCount 0을 검증한다.
 
-### G-F16 [P3] assembler metrics 분기는 production-unreachable — latent (P1-A-01 G half)
+### G-F15 [P2] eval unpriced usage를 `$0`로 표시
 
-- **Owner G:** `host/runtime/agent-config-assembler.ts:665-672` — `metricsEmitter` 있으면 `buildCallerOwnedRegistryWithTelemetry`, 없으면 `getGlobalSessionResourceRegistry`.
-- **Owner A:** singleton+sweep vs caller-owned (sweep 없음, `runtimeConfig()` 재읽기).
-- **Consumer 분열 (2차 HEAD에서 더 선명):** slash inspect/cleanup은 **singleton만** (`session-registry-cmd.ts:338-365`). live 세션 Map은 caller-owned일 수 있음.
-- **Failure: 없음 (도달 불가).** `metrics-adapter.ts:137` duck-test가 `increment`+`gauge`를 요구하는데 `AgentConfig.metrics`의 타입 `observability/metrics.ts:87 class Metrics`에는 `increment`가 **0건**(있는 건 `inc`/`value`/`set`/`start`/`record`/`stats`). 그 docblock 자체가 "legacy `Metrics` … does NOT have `increment`, so the duck test returns false"라고 명시. 유일 producer는 `cli/internal.ts:605 new Metrics()` ⇒ caller-owned 분기 미발화. **split-brain은 발생할 수 없음.**
-- write: assembler가 metrics여도 singleton+sweep을 쓰거나, caller-owned에 sweep을 붙이는 건 A. G는 분기만. Forbidden: A `global.ts`를 G가 재작성.
-- proof: producer census 완료 — `defaultMetricsRegistry()` 3곳 전부 sink용이고 `cfg.metrics`에 도달하지 않음.
+- 근거: token이 있으면 record count는 증가하지만 `costUsd`가 없으면 합산만 생략한다(`src/apps/eval/report/coverage-matrix.ts:123-135`). rollup 기본은 0(`:185-195`)이고 markdown/headline은 항상 `$...`를 출력한다(`src/apps/eval/report/markdown.ts:41-49,71-75`).
+- 트리거/영향: price table에 없는 model의 실제 token usage가 `Estimated cost: $0.0000`로 표시되어 미측정과 무비용을 구분할 수 없다.
+- 최소 수정/rail: `unpricedRecords` 또는 pricing completeness를 rollup에 보존하고, 전부/일부 unpriced인 보고서가 `$0` 단독 표기를 하지 않게 고정한다.
 
-### G-F1 [P2] MCP 로드 실패 정책 CLI vs web — open
+### G-F8 [P3] CLI permission-store fallback 무관측
 
-- CLI `internal.ts#loadMcpFeatures` catch 없음 → `prepare-runtime` rethrow → 부트 실패.
-- 웹 `daemon-mcp.ts:94-97` catch → warn → `{ tools:[], clients:[], mcpAccessor: undefined }`.
-- **도달성 없음:** `readMcpConfig`(`mcp-composition.ts:433-437`)는 malformed JSON도 `catch → return []`, `loadSingle`(`mcp-bridge.ts:427-432`)은 서버별 `catch → return null` → `loadMcpTools` continue. 깨진 `.mcp.json`도, 죽은 서버도 throw하지 않음 ⇒ CLI rethrow 경로에 도달하는 트리거가 없음.
-- **D21 아님.** 남는 건 정책 shape 비대칭뿐 → inventory.
+- 근거: CLI loader는 모든 예외를 무경고 `undefined`로 바꾼다(`src/apps/cli/repl.ts:288-295`). 동일 store를 쓰는 web loader는 durable posture가 사라졌음을 경고한다(`src/apps/web-daemon/runtime-factory.ts:272-282`).
+- 트리거/영향: 권한/읽기 실패 시 CLI는 durable permission posture 대신 seed를 쓰지만 운영자가 그 전환을 알 수 없다.
+- 최소 수정/rail: fail-soft는 유지하고 오류와 store path를 경고한다. loader rejection → warning 1회 + `undefined`를 고정한다.
 
-### G-F3 [P2] Isolated spawn 게이트 미배선 — open (C-F1 소비자)
+### G-F13 [P3] agent preset repo-rules fallback 무관측
 
-`mcp-composition.ts:121-135` factory 항상 `new McpClient`. 단 `MCP_USE_ISOLATED_SPAWN`은 `src/` 전체에서 정의부 2줄뿐이고 `isolatedMcpEnabledFromEnv` 호출 **0** — 게이트 자체가 inert. 반대로 plugin/skill 경로는 `agent/skill-mcp-wire.ts:92` / `agent/plugin-activation-handler/auto-wire.ts:167`에서 env와 무관하게 **무조건** `IsolatedMcpClient`를 씀.
+- 근거: `resolveModePresetRepoRules`는 `loadRepoRules(cwd)` 실패를 무경고로 삼킨다(`src/apps/agent/mode-presets/system.ts:42-49`). web의 같은 interactive-class 경로는 cwd와 오류를 경고한다(`src/apps/web-daemon/runtime-factory/agent-config-base.ts:228-238`).
+- 트리거/영향: 읽기/parse 실패 시 agent prompt에서 repo 규칙이 사라져도 로그가 없다.
+- 최소 수정/rail: fail-open 정책은 유지하고 경고 sink를 주입/호출한다. 실패 시 규칙 없음 + 경고 1회를 고정한다.
 
-⇒ G-vs-C 두 끝 불변식이 아니라 **C가 끝까지 소유한 dead gate**. G에서 factory를 게이트에 배선하면 아무도 읽지 않는 knob을 존중하게 됨.
+## 검증
 
-### G-F4 [P2] live tick이 stale claim reclaim을 안 함 — open
-
-- `TickOpts` (`ticker.ts:77-91`)에 `reclaimBefore` 없음. `tickScheduler`는 `engine.claim(now)`만 (`:119`).
-- 포트·sqlite·in-memory는 reclaim 구현. A `automation-ticker.ts`는 TickOpts가 막아서 못 넣음.
-- default-OFF 엔진. 켜진 뒤 crash-during-tick → row가 `running`에 박힘.
-
-### G-F6 [P2] eval dotenv 순서 역전 — open
-
-first-wins SSOT: `.env.dev → .env.local → .env`
-
-- CLI `index.ts:30` / agent `index.ts:31` / bench `run-main.ts:833`: 그 순서.
-- eval `index.ts:174`: **`.env → .env.local → .env.dev`**
-
-### G-F11 [P2] skill org policy 미배선 — open (E-SKILL-01 G half)
-
-- CLI `repl/session-setup.ts:343-363` — 주석이 `orgConfigDir`를 고의 null. `snapshotInputs`에 `userDir`만.
-- web `authority-readouts.ts:90-105` 동일.
-- `build-skills.ts:73-76` orgConfigDir 결정 → `:77-80` `loadAdminPolicy({ orgConfigDir })`; null ⇒ policy 없음.
-- ADR-0134 / catalog: `$QUANTA_ORG_CONFIG_DIR` 또는 `~/.config/quanta/org/`. **G composition은 env를 안 읽음.** `org-policy.json` banned/required·admin-skills discovery가 primary CLI/web에서 inert.
-- write: `session-setup.ts` + `authority-readouts.ts`에 org dir resolve. Forbidden: E가 CLI 수정; `src/shared/**`.
-
-### G-F12 [P2] turn abort ≠ userInput cancel — open (Aug-25 #88)
-
-- `ws-handlers.ts:500-513` — `cancelAll`은 WS `close`만. 주석 residual 명시.
-- `goal-wake-compose.ts:38`은 이미 `turn.aborted|failed|completed`를 봄.
-- **Failure:** 소켓이 열린 채 turn cancel → `request_user_input` / `ask_user` resolver hang.
-- 웹 userInput 포트의 `cancelAll` 유일 production caller = `ws-handlers.ts:510` (close 경로). 단 bare `cancelAll` 토큰 자체는 playbook debouncer·headless-stub·fs-watch·user-question broker에도 있음 — 다른 포트.
-- 게이트: 포트 존재는 `QUANTA_WEB_AGENT_STATE`, in-band interrupt는 `QUANTA_THIN_CLIENT_DISPATCH`. 둘 다 default-OFF.
-- write: `ws-handlers.ts`가 shared-session turn terminal에서 `userInputPorts.handle.cancelAll()`. Forbidden: protocol/kernel.
-
-### G-F14 [P2] pool abort가 `lost:true` 합성 전에 throw — open
-
-- `pool/worker.ts:957-961` catch → `queue.abort()` → `finalizeWorkerRun`이 `primaryErr`를 **재throw** (`:622`).
-- `pool.ts:186-188` `workerErrors` 있으면 `lost:true` map (`:192-200`) **전에** throw.
-- consumer `commands/pool.ts`는 성공 시에만 `summarizePoolRun`.
-- **Failure:** 이미 `out`에 쌓인 청크·abort된 잔여가 LOST/PARTIAL 영수증 없이 전체 throw. 주석의 “no recorded result → lost”는 worker 실패 시 도달 불가.
-- write: `pool.ts` settle 순서 + worker abort 정책. Forbidden: auth/EC2 TTL 소유권.
-
-### G-F15 [P2] eval cost rollup이 unpriced를 `$0`처럼 표시 — open
-
-- `eval/report/coverage-matrix.ts:128-135` — `tokens` 있으면 `records++`, `costUsd`는 number일 때만 가산.
-- `eval/report/markdown.ts:49` — `Estimated cost: $…` 무조건 `toFixed`.
-- bench `analyze/cost.ts:260-268`은 unpriced면 `— (no pricing for model)`.
-- **Failure:** unknown model → 헤드라인 `$` 과소. 토큰/`Runs with usage`는 증가.
-- write: matrix+markdown에 `pricingKnown`/`unpricedRecords` 또는 bench식 `—`. Forbidden: `@/observability/pricing` SSOT, prompt-cache fallback (X-G6).
-
-### G-F8 [P3] permission store 로드 관측 드리프트 — open
-
-CLI `repl.ts:288-295` empty catch. 웹 `runtime-factory.ts` `logger.warn`. 둘 다 fail-soft → `undefined`.
-
-### G-F13 [P3] apps/agent repo-rules 침묵 fail-open — open
-
-- `apps/agent/mode-presets/system.ts:49` `loadRepoRules(cwd).catch(() => undefined)`
-- CLI host: `session-state-ports.ts:253-257` warn. 웹: `agent-config-base.ts:232-237` warn.
-- 같은 fail-open, 관측만 없음. write: `system.ts` warn 미러. fail-open 뒤집지 말 것.
-
-### G-F2 [P2] **repaired** on `9b05cd33`
-
-`src/shared/mention-text.ts` `mentionFirstLine`가 HEAD. G: `mention-source-deps.ts:285`, `at-autocomplete/provider.ts:116`. A resolvers도 동일 import. 로컬 `firstLineOf` 없음. S8 트리거 이 HEAD에서 재현 안 됨.
-
-### G-F7 [P1] **repaired** on `9b05cd33`
-
-`session-registry-cmd.ts:338-365` — dry-run은 `getGlobalSessionResourceRegistryState().sweepConfig`, live는 `sweepGlobalSessionResourceRegistryNow()`. 두 번째 `startAutoSweep` / `runtimeConfig()` 재스냅샷 없음. (G-F16 split-brain은 **다른** 불변식.)
-
-## 5. 재오픈하지 않은 것 / 2차에서도 안 연 것
-
-| ID | 이유 |
-|---|---|
-| D21 CLI/web boot 병합 | 공통 I/O 계약 + parity RED 없음. 세 루트 inventory |
-| D22 `sleepReal` | 의미 동일, **바이트는 다름** — `pool/types.ts:119` 한 줄 `(r)` vs `lease-fs.ts:5-8` 블록 `(resolve)` |
-| D26 AgentEvent | dropped `usage` 등 존재. **그걸 필요로 하는 소비자** 못 짚음 |
-| SEP6 S8 | **이 HEAD에서 닫힘** (G-F2 repaired) |
-| C-F5 stdio EOF | G `serve-stdio-cmd.ts`가 stdin `end`/`close` 구독. transport data-only는 C. G hang 아님 |
-| H-SA-01 charter fail-open | assembler는 `QUANTA_SIDE_AGENT_PROCESS`일 때 process registry 정직 선택. finding IPC는 H |
-| permission grant dual-write | 한 gate 경로. 웹에 trustScope writer 없음 (missing writer ≠ dual-write) |
-| usage-accounting ×3 mint | override-safe. 세션당 한 instance |
-| web OOB WS vs session.v1 (#87) | goalWork/goalVerify는 refuse. 새 misroute 없음. X-C22 inventory |
-| C-F2 SessionVerbSurface | SDK `handle-adapter`가 구멍 핀. write는 protocol (C). G-Fx 아님 |
-| `/config set` 유령 | 7파일 8개 **주석**에 `/config set` (knob-catalog·runtime-config/types·global.ts·caller-owned-builder·cli-knobs-accessor×2·registry-surface·persistence-sqlite). live 슬래시는 `/knobs`뿐. comment rot → **inventory** |
-| CLI `dotenv.ts` | `export { loadEnvFiles } from "@/shared/env-files"` re-export. dual-owner 아님 |
-| cohort 900–999 size | size≠failure. 실실패는 G-F3/F5/F6/F14뿐 |
-
-## 6. 인벤토리 (failure mode 없음)
-
-- cohort 9파일: gates 985, worker 962, box 960, brain-mode 959, eval/index 956, rewind 938, ec2-lifecycle 934, run-main 929, mcp-composition 923.
-- `SessionBootstrapDeps` fat bag = 펜스 비용.
-- host/sdk `surfaceIsolationOnly`. `@/apps` value import 없음.
-- `parseEnvFlag` from `@/runner/assemble` = `@/shared` re-export.
-- usage mint 3곳 전부 `resolveUsageAccounting`.
-- `costUsd` null vs prompt-cache sonnet — ADR-0138. UI join 없으면 X-G6 inventory.
-- radar JSONL skip-corrupt + no fsync, default-OFF.
-- `NamedEntry` host 재선언 = fence.
-- `loadNamedAgents(...).catch(() => undefined)` (`apps/agent/index.ts:458`) — intentional fail-open. 대칭 warn 사이트는 `apps/cli/repl/session-loop-options.ts:129`. `apps/agent`엔 skill 로더가 없음. P3 smell, 승격 안 함 (G-F13과 구조 동일한데 여기만 미승격 — 트리아지 비일관).
-- apps/agent는 `.mcp.json` bootstrap 안 함 (#75 inventory).
-- CLI `rule-indicator.ts` `loadRepoRules.catch(() => undefined)` — chrome, boot capability 아님.
-- `getOrCreateRegistry` (`agent/session-resource-registry/unified-api.ts:118`, ADR-0383 "unified mint API") — production caller **0**. assembler는 builder를 직접 호출. dead API.
-
-## 7. W2-X fingerprint (live)
-
-| ID | Fingerprint | G 끝 | 상대 | 처분 |
-|---|---|---|---|---|
-| X-G1 | mcp-load-fault / throw-vs-empty | `loadMcpFeatures` vs `daemon-mcp.ts` | A `loadMcpTools` | **G-F1** |
-| X-G2 | mention-first-line / shared owner | `mentionFirstLine` 7 call | shared + A | **repaired** |
-| X-G3 | MCP_USE_ISOLATED_SPAWN ignored | `mcp-composition.ts:135` | C isolated-client | **G-F3 / C-F1** |
-| X-G4 | session-boot three roots | bootstrap vs web vs interactive | D21 | inventory |
-| X-G5 | usage-accounting mint copies | tooling-bundle / wire / web factory | obs | override-safe |
-| X-G6 | null vs sonnet fallback | `costUsd` vs prompt-cache | none | inventory; **G-F15**는 eval 표시층 |
-| X-G7 | sleepReal | pool vs lease-fs | D22 | 의미 동일, 표기 다름 |
-| X-G8 | AgentEvent subset-map | stream-json-sink | D | D26 closed |
-| X-G9 | radar jsonl skip-corrupt | jsonl-file-store | A producer-hook | gated |
-| X-G11 | SessionVerbSurface hole | sdk handle-adapter | C-F2 | G consumer only |
-| X-G15 | claim reclaim absent | `ticker.ts` | A automation-ticker | **G-F4** |
-| X-G16 | boxGrade vs isBootstrapped | ec2-lifecycle | profile | **G-F5** |
-| X-G17 | dotenv first-wins order | eval vs CLI/bench | shared | **G-F6** |
-| X-G18 | dual startAutoSweep | session-registry-cmd | A global | **repaired**; see X-G20 |
-| X-G19 | permission load silent-vs-warn | repl vs runtime-factory | F store | **G-F8** |
-| X-G20 | registry mint split-brain | assembler metrics branch | P1-A-01 | **G-F16 — latent, producer 없음** |
-| X-G21 | remote-runner empty seams | `cli/index.ts:100` | C-F6 registry | **G-F9** |
-| X-G22 | headless advertised | remote-cmd HELP | C-F7 stub | **G-F10** |
-| X-G23 | orgConfigDir null | session-setup + web authority | E-SKILL-01 | **G-F11** |
-| X-G24 | userInput cancel vs turn abort | ws-handlers close-only | #88 | **G-F12** |
-| X-G25 | pool lost:true unreachable | pool.ts throw-before-map | commands/pool | **G-F14** |
-| X-G26 | eval unpriced as $0 | coverage-matrix + markdown | bench analyze/cost | **G-F15** |
-| X-G27 | repo-rules warn drift | agent system.ts vs host/web | — | **G-F13** |
-
-W1-G가 정의한 **X-G10 / X-G12 / X-G13 / X-G14는 이 표에서 빠짐** (X-G10=NamedEntry·X-G12=parseEnvFlag는 §6 인벤토리로 흡수, **X-G13 transcript-retention·X-G14 next-fire `_clock`은 이번 hole-check에서 재확인 안 함**). 이 표를 라이브 전수로 쓰지 말 것.
-
-## 8. 검증 한계 (2차 후에도 안 한 것)
-
-- 891파일 각각 컨슈머
-- 깨진 `.mcp.json` 실기동, `MCP_USE_ISOLATED_SPAWN=1` 라이브 부트
-- live docker/lima/`quanta remote`, EC2 ProMax 웜풀
-- MetricsRegistry 켠 채 slash cleanup vs live Map
-- process-kill armed ticker, dual-process dotenv
-- 손상 permission store, `QUANTA_RADAR_FILE` mid-append
-- 웹 turn-abort + pending `request_user_input` 실소켓
-- eval null-cost fixture 테스트 (정적만)
-- D26 전수 AgentEvent, biome complexity 재귀속
-- CLI slash/keymap 전수 line-walk (remote/skill/config/mcp만 심층)
-
-## 9. 다른 에이전트에게
-
-1. 구현은 W3-I. 이 파일은 분류 dump.
-2. **W1-G를 그대로 실행하지 말 것.** G-F2/G-F7은 `9b05cd33`에서 repaired.
-3. G-F9/G-F10은 C-F6/C-F7과 한 불변식의 두 끝. G만 또는 C만 고치면 안 됨. G-F3도 C-F1과 동일.
-4. G-F16은 P1-A-01과 한 불변식. assembler(G) vs registry(A).
-5. G-F11은 E-SKILL-01과 한 불변식. `src/shared/**` / skill 본체는 E.
-6. D21로 CLI/web 부트 합치지 말 것.
-7. HEAD가 `9b05cd33`이 아니면 이 dump는 STALE.
-
-## 10. Write set (G only, live open)
-
-| ID | 허용 | 금지 |
-|---|---|---|
-| G-F1 | `apps/cli/internal.ts#loadMcpFeatures` **및** `daemon-mcp.ts` (수렴 방향 택1) | D21 부트 병합; A `loadMcpTools` 본문 |
-| G-F3 | `mcp-composition.ts` factory | C `isolated-client.ts`; A plugin launcher |
-| G-F4 | `scheduler/automation-engine/ticker.ts` | A `automation-ticker.ts` (W2-X 전) |
-| G-F5 | `ec2-lifecycle.ts` + boxGrade 테스트 | observability 가격표; AMI 추측 |
-| G-F6 | `apps/eval/index.ts` | shared env-files 정책을 G cleanup으로 |
-| G-F8 | `repl.ts` warn | CLI만 fail-closed |
-| G-F9 | `apps/cli/index.ts` seam factory | C registry를 G가 재작성 |
-| G-F10 | `remote-cmd.ts` HELP 및/또는 `routeRemote` 차단 | stub 본체만 고치고 광고 방치 |
-| G-F11 | `session-setup.ts`, `authority-readouts.ts` | E skill 본체; `src/shared/**` |
-| G-F12 | `ws-handlers.ts` (+ optional `web-user-input-port.ts`) | protocol/kernel |
-| G-F13 | `apps/agent/mode-presets/system.ts` warn | fail-open → fail-closed |
-| G-F14 | `apps/bench/remote/pool.ts` + `pool/worker.ts` | auth/EC2 TTL |
-| G-F15 | `eval/report/coverage-matrix.ts` + `markdown.ts` | `@/observability/pricing` |
-| G-F16 | `agent-config-assembler.ts` 분기 | A `global.ts` / caller-owned-builder 재작성 as G |
-
-### Test-owner map (coarse)
-
-- `src/apps/cli/**` → `src/apps/cli/__tests__/**`, `tests/unit/apps/cli/**`, `tests/unit/cli/**`
-- `src/apps/web-daemon/**` → `tests/unit/apps/web-daemon/**`, `*-web-daemon-e2e*`
-- `src/apps/bench/**` → `tests/unit/apps/bench/**`, `tests/unit/bench*`
-- `src/apps/eval/**` → `tests/unit/eval-*`
-- `src/apps/agent/**` → `tests/unit/apps/agent/**`
-- `src/host/**` → `tests/unit/host/**`
-- `src/scheduler/**` → `tests/unit/scheduler-*.test.ts`
-- 나머지 slice-boundary + `tests/unit/<slice>*`
-
-### 레인 소유권
-
-W1 G write 금지: `src/shared/**`, root-level tests, architecture configs, generated catalog MD, 다른 레인 production. 교차 import는 증거이지 write ownership이 아님.
+- `git rev-parse HEAD` → `f5f4875799141068af73e604129c8b9a09f76007`
+- `git diff --name-only 9b05cd33..HEAD -- src` → 없음. 최초 dump 이후 현재 HEAD까지 제품 소스는 동일하다.
+- 정적 producer/consumer census: `selectRemoteRunner`, `findIdleBox`, `claim(reclaimBefore)`, `buildSkillRuntimeAuthority`, `cancelAll`, eval cost rollup, permission/repo-rule loaders.
