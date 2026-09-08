@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { makeTrustPersistence } from "@/apps/agent/trust-persist"
@@ -215,6 +215,73 @@ describe("F-13 atomic writer", () => {
       "utf8",
     )
     expect(src.includes("copyFile")).toBe(false)
+  })
+
+  test("two OS processes union distinct memory appends", async () => {
+    const home = await mkdtemp(join(tmpdir(), "r02-f132-mem-"))
+    const persistPath = join(
+      import.meta.dir,
+      "../../../../src/migration/external-config/persist.ts",
+    )
+    const script = join(home, "worker.ts")
+    await writeFile(
+      script,
+      `import { persistConvertedItems } from ${JSON.stringify(persistPath)};
+const homeDir = process.argv[2];
+const sourcePath = process.argv[3];
+const body = process.argv[4];
+const r = await persistConvertedItems({
+  enabled: true,
+  homeDir,
+  projectDir: homeDir,
+  converted: [{ type: "memory", ok: true, value: { sourcePath, body } }],
+});
+if (!r.writtenTypes.includes("memory")) process.exit(2);
+`,
+    )
+    const repoRoot = join(import.meta.dir, "../../../..")
+    const spawnMem = (sourcePath: string, body: string) =>
+      Bun.spawn(["bun", script, home, sourcePath, body], {
+        cwd: repoRoot,
+        stdout: "pipe",
+        stderr: "pipe",
+      })
+    const a = spawnMem("/mem-a.md", "BODY-A")
+    const b = spawnMem("/mem-b.md", "BODY-B")
+    const [aCode, bCode] = await Promise.all([a.exited, b.exited])
+    if (aCode !== 0 || bCode !== 0) {
+      throw new Error(
+        `memory workers: a=${aCode} ${await new Response(a.stderr).text()} b=${bCode} ${await new Response(b.stderr).text()}`,
+      )
+    }
+    const raw = await readFile(join(home, ".quanta", "memory", "raw_memories.md"), "utf8")
+    expect(raw).toContain("<!-- quanta-imported-memory: /mem-a.md -->")
+    expect(raw).toContain("BODY-A")
+    expect(raw).toContain("<!-- quanta-imported-memory: /mem-b.md -->")
+    expect(raw).toContain("BODY-B")
+  })
+
+  test("persistMemory does not clobber bytes after a non-ENOENT read failure", async () => {
+    const home = await mkdtemp(join(tmpdir(), "r02-f132-eacces-"))
+    const dir = join(home, ".quanta", "memory")
+    await mkdir(dir, { recursive: true })
+    const rawPath = join(dir, "raw_memories.md")
+    const original = "KEEP-EXISTING-MEMORY\n"
+    await writeFile(rawPath, original)
+    await chmod(rawPath, 0o200)
+    try {
+      const r = await persistConvertedItems({
+        enabled: true,
+        homeDir: home,
+        projectDir: home,
+        converted: [{ type: "memory", ok: true, value: { sourcePath: "/x.md", body: "NEW" } }],
+      })
+      expect(r.persisted).toBe(false)
+      expect(r.warnings.length).toBeGreaterThan(0)
+    } finally {
+      await chmod(rawPath, 0o644)
+    }
+    expect(await readFile(rawPath, "utf8")).toBe(original)
   })
 })
 

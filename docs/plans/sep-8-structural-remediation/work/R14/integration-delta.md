@@ -16,4 +16,4 @@ const runner = selectRemoteRunner(process.env, resolved.seams)
 - `missing-binary` / `unknown` passed through
 - otherwise `disabled`
 
-G-F9.4: empty `{}` seams are gone from the production CLI path. Real Docker/Lima daemon proof is a separate evidence class.
+G-F9.4: empty `{}` seams are gone from the production CLI path. Live Docker/Lima is `tests/contract/remote-cli-docker.test.ts` (`requireContract` + skipIf; production seams, not fakes).

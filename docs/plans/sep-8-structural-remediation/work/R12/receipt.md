@@ -2,7 +2,7 @@
 
 Status: **implemented**. I-stage applied protocol barrel + SDK runtime verb pin. Kernel event-log already refuses non-torn corrupt decode. Not W7 `verified`.
 
-Lane: W3-C. Single writer on local `main`. NO COMMIT.
+Lane: W3-C. Closed on local `main` as part of W3 closeout.
 
 ## Findings
 
@@ -16,12 +16,13 @@ Lane: W3-C. Single writer on local `main`. NO COMMIT.
 
 - `assertSessionEventPayload` covers every `SESSION_EVENT_TYPES` discriminant.
 - `approval:null` → `bad_event_approval_null`.
+- `session.state.updated` requires `isSessionStateStatus(state.status)` (same check on snapshot decode). Prevents correlator false `approval_voided` on `state: {}`.
 - Exhaustive valid + missing-required table in owner tests.
 - Corrupt replay: `decodeSessionEvent` throws; kernel `event-log-jsonl.ts` already refuses (does not skip/rewrite). **Torn final line** still truncates — unchanged policy, recorded here.
 
 ## Tests
 
-`bun test tests/unit/sep8-remediation/r12 tests/unit/protocol/session-codec.test.ts tests/unit/ipc/session-handle-conformance.test.ts` GREEN.
+`bun test tests/unit/sep8-remediation/r12 tests/unit/protocol/session-codec.test.ts tests/unit/ipc/session-handle.test.ts` GREEN.
 
 ## I follow-up (outside R12 write-set)
 

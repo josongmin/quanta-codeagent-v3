@@ -8,7 +8,7 @@ Export `HOST_ONLY_SESSION_COMMANDS`.
 
 ## Kernel event-log (`src/kernel/session/event-log-jsonl.ts`)
 
-No code change required. `decodeSessionEvent` now validates payloads; existing `loadAndRecover` already throws `JsonlSessionEventLogCorruptionError` on non-torn decode failure (does not skip). Torn-final-line truncate remains.
+No code change required. `decodeSessionEvent` now validates payloads; `session.state.updated` and snapshot decode require `state.status`. Existing `loadAndRecover` already throws `JsonlSessionEventLogCorruptionError` on non-torn decode failure (does not skip). Torn-final-line truncate remains.
 
 ## SDK runtime (pin)
 

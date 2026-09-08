@@ -4,7 +4,7 @@ Status: **applied**.
 
 ## Trust persistence (`src/apps/agent/index.ts`)
 
-`TrustPersistencePort.save` removed. `commit(mutations)` re-reads, merges dirty keys, `writeFileAtomic` under flock on `${trustFilePath}.lock`.
+`TrustPersistencePort.save` removed. `commit(mutations)` re-reads, merges dirty keys, `writeFileAtomic` under flock on `${trustFilePath}.lock`. Malformed JSON throws; original bytes are not replaced (`src/apps/agent/trust-persist.ts`).
 
 Host/CLI no-op adapters (`mcp-composition.ts`, `configured-endpoint-wire.ts`) expose `commit` only.
 

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "sourceHead": "19fc9da2b5f5e7763f2288e09f1af36e44b70b2a",
+  "sourceHead": "742d61d0a721336e1cc6306ce8a31404eb733b27",
   "auditDigest": "769530ddf9d76b68bdfdf740771155bd2b255a79c9319516956283469bbedba8",
   "status": "w3-implemented",
   "maxParallelWriters": 3,
@@ -413,7 +413,8 @@
       ],
       "newTestScopes": [
         "tests/unit/sep8-remediation/r14/",
-        "tests/integration/sep8-remediation/r14/"
+        "tests/integration/sep8-remediation/r14/",
+        "tests/contract/remote-cli-docker.test.ts"
       ],
       "artifactScope": "docs/plans/sep-8-structural-remediation/work/R14/",
       "integrationScopes": [

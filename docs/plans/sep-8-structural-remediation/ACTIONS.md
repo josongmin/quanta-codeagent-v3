@@ -1,6 +1,6 @@
 # Sep-08 — evidence-backed action register
 
-상태: **W3 implemented on local `main` (`19fc9da2b` + uncommitted W3)**. W1·W2·W3 implemented. 나머지 finding은 W4–W6. G-F5.4 EC2 실기 proof는 열린 갭. G-F9.4 실 Docker/Lima daemon은 별도 evidence. 체크박스는 구현 수행이며 W7 전역 verified가 아니다.
+상태: **W3 closed on local `main`**. W1·W2·W3 implemented. 나머지 finding은 W4–W6. G-F5.4 EC2 실기 proof는 열린 갭. G-F9.4 contract rail 설치됨 (이 머신 Docker live 실행, Lima skip). 체크박스는 구현 수행이며 W7 전역 verified가 아니다.
 
 설계·write set·병렬 통합 정책: [README](/Users/songmin/quanta-codeagent-v3/docs/plans/sep-8-structural-remediation/README.md).
 실행 wave/group 배정: [WAVES](/Users/songmin/quanta-codeagent-v3/docs/plans/sep-8-structural-remediation/WAVES.md). 172개 액션의 단일 owner와 병렬 write set은 `waves.json`/`verify-waves.mjs`로 검사한다. 액션 내용은 이 문서, 실행 배정은 manifest가 원본이다.

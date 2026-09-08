@@ -1154,6 +1154,7 @@
         "!tests/unit/cli/**",
         "!tests/unit/apps/cli/**",
         "!tests/unit/sep8-remediation/r14/**",
+        "!tests/contract/remote-cli-docker.test.ts",
         "!tests/integration/cli/**",
         "!tests/unit/session-export-import-slash-hellgate.test.ts",
         "!tests/unit/session-registry-slash.test.ts",

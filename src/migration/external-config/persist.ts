@@ -664,7 +664,9 @@ const persistMemory = async (homeDir: string, value: ConvertedMemory): Promise<W
     let existing = ""
     try {
       existing = await readFile(rawPath, "utf8")
-    } catch {
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code
+      if (code !== "ENOENT" && code !== "ENOTDIR") throw err
       existing = ""
     }
     if (existing.includes(marker)) return { wrote: false, warnings: [] }
