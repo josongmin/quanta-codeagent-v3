@@ -42,23 +42,19 @@
  * homeDir + projectDir and calls in.
  */
 
-import { createHash, randomBytes } from "node:crypto"
-import {
-  chmod,
-  copyFile,
-  lstat,
-  mkdir,
-  open,
-  readFile,
-  realpath,
-  rename,
-  stat,
-  unlink,
-  writeFile,
-} from "node:fs/promises"
+import { createHash } from "node:crypto"
+import { lstat, mkdir, readFile, realpath, stat } from "node:fs/promises"
 import { basename, dirname, join } from "node:path"
-import { errMessage, logger } from "@/shared"
-import { isThrottled, loadMigrationLedger, recordDisposition } from "./ledger"
+import { errMessage } from "@/shared"
+import { withMigrationFileLock } from "./exclusive-lock"
+import {
+  isThrottled,
+  loadMigrationLedgerDetailed,
+  migrationLedgerPath,
+  recordDisposition,
+} from "./ledger"
+import { writeBytesAtomic, writeJsonAtomic } from "./persist-atomic"
+import { type ConfigWriteSync, defaultConfigWriteSync } from "./persist-sync"
 import type {
   ConvertedGlobRule,
   ConvertedHook,
@@ -74,53 +70,8 @@ import type {
   SkillStagePort,
 } from "./types"
 
-/**
- * Durability barrier for the JSON atomic commit — the SAME shape the slice's
- * sibling import-log writer exposes (`ImportLogSync` in `@/migration`), declared
- * locally because this slice is fenced to `@/shared` only (ADR-0038). Splitting
- * the temp-file fsync from the parent-dir fsync lets a fault-injection test stub
- * them and PROVE the ordering invariant: the rename NEVER runs if the temp
- * fsync rejected (no torn file surfaces as committed). Defaults issue a real
- * `fsync(2)` via an `fs/promises` handle.
- */
-export interface ConfigWriteSync {
-  /** Flush the temp file's bytes to stable storage BEFORE the rename. A
-   *  rejection ABORTS the commit — the rename must not run, the temp is
-   *  cleaned up, and the original file is left byte-identical. */
-  readonly syncFile: (path: string) => Promise<void>
-  /** Flush the parent directory AFTER a successful rename so the new dirent is
-   *  durable. Best-effort — a rejection is swallowed (some platforms reject a
-   *  directory fsync and the bytes are already safe). */
-  readonly syncDir: (dir: string) => Promise<void>
-}
-
-/** Real durability barrier — `fsync` via an `fs/promises` file handle. Mirrors
- *  `defaultImportLogSync`: the dir flush swallows the platforms that reject a
- *  directory `fsync` (Windows / some FUSE mounts) since the bytes are already
- *  durable from the temp flush + rename. */
-export const defaultConfigWriteSync: ConfigWriteSync = {
-  syncFile: async (path) => {
-    const handle = await open(path, "r+")
-    try {
-      await handle.sync()
-    } finally {
-      await handle.close()
-    }
-  },
-  syncDir: async (dir) => {
-    let handle: Awaited<ReturnType<typeof open>> | undefined
-    try {
-      handle = await open(dir, "r")
-      await handle.sync()
-    } catch (e) {
-      // Directory fsync rejected (EISDIR/EPERM/EINVAL on some platforms) — the
-      // bytes are already durable from the temp flush + rename, so swallow.
-      logger.debug(`config-migration: parent-dir fsync skipped: ${errMessage(e)}`)
-    } finally {
-      if (handle !== undefined) await handle.close().catch(() => undefined)
-    }
-  },
-}
+export type { ConfigWriteSync } from "./persist-sync"
+export { defaultConfigWriteSync } from "./persist-sync"
 
 /** Inputs to a persist run. Every path injected (slice stays env-free). */
 export interface PersistConvertedInput {
@@ -219,85 +170,6 @@ const symlinkTargetWarning = (path: string): MigrationWarning =>
  *  typed warning — same posture as the old writeFile ENOENT). */
 const resolveJsonDestinationOnce = async (path: string): Promise<string> =>
   join(await realpath(dirname(path)), basename(path))
-
-/** Probe the original file's permission bits (absent / unstat-able ⇒
- *  `undefined` — a NEW file keeps default perms, byte-identical to the old
- *  plain create). Attributed at debug: this is a benign existence probe. */
-const statModeOrUndefined = async (path: string): Promise<number | undefined> => {
-  try {
-    return (await stat(path)).mode
-  } catch (e) {
-    logger.debug(`config-migration: no original mode to preserve (new file?): ${errMessage(e)}`)
-    return undefined
-  }
-}
-
-/** Atomic + DURABLE commit for the JSON merge writers (audit #17, jun-10 D10):
- *  write to a temp in the SAME (already-resolved) directory, `fsync` the temp
- *  BEFORE the rename (durability barrier), re-apply the original file's mode,
- *  `rename` into place, then best-effort `fsync` the PARENT DIR so the new
- *  dirent survives a crash. A crash mid-write can no longer tear the user's
- *  settings.json/.mcp.json into a file the next run classifies "corrupt" and
- *  permanently refuses to self-heal — and a `rename` REPLACES (never follows) a
- *  later-planted leaf symlink, so the check→write TOCTOU is closed too.
- *
- *  Reaches PARITY with the slice's sibling import-log writer (`appendImportLog`
- *  in `@/migration`, ADR-0038) and `@/storage` writeFileAtomic (ADR-0398): the
- *  fsync barrier + parent-dir flush + EXDEV `copyFile` fallback are all present,
- *  and the barrier is INJECTABLE via {@link ConfigWriteSync} (the same seam
- *  shape the import-log writer exposes). Re-declared locally because the
- *  migration slice is fenced to `@/shared` only (ADR-0038), the same precedent
- *  as `@/storage` mirroring the `@/lsp` atomic adapter rather than crossing its
- *  fence. A failure anywhere BEFORE the rename (incl. a rejected `syncFile`)
- *  leaves the original untouched — the partial temp is cleaned up — and
- *  propagates to the per-item loop's typed-warning catch. */
-const writeJsonAtomic = async (
-  path: string,
-  value: Record<string, unknown>,
-  sync: ConfigWriteSync,
-): Promise<void> => {
-  const content = `${JSON.stringify(value, null, 2)}\n`
-  const temp = `${path}.quanta-tmp-${randomBytes(8).toString("hex")}`
-  const originalMode = await statModeOrUndefined(path)
-  try {
-    await writeFile(temp, content, "utf8")
-    // Durability barrier: flush the temp's bytes BEFORE the rename so a torn /
-    // zero-length temp can never be promoted under the final name. A rejection
-    // ABORTS the commit (caught below: temp cleaned, original untouched).
-    await sync.syncFile(temp)
-    if (originalMode !== undefined) {
-      // Best-effort mode carry-over (bytes are the contract; mode is the bonus).
-      await chmod(temp, originalMode).catch((e) => {
-        logger.debug(`config-migration: mode preservation failed: ${errMessage(e)}`)
-      })
-    }
-  } catch (e) {
-    // Best-effort cleanup of the partial temp; the ORIGINAL error wins.
-    await unlink(temp).catch((cleanupErr) => {
-      logger.debug(`config-migration: atomic temp cleanup failed: ${errMessage(cleanupErr)}`)
-    })
-    throw e
-  }
-  // POSIX rename(temp, path) — atomic on the same filesystem (the temp lives
-  // next to the destination by construction). EXDEV is unreachable here (temp
-  // is a sibling of path), but if a future caller hands a cross-device temp the
-  // fallback copies+removes rather than throwing — matching writeFileAtomic.
-  try {
-    await rename(temp, path)
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code !== "EXDEV") {
-      await unlink(temp).catch(() => undefined)
-      throw e
-    }
-    await copyFile(temp, path)
-    await unlink(temp).catch((cleanupErr) => {
-      logger.debug(`config-migration: post-copy temp cleanup failed: ${errMessage(cleanupErr)}`)
-    })
-  }
-  // Parent-dir fsync so the rename's new dirent is durable across a crash.
-  // Best-effort (swallows EISDIR/EPERM/EINVAL) — the bytes are already safe.
-  await sync.syncDir(dirname(path))
-}
 
 /**
  * The state of an existing JSON config target, read fail-CLOSED.
@@ -459,7 +331,7 @@ const writeNoClobber = async (path: string, content: string): Promise<string> =>
   const target = (await pathExists(path)) ? siblingImportedPath(path) : path
   if (await isSymlinkDestination(target)) throw new SymlinkWriteRefusedError(target)
   await mkdir(dirOf(target), { recursive: true })
-  await writeFile(target, content, "utf8")
+  await writeBytesAtomic(target, content, defaultConfigWriteSync)
   return target
 }
 
@@ -499,6 +371,14 @@ const persistSettings = async (
   sync: ConfigWriteSync,
 ): Promise<WriteOutcome> => {
   const path = await resolveJsonDestinationOnce(join(projectDir, "settings.json"))
+  return withMigrationFileLock(`${path}.lock`, () => mergeSettingsLocked(path, value, sync))
+}
+
+const mergeSettingsLocked = async (
+  path: string,
+  value: ConvertedSettings,
+  sync: ConfigWriteSync,
+): Promise<WriteOutcome> => {
   if (await isSymlinkDestination(path)) return NO_WRITE(symlinkTargetWarning(path))
   const existing = await readExistingJson(path)
   if (existing.state === "corrupt") return NO_WRITE(corruptTargetWarning(path))
@@ -532,6 +412,14 @@ const persistHooks = async (
   sync: ConfigWriteSync,
 ): Promise<WriteOutcome> => {
   const path = await resolveJsonDestinationOnce(join(projectDir, "settings.json"))
+  return withMigrationFileLock(`${path}.lock`, () => mergeHooksLocked(path, value, sync))
+}
+
+const mergeHooksLocked = async (
+  path: string,
+  value: readonly ConvertedHook[],
+  sync: ConfigWriteSync,
+): Promise<WriteOutcome> => {
   if (await isSymlinkDestination(path)) return NO_WRITE(symlinkTargetWarning(path))
   const existing = await readExistingJson(path)
   if (existing.state === "corrupt") return NO_WRITE(corruptTargetWarning(path))
@@ -548,12 +436,6 @@ const persistHooks = async (
     const group: Record<string, unknown> = {
       ...(h.matcher !== undefined ? { matcher: h.matcher } : {}),
       hooks: h.commands.map((command) => ({ type: "command", command })),
-      // T04 trust gate — an IMPORTED hook is external/untrusted shell, so stamp
-      // the review marker the command-hooks loader reads (TIGHTENING-only: the
-      // legacy `parseCommandHookBindings` honors `needsReview:true` → the hook
-      // is HELD until the user approves it via `/hooks` when the trust gate is
-      // armed). The marker is inert when the gate is OFF (byte-identical run).
-      // `source` is informational; `needsReview` is the load-bearing field.
       source: "imported",
       needsReview: true,
     }
@@ -778,20 +660,20 @@ const memoryMarker = (sourcePath: string): string =>
 const persistMemory = async (homeDir: string, value: ConvertedMemory): Promise<WriteOutcome> => {
   const rawPath = join(homeDir, ".quanta", "memory", "raw_memories.md")
   const marker = memoryMarker(value.sourcePath)
-  let existing = ""
-  try {
-    existing = await readFile(rawPath, "utf8")
-  } catch {
-    existing = "" // absent ⇒ fresh file (append still creates it).
-  }
-  // Double-append guard — the SAME source is not appended twice.
-  if (existing.includes(marker)) return { wrote: false, warnings: [] }
-  await mkdir(dirname(rawPath), { recursive: true })
-  const sep = existing.length > 0 && !existing.endsWith("\n") ? "\n" : ""
-  const block = `${sep}${marker}\n${value.body}\n`
-  // Append-only: write existing + block (never clobber prior evidence).
-  await writeFile(rawPath, existing + block, "utf8")
-  return { wrote: true, warnings: [] }
+  return withMigrationFileLock(`${rawPath}.lock`, async () => {
+    let existing = ""
+    try {
+      existing = await readFile(rawPath, "utf8")
+    } catch {
+      existing = ""
+    }
+    if (existing.includes(marker)) return { wrote: false, warnings: [] }
+    await mkdir(dirname(rawPath), { recursive: true })
+    const sep = existing.length > 0 && !existing.endsWith("\n") ? "\n" : ""
+    const next = `${existing}${sep}${marker}\n${value.body}\n`
+    await writeBytesAtomic(rawPath, next, defaultConfigWriteSync)
+    return { wrote: true, warnings: [] }
+  })
 }
 
 /** Persist ONE ok item to its destination. Returns whether it wrote + any
@@ -886,8 +768,21 @@ export const persistConvertedItems = async (
   // Throttle: a source already imported/offered/declined is a no-op so a 2nd
   // run cannot re-clobber the user's (possibly hand-edited) imported config.
   if (input.sourceKey !== undefined && input.sourceKey !== "") {
-    const ledger = await loadMigrationLedger(input.homeDir)
-    if (isThrottled(ledger, input.sourceKey)) {
+    const loaded = await loadMigrationLedgerDetailed(input.homeDir)
+    if (loaded.diagnostic.unreadable) {
+      return {
+        persisted: false,
+        throttled: false,
+        warnings: [
+          writeWarning(
+            migrationLedgerPath(input.homeDir),
+            "migration ledger is unreadable; refusing persist so a torn file is not treated as empty",
+          ),
+        ],
+        writtenTypes: [],
+      }
+    }
+    if (isThrottled(loaded.ledger, input.sourceKey)) {
       return { persisted: false, throttled: true, warnings: [], writtenTypes: [] }
     }
   }

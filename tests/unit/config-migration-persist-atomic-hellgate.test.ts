@@ -37,6 +37,9 @@ const IS_WIN = process.platform === "win32"
 // injection arm is meaningless under uid 0 (visible skip, not silent pass).
 const IS_ROOT = typeof process.getuid === "function" && process.getuid() === 0
 
+const configEntries = async (dir: string): Promise<string[]> =>
+  (await readdir(dir)).filter((name) => !name.endsWith(".lock"))
+
 let home = ""
 let project = ""
 let outside = ""
@@ -167,7 +170,7 @@ describe.skipIf(IS_WIN)("config-migration SINGLE-resolution destination (TOCTOU 
       // The committed file is a REGULAR file (rename replaced, never linked)…
       expect((await lstat(join(realProj, "settings.json"))).isSymbolicLink()).toBe(false)
       // …and the atomic temp was renamed away, not leaked next to the config.
-      expect(await readdir(realProj)).toEqual(["settings.json"])
+      expect(await configEntries(realProj)).toEqual(["settings.json"])
     } finally {
       await rm(realProj, { recursive: true, force: true })
     }
@@ -219,7 +222,7 @@ describe.skipIf(IS_WIN)("config-migration SINGLE-resolution destination (TOCTOU 
     // Merge semantics preserved: union of allow, peer keys intact.
     expect(parsed.permissions.allow).toEqual(["Existing", "Read"])
     expect(parsed.peer).toBe(7)
-    expect(await readdir(project)).toEqual(["settings.json"])
+    expect(await configEntries(project)).toEqual(["settings.json"])
   })
 })
 
@@ -266,7 +269,7 @@ describe("config-migration fsync barrier (D15 — durability parity, injectable 
     // No leaked atomic temp next to the config.
     const residue = (await readdir(project)).filter((n) => n.includes(".quanta-tmp-"))
     expect(residue).toEqual([])
-    expect(await readdir(project)).toEqual(["settings.json"])
+    expect(await configEntries(project)).toEqual(["settings.json"])
   })
 
   test("paired control: real barrier succeeds → merges + flushes in order [syncFile, syncDir]", async () => {
@@ -305,6 +308,6 @@ describe("config-migration fsync barrier (D15 — durability parity, injectable 
     }
     expect(parsed.permissions.allow).toEqual(["Existing", "Read"])
     expect(parsed.peer).toBe(7)
-    expect(await readdir(project)).toEqual(["settings.json"])
+    expect(await configEntries(project)).toEqual(["settings.json"])
   })
 })

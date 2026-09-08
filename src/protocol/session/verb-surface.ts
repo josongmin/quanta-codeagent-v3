@@ -23,11 +23,17 @@
  */
 
 import type { ImageBlock, Message } from "@/llm/types"
+import type { ObjectiveMutation } from "@/objective"
+import type { PosturePatch } from "@/permission/posture/types"
 import type {
   ApprovalRespondCommand,
   InputAppendCommand,
+  PostureCommandScope,
   SessionIdentitySetCommand,
+  SessionObjectiveMutateCommand,
   SessionPermissionSetCommand,
+  SessionPostureSetCommand,
+  SessionSkillSetEnabledCommand,
   SessionToolProfileSetCommand,
   SessionTranscriptReplaceCommand,
   TurnCancelCommand,
@@ -96,6 +102,28 @@ export interface SessionVerbSurface<R> {
     replace(
       messages: readonly Message[],
       meta?: Partial<Omit<SessionTranscriptReplaceCommand, "sessionId" | "type" | "messages">>,
+    ): Promise<R>
+  }
+  readonly objective: {
+    mutate(
+      mutation: ObjectiveMutation,
+      meta?: Partial<Omit<SessionObjectiveMutateCommand, "sessionId" | "type" | "mutation">>,
+    ): Promise<R>
+  }
+  readonly posture: {
+    set(
+      patch: PosturePatch,
+      scope: PostureCommandScope,
+      meta?: Partial<Omit<SessionPostureSetCommand, "sessionId" | "type" | "patch" | "scope">>,
+    ): Promise<R>
+  }
+  readonly skill: {
+    setEnabled(
+      name: string,
+      enabled: boolean,
+      meta?: Partial<
+        Omit<SessionSkillSetEnabledCommand, "sessionId" | "type" | "name" | "enabled">
+      >,
     ): Promise<R>
   }
 }

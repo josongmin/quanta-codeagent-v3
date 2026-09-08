@@ -1,21 +1,16 @@
 /**
  * External-config migration THROTTLE LEDGER (H13).
  *
- * A small persisted marker so the migration prompt is NOT re-offered every
- * launch. Mirrors Codex's startup-throttle (`external_agent_config_migration_
- * startup.rs` "Failed to save preference"): once a source has been offered,
- * imported, or declined, it is suppressed.
- *
- * Shape mirrors the parent slice's `ImportLog` (versioned envelope) and reuses
- * its atomic-append discipline: a sidecar lock + write-temp + rename so a
- * concurrent launch cannot tear the file. The lock here is best-effort — a
- * throttle write is advisory; if it fails (busy) we swallow and the worst case
- * is one extra prompt on the next launch (never a crash, never data loss).
+ * Lock is a held flock fd (F-03). Entries are validated element-wise (F-11).
+ * A malformed file never throws at startup; valid subset is used and the
+ * original bytes are not rewritten on load. An unreadable/unparseable file
+ * is not replaced by a fresh ledger on recordDisposition.
  */
 
 import { createHash, randomUUID } from "node:crypto"
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
+import { withMigrationFileLock } from "./exclusive-lock"
 import type {
   DetectedConfigItem,
   MigrationDisposition,
@@ -24,23 +19,43 @@ import type {
   MigrationLedgerEntry,
   MigrationScope,
 } from "./types"
+import { ALL_MIGRATION_ITEM_TYPES } from "./types"
 
-/** Ledger file location under `~/.quanta`. Caller-supplied `homeDir` lets
- *  tests redirect to a tmpdir. Named to be unmistakably distinct from the
- *  parent slice's `external_agent_session_imports.json` (sessions) — THIS is
- *  the CONFIG migration throttle. */
 export const migrationLedgerPath = (homeDir: string): string =>
   join(homeDir, ".quanta", "external_config_migration.json")
 
 const lockPath = (homeDir: string): string => `${migrationLedgerPath(homeDir)}.lock`
 
-/**
- * Stable identifier for a detected source: scope + the SORTED set of item
- * paths. Order-insensitive (we sort), so detect re-running on the same tree
- * yields the same key regardless of probe iteration order. Distinct scopes
- * (home vs project) yield distinct keys even with identical paths. A short
- * SHA-256 keeps the key compact + filesystem-safe.
- */
+const DISPOSITIONS: readonly MigrationDisposition[] = ["offered", "imported", "declined"]
+
+export type LedgerLoadDiagnostic = {
+  readonly dropped: number
+  /** File exists but JSON/version/shape cannot be used. Load must not rewrite
+   *  those bytes; writers must not replace them with a fresh empty ledger. */
+  readonly unreadable: boolean
+}
+
+export const parseLedgerEntry = (raw: unknown): MigrationLedgerEntry | null => {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null
+  const o = raw as Record<string, unknown>
+  if (typeof o.sourceKey !== "string" || o.sourceKey.length === 0) return null
+  if (!DISPOSITIONS.includes(o.disposition as MigrationDisposition)) return null
+  if (typeof o.timestamp !== "string" || o.timestamp.length === 0) return null
+  if (!Array.isArray(o.itemTypes)) return null
+  const itemTypes: MigrationItemType[] = []
+  for (const t of o.itemTypes) {
+    if (typeof t === "string" && (ALL_MIGRATION_ITEM_TYPES as readonly string[]).includes(t)) {
+      itemTypes.push(t as MigrationItemType)
+    }
+  }
+  return {
+    sourceKey: o.sourceKey,
+    disposition: o.disposition as MigrationDisposition,
+    timestamp: o.timestamp,
+    itemTypes,
+  }
+}
+
 export const sourceKeyOf = (
   scope: MigrationScope,
   items: readonly Pick<DetectedConfigItem, "path">[],
@@ -53,46 +68,56 @@ export const sourceKeyOf = (
   return `${scope}:${h.digest("hex").slice(0, 24)}`
 }
 
-/** Load the ledger. Missing file ⇒ empty (version 1). A malformed file is
- *  treated as empty (advisory store — we never crash startup on a corrupt
- *  throttle marker; the worst case is re-offering once). */
+const emptyLedger = (): MigrationLedger => ({ version: 1, entries: [] })
+
 export const loadMigrationLedger = async (homeDir: string): Promise<MigrationLedger> => {
+  const loaded = await loadMigrationLedgerDetailed(homeDir)
+  return loaded.ledger
+}
+
+export const loadMigrationLedgerDetailed = async (
+  homeDir: string,
+): Promise<{ readonly ledger: MigrationLedger; readonly diagnostic: LedgerLoadDiagnostic }> => {
   const path = migrationLedgerPath(homeDir)
   let raw: string
   try {
     raw = await readFile(path, "utf8")
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code
-    if (code === "ENOENT" || code === "ENOTDIR") return { version: 1, entries: [] }
-    return { version: 1, entries: [] }
+    if (code === "ENOENT" || code === "ENOTDIR") {
+      return { ledger: emptyLedger(), diagnostic: { dropped: 0, unreadable: false } }
+    }
+    return { ledger: emptyLedger(), diagnostic: { dropped: 0, unreadable: true } }
   }
   try {
     const parsed = JSON.parse(raw) as unknown
     if (
-      typeof parsed === "object" &&
-      parsed !== null &&
-      (parsed as { version?: unknown }).version === 1 &&
-      Array.isArray((parsed as { entries?: unknown }).entries)
+      typeof parsed !== "object" ||
+      parsed === null ||
+      (parsed as { version?: unknown }).version !== 1 ||
+      !Array.isArray((parsed as { entries?: unknown }).entries)
     ) {
-      return parsed as MigrationLedger
+      return { ledger: emptyLedger(), diagnostic: { dropped: 0, unreadable: true } }
     }
+    const entries: MigrationLedgerEntry[] = []
+    let dropped = 0
+    for (const item of (parsed as { entries: unknown[] }).entries) {
+      const entry = parseLedgerEntry(item)
+      if (entry === null) {
+        dropped += 1
+        continue
+      }
+      entries.push(entry)
+    }
+    return { ledger: { version: 1, entries }, diagnostic: { dropped, unreadable: false } }
   } catch {
-    // fallthrough to empty
+    return { ledger: emptyLedger(), diagnostic: { dropped: 0, unreadable: true } }
   }
-  return { version: 1, entries: [] }
 }
 
-/** True iff `sourceKey` has ANY recorded disposition (offered / imported /
- *  declined) — any of the three suppresses a re-offer. */
 export const isThrottled = (ledger: MigrationLedger, sourceKey: string): boolean =>
   ledger.entries.some((e) => e.sourceKey === sourceKey)
 
-/**
- * Record a disposition for `sourceKey`, atomically appending to the ledger.
- * Best-effort lock: on a concurrent-writer collision we SKIP the write (return
- * false) rather than throw — the throttle is advisory. A successful write
- * returns true.
- */
 export const recordDisposition = async (
   homeDir: string,
   sourceKey: string,
@@ -101,33 +126,29 @@ export const recordDisposition = async (
 ): Promise<boolean> => {
   const path = migrationLedgerPath(homeDir)
   await mkdir(dirname(path), { recursive: true })
-  const lock = lockPath(homeDir)
-  // Acquire — `wx` fails if the lock exists. Advisory: a held lock ⇒ skip.
   try {
-    await writeFile(lock, String(process.pid), { flag: "wx" })
+    return await withMigrationFileLock(lockPath(homeDir), async () => {
+      const loaded = await loadMigrationLedgerDetailed(homeDir)
+      if (loaded.diagnostic.unreadable) return false
+      const entry: MigrationLedgerEntry = {
+        sourceKey,
+        disposition,
+        timestamp: new Date().toISOString(),
+        itemTypes: [...itemTypes],
+      }
+      const next: MigrationLedger = { version: 1, entries: [...loaded.ledger.entries, entry] }
+      const tmp = `${path}.tmp.${process.pid}.${randomUUID().slice(0, 8)}`
+      try {
+        await writeFile(tmp, `${JSON.stringify(next, null, 2)}\n`, "utf8")
+        await rename(tmp, path)
+      } catch (e) {
+        await rm(tmp, { force: true })
+        throw e
+      }
+      return true
+    })
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "EEXIST") return false
+    if (err instanceof Error && err.message.includes("exclusive lock timeout")) return false
     throw err
-  }
-  try {
-    const current = await loadMigrationLedger(homeDir)
-    const entry: MigrationLedgerEntry = {
-      sourceKey,
-      disposition,
-      timestamp: new Date().toISOString(),
-      itemTypes: [...itemTypes],
-    }
-    const next: MigrationLedger = { version: 1, entries: [...current.entries, entry] }
-    const tmp = `${path}.tmp.${process.pid}.${randomUUID().slice(0, 8)}`
-    try {
-      await writeFile(tmp, `${JSON.stringify(next, null, 2)}\n`, "utf8")
-    } catch (e) {
-      await rm(tmp, { force: true })
-      throw e
-    }
-    await rename(tmp, path)
-    return true
-  } finally {
-    await rm(lock, { force: true })
   }
 }

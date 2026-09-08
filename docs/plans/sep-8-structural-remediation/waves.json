@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "sourceHead": "29d7e4ff1a2df3e925c1f3854432e3a741f5d2d7",
+  "sourceHead": "19fc9da2b5f5e7763f2288e09f1af36e44b70b2a",
   "auditDigest": "769530ddf9d76b68bdfdf740771155bd2b255a79c9319516956283469bbedba8",
-  "status": "w1-w2-implemented",
+  "status": "w3-implemented",
   "maxParallelWriters": 3,
   "scopeSyntax": "trailing slash = subtree; otherwise exact file; no globs; reserved and index.ts basename always excluded",
   "reservedScopes": [

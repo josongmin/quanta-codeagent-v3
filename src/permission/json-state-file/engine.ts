@@ -35,6 +35,7 @@ export interface EngineState<T> {
     | ((args: { onDisk: T | null; inMemory: T; baseline: T | null }) => T)
     | undefined
   readonly lockNow: () => number
+  readonly lockTimeoutMs: number
   readonly tmpSuffix: string
   readonly tmpPath: string
   readonly lockPath: string
@@ -111,7 +112,7 @@ export const writeToDisk = async <T>(st: EngineState<T>): Promise<PersistOutcome
   try {
     await mkdir(dirname(st.filePath), { recursive: true })
     if (useLock) {
-      locked = await acquireLock(st.lockPath, st.tmpSuffix, st.lockNow)
+      locked = await acquireLock(st.lockPath, st.tmpSuffix, st.lockNow, st.lockTimeoutMs)
       if (!locked) {
         const reason = "cross-process lock unavailable"
         stderrWarn(`flush blocked (${st.filePath}): ${reason}`)

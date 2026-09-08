@@ -8,6 +8,7 @@ import { CLI_SEEDED_GATE_NAMES } from "./cli-seeded-gates"
 import { loadEnvFiles } from "./dotenv"
 import { applyToolProfileFlag } from "./internal/argv"
 import { runRemoteCmd } from "./remote-cmd"
+import { buildCliRemoteSeams } from "./remote-dependencies/seams"
 import { runRepl, runSessionMain, runSlashMain, topLevelUsage } from "./repl"
 import { SessionStartupError } from "./repl/session-startup-error"
 import { installCliSandbox } from "./sandbox-wire"
@@ -97,9 +98,18 @@ const routeRemote = async (): Promise<never> => {
   const onSig = () => ac.abort()
   process.on("SIGINT", onSig)
   process.on("SIGTERM", onSig)
-  const runner = selectRemoteRunner(process.env, {})
+  const resolved = buildCliRemoteSeams(process.env)
+  const runner = selectRemoteRunner(process.env, resolved.seams)
   const code = await runRemoteCmd(process.argv.slice(3), {
     runner,
+    ...(resolved.reason === "ready"
+      ? {}
+      : {
+          unconfiguredReason:
+            resolved.reason === "missing-binary" || resolved.reason === "unknown"
+              ? resolved.reason
+              : "disabled",
+        }),
     io: {
       out: (s) => process.stdout.write(s),
       err: (s) => process.stderr.write(s),

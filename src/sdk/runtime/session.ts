@@ -10,7 +10,10 @@ import {
   buildApprovalRespond,
   buildIdentitySet,
   buildInputAppend,
+  buildObjectiveMutate,
   buildPermissionSet,
+  buildPostureSet,
+  buildSkillSetEnabled,
   buildToolProfileSet,
   buildTranscriptReplace,
   buildTurnCancel,
@@ -198,6 +201,18 @@ export const createRuntimeSession = (args: CreateRuntimeSessionArgs): RuntimeSes
     permission: {
       set: async (mode, meta, options) =>
         dispatch(engine, buildPermissionSet(commandDeps, mode, meta), options),
+    },
+    objective: {
+      mutate: async (mutation, meta, options) =>
+        dispatch(engine, buildObjectiveMutate(commandDeps, mutation, meta), options),
+    },
+    posture: {
+      set: async (patch, scope, meta, options) =>
+        dispatch(engine, buildPostureSet(commandDeps, patch, scope, meta), options),
+    },
+    skill: {
+      setEnabled: async (name, enabled, meta, options) =>
+        dispatch(engine, buildSkillSetEnabled(commandDeps, name, enabled, meta), options),
     },
     toolProfile: {
       set: async (profile, meta, options) =>

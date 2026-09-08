@@ -222,11 +222,7 @@ describe("H14 e2e — an allow-prefixed session NAME carrying an escape is defan
     const handle = `tmux:${EVIL_NAME}`
     const cfg = config(registryWith(tmux.exec))
     await markPublic(cfg, handle)
-    const res = await dispatchTool(
-      call("pty_read", { handle, sinceSeq: 0 }),
-      cfg,
-      BYPASS,
-    )
+    const res = await dispatchTool(call("pty_read", { handle, sinceSeq: 0 }), cfg, BYPASS)
     expect(res.ok).toBe(true)
     expect(hasLiveEscape(res.preview)).toBe(false)
     expect(res.preview.includes(ESC)).toBe(false)

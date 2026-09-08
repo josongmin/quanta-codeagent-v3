@@ -26,23 +26,16 @@
  */
 
 import type {
+  CommandReceipt,
   SessionCommand,
   SessionEvent,
   SessionSnapshotLite,
   SessionVerbSurface,
 } from "@/protocol/session"
 import {
-  buildApprovalRespond,
-  buildIdentitySet,
-  buildInputAppend,
-  buildPermissionSet,
-  buildToolProfileSet,
-  buildTranscriptReplace,
-  buildTurnCancel,
-  buildTurnRun,
   type CommandBuildDeps,
-  type CommandReceipt,
   continuationCommandIdForApproval,
+  isSessionStateStatus,
   SessionProtocolError,
 } from "@/protocol/session"
 import { errMessage } from "@/shared"
@@ -53,6 +46,7 @@ import type {
   SessionTransportConnectionState,
 } from "./client"
 import { typedErrorFromRejectedMessage } from "./errors"
+import { buildWireVerbSurface } from "./handle-verbs"
 import type { SessionTransportRejectedMessage } from "./types"
 
 /* ------------------------------------------------------------------------- */
@@ -370,6 +364,7 @@ const handleStateUpdated = (
   state: CorrelatorState,
   event: SessionEvent & { type: "session.state.updated" },
 ): void => {
+  if (!isSessionStateStatus(event.state.status)) return
   const previous = state.lastObservedStatus
   state.lastObservedStatus = event.state.status
   if (previous !== "awaiting_approval" || event.state.status === "awaiting_approval") return
@@ -662,68 +657,6 @@ const createHandshakeReplayBuffer = (events: readonly SessionEvent[] | undefined
     },
     invalidate(): void {
       pending = undefined
-    },
-  }
-}
-
-/** The wire verb table (§3.1) — hoisted from `createSessionHandle` (god-FN
- *  ratchet, jul-16 audit HIGH-3). Every verb routes through the ONE `submit`
- *  (receipt on transport-send success); `turn.run` additionally registers its
- *  chain with the correlator BEFORE the send (an in-memory transport can
- *  deliver the whole turn inside the send await) and settles it typed when
- *  the send itself throws. */
-const buildWireVerbSurface = (args: {
-  readonly deps: CommandBuildDeps
-  readonly submit: (command: SessionCommand) => Promise<CommandReceipt>
-  readonly mintId: (meta: { readonly commandId?: string } | undefined) => string
-  readonly correlator: TurnEndCorrelator
-  readonly guardOpen: () => void
-}): SessionVerbSurface<CommandReceipt> => {
-  const { deps, submit, mintId, correlator, guardOpen } = args
-  return {
-    input: {
-      append: (text, meta) =>
-        submit(buildInputAppend(deps, text, { ...meta, commandId: mintId(meta) })),
-    },
-    turn: {
-      async run(meta) {
-        guardOpen()
-        const commandId = mintId(meta)
-        // Register BEFORE the send: an in-memory transport can deliver the
-        // whole turn (terminal included) inside the send await.
-        correlator.begin(commandId)
-        try {
-          return await submit(buildTurnRun(deps, { ...meta, commandId }))
-        } catch (error) {
-          // The chain never reached the server — settle it so a later
-          // awaitTurnEnd() fails typed instead of waiting forever.
-          correlator.rejectCommand(commandId, error)
-          throw error
-        }
-      },
-      cancel: (meta) => submit(buildTurnCancel(deps, { ...meta, commandId: mintId(meta) })),
-    },
-    identity: {
-      set: (mode, meta) =>
-        submit(buildIdentitySet(deps, mode, { ...meta, commandId: mintId(meta) })),
-    },
-    toolProfile: {
-      set: (profile, meta) =>
-        submit(buildToolProfileSet(deps, profile, { ...meta, commandId: mintId(meta) })),
-    },
-    permission: {
-      set: (mode, meta) =>
-        submit(buildPermissionSet(deps, mode, { ...meta, commandId: mintId(meta) })),
-    },
-    approval: {
-      respond: (approvalId, decision, meta) =>
-        submit(
-          buildApprovalRespond(deps, approvalId, decision, { ...meta, commandId: mintId(meta) }),
-        ),
-    },
-    transcript: {
-      replace: (messages, meta) =>
-        submit(buildTranscriptReplace(deps, messages, { ...meta, commandId: mintId(meta) })),
     },
   }
 }

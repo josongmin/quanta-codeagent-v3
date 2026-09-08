@@ -233,6 +233,8 @@ export const SESSION_COMMAND_TYPES = [
   "turn.submit",
 ] as const
 
+export const HOST_ONLY_SESSION_COMMANDS = ["turn.submit"] as const
+
 export type SessionCommandType = (typeof SESSION_COMMAND_TYPES)[number]
 
 export const isSessionCommandType = (value: unknown): value is SessionCommandType =>

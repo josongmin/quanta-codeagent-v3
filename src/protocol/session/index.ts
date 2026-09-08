@@ -46,6 +46,7 @@ export type {
   TurnSubmitCommand,
 } from "./commands"
 export {
+  HOST_ONLY_SESSION_COMMANDS,
   isPostureCommandScope,
   isSessionCommandType,
   POSTURE_COMMAND_SCOPES,
@@ -138,9 +139,11 @@ export type {
   ArtifactRef,
   PendingApprovalView,
   SessionSnapshotLite,
+  SessionStateStatus,
   SessionStateView,
   SessionTokenUsageView,
 } from "./snapshot"
+export { isSessionStateStatus, SESSION_STATE_STATUSES } from "./snapshot"
 export type { CommandReceipt, SessionVerbSurface } from "./verb-surface"
 export {
   isSessionProtocolVersion,

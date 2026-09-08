@@ -1,22 +1,22 @@
 # Sep-08 — evidence-backed action register
 
-상태: **W1·W2 implemented on local `main` (`29d7e4ff1`)**. 나머지 28 finding(W3+)은 미착수. G-F5.4 EC2 실기 proof는 열린 갭. 체크박스는 구현 수행이며 W7 전역 verified가 아니다.
+상태: **W3 implemented on local `main` (`19fc9da2b` + uncommitted W3)**. W1·W2·W3 implemented. 나머지 finding은 W4–W6. G-F5.4 EC2 실기 proof는 열린 갭. G-F9.4 실 Docker/Lima daemon은 별도 evidence. 체크박스는 구현 수행이며 W7 전역 verified가 아니다.
 
 설계·write set·병렬 통합 정책: [README](/Users/songmin/quanta-codeagent-v3/docs/plans/sep-8-structural-remediation/README.md).
 실행 wave/group 배정: [WAVES](/Users/songmin/quanta-codeagent-v3/docs/plans/sep-8-structural-remediation/WAVES.md). 172개 액션의 단일 owner와 병렬 write set은 `waves.json`/`verify-waves.mjs`로 검사한다. 액션 내용은 이 문서, 실행 배정은 manifest가 원본이다.
-기준 source (계획 작성): `f5f4875799141068af73e604129c8b9a09f76007`. 통합 source (W1+W2): `29d7e4ff1a2df3e925c1f3854432e3a741f5d2d7`. audit 입력 digest는 README와 동일하다.
+기준 source (계획 작성): `f5f4875799141068af73e604129c8b9a09f76007`. 통합 source (W1+W2, W3 착수 HEAD): `19fc9da2b5f5e7763f2288e09f1af36e44b70b2a`. audit 입력 digest는 README와 동일하다.
 이 문서의 근거는 현재 source 계약과 앞선 audit의 재현 기록이다. `docs/bugbash/sep-8-se-audit/`는 baseline 입력이며 W1/W2 구현 후 재작성하지 않는다. source 변경 시 관련 근거·rail을 다시 고정한다.
 
 ## 0. 실행 방법과 선행 액션
 
 - [x] **W0.1** HEAD, dirty source digest, audit 문서 digest, Bun/OS/filesystem을 receipt에 기록한다. 현재 dirty audit 7개와 계획 문서는 보존한다.
 - [x] **W0.2** 각 package write set을 실제 filename 단위로 확정한다. shared/public exports/composition roots/package/catalog는 integrator만 편집한다. 파일뿐 아니라 같은 정책/동일 테스트 fixture의 중복 소유도 금지한다.
-- [ ] **W0.3** R02의 lock primitive 후보를 지원 플랫폼에서 실험한다. FD lock의 lifetime, same-process 별도 opener, child inheritance, holder kill, stable inode, symlink/path identity, abort/wait timeout을 검증한다. 새 native dependency/지원 범위 변경은 별도 승인 대상이다.
-- [ ] **W0.4** legacy wx writer와 새 lock writer의 혼재 차단/전환 절차를 확정한다. process 종료가 필요하면 명시하고, 기존 lock 파일을 age만으로 삭제하지 않는다.
+- [x] **W0.3** R02의 lock primitive 후보를 지원 플랫폼에서 실험한다. FD lock의 lifetime, same-process 별도 opener, child inheritance, holder kill, stable inode, symlink/path identity, abort/wait timeout을 검증한다. 새 native dependency/지원 범위 변경은 별도 승인 대상이다.
+- [x] **W0.4** legacy wx writer와 새 lock writer의 혼재 차단/전환 절차를 확정한다. process 종료가 필요하면 명시하고, 기존 lock 파일을 age만으로 삭제하지 않는다.
 - [x] **W0.5** R11의 process-ready와 DXT-ready 분리, client core 기능 parity 목록을 확정한다. HTTP reauth의 replay 허용 조건과 pending request 종료 정책도 고정한다.
 - [ ] **W0.6** R09의 unknown/known/estimated 및 legacy ledger hydration 정책, R10의 embedding-space identity와 old index 전환 정책을 확정한다.
 - [x] **W0.7** touched god-module/function을 detector 기준으로 목록화하고 해당 package의 책임 분리 안에 포함한다. line-count 낮추기용 wrapper 이동 또는 allowlist 증가는 금지한다.
-- [ ] **W0.8** owner-local RED test를 먼저 추가하고 실패 원인이 해당 finding인지 확인한다. 기존 suite PASS, source grep, test 파일 존재는 RED receipt가 아니다.
+- [x] **W0.8** owner-local RED test를 먼저 추가하고 실패 원인이 해당 finding인지 확인한다. 기존 suite PASS, source grep, test 파일 존재는 RED receipt가 아니다.
 
 ### 실제 blocking dependency
 
@@ -60,64 +60,64 @@
 
 근거: [ledger lock acquisition/cleanup](/Users/songmin/quanta-codeagent-v3/src/migration/external-config/ledger.ts:96), [throttle consumer](/Users/songmin/quanta-codeagent-v3/src/migration/external-config/run.ts:123). orphan `EEXIST`가 영구 false로 남고 best-effort caller는 기록 실패 후 진행한다.
 
-- [ ] **F-03.1** W0.3/W0.4 이후 ledger resource에 lock adapter를 주입한다. migration의 best-effort 결과와 lock failure reason은 분리한다.
-- [ ] **F-03.2** lock 아래 ledger re-read/validate/update/atomic replace를 수행하고 기존 orphan-sensitive wx 구현을 제거한다.
-- [ ] **F-03.3** 실제 child가 holder인 상태에서 kill한 뒤 새 process가 기록을 성공하는 rail과 live holder 비탈취 대조군을 추가한다.
-- [ ] **F-03.4** `runForScope`/persist consumer가 성공한 ledger 기록을 다음 실행의 throttle에 사용하는지 검증한다. lock helper 재획득 성공만으로 닫지 않는다.
+- [x] **F-03.1** W0.3/W0.4 이후 ledger resource에 lock adapter를 주입한다. migration의 best-effort 결과와 lock failure reason은 분리한다.
+- [x] **F-03.2** lock 아래 ledger re-read/validate/update/atomic replace를 수행하고 기존 orphan-sensitive wx 구현을 제거한다.
+- [x] **F-03.3** 실제 child가 holder인 상태에서 kill한 뒤 새 process가 기록을 성공하는 rail과 live holder 비탈취 대조군을 추가한다.
+- [x] **F-03.4** `runForScope`/persist consumer가 성공한 ledger 기록을 다음 실행의 throttle에 사용하는지 검증한다. lock helper 재획득 성공만으로 닫지 않는다.
 
 ### F-04 · P2 · OAuth CAS orphan
 
 근거: [CAS claim](/Users/songmin/quanta-codeagent-v3/src/auth/node-lock-file-store.ts:33), [compareAndSwap](/Users/songmin/quanta-codeagent-v3/src/auth/node-lock-file-store.ts:70). `.cas`가 존재하면 실제 expected 비교 전에 changed로 종료한다.
 
-- [ ] **F-04.1** auth lease/generation 상태와 이를 갱신하는 파일 임계구역을 구분한다. domain CAS 의미는 `LockFileStorePort` owner에 남기고 token 내용은 logs에 넣지 않는다.
-- [ ] **F-04.2** 검증된 lock 아래 expected read→compare→replace/delete를 수행하고 permanent `.cas` wedge를 제거한다. `changed`와 I/O/lock unavailable은 계약에 맞게 구분한다.
-- [ ] **F-04.3** orphan recovery, concurrent equal-expected CAS single winner, CAS delete, I/O failure를 실제 multi-process rail로 검증한다. file mode 0600도 검사한다.
-- [ ] **F-04.4** ChatGPT refresh transaction까지 연결해 dead owner 이후 refresh가 진행되고 live refresh generation은 훼손되지 않음을 확인한다.
+- [x] **F-04.1** auth lease/generation 상태와 이를 갱신하는 파일 임계구역을 구분한다. domain CAS 의미는 `LockFileStorePort` owner에 남기고 token 내용은 logs에 넣지 않는다.
+- [x] **F-04.2** 검증된 lock 아래 expected read→compare→replace/delete를 수행하고 permanent `.cas` wedge를 제거한다. `changed`와 I/O/lock unavailable은 계약에 맞게 구분한다.
+- [x] **F-04.3** orphan recovery, concurrent equal-expected CAS single winner, CAS delete, I/O failure를 실제 multi-process rail로 검증한다. file mode 0600도 검사한다.
+- [x] **F-04.4** ChatGPT refresh transaction까지 연결해 dead owner 이후 refresh가 진행되고 live refresh generation은 훼손되지 않음을 확인한다.
 
 ### F-09 · P2 · Permission live-steal / ABA
 
 근거: [5초 stale 판단](/Users/songmin/quanta-codeagent-v3/src/permission/json-state-file/locking.ts:94), [무조건 unlink release](/Users/songmin/quanta-codeagent-v3/src/permission/json-state-file/locking.ts:147). age로 live holder를 제거할 수 있고 old release가 successor lock을 지운다.
 
-- [ ] **F-09.1** W0.3에서 stable inode/FD lifetime 또는 동등하게 증명된 primitive를 선택한다. read-token-then-unlink를 ABA 해결책으로 승인하지 않는다.
-- [ ] **F-09.2** permission read/merge/write 전체를 임계구역 안에 두고 mtime-only steal/unconditional unlink를 제거한다. abort/timeout도 소유 중인 handle만 정리한다.
-- [ ] **F-09.3** A holder >5초, B contender, C contender를 barrier로 제어해 동시에 한 writer만 진입함을 검증한다. A kill 후 B가 진행하는 경우도 포함한다.
-- [ ] **F-09.4** 지연된 old release가 new holder에 영향을 주지 않음을 테스트한다. 같은 process refcount가 독립 transaction을 동시에 허용하지 않는지도 검사한다.
+- [x] **F-09.1** W0.3에서 stable inode/FD lifetime 또는 동등하게 증명된 primitive를 선택한다. read-token-then-unlink를 ABA 해결책으로 승인하지 않는다.
+- [x] **F-09.2** permission read/merge/write 전체를 임계구역 안에 두고 mtime-only steal/unconditional unlink를 제거한다. abort/timeout도 소유 중인 handle만 정리한다.
+- [x] **F-09.3** A holder >5초, B contender, C contender를 barrier로 제어해 동시에 한 writer만 진입함을 검증한다. A kill 후 B가 진행하는 경우도 포함한다.
+- [x] **F-09.4** 지연된 old release가 new holder에 영향을 주지 않음을 테스트한다. 같은 process refcount가 독립 transaction을 동시에 허용하지 않는지도 검사한다.
 
 ### F-10 · P2 · Settings/hooks lost update
 
 근거: [persistSettings](/Users/songmin/quanta-codeagent-v3/src/migration/external-config/persist.ts:496), [persistHooks](/Users/songmin/quanta-codeagent-v3/src/migration/external-config/persist.ts:529). 각각 atomic rename이지만 같은 settings file의 read→merge→rename은 잠기지 않는다.
 
-- [ ] **F-10.1** 두 writer가 동일 normalized resource key를 사용하게 한다. settings와 hooks용 별도 lock으로 나누지 않는다.
-- [ ] **F-10.2** critical section 안에서 최신 JSON을 읽고 해당 import delta만 merge한 뒤 strict atomic replace한다. 이전 read snapshot 기반 전체 overwrite를 제거한다.
-- [ ] **F-10.3** 두 OS process의 read/write를 barrier로 경합시켜 distinct setting/hook union과 unrelated keys 보존을 확인한다.
-- [ ] **F-10.4** 실제 command-hook loader가 merged 결과를 읽는 consumer rail과 malformed input/failure 시 기존 파일 보존을 확인한다.
+- [x] **F-10.1** 두 writer가 동일 normalized resource key를 사용하게 한다. settings와 hooks용 별도 lock으로 나누지 않는다.
+- [x] **F-10.2** critical section 안에서 최신 JSON을 읽고 해당 import delta만 merge한 뒤 strict atomic replace한다. 이전 read snapshot 기반 전체 overwrite를 제거한다.
+- [x] **F-10.3** 두 OS process의 read/write를 barrier로 경합시켜 distinct setting/hook union과 unrelated keys 보존을 확인한다.
+- [x] **F-10.4** 실제 command-hook loader가 merged 결과를 읽는 consumer rail과 malformed input/failure 시 기존 파일 보존을 확인한다.
 
 ### F-12 · P2 · Trust whole-map overwrite
 
 근거: [TrustStore mutation/flush](/Users/songmin/quanta-codeagent-v3/src/config/trust-store.ts:67), [persistence root](/Users/songmin/quanta-codeagent-v3/src/apps/agent/index.ts:258), [grant producer](/Users/songmin/quanta-codeagent-v3/src/apps/agent/index.ts:392). 현재 reachable 문제는 distinct explicit grant 유실이며 revoke producer는 확인되지 않았다.
 
-- [ ] **F-12.1** persistence port를 `load + commit explicit mutations` 계약으로 바꾼다. pure config slice에 filesystem/auth/storage import를 추가하지 않는다.
-- [ ] **F-12.2** root adapter에서 lock→fresh read→현재 instance dirty delta만 merge→atomic replace를 수행한다. 성공한 flush 이후 해당 delta만 acknowledge하고 도중에 추가된 mutation은 남긴다.
-- [ ] **F-12.3** 서로 다른 cwd의 두 process가 같은 시작 snapshot에서 grant한 뒤 둘 다 남는지 확인한다. retry/double flush 및 flush 중 추가 grant도 포함한다.
-- [ ] **F-12.4** stale whole-map save를 제거하고 grant UI→flush→새 instance read까지 검증한다. 미입증 revoke-resurrection을 완료 범위로 부풀리지 않는다.
+- [x] **F-12.1** persistence port를 `load + commit explicit mutations` 계약으로 바꾼다. pure config slice에 filesystem/auth/storage import를 추가하지 않는다.
+- [x] **F-12.2** root adapter에서 lock→fresh read→현재 instance dirty delta만 merge→atomic replace를 수행한다. 성공한 flush 이후 해당 delta만 acknowledge하고 도중에 추가된 mutation은 남긴다.
+- [x] **F-12.3** 서로 다른 cwd의 두 process가 같은 시작 snapshot에서 grant한 뒤 둘 다 남는지 확인한다. retry/double flush 및 flush 중 추가 grant도 포함한다.
+- [x] **F-12.4** stale whole-map save를 제거하고 grant UI→flush→새 instance read까지 검증한다. 미입증 revoke-resurrection을 완료 범위로 부풀리지 않는다.
 
 ### F-13 · P2 · Live document truncate-rewrite
 
 근거: [direct document write](/Users/songmin/quanta-codeagent-v3/src/migration/external-config/persist.ts:458), [raw memory append-RMW](/Users/songmin/quanta-codeagent-v3/src/migration/external-config/persist.ts:778). 실패 시 신규 block뿐 아니라 기존 bytes까지 손상될 수 있다.
 
-- [ ] **F-13.1** rules와 raw memory writer를 same-directory temp/sync/rename으로 연결한다. no-clobber/idempotency 의미와 기존 file mode를 보존한다. atomic replace와 overwrite 권한은 별개다.
-- [ ] **F-13.2** raw memory read+append+replace에는 같은 resource lock을 사용한다. torn-write 방지와 concurrent append union을 별도 invariant로 검증한다.
-- [ ] **F-13.3** temp write/sync/rename 실패 각각에서 old bytes 보존과 temp cleanup을 확인한다. rename 후 directory-sync 실패는 already-applied/uncertain durability로 명시하고 unchanged라고 하지 않는다.
-- [ ] **F-13.4** live glob-rule loader가 결과를 읽고 raw memory의 기존 block이 남음을 확인한다. 직접 truncate write와 EXDEV-copy 성공 fallback은 이 경로에서 제거한다.
+- [x] **F-13.1** rules와 raw memory writer를 same-directory temp/sync/rename으로 연결한다. no-clobber/idempotency 의미와 기존 file mode를 보존한다. atomic replace와 overwrite 권한은 별개다.
+- [x] **F-13.2** raw memory read+append+replace에는 같은 resource lock을 사용한다. torn-write 방지와 concurrent append union을 별도 invariant로 검증한다.
+- [x] **F-13.3** temp write/sync/rename 실패 각각에서 old bytes 보존과 temp cleanup을 확인한다. rename 후 directory-sync 실패는 already-applied/uncertain durability로 명시하고 unchanged라고 하지 않는다.
+- [x] **F-13.4** live glob-rule loader가 결과를 읽고 raw memory의 기존 block이 남음을 확인한다. 직접 truncate write와 EXDEV-copy 성공 fallback은 이 경로에서 제거한다.
 
 ### F-11 · P3 · Malformed ledger entry
 
 근거: [envelope-only loader](/Users/songmin/quanta-codeagent-v3/src/migration/external-config/ledger.ts:56), [entry dereference](/Users/songmin/quanta-codeagent-v3/src/migration/external-config/ledger.ts:85). `{entries:[null]}`이 `isThrottled`에서 TypeError를 만든다.
 
-- [ ] **F-11.1** entry required fields와 accepted version을 명시하고 element별 validator를 만든다. valid subset과 corruption diagnostic을 분리한다.
-- [ ] **F-11.2** unsafe cast를 제거하고 malformed subset 때문에 fail-soft migration startup이 throw하지 않게 한다. 원문 보존/후속 rewrite 정책을 함께 정한다.
-- [ ] **F-11.3** null/scalar/missing field/wrong type/valid mixed fixtures를 실제 throttle consumer로 통과시킨다.
-- [ ] **F-11.4** 정상 throttle 동작을 유지하고 malformed entry를 놓는 mutation에서 test가 RED인지 확인한다. 이 작업은 lock primitive 완료를 기다리지 않는다.
+- [x] **F-11.1** entry required fields와 accepted version을 명시하고 element별 validator를 만든다. valid subset과 corruption diagnostic을 분리한다.
+- [x] **F-11.2** unsafe cast를 제거하고 malformed subset 때문에 fail-soft migration startup이 throw하지 않게 한다. 원문 보존/후속 rewrite 정책을 함께 정한다.
+- [x] **F-11.3** null/scalar/missing field/wrong type/valid mixed fixtures를 실제 throttle consumer로 통과시킨다.
+- [x] **F-11.4** 정상 throttle 동작을 유지하고 malformed entry를 놓는 mutation에서 test가 RED인지 확인한다. 이 작업은 lock primitive 완료를 기다리지 않는다.
 
 ## 3. R03 — source-of-truth persistence
 
@@ -323,19 +323,19 @@
 
 근거: [canonical commands](/Users/songmin/quanta-codeagent-v3/src/protocol/session/commands.ts:207), [surface omissions](/Users/songmin/quanta-codeagent-v3/src/protocol/session/verb-surface.ts:55), [wire builders](/Users/songmin/quanta-codeagent-v3/src/ipc/session/handle.ts:675), [SDK conformance](/Users/songmin/quanta-codeagent-v3/src/sdk/runtime/handle-adapter.ts:43).
 
-- [ ] **C-F2.1** command discriminant별 public/internal visibility와 executor mapping을 exhaustively 정의한다. host-only `turn.submit` 등은 explicit exclusion이며 외부 공개하지 않는다.
-- [ ] **C-F2.2** objective/posture/skill verb를 양 builder에 연결하고 canonical command encoding을 사용한다. wire receipt와 execution completion semantics를 유지한다.
-- [ ] **C-F2.3** 세 command의 wire→kernel 결과와 in-process 결과를 conformance rail로 비교한다. permissions/error/receipt correlation도 검사한다.
-- [ ] **C-F2.4** 새 command에 mapping 없으면 compile/test 실패하게 하고 private command 노출도 실패하게 한다. public surface별 수동 누락 가능 목록을 제거한다.
+- [x] **C-F2.1** command discriminant별 public/internal visibility와 executor mapping을 exhaustively 정의한다. host-only `turn.submit` 등은 explicit exclusion이며 외부 공개하지 않는다.
+- [x] **C-F2.2** objective/posture/skill verb를 양 builder에 연결하고 canonical command encoding을 사용한다. wire receipt와 execution completion semantics를 유지한다.
+- [x] **C-F2.3** 세 command의 wire→kernel 결과와 in-process 결과를 conformance rail로 비교한다. permissions/error/receipt correlation도 검사한다.
+- [x] **C-F2.4** 새 command에 mapping 없으면 compile/test 실패하게 하고 private command 노출도 실패하게 한다. public surface별 수동 누락 가능 목록을 제거한다.
 
 ### C-F11 · P2 · Event payload unchecked
 
 근거: [envelope 이후 cast](/Users/songmin/quanta-codeagent-v3/src/protocol/session/codec.ts:238), [approval dereference](/Users/songmin/quanta-codeagent-v3/src/ipc/session/handle.ts:345), [persisted replay](/Users/songmin/quanta-codeagent-v3/src/kernel/session/event-log-jsonl.ts:209).
 
-- [ ] **C-F11.1** 모든 event discriminant에 payload validator를 배정한다. required/optional/version semantics는 protocol owner에 두고 kernel domain policy를 역import하지 않는다.
-- [ ] **C-F11.2** common envelope 다음 payload validation을 수행하고 invalid event를 consumer 이전에 typed decode error로 반환한다.
-- [ ] **C-F11.3** event variant당 valid case와 required-field malformed case를 생성해 exhaustive table/floor를 검사한다. `approval:null` wire 및 persisted-log rail을 포함한다.
-- [ ] **C-F11.4** corrupt replay는 원문 보존+typed refusal/diagnostic이며 silently skip 또는 재저장으로 숨기지 않는다. existing optional/version fixtures와 unsafe cast 제거를 확인한다.
+- [x] **C-F11.1** 모든 event discriminant에 payload validator를 배정한다. required/optional/version semantics는 protocol owner에 두고 kernel domain policy를 역import하지 않는다.
+- [x] **C-F11.2** common envelope 다음 payload validation을 수행하고 invalid event를 consumer 이전에 typed decode error로 반환한다.
+- [x] **C-F11.3** event variant당 valid case와 required-field malformed case를 생성해 exhaustive table/floor를 검사한다. `approval:null` wire 및 persisted-log rail을 포함한다.
+- [x] **C-F11.4** corrupt replay는 원문 보존+typed refusal/diagnostic이며 silently skip 또는 재저장으로 숨기지 않는다. existing optional/version fixtures와 unsafe cast 제거를 확인한다.
 
 ## 13. R13 — benchmark family profile
 
@@ -354,10 +354,10 @@
 
 근거: [empty production seams](/Users/songmin/quanta-codeagent-v3/src/apps/cli/index.ts:95), [required Docker/Lima ports](/Users/songmin/quanta-codeagent-v3/src/remote/runner/registry.ts:47).
 
-- [ ] **G-F9.1** CLI-local dependency builder에서 Docker process와 Lima process/VM 설정을 resolve한다. selection 자체는 backend command를 실행하지 않는다.
-- [ ] **G-F9.2** integrator가 CLI selector에 adapter를 주입하고 disabled/misconfigured/unavailable 결과를 CLI code/message로 연결한다. shell string 대신 argv를 사용한다.
-- [ ] **G-F9.3** 실제 CLI route에 fake adapter를 넣어 env docker/lima 선택이 factory 및 operation dispatch까지 도달하는지 검사한다. default/unset/missing binary/VM도 포함한다.
-- [ ] **G-F9.4** empty-seam 경로를 제거하고 실제 Docker/Lima runtime rail을 설치 환경에서 분리해 기록한다. P1이므로 배정된 W3-I 안에서 R14를 첫 순서로 통합한다.
+- [x] **G-F9.1** CLI-local dependency builder에서 Docker process와 Lima process/VM 설정을 resolve한다. selection 자체는 backend command를 실행하지 않는다.
+- [x] **G-F9.2** integrator가 CLI selector에 adapter를 주입하고 disabled/misconfigured/unavailable 결과를 CLI code/message로 연결한다. shell string 대신 argv를 사용한다.
+- [x] **G-F9.3** 실제 CLI route에 fake adapter를 넣어 env docker/lima 선택이 factory 및 operation dispatch까지 도달하는지 검사한다. default/unset/missing binary/VM도 포함한다.
+- [x] **G-F9.4** empty-seam 경로를 제거하고 실제 Docker/Lima runtime rail을 설치 환경에서 분리해 기록한다. P1이므로 배정된 W3-I 안에서 R14를 첫 순서로 통합한다.
 
 ## 15. R15 — configuration truth
 

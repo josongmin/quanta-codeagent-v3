@@ -24,7 +24,7 @@ import { readFileSync } from "node:fs"
 import { copyFile, mkdir, readFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import writeFileAtomic from "write-file-atomic"
-import { acquireLock, LOCK_STALE_MS, releaseLock } from "@/permission/json-state-file/locking"
+import { acquireLock, releaseLock } from "@/permission/json-state-file/locking"
 import { errMessage, QuantaError, quantaHomeDir, quantaHomeDirFrom } from "@/shared"
 import {
   readStickyModelFrom,
@@ -158,15 +158,9 @@ type StickyMutation = (current: StickyModelLoadResult) => Readonly<Record<string
  *   - `@/auth/lock-file-based` carries an OAuth-token payload + TTL contract this
  *     store has no use for.
  *
- * STALE-LOCK RULE (documented, because a lock with no reclamation is a deadlock
- * waiting for a `SIGKILL`): the lockfile body is `{pid, ts}`. A holder is
- * declared dead once `now() - ts > LOCK_STALE_MS` (5s) and its lockfile is
- * unlinked so the create can be retried; when the body is unreadable — a
- * half-written or legacy lock — the file's mtime substitutes for `ts` under the
- * same threshold. 5s is orders of magnitude above the real hold here (one small
- * read + one rename, sub-millisecond), so a healthy holder never trips its own
- * check, and it bounds the wedge a `kill -9` mid-write can cause to one 5s
- * window rather than forever.
+ * LOCK: POSIX flock on `<store>.lock`. Process death releases the fd.
+ * Leftover lock pathnames are reopened, never age-unlinked. A live holder
+ * cannot be stolen.
  *
  * NO-THROW, per the port contract: a lock we could not take within the helper's
  * budget, an un-creatable parent directory, and a failed write all resolve to a
@@ -193,8 +187,7 @@ const mutateUnderLock = async (
       error: new StickyModelWriteError(
         path,
         `the write lock ${JSON.stringify(lockPath)} could not be taken — a peer held it for the ` +
-          `whole acquisition budget, or the lock file itself could not be created. A holder is ` +
-          `presumed dead and reclaimed after ${LOCK_STALE_MS}ms`,
+          `whole acquisition budget, or the lock file itself could not be created.`,
       ),
     }
   }
@@ -222,8 +215,8 @@ const mutateUnderLock = async (
   } catch (cause: unknown) {
     return { ok: false, error: new StickyModelWriteError(path, errMessage(cause), { cause }) }
   } finally {
-    // Released on EVERY exit, including the throwing one — an un-released lock
-    // would wedge every writer on this machine for `LOCK_STALE_MS` per attempt.
+    // Released on EVERY exit, including the throwing one — an un-released
+    // flock would block every waiter until this process exits.
     await releaseLock(lockPath)
   }
 }

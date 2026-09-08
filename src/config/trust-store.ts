@@ -37,7 +37,12 @@ export interface TrustRecord {
  *  `undefined` from load ⇒ no trust file yet (everything untrusted). */
 export interface TrustPersistencePort {
   readonly load: () => Promise<Readonly<Record<string, TrustRecord>> | undefined>
-  readonly save: (records: Readonly<Record<string, TrustRecord>>) => Promise<void>
+  /**
+   * Persist ONLY the caller's dirty mutations. Adapters MUST re-read the
+   * durable map, merge these keys, and atomically replace. A whole-map
+   * overwrite of a stale in-memory snapshot is forbidden (F-12).
+   */
+  readonly commit: (mutations: Readonly<Record<string, TrustRecord>>) => Promise<void>
 }
 
 /**
@@ -66,7 +71,7 @@ export const canonicalizeProjectPath = (path: string, cwd?: string): string => {
  *  Lookups are default-UNTRUSTED. Mutations are buffered until {@link flush}. */
 export class TrustStore {
   private readonly records: Map<string, TrustRecord>
-  private dirty = false
+  private readonly dirtyMutations = new Map<string, TrustRecord>()
 
   private constructor(
     records: Map<string, TrustRecord>,
@@ -127,23 +132,30 @@ export class TrustStore {
   /** Record an explicit trust grant for a canonical path. `now` is the
    *  host-supplied epoch-ms (injected clock — the store never reads time). */
   setTrusted(path: string, now: number, cwd?: string): void {
-    this.records.set(canonicalizeProjectPath(path, cwd), { trusted: true, grantedAt: now })
-    this.dirty = true
+    const key = canonicalizeProjectPath(path, cwd)
+    const rec = { trusted: true, grantedAt: now }
+    this.records.set(key, rec)
+    this.dirtyMutations.set(key, rec)
   }
 
   /** Explicitly revoke trust (records `trusted:false`, an explicit untrust). */
   setUntrusted(path: string, now: number, cwd?: string): void {
-    this.records.set(canonicalizeProjectPath(path, cwd), { trusted: false, grantedAt: now })
-    this.dirty = true
+    const key = canonicalizeProjectPath(path, cwd)
+    const rec = { trusted: false, grantedAt: now }
+    this.records.set(key, rec)
+    this.dirtyMutations.set(key, rec)
   }
 
   /** Persist buffered mutations. No-op when nothing changed. */
   async flush(): Promise<void> {
-    if (!this.dirty) return
-    const obj: Record<string, TrustRecord> = {}
-    for (const [k, v] of this.records) obj[k] = v
-    await this.persistence.save(obj)
-    this.dirty = false
+    if (this.dirtyMutations.size === 0) return
+    const snapshot: Record<string, TrustRecord> = {}
+    for (const [k, v] of this.dirtyMutations) snapshot[k] = v
+    await this.persistence.commit(snapshot)
+    for (const [k, v] of Object.entries(snapshot)) {
+      const live = this.dirtyMutations.get(k)
+      if (live === v) this.dirtyMutations.delete(k)
+    }
   }
 }
 

@@ -174,6 +174,28 @@ const buildAdapterVerbSurface = (args: {
         return receiptOf(commandId, () => session.permission.set(mode, { ...meta, commandId }))
       },
     },
+    objective: {
+      mutate(mutation, meta) {
+        const commandId = meta?.commandId ?? newCommandId()
+        return receiptOf(commandId, () =>
+          session.objective.mutate(mutation, { ...meta, commandId }),
+        )
+      },
+    },
+    posture: {
+      set(patch, scope, meta) {
+        const commandId = meta?.commandId ?? newCommandId()
+        return receiptOf(commandId, () => session.posture.set(patch, scope, { ...meta, commandId }))
+      },
+    },
+    skill: {
+      setEnabled(name, enabled, meta) {
+        const commandId = meta?.commandId ?? newCommandId()
+        return receiptOf(commandId, () =>
+          session.skill.setEnabled(name, enabled, { ...meta, commandId }),
+        )
+      },
+    },
     approval: {
       respond(approvalId, decision, meta) {
         const commandId = meta?.commandId ?? newCommandId()

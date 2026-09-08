@@ -3,15 +3,21 @@ import type { CreateRuntimeOptions, RuntimeSessionConfig } from "@/host/runtime"
 import type { ConnectedSessionTransport, SessionTransport } from "@/ipc/session"
 import type { SessionHostSideConversationResult } from "@/kernel/session"
 import type { ImageBlock, Message } from "@/llm"
+import type { ObjectiveMutation } from "@/objective"
+import type { PosturePatch } from "@/permission/posture/types"
 import type {
   ApprovalRespondCommand,
   ArtifactRef,
   InputAppendCommand,
   PendingApprovalView,
+  PostureCommandScope,
   SessionCommand,
   SessionEvent,
   SessionIdentitySetCommand,
+  SessionObjectiveMutateCommand,
   SessionPermissionSetCommand,
+  SessionPostureSetCommand,
+  SessionSkillSetEnabledCommand,
   SessionSnapshotLite,
   SessionToolProfileSetCommand,
   SessionTranscriptReplaceCommand,
@@ -140,6 +146,31 @@ export interface RuntimeSession {
     set(
       mode: string,
       meta?: Partial<Omit<SessionPermissionSetCommand, "sessionId" | "type" | "mode">>,
+      options?: SessionDispatchOptions,
+    ): Promise<SessionDispatchResult>
+  }
+  readonly objective: {
+    mutate(
+      mutation: ObjectiveMutation,
+      meta?: Partial<Omit<SessionObjectiveMutateCommand, "sessionId" | "type" | "mutation">>,
+      options?: SessionDispatchOptions,
+    ): Promise<SessionDispatchResult>
+  }
+  readonly posture: {
+    set(
+      patch: PosturePatch,
+      scope: PostureCommandScope,
+      meta?: Partial<Omit<SessionPostureSetCommand, "sessionId" | "type" | "patch" | "scope">>,
+      options?: SessionDispatchOptions,
+    ): Promise<SessionDispatchResult>
+  }
+  readonly skill: {
+    setEnabled(
+      name: string,
+      enabled: boolean,
+      meta?: Partial<
+        Omit<SessionSkillSetEnabledCommand, "sessionId" | "type" | "name" | "enabled">
+      >,
       options?: SessionDispatchOptions,
     ): Promise<SessionDispatchResult>
   }

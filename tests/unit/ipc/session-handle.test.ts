@@ -631,6 +631,26 @@ describe("SessionHandle — parked-approval void (HIGH-1, jul-16 audit)", () => 
     expect(String((err as Error).message)).toContain("ap-1")
   })
 
+  test("status-less state.updated does not false-void a parked approval", async () => {
+    const { handle, deliver } = makeHandle()
+    await handle.turn.run({ commandId: "run-1" })
+    const wait = handle.awaitTurnEnd()
+    deliver(approvalRequested({ approvalId: "ap-1", causedByCommandId: "run-1", seq: 10 }))
+    deliver(stateUpdated({ status: "awaiting_approval", seq: 11, causedByCommandId: "run-1" }))
+    deliver({
+      kind: "event",
+      event: {
+        eventId: "e-bogus",
+        seq: 12,
+        revision: 6,
+        emittedAt: "t",
+        type: "session.state.updated",
+        state: {},
+      } as SessionEvent,
+    })
+    expect((await probe(wait)).state).toBe("pending")
+  })
+
   test("paired control: the NORMAL approve path crosses the same awaiting_approval→idle transition WITHOUT voiding (approval.resolved precedes the echo)", async () => {
     const { handle, deliver } = makeHandle()
     await handle.turn.run({ commandId: "run-1" })

@@ -54,9 +54,10 @@ export {
   LOCK_TIMEOUT_MS,
   type ParseOutcome,
   type PersistOutcome,
+  releaseLock,
 } from "./json-state-file/locking"
 
-import type { ParseOutcome, PersistOutcome } from "./json-state-file/locking"
+import { LOCK_TIMEOUT_MS, type ParseOutcome, type PersistOutcome } from "./json-state-file/locking"
 
 export interface JsonStateFileOptions<T> {
   /** Absolute path of the JSON state file. */
@@ -95,10 +96,10 @@ export interface JsonStateFileOptions<T> {
    *  result MUST equal `inMemory` byte-for-byte so the single-process path is
    *  unchanged. When absent, the engine falls back to writing `inMemory`. */
   mergeWithDisk?: (args: { onDisk: T | null; inMemory: T; baseline: T | null }) => T
-  /** Injected clock for the cross-process lock's staleness math (default
-   *  `Date.now`). Threaded into {@link acquireLock} so a peer's stale lock is
-   *  reclaimed deterministically in tests; production uses the real clock. */
+  /** Injected clock kept for source-compat. Age steal is gone; flock ignores it. */
   now?: () => number
+  /** Acquisition budget for the flock wait. Tests may shorten it. */
+  lockTimeoutMs?: number
 }
 
 /**
@@ -150,6 +151,7 @@ export const createJsonStateFile = <T>(opts: JsonStateFileOptions<T>): JsonState
     /** Injected lock-staleness clock; the literal `Date.now` is only the
      *  default-factory fallback (no call form ⇒ scanner-clean). */
     lockNow: opts.now ?? Date.now,
+    lockTimeoutMs: opts.lockTimeoutMs ?? LOCK_TIMEOUT_MS,
     tmpSuffix,
     tmpPath: `${opts.filePath}${tmpSuffix}`,
     /** Cross-process critical-section lock path. Only used when a `mergeWithDisk`

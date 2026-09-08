@@ -21,12 +21,12 @@
  *   • exit 0 on `--help` (after a usage dump to stdout).
  */
 
-import { mkdir, readFile, realpath } from "node:fs/promises"
-import { dirname, join } from "node:path"
+import { readFile, realpath } from "node:fs/promises"
+import { join } from "node:path"
 import * as readline from "node:readline/promises"
 import { buildSearchPipelineFromEnv, clearSearchPipelineWireForTests } from "@/runner/assemble"
 import { loadEnvFiles } from "@/shared/env-files"
-import { writeFileAtomic } from "@/storage"
+import { makeTrustPersistence } from "./trust-persist"
 
 loadEnvFiles([".env.dev", ".env.local", ".env"])
 
@@ -42,7 +42,6 @@ import {
   type ReadTextPort,
   readDiskLayers,
   type TrustPersistencePort,
-  type TrustRecord,
   TrustStore,
 } from "@/config"
 // ADR-0303 thin-surface relocation — the env-READING "argv → AgentConfig base"
@@ -251,40 +250,6 @@ const defaultTrustPrompt = async (info: {
     rl.close()
   }
 }
-
-/** Concrete `~/.quanta/trust.json` persistence for the TrustStore. Absent /
- *  malformed file ⇒ `undefined` (everything UNTRUSTED — fail-closed), mirroring
- *  the store's own hydration discipline. */
-const makeTrustPersistence = (trustFilePath: string): TrustPersistencePort => ({
-  load: async () => {
-    let text: string
-    try {
-      text = await readFile(trustFilePath, "utf8")
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code
-      if (code === "ENOENT" || code === "ENOTDIR") return undefined
-      throw err
-    }
-    try {
-      const parsed = JSON.parse(text) as unknown
-      return typeof parsed === "object" && parsed !== null
-        ? (parsed as Record<string, TrustRecord>)
-        : undefined
-    } catch {
-      return undefined
-    }
-  },
-  save: async (records) => {
-    // Security-load-bearing file (default-UNTRUSTED hydration). Two hardenings
-    // over the old naive `writeFile`: (1) ensure the config dir exists so a
-    // first-ever grant on a fresh `~/.quanta` (or a new QUANTA_CONFIG_DIR)
-    // doesn't ENOENT and break boot; (2) atomic temp+fsync+rename so a crash
-    // mid-write can't tear the trust file (parity with the sticky-model /
-    // permission / migration stores).
-    await mkdir(dirname(trustFilePath), { recursive: true })
-    await writeFileAtomic(trustFilePath, JSON.stringify(records))
-  },
-})
 
 /**
  * ADR-0497 jun-7-misc 05 — resolve the agent's `CommandHookBinding[]` at the

@@ -80,11 +80,24 @@ export interface SessionTokenUsageView {
   readonly costMicroUsd?: number
 }
 
+export const SESSION_STATE_STATUSES = [
+  "idle",
+  "running",
+  "awaiting_approval",
+  "failed",
+  "closed",
+] as const
+
+export type SessionStateStatus = (typeof SESSION_STATE_STATUSES)[number]
+
+export const isSessionStateStatus = (value: unknown): value is SessionStateStatus =>
+  typeof value === "string" && (SESSION_STATE_STATUSES as readonly string[]).includes(value)
+
 export interface SessionStateView {
   /** Live cumulative authority projection on snapshots, including before any
    * turn. Explicit off is not legacy absence; clients replace, never sum. */
   readonly costView?: CostSurfaceViewWire
-  readonly status: "idle" | "running" | "awaiting_approval" | "failed" | "closed"
+  readonly status: SessionStateStatus
   readonly draftInput: string
   readonly permissionMode: string
   readonly identityMode?: string

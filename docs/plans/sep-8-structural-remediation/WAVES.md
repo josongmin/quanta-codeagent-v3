@@ -1,12 +1,12 @@
 # Sep-08 — disjoint write-set wave plan
 
-상태: **분할 계획은 유지. W1·W2는 local `main` `29d7e4ff1`에 통합됨. W3+ 미착수. W7 verified 아님.**
+상태: **분할 계획은 유지. W1·W2·W3는 local `main`에 통합됨 (W3 uncommitted). W7 verified 아님.**
 
 - 구조·근거: [README](/Users/songmin/quanta-codeagent-v3/docs/plans/sep-8-structural-remediation/README.md), [ACTIONS](/Users/songmin/quanta-codeagent-v3/docs/plans/sep-8-structural-remediation/ACTIONS.md).
 - 실행 배정의 machine-readable 원본: [waves.json](/Users/songmin/quanta-codeagent-v3/docs/plans/sep-8-structural-remediation/waves.json).
 - 검사기: [verify-waves.mjs](/Users/songmin/quanta-codeagent-v3/docs/plans/sep-8-structural-remediation/verify-waves.mjs).
 - Plan baseline HEAD: `f5f4875799141068af73e604129c8b9a09f76007`.
-- Integrated source (W1+W2): `29d7e4ff1a2df3e925c1f3854432e3a741f5d2d7`. `waves.json` `sourceHead`는 이 값이다.
+- Integrated source (W1+W2, W3 착수): `19fc9da2b5f5e7763f2288e09f1af36e44b70b2a`. `waves.json` `sourceHead`는 이 값이다.
 - audit digest는 manifest에 고정한다. `docs/bugbash/sep-8-se-audit/`는 baseline 입력이지 구현 closeout이 아니다.
 
 ## 1. 전체 배정 — 39 finding / 16 package / 172 action

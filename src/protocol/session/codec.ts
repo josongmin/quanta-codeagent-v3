@@ -1,8 +1,9 @@
 import { errMessage } from "@/shared"
 import { isPostureCommandScope, isSessionCommandType, type SessionCommand } from "./commands"
 import { SessionProtocolValidationError } from "./errors"
-import { isSessionEventType, type SessionEvent } from "./events"
-import type { SessionSnapshotLite } from "./snapshot"
+import { assertSessionEventPayload } from "./event-payload"
+import type { SessionEvent } from "./events"
+import { isSessionStateStatus, type SessionSnapshotLite } from "./snapshot"
 import { isSessionProtocolVersion, SESSION_PROTOCOL_VERSION } from "./version"
 
 interface SessionWireEnvelope<TPayload> {
@@ -238,9 +239,7 @@ export const encodeSessionEvent = (event: SessionEvent): string =>
 export const decodeSessionEvent = (raw: string): SessionEvent => {
   const envelope = parseEnvelope(raw, "event")
   assertCommonMetadata(envelope.payload, "event")
-  if (!isSessionEventType(envelope.payload.type)) {
-    throw new SessionProtocolValidationError("bad_event_type")
-  }
+  assertSessionEventPayload(envelope.payload)
   return envelope.payload as unknown as SessionEvent
 }
 
@@ -265,6 +264,9 @@ export const decodeSessionSnapshot = (raw: string): SessionSnapshotLite => {
   // canonical contract exactly: `pendingApproval` is nullable, `openArtifacts`
   // is an array, `state`/`capabilities` are objects.
   assertObjectField(payload, "snapshot", "state")
+  if (!isSessionStateStatus((payload.state as Record<string, unknown>).status)) {
+    throw new SessionProtocolValidationError("bad_snapshot_state_status")
+  }
   assertObjectField(payload, "snapshot", "capabilities")
   assertNullableObjectField(payload, "snapshot", "pendingApproval")
   assertArrayField(payload, "snapshot", "openArtifacts")

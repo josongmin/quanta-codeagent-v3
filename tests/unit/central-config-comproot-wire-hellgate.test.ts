@@ -73,8 +73,8 @@ const makeInMemoryTrust = (): ((p: string) => TrustPersistencePort) => {
     persistenceCtorCalls++
     return {
       load: async () => trustBacking,
-      save: async (records) => {
-        trustBacking = { ...records }
+      commit: async (mutations) => {
+        trustBacking = { ...(trustBacking ?? {}), ...mutations }
       },
     }
   }

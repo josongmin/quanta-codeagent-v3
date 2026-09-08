@@ -17,8 +17,8 @@ const emptyPort = (): TrustPersistencePort => {
   let saved: Readonly<Record<string, TrustRecord>> | undefined
   return {
     load: async () => saved,
-    save: async (r) => {
-      saved = r
+    commit: async (mutations) => {
+      saved = { ...(saved ?? {}), ...mutations }
     },
   }
 }
@@ -95,7 +95,7 @@ describe("corrupt/forged persisted trust file is fail-soft (never crashes hydrat
   // and the entire trust store (including legitimately-trusted paths) is lost.
   const malicious = (raw: Readonly<Record<string, TrustRecord>>): TrustPersistencePort => ({
     load: async () => raw,
-    save: async () => {},
+    commit: async () => {},
   })
 
   test("a relative/empty key does not throw and does not nuke the valid records", async () => {

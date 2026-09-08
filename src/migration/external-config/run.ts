@@ -31,7 +31,7 @@ import {
   convertSubagents,
 } from "./convert"
 import { detectExternalConfigs } from "./detect"
-import { isThrottled, loadMigrationLedger, recordDisposition, sourceKeyOf } from "./ledger"
+import { isThrottled, loadMigrationLedgerDetailed, recordDisposition, sourceKeyOf } from "./ledger"
 import { type PersistConvertedResult, persistConvertedItems } from "./persist"
 import type {
   ConfigInventory,
@@ -123,8 +123,8 @@ const runForScope = async (
 ): Promise<{ throttled: boolean; converted: ConvertedItem[]; sourceKey: string }> => {
   if (items.length === 0) return { throttled: false, converted: [], sourceKey: "" }
   const sourceKey = sourceKeyOf(scope, items)
-  const ledger = await loadMigrationLedger(input.homeDir)
-  if (isThrottled(ledger, sourceKey)) {
+  const loaded = await loadMigrationLedgerDetailed(input.homeDir)
+  if (loaded.diagnostic.unreadable || isThrottled(loaded.ledger, sourceKey)) {
     return { throttled: true, converted: [], sourceKey }
   }
   const converted: ConvertedItem[] = []

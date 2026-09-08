@@ -33,7 +33,7 @@ const BYPASS_COMMANDS = [
   `ruby -e "p ENV"`,
   "$(printenv)",
   `perl -e "print %ENV"`,
-  `php -r "print_r(\$_ENV)"`,
+  `php -r "print_r($_ENV)"`,
   `deno eval "Deno.env.toObject()"`,
 ] as const
 

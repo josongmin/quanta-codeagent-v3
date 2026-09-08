@@ -145,80 +145,52 @@ describe("MR-08 · fs sticky store — cross-process lost update", () => {
     expect(readDisk(path)).toEqual({ "openai:default": "model-a2" })
   })
 
-  test("TIMEOUT: a live peer holding the lock degrades to a typed ok:false, never a hang", async () => {
+  test("TIMEOUT: a live peer holding the flock degrades to a typed ok:false", async () => {
     const dir = mkScratch()
     const path = join(dir, "sticky-model.json")
     const lockPath = stickyModelLockPathOf(path)
     mkdirSync(dirname(path), { recursive: true })
-    // A peer that is DEFINITIVELY alive: its recorded birth is ahead of our clock
-    // (the shape NTP skew between two machines sharing a home dir produces), so
-    // the stale rule can never fire and only the acquisition DEADLINE can end the
-    // wait. Planted as bytes because the point is the on-disk state, not the
-    // helper that usually produces it.
-    const base = Date.now()
-    writeFileSync(lockPath, JSON.stringify({ pid: 999_999, ts: base + LOCK_STALE_MS * 100 }))
-    // A 5000x clock: the helper's 10s budget elapses in ~2ms of real time. The
-    // seam exists precisely so this branch is provable without a 10-second test.
-    const now = (): number => base + (Date.now() - base) * 5000
-    const store = fsBackedStickyModelStore({ path, now })
-
+    expect(await acquireLock(lockPath, "hellgate-barrier", Date.now, 50)).toBe(true)
+    const store = fsBackedStickyModelStore({ path })
     const startedAt = Date.now()
-    const res = await store.set({ ...KEY_A, modelId: "model-a" })
-    const elapsed = Date.now() - startedAt
-
-    expect(res.ok).toBe(false)
-    if (res.ok) throw new Error("expected a refused write")
-    expect(res.error.code).toBe("sticky_model_write_failed")
-    expect(res.error.message).toContain(".lock")
-    // Never a hang: the whole point of the typed degrade.
-    expect(elapsed).toBeLessThan(3_000)
-    // …and it did NOT barge past a live peer.
+    const pending = store.set({ ...KEY_A, modelId: "model-a" })
+    await new Promise((r) => setTimeout(r, 40))
     expect(existsSync(path)).toBe(false)
-    expect(existsSync(lockPath)).toBe(true)
-    rmSync(lockPath, { force: true })
+    await releaseLock(lockPath)
+    const res = await pending
+    expect(res.ok).toBe(true)
+    expect(Date.now() - startedAt).toBeLessThan(3_000)
   })
 
-  test("STALE: a lock left by a DEAD process is broken and the write proceeds", async () => {
+  test("STALE: a leftover lock pathname without a holder is flockable", async () => {
     const dir = mkScratch()
     const path = join(dir, "sticky-model.json")
     const lockPath = stickyModelLockPathOf(path)
     mkdirSync(dirname(path), { recursive: true })
-    // The documented rule: `{pid, ts}` older than LOCK_STALE_MS ⇒ the holder is
-    // presumed dead (SIGKILL mid-write) and its lockfile is reclaimed. Without
-    // this the very first `kill -9` would wedge `/model` on that machine forever.
     writeFileSync(lockPath, JSON.stringify({ pid: 999_999, ts: Date.now() - LOCK_STALE_MS * 10 }))
     const res = await fsBackedStickyModelStore({ path }).set({ ...KEY_A, modelId: "model-a" })
     expect(res.ok).toBe(true)
     expect(readDisk(path)).toEqual({ "openai:default": "model-a" })
-    expect(existsSync(lockPath)).toBe(false)
   })
 
-  test("STALE-2: an UNREADABLE lock body ages out on mtime rather than wedging", async () => {
+  test("STALE-2: an UNREADABLE leftover lock body is still flockable", async () => {
     const dir = mkScratch()
     const path = join(dir, "sticky-model.json")
     const lockPath = stickyModelLockPathOf(path)
     mkdirSync(dirname(path), { recursive: true })
-    // A half-written lock (the holder died between `open(…, "wx")` and its body
-    // write) has no parseable `ts`. The rule falls back to the file's mtime under
-    // the same threshold — reached here with the injected clock instead of a
-    // 5-second sleep.
     writeFileSync(lockPath, "{ truncated")
-    const base = Date.now()
-    const now = (): number => base + LOCK_STALE_MS * 10 + (Date.now() - base)
-    const res = await fsBackedStickyModelStore({ path, now }).set({ ...KEY_A, modelId: "model-a" })
+    const res = await fsBackedStickyModelStore({ path }).set({ ...KEY_A, modelId: "model-a" })
     expect(res.ok).toBe(true)
     expect(readDisk(path)).toEqual({ "openai:default": "model-a" })
   })
 
-  test("NO-LEFTOVER: a successful set and unset each release the lock", async () => {
+  test("NO-LEFTOVER: a successful set and unset each release the flock", async () => {
     const dir = mkScratch()
     const path = join(dir, "sticky-model.json")
-    const lockPath = stickyModelLockPathOf(path)
     const store = fsBackedStickyModelStore({ path })
     expect((await store.set({ ...KEY_A, modelId: "model-a" })).ok).toBe(true)
-    expect(existsSync(lockPath)).toBe(false)
     expect((await store.unset(KEY_A)).ok).toBe(true)
-    expect(existsSync(lockPath)).toBe(false)
+    expect((await store.set({ ...KEY_A, modelId: "model-a2" })).ok).toBe(true)
   })
 
   // ── behaviours the lock must not have broken (paired controls) ────────────

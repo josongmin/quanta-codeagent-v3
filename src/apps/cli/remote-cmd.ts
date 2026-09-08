@@ -46,6 +46,8 @@ export interface RemoteCmdDeps {
   readonly defaultImage?: string | undefined
   /** Default timeoutMs when `--timeout-ms` is omitted. */
   readonly defaultTimeoutMs?: number | undefined
+  /** Why `runner` is null: disabled env vs missing binary vs unknown name. */
+  readonly unconfiguredReason?: "disabled" | "unknown" | "missing-binary" | undefined
 }
 
 const HELP = [
@@ -66,8 +68,10 @@ const HELP = [
   "",
 ].join("\n")
 
-const notConfigured = (io: RemoteCmdIO): number => {
-  io.err("remote-not-configured\n")
+const notConfigured = (io: RemoteCmdIO, reason?: RemoteCmdDeps["unconfiguredReason"]): number => {
+  if (reason === "missing-binary") io.err("remote-unavailable\n")
+  else if (reason === "unknown") io.err("remote-misconfigured\n")
+  else io.err("remote-not-configured\n")
   return EXIT_NOT_CONFIGURED
 }
 
@@ -169,7 +173,7 @@ const parseRunArgs = (
 /* ------------------------------------------------------------------ */
 
 const handleRun = async (argv: readonly string[], deps: RemoteCmdDeps): Promise<number> => {
-  if (deps.runner === null) return notConfigured(deps.io)
+  if (deps.runner === null) return notConfigured(deps.io, deps.unconfiguredReason)
   const parsed = parseRunArgs(argv)
   if (!parsed.ok) {
     deps.io.err(`error: ${parsed.error}\n`)
@@ -217,7 +221,7 @@ const reconstructHandle = (id: string): RemoteHandle | null => {
 }
 
 const handleStatus = async (argv: readonly string[], deps: RemoteCmdDeps): Promise<number> => {
-  if (deps.runner === null) return notConfigured(deps.io)
+  if (deps.runner === null) return notConfigured(deps.io, deps.unconfiguredReason)
   const id = argv[0]
   if (id === undefined) {
     deps.io.err("error: missing <handle>\n")
@@ -238,7 +242,7 @@ const handleStatus = async (argv: readonly string[], deps: RemoteCmdDeps): Promi
 }
 
 const handleCancel = async (argv: readonly string[], deps: RemoteCmdDeps): Promise<number> => {
-  if (deps.runner === null) return notConfigured(deps.io)
+  if (deps.runner === null) return notConfigured(deps.io, deps.unconfiguredReason)
   const id = argv[0]
   if (id === undefined) {
     deps.io.err("error: missing <handle>\n")
@@ -259,7 +263,7 @@ const handleCancel = async (argv: readonly string[], deps: RemoteCmdDeps): Promi
 }
 
 const handleLogs = async (argv: readonly string[], deps: RemoteCmdDeps): Promise<number> => {
-  if (deps.runner === null) return notConfigured(deps.io)
+  if (deps.runner === null) return notConfigured(deps.io, deps.unconfiguredReason)
   const id = argv[0]
   if (id === undefined) {
     deps.io.err("error: missing <handle>\n")

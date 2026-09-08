@@ -100,7 +100,7 @@ export const resolveConfiguredEndpointForCli = async (): Promise<ResolvedEndpoin
           return undefined
         }
       },
-      save: async () => {},
+      commit: async () => {},
     })
     const trustedFromEnv = canonicalizeTrustedPaths(
       (rc.trustedPaths ?? "").split(",").map((s) => s.trim()),
