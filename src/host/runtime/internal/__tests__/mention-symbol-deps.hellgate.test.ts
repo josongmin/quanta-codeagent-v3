@@ -30,9 +30,13 @@ import {
   type SymbolLookupSemanticPort,
 } from "@/agent/mention-injection"
 import { buildDefaultMentionResolver } from "@/agent/mention-runner"
-import { buildSemanticBackend, selectIndexEmbedder } from "@/runner/assemble/search-index-backend"
+import {
+  buildSemanticBackend,
+  EmbeddingSpaceError,
+  selectIndexEmbedder,
+} from "@/runner/assemble/search-index-backend"
 import type { LspNavProvider, LspNavSession, NavSymbolInfo } from "@/tool"
-import { buildMentionSymbolDeps } from "../mention-symbol-deps"
+import { buildMentionSymbolDeps, __test as mentionSymbolDepsTest } from "../mention-symbol-deps"
 
 const SYMBOL = "QUANTA_MENTION_SYMBOL"
 const SKILL = "QUANTA_MENTION_SKILL"
@@ -232,6 +236,33 @@ describe("buildMentionSymbolDeps — ADR-0422 follow-up production hellgate", ()
     await expect(deps.semantic?.findSymbol("X")).rejects.toMatchObject({
       name: "SemanticBackendUnavailableError",
     })
+  })
+
+  test("E4 — query-time EmbeddingSpaceError is not a silent null", async () => {
+    const throwing: SymbolLookupSemanticPort = {
+      findSymbol: async () => Promise.reject(new EmbeddingSpaceError("mismatch", "dim")),
+    }
+    const deps = buildMentionSymbolDeps(dir, process.env, { semanticLookup: throwing })
+    await expect(deps.semantic?.findSymbol("X")).rejects.toMatchObject({
+      name: "EmbeddingSpaceError",
+    })
+  })
+
+  test("E5 — host lookup rethrows query-time typed failure from the backend port", async () => {
+    await expect(
+      mentionSymbolDepsTest.findSymbolOnReadyBackend(
+        "Foo",
+        {
+          readiness: Promise.resolve({ kind: "ready" }),
+          port: {
+            query: async () => {
+              throw new EmbeddingSpaceError("mismatch", "query dim")
+            },
+          },
+        },
+        async () => [1, 0],
+      ),
+    ).rejects.toMatchObject({ name: "EmbeddingSpaceError" })
   })
 
   // -------- F. production end-to-end proof -----------------------------

@@ -167,6 +167,8 @@ describe("G-F4 ticker reclaim rail", () => {
     const oldToken = claimed.value.claimToken
     const reclaimed = await engine.claim(dueAt + 100, { reclaimBefore: dueAt + 50 })
     expect(reclaimed.ok && reclaimed.value !== null).toBe(true)
+    if (!reclaimed.ok || reclaimed.value === null) throw new Error("expected reclaim")
+    expect(reclaimed.value.claimToken).not.toBe(oldToken)
     const fin = await engine.finalize({
       id: "tok-1",
       claimToken: oldToken,
