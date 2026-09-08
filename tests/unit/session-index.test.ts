@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
@@ -89,7 +89,7 @@ describe("session index-store", () => {
     expect(list.map((m) => m.id)).toEqual(["a"])
   })
 
-  test("corrupt lines in index.jsonl are skipped silently", async () => {
+  test("invalid index lines are parked in sidecar; valid rows kept", async () => {
     const good = mkMeta({ id: "good", lastTouched: 500 })
     const path = indexFilePath()
     const body = [
@@ -102,6 +102,10 @@ describe("session index-store", () => {
     const list = await listSessions()
     expect(list).toHaveLength(1)
     expect(list[0]?.id).toBe("good")
+    expect(existsSync(`${path}.invalid`)).toBe(true)
+    const rewritten = readFileSync(path, "utf8")
+    expect(rewritten).toContain('"id":"good"')
+    expect(rewritten).not.toContain("not valid json")
   })
 
   test("empty / missing index → empty list", async () => {

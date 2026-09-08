@@ -168,6 +168,15 @@ describe("SEP7-D-06 index projection recovery", () => {
       expect((await listSessions()).map((m) => m.id).sort()).toEqual(["ghost", "visible"])
     })
   })
+
+  test("snapshot without index entry is rediscovered on list", async () => {
+    await withSessionDir("r03-d06c-", async () => {
+      const ghost = mkMeta({ id: "ghost", lastTouched: 50 })
+      await saveSessionById(ghost, mkPayload("ghost"))
+      writeFileSync(indexFilePath(), "")
+      expect((await listSessions()).map((m) => m.id)).toEqual(["ghost"])
+    })
+  })
 })
 
 describe("SEP7-D-07 typed snapshot read", () => {
@@ -197,6 +206,38 @@ describe("SEP7-D-07 typed snapshot read", () => {
       const meta = mkMeta({ id: "empty-ok" })
       await saveSessionById(meta, { reason: "completed", turns: 0, messages: [] })
       expect(await rehydrateResumeTranscript("empty-ok")).toEqual([])
+    })
+  })
+
+  test("schema mismatch is corrupt, not a fresh resume", async () => {
+    await withSessionDir("r03-d07-schema-", async () => {
+      const id = "schema-mismatch"
+      const path = sessionFilePath(id)
+      const raw = JSON.stringify({
+        version: 1,
+        meta: mkMeta({ id }),
+        reason: "completed",
+        turns: 0,
+        messages: [],
+      })
+      writeFileSync(path, raw)
+      await expect(rehydrateResumeTranscript(id)).rejects.toMatchObject({
+        name: "ResumeRehydrateRefusedError",
+        component: "corrupt",
+      })
+      expect(readFileSync(path, "utf8")).toBe(raw)
+    })
+  })
+
+  test("unreadable snapshot path refuses instead of collapsing to missing", async () => {
+    await withSessionDir("r03-d07-unread-", async () => {
+      const id = "unreadable"
+      const path = sessionFilePath(id)
+      mkdirSync(path)
+      await expect(rehydrateResumeTranscript(id)).rejects.toMatchObject({
+        name: "ResumeRehydrateRefusedError",
+        component: "unreadable",
+      })
     })
   })
 })
