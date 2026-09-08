@@ -163,7 +163,7 @@ export interface SessionTokenUsageView {
 
 export interface SessionStateView {
   readonly costView?: CostSurfaceViewWire
-  readonly status: "idle" | "running" | "awaiting_approval" | "failed" | "closed"
+  readonly status: SessionStateStatus
   readonly draftInput: string
   readonly permissionMode: string
   readonly identityMode?: string
@@ -191,6 +191,8 @@ export interface SessionSnapshotLite {
   readonly pendingApproval: PendingApprovalView | null
   readonly openArtifacts: readonly ArtifactRef[]
 }
+
+export type SessionStateStatus = (typeof SESSION_STATE_STATUSES)[number]
 
 export type SessionStatus = SessionStateView["status"]
 
