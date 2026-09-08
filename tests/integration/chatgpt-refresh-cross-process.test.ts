@@ -21,7 +21,7 @@ describe("chatgpt refresh cross-process", () => {
     }
   })
 
-  test("two children, one issuer hit, identical winner, no leftover lock", async () => {
+  test("two children, one issuer hit, identical winner, flock lockfile may remain", async () => {
     const dir = await mkdtemp(join(tmpdir(), "chatgpt-xproc-"))
     const tokenPath = join(dir, "chatgpt.json")
     const lockDir = join(dir, "locks")
@@ -66,7 +66,9 @@ describe("chatgpt refresh cross-process", () => {
       expect(outB.trim()).toBe("winner-access")
       const final = JSON.parse(await readFile(tokenPath, "utf8")) as { access_token: string }
       expect(final.access_token).toBe("winner-access")
-      expect(await readdir(lockDir)).toEqual([])
+      const leftover = await readdir(lockDir)
+      expect(leftover.filter((name) => name.endsWith(".cas"))).toEqual([])
+      expect(leftover.every((name) => name.endsWith(".txlock"))).toBe(true)
     } finally {
       server.stop(true)
       await rm(dir, { recursive: true, force: true })
