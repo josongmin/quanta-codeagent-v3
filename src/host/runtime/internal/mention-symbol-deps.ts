@@ -39,9 +39,12 @@
  *     is the SAME embedder. `createSemanticSymbolLookup` embeds the symbol name
  *     and probes the index. An EMPTY index (nothing upserted) ⇒ `query` returns
  *     `[]` ⇒ the port answers `null` (graceful — never throws).
+ *   - Typed `SemanticBackendUnavailableError` (explicit store / space refuse)
+ *     is NOT converted into a no-hit. The mention consumer observes it.
  *
- * NO-THROW: any failure (anchor walk rejects, backend build throws) degrades the
- * corresponding strategy to a port that answers `null`, never a throw.
+ * NO-THROW: transient failures (anchor walk rejects, generic backend build
+ * throws) degrade the corresponding strategy to a port that answers `null`.
+ * Typed semantic unavailability is rethrown.
  */
 
 import { lspExtensionToLanguage, lspNavProvider } from "@/agent/lsp-bridge"
@@ -56,6 +59,7 @@ import {
   synthesizeLspAnchors,
 } from "@/agent/mention-injection"
 import { parseEnvFlag } from "@/runner/assemble"
+import { SemanticBackendUnavailableError } from "@/runner/assemble/search-index-backend"
 import { errMessage, logger } from "@/shared"
 import type { LspNavProvider } from "@/tool"
 
@@ -83,6 +87,10 @@ export interface MentionSymbolDeps {
   readonly lsp?: SymbolLookupLspPort
   readonly semantic?: SymbolLookupSemanticPort
 }
+
+const isSemanticUnavailable = (e: unknown): e is SemanticBackendUnavailableError =>
+  e instanceof SemanticBackendUnavailableError ||
+  (e instanceof Error && e.name === "SemanticBackendUnavailableError")
 
 /** Memoize a successful async factory result. ONLY fulfilled promises are
  *  cached — if `factory()` rejects, the cache is reset so the NEXT caller
@@ -133,8 +141,9 @@ const buildLspLookup = async (
   }
 }
 
-/** Build the concrete semantic lookup from the search backend. `null` on any
- *  failure (NO-THROW); an EMPTY index is NOT a failure. */
+/** Build the concrete semantic lookup from the search backend. Generic
+ *  construction failure ⇒ `null` (NO-THROW). Typed store/space unavailability
+ *  is thrown so mention consumers do not treat it as a no-hit. */
 const buildSemanticLookup = async (
   env: MentionSymbolDepsEnv,
   seams: MentionSymbolDepsSeams,
@@ -148,8 +157,25 @@ const buildSemanticLookup = async (
     )
     const resolvedEmbedder = resolveIndexEmbedder(env)
     const backend = buildSemanticBackend(env, resolvedEmbedder.embed, { resolvedEmbedder })
-    return createSemanticSymbolLookup({ index: backend.port, embed: resolvedEmbedder.embed })
+    const ready = await backend.readiness
+    if (ready.kind === "unavailable") {
+      throw new SemanticBackendUnavailableError(ready.reason, ready.phase)
+    }
+    const inner = createSemanticSymbolLookup({
+      index: backend.port,
+      embed: resolvedEmbedder.embed,
+    })
+    return {
+      findSymbol: async (name) => {
+        const again = await backend.readiness
+        if (again.kind === "unavailable") {
+          throw new SemanticBackendUnavailableError(again.reason, again.phase)
+        }
+        return inner.findSymbol(name)
+      },
+    }
   } catch (e) {
+    if (isSemanticUnavailable(e)) throw e
     logger.warn(`mention @symbol: semantic backend build failed (${errMessage(e)}); skipping.`)
     return null
   }
@@ -157,7 +183,7 @@ const buildSemanticLookup = async (
 
 /** Wrap a lazily-built lookup behind a synchronous port whose `findSymbol`
  *  triggers (memoized) construction on first use. A `null` build ⇒ the port
- *  permanently answers `null` (strategy effectively absent, NO-THROW). */
+ *  permanently answers `null`. Typed semantic unavailability is rethrown. */
 const lazyLookupPort = (
   build: () => Promise<SymbolLookupLspPort | SymbolLookupSemanticPort | null>,
 ): { findSymbol(name: string): Promise<readonly SymbolHit[] | null> } => {
@@ -168,7 +194,8 @@ const lazyLookupPort = (
         const lookup = await get()
         if (lookup === null) return null
         return await lookup.findSymbol(name)
-      } catch {
+      } catch (e) {
+        if (isSemanticUnavailable(e)) throw e
         return null
       }
     },

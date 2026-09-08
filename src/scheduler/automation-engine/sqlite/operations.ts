@@ -400,6 +400,31 @@ export const finalize = (
   return Promise.resolve(runFinalize(deps, input))
 }
 
+export const renewClaim = (
+  deps: Deps,
+  id: string,
+  claimToken: string,
+  now: number,
+): Promise<EngineResult<void>> => {
+  try {
+    const row = deps.stmts.renewClaim.get({
+      $id: id,
+      $claim_token: claimToken,
+      $claimed_at: now,
+    })
+    if (row === null || row === undefined) {
+      return Promise.resolve({
+        ok: false,
+        code: "not-found",
+        message: `automation '${id}' not claimable / token mismatch`,
+      })
+    }
+    return Promise.resolve({ ok: true, value: undefined })
+  } catch (e) {
+    return Promise.resolve(ioFail(`renewClaim failed: ${errMessage(e)}`))
+  }
+}
+
 /** Shared finalize body for `markRun` + `finalize`: 3-table atomic write
  *  (run + inbox + advance), with the post-fire status decided by the shared
  *  {@link advancedStatus} rule so both verbs stay byte-equal. Caller has

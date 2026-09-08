@@ -43,6 +43,7 @@ import {
   listInboxItems,
   markRun,
   next,
+  renewClaim,
   schedule,
 } from "./sqlite/operations"
 import { prepareStatements } from "./sqlite/statements"
@@ -168,5 +169,6 @@ export const sqliteAutomationEngine = (
     markRun: (input) => markRun(deps, input),
     claim: (now, claimOpts) => claim(deps, now, claimOpts),
     finalize: (input) => finalize(deps, input),
+    renewClaim: (id, claimToken, now) => renewClaim(deps, id, claimToken, now),
   }
 }

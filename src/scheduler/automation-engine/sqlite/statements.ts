@@ -82,6 +82,12 @@ export const CLAIM_SQL = `
     RETURNING *
   `
 
+export const RENEW_CLAIM_SQL = `
+    UPDATE automations SET claimed_at = $claimed_at
+    WHERE id = $id AND status = 'running' AND claim_token = $claim_token
+    RETURNING id
+  `
+
 export const INSERT_RUN_SQL = `
     INSERT INTO automation_runs (id, automation_id, fired_at, outcome, error_message)
     VALUES ($id, $automation_id, $fired_at, $outcome, $error_message)
@@ -103,6 +109,7 @@ export interface PreparedStatements {
   readonly liveHeartbeatForThread: Statement
   readonly updateOnRun: Statement
   readonly claim: Statement
+  readonly renewClaim: Statement
   readonly insertRun: Statement
   readonly insertInbox: Statement
 }
@@ -118,6 +125,7 @@ export const prepareStatements = (db: Database): PreparedStatements => ({
   liveHeartbeatForThread: db.query(LIVE_HEARTBEAT_FOR_THREAD_SQL),
   updateOnRun: db.query(UPDATE_ON_RUN_SQL),
   claim: db.query(CLAIM_SQL),
+  renewClaim: db.query(RENEW_CLAIM_SQL),
   insertRun: db.query(INSERT_RUN_SQL),
   insertInbox: db.query(INSERT_INBOX_SQL),
 })

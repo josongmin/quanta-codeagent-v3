@@ -16,6 +16,7 @@ import {
   hashEmbed,
   isPersistOn,
   resolveIndexEmbedder,
+  SemanticBackendUnavailableError,
   selectIndexEmbedder,
 } from "@/runner/assemble/search-index-backend"
 
@@ -103,47 +104,36 @@ describe("selectIndexEmbedder — embedder selection", () => {
     expect(a).toEqual([...b])
   })
 
-  test("A5. real embedder failure (missing api key) ⇒ hashEmbed fallback", async () => {
-    // openai with no OPENAI_API_KEY ⇒ embed() returns err(missing-api-key);
-    // selector must preserve the provider dimension by falling back to the
-    // deterministic headless stub, never to 64-d hashEmbed.
+  test("A5. real embedder failure (missing api key) ⇒ typed error, not hash", async () => {
     const embed = selectIndexEmbedder({ QUANTA_EMBED_PROVIDER: "openai" })
-    const got = await embed("needs key")
-    expect(got.length).toBe(1536)
-    expect(got.length).not.toBe(hashEmbed("needs key").length)
+    await expect(embed("needs key")).rejects.toThrow()
   })
 
-  test("A6. empty real-embedder output ⇒ hashEmbed fallback", async () => {
-    const embed = selectIndexEmbedder(
-      { QUANTA_EMBED_PROVIDER: "headless" },
-      // inject an embedder factory that yields an ok-but-empty vectors array
-      () => ({
-        async embed() {
-          return { ok: true as const, value: { vectors: [], modelTag: "stub" } }
-        },
-        async capabilities() {
-          return { dim: 8, maxInputBytes: 0, batchSize: 0, modelTag: "stub" }
-        },
-      }),
-    )
-    const got = await embed("xyz")
-    expect(got.length).toBe(8)
+  test("A6. empty real-embedder output ⇒ typed error", async () => {
+    const embed = selectIndexEmbedder({ QUANTA_EMBED_PROVIDER: "headless" }, () => ({
+      async embed() {
+        return { ok: true as const, value: { vectors: [], modelTag: "stub" } }
+      },
+      async capabilities() {
+        return { dim: 8, maxInputBytes: 1_000_000, batchSize: 0, modelTag: "stub" }
+      },
+    }))
+    await expect(embed("xyz")).rejects.toThrow()
   })
 
-  test("A7. throwing real embedder ⇒ hashEmbed fallback (no leak)", async () => {
+  test("A7. throwing real embedder ⇒ typed error (no hash mix)", async () => {
     const embed = selectIndexEmbedder({ QUANTA_EMBED_PROVIDER: "headless" }, () => ({
       async embed(): Promise<never> {
         throw new Error("vendor blew up")
       },
       async capabilities() {
-        return { dim: 5, maxInputBytes: 0, batchSize: 0, modelTag: "x" }
+        return { dim: 5, maxInputBytes: 1_000_000, batchSize: 0, modelTag: "x" }
       },
     }))
-    const got = await embed("boom")
-    expect(got.length).toBe(5)
+    await expect(embed("boom")).rejects.toThrow()
   })
 
-  test("A8. metrics sink observes primary + fallback embed latency", async () => {
+  test("A8. metrics sink observes primary embed latency", async () => {
     const seen: Array<{ name: string; labels?: Record<string, string> }> = []
     const metrics = {
       observe(name: string, _value: number, labels?: Record<string, string>) {
@@ -154,26 +144,8 @@ describe("selectIndexEmbedder — embedder selection", () => {
       metrics,
     })
     await primary.embed("primary")
-    const fallback = resolveIndexEmbedder(
-      { QUANTA_EMBED_PROVIDER: "headless" },
-      () => ({
-        async embed() {
-          return { ok: false as const, error: { kind: "network", detail: "x" } }
-        },
-        async capabilities() {
-          return { dim: 9, maxInputBytes: 0, batchSize: 0, modelTag: "broken" }
-        },
-      }),
-      { metrics },
-    )
-    await fallback.embed("fallback")
     expect(
       seen.some((s) => s.name === "search.index.embed.latency_ms" && s.labels?.mode === "primary"),
-    ).toBe(true)
-    expect(
-      seen.some(
-        (s) => s.name === "search.index.embed.latency_ms" && s.labels?.mode === "fallback-headless",
-      ),
     ).toBe(true)
   })
 })
@@ -189,22 +161,16 @@ describe("resolveIndexEmbedder — key-detection default promotion", () => {
     expect(got).toEqual([...hashEmbed("alpha beta gamma")])
   })
 
-  test("AP2. VOYAGE_API_KEY present (no explicit provider) ⇒ promotes to real voyage embedder", async () => {
-    // Voyage embedder is dim-1024; if promotion fires we get a non-64 vector via
-    // the deterministic headless fallback (no real network). hashEmbed is dim-64,
-    // so a !=64 length proves the real (voyage) provider path was selected.
-    const embed = selectIndexEmbedder({ VOYAGE_API_KEY: "vk-test" })
-    const got = await embed("needs promotion")
-    expect(got.length).not.toBe(hashEmbed("needs promotion").length)
-    expect(got.length).toBe(1024)
+  test("AP2. VOYAGE_API_KEY present (no explicit provider) ⇒ promotes to voyage, failure is typed", async () => {
+    const resolved = resolveIndexEmbedder({ VOYAGE_API_KEY: "vk-test" })
+    expect(resolved.providerLabel).toBe("voyage")
+    await expect(resolved.embed("needs promotion")).rejects.toThrow()
   })
 
-  test("AP3. OPENAI_API_KEY present (no explicit provider) ⇒ promotes to real openai embedder", async () => {
-    const embed = selectIndexEmbedder({ OPENAI_API_KEY: "sk-test" })
-    const got = await embed("needs promotion")
-    expect(got.length).not.toBe(hashEmbed("needs promotion").length)
-    // openai default embedder dim is 1536 (headless-fallback preserves caps.dim).
-    expect(got.length).toBe(1536)
+  test("AP3. OPENAI_API_KEY present (no explicit provider) ⇒ promotes to openai, failure is typed", async () => {
+    const resolved = resolveIndexEmbedder({ OPENAI_API_KEY: "sk-test" })
+    expect(resolved.providerLabel).toBe("openai")
+    await expect(resolved.embed("needs promotion")).rejects.toThrow()
   })
 
   test("AP4. explicit QUANTA_EMBED_PROVIDER wins over key detection (no silent override)", async () => {
@@ -425,9 +391,9 @@ describe("buildSemanticBackend — sqlite persist", () => {
       resolvedEmbedder: resolved,
       storeDeps: { lance: { fetchImpl: rec.fetchImpl } },
     })
-    await backend.upsert.upsert(chunk("fallback.ts", "alpha"))
-    const hits = await backend.port.query(await resolved.embed("alpha"), 1)
-    expect(hits).toHaveLength(0)
+    await expect(backend.upsert.upsert(chunk("fallback.ts", "alpha"))).rejects.toBeInstanceOf(
+      SemanticBackendUnavailableError,
+    )
     expect(rec.calls).toHaveLength(0)
   })
 
@@ -436,9 +402,12 @@ describe("buildSemanticBackend — sqlite persist", () => {
       { QUANTA_VECTOR_STORE: "lancee", QUANTA_INDEX_PERSIST: "on" },
       async (t) => hashEmbed(t),
     )
-    await backend.upsert.upsert(chunk("disabled.ts", "alpha"))
-    const hits = await backend.port.query(hashEmbed("alpha"), 1)
-    expect(hits).toHaveLength(0)
+    await expect(backend.upsert.upsert(chunk("disabled.ts", "alpha"))).rejects.toBeInstanceOf(
+      SemanticBackendUnavailableError,
+    )
+    await expect(backend.port.query(hashEmbed("alpha"), 1)).rejects.toBeInstanceOf(
+      SemanticBackendUnavailableError,
+    )
   })
 
   test("B9. delete(path) failure keeps manifest so the same path can be retried", async () => {
@@ -463,7 +432,9 @@ describe("buildSemanticBackend — sqlite persist", () => {
       storeDeps: { lance: { fetchImpl: rec.fetchImpl } },
     })
     await backend.upsert.upsert(chunk("retry.ts", "alpha"))
-    await backend.upsert.delete("retry.ts")
+    await expect(backend.upsert.delete("retry.ts")).rejects.toBeInstanceOf(
+      SemanticBackendUnavailableError,
+    )
     deleteOk = true
     await backend.upsert.delete("retry.ts")
     const deleteBodies = rec.calls

@@ -1,6 +1,6 @@
 # Sep-08 structural remediation — 39 findings / 16 work packages
 
-상태: **W3 closed on local `main`**. W1·W2·W3 implemented. W7 `verified` 39/39는 아님.
+상태: **W3 closed / W4 implemented on local `main`**. W1·W2·W3·W4 implemented. W7 `verified` 39/39는 아님.
 
 실행 체크리스트: [ACTIONS — 39건의 근거·수정·제거·실패 rail](/Users/songmin/quanta-codeagent-v3/docs/plans/sep-8-structural-remediation/ACTIONS.md). 이 README는 구조/소유권을, ACTIONS는 finding별 실행과 완료 증거를 관리한다.
 
@@ -15,7 +15,7 @@
 - 작성 시 dirty: 위 audit 문서 7개. 제품 소스 변경 없음. 향후 worktree에 HEAD만 전달하면 이 입력 문서들은 누락된다. 착수 시 정확한 문서 snapshot도 전달한다.
 - 근거의 상세 `path:line`은 입력 문서에 유지한다. 아래 소스 경로는 현재 owner이며, 새 타입·모듈명은 **제안**이다.
 - 목표는 패치 개수 최소화가 아니라 **하나의 불변식에 하나의 결정권자, 모든 production consumer의 동일 계약 사용, 실패 시 사실에 맞는 결과**다.
-- **구현 상태 (2026-09-08):** W1(R01/R04/R09), W2(R05/R13/R11), W3(R14/R02/R12)는 local `main`에 통합됨. G-F5.4 EC2 실기는 열린 갭. G-F9.4 contract rail 설치 (이 머신 Docker live 실행, Lima skip). W0.3–W0.4 frozen. W0.6 R10 half는 W4. W7 `verified` 39/39는 아님. audit `agent-*.md`는 이 HEAD의 closeout이 아니다.
+- **구현 상태 (2026-09-09):** W1–W4는 local `main`에 구현됨 (W4 제품 커밋은 별도 요청). G-F5.4 EC2 실기는 열린 갭. G-F9.4 contract rail 설치 (이 머신 Docker live 실행, Lima skip). W0.3–W0.4 frozen. W0.6 R10 freeze 적용. W7 `verified` 39/39는 아님. audit `agent-*.md`는 이 HEAD의 closeout이 아니다.
 - 철회·미입증·inventory 항목은 재도입하지 않는다. 특히 C-F5 EOF wiring은 작업 대상이 아니다. 아래 구현 전제 검토는 새로운 확정 finding 추가가 아니다.
 
 ## 2. 설계 원칙과 금지선

@@ -6,6 +6,7 @@ import {
   type PersistedObjectiveSnapshot,
   type SavePayload,
   type SessionMeta,
+  StaleSessionGenerationError,
   saveSessionById,
 } from "@/session"
 import { errMessage, logger, runtimeConfig } from "@/shared"
@@ -160,13 +161,31 @@ const resolveObjectiveSnapshot = (
   }
 }
 
+const saveIdModeTurn = async (
+  idMeta: SessionMeta,
+  payload: SavePayload,
+  messages: Message[],
+  captureCheckpoint: PersistTurnCheckpointHook | undefined,
+): Promise<void> => {
+  try {
+    await saveSessionById(idMeta, payload)
+  } catch (e) {
+    if (e instanceof StaleSessionGenerationError) {
+      logger.warn(`persist-turn: refusing stale autosave after delete (${idMeta.id})`)
+      return
+    }
+    throw e
+  }
+  if (captureCheckpoint === undefined) return
+  try {
+    await captureCheckpoint({ sessionId: idMeta.id, messages })
+  } catch (e) {
+    logger.warn(`persist-turn: captureCheckpoint failed: ${errMessage(e)}`)
+  }
+}
+
 export const persistTurn = async (input: PersistTurnInput): Promise<void> => {
   const { state, idMeta, sessionId, outcome } = input
-  // RFC-13 HOP-2 — assign STABLE ids FIRST (before BOTH saves AND the checkpoint
-  // hook) so the saved transcript is addressable and the hook binds to a durable
-  // id. Gate: the dedicated `messageIds` knob OR `rewindCapture` (F3 is inert
-  // without ids, so enabling capture implies assignment). `input.assignIds`
-  // overrides purely for tests. Default OFF ⇒ same array ⇒ byte-identical.
   const cfg = runtimeConfig()
   const gateOn = input.assignIds ?? (cfg.messageIds || cfg.rewindCapture)
   const messages = maybeAssignMessageIds(input.messages, gateOn)
@@ -178,37 +197,15 @@ export const persistTurn = async (input: PersistTurnInput): Promise<void> => {
       turns: outcome.turns,
     })
   }
-  if (idMeta) {
-    // Auto-save in id-mode: per-turn persistence so `quanta --resume <id>`
-    // self-persists without the user touching `--state`. No log emitted
-    // here — would be too chatty inside the REPL.
-    // RFC-03 C2 — encode the live objective authority into its durable DTO so a
-    // real `--resume` restores the goal (ids / revision / provenance). Absent /
-    // undefined ⇒ `objective` OMITTED ⇒ the store preserves any on-disk snapshot
-    // (byte-identical). See {@link resolveObjectiveSnapshot} (guarded encode).
-    const objective = resolveObjectiveSnapshot(input.objectiveSnapshot)
-    const usageAccounting = input.usageAccountingSnapshot?.()
-    const payload: SavePayload = {
-      reason: outcome.reason,
-      turns: outcome.turns,
-      messages,
-      ...(objective !== undefined ? { objective } : {}),
-      ...(usageAccounting !== undefined ? { usageAccounting } : {}),
-    }
-    await saveSessionById(idMeta, payload)
-    // RFC-01 A2 — feed a durable rewind checkpoint AFTER the transcript is on
-    // disk (so the message ids the checkpoint binds to are durable). ABSENT hook
-    // ⇒ this whole block is skipped (byte-identical). Best-effort: the hook does
-    // not throw, but we still guard so a hook bug can never break persistence.
-    if (input.captureCheckpoint !== undefined) {
-      try {
-        await input.captureCheckpoint({ sessionId: idMeta.id, messages })
-      } catch (e) {
-        // checkpoint capture is observability-class; it MUST NOT break the
-        // turn's persistence (fail-OPEN, mirrors the checkpoint slice) — but a
-        // broken checkpoint hook is a real (non-fatal) defect, surfaced at warn.
-        logger.warn(`persist-turn: captureCheckpoint failed: ${errMessage(e)}`)
-      }
-    }
+  if (!idMeta) return
+  const objective = resolveObjectiveSnapshot(input.objectiveSnapshot)
+  const usageAccounting = input.usageAccountingSnapshot?.()
+  const payload: SavePayload = {
+    reason: outcome.reason,
+    turns: outcome.turns,
+    messages,
+    ...(objective !== undefined ? { objective } : {}),
+    ...(usageAccounting !== undefined ? { usageAccounting } : {}),
   }
+  await saveIdModeTurn(idMeta, payload, messages, input.captureCheckpoint)
 }

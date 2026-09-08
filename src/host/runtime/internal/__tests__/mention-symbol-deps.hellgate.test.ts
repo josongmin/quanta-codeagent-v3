@@ -227,6 +227,13 @@ describe("buildMentionSymbolDeps — ADR-0422 follow-up production hellgate", ()
     expect(await deps.semantic?.findSymbol("X")).toBeNull()
   })
 
+  test("E3 — invalid explicit vector store ⇒ typed unavailable, not silent null", async () => {
+    const deps = buildMentionSymbolDeps(dir, { QUANTA_VECTOR_STORE: "nope" } as NodeJS.ProcessEnv)
+    await expect(deps.semantic?.findSymbol("X")).rejects.toMatchObject({
+      name: "SemanticBackendUnavailableError",
+    })
+  })
+
   // -------- F. production end-to-end proof -----------------------------
   test("F1 — full production wire: @Symbol injects a fragment (NOT null)", async () => {
     writeFileSync(join(dir, "app.ts"), "export class Widget {}", "utf8")

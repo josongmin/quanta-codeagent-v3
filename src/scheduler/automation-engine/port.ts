@@ -227,6 +227,12 @@ export interface AutomationEnginePort {
    * `not-found` so a stale worker cannot finalize a row another worker owns.
    */
   finalize(input: FinalizeInput): Promise<EngineResult<EngineAutomation>>
+  /**
+   * Refresh `claimedAt` for a live claim without minting a new token.
+   * Token mismatch or a row that is not `running` yields `not-found`.
+   * This is NOT a second lease system — it extends the existing fence.
+   */
+  renewClaim(id: string, claimToken: string, now: number): Promise<EngineResult<void>>
 }
 
 /** Options for {@link AutomationEnginePort.claim}. */

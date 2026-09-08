@@ -331,7 +331,10 @@ const autoExecute = (
 
   /** Execution surface: take the next due row, record a run, claim it, and
    *  finalize the outcome. */
-  const engineExecute: Pick<AutomationEnginePort, "next" | "markRun" | "claim" | "finalize"> = {
+  const engineExecute: Pick<
+    AutomationEnginePort,
+    "next" | "markRun" | "claim" | "finalize" | "renewClaim"
+  > = {
     next(now: number): Promise<EngineResult<EngineAutomation | null>> {
       let best: EngineAutomation | null = null
       for (const r of rows.values()) {
@@ -399,6 +402,39 @@ const autoExecute = (
       }
       return Promise.resolve({ ok: true, value: recordAndAdvance(existing, input) })
     },
+
+    renewClaim(id: string, claimToken: string, now: number): Promise<EngineResult<void>> {
+      const existing = rows.get(id)
+      if (
+        existing === undefined ||
+        existing.status !== "running" ||
+        existing.claimToken !== claimToken
+      ) {
+        return Promise.resolve({
+          ok: false,
+          code: "not-found",
+          message: `automation '${id}' not claimable / token mismatch`,
+        })
+      }
+      rows.set(
+        id,
+        buildRow({
+          id: existing.id,
+          title: existing.title,
+          rule: existing.rule,
+          prompt: existing.prompt,
+          nextRunAt: existing.nextRunAt,
+          status: "running",
+          createdAt: existing.createdAt,
+          fireCount: existing.fireCount,
+          ...runHistory(existing),
+          ...immutableConfig(existing),
+          claimToken,
+          claimedAt: now,
+        }),
+      )
+      return Promise.resolve({ ok: true, value: undefined })
+    },
   }
 
   const engine: AutomationEnginePort = { ...engineSchedule, ...engineExecute }
@@ -424,6 +460,7 @@ export const inMemoryAutomationEngine = (
     markRun: engine.markRun,
     claim: engine.claim,
     finalize: engine.finalize,
+    renewClaim: engine.renewClaim,
     get runs(): ReadonlyArray<AutomationRun> {
       return Object.freeze([...runsBacking])
     },

@@ -43,15 +43,15 @@ describe("T06 / search backend fail-closed", () => {
     expect(backend.stateReason ?? "").toContain("lannce")
   })
 
-  test("FAIL-CLOSED-2: failed backend is INERT — upsert no-ops, query returns []", async () => {
+  test("FAIL-CLOSED-2: failed backend throws typed unavailable (no silent no-hit)", async () => {
     const backend = buildSemanticBackend(
       { QUANTA_VECTOR_STORE: "qdrnt" } as NodeJS.ProcessEnv,
       passEmbed,
     )
-    // No throw, but absolutely nothing is indexed (no silent fallback store).
-    const n = await upsertThenQuery(backend)
-    expect(n).toBe(0)
     expect(backend.state).toBe("failed")
+    await expect(backend.upsert.upsert(chunk("a.ts"))).rejects.toThrow()
+    await expect(backend.port.query([1, 0, 0], 5)).rejects.toThrow()
+    expect((await backend.readiness).kind).toBe("unavailable")
   })
 
   test("READY-1: no env (default-OFF) → state==='ready', in-memory still works", async () => {
@@ -77,10 +77,8 @@ describe("T06 / search backend fail-closed", () => {
       passEmbed,
     )
     const readyEmpty = buildSemanticBackend({} as NodeJS.ProcessEnv, passEmbed)
-    // Both currently return [] on query, but the consumer can tell them apart
-    // via `state` — the whole point of M-13.
-    expect(await failed.port.query([1, 0, 0], 5)).toEqual([])
-    expect(await readyEmpty.port.query([1, 0, 0], 5)).toEqual([])
     expect(failed.state).not.toBe(readyEmpty.state)
+    await expect(failed.port.query([1, 0, 0], 5)).rejects.toThrow()
+    expect(await readyEmpty.port.query([1, 0, 0], 5)).toEqual([])
   })
 })

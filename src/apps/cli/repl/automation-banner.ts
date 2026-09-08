@@ -23,8 +23,8 @@ export interface InboxBanner {
   /** Force a paint (e.g. session-start, after `/inbox` reads). Reads the
    *  current unread count from the engine and emits the banner line. */
   paint(): Promise<void>
-  /** Pass-through to `assembleAutomation`'s `onTick` — paint only on
-   *  fire/errored outcomes (idle / engine-error are no-ops). */
+  /** Pass-through to `assembleAutomation`'s `onTick` — paint on fire/errored;
+   *  observe `ownership-lost` without treating it as a successful fire. */
   onTick(outcome: TickOutcome): void
   /** Last emitted unread count — observable for tests/observability.
    *  `null` until first paint. */
@@ -86,6 +86,9 @@ export const createInboxBanner = (opts: InboxBannerOpts): InboxBanner => {
     onTick: (outcome: TickOutcome): void => {
       if (outcome.kind === "fired" || outcome.kind === "errored") {
         void paint()
+      }
+      if (outcome.kind === "ownership-lost") {
+        stderrWrite(`[automation] ownership-lost: id=${outcome.automationId}\n`)
       }
     },
     get lastCount(): number | null {

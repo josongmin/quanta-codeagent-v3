@@ -3,14 +3,8 @@
  *
  * Splits the two seams the search wire (`./search-pipeline.ts`) needs:
  *
- *   1. EMBEDDER SELECTION — `selectIndexEmbedder(env)` returns the
- *      `(text) => Promise<readonly number[]>` used for BOTH the index upsert
- *      vectors AND the pipeline query embedder (they must agree). When
- *      `QUANTA_EMBED_PROVIDER` selects a real provider via the ADR-0261
- *      registry, that adapter is used; on a null/empty/erroring/throwing
- *      embedder it falls back to the legacy `hashEmbed` placeholder. With NO
- *      provider env the function IS `hashEmbed` — byte-identical to the
- *      pre-ADR-0391 wire.
+ *   1. EMBEDDER SELECTION — no provider ⇒ intentional hash namespace.
+ *      A real provider that fails does NOT fall back to hash/headless.
  *
  *   2. STORE SELECTION — `buildSemanticBackend(env, embed, opts?)` returns the
  *      `{ port, upsert, reconcileChanges }` triple the wire feeds to the
@@ -30,7 +24,6 @@ import { Database } from "bun:sqlite"
 import type { IndexerFileChunk } from "@/retrieval"
 import {
   createEmbedderFromEnv,
-  createHeadlessEmbedder,
   createStoreFromEnv,
   type Embedder,
   type EmbedderCapabilities,
@@ -42,8 +35,16 @@ import {
   type SqliteDb,
   type VectorStore,
 } from "@/retrieval/engines"
+import { embeddingSpaceFromCaps, HASH_EMBEDDING_SPACE } from "@/retrieval/engines/embedder/space"
 import type { SearchHit, SemanticIndex } from "@/retrieval/pipeline"
 import { errMessage, gateDisabled, gateOn, logger } from "@/shared"
+import {
+  EmbeddingSpaceError,
+  SemanticBackendUnavailableError,
+  type SemanticReadiness,
+} from "./search-index-backend/errors"
+import { newInMemoryBackend } from "./search-index-backend/in-memory"
+import { bindPersistedEmbeddingSpace } from "./search-index-backend/space-bind"
 
 /** Caller-supplied upsert surface — mirrors `IndexerChunkUpsertPort`. */
 export interface ChunkUpsertPort {
@@ -59,24 +60,35 @@ export interface ChunkUpsertPort {
  *   - `"degraded"` — the requested store could not be opened but the wire is
  *                    falling back to a usable store (implicit selection only).
  *   - `"failed"`   — an EXPLICIT request is unusable (invalid `QUANTA_VECTOR_STORE`
- *                    spelling). The backend is inert (query ⇒ `[]`, upsert/delete
- *                    no-op) and consumers MUST treat this as a hard config error,
- *                    NOT a silently-empty index.
+ *                    spelling). Operations throw `SemanticBackendUnavailableError`
+ *                    after awaiting `readiness`. Not a silently-empty index.
  */
 export type SemanticBackendState = "ready" | "degraded" | "failed"
+
+export type { EmbeddingSpace } from "@/retrieval/engines/embedder/space"
+export {
+  embeddingSpaceFromCaps,
+  embeddingSpacesEqual,
+  HASH_EMBEDDING_SPACE,
+} from "@/retrieval/engines/embedder/space"
+export {
+  EmbeddingSpaceError,
+  SemanticBackendUnavailableError,
+  type SemanticReadiness,
+} from "./search-index-backend/errors"
+export {
+  bindPersistedEmbeddingSpace,
+  EMBEDDING_SPACE_TABLE,
+} from "./search-index-backend/space-bind"
 
 /** A wired semantic backend: a query port + the upsert surface the indexer drives. */
 export interface SemanticBackend {
   readonly port: SemanticIndex
   readonly upsert: ChunkUpsertPort
   readonly reconcileChanges?: (batch: SemanticReconcileBatch) => Promise<void>
-  /**
-   * Typed health so a consumer (indexer wire / mention symbol deps) can detect
-   * a broken backend instead of treating a disabled/inert store as a normal
-   * empty index. `reason` is set whenever state is not `"ready"`. (L5 H-4/M-13.)
-   */
   readonly state: SemanticBackendState
   readonly stateReason?: string
+  readonly readiness: Promise<SemanticReadiness>
 }
 
 export interface SemanticReconcileBatch {
@@ -145,6 +157,7 @@ export interface ResolvedIndexEmbedder {
   readonly embed: IndexEmbed
   readonly capabilities: () => Promise<EmbedderCapabilities>
   readonly providerLabel: string
+  readonly space: () => Promise<import("@/retrieval/engines/embedder/space").EmbeddingSpace>
 }
 
 export interface BuildSemanticBackendOptions {
@@ -171,6 +184,14 @@ interface VectorStoreRuntime {
   readonly storeLabel: string
   readonly manifest: ChunkManifestStore
 }
+
+type RuntimeRefused = { readonly kind: "space-refused"; readonly reason: string }
+type RuntimeBuild = VectorStoreRuntime | RuntimeRefused | null
+
+const isSpaceRefused = (r: RuntimeBuild): r is RuntimeRefused =>
+  r !== null && "kind" in r && r.kind === "space-refused"
+
+const unwrapRuntime = (r: RuntimeBuild): VectorStoreRuntime | null => (isSpaceRefused(r) ? null : r)
 
 type RequestedStoreSelection =
   | { readonly kind: "none" }
@@ -199,12 +220,22 @@ const safeObserve = (
   }
 }
 
+const READY: SemanticReadiness = { kind: "ready" }
+
+const awaitReady = async (readiness: Promise<SemanticReadiness>): Promise<void> => {
+  const r = await readiness
+  if (r.kind === "unavailable") {
+    throw new SemanticBackendUnavailableError(r.reason, r.phase)
+  }
+}
+
 const nowOrDate = (nowMs: (() => number) | undefined): number => (nowMs ?? (() => Date.now()))()
 
 const buildLegacyHashEmbedder = (): ResolvedIndexEmbedder => ({
   embed: async (text: string) => hashEmbed(text),
   capabilities: async () => HASH_EMBED_CAPS,
   providerLabel: HASH_EMBED_MODEL_TAG,
+  space: async () => HASH_EMBEDDING_SPACE,
 })
 
 /**
@@ -236,41 +267,59 @@ const promoteProviderFromKey = (
   return undefined
 }
 
-const fallbackHeadless = async (
+const embedWithProvider = async (
   embedder: Embedder,
   text: string,
-): Promise<readonly number[] | null> => {
+  providerLabel: string,
+  opts: ResolveIndexEmbedderOptions,
+): Promise<readonly number[]> => {
+  const t0 = nowOrDate(opts.nowMs)
+  const caps = await embedder.capabilities()
+  const bytes = new TextEncoder().encode(text).byteLength
+  if (bytes > caps.maxInputBytes) {
+    throw new EmbeddingSpaceError(
+      "input-too-large",
+      `embed input ${bytes} bytes exceeds ${caps.maxInputBytes} for ${caps.modelTag}`,
+    )
+  }
   try {
-    const caps = await embedder.capabilities()
-    const stub = createHeadlessEmbedder({
-      dim: caps.dim,
-      modelTag: `headless-fallback:${caps.modelTag}`,
+    const r = await embedder.embed(text)
+    const vec = r.ok ? r.value.vectors[0] : undefined
+    if (!r.ok || vec === undefined || vec.length === 0) {
+      const reason = r.ok ? "empty-vector" : r.error.kind
+      throw new EmbeddingSpaceError("provider-failed", `search index embedder failed: ${reason}`)
+    }
+    if (vec.length !== caps.dim) {
+      throw new EmbeddingSpaceError(
+        "mismatch",
+        `embedder returned dim ${vec.length}, expected ${caps.dim}`,
+      )
+    }
+    safeObserve(opts.metrics, "search.index.embed.latency_ms", nowOrDate(opts.nowMs) - t0, {
+      provider: providerLabel,
+      mode: "primary",
     })
-    const r = await stub.embed(text)
-    if (!r.ok) return null
-    return r.value.vectors[0] ?? null
-  } catch {
-    return null
+    return vec
+  } catch (e) {
+    if (e instanceof EmbeddingSpaceError) throw e
+    throw new EmbeddingSpaceError(
+      "provider-failed",
+      `search index embedder threw (${(e as Error).message})`,
+    )
   }
 }
 
 /**
  * Resolve the embed function from env.
  *
- *   - No / unknown `QUANTA_EMBED_PROVIDER` ⇒ `createEmbedderFromEnv` returns
- *     null ⇒ this returns `hashEmbed` verbatim (byte-identical default).
- *   - A recognised provider ⇒ the real embedder is adapted; any failure
- *     surface (err result, empty vectors, thrown vendor error) degrades to
- *     `hashEmbed` for that call so the wire never blocks or throws.
+ *   - No / unknown `QUANTA_EMBED_PROVIDER` ⇒ hash namespace (intentional).
+ *   - A recognised provider ⇒ typed failure on error; no hash/headless mix.
  */
 export const resolveIndexEmbedder = (
   env: Record<string, string | undefined>,
   factory: EmbedderFactory = createEmbedderFromEnv,
   opts: ResolveIndexEmbedderOptions = {},
 ): ResolvedIndexEmbedder => {
-  // Key-detection promotion: with a key but no explicit provider, build the
-  // provider env the key implies. Absent a key (or kill-switch off) this is a
-  // no-op and the original env flows through ⇒ byte-identical hash default.
   const promoted = promoteProviderFromKey(env)
   const factoryEnv: EmbedderEnv =
     promoted === undefined
@@ -279,51 +328,13 @@ export const resolveIndexEmbedder = (
   const embedder = factory(factoryEnv)
   if (embedder === null) return buildLegacyHashEmbedder()
   const providerLabel = factoryEnv.QUANTA_EMBED_PROVIDER ?? HASH_EMBED_MODEL_TAG
+  const capabilities = async (): Promise<EmbedderCapabilities> => embedder.capabilities()
   return {
-    capabilities: async (): Promise<EmbedderCapabilities> => {
-      try {
-        return await embedder.capabilities()
-      } catch (e) {
-        logger.warn(
-          `search index embedder capabilities failed (${(e as Error).message}); falling back to ${HASH_EMBED_MODEL_TAG}.`,
-        )
-        return HASH_EMBED_CAPS
-      }
-    },
+    capabilities,
     providerLabel,
-    embed: async (text: string): Promise<readonly number[]> => {
-      const t0 = nowOrDate(opts.nowMs)
-      try {
-        const r = await embedder.embed(text)
-        const vec = r.ok ? r.value.vectors[0] : undefined
-        if (r.ok && vec !== undefined && vec.length > 0) {
-          safeObserve(opts.metrics, "search.index.embed.latency_ms", nowOrDate(opts.nowMs) - t0, {
-            provider: providerLabel,
-            mode: "primary",
-          })
-          return vec
-        }
-        const reason = r.ok ? "empty-vector" : r.error.kind
-        logger.warn(`search index embedder failed: ${reason}; attempting deterministic fallback.`)
-      } catch (e) {
-        logger.warn(
-          `search index embedder threw (${(e as Error).message}); attempting deterministic fallback.`,
-        )
-      }
-      const fallback = await fallbackHeadless(embedder, text)
-      if (fallback !== null) {
-        safeObserve(opts.metrics, "search.index.embed.latency_ms", nowOrDate(opts.nowMs) - t0, {
-          provider: providerLabel,
-          mode: "fallback-headless",
-        })
-        return fallback
-      }
-      safeObserve(opts.metrics, "search.index.embed.latency_ms", nowOrDate(opts.nowMs) - t0, {
-        provider: providerLabel,
-        mode: "fallback-hash",
-      })
-      return hashEmbed(text)
-    },
+    space: async () => embeddingSpaceFromCaps(await capabilities()),
+    embed: async (text: string): Promise<readonly number[]> =>
+      embedWithProvider(embedder, text, providerLabel, opts),
   }
 }
 
@@ -337,87 +348,6 @@ export const isPersistOn = (env: Record<string, string | undefined>): boolean =>
   gateOn(env, "QUANTA_INDEX_PERSIST")
 
 const chunkId = (c: IndexerFileChunk): string => `${c.path}:${c.startLine}-${c.endLine}`
-
-type InMemoryEntry = { readonly vec: readonly number[]; readonly chunk: IndexerFileChunk }
-
-const squaredNorm = (vec: readonly number[]): number => {
-  let total = 0
-  for (let i = 0; i < vec.length; i++) total += (vec[i] ?? 0) * (vec[i] ?? 0)
-  return total
-}
-
-const cosineSimilarity = (query: readonly number[], candidate: readonly number[]): number => {
-  let dot = 0
-  const len = Math.min(candidate.length, query.length)
-  for (let i = 0; i < len; i++) dot += (candidate[i] ?? 0) * (query[i] ?? 0)
-  const denominator = Math.sqrt(squaredNorm(query)) * Math.sqrt(squaredNorm(candidate))
-  return denominator === 0 ? 0 : dot / denominator
-}
-
-const semanticHit = (id: string, score: number, chunk: IndexerFileChunk): SearchHit => ({
-  id,
-  score,
-  text: chunk.text,
-  source: "semantic",
-  metadata: {
-    path: chunk.path,
-    startLine: chunk.startLine,
-    endLine: chunk.endLine,
-  },
-})
-
-const rankedInMemoryHits = (
-  store: ReadonlyMap<string, InMemoryEntry>,
-  query: readonly number[],
-  limit: number,
-): SearchHit[] => {
-  const hits: SearchHit[] = []
-  for (const [id, { vec, chunk }] of store) {
-    hits.push(semanticHit(id, cosineSimilarity(query, vec), chunk))
-  }
-  return hits.sort((a, b) => b.score - a.score).slice(0, limit)
-}
-
-const newInMemoryBackend = (
-  embed: IndexEmbed,
-  metrics?: SearchIndexMetrics,
-  nowMs?: () => number,
-  storeLabel = "legacy-in-memory",
-  state: SemanticBackendState = "ready",
-  stateReason?: string,
-): SemanticBackend => {
-  const store = new Map<string, InMemoryEntry>()
-  return {
-    state,
-    ...(stateReason !== undefined ? { stateReason } : {}),
-    port: {
-      async query(vec: readonly number[], k: number): Promise<readonly SearchHit[]> {
-        const t0 = nowOrDate(nowMs)
-        // COSINE similarity, not raw dot. The legacy hash embedder emits
-        // unit-length vectors, so cosine == dot there (byte-identical ranking).
-        // But a real (Voyage/OpenAI/Cohere) embedder need NOT be normalized; raw
-        // dot then ranks by magnitude, not direction — a ranking distortion.
-        // Normalizing by both magnitudes restores direction-based ranking on the
-        // most-common enabled path. Zero-magnitude vectors ⇒ score 0 (no NaN).
-        const hits = rankedInMemoryHits(store, vec, k)
-        safeObserve(metrics, "search.index.query.latency_ms", nowOrDate(nowMs) - t0, {
-          store: storeLabel,
-        })
-        return hits
-      },
-    },
-    upsert: {
-      async upsert(chunk: IndexerFileChunk): Promise<void> {
-        store.set(chunkId(chunk), { vec: await embed(chunk.text), chunk })
-      },
-      delete(path: string): void {
-        for (const id of store.keys()) {
-          if (id.startsWith(`${path}:`)) store.delete(id)
-        }
-      },
-    },
-  }
-}
 
 const metaString = (v: string | number | boolean | undefined): string =>
   typeof v === "string" ? v : ""
@@ -606,7 +536,7 @@ const buildVectorStoreRuntime = async (
   selection: RequestedStoreSelection,
   resolvedEmbedder: ResolvedIndexEmbedder,
   opts: BuildSemanticBackendOptions,
-): Promise<VectorStoreRuntime | null> => {
+): Promise<RuntimeBuild> => {
   if (selection.kind === "none" || selection.kind === "invalid-explicit") return null
   const provider = selection.provider
   const resolved = resolveStoreDeps(env, provider, opts)
@@ -637,6 +567,14 @@ const buildVectorStoreRuntime = async (
         : `search index ${provider} capability negotiation failed (${(e as Error).message}); falling back to legacy in-memory index.`,
     )
     return null
+  }
+  if (resolved.dbHandle !== undefined) {
+    const space = await resolvedEmbedder.space()
+    const bind = bindPersistedEmbeddingSpace(resolved.dbHandle, PERSIST_TABLE, space)
+    if (bind.kind !== "ok") {
+      logger.warn(`search index embedding space ${bind.kind}: ${bind.reason}`)
+      return { kind: "space-refused", reason: bind.reason }
+    }
   }
   return {
     store,
@@ -701,21 +639,35 @@ const buildVectorStoreBackend = (
   metrics?: SearchIndexMetrics,
   nowMs?: () => number,
 ): SemanticBackend => {
-  const ensureRuntime = async (): Promise<VectorStoreRuntime | null> => runtimePromise
+  const readiness: Promise<SemanticReadiness> = runtimePromise.then((runtime) =>
+    runtime === null
+      ? { kind: "unavailable" as const, reason: "vector store unavailable", phase: "init" as const }
+      : READY,
+  )
+  const ensureRuntime = async (): Promise<VectorStoreRuntime> => {
+    await awaitReady(readiness)
+    const runtime = await runtimePromise
+    if (runtime === null) {
+      throw new SemanticBackendUnavailableError("vector store unavailable", "init")
+    }
+    return runtime
+  }
   return {
     state: "ready",
+    readiness,
     port: {
       async query(vec: readonly number[], k: number): Promise<readonly SearchHit[]> {
         const runtime = await ensureRuntime()
-        if (runtime === null) return []
         const t0 = nowOrDate(nowMs)
         const r = await runtime.store.query(vec, k)
         safeObserve(metrics, "search.index.query.latency_ms", nowOrDate(nowMs) - t0, {
           store: runtime.storeLabel,
         })
         if (!r.ok) {
-          logger.warn(`search index ${runtime.storeLabel} query failed: ${r.error.kind}`)
-          return []
+          throw new SemanticBackendUnavailableError(
+            `search index ${runtime.storeLabel} query failed: ${r.error.kind}`,
+            "operation",
+          )
         }
         return mapStoredHits(r.value)
       },
@@ -723,7 +675,6 @@ const buildVectorStoreBackend = (
     upsert: {
       async upsert(chunk: IndexerFileChunk): Promise<void> {
         const runtime = await ensureRuntime()
-        if (runtime === null) return
         const id = chunkId(chunk)
         const vec = await embed(chunk.text)
         const r = await runtime.store.upsert([
@@ -739,28 +690,30 @@ const buildVectorStoreBackend = (
           },
         ])
         if (!r.ok) {
-          logger.warn(`search index ${runtime.storeLabel} upsert failed: ${r.error.kind}`)
-          return
+          throw new SemanticBackendUnavailableError(
+            `search index ${runtime.storeLabel} upsert failed: ${r.error.kind}`,
+            "operation",
+          )
         }
         const prev = await runtime.manifest.idsForPath(chunk.path)
         if (!prev.includes(id)) await runtime.manifest.replacePath(chunk.path, [...prev, id])
       },
       async delete(path: string): Promise<void> {
         const runtime = await ensureRuntime()
-        if (runtime === null) return
         const ids = await runtime.manifest.idsForPath(path)
         if (ids.length === 0) return
         const r = await runtime.store.delete(ids)
         if (!r.ok) {
-          logger.warn(`search index ${runtime.storeLabel} delete failed: ${r.error.kind}`)
-          return
+          throw new SemanticBackendUnavailableError(
+            `search index ${runtime.storeLabel} delete failed: ${r.error.kind}`,
+            "operation",
+          )
         }
         await runtime.manifest.deletePath(path)
       },
     },
     reconcileChanges: async (batch: SemanticReconcileBatch): Promise<void> => {
       const runtime = await ensureRuntime()
-      if (runtime === null) return
       for (const path of batch.deletedPaths) {
         await reconcileDeletedPath(runtime, path)
       }
@@ -771,26 +724,28 @@ const buildVectorStoreBackend = (
   }
 }
 
-const newDisabledBackend = (reason: string): SemanticBackend => ({
-  // An EXPLICIT but unusable store request. `failed` (not `degraded`) so the
-  // consumer treats this as a hard config error, not a silently-empty index
-  // (L5 H-4/M-13). The port stays inert so we never index/query elsewhere.
-  state: "failed",
-  stateReason: reason,
-  port: {
-    async query(): Promise<readonly SearchHit[]> {
-      return []
+const newDisabledBackend = (reason: string): SemanticBackend => {
+  const readiness = Promise.resolve({
+    kind: "unavailable" as const,
+    reason,
+    phase: "init" as const,
+  })
+  const fail = async (): Promise<never> => {
+    throw new SemanticBackendUnavailableError(reason, "init")
+  }
+  return {
+    state: "failed",
+    stateReason: reason,
+    readiness,
+    port: {
+      query: fail,
     },
-  },
-  upsert: {
-    async upsert(): Promise<void> {
-      /* explicit store request is disabled; do not silently index elsewhere */
+    upsert: {
+      upsert: fail,
+      delete: fail,
     },
-    async delete(): Promise<void> {
-      /* explicit store request is disabled; do not silently delete elsewhere */
-    },
-  },
-})
+  }
+}
 
 /**
  * Open the persist database. `QUANTA_INDEX_DB_PATH` names a file; absent ⇒
@@ -819,39 +774,62 @@ export const buildSemanticBackend = (
     return newDisabledBackend(reason)
   }
   const runtime = buildVectorStoreRuntime(env, selection, resolvedEmbedder, opts)
+  const runtimeOrNull = runtime.then(unwrapRuntime)
   const fallback = newInMemoryBackend(embed, opts.metrics, opts.nowMs, "legacy-fallback")
-  const vectorBacked = buildVectorStoreBackend(embed, runtime, opts.metrics, opts.nowMs)
+  const vectorBacked = buildVectorStoreBackend(embed, runtimeOrNull, opts.metrics, opts.nowMs)
   const explicitDisabled = selection.kind === "explicit"
+  const throwIfUnusable = async (): Promise<VectorStoreRuntime | "fallback"> => {
+    const resolved = await runtime
+    if (isSpaceRefused(resolved)) {
+      throw new SemanticBackendUnavailableError(resolved.reason, "init")
+    }
+    if (resolved !== null) return resolved
+    if (explicitDisabled) {
+      throw new SemanticBackendUnavailableError(
+        `explicit ${selection.provider} store unavailable`,
+        "init",
+      )
+    }
+    return "fallback"
+  }
+  const readiness: Promise<SemanticReadiness> = runtime.then((resolved) => {
+    if (isSpaceRefused(resolved)) {
+      return { kind: "unavailable" as const, reason: resolved.reason, phase: "init" as const }
+    }
+    if (resolved !== null) return READY
+    if (explicitDisabled) {
+      return {
+        kind: "unavailable" as const,
+        reason: `explicit ${selection.provider} store unavailable`,
+        phase: "init" as const,
+      }
+    }
+    return READY
+  })
   return {
-    // A usable store was selected (explicit or implicit). If the runtime fails
-    // to OPEN later, an explicit request stays inert (no cross-store fallback)
-    // and an implicit request falls back to in-memory — both handled per-op
-    // below; the static state here reflects the SELECTION being valid.
     state: "ready",
+    readiness,
     port: {
       async query(vec, k) {
-        const resolved = await runtime
-        if (resolved !== null) return vectorBacked.port.query(vec, k)
-        return explicitDisabled ? [] : fallback.port.query(vec, k)
+        const dest = await throwIfUnusable()
+        return dest === "fallback" ? fallback.port.query(vec, k) : vectorBacked.port.query(vec, k)
       },
     },
     upsert: {
       async upsert(chunk) {
-        const resolved = await runtime
-        if (resolved !== null) return vectorBacked.upsert.upsert(chunk)
-        if (explicitDisabled) return
-        return fallback.upsert.upsert(chunk)
+        const dest = await throwIfUnusable()
+        return dest === "fallback"
+          ? fallback.upsert.upsert(chunk)
+          : vectorBacked.upsert.upsert(chunk)
       },
       async delete(path) {
-        const resolved = await runtime
-        if (resolved !== null) return vectorBacked.upsert.delete(path)
-        if (explicitDisabled) return
-        return fallback.upsert.delete(path)
+        const dest = await throwIfUnusable()
+        return dest === "fallback" ? fallback.upsert.delete(path) : vectorBacked.upsert.delete(path)
       },
     },
     reconcileChanges: async (batch) => {
-      const resolved = await runtime
-      if (resolved === null) return
+      const dest = await throwIfUnusable()
+      if (dest === "fallback") return
       await vectorBacked.reconcileChanges?.(batch)
     },
   }

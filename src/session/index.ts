@@ -149,6 +149,7 @@ export {
 } from "./rollback-record"
 export type { SessionRootProvider } from "./root-port"
 export { defaultSessionRootProvider, staticSessionRootProvider } from "./root-port"
+export type { SaveSessionOptions } from "./store"
 export {
   appendEnvelope,
   archiveSession,
@@ -156,8 +157,10 @@ export {
   deleteSession,
   forkSession,
   loadSessionById,
+  readSessionByIdTyped,
   renameSession,
   rewindToMessage,
+  StaleSessionGenerationError,
   saveSessionById,
   sessionEnvelopePath,
   sessionEnvelopePathAsync,

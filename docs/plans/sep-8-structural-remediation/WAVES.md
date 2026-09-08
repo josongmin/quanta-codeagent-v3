@@ -1,12 +1,12 @@
 # Sep-08 — disjoint write-set wave plan
 
-상태: **분할 계획은 유지. W1·W2·W3는 local `main`에 통합됨. W7 verified 아님.**
+상태: **분할 계획은 유지. W1–W4는 local `main`에 구현됨. W7 verified 아님.**
 
 - 구조·근거: [README](/Users/songmin/quanta-codeagent-v3/docs/plans/sep-8-structural-remediation/README.md), [ACTIONS](/Users/songmin/quanta-codeagent-v3/docs/plans/sep-8-structural-remediation/ACTIONS.md).
 - 실행 배정의 machine-readable 원본: [waves.json](/Users/songmin/quanta-codeagent-v3/docs/plans/sep-8-structural-remediation/waves.json).
 - 검사기: [verify-waves.mjs](/Users/songmin/quanta-codeagent-v3/docs/plans/sep-8-structural-remediation/verify-waves.mjs).
 - Plan baseline HEAD: `f5f4875799141068af73e604129c8b9a09f76007`.
-- Integrated source (W1+W2, W3 착수): `19fc9da2b` on local `main`. W3 land: `742d61d0`. `waves.json` `sourceHead`는 W3 land SHA.
+- Integrated source (W1+W2, W3 착수): `19fc9da2b` on local `main`. W3 land: `f3a93d5fd`. `waves.json` `sourceHead`는 W3 land SHA (`f3a93d5fd22855951ef4f871813e2b55b0f41b0c`). W4 status: `w4-implemented`.
 - audit digest는 manifest에 고정한다. `docs/bugbash/sep-8-se-audit/`는 baseline 입력이지 구현 closeout이 아니다.
 
 ## 1. 전체 배정 — 39 finding / 16 package / 172 action
@@ -152,6 +152,8 @@ auth transaction과 session protocol은 다른 schema/owner다. 공통 root가 �
 | W4-C / R10 | E-SEARCH-01, E-EMBED-01 | retrieval + runner search backend/pipeline | host mention-symbol consumer |
 
 R03과 R10이 모두 embedding을 다뤄도 수정 목적은 다르다. R03은 memory SQLite의 raw BLOB 보존, R10은 retrieval index/query 공간 계약이다. 공통 storage abstraction을 이 wave에서 새로 합치지 않는다. R06의 claimToken도 filesystem lock과 합치지 않는다.
+
+**구현 상태:** W4-P/I는 local `main`에서 `w4-implemented`. W7 verified 아님. G-F9.4 live Docker daemon / G-F5.4 EC2는 이 wave에 없음.
 
 ### W5 — Cancellation / LSP / boot configuration
 

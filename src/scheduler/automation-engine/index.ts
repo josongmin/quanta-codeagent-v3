@@ -42,4 +42,4 @@ export type {
   TickOpts,
   TickOutcome,
 } from "./ticker"
-export { tickScheduler } from "./ticker"
+export { DEFAULT_CLAIM_RECLAIM_MS, DEFAULT_CLAIM_RENEW_MS, tickScheduler } from "./ticker"

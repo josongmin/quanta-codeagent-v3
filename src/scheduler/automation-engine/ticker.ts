@@ -73,22 +73,36 @@ export type TickOutcome =
    *  row stays `scheduled` and is re-evaluated next tick). `reason` is the
    *  closed eligibility-reason anchor (e.g. `policy-never`). */
   | { readonly kind: "skipped"; readonly at: number; readonly reason: string }
+  | {
+      readonly kind: "ownership-lost"
+      readonly at: number
+      readonly automationId: string
+    }
 
 export interface TickOpts {
   readonly engine: AutomationEnginePort
   readonly now: number
   readonly handler: AutomationHandler
-  /** Override the inbox surface — default produces `[fired]/[errored]` titles. */
   readonly inbox?: InboxBuilder
-  /** ADR-0453 — OPTIONAL autorun-eligibility gate (the scheduler-path 4th
-   *  guard). Consulted ONCE at the top of the tick, BEFORE `engine.claim`, so a
-   *  block takes no claim and advances no anchor. ABSENT (default) ⇒ the tick
-   *  is byte-identical to the pre-ADR-0453 path (no consult). The gate is
-   *  additive: it can only BLOCK a fire the schedule already permitted. The
-   *  policy is global (the verdict does not depend on the row), so a block
-   *  suppresses ALL fires this tick. */
   readonly eligibility?: () => TickEligibilityVerdict
+  /**
+   * Stale `running` claims with `claimedAt <= now - reclaimStaleAfterMs` are
+   * eligible for reclaim. Default 60s so the live ticker recovers crashed
+   * workers without a composition-root change. `0` disables reclaim.
+   */
+  readonly reclaimStaleAfterMs?: number
+  /**
+   * While the handler runs, bump `claimedAt` on the same token this often.
+   * Default 20s. `0` disables renewal.
+   */
+  readonly renewEveryMs?: number
+  /** Clock for renewal timestamps. Default `Date.now`. */
+  readonly nowFn?: () => number
 }
+
+/** Default reclaim window — live ticker inherits this without agent-slot edits. */
+export const DEFAULT_CLAIM_RECLAIM_MS = 60_000
+export const DEFAULT_CLAIM_RENEW_MS = 20_000
 
 /**
  * Execute exactly one tick. Returns a typed outcome — never throws.
@@ -107,37 +121,38 @@ export interface TickOpts {
  *      `errored`. The claim token guards against a stale worker finalizing a
  *      row another worker now owns.
  */
-export const tickScheduler = async (opts: TickOpts): Promise<TickOutcome> => {
+const runClaimedTick = async (
+  opts: TickOpts,
+  claimed: { readonly automation: EngineAutomation; readonly claimToken: string },
+): Promise<TickOutcome> => {
   const { engine, now, handler, inbox = defaultInboxBuilder } = opts
-  // ADR-0453 — autorun-eligibility gate. Consulted BEFORE the claim so a block
-  // takes no claim and advances no anchor (the row stays scheduled). Absent ⇒
-  // no consult ⇒ byte-identical.
-  const verdict = opts.eligibility?.()
-  if (verdict !== undefined && !verdict.eligible) {
-    return { kind: "skipped", at: now, reason: verdict.reason }
-  }
-  const claimRes = await engine.claim(now)
-  if (!claimRes.ok) {
-    return { kind: "engine-error", at: now, error: claimRes }
-  }
-  const claimed = claimRes.value
-  if (claimed === null) {
-    return { kind: "idle", at: now }
-  }
   const due = claimed.automation
-
   const nextRunAt = computeNextFireAfter(due.rule, now, due.fireCount + 1)
+  const renewEveryMs = opts.renewEveryMs ?? DEFAULT_CLAIM_RENEW_MS
+  const nowFn = opts.nowFn ?? Date.now
   let handlerThrew: unknown
+  let ownershipLost = false
+  const renewTimer =
+    renewEveryMs > 0
+      ? setInterval(() => {
+          void engine.renewClaim(due.id, claimed.claimToken, nowFn()).then((r) => {
+            if (!r.ok) ownershipLost = true
+          })
+        }, renewEveryMs)
+      : undefined
   try {
     await handler(due)
   } catch (e) {
     handlerThrew = e
+  } finally {
+    if (renewTimer !== undefined) clearInterval(renewTimer)
   }
-
+  if (ownershipLost) {
+    return { kind: "ownership-lost", at: now, automationId: due.id }
+  }
   const outcome: "fired" | "errored" = handlerThrew === undefined ? "fired" : "errored"
   const errorMessage = handlerErrorMessage(handlerThrew)
   const built = inbox(due, outcome)
-
   const finRes = await engine.finalize({
     id: due.id,
     claimToken: claimed.claimToken,
@@ -160,6 +175,26 @@ export const tickScheduler = async (opts: TickOpts): Promise<TickOutcome> => {
     }
   }
   return { kind: "fired", at: now, automationId: due.id }
+}
+
+export const tickScheduler = async (opts: TickOpts): Promise<TickOutcome> => {
+  const { engine, now } = opts
+  const verdict = opts.eligibility?.()
+  if (verdict !== undefined && !verdict.eligible) {
+    return { kind: "skipped", at: now, reason: verdict.reason }
+  }
+  const reclaimStaleAfterMs = opts.reclaimStaleAfterMs ?? DEFAULT_CLAIM_RECLAIM_MS
+  const claimRes = await engine.claim(
+    now,
+    reclaimStaleAfterMs > 0 ? { reclaimBefore: now - reclaimStaleAfterMs } : undefined,
+  )
+  if (!claimRes.ok) {
+    return { kind: "engine-error", at: now, error: claimRes }
+  }
+  if (claimRes.value === null) {
+    return { kind: "idle", at: now }
+  }
+  return runClaimedTick(opts, claimRes.value)
 }
 
 /** Render whatever the handler threw, or `undefined` when it completed.

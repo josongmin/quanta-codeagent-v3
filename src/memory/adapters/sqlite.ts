@@ -14,6 +14,7 @@ import {
   normalizeEntry,
 } from "../types"
 import { deserializeVec, serializeVec } from "../vector"
+import { buildMemoryColumnUpdate } from "./sqlite/column-update"
 
 /** Row shape as stored in / read from sqlite (post-migration schema). */
 interface MemoryRow {
@@ -233,12 +234,14 @@ export class SqliteStore implements PersistentStorePort {
   update(id: string, patch: Partial<MemoryEntry>): Promise<void> {
     const row = this.selectByIdStmt.get(id) as MemoryRow | null
     if (!row) return Promise.resolve()
-    const merged: MemoryEntry = {
-      ...rowToEntry(row),
-      ...patch,
-      updatedAt: Date.now(),
+    const built = buildMemoryColumnUpdate(id, patch, Date.now())
+    if (built === null) return Promise.resolve()
+    try {
+      this.db.query(built.sql).run(built.params)
+    } catch (e) {
+      return Promise.reject(new Error(`SqliteStore.update(${id}) failed: ${errMessage(e)}`))
     }
-    return this.save(merged)
+    return Promise.resolve()
   }
 
   delete(id: string): Promise<void> {

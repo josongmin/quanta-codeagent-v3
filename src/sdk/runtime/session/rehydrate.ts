@@ -1,5 +1,6 @@
 import type { Message } from "@/llm"
-import { loadSessionById, type SavedSession } from "@/session"
+import type { SavedSession } from "@/session"
+import { loadResumeSnapshot, type ResumeSnapshotRead } from "./snapshot-read/typed-read"
 
 /**
  * RFC01-4 — A1 cold-start rehydrate (INJECTION, not event-fold).
@@ -53,8 +54,12 @@ import { loadSessionById, type SavedSession } from "@/session"
  *  it is the byte-identical fresh path; see the module header.) */
 export class ResumeRehydrateRefusedError extends Error {
   readonly sessionId: string
-  readonly component: "identity" | "transcript"
-  constructor(sessionId: string, component: "identity" | "transcript", detail: string) {
+  readonly component: "identity" | "transcript" | "corrupt" | "unreadable"
+  constructor(
+    sessionId: string,
+    component: "identity" | "transcript" | "corrupt" | "unreadable",
+    detail: string,
+  ) {
     super(
       `refusing to resume session ${sessionId}: ${detail} ` +
         "(the durable event log is resumable but its lossless SavedSession " +
@@ -129,8 +134,16 @@ export const validateResumeSnapshot = (
  */
 export const rehydrateResumeTranscript = async (
   sessionId: string,
-  loader: (id: string) => Promise<SavedSession | undefined> = loadSessionById,
+  loader: (id: string) => Promise<ResumeSnapshotRead> = loadResumeSnapshot,
 ): Promise<readonly Message[] | undefined> => {
   const snapshot = await loader(sessionId)
-  return validateResumeSnapshot(sessionId, snapshot)
+  if (snapshot.kind === "missing") return undefined
+  if (snapshot.kind === "found") return validateResumeSnapshot(sessionId, snapshot.session)
+  throw new ResumeRehydrateRefusedError(
+    sessionId,
+    snapshot.kind,
+    snapshot.kind === "corrupt"
+      ? `snapshot is corrupt (${snapshot.reason})`
+      : `snapshot is unreadable (${snapshot.reason})`,
+  )
 }

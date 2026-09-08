@@ -1,6 +1,6 @@
 # Sep-08 — evidence-backed action register
 
-상태: **W3 closed on local `main`**. W1·W2·W3 implemented. 나머지 finding은 W4–W6. G-F5.4 EC2 실기 proof는 열린 갭. G-F9.4 contract rail 설치됨 (이 머신 Docker live 실행, Lima skip). 체크박스는 구현 수행이며 W7 전역 verified가 아니다.
+상태: **W4 implemented on local `main`**. W1–W4 implemented. 나머지 finding은 W5–W6. G-F5.4 EC2 실기 proof는 열린 갭. G-F9.4 contract rail 설치됨 (이 머신 Docker live 실행, Lima skip). 체크박스는 구현 수행이며 W7 전역 verified가 아니다.
 
 설계·write set·병렬 통합 정책: [README](/Users/songmin/quanta-codeagent-v3/docs/plans/sep-8-structural-remediation/README.md).
 실행 wave/group 배정: [WAVES](/Users/songmin/quanta-codeagent-v3/docs/plans/sep-8-structural-remediation/WAVES.md). 172개 액션의 단일 owner와 병렬 write set은 `waves.json`/`verify-waves.mjs`로 검사한다. 액션 내용은 이 문서, 실행 배정은 manifest가 원본이다.
@@ -14,7 +14,7 @@
 - [x] **W0.3** R02의 lock primitive 후보를 지원 플랫폼에서 실험한다. FD lock의 lifetime, same-process 별도 opener, child inheritance, holder kill, stable inode, symlink/path identity, abort/wait timeout을 검증한다. 새 native dependency/지원 범위 변경은 별도 승인 대상이다.
 - [x] **W0.4** legacy wx writer와 새 lock writer의 혼재 차단/전환 절차를 확정한다. process 종료가 필요하면 명시하고, 기존 lock 파일을 age만으로 삭제하지 않는다.
 - [x] **W0.5** R11의 process-ready와 DXT-ready 분리, client core 기능 parity 목록을 확정한다. HTTP reauth의 replay 허용 조건과 pending request 종료 정책도 고정한다.
-- [ ] **W0.6** R09의 unknown/known/estimated 및 legacy ledger hydration 정책, R10의 embedding-space identity와 old index 전환 정책을 확정한다.
+- [x] **W0.6** R09의 unknown/known/estimated 및 legacy ledger hydration 정책, R10의 embedding-space identity와 old index 전환 정책을 확정한다.
 - [x] **W0.7** touched god-module/function을 detector 기준으로 목록화하고 해당 package의 책임 분리 안에 포함한다. line-count 낮추기용 wrapper 이동 또는 allowlist 증가는 금지한다.
 - [x] **W0.8** owner-local RED test를 먼저 추가하고 실패 원인이 해당 finding인지 확인한다. 기존 suite PASS, source grep, test 파일 존재는 RED receipt가 아니다.
 
@@ -125,37 +125,37 @@
 
 근거: [save queue](/Users/songmin/quanta-codeagent-v3/src/session/store.ts:578), [queue 밖 delete](/Users/songmin/quanta-codeagent-v3/src/session/store.ts:874), [autosave producer](/Users/songmin/quanta-codeagent-v3/src/runner/orchestrate/persist-turn.ts:181).
 
-- [ ] **SEP7-D-05.1** save/delete/create의 순서와 generation 소유자를 정의한다. old autosave가 delete 이후 도착하는 경우와 정당한 새 create를 구분한다.
-- [ ] **SEP7-D-05.2** snapshot+index delete를 같은 per-session queue에 넣고 stale generation save를 거부한다. queue 안에서 queue-dependent flush를 기다리지 않는다.
-- [ ] **SEP7-D-05.3** parked save→delete waits→save release→delete complete→late old save 순서를 강제하고 snapshot/index 둘 다 부재임을 검사한다.
-- [ ] **SEP7-D-05.4** 실제 delete command/autosave consumer를 연결하고 unrelated session 저장은 진행됨을 확인한다. cross-process 미검증이면 그 보장은 receipt에서 제외한다.
+- [x] **SEP7-D-05.1** save/delete/create의 순서와 generation 소유자를 정의한다. old autosave가 delete 이후 도착하는 경우와 정당한 새 create를 구분한다.
+- [x] **SEP7-D-05.2** snapshot+index delete를 같은 per-session queue에 넣고 stale generation save를 거부한다. queue 안에서 queue-dependent flush를 기다리지 않는다.
+- [x] **SEP7-D-05.3** parked save→delete waits→save release→delete complete→late old save 순서를 강제하고 snapshot/index 둘 다 부재임을 검사한다.
+- [x] **SEP7-D-05.4** 실제 delete command/autosave consumer를 연결하고 unrelated session 저장은 진행됨을 확인한다. cross-process 미검증이면 그 보장은 receipt에서 제외한다.
 
 ### SEP7-D-06 · P2 · Corrupt index row loss
 
 근거: [invalid row skip](/Users/songmin/quanta-codeagent-v3/src/session/index-store.ts:28), [upsert rewrite](/Users/songmin/quanta-codeagent-v3/src/session/index-store.ts:109), [list](/Users/songmin/quanta-codeagent-v3/src/session/index-store.ts:134).
 
-- [ ] **SEP7-D-06.1** snapshot은 원본, index는 projection으로 선언하고 invalid-row diagnostic/원문 보존/재구축 경로를 정한다. list마다 전체 scan을 강제하지 않도록 recovery trigger를 명시한다.
-- [ ] **SEP7-D-06.2** 발견된 손상을 valid snapshot으로 복구한 뒤 index를 교체한다. unreadable snapshot은 silent drop하지 않고 진단/원문을 남긴다.
-- [ ] **SEP7-D-06.3** corrupt one row→다른 session upsert→원래 session이 picker/list에 다시 보임을 확인한다. snapshot-write/index-write 사이 crash도 재발견해야 한다.
-- [ ] **SEP7-D-06.4** cross-session index RMW 직렬화와 delete/rebuild 경쟁을 검증한다. silent filtered-map overwrite를 제거하고 recovery 실패를 정상 empty list로 바꾸지 않는다.
+- [x] **SEP7-D-06.1** snapshot은 원본, index는 projection으로 선언하고 invalid-row diagnostic/원문 보존/재구축 경로를 정한다. list마다 전체 scan을 강제하지 않도록 recovery trigger를 명시한다.
+- [x] **SEP7-D-06.2** 발견된 손상을 valid snapshot으로 복구한 뒤 index를 교체한다. unreadable snapshot은 silent drop하지 않고 진단/원문을 남긴다.
+- [x] **SEP7-D-06.3** corrupt one row→다른 session upsert→원래 session이 picker/list에 다시 보임을 확인한다. snapshot-write/index-write 사이 crash도 재발견해야 한다.
+- [x] **SEP7-D-06.4** cross-session index RMW 직렬화와 delete/rebuild 경쟁을 검증한다. silent filtered-map overwrite를 제거하고 recovery 실패를 정상 empty list로 바꾸지 않는다.
 
 ### SEP7-D-07 · P2 · Corrupt snapshot as fresh resume
 
 근거: [read result collapse](/Users/songmin/quanta-codeagent-v3/src/session/store.ts:463), [rehydrate consumer](/Users/songmin/quanta-codeagent-v3/src/sdk/runtime/session/rehydrate.ts:90), [durable-tip caller](/Users/songmin/quanta-codeagent-v3/src/sdk/runtime/runtime.ts:26).
 
-- [ ] **SEP7-D-07.1** read result를 found/missing/corrupt/unreadable로 정의하고 loader→SDK adapter까지 전달한다. public convenience API가 필요하면 명시 wrapper로 제한한다.
-- [ ] **SEP7-D-07.2** durable resume에서 corrupt/unreadable은 typed refusal, genuine missing은 기존 허용 정책으로 분기한다. 모든 catch→undefined를 제거한다.
-- [ ] **SEP7-D-07.3** nonzero log tip+malformed JSON/schema mismatch/read failure 각각이 `ResumeRehydrateRefusedError`인지 확인한다. missing/valid empty 정상 대조군을 포함한다.
-- [ ] **SEP7-D-07.4** 거절 후 원 snapshot/log가 덮어써지지 않고 fresh autosave가 시작되지 않음을 실제 runtime entry에서 검증한다.
+- [x] **SEP7-D-07.1** read result를 found/missing/corrupt/unreadable로 정의하고 loader→SDK adapter까지 전달한다. public convenience API가 필요하면 명시 wrapper로 제한한다.
+- [x] **SEP7-D-07.2** durable resume에서 corrupt/unreadable은 typed refusal, genuine missing은 기존 허용 정책으로 분기한다. 모든 catch→undefined를 제거한다.
+- [x] **SEP7-D-07.3** nonzero log tip+malformed JSON/schema mismatch/read failure 각각이 `ResumeRehydrateRefusedError`인지 확인한다. missing/valid empty 정상 대조군을 포함한다.
+- [x] **SEP7-D-07.4** 거절 후 원 snapshot/log가 덮어써지지 않고 fresh autosave가 시작되지 않음을 실제 runtime entry에서 검증한다.
 
 ### SEP7-D-10 · P2 · Unrelated update destroys corrupt BLOB
 
 근거: [decode→save update](/Users/songmin/quanta-codeagent-v3/src/memory/adapters/sqlite.ts:233), [corrupt embedding omit](/Users/songmin/quanta-codeagent-v3/src/memory/adapters/sqlite.ts:328). omitted embedding이 whole-row save에서 SQL NULL로 바뀐다.
 
-- [ ] **SEP7-D-10.1** update patch의 미지정/set/clear semantics를 정하고 column-local SQL update를 사용한다. column 이름은 closed allowlist로 제한한다.
-- [ ] **SEP7-D-10.2** embedding을 소유하지 않는 update에서 decode/reserialize를 제거한다. 다른 metadata default/merge 의미도 기존 계약을 유지한다.
-- [ ] **SEP7-D-10.3** raw BLOB `00`을 심고 text/score-only update 후 SQL raw bytes가 동일하고 corruption callback도 계속 관측되는지 확인한다.
-- [ ] **SEP7-D-10.4** explicit embedding set/clear, missing row, transaction failure를 검증한다. 이 수정은 session repository abstraction에 결합하지 않는다.
+- [x] **SEP7-D-10.1** update patch의 미지정/set/clear semantics를 정하고 column-local SQL update를 사용한다. column 이름은 closed allowlist로 제한한다.
+- [x] **SEP7-D-10.2** embedding을 소유하지 않는 update에서 decode/reserialize를 제거한다. 다른 metadata default/merge 의미도 기존 계약을 유지한다.
+- [x] **SEP7-D-10.3** raw BLOB `00`을 심고 text/score-only update 후 SQL raw bytes가 동일하고 corruption callback도 계속 관측되는지 확인한다.
+- [x] **SEP7-D-10.4** explicit embedding set/clear, missing row, transaction failure를 검증한다. 이 수정은 session repository abstraction에 결합하지 않는다.
 
 ## 4. R04 — patch semantics / recovery truth
 
@@ -203,10 +203,10 @@
 
 근거: [reclaimBefore + claimToken](/Users/songmin/quanta-codeagent-v3/src/scheduler/automation-engine/port.ts:205), [ticker claim caller](/Users/songmin/quanta-codeagent-v3/src/scheduler/automation-engine/ticker.ts:110). engine 기능은 존재하지만 live ticker가 reclaim을 전달하지 않는다.
 
-- [ ] **G-F4.1** renewal 또는 실행 상한/ownership proof와 reclaim window를 함께 정한다. 기존 claimToken/finalize fence를 재사용하며 두 번째 lease 체계를 만들지 않는다.
-- [ ] **G-F4.2** ticker와 composition에 정책을 배선하고 renewal/ownership-lost/cancel outcome을 처리한다. old token의 finalize는 계속 거절한다.
-- [ ] **G-F4.3** durable child claim→kill→restart ticker→reclaim 및 live long-running 비탈취를 검증한다. engine 단독 호출이 아니라 실제 ticker rail을 사용한다.
-- [ ] **G-F4.4** 외부 부작용 attempt identity와 replay 정책을 정한다. exactly-once를 약속하지 않고 결과 불명 비멱등 실행은 recovery-required로 남긴다.
+- [x] **G-F4.1** renewal 또는 실행 상한/ownership proof와 reclaim window를 함께 정한다. 기존 claimToken/finalize fence를 재사용하며 두 번째 lease 체계를 만들지 않는다.
+- [x] **G-F4.2** ticker와 composition에 정책을 배선하고 renewal/ownership-lost/cancel outcome을 처리한다. old token의 finalize는 계속 거절한다.
+- [x] **G-F4.3** durable child claim→kill→restart ticker→reclaim 및 live long-running 비탈취를 검증한다. engine 단독 호출이 아니라 실제 ticker rail을 사용한다.
+- [x] **G-F4.4** 외부 부작용 attempt identity와 replay 정책을 정한다. exactly-once를 약속하지 않고 결과 불명 비멱등 실행은 recovery-required로 남긴다.
 
 ## 7. R07 — cancellation ownership
 
@@ -283,19 +283,19 @@
 
 근거: [null initialization](/Users/songmin/quanta-codeagent-v3/src/runner/assemble/search-index-backend.ts:604), [ready + noop ports](/Users/songmin/quanta-codeagent-v3/src/runner/assemble/search-index-backend.ts:800), [search consumer](/Users/songmin/quanta-codeagent-v3/src/runner/assemble/search-pipeline.ts:222), [mention consumer](/Users/songmin/quanta-codeagent-v3/src/host/runtime/internal/mention-symbol-deps.ts:140).
 
-- [ ] **E-SEARCH-01.1** single-flight async readiness와 typed unavailable contract를 정하고 initialization/operation 실패를 구분한다.
-- [ ] **E-SEARCH-01.2** 실제 operations가 readiness를 await하고 search/mention consumer가 failure를 처리하게 한다. static state field 추가만으로 끝내지 않는다.
-- [ ] **E-SEARCH-01.3** valid explicit store의 create/capability/remote failure를 넣어 no-hit와 구별되는 결과를 검증한다. 정상 explicit/no-hit 대조군을 둔다.
-- [ ] **E-SEARCH-01.4** null→[]/noop 및 explicit store 자동 대체를 제거한다. partial upsert/retry의 caller-visible 결과도 명시한다.
+- [x] **E-SEARCH-01.1** single-flight async readiness와 typed unavailable contract를 정하고 initialization/operation 실패를 구분한다.
+- [x] **E-SEARCH-01.2** 실제 operations가 readiness를 await하고 search/mention consumer가 failure를 처리하게 한다. static state field 추가만으로 끝내지 않는다.
+- [x] **E-SEARCH-01.3** valid explicit store의 create/capability/remote failure를 넣어 no-hit와 구별되는 결과를 검증한다. 정상 explicit/no-hit 대조군을 둔다.
+- [x] **E-SEARCH-01.4** null→[]/noop 및 explicit store 자동 대체를 제거한다. partial upsert/retry의 caller-visible 결과도 명시한다.
 
 ### E-EMBED-01 · P2 · Embedding space mismatch
 
 근거: [fallback chain](/Users/songmin/quanta-codeagent-v3/src/runner/assemble/search-index-backend.ts:239), [64d return](/Users/songmin/quanta-codeagent-v3/src/runner/assemble/search-index-backend.ts:294), [dimension truncation](/Users/songmin/quanta-codeagent-v3/src/runner/assemble/search-index-backend.ts:349). 앞선 probe는 1536d provider 실패+32,769 bytes에서 64d를 반환했다.
 
-- [ ] **E-EMBED-01.1** model/revision/dimension/normalization을 포함한 embedding-space identity를 index/query에 고정한다. dimension만 맞춘 hash도 허용하지 않는다.
-- [ ] **E-EMBED-01.2** provider 실패 시 typed error 또는 같은 model의 명시 chunking을 사용한다. hash mode가 필요하면 전체 index를 별도 namespace에 둔다.
-- [ ] **E-EMBED-01.3** 32,769-byte 실패, same-dimension/different-model, query/index mismatch를 RED→GREEN으로 검증하고 silent cosine truncation을 제거한다.
-- [ ] **E-EMBED-01.4** old index의 identity 불명 상태를 검증/rebuild로 전환한다. new index 완료 전 old index를 덮거나 삭제하지 않고 rollback/read compatibility를 확인한다.
+- [x] **E-EMBED-01.1** model/revision/dimension/normalization을 포함한 embedding-space identity를 index/query에 고정한다. dimension만 맞춘 hash도 허용하지 않는다.
+- [x] **E-EMBED-01.2** provider 실패 시 typed error 또는 같은 model의 명시 chunking을 사용한다. hash mode가 필요하면 전체 index를 별도 namespace에 둔다.
+- [x] **E-EMBED-01.3** 32,769-byte 실패, same-dimension/different-model, query/index mismatch를 RED→GREEN으로 검증하고 silent cosine truncation을 제거한다.
+- [x] **E-EMBED-01.4** old index의 identity 불명 상태를 검증/rebuild로 전환한다. new index 완료 전 old index를 덮거나 삭제하지 않고 rollback/read compatibility를 확인한다.
 
 ## 11. R11 — MCP carrier / session lifecycle
 

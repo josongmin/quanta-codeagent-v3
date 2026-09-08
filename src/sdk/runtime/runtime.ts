@@ -33,7 +33,9 @@ export const createRuntimeFacade = (options: CreateRuntimeOptions): RuntimeFacad
         // empty; when it is IDENTITY-MISMATCHED or its transcript is TAMPERED,
         // `rehydrateResumeTranscript` THROWS here (before any RuntimeSession is
         // assembled) — the runtime REFUSES rather than partial-merging a corrupt
-        // transcript. When NO snapshot exists (a pure wire/seq-only resume, or
+        // transcript. A throw means no RuntimeSession and therefore no fresh
+        // autosave/overwrite of the snapshot or durable log (SEP7-D-07.4).
+        // When NO snapshot exists (a pure wire/seq-only resume, or
         // an in-memory log with `tip === 0`), it returns `undefined` ⇒ the
         // empty-transcript cold start, byte-identical to the pre-feature runtime.
         const durableTip = isDurableSessionEventLog(eventLog) ? eventLog.tip() : 0
