@@ -36,11 +36,13 @@
  * Semantic strategy (the `auto` fallback):
  *   - `buildSemanticBackend(env, embed)` (ADR-0391) is the SAME in-memory /
  *     sqlite vector backend the search pipeline uses; `selectIndexEmbedder(env)`
- *     is the SAME embedder. `createSemanticSymbolLookup` embeds the symbol name
- *     and probes the index. An EMPTY index (nothing upserted) ⇒ `query` returns
- *     `[]` ⇒ the port answers `null` (graceful — never throws).
- *   - Typed `SemanticBackendUnavailableError` (explicit store / space refuse)
- *     is NOT converted into a no-hit. The mention consumer observes it.
+ *     is the SAME embedder. The host queries that port directly so a typed
+ *     `SemanticBackendUnavailableError` / `EmbeddingSpaceError` is NOT
+ *     converted into a no-hit by the agent-slice adapter's generic catch.
+ *   - An EMPTY index (nothing upserted) ⇒ `query` returns `[]` ⇒ the port
+ *     answers `null` (graceful — never throws).
+ *   - Typed store/space unavailability is NOT converted into a no-hit. The
+ *     mention consumer observes it.
  *
  * NO-THROW: transient failures (anchor walk rejects, generic backend build
  * throws) degrade the corresponding strategy to a port that answers `null`.
@@ -50,7 +52,6 @@
 import { lspExtensionToLanguage, lspNavProvider } from "@/agent/lsp-bridge"
 import {
   type AnchorDirLister,
-  createSemanticSymbolLookup,
   createUnionLspSymbolLookup,
   nodeFsAnchorDirLister,
   type SymbolHit,
@@ -59,7 +60,11 @@ import {
   synthesizeLspAnchors,
 } from "@/agent/mention-injection"
 import { parseEnvFlag } from "@/runner/assemble"
-import { SemanticBackendUnavailableError } from "@/runner/assemble/search-index-backend"
+import {
+  isTypedSemanticFailure,
+  SemanticBackendUnavailableError,
+  type SemanticReadiness,
+} from "@/runner/assemble/search-index-backend"
 import { errMessage, logger } from "@/shared"
 import type { LspNavProvider } from "@/tool"
 
@@ -88,9 +93,56 @@ export interface MentionSymbolDeps {
   readonly semantic?: SymbolLookupSemanticPort
 }
 
-const isSemanticUnavailable = (e: unknown): e is SemanticBackendUnavailableError =>
-  e instanceof SemanticBackendUnavailableError ||
-  (e instanceof Error && e.name === "SemanticBackendUnavailableError")
+const isSemanticUnavailable = (e: unknown): boolean => isTypedSemanticFailure(e)
+
+const DEFAULT_SEMANTIC_TOP_K = 5
+
+const metaString = (v: unknown): string => (typeof v === "string" ? v : "")
+const metaNumber = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0)
+
+const toSymbolHit = (h: {
+  readonly text: string
+  readonly metadata?: Readonly<Record<string, unknown>>
+}): SymbolHit | null => {
+  const meta = h.metadata ?? {}
+  const path = metaString(meta.path)
+  if (path.length === 0) return null
+  const startLine = metaNumber(meta.startLine)
+  const line = startLine > 0 ? startLine : 1
+  const snippet = typeof h.text === "string" ? (h.text.split("\n", 1)[0] ?? "") : ""
+  return snippet.length > 0 ? { path, line, snippet } : { path, line }
+}
+
+interface ReadySemanticBackend {
+  readonly readiness: Promise<SemanticReadiness>
+  readonly port: {
+    query(
+      vec: readonly number[],
+      k: number,
+    ): Promise<
+      readonly { readonly text: string; readonly metadata?: Readonly<Record<string, unknown>> }[]
+    >
+  }
+}
+
+/** Host-owned lookup: typed store/space errors propagate; empty/generic miss is null. */
+const findSymbolOnReadyBackend = async (
+  name: string,
+  backend: ReadySemanticBackend,
+  embed: (text: string) => Promise<readonly number[]>,
+): Promise<readonly SymbolHit[] | null> => {
+  const again = await backend.readiness
+  if (again.kind === "unavailable") {
+    throw new SemanticBackendUnavailableError(again.reason, again.phase)
+  }
+  if (typeof name !== "string" || name.length === 0) return null
+  const vec = await embed(name)
+  if (!Array.isArray(vec) || vec.length === 0) return null
+  const hits = await backend.port.query(vec, DEFAULT_SEMANTIC_TOP_K)
+  if (!Array.isArray(hits) || hits.length === 0) return null
+  const projected = hits.map(toSymbolHit).filter((h): h is SymbolHit => h !== null)
+  return projected.length > 0 ? projected : null
+}
 
 /** Memoize a successful async factory result. ONLY fulfilled promises are
  *  cached — if `factory()` rejects, the cache is reset so the NEXT caller
@@ -161,18 +213,8 @@ const buildSemanticLookup = async (
     if (ready.kind === "unavailable") {
       throw new SemanticBackendUnavailableError(ready.reason, ready.phase)
     }
-    const inner = createSemanticSymbolLookup({
-      index: backend.port,
-      embed: resolvedEmbedder.embed,
-    })
     return {
-      findSymbol: async (name) => {
-        const again = await backend.readiness
-        if (again.kind === "unavailable") {
-          throw new SemanticBackendUnavailableError(again.reason, again.phase)
-        }
-        return inner.findSymbol(name)
-      },
+      findSymbol: (name) => findSymbolOnReadyBackend(name, backend, resolvedEmbedder.embed),
     }
   } catch (e) {
     if (isSemanticUnavailable(e)) throw e
@@ -234,4 +276,4 @@ export const buildMentionSymbolDeps = (
  *  bodies in try/catch and return `null` rather than rejecting. So the only
  *  way to PIN the "cache only fulfilled / reset on reject / share in-flight"
  *  invariant against a silent revert is to test `once` directly. */
-export const __test = { once }
+export const __test = { once, findSymbolOnReadyBackend }

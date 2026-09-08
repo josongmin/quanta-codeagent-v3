@@ -207,15 +207,18 @@ export interface AutomationEnginePort {
    * it to `running` with a fresh `claimToken`/`claimedAt`, and return it. The
    * flip is a SINGLE atomic statement (SQLite `UPDATE ... RETURNING`; the
    * in-memory engine does it under its synchronous critical section), so two
-   * overlapping ticker invocations can never receive the SAME row — a fired
-   * automation is executed at most once per due instant.
+   * overlapping LIVE ticker invocations never receive the SAME claim. That is
+   * a fence, not exactly-once delivery: `reclaimBefore` re-hands a stale
+   * `running` row to a later tick under a fresh `claimToken`, and the handler
+   * runs again (recovery-required / at-least-once).
    *
    * `value: null` when nothing is claimable.
    *
    * `opts.reclaimBefore` — when set, a row already `running` whose `claimedAt`
    * is `<= reclaimBefore` (a stale claim left by a crashed worker) is also
-   * eligible: it is re-claimed with a fresh token. Absent ⇒ only `scheduled`
-   * rows are claimable.
+   * eligible: it is re-claimed with a fresh token. That new token is a new
+   * attempt identity, not a replay of the stolen claim. Absent ⇒ only
+   * `scheduled` rows are claimable.
    */
   claim(now: number, opts?: ClaimOpts): Promise<EngineResult<ClaimedRun | null>>
   /**

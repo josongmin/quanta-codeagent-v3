@@ -73,6 +73,7 @@ export {
 } from "@/retrieval/engines/embedder/space"
 export {
   EmbeddingSpaceError,
+  isTypedSemanticFailure,
   SemanticBackendUnavailableError,
   type SemanticReadiness,
 } from "./search-index-backend/errors"

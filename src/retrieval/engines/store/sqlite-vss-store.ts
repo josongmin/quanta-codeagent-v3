@@ -137,7 +137,9 @@ export const createSqliteVssStore = (opts: SqliteVssStoreOptions): VectorStore =
       for (const r of rows) {
         const meta = parseMeta(r.metadata)
         if (!matchesFilter(meta, filter)) continue
-        out.push(makeHit(r.id, cosine(vec, deserialize(r.vector)), meta))
+        const stored = deserialize(r.vector)
+        if (stored.length !== vec.length) continue
+        out.push(makeHit(r.id, cosine(vec, stored), meta))
       }
       out.sort((a, b) => b.score - a.score)
       return ok(out.slice(0, k))

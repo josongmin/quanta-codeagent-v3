@@ -88,6 +88,7 @@ export const createInMemoryVectorStore = (opts: InMemoryStoreOptions = {}): Vect
       const out: StoredHit[] = []
       for (const [id, entry] of docs) {
         if (!matchesFilter(entry.metadata, filter)) continue
+        if (entry.vector.length !== vec.length) continue
         out.push(makeHit(id, cosine(vec, entry.vector), entry.metadata))
       }
       out.sort((a, b) => b.score - a.score)

@@ -89,6 +89,8 @@ export interface TickOpts {
    * Stale `running` claims with `claimedAt <= now - reclaimStaleAfterMs` are
    * eligible for reclaim. Default 60s so the live ticker recovers crashed
    * workers without a composition-root change. `0` disables reclaim.
+   * Reclaim is recovery-required: the handler may run again under a new
+   * token. There is no attempt identity that makes reclaim a no-op replay.
    */
   readonly reclaimStaleAfterMs?: number
   /**
@@ -110,8 +112,9 @@ export const DEFAULT_CLAIM_RENEW_MS = 20_000
  * T10 `claim -> execute -> finalize` run model:
  *   1. `claim(now)` atomically picks the soonest-due row, flips it to
  *      `running`, and returns a claim token → if `null`, return `idle`. The
- *      claim flip is engine-atomic so two overlapping ticks NEVER receive the
- *      same row (no double-execution; L9 M11).
+ *      claim flip is engine-atomic so two overlapping LIVE ticks never receive
+ *      the same row. Stale reclaim is a NEW claimToken and a NEW handler
+ *      invocation (at-least-once / recovery-required — not exactly-once).
  *   2. Compute `nextFire` from the rule + the row's anchor — `null` if the
  *      rule is exhausted (UNTIL past, COUNT met).
  *   3. Invoke `handler(automation)` — synchronously or async.

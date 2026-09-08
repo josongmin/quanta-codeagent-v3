@@ -184,6 +184,23 @@ const loadMapForWrite = async (path: string): Promise<Map<string, SessionMeta>> 
   return recoverFromSnapshots(path, doc)
 }
 
+/** Cheap list trigger: names on disk missing from the projection, without parsing snapshots. */
+const hasUnindexedSessionSnapshots = async (
+  indexPath: string,
+  map: ReadonlyMap<string, SessionMeta>,
+): Promise<boolean> => {
+  try {
+    const files = await readdir(dirname(indexPath))
+    for (const name of files) {
+      if (!name.endsWith(".json") || name.startsWith("index.")) continue
+      if (!map.has(name.slice(0, -".json".length))) return true
+    }
+  } catch {
+    return false
+  }
+  return false
+}
+
 export const upsertMeta = async (
   meta: SessionMeta,
   provider?: SessionRootProvider,
@@ -217,14 +234,15 @@ export const listSessions = async (
 ): Promise<SessionMeta[]> => {
   const path = await resolveIndexPath(provider)
   const doc = await readIndexDocument(path)
-  const map =
-    doc.invalid.length > 0
-      ? await withIndexMutex(path, async () => {
-          const recovered = await recoverFromSnapshots(path, doc)
-          await writeIndexMap(path, recovered)
-          return recovered
-        })
-      : doc.map
+  const shouldRecover =
+    doc.invalid.length > 0 || (await hasUnindexedSessionSnapshots(path, doc.map))
+  const map = shouldRecover
+    ? await withIndexMutex(path, async () => {
+        const recovered = await recoverFromSnapshots(path, doc)
+        await writeIndexMap(path, recovered)
+        return recovered
+      })
+    : doc.map
   const includeArchived = opts?.includeArchived === true
   const out: SessionMeta[] = []
   for (const meta of map.values()) {

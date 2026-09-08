@@ -22,3 +22,12 @@ export class SemanticBackendUnavailableError extends Error {
 export type SemanticReadiness =
   | { readonly kind: "ready" }
   | { readonly kind: "unavailable"; readonly reason: string; readonly phase: "init" | "operation" }
+
+/** Typed store/space failure — never collapse to a no-hit or warn-and-continue. */
+export const isTypedSemanticFailure = (
+  e: unknown,
+): e is SemanticBackendUnavailableError | EmbeddingSpaceError =>
+  e instanceof SemanticBackendUnavailableError ||
+  e instanceof EmbeddingSpaceError ||
+  (e instanceof Error &&
+    (e.name === "SemanticBackendUnavailableError" || e.name === "EmbeddingSpaceError"))

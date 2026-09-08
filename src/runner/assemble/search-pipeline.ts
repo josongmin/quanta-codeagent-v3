@@ -33,6 +33,7 @@ import {
   buildSemanticBackend,
   type ChunkUpsertPort,
   HASH_EMBED_MODEL_TAG,
+  isTypedSemanticFailure,
   resolveIndexEmbedder,
   type SearchIndexMetrics,
   type SemanticReconcileBatch,
@@ -226,7 +227,7 @@ const startIndexer = (
 ): {
   readonly sem: NonNullable<PipelineWireOverrides["sem"]>
   readonly embedder: NonNullable<PipelineWireOverrides["embedder"]>
-  readonly indexer: CodebaseIndexer
+  readonly indexer: CodebaseIndexer | null
   readonly intervalHandle: ReturnType<typeof setInterval> | null
 } => {
   // The SAME embed function backs both upsert vectors and the pipeline query
@@ -244,6 +245,30 @@ const startIndexer = (
     resolvedEmbedder,
     ...(metrics !== undefined ? { metrics } : {}),
   })
+  const embedder = { embed: async (text: string) => resolvedEmbedder.embed(text) }
+  if (sem.state === "failed") {
+    return {
+      sem: sem.port,
+      embedder,
+      indexer: null,
+      intervalHandle: null,
+    }
+  }
+  let typedFailure: Error | undefined
+  const rememberTypedFailure = (e: unknown): void => {
+    if (isTypedSemanticFailure(e) && typedFailure === undefined) typedFailure = e
+  }
+  const guardedPort = {
+    query: async (vec: readonly number[], k: number) => {
+      if (typedFailure !== undefined) throw typedFailure
+      try {
+        return await sem.port.query(vec, k)
+      } catch (e) {
+        rememberTypedFailure(e)
+        throw e
+      }
+    },
+  }
   const trackedUpsert = createTrackedSemanticUpsert(sem.upsert)
   // RFC jun-6 §26.1 — wire the syntax-aware (tree-sitter) chunker into the LIVE
   // index when `QUANTA_SYNTAX_CHUNK` is on. The scanner consults the parser only
@@ -262,13 +287,20 @@ const startIndexer = (
   const queueReconcile = (batch: SemanticReconcileBatch): void => {
     if (sem.reconcileChanges === undefined) return
     reconcile = reconcile
-      .catch(() => undefined)
+      .catch((e) => {
+        rememberTypedFailure(e)
+      })
       .then(async () => {
+        if (typedFailure !== undefined) return
         try {
           // Reconcile only the paths touched in the completed scan batch. This
           // avoids the old full-corpus replay on every successful delta tick.
           await sem.reconcileChanges?.(batch)
         } catch (e) {
+          if (isTypedSemanticFailure(e)) {
+            rememberTypedFailure(e)
+            return
+          }
           logger.warn(`search index reconcile failed: ${errMessage(e)}`)
         }
       })
@@ -300,8 +332,8 @@ const startIndexer = (
     ;(intervalHandle as { unref(): unknown }).unref()
   }
   return {
-    sem: sem.port,
-    embedder: { embed: async (text: string) => resolvedEmbedder.embed(text) },
+    sem: guardedPort,
+    embedder,
     indexer,
     intervalHandle,
   }
