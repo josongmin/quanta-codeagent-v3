@@ -159,6 +159,9 @@ const stubFactory = (): (() => Promise<RuntimeFacade>) => {
           identity: { set: async () => okResult(snapshot) },
           toolProfile: { set: async () => okResult(snapshot) },
           permission: { set: async () => okResult(snapshot) },
+          objective: { mutate: async () => okResult(snapshot) },
+          posture: { set: async () => okResult(snapshot) },
+          skill: { setEnabled: async () => okResult(snapshot) },
           approval: { respond: async () => okResult(snapshot) },
           transcript: { replace: async () => okResult(snapshot) },
           side: {

@@ -152,6 +152,7 @@ describe("G-F15 — eval cost completeness", () => {
 
   test("production unknown-model costUsd:null is unpriced, not measured $0", () => {
     const base = syn({ tokens: tokens(800, 100) })
+    if (base.payload.kind !== "synthetic") throw new Error("expected synthetic")
     const rec: EvalRecord = {
       ...base,
       payload: { ...base.payload, costUsd: null as unknown as number },

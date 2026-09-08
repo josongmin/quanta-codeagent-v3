@@ -120,6 +120,9 @@ const stubSetup = (approvalDecisions: readonly ApprovalDecisionResult[]) => {
         },
         identity: { set: async () => ({ revision: 0, seq: 0, events: [] }) },
         permission: { set: async () => ({ revision: 0, seq: 0, events: [] }) },
+        objective: { mutate: async () => ({ revision: 0, seq: 0, events: [] }) },
+        posture: { set: async () => ({ revision: 0, seq: 0, events: [] }) },
+        skill: { setEnabled: async () => ({ revision: 0, seq: 0, events: [] }) },
         toolProfile: { set: async () => ({ revision: 0, seq: 0, events: [] }) },
         approval: {
           respond: async (

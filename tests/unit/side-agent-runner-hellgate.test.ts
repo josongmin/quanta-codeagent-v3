@@ -13,7 +13,15 @@ import {
   wireSideAgentDaemons,
 } from "@/agent/side-agent-runner"
 import type { MailboxPort } from "@/agent/subagent-mailbox"
+import type { SideAgentRunnerPort } from "@/side-agent"
 import type { SubagentRequest, SubagentResult, SubagentRunner } from "@/subagent"
+
+type PassOut = Awaited<ReturnType<SideAgentRunnerPort["run"]>>
+const firstFinding = (out: PassOut) => {
+  if (out === null) return undefined
+  if (Array.isArray(out)) return out[0]
+  return out
+}
 
 // ── fakes ─────────────────────────────────────────────────────────────────────
 
@@ -131,10 +139,11 @@ describe("side-agent-runner — runner adapter (one read-biased pass)", () => {
       maxTurns: 1,
       signal: new AbortController().signal,
     })
-    expect(out?.summary).toBe("HEADLINE")
+    const finding = firstFinding(out)
+    expect(finding?.summary).toBe("HEADLINE")
     // detail present (multi-line) but bounded well below the raw 50k payload.
-    expect(out?.detail).toBeDefined()
-    expect(out?.detail?.length ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(8_000)
+    expect(finding?.detail).toBeDefined()
+    expect(finding?.detail?.length ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(8_000)
   })
 
   test("small multi-line finalText → detail still the FULL text (cap is a ceiling, not a chop)", async () => {
@@ -174,7 +183,7 @@ describe("side-agent-runner — runner adapter (one read-biased pass)", () => {
       maxTurns: 1,
       signal: new AbortController().signal,
     })
-    const detail = out?.detail
+    const detail = firstFinding(out)?.detail
     expect(detail).toBeDefined()
     // (1) well-formed — no lone surrogate emitted by the cut.
     expect(detail?.isWellFormed()).toBe(true)
@@ -194,7 +203,7 @@ describe("side-agent-runner — runner adapter (one read-biased pass)", () => {
       signal: new AbortController().signal,
     })
     expect(out).toEqual({ summary: "HEADLINE", detail: text })
-    expect(out?.detail?.isWellFormed()).toBe(true)
+    expect(firstFinding(out)?.detail?.isWellFormed()).toBe(true)
   })
 })
 

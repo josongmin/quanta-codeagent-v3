@@ -465,6 +465,15 @@ export const createStubRuntimeFactory = (
         permission: {
           set: async () => ({ revision: snapshot.revision, seq: snapshot.seq, events: [] }),
         },
+        objective: {
+          mutate: async () => ({ revision: snapshot.revision, seq: snapshot.seq, events: [] }),
+        },
+        posture: {
+          set: async () => ({ revision: snapshot.revision, seq: snapshot.seq, events: [] }),
+        },
+        skill: {
+          setEnabled: async () => ({ revision: snapshot.revision, seq: snapshot.seq, events: [] }),
+        },
         approval: {
           respond: async (approvalId, decision, meta, options) =>
             await dispatch(

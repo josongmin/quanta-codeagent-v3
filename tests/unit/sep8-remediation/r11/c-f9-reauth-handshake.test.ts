@@ -123,7 +123,13 @@ const record = (
   protocol: string | undefined,
   rpc?: string,
 ): void => {
-  state.log.push({ method, rpc, session, protocol, bearer })
+  state.log.push({
+    method,
+    bearer,
+    session,
+    protocol,
+    ...(rpc !== undefined ? { rpc } : {}),
+  })
 }
 
 const handleDelete = (
