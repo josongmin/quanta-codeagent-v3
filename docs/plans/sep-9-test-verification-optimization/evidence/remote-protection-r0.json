@@ -1,0 +1,16 @@
+{
+  "status": "REMOTE_UNVERIFIED",
+  "queriedAt": "2026-09-10T00:50:00+09:00",
+  "ghLogin": "songminjo",
+  "origin": "git@github-personal:josongmin/quanta-codeagent-v3.git",
+  "defaultBranch": "unverified",
+  "rulesets": "unreadable",
+  "requiredChecks": "unreadable",
+  "mergeQueue": "unreadable",
+  "errors": [
+    "gh repo view GraphQL: Could not resolve josongmin/quanta-codeagent-v3",
+    "REST 404 on rulesets, branch protection, required_status_checks, merge-queue"
+  ],
+  "r2HookSwitch": false,
+  "reason": "cannot confirm that a remote full required check exists"
+}

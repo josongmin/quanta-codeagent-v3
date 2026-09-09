@@ -58,3 +58,12 @@
 - core 슬라이스(agent/tool/llm/permission/runtime) unit 파일 존재의
   구조적 단언을 CI에 추가 검토(라인% 아닌 "빵꾸" 가드).
 - 실 SWE-bench(synthetic 아닌) 작은 서브셋을 eval에 편입(RFC §10.3 P2).
+
+## 이후 정책 (SEP9-TV)
+
+이 ADR의 4티어 분리는 역사적 결정으로 보존한다. 로컬 명령(`verify:*`),
+CI job DAG, 캐시 identity, shard membership은
+[SEP9-TV 티켓 패킷](../plans/sep-9-test-verification-optimization/tickets/README.md)이
+supersede한다. GitHub check 이름 `pyramid (unit + integration)`은 보호 규칙
+호환을 위해 aggregator job으로 유지한다.
+

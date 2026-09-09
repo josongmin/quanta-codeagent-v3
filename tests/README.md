@@ -8,9 +8,9 @@ entry point — read it before adding tests.
 
 | Tier | Path | Files | Determinism | Default gate | Wall-clock budget |
 |------|------|-------|-------------|--------------|-------------------|
-| unit | `tests/unit/` | 361 | full (in-proc) | every push/PR | ~45 s (`test:unit`) |
-| integration | `tests/integration/` | 109 | full (FakeLLM, tmpdir, in-proc adapters) | every push/PR | bundled with `test` (total ~117 s) |
-| contract | `tests/contract/` | 3 | env-gated (real Docker / language servers) | PR/main with `test:contract` | depends on host |
+| unit | `tests/unit/` | 3207 | full (in-proc) | every push/PR | inner loop; authoritative wall is the shard campaign |
+| integration | `tests/integration/` | 390 | full (FakeLLM, tmpdir, in-proc adapters) | every push/PR | bundled with `test` |
+| contract | `tests/contract/` | 5 | env-gated (real Docker / language servers) | PR/main with `test:contract` | depends on host |
 | smoke | `tests/smoke/` | 26 | replay (Tier-0) + live (Tier-1) | `smoke` / `smoke:live` | ~seconds (replay) |
 | eval | `src/apps/bench/` | n/a | non-deterministic (real LLM) | nightly / `eval` label, non-blocking | minutes–hours |
 | meta | `tests/meta/` | 1 | filesystem-only (hellgate) | every push/PR (bundled with `test:unit`) | sub-second |
@@ -86,7 +86,7 @@ new suffix. The suffix is the load-bearing convention, not the directory.
 | `bun test <path>` | single file | ~40 ms | iterating on one test |
 | `npm run test:fast` | `tests/unit/{agent,llm,permission,runtime}` (~66 files / 1388 tests) | ~1.5 s | tightest sane loop while editing a core slice |
 | `npm run test:watch` | `tests/unit` in watch mode | continuous | hands-off TDD |
-| `npm run test:unit` | full `tests/unit` (~361 files / 5450 tests) | ~45 s | before committing a unit-only change |
+| `bun test tests/unit` | full `tests/unit` (3207 files) | shard campaign | before committing a unit-only change |
 | `npm test` | unit + integration | ~117 s | pre-push gate |
 | `npm run test:contract` | contract (env-gated, polite-skip locally) | varies | before merging if you touched Docker / LSP code paths |
 
