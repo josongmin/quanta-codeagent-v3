@@ -307,6 +307,13 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run tools/dev/verification-required-results.ts
+        env:
+          QUANTA_REQUIRED_NEEDS: ${{ toJSON(needs) }}
 
   feature-catalog-pr:
     name: feature-catalog (PR — added src must be in fc)

@@ -1,7 +1,7 @@
 # TV-12 — 단일 manifest 기반 CI shard matrix
 
 - 우선순위: P1
-- 상태: PLANNED
+- 상태: FOCUSED_VERIFIED
 - 소유자: CI 담당
 - 선행: TV-04, TV-06, TV-11
 

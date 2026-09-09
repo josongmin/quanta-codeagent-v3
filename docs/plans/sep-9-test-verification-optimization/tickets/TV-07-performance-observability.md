@@ -1,7 +1,7 @@
 # TV-07 — 타이밍, 대기, setup 비용을 분리한 관측
 
 - 우선순위: P1
-- 상태: PLANNED
+- 상태: FOCUSED_VERIFIED
 - 소유자: B
 - 선행: TV-00, TV-04
 - 소비자: TV-06 실행 순서, TV-08 admission, TV-90 비교

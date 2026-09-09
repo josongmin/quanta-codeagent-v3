@@ -1,3 +1,4 @@
+import { policyDigest, resolveTestPopulation, type TestPolicyOverride } from "./test-policy"
 import type { VerificationTier } from "./verification-result"
 
 export type SelectionMode = "base-head" | "working" | "staged"
@@ -24,7 +25,12 @@ export interface SelectionPlan {
 }
 
 const FULL_FALLBACK =
-  /(?:^|\/)(?:package\.json|bun\.lock|bun\.lockb|bunfig\.toml|tsconfig.*\.json)$/
+  /(?:^|\/)(?:package\.json|bun\.lock|bun\.lockb|bunfig\.toml|tsconfig.*\.json|tests\/preload.*)$|tools\/dev\/(?:run-test-shards|test-shard-plan|gate(?:-manifest)?|verify-scope)\.ts$/
+
+const UNSUPPORTED_EDGE = /\.(?:wasm|so|dylib|node)$/
+
+const digestOf = (value: unknown): string =>
+  new Bun.CryptoHasher("sha256").update(JSON.stringify(value)).digest("hex")
 
 export const parseNameStatusZ = (
   payload: string,
@@ -49,8 +55,16 @@ export const parseNameStatusZ = (
   return records
 }
 
-export const fallbackReasonForPath = (path: string): FullFallbackReason | undefined =>
-  FULL_FALLBACK.test(path) ? "package-or-lock" : undefined
+export const fallbackReasonForPath = (path: string): FullFallbackReason | undefined => {
+  if (FULL_FALLBACK.test(path)) {
+    return /(?:package\.json|bun\.lock)/.test(path) ? "package-or-lock" : "tsconfig-or-bunfig"
+  }
+  return undefined
+}
+
+export const changedPathsFromRecords = (
+  records: readonly { readonly status: string; readonly paths: readonly string[] }[],
+): readonly string[] => [...new Set(records.flatMap((record) => record.paths))]
 
 export const deriveVerificationSelection = (input: {
   readonly tier: VerificationTier
@@ -61,16 +75,22 @@ export const deriveVerificationSelection = (input: {
   readonly changedPaths: readonly string[]
   readonly selectedIds?: readonly string[]
   readonly gitOk?: boolean
+  readonly overrides?: readonly TestPolicyOverride[]
 }): SelectionPlan => {
+  const policies = resolveTestPopulation(input.population, input.overrides ?? [])
+  const policyById = new Map(policies.map((row) => [row.id, row]))
+  const digests = {
+    snapshotDigest: digestOf([...input.changedPaths].sort()),
+    policyDigest: policyDigest(policies),
+    populationDigest: digestOf([...input.population].sort()),
+  }
   if (input.gitOk === false || input.baseSha === "") {
     return {
       schema: "quanta.verification-selection.v1",
       tier: input.tier,
       baseSha: input.baseSha,
       headSha: input.headSha,
-      snapshotDigest: "",
-      policyDigest: "",
-      populationDigest: "",
+      ...digests,
       selected: [],
       notSelected: input.population.map((id) => ({ id, reason: "full-required" })),
       fallback: {
@@ -80,11 +100,14 @@ export const deriveVerificationSelection = (input: {
     }
   }
   const fallbackReasons = [
-    ...new Set(
-      input.changedPaths
+    ...new Set([
+      ...input.changedPaths
         .map(fallbackReasonForPath)
         .filter((reason): reason is FullFallbackReason => reason !== undefined),
-    ),
+      ...(input.changedPaths.some((path) => UNSUPPORTED_EDGE.test(path))
+        ? (["unsupported-edge"] as const)
+        : []),
+    ]),
   ]
   if (fallbackReasons.length > 0) {
     return {
@@ -92,31 +115,37 @@ export const deriveVerificationSelection = (input: {
       tier: input.tier,
       baseSha: input.baseSha,
       headSha: input.headSha,
-      snapshotDigest: "",
-      policyDigest: "",
-      populationDigest: "",
+      ...digests,
       selected: input.population.map((id) => ({ id, reasons: ["fallback-full"] })),
       notSelected: [],
       fallback: { scope: "full", reasons: fallbackReasons },
     }
   }
-  const selectedSet = new Set(
-    input.selectedIds ?? input.changedPaths.filter((path) => path.endsWith(".test.ts")),
-  )
+  const alwaysRun = new Set(policies.filter((row) => row.alwaysRun).map((row) => row.id))
+  const selectedSet = new Set([
+    ...(input.selectedIds ?? input.changedPaths.filter((path) => path.endsWith(".test.ts"))),
+    ...alwaysRun,
+  ])
   const selected = input.population
     .filter((id) => selectedSet.has(id))
-    .map((id) => ({ id, reasons: ["changed-or-reachable"] }))
+    .map((id) => {
+      const reasons = ["changed-or-reachable"]
+      if (alwaysRun.has(id)) reasons.push("always-run")
+      if (policyById.get(id)?.runner === "vitest") reasons.push("vitest-runner")
+      return { id, reasons }
+    })
   const notSelected = input.population
     .filter((id) => !selectedSet.has(id))
-    .map((id) => ({ id, reason: "not-affected" }))
+    .map((id) => ({
+      id,
+      reason: policyById.get(id)?.runner === "vitest" ? "vitest-not-affected" : "not-affected",
+    }))
   return {
     schema: "quanta.verification-selection.v1",
     tier: input.tier,
     baseSha: input.baseSha,
     headSha: input.headSha,
-    snapshotDigest: "",
-    policyDigest: "",
-    populationDigest: "",
+    ...digests,
     selected,
     notSelected,
     fallback: { scope: "none", reasons: [] },

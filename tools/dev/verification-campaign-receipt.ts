@@ -1,6 +1,7 @@
 import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs"
 import { availableParallelism, loadavg, totalmem } from "node:os"
 import { dirname } from "node:path"
+import { summarizeSamples, type VerificationSample } from "./verification-metrics"
 
 /**
  * Machine-readable record of ONE verification campaign.
@@ -53,6 +54,36 @@ export interface CampaignReceipt {
   readonly survivingGroups: readonly number[]
   readonly hostAtStart: CampaignHostSample
   readonly hostAtEnd: CampaignHostSample
+  readonly timing: {
+    readonly count: number
+    readonly medianMs: number | null
+    readonly p95Ms: number | null
+  }
+}
+
+const campaignTiming = (input: {
+  readonly startedAtMs: number
+  readonly finishedAtMs: number
+  readonly leaseWaitMs: number
+  readonly outcome: CampaignOutcome
+  readonly loadAverage1m: number
+}): VerificationSample => {
+  const leaseEnd = input.startedAtMs + Math.max(0, input.leaseWaitMs)
+  const runEnd = Math.max(leaseEnd, input.finishedAtMs)
+  return {
+    phases: [
+      { phase: "lease", startedMs: input.startedAtMs, endedMs: leaseEnd },
+      { phase: "run", startedMs: leaseEnd, endedMs: runEnd },
+    ],
+    outcome:
+      input.outcome === "terminated"
+        ? "cancelled"
+        : input.outcome === "failed"
+          ? "failed"
+          : "passed",
+    intraParallel: 1,
+    loadAverage1m: input.loadAverage1m,
+  }
 }
 
 export const sampleCampaignHost = (): CampaignHostSample => ({
@@ -76,26 +107,38 @@ export const buildCampaignReceipt = (input: {
   readonly survivingGroups: readonly number[]
   readonly hostAtStart: CampaignHostSample
   readonly hostAtEnd: CampaignHostSample
-}): CampaignReceipt => ({
-  schema: CAMPAIGN_RECEIPT_SCHEMA,
-  pid: input.pid,
-  head: input.head,
-  command: input.command,
-  leasePort: input.leasePort,
-  leaseWaitMs: Math.max(0, Math.round(input.leaseWaitMs)),
-  startedAt: new Date(input.startedAtMs).toISOString(),
-  finishedAt: new Date(input.finishedAtMs).toISOString(),
-  elapsedMs: Math.max(0, Math.round(input.finishedAtMs - input.startedAtMs)),
-  outcome: input.outcome,
-  exitCode: input.exitCode,
-  ...(input.cancellationReason === undefined
-    ? {}
-    : { cancellationReason: input.cancellationReason }),
-  drained: input.drained,
-  survivingGroups: [...input.survivingGroups],
-  hostAtStart: input.hostAtStart,
-  hostAtEnd: input.hostAtEnd,
-})
+}): CampaignReceipt => {
+  const timing = summarizeSamples([
+    campaignTiming({
+      startedAtMs: input.startedAtMs,
+      finishedAtMs: input.finishedAtMs,
+      leaseWaitMs: input.leaseWaitMs,
+      outcome: input.outcome,
+      loadAverage1m: input.hostAtEnd.loadAverage1m,
+    }),
+  ])
+  return {
+    schema: CAMPAIGN_RECEIPT_SCHEMA,
+    pid: input.pid,
+    head: input.head,
+    command: input.command,
+    leasePort: input.leasePort,
+    leaseWaitMs: Math.max(0, Math.round(input.leaseWaitMs)),
+    startedAt: new Date(input.startedAtMs).toISOString(),
+    finishedAt: new Date(input.finishedAtMs).toISOString(),
+    elapsedMs: Math.max(0, Math.round(input.finishedAtMs - input.startedAtMs)),
+    outcome: input.outcome,
+    exitCode: input.exitCode,
+    ...(input.cancellationReason === undefined
+      ? {}
+      : { cancellationReason: input.cancellationReason }),
+    drained: input.drained,
+    survivingGroups: [...input.survivingGroups],
+    hostAtStart: input.hostAtStart,
+    hostAtEnd: input.hostAtEnd,
+    timing,
+  }
+}
 
 /** Atomic, and never able to fail a campaign: diagnostics are not a verdict. */
 export const writeCampaignReceipt = (path: string, receipt: CampaignReceipt): boolean => {

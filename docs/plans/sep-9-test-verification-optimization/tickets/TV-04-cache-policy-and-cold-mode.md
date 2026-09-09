@@ -1,7 +1,7 @@
 # TV-04 — 캐시 정확성, JUnit 보존, 실제 cold 실행
 
 - 우선순위: P0
-- 상태: PLANNED
+- 상태: FOCUSED_VERIFIED
 - 소유자: B
 - 선행: TV-00, contracts.md
 

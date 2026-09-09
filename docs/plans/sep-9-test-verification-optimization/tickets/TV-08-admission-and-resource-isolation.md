@@ -1,7 +1,7 @@
 # TV-08 — 단일 admission 예산과 단계적 자원 격리
 
 - 우선순위: 대기 통합 P0 / lease 분할 P2
-- 상태: PLANNED
+- 상태: FOCUSED_VERIFIED
 - 소유자: 통합 담당
 - 선행: TV-01, TV-02, TV-04
 - lease 분할 추가 선행: TV-07, 격리 canary 증거

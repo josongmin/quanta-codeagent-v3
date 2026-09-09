@@ -130,6 +130,7 @@ describe("test:ci admission gate", () => {
     expect(packageJson.scripts?.["verify:prepush"]).toContain("gate.ts prepush")
     expect(packageJson.scripts?.["verify:prepush"]).not.toContain("verify:prepush")
     expect(packageJson.scripts?.["verify:full"]).toContain("--keep-going")
+    expect(packageJson.scripts?.["verify:pr"]).toContain("--keep-going")
     expect(packageJson.scripts?.["verify:nightly"]).toContain("QUANTA_TEST_CACHE=off")
     expect(packageJson.scripts?.["test:ci"]).not.toContain("verify:")
     // The one authoritative execution the receipt-consuming gates derive from.
@@ -146,6 +147,9 @@ describe("test:ci admission gate", () => {
     expect(shardRunner).toContain("idle=$" + "{idleMs}ms")
     expect(shardRunner).toContain("discoverSuiteFiles(")
     expect(shardRunner).toContain("planTestChunks(manifest")
+    expect(shardRunner).toContain("admission-budget-exhausted")
+    expect(shardRunner).toContain("spawn=0")
+    expect(shardRunner).toContain("chunkInputScopeSha256(")
     expect(shardRunner).toContain("loadTestTimings(TIMING_STORE)")
     expect(shardRunner).toContain("harvestTimings(cached.chunk, result)")
     expect(shardRunner).toContain("result.executedFiles === plan.files.length")

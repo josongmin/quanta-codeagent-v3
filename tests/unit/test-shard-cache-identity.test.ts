@@ -44,6 +44,7 @@ const identity = (over: Partial<TestShardCacheIdentity> = {}): TestShardCacheIde
   junit: false,
   intraParallel: 1,
   executionPolicySha256: "f".repeat(64),
+  inputScopeSha256: "1".repeat(64),
   ...over,
 })
 
@@ -115,6 +116,7 @@ describe("shard cache identity — what may and may not invalidate a receipt", (
       { junit: true },
       { intraParallel: 8 },
       { executionPolicySha256: "9".repeat(64) },
+      { inputScopeSha256: "9".repeat(64) },
     ]
     for (const over of fields) {
       expect(roundTrip(identity(), identity(over)).kind).toBe("miss")

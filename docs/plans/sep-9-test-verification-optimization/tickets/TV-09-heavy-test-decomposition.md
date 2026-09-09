@@ -1,7 +1,7 @@
 # TV-09 — 중량 테스트를 canary와 exhaustive로 분리
 
 - 우선순위: P1
-- 상태: PLANNED
+- 상태: FOCUSED_VERIFIED
 - 소유자: C (영역별 파일 write set 분리)
 - 선행: TV-02
 - PR 기본 범위 축소 선행: TV-03, TV-13의 실제 연결

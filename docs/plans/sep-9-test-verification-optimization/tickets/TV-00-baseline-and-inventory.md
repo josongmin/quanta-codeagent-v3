@@ -1,7 +1,7 @@
 # TV-00 — 기준 증거와 전체 population 고정
 
 - 우선순위: P0
-- 상태: FOCUSED_VERIFIED
+- 상태: INTEGRATED
 - 소유자: 통합 담당
 - 선행: 없음
 - 산출물: baseline 요약, population inventory, known-failure register

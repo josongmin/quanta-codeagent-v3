@@ -49,6 +49,7 @@ import {
   verificationContextForSnapshot,
   verificationManifestSha256,
 } from "./verification-receipt-probe"
+import { finalizeVerificationResult, type GateResult } from "./verification-result"
 
 const REPO_ROOT = join(dirname(dirname(dirname(fileURLToPath(import.meta.url)))))
 
@@ -496,6 +497,19 @@ for (const gate of planned) {
 const notRun = planned.filter(
   (g) => !results.some((r) => r.gate.id === g.id) && !skipped.includes(g),
 )
+const gateResults: readonly GateResult[] = [
+  ...results.map((row) => ({
+    id: row.gate.id,
+    outcome: (row.ok ? "passed" : "failed") as const,
+    elapsedMs: row.ms,
+  })),
+  ...skipped.map((gate) => ({ id: gate.id, outcome: "skipped-input" as const, elapsedMs: 0 })),
+  ...notRun.map((gate) => ({ id: gate.id, outcome: "not-run" as const, elapsedMs: 0 })),
+]
+const verification = finalizeVerificationResult({
+  tier: "prepush",
+  gates: gateResults,
+})
 
 let endingSnapshot: GitSnapshot | undefined
 let snapshotError: string | undefined
@@ -579,7 +593,7 @@ if (
       }),
     )
   }
-  process.exit(0)
+  process.exit(verification.exitCode)
 }
 if (
   stage === "prepush" &&
@@ -677,4 +691,4 @@ if (stage === "prepush") {
     )
   }
 }
-process.exit(1)
+process.exit(verification.exitCode === 0 ? 1 : verification.exitCode)

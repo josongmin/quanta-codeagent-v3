@@ -23,11 +23,12 @@
  * Exit: 0 = clean or only-known-flakes; 1 = real failure / new flake / ratchet breach; 2 = usage.
  */
 import { join } from "node:path"
+import { mayQuarantine, preserveFirstFailure } from "../dev/verification-first-failure"
 import {
   isQuarantined,
   type ParsedFailure,
-  type QuarantineLedger,
   parseBunTestOutput,
+  type QuarantineLedger,
 } from "./parse"
 
 const LEDGER_PATH = join(import.meta.dir, "quarantine.json")
@@ -104,6 +105,28 @@ const cmdRun = async (paths: string[]): Promise<number> => {
     return 0
   }
 
+  const firstFailures = full.failures.map((row) =>
+    preserveFirstFailure(
+      {
+        testId: `${row.file}::${row.leaf}`,
+        kind: "assertion",
+        fingerprint: `${row.file}:${row.leaf}`,
+        sha: "",
+        elapsedMs: 0,
+      },
+      { passed: false, fingerprint: `${row.file}:${row.leaf}` },
+    ),
+  )
+  console.log(
+    `[resilient] first-failure preserved count=${firstFailures.length}; retry pass is not required green`,
+  )
+  if (process.env.QUANTA_VERIFICATION_REQUIRED === "1") {
+    console.error(
+      "[resilient] ✗ required lane keeps the first failure (isolation is diagnostic only)",
+    )
+    return 1
+  }
+
   const ledger = await loadLedger()
   const real: ParsedFailure[] = []
   const knownFlake: ParsedFailure[] = []
@@ -118,7 +141,9 @@ const cmdRun = async (paths: string[]): Promise<number> => {
       console.log(`  ✗ REAL    ${f.file} :: ${f.leaf}`)
     } else if (verdict === "inconclusive") {
       inconclusive.push(f)
-      console.log(`  ? INCONCLUSIVE ${f.file} :: ${f.leaf}  (-t matched no test — cannot confirm flake)`)
+      console.log(
+        `  ? INCONCLUSIVE ${f.file} :: ${f.leaf}  (-t matched no test — cannot confirm flake)`,
+      )
     } else if (isQuarantined(f, ledger)) {
       knownFlake.push(f)
       console.log(`  ~ flake   ${f.file} :: ${f.leaf}  (known-quarantined)`)
@@ -148,7 +173,16 @@ const cmdQuarantineCheck = async (): Promise<number> => {
   const ledger = await loadLedger()
   const n = ledger.entries.length
   if (n > ledger.maxCount) {
-    console.error(`[resilient] ✗ quarantine ratchet breached: ${n} entries > maxCount ${ledger.maxCount}`)
+    console.error(
+      `[resilient] ✗ quarantine ratchet breached: ${n} entries > maxCount ${ledger.maxCount}`,
+    )
+    return 1
+  }
+  const critical = ledger.entries.filter((entry) => !mayQuarantine(entry.file))
+  if (critical.length > 0) {
+    console.error(
+      `[resilient] ✗ critical tests cannot be quarantined: ${critical.map((entry) => entry.file).join(", ")}`,
+    )
     return 1
   }
   console.log(`[resilient] ✓ quarantine: ${n}/${ledger.maxCount} entries (within ratchet)`)
@@ -163,7 +197,9 @@ const main = async (): Promise<number> => {
     case "quarantine-check":
       return cmdQuarantineCheck()
     default:
-      console.error("usage: bun run tools/test-resilience/cli.ts <run [paths...] | quarantine-check>")
+      console.error(
+        "usage: bun run tools/test-resilience/cli.ts <run [paths...] | quarantine-check>",
+      )
       return 2
   }
 }

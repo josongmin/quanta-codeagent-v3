@@ -60,7 +60,9 @@ import {
   writeSuccessfulTestShardReceiptAtomic,
 } from "./test-shard-receipt"
 import { harvestChunkTimings, loadTestTimings, mergeTestTimings } from "./test-shard-timings"
+import { admissionFromEnv, remainingBudgetMs } from "./verification-admission"
 import { executionPolicyDigest } from "./verification-execution-policy"
+import { chunkInputScopeSha256 } from "./verification-input-scope"
 import { sharedVerificationCacheRoot } from "./verification-receipt"
 
 /**
@@ -307,13 +309,27 @@ const runShard = async (
 ): Promise<ShardRunResult> => {
   const shard = `${plan.index}/${totalChunks}`
   const workerRootEarly = join(runRoot, `worker-${plan.index}`)
-  // Every chunk writes a JUnit receipt: the consumer lane (unit) merges it,
-  // and EVERY green chunk feeds the measured per-file timing store the LPT
-  // planner reads next run.
   const junitPath =
     opts.junitOut === undefined
       ? join(workerRootEarly, `junit-${plan.index}.xml`)
       : junitShardPath(opts.junitOut, plan.index)
+  const scanReachSink = join(workerRootEarly, `scan-reach-${plan.index}.jsonl`)
+  const admission = admissionFromEnv(process.env)
+  if (admission !== undefined && remainingBudgetMs(admission) <= 0) {
+    mkdirSync(workerRootEarly, { recursive: true })
+    writeFileSync(scanReachSink, "")
+    process.stdout.write(
+      `[test:shards] DEFERRED chunk=${shard} reason=admission-budget-exhausted spawn=0\n`,
+    )
+    return {
+      code: 0,
+      timedOut: false,
+      cancelled: true,
+      scanReachSink,
+      junitPath,
+      elapsedMs: 0,
+    }
+  }
   const junitArgs = ["--reporter=junit", `--reporter-outfile=${junitPath}`]
   process.stdout.write(
     `\n[test:shards] START chunk=${shard} files=${plan.files.length} class=${plan.resourceClass} ` +
@@ -336,7 +352,6 @@ const runShard = async (
   mkdirSync(prefsHome, { recursive: true })
   mkdirSync(benchResults, { recursive: true })
   const spoolPath = join(workerRoot, `chunk-${plan.index}.log`)
-  const scanReachSink = join(workerRoot, `scan-reach-${plan.index}.jsonl`)
   writeFileSync(scanReachSink, "")
   const spoolFd = openSync(spoolPath, "w")
   let closed = false
@@ -867,6 +882,10 @@ const main = async (): Promise<void> => {
             environmentDigest: envSha256,
             cacheMode: opts.cacheMode,
           }),
+          inputScopeSha256: chunkInputScopeSha256(
+            REPO_ROOT,
+            chunk.files.map((file) => relative(REPO_ROOT, file)),
+          ),
         },
       }
     })

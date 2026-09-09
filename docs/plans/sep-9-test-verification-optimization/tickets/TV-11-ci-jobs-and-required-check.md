@@ -1,7 +1,7 @@
 # TV-11 — CI 독립 job과 안정적인 required 집계
 
 - 우선순위: P0
-- 상태: PLANNED
+- 상태: FOCUSED_VERIFIED
 - 소유자: CI 담당 / workflow는 단일 작성자
 - 선행: TV-01
 - 원격 활성화: TV-15

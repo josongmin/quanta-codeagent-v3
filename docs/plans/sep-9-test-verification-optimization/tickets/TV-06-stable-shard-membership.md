@@ -1,7 +1,7 @@
 # TV-06 — 안정적 청크 구성과 완전성
 
 - 우선순위: P1
-- 상태: PLANNED
+- 상태: FOCUSED_VERIFIED
 - 소유자: B
 - 선행: TV-02, TV-04
 

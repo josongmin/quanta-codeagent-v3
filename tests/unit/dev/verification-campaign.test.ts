@@ -36,6 +36,7 @@ const CAMPAIGN_MODULES = [
   "verification-receipt.ts",
   "verification-receipt-probe.ts",
   "verification-campaign-receipt.ts",
+  "verification-metrics.ts",
   "external-toolchain.ts",
   "verdict-env.ts",
 ] as const

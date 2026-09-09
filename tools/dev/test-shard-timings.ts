@@ -96,7 +96,10 @@ export const mergeTestTimings = (
   }
 }
 
-const SUITE_LINE = /<testsuite\b[^>]*\bfile="([^"]+)"[^>]*\btime="([0-9.]+)"/g
+const attribute = (tag: string, name: string): string | undefined => {
+  const match = new RegExp(`\\b${name}="([^"]*)"`, "u").exec(tag)
+  return match?.[1]
+}
 
 /**
  * Per-file wall estimate for one green chunk: the file's JUnit suite time plus
@@ -111,9 +114,10 @@ export const harvestChunkTimings = (
 ): ReadonlyMap<string, number> => {
   if (files.length === 0) return new Map()
   const suiteMs = new Map<string, number>()
-  for (const match of junitXml.matchAll(SUITE_LINE)) {
-    const file = match[1]
-    const seconds = Number.parseFloat(match[2] ?? "")
+  for (const match of junitXml.matchAll(/<testsuite\b[^>]*>/g)) {
+    const tag = match[0] ?? ""
+    const file = attribute(tag, "file")
+    const seconds = Number.parseFloat(attribute(tag, "time") ?? "")
     if (file !== undefined && Number.isFinite(seconds) && seconds >= 0) {
       suiteMs.set(file, (suiteMs.get(file) ?? 0) + seconds * 1_000)
     }

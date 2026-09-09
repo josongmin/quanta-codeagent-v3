@@ -42,6 +42,14 @@
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { dirname, join, relative, resolve } from "node:path"
 
+import {
+  changedPathsFromRecords,
+  deriveVerificationSelection,
+  parseNameStatusZ,
+  type SelectionPlan,
+} from "./verification-selection"
+import { parseSelectionArgv } from "./verification-selection-argv"
+
 const REPO_ROOT = resolve(dirname(new URL(import.meta.url).pathname), "..", "..")
 
 /** Roots that hold shipped code or tests. `tools/` is included: its scripts back
@@ -158,11 +166,6 @@ const readText = (rel: string): string | null => {
   }
 }
 
-const specifiersOf = (rel: string): string[] => {
-  const text = readText(rel)
-  return text === null ? [] : specifiersOfText(text)
-}
-
 const CANDIDATE_SUFFIXES = ["", ".ts", ".tsx", "/index.ts", "/index.tsx"] as const
 
 /** Resolve one specifier to a repo-relative file, or null when it is a package
@@ -229,7 +232,7 @@ const buildReexportTables = (
   return tables
 }
 
-const buildVerificationGraph = (): VerificationGraph => {
+export const buildVerificationGraph = (): VerificationGraph => {
   const files = allSourceFiles()
   const known = new Set(files)
   const reexports = buildReexportTables(files, known)
@@ -334,29 +337,104 @@ export const deriveVerificationScope = (changed: readonly string[]): Verificatio
   return { tests, globals, totalTestFiles: testFiles.length }
 }
 
-/** CLI: `bun run tools/dev/verify-scope.ts [--staged | <file>…]`. Defaults to
- *  the STAGED set, because the defect this exists to stop was verifying the
- *  working tree and committing a subset of it. */
+/** CLI: `bun run tools/dev/verify-scope.ts [--json] [--base= --head= | --working | --staged | <file>…]`.
+ *  Default remains the STAGED set. `--json` emits a SelectionPlan and never
+ *  treats git/parse failure as an empty success. */
 if (import.meta.main) {
   const argv = process.argv.slice(2)
-  const explicit = argv.filter((a) => !a.startsWith("--"))
-  let changed = explicit
-  if (changed.length === 0) {
-    const proc = Bun.spawnSync(["git", "diff", "--cached", "--name-only"], { cwd: REPO_ROOT })
-    changed = new TextDecoder()
-      .decode(proc.stdout)
-      .split("\n")
-      .map((l) => l.trim())
-      .filter((l) => l.length > 0)
+  const json = argv.includes("--json")
+  const parsedFlags = parseSelectionArgv(argv.filter((arg) => arg !== "--json"))
+  const git = (args: readonly string[]): { readonly ok: boolean; readonly text: string } => {
+    const proc = Bun.spawnSync(["git", ...args], { cwd: REPO_ROOT, stdout: "pipe", stderr: "pipe" })
+    return {
+      ok: proc.exitCode === 0,
+      text: new TextDecoder().decode(proc.stdout),
+    }
   }
-  if (changed.length === 0) {
-    console.error("verify-scope: nothing staged (and no files given) — nothing to derive from.")
-    process.exit(2)
+  const emitPlan = (plan: SelectionPlan, exit: number): void => {
+    if (json) process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`)
+    else if (plan.fallback.scope === "full") {
+      process.stderr.write(`verify-scope: full-required (${plan.fallback.reasons.join(",")})\n`)
+    } else {
+      const selected = plan.selected.map((row) => row.id)
+      process.stderr.write(
+        `verify-scope: ${selected.length} selected of ${plan.selected.length + plan.notSelected.length}\n`,
+      )
+      for (const id of selected) process.stdout.write(`${id}\n`)
+    }
+    process.exit(exit)
   }
-  const scope = deriveVerificationScope(changed)
-  console.error(
-    `verify-scope: ${changed.length} changed file(s) ⇒ ${scope.tests.length} dependent test(s) ` +
-      `of ${scope.totalTestFiles} + ${scope.globals.length} always-run scanner(s)`,
-  )
-  for (const t of [...scope.tests, ...scope.globals]) console.log(t)
+  if (!parsedFlags.ok) {
+    emitPlan(
+      deriveVerificationSelection({
+        tier: "prepush",
+        mode: "staged",
+        baseSha: "",
+        headSha: "",
+        population: VERIFICATION_GRAPH.testFiles,
+        changedPaths: [],
+        gitOk: false,
+      }),
+      2,
+    )
+  } else {
+    const mode = parsedFlags.mode
+    const explicit = argv.filter((arg) => !arg.startsWith("--"))
+    let changed: readonly string[] = explicit
+    let gitOk = true
+    let baseSha = parsedFlags.mode === "base-head" ? (parsedFlags.base ?? "") : ""
+    let headSha = parsedFlags.mode === "base-head" ? (parsedFlags.head ?? "") : ""
+    if (explicit.length === 0) {
+      try {
+        if (mode === "base-head") {
+          const diff = git([
+            "diff",
+            "--name-status",
+            "-z",
+            `${parsedFlags.base}..${parsedFlags.head}`,
+          ])
+          gitOk = diff.ok
+          changed = gitOk ? changedPathsFromRecords(parseNameStatusZ(diff.text)) : []
+          const head = git(["rev-parse", "HEAD"])
+          if (head.ok) headSha = head.text.trim()
+        } else if (mode === "working") {
+          const diff = git(["diff", "--name-status", "-z", "HEAD"])
+          gitOk = diff.ok
+          changed = gitOk ? changedPathsFromRecords(parseNameStatusZ(diff.text)) : []
+          const head = git(["rev-parse", "HEAD"])
+          baseSha = head.ok ? head.text.trim() : ""
+          headSha = baseSha
+        } else {
+          const diff = git(["diff", "--cached", "--name-status", "-z"])
+          gitOk = diff.ok
+          if (gitOk) changed = changedPathsFromRecords(parseNameStatusZ(diff.text))
+          const head = git(["rev-parse", "HEAD"])
+          baseSha = head.ok ? head.text.trim() : ""
+          headSha = baseSha
+        }
+      } catch {
+        gitOk = false
+        changed = []
+      }
+    }
+    if (!json && changed.length === 0 && gitOk) {
+      process.stderr.write(
+        "verify-scope: nothing staged (and no files given) — nothing to derive from.\n",
+      )
+      process.exit(2)
+    }
+    const scope = deriveVerificationScope(changed)
+    const selectedIds = [...new Set([...scope.tests, ...scope.globals])]
+    const plan = deriveVerificationSelection({
+      tier: "prepush",
+      mode,
+      baseSha,
+      headSha,
+      population: VERIFICATION_GRAPH.testFiles,
+      changedPaths: changed,
+      selectedIds,
+      gitOk,
+    })
+    emitPlan(plan, gitOk ? 0 : 2)
+  }
 }

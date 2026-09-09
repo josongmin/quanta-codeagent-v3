@@ -409,6 +409,15 @@ describe("measured per-file timing store", () => {
     expect(estimates.get("/r/c.test.ts")).toBe(2_000)
   })
 
+  test("JUnit harvest keys attributes by name, not order", () => {
+    const estimates = harvestChunkTimings(
+      '<testsuite time="1.5" name="n" file="a.test.ts"></testsuite>',
+      ["a.test.ts"],
+      1_500,
+    )
+    expect(estimates.get("a.test.ts")).toBe(1_500)
+  })
+
   test("store round-trips, expires stale entries, and survives corruption", () => {
     const directory = mkdtempSync(join(tmpdir(), "shard-timings-test-"))
     temporaryDirectories.push(directory)
@@ -563,6 +572,7 @@ describe("same-INPUTS successful shard cache", () => {
       junit: false,
       intraParallel: 1,
       executionPolicySha256: "f".repeat(64),
+      inputScopeSha256: "1".repeat(64),
     }
     const nowMs = 1_800_000_000_000
     writeSuccessfulTestShardReceiptAtomic({
@@ -587,6 +597,7 @@ describe("same-INPUTS successful shard cache", () => {
       { ...identity, toolchainSha256: "d".repeat(64) },
       { ...identity, testEnvSha256: "d".repeat(64) },
       { ...identity, junit: true },
+      { ...identity, inputScopeSha256: "d".repeat(64) },
     ]
     for (const expected of identityMutations) {
       expect(loadSuccessfulTestShardReceipt({ path: receiptPath, expected, nowMs })).toEqual({
@@ -649,6 +660,7 @@ describe("same-INPUTS successful shard cache", () => {
       junit: false,
       intraParallel: 1,
       executionPolicySha256: "f".repeat(64),
+      inputScopeSha256: "1".repeat(64),
     }
     writeFileSync(receiptPath, "not-json")
     expect(loadSuccessfulTestShardReceipt({ path: receiptPath, expected: identity })).toEqual({

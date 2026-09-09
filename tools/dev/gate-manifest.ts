@@ -314,6 +314,11 @@ export const WORKFLOW_EXEMPT: readonly {
   },
   {
     file: "ci.yml",
+    match: "verification-required-results.ts",
+    why: "required-job aggregator over GitHub needs JSON; not a product test gate",
+  },
+  {
+    file: "ci.yml",
     match: "bun run src/apps/bench/index.ts",
     why: "eval job (non-blocking, needs a key)",
   },

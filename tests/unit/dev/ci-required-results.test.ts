@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test"
-import { requiredCheckOutcome } from "../../../tools/dev/verification-required-results"
+import {
+  aggregateRequiredNeeds,
+  requiredCheckOutcome,
+} from "../../../tools/dev/verification-required-results"
 import type { VerificationOutcome } from "../../../tools/dev/verification-result"
 
 describe("required check truth table", () => {
@@ -17,5 +20,21 @@ describe("required check truth table", () => {
   test("github success still fails when policy is failed", () => {
     const failed: VerificationOutcome = "failed"
     expect(requiredCheckOutcome({ github: "success", policy: failed })).toBe("fail")
+  })
+
+  test("empty needs or a skipped required job fail closed", () => {
+    expect(aggregateRequiredNeeds({})).toBe("fail")
+    expect(
+      aggregateRequiredNeeds({
+        "static-code": { result: "success" },
+        contract: { result: "skipped" },
+      }),
+    ).toBe("fail")
+    expect(
+      aggregateRequiredNeeds({
+        "static-code": { result: "success" },
+        catalog: { result: "success" },
+      }),
+    ).toBe("pass")
   })
 })

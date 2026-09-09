@@ -1,7 +1,7 @@
 # TV-10 — 중복 scan, preload, toolchain setup 비용 제거
 
 - 우선순위: P1
-- 상태: PLANNED
+- 상태: FOCUSED_VERIFIED
 - 소유자: C
 - 선행: TV-02
 - 협업: TV-09 reach-test 빈도, TV-11 job 배치, TV-13 toolchain 환경

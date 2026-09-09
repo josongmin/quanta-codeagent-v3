@@ -26,6 +26,8 @@ export interface TestShardCacheIdentity {
   /** Exact intra-worker file width. Concurrent green does not answer for serial. */
   readonly intraParallel: number
   readonly executionPolicySha256: string
+  /** whole-tree until every file in the chunk is declared-v1 certified. */
+  readonly inputScopeSha256: string
 }
 
 export interface SuccessfulTestShardReceipt extends TestShardCacheIdentity {
@@ -194,7 +196,8 @@ const sameIdentity = (
   receipt.testEnvSha256 === expected.testEnvSha256 &&
   receipt.junit === expected.junit &&
   receipt.intraParallel === expected.intraParallel &&
-  receipt.executionPolicySha256 === expected.executionPolicySha256
+  receipt.executionPolicySha256 === expected.executionPolicySha256 &&
+  receipt.inputScopeSha256 === expected.inputScopeSha256
 
 const isScanReachRecord = (value: unknown): value is ScanReachRecord => {
   if (typeof value !== "object" || value === null) return false
@@ -228,6 +231,7 @@ const parseSuccessfulShardReceipt = (value: unknown): SuccessfulTestShardReceipt
     !Number.isSafeInteger(row.intraParallel) ||
     (row.intraParallel as number) < 1 ||
     !validSha256(row.executionPolicySha256) ||
+    !validSha256(row.inputScopeSha256) ||
     !Number.isSafeInteger(row.createdAtMs) ||
     !Number.isSafeInteger(row.expiresAtMs) ||
     !Number.isSafeInteger(row.executedFiles) ||

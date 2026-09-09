@@ -1,7 +1,7 @@
 # TV-03 — 변경 영향 선택과 full fallback
 
 - 우선순위: P1
-- 상태: PLANNED
+- 상태: FOCUSED_VERIFIED
 - 소유자: A
 - 선행: TV-01, TV-02
 - 소비자: local prepush, PR early feedback, TV-05 cache 입력 분석

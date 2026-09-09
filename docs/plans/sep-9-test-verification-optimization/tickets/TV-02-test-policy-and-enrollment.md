@@ -1,7 +1,7 @@
 # TV-02 — 테스트 정책과 누락 없는 등록
 
 - 우선순위: P0
-- 상태: PLANNED
+- 상태: FOCUSED_VERIFIED
 - 소유자: C
 - 선행: TV-00, contracts.md
 

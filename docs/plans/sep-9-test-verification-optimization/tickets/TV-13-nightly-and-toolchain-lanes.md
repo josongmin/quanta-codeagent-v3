@@ -1,7 +1,7 @@
 # TV-13 — nightly, 실제 도구체인, cold 검증
 
 - 우선순위: P1
-- 상태: PLANNED
+- 상태: FOCUSED_VERIFIED
 - 소유자: CI 담당 / toolchain fixture 담당
 - 선행: TV-02, TV-04, TV-11
 - matrix 확장 선행: TV-12

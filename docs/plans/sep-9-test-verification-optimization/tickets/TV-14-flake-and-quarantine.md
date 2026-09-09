@@ -1,7 +1,7 @@
 # TV-14 — 최초 실패 보존과 quarantine lifecycle
 
 - 우선순위: P2
-- 상태: PLANNED
+- 상태: FOCUSED_VERIFIED
 - 소유자: 테스트 운영 담당
 - 선행: TV-02, TV-11
 

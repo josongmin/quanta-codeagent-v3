@@ -1,7 +1,7 @@
 # TV-15 — 보호 규칙 확인, 단계적 활성화, 문서 동기화
 
 - 우선순위: P0
-- 상태: PLANNED
+- 상태: IMPLEMENTING
 - 소유자: 통합 담당
 - 선행: preflight=TV-00; 활성화는 아래 barrier별 적용
 

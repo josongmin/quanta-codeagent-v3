@@ -1,7 +1,7 @@
 # TV-05 — 입력이 검증된 테스트의 제한적 캐시 범위 축소
 
 - 우선순위: P1
-- 상태: PLANNED
+- 상태: FOCUSED_VERIFIED
 - 소유자: B
 - 선행: TV-02, TV-04
 - 협업: TV-03 그래프를 재사용하되 skip authority와 cache authority를 혼합하지 않음

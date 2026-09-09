@@ -60,6 +60,7 @@
     "prepush:cold": "QUANTA_TEST_CACHE=off bun run tools/dev/verification-campaign.ts -- bun run tools/dev/gate.ts prepush --keep-going",
     "verify:smoke": "bun test tests/unit/smoke-battery.test.ts tests/unit/git/conflict-parser-differential-fuzz.canary.test.ts --parallel=1",
     "verify:prepush": "bun run tools/dev/verification-campaign.ts -- bun run tools/dev/gate.ts prepush",
+    "verify:pr": "bun run tools/dev/verification-campaign.ts -- bun run tools/dev/gate.ts prepush --keep-going",
     "verify:full": "bun run tools/dev/verification-campaign.ts -- bun run tools/dev/gate.ts prepush --keep-going",
     "verify:nightly": "QUANTA_TEST_CACHE=off bun run tools/dev/verification-campaign.ts -- bun run tools/dev/gate.ts prepush --keep-going",
     "gates:list": "bun run tools/dev/gate.ts --list",

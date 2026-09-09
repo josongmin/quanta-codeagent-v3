@@ -1,7 +1,7 @@
 # TV-01 — tier 명령, 로컬 hook, fail-fast
 
 - 우선순위: P0
-- 상태: PLANNED
+- 상태: FOCUSED_VERIFIED
 - 소유자: A / 공통 파일은 통합 담당
 - 선행: TV-00, contracts.md
 - 활성화 선행: TV-03 및 TV-15의 원격 보호 확인
