@@ -24,6 +24,7 @@ import {
   settleObjectiveAttempt,
 } from "./objective-settlement"
 import { buildRewindCaptureHook } from "./rewind-capture-wire"
+import { bindTurnUserInput } from "./turn-user-input-bind"
 import type { RuntimeBase } from "./types"
 
 export interface RuntimeTurnResult {
@@ -256,19 +257,29 @@ export const runRuntimeTurn = async (args: {
     ...(args.base.fullFidelity === true ? { fullFidelity: true } : {}),
   })
   // GOAL-04 — attributed attempt (host claim); ordinary chat has none.
-  const cfg = buildAgentConfigFromBase(
-    buildAgentConfigFromBaseInput({
-      base: { ...args.base, stream: turnStream.stream },
-      messages: [
-        ...args.history,
-        {
-          role: "user",
-          content: [{ type: "text", text: args.prompt }, ...(args.images ?? [])] as ContentBlock[],
-        } as Message,
-      ],
+  const cfg = bindTurnUserInput(
+    buildAgentConfigFromBase(
+      buildAgentConfigFromBaseInput({
+        base: { ...args.base, stream: turnStream.stream },
+        messages: [
+          ...args.history,
+          {
+            role: "user",
+            content: [
+              { type: "text", text: args.prompt },
+              ...(args.images ?? []),
+            ] as ContentBlock[],
+          } as Message,
+        ],
+        signal: args.signal,
+        turnAssembler: args.turnAssembler,
+      }),
+    ),
+    {
+      sessionId: getSessionId(args.base),
+      turnId: crypto.randomUUID(),
       signal: args.signal,
-      turnAssembler: args.turnAssembler,
-    }),
+    },
   )
   const attributed = await beginObjectiveAttempt({
     objective: args.base.objective,

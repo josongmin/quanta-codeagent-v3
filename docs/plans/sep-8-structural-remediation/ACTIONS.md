@@ -1,6 +1,6 @@
 # Sep-08 — evidence-backed action register
 
-상태: **W4 implemented on local `main`**. W1–W4 implemented. 나머지 finding은 W5–W6. G-F5.4 EC2 실기 proof는 열린 갭. G-F9.4 contract rail 설치됨 (이 머신 Docker live 실행, Lima skip). 체크박스는 구현 수행이며 W7 전역 verified가 아니다.
+상태: **W6 implemented on local `main`**. W1–W6 implemented. 나머지 액션은 W7 closeout. G-F5.4 EC2 실기 proof는 열린 갭. G-F9.4 contract rail 설치됨 (이 머신 Docker live 실행, Lima skip). 체크박스는 구현 수행이며 W7 전역 verified가 아니다.
 
 설계·write set·병렬 통합 정책: [README](/Users/songmin/quanta-codeagent-v3/docs/plans/sep-8-structural-remediation/README.md).
 실행 wave/group 배정: [WAVES](/Users/songmin/quanta-codeagent-v3/docs/plans/sep-8-structural-remediation/WAVES.md). 172개 액션의 단일 owner와 병렬 write set은 `waves.json`/`verify-waves.mjs`로 검사한다. 액션 내용은 이 문서, 실행 배정은 manifest가 원본이다.
@@ -214,19 +214,19 @@
 
 근거: [pending map registration](/Users/songmin/quanta-codeagent-v3/src/apps/web-daemon/web-user-input-port.ts:118), [socket-only cleanup](/Users/songmin/quanta-codeagent-v3/src/apps/web-daemon/server/ws-handlers.ts:500).
 
-- [ ] **G-F12.1** request를 session/turn/prompt identity와 originating signal에 묶고 정확히 한 번 settle하는 cleanup을 정한다.
-- [ ] **G-F12.2** turn abort에서 해당 요청만 cancel한다. terminal event는 보조 cleanup이며 blocked tool 종료를 기다리는 terminal만으로 취소하지 않는다.
-- [ ] **G-F12.3** socket 유지+request pending+turn abort에서 promise settled/pending 0을 검증한다. late answer와 같은 connection의 다른 turn도 테스트한다.
-- [ ] **G-F12.4** success/failure/abort/socket close race의 listener/timer 제거를 검증하고 global cancelAll로 무관한 turn을 지우는 구현은 넣지 않는다.
+- [x] **G-F12.1** request를 session/turn/prompt identity와 originating signal에 묶고 정확히 한 번 settle하는 cleanup을 정한다.
+- [x] **G-F12.2** turn abort에서 해당 요청만 cancel한다. terminal event는 보조 cleanup이며 blocked tool 종료를 기다리는 terminal만으로 취소하지 않는다.
+- [x] **G-F12.3** socket 유지+request pending+turn abort에서 promise settled/pending 0을 검증한다. late answer와 같은 connection의 다른 turn도 테스트한다.
+- [x] **G-F12.4** success/failure/abort/socket close race의 listener/timer 제거를 검증하고 global cancelAll로 무관한 turn을 지우는 구현은 넣지 않는다.
 
 ### F-08 · P2 · OAuth loopback listener leak
 
 근거: [received-only close](/Users/songmin/quanta-codeagent-v3/src/auth/chatgpt-oauth/cli-callback.ts:306), [opener and timeout race](/Users/songmin/quanta-codeagent-v3/src/auth/chatgpt-oauth/browser-flow.ts:134), [handle contract](/Users/songmin/quanta-codeagent-v3/src/auth/chatgpt-oauth/callback-port.ts:41).
 
-- [ ] **F-08.1** callback handle에 idempotent close/cancel 또는 flow-owned abort 계약을 정의하고 opener 이전부터 flow가 자원을 소유하게 한다.
-- [ ] **F-08.2** success/timeout/open throw/caller abort 모두 finally에서 listener/timer/pending receive를 정리한다.
-- [ ] **F-08.3** 각 종료 경로 직후 실제 loopback port에 다시 bind하고 두 번째 login 시도가 진행되는지 확인한다.
-- [ ] **F-08.4** close-vs-callback race와 unhandled rejection을 검증한다. 성공 callback만 자원을 해제하는 기존 경로를 제거한다.
+- [x] **F-08.1** callback handle에 idempotent close/cancel 또는 flow-owned abort 계약을 정의하고 opener 이전부터 flow가 자원을 소유하게 한다.
+- [x] **F-08.2** success/timeout/open throw/caller abort 모두 finally에서 listener/timer/pending receive를 정리한다.
+- [x] **F-08.3** 각 종료 경로 직후 실제 loopback port에 다시 bind하고 두 번째 login 시도가 진행되는지 확인한다.
+- [x] **F-08.4** close-vs-callback race와 unhandled rejection을 검증한다. 성공 callback만 자원을 해제하는 기존 경로를 제거한다.
 
 ## 8. R08 — LSP cache / waiter
 
@@ -234,28 +234,28 @@
 
 근거: [독립 cache](/Users/songmin/quanta-codeagent-v3/src/agent/shadow-verify-adapters/check-lsp-test.ts:63), [canonical false eviction](/Users/songmin/quanta-codeagent-v3/src/agent/lsp-bridge/availability.ts:47).
 
-- [ ] **P2-A-02.1** shadow probe의 binary/timeout/context를 canonical availability 계약에 매핑한다.
-- [ ] **P2-A-02.2** false/rejected result를 영구 cache하는 별도 Map을 제거하고 canonical success-only cache에 위임한다.
-- [ ] **P2-A-02.3** false→true probe에서 두 번째 호출이 실제 probe하고 shadow check가 복구됨을 검증한다. concurrent in-flight dedup도 보존한다.
-- [ ] **P2-A-02.4** 성공 cache 재사용·binary key 분리·timeout을 검사하고 false cache를 되살린 mutation에서 RED를 확인한다.
+- [x] **P2-A-02.1** shadow probe의 binary/timeout/context를 canonical availability 계약에 매핑한다.
+- [x] **P2-A-02.2** false/rejected result를 영구 cache하는 별도 Map을 제거하고 canonical success-only cache에 위임한다.
+- [x] **P2-A-02.3** false→true probe에서 두 번째 호출이 실제 probe하고 shadow check가 복구됨을 검증한다. concurrent in-flight dedup도 보존한다.
+- [x] **P2-A-02.4** 성공 cache 재사용·binary key 분리·timeout을 검사하고 false cache를 되살린 mutation에서 RED를 확인한다.
 
 ### P2-A-05 · P2 · Diagnostics null/reject cache
 
 근거: [open promise cache](/Users/songmin/quanta-codeagent-v3/src/agent/lsp-diagnostics-hook.ts:74), [production null opener](/Users/songmin/quanta-codeagent-v3/src/agent/lsp-bridge/diagnostics.ts:33).
 
-- [ ] **P2-A-05.1** in-flight dedup와 successful-session reuse는 유지하고 null/rejection만 재시도 가능하게 정의한다.
-- [ ] **P2-A-05.2** entry promise identity를 비교한 conditional eviction을 구현한다. 늦은 실패가 새 client를 제거하지 않게 한다.
-- [ ] **P2-A-05.3** null→live, rejection→live, concurrent opens, old failure/new success race를 실제 edit-triggered diagnostics consumer로 검증한다.
-- [ ] **P2-A-05.4** dispose-during-open의 late client close와 rejection handling을 확인하고 permanent negative entry를 제거한다.
+- [x] **P2-A-05.1** in-flight dedup와 successful-session reuse는 유지하고 null/rejection만 재시도 가능하게 정의한다.
+- [x] **P2-A-05.2** entry promise identity를 비교한 conditional eviction을 구현한다. 늦은 실패가 새 client를 제거하지 않게 한다.
+- [x] **P2-A-05.3** null→live, rejection→live, concurrent opens, old failure/new success race를 실제 edit-triggered diagnostics consumer로 검증한다.
+- [x] **P2-A-05.4** dispose-during-open의 late client close와 rejection handling을 확인하고 permanent negative entry를 제거한다.
 
 ### C-F12 · P3 · Diagnostics timeout waiter retention
 
 근거: [timeout](/Users/songmin/quanta-codeagent-v3/src/lsp/adapters/base/diagnostics-hub.ts:18), [publish/teardown cleanup](/Users/songmin/quanta-codeagent-v3/src/lsp/adapters/base/diagnostics-hub.ts:42).
 
-- [ ] **C-F12.1** waiter에 개별 identity와 idempotent finish 함수를 두고 timeout/publish/dispose를 같은 cleanup에 연결한다.
-- [ ] **C-F12.2** timeout에서 자기 callback을 제거하고 빈 URI key만 삭제한다. 같은 URI 전체를 지우지 않는다.
-- [ ] **C-F12.3** 반복 timeout 후 retained callbacks/keys가 0인지 fake timer로 확인한다. concurrent live waiter는 late publish로 정상 resolve해야 한다.
-- [ ] **C-F12.4** publish-timeout-dispose 경쟁에서 중복 settle/timer leak이 없는지 검증한다. 세션 teardown까지 기다리는 cleanup 의존을 제거한다.
+- [x] **C-F12.1** waiter에 개별 identity와 idempotent finish 함수를 두고 timeout/publish/dispose를 같은 cleanup에 연결한다.
+- [x] **C-F12.2** timeout에서 자기 callback을 제거하고 빈 URI key만 삭제한다. 같은 URI 전체를 지우지 않는다.
+- [x] **C-F12.3** 반복 timeout 후 retained callbacks/keys가 0인지 fake timer로 확인한다. concurrent live waiter는 late publish로 정상 resolve해야 한다.
+- [x] **C-F12.4** publish-timeout-dispose 경쟁에서 중복 settle/timer leak이 없는지 검증한다. 세션 teardown까지 기다리는 cleanup 의존을 제거한다.
 
 ## 9. R09 — pricing provenance
 
@@ -365,28 +365,28 @@
 
 근거: [legacy picker](/Users/songmin/quanta-codeagent-v3/src/llm/factory.ts:424), [actual transport ladder](/Users/songmin/quanta-codeagent-v3/src/runner/assemble/llm.ts:446), [status consumer](/Users/songmin/quanta-codeagent-v3/src/apps/cli/status-cmd.ts:57), [doctor consumer](/Users/songmin/quanta-codeagent-v3/src/apps/cli/doctor/default-probes.ts:32).
 
-- [ ] **E-PROV-01.1** existing transport resolver에 requested/effective/reason DTO를 정의한다. credential provider와 actual transport를 같은 field로 뭉개지 않는다.
-- [ ] **E-PROV-01.2** live status는 boot snapshot, preflight doctor는 동일 resolver의 현재 결과를 표시한다. cloud ladder를 consumer에 복사하지 않는다.
-- [ ] **E-PROV-01.3** Bedrock/Vertex/Foundry/Mantle 각 selector와 legacy control에서 constructed adapter↔status↔doctor를 비교한다.
-- [ ] **E-PROV-01.4** 독립 pickProvider 기반 진단을 제거하고 DTO/log에 credential 값이 없으며 live/preflight 시점 차이를 구분하는지 확인한다.
+- [x] **E-PROV-01.1** existing transport resolver에 requested/effective/reason DTO를 정의한다. credential provider와 actual transport를 같은 field로 뭉개지 않는다.
+- [x] **E-PROV-01.2** live status는 boot snapshot, preflight doctor는 동일 resolver의 현재 결과를 표시한다. cloud ladder를 consumer에 복사하지 않는다.
+- [x] **E-PROV-01.3** Bedrock/Vertex/Foundry/Mantle 각 selector와 legacy control에서 constructed adapter↔status↔doctor를 비교한다.
+- [x] **E-PROV-01.4** 독립 pickProvider 기반 진단을 제거하고 DTO/log에 credential 값이 없으며 live/preflight 시점 차이를 구분하는지 확인한다.
 
 ### G-F6 · P2 · Eval env precedence
 
 근거: [eval reverse order](/Users/songmin/quanta-codeagent-v3/src/apps/eval/index.ts:165), [CLI canonical load](/Users/songmin/quanta-codeagent-v3/src/apps/cli/index.ts:30), [shared loader](/Users/songmin/quanta-codeagent-v3/src/shared/env-files.ts:1).
 
-- [ ] **G-F6.1** eval을 shared loader의 `.env.dev → .env.local → .env` first-wins에 연결하고 기존 shell env 우선권을 유지한다.
-- [ ] **G-F6.2** eval의 독립 parser/order loop를 제거한다. dotenv values를 provenance log에 출력하지 않는다.
-- [ ] **G-F6.3** temp directory 세 env 파일의 충돌 key와 shell override를 실제 entrypoint loader rail로 검증한다.
-- [ ] **G-F6.4** missing file/empty value/기존 env/다른 cwd 대조군을 확인한다. process.env singleton rail은 child process로 격리한다.
+- [x] **G-F6.1** eval을 shared loader의 `.env.dev → .env.local → .env` first-wins에 연결하고 기존 shell env 우선권을 유지한다.
+- [x] **G-F6.2** eval의 독립 parser/order loop를 제거한다. dotenv values를 provenance log에 출력하지 않는다.
+- [x] **G-F6.3** temp directory 세 env 파일의 충돌 key와 shell override를 실제 entrypoint loader rail로 검증한다.
+- [x] **G-F6.4** missing file/empty value/기존 env/다른 cwd 대조군을 확인한다. process.env singleton rail은 child process로 격리한다.
 
 ### E-KNOB-01 · P3 · Runtime/bench boolean mismatch
 
 근거: [read-outline local set](/Users/songmin/quanta-codeagent-v3/src/runner/knobs/knobs/read-outline.ts:17), [test-runner local set](/Users/songmin/quanta-codeagent-v3/src/runner/knobs/knobs/test-runner.ts:17), [canonical tokens](/Users/songmin/quanta-codeagent-v3/src/shared/env-flag.ts:24).
 
-- [ ] **E-KNOB-01.1** 두 parser를 기존 `isTruthyToken`에 위임한다. shared vocabulary를 두 번째 상수로 복사하지 않는다.
-- [ ] **E-KNOB-01.2** local ENABLING set을 제거하고 rejected/disabled 처리 의미를 runtime 계약과 맞춘다.
-- [ ] **E-KNOB-01.3** 모든 canonical true/false/unrecognized token을 runtimeConfig와 resolveBenchKnobs에 넣어 활성화 및 report metadata parity를 검증한다.
-- [ ] **E-KNOB-01.4** `yes` 제거 mutation에서 actual bench report rail이 RED인지 확인한다. parser helper만 검사하지 않는다.
+- [x] **E-KNOB-01.1** 두 parser를 기존 `isTruthyToken`에 위임한다. shared vocabulary를 두 번째 상수로 복사하지 않는다.
+- [x] **E-KNOB-01.2** local ENABLING set을 제거하고 rejected/disabled 처리 의미를 runtime 계약과 맞춘다.
+- [x] **E-KNOB-01.3** 모든 canonical true/false/unrecognized token을 runtimeConfig와 resolveBenchKnobs에 넣어 활성화 및 report metadata parity를 검증한다.
+- [x] **E-KNOB-01.4** `yes` 제거 mutation에서 actual bench report rail이 RED인지 확인한다. parser helper만 검사하지 않는다.
 
 ## 16. R16 — authority inputs / explicit degradation
 
@@ -394,28 +394,28 @@
 
 근거: [CLI snapshot inputs](/Users/songmin/quanta-codeagent-v3/src/apps/cli/repl/session-setup.ts:350), [web inputs](/Users/songmin/quanta-codeagent-v3/src/apps/web-daemon/authority-readouts.ts:97), [missing→null authority](/Users/songmin/quanta-codeagent-v3/src/runner/assemble/session-authorities/build-skills.ts:68).
 
-- [ ] **G-F11.1** org path resolution을 기존 authority 입력 계약에 맞추고 undefined default와 explicit null opt-out을 구별한다.
-- [ ] **G-F11.2** CLI/web composition에서 한 번 resolve한 org dir을 snapshot에 전달한다. admin/banned/required 해석은 기존 skill authority만 수행한다.
-- [ ] **G-F11.3** temp org policy/admin skill fixtures로 두 surface의 actual active set 및 banned/required enforcement 변화, env/default/opt-out을 검증한다.
-- [ ] **G-F11.4** malformed org policy의 기존 failure policy를 유지하고 wiring catch로 silently disable하지 않는다. org input 누락 및 중복 policy parser를 제거한다.
+- [x] **G-F11.1** org path resolution을 기존 authority 입력 계약에 맞추고 undefined default와 explicit null opt-out을 구별한다.
+- [x] **G-F11.2** CLI/web composition에서 한 번 resolve한 org dir을 snapshot에 전달한다. admin/banned/required 해석은 기존 skill authority만 수행한다.
+- [x] **G-F11.3** temp org policy/admin skill fixtures로 두 surface의 actual active set 및 banned/required enforcement 변화, env/default/opt-out을 검증한다.
+- [x] **G-F11.4** malformed org policy의 기존 failure policy를 유지하고 wiring catch로 silently disable하지 않는다. org input 누락 및 중복 policy parser를 제거한다.
 
 ### G-F8 · P3 · Silent permission fallback
 
 근거: [CLI silent catch](/Users/songmin/quanta-codeagent-v3/src/apps/cli/repl.ts:288), [web warning control](/Users/songmin/quanta-codeagent-v3/src/apps/web-daemon/runtime-factory.ts:272).
 
-- [ ] **G-F8.1** durable load failure의 effective fallback과 scrubbed cause/path warning 계약을 정한다. fail-soft 정책 자체는 변경하지 않는다.
-- [ ] **G-F8.2** loader rejection에서 warning sink를 정확히 1회 호출하고 기존 undefined fallback을 유지한다.
-- [ ] **G-F8.3** read/permission/parse failure, success, warning-sink failure fixtures로 fallback/경고 횟수와 secret 비노출을 검증한다.
-- [ ] **G-F8.4** CLI 실제 boot consumer에서 degraded posture가 관측되는지 확인하고 silent catch를 제거한다. 일반 startup error framework까지 확장하지 않는다.
+- [x] **G-F8.1** durable load failure의 effective fallback과 scrubbed cause/path warning 계약을 정한다. fail-soft 정책 자체는 변경하지 않는다.
+- [x] **G-F8.2** loader rejection에서 warning sink를 정확히 1회 호출하고 기존 undefined fallback을 유지한다.
+- [x] **G-F8.3** read/permission/parse failure, success, warning-sink failure fixtures로 fallback/경고 횟수와 secret 비노출을 검증한다.
+- [x] **G-F8.4** CLI 실제 boot consumer에서 degraded posture가 관측되는지 확인하고 silent catch를 제거한다. 일반 startup error framework까지 확장하지 않는다.
 
 ### G-F13 · P3 · Silent repo-rules fallback
 
 근거: [agent preset silent catch](/Users/songmin/quanta-codeagent-v3/src/apps/agent/mode-presets/system.ts:42), [web diagnostic control](/Users/songmin/quanta-codeagent-v3/src/apps/web-daemon/runtime-factory/agent-config-base.ts:228).
 
-- [ ] **G-F13.1** preset rule loader에 warning sink를 주입하고 no-rules fallback/원인/path의 관측 계약을 정한다. fail-open 정책은 유지한다.
-- [ ] **G-F13.2** load failure 때 warning 1회와 규칙 없는 결과를 반환한다. diagnostic failure가 기존 fallback을 throw로 바꾸지 않게 한다.
-- [ ] **G-F13.3** successful load/no file/read failure/parse failure를 구분하고 실제 preset prompt 및 warning을 함께 검증한다.
-- [ ] **G-F13.4** silent catch를 제거하고 cwd/cause에 포함될 수 있는 credential/path-sensitive 내용을 기존 redaction 정책으로 처리한다.
+- [x] **G-F13.1** preset rule loader에 warning sink를 주입하고 no-rules fallback/원인/path의 관측 계약을 정한다. fail-open 정책은 유지한다.
+- [x] **G-F13.2** load failure 때 warning 1회와 규칙 없는 결과를 반환한다. diagnostic failure가 기존 fallback을 throw로 바꾸지 않게 한다.
+- [x] **G-F13.3** successful load/no file/read failure/parse failure를 구분하고 실제 preset prompt 및 warning을 함께 검증한다.
+- [x] **G-F13.4** silent catch를 제거하고 cwd/cause에 포함될 수 있는 credential/path-sensitive 내용을 기존 redaction 정책으로 처리한다.
 
 ## 17. 기존 테스트 재사용 지도
 

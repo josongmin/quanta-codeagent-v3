@@ -247,10 +247,38 @@ export const createCliOAuthCallback = (opts: CliCallbackOptions = {}): OAuthCall
       const redirectUri = `http://localhost:${port}${CALLBACK_PATH}`
 
       let handled = false
+      let closed = false
       let abortListener: (() => void) | null = null
+      let settleReject: ((err: Error) => void) | undefined
       const sig = input.signal
 
+      const releaseSignal = (): void => {
+        if (abortListener !== null && sig !== undefined) {
+          sig.removeEventListener("abort", abortListener)
+          abortListener = null
+        }
+      }
+
+      const dropServer = (): void => {
+        if (typeof server.closeAllConnections === "function") {
+          server.closeAllConnections()
+        }
+        server.close()
+      }
+
+      const close = (): void => {
+        if (closed) return
+        closed = true
+        releaseSignal()
+        if (!handled) {
+          handled = true
+          settleReject?.(new BrowserFlowError("user_cancel", "callback listener closed"))
+        }
+        dropServer()
+      }
+
       const received = new Promise<OAuthCallbackResult>((resolve, reject) => {
+        settleReject = reject
         const pending: PendingState = {
           state: input.expectedState,
           resolve: (code) => resolve({ code }),
@@ -303,17 +331,9 @@ export const createCliOAuthCallback = (opts: CliCallbackOptions = {}): OAuthCall
         /* see comment above */
       })
 
-      // Always tear the server down once the callback settles — success,
-      // failure, or abort — and detach any signal listener.
-      const teardown = (): void => {
-        if (abortListener !== null && sig !== undefined) {
-          sig.removeEventListener("abort", abortListener)
-        }
-        server.close()
-      }
-      received.then(teardown, teardown)
+      received.then(close, close)
 
-      return { redirectUri, received }
+      return { redirectUri, received, close }
     },
   }
 }

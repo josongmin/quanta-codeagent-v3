@@ -3,7 +3,8 @@ import { type GlobRule, loadGlobRulesWithVendors } from "@/agent/glob-rules"
 import { loadRepoRules, type RepoRules } from "@/agent/repo-rules"
 import { modeLoadsRepoRules } from "@/agent/run-mode"
 import { buildSystemPromptForRunMode, promptSurfaceProfileForRunMode } from "@/agent/system-prompt"
-import type { PromptSurfaceProfileSnapshot } from "@/shared"
+import { redactSecrets } from "@/security"
+import { errMessage, logger, type PromptSurfaceProfileSnapshot } from "@/shared"
 
 // Re-export the SSOT policy (now in the surface-agnostic `@/agent/run-mode`
 // layer so web-daemon can link to the SAME decision) for callers/tests that
@@ -27,26 +28,56 @@ export const resolveModePresetPromptSurfaceProfile = (
     ? undefined
     : promptSurfaceProfileForRunMode(mode)
 
+export interface ModePresetRulesLoadOpts {
+  readonly warn?: (info: { cwd: string; cause: string }) => void
+  readonly load?: (cwd: string) => Promise<RepoRules | undefined>
+}
+
+const emitRulesWarning = (
+  warn: ((info: { cwd: string; cause: string }) => void) | undefined,
+  cwd: string,
+  cause: string,
+  fallback: (info: { cwd: string; cause: string }) => void,
+): void => {
+  try {
+    ;(warn ?? fallback)({ cwd, cause })
+  } catch {
+    // Diagnostic failure must not convert fail-open into throw.
+  }
+}
+
+const scrubCause = (cause: string): string =>
+  redactSecrets(cause, { origin: "envelope_jsonl" }).text
+
+const defaultRepoRulesWarn = (info: { cwd: string; cause: string }): void => {
+  logger.warn("mode preset repo rules load failed; continuing without local rules", {
+    cwd: info.cwd,
+    error: scrubCause(info.cause),
+  })
+}
+
 /**
  * WS4 (jul-12 OmO absorption + hell-audit R3/R4/R5/R8) — the ONE place a PRESET
  * decides whether to load repo-local rules (AGENTS.md / CLAUDE.md). A caller
  * `override` always wins (trusted host code); otherwise the SSOT policy
  * {@link modeLoadsRepoRules} (in `@/agent/run-mode`, shared with web-daemon)
  * decides. Fail-open: a broken/unreadable rule source must never crash session
- * start.
- *
- * Mirrors {@link resolveModePresetSystemPrompt} / {@link
- * resolveModePresetPromptSurfaceProfile}: a mode-keyed resolver each preset's
- * base-builder calls, rather than N divergent inline loads.
+ * start. Load failure is warned exactly once (G-F13).
  */
 export const resolveModePresetRepoRules = async (
   mode: RunMode,
   override: RepoRules | undefined,
   cwd: string,
+  opts: ModePresetRulesLoadOpts = {},
 ): Promise<RepoRules | undefined> => {
   if (override !== undefined) return override
   if (!modeLoadsRepoRules(mode)) return undefined
-  return loadRepoRules(cwd).catch(() => undefined)
+  try {
+    return await (opts.load ?? loadRepoRules)(cwd)
+  } catch (e) {
+    emitRulesWarning(opts.warn, cwd, scrubCause(errMessage(e)), defaultRepoRulesWarn)
+    return undefined
+  }
 }
 
 /**
@@ -63,6 +94,13 @@ export const resolveModePresetRepoRules = async (
  * a broken detector/loader must never crash session start. Empty ⇒ the caller
  * leaves `cfg.globRules` unset ⇒ OFF byte-identical.
  */
+const defaultGlobRulesWarn = (info: { cwd: string; cause: string }): void => {
+  logger.warn("mode preset glob rules load failed; continuing without vendor rules", {
+    cwd: info.cwd,
+    error: info.cause,
+  })
+}
+
 export const resolveModePresetGlobRules = async (
   mode: RunMode,
   cwd: string,
@@ -70,5 +108,10 @@ export const resolveModePresetGlobRules = async (
 ): Promise<GlobRule[]> => {
   if (!modeLoadsRepoRules(mode)) return [] // SECURITY: untrusted/hermetic ⇒ nothing
   if (!enabled) return [] // FEATURE gate: default-OFF
-  return loadGlobRulesWithVendors(cwd, { vendorDetectorEnabled: true }).catch(() => [])
+  try {
+    return await loadGlobRulesWithVendors(cwd, { vendorDetectorEnabled: true })
+  } catch (e) {
+    emitRulesWarning(undefined, cwd, scrubCause(errMessage(e)), defaultGlobRulesWarn)
+    return []
+  }
 }

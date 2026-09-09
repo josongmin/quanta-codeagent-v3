@@ -503,9 +503,9 @@ export const buildWebSocketHandlers = (deps: WsHandlerDeps): WsHandlers => {
       // deliver. The inbound port is SHARED across connections, so this
       // resolves ALL pending requests — for the v1 shared-session daemon there
       // is one logical client, so a disconnect means no one can answer.
-      // RESIDUAL EDGE: a turn-abort WITHOUT a socket disconnect leaves the
-      // resolver lingering until the NEXT close or answer (the close path is
-      // the only cancel trigger; an in-band turn cancel does not reach here).
+      // Socket close owns `cancelAll`. Turn abort must NOT call it: the host
+      // binds that turn's AbortSignal + turnId so abort settles only that
+      // request (G-F12). Do not wait for a terminal event to cancel.
       try {
         config.userInputPorts?.handle.cancelAll()
       } catch {

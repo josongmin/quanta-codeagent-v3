@@ -1,4 +1,3 @@
-import { join } from "node:path"
 import type { ConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import type { FollowUpQueue } from "@/agent/follow-up-queue"
 import type { PlanStore } from "@/agent/plan/state"
@@ -11,10 +10,10 @@ import type { ImageBlock, LLMPort, Message, ResponsesContinuationStore } from "@
 import type { StructuredLogger } from "@/observability"
 import type { PermissionMode, PermissionStore } from "@/permission"
 import type { PendingApprovalView } from "@/protocol/session"
-import { buildSkillRuntimeAuthority } from "@/runner/assemble/session-authorities"
+import { composeSessionSkillAuthority } from "@/runner/assemble/session-authorities"
 import type { ApprovalDecisionResult } from "@/runner/orchestrate"
 import type { RuntimeContext } from "@/sdk/runtime"
-import { errMessage, gateOn, logger, quantaHomeDirFrom, runtimeConfig } from "@/shared"
+import { gateOn, logger, runtimeConfig } from "@/shared"
 import type { SkillRuntimeAuthority } from "@/skill"
 import { clearFsJailDecisionSink, setFsJailDecisionSink } from "@/storage"
 import type { AgentEvent, StreamPort } from "@/stream"
@@ -337,37 +336,23 @@ export interface SessionSetupResult {
  *  status chrome and interactive prompt-only ports. */
 /**
  * RFC-06 F4 — build the ONE durable skill runtime authority for a CLI
- * interactive session. Mirrors the pre-F4 discovery `buildSkillBlock` performed
- * (userDir only ⇒ byte-identical active set) but makes it DURABLE (a JSON
- * disabled-set store under `~/.quanta`, or `<userSkillsDir>/.disabled.json`) and
- * SHARED across every surface. `orgConfigDir` is left null (no admin policy
- * wired at this surface yet — same posture as the interim `policy: null`; the
- * builder's real `loadAdminPolicy` still runs and returns null). Fail-open: on
- * any error the session degrades to the pre-F4 path (no authority ⇒
- * `buildSkillBlock` mints the interim one, the slash re-scans) — session setup
- * must never crash on the skill surface.
+ * interactive session. Org dir is resolved once (`undefined` default vs
+ * explicit `null` opt-out) and passed into the shared composer. Malformed
+ * org-policy stays fail-loud. Generic construction errors fail-open.
  */
-const buildCliSkillAuthority = async (
+export const buildCliSkillAuthority = async (
   skillsConfig: AgentConfigSkills,
   env: Record<string, string | undefined>,
-): Promise<SkillRuntimeAuthority | undefined> => {
-  if (skillsConfig === undefined) return undefined
-  const dir = skillsConfig.dir
-  try {
-    return await buildSkillRuntimeAuthority({
-      snapshotInputs: dir !== undefined ? { userDir: dir } : {},
-      disabledSetPath:
-        dir !== undefined
-          ? join(dir, ".disabled.json")
-          : join(quantaHomeDirFrom(env), "skills-disabled.json"),
-    })
-  } catch (e) {
-    logger.warn("skill runtime authority build failed; continuing without convergence", {
-      error: errMessage(e),
-    })
-    return undefined
-  }
-}
+): Promise<SkillRuntimeAuthority | undefined> =>
+  composeSessionSkillAuthority({
+    ...(skillsConfig !== undefined ? { skills: skillsConfig } : {}),
+    env,
+    warn: (info) => {
+      logger.warn("skill runtime authority build failed; continuing without convergence", {
+        error: info.error,
+      })
+    },
+  })
 
 type AgentConfigSkills = import("@/agent").AgentConfig["skills"]
 

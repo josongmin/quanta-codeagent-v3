@@ -33,6 +33,7 @@ const harness = (over: { tokenBody?: Record<string, unknown> } = {}) => {
       start: async () => ({
         redirectUri: "http://localhost:1/auth/callback",
         received: Promise.resolve({ code: "auth-code-123" }),
+        close() {},
       }),
     },
     fetchImpl: async () =>

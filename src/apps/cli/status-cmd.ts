@@ -18,6 +18,11 @@ import {
   type TokenRecord,
 } from "@/auth/chatgpt-oauth"
 import { pickProvider } from "@/llm"
+import {
+  formatLlmTransportProjection,
+  type LlmTransportProjection,
+  projectLlmTransport,
+} from "@/runner/assemble"
 import { errMessage } from "@/shared"
 import {
   bold,
@@ -37,6 +42,15 @@ import type { SlashCommand, SlashContext } from "./slash-commands"
 export interface StatusDeps {
   readonly env?: Record<string, string | undefined>
   readonly nowMs?: () => number
+  /** Boot-time transport projection. Live `/status` shows this snapshot. */
+  readonly bootProjection?: LlmTransportProjection
+}
+
+let capturedBootProjection: LlmTransportProjection | undefined
+
+/** CLI entry captures the boot resolver result. `/status` reads it lazily. */
+export const captureStatusBootProjection = (projection: LlmTransportProjection): void => {
+  capturedBootProjection = projection
 }
 
 /** Human-readable auth-mode badge — identical to the runtime
@@ -156,7 +170,7 @@ export const buildStatusCmd = (deps: StatusDeps = {}): SlashCommand => ({
   async run(_args, ctx: SlashContext) {
     const env = deps.env ?? process.env
     const nowMs = deps.nowMs?.() ?? (ctx.now ? ctx.now() : Date.now())
-    const tokenEnv = {
+    const tokenEnv: Record<string, string | undefined> = {
       ...env,
       ...(ctx.prefsHome !== undefined ? { QUANTA_PREFS_HOME: ctx.prefsHome } : {}),
     }
@@ -176,9 +190,19 @@ export const buildStatusCmd = (deps: StatusDeps = {}): SlashCommand => ({
     }
 
     const active = resolveActiveProvider(tokenEnv, token !== null && tokenErr === null)
+    const projection =
+      deps.bootProjection ??
+      capturedBootProjection ??
+      projectLlmTransport({
+        transport: tokenEnv.QUANTA_LLM_TRANSPORT,
+        env: tokenEnv,
+        credentialProvider: active.name,
+      })
 
     const lines: string[] = [
       `${bold("Active provider")}  ${active.styled}`,
+      `${bold("Effective transport")}  ${cyan(projection.effectiveId)} ${dim(`(${projection.reason})`)}`,
+      `${dim(formatLlmTransportProjection(projection))}`,
       "",
       ...renderByokSection(env),
       "",

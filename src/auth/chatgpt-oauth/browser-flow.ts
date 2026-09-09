@@ -113,64 +113,67 @@ export const runBrowserFlow = async (opts: RunBrowserFlowOptions): Promise<Brows
     expectedState: state,
     ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
   }
-  const handle = await provider.start(startInput)
-  const redirectUri = handle.redirectUri
 
-  const url = buildAuthorizeUrl({
-    cfg: opts.cfg,
-    redirectUri,
-    codeChallenge: challenge,
-    state,
-  })
-
-  // `handle.received` already self-suppresses unhandled-rejection inside
-  // the provider; we still attach a local catch here to cover the window
-  // before `Promise.race(...)` attaches its own handler one microtask later
-  // (matches the pre-refactor codePromise comment in this file).
-  handle.received.catch((_unhandled: unknown) => {
-    /* unhandled-rejection suppressant only */
-  })
-
-  // Provider teardown is the provider's responsibility once `received`
-  // settles. If `openBrowserDefault` throws, the BrowserFlowError propagates
-  // out — provider's pending `received` promise stays open and will be torn
-  // down via the abort signal / timeout / next caller. In practice tests
-  // pass `opener`, so the throw path is only hit when a real shell spawn
-  // fails.
-  if (opts.opener) opts.opener(url)
-  else openBrowserDefault(url)
-
-  const timeoutMs = opts.timeoutMs ?? LOGIN_TIMEOUT_MS
+  // Flow owns the handle from the moment `start` resolves — including the
+  // opener-throw path. `close()` is idempotent with the provider's
+  // received-settle teardown.
+  let handle: Awaited<ReturnType<OAuthCallbackProvider["start"]>> | undefined
   let timer: ReturnType<typeof setTimeout> | null = null
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timer = setTimeout(
-      () =>
-        reject(
-          new BrowserFlowError("timeout", `login timed out after ${Math.round(timeoutMs / 1000)}s`),
-        ),
-      timeoutMs,
-    )
-  })
-
   let abortListener: (() => void) | null = null
-  const abortPromise = new Promise<never>((_, reject) => {
-    const sig = opts.signal
-    if (sig === undefined) return
-    if (sig.aborted) {
-      reject(new BrowserFlowError("user_cancel", "login aborted by caller"))
-      return
-    }
-    abortListener = () => reject(new BrowserFlowError("user_cancel", "login aborted by caller"))
-    sig.addEventListener("abort", abortListener, { once: true })
-  })
-  abortPromise.catch((_unhandled: unknown) => {
-    /* see handle.received comment — unhandled-rejection suppressant only. */
-  })
-
   try {
+    handle = await provider.start(startInput)
+    const redirectUri = handle.redirectUri
+
+    const url = buildAuthorizeUrl({
+      cfg: opts.cfg,
+      redirectUri,
+      codeChallenge: challenge,
+      state,
+    })
+
+    // `handle.received` already self-suppresses unhandled-rejection inside
+    // the provider; we still attach a local catch here to cover the window
+    // before `Promise.race(...)` attaches its own handler one microtask later
+    // (matches the pre-refactor codePromise comment in this file).
+    handle.received.catch((_unhandled: unknown) => {
+      /* unhandled-rejection suppressant only */
+    })
+
+    if (opts.opener) opts.opener(url)
+    else openBrowserDefault(url)
+
+    const timeoutMs = opts.timeoutMs ?? LOGIN_TIMEOUT_MS
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () =>
+          reject(
+            new BrowserFlowError(
+              "timeout",
+              `login timed out after ${Math.round(timeoutMs / 1000)}s`,
+            ),
+          ),
+        timeoutMs,
+      )
+    })
+
+    const abortPromise = new Promise<never>((_, reject) => {
+      const sig = opts.signal
+      if (sig === undefined) return
+      if (sig.aborted) {
+        reject(new BrowserFlowError("user_cancel", "login aborted by caller"))
+        return
+      }
+      abortListener = () => reject(new BrowserFlowError("user_cancel", "login aborted by caller"))
+      sig.addEventListener("abort", abortListener, { once: true })
+    })
+    abortPromise.catch((_unhandled: unknown) => {
+      /* see handle.received comment — unhandled-rejection suppressant only. */
+    })
+
     const { code } = await Promise.race([handle.received, timeoutPromise, abortPromise])
     return { code, verifier, redirectUri }
   } finally {
+    handle?.close()
     if (timer !== null) clearTimeout(timer)
     if (abortListener !== null && opts.signal !== undefined) {
       opts.signal.removeEventListener("abort", abortListener)

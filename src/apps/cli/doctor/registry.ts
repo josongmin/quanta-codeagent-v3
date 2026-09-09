@@ -43,7 +43,14 @@ const authCheck: CheckFn = async (probes) => {
       remedy: "run `/login --chatgpt` to refresh before it expires",
     }
   }
-  return { id: "auth", status: "ok", detail: a.provider }
+  return {
+    id: "auth",
+    status: "ok",
+    detail:
+      a.effectiveTransport !== undefined
+        ? `${a.provider} · transport=${a.effectiveTransport}${a.transportReason !== undefined ? ` (${a.transportReason})` : ""}`
+        : a.provider,
+  }
 }
 
 const terminalCheck: CheckFn = async (probes) => {

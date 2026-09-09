@@ -48,6 +48,13 @@ export {
   selectLlmTransport,
 } from "./llm"
 export {
+  formatLlmTransportProjection,
+  type LlmTransportProjection,
+  type LlmTransportReason,
+  type ProjectLlmTransportInput,
+  projectLlmTransport,
+} from "./llm/transport-projection"
+export {
   buildMemoryConfigCore,
   type MemoryConfigAssembleInput,
   parseRecallTiers,

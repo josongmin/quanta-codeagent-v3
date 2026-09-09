@@ -7,20 +7,18 @@
  * this registry entry exists ONLY so the bench resolver / report / preset layer
  * can SEE the knob. `buildConfig` bridges an active resolved value to the
  * runtime-config live-override store (`setKnobOverride`) so the wire-time read
- * picks it up. Strict truthy gate: `"1"` / `"on"` / `"true"` ⇒ enabled.
+ * picks it up. Strict truthy gate: canonical `isTruthyToken` (`1`/`on`/`true`/`yes`).
  */
 
 import type { AgentConfig } from "@/agent"
+import { isTruthyToken } from "@/shared"
 import { registerKnob } from "../registry"
 import type { Knob, Surface } from "../types"
 
 const SURFACES: readonly Surface[] = ["bench"]
-const ENABLING = new Set(["1", "on", "true"])
 
-const parseReadOutline = (raw: string | undefined): true | undefined => {
-  if (raw === undefined) return undefined
-  return ENABLING.has(raw.trim().toLowerCase()) ? true : undefined
-}
+const parseReadOutline = (raw: string | undefined): true | undefined =>
+  isTruthyToken(raw) ? true : undefined
 
 const applyReadOutline = (cfg: AgentConfig): AgentConfig => cfg
 

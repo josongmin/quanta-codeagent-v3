@@ -7,20 +7,18 @@
  * IS A NOOP — this registry entry exists ONLY so the bench resolver / report /
  * preset layer can SEE it; `buildConfig` bridges an active resolved value to
  * the live-override store via `setKnobOverride`. Strict truthy gate:
- * `"1"` / `"on"` / `"true"` ⇒ enabled.
+ * `"1"` / `"on"` / `"true"` / `"yes"` ⇒ enabled (canonical `isTruthyToken`).
  */
 
 import type { AgentConfig } from "@/agent"
+import { isTruthyToken } from "@/shared"
 import { registerKnob } from "../registry"
 import type { Knob, Surface } from "../types"
 
 const SURFACES: readonly Surface[] = ["bench"]
-const ENABLING = new Set(["1", "on", "true"])
 
-const parseTestRunner = (raw: string | undefined): true | undefined => {
-  if (raw === undefined) return undefined
-  return ENABLING.has(raw.trim().toLowerCase()) ? true : undefined
-}
+const parseTestRunner = (raw: string | undefined): true | undefined =>
+  isTruthyToken(raw) ? true : undefined
 
 const applyTestRunner = (cfg: AgentConfig): AgentConfig => cfg
 

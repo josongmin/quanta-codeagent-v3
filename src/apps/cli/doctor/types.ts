@@ -36,6 +36,9 @@ export interface Check {
 export interface AuthProbeResult {
   readonly provider: string
   readonly keyPresent: boolean
+  /** Effective LLM transport id (`legacy` or cloud id). Separate from `provider`. */
+  readonly effectiveTransport?: string
+  readonly transportReason?: string
   /** `true` if a token exists but is past expiry; omitted when no token. */
   readonly tokenExpired?: boolean
   /** `true` if a token is valid but within the near-expiry window ⇒ warn. */

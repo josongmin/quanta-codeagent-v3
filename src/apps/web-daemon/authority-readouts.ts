@@ -24,10 +24,9 @@
  * declared for `WebReadoutSources.skills`.
  */
 
-import { join } from "node:path"
 import { resolveThinClientRoute } from "@/agent/thin-client-dispatch"
-import { buildSkillRuntimeAuthority } from "@/runner/assemble/session-authorities"
-import { errMessage, logger, quantaHomeDirFrom, type ThinClientRoute } from "@/shared"
+import { composeSessionSkillAuthority } from "@/runner/assemble/session-authorities"
+import { logger, type ThinClientRoute } from "@/shared"
 import type { SkillRuntimeAuthority } from "@/skill"
 
 /** The narrow structural row the web `/skills` readout renders (mirror of the
@@ -83,38 +82,21 @@ export const buildSkillsReadoutSource =
 
 /**
  * RFC-06 F4 — build the ONE durable skill runtime authority for a web-daemon
- * session (mirror of the CLI `buildCliSkillAuthority`). Same discovery the pre-F4
- * readout scan used (userDir + bundled system), now DURABLE (a JSON disabled-set
- * store under `~/.quanta`, or `<userSkillsDir>/.disabled.json`) and SHARED across
- * surfaces: the prompt/ToolSearch/invocation read it via `config.skills.authority`
- * and the `/skills` readout reads its `active` projection. `orgConfigDir` is left
- * null (no admin policy wired at this surface yet — the builder's real
- * `loadAdminPolicy` still runs and returns null). Fail-open ⇒ undefined ⇒ the
- * readout serves the honest missing-source line and `buildSkillBlock` mints the
- * interim authority. Lives here (not `runtime-factory.ts`) to keep that
- * composition root under the god-module cap.
+ * session (mirror of the CLI composer). Org dir is resolved once and passed
+ * into snapshot+policy. Malformed org-policy stays fail-loud; generic
+ * construction errors fail-open with a warning.
  */
 export const buildWebSkillAuthority = async (
   skills: { readonly dir?: string } | undefined,
   env: Record<string, string | undefined>,
-): Promise<SkillRuntimeAuthority | undefined> => {
-  if (skills === undefined) return undefined
-  const dir = skills.dir
-  try {
-    return await buildSkillRuntimeAuthority({
-      snapshotInputs: dir !== undefined ? { userDir: dir } : {},
-      disabledSetPath:
-        dir !== undefined
-          ? join(dir, ".disabled.json")
-          : join(quantaHomeDirFrom(env), "skills-disabled.json"),
-    })
-  } catch (e) {
-    logger.warn(
-      "web-daemon: skill runtime authority build failed; continuing without convergence",
-      {
-        error: errMessage(e),
-      },
-    )
-    return undefined
-  }
-}
+): Promise<SkillRuntimeAuthority | undefined> =>
+  composeSessionSkillAuthority({
+    ...(skills !== undefined ? { skills } : {}),
+    env,
+    warn: (info) => {
+      logger.warn(
+        "web-daemon: skill runtime authority build failed; continuing without convergence",
+        { error: info.error },
+      )
+    },
+  })

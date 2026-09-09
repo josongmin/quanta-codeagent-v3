@@ -53,6 +53,7 @@ const makeControlledProvider = (): {
         return {
           redirectUri: "http://localhost:1455/auth/callback",
           received,
+          close() {},
         }
       },
     },

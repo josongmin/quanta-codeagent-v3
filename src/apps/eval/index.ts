@@ -56,10 +56,11 @@
  * anything else (progress spam, debug traces) belongs in `logger`, or in the
  * library module that owns the work, which is NOT covered by this override.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import { DEFAULT_MODEL, type LLMPort, type Provider, pickProvider, tryCreateLLM } from "@/llm"
 import { errMessage, logger, setTerminalIo } from "@/shared"
+import { loadEnvFiles } from "@/shared/env-files"
 import { runAudit } from "./audit"
 import { isKnownAdapter, KNOWN_ADAPTERS, runCompare } from "./compare"
 import {
@@ -137,41 +138,7 @@ const csvValues = (raw: string | undefined): readonly string[] | undefined => {
   return values.length === 0 ? undefined : values
 }
 
-// ── tiny dotenv (no dep, first-wins; mirrors apps/bench) ─────────────────────
-
-const unquote = (v: string): string =>
-  (v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))
-    ? v.slice(1, -1)
-    : v
-
-/** One `KEY=value` assignment from a dotenv file, or `null` for a line that
- *  carries none (blank, comment, or missing `=`).
- *
- *  A unit because "what counts as an assignment" is the whole of this dialect:
- *  the blank/comment skip, the optional `export ` prefix, and the quote
- *  stripping are one grammar, and `loadEnv` above only decides first-wins. */
-const parseEnvLine = (raw: string): { key: string; value: string } | null => {
-  let line = raw.trim()
-  if (line === "" || line.startsWith("#")) return null
-  if (line.startsWith("export ")) line = line.slice("export ".length).trimStart()
-  const eq = line.indexOf("=")
-  if (eq <= 0) return null
-  return { key: line.slice(0, eq).trim(), value: unquote(line.slice(eq + 1).trim()) }
-}
-
-const loadEnv = (files: readonly string[]): void => {
-  for (const f of files) {
-    const p = resolve(process.cwd(), f)
-    if (!existsSync(p)) continue
-    for (const raw of readFileSync(p, "utf8").split("\n")) {
-      const entry = parseEnvLine(raw)
-      if (entry === null) continue
-      if (process.env[entry.key] === undefined) process.env[entry.key] = entry.value
-    }
-  }
-}
-
-loadEnv([".env", ".env.local", ".env.dev"])
+loadEnvFiles([".env.dev", ".env.local", ".env"])
 
 // ── provider pick + LLM construction (delegated to the shared @/llm factory) ──
 // Provider precedence, per-provider key env vars, OPENAI_BASE_URL, and the

@@ -563,10 +563,8 @@ export class LspClient implements LspPort {
       this.sendNotification("textDocument/didClose", { textDocument: { uri } })
     }
     this.opened.clear()
-    // Drop the per-session URI-keyed caches so a stopped client retains no
-    // document text or diagnostics (the maps would otherwise live until GC even
-    // though the session is over). Waiters are settled by `failAllPending` /
-    // their own timeout; clearing the registry just frees the keys.
+    // Drop the per-session URI-keyed caches. `clear()` settles waiters immediately
+    // so stop does not wait for the diagnostics timeout (C-F12).
     this.diagnosticsHub.clear()
 
     if (!proc) return

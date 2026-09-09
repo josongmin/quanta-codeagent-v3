@@ -50,15 +50,28 @@ import type { UserInputOutcome, UserInputRequester } from "@/tool"
  */
 export type WebUserInputRequest = Parameters<UserInputRequester>[0] & {
   readonly choiceDetails?: readonly PlanInputChoiceDetail[]
+  /** Originating session. Optional so existing promptId-only callers stay valid. */
+  readonly sessionId?: string
+  /** Originating turn. `cancelTurn` matches this identity only. */
+  readonly turnId?: string
+  /** Originating abort. Abort settles THIS request; other turns stay pending. */
+  readonly signal?: AbortSignal
 }
 
 export type WebUserInputRequester = (req: WebUserInputRequest) => Promise<UserInputOutcome>
 
+export interface WebUserInputPendingIdentity {
+  readonly promptId: string
+  readonly sessionId?: string
+  readonly turnId?: string
+}
+
 /**
  * The handle the composition root wires: `port` goes onto
  * `AgentConfig.userInputPort`; `resolve` is called by the server when a
- * `planInputAnswer` frame arrives; `cancelAll` on disconnect; `pendingCount`
- * for observability + the hellgate's no-leak assertion.
+ * `planInputAnswer` frame arrives; `cancelAll` on disconnect; `cancelTurn`
+ * on turn abort; `pendingCount` for observability + the hellgate's no-leak
+ * assertion.
  */
 export interface WebUserInputPortHandle {
   /** The requester the `request_user_input` tool invokes. Emits a
@@ -70,8 +83,12 @@ export interface WebUserInputPortHandle {
    *  id is unknown OR already resolved (double-resolve guard). */
   resolve(promptId: string, outcome: UserInputOutcome): boolean
   /** Resolve EVERY pending request with `{decision:"cancelled"}`. After this
-   *  call the pending map is empty (no leaked resolver). Idempotent. */
+   *  call the pending map is empty (no leaked resolver). Idempotent.
+   *  Socket-close cleanup ONLY — turn abort must call {@link cancelTurn}. */
   cancelAll(): void
+  /** Settle pending requests for one turn. Other turns stay. Returns how many
+   *  requests were cancelled. */
+  cancelTurn(turnId: string): number
   /** How many requests are currently awaiting an answer. */
   pendingCount(): number
 }
@@ -87,8 +104,13 @@ export interface WebUserInputPortDeps {
  * mints it alongside the agent-state source, gated on the same flag).
  */
 export const createWebUserInputPort = (deps: WebUserInputPortDeps): WebUserInputPortHandle => {
-  // promptId → the resolver for the awaiting `port()` promise.
-  const pending = new Map<string, (o: UserInputOutcome) => void>()
+  type Pending = {
+    readonly settle: (o: UserInputOutcome) => void
+    readonly identity: WebUserInputPendingIdentity
+    readonly signal?: AbortSignal
+    abortListener?: (() => void) | undefined
+  }
+  const pending = new Map<string, Pending>()
 
   /** Emit one observation through the sink, swallowing any throw (a hostile /
    *  dead sink must never strand the agent's pending promise). */
@@ -115,6 +137,24 @@ export const createWebUserInputPort = (deps: WebUserInputPortDeps): WebUserInput
         }
       : { type: "plan_user_input_resolved", promptId, decision: "cancelled" }
 
+  const detachAbort = (entry: Pending): void => {
+    if (entry.abortListener !== undefined && entry.signal !== undefined) {
+      entry.signal.removeEventListener("abort", entry.abortListener)
+      entry.abortListener = undefined
+    }
+  }
+
+  const resolve = (promptId: string, outcome: UserInputOutcome): boolean => {
+    const entry = pending.get(promptId)
+    if (entry === undefined) return false
+    // Delete BEFORE invoking ⇒ a re-entrant / racing second resolve finds no
+    // entry and is a no-op (the promise settles exactly once).
+    pending.delete(promptId)
+    detachAbort(entry)
+    entry.settle(outcome)
+    return true
+  }
+
   const port: WebUserInputRequester = (req) => {
     // Surface the prompt to the browser FIRST so a connected panel renders the
     // answer affordance before we park the resolver.
@@ -127,24 +167,34 @@ export const createWebUserInputPort = (deps: WebUserInputPortDeps): WebUserInput
       // byte-identical to the pre-fix shape.
       ...(req.choiceDetails !== undefined ? { choiceDetails: req.choiceDetails } : {}),
     })
+    if (req.signal?.aborted) {
+      const cancelled: UserInputOutcome = { decision: "cancelled" }
+      safeCapture(resolvedObservation(req.promptId, cancelled))
+      return Promise.resolve(cancelled)
+    }
     return new Promise<UserInputOutcome>((res) => {
-      pending.set(req.promptId, (o) => {
-        // Mirror the resolution back to the browser so the panel clears its
-        // pending card (and any other connection sees the resolve).
-        safeCapture(resolvedObservation(req.promptId, o))
-        res(o)
-      })
+      const identity: WebUserInputPendingIdentity = {
+        promptId: req.promptId,
+        ...(req.sessionId !== undefined ? { sessionId: req.sessionId } : {}),
+        ...(req.turnId !== undefined ? { turnId: req.turnId } : {}),
+      }
+      const entry: Pending = {
+        settle: (o) => {
+          safeCapture(resolvedObservation(req.promptId, o))
+          res(o)
+        },
+        identity,
+        ...(req.signal !== undefined ? { signal: req.signal } : {}),
+      }
+      if (req.signal !== undefined) {
+        const onAbort = (): void => {
+          resolve(req.promptId, { decision: "cancelled" })
+        }
+        entry.abortListener = onAbort
+        req.signal.addEventListener("abort", onAbort, { once: true })
+      }
+      pending.set(req.promptId, entry)
     })
-  }
-
-  const resolve = (promptId: string, outcome: UserInputOutcome): boolean => {
-    const r = pending.get(promptId)
-    if (r === undefined) return false
-    // Delete BEFORE invoking ⇒ a re-entrant / racing second resolve finds no
-    // entry and is a no-op (the promise settles exactly once).
-    pending.delete(promptId)
-    r(outcome)
-    return true
   }
 
   const cancelAll = (): void => {
@@ -153,15 +203,26 @@ export const createWebUserInputPort = (deps: WebUserInputPortDeps): WebUserInput
     // map. After this method returns the map is guaranteed empty (no leak).
     const entries = [...pending.values()]
     pending.clear()
-    for (const r of entries) {
-      r({ decision: "cancelled" })
+    for (const entry of entries) {
+      detachAbort(entry)
+      entry.settle({ decision: "cancelled" })
     }
+  }
+
+  const cancelTurn = (turnId: string): number => {
+    let n = 0
+    for (const [promptId, entry] of [...pending.entries()]) {
+      if (entry.identity.turnId !== turnId) continue
+      if (resolve(promptId, { decision: "cancelled" })) n += 1
+    }
+    return n
   }
 
   return {
     port,
     resolve,
     cancelAll,
+    cancelTurn,
     pendingCount: () => pending.size,
   }
 }

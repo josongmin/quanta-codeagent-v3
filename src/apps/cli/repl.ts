@@ -12,8 +12,9 @@ import { getDefaultPermissionStore, type PermissionStore } from "@/permission"
 import { buildSessionAuthorities } from "@/runner/assemble/session-authorities"
 import { bootstrapCrashResumeOffers, selectCrashResumeReinject } from "@/runner/orchestrate"
 import { runSessionCommand as runSessionCommandInner } from "@/runner/session-ops"
+import { redactSecrets } from "@/security"
 import { clearSessionInterrupted, crashResumeEnabled, listSessions } from "@/session"
-import { gateOn, runtimeConfig } from "@/shared"
+import { errMessage, gateOn, logger, runtimeConfig } from "@/shared"
 import { composeShellObservers, type ShellExecObserver } from "@/tool"
 import { readCliKnob } from "./cli-knobs-accessor"
 import { emitConfigMigrationImport, emitConfigMigrationNotice } from "./config-migration-notice"
@@ -237,6 +238,28 @@ const cliBuildIdleGuards: Parameters<typeof setupSession>[0]["buildIdleGuards"] 
   return { idleMonitor, rejectCounter }
 }
 
+/**
+ * Fail-soft durable permission-store load (G-F8). Fallback stays `undefined`.
+ * Warning fires once; a throwing sink does not become a boot crash.
+ */
+export const loadPermissionStoreFailSoft = async (
+  open: () => Promise<PermissionStore>,
+  warn: (message: string) => void,
+): Promise<PermissionStore | undefined> => {
+  try {
+    return await open()
+  } catch (e) {
+    try {
+      warn(
+        `cli.loadPermissionStore: ${redactSecrets(errMessage(e), { origin: "envelope_jsonl" }).text}`,
+      )
+    } catch {
+      // Diagnostic failure must not convert fail-soft into throw.
+    }
+    return undefined
+  }
+}
+
 /** Bundle the {@link setupSession} factories the host wires. CLI-06
  *  (ADR-0307) — the 10 surface-adapter factories live under
  *  `./repl/factories/`; the wrappers here just narrow the host's `unknown`
@@ -285,15 +308,15 @@ const sessionSetupDeps: Parameters<typeof setupSession>[0] = {
   createSubagentBackedGuardianAssess,
   buildMcpSurfaceInfo,
   buildIdleGuards: cliBuildIdleGuards,
-  loadPermissionStore: async (): Promise<PermissionStore | undefined> => {
-    try {
-      const store = getDefaultPermissionStore()
-      await store.load()
-      return store
-    } catch {
-      return undefined
-    }
-  },
+  loadPermissionStore: () =>
+    loadPermissionStoreFailSoft(
+      async () => {
+        const store = getDefaultPermissionStore()
+        await store.load()
+        return store
+      },
+      (message) => logger.warn(message),
+    ),
   installPills,
 }
 

@@ -1,5 +1,8 @@
 import { Database } from "bun:sqlite"
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import type { IndexerFileChunk } from "@/retrieval"
 import {
   bindPersistedEmbeddingSpace,
@@ -11,6 +14,10 @@ import {
   resolveIndexEmbedder,
   SemanticBackendUnavailableError,
 } from "@/runner/assemble/search-index-backend"
+import {
+  buildSearchPipelineFromEnv,
+  clearSearchPipelineWireForTests,
+} from "@/runner/assemble/search-pipeline"
 
 const chunk = (path: string, text: string): IndexerFileChunk => ({
   path,
@@ -148,5 +155,29 @@ describe("E-EMBED-01 embedding space", () => {
     expect(n?.n).toBe(1)
     const bind = bindPersistedEmbeddingSpace(db as never, "search_index_vss", HASH_EMBEDDING_SPACE)
     expect(bind.kind).toBe("unknown")
+  })
+})
+
+describe("E-SEARCH-01.4 search pipeline typed failure", () => {
+  afterEach(() => {
+    clearSearchPipelineWireForTests()
+  })
+
+  test("explicit invalid store does not start a silent indexer", () => {
+    const dir = mkdtempSync(join(tmpdir(), "r10-pipe-"))
+    try {
+      const wired = buildSearchPipelineFromEnv(
+        {
+          QUANTA_INDEX: "on",
+          QUANTA_VECTOR_STORE: "nope",
+          QUANTA_INDEX_INTERVAL_MS: "1000000",
+        },
+        dir,
+      )
+      expect(wired?.indexer).toBeNull()
+      expect(wired?.intervalHandle).toBeNull()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

@@ -238,7 +238,8 @@ export const listSessions = async (
     doc.invalid.length > 0 || (await hasUnindexedSessionSnapshots(path, doc.map))
   const map = shouldRecover
     ? await withIndexMutex(path, async () => {
-        const recovered = await recoverFromSnapshots(path, doc)
+        const fresh = await readIndexDocument(path)
+        const recovered = await recoverFromSnapshots(path, fresh)
         await writeIndexMap(path, recovered)
         return recovered
       })

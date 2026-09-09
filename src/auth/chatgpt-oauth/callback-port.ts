@@ -50,13 +50,17 @@ export interface OAuthCallbackHandle {
    *  malformed callback. Resolution and rejection are one-shot — provider
    *  ignores any subsequent callbacks on the same handle. */
   readonly received: Promise<OAuthCallbackResult>
+  /** Idempotent resource release. Unsettled `received` rejects; the loopback
+   *  listener (or equivalent) is dropped so the same port can rebind. Safe
+   *  after success, timeout, abort, or opener failure. */
+  close(): void
 }
 
 export interface OAuthCallbackProvider {
   /** Begin listening for the OAuth callback. Returns the redirect_uri the
    *  authorize URL should embed, plus a promise that settles with the code
-   *  (or a typed error). Implementations are responsible for their own
-   *  teardown when `received` settles (close the HTTP server, drop the
-   *  deep-link listener, unsubscribe from the EventBus, …). */
+   *  (or a typed error). The caller owns `close()` from the moment `start`
+   *  resolves — including opener failure — and MUST call it. Settling
+   *  `received` also releases resources; `close` stays idempotent. */
   start(input: OAuthCallbackStartInput): Promise<OAuthCallbackHandle>
 }

@@ -20,21 +20,28 @@ export class DiagnosticsHub {
     if (existing) return Promise.resolve(existing)
 
     return new Promise<Diagnostic[]>((resolve) => {
-      const waiters = this.diagnosticsWaiters.get(uri) ?? []
       let settled = false
-      const settle = (d: Diagnostic[]) => {
+      const finish = (d: Diagnostic[]): void => {
         if (settled) return
         settled = true
         clearTimeout(timer)
         resolve(d)
       }
+      const dropSelf = (): void => {
+        const list = this.diagnosticsWaiters.get(uri)
+        if (list === undefined) return
+        const idx = list.indexOf(finish)
+        if (idx >= 0) list.splice(idx, 1)
+        if (list.length === 0) this.diagnosticsWaiters.delete(uri)
+      }
       const timer = setTimeout(() => {
-        // No publish within the bound: treat as "no diagnostics" rather than
-        // hang. Servers emit an empty array for clean files, but a timeout is
-        // the safety net if a notification is somehow missed.
-        settle(this.diagnosticsByUri.get(uri) ?? [])
+        // Timeout drops ONLY this waiter. Sibling waiters on the same URI
+        // stay until publish, their own timeout, or dispose.
+        dropSelf()
+        finish(this.diagnosticsByUri.get(uri) ?? [])
       }, this.requestTimeoutMs)
-      waiters.push(settle)
+      const waiters = this.diagnosticsWaiters.get(uri) ?? []
+      waiters.push(finish)
       this.diagnosticsWaiters.set(uri, waiters)
     })
   }
@@ -51,10 +58,11 @@ export class DiagnosticsHub {
     }
   }
 
-  /** Drop the per-session URI-keyed caches. */
+  /** Drop the per-session URI-keyed caches. Waiters are settled immediately
+   *  (same as {@link failAll}) so stop/teardown does not wait for timeout. */
   clear(): void {
+    this.failAll()
     this.diagnosticsByUri.clear()
-    this.diagnosticsWaiters.clear()
   }
 
   /** Unblock every diagnostics waiter with an empty result so callers that

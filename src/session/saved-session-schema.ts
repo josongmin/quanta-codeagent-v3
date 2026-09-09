@@ -6,7 +6,7 @@
  */
 import { z } from "zod"
 import { errMessage, logger } from "@/shared"
-import { fileExists, readFile } from "@/storage"
+import { readFile, statFile } from "@/storage"
 import {
   persistedBlockerObservationSchema,
   persistedObjectiveBlockerSchema,
@@ -377,7 +377,16 @@ export type SessionSnapshotRead =
 
 /** Typed snapshot file read. Missing is distinct from corrupt/unreadable. */
 export const readSessionSnapshot = async (path: string): Promise<SessionSnapshotRead> => {
-  if (!(await fileExists(path))) return { kind: "missing" }
+  try {
+    const info = await statFile(path)
+    if (info.isDirectory || info.isFIFO || info.isCharacterDevice || info.isBlockDevice) {
+      const reason = "snapshot path is not a regular file"
+      logger.warn("session: read failed", { path, error: reason })
+      return { kind: "unreadable", reason }
+    }
+  } catch {
+    return { kind: "missing" }
+  }
   let raw: string
   try {
     raw = await readFile(path)

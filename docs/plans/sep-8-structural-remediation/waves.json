@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "sourceHead": "f3a93d5fd22855951ef4f871813e2b55b0f41b0c",
+  "sourceHead": "c156d76397feb63ec1c4992c07d011dd0647a4c6",
   "auditDigest": "769530ddf9d76b68bdfdf740771155bd2b255a79c9319516956283469bbedba8",
-  "status": "w4-implemented",
+  "status": "w6-implemented",
   "maxParallelWriters": 3,
   "scopeSyntax": "trailing slash = subtree; otherwise exact file; no globs; reserved and index.ts basename always excluded",
   "reservedScopes": [
@@ -818,7 +818,8 @@
         "src/apps/cli/repl/session-setup.ts",
         "src/apps/web-daemon/authority-readouts.ts",
         "src/apps/cli/repl.ts",
-        "src/apps/agent/mode-presets/system.ts"
+        "src/apps/agent/mode-presets/system.ts",
+        "src/runner/assemble/session-authorities/index.ts"
       ]
     }
   ],

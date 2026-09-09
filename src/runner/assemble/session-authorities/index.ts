@@ -48,8 +48,13 @@ export {
 // disabled filter); it calls the REAL registry + admin-policy loaders and derives
 // the three consistent projections at one unified revision.
 export type { BuildSkillRuntimeAuthorityInput } from "./build-skills"
-export { buildSkillRuntimeAuthority } from "./build-skills"
+export { buildSkillRuntimeAuthority, SkillAdminPolicyLoadError } from "./build-skills"
 export { decodeObjectiveSnapshot, normalizeObjectiveSnapshot } from "./restore"
+export {
+  type ComposeSessionSkillAuthorityInput,
+  composeSessionSkillAuthority,
+} from "./skill-inputs/compose-session-skill-authority"
+export { defaultOrgConfigDir, resolveOrgConfigDir } from "./skill-inputs/org-config-dir"
 export type {
   AttentionReader,
   BuildSessionAuthoritiesInput,

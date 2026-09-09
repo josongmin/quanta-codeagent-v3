@@ -3,6 +3,7 @@ import { AgentArgsError } from "@/host/runtime"
 import { applyGoalPreset } from "@/objective"
 import { installOtelSpanExportFromEnv } from "@/observability/otel-span-export"
 import { selectRemoteRunner } from "@/remote"
+import { pickProviderCore, projectLlmTransport } from "@/runner/assemble"
 import { errMessage, gateDisabled, logger, setTerminalIo } from "@/shared"
 import { CLI_SEEDED_GATE_NAMES } from "./cli-seeded-gates"
 import { loadEnvFiles } from "./dotenv"
@@ -13,6 +14,7 @@ import { runRepl, runSessionMain, runSlashMain, topLevelUsage } from "./repl"
 import { SessionStartupError } from "./repl/session-startup-error"
 import { installCliSandbox } from "./sandbox-wire"
 import { isSlashCommand } from "./slash-commands"
+import { captureStatusBootProjection } from "./status-cmd"
 import { installUnhandledRejectionDefense } from "./unhandled-rejection-defense"
 import { renderVersion } from "./version-cmd"
 import { QUANTA_VERSION } from "./welcome-banner"
@@ -50,6 +52,14 @@ applyGoalPreset(process.env, !gateDisabled(process.env, "QUANTA_GOAL"))
 for (const gate of CLI_SEEDED_GATE_NAMES) {
   if (process.env[gate] === undefined) process.env[gate] = "1"
 }
+
+captureStatusBootProjection(
+  projectLlmTransport({
+    transport: process.env.QUANTA_LLM_TRANSPORT,
+    env: process.env,
+    credentialProvider: pickProviderCore({ env: process.env }),
+  }),
+)
 
 /** Validated `QUANTA_REMOTE_TIMEOUT_MS` → optional `{ defaultTimeoutMs }`.
  *  A raw `Number.parseInt` would forward `NaN` on garbage input (silently

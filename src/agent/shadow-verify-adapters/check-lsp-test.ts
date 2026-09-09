@@ -32,6 +32,7 @@ import type { Diagnostic, DiagnosticSeverity } from "@/lsp"
 import { type LspClient, PyrightAdapter, TypescriptAdapter } from "@/lsp"
 import { runShell } from "@/runtime"
 import { errMessage, logger } from "@/shared"
+import { isAvailable } from "../lsp-bridge/availability"
 import type { ShadowCheck, ShadowCheckPort, ShadowDiagnostic } from "../shadow-verify"
 
 /** Local view of the per-language wiring; mirrors `@/agent/lsp-bridge` but
@@ -58,36 +59,6 @@ const SERVERS: ReadonlyArray<{ exts: readonly string[]; spec: ServerSpec }> = [
 const specFor = (filePath: string): ServerSpec | null => {
   const ext = extname(filePath).toLowerCase()
   return SERVERS.find((entry) => entry.exts.includes(ext))?.spec ?? null
-}
-
-/** Probe whether a server binary is launchable. Cached per process so a single
- *  verify run does not re-spawn `--version` per file. */
-const PROBE_TIMEOUT_MS = 5_000
-const availabilityCache = new Map<string, Promise<boolean>>()
-const probeAvailable = async (bin: string): Promise<boolean> => {
-  try {
-    const proc = Bun.spawn([bin, "--version"], { stdout: "pipe", stderr: "pipe" })
-    const exit = await Promise.race([
-      proc.exited,
-      new Promise<number>((r) => setTimeout(() => r(-1), PROBE_TIMEOUT_MS)),
-    ])
-    try {
-      proc.kill()
-    } catch {
-      // already exited
-    }
-    await proc.exited.catch(() => undefined)
-    return exit !== -1
-  } catch {
-    return false
-  }
-}
-const isAvailable = (bin: string): Promise<boolean> => {
-  const cached = availabilityCache.get(bin)
-  if (cached !== undefined) return cached
-  const probe = probeAvailable(bin)
-  availabilityCache.set(bin, probe)
-  return probe
 }
 
 /** Map LSP severity → ShadowDiagnostic severity (closed 3-arm union). */

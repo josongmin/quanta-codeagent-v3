@@ -84,9 +84,19 @@ export const attachLspDiagnosticsHook = (
     const key = extname(filePath).toLowerCase()
     const existing = sessions.get(key)
     if (existing !== undefined) return existing
-    const opened = opts.open(filePath, opts.cwd)
-    sessions.set(key, opened)
-    return opened
+    let tracked: Promise<DiagnosticsSession | null>
+    tracked = Promise.resolve(opts.open(filePath, opts.cwd)).then(
+      (opened) => {
+        if (opened === null && sessions.get(key) === tracked) sessions.delete(key)
+        return opened
+      },
+      (err: unknown) => {
+        if (sessions.get(key) === tracked) sessions.delete(key)
+        throw err
+      },
+    )
+    sessions.set(key, tracked)
+    return tracked
   }
 
   opts.hooks.on("post_tool_use", async (event) => {

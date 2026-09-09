@@ -19,6 +19,7 @@
 
 import { isExpired, readResolvedToken, resolveChatgptTokenCandidates } from "@/auth/chatgpt-oauth"
 import { pickProvider } from "@/llm"
+import { projectLlmTransport } from "@/runner/assemble"
 import { checkSessionStoreHealth, listSessions } from "@/session"
 import { errMessage, runtimeConfig } from "@/shared"
 import type { SlashContext } from "../slash-contract"
@@ -41,6 +42,11 @@ export const defaultDoctorProbes = (ctx: SlashContext): DoctorProbes => {
         ...(ctx.prefsHome !== undefined ? { QUANTA_PREFS_HOME: ctx.prefsHome } : {}),
       }
       const provider = pickProvider(env)
+      const transport = projectLlmTransport({
+        transport: env.QUANTA_LLM_TRANSPORT,
+        env,
+        credentialProvider: provider,
+      })
       const keyPresent = env.OPENAI_API_KEY !== undefined || env.ANTHROPIC_API_KEY !== undefined
       // ChatGPT-OAuth token state (presence/expiry only — never the value).
       let tokenExpired: boolean | undefined
@@ -63,9 +69,16 @@ export const defaultDoctorProbes = (ctx: SlashContext): DoctorProbes => {
       const result: {
         provider: string
         keyPresent: boolean
+        effectiveTransport?: string
+        transportReason?: string
         tokenExpired?: boolean
         tokenExpiringSoon?: boolean
-      } = { provider, keyPresent }
+      } = {
+        provider,
+        keyPresent,
+        effectiveTransport: transport.effectiveId,
+        transportReason: transport.reason,
+      }
       if (tokenExpired !== undefined) result.tokenExpired = tokenExpired
       if (tokenExpiringSoon !== undefined) result.tokenExpiringSoon = tokenExpiringSoon
       return result

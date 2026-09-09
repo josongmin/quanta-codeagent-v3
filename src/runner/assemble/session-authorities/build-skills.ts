@@ -27,6 +27,7 @@
  * are OMITTED when absent.
  */
 
+import { errMessage } from "@/shared"
 import {
   type AdminPolicyReader,
   buildSkillSnapshot,
@@ -37,6 +38,14 @@ import {
   type SkillRuntimeAuthority,
   type SkillSnapshotInputs,
 } from "@/skill"
+
+/** Fail-loud wrapper so surface wiring cannot collapse malformed org policy into disable. */
+export class SkillAdminPolicyLoadError extends Error {
+  constructor(cause: unknown) {
+    super(errMessage(cause))
+    this.name = "SkillAdminPolicyLoadError"
+  }
+}
 
 export interface BuildSkillRuntimeAuthorityInput {
   /** Host discovery inputs for the real `buildSkillSnapshot` (user/system/repo/
@@ -74,10 +83,15 @@ export const buildSkillRuntimeAuthority = async (
     input.orgConfigDir !== undefined
       ? input.orgConfigDir
       : (input.snapshotInputs.orgConfigDir ?? null)
-  const loaded = await loadAdminPolicy({
-    orgConfigDir,
-    ...(input.readPolicyFile !== undefined ? { readPolicyFile: input.readPolicyFile } : {}),
-  })
+  let loaded: Awaited<ReturnType<typeof loadAdminPolicy>>
+  try {
+    loaded = await loadAdminPolicy({
+      orgConfigDir,
+      ...(input.readPolicyFile !== undefined ? { readPolicyFile: input.readPolicyFile } : {}),
+    })
+  } catch (e) {
+    throw new SkillAdminPolicyLoadError(e)
+  }
 
   const disabledStore: DisabledStorePort =
     input.disabledStore ??
