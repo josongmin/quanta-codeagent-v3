@@ -1,0 +1,12 @@
+export const NIGHTLY_SCHEDULES = [
+  { file: "ci.yml", cron: "0 6 * * *", purpose: "nightly eval" },
+  { file: "agent-nightly-regression.yml", cron: "0 8 * * *", purpose: "agent regression" },
+  { file: "grounding-live-gate.yml", cron: "0 9 * * *", purpose: "grounding live gate" },
+] as const
+
+export const NIGHTLY_MEMBERSHIP = {
+  schema: "quanta.verification-nightly.v1",
+  cacheMode: "off",
+  includes: ["exhaustive-fuzz", "quarantine-lane", "toolchain-matrix"],
+  excludesPaidEvalMove: true,
+} as const

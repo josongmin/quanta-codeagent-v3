@@ -242,6 +242,10 @@ export const NON_GATING_WORKFLOWS: readonly { readonly file: string; readonly wh
     file: "grounding-live-gate.yml",
     why: "live-LLM canary; opt-in via the `grounding-gate` label",
   },
+  {
+    file: "verification-nightly.yml",
+    why: "scheduled cache-off verification; first run is dispatch-gated, never a merge gate",
+  },
   { file: "quanta-pr-bot.yml.template", why: "a template, not an installed workflow" },
 ]
 
@@ -302,6 +306,11 @@ export const WORKFLOW_EXEMPT: readonly {
     file: "ci.yml",
     match: "writeSyntheticCorpus",
     why: "eval job (non-blocking, needs a key) — the synthetic-corpus writer inside that step's shell block",
+  },
+  {
+    file: "ci.yml",
+    match: "verification-matrix-cli.ts",
+    why: "shadow matrix planner/worker/aggregate; required still consumes the single full-suite job",
   },
   {
     file: "ci.yml",

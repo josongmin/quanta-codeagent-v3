@@ -1,0 +1,27 @@
+# Scheduled verification lane (TV-13). Not a merge gate.
+#
+# First real nightly run is opt-in via workflow_dispatch. cache=off so a
+# receipt cannot bless a cold lane. Paid eval stays in ci.yml 06:00.
+name: verification-nightly
+
+on:
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  nightly:
+    name: verification-nightly (cache-off)
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: verify nightly
+        run: bun run verify:nightly

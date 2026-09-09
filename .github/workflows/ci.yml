@@ -1,10 +1,14 @@
-# Test-pyramid CI (ADR-0003, RFC §10).
+# Test-pyramid CI (ADR-0003, RFC §10), decomposed (TV-11/12).
 #
-#   pyramid   unit + integration — deterministic, fast, BLOCKING on every push/PR
-#   contract  real Docker + language servers + python+lancedb — REQUIRE_CONTRACT, BLOCKING on PR/main
-#   eval      real LLM on a synthetic SWE-bench corpus — NON-BLOCKING, trend only
+#   static-code / catalog / full-suite / pty / web / toolchain
+#     — former pyramid steps, now parallel jobs. The `pyramid` check NAME is
+#     preserved as an aggregator so existing required-context rules keep matching.
+#   required   — concurrent aggregator including contract
+#   contract   — real Docker + language servers + python+lancedb; blocking on PR/main
+#   eval       — real LLM; NON-BLOCKING, trend only
 #
-# The pyramid job is the merge gate. contract gates main. eval never gates.
+# Shadow matrix (full-plan/full-shard/full-aggregate) is off unless
+# vars.QUANTA_SHADOW_MATRIX == '1'. Required still consumes full-suite.
 name: ci
 
 on:
@@ -14,13 +18,59 @@ on:
   schedule:
     - cron: "0 6 * * *" # nightly eval (06:00 UTC)
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
 jobs:
-  pyramid:
-    name: pyramid (unit + integration)
+  full-plan:
+    name: full-plan (shadow)
+    if: ${{ vars.QUANTA_SHADOW_MATRIX == '1' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run tools/dev/verification-matrix-cli.ts plan
+
+  full-shard:
+    name: full-shard (shadow)
+    if: ${{ vars.QUANTA_SHADOW_MATRIX == '1' }}
+    needs: [full-plan]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run tools/dev/verification-matrix-cli.ts worker
+
+  full-aggregate:
+    name: full-aggregate (shadow)
+    if: ${{ vars.QUANTA_SHADOW_MATRIX == '1' }}
+    needs: [full-plan, full-shard]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run tools/dev/verification-matrix-cli.ts aggregate
+
+  static-code:
+    name: static-code
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -61,6 +111,49 @@ jobs:
         # rule that fires while ABSENT from that file fails as "unpinned" so a
         # biome upgrade / newly-enabled rule cannot add debt silently.
         run: bun run lint:debt
+
+  catalog:
+    name: catalog
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: feature-catalog — validate + diff + ratchet
+        # Hard-gates on:
+        #   validate     — every evidence file/ADR/test exists
+        #   diff         — docs/10.feature-catalog.md is in sync with YAMLs
+        #   lint         — empty-stub count + orphan Accepted ADRs do not grow
+        # PR-only check-changed gate runs in the `feature-catalog-pr` job below.
+        run: |
+          bun fc validate
+          bun fc diff
+          bun fc lint
+      - name: silent-catch baseline gate (R10 — read-only --check mode)
+        # Read-only counterpart of `bun run baseline:silent-catch`. CI cannot
+        # commit a tightened BASELINES table, so this step BLOCKS when:
+        #   exit 4 — a tighten is available (operator must run the script
+        #            locally + commit the diff)
+        #   exit 5 — a silent-catch regression was detected (a bare `} catch {`
+        #            crept back in past the pinned baseline; fix or ADR-justify)
+        # Exit 0 covers both "ratchet steady" and "BASELINES table not yet
+        # wired" so landing the script before the ratchet contract migrates
+        # does not block unrelated PRs (idempotent no-op shape).
+        run: bun run baseline:silent-catch --check
+
+  full-suite:
+    name: full-suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
       - name: full suite (guarded — one chunked run of every test tier)
         # ONE authoritative execution: unit + integration + meta/adversarial/
         # measurement + colocated src/tools tests through the chunked runner.
@@ -126,6 +219,17 @@ jobs:
         run: bun run tools/dev/unit-speed-budget.ts .cache/full-junit.xml --scope=tests/unit/
       - name: pm DoD ratchet (receipt-derived — the test ran in the full suite)
         run: bun run tools/dev/junit-file-green.ts .cache/full-junit.xml tests/unit/pm-dod-ratchet.test.ts
+
+  pty:
+    name: pty
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
       - name: interactive CLI e2e (PTY)
         # aug-23 audit — this suite was the ONLY coverage of the raw-mode
         # interactive input layer and ran in NO workflow, so it rotted unseen.
@@ -142,6 +246,17 @@ jobs:
         # it is the likeliest place for a stray file to be written next to the
         # repo rather than into the harness's temp HOME.
         run: bun run tools/dev/worktree-pollution-guard.ts -- bun run e2e:pty
+
+  web:
+    name: web
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
       - name: web-frontend suite (vitest/jsdom — bun test cannot give it a verdict)
         # 744 tests across 79 files that ran in NO gate until this step existed.
         # `bun test` DOES load them — 732 tests, 18 failures — but supplies no DOM,
@@ -154,6 +269,17 @@ jobs:
         # without that the gate fails as "no such file" and reads as broken rather
         # than as un-installed.
         run: bun run test:web-frontend
+
+  toolchain:
+    name: toolchain
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
       - name: real-toolchain e2e (opt-in lane — visible skips without the toolchain)
         # The `*-real-e2e.test.ts` lane is gated on QUANTA_REAL_TOOLCHAIN_E2E so it
         # cannot blow the per-test unit speed budget on a developer machine that
@@ -165,31 +291,27 @@ jobs:
         # 8. With the env set, the arms whose toolchain is absent degrade to VISIBLE
         # skips, which is the posture every other gate in this file already has.
         run: QUANTA_REAL_TOOLCHAIN_E2E=1 bun run test:real-toolchain
-      - name: feature-catalog — validate + diff + ratchet
-        # Hard-gates on:
-        #   validate     — every evidence file/ADR/test exists
-        #   diff         — docs/10.feature-catalog.md is in sync with YAMLs
-        #   lint         — empty-stub count + orphan Accepted ADRs do not grow
-        # PR-only check-changed gate runs in the `feature-catalog-pr` job below.
-        run: |
-          bun fc validate
-          bun fc diff
-          bun fc lint
-      - name: silent-catch baseline gate (R10 — read-only --check mode)
-        # Read-only counterpart of `bun run baseline:silent-catch`. CI cannot
-        # commit a tightened BASELINES table, so this step BLOCKS when:
-        #   exit 4 — a tighten is available (operator must run the script
-        #            locally + commit the diff)
-        #   exit 5 — a silent-catch regression was detected (a bare `} catch {`
-        #            crept back in past the pinned baseline; fix or ADR-justify)
-        # Exit 0 covers both "ratchet steady" and "BASELINES table not yet
-        # wired" so landing the script before the ratchet contract migrates
-        # does not block unrelated PRs (idempotent no-op shape).
-        run: bun run baseline:silent-catch --check
+
+  pyramid:
+    name: pyramid (unit + integration)
+    needs: [static-code, catalog, full-suite, pty, web, toolchain]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+  required:
+    name: required
+    needs: [static-code, catalog, full-suite, pty, web, toolchain, contract]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
 
   feature-catalog-pr:
     name: feature-catalog (PR — added src must be in fc)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
@@ -206,6 +328,7 @@ jobs:
   contract:
     name: contract (docker + language servers + python+lancedb)
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     # Blocking on PRs and main; skipped on the nightly schedule trigger.
     if: github.event_name != 'schedule'
     env:
@@ -233,6 +356,7 @@ jobs:
   eval:
     name: eval (real LLM — non-blocking)
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     # Nightly, or on a PR labelled "eval". Never blocks a merge.
     if: github.event_name == 'schedule' || contains(github.event.pull_request.labels.*.name, 'eval')
     continue-on-error: true
