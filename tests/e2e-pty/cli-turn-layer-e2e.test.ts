@@ -83,7 +83,7 @@ describe.skipIf(!PTY_AVAILABLE)("CLI turn-layer e2e (PTY + replay)", () => {
         },
       })
       cli = c
-      await c.waitFor(BOOT, 15_000)
+      await c.waitFor(BOOT, T)
       c.send("hello\r") // submit a turn ⇒ the replay drives the agent loop
       // Reasoning trace renders (the #11 fix). Before, thinking_delta was consumed
       // only for TTFT/tokens and never shown.
@@ -131,7 +131,7 @@ describe.skipIf(!PTY_AVAILABLE)("CLI turn-layer e2e (PTY + replay)", () => {
       },
     })
     cli = c
-    await c.waitFor(BOOT, 15_000)
+    await c.waitFor(BOOT, T)
     c.send("hello\r") // submit ⇒ sustained turn begins
     await c.waitFor("REASONING start", 12_000) // turn is mid-stream now
     c.send("QUEUEDFOLLOWUP") // type DURING the turn
@@ -159,7 +159,7 @@ describe.skipIf(!PTY_AVAILABLE)("CLI turn-layer e2e (PTY + replay)", () => {
         },
       })
       cli = c
-      await c.waitFor(BOOT, 15_000)
+      await c.waitFor(BOOT, T)
       c.send("hello\r")
       await c.waitFor("SIMPLE_ANSWER", 12_000)
       // done line: "— done (completed, 1 turns) —"
@@ -189,7 +189,7 @@ describe.skipIf(!PTY_AVAILABLE)("CLI turn-layer e2e (PTY + replay)", () => {
         },
       })
       cli = c
-      await c.waitFor(BOOT, 15_000)
+      await c.waitFor(BOOT, T)
       c.send("hello\r") // prompt 1 — starts first session
       await c.waitFor("MULTI_DONE", 12_000) // LLM replied
       // Wait for "done" AND the second readline prompt in the same waitFor.
@@ -222,7 +222,7 @@ describe.skipIf(!PTY_AVAILABLE)("CLI turn-layer e2e (PTY + replay)", () => {
         },
       })
       cli = c
-      await c.waitFor(BOOT, 15_000)
+      await c.waitFor(BOOT, T)
       c.send("hello\r")
       await c.waitFor("error:", 12_000)
     },

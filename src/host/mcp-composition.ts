@@ -38,6 +38,7 @@ import {
   type CapabilityNegotiator,
   DEFAULT_BACKOFF_POLICY,
   type ElicitationPrompter,
+  isolatedMcpEnabledFromEnv,
   McpClient,
   type McpClientTransport,
   type McpOAuthProviderPort,
@@ -94,8 +95,9 @@ export const mcpHotReloadEnabled = (): boolean =>
 /** Build the injected {@link SupervisorDeps} for one MCP server. The real
  *  clock/timer/RNG are injected ONLY here, at the composition root — the
  *  supervisor core itself never reaches for a global. The factory picks
- *  `McpClient`. When `MCP_USE_ISOLATED_SPAWN` is on, `defaultTransportFor`
- *  selects `IsolatedMcpTransport` (`process-ready`) for command servers.
+ *  `McpClient`. The host-resolved `MCP_USE_ISOLATED_SPAWN` policy is injected
+ *  into each client and selects `IsolatedMcpTransport` (`process-ready`) for
+ *  command servers.
  *  HTTP/url is unchanged. Do not construct `IsolatedMcpClient` here.
  *
  *  B1 + H19 — the inbound-capability wiring bundle (`{ negotiator, handler?,
@@ -116,11 +118,13 @@ const mcpSupervisorDepsFor = (
   oauthProvider: McpOAuthProviderPort | undefined,
   proxyEnv: ProxyEnvInput | undefined,
   resourceObserver: McpResourceObserver | undefined,
+  isolatedSpawn: boolean,
 ) => {
   return (_config: McpServerConfig): SupervisorDeps => ({
     factory: (c): SupervisableMcpClient => {
       const clientOpts: NonNullable<ConstructorParameters<typeof McpClient>[1]> = {}
       if (transportFor !== undefined) clientOpts.transport = transportFor(c)
+      if (isolatedSpawn) clientOpts.isolatedSpawn = true
       // H18 (jun-06 live-wire) — bake the OAuth provider into the restart factory
       // via the SAME helper the single-client path uses, so a reconnected client
       // RE-resolves a bearer for an `oauth:true` server. Absent ⇒ headless
@@ -813,78 +817,83 @@ export const buildMcpLoadOpts = (
      *  (byte-identical load). */
     readonly onReloadSource?: (source: McpReloadableSource) => void
   },
-): Parameters<typeof loadMcpTools>[2] => ({
-  // WS-G (UUX-6-22) — route the ALBB-09 load-error sink + the new exit sink
-  // into the health registry and the operator-notice bus (error severity: the
-  // server's tools WILL fail from here on).
-  ...(args.mcpHealth !== undefined
-    ? {
-        onServerLoadError: ({ server, error }: { server: string; error: unknown }): void => {
-          args.mcpHealth?.markDown(server, errMessage(error))
-          emitOperatorNotice({
-            severity: "error",
-            source: "mcp",
-            message: `server "${server}" failed to load: ${errMessage(error)}`,
-            hint: "its tools are unavailable; see /mcp",
-          })
-        },
-        onServerExit: ({ server, reason }: { server: string; reason?: string }): void => {
-          args.mcpHealth?.markDown(server, reason)
-          emitOperatorNotice({
-            severity: "error",
-            source: "mcp",
-            message: `server "${server}" exited${reason !== undefined ? ` (${reason})` : ""}`,
-            hint: "its tools will fail from now on; see /mcp",
-          })
-        },
-      }
-    : {}),
-  // B1 + H19 — the SAME unified `{ negotiator, handler?, rootsProvider? }` bundle
-  // feeds BOTH paths. On the supervised path it is BAKED into the restart factory
-  // (so a reconnected client re-advertises); on the single-client path it is the
-  // `samplingWiring` opt the bridge applies to the one client. The transport seam
-  // (test-only) is threaded into the supervisor factory too so a supervised
-  // client can be driven by a scripted transport. H18 (jun-06) — the OAuth
-  // provider rides BOTH paths identically: baked into the supervisor factory AND
-  // passed as the single-client `oauthProvider` opt.
-  ...(args.autoRestart
-    ? {
-        supervisorDepsFor: mcpSupervisorDepsFor(
-          slog,
-          args.inboundWiring,
-          args.opts.mcpTransportFor,
-          args.oauthProvider,
-          args.opts.proxyEnv,
-          args.resourceObserver,
-        ),
-      }
-    : {}),
-  ...(args.inboundWiring !== undefined ? { samplingWiring: args.inboundWiring } : {}),
-  // RFC04-2/3 (hot-reload) — the single-client path reads `resourceObserver`
-  // off the opts bag (the supervised path baked it into the factory above). ONE
-  // shared instance so ANY server's list-change orders the SAME relist. Present
-  // only when `QUANTA_MCP_HOT_RELOAD` is on; absent ⇒ slot omitted (byte-identical).
-  ...(args.resourceObserver !== undefined ? { resourceObserver: args.resourceObserver } : {}),
-  // RFC04-2/3 (hot-reload) — BOTH paths emit one reload source per successfully-
-  // loaded server through this sink (single-client over the live client; the
-  // supervised path over the supervisor's stable handle — `loadMcpTools` forwards
-  // it to `loadSupervised`). Present only when the gate is on; absent ⇒
-  // byte-identical.
-  ...(args.onReloadSource !== undefined ? { onReloadSource: args.onReloadSource } : {}),
-  ...(args.opts.mcpTransportFor !== undefined ? { transportFor: args.opts.mcpTransportFor } : {}),
-  ...(args.oauthProvider !== undefined ? { oauthProvider: args.oauthProvider } : {}),
-  // H3 (jun-10 session-scoped egress) — the session proxy env (opened once at
-  // bootstrap, BEFORE any MCP spawn) rides BOTH the single-client and the
-  // supervised path so every stdio server child's own sockets are forced through
-  // the loopback allowlist. Absent / proxy OFF ⇒ slot omitted ⇒ byte-identical.
-  ...(args.opts.proxyEnv !== undefined ? { proxyEnv: args.opts.proxyEnv } : {}),
-  // §19.1 (QUANTA_MCP_TOOL_ANNOTATIONS) — the global default-OFF master switch.
-  // OFF (default) ⇒ slot omitted ⇒ the bridge's `annotationsHonored` stays false
-  // ⇒ `honored = annotationsHonored && trusted` is false for EVERY tool, so the
-  // read/concurrency predicates keep their conservative classification
-  // (byte-identical). ON ⇒ a TRUSTED server's annotations may elevate them.
-  ...(runtimeConfig().mcpToolAnnotations ? { annotationsHonored: true } : {}),
-})
+): Parameters<typeof loadMcpTools>[2] => {
+  const isolatedSpawn = isolatedMcpEnabledFromEnv(process.env)
+  return {
+    // WS-G (UUX-6-22) — route the ALBB-09 load-error sink + the new exit sink
+    // into the health registry and the operator-notice bus (error severity: the
+    // server's tools WILL fail from here on).
+    ...(args.mcpHealth !== undefined
+      ? {
+          onServerLoadError: ({ server, error }: { server: string; error: unknown }): void => {
+            args.mcpHealth?.markDown(server, errMessage(error))
+            emitOperatorNotice({
+              severity: "error",
+              source: "mcp",
+              message: `server "${server}" failed to load: ${errMessage(error)}`,
+              hint: "its tools are unavailable; see /mcp",
+            })
+          },
+          onServerExit: ({ server, reason }: { server: string; reason?: string }): void => {
+            args.mcpHealth?.markDown(server, reason)
+            emitOperatorNotice({
+              severity: "error",
+              source: "mcp",
+              message: `server "${server}" exited${reason !== undefined ? ` (${reason})` : ""}`,
+              hint: "its tools will fail from now on; see /mcp",
+            })
+          },
+        }
+      : {}),
+    // B1 + H19 — the SAME unified `{ negotiator, handler?, rootsProvider? }` bundle
+    // feeds BOTH paths. On the supervised path it is BAKED into the restart factory
+    // (so a reconnected client re-advertises); on the single-client path it is the
+    // `samplingWiring` opt the bridge applies to the one client. The transport seam
+    // (test-only) is threaded into the supervisor factory too so a supervised
+    // client can be driven by a scripted transport. H18 (jun-06) — the OAuth
+    // provider rides BOTH paths identically: baked into the supervisor factory AND
+    // passed as the single-client `oauthProvider` opt.
+    ...(args.autoRestart
+      ? {
+          supervisorDepsFor: mcpSupervisorDepsFor(
+            slog,
+            args.inboundWiring,
+            args.opts.mcpTransportFor,
+            args.oauthProvider,
+            args.opts.proxyEnv,
+            args.resourceObserver,
+            isolatedSpawn,
+          ),
+        }
+      : {}),
+    ...(args.inboundWiring !== undefined ? { samplingWiring: args.inboundWiring } : {}),
+    // RFC04-2/3 (hot-reload) — the single-client path reads `resourceObserver`
+    // off the opts bag (the supervised path baked it into the factory above). ONE
+    // shared instance so ANY server's list-change orders the SAME relist. Present
+    // only when `QUANTA_MCP_HOT_RELOAD` is on; absent ⇒ slot omitted (byte-identical).
+    ...(args.resourceObserver !== undefined ? { resourceObserver: args.resourceObserver } : {}),
+    // RFC04-2/3 (hot-reload) — BOTH paths emit one reload source per successfully-
+    // loaded server through this sink (single-client over the live client; the
+    // supervised path over the supervisor's stable handle — `loadMcpTools` forwards
+    // it to `loadSupervised`). Present only when the gate is on; absent ⇒
+    // byte-identical.
+    ...(args.onReloadSource !== undefined ? { onReloadSource: args.onReloadSource } : {}),
+    ...(args.opts.mcpTransportFor !== undefined ? { transportFor: args.opts.mcpTransportFor } : {}),
+    ...(args.oauthProvider !== undefined ? { oauthProvider: args.oauthProvider } : {}),
+    // H3 (jun-10 session-scoped egress) — the session proxy env (opened once at
+    // bootstrap, BEFORE any MCP spawn) rides BOTH the single-client and the
+    // supervised path so every stdio server child's own sockets are forced through
+    // the loopback allowlist. Absent / proxy OFF ⇒ slot omitted ⇒ byte-identical.
+    ...(args.opts.proxyEnv !== undefined ? { proxyEnv: args.opts.proxyEnv } : {}),
+    ...(isolatedSpawn ? { isolatedSpawn: true } : {}),
+    // §19.1 (QUANTA_MCP_TOOL_ANNOTATIONS) — the global default-OFF master switch.
+    // OFF (default) ⇒ slot omitted ⇒ the bridge's `annotationsHonored` stays false
+    // ⇒ `honored = annotationsHonored && trusted` is false for EVERY tool, so the
+    // read/concurrency predicates keep their conservative classification
+    // (byte-identical). ON ⇒ a TRUSTED server's annotations may elevate them.
+    ...(runtimeConfig().mcpToolAnnotations ? { annotationsHonored: true } : {}),
+  }
+}
 
 /** Start the configured MCP servers (or short-circuit to an empty bundle when
  *  none are configured), returning the same `{ tools, clients, resources? }`

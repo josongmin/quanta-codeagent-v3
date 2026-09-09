@@ -1,8 +1,8 @@
 /**
  * IsolatedMcpClient — happy-path unit (ADR-0162 Phase E).
  *
- * Backwards-compat checks: env-flag is the only switch, the legacy McpClient
- * stays intact, and the isolated client mirrors the legacy public surface.
+ * Backwards-compat checks: the host-parsed env flag is the only switch, the
+ * legacy McpClient stays intact, and the isolated client mirrors its surface.
  */
 
 import { describe, expect, test } from "bun:test"
@@ -22,18 +22,12 @@ describe("ADR-0162 IsolatedMcpClient — backwards compat", () => {
     expect(typeof inst.stop).toBe("function")
   })
 
-  test("flag detection defaults to the process.env (when no arg passed)", () => {
-    // Real env-access verification: clear the documented key, then call
-    // with no arg — the result must be `false` (defaults are off-by-default).
-    // This proves the no-arg overload genuinely consults process.env.
+  test("flag detection uses only caller-supplied env", () => {
     const prev = process.env.MCP_USE_ISOLATED_SPAWN
-    process.env.MCP_USE_ISOLATED_SPAWN = undefined
+    process.env.MCP_USE_ISOLATED_SPAWN = "1"
     try {
-      const cleared = isolatedMcpEnabledFromEnv()
-      expect(cleared).toBe(false)
-      process.env.MCP_USE_ISOLATED_SPAWN = "1"
-      const set = isolatedMcpEnabledFromEnv()
-      expect(set).toBe(true)
+      expect(isolatedMcpEnabledFromEnv({})).toBe(false)
+      expect(isolatedMcpEnabledFromEnv({ MCP_USE_ISOLATED_SPAWN: "1" })).toBe(true)
     } finally {
       process.env.MCP_USE_ISOLATED_SPAWN = prev
     }

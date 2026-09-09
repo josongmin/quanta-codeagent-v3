@@ -252,7 +252,7 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
       "@/stream",
       "@/objective",
     ],
-    envAllowFiles: ["isolated-client.ts", "stdio.ts"],
+    envAllowFiles: ["stdio.ts"],
     requireSliceBarrel: true,
   },
   rules: {

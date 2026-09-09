@@ -240,6 +240,10 @@ export interface LoadMcpToolsOpts {
    *  Absent / proxy OFF ⇒ no keys injected (byte-identical). The HTTP-SSE carrier
    *  is unaffected. */
   proxyEnv?: ProxyEnvInput
+  /** ADR-0162 / C-F1 — host-resolved isolated-spawn policy. Threaded into the
+   *  single-client path; supervised factories receive the same policy at their
+   *  composition root. Absent/false preserves stdio. */
+  isolatedSpawn?: boolean
   /** ALBB-09 (jul-9) — optional load-failure sink. Invoked in BOTH catch sites
    *  (single-client + supervised) when a CONFIGURED server's `start()` /
    *  `listTools()` throws, alongside the existing `logger.warn`. A composition
@@ -387,11 +391,13 @@ const loadSingle = async (
   oauthProvider: McpOAuthProviderPort | undefined,
   annotationsHonored: boolean | undefined,
   proxyEnv: ProxyEnvInput | undefined,
+  isolatedSpawn: boolean | undefined,
   onServerLoadError: ((info: { server: string; error: unknown }) => void) | undefined,
   resourceObserver: McpResourceObserver | undefined,
   onReloadSource: ((source: McpReloadableSource) => void) | undefined,
 ): Promise<{ tools: Tool[]; client: McpStoppable; resources?: ResourcesCapableClient } | null> => {
   const clientOpts: ConstructorParameters<typeof McpClient>[1] = {}
+  if (isolatedSpawn === true) clientOpts.isolatedSpawn = true
   if (elicitationPrompterFor !== undefined) {
     clientOpts.elicitationPrompter = elicitationPrompterFor(config.name)
   }
@@ -465,6 +471,7 @@ export const loadMcpTools = async (
             opts?.oauthProvider,
             opts?.annotationsHonored,
             opts?.proxyEnv,
+            opts?.isolatedSpawn,
             opts?.onServerLoadError,
             opts?.resourceObserver,
             opts?.onReloadSource,

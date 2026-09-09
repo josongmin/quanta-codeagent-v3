@@ -23,8 +23,10 @@ surface_integration:
     cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "pure internal IPC spawn primitive, no browser affordance"
 purpose: |
-  When MCP_USE_ISOLATED_SPAWN=1 (also true/yes), McpClient's defaultTransportFor
-  selects IsolatedMcpTransport in process-ready mode for command servers.
+  When MCP_USE_ISOLATED_SPAWN=1 (also true/yes), the host composition root
+  resolves the flag once and injects the same policy into single-client and
+  supervised/restart McpClient construction. defaultTransportFor then selects
+  IsolatedMcpTransport in process-ready mode for command servers.
   HTTP/url selection is unchanged. Flag unset → StdioMcpTransport (byte-identical).
   IsolatedMcpClient is a delegating facade (dxt-ready-line) for existing
   hellgates. Production plugin launchers construct McpClient + IsolatedMcpTransport
@@ -35,6 +37,7 @@ purpose: |
   McpTransport.send; DXT IsolatedProcess.send stays NO-THROW.
 evidence:
   code:
+    - src/host/mcp-composition.ts
     - src/mcp/client/transport-factory.ts
     - src/mcp/client/isolated-flag.ts
     - src/mcp/transports/isolated.ts
@@ -54,7 +57,7 @@ evidence:
     contract: []
 knobs:
   - name: MCP_USE_ISOLATED_SPAWN
-    where: src/mcp/client/isolated-flag.ts (isolatedMcpEnabledFromEnv)
+    where: src/host/mcp-composition.ts (buildMcpLoadOpts)
     default: ""
     purpose: opt-in factory switch (accepts '1' | 'true' | 'yes')
 deliberate_hold: null
@@ -62,5 +65,6 @@ notes: |
   Backward compat: `McpClient` remains the `@/mcp` default. IsolatedMcpClient
   is NOT re-exported from the barrel; IsolatedMcpTransport and
   isolatedMcpEnabledFromEnv ARE. Plugin launchers construct McpClient +
-  IsolatedMcpTransport (dxt-ready-line). The env flag is owned by
-  transport-factory / isolated-flag, not by host composition.
+  IsolatedMcpTransport (dxt-ready-line). Host composition owns environment
+  access; isolated-flag only parses caller-supplied input, and transport-factory
+  consumes an injected boolean policy.

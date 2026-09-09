@@ -151,7 +151,11 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
       },
     })
     cli = c
-    await c.waitFor(BOOT, 15_000)
+    // Use the suite budget for process boot as well. A fixed 15s sub-budget
+    // flakes before raw-mode readiness on shared/contended CI hosts even though
+    // the enclosing test still has ample time and `waitFor` returns immediately
+    // on healthy hosts.
+    await c.waitFor(BOOT, T)
     await sleep(50)
     return c
   }

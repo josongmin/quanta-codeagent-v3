@@ -106,6 +106,8 @@ export class McpClient {
   private readonly transportFactory: ((config: McpServerConfig) => McpTransport) | null
   /** H3 (jun-10) — session-scoped proxy env for the stdio child spawn. */
   private readonly proxyEnv: ProxyEnvInput | undefined
+  /** ADR-0162 / C-F1 — host-resolved command transport policy. */
+  private readonly isolatedSpawn: boolean
   /** H18 — the wired OAuth provider. Defaults to {@link headlessOAuthRejecter}
    *  (obtains no token), so a client with no provider — or a server that did NOT
    *  opt in (`config.oauth !== true`) — is byte-identical to the pre-H18 path:
@@ -206,6 +208,9 @@ export class McpClient {
        *  stdio child spawn so an MCP server's OWN sockets are gated. Absent ⇒
        *  byte-identical (no proxy keys in the child env). */
       proxyEnv?: ProxyEnvInput
+      /** ADR-0162 / C-F1 — host-resolved policy for command-based MCP servers.
+       *  Absent/false preserves the stdio default; URL servers remain HTTP. */
+      isolatedSpawn?: boolean
     },
   ) {
     this.config = config
@@ -222,12 +227,13 @@ export class McpClient {
     // unsupported override conservatively falls back to the SSOT newest.
     this.offeredVersion = resolveOfferedVersion(runtimeConfig().mcpProtocolMax)
     this.proxyEnv = opts?.proxyEnv
+    this.isolatedSpawn = opts?.isolatedSpawn === true
     const t = opts?.transport
     // Bind the offered version into the DEFAULT factory so the HTTP carrier
     // stamps the same offer the `initialize` body carries. An INJECTED factory
     // (test double) keeps its single-arg `McpClientTransport` shape unchanged.
     const boundDefault = (cfg: McpServerConfig): McpTransport =>
-      defaultTransportFor(cfg, this.offeredVersion, this.proxyEnv)
+      defaultTransportFor(cfg, this.offeredVersion, this.proxyEnv, this.isolatedSpawn)
     // When OAuth is active we MUST resolve the bearer before constructing the
     // carrier (the HTTP transport reads static headers at construction time), so
     // we defer to `start()` — UNLESS an explicit transport INSTANCE was supplied
@@ -303,7 +309,8 @@ export class McpClient {
       const token = await this.oauthProvider.tokenFor(this.config.name)
       const build =
         this.transportFactory ??
-        ((cfg: McpServerConfig) => defaultTransportFor(cfg, this.offeredVersion, this.proxyEnv))
+        ((cfg: McpServerConfig) =>
+          defaultTransportFor(cfg, this.offeredVersion, this.proxyEnv, this.isolatedSpawn))
       this.transport = build(this.withBearer(this.config, token))
     }
     const transport = this.transport
