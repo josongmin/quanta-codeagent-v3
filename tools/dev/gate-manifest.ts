@@ -268,7 +268,11 @@ export const tiersForGate = (gate: Gate): readonly VerificationTier[] => {
 
 export const gatesForVerificationTier = (tier: VerificationTier): readonly Gate[] => {
   const selected = gatesForTier(
-    GATES.map((gate) => ({ id: gate.id, consumes: gate.consumes, tiers: tiersForGate(gate) })),
+    GATES.map((gate) =>
+      gate.consumes === undefined
+        ? { id: gate.id, tiers: tiersForGate(gate) }
+        : { id: gate.id, consumes: gate.consumes, tiers: tiersForGate(gate) },
+    ),
     tier,
   )
   const byId = new Map(GATES.map((gate) => [gate.id, gate] as const))

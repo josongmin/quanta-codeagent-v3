@@ -36,7 +36,13 @@ import { fileURLToPath } from "node:url"
 
 import { describeQuietBoxWait, loadPerCore, quietBoxBudgetMs, waitForQuietBox } from "./box-load"
 import { missingExternalTools } from "./external-toolchain"
-import { GATES, type Gate, gatesForStage, gatesForVerificationTier } from "./gate-manifest"
+import {
+  GATES,
+  type Gate,
+  type GateStage,
+  gatesForStage,
+  gatesForVerificationTier,
+} from "./gate-manifest"
 import { admissionFromEnv } from "./verification-admission"
 import {
   cleanStatusSha256,
@@ -304,7 +310,8 @@ const ownedPrecommit = GATES.filter((g) => g.stage === "precommit").length
 const ownedPrepush = GATES.filter((g) => g.stage === "prepush").length
 const owned = { precommit: ownedPrecommit, prepush: ownedPrepush }
 for (const st of ["precommit", "prepush"] as const) {
-  if (owned[st] < MIN_OWNED[st]) {
+  const floor = MIN_OWNED[st]
+  if (owned[st] < floor) {
     printErr(
       `gate.ts: the manifest owns ${owned[st]} ${st} gate(s), below the floor of ` +
         `${MIN_OWNED[st]}. Gates were deleted or mis-staged — refusing to report a ` +
@@ -492,9 +499,10 @@ for (const gate of planned) {
   if (gate.needsQuietBox !== undefined) {
     // Bounded, and it never refuses to run: a rail that unrelated load on the
     // host can stop is a rail that cannot be used on a working machine.
+    const admission = admissionFromEnv(process.env)
     const wait = await waitForQuietBox({
       budgetMs: quietBoxBudgetMs(process.env, QUIET_BOX_BUDGET_MS),
-      admission: admissionFromEnv(process.env),
+      ...(admission === undefined ? {} : { admission }),
     })
     printOut(`  [${gate.id}] ${describeQuietBoxWait(wait)}`)
     if (!wait.settled) hotGates.set(gate.id, wait.endPerCore)
@@ -515,7 +523,7 @@ const notRun = planned.filter(
 const gateResults: readonly GateResult[] = [
   ...results.map((row) => ({
     id: row.gate.id,
-    outcome: (row.ok ? "passed" : "failed") as const,
+    outcome: row.ok ? ("passed" as const) : ("failed" as const),
     elapsedMs: row.ms,
   })),
   ...skipped.map((gate) => ({ id: gate.id, outcome: "skipped-input" as const, elapsedMs: 0 })),

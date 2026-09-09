@@ -13,6 +13,7 @@ import {
 } from "node:fs"
 import { availableParallelism, freemem, homedir, loadavg, tmpdir, totalmem } from "node:os"
 import { dirname, join, relative, resolve } from "node:path"
+import { sampleTreeRssBytes } from "./shard-rss"
 import {
   discoverInventory,
   discoverSuiteFiles,
