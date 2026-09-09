@@ -4,6 +4,7 @@ import { embeddingSpacesEqual } from "@/retrieval/engines/embedder/space"
 
 /** Sidecar identity for a persisted sqlite vector table. Not the vector rows. */
 export const EMBEDDING_SPACE_TABLE = "search_index_embedding_space"
+export const EMBEDDING_NAMESPACE_TABLE = "search_index_embedding_namespaces"
 
 export type SpaceBindResult =
   | { readonly kind: "ok"; readonly space: EmbeddingSpace }
@@ -79,6 +80,66 @@ export const bindPersistedEmbeddingSpace = (
   return {
     kind: "mismatch",
     reason: `persisted embedding space ${persisted.model}/${persisted.dimensions}d ≠ ${current.model}/${current.dimensions}d; rebuild required`,
+    persisted,
+    current,
+  }
+}
+
+/**
+ * Record and collision-check an embedding-derived remote namespace.
+ *
+ * Remote vector rows live in the namespace itself, so no local vector count is
+ * needed. Absence writes the mapping; a hash collision or manual remap refuses.
+ */
+export const bindPersistedEmbeddingNamespace = (
+  db: SqliteDb,
+  namespace: string,
+  current: EmbeddingSpace,
+): SpaceBindResult => {
+  db.exec(
+    `CREATE TABLE IF NOT EXISTS ${EMBEDDING_NAMESPACE_TABLE} (
+       namespace TEXT PRIMARY KEY,
+       model TEXT NOT NULL,
+       revision TEXT NOT NULL,
+       dimensions INTEGER NOT NULL,
+       normalization TEXT NOT NULL
+     ) WITHOUT ROWID`,
+  )
+  const row = db
+    .query<{
+      model: string
+      revision: string
+      dimensions: number
+      normalization: string
+    }>(
+      `SELECT model, revision, dimensions, normalization
+       FROM ${EMBEDDING_NAMESPACE_TABLE} WHERE namespace = ?`,
+    )
+    .get(namespace)
+  if (row === null) {
+    db.query(
+      `INSERT INTO ${EMBEDDING_NAMESPACE_TABLE}
+       (namespace, model, revision, dimensions, normalization)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run(namespace, current.model, current.revision, current.dimensions, current.normalization)
+    return { kind: "ok", space: current }
+  }
+  if (row.normalization !== "l2" && row.normalization !== "none") {
+    return {
+      kind: "unknown",
+      reason: `remote namespace ${namespace} has invalid identity metadata`,
+    }
+  }
+  const persisted: EmbeddingSpace = {
+    model: row.model,
+    revision: row.revision,
+    dimensions: row.dimensions,
+    normalization: row.normalization,
+  }
+  if (embeddingSpacesEqual(persisted, current)) return { kind: "ok", space: persisted }
+  return {
+    kind: "mismatch",
+    reason: `remote namespace ${namespace} is bound to a different embedding space`,
     persisted,
     current,
   }

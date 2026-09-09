@@ -1,5 +1,5 @@
 import type { MemoryTelemetryPort } from "./telemetry-port"
-import type { MemoryEntry, MemoryQuery } from "./types"
+import type { MemoryEntry, MemoryPatch, MemoryQuery } from "./types"
 
 /**
  * Durable long-term memory store (RFC §6.3). Two adapters exist
@@ -15,7 +15,7 @@ export interface PersistentStorePort {
    * No-op if the id is unknown. Used by reinforcement, consolidation, and the
    * self-edit `memory_update` tool.
    */
-  update(id: string, patch: Partial<MemoryEntry>): Promise<void>
+  update(id: string, patch: MemoryPatch): Promise<void>
   /** Hard-delete an entry by id. No-op if unknown. */
   delete(id: string): Promise<void>
   /** Fetch one entry by id, or `undefined`. */

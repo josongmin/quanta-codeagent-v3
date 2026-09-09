@@ -124,6 +124,31 @@ export interface MemoryEntry {
   reuseRule?: string
 }
 
+/**
+ * Column-local update (SEP7-D-10).
+ *
+ * Identity and store-owned clocks (`id`, `createdAt`, `updatedAt`) are not
+ * patchable. Required mutable fields never accept explicit `undefined`.
+ * `embedding` is the sole clearable field: an own key with `undefined` removes
+ * the vector while omission leaves it untouched.
+ */
+export interface MemoryPatch {
+  kind?: MemoryKind
+  tier?: MemoryTier
+  text?: string
+  tags?: string[]
+  importance?: number
+  accessCount?: number
+  lastAccessedAt?: number
+  lastDecayedAt?: number
+  embedding?: number[] | undefined
+  supersededBy?: string
+  sessionId?: string
+  taskGroup?: string
+  appliesTo?: { readonly cwd: string }
+  reuseRule?: string
+}
+
 /** §10.6 — structured scope boundary (Codex `applies_to: cwd=...`). */
 export interface AppliesTo {
   /** Primary working directory / cwd family / workflow scope this memory covers. */

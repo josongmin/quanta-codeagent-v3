@@ -8,7 +8,7 @@ import {
   composeSessionSkillAuthority,
   SkillAdminPolicyLoadError,
 } from "@/runner/assemble/session-authorities"
-import { createInMemoryDisabledStore } from "@/skill"
+import { createInMemoryDisabledStore, DISABLED_SET_SCHEMA_VERSION } from "@/skill"
 
 const writeSkill = (dir: string, name: string): void => {
   mkdirSync(join(dir, name), { recursive: true })
@@ -68,6 +68,62 @@ describe("G-F11 CLI/web org input surfaces", () => {
       expect(banned?.read().active.map((s) => s.name)).not.toContain("demo")
       expect(cli?.read().active.map((s) => s.name)).toContain("demo")
       expect(web?.read().active.map((s) => s.name)).toContain("demo")
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test("required pin beats user disable on CLI and web", async () => {
+    const root = mkdtempSync(join(tmpdir(), "r16-surf-req-"))
+    try {
+      const userDir = join(root, "user")
+      const orgDir = join(root, "org")
+      writeSkill(userDir, "r16-keep")
+      writeSkill(userDir, "r16-demo")
+      writeFileSync(
+        join(userDir, ".disabled.json"),
+        JSON.stringify({
+          schemaVersion: DISABLED_SET_SCHEMA_VERSION,
+          revision: 1,
+          names: ["r16-keep", "r16-demo"],
+        }),
+      )
+      mkdirSync(join(orgDir, "admin-skills"), { recursive: true })
+      writeFileSync(
+        join(orgDir, "org-policy.json"),
+        JSON.stringify({ bannedSkills: ["r16-demo"], requiredSkills: ["r16-keep"] }),
+      )
+      const env = { QUANTA_ORG_CONFIG_DIR: orgDir }
+      const opted = { QUANTA_ORG_CONFIG_DIR: "" }
+      const cli = await buildCliSkillAuthority({ dir: userDir }, env)
+      const web = await buildWebSkillAuthority({ dir: userDir }, env)
+      const off = await buildCliSkillAuthority({ dir: userDir }, opted)
+      const active = (a: typeof cli) => a?.read().active.map((s) => s.name) ?? []
+      expect(active(cli)).toContain("r16-keep")
+      expect(active(cli)).not.toContain("r16-demo")
+      expect(active(web)).toContain("r16-keep")
+      expect(active(web)).not.toContain("r16-demo")
+      expect(off?.read().management.find((m) => m.name === "r16-keep")?.disableReason).toBe("user")
+      expect(active(off)).not.toContain("r16-keep")
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test("XDG default org dir applies on CLI and web when env is omitted", async () => {
+    const root = mkdtempSync(join(tmpdir(), "r16-surf-xdg-"))
+    try {
+      const userDir = join(root, "user")
+      const xdg = join(root, "xdg")
+      const orgDir = join(xdg, "quanta", "org")
+      writeSkill(userDir, "r16-demo")
+      mkdirSync(join(orgDir, "admin-skills"), { recursive: true })
+      writeFileSync(join(orgDir, "org-policy.json"), JSON.stringify({ bannedSkills: ["r16-demo"] }))
+      const env = { XDG_CONFIG_HOME: xdg }
+      const cli = await buildCliSkillAuthority({ dir: userDir }, env)
+      const web = await buildWebSkillAuthority({ dir: userDir }, env)
+      expect(cli?.read().active.map((s) => s.name)).not.toContain("r16-demo")
+      expect(web?.read().active.map((s) => s.name)).not.toContain("r16-demo")
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

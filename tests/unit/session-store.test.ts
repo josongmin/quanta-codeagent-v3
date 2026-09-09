@@ -441,11 +441,10 @@ describe("session store — index reconcile on load", () => {
 
   test("load re-adds a session whose index line was lost mid-write", async () => {
     await saveSessionById(mkMeta({ id: "heal-1", title: "Healed" }), mkPayload())
-    // Simulate a crash AFTER the JSON write but BEFORE/clobbering the index:
-    // wipe index.jsonl so the session is orphaned (JSON present, not listed).
+    // Crash after JSON write, empty index sidecar. SEP7-D-06: list recovers
+    // from the snapshot (index is a projection). Load still returns the session.
     writeFileSync(join(dir, "index.jsonl"), "")
-    expect((await listSessions()).some((m) => m.id === "heal-1")).toBe(false)
-    // Loading the orphaned session must self-heal the index.
+    expect((await listSessions()).some((m) => m.id === "heal-1")).toBe(true)
     const loaded = await loadSessionById("heal-1")
     expect(loaded?.meta.title).toBe("Healed")
     expect((await listSessions()).some((m) => m.id === "heal-1")).toBe(true)

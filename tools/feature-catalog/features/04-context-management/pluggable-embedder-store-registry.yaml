@@ -107,8 +107,9 @@ notes: |
     output. Default dim 1536 (configurable per factory call).
   - ADR-0424 closes the prior hold: the search-index consumer now projects
     `QUANTA_VECTOR_STORE` into the live semantic backend, with same-dim
-    deterministic fallback on provider failure, explicit-store fail-closed
-    semantics, mutation-batch reconcile, and embed/query latency metrics.
+    capability negotiation, typed refusal on provider failure, explicit-store
+    fail-closed semantics, embedding-space-specific remote namespaces, durable
+    manifest ownership, mutation-batch reconcile, and embed/query latency metrics.
   - Contract evidence splits by proof tier: the integration rail uses a
     stateful in-proc REST fixture, while `tests/contract/lance-real-wire.test.ts`
     uses real `python+lancedb` storage semantics behind a compatible HTTP shim.

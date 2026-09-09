@@ -9,6 +9,10 @@ import {
   buildSearchPipelineFromEnv,
   clearSearchPipelineWireForTests,
 } from "@/../src/apps/agent/search-pipeline-wire"
+import {
+  embeddingSpaceNamespace,
+  resolveIndexEmbedder,
+} from "@/runner/assemble/search-index-backend"
 
 interface StoredDoc {
   readonly id: string
@@ -232,27 +236,27 @@ describe("search pipeline Lance wire", () => {
     await mkdir(join(dir, "src"))
     await writeFile(join(dir, "src", "main.ts"), exportLines("alpha", 120))
 
-    const wired = buildSearchPipelineFromEnv(
-      {
-        QUANTA_INDEX: "on",
-        QUANTA_PIPELINE: "semantic-only",
-        QUANTA_INDEX_INTERVAL_MS: "200",
-        QUANTA_INDEX_GLOB: "**/*.ts",
-        QUANTA_EMBED_PROVIDER: "headless",
-        QUANTA_VECTOR_STORE: "lance",
-        QUANTA_LANCE_BASE_URL: fixture.baseURL,
-        QUANTA_LANCE_TABLE: "docs",
-      },
-      dir,
-    )
+    const env = {
+      QUANTA_INDEX: "on",
+      QUANTA_PIPELINE: "semantic-only",
+      QUANTA_INDEX_INTERVAL_MS: "200",
+      QUANTA_INDEX_GLOB: "**/*.ts",
+      QUANTA_EMBED_PROVIDER: "headless",
+      QUANTA_VECTOR_STORE: "lance",
+      QUANTA_LANCE_BASE_URL: fixture.baseURL,
+      QUANTA_LANCE_TABLE: "docs",
+      QUANTA_INDEX_DB_PATH: join(dir, "manifest.sqlite"),
+    } as const
+    const table = embeddingSpaceNamespace("docs", await resolveIndexEmbedder(env).space())
+    const wired = buildSearchPipelineFromEnv(env, dir)
     expect(wired).not.toBeNull()
 
     await waitUntil(
-      () => (fixture?.tableIds("docs").length === 4 ? fixture.tableIds("docs") : null),
+      () => (fixture?.tableIds(table).length === 4 ? fixture.tableIds(table) : null),
       10_000,
       "initial Lance upserts",
     )
-    expect(fixture.tableIds("docs")).toEqual(expectedInitialIds)
+    expect(fixture.tableIds(table)).toEqual(expectedInitialIds)
 
     const initial = await wired?.pipeline.search({ text: "alpha_001", k: 1 })
     expect(initial?.ok).toBe(true)
@@ -263,12 +267,12 @@ describe("search pipeline Lance wire", () => {
 
     const rewrite = await waitUntil(
       () => {
-        const deleteCall = fixture?.calls.find((call) => call.path === "/v1/table/docs/delete")
+        const deleteCall = fixture?.calls.find((call) => call.path === `/v1/table/${table}/delete`)
         const rewriteCall = fixture?.calls.find(
-          (call) => call.path === "/v1/table/docs/upsert" && rewriteTextSeen(call),
+          (call) => call.path === `/v1/table/${table}/upsert` && rewriteTextSeen(call),
         )
         if (deleteCall === undefined || rewriteCall === undefined) return null
-        const ids = fixture?.tableIds("docs") ?? []
+        const ids = fixture?.tableIds(table) ?? []
         return ids.length === 1 && ids[0] === "src/main.ts:1-1" ? { deleteCall, rewriteCall } : null
       },
       10_000,
@@ -277,7 +281,7 @@ describe("search pipeline Lance wire", () => {
     if (rewrite === null) throw new Error("unreachable")
 
     expect([...deleteIds(rewrite.deleteCall)].sort()).toEqual(expectedInitialIds)
-    expect(fixture.tableTexts("docs")).toEqual(["export const gamma = 3"])
+    expect(fixture.tableTexts(table)).toEqual(["export const gamma = 3"])
 
     const afterRewrite = await wired?.pipeline.search({ text: "gamma", k: 1 })
     expect(afterRewrite?.ok).toBe(true)
@@ -300,16 +304,17 @@ describe("search pipeline Lance wire", () => {
       QUANTA_LANCE_BASE_URL: fixture.baseURL,
       QUANTA_LANCE_TABLE: "docs",
       QUANTA_INDEX_DB_PATH: dbPath,
-    }
+    } as const
+    const table = embeddingSpaceNamespace("docs", await resolveIndexEmbedder(env).space())
 
     const firstWire = buildSearchPipelineFromEnv(env, dir)
     expect(firstWire).not.toBeNull()
     await waitUntil(
-      () => (fixture?.tableIds("docs").length === 4 ? true : null),
+      () => (fixture?.tableIds(table).length === 4 ? true : null),
       10_000,
       "initial persisted-manifest upserts",
     )
-    expect(fixture.tableIds("docs")).toEqual(expectedInitialIds)
+    expect(fixture.tableIds(table)).toEqual(expectedInitialIds)
 
     clearSearchPipelineWireForTests()
     fixture.resetCalls()
@@ -321,9 +326,9 @@ describe("search pipeline Lance wire", () => {
     expect(secondWire).not.toBeNull()
     const deleteCall = await waitUntil(
       () => {
-        const call = fixture?.calls.find((entry) => entry.path === "/v1/table/docs/delete")
+        const call = fixture?.calls.find((entry) => entry.path === `/v1/table/${table}/delete`)
         if (call === undefined) return null
-        const ids = fixture?.tableIds("docs") ?? []
+        const ids = fixture?.tableIds(table) ?? []
         return ids.length === 1 && ids[0] === "src/main.ts:1-1" ? call : null
       },
       10_000,
@@ -332,7 +337,7 @@ describe("search pipeline Lance wire", () => {
     if (deleteCall === null) throw new Error("unreachable")
 
     expect([...deleteIds(deleteCall)].sort()).toEqual(expectedInitialIds)
-    expect(fixture.tableTexts("docs")).toEqual(["export const gamma = 3"])
+    expect(fixture.tableTexts(table)).toEqual(["export const gamma = 3"])
 
     const query = await secondWire?.pipeline.search({ text: "gamma", k: 1 })
     expect(query?.ok).toBe(true)

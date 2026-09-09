@@ -24,7 +24,13 @@
 
 import { describe, expect, test } from "bun:test"
 import { BudgetMeter } from "@/agent"
-import type { MemoryEntry, MemoryQuery, PersistentStorePort } from "@/memory"
+import {
+  applyMemoryPatch,
+  type MemoryEntry,
+  type MemoryPatch,
+  type MemoryQuery,
+  type PersistentStorePort,
+} from "@/memory"
 import { StructuredLogger } from "@/observability"
 import { buildToolingCore } from "@/runner/assemble"
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
@@ -45,9 +51,9 @@ class TinyStore implements PersistentStorePort {
     this.map.set(entry.id, entry)
     return Promise.resolve()
   }
-  update(id: string, patch: Partial<MemoryEntry>): Promise<void> {
+  update(id: string, patch: MemoryPatch): Promise<void> {
     const cur = this.map.get(id)
-    if (cur) this.map.set(id, { ...cur, ...patch })
+    if (cur) this.map.set(id, applyMemoryPatch(cur, patch, Date.now()))
     return Promise.resolve()
   }
   delete(id: string): Promise<void> {

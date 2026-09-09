@@ -8,7 +8,7 @@ Lane: W3-B. Closed on local `main` as part of W3 closeout.
 
 POSIX `flock(2)` via `bun:ffi` (`libSystem.B.dylib` / libc). No npm native. Hold fd; CLOEXEC when the platform constant exists; release does **not** unlink; no age steal; nested reentrancy forbidden; concurrent waiters serialize.
 
-Colocated copies (library fence): `src/auth/file-transaction/`, `src/permission/json-state-file/posix-flock.ts`, `src/migration/external-config/{posix-flock,exclusive-lock}.ts`.
+Canonical OS primitive and closure-scoped transaction wrapper: `src/shared/posix-flock.ts`. Auth and migration policy adapters delegate to it; permission keeps its acquire/release lifetime API but uses the same low-level primitive. The three duplicated FFI modules were removed.
 
 ## Findings
 
@@ -22,6 +22,8 @@ Colocated copies (library fence): `src/auth/file-transaction/`, `src/permission/
 | F-12 | `commit(mutations)` only; agent adapter lock+reread+merge; two OS processes keep both grants; malformed JSON `commit` throws and preserves original bytes (`trust-persist.ts`) |
 | F-13 | `writeBytesAtomic` same-dir temp/sync/rename; EXDEV copy gone; memory append under lock; **F-13.2** two OS processes union distinct `raw_memories.md` blocks; `persistMemory` treats only ENOENT/ENOTDIR as empty (other read errors throw; `persistItemGuarded` absorbs as warning) |
 
+W7 follow-up: session snapshot mutation now uses the same canonical fd lock through a session-local queue, plus a durable generation/tombstone sidecar. A fresh OS process cannot save through a completed delete; explicit `{create:true}` advances the generation. `index.jsonl` RMW also takes a root-wide flock.
+
 ## God-code
 
 `persist.ts` 914 → **791** (left 900–999). Split `persist-sync.ts` / `persist-atomic.ts`. Allowlist not grown.
@@ -34,5 +36,5 @@ Owner `tests/unit/sep8-remediation/r02` + lock/CAS/persist/trust hellgates + sti
 
 - Windows flock
 - Mixed pre-W3 wx binary vs post-W3 flock on the same `~/.quanta` (W0.4 operator rule)
-- Revoke-resurrection
+- Revoke-resurrection outside the session generation contract
 - `persistMcp` unlocked (F-10 original is settings/hooks)

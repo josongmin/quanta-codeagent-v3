@@ -94,6 +94,7 @@ describe("T03 kernel cancel — reducer owns cancel, scheduler executes", () => 
     const { state, eventLog } = await seedRunningState("cx-2")
 
     let observedSignal: AbortSignal | undefined
+    let observedTurnId: string | undefined
     let abortedDuringTurn = false
     let resolveTurn: (() => void) | undefined
     const turnGate = new Promise<void>((r) => {
@@ -106,8 +107,9 @@ describe("T03 kernel cancel — reducer owns cancel, scheduler executes", () => 
         permissionMode: "default",
         capabilityManifest: manifest,
       }),
-      runTurn: async ({ signal }) => {
+      runTurn: async ({ signal, turnId }) => {
         observedSignal = signal
+        observedTurnId = turnId
         // Park here so a concurrent turn.cancel can land mid-flight.
         await turnGate
         abortedDuringTurn = signal?.aborted === true
@@ -139,6 +141,7 @@ describe("T03 kernel cancel — reducer owns cancel, scheduler executes", () => 
     // Let runTurn register its controller + park.
     await new Promise<void>((r) => setTimeout(r, 5))
     expect(observedSignal).toBeDefined()
+    expect(observedTurnId).toBe("run")
     expect(observedSignal?.aborted).toBe(false)
 
     // Public cancel: must reach the live, in-flight controller even though the

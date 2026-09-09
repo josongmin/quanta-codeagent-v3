@@ -354,7 +354,7 @@ describe("C. filesystem chaos", () => {
     expect(c.out).not.toContain("half-line")
   })
 
-  test("session file present but missing from index: show finds it, ls doesn't", async () => {
+  test("session file present but missing from index: ls rebuilds the projection", async () => {
     const id = "orphan-file"
     // Write the .json directly, never calling upsertMeta.
     const meta = mkMeta({ id, title: "Orphan" })
@@ -369,7 +369,8 @@ describe("C. filesystem chaos", () => {
 
     const cLs = captureDeps()
     expect(await runSessionCommand(["ls"], cLs.deps)).toBe(0)
-    expect(cLs.out).not.toContain(id)
+    expect(cLs.out).toContain(id)
+    expect(cLs.out).toContain("Orphan")
 
     const cShow = captureDeps()
     expect(await runSessionCommand(["show", id], cShow.deps)).toBe(0)

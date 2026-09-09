@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import { lineSpanOf, memoryTools } from "@/agent/memory-tools"
-import type { MemoryEntry, MemoryQuery, PersistentStorePort } from "@/memory"
+import {
+  applyMemoryPatch,
+  type MemoryEntry,
+  type MemoryPatch,
+  type MemoryQuery,
+  type PersistentStorePort,
+} from "@/memory"
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
 
 // ADR-0432 — HARDER hellgate battery (beyond the existing 14). Uses a SPY
@@ -47,10 +53,10 @@ class SpyStore implements PersistentStorePort {
     this.map.set(entry.id, entry)
     return Promise.resolve()
   }
-  update(id: string, patch: Partial<MemoryEntry>): Promise<void> {
+  update(id: string, patch: MemoryPatch): Promise<void> {
     this.calls.update++
     const cur = this.map.get(id)
-    if (cur) this.map.set(id, { ...cur, ...patch })
+    if (cur) this.map.set(id, applyMemoryPatch(cur, patch, Date.now()))
     return Promise.resolve()
   }
   delete(id: string): Promise<void> {

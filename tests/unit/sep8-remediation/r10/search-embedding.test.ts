@@ -5,9 +5,11 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { IndexerFileChunk } from "@/retrieval"
 import {
+  bindPersistedEmbeddingNamespace,
   bindPersistedEmbeddingSpace,
   buildSemanticBackend,
   EmbeddingSpaceError,
+  embeddingSpaceNamespace,
   embeddingSpacesEqual,
   HASH_EMBEDDING_SPACE,
   hashEmbed,
@@ -86,6 +88,60 @@ describe("E-EMBED-01 embedding space", () => {
       normalization: "l2" as const,
     }
     expect(embeddingSpacesEqual(a, b)).toBe(false)
+    expect(embeddingSpaceNamespace("docs", a)).not.toBe(embeddingSpaceNamespace("docs", b))
+    expect(embeddingSpaceNamespace("docs", a)).toBe(embeddingSpaceNamespace("docs", a))
+    expect(embeddingSpaceNamespace("repo-a", a)).not.toBe(embeddingSpaceNamespace("repo-b", a))
+  })
+
+  test("remote namespace mapping detects collision/remap instead of relabeling", () => {
+    const db = new Database(":memory:")
+    const namespace = embeddingSpaceNamespace("docs", HASH_EMBEDDING_SPACE)
+    expect(bindPersistedEmbeddingNamespace(db as never, namespace, HASH_EMBEDDING_SPACE).kind).toBe(
+      "ok",
+    )
+    const other = { ...HASH_EMBEDDING_SPACE, revision: "2" }
+    expect(bindPersistedEmbeddingNamespace(db as never, namespace, other).kind).toBe("mismatch")
+  })
+
+  test("Qdrant composition uses the embedding namespace and requires durable manifest ownership", async () => {
+    const calls: string[] = []
+    const env = {
+      QUANTA_VECTOR_STORE: "qdrant",
+      QUANTA_QDRANT_COLLECTION: "docs",
+      QUANTA_EMBED_PROVIDER: "headless",
+    } as const
+    const resolved = resolveIndexEmbedder(env)
+    const namespace = embeddingSpaceNamespace("docs", await resolved.space())
+    const unowned = buildSemanticBackend(env, resolved.embed, {
+      resolvedEmbedder: resolved,
+      storeDeps: {
+        qdrant: {
+          fetchImpl: async (url) => {
+            calls.push(url)
+            return new Response(JSON.stringify({ result: { status: "ok" } }))
+          },
+        },
+      },
+    })
+    await expect(unowned.upsert.upsert(chunk("a.ts", "alpha"))).rejects.toThrow(
+      "requires QUANTA_INDEX_DB_PATH",
+    )
+    expect(calls).toEqual([])
+
+    const owned = buildSemanticBackend(env, resolved.embed, {
+      manifestDb: new Database(":memory:"),
+      resolvedEmbedder: resolved,
+      storeDeps: {
+        qdrant: {
+          fetchImpl: async (url) => {
+            calls.push(url)
+            return new Response(JSON.stringify({ result: { status: "ok" } }))
+          },
+        },
+      },
+    })
+    await owned.upsert.upsert(chunk("a.ts", "alpha"))
+    expect(calls).toEqual([`http://localhost:6333/collections/${namespace}/points`])
   })
 
   test("query/index dimension mismatch throws instead of Math.min truncation", async () => {

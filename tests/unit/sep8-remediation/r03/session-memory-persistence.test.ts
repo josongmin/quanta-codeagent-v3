@@ -2,7 +2,7 @@ import { afterEach, describe, expect, mock, test } from "bun:test"
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { type MemoryEntry, SqliteStore } from "@/memory"
+import { SqliteStore } from "@/memory"
 import {
   ResumeRehydrateRefusedError,
   rehydrateResumeTranscript,
@@ -273,7 +273,7 @@ describe("SEP7-D-10 column-local embedding update", () => {
       expect((await db.get("blob"))?.text).toBe("after")
       expect(seen.length).toBeGreaterThan(0)
 
-      await db.update("blob", { embedding: undefined } as Partial<MemoryEntry>)
+      await db.update("blob", { embedding: undefined })
       const cleared = db
         .rawDbForTest()
         .query("SELECT embedding FROM memories WHERE id = 'blob'")

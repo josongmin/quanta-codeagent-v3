@@ -4,7 +4,7 @@ Status: **implemented** (not verified). Not W7 `verified`.
 
 Lane: W6-A. Single package; no B/C slot.
 
-source HEAD snapshot: `d841e134be6d349d949ad3dadecbfe877ec106af`
+source HEAD snapshot: `d6087349fbf221bdd66f3e23903b4ca647b0a69c`
 
 ## Snapshot
 
@@ -28,11 +28,11 @@ source HEAD snapshot: `d841e134be6d349d949ad3dadecbfe877ec106af`
 bun test tests/unit/sep8-remediation/r16/ tests/integration/sep8-remediation/r16/ tests/unit/skill/runtime/skill-runtime-authority-hellgate.test.ts
 ```
 
-Env/default/opt-out change active set. CLI/web malformed org-policy throws. PAT in permission/repo-rules warning is `[REDACTED:github_pat_classic]`.
+CLI/web active sets honor banned, required-pin vs user disable, XDG default, empty-env opt-out. Malformed org-policy throws. PAT in permission/repo-rules warning is `[REDACTED:github_pat_classic]`.
 
 ## Unverified / out of scope
 
 - W7 `I.1`–`I.8` / global `prepush` / 39/39 verified
 - G-F5.4 EC2 live proof
 - G-F9.4 live Docker/Lima daemon (contract rail already installed)
-- Unrelated startup catches (e.g. web MCP load) not redesigned
+- Unrelated startup catches (web MCP load, host `resolveBootstrapRepoRules`, CLI `rule-indicator`) not redesigned

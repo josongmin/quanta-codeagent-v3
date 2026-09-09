@@ -27,6 +27,15 @@ export {
   EMBED_PROVIDERS,
   isEmbedProvider,
 } from "./embedder/registry"
+export type { EmbeddingSpace } from "./embedder/space"
+export {
+  embeddingSpaceFingerprint,
+  embeddingSpaceFromCaps,
+  embeddingSpaceKey,
+  embeddingSpaceNamespace,
+  embeddingSpacesEqual,
+  HASH_EMBEDDING_SPACE,
+} from "./embedder/space"
 export type {
   EmbedderCapabilities,
   EmbedError,

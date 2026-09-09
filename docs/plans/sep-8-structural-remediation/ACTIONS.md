@@ -1,6 +1,6 @@
 # Sep-08 — evidence-backed action register
 
-상태: **W6 implemented on local `main`**. W1–W6 implemented. 나머지 액션은 W7 closeout. G-F5.4 EC2 실기 proof는 열린 갭. G-F9.4 contract rail 설치됨 (이 머신 Docker live 실행, Lima skip). 체크박스는 구현 수행이며 W7 전역 verified가 아니다.
+상태: **W7 structural repair in progress on local `main`**. W1–W6 implementation은 유지되며 현재 repair tree는 **not verified**다. G-F5.4 EC2 실기 proof는 열린 갭. G-F9.4 contract rail은 설치됨(이 머신 Docker live 실행, Lima skip). 계획 PASS와 완료 자격은 `verify-waves.mjs`가 별도로 판정한다.
 
 설계·write set·병렬 통합 정책: [README](/Users/songmin/quanta-codeagent-v3/docs/plans/sep-8-structural-remediation/README.md).
 실행 wave/group 배정: [WAVES](/Users/songmin/quanta-codeagent-v3/docs/plans/sep-8-structural-remediation/WAVES.md). 172개 액션의 단일 owner와 병렬 write set은 `waves.json`/`verify-waves.mjs`로 검사한다. 액션 내용은 이 문서, 실행 배정은 manifest가 원본이다.
@@ -43,7 +43,7 @@
 - [x] **F-07.1** 지원 executable/shell/options/compound/code grammar를 inventory하고, basename·shell option·nested command를 공통 구조로 해석한다. 기존 parser가 있으면 reuse하고 새 regex 목록 누적으로 처리하지 않는다.
 - [x] **F-07.2** env 읽기/code-shape 판정을 한 authority로 연결하고 raw-first-token 별도 규칙을 제거한다. unsupported 의심 구조의 sensitivity와 benign control을 명시한다.
 - [x] **F-07.3** 위 6개 bypass family + 정상 대조군을 RED→GREEN으로 고정한다. wrapper 중첩·prefix·redirect에서 판정이 사라지지 않는지 확인한다.
-- [x] **F-07.4** synthetic 비정형 secret을 실제 tool producer에 넣고 모델/JSONL consumer까지 노출되지 않음을 확인한다. classifier만 고치고 sink metadata가 유실되면 미완료다. 현재 증명: live `makeBashTool().classifySource` → `dispatchTool` preview. JSONL 디스크 persist는 별도 rail이 아님.
+- [x] **F-07.4** synthetic 비정형 secret을 실제 tool producer에 넣고 모델/JSONL consumer까지 노출되지 않음을 확인한다. classifier만 고치고 sink metadata가 유실되면 미완료다. 현재 증명: live `makeBashTool().classifySource` → central stream dispatcher → `JsonlRecorder` 실제 파일 readback; raw token 0, redaction marker 존재.
 
 ### SEP7-D-11 · P2 · Stdout progress redaction
 
@@ -423,7 +423,7 @@
 
 | Package | 확장할 기존 suite (repo-relative) | 별도로 확보할 proof |
 |---|---|---|
-| R01 | `tests/unit/security/sensitivity-classifier.test.ts`, `tests/unit/stdout.test.ts`, `tests/unit/sep8-remediation/r01/`, `tests/integration/sep8-remediation/r01/f07-classify-redact-path.test.ts` | live bash `classifySource` → dispatch preview; JSONL 디스크는 미증명 |
+| R01 | `tests/unit/security/sensitivity-classifier.test.ts`, `tests/unit/stdout.test.ts`, `tests/unit/sep8-remediation/r01/`, `tests/integration/sep8-remediation/r01/f07-classify-redact-path.test.ts` | live bash `classifySource` → dispatcher → JSONL disk readback |
 | R02 | `tests/unit/auth/node-lock-file-store.test.ts`, `tests/unit/permission/json-state-file-lock-clock-hellgate.test.ts`, `tests/unit/config-migration-persist-atomic-hellgate.test.ts`, `tests/unit/central-config-trust-store-hellgate.test.ts` | 실제 2/3-process contention/kill/legacy-writer 전환 |
 | R03 | `tests/unit/session-index.test.ts`, `tests/unit/session-store.test.ts`, `tests/integration/memory-sqlite.test.ts` | save/delete barrier, runtime durable resume, raw SQLite BLOB readback |
 | R04 | `tests/unit/patch/unified-to-v4a-scenarios.test.ts`, `tests/unit/patch/applier-rollback-rename-delete.test.ts`, `tests/unit/sep8-remediation/r04/`, `tests/integration/sep8-remediation/r04/` | apply-tool rename와 Incomplete → dispatch preview (`h-patch-02-tool-result.test.ts`) |
@@ -442,14 +442,14 @@
 
 ## 18. 통합 액션 / completion checklist
 
-- [ ] **I.1** 각 finding의 `.1` 계약, `.2` owner 변경, `.3` failure rail, `.4` consumer/제거/호환 작업을 완료한다. 각 checkbox에 diff/receipt를 연결하기 전 체크하지 않는다.
-- [ ] **I.2** code/test 변경 후 기존 authority 우회 경로가 없는지 production constructor/producer census를 재실행한다. 이름 grep만으로 제거 완료를 선언하지 않는다.
-- [ ] **I.3** public API/IPC/저장 포맷 compatibility matrix를 채운다: old reader/new writer, new reader/old writer, mixed process, restart/rollback. 미지원 조합은 실행 차단 또는 명시 migration으로 처리한다.
-- [ ] **I.4** token/path/secret·corrupt bytes·old index는 보존/진단 정책을 지킨다. recovery를 위해 원본을 삭제하는 자동 cleanup을 추가하지 않는다.
-- [ ] **I.5** package별 targeted test/정상 대조군/mutation과 typecheck/lint/slice-boundary/god-code/cohort/lint-debt gate를 실행한다. 코드 행수·경고 ceiling 증가는 금지한다.
-- [ ] **I.6** serial integrator가 composition roots/exports/catalog를 연결하고 exact integrated source에서 cross-surface smoke와 repository prepush campaign을 실행한다. generated catalog는 YAML에서만 build한다.
-- [ ] **I.7** receipt에 source digest·환경·명령·assertion·RED/GREEN/mutation·삭제 경로·compatibility·미검증 runtime 범위를 적는다. fake process와 실제 OS child, 로컬과 cloud 결과를 섞지 않는다.
-- [ ] **I.8** 최종 39개 status를 집계한다. 남은 proof gap은 open으로 두고 구현률·테스트 통과·CI·merge·runtime 적용을 따로 보고한다.
+- [ ] **I.1** 각 finding의 `.1` 계약, `.2` owner 변경, `.3` failure rail, `.4` consumer/제거/호환 작업을 완료한다. 각 checkbox에 diff/receipt를 연결하기 전 체크하지 않는다. G-F5.4 유료 EC2 proof가 열려 있으므로 전역 완료는 미체크다.
+- [x] **I.2** code/test 변경 후 기존 authority 우회 경로가 없는지 production constructor/producer census를 재실행한다. 이름 grep만으로 제거 완료를 선언하지 않는다.
+- [x] **I.3** public API/IPC/저장 포맷 compatibility matrix를 채운다: old reader/new writer, new reader/old writer, mixed process, restart/rollback. 미지원 조합은 실행 차단 또는 명시 migration으로 처리한다.
+- [x] **I.4** token/path/secret·corrupt bytes·old index는 보존/진단 정책을 지킨다. recovery를 위해 원본을 삭제하는 자동 cleanup을 추가하지 않는다.
+- [x] **I.5** package별 targeted test/정상 대조군/mutation과 typecheck/lint/slice-boundary/god-code/cohort/lint-debt gate를 실행한다. 코드 행수·경고 ceiling 증가는 금지한다.
+- [ ] **I.6** serial integrator가 composition roots/exports/catalog를 연결하고 exact integrated source에서 cross-surface smoke와 repository prepush campaign을 실행한다. generated catalog는 YAML에서만 build한다. 현재 source truth tree가 dirty이므로 exact-tree prepush receipt는 아직 없다.
+- [x] **I.7** receipt에 source digest·환경·명령·assertion·RED/GREEN/mutation·삭제 경로·compatibility·미검증 runtime 범위를 적는다. fake process와 실제 OS child, 로컬과 cloud 결과를 섞지 않는다.
+- [x] **I.8** 최종 39개 status를 집계한다. 남은 proof gap은 open으로 두고 구현률·테스트 통과·CI·merge·runtime 적용을 따로 보고한다.
 
 ## 19. 계획 검증과 실행 금지선
 

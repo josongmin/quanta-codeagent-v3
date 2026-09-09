@@ -29,8 +29,8 @@ import {
   type EmbedderCapabilities,
   type EmbedderEnv,
   type EmbedProvider,
+  embeddingSpaceNamespace,
   type LanceStoreOptions,
-  negotiateCapabilities,
   type QdrantStoreOptions,
   type SqliteDb,
   type VectorStore,
@@ -44,7 +44,12 @@ import {
   type SemanticReadiness,
 } from "./search-index-backend/errors"
 import { newInMemoryBackend } from "./search-index-backend/in-memory"
-import { bindPersistedEmbeddingSpace } from "./search-index-backend/space-bind"
+import {
+  bindRuntimeEmbeddingSpace,
+  negotiateVectorStore,
+  remoteNamespaceFor,
+  reportUnavailableStore,
+} from "./search-index-backend/vector-runtime"
 
 /** Caller-supplied upsert surface — mirrors `IndexerChunkUpsertPort`. */
 export interface ChunkUpsertPort {
@@ -67,7 +72,9 @@ export type SemanticBackendState = "ready" | "degraded" | "failed"
 
 export type { EmbeddingSpace } from "@/retrieval/engines/embedder/space"
 export {
+  embeddingSpaceFingerprint,
   embeddingSpaceFromCaps,
+  embeddingSpaceNamespace,
   embeddingSpacesEqual,
   HASH_EMBEDDING_SPACE,
 } from "@/retrieval/engines/embedder/space"
@@ -78,6 +85,7 @@ export {
   type SemanticReadiness,
 } from "./search-index-backend/errors"
 export {
+  bindPersistedEmbeddingNamespace,
   bindPersistedEmbeddingSpace,
   EMBEDDING_SPACE_TABLE,
 } from "./search-index-backend/space-bind"
@@ -376,9 +384,12 @@ class InMemoryManifestStore implements ChunkManifestStore {
 }
 
 class SqliteManifestStore implements ChunkManifestStore {
-  constructor(private readonly db: SqliteDb) {
+  constructor(
+    private readonly db: SqliteDb,
+    private readonly table = MANIFEST_TABLE,
+  ) {
     db.exec(
-      `CREATE TABLE IF NOT EXISTS ${MANIFEST_TABLE} (
+      `CREATE TABLE IF NOT EXISTS ${table} (
          path TEXT NOT NULL,
          id TEXT NOT NULL,
          PRIMARY KEY(path, id)
@@ -387,27 +398,25 @@ class SqliteManifestStore implements ChunkManifestStore {
   }
 
   async listPaths(): Promise<readonly string[]> {
-    const rows = this.db
-      .query<{ path: string }>(`SELECT DISTINCT path FROM ${MANIFEST_TABLE}`)
-      .all()
+    const rows = this.db.query<{ path: string }>(`SELECT DISTINCT path FROM ${this.table}`).all()
     return rows.map((row) => row.path)
   }
 
   async idsForPath(path: string): Promise<readonly string[]> {
     const rows = this.db
-      .query<{ id: string }>(`SELECT id FROM ${MANIFEST_TABLE} WHERE path = ? ORDER BY id`)
+      .query<{ id: string }>(`SELECT id FROM ${this.table} WHERE path = ? ORDER BY id`)
       .all(path)
     return rows.map((row) => row.id)
   }
 
   async replacePath(path: string, ids: readonly string[]): Promise<void> {
-    this.db.query(`DELETE FROM ${MANIFEST_TABLE} WHERE path = ?`).run(path)
-    const stmt = this.db.query(`INSERT INTO ${MANIFEST_TABLE} (path, id) VALUES (?, ?)`)
+    this.db.query(`DELETE FROM ${this.table} WHERE path = ?`).run(path)
+    const stmt = this.db.query(`INSERT INTO ${this.table} (path, id) VALUES (?, ?)`)
     for (const id of ids) stmt.run(path, id)
   }
 
   async deletePath(path: string): Promise<void> {
-    this.db.query(`DELETE FROM ${MANIFEST_TABLE} WHERE path = ?`).run(path)
+    this.db.query(`DELETE FROM ${this.table} WHERE path = ?`).run(path)
   }
 }
 
@@ -467,6 +476,7 @@ const resolveSqliteStoreDeps = (
 const resolveLanceStoreDeps = (
   env: Record<string, string | undefined>,
   opts: BuildSemanticBackendOptions,
+  space: import("@/retrieval/engines").EmbeddingSpace,
 ): StoreDeps => {
   const baseURL = env.QUANTA_LANCE_BASE_URL
   const table = env.QUANTA_LANCE_TABLE
@@ -475,7 +485,7 @@ const resolveLanceStoreDeps = (
   return {
     lance: {
       baseURL,
-      table,
+      table: embeddingSpaceNamespace(table, space),
       ...(env.QUANTA_LANCE_API_KEY !== undefined ? { apiKey: env.QUANTA_LANCE_API_KEY } : {}),
       ...(maxDim !== undefined ? { maxDim } : {}),
       ...(opts.storeDeps?.lance ?? {}),
@@ -486,13 +496,14 @@ const resolveLanceStoreDeps = (
 const resolveQdrantStoreDeps = (
   env: Record<string, string | undefined>,
   opts: BuildSemanticBackendOptions,
+  space: import("@/retrieval/engines").EmbeddingSpace,
 ): StoreDeps => {
   const collection = env.QUANTA_QDRANT_COLLECTION
   if (collection === undefined) return {}
   const maxDim = parseMaxDim(env.QUANTA_QDRANT_MAX_DIM)
   return {
     qdrant: {
-      collection,
+      collection: embeddingSpaceNamespace(collection, space),
       ...(env.QUANTA_QDRANT_BASE_URL !== undefined ? { baseURL: env.QUANTA_QDRANT_BASE_URL } : {}),
       ...(env.QUANTA_QDRANT_API_KEY !== undefined ? { apiKey: env.QUANTA_QDRANT_API_KEY } : {}),
       ...(maxDim !== undefined ? { maxDim } : {}),
@@ -505,28 +516,36 @@ const resolveStoreDeps = (
   env: Record<string, string | undefined>,
   provider: "in-memory" | "sqlite" | "lance" | "qdrant",
   opts: BuildSemanticBackendOptions,
+  space: import("@/retrieval/engines").EmbeddingSpace,
 ): ResolvedStoreDeps => {
   if (provider === "sqlite") return resolveSqliteStoreDeps(env, opts)
-  if (provider === "lance") return { deps: resolveLanceStoreDeps(env, opts) }
-  if (provider === "qdrant") return { deps: resolveQdrantStoreDeps(env, opts) }
+  if (provider === "lance" || provider === "qdrant") {
+    const dbHandle =
+      opts.manifestDb ??
+      (env.QUANTA_INDEX_DB_PATH !== undefined && env.QUANTA_INDEX_DB_PATH !== ""
+        ? openLocalIndexDb(env, "manifest")
+        : null)
+    return {
+      deps:
+        provider === "lance"
+          ? resolveLanceStoreDeps(env, opts, space)
+          : resolveQdrantStoreDeps(env, opts, space),
+      ...(dbHandle !== null ? { dbHandle } : {}),
+    }
+  }
   return { deps: {} }
 }
 
 const resolveManifestStore = (
-  env: Record<string, string | undefined>,
   provider: "in-memory" | "sqlite" | "lance" | "qdrant",
-  opts: BuildSemanticBackendOptions,
   dbHandle: SqliteDb | undefined,
+  namespace?: string,
 ): ChunkManifestStore => {
-  if (opts.manifestDb !== undefined) return new SqliteManifestStore(opts.manifestDb)
-  if (provider === "sqlite" && dbHandle !== undefined) return new SqliteManifestStore(dbHandle)
-  if (env.QUANTA_INDEX_DB_PATH !== undefined && env.QUANTA_INDEX_DB_PATH !== "") {
-    const db = openLocalIndexDb(env, "manifest")
-    if (db !== null) return new SqliteManifestStore(db)
-  }
+  const table = namespace === undefined ? MANIFEST_TABLE : `${MANIFEST_TABLE}_${namespace}`
+  if (dbHandle !== undefined) return new SqliteManifestStore(dbHandle, table)
   if (provider === "lance" || provider === "qdrant") {
     logger.warn(
-      `search index ${provider} manifest is in-memory only (set QUANTA_INDEX_DB_PATH for restart-safe stale-chunk cleanup).`,
+      `search index ${provider} requires QUANTA_INDEX_DB_PATH for restart-safe manifest ownership.`,
     )
   }
   return new InMemoryManifestStore()
@@ -540,47 +559,32 @@ const buildVectorStoreRuntime = async (
 ): Promise<RuntimeBuild> => {
   if (selection.kind === "none" || selection.kind === "invalid-explicit") return null
   const provider = selection.provider
-  const resolved = resolveStoreDeps(env, provider, opts)
+  const space = await resolvedEmbedder.space()
+  const remoteNamespace = remoteNamespaceFor(provider, env, space)
+  const resolved = resolveStoreDeps(env, provider, opts, space)
   const store = createStoreFromEnv({ QUANTA_VECTOR_STORE: provider }, resolved.deps)
   if (store === null) {
-    logger.warn(
-      selection.kind === "explicit"
-        ? `search index ${provider} store unavailable; semantic backend disabled for explicit QUANTA_VECTOR_STORE.`
-        : `search index ${provider} store unavailable; falling back to legacy in-memory index.`,
-    )
+    reportUnavailableStore(selection)
     return null
   }
-  try {
-    const caps = await resolvedEmbedder.capabilities()
-    const negotiated = negotiateCapabilities(caps, store.capabilities())
-    if (!negotiated.ok) {
-      logger.warn(
-        selection.kind === "explicit"
-          ? `search index ${provider} capability mismatch (${negotiated.error.kind}); semantic backend disabled for explicit QUANTA_VECTOR_STORE.`
-          : `search index ${provider} capability mismatch (${negotiated.error.kind}); falling back to legacy in-memory index.`,
-      )
-      return null
-    }
-  } catch (e) {
-    logger.warn(
-      selection.kind === "explicit"
-        ? `search index ${provider} capability negotiation failed (${(e as Error).message}); semantic backend disabled for explicit QUANTA_VECTOR_STORE.`
-        : `search index ${provider} capability negotiation failed (${(e as Error).message}); falling back to legacy in-memory index.`,
-    )
-    return null
-  }
-  if (resolved.dbHandle !== undefined) {
-    const space = await resolvedEmbedder.space()
-    const bind = bindPersistedEmbeddingSpace(resolved.dbHandle, PERSIST_TABLE, space)
-    if (bind.kind !== "ok") {
-      logger.warn(`search index embedding space ${bind.kind}: ${bind.reason}`)
-      return { kind: "space-refused", reason: bind.reason }
+  if ((provider === "lance" || provider === "qdrant") && resolved.dbHandle === undefined) {
+    return {
+      kind: "space-refused",
+      reason: `persistent ${provider} store requires QUANTA_INDEX_DB_PATH; refusing an unowned remote index`,
     }
   }
+  if (!(await negotiateVectorStore(selection, resolvedEmbedder, store))) return null
+  const refused = bindRuntimeEmbeddingSpace(
+    resolved.dbHandle,
+    remoteNamespace,
+    PERSIST_TABLE,
+    space,
+  )
+  if (refused !== null) return refused
   return {
     store,
     storeLabel: provider,
-    manifest: resolveManifestStore(env, provider, opts, resolved.dbHandle),
+    manifest: resolveManifestStore(provider, resolved.dbHandle, remoteNamespace),
   }
 }
 

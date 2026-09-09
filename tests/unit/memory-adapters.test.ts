@@ -4,8 +4,17 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { InMemoryStore } from "../../src/memory/adapters/in-memory"
 import { SqliteStore } from "../../src/memory/adapters/sqlite"
+import { InvalidMemoryPatchError } from "../../src/memory/patch"
 import type { PersistentStorePort } from "../../src/memory/ports"
-import { EMBED_DIM, type MemoryEntry } from "../../src/memory/types"
+import { EMBED_DIM, type MemoryEntry, type MemoryPatch } from "../../src/memory/types"
+
+// `exactOptionalPropertyTypes` must reject required mutable fields explicitly
+// cleared by an untyped caller. Embedding is the one deliberate clear command.
+// @ts-expect-error text cannot be cleared
+const INVALID_TEXT_CLEAR: MemoryPatch = { text: undefined }
+const VALID_EMBEDDING_CLEAR: MemoryPatch = { embedding: undefined }
+void INVALID_TEXT_CLEAR
+void VALID_EMBEDDING_CLEAR
 
 /**
  * Deterministic length-1536 embedding whose every component is exactly
@@ -115,6 +124,39 @@ for (const [name, make] of adapters) {
       const store = make()
       await store.update("ghost", { text: "x" })
       expect(await store.get("ghost")).toBeUndefined()
+    })
+
+    test("update rejects immutable and required-field clears without changing the row", async () => {
+      const store = make()
+      await store.save(fullEntry())
+      const before = await store.get("e1")
+      const hostilePatches = [
+        { id: undefined },
+        { createdAt: undefined },
+        { updatedAt: undefined },
+        { kind: undefined },
+        { text: undefined },
+        { tags: undefined },
+      ]
+      for (const patch of hostilePatches) {
+        await expect(store.update("e1", patch as unknown as MemoryPatch)).rejects.toBeInstanceOf(
+          InvalidMemoryPatchError,
+        )
+        expect(await store.get("e1")).toEqual(before)
+      }
+    })
+
+    test("embedding clear is explicit and adapter-identical", async () => {
+      const store = make()
+      await store.save(fullEntry())
+      await store.update("e1", { embedding: undefined })
+      const got = await store.get("e1")
+      expect(got?.id).toBe("e1")
+      expect(got?.kind).toBe("fact")
+      expect(got?.text).toBe("the sky is blue")
+      expect(got?.tags).toEqual(["color", "sky"])
+      expect(got?.createdAt).toBe(1_000)
+      expect(got?.embedding).toBeUndefined()
     })
 
     test("delete removes; no-op for unknown id", async () => {

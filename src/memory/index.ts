@@ -72,6 +72,13 @@ export {
   type EvictionPlan,
   planEviction,
 } from "./eviction"
+export {
+  applyMemoryPatch,
+  assertValidMemoryPatch,
+  InvalidMemoryPatchError,
+  MEMORY_PATCH_FIELDS,
+  type MemoryPatchField,
+} from "./patch"
 export type { PersistentStorePort } from "./ports"
 export { rankEntries, scoreEntry } from "./ranking"
 export {
@@ -99,6 +106,7 @@ export {
   MEMORY_TIERS,
   type MemoryEntry,
   type MemoryKind,
+  type MemoryPatch,
   type MemoryQuery,
   type MemoryTier,
   type NormalizedEntry,

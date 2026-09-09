@@ -6,7 +6,15 @@ import { fileExists, readFile, writeFile } from "@/storage"
 import type { SessionEnvelopeRecord } from "./envelope"
 import { appendSessionLine, encodeSessionLine } from "./envelope-encoder"
 import { cloneObjectiveForFork } from "./fork-objective"
-import { admitSessionSave, markSessionDeleted, sessionGenerationOf } from "./generation"
+import {
+  admitDurableSessionSave,
+  admitSessionSave,
+  captureDurableSessionGeneration,
+  markSessionDeleted,
+  markSessionDeletedDurably,
+  readDurableSessionGeneration,
+  sessionGenerationOf,
+} from "./generation"
 import { listSessions, removeFromIndex, upsertMeta } from "./index-store"
 import {
   archivedFilePath,
@@ -14,6 +22,8 @@ import {
   sanitizeId,
   sessionFilePath,
   sessionFilePathAsync,
+  sessionGenerationPathAsync,
+  sessionMutationLockPathAsync,
   sessionsRoot,
   sessionsRootAsync,
 } from "./paths"
@@ -78,7 +88,7 @@ const reconcileMessages = (messages: Message[]): Message[] =>
  * Writes throw only on programmer errors (we don't catch — let it bubble).
  */
 
-export { StaleSessionGenerationError } from "./generation"
+export { SessionGenerationStateError, StaleSessionGenerationError } from "./generation"
 export type { SaveSessionOptions } from "./save-options"
 export {
   firstInvalidMessageElement,
@@ -121,6 +131,12 @@ const removeFileIfExists = async (path: string): Promise<void> => {
     // Best-effort — caller already treats absence as success.
   }
 }
+
+const withSessionMutationLock = async <T>(
+  id: string,
+  provider: SessionRootProvider | undefined,
+  fn: () => Promise<T>,
+): Promise<T> => withSessionSaveLock(id, sessionMutationLockPathAsync(id, provider), fn)
 
 /**
  * Commit the derived `index.jsonl` entry AFTER the per-id snapshot JSON has
@@ -195,7 +211,16 @@ export const saveSessionById = (
 ): Promise<void> => {
   const captured = sessionGenerationOf(meta.id)
   const create = opts?.create === true
-  return withSessionSaveLock(meta.id, async () => {
+  const generationPath = sessionGenerationPathAsync(meta.id, provider)
+  const durableCaptured = generationPath.then(captureDurableSessionGeneration).then(
+    (value) => ({ ok: true as const, value }),
+    (error: unknown) => ({ ok: false as const, error }),
+  )
+  return withSessionSaveLock(meta.id, sessionMutationLockPathAsync(meta.id, provider), async () => {
+    const resolvedGenerationPath = await generationPath
+    const durableCapture = await durableCaptured
+    if (!durableCapture.ok) throw durableCapture.error
+    await admitDurableSessionSave(meta.id, resolvedGenerationPath, durableCapture.value, create)
     admitSessionSave(meta.id, captured, create)
     // R6 (final adversarial audit) — the caller's `meta.archived` can be STALE:
     // another surface may have archived (or unarchived) this session mid-turn, and
@@ -205,10 +230,8 @@ export const saveSessionById = (
     // `meta.archived` to match. This stops an omitting save from (a) RESURRECTING an
     // archived session onto the active path and (b) reading the now-empty active
     // file for the rollback-preserve below (silently dropping the ledger). NOTE:
-    // within one process this composes with the save lock; ACROSS processes (two
-    // `quanta` procs on one QUANTA_SESSIONS_DIR) it narrows but cannot fully close
-    // the check→write window — a pre-existing store limitation that needs OS
-    // file-locking, out of scope here.
+    // The stable per-session flock covers this check→write interval across
+    // processes sharing the same session root.
     const activePath = await resolveSessionFilePath(meta.id, provider)
     const archivedPath = await resolveArchivedFilePath(meta.id, provider)
     const path = (await fileExists(activePath))
@@ -311,6 +334,10 @@ export const readSessionByIdTyped = async (
   id: string,
   provider?: SessionRootProvider,
 ): Promise<SessionSnapshotRead> => {
+  const generationPath = await sessionGenerationPathAsync(id, provider)
+  const generation = await readDurableSessionGeneration(generationPath)
+  if (generation.kind !== "ok") return { kind: generation.kind, reason: generation.reason }
+  if (generation.state.deleted) return { kind: "missing" }
   const active = await readSessionSnapshot(await resolveSessionFilePath(id, provider))
   if (active.kind !== "missing") return active
   return readSessionSnapshot(await resolveArchivedFilePath(id, provider))
@@ -343,7 +370,7 @@ export const updateSessionAtomic = (
   mutate: (s: SavedSession) => SavedSession,
   provider?: SessionRootProvider,
 ): Promise<boolean> =>
-  withSessionSaveLock(id, async () => {
+  withSessionMutationLock(id, provider, async () => {
     const existing = await loadSessionById(id, provider)
     if (existing === undefined) return false
     const next = mutate(existing)
@@ -360,7 +387,7 @@ export const archiveSession = (id: string, provider?: SessionRootProvider): Prom
   // Under the per-session save lock (R4): this load→modify→write must not
   // interleave with a coordinator rollback fold (saveSessionById), or the
   // full-snapshot rewrite would clobber a record folded in the load→write gap.
-  withSessionSaveLock(id, async () => {
+  withSessionMutationLock(id, provider, async () => {
     const activePath = await resolveSessionFilePath(id, provider)
     const archivedPath = await resolveArchivedFilePath(id, provider)
     // Idempotency: if it's already archived (active file gone, archived present
@@ -387,7 +414,7 @@ export const archiveSession = (id: string, provider?: SessionRootProvider): Prom
   })
 
 export const unarchiveSession = (id: string, provider?: SessionRootProvider): Promise<void> =>
-  withSessionSaveLock(id, async () => {
+  withSessionMutationLock(id, provider, async () => {
     const activePath = await resolveSessionFilePath(id, provider)
     const archivedPath = await resolveArchivedFilePath(id, provider)
     const archivedExists = await fileExists(archivedPath)
@@ -416,7 +443,7 @@ export const renameSession = (
   title: string,
   provider?: SessionRootProvider,
 ): Promise<void> =>
-  withSessionSaveLock(id, async () => {
+  withSessionMutationLock(id, provider, async () => {
     const existing = await loadSessionById(id, provider)
     if (existing === undefined) return
     const nextMeta: SessionMeta = { ...existing.meta, title, lastTouched: Date.now() }
@@ -479,7 +506,8 @@ export const forkSession = async (
 }
 
 export const deleteSession = async (id: string, provider?: SessionRootProvider): Promise<void> =>
-  withSessionSaveLock(id, async () => {
+  withSessionMutationLock(id, provider, async () => {
+    await markSessionDeletedDurably(await sessionGenerationPathAsync(id, provider))
     await removeFileIfExists(await resolveSessionFilePath(id, provider))
     await removeFileIfExists(await resolveArchivedFilePath(id, provider))
     await removeFromIndex(id, provider)
@@ -556,7 +584,7 @@ export const rewindToMessage = (
 ): Promise<{ removed: number }> =>
   // Per-session save lock (R4): serialize this load→modify→write with the
   // coordinator's rollback fold so a concurrent fold is not clobbered.
-  withSessionSaveLock(sessionId, async () => {
+  withSessionMutationLock(sessionId, provider, async () => {
     const existing = await loadSessionById(sessionId, provider)
     if (existing === undefined) return { removed: 0 }
     if (existing.messages.length === 0) return { removed: 0 }

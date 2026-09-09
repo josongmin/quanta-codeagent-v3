@@ -160,6 +160,7 @@ export {
   readSessionByIdTyped,
   renameSession,
   rewindToMessage,
+  SessionGenerationStateError,
   StaleSessionGenerationError,
   saveSessionById,
   sessionEnvelopePath,

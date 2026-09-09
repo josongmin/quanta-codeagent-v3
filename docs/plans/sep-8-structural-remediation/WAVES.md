@@ -1,12 +1,12 @@
 # Sep-08 — disjoint write-set wave plan
 
-상태: **분할 계획은 유지. W1–W6는 local `main`에 구현됨. W7 verified 아님.**
+상태: **분할 계획은 유지. W1–W6는 local `main`에 구현됨. W7 structural repair in progress, verified 아님.**
 
 - 구조·근거: [README](/Users/songmin/quanta-codeagent-v3/docs/plans/sep-8-structural-remediation/README.md), [ACTIONS](/Users/songmin/quanta-codeagent-v3/docs/plans/sep-8-structural-remediation/ACTIONS.md).
 - 실행 배정의 machine-readable 원본: [waves.json](/Users/songmin/quanta-codeagent-v3/docs/plans/sep-8-structural-remediation/waves.json).
 - 검사기: [verify-waves.mjs](/Users/songmin/quanta-codeagent-v3/docs/plans/sep-8-structural-remediation/verify-waves.mjs).
 - Plan baseline HEAD: `f5f4875799141068af73e604129c8b9a09f76007`.
-- Integrated source (W1+W2, W3 착수): `19fc9da2b` on local `main`. W3 land: `f3a93d5fd`. W5 land: `d841e134be6d349d949ad3dadecbfe877ec106af`. `waves.json` `sourceHead`는 W5 land SHA. W6 status: `w6-implemented`.
+- Integrated source (W1+W2, W3 착수): `19fc9da2b` on local `main`. W3 land: `f3a93d5fd`. W5 land: `d841e134b`. W6 land: `d6087349fbf221bdd66f3e23903b4ca647b0a69c`. `waves.json` `sourceHead`는 frozen audit/implementation baseline이며 current HEAD와 동일할 필요가 없다. status: `w7-repair-in-progress`.
 - audit digest는 manifest에 고정한다. `docs/bugbash/sep-8-se-audit/`는 baseline 입력이지 구현 closeout이 아니다.
 
 ## 1. 전체 배정 — 39 finding / 16 package / 172 action
@@ -171,7 +171,7 @@ R07의 OAuth files는 W3 R02가 사용한 file-store owner와 분리되어 있�
 - worker는 skill authority leaf/contracts/tests를 맡는다. CLI session-setup/repl, web authority, agent preset 경고 배선은 W6-I가 적용한다.
 - 한 package이므로 B/C 슬롯을 임의의 “잔여 작업”으로 채우지 않는다. 읽기 전용 review/test는 가능하나 새로운 owner write를 만들지 않는다.
 
-**구현 상태:** W6-P/I는 local `main`에서 residual uncommitted. sourceHead snapshot `d841e134b`. status `w6-implemented`. W7 verified 아님. G-F5.4 EC2 / G-F9.4 live Docker daemon은 이 wave에 없음.
+**구현 상태:** W6-P/I는 local `main` `d6087349f`에 land. sourceHead snapshot `d6087349f`. status `w6-implemented`. W7 verified 아님. G-F5.4 EC2 / G-F9.4 live Docker daemon은 이 wave에 없음.
 
 ### W7 — Serial final closeout
 
@@ -179,6 +179,8 @@ R07의 OAuth files는 W3 R02가 사용한 file-store owner와 분리되어 있�
 - Wn-I의 로컬 통합 실행은 해당 package handoff의 일부다. 전역 I 체크박스는 W7에서 모든 package의 증거를 집계한 뒤 한 번만 닫는다.
 - 모든 producer/constructor census, compatibility matrix, 원본 보존, mutation, typecheck/lint/fence/ratchet, exact-source prepush, catalog 및 39건 최종 상태를 확인한다.
 - 실제 Docker/Lima/EC2 proof가 없으면 해당 gap을 open으로 기록한다. external proof를 누락한 채 verified 39/39로 표시하지 않는다.
+
+**구현 상태:** W7 structural repair in progress on local `main` (dirty on product land `d6087349`). `waves.json` status `w7-repair-in-progress`. **Not** verified. G-F5.4 EC2 OPEN. Receipt: `work/W7.md`.
 
 ## 5. 테스트·문서·운영 자원도 분리
 
@@ -208,10 +210,10 @@ bun docs/plans/sep-8-structural-remediation/verify-waves.mjs --group R01 src/sec
 1. 39 finding/16 group/172 action floor와 exact coverage, 중복 owner, `.1`–`.4` 빠짐.
 2. W0→W1…W6→W7 dependency, wave당 writer ≤3, 단일 integration 순서.
 3. 같은 wave의 prefix/exact scope 간 symbolic intersection와 현재 파일 목록의 실제 intersection.
-4. reserved path 침범, 기존 exact file/test 존재, audit digest/HEAD drift.
+4. reserved path 침범, 기존 exact file/test 존재, audit digest와 frozen audit HEAD 유효성.
 5. future-path collision injection, reserved-root exclusion, undeclared write rejection self-test.
 
-작성 시 결과: **PASS — 배정 누락/중복 0, 같은 wave의 병렬 write-set 교집합 0.** 최초 검사에서 eval `index.ts`의 worker/reserved 충돌을 잡아 W5-I로 옮긴 뒤 재검사했다. 이는 계획의 집합 검증이지 제품 테스트 PASS가 아니다.
+출력의 `PLAN_PASS`는 배정 누락/중복 0과 같은 wave의 병렬 write-set 교집합 0만 뜻한다. `completion.eligible`은 current source truth clean, unchecked action 0, manifest `verified`를 별도로 요구한다. `--require-closeout`은 이 조건 중 하나라도 없으면 non-zero다. 이는 계획의 집합 검증을 제품 테스트/완료 PASS로 오독하지 않기 위한 경계다.
 
 실제 negative control도 실행했다. R01의 security 파일은 exit 0, R01에서 `src/shared/env-flag.ts` 또는 R04 소유 `src/patch/applier.ts`를 쓰려는 검사는 각각 정확한 경로를 지목하며 exit 1이었다. 판정 결과만으로 mutation을 적용하지 않는다.
 

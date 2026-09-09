@@ -22,7 +22,9 @@ surface_integration:
     web: "no web verb; session resilience is a host/CLI restart-boundary concern with no browser affordance (offer→web card consumes the same event, ADR-0528 surface follow-up)."
 purpose: |
   Two leaf durability/diagnostic modules in the `@/session` slice that sit on
-  top of the existing snapshot store (no new on-disk file, no sqlite).
+  top of the existing snapshot store (no sqlite). The store maintains a small
+  per-session durable generation/tombstone sidecar and stable flock pathname so
+  a completed delete fences late saves from other processes.
 
   1. crash-resume (`src/session/crash-resume.ts`, §13.2) — the in-memory
      `InterruptedTurnBuffer` (`src/agent/interrupted-turn.ts`, jun-08) restores
@@ -77,6 +79,9 @@ evidence:
   code:
     - src/session/crash-resume.ts
     - src/session/store-health.ts
+    - src/session/generation.ts
+    - src/session/save-lock.ts
+    - src/session/store.ts
     - src/runner/orchestrate/crash-resume-wire.ts
     - src/runner/orchestrate/session-turn-driver.ts
   adrs: [525, 528]
@@ -84,9 +89,11 @@ evidence:
     unit:
       - tests/unit/session/crash-resume.test.ts
       - tests/unit/session/store-health.test.ts
+      - tests/unit/session-store.test.ts
     integration:
       - tests/integration/crash-resume-hellgate.test.ts
       - tests/integration/crash-resume-wire-hellgate.test.ts
+      - tests/integration/sep8-remediation/r03/session-delete-save.integration.test.ts
     contract: []
 knobs:
   - name: QUANTA_CRASH_RESUME

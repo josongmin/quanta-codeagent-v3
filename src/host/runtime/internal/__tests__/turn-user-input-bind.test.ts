@@ -43,6 +43,7 @@ describe("G-F12 runRuntimeTurn wires bind + originating signal", () => {
     )
     expect(src).toMatch(/bindTurnUserInput\s*\(/)
     expect(src).toMatch(/signal:\s*args\.signal/)
+    expect(src).toMatch(/turnId:\s*turnIdentity\(args\.turnId\)/)
     expect(src).not.toContain("cancelAll")
   })
 

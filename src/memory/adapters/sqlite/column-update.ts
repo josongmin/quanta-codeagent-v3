@@ -6,30 +6,12 @@
  * vector serializes. Omitted embedding leaves the raw BLOB alone.
  */
 
-import type { MemoryEntry } from "../../types"
+import { assertValidMemoryPatch, MEMORY_PATCH_FIELDS, type MemoryPatchField } from "../../patch"
+import type { MemoryPatch } from "../../types"
 import { serializeVec } from "../../vector"
 
-export const MEMORY_UPDATE_COLUMNS = [
-  "kind",
-  "text",
-  "tags",
-  "tier",
-  "importance",
-  "accessCount",
-  "lastAccessedAt",
-  "embedding",
-  "supersededBy",
-  "sessionId",
-  "taskGroup",
-  "appliesTo",
-  "reuseRule",
-  "lastDecayedAt",
-] as const
-
-type UpdateColumn = (typeof MEMORY_UPDATE_COLUMNS)[number]
-
-const isUpdateColumn = (key: string): key is UpdateColumn =>
-  (MEMORY_UPDATE_COLUMNS as readonly string[]).includes(key)
+export const MEMORY_UPDATE_COLUMNS = MEMORY_PATCH_FIELDS
+type UpdateColumn = MemoryPatchField
 
 export interface SqlUpdate {
   readonly sql: string
@@ -57,7 +39,7 @@ const bindScalar = (
 
 const applyPatchKey = (
   key: UpdateColumn,
-  patch: Partial<MemoryEntry>,
+  patch: MemoryPatch,
   sets: string[],
   params: Record<string, string | number | Uint8Array | null>,
 ): void => {
@@ -85,16 +67,17 @@ const applyPatchKey = (
 
 export const buildMemoryColumnUpdate = (
   id: string,
-  patch: Partial<MemoryEntry>,
+  patch: MemoryPatch,
   updatedAt: number,
 ): SqlUpdate | null => {
+  assertValidMemoryPatch(patch)
   const sets: string[] = ["updated_at = $updated_at"]
   const params: Record<string, string | number | Uint8Array | null> = {
     $id: id,
     $updated_at: updatedAt,
   }
-  for (const key of Object.keys(patch)) {
-    if (!isUpdateColumn(key)) continue
+  for (const key of MEMORY_UPDATE_COLUMNS) {
+    if (!Object.hasOwn(patch, key)) continue
     applyPatchKey(key, patch, sets, params)
   }
   if (sets.length === 0) return null

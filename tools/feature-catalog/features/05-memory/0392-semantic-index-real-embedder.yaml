@@ -33,21 +33,26 @@ purpose: |
   startIndexer가 더 이상 placeholder hashEmbed(64-d FNV)만 쓰지 않는다 —
   ADR-0261 embedder 레지스트리(createEmbedderFromEnv: openai/voyage/cohere/
   ollama/headless)에 wired. env 미설정 / embedder null ⇒ hashEmbed default,
-  real provider failure는 SAME-DIM deterministic headless fallback으로
-  degrade되어 fixed-dim sqlite/Lance/Qdrant store와 충돌하지 않는다.
+  real provider failure는 typed error로 semantic backend를 중단하며 hash나
+  headless vector로 fallback하지 않아 sqlite/Lance/Qdrant 공간을 오염시키지 않는다.
   또 semantic backend가 ADR-0261 store registry를 실제로 소비한다:
   `QUANTA_VECTOR_STORE ∈ {in-memory, sqlite, lance, qdrant}` 또는 legacy
   `QUANTA_INDEX_PERSIST=on` ⇒ 해당 store로 codebase index를 올린다.
   explicit store misconfig/negotiation failure는 legacy in-memory로 숨기지
   않고 semantic backend를 hard-disable한다. Lance/Qdrant path는
-  manifest-backed stale-chunk reconcile + delete-ack-gated retry retention +
+  logical collection과 전체 embedding-space identity로 physical namespace를
+  파생하고 durable local manifest/namespace sidecar가 없으면 첫 remote write
+  전에 거부한다. stale-chunk reconcile + delete-ack-gated retry retention +
   embed/query latency metrics를 포함한다. search wire는 full-corpus pass가
   아니라 scan mutation batch만 reconcile한다. default-OFF: store/embedder
   knob 미설정 ⇒ in-memory + hashEmbed ⇒ byte-identical.
 evidence:
   code:
     - src/runner/assemble/search-index-backend.ts
+    - src/runner/assemble/search-index-backend/space-bind.ts
+    - src/runner/assemble/search-index-backend/vector-runtime.ts
     - src/runner/assemble/search-pipeline.ts
+    - src/retrieval/engines/embedder/space.ts
     - src/retrieval/engines/embedder/registry.ts
     - src/retrieval/engines/store/registry.ts
     - src/retrieval/engines/store/sqlite-vss-store.ts
@@ -57,6 +62,7 @@ evidence:
     unit:
       - tests/unit/runner/search-index-backend.test.ts
       - tests/unit/runner/search-pipeline.test.ts
+      - tests/unit/sep8-remediation/r10/search-embedding.test.ts
     integration:
       - tests/integration/search-pipeline-lance-wire.test.ts
     contract:
@@ -75,12 +81,15 @@ knobs:
     type: string
     default: '<unset>'
     purpose: 'LanceDB table name when the semantic backend opts into QUANTA_VECTOR_STORE=lance'
+  - name: QUANTA_INDEX_DB_PATH
+    type: string
+    default: '<unset>'
+    purpose: 'durable vector manifest and embedding-namespace ownership sidecar; required for Lance/Qdrant'
 deliberate_hold: null
 notes: |
   lexical search는 default — semantic은 보조. real embedder 미설정 시
-  hashEmbed로 graceful fallback이라 사용자가 embedder 모르고 쓰는 경우에도
-  lexical 동작 byte-identical. provider를 명시적으로 고른 후 실패하면
-  fallback도 같은 차원(dim)을 유지한다. store를 명시적으로 고른 후
+  hashEmbed default namespace를 사용해 lexical 동작은 byte-identical이다.
+  provider를 명시적으로 고른 후 실패하면 다른 embedder로 fallback하지 않는다. store를 명시적으로 고른 후
   misconfig되면 fallback indexing 대신 disabled/no-op로 fail-closed한다.
   Lance contract proof는 두 층이다: integration rail은 stateful in-proc
   REST fixture로 live wire/restart-safe manifest branch를 deterministically

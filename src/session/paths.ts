@@ -87,6 +87,12 @@ export const archivedFilePath = (id: string): string =>
 
 export const indexFilePath = (): string => join(sessionsRoot(), "index.jsonl")
 
+export const sessionMutationLockPath = (id: string): string =>
+  join(sessionsRoot(), ".locks", `${sanitizeId(id)}.lock`)
+
+export const sessionGenerationPath = (id: string): string =>
+  join(sessionsRoot(), ".generations", `${sanitizeId(id)}.json`)
+
 /** Provider-aware twin of {@link sessionFilePath}. When `provider` is
  *  omitted the result is byte-identical to `sessionFilePath(id)`. */
 export const sessionFilePathAsync = async (
@@ -103,3 +109,14 @@ export const archivedFilePathAsync = async (
 /** Provider-aware twin of {@link indexFilePath}. */
 export const indexFilePathAsync = async (provider?: SessionRootProvider): Promise<string> =>
   join(await sessionsRootAsync(provider), "index.jsonl")
+
+export const sessionMutationLockPathAsync = async (
+  id: string,
+  provider?: SessionRootProvider,
+): Promise<string> => join(await sessionsRootAsync(provider), ".locks", `${sanitizeId(id)}.lock`)
+
+export const sessionGenerationPathAsync = async (
+  id: string,
+  provider?: SessionRootProvider,
+): Promise<string> =>
+  join(await sessionsRootAsync(provider), ".generations", `${sanitizeId(id)}.json`)

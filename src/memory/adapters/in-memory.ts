@@ -1,7 +1,8 @@
+import { applyMemoryPatch } from "../patch"
 import type { PersistentStorePort } from "../ports"
 import { rankEntries } from "../ranking"
 import type { MemoryTelemetryPort } from "../telemetry-port"
-import { type MemoryEntry, type MemoryQuery, normalizeEntry } from "../types"
+import { type MemoryEntry, type MemoryPatch, type MemoryQuery, normalizeEntry } from "../types"
 
 /**
  * Volatile {@link PersistentStorePort} (tests / ephemeral sessions).
@@ -26,12 +27,10 @@ export class InMemoryStore implements PersistentStorePort {
     return Promise.resolve()
   }
 
-  update(id: string, patch: Partial<MemoryEntry>): Promise<void> {
+  async update(id: string, patch: MemoryPatch): Promise<void> {
     const existing = this.entries.get(id)
-    if (!existing) return Promise.resolve()
-    const merged: MemoryEntry = { ...existing, ...patch, updatedAt: Date.now() }
-    this.entries.set(id, clone(normalizeEntry(merged)))
-    return Promise.resolve()
+    if (!existing) return
+    this.entries.set(id, clone(applyMemoryPatch(existing, patch, Date.now())))
   }
 
   delete(id: string): Promise<void> {

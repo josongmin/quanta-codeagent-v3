@@ -4,12 +4,12 @@
  * recovered from valid snapshots; they are not silently dropped on rewrite
  * (SEP7-D-06).
  *
- * CONCURRENCY (in-process): upsert/remove/recover serialize on a per-root
- * promise-chain mutex. Cross-process last-writer-wins is not claimed.
+ * CONCURRENCY: upsert/remove/recover serialize on a per-root promise queue and
+ * a stable fd-held flock, so different processes cannot lose index updates.
  */
 import { readdir, rename, unlink } from "node:fs/promises"
 import { dirname, join } from "node:path"
-import { errMessage, logger } from "@/shared"
+import { errMessage, logger, POSIX_FLOCK_SUPPORTED, withPosixFileLock } from "@/shared"
 import { fileExists, readFile, writeFile } from "@/storage"
 import { indexFilePath, indexFilePathAsync } from "./paths"
 import type { SessionRootProvider } from "./root-port"
@@ -169,7 +169,7 @@ const withIndexMutex = async <T>(path: string, fn: () => Promise<T>): Promise<T>
     // A previous holder rejecting must not poison the queue.
   }
   try {
-    return await fn()
+    return await (POSIX_FLOCK_SUPPORTED ? withPosixFileLock(`${path}.lock`, fn) : fn())
   } finally {
     release()
     if (indexMutexes.get(path) === next) indexMutexes.delete(path)

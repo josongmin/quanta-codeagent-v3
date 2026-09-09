@@ -140,6 +140,15 @@ export {
   installOperatorNoticeSink,
 } from "./operator-notice"
 export { omitUndef } from "./optional"
+export {
+  LOCK_EX,
+  LOCK_NB,
+  LOCK_UN,
+  OPEN_LOCK_FLAGS,
+  POSIX_FLOCK_SUPPORTED,
+  posixFlock,
+  withPosixFileLock,
+} from "./posix-flock"
 export { normalizePublicIssueText, stripHtmlComments } from "./public-issue-text"
 export { quantaHomeDir, quantaHomeDirFrom, quantaHomePath } from "./quanta-home"
 export { RECONCILE_PLACEHOLDER_TEXT, reconcileToolPairing } from "./reconcile-tool-pairing"

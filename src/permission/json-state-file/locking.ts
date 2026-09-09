@@ -12,7 +12,7 @@
 
 import { closeSync, mkdirSync, openSync } from "node:fs"
 import { dirname } from "node:path"
-import { LOCK_EX, LOCK_NB, LOCK_UN, OPEN_LOCK_FLAGS, posixFlock } from "./posix-flock"
+import { LOCK_EX, LOCK_NB, LOCK_UN, OPEN_LOCK_FLAGS, posixFlock } from "@/shared"
 
 /** Distinguished outcomes of a state `parse`. The engine takes the right
  *  action per outcome — schema mismatch quarantines to a versioned sidecar so

@@ -13,6 +13,7 @@ import { describe, expect, test } from "bun:test"
 import type { IndexerFileChunk } from "@/retrieval"
 import {
   buildSemanticBackend,
+  embeddingSpaceNamespace,
   hashEmbed,
   isPersistOn,
   resolveIndexEmbedder,
@@ -354,7 +355,9 @@ describe("buildSemanticBackend — sqlite persist", () => {
       QUANTA_EMBED_PROVIDER: "headless",
     } as const
     const resolved = resolveIndexEmbedder(env)
+    const table = embeddingSpaceNamespace("docs", await resolved.space())
     const backend = buildSemanticBackend(env, resolved.embed, {
+      manifestDb: new Database(":memory:"),
       resolvedEmbedder: resolved,
       storeDeps: { lance: { fetchImpl: rec.fetchImpl } },
     })
@@ -366,12 +369,12 @@ describe("buildSemanticBackend — sqlite persist", () => {
     await backend.reconcileChanges?.(batchFor([first]))
     const hits = await backend.port.query(await resolved.embed("alpha"), 1)
     expect(hits[0]?.metadata?.path).toBe("a.ts")
-    expect(rec.calls.some((c) => c.url === "http://lance.test/v1/table/docs/upsert")).toBe(true)
-    expect(rec.calls.some((c) => c.url === "http://lance.test/v1/table/docs/query")).toBe(true)
+    expect(rec.calls.some((c) => c.url === `http://lance.test/v1/table/${table}/upsert`)).toBe(true)
+    expect(rec.calls.some((c) => c.url === `http://lance.test/v1/table/${table}/query`)).toBe(true)
     expect(
       rec.calls.some(
         (c) =>
-          c.url === "http://lance.test/v1/table/docs/delete" &&
+          c.url === `http://lance.test/v1/table/${table}/delete` &&
           JSON.stringify(c.body) === JSON.stringify({ ids: ["a.ts:6-10"] }),
       ),
     ).toBe(true)
@@ -388,6 +391,7 @@ describe("buildSemanticBackend — sqlite persist", () => {
     } as const
     const resolved = resolveIndexEmbedder(env)
     const backend = buildSemanticBackend(env, resolved.embed, {
+      manifestDb: new Database(":memory:"),
       resolvedEmbedder: resolved,
       storeDeps: { lance: { fetchImpl: rec.fetchImpl } },
     })
@@ -427,7 +431,9 @@ describe("buildSemanticBackend — sqlite persist", () => {
       QUANTA_EMBED_PROVIDER: "headless",
     } as const
     const resolved = resolveIndexEmbedder(env)
+    const table = embeddingSpaceNamespace("docs", await resolved.space())
     const backend = buildSemanticBackend(env, resolved.embed, {
+      manifestDb: new Database(":memory:"),
       resolvedEmbedder: resolved,
       storeDeps: { lance: { fetchImpl: rec.fetchImpl } },
     })
@@ -438,7 +444,7 @@ describe("buildSemanticBackend — sqlite persist", () => {
     deleteOk = true
     await backend.upsert.delete("retry.ts")
     const deleteBodies = rec.calls
-      .filter((c) => c.url === "http://lance.test/v1/table/docs/delete")
+      .filter((c) => c.url === `http://lance.test/v1/table/${table}/delete`)
       .map((c) => JSON.stringify(c.body))
     expect(deleteBodies).toEqual([
       JSON.stringify({ ids: ["retry.ts:1-5"] }),
@@ -463,7 +469,9 @@ describe("buildSemanticBackend — sqlite persist", () => {
       QUANTA_EMBED_PROVIDER: "headless",
     } as const
     const resolved = resolveIndexEmbedder(env)
+    const table = embeddingSpaceNamespace("docs", await resolved.space())
     const backend = buildSemanticBackend(env, resolved.embed, {
+      manifestDb: new Database(":memory:"),
       resolvedEmbedder: resolved,
       storeDeps: { lance: { fetchImpl: rec.fetchImpl } },
     })
@@ -477,7 +485,7 @@ describe("buildSemanticBackend — sqlite persist", () => {
     deleteOk = true
     await backend.reconcileChanges?.(batchFor([first]))
     const deleteBodies = rec.calls
-      .filter((c) => c.url === "http://lance.test/v1/table/docs/delete")
+      .filter((c) => c.url === `http://lance.test/v1/table/${table}/delete`)
       .map((c) => JSON.stringify(c.body))
       .filter((body) => body === JSON.stringify({ ids: ["retry.ts:6-10"] }))
     expect(deleteBodies).toHaveLength(2)
@@ -500,7 +508,9 @@ describe("buildSemanticBackend — sqlite persist", () => {
       QUANTA_EMBED_PROVIDER: "headless",
     } as const
     const resolved = resolveIndexEmbedder(env)
+    const table = embeddingSpaceNamespace("docs", await resolved.space())
     const backend = buildSemanticBackend(env, resolved.embed, {
+      manifestDb: new Database(":memory:"),
       resolvedEmbedder: resolved,
       storeDeps: { lance: { fetchImpl: rec.fetchImpl } },
     })
@@ -510,7 +520,7 @@ describe("buildSemanticBackend — sqlite persist", () => {
     deleteOk = true
     await backend.reconcileChanges?.(batchFor([], ["gone.ts"]))
     const deleteBodies = rec.calls
-      .filter((c) => c.url === "http://lance.test/v1/table/docs/delete")
+      .filter((c) => c.url === `http://lance.test/v1/table/${table}/delete`)
       .map((c) => JSON.stringify(c.body))
       .filter((body) => body === JSON.stringify({ ids: ["gone.ts:1-5"] }))
     expect(deleteBodies).toHaveLength(2)
@@ -533,7 +543,7 @@ describe("buildSemanticBackend — sqlite persist", () => {
     ).toBe(true)
   })
 
-  test("B13. remote store restart without a persistent manifest cannot discover stale ids to delete", async () => {
+  test("B13. remote store without a persistent manifest is refused before first write", async () => {
     const rec = recorder((req) => {
       if (req.url.endsWith("/upsert")) return jsonResponse(200, { ok: true })
       if (req.url.endsWith("/delete")) return jsonResponse(200, { ok: true })
@@ -547,29 +557,13 @@ describe("buildSemanticBackend — sqlite persist", () => {
       QUANTA_EMBED_PROVIDER: "headless",
     } as const
     const resolved = resolveIndexEmbedder(env)
-    const firstBackend = buildSemanticBackend(env, resolved.embed, {
+    const backend = buildSemanticBackend(env, resolved.embed, {
       resolvedEmbedder: resolved,
       storeDeps: { lance: { fetchImpl: rec.fetchImpl } },
     })
-    const first = chunk("restart.ts", "alpha", 1, 5)
-    const stale = chunk("restart.ts", "beta", 6, 10)
-    await firstBackend.upsert.upsert(first)
-    await firstBackend.upsert.upsert(stale)
-    await firstBackend.reconcileChanges?.(batchFor([first, stale]))
-
-    const beforeRestart = rec.calls.length
-    const secondBackend = buildSemanticBackend(env, resolved.embed, {
-      resolvedEmbedder: resolved,
-      storeDeps: { lance: { fetchImpl: rec.fetchImpl } },
-    })
-    const rewritten = chunk("restart.ts", "gamma", 1, 1)
-    await secondBackend.upsert.upsert(rewritten)
-    await secondBackend.reconcileChanges?.(batchFor([rewritten]))
-
-    const deleteBodies = rec.calls
-      .slice(beforeRestart)
-      .filter((c) => c.url === "http://lance.test/v1/table/docs/delete")
-      .map((c) => JSON.stringify(c.body))
-    expect(deleteBodies).toEqual([])
+    await expect(backend.upsert.upsert(chunk("restart.ts", "alpha"))).rejects.toThrow(
+      "requires QUANTA_INDEX_DB_PATH",
+    )
+    expect(rec.calls).toEqual([])
   })
 })

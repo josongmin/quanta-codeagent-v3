@@ -95,6 +95,7 @@ export const createTurnStreamPort = (args: {
 const buildRuntimeTurnArgs = (args: {
   readonly base: RuntimeBase
   readonly turnAssembler?: RuntimeAgentTurnAssembler
+  readonly turnId?: string
   readonly history: readonly Message[]
   readonly prompt: string
   readonly images?: readonly ImageBlock[]
@@ -106,6 +107,7 @@ const buildRuntimeTurnArgs = (args: {
 }) => ({
   base: args.base,
   ...(args.turnAssembler !== undefined ? { turnAssembler: args.turnAssembler } : {}),
+  ...(args.turnId !== undefined ? { turnId: args.turnId } : {}),
   history: [...args.history],
   prompt: args.prompt,
   ...(args.images !== undefined && args.images.length > 0 ? { images: [...args.images] } : {}),
@@ -235,9 +237,13 @@ const usageAccountingPersistInput = (
   return accounting === undefined ? {} : { usageAccountingSnapshot: () => accounting.serialize() }
 }
 
+const turnIdentity = (explicit: string | undefined): string => explicit ?? crypto.randomUUID()
+
 export const runRuntimeTurn = async (args: {
   readonly base: RuntimeBase
   readonly turnAssembler?: RuntimeAgentTurnAssembler
+  /** Canonical kernel command identity; direct host callers may omit it. */
+  readonly turnId?: string
   readonly history: readonly Message[]
   readonly prompt: string
   readonly images?: readonly ImageBlock[]
@@ -277,7 +283,7 @@ export const runRuntimeTurn = async (args: {
     ),
     {
       sessionId: getSessionId(args.base),
-      turnId: crypto.randomUUID(),
+      turnId: turnIdentity(args.turnId),
       signal: args.signal,
     },
   )

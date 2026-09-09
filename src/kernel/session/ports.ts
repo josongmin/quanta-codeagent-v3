@@ -262,6 +262,9 @@ export interface SessionHost {
    *  empty (no-op); a different claim or a fail-stop is never touched. */
   releaseGoalAttempt?(attemptId: string): void
   runTurn(args: {
+    /** Canonical turn execution identity. The kernel supplies the originating
+     *  command id; hosts must preserve it when binding turn-local resources. */
+    readonly turnId?: string
     readonly history: readonly Message[]
     readonly prompt: string
     readonly images?: readonly ImageBlock[]

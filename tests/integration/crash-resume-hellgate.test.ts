@@ -514,17 +514,10 @@ describe("RFC01-4 A1 boot rehydrate — LIVE (SavedSession injection)", () => {
   })
 
   // (4) TAMPERED TRANSCRIPT — never partial-merges a corrupt transcript. Two
-  // guards compose here, both fail-closed against silently adopting garbage:
-  //   (a) the `@/session` store's own `savedSessionSchema.safeParse` refuses to
-  //       LOAD a badly-corrupt file (`loadSessionById → undefined`), so the
-  //       front door takes the byte-identical FRESH path — a corrupt file is
-  //       NEVER partial-merged into the runtime;
-  //   (b) the boot-time `validateResumeSnapshot` re-check REFUSES a snapshot
-  //       that parses the store schema but still violates the Message contract
-  //       (defense-in-depth; proven at the pure boundary in test (5)).
-  // This test exercises (a) through the REAL front door: a store-corrupt
-  // transcript resumes seq only and starts EMPTY, never surfacing the garbage.
-  test("[rehydrate] store-corrupt transcript ⇒ never partial-merged (fresh, not garbage)", async () => {
+  // guards compose here, both fail-closed against silently adopting garbage.
+  // The typed snapshot reader distinguishes corrupt from missing, so the front
+  // door refuses rather than laundering corruption into an empty fresh start.
+  test("[rehydrate] store-corrupt transcript ⇒ typed refusal, never fresh/partial", async () => {
     const sessionId = "a1-tamper"
     const { coldStart } = await setupResumeWorld(sessionId)
     await seedDurableTip(coldStart)
@@ -541,15 +534,16 @@ describe("RFC01-4 A1 boot rehydrate — LIVE (SavedSession injection)", () => {
     writeFileSync(path, JSON.stringify(parsed))
     __resetRuntimeConfig()
 
-    // The store refuses to load the corrupt file, so the runtime does NOT throw
-    // and — critically — does NOT surface the garbage: the transcript is empty,
-    // never the corrupt `"not-an-array-tool-result"` string.
-    const resumed = await coldStart()
-    const messages = resumed.transcript.messages()
-    expect(messages).toEqual([])
-    const flat = JSON.stringify(messages)
-    expect(flat).not.toContain("not-an-array-tool-result")
-    await resumed.close?.()
+    const { ResumeRehydrateRefusedError } = await import("@/sdk/runtime/session/rehydrate")
+    let caught: unknown
+    try {
+      await coldStart()
+    } catch (error) {
+      caught = error
+    }
+    expect(caught).toBeInstanceOf(ResumeRehydrateRefusedError)
+    expect((caught as InstanceType<typeof ResumeRehydrateRefusedError>).component).toBe("corrupt")
+    expect((caught as Error).message).not.toContain("not-an-array-tool-result")
   })
 
   // (5) FAIL-CLOSED on garbage transcript entry (revision/hash-tamper proxy):

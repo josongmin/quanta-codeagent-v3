@@ -177,12 +177,13 @@ const runSessionHostTurn = async (deps: {
   readonly turnArgs: Parameters<SessionHost["runTurn"]>[0]
 }): Promise<Awaited<ReturnType<SessionHost["runTurn"]>>> => {
   const { args, base, approvalProtocol, emittedArtifactIds, turnArgs } = deps
-  const { history, prompt, images, signal, onEvent } = turnArgs
+  const { turnId, history, prompt, images, signal, onEvent } = turnArgs
   const result = await approvalProtocol.runWithProtocol(
     async () =>
       await runRuntimeTurn(
         buildRuntimeTurnArgs({
           base,
+          ...(turnId !== undefined ? { turnId } : {}),
           ...(args.state.turnAssembler !== undefined
             ? { turnAssembler: args.state.turnAssembler }
             : {}),

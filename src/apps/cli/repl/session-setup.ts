@@ -336,9 +336,9 @@ export interface SessionSetupResult {
  *  status chrome and interactive prompt-only ports. */
 /**
  * RFC-06 F4 — build the ONE durable skill runtime authority for a CLI
- * interactive session. Org dir is resolved once (`undefined` default vs
- * explicit `null` opt-out) and passed into the shared composer. Malformed
- * org-policy stays fail-loud. Generic construction errors fail-open.
+ * interactive session. Org dir is resolved from env (`QUANTA_ORG_CONFIG_DIR`
+ * empty = opt-out, omitted = platform default). Malformed org-policy stays
+ * fail-loud. Generic construction errors fail-open.
  */
 export const buildCliSkillAuthority = async (
   skillsConfig: AgentConfigSkills,

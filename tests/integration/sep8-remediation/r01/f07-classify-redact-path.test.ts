@@ -6,15 +6,19 @@
  * redactSecrets({ origin: "tool_result", sourceClass }) sink must fire.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { dispatchTool } from "@/agent/dispatch"
+import { createStreamDispatcher } from "@/agent/stream-callbacks"
+import type { TurnSession, TurnState } from "@/agent/turn-context"
 import type { AgentConfig } from "@/agent/types"
 import type { ToolUseBlock } from "@/llm"
+import type { TurnTimingCapture } from "@/observability"
 import type { PermissionContext } from "@/permission"
 import { __resetDefaultPermissionStore } from "@/permission"
 import { __resetRuntimeConfig } from "@/shared"
+import { JsonlRecorder } from "@/stream"
 import type { Tool, ToolEvent } from "@/tool"
 import { ToolRegistry } from "@/tool"
 import { makeBashTool } from "@/tool/bash"
@@ -110,5 +114,51 @@ describe("F-07.4 live bash.classifySource → dispatch redaction", () => {
         command,
       ).toBe(true)
     }
+  })
+
+  test("live dispatcher persists only the redacted tool_result to JSONL", async () => {
+    if (permissionStateRoot === null) throw new Error("missing test root")
+    const target = join(permissionStateRoot, "trajectory.jsonl")
+    const stream = new JsonlRecorder(target, {
+      strict: true,
+      ctx: { runId: "f07-live-jsonl" },
+      now: () => 1_700_000_000_000,
+    })
+    const agentConfig = { ...config(), stream }
+    const session = {
+      config: agentConfig,
+      specs: agentConfig.registry.specs(),
+      guards: [],
+    } as unknown as TurnSession
+    const state = {
+      onRedaction: () => {},
+      breaker: undefined,
+      toolHistory: undefined,
+      workingState: undefined,
+      collector: undefined,
+    } as unknown as TurnState
+    const turnTimingCapture = {
+      markFirstToken: () => {},
+    } as unknown as TurnTimingCapture
+    const dispatcher = createStreamDispatcher(session, state, { turnTimingCapture })
+
+    dispatcher.onToolStart({ id: "jsonl-c1", name: "bash", input: { command: "printenv" } })
+    const out = await dispatcher.dispatch({
+      id: "jsonl-c1",
+      name: "bash",
+      input: { command: "printenv" },
+    })
+    stream.close()
+
+    expect(out.ok).toBe(true)
+    const raw = readFileSync(target, "utf8")
+    expect(raw).not.toContain(SYNTH)
+    const rows = raw
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { kind: string; data: Record<string, unknown> })
+    const result = rows.find((row) => row.kind === "tool_result")
+    expect(result?.data.stdoutTail).toContain("[REDACTED:source_class_secret]")
+    expect(result?.data.stdoutTail).not.toContain(SYNTH)
   })
 })

@@ -4,6 +4,7 @@ import {
   type EmbedderPort,
   type MemoryEntry,
   type MemoryKind,
+  type MemoryPatch,
   type MemoryQuery,
   type PersistentStorePort,
 } from "@/memory"
@@ -232,8 +233,8 @@ const errMsg = (e: unknown): string => errMessage(e)
 const buildUpdatePatch = async (
   input: UpdateInput,
   embedder: EmbedderPort | undefined,
-): Promise<Partial<MemoryEntry>> => {
-  const patch: Partial<MemoryEntry> = {}
+): Promise<MemoryPatch> => {
+  const patch: MemoryPatch = {}
   if (input.text !== undefined) {
     patch.text = input.text
     const embedding = await tryEmbed(embedder, input.text)

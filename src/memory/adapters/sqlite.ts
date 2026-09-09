@@ -9,6 +9,7 @@ import {
   MEMORY_KINDS,
   type MemoryEntry,
   type MemoryKind,
+  type MemoryPatch,
   type MemoryQuery,
   type MemoryTier,
   normalizeEntry,
@@ -231,17 +232,16 @@ export class SqliteStore implements PersistentStorePort {
     return Promise.resolve()
   }
 
-  update(id: string, patch: Partial<MemoryEntry>): Promise<void> {
+  async update(id: string, patch: MemoryPatch): Promise<void> {
     const row = this.selectByIdStmt.get(id) as MemoryRow | null
-    if (!row) return Promise.resolve()
+    if (!row) return
     const built = buildMemoryColumnUpdate(id, patch, Date.now())
-    if (built === null) return Promise.resolve()
+    if (built === null) return
     try {
       this.db.query(built.sql).run(built.params)
     } catch (e) {
-      return Promise.reject(new Error(`SqliteStore.update(${id}) failed: ${errMessage(e)}`))
+      throw new Error(`SqliteStore.update(${id}) failed: ${errMessage(e)}`)
     }
-    return Promise.resolve()
   }
 
   delete(id: string): Promise<void> {

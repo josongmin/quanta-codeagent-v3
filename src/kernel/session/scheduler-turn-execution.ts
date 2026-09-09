@@ -184,6 +184,7 @@ export const runTurn = async (args: {
       })
     }
     const result = await args.ctx.host.runTurn({
+      turnId: args.command.commandId,
       history: hostAction.kind === "run_turn" ? hostAction.history : args.state.messages,
       prompt: hostAction.kind === "run_turn" ? hostAction.prompt : "",
       ...(hostAction.kind === "run_turn" ? { images: hostAction.images } : {}),

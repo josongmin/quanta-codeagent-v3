@@ -12,7 +12,9 @@ describe("G-F11 org config dir resolution", () => {
   })
 
   test("explicit dir wins over env", () => {
-    expect(resolveOrgConfigDir({ QUANTA_ORG_CONFIG_DIR: "/from-env" }, "/explicit")).toBe("/explicit")
+    expect(resolveOrgConfigDir({ QUANTA_ORG_CONFIG_DIR: "/from-env" }, "/explicit")).toBe(
+      "/explicit",
+    )
   })
 
   test("env wins over platform default", () => {
