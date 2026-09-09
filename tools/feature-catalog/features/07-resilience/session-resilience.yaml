@@ -23,8 +23,10 @@ surface_integration:
 purpose: |
   Two leaf durability/diagnostic modules in the `@/session` slice that sit on
   top of the existing snapshot store (no sqlite). The store maintains a small
-  per-session durable generation/tombstone sidecar and stable flock pathname so
-  a completed delete fences late saves from other processes.
+  per-session durable generation/tombstone sidecar and a stable POSIX flock
+  pathname so a completed delete fences late saves from other processes.
+  Windows has no equivalent lock adapter yet, so session mutations and index
+  RMW fail closed there; they never silently degrade to process-local locking.
 
   1. crash-resume (`src/session/crash-resume.ts`, §13.2) — the in-memory
      `InterruptedTurnBuffer` (`src/agent/interrupted-turn.ts`, jun-08) restores
@@ -121,6 +123,11 @@ notes: |
   snapshots conversation state. This entry covers the orthogonal DURABILITY +
   STORE-HEALTH plane: surviving a HARD crash (not a clean resume) and detecting
   when the whole store — not one file — is unreadable.
+
+  Cross-process generation/lock safety is currently a POSIX capability. The
+  Windows path reaches the unsupported POSIX lock boundary and fails before
+  executing the mutation; it does not silently degrade to process-local
+  durability. A Windows native lock adapter and platform proof remain open.
 
   Maturity L4: crash-resume (§13.2) is real, tested (unit + a §13.2 CROWN JEWEL
   hellgate + the ADR-0528 wire hellgate), and LIVE-wired through runSessionTurn +

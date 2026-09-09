@@ -113,19 +113,27 @@ export const admitDurableSessionSave = async (
   path: string,
   captured: number,
   create: boolean,
-): Promise<void> => {
+): Promise<number> => {
   const current = await requireDurableState(path)
   if (!create && (current.deleted || current.generation !== captured)) {
     throw new StaleSessionGenerationError(id)
   }
-  if (create) {
-    await writeDurableState(path, {
-      version: 1,
-      generation: current.generation + 1,
-      deleted: false,
-    })
-  }
+  return current.generation
 }
+
+/** Publish a successfully-written replacement snapshot as the new generation.
+ * The caller must hold the per-session flock from admission through this
+ * commit. Keeping this AFTER the snapshot write means a failed/crashed create
+ * leaves an existing delete tombstone authoritative. */
+export const commitDurableSessionCreate = async (
+  path: string,
+  admittedGeneration: number,
+): Promise<void> =>
+  writeDurableState(path, {
+    version: 1,
+    generation: admittedGeneration + 1,
+    deleted: false,
+  })
 
 export const markSessionDeletedDurably = async (path: string): Promise<void> => {
   const current = await requireDurableState(path)
@@ -140,22 +148,27 @@ export const sessionGenerationOf = (id: string): number => generations.get(id) ?
 
 export const isSessionTombstoned = (id: string): boolean => tombstones.has(id)
 
-export const markSessionDeleted = (id: string): void => {
-  tombstones.add(id)
-  generations.set(id, sessionGenerationOf(id) + 1)
+export const markSessionDeleted = (scopeKey: string): void => {
+  tombstones.add(scopeKey)
+  generations.set(scopeKey, sessionGenerationOf(scopeKey) + 1)
 }
 
-export const admitSessionSave = (id: string, captured: number, create: boolean): void => {
-  if (tombstones.has(id) && !create) {
-    throw new StaleSessionGenerationError(id)
+export const admitSessionSave = (
+  scopeKey: string,
+  captured: number,
+  create: boolean,
+  sessionId = scopeKey,
+): void => {
+  if (tombstones.has(scopeKey) && !create) {
+    throw new StaleSessionGenerationError(sessionId)
   }
   if (create) {
-    tombstones.delete(id)
-    generations.set(id, sessionGenerationOf(id) + 1)
+    tombstones.delete(scopeKey)
+    generations.set(scopeKey, sessionGenerationOf(scopeKey) + 1)
     return
   }
-  if (sessionGenerationOf(id) !== captured) {
-    throw new StaleSessionGenerationError(id)
+  if (sessionGenerationOf(scopeKey) !== captured) {
+    throw new StaleSessionGenerationError(sessionId)
   }
 }
 

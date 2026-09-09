@@ -190,6 +190,18 @@ describe("session store", () => {
     expect(forked?.meta.cwd).toBe("/elsewhere")
   })
 
+  test("forkSession explicitly recreates a deleted custom destination generation", async () => {
+    await saveSessionById(mkMeta({ id: "fork-source" }), mkPayload())
+    await saveSessionById(mkMeta({ id: "fork-destination" }), mkPayload(), undefined, {
+      create: true,
+    })
+    await deleteSession("fork-destination")
+
+    await forkSession("fork-source", { newId: "fork-destination" })
+
+    expect((await loadSessionById("fork-destination"))?.meta.forkedFromId).toBe("fork-source")
+  })
+
   test("forkSession creates a paused objective generation without progress evidence", async () => {
     const objective = createObjectiveStore()
     const sourceObjective = objective.create("src-goal", {
@@ -546,6 +558,20 @@ describe("session store — git/provider regressions", () => {
     expect(
       (await listSessions({ includeArchived: true }, provider)).map((m) => m.id),
     ).not.toContain("tenant-1")
+  })
+
+  test("delete generation is isolated between provider roots with the same session id", async () => {
+    const providerA = staticSessionRootProvider(join(dir, "tenant-a"))
+    const providerB = staticSessionRootProvider(join(dir, "tenant-b"))
+    const meta = mkMeta({ id: "shared-id" })
+    await saveSessionById(meta, mkPayload(), providerA, { create: true })
+    await saveSessionById(meta, mkPayload(), providerB, { create: true })
+
+    await deleteSession(meta.id, providerA)
+    await saveSessionById(meta, mkPayload({ turns: 2 }), providerB)
+
+    expect(await loadSessionById(meta.id, providerA)).toBeUndefined()
+    expect((await loadSessionById(meta.id, providerB))?.turns).toBe(2)
   })
 
   test("rewindToMessage honors provider-scoped storage", async () => {

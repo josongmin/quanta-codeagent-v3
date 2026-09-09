@@ -237,8 +237,10 @@ const buildUpdatePatch = async (
   const patch: MemoryPatch = {}
   if (input.text !== undefined) {
     patch.text = input.text
-    const embedding = await tryEmbed(embedder, input.text)
-    if (embedding) patch.embedding = embedding
+    // Text and vector form one semantic value. If re-embedding is unavailable
+    // or fails, explicitly clear the old vector rather than attaching it to
+    // unrelated replacement text.
+    patch.embedding = await tryEmbed(embedder, input.text)
   }
   if (input.tags !== undefined) patch.tags = input.tags
   if (input.importance !== undefined) patch.importance = input.importance

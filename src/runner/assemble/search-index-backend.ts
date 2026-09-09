@@ -29,7 +29,6 @@ import {
   type EmbedderCapabilities,
   type EmbedderEnv,
   type EmbedProvider,
-  embeddingSpaceNamespace,
   type LanceStoreOptions,
   type QdrantStoreOptions,
   type SqliteDb,
@@ -47,7 +46,8 @@ import { newInMemoryBackend } from "./search-index-backend/in-memory"
 import {
   bindRuntimeEmbeddingSpace,
   negotiateVectorStore,
-  remoteNamespaceFor,
+  type RemoteVectorOwner,
+  remoteVectorOwnerFor,
   reportUnavailableStore,
 } from "./search-index-backend/vector-runtime"
 
@@ -87,6 +87,7 @@ export {
 export {
   bindPersistedEmbeddingNamespace,
   bindPersistedEmbeddingSpace,
+  EMBEDDING_REMOTE_OWNER_TABLE,
   EMBEDDING_SPACE_TABLE,
 } from "./search-index-backend/space-bind"
 
@@ -176,14 +177,16 @@ export interface BuildSemanticBackendOptions {
   readonly nowMs?: () => number
   readonly resolvedEmbedder?: ResolvedIndexEmbedder
   readonly storeDeps?: {
-    readonly lance?: Partial<LanceStoreOptions>
-    readonly qdrant?: Partial<QdrantStoreOptions>
+    readonly lance?: Partial<Omit<LanceStoreOptions, "baseURL" | "table">>
+    readonly qdrant?: Partial<Omit<QdrantStoreOptions, "baseURL" | "collection">>
   }
 }
 
 interface ChunkManifestStore {
   listPaths(): Promise<readonly string[]>
   idsForPath(path: string): Promise<readonly string[]>
+  stageId(path: string, id: string): Promise<void>
+  commitId(path: string, id: string): Promise<void>
   replacePath(path: string, ids: readonly string[]): Promise<void>
   deletePath(path: string): Promise<void>
 }
@@ -374,6 +377,14 @@ class InMemoryManifestStore implements ChunkManifestStore {
     return this.idsByPath.get(path) ?? []
   }
 
+  async stageId(path: string, id: string): Promise<void> {
+    const ids = this.idsByPath.get(path) ?? []
+    if (ids.includes(id)) return
+    this.idsByPath.set(path, [...ids, id])
+  }
+
+  async commitId(_path: string, _id: string): Promise<void> {}
+
   async replacePath(path: string, ids: readonly string[]): Promise<void> {
     this.idsByPath.set(path, [...ids])
   }
@@ -392,9 +403,14 @@ class SqliteManifestStore implements ChunkManifestStore {
       `CREATE TABLE IF NOT EXISTS ${table} (
          path TEXT NOT NULL,
          id TEXT NOT NULL,
+         state TEXT NOT NULL DEFAULT 'committed',
          PRIMARY KEY(path, id)
        ) WITHOUT ROWID`,
     )
+    const columns = db.query<{ name: string }>(`PRAGMA table_info(${table})`).all()
+    if (!columns.some((column) => column.name === "state")) {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN state TEXT NOT NULL DEFAULT 'committed'`)
+    }
   }
 
   async listPaths(): Promise<readonly string[]> {
@@ -409,10 +425,35 @@ class SqliteManifestStore implements ChunkManifestStore {
     return rows.map((row) => row.id)
   }
 
+  async stageId(path: string, id: string): Promise<void> {
+    this.db
+      .query(`INSERT OR IGNORE INTO ${this.table} (path, id, state) VALUES (?, ?, 'pending')`)
+      .run(path, id)
+  }
+
+  async commitId(path: string, id: string): Promise<void> {
+    this.db
+      .query(`UPDATE ${this.table} SET state = 'committed' WHERE path = ? AND id = ?`)
+      .run(path, id)
+  }
+
   async replacePath(path: string, ids: readonly string[]): Promise<void> {
-    this.db.query(`DELETE FROM ${this.table} WHERE path = ?`).run(path)
-    const stmt = this.db.query(`INSERT INTO ${this.table} (path, id) VALUES (?, ?)`)
-    for (const id of ids) stmt.run(path, id)
+    this.db.exec("BEGIN IMMEDIATE")
+    try {
+      this.db.query(`DELETE FROM ${this.table} WHERE path = ?`).run(path)
+      const stmt = this.db.query(
+        `INSERT INTO ${this.table} (path, id, state) VALUES (?, ?, 'committed')`,
+      )
+      for (const id of ids) stmt.run(path, id)
+      this.db.exec("COMMIT")
+    } catch (error) {
+      try {
+        this.db.exec("ROLLBACK")
+      } catch {
+        // Preserve the original manifest failure.
+      }
+      throw error
+    }
   }
 
   async deletePath(path: string): Promise<void> {
@@ -476,19 +517,17 @@ const resolveSqliteStoreDeps = (
 const resolveLanceStoreDeps = (
   env: Record<string, string | undefined>,
   opts: BuildSemanticBackendOptions,
-  space: import("@/retrieval/engines").EmbeddingSpace,
+  owner: RemoteVectorOwner | undefined,
 ): StoreDeps => {
-  const baseURL = env.QUANTA_LANCE_BASE_URL
-  const table = env.QUANTA_LANCE_TABLE
-  if (baseURL === undefined || table === undefined) return {}
+  if (owner === undefined) return {}
   const maxDim = parseMaxDim(env.QUANTA_LANCE_MAX_DIM)
   return {
     lance: {
-      baseURL,
-      table: embeddingSpaceNamespace(table, space),
+      ...(opts.storeDeps?.lance ?? {}),
+      baseURL: owner.transportEndpoint,
+      table: owner.namespace,
       ...(env.QUANTA_LANCE_API_KEY !== undefined ? { apiKey: env.QUANTA_LANCE_API_KEY } : {}),
       ...(maxDim !== undefined ? { maxDim } : {}),
-      ...(opts.storeDeps?.lance ?? {}),
     },
   }
 }
@@ -496,18 +535,17 @@ const resolveLanceStoreDeps = (
 const resolveQdrantStoreDeps = (
   env: Record<string, string | undefined>,
   opts: BuildSemanticBackendOptions,
-  space: import("@/retrieval/engines").EmbeddingSpace,
+  owner: RemoteVectorOwner | undefined,
 ): StoreDeps => {
-  const collection = env.QUANTA_QDRANT_COLLECTION
-  if (collection === undefined) return {}
+  if (owner === undefined) return {}
   const maxDim = parseMaxDim(env.QUANTA_QDRANT_MAX_DIM)
   return {
     qdrant: {
-      collection: embeddingSpaceNamespace(collection, space),
-      ...(env.QUANTA_QDRANT_BASE_URL !== undefined ? { baseURL: env.QUANTA_QDRANT_BASE_URL } : {}),
+      ...(opts.storeDeps?.qdrant ?? {}),
+      collection: owner.namespace,
+      baseURL: owner.transportEndpoint,
       ...(env.QUANTA_QDRANT_API_KEY !== undefined ? { apiKey: env.QUANTA_QDRANT_API_KEY } : {}),
       ...(maxDim !== undefined ? { maxDim } : {}),
-      ...(opts.storeDeps?.qdrant ?? {}),
     },
   }
 }
@@ -516,7 +554,7 @@ const resolveStoreDeps = (
   env: Record<string, string | undefined>,
   provider: "in-memory" | "sqlite" | "lance" | "qdrant",
   opts: BuildSemanticBackendOptions,
-  space: import("@/retrieval/engines").EmbeddingSpace,
+  owner: RemoteVectorOwner | undefined,
 ): ResolvedStoreDeps => {
   if (provider === "sqlite") return resolveSqliteStoreDeps(env, opts)
   if (provider === "lance" || provider === "qdrant") {
@@ -528,8 +566,8 @@ const resolveStoreDeps = (
     return {
       deps:
         provider === "lance"
-          ? resolveLanceStoreDeps(env, opts, space)
-          : resolveQdrantStoreDeps(env, opts, space),
+          ? resolveLanceStoreDeps(env, opts, owner)
+          : resolveQdrantStoreDeps(env, opts, owner),
       ...(dbHandle !== null ? { dbHandle } : {}),
     }
   }
@@ -539,9 +577,9 @@ const resolveStoreDeps = (
 const resolveManifestStore = (
   provider: "in-memory" | "sqlite" | "lance" | "qdrant",
   dbHandle: SqliteDb | undefined,
-  namespace?: string,
+  ownerKey?: string,
 ): ChunkManifestStore => {
-  const table = namespace === undefined ? MANIFEST_TABLE : `${MANIFEST_TABLE}_${namespace}`
+  const table = ownerKey === undefined ? MANIFEST_TABLE : `${MANIFEST_TABLE}_${ownerKey}`
   if (dbHandle !== undefined) return new SqliteManifestStore(dbHandle, table)
   if (provider === "lance" || provider === "qdrant") {
     logger.warn(
@@ -560,8 +598,8 @@ const buildVectorStoreRuntime = async (
   if (selection.kind === "none" || selection.kind === "invalid-explicit") return null
   const provider = selection.provider
   const space = await resolvedEmbedder.space()
-  const remoteNamespace = remoteNamespaceFor(provider, env, space)
-  const resolved = resolveStoreDeps(env, provider, opts, space)
+  const remoteOwner = remoteVectorOwnerFor(provider, env, space)
+  const resolved = resolveStoreDeps(env, provider, opts, remoteOwner)
   const store = createStoreFromEnv({ QUANTA_VECTOR_STORE: provider }, resolved.deps)
   if (store === null) {
     reportUnavailableStore(selection)
@@ -574,17 +612,12 @@ const buildVectorStoreRuntime = async (
     }
   }
   if (!(await negotiateVectorStore(selection, resolvedEmbedder, store))) return null
-  const refused = bindRuntimeEmbeddingSpace(
-    resolved.dbHandle,
-    remoteNamespace,
-    PERSIST_TABLE,
-    space,
-  )
+  const refused = bindRuntimeEmbeddingSpace(resolved.dbHandle, remoteOwner, PERSIST_TABLE, space)
   if (refused !== null) return refused
   return {
     store,
     storeLabel: provider,
-    manifest: resolveManifestStore(provider, resolved.dbHandle, remoteNamespace),
+    manifest: resolveManifestStore(provider, resolved.dbHandle, remoteOwner?.key),
   }
 }
 
@@ -682,6 +715,9 @@ const buildVectorStoreBackend = (
         const runtime = await ensureRuntime()
         const id = chunkId(chunk)
         const vec = await embed(chunk.text)
+        // Persist ownership before the remote write. A process death after this
+        // point leaves a retryable pending id, never an undiscoverable remote row.
+        await runtime.manifest.stageId(chunk.path, id)
         const r = await runtime.store.upsert([
           {
             id,
@@ -700,8 +736,7 @@ const buildVectorStoreBackend = (
             "operation",
           )
         }
-        const prev = await runtime.manifest.idsForPath(chunk.path)
-        if (!prev.includes(id)) await runtime.manifest.replacePath(chunk.path, [...prev, id])
+        await runtime.manifest.commitId(chunk.path, id)
       },
       async delete(path: string): Promise<void> {
         const runtime = await ensureRuntime()
@@ -776,6 +811,15 @@ export const buildSemanticBackend = (
     logger.error(
       `search index store ${reason}; semantic backend FAILED (explicit store, fail-closed).`,
     )
+    return newDisabledBackend(reason)
+  }
+  if (
+    (selection.provider === "lance" || selection.provider === "qdrant") &&
+    opts.manifestDb === undefined &&
+    (env.QUANTA_INDEX_DB_PATH === undefined || env.QUANTA_INDEX_DB_PATH === "")
+  ) {
+    const reason = `persistent ${selection.provider} store requires QUANTA_INDEX_DB_PATH; refusing an unowned remote index`
+    logger.error(`search index ${reason}`)
     return newDisabledBackend(reason)
   }
   const runtime = buildVectorStoreRuntime(env, selection, resolvedEmbedder, opts)

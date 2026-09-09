@@ -213,7 +213,7 @@ bun docs/plans/sep-8-structural-remediation/verify-waves.mjs --group R01 src/sec
 4. reserved path 침범, 기존 exact file/test 존재, audit digest와 frozen audit HEAD 유효성.
 5. future-path collision injection, reserved-root exclusion, undeclared write rejection self-test.
 
-출력의 `PLAN_PASS`는 배정 누락/중복 0과 같은 wave의 병렬 write-set 교집합 0만 뜻한다. `completion.eligible`은 current source truth clean, unchecked action 0, manifest `verified`를 별도로 요구한다. `--require-closeout`은 이 조건 중 하나라도 없으면 non-zero다. 이는 계획의 집합 검증을 제품 테스트/완료 PASS로 오독하지 않기 위한 경계다.
+출력의 `PLAN_PASS`는 배정 누락/중복 0과 같은 wave의 병렬 write-set 교집합 0만 뜻한다. `completion.eligible`은 plan/manifest/receipt를 포함한 whole-repository clean, unchecked action 0, manifest `verified`를 별도로 요구한다. `--require-closeout`은 이 조건 중 하나라도 없으면 non-zero다. 이는 계획의 집합 검증을 제품 테스트/완료 PASS로 오독하지 않기 위한 경계다.
 
 실제 negative control도 실행했다. R01의 security 파일은 exit 0, R01에서 `src/shared/env-flag.ts` 또는 R04 소유 `src/patch/applier.ts`를 쓰려는 검사는 각각 정확한 경로를 지목하며 exit 1이었다. 판정 결과만으로 mutation을 적용하지 않는다.
 

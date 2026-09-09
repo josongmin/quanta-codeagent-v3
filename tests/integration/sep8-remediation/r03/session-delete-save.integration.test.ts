@@ -119,4 +119,32 @@ else {
     ).rejects.toMatchObject({ name: "SessionGenerationStateError", kind: "corrupt" })
     expect(readFileSync(snapshot, "utf8")).toBe(before)
   })
+
+  test("unsupported POSIX locking fails session mutation and index RMW closed", async () => {
+    const sessionModule = join(import.meta.dir, "../../../../src/session/index.ts")
+    const indexModule = join(import.meta.dir, "../../../../src/session/index-store.ts")
+    const worker = join(root, "unsupported-lock-worker.ts")
+    writeFileSync(
+      worker,
+      `Object.defineProperty(process, "platform", { value: "win32" });
+const session = await import(${JSON.stringify(sessionModule)});
+const indexStore = await import(${JSON.stringify(indexModule)});
+const provider = session.staticSessionRootProvider(${JSON.stringify(join(root, "unsupported"))});
+const meta = { id: "closed", title: "closed", cwd: "/tmp", createdAt: 1, lastTouched: 1, archived: false };
+const mustRefuse = async (run) => {
+  try { await run(); return false; }
+  catch (error) { return error instanceof Error && error.message.includes("POSIX flock is unavailable"); }
+};
+if (!(await mustRefuse(() => session.saveSessionById(meta, { reason: "done", turns: 1, messages: [] }, provider)))) process.exit(2);
+if (!(await mustRefuse(() => indexStore.upsertMeta(meta, provider)))) process.exit(3);
+`,
+    )
+    const child = Bun.spawn(["bun", worker], {
+      cwd: join(import.meta.dir, "../../../.."),
+      env: { ...process.env },
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    expect(await child.exited).toBe(0)
+  })
 })

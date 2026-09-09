@@ -170,33 +170,19 @@ check(
 )
 
 // Completion is a separate claim from plan integrity. A frozen audit HEAD is
-// expected to differ after implementation lands; the exact CURRENT tree must
-// instead be clean, every action must be checked, and the manifest must opt in
-// to the terminal `verified` state.
-const sourceTruthScopes = [
-  "src",
-  "tests",
-  "tools",
-  "package.json",
-  "bun.lock",
-  "biome.json",
-  "biome.jsonc",
-  "tsconfig.json",
-  "tsconfig.tests.json",
-  "docs/10.feature-catalog.md",
-]
+// expected to differ after implementation lands; the exact CURRENT repository
+// must instead be clean, every action must be checked, and the manifest must
+// opt in to the terminal `verified` state. Do not scope this status query to
+// product paths: uncommitted ACTIONS/waves/receipt edits could otherwise make
+// the checker certify a closeout claim that does not exist at HEAD.
 const git = (args, encoding = "utf8") =>
   execFileSync("git", args, { cwd: root, ...(encoding === null ? {} : { encoding }) })
-const dirtyRaw = git(["status", "--porcelain=v1", "-z", "--", ...sourceTruthScopes], null)
-const dirtyEntries = dirtyRaw.toString("utf8").split("\0").filter(Boolean)
+const repositoryStatusArgs = ["status", "--porcelain=v1", "-z", "-uall"]
+const parseStatusEntries = (raw) => raw.toString("utf8").split("\0").filter(Boolean)
+const dirtyEntries = parseStatusEntries(git(repositoryStatusArgs, null))
 const treeHash = createHash("sha256")
-treeHash.update(
-  git(["diff", "--binary", "--no-ext-diff", "HEAD", "--", ...sourceTruthScopes], null),
-)
-const untrackedRaw = git(
-  ["ls-files", "--others", "--exclude-standard", "-z", "--", ...sourceTruthScopes],
-  null,
-)
+treeHash.update(git(["diff", "--binary", "--no-ext-diff", "HEAD", "--"], null))
+const untrackedRaw = git(["ls-files", "--others", "--exclude-standard", "-z", "--"], null)
 for (const path of untrackedRaw.toString("utf8").split("\0").filter(Boolean).sort()) {
   treeHash.update(`untracked\0${path}\0`)
   treeHash.update(readFileSync(join(root, path)))
@@ -204,7 +190,7 @@ for (const path of untrackedRaw.toString("utf8").split("\0").filter(Boolean).sor
 }
 const worktreeDigest = treeHash.digest("hex")
 const completionBlockersFor = ({ dirtyCount, uncheckedCount, status }) => [
-  ...(dirtyCount > 0 ? [`source truth tree has ${dirtyCount} dirty entries`] : []),
+  ...(dirtyCount > 0 ? [`repository has ${dirtyCount} dirty status entries`] : []),
   ...(uncheckedCount > 0 ? [`${uncheckedCount} actions remain unchecked`] : []),
   ...(status !== "verified"
     ? [`manifest status is ${JSON.stringify(status)}, not "verified"`]
@@ -250,6 +236,17 @@ check(
   completionBlockersFor({ dirtyCount: 0, uncheckedCount: 0, status: "verified" }).length === 0,
   "self-test: clean verified completion was blocked",
 )
+check(
+  JSON.stringify(repositoryStatusArgs) ===
+    JSON.stringify(["status", "--porcelain=v1", "-z", "-uall"]),
+  "self-test: closeout cleanliness query is not whole-repository",
+)
+check(
+  parseStatusEntries(
+    Buffer.from(" M docs/plans/sep-8-structural-remediation/waves.json\0"),
+  ).join() === " M docs/plans/sep-8-structural-remediation/waves.json",
+  "self-test: closeout status parser missed a plan-truth edit",
+)
 
 const groupArg = process.argv.indexOf("--group")
 if (groupArg !== -1) {
@@ -282,7 +279,7 @@ console.log(
       completion: {
         eligible: completionBlockers.length === 0,
         manifestStatus: manifest.status,
-        sourceTruthDirtyEntries: dirtyEntries,
+        repositoryDirtyEntries: dirtyEntries,
         worktreeDigest,
         blockers: completionBlockers,
       },

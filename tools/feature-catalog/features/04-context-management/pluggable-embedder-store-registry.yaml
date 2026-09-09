@@ -33,7 +33,11 @@ purpose: |
   (registries return null until env present). Managed-vendor adapters use
   fetch directly per the no-install constraint (ADR-0160). API keys come
   from env (OPENAI_API_KEY / VOYAGE_API_KEY / COHERE_API_KEY); missing key
-  is the typed missing-api-key arm.
+  is the typed missing-api-key arm. The live remote-store composition owns
+  physical identity: table/collection overrides cannot bypass the derived
+  embedding namespace, and local manifests are partitioned by provider +
+  redacted canonical-endpoint fingerprint + namespace with durable
+  pending-to-committed intents; raw credentials/query material is not persisted.
 evidence:
   code:
     - src/retrieval/engines/embedder/port.ts
@@ -54,6 +58,8 @@ evidence:
     - src/retrieval/engines/capabilities.ts
     - src/retrieval/engines/index.ts
     - src/runner/assemble/search-index-backend.ts
+    - src/runner/assemble/search-index-backend/space-bind.ts
+    - src/runner/assemble/search-index-backend/vector-runtime.ts
     - src/runner/assemble/search-pipeline.ts
   adrs: [261, 254, 424]
   tests:
@@ -61,6 +67,7 @@ evidence:
       - tests/unit/retrieval/engines-hellgate.test.ts
       - tests/unit/runner/search-index-backend.test.ts
       - tests/unit/runner/search-pipeline.test.ts
+      - tests/unit/sep8-remediation/r10/search-embedding.test.ts
     integration:
       - tests/integration/search-pipeline-lance-wire.test.ts
     contract:
@@ -109,7 +116,10 @@ notes: |
     `QUANTA_VECTOR_STORE` into the live semantic backend, with same-dim
     capability negotiation, typed refusal on provider failure, explicit-store
     fail-closed semantics, embedding-space-specific remote namespaces, durable
-    manifest ownership, mutation-batch reconcile, and embed/query latency metrics.
+    manifest ownership keyed by provider + redacted canonical-endpoint fingerprint + namespace,
+    pre-write pending intents for crash cleanup, mutation-batch reconcile, and
+    embed/query latency metrics. Injected test transports cannot override the
+    physical endpoint/table/collection identity.
   - Contract evidence splits by proof tier: the integration rail uses a
     stateful in-proc REST fixture, while `tests/contract/lance-real-wire.test.ts`
     uses real `python+lancedb` storage semantics behind a compatible HTTP shim.

@@ -8,6 +8,7 @@ import {
   bindPersistedEmbeddingNamespace,
   bindPersistedEmbeddingSpace,
   buildSemanticBackend,
+  EMBEDDING_REMOTE_OWNER_TABLE,
   EmbeddingSpaceError,
   embeddingSpaceNamespace,
   embeddingSpacesEqual,
@@ -123,6 +124,7 @@ describe("E-EMBED-01 embedding space", () => {
         },
       },
     })
+    expect(unowned.state).toBe("failed")
     await expect(unowned.upsert.upsert(chunk("a.ts", "alpha"))).rejects.toThrow(
       "requires QUANTA_INDEX_DB_PATH",
     )
@@ -142,6 +144,208 @@ describe("E-EMBED-01 embedding space", () => {
     })
     await owned.upsert.upsert(chunk("a.ts", "alpha"))
     expect(calls).toEqual([`http://localhost:6333/collections/${namespace}/points`])
+  })
+
+  test("untyped store deps cannot override the authoritative physical namespace", async () => {
+    const calls: string[] = []
+    const env = {
+      QUANTA_VECTOR_STORE: "qdrant",
+      QUANTA_QDRANT_COLLECTION: "docs",
+      QUANTA_EMBED_PROVIDER: "headless",
+    } as const
+    const resolved = resolveIndexEmbedder(env)
+    const namespace = embeddingSpaceNamespace("docs", await resolved.space())
+    const backend = buildSemanticBackend(env, resolved.embed, {
+      manifestDb: new Database(":memory:"),
+      resolvedEmbedder: resolved,
+      storeDeps: {
+        qdrant: {
+          collection: "hostile-override",
+          baseURL: "http://hostile.invalid",
+          fetchImpl: async (url: string) => {
+            calls.push(url)
+            return new Response(JSON.stringify({ result: { status: "ok" } }))
+          },
+        } as never,
+      },
+    })
+
+    await backend.upsert.upsert(chunk("a.ts", "alpha"))
+
+    expect(calls).toEqual([`http://localhost:6333/collections/${namespace}/points`])
+  })
+
+  test("manifest ownership is isolated across endpoint and provider rotation", async () => {
+    const db = new Database(":memory:")
+    const firstCalls: string[] = []
+    const envA = {
+      QUANTA_VECTOR_STORE: "qdrant",
+      QUANTA_QDRANT_COLLECTION: "docs",
+      QUANTA_QDRANT_BASE_URL: "http://cluster-a/",
+      QUANTA_EMBED_PROVIDER: "headless",
+    } as const
+    const resolvedA = resolveIndexEmbedder(envA)
+    const first = buildSemanticBackend(envA, resolvedA.embed, {
+      manifestDb: db,
+      resolvedEmbedder: resolvedA,
+      storeDeps: {
+        qdrant: {
+          fetchImpl: async (url) => {
+            firstCalls.push(url)
+            return new Response(JSON.stringify({ result: { status: "ok" } }))
+          },
+        },
+      },
+    })
+    await first.upsert.upsert(chunk("owned.ts", "alpha"))
+
+    const rotatedCalls: string[] = []
+    const envB = { ...envA, QUANTA_QDRANT_BASE_URL: "http://cluster-b" } as const
+    const resolvedB = resolveIndexEmbedder(envB)
+    const rotated = buildSemanticBackend(envB, resolvedB.embed, {
+      manifestDb: db,
+      resolvedEmbedder: resolvedB,
+      storeDeps: {
+        qdrant: {
+          fetchImpl: async (url) => {
+            rotatedCalls.push(url)
+            return new Response(JSON.stringify({ result: { status: "ok" } }))
+          },
+        },
+      },
+    })
+    await rotated.upsert.delete("owned.ts")
+
+    const lanceCalls: string[] = []
+    const lanceEnv = {
+      QUANTA_VECTOR_STORE: "lance",
+      QUANTA_LANCE_BASE_URL: "http://cluster-a",
+      QUANTA_LANCE_TABLE: "docs",
+      QUANTA_EMBED_PROVIDER: "headless",
+    } as const
+    const lanceResolved = resolveIndexEmbedder(lanceEnv)
+    const lance = buildSemanticBackend(lanceEnv, lanceResolved.embed, {
+      manifestDb: db,
+      resolvedEmbedder: lanceResolved,
+      storeDeps: {
+        lance: {
+          fetchImpl: async (url) => {
+            lanceCalls.push(url)
+            return new Response(JSON.stringify({ ok: true }))
+          },
+        },
+      },
+    })
+    await lance.upsert.delete("owned.ts")
+
+    expect(firstCalls).toHaveLength(1)
+    expect(rotatedCalls).toEqual([])
+    expect(lanceCalls).toEqual([])
+  })
+
+  test("remote owner sidecar persists only a redacted endpoint fingerprint", async () => {
+    const db = new Database(":memory:")
+    const env = {
+      QUANTA_VECTOR_STORE: "qdrant",
+      QUANTA_QDRANT_COLLECTION: "docs",
+      QUANTA_QDRANT_BASE_URL:
+        "http://operator:super-secret@cluster.example/api/?token=query-secret#fragment-secret",
+      QUANTA_EMBED_PROVIDER: "headless",
+    } as const
+    const resolved = resolveIndexEmbedder(env)
+    const backend = buildSemanticBackend(env, resolved.embed, {
+      manifestDb: db,
+      resolvedEmbedder: resolved,
+      storeDeps: { qdrant: { fetchImpl: async () => new Response("{}") } },
+    })
+
+    expect((await backend.readiness).kind).toBe("ready")
+    await backend.upsert.upsert(chunk("tenant.ts", "alpha"))
+    const otherTenantCalls: string[] = []
+    const otherTenantEnv = {
+      ...env,
+      QUANTA_QDRANT_BASE_URL:
+        "http://operator:other-secret@cluster.example/api/?token=query-secret#fragment-secret",
+    } as const
+    const otherTenantResolved = resolveIndexEmbedder(otherTenantEnv)
+    const otherTenant = buildSemanticBackend(otherTenantEnv, otherTenantResolved.embed, {
+      manifestDb: db,
+      resolvedEmbedder: otherTenantResolved,
+      storeDeps: {
+        qdrant: {
+          fetchImpl: async (url) => {
+            otherTenantCalls.push(url)
+            return new Response("{}")
+          },
+        },
+      },
+    })
+    await otherTenant.upsert.delete("tenant.ts")
+
+    const persisted = db.query(`SELECT * FROM ${EMBEDDING_REMOTE_OWNER_TABLE}`).all()
+    const serialized = JSON.stringify(persisted)
+    expect(persisted).toHaveLength(2)
+    expect(otherTenantCalls).toEqual([])
+    expect(serialized).toContain("qep_")
+    expect(serialized).not.toContain("operator")
+    expect(serialized).not.toContain("super-secret")
+    expect(serialized).not.toContain("other-secret")
+    expect(serialized).not.toContain("query-secret")
+    expect(serialized).not.toContain("fragment-secret")
+    expect(serialized).not.toContain("cluster.example")
+  })
+
+  test("pending manifest intent survives a crash after remote write and remains cleanable", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "r10-manifest-crash-"))
+    const dbPath = join(dir, "manifest.sqlite")
+    try {
+      const firstDb = new Database(dbPath)
+      const env = {
+        QUANTA_VECTOR_STORE: "qdrant",
+        QUANTA_QDRANT_COLLECTION: "docs",
+        QUANTA_EMBED_PROVIDER: "headless",
+      } as const
+      const resolved = resolveIndexEmbedder(env)
+      const first = buildSemanticBackend(env, resolved.embed, {
+        manifestDb: firstDb,
+        resolvedEmbedder: resolved,
+        storeDeps: {
+          qdrant: {
+            fetchImpl: async () => {
+              // Simulate process death after the remote service accepted the
+              // write but before the local owner can mark it committed.
+              firstDb.close()
+              return new Response(JSON.stringify({ result: { status: "ok" } }))
+            },
+          },
+        },
+      })
+      await expect(first.upsert.upsert(chunk("crash.ts", "alpha"))).rejects.toThrow()
+
+      const cleanupCalls: string[] = []
+      const secondDb = new Database(dbPath)
+      try {
+        const second = buildSemanticBackend(env, resolved.embed, {
+          manifestDb: secondDb,
+          resolvedEmbedder: resolved,
+          storeDeps: {
+            qdrant: {
+              fetchImpl: async (url) => {
+                cleanupCalls.push(url)
+                return new Response(JSON.stringify({ result: { status: "ok" } }))
+              },
+            },
+          },
+        })
+        await second.upsert.delete("crash.ts")
+      } finally {
+        secondDb.close()
+      }
+      expect(cleanupCalls).toHaveLength(1)
+      expect(cleanupCalls[0]).toEndWith("/points/delete")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   test("query/index dimension mismatch throws instead of Math.min truncation", async () => {
@@ -227,6 +431,26 @@ describe("E-SEARCH-01.4 search pipeline typed failure", () => {
           QUANTA_INDEX: "on",
           QUANTA_VECTOR_STORE: "nope",
           QUANTA_INDEX_INTERVAL_MS: "1000000",
+        },
+        dir,
+      )
+      expect(wired?.indexer).toBeNull()
+      expect(wired?.intervalHandle).toBeNull()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("explicit remote store without manifest ownership does not start a retry loop", () => {
+    const dir = mkdtempSync(join(tmpdir(), "r10-pipe-"))
+    try {
+      const wired = buildSearchPipelineFromEnv(
+        {
+          QUANTA_INDEX: "on",
+          QUANTA_VECTOR_STORE: "qdrant",
+          QUANTA_QDRANT_COLLECTION: "docs",
+          QUANTA_EMBED_PROVIDER: "headless",
+          QUANTA_INDEX_INTERVAL_MS: "1",
         },
         dir,
       )

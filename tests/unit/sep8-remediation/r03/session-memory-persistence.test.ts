@@ -137,6 +137,29 @@ describe("SEP7-D-05 delete/save generation", () => {
       mock.restore()
     }
   })
+
+  test("failed explicit create keeps the durable delete tombstone authoritative", async () => {
+    await withSessionDir("r03-d05-create-fail-", async () => {
+      const meta = mkMeta({ id: "failed-recreate" })
+      await saveSessionById(meta, mkPayload("first"), undefined, { create: true })
+      await deleteSession(meta.id)
+      mkdirSync(sessionFilePath(meta.id))
+
+      await expect(
+        saveSessionById(meta, mkPayload("replacement"), undefined, { create: true }),
+      ).rejects.toThrow()
+      const generation = JSON.parse(
+        readFileSync(
+          join(process.env.QUANTA_SESSIONS_DIR ?? "", ".generations", `${meta.id}.json`),
+          "utf8",
+        ),
+      ) as { deleted: boolean }
+      expect(generation.deleted).toBe(true)
+      await expect(saveSessionById(meta, mkPayload("late"))).rejects.toBeInstanceOf(
+        StaleSessionGenerationError,
+      )
+    })
+  })
 })
 
 describe("SEP7-D-06 index projection recovery", () => {

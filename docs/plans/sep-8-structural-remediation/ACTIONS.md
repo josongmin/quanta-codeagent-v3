@@ -447,7 +447,7 @@
 - [x] **I.3** public API/IPC/저장 포맷 compatibility matrix를 채운다: old reader/new writer, new reader/old writer, mixed process, restart/rollback. 미지원 조합은 실행 차단 또는 명시 migration으로 처리한다.
 - [x] **I.4** token/path/secret·corrupt bytes·old index는 보존/진단 정책을 지킨다. recovery를 위해 원본을 삭제하는 자동 cleanup을 추가하지 않는다.
 - [x] **I.5** package별 targeted test/정상 대조군/mutation과 typecheck/lint/slice-boundary/god-code/cohort/lint-debt gate를 실행한다. 코드 행수·경고 ceiling 증가는 금지한다.
-- [ ] **I.6** serial integrator가 composition roots/exports/catalog를 연결하고 exact integrated source에서 cross-surface smoke와 repository prepush campaign을 실행한다. generated catalog는 YAML에서만 build한다. 현재 source truth tree가 dirty이므로 exact-tree prepush receipt는 아직 없다.
+- [ ] **I.6** serial integrator가 composition roots/exports/catalog를 연결하고 exact integrated source에서 cross-surface smoke와 repository prepush campaign을 실행한다. generated catalog는 YAML에서만 build한다. 현재 repository가 dirty이므로 exact-HEAD prepush receipt는 아직 없다.
 - [x] **I.7** receipt에 source digest·환경·명령·assertion·RED/GREEN/mutation·삭제 경로·compatibility·미검증 runtime 범위를 적는다. fake process와 실제 OS child, 로컬과 cloud 결과를 섞지 않는다.
 - [x] **I.8** 최종 39개 status를 집계한다. 남은 proof gap은 open으로 두고 구현률·테스트 통과·CI·merge·runtime 적용을 따로 보고한다.
 

@@ -79,6 +79,9 @@ class SpyStore implements PersistentStorePort {
   get totalCalls(): number {
     return Object.values(this.calls).reduce((a, b) => a + b, 0)
   }
+  peek(id: string): MemoryEntry | undefined {
+    return this.map.get(id)
+  }
 }
 
 const entry = (id: string, text: string): MemoryEntry => ({
@@ -137,6 +140,33 @@ describe("ADR-0432 read-only mode (spy)", () => {
     if (write.type === "result") expect(write.result.ok).toBe(false)
     expect(store.calls.save).toBe(0)
   })
+})
+
+describe("memory_update text/vector atomicity", () => {
+  for (const [name, embedder] of [
+    ["absent embedder", undefined],
+    [
+      "failing embedder",
+      {
+        async embed(): Promise<number[][]> {
+          throw new Error("provider unavailable")
+        },
+      },
+    ],
+  ] as const) {
+    test(`${name} clears the stale embedding when text changes`, async () => {
+      const seeded = { ...entry("m1", "old text"), embedding: new Array(1536).fill(0.25) }
+      const store = new SpyStore([seeded])
+      const tools = memoryTools({ store, ...(embedder === undefined ? {} : { embedder }) })
+
+      const ev = await run(byName(tools, "memory_update"), { id: "m1", text: "new text" })
+
+      expect(ev.type).toBe("result")
+      if (ev.type === "result") expect(ev.result.ok).toBe(true)
+      expect(store.peek("m1")?.text).toBe("new text")
+      expect(store.peek("m1")?.embedding).toBeUndefined()
+    })
+  }
 })
 
 describe("ADR-0432 write-guard exact boundary (remaining vs minRemainingPercent)", () => {

@@ -5,6 +5,14 @@ import { embeddingSpacesEqual } from "@/retrieval/engines/embedder/space"
 /** Sidecar identity for a persisted sqlite vector table. Not the vector rows. */
 export const EMBEDDING_SPACE_TABLE = "search_index_embedding_space"
 export const EMBEDDING_NAMESPACE_TABLE = "search_index_embedding_namespaces"
+export const EMBEDDING_REMOTE_OWNER_TABLE = "search_index_embedding_remote_owners"
+
+export interface PersistedEmbeddingOwner {
+  readonly key: string
+  readonly provider: "lance" | "qdrant"
+  readonly endpointFingerprint: string
+  readonly namespace: string
+}
 
 export type SpaceBindResult =
   | { readonly kind: "ok"; readonly space: EmbeddingSpace }
@@ -93,9 +101,11 @@ export const bindPersistedEmbeddingSpace = (
  */
 export const bindPersistedEmbeddingNamespace = (
   db: SqliteDb,
-  namespace: string,
+  owner: string | PersistedEmbeddingOwner,
   current: EmbeddingSpace,
 ): SpaceBindResult => {
+  if (typeof owner !== "string") return bindPersistedRemoteEmbeddingOwner(db, owner, current)
+  const namespace = owner
   db.exec(
     `CREATE TABLE IF NOT EXISTS ${EMBEDDING_NAMESPACE_TABLE} (
        namespace TEXT PRIMARY KEY,
@@ -140,6 +150,80 @@ export const bindPersistedEmbeddingNamespace = (
   return {
     kind: "mismatch",
     reason: `remote namespace ${namespace} is bound to a different embedding space`,
+    persisted,
+    current,
+  }
+}
+
+const bindPersistedRemoteEmbeddingOwner = (
+  db: SqliteDb,
+  owner: PersistedEmbeddingOwner,
+  current: EmbeddingSpace,
+): SpaceBindResult => {
+  db.exec(
+    `CREATE TABLE IF NOT EXISTS ${EMBEDDING_REMOTE_OWNER_TABLE} (
+       owner_key TEXT PRIMARY KEY,
+       provider TEXT NOT NULL,
+       endpoint_fingerprint TEXT NOT NULL,
+       namespace TEXT NOT NULL,
+       model TEXT NOT NULL,
+       revision TEXT NOT NULL,
+       dimensions INTEGER NOT NULL,
+       normalization TEXT NOT NULL
+     ) WITHOUT ROWID`,
+  )
+  const row = db
+    .query<{
+      provider: string
+      endpoint_fingerprint: string
+      namespace: string
+      model: string
+      revision: string
+      dimensions: number
+      normalization: string
+    }>(
+      `SELECT provider, endpoint_fingerprint, namespace, model, revision, dimensions, normalization
+       FROM ${EMBEDDING_REMOTE_OWNER_TABLE} WHERE owner_key = ?`,
+    )
+    .get(owner.key)
+  if (row === null) {
+    db.query(
+      `INSERT INTO ${EMBEDDING_REMOTE_OWNER_TABLE}
+       (owner_key, provider, endpoint_fingerprint, namespace, model, revision, dimensions, normalization)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      owner.key,
+      owner.provider,
+      owner.endpointFingerprint,
+      owner.namespace,
+      current.model,
+      current.revision,
+      current.dimensions,
+      current.normalization,
+    )
+    return { kind: "ok", space: current }
+  }
+  if (
+    row.provider !== owner.provider ||
+    row.endpoint_fingerprint !== owner.endpointFingerprint ||
+    row.namespace !== owner.namespace ||
+    (row.normalization !== "l2" && row.normalization !== "none")
+  ) {
+    return {
+      kind: "unknown",
+      reason: `remote owner ${owner.key} has invalid or colliding identity metadata`,
+    }
+  }
+  const persisted: EmbeddingSpace = {
+    model: row.model,
+    revision: row.revision,
+    dimensions: row.dimensions,
+    normalization: row.normalization,
+  }
+  if (embeddingSpacesEqual(persisted, current)) return { kind: "ok", space: persisted }
+  return {
+    kind: "mismatch",
+    reason: `remote owner ${owner.key} is bound to a different embedding space`,
     persisted,
     current,
   }

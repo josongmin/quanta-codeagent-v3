@@ -6,10 +6,11 @@
  *
  * CONCURRENCY: upsert/remove/recover serialize on a per-root promise queue and
  * a stable fd-held flock, so different processes cannot lose index updates.
+ * Platforms without POSIX flock fail closed before an index RMW executes.
  */
 import { readdir, rename, unlink } from "node:fs/promises"
 import { dirname, join } from "node:path"
-import { errMessage, logger, POSIX_FLOCK_SUPPORTED, withPosixFileLock } from "@/shared"
+import { errMessage, logger, withPosixFileLock } from "@/shared"
 import { fileExists, readFile, writeFile } from "@/storage"
 import { indexFilePath, indexFilePathAsync } from "./paths"
 import type { SessionRootProvider } from "./root-port"
@@ -169,7 +170,7 @@ const withIndexMutex = async <T>(path: string, fn: () => Promise<T>): Promise<T>
     // A previous holder rejecting must not poison the queue.
   }
   try {
-    return await (POSIX_FLOCK_SUPPORTED ? withPosixFileLock(`${path}.lock`, fn) : fn())
+    return await withPosixFileLock(`${path}.lock`, fn)
   } finally {
     release()
     if (indexMutexes.get(path) === next) indexMutexes.delete(path)

@@ -41,9 +41,13 @@ purpose: |
   explicit store misconfig/negotiation failure는 legacy in-memory로 숨기지
   않고 semantic backend를 hard-disable한다. Lance/Qdrant path는
   logical collection과 전체 embedding-space identity로 physical namespace를
-  파생하고 durable local manifest/namespace sidecar가 없으면 첫 remote write
-  전에 거부한다. stale-chunk reconcile + delete-ack-gated retry retention +
-  embed/query latency metrics를 포함한다. search wire는 full-corpus pass가
+  파생하고, manifest owner를 provider + redacted canonical-endpoint fingerprint + physical namespace로
+  분리한다. caller injection은 table/collection/endpoint authority를 덮어쓸 수
+  없다. durable local manifest/owner sidecar가 없으면 첫 remote write 전에
+  거부하며, 각 remote upsert 전에 pending intent를 먼저 기록하고 성공 후
+  committed로 승격해 write-accept 뒤 process crash도 재시도/삭제 가능하게 한다.
+  stale-chunk reconcile + delete-ack-gated retry retention + embed/query latency
+  metrics를 포함한다. search wire는 full-corpus pass가
   아니라 scan mutation batch만 reconcile한다. default-OFF: store/embedder
   knob 미설정 ⇒ in-memory + hashEmbed ⇒ byte-identical.
 evidence:
@@ -95,4 +99,6 @@ notes: |
   REST fixture로 live wire/restart-safe manifest branch를 deterministically
   고정하고, contract rail은 real `python+lancedb` backing을 compatible
   HTTP shim 뒤에 둔다. 따라서 현재 closure는 “real Lance backing semantics”
-  기준이지, 공식 daemon binary parity claim은 아니다.
+  기준이지, 공식 daemon binary parity claim은 아니다. Unit owner rails는
+  hostile identity override, endpoint/provider rotation, sidecar secret 비노출,
+  remote-accept 이후 local commit 전 crash를 각각 고정한다.

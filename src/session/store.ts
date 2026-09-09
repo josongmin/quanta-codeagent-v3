@@ -10,6 +10,7 @@ import {
   admitDurableSessionSave,
   admitSessionSave,
   captureDurableSessionGeneration,
+  commitDurableSessionCreate,
   markSessionDeleted,
   markSessionDeletedDurably,
   readDurableSessionGeneration,
@@ -132,11 +133,59 @@ const removeFileIfExists = async (path: string): Promise<void> => {
   }
 }
 
+interface SessionMutationPaths {
+  readonly generationPath: string
+  readonly lockPath: string
+}
+
+const resolveSessionMutationPaths = async (
+  id: string,
+  provider: SessionRootProvider | undefined,
+): Promise<SessionMutationPaths> => {
+  const [generationPath, lockPath] = await Promise.all([
+    sessionGenerationPathAsync(id, provider),
+    sessionMutationLockPathAsync(id, provider),
+  ])
+  return { generationPath, lockPath }
+}
+
 const withSessionMutationLock = async <T>(
   id: string,
   provider: SessionRootProvider | undefined,
+  fn: (paths: SessionMutationPaths) => Promise<T>,
+): Promise<T> => {
+  const paths = await resolveSessionMutationPaths(id, provider)
+  return withSessionSaveLock(paths.generationPath, paths.lockPath, () => fn(paths))
+}
+
+/** Capture generation before queue admission, then hold the same root-scoped
+ * queue + flock through mutation. A create publishes its new generation only
+ * after `fn` has committed the replacement snapshot. */
+const withSessionSaveAdmission = async <T>(
+  id: string,
+  provider: SessionRootProvider | undefined,
+  create: boolean,
   fn: () => Promise<T>,
-): Promise<T> => withSessionSaveLock(id, sessionMutationLockPathAsync(id, provider), fn)
+): Promise<T> => {
+  const paths = await resolveSessionMutationPaths(id, provider)
+  const captured = sessionGenerationOf(paths.generationPath)
+  const durableCapture = await captureDurableSessionGeneration(paths.generationPath)
+  return withSessionSaveLock(paths.generationPath, paths.lockPath, async () => {
+    const admittedGeneration = await admitDurableSessionSave(
+      id,
+      paths.generationPath,
+      durableCapture,
+      create,
+    )
+    if (!create) admitSessionSave(paths.generationPath, captured, false, id)
+    const result = await fn()
+    if (create) {
+      await commitDurableSessionCreate(paths.generationPath, admittedGeneration)
+      admitSessionSave(paths.generationPath, captured, true, id)
+    }
+    return result
+  })
+}
 
 /**
  * Commit the derived `index.jsonl` entry AFTER the per-id snapshot JSON has
@@ -209,19 +258,8 @@ export const saveSessionById = (
   provider?: SessionRootProvider,
   opts?: SaveSessionOptions,
 ): Promise<void> => {
-  const captured = sessionGenerationOf(meta.id)
   const create = opts?.create === true
-  const generationPath = sessionGenerationPathAsync(meta.id, provider)
-  const durableCaptured = generationPath.then(captureDurableSessionGeneration).then(
-    (value) => ({ ok: true as const, value }),
-    (error: unknown) => ({ ok: false as const, error }),
-  )
-  return withSessionSaveLock(meta.id, sessionMutationLockPathAsync(meta.id, provider), async () => {
-    const resolvedGenerationPath = await generationPath
-    const durableCapture = await durableCaptured
-    if (!durableCapture.ok) throw durableCapture.error
-    await admitDurableSessionSave(meta.id, resolvedGenerationPath, durableCapture.value, create)
-    admitSessionSave(meta.id, captured, create)
+  return withSessionSaveAdmission(meta.id, provider, create, async () => {
     // R6 (final adversarial audit) — the caller's `meta.archived` can be STALE:
     // another surface may have archived (or unarchived) this session mid-turn, and
     // the per-turn auto-save reuses a long-lived `idMeta` snapshot that is never
@@ -500,18 +538,20 @@ export const forkSession = async (
     // copy completion/progress/blockers or autonomous execution state.
     ...(forkedObjective !== undefined ? { objective: forkedObjective } : {}),
   }
-  await writeSessionFile(await resolveSessionFilePath(newId, provider), JSON.stringify(saved))
-  await commitMetaAfterSnapshot(newMeta, provider)
+  await withSessionSaveAdmission(newId, provider, true, async () => {
+    await writeSessionFile(await resolveSessionFilePath(newId, provider), JSON.stringify(saved))
+    await commitMetaAfterSnapshot(newMeta, provider)
+  })
   return newId
 }
 
 export const deleteSession = async (id: string, provider?: SessionRootProvider): Promise<void> =>
-  withSessionMutationLock(id, provider, async () => {
-    await markSessionDeletedDurably(await sessionGenerationPathAsync(id, provider))
+  withSessionMutationLock(id, provider, async ({ generationPath }) => {
+    await markSessionDeletedDurably(generationPath)
     await removeFileIfExists(await resolveSessionFilePath(id, provider))
     await removeFileIfExists(await resolveArchivedFilePath(id, provider))
     await removeFromIndex(id, provider)
-    markSessionDeleted(id)
+    markSessionDeleted(generationPath)
   })
 
 /** Path of the per-session JSONL event log (ADR-0034). Lives next to the
