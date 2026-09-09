@@ -36,6 +36,22 @@ export const assertKnownTier = (tier: string): VerificationTier => {
   return tier as VerificationTier
 }
 
+const isGateCliArg = (arg: string): boolean =>
+  arg === "gate.ts" || arg === "tools/dev/gate.ts" || arg.endsWith("/gate.ts")
+
+/** Diagnostic parse of a campaign argv. Unknown tokens stay null, never a guessed tier. */
+export const tierFromGateCommand = (
+  command: readonly string[],
+): VerificationTier | "precommit" | null => {
+  const idx = command.findIndex(isGateCliArg)
+  if (idx === -1) return null
+  const next = command.slice(idx + 1).find((arg) => !arg.startsWith("-"))
+  if (next === undefined) return null
+  if (next === "precommit") return "precommit"
+  if (!knownTiers.has(next as VerificationTier)) return null
+  return next as VerificationTier
+}
+
 export const gatesForTier = (
   gates: readonly TierGate[],
   tier: VerificationTier,

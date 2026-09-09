@@ -6,6 +6,7 @@ import {
   assertKnownTier,
   orchestrateGates,
   type TierGate,
+  tierFromGateCommand,
 } from "../../../tools/dev/verification-tier"
 
 const gates: readonly TierGate[] = [
@@ -109,7 +110,11 @@ describe("manifest tier membership", () => {
     const source = await Bun.file(join(import.meta.dir, "../../../tools/dev/gate.ts")).text()
     expect(source).toContain("assertKnownTier(")
     expect(source).toContain("gatesForVerificationTier(")
+    expect(source).toContain("tiersForGate(")
     expect(source).toContain('tier: label === "precommit" ? "prepush" : label')
+    expect(source).toMatch(
+      /if \(label === "nightly"\) \{\s*process\.env\.QUANTA_TEST_CACHE = NIGHTLY_MEMBERSHIP\.cacheMode/,
+    )
   })
 
   test("unknown CLI tier is exit 2, not a silent prepush", () => {
@@ -122,5 +127,69 @@ describe("manifest tier membership", () => {
     expect(new TextDecoder().decode(proc.stderr)).toContain(
       "precommit|smoke|prepush|pr|full|nightly",
     )
+  })
+
+  test("--list matrix shows smoke excluding typecheck and full-suite", () => {
+    const proc = Bun.spawnSync(["bun", "run", "tools/dev/gate.ts", "--list"], {
+      cwd: join(import.meta.dir, "../../.."),
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    expect(proc.exitCode).toBe(0)
+    const out = new TextDecoder().decode(proc.stdout)
+    const typecheck = out
+      .split("\n")
+      .find((line) => line.startsWith("typecheck "))
+      ?.trim()
+      .split(/\s+/)
+    const fullSuite = out
+      .split("\n")
+      .find((line) => line.startsWith("full-suite "))
+      ?.trim()
+      .split(/\s+/)
+    const lint = out
+      .split("\n")
+      .find((line) => line.startsWith("lint "))
+      ?.trim()
+      .split(/\s+/)
+    expect(typecheck).toEqual(["typecheck", "-", "y", "y", "y", "y"])
+    expect(fullSuite).toEqual(["full-suite", "-", "y", "y", "y", "y"])
+    expect(lint).toEqual(["lint", "y", "y", "y", "y", "y"])
+  })
+
+  test("--list smoke does not include typecheck or full-suite", () => {
+    const proc = Bun.spawnSync(["bun", "run", "tools/dev/gate.ts", "--list", "smoke"], {
+      cwd: join(import.meta.dir, "../../.."),
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    expect(proc.exitCode).toBe(0)
+    const out = new TextDecoder().decode(proc.stdout)
+    expect(out).toContain("lint")
+    expect(out).not.toContain("typecheck")
+    expect(out).not.toContain("full-suite")
+  })
+
+  test("--list unknown tier is exit 2", () => {
+    const proc = Bun.spawnSync(["bun", "run", "tools/dev/gate.ts", "--list", "merge-green"], {
+      cwd: join(import.meta.dir, "../../.."),
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    expect(proc.exitCode).toBe(2)
+  })
+})
+
+describe("campaign command tier parse", () => {
+  test("reads the gate.ts argv token, not a nearby flag", () => {
+    expect(
+      tierFromGateCommand(["bun", "run", "tools/dev/gate.ts", "nightly", "--keep-going"]),
+    ).toBe("nightly")
+    expect(
+      tierFromGateCommand(["bun", "run", "tools/dev/gate.ts", "prepush", "--reuse-receipt"]),
+    ).toBe("prepush")
+    expect(tierFromGateCommand(["bun", "run", "tools/dev/gate.ts", "precommit"])).toBe("precommit")
+    expect(tierFromGateCommand(["bun", "-e", "process.exit(0)"])).toBeNull()
+    expect(tierFromGateCommand(["bun", "run", "tools/dev/gate.ts", "merge-green"])).toBeNull()
   })
 })

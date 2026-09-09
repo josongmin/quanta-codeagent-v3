@@ -22,6 +22,7 @@ import {
 } from "./verification-campaign-receipt"
 import { sharedVerificationCacheRoot } from "./verification-receipt"
 import { probeExactVerificationReceipt } from "./verification-receipt-probe"
+import { tierFromGateCommand } from "./verification-tier"
 
 /**
  * Whole-campaign serializer for `bun run prepush` / `bun run test:ci`.
@@ -97,6 +98,7 @@ if (isExactPrepushReuse) {
           pid: process.pid,
           head: campaignHead,
           command: command.join(" "),
+          verificationTier: tierFromGateCommand(command),
           // No lane was taken: that IS the outcome being recorded.
           leasePort: null,
           leaseWaitMs: 0,
@@ -167,6 +169,7 @@ const recordCampaign = (input: {
       pid: process.pid,
       head: campaignHead,
       command: command.join(" "),
+      verificationTier: tierFromGateCommand(command),
       leasePort: lease?.port ?? null,
       leaseWaitMs,
       startedAtMs: campaignStartedAtMs,

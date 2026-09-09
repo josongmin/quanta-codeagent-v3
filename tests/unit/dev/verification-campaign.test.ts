@@ -34,6 +34,7 @@ const CAMPAIGN_MODULES = [
   "test-shard-lifecycle.ts",
   "gate-manifest.ts",
   "verification-tier.ts",
+  "verification-nightly-manifest.ts",
   "verification-receipt.ts",
   "verification-receipt-probe.ts",
   "verification-campaign-receipt.ts",
@@ -129,6 +130,10 @@ export const GATES: readonly Gate[] = ${JSON.stringify(entries, null, 2)}
 export const gatesForStage = (stage: GateStage): readonly Gate[] =>
   stage === "precommit" ? GATES.filter((gate) => gate.stage === "precommit") : GATES
 export const gatesForVerificationTier = (_tier: string): readonly Gate[] => GATES
+export const tiersForGate = (gate: Gate): readonly string[] =>
+  gate.stage === "precommit"
+    ? ["smoke", "prepush", "pr", "full", "nightly"]
+    : ["prepush", "pr", "full", "nightly"]
 `
 }
 
@@ -360,6 +365,7 @@ describe("whole verification campaign lease", () => {
     expect(passed.drained).toBe(true)
     expect(passed.survivingGroups).toEqual([])
     expect(passed.head).toMatch(/^[a-f0-9]{40}$/)
+    expect(passed.verificationTier).toBeNull()
     expect(typeof passed.leaseWaitMs).toBe("number")
     expect(passed.leasePort).toBeGreaterThan(0)
     expect((passed.hostAtStart as { cpus: number }).cpus).toBeGreaterThan(0)
@@ -421,6 +427,7 @@ describe("whole verification campaign lease", () => {
     expect(reuse.exitCode, `${reuse.stdout.toString()}\n${reuse.stderr.toString()}`).toBe(0)
     const recorded = JSON.parse(readFileSync(receiptPath, "utf8")) as Record<string, unknown>
     expect(recorded.outcome).toBe("reused")
+    expect(recorded.verificationTier).toBe("prepush")
     expect(recorded.head).toBe(head)
     // No lane was taken — that is the point of the reuse path.
     expect(recorded.leasePort).toBeNull()

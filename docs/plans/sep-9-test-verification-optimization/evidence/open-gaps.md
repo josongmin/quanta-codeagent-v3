@@ -17,5 +17,6 @@ forbids starting them in this session.
 | TV-90 ABBA p95 | No healthy-load sample. Campaign receipts now record lease/run phase timing without treating one sample as p95 proof. |
 | KF-01 chunk 16 | `tests/unit/bench-full-remote-hellgate.test.ts` remains unresolved. Not quarantined. |
 | Declared-v1 rollout | Identity field is live; opt-in set is empty so every chunk stays whole-tree. |
+| TV-13 nightly exhaustive groups | `NIGHTLY_MEMBERSHIP.includes` is `cache-off-full-suite` only — the lane `verify:nightly` actually runs. exhaustive-fuzz / quarantine-lane / toolchain-matrix stay unwired until TV-09/12 jobs exist. |
 
 Selection dry-run and membership equality were checked in focused unit tests, not against a full campaign receipt.

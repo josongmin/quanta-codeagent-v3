@@ -2,6 +2,7 @@ import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs"
 import { availableParallelism, loadavg, totalmem } from "node:os"
 import { dirname } from "node:path"
 import { summarizeSamples, type VerificationSample } from "./verification-metrics"
+import type { VerificationTier } from "./verification-result"
 
 /**
  * Machine-readable record of ONE verification campaign.
@@ -39,6 +40,8 @@ export interface CampaignReceipt {
   readonly pid: number
   readonly head: string
   readonly command: string
+  /** Parsed from argv when the command is `gate.ts <tier>`; otherwise null. Not a verdict. */
+  readonly verificationTier: VerificationTier | "precommit" | null
   readonly leasePort: number | null
   /** Milliseconds spent waiting for another checkout to release the lane. */
   readonly leaseWaitMs: number
@@ -96,6 +99,7 @@ export const buildCampaignReceipt = (input: {
   readonly pid: number
   readonly head: string
   readonly command: string
+  readonly verificationTier: VerificationTier | "precommit" | null
   readonly leasePort: number | null
   readonly leaseWaitMs: number
   readonly startedAtMs: number
@@ -122,6 +126,7 @@ export const buildCampaignReceipt = (input: {
     pid: input.pid,
     head: input.head,
     command: input.command,
+    verificationTier: input.verificationTier,
     leasePort: input.leasePort,
     leaseWaitMs: Math.max(0, Math.round(input.leaseWaitMs)),
     startedAt: new Date(input.startedAtMs).toISOString(),

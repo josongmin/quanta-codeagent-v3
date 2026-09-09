@@ -8,6 +8,6 @@ export const NIGHTLY_SCHEDULES = [
 export const NIGHTLY_MEMBERSHIP = {
   schema: "quanta.verification-nightly.v1",
   cacheMode: "off",
-  includes: ["exhaustive-fuzz", "quarantine-lane", "toolchain-matrix"],
+  includes: ["cache-off-full-suite"],
   excludesPaidEvalMove: true,
 } as const

@@ -1,13 +1,14 @@
 /**
- * The runner for `bun run precommit` / `bun run prepush`.
+ * The runner for `bun run precommit` / `bun run prepush` / `verify:*` tiers.
  *
- * Runs every gate in `gate-manifest.ts` for the stage, IN ORDER, and prints one
- * summary line per gate plus a final verdict. Exits 1 if any gate failed.
+ * Runs every gate in `gate-manifest.ts` for the requested stage or
+ * VerificationTier, IN ORDER, and prints one summary line per gate plus a
+ * final verdict. Exits 1 if any gate failed.
  *
- * RUNS EVERY GATE, does not stop at the first failure. A developer who has
- * broken two things wants both names in one pass; stopping early turns a
- * two-minute fix into two two-minute rounds. `--bail` opts into the other
- * behaviour for the slow prepush suites.
+ * Default is fail-fast: a failed gate stops later independent gates (`not-run`)
+ * and poisons consumers (`skipped-input`). `--keep-going` opts into running
+ * remaining independent gates. `--bail` is accepted as an explicit alias of
+ * the default.
  *
  * OUTPUT IS THE CHILD'S. Each gate inherits stdio unless `--quiet` is passed,
  * because the gate scripts already print the diagnosis the fixer needs (the
@@ -28,6 +29,7 @@
  *   bun run tools/dev/gate.ts prepush --bail
  *   bun run tools/dev/gate.ts pr --keep-going
  *   bun run tools/dev/gate.ts --list
+ *   bun run tools/dev/gate.ts --list smoke
  */
 
 import { rmSync } from "node:fs"
@@ -42,8 +44,10 @@ import {
   type GateStage,
   gatesForStage,
   gatesForVerificationTier,
+  tiersForGate,
 } from "./gate-manifest"
 import { admissionFromEnv } from "./verification-admission"
+import { NIGHTLY_MEMBERSHIP } from "./verification-nightly-manifest"
 import {
   cleanStatusSha256,
   mintExactVerificationReceipt,
@@ -74,16 +78,42 @@ const printErr = (line: string): void => {
   process.stderr.write(`${line}\n`)
 }
 
+const USAGE =
+  "usage: gate.ts <precommit|smoke|prepush|pr|full|nightly> [--bail|--keep-going] [--quiet] | --list [tier]"
+const LIST_TIERS: readonly VerificationTier[] = ["smoke", "prepush", "pr", "full", "nightly"]
+const printGateRow = (gate: Gate): void => {
+  printOut(`${gate.stage.padEnd(9)} ${gate.id.padEnd(22)} ${gate.run}`)
+}
+
 if (wants("--list")) {
-  for (const g of gatesForStage("prepush")) {
-    printOut(`${g.stage.padEnd(9)} ${g.id.padEnd(22)} ${g.run}`)
+  const requested = argv.find((a) => a !== "--list" && !a.startsWith("-"))
+  if (requested === undefined) {
+    printOut(`${"id".padEnd(22)} ${LIST_TIERS.map((tier) => tier.padEnd(8)).join(" ")}`)
+    for (const gate of GATES) {
+      const membership = new Set(tiersForGate(gate))
+      printOut(
+        `${gate.id.padEnd(22)} ${LIST_TIERS.map((tier) =>
+          (membership.has(tier) ? "y" : "-").padEnd(8),
+        ).join(" ")}`,
+      )
+    }
+    process.exit(0)
   }
-  process.exit(0)
+  if (requested === "precommit") {
+    for (const gate of gatesForStage("precommit")) printGateRow(gate)
+    process.exit(0)
+  }
+  try {
+    const tier = assertKnownTier(requested)
+    for (const gate of gatesForVerificationTier(tier)) printGateRow(gate)
+    process.exit(0)
+  } catch {
+    printErr(USAGE)
+    process.exit(2)
+  }
 }
 
 const stageArg = argv.find((a) => !a.startsWith("-"))
-const USAGE =
-  "usage: gate.ts <precommit|smoke|prepush|pr|full|nightly> [--bail|--keep-going] [--quiet] | --list"
 let label: "precommit" | VerificationTier
 if (stageArg === "precommit") {
   label = "precommit"
@@ -94,6 +124,9 @@ if (stageArg === "precommit") {
     printErr(USAGE)
     process.exit(2)
   }
+}
+if (label === "nightly") {
+  process.env.QUANTA_TEST_CACHE = NIGHTLY_MEMBERSHIP.cacheMode
 }
 const writesExactReceipt = label === "prepush"
 const keepGoing = wants("--keep-going")

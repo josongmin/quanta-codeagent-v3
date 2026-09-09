@@ -35,8 +35,14 @@ evidence:
     - tools/dev/verification-metrics.ts
     - tools/dev/verification-matrix.ts
     - tools/dev/verification-required-results.ts
+    - tools/dev/verification-tier.ts
+    - tools/dev/verification-nightly-manifest.ts
+    - tools/dev/verification-campaign.ts
+    - tools/dev/verification-campaign-receipt.ts
     - tools/dev/test-shard-membership.ts
     - tools/dev/source-snapshot.ts
+    - tools/dev/gate-manifest.ts
+    - tools/dev/gate.ts
   adrs: [3]
   tests:
     unit:
@@ -45,6 +51,9 @@ evidence:
       - tests/unit/dev/verification-input-scope.test.ts
       - tests/unit/dev/ci-required-results.test.ts
       - tests/unit/test-shard-membership.test.ts
+      - tests/unit/dev/verification-tier-runner.test.ts
+      - tests/unit/dev/verification-first-failure.test.ts
+      - tests/unit/dev/verification-campaign.test.ts
     integration: []
     contract: []
 config_refs:
