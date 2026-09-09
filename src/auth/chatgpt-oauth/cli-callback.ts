@@ -310,16 +310,15 @@ export const createCliOAuthCallback = (opts: CliCallbackOptions = {}): OAuthCall
 
         if (sig !== undefined) {
           if (sig.aborted) {
-            handled = true
-            reject(new BrowserFlowError("user_cancel", "login aborted by caller"))
+            close()
             return
           }
           abortListener = () => {
-            if (handled) return
-            handled = true
-            reject(new BrowserFlowError("user_cancel", "login aborted by caller"))
+            close()
           }
           sig.addEventListener("abort", abortListener, { once: true })
+          // WHATWG does not fire `abort` for listeners added after abort.
+          if (sig.aborted) close()
         }
       })
 

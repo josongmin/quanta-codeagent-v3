@@ -159,4 +159,47 @@ describe("P2-A-05 diagnostics open cache eviction", () => {
     await Promise.all([pending, disposed])
     expect(live.stopped).toBe(1)
   })
+
+  test("dispose during diagnostics does not inject", async () => {
+    const bus = new HookBus()
+    const pushed: HookPromptInject[] = []
+    let release!: () => void
+    const live = session([errDiag("late")])
+    live.diagnostics = () =>
+      new Promise<DiagnosticItem[]>((resolve) => {
+        release = () => resolve([errDiag("late")])
+      })
+    const handle = attachLspDiagnosticsHook({
+      hooks: bus,
+      push: { push: (e) => pushed.push(e) },
+      editTools: EDIT,
+      open: async () => live,
+      cwd: "/work",
+    })
+    const pending = emitEdit(bus)
+    await Bun.sleep(10)
+    const disposed = handle.dispose()
+    release()
+    await Promise.all([pending, disposed])
+    expect(pushed).toHaveLength(0)
+    expect(live.stopped).toBe(1)
+  })
+
+  test("post-dispose edit does not open a new client", async () => {
+    const bus = new HookBus()
+    let n = 0
+    const handle = attachLspDiagnosticsHook({
+      hooks: bus,
+      push: { push: () => {} },
+      editTools: EDIT,
+      open: async () => {
+        n += 1
+        return session([errDiag("x")])
+      },
+      cwd: "/work",
+    })
+    await handle.dispose()
+    await emitEdit(bus)
+    expect(n).toBe(0)
+  })
 })

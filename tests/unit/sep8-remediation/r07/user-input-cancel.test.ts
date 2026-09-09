@@ -38,6 +38,41 @@ describe("G-F12 turn-scoped user-input cancel", () => {
     expect(h.cancelTurn("t1")).toBe(0)
   })
 
+  test("reusing promptId settles the stale waiter instead of leaking it", async () => {
+    const h = createWebUserInputPort({ capture: () => {} })
+    const first = h.port({ promptId: "dup", prompt: "first", turnId: "t1" })
+    const second = h.port({ promptId: "dup", prompt: "second", turnId: "t2" })
+    expect(h.pendingCount()).toBe(1)
+    await expect(first).resolves.toEqual({ decision: "cancelled" })
+    expect(h.resolve("dup", { decision: "answer", text: "second" })).toBe(true)
+    await expect(second).resolves.toEqual({ decision: "answer", text: "second" })
+    expect(h.pendingCount()).toBe(0)
+  })
+
+  test("abort during stale-prompt cancel settles the replacement waiter", async () => {
+    const ac = new AbortController()
+    const h = createWebUserInputPort({
+      capture: (ev) => {
+        if (ev.type === "plan_user_input_resolved") ac.abort()
+      },
+    })
+    const first = h.port({
+      promptId: "dup",
+      prompt: "first",
+      turnId: "t1",
+      signal: ac.signal,
+    })
+    const second = h.port({
+      promptId: "dup",
+      prompt: "second",
+      turnId: "t2",
+      signal: ac.signal,
+    })
+    await expect(first).resolves.toEqual({ decision: "cancelled" })
+    await expect(second).resolves.toEqual({ decision: "cancelled" })
+    expect(h.pendingCount()).toBe(0)
+  })
+
   test("already-aborted signal settles without parking", async () => {
     const h = createWebUserInputPort({ capture: () => {} })
     const ac = new AbortController()

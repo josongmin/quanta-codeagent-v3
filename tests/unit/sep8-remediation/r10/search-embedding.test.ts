@@ -151,7 +151,7 @@ describe("E-EMBED-01 embedding space", () => {
       resolvedEmbedder: hash,
     })
     expect((await backend.readiness).kind).toBe("unavailable")
-    const n = db.query<{ n: number }>(`SELECT COUNT(*) AS n FROM search_index_vss`).get()
+    const n = db.query<{ n: number }, []>(`SELECT COUNT(*) AS n FROM search_index_vss`).get()
     expect(n?.n).toBe(1)
     const bind = bindPersistedEmbeddingSpace(db as never, "search_index_vss", HASH_EMBEDDING_SPACE)
     expect(bind.kind).toBe("unknown")

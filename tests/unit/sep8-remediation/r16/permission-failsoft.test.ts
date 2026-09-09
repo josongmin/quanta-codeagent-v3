@@ -53,4 +53,19 @@ describe("G-F8 permission load fail-soft", () => {
       /loadPermissionStore:\s*async\s*\(\)\s*=>\s*\{[\s\S]*?catch\s*\{[\s\S]*?return undefined/,
     )
   })
+
+  test("web durable loader redacts secrets in the fail-soft warning", () => {
+    const src = readFileSync(join(process.cwd(), "src/apps/web-daemon/runtime-factory.ts"), "utf8")
+    const start = src.indexOf("const loadDefaultPermissionStore")
+    const end = src.indexOf("Build a `runtimeFactory`", start)
+    expect(start).toBeGreaterThan(0)
+    expect(end).toBeGreaterThan(start)
+    const site = src.slice(start, end)
+    expect(site).toContain("redactSecrets")
+    expect(site).toContain("envelope_jsonl")
+    expect(site).not.toMatch(
+      /logger\.warn\(`web-daemon\.loadDefaultPermissionStore: \$\{errMessage/,
+    )
+    expect(site).toMatch(/try \{\s*logger\.warn/)
+  })
 })

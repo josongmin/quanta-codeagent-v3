@@ -99,6 +99,24 @@ describe("F-08 OAuth callback close", () => {
     await rebind(port)
   })
 
+  test("abort inside opener closes without waiting for timeout", async () => {
+    const port = await freePort()
+    const ac = new AbortController()
+    const started = Date.now()
+    const result = await runBrowserFlow({
+      cfg,
+      opener: () => {
+        ac.abort()
+      },
+      timeoutMs: 8_000,
+      signal: ac.signal,
+      callbackProvider: createCliOAuthCallback({ ports: [port] }),
+    }).catch((e: Error) => e)
+    expect(result).toMatchObject({ name: "BrowserFlowError", reason: "user_cancel" })
+    expect(Date.now() - started).toBeLessThan(2000)
+    await rebind(port)
+  })
+
   test("caller abort closes the listener so the port rebinds", async () => {
     const port = await freePort()
     const ac = new AbortController()

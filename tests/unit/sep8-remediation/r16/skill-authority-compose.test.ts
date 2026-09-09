@@ -119,6 +119,31 @@ describe("G-F11 composeSessionSkillAuthority", () => {
     expect(seen).toEqual(["store down"])
   })
 
+  test("generic construction warning redacts secrets", async () => {
+    const seen: string[] = []
+    const secret = `ghp_${"A".repeat(36)}`
+    const result = await composeSessionSkillAuthority({
+      skills: {},
+      env: {},
+      warn: (info) => {
+        seen.push(info.error)
+      },
+      disabledStore: {
+        read: async () => {
+          throw new Error(`store down ${secret}`)
+        },
+        write: async () => undefined,
+        mutate: async () => {
+          throw new Error(`store down ${secret}`)
+        },
+      },
+    })
+    expect(result).toBeUndefined()
+    expect(seen).toHaveLength(1)
+    expect(seen[0]).not.toContain(secret)
+    expect(seen[0]).toContain("[REDACTED")
+  })
+
   test("throwing warning sink still fail-opens", async () => {
     const result = await composeSessionSkillAuthority({
       skills: {},

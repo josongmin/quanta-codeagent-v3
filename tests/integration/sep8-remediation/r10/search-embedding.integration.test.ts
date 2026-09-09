@@ -43,7 +43,7 @@ describe("R10 sqlite persist space (file-backed)", () => {
     )
 
     const db = new Database(dbPath)
-    const n = db.query<{ n: number }>(`SELECT COUNT(*) AS n FROM search_index_vss`).get()
+    const n = db.query<{ n: number }, []>(`SELECT COUNT(*) AS n FROM search_index_vss`).get()
     expect(n?.n).toBe(1)
     db.close()
   })

@@ -36,6 +36,7 @@ import type { PermissionContext } from "@/permission"
 import type { PostureControl } from "@/permission/posture/control"
 import type { buildSkillsConfigCore, buildSubagentConfigCore } from "@/runner/assemble"
 import type { RuntimeAgentConfigBase } from "@/sdk/runtime"
+import { redactSecrets } from "@/security"
 import { errMessage, gateOn, logger } from "@/shared"
 import { StdoutStream } from "@/stream"
 import { buildDefaultTools, type Tool, ToolRegistry } from "@/tool"
@@ -62,6 +63,8 @@ export const buildDaemonToolRegistry = (
     ...buildDefaultTools(artifactRegistry !== undefined ? { artifactRegistry } : {}),
     ...extraTools,
   ])
+
+let webRepoRulesLoadWarned = false
 
 /** A7 — optional usage-accounting slot. A helper (not an inline spread) for
  *  the same reason as {@link objectiveSlot}: the base builder sits at biome's
@@ -228,12 +231,20 @@ export const buildAgentConfigBase = async ({
   // `modeLoadsRepoRules` (in the surface-agnostic `@/agent/run-mode`, shared with
   // the presets) so web can never drift from the security classification — if
   // "interactive" ever became rule-less, this stops loading too. Fail-open.
+  // G-F13: warn at most once per process; a throwing sink must not become a throw.
   const repoRules = modeLoadsRepoRules("interactive")
     ? await loadRepoRules(cwd).catch((e) => {
-        logger.warn("web daemon repo rules load failed; continuing without local rules", {
-          cwd,
-          error: errMessage(e),
-        })
+        if (!webRepoRulesLoadWarned) {
+          webRepoRulesLoadWarned = true
+          try {
+            logger.warn("web daemon repo rules load failed; continuing without local rules", {
+              cwd,
+              error: redactSecrets(errMessage(e), { origin: "envelope_jsonl" }).text,
+            })
+          } catch {
+            // Diagnostic failure must not convert fail-open into throw.
+          }
+        }
         return undefined
       })
     : undefined

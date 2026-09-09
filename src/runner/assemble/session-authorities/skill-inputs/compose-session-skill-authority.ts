@@ -6,6 +6,7 @@
  * fail-loud via {@link SkillAdminPolicyLoadError} — wiring must not swallow it.
  */
 import { join } from "node:path"
+import { redactSecrets } from "@/security"
 import { errMessage, quantaHomeDirFrom } from "@/shared"
 import type { AdminPolicyReader, DisabledStorePort, SkillRuntimeAuthority } from "@/skill"
 import { buildSkillRuntimeAuthority, SkillAdminPolicyLoadError } from "../build-skills"
@@ -57,7 +58,7 @@ export const composeSessionSkillAuthority = async (
     })
   } catch (e) {
     if (e instanceof SkillAdminPolicyLoadError) throw e
-    emitWarn(input.warn, errMessage(e))
+    emitWarn(input.warn, redactSecrets(errMessage(e), { origin: "envelope_jsonl" }).text)
     return undefined
   }
 }

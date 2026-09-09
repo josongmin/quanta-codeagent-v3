@@ -53,6 +53,7 @@ import {
 import { createUsageAccounting, resolveUsageAccounting } from "@/observability/usage-accounting"
 import { getDefaultPermissionStore, type PermissionStore } from "@/permission"
 import { createRuntimeFromAgentConfigBase } from "@/sdk/runtime"
+import { redactSecrets } from "@/security"
 import { errMessage, gateDisabled, gateOn, logger } from "@/shared"
 import { buildWebSkillAuthority } from "./authority-readouts"
 import { createCanvasToolDiffSource } from "./canvas-tool-diff-source"
@@ -278,7 +279,13 @@ const loadDefaultPermissionStore = async (): Promise<PermissionStore | undefined
     // Fail-soft is the DESIGN (a corrupt store must not stop daemon boot), but
     // silence is not: the operator's durable posture just vanished and every
     // approval falls back to the in-memory seed. Say which, and why.
-    logger.warn(`web-daemon.loadDefaultPermissionStore: ${errMessage(e)}`)
+    try {
+      logger.warn(
+        `web-daemon.loadDefaultPermissionStore: ${redactSecrets(errMessage(e), { origin: "envelope_jsonl" }).text}`,
+      )
+    } catch {
+      // Diagnostic failure must not convert fail-soft into throw.
+    }
     return undefined
   }
 }

@@ -79,8 +79,17 @@ export const attachLspDiagnosticsHook = (
   // concurrent edits to the same language share ONE open (the bus serializes
   // handlers per emit, but a future parallel emitter must not double-open).
   const sessions = new Map<string, Promise<DiagnosticsSession | null>>()
+  let disposed = false
+  const stopped = new WeakSet<DiagnosticsSession>()
+
+  const stopOnce = async (session: DiagnosticsSession | null): Promise<void> => {
+    if (session === null || stopped.has(session)) return
+    stopped.add(session)
+    await session.stop().catch(() => undefined)
+  }
 
   const sessionFor = (filePath: string): Promise<DiagnosticsSession | null> => {
+    if (disposed) return Promise.resolve(null)
     const key = extname(filePath).toLowerCase()
     const existing = sessions.get(key)
     if (existing !== undefined) return existing
@@ -96,42 +105,61 @@ export const attachLspDiagnosticsHook = (
       },
     )
     sessions.set(key, tracked)
+    // Dispose may have started after the opening `if (disposed)` check.
+    // If it already snapshotted this promise, it owns stop. If we re-inserted
+    // after clear(), we own stop so the client cannot leak.
+    if (disposed) {
+      if (sessions.get(key) === tracked) sessions.delete(key)
+      return tracked.then(
+        async (opened) => {
+          await stopOnce(opened)
+          return null
+        },
+        () => null,
+      )
+    }
     return tracked
   }
 
-  opts.hooks.on("post_tool_use", async (event) => {
+  const pathOfEdit = (event: { name: string; input: unknown }): string | null => {
+    if (disposed) return null
     const extract = opts.editTools.get(event.name)
-    if (extract === undefined) return // not an edit-class tool — ignore.
-    let path: string | null
+    if (extract === undefined) return null
     try {
-      path = extract(event.input)
+      const path = extract(event.input)
+      return path === null || path === "" ? null : path
     } catch {
-      return // a throwing extractor must not break the turn.
+      return null
     }
-    if (path === null || path === "") return
+  }
 
-    let diags: DiagnosticItem[]
+  const diagnosticsFor = async (path: string): Promise<DiagnosticItem[] | null> => {
     try {
       const session = await sessionFor(path)
-      if (session === null) return // no server for this file — silent.
-      diags = await session.diagnostics(path)
+      if (disposed || session === null) return null
+      return await session.diagnostics(path)
     } catch {
       // Any LSP failure (spawn, handshake, request) is swallowed — a flaky
       // server must never turn a successful edit into a broken turn.
-      return
+      return null
     }
-    if (diags.length === 0) return // clean file — no noise injected.
+  }
 
+  opts.hooks.on("post_tool_use", async (event) => {
+    const path = pathOfEdit(event)
+    if (path === null) return
+    const diags = await diagnosticsFor(path)
+    if (diags === null || disposed || diags.length === 0) return
     opts.push.push({ injectAfterSystem: renderInjection(path, diags) })
   })
 
   return {
     dispose: async () => {
+      disposed = true
       const pending = [...sessions.values()]
       sessions.clear()
       for (const p of pending) {
-        const session = await p.catch(() => null)
-        if (session) await session.stop().catch(() => undefined)
+        await stopOnce(await p.catch(() => null))
       }
     },
   }

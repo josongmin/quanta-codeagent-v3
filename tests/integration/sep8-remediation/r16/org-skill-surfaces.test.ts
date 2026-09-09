@@ -52,6 +52,27 @@ describe("G-F11 CLI/web org input surfaces", () => {
     }
   })
 
+  test("empty QUANTA_ORG_CONFIG_DIR opts out on CLI and web", async () => {
+    const root = mkdtempSync(join(tmpdir(), "r16-surf-opt-"))
+    try {
+      const userDir = join(root, "user")
+      const orgDir = join(root, "org")
+      writeSkill(userDir, "demo")
+      mkdirSync(join(orgDir, "admin-skills"), { recursive: true })
+      writeFileSync(join(orgDir, "org-policy.json"), JSON.stringify({ bannedSkills: ["demo"] }))
+      const env = { QUANTA_ORG_CONFIG_DIR: orgDir }
+      const opted = { QUANTA_ORG_CONFIG_DIR: "" }
+      const banned = await buildCliSkillAuthority({ dir: userDir }, env)
+      const cli = await buildCliSkillAuthority({ dir: userDir }, opted)
+      const web = await buildWebSkillAuthority({ dir: userDir }, opted)
+      expect(banned?.read().active.map((s) => s.name)).not.toContain("demo")
+      expect(cli?.read().active.map((s) => s.name)).toContain("demo")
+      expect(web?.read().active.map((s) => s.name)).toContain("demo")
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   test("malformed org policy is fail-loud on CLI and web surfaces", async () => {
     const root = mkdtempSync(join(tmpdir(), "r16-surf-bad-"))
     try {

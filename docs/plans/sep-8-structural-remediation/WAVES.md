@@ -6,7 +6,7 @@
 - 실행 배정의 machine-readable 원본: [waves.json](/Users/songmin/quanta-codeagent-v3/docs/plans/sep-8-structural-remediation/waves.json).
 - 검사기: [verify-waves.mjs](/Users/songmin/quanta-codeagent-v3/docs/plans/sep-8-structural-remediation/verify-waves.mjs).
 - Plan baseline HEAD: `f5f4875799141068af73e604129c8b9a09f76007`.
-- Integrated source (W1+W2, W3 착수): `19fc9da2b` on local `main`. W3 land: `f3a93d5fd`. W4 snapshot: `c156d76397feb63ec1c4992c07d011dd0647a4c6`. `waves.json` `sourceHead`는 W4 snapshot SHA. W6 status: `w6-implemented`.
+- Integrated source (W1+W2, W3 착수): `19fc9da2b` on local `main`. W3 land: `f3a93d5fd`. W5 land: `d841e134be6d349d949ad3dadecbfe877ec106af`. `waves.json` `sourceHead`는 W5 land SHA. W6 status: `w6-implemented`.
 - audit digest는 manifest에 고정한다. `docs/bugbash/sep-8-se-audit/`는 baseline 입력이지 구현 closeout이 아니다.
 
 ## 1. 전체 배정 — 39 finding / 16 package / 172 action
@@ -171,7 +171,7 @@ R07의 OAuth files는 W3 R02가 사용한 file-store owner와 분리되어 있�
 - worker는 skill authority leaf/contracts/tests를 맡는다. CLI session-setup/repl, web authority, agent preset 경고 배선은 W6-I가 적용한다.
 - 한 package이므로 B/C 슬롯을 임의의 “잔여 작업”으로 채우지 않는다. 읽기 전용 review/test는 가능하나 새로운 owner write를 만들지 않는다.
 
-**구현 상태:** W6-P/I는 local `main`에서 uncommitted. sourceHead snapshot `c156d7639`. status `w6-implemented`. W7 verified 아님. G-F5.4 EC2 / G-F9.4 live Docker daemon은 이 wave에 없음.
+**구현 상태:** W6-P/I는 local `main`에서 residual uncommitted. sourceHead snapshot `d841e134b`. status `w6-implemented`. W7 verified 아님. G-F5.4 EC2 / G-F9.4 live Docker daemon은 이 wave에 없음.
 
 ### W7 — Serial final closeout
 

@@ -155,6 +155,43 @@ export const createWebUserInputPort = (deps: WebUserInputPortDeps): WebUserInput
     return true
   }
 
+  const bindAbort = (promptId: string, entry: Pending): void => {
+    const signal = entry.signal
+    if (signal === undefined) return
+    const onAbort = (): void => {
+      resolve(promptId, { decision: "cancelled" })
+    }
+    entry.abortListener = onAbort
+    signal.addEventListener("abort", onAbort, { once: true })
+    if (signal.aborted) resolve(promptId, { decision: "cancelled" })
+  }
+
+  const parkPending = (req: WebUserInputRequest, res: (o: UserInputOutcome) => void): void => {
+    // Same promptId must not leak the previous resolver. Settle the stale
+    // entry first so the map always has exactly one waiter per id.
+    if (pending.has(req.promptId)) {
+      resolve(req.promptId, { decision: "cancelled" })
+    }
+    const identity: WebUserInputPendingIdentity = {
+      promptId: req.promptId,
+      ...(req.sessionId !== undefined ? { sessionId: req.sessionId } : {}),
+      ...(req.turnId !== undefined ? { turnId: req.turnId } : {}),
+    }
+    const entry: Pending = {
+      settle: (o) => {
+        safeCapture(resolvedObservation(req.promptId, o))
+        res(o)
+      },
+      identity,
+      ...(req.signal !== undefined ? { signal: req.signal } : {}),
+    }
+    // Park BEFORE attaching abort so an abort that fires while we attach
+    // still finds the waiter. WHATWG does not invoke `abort` listeners
+    // added to an already-aborted signal — re-check after attach.
+    pending.set(req.promptId, entry)
+    bindAbort(req.promptId, entry)
+  }
+
   const port: WebUserInputRequester = (req) => {
     // Surface the prompt to the browser FIRST so a connected panel renders the
     // answer affordance before we park the resolver.
@@ -173,27 +210,7 @@ export const createWebUserInputPort = (deps: WebUserInputPortDeps): WebUserInput
       return Promise.resolve(cancelled)
     }
     return new Promise<UserInputOutcome>((res) => {
-      const identity: WebUserInputPendingIdentity = {
-        promptId: req.promptId,
-        ...(req.sessionId !== undefined ? { sessionId: req.sessionId } : {}),
-        ...(req.turnId !== undefined ? { turnId: req.turnId } : {}),
-      }
-      const entry: Pending = {
-        settle: (o) => {
-          safeCapture(resolvedObservation(req.promptId, o))
-          res(o)
-        },
-        identity,
-        ...(req.signal !== undefined ? { signal: req.signal } : {}),
-      }
-      if (req.signal !== undefined) {
-        const onAbort = (): void => {
-          resolve(req.promptId, { decision: "cancelled" })
-        }
-        entry.abortListener = onAbort
-        req.signal.addEventListener("abort", onAbort, { once: true })
-      }
-      pending.set(req.promptId, entry)
+      parkPending(req, res)
     })
   }
 

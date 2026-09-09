@@ -165,6 +165,8 @@ export const runBrowserFlow = async (opts: RunBrowserFlowOptions): Promise<Brows
       }
       abortListener = () => reject(new BrowserFlowError("user_cancel", "login aborted by caller"))
       sig.addEventListener("abort", abortListener, { once: true })
+      // WHATWG does not fire `abort` for listeners added after abort.
+      if (sig.aborted) abortListener()
     })
     abortPromise.catch((_unhandled: unknown) => {
       /* see handle.received comment — unhandled-rejection suppressant only. */

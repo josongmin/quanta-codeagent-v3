@@ -62,6 +62,18 @@ describe("E-PROV-01 transport projection", () => {
     expect(p.reason).toBe("explicit-transport")
     noSecrets(p)
   })
+
+  test("projection effective matches the adapter selector for the same env", () => {
+    const env = { ANTHROPIC_API_KEY: "sk-secret-key", ANTHROPIC_BEDROCK_BASE_URL: "https://x" }
+    const selection = selectLlmTransport({ transport: undefined, env })
+    const p = projectLlmTransport({
+      transport: undefined,
+      env,
+      credentialProvider: "anthropic",
+    })
+    expect(p.effective).toEqual(selection)
+    expect(p.credentialProvider).not.toBe(p.effectiveId)
+  })
 })
 
 describe("E-PROV-01 status boot snapshot vs doctor current", () => {
@@ -83,7 +95,9 @@ describe("E-PROV-01 status boot snapshot vs doctor current", () => {
       nowMs: () => 0,
     })
     await cmd.run([], {
-      out: (s) => out.push(s),
+      out: (s: string) => {
+        out.push(s)
+      },
       err: () => {},
       cwd: "/tmp",
       prefsHome: "/tmp/r15-missing-prefs",

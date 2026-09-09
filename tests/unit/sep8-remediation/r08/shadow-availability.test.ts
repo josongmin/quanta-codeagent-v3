@@ -38,12 +38,15 @@ describe("P2-A-02 shadow probe uses canonical success-only cache", () => {
     const first = await checker.run(dir, "lint", undefined)
     expect(first).toEqual([])
     expect(probes).toBe(1)
+    const stillBlocked = await checker.run(dir, "lint", undefined)
+    expect(stillBlocked).toEqual([])
+    expect(probes).toBe(2)
     allow = true
-    // Second probe goes through the SAME `isAvailable` the shadow checker uses.
-    // Do not `checker.run` again here: allow=true would start a real
+    // Recovery probe goes through the SAME `isAvailable` the shadow checker uses.
+    // Do not `checker.run` with allow=true: that would start a real
     // typescript-language-server and the unit timeout is 5s.
     expect(await isAvailable("typescript-language-server")).toBe(true)
-    expect(probes).toBe(2)
+    expect(probes).toBe(3)
   })
 
   test("canonical cache dedups in-flight probes and evicts false", async () => {

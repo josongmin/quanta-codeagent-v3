@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import type { RepoRules } from "@/agent/repo-rules"
-import { resolveModePresetRepoRules } from "@/apps/agent/mode-presets/system"
+import {
+  resolveModePresetRepoRules,
+  resolveModePresetSystemPrompt,
+} from "@/apps/agent/mode-presets/system"
 
 describe("G-F13 repo-rules load warning", () => {
   test("success does not warn", async () => {
@@ -81,5 +86,36 @@ describe("G-F13 repo-rules load warning", () => {
     })
     expect(got).toBe(override)
     expect(seen).toEqual([])
+  })
+
+  test("failed load leaves the preset prompt intact and unused by the warning", async () => {
+    const secret = `ghp_${"A".repeat(36)}`
+    const seen: { cwd: string; cause: string }[] = []
+    const rules = await resolveModePresetRepoRules("interactive", undefined, "/work", {
+      load: async () => {
+        throw new Error(`EACCES ${secret}`)
+      },
+      warn: (info) => {
+        seen.push(info)
+      },
+    })
+    const prompt = resolveModePresetSystemPrompt("interactive", undefined, "/work")
+    expect(rules).toBeUndefined()
+    expect(prompt.length).toBeGreaterThan(0)
+    expect(prompt).not.toContain(secret)
+    expect(seen).toHaveLength(1)
+    expect(seen[0]?.cause).not.toContain("ghp_")
+  })
+
+  test("web repo-rules catch redacts the cause and warns once", () => {
+    const src = readFileSync(
+      join(process.cwd(), "src/apps/web-daemon/runtime-factory/agent-config-base.ts"),
+      "utf8",
+    )
+    expect(src).toContain("redactSecrets")
+    expect(src).toContain("envelope_jsonl")
+    expect(src).toContain("webRepoRulesLoadWarned")
+    expect(src).not.toMatch(/error:\s*errMessage\(e\)/)
+    expect(src).not.toMatch(/apps\/agent/)
   })
 })
