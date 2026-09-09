@@ -28,6 +28,8 @@ const source = (name: string): string =>
 const CAMPAIGN_MODULES = [
   "verification-campaign.ts",
   "box-load.ts",
+  "verification-admission.ts",
+  "verification-result.ts",
   "test-shard-lease.ts",
   "test-shard-lifecycle.ts",
   "gate-manifest.ts",

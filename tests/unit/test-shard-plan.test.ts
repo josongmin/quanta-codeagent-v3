@@ -69,10 +69,12 @@ describe("resource-classed chunk plan", () => {
     const mutilated = chunks.map((chunk, offset) =>
       offset === 0 ? { ...chunk, files: chunk.files.slice(1) } : chunk,
     )
-    expect(() => assertTestChunkPlan(files, mutilated)).toThrow("partition is not exact")
+    expect(() => assertTestChunkPlan(files, mutilated)).toThrow(
+      /partition is not exact|partition missing/,
+    )
   })
 
-  test("measured timings drive LPT balance instead of file counts", () => {
+  test("measured timings do not move files between membership buckets", () => {
     const files = Array.from({ length: 12 }, (_, index) => `tests/unit/file-${index}.test.ts`)
     const slow = "tests/unit/file-0.test.ts"
     const timings = new Map(files.map((file) => [file, file === slow ? 60_000 : 1_000]))
@@ -82,12 +84,11 @@ describe("resource-classed chunk plan", () => {
       predictMs: (file) => timings.get(file),
     })
     expect(() => assertTestChunkPlan(files, chunks)).not.toThrow()
-    // The slow file dominates one chunk; the peers split the rest instead of
-    // one chunk carrying the slow file plus a fourth of everything else.
-    const slowChunk = chunks.find(({ files: chunkFiles }) => chunkFiles.includes(slow))
-    expect(slowChunk).toBeDefined()
-    expect(slowChunk?.files).toEqual([slow])
-    // Deterministic: identical inputs replan identically (stable cache identity).
+    const cold = planTestChunks(files, {
+      targetChunkCount: 4,
+      classify: () => "pure",
+    })
+    expect(cold.map((chunk) => [...chunk.files])).toEqual(chunks.map((chunk) => [...chunk.files]))
     expect(
       planTestChunks(files, {
         targetChunkCount: 4,
@@ -97,13 +98,25 @@ describe("resource-classed chunk plan", () => {
     ).toEqual(chunks)
   })
 
-  test("a cold timing store degrades to count balancing, never a crash", () => {
+  test("a cold timing store still partitions exactly", () => {
     const files = Array.from({ length: 100 }, (_, index) => `tests/unit/f-${index}.test.ts`)
     const chunks = planTestChunks(files, { targetChunkCount: 24, classify: () => "pure" })
     expect(() => assertTestChunkPlan(files, chunks)).not.toThrow()
-    expect(chunks.length).toBe(24)
-    const sizes = chunks.map(({ files: chunkFiles }) => chunkFiles.length)
-    expect(Math.max(...sizes) - Math.min(...sizes)).toBeLessThanOrEqual(1)
+    expect(chunks.length).toBeGreaterThan(0)
+    expect(chunks.every((chunk) => chunk.files.length > 0)).toBe(true)
+  })
+
+  test("count-matched missing plus duplicate is not an exact partition", () => {
+    const files = ["a.test.ts", "b.test.ts"]
+    const chunks = [
+      {
+        index: 1,
+        files: ["a.test.ts", "a.test.ts"],
+        resourceClass: "pure" as const,
+        predictedMs: 1,
+      },
+    ]
+    expect(() => assertTestChunkPlan(files, chunks)).toThrow("partition is not exact")
   })
 
   test("classifier names the owned resource; path fallback stays serialized", () => {

@@ -91,6 +91,19 @@ describe("waiting for a box that is not oversubscribed", () => {
     expect(line).toContain("may be contention, not code")
   })
 
+  test("a nested wait cannot mint a fresh budget", async () => {
+    const { now, sleep } = fakeClock()
+    const wait = await waitForQuietBox({
+      budgetMs: 180_000,
+      admission: { deadlineMs: 0, now },
+      now,
+      sleep,
+      sample: () => 3,
+    })
+    expect(wait.settled).toBe(false)
+    expect(wait.waitedMs).toBe(0)
+  })
+
   test("the threshold is the definition of oversubscribed, not a tuned number", async () => {
     const { now, sleep } = fakeClock()
     // Exactly one runnable thread per CPU is subscribed, not over: it must not

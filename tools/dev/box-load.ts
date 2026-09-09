@@ -33,6 +33,8 @@
 
 import { cpus, loadavg } from "node:os"
 
+import { type AdmissionBudget, remainingBudgetMs } from "./verification-admission"
+
 /** Runnable work per CPU over the last minute. 1.0 = exactly subscribed. */
 export const loadPerCore = (): number => {
   const cores = cpus().length
@@ -54,6 +56,8 @@ export interface QuietBoxOptions {
   readonly maxPerCore?: number
   readonly budgetMs: number
   readonly pollMs?: number
+  /** Campaign-wide remaining wait; nested calls must not mint a new budget. */
+  readonly admission?: AdmissionBudget
   /** Injected for tests. */
   readonly now?: () => number
   readonly sleep?: (ms: number) => Promise<void>
@@ -74,12 +78,18 @@ export const waitForQuietBox = async (options: QuietBoxOptions): Promise<QuietBo
   const now = options.now ?? (() => Date.now())
   const sleep = options.sleep ?? ((ms: number) => Bun.sleep(ms))
   const sample = options.sample ?? loadPerCore
+  const remaining =
+    options.admission === undefined ? options.budgetMs : remainingBudgetMs(options.admission)
+  const budgetMs = Math.min(options.budgetMs, remaining)
 
   const started = now()
   const startPerCore = sample()
   let current = startPerCore
+  if (budgetMs <= 0) {
+    return { startPerCore, endPerCore: current, waitedMs: 0, settled: false }
+  }
   while (current > maxPerCore) {
-    if (now() - started >= options.budgetMs) {
+    if (now() - started >= budgetMs) {
       return { startPerCore, endPerCore: current, waitedMs: now() - started, settled: false }
     }
     await sleep(pollMs)

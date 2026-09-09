@@ -36,6 +36,7 @@ import { fileURLToPath } from "node:url"
 import { describeQuietBoxWait, loadPerCore, quietBoxBudgetMs, waitForQuietBox } from "./box-load"
 import { missingExternalTools } from "./external-toolchain"
 import { GATES, type Gate, type GateStage, gatesForStage } from "./gate-manifest"
+import { admissionFromEnv } from "./verification-admission"
 import {
   cleanStatusSha256,
   mintExactVerificationReceipt,
@@ -477,6 +478,7 @@ for (const gate of planned) {
     // host can stop is a rail that cannot be used on a working machine.
     const wait = await waitForQuietBox({
       budgetMs: quietBoxBudgetMs(process.env, QUIET_BOX_BUDGET_MS),
+      admission: admissionFromEnv(process.env),
     })
     printOut(`  [${gate.id}] ${describeQuietBoxWait(wait)}`)
     if (!wait.settled) hotGates.set(gate.id, wait.endPerCore)

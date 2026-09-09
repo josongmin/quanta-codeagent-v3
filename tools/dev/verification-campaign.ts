@@ -13,6 +13,7 @@ import {
   VERIFICATION_LEASE_TOKEN_ENV,
 } from "./test-shard-lease"
 import { ShardProcessRegistry, terminationExitCode } from "./test-shard-lifecycle"
+import { ADMISSION_DEADLINE_ENV } from "./verification-admission"
 import {
   buildCampaignReceipt,
   type CampaignOutcome,
@@ -273,8 +274,11 @@ writeOwnerSidecar()
  * later. It never refuses — a rail that unrelated load can stop is a rail
  * nobody can use on a working machine.
  */
+const campaignQuietBudgetMs = quietBoxBudgetMs(process.env, CAMPAIGN_QUIET_BOX_BUDGET_MS)
+const admissionDeadlineMs = Date.now() + campaignQuietBudgetMs
 const startWait = await waitForQuietBox({
-  budgetMs: quietBoxBudgetMs(process.env, CAMPAIGN_QUIET_BOX_BUDGET_MS),
+  budgetMs: campaignQuietBudgetMs,
+  admission: { deadlineMs: admissionDeadlineMs, now: () => Date.now() },
 })
 process.stdout.write(`[verification] ${describeQuietBoxWait(startWait)}\n`)
 
@@ -287,6 +291,7 @@ try {
       ...process.env,
       [VERIFICATION_LEASE_TOKEN_ENV]: randomBytes(32).toString("hex"),
       [VERIFICATION_LEASE_OWNER_PID_ENV]: String(process.pid),
+      [ADMISSION_DEADLINE_ENV]: String(admissionDeadlineMs),
     },
     stdoutFd: 1,
     stderrFd: 2,

@@ -1,5 +1,7 @@
 import { readFileSync } from "node:fs"
 
+import { bucketForFile, DEFAULT_MEMBERSHIP } from "./test-shard-membership"
+
 export interface MemoryBudget {
   readonly totalBytes: number
   readonly availableBytes: number
@@ -254,25 +256,7 @@ interface WeightedFile {
   readonly measured: boolean
 }
 
-/** Longest-processing-time-first into `binCount` bins; deterministic ties. */
-const lptBins = (files: readonly WeightedFile[], binCount: number): WeightedFile[][] => {
-  const bins = Array.from({ length: binCount }, () => [] as WeightedFile[])
-  const sums = new Array<number>(binCount).fill(0)
-  const ordered = [...files].sort(
-    (left, right) => right.weightMs - left.weightMs || left.file.localeCompare(right.file),
-  )
-  for (const entry of ordered) {
-    let target = 0
-    for (let bin = 1; bin < binCount; bin += 1) {
-      const currentSum = sums[bin] ?? 0
-      const targetSum = sums[target] ?? 0
-      if (currentSum < targetSum) target = bin
-    }
-    bins[target]?.push(entry)
-    sums[target] = (sums[target] ?? 0) + entry.weightMs
-  }
-  return bins.filter((bin) => bin.length > 0)
-}
+/** Longest-processing-time-first is launch order only; membership is hashed. */
 
 /**
  * Partition the manifest into resource-classed, timing-balanced chunks.
@@ -316,23 +300,38 @@ interface UnindexedChunk {
   readonly predictedMs: number
 }
 
-/** Per-class LPT bins; count follows the class's time share, bounded by the
- *  checkpoint size cap. */
+/** Per-class fixed membership buckets. Timing still labels launch order, not
+ *  which files share a chunk. */
 const chunkOneGroup = (
   resourceClass: TestResourceClass,
   group: readonly WeightedFile[],
-  totalWeight: number,
-  targetChunkCount: number,
+  _totalWeight: number,
+  _targetChunkCount: number,
 ): UnindexedChunk[] => {
-  const groupWeight = group.reduce((sum, entry) => sum + entry.weightMs, 0)
-  const proportional = Math.round((groupWeight / totalWeight) * targetChunkCount)
-  const checkpointFloor = Math.ceil(group.length / MAX_CHUNK_FILES)
-  const binCount = Math.max(1, checkpointFloor, Math.min(group.length, proportional))
-  return lptBins(group, binCount).map((bin) => ({
-    files: bin.map(({ file }) => file).sort(),
-    resourceClass,
-    predictedMs: Math.round(bin.reduce((sum, entry) => sum + entry.weightMs, 0)),
-  }))
+  const bins = new Map<number, WeightedFile[]>()
+  for (const entry of group) {
+    const { bucket } = bucketForFile(entry.file, resourceClass, DEFAULT_MEMBERSHIP)
+    const bin = bins.get(bucket)
+    if (bin === undefined) bins.set(bucket, [entry])
+    else bin.push(entry)
+  }
+  return [...bins.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([, bin]) => {
+      if (bin.length > MAX_CHUNK_FILES) {
+        throw new Error(
+          `[test:shards] membership bucket ${resourceClass} exceeds ${MAX_CHUNK_FILES} files`,
+        )
+      }
+      const ordered = [...bin].sort(
+        (left, right) => right.weightMs - left.weightMs || left.file.localeCompare(right.file),
+      )
+      return {
+        files: [...bin].map(({ file }) => file).sort(),
+        resourceClass,
+        predictedMs: Math.round(ordered.reduce((sum, entry) => sum + entry.weightMs, 0)),
+      }
+    })
 }
 
 export const planTestChunks = (

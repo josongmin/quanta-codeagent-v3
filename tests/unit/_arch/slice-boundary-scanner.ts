@@ -8,7 +8,10 @@ import { describe, test } from "bun:test"
 import { readdirSync, readFileSync, type Stats, statSync } from "node:fs"
 import { join, relative } from "node:path"
 import ts from "typescript"
+import { createSourceSnapshot } from "../../../tools/dev/source-snapshot"
 import { assertScanPopulation } from "../_shared/scan-population"
+
+const PROCESS_SOURCE_SNAPSHOT = createSourceSnapshot("process-local")
 
 const REPO_ROOT = join(import.meta.dir, "../../..")
 
@@ -229,7 +232,7 @@ export const readWalkedFiles = (
   for (const file of files) {
     let src: string
     try {
-      src = readFileSync(file, "utf8")
+      src = PROCESS_SOURCE_SNAPSHOT.read(file, () => readFileSync(file, "utf8")).text
     } catch (err) {
       if (skippable && isEnoent(err)) {
         vanished.push(file)

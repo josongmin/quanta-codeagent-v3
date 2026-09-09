@@ -130,6 +130,7 @@ describe("test:ci admission gate", () => {
     expect(packageJson.scripts?.["verify:prepush"]).toContain("gate.ts prepush")
     expect(packageJson.scripts?.["verify:prepush"]).not.toContain("verify:prepush")
     expect(packageJson.scripts?.["verify:full"]).toContain("--keep-going")
+    expect(packageJson.scripts?.["verify:nightly"]).toContain("QUANTA_TEST_CACHE=off")
     expect(packageJson.scripts?.["test:ci"]).not.toContain("verify:")
     // The one authoritative execution the receipt-consuming gates derive from.
     const full = packageJson.scripts?.["test:full:ci"] ?? ""
@@ -170,11 +171,13 @@ describe("test:ci admission gate", () => {
     expect(optionsSource).toContain("--cache=")
     expect(planSource).toContain("chooseShardConcurrency")
     expect(planSource).toContain("TWO_WORKER_MIN_AVAILABLE_BYTES")
-    // Class-aware chunk planning: the classifier, the conservative overlap
-    // matrix, and the LPT bin placement must all remain live exports.
+    // Class-aware chunk planning: the classifier, overlap matrix, and hashed
+    // membership must all remain live. LPT no longer chooses bucket membership.
     expect(planSource).toContain("classifyTestResource")
     expect(planSource).toContain("VALIDATED_NONPURE_OVERLAPS")
-    expect(planSource).toContain("lptBins")
+    expect(planSource).toContain("bucketForFile")
+    expect(planSource).toContain("DEFAULT_MEMBERSHIP")
+    expect(planSource).not.toContain("const lptBins")
   })
 
   test("the full-suite worker writes natively instead of relaying output through JS", () => {

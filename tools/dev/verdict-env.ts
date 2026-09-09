@@ -32,6 +32,8 @@ export const isVerdictRelevantEnvKey = (key: string): boolean => {
   // The lease token is minted per campaign; keying it would make every receipt
   // unreusable by construction.
   if (key.startsWith("QUANTA_VERIFICATION_LEASE_")) return false
+  // Campaign wait remaining is a timestamp, not a verdict input.
+  if (key === "QUANTA_ADMISSION_DEADLINE_MS") return false
   return VERDICT_RELEVANT_EXACT.has(key) || key.startsWith("BUN_") || key.startsWith("QUANTA_")
 }
 
