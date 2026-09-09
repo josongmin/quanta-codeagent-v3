@@ -1,7 +1,7 @@
 # SEP9-TV — 테스트 검증 비용 최적화 실행 티켓
 
 - 감사일: 2026-09-09 / 티켓 작성 완료일: 2026-09-10 (KST)
-- 상태: IMPLEMENTING — 구현 1/17 (TV-00 FOCUSED_VERIFIED). 이 패킷 작성 완료와 구현·검증 완료를 구분한다.
+- 상태: IMPLEMENTING — 구현 1/17 통합, Wave 1 sibling FOCUSED_VERIFIED.
 - 고정 증거: [evidence/baseline-94073ffa6415.json](../evidence/baseline-94073ffa6415.json), [evidence/known-failures.md](../evidence/known-failures.md)
 - 현재 full digest: `e58849bda57f731d18f2d2ec189038f2f26b88feb39b605fb95cc9b4278bcf5e` (3907 files; audit 3906 + TV-00 discovery test)
 - 감사 기준 HEAD: `94073ffa64155941bd9c6a97e0c7121b7f09d526`
@@ -54,15 +54,15 @@
 | ID | 우선순위 | 소유 경계 | 선행 | 상태 |
 |---|---|---|---|---|
 | [TV-00](TV-00-baseline-and-inventory.md) | P0 | 기준 증거·미해결 실패 기록 | 없음 | FOCUSED_VERIFIED |
-| [TV-01](TV-01-tier-runner-and-local-hook.md) | P0 | tier 실행·명령·fail-fast | 00 | PLANNED |
-| [TV-02](TV-02-test-policy-and-enrollment.md) | P0 | test policy·전체 등록 | 00 | PLANNED |
+| [TV-01](TV-01-tier-runner-and-local-hook.md) | P0 | tier 실행·명령·fail-fast | 00 | IMPLEMENTING |
+| [TV-02](TV-02-test-policy-and-enrollment.md) | P0 | test policy·전체 등록 | 00 | IMPLEMENTING |
 | [TV-03](TV-03-affected-selection.md) | P1 | 변경 영향 선택·fallback | 01,02 | PLANNED |
-| [TV-04](TV-04-cache-policy-and-cold-mode.md) | P0 | 캐시 정확성·JUnit·cache-off | 00 | PLANNED |
+| [TV-04](TV-04-cache-policy-and-cold-mode.md) | P0 | 캐시 정확성·JUnit·cache-off | 00 | IMPLEMENTING |
 | [TV-05](TV-05-declared-input-cache.md) | P1 | 제한된 입력 범위 캐시 | 02,04 | PLANNED |
 | [TV-06](TV-06-stable-shard-membership.md) | P1 | 안정적 청크·완전성 | 02,04 | PLANNED |
 | [TV-07](TV-07-performance-observability.md) | P1 | 타이밍·비용 관측 | 00,04 | PLANNED |
 | [TV-08](TV-08-admission-and-resource-isolation.md) | P0/P2 | 단일 대기 예산 / 자원 lease | 01,02,04 | PLANNED |
-| [TV-09](TV-09-heavy-test-decomposition.md) | P1 | fuzz·PTY·toolchain·stress 분할 | 02; 활성화는 03,13 | PLANNED |
+| [TV-09](TV-09-heavy-test-decomposition.md) | P1 | fuzz·PTY·toolchain·stress 분할 | 02; 활성화는 03,13 | IMPLEMENTING |
 | [TV-10](TV-10-static-scan-and-setup-reuse.md) | P1 | 중복 scan·preload·setup | 02 | PLANNED |
 | [TV-11](TV-11-ci-jobs-and-required-check.md) | P0 | CI job DAG·집계 context | 01 | PLANNED |
 | [TV-12](TV-12-ci-shard-matrix.md) | P1 | 분산 청크·artifact 집계 | 04,06,11 | PLANNED |

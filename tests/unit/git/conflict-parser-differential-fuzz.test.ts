@@ -33,6 +33,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { type ConflictBlock, parseConflicts } from "@/git"
+import { BASE_SEED, GIT_CASES } from "./conflict-parser-fuzz-cases"
 
 const assertSequentialBlocks = (
   blocks: readonly ConflictBlock[],
@@ -59,9 +60,6 @@ const assertSequentialBlocks = (
 // Seeded PRNG — SplitMix32 (deterministic, no global state)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const BASE_SEED = 0x9e3779b9
-
-/** SplitMix32: tiny, well-distributed, fully deterministic from a 32-bit seed. */
 class Rng {
   private state: number
   constructor(seed: number) {
@@ -261,7 +259,6 @@ describe("conflict-parser differential fuzz — PART 1: real git ground truth", 
     test.skip("git unavailable — skipping real-git differential", () => {})
   }
 
-  const GIT_CASES = 60
   let produced = 0
   let twoWay = 0
   let threeWay = 0
