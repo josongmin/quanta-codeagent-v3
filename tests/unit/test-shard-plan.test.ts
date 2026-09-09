@@ -548,7 +548,8 @@ describe("same-INPUTS successful shard cache", () => {
         NO_DOTENV,
       ),
       junit: false,
-      filesRunConcurrently: false,
+      intraParallel: 1,
+      executionPolicySha256: "f".repeat(64),
     }
     const nowMs = 1_800_000_000_000
     writeSuccessfulTestShardReceiptAtomic({
@@ -580,14 +581,11 @@ describe("same-INPUTS successful shard cache", () => {
         reason: "input-mismatch",
       })
     }
-    // A serial green does NOT answer for a concurrent plan: that was the
-    // cache's blind spot — a loaded box banks serial receipts, an idle box
-    // plans `pure` chunks concurrently and HITS them, so the interleaved
-    // schedule is never actually exercised.
+    // A width-1 green does NOT answer for a width-8 plan.
     expect(
       loadSuccessfulTestShardReceipt({
         path: receiptPath,
-        expected: { ...identity, filesRunConcurrently: true },
+        expected: { ...identity, intraParallel: 8 },
         nowMs,
       }),
     ).toEqual({ kind: "miss", reason: "input-mismatch" })
@@ -636,7 +634,8 @@ describe("same-INPUTS successful shard cache", () => {
       toolchainSha256: "d".repeat(64),
       testEnvSha256: "e".repeat(64),
       junit: false,
-      filesRunConcurrently: false,
+      intraParallel: 1,
+      executionPolicySha256: "f".repeat(64),
     }
     writeFileSync(receiptPath, "not-json")
     expect(loadSuccessfulTestShardReceipt({ path: receiptPath, expected: identity })).toEqual({

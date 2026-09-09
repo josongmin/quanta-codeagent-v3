@@ -42,7 +42,8 @@ const identity = (over: Partial<TestShardCacheIdentity> = {}): TestShardCacheIde
   testEnvSha256: "d".repeat(64),
   treeSha256: "e".repeat(64),
   junit: false,
-  filesRunConcurrently: false,
+  intraParallel: 1,
+  executionPolicySha256: "f".repeat(64),
   ...over,
 })
 
@@ -112,39 +113,55 @@ describe("shard cache identity — what may and may not invalidate a receipt", (
       { toolchainSha256: "9".repeat(64) },
       { testEnvSha256: "9".repeat(64) },
       { junit: true },
+      { intraParallel: 8 },
+      { executionPolicySha256: "9".repeat(64) },
     ]
     for (const over of fields) {
       expect(roundTrip(identity(), identity(over)).kind).toBe("miss")
     }
   })
 
-  test("a concurrent green answers for a serial plan, but never the reverse", () => {
-    // IMPLICATION, not equality. Running a chunk's files concurrently is the
-    // strictly harder condition — it is the one that can interleave shared
-    // module state — so that green also covers a serial plan. A serial green
-    // covers only serial: without this the cache had a blind spot where a
-    // loaded box banked serial receipts and an idle box, planning `pure`
-    // chunks concurrently, HIT them and never exercised the interleaving.
-    expect(
-      roundTrip(identity({ filesRunConcurrently: true }), identity({ filesRunConcurrently: true }))
-        .kind,
-    ).toBe("hit")
-    expect(
-      roundTrip(identity({ filesRunConcurrently: true }), identity({ filesRunConcurrently: false }))
-        .kind,
-    ).toBe("hit")
-    expect(
-      roundTrip(
-        identity({ filesRunConcurrently: false }),
-        identity({ filesRunConcurrently: false }),
-      ).kind,
-    ).toBe("hit")
-    const blindSpot = roundTrip(
-      identity({ filesRunConcurrently: false }),
-      identity({ filesRunConcurrently: true }),
+  test("intraParallel is exact — concurrent green does not answer for serial", () => {
+    expect(roundTrip(identity({ intraParallel: 8 }), identity({ intraParallel: 8 })).kind).toBe(
+      "hit",
     )
-    expect(blindSpot.kind).toBe("miss")
-    if (blindSpot.kind === "miss") expect(blindSpot.reason).toBe("input-mismatch")
+    expect(roundTrip(identity({ intraParallel: 1 }), identity({ intraParallel: 1 })).kind).toBe(
+      "hit",
+    )
+    expect(roundTrip(identity({ intraParallel: 8 }), identity({ intraParallel: 1 })).kind).toBe(
+      "miss",
+    )
+    expect(roundTrip(identity({ intraParallel: 1 }), identity({ intraParallel: 8 })).kind).toBe(
+      "miss",
+    )
+    expect(roundTrip(identity({ intraParallel: 2 }), identity({ intraParallel: 8 })).kind).toBe(
+      "miss",
+    )
+  })
+
+  test("v1 receipts are an explicit schema miss", () => {
+    const dir = mkdtempSync(join(tmpdir(), "shard-cache-v1-"))
+    try {
+      const path = join(dir, "chunk.json")
+      writeFileSync(
+        path,
+        `${JSON.stringify({
+          schema: "quanta.test-shard-success.v1",
+          ...identity(),
+          filesRunConcurrently: true,
+          createdAtMs: 1,
+          expiresAtMs: 1 + 24 * 60 * 60_000,
+          executedFiles: 2,
+          scanReachRecords: [],
+          receiptSha256: "a".repeat(64),
+        })}\n`,
+      )
+      expect(loadSuccessfulTestShardReceipt({ path, expected: identity(), nowMs: 2 }).kind).toBe(
+        "miss",
+      )
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   test("shardIndex still does NOT invalidate — a neighbour chunk may renumber it", () => {

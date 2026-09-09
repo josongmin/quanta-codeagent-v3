@@ -69,11 +69,12 @@ if (wants("--list")) {
 
 const stageArg = argv.find((a) => !a.startsWith("-"))
 if (stageArg !== "precommit" && stageArg !== "prepush") {
-  printErr("usage: gate.ts <precommit|prepush> [--bail] [--quiet] | --list")
+  printErr("usage: gate.ts <precommit|prepush> [--bail|--keep-going] [--quiet] | --list")
   process.exit(2)
 }
 const stage: GateStage = stageArg
-const bail = wants("--bail")
+const keepGoing = wants("--keep-going")
+const bail = keepGoing ? false : wants("--bail") || true
 const quiet = wants("--quiet")
 
 /** How much of a captured failure to replay. Enough for a stack + the gate

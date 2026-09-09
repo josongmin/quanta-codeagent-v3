@@ -13,11 +13,9 @@ import {
 } from "node:fs"
 import { availableParallelism, freemem, homedir, loadavg, tmpdir, totalmem } from "node:os"
 import { dirname, join, relative, resolve } from "node:path"
-import { sampleTreeRssBytes } from "./shard-rss"
 import {
   discoverInventory,
   discoverSuiteFiles,
-  isSuiteName,
   SUITE_FLOORS,
   type SuiteName,
 } from "./test-shard-discovery"
@@ -35,6 +33,7 @@ import {
   ShardProcessRegistry,
   terminateCampaignOnSignal,
 } from "./test-shard-lifecycle"
+import { parseShardRunnerOptions, type RunnerOptions } from "./test-shard-options"
 import {
   chooseIntraWorkerParallelism,
   chooseShardConcurrency,
@@ -61,6 +60,7 @@ import {
   writeSuccessfulTestShardReceiptAtomic,
 } from "./test-shard-receipt"
 import { harvestChunkTimings, loadTestTimings, mergeTestTimings } from "./test-shard-timings"
+import { executionPolicyDigest } from "./verification-execution-policy"
 import { sharedVerificationCacheRoot } from "./verification-receipt"
 
 /**
@@ -78,7 +78,7 @@ const SCAN_REACH_RECEIPT = join(REPO_ROOT, ".cache", "scan-reach-receipt.json")
 // Shard receipts and timings live in the git-common-dir cache: keyed by exact
 // HEAD + file content + toolchain, a green from any worktree serves them all.
 const SHARED_CACHE_ROOT = sharedVerificationCacheRoot(REPO_ROOT)
-const SHARD_CACHE_ROOT = join(SHARED_CACHE_ROOT, "test-shards", "v2")
+const SHARD_CACHE_ROOT = join(SHARED_CACHE_ROOT, "test-shards", "v3")
 const TIMING_STORE = join(SHARED_CACHE_ROOT, "test-timings-v1.json")
 // Extreme-load regime: the same load/(2*cpus) pressure formula that saturates
 // the per-test timeout cap. At or beyond it, starting a fresh worker mostly
@@ -98,12 +98,6 @@ const SHARD_INACTIVITY_TIMEOUT_MS = 12 * 60_000
 const WATCHDOG_TAIL_LINES = 20
 
 const SHARD_WATCHDOG_POLL_MS = 1_000
-
-interface RunnerOptions {
-  readonly suite: SuiteName
-  readonly junitOut?: string
-  readonly discoverOnly: boolean
-}
 
 interface GitSnapshot {
   readonly head: string
@@ -181,49 +175,7 @@ const writeScanReachReceipt = (input: {
   })
 }
 
-const suiteOption = (arg: string): SuiteName | undefined => {
-  if (!arg.startsWith("--suite=")) return undefined
-  const candidate = arg.slice("--suite=".length)
-  if (!isSuiteName(candidate)) throw new Error(`unknown shard suite: ${candidate}`)
-  return candidate
-}
-
-const junitOption = (arg: string): string | undefined => {
-  if (!arg.startsWith("--junit-out=")) return undefined
-  const candidate = arg.slice("--junit-out=".length)
-  if (!candidate.startsWith(".cache/") || candidate.includes("..")) {
-    throw new Error("--junit-out must be a safe .cache/ path")
-  }
-  return candidate
-}
-
-const parseOptions = (args: readonly string[]): RunnerOptions => {
-  let suite: SuiteName = "full"
-  let junitOut: string | undefined
-  let discoverOnly = false
-  for (const arg of args) {
-    if (arg === "--parallel=1") continue
-    if (arg === "--discover-only") {
-      discoverOnly = true
-      continue
-    }
-    const selectedSuite = suiteOption(arg)
-    if (selectedSuite !== undefined) {
-      suite = selectedSuite
-      continue
-    }
-    const selectedJunit = junitOption(arg)
-    if (selectedJunit !== undefined) {
-      junitOut = selectedJunit
-      continue
-    }
-    throw new Error(`unknown shard runner argument: ${arg}`)
-  }
-  if (junitOut !== undefined && suite !== "unit" && suite !== "full") {
-    throw new Error("JUnit shard receipts are reserved for --suite=unit or --suite=full")
-  }
-  return junitOut === undefined ? { suite, discoverOnly } : { suite, junitOut, discoverOnly }
-}
+const parseOptions = parseShardRunnerOptions
 
 const junitShardPath = (junitOut: string, index: number): string => `${junitOut}.shard-${index}.xml`
 
@@ -574,17 +526,15 @@ const cacheSuccessfulShard = (
   if (result.executedFiles === undefined) {
     throw new Error(`[test:shards] chunk ${cached.chunk.index} has no executed-file receipt`)
   }
-  const junitXml =
-    opts.junitOut === undefined
-      ? undefined
-      : readFileSync(junitShardPath(opts.junitOut, cached.chunk.index), "utf8")
-  if (junitXml !== undefined) junitBody(junitXml, cached.chunk.index)
+  const junitXml = readFileSync(result.junitPath, "utf8")
+  junitBody(junitXml, cached.chunk.index)
+  if (opts.cacheMode === "off") return
   writeSuccessfulTestShardReceiptAtomic({
     path: cached.cachePath,
-    identity: cached.identity,
+    identity: { ...cached.identity, junit: true },
     executedFiles: result.executedFiles,
     scanReachRecords: mergeScanReachSinks([result.scanReachSink]),
-    ...(junitXml === undefined ? {} : { junitXml }),
+    junitXml,
   })
 }
 
@@ -675,6 +625,13 @@ const executeChunks = async (input: {
   const scanReachSinks = new Map<number, string>()
   const misses: CachedChunk[] = []
   for (const cached of input.chunks) {
+    if (input.opts.cacheMode === "off") {
+      process.stdout.write(
+        `[test:shards] CACHE OFF chunk=${cached.chunk.index}/${totalChunks} reason=cache-off\n`,
+      )
+      misses.push(cached)
+      continue
+    }
     const lookup = loadSuccessfulTestShardReceipt({
       path: cached.cachePath,
       expected: cached.identity,
@@ -895,8 +852,21 @@ const main = async (): Promise<void> => {
           shardFilesSha256: filesSha256,
           toolchainSha256,
           testEnvSha256: envSha256,
-          junit: opts.junitOut !== undefined,
-          filesRunConcurrently: intraParallel > 1,
+          junit: true,
+          intraParallel,
+          executionPolicySha256: executionPolicyDigest({
+            version: "v2",
+            runnerIdentity: `bun-${Bun.version}-${process.platform}-${process.arch}`,
+            intraParallel,
+            timeoutPolicyDigest: new Bun.CryptoHasher("sha256")
+              .update(String(testTimeoutMs))
+              .digest("hex"),
+            isolationPolicyDigest: new Bun.CryptoHasher("sha256")
+              .update(chunk.resourceClass)
+              .digest("hex"),
+            environmentDigest: envSha256,
+            cacheMode: opts.cacheMode,
+          }),
         },
       }
     })

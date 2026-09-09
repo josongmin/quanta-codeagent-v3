@@ -29,6 +29,8 @@
  * exactly the stale copy it exists to prevent.
  */
 
+import type { VerificationTier } from "./verification-result"
+
 /** Which stage a gate belongs to. `precommit` must stay fast enough to run on
  *  every commit (static analysis only — no test suite). */
 export type GateStage = "precommit" | "prepush"
@@ -248,6 +250,16 @@ export const gatesForStage = (stage: GateStage): readonly Gate[] =>
     ? GATES.filter((g) => g.stage === "precommit")
     : // prepush is a SUPERSET: the static gates run first, then the suites.
       GATES
+
+const STATIC_TIERS: readonly VerificationTier[] = ["smoke", "prepush", "pr", "full", "nightly"]
+const PREPUSH_STATIC_TIERS: readonly VerificationTier[] = ["prepush", "pr", "full", "nightly"]
+const FULL_TIERS: readonly VerificationTier[] = ["pr", "full", "nightly"]
+
+export const tiersForGate = (gate: Gate): readonly VerificationTier[] => {
+  if (gate.id === "typecheck") return PREPUSH_STATIC_TIERS
+  if (gate.stage === "precommit") return STATIC_TIERS
+  return FULL_TIERS
+}
 
 /**
  * Workflow `run:` commands that are deliberately NOT gates: environment setup,

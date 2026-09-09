@@ -26,6 +26,9 @@ const mainSource = shardRunner.slice(
 const planSource = await Bun.file(
   join(import.meta.dir, "..", "..", "tools", "dev", "test-shard-plan.ts"),
 ).text()
+const optionsSource = await Bun.file(
+  join(import.meta.dir, "..", "..", "tools", "dev", "test-shard-options.ts"),
+).text()
 
 const usesNativeShardSpool = (source: string): boolean =>
   (source.match(/registry\.spawnWorker\s*\(/g) ?? []).length === 1 &&
@@ -118,11 +121,16 @@ describe("test:ci admission gate", () => {
     // different claims. It now delegates to the campaign-wrapped gate runner.
     expect(packageJson.scripts?.["test:ci"]).toBe("bun run prepush")
     expect(packageJson.scripts?.prepush).toBe(
-      "bun run tools/dev/verification-campaign.ts -- bun run tools/dev/gate.ts prepush --reuse-receipt",
+      "bun run tools/dev/verification-campaign.ts -- bun run tools/dev/gate.ts prepush --reuse-receipt --keep-going",
     )
     expect(packageJson.scripts?.["prepush:cold"]).toBe(
-      "bun run tools/dev/verification-campaign.ts -- bun run tools/dev/gate.ts prepush",
+      "QUANTA_TEST_CACHE=off bun run tools/dev/verification-campaign.ts -- bun run tools/dev/gate.ts prepush --keep-going",
     )
+    expect(packageJson.scripts?.["verify:smoke"]).toContain("smoke-battery.test.ts")
+    expect(packageJson.scripts?.["verify:prepush"]).toContain("gate.ts prepush")
+    expect(packageJson.scripts?.["verify:prepush"]).not.toContain("verify:prepush")
+    expect(packageJson.scripts?.["verify:full"]).toContain("--keep-going")
+    expect(packageJson.scripts?.["test:ci"]).not.toContain("verify:")
     // The one authoritative execution the receipt-consuming gates derive from.
     const full = packageJson.scripts?.["test:full:ci"] ?? ""
     expect(full).toContain(
@@ -135,7 +143,7 @@ describe("test:ci admission gate", () => {
     expect(shardRunner).toContain("const SHARD_INACTIVITY_TIMEOUT_MS = 12 * 60_000")
     expect(shardRunner).toContain("lastProgressAt = Date.now()")
     expect(shardRunner).toContain("idle=$" + "{idleMs}ms")
-    expect(shardRunner).toContain("expandTestFiles(")
+    expect(shardRunner).toContain("discoverSuiteFiles(")
     expect(shardRunner).toContain("planTestChunks(manifest")
     expect(shardRunner).toContain("loadTestTimings(TIMING_STORE)")
     expect(shardRunner).toContain("harvestTimings(cached.chunk, result)")
@@ -145,7 +153,9 @@ describe("test:ci admission gate", () => {
     expect(shardRunner).toContain("checkout changed during run")
     expect(shardRunner).toContain("checkout changed after chunk")
     expect(shardRunner).toContain("require a clean checkout")
-    expect(shardRunner).toContain("--junit-out")
+    expect(shardRunner).toContain("opts.junitOut")
+    expect(shardRunner).toContain("parseShardRunnerOptions")
+    expect(shardRunner).toContain("cacheMode")
     expect(shardRunner).toContain("QUANTA_SCAN_REACH_RECORD: scanReachSink")
     expect(shardRunner).toContain("HOME: workerHome")
     expect(shardRunner).toContain("QUANTA_HOME: quantaHome")
@@ -156,6 +166,8 @@ describe("test:ci admission gate", () => {
     // tests that intentionally mutate QUANTA_HOME.
     expect(shardRunner).not.toContain("QUANTA_BENCH_HOME: benchHome")
     expect(shardRunner).toContain("writeScanReachReceipt(")
+    expect(optionsSource).toContain("--junit-out=")
+    expect(optionsSource).toContain("--cache=")
     expect(planSource).toContain("chooseShardConcurrency")
     expect(planSource).toContain("TWO_WORKER_MIN_AVAILABLE_BYTES")
     // Class-aware chunk planning: the classifier, the conservative overlap

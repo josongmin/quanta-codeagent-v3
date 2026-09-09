@@ -23,20 +23,13 @@ export interface TestShardCacheIdentity {
   readonly toolchainSha256: string
   readonly testEnvSha256: string
   readonly junit: boolean
-  /**
-   * Did this chunk's files run CONCURRENTLY inside the worker?
-   *
-   * Without it the cache had a systematic blind spot: a loaded box plans
-   * serial, banks a green, and a later idle box plans `pure` chunks
-   * concurrently but HITS those serial receipts — so the concurrent schedule
-   * is never actually exercised, and a file that only breaks when interleaved
-   * with a peer is passed by a receipt that never interleaved it.
-   */
-  readonly filesRunConcurrently: boolean
+  /** Exact intra-worker file width. Concurrent green does not answer for serial. */
+  readonly intraParallel: number
+  readonly executionPolicySha256: string
 }
 
 export interface SuccessfulTestShardReceipt extends TestShardCacheIdentity {
-  readonly schema: "quanta.test-shard-success.v1"
+  readonly schema: "quanta.test-shard-success.v2"
   readonly createdAtMs: number
   readonly expiresAtMs: number
   readonly executedFiles: number
@@ -200,11 +193,8 @@ const sameIdentity = (
   receipt.toolchainSha256 === expected.toolchainSha256 &&
   receipt.testEnvSha256 === expected.testEnvSha256 &&
   receipt.junit === expected.junit &&
-  // IMPLICATION, not equality. Running files concurrently is the strictly
-  // harder condition — it is the one that can interleave shared module state —
-  // so a green earned that way also answers for a serial plan. A serial green
-  // answers only for a serial plan.
-  (receipt.filesRunConcurrently || !expected.filesRunConcurrently)
+  receipt.intraParallel === expected.intraParallel &&
+  receipt.executionPolicySha256 === expected.executionPolicySha256
 
 const isScanReachRecord = (value: unknown): value is ScanReachRecord => {
   if (typeof value !== "object" || value === null) return false
@@ -223,7 +213,7 @@ const parseSuccessfulShardReceipt = (value: unknown): SuccessfulTestShardReceipt
   if (typeof value !== "object" || value === null) return undefined
   const row = value as Record<string, unknown>
   if (
-    row.schema !== "quanta.test-shard-success.v1" ||
+    row.schema !== "quanta.test-shard-success.v2" ||
     !validSha256(row.treeSha256) ||
     typeof row.suite !== "string" ||
     !validSha256(row.manifestSha256) ||
@@ -235,7 +225,9 @@ const parseSuccessfulShardReceipt = (value: unknown): SuccessfulTestShardReceipt
     !validSha256(row.toolchainSha256) ||
     !validSha256(row.testEnvSha256) ||
     typeof row.junit !== "boolean" ||
-    typeof row.filesRunConcurrently !== "boolean" ||
+    !Number.isSafeInteger(row.intraParallel) ||
+    (row.intraParallel as number) < 1 ||
+    !validSha256(row.executionPolicySha256) ||
     !Number.isSafeInteger(row.createdAtMs) ||
     !Number.isSafeInteger(row.expiresAtMs) ||
     !Number.isSafeInteger(row.executedFiles) ||
@@ -312,7 +304,7 @@ export const writeSuccessfulTestShardReceiptAtomic = (input: {
   }
   const createdAtMs = input.nowMs ?? Date.now()
   const payload: Omit<SuccessfulTestShardReceipt, "receiptSha256"> = {
-    schema: "quanta.test-shard-success.v1",
+    schema: "quanta.test-shard-success.v2",
     ...input.identity,
     createdAtMs,
     expiresAtMs: createdAtMs + TEST_SHARD_CACHE_TTL_MS,
