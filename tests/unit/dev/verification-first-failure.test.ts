@@ -32,6 +32,7 @@ describe("first failure is immutable", () => {
 describe("nightly membership", () => {
   test("keeps the existing schedule inventory and cache-off", () => {
     expect(NIGHTLY_SCHEDULES.map((row) => row.file)).toEqual([
+      "verification-nightly.yml",
       "ci.yml",
       "agent-nightly-regression.yml",
       "grounding-live-gate.yml",

@@ -26,6 +26,7 @@
  *   bun run prepush
  *   bun run tools/dev/gate.ts precommit --quiet
  *   bun run tools/dev/gate.ts prepush --bail
+ *   bun run tools/dev/gate.ts pr --keep-going
  *   bun run tools/dev/gate.ts --list
  */
 
@@ -35,7 +36,7 @@ import { fileURLToPath } from "node:url"
 
 import { describeQuietBoxWait, loadPerCore, quietBoxBudgetMs, waitForQuietBox } from "./box-load"
 import { missingExternalTools } from "./external-toolchain"
-import { GATES, type Gate, type GateStage, gatesForStage } from "./gate-manifest"
+import { GATES, type Gate, gatesForStage, gatesForVerificationTier } from "./gate-manifest"
 import { admissionFromEnv } from "./verification-admission"
 import {
   cleanStatusSha256,
@@ -49,7 +50,12 @@ import {
   verificationContextForSnapshot,
   verificationManifestSha256,
 } from "./verification-receipt-probe"
-import { finalizeVerificationResult, type GateResult } from "./verification-result"
+import {
+  finalizeVerificationResult,
+  type GateResult,
+  type VerificationTier,
+} from "./verification-result"
+import { assertKnownTier } from "./verification-tier"
 
 const REPO_ROOT = join(dirname(dirname(dirname(fileURLToPath(import.meta.url)))))
 
@@ -70,11 +76,20 @@ if (wants("--list")) {
 }
 
 const stageArg = argv.find((a) => !a.startsWith("-"))
-if (stageArg !== "precommit" && stageArg !== "prepush") {
-  printErr("usage: gate.ts <precommit|prepush> [--bail|--keep-going] [--quiet] | --list")
-  process.exit(2)
+const USAGE =
+  "usage: gate.ts <precommit|smoke|prepush|pr|full|nightly> [--bail|--keep-going] [--quiet] | --list"
+let label: "precommit" | VerificationTier
+if (stageArg === "precommit") {
+  label = "precommit"
+} else {
+  try {
+    label = assertKnownTier(stageArg ?? "")
+  } catch {
+    printErr(USAGE)
+    process.exit(2)
+  }
 }
-const stage: GateStage = stageArg
+const writesExactReceipt = label === "prepush"
 const keepGoing = wants("--keep-going")
 const bail = keepGoing ? false : wants("--bail") || true
 const quiet = wants("--quiet")
@@ -282,7 +297,7 @@ const runGate = (gate: Gate): GateRun => {
  * asked for, so a manifest edit that empties it, or mis-stages every gate into
  * the other stage, is loud instead of reassuring.
  */
-const planned = gatesForStage(stage)
+const planned = label === "precommit" ? gatesForStage("precommit") : gatesForVerificationTier(label)
 const overallStarted = Bun.nanoseconds()
 const plannedManifestSha256 = verificationManifestSha256(planned)
 const ownedPrecommit = GATES.filter((g) => g.stage === "precommit").length
@@ -345,7 +360,7 @@ if (danglingConsumes.length > 0) {
 // wrapper launched this runner — so a contender that waited behind a green
 // same-HEAD campaign exits without executing a single gate.
 const exactReceiptPath = verificationReceiptPath(REPO_ROOT)
-if (stage === "prepush" && wants("--reuse-receipt")) {
+if (writesExactReceipt && wants("--reuse-receipt")) {
   try {
     const current = gitSnapshot()
     const validation = validateExactVerificationReceipt(
@@ -379,7 +394,7 @@ if (stage === "prepush" && wants("--reuse-receipt")) {
  * different state. It is not about to be mistaken for this run's result — the
  * validation above already rejects it — so it is not ours to delete.
  */
-if (stage === "prepush") {
+if (writesExactReceipt) {
   const supersedes = (): boolean => {
     try {
       return validateExactVerificationReceipt(
@@ -396,7 +411,7 @@ if (stage === "prepush") {
 }
 
 let frozenSnapshot: GitSnapshot | undefined
-if (stage === "prepush") {
+if (writesExactReceipt) {
   try {
     frozenSnapshot = gitSnapshot()
   } catch (error) {
@@ -473,7 +488,7 @@ for (const gate of planned) {
     poisoned.add(gate.id)
     continue
   }
-  if (!quiet) printOut(`\n──── ${stage}: ${gate.id} — ${gate.run}`)
+  if (!quiet) printOut(`\n──── ${label}: ${gate.id} — ${gate.run}`)
   if (gate.needsQuietBox !== undefined) {
     // Bounded, and it never refuses to run: a rail that unrelated load on the
     // host can stop is a rail that cannot be used on a working machine.
@@ -507,13 +522,13 @@ const gateResults: readonly GateResult[] = [
   ...notRun.map((gate) => ({ id: gate.id, outcome: "not-run" as const, elapsedMs: 0 })),
 ]
 const verification = finalizeVerificationResult({
-  tier: "prepush",
+  tier: label === "precommit" ? "prepush" : label,
   gates: gateResults,
 })
 
 let endingSnapshot: GitSnapshot | undefined
 let snapshotError: string | undefined
-if (stage === "prepush") {
+if (writesExactReceipt) {
   try {
     endingSnapshot = gitSnapshot()
   } catch (error) {
@@ -527,7 +542,7 @@ const snapshotStable =
   frozenSnapshot.status === endingSnapshot.status
 
 const failed = results.filter((r) => !r.ok)
-printOut(`\n──── ${stage} summary`)
+printOut(`\n──── ${label} summary`)
 for (const r of results) {
   const hd = r.ok && r.gate.hostDependent !== undefined ? "  [host-dependent]" : ""
   // A red on a saturated box is reported WITH the saturation. The last time it
@@ -548,7 +563,7 @@ if (
   failed.length === 0 &&
   skipped.length === 0 &&
   notRun.length === 0 &&
-  (stage !== "prepush" || snapshotStable)
+  (!writesExactReceipt || snapshotStable)
 ) {
   const marked = results.filter((r) => r.gate.hostDependent !== undefined)
   const note =
@@ -565,8 +580,8 @@ if (
       `  [capabilities] absent on this host, so anything gated on them was skipped: ${absent.join(", ")}`,
     )
   }
-  printOut(`${stage}: ok — ${results.length} of ${planned.length} gate(s) passed${note}`)
-  if (stage === "prepush") {
+  printOut(`${label}: ok — ${results.length} of ${planned.length} gate(s) passed${note}`)
+  if (writesExactReceipt) {
     if (endingSnapshot !== undefined) {
       const current = verificationContextForSnapshot(
         REPO_ROOT,
@@ -596,7 +611,7 @@ if (
   process.exit(verification.exitCode)
 }
 if (
-  stage === "prepush" &&
+  writesExactReceipt &&
   !snapshotStable &&
   failed.length === 0 &&
   skipped.length === 0 &&
@@ -628,7 +643,7 @@ if (
 // The denominator is what the STAGE asked for, not what happened to run. The
 // first fix changed only the "ok" line, so `--bail` still reported
 // "1 of 1 gate(s) FAILED" while seven never ran.
-printErr(`\n${stage}: ${failed.length} FAILED of ${planned.length} gate(s) in this stage:`)
+printErr(`\n${label}: ${failed.length} FAILED of ${planned.length} gate(s) in this stage:`)
 for (const r of failed) printErr(`  ${r.gate.id} — ${r.gate.why}`)
 for (const r of failed) {
   // Both streams, each with its own window. The first version tested only
@@ -657,7 +672,7 @@ for (const r of failed) {
     for (const line of tail) printErr(`  ${line}`)
   }
 }
-if (stage === "prepush") {
+if (writesExactReceipt) {
   if (!snapshotStable) {
     const message = snapshotInvalidMessage(frozenSnapshot, endingSnapshot, snapshotError)
     printErr(`\nprepush: INVALID — ${message}`)

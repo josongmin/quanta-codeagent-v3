@@ -1,4 +1,5 @@
 export const NIGHTLY_SCHEDULES = [
+  { file: "verification-nightly.yml", cron: "0 4 * * *", purpose: "cache-off verification" },
   { file: "ci.yml", cron: "0 6 * * *", purpose: "nightly eval" },
   { file: "agent-nightly-regression.yml", cron: "0 8 * * *", purpose: "agent regression" },
   { file: "grounding-live-gate.yml", cron: "0 9 * * *", purpose: "grounding live gate" },

@@ -129,9 +129,13 @@ describe("test:ci admission gate", () => {
     expect(packageJson.scripts?.["verify:smoke"]).toContain("smoke-battery.test.ts")
     expect(packageJson.scripts?.["verify:prepush"]).toContain("gate.ts prepush")
     expect(packageJson.scripts?.["verify:prepush"]).not.toContain("verify:prepush")
-    expect(packageJson.scripts?.["verify:full"]).toContain("--keep-going")
-    expect(packageJson.scripts?.["verify:pr"]).toContain("--keep-going")
+    expect(packageJson.scripts?.["verify:full"]).toContain("gate.ts full")
+    expect(packageJson.scripts?.["verify:pr"]).toContain("gate.ts pr")
+    expect(packageJson.scripts?.["verify:nightly"]).toContain("gate.ts nightly")
     expect(packageJson.scripts?.["verify:nightly"]).toContain("QUANTA_TEST_CACHE=off")
+    expect(packageJson.scripts?.["verify:pr"]).not.toContain("gate.ts prepush")
+    expect(packageJson.scripts?.["verify:full"]).not.toContain("gate.ts prepush")
+    expect(packageJson.scripts?.["verify:nightly"]).not.toContain("gate.ts prepush")
     expect(packageJson.scripts?.["test:ci"]).not.toContain("verify:")
     // The one authoritative execution the receipt-consuming gates derive from.
     const full = packageJson.scripts?.["test:full:ci"] ?? ""

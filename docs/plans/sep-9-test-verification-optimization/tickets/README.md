@@ -1,7 +1,7 @@
 # SEP9-TV — 테스트 검증 비용 최적화 실행 티켓
 
 - 감사일: 2026-09-09 / 티켓 작성 완료일: 2026-09-10 (KST)
-- 상태: IMPLEMENTING — Wave 0–5 코드 착륙. remote required는 REMOTE_UNVERIFIED. full 캠페인 없음.
+- 상태: IMPLEMENTING — Wave 0–6 코드 착륙. remote required는 REMOTE_UNVERIFIED. full 캠페인 없음.
 - 고정 증거: [evidence/baseline-94073ffa6415.json](../evidence/baseline-94073ffa6415.json), [evidence/known-failures.md](../evidence/known-failures.md), [evidence/remote-protection-r0.json](../evidence/remote-protection-r0.json), [evidence/open-gaps.md](../evidence/open-gaps.md)
 - 현재 full digest: `e58849bda57f731d18f2d2ec189038f2f26b88feb39b605fb95cc9b4278bcf5e` (3907 files; audit 3906 + TV-00 discovery test)
 - 감사 기준 HEAD: `94073ffa64155941bd9c6a97e0c7121b7f09d526`

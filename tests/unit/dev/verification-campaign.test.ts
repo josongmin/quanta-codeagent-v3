@@ -33,6 +33,7 @@ const CAMPAIGN_MODULES = [
   "test-shard-lease.ts",
   "test-shard-lifecycle.ts",
   "gate-manifest.ts",
+  "verification-tier.ts",
   "verification-receipt.ts",
   "verification-receipt-probe.ts",
   "verification-campaign-receipt.ts",
@@ -127,6 +128,7 @@ export interface Gate {
 export const GATES: readonly Gate[] = ${JSON.stringify(entries, null, 2)}
 export const gatesForStage = (stage: GateStage): readonly Gate[] =>
   stage === "precommit" ? GATES.filter((gate) => gate.stage === "precommit") : GATES
+export const gatesForVerificationTier = (_tier: string): readonly Gate[] => GATES
 `
 }
 
