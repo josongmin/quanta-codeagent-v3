@@ -13,8 +13,14 @@ import {
 } from "node:fs"
 import { availableParallelism, freemem, homedir, loadavg, tmpdir, totalmem } from "node:os"
 import { dirname, join, relative, resolve } from "node:path"
-import { expandTestFiles } from "./sandboxed-test"
 import { sampleTreeRssBytes } from "./shard-rss"
+import {
+  discoverInventory,
+  discoverSuiteFiles,
+  isSuiteName,
+  SUITE_FLOORS,
+  type SuiteName,
+} from "./test-shard-discovery"
 import {
   acquireTestShardLease,
   inheritedTestShardLeaseState,
@@ -92,48 +98,11 @@ const SHARD_INACTIVITY_TIMEOUT_MS = 12 * 60_000
 const WATCHDOG_TAIL_LINES = 20
 
 const SHARD_WATCHDOG_POLL_MS = 1_000
-const SUITE_ROOTS = {
-  full: [
-    "tests/unit",
-    "tests/meta",
-    "tests/adversarial",
-    "tests/measurement",
-    "tests/integration",
-    "./src/",
-    "./tools/",
-  ],
-  core: [
-    "tests/unit",
-    "tests/meta",
-    "tests/adversarial",
-    "tests/measurement",
-    "./src/",
-    "./tools/",
-  ],
-  unit: ["tests/unit"],
-  integration: ["tests/integration"],
-} as const
-
-/**
- * One-directional floors on what each suite must DISCOVER.
- *
- * Measured from a real full run (3,822 files) with headroom for churn, in the
- * repo's own idiom: raise when the corpus grows, never lower to make a red go
- * away. A run that finds fewer files than this is reporting on a corpus that
- * quietly lost coverage.
- */
-const SUITE_FLOORS: Record<keyof typeof SUITE_ROOTS, number> = {
-  full: 3_600,
-  core: 3_200,
-  unit: 2_900,
-  integration: 330,
-}
-
-type SuiteName = keyof typeof SUITE_ROOTS
 
 interface RunnerOptions {
   readonly suite: SuiteName
   readonly junitOut?: string
+  readonly discoverOnly: boolean
 }
 
 interface GitSnapshot {
@@ -215,8 +184,8 @@ const writeScanReachReceipt = (input: {
 const suiteOption = (arg: string): SuiteName | undefined => {
   if (!arg.startsWith("--suite=")) return undefined
   const candidate = arg.slice("--suite=".length)
-  if (!(candidate in SUITE_ROOTS)) throw new Error(`unknown shard suite: ${candidate}`)
-  return candidate as SuiteName
+  if (!isSuiteName(candidate)) throw new Error(`unknown shard suite: ${candidate}`)
+  return candidate
 }
 
 const junitOption = (arg: string): string | undefined => {
@@ -231,8 +200,13 @@ const junitOption = (arg: string): string | undefined => {
 const parseOptions = (args: readonly string[]): RunnerOptions => {
   let suite: SuiteName = "full"
   let junitOut: string | undefined
+  let discoverOnly = false
   for (const arg of args) {
     if (arg === "--parallel=1") continue
+    if (arg === "--discover-only") {
+      discoverOnly = true
+      continue
+    }
     const selectedSuite = suiteOption(arg)
     if (selectedSuite !== undefined) {
       suite = selectedSuite
@@ -248,7 +222,7 @@ const parseOptions = (args: readonly string[]): RunnerOptions => {
   if (junitOut !== undefined && suite !== "unit" && suite !== "full") {
     throw new Error("JUnit shard receipts are reserved for --suite=unit or --suite=full")
   }
-  return junitOut === undefined ? { suite } : { suite, junitOut }
+  return junitOut === undefined ? { suite, discoverOnly } : { suite, junitOut, discoverOnly }
 }
 
 const junitShardPath = (junitOut: string, index: number): string => `${junitOut}.shard-${index}.xml`
@@ -780,6 +754,14 @@ const executeChunks = async (input: {
 
 const main = async (): Promise<void> => {
   const opts = parseOptions(process.argv.slice(2))
+  if (opts.discoverOnly) {
+    const inventory = discoverInventory(REPO_ROOT)
+    const selected = inventory.suites[opts.suite]
+    process.stdout.write(
+      `${JSON.stringify({ schema: "quanta.shard-discovery.v1", selected, inventory }, null, 2)}\n`,
+    )
+    return
+  }
   // A campaign wrapper (verification-campaign.ts) may already own the
   // repository lane for this whole verification run. A live ancestor-owned
   // token means "do not reacquire" — reacquiring would deadlock against the
@@ -844,9 +826,7 @@ const main = async (): Promise<void> => {
         "[test:shards] INVALID — authoritative receipts require a clean checkout. Commit or stash changes first.",
       )
     }
-    const manifest = expandTestFiles(
-      SUITE_ROOTS[opts.suite].map((root) => resolve(REPO_ROOT, root)),
-    )
+    const manifest = [...discoverSuiteFiles(REPO_ROOT, opts.suite)]
     // A FLOOR, not a printout. `manifest_files=N` was reported and compared to
     // nothing: a suite root that still exists but stops yielding test files —
     // a naming change, a bad merge, a directory renamed under a dot prefix —

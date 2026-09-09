@@ -191,7 +191,7 @@ const assertSelected = (
 const parseFullSuiteRoots = (shardsSrc: string): string[] => {
   const block = shardsSrc.match(/full:\s*\[([\s\S]*?)\],\s*core:/)
   if (block?.[1] === undefined) {
-    throw new Error("SUITE_ROOTS.full array not found in run-test-shards.ts")
+    throw new Error("SUITE_ROOTS.full array not found in test-shard-discovery.ts")
   }
   return [...block[1].matchAll(/"([^"]+)"/g)].map((m) => m[1] ?? "").filter((r) => r !== "")
 }
@@ -311,7 +311,7 @@ describe("SEP5 ratchet enrollment", () => {
     expect(fullGate?.run.includes("test:full:ci")).toBe(true)
     expect(pkg.scripts["test:full:ci"] ?? "").toContain("--suite=full")
 
-    const shardsSrc = readFileSync(join(ROOT, "tools/dev/run-test-shards.ts"), "utf8")
+    const shardsSrc = readFileSync(join(ROOT, "tools/dev/test-shard-discovery.ts"), "utf8")
     const roots = parseFullSuiteRoots(shardsSrc)
     expect(roots).toContain("tests/unit")
     expect(roots).toContain("tests/integration")
@@ -336,7 +336,7 @@ describe("SEP5 ratchet enrollment", () => {
   })
 
   test("removing one expected path from a cloned selection fails for that path", () => {
-    const shardsSrc = readFileSync(join(ROOT, "tools/dev/run-test-shards.ts"), "utf8")
+    const shardsSrc = readFileSync(join(ROOT, "tools/dev/test-shard-discovery.ts"), "utf8")
     const selected = resolvedFullSuiteSelection(parseFullSuiteRoots(shardsSrc)).filter(
       (p) => p !== EXPECTED[0],
     )
