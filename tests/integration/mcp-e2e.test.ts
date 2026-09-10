@@ -142,7 +142,7 @@ process.stdin.on("data", (c) => {
  *  - `notifWithId`    sends an unsolicited notification carrying an id field
  *  - `bigLine`        emits a single 10MB line BEFORE the real reply
  *  - `crash`          process.exit(1) on first tools/call
- *  - `sigkillable`    waits forever on tools/call (caller kills externally)
+ *  - `sigkillable`    waits forever on tools/call (client stops while pending)
  *  - `slow`           sleeps 5s before responding (test asserts no hang)
  *  - `nulInResult`    returns a text block containing NUL/control bytes
  *  - `concurrent`     interleaves N parallel replies in send-order
@@ -456,7 +456,7 @@ describe("MCP e2e hell-cases — server lifecycle chaos", () => {
     }
   }, 15_000)
 
-  test("server is SIGKILL'd externally: client detects EOF and rejects pending request", async () => {
+  test("client stop while a real server call is pending rejects the request", async () => {
     const c = advClient("sigkillable")
     await withTimeout(c.start(), 10_000, "sigkill start")
     try {
@@ -465,11 +465,9 @@ describe("MCP e2e hell-cases — server lifecycle chaos", () => {
       const pending = c.callTool("alpha", {}).catch((e: unknown) => {
         caught = e
       })
-      // Give the request a moment to be sent before we kill the server.
-      await new Promise((r) => setTimeout(r, 100))
-      // Forcibly kill via stop() — equivalent to SIGKILL since Bun.spawn's
-      // kill() sends SIGTERM by default but the subprocess won't have time
-      // to clean up. The contract is that the pending call rejects, NOT hangs.
+      // callTool registers and sends the request synchronously before returning
+      // its promise. stop() must reject that pending request without a timing
+      // sleep; the prior test owns unsolicited real-process exit coverage.
       await c.stop()
       await withTimeout(pending, 10_000, "sigkill pending")
       expect(caught).toBeDefined()
