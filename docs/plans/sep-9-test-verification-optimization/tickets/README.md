@@ -1,7 +1,7 @@
 # SEP9-TV — 테스트 검증 비용 최적화 실행 티켓
 
 - 감사일: 2026-09-09 / 티켓 작성 완료일: 2026-09-10 (KST)
-- 상태: IMPLEMENTING — Wave 0–6 코드 착륙. remote required는 REMOTE_UNVERIFIED. full 캠페인 없음.
+- 상태: IMPLEMENTING — Wave 0–6 코드 착륙. 저장소와 `main`은 확인됐지만 current private-repository plan에서 ruleset/branch-protection API가 HTTP 403이라 remote required는 활성화 불가. exact-HEAD Actions도 billing/spending-limit으로 0-step 종료. full 캠페인 없음. KF-01은 owner-local green.
 - 고정 증거: [evidence/baseline-94073ffa6415.json](../evidence/baseline-94073ffa6415.json), [evidence/known-failures.md](../evidence/known-failures.md), [evidence/remote-protection-r0.json](../evidence/remote-protection-r0.json), [evidence/open-gaps.md](../evidence/open-gaps.md)
 - 현재 full digest: `e58849bda57f731d18f2d2ec189038f2f26b88feb39b605fb95cc9b4278bcf5e` (3907 files; audit 3906 + TV-00 discovery test)
 - 감사 기준 HEAD: `94073ffa64155941bd9c6a97e0c7121b7f09d526`
@@ -27,7 +27,7 @@
 | 최근 캠페인 | 2,494,512ms / 41분 34초, SIGINT 종료 | 전체 통과 receipt 아님 |
 | 머신 | 16 CPU, 시작 load 120.41 / 종료 139.69 | 과부하 실행이므로 성능 목표 산정의 정상 baseline으로 사용 금지 |
 | 캠페인 결과 | exit 130, drained=true, survivingGroups=[] | 프로세스 정리 확인; 테스트 통과를 의미하지 않음 |
-| 실패 | chunk 16, bench-full-remote-hellgate의 access-token 전달 assertion | 원인 미확정; tier 이동으로 해결 처리 금지 |
+| 실패 | chunk 16, bench-full-remote-hellgate의 access-token 전달 assertion | owner-local 재현 후 G-F5 readiness mock 공백이 원인. quarantine 금지. 캐시-off full 캠페인 영수증 아님 |
 | 작업 트리 | 감사 당시 clean | 실행 착수 전 다시 확인 |
 
 원본 관측은 `.git/quanta-verification-cache/last-campaign.json`, `test-timings-v1.json`, `.cache/full-junit.xml.shard-16.xml`에서 수집했다. 이 파일들은 가변·로컬 캐시이며 영구 증거가 아니다. TV-00에서 필요한 비밀정보 없는 요약을 고정한다.

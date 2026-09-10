@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import {
   mayQuarantine,
@@ -9,6 +10,25 @@ import {
   NIGHTLY_MEMBERSHIP,
   NIGHTLY_SCHEDULES,
 } from "../../../tools/dev/verification-nightly-manifest"
+import { assertScanPopulation } from "../_shared/scan-population"
+
+const WORKFLOW_DIR = join(import.meta.dir, "../../../.github/workflows")
+const WORKFLOW_FILES = readdirSync(WORKFLOW_DIR)
+  .filter((name) => name.endsWith(".yml"))
+  .sort()
+const SCHEDULED_WORKFLOWS = WORKFLOW_FILES.filter((name) =>
+  readFileSync(join(WORKFLOW_DIR, name), "utf8").includes("cron:"),
+)
+assertScanPopulation(
+  WORKFLOW_FILES.map((name) => join(WORKFLOW_DIR, name)),
+  WORKFLOW_DIR,
+  {
+    id: "tests/unit/dev/verification-first-failure.test.ts#WORKFLOW-SCHEDULES",
+    collectable: (name) => name.endsWith(".yml"),
+    topLevelOnly: true,
+    matched: SCHEDULED_WORKFLOWS.map((name) => join(WORKFLOW_DIR, name)),
+  },
+)
 
 describe("first failure is immutable", () => {
   test("retry pass is not required green", () => {
@@ -64,5 +84,18 @@ describe("nightly membership", () => {
     expect(laneWired("exhaustive-fuzz")).toBe(false)
     expect(nightlyScript).not.toContain("exhaustive-fuzz")
     expect(workflow).not.toContain("exhaustive-fuzz")
+  })
+
+  test("schedule inventory matches workflow cron lines", () => {
+    expect(NIGHTLY_SCHEDULES.length).toBeGreaterThan(0)
+    const manifestFiles: string[] = NIGHTLY_SCHEDULES.map((row) => row.file).sort()
+    expect(manifestFiles).toEqual(SCHEDULED_WORKFLOWS)
+    for (const row of NIGHTLY_SCHEDULES) {
+      const text = readFileSync(join(WORKFLOW_DIR, row.file), "utf8")
+      expect(text).toContain(`cron: "${row.cron}"`)
+    }
+    expect(readFileSync(join(WORKFLOW_DIR, "verification-nightly.yml"), "utf8")).not.toContain(
+      'cron: "0 5 * * *"',
+    )
   })
 })

@@ -11,6 +11,7 @@ import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import ts from "typescript"
 import { mentionFirstLine } from "@/shared"
+import { assertScanPopulation } from "./_shared/scan-population"
 
 const REPO_ROOT = resolve(import.meta.dir, "../..")
 
@@ -148,13 +149,35 @@ const productionSources = (): Map<string, string> =>
 
 const projectionSurfaceSources = (): Map<string, string> => {
   const srcRoot = resolve(REPO_ROOT, "src")
+  const mentionRunnerRoot = resolve(srcRoot, "agent/mention-runner")
+  const pluginResolverRoot = resolve(srcRoot, "agent/plugin-app-resolver")
+  const mentionRunnerResolvers = [
+    ...new Bun.Glob("*resolver.ts").scanSync({ cwd: mentionRunnerRoot }),
+  ].sort()
+  const pluginResolvers = [
+    ...new Bun.Glob("*resolver.ts").scanSync({ cwd: pluginResolverRoot }),
+  ].sort()
+  assertScanPopulation(
+    mentionRunnerResolvers.map((path) => resolve(mentionRunnerRoot, path)),
+    mentionRunnerRoot,
+    {
+      id: "tests/unit/mention-first-line-parity-hellgate.test.ts#MENTION-RUNNER",
+      collectable: (name) => name.endsWith("resolver.ts"),
+      topLevelOnly: true,
+    },
+  )
+  assertScanPopulation(
+    pluginResolvers.map((path) => resolve(pluginResolverRoot, path)),
+    pluginResolverRoot,
+    {
+      id: "tests/unit/mention-first-line-parity-hellgate.test.ts#PLUGIN-APP-RESOLVER",
+      collectable: (name) => name.endsWith("resolver.ts"),
+      topLevelOnly: true,
+    },
+  )
   const paths = [
-    ...[...new Bun.Glob("agent/mention-runner/*resolver.ts").scanSync({ cwd: srcRoot })].map(
-      (path) => `src/${path}`,
-    ),
-    ...[...new Bun.Glob("agent/plugin-app-resolver/*resolver.ts").scanSync({ cwd: srcRoot })].map(
-      (path) => `src/${path}`,
-    ),
+    ...mentionRunnerResolvers.map((path) => `src/agent/mention-runner/${path}`),
+    ...pluginResolvers.map((path) => `src/agent/plugin-app-resolver/${path}`),
     "src/apps/cli/at-autocomplete/provider.ts",
     "src/host/runtime/internal/mention-source-deps.ts",
   ].sort()
@@ -170,15 +193,31 @@ const localProjectionViolations = (sources: ReadonlyMap<string, string>): string
 const discoverProductionConsumers = (): string[] => {
   const srcRoot = resolve(REPO_ROOT, "src")
   const glob = new Bun.Glob("**/*.ts")
-  return [...glob.scanSync({ cwd: srcRoot })]
-    .map((path) => `src/${path}`)
+  const scanned = [...glob.scanSync({ cwd: srcRoot })].map((path) => `src/${path}`).sort()
+  const consumers = scanned
     .filter((path) => {
       const source = readFileSync(resolve(REPO_ROOT, path), "utf8")
       if (!source.includes("mentionFirstLine")) return false
       return inspectSource(path, source).callsSharedOwner
     })
     .sort()
+  assertScanPopulation(
+    scanned.map((path) => resolve(REPO_ROOT, path)),
+    srcRoot,
+    {
+      id: "tests/unit/mention-first-line-parity-hellgate.test.ts#SRC-CONSUMERS",
+      collectable: (name) => name.endsWith(".ts"),
+      matched: consumers.map((path) => resolve(REPO_ROOT, path)),
+    },
+  )
+  return consumers
 }
+
+// Both are immutable source snapshots for this process. Re-reading and reparsing
+// the full source tree in each assertion made the ratchet's cost scale with the
+// number of mutation controls rather than with the guarded surface.
+const PROJECTION_SURFACE_SOURCES = projectionSurfaceSources()
+const DISCOVERED_PRODUCTION_CONSUMERS = discoverProductionConsumers()
 
 describe("SEP6 S8 canonical mention first-line policy", () => {
   test.each([
@@ -198,9 +237,9 @@ describe("SEP6 S8 canonical mention first-line policy", () => {
     expect(CONSUMERS).toHaveLength(7)
     expect(new Set(CONSUMERS).size).toBe(7)
     expect(parityViolations(productionSources())).toEqual([])
-    expect(discoverProductionConsumers()).toEqual([...CONSUMERS].sort())
-    expect(projectionSurfaceSources().size).toBeGreaterThanOrEqual(14)
-    expect(localProjectionViolations(projectionSurfaceSources())).toEqual([])
+    expect(DISCOVERED_PRODUCTION_CONSUMERS).toEqual([...CONSUMERS].sort())
+    expect(PROJECTION_SURFACE_SOURCES.size).toBeGreaterThanOrEqual(14)
+    expect(localProjectionViolations(PROJECTION_SURFACE_SOURCES)).toEqual([])
   })
 
   test("red-on-injection: deleting one live shared call identifies exactly that consumer", () => {
@@ -227,7 +266,7 @@ describe("SEP6 S8 canonical mention first-line policy", () => {
   })
 
   test("red-on-injection: an eighth local projection owner is rejected regardless of its name", () => {
-    const sources = projectionSurfaceSources()
+    const sources = new Map(PROJECTION_SURFACE_SOURCES)
     const victim = "src/agent/plugin-app-resolver/new-kind-resolver.ts"
     sources.set(
       victim,

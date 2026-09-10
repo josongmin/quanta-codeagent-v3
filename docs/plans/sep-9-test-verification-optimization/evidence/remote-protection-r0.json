@@ -1,21 +1,27 @@
 {
-  "status": "REMOTE_UNVERIFIED",
+  "status": "REPOSITORY_VERIFIED_PROTECTION_UNAVAILABLE",
   "queriedAt": "2026-09-10T00:50:00+09:00",
-  "retriedAt": "2026-09-10T01:20:00+09:00",
-  "ghLogin": "songminjo",
+  "retriedAt": "2026-09-10T09:59:39+09:00",
+  "ghLogin": "josongmin",
   "origin": "git@github-personal:josongmin/quanta-codeagent-v3.git",
-  "triedRepos": [
-    "josongmin/quanta-codeagent-v3",
-    "songminjo/quanta-codeagent-v3"
-  ],
-  "defaultBranch": "unverified",
-  "rulesets": "unreadable",
-  "requiredChecks": "unreadable",
-  "mergeQueue": "unreadable",
-  "errors": [
-    "gh login is songminjo; origin is josongmin/quanta-codeagent-v3",
-    "REST 404 on both triedRepos for repo, rulesets, and branch protection"
-  ],
+  "repository": {
+    "nameWithOwner": "josongmin/quanta-codeagent-v3",
+    "visibility": "PRIVATE",
+    "defaultBranch": "main",
+    "verified": true
+  },
+  "rulesets": "unavailable-http-403-plan",
+  "requiredChecks": "not-enforceable-http-403-plan",
+  "mergeQueue": "unverified-or-unavailable",
+  "openPullRequests": 0,
+  "exactHead": "dba37472ec70acad1a38721a50a0693583333cd3",
+  "exactHeadCi": {
+    "runId": 34377504975,
+    "conclusion": "failure",
+    "jobsStarted": 0,
+    "required": "skipped",
+    "reason": "billing-or-spending-limit"
+  },
   "r2HookSwitch": false,
-  "reason": "cannot confirm that a remote full required check exists"
+  "reason": "repository and default branch are verified; the current private-repository plan does not expose rulesets or branch protection, and exact-HEAD Actions jobs did not start because billing or the spending limit blocked them"
 }

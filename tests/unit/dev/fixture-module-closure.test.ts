@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import { readFileSync } from "node:fs"
+import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
+import { assertScanPopulation } from "../_shared/scan-population"
 
 /**
  * DRIFT GUARD — a fixture that materializes tools/dev modules into a scratch
@@ -35,6 +36,31 @@ const FIXTURES: readonly { readonly file: string; readonly why: string }[] = [
 /** `"foo.ts"` string literals — the shape both fixtures use to list modules. */
 const COPIED_MODULE = /"([a-z0-9-]+\.ts)"/g
 const RELATIVE_IMPORT = /from\s+"\.\/([a-z0-9-]+)"/g
+
+const DISCOVERED_FIXTURE_COPIERS = (() => {
+  const dir = join(REPO_ROOT, "tests/unit/dev")
+  const copyCall = "copyFile" + "Sync("
+  const destJoin = "join(root, " + '"tools", "dev"'
+  const testFiles = readdirSync(dir).filter((name) => name.endsWith(".test.ts"))
+  const copiers = testFiles
+    .filter((name) => {
+      const text = readFileSync(join(dir, name), "utf8")
+      return text.includes(copyCall) && text.includes(destJoin)
+    })
+    .map((name) => `tests/unit/dev/${name}`)
+    .sort()
+  assertScanPopulation(
+    testFiles.map((name) => join(dir, name)),
+    dir,
+    {
+      id: "tests/unit/dev/fixture-module-closure.test.ts#UNIT-DEV-COPIERS",
+      collectable: (name) => name.endsWith(".test.ts"),
+      topLevelOnly: true,
+      matched: copiers.map((path) => join(REPO_ROOT, path)),
+    },
+  )
+  return copiers
+})()
 
 const copiedModules = (fixtureSource: string): ReadonlySet<string> => {
   const names = new Set<string>()
@@ -94,4 +120,9 @@ describe("fixtures copy the whole import closure they run", () => {
       ).toEqual([])
     })
   }
+
+  test("FIXTURES is the closed universe of scratch-rail copiers under tests/unit/dev", () => {
+    expect(DISCOVERED_FIXTURE_COPIERS.length).toBeGreaterThan(0)
+    expect([...FIXTURES.map((row) => row.file)].sort()).toEqual(DISCOVERED_FIXTURE_COPIERS)
+  })
 })

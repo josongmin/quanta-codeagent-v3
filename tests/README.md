@@ -95,6 +95,28 @@ memory, eval, observability, and the heavy benches. Use it as a "is the
 core still alive" smoke pulse, **not** as a substitute for `test:unit` at
 commit time.
 
+## `verify:*` campaigns (SEP9-TV)
+
+These are the named verification tiers. Historical `prepush` / `test:ci` remain
+the local push path until remote required can be enforced
+([TV-15](../docs/plans/sep-9-test-verification-optimization/tickets/TV-15-rollout-and-documentation.md);
+the repository is verified, but protection APIs are unavailable on the current
+private-repository plan). p95 budgets in the ticket index are targets, not
+measured receipts. `verify:pr` / `verify:full` / `verify:nightly` currently
+share the same suite population; nightly is the cache-off lane.
+
+| Command | What it runs | Success means |
+|---------|--------------|---------------|
+| `bun run verify:smoke` | smoke battery + conflict-parser canary (`--parallel=1`) | those files passed; not a gate-manifest campaign |
+| `bun run verify:prepush` | `gate.ts prepush` inside a verification campaign | prepush gate set passed (static + suites) |
+| `bun run verify:pr` | `gate.ts pr --keep-going` | PR tier membership passed; not a remote required check |
+| `bun run verify:full` | `gate.ts full --keep-going` | full tier membership passed; not an authoritative cache-off receipt |
+| `bun run verify:nightly` | `QUANTA_TEST_CACHE=off` + `gate.ts nightly --keep-going` | cache-off nightly membership (`cache-off-full-suite`) ran |
+| `bun run verify:scope` | dry-run selection (`verify-scope.ts`) | JSON/plan of what a tier would run; exclusive flags fail closed |
+
+`.githooks/pre-push` still calls `bun run prepush --bail`, not `verify:prepush`.
+See [ADR-0003](../docs/decisions/0003-test-pyramid.md) “이후 정책 (SEP9-TV)”.
+
 ## Reading order (cold start)
 
 1. [ADR-0003](../docs/decisions/0003-test-pyramid.md) — why this tier split.

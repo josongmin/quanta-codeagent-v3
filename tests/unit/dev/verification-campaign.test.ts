@@ -141,6 +141,19 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
+describe("campaign fixtures that copy gate.ts", () => {
+  test("CAMPAIGN_MODULES still covers every gate.ts local sibling", async () => {
+    const gate = await Bun.file(source("gate.ts")).text()
+    const specs = [...gate.matchAll(/from "\.\/([^"]+)"/g)].map((match) => match[1])
+    const campaignModules = new Set<string>(CAMPAIGN_MODULES)
+    expect(specs.length).toBeGreaterThan(5)
+    for (const spec of specs) {
+      if (spec === "gate-manifest") continue
+      expect(campaignModules.has(`${spec}.ts`)).toBeTrue()
+    }
+  })
+})
+
 describe("whole verification campaign lease", () => {
   test("a second campaign cannot start even its first command before the first releases", async () => {
     const root = mkdtempSync(join(tmpdir(), "quanta-verification-campaign-"))

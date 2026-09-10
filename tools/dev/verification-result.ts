@@ -43,15 +43,17 @@ const OUTCOME_PRIORITY: readonly VerificationOutcome[] = [
   "not-run",
 ]
 
+export const outcomeFromGates = (gates: readonly GateResult[]): VerificationOutcome => {
+  if (gates.length === 0) return "failed"
+  const present = new Set(gates.map((gate) => gate.outcome))
+  return OUTCOME_PRIORITY.find((item) => present.has(item)) ?? "passed"
+}
+
 export const finalizeVerificationResult = (input: {
   readonly tier: VerificationTier
   readonly gates: readonly GateResult[]
 }): VerificationResult => {
-  if (input.gates.length === 0) {
-    return { tier: input.tier, gates: input.gates, outcome: "failed", exitCode: 1 }
-  }
-  const present = new Set(input.gates.map((gate) => gate.outcome))
-  const outcome = OUTCOME_PRIORITY.find((item) => present.has(item)) ?? "passed"
+  const outcome = outcomeFromGates(input.gates)
   return {
     tier: input.tier,
     gates: input.gates,

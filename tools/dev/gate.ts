@@ -60,12 +60,8 @@ import {
   verificationContextForSnapshot,
   verificationManifestSha256,
 } from "./verification-receipt-probe"
-import {
-  finalizeVerificationResult,
-  type GateResult,
-  type VerificationTier,
-} from "./verification-result"
-import { assertKnownTier } from "./verification-tier"
+import { exitCodeForOutcome, outcomeFromGates, type VerificationTier } from "./verification-result"
+import { assertKnownTier, stepGatePlan } from "./verification-tier"
 
 const REPO_ROOT = join(dirname(dirname(dirname(fileURLToPath(import.meta.url)))))
 
@@ -501,71 +497,47 @@ if (writesExactReceipt) {
  */
 const QUIET_BOX_BUDGET_MS = 180_000
 
-const results: {
-  gate: Gate
-  ok: boolean
-  ms: number
-  out: string
-  err: string
-  peakLoadPerCore: number
-}[] = []
+type ExecutedGate = {
+  readonly gate: Gate
+  readonly ok: boolean
+  readonly ms: number
+  readonly out: string
+  readonly err: string
+  readonly peakLoadPerCore: number
+}
+const ranById = new Map<string, ExecutedGate>()
 /** Gates that gave up waiting and ran on a saturated box. */
 const hotGates = new Map<string, number>()
-const failedIds = new Set<string>()
-/** Gate ids whose output cannot be trusted: failed, or skipped because their own
- *  input could not be trusted. */
-const poisoned = new Set<string>()
-const skipped: Gate[] = []
-for (const gate of planned) {
-  // A gate whose INPUT a failed gate produces cannot be judged: the input is
-  // either missing or, worse, left over from a previous run. Report it as
-  // SKIPPED, never as PASS.
-  // TRANSITIVE. A consumer of a SKIPPED gate is reading the same unproduced
-  // input; the first version only checked `failedIds`, so a three-link chain ran
-  // its tail over stale data and printed PASS.
-  if (gate.consumes !== undefined && poisoned.has(gate.consumes)) {
-    skipped.push(gate)
-    poisoned.add(gate.id)
-    continue
-  }
-  if (!quiet) printOut(`\n──── ${label}: ${gate.id} — ${gate.run}`)
-  if (gate.needsQuietBox !== undefined) {
-    // Bounded, and it never refuses to run: a rail that unrelated load on the
-    // host can stop is a rail that cannot be used on a working machine.
-    const admission = admissionFromEnv(process.env)
-    const wait = await waitForQuietBox({
-      budgetMs: quietBoxBudgetMs(process.env, QUIET_BOX_BUDGET_MS),
-      ...(admission === undefined ? {} : { admission }),
-    })
-    printOut(`  [${gate.id}] ${describeQuietBoxWait(wait)}`)
-    if (!wait.settled) hotGates.set(gate.id, wait.endPerCore)
-  }
-  const { ok, ms, out, err, peakLoadPerCore } = runGate(gate)
-  results.push({ gate, ok, ms, out, err, peakLoadPerCore })
-  if (!ok) {
-    failedIds.add(gate.id)
-    poisoned.add(gate.id)
-  }
-  if (!ok && bail) break
-}
-/** Gates never reached because `--bail` stopped the run. Reported, not silently
- *  dropped from the denominator. */
-const notRun = planned.filter(
-  (g) => !results.some((r) => r.gate.id === g.id) && !skipped.includes(g),
-)
-const gateResults: readonly GateResult[] = [
-  ...results.map((row) => ({
-    id: row.gate.id,
-    outcome: row.ok ? ("passed" as const) : ("failed" as const),
-    elapsedMs: row.ms,
-  })),
-  ...skipped.map((gate) => ({ id: gate.id, outcome: "skipped-input" as const, elapsedMs: 0 })),
-  ...notRun.map((gate) => ({ id: gate.id, outcome: "not-run" as const, elapsedMs: 0 })),
-]
-const verification = finalizeVerificationResult({
-  tier: label === "precommit" ? "prepush" : label,
-  gates: gateResults,
+const gateResults = await stepGatePlan({
+  planned,
+  failFast: bail,
+  runGate: async (gate) => {
+    if (!quiet) printOut(`\n──── ${label}: ${gate.id} — ${gate.run}`)
+    if (gate.needsQuietBox !== undefined) {
+      const admission = admissionFromEnv(process.env)
+      const wait = await waitForQuietBox({
+        budgetMs: quietBoxBudgetMs(process.env, QUIET_BOX_BUDGET_MS),
+        ...(admission === undefined ? {} : { admission }),
+      })
+      printOut(`  [${gate.id}] ${describeQuietBoxWait(wait)}`)
+      if (!wait.settled) hotGates.set(gate.id, wait.endPerCore)
+    }
+    const executed = runGate(gate)
+    ranById.set(gate.id, { gate, ...executed })
+    return { ok: executed.ok, elapsedMs: executed.ms }
+  },
 })
+const results = gateResults.flatMap((row) => {
+  const executed = ranById.get(row.id)
+  return executed === undefined ? [] : [executed]
+})
+const skipped = planned.filter(
+  (gate) => gateResults.find((row) => row.id === gate.id)?.outcome === "skipped-input",
+)
+const notRun = planned.filter(
+  (gate) => gateResults.find((row) => row.id === gate.id)?.outcome === "not-run",
+)
+const verificationExit = exitCodeForOutcome(outcomeFromGates(gateResults))
 
 let endingSnapshot: GitSnapshot | undefined
 let snapshotError: string | undefined
@@ -649,7 +621,7 @@ if (
       }),
     )
   }
-  process.exit(verification.exitCode)
+  process.exit(verificationExit)
 }
 if (
   writesExactReceipt &&
@@ -747,4 +719,4 @@ if (writesExactReceipt) {
     )
   }
 }
-process.exit(verification.exitCode === 0 ? 1 : verification.exitCode)
+process.exit(verificationExit === 0 ? 1 : verificationExit)

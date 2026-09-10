@@ -38,9 +38,9 @@ describe("verification-tier-runner", () => {
     expect(() => assertKnownTier("merge-green")).toThrow(/unknown verification tier/)
   })
 
-  test("fail-fast does not start later independent gates", () => {
+  test("fail-fast does not start later independent gates", async () => {
     const spawned: string[] = []
-    const result = orchestrateGates({
+    const result = await orchestrateGates({
       tier: "prepush",
       gates,
       failFast: true,
@@ -57,9 +57,9 @@ describe("verification-tier-runner", () => {
     ])
   })
 
-  test("producer failure skips the consumer even when keep-going", () => {
+  test("producer failure skips the consumer even when keep-going", async () => {
     const spawned: string[] = []
-    const result = orchestrateGates({
+    const result = await orchestrateGates({
       tier: "prepush",
       gates,
       failFast: false,
@@ -73,8 +73,8 @@ describe("verification-tier-runner", () => {
     expect(result.gates.find((gate) => gate.id === "heavy")?.outcome).toBe("passed")
   })
 
-  test("duplicate gate ids are rejected", () => {
-    expect(() =>
+  test("duplicate gate ids are rejected", async () => {
+    await expect(
       orchestrateGates({
         tier: "smoke",
         gates: [
@@ -84,7 +84,7 @@ describe("verification-tier-runner", () => {
         failFast: true,
         runGate: () => ({ ok: true }),
       }),
-    ).toThrow(/duplicate gate id/)
+    ).rejects.toThrow(/duplicate gate id/)
   })
 })
 
@@ -111,10 +111,17 @@ describe("manifest tier membership", () => {
     expect(source).toContain("assertKnownTier(")
     expect(source).toContain("gatesForVerificationTier(")
     expect(source).toContain("tiersForGate(")
-    expect(source).toContain('tier: label === "precommit" ? "prepush" : label')
+    expect(source).toContain("stepGatePlan(")
+    expect(source).toContain("outcomeFromGates(")
+    expect(source).not.toContain('tier: label === "precommit" ? "prepush" : label')
     expect(source).toMatch(
       /if \(label === "nightly"\) \{\s*process\.env\.QUANTA_TEST_CACHE = NIGHTLY_MEMBERSHIP\.cacheMode/,
     )
+    const owner = await Bun.file(
+      join(import.meta.dir, "../../../tools/dev/verification-tier.ts"),
+    ).text()
+    expect(owner).toContain("export const stepGatePlan")
+    expect(owner).toMatch(/export const orchestrateGates[\s\S]*stepGatePlan\s*\(/)
   })
 
   test("unknown CLI tier is exit 2, not a silent prepush", () => {

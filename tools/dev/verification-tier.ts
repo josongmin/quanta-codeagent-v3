@@ -1,7 +1,6 @@
 import {
   finalizeVerificationResult,
   type GateResult,
-  type VerificationOutcome,
   type VerificationResult,
   type VerificationTier,
 } from "./verification-result"
@@ -79,12 +78,26 @@ export const gatesForTier = (
   return selected
 }
 
-export const orchestrateGates = (input: OrchestrateInput): VerificationResult => {
-  const planned = gatesForTier(input.gates, input.tier)
+export interface PlannedGate {
+  readonly id: string
+  readonly consumes?: string
+}
+
+export type GateRunAttempt = {
+  readonly ok: boolean
+  readonly elapsedMs?: number
+}
+
+/** Single skip / fail-fast sequencer. CLI and tests must not reimplement this. */
+export const stepGatePlan = async <T extends PlannedGate>(input: {
+  readonly planned: readonly T[]
+  readonly failFast: boolean
+  readonly runGate: (gate: T) => GateRunAttempt | Promise<GateRunAttempt>
+}): Promise<readonly GateResult[]> => {
   const results: GateResult[] = []
   const poisoned = new Set<string>()
   let stopped = false
-  for (const gate of planned) {
+  for (const gate of input.planned) {
     if (stopped) {
       results.push({
         id: gate.id,
@@ -95,17 +108,16 @@ export const orchestrateGates = (input: OrchestrateInput): VerificationResult =>
       continue
     }
     if (gate.consumes !== undefined && poisoned.has(gate.consumes)) {
-      const outcome: VerificationOutcome = "skipped-input"
       poisoned.add(gate.id)
       results.push({
         id: gate.id,
-        outcome,
+        outcome: "skipped-input",
         elapsedMs: 0,
         reason: `producer ${gate.consumes} failed`,
       })
       continue
     }
-    const ran = input.runGate(gate)
+    const ran = await input.runGate(gate)
     if (ran.ok) {
       results.push({
         id: gate.id,
@@ -122,5 +134,17 @@ export const orchestrateGates = (input: OrchestrateInput): VerificationResult =>
     })
     if (input.failFast) stopped = true
   }
-  return finalizeVerificationResult({ tier: input.tier, gates: results })
+  return results
+}
+
+export const orchestrateGates = async (input: OrchestrateInput): Promise<VerificationResult> => {
+  const planned = gatesForTier(input.gates, input.tier)
+  return finalizeVerificationResult({
+    tier: input.tier,
+    gates: await stepGatePlan({
+      planned,
+      failFast: input.failFast,
+      runGate: input.runGate,
+    }),
+  })
 }

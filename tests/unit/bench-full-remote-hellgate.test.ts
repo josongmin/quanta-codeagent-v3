@@ -200,6 +200,11 @@ const mockSpawn = (
       RUN_EXIT_OK,
     ),
     whenSshRemote((remote) => remote.includes("bun") && remote.includes("READY"), ok("READY")),
+    // G-F5 profile readiness (`boxProfileReadinessProbe`) ends with `echo OK`.
+    // Default recorder stdout is empty, so an unanswered probe fails closed and
+    // the run never reaches `shipAccessToken` — KF-01 then looks like a token
+    // leak while measuring a box that never shipped credentials.
+    whenSshRemoteIncludes("echo OK", ok("OK")),
     whenSshRemoteIncludes("command -v pyright-langserver", ok("pyright 1.1.350\n")),
     whenSshRemote(isFullSnapshotWrite, () => o.snapshotWriteResult ?? ok("")),
     whenSshRemoteIncludes("mkdir ~/.pool-grade.lock", ok("LOCKED")),
@@ -263,6 +268,13 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     const backend = createFullRemoteBackend({ ...baseCfg, spawn: fn })
     await backend.run().catch(() => undefined)
     const shipped = everyShippedString(calls)
+    const tokenShip = calls.find(
+      (c) => c.cmd === "ssh" && c.args.some((arg) => arg.includes("chatgpt.json")),
+    )
+    // Vacuity floor: the run must actually reach the stdin ship, not terminate
+    // at bootstrap so this assertion would pass over an empty command log.
+    expect(tokenShip).toBeDefined()
+    expect(tokenShip?.input ?? "").toContain("ACCESS-xyz")
     // TEETH — the long-lived secrets must not appear in ANY command/stdin.
     expect(shipped).not.toContain("REFRESH-super-secret-long-lived")
     expect(shipped).not.toContain("IDTOK-secret")
@@ -645,6 +657,7 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
       whenArgsInclude("describe-instances", ok("1.2.3.4")),
       whenArgsInclude("terminate-instances", ok("")),
       whenSshRemoteIncludes("READY", ok("READY")),
+      whenSshRemoteIncludes("echo OK", ok("OK")),
       whenSshRemoteIncludes("command -v pyright-langserver", ok("pyright 1.1.350\n")),
       whenSshRemoteIncludes("mkdir ~/.pool-grade.lock", ok("LOCKED")),
       whenSshRemoteIncludes("rmdir ~/.pool-grade.lock", ok("")),
@@ -1104,9 +1117,15 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     // The reBootstrapped guard: when isBootstrapped is false, attachBox calls
     // bootstrapBox (which seed-syncs fresh src+config), so the reuse self-heal
     // must NOT additionally fire — that would be a redundant double-rsync. The
-    // isBootstrapped probe is left unmocked → defaults to ok("") (no "OK") → false.
+    // first profile-readiness probe stays unanswered (no "OK") so the box looks
+    // cold; the post-bootstrap probe must return OK or re-bootstrap throws.
+    let readinessProbes = 0
     const { fn, calls } = createFullSpawnRecorder(
       whenArgsInclude("describe-instances", ok("1.2.3.4")),
+      whenSshRemoteIncludes("echo OK", () => {
+        readinessProbes += 1
+        return readinessProbes === 1 ? ok("") : ok("OK")
+      }),
     )
     await attachBox({ ...baseCfg, spawn: fn, preset: "agentless-v2" }, "i-cold")
     // bootstrapBox ran its SEED rsync (byte-identical historical args — NO checksum).
@@ -1306,6 +1325,7 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
       whenArgsInclude("describe-instances", ok("1.2.3.4")),
       whenArgsInclude("terminate-instances", fail(254, "terminate denied")),
       whenSshRemoteIncludes("READY", ok("READY")),
+      whenSshRemoteIncludes("echo OK", ok("OK")),
       whenSshRemoteIncludes("command -v pyright-langserver", ok("pyright 1.1.350\n")),
       whenSshRemoteIncludes("mkdir ~/.pool-grade.lock", ok("LOCKED")),
       whenSshRemoteIncludes("chmod 600 ~/.quanta/auth/chatgpt.json", fail(1, "ship boom")),

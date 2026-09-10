@@ -315,6 +315,14 @@
     "tests/unit/dev/external-toolchain-coverage.test.ts#REAL_E2E": {
       "walked": 16
     },
+    "tests/unit/dev/fixture-module-closure.test.ts#UNIT-DEV-COPIERS": {
+      "walked": 25,
+      "matched": 2
+    },
+    "tests/unit/dev/verification-first-failure.test.ts#WORKFLOW-SCHEDULES": {
+      "walked": 7,
+      "matched": 4
+    },
     "tests/unit/edit-fresh-hash-mutating-tool-completeness-ratchet.test.ts#TOOL": {
       "walked": 306
     },
@@ -359,6 +367,16 @@
     },
     "tests/unit/manifest-codex-compat-hellgate.test.ts#SYSTEM-SKILLS": {
       "walked": 22
+    },
+    "tests/unit/mention-first-line-parity-hellgate.test.ts#MENTION-RUNNER": {
+      "walked": 2
+    },
+    "tests/unit/mention-first-line-parity-hellgate.test.ts#PLUGIN-APP-RESOLVER": {
+      "walked": 10
+    },
+    "tests/unit/mention-first-line-parity-hellgate.test.ts#SRC-CONSUMERS": {
+      "walked": 3728,
+      "matched": 7
     },
     "tests/unit/memory-fence-no-llm-import-hellgate.test.ts#MEMORY-ROOT": {
       "walked": 49

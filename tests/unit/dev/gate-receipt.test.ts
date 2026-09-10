@@ -92,6 +92,11 @@ export interface Gate {
 export const GATES: readonly Gate[] = ${JSON.stringify(entries, null, 2)}
 export const gatesForStage = (stage: GateStage): readonly Gate[] =>
   stage === "precommit" ? GATES.filter((gate) => gate.stage === "precommit") : GATES
+export const gatesForVerificationTier = (_tier: string): readonly Gate[] => GATES
+export const tiersForGate = (gate: Gate): readonly string[] =>
+  gate.stage === "precommit"
+    ? ["smoke", "prepush", "pr", "full", "nightly"]
+    : ["prepush", "pr", "full", "nightly"]
 `
 }
 
@@ -106,8 +111,12 @@ const makeRepo = (
   copyFileSync(SOURCE_GATE, join(root, "tools", "dev", "gate.ts"))
   for (const dependency of [
     "box-load.ts",
+    "verification-admission.ts",
+    "verification-nightly-manifest.ts",
     "verification-receipt.ts",
     "verification-receipt-probe.ts",
+    "verification-result.ts",
+    "verification-tier.ts",
     "external-toolchain.ts",
     "verdict-env.ts",
   ]) {
@@ -163,6 +172,23 @@ const receiptFrom = (stdout: string): GateReceipt => {
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
+})
+
+describe("gate.ts fixture copies every local import", () => {
+  test("dropping a sibling from makeRepo fails this scan", async () => {
+    const gate = await Bun.file(SOURCE_GATE).text()
+    const fixture = await Bun.file(import.meta.path).text()
+    const specs = [...gate.matchAll(/from "\.\/([^"]+)"/g)].map((match) => match[1])
+    expect(specs.length).toBeGreaterThan(5)
+    for (const spec of specs) {
+      if (spec === "gate-manifest") {
+        expect(fixture).toContain("gatesForVerificationTier")
+        expect(fixture).toContain("tiersForGate")
+        continue
+      }
+      expect(fixture).toContain(`${spec}.ts`)
+    }
+  })
 })
 
 describe("a green states what it could not check", () => {

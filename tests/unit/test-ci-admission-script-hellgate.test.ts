@@ -144,6 +144,20 @@ describe("test:ci admission gate", () => {
     )
   })
 
+  test("tests/README documents every verify:* script that package.json owns", async () => {
+    const readme = await Bun.file(join(import.meta.dir, "..", "..", "tests", "README.md")).text()
+    const verifyScripts = Object.keys(packageJson.scripts ?? {}).filter((name) =>
+      name.startsWith("verify:"),
+    )
+    expect(verifyScripts.length).toBeGreaterThanOrEqual(5)
+    for (const name of verifyScripts) {
+      expect(readme, name).toContain(`bun run ${name}`)
+    }
+    const stripped = readme.replaceAll("`bun run verify:smoke`", "`bun run verify:MISSING`")
+    expect(stripped).not.toContain("`bun run verify:smoke`")
+    expect(readme).toContain("`bun run verify:smoke`")
+  })
+
   test("the authoritative full-suite runner bounds a wedged shard worker", () => {
     expect(packageJson.scripts?.test).toContain("tools/dev/run-test-shards.ts")
     expect(shardRunner).toContain("const SHARD_INACTIVITY_TIMEOUT_MS = 12 * 60_000")

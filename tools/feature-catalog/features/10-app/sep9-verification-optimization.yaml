@@ -54,6 +54,8 @@ evidence:
       - tests/unit/dev/verification-tier-runner.test.ts
       - tests/unit/dev/verification-first-failure.test.ts
       - tests/unit/dev/verification-campaign.test.ts
+      - tests/unit/dev/gate-receipt.test.ts
+      - tests/unit/dev/fixture-module-closure.test.ts
     integration: []
     contract: []
 config_refs:
@@ -70,3 +72,5 @@ deliberate_hold:
 notes: |
   Sibling modules own policy/selection/metrics; shared runners consume them.
   See docs/plans/sep-9-test-verification-optimization/tickets/README.md.
+  KF-01 token-ship hellgate is owner-local green: the G-F5 readiness probe is
+  answered so shipAccessToken is actually observed. Not a cache-off full receipt.
