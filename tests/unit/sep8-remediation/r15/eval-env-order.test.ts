@@ -8,7 +8,7 @@ const FORBIDDEN = 'loadEnv([".env", ".env.local", ".env.dev"])'
 
 describe("G-F6 eval env precedence", () => {
   test("eval entrypoint uses shared first-wins order, not a reverse local loop", () => {
-    const src = readFileSync(join(process.cwd(), "src/apps/eval/index.ts"), "utf8")
+    const src = readFileSync(join(process.cwd(), "src/apps/eval/entry.ts"), "utf8")
     expect(src).toContain(CANONICAL)
     expect(src).not.toContain(FORBIDDEN)
     expect(src).toContain("loadEnvFiles")

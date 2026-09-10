@@ -15,7 +15,7 @@ const EVAL_CLI_CHILD_TIMEOUT_MS = 30_000
 const REPO_ROOT = "/Users/songmin/quanta-codeagent-v3"
 
 const runEvalProcess = (...args: string[]) => {
-  const out = spawnSync(process.execPath, ["run", "src/apps/eval/index.ts", ...args], {
+  const out = spawnSync(process.execPath, ["run", "src/apps/eval/entry.ts", ...args], {
     cwd: REPO_ROOT,
     encoding: "utf8",
     timeout: EVAL_CLI_CHILD_TIMEOUT_MS,

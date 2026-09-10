@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-const evalEntrypoint = join(process.cwd(), "src/apps/eval/index.ts")
+const evalEntrypoint = join(process.cwd(), "src/apps/eval/entry.ts")
 
 const runEvalHelp = async (args: {
   readonly cwd: string

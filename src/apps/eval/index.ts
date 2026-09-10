@@ -881,7 +881,7 @@ export const runEvalCli = (
     main,
   )
 
-if (import.meta.main) {
+export const runEvalCliProcess = async (argv: readonly string[]): Promise<void> => {
   setTerminalIo({
     stdout: (chunk) => {
       void process.stdout.write(chunk)
@@ -892,11 +892,15 @@ if (import.meta.main) {
     stdoutIsTTY: process.stdout.isTTY,
     stderrIsTTY: process.stderr.isTTY,
   })
+  try {
+    process.exit(await runEvalCli(argv))
+  } catch (e) {
+    logger.error("eval: fatal", { error: errMessage(e) })
+    process.exit(1)
+  }
+}
+
+if (import.meta.main) {
   loadEnvFiles([".env.dev", ".env.local", ".env"])
-  runEvalCli(process.argv.slice(2))
-    .then((code) => process.exit(code))
-    .catch((e) => {
-      logger.error("eval: fatal", { error: errMessage(e) })
-      process.exit(1)
-    })
+  await runEvalCliProcess(process.argv.slice(2))
 }
