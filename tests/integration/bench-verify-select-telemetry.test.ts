@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, setDefaultTimeout, spyOn, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -11,6 +11,13 @@ import { runInstance } from "../../src/apps/bench/eval"
 import type { Instance } from "../../src/apps/bench/types"
 import { withBenchObserverTestIsolation } from "../_support/bench-observer-test-isolation"
 import { scopedEnv } from "../_support/scoped-env"
+import { pressureScaledTimeoutMs } from "./_host-pressure"
+
+// Each case crosses the real synthetic-repo sandbox/verify boundary and the
+// file is serial because scoped process env is its selection authority. Bun's
+// generic 5s default has no headroom under host pressure; keep one explicit,
+// centrally scaled integration budget instead of scattering per-case numbers.
+setDefaultTimeout(pressureScaledTimeoutMs(30_000))
 
 class NoopEndLLM implements LLMPort {
   async *stream(): AsyncIterable<StreamEvent> {
