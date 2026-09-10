@@ -8,14 +8,12 @@ import { __setBranchRunAgentForTest } from "@/agent/branch-search-runner/run-age
 // The leaf, not the `@/agent/lsp-bridge` barrel: the barrel reaches
 // `diagnostics.ts` and from there all of `src/tool`.
 import { __setLspAvailabilityOverrideForTest } from "@/agent/lsp-bridge/availability"
-import { __resetSpanSink } from "@/observability"
 import { __resetDefaultMetricSink } from "@/observability/metrics/in-memory-registry"
-import {
-  __resetKnobOverrides,
-  __resetRuntimeConfig,
-  quantaHomeDirFrom,
-  setTerminalIo,
-} from "@/shared"
+import { __resetSpanSink } from "@/observability/spans"
+import { __resetKnobOverrides } from "@/shared/knob-overrides"
+import { quantaHomeDirFrom } from "@/shared/quanta-home"
+import { __resetRuntimeConfig } from "@/shared/runtime-config"
+import { setTerminalIo } from "@/shared/terminal-io"
 import { decideBenchResultsDir } from "./_support/bench-results-fence"
 
 // FORCING FUNCTION (aug-22 incident): `writeReport`/`writeArtifacts` fan out to

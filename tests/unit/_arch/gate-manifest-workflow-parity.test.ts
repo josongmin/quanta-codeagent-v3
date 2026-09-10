@@ -68,22 +68,34 @@ assertScanPopulation(
  */
 interface WorkflowStep {
   readonly file: string
+  readonly name?: string
   readonly raw: string
   readonly lines: readonly string[]
 }
 
-const localUsesStep = (file: string, line: string): WorkflowStep | undefined => {
+const localUsesStep = (file: string, line: string, name?: string): WorkflowStep | undefined => {
   const match = /^\s*(?:- )?uses:\s*(\.[^\s]+)\s*$/.exec(line)
   if (match === null) return undefined
   const command = `uses ${match[1] ?? ""}`
-  return { file, raw: line, lines: [command] }
+  return { file, ...(name === undefined ? {} : { name }), raw: line, lines: [command] }
 }
 
-const externalUsesStep = (file: string, line: string): WorkflowStep | undefined => {
+const externalUsesStep = (file: string, line: string, name?: string): WorkflowStep | undefined => {
   const match = /^\s*(?:- )?uses: (\S+)/.exec(line)
   if (match === null) return undefined
   const command = `uses: ${match[1] ?? ""}`
-  return { file, raw: command, lines: [command] }
+  return { file, ...(name === undefined ? {} : { name }), raw: command, lines: [command] }
+}
+
+const adjacentStepName = (lines: readonly string[], index: number): string | undefined => {
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    const line = lines[cursor] ?? ""
+    if (line.trim() === "" || line.trimStart().startsWith("#")) continue
+    const match = /^\s*-\s*name\s*:\s*(.+)$/.exec(line)
+    if (match !== null) return match[1]?.trim()
+    if (/^\s*-\s*(?:uses|run)\s*:/.test(line)) return undefined
+  }
+  return undefined
 }
 
 type ParsedRunStep = {
@@ -153,7 +165,8 @@ const workflowStepsInFile = (file: string): readonly WorkflowStep[] => {
   const lines = readFileSync(join(WORKFLOW_DIR, file), "utf8").split("\n")
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index] ?? ""
-    const uses = localUsesStep(file, line) ?? externalUsesStep(file, line)
+    const name = adjacentStepName(lines, index)
+    const uses = localUsesStep(file, line, name) ?? externalUsesStep(file, line, name)
     if (uses !== undefined) {
       out.push(uses)
       continue
@@ -202,8 +215,16 @@ const normalize = (cmd: string): string =>
     .replace(/\s+/g, " ")
     .trim()
 
-const isExempt = (cmd: string, file: string): boolean =>
-  WORKFLOW_EXEMPT.some((e) => (e.file === "*" || e.file === file) && cmd.includes(e.match))
+const exemptionMatches = (cmd: string, exemption: (typeof WORKFLOW_EXEMPT)[number]): boolean =>
+  exemption.exact === true ? cmd === exemption.match : cmd.includes(exemption.match)
+
+const isExempt = (cmd: string, step: WorkflowStep): boolean =>
+  WORKFLOW_EXEMPT.some(
+    (e) =>
+      (e.file === "*" || e.file === step.file) &&
+      (e.step === undefined || e.step === step.name) &&
+      exemptionMatches(cmd, e),
+  )
 
 describe("gate manifest ↔ workflow parity", () => {
   const steps = workflowSteps()
@@ -250,7 +271,7 @@ describe("gate manifest ↔ workflow parity", () => {
     // exempt the lint step AND silently cover `lint:debt`. Deleting the gate then
     // left this file green. Nothing asserted the sets were disjoint.
     const clashes = GATES.filter((g) =>
-      WORKFLOW_EXEMPT.some((e) => normalize(g.run).includes(e.match)),
+      WORKFLOW_EXEMPT.some((e) => exemptionMatches(normalize(g.run), e)),
     ).map((g) => g.id)
     // …and every exemption must name a workflow that exists, or "*".
     const files = new Set([...GATING_WORKFLOWS, ...NON_GATING_WORKFLOWS.map((w) => w.file), "*"])
@@ -259,6 +280,40 @@ describe("gate manifest ↔ workflow parity", () => {
     expect({ clashes }).toEqual({ clashes: [] })
     for (const e of WORKFLOW_EXEMPT) {
       expect({ match: e.match, why: e.why.length > 10 }).toEqual({ match: e.match, why: true })
+    }
+  })
+
+  test("one-off producer/consumer and compatibility steps use exact exemptions", () => {
+    const exact = new Set(
+      WORKFLOW_EXEMPT.filter((entry) => entry.file === "ci.yml" && entry.exact === true).map(
+        (entry) => entry.match,
+      ),
+    )
+    expect(exact.has("uses: actions/cache/restore@v4")).toBe(true)
+    expect(exact.has("uses: actions/download-artifact@v4")).toBe(true)
+    expect(
+      exact.has("bun add -g pyright@1.1.414 typescript@5.9.3 typescript-language-server@6.0.0"),
+    ).toBe(true)
+    expect(exact.has('test "<expr>" = "success"')).toBe(true)
+  })
+
+  test("artifact and cache actions are exact, named producer/consumer semantics", () => {
+    const actions = WORKFLOW_EXEMPT.filter((entry) =>
+      /^uses: actions\/(?:cache|cache\/restore|download-artifact|upload-artifact)@/.test(
+        entry.match,
+      ),
+    )
+    expect(actions.length).toBeGreaterThanOrEqual(10)
+    for (const entry of actions) {
+      expect({
+        match: entry.match,
+        exact: entry.exact,
+        named: (entry.step?.length ?? 0) > 5,
+      }).toEqual({
+        match: entry.match,
+        exact: true,
+        named: true,
+      })
     }
   })
 
@@ -285,7 +340,7 @@ describe("gate manifest ↔ workflow parity", () => {
   ]
 
   const isConditionalOrNonBlocking = (line: string): boolean =>
-    /^\s*continue-on-error\s*:\s*true\s*$/.test(line) || /^\s*if\s*:/.test(line)
+    /^\s{8,}continue-on-error\s*:\s*true\s*$/.test(line) || /^\s{8,}if\s*:/.test(line)
 
   const precedingStepName = (lines: readonly string[], index: number): string => {
     const nameLine = lines
@@ -376,11 +431,11 @@ describe("gate manifest ↔ workflow parity", () => {
       // still a candidate gate and must be listed or exempt on its own line.
       // Injected proof of the old hole: `bun run probe` placed beside
       // `bun fc gates || true` in the step-summary block shipped un-gated.
-      const stepExempt = isExempt(st.raw, st.file)
+      const stepExempt = isExempt(st.raw, st)
       for (const line of st.lines) {
         const c = normalize(line)
         if (stepExempt && !LOOKS_LIKE_A_COMMAND.test(c)) continue
-        if (!isExempt(c, st.file) && !manifestRuns.has(c) && !missing.includes(c)) missing.push(c)
+        if (!isExempt(c, st) && !manifestRuns.has(c) && !missing.includes(c)) missing.push(c)
       }
     }
     expect({ missing }).toEqual({ missing: [] })

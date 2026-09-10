@@ -101,6 +101,24 @@ const attribute = (tag: string, name: string): string | undefined => {
   return match?.[1]
 }
 
+const decodeXmlAttribute = (value: string): string =>
+  value
+    .replaceAll("&quot;", '"')
+    .replaceAll("&apos;", "'")
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&amp;", "&")
+
+/** Exact test-file set independently emitted by Bun's JUnit reporter. */
+export const junitExecutedFiles = (junitXml: string): readonly string[] => {
+  const files = new Set<string>()
+  for (const match of junitXml.matchAll(/<testsuite\b[^>]*>/g)) {
+    const file = attribute(match[0] ?? "", "file")
+    if (file !== undefined && file !== "") files.add(decodeXmlAttribute(file))
+  }
+  return [...files].sort((left, right) => left.localeCompare(right))
+}
+
 /**
  * Per-file wall estimate for one green chunk: the file's JUnit suite time plus
  * an even share of the chunk's unattributed wall (module load, setup, runner

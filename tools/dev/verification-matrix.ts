@@ -1,10 +1,17 @@
+import { TEST_RESOURCE_CLASSES, type TestResourceClass } from "./test-shard-plan"
+
 export type MatrixChunk = {
   readonly id: string
   readonly files: readonly string[]
+  readonly resourceClass: TestResourceClass
+  /** Measured scheduling weight, used to launch the longest chunks first. */
+  readonly predictedMs: number
+  readonly testTimeoutMs: number
+  readonly intraParallel: number
 }
 
 export type VerificationMatrixPlan = {
-  readonly schema: "quanta.verification-matrix.v2"
+  readonly schema: "quanta.verification-matrix.v3"
   readonly headSha: string
   readonly planSha256: string
   readonly chunks: readonly MatrixChunk[]
@@ -20,6 +27,32 @@ const isSafeRelativePath = (file: string): boolean =>
 
 const isSafeChunkId = (id: string): boolean => /^[a-z0-9-]+$/i.test(id)
 
+const validExecutionPolicy = (chunk: MatrixChunk): boolean =>
+  TEST_RESOURCE_CLASSES.includes(chunk.resourceClass) &&
+  Number.isSafeInteger(chunk.predictedMs) &&
+  chunk.predictedMs >= 1 &&
+  Number.isSafeInteger(chunk.testTimeoutMs) &&
+  chunk.testTimeoutMs >= 1 &&
+  Number.isSafeInteger(chunk.intraParallel) &&
+  chunk.intraParallel >= 1
+
+const claimChunkId = (id: string, ids: Set<string>): void => {
+  if (!isSafeChunkId(id)) throw new Error(`unsafe matrix chunk id: ${id}`)
+  if (ids.has(id)) throw new Error("duplicate matrix chunk id")
+  ids.add(id)
+}
+
+const claimChunkFiles = (files: readonly string[], allFiles: Set<string>): readonly string[] => {
+  const canonical = [...files].sort()
+  if (canonical.length === 0) throw new Error("empty matrix chunk")
+  for (const file of canonical) {
+    if (!isSafeRelativePath(file)) throw new Error(`unsafe matrix file: ${file}`)
+    if (allFiles.has(file)) throw new Error(`duplicate matrix file: ${file}`)
+    allFiles.add(file)
+  }
+  return canonical
+}
+
 const canonicalChunks = (chunks: readonly MatrixChunk[]): readonly MatrixChunk[] => {
   if (chunks.length === 0) throw new Error("empty matrix plan")
   const ids = new Set<string>()
@@ -27,17 +60,12 @@ const canonicalChunks = (chunks: readonly MatrixChunk[]): readonly MatrixChunk[]
   return [...chunks]
     .sort((left, right) => left.id.localeCompare(right.id))
     .map((chunk) => {
-      if (!isSafeChunkId(chunk.id)) throw new Error(`unsafe matrix chunk id: ${chunk.id}`)
-      if (ids.has(chunk.id)) throw new Error("duplicate matrix chunk id")
-      ids.add(chunk.id)
-      const files = [...chunk.files].sort()
-      if (files.length === 0) throw new Error(`empty matrix chunk: ${chunk.id}`)
-      for (const file of files) {
-        if (!isSafeRelativePath(file)) throw new Error(`unsafe matrix file: ${file}`)
-        if (allFiles.has(file)) throw new Error(`duplicate matrix file: ${file}`)
-        allFiles.add(file)
+      claimChunkId(chunk.id, ids)
+      const files = claimChunkFiles(chunk.files, allFiles)
+      if (!validExecutionPolicy(chunk)) {
+        throw new Error(`invalid matrix execution policy: ${chunk.id}`)
       }
-      return { id: chunk.id, files }
+      return { ...chunk, files }
     })
 }
 
@@ -51,7 +79,7 @@ export const planVerificationMatrix = (
   if (!/^[0-9a-f]{40}$/.test(headSha)) throw new Error("matrix plan requires an exact HEAD SHA")
   const canonical = canonicalChunks(chunks)
   return {
-    schema: "quanta.verification-matrix.v2",
+    schema: "quanta.verification-matrix.v3",
     headSha,
     planSha256: planIdentity(headSha, canonical),
     chunks: canonical,
@@ -61,7 +89,7 @@ export const planVerificationMatrix = (
 export const parseVerificationMatrixPlan = (value: unknown): VerificationMatrixPlan => {
   if (typeof value !== "object" || value === null) throw new Error("invalid matrix plan")
   const row = value as Partial<VerificationMatrixPlan>
-  if (row.schema !== "quanta.verification-matrix.v2") throw new Error("invalid matrix plan schema")
+  if (row.schema !== "quanta.verification-matrix.v3") throw new Error("invalid matrix plan schema")
   if (typeof row.headSha !== "string" || !Array.isArray(row.chunks)) {
     throw new Error("invalid matrix plan fields")
   }
@@ -71,11 +99,15 @@ export const parseVerificationMatrixPlan = (value: unknown): VerificationMatrixP
 }
 
 export type MatrixWorkerReceipt = {
-  readonly schema: "quanta.verification-matrix-worker.v2"
+  readonly schema: "quanta.verification-matrix-worker.v3"
   readonly headSha: string
   readonly planSha256: string
   readonly chunkId: string
-  readonly files: readonly string[]
+  readonly plannedFiles: readonly string[]
+  /** Files independently recovered from JUnit, never copied from the plan. */
+  readonly executedFiles: readonly string[]
+  readonly testTimeoutMs: number
+  readonly intraParallel: number
   readonly outcome: "passed" | "failed" | "cancelled"
   readonly snapshotStable: boolean
   readonly junitFile: string
@@ -86,17 +118,23 @@ export const workerReceipt = (input: {
   readonly headSha: string
   readonly planSha256: string
   readonly chunkId: string
-  readonly files: readonly string[]
+  readonly plannedFiles: readonly string[]
+  readonly executedFiles: readonly string[]
+  readonly testTimeoutMs: number
+  readonly intraParallel: number
   readonly outcome: "passed" | "failed" | "cancelled"
   readonly snapshotStable: boolean
   readonly junitFile: string
   readonly junitSha256?: string
 }): MatrixWorkerReceipt => ({
-  schema: "quanta.verification-matrix-worker.v2",
+  schema: "quanta.verification-matrix-worker.v3",
   headSha: input.headSha,
   planSha256: input.planSha256,
   chunkId: input.chunkId,
-  files: [...input.files].sort(),
+  plannedFiles: [...input.plannedFiles].sort(),
+  executedFiles: [...input.executedFiles].sort(),
+  testTimeoutMs: input.testTimeoutMs,
+  intraParallel: input.intraParallel,
   outcome: input.outcome,
   snapshotStable: input.snapshotStable,
   junitFile: input.junitFile,
@@ -107,12 +145,18 @@ export const parseMatrixWorkerReceipt = (value: unknown): MatrixWorkerReceipt =>
   if (typeof value !== "object" || value === null) throw new Error("invalid matrix receipt")
   const row = value as Partial<MatrixWorkerReceipt>
   if (
-    row.schema !== "quanta.verification-matrix-worker.v2" ||
+    row.schema !== "quanta.verification-matrix-worker.v3" ||
     typeof row.headSha !== "string" ||
     typeof row.planSha256 !== "string" ||
     typeof row.chunkId !== "string" ||
-    !Array.isArray(row.files) ||
-    !row.files.every((file) => typeof file === "string") ||
+    !Array.isArray(row.plannedFiles) ||
+    !row.plannedFiles.every((file) => typeof file === "string" && isSafeRelativePath(file)) ||
+    !Array.isArray(row.executedFiles) ||
+    !row.executedFiles.every((file) => typeof file === "string" && isSafeRelativePath(file)) ||
+    !Number.isSafeInteger(row.testTimeoutMs) ||
+    (row.testTimeoutMs as number) < 1 ||
+    !Number.isSafeInteger(row.intraParallel) ||
+    (row.intraParallel as number) < 1 ||
     !["passed", "failed", "cancelled"].includes(row.outcome ?? "") ||
     typeof row.snapshotStable !== "boolean" ||
     typeof row.junitFile !== "string" ||
@@ -129,6 +173,9 @@ export type AggregateVerdict = "passed" | "failed"
 const sameFiles = (left: readonly string[], right: readonly string[]): boolean =>
   [...left].sort().join("\n") === [...right].sort().join("\n")
 
+const reasonIf = (condition: boolean, reason: string): readonly string[] =>
+  condition ? [reason] : []
+
 const reasonsForReceipt = (
   plan: VerificationMatrixPlan,
   expected: MatrixChunk | undefined,
@@ -137,13 +184,17 @@ const reasonsForReceipt = (
 ): readonly string[] => {
   const id = expected?.id ?? receipt?.chunkId ?? "unknown"
   if (receipt === undefined) return [`missing:${id}`]
-  const reasons: string[] = []
-  if (receipt.headSha !== plan.headSha) reasons.push(`wrong-head:${id}`)
-  if (receipt.planSha256 !== plan.planSha256) reasons.push(`wrong-plan:${id}`)
-  if (!sameFiles(expected?.files ?? [], receipt.files)) reasons.push(`stale:${id}`)
-  if (!receipt.snapshotStable) reasons.push(`snapshot-drift:${id}`)
-  if (receipt.outcome === "cancelled") reasons.push(`cancelled:${id}`)
-  if (receipt.outcome === "failed") reasons.push(`failed:${id}`)
+  const reasons = [
+    ...reasonIf(receipt.headSha !== plan.headSha, `wrong-head:${id}`),
+    ...reasonIf(receipt.planSha256 !== plan.planSha256, `wrong-plan:${id}`),
+    ...reasonIf(!sameFiles(expected?.files ?? [], receipt.plannedFiles), `stale-plan:${id}`),
+    ...reasonIf(!sameFiles(expected?.files ?? [], receipt.executedFiles), `stale-executed:${id}`),
+    ...reasonIf(receipt.testTimeoutMs !== expected?.testTimeoutMs, `wrong-timeout:${id}`),
+    ...reasonIf(receipt.intraParallel !== expected?.intraParallel, `wrong-parallel:${id}`),
+    ...reasonIf(!receipt.snapshotStable, `snapshot-drift:${id}`),
+    ...reasonIf(receipt.outcome === "cancelled", `cancelled:${id}`),
+    ...reasonIf(receipt.outcome === "failed", `failed:${id}`),
+  ]
   if (receipt.outcome === "passed") {
     if (receipt.junitSha256 === null) reasons.push(`missing-junit:${id}`)
     else if (junitDigests.get(receipt.junitFile) !== receipt.junitSha256) {

@@ -268,6 +268,32 @@ describe("createPpidWalkKiller — whole-tree signal (D1)", () => {
 })
 
 describe("escalatingKill wired with a ProcessTreeKiller (D1 wiring)", () => {
+  const manualScheduler = () => {
+    const pending = new Map<number, () => void>()
+    const delays: number[] = []
+    let nextHandle = 0
+    return {
+      delays,
+      pending,
+      scheduler: {
+        schedule: (callback: () => void, delayMs: number): number => {
+          const handle = ++nextHandle
+          delays.push(delayMs)
+          pending.set(handle, callback)
+          return handle
+        },
+        cancel: (handle: unknown): void => {
+          pending.delete(handle as number)
+        },
+      },
+      flush: (): void => {
+        const callbacks = [...pending.values()]
+        pending.clear()
+        for (const callback of callbacks) callback()
+      },
+    }
+  }
+
   /** A fake child whose `.pid` the killer reads. Never actually spawns. */
   const fakeChild = (pid: number): KillableChild & { directKills: number } => {
     let resolveExit: ((code: number) => void) | undefined
@@ -299,16 +325,17 @@ describe("escalatingKill wired with a ProcessTreeKiller (D1 wiring)", () => {
     disarm()
   })
 
-  test("the SIGKILL grace escalation also routes through signalTree", async () => {
+  test("the SIGKILL grace escalation also routes through signalTree", () => {
     const calls: Array<{ pid: number; signal: string }> = []
     const killer: ProcessTreeKiller = {
       signalTree: (pid, signal) => calls.push({ pid, signal }),
     }
     const child = fakeChild(888)
-    const { kill, disarm } = escalatingKill(child, killer)
+    const manual = manualScheduler()
+    const { kill, disarm } = escalatingKill(child, killer, { scheduler: manual.scheduler })
     kill()
-    // Wait past the grace window — child never exits, so SIGKILL must escalate.
-    await Bun.sleep(KILL_GRACE_MS + 100)
+    expect(manual.delays).toEqual([KILL_GRACE_MS])
+    manual.flush()
     expect(calls).toEqual([
       { pid: 888, signal: "SIGTERM" },
       { pid: 888, signal: "SIGKILL" },
@@ -359,13 +386,15 @@ describe("escalatingKill wired with a ProcessTreeKiller (D1 wiring)", () => {
       signalTree: (pid, signal) => calls.push({ pid, signal }),
     }
     const child = fakeChild(4242)
-    const { kill, disarm } = escalatingKill(child, killer)
+    const manual = manualScheduler()
+    const { kill, disarm } = escalatingKill(child, killer, { scheduler: manual.scheduler })
     ;(child as unknown as { __resolve: () => void }).__resolve() // child exits / is reaped
     await Promise.resolve() // let `proc.exited.then(markReaped)` flip the latch
     await Promise.resolve()
     kill() // a LATE kill (e.g. eviction of a completed shell)
-    await Bun.sleep(KILL_GRACE_MS + 100)
+    manual.flush()
     expect(calls).toEqual([]) // NO SIGTERM, NO leaked SIGKILL on the dead pid
+    expect(manual.pending.size).toBe(0)
     disarm()
   })
 })

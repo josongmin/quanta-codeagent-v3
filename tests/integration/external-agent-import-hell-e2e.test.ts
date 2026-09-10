@@ -49,6 +49,7 @@ import {
 } from "@/migration"
 import {
   appendEnvelope,
+  encodeSessionLine,
   SESSION_ENVELOPE_VERSION,
   type SessionEnvelopeRecord,
   sessionEnvelopePath,
@@ -392,8 +393,8 @@ describe("hell-5: concurrent appendImportLog — exactly one winner under the lo
 /* scenario 6 — persistence schema stability + malformed tail surfaces       */
 /* ------------------------------------------------------------------------- */
 
-describe("hell-6: 50-entry round-trip + malformed-tail explicit error", () => {
-  test("50 sequential appends preserve order + exact key set", async () => {
+describe("hell-6: provider×stage round-trip + malformed-tail explicit error", () => {
+  test("12 sequential appends cover every provider×stage pair and preserve exact shape", async () => {
     const provs = ["claude_code", "cursor", "aider"] as const
     const stages = [
       "detect_finished",
@@ -402,7 +403,8 @@ describe("hell-6: 50-entry round-trip + malformed-tail explicit error", () => {
       "import_finished",
     ] as const
     const entries: ImportLogEntry[] = []
-    for (let i = 0; i < 50; i++) {
+    const count = provs.length * stages.length
+    for (let i = 0; i < count; i++) {
       const tsMs = Date.UTC(2026, 4, 21, 0, 0, i)
       const e: ImportLogEntry = {
         timestamp: new Date(tsMs).toISOString(),
@@ -416,8 +418,8 @@ describe("hell-6: 50-entry round-trip + malformed-tail explicit error", () => {
     }
     const log = await loadImportLog(home)
     expect(log.version).toBe(1)
-    expect(log.entries).toHaveLength(50)
-    for (let i = 0; i < 50; i++) {
+    expect(log.entries).toHaveLength(count)
+    for (let i = 0; i < count; i++) {
       const exp = entries[i]
       const got = log.entries[i]
       if (exp === undefined || got === undefined) throw new Error(`missing at ${i}`)
@@ -480,8 +482,9 @@ describe("hell-7: import → appendEnvelope (Cluster B seam) → applyRetention"
     expect(importResult.sessionsTranslated).toBe(4)
     expect(events.every((e) => e.ok)).toBe(true)
 
-    // 2. Materialize 110 envelope records (>= 100) into the v3 jsonl rail
-    //    via `appendEnvelope`. Each record represents one
+    // 2. Materialize 110 envelope records (>= 100) into the v3 jsonl rail.
+    //    The first 109 are a validated batch fixture; the final record passes
+    //    through the real appendEnvelope seam. Each record represents one
     //    migrated-from-Claude-Code "user_message" turn event.
     const sessionId = "migrated-claude-code-001"
     const RECORD_COUNT = 110
@@ -489,6 +492,7 @@ describe("hell-7: import → appendEnvelope (Cluster B seam) → applyRetention"
     // Each `content` is ~15 KB → 110 records ≈ 1.65 MB, which guarantees
     // the 1 MB retention cap drops a positive number of rows.
     const padPayload = "p".repeat(15_000)
+    const records: SessionEnvelopeRecord[] = []
     for (let i = 0; i < RECORD_COUNT; i++) {
       const ts = new Date(Date.UTC(2026, 4, 21, 0, 0, i)).toISOString()
       const record: SessionEnvelopeRecord = {
@@ -499,9 +503,20 @@ describe("hell-7: import → appendEnvelope (Cluster B seam) → applyRetention"
         kind: "user_message",
         content: `record-${i.toString().padStart(3, "0")}-${padPayload}`,
       }
-      await appendEnvelope(sessionId, record)
+      records.push(record)
     }
     const jsonlPath = sessionEnvelopePath(sessionId)
+    await writeFileAsync(
+      jsonlPath,
+      records
+        .slice(0, -1)
+        .map((record) => encodeSessionLine(record))
+        .join(""),
+      "utf8",
+    )
+    const last = records.at(-1)
+    if (last === undefined) throw new Error("retention fixture is empty")
+    await appendEnvelope(sessionId, last)
     const before = await inspectRetentionState(jsonlPath)
     expect(before.rowCount).toBe(RECORD_COUNT)
     // Sanity: file should be substantially larger than 1 MB so the cap

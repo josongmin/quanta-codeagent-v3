@@ -8,8 +8,8 @@ export const TEST_SHARD_CACHE_TTL_MS = 24 * 60 * 60_000
 
 export interface TestShardCacheIdentity {
   /**
-   * Content hash of everything tracked that a test can read, minus prose and
-   * minus the chunk-bound test files. See {@link trackedTreeSha256}: this
+   * Content hash of everything tracked that a test can read. See
+   * {@link trackedTreeSha256}: this
    * replaced a `src`+`tools` scan that could not see `tests/setup.ts`,
    * `bunfig.toml` or any fixture, and therefore replayed green receipts across
    * changes that alter every test's behaviour.
@@ -63,18 +63,6 @@ export const shardFilesSha256 = (repoRoot: string, files: readonly string[]): st
 }
 
 /**
- * Paths that cannot change what a test observes.
- *
- * Prose only. Everything else tracked by Git is part of the identity, so a new
- * file TYPE is included by default and the list fails closed.
- */
-const PROSE_ONLY = /^docs\/|\.md$/
-
-/** Per-chunk bound by `shardFilesSha256`; hashing them here would make one
- *  test edit invalidate every chunk, which is the coarseness this replaced. */
-const CHUNK_BOUND = /(?:^|\/)__tests__\/|\.test\.ts$/
-
-/**
  * Content identity of everything the tests can read.
  *
  * MEASURED HOLE THIS CLOSES. The previous version hashed `src` and `tools`
@@ -104,10 +92,6 @@ export const trackedTreeSha256 = (repoRoot: string): string => {
     .toString()
     .split("\n")
     .filter((line) => line !== "")
-    .filter((line) => {
-      const path = line.slice(0, line.lastIndexOf(" "))
-      return !PROSE_ONLY.test(path) && !CHUNK_BOUND.test(path)
-    })
     .sort()
   if (lines.length === 0) throw new Error("[test:shards] empty tree listing for cache identity")
   for (const line of lines) {
@@ -151,6 +135,7 @@ export const testEnvironmentSha256 = (
     QUANTA_PREFS_HOME: "<worker-prefs-home>",
     QUANTA_BENCH_RESULTS_DIR: "<worker-bench-results>",
     QUANTA_SCAN_REACH_RECORD: "<worker-scan-reach-sink>",
+    QUANTA_TEST_SOURCE_JS_CLEANED_ROOT: "<repo-source-root>",
     QUANTA_TEST_TIMEOUT_SCALE: String(testTimeoutMs / 60_000),
   })
   const canonical = Object.entries(effective)
@@ -179,6 +164,24 @@ export const testToolchainSha256 = (
 const receiptPayload = (receipt: Omit<SuccessfulTestShardReceipt, "receiptSha256">): string =>
   JSON.stringify(receipt)
 
+/** Path key for exactly the fields {@link sameIdentity} compares. */
+export const testShardCacheIdentitySha256 = (identity: TestShardCacheIdentity): string =>
+  sha256(
+    JSON.stringify({
+      treeSha256: identity.treeSha256,
+      suite: identity.suite,
+      manifestSha256: identity.manifestSha256,
+      shardFileCount: identity.shardFileCount,
+      shardFilesSha256: identity.shardFilesSha256,
+      toolchainSha256: identity.toolchainSha256,
+      testEnvSha256: identity.testEnvSha256,
+      junit: identity.junit,
+      intraParallel: identity.intraParallel,
+      executionPolicySha256: identity.executionPolicySha256,
+      inputScopeSha256: identity.inputScopeSha256,
+    }),
+  )
+
 const sameIdentity = (
   receipt: SuccessfulTestShardReceipt,
   expected: TestShardCacheIdentity,
@@ -187,17 +190,7 @@ const sameIdentity = (
   // is bound by shardFilesSha256 (path + content of every file), while the
   // ordinal is a presentation label that can shift when a NEIGHBOR chunk
   // changes. Everything else must match exactly.
-  receipt.treeSha256 === expected.treeSha256 &&
-  receipt.suite === expected.suite &&
-  receipt.manifestSha256 === expected.manifestSha256 &&
-  receipt.shardFileCount === expected.shardFileCount &&
-  receipt.shardFilesSha256 === expected.shardFilesSha256 &&
-  receipt.toolchainSha256 === expected.toolchainSha256 &&
-  receipt.testEnvSha256 === expected.testEnvSha256 &&
-  receipt.junit === expected.junit &&
-  receipt.intraParallel === expected.intraParallel &&
-  receipt.executionPolicySha256 === expected.executionPolicySha256 &&
-  receipt.inputScopeSha256 === expected.inputScopeSha256
+  testShardCacheIdentitySha256(receipt) === testShardCacheIdentitySha256(expected)
 
 const isScanReachRecord = (value: unknown): value is ScanReachRecord => {
   if (typeof value !== "object" || value === null) return false

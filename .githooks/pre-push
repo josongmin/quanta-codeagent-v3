@@ -28,10 +28,10 @@ set -e
 # No bun in this checkout ⇒ never block a push on a missing toolchain.
 command -v bun >/dev/null 2>&1 || exit 0
 
-echo "pre-push: running the full gate set (bun run prepush --bail)."
+echo "pre-push: running the fail-fast full gate set (bun run prepush)."
 echo "          minutes, not seconds — bypass once with: git push --no-verify"
 
-if ! bun run prepush --bail; then
+if ! bun run prepush; then
   echo ""
   echo "pre-push: the gate set is RED (the failing gate printed its own diagnosis above)."
   echo "  Re-run one gate:  bun run gates:list   then run its command directly"

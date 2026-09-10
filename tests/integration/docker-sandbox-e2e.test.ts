@@ -34,6 +34,31 @@ describe("DockerSandbox e2e — stub docker binary, real spawn pipeline", () => 
   let envLog: string
   let stubBin: string
 
+  const manualProbeScheduler = () => {
+    const pending = new Map<number, () => void>()
+    const delays: number[] = []
+    let nextHandle = 0
+    return {
+      delays,
+      scheduler: {
+        schedule: (callback: () => void, delayMs: number): number => {
+          const handle = ++nextHandle
+          delays.push(delayMs)
+          pending.set(handle, callback)
+          return handle
+        },
+        cancel: (handle: unknown): void => {
+          pending.delete(handle as number)
+        },
+      },
+      flush: (): void => {
+        const callbacks = [...pending.values()]
+        pending.clear()
+        for (const callback of callbacks) callback()
+      },
+    }
+  }
+
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "docker-sandbox-e2e-"))
     argvLog = join(dir, "argv.txt")
@@ -292,27 +317,38 @@ describe("DockerSandbox e2e — stub docker binary, real spawn pipeline", () => 
     expect(argv[argv.indexOf("--cpus") + 1]).toBe("0.5")
   })
 
-  test("10. isAvailable() timeout guard: a hanging `docker version` does not block forever", async () => {
-    // Stub: `version` sleeps 10s; the implementation's 5s internal kill MUST
-    // unblock isAvailable() well before that (returning false). We give the
-    // test 8s of headroom so a passing impl finishes quickly; a regression
-    // that removed the kill timer would exhaust the test timeout.
+  test("10. isAvailable() default timeout guard schedules exactly 5000ms without wall sleep", async () => {
+    // `exec` makes the stub PID the sleeper, so the injected deadline callback
+    // kills the actual process rather than leaving a shell waiting on a child.
     const hangStub = join(dir, "docker-hang")
     writeFileSync(
       hangStub,
-      ["#!/usr/bin/env bash", `if [ "$1" = "version" ]; then sleep 10; exit 0; fi`, "exit 0"].join(
+      ["#!/usr/bin/env bash", `if [ "$1" = "version" ]; then exec sleep 10; fi`, "exit 0"].join(
         "\n",
       ),
     )
     chmodSync(hangStub, 0o755)
-    const sb = new DockerSandbox({ dockerBin: hangStub })
-    const start = Date.now()
-    const ok = await sb.isAvailable()
-    const elapsed = Date.now() - start
-    // Implementation kills after 5s ⇒ available is false and we return well
-    // under 8s. A regression that lost the timer would hit the test runner's
-    // own timeout instead and surface as a different (still failing) signal.
+    const manual = manualProbeScheduler()
+    const sb = new DockerSandbox({ dockerBin: hangStub, probeScheduler: manual.scheduler })
+    const availability = sb.isAvailable()
+    expect(manual.delays).toEqual([5_000])
+    manual.flush()
+    const ok = await availability
     expect(ok).toBe(false)
-    expect(elapsed).toBeLessThan(8000)
-  }, 15_000)
+  })
+
+  test("10b. isAvailable() real timer canary kills a hanging probe", async () => {
+    const hangStub = join(dir, "docker-hang-real-timer")
+    writeFileSync(
+      hangStub,
+      ["#!/usr/bin/env bash", `if [ "$1" = "version" ]; then exec sleep 10; fi`, "exit 0"].join(
+        "\n",
+      ),
+    )
+    chmodSync(hangStub, 0o755)
+    const sb = new DockerSandbox({ dockerBin: hangStub, probeTimeoutMs: 50 })
+    const start = Date.now()
+    expect(await sb.isAvailable()).toBe(false)
+    expect(Date.now() - start).toBeLessThan(2_000)
+  }, 5_000)
 })

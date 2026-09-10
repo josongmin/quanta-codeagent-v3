@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process"
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { runEvalCli } from "@/../src/apps/eval/index"
 import type { GroundingPayload } from "@/../src/apps/eval/storage"
 import { ResultStore } from "@/../src/apps/eval/storage"
 
@@ -11,9 +12,11 @@ import { ResultStore } from "@/../src/apps/eval/storage"
  * `spawnSync` child alive indefinitely; callers receive a diagnostic instead of
  * an opaque `status === null`. */
 const EVAL_CLI_CHILD_TIMEOUT_MS = 30_000
-const runEval = (...args: string[]) => {
+const REPO_ROOT = "/Users/songmin/quanta-codeagent-v3"
+
+const runEvalProcess = (...args: string[]) => {
   const out = spawnSync(process.execPath, ["run", "src/apps/eval/index.ts", ...args], {
-    cwd: "/Users/songmin/quanta-codeagent-v3",
+    cwd: REPO_ROOT,
     encoding: "utf8",
     timeout: EVAL_CLI_CHILD_TIMEOUT_MS,
     killSignal: "SIGKILL",
@@ -24,6 +27,22 @@ const runEval = (...args: string[]) => {
     )
   }
   return out
+}
+
+const runEvalApplication = async (...args: string[]) => {
+  let stdout = ""
+  let stderr = ""
+  const status = await runEvalCli(args, {
+    cwd: REPO_ROOT,
+    env: { ...process.env },
+    stdout: (chunk) => {
+      stdout += chunk
+    },
+    stderr: (chunk) => {
+      stderr += chunk
+    },
+  })
+  return { status, stdout, stderr }
 }
 
 const payload = (over: Partial<GroundingPayload> = {}): GroundingPayload => {
@@ -79,9 +98,12 @@ const readJson = (path: string): unknown => JSON.parse(readFileSync(path, "utf8"
 describe("eval grounding CLI", () => {
   test(
     "--help includes the grounding subcommands",
-    () => {
-      const out = runEval("--help")
+    async () => {
+      const out = runEvalProcess("--help")
+      const application = await runEvalApplication("--help")
       expect(out.status).toBe(0)
+      expect(out.stdout).toBe(application.stdout)
+      expect(out.stderr).toBe(application.stderr)
       expect(out.stdout).toContain("grounding run [--mode raw|engine|assisted]")
       expect(out.stdout).toContain("grounding preflight")
       expect(out.stdout).toContain("grounding report --run-id ID")
@@ -101,9 +123,12 @@ describe("eval grounding CLI", () => {
 
   test(
     "grounding requires a valid subcommand",
-    () => {
-      const out = runEval("grounding")
+    async () => {
+      const out = runEvalProcess("grounding")
+      const application = await runEvalApplication("grounding")
       expect(out.status).toBe(1)
+      expect(out.stdout).toBe(application.stdout)
+      expect(out.stderr).toBe(application.stderr)
       expect(out.stderr).toContain(
         "eval grounding: subcommand must be one of: run, preflight, report, baseline, gate, compare, regress, scaffold-replay, promote-replay",
       )
@@ -111,36 +136,43 @@ describe("eval grounding CLI", () => {
     EVAL_CLI_CHILD_TIMEOUT_MS,
   )
 
-  test("grounding run rejects invalid suites and report/gate validate required args", () => {
-    const badSuite = runEval("grounding", "run", "--suite", "bogus")
+  test("grounding run rejects invalid suites and report/gate validate required args", async () => {
+    const badSuite = await runEvalApplication("grounding", "run", "--suite", "bogus")
     expect(badSuite.status).toBe(1)
     expect(badSuite.stderr).toContain("--suite must be canary or nightly")
 
-    const badCorpus = runEval("grounding", "run", "--corpus", "bogus")
+    const badCorpus = await runEvalApplication("grounding", "run", "--corpus", "bogus")
     expect(badCorpus.status).toBe(1)
     expect(badCorpus.stderr).toContain("--corpus must be one of")
 
-    const badMode = runEval("grounding", "run", "--mode", "bogus")
+    const badMode = await runEvalApplication("grounding", "run", "--mode", "bogus")
     expect(badMode.status).toBe(1)
     expect(badMode.stderr).toContain("--mode must be one of")
 
-    const missingRunId = runEval("grounding", "report")
+    const missingRunId = await runEvalApplication("grounding", "report")
     expect(missingRunId.status).toBe(1)
     expect(missingRunId.stderr).toContain("--run-id <id> is required")
 
-    const missingCandidate = runEval("grounding", "baseline")
+    const missingCandidate = await runEvalApplication("grounding", "baseline")
     expect(missingCandidate.status).toBe(1)
     expect(missingCandidate.stderr).toContain("--candidate <id> is required")
 
-    const missingGateRunId = runEval("grounding", "gate", "--profile", "canary")
+    const missingGateRunId = await runEvalApplication("grounding", "gate", "--profile", "canary")
     expect(missingGateRunId.status).toBe(1)
     expect(missingGateRunId.stderr).toContain("--run-id <id> is required")
 
-    const badProfile = runEval("grounding", "gate", "--run-id", "x", "--profile", "nightly")
+    const badProfile = await runEvalApplication(
+      "grounding",
+      "gate",
+      "--run-id",
+      "x",
+      "--profile",
+      "nightly",
+    )
     expect(badProfile.status).toBe(1)
     expect(badProfile.stderr).toContain("--profile must be one of canary")
 
-    const missingRouteRunIds = runEval(
+    const missingRouteRunIds = await runEvalApplication(
       "grounding",
       "gate",
       "--route-matrix",
@@ -151,23 +183,33 @@ describe("eval grounding CLI", () => {
     expect(missingRouteRunIds.status).toBe(1)
     expect(missingRouteRunIds.stderr).toContain("--run-ids <id1,id2,...> is required")
 
-    const missingCompare = runEval("grounding", "compare", "--baseline", "a")
+    const missingCompare = await runEvalApplication("grounding", "compare", "--baseline", "a")
     expect(missingCompare.status).toBe(1)
     expect(missingCompare.stderr).toContain("--baseline <id> and --candidate <id> are required")
 
-    const missingScaffoldReplay = runEval("grounding", "scaffold-replay", "--source", "x")
+    const missingScaffoldReplay = await runEvalApplication(
+      "grounding",
+      "scaffold-replay",
+      "--source",
+      "x",
+    )
     expect(missingScaffoldReplay.status).toBe(1)
     expect(missingScaffoldReplay.stderr).toContain(
       "--source, --id, --target-utterance, --bucket, --severity, --out are required",
     )
 
-    const missingPromoteReplay = runEval("grounding", "promote-replay", "--draft", "x")
+    const missingPromoteReplay = await runEvalApplication(
+      "grounding",
+      "promote-replay",
+      "--draft",
+      "x",
+    )
     expect(missingPromoteReplay.status).toBe(1)
     expect(missingPromoteReplay.stderr).toContain(
       "--draft, --gold-json, --corpus, --out are required",
     )
 
-    const badRegressionProfile = runEval(
+    const badRegressionProfile = await runEvalApplication(
       "grounding",
       "regress",
       "--baseline",
@@ -180,7 +222,7 @@ describe("eval grounding CLI", () => {
     expect(badRegressionProfile.status).toBe(1)
     expect(badRegressionProfile.stderr).toContain("--profile must be one of strict")
 
-    const badReplayCorpus = runEval(
+    const badReplayCorpus = await runEvalApplication(
       "grounding",
       "promote-replay",
       "--draft",
@@ -194,15 +236,19 @@ describe("eval grounding CLI", () => {
     )
     expect(badReplayCorpus.status).toBe(1)
     expect(badReplayCorpus.stderr).toContain("--corpus must be replay_critical or replay_nightly")
-    // Each assertion cold-spawns the full eval harness. Under a contended unit
-    // run, the aggregate can exceed 60s despite every child staying within its
-    // own 30s kill cap; retain all validation cases with a total-test budget.
-  }, 180_000)
+  })
 
   test(
     "grounding run rejects invalid concurrency",
-    () => {
-      const out = runEval("grounding", "run", "--suite", "canary", "--concurrency", "0")
+    async () => {
+      const out = await runEvalApplication(
+        "grounding",
+        "run",
+        "--suite",
+        "canary",
+        "--concurrency",
+        "0",
+      )
       expect(out.status).toBe(1)
       expect(out.stderr).toContain("invalid --concurrency 0")
     },
@@ -284,7 +330,7 @@ describe("eval grounding CLI", () => {
       await store.drain()
 
       const baselineJson = join(artifactsDir, "baseline.json")
-      const baseline = runEval(
+      const baseline = await runEvalApplication(
         "grounding",
         "baseline",
         "--candidate",
@@ -312,7 +358,7 @@ describe("eval grounding CLI", () => {
       })
 
       const reportJson = join(artifactsDir, "report.json")
-      const report = runEval(
+      const report = await runEvalApplication(
         "grounding",
         "report",
         "--run-id",
@@ -332,7 +378,7 @@ describe("eval grounding CLI", () => {
       })
 
       const gateJson = join(artifactsDir, "gate.json")
-      const gate = runEval(
+      const gate = await runEvalApplication(
         "grounding",
         "gate",
         "--run-id",
@@ -363,7 +409,7 @@ describe("eval grounding CLI", () => {
       })
 
       const compareJson = join(artifactsDir, "compare.json")
-      const compare = runEval(
+      const compare = await runEvalApplication(
         "grounding",
         "compare",
         "--baseline",
@@ -383,7 +429,7 @@ describe("eval grounding CLI", () => {
       })
 
       const regressJson = join(artifactsDir, "regress.json")
-      const regress = runEval(
+      const regress = await runEvalApplication(
         "grounding",
         "regress",
         "--baseline",
@@ -435,7 +481,7 @@ describe("eval grounding CLI", () => {
       })
 
       const matrixJson = join(artifactsDir, "matrix.json")
-      const matrixGate = runEval(
+      const matrixGate = await runEvalApplication(
         "grounding",
         "gate",
         "--route-matrix",

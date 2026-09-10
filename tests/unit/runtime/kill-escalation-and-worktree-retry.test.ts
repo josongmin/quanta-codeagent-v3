@@ -15,10 +15,17 @@ describe("escalatingKill — SIGTERM→SIGKILL escalation", () => {
       // `trap '' TERM` makes the child ignore SIGTERM entirely, then it sleeps
       // far longer than the test budget. Without escalation it would survive
       // the polite kill and run to natural completion.
-      const proc = Bun.spawn(["bash", "-c", "trap '' TERM; sleep 30"], {
-        stdout: "ignore",
+      const proc = Bun.spawn(["bash", "-c", "trap '' TERM; echo ready; sleep 30"], {
+        stdout: "pipe",
         stderr: "ignore",
       })
+      // Synchronize on the trap installation before SIGTERM. Killing
+      // immediately after spawn races bash startup and can accidentally test
+      // ordinary TERM termination rather than the grace timer.
+      const reader = proc.stdout.getReader()
+      const ready = await reader.read()
+      reader.releaseLock()
+      expect(new TextDecoder().decode(ready.value)).toContain("ready")
       const startedAlive = proc.killed === false
       expect(startedAlive).toBe(true)
 
@@ -59,6 +66,20 @@ describe("escalatingKill — SIGTERM→SIGKILL escalation", () => {
   })
 
   test("disarm cancels the pending SIGKILL timer (no leak after the child exits)", async () => {
+    const pending = new Map<number, () => void>()
+    const delays: number[] = []
+    let nextHandle = 0
+    const scheduler = {
+      schedule: (callback: () => void, delayMs: number): number => {
+        const handle = ++nextHandle
+        delays.push(delayMs)
+        pending.set(handle, callback)
+        return handle
+      },
+      cancel: (handle: unknown): void => {
+        pending.delete(handle as number)
+      },
+    }
     let resolveExit: ((code: number) => void) | undefined
     const signals: Array<number | NodeJS.Signals | undefined> = []
     const proc = {
@@ -69,12 +90,15 @@ describe("escalatingKill — SIGTERM→SIGKILL escalation", () => {
         resolveExit = resolve
       }),
     }
-    const { kill, disarm } = escalatingKill(proc)
+    const { kill, disarm } = escalatingKill(proc, undefined, { scheduler })
     kill()
+    expect(delays).toEqual([KILL_GRACE_MS])
+    expect(pending.size).toBe(1)
     resolveExit?.(0)
     await proc.exited
+    await Promise.resolve()
     disarm()
-    await Bun.sleep(KILL_GRACE_MS + 50)
+    expect(pending.size).toBe(0)
     expect(signals).toEqual([undefined])
   })
 })

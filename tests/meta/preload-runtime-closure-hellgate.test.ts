@@ -137,10 +137,32 @@ describe("preload runtime closure", () => {
   })
 
   test("the total stays under a one-directional ceiling", () => {
-    // 67 measured after the cut, from 1,202 before. The ceiling is headroom for
+    // 47 measured after moving the remaining observability/shared imports to
+    // leaves, from 1,202 before. The ceiling is headroom for
     // ordinary drift, not for a barrel: a single re-added barrel import is worth
     // hundreds and blows straight through it.
-    expect(loaded.length).toBeLessThanOrEqual(120)
+    expect(loaded.length).toBeLessThanOrEqual(60)
+  })
+
+  test("global hot reload stays disabled while the interactive dev command opts in", () => {
+    const bunfig = readFileSyncSafe(join(REPO_ROOT, "bunfig.toml"))
+    const pkg = JSON.parse(readFileSyncSafe(join(REPO_ROOT, "package.json"))) as {
+      scripts?: Record<string, string>
+    }
+    expect(bunfig).not.toMatch(/\[run\][\s\S]*?\bhot\s*=\s*true/)
+    expect(pkg.scripts?.dev).toContain("--hot")
+  })
+
+  test("source cleanup uses Dirent metadata and exposes the managed-runner skip contract", () => {
+    const preload = readFileSyncSafe(join(REPO_ROOT, "tests", "preload-clean-source-js.ts"))
+    expect(preload.length).toBeGreaterThan(500)
+    expect(preload).toMatch(/readdirSync\([^)]*\{\s*withFileTypes:\s*true\s*\}\)/)
+    expect(preload).toMatch(/entry\.isDirectory\s*\(\s*\)/)
+    expect(preload).not.toContain("lstatSync")
+    expect(preload).toContain("SOURCE_JS_CLEANED_ROOT_ENV")
+    expect(preload).toMatch(
+      /process\.env\[SOURCE_JS_CLEANED_ROOT_ENV\][^\n]+cleanStaleSourceJs\s*\(/,
+    )
   })
 
   test("🔴 the preload still DOES its job — the reset hooks are wired and effective", () => {

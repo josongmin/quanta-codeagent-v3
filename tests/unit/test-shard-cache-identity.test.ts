@@ -1,5 +1,5 @@
 /**
- * ★ HELLGATE — the shard cache survives a commit that cannot change a verdict.
+ * ★ HELLGATE — the shard cache survives a commit-id change with the same tree.
  *
  * MEASURED DEFECT (2026-09-02): `TestShardCacheIdentity` carried the git HEAD
  * sha, so EVERY commit invalidated EVERY chunk. Measured on a real run: 63
@@ -8,27 +8,28 @@
  * moved to `ee18dd4de`. A docs-only commit — no test file, no source file
  * touched — threw away a 19-minute suite.
  *
- * HEAD was standing in for "the code under test changed", which the identity
- * otherwise could not see: `shardFilesSha256` hashes the chunk's own TEST files
- * and `manifestSha256` hashes only the file-path list. So the fix is to name the
- * real dependency — a content hash of `src`/`tools` — and drop the proxy.
+ * HEAD was standing in for "the inputs changed". That is false across rebases,
+ * cherry-picks, and metadata-only commits with byte-identical trees. The fix is
+ * to bind the complete tracked tree by content and drop the commit-id proxy.
  *
  * Soundness is unchanged, and that is the point: a source edit invalidated
  * everything before (HEAD moved) and invalidates everything now (`treeSha256`
  * moves). Nothing became more permissive; what disappeared is the waste of
  * discarding receipts whose inputs are byte-identical.
  *
- * Of 30 commits sampled from the day this was found: 18 touched src/tools, 9
- * were tests-only, 3 were docs-only. Under HEAD-keying all 30 cost a full run.
+ * Tracked prose remains in the tree identity because ratchet tests read docs;
+ * excluding it would trade cache hits for a false green.
  */
 
 import { describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
   loadSuccessfulTestShardReceipt,
   type TestShardCacheIdentity,
+  testShardCacheIdentitySha256,
+  trackedTreeSha256,
   writeSuccessfulTestShardReceiptAtomic,
 } from "../../tools/dev/test-shard-receipt"
 
@@ -73,9 +74,9 @@ describe("shard cache identity — what may and may not invalidate a receipt", (
   })
 
   test("the git HEAD is NOT part of the identity — a commit alone cannot invalidate", () => {
-    // The whole defect: a docs-only commit moved HEAD and discarded 31 chunks.
-    // There is no `head` field to differ on, so this is expressed as: the
-    // serialized receipt carries no head, and identical inputs still hit.
+    // There is no `head` field to differ on: the serialized receipt carries the
+    // complete tracked-tree identity, so equal input trees still hit even when
+    // their commits differ.
     const dir = mkdtempSync(join(tmpdir(), "shard-cache-head-"))
     try {
       const path = join(dir, "chunk.json")
@@ -120,6 +121,49 @@ describe("shard cache identity — what may and may not invalidate a receipt", (
     ]
     for (const over of fields) {
       expect(roundTrip(identity(), identity(over)).kind).toBe("miss")
+      expect(testShardCacheIdentitySha256(identity(over))).not.toBe(
+        testShardCacheIdentitySha256(identity()),
+      )
+    }
+  })
+
+  test("cache path identity ignores only the presentation ordinal", () => {
+    expect(testShardCacheIdentitySha256(identity({ shardIndex: 99 }))).toBe(
+      testShardCacheIdentitySha256(identity()),
+    )
+  })
+
+  test("whole-tree identity includes tests outside the current chunk and tracked prose", () => {
+    const dir = mkdtempSync(join(tmpdir(), "shard-cache-tree-"))
+    try {
+      mkdirSync(join(dir, "tests", "unit"), { recursive: true })
+      mkdirSync(join(dir, "docs"), { recursive: true })
+      writeFileSync(join(dir, "tests", "unit", "a.test.ts"), "test('a', () => {})\n")
+      writeFileSync(join(dir, "tests", "unit", "b.test.ts"), "test('b', () => {})\n")
+      writeFileSync(join(dir, "docs", "note.md"), "one\n")
+      const git = (...args: string[]) => {
+        const result = Bun.spawnSync(["git", ...args], { cwd: dir, stdout: "pipe", stderr: "pipe" })
+        if (result.exitCode !== 0) throw new Error(result.stderr.toString())
+      }
+      git("init")
+      git("config", "user.email", "cache-test@example.invalid")
+      git("config", "user.name", "cache test")
+      git("add", ".")
+      git("commit", "-m", "base")
+      const before = trackedTreeSha256(dir)
+
+      writeFileSync(join(dir, "docs", "note.md"), "two\n")
+      git("add", ".")
+      git("commit", "-m", "prose")
+      const afterProse = trackedTreeSha256(dir)
+      expect(afterProse).not.toBe(before)
+
+      writeFileSync(join(dir, "tests", "unit", "b.test.ts"), "test('changed', () => {})\n")
+      git("add", ".")
+      git("commit", "-m", "other-test")
+      expect(trackedTreeSha256(dir)).not.toBe(afterProse)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
     }
   })
 

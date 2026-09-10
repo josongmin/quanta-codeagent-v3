@@ -41,7 +41,12 @@ jobs:
       - name: setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.3.14
+      - name: restore Bun package download cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ runner.arch }}-1.3.14-${{ hashFiles('bun.lock') }}
       - name: install deps
         run: bun install --frozen-lockfile
       - name: agent review

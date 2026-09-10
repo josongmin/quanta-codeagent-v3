@@ -3,7 +3,7 @@ import { mkdtemp, rm, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { fingerprintOf, hashTrackedFile } from "../../../tools/dev/typecheck"
+import { fingerprintOf, hashTrackedFile, typecheckSkipEligible } from "../../../tools/dev/typecheck"
 
 // HELLGATE — RCA jun-08: ~300 test tsc errors accumulated invisibly because the
 // stamp cache decided skip-vs-run from an mtime+size proxy. mtime+size is an
@@ -35,6 +35,23 @@ const withTempDir = async (fn: (dir: string) => Promise<void>): Promise<void> =>
 }
 
 describe("typecheck stamp tracks file content (hellgate)", () => {
+  test("tree hashing is eligible only when skip can actually succeed", () => {
+    expect(
+      typecheckSkipEligible({
+        skipAllowed: true,
+        previousFingerprint: "prior",
+        buildInfoExists: true,
+      }),
+    ).toBe(true)
+    for (const blocked of [
+      { skipAllowed: false, previousFingerprint: "prior", buildInfoExists: true },
+      { skipAllowed: true, previousFingerprint: null, buildInfoExists: true },
+      { skipAllowed: true, previousFingerprint: "prior", buildInfoExists: false },
+    ]) {
+      expect(typecheckSkipEligible(blocked)).toBe(false)
+    }
+  })
+
   test("same-size, same-mtime content change INVALIDATES the fingerprint", async () => {
     await withTempDir(async (dir) => {
       const abs = join(dir, "example.test.ts")

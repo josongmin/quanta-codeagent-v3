@@ -29,8 +29,11 @@ import {
   armsDiffer,
   classify,
   parityArmCommand,
+  parityBatchCommand,
+  parseBatchJunit,
   parseCounters,
   parseParityArgs,
+  partitionParityBatches,
   shardOf,
 } from "@/../tools/dev/cwd-parity-check"
 
@@ -42,6 +45,43 @@ describe("cwd-parity harness", () => {
     expect(command).toContain(file)
     expect(command.filter((arg) => arg.startsWith("--preload"))).toHaveLength(2)
     expect(command.filter((arg) => arg.startsWith("--timeout="))).toEqual(["--timeout=90000"])
+  })
+
+  test("normal parity uses one JUnit-producing command for every selected file", () => {
+    const command = parityBatchCommand(["/repo/a.test.ts", "/repo/b.test.ts"], "/tmp/arm.xml")
+    expect(command.filter((arg) => arg === "bun")).toHaveLength(1)
+    expect(command).toContain("/repo/a.test.ts")
+    expect(command).toContain("/repo/b.test.ts")
+    expect(command).toContain("--reporter=junit")
+    expect(command).toContain("--reporter-outfile=/tmp/arm.xml")
+  })
+
+  test("batch JUnit maps each file independently and fails closed on an omitted file", () => {
+    const xml = [
+      '<testsuite file="tests/unit/a.test.ts" tests="3" failures="0" skipped="1">',
+      '<testsuite file="tests/unit/b.test.ts" tests="2" failures="1" skipped="0">',
+    ].join("\n")
+    const requested = [
+      "/repo/tests/unit/a.test.ts",
+      "/repo/tests/unit/b.test.ts",
+      "/repo/tests/unit/missing.test.ts",
+    ]
+    const parsed = parseBatchJunit(xml, requested, "/repo")
+    expect(parsed.observedFiles).toBe(2)
+    expect(parsed.byFile.get(requested[0] as string)).toEqual({ ok: true, pass: 2, fail: 0 })
+    expect(parsed.byFile.get(requested[1] as string)).toEqual({ ok: false, pass: 1, fail: 1 })
+    expect(parsed.byFile.get(requested[2] as string)).toEqual({ ok: false, pass: -1, fail: -1 })
+  })
+
+  test("large corpora are partitioned without loss or argv-sized batches", () => {
+    const files = Array.from(
+      { length: 600 },
+      (_, index) => `/repo/tests/unit/${String(index).padStart(4, "0")}-${"x".repeat(200)}.test.ts`,
+    )
+    const batches = partitionParityBatches(files)
+    expect(batches.length).toBeGreaterThan(2)
+    expect(batches.flat()).toEqual(files)
+    expect(batches.every((batch) => batch.length <= 256)).toBe(true)
   })
 
   describe("argv", () => {

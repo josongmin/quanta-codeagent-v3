@@ -58,14 +58,16 @@ const searchableSourcePaths = (): string[] => {
  * it was reading a different `src/` than the one under test.
  */
 const SEARCH_ROOT = join(REPO_ROOT, "src")
+const SYNTHETIC_ORPHAN = "QUANTA_SYNTHETIC_ORPHAN_GATE"
 
-const isConsumedSomewhere = (knob: string): boolean => {
+const consumedGates = (gates: readonly string[]): ReadonlySet<string> => {
   const proc = Bun.spawnSync(
     [
       "rg",
-      "-l",
+      "--no-filename",
+      "--only-matching",
       "--fixed-strings",
-      knob,
+      ...gates.flatMap((gate) => ["-e", gate]),
       SEARCH_ROOT,
       "--type",
       "ts",
@@ -90,12 +92,22 @@ const isConsumedSomewhere = (knob: string): boolean => {
   // false }` reported all three as the same thing.
   if (proc.exitCode !== 0 && proc.exitCode !== 1) {
     throw new Error(
-      `rg failed with exit ${proc.exitCode} searching for "${knob}" — that is not the same ` +
+      `rg failed with exit ${proc.exitCode} searching for CLI gates — that is not the same ` +
         `as finding no consumer. ${new TextDecoder().decode(proc.stderr).trim()}`,
     )
   }
-  return new TextDecoder().decode(proc.stdout).trim().length > 0
+  return new Set(
+    new TextDecoder()
+      .decode(proc.stdout)
+      .split("\n")
+      .filter((line) => line.length > 0),
+  )
 }
+
+// One immutable corpus snapshot per test process. Re-running the same full-tree
+// searches in separate assertions only adds process and filesystem contention.
+const SEARCHABLE_SOURCE_PATHS = searchableSourcePaths()
+const CONSUMED_GATES = consumedGates([...GATES, SYNTHETIC_ORPHAN])
 
 describe("CLI_FEATURE_GATES drift guard", () => {
   test("the array is non-empty and parsed", () => {
@@ -105,16 +117,15 @@ describe("CLI_FEATURE_GATES drift guard", () => {
   test("every seeded CLI gate has a real consumer in src/ (no stale/typo seed)", () => {
     // Anti-vacuity, derived from the real tree (3,600+ `.ts` under src/ today).
     // Without it the assertion below passes over a search that reached nothing.
-    const sourcePaths = searchableSourcePaths()
-    assertScanPopulation(sourcePaths, SEARCH_ROOT, {
+    assertScanPopulation(SEARCHABLE_SOURCE_PATHS, SEARCH_ROOT, {
       collectable: (name) => name.endsWith(".ts"),
       id: "tests/unit/cli/cli-feature-gates-drift-hellgate.test.ts#SRC",
     })
     expect(
-      sourcePaths.length,
+      SEARCHABLE_SOURCE_PATHS.length,
       "the consumer search reached no source files — every gate would read as consumed",
     ).toBeGreaterThan(3000)
-    const orphans = GATES.filter((g) => !isConsumedSomewhere(g))
+    const orphans = GATES.filter((gate) => !CONSUMED_GATES.has(gate))
     // Any entry here is a gate the CLI seeds to "1" that NOTHING reads — either a
     // typo or a feature whose consumer was removed. Delete it from the list (or
     // fix the name) so the CLI never seeds a dead env var.
@@ -123,5 +134,10 @@ describe("CLI_FEATURE_GATES drift guard", () => {
 
   test("no duplicate entries", () => {
     expect(new Set(GATES).size).toBe(GATES.length)
+  })
+
+  test("the batched matcher names every exact fixed-string hit", () => {
+    expect(CONSUMED_GATES.has(GATES[0] as string)).toBe(true)
+    expect(CONSUMED_GATES.has(SYNTHETIC_ORPHAN)).toBe(false)
   })
 })

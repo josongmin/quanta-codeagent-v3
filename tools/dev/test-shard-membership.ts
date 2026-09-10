@@ -28,14 +28,29 @@ const bucketIndex = (file: string, buckets: number): number => {
   return n % Math.max(1, buckets)
 }
 
+/** Membership is a repository property, not a checkout-location property. */
+const assertRepoRelativeFile = (file: string): void => {
+  if (
+    file.length === 0 ||
+    file.startsWith("/") ||
+    file.includes("\\") ||
+    file.split("/").some((part) => part === "" || part === "." || part === "..")
+  ) {
+    throw new Error(`membership file must be a canonical repo-relative path: ${file}`)
+  }
+}
+
 export const bucketForFile = (
   file: string,
   resourceClass: TestResourceClass,
   config: MembershipConfig = DEFAULT_MEMBERSHIP,
-): { readonly class: TestResourceClass; readonly bucket: number } => ({
-  class: resourceClass,
-  bucket: bucketIndex(file, config.bucketsByClass[resourceClass]),
-})
+): { readonly class: TestResourceClass; readonly bucket: number } => {
+  assertRepoRelativeFile(file)
+  return {
+    class: resourceClass,
+    bucket: bucketIndex(file, config.bucketsByClass[resourceClass]),
+  }
+}
 
 export interface MembershipManifest {
   readonly version: string

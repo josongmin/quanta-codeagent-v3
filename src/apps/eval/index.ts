@@ -1,5 +1,7 @@
 #!/usr/bin/env bun
 
+import { AsyncLocalStorage } from "node:async_hooks"
+
 /**
  * `bun run eval <subcommand>` — Tier 0–5 verification harness.
  *
@@ -22,39 +24,8 @@
  * Exits 0 in all "no work to do / missing key" paths so a CI matrix entry that
  * has no API key configured does not break the build — it prints guidance.
  *
- * ── WHY `console.*` IS THE RIGHT SINK HERE (biome `suspicious/noConsole`) ────
- *
- * The repo-wide rule is `noConsole: "error"`, and `biome.json` carries an
- * override lowering it to `warn` for exactly this path. That override is
- * load-bearing, not a grandfathered leak, and this is its rationale:
- *
- *   1. This file is the eval CLI's COMPOSITION ROOT — the `#!/usr/bin/env bun`
- *      entrypoint that owns the process. `src/shared/terminal-io.ts` states the
- *      contract: "Non-app modules MUST NOT reach for `process.stdout` /
- *      `process.stderr` directly. The app/composition root registers the real
- *      terminal sinks." This file IS that root: it calls `setTerminalIo` with
- *      the real streams a few lines below. Terminal ownership is its job.
- *
- *   2. Human-readable stdout IS the product. `eval grounding report`,
- *      `compare`, `regress` and `report` emit markdown/JSON on stdout for a
- *      human or a pipe to consume; routing that through the structured
- *      `logger` would wrap the artifact in log envelopes and destroy it.
- *
- *   3. The stdout/stderr SPLIT is deliberate and must survive: the artifact
- *      goes to stdout (`console.log`), while headlines, usage errors,
- *      validation failures and gate verdicts go to stderr (`console.error`) —
- *      see every `console.log(out.markdown)` / `console.error(out.headline)`
- *      pair below. That is what makes `bun run eval ... > report.md` yield a
- *      clean report while diagnostics still reach the operator.
- *
- * Every `console.*` call in this file is one of those two categories: an
- * stdout artifact or an stderr diagnostic. NONE is a debug leftover. The single
- * non-console sink is `logger.error("eval: fatal", …)` at the bottom, which is
- * correct: an unhandled crash is an observability event, not CLI output.
- *
- * If you add a `console.*` here, it must fall in one of those two categories —
- * anything else (progress spam, debug traces) belongs in `logger`, or in the
- * library module that owns the work, which is NOT covered by this override.
+ * The exported application runner owns argument parsing and output routing.
+ * The guarded process wrapper below only binds terminal streams and exit codes.
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
@@ -86,6 +57,7 @@ import {
   writePromotedGroundingReplayCase,
 } from "./grounding"
 import { GROUNDING_AMBIGUITY_CLASSES } from "./grounding/schema"
+import { EVAL_HELP } from "./help"
 import { runSwebenchAdapter } from "./public"
 import { buildReport } from "./report"
 import { ResultStore } from "./storage"
@@ -99,36 +71,6 @@ import {
 } from "./trajectory"
 import type { UseCaseId } from "./types"
 
-setTerminalIo({
-  stdout: (chunk) => {
-    void process.stdout.write(chunk)
-  },
-  stderr: (chunk) => {
-    void process.stderr.write(chunk)
-  },
-  stdoutIsTTY: process.stdout.isTTY,
-  stderrIsTTY: process.stderr.isTTY,
-})
-
-// ── argv helpers ─────────────────────────────────────────────────────────────
-
-const argv = process.argv.slice(2)
-
-const argValue = (flag: string): string | undefined => {
-  const i = argv.indexOf(flag)
-  if (i < 0 || i + 1 >= argv.length) return undefined
-  return argv[i + 1]
-}
-
-const writeTextFile = (path: string, text: string): void => {
-  const out = resolve(process.cwd(), path)
-  mkdirSync(dirname(out), { recursive: true })
-  writeFileSync(out, text)
-}
-
-const readJsonFile = (path: string): unknown =>
-  JSON.parse(readFileSync(resolve(process.cwd(), path), "utf8"))
-
 const csvValues = (raw: string | undefined): readonly string[] | undefined => {
   if (raw === undefined) return undefined
   const values = raw
@@ -138,7 +80,51 @@ const csvValues = (raw: string | undefined): readonly string[] | undefined => {
   return values.length === 0 ? undefined : values
 }
 
-loadEnvFiles([".env.dev", ".env.local", ".env"])
+export interface EvalCliApplicationDeps {
+  readonly cwd?: string
+  readonly env?: NodeJS.ProcessEnv
+  readonly stdout?: (chunk: string) => void
+  readonly stderr?: (chunk: string) => void
+}
+
+interface EvalCliInvocationContext {
+  readonly argv: readonly string[]
+  readonly cwd: string
+  readonly env: NodeJS.ProcessEnv
+  readonly stdout: (chunk: string) => void
+  readonly stderr: (chunk: string) => void
+}
+
+/** Invocation-local state rather than mutable module globals. AsyncLocalStorage
+ * keeps concurrent embedded CLI calls isolated across every awaited command. */
+const EVAL_CLI_CONTEXT = new AsyncLocalStorage<EvalCliInvocationContext>()
+
+const invocation = (): EvalCliInvocationContext => {
+  const current = EVAL_CLI_CONTEXT.getStore()
+  if (current === undefined) throw new Error("eval CLI command invoked outside runEvalCli")
+  return current
+}
+
+const console = {
+  log: (...values: unknown[]): void => invocation().stdout(`${values.join(" ")}\n`),
+  error: (...values: unknown[]): void => invocation().stderr(`${values.join(" ")}\n`),
+}
+
+const argValue = (flag: string): string | undefined => {
+  const argv = invocation().argv
+  const i = argv.indexOf(flag)
+  if (i < 0 || i + 1 >= argv.length) return undefined
+  return argv[i + 1]
+}
+
+const writeTextFile = (path: string, text: string): void => {
+  const out = resolve(invocation().cwd, path)
+  mkdirSync(dirname(out), { recursive: true })
+  writeFileSync(out, text)
+}
+
+const readJsonFile = (path: string): unknown =>
+  JSON.parse(readFileSync(resolve(invocation().cwd, path), "utf8"))
 
 // ── provider pick + LLM construction (delegated to the shared @/llm factory) ──
 // Provider precedence, per-provider key env vars, OPENAI_BASE_URL, and the
@@ -148,7 +134,8 @@ loadEnvFiles([".env.dev", ".env.local", ".env"])
 const resolveLLM = (
   role: "agent" | "judge" | "classifier",
 ): { llm: LLMPort; provider: Provider; model: string } | null => {
-  const provider = pickProvider(process.env)
+  const env = invocation().env
+  const provider = pickProvider(env)
   const envKey =
     role === "judge"
       ? "QUANTA_JUDGE_MODEL"
@@ -157,8 +144,8 @@ const resolveLLM = (
         : "QUANTA_MODEL"
   // `--model` > per-role model env > canonical DEFAULT_MODEL[provider] (the
   // factory fills the default when `model` is omitted).
-  const modelArg = argValue("--model") ?? process.env[envKey]
-  const llm = tryCreateLLM(provider, modelArg !== undefined ? { model: modelArg } : {}, process.env)
+  const modelArg = argValue("--model") ?? env[envKey]
+  const llm = tryCreateLLM(provider, modelArg !== undefined ? { model: modelArg } : {}, env)
   if (llm === null) {
     console.error(`eval/${role}: ${provider.toUpperCase()}_API_KEY not set — skip ${role} step`)
     return null
@@ -620,7 +607,7 @@ const groundingRegress = (loadGroundingReport: LoadGroundingReport): number => {
 }
 
 const cmdGrounding = async (): Promise<number> => {
-  const sub = argv[1]
+  const sub = invocation().argv[1]
   const storeDir = argValue("--store-dir")
   const store = new ResultStore({
     ...(storeDir !== undefined ? { dir: storeDir } : {}),
@@ -655,7 +642,7 @@ const cmdGrounding = async (): Promise<number> => {
 }
 
 const cmdPublic = async (): Promise<number> => {
-  const bench = argv[1]
+  const bench = invocation().argv[1]
   if (bench !== "swebench-verified") {
     console.error("eval public: only 'swebench-verified' is wired in this iteration")
     return 1
@@ -725,18 +712,18 @@ const cmdTrajectoryRedact = (): number => {
   const source = argValue("--source")
   const out = argValue("--out")
   if (source === undefined || out === undefined) {
-    process.stderr.write("eval trajectory redact: --source <jsonl> and --out <jsonl> required\n")
+    invocation().stderr("eval trajectory redact: --source <jsonl> and --out <jsonl> required\n")
     return 1
   }
   const result = exportRedactedCassette({ sourcePath: source, outputPath: out })
-  process.stdout.write(
+  invocation().stdout(
     `redacted ${result.outputPath}\n  receipt ${result.receiptPath}\n  source-sha256 ${result.receipt.source.sha256}\n  output-sha256 ${result.receipt.output.sha256}\n`,
   )
   return 0
 }
 
 const cmdTrajectory = async (): Promise<number> => {
-  const sub = argv[1]
+  const sub = invocation().argv[1]
   switch (sub) {
     case "classify":
       return cmdTrajectoryClassify()
@@ -831,7 +818,7 @@ const cmdReport = async (): Promise<number> => {
 }
 
 const cmdClassify = async (): Promise<number> => {
-  const text = argv[1]
+  const text = invocation().argv[1]
   if (text === undefined || text === "") {
     console.error("eval classify: pass the query as a single argument")
     return 1
@@ -845,44 +832,8 @@ const cmdClassify = async (): Promise<number> => {
   return 0
 }
 
-const HELP = `quanta eval — verification harness (Tier 0..5)
-
-  audit                                      Tier 0 static coverage
-  synthetic [--usecase ID]                   Tier 1 LLM-judged scenarios
-  grounding run [--mode raw|engine|assisted] [--suite canary|nightly|--corpus CORPUS]
-                                             Tier 2 structured context-grounding probe
-  grounding preflight                        Tier 2 provider/route/parser health check
-  grounding report --run-id ID               Tier 2 grounding metrics report
-  grounding baseline --candidate ID          Tier 2 resolve latest comparable baseline
-  grounding gate --run-id ID --profile canary
-                                             Tier 2 grounding release gate
-  grounding gate --route-matrix primary-openai --run-ids ID,ID --profile canary
-                                             Tier 2 route-matrix release gate
-  grounding compare --baseline ID --candidate ID
-                                             Tier 2 run-to-run grounding delta
-  grounding regress --baseline ID --candidate ID --profile strict
-                                             Tier 2 fail-closed regression gate
-  grounding scaffold-replay --source JSONL --out PATH
-                                             Tier 2 replay draft scaffold (gold-blind)
-  grounding promote-replay --draft PATH --gold-json PATH --corpus replay_critical|replay_nightly --out PATH
-                                             Tier 2 replay draft promotion to runnable fixture
-                                             add --store-dir DIR to isolate run storage
-  generate --usecase ID [--count N]          Tier 1 auto-generate scenarios (LLM)
-  public swebench-verified [--report PATH]   Tier 3 wraps bench-report.json
-  trajectory classify --input DIR            Tier 4 label real sessions
-  trajectory replay --fixture <jsonl>        Tier 4 re-execute a fixture + diff
-  trajectory freeze --source <jsonl> --usecase ID [--prompt TEXT]
-                                             Tier 4 promote a session to fixture
-  trajectory redact --source <jsonl> --out <jsonl>
-                                             owner-only redacted sharing export + provenance receipt
-  compare --scenario ID --usecase ID [--agents quanta,claude-code,...]
-                                             Tier 5 head-to-head + pairwise judge
-  report                                     render aggregate matrix
-  classify "<text>"                          ad-hoc taxonomy classifier
-`
-
 const main = async (): Promise<number> => {
-  const sub = argv[0]
+  const sub = invocation().argv[0]
   switch (sub) {
     case "audit":
       return cmdAudit()
@@ -906,18 +857,46 @@ const main = async (): Promise<number> => {
     case "help":
     case "--help":
     case "-h":
-      console.log(HELP)
+      console.log(EVAL_HELP)
       return 0
     default:
       console.error(`unknown subcommand: ${sub}`)
-      console.error(HELP)
+      console.error(EVAL_HELP)
       return 1
   }
 }
 
-main()
-  .then((code) => process.exit(code))
-  .catch((e) => {
-    logger.error("eval: fatal", { error: errMessage(e) })
-    process.exit(1)
+export const runEvalCli = (
+  argv: readonly string[],
+  deps: EvalCliApplicationDeps = {},
+): Promise<number> =>
+  EVAL_CLI_CONTEXT.run(
+    {
+      argv,
+      cwd: deps.cwd ?? process.cwd(),
+      env: deps.env ?? process.env,
+      stdout: deps.stdout ?? ((chunk: string) => void process.stdout.write(chunk)),
+      stderr: deps.stderr ?? ((chunk: string) => void process.stderr.write(chunk)),
+    },
+    main,
+  )
+
+if (import.meta.main) {
+  setTerminalIo({
+    stdout: (chunk) => {
+      void process.stdout.write(chunk)
+    },
+    stderr: (chunk) => {
+      void process.stderr.write(chunk)
+    },
+    stdoutIsTTY: process.stdout.isTTY,
+    stderrIsTTY: process.stderr.isTTY,
   })
+  loadEnvFiles([".env.dev", ".env.local", ".env"])
+  runEvalCli(process.argv.slice(2))
+    .then((code) => process.exit(code))
+    .catch((e) => {
+      logger.error("eval: fatal", { error: errMessage(e) })
+      process.exit(1)
+    })
+}

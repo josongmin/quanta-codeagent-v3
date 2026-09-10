@@ -105,22 +105,10 @@ export const GATES: readonly Gate[] = [
     why: "a new src/*.ts that no feature-catalog entry references",
   },
   {
-    id: "fc-validate",
+    id: "fc-ci",
     stage: "precommit",
-    run: "bun fc validate",
-    why: "an evidence file / ADR / test a catalog entry names does not exist",
-  },
-  {
-    id: "fc-diff",
-    stage: "precommit",
-    run: "bun fc diff",
-    why: "docs/10.feature-catalog.md out of sync with the YAMLs",
-  },
-  {
-    id: "fc-lint",
-    stage: "precommit",
-    run: "bun fc lint",
-    why: "empty-stub count + orphan Accepted ADRs may not grow",
+    run: "bun fc ci",
+    why: "one loaded catalog snapshot must pass evidence/ADR/test validation, generated-doc drift, and debt ratchets in fail-fast order",
   },
   {
     id: "fc-reachability",
@@ -291,6 +279,11 @@ export const gatesForVerificationTier = (tier: VerificationTier): readonly Gate[
  */
 export const WORKFLOW_EXEMPT: readonly {
   readonly match: string
+  /** Exact comparisons are used for one-off compatibility/producer-consumer
+   * steps. Substring matching remains only for established command families. */
+  readonly exact?: boolean
+  /** Exact workflow step name when the same action has multiple semantics. */
+  readonly step?: string
   /** The workflow the exemption is granted IN. An unscoped exemption is a hole:
    *  "advisory maturity-promotion audit, explicitly warn-only" is true of the
    *  `|| true` step in fc-gate.yml, and an audit used it to smuggle a genuinely
@@ -304,18 +297,111 @@ export const WORKFLOW_EXEMPT: readonly {
   // only `run:` steps. A new action is now a deliberate line here.
   { file: "*", match: "uses: actions/checkout@", why: "checkout — required by every job" },
   { file: "*", match: "uses: oven-sh/setup-bun@", why: "the bun toolchain itself" },
-  { file: "*", match: "uses: actions/cache@", why: "tsbuildinfo cache; cannot change a verdict" },
+  {
+    file: "ci.yml",
+    step: "restore Bun package download cache",
+    match: "uses: actions/cache@v4",
+    exact: true,
+    why: "root jobs restore Bun's package-download cache; each job still performs a frozen install",
+  },
+  {
+    file: "ci.yml",
+    step: "restore measured test timings",
+    match: "uses: actions/cache/restore@v4",
+    exact: true,
+    why: "the shadow planner restores measured timing hints; the frozen plan and worker receipts still determine the verdict",
+  },
+  {
+    file: "ci.yml",
+    step: "download exact plan",
+    match: "uses: actions/download-artifact@v4",
+    exact: true,
+    why: "shadow workers and the aggregator consume the exact plan produced by the planner job",
+  },
+  {
+    file: "ci.yml",
+    step: "download exact worker artifacts",
+    match: "uses: actions/download-artifact@v4",
+    exact: true,
+    why: "the shadow aggregator consumes exact JUnit and receipts produced by all worker jobs",
+  },
+  {
+    file: "ci.yml",
+    step: "upload exact plan",
+    match: "uses: actions/upload-artifact@v4",
+    exact: true,
+    why: "the shadow planner publishes its content-bound plan for downstream workers",
+  },
+  {
+    file: "ci.yml",
+    step: "upload worker receipt and JUnit",
+    match: "uses: actions/upload-artifact@v4",
+    exact: true,
+    why: "each shadow worker publishes its JUnit and content-bound receipt for aggregation",
+  },
+  {
+    file: "ci.yml",
+    step: "upload aggregate verdict",
+    match: "uses: actions/upload-artifact@v4",
+    exact: true,
+    why: "the shadow aggregator publishes its fail-closed diagnostic verdict for inspection",
+  },
+  {
+    file: "ci.yml",
+    step: "restore typecheck incremental cache",
+    match: "uses: actions/cache@v4",
+    exact: true,
+    why: "static-code restores compiler incremental state; typecheck still computes the current-tree verdict",
+  },
+  {
+    file: "ci.yml",
+    step: "restore and publish measured test timings",
+    match: "uses: actions/cache@v4",
+    exact: true,
+    why: "full-suite restores and updates scheduling hints; timings never substitute for test execution",
+  },
+  {
+    file: "ci.yml",
+    step: "restore web-frontend Bun package download cache",
+    match: "uses: actions/cache@v4",
+    exact: true,
+    why: "the web job restores downloads for its isolated frontend frozen install",
+  },
+  {
+    file: "ci.yml",
+    step: "restore contract Bun package download cache",
+    match: "uses: actions/cache@v4",
+    exact: true,
+    why: "the contract job restores Bun downloads while retaining frozen root and pinned tool installs",
+  },
+  {
+    file: "ci.yml",
+    step: "restore LanceDB wheel cache",
+    match: "uses: actions/cache@v4",
+    exact: true,
+    why: "the contract job restores pip wheels but still installs the exact LanceDB version",
+  },
+  {
+    file: "fc-gate.yml",
+    step: "restore Bun package download cache",
+    match: "uses: actions/cache@v4",
+    exact: true,
+    why: "the feature-catalog gate restores Bun downloads and still performs a frozen install",
+  },
   { file: "*", match: "uses: actions/setup-python@", why: "contract-job python runtime" },
   {
     file: "ci.yml",
-    match: "uses: actions/upload-artifact@",
-    why: "eval job (non-blocking) publishes its report",
+    step: "publish eval report",
+    match: "uses: actions/upload-artifact@v4",
+    exact: true,
+    why: "the non-blocking eval job publishes its report for trend inspection",
   },
   { file: "*", match: "bun install --frozen-lockfile", why: "dependency install" },
   {
-    file: "*",
-    match: "bun add -g pyright typescript typescript-language-server",
-    why: "contract-job toolchain",
+    file: "ci.yml",
+    match: "bun add -g pyright@1.1.414 typescript@5.9.3 typescript-language-server@6.0.0",
+    exact: true,
+    why: "contract-job language-server toolchain pinned to reproducible versions",
   },
   { file: "*", match: "docker version", why: "contract-job sanity probe" },
   { file: "*", match: "python -m pip install", why: "contract-job lancedb runtime" },
@@ -334,6 +420,19 @@ export const WORKFLOW_EXEMPT: readonly {
     file: "ci.yml",
     match: "verification-required-results.ts",
     why: "required-job aggregator over GitHub needs JSON; not a product test gate",
+  },
+  {
+    file: "ci.yml",
+    match:
+      'test "<expr>" = success && test "<expr>" = success && test "<expr>" = success && test "<expr>" = success && test "<expr>" = success && test "<expr>" = success',
+    exact: true,
+    why: "legacy pyramid context is a fail-closed compatibility aggregator over its six producer jobs",
+  },
+  {
+    file: "ci.yml",
+    match: 'test "<expr>" = "success"',
+    exact: true,
+    why: "legacy feature-catalog PR context mirrors the catalog producer result without duplicating setup or execution",
   },
   {
     file: "ci.yml",
@@ -378,9 +477,7 @@ export const REQUIRED_GATE_IDS: readonly string[] = [
   "lint",
   "lint-debt",
   "fc-check-changed",
-  "fc-validate",
-  "fc-diff",
-  "fc-lint",
+  "fc-ci",
   "fc-reachability",
   "silent-catch-baseline",
   "protocol-generated",

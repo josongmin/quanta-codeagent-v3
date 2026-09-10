@@ -5,10 +5,11 @@
  * the composition root `main()` in tools/pm/check.ts — argv parsing, the load-bearing
  * exit-code contract `process.exit(failed>0||missing>0 ? 1 : 0)` (with no-args ⇒ 2),
  * --strict propagation into `checkFeatureDoD(feature, strict)`, and the MISSING path —
- * had ZERO end-to-end coverage. This drives the SAME path CI runs: a real subprocess
- * over the on-disk feature catalog (the only leaf is the catalog + argv).
+ * had ZERO end-to-end coverage. One real subprocess pins the executable wrapper;
+ * the remaining cases call the exported application boundary with one preloaded
+ * on-disk catalog and exact stdout/stderr capture.
  *
- * Exit-code contract under test (check.ts:51-57, 79-94):
+ * Exit-code contract under test:
  *   - no args / no --all      ⇒ 2  (usage error)
  *   - all checked ids PASS    ⇒ 0
  *   - any id FAILS the DoD    ⇒ 1
@@ -19,11 +20,12 @@
  * the "self-consistency" guard so this stays honest if the catalog shifts.
  */
 
-import { describe, expect, test } from "bun:test"
+import { beforeAll, describe, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
 import { join } from "node:path"
 import { FEATURES_DIR as ANCHORED_FEATURES_DIR } from "../../tools/feature-catalog/paths"
-import { loadFeaturesStrict } from "../../tools/feature-catalog/schema"
+import { type LoadedFeature, loadFeaturesStrict } from "../../tools/feature-catalog/schema"
+import { runPmCheck } from "../../tools/pm/check"
 import { checkFeatureDoD } from "../../tools/pm/definition-of-done"
 
 // ANCHORED on this file, never a machine path: a hardcoded absolute repo root
@@ -48,6 +50,26 @@ const runCheck = (...args: string[]) =>
     encoding: "utf8",
   })
 
+let features: readonly LoadedFeature[] = []
+beforeAll(async () => {
+  features = await loadFeaturesStrict(FEATURES_DIR)
+})
+
+const runApplication = async (...args: string[]) => {
+  let stdout = ""
+  let stderr = ""
+  const status = await runPmCheck(args, {
+    features,
+    stdout: (chunk) => {
+      stdout += chunk
+    },
+    stderr: (chunk) => {
+      stderr += chunk
+    },
+  })
+  return { status, stdout, stderr }
+}
+
 // Stable fixtures from the committed catalog (asserted in the self-consistency guard).
 const PASSING_ID = "skill-mcp-deps" // full-bar L3 with catalog + unit + hellgate.
 const FAILING_ID = "image-gen" // fails the DoD on the committed tree (catalog axis).
@@ -55,55 +77,58 @@ const L2_SEAM_ID = "special-path-resolver" // L2 seam: catalog-only bar ⇒ pass
 const UNKNOWN_ID = "totally-not-a-real-feature-id-xyz"
 
 describe("tools/pm/check.ts CLI — exit-code contract end-to-end", () => {
-  test("no args ⇒ exit 2 + usage on stderr (does NOT silently pass)", () => {
-    const out = runCheck()
+  test("no args ⇒ exit 2 + usage on stderr (does NOT silently pass)", async () => {
+    const out = await runApplication()
     expect(out.status).toBe(2)
     expect(out.stderr).toContain("usage: bun tools/pm/check.ts")
   })
 
-  test("a passing id ⇒ exit 0 (real load → checkFeatureDoD → process.exit path)", () => {
+  test("a passing id ⇒ exit 0 (real load → checkFeatureDoD → process.exit path)", async () => {
     const out = runCheck(PASSING_ID)
+    const application = await runApplication(PASSING_ID)
     expect(out.status).toBe(0)
+    expect(out.stdout).toBe(application.stdout)
+    expect(out.stderr).toBe(application.stderr)
     expect(out.stdout).toContain("PASS")
     expect(out.stdout).toContain(PASSING_ID)
-  })
+  }, 30_000)
 
-  test("a DoD-failing id ⇒ exit 1 + FAIL in report", () => {
-    const out = runCheck(FAILING_ID)
+  test("a DoD-failing id ⇒ exit 1 + FAIL in report", async () => {
+    const out = await runApplication(FAILING_ID)
     expect(out.status).toBe(1)
     expect(out.stdout).toContain("FAIL")
     expect(out.stdout).toContain(FAILING_ID)
   })
 
-  test("an unknown id ⇒ exit 1 + a MISSING line on stderr", () => {
-    const out = runCheck(UNKNOWN_ID)
+  test("an unknown id ⇒ exit 1 + a MISSING line on stderr", async () => {
+    const out = await runApplication(UNKNOWN_ID)
     expect(out.status).toBe(1)
     expect(out.stderr).toContain("MISSING")
     expect(out.stderr).toContain(UNKNOWN_ID)
   })
 
-  test("mixed passing + unknown ⇒ still exit 1 (missing forces non-zero)", () => {
-    const out = runCheck(PASSING_ID, UNKNOWN_ID)
+  test("mixed passing + unknown ⇒ still exit 1 (missing forces non-zero)", async () => {
+    const out = await runApplication(PASSING_ID, UNKNOWN_ID)
     expect(out.status).toBe(1)
     expect(out.stdout).toContain("PASS")
     expect(out.stderr).toContain("MISSING")
   })
 
-  test("--strict propagates: an L2 seam passes by default but FAILS under --strict", () => {
-    const lax = runCheck(L2_SEAM_ID)
+  test("--strict propagates: an L2 seam passes by default but FAILS under --strict", async () => {
+    const lax = await runApplication(L2_SEAM_ID)
     expect(lax.status).toBe(0)
     expect(lax.stdout).toContain("PASS")
 
-    const strict = runCheck(L2_SEAM_ID, "--strict")
+    const strict = await runApplication(L2_SEAM_ID, "--strict")
     expect(strict.status).toBe(1)
     expect(strict.stdout).toContain("FAIL")
     // The strict summary line annotates the mode so the flip is visible.
     expect(strict.stdout).toContain("strict")
   })
 
-  test("--strict flag order is immaterial (flag before id parses the same)", () => {
-    const a = runCheck("--strict", L2_SEAM_ID)
-    const b = runCheck(L2_SEAM_ID, "--strict")
+  test("--strict flag order is immaterial (flag before id parses the same)", async () => {
+    const a = await runApplication("--strict", L2_SEAM_ID)
+    const b = await runApplication(L2_SEAM_ID, "--strict")
     expect(a.status).toBe(1)
     expect(b.status).toBe(1)
     expect(a.status).toBe(b.status)
@@ -114,7 +139,6 @@ describe("tools/pm/check.ts CLI — fixture self-consistency (keeps this honest 
   test(
     "the chosen fixtures still have the verdicts the exit-code tests assume",
     async () => {
-      const features = await loadFeaturesStrict(FEATURES_DIR)
       const byId = new Map(features.map((lf) => [lf.feature.id, lf.feature]))
 
       const passing = byId.get(PASSING_ID)

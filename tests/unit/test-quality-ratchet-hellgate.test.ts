@@ -102,6 +102,10 @@ const recordCount = (counts: Record<string, number>, file: string, count: number
 const sumCounts = (counts: Record<string, number>): number =>
   Object.values(counts).reduce((sum, count) => sum + count, 0)
 
+const FILES_BY_ROOT = new Map(
+  ROOTS.map((root) => [root, Object.freeze([...walkTests(root)])] as const),
+)
+
 const scan = (): {
   trueTerminators: { total: number; byFile: Record<string, number> }
   locBudgets: { total: number; byFile: Record<string, number> }
@@ -111,7 +115,7 @@ const scan = (): {
   const loc: Record<string, number> = {}
   let filesScanned = 0
   for (const root of ROOTS) {
-    for (const file of walkTests(root)) {
+    for (const file of FILES_BY_ROOT.get(root) ?? []) {
       filesScanned += 1
       const counts = countSmells(readFileSync(file, "utf8"))
       recordCount(tt, file, counts.trueTerminators)
@@ -124,6 +128,8 @@ const scan = (): {
     filesScanned,
   }
 }
+
+const SCAN_RESULT = scan()
 
 const offenderList = (byFile: Record<string, number>): string =>
   Object.entries(byFile)
@@ -143,17 +149,17 @@ describe("test-quality ratchet (jun-08 audit)", () => {
   // `dangerous-gate-strict-ratchet-hellgate.test.ts` — "walk not broken".
   test("the scan actually read the repo (floor — a vacuous scan cannot pass)", () => {
     for (const root of ROOTS) {
-      assertScanPopulation([...walkTests(root)], root, {
+      assertScanPopulation(FILES_BY_ROOT.get(root) ?? [], root, {
         id: `tests/unit/test-quality-ratchet-hellgate.test.ts#${root.endsWith("/tests") ? "TESTS" : "SRC"}`,
         collectable: (name) => name.endsWith(".test.ts") && name !== SELF,
         skipDirs: ["__snapshots__"],
       })
     }
-    expect(scan().filesScanned).toBeGreaterThan(2000)
+    expect(SCAN_RESULT.filesScanned).toBeGreaterThan(2000)
   })
 
   test(`A: expect(true).toBe(true) terminators stay <= ${TRUE_TERMINATOR_CEILING} (burn-down)`, () => {
-    const { trueTerminators } = scan()
+    const { trueTerminators } = SCAN_RESULT
     if (trueTerminators.total > TRUE_TERMINATOR_CEILING) {
       throw new Error(
         `\`expect(true).toBe(true)\` terminators rose to ${trueTerminators.total} ` +
@@ -166,7 +172,7 @@ describe("test-quality ratchet (jun-08 audit)", () => {
   })
 
   test(`B: source-LOC-count budget asserts stay <= ${LOC_BUDGET_CEILING} (forbidden)`, () => {
-    const { locBudgets } = scan()
+    const { locBudgets } = SCAN_RESULT
     if (locBudgets.total > LOC_BUDGET_CEILING) {
       throw new Error(
         `Source-line-count budget asserts rose to ${locBudgets.total} (ceiling ${LOC_BUDGET_CEILING}). ` +

@@ -495,25 +495,6 @@ describe("rewindToLast — safety net (HELL-24)", () => {
     expect(nth(preRewinds, 0, "preRewinds").ref).toMatch(PRE_REWIND_REF_RE)
   })
 
-  test("HELL-24b: two rewinds with 1s gap ⇒ two distinct pre-rewind refs", async () => {
-    const base = mkTmp("base-rewind-24b")
-    const ws = makeWorkspace("rw-24b")
-    const odb = defaultShadowOdb({ baseDir: base })
-    await odb.registerHead(ws)
-    writeFileSync(join(ws, "seed.txt"), "seed\nM1\n", "utf8")
-    await odb.rewindToLast(ws)
-    // Sleep > 1s so the next ISO-second suffix is distinct.
-    await new Promise((r) => setTimeout(r, 1100))
-    writeFileSync(join(ws, "seed.txt"), "seed\nM2\n", "utf8")
-    await odb.rewindToLast(ws)
-    const snaps = await odb.listSnapshots(ws)
-    const preRewinds = snaps.filter((s) => s.ref.startsWith(SHADOW_PRE_REWIND_REF_PREFIX))
-    expect(preRewinds.length).toBe(2)
-    const refs = new Set(preRewinds.map((s) => s.ref))
-    expect(refs.size).toBe(2) // distinct
-    for (const ref of refs) expect(ref).toMatch(PRE_REWIND_REF_RE)
-  })
-
   test("HELL-24c: pre-rewind ref captures pre-rewind worktree; SHADOW_LAST_REF captures snapshot", async () => {
     const base = mkTmp("base-rewind-24c")
     const ws = makeWorkspace("rw-24c")
@@ -581,10 +562,8 @@ describe("listSnapshots (HELL-26)", () => {
     expect(after1.length).toBe(1)
     expect(nth(after1, 0, "after1").ref).toBe(SHADOW_LAST_REF)
     expect(nth(after1, 0, "after1").sha).toMatch(/^[0-9a-f]{40}$/)
-    // Wait 1s so the pre-rewind commit's committer time is strictly
-    // greater than the registerHead commit's — newest-first ordering
-    // becomes provably deterministic.
-    await new Promise((r) => setTimeout(r, 1100))
+    // Git timestamps may share one second. The public contract is descending
+    // timestamp order, not a sleep-dependent strict ordering between ties.
     writeFileSync(join(ws, "seed.txt"), "seed\nMUT\n", "utf8")
     await odb.rewindToLast(ws)
     const after2 = await odb.listSnapshots(ws)

@@ -1,7 +1,7 @@
-import { dirname, join } from "node:path"
-import { fileURLToPath } from "node:url"
 import { createHash } from "node:crypto"
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
 
 const repoRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))))
 const tscBin = join(repoRoot, "node_modules/.bin/tsc")
@@ -84,7 +84,9 @@ const walkTrackedFiles = async (relativeDir: string): Promise<string[]> => {
   return out
 }
 
-const safeStat = async (relativePath: string): Promise<{ path: string; size: number; mtimeMs: number } | null> => {
+const safeStat = async (
+  relativePath: string,
+): Promise<{ path: string; size: number; mtimeMs: number } | null> => {
   try {
     const info = await stat(join(repoRoot, relativePath))
     if (!info.isFile()) return null
@@ -128,6 +130,12 @@ export const hashTrackedFile = async (
 export const fingerprintOf = (entries: readonly FingerprintEntry[]): string =>
   createHash("sha1").update(JSON.stringify(entries)).digest("hex")
 
+export const typecheckSkipEligible = (input: {
+  readonly skipAllowed: boolean
+  readonly previousFingerprint: string | null
+  readonly buildInfoExists: boolean
+}): boolean => input.skipAllowed && input.previousFingerprint !== null && input.buildInfoExists
+
 const buildFingerprint = async (target: TypecheckTarget, configPath: string): Promise<string> => {
   const selected = targetConfig[target]
   const trackedFiles = new Set<string>(trackedConfigFiles(target, configPath))
@@ -159,8 +167,8 @@ const runTypecheck = async (): Promise<never> => {
 
   const selected = targetConfig[target]
   const start = performance.now()
-  const skipAllowed = process.env["QUANTA_TYPECHECK_NO_SKIP"] !== "1"
-  const debugEnabled = process.env["QUANTA_TYPECHECK_DEBUG"] === "1"
+  const skipAllowed = process.env.QUANTA_TYPECHECK_NO_SKIP !== "1"
+  const debugEnabled = process.env.QUANTA_TYPECHECK_DEBUG === "1"
   const stampPath = join(repoRoot, selected.stamp)
 
   await mkdir(buildInfoDir, { recursive: true })
@@ -169,17 +177,28 @@ const runTypecheck = async (): Promise<never> => {
     `typecheck target=${target} scope=${selected.label} config=${selected.config} buildinfo=${selected.buildInfo}`,
   )
 
-  const fingerprint = await buildFingerprint(target, selected.config)
-  const previousFingerprint = await loadPreviousFingerprint(selected.stamp)
-  const buildInfoExists = await safeStat(selected.buildInfo)
+  // A full content fingerprint is useful only when it can produce an immediate
+  // cache hit. A forced run, missing stamp, or missing buildinfo must invoke tsc
+  // regardless, so do not make that path hash the tree before compilation.
+  const [previousFingerprint, buildInfo] = skipAllowed
+    ? await Promise.all([loadPreviousFingerprint(selected.stamp), safeStat(selected.buildInfo)])
+    : ([null, null] as const)
+  const skipEligible = typecheckSkipEligible({
+    skipAllowed,
+    previousFingerprint,
+    buildInfoExists: buildInfo !== null,
+  })
+  let fingerprint: string | undefined
+
+  if (skipEligible) fingerprint = await buildFingerprint(target, selected.config)
 
   if (debugEnabled) {
     console.log(
-      `typecheck debug target=${target} previousFingerprint=${previousFingerprint ?? "null"} currentFingerprint=${fingerprint} buildInfoExists=${buildInfoExists !== null}`,
+      `typecheck debug target=${target} skipEligible=${skipEligible} previousFingerprint=${previousFingerprint ?? "null"} currentFingerprint=${fingerprint ?? "not-computed"} buildInfoExists=${buildInfo !== null}`,
     )
   }
 
-  if (skipAllowed && buildInfoExists !== null && previousFingerprint === fingerprint) {
+  if (skipEligible && previousFingerprint === fingerprint) {
     const durationMs = Math.round(performance.now() - start)
     console.log(`typecheck target=${target} unchanged; skipping (${durationMs}ms)`)
     process.exit(0)
@@ -207,9 +226,11 @@ const runTypecheck = async (): Promise<never> => {
   )
 
   const exitCode = await proc.exited
-  const durationMs = Math.round(performance.now() - start)
 
   if (exitCode === 0) {
+    // Stamp the tree only after a successful mandatory run. Besides avoiding
+    // pre-run work, this makes the stamp describe the post-tsc source snapshot.
+    fingerprint ??= await buildFingerprint(target, selected.config)
     await writeFile(
       stampPath,
       JSON.stringify(
@@ -227,6 +248,7 @@ const runTypecheck = async (): Promise<never> => {
         2,
       ),
     )
+    const durationMs = Math.round(performance.now() - start)
     console.log(`typecheck target=${target} passed (${durationMs}ms)`)
   }
 

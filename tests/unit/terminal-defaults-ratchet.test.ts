@@ -91,7 +91,8 @@ const scanFile = (file: string): readonly Match[] => {
   return matches
 }
 
-const collectMatches = (): readonly Match[] => walkTsFiles(SRC_DIR).flatMap(scanFile)
+const TS_FILES = Object.freeze([...walkTsFiles(SRC_DIR)])
+const TERMINAL_MATCHES = Object.freeze(TS_FILES.flatMap(scanFile))
 
 // Console scan reuses the slice scanner's AST-based `scanConsoleCalls`, so
 // string-literal mentions and commented-out calls are excluded natively (no
@@ -108,20 +109,20 @@ const scanConsoleFile = (file: string): readonly Match[] => {
   }))
 }
 
-const collectConsoleMatches = (): readonly Match[] => walkTsFiles(SRC_DIR).flatMap(scanConsoleFile)
+const CONSOLE_MATCHES = Object.freeze(TS_FILES.flatMap(scanConsoleFile))
 
 describe("terminal defaults ratchet", () => {
   test("ANTI-VACUITY: the walk reaches a real, populated `src/` tree", () => {
     // The ratchet pins a debt COUNT of zero. Zero matches over a tree that was
     // never read is indistinguishable from zero over a clean one.
-    assertScanPopulation(walkTsFiles(SRC_DIR), SRC_DIR, {
+    assertScanPopulation(TS_FILES, SRC_DIR, {
       id: "tests/unit/terminal-defaults-ratchet.test.ts#SRC-DIR",
       collectable: (n) => n.endsWith(".ts"),
     })
   })
 
   test("no new non-app files own process stdio or process.exit", () => {
-    const files = new Set(collectMatches().map((match) => match.relPath))
+    const files = new Set(TERMINAL_MATCHES.map((match) => match.relPath))
     const unexpected = [...files]
       .sort()
       .filter((relPath) => !ALLOWED_NON_APP_TERMINAL_DEFAULT_FILES.has(relPath))
@@ -142,11 +143,11 @@ describe("terminal defaults ratchet", () => {
   })
 
   test("temporary non-app terminal-default debt ceiling does not grow", () => {
-    expect(collectMatches().length).toBe(CURRENT_TERMINAL_DEFAULT_DEBT_COUNT)
+    expect(TERMINAL_MATCHES.length).toBe(CURRENT_TERMINAL_DEFAULT_DEBT_COUNT)
   })
 
   test("no new non-app files call console.* (route through injected sink)", () => {
-    const files = new Set(collectConsoleMatches().map((match) => match.relPath))
+    const files = new Set(CONSOLE_MATCHES.map((match) => match.relPath))
     const unexpected = [...files]
       .sort()
       .filter((relPath) => !ALLOWED_NON_APP_CONSOLE_FILES.has(relPath))
@@ -168,7 +169,7 @@ describe("terminal defaults ratchet", () => {
   })
 
   test("non-app console debt ceiling does not grow (beyond the sanctioned allowlist)", () => {
-    const unsanctioned = collectConsoleMatches().filter(
+    const unsanctioned = CONSOLE_MATCHES.filter(
       (match) => !ALLOWED_NON_APP_CONSOLE_FILES.has(match.relPath),
     )
     expect(unsanctioned.length).toBe(0)

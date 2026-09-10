@@ -103,7 +103,9 @@ the local push path until remote required can be enforced
 the repository is verified, but protection APIs are unavailable on the current
 private-repository plan). p95 budgets in the ticket index are targets, not
 measured receipts. `verify:pr` / `verify:full` / `verify:nightly` currently
-share the same suite population; nightly is the cache-off lane.
+share the same suite population. Only the nightly cache-off campaign injects
+`QUANTA_TEST_STRESS=1`; the campaign explicitly removes it from smoke, PR, and
+full children so repeat/stress rails cannot inflate merge-gating wall time.
 
 | Command | What it runs | Success means |
 |---------|--------------|---------------|
@@ -111,10 +113,11 @@ share the same suite population; nightly is the cache-off lane.
 | `bun run verify:prepush` | `gate.ts prepush` inside a verification campaign | prepush gate set passed (static + suites) |
 | `bun run verify:pr` | `gate.ts pr --keep-going` | PR tier membership passed; not a remote required check |
 | `bun run verify:full` | `gate.ts full --keep-going` | full tier membership passed; not an authoritative cache-off receipt |
-| `bun run verify:nightly` | `QUANTA_TEST_CACHE=off` + `gate.ts nightly --keep-going` | cache-off nightly membership (`cache-off-full-suite`) ran |
+| `bun run verify:nightly` | `QUANTA_TEST_CACHE=off` + `gate.ts nightly --keep-going`; child gets `QUANTA_TEST_STRESS=1` | cache-off nightly membership (`cache-off-full-suite`) and opted-in stress rails ran |
 | `bun run verify:scope` | dry-run selection (`verify-scope.ts`) | JSON/plan of what a tier would run; exclusive flags fail closed |
 
-`.githooks/pre-push` still calls `bun run prepush --bail`, not `verify:prepush`.
+`.githooks/pre-push` calls canonical `bun run prepush`; that script owns the
+fail-fast `--bail` policy and receipt reuse, rather than duplicating flags in the hook.
 See [ADR-0003](../docs/decisions/0003-test-pyramid.md) “이후 정책 (SEP9-TV)”.
 
 ## Reading order (cold start)

@@ -6,6 +6,7 @@ import {
   atomicWriteJson,
   createHeartbeatLoop,
   errorCodeOf,
+  type HeartbeatScheduler,
   parseIsoMs,
   processAlive,
   readJson,
@@ -25,6 +26,7 @@ export interface AcquireSingleBoxGuardOptions {
   readonly waitMs?: number
   readonly pollMs?: number
   readonly heartbeatMs?: number
+  readonly heartbeatScheduler?: HeartbeatScheduler
   readonly staleHeartbeatMs?: number
   readonly now?: () => number
   readonly sleep?: (ms: number) => Promise<void>
@@ -45,6 +47,7 @@ interface ResolvedAcquireSingleBoxGuardOptions {
   readonly waitMs: number
   readonly pollMs: number
   readonly heartbeatMs: number
+  readonly heartbeatScheduler: HeartbeatScheduler | undefined
   readonly staleHeartbeatMs: number
   readonly now: () => number
   readonly sleep: (ms: number) => Promise<void>
@@ -159,6 +162,7 @@ const resolveAcquireSingleBoxGuardOptions = (
     waitMs,
     pollMs: asPositiveInt(opts.pollMs ?? DEFAULT_POLL_MS, DEFAULT_POLL_MS),
     heartbeatMs: asPositiveInt(opts.heartbeatMs ?? DEFAULT_HEARTBEAT_MS, DEFAULT_HEARTBEAT_MS),
+    heartbeatScheduler: opts.heartbeatScheduler,
     staleHeartbeatMs: asPositiveInt(
       opts.staleHeartbeatMs ?? DEFAULT_STALE_HEARTBEAT_MS,
       DEFAULT_STALE_HEARTBEAT_MS,
@@ -192,8 +196,10 @@ const createSingleBoxGuardHandle = (
   opts: ResolvedAcquireSingleBoxGuardOptions,
   acquiredAt: string,
 ): SingleBoxGuard => {
-  const heartbeat = createHeartbeatLoop(opts.heartbeatMs, () =>
-    writeSingleBoxOwnerRecord(opts, acquiredAt),
+  const heartbeat = createHeartbeatLoop(
+    opts.heartbeatMs,
+    () => writeSingleBoxOwnerRecord(opts, acquiredAt),
+    opts.heartbeatScheduler,
   )
   let released = false
   let releaseInFlight: Promise<void> | undefined

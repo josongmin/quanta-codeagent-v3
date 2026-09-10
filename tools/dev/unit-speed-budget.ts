@@ -1,5 +1,6 @@
+// biome-ignore-all lint/suspicious/noConsole: command-line reporter
 /**
- * Unit-suite speed budget — PER-TEST, one-directional.
+ * Unit-suite speed budget — PER-TEST + PER-FILE, one-directional.
  *
  * WHY THIS REPLACED THE OLD GATE. `ci.yml` used to wrap `bun test tests/unit`
  * in a wall-clock assert: "fail if the whole suite takes > 8000ms (RFC §10.1
@@ -21,7 +22,10 @@
  *   slowest <= ceiling → PASS, with a "you can tighten to N" advisory on a drop.
  *
  * Total wall time is REPORTED, never asserted: it is runner-hardware dependent
- * and a growing suite legitimately takes longer.
+ * and a growing suite legitimately takes longer. Per-file cost is asserted from
+ * testcase aggregates plus the runner's measured share of module/preload/startup
+ * wall time, which prevents 100 modest cases or module-scope work from hiding
+ * behind the single-test maximum.
  *
  * Usage:
  *   bun test tests/unit --reporter=junit --reporter-outfile=<xml>
@@ -32,6 +36,8 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
+import { loadTestTimings } from "./test-shard-timings"
+import { sharedVerificationCacheRoot } from "./verification-receipt"
 
 const repoRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))))
 const budgetPath = join(repoRoot, "tools/dev/unit-speed-budget.json")
@@ -39,12 +45,19 @@ const budgetPath = join(repoRoot, "tools/dev/unit-speed-budget.json")
 /** A junit run this small means the reporter/glob broke — never pass over it. */
 const MIN_TESTCASES = 1000
 
-type Budget = { readonly slowestMs: number; readonly note?: string }
-type Case = { readonly name: string; readonly ms: number; readonly file: string | undefined }
+type Budget = { readonly slowestMs: number; readonly slowestFileMs: number; readonly note?: string }
+type Case = {
+  readonly name: string
+  readonly ms: number
+  readonly file: string | undefined
+  readonly receiptFile: string | undefined
+}
 
 const xmlPath = process.argv[2]
 if (!xmlPath || xmlPath.startsWith("--")) {
-  console.error("usage: unit-speed-budget.ts <junit.xml> [--scope=<path-prefix>] [--tighten]")
+  console.error(
+    "usage: unit-speed-budget.ts <junit.xml> [--scope=<path-prefix>] [--timings=<runner-timings.json>] [--tighten]",
+  )
   process.exit(1)
 }
 
@@ -54,6 +67,9 @@ if (!xmlPath || xmlPath.startsWith("--")) {
 const scope = process.argv
   .find((argument) => argument.startsWith("--scope="))
   ?.slice("--scope=".length)
+const timingsPath =
+  process.argv.find((argument) => argument.startsWith("--timings="))?.slice("--timings=".length) ??
+  join(sharedVerificationCacheRoot(repoRoot), "test-timings-v1.json")
 
 const xml = readFileSync(xmlPath, "utf8")
 
@@ -81,11 +97,13 @@ for (const tag of xml.match(/<testcase\b[^>]*>/g) ?? []) {
   // Scoped consumption: a case outside the scope prefix (or one the reporter
   // could not attribute to a file) is another tier's business, not this budget's.
   if (scope !== undefined && !(rawFile ?? "").startsWith(scope)) continue
-  const file =
-    rawFile !== undefined && rawFile.endsWith(".ts") && existsSync(join(repoRoot, rawFile))
-      ? rawFile
-      : undefined
-  cases.push({ name: label ? `${label} › ${name}` : name, ms: seconds * 1000, file })
+  const file = rawFile?.endsWith(".ts") && existsSync(join(repoRoot, rawFile)) ? rawFile : undefined
+  cases.push({
+    name: label ? `${label} › ${name}` : name,
+    ms: seconds * 1000,
+    file,
+    receiptFile: rawFile,
+  })
 }
 
 if (cases.length < MIN_TESTCASES) {
@@ -100,6 +118,42 @@ const sorted = [...cases].sort((a, b) => b.ms - a.ms)
 const slowest = sorted[0] as Case
 const totalMs = cases.reduce((acc, c) => acc + c.ms, 0)
 const budget = JSON.parse(readFileSync(budgetPath, "utf8")) as Budget
+const aggregateByFile = new Map<string, number>()
+for (const one of cases) {
+  if (one.receiptFile === undefined) continue
+  aggregateByFile.set(one.receiptFile, (aggregateByFile.get(one.receiptFile) ?? 0) + one.ms)
+}
+if (aggregateByFile.size === 0) {
+  console.error(
+    "unit-speed-budget: JUnit attributed zero cases to files — per-file governance would be vacuous.",
+  )
+  process.exit(1)
+}
+
+// Runner timings include each file's JUnit aggregate plus an even share of the
+// chunk's unattributed wall (module loading, preload/setup, and runner startup).
+// The budget therefore sees costs that per-test JUnit cannot represent.
+const runnerTimings = loadTestTimings(timingsPath)
+const missingTimingFiles = [...aggregateByFile.keys()].filter((file) => !runnerTimings.has(file))
+if (missingTimingFiles.length > 0) {
+  console.error(
+    `unit-speed-budget: runner timing receipt ${timingsPath} is missing ${missingTimingFiles.length}/` +
+      `${aggregateByFile.size} executed file(s), including ${missingTimingFiles.slice(0, 5).join(", ")}. ` +
+      "Refusing to claim module-startup coverage from testcase-only JUnit.",
+  )
+  process.exit(1)
+}
+const fileCosts = [...aggregateByFile].map(([file, aggregateMs]) => ({
+  file,
+  ms: Math.max(aggregateMs, runnerTimings.get(file) ?? 0),
+  aggregateMs,
+}))
+fileCosts.sort((left, right) => right.ms - left.ms)
+const slowestFile = fileCosts[0] as {
+  readonly file: string
+  readonly ms: number
+  readonly aggregateMs: number
+}
 
 /**
  * CONFIRM A VIOLATION STANDALONE BEFORE CALLING IT ONE.
@@ -190,7 +244,7 @@ const topList = (): string =>
     .join("\n")
 
 if (process.argv.includes("--tighten")) {
-  if (slowest.ms > budget.slowestMs) {
+  if (slowest.ms > budget.slowestMs || slowestFile.ms > budget.slowestFileMs) {
     console.error(
       "unit-speed-budget: refusing to --tighten a REGRESSION (the budget only goes down)",
     )
@@ -211,7 +265,9 @@ if (process.argv.includes("--tighten")) {
 
 console.log(
   `unit-speed-budget: ${cases.length} tests, summed ${Math.round(totalMs)}ms, ` +
-    `slowest ${Math.round(slowest.ms)}ms/${budget.slowestMs}ms`,
+    `slowest ${Math.round(slowest.ms)}ms/${budget.slowestMs}ms, ` +
+    `slowest file ${Math.round(slowestFile.ms)}ms/${budget.slowestFileMs}ms ` +
+    `(${aggregateByFile.size}/${aggregateByFile.size} runner-timed)`,
 )
 console.log(`slowest 10:\n${topList()}`)
 
@@ -229,6 +285,29 @@ if (slowest.ms > budget.slowestMs) {
         `${confirmed.how} — "${slowest.name}". In-suite it measured ${Math.round(slowest.ms)}ms, so this is ` +
         "the test's own cost, not contention. Move it to tests/integration or fake the slow dependency; " +
         "do NOT raise the budget.",
+    )
+    process.exit(1)
+  }
+}
+if (slowestFile.ms > budget.slowestFileMs) {
+  const candidate = cases.find((one) => one.receiptFile === slowestFile.file)
+  const confirmed =
+    candidate === undefined
+      ? { ms: slowestFile.ms, how: "no testcase mapped to file — screen number stands" }
+      : confirmStandalone({ ...candidate, ms: slowestFile.ms })
+  if (confirmed.ms <= budget.slowestFileMs) {
+    console.log(
+      `[screen only] file "${slowestFile.file}" measured ${Math.round(slowestFile.ms)}ms from ` +
+        `runner/JUnit but ${Math.round(confirmed.ms)}ms ${confirmed.how} — under the ` +
+        `${budget.slowestFileMs}ms file budget. Contention, not a slow file; no regression.`,
+    )
+  } else {
+    console.error(
+      `REGRESSION: slowest unit file is ${Math.round(confirmed.ms)}ms ` +
+        `(budget ${budget.slowestFileMs}ms), ${confirmed.how} — "${slowestFile.file}". ` +
+        `JUnit aggregate=${Math.round(slowestFile.aggregateMs)}ms, runner/module-aware ` +
+        `screen=${Math.round(slowestFile.ms)}ms. Split the file, remove module-scope work, or move ` +
+        "real integration work out of tests/unit; do NOT raise the budget.",
     )
     process.exit(1)
   }

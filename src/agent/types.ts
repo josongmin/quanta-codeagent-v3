@@ -80,6 +80,14 @@ export type { WireSlotsCoreConfig } from "./types/wire-slots-core"
 export type { WireSlotsRuntimeConfig } from "./types/wire-slots-runtime"
 export type { WireSlotsSessionConfig } from "./types/wire-slots-session"
 
+/** Same-turn transient recovery timing seam. Production omits this and keeps
+ * full-jitter `Math.random` plus the abort-aware real timer. Tests may inject a
+ * seeded source and a recording no-wall sleeper without changing policy math. */
+export interface RecoveryBackoffConfig {
+  readonly random?: () => number
+  readonly sleep?: (delayMs: number, signal: AbortSignal) => Promise<void>
+}
+
 // AgentConfig `extends` the three cohesion groups defined at the BOTTOM of
 // this file (SafetyConfig / PermissionExtrasConfig / SteeringConfig) plus the
 // four extracted wire-slot groups (WireSlotsCore/Runtime/Session/Compose).
@@ -168,6 +176,8 @@ export interface AgentConfig
   cwd: string
   maxTurns: number
   signal: AbortSignal
+  /** Optional recovery timing collaborators; absent preserves production defaults. */
+  recoveryBackoff?: RecoveryBackoffConfig
   /**
    * Asked when the permission policy returns `ask` (or the always-confirm HITL
    * tier fires). Absent ⇒ treated as deny.
@@ -780,7 +790,13 @@ export type AdmissibilityGateConfig = Pick<
  *  compaction thrash. ISP slice for the recovery / compaction co-operators. */
 export type RecoveryConfig = Pick<
   AgentConfig,
-  "llm" | "stream" | "signal" | "compaction" | "compactionBreaker" | "onPreCompact"
+  | "llm"
+  | "stream"
+  | "signal"
+  | "compaction"
+  | "compactionBreaker"
+  | "onPreCompact"
+  | "recoveryBackoff"
 >
 
 /** Narrow contract for the plan-mode lifecycle wires (`loop/plan-enter-wire.ts`,

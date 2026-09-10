@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -62,11 +62,33 @@ const fastUnitSuites = (prefix = "tests/unit/"): string[] =>
 const run = (
   xmlPath: string,
   args: readonly string[],
+  timingOverrides: Readonly<Record<string, number>> = {},
 ): { readonly code: number; readonly out: string; readonly err: string } => {
-  const proc = Bun.spawnSync([process.execPath, SCRIPT, xmlPath, ...args], {
-    stdout: "pipe",
-    stderr: "pipe",
-  })
+  const xml = readFileSync(xmlPath, "utf8")
+  const files = [
+    ...new Set(
+      [...xml.matchAll(/<testcase\b[^>]*\bfile="([^"]+)"/g)].flatMap((match) =>
+        match[1] === undefined ? [] : [match[1]],
+      ),
+    ),
+  ]
+  const timingsPath = `${xmlPath}.timings.json`
+  writeFileSync(
+    timingsPath,
+    `${JSON.stringify({
+      schema: "quanta.test-timings.v1",
+      entries: Object.fromEntries(
+        files.map((file) => [file, { ms: timingOverrides[file] ?? 1, sampledAtMs: Date.now() }]),
+      ),
+    })}\n`,
+  )
+  const proc = Bun.spawnSync(
+    [process.execPath, SCRIPT, xmlPath, ...args, `--timings=${timingsPath}`],
+    {
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  )
   return {
     code: proc.exitCode ?? 1,
     out: proc.stdout.toString(),
@@ -146,5 +168,28 @@ describe("unit speed budget over the full-suite receipt", () => {
     const missed = run(xml, ["--scope=tests/does-not-exist/"])
     expect(missed.code).toBe(1)
     expect(missed.err).toContain("only 0 testcases parsed")
+  })
+
+  test("100 individually-fast 100ms cases are governed as a 10s file aggregate", () => {
+    const aggregateFile = "tests/unit/aggregate-only-probe.test.ts"
+    const xml = mergedJunit([
+      ...fastUnitSuites(),
+      suite(
+        aggregateFile,
+        Array.from({ length: 100 }, (_, index) => ({ name: `aggregate ${index}`, seconds: 0.1 })),
+      ),
+    ])
+    const result = run(xml, ["--scope=tests/unit/"])
+    expect(result.code, `${result.out}\n${result.err}`).toBe(0)
+    expect(result.out).toContain("slowest file 10000ms/43517ms")
+  })
+
+  test("runner receipt makes module/startup cost visible when testcase times are tiny", () => {
+    const moduleFile = "tests/unit/fixture-0.test.ts"
+    const xml = mergedJunit(fastUnitSuites())
+    const result = run(xml, ["--scope=tests/unit/"], { [moduleFile]: 60_000 })
+    expect(result.code).toBe(1)
+    expect(result.err).toContain("slowest unit file")
+    expect(result.err).toContain("runner/module-aware screen=60000ms")
   })
 })

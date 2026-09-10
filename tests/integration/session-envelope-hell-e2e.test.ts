@@ -490,29 +490,38 @@ const writeTokenCountFixture = async (path: string, n: number): Promise<void> =>
   }
 }
 
-describe("session envelope hell — streaming 10,000 records with running counter only", () => {
-  test("exact 10,000 read-back; we never materialise the full array", async () => {
-    const sessionId = "stream-10k"
-    const N = 10_000
-    const path = sessionEnvelopePath(sessionId)
-    await writeTokenCountFixture(path, N)
+const assertStreamingReadback = async (sessionId: string, n: number): Promise<void> => {
+  const path = sessionEnvelopePath(sessionId)
+  await writeTokenCountFixture(path, n)
 
-    let count = 0
-    let okCount = 0
-    let sumInputs = 0
-    for await (const r of iterateSessionFile(path)) {
-      count += 1
-      if (!r.ok) throw new Error(`decode failed at ${count}: ${r.error.message}`)
-      okCount += 1
-      if (r.value.type === "event_msg" && r.value.kind === "token_count") {
-        sumInputs += r.value.input_tokens
-      }
+  let count = 0
+  let okCount = 0
+  let sumInputs = 0
+  for await (const r of iterateSessionFile(path)) {
+    count += 1
+    if (!r.ok) throw new Error(`decode failed at ${count}: ${r.error.message}`)
+    okCount += 1
+    if (r.value.type === "event_msg" && r.value.kind === "token_count") {
+      sumInputs += r.value.input_tokens
     }
-    expect(count).toBe(N)
-    expect(okCount).toBe(N)
-    // sum 0..N-1 = N*(N-1)/2
-    expect(sumInputs).toBe((N * (N - 1)) / 2)
+  }
+  expect(count).toBe(n)
+  expect(okCount).toBe(n)
+  // sum 0..N-1 = N*(N-1)/2
+  expect(sumInputs).toBe((n * (n - 1)) / 2)
+}
+
+describe("session envelope hell — streaming readback with running counter only", () => {
+  test("PR rail: exact 256 read-back without materialising an array", async () => {
+    await assertStreamingReadback("stream-pr", 256)
   })
+
+  test.if(process.env.QUANTA_TEST_STRESS === "1")(
+    "nightly stress: exact 10,000 read-back",
+    async () => {
+      await assertStreamingReadback("stream-10k", 10_000)
+    },
+  )
 })
 
 /* ------------------------------------------------------------------ */
@@ -520,14 +529,13 @@ describe("session envelope hell — streaming 10,000 records with running counte
 /* ------------------------------------------------------------------ */
 
 describe("session envelope hell — two concurrent Promise.all writers, no torn lines", () => {
-  const N_PER = 500
-
   const oneWriter = async (
     sessionId: string,
     label: "writer-A" | "writer-B",
     tsBase: number,
+    n: number,
   ): Promise<void> => {
-    for (let i = 0; i < N_PER; i += 1) {
+    for (let i = 0; i < n; i += 1) {
       const ev: EventMsgRecord = {
         type: "event_msg",
         schema_version: SESSION_ENVELOPE_VERSION,
@@ -557,28 +565,31 @@ describe("session envelope hell — two concurrent Promise.all writers, no torn 
     return { total, a, b }
   }
 
-  const assertTally = (t: { total: number; a: number; b: number }): void => {
-    expect(t.total).toBe(N_PER * 2)
-    expect(t.a).toBe(N_PER)
-    expect(t.b).toBe(N_PER)
+  const assertTally = (t: { total: number; a: number; b: number }, n: number): void => {
+    expect(t.total).toBe(n * 2)
+    expect(t.a).toBe(n)
+    expect(t.b).toBe(n)
   }
 
-  const runConcurrentBurst = async (sessionId: string): Promise<void> => {
+  const runConcurrentBurst = async (sessionId: string, n: number): Promise<void> => {
     await Promise.all([
-      oneWriter(sessionId, "writer-A", 0),
-      oneWriter(sessionId, "writer-B", N_PER),
+      oneWriter(sessionId, "writer-A", 0, n),
+      oneWriter(sessionId, "writer-B", n, n),
     ])
     const t = await tallyWriters(sessionEnvelopePath(sessionId))
-    assertTally(t)
+    assertTally(t, n)
   }
 
-  test("first run: 1000 records, all decodable", async () => {
-    await runConcurrentBurst("concurrent-1")
+  test("PR rail: 128 records from two writers are all decodable", async () => {
+    await runConcurrentBurst("concurrent-pr", 64)
   })
 
-  test("second run (same harness, fresh session): catches flakiness", async () => {
-    await runConcurrentBurst("concurrent-2")
-  })
+  test.if(process.env.QUANTA_TEST_STRESS === "1")(
+    "nightly stress repeat: same harness, fresh session",
+    async () => {
+      await runConcurrentBurst("concurrent-nightly", 500)
+    },
+  )
 })
 
 /* ------------------------------------------------------------------ */

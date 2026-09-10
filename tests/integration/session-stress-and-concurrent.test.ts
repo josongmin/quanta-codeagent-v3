@@ -279,7 +279,7 @@ describe("session stress — index growth", () => {
   // 2. 1000 sessions via Promise.all batches — per-writer-tmp + in-process
   // mutex on the index ensures ALL 1000 saves succeed AND all 1000 rows
   // land in the index.
-  test("1000 sessions: batched parallel saves all succeed; full index", async () => {
+  test("1000 sessions: parallel save plus list/ids/json views share one full index", async () => {
     const N = 1000
     const tasks: Array<() => Promise<void>> = []
     for (let i = 0; i < N; i++) {
@@ -310,36 +310,19 @@ describe("session stress — index growth", () => {
     // No tmp residue (per-writer tmps are all renamed away).
     const residue = readdirSync(sessionsDir).filter((f) => f.includes(".tmp."))
     expect(residue).toEqual([])
-  }, 60_000)
 
-  // 3. `session ls --ids` at scale — output line count == 1000.
-  test("1000 sessions: ls --ids line count matches index size", async () => {
-    const N = 1000
-    // Use serial saves for deterministic index population.
-    for (let i = 0; i < N; i++) {
-      const meta = mkMeta({ id: `ids-${i}`, lastTouched: 3_000_000 + i })
-      await saveSessionById(meta, mkPayload())
-    }
-    const c = captureDeps()
-    const rc = await runSessionCommand(["ls", "--ids"], c.deps)
-    expect(rc).toBe(0)
-    const lines = c.out.split("\n").filter((l) => l.length > 0)
-    expect(lines.length).toBe(N)
-  }, 60_000)
+    const ids = captureDeps()
+    expect(await runSessionCommand(["ls", "--ids"], ids.deps)).toBe(0)
+    expect(ids.out.split("\n").filter((line) => line.length > 0)).toHaveLength(N)
 
-  // 4. `session ls --json` at scale — parses to array length 1000.
-  test("1000 sessions: ls --json parses cleanly", async () => {
-    const N = 1000
-    for (let i = 0; i < N; i++) {
-      const meta = mkMeta({ id: `json-${i}`, lastTouched: 4_000_000 + i })
-      await saveSessionById(meta, mkPayload())
-    }
-    const c = captureDeps()
-    const rc = await runSessionCommand(["ls", "--json"], c.deps)
-    expect(rc).toBe(0)
-    const parsed = JSON.parse(c.out) as SessionMeta[]
+    const json = captureDeps()
+    expect(await runSessionCommand(["ls", "--json"], json.deps)).toBe(0)
+    const parsed = JSON.parse(json.out) as SessionMeta[]
     expect(Array.isArray(parsed)).toBe(true)
     expect(parsed.length).toBe(N)
+    expect(parsed.map((meta) => meta.id).sort()).toEqual(
+      Array.from({ length: N }, (_, index) => `s1k-${index}`).sort(),
+    )
   }, 60_000)
 })
 

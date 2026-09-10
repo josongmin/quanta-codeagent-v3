@@ -1,4 +1,5 @@
 {
-  "note": "One-directional budget for the SLOWEST single unit test (ms). Replaces the old whole-suite 8000ms wall-clock assert in ci.yml, which no machine could satisfy once the suite passed ~36k tests. Raise NEVER — move the slow case to tests/integration or fake its slow dependency; tighten with `--tighten`. Pinned from a full local run: the current worst cases are REAL-toolchain e2e (real git / lldb-dap / cargo / go / ollama) that live in tests/unit and shell out to compilers, so this ceiling is loose by construction — on a runner lacking those toolchains they skip and the real slowest is far lower.",
-  "slowestMs": 8529
+  "note": "One-directional budgets for the slowest single unit test and slowest whole unit FILE (ms). Raise NEVER. slowestFileMs is pinned from the runner-owned test-timings-v1 receipt sampled 2026-09-09: tests/unit/git/conflict-parser-differential-fuzz.test.ts=43517ms. That receipt adds each chunk's unattributed module/preload/runner wall to per-file JUnit aggregate; the gate requires timing coverage for every executed file and confirms a screen hit standalone.",
+  "slowestMs": 8529,
+  "slowestFileMs": 43517
 }

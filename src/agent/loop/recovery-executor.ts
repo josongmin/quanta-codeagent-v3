@@ -116,7 +116,9 @@ export const applyNonSuccessRecoveryAction = async (
   }
   if (action.do === "backoff") {
     emitRecovery(config, "backoff", `attempt ${action.attempt}`)
-    await sleep(backoffDelayMs(action.attempt), config.signal)
+    const random = config.recoveryBackoff?.random ?? Math.random
+    const wait = config.recoveryBackoff?.sleep ?? sleep
+    await wait(backoffDelayMs(action.attempt, undefined, random), config.signal)
     return CONTINUE
   }
   if (action.do !== "compact") return null

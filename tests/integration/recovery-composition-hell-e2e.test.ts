@@ -39,12 +39,12 @@
  * No src/ file is touched. Reuses tests/integration/_harness.ts exclusively.
  */
 import { describe, expect, test } from "bun:test"
-import { runAgent } from "@/agent"
+import { type AgentConfig, runAgent } from "@/agent"
 import type { StreamEvent } from "@/llm"
 import { LLMError } from "@/shared"
 import {
-  cfg,
   ev,
+  cfg as harnessCfg,
   RecordingStream,
   ScriptedLLM,
   type Step,
@@ -53,6 +53,26 @@ import {
   toolUse,
   withTimeout,
 } from "./_harness"
+
+const seededRecoveryBackoff = (seed = 0x5eed1234) => {
+  let state = seed >>> 0
+  const delays: number[] = []
+  return {
+    delays,
+    config: {
+      random: (): number => {
+        state = (Math.imul(1_664_525, state) + 1_013_904_223) >>> 0
+        return state / 0x1_0000_0000
+      },
+      sleep: async (delayMs: number, signal: AbortSignal): Promise<void> => {
+        if (!signal.aborted) delays.push(delayMs)
+      },
+    },
+  }
+}
+
+const cfg = (over: Partial<AgentConfig> & Pick<AgentConfig, "llm">): AgentConfig =>
+  harnessCfg({ recoveryBackoff: seededRecoveryBackoff().config, ...over })
 
 const empty: StreamEvent[] = [{ type: "message_stop", stop_reason: "end_turn" }]
 
@@ -66,6 +86,7 @@ describe("recovery COMPOSITION hellgate — different kinds chained in one run",
   // CASE 1 — CHAIN three DIFFERENT recovery types in ONE logical turn.
   // ───────────────────────────────────────────────────────────────────────
   test("1. chain: transient backoff → max_tokens continue → empty nudge → end_turn = ONE turn", async () => {
+    const backoff = seededRecoveryBackoff()
     const stream = new RecordingStream()
     const llm = new ScriptedLLM([
       thr(new LLMError("503 service unavailable")), // call 1 → backoff retry
@@ -74,7 +95,7 @@ describe("recovery COMPOSITION hellgate — different kinds chained in one run",
       ev(text("composed final answer")), // call 4 → end_turn
     ])
     const out = await withTimeout(
-      runAgent(cfg({ llm, stream, maxTurns: 1 })),
+      runAgent(cfg({ llm, stream, maxTurns: 1, recoveryBackoff: backoff.config })),
       15_000,
       "compose-chain",
     )
@@ -84,6 +105,8 @@ describe("recovery COMPOSITION hellgate — different kinds chained in one run",
     expect(out.turns).toBe(1)
     // Every retry is reflected: 4 LLM calls (3 recoveries + 1 real end).
     expect(llm.calls).toBe(4)
+    expect(backoff.delays).toHaveLength(1)
+    expect(backoff.delays[0]).toBeLessThan(500)
 
     // The recovery TRACE proves the recoveries actually fired (not just final
     // state). Three DIFFERENT reasons, in chain order.
@@ -118,6 +141,7 @@ describe("recovery COMPOSITION hellgate — different kinds chained in one run",
   // does NOT buy extra stream retries.
   // ───────────────────────────────────────────────────────────────────────
   test("2. budget composition: output-continue spend does NOT refund the stream-retry cap", async () => {
+    const backoff = seededRecoveryBackoff()
     const stream = new RecordingStream()
     const llm = new ScriptedLLM([
       ev(text("p1", "max_tokens")), // call 1 → output nudge (outputContinues 0→1)
@@ -129,7 +153,7 @@ describe("recovery COMPOSITION hellgate — different kinds chained in one run",
       ev(text("must-not-reach")),
     ])
     const out = await withTimeout(
-      runAgent(cfg({ llm, stream, maxTurns: 1 })),
+      runAgent(cfg({ llm, stream, maxTurns: 1, recoveryBackoff: backoff.config })),
       20_000,
       "compose-budget-no-refund",
     )
@@ -139,6 +163,7 @@ describe("recovery COMPOSITION hellgate — different kinds chained in one run",
     // exhausted the stream budget. If output-continues had "refunded" stream
     // retries we'd see a 7th call (or completion); we must NOT.
     expect(llm.calls).toBe(6)
+    expect(backoff.delays).toHaveLength(3)
     // First-turn error reports turn-1 = 0; no productive turn was produced.
     expect(out.turns).toBe(0)
 

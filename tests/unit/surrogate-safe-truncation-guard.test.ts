@@ -391,7 +391,6 @@ const ALLOW_BURNDOWN: ReadonlySet<string> = new Set([
   // See agent/evidence/ingest.ts:22.
   "agent/evidence/ingest.ts:CLAIM_MAX",
   "llm/cache-control-audit/analyzer.ts:SAMPLE_CHARS",
-  "mcp/isolated-client.ts:MAX_RESULT_CHARS",
   "tool/output-spill.ts:HEAD_CHARS",
   "agent/shadow-verify-adapters/check-lsp-test.ts:TEST_TAIL_CAP",
   "agent/issue-hint/extract-errors.ts:MAX_MSG_LEN",
@@ -437,16 +436,15 @@ const ALLOW_BURNDOWN: ReadonlySet<string> = new Set([
 
 const keyOf = (s: CapSliceSite): string => `${s.file}:${s.cap}`
 
-const collectAllCapSlices = (): CapSliceSite[] => {
-  const out: CapSliceSite[] = []
-  for (const f of listTsFiles(SRC_DIR)) out.push(...findCapSliceSites(f))
-  return out
-}
+// AST construction dominates this ratchet. Freeze one on-disk snapshot and
+// reuse it for the three independent allowlist assertions.
+const ALL_TS_FILES = Object.freeze([...listTsFiles(SRC_DIR)])
+const ALL_CAP_SLICES = Object.freeze(ALL_TS_FILES.flatMap((file) => findCapSliceSites(file)))
 
 describe("PART 2 — static ratchet: no NEW naive cap-slice on a string", () => {
   test("ANTI-VACUITY: the walk reaches a real, populated `src/` tree", () => {
     // A cap-slice ratchet over an empty file list finds no naive slice anywhere.
-    assertScanPopulation(listTsFiles(SRC_DIR), SRC_DIR, {
+    assertScanPopulation(ALL_TS_FILES, SRC_DIR, {
       id: "tests/unit/surrogate-safe-truncation-guard.test.ts#SRC-DIR",
       collectable: (n) =>
         n.endsWith(".ts") &&
@@ -457,7 +455,7 @@ describe("PART 2 — static ratchet: no NEW naive cap-slice on a string", () => 
   })
 
   test("every raw cap-slice is allowlisted (hash/id) or burn-down — no new unlisted site", () => {
-    const sites = collectAllCapSlices()
+    const sites = ALL_CAP_SLICES
     const violations = sites.filter(
       (s) => !ALLOW_HASH_ID_CAPS.has(s.cap) && !ALLOW_BURNDOWN.has(keyOf(s)),
     )
@@ -477,7 +475,7 @@ describe("PART 2 — static ratchet: no NEW naive cap-slice on a string", () => 
   }, 30_000)
 
   test("burn-down list is MINIMAL — every entry still corresponds to a live site", () => {
-    const live = new Set(collectAllCapSlices().map(keyOf))
+    const live = new Set(ALL_CAP_SLICES.map(keyOf))
     const stale = [...ALLOW_BURNDOWN].filter((k) => !live.has(k))
     if (stale.length > 0) {
       throw new Error(
@@ -489,7 +487,7 @@ describe("PART 2 — static ratchet: no NEW naive cap-slice on a string", () => 
   }, 30_000)
 
   test("hash/id allowlist is MINIMAL — every cap is still referenced by a live slice", () => {
-    const liveCaps = new Set(collectAllCapSlices().map((s) => s.cap))
+    const liveCaps = new Set(ALL_CAP_SLICES.map((s) => s.cap))
     const stale = [...ALLOW_HASH_ID_CAPS].filter((c) => !liveCaps.has(c))
     expect(stale).toEqual([])
   }, 30_000)

@@ -1,6 +1,6 @@
 import { expect } from "bun:test"
 import { appendFileSync, existsSync, realpathSync } from "node:fs"
-import { isAbsolute, join, relative, resolve, sep } from "node:path"
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
 import { readScanReachBaseline, type ScanReach } from "../../../tools/dev/scan-reach-baseline"
 
 /**
@@ -40,10 +40,51 @@ import { readScanReachBaseline, type ScanReach } from "../../../tools/dev/scan-r
  * the same index 49 times is pure duplicate work. */
 const repositoryTrackedCache = new Map<string, ReadonlySet<string>>()
 const rootRepositoryCache = new Map<string, string>()
+const trackedUnderCache = new Map<
+  string,
+  { readonly repository: string; readonly files: ReadonlySet<string> }
+>()
+let repositoryRootQueries = 0
+let repositoryTrackedQueries = 0
+
+const isWithin = (root: string, path: string): boolean => {
+  const rel = relative(root, path)
+  return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
+}
+
+const closestCachedAncestor = <T>(
+  path: string,
+  entries: Iterable<readonly [string, T]>,
+): T | undefined => {
+  let closest: readonly [string, T] | undefined
+  for (const entry of entries) {
+    if (!isWithin(entry[0], path)) continue
+    if (closest === undefined || entry[0].length > closest[0].length) closest = entry
+  }
+  return closest?.[1]
+}
+
+const hasNestedGitBoundary = (repository: string, root: string): boolean => {
+  for (let cursor = root; cursor !== repository; cursor = dirname(cursor)) {
+    if (existsSync(join(cursor, ".git"))) return true
+    const parent = dirname(cursor)
+    if (parent === cursor) return true
+  }
+  return false
+}
 
 const gitRepositoryRoot = (root: string): string => {
   const cached = rootRepositoryCache.get(root)
   if (cached !== undefined) return cached
+  const cachedRepositories = [...new Set(rootRepositoryCache.values())]
+    .filter((repository) => isWithin(repository, root) && !hasNestedGitBoundary(repository, root))
+    .map((repository) => [repository, repository] as const)
+  const ancestorRepository = closestCachedAncestor(root, cachedRepositories)
+  if (ancestorRepository !== undefined) {
+    rootRepositoryCache.set(root, ancestorRepository)
+    return ancestorRepository
+  }
+  repositoryRootQueries += 1
   const result = Bun.spawnSync(["git", "rev-parse", "--show-toplevel"], {
     cwd: root,
     stdout: "pipe",
@@ -56,6 +97,10 @@ const gitRepositoryRoot = (root: string): string => {
         "so no verdict below it means anything",
     )
   }
+  // Cache the repository itself as the widest safe ancestor. Subsequent sibling
+  // scan roots (49 slice-boundary roots are the common case) can then resolve
+  // without another `git rev-parse`.
+  rootRepositoryCache.set(repository, repository)
   rootRepositoryCache.set(root, repository)
   return repository
 }
@@ -66,6 +111,7 @@ const trackedRepositoryFiles = (repository: string): ReadonlySet<string> => {
   // --full-name makes output relative to the repository root regardless of the
   // caller's scan directory. The old per-root command could emit a different
   // prefix shape and then cache a false empty intersection for the whole run.
+  repositoryTrackedQueries += 1
   const result = Bun.spawnSync(["git", "ls-files", "--full-name", "-z"], {
     cwd: repository,
     stdout: "pipe",
@@ -89,15 +135,38 @@ const trackedRepositoryFiles = (repository: string): ReadonlySet<string> => {
   return tracked
 }
 
-const isWithin = (root: string, path: string): boolean => {
-  const rel = relative(root, path)
-  return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
-}
-
 const trackedUnder = (root: string): ReadonlySet<string> => {
   const key = resolve(root)
+  const cached = trackedUnderCache.get(key)
+  if (cached !== undefined) return cached.files
   const repository = gitRepositoryRoot(key)
-  return new Set([...trackedRepositoryFiles(repository)].filter((path) => isWithin(key, path)))
+  const sameRepositoryEntries = [...trackedUnderCache.entries()]
+    .filter(([, entry]) => entry.repository === repository)
+    .map(([path, entry]) => [path, entry.files] as const)
+  const ancestorTracked = closestCachedAncestor(key, sameRepositoryEntries)
+  const source = ancestorTracked ?? trackedRepositoryFiles(repository)
+  const tracked = new Set([...source].filter((path) => isWithin(key, path)))
+  trackedUnderCache.set(key, { repository, files: tracked })
+  return tracked
+}
+
+/** Test-only observability for the cache's no-subprocess contract. */
+export const __scanPopulationCacheStatsForTest = (): {
+  readonly repositoryRootQueries: number
+  readonly repositoryTrackedQueries: number
+  readonly trackedUnderEntries: number
+} => ({
+  repositoryRootQueries,
+  repositoryTrackedQueries,
+  trackedUnderEntries: trackedUnderCache.size,
+})
+
+export const __resetScanPopulationCachesForTest = (): void => {
+  repositoryTrackedCache.clear()
+  rootRepositoryCache.clear()
+  trackedUnderCache.clear()
+  repositoryRootQueries = 0
+  repositoryTrackedQueries = 0
 }
 
 export interface ScanPopulationOptions {

@@ -12,7 +12,12 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { readScanReachBaseline } from "@/../tools/dev/scan-reach-baseline"
-import { assertFailsClosedOnEmpty, assertScanPopulation } from "../_shared/scan-population"
+import {
+  __resetScanPopulationCachesForTest,
+  __scanPopulationCacheStatsForTest,
+  assertFailsClosedOnEmpty,
+  assertScanPopulation,
+} from "../_shared/scan-population"
 
 const made: string[] = []
 afterEach(() => {
@@ -76,6 +81,64 @@ const twinFiles = (root: string): string[] =>
   Array.from({ length: 50 }, (_, i) => join(root, "twin", `m${i}.ts`))
 
 describe("population floor", () => {
+  test("nested scan roots reuse repository discovery and the closest tracked ancestor", () => {
+    const fx = build()
+    __resetScanPopulationCachesForTest()
+
+    assertScanPopulation(walk(fx.root), fx.root, {
+      id: "fx",
+      fixture: true,
+      baselinePath: fx.pin(2),
+    })
+    expect(__scanPopulationCacheStatsForTest()).toEqual({
+      repositoryRootQueries: 1,
+      repositoryTrackedQueries: 1,
+      trackedUnderEntries: 1,
+    })
+
+    const alpha = join(fx.root, "alpha")
+    const alphaFile = join(alpha, "mod.ts")
+    const alphaOpts = {
+      id: "fx",
+      fixture: true,
+      baselinePath: fx.pin(1),
+    } as const
+    assertScanPopulation([alphaFile], alpha, alphaOpts)
+    assertScanPopulation([alphaFile], alpha, alphaOpts)
+    expect(__scanPopulationCacheStatsForTest()).toEqual({
+      repositoryRootQueries: 1,
+      repositoryTrackedQueries: 1,
+      trackedUnderEntries: 2,
+    })
+
+    const beta = join(fx.root, "beta")
+    assertScanPopulation([join(beta, "mod.ts")], beta, alphaOpts)
+    expect(__scanPopulationCacheStatsForTest()).toEqual({
+      repositoryRootQueries: 1,
+      repositoryTrackedQueries: 1,
+      trackedUnderEntries: 3,
+    })
+
+    // A lexical descendant can be an independent nested repository. The
+    // ancestor optimization must stop at its `.git` boundary rather than reuse
+    // the outer index and turn the nested corpus into false zero reach.
+    const nested = join(fx.root, "nested-repo")
+    mkdirSync(nested)
+    expect(Bun.spawnSync(["git", "init", "-q"], { cwd: nested }).exitCode).toBe(0)
+    const nestedFile = join(nested, "nested.ts")
+    writeFileSync(nestedFile, "export const nested = true\n")
+    expect(Bun.spawnSync(["git", "add", "nested.ts"], { cwd: nested }).exitCode).toBe(0)
+    expect(
+      Bun.spawnSync(["git", "ls-files"], { cwd: nested, stdout: "pipe" }).stdout.toString().trim(),
+    ).toBe("nested.ts")
+    assertScanPopulation([nestedFile], nested, alphaOpts)
+    expect(__scanPopulationCacheStatsForTest()).toEqual({
+      repositoryRootQueries: 2,
+      repositoryTrackedQueries: 2,
+      trackedUnderEntries: 4,
+    })
+  })
+
   test("exact-file baseline cache invalidates a same-path, same-size rewrite", () => {
     const fx = build()
     const baseline = fx.pin(1)

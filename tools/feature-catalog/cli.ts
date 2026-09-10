@@ -10,6 +10,7 @@
  *   show <id>          — full YAML for one feature
  *   add <section> <slug> — scaffold a template YAML
  *   diff               — compare current MD against fresh render (line diff)
+ *   ci                 — validate → diff → lint from one loaded YAML snapshot
  *   check-evidence     — verify evidence files exist
  *   graph              — emit DOT dependency DAG (depends_on) to stdout
  *
@@ -123,6 +124,7 @@ function usage(): never {
       "  show <id>",
       "  add <section> <slug>",
       "  diff               compare current MD with fresh render",
+      "  ci                 validate + diff + lint from one loaded YAML snapshot",
       "  check-evidence     verify evidence files exist",
       "  audit              4-lens sweep (orphan ADRs / orphan src / empty stubs)",
       "  lint [--update-baseline]   ratchet on empty stubs + orphan Accepted ADRs",
@@ -204,7 +206,10 @@ async function collectMissingTests(
   }
 }
 
-async function cmdValidate(argv: string[] = []): Promise<void> {
+async function cmdValidate(
+  argv: string[] = [],
+  loadedFeatures?: readonly LoadedFeature[],
+): Promise<void> {
   const strict = argv.includes("--strict")
   for (const a of argv) {
     if (a !== "--strict") {
@@ -212,7 +217,7 @@ async function cmdValidate(argv: string[] = []): Promise<void> {
       process.exit(2)
     }
   }
-  const features = await loadFeaturesStrict(FEATURES_DIR)
+  const features = loadedFeatures ?? (await loadFeaturesStrict(FEATURES_DIR))
   const evidenceSnapshot = createFeatureEvidenceSnapshot(ROOT)
   // Evidence paths recur across the catalog. Probe each exact ROOT+path once,
   // concurrently, while Promise.all preserves feature order for diagnostics.
@@ -328,8 +333,8 @@ async function cmdAdd(argv: string[]): Promise<void> {
   console.log(`wrote ${file}`)
 }
 
-async function cmdDiff(): Promise<void> {
-  const features = await loadFeaturesStrict(FEATURES_DIR)
+async function cmdDiff(loadedFeatures?: readonly LoadedFeature[]): Promise<void> {
+  const features = loadedFeatures ?? (await loadFeaturesStrict(FEATURES_DIR))
   const prose = await loadProse(PROSE_DIR)
   const baseline = await loadBaseline(BASELINE)
   const fresh = renderCatalog({ features, prose, baseline })
@@ -436,9 +441,9 @@ async function collectAdrs(dir: string = resolve(ROOT, "docs/decisions")): Promi
 }
 
 /** Run all three audit lenses by reading the real filesystem. */
-async function buildAuditReport(): Promise<AuditReport> {
+async function buildAuditReport(loadedFeatures?: readonly LoadedFeature[]): Promise<AuditReport> {
   const [features, srcFiles, adrs] = await Promise.all([
-    loadFeaturesStrict(FEATURES_DIR),
+    loadedFeatures ?? loadFeaturesStrict(FEATURES_DIR),
     collectSrcFiles("src"),
     collectAdrs(resolve(ROOT, "docs/decisions")),
   ])
@@ -450,13 +455,13 @@ async function cmdAudit(): Promise<void> {
   console.log(formatAuditReport(report))
 }
 
-async function cmdLint(argv: string[]): Promise<void> {
+async function cmdLint(argv: string[], loadedFeatures?: readonly LoadedFeature[]): Promise<void> {
   const updateBaseline = argv.includes("--update-baseline")
-  const report = await buildAuditReport()
+  const report = await buildAuditReport(loadedFeatures)
 
   if (updateBaseline) {
     const next = snapshotBaseline(report)
-    await saveFcBaseline(next)
+    await saveFcBaseline(next, BASELINE)
     console.log(
       `lint: baseline updated — empty_stubs_max=${next.empty_stubs_max}, ` +
         `orphan_adr_paths_grandfathered=[${next.orphan_adr_paths_grandfathered.join(", ")}]`,
@@ -464,7 +469,7 @@ async function cmdLint(argv: string[]): Promise<void> {
     return
   }
 
-  const baseline = await loadFcBaseline()
+  const baseline = await loadFcBaseline(BASELINE)
   const result = runLint(report, baseline)
   for (const w of result.warnings) console.error(`warn: ${w}`)
   if (!result.ok) {
@@ -479,6 +484,34 @@ async function cmdLint(argv: string[]): Promise<void> {
     `lint: ok — empty stubs=${report.counts.emptyStubs}/${baseline.empty_stubs_max} ` +
       `orphan Accepted ADRs=${report.counts.orphanAdrs} (grandfathered)`,
   )
+}
+
+export interface FcCiSteps {
+  readonly load: () => Promise<readonly LoadedFeature[]>
+  readonly validate: (features: readonly LoadedFeature[]) => Promise<void>
+  readonly diff: (features: readonly LoadedFeature[]) => Promise<void>
+  readonly lint: (features: readonly LoadedFeature[]) => Promise<void>
+}
+
+/** Fail-fast CI composite. Every step sees the same immutable parsed snapshot. */
+export const runFcCi = async (steps: FcCiSteps): Promise<void> => {
+  const features = await steps.load()
+  await steps.validate(features)
+  await steps.diff(features)
+  await steps.lint(features)
+}
+
+async function cmdCi(argv: string[]): Promise<void> {
+  if (argv.length > 0) {
+    console.error(`ci: unknown arg "${argv[0]}"`)
+    process.exit(2)
+  }
+  await runFcCi({
+    load: () => loadFeaturesStrict(FEATURES_DIR),
+    validate: (features) => cmdValidate([], features),
+    diff: (features) => cmdDiff(features),
+    lint: (features) => cmdLint([], features),
+  })
 }
 
 // --- Maturity-promotion gates ----------------------------------------------
@@ -1536,6 +1569,9 @@ async function main(): Promise<void> {
     case "diff":
       await cmdDiff()
       return
+    case "ci":
+      await cmdCi(rest)
+      return
     case "check-evidence":
       await cmdCheckEvidence(rest)
       return
@@ -1608,6 +1644,7 @@ export {
   cmdAudit,
   cmdBuild,
   cmdCheckChanged,
+  cmdCi,
   cmdDiff,
   cmdGates,
   cmdGraph,

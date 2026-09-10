@@ -2,9 +2,10 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { z } from "zod"
 import { runAgent, VERIFY_FORCE_MESSAGE } from "@/agent"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
-import { defaultTools, ToolRegistry } from "@/tool"
+import { defaultTools, type Tool, ToolRegistry } from "@/tool"
 import {
   FakeLLM,
   baseConfig as harnessBaseConfig,
@@ -35,6 +36,28 @@ const baseConfig = (
     maxTurns,
     system: "test",
   })
+
+/**
+ * Verify-guard tests exercise command classification and loop ordering, not
+ * Python/pytest startup. Keep the real write tool (so the mutation watermark is
+ * production-shaped) while replacing only bash execution with a recording
+ * tool. Real subprocess, exit-code, and timeout behavior stays covered by the
+ * runArgv/bash contract suites.
+ */
+const registryWithRecordingBash = (commands: string[]): ToolRegistry => {
+  const bash: Tool<{ command: string }> = {
+    name: "bash",
+    description: "recording bash for verify-guard integration tests",
+    inputSchema: z.object({ command: z.string() }),
+    isReadOnly: () => false,
+    isConcurrencySafe: () => false,
+    async *execute(input) {
+      commands.push(input.command)
+      yield { type: "result", result: { ok: true, output: "recorded" } }
+    },
+  }
+  return new ToolRegistry(defaultTools.map((tool) => (tool.name === "bash" ? bash : tool)))
+}
 
 describe("runAgent integration", () => {
   let dir: string
@@ -195,17 +218,18 @@ describe("runAgent integration", () => {
       toolUseScript("c1", "write", { path: file, content: "patched" }),
       // turn 2: model tries to finish with NO verification since the edit
       textScript("all done"),
-      // forced turn: now it runs a REAL test. R1's tightened policy only
+      // forced turn: now it issues a valid test command. R1's tightened policy only
       // counts a `bash` as verification when its command matches the
       // test/repro regex — a noise command like `echo`/`git status` would NOT
       // satisfy the guard (that loophole is the empirically-confirmed 0-trip
-      // defect this guard exists to close), so use an actual pytest invocation.
+      // defect this guard exists to close), so use a pytest-shaped invocation.
       toolUseScript("c3", "bash", { command: "python -m pytest tests/ -q" }),
       // turn 4: finish for real
       textScript("verified and done"),
     ])
     const stream = new RecordingStream()
-    const registry = new ToolRegistry(defaultTools)
+    const bashCommands: string[] = []
+    const registry = registryWithRecordingBash(bashCommands)
     const cfg = {
       ...baseConfig(llm, registry, stream, dir, { mode: "bypass" }, 10),
       verifyGuard: { maxTrips: 2 },
@@ -232,6 +256,7 @@ describe("runAgent integration", () => {
     const toolCalls = stream.events.filter((e) => e.type === "tool_call")
     const names = toolCalls.map((e) => (e.type === "tool_call" ? e.name : ""))
     expect(names).toEqual(["write", "bash"])
+    expect(bashCommands).toEqual(["python -m pytest tests/ -q"])
   })
 
   // Regression for the EMPIRICALLY-CONFIRMED prod defect: a real SWE-bench run
@@ -248,13 +273,14 @@ describe("runAgent integration", () => {
       toolUseScript("c2", "bash", { command: "git status" }),
       // turn 3: model tries to finish — still unverified ⇒ guard MUST block.
       textScript("all done"),
-      // forced turn 4: now a REAL test runs ⇒ guard satisfied.
+      // forced turn 4: now a valid test command runs ⇒ guard satisfied.
       toolUseScript("c4", "bash", { command: "python -m pytest -q" }),
       // turn 5: finish for real.
       textScript("verified and done"),
     ])
     const stream = new RecordingStream()
-    const registry = new ToolRegistry(defaultTools)
+    const bashCommands: string[] = []
+    const registry = registryWithRecordingBash(bashCommands)
     const cfg = {
       ...baseConfig(llm, registry, stream, dir, { mode: "bypass" }, 10),
       verifyGuard: { maxTrips: 2 },
@@ -271,6 +297,7 @@ describe("runAgent integration", () => {
     const toolCalls = stream.events.filter((e) => e.type === "tool_call")
     const names = toolCalls.map((e) => (e.type === "tool_call" ? e.name : ""))
     expect(names).toEqual(["write", "bash", "bash"])
+    expect(bashCommands).toEqual(["git status", "python -m pytest -q"])
   })
 
   test("(h) verifyGuard maxTrips cap: edit→done repeated stops blocking, no infinite loop", async () => {
@@ -283,7 +310,8 @@ describe("runAgent integration", () => {
       textScript("done again"),
     ])
     const stream = new RecordingStream()
-    const registry = new ToolRegistry(defaultTools)
+    const bashCommands: string[] = []
+    const registry = registryWithRecordingBash(bashCommands)
     const cfg = {
       ...baseConfig(llm, registry, stream, dir, { mode: "bypass" }, 10),
       verifyGuard: { maxTrips: 1 },
@@ -386,8 +414,9 @@ describe("runAgent integration", () => {
   // Closeout reminder × verify-guard interaction. Ordered (verify first,
   // closeout second): both can fire in the same RUN (different turns), but only
   // verify can fire on its triggering finish; closeout fires the next finish
-  // attempt AFTER verify is satisfied. Script: edit → verify-blocks → real
-  // pytest → closeout-blocks → final finish.
+  // attempt AFTER verify is satisfied. Script: edit → verify-blocks → recorded
+  // test command → closeout-blocks → final finish. The FSM cares about command
+  // classification here; executing pytest would duplicate pytest's own tests.
   test("(l) closeoutGuard × verifyGuard interaction: both fire, ordered verify-first then closeout", async () => {
     const file = join(dir, "fix.txt")
     const llm = new FakeLLM([
@@ -395,7 +424,7 @@ describe("runAgent integration", () => {
       toolUseScript("c1", "write", { path: file, content: "patched" }),
       // turn 2: model tries to finish → verify-guard blocks (no test since edit)
       textScript("all done"),
-      // forced turn 2 (re-entry): now a REAL test runs → verify satisfied
+      // forced turn 2 (re-entry): now a test command runs → verify satisfied
       toolUseScript("c3", "bash", { command: "python -m pytest tests/ -q" }),
       // turn 3: model tries to finish → closeout blocks (single-shot)
       textScript("verified and done"),
@@ -403,7 +432,8 @@ describe("runAgent integration", () => {
       textScript("complete"),
     ])
     const stream = new RecordingStream()
-    const registry = new ToolRegistry(defaultTools)
+    const bashCommands: string[] = []
+    const registry = registryWithRecordingBash(bashCommands)
     const cfg = {
       ...baseConfig(llm, registry, stream, dir, { mode: "bypass" }, 10),
       verifyGuard: { maxTrips: 1 },
@@ -431,6 +461,7 @@ describe("runAgent integration", () => {
     expect(unverifiedIdx).toBeGreaterThanOrEqual(0)
     expect(closeoutIdx).toBeGreaterThanOrEqual(0)
     expect(unverifiedIdx).toBeLessThan(closeoutIdx)
+    expect(bashCommands).toEqual(["python -m pytest tests/ -q"])
   })
 
   test("(f) safe read then unsafe write in one turn → result order preserved", async () => {

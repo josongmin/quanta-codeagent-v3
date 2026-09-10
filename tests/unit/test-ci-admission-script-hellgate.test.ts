@@ -29,6 +29,9 @@ const planSource = await Bun.file(
 const optionsSource = await Bun.file(
   join(import.meta.dir, "..", "..", "tools", "dev", "test-shard-options.ts"),
 ).text()
+const prePushHook = await Bun.file(
+  join(import.meta.dir, "..", "..", ".githooks", "pre-push"),
+).text()
 
 const usesNativeShardSpool = (source: string): boolean =>
   (source.match(/registry\.spawnWorker\s*\(/g) ?? []).length === 1 &&
@@ -43,6 +46,23 @@ const workerBailsAfterFirstFailure = (source: string): boolean =>
   (source.match(/registry\.spawnWorker\s*\(/g) ?? []).length === 1 &&
   (source.match(/["']--bail=1["']/g) ?? []).length === 1 &&
   /cmd:\s*\[[\s\S]*?["']bun["']\s*,\s*["']test["'][\s\S]*?["']--bail=1["']/.test(source)
+
+const hookInvokesCanonicalFailFastPrepush = (source: string): boolean =>
+  (source.match(/if ! bun run prepush; then/g) ?? []).length === 1 &&
+  !/bun run prepush\s+--(?:bail|keep-going)/.test(source)
+
+const shardTreatsAdmissionDeadlineAsStartupOnly = (source: string): boolean =>
+  (source.match(/delete\s+workerEnv\[ADMISSION_DEADLINE_ENV\]/g) ?? []).length === 1 &&
+  !/admissionFromEnv\s*\(/.test(source) &&
+  !/remainingBudgetMs\s*\(/.test(source) &&
+  !source.includes("admission-budget-exhausted")
+
+const shardOwnsSourceJsCleanupOnce = (source: string): boolean =>
+  (source.match(/await preflightSourceJs\s*\(\s*\)/g) ?? []).length === 1 &&
+  (source.match(/await assertNoNewSourceJs\s*\(\s*\)/g) ?? []).length === 1 &&
+  source.includes("workerEnv[SOURCE_JS_CLEANED_ROOT_ENV] = SOURCE_ROOT") &&
+  source.includes("rmSync(chunk.cachePath, { force: true })") &&
+  source.includes('await import("../../tests/preload-clean-source-js")')
 
 const watchdogKillsWorkerTree = (source: string): boolean =>
   /void\s+handle\.cancel\s*\(\s*\)/.test(source) && !/proc\.kill\s*\(/.test(source)
@@ -121,11 +141,21 @@ describe("test:ci admission gate", () => {
     // different claims. It now delegates to the campaign-wrapped gate runner.
     expect(packageJson.scripts?.["test:ci"]).toBe("bun run prepush")
     expect(packageJson.scripts?.prepush).toBe(
-      "bun run tools/dev/verification-campaign.ts -- bun run tools/dev/gate.ts prepush --reuse-receipt --keep-going",
+      "bun run tools/dev/verification-campaign.ts -- bun run tools/dev/gate.ts prepush --reuse-receipt --bail",
     )
     expect(packageJson.scripts?.["prepush:cold"]).toBe(
-      "QUANTA_TEST_CACHE=off bun run tools/dev/verification-campaign.ts -- bun run tools/dev/gate.ts prepush --keep-going",
+      "QUANTA_TEST_CACHE=off bun run tools/dev/verification-campaign.ts -- bun run tools/dev/gate.ts prepush --bail",
     )
+    expect(packageJson.scripts?.prepush).not.toContain("--keep-going")
+    expect(hookInvokesCanonicalFailFastPrepush(prePushHook)).toBe(true)
+    expect(
+      hookInvokesCanonicalFailFastPrepush(
+        prePushHook.replace(
+          "if ! bun run prepush; then",
+          "if ! bun run prepush --keep-going; then",
+        ),
+      ),
+    ).toBe(false)
     expect(packageJson.scripts?.["verify:smoke"]).toContain("smoke-battery.test.ts")
     expect(packageJson.scripts?.["verify:prepush"]).toContain("gate.ts prepush")
     expect(packageJson.scripts?.["verify:prepush"]).not.toContain("verify:prepush")
@@ -165,9 +195,17 @@ describe("test:ci admission gate", () => {
     expect(shardRunner).toContain("idle=$" + "{idleMs}ms")
     expect(shardRunner).toContain("discoverSuiteFiles(")
     expect(shardRunner).toContain("planTestChunks(manifest")
-    expect(shardRunner).toContain("admission-budget-exhausted")
-    expect(shardRunner).toContain("spawn=0")
+    expect(shardTreatsAdmissionDeadlineAsStartupOnly(shardRunner)).toBe(true)
+    expect(
+      shardTreatsAdmissionDeadlineAsStartupOnly(
+        shardRunner.replace(
+          "delete workerEnv[ADMISSION_DEADLINE_ENV]",
+          "void workerEnv[ADMISSION_DEADLINE_ENV]",
+        ),
+      ),
+    ).toBe(false)
     expect(shardRunner).toContain("chunkInputScopeSha256(")
+    expect(shardOwnsSourceJsCleanupOnce(shardRunner)).toBe(true)
     expect(shardRunner).toContain("loadTestTimings(TIMING_STORE)")
     expect(shardRunner).toContain("harvestTimings(cached.chunk, result)")
     expect(shardRunner).toContain("result.executedFiles === plan.files.length")

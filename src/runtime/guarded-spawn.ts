@@ -84,6 +84,29 @@ export interface EscalatingKill {
   readonly disarm: () => void
 }
 
+/** Timer boundary used by SIGKILL escalation. Production uses real timers;
+ * deterministic tests inject a manual scheduler and advance it synchronously. */
+export interface EscalationScheduler {
+  readonly schedule: (callback: () => void, delayMs: number) => unknown
+  readonly cancel: (handle: unknown) => void
+  readonly unref?: (handle: unknown) => void
+}
+
+export interface EscalatingKillOptions {
+  /** Defaults to the production {@link KILL_GRACE_MS} contract (2000ms). */
+  readonly graceMs?: number
+  /** Defaults to the platform's real setTimeout/clearTimeout scheduler. */
+  readonly scheduler?: EscalationScheduler
+}
+
+const REAL_ESCALATION_SCHEDULER: EscalationScheduler = {
+  schedule: (callback, delayMs) => setTimeout(callback, delayMs),
+  cancel: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+  unref: (handle) => (handle as ReturnType<typeof setTimeout>).unref?.(),
+}
+
+const NO_GRACE_TIMER = Symbol("no-grace-timer")
+
 /**
  * Build a SIGTERM→SIGKILL escalating kill for a spawned child.
  *
@@ -109,7 +132,13 @@ export interface EscalatingKill {
  * the killer is ABSENT (tests / un-wired sites) the path is BYTE-IDENTICAL to
  * the legacy single-PID `proc.kill()`.
  */
-export const escalatingKill = (proc: KillableChild, killer?: ProcessTreeKiller): EscalatingKill => {
+export const escalatingKill = (
+  proc: KillableChild,
+  killer?: ProcessTreeKiller,
+  options: EscalatingKillOptions = {},
+): EscalatingKill => {
+  const graceMs = options.graceMs ?? KILL_GRACE_MS
+  const scheduler = options.scheduler ?? REAL_ESCALATION_SCHEDULER
   // Route a single signal either through the whole-tree killer (when wired AND
   // the child has a POSITIVE pid) or the legacy single-PID `proc.kill()`. Both
   // are no-op-safe after the child exits.
@@ -137,11 +166,11 @@ export const escalatingKill = (proc: KillableChild, killer?: ProcessTreeKiller):
     if (useTree) (killer as ProcessTreeKiller).signalTree(proc.pid as number, "SIGKILL")
     else proc.kill("SIGKILL")
   }
-  let graceTimer: ReturnType<typeof setTimeout> | undefined
+  let graceTimer: unknown | typeof NO_GRACE_TIMER = NO_GRACE_TIMER
   const disarm = () => {
-    if (graceTimer !== undefined) {
-      clearTimeout(graceTimer)
-      graceTimer = undefined
+    if (graceTimer !== NO_GRACE_TIMER) {
+      scheduler.cancel(graceTimer)
+      graceTimer = NO_GRACE_TIMER
     }
   }
   // Clear the grace timer the instant the child is reaped — covers the common
@@ -168,17 +197,17 @@ export const escalatingKill = (proc: KillableChild, killer?: ProcessTreeKiller):
       // already exited
     }
     // Arm the escalation only once; a re-entrant kill() must not stack timers.
-    if (graceTimer !== undefined) return
-    graceTimer = setTimeout(() => {
-      graceTimer = undefined
+    if (graceTimer !== NO_GRACE_TIMER) return
+    graceTimer = scheduler.schedule(() => {
+      graceTimer = NO_GRACE_TIMER
       try {
         sigkill() // signal 9 — uncatchable, for TERM-trapping children/trees
       } catch {
         // already exited in the grace window
       }
-    }, KILL_GRACE_MS)
+    }, graceMs)
     // Don't let the grace timer keep the event loop alive on its own.
-    graceTimer.unref?.()
+    scheduler.unref?.(graceTimer)
   }
 
   return { kill, disarm }

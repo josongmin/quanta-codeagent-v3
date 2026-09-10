@@ -55,13 +55,14 @@ import {
   shardFilesSha256,
   type TestShardCacheIdentity,
   testEnvironmentSha256,
+  testShardCacheIdentitySha256,
   testToolchainSha256,
   trackedTreeSha256,
   writeScanReachReceiptAtomic,
   writeSuccessfulTestShardReceiptAtomic,
 } from "./test-shard-receipt"
 import { harvestChunkTimings, loadTestTimings, mergeTestTimings } from "./test-shard-timings"
-import { admissionFromEnv, remainingBudgetMs } from "./verification-admission"
+import { ADMISSION_DEADLINE_ENV } from "./verification-admission"
 import { executionPolicyDigest } from "./verification-execution-policy"
 import { chunkInputScopeSha256 } from "./verification-input-scope"
 import { sharedVerificationCacheRoot } from "./verification-receipt"
@@ -101,6 +102,53 @@ const SHARD_INACTIVITY_TIMEOUT_MS = 12 * 60_000
 const WATCHDOG_TAIL_LINES = 20
 
 const SHARD_WATCHDOG_POLL_MS = 1_000
+const SOURCE_JS_CLEANED_ROOT_ENV = "QUANTA_TEST_SOURCE_JS_CLEANED_ROOT"
+const SOURCE_ROOT = join(REPO_ROOT, "src")
+const PRESERVED_SOURCE_JS = new Set([join(SOURCE_ROOT, "ui", "auth-ui.js")])
+
+export const findStaleSourceJs = (sourceRoot: string): readonly string[] => {
+  const stale: string[] = []
+  const visit = (directory: string): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name)
+      if (entry.isDirectory()) visit(path)
+      else if (
+        (entry.isFile() || entry.isSymbolicLink()) &&
+        path.endsWith(".js") &&
+        !PRESERVED_SOURCE_JS.has(path)
+      ) {
+        stale.push(path)
+      }
+    }
+  }
+  visit(sourceRoot)
+  return stale.sort((left, right) => left.localeCompare(right))
+}
+
+const preflightSourceJs = async (): Promise<void> => {
+  // Suppress the preload module's direct-test fallback during import, then call
+  // its managed-campaign entrypoint exactly once under the repository lease.
+  process.env[SOURCE_JS_CLEANED_ROOT_ENV] = SOURCE_ROOT
+  const cleanup = await import("../../tests/preload-clean-source-js")
+  if (
+    cleanup.SOURCE_JS_CLEANED_ROOT_ENV !== SOURCE_JS_CLEANED_ROOT_ENV ||
+    cleanup.SOURCE_ROOT !== SOURCE_ROOT ||
+    cleanup.cleanStaleSourceJs() !== SOURCE_ROOT
+  ) {
+    throw new Error("[test:shards] stale source-JS cleanup contract mismatch")
+  }
+}
+
+const assertNoNewSourceJs = async (): Promise<void> => {
+  const stale = findStaleSourceJs(SOURCE_ROOT)
+  if (stale.length === 0) return
+  const cleanup = await import("../../tests/preload-clean-source-js")
+  cleanup.cleanStaleSourceJs()
+  throw new Error(
+    `[test:shards] INVALID — test workers emitted ${stale.length} stale source .js file(s):\n` +
+      stale.map((path) => `  - ${relative(REPO_ROOT, path)}`).join("\n"),
+  )
+}
 
 interface GitSnapshot {
   readonly head: string
@@ -195,8 +243,8 @@ const junitShardPath = (junitOut: string, index: number): string => `${junitOut}
  * many-worktree case it was built for. Adding the tree keeps them side by side;
  * TTL pruning still bounds the directory.
  */
-const chunkCachePath = (suite: SuiteName, filesSha256: string, treeSha256: string): string =>
-  join(SHARD_CACHE_ROOT, suite, `chunk-${treeSha256.slice(0, 12)}-${filesSha256.slice(0, 16)}.json`)
+const chunkCachePath = (identity: TestShardCacheIdentity): string =>
+  join(SHARD_CACHE_ROOT, identity.suite, `chunk-${testShardCacheIdentitySha256(identity)}.json`)
 
 const prepareJunit = (junitOut: string, indices: readonly number[]): void => {
   // Bun's JUnit reporter does not create the target directory; on a fresh
@@ -315,22 +363,6 @@ const runShard = async (
       ? join(workerRootEarly, `junit-${plan.index}.xml`)
       : junitShardPath(opts.junitOut, plan.index)
   const scanReachSink = join(workerRootEarly, `scan-reach-${plan.index}.jsonl`)
-  const admission = admissionFromEnv(process.env)
-  if (admission !== undefined && remainingBudgetMs(admission) <= 0) {
-    mkdirSync(workerRootEarly, { recursive: true })
-    writeFileSync(scanReachSink, "")
-    process.stdout.write(
-      `[test:shards] DEFERRED chunk=${shard} reason=admission-budget-exhausted spawn=0\n`,
-    )
-    return {
-      code: 0,
-      timedOut: false,
-      cancelled: true,
-      scanReachSink,
-      junitPath,
-      elapsedMs: 0,
-    }
-  }
   const junitArgs = ["--reporter=junit", `--reporter-outfile=${junitPath}`]
   process.stdout.write(
     `\n[test:shards] START chunk=${shard} files=${plan.files.length} class=${plan.resourceClass} ` +
@@ -355,6 +387,11 @@ const runShard = async (
   const spoolPath = join(workerRoot, `chunk-${plan.index}.log`)
   writeFileSync(scanReachSink, "")
   const spoolFd = openSync(spoolPath, "w")
+  // Admission is complete before the shard runner starts. Never expose a
+  // stale startup deadline to test code that may launch another local gate.
+  const workerEnv = { ...process.env }
+  delete workerEnv[ADMISSION_DEADLINE_ENV]
+  workerEnv[SOURCE_JS_CLEANED_ROOT_ENV] = SOURCE_ROOT
   let closed = false
   try {
     const startedAt = performance.now()
@@ -378,7 +415,7 @@ const runShard = async (
       ],
       cwd: REPO_ROOT,
       env: {
-        ...process.env,
+        ...workerEnv,
         HOME: workerHome,
         TMPDIR: workerTmp,
         PWD: REPO_ROOT,
@@ -725,6 +762,38 @@ const executeChunks = async (input: {
   })
 }
 
+const executeChunksWithSourcePostflight = async (
+  input: Parameters<typeof executeChunks>[0],
+): Promise<readonly string[]> => {
+  let receipts: readonly string[] | undefined
+  let executionError: unknown
+  try {
+    receipts = await executeChunks(input)
+  } catch (error) {
+    executionError = error
+  }
+  let sourceJsError: unknown
+  try {
+    await assertNoNewSourceJs()
+  } catch (error) {
+    sourceJsError = error
+    // A chunk that emitted executable source beside `.ts` did not satisfy the
+    // isolation contract. Do not let receipts written before this global
+    // postflight turn the next campaign green without execution.
+    for (const chunk of input.chunks) rmSync(chunk.cachePath, { force: true })
+  }
+  if (executionError !== undefined && sourceJsError !== undefined) {
+    throw new AggregateError(
+      [executionError, sourceJsError],
+      "[test:shards] shard execution and source-JS postflight both failed",
+    )
+  }
+  if (executionError !== undefined) throw executionError
+  if (sourceJsError !== undefined) throw sourceJsError
+  if (receipts === undefined) throw new Error("[test:shards] missing execution receipts")
+  return receipts
+}
+
 const main = async (): Promise<void> => {
   const opts = parseOptions(process.argv.slice(2))
   if (opts.discoverOnly) {
@@ -793,6 +862,7 @@ const main = async (): Promise<void> => {
     // A red or interrupted run must never leave a previous green receipt looking
     // current. The repository lease makes this deletion race-free across clones.
     if (opts.suite === "full") rmSync(SCAN_REACH_RECEIPT, { force: true })
+    await preflightSourceJs()
     const before = await gitSnapshot()
     if (before.status !== "") {
       throw new Error(
@@ -819,6 +889,7 @@ const main = async (): Promise<void> => {
     const timings = loadTestTimings(TIMING_STORE)
     const chunks = planTestChunks(manifest, {
       predictMs: (file) => timings.get(relative(REPO_ROOT, file)),
+      membershipFile: (file) => relative(REPO_ROOT, file),
     })
     if (opts.junitOut !== undefined) {
       prepareJunit(
@@ -855,43 +926,44 @@ const main = async (): Promise<void> => {
         workers: concurrency,
         pressure: loadPressure(),
       })
+      const identity: TestShardCacheIdentity = {
+        treeSha256,
+        suite: opts.suite,
+        manifestSha256: manifestDigest,
+        shardIndex: chunk.index,
+        shardFileCount: chunk.files.length,
+        shardFilesSha256: filesSha256,
+        toolchainSha256,
+        testEnvSha256: envSha256,
+        junit: true,
+        intraParallel,
+        executionPolicySha256: executionPolicyDigest({
+          version: "v2",
+          runnerIdentity: `bun-${Bun.version}-${process.platform}-${process.arch}`,
+          intraParallel,
+          timeoutPolicyDigest: new Bun.CryptoHasher("sha256")
+            .update(String(testTimeoutMs))
+            .digest("hex"),
+          isolationPolicyDigest: new Bun.CryptoHasher("sha256")
+            .update(chunk.resourceClass)
+            .digest("hex"),
+          environmentDigest: envSha256,
+          cacheMode: opts.cacheMode,
+        }),
+        inputScopeSha256: chunkInputScopeSha256(
+          REPO_ROOT,
+          chunk.files.map((file) => relative(REPO_ROOT, file)),
+        ),
+      }
       return {
         chunk,
         intraParallel,
-        cachePath: chunkCachePath(opts.suite, filesSha256, treeSha256),
-        identity: {
-          treeSha256,
-          suite: opts.suite,
-          manifestSha256: manifestDigest,
-          shardIndex: chunk.index,
-          shardFileCount: chunk.files.length,
-          shardFilesSha256: filesSha256,
-          toolchainSha256,
-          testEnvSha256: envSha256,
-          junit: true,
-          intraParallel,
-          executionPolicySha256: executionPolicyDigest({
-            version: "v2",
-            runnerIdentity: `bun-${Bun.version}-${process.platform}-${process.arch}`,
-            intraParallel,
-            timeoutPolicyDigest: new Bun.CryptoHasher("sha256")
-              .update(String(testTimeoutMs))
-              .digest("hex"),
-            isolationPolicyDigest: new Bun.CryptoHasher("sha256")
-              .update(chunk.resourceClass)
-              .digest("hex"),
-            environmentDigest: envSha256,
-            cacheMode: opts.cacheMode,
-          }),
-          inputScopeSha256: chunkInputScopeSha256(
-            REPO_ROOT,
-            chunk.files.map((file) => relative(REPO_ROOT, file)),
-          ),
-        },
+        cachePath: chunkCachePath(identity),
+        identity,
       }
     })
 
-    const scanReachSinks = await executeChunks({
+    const scanReachSinks = await executeChunksWithSourcePostflight({
       chunks: cachedChunks,
       opts,
       runRoot,

@@ -80,9 +80,14 @@ const realFiles = function* (): Generator<{ rel: string; src: string }> {
   }
 }
 
+// One immutable source snapshot per test-file process. Every assertion below
+// judges the same checkout bytes; synthetic red-on-injection cases append to a
+// clone instead of re-walking and re-reading the full src tree.
+const REAL_FILES = Object.freeze([...realFiles()])
+
 describe("GOAL-01 — objective authority boundary ratchet", () => {
   test("no production file outside the allowlist reaches the raw authority protocol", () => {
-    const { unauthorized } = scan(realFiles(), ALLOWED)
+    const { unauthorized } = scan(REAL_FILES, ALLOWED)
     if (unauthorized.length > 0) {
       throw new Error(
         `Raw ObjectiveAuthority protocol outside the composition allowlist (use ObjectiveReadPort / an actor-fixed capability):\n${unauthorized
@@ -94,18 +99,18 @@ describe("GOAL-01 — objective authority boundary ratchet", () => {
   })
 
   test("every allowlisted file still holds a real call (anti-vacuum floor)", () => {
-    const files = [...walk(SRC_DIR)]
+    const files = REAL_FILES.map(({ rel }) => join(REPO_ROOT, rel))
     assertScanPopulation(files, SRC_DIR, {
       id: "tests/unit/objective/authority-boundary-ratchet.test.ts#SRC",
     })
-    const { stale } = scan(realFiles(), ALLOWED)
+    const { stale } = scan(REAL_FILES, ALLOWED)
     expect(stale).toEqual([])
     expect(ALLOWED.size).toBeGreaterThanOrEqual(3)
   })
 
   test("red-on-injection: a synthetic consumer reaching for the protocol is NAMED", () => {
     const injected = [
-      ...realFiles(),
+      ...REAL_FILES,
       {
         rel: "src/agent/loop/injected-consumer.ts",
         src: 'const a = asObjectiveAuthority(port)\nconst p = a.prepare({ threadId, actor: "system", mutation })\n',
@@ -116,7 +121,7 @@ describe("GOAL-01 — objective authority boundary ratchet", () => {
 
   test("red-on-injection: a comment-only mention does not count as a call", () => {
     const injected = [
-      ...realFiles(),
+      ...REAL_FILES,
       {
         rel: "src/agent/loop/prose-only.ts",
         src: "// see asObjectiveAuthority( in the bridge\n/* never call .prepare({ here */\nexport const x = 1\n",

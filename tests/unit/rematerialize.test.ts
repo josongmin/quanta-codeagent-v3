@@ -5,9 +5,9 @@
  * the wrong tree — cannot survive) is to read the actual worktree.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test"
 import { execFileSync } from "node:child_process"
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
@@ -26,11 +26,14 @@ import {
 } from "@/runner/batch/eval/rematerialize"
 
 let repo: string
+let templateRepo: string
+let caseRoot: string
 const git = (...args: string[]): string =>
   execFileSync("git", args, { cwd: repo, encoding: "utf8" }).trim()
 
-beforeEach(() => {
-  repo = mkdtempSync(join(tmpdir(), "remat-"))
+beforeAll(() => {
+  templateRepo = mkdtempSync(join(tmpdir(), "remat-template-"))
+  repo = templateRepo
   git("init", "-q")
   git("config", "user.email", "t@t")
   git("config", "user.name", "t")
@@ -39,7 +42,16 @@ beforeEach(() => {
   git("add", "-A")
   git("commit", "-q", "-m", "base")
 })
-afterEach(() => rmSync(repo, { recursive: true, force: true }))
+afterAll(() => rmSync(templateRepo, { recursive: true, force: true }))
+
+beforeEach(() => {
+  caseRoot = mkdtempSync(join(tmpdir(), "remat-case-"))
+  repo = join(caseRoot, "repo")
+  // Deep-copy the immutable committed template. Never hard-link mutable Git
+  // metadata or worktree files across tests.
+  cpSync(templateRepo, repo, { recursive: true, preserveTimestamps: true })
+})
+afterEach(() => rmSync(caseRoot, { recursive: true, force: true }))
 
 const baseCommit = (): string => git("rev-parse", "HEAD")
 

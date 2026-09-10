@@ -93,11 +93,22 @@ const allTsFiles = (dir: string, into: string[] = []): string[] => {
 const EXIT_HOOK =
   /process\s*(\.\s*[A-Za-z]*[lL]istener|\.\s*(on|once)|\[\s*["'`][A-Za-z]+["'`]\s*\])\s*\(\s*["`']exit["`']/
 
+// The guards below share one immutable inventory and one source read per
+// test-adjacent file. Synthetic detector tests operate on strings and do not
+// mutate this snapshot.
+const TEST_FILES = Object.freeze(ROOTS.flatMap((root) => testFiles(root)))
+const ALL_TS_BY_ROOT = new Map(
+  ROOTS.map((root) => [root, Object.freeze(allTsFiles(root))] as const),
+)
+const TEST_SOURCE = new Map(
+  TEST_FILES.map((file) => [file, stripComments(readFileSync(join(REPO_ROOT, file), "utf8"))]),
+)
+
 describe("temp-dir cleanup is registered with the test runner", () => {
   test('no test file relies on `process.on("exit")`, which bun test never fires', () => {
-    const offenders = ROOTS.flatMap((root) => testFiles(root))
-      .filter((f) => f !== SELF)
-      .filter((f) => EXIT_HOOK.test(stripComments(readFileSync(join(REPO_ROOT, f), "utf8"))))
+    const offenders = TEST_FILES.filter((f) => f !== SELF).filter((f) =>
+      EXIT_HOOK.test(TEST_SOURCE.get(f) ?? ""),
+    )
     expect(
       offenders,
       "these files register cleanup bun test will never run — use `afterAll` instead",
@@ -106,9 +117,9 @@ describe("temp-dir cleanup is registered with the test runner", () => {
 
   test("ANTI-VACUITY: the scan reaches a real, populated set of test files", () => {
     // without this the guard passes just as well when the walk finds nothing
-    const all = ROOTS.flatMap((root) => testFiles(root))
+    const all = TEST_FILES
     for (const root of ROOTS) {
-      const raw = allTsFiles(root).map((file) => join(REPO_ROOT, file))
+      const raw = (ALL_TS_BY_ROOT.get(root) ?? []).map((file) => join(REPO_ROOT, file))
       assertScanPopulation(raw, join(REPO_ROOT, root), {
         id: `tests/unit/test-fixtures-do-not-leak-tmp.test.ts#${root.toUpperCase()}`,
         collectable: (name) => name.endsWith(".ts"),
@@ -211,12 +222,10 @@ describe("no test file deletes a shared environment fence", () => {
     ).test(src)
 
   test("🔴 a fenced variable is RESTORED, never deleted outright", () => {
-    const offenders = ROOTS.flatMap((root) => testFiles(root))
-      .filter((f) => f !== SELF)
-      .flatMap((f) => {
-        const src = stripComments(readFileSync(f, "utf8"))
-        return FENCED.filter((name) => deletes(src, name)).map((name) => `${f} → ${name}`)
-      })
+    const offenders = TEST_FILES.filter((f) => f !== SELF).flatMap((f) => {
+      const src = TEST_SOURCE.get(f) ?? ""
+      return FENCED.filter((name) => deletes(src, name)).map((name) => `${f} → ${name}`)
+    })
     expect(
       offenders,
       "restore the prior value instead — bun shares one process across every test file",

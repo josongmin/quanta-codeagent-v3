@@ -6,6 +6,7 @@
 import { afterAll, describe, expect, test } from "bun:test"
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   rmSync,
@@ -15,6 +16,7 @@ import {
 } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import type { HeartbeatScheduler } from "../../src/apps/bench/remote/lease-fs"
 import { acquireSingleBoxGuard } from "../../src/apps/bench/remote/single-box-guard"
 
 const TEMP_DIRS = new Set<string>()
@@ -23,6 +25,28 @@ const allocTempDir = (prefix: string): string => {
   const dir = mkdtempSync(join(tmpdir(), prefix))
   TEMP_DIRS.add(dir)
   return dir
+}
+
+const manualHeartbeatScheduler = (): HeartbeatScheduler & {
+  readonly fire: () => Promise<void>
+  readonly active: () => number
+} => {
+  let nextId = 0
+  const tasks = new Map<number, () => Promise<void>>()
+  return {
+    schedule: (task) => {
+      nextId += 1
+      tasks.set(nextId, task)
+      return nextId
+    },
+    cancel: (handle) => {
+      if (typeof handle === "number") tasks.delete(handle)
+    },
+    fire: async () => {
+      await Promise.all([...tasks.values()].map((task) => task()))
+    },
+    active: () => tasks.size,
+  }
 }
 
 afterAll(() => {
@@ -122,17 +146,17 @@ describe("single-box guard hellgate", () => {
   test("a live guard re-creates its owner dir so external deletion cannot open a second launch lane", async () => {
     const root = allocTempDir("bench-single-box-heartbeat-")
     const dir = join(root, "guard")
+    const scheduler = manualHeartbeatScheduler()
     const first = await acquireSingleBoxGuard({
       label: "first",
       dir,
       heartbeatMs: 1_000,
+      heartbeatScheduler: scheduler,
     })
     let firstReleaseErr: unknown
     try {
       rmSync(dir, { recursive: true, force: true })
-      await new Promise<void>((resolve) => {
-        setTimeout(resolve, 1_100)
-      })
+      await scheduler.fire()
       await expect(
         acquireSingleBoxGuard({
           label: "second",
@@ -147,6 +171,22 @@ describe("single-box guard hellgate", () => {
       }
     }
     expect(firstReleaseErr).toBeUndefined()
+    expect(scheduler.active()).toBe(0)
+  })
+
+  test("the production scheduler delivers a real heartbeat canary", async () => {
+    const root = allocTempDir("bench-single-box-real-heartbeat-")
+    const dir = join(root, "guard")
+    const ownerMeta = join(dir, "owner.json")
+    const first = await acquireSingleBoxGuard({ label: "first", dir, heartbeatMs: 10 })
+    try {
+      rmSync(dir, { recursive: true, force: true })
+      const deadline = Date.now() + 1_000
+      while (!existsSync(ownerMeta) && Date.now() < deadline) await Bun.sleep(5)
+      expect(existsSync(ownerMeta)).toBe(true)
+    } finally {
+      await first.release().catch(() => undefined)
+    }
   })
 
   test("external deletion cannot open a second launch lane BEFORE the next heartbeat lands", async () => {
@@ -225,10 +265,12 @@ describe("single-box guard hellgate", () => {
   test("a failed release keeps the heartbeat alive so external deletion still cannot open a second launch lane", async () => {
     const root = allocTempDir("bench-single-box-release-heartbeat-")
     const dir = join(root, "guard")
+    const scheduler = manualHeartbeatScheduler()
     const first = await acquireSingleBoxGuard({
       label: "first",
       dir,
       heartbeatMs: 1_000,
+      heartbeatScheduler: scheduler,
     })
     let firstReleaseErr: unknown
     chmodSync(root, 0o555)
@@ -241,9 +283,7 @@ describe("single-box guard hellgate", () => {
     }
     try {
       rmSync(dir, { recursive: true, force: true })
-      await new Promise<void>((resolve) => {
-        setTimeout(resolve, 1_100)
-      })
+      await scheduler.fire()
       await expect(
         acquireSingleBoxGuard({
           label: "second",
@@ -258,5 +298,6 @@ describe("single-box guard hellgate", () => {
       }
     }
     expect(firstReleaseErr).toBeUndefined()
+    expect(scheduler.active()).toBe(0)
   })
 })

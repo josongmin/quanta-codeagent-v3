@@ -1,3 +1,4 @@
+// biome-ignore-all lint/suspicious/noConsole: command-line reporter
 /**
  * Paired control for cwd dependence: run the same tests from the repo root and
  * from a throwaway working directory, and report only the DIFFERENCE.
@@ -13,20 +14,19 @@
  * Only the diff is evidence: a file that fails in BOTH arms is broken or loaded,
  * not cwd-dependent, and it cancels.
  *
- * ## Why SEQUENTIAL, and why per-file
+ * ## Why sequential batched arms
  *
  * An earlier plan specified "both arms at the same time, on a quiet tree". Those
  * two conditions are mutually exclusive — running two full suites simultaneously
- * IS the load. So the arms run back-to-back per file, which keeps them close
- * enough in time to share machine conditions without either arm being the other's
- * noise.
- *
- * Per-file rather than per-suite for the same reason the runner batches: a whole-
- * suite verdict tells you something differs and not where.
+ * IS the load. So bounded root batches and matching sandbox batches run
+ * back-to-back. Bun's JUnit receipt retains the per-file result mapping without
+ * paying two process startups for every file. Batches are capped below argv
+ * limits, so the default ~3k-file corpus cannot fail at process creation.
  *
  * ## The re-run
  *
- * A file that differs is run a SECOND time in both arms before being reported.
+ * A file that differs between batches is run individually in both arms before
+ * being reported.
  * A difference that does not reproduce is recorded as FLAKY rather than as a
  * finding — that distinction is the whole point of the harness, and dropping it
  * would reintroduce the ambiguity it exists to remove.
@@ -55,6 +55,9 @@ const PRELOADS = ["tests/preload-clean-source-js.ts", "tests/setup.ts"] as const
  */
 const ARM_TEST_TIMEOUT_MS = 90_000
 const ARM_PROCESS_TIMEOUT_MS = 120_000
+const BATCH_PROCESS_TIMEOUT_MAX_MS = 45 * 60_000
+const BATCH_MAX_FILES = 256
+const BATCH_MAX_PATH_BYTES = 48 * 1024
 
 export type ArmResult = { readonly ok: boolean; readonly pass: number; readonly fail: number }
 
@@ -138,6 +141,155 @@ export const parityArmCommand = (file: string): string[] => {
   return ["bun", "test", ...preloads, file, `--timeout=${ARM_TEST_TIMEOUT_MS}`]
 }
 
+export const parityBatchCommand = (files: readonly string[], junitPath: string): string[] => {
+  const preloads = PRELOADS.flatMap((preload) => ["--preload", join(REPO_ROOT, preload)])
+  return [
+    "bun",
+    "test",
+    ...preloads,
+    ...files,
+    `--timeout=${ARM_TEST_TIMEOUT_MS}`,
+    "--reporter=junit",
+    `--reporter-outfile=${junitPath}`,
+  ]
+}
+
+/** Keep the default 3k-file unit corpus below macOS argv/env process limits. */
+export const partitionParityBatches = (
+  files: readonly string[],
+): readonly (readonly string[])[] => {
+  const batches: string[][] = []
+  let current: string[] = []
+  let pathBytes = 0
+  for (const file of files) {
+    const nextBytes = Buffer.byteLength(file) + 1
+    if (
+      current.length > 0 &&
+      (current.length >= BATCH_MAX_FILES || pathBytes + nextBytes > BATCH_MAX_PATH_BYTES)
+    ) {
+      batches.push(current)
+      current = []
+      pathBytes = 0
+    }
+    current.push(file)
+    pathBytes += nextBytes
+  }
+  if (current.length > 0) batches.push(current)
+  return batches
+}
+
+const xmlAttribute = (tag: string, name: string): string | undefined =>
+  new RegExp(`\\b${name}="([^"]*)"`, "u").exec(tag)?.[1]
+
+const decodeXmlAttribute = (value: string): string =>
+  value
+    .replaceAll("&quot;", '"')
+    .replaceAll("&apos;", "'")
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&amp;", "&")
+
+export interface ParsedBatchArm {
+  readonly byFile: ReadonlyMap<string, ArmResult>
+  readonly observedFiles: number
+}
+
+const parsedSuite = (
+  tag: string,
+  cwd: string,
+): { readonly file: string; readonly pass: number; readonly fail: number } | undefined => {
+  const rawFile = xmlAttribute(tag, "file")
+  if (rawFile === undefined || rawFile === "") return undefined
+  const counts = ["tests", "failures", "skipped"].map((name) =>
+    Number(xmlAttribute(tag, name) ?? "0"),
+  )
+  if (!counts.every(Number.isFinite)) return undefined
+  const [tests = 0, failures = 0, skipped = 0] = counts
+  return {
+    file: resolve(cwd, decodeXmlAttribute(rawFile)),
+    pass: Math.max(0, tests - failures - skipped),
+    fail: Math.max(0, failures),
+  }
+}
+
+/** Map Bun's JUnit suites back to the exact requested files. */
+export const parseBatchJunit = (
+  xml: string,
+  requestedFiles: readonly string[],
+  cwd: string,
+): ParsedBatchArm => {
+  const requested = new Set(requestedFiles.map((file) => resolve(file)))
+  const totals = new Map<string, { pass: number; fail: number }>()
+  for (const match of xml.matchAll(/<testsuite\b[^>]*>/g)) {
+    const suite = parsedSuite(match[0] ?? "", cwd)
+    if (suite === undefined || !requested.has(suite.file)) continue
+    const previous = totals.get(suite.file) ?? { pass: 0, fail: 0 }
+    totals.set(suite.file, {
+      pass: previous.pass + suite.pass,
+      fail: previous.fail + suite.fail,
+    })
+  }
+  const byFile = new Map<string, ArmResult>()
+  for (const file of requested) {
+    const total = totals.get(file)
+    byFile.set(
+      file,
+      total === undefined
+        ? { ok: false, pass: -1, fail: -1 }
+        : { ok: total.fail === 0 && total.pass > 0, ...total },
+    )
+  }
+  return { byFile, observedFiles: totals.size }
+}
+
+const runBatchArm = (
+  files: readonly string[],
+  cwd: string,
+  junitPath: string,
+): ReadonlyMap<string, ArmResult> => {
+  rmSync(junitPath, { force: true })
+  const proc = Bun.spawnSync(parityBatchCommand(files, junitPath), {
+    cwd,
+    stdout: "pipe",
+    stderr: "pipe",
+    env: { ...process.env, FORCE_COLOR: "0", PWD: cwd },
+    // A batched arm replaces N bounded processes. Retain a bounded watchdog,
+    // but scale it by file count so a legitimate shard is not capped at the old
+    // single-file allowance.
+    timeout: Math.min(
+      BATCH_PROCESS_TIMEOUT_MAX_MS,
+      Math.max(ARM_PROCESS_TIMEOUT_MS, files.length * ARM_TEST_TIMEOUT_MS),
+    ),
+  })
+  let xml: string
+  try {
+    xml = readFileSync(junitPath, "utf8")
+  } catch {
+    throw new Error(
+      `cwd-parity: batched arm in ${cwd} wrote no JUnit receipt (exit ${proc.exitCode})`,
+    )
+  }
+  const parsed = parseBatchJunit(xml, files, cwd)
+  if (parsed.observedFiles === 0) {
+    throw new Error(`cwd-parity: batched arm in ${cwd} mapped zero requested files from JUnit`)
+  }
+  return parsed.byFile
+}
+
+const runCorpusArm = (
+  files: readonly string[],
+  cwd: string,
+  receiptDir: string,
+  label: string,
+): ReadonlyMap<string, ArmResult> => {
+  const results = new Map<string, ArmResult>()
+  for (const [index, batch] of partitionParityBatches(files).entries()) {
+    const one = runBatchArm(batch, cwd, join(receiptDir, `${label}-${index + 1}.junit.xml`))
+    for (const [file, result] of one) results.set(file, result)
+  }
+  return results
+}
+
 const runArm = (file: string, cwd: string): ArmResult => {
   const proc = Bun.spawnSync(parityArmCommand(file), {
     cwd,
@@ -219,11 +371,15 @@ if (import.meta.main) {
   const sandbox = mkdtempSync(join(tmpdir(), "quanta-parity-"))
   const findings: Array<{ file: string; verdict: Verdict; detail: string }> = []
   try {
+    // The normal path is one bounded set of batch startups per arm, rather than
+    // two startups per file. Only mismatches pay for individual confirmation.
+    const rootBatch = runCorpusArm(files, REPO_ROOT, sandbox, "root-arm")
+    const sandboxBatch = runCorpusArm(files, sandbox, sandbox, "sandbox-arm")
     for (const [i, file] of files.entries()) {
-      const root = runArm(file, REPO_ROOT)
-      const sbx = runArm(file, sandbox)
+      const root = rootBatch.get(resolve(file)) ?? { ok: false, pass: -1, fail: -1 }
+      const sbx = sandboxBatch.get(resolve(file)) ?? { ok: false, pass: -1, fail: -1 }
       if (!armsDiffer(root, sbx)) continue
-      // Differs — settle it with a second pair before believing it.
+      // Differs — settle it with individual arms before believing the batch.
       const root2 = runArm(file, REPO_ROOT)
       const sbx2 = runArm(file, sandbox)
       const verdict = classify(root, sbx, root2, sbx2)

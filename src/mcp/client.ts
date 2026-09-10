@@ -211,10 +211,14 @@ export class McpClient {
       /** ADR-0162 / C-F1 — host-resolved policy for command-based MCP servers.
        *  Absent/false preserves the stdio default; URL servers remain HTTP. */
       isolatedSpawn?: boolean
+      /** Per-request deadline. Omitted preserves the production 30s default.
+       *  Primarily useful for callers with tighter latency budgets and for
+       *  deterministic timeout tests against an intentionally silent peer. */
+      requestTimeoutMs?: number
     },
   ) {
     this.config = config
-    this.requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS
+    this.requestTimeoutMs = opts?.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
     this.negotiator = opts?.negotiator ?? defaultNegotiator
     // H18 — OAuth is active only when this server opted in AND a real provider
     // is wired. The default rejecter obtains no token, so an unwired client (or

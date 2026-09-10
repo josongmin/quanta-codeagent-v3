@@ -21,7 +21,7 @@ export interface Baseline {
 }
 
 export interface RenderInput {
-  features: LoadedFeature[]
+  features: readonly LoadedFeature[]
   prose: ProseFiles
   baseline: Baseline | null
 }
@@ -157,7 +157,7 @@ export function renderCatalog(input: RenderInput): string {
 
 // --- Helpers ---------------------------------------------------------------
 
-function groupBySection(features: LoadedFeature[]): Map<number, LoadedFeature[]> {
+function groupBySection(features: readonly LoadedFeature[]): Map<number, LoadedFeature[]> {
   const map = new Map<number, LoadedFeature[]>()
   for (const lf of features) {
     const arr = map.get(lf.feature.section)
@@ -170,7 +170,7 @@ function groupBySection(features: LoadedFeature[]): Map<number, LoadedFeature[]>
 /** Order within a section so same-subsystem rows are contiguous. Subsystems
  *  are ordered by the minimum `order` they contain; within a subsystem rows
  *  are sorted by `order` then `id`. Pure + deterministic — fixture-tested. */
-function sortWithinSection(entries: LoadedFeature[]): LoadedFeature[] {
+function sortWithinSection(entries: readonly LoadedFeature[]): LoadedFeature[] {
   const minOrderBySubsystem = new Map<string, number>()
   for (const { feature } of entries) {
     const prev = minOrderBySubsystem.get(feature.subsystem)
@@ -303,7 +303,7 @@ interface E2EEntry {
   title: string
 }
 
-function collectE2E(features: LoadedFeature[]): E2EEntry[] {
+function collectE2E(features: readonly LoadedFeature[]): E2EEntry[] {
   const out: E2EEntry[] = []
   for (const { feature } of features) {
     for (const t of feature.evidence.tests.integration) {
@@ -317,7 +317,7 @@ function collectE2E(features: LoadedFeature[]): E2EEntry[] {
   return out
 }
 
-function computeMaturityDistribution(features: LoadedFeature[]): Map<Maturity, Feature[]> {
+function computeMaturityDistribution(features: readonly LoadedFeature[]): Map<Maturity, Feature[]> {
   const map = new Map<Maturity, Feature[]>()
   for (const lf of features) {
     const bucket = map.get(lf.feature.maturity)

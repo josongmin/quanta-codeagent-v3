@@ -26,6 +26,19 @@ describe("stable shard membership", () => {
     expect(left).toEqual(right)
   })
 
+  test("absolute and non-canonical paths cannot make membership checkout-dependent", () => {
+    for (const file of [
+      "/Users/alice/repo/tests/unit/a.test.ts",
+      "tests/../tests/unit/a.test.ts",
+      "tests\\unit\\a.test.ts",
+    ]) {
+      expect(() => bucketForFile(file, "pure")).toThrow("canonical repo-relative")
+    }
+    expect(bucketForFile("tests/unit/a.test.ts", "pure")).toEqual(
+      bucketForFile("tests/unit/a.test.ts", "pure"),
+    )
+  })
+
   test("missing plus duplicate with matching counts is not a partition", () => {
     expect(() =>
       buildMembershipManifest([

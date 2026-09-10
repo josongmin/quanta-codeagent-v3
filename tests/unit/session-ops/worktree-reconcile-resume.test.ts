@@ -139,10 +139,18 @@ describe("reconcileCreatingWorktreeAtResume (RFC06-2 crash-resume wire)", () => 
   })
 
   test("RED-ON-INJECTION / gate OFF ⇒ NO reconciliation: the `creating` orphan persists unresolved (byte-identical)", async () => {
-    repo = await mkRepo()
+    // A deliberately nonexistent repository makes this a stronger no-touch
+    // assertion than provisioning a real worktree: any registry inspection on
+    // the disabled path would fail the test immediately.
+    const untouchedRepo = join(sessionsDir, "must-not-be-read")
     const ownershipId = crypto.randomUUID()
-    const created = await createPersistentWorktree(ownershipId, repo)
-    await seedCreating("s1", repo, ownershipId, created.worktreePath, created.branch)
+    await seedCreating(
+      "s1",
+      untouchedRepo,
+      ownershipId,
+      join(untouchedRepo, ".quanta", "worktrees", ownershipId),
+      `fork-${ownershipId}`,
+    )
 
     // Gate unset (default-OFF) — the wire must be a transparent no-op.
     await reconcileCreatingWorktreeAtResume({ sessionId: "s1", env: env(), now: () => 1000 })
@@ -155,24 +163,24 @@ describe("reconcileCreatingWorktreeAtResume (RFC06-2 crash-resume wire)", () => 
   })
 
   test("SAFETY: a `ready` (non-creating) record is NEVER touched at resume — no accidental transition", async () => {
-    repo = await mkRepo()
+    const untouchedRepo = join(sessionsDir, "ready-repo-must-not-be-read")
     const ownershipId = crypto.randomUUID()
-    const created = await createPersistentWorktree(ownershipId, repo)
-    // Seed a LIVE ready worktree — the steady-state, not a crash.
+    // Seed a ready ownership record — the steady-state, not a crash. The path
+    // intentionally does not exist because this state must not touch Git.
     const intent = makeWorkspaceCreateIntent({
       ownershipId,
       ownerThreadId: "s1",
-      repoRoot: repo,
-      repoId: repo,
-      path: created.worktreePath,
-      branch: created.branch,
+      repoRoot: untouchedRepo,
+      repoId: untouchedRepo,
+      path: join(untouchedRepo, ".quanta", "worktrees", ownershipId),
+      branch: `fork-${ownershipId}`,
       baseSha: "HEAD",
       now: 1,
     })
     const meta: SessionMeta = {
       id: "s1",
       title: "t",
-      cwd: repo,
+      cwd: untouchedRepo,
       createdAt: 1,
       lastTouched: 1,
       archived: false,
@@ -191,11 +199,11 @@ describe("reconcileCreatingWorktreeAtResume (RFC06-2 crash-resume wire)", () => 
   })
 
   test("SAFETY: gate ON but NO ownership at all ⇒ no-op (nothing persisted)", async () => {
-    repo = await mkRepo()
+    const untouchedRepo = join(sessionsDir, "unowned-repo-must-not-be-read")
     const meta: SessionMeta = {
       id: "s1",
       title: "t",
-      cwd: repo,
+      cwd: untouchedRepo,
       createdAt: 1,
       lastTouched: 1,
       archived: false,

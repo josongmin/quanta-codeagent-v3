@@ -237,6 +237,8 @@ export interface PlanTestChunksOptions {
   /** Measured per-file wall time; undefined = no measurement for that file. */
   readonly predictMs?: (file: string) => number | undefined
   readonly classify?: (file: string) => TestResourceClass
+  /** Canonical repo-relative identity used for stable membership hashing. */
+  readonly membershipFile?: (file: string) => string
 }
 
 const DEFAULT_TARGET_CHUNK_COUNT = 24
@@ -307,10 +309,11 @@ const chunkOneGroup = (
   group: readonly WeightedFile[],
   _totalWeight: number,
   _targetChunkCount: number,
+  membershipFile: (file: string) => string,
 ): UnindexedChunk[] => {
   const bins = new Map<number, WeightedFile[]>()
   for (const entry of group) {
-    const { bucket } = bucketForFile(entry.file, resourceClass, DEFAULT_MEMBERSHIP)
+    const { bucket } = bucketForFile(membershipFile(entry.file), resourceClass, DEFAULT_MEMBERSHIP)
     const bin = bins.get(bucket)
     if (bin === undefined) bins.set(bucket, [entry])
     else bin.push(entry)
@@ -346,6 +349,7 @@ export const planTestChunks = (
   }
   const classify = options.classify ?? classifyTestResource
   const predictMs = options.predictMs ?? (() => undefined)
+  const membershipFile = options.membershipFile ?? ((file: string) => file)
   const targetChunkCount = options.targetChunkCount ?? DEFAULT_TARGET_CHUNK_COUNT
   if (!Number.isSafeInteger(targetChunkCount) || targetChunkCount < 1) {
     throw new Error(`[test:shards] invalid target chunk count: ${targetChunkCount}`)
@@ -354,7 +358,7 @@ export const planTestChunks = (
   const groups = groupWeightedFiles(sorted, classify, predictMs)
   const totalWeight = [...groups.values()].flat().reduce((sum, entry) => sum + entry.weightMs, 0)
   const chunks = [...groups.entries()].flatMap(([resourceClass, group]) =>
-    chunkOneGroup(resourceClass, group, totalWeight, targetChunkCount),
+    chunkOneGroup(resourceClass, group, totalWeight, targetChunkCount, membershipFile),
   )
 
   // Deterministic indices derived from composition (class + first file), so a
@@ -419,7 +423,10 @@ export const parseExecutedFileCount = (output: string): number | undefined => {
 export const spoolTail = (output: string, lines: number): string => {
   const kept = output
     .split("\n")
-    .map((line) => line.replace(/\u001b\[[0-9;]*m/g, "").trimEnd())
+    .map((line) =>
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI colour escape sequence.
+      line.replace(/\x1b\[[0-9;]*m/g, "").trimEnd(),
+    )
     .filter((line) => line.trim() !== "")
     .slice(-lines)
   return kept.length === 0 ? "<no output>" : kept.join("\n")

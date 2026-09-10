@@ -144,6 +144,8 @@ const scanSrc = (): { readonly hits: readonly Hit[]; readonly filesScanned: numb
   return { hits, filesScanned: files.length }
 }
 
+const SOURCE_SCAN = scanSrc()
+
 // ---------------------------------------------------------------------------
 // The allowlist
 // ---------------------------------------------------------------------------
@@ -246,7 +248,7 @@ const readMapSources = (mapPath: string): readonly string[] => {
 
 describe("compiled-binary asset ratchet", () => {
   test("the scan is not vacuous", () => {
-    const { hits, filesScanned } = scanSrc()
+    const { hits, filesScanned } = SOURCE_SCAN
     // A refactor that moved src/, a broken walk, or a regex that stopped
     // compiling would otherwise show up as a serene green "0 unlisted sites".
     expect(filesScanned).toBeGreaterThan(1000)
@@ -271,7 +273,7 @@ describe("compiled-binary asset ratchet", () => {
   })
 
   test("no UNLISTED site — a new one is ceiling 0 and fails", () => {
-    const { hits } = scanSrc()
+    const { hits } = SOURCE_SCAN
     const pinned = pinnedByFile()
     const unlisted = hits
       .filter((h) => !pinned.has(h.file))
@@ -307,7 +309,7 @@ describe("compiled-binary asset ratchet", () => {
       [...m].flatMap(([f, pats]) => [...pats].map(([p, n]) => `${f} [${p}] ${n}`)).sort()
 
     const actual = new Map<string, Map<string, number>>()
-    for (const h of scanSrc().hits) {
+    for (const h of SOURCE_SCAN.hits) {
       const m = actual.get(h.file) ?? new Map<string, number>()
       m.set(h.pattern, (m.get(h.pattern) ?? 0) + 1)
       actual.set(h.file, m)
@@ -316,7 +318,7 @@ describe("compiled-binary asset ratchet", () => {
   })
 
   test("no STALE entry — every listed file still exists and still fires", () => {
-    const { hits } = scanSrc()
+    const { hits } = SOURCE_SCAN
     const firing = new Set(hits.map((h) => h.file))
     const stale = allowlist.sites
       .map(entryFile)

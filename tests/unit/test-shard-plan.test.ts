@@ -98,6 +98,27 @@ describe("resource-classed chunk plan", () => {
     ).toEqual(chunks)
   })
 
+  test("absolute discovery paths hash by canonical repo-relative membership", () => {
+    const roots = ["/Users/alice/repo", "/home/runner/work/repo/repo"]
+    const relativeFiles = Array.from(
+      { length: 24 },
+      (_, index) => `tests/unit/file-${index}.test.ts`,
+    )
+    const plans = roots.map((root) =>
+      planTestChunks(
+        relativeFiles.map((file) => `${root}/${file}`),
+        {
+          classify: () => "pure",
+          membershipFile: (file) => file.slice(root.length + 1),
+        },
+      ).map((chunk) => ({
+        resourceClass: chunk.resourceClass,
+        files: chunk.files.map((file) => file.slice(root.length + 1)),
+      })),
+    )
+    expect(plans[1]).toEqual(plans[0])
+  })
+
   test("a cold timing store still partitions exactly", () => {
     const files = Array.from({ length: 100 }, (_, index) => `tests/unit/f-${index}.test.ts`)
     const chunks = planTestChunks(files, { targetChunkCount: 24, classify: () => "pure" })
@@ -495,6 +516,19 @@ describe("same-INPUTS successful shard cache", () => {
       NO_DOTENV,
     )
     expect(left).toBe(right)
+    expect(
+      testEnvironmentSha256(
+        { QUANTA_MODE: "strict", QUANTA_TEST_SOURCE_JS_CLEANED_ROOT: "/checkout-a/src" },
+        120_000,
+        NO_DOTENV,
+      ),
+    ).toBe(
+      testEnvironmentSha256(
+        { QUANTA_MODE: "strict", QUANTA_TEST_SOURCE_JS_CLEANED_ROOT: "/checkout-b/src" },
+        120_000,
+        NO_DOTENV,
+      ),
+    )
     expect(testEnvironmentSha256({ QUANTA_MODE: "relaxed" }, 120_000, NO_DOTENV)).not.toBe(left)
     expect(testEnvironmentSha256({ QUANTA_MODE: "strict" }, 240_000, NO_DOTENV)).not.toBe(left)
 

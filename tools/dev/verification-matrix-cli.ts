@@ -8,10 +8,16 @@ import {
   renameSync,
   writeFileSync,
 } from "node:fs"
+import { availableParallelism, loadavg } from "node:os"
 import { dirname, join, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { discoverSuiteFiles } from "./test-shard-discovery"
-import { planTestChunks } from "./test-shard-plan"
+import {
+  chooseIntraWorkerParallelism,
+  chooseShardTestTimeoutMs,
+  planTestChunks,
+} from "./test-shard-plan"
+import { junitExecutedFiles, loadTestTimings } from "./test-shard-timings"
 import {
   aggregateMatrixReceipts,
   parseMatrixWorkerReceipt,
@@ -19,8 +25,10 @@ import {
   planVerificationMatrix,
   workerReceipt,
 } from "./verification-matrix"
+import { sharedVerificationCacheRoot } from "./verification-receipt"
 
 const repoRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))))
+const timingStore = join(sharedVerificationCacheRoot(repoRoot), "test-timings-v1.json")
 const command = process.argv[2] ?? "plan"
 const args = process.argv.slice(3)
 
@@ -78,19 +86,41 @@ const safeArtifactStem = (chunkId: string): string => {
 if (command === "plan") {
   const headSha = await cleanGitHead()
   const files = discoverSuiteFiles(repoRoot, "full")
-  const chunks = planTestChunks(files)
+  const timings = loadTestTimings(timingStore)
+  const cpuCount = availableParallelism()
+  const loadAverage1m = loadavg()[0] ?? 0
+  const pressure = Math.max(1, Math.ceil(loadAverage1m / Math.max(1, cpuCount * 2)))
+  const testTimeoutMs = chooseShardTestTimeoutMs({ loadAverage1m, cpuCount })
+  const chunks = planTestChunks(files, {
+    predictMs: (file) => timings.get(relative(repoRoot, file)),
+    membershipFile: (file) => relative(repoRoot, file),
+  })
   const plan = planVerificationMatrix(
     headSha,
     chunks.map((chunk) => ({
       id: `${chunk.resourceClass}-${chunk.index}`,
       files: chunk.files.map((file) => relative(repoRoot, file)),
+      resourceClass: chunk.resourceClass,
+      predictedMs: chunk.predictedMs,
+      testTimeoutMs,
+      intraParallel: chooseIntraWorkerParallelism({
+        resourceClass: chunk.resourceClass,
+        cpuCount,
+        workers: 1,
+        pressure,
+      }),
     })),
   )
   const out = resolve(repoRoot, valueArg("--out") ?? ".cache/verification-matrix/plan.json")
   writeJsonAtomic(out, plan)
   const githubOutput = valueArg("--github-output")
   if (githubOutput !== undefined) {
-    appendFileSync(githubOutput, `chunks=${JSON.stringify(plan.chunks.map((chunk) => chunk.id))}\n`)
+    const launchOrder = [...plan.chunks]
+      .sort(
+        (left, right) => right.predictedMs - left.predictedMs || left.id.localeCompare(right.id),
+      )
+      .map((chunk) => chunk.id)
+    appendFileSync(githubOutput, `chunks=${JSON.stringify(launchOrder)}\n`)
     appendFileSync(githubOutput, `plan_sha256=${plan.planSha256}\n`)
   }
   process.stdout.write(
@@ -138,13 +168,14 @@ if (command === "worker") {
   const junitFile = `${stem}.junit.xml`
   const junitPath = join(outDir, junitFile)
   const receiptPath = join(outDir, `${stem}.receipt.json`)
+  const startedAt = performance.now()
   const proc = Bun.spawn({
     cmd: [
       "bun",
       "test",
       ...chunk.files,
-      "--timeout=60000",
-      "--parallel=1",
+      `--timeout=${chunk.testTimeoutMs}`,
+      `--parallel=${chunk.intraParallel}`,
       "--bail=1",
       "--reporter=junit",
       `--reporter-outfile=${junitPath}`,
@@ -156,7 +187,15 @@ if (command === "worker") {
     stderr: "inherit",
   })
   const code = await proc.exited
-  const junitOk = existsSync(junitPath) && readFileSync(junitPath, "utf8").includes("<testcase")
+  const elapsedMs = Math.max(1, Math.round(performance.now() - startedAt))
+  const junitXml = existsSync(junitPath) ? readFileSync(junitPath, "utf8") : ""
+  const executedFiles = junitExecutedFiles(junitXml).map((file) => {
+    const absolute = resolve(repoRoot, file)
+    return relative(repoRoot, absolute)
+  })
+  const exactExecutedSet =
+    [...executedFiles].sort().join("\n") === [...chunk.files].sort().join("\n")
+  const junitOk = junitXml.includes("<testcase") && executedFiles.length > 0
   let snapshotStable = false
   try {
     snapshotStable = (await cleanGitHead()) === plan.headSha
@@ -168,14 +207,17 @@ if (command === "worker") {
     headSha: plan.headSha,
     planSha256: plan.planSha256,
     chunkId: chunk.id,
-    files: chunk.files,
-    outcome: code === 0 && junitOk && snapshotStable ? "passed" : "failed",
+    plannedFiles: chunk.files,
+    executedFiles,
+    testTimeoutMs: chunk.testTimeoutMs,
+    intraParallel: chunk.intraParallel,
+    outcome: code === 0 && junitOk && exactExecutedSet && snapshotStable ? "passed" : "failed",
     snapshotStable,
     junitFile,
     ...(junitOk ? { junitSha256: sha256(readFileSync(junitPath)) } : {}),
   })
   writeJsonAtomic(receiptPath, receipt)
-  process.stdout.write(`${JSON.stringify(receipt, null, 2)}\n`)
+  process.stdout.write(`${JSON.stringify({ ...receipt, elapsedMs }, null, 2)}\n`)
   process.exit(receipt.outcome === "passed" ? 0 : code === 0 ? 1 : code)
 }
 

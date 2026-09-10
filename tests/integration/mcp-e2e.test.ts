@@ -31,9 +31,54 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { loadMcpTools, runAgent } from "@/agent"
-import { McpClient, McpError } from "@/mcp"
+import {
+  McpClient,
+  McpError,
+  type McpTransport,
+  type McpTransportExitHandler,
+  type McpTransportMessageHandler,
+  type McpTransportPayload,
+} from "@/mcp"
 import { defaultTools, ToolRegistry } from "@/tool"
 import { cfg, ev, RecordingStream, ScriptedLLM, text, toolUse, withTimeout } from "./_harness"
+
+function silentCallTransport(): McpTransport {
+  const messageHandlers = new Set<McpTransportMessageHandler>()
+  const exitHandlers = new Set<McpTransportExitHandler>()
+  return {
+    async start() {},
+    onMessage(handler) {
+      messageHandlers.add(handler)
+      return () => messageHandlers.delete(handler)
+    },
+    onExit(handler) {
+      exitHandlers.add(handler)
+      return () => exitHandlers.delete(handler)
+    },
+    send(payload: McpTransportPayload) {
+      const request = payload as { id?: number; method?: string }
+      if (request.method === "initialize") {
+        for (const handler of messageHandlers) {
+          handler({
+            jsonrpc: "2.0",
+            id: request.id ?? 0,
+            result: {
+              protocolVersion: "2025-06-18",
+              serverInfo: { name: "silent-call", version: "1" },
+              capabilities: { tools: {} },
+            },
+          })
+        }
+      }
+      // Deliberately never answer tools/call; the client must own the deadline.
+      return null
+    },
+    async close() {
+      messageHandlers.clear()
+      exitHandlers.clear()
+    },
+  }
+}
 
 /** Same mock server pattern as `mcp-client.test.ts` — one binary, two tools
  *  (`alpha` joins text blocks, `boom` returns isError). We re-spawn per test
@@ -434,40 +479,28 @@ describe("MCP e2e hell-cases — server lifecycle chaos", () => {
     }
   }, 15_000)
 
-  test("a server that never answers in time: our withTimeout traps the hang at 2s instead of the 30s default", async () => {
-    // CURRENT BEHAVIOUR: DEFAULT_REQUEST_TIMEOUT_MS is 30s (client.ts L8) and
-    // not configurable per-call. To prove "doesn't hang forever" without
-    // a 30s wait we wrap the callTool in withTimeout(2s) and assert that
-    // wrapper trips — confirming the call is in-flight and the underlying
-    // socket isn't deadlocked. The real 30s timeout itself is covered by
-    // the client unit tests.
-    // The server's delay is deliberately far past this test's own deadline:
-    // an assertion that races a timer against a real reply is decided by host
-    // load, not by the code under test.
-    // FOLLOW-UP: expose a per-call timeout knob so adversarial servers can be
-    // bounded tighter than 30s in production agents.
-    const c = advClient("slow")
+  test("a server that never answers is rejected by the configured request deadline", async () => {
+    // Use a per-test, in-process transport so this matrix case exercises the
+    // product deadline without paying for or racing a real process. Separate
+    // tests above retain real crash, EOF, SIGKILL and teardown coverage.
+    const c = new McpClient(
+      { name: "silent-call", command: ["unused-with-injected-transport"] },
+      { requestTimeoutMs: 10, transport: silentCallTransport() },
+    )
     await withTimeout(c.start(), 10_000, "slow start")
     try {
       let caught: unknown
       try {
-        await withTimeout(c.callTool("alpha", {}), 2_000, "slow-call-cap")
+        await c.callTool("alpha", {})
       } catch (e) {
         caught = e
       }
-      expect(caught).toBeDefined()
-      // withTimeout's sentinel error message starts with "HANG:".
-      expect((caught as Error).message).toMatch(/^HANG:/)
+      expect(caught).toBeInstanceOf(McpError)
+      expect((caught as Error).message).toBe('mcp request "tools/call" timed out after 10ms')
     } finally {
       await c.stop().catch(() => undefined)
     }
-    // Keep the runner watchdog strictly outside the 2s product-observation
-    // deadline. Under repository-wide parallel load the event loop can be
-    // descheduled for several seconds; the assertion above still requires the
-    // named 2s withTimeout sentinel, while this outer budget catches a genuine
-    // leaked child or never-settling wrapper without racing the behavior under
-    // test.
-  }, 30_000)
+  }, 15_000)
 })
 
 describe("MCP e2e hell-cases — adversarial tool arguments and results", () => {

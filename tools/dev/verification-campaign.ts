@@ -65,6 +65,8 @@ if (command.length === 0) {
   process.stderr.write("usage: verification-campaign.ts -- <command> [args...]\n")
   process.exit(2)
 }
+const verificationTier = tierFromGateCommand(command)
+const TEST_STRESS_ENV = "QUANTA_TEST_STRESS"
 
 /** Long enough for this repository's own 30-chunk suite to decay out of the
  *  1-minute average; past that the load is foreign and waiting buys nothing. */
@@ -98,7 +100,7 @@ if (isExactPrepushReuse) {
           pid: process.pid,
           head: campaignHead,
           command: command.join(" "),
-          verificationTier: tierFromGateCommand(command),
+          verificationTier,
           // No lane was taken: that IS the outcome being recorded.
           leasePort: null,
           leaseWaitMs: 0,
@@ -169,7 +171,7 @@ const recordCampaign = (input: {
       pid: process.pid,
       head: campaignHead,
       command: command.join(" "),
-      verificationTier: tierFromGateCommand(command),
+      verificationTier,
       leasePort: lease?.port ?? null,
       leaseWaitMs,
       startedAtMs: campaignStartedAtMs,
@@ -285,16 +287,29 @@ const startWait = await waitForQuietBox({
 })
 process.stdout.write(`[verification] ${describeQuietBoxWait(startWait)}\n`)
 
+// The deadline bounds ADMISSION only: once this campaign has decided to start
+// (quiet or explicitly hot), it must not become a wall-clock TTL for the child.
+// In particular, a full shard campaign normally outlives this three-minute
+// budget. Strip both our deadline and a stale inherited one before execution.
+const executionEnv = { ...process.env }
+delete executionEnv[ADMISSION_DEADLINE_ENV]
+// Stress rails are intentionally outside interactive and merge-gating tiers.
+// They run only in the scheduled cache-off campaign, where repeats expose
+// order/concurrency flakes without multiplying smoke/PR/full wall time.
+delete executionEnv[TEST_STRESS_ENV]
+if (verificationTier === "nightly" && executionEnv.QUANTA_TEST_CACHE === "off") {
+  executionEnv[TEST_STRESS_ENV] = "1"
+}
+
 let campaignExitCode: number | null = null
 try {
   const handle = registry.spawnWorker({
     cmd: command,
     cwd: REPO_ROOT,
     env: {
-      ...process.env,
+      ...executionEnv,
       [VERIFICATION_LEASE_TOKEN_ENV]: randomBytes(32).toString("hex"),
       [VERIFICATION_LEASE_OWNER_PID_ENV]: String(process.pid),
-      [ADMISSION_DEADLINE_ENV]: String(admissionDeadlineMs),
     },
     stdoutFd: 1,
     stderrFd: 2,

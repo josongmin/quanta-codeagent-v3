@@ -28,7 +28,7 @@ permissions:
 jobs:
   full-plan:
     name: full-plan (shadow)
-    if: ${{ vars.QUANTA_SHADOW_MATRIX == '1' }}
+    if: ${{ github.event_name != 'schedule' && vars.QUANTA_SHADOW_MATRIX == '1' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -38,8 +38,20 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.3.14
+      - name: restore Bun package download cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ runner.arch }}-1.3.14-${{ hashFiles('bun.lock') }}
       - run: bun install --frozen-lockfile
+      - name: restore measured test timings
+        uses: actions/cache/restore@v4
+        with:
+          path: .git/quanta-verification-cache/test-timings-v1.json
+          key: test-timings-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}-plan
+          restore-keys: |
+            test-timings-${{ runner.os }}-${{ runner.arch }}-
       - id: plan
         name: freeze exact-HEAD matrix plan
         run: >-
@@ -69,7 +81,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.3.14
+      - name: restore Bun package download cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ runner.arch }}-1.3.14-${{ hashFiles('bun.lock') }}
       - run: bun install --frozen-lockfile
       - name: download exact plan
         uses: actions/download-artifact@v4
@@ -93,7 +110,7 @@ jobs:
 
   full-aggregate:
     name: full-aggregate (shadow)
-    if: ${{ always() && vars.QUANTA_SHADOW_MATRIX == '1' }}
+    if: ${{ always() && github.event_name != 'schedule' && vars.QUANTA_SHADOW_MATRIX == '1' }}
     needs: [full-plan, full-shard]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -101,7 +118,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.3.14
+      - name: restore Bun package download cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ runner.arch }}-1.3.14-${{ hashFiles('bun.lock') }}
       - run: bun install --frozen-lockfile
       - name: download exact plan
         uses: actions/download-artifact@v4
@@ -131,13 +153,19 @@ jobs:
 
   static-code:
     name: static-code
+    if: ${{ github.event_name != 'schedule' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.3.14
+      - name: restore Bun package download cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ runner.arch }}-1.3.14-${{ hashFiles('bun.lock') }}
       - run: bun install --frozen-lockfile
       - name: restore typecheck incremental cache
         # Cache ONLY .tsbuildinfo. The local skip stamps are content-hash
@@ -176,24 +204,30 @@ jobs:
 
   catalog:
     name: catalog
+    if: ${{ github.event_name != 'schedule' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.3.14
+      - name: restore Bun package download cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ runner.arch }}-1.3.14-${{ hashFiles('bun.lock') }}
       - run: bun install --frozen-lockfile
       - name: feature-catalog — validate + diff + ratchet
         # Hard-gates on:
         #   validate     — every evidence file/ADR/test exists
         #   diff         — docs/10.feature-catalog.md is in sync with YAMLs
         #   lint         — empty-stub count + orphan Accepted ADRs do not grow
-        # PR-only check-changed gate runs in the `feature-catalog-pr` job below.
-        run: |
-          bun fc validate
-          bun fc diff
-          bun fc lint
+        # PR-only check-changed runs below; the historical context job consumes
+        # this producer's result without a second checkout/toolchain/install.
+        run: bun fc ci
       - name: silent-catch baseline gate (R10 — read-only --check mode)
         # Read-only counterpart of `bun run baseline:silent-catch`. CI cannot
         # commit a tightened BASELINES table, so this step BLOCKS when:
@@ -205,17 +239,33 @@ jobs:
         # wired" so landing the script before the ratchet contract migrates
         # does not block unrelated PRs (idempotent no-op shape).
         run: bun run baseline:silent-catch --check
+      - name: check-changed (added src files must be in fc evidence.code)
+        if: github.event_name == 'pull_request'
+        run: bun fc check-changed origin/${{ github.event.pull_request.base.ref }}
 
   full-suite:
     name: full-suite
+    if: ${{ github.event_name != 'schedule' }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.3.14
+      - name: restore Bun package download cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ runner.arch }}-1.3.14-${{ hashFiles('bun.lock') }}
       - run: bun install --frozen-lockfile
+      - name: restore and publish measured test timings
+        uses: actions/cache@v4
+        with:
+          path: .git/quanta-verification-cache/test-timings-v1.json
+          key: test-timings-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            test-timings-${{ runner.os }}-${{ runner.arch }}-
       - name: full suite (guarded — one chunked run of every test tier)
         # ONE authoritative execution: unit + integration + meta/adversarial/
         # measurement + colocated src/tools tests through the chunked runner.
@@ -284,13 +334,19 @@ jobs:
 
   pty:
     name: pty
+    if: ${{ github.event_name != 'schedule' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.3.14
+      - name: restore Bun package download cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ runner.arch }}-1.3.14-${{ hashFiles('bun.lock') }}
       - run: bun install --frozen-lockfile
       - name: interactive CLI e2e (PTY)
         # aug-23 audit — this suite was the ONLY coverage of the raw-mode
@@ -311,14 +367,19 @@ jobs:
 
   web:
     name: web
+    if: ${{ github.event_name != 'schedule' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
-      - run: bun install --frozen-lockfile
+          bun-version: 1.3.14
+      - name: restore web-frontend Bun package download cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-web-${{ runner.os }}-${{ runner.arch }}-1.3.14-${{ hashFiles('apps/web-frontend/bun.lock') }}
       - name: web-frontend suite (vitest/jsdom — bun test cannot give it a verdict)
         # 744 tests across 79 files that ran in NO gate until this step existed.
         # `bun test` DOES load them — 732 tests, 18 failures — but supplies no DOM,
@@ -334,13 +395,19 @@ jobs:
 
   toolchain:
     name: toolchain
+    if: ${{ github.event_name != 'schedule' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.3.14
+      - name: restore Bun package download cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ runner.arch }}-1.3.14-${{ hashFiles('bun.lock') }}
       - run: bun install --frozen-lockfile
       - name: real-toolchain e2e (opt-in lane — visible skips without the toolchain)
         # The `*-real-e2e.test.ts` lane is gated on QUANTA_REAL_TOOLCHAIN_E2E so it
@@ -357,22 +424,30 @@ jobs:
   pyramid:
     name: pyramid (unit + integration)
     needs: [static-code, catalog, full-suite, pty, web, toolchain]
+    if: ${{ always() && github.event_name != 'schedule' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - name: preserve the legacy context from producer verdicts
+        run: >-
+          test "${{ needs.static-code.result }}" = success &&
+          test "${{ needs.catalog.result }}" = success &&
+          test "${{ needs.full-suite.result }}" = success &&
+          test "${{ needs.pty.result }}" = success &&
+          test "${{ needs.web.result }}" = success &&
+          test "${{ needs.toolchain.result }}" = success
 
   required:
     name: required
     needs: [static-code, catalog, full-suite, pty, web, toolchain, contract]
+    if: ${{ always() && github.event_name != 'schedule' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
-      - run: bun install --frozen-lockfile
+          bun-version: 1.3.14
       - run: bun run tools/dev/verification-required-results.ts
         env:
           QUANTA_REQUIRED_NEEDS: ${{ toJSON(needs) }}
@@ -381,18 +456,12 @@ jobs:
     name: feature-catalog (PR — added src must be in fc)
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    if: github.event_name == 'pull_request'
+    needs: [catalog]
+    if: ${{ always() && github.event_name == 'pull_request' }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          # Need the merge base to diff against; fetch full history.
-          fetch-depth: 0
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-      - run: bun install --frozen-lockfile
-      - name: check-changed (added src files must be in fc evidence.code)
-        run: bun fc check-changed origin/${{ github.event.pull_request.base.ref }}
+      # Preserve the historical context without provisioning a second runner
+      # checkout/toolchain/install for work now owned by the catalog producer.
+      - run: test "${{ needs.catalog.result }}" = "success"
 
   contract:
     name: contract (docker + language servers + python+lancedb)
@@ -406,17 +475,25 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.3.14
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: restore contract Bun package download cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-contract-${{ runner.os }}-${{ runner.arch }}-1.3.14-${{ hashFiles('bun.lock') }}-pyright-1.1.414-tsls-6.0.0
       - run: bun install --frozen-lockfile
+      - name: restore LanceDB wheel cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ runner.arch }}-python-3.11-lancedb-0.25.3
       - name: provision LanceDB contract runtime
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install "lancedb==0.25.3"
+        run: python -m pip install "lancedb==0.25.3"
       - name: provision language servers
-        run: bun add -g pyright typescript typescript-language-server
+        run: bun add -g pyright@1.1.414 typescript@5.9.3 typescript-language-server@6.0.0
       - name: docker sanity (ubuntu runners ship the daemon)
         run: docker version
       - name: contract suite
@@ -437,7 +514,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.3.14
+      - name: restore Bun package download cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ runner.arch }}-1.3.14-${{ hashFiles('bun.lock') }}
       - run: bun install --frozen-lockfile
       - name: write synthetic SWE-bench corpus
         run: |

@@ -219,6 +219,15 @@ export interface DockerSandboxOptions {
   cpus?: string
   /** Override the docker binary (mainly for testing). Default `"docker"`. */
   dockerBin?: string
+  /** Availability-probe deadline. Production default remains exactly 5000ms. */
+  probeTimeoutMs?: number
+  /** Probe-only scheduler seam. Omitted uses real platform timers. */
+  probeScheduler?: DockerProbeScheduler
+}
+
+export interface DockerProbeScheduler {
+  readonly schedule: (callback: () => void, delayMs: number) => unknown
+  readonly cancel: (handle: unknown) => void
 }
 
 const DEFAULT_IMAGE = "node:22-slim"
@@ -241,6 +250,10 @@ const DOCKER_CLIENT_ENV_ALLOWLIST = [
  *  probe blocks scenario startup; longer than 5s and a hung daemon could
  *  stall the whole eval / agent boot. */
 const DOCKER_PROBE_TIMEOUT_MS = 5_000
+const REAL_DOCKER_PROBE_SCHEDULER: DockerProbeScheduler = {
+  schedule: (callback, delayMs) => setTimeout(callback, delayMs),
+  cancel: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+}
 
 /** Append a flag pair only when the value is present (keeps argv minimal and
  *  satisfies exactOptionalPropertyTypes without conditional spreads in argv). */
@@ -276,12 +289,16 @@ export class DockerSandbox implements Sandbox {
   private readonly memory: string | undefined
   private readonly cpus: string | undefined
   private readonly dockerBin: string
+  private readonly probeTimeoutMs: number
+  private readonly probeScheduler: DockerProbeScheduler
 
   constructor(options: DockerSandboxOptions = {}) {
     this.image = options.image ?? DEFAULT_IMAGE
     this.memory = options.memory
     this.cpus = options.cpus
     this.dockerBin = options.dockerBin ?? "docker"
+    this.probeTimeoutMs = options.probeTimeoutMs ?? DOCKER_PROBE_TIMEOUT_MS
+    this.probeScheduler = options.probeScheduler ?? REAL_DOCKER_PROBE_SCHEDULER
   }
 
   /** True iff the docker CLI is present AND a daemon answers `docker version`. */
@@ -293,17 +310,17 @@ export class DockerSandbox implements Sandbox {
         stdout: "ignore",
         stderr: "ignore",
       }) as Subprocess<"ignore", "ignore", "ignore">
-      const timer = setTimeout(() => {
+      const timer = this.probeScheduler.schedule(() => {
         try {
           proc.kill()
         } catch {
           // already exited
         }
-      }, DOCKER_PROBE_TIMEOUT_MS)
+      }, this.probeTimeoutMs)
       try {
         return (await proc.exited) === 0
       } finally {
-        clearTimeout(timer)
+        this.probeScheduler.cancel(timer)
       }
     } catch {
       return false

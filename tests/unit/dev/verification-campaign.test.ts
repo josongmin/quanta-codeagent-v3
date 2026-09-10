@@ -72,6 +72,8 @@ const cleanLeaseEnv = (): NodeJS.ProcessEnv => {
   const env = { ...process.env }
   delete env.QUANTA_VERIFICATION_LEASE_TOKEN
   delete env.QUANTA_VERIFICATION_LEASE_OWNER_PID
+  delete env.QUANTA_ADMISSION_DEADLINE_MS
+  delete env.QUANTA_TEST_STRESS
   // Every fixture here spawns a REAL campaign, and a real campaign waits for a
   // box that is not oversubscribed before running its command. Standalone that
   // is instant; inside a full-suite chunk it is not, and two lease cases blew
@@ -155,6 +157,62 @@ describe("campaign fixtures that copy gate.ts", () => {
 })
 
 describe("whole verification campaign lease", () => {
+  test("stress mode reaches only a cache-off nightly child", () => {
+    const root = mkdtempSync(join(tmpdir(), "quanta-verification-tier-env-"))
+    roots.push(root)
+    const runner = copyCampaignOwner(root)
+    const gate = join(root, "tools", "dev", "gate.ts")
+    writeFileSync(
+      gate,
+      'await Bun.write(process.env.QUANTA_TIER_MARKER!, process.env.QUANTA_TEST_STRESS ?? "absent")\n',
+    )
+
+    const run = (tier: "smoke" | "pr" | "full" | "nightly", cache: "on" | "off"): string => {
+      const marker = join(root, `.git/${tier}-${cache}-stress`)
+      const child = Bun.spawnSync([process.execPath, runner, "--", process.execPath, gate, tier], {
+        cwd: root,
+        env: {
+          ...cleanLeaseEnv(),
+          QUANTA_TEST_CACHE: cache,
+          QUANTA_TIER_MARKER: marker,
+        },
+        stdout: "pipe",
+        stderr: "pipe",
+      })
+      expect(child.exitCode, `${child.stdout.toString()}\n${child.stderr.toString()}`).toBe(0)
+      return readFileSync(marker, "utf8")
+    }
+
+    expect(run("nightly", "off")).toBe("1")
+    expect(run("nightly", "on")).toBe("absent")
+    expect(run("smoke", "off")).toBe("absent")
+    expect(run("pr", "off")).toBe("absent")
+    expect(run("full", "off")).toBe("absent")
+  }, 30_000)
+
+  test("the admission deadline is not inherited as an execution TTL", async () => {
+    const root = mkdtempSync(join(tmpdir(), "quanta-verification-admission-scope-"))
+    roots.push(root)
+    const runner = copyCampaignOwner(root)
+    const marker = join(root, "child-admission-deadline")
+    const child = Bun.spawn({
+      cmd: [
+        process.execPath,
+        runner,
+        "--",
+        process.execPath,
+        "-e",
+        `await Bun.write(${JSON.stringify(marker)}, process.env.QUANTA_ADMISSION_DEADLINE_MS ?? "absent")`,
+      ],
+      cwd: root,
+      env: { ...cleanLeaseEnv(), QUANTA_ADMISSION_DEADLINE_MS: "1" },
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    expect(await child.exited).toBe(0)
+    expect(readFileSync(marker, "utf8")).toBe("absent")
+  }, 20_000)
+
   test("a second campaign cannot start even its first command before the first releases", async () => {
     const root = mkdtempSync(join(tmpdir(), "quanta-verification-campaign-"))
     roots.push(root)

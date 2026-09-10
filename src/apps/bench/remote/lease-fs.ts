@@ -48,33 +48,49 @@ export interface HeartbeatLoop {
   stop(): void
 }
 
+export interface HeartbeatScheduler {
+  readonly schedule: (task: () => Promise<void>, intervalMs: number) => unknown
+  readonly cancel: (handle: unknown) => void
+}
+
+const realHeartbeatScheduler: HeartbeatScheduler = {
+  schedule: (task, intervalMs) =>
+    setInterval(() => {
+      void task()
+    }, intervalMs),
+  cancel: (handle) => clearInterval(handle as ReturnType<typeof setInterval>),
+}
+
 export const createHeartbeatLoop = (
   intervalMs: number,
   beat: () => Promise<void>,
+  scheduler: HeartbeatScheduler = realHeartbeatScheduler,
 ): HeartbeatLoop => {
-  let timer: ReturnType<typeof setInterval> | undefined
+  let timer: unknown
+  let armed = false
   let stopped = false
-  const tick = (): void => {
-    void beat().catch(() => undefined)
-  }
+  const tick = async (): Promise<void> => beat().catch(() => undefined)
   const arm = (): void => {
-    timer = setInterval(tick, intervalMs)
+    timer = scheduler.schedule(tick, intervalMs)
+    armed = true
   }
   arm()
   return {
     pause(): void {
-      if (timer === undefined) return
-      clearInterval(timer)
+      if (!armed) return
+      scheduler.cancel(timer)
+      armed = false
       timer = undefined
     },
     resume(): void {
-      if (stopped || timer !== undefined) return
+      if (stopped || armed) return
       arm()
     },
     stop(): void {
       stopped = true
-      if (timer === undefined) return
-      clearInterval(timer)
+      if (!armed) return
+      scheduler.cancel(timer)
+      armed = false
       timer = undefined
     },
   }

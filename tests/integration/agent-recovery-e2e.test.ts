@@ -63,18 +63,46 @@ const toolUse = (id: string, name: string, input: unknown): StreamEvent[] => [
 const ev = (events: StreamEvent[]): Step => ({ kind: "events", events })
 const thr = (error: unknown): Step => ({ kind: "throw", error })
 
-const cfg = (over: Partial<AgentConfig> & Pick<AgentConfig, "llm">): AgentConfig => ({
-  registry: new ToolRegistry(defaultTools),
-  stream: new RecordingStream(),
-  permission: { mode: "acceptEdits" } as PermissionContext,
-  messages: [{ role: "user", content: [{ type: "text", text: "go" }] }] as Message[],
-  system: "test-system",
-  cwd: "/tmp",
-  maxTurns: 5,
-  signal: new AbortController().signal,
-  onConfirm: async () => false,
-  ...over,
-})
+const seededRecoveryBackoff = (seed = 0x5eed1234) => {
+  let state = seed >>> 0
+  const delays: number[] = []
+  return {
+    delays,
+    config: {
+      random: (): number => {
+        state = (Math.imul(1_664_525, state) + 1_013_904_223) >>> 0
+        return state / 0x1_0000_0000
+      },
+      sleep: async (delayMs: number, signal: AbortSignal): Promise<void> => {
+        if (!signal.aborted) delays.push(delayMs)
+      },
+    },
+  }
+}
+
+const cfg = (over: Partial<AgentConfig> & Pick<AgentConfig, "llm">): AgentConfig => {
+  const backoff = seededRecoveryBackoff()
+  return {
+    registry: new ToolRegistry(defaultTools),
+    stream: new RecordingStream(),
+    permission: { mode: "acceptEdits" } as PermissionContext,
+    messages: [{ role: "user", content: [{ type: "text", text: "go" }] }] as Message[],
+    system: "test-system",
+    cwd: "/tmp",
+    maxTurns: 5,
+    signal: new AbortController().signal,
+    onConfirm: async () => false,
+    recoveryBackoff: backoff.config,
+    ...over,
+  }
+}
+
+/** Preserve a real abort-aware timer canary for the backoff boundary. */
+const realBackoffCfg = (over: Partial<AgentConfig> & Pick<AgentConfig, "llm">): AgentConfig => {
+  const config = cfg(over)
+  delete config.recoveryBackoff
+  return config
+}
 
 /** Guard: every test must terminate well under this. The loop's bounded
  *  budgets guarantee termination; a hang here is a real loop bug. */
@@ -92,15 +120,22 @@ const withTimeout = async <T>(p: Promise<T>, ms: number, label: string): Promise
 
 describe("recovery e2e — integrated runAgent", () => {
   test("1. transient stream error then success → completed, retried, turn not consumed", async () => {
+    const backoff = seededRecoveryBackoff()
     const llm = new ScriptedLLM([
       thr(new LLMError("503 service unavailable")),
       ev(text("recovered answer")),
     ])
-    const out = await withTimeout(runAgent(cfg({ llm, maxTurns: 1 })), 15_000, "transient-retry")
+    const out = await withTimeout(
+      runAgent(cfg({ llm, maxTurns: 1, recoveryBackoff: backoff.config })),
+      15_000,
+      "transient-retry",
+    )
     expect(out.reason).toBe("completed")
     // >=2 LLM calls proves it retried; maxTurns=1 yet it still completed →
     // the same-turn retry did NOT consume the single turn slot.
     expect(llm.calls).toBeGreaterThanOrEqual(2)
+    expect(backoff.delays).toHaveLength(1)
+    expect(backoff.delays[0]).toBeLessThan(500)
     expect(out.turns).toBe(1)
     const finalAssistant = out.messages.findLast((m) => m.role === "assistant")
     expect(
@@ -109,6 +144,7 @@ describe("recovery e2e — integrated runAgent", () => {
   })
 
   test("2. transient error exceeding per-turn budget → error mentioning retries", async () => {
+    const backoff = seededRecoveryBackoff()
     // MAX_TURN_STREAM_RETRIES=3 → 4 consecutive throws exhausts the budget.
     const stream = new RecordingStream()
     const llm = new ScriptedLLM([
@@ -119,12 +155,16 @@ describe("recovery e2e — integrated runAgent", () => {
       ev(text("never reached")),
     ])
     const out = await withTimeout(
-      runAgent(cfg({ llm, stream, maxTurns: 3 })),
+      runAgent(cfg({ llm, stream, maxTurns: 3, recoveryBackoff: backoff.config })),
       20_000,
       "budget-exceeded",
     )
     expect(out.reason).toBe("error")
     expect(llm.calls).toBe(4)
+    expect(backoff.delays).toHaveLength(3)
+    expect(backoff.delays[0]).toBeLessThan(500)
+    expect(backoff.delays[1]).toBeLessThan(1_000)
+    expect(backoff.delays[2]).toBeLessThan(2_000)
     // The loop emits an error event whose message mentions retries.
     const errMsg = stream.events.find((e) => e.type === "error")
     expect(errMsg).toBeDefined()
@@ -662,7 +702,7 @@ describe("recovery e2e — hell cases: recovery + abort interaction", () => {
     // Abort after a microtask so the loop has begun retrying.
     queueMicrotask(() => ac.abort())
     const out = await withTimeout(
-      runAgent(cfg({ llm, signal: ac.signal, maxTurns: 5 })),
+      runAgent(realBackoffCfg({ llm, signal: ac.signal, maxTurns: 5 })),
       15_000,
       "hc-abort-during-retry",
     )
@@ -697,7 +737,7 @@ describe("recovery e2e — hell cases: recovery + abort interaction", () => {
       yield* baseStream(input)
     }
     const out = await withTimeout(
-      runAgent(cfg({ llm, signal: ac.signal, maxTurns: 1 })),
+      runAgent(realBackoffCfg({ llm, signal: ac.signal, maxTurns: 1 })),
       15_000,
       "hc-abort-mid-recovery-stack",
     )

@@ -14,7 +14,7 @@
  */
 
 import { FEATURES_DIR } from "../feature-catalog/paths"
-import { loadFeaturesStrict } from "../feature-catalog/schema"
+import { type LoadedFeature, loadFeaturesStrict } from "../feature-catalog/schema"
 import { checkFeatureDoD, type DoDCheck, type DoDResult } from "./definition-of-done"
 
 const GREEN = "\x1b[32m"
@@ -42,21 +42,40 @@ const renderOne = (r: DoDResult): string => {
   return lines.join("\n")
 }
 
-const main = async (): Promise<void> => {
-  const argv = process.argv.slice(2)
+export interface PmCheckApplicationDeps {
+  /** Preloaded immutable catalog for tests or callers composing several checks. */
+  readonly features?: readonly LoadedFeature[]
+  readonly stdout?: (chunk: string) => void
+  readonly stderr?: (chunk: string) => void
+}
+
+const resolvePmCheckIo = (
+  deps: PmCheckApplicationDeps,
+): Pick<Required<PmCheckApplicationDeps>, "stdout" | "stderr"> => ({
+  stdout: deps.stdout ?? ((chunk: string) => void process.stdout.write(chunk)),
+  stderr: deps.stderr ?? ((chunk: string) => void process.stderr.write(chunk)),
+})
+
+/** Testable application boundary. It owns argv semantics and rendering but not
+ * process globals or process.exit; the executable wrapper below owns those. */
+export const runPmCheck = async (
+  argv: readonly string[],
+  deps: PmCheckApplicationDeps = {},
+): Promise<number> => {
+  const { stdout, stderr } = resolvePmCheckIo(deps)
   const strict = argv.includes("--strict")
   const all = argv.includes("--all")
   const ids = argv.filter((a) => !a.startsWith("--"))
 
   if (!all && ids.length === 0) {
-    console.error(
+    stderr(
       "usage: bun tools/pm/check.ts <feature-id> [...]  |  --all [--strict]\n" +
-        "see tools/pm/README.md for the Definition of Done.",
+        "see tools/pm/README.md for the Definition of Done.\n",
     )
-    process.exit(2)
+    return 2
   }
 
-  const features = await loadFeaturesStrict(FEATURES_DIR)
+  const features = deps.features ?? (await loadFeaturesStrict(FEATURES_DIR))
   const byId = new Map(features.map((lf) => [lf.feature.id, lf.feature]))
 
   const targets = all ? [...byId.keys()] : ids
@@ -74,27 +93,33 @@ const main = async (): Promise<void> => {
   // In --all mode, only print the failures (a clean sweep prints a summary);
   // for explicit ids, print every result so the author sees the full checklist.
   const toPrint = all ? results.filter((r) => r.verdict === "fail") : results
-  for (const r of toPrint) console.log(renderOne(r), "\n")
+  // Preserve the historical `console.log(renderOne(r), "\n")` byte shape:
+  // one separator space followed by two newlines between rendered reports.
+  for (const r of toPrint) stdout(`${renderOne(r)} \n\n`)
 
   for (const id of missing) {
-    console.error(
-      `${RED}MISSING${RESET} ${BOLD}${id}${RESET} — not in the feature catalog. Register it first (see tools/pm/README.md §1).`,
+    stderr(
+      `${RED}MISSING${RESET} ${BOLD}${id}${RESET} — not in the feature catalog. Register it first (see tools/pm/README.md §1).\n`,
     )
   }
 
   const failed = results.filter((r) => r.verdict === "fail").length
   const passed = results.length - failed
-  console.log(
+  stdout(
     `${BOLD}Definition of Done:${RESET} ${GREEN}${passed} pass${RESET}, ` +
       `${failed > 0 ? RED : DIM}${failed} fail${RESET}` +
       (missing.length > 0 ? `, ${RED}${missing.length} missing${RESET}` : "") +
-      ` ${DIM}(of ${targets.length} checked${strict ? ", strict" : ""})${RESET}`,
+      ` ${DIM}(of ${targets.length} checked${strict ? ", strict" : ""})${RESET}\n`,
   )
 
-  process.exit(failed > 0 || missing.length > 0 ? 1 : 0)
+  return failed > 0 || missing.length > 0 ? 1 : 0
 }
 
-main().catch((e) => {
-  console.error(e)
-  process.exit(1)
-})
+if (import.meta.main) {
+  runPmCheck(process.argv.slice(2))
+    .then((code) => process.exit(code))
+    .catch((e) => {
+      console.error(e)
+      process.exit(1)
+    })
+}
