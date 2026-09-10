@@ -7,15 +7,18 @@
  *  - dry-run never reads any auth JSON file (points auth at a path that does
  *    NOT exist; a read would crash the process).
  */
-import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { createBoundedTestExecutor } from "../_support/bounded-test-concurrency"
 
 const ENTRY = "src/apps/bench/cli.ts"
 // Repo root anchored on this file, not on the ambient cwd: ENTRY below is a
 // repo-RELATIVE path, so the spawn only works when `cwd` is the real repo root.
 const REPO = join(import.meta.dir, "..", "..")
+const runBounded = createBoundedTestExecutor(2)
+setDefaultTimeout(30_000)
 
 let dir = ""
 let ds = ""
@@ -59,18 +62,20 @@ const runCli = async (
   env: Record<string, string>,
   ...args: string[]
 ): Promise<{ code: number; out: string }> => {
-  const proc = Bun.spawn(["bun", "run", ENTRY, ...args], {
-    cwd: REPO,
-    stdout: "pipe",
-    stderr: "pipe",
-    env: { ...process.env, ...env },
+  return runBounded(async () => {
+    const proc = Bun.spawn(["bun", "run", ENTRY, ...args], {
+      cwd: REPO,
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...process.env, ...env },
+    })
+    const out = `${await new Response(proc.stdout).text()}${await new Response(proc.stderr).text()}`
+    return { code: await proc.exited, out }
   })
-  const out = `${await new Response(proc.stdout).text()}${await new Response(proc.stderr).text()}`
-  return { code: await proc.exited, out }
 }
 
 describe("T-1 bench pool dry-run with auth pool", () => {
-  test("single-auth dry-run prints the single source and stays exit-0", async () => {
+  test.concurrent("single-auth dry-run prints the single source and stays exit-0", async () => {
     const { code, out } = await runCli(
       { QUANTA_BENCH_AUTH_FILE: NONEXISTENT_AUTH },
       "pool",
@@ -84,7 +89,7 @@ describe("T-1 bench pool dry-run with auth pool", () => {
     expect(out).toContain(NONEXISTENT_AUTH)
   })
 
-  test("pool manifest dry-run lists account labels, never token bytes", async () => {
+  test.concurrent("pool manifest dry-run lists account labels, never token bytes", async () => {
     const { code, out } = await runCli(
       { QUANTA_BENCH_AUTH_POOL: manifest },
       "pool",
@@ -102,7 +107,7 @@ describe("T-1 bench pool dry-run with auth pool", () => {
     expect(out).not.toMatch(/access_token|refresh_token/)
   })
 
-  test("--auth-pool flag is honored on the pool dry-run plan", async () => {
+  test.concurrent("--auth-pool flag is honored on the pool dry-run plan", async () => {
     const { code, out } = await runCli(
       {},
       "pool",
@@ -117,7 +122,7 @@ describe("T-1 bench pool dry-run with auth pool", () => {
     expect(out).toContain("auth: pool of 2")
   })
 
-  test("--auth-label pins the pool dry-run to one account", async () => {
+  test.concurrent("--auth-label pins the pool dry-run to one account", async () => {
     const { code, out } = await runCli(
       {},
       "pool",
@@ -137,7 +142,7 @@ describe("T-1 bench pool dry-run with auth pool", () => {
     expect(out).toMatch(/plan chunk .* acct-b/)
   })
 
-  test("unknown --auth-label fails fast instead of silently using another account", async () => {
+  test.concurrent("unknown --auth-label fails fast instead of silently using another account", async () => {
     const { code, out } = await runCli(
       {},
       "pool",
@@ -154,7 +159,7 @@ describe("T-1 bench pool dry-run with auth pool", () => {
     expect(out).toMatch(/unknown account label "missing"/)
   })
 
-  test("all-disabled auth pools fail fast instead of silently using a disabled account", async () => {
+  test.concurrent("all-disabled auth pools fail fast instead of silently using a disabled account", async () => {
     const disabledManifest = join(dir, "auth-pool-disabled.yaml")
     writeFileSync(
       disabledManifest,
@@ -186,7 +191,7 @@ describe("T-1 bench pool dry-run with auth pool", () => {
 })
 
 describe("T-1 full-remote dry-run shares the auth source", () => {
-  test("grade --mode full dry-run prints the resolved auth source (pool)", async () => {
+  test.concurrent("grade --mode full dry-run prints the resolved auth source (pool)", async () => {
     const { code, out } = await runCli(
       { QUANTA_BENCH_AUTH_POOL: manifest },
       "grade",
@@ -202,7 +207,7 @@ describe("T-1 full-remote dry-run shares the auth source", () => {
     expect(out).not.toMatch(/ENOENT|no such file/)
   })
 
-  test("grade --mode full rejects --auth-label outside pool mode", async () => {
+  test.concurrent("grade --mode full rejects --auth-label outside pool mode", async () => {
     const { code, out } = await runCli(
       { QUANTA_BENCH_AUTH_FILE: NONEXISTENT_AUTH },
       "grade",
@@ -219,7 +224,7 @@ describe("T-1 full-remote dry-run shares the auth source", () => {
     expect(out).toMatch(/requires auth pool mode/i)
   })
 
-  test("grade --mode full rejects all-disabled auth pools", async () => {
+  test.concurrent("grade --mode full rejects all-disabled auth pools", async () => {
     const disabledManifest = join(dir, "full-auth-pool-disabled.yaml")
     writeFileSync(
       disabledManifest,
