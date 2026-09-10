@@ -58,6 +58,14 @@ const waitForMessage = (
 
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
+const waitForCondition = async (predicate: () => boolean, timeoutMs = 1500): Promise<void> => {
+  const deadline = Date.now() + timeoutMs
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error("waitForCondition: timed out")
+    await wait(1)
+  }
+}
+
 const encodeConnectWithSubscription = (surfaceSubscription: unknown): string =>
   JSON.stringify({
     version: "session.v1",
@@ -106,9 +114,7 @@ describe("web daemon end-to-end", () => {
     const ws = new WebSocket(`ws://127.0.0.1:${handle.port}/`)
     await waitForOpen(ws)
 
-    // Wait one microtask so the server-side `open()` finishes wiring the
-    // RuntimeSession before we issue the connect.
-    await new Promise((resolve) => setTimeout(resolve, 25))
+    await waitForCondition(() => handle.activeSessions() === 1)
     expect(bag.sessionsCreated).toBe(1)
     expect(bag.attachTransportCalls).toBe(1)
 
@@ -126,8 +132,6 @@ describe("web daemon end-to-end", () => {
     expect(snapshotMsg.snapshot.revision).toBe(1)
 
     ws.close()
-    // Give Bun's close callback a moment to fire so the eviction loop runs.
-    await new Promise((resolve) => setTimeout(resolve, 50))
   })
 
   test("answers a client heartbeat ping with a heartbeat pong (keepalive)", async () => {
@@ -137,7 +141,7 @@ describe("web daemon end-to-end", () => {
 
     const ws = new WebSocket(`ws://127.0.0.1:${handle.port}/`)
     await waitForOpen(ws)
-    await new Promise((resolve) => setTimeout(resolve, 25))
+    await waitForCondition(() => handle.activeSessions() === 1)
 
     // A bare ping (no handshake needed — keepalive is connection-level, not
     // session-level) must come back as a pong so a live socket stays warm.
@@ -148,7 +152,6 @@ describe("web daemon end-to-end", () => {
     expect(pong.phase).toBe("pong")
 
     ws.close()
-    await new Promise((resolve) => setTimeout(resolve, 50))
   })
 
   test("session id mismatch on connect is rejected (close+protocol_validation)", async () => {
@@ -158,7 +161,7 @@ describe("web daemon end-to-end", () => {
 
     const ws = new WebSocket(`ws://127.0.0.1:${handle.port}/`)
     await waitForOpen(ws)
-    await new Promise((resolve) => setTimeout(resolve, 25))
+    await waitForCondition(() => handle.activeSessions() === 1)
 
     const connect: SessionTransportMessage = {
       kind: "connect",
@@ -173,7 +176,6 @@ describe("web daemon end-to-end", () => {
     expect(rejected.reason).toBe("session_id_mismatch")
 
     ws.close()
-    await new Promise((resolve) => setTimeout(resolve, 50))
   })
 
   test("empty-session bootstrap connect is rejected with the canonical session id", async () => {
@@ -183,7 +185,7 @@ describe("web daemon end-to-end", () => {
 
     const ws = new WebSocket(`ws://127.0.0.1:${handle.port}/`)
     await waitForOpen(ws)
-    await new Promise((resolve) => setTimeout(resolve, 25))
+    await waitForCondition(() => handle.activeSessions() === 1)
 
     const connect: SessionTransportMessage = {
       kind: "connect",
@@ -201,7 +203,6 @@ describe("web daemon end-to-end", () => {
     expect(rejected.reason).toBe("session_id_mismatch")
 
     ws.close()
-    await new Promise((resolve) => setTimeout(resolve, 50))
   })
 
   test("back-to-back input.append + turn.run is serialized through the runtime transport", async () => {
@@ -211,7 +212,7 @@ describe("web daemon end-to-end", () => {
 
     const ws = new WebSocket(`ws://127.0.0.1:${handle.port}/`)
     await waitForOpen(ws)
-    await new Promise((resolve) => setTimeout(resolve, 25))
+    await waitForCondition(() => handle.activeSessions() === 1)
 
     ws.send(
       encodeSessionTransportMessage({
@@ -258,7 +259,6 @@ describe("web daemon end-to-end", () => {
     expect(started.event.prompt).toBe("hello")
 
     ws.close()
-    await new Promise((resolve) => setTimeout(resolve, 50))
   })
 
   test("turn.run streams assistant delta events before completion", async () => {
@@ -268,7 +268,7 @@ describe("web daemon end-to-end", () => {
 
     const ws = new WebSocket(`ws://127.0.0.1:${handle.port}/`)
     await waitForOpen(ws)
-    await new Promise((resolve) => setTimeout(resolve, 25))
+    await waitForCondition(() => handle.activeSessions() === 1)
 
     ws.send(
       encodeSessionTransportMessage({
@@ -338,7 +338,6 @@ describe("web daemon end-to-end", () => {
     expect(finalState.event.state.streamingAssistantText).toBeUndefined()
 
     ws.close()
-    await new Promise((resolve) => setTimeout(resolve, 50))
   })
 
   test("/health reports the live session count and uptime", async () => {
@@ -352,15 +351,14 @@ describe("web daemon end-to-end", () => {
 
     const ws = new WebSocket(`ws://127.0.0.1:${handle.port}/`)
     await waitForOpen(ws)
-    // Wait for server-side open() to finish.
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await waitForCondition(() => handle.activeSessions() === 1)
 
     const r2 = await fetch(`http://127.0.0.1:${handle.port}/health`)
     const body2 = (await r2.json()) as { status: string; sessions: number; uptime_ms: number }
     expect(body2.sessions).toBe(1)
 
     ws.close()
-    await new Promise((resolve) => setTimeout(resolve, 100))
+    await waitForCondition(() => handle.activeSessions() === 0)
     const r3 = await fetch(`http://127.0.0.1:${handle.port}/health`)
     const body3 = (await r3.json()) as { status: string; sessions: number; uptime_ms: number }
     expect(body3.sessions).toBe(0)
@@ -433,8 +431,7 @@ describe("web daemon end-to-end", () => {
 
     const ws = new WebSocket(`ws://127.0.0.1:${handle.port}/`)
     await waitForOpen(ws)
-    // Wait for server-side open() to finish wiring.
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await waitForCondition(() => handle.activeSessions() === 1)
     expect(bag.sessionsCreated).toBe(1)
     expect(handle.activeSessions()).toBe(1)
 
@@ -458,7 +455,7 @@ describe("web daemon end-to-end", () => {
 
     const ws = new WebSocket(`ws://127.0.0.1:${handle.port}/`)
     await waitForOpen(ws)
-    await new Promise((resolve) => setTimeout(resolve, 25))
+    await waitForCondition(() => bag.attachTransportCalls === 1)
 
     // The daemon must pass an explicit, bounded replayWindow so a reconnecting
     // client's resume replay is capped (no unbounded history) and resumes older
@@ -469,11 +466,10 @@ describe("web daemon end-to-end", () => {
     expect(bag.lastAttachReplayWindow).toBe(128)
 
     ws.close()
-    await new Promise((resolve) => setTimeout(resolve, 50))
   })
 
   test("reconnect caught-up to the live seq replays NOTHING (no snapshot, no events)", async () => {
-    const { factory } = createStubRuntimeFactory()
+    const { factory, bag } = createStubRuntimeFactory()
     const handle = await main({ port: 0, bind: "127.0.0.1", runtimeFactory: factory })
     handles.push(handle)
 
@@ -481,7 +477,7 @@ describe("web daemon end-to-end", () => {
     // the live snapshot moves to seq 1.
     const wsA = new WebSocket(`ws://127.0.0.1:${handle.port}/`)
     await waitForOpen(wsA)
-    await new Promise((resolve) => setTimeout(resolve, 25))
+    await waitForCondition(() => bag.attachTransportCalls === 1)
     wsA.send(encodeSessionTransportMessage({ kind: "connect", sessionId: "stub-session-1" }))
     await waitForMessage(wsA, (m) => m.kind === "snapshot")
 
@@ -509,7 +505,7 @@ describe("web daemon end-to-end", () => {
     // must receive NEITHER a snapshot NOR any replayed events (nothing missed).
     const wsB = new WebSocket(`ws://127.0.0.1:${handle.port}/`)
     await waitForOpen(wsB)
-    await new Promise((resolve) => setTimeout(resolve, 25))
+    await waitForCondition(() => bag.attachTransportCalls === 2)
 
     const framesB: SessionTransportMessage[] = []
     wsB.addEventListener("message", (event: MessageEvent) => {
@@ -533,18 +529,17 @@ describe("web daemon end-to-end", () => {
 
     wsA.close()
     wsB.close()
-    await new Promise((resolve) => setTimeout(resolve, 50))
   })
 
   test("reconnect with resumeFromSeq BEHIND the live snapshot falls back to a full snapshot", async () => {
-    const { factory } = createStubRuntimeFactory()
+    const { factory, bag } = createStubRuntimeFactory()
     const handle = await main({ port: 0, bind: "127.0.0.1", runtimeFactory: factory })
     handles.push(handle)
 
     // Advance the live snapshot to seq 1 via an append on the first client.
     const wsA = new WebSocket(`ws://127.0.0.1:${handle.port}/`)
     await waitForOpen(wsA)
-    await new Promise((resolve) => setTimeout(resolve, 25))
+    await waitForCondition(() => bag.attachTransportCalls === 1)
     wsA.send(encodeSessionTransportMessage({ kind: "connect", sessionId: "stub-session-1" }))
     await waitForMessage(wsA, (m) => m.kind === "snapshot")
     wsA.send(
@@ -570,7 +565,7 @@ describe("web daemon end-to-end", () => {
     // resets cleanly rather than missing the gap.
     const wsB = new WebSocket(`ws://127.0.0.1:${handle.port}/`)
     await waitForOpen(wsB)
-    await new Promise((resolve) => setTimeout(resolve, 25))
+    await waitForCondition(() => bag.attachTransportCalls === 2)
     wsB.send(
       encodeSessionTransportMessage({
         kind: "connect",
@@ -586,24 +581,22 @@ describe("web daemon end-to-end", () => {
 
     wsA.close()
     wsB.close()
-    await new Promise((resolve) => setTimeout(resolve, 50))
   })
 
   test("reconnect WITHOUT resumeFromSeq receives a full snapshot (byte-identical legacy path)", async () => {
-    const { factory } = createStubRuntimeFactory()
+    const { factory, bag } = createStubRuntimeFactory()
     const handle = await main({ port: 0, bind: "127.0.0.1", runtimeFactory: factory })
     handles.push(handle)
 
     const ws = new WebSocket(`ws://127.0.0.1:${handle.port}/`)
     await waitForOpen(ws)
-    await new Promise((resolve) => setTimeout(resolve, 25))
+    await waitForCondition(() => bag.attachTransportCalls === 1)
 
     ws.send(encodeSessionTransportMessage({ kind: "connect", sessionId: "stub-session-1" }))
     const snapshotMsg = await waitForMessage(ws, (m) => m.kind === "snapshot")
     expect(snapshotMsg.kind).toBe("snapshot")
 
     ws.close()
-    await new Promise((resolve) => setTimeout(resolve, 50))
   })
 
   test("unsupported read models in the connect handshake suppress derived side-channel fanout", async () => {
@@ -628,7 +621,7 @@ describe("web daemon end-to-end", () => {
 
     const ws = new WebSocket(`ws://127.0.0.1:${handle.port}/`)
     await waitForOpen(ws)
-    await wait(25)
+    await waitForCondition(() => handle.activeSessions() === 1)
 
     const frames: string[] = []
     ws.addEventListener("message", (event: MessageEvent) => {
@@ -657,7 +650,6 @@ describe("web daemon end-to-end", () => {
     expect(frames.some((raw) => raw.includes('"kind":"observability"'))).toBe(false)
 
     ws.close()
-    await wait(50)
   })
 
   test("legacy raw socket receives agent-state fanout before any explicit connect subscription", async () => {
@@ -681,7 +673,7 @@ describe("web daemon end-to-end", () => {
 
     const ws = new WebSocket(`ws://127.0.0.1:${handle.port}/`)
     await waitForOpen(ws)
-    await wait(25)
+    await waitForCondition(() => handle.activeSessions() === 1)
 
     const frames: string[] = []
     ws.addEventListener("message", (event: MessageEvent) => {
@@ -694,7 +686,7 @@ describe("web daemon end-to-end", () => {
       name: "bash",
       message: "visible",
     })
-    await wait(50)
+    await waitForCondition(() => frames.length > 0)
 
     const decoded = frames
       .map((raw) => decodeAgentStateFrame(raw))
@@ -706,7 +698,6 @@ describe("web daemon end-to-end", () => {
     }
 
     ws.close()
-    await wait(50)
   })
 })
 
