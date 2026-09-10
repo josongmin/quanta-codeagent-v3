@@ -147,9 +147,15 @@ const configWithMarker = (name: string, marker: string): McpServerConfig => ({
 const realSchedulerDeps = (
   factory: SupervisorDeps["factory"],
   onStateChange?: SupervisorDeps["onStateChange"],
+  policyOverrides: Partial<SupervisorDeps["policy"]> = {},
 ): SupervisorDeps => ({
   factory,
-  policy: { ...DEFAULT_BACKOFF_POLICY, fastRetryBaseMs: 10, fastRetryMaxMs: 50 },
+  policy: {
+    ...DEFAULT_BACKOFF_POLICY,
+    fastRetryBaseMs: 10,
+    fastRetryMaxMs: 50,
+    ...policyOverrides,
+  },
   now: () => Date.now(),
   setTimer: (fn, ms) => {
     const t = setTimeout(fn, ms)
@@ -266,11 +272,9 @@ describe("MCP auto-restart — REAL process crash → transparent supervised res
       )
       expect(first.ok).toBe(false)
 
-      // Give any (nonexistent) recovery the same wall-clock budget the auto-
-      // restart path used — then a SECOND call must STILL FAIL, because nothing
-      // respawned the dead client. This is the non-vacuous control: the ONLY
-      // difference from the passing test above is the absent supervisor.
-      await new Promise((r) => setTimeout(r, 300))
+      // A SECOND call must STILL FAIL because this path has no scheduler or
+      // factory that could respawn the dead client. Waiting here cannot add
+      // coverage: there is no asynchronous recovery mechanism to exercise.
       const after = await withTimeout(
         runBridged(echo as Tool, { who: "quanta" }),
         15_000,
@@ -321,6 +325,18 @@ describe("MCP auto-restart — REAL process crash → transparent supervised res
               return sabotaged
             },
             (s) => states.push(s.state),
+            // This E2E owns the real process/factory/start failure boundary.
+            // The exhaustive default retry storm and permanent give-up are
+            // already pinned with a deterministic fake clock in the supervisor
+            // hellgate, so one periodic attempt is sufficient here.
+            {
+              fastRetryBaseMs: 10,
+              fastRetryMaxMs: 10,
+              periodicBaseMs: 10,
+              periodicMaxMs: 10,
+              maxFastAttempts: 0,
+              maxPeriodicCycles: 1,
+            },
           ),
       },
     )
@@ -338,11 +354,11 @@ describe("MCP auto-restart — REAL process crash → transparent supervised res
       )
       expect(first.ok).toBe(false)
 
-      // The supervisor keeps trying to respawn, but every respawn's start()
-      // throws ⇒ it never returns to HEALTHY (it churns backing-off/restarting,
-      // ultimately DEGRADED once caps exhaust). It must NOT reach healthy.
-      const finalState = await waitForHealthy(sup, 8_000)
-      expect(finalState).not.toBe("healthy")
+      // The real respawn's start() throws, so the single-attempt E2E policy
+      // reaches DEGRADED. Exhaustive default-policy retry counts are owned by
+      // supervisor.hellgate.test.ts on a deterministic clock.
+      const finalState = await waitForHealthy(sup, 2_000)
+      expect(finalState).toBe("degraded")
       // Proof the sabotage was actually exercised: at least one respawn attempt
       // (spawnCount>1) ⇒ the factory was re-invoked for a restart.
       expect(spawnCount).toBeGreaterThan(1)
