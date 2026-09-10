@@ -3,7 +3,7 @@
 - 감사일: 2026-09-09 / 티켓 작성 완료일: 2026-09-10 (KST)
 - 상태: IMPLEMENTING — Wave 0–6 코드 착륙. 저장소와 `main`은 확인됐지만 current private-repository plan에서 ruleset/branch-protection API가 HTTP 403이라 remote required는 활성화 불가. exact-HEAD Actions도 billing/spending-limit으로 0-step 종료. full 캠페인 없음. KF-01은 owner-local green.
 - 고정 증거: [evidence/baseline-94073ffa6415.json](../evidence/baseline-94073ffa6415.json), [evidence/known-failures.md](../evidence/known-failures.md), [evidence/remote-protection-r0.json](../evidence/remote-protection-r0.json), [evidence/open-gaps.md](../evidence/open-gaps.md)
-- 현재 full digest: `e58849bda57f731d18f2d2ec189038f2f26b88feb39b605fb95cc9b4278bcf5e` (3907 files; audit 3906 + TV-00 discovery test)
+- 현재 full population digest: `e887c346fd94536b05801c86f1be7fe08a02c8bca7fde7c0d92e369b27512fd0` (3,921 files at local HEAD `03f36c9eb`)
 - 감사 기준 HEAD: `94073ffa64155941bd9c6a97e0c7121b7f09d526`
 - 요청: 기존 장시간 검증 중단 후 smoke / prepush / PR / nightly 체계와 최적화 작업을 구체적으로 기록.
 - 현재 실행 제약: full / prepush / test:ci 캠페인은 중단 상태를 유지한다. 이 문서의 명령은 향후 구현·검증 명세이며 지금 실행하라는 지시가 아니다.

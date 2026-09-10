@@ -9,7 +9,7 @@ or healthy-load proof barriers; focused green does not authorize those switches.
 |---|---|
 | TV-08 B lease split | Deferred by plan. Admission A (single wait budget + spawn=0) only. |
 | TV-09 PR exhaustive reduction | Canary added; 60-seed fuzz / bench cross-product stay on PR until a real nightly artifact exists. |
-| TV-12 live matrix | Shadow jobs exist behind `vars.QUANTA_SHADOW_MATRIX`. Required still consumes `full-suite`. |
+| TV-12 live matrix | Shadow jobs now freeze an exact clean HEAD plan, fan out real Bun/JUnit workers, and fail closed on missing/stale/wrong-HEAD artifacts behind `vars.QUANTA_SHADOW_MATRIX`. No hosted artifact exists yet; required still consumes `full-suite`. |
 | TV-15 R2 hook switch | Repository/default branch are verified, but protection capability is unavailable on the current private-repository plan; `.githooks/pre-push` still calls `bun run prepush --bail`. |
 | TV-15 R3 remote required | Ruleset and branch-protection reads return HTTP 403 on the current plan, so a required context cannot be proved or enforced. `pyramid` remains the intended aggregator; `required` evaluates `needs` JSON locally. |
 | Exact-HEAD hosted receipt | CI run `34377504975` targets `dba37472ec70acad1a38721a50a0693583333cd3`, but all seven jobs started zero steps because Actions reported a billing/spending-limit block; `required` was skipped. This is not a code-failure receipt. |

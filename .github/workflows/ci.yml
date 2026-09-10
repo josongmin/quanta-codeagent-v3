@@ -31,13 +31,28 @@ jobs:
     if: ${{ vars.QUANTA_SHADOW_MATRIX == '1' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      chunks: ${{ steps.plan.outputs.chunks }}
+      plan_sha256: ${{ steps.plan.outputs.plan_sha256 }}
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
       - run: bun install --frozen-lockfile
-      - run: bun run tools/dev/verification-matrix-cli.ts plan
+      - id: plan
+        name: freeze exact-HEAD matrix plan
+        run: >-
+          bun run tools/dev/verification-matrix-cli.ts plan
+          --out=.cache/verification-matrix/plan.json
+          --github-output="$GITHUB_OUTPUT"
+      - name: upload exact plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-plan-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          path: .cache/verification-matrix/plan.json
+          if-no-files-found: error
+          include-hidden-files: true
 
   full-shard:
     name: full-shard (shadow)
@@ -45,17 +60,40 @@ jobs:
     needs: [full-plan]
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        chunk: ${{ fromJSON(needs.full-plan.outputs.chunks) }}
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
       - run: bun install --frozen-lockfile
-      - run: bun run tools/dev/verification-matrix-cli.ts worker
+      - name: download exact plan
+        uses: actions/download-artifact@v4
+        with:
+          name: verification-plan-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          path: .cache/verification-matrix/plan
+      - name: execute frozen chunk
+        run: >-
+          bun run tools/dev/verification-matrix-cli.ts worker
+          --plan=.cache/verification-matrix/plan/plan.json
+          --chunk=${{ matrix.chunk }}
+          --out-dir=.cache/verification-matrix/worker
+      - name: upload worker receipt and JUnit
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-worker-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}-${{ matrix.chunk }}
+          path: .cache/verification-matrix/worker/
+          if-no-files-found: error
+          include-hidden-files: true
 
   full-aggregate:
     name: full-aggregate (shadow)
-    if: ${{ vars.QUANTA_SHADOW_MATRIX == '1' }}
+    if: ${{ always() && vars.QUANTA_SHADOW_MATRIX == '1' }}
     needs: [full-plan, full-shard]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -65,7 +103,31 @@ jobs:
         with:
           bun-version: latest
       - run: bun install --frozen-lockfile
-      - run: bun run tools/dev/verification-matrix-cli.ts aggregate
+      - name: download exact plan
+        uses: actions/download-artifact@v4
+        with:
+          name: verification-plan-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          path: .cache/verification-matrix/plan
+      - name: download exact worker artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: verification-worker-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}-*
+          path: .cache/verification-matrix/receipts
+          merge-multiple: true
+      - name: aggregate exact membership and JUnit receipts
+        run: >-
+          bun run tools/dev/verification-matrix-cli.ts aggregate
+          --plan=.cache/verification-matrix/plan/plan.json
+          --receipts=.cache/verification-matrix/receipts
+          --out=.cache/verification-matrix/aggregate.json
+      - name: upload aggregate verdict
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-aggregate-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          path: .cache/verification-matrix/aggregate.json
+          if-no-files-found: error
+          include-hidden-files: true
 
   static-code:
     name: static-code
