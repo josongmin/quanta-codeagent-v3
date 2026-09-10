@@ -9,6 +9,7 @@ import {
 import {
   NIGHTLY_MEMBERSHIP,
   NIGHTLY_SCHEDULES,
+  nightlyStressEnabled,
 } from "../../../tools/dev/verification-nightly-manifest"
 import { assertScanPopulation } from "../_shared/scan-population"
 
@@ -69,21 +70,28 @@ describe("nightly membership", () => {
     }
     const nightlyScript = pkg.scripts?.["verify:nightly"] ?? ""
     const workflow = await Bun.file(join(repo, ".github/workflows/verification-nightly.yml")).text()
+    const campaign = await Bun.file(join(repo, "tools/dev/verification-campaign.ts")).text()
     const laneWired = (lane: string): boolean => {
-      if (lane !== "cache-off-full-suite") return false
+      if (
+        !["cache-off-full-suite", "exhaustive-fuzz", "exhaustive-static-oracles"].includes(lane)
+      ) {
+        return false
+      }
       return (
         nightlyScript.includes("QUANTA_TEST_CACHE=off") &&
         nightlyScript.includes("gate.ts nightly") &&
-        workflow.includes("bun run verify:nightly")
+        workflow.includes("bun run verify:nightly") &&
+        (lane === "cache-off-full-suite" || campaign.includes("QUANTA_TEST_STRESS"))
       )
     }
     expect(NIGHTLY_MEMBERSHIP.includes.length).toBeGreaterThan(0)
     for (const lane of NIGHTLY_MEMBERSHIP.includes) {
       expect(laneWired(lane)).toBe(true)
     }
-    expect(laneWired("exhaustive-fuzz")).toBe(false)
-    expect(nightlyScript).not.toContain("exhaustive-fuzz")
-    expect(workflow).not.toContain("exhaustive-fuzz")
+    expect(laneWired("exhaustive-fuzz")).toBe(true)
+    expect(laneWired("exhaustive-static-oracles")).toBe(true)
+    expect(nightlyStressEnabled({ QUANTA_TEST_STRESS: "1" })).toBe(true)
+    expect(nightlyStressEnabled({ QUANTA_TEST_STRESS: "0" })).toBe(false)
   })
 
   test("schedule inventory matches workflow cron lines", () => {

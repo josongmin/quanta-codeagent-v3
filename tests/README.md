@@ -113,7 +113,7 @@ full children so repeat/stress rails cannot inflate merge-gating wall time.
 | `bun run verify:prepush` | `gate.ts prepush` inside a verification campaign | prepush gate set passed (static + suites) |
 | `bun run verify:pr` | `gate.ts pr --keep-going` | PR tier membership passed; not a remote required check |
 | `bun run verify:full` | `gate.ts full --keep-going` | full tier membership passed; not an authoritative cache-off receipt |
-| `bun run verify:nightly` | `QUANTA_TEST_CACHE=off` + `gate.ts nightly --keep-going`; child gets `QUANTA_TEST_STRESS=1` | cache-off nightly membership (`cache-off-full-suite`) and opted-in stress rails ran |
+| `bun run verify:nightly` | `QUANTA_TEST_CACHE=off` + `gate.ts nightly --keep-going`; child gets `QUANTA_TEST_STRESS=1` | cache-off full suite plus `exhaustive-fuzz` and `exhaustive-static-oracles` ran |
 | `bun run verify:scope` | dry-run selection (`verify-scope.ts`) | JSON/plan of what a tier would run; exclusive flags fail closed |
 
 `.githooks/pre-push` calls canonical `bun run prepush`; that script owns the

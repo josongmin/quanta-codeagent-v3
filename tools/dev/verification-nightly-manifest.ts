@@ -8,6 +8,11 @@ export const NIGHTLY_SCHEDULES = [
 export const NIGHTLY_MEMBERSHIP = {
   schema: "quanta.verification-nightly.v1",
   cacheMode: "off",
-  includes: ["cache-off-full-suite"],
+  includes: ["cache-off-full-suite", "exhaustive-fuzz", "exhaustive-static-oracles"],
   excludesPaidEvalMove: true,
 } as const
+
+/** One authority for expensive deterministic cases that run nightly, not per PR. */
+export const nightlyStressEnabled = (
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): boolean => env.QUANTA_TEST_STRESS === "1"

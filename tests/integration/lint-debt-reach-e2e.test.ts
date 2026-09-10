@@ -31,6 +31,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { collectBiomeTargets } from "../../tools/dev/biome-targets"
+import { nightlyStressEnabled } from "../../tools/dev/verification-nightly-manifest"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..")
 const BIOME_BIN = join(REPO_ROOT, "node_modules/.bin/biome")
@@ -102,14 +103,18 @@ describe("lint-debt reach — every biome diagnostic lands on an enumerated file
    * unenumerated file happens to be clean — but it is the form the ceiling
    * actually consumes, so it is pinned in that form too.
    */
-  test("every diagnostic biome raises under src/ and tests/ lands on an enumerated file", () => {
-    const diagnostics = biomeDiagnosticsOverRoots()
-    expect(diagnostics.length).toBeGreaterThan(0) // anti-vacuity
+  test.skipIf(!nightlyStressEnabled())(
+    "nightly: every diagnostic biome raises under src/ and tests/ lands on an enumerated file",
+    () => {
+      const diagnostics = biomeDiagnosticsOverRoots()
+      expect(diagnostics.length).toBeGreaterThan(0) // anti-vacuity
 
-    const enumerated = new Set(targets)
-    const unseen = diagnostics
-      .map((d) => relPathOf(d))
-      .filter((rel) => rel !== "" && !enumerated.has(rel))
-    expect([...new Set(unseen)].sort()).toEqual([])
-  }, 300_000)
+      const enumerated = new Set(targets)
+      const unseen = diagnostics
+        .map((d) => relPathOf(d))
+        .filter((rel) => rel !== "" && !enumerated.has(rel))
+      expect([...new Set(unseen)].sort()).toEqual([])
+    },
+    300_000,
+  )
 })

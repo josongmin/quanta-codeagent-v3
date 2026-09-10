@@ -33,7 +33,8 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { type ConflictBlock, parseConflicts } from "@/git"
-import { BASE_SEED, GIT_CASES } from "./conflict-parser-fuzz-cases"
+import { nightlyStressEnabled } from "../../../tools/dev/verification-nightly-manifest"
+import { BASE_SEED, CANARY_INDICES, GIT_CASES } from "./conflict-parser-fuzz-cases"
 
 const assertSequentialBlocks = (
   blocks: readonly ConflictBlock[],
@@ -263,7 +264,11 @@ describe("conflict-parser differential fuzz — PART 1: real git ground truth", 
   let twoWay = 0
   let threeWay = 0
 
-  for (let idx = 0; idx < GIT_CASES; idx++) {
+  const realGitIndices = nightlyStressEnabled()
+    ? Array.from({ length: GIT_CASES }, (_, index) => index)
+    : [...CANARY_INDICES]
+
+  for (const idx of realGitIndices) {
     test(`G${idx}: parseConflicts matches real git output`, () => {
       const rng = rngFor(idx)
       const gc = makeGitConflict(rng)
@@ -324,11 +329,9 @@ describe("conflict-parser differential fuzz — PART 1: real git ground truth", 
 
   test("real-git corpus actually produced conflicts of both styles", () => {
     if (!gitUsable) return
-    // The 60 cases above will have run and mutated the counters. Across a
-    // 60-case deterministic spread we expect a healthy number of real
-    // conflicts and at least one of EACH style — this is the proof the
-    // differential is exercising git, not silently no-op'ing.
-    expect(produced).toBeGreaterThanOrEqual(20)
+    // PRs retain six real-Git canaries; nightly stress runs all 60. Both fixed
+    // populations contain each conflict style and must actually yield conflicts.
+    expect(produced).toBeGreaterThanOrEqual(nightlyStressEnabled() ? 20 : 4)
     expect(twoWay).toBeGreaterThanOrEqual(1)
     expect(threeWay).toBeGreaterThanOrEqual(1)
   })
