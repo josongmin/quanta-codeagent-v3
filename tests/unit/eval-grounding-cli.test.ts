@@ -122,14 +122,15 @@ describe("eval grounding CLI", () => {
   )
 
   test(
-    "grounding requires a valid subcommand",
+    "grounding application requires a valid subcommand",
     async () => {
-      const out = runEvalProcess("grounding")
+      // The --help case above is the single real-process reachability/parity
+      // canary for the thin import.meta.main wrapper. Argument dispatch belongs
+      // to runEvalCli, so do not cold-boot the full eval graph again here.
       const application = await runEvalApplication("grounding")
-      expect(out.status).toBe(1)
-      expect(out.stdout).toBe(application.stdout)
-      expect(out.stderr).toBe(application.stderr)
-      expect(out.stderr).toContain(
+      expect(application.status).toBe(1)
+      expect(application.stdout).toBe("")
+      expect(application.stderr).toContain(
         "eval grounding: subcommand must be one of: run, preflight, report, baseline, gate, compare, regress, scaffold-replay, promote-replay",
       )
     },
