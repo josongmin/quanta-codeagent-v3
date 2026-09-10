@@ -24,7 +24,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { runMain } from "@/apps/bench"
-import { parseMaxWorkers, resolvedIdsFromReport } from "@/apps/bench/cli"
+import { parseMaxWorkers, resolvedIdsFromReport } from "@/apps/bench/commands/shared"
 
 describe("#17 — dataset JSONL parsed ONCE per run (single read)", () => {
   let dir: string

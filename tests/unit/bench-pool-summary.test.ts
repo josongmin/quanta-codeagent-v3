@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { summarizePoolRunLines } from "../../src/apps/bench/cli"
+import { summarizePoolRunLines } from "../../src/apps/bench/commands/pool"
 import type { PoolChunkResult } from "../../src/apps/bench/remote/pool"
 
 describe("pool summary lines", () => {

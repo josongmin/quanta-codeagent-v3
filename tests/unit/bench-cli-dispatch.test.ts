@@ -5,15 +5,14 @@
  * this pins the thin dispatch glue.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { writeFileSync } from "node:fs"
+import { readFileSync, writeFileSync } from "node:fs"
+import { buildBackend } from "../../src/apps/bench/commands/grade"
 import {
   argValue,
-  buildBackend,
   modelNameFromPredictions,
-  otelUiPort,
   positionals,
-  traceUrl,
-} from "../../src/apps/bench/cli"
+} from "../../src/apps/bench/commands/shared"
+import { otelUiPort, traceViewerUrl as traceUrl } from "../../src/apps/bench/otel"
 
 let savedArgv: string[]
 beforeEach(() => {
@@ -26,7 +25,18 @@ const setArgv = (...rest: string[]): void => {
   process.argv = ["bun", "cli.ts", ...rest]
 }
 
+const CLI_SOURCE = readFileSync(new URL("../../src/apps/bench/cli.ts", import.meta.url), "utf8")
+
 describe("bench CLI dispatch", () => {
+  test("direct CLI startup lazy-loads command handlers", () => {
+    const dynamicHandlerLoads = [
+      ...CLI_SOURCE.matchAll(/await import\("\.\/commands\/[a-z-]+"\)/gu),
+    ]
+    expect(dynamicHandlerLoads.length).toBeGreaterThanOrEqual(16)
+    expect(CLI_SOURCE.match(/^import .* from "\.\/commands\/[a-z-]+"$/gmu) ?? []).toEqual([])
+    expect(CLI_SOURCE.match(/^export .* from "\.\/commands\/[a-z-]+"$/gmu) ?? []).toEqual([])
+  })
+
   test("positionals skips flags AND their value tokens", () => {
     // `leaderboard a.json b.json --preset agentless-v1 --title T`
     setArgv("leaderboard", "a.json", "b.json", "--preset", "agentless-v1", "--title", "T")

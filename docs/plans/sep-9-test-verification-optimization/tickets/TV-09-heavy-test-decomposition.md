@@ -1,7 +1,7 @@
 # TV-09 — 중량 테스트를 canary와 exhaustive로 분리
 
 - 우선순위: P1
-- 상태: IMPLEMENTING — exact tier wiring과 Biome nightly entrypoint 착륙; 나머지 fuzz/toolchain split과 hosted activation 미완료
+- 상태: IMPLEMENTING — exact tier wiring, hosted PR-tier binding, Biome/conflict-fuzz/bench nightly entrypoint 착륙; 나머지 capability split과 hosted receipt 미완료
 - 소유자: C (영역별 파일 write set 분리)
 - 선행: TV-02
 - PR 기본 범위 축소 선행: TV-03, TV-13의 실제 연결
@@ -10,7 +10,9 @@
 
 Git fuzz, Biome 전체 reach, CLI 조합, PTY, 실제 언어 도구가 반복 loop에 함께 들어 있다. 단순 파일 이동은 coverage를 숨길 수 있으므로 기존 case/seed universe를 보존하며 실행 빈도를 나눈다.
 
-2026-09-11 현재 conflict differential fuzz의 고비용 부분은 `QUANTA_TEST_STRESS=1`로 nightly gating돼 있다. Biome exhaustive oracle은 `lint-debt-reach-e2e.nightly.test.ts`로 물리 분리되어 working-tree discovery 기준 PR/full 3,924 files, nightly 3,925 files다(신규 certification unit 포함). 나머지 fuzz/toolchain은 아직 같은 파일 내부 stress branch이므로 추가 분리가 필요하다.
+2026-09-11 현재 conflict differential fuzz는 공통 deterministic fixture, PR 6-seed canary, nightly-only 54-seed remainder로 물리 분리되어 있다. canary/nightly ID는 서로 겹치지 않고 합집합이 원래 60-seed universe와 같다는 ratchet이 있다. Bench composition도 모든 7개 root의 invalid/absent pair와 Pro decision을 PR canary에 유지하고 전체 19-test cross-product를 nightly sibling으로 분리했다. Biome exhaustive oracle도 `lint-debt-reach-e2e.nightly.test.ts`로 분리되어 committed-HEAD discovery 기준 PR/full 3,924 files, nightly 3,927 files다. 나머지 session stress와 독립 toolchain capability lane은 추가 분리가 필요하다.
+
+같은 날 focused 최적화로 conflict harness를 case당 임시 repository + Git 8회에서 `git merge-file -p` 1회로 교체했다. 분리 전 canary 6개 기준 9.44초에서 2.72초로 71% 감소했고, 당시 전체 60-seed 포함 215 tests가 4.05초에 통과했다. 물리 분리 후에는 PR 161 tests와 nightly remainder 55 tests가 각각 통과한다. seed/case 수와 Git xdiff marker authority는 유지된다. bench CLI는 handler와 run-time graph를 지연 로드하고 selector subprocess를 concurrency 4로 묶었다. `composition-root-dispatch`는 부하가 큰 동일 호스트에서 126.9초에서 90.9초로 감소했지만 CPU 포화 상태 측정이므로 authoritative ABBA가 아니다. 순수 instance-filter 테스트도 무거운 `batch/core` barrel 대신 `instance-selection` leaf를 직접 가져오도록 바꿔 동일 작업 트리에서 16.6초에서 3.43초로 줄었다.
 
 ## 구현 범위
 
@@ -46,8 +48,10 @@ Git fuzz, Biome 전체 reach, CLI 조합, PTY, 실제 언어 도구가 반복 lo
 
 | 파일 | 현재 중량 지점 | 변경 로직 | 보존 검증 |
 |---|---|---|---|
-| `tests/unit/git/conflict-parser-differential-fuzz.test.ts` | `BASE_SEED`, `GIT_CASES = 60`, real-git loop, constructed adversarial cases | generator/seed/case descriptor를 sibling fixture로 추출한다. PR canary는 고정 6 case와 known regressions, exhaustive는 기존 60 seed와 모든 constructed case를 실행한다. | PR∪nightly case IDs가 기존 universe와 같고 seed 재현 가능. |
-| `src/apps/bench/composition-root-dispatch.test.ts` | `runCliBatch`, `FAMILY_BEARING`, `BAD_SELECTORS`, 다수 cross-product describe | invocation/grade helpers는 공유하고 PR에는 subcommand별 valid/invalid 최소 pair, exhaustive에는 전체 cross-product를 둔다. | selector/command pair inventory set equality. |
+| `tests/unit/git/conflict-parser-differential-fuzz.test.ts`, `conflict-parser-differential-fuzz.nightly.test.ts`, `conflict-parser-fuzz-runtime.ts` | `BASE_SEED`, `GIT_CASES = 60`, real-git loop, constructed adversarial cases | DONE: Git process를 case당 8→1로 축소하고 PR 6-seed/nightly 54-seed remainder를 sibling entrypoint로 물리 분리했다. constructed adversarial은 PR에 유지한다. | disjoint union=60 ratchet, PR 161 pass, nightly remainder 55 pass. |
+| `src/apps/bench/cli.ts`, `run-main.ts`, `run-main-dataset.ts`, `src/runner/batch/instance-selection.ts` | run/no-subcommand가 모든 command/eval/report 모듈을 선로드 | DONE: command handler, eval/LLM/observe/artifact graph를 사용 시점까지 지연하고 dataset/instance selection을 경량 모듈로 분리한다. static anti-vacuum guard가 eager command import 재도입을 막는다. | help 1.01초, live family rejection 89.8ms in-process, custom dry-run 3.65초; 공개 re-export focused tests 보존. |
+| `.github/workflows/ci.yml`, `tests/unit/dev/test-policy-enrollment.test.ts` | hosted `full-suite`가 tier 미지정으로 nightly까지 실행 | DONE: full-suite step에 `QUANTA_VERIFICATION_TIER=pr`을 결합했다. step 이름/env/실행 명령을 함께 검사하고 `pr→full`, command 교체 injection이 RED가 되는 guard를 둔다. | PR/full 3,924, nightly 3,927 exact discovery; workflow parity 13 tests와 policy 10 tests 통과. |
+| `src/apps/bench/composition-root-dispatch.test.ts`, `composition-root-dispatch.nightly.test.ts` | `runCliBatch`, `FAMILY_BEARING`, `BAD_SELECTORS`, 다수 cross-product describe | DONE: PR은 7-root invalid/absent pair와 Pro decision을 concurrency 4로 실행하고, 전체 selector/family/precedence cross-product는 nightly sibling으로 물리 분리했다. | PR 2 tests/40 assertions 17.5초, nightly 19/19 59.3초; nightly-only policy membership ratchet. |
 | `tests/integration/lint-debt-reach-e2e.nightly.test.ts` | `biomeDiagnosticsOverRoots`, root-wide oracle test | nightly exact entrypoint로 분리한다. PR에서는 file load 자체를 제거하되 config/target/receipt 변경은 selector가 nightly-required/full-required 이유를 반환한다. | nightly manifest 포함, PR manifest 제외, invalid target injection RED. |
 | `tests/e2e-pty/` | 각 파일의 `describe.skipIf(!PTY_AVAILABLE)` | `cli-input-layer`, `cli-goal-pursuit`, `cli-hunk-approval`을 기본 canary 후보로 등록한다. PTY 부재는 required capability lane에서 pass가 아니라 capability failure다. | 관련 CLI path 변경 시 전체 affected PTY 선택. |
 | `tests/unit/project-env-astropy-real-e2e.test.ts` | `D`, `ASTROPY_13033`, `runRepro` | 실제 toolchain case는 nightly/cold 전용으로 정책 등록하고 작은 fake contract는 별도 unit에 둔다. 현재 real assertion을 mock으로 대체하지 않는다. | base/proof 두 경로와 environment/setup failure 분리. |

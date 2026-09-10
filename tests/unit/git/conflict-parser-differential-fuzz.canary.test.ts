@@ -5,7 +5,9 @@ import {
   GIT_CASES,
   gitFuzzCanaryIds,
   gitFuzzCaseId,
+  gitFuzzNightlyIds,
   gitFuzzUniverseIds,
+  NIGHTLY_INDICES,
 } from "./conflict-parser-fuzz-cases"
 
 describe("conflict-parser fuzz canary enrollment", () => {
@@ -23,10 +25,13 @@ describe("conflict-parser fuzz canary enrollment", () => {
     }
   })
 
-  test("exhaustive ∪ canary IDs equal the original case universe", () => {
-    const exhaustive = gitFuzzUniverseIds()
-    const combined = [...new Set([...exhaustive, ...gitFuzzCanaryIds()])].sort()
-    expect(combined).toEqual([...exhaustive].sort())
+  test("PR canary and nightly remainder are disjoint and cover the original universe", () => {
+    expect(NIGHTLY_INDICES).toHaveLength(GIT_CASES - CANARY_INDICES.length)
+    const canary = new Set(gitFuzzCanaryIds())
+    const nightly = new Set(gitFuzzNightlyIds())
+    for (const id of canary) expect(nightly.has(id)).toBe(false)
+    const combined = [...new Set([...canary, ...nightly])].sort()
+    expect(combined).toEqual([...gitFuzzUniverseIds()].sort())
   })
 
   test("known malformed markers stay typed (PR canary)", () => {

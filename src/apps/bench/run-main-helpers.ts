@@ -12,7 +12,6 @@
  * `ObserveCtx` / `RunCfg` live in `run-main.ts` and are pulled in here as
  * TYPE-ONLY imports (erased at runtime → no cycle).
  */
-import { readFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { withActiveSpanScope } from "@/agent/session-resources"
 import {
@@ -25,7 +24,7 @@ import {
   type SpanName,
   startSpan,
 } from "@/observability"
-import { matchesInstanceFilter, writeArtifacts as writeBatchArtifacts } from "@/runner/batch/core"
+import { writeArtifacts as writeBatchArtifacts } from "@/runner/batch/core"
 import type { AggregateOfficialGradeInput, RunHealthSummary } from "@/runner/batch/report"
 import { logger } from "@/shared"
 import { benchRunDir, benchRunId } from "./corpus"
@@ -34,9 +33,6 @@ import { finalizeRun } from "./eval"
 import { prepareImages, resolveHarnessConfig } from "./harness"
 import type { AttemptObservation } from "./observe"
 import { resolveOfficialGradeReportInput } from "./official-grade-ingest-source"
-import { readFamilyCorpusText } from "./profiles/corpus-read"
-import { type FamilyCorpusRow, type FamilyCorpusTask, runnableTasksOf } from "./profiles/corpus-row"
-import { applySelectionOrder, resolveFamilySelectedInstanceIds } from "./profiles/selection"
 import { argValue } from "./run-args"
 import type { ObserveCtx, RunCfg } from "./run-main"
 import type { InstanceResult } from "./types"
@@ -154,65 +150,8 @@ export const runPrepareImages = async (instanceIds: string[]): Promise<number> =
   return result.ok ? 0 : 1
 }
 
-// REGRESSION FIX (jun-30): the god-MODULE split (11adab597) dropped the family-aware
-// parse — Pro rows MUST be normalized (lowercase fail_to_pass + extra fields) or they
-// degrade to the `testCmd:"true"` no-op. Verified/Live are the standard schema.
-//
-// HIGH-1 (aug-22): `family` is a REQUIRED TYPED parameter. This used to call a
-// local `datasetFamily()` helper that re-resolved `--dataset-family` + ambient
-// `process.env` on every call — a second, independent authority that could (and
-// did, for whitespace-padded selectors) disagree with the typed `BenchRunConfig`
-// the composition root had already admitted, silently parsing Pro rows with the
-// Verified identity parse and degrading them to `testCmd:"true"`.
-//
-// PMX-02: the reader is the FAMILY's, not this module's. `readFamilyCorpusText`
-// resolves `DatasetFamilyProfile.readCorpus`, so a family whose corpus is an
-// official JSON array is decoded here by the same reader the remote preflight and
-// the pool chunk slicer use. Only RUNNABLE rows are returned, which is exactly
-// what `parseSwebenchJsonl` used to yield.
-export type SwebenchRunnableRow = FamilyCorpusRow & { readonly task: FamilyCorpusTask }
-
-export const readSwebenchTasks = (
-  datasetFile: string,
-  family: DatasetFamily,
-): SwebenchRunnableRow[] => [
-  ...runnableTasksOf(readFamilyCorpusText(readFileSync(datasetFile, "utf8"), family)),
-]
-
-/**
- * Resolve WHICH already-parsed tasks a run executes.
- *
- * Two authorities, in this order:
- *  1. the FAMILY's selection port (PMX-06 / aug-22 G4) — a sealed sample
- *     manifest, when the operator named one. Its ORDER is authoritative.
- *  2. the historical `--instance <substr>` filter.
- *
- * Byte-identical when no family declares a selection authority (the port is
- * absent for verified/live/pro, and `resolveFamilySelectedInstanceIds` then
- * returns `undefined`) — this stays the same substring filter it always was.
- *
- * `selection` is REQUIRED, deliberately: an optional parameter would let the one
- * composition-root call site silently drop the family authority and leave the
- * whole manifest lane inert, which is exactly the shape of the bug this closes.
- * The compiler now enforces the binding.
- */
-export const filterSwebenchTasks = (
-  parsed: readonly SwebenchRunnableRow[],
-  selection: { readonly family: DatasetFamily; readonly env: NodeJS.ProcessEnv },
-): SwebenchRunnableRow[] => {
-  const instanceFilter = argValue("--instance")
-  const ids = resolveFamilySelectedInstanceIds({
-    family: selection.family,
-    rows: parsed,
-    env: selection.env,
-    surface: "local-run",
-    ...(instanceFilter !== undefined ? { instanceFilter } : {}),
-  })
-  if (ids !== undefined) return applySelectionOrder(parsed, ids, "local-run")
-  return instanceFilter !== undefined && instanceFilter !== ""
-    ? parsed.filter((t) => matchesInstanceFilter(t.instanceId, instanceFilter))
-    : [...parsed]
-}
+export type { SwebenchRunnableRow } from "./run-main-dataset"
+export { filterSwebenchTasks, readSwebenchTasks } from "./run-main-dataset"
 
 /** D-fix: shared `--predictions` / `--report` writer for both bench modes.
  *  Pure-by-signature (paths + results + meta are explicit args, no argv reads)

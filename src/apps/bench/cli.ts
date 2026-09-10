@@ -22,23 +22,6 @@
  * the thin argv parser + dispatcher + composition root (ADR-0536 P0 cleanup).
  */
 import { errMessage, logger } from "@/shared"
-import {
-  cmdBestkPassk,
-  cmdCost,
-  cmdDiff,
-  cmdExplain,
-  cmdLeaderboard,
-  cmdPresets,
-  cmdWave2Ab,
-  cmdWave2Backlog,
-  cmdWave2Coverage,
-} from "./commands/analyze"
-import { cmdAuth } from "./commands/auth"
-import { cmdBox } from "./commands/box"
-import { cmdGrade } from "./commands/grade"
-import { cmdPool } from "./commands/pool"
-import { cmdTerminal } from "./commands/terminal"
-import { cmdTrace, cmdTraceUrl } from "./commands/trace"
 import { knownDatasetFamilyTokens } from "./dataset-family-token"
 import { routeBenchTerminalIo } from "./entry-bootstrap"
 import { bootBenchOtelExport } from "./otel"
@@ -121,23 +104,27 @@ const main = async (): Promise<void> => {
       printHelp()
       return
     }
-    const { runMain } = await import("./index")
+    const { runMain } = await import("./run-main")
     await runMain()
     return
   }
   switch (sub) {
     case "run": {
-      const { runMain } = await import("./index")
+      const { runMain } = await import("./run-main")
       await runMain()
       return
     }
     case "grade":
-    case "remote":
+    case "remote": {
+      const { cmdGrade } = await import("./commands/grade")
       await cmdGrade()
       return
-    case "pool":
+    }
+    case "pool": {
+      const { cmdPool } = await import("./commands/pool")
       await cmdPool()
       return
+    }
     case "terminal": {
       // TB21-00A — the Terminal-Bench branch is REGISTERED here: one nested
       // dispatcher (`./commands/terminal`) that resolves the BFND-01 suite
@@ -152,48 +139,75 @@ const main = async (): Promise<void> => {
       // The AMBIENT reads (argv + env) happen HERE, at the allowlisted bench
       // composition root, and are threaded in as values — the terminal modules
       // below never re-read `process.env`.
+      const { cmdTerminal } = await import("./commands/terminal")
       await cmdTerminal({ argv: process.argv, env: process.env })
       return
     }
-    case "box":
+    case "box": {
+      const { cmdBox } = await import("./commands/box")
       await cmdBox()
       return
-    case "auth":
+    }
+    case "auth": {
+      const { cmdAuth } = await import("./commands/auth")
       await cmdAuth()
       return
-    case "diff":
+    }
+    case "diff": {
+      const { cmdDiff } = await import("./commands/analyze")
       cmdDiff()
       return
-    case "explain":
+    }
+    case "explain": {
+      const { cmdExplain } = await import("./commands/analyze")
       cmdExplain()
       return
-    case "leaderboard":
+    }
+    case "leaderboard": {
+      const { cmdLeaderboard } = await import("./commands/analyze")
       cmdLeaderboard()
       return
-    case "cost":
+    }
+    case "cost": {
+      const { cmdCost } = await import("./commands/analyze")
       cmdCost()
       return
-    case "bestk-passk":
+    }
+    case "bestk-passk": {
+      const { cmdBestkPassk } = await import("./commands/analyze")
       await cmdBestkPassk()
       return
-    case "wave2-ab":
+    }
+    case "wave2-ab": {
+      const { cmdWave2Ab } = await import("./commands/analyze")
       cmdWave2Ab()
       return
-    case "wave2-coverage":
+    }
+    case "wave2-coverage": {
+      const { cmdWave2Coverage } = await import("./commands/analyze")
       cmdWave2Coverage()
       return
-    case "wave2-backlog":
+    }
+    case "wave2-backlog": {
+      const { cmdWave2Backlog } = await import("./commands/analyze")
       cmdWave2Backlog()
       return
-    case "presets":
+    }
+    case "presets": {
+      const { cmdPresets } = await import("./commands/analyze")
       cmdPresets()
       return
-    case "trace":
+    }
+    case "trace": {
+      const { cmdTrace } = await import("./commands/trace")
       cmdTrace()
       return
-    case "trace-url":
+    }
+    case "trace-url": {
+      const { cmdTraceUrl } = await import("./commands/trace")
       cmdTraceUrl()
       return
+    }
     default:
       printHelp()
   }
@@ -231,17 +245,3 @@ if (import.meta.main) {
     if (failed) process.exitCode = 1
   })()
 }
-
-export { buildBackend } from "./commands/grade"
-export { summarizePoolRunLines } from "./commands/pool"
-export {
-  argValue,
-  modelNameFromPredictions,
-  parseMaxWorkers,
-  positionals,
-  resolvedIdsFromReport,
-} from "./commands/shared"
-// Re-exported for the CLI-dispatch unit tests, which import these from the cli
-// barrel under their historical names. The substantive logic now lives under
-// ./commands/ (and ./otel); these re-exports keep the test import surface stable.
-export { otelUiPort, traceViewerUrl as traceUrl } from "./otel"

@@ -1,7 +1,7 @@
 # TV-13 — nightly, 실제 도구체인, cold 검증
 
 - 우선순위: P1
-- 상태: IMPLEMENTING — Bun pin/tier wiring/Biome nightly file focused green; 추가 capability lanes와 hosted receipt 미완료
+- 상태: IMPLEMENTING — Bun pin/tier wiring/hosted PR binding/Biome nightly file focused green; 추가 capability lanes와 hosted receipt 미완료
 - 소유자: CI 담당 / toolchain fixture 담당
 - 선행: TV-02, TV-04, TV-11
 - matrix 확장 선행: TV-12
@@ -10,7 +10,7 @@
 
 real-toolchain이 로컬 prepush에 포함돼 upstream clone·native build를 매번 실행할 수 있다. 기존 nightly eval workflow도 있으므로 중복 예약을 만들면 전체 비용이 증가한다. 현행 prepush:cold는 shard-cache bypass가 아니다.
 
-2026-09-11 현재 `NIGHTLY_MEMBERSHIP.includes`는 `cache-off-full-suite`, `exhaustive-fuzz`, `exhaustive-static-oracles`를 포함하고 `QUANTA_TEST_STRESS=1` 경로도 존재한다. nightly workflow의 Bun은 CI와 같은 `1.3.14`로 고정됐고 parity rail이 있다. 다만 workflow는 단일 job이며 최근 hosted nightly는 0-step 실패하여 uncached execution receipt가 없다.
+2026-09-11 현재 `NIGHTLY_MEMBERSHIP.includes`는 `cache-off-full-suite`, `exhaustive-fuzz`, `exhaustive-static-oracles`를 포함한다. conflict fuzz는 PR 6-seed와 nightly-only 54-seed entrypoint로 물리 분리됐고, `QUANTA_TEST_STRESS=1`은 아직 이동하지 않은 다른 heavy branch에 남아 있다. nightly workflow의 Bun은 CI와 같은 `1.3.14`로 고정됐고 parity rail이 있다. 다만 workflow는 단일 job이며 최근 hosted nightly는 0-step 실패하여 uncached execution receipt가 없다.
 
 ## 구현 범위
 

@@ -266,7 +266,7 @@ jobs:
           key: test-timings-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             test-timings-${{ runner.os }}-${{ runner.arch }}-
-      - name: full suite (guarded — one chunked run of every test tier)
+      - name: full suite (guarded — exact PR tier)
         # ONE authoritative execution: unit + integration + meta/adversarial/
         # measurement + colocated src/tools tests through the chunked runner.
         # This replaced separate unit/integration steps (and folded in the
@@ -278,6 +278,8 @@ jobs:
         # lint, lint:debt and storage.test.ts at once, from files no commit
         # contains -- so neither review nor `git log` could ever have caught it.
         # `.cache/` is gitignored, so the junit outfile below is not a leak.
+        env:
+          QUANTA_VERIFICATION_TIER: pr
         run: >-
           bun run tools/dev/worktree-pollution-guard.ts -- bun run test:full:ci
       - name: cwd parity (a guard must give the same verdict from any directory)

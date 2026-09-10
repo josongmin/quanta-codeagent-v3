@@ -1,4 +1,4 @@
-import { loadCorpus as defaultLoadCorpus, type Prediction, writePredictions } from "./corpus"
+import { type Prediction, writePredictions } from "./corpus"
 import { knobsForReport, resolveBenchKnobs } from "./eval/knobs-bench"
 import type { AggregateOfficialGradeInput, DatasetFamily, RunHealthSummary } from "./report"
 import { type BenchReportKnobs, buildReport, toCanonicalSweReport, writeReport } from "./report"
@@ -32,18 +32,6 @@ export interface BatchArtifactMeta {
   officialGrade?: AggregateOfficialGradeInput
 }
 
-export interface LoadSelectedInstancesOptions {
-  corpus: string
-  filter?: string
-  limit?: number | null
-  loadCorpus?: (root: string) => Promise<Instance[]>
-}
-
-export interface LoadSelectedInstancesResult {
-  all: Instance[]
-  instances: Instance[]
-}
-
 export interface RunBatchOptions {
   instances: readonly Instance[]
   runInstance: (instance: Instance) => Promise<InstanceResult>
@@ -69,47 +57,13 @@ export interface RunBatchResult {
 
 const hasPath = (path: string | undefined): path is string => path !== undefined && path !== ""
 
-/** Match an instance id against a `--instance` filter. The filter is a
- *  comma-separated list of substrings; an id matches if it contains ANY part.
- *  A single value (no comma) is plain substring match — byte-identical to the
- *  pre-2026-06-16 behavior. Comma support fixes multi-instance subset runs
- *  (full-remote passes `ids.join(",")`, which the old single-substring filter
- *  matched against zero ids — no id contains a literal comma). */
-export const matchesInstanceFilter = (id: string, filter: string): boolean => {
-  const parts = filter
-    .split(",")
-    .map((p) => p.trim())
-    .filter((p) => p !== "")
-  if (parts.length === 0) return true
-  return parts.some((p) => id.includes(p))
-}
-
-/** Apply the optional id-substring filter + the limit slice. Filter runs
- *  BEFORE limit so selection stays byte-identical to the bench CLI. */
-export const selectInstances = (
-  all: readonly Instance[],
-  filter: string | undefined,
-  limit: number | null | undefined,
-): Instance[] => {
-  const filtered =
-    filter !== undefined && filter !== ""
-      ? all.filter((instance) => matchesInstanceFilter(instance.id, filter))
-      : [...all]
-  if (limit === null || limit === undefined) return filtered
-  return filtered.slice(0, limit)
-}
-
-/** Shared corpus loader + selector for `agent:batch` and the custom-corpus bench path. */
-export const loadSelectedInstances = async (
-  opts: LoadSelectedInstancesOptions,
-): Promise<LoadSelectedInstancesResult> => {
-  const load = opts.loadCorpus ?? defaultLoadCorpus
-  const all = await load(opts.corpus)
-  return {
-    all,
-    instances: selectInstances(all, opts.filter, opts.limit),
-  }
-}
+export {
+  type LoadSelectedInstancesOptions,
+  type LoadSelectedInstancesResult,
+  loadSelectedInstances,
+  matchesInstanceFilter,
+  selectInstances,
+} from "./instance-selection"
 
 /** Exit code is 0 iff every selected instance passed with an ok verdict. */
 export const computeExitCode = (results: readonly InstanceResult[]): number => {

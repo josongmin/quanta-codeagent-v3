@@ -12,7 +12,7 @@
  */
 import { describe, expect, test } from "bun:test"
 import type { Instance } from "../../src/apps/bench/types"
-import { matchesInstanceFilter, selectInstances } from "../../src/runner/batch/core"
+import { matchesInstanceFilter, selectInstances } from "../../src/runner/batch/instance-selection"
 
 describe("matchesInstanceFilter", () => {
   test("single substring = plain match (back-compat)", () => {

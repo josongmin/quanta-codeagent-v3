@@ -6,10 +6,9 @@
  * ~8 hand cases in `conflict-parser.test.ts` + the tool layer's own suite.
  * This battery hardens that by:
  *
- *   PART 1 — REAL GIT GROUND TRUTH. We drive `git` itself in a throwaway repo:
- *     base commit → two branches editing the same lines → `git merge` →
- *     read the genuinely-conflicted file back → assert `parseConflicts` matches
- *     what git actually wrote (block count, style, ours/base/theirs split,
+ *   PART 1 — REAL GIT GROUND TRUTH. We drive Git's xdiff engine through
+ *     `git merge-file` over base/ours/theirs inputs, then assert
+ *     `parseConflicts` matches what Git emitted (block count, style, split,
  *     labels, marker offsets). Run for BOTH `merge.conflictStyle=merge`
  *     (two-way) and `=diff3` (three-way), across many randomized line shapes,
  *     CRLF/LF, unicode labels, and EOF-without-trailing-newline.
@@ -27,14 +26,16 @@
  * the corpus is byte-stable across runs and CI.
  */
 
-import { afterAll, describe, expect, test } from "bun:test"
-import { execFileSync } from "node:child_process"
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { describe, expect, test } from "bun:test"
 import { type ConflictBlock, parseConflicts } from "@/git"
-import { nightlyStressEnabled } from "../../../tools/dev/verification-nightly-manifest"
-import { BASE_SEED, CANARY_INDICES, GIT_CASES } from "./conflict-parser-fuzz-cases"
+import { CANARY_INDICES } from "./conflict-parser-fuzz-cases"
+import {
+  contentLine,
+  type Rng,
+  registerRealGitConflictTests,
+  rngFor,
+  UNICODE_LABELS,
+} from "./conflict-parser-fuzz-runtime"
 
 const assertSequentialBlocks = (
   blocks: readonly ConflictBlock[],
@@ -57,285 +58,11 @@ const assertSequentialBlocks = (
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Seeded PRNG — SplitMix32 (deterministic, no global state)
-// ─────────────────────────────────────────────────────────────────────────────
-
-class Rng {
-  private state: number
-  constructor(seed: number) {
-    // Keep in uint32 space.
-    this.state = seed >>> 0
-  }
-  /** Next uint32. */
-  next(): number {
-    this.state = (this.state + 0x9e3779b9) >>> 0
-    let z = this.state
-    z = Math.imul(z ^ (z >>> 16), 0x21f0aaad) >>> 0
-    z = Math.imul(z ^ (z >>> 15), 0x735a2d97) >>> 0
-    return (z ^ (z >>> 15)) >>> 0
-  }
-  /** Integer in [0, n). */
-  int(n: number): number {
-    return this.next() % n
-  }
-  /** Integer in [lo, hi] inclusive. */
-  between(lo: number, hi: number): number {
-    return lo + this.int(hi - lo + 1)
-  }
-  bool(): boolean {
-    return (this.next() & 1) === 1
-  }
-  pick<T>(arr: ReadonlyArray<T>): T {
-    const v = arr[this.int(arr.length)]
-    if (v === undefined) throw new Error("pick from empty array")
-    return v
-  }
-}
-
-/** A per-case rng whose seed is the base seed XORed with the case index so each
- *  index gives a stable but distinct stream. */
-const rngFor = (index: number): Rng => new Rng((BASE_SEED ^ Math.imul(index + 1, 0x85ebca6b)) >>> 0)
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Random content generators (deterministic, given an Rng)
-// ─────────────────────────────────────────────────────────────────────────────
-
-const WORD_POOL = [
-  "alpha",
-  "beta",
-  "gamma",
-  "delta",
-  "x",
-  "value",
-  "return foo;",
-  "  indented",
-  "tab\there",
-  "<half open", // shorter-than-marker run — must stay plain text
-  "=== heading", // markdown-ish, < marker length
-  "||| table",
-  "café", // unicode in content
-  "→ arrow",
-  "", // blank line
-]
-
-/** Random non-marker content line (never a full >=6 marker run at line start). */
-const contentLine = (rng: Rng): string => {
-  const w = rng.pick(WORD_POOL)
-  // Guard: never accidentally emit a >=6 leading marker run.
-  if (/^(<{6,}|>{6,}|={6,}|\|{6,})/.test(w)) return `safe ${w}`
-  return w
-}
-
-const UNICODE_LABELS = [
-  "HEAD",
-  "feature/foo",
-  "branch with spaces",
-  "café-branch",
-  "ветка",
-  "分支",
-  "label\ttrailing-tab",
-  "trailing-space ",
-  "",
-]
-
-// ─────────────────────────────────────────────────────────────────────────────
-// PART 1 — REAL GIT GROUND TRUTH
-// ─────────────────────────────────────────────────────────────────────────────
-
-interface GitCase {
-  /** Conflicted file contents exactly as git wrote them. */
-  readonly conflicted: string
-  /** True when produced under merge.conflictStyle=diff3. */
-  readonly diff3: boolean
-  /** The "ours" branch label git stamped on the open marker. */
-  readonly oursLabel: string
-}
-
-const GIT = "/usr/bin/git"
-
-const git = (cwd: string, args: string[]): string =>
-  execFileSync(GIT, args, {
-    cwd,
-    encoding: "utf8",
-    env: {
-      ...process.env,
-      GIT_AUTHOR_NAME: "fuzz",
-      GIT_AUTHOR_EMAIL: "fuzz@example.com",
-      GIT_COMMITTER_NAME: "fuzz",
-      GIT_COMMITTER_EMAIL: "fuzz@example.com",
-      GIT_CONFIG_NOSYSTEM: "1",
-      // Invocation-local config keeps every case hermetic without spawning four
-      // `git config` processes per repository.
-      GIT_CONFIG_COUNT: "1",
-      GIT_CONFIG_KEY_0: "core.autocrlf",
-      GIT_CONFIG_VALUE_0: "false",
-      // Stable so labels don't drift across machines.
-      LC_ALL: "C",
-    },
-  })
-
-let gitUsable = true
-try {
-  execFileSync(GIT, ["--version"], { encoding: "utf8" })
-} catch {
-  gitUsable = false
-}
-
-const tmpRoots: string[] = []
-afterAll(() => {
-  for (const d of tmpRoots) {
-    try {
-      rmSync(d, { recursive: true, force: true })
-    } catch {
-      /* best-effort */
-    }
-  }
-})
-
-/**
- * Build ONE real conflict by driving git. We generate `total` shared lines,
- * then pick a band of conflicting lines that "ours" and "theirs" each rewrite
- * differently (and which both differ from base, so git can't auto-resolve).
- */
-const makeGitConflict = (rng: Rng): GitCase | null => {
-  if (!gitUsable) return null
-  const dir = mkdtempSync(join(tmpdir(), "qcp-fuzz-"))
-  tmpRoots.push(dir)
-  const diff3 = rng.bool()
-  const eol = rng.bool() ? "\r\n" : "\n"
-  const oursLabel = rng.pick(UNICODE_LABELS.filter((l) => l.trim() !== "" && !l.includes("\t")))
-
-  git(dir, ["init", "-q", "--initial-branch=base"])
-  const fpath = join(dir, "f.txt")
-
-  const total = rng.between(3, 10)
-  const baseLines: string[] = []
-  for (let i = 0; i < total; i++) baseLines.push(`base-${i}-${contentLine(rng)}`)
-
-  writeFileSync(fpath, baseLines.join(eol) + eol)
-  git(dir, ["add", "f.txt"])
-  git(dir, ["commit", "-qm", "base"])
-  const baseBranch = "base"
-
-  // Pick a contiguous conflicting band.
-  const lo = rng.between(0, total - 1)
-  const hi = rng.between(lo, total - 1)
-
-  // "theirs" branch.
-  git(dir, ["checkout", "-q", "-b", oursLabel === "HEAD" ? "their-branch" : "theirs"])
-  const theirsBranch = oursLabel === "HEAD" ? "their-branch" : "theirs"
-  const theirsLines = baseLines.slice()
-  for (let i = lo; i <= hi; i++) theirsLines[i] = `THEIRS-${i}-${contentLine(rng)}`
-  writeFileSync(fpath, theirsLines.join(eol) + eol)
-  git(dir, ["commit", "-qam", "theirs"])
-
-  // Back to base branch, make conflicting "ours" edit.
-  git(dir, ["checkout", "-q", baseBranch])
-  const oursLines = baseLines.slice()
-  for (let i = lo; i <= hi; i++) oursLines[i] = `OURS-${i}-${contentLine(rng)}`
-  writeFileSync(fpath, oursLines.join(eol) + eol)
-  git(dir, ["commit", "-qam", "ours"])
-
-  // Merge → conflict.
-  try {
-    git(dir, ["-c", `merge.conflictStyle=${diff3 ? "diff3" : "merge"}`, "merge", theirsBranch])
-    // No conflict produced (e.g. identical edits collapsed) — skip this case.
-    return null
-  } catch {
-    /* expected: merge failed with conflict */
-  }
-
-  const conflicted = readFileSync(fpath, "utf8")
-  if (!conflicted.includes("<<<<<<<")) return null
-  // git stamps the literal `HEAD` (not the branch name) as the open-marker
-  // label when the merge target is the checked-out branch; the merged-in
-  // branch name lands on the close marker as the theirs label.
-  void baseBranch
-  return { conflicted, diff3, oursLabel: "HEAD" }
-}
-
-describe("conflict-parser differential fuzz — PART 1: real git ground truth", () => {
-  if (!gitUsable) {
-    test.skip("git unavailable — skipping real-git differential", () => {})
-  }
-
-  let produced = 0
-  let twoWay = 0
-  let threeWay = 0
-
-  const realGitIndices = nightlyStressEnabled()
-    ? Array.from({ length: GIT_CASES }, (_, index) => index)
-    : [...CANARY_INDICES]
-
-  for (const idx of realGitIndices) {
-    test(`G${idx}: parseConflicts matches real git output`, () => {
-      const rng = rngFor(idx)
-      const gc = makeGitConflict(rng)
-      if (!gc) {
-        // Either git unusable or this randomized shape auto-resolved; not a
-        // parser failure. Assert nothing — corpus stays deterministic.
-        return
-      }
-      produced++
-
-      const r = parseConflicts(gc.conflicted)
-
-      // Git wrote a real conflict → exactly one block, zero diagnostics.
-      expect(r.diagnostics).toEqual([])
-      expect(r.blocks.length).toBe(1)
-      const b = r.blocks[0] as ConflictBlock
-
-      // Style must match the conflictStyle we asked git for.
-      if (gc.diff3) {
-        expect(b.style).toBe("three-way")
-        expect("base" in b).toBe(true)
-        expect("baseLabel" in b).toBe(true)
-        threeWay++
-      } else {
-        expect(b.style).toBe("two-way")
-        expect("base" in b).toBe(false)
-        expect("baseLabel" in b).toBe(false)
-        twoWay++
-      }
-
-      // The "ours" label git stamps on `<<<<<<<` is the current branch name.
-      expect(b.oursLabel).toBe(gc.oursLabel)
-      // theirs label is the merged-in branch ref; non-empty.
-      expect(b.theirsLabel.length).toBeGreaterThan(0)
-
-      // Offsets must reproduce the block verbatim (sans trailing newline).
-      const reproduced = gc.conflicted.slice(b.startOffset, b.endOffset)
-      expect(reproduced.startsWith("<<<<<<<")).toBe(true)
-      expect(reproduced.includes(">>>>>>>")).toBe(true)
-      // endOffset is exclusive of the close line's terminator.
-      const afterEnd = gc.conflicted.charAt(b.endOffset)
-      expect(afterEnd === "\n" || afterEnd === "\r" || afterEnd === "").toBe(true)
-
-      // ours/theirs content must each line up with a marker boundary in the
-      // raw file: ours sits between open and (base|sep); theirs between sep and
-      // close. Cross-check that concatenation order is preserved.
-      const openNlAware = gc.conflicted.indexOf("\n", b.startOffset)
-      expect(openNlAware).toBeGreaterThan(b.startOffset)
-
-      // For three-way, the base section git emits must be reflected.
-      if (gc.diff3) {
-        expect(typeof b.base).toBe("string")
-        // git's diff3 base marker carries the merge-base oid as its label.
-        expect(typeof b.baseLabel).toBe("string")
-      }
-    })
-  }
-
-  test("real-git corpus actually produced conflicts of both styles", () => {
-    if (!gitUsable) return
-    // PRs retain six real-Git canaries; nightly stress runs all 60. Both fixed
-    // populations contain each conflict style and must actually yield conflicts.
-    expect(produced).toBeGreaterThanOrEqual(nightlyStressEnabled() ? 20 : 4)
-    expect(twoWay).toBeGreaterThanOrEqual(1)
-    expect(threeWay).toBeGreaterThanOrEqual(1)
-  })
-})
+registerRealGitConflictTests(
+  "conflict-parser differential fuzz — PR real-git canary",
+  CANARY_INDICES,
+  4,
+)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PART 2 — CONSTRUCTED ADVERSARIAL (shapes git won't emit but files contain)

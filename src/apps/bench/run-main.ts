@@ -17,21 +17,11 @@ import "@/runner/knobs/knobs"
 import { existsSync } from "node:fs"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { join } from "node:path"
-import { BUDGET_PRESETS } from "@/agent"
-import { type LLMPort, tryCreateLLM } from "@/llm"
-import {
-  loadSelectedInstances,
-  mapWithConcurrency,
-  runBatch,
-  selectInstances,
-} from "@/runner/batch/core"
-import { writeClosureSidecar } from "@/runner/batch/eval/closure-diagnostics-io"
-import { makeReproArtifactFsSink } from "@/runner/batch/eval/repro-artifacts-fs"
-import { runBatchWithHealth } from "@/runner/batch/eval/run-health"
+import { BUDGET_PRESETS } from "@/agent/run-mode"
+import type { LLMPort } from "@/llm"
 import type { RunHealthSummary } from "@/runner/batch/report"
 import { errMessage, gateOn, logger, runtimeConfig } from "@/shared"
 import { resolveBenchmarkRunConfig } from "./benchmark-suite"
-import { resolveBenchLLM } from "./boot-llm-wire"
 import {
   benchInstanceWorkSlug,
   benchRunDir,
@@ -42,17 +32,11 @@ import {
 } from "./corpus"
 import type { DatasetFamily } from "./dataset-family-token"
 import { buildDatasetDryRunPlan, buildDryRunPlan, formatDryRunPlan } from "./dry-run"
-import { runInstance } from "./eval"
 import { type ForkBranchOutcome, formatForkBranchReport } from "./eval/fork-branch-report"
-import { type ForkExperiment, resolveForkExperiments } from "./eval/fork-experiments"
+import type { ForkExperiment } from "./eval/fork-experiments"
 import { assertFamilySelectorHonored } from "./family-mode-honor"
-import { startHostResourceSampler } from "./host-resource-sampler"
-import { startLaneProgressRenderer } from "./lane-progress-renderer"
-import { resolveModelLanes } from "./model-lanes"
-import { resolvedTotals } from "./observe"
 import { seedBenchExecutionPreset } from "./preset"
 import { resolveDatasetFamilyProfile } from "./profiles/registry"
-import { buildPythonSwebench } from "./python-verifier-wiring"
 import {
   resolveBenchReasoningSummary,
   resolveBenchReasoningSummaryDetail,
@@ -66,29 +50,24 @@ import {
   resolveConcurrency,
 } from "./run-args"
 import { datasetFamilyOrDefault, readDatasetFamilySelector } from "./run-config"
-import {
-  attemptObs,
-  buildSwebenchArtifactMeta,
-  filterSwebenchTasks,
-  finalizeObserve,
-  readSwebenchTasks,
-  resolveObserve,
-  runPrepareImages,
-  type SwebenchRunnableRow,
-  withBenchInstanceRoot,
-  withObserve,
-  writeArtifacts,
-} from "./run-main-helpers"
+import type { SwebenchRunnableRow } from "./run-main-dataset"
 import { printHelp, printPresetList, printSummary } from "./run-report"
-import { patchVote, sampleBestOfN } from "./sampler"
 import type { Instance, InstanceResult } from "./types"
 
 export { repairConfigFromArg } from "./run-args"
-export { writeArtifacts } from "./run-main-helpers"
+
+type WriteArtifactsFn = typeof import("./run-main-helpers")["writeArtifacts"]
+export const writeArtifacts: WriteArtifactsFn = (...args) =>
+  import("./run-main-helpers").then(({ writeArtifacts: write }) => write(...args))
 
 /** Per-run config common to single & Best-of-N. `pythonSwebench` is present
  *  only when `QUANTA_SWEBENCH_PYTHON=1` and the harness is importable. */
-export type RunCfg = Parameters<typeof runInstance>[1]
+type RunInstanceFn = typeof import("./eval")["runInstance"]
+type BuildPythonSwebenchFn = typeof import("./python-verifier-wiring")["buildPythonSwebench"]
+export type RunCfg = Parameters<RunInstanceFn>[1]
+
+const runBenchInstance = (...args: Parameters<RunInstanceFn>): ReturnType<RunInstanceFn> =>
+  import("./eval").then(({ runInstance }) => runInstance(...args))
 
 /** Injectable exit. Mirrors `apps/agent/index.ts` MainDeps so unit tests can
  *  observe early-exit codes without forking the process. Defaults to
@@ -153,6 +132,7 @@ const runForkBranches = async (
   freshLlm: () => LLMPort,
   obs?: ObserveCtx,
 ): Promise<InstanceResult> => {
+  const { attemptObs, withBenchInstanceRoot, withObserve } = await import("./run-main-helpers")
   // Footgun guard: fan-out is a TROUBLESHOOTING mode. The pipeline keeps ONE
   // result per instance (the baseline branch), so predictions.jsonl / report.json
   // reflect ONLY the baseline — the other branches live in the printed table.
@@ -171,7 +151,7 @@ const runForkBranches = async (
     // C5 bench-attempt root: one root span (fresh trace) per fork branch, so each
     // branch's sandbox→agent→verify sits under its own `quanta.bench.instance`.
     const result = await withBenchInstanceRoot({ instanceId: instance.id, attempt: a }, () =>
-      runInstance(instance, withObserve(branchBase, attemptObs(obs, a))),
+      runBenchInstance(instance, withObserve(branchBase, attemptObs(obs, a))),
     )
     if (baseline === undefined) baseline = result
     outcomes.push({
@@ -192,6 +172,12 @@ const resolveInstance = async (
   obs?: ObserveCtx,
   freshLlm?: (attempt?: number) => LLMPort,
 ): Promise<InstanceResult> => {
+  const [helpers, { resolveForkExperiments }, { patchVote, sampleBestOfN }] = await Promise.all([
+    import("./run-main-helpers"),
+    import("./eval/fork-experiments"),
+    import("./sampler"),
+  ])
+  const { attemptObs, withBenchInstanceRoot, withObserve } = helpers
   // Fork-experiment seam (DEFAULT-OFF: QUANTA_FORK_EXPERIMENT unset ⇒ [] ⇒
   // byte-identical). ≥2 names ⇒ branch fan-out; exactly 1 ⇒ single run with that
   // mutator wired onto the config.
@@ -211,7 +197,7 @@ const resolveInstance = async (
     const cfg = freshLlm !== undefined ? { ...effBase, llm: freshLlm() } : effBase
     // C5 bench-attempt root: single-pass ⇒ attempt 0 (the `.0.jsonl` file).
     return withBenchInstanceRoot({ instanceId: instance.id, attempt: 0 }, () =>
-      runInstance(instance, withObserve(cfg, attemptObs(obs, 0))),
+      runBenchInstance(instance, withObserve(cfg, attemptObs(obs, 0))),
     )
   }
 
@@ -224,7 +210,7 @@ const resolveInstance = async (
       // so N attempts of one instance carry DISTINCT trace ids (never merged) and
       // each attempt's `quanta.instance.attempt` matches its `.<a>.jsonl` file.
       return withBenchInstanceRoot({ instanceId: instance.id, attempt: a }, () =>
-        runInstance(
+        runBenchInstance(
           instance,
           withObserve(
             freshLlm !== undefined ? { ...effBase, llm: freshLlm(a) } : effBase,
@@ -274,7 +260,7 @@ type SwebenchTaskDeps = {
    *  byte-identical single-port path. */
   llmLanes?: readonly LLMPort[]
   cfg: { n: number; limit?: number; maxTurns: number; timeoutMs: number; family: DatasetFamily }
-  pythonSwebench: Awaited<ReturnType<typeof buildPythonSwebench>>
+  pythonSwebench: Awaited<ReturnType<BuildPythonSwebenchFn>>
   repair: { maxRounds: number } | undefined
   obs: ObserveCtx | undefined
   repoBaseUrl: string
@@ -343,7 +329,9 @@ const runSwebenchTask = async (
     // (no new knob): no observe handle ⇒ no sink ⇒ no-op (default-OFF).
     const reproArtifactSink =
       deps.obs !== undefined
-        ? makeReproArtifactFsSink(join(deps.obs.dir, deps.obs.runId))
+        ? (await import("@/runner/batch/eval/repro-artifacts-fs")).makeReproArtifactFsSink(
+            join(deps.obs.dir, deps.obs.runId),
+          )
         : undefined
     const reproArtifactRootPath =
       deps.obs !== undefined ? join(deps.obs.dir, deps.obs.runId) : undefined
@@ -403,6 +391,12 @@ const executeSwebenchTasks = async (
   concurrency: number,
   taskDeps: SwebenchTaskDeps,
 ): Promise<{ readonly results: InstanceResult[]; readonly runHealth?: RunHealthSummary }> => {
+  const [{ mapWithConcurrency }, { runBatchWithHealth }, { startLaneProgressRenderer }] =
+    await Promise.all([
+      import("@/runner/batch/core"),
+      import("@/runner/batch/eval/run-health"),
+      import("./lane-progress-renderer"),
+    ])
   const stopLaneProgress = startLaneProgressRenderer()
   try {
     if (concurrency > 1) {
@@ -461,6 +455,11 @@ const runDatasetMode = async (
    *  Undefined ⇒ byte-identical single-port path. */
   llmLanes?: readonly LLMPort[],
 ): Promise<void> => {
+  const [{ buildPythonSwebench }, helpers] = await Promise.all([
+    import("./python-verifier-wiring"),
+    import("./run-main-helpers"),
+  ])
+  const { buildSwebenchArtifactMeta, finalizeObserve, runPrepareImages } = helpers
   if (tasks.parsed.length === 0) {
     logger.info(
       `No usable tasks parsed from "${datasetFile}". Expecting official SWE-bench JSONL. Nothing to run.`,
@@ -555,12 +554,14 @@ const runDatasetMode = async (
   if (gateOn(process.env, "QUANTA_BENCH_CLOSURE_DIAG") || closureTelemetryPresent) {
     try {
       const dataset = argValue("--swebench") ?? process.env.QUANTA_SWEBENCH_DATASET
+      const { writeClosureSidecar } = await import("@/runner/batch/eval/closure-diagnostics-io")
       const sc = writeClosureSidecar(reportPath, results, dataset)
       logger.info(`closure diagnostics: ${sc}`)
     } catch (e) {
       logger.info(`closure diagnostics skipped: ${errMessage(e)}`)
     }
   }
+  const { resolvedTotals } = await import("./observe")
   printSummary({ ...resolvedTotals(results), results })
   await finalizeObserve(obs, results)
 }
@@ -570,25 +571,25 @@ const runDatasetMode = async (
  *  / reasoning-summary / key-missing composition around it); this keystone keeps
  *  only the binding of the module-private injectable `exitFn`, so the two call
  *  sites below stay a one-argument call. */
-const resolveLLM = (noun: string) => resolveBenchLLM(noun, exitFn)
+const resolveLLM = async (noun: string) => {
+  const { resolveBenchLLM } = await import("./boot-llm-wire")
+  return resolveBenchLLM(noun, exitFn)
+}
 
 /** Official-dataset entrypoint. Returns true when it handled the run (so main
  *  skips the custom-corpus path entirely). */
-const maybeRunDatasetMode = async (
-  cfg: {
-    n: number
-    limit: number | null
-    maxTurns: number
-    timeoutMs: number
-    /** The composition root's TYPED resolved family. REQUIRED (aug-22 HIGH-1):
-     *  every SWE parse / grade / label / report site below reads THIS field.
-     *  It used to be an optional declaration while those sites still called
-     *  `datasetFamily()` — a fresh argv+ambient-env re-resolution that could
-     *  disagree with the config the root had already admitted. */
-    family: DatasetFamily
-  },
-  obs?: ObserveCtx,
-): Promise<boolean> => {
+const maybeRunDatasetMode = async (cfg: {
+  n: number
+  limit: number | null
+  maxTurns: number
+  timeoutMs: number
+  /** The composition root's TYPED resolved family. REQUIRED (aug-22 HIGH-1):
+   *  every SWE parse / grade / label / report site below reads THIS field.
+   *  It used to be an optional declaration while those sites still called
+   *  `datasetFamily()` — a fresh argv+ambient-env re-resolution that could
+   *  disagree with the config the root had already admitted. */
+  family: DatasetFamily
+}): Promise<boolean> => {
   const datasetFile = argValue("--swebench") ?? process.env.QUANTA_SWEBENCH_DATASET ?? ""
   if (!datasetFile) return false
   if (!existsSync(datasetFile)) {
@@ -601,6 +602,7 @@ const maybeRunDatasetMode = async (
   // Parse the dataset file ONCE per run; the raw corpus + the `--instance`
   // filtered view are then threaded through the dry-run plan AND the run path
   // (no more 3× re-read/re-parse of the same JSONL).
+  const { filterSwebenchTasks, readSwebenchTasks } = await import("./run-main-dataset")
   const parsed = readSwebenchTasks(datasetFile, cfg.family)
   // PMX-06 / aug-22 G4 — selection resolves through the FAMILY (a sealed sample
   // manifest, when one is named), then the historical `--instance` filter. The
@@ -621,13 +623,20 @@ const maybeRunDatasetMode = async (
     exitFn(0)
     return true
   }
-  const resolved = resolveLLM("a dataset")
+  const { resolveObserve } = await import("./run-main-helpers")
+  const obs = resolveObserve()
+  const [{ resolveModelLanes }, { startHostResourceSampler }] = await Promise.all([
+    import("./model-lanes"),
+    import("./host-resource-sampler"),
+  ])
+  const resolved = await resolveLLM("a dataset")
   if (resolved === null) return true
   const { provider, model, llm, freshLlm } = resolved
   // G1 — verify-select model lanes. Undefined unless QUANTA_BENCH_MODEL_LANES
   // names ≥2 distinct models that EACH build a real port for `provider`. The
   // primary model (`model`) reuses the already-built `llm` so lane-0 is never a
   // duplicate port; other ids are pinned via the factory (null ⇒ dropped).
+  const { tryCreateLLM } = await import("@/llm")
   const llmLanes = resolveModelLanes({
     env: process.env,
     buildLanePort: (modelId) =>
@@ -700,22 +709,22 @@ const exitCustomDryRunIfRequested = (
 
 /** Custom-corpus entrypoint (the path when no --swebench dataset is given).
  *  Handles --dry-run (no LLM), empty-corpus + no-key guidance, then runs. */
-const runCustomCorpusMode = async (
-  cfg: {
-    corpusRoot: string
-    n: number
-    limit: number | null
-    maxTurns: number
-    timeoutMs: number
-    /** The composition root's TYPED resolved family. REQUIRED (aug-22 HIGH-1):
-     *  every SWE parse / grade / label / report site below reads THIS field.
-     *  It used to be an optional declaration while those sites still called
-     *  `datasetFamily()` — a fresh argv+ambient-env re-resolution that could
-     *  disagree with the config the root had already admitted. */
-    family: DatasetFamily
-  },
-  obs?: ObserveCtx,
-): Promise<void> => {
+const runCustomCorpusMode = async (cfg: {
+  corpusRoot: string
+  n: number
+  limit: number | null
+  maxTurns: number
+  timeoutMs: number
+  /** The composition root's TYPED resolved family. REQUIRED (aug-22 HIGH-1):
+   *  every SWE parse / grade / label / report site below reads THIS field.
+   *  It used to be an optional declaration while those sites still called
+   *  `datasetFamily()` — a fresh argv+ambient-env re-resolution that could
+   *  disagree with the config the root had already admitted. */
+  family: DatasetFamily
+}): Promise<void> => {
+  const { loadSelectedInstances, selectInstances } = await import(
+    "@/runner/batch/instance-selection"
+  )
   const instanceFilter = argValue("--instance")
   const selection = await loadSelectedInstances({
     corpus: cfg.corpusRoot,
@@ -738,10 +747,16 @@ const runCustomCorpusMode = async (
     return
   }
   const instances = selection.instances
+  const { finalizeObserve, resolveObserve } = await import("./run-main-helpers")
+  const obs = resolveObserve()
 
-  const resolved = resolveLLM(`${instances.length} instance(s)`)
+  const resolved = await resolveLLM(`${instances.length} instance(s)`)
   if (resolved === null) return
   const { provider, model, llm } = resolved
+  const [{ buildPythonSwebench }, { makeReproArtifactFsSink }] = await Promise.all([
+    import("./python-verifier-wiring"),
+    import("@/runner/batch/eval/repro-artifacts-fs"),
+  ])
   const pythonSwebench = await buildPythonSwebench(cfg.family, exitFn)
   logger.info(
     `bench: ${instances.length} instance(s), provider=${provider}, model=${model}, n=${cfg.n}`,
@@ -760,6 +775,7 @@ const runCustomCorpusMode = async (
     ...(reproArtifactSink !== undefined ? { reproArtifactSink } : {}),
     ...(reproArtifactRootPath !== undefined ? { reproArtifactRootPath } : {}),
   }
+  const { runBatch } = await import("@/runner/batch/core")
   const { results } = await runBatch({
     instances,
     runInstance: (instance) =>
@@ -776,6 +792,7 @@ const runCustomCorpusMode = async (
     // stamping one would fabricate identity for a corpus the family never selected.
     { provider, model, n: cfg.n },
   )
+  const { resolvedTotals } = await import("./observe")
   printSummary({ ...resolvedTotals(results), results })
   await finalizeObserve(obs, results)
 }
@@ -911,11 +928,13 @@ export const runMain = async (deps: MainDeps = {}): Promise<void> => {
   const timeoutMs = cfg.benchTimeoutMs ?? DEFAULT_BENCH_TIMEOUT_MS
   // Trajectories persist by default now (the prior tmp default reaped them);
   // pass `--observe-dir`/`QUANTA_OBSERVE_DIR` to override the location.
-  const obs = resolveObserve()
-
   // Official-dataset mode takes precedence; when its flag/env is unset the
   // custom-corpus path is byte-for-byte unchanged.
-  if (await maybeRunDatasetMode({ n, limit, maxTurns, timeoutMs, family }, obs)) {
+  const datasetFile = argValue("--swebench") ?? process.env.QUANTA_SWEBENCH_DATASET ?? ""
+  if (
+    datasetFile !== "" &&
+    (await maybeRunDatasetMode({ n, limit, maxTurns, timeoutMs, family }))
+  ) {
     return
   }
   // We are now committed to CUSTOM-CORPUS mode, which has no family axis: it
@@ -925,5 +944,5 @@ export const runMain = async (deps: MainDeps = {}): Promise<void> => {
   // family's `remoteDefaultPreset` — so accepting an explicit selector here
   // silently hands this run a different agent. Refuse instead of half-applying.
   assertFamilySelectorHonored({ mode: "custom-corpus", familySelector, datasetFamily: family })
-  await runCustomCorpusMode({ corpusRoot, n, limit, maxTurns, timeoutMs, family }, obs)
+  await runCustomCorpusMode({ corpusRoot, n, limit, maxTurns, timeoutMs, family })
 }

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { readFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import {
   isKnownTestPath,
@@ -12,6 +13,19 @@ import { discoverInventory } from "../../../tools/dev/test-shard-discovery"
 
 const ROOT = resolve(import.meta.dir, "..", "..", "..")
 const OVERRIDES = join(ROOT, "tools/dev/test-policy-overrides.json")
+
+const ciFullSuiteUsesPrTier = (workflow: string): boolean => {
+  const block = workflow.match(
+    /- name: full suite \(guarded — exact PR tier\)[\s\S]*?(?=\n\s+- name:|\n\s{2}[a-z-]+:|$)/u,
+  )?.[0]
+  if (block === undefined) return false
+  return (
+    /env:\s*\n\s+QUANTA_VERIFICATION_TIER:\s*pr(?:\s|$)/u.test(block) &&
+    /run:\s*>-\s*\n\s+bun run tools\/dev\/worktree-pollution-guard\.ts -- bun run test:full:ci/u.test(
+      block,
+    )
+  )
+}
 
 describe("test-policy-enrollment", () => {
   test("unknown files fail wide: full + exclusive + whole-tree", () => {
@@ -65,6 +79,19 @@ describe("test-policy-enrollment", () => {
     ])
   })
 
+  test("hosted full-suite executes the exact PR tier, not the legacy all-tier population", () => {
+    const workflow = readFileSync(join(ROOT, ".github/workflows/ci.yml"), "utf8")
+    expect(ciFullSuiteUsesPrTier(workflow)).toBe(true)
+    expect(
+      ciFullSuiteUsesPrTier(
+        workflow.replace("QUANTA_VERIFICATION_TIER: pr", "QUANTA_VERIFICATION_TIER: full"),
+      ),
+    ).toBe(false)
+    expect(
+      ciFullSuiteUsesPrTier(workflow.replace("bun run test:full:ci", "bun run test:integration")),
+    ).toBe(false)
+  })
+
   test("discovered full population and policy-resolved ids are the same set", () => {
     const inventory = discoverInventory(ROOT)
     const policies = resolveTestPopulation(inventory.suites.full.files)
@@ -77,9 +104,17 @@ describe("test-policy-enrollment", () => {
     const fullIds = selectTestPoliciesForTier(policies, "full").map(({ id }) => id)
     const nightlyIds = selectTestPoliciesForTier(policies, "nightly").map(({ id }) => id)
     const nightlyOnly = nightlyIds.filter((id) => !fullIds.includes(id))
-    expect(nightlyOnly.length).toBeGreaterThanOrEqual(1)
+    expect(nightlyOnly.length).toBeGreaterThanOrEqual(3)
     expect(nightlyOnly).toContain("tests/integration/lint-debt-reach-e2e.nightly.test.ts")
+    expect(nightlyOnly).toContain("src/apps/bench/composition-root-dispatch.nightly.test.ts")
+    expect(nightlyOnly).toContain(
+      "tests/unit/git/conflict-parser-differential-fuzz.nightly.test.ts",
+    )
     expect(fullIds).not.toContain("tests/integration/lint-debt-reach-e2e.nightly.test.ts")
+    expect(fullIds).not.toContain("src/apps/bench/composition-root-dispatch.nightly.test.ts")
+    expect(fullIds).not.toContain(
+      "tests/unit/git/conflict-parser-differential-fuzz.nightly.test.ts",
+    )
   })
 
   test("injecting an unregistered contract file into inventory comparison fails", () => {

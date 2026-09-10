@@ -42,7 +42,7 @@
 | lsp / port / process-global | 206 / 62 / 55 | 단일 class 이름이 아니라 실제 resource key/mode로 세분화 필요 |
 | browser / worktree / repo-write | 12 / 17 / 2 | 배타성 유지; checkout/git-common/cache 경계 분리 필요 |
 | shadow matrix | plan/worker/aggregate 코드와 조건부 workflow 존재 | `QUANTA_SHADOW_MATRIX=1` hosted receipt 없음; required는 `full-suite` 소비 |
-| tier membership | working tree discovery: PR/full 3,924, nightly 3,925 | `--tier`/policy digest 연결 및 Biome reach 1개 물리 분리; 신규 certification unit 포함, 나머지 fuzz/toolchain migration은 진행 중 |
+| tier membership | committed-HEAD discovery: PR/full 3,924, nightly 3,927 | `--tier`/policy digest와 hosted PR job 연결, Biome reach·conflict-fuzz remainder·bench matrix 물리 분리; 나머지 capability migration은 진행 중 |
 
 ## 현재 남은 구조 캠페인
 
@@ -90,7 +90,7 @@
 | [TV-06](TV-06-stable-shard-membership.md) | P1 | 안정적 청크·완전성 | 02,04 | FOCUSED_VERIFIED |
 | [TV-07](TV-07-performance-observability.md) | P1 | 타이밍·비용 관측 | 00,04 | IMPLEMENTING — v2/rebaseline open |
 | [TV-08](TV-08-admission-and-resource-isolation.md) | P0/P1 | resource certification / 자원 lease | 01,02,04,07 | IMPLEMENTING — certification/lease split open |
-| [TV-09](TV-09-heavy-test-decomposition.md) | P1 | exact tier membership·중량 테스트 분할 | 02; 활성화는 03,13 | IMPLEMENTING — file split/activation open |
+| [TV-09](TV-09-heavy-test-decomposition.md) | P1 | exact tier membership·중량 테스트 분할 | 02; 활성화는 03,13 | IMPLEMENTING — Git/bench split and CLI lazy load done; toolchain split open |
 | [TV-10](TV-10-static-scan-and-setup-reuse.md) | P1 | 중복 scan·preload·setup | 02 | FOCUSED_VERIFIED |
 | [TV-11](TV-11-ci-jobs-and-required-check.md) | P0 | CI job DAG·집계 context | 01 | IMPLEMENTING — hosted activation blocked |
 | [TV-12](TV-12-ci-shard-matrix.md) | P1 | 분산 청크·artifact 집계 | 04,06,11 | IMPLEMENTING — shadow code, no live receipt |
