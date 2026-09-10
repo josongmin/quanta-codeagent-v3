@@ -87,21 +87,14 @@ const FAMILY_REFUSAL = /unknown dataset family|is blank|requires a value/i
 // ─────────────────────────────────────────────────────────────────────────────
 describe("R2 — `box` fails closed on an explicit-invalid dataset-family selector", () => {
   test(
-    `box: all ${BAD_SELECTORS.length} adversarial selectors are refused at the root`,
+    "box: the real CLI reaches the shared fail-closed family gate",
     () => {
-      const survivors: string[] = []
-      for (const sel of BAD_SELECTORS) {
-        const r = runCli(["box", "bogus-action", ...sel.args])
-        if (r.code === 0 || !FAMILY_REFUSAL.test(r.out)) {
-          survivors.push(
-            `${sel.label} (${sel.args.join(" ")}) -> exit ${r.code}: ${r.out.slice(0, 240)}`,
-          )
-        }
-      }
-      expect(
-        survivors,
-        `box accepted an explicit-invalid family selector:\n${survivors.join("\n")}`,
-      ).toEqual([])
+      // The in-process `box up` rail below owns the complete adversarial
+      // matrix and proves the provisioner stays untouched. This one subprocess
+      // is the composition-root reachability canary.
+      const r = runCli(["box", "bogus-action", "--dataset-family", "prow"])
+      expect(r.code).not.toBe(0)
+      expect(r.out).toMatch(FAMILY_REFUSAL)
     },
     SPAWN_BUDGET_MS,
   )
@@ -132,20 +125,14 @@ describe("R2 — `box` fails closed on an explicit-invalid dataset-family select
   )
 
   test(
-    "PAIRED CONTROL — every VALID family passes the gate (no blanket-failing gate)",
+    "PAIRED CONTROL — a valid family and the absent default pass the gate",
     () => {
-      const leaked: string[] = []
-      for (const family of ["verified", "live", "pro", "promax"]) {
-        const r = runCli(["box", "bogus-action", "--dataset-family", family])
-        // Reaches the action dispatch and refuses for its OWN reason (usage),
-        // never for the family.
-        if (FAMILY_REFUSAL.test(r.out) || !/usage: quanta-bench box/.test(r.out)) {
-          leaked.push(`--dataset-family ${family}: exit ${r.code}: ${r.out.slice(0, 240)}`)
-        }
-        expect(r.code).toBe(2)
-      }
-      expect(leaked, `family gate mishandled a VALID family:\n${leaked.join("\n")}`).toEqual([])
-      // ...and with NO selector at all the root is byte-identically unchanged.
+      // The full valid union is asserted through the injected `box up` owner
+      // below; one real CLI canary proves the public dispatch is not blanket-red.
+      const valid = runCli(["box", "bogus-action", "--dataset-family", "pro"])
+      expect(valid.code).toBe(2)
+      expect(valid.out).toMatch(/usage: quanta-bench box/)
+      expect(FAMILY_REFUSAL.test(valid.out)).toBe(false)
       const absent = runCli(["box", "bogus-action"])
       expect(absent.code).toBe(2)
       expect(absent.out).toMatch(/usage: quanta-bench box/)
