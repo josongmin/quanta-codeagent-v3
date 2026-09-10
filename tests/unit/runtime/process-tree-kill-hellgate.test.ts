@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { escalatingKill, KILL_GRACE_MS, type KillableChild } from "@/runtime"
+import { escalatingKill, KILL_GRACE_MS, type KillableChild } from "@/runtime/guarded-spawn"
 import {
   createPpidWalkKiller,
   type ProcessTableProvider,
   type ProcessTreeKiller,
 } from "@/runtime/process-tree"
-import { __resetLoggerRateLimit, __resetRuntimeConfig, setTerminalIo } from "@/shared"
+import { __resetLoggerRateLimit } from "@/shared/log-rate-limit"
+import { __resetRuntimeConfig } from "@/shared/runtime-config"
+import { setTerminalIo } from "@/shared/terminal-io"
 
 /**
  * D1 — ProcessTreeKiller (jun-7-naive-impl-hardening §2.1).

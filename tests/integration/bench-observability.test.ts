@@ -12,7 +12,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
-import { isTrajectoryEvent } from "@/shared"
+import { isTrajectoryEvent } from "@/shared/trajectory"
 import { runTokenCostLine } from "../../src/apps/bench/analyze/cost"
 import { loadCorpus, writeSyntheticCorpus } from "../../src/apps/bench/corpus/loader"
 import { finalizeRun, type RunObservation, runInstance } from "../../src/apps/bench/eval"

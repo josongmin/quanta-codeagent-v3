@@ -39,7 +39,7 @@ import {
 import type { WebDaemonHandle } from "@/apps/web-daemon/types"
 import { type ArtifactRegistry, createArtifactRegistry, monotonicIdFactory } from "@/artifact"
 import { createArtifactPreviewResolver } from "@/host/runtime"
-import { encodeSessionTransportMessage } from "@/ipc/session"
+import { encodeSessionTransportMessage, tryDecodeSessionTransportMessage } from "@/ipc/session"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import { type CanvasMessage, decodeCanvasFrame } from "@/protocol/canvas"
@@ -233,12 +233,21 @@ const collectCanvas = (
 ): {
   frames: CanvasMessage[]
   waitFor: (kind: CanvasMessage["kind"], timeoutMs?: number) => Promise<CanvasMessage>
+  waitForTurnEnd: (timeoutMs?: number) => Promise<void>
 } => {
   const frames: CanvasMessage[] = []
+  let turnEnded = false
   ws.addEventListener("message", (event: MessageEvent) => {
     if (typeof event.data !== "string") return
     const canvas = decodeCanvasFrame(event.data)
     if (canvas !== null) frames.push(canvas)
+    const session = tryDecodeSessionTransportMessage(event.data)
+    if (
+      session?.kind === "event" &&
+      ["turn.completed", "turn.failed", "turn.aborted"].includes(session.event.type)
+    ) {
+      turnEnded = true
+    }
   })
   const waitFor = (kind: CanvasMessage["kind"], timeoutMs = 4000): Promise<CanvasMessage> =>
     new Promise((resolve, reject) => {
@@ -259,7 +268,21 @@ const collectCanvas = (
         )
       }, timeoutMs)
     })
-  return { frames, waitFor }
+  const waitForTurnEnd = (timeoutMs = 4000): Promise<void> =>
+    new Promise((resolve, reject) => {
+      if (turnEnded) return resolve()
+      const timer = setInterval(() => {
+        if (!turnEnded) return
+        clearInterval(timer)
+        clearTimeout(deadline)
+        resolve()
+      }, 10)
+      const deadline = setTimeout(() => {
+        clearInterval(timer)
+        reject(new Error("waitForTurnEnd: timeout"))
+      }, timeoutMs)
+    })
+  return { frames, waitFor, waitForTurnEnd }
 }
 
 const driveTurn = (ws: WebSocket, sessionId: string): void => {
@@ -433,11 +456,11 @@ describe("A2 e2e — artifact.ready Canvas frame + jailed IPC preview", () => {
 
     const ws = new WebSocket(`ws://127.0.0.1:${handle.port}/`)
     await waitForOpen(ws)
-    const { frames } = collectCanvas(ws)
+    const { frames, waitForTurnEnd } = collectCanvas(ws)
     await new Promise((r) => setTimeout(r, 30))
 
     driveTurn(ws, present(bag.sessionId, "bag.sessionId"))
-    await new Promise((r) => setTimeout(r, 500))
+    await waitForTurnEnd()
     expect(frames.filter((f) => f.kind === "artifact.ready")).toHaveLength(0)
 
     // No registry ⇒ no producer; and the resolver is absent ⇒ the route 404s.
@@ -480,11 +503,11 @@ describe("A2 e2e — artifact.ready Canvas frame + jailed IPC preview", () => {
 
     const ws = new WebSocket(`ws://127.0.0.1:${handle.port}/`)
     await waitForOpen(ws)
-    const { frames } = collectCanvas(ws)
+    const { frames, waitForTurnEnd } = collectCanvas(ws)
     await new Promise((r) => setTimeout(r, 30))
 
     driveTurn(ws, present(bag.sessionId, "bag.sessionId"))
-    await new Promise((r) => setTimeout(r, 500))
+    await waitForTurnEnd()
     expect(frames.some((f) => f.kind === "artifact.ready")).toBe(false)
 
     ws.close()

@@ -10,10 +10,9 @@ import { loadEnvFiles } from "./dotenv"
 import { applyToolProfileFlag } from "./internal/argv"
 import { runRemoteCmd } from "./remote-cmd"
 import { buildCliRemoteSeams } from "./remote-dependencies/seams"
-import { runRepl, runSessionMain, runSlashMain, topLevelUsage } from "./repl"
 import { SessionStartupError } from "./repl/session-startup-error"
 import { installCliSandbox } from "./sandbox-wire"
-import { isSlashCommand } from "./slash-commands"
+import { isSlashCommand } from "./slash-engine"
 import { captureStatusBootProjection } from "./status-cmd"
 import { installUnhandledRejectionDefense } from "./unhandled-rejection-defense"
 import { renderVersion } from "./version-cmd"
@@ -208,6 +207,7 @@ const main = async (): Promise<void> => {
   // Early route: `quanta session …` is fully handled by the subcommand
   // dispatcher and never touches the agent loop / REPL wiring below.
   if (process.argv[2] === "session") {
+    const { runSessionMain } = await import("./session-main")
     const code = await runSessionMain()
     process.exit(code)
   }
@@ -296,6 +296,7 @@ const main = async (): Promise<void> => {
   // through to the agent / REPL path.
   const slashTok = process.argv[2]
   if (slashTok !== undefined && isSlashCommand(slashTok)) {
+    const { runSlashMain } = await import("./repl")
     process.exit(await runSlashMain(slashTok))
   }
 
@@ -304,6 +305,7 @@ const main = async (): Promise<void> => {
   // the bare argv (no `session` subcommand involved — handled above).
   const rawArgs = process.argv.slice(2)
   if (rawArgs.includes("--help") || rawArgs.includes("-h")) {
+    const { topLevelUsage } = await import("./top-level-usage")
     process.stdout.write(topLevelUsage())
     process.exit(0)
   }
@@ -326,6 +328,7 @@ const main = async (): Promise<void> => {
 
   // Delegate to the REPL/one-shot orchestrator. All agent assembly, resume
   // state machine, interactive loop and per-turn save plumbing lives there.
+  const { runRepl } = await import("./repl")
   await runRepl()
 }
 

@@ -18,9 +18,9 @@
  * env the spawn received without a mock seam.
  */
 import { afterEach, describe, expect, spyOn, test } from "bun:test"
-import { LspClient, type LspClientSpec } from "@/lsp"
+import { LspClient, type LspClientSpec } from "@/lsp/adapters/base"
 import { buildLspServerEnv, resolveLspMemBudgetMb } from "@/lsp/server-mem-budget"
-import { logger } from "@/shared"
+import { logger } from "@/shared/logger"
 
 const lang: LspClientSpec["languageIdFor"] = () => "plaintext"
 
@@ -121,7 +121,14 @@ describe("LspClient.start — WIRING PROOF: spawn inherits the budgeted NODE_OPT
     "-c",
     'printf "NODE_OPTIONS_SEEN=[%s]\\n" "$NODE_OPTIONS" 1>&2; exit 0',
   ]
-  const settleExit = () => new Promise((r) => setTimeout(r, 250))
+  const waitForExitLog = async (seen: () => boolean, timeoutMs = 1_000): Promise<boolean> => {
+    const deadline = performance.now() + timeoutMs
+    while (performance.now() < deadline) {
+      if (seen()) return true
+      await Bun.sleep(5)
+    }
+    return seen()
+  }
 
   test("default-on: the spawned server sees --max-old-space-size=4096 in its NODE_OPTIONS", async () => {
     delete process.env.QUANTA_LSP_MEM_BUDGET_MB // exercise the default
@@ -132,7 +139,11 @@ describe("LspClient.start — WIRING PROOF: spawn inherits the budgeted NODE_OPT
         { requestTimeoutMs: 400 },
       )
       await client.start().catch(() => undefined)
-      await settleExit()
+      expect(
+        await waitForExitLog(() =>
+          debug.mock.calls.some((c) => String(c[0]).includes("server exited")),
+        ),
+      ).toBe(true)
       const call = debug.mock.calls.find((c) => String(c[0]).includes("server exited"))
       expect(call).toBeDefined()
       const detail = call?.[1] as { stderrTail: string }
@@ -151,7 +162,11 @@ describe("LspClient.start — WIRING PROOF: spawn inherits the budgeted NODE_OPT
         { requestTimeoutMs: 400 },
       )
       await client.start().catch(() => undefined)
-      await settleExit()
+      expect(
+        await waitForExitLog(() =>
+          debug.mock.calls.some((c) => String(c[0]).includes("server exited")),
+        ),
+      ).toBe(true)
       const call = debug.mock.calls.find((c) => String(c[0]).includes("server exited"))
       expect(call).toBeDefined()
       const detail = call?.[1] as { stderrTail: string }

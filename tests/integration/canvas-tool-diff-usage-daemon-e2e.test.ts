@@ -46,7 +46,7 @@ import { createCanvasUsageSource } from "@/apps/web-daemon/canvas-usage-source"
 import type { ObservableRuntimeFacade } from "@/apps/web-daemon/runtime-factory"
 import { buildInteractiveTurnAssembler } from "@/apps/web-daemon/runtime-factory"
 import type { WebDaemonHandle } from "@/apps/web-daemon/types"
-import { encodeSessionTransportMessage } from "@/ipc/session"
+import { encodeSessionTransportMessage, tryDecodeSessionTransportMessage } from "@/ipc/session"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import { type CanvasMessage, decodeCanvasFrame } from "@/protocol/canvas"
@@ -186,12 +186,21 @@ const collectCanvas = (
 ): {
   frames: CanvasMessage[]
   waitFor: (kind: CanvasMessage["kind"], timeoutMs?: number) => Promise<CanvasMessage>
+  waitForTurnEnd: (timeoutMs?: number) => Promise<void>
 } => {
   const frames: CanvasMessage[] = []
+  let turnEnded = false
   ws.addEventListener("message", (event: MessageEvent) => {
     if (typeof event.data !== "string") return
     const canvas = decodeCanvasFrame(event.data)
     if (canvas !== null) frames.push(canvas)
+    const session = tryDecodeSessionTransportMessage(event.data)
+    if (
+      session?.kind === "event" &&
+      ["turn.completed", "turn.failed", "turn.aborted"].includes(session.event.type)
+    ) {
+      turnEnded = true
+    }
   })
   const waitFor = (kind: CanvasMessage["kind"], timeoutMs = 4000): Promise<CanvasMessage> =>
     new Promise((resolve, reject) => {
@@ -214,7 +223,21 @@ const collectCanvas = (
         )
       }, timeoutMs)
     })
-  return { frames, waitFor }
+  const waitForTurnEnd = (timeoutMs = 4000): Promise<void> =>
+    new Promise((resolve, reject) => {
+      if (turnEnded) return resolve()
+      const timer = setInterval(() => {
+        if (!turnEnded) return
+        clearInterval(timer)
+        clearTimeout(deadline)
+        resolve()
+      }, 10)
+      const deadline = setTimeout(() => {
+        clearInterval(timer)
+        reject(new Error("waitForTurnEnd: timeout"))
+      }, timeoutMs)
+    })
+  return { frames, waitFor, waitForTurnEnd }
 }
 
 /** Drive a real turn: connect → input.append → turn.run. */
@@ -360,12 +383,11 @@ describe("W3 canvas e2e — tool.diff + context.usage flow daemon → WS client"
 
     const ws = new WebSocket(`ws://127.0.0.1:${handle.port}/`)
     await waitForOpen(ws)
-    const { frames } = collectCanvas(ws)
+    const { frames, waitForTurnEnd } = collectCanvas(ws)
     await new Promise((r) => setTimeout(r, 30))
 
     driveTurn(ws, present(bag.sessionId, "bag.sessionId"), "please edit the file")
-    // Give the whole turn ample time to run + any (absent) frames to arrive.
-    await new Promise((r) => setTimeout(r, 600))
+    await waitForTurnEnd()
 
     expect(frames).toHaveLength(0)
 
@@ -380,15 +402,14 @@ describe("W3 canvas e2e — tool.diff + context.usage flow daemon → WS client"
 
     const ws = new WebSocket(`ws://127.0.0.1:${handle.port}/`)
     await waitForOpen(ws)
-    const { frames, waitFor } = collectCanvas(ws)
+    const { frames, waitFor, waitForTurnEnd } = collectCanvas(ws)
     await new Promise((r) => setTimeout(r, 30))
 
     driveTurn(ws, present(bag.sessionId, "bag.sessionId"), "please edit the file")
 
     // Usage still flows (its wire is intact) — use it as a turn-progressed barrier.
     await waitFor("context.usage")
-    // Drain a little more in case a tool.diff were (wrongly) in flight.
-    await new Promise((r) => setTimeout(r, 200))
+    await waitForTurnEnd()
     expect(frames.some((f) => f.kind === "tool.diff")).toBe(false)
 
     ws.close()
@@ -402,14 +423,14 @@ describe("W3 canvas e2e — tool.diff + context.usage flow daemon → WS client"
 
     const ws = new WebSocket(`ws://127.0.0.1:${handle.port}/`)
     await waitForOpen(ws)
-    const { frames, waitFor } = collectCanvas(ws)
+    const { frames, waitFor, waitForTurnEnd } = collectCanvas(ws)
     await new Promise((r) => setTimeout(r, 30))
 
     driveTurn(ws, present(bag.sessionId, "bag.sessionId"), "please edit the file")
 
     // Diff still flows (its wire is intact) — use it as a turn-progressed barrier.
     await waitFor("tool.diff")
-    await new Promise((r) => setTimeout(r, 200))
+    await waitForTurnEnd()
     expect(frames.some((f) => f.kind === "context.usage")).toBe(false)
 
     ws.close()

@@ -104,19 +104,23 @@ describe("test-policy-enrollment", () => {
     const fullIds = selectTestPoliciesForTier(policies, "full").map(({ id }) => id)
     const nightlyIds = selectTestPoliciesForTier(policies, "nightly").map(({ id }) => id)
     const nightlyOnly = nightlyIds.filter((id) => !fullIds.includes(id))
-    expect(nightlyOnly.length).toBeGreaterThanOrEqual(3)
+    expect(nightlyOnly.length).toBeGreaterThanOrEqual(6)
     expect(nightlyOnly).toContain("tests/integration/lint-debt-reach-e2e.nightly.test.ts")
     expect(nightlyOnly).toContain("src/apps/bench/composition-root-dispatch.nightly.test.ts")
     expect(nightlyOnly).toContain(
       "tests/unit/git/conflict-parser-differential-fuzz.nightly.test.ts",
     )
     expect(nightlyOnly).toContain("tests/integration/session-stress-and-concurrent.nightly.test.ts")
+    expect(nightlyOnly).toContain("tests/integration/bench-sandbox-cleanup.nightly.test.ts")
+    expect(nightlyOnly).toContain("tests/integration/session-envelope-stress.nightly.test.ts")
     expect(fullIds).not.toContain("tests/integration/lint-debt-reach-e2e.nightly.test.ts")
     expect(fullIds).not.toContain("src/apps/bench/composition-root-dispatch.nightly.test.ts")
     expect(fullIds).not.toContain(
       "tests/unit/git/conflict-parser-differential-fuzz.nightly.test.ts",
     )
     expect(fullIds).not.toContain("tests/integration/session-stress-and-concurrent.nightly.test.ts")
+    expect(fullIds).not.toContain("tests/integration/bench-sandbox-cleanup.nightly.test.ts")
+    expect(fullIds).not.toContain("tests/integration/session-envelope-stress.nightly.test.ts")
   })
 
   test("injecting an unregistered contract file into inventory comparison fails", () => {

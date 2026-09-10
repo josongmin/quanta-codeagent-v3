@@ -10,14 +10,15 @@
 import { lstat, readdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { REPRO_CANONICAL_BASENAME } from "@/agent/repro-test/scaffold-patterns"
-import { isTestFilePath, type SandboxData } from "@/shared"
+import { isTestFilePath } from "@/shared/test-path"
+import type { SandboxData } from "@/shared/trajectory"
 import { getCachePathspecs } from "../corpus/cache-pathspecs"
 import {
   type ProjectEnvSandboxFs,
   prepareProjectEnvSandbox,
   revertProjectEnvSandbox,
 } from "../corpus/project-env"
-import { type ExecResult, exec, execArgv, trimOut } from "./exec"
+import { type ExecResult, execArgv, trimOut } from "./exec"
 import { isBenchReproArtifactPath } from "./repro-artifacts"
 import { stripEnvManifestPins } from "./strip-env-manifest-pins"
 
@@ -238,17 +239,37 @@ export const withGitSnapshot = async (
    *  patch. Undefined ⇒ byte-identical to the pre-P0 path (no-op). */
   repo?: string,
 ): Promise<string> => {
-  const G = "git -c user.email=b@b -c user.name=b -c commit.gpgsign=false"
-  const hasGit = (await exec("git rev-parse --git-dir", sandbox, timeoutMs)).code === 0
+  // These are trusted fixed argv operations. Avoid wrapping them in
+  // `bash -c`: every wrapper adds another process to every bench attempt and
+  // provides no shell semantics here.
+  const hasGit = (await execArgv(["git", "rev-parse", "--git-dir"], sandbox, timeoutMs)).code === 0
   const canonicalReproScaffold =
     hasGit && baseCommit !== undefined
       ? await readOptionalText(join(sandbox, CANONICAL_REPRO_FILE_NAME))
       : undefined
-  const prep =
+  const prepArgvs: readonly (readonly string[])[] =
     hasGit && baseCommit
-      ? `${G} checkout -q -f ${baseCommit} && ${G} reset -q --hard ${baseCommit} && ${G} clean -qfdx`
-      : `git init -q . && ${G} add -A && ${G} commit -q -m base --allow-empty`
-  const init = await exec(prep, sandbox, timeoutMs)
+      ? [
+          [...GIT_ARGV, "checkout", "-q", "-f", baseCommit],
+          [...GIT_ARGV, "reset", "-q", "--hard", baseCommit],
+          [...GIT_ARGV, "clean", "-qfdx"],
+        ]
+      : [
+          ["git", "init", "-q", "."],
+          [...GIT_ARGV, "add", "-A"],
+          [...GIT_ARGV, "commit", "-q", "-m", "base", "--allow-empty"],
+        ]
+  let init: ExecResult = { code: 0, stdout: "", stderr: "" }
+  const prepDeadline = performance.now() + timeoutMs
+  for (const argv of prepArgvs) {
+    const remainingMs = Math.ceil(prepDeadline - performance.now())
+    if (remainingMs <= 0) {
+      init = { code: 124, stdout: "", stderr: "git snapshot preparation timed out" }
+      break
+    }
+    init = await execArgv(argv, sandbox, remainingMs)
+    if (init.code !== 0) break
+  }
   if (init.code === 0) {
     await restoreCanonicalReproScaffold(sandbox, timeoutMs, canonicalReproScaffold)
   }
@@ -279,8 +300,9 @@ const ENV_POLICY_VERSION = "sandbox.v2"
 
 /** Best-effort `<bin> --version` → first line, or undefined. */
 const probeVersion = async (bin: string, sandbox: string, timeoutMs: number): Promise<string> => {
-  const r = await exec(`${bin} --version 2>&1 | head -n1`, sandbox, timeoutMs)
-  return trimOut(r)
+  const r = await execArgv([bin, "--version"], sandbox, timeoutMs)
+  if (r.code !== 0) return ""
+  return `${r.stdout}\n${r.stderr}`.split("\n", 1)[0]?.trim() ?? ""
 }
 
 /**
@@ -294,8 +316,8 @@ export const gatherSandbox = async (
   baseCommit: string | undefined,
   timeoutMs: number,
 ): Promise<SandboxData> => {
-  const head: ExecResult = await exec("git rev-parse HEAD", sandbox, timeoutMs)
-  const status: ExecResult = await exec("git status --porcelain", sandbox, timeoutMs)
+  const head: ExecResult = await execArgv(["git", "rev-parse", "HEAD"], sandbox, timeoutMs)
+  const status: ExecResult = await execArgv(["git", "status", "--porcelain"], sandbox, timeoutMs)
   const [bun, node, python] = await Promise.all([
     probeVersion("bun", sandbox, timeoutMs),
     probeVersion("node", sandbox, timeoutMs),

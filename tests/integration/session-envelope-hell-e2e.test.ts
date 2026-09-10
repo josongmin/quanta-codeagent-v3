@@ -9,11 +9,10 @@
  *      preserved.
  *   4. Partial line + EOF without trailing newline surfaces malformed line
  *      as `{ ok: false }`, NOT silent skip.
- *   5. Streaming 10,000 records — memory bounded (running counter only),
- *      exact count.
- *   6. Concurrent writers — two `Promise.all` writers each append 500
- *      records to the SAME session, final file has exactly 1000 records,
- *      every line decodable, no torn writes. Run twice for flakiness.
+ *   5. Streaming readback — PR uses 256 records; the physical nightly sibling
+ *      preserves the 10,000-record scale case.
+ *   6. Concurrent writers — PR uses 2×64; the physical nightly sibling keeps
+ *      the 2×500 same-session untorn-write case.
  *   7. Snapshot independence invariant — `.jsonl` and `.json` files exist
  *      independently and neither corrupts the other.
  *
@@ -30,24 +29,24 @@ import { open } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
-  appendEnvelope,
-  appendSessionLine,
-  EnvelopeDecodeError,
   type EventMsgRecord,
-  encodeSessionLine,
-  iterateSessionFile,
   type ResponseItemRecord,
   SESSION_ENVELOPE_VERSION,
   type SessionEnvelopeRecord,
-  type SessionMeta,
   type SessionMetaRecord,
-  saveSessionById,
-  sessionEnvelopePath,
-  sessionFilePath,
   type ThreadSpawnRecord,
   type TurnContextRecord,
-} from "@/session"
-import { __resetRuntimeConfig } from "@/shared"
+} from "@/session/envelope"
+import {
+  appendSessionLine,
+  EnvelopeDecodeError,
+  encodeSessionLine,
+  iterateSessionFile,
+} from "@/session/envelope-encoder"
+import { sessionFilePath } from "@/session/paths"
+import { appendEnvelope, saveSessionById, sessionEnvelopePath } from "@/session/store"
+import type { SessionMeta } from "@/session/types"
+import { __resetRuntimeConfig } from "@/shared/runtime-config"
 
 const root = mkdtempSync(join(tmpdir(), "e2e-session-envelope-hell-"))
 
@@ -515,13 +514,6 @@ describe("session envelope hell — streaming readback with running counter only
   test("PR rail: exact 256 read-back without materialising an array", async () => {
     await assertStreamingReadback("stream-pr", 256)
   })
-
-  test.if(process.env.QUANTA_TEST_STRESS === "1")(
-    "nightly stress: exact 10,000 read-back",
-    async () => {
-      await assertStreamingReadback("stream-10k", 10_000)
-    },
-  )
 })
 
 /* ------------------------------------------------------------------ */
@@ -583,13 +575,6 @@ describe("session envelope hell — two concurrent Promise.all writers, no torn 
   test("PR rail: 128 records from two writers are all decodable", async () => {
     await runConcurrentBurst("concurrent-pr", 64)
   })
-
-  test.if(process.env.QUANTA_TEST_STRESS === "1")(
-    "nightly stress repeat: same harness, fresh session",
-    async () => {
-      await runConcurrentBurst("concurrent-nightly", 500)
-    },
-  )
 })
 
 /* ------------------------------------------------------------------ */

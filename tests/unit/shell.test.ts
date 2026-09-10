@@ -1,5 +1,18 @@
 import { describe, expect, test } from "bun:test"
-import { runShell } from "@/runtime"
+import { runShell } from "@/runtime/shell"
+
+const waitForProcessExit = async (pid: number, timeoutMs = 1_000): Promise<boolean> => {
+  const deadline = performance.now() + timeoutMs
+  while (performance.now() < deadline) {
+    try {
+      process.kill(pid, 0)
+    } catch {
+      return true
+    }
+    await Bun.sleep(10)
+  }
+  return false
+}
 
 describe("runShell", () => {
   test("captures stdout and a zero exit code", async () => {
@@ -43,15 +56,8 @@ describe("runShell child-process leak on observer throw (lifecycle audit)", () =
     ).rejects.toBe(boom)
 
     expect(pid).toBeGreaterThan(0)
-    // Give the kill a beat to take effect, then assert the child is gone.
-    await Bun.sleep(300)
-    let alive = true
-    try {
-      process.kill(pid, 0) // signal 0 = existence probe; throws ESRCH if gone
-    } catch {
-      alive = false
-    }
-    expect(alive).toBe(false)
+    // Poll the real OS state instead of paying a fixed 300ms on every pass.
+    expect(await waitForProcessExit(pid)).toBe(true)
   })
 })
 
@@ -89,7 +95,9 @@ describe("runShell env scrubbing (ADR-0006)", () => {
       const r = await runShell('echo "$RUNSHELL_TEST_INHERIT"', { inheritEnv: true })
       expect(r.stdout.trim()).toBe("inherited-value")
       // Counter-control: with inheritEnv DEFAULT (scrubbed), same key is gone.
-      const rScrubbed = await runShell('echo "${RUNSHELL_TEST_INHERIT:-MISSING}"')
+      const rScrubbed = await runShell(
+        ['echo "', "$", "{RUNSHELL_TEST_INHERIT:-MISSING}", '"'].join(""),
+      )
       expect(rScrubbed.stdout.trim()).toBe("MISSING")
     } finally {
       process.env.RUNSHELL_TEST_INHERIT = undefined

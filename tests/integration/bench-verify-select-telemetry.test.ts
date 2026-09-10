@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, setDefaultTimeout, spyOn, test
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { BudgetMeter } from "@/agent"
+import { BudgetMeter } from "@/agent/budget/meter"
 import { BenchObserver } from "@/apps/bench/eval/driver"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import { classifyOutcome } from "@/runner/batch/eval/retry-policy"

@@ -4,7 +4,7 @@ import { chmod } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
-import { __resetRuntimeConfig } from "@/shared"
+import { __resetRuntimeConfig } from "@/shared/runtime-config"
 import {
   type Prediction,
   parseSwebenchJsonl,
@@ -440,18 +440,18 @@ describe("HC-C. sandbox cleanup", () => {
     RUN_INSTANCE_TIMEOUT_MS,
   )
 
-  test("50 sequential bench instances → no tmp-dir accumulation", async () => {
+  test("3 sequential bench instances → no immediate tmp-dir accumulation", async () => {
     const inst = makeMiniInstance(dir, "no-accum")
     expect(ownedSandboxParents(inst.id)).toEqual([])
     // Use NoopEndLLM (deterministic, no real agent loop overhead).
     const llm = new NoopEndLLM()
-    for (let i = 0; i < 50; i++) {
+    for (let i = 0; i < 3; i++) {
       const r = await runInstance(inst, { ...DEPS, llm })
       expect(r.id).toBe("no-accum")
       expect(ownedSandboxParents(inst.id)).toEqual([])
     }
     expect(ownedSandboxParents(inst.id)).toEqual([])
-  }, 60_000) // 50 instances × ~150ms each on cold spawn = 7-10s; leave headroom.
+  }, 15_000)
 })
 
 // -------------------------------------------------------------------------

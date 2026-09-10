@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { PyrightAdapter } from "@/lsp"
+import { PyrightAdapter } from "@/lsp/adapters/pyright"
 
 /**
  * REAL-pyright hellgate. The existing `lsp-client-persistent-sync-hellgate`
@@ -47,7 +47,7 @@ gate("pyright cross-file resolution (real server)", () => {
           resolved = defs
           break
         }
-        await new Promise((r) => setTimeout(r, 500))
+        await new Promise((r) => setTimeout(r, 50))
       }
       // RED-on-injection: without pythonPath + the didChangeConfiguration push,
       // pyright never answers → `resolved` stays null → this fails.

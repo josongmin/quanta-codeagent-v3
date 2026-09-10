@@ -130,30 +130,28 @@ describe("CLI-05: structural — shim is gone", () => {
     expect(offenders).toEqual([])
   })
 
-  test("HELL-05: src/apps/cli/repl.ts imports runSessionCommand as runSessionCommandInner from @/runner/session-ops", () => {
-    const text = readFileSync(join(REPO_ROOT, "src/apps/cli/repl.ts"), "utf8")
-    expect(text).toContain(
-      'runSessionCommand as runSessionCommandInner } from "@/runner/session-ops"',
-    )
+  test("HELL-05: focused session entry imports the runner session command", () => {
+    const text = readFileSync(join(REPO_ROOT, "src/apps/cli/session-main.ts"), "utf8")
+    expect(text).toContain('import { runSessionCommand } from "@/runner/session-ops"')
   })
 
-  test("HELL-06: src/apps/cli/repl.ts calls runSessionCommandInner (not the dead shim alias)", () => {
-    const text = readFileSync(join(REPO_ROOT, "src/apps/cli/repl.ts"), "utf8")
-    expect(text).toContain("runSessionCommandInner(process.argv.slice(3)")
+  test("HELL-06: focused session entry calls runSessionCommand (not the dead shim alias)", () => {
+    const text = readFileSync(join(REPO_ROOT, "src/apps/cli/session-main.ts"), "utf8")
+    expect(text).toMatch(/runSessionCommand\s*\(argv,/u)
   })
 
-  test("HELL-07: src/apps/cli/repl.ts imports createCliImportHandler from ./session-import-handler", () => {
-    const text = readFileSync(join(REPO_ROOT, "src/apps/cli/repl.ts"), "utf8")
+  test("HELL-07: focused session entry imports createCliImportHandler", () => {
+    const text = readFileSync(join(REPO_ROOT, "src/apps/cli/session-main.ts"), "utf8")
     expect(text).toContain('import { createCliImportHandler } from "./session-import-handler"')
   })
 
-  test("HELL-08: src/apps/cli/repl.ts imports resolveCliSessionListEnv from ./session-list-env", () => {
-    const text = readFileSync(join(REPO_ROOT, "src/apps/cli/repl.ts"), "utf8")
+  test("HELL-08: focused session entry imports resolveCliSessionListEnv", () => {
+    const text = readFileSync(join(REPO_ROOT, "src/apps/cli/session-main.ts"), "utf8")
     expect(text).toContain('import { resolveCliSessionListEnv } from "./session-list-env"')
   })
 
   test("HELL-09: runSessionMain wires importHandler + listEnv into deps", () => {
-    const text = readFileSync(join(REPO_ROOT, "src/apps/cli/repl.ts"), "utf8")
+    const text = readFileSync(join(REPO_ROOT, "src/apps/cli/session-main.ts"), "utf8")
     expect(text).toContain("importHandler: createCliImportHandler()")
     expect(text).toContain("resolveCliSessionListEnv()")
   })

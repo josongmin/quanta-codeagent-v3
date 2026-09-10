@@ -39,9 +39,10 @@
  * No src/ file is touched. Reuses tests/integration/_harness.ts exclusively.
  */
 import { describe, expect, test } from "bun:test"
-import { type AgentConfig, runAgent } from "@/agent"
+import { runAgent } from "@/agent/loop/entry"
+import type { AgentConfig } from "@/agent/types"
 import type { StreamEvent } from "@/llm"
-import { LLMError } from "@/shared"
+import { LLMError } from "@/shared/errors"
 import {
   ev,
   cfg as harnessCfg,

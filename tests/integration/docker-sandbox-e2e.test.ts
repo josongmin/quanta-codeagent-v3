@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { DockerSandbox, SandboxUnavailableError } from "@/runtime"
+import { DockerSandbox, SandboxUnavailableError } from "@/runtime/sandbox"
 
 /**
  * End-to-end coverage of {@link DockerSandbox} as a {@link Sandbox} port —

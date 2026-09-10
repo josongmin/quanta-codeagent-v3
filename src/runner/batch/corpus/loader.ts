@@ -39,7 +39,7 @@
  */
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises"
 import { isAbsolute, join, resolve } from "node:path"
-import { byteCompare } from "@/shared"
+import { byteCompare } from "@/shared/byte-compare"
 import type { Instance } from "../types"
 
 const exists = async (p: string): Promise<boolean> => {

@@ -3,18 +3,13 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs"
 import { writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { runShell } from "@/runtime"
-import {
-  loadSessionById,
-  type SavedSession,
-  type SavePayload,
-  type SessionMeta,
-  saveSessionById,
-} from "@/session"
-import { __resetRuntimeConfig } from "@/shared"
+import { loadSessionById, saveSessionById } from "@/session/store"
+import type { SavedSession, SavePayload, SessionMeta } from "@/session/types"
+import { __resetRuntimeConfig } from "@/shared/runtime-config"
 
 /**
- * HARD subprocess-spawn e2e for the session CLI.
+ * HARD subprocess-spawn e2e for the session CLI. Public routing canaries use
+ * `index.ts`; command-lifecycle cases use the focused production session entry.
  *
  * Spawns `bun src/apps/cli/index.ts <args>` and asserts exit codes, stdout/
  * stderr, and filesystem side-effects. Closes audit-coverage gaps for
@@ -42,6 +37,7 @@ import { __resetRuntimeConfig } from "@/shared"
 
 const REPO_ROOT = "/Users/songmin/quanta-codeagent-v3"
 const CLI_ENTRY = join(REPO_ROOT, "src/apps/cli/index.ts")
+const SESSION_ENTRY = join(REPO_ROOT, "src/apps/cli/session-command-entry.ts")
 const TEST_TIMEOUT_MS = 15_000
 
 interface RunResult {
@@ -55,9 +51,32 @@ interface RunOpts {
   cwd?: string
 }
 
+const runGit = async (
+  args: readonly string[],
+  cwd?: string,
+): Promise<{ exitCode: number; stdout: string; stderr: string }> => {
+  const proc = Bun.spawn(["git", ...args], {
+    ...(cwd !== undefined ? { cwd } : {}),
+    env: {
+      PATH: process.env.PATH ?? "/usr/bin:/bin",
+      HOME: process.env.HOME ?? "/tmp",
+      GIT_CONFIG_GLOBAL: "/dev/null",
+      GIT_CONFIG_SYSTEM: "/dev/null",
+    },
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ])
+  return { exitCode, stdout, stderr }
+}
+
 const gitAvailable = async (): Promise<boolean> => {
   try {
-    const r = await runShell("git --version")
+    const r = await runGit(["--version"])
     return r.exitCode === 0
   } catch {
     return false
@@ -81,6 +100,7 @@ const runCli = async (
   args: string[],
   opts: RunOpts = {},
   isolatedCwd?: string,
+  entry = CLI_ENTRY,
 ): Promise<RunResult> => {
   const cwd = opts.cwd ?? isolatedCwd ?? mkdtempSync(join(tmpdir(), "cli-sub-cwd-"))
   // Build a clean env: PATH + HOME + the test-controlled keys. Explicitly
@@ -95,7 +115,7 @@ const runCli = async (
     ...opts.env,
   }
   const proc = Bun.spawn({
-    cmd: ["bun", CLI_ENTRY, ...args],
+    cmd: ["bun", entry, ...args],
     cwd,
     env,
     stdout: "pipe",
@@ -110,13 +130,18 @@ const runCli = async (
   return { exit, out, err }
 }
 
+const runFocusedSessionCli = (
+  args: string[],
+  opts: RunOpts = {},
+  isolatedCwd?: string,
+): Promise<RunResult> => runCli(args, opts, isolatedCwd, SESSION_ENTRY)
+
 const makeRepo = async (): Promise<string> => {
   const dir = mkdtempSync(join(tmpdir(), "cli-sub-repo-"))
-  const sh = (c: string) => runShell(c, { cwd: dir })
-  await sh("git init -q")
-  await sh("git config user.email t@t.t && git config user.name t")
+  await runGit(["init", "-q"], dir)
   await writeFile(join(dir, "README.md"), "hello\n")
-  await sh("git add -A && git commit -q -m init")
+  await runGit(["add", "-A"], dir)
+  await runGit(["-c", "user.email=t@t.t", "-c", "user.name=t", "commit", "-q", "-m", "init"], dir)
   return dir
 }
 
@@ -248,8 +273,8 @@ describe("session CLI — subprocess e2e", () => {
   test(
     "T6 — `session ls --ids` on empty store exits 0 with empty stdout",
     async () => {
-      const r = await runCli(
-        ["session", "ls", "--ids"],
+      const r = await runFocusedSessionCli(
+        ["ls", "--ids"],
         { env: { QUANTA_SESSIONS_DIR: sessionsDir } },
         workCwd,
       )
@@ -288,8 +313,8 @@ describe("session CLI — subprocess e2e", () => {
     async () => {
       const id = "rt-show"
       await saveSessionById(mkMeta({ id, title: "ShowMe" }), mkPayload())
-      const r = await runCli(
-        ["session", "show", id, "--json"],
+      const r = await runFocusedSessionCli(
+        ["show", id, "--json"],
         { env: { QUANTA_SESSIONS_DIR: sessionsDir } },
         workCwd,
       )
@@ -312,10 +337,10 @@ describe("session CLI — subprocess e2e", () => {
         const srcId = "wt-src-resume"
         await saveSessionById(mkMeta({ id: srcId, title: "WTSrc", cwd: repoDir }), mkPayload())
 
-        // 2. Create a worktree-backed fork by spawning the SAME binary —
-        //    this also doubles as a round-trip of `session fork --worktree`.
-        const fork = await runCli(
-          ["session", "fork", srcId, "--worktree"],
+        // 2. Create a worktree-backed fork through the focused production
+        //    dispatcher entry. Public session routing is pinned by T5/T7.
+        const fork = await runFocusedSessionCli(
+          ["fork", srcId, "--worktree"],
           { env: { QUANTA_SESSIONS_DIR: sessionsDir } },
           workCwd,
         )
@@ -361,8 +386,8 @@ describe("session CLI — subprocess e2e", () => {
       try {
         const srcId = "wt-src-del"
         await saveSessionById(mkMeta({ id: srcId, title: "WTSrcDel", cwd: repoDir }), mkPayload())
-        const fork = await runCli(
-          ["session", "fork", srcId, "--worktree"],
+        const fork = await runFocusedSessionCli(
+          ["fork", srcId, "--worktree"],
           { env: { QUANTA_SESSIONS_DIR: sessionsDir } },
           workCwd,
         )
@@ -377,8 +402,8 @@ describe("session CLI — subprocess e2e", () => {
         const safeSeg = wtPath.split("/").pop() ?? ""
 
         // Now: subprocess delete --force.
-        const r = await runCli(
-          ["session", "delete", forkId, "--force"],
+        const r = await runFocusedSessionCli(
+          ["delete", forkId, "--force"],
           { env: { QUANTA_SESSIONS_DIR: sessionsDir } },
           workCwd,
         )
@@ -387,7 +412,7 @@ describe("session CLI — subprocess e2e", () => {
         expect(r.out).toContain(`deleted ${forkId}`)
         // Worktree dir + branch should be gone.
         expect(existsSync(wtPath)).toBe(false)
-        const branches = await runShell("git branch -a", { cwd: repoDir })
+        const branches = await runGit(["branch", "-a"], repoDir)
         expect(branches.stdout).not.toContain(`fork-${safeSeg}`)
       } finally {
         rmSync(repoDir, { recursive: true, force: true })

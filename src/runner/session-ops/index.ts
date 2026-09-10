@@ -1,31 +1,27 @@
 import type { ActivityStore } from "@/activity"
 import type { Message } from "@/llm"
+import { runShell } from "@/runtime/shell"
+import { isGitRepo } from "@/runtime/worktree"
 import {
   createPersistentWorktree,
-  isGitRepo,
   removeWorktree,
-  runShell,
   WorktreeForkError,
-} from "@/runtime"
+} from "@/runtime/worktree-fork"
+import { listSessions } from "@/session/index-store"
+import { archivedFilePath, SessionIdError, sessionFilePath } from "@/session/paths"
 import {
-  archivedFilePath,
   archiveSession,
   deleteSession,
   forkSession,
-  listSessions,
   loadSessionById,
-  makeWorkspaceCreateIntent,
   renameSession,
   rewindToMessage,
-  SessionIdError,
-  type SessionMeta,
   saveSessionById,
-  sessionFilePath,
-  transitionWorkspaceState,
   unarchiveSession,
-  type WorkspaceOwnership,
-} from "@/session"
-import { errMessage } from "@/shared"
+} from "@/session/store"
+import type { SessionMeta, WorkspaceOwnership } from "@/session/types"
+import { makeWorkspaceCreateIntent, transitionWorkspaceState } from "@/session/workspace-ownership"
+import { errMessage } from "@/shared/errors"
 import {
   applyListPipeline,
   buildSessionListEntries,

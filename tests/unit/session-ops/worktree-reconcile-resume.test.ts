@@ -32,7 +32,7 @@ const PIN = "QUANTA_WORKTREE_CWD_PIN"
 const PAYLOAD = { reason: "t", turns: 3, messages: [] }
 
 const run = async (command: readonly string[]): Promise<void> => {
-  const p = Bun.spawn(command, { stdout: "pipe", stderr: "pipe" })
+  const p = Bun.spawn([...command], { stdout: "pipe", stderr: "pipe" })
   const code = await p.exited
   if (code !== 0) {
     throw new Error(

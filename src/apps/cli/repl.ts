@@ -9,14 +9,11 @@ import {
 import { defaultResponsesContinuationStore } from "@/llm"
 import { buildShellOtelObserver } from "@/observability"
 import { getDefaultPermissionStore, type PermissionStore } from "@/permission"
-import { buildSessionAuthorities } from "@/runner/assemble/session-authorities"
 import { bootstrapCrashResumeOffers, selectCrashResumeReinject } from "@/runner/orchestrate"
-import { runSessionCommand as runSessionCommandInner } from "@/runner/session-ops"
 import { redactSecrets } from "@/security"
 import { clearSessionInterrupted, crashResumeEnabled, listSessions } from "@/session"
 import { errMessage, gateOn, logger, runtimeConfig } from "@/shared"
 import { composeShellObservers, type ShellExecObserver } from "@/tool"
-import { readCliKnob } from "./cli-knobs-accessor"
 import { emitConfigMigrationImport, emitConfigMigrationNotice } from "./config-migration-notice"
 import { createIdleMonitor, DEFAULT_IDLE_MS } from "./idle-monitor"
 import { loadImageBlock } from "./image-loader"
@@ -62,11 +59,9 @@ import {
 } from "./repl/surface-compose"
 import type { RewindSlashState } from "./rewind-cmd"
 import { createCliRewindGitPort } from "./rewind-git"
-import { createCliImportHandler } from "./session-import-handler"
 import { switchToSessionCwd } from "./session-io"
-import { resolveCliSessionListEnv } from "./session-list-env"
 import { buildShellStreamPainter } from "./shell-stream-painter"
-import { runSlashCommand, slashCompleter } from "./slash-commands"
+import { runSlashCommand } from "./slash-commands"
 import { buildWelcomeInfo, renderWelcomeBanner } from "./welcome-banner"
 
 /**
@@ -97,74 +92,14 @@ const buildRewindSlashState = (
 
 /** Top-level usage block. Printed on `--help`/`-h` BEFORE prompt forwarding so
  *  a typo doesn't become an LLM prompt. Session subcommand has its own help. */
-export const topLevelUsage = (): string =>
-  [
-    "quanta — coding agent CLI",
-    "",
-    "Usage:",
-    "  quanta [PROMPT]                      Run a one-shot prompt",
-    "  quanta                               Start interactive REPL",
-    "  quanta --new-session [--title T]     Start a new id-mode session",
-    "  quanta --resume <id|path>            Resume by id (id-mode) or path (path-mode)",
-    "  quanta --state <path>                Save path-mode transcript",
-    "  quanta session <subcommand> ...      Session management (see `quanta session --help`)",
-    "  quanta remote <subcommand> ...       Remote execution plane (see `quanta remote --help`)",
-    "  quanta attach [ws-url]               Join a running daemon's shared session over WS",
-    "  quanta mcp-server        Expose quanta AS an MCP server over stdio (needs QUANTA_MCP_SERVER=1)",
-    "",
-    "Common flags:",
-    "  --plan, --lsp, --lsp-tools, --git-tools, --observe-dir <d>, --metrics",
-    "  -h, --help                           Show this help",
-    "",
-  ].join("\n")
+export { runSessionMain } from "./session-main"
+export { topLevelUsage } from "./top-level-usage"
 
 /** Build the per-REPL multi-modal image queue (ADR-0083). Default-ON cap 5;
  *  `QUANTA_IMAGE_QUEUE=0` returns `undefined` so the surface short-circuits. */
 const buildImageQueue = (featureCfg: CliFeatureConfig): ImageQueue | undefined => {
   if (!featureCfg.imageQueue.enabled) return undefined
   return createImageQueue({ maxSize: featureCfg.imageQueue.maxSize })
-}
-
-/** Route `quanta session …` to the session subcommand dispatcher. Returns
- *  the exit code; no agent/REPL wiring runs in this branch. */
-export const runSessionMain = async (): Promise<number> => {
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stderr,
-    completer: slashCompleter,
-  })
-  // CLI-05 (ADR-0305): the prior shim `./session-commands.ts` is removed —
-  // we now call the surface-agnostic runner slice directly and inject the
-  // two CLI-specific adapters (import handler + list-env resolver) inline.
-  // The runner accepts `listEnv: undefined` (treats it as omitted), so the
-  // `exactOptionalPropertyTypes: true` spread is safe.
-  const listEnv = resolveCliSessionListEnv()
-  // RFC-04 D4 — one session `ActivityStore` from the authority builder (DI; no
-  // command-local `createActivityStore()`), and the live-progress gate resolved
-  // ONCE at this composition root through the designated CLI knob accessor
-  // (`QUANTA_WORKTREE_PROGRESS`, default OFF). Gate off ⇒ the `worktree` command
-  // is byte-identical (single final render, no staged children).
-  const authorities = buildSessionAuthorities({ env: process.env })
-  const worktreeProgress = readCliKnob("QUANTA_WORKTREE_PROGRESS", "bool") ?? false
-  const code = await runSessionCommandInner(process.argv.slice(3), {
-    out: (s) => process.stdout.write(s),
-    err: (s) => process.stderr.write(s),
-    confirm: async (prompt) => {
-      const ans = await rl.question(prompt)
-      return ans.trim().toLowerCase() === "y"
-    },
-    importHandler: createCliImportHandler(),
-    // RFC-06 §RFC06-3 — the `worktree-gc` subcommand operates on the CWD repo
-    // by default; the runner slice never reads `process.cwd()` itself.
-    cwd: process.cwd(),
-    // RFC02-5 / RFC06-2 — the `worktree` subcommand emits its correlated
-    // running→done|failed transition onto this session spine, then renders it.
-    activityStore: authorities.activity,
-    worktreeProgress,
-    ...(listEnv !== undefined ? { listEnv } : {}),
-  })
-  rl.close()
-  return code
 }
 
 /** Run the matching built-in slash command and exit. Tier-2 absorption #2-1. */
