@@ -69,7 +69,7 @@ const scope = process.argv
   ?.slice("--scope=".length)
 const timingsPath =
   process.argv.find((argument) => argument.startsWith("--timings="))?.slice("--timings=".length) ??
-  join(sharedVerificationCacheRoot(repoRoot), "test-timings-v1.json")
+  join(sharedVerificationCacheRoot(repoRoot), "test-timings-v2.json")
 
 const xml = readFileSync(xmlPath, "utf8")
 

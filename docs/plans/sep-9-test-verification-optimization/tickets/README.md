@@ -1,10 +1,10 @@
 # SEP9-TV — 테스트 검증 비용 최적화 실행 티켓
 
-- 감사일: 2026-09-09 / 티켓 작성 완료일: 2026-09-10 (KST)
-- 상태: IMPLEMENTING — Wave 0–6 코드 착륙. 저장소와 `main`은 확인됐지만 current private-repository plan에서 ruleset/branch-protection API가 HTTP 403이라 remote required는 활성화 불가. exact-HEAD Actions도 billing/spending-limit으로 0-step 종료. full 캠페인 없음. KF-01은 owner-local green.
+- 감사일: 2026-09-09 / 최초 티켓 작성: 2026-09-10 / 구조 캠페인 갱신: 2026-09-11 (KST)
+- 상태: IMPLEMENTING — 기존 focused rail과 shadow matrix 코드는 착륙했지만 resource certification, lease 세분화, tier별 exact file membership, hosted activation/receipt가 열려 있다. current private-repository plan에서 ruleset/branch-protection API는 HTTP 403이고 최신 Actions도 0-step 실패다. authoritative full 캠페인은 재개하지 않았다.
 - 고정 증거: [evidence/baseline-94073ffa6415.json](../evidence/baseline-94073ffa6415.json), [evidence/known-failures.md](../evidence/known-failures.md), [evidence/remote-protection-r0.json](../evidence/remote-protection-r0.json), [evidence/open-gaps.md](../evidence/open-gaps.md)
-- 현재 full population digest: `e887c346fd94536b05801c86f1be7fe08a02c8bca7fde7c0d92e369b27512fd0` (3,921 files; 2026-09-10 local snapshot)
-- 감사 기준 HEAD: `94073ffa64155941bd9c6a97e0c7121b7f09d526`
+- 현재 full population digest: `c5ec263c9c83e7ce82d48f10854ddae56cca7bd55ee47456bb3a9e1308bc3a71` (3,924 files; 2026-09-11 local discovery-only snapshot)
+- 현재 계획 기준 HEAD: `4fd84e7f2f809b5ff53772a29e91cb26cc991e17`; `origin/main=dba37472ec70acad1a38721a50a0693583333cd3`로 로컬 `main`이 15 commits 앞선다.
 - 요청: 기존 장시간 검증 중단 후 smoke / prepush / PR / nightly 체계와 최적화 작업을 구체적으로 기록.
 - 현재 실행 제약: full / prepush / test:ci 캠페인은 중단 상태를 유지한다. 이 문서의 명령은 향후 구현·검증 명세이며 지금 실행하라는 지시가 아니다.
 - 기존 W7의 미해결 실패·외부 실행 증거는 이 계획으로 완료 처리하지 않는다.
@@ -29,6 +29,34 @@
 | 캠페인 결과 | exit 130, drained=true, survivingGroups=[] | 프로세스 정리 확인; 테스트 통과를 의미하지 않음 |
 | 실패 | chunk 16, bench-full-remote-hellgate의 access-token 전달 assertion | owner-local 재현 후 G-F5 readiness mock 공백이 원인. quarantine 금지. 캐시-off full 캠페인 영수증 아님 |
 | 작업 트리 | 감사 당시 clean | 실행 착수 전 다시 확인 |
+
+### 2026-09-11 current-HEAD 구조 스냅샷
+
+`run-test-shards --discover-only`와 현재 classifier를 read-only로 실행한 값이다. timing 값은 2026-09-09 v1 store의 오래된 scheduling weight이므로 현재 wall-time 증거로 사용하지 않는다.
+
+| 항목 | 현재 값 | 남은 의미 |
+|---|---:|---|
+| full/core/unit/integration | 3,924 / 3,534 / 3,210 / 390 files | 모든 tier manifest의 current population 기준 |
+| pure | 3,012 | 현재 intra-worker 병렬화 허용 |
+| integration-path | 558 | 경로 fallback; 파일별 자원 격리 인증 전에는 직렬 유지 |
+| lsp / port / process-global | 206 / 62 / 55 | 단일 class 이름이 아니라 실제 resource key/mode로 세분화 필요 |
+| browser / worktree / repo-write | 12 / 17 / 2 | 배타성 유지; checkout/git-common/cache 경계 분리 필요 |
+| shadow matrix | plan/worker/aggregate 코드와 조건부 workflow 존재 | `QUANTA_SHADOW_MATRIX=1` hosted receipt 없음; required는 `full-suite` 소비 |
+| tier membership | working tree discovery: PR/full 3,924, nightly 3,925 | `--tier`/policy digest 연결 및 Biome reach 1개 물리 분리; 신규 certification unit 포함, 나머지 fuzz/toolchain migration은 진행 중 |
+
+## 현재 남은 구조 캠페인
+
+| 순서 | 소유 티켓 | 작업 | 활성화 barrier | 성능 효과 |
+|---:|---|---|---|---|
+| 0 | TV-07, TV-13 | timing v2 재기준화, nightly Bun `1.3.14` 고정 | schema/pin 구현 완료; healthy-load sample open | 잘못된 hot-file 우선순위 제거 |
+| 1A | TV-02, TV-08 | 558개 integration-path source-digest resource certification | authority/audit 완료; 현재 missing 558, candidate claim 124, 미인증/만료는 exclusive | full/integration 내부 병렬성 |
+| 1B | TV-09, TV-13 | smoke/prepush/PR/full/nightly exact file membership | tier wiring + 첫 nightly file 완료; 나머지는 hosted artifact 전 PR coverage 제거 금지 | PR file load/setup 직접 감소 |
+| 2 | TV-08 | checkout/git-common/cache/host resource lease 세분화 | canonical multi-key primitive 완료; campaign 전환은 1/2/4 동등 verdict와 충돌 0 이후 | 다중 세션 대기 감소 |
+| 3 | TV-12 | 4-worker shadow matrix live 실행·단일 full과 exact 비교 | exact HEAD hosted receipt | hosted full wall 감소 |
+| 4 | TV-11, TV-15 | Actions 복구 및 required/branch protection 활성화 | private repo plan 또는 visibility 결정 | merge enforcement |
+| 5 | TV-90 | healthy-load ABBA와 authoritative full/nightly 1회 | 위 barrier 완료 및 full 재개 승인 | 최종 정확성·성능 receipt |
+
+1A와 1B는 별도 파일에서 병렬 개발할 수 있다. `test-policy.ts`, `gate-manifest.ts`, `run-test-shards.ts`, workflow 같은 공유 surface는 통합 담당이 순차 병합한다. resource certification 없이 lease만 풀거나, nightly hosted receipt 없이 PR membership을 줄이는 변경은 금지한다.
 
 원본 관측은 `.git/quanta-verification-cache/last-campaign.json`, `test-timings-v1.json`, `.cache/full-junit.xml.shard-16.xml`에서 수집했다. 이 파일들은 가변·로컬 캐시이며 영구 증거가 아니다. TV-00에서 필요한 비밀정보 없는 요약을 고정한다.
 
@@ -55,18 +83,18 @@
 |---|---|---|---|---|
 | [TV-00](TV-00-baseline-and-inventory.md) | P0 | 기준 증거·미해결 실패 기록 | 없음 | INTEGRATED |
 | [TV-01](TV-01-tier-runner-and-local-hook.md) | P0 | tier 실행·명령·fail-fast | 00 | FOCUSED_VERIFIED |
-| [TV-02](TV-02-test-policy-and-enrollment.md) | P0 | test policy·전체 등록 | 00 | FOCUSED_VERIFIED |
+| [TV-02](TV-02-test-policy-and-enrollment.md) | P0 | test policy·tier/resource 등록 | 00 | IMPLEMENTING — base policy green, explicit enrollment open |
 | [TV-03](TV-03-affected-selection.md) | P1 | 변경 영향 선택·fallback | 01,02 | FOCUSED_VERIFIED |
 | [TV-04](TV-04-cache-policy-and-cold-mode.md) | P0 | 캐시 정확성·JUnit·cache-off | 00 | FOCUSED_VERIFIED |
 | [TV-05](TV-05-declared-input-cache.md) | P1 | 제한된 입력 범위 캐시 | 02,04 | FOCUSED_VERIFIED |
 | [TV-06](TV-06-stable-shard-membership.md) | P1 | 안정적 청크·완전성 | 02,04 | FOCUSED_VERIFIED |
-| [TV-07](TV-07-performance-observability.md) | P1 | 타이밍·비용 관측 | 00,04 | FOCUSED_VERIFIED |
-| [TV-08](TV-08-admission-and-resource-isolation.md) | P0/P2 | 단일 대기 예산 / 자원 lease | 01,02,04 | FOCUSED_VERIFIED |
-| [TV-09](TV-09-heavy-test-decomposition.md) | P1 | fuzz·PTY·toolchain·stress 분할 | 02; 활성화는 03,13 | FOCUSED_VERIFIED |
+| [TV-07](TV-07-performance-observability.md) | P1 | 타이밍·비용 관측 | 00,04 | IMPLEMENTING — v2/rebaseline open |
+| [TV-08](TV-08-admission-and-resource-isolation.md) | P0/P1 | resource certification / 자원 lease | 01,02,04,07 | IMPLEMENTING — certification/lease split open |
+| [TV-09](TV-09-heavy-test-decomposition.md) | P1 | exact tier membership·중량 테스트 분할 | 02; 활성화는 03,13 | IMPLEMENTING — file split/activation open |
 | [TV-10](TV-10-static-scan-and-setup-reuse.md) | P1 | 중복 scan·preload·setup | 02 | FOCUSED_VERIFIED |
-| [TV-11](TV-11-ci-jobs-and-required-check.md) | P0 | CI job DAG·집계 context | 01 | FOCUSED_VERIFIED |
-| [TV-12](TV-12-ci-shard-matrix.md) | P1 | 분산 청크·artifact 집계 | 04,06,11 | FOCUSED_VERIFIED |
-| [TV-13](TV-13-nightly-and-toolchain-lanes.md) | P1 | nightly·환경 matrix | 02,04,11; matrix는 12 | FOCUSED_VERIFIED |
+| [TV-11](TV-11-ci-jobs-and-required-check.md) | P0 | CI job DAG·집계 context | 01 | IMPLEMENTING — hosted activation blocked |
+| [TV-12](TV-12-ci-shard-matrix.md) | P1 | 분산 청크·artifact 집계 | 04,06,11 | IMPLEMENTING — shadow code, no live receipt |
+| [TV-13](TV-13-nightly-and-toolchain-lanes.md) | P1 | nightly·환경 matrix | 02,04,11; matrix는 12 | IMPLEMENTING — stress wired, hosted receipt open |
 | [TV-14](TV-14-flake-and-quarantine.md) | P2 | 실패 분류·quarantine | 02,11 | FOCUSED_VERIFIED |
 | [TV-15](TV-15-rollout-and-documentation.md) | P0 | 보호 규칙 확인·명령 활성화·문서 | 단계별 01,03,09,11,13 | IMPLEMENTING |
 | [TV-90](TV-90-performance-and-closeout.md) | P1 | 최종 성능·정확성·종결 | 00–15 | IMPLEMENTING |

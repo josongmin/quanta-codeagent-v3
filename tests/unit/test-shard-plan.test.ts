@@ -30,10 +30,13 @@ import {
   writeSuccessfulTestShardReceiptAtomic,
 } from "../../tools/dev/test-shard-receipt"
 import {
+  harvestChunkTimingObservations,
   harvestChunkTimings,
   loadTestTimings,
+  mergeTestTimingObservations,
   mergeTestTimings,
   TEST_TIMING_MAX_AGE_MS,
+  TEST_TIMING_SCHEMA,
 } from "../../tools/dev/test-shard-timings"
 
 /** A root with no dotenv files, so the dotenv half of the fingerprint is a
@@ -439,6 +442,32 @@ describe("measured per-file timing store", () => {
     expect(estimates.get("a.test.ts")).toBe(1_500)
   })
 
+  test("v2 preserves suite and chunk-overhead components", () => {
+    const observations = harvestChunkTimingObservations(
+      '<testsuite time="1.5" name="n" file="a.test.ts"></testsuite>',
+      ["a.test.ts", "b.test.ts"],
+      3_500,
+      {
+        runnerClass: "integration-path",
+        policyDigest: "policy-a",
+        intraParallel: 1,
+        loadPerCore: 0.5,
+      },
+    )
+    expect(observations.get("a.test.ts")).toEqual({
+      schedulingWeightMs: 2_500,
+      suiteMs: 1_500,
+      chunkOverheadShareMs: 1_000,
+      observedChunkWallMs: 3_500,
+      runnerClass: "integration-path",
+      policyDigest: "policy-a",
+      intraParallel: 1,
+      loadPerCore: 0.5,
+    })
+    expect(observations.get("b.test.ts")?.suiteMs).toBe(0)
+    expect(observations.get("b.test.ts")?.schedulingWeightMs).toBe(1_000)
+  })
+
   test("store round-trips, expires stale entries, and survives corruption", () => {
     const directory = mkdtempSync(join(tmpdir(), "shard-timings-test-"))
     temporaryDirectories.push(directory)
@@ -461,6 +490,42 @@ describe("measured per-file timing store", () => {
       JSON.stringify({ schema: "other", entries: { x: { ms: 5, sampledAtMs: nowMs } } }),
     )
     expect(loadTestTimings(path, nowMs).size).toBe(0)
+
+    // A legacy v1 store cannot silently become current scheduling evidence.
+    writeFileSync(
+      path,
+      JSON.stringify({
+        schema: "quanta.test-timings.v1",
+        entries: { x: { ms: 5, sampledAtMs: nowMs } },
+      }),
+    )
+    expect(loadTestTimings(path, nowMs).size).toBe(0)
+  })
+
+  test("v2 uses the newest execution cohort and retains component samples", () => {
+    const directory = mkdtempSync(join(tmpdir(), "shard-timings-cohort-test-"))
+    temporaryDirectories.push(directory)
+    const path = join(directory, "timings.json")
+    const observation = (weight: number, policyDigest: string) => ({
+      schedulingWeightMs: weight,
+      suiteMs: weight - 10,
+      chunkOverheadShareMs: 10,
+      observedChunkWallMs: weight + 100,
+      runnerClass: "pure",
+      policyDigest,
+      intraParallel: 4,
+      loadPerCore: 0.5,
+    })
+    mergeTestTimingObservations(path, new Map([["a.test.ts", observation(100, "old")]]), 100)
+    mergeTestTimingObservations(path, new Map([["a.test.ts", observation(900, "old")]]), 200)
+    mergeTestTimingObservations(path, new Map([["a.test.ts", observation(300, "new")]]), 300)
+    expect(loadTestTimings(path, 300).get("a.test.ts")).toBe(300)
+    const stored = JSON.parse(readFileSync(path, "utf8")) as {
+      schema: string
+      entries: Record<string, { samples: readonly unknown[] }>
+    }
+    expect(stored.schema).toBe(TEST_TIMING_SCHEMA)
+    expect(stored.entries["a.test.ts"]?.samples).toHaveLength(3)
   })
 })
 

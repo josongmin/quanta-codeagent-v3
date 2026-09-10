@@ -102,10 +102,14 @@ the local push path until remote required can be enforced
 ([TV-15](../docs/plans/sep-9-test-verification-optimization/tickets/TV-15-rollout-and-documentation.md);
 the repository is verified, but protection APIs are unavailable on the current
 private-repository plan). p95 budgets in the ticket index are targets, not
-measured receipts. `verify:pr` / `verify:full` / `verify:nightly` currently
-share the same suite population. Only the nightly cache-off campaign injects
-`QUANTA_TEST_STRESS=1`; the campaign explicitly removes it from smoke, PR, and
-full children so repeat/stress rails cannot inflate merge-gating wall time.
+measured receipts. The shard runner now receives an exact tier and binds the
+resolved `TestPolicy` digest and file manifest to discovery/cache identity.
+Regular tests remain in prepush/PR/full/nightly by default; `*.nightly.test.ts`
+entrypoints are physically absent from PR/full. The nightly cache-off campaign
+also injects `QUANTA_TEST_STRESS=1`; the campaign explicitly removes it from
+smoke, PR, and full children so repeat/stress rails cannot inflate merge-gating
+wall time. The first physical split is the Biome full-reach oracle; the larger
+fuzz/toolchain migration remains tracked by TV-09/13.
 
 | Command | What it runs | Success means |
 |---------|--------------|---------------|

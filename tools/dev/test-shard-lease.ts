@@ -15,6 +15,19 @@ export interface TestShardLease {
   release(): void
 }
 
+export interface KeyedTestShardLease {
+  readonly keys: readonly string[]
+  readonly ports: readonly number[]
+  release(): void
+}
+
+export interface KeyedTestShardLeaseOptions
+  extends Omit<TestShardLeaseOptions, "identity" | "onWait"> {
+  readonly scopeIdentity: string
+  readonly keys: readonly string[]
+  readonly onWait?: (key: string, port: number, elapsedMs: number) => void
+}
+
 export interface TestShardLeaseOptions {
   readonly identity: string
   readonly waitMs?: number
@@ -258,5 +271,48 @@ export const acquireTestShardLease = async (
     // hot-spins; a busy owner waits the full poll interval.
     const sleepMs = probe === "absent" ? Math.min(pollMs, 25) : pollMs
     await Bun.sleep(Math.min(sleepMs, Math.max(1, deadline - Date.now())))
+  }
+}
+
+/**
+ * Acquire multiple resource keys in one canonical order. This is an exclusive
+ * cross-process primitive; shared/exclusive compatibility is decided by the
+ * scheduler before it requests host locks. Partial acquisition is rolled back
+ * in reverse order so a failed second key cannot strand the first.
+ */
+export const acquireKeyedTestShardLeases = async (
+  options: KeyedTestShardLeaseOptions,
+): Promise<KeyedTestShardLease> => {
+  const keys = [...new Set(options.keys)].sort((left, right) => left.localeCompare(right))
+  const acquired: TestShardLease[] = []
+  const startedAt = Date.now()
+  try {
+    for (const key of keys) {
+      const elapsedMs = Date.now() - startedAt
+      const remainingMs = Math.max(1, (options.waitMs ?? 90 * 60_000) - elapsedMs)
+      acquired.push(
+        await acquireTestShardLease({
+          identity: `${options.scopeIdentity}\0${key}`,
+          waitMs: remainingMs,
+          ...(options.pollMs === undefined ? {} : { pollMs: options.pollMs }),
+          ...(options.heartbeatMs === undefined ? {} : { heartbeatMs: options.heartbeatMs }),
+          ...(options.signal === undefined ? {} : { signal: options.signal }),
+          onWait: (port, waitedMs) => options.onWait?.(key, port, waitedMs),
+        }),
+      )
+    }
+  } catch (error) {
+    for (const lease of acquired.reverse()) lease.release()
+    throw error
+  }
+  let released = false
+  return {
+    keys,
+    ports: acquired.map(({ port }) => port),
+    release() {
+      if (released) return
+      released = true
+      for (const lease of acquired.reverse()) lease.release()
+    },
   }
 }

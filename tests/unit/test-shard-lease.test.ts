@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
 import {
+  acquireKeyedTestShardLeases,
   acquireTestShardLease,
   inheritedTestShardLeaseState,
   normalizeRepositoryIdentity,
@@ -207,5 +208,43 @@ describe("full-suite repository lease", () => {
     } finally {
       owner.release()
     }
+  })
+
+  test("multi-key leases canonicalize order and release partial ownership", async () => {
+    const scopeIdentity = `keyed-lease-self-test-${process.pid}-${Date.now()}`
+    const first = await acquireKeyedTestShardLeases({
+      scopeIdentity,
+      keys: ["port:4317", "git-common", "port:4317"],
+      waitMs: 5_000,
+      pollMs: 5,
+    })
+    expect(first.keys).toEqual(["git-common", "port:4317"])
+
+    let waitingOn: string | undefined
+    const secondPending = acquireKeyedTestShardLeases({
+      scopeIdentity,
+      keys: ["port:4317", "git-common"],
+      waitMs: 5_000,
+      pollMs: 5,
+      onWait: (key) => {
+        waitingOn = key
+      },
+    })
+    for (let attempt = 0; attempt < 300 && waitingOn === undefined; attempt += 1) {
+      await Bun.sleep(5)
+    }
+    expect(waitingOn).toBe("git-common")
+    first.release()
+    const second = await secondPending
+    expect(second.keys).toEqual(first.keys)
+    second.release()
+
+    const reacquired = await acquireKeyedTestShardLeases({
+      scopeIdentity,
+      keys: ["git-common", "port:4317"],
+      waitMs: 500,
+      pollMs: 5,
+    })
+    reacquired.release()
   })
 })

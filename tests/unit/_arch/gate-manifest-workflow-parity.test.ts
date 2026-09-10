@@ -52,6 +52,11 @@ assertScanPopulation(
   },
 )
 
+const pinnedBunVersions = (file: string): readonly string[] =>
+  [
+    ...readFileSync(join(WORKFLOW_DIR, file), "utf8").matchAll(/^\s*bun-version:\s*(\S+)\s*$/gm),
+  ].map((match) => match[1] ?? "")
+
 /**
  * Every `run:` command in the workflow files, one entry per command.
  *
@@ -227,6 +232,15 @@ const isExempt = (cmd: string, step: WorkflowStep): boolean =>
   )
 
 describe("gate manifest ↔ workflow parity", () => {
+  test("required CI and deterministic nightly pin the same Bun runtime", () => {
+    const ciVersions = pinnedBunVersions("ci.yml")
+    const nightlyVersions = pinnedBunVersions("verification-nightly.yml")
+    expect(ciVersions.length).toBeGreaterThanOrEqual(10)
+    expect(nightlyVersions).toHaveLength(1)
+    expect(new Set(ciVersions)).toEqual(new Set(["1.3.14"]))
+    expect(new Set(nightlyVersions)).toEqual(new Set(ciVersions))
+  })
+
   const steps = workflowSteps()
   const normalized = steps.flatMap((st) => st.lines.map(normalize))
   const manifestRuns = new Set(GATES.map((g) => normalize(g.run)))

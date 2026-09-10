@@ -15,7 +15,7 @@
  * rather than sampled — stays in `tests/unit/lint-debt-ratchet-reach.test.ts`
  * with its paired non-degeneracy control.
  *
- * WHY tests/integration AND NOT tests/unit. It runs the shipped biome binary
+ * WHY tests/integration AND NIGHTLY ONLY. It runs the shipped biome binary
  * over ALL of `src/` and `tests/` with a JSON reporter: measured 18,096ms inside
  * a full `bun test tests/unit` run, against a per-test unit budget of 8,529ms
  * (`tools/dev/unit-speed-budget.json`) that may only go DOWN. Faking the linter

@@ -1,13 +1,26 @@
 import { isSuiteName, type SuiteName } from "./test-shard-discovery"
 import type { CacheMode } from "./verification-execution-policy"
+import { assertKnownTier, type VerificationTier } from "./verification-tier"
 
 export type { CacheMode, SuiteName }
 
 export interface RunnerOptions {
   readonly suite: SuiteName
+  readonly tier?: Exclude<VerificationTier, "smoke">
   readonly junitOut?: string
   readonly discoverOnly: boolean
   readonly cacheMode: CacheMode
+}
+
+const shardTier = (value: string): Exclude<VerificationTier, "smoke"> => {
+  const tier = assertKnownTier(value)
+  if (tier === "smoke") throw new Error("smoke is not a shard-runner tier")
+  return tier
+}
+
+const tierOption = (arg: string): Exclude<VerificationTier, "smoke"> | undefined => {
+  if (!arg.startsWith("--tier=")) return undefined
+  return shardTier(arg.slice("--tier=".length))
 }
 
 const suiteOption = (arg: string): SuiteName | undefined => {
@@ -38,38 +51,48 @@ const cacheModeOption = (arg: string): CacheMode | undefined => {
 const envCacheMode = (): CacheMode =>
   process.env.QUANTA_TEST_CACHE === "off" ? "off" : "read-write"
 
+interface MutableRunnerOptions {
+  suite: SuiteName
+  tier?: Exclude<VerificationTier, "smoke">
+  junitOut?: string
+  discoverOnly: boolean
+  cacheMode: CacheMode
+}
+
+const applyNamedOption = (state: MutableRunnerOptions, arg: string): boolean => {
+  const cacheMode = cacheModeOption(arg)
+  if (cacheMode !== undefined) state.cacheMode = cacheMode
+  const suite = suiteOption(arg)
+  if (suite !== undefined) state.suite = suite
+  const tier = tierOption(arg)
+  if (tier !== undefined) state.tier = tier
+  const junitOut = junitOption(arg)
+  if (junitOut !== undefined) state.junitOut = junitOut
+  return (
+    cacheMode !== undefined || suite !== undefined || tier !== undefined || junitOut !== undefined
+  )
+}
+
 export const parseShardRunnerOptions = (args: readonly string[]): RunnerOptions => {
-  let suite: SuiteName = "full"
-  let junitOut: string | undefined
-  let discoverOnly = false
-  let cacheMode = envCacheMode()
+  const state: MutableRunnerOptions = {
+    suite: "full",
+    discoverOnly: false,
+    cacheMode: envCacheMode(),
+  }
+  if (process.env.QUANTA_VERIFICATION_TIER !== undefined) {
+    state.tier = shardTier(process.env.QUANTA_VERIFICATION_TIER)
+  }
   for (const arg of args) {
     if (arg === "--parallel=1") continue
     if (arg === "--discover-only") {
-      discoverOnly = true
+      state.discoverOnly = true
       continue
     }
-    const selectedCache = cacheModeOption(arg)
-    if (selectedCache !== undefined) {
-      cacheMode = selectedCache
-      continue
-    }
-    const selectedSuite = suiteOption(arg)
-    if (selectedSuite !== undefined) {
-      suite = selectedSuite
-      continue
-    }
-    const selectedJunit = junitOption(arg)
-    if (selectedJunit !== undefined) {
-      junitOut = selectedJunit
-      continue
-    }
+    if (applyNamedOption(state, arg)) continue
     throw new Error(`unknown shard runner argument: ${arg}`)
   }
-  if (junitOut !== undefined && suite !== "unit" && suite !== "full") {
+  if (state.junitOut !== undefined && state.suite !== "unit" && state.suite !== "full") {
     throw new Error("JUnit shard receipts are reserved for --suite=unit or --suite=full")
   }
-  return junitOut === undefined
-    ? { suite, discoverOnly, cacheMode }
-    : { suite, junitOut, discoverOnly, cacheMode }
+  return state
 }

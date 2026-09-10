@@ -249,6 +249,12 @@ describe("verification matrix aggregate", () => {
     expect(workflow).toContain("merge-multiple: true")
     expect(workflow).toContain("include-hidden-files: true")
     expect(workflow).not.toContain("QUANTA_MATRIX_CHUNK_FILES")
-    expect(workflow).toContain("test-timings-v1.json")
+    expect(workflow).toContain("test-timings-v2.json")
+    const matrixCli = readFileSync(
+      join(import.meta.dir, "../../../tools/dev/verification-matrix-cli.ts"),
+      "utf8",
+    )
+    expect(matrixCli).toMatch(/selectTestPoliciesForTier\s*\(/)
+    expect(matrixCli).toContain('"full"')
   })
 })

@@ -41,7 +41,7 @@
 | nightly | 45분 목표, 60분 예산; 초과/누락은 incomplete/fail |
 | 캐시 | 동일 입력 재사용, 관찰 입력 변경 시 miss; corruption은 miss/실패 |
 | 선택 | synthetic mutation 누락 0, 실제 shadow false-skip 0; 표본 구성 함께 보고 |
-| 전체 검증 | baseline 3,906의 정당한 추가·삭제를 반영한 현재 집합 정확히 충족 |
+| 전체 검증 | current discovery 3,924의 정당한 추가·삭제를 반영한 실행 시점 집합 정확히 충족 |
 
 80% hit 같은 숫자는 opt-in 표본에서의 관측 목표로만 보고한다. global-input 변경에 높은 hit율을 요구하지 않는다. 목표 미달 시 원인을 티켓으로 남기고 timeout/skip/coverage를 조정해 숫자를 맞추지 않는다.
 
@@ -76,6 +76,20 @@
 6. baseline 대비 성능, coverage, failure를 같은 cohort만 비교한다.
 7. 미달/미확인 항목은 새 owner ticket으로 분리하고 현재 티켓을 `CLOSED_WITH_GAPS`로 위장하지 않는다.
 8. child/lease 0, docs/catalog parity를 확인한 뒤에만 CLOSED로 전환한다.
+
+## current hot-path 후속 작업
+
+TV-07 v2 healthy-load 결과로 순위를 다시 확정하기 전 아래 시간은 결론이 아니라 focused 관측이다. 구조 변경은 real boundary canary를 남긴다.
+
+| 대상 | 현재 병목 | 구현 방향 | 보존 rail |
+|---|---|---|---|
+| `tests/integration/bench-verify-select-telemetry.test.ts` | serial 9 cases가 synthetic corpus write/load와 `runInstance`를 반복; focused 약 35.5초 관측 | `runInstance`에 invocation-local posture/config snapshot을 주입해 `process.env` 의존을 제거하고 immutable seed corpus를 case sandbox로 clone; 이후 bounded concurrency 2부터 검증 | production entrypoint real run canary 1개, width 1/2 verdict equality |
+| `tests/integration/bench-observability.test.ts` | case마다 corpus 생성/load; Best-of-N n=2 반복 | immutable corpus seed와 per-case clone을 도입하되 실제 edit/git-diff/verdict 경계 유지 | cache/fixture mutation이 다른 case로 누출되지 않음 |
+| `tests/integration/web-usage-accounting-live-e2e.test.ts` | daemon boot, global env/cwd/fetch mutation, frontend render subprocess 반복 | daemon factory에 env/cwd/fetch 주입; display matrix는 in-process reducer로 이동; renderer는 persistent worker 또는 importable 함수 사용 | TCP/WebSocket/persistence와 real renderer canary 유지 |
+| `tests/integration/test-runner.test.ts` 및 CLI matrix | 동일 child boot로 argv/error 조합 검증 | 실제 npm/CLI process canary 1개 + injected runner/parser matrix | subprocess 경계 회귀와 parser 전체 matrix 모두 유지 |
+| fixed sleep 후보 | readiness와 의미적 quiet-window가 혼재 | readiness sleep만 observable polling/event로 교체; debounce/timeout assertion sleep은 유지 | timeout path가 즉시 green으로 변하지 않음 |
+
+이 순서는 tier membership → integration-path certification → hosted matrix → 개별 hot-file 순이다. lease split은 단일 full wall보다 다중 세션 queue 개선으로 따로 평가한다.
 
 ## 완료 기준
 

@@ -11,6 +11,11 @@ import {
 import { availableParallelism, loadavg } from "node:os"
 import { dirname, join, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import {
+  loadPolicyOverrides,
+  resolveTestPopulation,
+  selectTestPoliciesForTier,
+} from "./test-policy"
 import { discoverSuiteFiles } from "./test-shard-discovery"
 import {
   chooseIntraWorkerParallelism,
@@ -28,7 +33,8 @@ import {
 import { sharedVerificationCacheRoot } from "./verification-receipt"
 
 const repoRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))))
-const timingStore = join(sharedVerificationCacheRoot(repoRoot), "test-timings-v1.json")
+const timingStore = join(sharedVerificationCacheRoot(repoRoot), "test-timings-v2.json")
+const policyOverrides = join(repoRoot, "tools/dev/test-policy-overrides.json")
 const command = process.argv[2] ?? "plan"
 const args = process.argv.slice(3)
 
@@ -85,7 +91,17 @@ const safeArtifactStem = (chunkId: string): string => {
 
 if (command === "plan") {
   const headSha = await cleanGitHead()
-  const files = discoverSuiteFiles(repoRoot, "full")
+  const discoveredFiles = discoverSuiteFiles(repoRoot, "full")
+  const selectedIds = new Set(
+    selectTestPoliciesForTier(
+      resolveTestPopulation(
+        discoveredFiles.map((file) => relative(repoRoot, file)),
+        loadPolicyOverrides(policyOverrides).overrides,
+      ),
+      "full",
+    ).map(({ id }) => id),
+  )
+  const files = discoveredFiles.filter((file) => selectedIds.has(relative(repoRoot, file)))
   const timings = loadTestTimings(timingStore)
   const cpuCount = availableParallelism()
   const loadAverage1m = loadavg()[0] ?? 0

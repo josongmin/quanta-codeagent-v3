@@ -298,6 +298,7 @@ const runGate = (gate: Gate): GateRun => {
     // would have to re-tokenize, and re-tokenizing is how a runner drifts from
     // the command it claims to run.
     cmd: ["sh", "-c", gate.run],
+    env: label === "precommit" ? process.env : { ...process.env, QUANTA_VERIFICATION_TIER: label },
     // The REPO ROOT, never the caller's cwd. `bun run precommit` happens to be
     // safe (bun chdirs to the package.json dir), but the documented direct form
     // `bun run tools/dev/gate.ts precommit` from elsewhere ran every gate in the

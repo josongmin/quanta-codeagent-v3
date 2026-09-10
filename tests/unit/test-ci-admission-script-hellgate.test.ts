@@ -207,7 +207,7 @@ describe("test:ci admission gate", () => {
     expect(shardRunner).toContain("chunkInputScopeSha256(")
     expect(shardOwnsSourceJsCleanupOnce(shardRunner)).toBe(true)
     expect(shardRunner).toContain("loadTestTimings(TIMING_STORE)")
-    expect(shardRunner).toContain("harvestTimings(cached.chunk, result)")
+    expect(shardRunner).toContain("harvestTimings(cached, result)")
     expect(shardRunner).toContain("result.executedFiles === plan.files.length")
     expect(shardRunner).toContain("aborting remaining shards")
     expect(shardRunner).not.toContain(["--shard=", "{shard}"].join("$"))

@@ -1,5 +1,5 @@
 {
-  "note": "One-directional budgets for the slowest single unit test and slowest whole unit FILE (ms). Raise NEVER. slowestFileMs is pinned from the runner-owned test-timings-v1 receipt sampled 2026-09-09: tests/unit/git/conflict-parser-differential-fuzz.test.ts=43517ms. That receipt adds each chunk's unattributed module/preload/runner wall to per-file JUnit aggregate; the gate requires timing coverage for every executed file and confirms a screen hit standalone.",
+  "note": "One-directional budgets for the slowest single unit test and slowest whole unit FILE (ms). Raise NEVER. The current ceiling was historically pinned from the 2026-09-09 v1 receipt; the runner now requires test-timings-v2 observations that preserve suite and chunk-overhead components. Tighten only from healthy-load v2 evidence.",
   "slowestMs": 8529,
   "slowestFileMs": 43517
 }

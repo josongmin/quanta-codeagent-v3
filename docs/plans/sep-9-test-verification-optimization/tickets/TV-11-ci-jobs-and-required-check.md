@@ -1,7 +1,7 @@
 # TV-11 — CI 독립 job과 안정적인 required 집계
 
 - 우선순위: P0
-- 상태: FOCUSED_VERIFIED
+- 상태: IMPLEMENTING — local DAG/parity focused green; hosted execution과 required activation blocked
 - 소유자: CI 담당 / workflow는 단일 작성자
 - 선행: TV-01
 - 원격 활성화: TV-15
@@ -9,6 +9,8 @@
 ## 문제와 근거
 
 `.github/workflows/ci.yml`의 pyramid는 static/full/parity/PTY/web/toolchain을 한 job에서 순차 실행한다. workflow에 PR superseded-run cancellation이나 명시적 job timeout이 없다. fc-gate check 이름은 보호 규칙이 참조할 수 있다.
+
+2026-09-11 현재 `static-code`, `catalog`, `full-suite`, `pty`, `web`, `toolchain`, `contract`, `required` job과 legacy `pyramid`가 tree에 존재한다. 최신 scheduled CI는 각 job이 0 steps로 실패했고, private repository의 branch-protection/ruleset read는 HTTP 403이다. 따라서 코드/parity 상태와 hosted/required 상태를 동일한 완료로 표시하지 않는다.
 
 ## 구현 범위
 
@@ -21,6 +23,8 @@
 7. runner·Bun 버전을 고정하고 dependency setup cache를 lockfile/OS/arch에 결합한다. latest 런타임 비교는 별도 lane이다.
 8. job timeout은 measured baseline과 cleanup 예산을 반영한다. workflow concurrency와 각 worker의 내부 병렬도가 곱해져 oversubscribe되지 않게 한다.
 9. old required context를 유지하면서 새 집계를 추가한다. 보호 규칙 이동은 TV-15의 별도 상태다.
+10. private 유지 시 branch protection을 제공하는 repository plan을 확보한다. public 전환은 별도 사용자 결정이며 기본 해결책으로 간주하지 않는다.
+11. Actions 0-step 원인을 계정/결제 설정에서 해소한 뒤 exact local HEAD를 origin에 게시하고 실제 PR check names를 다시 수집한다.
 
 ## 수정 파일
 
@@ -48,6 +52,7 @@
 3. workflow job을 분해하되 full command와 범위는 바꾸지 않는다.
 4. parity test와 local YAML parse를 통과시킨다.
 5. TV-15 R3에서 실제 PR SHA의 check 이름/결과를 확인한 뒤 원격 required를 전환한다.
+6. `required`와 legacy `pyramid`를 전환 기간 함께 관측하고, 동일 SHA에서 두 context가 모두 정상 생성된 뒤 legacy를 제거한다.
 
 ## 검증 계획
 
@@ -60,6 +65,8 @@
 - [ ] 기존 full 검증 범위 보존.
 - [ ] obsolete PR 실행 취소와 cleanup 확인.
 - [ ] workflow 파일 수정과 원격 required 활성화 상태를 별도 기록.
+- [ ] Actions job이 0-step이 아닌 실제 setup/test steps를 실행한 exact-HEAD run ID 존재.
+- [ ] branch protection/ruleset readback에 required context와 enforcement 대상 branch가 기록됨.
 
 ## 실패·복구
 

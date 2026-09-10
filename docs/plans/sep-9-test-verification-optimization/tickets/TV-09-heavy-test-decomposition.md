@@ -1,7 +1,7 @@
 # TV-09 — 중량 테스트를 canary와 exhaustive로 분리
 
 - 우선순위: P1
-- 상태: FOCUSED_VERIFIED
+- 상태: IMPLEMENTING — exact tier wiring과 Biome nightly entrypoint 착륙; 나머지 fuzz/toolchain split과 hosted activation 미완료
 - 소유자: C (영역별 파일 write set 분리)
 - 선행: TV-02
 - PR 기본 범위 축소 선행: TV-03, TV-13의 실제 연결
@@ -9,6 +9,8 @@
 ## 문제와 근거
 
 Git fuzz, Biome 전체 reach, CLI 조합, PTY, 실제 언어 도구가 반복 loop에 함께 들어 있다. 단순 파일 이동은 coverage를 숨길 수 있으므로 기존 case/seed universe를 보존하며 실행 빈도를 나눈다.
+
+2026-09-11 현재 conflict differential fuzz의 고비용 부분은 `QUANTA_TEST_STRESS=1`로 nightly gating돼 있다. Biome exhaustive oracle은 `lint-debt-reach-e2e.nightly.test.ts`로 물리 분리되어 working-tree discovery 기준 PR/full 3,924 files, nightly 3,925 files다(신규 certification unit 포함). 나머지 fuzz/toolchain은 아직 같은 파일 내부 stress branch이므로 추가 분리가 필요하다.
 
 ## 구현 범위
 
@@ -27,11 +29,13 @@ Git fuzz, Biome 전체 reach, CLI 조합, PTY, 실제 언어 도구가 반복 lo
 3. nightly 등록·실행 증거와 affected-path selector가 준비되기 전 기존 PR 실행을 제거하지 않는다.
 4. `bench-full-remote-hellgate`의 기존 실패는 분할 완료와 별개다. 오류를 삼키는 fixture 때문에 진단이 숨는지도 owner-local 조사 항목으로 남긴다.
 5. 알려진 결함 재현 사례는 작은 PR canary로 영구 유지한다.
+6. nightly 조건부 case는 sibling `*.nightly.test.ts` entrypoint로 물리 분리한다. 같은 파일의 `skipIf`만으로 membership 분리를 완료 처리하지 않는다.
+7. `run-test-shards --tier`가 `TestPolicy.tiers`의 exact manifest를 소비하게 하고 PR/full/nightly의 file set을 receipt로 비교한다.
 
 ## 대상 파일
 
 - `tests/unit/git/conflict-parser-differential-fuzz.test.ts`
-- `tests/integration/lint-debt-reach-e2e.test.ts` (scan 본체 변경은 TV-10)
+- `tests/integration/lint-debt-reach-e2e.nightly.test.ts` (scan 본체 변경은 TV-10)
 - `src/apps/bench/composition-root-dispatch.test.ts`
 - `tests/e2e-pty/`, `tests/unit/project-env-astropy-real-e2e.test.ts`
 - `tests/integration/mcp-auto-restart-real-process-e2e.test.ts`
@@ -44,10 +48,12 @@ Git fuzz, Biome 전체 reach, CLI 조합, PTY, 실제 언어 도구가 반복 lo
 |---|---|---|---|
 | `tests/unit/git/conflict-parser-differential-fuzz.test.ts` | `BASE_SEED`, `GIT_CASES = 60`, real-git loop, constructed adversarial cases | generator/seed/case descriptor를 sibling fixture로 추출한다. PR canary는 고정 6 case와 known regressions, exhaustive는 기존 60 seed와 모든 constructed case를 실행한다. | PR∪nightly case IDs가 기존 universe와 같고 seed 재현 가능. |
 | `src/apps/bench/composition-root-dispatch.test.ts` | `runCliBatch`, `FAMILY_BEARING`, `BAD_SELECTORS`, 다수 cross-product describe | invocation/grade helpers는 공유하고 PR에는 subcommand별 valid/invalid 최소 pair, exhaustive에는 전체 cross-product를 둔다. | selector/command pair inventory set equality. |
-| `tests/integration/lint-debt-reach-e2e.test.ts` | `biomeDiagnosticsOverRoots`, root-wide oracle test | test 목적은 유지하되 PR 빈도 결정은 TV-10 receipt와 config-change selector에 맡긴다. 파일 내부에서 임의 skip하지 않는다. | biome config 변경 시 반드시 선택. |
+| `tests/integration/lint-debt-reach-e2e.nightly.test.ts` | `biomeDiagnosticsOverRoots`, root-wide oracle test | nightly exact entrypoint로 분리한다. PR에서는 file load 자체를 제거하되 config/target/receipt 변경은 selector가 nightly-required/full-required 이유를 반환한다. | nightly manifest 포함, PR manifest 제외, invalid target injection RED. |
 | `tests/e2e-pty/` | 각 파일의 `describe.skipIf(!PTY_AVAILABLE)` | `cli-input-layer`, `cli-goal-pursuit`, `cli-hunk-approval`을 기본 canary 후보로 등록한다. PTY 부재는 required capability lane에서 pass가 아니라 capability failure다. | 관련 CLI path 변경 시 전체 affected PTY 선택. |
 | `tests/unit/project-env-astropy-real-e2e.test.ts` | `D`, `ASTROPY_13033`, `runRepro` | 실제 toolchain case는 nightly/cold 전용으로 정책 등록하고 작은 fake contract는 별도 unit에 둔다. 현재 real assertion을 mock으로 대체하지 않는다. | base/proof 두 경로와 environment/setup failure 분리. |
 | `tests/integration/mcp-auto-restart-real-process-e2e.test.ts`, `tests/integration/session-stress-and-concurrent.test.ts` | real process/stress cases | crash/restart 및 lost-update known regression은 PR canary로 남기고 반복 횟수/대량 matrix만 exhaustive로 이동한다. | case ID 합집합과 teardown 검증. |
+| `tools/dev/test-policy.ts`, `tools/dev/test-policy-overrides.json` | `TestPolicy.tiers`, `resolveTestPopulation` | default-only full 정책을 실제 smoke/prepush/pr/full/nightly file membership으로 확장한다. generated defaults와 explicit exceptions의 owner를 하나로 둔다. | tier union/exact set, unknown tier, duplicate test ID, empty tier RED. |
+| `tools/dev/test-shard-options.ts`, `tools/dev/run-test-shards.ts` | NEW `--tier`, discovery filter | suite discovery 후 exact tier policy로 파일을 필터링하고 tier/policy/population/membership digest를 receipt에 결합한다. | 같은 count/다른 file set, unknown tier, policy drift reject. |
 
 ## 작업 순서
 
@@ -56,6 +62,7 @@ Git fuzz, Biome 전체 reach, CLI 조합, PTY, 실제 언어 도구가 반복 lo
 3. helper만 추출하고 canary/exhaustive entrypoint를 만든다.
 4. TV-02 정책과 TV-03 affected mapping에 두 population을 등록한다.
 5. TV-13 nightly의 실제 실행 receipt가 생긴 뒤에만 PR exhaustive 실행을 제거한다.
+6. PR selector shadow에서 full failure false-skip 0을 확인한 뒤 tier 축소를 required 경로에 활성화한다.
 
 ## 검증 계획
 
@@ -68,6 +75,8 @@ case/seed inventory를 비교해 기존 사례가 PR/nightly 합집합에서 빠
 - [ ] 관련 변경 시 필요한 real runtime 검증이 PR에 남음.
 - [ ] nightly 미연결 상태에서 PR 검증을 삭제하지 않음.
 - [ ] 단순 timeout 증가·skip 증가로 속도를 만들지 않음.
+- [ ] PR/full/nightly exact file manifests가 서로 구분되고 receipt에 고정됨.
+- [ ] 같은 파일 안의 runtime skip을 file membership 분리로 계산하지 않음.
 
 ## 실패·복구
 

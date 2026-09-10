@@ -27,6 +27,22 @@ interface TestPolicy {
   alwaysRun: boolean;
 }
 
+type ResourceMode = "shared" | "exclusive";
+type ResourceIsolation = "process" | "checkout" | "host";
+
+interface ResourceClaim {
+  key: string;                  // e.g. port:4317, lsp:workspace, git-common, browser:profile
+  mode: ResourceMode;
+}
+
+interface TestResourceCertification {
+  testId: string;
+  sourceSha256: string;         // source change invalidates the certification
+  owner: string;
+  claims: ResourceClaim[];
+  isolation: ResourceIsolation;
+}
+
 interface SelectionPlan {
   schema: string;
   tier: VerificationTier;
@@ -51,6 +67,10 @@ interface ExecutionPolicy {
 ```
 
 타입 이름은 설계 초안이다. 구현 시 기존 타입과 통합하고 같은 판정을 내리는 소유 모듈을 중복 생성하지 않는다.
+
+`TestPolicy.resources: string[]`는 현재 구현과의 호환 필드다. resource scheduler 활성화 전에 typed `ResourceClaim[]`의 단일 authority로 마이그레이션한다. regex/path classifier는 certification 후보를 만들 수 있지만 승인 authority가 아니다. certification 부재, source digest drift, unknown key/mode는 모두 `exclusive` fallback이다.
+
+lease identity는 하나의 remote-derived repository key로 끝내지 않는다. 최소한 `checkout:<absolute-root>`, `git-common:<repository-id>`, `cache:<repository-id>`, `host:<resource-key>`를 구분하고 복수 lock은 canonical sorted order로 취득한다. cache/timing/receipt writer는 테스트 자원과 별도의 atomic-write/lock 계약을 가진다.
 
 ## 스냅샷과 변경 집합
 
@@ -78,6 +98,8 @@ interface ExecutionPolicy {
 - 필수 artifact는 `head/base/policy/population/shardMembership/executionPolicy`를 결합한다. 다른 SHA나 정책의 XML을 개수만 맞춰 합치지 않는다.
 - partial local 결과는 partial로 표시한다. full 결과에는 현재 full population 전체가 포함돼야 한다.
 - quarantined 결과는 별도 집계하고 실제 full manifest에서는 계속 드러낸다. skip을 executed-pass에 더하지 않는다.
+- tier receipt는 exact file membership을 포함한다. 같은 파일 내부의 `skipIf(!nightly)`만으로 PR/full/nightly membership 분리를 주장하지 않는다.
+- resource receipt는 각 test의 certification digest와 실제 취득 lease key를 포함한다. 선언보다 넓은 자원 접근 또는 만료된 digest는 PASS가 아니라 certification 실패/보수적 fallback이다.
 
 ## 구현 회귀 전략
 

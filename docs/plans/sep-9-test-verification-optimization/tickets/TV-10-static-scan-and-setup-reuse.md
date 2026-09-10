@@ -26,7 +26,7 @@ lint gate 뒤 lint reach 테스트가 전체 Biome 스캔을 다시 한다. slic
 - `tools/dev/run-biome.ts`, `lint-debt-ceiling.ts`, `biome-targets.ts`
 - `tests/unit/_arch/slice-boundary-scanner.ts`
 - `tests/preload-clean-source-js.ts`, `tools/dev/sandboxed-test.ts`
-- `tests/integration/lint-debt-reach-e2e.test.ts`
+- `tests/integration/lint-debt-reach-e2e.nightly.test.ts`
 - `src/runner/batch/corpus/project-env.ts` (cold-correctness 읽기; 기본 변경 대상 아님)
 
 ## 파일·심볼별 작업
@@ -36,7 +36,7 @@ lint gate 뒤 lint reach 테스트가 전체 Biome 스캔을 다시 한다. slic
 | `tools/dev/run-biome.ts` | `collectBiomeTargets` 소비, `printJsonDiagnostics`, Bun spawn | lint 실행 뒤 diagnostics, target digest, config/lock/tool version, exit status를 atomic receipt로 쓴다. stderr/stdout 포맷은 기존 CLI와 호환시킨다. | content/config/version 변경 시 receipt miss. |
 | `tools/dev/biome-diagnostics-receipt.ts` | receipt producer/parser | 같은 job/HEAD/targets/config/tool identity에서만 diagnostics 재사용을 허용한다. failed/partial receipt는 consumer가 거부한다. | stale/partial/corrupt/다른 cwd fixture. |
 | `tools/dev/lint-debt-ceiling.ts` | `runBiome`, `evaluateCeilings`, `scopeOfPath` | valid producer receipt가 있으면 `runBiome`을 생략하고 동일 diagnostics를 `evaluateCeilings`에 전달한다. receipt miss면 현재 full scan으로 fallback한다. | producer 1회/consumer 추가 spawn 0회 counter. |
-| `tests/integration/lint-debt-reach-e2e.test.ts` | `biomeDiagnosticsOverRoots` | 독립 oracle은 config/target/receipt code 변경 시 실행한다. 자기 자신이 검증할 receipt를 무조건 소비하지 않는다. | invalid target enumeration injection이 RED. |
+| `tests/integration/lint-debt-reach-e2e.nightly.test.ts` | `biomeDiagnosticsOverRoots` | 독립 oracle은 nightly와 config/target/receipt code 변경 시 실행한다. 자기 자신이 검증할 receipt를 무조건 소비하지 않는다. | invalid target enumeration injection이 RED. |
 | `tests/unit/_arch/slice-boundary-scanner.ts` | source read/parse helpers | `(HEAD, path, contentSha)` keyed immutable snapshot을 한 test process 안에서 공유하고 mutation fixture는 clone한다. | read counter 감소, mutation 오염 0, empty floor failure. |
 | `tests/preload-clean-source-js.ts`, `tools/dev/sandboxed-test.ts` | cleanup/preload | managed campaign에서만 snapshot identity가 맞는 setup receipt를 재사용하고 direct `bun test`는 기존 freshness check를 수행한다. | stale `.js`, 외부 cwd, direct-run 회귀. |
 

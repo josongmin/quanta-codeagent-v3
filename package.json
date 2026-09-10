@@ -39,6 +39,7 @@
     "test:real-toolchain": "QUANTA_REAL_TOOLCHAIN_E2E=1 bun test $(find tests/unit -name '*-real-e2e.test.ts') --parallel=1",
     "test:contract": "bun run test:clean-js && bun test tests/contract --parallel=1",
     "test:ci": "bun run prepush",
+    "test:resource-certification:audit": "bun run tools/dev/test-resource-certification-audit.ts",
     "test:full:ci": "bun run test:clean-js && bun run tools/dev/run-test-shards.ts --suite=full --junit-out=.cache/full-junit.xml --parallel=1",
     "test:cov": "bun run typecheck && bun run test:clean-js && bun test --coverage tests/unit tests/integration --parallel=1",
     "test:eval": "bun run src/apps/bench/index.ts",

@@ -15,6 +15,12 @@ import { availableParallelism, freemem, homedir, loadavg, tmpdir, totalmem } fro
 import { dirname, join, relative, resolve } from "node:path"
 import { sampleTreeRssBytes } from "./shard-rss"
 import {
+  loadPolicyOverrides,
+  policyDigest,
+  resolveTestPopulation,
+  selectTestPoliciesForTier,
+} from "./test-policy"
+import {
   discoverInventory,
   discoverSuiteFiles,
   SUITE_FLOORS,
@@ -61,7 +67,11 @@ import {
   writeScanReachReceiptAtomic,
   writeSuccessfulTestShardReceiptAtomic,
 } from "./test-shard-receipt"
-import { harvestChunkTimings, loadTestTimings, mergeTestTimings } from "./test-shard-timings"
+import {
+  harvestChunkTimingObservations,
+  loadTestTimings,
+  mergeTestTimingObservations,
+} from "./test-shard-timings"
 import { ADMISSION_DEADLINE_ENV } from "./verification-admission"
 import { executionPolicyDigest } from "./verification-execution-policy"
 import { chunkInputScopeSha256 } from "./verification-input-scope"
@@ -83,7 +93,8 @@ const SCAN_REACH_RECEIPT = join(REPO_ROOT, ".cache", "scan-reach-receipt.json")
 // HEAD + file content + toolchain, a green from any worktree serves them all.
 const SHARED_CACHE_ROOT = sharedVerificationCacheRoot(REPO_ROOT)
 const SHARD_CACHE_ROOT = join(SHARED_CACHE_ROOT, "test-shards", "v3")
-const TIMING_STORE = join(SHARED_CACHE_ROOT, "test-timings-v1.json")
+const TIMING_STORE = join(SHARED_CACHE_ROOT, "test-timings-v2.json")
+const TEST_POLICY_OVERRIDES = join(REPO_ROOT, "tools", "dev", "test-policy-overrides.json")
 // Extreme-load regime: the same load/(2*cpus) pressure formula that saturates
 // the per-test timeout cap. At or beyond it, starting a fresh worker mostly
 // deepens the thrash, so the runner briefly WAITS (bounded) instead.
@@ -592,21 +603,26 @@ const cacheSuccessfulShard = (
 }
 
 /** Every green chunk feeds measured per-file wall time back to the planner. */
-const harvestTimings = (chunk: TestChunk, result: ShardRunResult): void => {
+const harvestTimings = (cached: CachedChunk, result: ShardRunResult): void => {
   try {
     const junitXml = readFileSync(result.junitPath, "utf8")
     // Bun writes the JUnit `file` attribute RELATIVE to the worker's cwd (the
     // repo root) even when the command line carried absolute paths, so the
     // harvest must look suites up by the same relative key (measured on 1.3.14).
-    const relFiles = chunk.files.map((file) => relative(REPO_ROOT, file))
-    const estimates = harvestChunkTimings(junitXml, relFiles, result.elapsedMs)
-    mergeTestTimings(TIMING_STORE, estimates)
+    const relFiles = cached.chunk.files.map((file) => relative(REPO_ROOT, file))
+    const observations = harvestChunkTimingObservations(junitXml, relFiles, result.elapsedMs, {
+      runnerClass: cached.chunk.resourceClass,
+      policyDigest: cached.identity.executionPolicySha256,
+      intraParallel: cached.intraParallel,
+      loadPerCore: Math.max(0, (loadavg()[0] ?? 0) / availableParallelism()),
+    })
+    mergeTestTimingObservations(TIMING_STORE, observations)
   } catch (error) {
     // Timing is a scheduler hint, never a verdict input; a harvest failure is
     // reported and the campaign continues.
     const message = error instanceof Error ? error.message : String(error)
     process.stderr.write(
-      `[test:shards] WARN timing harvest failed for chunk ${chunk.index}: ${message}\n`,
+      `[test:shards] WARN timing harvest failed for chunk ${cached.chunk.index}: ${message}\n`,
     )
   }
 }
@@ -737,7 +753,7 @@ const executeChunks = async (input: {
         }
         const sink = validateCompletedShard(input.before, completedShard)
         cacheSuccessfulShard(cached, result, input.opts)
-        harvestTimings(cached.chunk, result)
+        harvestTimings(cached, result)
         return { index: cached.chunk.index, sink }
       },
     })),
@@ -794,14 +810,52 @@ const executeChunksWithSourcePostflight = async (
   return receipts
 }
 
+const digestFiles = (files: readonly string[]): string =>
+  new Bun.CryptoHasher("sha256").update(files.join("\0")).digest("hex")
+
+const tierSelection = (
+  relativeFiles: readonly string[],
+  tier: RunnerOptions["tier"],
+): { readonly files: readonly string[]; readonly policySha256?: string } => {
+  if (tier === undefined) return { files: relativeFiles }
+  const overrides = loadPolicyOverrides(TEST_POLICY_OVERRIDES).overrides
+  const policies = resolveTestPopulation(relativeFiles, overrides)
+  const selected = selectTestPoliciesForTier(policies, tier)
+  if (selected.length === 0) {
+    throw new Error(`[test:shards] INVALID — tier=${tier} selected zero files`)
+  }
+  return {
+    files: selected.map(({ id }) => id),
+    policySha256: policyDigest(policies),
+  }
+}
+
+const emitDiscovery = (opts: RunnerOptions): void => {
+  const inventory = discoverInventory(REPO_ROOT)
+  const selected = inventory.suites[opts.suite]
+  const tiered = tierSelection(selected.files, opts.tier)
+  const selectedPopulation =
+    opts.tier === undefined
+      ? selected
+      : {
+          ...selected,
+          name: `${selected.name}:${opts.tier}`,
+          files: tiered.files,
+          digestSha256: digestFiles(tiered.files),
+          policySha256: tiered.policySha256,
+        }
+  process.stdout.write(
+    `${JSON.stringify({ schema: "quanta.shard-discovery.v1", selected: selectedPopulation, inventory }, null, 2)}\n`,
+  )
+}
+
+const cacheSuiteName = (opts: RunnerOptions): string =>
+  opts.tier === undefined ? opts.suite : `${opts.suite}:${opts.tier}`
+
 const main = async (): Promise<void> => {
   const opts = parseOptions(process.argv.slice(2))
   if (opts.discoverOnly) {
-    const inventory = discoverInventory(REPO_ROOT)
-    const selected = inventory.suites[opts.suite]
-    process.stdout.write(
-      `${JSON.stringify({ schema: "quanta.shard-discovery.v1", selected, inventory }, null, 2)}\n`,
-    )
+    emitDiscovery(opts)
     return
   }
   // A campaign wrapper (verification-campaign.ts) may already own the
@@ -869,7 +923,13 @@ const main = async (): Promise<void> => {
         "[test:shards] INVALID — authoritative receipts require a clean checkout. Commit or stash changes first.",
       )
     }
-    const manifest = [...discoverSuiteFiles(REPO_ROOT, opts.suite)]
+    const discoveredManifest = [...discoverSuiteFiles(REPO_ROOT, opts.suite)]
+    const tiered = tierSelection(
+      discoveredManifest.map((file) => relative(REPO_ROOT, file)),
+      opts.tier,
+    )
+    const selectedIds = new Set(tiered.files)
+    const manifest = discoveredManifest.filter((file) => selectedIds.has(relative(REPO_ROOT, file)))
     // A FLOOR, not a printout. `manifest_files=N` was reported and compared to
     // nothing: a suite root that still exists but stops yielding test files —
     // a naming change, a bad merge, a directory renamed under a dot prefix —
@@ -905,8 +965,9 @@ const main = async (): Promise<void> => {
       .filter(({ resourceClass }) => resourceClass !== "pure")
       .reduce((count, chunk) => count + chunk.files.length, 0)
     process.stdout.write(
-      `[test:shards] frozen head=${before.head} suite=${opts.suite} dirty=no ` +
+      `[test:shards] frozen head=${before.head} suite=${opts.suite} tier=${opts.tier ?? "legacy"} dirty=no ` +
         `manifest_files=${manifest.length} manifest_sha256=${manifestDigest} ` +
+        `policy_sha256=${tiered.policySha256 ?? "legacy"} ` +
         `chunks=${chunks.length} timed_files=${timings.size} workers=${concurrency} ` +
         `test_timeout_ms=${testTimeoutMs} load_1m=${loadAverage1m.toFixed(2)} cpus=${cpuCount} ` +
         `non_pure_files=${nonPureFiles}\n`,
@@ -928,7 +989,7 @@ const main = async (): Promise<void> => {
       })
       const identity: TestShardCacheIdentity = {
         treeSha256,
-        suite: opts.suite,
+        suite: cacheSuiteName(opts),
         manifestSha256: manifestDigest,
         shardIndex: chunk.index,
         shardFileCount: chunk.files.length,

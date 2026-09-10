@@ -38,7 +38,9 @@ export interface TestPolicyFile {
   readonly overrides: readonly TestPolicyOverride[]
 }
 
-const DEFAULT_TIERS: readonly VerificationTier[] = ["full"]
+const DEFAULT_KNOWN_TIERS: readonly VerificationTier[] = ["prepush", "pr", "full", "nightly"]
+const DEFAULT_UNKNOWN_TIERS: readonly VerificationTier[] = ["full"]
+const NIGHTLY_ONLY_TIERS: readonly VerificationTier[] = ["nightly"]
 
 const KNOWN_PREFIXES = [
   "tests/unit/",
@@ -71,10 +73,11 @@ const pathResources = (id: string): readonly string[] => {
 
 const defaultPolicy = (id: string): TestPolicy => {
   const known = isKnownTestPath(id)
+  const nightlyOnly = known && /\.nightly(?:\.|-)/u.test(id)
   return {
     id,
     runner: pathRunner(id),
-    tiers: DEFAULT_TIERS,
+    tiers: nightlyOnly ? NIGHTLY_ONLY_TIERS : known ? DEFAULT_KNOWN_TIERS : DEFAULT_UNKNOWN_TIERS,
     cost: "medium",
     resources: known ? pathResources(id) : ["exclusive"],
     requiredCapabilities: [],
@@ -134,6 +137,11 @@ export const resolveTestPopulation = (
   const unique = [...new Set(ids)].sort((left, right) => left.localeCompare(right))
   return unique.map((id) => resolveTestPolicy(id, overrides))
 }
+
+export const selectTestPoliciesForTier = (
+  policies: readonly TestPolicy[],
+  tier: VerificationTier,
+): readonly TestPolicy[] => policies.filter((policy) => policy.tiers.includes(tier))
 
 export const policyDigest = (policies: readonly TestPolicy[]): string =>
   new Bun.CryptoHasher("sha256").update(JSON.stringify(policies)).digest("hex")

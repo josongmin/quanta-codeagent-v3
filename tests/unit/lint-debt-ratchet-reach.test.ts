@@ -42,7 +42,7 @@
  * ## The DIAGNOSTIC form of the same property lives in tests/integration
  *
  * "every diagnostic biome raises under the roots lands on an enumerated file"
- * moved to `tests/integration/lint-debt-reach-e2e.test.ts`. It runs biome over
+ * moved to `tests/integration/lint-debt-reach-e2e.nightly.test.ts`. It runs biome over
  * ALL of src/ and tests/ with a JSON reporter: measured 18,096ms inside a full
  * `bun test tests/unit` run, against a per-test unit budget of 8,529ms
  * (`tools/dev/unit-speed-budget.json`) that may only go DOWN, and faking the

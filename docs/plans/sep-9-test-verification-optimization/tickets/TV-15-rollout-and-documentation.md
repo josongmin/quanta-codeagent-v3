@@ -9,6 +9,8 @@
 
 workflow에 gate가 있다는 것과 원격 branch protection이 실제 요구한다는 것은 다르다. `fc-gate.yml`은 check 이름 보존을 명시한다. tests README는 과거 361 unit files/45초를 설명해 현재 population과 맞지 않는다.
 
+2026-09-11 현재 로컬 `main=4fd84e7f2f809b5ff53772a29e91cb26cc991e17`은 `origin/main=dba37472ec70acad1a38721a50a0693583333cd3`보다 15 commits 앞선다. 최신 hosted jobs는 0-step 실패이고 private repository의 protection API는 HTTP 403이므로 R2–R4 활성화 barrier는 닫히지 않았다.
+
 ## 단계별 구현
 
 ### R0 — 읽기 전용 preflight
@@ -16,6 +18,7 @@ workflow에 gate가 있다는 것과 원격 branch protection이 실제 요구�
 - 원격 repo, 기본 branch, direct push/PR 흐름, required checks/rulesets, merge queue를 확인한다.
 - 현재 check 이름과 SHA 판정 기준을 기록한다. 확인할 수 없으면 remote-unverified로 남긴다.
 - 원격 설정을 쓰는 단계는 별도 권한과 실행 결과를 기록하며 문서 작성 요청으로 수행하지 않는다.
+- 현재 readback: private repository, default branch `main`, branch-protection/ruleset HTTP 403. hosted job metadata는 0-step 실패를 증명하며 원인은 계정/결제 설정에서 별도 해소·재확인한다.
 
 ### R1 — 새 경로 구현, 기존 보호 유지
 
@@ -53,6 +56,7 @@ workflow에 gate가 있다는 것과 원격 branch protection이 실제 요구�
 | 단계 | 파일/외부 surface | 구체 작업 | 통과 증거 |
 |---|---|---|---|
 | R0 | git/GitHub read-only | `git remote get-url origin`, default branch, rulesets/branch protection, merge queue, 현재 required context를 exact repo에서 조회한다. | 조회 시각, repo, branch, check name, source URL/API response digest. |
+| R0.5 | local→origin integration | 현재 local main 15 commits의 소유·diff·focused 증거를 확인한 후 명시된 push/PR 경로로 exact HEAD를 게시한다. 문서 변경만으로 자동 push하지 않는다. | local/origin SHA, push 또는 PR URL, dirty ownership. |
 | R1 | `package.json`, `tools/dev/gate-manifest.ts`, `tools/dev/gate.ts` | 새 tier 명령을 추가하되 기존 `prepush`, `test:ci`, required context는 유지한다. | focused tests와 script/gate parity. |
 | R2 | `.githooks/pre-push`, `package.json` | hook을 `verify:prepush --base=<remoteSha> --head=<localSha>`로 원자 전환한다. 다중 ref/신규 branch/missing remote base는 full-required를 반환한다. | fake stdin ref updates와 failing child exit propagation. |
 | R3 | `.github/workflows/ci.yml`, `.github/workflows/fc-gate.yml`, remote ruleset | 새 `required` check를 병행 실행하고 실제 PR 실패/취소 차단을 확인한 뒤 원격 보호를 전환한다. old context는 같은 변경에서 먼저 삭제하지 않는다. | exact PR HEAD의 checks + ruleset 재조회. |
@@ -78,6 +82,7 @@ workflow에 gate가 있다는 것과 원격 branch protection이 실제 요구�
 - [ ] 현재 scope·측정 시간으로 문서 갱신.
 - [ ] branch 흐름에 맞는 prepush/full 정책 확정.
 - [ ] rollback 명령·이전 config revision이 기록됨.
+- [ ] local implementation HEAD가 origin에 존재하고 hosted workflow가 그 exact SHA를 실제 steps로 실행함.
 
 ## 실패·복구
 

@@ -6,6 +6,7 @@ import {
   policyDigest,
   resolveTestPolicy,
   resolveTestPopulation,
+  selectTestPoliciesForTier,
 } from "../../../tools/dev/test-policy"
 import { discoverInventory } from "../../../tools/dev/test-shard-discovery"
 
@@ -50,6 +51,20 @@ describe("test-policy-enrollment", () => {
     ).toThrow(/tier gap/)
   })
 
+  test("known tests preserve merge coverage while nightly entrypoints are physically isolated", () => {
+    const regular = resolveTestPolicy("tests/integration/regular.test.ts")
+    const nightly = resolveTestPolicy("tests/integration/expensive.nightly.test.ts")
+    expect(regular.tiers).toEqual(["prepush", "pr", "full", "nightly"])
+    expect(nightly.tiers).toEqual(["nightly"])
+    const policies = [regular, nightly]
+    expect(selectTestPoliciesForTier(policies, "pr").map(({ id }) => id)).toEqual([regular.id])
+    expect(selectTestPoliciesForTier(policies, "full").map(({ id }) => id)).toEqual([regular.id])
+    expect(selectTestPoliciesForTier(policies, "nightly").map(({ id }) => id)).toEqual([
+      regular.id,
+      nightly.id,
+    ])
+  })
+
   test("discovered full population and policy-resolved ids are the same set", () => {
     const inventory = discoverInventory(ROOT)
     const policies = resolveTestPopulation(inventory.suites.full.files)
@@ -58,6 +73,13 @@ describe("test-policy-enrollment", () => {
     const digestA = policyDigest(policies)
     const digestB = policyDigest(resolveTestPopulation(inventory.suites.full.files))
     expect(digestA).toBe(digestB)
+
+    const fullIds = selectTestPoliciesForTier(policies, "full").map(({ id }) => id)
+    const nightlyIds = selectTestPoliciesForTier(policies, "nightly").map(({ id }) => id)
+    const nightlyOnly = nightlyIds.filter((id) => !fullIds.includes(id))
+    expect(nightlyOnly.length).toBeGreaterThanOrEqual(1)
+    expect(nightlyOnly).toContain("tests/integration/lint-debt-reach-e2e.nightly.test.ts")
+    expect(fullIds).not.toContain("tests/integration/lint-debt-reach-e2e.nightly.test.ts")
   })
 
   test("injecting an unregistered contract file into inventory comparison fails", () => {

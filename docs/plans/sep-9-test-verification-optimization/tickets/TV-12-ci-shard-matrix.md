@@ -1,13 +1,13 @@
 # TV-12 — 단일 manifest 기반 CI shard matrix
 
 - 우선순위: P1
-- 상태: FOCUSED_VERIFIED
+- 상태: IMPLEMENTING — plan/worker/aggregate와 shadow workflow focused green; hosted shadow receipt 미완료
 - 소유자: CI 담당
 - 선행: TV-04, TV-06, TV-11
 
 ## 문제와 근거
 
-로컬 프로세스 40개 청크를 CI에서 같은 방식으로 순차 실행하면 독립 runner의 병렬성을 활용하지 못한다. 각 runner가 별도 discovery/LPT를 수행하면 population·membership이 달라질 수 있다.
+로컬 프로세스 44개 current plan을 CI에서 같은 방식으로 순차 실행하면 독립 runner의 병렬성을 활용하지 못한다. 각 runner가 별도 discovery/LPT를 수행하면 population·membership이 달라질 수 있다. 현재 `.github/workflows/ci.yml`의 `full-plan/full-shard/full-aggregate`는 `vars.QUANTA_SHADOW_MATRIX == '1'`일 때만 실행되고 `required`는 여전히 `full-suite`를 소비한다.
 
 ## 구현 범위
 
@@ -23,8 +23,8 @@
 
 ## 수정 파일
 
-- NEW: `tools/dev/verification-matrix-plan.ts`, `tools/dev/verification-matrix-worker.ts`, `tools/dev/verification-matrix-aggregate.ts`
-- EXISTING: `tools/dev/run-test-shards.ts`에서 planner/worker 재사용 가능한 모듈 경계 추출
+- EXISTING: `tools/dev/verification-matrix.ts`, `tools/dev/verification-matrix-cli.ts`
+- EXISTING: `tools/dev/run-test-shards.ts`에서 planner/worker 재사용 가능한 모듈 경계
 - `.github/workflows/ci.yml`
 - NEW TEST: `tests/unit/dev/verification-matrix.test.ts`
 
@@ -32,9 +32,10 @@
 
 | 파일 | 심볼/영역 | 구현 로직 | 회귀 rail |
 |---|---|---|---|
-| `tools/dev/verification-matrix-plan.ts` | NEW `buildMatrixPlan`, CLI `--suite --head --out` | exact HEAD에서 TV-06 manifest를 한 번 생성하고 expected chunk IDs/files/policy/population digests를 canonical JSON으로 쓴다. | 동일 snapshot deterministic digest. |
-| `tools/dev/verification-matrix-worker.ts` | NEW `runMatrixChunk`, CLI `--plan --chunk --out-dir` | plan에 적힌 chunk만 실행한다. local discovery/rebalance를 금지하고 worker envelope에 executed IDs, cache hits, JUnit SHA, exit/cancel을 쓴다. | 다른 chunk/file injection reject. |
-| `tools/dev/verification-matrix-aggregate.ts` | NEW `aggregateMatrixResults` | expected result 파일을 ID로 exact join하고 SHA/policy/membership/JUnit을 검증한다. selected = executed ∪ cache-hit 및 중복 0을 강제한다. | missing/duplicate/stale/same-count-different-files/corrupt XML fixture. |
+| `tools/dev/verification-matrix.ts` | `planVerificationMatrix`, `parseVerificationMatrixPlan` | exact HEAD에서 TV-06 manifest를 한 번 생성하고 expected chunk IDs/files/policy/population digests를 canonical JSON으로 쓴다. | 동일 snapshot deterministic digest. |
+| `tools/dev/verification-matrix.ts` | `workerReceipt`, `parseMatrixWorkerReceipt` | plan에 적힌 chunk만 수락한다. worker envelope에 executed IDs, JUnit SHA, exit/cancel과 execution policy를 고정한다. | 다른 chunk/file/head/timeout/parallel injection reject. |
+| `tools/dev/verification-matrix.ts` | `aggregateMatrixReceipts` | expected result를 chunk ID로 exact join하고 SHA/plan/membership/JUnit을 검증한다. 중복과 누락을 강제로 거부한다. | missing/duplicate/stale/same-count-different-files/corrupt XML fixture. |
+| `tools/dev/verification-matrix-cli.ts` | plan/worker/aggregate CLI | workflow와 local shadow가 동일 schema/parser를 소비하고 worker가 재-discovery/rebalance하지 못하게 한다. | CLI argv/schema parity. |
 | `tools/dev/run-test-shards.ts` | discovery/worker boundary | CLI 내부에 묶인 discovery, plan, execute 기능을 import 가능한 함수로 추출한다. 기존 local full 경로도 동일 함수를 소비한다. | local single-worker와 matrix result set equality. |
 | `.github/workflows/ci.yml` | `full-plan`, `full-shard`, `full-aggregate` | planner artifact→matrix(max-parallel=4)→aggregate DAG를 만든다. artifact 이름은 run_id/run_attempt/head/plan/chunk를 포함한다. | cancelled worker와 upload failure가 required 실패. |
 
@@ -52,6 +53,8 @@
 3. existing runner 로직을 모듈 경계로 추출한다.
 4. local 1-worker/4-worker small corpus 동등성을 확인한다.
 5. TV-11의 단일 full job을 fallback으로 유지한 채 CI matrix를 shadow로 연결한다.
+6. Actions 복구 후 exact HEAD에서 shadow variable을 켜고 single `full-suite`와 4-worker aggregate의 file/verdict/JUnit set을 비교한다.
+7. 최소 한 번의 cache-off hosted equality receipt 후 `required` consumer를 `full-aggregate`로 전환한다. 초기 전환에는 single full fallback을 유지한다.
 
 ## 검증 계획
 
@@ -63,6 +66,8 @@ fake workers로 한 shard 누락, duplicate ID, 같은 개수의 다른 파일, 
 - [ ] selected files의 executed/cache-hit 합집합이 정확히 일치.
 - [ ] required consumers가 aggregate 생성 뒤 한 번만 실행.
 - [ ] actual CI artifact와 최종 check가 동일 SHA/plan에 결합됨.
+- [ ] hosted 1-worker/4-worker exact file·verdict·JUnit equality receipt 존재.
+- [ ] shadow variable 활성화와 required consumer 전환을 별도 단계/커밋으로 기록.
 
 ## 실패·복구
 
