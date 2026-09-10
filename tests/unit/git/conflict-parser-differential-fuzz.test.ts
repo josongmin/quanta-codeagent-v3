@@ -164,6 +164,11 @@ const git = (cwd: string, args: string[]): string =>
       GIT_COMMITTER_NAME: "fuzz",
       GIT_COMMITTER_EMAIL: "fuzz@example.com",
       GIT_CONFIG_NOSYSTEM: "1",
+      // Invocation-local config keeps every case hermetic without spawning four
+      // `git config` processes per repository.
+      GIT_CONFIG_COUNT: "1",
+      GIT_CONFIG_KEY_0: "core.autocrlf",
+      GIT_CONFIG_VALUE_0: "false",
       // Stable so labels don't drift across machines.
       LC_ALL: "C",
     },
@@ -200,12 +205,7 @@ const makeGitConflict = (rng: Rng): GitCase | null => {
   const eol = rng.bool() ? "\r\n" : "\n"
   const oursLabel = rng.pick(UNICODE_LABELS.filter((l) => l.trim() !== "" && !l.includes("\t")))
 
-  git(dir, ["init", "-q"])
-  git(dir, ["config", "user.email", "fuzz@example.com"])
-  git(dir, ["config", "user.name", "fuzz"])
-  git(dir, ["config", "merge.conflictStyle", diff3 ? "diff3" : "merge"])
-  git(dir, ["config", "core.autocrlf", "false"])
-  // Determine the initial branch name git chose (master vs main vary by config).
+  git(dir, ["init", "-q", "--initial-branch=base"])
   const fpath = join(dir, "f.txt")
 
   const total = rng.between(3, 10)
@@ -215,7 +215,7 @@ const makeGitConflict = (rng: Rng): GitCase | null => {
   writeFileSync(fpath, baseLines.join(eol) + eol)
   git(dir, ["add", "f.txt"])
   git(dir, ["commit", "-qm", "base"])
-  const baseBranch = git(dir, ["rev-parse", "--abbrev-ref", "HEAD"]).trim()
+  const baseBranch = "base"
 
   // Pick a contiguous conflicting band.
   const lo = rng.between(0, total - 1)
@@ -238,7 +238,7 @@ const makeGitConflict = (rng: Rng): GitCase | null => {
 
   // Merge → conflict.
   try {
-    git(dir, ["merge", theirsBranch])
+    git(dir, ["-c", `merge.conflictStyle=${diff3 ? "diff3" : "merge"}`, "merge", theirsBranch])
     // No conflict produced (e.g. identical edits collapsed) — skip this case.
     return null
   } catch {
