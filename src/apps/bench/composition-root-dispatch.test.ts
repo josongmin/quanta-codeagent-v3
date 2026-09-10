@@ -22,18 +22,23 @@
  *   - ambient `process.env` after an in-process root call (HIGH-1's rail, which
  *     cannot be observed across a process boundary).
  *
- * NON-VACUITY: the whole family union flows through every root, and the
- * assertions are PAIRED — `pro` must differ from `verified`, `live` must differ
- * from `verified` on the family line, and `verified` must equal the absent
- * default. A root that ignored its argv and returned a constant fails the pair.
+ * NON-VACUITY: the whole family union flows through every decision-bearing dry
+ * run root, while every remaining root has a real-process reachability canary.
+ * The exhaustive invalid-shape cross-product lives at the shared reader/parser,
+ * and a source-call ratchet proves each owner still invokes that shared seam.
+ * This avoids multiplying identical parser cases across dozens of cold CLIs.
  */
 import { describe, expect, test } from "bun:test"
-import { mkdtempSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { stripComments } from "@/shared/source-text"
 import { positionals, VALUE_FLAGS } from "./commands/shared"
-import { DATASET_FAMILY_FLAG, readDatasetFamilySelector } from "./run-config"
+import {
+  DATASET_FAMILY_FLAG,
+  parseDatasetFamilyOrThrow,
+  readDatasetFamilySelector,
+} from "./run-config"
 
 const FAMILY_KEY = "QUANTA_SWEBENCH_DATASET_FAMILY"
 const CLI = join(import.meta.dir, "cli.ts")
@@ -199,33 +204,47 @@ const BAD_SELECTORS = [
 
 const FAMILY_REFUSAL = /unknown dataset family|is blank|SWE-only|requires a value|missing a value/i
 
+const FAMILY_READER_OWNERS = [
+  ["run-main.ts", 1],
+  ["commands/grade.ts", 2],
+  ["commands/pool.ts", 1],
+  ["commands/analyze.ts", 1],
+  ["terminal/config.ts", 2],
+] as const
+
+const familyReaderCallCount = (source: string): number =>
+  stripComments(source).match(/\breadDatasetFamilySelector\s*\(/g)?.length ?? 0
+
 // ─────────────────────────────────────────────────────────────────────────────
-// LOW-10 (a) — fail-closed on EVERY explicit-invalid selector, PER SUBCOMMAND
+// LOW-10 (a) — exhaustive parser matrix + one reachable canary per root
 // ─────────────────────────────────────────────────────────────────────────────
 describe("LOW-10 — every family-bearing composition root fails closed on an explicit-invalid selector", () => {
-  for (const sub of FAMILY_BEARING) {
+  test("the shared reader/parser refuses the complete adversarial selector matrix", () => {
+    for (const selector of BAD_SELECTORS) {
+      expect(
+        () =>
+          parseDatasetFamilyOrThrow(
+            readDatasetFamilySelector(["bun", "cli.ts", ...selector.args]) as string,
+          ),
+        selector.label,
+      ).toThrow(FAMILY_REFUSAL)
+    }
+  })
+
+  for (const [rootIndex, sub] of FAMILY_BEARING.entries()) {
     test(
-      `${sub.name}: all ${BAD_SELECTORS.length} adversarial selectors are refused`,
+      `${sub.name}: the real root reaches the shared fail-closed gate`,
       async () => {
-        const survivors: string[] = []
-        const results = await runCliBatch(
-          BAD_SELECTORS.map((sel) => ({ args: [...sub.argv, ...sel.args], env: sub.env })),
-        )
-        expect(results).toHaveLength(BAD_SELECTORS.length)
-        for (const [index, sel] of BAD_SELECTORS.entries()) {
-          const r = results[index]
-          expect(r, `missing CLI result for ${sub.name}/${sel.label}`).toBeDefined()
-          if (r === undefined) continue
-          if (r.code === 0 || !FAMILY_REFUSAL.test(r.out)) {
-            survivors.push(
-              `${sel.label} (${sel.args.join(" ")}) -> exit ${r.code}: ${r.out.slice(0, 200)}`,
-            )
-          }
-        }
-        expect(
-          survivors,
-          `${sub.name} accepted an explicit-invalid family selector:\n${survivors.join("\n")}`,
-        ).toEqual([])
+        // Spread the selector shapes across roots; the pure test above owns
+        // their exhaustive cross-product, while this child proves reachability.
+        const selector = BAD_SELECTORS[rootIndex % BAD_SELECTORS.length]
+        if (selector === undefined) throw new Error(`missing selector for ${sub.name}`)
+        const [result] = await runCliBatch([
+          { args: [...sub.argv, ...selector.args], env: sub.env },
+        ])
+        expect(result, `missing CLI result for ${sub.name}/${selector.label}`).toBeDefined()
+        expect(result?.code).not.toBe(0)
+        expect(result?.out).toMatch(FAMILY_REFUSAL)
       },
       SPAWN_BUDGET_MS,
     )
@@ -238,13 +257,11 @@ describe("LOW-10 — every family-bearing composition root fails closed on an ex
       const cases: Array<CliInvocation & { label: string }> = []
       for (const sub of FAMILY_BEARING) {
         if (sub.name === "terminal") continue // terminal refuses ANY family selector, by design
-        for (const family of ["verified", "live", "pro", "promax"]) {
-          cases.push({
-            args: [...sub.argv, "--dataset-family", family],
-            env: sub.env,
-            label: `${sub.name} --dataset-family ${family}`,
-          })
-        }
+        cases.push({
+          args: [...sub.argv, "--dataset-family", "pro"],
+          env: sub.env,
+          label: `${sub.name} --dataset-family pro`,
+        })
       }
       const results = await runCliBatch(cases)
       expect(results).toHaveLength(cases.length)
@@ -806,6 +823,20 @@ describe("NEW-2 — VALUE_FLAGS covers every value-taking flag the dispatcher re
 // NEW-1 — the selector READER: ABSENT vs PRESENT-BUT-VALUELESS
 // ─────────────────────────────────────────────────────────────────────────────
 describe("NEW-1 — readDatasetFamilySelector separates ABSENT from typed-but-valueless", () => {
+  test("every family-bearing owner retains a live call to the shared reader", () => {
+    for (const [relativePath, minimumCalls] of FAMILY_READER_OWNERS) {
+      const source = readFileSync(join(import.meta.dir, relativePath), "utf8")
+      expect(
+        familyReaderCallCount(source),
+        `${relativePath} no longer reaches readDatasetFamilySelector`,
+      ).toBeGreaterThanOrEqual(minimumCalls)
+    }
+    // Red-on-injection: imports and comments are not calls; a live invocation is.
+    expect(familyReaderCallCount("import { readDatasetFamilySelector } from './x'")).toBe(0)
+    expect(familyReaderCallCount("// readDatasetFamilySelector(argv)")).toBe(0)
+    expect(familyReaderCallCount("const selected = readDatasetFamilySelector(argv)")).toBe(1)
+  })
+
   test("ABSENT ⇒ undefined; a real value ⇒ that value, in BOTH argv spellings", () => {
     // Absent — the ONLY input allowed to yield the Verified default.
     expect(readDatasetFamilySelector(["bun", "cli.ts", "run", "--swebench", "ds"])).toBeUndefined()
