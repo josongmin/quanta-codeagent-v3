@@ -1,9 +1,10 @@
 /**
  * `quanta serve --stdio` e2e HELLGATE (jul-16 transport-unified SDK, ticket 02).
  *
- * REAL child processes: every test here spawns the ACTUAL CLI entry
- * (`src/apps/cli/index.ts`) with `bun` and speaks session.v1 over the child's
- * stdin/stdout — either through the production SDK door (`connect()` +
+ * REAL child processes: the route canaries spawn the ACTUAL CLI entry
+ * (`src/apps/cli/index.ts`); transport/lifecycle cases spawn the focused
+ * production serve entry after routing has already been proven. Both speak
+ * session.v1 over the child's stdin/stdout — either through the production SDK door (`connect()` +
  * `transports.stdio`, ticket 01) or through a raw pipe speaker (for the
  * stdout-purity / EOF / SIGTERM lifecycle assertions the spawn transport's
  * ownership would hide). The LLM is the env-driven deterministic replay
@@ -43,6 +44,7 @@ import { connect, transports } from "@/sdk"
 
 const REPO_ROOT = new URL("../../../", import.meta.url).pathname
 const CLI_ENTRY = join(REPO_ROOT, "src", "apps", "cli", "index.ts")
+const SERVE_ENTRY = join(REPO_ROOT, "src", "apps", "cli", "serve-stdio-entry.ts")
 const POLLUTER_ENTRY = join(
   REPO_ROOT,
   "tests",
@@ -249,7 +251,7 @@ const spawnRawServe = (args: {
   readonly cwd: string
 }): RawServeChild => {
   const child = Bun.spawn({
-    cmd: [BUN, args.entry ?? CLI_ENTRY, ...(args.argv ?? ["serve", "--stdio"])],
+    cmd: [BUN, args.entry ?? SERVE_ENTRY, ...(args.argv ?? ["--stdio"])],
     cwd: args.cwd,
     env: args.env,
     stdin: "pipe",
@@ -374,7 +376,7 @@ describe("quanta serve --stdio — spawned session.v1 server (ticket 02)", () =>
       const approvals: string[] = []
       const session = await connect({
         transport: transports.stdio({
-          command: [BUN, CLI_ENTRY, "serve", "--stdio", "--cwd", dir],
+          command: [BUN, SERVE_ENTRY, "--stdio", "--cwd", dir],
           env: childEnv({ QUANTA_SERVE_STDIO: "1", QUANTA_LLM_REPLAY: cassette }),
           cwd: dir,
         }),
@@ -417,7 +419,7 @@ describe("quanta serve --stdio — spawned session.v1 server (ticket 02)", () =>
       const approvals: string[] = []
       const session = await connect({
         transport: transports.stdio({
-          command: [BUN, CLI_ENTRY, "serve", "--stdio", "--cwd", dir],
+          command: [BUN, SERVE_ENTRY, "--stdio", "--cwd", dir],
           env: childEnv({ QUANTA_SERVE_STDIO: "1", QUANTA_LLM_REPLAY: cassette }),
           cwd: dir,
         }),
@@ -464,7 +466,7 @@ describe("quanta serve --stdio — spawned session.v1 server (ticket 02)", () =>
       const approvals: string[] = []
       const session = await connect({
         transport: transports.stdio({
-          command: [BUN, CLI_ENTRY, "serve", "--stdio", "--cwd", dir],
+          command: [BUN, SERVE_ENTRY, "--stdio", "--cwd", dir],
           env: childEnv({ QUANTA_SERVE_STDIO: "1", QUANTA_LLM_REPLAY: cassette }),
           cwd: dir,
         }),
@@ -599,7 +601,7 @@ describe("quanta serve --stdio — spawned session.v1 server (ticket 02)", () =>
         ].join("\n")}\n`,
       )
       const raw = spawnRawServe({
-        argv: ["serve", "--stdio", "--cwd", dir, "--permission-mode", "bypass"],
+        argv: ["--stdio", "--cwd", dir, "--permission-mode", "bypass"],
         env: childEnv({ QUANTA_SERVE_STDIO: "1", QUANTA_LLM_REPLAY: cassette }),
         cwd: dir,
       })

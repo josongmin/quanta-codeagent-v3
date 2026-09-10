@@ -270,8 +270,8 @@ const main = async (): Promise<void> => {
   // graceful session close inside the command.
   if (process.argv[2] === "serve") {
     const serveArgv = process.argv.slice(3)
-    const { runServeStdioCmd } = await import("./serve-stdio-cmd")
-    process.exit(await runServeStdioCmd(serveArgv))
+    const { runServeStdioEntry } = await import("./serve-stdio-entry")
+    process.exit(await runServeStdioEntry(serveArgv))
   }
 
   // ADR-0312 — `quanta webhook` GitHub-webhook HOST subcommand (inbound HTTP →

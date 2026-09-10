@@ -45,7 +45,7 @@ evidence:
       - tests/integration/session-cli-subprocess.test.ts
       - tests/integration/session-ux-e2e.test.ts
       - tests/integration/session-chaos-and-attack.test.ts
-      - tests/integration/session-stress-and-concurrent.test.ts
+      - tests/integration/session-stress-and-concurrent.nightly.test.ts
     contract: []
 knobs: []
 deliberate_hold: null

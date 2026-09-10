@@ -54,7 +54,7 @@ evidence:
       - tests/unit/session-security-regression.test.ts
       - tests/unit/cli-session-commands.test.ts
     integration:
-      - tests/integration/session-stress-and-concurrent.test.ts
+      - tests/integration/session-stress-and-concurrent.nightly.test.ts
       - tests/integration/session-chaos-and-attack.test.ts
     contract: []
 knobs: []

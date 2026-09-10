@@ -1,7 +1,5 @@
 #!/usr/bin/env bun
 
-import { AsyncLocalStorage } from "node:async_hooks"
-
 /**
  * `bun run eval <subcommand>` — Tier 0–5 verification harness.
  *
@@ -27,48 +25,47 @@ import { AsyncLocalStorage } from "node:async_hooks"
  * The exported application runner owns argument parsing and output routing.
  * The guarded process wrapper below only binds terminal streams and exit codes.
  */
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { dirname, resolve } from "node:path"
 import { DEFAULT_MODEL, type LLMPort, type Provider, pickProvider, tryCreateLLM } from "@/llm"
 import { errMessage, logger, setTerminalIo } from "@/shared"
 import { loadEnvFiles } from "@/shared/env-files"
-import { runAudit } from "./audit"
-import { isKnownAdapter, KNOWN_ADAPTERS, runCompare } from "./compare"
 import {
-  buildGroundingComparison,
+  argValue,
+  evalConsole as console,
+  type EvalCliApplicationDeps,
+  invocation,
+  readJsonFile,
+  runWithEvalCliContext,
+  writeTextFile,
+} from "./cli-context"
+import { resolveGroundingBaseline } from "./grounding/baseline"
+import { buildGroundingComparison } from "./grounding/compare"
+import {
   buildGroundingGateResult,
-  buildGroundingRegressionResult,
-  buildGroundingReport,
   buildGroundingRouteMatrixGateResult,
-  GROUNDING_BUCKETS,
-  GROUNDING_CORPORA,
   GROUNDING_GATE_PROFILES,
-  GROUNDING_MODES,
-  GROUNDING_REGRESSION_PROFILES,
-  GROUNDING_SEVERITIES,
   isGroundingGateProfile,
+} from "./grounding/gate"
+import {
+  buildGroundingRegressionResult,
+  GROUNDING_REGRESSION_PROFILES,
   isGroundingRegressionProfile,
-  isGroundingRouteMatrixName,
+} from "./grounding/regression"
+import {
   readGroundingReplayDraft,
-  resolveGroundingBaseline,
-  runGrounding,
-  runGroundingPreflightCheck,
   writeGroundingReplayDraft,
   writePromotedGroundingReplayCase,
-} from "./grounding"
-import { GROUNDING_AMBIGUITY_CLASSES } from "./grounding/schema"
-import { EVAL_HELP } from "./help"
-import { runSwebenchAdapter } from "./public"
-import { buildReport } from "./report"
-import { ResultStore } from "./storage"
-import { generateScenarios, runSynthetic } from "./synthetic"
-import { classifyQuery } from "./taxonomy"
+} from "./grounding/replay-scaffold"
+import { buildGroundingReport } from "./grounding/report"
+import { isGroundingRouteMatrixName } from "./grounding/route-matrix"
 import {
-  classifyTrajectories,
-  exportRedactedCassette,
-  freezeFixture,
-  replayFixture,
-} from "./trajectory"
+  GROUNDING_AMBIGUITY_CLASSES,
+  GROUNDING_BUCKETS,
+  GROUNDING_CORPORA,
+  GROUNDING_MODES,
+  GROUNDING_SEVERITIES,
+} from "./grounding/schema"
+import { EVAL_HELP } from "./help"
+import { ResultStore } from "./storage"
 import type { UseCaseId } from "./types"
 
 const csvValues = (raw: string | undefined): readonly string[] | undefined => {
@@ -79,52 +76,6 @@ const csvValues = (raw: string | undefined): readonly string[] | undefined => {
     .filter((value) => value !== "")
   return values.length === 0 ? undefined : values
 }
-
-export interface EvalCliApplicationDeps {
-  readonly cwd?: string
-  readonly env?: NodeJS.ProcessEnv
-  readonly stdout?: (chunk: string) => void
-  readonly stderr?: (chunk: string) => void
-}
-
-interface EvalCliInvocationContext {
-  readonly argv: readonly string[]
-  readonly cwd: string
-  readonly env: NodeJS.ProcessEnv
-  readonly stdout: (chunk: string) => void
-  readonly stderr: (chunk: string) => void
-}
-
-/** Invocation-local state rather than mutable module globals. AsyncLocalStorage
- * keeps concurrent embedded CLI calls isolated across every awaited command. */
-const EVAL_CLI_CONTEXT = new AsyncLocalStorage<EvalCliInvocationContext>()
-
-const invocation = (): EvalCliInvocationContext => {
-  const current = EVAL_CLI_CONTEXT.getStore()
-  if (current === undefined) throw new Error("eval CLI command invoked outside runEvalCli")
-  return current
-}
-
-const console = {
-  log: (...values: unknown[]): void => invocation().stdout(`${values.join(" ")}\n`),
-  error: (...values: unknown[]): void => invocation().stderr(`${values.join(" ")}\n`),
-}
-
-const argValue = (flag: string): string | undefined => {
-  const argv = invocation().argv
-  const i = argv.indexOf(flag)
-  if (i < 0 || i + 1 >= argv.length) return undefined
-  return argv[i + 1]
-}
-
-const writeTextFile = (path: string, text: string): void => {
-  const out = resolve(invocation().cwd, path)
-  mkdirSync(dirname(out), { recursive: true })
-  writeFileSync(out, text)
-}
-
-const readJsonFile = (path: string): unknown =>
-  JSON.parse(readFileSync(resolve(invocation().cwd, path), "utf8"))
 
 // ── provider pick + LLM construction (delegated to the shared @/llm factory) ──
 // Provider precedence, per-provider key env vars, OPENAI_BASE_URL, and the
@@ -157,6 +108,7 @@ const resolveLLM = (
 // ── subcommands ──────────────────────────────────────────────────────────────
 
 const cmdAudit = async (): Promise<number> => {
+  const { runAudit } = await import("./audit")
   const result = await runAudit()
   const matrix = result.matrix
   console.log(
@@ -170,6 +122,7 @@ const cmdSynthetic = async (): Promise<number> => {
   if (agent === null) return 0
   const judge = resolveLLM("judge") ?? agent
   const usecase = argValue("--usecase") as UseCaseId | undefined
+  const { runSynthetic } = await import("./synthetic")
   const summary = await runSynthetic({
     agent: agent.llm,
     judge: judge.llm,
@@ -266,6 +219,7 @@ const groundingRun = async (storeDir: string | undefined): Promise<number> => {
   }
   const agent = resolveLLM("agent")
   if (agent === null) return 0
+  const { runGrounding } = await import("./grounding")
   const summary = await runGrounding({
     llm: agent.llm,
     ...selectors.value,
@@ -285,6 +239,7 @@ const groundingRun = async (storeDir: string | undefined): Promise<number> => {
 const groundingPreflight = async (): Promise<number> => {
   const agent = resolveLLM("agent")
   if (agent === null) return 0
+  const { runGroundingPreflightCheck } = await import("./grounding")
   const out = await runGroundingPreflightCheck(agent.llm)
   const jsonOut = argValue("--json-out")
   const payload = {
@@ -648,6 +603,7 @@ const cmdPublic = async (): Promise<number> => {
     return 1
   }
   const reportPath = argValue("--report")
+  const { runSwebenchAdapter } = await import("./public")
   const summary = await runSwebenchAdapter(reportPath !== undefined ? { reportPath } : {})
   console.log(
     `public run=${summary.runId} total=${summary.total} pass=${summary.counts.pass} fail=${summary.counts.fail} (${summary.durationMs}ms)`,
@@ -663,6 +619,7 @@ const cmdTrajectoryClassify = async (): Promise<number> => {
   }
   const cls = resolveLLM("classifier")
   if (cls === null) return 0
+  const { classifyTrajectories } = await import("./trajectory")
   const summary = await classifyTrajectories({ llm: cls.llm, inputDir: input })
   console.log(
     `trajectory run=${summary.runId} total=${summary.total} classified=${summary.classified} unrecognised=${summary.unrecognised} no-meta=${summary.noMeta} classifier-errors=${summary.classifierErrors} (${summary.durationMs}ms)`,
@@ -678,6 +635,7 @@ const cmdTrajectoryReplay = async (): Promise<number> => {
   }
   const agent = resolveLLM("agent")
   if (agent === null) return 0
+  const { replayFixture } = await import("./trajectory")
   const result = await replayFixture({ llm: agent.llm, fixture })
   console.log(
     `replay run=${result.runId} verdict=${result.verdict} matched=${result.diff?.matched ?? "n/a"} diverged=${result.diff?.divergedEvents ?? "n/a"} turns=${result.originalTurns}→${result.replayTurns} (${result.durationMs}ms)`,
@@ -693,6 +651,7 @@ const cmdTrajectoryFreeze = async (): Promise<number> => {
     console.error("eval trajectory freeze: --source <jsonl> and --usecase <id> required")
     return 1
   }
+  const { freezeFixture } = await import("./trajectory")
   const result = freezeFixture({
     source,
     usecase,
@@ -708,13 +667,14 @@ const cmdTrajectoryFreeze = async (): Promise<number> => {
   return 0
 }
 
-const cmdTrajectoryRedact = (): number => {
+const cmdTrajectoryRedact = async (): Promise<number> => {
   const source = argValue("--source")
   const out = argValue("--out")
   if (source === undefined || out === undefined) {
     invocation().stderr("eval trajectory redact: --source <jsonl> and --out <jsonl> required\n")
     return 1
   }
+  const { exportRedactedCassette } = await import("./trajectory")
   const result = exportRedactedCassette({ sourcePath: source, outputPath: out })
   invocation().stdout(
     `redacted ${result.outputPath}\n  receipt ${result.receiptPath}\n  source-sha256 ${result.receipt.source.sha256}\n  output-sha256 ${result.receipt.output.sha256}\n`,
@@ -755,6 +715,7 @@ const cmdCompare = async (): Promise<number> => {
     .split(",")
     .map((a) => a.trim())
     .filter((a) => a !== "")
+  const { isKnownAdapter, KNOWN_ADAPTERS, runCompare } = await import("./compare")
   // Validate ALL adapter names up front — silent skip on a typo was the bug.
   const unknown = agents.filter((a) => !isKnownAdapter(a))
   if (unknown.length > 0) {
@@ -801,6 +762,7 @@ const cmdGenerate = async (): Promise<number> => {
   }
   const agent = resolveLLM("agent")
   if (agent === null) return 0
+  const { generateScenarios } = await import("./synthetic")
   const result = await generateScenarios({ llm: agent.llm, usecase, count })
   console.log(
     `generate usecase=${usecase} accepted=${result.accepted.length} rejected=${result.rejected.length}`,
@@ -811,6 +773,7 @@ const cmdGenerate = async (): Promise<number> => {
 }
 
 const cmdReport = async (): Promise<number> => {
+  const { buildReport } = await import("./report")
   const out = buildReport()
   console.log(out.markdown)
   console.error(out.headline)
@@ -825,6 +788,7 @@ const cmdClassify = async (): Promise<number> => {
   }
   const cls = resolveLLM("classifier")
   if (cls === null) return 0
+  const { classifyQuery } = await import("./taxonomy")
   const result = await classifyQuery(text, { llm: cls.llm })
   console.log(
     JSON.stringify({ id: result.id, confidence: result.confidence, alt: result.alt }, null, 2),
@@ -869,17 +833,9 @@ const main = async (): Promise<number> => {
 export const runEvalCli = (
   argv: readonly string[],
   deps: EvalCliApplicationDeps = {},
-): Promise<number> =>
-  EVAL_CLI_CONTEXT.run(
-    {
-      argv,
-      cwd: deps.cwd ?? process.cwd(),
-      env: deps.env ?? process.env,
-      stdout: deps.stdout ?? ((chunk: string) => void process.stdout.write(chunk)),
-      stderr: deps.stderr ?? ((chunk: string) => void process.stderr.write(chunk)),
-    },
-    main,
-  )
+): Promise<number> => runWithEvalCliContext(argv, { ...deps, env: deps.env ?? process.env }, main)
+
+export type { EvalCliApplicationDeps } from "./cli-context"
 
 export const runEvalCliProcess = async (argv: readonly string[]): Promise<void> => {
   setTerminalIo({

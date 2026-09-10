@@ -17,7 +17,10 @@ const ENTRY = "src/apps/bench/cli.ts"
 // Repo root anchored on this file, not on the ambient cwd: ENTRY below is a
 // repo-RELATIVE path, so the spawn only works when `cwd` is the real repo root.
 const REPO = join(import.meta.dir, "..", "..")
-const runBounded = createBoundedTestExecutor(2)
+// The cases use independent child envs and only read their shared immutable
+// dataset/manifest fixtures. Four workers match the bench CLI conformance lane
+// without oversubscribing the host the way unbounded test.concurrent would.
+const runBounded = createBoundedTestExecutor(4)
 setDefaultTimeout(30_000)
 
 let dir = ""

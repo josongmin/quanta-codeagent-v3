@@ -42,7 +42,7 @@
 | lsp / port / process-global | 206 / 62 / 55 | 단일 class 이름이 아니라 실제 resource key/mode로 세분화 필요 |
 | browser / worktree / repo-write | 12 / 17 / 2 | 배타성 유지; checkout/git-common/cache 경계 분리 필요 |
 | shadow matrix | plan/worker/aggregate 코드와 조건부 workflow 존재 | `QUANTA_SHADOW_MATRIX=1` hosted receipt 없음; required는 `full-suite` 소비 |
-| tier membership | committed-HEAD discovery: PR/full 3,924, nightly 3,927 | `--tier`/policy digest와 hosted PR job 연결, Biome reach·conflict-fuzz remainder·bench matrix 물리 분리; 나머지 capability migration은 진행 중 |
+| tier membership | committed-HEAD discovery: PR/full 3,926, nightly 3,930 | `--tier`/policy digest와 hosted PR job 연결, Biome reach·conflict-fuzz remainder·bench/session matrix 물리 분리; hosted receipt는 미확보 |
 
 ## 현재 남은 구조 캠페인
 

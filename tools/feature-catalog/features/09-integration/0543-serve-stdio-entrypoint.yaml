@@ -52,6 +52,7 @@ purpose: |
   cannot silently replace connect({onApproval}) with inline auto-approval.
 evidence:
   code:
+    - src/apps/cli/serve-stdio-entry.ts
     - src/apps/cli/serve-stdio-cmd.ts
     - src/apps/cli/index.ts
     - src/apps/headless/session-bridge.ts
@@ -61,3 +62,4 @@ evidence:
   tests:
     integration:
       - tests/unit/cli/serve-stdio-e2e-hellgate.test.ts
+      - tests/unit/cli/serve-stdio-entry-wiring-hellgate.test.ts

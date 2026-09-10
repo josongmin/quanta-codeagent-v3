@@ -14,7 +14,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { reconcileCreatingWorktreeAtResume } from "@/runner/orchestrate"
@@ -31,18 +31,33 @@ import { __resetRuntimeConfig } from "@/shared"
 const PIN = "QUANTA_WORKTREE_CWD_PIN"
 const PAYLOAD = { reason: "t", turns: 3, messages: [] }
 
-const sh = async (cwd: string, cmd: string): Promise<void> => {
-  const p = Bun.spawn(["bash", "-lc", cmd], { cwd, stdout: "pipe", stderr: "pipe" })
+const run = async (command: readonly string[]): Promise<void> => {
+  const p = Bun.spawn(command, { stdout: "pipe", stderr: "pipe" })
   const code = await p.exited
   if (code !== 0) {
-    throw new Error(`cmd failed (${code}): ${cmd}\n${await new Response(p.stderr).text()}`)
+    throw new Error(
+      `cmd failed (${code}): ${command.join(" ")}\n${await new Response(p.stderr).text()}`,
+    )
   }
 }
 
 const mkRepo = async (): Promise<string> => {
   const repo = await mkdtemp(join(tmpdir(), "wt-recon-resume-"))
-  await sh(repo, "git init -q && git config user.email a@b.c && git config user.name t")
-  await sh(repo, "git commit -q --allow-empty -m init")
+  await run(["git", "init", "-q", repo])
+  await run([
+    "git",
+    "-C",
+    repo,
+    "-c",
+    "user.email=a@b.c",
+    "-c",
+    "user.name=t",
+    "commit",
+    "-q",
+    "--allow-empty",
+    "-m",
+    "init",
+  ])
   return repo
 }
 
@@ -268,7 +283,7 @@ describe("reconcileCreatingWorktreeAtResume (RFC06-2 crash-resume wire)", () => 
     const ownershipId = crypto.randomUUID()
     const created = await createPersistentWorktree(ownershipId, repo)
     // Make the worktree DIRTY (uncommitted file) — reconcile must not delete it.
-    await sh(created.worktreePath, "echo dirty > uncommitted.txt")
+    await writeFile(join(created.worktreePath, "uncommitted.txt"), "dirty\n")
     await seedCreating("s1", repo, ownershipId, created.worktreePath, created.branch)
     process.env[PIN] = "1"
 

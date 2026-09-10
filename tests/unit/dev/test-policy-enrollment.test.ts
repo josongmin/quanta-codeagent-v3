@@ -110,11 +110,13 @@ describe("test-policy-enrollment", () => {
     expect(nightlyOnly).toContain(
       "tests/unit/git/conflict-parser-differential-fuzz.nightly.test.ts",
     )
+    expect(nightlyOnly).toContain("tests/integration/session-stress-and-concurrent.nightly.test.ts")
     expect(fullIds).not.toContain("tests/integration/lint-debt-reach-e2e.nightly.test.ts")
     expect(fullIds).not.toContain("src/apps/bench/composition-root-dispatch.nightly.test.ts")
     expect(fullIds).not.toContain(
       "tests/unit/git/conflict-parser-differential-fuzz.nightly.test.ts",
     )
+    expect(fullIds).not.toContain("tests/integration/session-stress-and-concurrent.nightly.test.ts")
   })
 
   test("injecting an unregistered contract file into inventory comparison fails", () => {
