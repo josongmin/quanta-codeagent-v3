@@ -233,6 +233,21 @@ export interface TestChunk {
 }
 
 export interface PlanTestChunksOptions {
+  /**
+   * REJECTED, not honoured.
+   *
+   * It was accepted, range-checked, threaded through `chunkOneGroup` as
+   * `_targetChunkCount` — and never read. Membership is fixed per-class SHA
+   * buckets by design, because a chunk's identity is what its cache receipt is
+   * keyed on; a caller-supplied chunk count would re-cut every chunk on every
+   * invocation and invalidate the whole cache. So the option could not be
+   * honoured without breaking the thing it looked like it configured, and it
+   * silently did nothing instead.
+   *
+   * The real control is `bucketsByClass` in `test-shard-membership.ts` — a
+   * versioned, committed config, because changing it changes every chunk
+   * identity and that should be a reviewable diff, not an argument.
+   */
   readonly targetChunkCount?: number
   /** Measured per-file wall time; undefined = no measurement for that file. */
   readonly predictMs?: (file: string) => number | undefined
@@ -241,7 +256,6 @@ export interface PlanTestChunksOptions {
   readonly membershipFile?: (file: string) => string
 }
 
-const DEFAULT_TARGET_CHUNK_COUNT = 24
 /** Checkpoint bound: a failed campaign forfeits at most this many files of
  *  green coverage per chunk, however small a group's time share is. */
 const MAX_CHUNK_FILES = 160
@@ -355,7 +369,6 @@ const chunkOneGroup = (
   resourceClass: TestResourceClass,
   group: readonly WeightedFile[],
   _totalWeight: number,
-  _targetChunkCount: number,
   membershipFile: (file: string) => string,
 ): UnindexedChunk[] => {
   const bins = new Map<number, WeightedFile[]>()
@@ -394,15 +407,19 @@ export const planTestChunks = (
   const classify = options.classify ?? classifyTestResource
   const predictMs = options.predictMs ?? (() => undefined)
   const membershipFile = options.membershipFile ?? ((file: string) => file)
-  const targetChunkCount = options.targetChunkCount ?? DEFAULT_TARGET_CHUNK_COUNT
-  if (!Number.isSafeInteger(targetChunkCount) || targetChunkCount < 1) {
-    throw new Error(`[test:shards] invalid target chunk count: ${targetChunkCount}`)
+  if (options.targetChunkCount !== undefined) {
+    throw new Error(
+      "[test:shards] targetChunkCount is not supported: membership is fixed per-class SHA " +
+        "buckets so that a chunk's identity — and therefore its cache receipt — is stable. " +
+        "Change `bucketsByClass` in tools/dev/test-shard-membership.ts, which is versioned " +
+        "because it re-identifies every chunk.",
+    )
   }
 
   const groups = groupWeightedFiles(sorted, classify, predictMs)
   const totalWeight = [...groups.values()].flat().reduce((sum, entry) => sum + entry.weightMs, 0)
   const chunks = [...groups.entries()].flatMap(([resourceClass, group]) =>
-    chunkOneGroup(resourceClass, group, totalWeight, targetChunkCount, membershipFile),
+    chunkOneGroup(resourceClass, group, totalWeight, membershipFile),
   )
 
   // Deterministic indices derived from composition (class + first file), so a

@@ -56,7 +56,6 @@ describe("resource-classed chunk plan", () => {
     const files = Array.from({ length: 17 }, (_, index) => `tests/unit/file-${index}.test.ts`)
     const shared = new Set(["tests/unit/file-3.test.ts", "tests/unit/file-11.test.ts"])
     const chunks = planTestChunks(files, {
-      targetChunkCount: 4,
       classify: (file) => (shared.has(file) ? "port" : "pure"),
     })
 
@@ -82,19 +81,16 @@ describe("resource-classed chunk plan", () => {
     const slow = "tests/unit/file-0.test.ts"
     const timings = new Map(files.map((file) => [file, file === slow ? 60_000 : 1_000]))
     const chunks = planTestChunks(files, {
-      targetChunkCount: 4,
       classify: () => "pure",
       predictMs: (file) => timings.get(file),
     })
     expect(() => assertTestChunkPlan(files, chunks)).not.toThrow()
     const cold = planTestChunks(files, {
-      targetChunkCount: 4,
       classify: () => "pure",
     })
     expect(cold.map((chunk) => [...chunk.files])).toEqual(chunks.map((chunk) => [...chunk.files]))
     expect(
       planTestChunks(files, {
-        targetChunkCount: 4,
         classify: () => "pure",
         predictMs: (file) => timings.get(file),
       }),
@@ -124,7 +120,7 @@ describe("resource-classed chunk plan", () => {
 
   test("a cold timing store still partitions exactly", () => {
     const files = Array.from({ length: 100 }, (_, index) => `tests/unit/f-${index}.test.ts`)
-    const chunks = planTestChunks(files, { targetChunkCount: 24, classify: () => "pure" })
+    const chunks = planTestChunks(files, { classify: () => "pure" })
     expect(() => assertTestChunkPlan(files, chunks)).not.toThrow()
     expect(chunks.length).toBeGreaterThan(0)
     expect(chunks.every((chunk) => chunk.files.length > 0)).toBe(true)
@@ -944,5 +940,25 @@ describe("membership bucket capacity", () => {
     const chunks = planTestChunks(syntheticPure(MAX_CHUNK_FILES + 1), oneBucket)
     expect(chunks.length).toBe(2)
     expect(chunks.reduce((sum, chunk) => sum + chunk.files.length, 0)).toBe(MAX_CHUNK_FILES + 1)
+  })
+})
+
+describe("targetChunkCount is refused, not ignored", () => {
+  test("passing it is an error naming the real control", () => {
+    // It was accepted, range-checked, threaded through `chunkOneGroup` as
+    // `_targetChunkCount`, and never read. A caller could write
+    // `targetChunkCount: 4`, see 44 chunks, and have no way to tell the option
+    // from a bug in their own code.
+    expect(() =>
+      planTestChunks(["tests/unit/a.test.ts"], { targetChunkCount: 4, classify: () => "pure" }),
+    ).toThrow(/targetChunkCount is not supported/)
+    expect(() =>
+      planTestChunks(["tests/unit/a.test.ts"], { targetChunkCount: 24, classify: () => "pure" }),
+    ).toThrow(/bucketsByClass/)
+  })
+
+  test("omitting it still plans", () => {
+    const chunks = planTestChunks(["tests/unit/a.test.ts"], { classify: () => "pure" })
+    expect(chunks.length).toBe(1)
   })
 })
