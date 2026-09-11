@@ -29,6 +29,7 @@
  * exactly the stale copy it exists to prevent.
  */
 
+import type { GateContractEntry } from "./gate-manifest-contract"
 import type { VerificationTier } from "./verification-result"
 import { gatesForTier } from "./verification-tier"
 
@@ -459,7 +460,7 @@ export const WORKFLOW_EXEMPT: readonly {
 ]
 
 /**
- * Gate ids that may NEVER leave this manifest.
+ * The exact (id, stage) set this manifest must have — the gate contract.
  *
  * Deleting a gate and adding a `WORKFLOW_EXEMPT` entry for the same command in
  * one commit satisfied every other check: direction ① saw the workflow step as
@@ -468,28 +469,40 @@ export const WORKFLOW_EXEMPT: readonly {
  * gate is added, and shrinking it is a deliberate, reviewable edit rather than a
  * side effect of an exemption.
  */
-export const REQUIRED_GATE_IDS: readonly string[] = [
-  // EVERY gate id, deliberately: with only a subset listed, the seven unlisted
-  // gates were open to the exact delete+exempt regression this ratchet exists
-  // for. Removing a gate now requires editing this list in the same reviewable
-  // diff.
-  "typecheck",
-  "lint",
-  "lint-debt",
-  "fc-check-changed",
-  "fc-ci",
-  "fc-reachability",
-  "silent-catch-baseline",
-  "protocol-generated",
-  "full-suite",
-  "unit-speed-budget",
-  "e2e-pty",
-  "cwd-parity-arch",
-  "scan-reach",
-  "non-vacuity-oracle",
-  "preload-runtime-closure",
-  "real-toolchain-e2e",
-  "web-frontend",
-  "pm-dod-ratchet",
-  "contract",
+export const GATE_CONTRACT: readonly GateContractEntry[] = [
+  // EVERY gate, deliberately: with only a subset listed, the unlisted gates
+  // were open to the exact delete+exempt regression this ratchet exists for.
+  // Removing or re-staging a gate now requires editing this list in the same
+  // reviewable diff.
+  //
+  // The STAGE is part of the contract, not decoration. A count floor cannot
+  // distinguish a deletion from a mis-stage: both move the number by one, and
+  // the floor that used to live in `gate.ts` went stale against a legitimate
+  // 3-gates-into-1 consolidation (`fc-validate`/`fc-diff`/`fc-lint` -> `fc-ci`)
+  // and then refused every gate command at HEAD until it was noticed.
+  { id: "typecheck", stage: "precommit" },
+  { id: "lint", stage: "precommit" },
+  { id: "lint-debt", stage: "precommit" },
+  { id: "fc-check-changed", stage: "precommit" },
+  { id: "fc-ci", stage: "precommit" },
+  { id: "fc-reachability", stage: "precommit" },
+  { id: "silent-catch-baseline", stage: "precommit" },
+  { id: "protocol-generated", stage: "precommit" },
+  { id: "full-suite", stage: "prepush" },
+  { id: "unit-speed-budget", stage: "prepush" },
+  { id: "e2e-pty", stage: "prepush" },
+  { id: "cwd-parity-arch", stage: "prepush" },
+  { id: "scan-reach", stage: "prepush" },
+  { id: "non-vacuity-oracle", stage: "prepush" },
+  { id: "preload-runtime-closure", stage: "prepush" },
+  { id: "real-toolchain-e2e", stage: "prepush" },
+  { id: "web-frontend", stage: "prepush" },
+  { id: "pm-dod-ratchet", stage: "prepush" },
+  { id: "contract", stage: "prepush" },
 ]
+
+/**
+ * Ids only, derived. Kept because the workflow-parity test reads the manifest
+ * from the id side; the STAGE-carrying `GATE_CONTRACT` above is the authority.
+ */
+export const REQUIRED_GATE_IDS: readonly string[] = GATE_CONTRACT.map((entry) => entry.id)

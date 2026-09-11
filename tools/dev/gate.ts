@@ -39,13 +39,14 @@ import { fileURLToPath } from "node:url"
 import { describeQuietBoxWait, loadPerCore, quietBoxBudgetMs, waitForQuietBox } from "./box-load"
 import { missingExternalTools } from "./external-toolchain"
 import {
+  GATE_CONTRACT,
   GATES,
   type Gate,
-  type GateStage,
   gatesForStage,
   gatesForVerificationTier,
   tiersForGate,
 } from "./gate-manifest"
+import { formatGateManifestViolations, validateGateManifest } from "./gate-manifest-contract"
 import { admissionFromEnv } from "./verification-admission"
 import { NIGHTLY_MEMBERSHIP } from "./verification-nightly-manifest"
 import {
@@ -79,6 +80,22 @@ const USAGE =
 const LIST_TIERS: readonly VerificationTier[] = ["smoke", "prepush", "pr", "full", "nightly"]
 const printGateRow = (gate: Gate): void => {
   printOut(`${gate.stage.padEnd(9)} ${gate.id.padEnd(22)} ${gate.run}`)
+}
+
+/**
+ * ONE validator, run before the listing path and the run path diverge.
+ *
+ * `--list` used to return before any validation at all, so the listing printed a
+ * healthy manifest while the run path refused over the same manifest. That split
+ * is how the stale ownership floor survived: nobody running `--list` could see
+ * it, and the only message the run path produced blamed the manifest.
+ *
+ * No gate is spawned here. This is pure comparison against the contract.
+ */
+const manifestViolations = validateGateManifest(GATES, GATE_CONTRACT)
+if (manifestViolations.length > 0) {
+  printErr(formatGateManifestViolations(manifestViolations))
+  process.exit(1)
 }
 
 if (wants("--list")) {
@@ -135,22 +152,6 @@ const REPLAY_TAIL_LINES = 40
 /** …and the same from the top: a gate that diagnoses first and then floods.
  *  Together with the tail this bounds the replay at ~60 lines per stream. */
 const REPLAY_HEAD_LINES = 20
-
-/**
- * Floors on the gates each stage OWNS, not on the superset.
- *
- * The first version floored the resolved list — prepush >= 16 against 21 — and
- * because prepush contains all 10 precommit gates, an audit deleted `unit`,
- * `unit-speed-budget`, `integration`, `e2e-pty` and `contract` (i.e. every actual
- * test execution) and still cleared it. It also only fired one way: moving every
- * prepush gate into precommit left both stages at 21 and said nothing, while the
- * docstring claimed mis-staging was loud.
- *
- * Owned counts, derived from the real manifest: 10 precommit, 11 prepush-only.
- * The floors sit AT the real counts — deleting any gate trips them, and adding
- * one is expected to raise them in the same diff.
- */
-const MIN_OWNED: Record<GateStage, number> = { precommit: 10, prepush: 11 }
 
 interface GateRun {
   readonly ok: boolean
@@ -329,28 +330,14 @@ const runGate = (gate: Gate): GateRun => {
 /**
  * ANTI-VACUITY. A runner that reports "ok — 0 gate(s) passed" is the exact shape
  * this repo's ratchets exist to catch, and this one had it: emptying `GATES`
- * printed a green summary and exited 0. The floors are on the STAGE the caller
- * asked for, so a manifest edit that empties it, or mis-stages every gate into
- * the other stage, is loud instead of reassuring.
+ * printed a green summary and exited 0. The contract check above names the
+ * missing gate ids, so a manifest edit that empties a stage, or mis-stages every
+ * gate into the other one, is loud instead of reassuring — and, unlike the count
+ * floor it replaced, it cannot be cleared by editing a number.
  */
 const planned = label === "precommit" ? gatesForStage("precommit") : gatesForVerificationTier(label)
 const overallStarted = Bun.nanoseconds()
 const plannedManifestSha256 = verificationManifestSha256(planned)
-const ownedPrecommit = GATES.filter((g) => g.stage === "precommit").length
-const ownedPrepush = GATES.filter((g) => g.stage === "prepush").length
-const owned = { precommit: ownedPrecommit, prepush: ownedPrepush }
-for (const st of ["precommit", "prepush"] as const) {
-  const floor = MIN_OWNED[st]
-  if (owned[st] < floor) {
-    printErr(
-      `gate.ts: the manifest owns ${owned[st]} ${st} gate(s), below the floor of ` +
-        `${MIN_OWNED[st]}. Gates were deleted or mis-staged — refusing to report a ` +
-        `verdict over it. (owned: precommit=${ownedPrecommit}, prepush=${ownedPrepush})`,
-    )
-    process.exit(1)
-  }
-}
-
 // D4 — a `consumes` that names nothing real disarms the whole mechanism with no
 // output. An audit typo'd `consumes: "Unit"` and the consumer ran over stale
 // input and PASSED. Validated here, against the STAGE the caller asked for,
