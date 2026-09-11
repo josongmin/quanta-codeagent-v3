@@ -3,12 +3,16 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
+  hasRunningMemberRows,
+  type LeaderIdentity,
+  type ProcessRow,
+  type ProcessSnapshot,
+} from "../../tools/dev/process-observer"
+import {
   describeProcessGroup,
   drainCampaign,
-  groupHasRunningMemberFromPs,
-  groupStateLines,
-  hasRunningMember,
   killProcessTree,
+  probeGroupFromSnapshot,
   processGroupAlive,
   processGroupHoldsResources,
   runResourceAwareSchedule,
@@ -16,6 +20,19 @@ import {
   terminateCampaignOnSignal,
   terminationExitCode,
 } from "../../tools/dev/test-shard-lifecycle"
+
+/** A `ps` row, defaulted so a case names only the columns it is about. */
+const psRow = (over: Partial<ProcessRow> & Pick<ProcessRow, "pid">): ProcessRow => ({
+  ppid: 1,
+  pgid: over.pid,
+  stat: "S",
+  rssKib: 1024,
+  pcpu: "0.0",
+  etime: "12:00",
+  started: "Fri Sep 11 23:13:04 2026",
+  comm: "bun",
+  ...over,
+})
 
 const MODULE_PATH = join(import.meta.dir, "..", "..", "tools", "dev", "test-shard-lifecycle.ts")
 
@@ -261,7 +278,8 @@ describe("shard worker process lifecycle", () => {
     const runRoot = join(dir, "run-root")
     mkdirSync(runRoot, { recursive: true })
     const survivorRegistry = {
-      cancelAll: () => Promise.resolve({ drained: false, survivors: [12345] as const }),
+      cancelAll: () =>
+        Promise.resolve({ drained: false, survivors: [12345] as const, abandoned: [] as const }),
     }
     const lines: string[] = []
     const outcome = await drainCampaign({
@@ -301,12 +319,13 @@ describe("shard worker process lifecycle", () => {
     const runRoot = join(dir, "run-root")
     const pidFile = join(dir, "grandchild.pid")
     const resultFile = join(dir, "result.txt")
+    const readyFile = join(dir, "driver-ready.txt")
     const driverPath = join(dir, "driver.ts")
     writeFileSync(
       driverPath,
       [
         `import { ShardProcessRegistry, terminateCampaignOnSignal } from ${JSON.stringify(MODULE_PATH)}`,
-        `import { mkdirSync, writeFileSync } from "node:fs"`,
+        `import { mkdirSync, renameSync, writeFileSync } from "node:fs"`,
         `const runRoot = ${JSON.stringify(runRoot)}`,
         `mkdirSync(runRoot, { recursive: true })`,
         `const registry = new ShardProcessRegistry({ termGraceMs: 500, killGraceMs: 3_000 })`,
@@ -329,6 +348,16 @@ describe("shard worker process lifecycle", () => {
         `    log: () => {},`,
         `  }).then((code) => process.exit(code))`,
         `})`,
+        // The driver announces READINESS only once its handler is installed.
+        // Gating the signal on the WORKER's pid file instead was a race: the
+        // worker is a separate process, so its progress says nothing about
+        // whether this process can yet catch SIGTERM. It stayed hidden while
+        // the pre-handler work was ~3ms and surfaced the moment that work grew
+        // — exactly the class of test that fails on a slower box for reasons
+        // unrelated to what it is testing.
+        `const readyTmp = ${JSON.stringify(`${readyFile}.partial`)}`,
+        `writeFileSync(readyTmp, "ready")`,
+        `renameSync(readyTmp, ${JSON.stringify(readyFile)})`,
         `await handle.exited`,
         `await Bun.sleep(30_000)`,
       ].join("\n"),
@@ -340,6 +369,7 @@ describe("shard worker process lifecycle", () => {
       stderr: "inherit",
     })
     expect(await waitFor(() => existsSync(pidFile), 10_000)).toBe(true)
+    expect(await waitFor(() => existsSync(readyFile), 10_000)).toBe(true)
     const grandchild = readGrandchildPid(pidFile)
     expect(pidAlive(grandchild)).toBe(true)
     driver.kill("SIGTERM")
@@ -388,12 +418,19 @@ describe("shard worker process lifecycle", () => {
     const strangerGrandchild = readGrandchildPid(stranger.pidFile)
     writeFileSync(strangerFile, String(stranger.handle.pid))
 
-    // Rewrite the first worker's recorded leader so it looks recycled.
-    const tracked = (registry as unknown as { tracked: Set<{ pgid: number; leader?: string }> })
-      .tracked
+    // Rewrite the stranger's recorded leader so its live identity no longer
+    // matches: a CONFIRMED different leader, which is the recycle case (and
+    // NOT the "we could not look" case, covered in
+    // tests/integration/test-shard-identity-safety.test.ts).
+    const tracked = (
+      registry as unknown as { tracked: Set<{ pgid: number; leader: LeaderIdentity }> }
+    ).tracked
     for (const worker of tracked) {
       if (worker.pgid === stranger.handle.pid) {
-        ;(worker as { leader?: string }).leader = "Thu Jan  1 00:00:00 1970 someone-else"
+        ;(worker as { leader: LeaderIdentity }).leader = {
+          kind: "identity",
+          value: "Thu Jan  1 00:00:00 1970 someone-else",
+        }
       }
     }
 
@@ -410,6 +447,7 @@ describe("shard worker process lifecycle", () => {
     expect(await stranger.handle.cancel()).toBe(false)
     expect(outcome.drained).toBe(false)
     expect(outcome.survivors).toContain(stranger.handle.pid)
+    expect(outcome.abandoned.map((group) => group.reason)).toEqual(["recycled"])
     await handle.exited.catch(() => undefined)
   }, 30_000)
 
@@ -421,24 +459,22 @@ describe("shard worker process lifecycle", () => {
     // unkillable by definition and holds no fd, port or working directory, so
     // counting it as alive turns a green 45-minute run red and leaves 97MB of
     // run root behind for nothing.
-    const ps = [
-      "  71030 Z",
-      "  71030 ?E",
-      "  71030 Z",
-      "  99999 S", // another group, still running — must not leak in
-    ].join("\n")
-    expect(groupStateLines(ps, 71030)).toEqual(["Z", "?E", "Z"])
-    expect(hasRunningMember(groupStateLines(ps, 71030))).toBe(false)
+    const rows = [
+      psRow({ pid: 71030, pgid: 71030, stat: "Z" }),
+      psRow({ pid: 71031, pgid: 71030, stat: "?E" }),
+      psRow({ pid: 71032, pgid: 71030, stat: "Z" }),
+      psRow({ pid: 99999, pgid: 99999, stat: "S" }), // another group — must not leak in
+    ]
+    expect(hasRunningMemberRows(rows, 71030)).toBe(false)
 
     // A genuinely running member still counts, whatever else is in the group.
-    const withLive = `${ps}\n  71030 S`
-    expect(hasRunningMember(groupStateLines(withLive, 71030))).toBe(true)
+    expect(hasRunningMemberRows([...rows, psRow({ pid: 71033, pgid: 71030 })], 71030)).toBe(true)
     // Common live states are not mistaken for exiting.
-    for (const state of ["S", "R", "S+", "SN", "U"]) {
-      expect(hasRunningMember([state]), state).toBe(true)
+    for (const stat of ["S", "R", "S+", "SN", "U"]) {
+      expect(hasRunningMemberRows([psRow({ pid: 7, pgid: 7, stat })], 7), stat).toBe(true)
     }
     // An empty group is drained.
-    expect(hasRunningMember(groupStateLines(ps, 12345))).toBe(false)
+    expect(hasRunningMemberRows(rows, 12345)).toBe(false)
   })
 
   test("a ps that did not run is 'still alive', never 'drained'", () => {
@@ -446,11 +482,30 @@ describe("shard worker process lifecycle", () => {
     // blessed and its run root deleted. Reading a failed probe as "drained"
     // would bless a run whose workers are still executing — silently, and
     // exactly on the boxes where the probe is most likely to fail.
-    expect(groupHasRunningMemberFromPs({ exitCode: 1, stdout: "" }, 71030)).toBe(true)
-    expect(groupHasRunningMemberFromPs({ exitCode: 127, stdout: "garbage" }, 71030)).toBe(true)
+    const unavailable: ProcessSnapshot = {
+      kind: "unavailable",
+      reason: "timeout",
+      detail: "ps never returned",
+    }
+    expect(probeGroupFromSnapshot(unavailable, 71030).kind).toBe("unobservable")
+    expect(probeGroupFromSnapshot(unavailable, 71030).kind).not.toBe("empty")
+    expect(
+      probeGroupFromSnapshot(
+        { kind: "unavailable", reason: "nonzero-exit", detail: "ps exited 127" },
+        71030,
+      ).kind,
+    ).not.toBe("empty")
     // And a probe that DID run is believed, in both directions.
-    expect(groupHasRunningMemberFromPs({ exitCode: 0, stdout: "  71030 Z" }, 71030)).toBe(false)
-    expect(groupHasRunningMemberFromPs({ exitCode: 0, stdout: "  71030 S" }, 71030)).toBe(true)
+    expect(
+      probeGroupFromSnapshot(
+        { kind: "ok", rows: [psRow({ pid: 71030, pgid: 71030, stat: "Z" })] },
+        71030,
+      ).kind,
+    ).toBe("empty")
+    expect(
+      probeGroupFromSnapshot({ kind: "ok", rows: [psRow({ pid: 71030, pgid: 71030 })] }, 71030)
+        .kind,
+    ).toBe("holds")
   })
 
   test("a spawn failure rejects the exit promise and tracks nothing", async () => {
@@ -473,21 +528,35 @@ describe("shard worker process lifecycle", () => {
     // kevent64 while holding one `<defunct>` child — a worker awaiting a
     // subprocess that had already exited, which narrows ~150 candidate files to
     // the ones that spawn.
-    const ps = [
-      "  4242   4242      1 Ss+     0.1    12:00 bun",
-      "  4242   4310   4242 Z       0.0    11:37 (bun)",
-      "  9999   9999      1 S       0.0    01:00 someone-else",
-    ].join("\n")
-    const rendered = describeProcessGroup(4242, { exitCode: 0, stdout: ps })
+    const snapshot: ProcessSnapshot = {
+      kind: "ok",
+      rows: [
+        psRow({ pid: 4242, ppid: 1, pgid: 4242, stat: "Ss+", pcpu: "0.1", etime: "12:00" }),
+        psRow({
+          pid: 4310,
+          ppid: 4242,
+          pgid: 4242,
+          stat: "Z",
+          pcpu: "0.0",
+          etime: "11:37",
+          comm: "(bun)",
+        }),
+        psRow({ pid: 9999, pgid: 9999, comm: "someone-else" }),
+      ],
+    }
+    const rendered = describeProcessGroup(4242, snapshot)
     expect(rendered).toContain("4310")
     expect(rendered).toContain("Z") // the zombie is the lead, so it must survive
+    expect(rendered).toContain("0.1") // %cpu — half of the one real diagnosis
     expect(rendered).not.toContain("someone-else") // another group must not leak in
     expect(rendered.split("\n")).toHaveLength(2)
 
     // A group with nothing in it, and a `ps` that did not run, each say so
     // rather than rendering an empty block that reads like "nothing wrong".
-    expect(describeProcessGroup(1234, { exitCode: 0, stdout: ps })).toBe("  <no members>")
-    expect(describeProcessGroup(4242, { exitCode: 1, stdout: "" })).toBe("  <ps unavailable>")
+    expect(describeProcessGroup(1234, snapshot)).toBe("  <no members>")
+    expect(
+      describeProcessGroup(4242, { kind: "unavailable", reason: "timeout", detail: "x" }),
+    ).toBe("  <ps unavailable: timeout>")
   })
 
   test("the real probe renders this process's own group", () => {
@@ -501,7 +570,7 @@ describe("shard worker process lifecycle", () => {
     )
     const rendered = describeProcessGroup(own)
     expect(rendered).not.toBe("  <no members>")
-    expect(rendered).not.toBe("  <ps unavailable>")
+    expect(rendered).not.toContain("<ps unavailable")
     expect(rendered).toContain(String(own))
   })
 })

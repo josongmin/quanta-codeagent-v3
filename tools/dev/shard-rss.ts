@@ -14,9 +14,24 @@
  * so the number a human reads when asking "can this host afford another
  * worker?" was reading an order of magnitude low.
  *
+ * # Why it is no longer two `ps` calls either
+ * It was `ps -Ao pid=,ppid=` to find the tree, then `ps -o rss= -p …` to price
+ * it: two unbounded synchronous spawns per sample, inside the same interval
+ * that owns the inactivity watchdog. Both now come out of ONE bounded snapshot
+ * (`process-observer`), which also carries the rows the drain check and the
+ * leader-identity check need — so a watchdog tick costs one `ps`, not four.
+ *
  * The parse is split from the spawn so the arithmetic is testable without a
  * process tree (tests/unit/shard-rss-sampling.test.ts).
  */
+
+import {
+  defaultProcessObserver,
+  type ProcessObserver,
+  type ProcessRow,
+  treeRssKib,
+  walkDescendants,
+} from "./process-observer"
 
 /** Sum every RSS row `ps` printed. A row that is not a positive integer (a
  *  header, a warning, a pid that vanished mid-sample) is skipped rather than
@@ -30,41 +45,39 @@ export const sumRssKib = (psOutput: string): number => {
   return total
 }
 
-/** Every descendant of `pid`, breadth-first. Bun's worker children are direct
- *  children today; the walk is general so a worker that spawns its own helper
- *  is still counted. Bounded so a pathological tree cannot stall the watchdog. */
+/** Every descendant of `pid`, breadth-first, from `ps -Ao pid=,ppid=` text.
+ *  Bun's worker children are direct children today; the walk is general so a
+ *  worker that spawns its own helper is still counted. Bounded so a
+ *  pathological (or self-parented) tree cannot stall the watchdog. */
 export const descendantPids = (pid: number, psAll: string, maxNodes = 512): readonly number[] => {
-  const childrenOf = new Map<number, number[]>()
+  const edges: { pid: number; ppid: number }[] = []
   for (const line of psAll.split("\n")) {
-    const fields = line.trim().split(/\s+/)
+    const fields = line.trim().split(/\s+/u)
     const child = Number.parseInt(fields[0] ?? "", 10)
     const parent = Number.parseInt(fields[1] ?? "", 10)
     if (!Number.isSafeInteger(child) || !Number.isSafeInteger(parent)) continue
-    const siblings = childrenOf.get(parent) ?? []
-    siblings.push(child)
-    childrenOf.set(parent, siblings)
+    edges.push({ pid: child, ppid: parent })
   }
-  const out: number[] = []
-  const queue = [pid]
-  const seen = new Set<number>([pid])
-  while (queue.length > 0 && out.length < maxNodes) {
-    const next = queue.shift()
-    if (next === undefined) break
-    for (const child of childrenOf.get(next) ?? []) {
-      if (seen.has(child)) continue
-      seen.add(child)
-      out.push(child)
-      queue.push(child)
-    }
-  }
-  return out
+  return walkDescendants(edges, pid, maxNodes)
 }
 
-/** Peak-RSS of the worker TREE in bytes. `0` means "could not measure", which
- *  the caller already treats as "leave the previous peak alone". */
-export const sampleTreeRssBytes = (pid: number): number => {
-  const all = Bun.spawnSync(["ps", "-Ao", "pid=,ppid="]).stdout.toString()
-  const pids = [pid, ...descendantPids(pid, all)]
-  const rows = Bun.spawnSync(["ps", "-o", "rss=", ...pids.flatMap((p) => ["-p", String(p)])])
-  return sumRssKib(rows.stdout.toString()) * 1024
+/** Peak-RSS of the worker TREE, in bytes, from rows already in hand. */
+export const treeRssBytesFromRows = (rows: readonly ProcessRow[], pid: number): number =>
+  treeRssKib(rows, pid) * 1024
+
+/**
+ * Peak-RSS of the worker TREE in bytes.
+ *
+ * `0` means "could not measure", which the caller already treats as "leave the
+ * previous peak alone". An unavailable snapshot lands there too: a bounded
+ * failure to observe must read as no measurement, never as a worker that
+ * suddenly uses nothing.
+ */
+export const sampleTreeRssBytes = (
+  pid: number,
+  observer: ProcessObserver = defaultProcessObserver(),
+): number => {
+  const snapshot = observer.snapshot()
+  if (snapshot.kind !== "ok") return 0
+  return treeRssBytesFromRows(snapshot.rows, pid)
 }

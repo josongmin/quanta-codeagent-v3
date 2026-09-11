@@ -22,7 +22,25 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { descendantPids, sumRssKib } from "../../tools/dev/shard-rss"
+import { createProcessObserver, type ProcessRow } from "../../tools/dev/process-observer"
+import {
+  descendantPids,
+  sampleTreeRssBytes,
+  sumRssKib,
+  treeRssBytesFromRows,
+} from "../../tools/dev/shard-rss"
+
+const psRow = (over: Partial<ProcessRow> & Pick<ProcessRow, "pid">): ProcessRow => ({
+  ppid: 1,
+  pgid: over.pid,
+  stat: "S",
+  rssKib: 0,
+  pcpu: "0.0",
+  etime: "01:00",
+  started: "Fri Sep 11 23:13:04 2026",
+  comm: "bun",
+  ...over,
+})
 
 describe("shard RSS sampling — a worker is its whole tree", () => {
   test("sums every row `ps` returns, not just the first", () => {
@@ -66,5 +84,40 @@ describe("shard RSS sampling — a worker is its whole tree", () => {
 
   test("negative or absurd values are ignored", () => {
     expect(sumRssKib("  -5\n  2048\n")).toBe(2048)
+  })
+
+  test("ONE snapshot now prices the tree — it used to be two unbounded `ps` calls", () => {
+    // The sample is a pure function of rows the drain check and the identity
+    // check already needed, so a watchdog tick costs one `ps`, not four.
+    let calls = 0
+    const observer = createProcessObserver({
+      spawn: () => {
+        calls += 1
+        return {
+          exitCode: 0,
+          stdout: [
+            "  100     1   100 S     1024   0.0 01:00 Fri Sep 11 23:13:04 2026 /usr/bin/bun",
+            "  101   100   100 S     2048   0.0 01:00 Fri Sep 11 23:13:04 2026 /usr/bin/bun",
+            "  103   101   100 S      256   0.0 01:00 Fri Sep 11 23:13:04 2026 /usr/bin/bun",
+            "  200     1   200 S 99999999   0.0 01:00 Fri Sep 11 23:13:04 2026 /usr/bin/other",
+          ].join("\n"),
+        }
+      },
+    })
+
+    expect(sampleTreeRssBytes(100, observer)).toBe((1024 + 2048 + 256) * 1024)
+    expect(calls).toBe(1)
+  })
+
+  test("★ an unavailable snapshot reads as NO MEASUREMENT (0), never a shrunken worker", () => {
+    // `0` is what the caller already treats as "leave the previous peak alone".
+    // A bounded probe that could not run must land there rather than reporting
+    // a worker that suddenly uses nothing.
+    const observer = createProcessObserver({
+      spawn: () => ({ exitCode: null, signalCode: "SIGTERM", stdout: "" }),
+    })
+    expect(sampleTreeRssBytes(100, observer)).toBe(0)
+    // PAIRED CONTROL — the same pid against readable rows is non-zero.
+    expect(treeRssBytesFromRows([psRow({ pid: 100, rssKib: 4096 })], 100)).toBe(4096 * 1024)
   })
 })

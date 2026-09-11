@@ -1,5 +1,20 @@
 import { spawn } from "node:child_process"
 import { rmSync } from "node:fs"
+import {
+  DEFAULT_POLL_SCHEDULE,
+  defaultProcessObserver,
+  hasRunningMemberRows,
+  type LeaderIdentity,
+  leaderIdentityFromSnapshot,
+  nextPollDelay,
+  type PollSchedule,
+  type ProcessObserver,
+  type ProcessSnapshot,
+  renderProcessRow,
+  rowsInGroup,
+  type SnapshotUnavailableReason,
+  seededObserver,
+} from "./process-observer"
 
 /**
  * Process lifecycle for the full-suite shard runner.
@@ -53,61 +68,56 @@ export interface SpawnShardWorkerOptions {
 export interface KillProcessTreeOptions {
   readonly termGraceMs?: number
   readonly killGraceMs?: number
+  /** First poll interval. Later polls back off geometrically toward `maxPollMs`. */
   readonly pollMs?: number
+  readonly maxPollMs?: number
+  /** Injection seam: observer, existence probe, signal sink, clock. */
+  readonly deps?: Partial<ProcessLifecycleDeps>
+  /** A snapshot already taken this tick, spent as the first observation. */
+  readonly seedSnapshot?: ProcessSnapshot
+}
+
+/** A group this campaign could not finish accounting for. */
+export interface AbandonedGroup {
+  readonly pgid: number
+  /**
+   * `recycled`   — the leader is alive with a CONFIRMED different identity.
+   * `unverified` — identity is unknown (at spawn, at kill, or both), so there
+   *                is no evidence this group is ours.
+   */
+  readonly reason: "recycled" | "unverified"
+  readonly detail: string
 }
 
 export interface DrainOutcome {
   readonly drained: boolean
+  /** Groups still holding resources, plus every group we had to abandon. */
   readonly survivors: readonly number[]
+  readonly abandoned: readonly AbandonedGroup[]
 }
 
 /**
- * Does this process group still hold a RUNNING member?
+ * Everything in this file that touches the OS, in one injectable bundle.
  *
- * `kill(-pgid, 0)` answers "does the kernel still know this group", and a
- * ZOMBIE answers yes: it is a reaped-pending table entry, unkillable by
- * definition (SIGKILL to a zombie is a no-op) and holding no fds, ports or
- * working directory. Counting them as alive made the drain check report
- * "survived SIGKILL" over four `<defunct>` entries and refuse an otherwise
- * green 45-minute campaign — measured, on the first full-suite run that
- * reached the end.
- *
- * So the cheap syscall stays the fast path, and only when it says "yes" is the
- * group's actual membership inspected.
+ * `observer` is the only thing that spawns; `groupExists` is a syscall;
+ * `now`/`sleep` are the clock. A test can therefore drive a 70-second survivor
+ * in microseconds and still assert the REAL poll arithmetic and the REAL signal
+ * sequence, rather than a mock of them.
  */
-export const groupStateLines = (psOutput: string, pgid: number): readonly string[] =>
-  psOutput
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line !== "")
-    .filter((line) => Number.parseInt(line.split(/\s+/)[0] ?? "", 10) === pgid)
-    .map((line) => line.split(/\s+/)[1] ?? "")
-
-/** A member is live unless the kernel has it in Z (zombie) or E (exiting). */
-export const hasRunningMember = (states: readonly string[]): boolean =>
-  states.some((state) => !state.startsWith("Z") && !state.includes("E"))
-
-/**
- * The decision, separated from the spawn so BOTH branches are testable.
- *
- * A `ps` that did not run answers nothing, and "nothing" must not read as
- * "drained": that is the direction in which a wrong answer blesses a campaign
- * whose workers are still executing.
- */
-export const groupHasRunningMemberFromPs = (
-  ps: { readonly exitCode: number; readonly stdout: string },
-  pgid: number,
-): boolean => {
-  if (ps.exitCode !== 0) return true // cannot tell — fail closed to "alive"
-  return hasRunningMember(groupStateLines(ps.stdout, pgid))
+export interface ProcessLifecycleDeps {
+  readonly observer: ProcessObserver
+  readonly groupExists: (pgid: number) => boolean
+  readonly signal: (pgid: number, signal: NodeJS.Signals) => void
+  readonly now: () => number
+  readonly sleep: (ms: number) => Promise<void>
 }
 
-const groupHasRunningMember = (pgid: number): boolean => {
-  const result = Bun.spawnSync(["ps", "-Ao", "pgid=,stat="], { stdout: "pipe", stderr: "ignore" })
-  return groupHasRunningMemberFromPs(
-    { exitCode: result.exitCode ?? 1, stdout: result.stdout.toString() },
-    pgid,
-  )
+const signalGroup = (pgid: number, signal: NodeJS.Signals): void => {
+  try {
+    process.kill(-pgid, signal)
+  } catch {
+    // The whole group already exited; nothing left to signal.
+  }
 }
 
 /** Literal existence: does the kernel still know this group at all. */
@@ -120,83 +130,210 @@ export const processGroupAlive = (pgid: number): boolean => {
   }
 }
 
-/**
- * Does the group still HOLD anything — the question a drain actually asks.
- *
- * Deliberately weaker than existence: a group of zombies exists and cannot be
- * killed, but owns no fd, port or working directory, so waiting for it is
- * waiting forever and refusing the campaign over it is refusing over nothing.
- */
-export const processGroupHoldsResources = (pgid: number): boolean =>
-  processGroupAlive(pgid) && groupHasRunningMember(pgid)
+export const resolveProcessLifecycleDeps = (
+  partial: Partial<ProcessLifecycleDeps> = {},
+): ProcessLifecycleDeps => ({
+  observer: partial.observer ?? defaultProcessObserver(),
+  groupExists: partial.groupExists ?? processGroupAlive,
+  signal: partial.signal ?? signalGroup,
+  now: partial.now ?? (() => Date.now()),
+  sleep: partial.sleep ?? ((ms: number) => Bun.sleep(ms)),
+})
 
 /**
- * Identity of a process group's LEADER, as start time + command.
+ * Does this process group still HOLD anything — the question a drain asks.
  *
- * A pgid is just a recycled pid. Between a group emptying and the registry
- * observing it, the OS can hand that pid to an unrelated process which then
- * leads a group with the same number — and a campaign that kills by pgid alone
- * would SIGKILL a stranger's process tree. A full suite spawns thousands of
- * processes, so this is narrow but not fanciful, and the blast radius is
- * someone else's work.
- *
- * `undefined` means the leader is gone. That case is SAFE to kill: anything
- * still in the group is our own descendant, and a recycled pid that had
- * claimed this group number would itself be alive and caught by the
- * comparison instead.
+ * Three answers, not two. `unobservable` is NOT `holds` and NOT `empty`: the
+ * drain loop fails it closed to "still there" (so a campaign is never blessed
+ * on a probe that did not run), while the kill path reports it as a typed
+ * failure rather than as a group that survived SIGKILL.
  */
-const leaderIdentity = (pgid: number): string | undefined => {
-  const result = Bun.spawnSync(["ps", "-o", "lstart=,comm=", "-p", String(pgid)], {
-    stdout: "pipe",
-    stderr: "ignore",
-  })
-  if (result.exitCode !== 0) return undefined
-  const line = result.stdout.toString().trim()
-  return line === "" ? undefined : line
+export type GroupProbe =
+  | { readonly kind: "empty" }
+  | { readonly kind: "holds" }
+  | {
+      readonly kind: "unobservable"
+      readonly reason: SnapshotUnavailableReason
+      readonly detail: string
+    }
+
+export const probeGroupFromSnapshot = (snapshot: ProcessSnapshot, pgid: number): GroupProbe => {
+  if (snapshot.kind === "unavailable") {
+    return { kind: "unobservable", reason: snapshot.reason, detail: snapshot.detail }
+  }
+  return hasRunningMemberRows(snapshot.rows, pgid) ? { kind: "holds" } : { kind: "empty" }
 }
 
-const signalGroup = (pgid: number, signal: NodeJS.Signals): void => {
-  try {
-    process.kill(-pgid, signal)
-  } catch {
-    // The whole group already exited; nothing left to signal.
+/**
+ * `kill(-pgid, 0)` stays the fast path: a group the kernel has forgotten costs
+ * ZERO snapshots, which is the overwhelmingly common case on every tick of a
+ * healthy campaign. Only when the kernel still knows the group is the table
+ * read — and only then can a zombie-vs-running distinction matter.
+ */
+const probeGroup = (pgid: number, deps: ProcessLifecycleDeps): GroupProbe =>
+  deps.groupExists(pgid)
+    ? probeGroupFromSnapshot(deps.observer.snapshot(), pgid)
+    : { kind: "empty" }
+
+/**
+ * Does the group still hold resources? Deliberately weaker than existence: a
+ * group of zombies exists and cannot be killed, but owns no fd, port or working
+ * directory, so waiting for it is waiting forever and refusing the campaign
+ * over it is refusing over nothing.
+ */
+export const processGroupHoldsResources = (
+  pgid: number,
+  deps: Partial<ProcessLifecycleDeps> = {},
+): boolean => probeGroup(pgid, resolveProcessLifecycleDeps(deps)).kind !== "empty"
+
+const scheduleFor = (options: KillProcessTreeOptions): PollSchedule => {
+  const initialMs = options.pollMs ?? DEFAULT_POLL_SCHEDULE.initialMs
+  return {
+    initialMs,
+    maxMs: Math.max(initialMs, options.maxPollMs ?? DEFAULT_POLL_SCHEDULE.maxMs),
+    factor: DEFAULT_POLL_SCHEDULE.factor,
   }
 }
 
+/**
+ * Poll until the group empties or the deadline passes.
+ *
+ * The backoff is the whole point. A flat 50ms poll across the campaign's
+ * 60s TERM + 10s KILL grace is up to ~1,400 `ps` spawns for ONE group, on a box
+ * that is already unhealthy enough to need a 60s grace. Geometric 50ms→3s costs
+ * ~35 for the same 70 seconds and still notices a normal death in 50ms.
+ */
 const waitForEmptyGroup = async (
   pgid: number,
   deadline: number,
-  pollMs: number,
-): Promise<boolean> => {
-  while (processGroupHoldsResources(pgid)) {
-    if (Date.now() >= deadline) return false
-    await Bun.sleep(pollMs)
+  deps: ProcessLifecycleDeps,
+  schedule: PollSchedule,
+): Promise<GroupProbe> => {
+  let attempt = 0
+  for (;;) {
+    const probe = probeGroup(pgid, deps)
+    if (probe.kind === "empty") return probe
+    const remaining = deadline - deps.now()
+    if (remaining <= 0) return probe
+    await deps.sleep(Math.min(nextPollDelay(attempt, schedule), remaining))
+    attempt += 1
   }
-  return true
 }
 
 /**
- * SIGTERM the group, escalate to SIGKILL, and report whether it emptied.
- * Bounded: worst case termGraceMs + killGraceMs, never an unbounded wait.
+ * What a kill attempt is allowed to conclude.
+ *
+ * `unobservable` exists so "we could not see whether it died" never renders as
+ * either success or "survived SIGKILL": it is its own outcome, it keeps
+ * `drained` false, and it names the reason the observer gave.
  */
+export type KillTreeOutcome =
+  | { readonly kind: "emptied" }
+  | { readonly kind: "survived" }
+  | {
+      readonly kind: "unobservable"
+      readonly reason: SnapshotUnavailableReason
+      readonly detail: string
+    }
+
+/**
+ * SIGTERM the group, escalate to SIGKILL, and report a typed outcome.
+ *
+ * Bounded twice over: by wall clock (termGraceMs + killGraceMs, on the injected
+ * clock) AND by observation budget (the backoff schedule). An observer that
+ * never answers can no longer stall this — it answers `unavailable` at its own
+ * timeout and the loop keeps its deadline.
+ */
+export const killProcessTreeOutcome = async (
+  pgid: number,
+  options: KillProcessTreeOptions = {},
+): Promise<KillTreeOutcome> => {
+  const base = resolveProcessLifecycleDeps(options.deps)
+  const deps: ProcessLifecycleDeps =
+    options.seedSnapshot === undefined
+      ? base
+      : { ...base, observer: seededObserver(base.observer, options.seedSnapshot) }
+  const schedule = scheduleFor(options)
+  if (probeGroup(pgid, deps).kind === "empty") return { kind: "emptied" }
+  deps.signal(pgid, "SIGTERM")
+  const termDeadline = deps.now() + (options.termGraceMs ?? 2_000)
+  if ((await waitForEmptyGroup(pgid, termDeadline, deps, schedule)).kind === "empty") {
+    return { kind: "emptied" }
+  }
+  deps.signal(pgid, "SIGKILL")
+  const killDeadline = deps.now() + (options.killGraceMs ?? 5_000)
+  const afterKill = await waitForEmptyGroup(pgid, killDeadline, deps, schedule)
+  if (afterKill.kind === "empty") return { kind: "emptied" }
+  return afterKill.kind === "unobservable"
+    ? { kind: "unobservable", reason: afterKill.reason, detail: afterKill.detail }
+    : { kind: "survived" }
+}
+
+/** Boolean form: did the group actually empty. */
 export const killProcessTree = async (
   pgid: number,
   options: KillProcessTreeOptions = {},
-): Promise<boolean> => {
-  const termGraceMs = options.termGraceMs ?? 2_000
-  const killGraceMs = options.killGraceMs ?? 5_000
-  const pollMs = options.pollMs ?? 50
-  if (!processGroupHoldsResources(pgid)) return true
-  signalGroup(pgid, "SIGTERM")
-  if (await waitForEmptyGroup(pgid, Date.now() + termGraceMs, pollMs)) return true
-  signalGroup(pgid, "SIGKILL")
-  return waitForEmptyGroup(pgid, Date.now() + killGraceMs, pollMs)
+): Promise<boolean> => (await killProcessTreeOutcome(pgid, options)).kind === "emptied"
+
+/**
+ * May this group be signalled, given what we knew at spawn and what we can see
+ * now? The single decision the pid-recycle guard turns on, pure and total.
+ *
+ * The rule that changed: `unknown` is NEVER safe. The old code compared
+ * `string | undefined` and read `undefined` as "leader exited, go ahead", so a
+ * `ps` that failed — at spawn OR at kill time — silently disabled the guard
+ * entirely, precisely on the boxes sick enough to make pid recycling plausible.
+ * Unknown now means "no evidence this group is ours", which is a refusal.
+ *
+ * `leader-exited` on BOTH sides stays safe-to-kill and that is deliberate:
+ * anything still in a leaderless group is our own descendant, and a recycled
+ * pid that had claimed this group number would itself be alive and so be caught
+ * by the identity comparison instead.
+ */
+export type KillTargetVerdict =
+  | { readonly kind: "ours" }
+  | { readonly kind: "leader-exited" }
+  | { readonly kind: "recycled"; readonly detail: string }
+  | { readonly kind: "unverified"; readonly detail: string }
+
+export const classifyKillTarget = (
+  recorded: LeaderIdentity,
+  current: LeaderIdentity,
+): KillTargetVerdict => {
+  if (current.kind === "unknown") {
+    return { kind: "unverified", detail: `identity unreadable at kill time (${current.reason})` }
+  }
+  if (recorded.kind === "unknown") {
+    return { kind: "unverified", detail: `identity unreadable at spawn time (${recorded.reason})` }
+  }
+  if (current.kind === "leader-exited") {
+    return recorded.kind === "leader-exited" || recorded.kind === "identity"
+      ? { kind: "leader-exited" }
+      : { kind: "unverified", detail: "no recorded identity to compare" }
+  }
+  if (recorded.kind === "leader-exited") {
+    // We recorded "no leader" and now a leader is alive: that is a process we
+    // have never identified, so it is not ours to signal.
+    return { kind: "unverified", detail: "a leader appeared that was absent at spawn" }
+  }
+  return recorded.value === current.value
+    ? { kind: "ours" }
+    : { kind: "recycled", detail: `leader identity changed: ${recorded.value} -> ${current.value}` }
+}
+
+/** Verdicts that permit a signal. Exhaustive by construction, so a new verdict
+ *  must be classified here rather than defaulting into "go ahead and kill". */
+export const KILL_TARGET_PERMITS_SIGNAL: Readonly<Record<KillTargetVerdict["kind"], boolean>> = {
+  ours: true,
+  "leader-exited": true,
+  recycled: false,
+  unverified: false,
 }
 
 interface TrackedWorker {
   readonly pgid: number
-  /** Leader identity at spawn; `undefined` when it exited before we looked. */
-  readonly leader: string | undefined
+  /** Leader identity at spawn — typed, so "we could not look" survives. */
+  readonly leader: LeaderIdentity
   cancelled: boolean
 }
 
@@ -208,12 +345,19 @@ interface TrackedWorker {
  */
 export class ShardProcessRegistry {
   private readonly tracked = new Set<TrackedWorker>()
-  /** Groups abandoned because their leader pid was recycled by the OS. */
-  private readonly recycled = new Set<number>()
+  /** Groups this campaign could not finish accounting for, and why. */
+  private readonly abandoned = new Map<number, AbandonedGroup>()
   private readonly killOptions: KillProcessTreeOptions
+  private readonly deps: ProcessLifecycleDeps
 
   constructor(killOptions: KillProcessTreeOptions = {}) {
     this.killOptions = killOptions
+    this.deps = resolveProcessLifecycleDeps(killOptions.deps)
+  }
+
+  /** How many times this registry has read the process table. Asserted. */
+  observerCalls(): number {
+    return this.deps.observer.calls
   }
 
   liveGroups(): readonly number[] {
@@ -221,9 +365,22 @@ export class ShardProcessRegistry {
     return [...this.tracked].map((worker) => worker.pgid)
   }
 
+  /**
+   * Drop every group the kernel has forgotten — using at most ONE snapshot for
+   * the whole set, not one per worker. `groupExists` is a syscall, so a sweep
+   * over groups that are all gone (the normal case) still costs zero spawns.
+   */
   private sweep(): void {
-    for (const worker of [...this.tracked]) {
-      if (!processGroupHoldsResources(worker.pgid)) this.tracked.delete(worker)
+    const live = [...this.tracked].filter((worker) => this.deps.groupExists(worker.pgid))
+    for (const worker of this.tracked) {
+      if (!live.includes(worker)) this.tracked.delete(worker)
+    }
+    if (live.length === 0) return
+    const snapshot = this.deps.observer.snapshot()
+    // An unreadable table is not evidence of a drain: keep every group tracked.
+    if (snapshot.kind !== "ok") return
+    for (const worker of live) {
+      if (!hasRunningMemberRows(snapshot.rows, worker.pgid)) this.tracked.delete(worker)
     }
   }
 
@@ -256,7 +413,17 @@ export class ShardProcessRegistry {
         cancel: () => Promise.resolve(true),
       }
     }
-    const worker: TrackedWorker = { pgid: pid, leader: leaderIdentity(pid), cancelled: false }
+    const worker: TrackedWorker = {
+      pgid: pid,
+      // A TARGETED probe, not a whole-table read: this is the one identity
+      // question with no other consumer to share a snapshot with, and it runs
+      // synchronously on the spawn path. MEASURED, the difference is ~41ms vs
+      // ~77ms of blocked event loop per worker — enough, on this host, to move
+      // a campaign driver's SIGTERM-handler installation past the point where
+      // its first worker is already running.
+      leader: this.deps.observer.identity(pid),
+      cancelled: false,
+    }
     this.tracked.add(worker)
     const registry = this
     return {
@@ -273,34 +440,64 @@ export class ShardProcessRegistry {
   }
 
   /**
-   * Kill every tracked live group and wait (bounded) for each to empty.
-   * Returns the groups that survived even SIGKILL; those keep the campaign's
-   * run root on disk so a live descendant never has its cwd deleted.
-   */
-  /**
    * Kill one tracked group, but only after confirming it is still OURS.
    *
-   * If the leader is alive with a DIFFERENT identity than the one recorded at
-   * spawn, the pid was recycled: the group now belongs to a stranger. Killing
-   * it would be the worst kind of bug this file can have, so the worker is
-   * dropped from tracking untouched and the campaign continues.
+   * Two ways to fail that confirmation, and NEITHER may send a signal:
+   *
+   *  - `recycled`   — the leader is alive with a confirmed different identity.
+   *                   The pid was reused; this tree belongs to a stranger, and
+   *                   SIGKILLing it is the worst bug this file can have.
+   *  - `unverified` — identity is unknown (the `ps` that would have answered
+   *                   failed, at spawn or now). There is no evidence the group
+   *                   is ours, and "no evidence" is not permission.
+   *
+   * Either way the worker leaves tracking untouched and is recorded as
+   * abandoned, so the campaign reports `drained: false` rather than deleting a
+   * run root out from under processes it can no longer identify.
    */
   private async killTracked(worker: TrackedWorker): Promise<boolean> {
-    const current = leaderIdentity(worker.pgid)
-    if (current !== undefined && worker.leader !== undefined && current !== worker.leader) {
-      // The pid was recycled: this group is a stranger's, so it is neither
-      // killed nor tracked. It is also NOT evidence that our descendants
-      // drained — claiming "emptied" here would let the campaign delete a run
-      // root out from under processes it can no longer identify.
+    const snapshot = this.deps.observer.snapshot()
+    const verdict = classifyKillTarget(
+      worker.leader,
+      leaderIdentityFromSnapshot(snapshot, worker.pgid),
+    )
+    if (!KILL_TARGET_PERMITS_SIGNAL[verdict.kind]) {
       this.tracked.delete(worker)
-      this.recycled.add(worker.pgid)
+      this.abandoned.set(worker.pgid, {
+        pgid: worker.pgid,
+        reason: verdict.kind === "recycled" ? "recycled" : "unverified",
+        detail: verdict.kind === "ours" || verdict.kind === "leader-exited" ? "" : verdict.detail,
+      })
       return false
     }
-    const emptied = await killProcessTree(worker.pgid, this.killOptions)
-    if (emptied) this.tracked.delete(worker)
-    return emptied
+    const outcome = await killProcessTreeOutcome(worker.pgid, {
+      ...this.killOptions,
+      deps: this.deps,
+      // The identity snapshot above is this tick's observation; spend it as the
+      // kill path's first probe instead of asking the kernel the same question
+      // a microsecond later.
+      seedSnapshot: snapshot,
+    })
+    if (outcome.kind === "emptied") {
+      this.tracked.delete(worker)
+      return true
+    }
+    if (outcome.kind === "unobservable") {
+      this.tracked.delete(worker)
+      this.abandoned.set(worker.pgid, {
+        pgid: worker.pgid,
+        reason: "unverified",
+        detail: `drain unobservable (${outcome.reason}): ${outcome.detail}`,
+      })
+    }
+    return false
   }
 
+  /**
+   * Kill every tracked live group and wait (bounded) for each to empty.
+   * Survivors and abandoned groups both keep the campaign's run root on disk,
+   * so a live descendant never has its cwd deleted.
+   */
   async cancelAll(): Promise<DrainOutcome> {
     this.sweep()
     await Promise.all(
@@ -311,12 +508,13 @@ export class ShardProcessRegistry {
     )
     this.sweep()
     const survivors = [...this.tracked].map((worker) => worker.pgid)
-    // A recycled group was never observed empty, so the campaign cannot claim
+    // An abandoned group was never observed empty, so the campaign cannot claim
     // a clean drain — it can only report which groups it had to abandon.
-    const abandoned = [...this.recycled]
+    const abandoned = [...this.abandoned.values()]
     return {
       drained: survivors.length === 0 && abandoned.length === 0,
-      survivors: [...survivors, ...abandoned],
+      survivors: [...survivors, ...abandoned.map((group) => group.pgid)],
+      abandoned,
     }
   }
 }
@@ -501,20 +699,11 @@ export const terminateCampaignOnSignal = async (
  */
 export const describeProcessGroup = (
   pgid: number,
-  ps: { readonly exitCode: number; readonly stdout: string } = psSnapshot(),
+  snapshot: ProcessSnapshot = defaultProcessObserver().snapshot(),
 ): string => {
-  if (ps.exitCode !== 0) return "  <ps unavailable>"
-  const rows = ps.stdout
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => Number.parseInt(line.split(/\s+/)[0] ?? "", 10) === pgid)
-  return rows.length === 0 ? "  <no members>" : rows.map((row) => `  ${row}`).join("\n")
-}
-
-const psSnapshot = (): { exitCode: number; stdout: string } => {
-  const result = Bun.spawnSync(["ps", "-Ao", "pgid=,pid=,ppid=,stat=,pcpu=,etime=,comm="], {
-    stdout: "pipe",
-    stderr: "ignore",
-  })
-  return { exitCode: result.exitCode ?? 1, stdout: result.stdout.toString() }
+  if (snapshot.kind === "unavailable") return `  <ps unavailable: ${snapshot.reason}>`
+  const rows = rowsInGroup(snapshot.rows, pgid)
+  return rows.length === 0
+    ? "  <no members>"
+    : rows.map((row) => `  ${renderProcessRow(row)}`).join("\n")
 }

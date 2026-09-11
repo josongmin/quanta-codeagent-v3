@@ -32,7 +32,14 @@ const CAMPAIGN_MODULES = [
   "verification-result.ts",
   "test-shard-lease.ts",
   "test-shard-lifecycle.ts",
+  // `test-shard-lifecycle` imports the bounded `ps` adapter; without it the
+  // scratch campaign cannot even module-load.
+  "process-observer.ts",
   "gate-manifest.ts",
+  // `gate.ts` validates the manifest against its exact (id, stage) contract
+  // before the listing path and the run path diverge, so the scratch campaign
+  // needs the validator module too.
+  "gate-manifest-contract.ts",
   "verification-tier.ts",
   "verification-nightly-manifest.ts",
   "verification-receipt.ts",
@@ -129,6 +136,8 @@ export interface Gate {
   readonly notInWorkflow?: string
 }
 export const GATES: readonly Gate[] = ${JSON.stringify(entries, null, 2)}
+export const GATE_CONTRACT: readonly { readonly id: string; readonly stage: GateStage }[] =
+  GATES.map((gate) => ({ id: gate.id, stage: gate.stage }))
 export const gatesForStage = (stage: GateStage): readonly Gate[] =>
   stage === "precommit" ? GATES.filter((gate) => gate.stage === "precommit") : GATES
 export const gatesForVerificationTier = (_tier: string): readonly Gate[] => GATES
@@ -150,7 +159,13 @@ describe("campaign fixtures that copy gate.ts", () => {
     const campaignModules = new Set<string>(CAMPAIGN_MODULES)
     expect(specs.length).toBeGreaterThan(5)
     for (const spec of specs) {
-      if (spec === "gate-manifest") continue
+      if (spec === "gate-manifest") {
+        // The synthetic manifest above stands in for the real one, and it must
+        // carry its own contract because `gate.ts` validates the exact
+        // (id, stage) set before it dispatches anything.
+        expect(syntheticManifestSource(["true"])).toContain("GATE_CONTRACT")
+        continue
+      }
       expect(campaignModules.has(`${spec}.ts`)).toBeTrue()
     }
   })
