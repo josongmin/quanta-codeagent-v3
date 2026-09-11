@@ -57,3 +57,18 @@
   DAG 전환의 선행 조건이 충족됐다.
 - 남은 항목: gate schema 확장(`dependsOn[]`/`resources[]`/`timeout`/`outputBudget`),
   ready-set 병렬 실행, bounded lifecycle primitive로 `Bun.spawnSync` 교체, 단일 admission deadline.
+
+## 추가 진행 (2026-09-12)
+
+- **LANDED `c48602062`** — ready-set 스케줄러(`tools/dev/gate-dag.ts`).
+  `stepGatePlan`은 의존이 없어도 manifest 순서대로 전부 await하므로 top-level wall이
+  critical path가 아니라 **합**이다. 의존 표현도 부족했다: `consumes?: string` 하나로는
+  "A와 B를 모두 기다린다"도, "둘 다 checkout에 쓰니 겹치지 마라"도 말할 수 없다.
+  `--keep-going`은 병렬화가 아니라 실패 후에도 같은 직렬 목록을 계속 돌리는 것이었다.
+  구분 2가지: `consumes`=산출물을 읽음(실패 시 poison), `dependsOn`=순서만(poison 없음).
+  기본 concurrency 2 — 여기 gate는 전부 실 toolchain이고, 경합이 "느린 정답"이 아니라
+  "다르게 타이밍된 오답"을 만든다는 측정 전례가 있다.
+  뮤턴트 5개 전부 killed.
+- **아직 배선 안 됨**: `gate.ts`의 `Bun.spawnSync(["sh","-c",gate.run])` 교체는
+  bounded child lifecycle primitive가 필요하고 그건 TVH-15 lane에서 진행 중이다.
+  shell-command 모드·process-group kill·signal 전달이 필요해 반만 하면 더 위험하다.

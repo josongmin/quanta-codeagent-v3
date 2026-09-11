@@ -52,3 +52,22 @@
 - [ ] spool 전체를 runner memory에 다시 적재하지 않는다.
 - [ ] CPU/time뿐 아니라 RSS/temp/output가 scheduler의 실제 입력이다.
 - [ ] resource exhaustion 결과가 일반 assertion failure와 구분된다.
+
+## 진행 (2026-09-12)
+
+- **LANDED `c1a87073d`** — 확정 결함 2·3.
+  watchdog이 `spoolBytes !== lastSpoolBytes → progressed` 한 줄로 liveness를 판정했다.
+  어떤 바이트든 쓰이면 12분 inactivity 타이머가 리셋되므로 `console.log` 루프에 빠진 워커가
+  **가장 살아있는 것으로 측정**되어 JOB timeout까지 간다(= watchdog이 지키려던 바로 그 외곽 경계).
+  total wall bound는 아예 없었다.
+  이제 3중 bound + typed outcome이고, **절대 bound 2개를 progress 휴리스틱보다 먼저** 평가한다
+  (결함의 본질이 bound를 무효화할 수 있는 휴리스틱이었다):
+  inactivity 12분 / total wall 40분 / output cap 512MiB.
+  또한 timeout 진단과 정상 종료가 둘 다 `readFileSync(spool,"utf8")`로 **전체를 메모리에 적재**했다.
+  runner 자신의 RSS가 보호 대상인데 병리적 producer에 대한 대응이 그 산출물 전량 적재였다.
+  이제 파일 끝에서 bounded window만 positional read하고, 초과 시 그 사실과 전체 경로를 출력한다.
+- 뮤턴트 4개 전부 killed.
+
+### 남은 항목
+- RSS soft/hard limit을 admission에 연결, temp disk free-space preflight,
+  predicted peak RSS/output/temp를 scheduler 입력으로, owned scratch TTL/GC.

@@ -74,3 +74,29 @@
 ## 복구
 
 matrix 불일치나 artifact 누락이 발생하면 required authority는 monolith로 유지한다. timeout 확대, missing artifact 무시, skipped green으로 승격하지 않는다.
+
+## 진행 (2026-09-12)
+
+- **LANDED `e0b20052a`** — concurrency lane 3종 결함.
+  - `ci.yml` 키가 `${WF}-${REF}`였다. `schedule` 이벤트의 `github.ref`는 `refs/heads/main`이라
+    push와 구분 불가 → 06:00 eval cron과 required main verification이 **같은 lane**을 썼다.
+    non-blocking 60분 eval이 머지 게이트를 큐에 세울 수 있었다. 키에 event 추가.
+  - `fc-gate.yml`은 concurrency 블록 자체가 없었다(같은 PR의 required context인데).
+    superseded commit의 catalog run이 계속 돌았다. ci.yml과 같은 키 형태로 추가.
+  - `verification-nightly.yml`도 없었다 → cron/manual/retry가 180분 cache-off 캠페인을
+    3개까지 겹칠 수 있었다. **cancel하지 않고 queue**한다(170분째 취소는 그날 유일한
+    deterministic 증거를 버리는 것).
+- **artifact retention**: 7개 업로드 전부 repository default 상속이었다. kind별로 명시:
+  worker receipt/JUnit 3일(바이트의 대부분, aggregate 생기면 즉시 무의미) /
+  frozen plan·eval report 14일 / aggregate verdict·capability 실행증명 30일.
+  가드는 **숫자가 아니라 순서**를 단언한다(튜닝은 정당, worker가 aggregate보다 오래 사는 건 부당).
+- 뮤턴트 5개 전부 killed.
+
+### 남은 항목 (외부 blocker 포함)
+
+- 승격 단계 4~8(monolith↔matrix exact verdict equality, hosted artifact, branch protection
+  live read-back)은 **hosted 실행이 필요**하다. GitHub Actions 빌링이 2026-07-10부터 차단돼
+  job이 시작조차 하지 않으므로 이건 코드가 아니라 **권한/결제 blocker**다.
+- shadow matrix 44개 one-chunk job의 checkout+install 반복, plan/aggregate/required의
+  불필요한 runner 구매는 미착수.
+  단, `required`는 이제 `yaml` 의존을 쓰므로(producer SSOT의 workflow 파싱) dependency-free가 아니다.
