@@ -3,9 +3,11 @@ import { join } from "node:path"
 import {
   acquireKeyedTestShardLeases,
   acquireTestShardLease,
+  canonicalLeaseRequests,
   inheritedTestShardLeaseState,
   normalizeRepositoryIdentity,
   readCommittedRepositoryLeaseId,
+  SHARED_LEASE_SLOTS,
   selectRepositoryLeaseIdentity,
   testShardLeasePort,
 } from "../../tools/dev/test-shard-lease"
@@ -218,7 +220,9 @@ describe("full-suite repository lease", () => {
       waitMs: 5_000,
       pollMs: 5,
     })
-    expect(first.keys).toEqual(["git-common", "port:4317"])
+    // Labels carry the MODE: a bare string key means `exclusive`, which is
+    // what every caller meant before modes existed.
+    expect(first.keys).toEqual(["git-common:exclusive", "port:4317:exclusive"])
 
     let waitingOn: string | undefined
     const secondPending = acquireKeyedTestShardLeases({
@@ -242,9 +246,141 @@ describe("full-suite repository lease", () => {
     const reacquired = await acquireKeyedTestShardLeases({
       scopeIdentity,
       keys: ["git-common", "port:4317"],
-      waitMs: 500,
+      waitMs: 5_000,
       pollMs: 5,
     })
     reacquired.release()
+    // An explicit budget, because the default 5s per-test timeout is the same
+    // number as this test's own lease `waitMs`: an exclusive key is a gate plus
+    // every reader slot, and a contender pays up to one 500ms identity probe
+    // per poll, so on a loaded host the two deadlines raced each other.
+  }, 30_000)
+})
+
+describe("keyed resource leases", () => {
+  const scope = (name: string): string => `keyed-mode-${name}-${process.pid}-${Date.now()}`
+
+  test("two SHARED holders of one key overlap; an exclusive holder excludes both", async () => {
+    const scopeIdentity = scope("shared")
+    const first = await acquireKeyedTestShardLeases({
+      scopeIdentity,
+      keys: [{ key: "cache", mode: "shared" }],
+      waitMs: 5_000,
+      pollMs: 5,
+    })
+    const second = await acquireKeyedTestShardLeases({
+      scopeIdentity,
+      keys: [{ key: "cache", mode: "shared" }],
+      waitMs: 5_000,
+      pollMs: 5,
+    })
+    try {
+      // The whole point of a mode: shared/shared is the ONLY pair that runs
+      // together, and it really does run together rather than queueing.
+      expect(first.keys).toEqual(["cache:shared"])
+      expect(second.keys).toEqual(["cache:shared"])
+      expect(first.ports[0]).not.toBe(second.ports[0])
+      // shared/exclusive must NOT.
+      await expect(
+        acquireKeyedTestShardLeases({
+          scopeIdentity,
+          keys: [{ key: "cache", mode: "exclusive" }],
+          waitMs: 250,
+          pollMs: 5,
+        }),
+      ).rejects.toThrow()
+    } finally {
+      first.release()
+      second.release()
+    }
+    // Once both readers leave, the writer gets in — so the exclusion above was
+    // contention, not a deadlock.
+    const writer = await acquireKeyedTestShardLeases({
+      scopeIdentity,
+      keys: [{ key: "cache", mode: "exclusive" }],
+      waitMs: 5_000,
+      pollMs: 5,
+    })
+    try {
+      expect(writer.keys).toEqual(["cache:exclusive"])
+      // A writer holds the gate and every reader slot; that is what makes it
+      // exclusive against readers a port bind alone could not express.
+      expect(writer.ports).toHaveLength(SHARED_LEASE_SLOTS + 1)
+      await expect(
+        acquireKeyedTestShardLeases({
+          scopeIdentity,
+          keys: [{ key: "cache", mode: "shared" }],
+          waitMs: 250,
+          pollMs: 5,
+        }),
+      ).rejects.toThrow()
+    } finally {
+      writer.release()
+    }
+  })
+
+  test("a resource key is hashed RAW — repository normalization would collapse it", () => {
+    // `normalizeRepositoryIdentity` extracts the trailing `owner/repo` of a git
+    // remote. Applied to a composite resource key that contains a path it keeps
+    // the last two segments and DISCARDS the scope and the key name, so two
+    // different keys in two different checkouts hash to one port.
+    const left = "scope-a\u0000checkout:/Users/one/quanta/repo"
+    const right = "scope-b\u0000git-common:/Users/two/quanta/repo"
+    expect(normalizeRepositoryIdentity(left)).toBe(normalizeRepositoryIdentity(right))
+    expect(testShardLeasePort(left)).not.toBe(testShardLeasePort(right))
+  })
+
+  test("opposite key orders reach the same canonical order, so neither waits on the other", () => {
+    const forward = canonicalLeaseRequests(["checkout", { key: "cache", mode: "shared" }])
+    const reverse = canonicalLeaseRequests([{ key: "cache", mode: "shared" }, "checkout"])
+    expect(forward).toEqual(reverse)
+    expect(forward.map(({ key }) => key)).toEqual(["cache", "checkout"])
+    // A key requested both ways resolves to the STRICTER mode: taking the
+    // shared row would hand the caller a lock that does not exclude its peer.
+    expect(
+      canonicalLeaseRequests([
+        { key: "cache", mode: "shared" },
+        { key: "cache", mode: "exclusive" },
+      ]),
+    ).toEqual([{ key: "cache", mode: "exclusive" }])
+    expect(
+      canonicalLeaseRequests([
+        { key: "cache", mode: "exclusive" },
+        { key: "cache", mode: "shared" },
+      ]),
+    ).toEqual([{ key: "cache", mode: "exclusive" }])
+  })
+
+  test("a failed second key releases the first, so a retry is not self-blocked", async () => {
+    const scopeIdentity = scope("rollback")
+    const blocker = await acquireKeyedTestShardLeases({
+      scopeIdentity,
+      keys: ["checkout"],
+      waitMs: 5_000,
+      pollMs: 5,
+    })
+    try {
+      await expect(
+        acquireKeyedTestShardLeases({
+          scopeIdentity,
+          keys: ["cache", "checkout"],
+          waitMs: 200,
+          pollMs: 5,
+        }),
+      ).rejects.toThrow()
+      // `cache` was acquired first and must NOT be stranded: without reverse
+      // rollback the failed attempt would hold it forever and every retry —
+      // including this one — would block on the campaign's own orphan.
+      const cacheOnly = await acquireKeyedTestShardLeases({
+        scopeIdentity,
+        keys: ["cache"],
+        waitMs: 500,
+        pollMs: 5,
+      })
+      expect(cacheOnly.keys).toEqual(["cache:exclusive"])
+      cacheOnly.release()
+    } finally {
+      blocker.release()
+    }
   })
 })

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs"
 import { type CapabilityLane, capabilityMembershipFor } from "./test-capability-manifest"
-import { classifyTestResource } from "./test-shard-plan"
+import { policyTestResources } from "./test-resource-resolution"
 import type { VerificationTier } from "./verification-result"
 
 export type TestCost = "small" | "medium" | "large"
@@ -170,13 +170,20 @@ const pathRunner = (id: string): TestRunnerKind => {
   return "bun"
 }
 
-const pathResources = (id: string): readonly string[] => {
-  if (id.startsWith("tests/contract/")) return ["exclusive", "docker"]
-  if (id.startsWith("tests/e2e-pty/")) return ["exclusive", "pty"]
-  if (id.includes("apps/web-frontend/")) return ["exclusive"]
-  const classified = classifyTestResource(id, "")
-  return classified === "pure" ? [] : [classified]
-}
+/**
+ * One SOURCE-AWARE resolution, shared with the planner.
+ *
+ * This used to call `classifyTestResource(id, "")` with an EMPTY source, so the
+ * path heuristic always won and `policy.resources` described a file nobody had
+ * read. Measured: 362 of 3,962 files disagreed with what the planner computed
+ * from the real source — the policy layer's `resources` field was fiction, and
+ * the scheduler was not consuming it anyway.
+ *
+ * The three out-of-band prefixes are kept inside the shared resolver: their
+ * `exclusive` marker is a statement about the COMMAND that runs them, not about
+ * the file's source.
+ */
+const pathResources = (id: string): readonly string[] => policyTestResources(id)
 
 /** Which population a discovered id belongs to. One decision, in one place. */
 const classifyPolicy = (

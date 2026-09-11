@@ -1,6 +1,17 @@
-import { readFileSync } from "node:fs"
-
+import {
+  CLASS_RESOURCE_CLAIMS,
+  mergeResourceClaims,
+  type ResourceClaim,
+  resourceClassFor,
+  scheduleClaimsOverlap,
+  TEST_RESOURCE_CLASSES,
+  type TestResourceClass,
+} from "./test-resource-claims"
+import { resolveTestResource } from "./test-resource-resolution"
 import { bucketForFile, DEFAULT_MEMBERSHIP } from "./test-shard-membership"
+
+export type { ResourceClaim }
+export { TEST_RESOURCE_CLASSES, type TestResourceClass }
 
 export interface MemoryBudget {
   readonly totalBytes: number
@@ -125,104 +136,63 @@ export const nextOverloadDelayMs = (input: OverloadDelayInput): number => {
 }
 
 /**
- * Resource classes. A class names the process-global or checkout-global
- * resource a test file observably uses; only INCOMPATIBLE classes serialize.
- * "pure" files (no detected shared resource) may overlap anything — they
- * already overlap each other today, and a file that touches nothing shared
- * cannot corrupt a resource-owning peer.
- */
-export const TEST_RESOURCE_CLASSES = [
-  "pure",
-  "worktree",
-  "repo-write",
-  "browser",
-  "lsp",
-  "port",
-  "process-global",
-  "integration-path",
-] as const
-
-export type TestResourceClass = (typeof TEST_RESOURCE_CLASSES)[number]
-
-/** Source detectors, most specific first; the first match names the class. */
-const CLASS_SOURCE_DETECTORS: readonly (readonly [TestResourceClass, RegExp])[] = [
-  // Shell form ("git worktree add …") AND argv-array form (["worktree", "add"]).
-  ["worktree", /\bgit\s+worktree\b|\bworktree\b[^\n]{0,40}\b(?:add|remove|prune|lock)\b/],
-  [
-    "repo-write",
-    /\b(?:writeFileSync|rmSync|renameSync|unlinkSync)\s*\([^\n]*(?:REPO_ROOT|repoRoot|process\.cwd\s*\(\s*\))/,
-  ],
-  // `REAL_CHROME` is this repo's own real-spawn gate: the browser e2e flips it
-  // only once a live CDP session exists. It is listed because the four tokens
-  // beside it are OTHER projects' vocabulary — our CDP adapter says `cdp` and
-  // `chrome`, so the one test that actually spawns Chrome scored zero matches
-  // and got overlapped with 135 integration files (2026-09-02 gate audit: a 60s
-  // navigate timeout that reproduces 0/4 in isolation). Deliberately NOT a bare
-  // /cdp|chrome/ — that reclassifies 56 files, nearly all pure unit tests with
-  // no browser, and serializes the suite for nothing.
-  ["browser", /puppeteer|playwright|chromium|--headless|REAL_CHROME/i],
-  ["lsp", /\b(?:typescript-language-server|pyright|rust-analyzer|gopls|lldb|lsp)\b/i],
-  [
-    "port",
-    /\bBun\.listen\s*\(|\b(?:createServer|createConnection)\s*\(|\b(?:localhost|127\.0\.0\.1):\d{2,5}\b/,
-  ],
-  [
-    "process-global",
-    /\b(?:killProcessTree|process\.kill)\s*\(|\b(?:QUANTA_HOME|QUANTA_BENCH_HOME|process\.env\.HOME)\b/,
-  ],
-] as const
-
-const SHARED_RESOURCE_PATH =
-  /(?:^|\/)(?:integration|e2e)(?:\/|$)|(?:git|worktree|mcp|lsp|server|socket|process-tree|multi-process)/i
-
-/**
- * Classify one test file. Source evidence wins over the path heuristic: a
- * path-only match (integration/e2e naming) with no specific marker lands in
- * "integration-path", which stays serialized against every non-pure class.
- */
-export const classifyTestResource = (
-  file: string,
-  source: string = readFileSync(file, "utf8"),
-): TestResourceClass => {
-  for (const [resourceClass, pattern] of CLASS_SOURCE_DETECTORS) {
-    if (pattern.test(source)) return resourceClass
-  }
-  return SHARED_RESOURCE_PATH.test(file) ? "integration-path" : "pure"
-}
-
-/**
- * Non-pure classes serialize against EVERY non-pure class until a specific
- * pair is measured safe under real contention. This is already strictly more
- * parallel than the previous binary plan: the exclusive corpus (19.6% of the
- * suite, formerly 100% serial waves) now overlaps the pure corpus.
- */
-const VALIDATED_NONPURE_OVERLAPS: ReadonlySet<string> = new Set()
-
-const overlapKey = (a: TestResourceClass, b: TestResourceClass): string => [a, b].sort().join("+")
-
-/**
- * Classes measured unsafe even against `pure`.
+ * Classify one test file.
  *
- * `pure` overlapping everything is this plan's whole parallelism win, and it
- * holds for every resource whose hazard is its KIND — two `port` chunks fight
- * over sockets, a `pure` peer cannot. A real browser is the exception: what
- * breaks it is the peer's CPU appetite, which `pure` says nothing about. The
- * 2026-09-02 gate audit measured it twice — a real-Chrome file lost an HONORED,
- * pressure-scaled 60,000ms CDP budget by 1.88ms while scheduled beside a 137-file
- * `pure` chunk, and passed 3/3 alone. Another timeout multiplier would only
- * record the contention as if it were a property of the code.
+ * A thin projection over the ONE shared resolution (`test-resource-resolution
+ * .ts`), which reads the file once and derives the class and the typed claim
+ * set from the same bytes. It used to read the file here and `test-policy.ts`
+ * read nothing at all, which is how 359 files came to carry two different
+ * answers.
  *
- * Safe because the scheduler starts a task unconditionally when nothing is
- * running (`test-shard-lifecycle.ts` `startEligibleTasks`), so an exclusive
- * chunk waits for an empty box rather than starving. Pinned by
- * "an exclusive class still runs" in tests/unit/test-shard-plan.test.ts.
+ * `source` is for synthetic callers (unit tests, fixtures) only. Passing `""`
+ * still means "classify this path with no source evidence" — that is what the
+ * path fallback is for — but no production caller does it any more.
  */
-const EXCLUSIVE_CLASSES: ReadonlySet<TestResourceClass> = new Set<TestResourceClass>(["browser"])
+export const classifyTestResource = (file: string, source?: string): TestResourceClass =>
+  source === undefined ? resolveTestResource(file).resourceClass : resourceClassFor(file, source)
 
+/**
+ * May chunks of these two classes run at the same time?
+ *
+ * Now COMPUTED from claim sets rather than from a hand-kept pair table. The
+ * answer is byte-identical to the table it replaces — `pure` beside anything
+ * except `browser`, every other pair serial — and
+ * `tests/unit/dev/test-resource-claims.test.ts` asserts that over the full
+ * 8x8 matrix rather than over the four pairs somebody remembered.
+ *
+ * The two facts that produce it:
+ *
+ *  - every non-`pure` class claims `unknown`, because first-match
+ *    classification stopped at ONE detector and never enumerated the rest. An
+ *    `unknown` holder may overlap a peer that holds nothing and nothing else.
+ *  - `browser` claims `host-cpu: exclusive`. What breaks a real browser is the
+ *    PEER's CPU appetite, which no resource kind models: measured 2026-09-02, a
+ *    real-Chrome file lost an HONOURED, pressure-scaled 60,000ms CDP budget by
+ *    1.88ms beside a 137-file `pure` chunk, and passed 3/3 alone.
+ *
+ * `VALIDATED_NONPURE_OVERLAPS`, the empty allowlist this replaces, could only
+ * ever be widened by hand-editing a set literal. A certified claim set widens
+ * it by ENUMERATING what the file owns, which is reviewable and drift-checked.
+ */
 export const resourceClassesOverlap = (a: TestResourceClass, b: TestResourceClass): boolean =>
-  EXCLUSIVE_CLASSES.has(a) || EXCLUSIVE_CLASSES.has(b)
-    ? false
-    : a === "pure" || b === "pure" || VALIDATED_NONPURE_OVERLAPS.has(overlapKey(a, b))
+  scheduleClaimsOverlap(CLASS_RESOURCE_CLAIMS[a], CLASS_RESOURCE_CLAIMS[b])
+
+/**
+ * May these two chunks run at the same time, given what their files claim?
+ *
+ * The claim-set form of `resourceClassesOverlap`, and the one that certification
+ * actually buys something from: two chunks whose certified keys are disjoint
+ * may overlap even though both are non-`pure`.
+ *
+ * NOT yet wired into the production scheduler. `run-test-shards.ts` passes
+ * CLASS labels to `runResourceAwareSchedule`, is owned by the integrator, and
+ * — the part that matters — enabling a new overlap needs a 1/2/4-worker
+ * equality canary, which cannot be produced from a lane that is forbidden to
+ * run a campaign. The call-site diff and the canary it is gated on are in
+ * `docs/plans/sep-12-test-verification-hardening/handoff-tvh04.md`.
+ */
+export const chunkClaimsOverlap = (left: TestChunk, right: TestChunk): boolean =>
+  scheduleClaimsOverlap(left.claims, right.claims)
 
 export interface TestChunk {
   readonly index: number
@@ -230,6 +200,15 @@ export interface TestChunk {
   readonly resourceClass: TestResourceClass
   /** Sum of measured per-file wall estimates (fallback-weighted when unmeasured). */
   readonly predictedMs: number
+  /**
+   * The union of every member file's resolved claims.
+   *
+   * A chunk is scheduled as a unit, so it owns everything any member owns.
+   * Union, never intersection: one uncertified file in a chunk of certified
+   * peers contributes `unknown` and the whole chunk stays exclusive, which is
+   * the only safe reading of "one of these files might do anything".
+   */
+  readonly claims: readonly ResourceClaim[]
 }
 
 export interface PlanTestChunksOptions {
@@ -254,6 +233,12 @@ export interface PlanTestChunksOptions {
   readonly classify?: (file: string) => TestResourceClass
   /** Canonical repo-relative identity used for stable membership hashing. */
   readonly membershipFile?: (file: string) => string
+  /**
+   * What one file claims. Defaults to the shared resolution, so a certified
+   * file exposes its reviewed claim set and every other file exposes its
+   * class's — which carries `unknown`.
+   */
+  readonly resolveClaims?: (file: string) => readonly ResourceClaim[]
 }
 
 /** Checkpoint bound: a failed campaign forfeits at most this many files of
@@ -314,6 +299,7 @@ interface UnindexedChunk {
   readonly files: readonly string[]
   readonly resourceClass: TestResourceClass
   readonly predictedMs: number
+  readonly claims: readonly ResourceClaim[]
 }
 
 /**
@@ -379,6 +365,7 @@ const chunkOneGroup = (
   group: readonly WeightedFile[],
   _totalWeight: number,
   membershipFile: (file: string) => string,
+  resolveClaims: (file: string) => readonly ResourceClaim[],
 ): UnindexedChunk[] => {
   const bins = new Map<number, WeightedFile[]>()
   for (const entry of group) {
@@ -398,6 +385,7 @@ const chunkOneGroup = (
           files: [...part].map(({ file }) => file).sort(),
           resourceClass,
           predictedMs: Math.round(ordered.reduce((sum, entry) => sum + entry.weightMs, 0)),
+          claims: mergeResourceClaims(...part.map(({ file }) => resolveClaims(file))),
         }
       }),
     )
@@ -416,6 +404,14 @@ export const planTestChunks = (
   const classify = options.classify ?? classifyTestResource
   const predictMs = options.predictMs ?? (() => undefined)
   const membershipFile = options.membershipFile ?? ((file: string) => file)
+  // When a caller supplies its own `classify` (synthetic plans in tests), the
+  // claims must follow THAT class, or a chunk would carry the claims of a
+  // classification the plan does not use.
+  const resolveClaims =
+    options.resolveClaims ??
+    (options.classify === undefined
+      ? (file: string) => resolveTestResource(file).claims
+      : (file: string) => CLASS_RESOURCE_CLAIMS[classify(file)])
   if (options.targetChunkCount !== undefined) {
     throw new Error(
       "[test:shards] targetChunkCount is not supported: membership is fixed per-class SHA " +
@@ -428,7 +424,7 @@ export const planTestChunks = (
   const groups = groupWeightedFiles(sorted, classify, predictMs)
   const totalWeight = [...groups.values()].flat().reduce((sum, entry) => sum + entry.weightMs, 0)
   const chunks = [...groups.entries()].flatMap(([resourceClass, group]) =>
-    chunkOneGroup(resourceClass, group, totalWeight, membershipFile),
+    chunkOneGroup(resourceClass, group, totalWeight, membershipFile, resolveClaims),
   )
 
   // Deterministic indices derived from composition (class + first file), so a

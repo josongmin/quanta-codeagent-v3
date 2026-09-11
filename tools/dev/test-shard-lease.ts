@@ -15,7 +15,15 @@ export interface TestShardLease {
   release(): void
 }
 
+export type LeaseMode = "shared" | "exclusive"
+
+export interface KeyedLeaseRequest {
+  readonly key: string
+  readonly mode: LeaseMode
+}
+
 export interface KeyedTestShardLease {
+  /** Canonical `key:mode` strings, in the order they were acquired. */
   readonly keys: readonly string[]
   readonly ports: readonly number[]
   release(): void
@@ -24,9 +32,30 @@ export interface KeyedTestShardLease {
 export interface KeyedTestShardLeaseOptions
   extends Omit<TestShardLeaseOptions, "identity" | "onWait"> {
   readonly scopeIdentity: string
-  readonly keys: readonly string[]
+  /** A bare string means `exclusive`, which is what every caller meant before
+   *  modes existed. */
+  readonly keys: readonly (string | KeyedLeaseRequest)[]
   readonly onWait?: (key: string, port: number, elapsedMs: number) => void
 }
+
+/**
+ * How many concurrent SHARED holders one key admits.
+ *
+ * A kernel port bind is a mutex, not a reader-writer lock, so shared mode is
+ * built from a fixed pool of reader slots plus a gate. Bounded on purpose: the
+ * fifth shared holder of a key waits, which is a concurrency cap rather than a
+ * correctness property, and it keeps the port space per key at a constant 5.
+ *
+ * FOUR, not eight, and the difference was measured. An exclusive holder takes
+ * the gate AND every slot, so the pool size is also the number of sequential
+ * binds an exclusive acquisition pays — and a contender that has to re-probe
+ * pays up to `LEASE_PROBE_TIMEOUT_MS` per poll on top. At eight, the existing
+ * two-key rollback test (5s budget, calibrated when a key was one port) went
+ * intermittently over its deadline on a loaded host: 1 failure in 6 runs,
+ * 0 in 6 at four slots. The runner overlaps at most two workers, so four
+ * concurrent readers of one key is headroom, not a constraint.
+ */
+export const SHARED_LEASE_SLOTS = 4
 
 export interface TestShardLeaseOptions {
   readonly identity: string
@@ -239,8 +268,25 @@ const leaseFromListener = (
  */
 export const acquireTestShardLease = async (
   options: TestShardLeaseOptions,
+): Promise<TestShardLease> =>
+  acquireRawTestShardLease(normalizeRepositoryIdentity(options.identity), options)
+
+/**
+ * Acquire on an identity string EXACTLY as given.
+ *
+ * `acquireTestShardLease` runs its identity through
+ * `normalizeRepositoryIdentity`, which extracts the trailing `owner/repo` of a
+ * git remote. Applied to a composite resource key that contains a path —
+ * `<scope>\0checkout:/Users/x/repo` — that regex keeps the last two path
+ * segments and DISCARDS the scope and the key name, so two different keys in
+ * two different checkouts can hash to the same port and one silently waits on
+ * the other. Repository identities are normalised; resource keys are hashed
+ * raw.
+ */
+const acquireRawTestShardLease = async (
+  identity: string,
+  options: Omit<TestShardLeaseOptions, "identity">,
 ): Promise<TestShardLease> => {
-  const identity = normalizeRepositoryIdentity(options.identity)
   const port = testShardLeasePort(identity)
   const digest = leaseDigest(identity)
   const waitMs = options.waitMs ?? 90 * 60_000
@@ -280,39 +326,169 @@ export const acquireTestShardLease = async (
  * scheduler before it requests host locks. Partial acquisition is rolled back
  * in reverse order so a failed second key cannot strand the first.
  */
+/**
+ * One canonical request list: deduplicated by key, EXCLUSIVE wins a tie, then
+ * sorted by key.
+ *
+ * Sorting is what makes opposite acquisition orders deadlock-free — two
+ * campaigns asking for `{cache, checkout}` and `{checkout, cache}` both take
+ * `cache` first. Exclusive-wins is not a preference either: a caller that
+ * claims one key both ways needs the stricter of the two, and taking the
+ * shared row would hand it a lock that does not exclude its own peer.
+ */
+export const canonicalLeaseRequests = (
+  keys: readonly (string | KeyedLeaseRequest)[],
+): readonly KeyedLeaseRequest[] => {
+  const byKey = new Map<string, LeaseMode>()
+  for (const entry of keys) {
+    const request: KeyedLeaseRequest =
+      typeof entry === "string" ? { key: entry, mode: "exclusive" } : entry
+    if (byKey.get(request.key) === "exclusive") continue
+    byKey.set(request.key, request.mode)
+  }
+  return [...byKey.entries()]
+    .map(([key, mode]) => ({ key, mode }))
+    .sort((left, right) => (left.key < right.key ? -1 : left.key > right.key ? 1 : 0))
+}
+
+const slotIdentity = (scope: string, key: string, slot: string): string =>
+  `${scope}\0${key}\0${slot}`
+
+/** Bind without waiting. `undefined` means somebody else holds it right now. */
+const tryHoldLease = (identity: string): TestShardLease | undefined => {
+  const port = testShardLeasePort(identity)
+  const listener = tryListen(port, leaseDigest(identity))
+  return listener === undefined ? undefined : leaseFromListener(port, listener)
+}
+
+interface KeyAcquisition {
+  readonly leases: readonly TestShardLease[]
+  readonly label: string
+}
+
+/**
+ * Acquire one key in one mode.
+ *
+ * EXCLUSIVE takes the gate and then every reader slot: no reader can arrive
+ * while the gate is held, and the slots it waits on are the readers already
+ * running, so it makes progress instead of racing them forever.
+ *
+ * SHARED takes the gate only long enough to claim a free slot and hands it
+ * straight back, so two shared holders of the same key overlap while an
+ * exclusive holder still excludes both.
+ */
+type WaitForIdentity = (identity: string) => Promise<TestShardLease>
+
+const waiterFor = (
+  request: KeyedLeaseRequest,
+  options: KeyedTestShardLeaseOptions,
+  deadline: number,
+): WaitForIdentity => {
+  const rest = {
+    ...(options.pollMs === undefined ? {} : { pollMs: options.pollMs }),
+    ...(options.heartbeatMs === undefined ? {} : { heartbeatMs: options.heartbeatMs }),
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+  }
+  return (identity) =>
+    acquireRawTestShardLease(identity, {
+      waitMs: Math.max(1, deadline - Date.now()),
+      ...rest,
+      onWait: (port, waitedMs) => options.onWait?.(request.key, port, waitedMs),
+    })
+}
+
+/** The gate AND every reader slot: no reader can arrive while the gate is
+ *  held, and the slots it waits on are the readers already running. */
+const acquireExclusiveKey = async (
+  request: KeyedLeaseRequest,
+  scopeIdentity: string,
+  wait: WaitForIdentity,
+): Promise<KeyAcquisition> => {
+  const held: TestShardLease[] = [await wait(slotIdentity(scopeIdentity, request.key, "gate"))]
+  try {
+    for (let slot = 0; slot < SHARED_LEASE_SLOTS; slot += 1) {
+      held.push(await wait(slotIdentity(scopeIdentity, request.key, `slot${slot}`)))
+    }
+  } catch (error) {
+    for (const lease of [...held].reverse()) lease.release()
+    throw error
+  }
+  return { leases: held, label: `${request.key}:exclusive` }
+}
+
+/** The gate only long enough to claim a free slot, so two shared holders of
+ *  the same key overlap while an exclusive holder still excludes both. */
+const acquireSharedKey = async (
+  request: KeyedLeaseRequest,
+  options: KeyedTestShardLeaseOptions,
+  deadline: number,
+  startedAt: number,
+  wait: WaitForIdentity,
+): Promise<KeyAcquisition> => {
+  const gateIdentity = slotIdentity(options.scopeIdentity, request.key, "gate")
+  const pollMs = options.pollMs ?? 1_000
+  while (true) {
+    const gate = await wait(gateIdentity)
+    try {
+      for (let slot = 0; slot < SHARED_LEASE_SLOTS; slot += 1) {
+        const held = tryHoldLease(slotIdentity(options.scopeIdentity, request.key, `slot${slot}`))
+        if (held !== undefined) return { leases: [held], label: `${request.key}:shared` }
+      }
+    } finally {
+      // Always hand the gate back: holding it while waiting for a slot would
+      // block the very readers whose exit frees one.
+      gate.release()
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `[test:shards] shared lease for ${request.key} timed out: all ${SHARED_LEASE_SLOTS} slots busy`,
+      )
+    }
+    options.onWait?.(request.key, testShardLeasePort(gateIdentity), Date.now() - startedAt)
+    await Bun.sleep(Math.min(pollMs, Math.max(1, deadline - Date.now())))
+  }
+}
+
+const acquireOneKey = async (
+  request: KeyedLeaseRequest,
+  options: KeyedTestShardLeaseOptions,
+  deadline: number,
+  startedAt: number,
+): Promise<KeyAcquisition> => {
+  const wait = waiterFor(request, options, deadline)
+  return request.mode === "exclusive"
+    ? acquireExclusiveKey(request, options.scopeIdentity, wait)
+    : acquireSharedKey(request, options, deadline, startedAt, wait)
+}
+
 export const acquireKeyedTestShardLeases = async (
   options: KeyedTestShardLeaseOptions,
 ): Promise<KeyedTestShardLease> => {
-  const keys = [...new Set(options.keys)].sort((left, right) => left.localeCompare(right))
-  const acquired: TestShardLease[] = []
+  const requests = canonicalLeaseRequests(options.keys)
+  const acquired: KeyAcquisition[] = []
   const startedAt = Date.now()
+  const deadline = startedAt + (options.waitMs ?? 90 * 60_000)
   try {
-    for (const key of keys) {
-      const elapsedMs = Date.now() - startedAt
-      const remainingMs = Math.max(1, (options.waitMs ?? 90 * 60_000) - elapsedMs)
-      acquired.push(
-        await acquireTestShardLease({
-          identity: `${options.scopeIdentity}\0${key}`,
-          waitMs: remainingMs,
-          ...(options.pollMs === undefined ? {} : { pollMs: options.pollMs }),
-          ...(options.heartbeatMs === undefined ? {} : { heartbeatMs: options.heartbeatMs }),
-          ...(options.signal === undefined ? {} : { signal: options.signal }),
-          onWait: (port, waitedMs) => options.onWait?.(key, port, waitedMs),
-        }),
-      )
+    for (const request of requests) {
+      acquired.push(await acquireOneKey(request, options, deadline, startedAt))
     }
   } catch (error) {
-    for (const lease of acquired.reverse()) lease.release()
+    // Reverse order, so a failed second key can never strand the first.
+    for (const entry of [...acquired].reverse()) {
+      for (const lease of [...entry.leases].reverse()) lease.release()
+    }
     throw error
   }
   let released = false
   return {
-    keys,
-    ports: acquired.map(({ port }) => port),
+    keys: acquired.map(({ label }) => label),
+    ports: acquired.flatMap(({ leases }) => leases.map(({ port }) => port)),
     release() {
       if (released) return
       released = true
-      for (const lease of acquired.reverse()) lease.release()
+      for (const entry of [...acquired].reverse()) {
+        for (const lease of [...entry.leases].reverse()) lease.release()
+      }
     },
   }
 }

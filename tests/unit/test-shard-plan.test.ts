@@ -134,6 +134,7 @@ describe("resource-classed chunk plan", () => {
         files: ["a.test.ts", "a.test.ts"],
         resourceClass: "pure" as const,
         predictedMs: 1,
+        claims: [],
       },
     ]
     expect(() => assertTestChunkPlan(files, chunks)).toThrow("partition is not exact")
@@ -652,13 +653,15 @@ describe("same-INPUTS successful shard cache", () => {
     const receiptPath = join(directory, "cache", "shard-1.json")
     writeFileSync(testFile, "test('a', () => expect(1).toBe(1))\n")
     const identity = {
+      scopeKind: "whole-tree" as const,
       treeSha256: "a".repeat(64),
       suite: "full",
       manifestSha256: "b".repeat(64),
       shardIndex: 1,
       shardFileCount: 1,
       shardFilesSha256: shardFilesSha256(directory, [testFile]),
-      toolchainSha256: "c".repeat(64),
+      runtimeSha256: "9".repeat(64),
+      toolScopeSha256: "c".repeat(64),
       testEnvSha256: testEnvironmentSha256(
         { QUANTA_TEST_KNOB: "super-secret-cache-input" },
         120_000,
@@ -668,6 +671,8 @@ describe("same-INPUTS successful shard cache", () => {
       intraParallel: 1,
       executionPolicySha256: "f".repeat(64),
       inputScopeSha256: "1".repeat(64),
+      timeoutPolicySha256: "2".repeat(64),
+      producerReceiptsSha256: "3".repeat(64),
     }
     const nowMs = 1_800_000_000_000
     writeSuccessfulTestShardReceiptAtomic({
@@ -675,11 +680,19 @@ describe("same-INPUTS successful shard cache", () => {
       identity,
       executedFiles: 1,
       scanReachRecords: [{ id: "guard", walked: 4, matched: 2 }],
+      testTimeoutMs: 120_000,
+      timingObservations: [],
+      scopeReason: "test",
       nowMs,
     })
 
     expect(
-      loadSuccessfulTestShardReceipt({ path: receiptPath, expected: identity, nowMs }).kind,
+      loadSuccessfulTestShardReceipt({
+        path: receiptPath,
+        expected: identity,
+        expectedTestTimeoutMs: 120_000,
+        nowMs,
+      }).kind,
     ).toBe("hit")
     const identityMutations = [
       // The code under test — this REPLACED the git HEAD sha, which invalidated
@@ -689,13 +702,23 @@ describe("same-INPUTS successful shard cache", () => {
       { ...identity, manifestSha256: "d".repeat(64) },
       { ...identity, shardFileCount: 2 },
       { ...identity, shardFilesSha256: "d".repeat(64) },
-      { ...identity, toolchainSha256: "d".repeat(64) },
+      { ...identity, runtimeSha256: "8".repeat(64) },
+      { ...identity, toolScopeSha256: "d".repeat(64) },
+      { ...identity, timeoutPolicySha256: "8".repeat(64) },
+      { ...identity, producerReceiptsSha256: "8".repeat(64) },
       { ...identity, testEnvSha256: "d".repeat(64) },
       { ...identity, junit: true },
       { ...identity, inputScopeSha256: "d".repeat(64) },
     ]
     for (const expected of identityMutations) {
-      expect(loadSuccessfulTestShardReceipt({ path: receiptPath, expected, nowMs })).toEqual({
+      expect(
+        loadSuccessfulTestShardReceipt({
+          path: receiptPath,
+          expected,
+          expectedTestTimeoutMs: 120_000,
+          nowMs,
+        }),
+      ).toEqual({
         kind: "miss",
         reason: "input-mismatch",
       })
@@ -704,6 +727,7 @@ describe("same-INPUTS successful shard cache", () => {
     expect(
       loadSuccessfulTestShardReceipt({
         path: receiptPath,
+        expectedTestTimeoutMs: 120_000,
         expected: { ...identity, intraParallel: 8 },
         nowMs,
       }),
@@ -715,6 +739,7 @@ describe("same-INPUTS successful shard cache", () => {
     expect(
       loadSuccessfulTestShardReceipt({
         path: receiptPath,
+        expectedTestTimeoutMs: 120_000,
         expected: { ...identity, shardIndex: 2 },
         nowMs,
       }).kind,
@@ -722,6 +747,7 @@ describe("same-INPUTS successful shard cache", () => {
     expect(
       loadSuccessfulTestShardReceipt({
         path: receiptPath,
+        expectedTestTimeoutMs: 120_000,
         expected: identity,
         nowMs: nowMs + TEST_SHARD_CACHE_TTL_MS,
       }),
@@ -733,7 +759,12 @@ describe("same-INPUTS successful shard cache", () => {
     expect(shardFilesSha256(directory, [testFile])).not.toBe(identity.shardFilesSha256)
     const raw = readFileSync(receiptPath, "utf8")
     expect(raw).not.toContain("super-secret-cache-input")
-    const hit = loadSuccessfulTestShardReceipt({ path: receiptPath, expected: identity, nowMs })
+    const hit = loadSuccessfulTestShardReceipt({
+      path: receiptPath,
+      expected: identity,
+      expectedTestTimeoutMs: 120_000,
+      nowMs,
+    })
     expect(hit.kind === "hit" ? hit.receipt.scanReachRecords : []).toEqual([
       { id: "guard", walked: 4, matched: 2 },
     ])
@@ -744,21 +775,31 @@ describe("same-INPUTS successful shard cache", () => {
     temporaryDirectories.push(directory)
     const receiptPath = join(directory, "shard.json")
     const identity = {
+      scopeKind: "whole-tree" as const,
       treeSha256: "a".repeat(64),
       suite: "full",
       manifestSha256: "b".repeat(64),
       shardIndex: 1,
       shardFileCount: 1,
       shardFilesSha256: "c".repeat(64),
-      toolchainSha256: "d".repeat(64),
+      runtimeSha256: "9".repeat(64),
+      toolScopeSha256: "d".repeat(64),
       testEnvSha256: "e".repeat(64),
       junit: false,
       intraParallel: 1,
       executionPolicySha256: "f".repeat(64),
       inputScopeSha256: "1".repeat(64),
+      timeoutPolicySha256: "2".repeat(64),
+      producerReceiptsSha256: "3".repeat(64),
     }
     writeFileSync(receiptPath, "not-json")
-    expect(loadSuccessfulTestShardReceipt({ path: receiptPath, expected: identity })).toEqual({
+    expect(
+      loadSuccessfulTestShardReceipt({
+        path: receiptPath,
+        expected: identity,
+        expectedTestTimeoutMs: 120_000,
+      }),
+    ).toEqual({
       kind: "miss",
       reason: "absent-or-corrupt",
     })
@@ -768,6 +809,9 @@ describe("same-INPUTS successful shard cache", () => {
         identity,
         executedFiles: 0,
         scanReachRecords: [],
+        testTimeoutMs: 120_000,
+        timingObservations: [],
+        scopeReason: "test",
       }),
     ).toThrow("refusing to cache")
 
@@ -776,11 +820,20 @@ describe("same-INPUTS successful shard cache", () => {
       identity,
       executedFiles: 1,
       scanReachRecords: [],
+      testTimeoutMs: 120_000,
+      timingObservations: [],
+      scopeReason: "test",
     })
     const tampered = JSON.parse(readFileSync(receiptPath, "utf8")) as Record<string, unknown>
     tampered.executedFiles = 2
     writeFileSync(receiptPath, JSON.stringify(tampered))
-    expect(loadSuccessfulTestShardReceipt({ path: receiptPath, expected: identity })).toEqual({
+    expect(
+      loadSuccessfulTestShardReceipt({
+        path: receiptPath,
+        expected: identity,
+        expectedTestTimeoutMs: 120_000,
+      }),
+    ).toEqual({
       kind: "miss",
       reason: "integrity",
     })

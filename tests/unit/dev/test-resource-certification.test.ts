@@ -4,10 +4,11 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
-  auditResourceCertifications,
+  CERTIFICATION_SCHEMA,
+  certificationCoversDerived,
   certificationDigest,
-  inferResourceClaimCandidates,
   loadTestResourceCertifications,
+  loadTestResourceCertificationsSafe,
   resolveResourceCertification,
   resourceClaimSetsOverlap,
   sourceSha256,
@@ -22,6 +23,7 @@ const certification = (source: string): TestResourceCertification => ({
   status: "certified",
   isolation: "process",
   claims: [{ key: "port:ephemeral", mode: "exclusive" }],
+  analyzer: "quanta.test-resource-analysis.v1",
 })
 
 describe("test resource certification", () => {
@@ -58,21 +60,62 @@ describe("test resource certification", () => {
     expect(resolved.claims).toEqual([{ key: "port:ephemeral", mode: "exclusive" }])
   })
 
-  test("candidate scan requires live uses and has a non-vacuous defect corpus", () => {
-    expect(inferResourceClaimCandidates("import { spawn } from 'node:child_process'")).toEqual([])
-    const candidates = inferResourceClaimCandidates(`
-      process.env.QUANTA_HOME = "/tmp/q"
-      Bun.spawn(["git", "status"])
-      Bun.listen({ port: 0 })
-      writeFileSync(join(REPO_ROOT, "x"), "bad")
-      run("git worktree add /tmp/w")
-    `)
-    expect(candidates.length).toBeGreaterThanOrEqual(5)
-    expect(candidates).toContainEqual({ key: "process-env:QUANTA_HOME", mode: "exclusive" })
-    expect(candidates).toContainEqual({ key: "child-process", mode: "shared" })
-    expect(candidates).toContainEqual({ key: "port:ephemeral", mode: "exclusive" })
-    expect(candidates).toContainEqual({ key: "checkout", mode: "exclusive" })
-    expect(candidates).toContainEqual({ key: "git-common", mode: "exclusive" })
+  test("a registry that will not parse yields zero certifications, not an exception", () => {
+    // The registry is read from the policy layer, the planner AND the audit. A
+    // throw here would take out every gate in the repository over a stray
+    // comma; zero certifications degrades to "nothing is certified", which is
+    // the behaviour the corpus already has.
+    const root = mkdtempSync(join(tmpdir(), "resource-certification-"))
+    const path = join(root, "registry.json")
+    try {
+      writeFileSync(path, "{ not json")
+      const broken = loadTestResourceCertificationsSafe(path)
+      expect(broken.certifications).toEqual([])
+      expect(broken.error).toBeDefined()
+      // PAIRED CONTROL — a well-formed registry still loads, so the safe
+      // loader is not simply always empty.
+      writeFileSync(
+        path,
+        JSON.stringify({ schema: CERTIFICATION_SCHEMA, certifications: [certification("s")] }),
+      )
+      const good = loadTestResourceCertificationsSafe(path)
+      expect(good.certifications).toHaveLength(1)
+      expect(good.error).toBeUndefined()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test("a claim key outside the vocabulary is rejected, not silently accepted", () => {
+    // A typo'd key names a resource nothing else ever claims, so it conflicts
+    // with nobody — a claim that reads like a lock and behaves like none.
+    const root = mkdtempSync(join(tmpdir(), "resource-certification-"))
+    const path = join(root, "registry.json")
+    try {
+      writeFileSync(
+        path,
+        JSON.stringify({
+          schema: CERTIFICATION_SCHEMA,
+          certifications: [
+            { ...certification("s"), claims: [{ key: "portt:4317", mode: "exclusive" }] },
+          ],
+        }),
+      )
+      expect(() => loadTestResourceCertifications(path)).toThrow(/invalid resource key/)
+      // PAIRED CONTROL — the correctly spelled key loads.
+      writeFileSync(
+        path,
+        JSON.stringify({
+          schema: CERTIFICATION_SCHEMA,
+          certifications: [
+            { ...certification("s"), claims: [{ key: "port:4317", mode: "exclusive" }] },
+          ],
+        }),
+      )
+      expect(loadTestResourceCertifications(path).certifications).toHaveLength(1)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 
   test("registry rejects duplicate ids and intentionally-exclusive without an exclusive claim", () => {
@@ -83,7 +126,7 @@ describe("test resource certification", () => {
       writeFileSync(
         path,
         JSON.stringify({
-          schema: "quanta.test-resource-certifications.v1",
+          schema: CERTIFICATION_SCHEMA,
           certifications: [row, row],
         }),
       )
@@ -92,7 +135,7 @@ describe("test resource certification", () => {
       writeFileSync(
         path,
         JSON.stringify({
-          schema: "quanta.test-resource-certifications.v1",
+          schema: CERTIFICATION_SCHEMA,
           certifications: [{ ...row, status: "intentionally-exclusive", claims: [] }],
         }),
       )
@@ -108,22 +151,41 @@ describe("test resource certification", () => {
     expect(certificationDigest([left, right])).toBe(certificationDigest([right, left]))
   })
 
-  test("audit sorts the full input and keeps missing separate from reviewed claims", () => {
+  test("a certified row that still says `unknown` falls back, whatever its status", () => {
+    // `status: certified` asserts a COMPLETE enumeration; `unknown` is the
+    // marker for an incomplete one. When a row says both, the marker wins.
     const source = "Bun.listen({ port: 0 })"
-    const rows = auditResourceCertifications(
-      [
-        { testId: "tests/integration/z.test.ts", source: "plain" },
-        { testId: "tests/integration/example.test.ts", source },
+    const resolved = resolveResourceCertification({
+      testId: "tests/integration/example.test.ts",
+      source,
+      certifications: [
+        { ...certification(source), claims: [{ key: "unknown", mode: "exclusive" }] },
       ],
-      [certification(source)],
+    })
+    expect(resolved.kind).toBe("exclusive-fallback")
+    expect(resolved.kind === "exclusive-fallback" && resolved.reason).toBe("unknown-claim")
+  })
+
+  test("the gate checks CONTAINMENT of the derived closure, in one direction only", () => {
+    const certified = [
+      { key: "checkout", mode: "exclusive" },
+      { key: "child-process", mode: "shared" },
+    ] as const
+    // A closure that SHED a claim is over-declared, which is safe.
+    expect(certificationCoversDerived(certified, [{ key: "checkout", mode: "exclusive" }])).toBe(
+      true,
     )
-    expect(rows.map(({ testId }) => testId)).toEqual([
-      "tests/integration/example.test.ts",
-      "tests/integration/z.test.ts",
-    ])
-    expect(rows[0]?.status).toBe("certified")
-    expect(rows[1]?.status).toBe("missing")
-    expect(rows[1]?.claims).toEqual([{ key: "unknown", mode: "exclusive" }])
+    // A closure that GREW one is under-declared, which is the unsafe direction.
+    expect(
+      certificationCoversDerived(certified, [
+        { key: "checkout", mode: "exclusive" },
+        { key: "port:ephemeral", mode: "exclusive" },
+      ]),
+    ).toBe(false)
+    // Same key, stricter mode: `shared` certified does not cover `exclusive`.
+    expect(
+      certificationCoversDerived(certified, [{ key: "child-process", mode: "exclusive" }]),
+    ).toBe(false)
   })
 
   test("claim compatibility allows shared peers and rejects exclusive or unknown overlap", () => {
