@@ -61,6 +61,24 @@ export const whenSshRemote = (
 export const whenSshRemoteIncludes = (needle: string, responder: SpawnResponder): SpawnHandler =>
   whenSshRemote((remote) => remote.includes(needle), responder)
 
+/**
+ * The family-profile readiness probe, answered the way the caller checks it.
+ *
+ * `assertBoxProfileReady` runs a command ending `&& echo OK` and requires
+ * stdout to contain "OK". Four bench stubs answered "READY" — a sentinel from
+ * an earlier contract — or had no branch at all, so bootstrap threw
+ * "dataset-family=… readiness probe failed" and every case in those files died
+ * during provisioning before it could assert anything it was named for. Twelve
+ * cases across three files, plus one more found a campaign later.
+ *
+ * Matching on the trailing `echo OK` rather than on a keyword is the point:
+ * the probe's own shape decides, so rewording either side cannot silently
+ * separate them again. Put here rather than in each file because "each file
+ * remembers" is exactly what failed.
+ */
+export const whenSshProfileReadinessProbe = (responder: SpawnResponder = () => ok("OK")) =>
+  whenSshRemote((remote) => remote.trim().endsWith("echo OK"), responder)
+
 export const whenSshRemoteIncludesAll = (
   needles: readonly string[],
   responder: SpawnResponder,

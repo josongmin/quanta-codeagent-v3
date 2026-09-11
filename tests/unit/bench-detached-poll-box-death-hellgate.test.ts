@@ -35,6 +35,7 @@ import {
   whenArgsInclude,
   whenArgsIncludeAll,
   whenCmd,
+  whenSshProfileReadinessProbe,
   whenSshRemote,
   whenSshRemoteIncludes,
   whenSshRemoteMatches,
@@ -192,6 +193,7 @@ describe("BUG 1 — detached poll bounds box death (no forever spin)", () => {
       }),
       whenArgsInclude("wait", ok("")),
       whenArgsInclude("terminate-instances", ok("")),
+      whenSshProfileReadinessProbe(),
       whenSshRemoteIncludes("READY", ok("READY")),
       whenSshRemoteIncludes("setsid bash -c", ({ remote, onData }) => {
         const runId = remote.match(/~\/runs\/([^/]+)\/instances\.jsonl/)?.[1] ?? "unknown"

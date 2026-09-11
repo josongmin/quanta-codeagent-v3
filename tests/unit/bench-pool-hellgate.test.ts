@@ -29,6 +29,7 @@ import {
   when,
   whenArgsInclude,
   whenCmd,
+  whenSshProfileReadinessProbe,
   whenSshRemote,
   whenSshRemoteIncludes,
   whenSshRemoteMatches,
@@ -164,6 +165,7 @@ const mockSpawn = (opts: {
     whenArgsInclude("describe-instances", ok("1.2.3.4")),
     whenArgsInclude("wait", ok("")),
     whenArgsInclude("terminate-instances", () => opts.terminateResult ?? ok("")),
+    whenSshProfileReadinessProbe(),
     whenSshRemoteIncludes("READY", ok("READY")),
     whenSshRemoteIncludes("setsid bash -c", ({ remote, onData }) => {
       const runId = remote.match(/~\/runs\/([^/]+)\/instances\.jsonl/)?.[1] ?? "unknown"
@@ -386,6 +388,7 @@ describe("runPool — persistent box, amortised bootstrap", () => {
         whenArgsInclude("describe-instances", ok("1.2.3.4")),
         whenArgsInclude("wait", ok("")),
         whenArgsInclude("terminate-instances", ok("")),
+        whenSshProfileReadinessProbe(),
         whenSshRemoteIncludes("READY", ok("READY")),
         whenSshRemoteIncludes("setsid bash -c", ({ remote, onData }) => {
           if (remote.includes("cli.ts run")) {
@@ -674,6 +677,7 @@ describe("runPool — persistent box, amortised bootstrap", () => {
       ),
       whenArgsInclude("describe-instances", ok("1.2.3.4")),
       whenArgsInclude("terminate-instances", ok("")),
+      whenSshProfileReadinessProbe(),
       whenSshRemoteIncludes("READY", ok("READY")),
       whenSshRemoteIncludes("mkdir ~/.pool-grade.lock", ok("LOCKED")),
       whenSshRemoteIncludes("rmdir ~/.pool-grade.lock", ok("")),
@@ -785,6 +789,7 @@ describe("runPool — persistent box, amortised bootstrap", () => {
       whenArgsInclude("describe-instances", ok("1.2.3.4")),
       whenArgsInclude("wait", ok("")),
       whenArgsInclude("terminate-instances", ok("")),
+      whenSshProfileReadinessProbe(),
       whenSshRemoteIncludes("READY", ok("READY")),
       whenSshRemoteIncludes("setsid bash -c", ({ onData }) => {
         onData?.("[FAIL][generation_error] c1__inst-1 (turns=2)\n")
@@ -1121,6 +1126,7 @@ describe("runPool — persistent box, amortised bootstrap", () => {
         (remote) => remote.includes("run.exit") || remote.includes("XQ-RUN-EXIT-XQ"),
         RUN_EXIT_OK,
       ),
+      whenSshProfileReadinessProbe(),
       whenSshRemoteIncludes("READY", ok("READY")),
       whenSshRemoteIncludes("mkdir ~/.pool-grade.lock", ok("BUSY")),
       whenSshRemoteIncludes("rmdir ~/.pool-grade.lock", ok("")),
@@ -1160,6 +1166,7 @@ describe("runPool — persistent box, amortised bootstrap", () => {
         (remote) => remote.includes("run.exit") || remote.includes("XQ-RUN-EXIT-XQ"),
         RUN_EXIT_OK,
       ),
+      whenSshProfileReadinessProbe(),
       whenSshRemoteIncludes("READY", ok("READY")),
       whenSshRemoteIncludes("mkdir ~/.pool-grade.lock", ok("BUSY")),
       whenSshRemoteIncludes("rmdir ~/.pool-grade.lock", ok("")),
@@ -1266,6 +1273,7 @@ describe("runPool — persistent box, amortised bootstrap", () => {
         (remote) => remote.includes("run.exit") || remote.includes("XQ-RUN-EXIT-XQ"),
         RUN_EXIT_OK,
       ),
+      whenSshProfileReadinessProbe(),
       whenSshRemoteIncludes("READY", ok("READY")),
       whenSshRemoteIncludes("mkdir ~/.pool-grade.lock", fail(255, "ssh: connect timeout")),
     )
@@ -1321,6 +1329,7 @@ describe("runPool — persistent box, amortised bootstrap", () => {
       whenArgsInclude("describe-instances", ok("1.2.3.4")),
       whenArgsInclude("wait", ok("")),
       whenArgsInclude("terminate-instances", ok("")),
+      whenSshProfileReadinessProbe(),
       whenSshRemoteIncludes("READY", ok("READY")),
       whenSshRemoteIncludes("setsid bash -c", ({ remote, onData }) => {
         const runId = remote.match(/~\/runs\/([^/]+)\/instances\.jsonl/)?.[1] ?? "unknown"
@@ -1392,6 +1401,7 @@ describe("runPool — persistent box, amortised bootstrap", () => {
       whenArgsInclude("describe-instances", ok("1.2.3.4")),
       whenArgsInclude("wait", ok("")),
       whenArgsInclude("terminate-instances", ok("")),
+      whenSshProfileReadinessProbe(),
       whenSshRemoteIncludes("READY", ok("READY")),
       whenSshRemoteIncludes("setsid bash -c", ({ remote, onData }) => {
         const runId = remote.match(/~\/runs\/([^/]+)\/instances\.jsonl/)?.[1] ?? "unknown"
@@ -1521,6 +1531,7 @@ describe("runPool — persistent box, amortised bootstrap", () => {
       whenArgsInclude("describe-instances", ok("1.2.3.4")),
       whenArgsInclude("wait", ok("")),
       whenArgsInclude("terminate-instances", ok("")),
+      whenSshProfileReadinessProbe(),
       whenSshRemoteIncludes("READY", ok("READY")),
       whenSshRemoteIncludes("command -v pyright-langserver", fail(7, "", "PYRIGHT_MISSING\n")),
       whenSshRemoteIncludes("mkdir ~/.pool-grade.lock", ok("LOCKED")),
@@ -1667,6 +1678,7 @@ describe("runPool — persistent box, amortised bootstrap", () => {
         (remote) => remote.includes("run.exit") || remote.includes("XQ-RUN-EXIT-XQ"),
         RUN_EXIT_OK,
       ),
+      whenSshProfileReadinessProbe(),
       whenSshRemoteIncludes("READY", ok("READY")),
       whenSshRemoteIncludes("echo OK", ok("OK")),
       whenSshRemoteIncludes("IDLE", ok("BUSY")),
