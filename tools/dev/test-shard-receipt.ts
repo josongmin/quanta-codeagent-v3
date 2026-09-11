@@ -10,7 +10,7 @@ import {
 } from "node:fs"
 import { dirname, join, relative } from "node:path"
 import { executedFileSetDigest } from "./executed-file-set"
-import { externalToolchainFingerprint } from "./external-toolchain"
+import { externalToolchainFingerprint, hostCapabilityFingerprint } from "./external-toolchain"
 import { AUTHORITATIVE_SCAN_TIERS, type ScanReachAuthority } from "./scan-reach-authority"
 import { timeoutCompatibility } from "./test-shard-timeout-policy"
 import {
@@ -235,7 +235,11 @@ export const testRuntimeSha256 = (): string =>
  * cannot silently drop a capability from the identity.
  */
 export const toolScopeSha256 = (
-  fingerprint: Record<string, string> = externalToolchainFingerprint(),
+  // The uncertified fail-safe hashes the WHOLE host capability set, daemon
+  // state included: an uncertified chunk may do anything, including talk to a
+  // daemon. A chunk that DECLARED its tools still narrows to those, so this
+  // does not re-inflate the identity the `claimed` path exists to shrink.
+  fingerprint: Record<string, string> = hostCapabilityFingerprint(),
   claimed?: readonly string[],
 ): string => {
   if (claimed === undefined) {

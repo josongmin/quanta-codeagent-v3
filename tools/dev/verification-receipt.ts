@@ -2,7 +2,7 @@ import { createHash } from "node:crypto"
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs"
 import { arch, hostname, platform, release } from "node:os"
 import { delimiter, dirname, join } from "node:path"
-import { externalToolchainFingerprint } from "./external-toolchain"
+import { externalToolchainFingerprint, hostCapabilityFingerprint } from "./external-toolchain"
 import { isVerdictRelevantEnvKey, verdictDotenvSha256 } from "./verdict-env"
 
 export const EXACT_RECEIPT_SCHEMA = "quanta.exact-verification-receipt.v1" as const
@@ -234,7 +234,14 @@ export const verificationDependencySha256 = (repoRoot: string): string =>
  * out of the receipt that actually does the skipping.)
  */
 export const verificationToolchainSha256 = (
-  externalTools: Record<string, string> = externalToolchainFingerprint(),
+  // TVH item 13. Was `externalToolchainFingerprint()` — PATH BINARIES only. A
+  // docker CLIENT on PATH says nothing about whether the daemon is up, and that
+  // is exactly what decides whether the docker contracts execute or skip. So
+  // "daemon stopped" and "daemon running" shared a receipt, and a green earned
+  // while those contracts skipped could be replayed as if they had run.
+  // `hostCapabilityFingerprint` — binaries, absolute non-PATH candidates, and
+  // daemon state — already existed, complete, with zero consumers.
+  externalTools: Record<string, string> = hostCapabilityFingerprint(),
 ): string =>
   sha256(
     JSON.stringify({

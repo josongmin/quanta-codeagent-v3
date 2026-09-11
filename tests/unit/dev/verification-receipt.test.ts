@@ -1,9 +1,13 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
+import {
+  externalToolchainFingerprint,
+  hostCapabilityFingerprint,
+} from "../../../tools/dev/external-toolchain"
 import { GATES } from "../../../tools/dev/gate-manifest"
-import { testEnvironmentSha256 } from "../../../tools/dev/test-shard-receipt"
+import { testEnvironmentSha256, toolScopeSha256 } from "../../../tools/dev/test-shard-receipt"
 import {
   ABSENT_BASE_OID,
   cleanStatusSha256,
@@ -515,5 +519,73 @@ describe("the dispatch schema is a closed universe", () => {
     expect(real.some((row) => row.needsQuietBox !== undefined)).toBe(true)
     const stripped = real.map(({ needsQuietBox: _drop, ...rest }) => rest as never)
     expect(verificationManifestSha256(stripped)).not.toBe(verificationManifestSha256(real))
+  })
+})
+
+/**
+ * TVH item 13 — a daemon's state was not part of any receipt's identity.
+ *
+ * `docker` on PATH is a CLIENT. Whether the daemon is up is what decides
+ * whether `tests/contract/sandbox-docker.test.ts` executes or skips, and both
+ * receipts hashed `externalToolchainFingerprint()` — PATH binaries only. So
+ * "daemon stopped" and "daemon running" shared a receipt, and a green earned
+ * while the docker contracts skipped could be replayed as if they had run.
+ *
+ * `hostCapabilityFingerprint` — binaries, absolute non-PATH candidates and
+ * daemon state — already existed, complete, with zero consumers. The fourth
+ * built-and-unwired module this ticket has found.
+ */
+describe("daemon state is part of receipt identity", () => {
+  const TOOLS = { docker: "/usr/bin/docker 27.0.0", git: "/usr/bin/git 2.44" }
+
+  test("the same binaries with a stopped vs running daemon hash differently", () => {
+    const stopped = { ...TOOLS, "docker-daemon": "<down>" }
+    const running = { ...TOOLS, "docker-daemon": "/var/run/docker.sock 1:2 1700000000" }
+    expect(verificationToolchainSha256(stopped)).not.toBe(verificationToolchainSha256(running))
+    expect(toolScopeSha256(stopped)).not.toBe(toolScopeSha256(running))
+  })
+
+  test("a daemon RESTART is visible too — the socket moves", () => {
+    const before = { ...TOOLS, "docker-daemon": "/var/run/docker.sock 1:2 1700000000" }
+    const after = { ...TOOLS, "docker-daemon": "/var/run/docker.sock 1:3 1800000000" }
+    expect(verificationToolchainSha256(before)).not.toBe(verificationToolchainSha256(after))
+  })
+
+  test("the real defaults include daemon entries at all", () => {
+    // ANTI-VACUITY, and the whole wiring claim: the arms above pass synthetic
+    // maps, which proves the hash reads the field and NOT that production
+    // supplies it.
+    const live = hostCapabilityFingerprint()
+    const daemons = Object.keys(live).filter(
+      (key) => key.endsWith("-daemon") || key.endsWith("-vm"),
+    )
+    expect(daemons.length).toBeGreaterThanOrEqual(3)
+    expect(daemons).toContain("docker-daemon")
+    // ...and the PATH-only fingerprint does NOT, which is what made it wrong
+    // as an identity while remaining correct as itself.
+    expect(Object.keys(externalToolchainFingerprint())).not.toContain("docker-daemon")
+  })
+
+  test("both receipt owners default to the capability set, not the PATH set", () => {
+    const source = (rel: string): string =>
+      readFileSync(resolve(import.meta.dir, "..", "..", "..", rel), "utf8")
+    for (const rel of ["tools/dev/verification-receipt.ts", "tools/dev/test-shard-receipt.ts"]) {
+      const body = source(rel)
+      expect({ rel, wired: body.includes("= hostCapabilityFingerprint()") }).toEqual({
+        rel,
+        wired: true,
+      })
+    }
+  })
+
+  test("a DECLARED tool scope still narrows — this does not re-inflate it", () => {
+    // The `claimed` path exists because a `cargo install` used to change the
+    // identity of every pure chunk. Folding daemon state into the fail-safe
+    // must not undo that.
+    const wide = { ...TOOLS, "docker-daemon": "<down>", cargo: "/usr/bin/cargo 1.79" }
+    const narrowed = toolScopeSha256(wide, ["git"])
+    expect(narrowed).not.toBe(toolScopeSha256(wide))
+    expect(toolScopeSha256({ ...wide, cargo: "/usr/bin/cargo 1.80" }, ["git"])).toBe(narrowed)
+    expect(toolScopeSha256({ ...wide, "docker-daemon": "up" }, ["git"])).toBe(narrowed)
   })
 })
