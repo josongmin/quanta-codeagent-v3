@@ -137,6 +137,7 @@ export const NETWORK_SINKS: ReadonlySet<string> = new Set([
   "navigate",
   "goto",
   "sendBeacon",
+  "importScripts",
   "spawn",
   "spawnSync",
   "exec",
@@ -163,6 +164,38 @@ const NETWORK_RECEIVERS: ReadonlySet<string> = new Set([
   "Bun",
   "undici",
   "axios",
+])
+
+/**
+ * Properties whose ASSIGNMENT issues a request.
+ *
+ * The walk only understood call arguments and HTML attributes, so the canonical
+ * browser shapes were invisible: `new Image().src = addr` is the standard way to
+ * test cross-origin subresource blocking, and `location.href = addr` is a
+ * navigation. Both are assignments, not calls — and this guard exists to protect
+ * a browser fixture page, which is exactly where they would appear next.
+ */
+const REQUESTING_PROPERTIES: ReadonlySet<string> = new Set([
+  "src",
+  "srcset",
+  "href",
+  "action",
+  "poster",
+  "data",
+])
+
+/** Receivers whose `href` assignment is a navigation rather than a data field. */
+const NAVIGATING_RECEIVERS: ReadonlySet<string> = new Set(["location", "window", "top", "parent"])
+
+/** HTTP methods, so `xhr.open("GET", addr)` is a request while `fs.open` is not. */
+const HTTP_METHODS: ReadonlySet<string> = new Set([
+  "GET",
+  "POST",
+  "PUT",
+  "DELETE",
+  "HEAD",
+  "PATCH",
+  "OPTIONS",
 ])
 
 /** The Bun shell tag — `` $`curl …` `` runs a command. */
@@ -200,6 +233,15 @@ const finalIdentifier = (node: ts.Expression): string | undefined => {
 const sinkNameOf = (call: ts.CallExpression | ts.NewExpression): string | undefined => {
   const final = finalIdentifier(call.expression)
   if (final !== undefined && NETWORK_SINKS.has(final)) return final
+  // `open` is a sink only when its first argument is an HTTP METHOD. That is
+  // what separates `xhr.open("GET", url)` — where the url is the SECOND
+  // argument and never reaches a named sink — from `fs.open(path)`.
+  if (final === "open") {
+    const first = (call.arguments ?? [])[0]
+    if (first !== undefined && ts.isStringLiteralLike(first) && HTTP_METHODS.has(first.text)) {
+      return "open"
+    }
+  }
   const root = rootIdentifier(call.expression)
   if (root !== undefined && NETWORK_RECEIVERS.has(root)) {
     return final === undefined ? root : `${root}.${final}`
@@ -279,6 +321,23 @@ const stopAt = (parent: ts.Node, child: ts.Node): SinkWalkResult | undefined => 
   if (ts.isCallExpression(parent) || ts.isNewExpression(parent)) {
     const step = stepThroughCall(parent, child)
     return step.kind === "through" ? undefined : stopped(step.sink)
+  }
+  if (ts.isBinaryExpression(parent) && parent.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+    // ASSIGNMENT to a requesting property. Only when the address is on the
+    // RIGHT — `img.src` on the left of a comparison, or a literal being
+    // assigned INTO by something else, is not egress.
+    if (parent.right !== child) return stopped()
+    const target = parent.left
+    if (!ts.isPropertyAccessExpression(target)) return stopped()
+    const property = target.name.text
+    if (!REQUESTING_PROPERTIES.has(property)) return stopped()
+    // `href` alone is ambiguous — an anchor's href in a data structure is not a
+    // request. It counts when the receiver navigates.
+    if (property === "href") {
+      const root = rootIdentifier(target.expression)
+      if (root === undefined || !NAVIGATING_RECEIVERS.has(root)) return stopped()
+    }
+    return stopped(`assignment to .${property}`)
   }
   if (ts.isTaggedTemplateExpression(parent)) {
     const tag = finalIdentifier(parent.tag)

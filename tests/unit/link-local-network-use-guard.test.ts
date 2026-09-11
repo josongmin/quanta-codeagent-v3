@@ -167,6 +167,30 @@ const NETWORK_FIXTURES: readonly { readonly why: string; readonly source: string
     source: `const page = \`<img src="http://${A}/meta.png" />\``,
   },
   {
+    // The canonical way to test cross-origin subresource blocking, and the
+    // shape this guard's own browser fixture would most likely grow next.
+    // Assignment, not a call — so the argument-position walk never saw it.
+    why: "an Image().src assignment",
+    source: `const probe = new Image()\nprobe.src = "http://${A}/meta.png"`,
+  },
+  {
+    why: "a location.href navigation",
+    source: `location.href = "http://${A}/latest/meta-data/"`,
+  },
+  {
+    // The url is the SECOND argument of a method that is not a named sink.
+    why: "an XHR whose url is the second argument",
+    source: `const x = new XMLHttpRequest()\nx.open("GET", "http://${A}/")\nx.send()`,
+  },
+  {
+    why: "a worker importScripts",
+    source: `importScripts("http://${A}/payload.js")`,
+  },
+  {
+    why: "an iframe src assigned from a variable",
+    source: `const addr = "${A}"\nframe.src = \`http://\${addr}/\``,
+  },
+  {
     // MUTATION SURVIVOR, closed: emptying `SHELL_TAGS` left the suite 12/12
     // green, so a future ``await $`curl http://<addr>/latest/meta-data` ``
     // would have passed the SSRF guard. `NETWORK_SINKS` and
@@ -188,6 +212,26 @@ const NETWORK_FIXTURES: readonly { readonly why: string; readonly source: string
 /** The legitimate shapes this repository genuinely uses. All must stay GREEN. */
 const DATA_FIXTURES: readonly { readonly why: string; readonly source: string }[] = [
   { why: "pure classifier input", source: `expect(classifyHost("${A}")).not.toBeNull()` },
+  {
+    // PAIRED CONTROL for the assignment rule: a non-requesting property is a
+    // data field, not egress.
+    why: "a plain data property holding the address",
+    source: `config.metadataHost = "${A}"`,
+  },
+  {
+    why: "an href on something that does not navigate",
+    source: `const link = {}\nlink.href = "http://${A}/"`,
+  },
+  {
+    why: "the address on the LEFT of a comparison, not assigned",
+    source: `if (host === "${A}") deny()`,
+  },
+  {
+    // PAIRED CONTROL for the `open` rule: `open` is a sink only when its FIRST
+    // argument is an HTTP method. A store keyed by the address is data.
+    why: "an open() whose first argument is the address, not a method",
+    source: `db.open("${A}", handler)`,
+  },
   {
     why: "a deny table",
     source: `const DENIED = ["http://${A}/", "http://${A}/latest/meta-data/iam/"]`,
@@ -301,6 +345,29 @@ describe("link-local / metadata addresses are never a NETWORK target in test sou
       expect(
         result.occurrences.filter((o) => o.verdict === "network").map(render),
         "a colocated test may not open a socket to a link-local / metadata address",
+      ).toEqual([])
+    },
+    SCAN_TIMEOUT_MS,
+  )
+
+  test(
+    "C3. PRODUCTION source is scanned too — an SSRF would live there, not in a test",
+    () => {
+      // Audit finding: the guard scanned `tests/**/*.ts` and `src/**/*.test.ts`
+      // and never looked at production modules. Measured at the time: 3,435
+      // non-test files under src/, 5 mentioning a link-local address, 0 network
+      // uses — benign, but entirely outside the guard, and src/ is where a real
+      // egress would actually be written.
+      const result = scan(SRC_ROOT, (p) => p.endsWith(".ts") && !p.endsWith(".test.ts"))
+      assertScanPopulation(result.scanned, SRC_ROOT, {
+        id: "tests/unit/link-local-network-use-guard.test.ts#SRC-PROD",
+        collectable: (name) => name.endsWith(".ts") && !name.endsWith(".test.ts"),
+      })
+      expect(
+        result.occurrences.filter((o) => o.verdict === "network").map(render),
+        "a production module may not open a socket to a link-local / metadata " +
+          "address. If this is a deliberate egress guard's own fixture, it belongs " +
+          "in a test with a loopback stand-in.",
       ).toEqual([])
     },
     SCAN_TIMEOUT_MS,

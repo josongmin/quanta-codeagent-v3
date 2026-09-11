@@ -238,7 +238,8 @@
     ],
     "tests/unit/link-local-network-use-guard.test.ts": [
       "tests/unit/link-local-network-use-guard.test.ts#SRC-TESTS",
-      "tests/unit/link-local-network-use-guard.test.ts#TESTS"
+      "tests/unit/link-local-network-use-guard.test.ts#TESTS",
+      "tests/unit/link-local-network-use-guard.test.ts#SRC-PROD"
     ],
     "tests/unit/lint-debt-ratchet-reach.test.ts": [
       "tests/unit/lint-debt-ratchet-reach.test.ts#SRC",
