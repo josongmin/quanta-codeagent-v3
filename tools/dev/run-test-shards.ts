@@ -17,6 +17,11 @@ import {
   executedFileSetDigest,
   executedFileSetVerdict,
 } from "./executed-file-set"
+import {
+  buildFailureAttemptArtifact,
+  failureRecordsFromJunit,
+  writeFailureAttemptArtifact,
+} from "./failure-attempt-producer"
 import { quarantineLane, quarantinePath } from "./lease-quarantine"
 import { AUTHORITATIVE_SCAN_TIERS, scanReachAuthorityFor } from "./scan-reach-authority"
 import {
@@ -609,6 +614,11 @@ interface CompletedShard {
   readonly totalChunks: number
   readonly result: ShardRunResult
   readonly snapshot: GitSnapshot
+  /** Replay context for the failure artifact: what this attempt ran under. */
+  readonly suite: string
+  readonly workerParallel: number
+  readonly intraParallel: number
+  readonly testTimeoutMs: number
 }
 
 interface CachedChunk {
@@ -619,6 +629,58 @@ interface CachedChunk {
   readonly intraParallel: number
   /** Why this chunk got the cache scope it did, recorded in the receipt. */
   readonly scopeReason: string
+}
+
+/** Where the authoritative attempt's failures are published. */
+const FAILURE_ATTEMPT_PATH = join(SHARED_CACHE_ROOT, "failure-attempt.json")
+
+/**
+ * Publish the first failing chunk's failures, or `undefined` when there is
+ * nothing to publish.
+ *
+ * Never throws into the failure path: a campaign that has already failed must
+ * report THAT, not an error from writing a diagnostic aid.
+ */
+const emitFailureAttempt = (
+  plan: TestChunk,
+  result: ShardRunResult,
+  snapshot: GitSnapshot,
+  completed: CompletedShard,
+): string | undefined => {
+  try {
+    const junitXml = readFileSync(result.junitPath, "utf8")
+    const failures = failureRecordsFromJunit(junitXml, plan.index)
+    const artifact = buildFailureAttemptArtifact({
+      head: snapshot.head,
+      dirty: snapshot.status !== "",
+      suite: completed.suite,
+      replay: {
+        // The runner does not seed Bun's ordering, and saying so is the honest
+        // answer: a fabricated seed would make a replay look reproducible when
+        // it is not. TVH-15 owns closing this.
+        seed: "<unseeded>",
+        permutation: shardFilesSha256(REPO_ROOT, plan.files),
+        cores: availableParallelism(),
+        loadAverage1m: loadavg()[0] ?? 0,
+        workerParallel: completed.workerParallel,
+        intraParallel: completed.intraParallel,
+        testTimeoutMs: completed.testTimeoutMs,
+        resourceClaims: plan.claims.map((claim) => `${claim.key}:${claim.mode}`),
+        // Authoritative by construction: this is the ORIGINAL attempt, written
+        // before anything retried it.
+        retryCount: 0,
+      },
+      failures,
+    })
+    return writeFailureAttemptArtifact(FAILURE_ATTEMPT_PATH, artifact)
+      ? FAILURE_ATTEMPT_PATH
+      : undefined
+  } catch (error) {
+    process.stderr.write(
+      `[test:shards] WARN could not publish the failure artifact: ${error instanceof Error ? error.message : String(error)}\n`,
+    )
+    return undefined
+  }
 }
 
 /**
@@ -681,12 +743,19 @@ const validateCompletedShard = (before: GitSnapshot, completed: CompletedShard):
         "termination; aborting remaining shards",
     )
   }
+  // The AUTHORITATIVE attempt, written down before the campaign aborts.
+  // `failure-artifact.ts` states this contract in its own header — "the runner
+  // that actually holds the lease writes this artifact" — and nothing wrote
+  // one, so the diagnostic tool could only ever be driven by a hand-authored
+  // file and its fail-closed was the only path it ever took.
+  const artifactPath = emitFailureAttempt(plan, result, snapshot, completed)
   const discovery =
     result.executedFiles === undefined ? "missing" : `${result.executedFiles}/${plan.files.length}`
   throw new Error(
     `[test:shards] FAILED chunk=${plan.index}/${totalChunks} exit=${result.code} ` +
       `timeout=${result.timedOut ? "yes" : "no"} discovery=${discovery}; ` +
-      "aborting remaining shards",
+      "aborting remaining shards" +
+      (artifactPath === undefined ? "" : `\n[test:shards] failure artifact: ${artifactPath}`),
   )
 }
 
@@ -928,6 +997,16 @@ const executeChunks = async (input: {
           totalChunks,
           result,
           snapshot: await gitSnapshot(),
+          suite: input.opts.suite,
+          // What the scheduler is allowed to overlap, derived from the same
+          // memory budget the dispatcher uses — not a new field threaded
+          // through three layers to say something already decided.
+          workerParallel: chooseShardConcurrency({
+            totalBytes: totalmem(),
+            availableBytes: freemem(),
+          }),
+          intraParallel: cached.intraParallel,
+          testTimeoutMs: input.testTimeoutMs,
         }
         const sink = validateCompletedShard(input.before, completedShard)
         cacheSuccessfulShard(cached, result, input.opts, input.journal, input.testTimeoutMs)

@@ -39,7 +39,7 @@
  *       2 = usage / missing / invalid artifact (fail closed); 0 = never.
  */
 
-import { readFileSync, writeFileSync } from "node:fs"
+import { readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { mayQuarantine, preserveFirstFailure } from "../dev/verification-first-failure"
 import { runBoundedChild } from "./bounded-child"
@@ -79,7 +79,14 @@ const loadLedger = (): QuarantineLedgerV2 => {
   return { maxCount: raw.maxCount, entries: raw.entries }
 }
 
-/** Run ONE diagnostic child for a whole file's worth of failures. */
+/**
+ * Run ONE diagnostic child for a whole file's worth of failures.
+ *
+ * The JUnit file is removed in a `finally`. It was created per child under
+ * TMPDIR and never deleted, so every diagnosis leaked one file per batch —
+ * and this repository already has a scar from exactly that shape: test leakage
+ * into `/tmp` slowed `ls /tmp` from 6.6s to a timeout.
+ */
 const diagnoseBatch = async (
   file: string,
   selector: string,
@@ -89,6 +96,19 @@ const diagnoseBatch = async (
     process.env.TMPDIR ?? "/tmp",
     `flake-diagnosis-${process.pid}-${crypto.randomUUID()}.xml`,
   )
+  try {
+    return await diagnoseBatchInto(file, selector, perChildMs, junitPath)
+  } finally {
+    rmSync(junitPath, { force: true })
+  }
+}
+
+const diagnoseBatchInto = async (
+  file: string,
+  selector: string,
+  perChildMs: number,
+  junitPath: string,
+): Promise<ChildEvidence> => {
   const outcome = await runBoundedChild({
     cmd: [
       "bun",
@@ -231,7 +251,18 @@ const runDiagnosis = async (artifact: FailureAttemptArtifact): Promise<number> =
       continue
     }
     childrenSpawned += 1
-    const evidence = await diagnoseBatch(batch.file, batch.selector, DEFAULT_BUDGET.perChildMs)
+    // CLAMPED to what is left of the global budget, not the per-child figure.
+    // The global deadline was checked only BEFORE a child started, so the last
+    // child could begin with one millisecond left and run a further 120
+    // seconds — a "10-minute budget" that finished at twelve. A child given
+    // less than a second cannot say anything, so the batch is reported as
+    // budget-exhausted rather than spawned to be killed immediately.
+    const remainingMs = DEFAULT_BUDGET.maxTotalMs - (Date.now() - startedAt)
+    const childMs = Math.min(DEFAULT_BUDGET.perChildMs, remainingMs)
+    const evidence =
+      childMs < 1_000
+        ? { completed: false, selectorMatchedNothing: false, statusByTestId: new Map() }
+        : await diagnoseBatch(batch.file, batch.selector, childMs)
     for (const record of batch.records) {
       rows.push({
         file: record.file,
