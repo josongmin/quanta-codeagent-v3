@@ -71,8 +71,23 @@ import {
 } from "./external-toolchain"
 import { requiredProducerIds } from "./verification-required-producers"
 
-/** The aggregator's closed set of producer ids. Read, never re-declared. */
-const REQUIRED_PRODUCER_IDS: ReadonlySet<string> = new Set(requiredProducerIds())
+/**
+ * The aggregator's closed set of producer ids. Read, never re-declared.
+ *
+ * LAZY, and that is load-bearing: this module and
+ * `verification-required-producers.ts` now reference each other — the
+ * producers derive their floors from these groups, and this file validates its
+ * `producer` fields against their ids. Evaluated at module scope, whichever
+ * module loaded second saw the other half-initialized. MEASURED, both
+ * directions: importing the producers first threw "Cannot access
+ * 'requiredProducerIds' before initialization"; importing this file first threw
+ * inside `capabilityFloorFor`. `typecheck` reports neither.
+ */
+let requiredProducerIdSet: ReadonlySet<string> | undefined
+const requiredProducerIdsCached = (): ReadonlySet<string> => {
+  requiredProducerIdSet ??= new Set(requiredProducerIds())
+  return requiredProducerIdSet
+}
 
 /** Where a group's failure is allowed to block. */
 export type CapabilityLane =
@@ -675,7 +690,7 @@ const shapeProblems = (group: CapabilityGroup): readonly CapabilityManifestProbl
     push(`minExecutedFiles ${group.minExecutedFiles} exceeds ${group.members.length} members`)
   }
   if (group.receiptFields.length === 0) push("no receipt fields declared")
-  if (!REQUIRED_PRODUCER_IDS.has(group.producer)) {
+  if (!requiredProducerIdsCached().has(group.producer)) {
     push(
       `producer "${group.producer}" is not a required-producer id — the fan-out would publish a ` +
         "quanta.capability-result.v1 artifact nothing aggregates",

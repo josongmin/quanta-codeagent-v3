@@ -19,7 +19,9 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
   CAPABILITY_RESULT_SCHEMA,
+  type CapabilityGroupFloor,
   type CapabilityResult,
+  capabilityFloorFor,
   capabilityProducers,
   parseWorkflowJobGraph,
   REQUIRED_WORKFLOW_PATH,
@@ -53,15 +55,31 @@ const greenNeeds = (
 ): Record<string, { readonly result: string }> =>
   Object.fromEntries(ids.map((id) => [id, { result: "success" }]))
 
-const executedArtifact = (producer: string): CapabilityResult => ({
-  schema: CAPABILITY_RESULT_SCHEMA,
-  producer,
-  executedFiles: [`tests/${producer}/one.test.ts`],
-  executedCases: 8,
-  skippedUnsupported: 0,
-  blockedMissing: 0,
-  failedSetup: 0,
-})
+/**
+ * Every member file of every group this producer must show execution for.
+ *
+ * The predecessor was a single invented path and `executedCases: 8`, which
+ * satisfied the old flat 1-file/1-case floor. It could not satisfy the derived
+ * floors, and that is the point: a fixture that passes a real floor has to name
+ * the real files, so these tests stop being able to describe a lane that never
+ * ran.
+ */
+const requiredMembers = (producer: string): readonly string[] =>
+  capabilityFloorFor(producer).groups.flatMap((group) => [...group.members])
+
+const executedArtifact = (producer: string): CapabilityResult => {
+  const floor = capabilityFloorFor(producer)
+  const members = requiredMembers(producer)
+  return {
+    schema: CAPABILITY_RESULT_SCHEMA,
+    producer,
+    executedFiles: members.length > 0 ? members : [`tests/${producer}/one.test.ts`],
+    executedCases: Math.max(floor.minimumExecutedCases, members.length),
+    skippedUnsupported: 0,
+    blockedMissing: 0,
+    failedSetup: 0,
+  }
+}
 
 const greenCapabilities = (): Record<string, unknown> =>
   Object.fromEntries(
@@ -100,8 +118,9 @@ describe("required producer SSOT is exact and non-empty", () => {
       "contract",
     ])
     for (const producer of capabilityProducers()) {
-      expect(producer.capability?.minimumExecutedCases ?? 0).toBeGreaterThan(0)
-      expect(producer.capability?.minimumExecutedFiles ?? 0).toBeGreaterThan(0)
+      const floor = capabilityFloorFor(producer.id)
+      expect(floor.minimumExecutedCases).toBeGreaterThan(0)
+      expect(floor.minimumExecutedFiles).toBeGreaterThan(0)
     }
   })
 
@@ -321,7 +340,12 @@ describe("capability zero-execution floor", () => {
       },
     })
     expect(verdict.ok).toBe(false)
-    expect(reasonsOf(verdict)).toContain('capability producer "pty" executed 0 case(s), floor is 1')
+    // The GROUP names itself now: "pty executed 0 of its 8 member files" says
+    // what did not happen, where "0 cases, floor is 1" only said that the
+    // cheapest possible bar was missed.
+    expect(reasonsOf(verdict)).toContain(
+      'capability group "pty" (producer "pty") executed 0 of its 8 member file(s), floor is 8',
+    )
   })
 
   test("[5] an absent capability artifact is RED, not PASS", () => {
@@ -384,7 +408,7 @@ describe("capability zero-execution floor", () => {
     const staticCode = requiredProducers().find(
       (producer) => producer.id === "static-code",
     ) as unknown as RequiredProducer
-    expect(staticCode.capability).toBeUndefined()
+    expect(staticCode.capabilityGated).toBeUndefined()
     expect(validateCapabilityResult(staticCode, undefined)).toEqual({ ok: true })
   })
 
@@ -471,14 +495,17 @@ describe("the capability file floor is real, not decoration", () => {
       schema: "quanta.capability-result.v1",
       producer: producer.id,
       executedFiles: [],
-      executedCases: 5,
+      // ABOVE the case floor on purpose, so the FILE half is what trips. The
+      // derived floors made the case check fire first and hid the file check
+      // again — the same way the original survivor hid.
+      executedCases: 999,
       skippedUnsupported: 0,
       blockedMissing: 0,
       failedSetup: 0,
     })
     expect(verdict.ok).toBe(false)
     if (verdict.ok) throw new Error("unreachable")
-    expect(verdict.reason).toContain("file")
+    expect(verdict.reason).toMatch(/file\(s\)/)
   })
 
   test("PAIRED CONTROL — the same artifact with one named file is accepted", () => {
@@ -487,8 +514,8 @@ describe("the capability file floor is real, not decoration", () => {
     const verdict = validateCapabilityResult(producer, {
       schema: "quanta.capability-result.v1",
       producer: producer.id,
-      executedFiles: ["tests/e2e-pty/a.test.ts"],
-      executedCases: 5,
+      executedFiles: [...requiredMembers(producer.id)],
+      executedCases: 999,
       skippedUnsupported: 0,
       blockedMissing: 0,
       failedSetup: 0,
@@ -496,17 +523,111 @@ describe("the capability file floor is real, not decoration", () => {
     expect(verdict.ok).toBe(true)
   })
 
-  test("both floors are declared, and neither is zero", () => {
-    // ANTI-VACUITY: a floor of 0 makes the branch above unreachable, which is
-    // how the survivor hid in the first place.
+  test("the floors come from the MANIFEST, not from a flat 1 file / 1 case", () => {
+    // TVH P0-3. Every capability producer used to carry the same 1/1 floor,
+    // which is the definition of "something executed" and nothing more: a
+    // `toolchain` job where sixteen of seventeen files skipped and one cheap
+    // case ran cleared it, and `required` went green over it.
+    //
+    // These numbers are DERIVED — the sum over the producer's PR-required
+    // groups — so they move when the manifest moves and cannot be tuned here.
     const producers = capabilityProducers()
     expect(producers.length).toBeGreaterThan(0)
+    const measured = Object.fromEntries(
+      producers.map((row) => {
+        const floor = capabilityFloorFor(row.id)
+        return [row.id, { files: floor.minimumExecutedFiles, cases: floor.minimumExecutedCases }]
+      }),
+    )
+    expect(measured).toEqual({
+      pty: { files: 8, cases: 8 },
+      toolchain: { files: 10, cases: 14 },
+      contract: { files: 5, cases: 5 },
+    })
+    // ANTI-VACUITY: a floor of 0 makes the branch it guards unreachable, which
+    // is how the original survivor hid, and every producer must name groups.
     for (const row of producers) {
-      expect({
+      const floor = capabilityFloorFor(row.id)
+      expect({ id: row.id, zero: floor.minimumExecutedFiles === 0 }).toEqual({
         id: row.id,
-        files: row.capability?.minimumExecutedFiles ?? 0,
-        cases: row.capability?.minimumExecutedCases ?? 0,
-      }).toEqual({ id: row.id, files: 1, cases: 1 })
+        zero: false,
+      })
+      expect({ id: row.id, groups: floor.groups.length }).not.toEqual({ id: row.id, groups: 0 })
     }
+  })
+
+  /**
+   * The shape the flat floor could not see: a lane that clears an aggregate
+   * total while an entire group never starts.
+   */
+  describe("per-group execution", () => {
+    const toolchain = requiredProducers().find(
+      (producer) => producer.id === "toolchain",
+    ) as RequiredProducer
+
+    const artifactFor = (files: readonly string[], cases: number): unknown => ({
+      schema: "quanta.capability-result.v1",
+      producer: "toolchain",
+      executedFiles: [...files],
+      executedCases: cases,
+      skippedUnsupported: 0,
+      blockedMissing: 0,
+      failedSetup: 0,
+    })
+
+    const allMembers = capabilityFloorFor("toolchain").groups.flatMap((group) => [...group.members])
+
+    test("every required group running is a PASS", () => {
+      // ANTI-VACUITY: the negative arms below are only meaningful if the
+      // complete set actually passes.
+      expect(validateCapabilityResult(toolchain, artifactFor(allMembers, 14))).toEqual({ ok: true })
+    })
+
+    test("one group missing entirely is RED, and the group is NAMED", () => {
+      const pyright = capabilityFloorFor("toolchain").groups.find(
+        (group) => group.id === "lsp-pyright",
+      ) as CapabilityGroupFloor
+      const withoutPyright = allMembers.filter((file) => !pyright.members.includes(file))
+      const verdict = validateCapabilityResult(toolchain, artifactFor(withoutPyright, 14))
+      expect(verdict.ok).toBe(false)
+      if (verdict.ok) throw new Error("unreachable")
+      expect(verdict.reason).toContain('capability group "lsp-pyright"')
+    })
+
+    test("EVERY required group is individually load-bearing", () => {
+      // Not one representative group: dropping any of them must fail, or the
+      // check is a floor over whichever group happens to be smallest.
+      for (const group of capabilityFloorFor("toolchain").groups) {
+        const without = allMembers.filter((file) => !group.members.includes(file))
+        const verdict = validateCapabilityResult(toolchain, artifactFor(without, 14))
+        expect({ group: group.id, ok: verdict.ok }).toEqual({ group: group.id, ok: false })
+      }
+    })
+
+    test("1 executed + 999 skipped no longer clears the lane", () => {
+      const one = validateCapabilityResult(toolchain, {
+        schema: "quanta.capability-result.v1",
+        producer: "toolchain",
+        executedFiles: [allMembers[0] as string],
+        executedCases: 1,
+        skippedUnsupported: 999,
+        blockedMissing: 0,
+        failedSetup: 0,
+      })
+      expect(one.ok).toBe(false)
+      if (one.ok) throw new Error("unreachable")
+      // Rejected, and the message names a floor rather than saying "required failed".
+      expect(one.reason).toMatch(/floor is \d+/)
+    })
+
+    test("padding the COUNT with non-member files does not buy a pass", () => {
+      // The aggregate floor is a count, so it is satisfiable by ten unrelated
+      // paths. Group attribution is exact membership, which is why it is not.
+      const padding = Array.from({ length: 20 }, (_, i) => `tests/unit/filler-${i}.test.ts`)
+      const verdict = validateCapabilityResult(toolchain, artifactFor(padding, 99))
+      expect(verdict.ok).toBe(false)
+      if (verdict.ok) throw new Error("unreachable")
+      expect(verdict.reason).toContain("capability group")
+    })
   })
 })

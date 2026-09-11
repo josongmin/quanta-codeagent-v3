@@ -1,4 +1,5 @@
 import { parse as parseYaml } from "yaml"
+import { CAPABILITY_GROUPS, type CapabilityGroup } from "./test-capability-manifest"
 
 /**
  * WHICH producer jobs a required verdict is made of — the exact set, not a
@@ -27,25 +28,95 @@ export const REQUIRED_AGGREGATOR_JOB = "required" as const
 /**
  * The floor a capability job must clear to count as having run.
  *
- * `1` is not a tuned threshold — it is the definition of "something actually
- * executed". A capability lane whose arms all degrade to visible skips
- * (`pty` without a real PTY, `real-toolchain-e2e` without clangd/dlv/debugpy,
- * `contract` without docker) produces a success-shaped job with zero executed
- * cases, which is exactly the zero-coverage green this ticket exists to stop.
+ * WAS 1 file / 1 case for a whole lane. That is the definition of "something
+ * executed" and nothing more: a `toolchain` job where sixteen of seventeen
+ * files skipped and one cheap case ran cleared it, and `required` went green
+ * over a lane that proved almost nothing. The capability manifest has carried
+ * exact per-GROUP numbers the whole time — `capabilityProducerFloors()` even
+ * documents itself as "the per-group numbers the fanned-out jobs should carry
+ * instead" — with zero production consumers.
  *
- * Raising a floor above the zero-execution floor requires MEASURED per-runner
- * case counts from the emitted artifacts; the jobs do not emit them yet
- * (TVH-03/TVH-05 own that wiring), so no number here is invented from a
- * comment or a guess.
+ * Now derived. The aggregate floor is the SUM over the producer's required
+ * groups, and each group is checked separately against the executed FILE ids,
+ * so a lane cannot satisfy a total by over-running one group while another
+ * never starts.
+ *
+ * Which groups are required is not a new judgement either: `lane` already says
+ * it. `pr-required-deterministic` is deterministic once provisioned and a PR
+ * may block on it; `nightly-heavy` needs network, a live model or minutes of
+ * wall clock and is excluded here rather than being softened into a warning.
  */
+export interface CapabilityGroupFloor {
+  readonly id: string
+  readonly minimumExecutedFiles: number
+  readonly minimumExecutedCases: number
+  /** EXACT member ids, so attribution is membership and never a path prefix. */
+  readonly members: readonly string[]
+}
+
 export interface CapabilityFloor {
   readonly minimumExecutedFiles: number
   readonly minimumExecutedCases: number
+  readonly groups: readonly CapabilityGroupFloor[]
 }
 
-const ZERO_EXECUTION_FLOOR: CapabilityFloor = {
-  minimumExecutedFiles: 1,
-  minimumExecutedCases: 1,
+/**
+ * The groups a PR-required producer must show execution for.
+ *
+ * Excluded: `declared-pending-gate`. Those members run inside the ordinary
+ * suite and roll up to `full-suite`, which carries no capability floor — their
+ * execution is currently unprovable, and a floor over them would claim evidence
+ * that does not exist.
+ *
+ * INCLUDED: `out-of-band`. A first draft kept only `lane-gated` and silently
+ * dropped `contract-docker`, `contract-lsp-lance` and `pty` — every group those
+ * two producers have. `membershipAuthority` says who owns SELECTION (whether
+ * the shard runner picks the files), not whether the group is evidence: these
+ * run in their own job, and that job IS the producer being validated.
+ */
+export const requiredCapabilityGroups = (
+  producerId: string,
+  groups: readonly CapabilityGroup[] = CAPABILITY_GROUPS,
+): readonly CapabilityGroupFloor[] =>
+  groups
+    .filter(
+      (group) =>
+        group.producer === producerId &&
+        group.lane === "pr-required-deterministic" &&
+        group.membershipAuthority !== "declared-pending-gate",
+    )
+    .map((group) => ({
+      id: group.id,
+      minimumExecutedFiles: group.minExecutedFiles,
+      minimumExecutedCases: group.minExecutedCases,
+      members: group.members,
+    }))
+
+/**
+ * A producer's floor, derived from the manifest.
+ *
+ * A producer with no required group keeps the zero-execution floor: `pty` has
+ * no manifest group, and dropping to "no floor at all" because the manifest is
+ * silent would reinstate the success-shaped empty job this guard exists for.
+ */
+export const capabilityFloorFor = (
+  producerId: string,
+  groups: readonly CapabilityGroup[] = CAPABILITY_GROUPS,
+): CapabilityFloor => {
+  const required = requiredCapabilityGroups(producerId, groups)
+  const sum = (pick: (group: CapabilityGroupFloor) => number): number =>
+    required.reduce((total, group) => total + pick(group), 0)
+  return {
+    minimumExecutedFiles: Math.max(
+      1,
+      sum((group) => group.minimumExecutedFiles),
+    ),
+    minimumExecutedCases: Math.max(
+      1,
+      sum((group) => group.minimumExecutedCases),
+    ),
+    groups: required,
+  }
 }
 
 export interface RequiredProducer {
@@ -57,8 +128,14 @@ export interface RequiredProducer {
   /**
    * Set when the job's coverage is conditional on host capability, so a
    * `success` conclusion alone does not prove anything ran.
+   *
+   * A FLAG, not the floor itself. The floor is derived from the capability
+   * manifest, and the two modules reference each other — computing it here, at
+   * module scope, made whichever loaded second observe the other
+   * half-initialized. Both directions threw at runtime and `typecheck` reported
+   * neither, so the numbers are resolved at validation time instead.
    */
-  readonly capability?: CapabilityFloor
+  readonly capabilityGated?: true
 }
 
 export type RequiredProducerContext = "pr-required"
@@ -77,7 +154,12 @@ const PR_REQUIRED_PRODUCERS: readonly RequiredProducer[] = [
   { id: "full-suite", workflow: REQUIRED_WORKFLOW_PATH, job: "full-suite" },
   // Every describe in the PTY e2e is `skipIf(!PTY_AVAILABLE)`: on a runner
   // without openpty the job is green having executed nothing.
-  { id: "pty", workflow: REQUIRED_WORKFLOW_PATH, job: "pty", capability: ZERO_EXECUTION_FLOOR },
+  {
+    id: "pty",
+    workflow: REQUIRED_WORKFLOW_PATH,
+    job: "pty",
+    capabilityGated: true,
+  },
   { id: "web", workflow: REQUIRED_WORKFLOW_PATH, job: "web" },
   // `*-real-e2e.test.ts` arms degrade to visible skips when clangd / lldb-dap /
   // dlv / debugpy are absent — all 32 of them, on the wrong runner.
@@ -85,7 +167,7 @@ const PR_REQUIRED_PRODUCERS: readonly RequiredProducer[] = [
     id: "toolchain",
     workflow: REQUIRED_WORKFLOW_PATH,
     job: "toolchain",
-    capability: ZERO_EXECUTION_FLOOR,
+    capabilityGated: true,
   },
   // REQUIRE_CONTRACT=1 is supposed to make an absent dependency a hard fail
   // rather than a silent skip; the floor is what PROVES that held.
@@ -93,7 +175,7 @@ const PR_REQUIRED_PRODUCERS: readonly RequiredProducer[] = [
     id: "contract",
     workflow: REQUIRED_WORKFLOW_PATH,
     job: "contract",
-    capability: ZERO_EXECUTION_FLOOR,
+    capabilityGated: true,
   },
 ]
 
@@ -113,7 +195,7 @@ export const requiredProducerIds = (
 
 export const capabilityProducers = (
   producers: readonly RequiredProducer[] = requiredProducers(),
-): readonly RequiredProducer[] => producers.filter((producer) => producer.capability !== undefined)
+): readonly RequiredProducer[] => producers.filter((producer) => producer.capabilityGated === true)
 
 /* ------------------------------------------------------------------ */
 /* workflow side                                                       */
@@ -199,8 +281,8 @@ export const validateCapabilityResult = (
   producer: RequiredProducer,
   candidate: unknown,
 ): CapabilityValidation => {
-  const floor = producer.capability
-  if (floor === undefined) return { ok: true }
+  if (producer.capabilityGated !== true) return { ok: true }
+  const floor = capabilityFloorFor(producer.id)
   if (candidate === undefined || candidate === null) {
     return { ok: false, reason: `capability artifact absent for producer "${producer.id}"` }
   }
@@ -253,6 +335,26 @@ export const validateCapabilityResult = (
         `blocked-missing dependency(ies)`,
     }
   }
+  // PER GROUP, not just in total. A lane can clear an aggregate floor by
+  // over-running one group while another never starts — `toolchain` fans out
+  // to seven groups, and "10 files ran" says nothing about whether pyright ran
+  // at all. Attribution is exact membership, never a path prefix.
+  const executed = new Set(result.executedFiles)
+  for (const group of floor.groups) {
+    const ran = group.members.filter((member) => executed.has(member))
+    if (ran.length < group.minimumExecutedFiles) {
+      return {
+        ok: false,
+        reason:
+          `capability group "${group.id}" (producer "${producer.id}") executed ` +
+          `${ran.length} of its ${group.members.length} member file(s), floor is ` +
+          `${group.minimumExecutedFiles}`,
+      }
+    }
+  }
+  // Totals last, and only reachable once every group cleared: by then a
+  // shortfall means the lane ran its groups and still under-executed, which is
+  // a different sentence from "a group never started".
   if (result.executedCases < floor.minimumExecutedCases) {
     return {
       ok: false,

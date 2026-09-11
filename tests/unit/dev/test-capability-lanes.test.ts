@@ -22,6 +22,7 @@ import {
 } from "../../../tools/dev/test-policy"
 import { discoverInventory } from "../../../tools/dev/test-shard-discovery"
 import {
+  capabilityFloorFor,
   capabilityProducers,
   REQUIRED_PRODUCERS,
   requiredProducerIds,
@@ -159,16 +160,23 @@ describe("capability manifest is internally closed", () => {
     ).map((group) => `${group.id}->${group.producer}`)
     expect(unprovable).toEqual([])
 
-    // The floors this manifest declares are strictly tighter than the coarse
-    // 1-file/1-case floor they refine, or the refinement buys nothing.
+    // The refinement is now WIRED, not merely tighter on paper: the producer's
+    // floor IS the sum over its PR-required groups. This used to compare the
+    // manifest against a hardcoded 1-file/1-case constant and pass while
+    // nothing consumed the manifest at all.
     const coarse = capabilityProducers().find((producer) => producer.id === "toolchain")
-    expect(coarse?.capability).toBeDefined()
+    expect(coarse?.capabilityGated).toBe(true)
+    const derived = capabilityFloorFor("toolchain")
     const toolchainGroups = capabilityProducerFloors().filter(
       (floor) => floor.producer === "toolchain",
     )
     expect(toolchainGroups.length).toBeGreaterThanOrEqual(8)
-    const totalFiles = toolchainGroups.reduce((sum, row) => sum + row.minimumExecutedFiles, 0)
-    expect(totalFiles).toBeGreaterThan(coarse?.capability?.minimumExecutedFiles ?? 0)
+    expect(derived.minimumExecutedFiles).toBe(
+      derived.groups.reduce((sum, row) => sum + row.minimumExecutedFiles, 0),
+    )
+    // ...and strictly above the flat floor it replaced.
+    expect(derived.minimumExecutedFiles).toBeGreaterThan(1)
+    expect(derived.minimumExecutedCases).toBeGreaterThan(1)
   })
 
   test("every declared capability group has a non-zero executed floor", () => {
@@ -189,7 +197,8 @@ describe("a capability job that executed nothing is RED", () => {
 
   test("the toolchain producer carries a capability floor at all", () => {
     expect(producer).toBeDefined()
-    expect(producer?.capability).toBeDefined()
+    expect(producer?.capabilityGated).toBe(true)
+    expect(capabilityFloorFor("toolchain").groups.length).toBeGreaterThan(0)
   })
 
   test("zero executed files/cases fails; a real execution passes", () => {
@@ -208,8 +217,21 @@ describe("a capability job that executed nothing is RED", () => {
 
     // PAIRED CONTROL: the same artifact with one real execution passes, so the
     // red above is about EXECUTION and not about the artifact's shape.
-    const one = { ...zero, executedFiles: ["tests/unit/x-real-e2e.test.ts"], executedCases: 1 }
+    // PAIRED CONTROL — and it now has to name the REAL members. One invented
+    // path with one case used to pass this, which was the whole defect: the
+    // floor was 1 file / 1 case for a lane of seven groups.
+    const floor = capabilityFloorFor("toolchain")
+    const members = floor.groups.flatMap((group) => [...group.members])
+    const one = { ...zero, executedFiles: members, executedCases: floor.minimumExecutedCases }
     expect(validateCapabilityResult(producer, one).ok).toBe(true)
+    // ...and the invented path alone is refused.
+    expect(
+      validateCapabilityResult(producer, {
+        ...zero,
+        executedFiles: ["tests/unit/x-real-e2e.test.ts"],
+        executedCases: 1,
+      }).ok,
+    ).toBe(false)
 
     // And the two outcomes that are failures wearing a skip's clothes.
     expect(validateCapabilityResult(producer, { ...one, blockedMissing: 1 }).ok).toBe(false)
