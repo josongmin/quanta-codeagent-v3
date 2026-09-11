@@ -20,7 +20,6 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it, test } from "bun:test"
-import { execSync } from "node:child_process"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -28,6 +27,7 @@ import { PatchParseError } from "@/patch"
 import type { ToolContext, ToolEvent } from "@/tool"
 import { applyPatchTool } from "@/tool/apply-patch"
 import { astGrepTool } from "@/tool/ast-grep"
+import { canExecute, capability } from "../../tools/dev/capability-receipt-consumer"
 import { present } from "../_helpers/expect-present"
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -48,15 +48,15 @@ async function run(
   return last
 }
 
-/** Probe once (sync) whether the ast-grep binary is on PATH. */
-const astGrepAvailable = (() => {
-  try {
-    execSync("which ast-grep", { stdio: "ignore" })
-    return true
-  } catch {
-    return false
-  }
-})()
+// ─── capability receipt (TVH-11: read, never probe) ─────────────────────────
+//
+// Was an IIFE running `execSync("which ast-grep")` at MODULE LOAD — an
+// external process charged to importing this file. E2E-1 asserts the
+// binary-ABSENT behaviour, so it gates on PROVEN absence; with no receipt the
+// verdict is `blocked` and both directions skip visibly.
+const astGrep = capability("ast-grep")
+const astGrepAvailable = canExecute(astGrep)
+const astGrepProvenAbsent = astGrep.verdict === "skipped-unsupported"
 
 // ─── temp-directory lifecycle ────────────────────────────────────────────────
 
@@ -83,7 +83,7 @@ describe("E2E-1: probe failure → ok:false with install hint", () => {
   // run exactly once (it is never cached to `true`) and return the error string.
   // We do NOT call this test skipIf so it always exercises the failure path.
 
-  test.skipIf(astGrepAvailable)(
+  test.skipIf(!astGrepProvenAbsent)(
     "execute yields ok:false when ast-grep binary is absent",
     async () => {
       const result = await run(astGrepTool, { pattern: "console.log($A)" }, tmpDir)

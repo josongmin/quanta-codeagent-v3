@@ -13,41 +13,59 @@
  *   (b) lets a symlink/`**` hit that resolves OUTSIDE the jail survive, or
  *   (c) accepts an absolute / "../" escaping pattern instead of rejecting it.
  */
-import { afterAll, describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { execFileSync } from "node:child_process"
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { ToolContext, ToolResult } from "@/tool"
 import { globTool } from "@/tool/glob"
+import { canExecute, capability } from "../../../tools/dev/capability-receipt-consumer"
+
+// TVH-11: this whole fixture — `mkdtempSync`, five `writeFileSync`, a real
+// `git init` child process and a `symlinkSync` — used to run at MODULE LOAD.
+// Importing this file created a git repository on disk. It is now built in
+// `beforeAll`, and the `git` answer comes from the tier capability receipt
+// instead of from an unguarded `execFileSync` that throws at import time on a
+// host without git.
+const git = capability("git")
 
 // jailRoot = <root>/work (a git repo so .gitignore is honored). A sibling
 // <root>/outside holds a secret the jail must never list; a symlink inside work
 // points at it (the `**`/symlink escape attempt). work/node_modules is
 // gitignored — its content must never surface either.
-const root = mkdtempSync(join(tmpdir(), "glob-gimtime-hell-"))
-const work = join(root, "work")
-const outside = join(root, "outside")
-afterAll(() => rmSync(root, { recursive: true, force: true }))
-mkdirSync(join(work, "src"), { recursive: true })
-mkdirSync(join(work, "node_modules", "pkg"), { recursive: true })
-mkdirSync(outside, { recursive: true })
-// node_modules/ is a DIRECTORY ignore; secret.env.ts is a FILE-NAME ignore (the
-// F1 case — ripgrep's `-g <pattern>` force-include would RE-ADMIT this individual
-// file, which is why the tool now filters the glob IN-PROCESS over the
-// gitignore-pruned `rg --files` list instead of via `-g`).
-writeFileSync(join(work, ".gitignore"), "node_modules/\nsecret.env.ts\n")
-writeFileSync(join(work, "src", "in.ts"), "1")
-writeFileSync(join(work, "src", "secret.env.ts"), "FILELEVELSECRET")
-writeFileSync(join(work, "node_modules", "pkg", "secret-dep.ts"), "DEP")
-writeFileSync(join(outside, "secret.ts"), "TOPSECRET")
-execFileSync("git", ["init", "-q"], { cwd: work })
+let root: string
+let work: string
+let outside: string
 let symlinkOk = true
-try {
-  symlinkSync(outside, join(work, "link"))
-} catch {
-  symlinkOk = false
-}
+
+afterAll(() => {
+  if (root !== undefined) rmSync(root, { recursive: true, force: true })
+})
+
+beforeAll(() => {
+  root = mkdtempSync(join(tmpdir(), "glob-gimtime-hell-"))
+  work = join(root, "work")
+  outside = join(root, "outside")
+  mkdirSync(join(work, "src"), { recursive: true })
+  mkdirSync(join(work, "node_modules", "pkg"), { recursive: true })
+  mkdirSync(outside, { recursive: true })
+  // node_modules/ is a DIRECTORY ignore; secret.env.ts is a FILE-NAME ignore (the
+  // F1 case — ripgrep's `-g <pattern>` force-include would RE-ADMIT this individual
+  // file, which is why the tool now filters the glob IN-PROCESS over the
+  // gitignore-pruned `rg --files` list instead of via `-g`).
+  writeFileSync(join(work, ".gitignore"), "node_modules/\nsecret.env.ts\n")
+  writeFileSync(join(work, "src", "in.ts"), "1")
+  writeFileSync(join(work, "src", "secret.env.ts"), "FILELEVELSECRET")
+  writeFileSync(join(work, "node_modules", "pkg", "secret-dep.ts"), "DEP")
+  writeFileSync(join(outside, "secret.ts"), "TOPSECRET")
+  execFileSync("git", ["init", "-q"], { cwd: work })
+  try {
+    symlinkSync(outside, join(work, "link"))
+  } catch {
+    symlinkOk = false
+  }
+})
 
 const ctx = (): ToolContext => ({ cwd: work, signal: new AbortController().signal })
 const run = async (input: unknown): Promise<ToolResult> => {
@@ -59,7 +77,11 @@ const run = async (input: unknown): Promise<ToolResult> => {
   return result
 }
 
-describe("glob ripgrep engine cannot leak gitignored or out-of-jail paths", () => {
+// A `describe`/`describe.skip` binding rather than `describe.skipIf(...)` so the
+// suite body keeps its indentation and this stays a reviewable diff.
+const D = canExecute(git) ? describe : describe.skip
+
+D(`glob ripgrep engine cannot leak gitignored or out-of-jail paths [${git.verdict}]`, () => {
   test("(a) a .gitignored path (node_modules/secret-dep.ts) is NOT returned", async () => {
     const r = await run({ pattern: "**/*.ts" })
     expect(r.ok).toBe(true)

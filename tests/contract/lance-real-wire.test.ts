@@ -8,45 +8,34 @@ import {
   buildSearchPipelineFromEnv,
   clearSearchPipelineWireForTests,
 } from "@/../src/apps/agent/search-pipeline-wire"
+import {
+  canExecute,
+  capability,
+  requireCapability,
+} from "../../tools/dev/capability-receipt-consumer"
 import { requireContract } from "./_guard"
 
-const PYTHON_CANDIDATES = [
-  process.env.QUANTA_LANCE_PYTHON,
-  "/opt/homebrew/opt/python@3.11/Frameworks/Python.framework/Versions/3.11/bin/python3.11",
-  "python3",
-  "python",
-].filter((value): value is string => value !== undefined && value !== "")
-
-const probePython = async (command: string): Promise<boolean> => {
-  try {
-    const proc = Bun.spawn([command, "-c", "import lancedb"], {
-      stdout: "ignore",
-      stderr: "ignore",
-    })
-    const exit = await Promise.race([
-      proc.exited,
-      new Promise<number>((resolve) => setTimeout(() => resolve(-1), 5_000)),
-    ])
-    try {
-      proc.kill()
-    } catch {
-      // already exited
-    }
-    return exit === 0
-  } catch {
-    return false
-  }
-}
-
-const resolvePython = async (): Promise<string | null> => {
-  for (const command of PYTHON_CANDIDATES) {
-    if (await probePython(command)) return command
-  }
-  return null
-}
-
-const python = await resolvePython()
-const available = requireContract("python+lancedb", python !== null)
+/**
+ * ─── capability receipt (TVH-11) ─────────────────────────────────────────────
+ *
+ * This file used to resolve its interpreter at MODULE LOAD by walking up to
+ * FOUR python candidates SERIALLY, 5,000ms each — 20 seconds of DISCOVERY on a
+ * host with no lancedb, paid by anyone who imported the file, and the losing
+ * `Promise.race` timers were never cleared.
+ *
+ * The candidate search moved into `tools/dev/capability-probe-producer.ts`,
+ * where the candidates run in PARALLEL under ONE deadline, the winner is chosen
+ * by PRIORITY (not by who finished first), losers are killed AND drained, and
+ * every timer is cleared in a `finally`. This file now reads the answer.
+ *
+ * `requireCapability` keeps the CI contract that `_guard.ts` established: a
+ * `blocked` or `failed-setup` under `QUANTA_REQUIRE_CAPABILITIES` throws rather
+ * than skipping, because "the dependency is missing" and "our probe never ran"
+ * must not print the same result.
+ */
+const lancePython = requireCapability(capability("lancedb"))
+const python = lancePython.resolved ?? null
+const available = requireContract("python+lancedb", canExecute(lancePython) && python !== null)
 
 const tmpDirs: string[] = []
 const makeTmpDir = (): string => {
@@ -332,7 +321,7 @@ const inspectRealTable = (
 
 describe("search pipeline Lance wire (real LanceDB backing via compatible REST shim)", () => {
   if (!available || python === null) {
-    test.skip("python+lancedb unavailable — skipping real LanceDB-backed shim round trip", () => {})
+    test.skip(`python+lancedb — ${lancePython.label}`, () => {})
     return
   }
 

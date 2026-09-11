@@ -26,8 +26,12 @@ import {
   PROJECT_ENV_SOURCE_SHIM_BEGIN,
 } from "@/runner/batch/corpus/project-env"
 import { withGitSnapshot } from "@/runner/batch/eval/snapshot"
+import { canExecute, capability } from "../../tools/dev/capability-receipt-consumer"
 
-const hasGit = spawnSync("git", ["--version"], { stdio: "ignore" }).status === 0
+// TVH-11: was `spawnSync("git", ["--version"])` at MODULE LOAD — a child
+// process charged to importing this file, and one of five such probes running
+// during ordinary discovery. The tier's capability producer answers it once.
+const hasGit = canExecute(capability("git"))
 
 const git = (cwd: string, args: readonly string[]): string =>
   spawnSync(

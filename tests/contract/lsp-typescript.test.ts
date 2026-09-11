@@ -3,37 +3,29 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync 
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { TypescriptAdapter } from "@/lsp"
+import {
+  canExecute,
+  capability,
+  requireCapability,
+} from "../../tools/dev/capability-receipt-consumer"
 import { requireContract } from "./_guard"
 
-const COMMAND = ["typescript-language-server", "--stdio"]
-
-/** Probe whether typescript-language-server is actually launchable in this
- *  environment. The whole suite must stay 0-fail when it is absent, so this
- *  gates the real round-trip tests. */
-const tsServerAvailable = async (): Promise<boolean> => {
-  try {
-    const proc = Bun.spawn([COMMAND[0] as string, "--version"], {
-      stdout: "pipe",
-      stderr: "pipe",
-    })
-    const exit = await Promise.race([
-      proc.exited,
-      new Promise<number>((resolve) => setTimeout(() => resolve(-1), 5_000)),
-    ])
-    try {
-      proc.kill()
-    } catch {
-      // already exited
-    }
-    // `--version` exits non-zero on some builds but still proves the binary
-    // resolves and runs; -1 means our timeout fired (treat as unavailable).
-    return exit !== -1
-  } catch {
-    return false
-  }
-}
-
-const available = requireContract("typescript-language-server", await tsServerAvailable())
+/**
+ * ─── capability receipt (TVH-11) ─────────────────────────────────────────────
+ *
+ * Was a `Bun.spawn(["typescript-language-server", "--version"])` at MODULE LOAD, re-run
+ * per contract file that asks the same question, with an uncleared 5,000ms
+ * `Promise.race` timer on the winning path. The tier's capability producer
+ * probes once, under one deadline, and this reads the receipt — importing the
+ * file now starts nothing.
+ *
+ * `requireCapability` preserves the `_guard.ts` CI contract: under
+ * `QUANTA_REQUIRE_CAPABILITIES`, a `blocked` receipt (nobody probed) or a
+ * `failed-setup` (the probe wedged) THROWS instead of passing for the absent
+ * tool's reason.
+ */
+const lsp = requireCapability(capability("typescript-language-server"))
+const available = requireContract("typescript-language-server", canExecute(lsp))
 
 const tmpDirs: string[] = []
 const REPO_TYPESCRIPT = join(import.meta.dir, "..", "..", "node_modules", "typescript")

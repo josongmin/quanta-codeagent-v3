@@ -41,67 +41,39 @@
  * up.
  */
 
-import { describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { beforeAll, describe, expect, test } from "bun:test"
 import { join } from "node:path"
+import {
+  loadOrProducePreloadClosureArtifact,
+  type PreloadClosureArtifact,
+} from "../../tools/dev/preload-closure-probe"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..")
-const PROBE_ROOT = join(REPO_ROOT, "tests", ".tmp")
-
-const makeProbeDir = (prefix: string): string => {
-  // Keep the probe under tests/ so Bun applies the real bunfig preload, but
-  // stage it in the repo's ignored .tmp namespace. A visible transient
-  // `tests/zz-*` directory made a concurrent authoritative shard observe a
-  // dirty checkout and abort even though this test removed it in finally.
-  mkdirSync(PROBE_ROOT, { recursive: true })
-  return mkdtempSync(join(PROBE_ROOT, prefix))
-}
 
 /**
- * Run a probe under the REAL bunfig and report every `src/` module the runtime
- * ended up with.
+ * ## Why the child processes moved out of this file (TVH-11)
  *
- * The probe is written into the repo's ignored `tests/.tmp/` tree, not a system
- * temp directory,
- * so it is preloaded exactly like any other test file — a probe outside the tree
- * would not pick up `bunfig.toml` at all and would report a clean closure for
- * the wrong reason.
+ * `describe` callbacks run at MODULE LOAD under bun:test, so
+ * `describe("...", () => { const loaded = loadedSrcModules() })` started a
+ * nested `bun test` DURING DISCOVERY — importing this file spawned a bun
+ * process and wrote a directory into the repo. A second test then started a
+ * separate `bun run`. Neither is wrong to do; both were wrong to do at import,
+ * inside an ordinary meta suite.
+ *
+ * `tools/dev/preload-closure-probe.ts` is the `meta-runtime` producer: ONE
+ * invocation, both probes, one small artifact. A runner that produces the
+ * artifact up front (`QUANTA_PRELOAD_CLOSURE_ARTIFACT`) makes this file
+ * spawn-free entirely; without one, `beforeAll` produces it once — still after
+ * discovery, and once for the whole file rather than twice.
  */
-const loadedSrcModules = (): readonly string[] => {
-  const dir = makeProbeDir("preload-probe-")
-  const probe = join(dir, "probe.test.ts")
-  writeFileSync(
-    probe,
-    [
-      `import { test } from "bun:test"`,
-      `test("report the runtime module set", () => {`,
-      `  const loaded = Object.keys(require.cache ?? {})`,
-      `  process.stdout.write("MODULES:" + JSON.stringify(loaded) + "\\n")`,
-      `})`,
-      ``,
-    ].join("\n"),
-  )
-  try {
-    const proc = Bun.spawnSync(["bun", "test", probe], {
-      cwd: REPO_ROOT,
-      stdout: "pipe",
-      stderr: "pipe",
-      env: { ...process.env, FORCE_COLOR: "0" },
-    })
-    const out = `${proc.stdout.toString()}${proc.stderr.toString()}`
-    const line = /MODULES:(\[.*\])/.exec(out)
-    if (line === null) return []
-    return (JSON.parse(line[1] as string) as string[])
-      .map((p) => (p.startsWith(REPO_ROOT) ? p.slice(REPO_ROOT.length + 1) : p))
-      .filter((p) => p.startsWith("src/"))
-      .sort()
-  } finally {
-    rmSync(dir, { recursive: true, force: true })
-  }
-}
-
 describe("preload runtime closure", () => {
-  const loaded = loadedSrcModules()
+  let artifact: PreloadClosureArtifact
+  let loaded: readonly string[]
+
+  beforeAll(() => {
+    artifact = loadOrProducePreloadClosureArtifact(REPO_ROOT)
+    loaded = artifact.loadedSrcModules
+  }, 120_000)
 
   test("anti-vacuity: the probe actually ran under the real preload", () => {
     // Without this every assertion below passes when the probe fails to start,
@@ -189,33 +161,14 @@ describe("preload runtime closure", () => {
     // in the repo noticed that the preload's `afterEach(… (null))` had stopped
     // clearing the slot.
     //
-    // Driven through the same import path `tests/setup.ts` uses, so a re-export
-    // that silently becomes a different binding fails here too.
-    const probe = `
-      import { __setBranchRunAgentForTest, branchRunAgentOverride }
-        from "@/agent/branch-search-runner/run-agent-override"
-      const sentinel = (() => undefined) as never
-      __setBranchRunAgentForTest(sentinel)
-      if (branchRunAgentOverride() !== sentinel) throw new Error("set did not take")
-      __setBranchRunAgentForTest(null)
-      if (branchRunAgentOverride() !== null) throw new Error("reset did not clear")
-      process.stdout.write("RESET-OK\\n")
-    `
-    const dir = makeProbeDir("reset-probe-")
-    try {
-      const file = join(dir, "probe.ts")
-      writeFileSync(file, probe)
-      const proc = Bun.spawnSync(["bun", "run", file], {
-        cwd: REPO_ROOT,
-        stdout: "pipe",
-        stderr: "pipe",
-      })
-      const out = `${proc.stdout.toString()}${proc.stderr.toString()}`
-      expect(out, "the override cell does not round-trip set→clear").toContain("RESET-OK")
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
-  }, 60_000)
+    // Still driven through the same import path `tests/setup.ts` uses, in a REAL
+    // child process, so a re-export that silently becomes a different binding
+    // fails here too — the probe just lives in the producer now (TVH-11).
+    expect(
+      artifact.overrideRoundTrip.ok,
+      `the override cell does not round-trip set→clear:\n${artifact.overrideRoundTrip.output}`,
+    ).toBe(true)
+  })
 
   test("🔴 the override cell is a leaf — no value imports", () => {
     // The property the preload depends on. `run-agent-override.ts` may reference

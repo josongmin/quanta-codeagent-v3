@@ -23,17 +23,22 @@
  * DETERMINISTIC: the headless stub (`createHeadlessBrowser({ pages })`) has no
  * process, socket, or network. No chrome required for the green path.
  *
- * REAL-CHROME (optional, env-gated): a separate block drives the cdp-adapter
- * PORT directly (NOT the tool layer — 127.0.0.1 is SSRF-denied at the tool
- * layer) against a `Bun.serve` fixture. It runs ONLY when a real Chrome session
- * can actually be brought up; otherwise it is SKIPPED (a visible `skipped` in
- * the runner) — never a silent green pass. `availability() !== null` only means
- * the binary exists — it does NOT guarantee the CDP `Page.enable` bring-up
- * succeeds in a sandboxed CI, so the gate is a real spawn probe done at module
- * load (top-level await), feeding `describe.skipIf`, not the binary probe alone.
+ * REAL-CHROME (optional, CAPABILITY-gated): a separate block drives the
+ * cdp-adapter PORT directly (NOT the tool layer — 127.0.0.1 is SSRF-denied at
+ * the tool layer) against a `Bun.serve` fixture. It runs ONLY when a real
+ * Chrome session can actually be brought up; otherwise it is SKIPPED (a visible
+ * `skipped` in the runner) — never a silent green pass. `availability() !== null`
+ * only means the binary exists — it does NOT guarantee the CDP `Page.enable`
+ * bring-up succeeds in a sandboxed CI, so the gate is still a REAL bring-up
+ * probe; it just runs once per tier in the capability producer instead of at
+ * this file's module load. Nothing external happens before `beforeAll`.
+ *
+ * The previous comment on this block said "env-gated" and there was no env gate
+ * — the top-level `await` spawned Chrome and bound a port on every import. See
+ * the block above `REAL_CHROME_RAN` for the full account (TVH-11).
  */
 
-import { afterAll, describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -53,6 +58,7 @@ import {
 import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { defaultTools, ToolRegistry } from "@/tool"
+import { canExecute, capability } from "../../tools/dev/capability-receipt-consumer"
 import { pressureScaledTimeoutMs } from "./_host-pressure"
 
 const ENDPOINT_TIMEOUT_MS = pressureScaledTimeoutMs(15_000)
@@ -481,21 +487,30 @@ describe("browser features seam — registry surface", () => {
   })
 })
 
-// ── REAL CHROME (optional, env-gated; drives the cdp-adapter PORT directly) ───
+// ── REAL CHROME (capability-gated; drives the cdp-adapter PORT directly) ─────
 //
-// `availability() !== null` only proves the binary exists. The CDP bring-up
-// (Page.enable) can still fail under a sandboxed CI. So the gate is a REAL
-// spawn probe done at MODULE LOAD (top-level await) — `REAL_CHROME_RAN` is true
-// only once an actual CDP session is established. It feeds `describe.skipIf`
-// below, so an unavailable Chrome (missing binary OR session won't come up)
-// yields a VISIBLE `skipped` in the runner — never a silent green pass with the
-// real assertions quietly not running. When the block DOES run, every test
-// exercises the real port and asserts real page content.
+// WHAT THIS REPLACED (TVH-11). The header above used to say "env-gated" and
+// there was NO env gate: a top-level `await` ran a full Chrome/CDP bring-up AND
+// started a `Bun.serve` fixture server, unconditionally, at MODULE LOAD. A
+// comment is not a gate, and importing this file — to list it, to shard it, to
+// run one of the fifteen deterministic cases above — spawned a browser and
+// bound a port.
+//
+// `availability() !== null` only proves the binary exists, and the failure
+// being guarded against is a Chrome that IS installed and cannot bring a CDP
+// session up, so the bring-up probe is real — it just happens ONCE PER TIER in
+// `tools/dev/capability-probe-producer.ts`, not once per file at import. This
+// file reads the receipt, and everything external moved into `beforeAll`.
+//
+// `REAL_CHROME_RAN` keeps its name deliberately: `tools/dev/test-shard-plan.ts`
+// classifies this file into the `browser` resource class by matching the
+// `REAL_CHROME` token in its source, and a rename would silently reclassify it
+// into a chunk that overlaps 135 CPU-hungry peers.
 
-const TEMP_ROOT = mkdtempSync(join(tmpdir(), "qbe-"))
 let realPort: BrowserPort | undefined
 let realHandle: BrowserHandle | undefined
 let server: ReturnType<typeof Bun.serve> | undefined
+let tempRoot: string | undefined
 
 const FORM_HTML = `<!doctype html><html><head><title>Fixture Page</title></head><body>
 <h1 id="hd">Fixture</h1>
@@ -503,51 +518,54 @@ const FORM_HTML = `<!doctype html><html><head><title>Fixture Page</title></head>
 <input id="inp" type="text" value="">
 </body></html>`
 
-// Module-load bring-up probe: only attempt the real spawn when the binary is
-// present, and only flip REAL_CHROME_RAN once a CDP session is actually live.
-const REAL_CHROME_RAN = await (async (): Promise<boolean> => {
-  const probe = createCdpBrowser({
-    spawner: defaultProcessSpawner,
-    transport: defaultCdpTransport,
-    fs: defaultBrowserFs,
-    scheduler: realScheduler,
-    clock: realClock,
-    profileRoot: TEMP_ROOT,
-    endpointTimeoutMs: ENDPOINT_TIMEOUT_MS,
-    commandTimeoutMs: CDP_COMMAND_TIMEOUT_MS,
-  })
-  if (probe.availability() === null) return false
-  const sp = await probe.spawn()
-  if (!sp.ok) return false // binary present but session won't come up here → skip
-  realPort = probe
-  realHandle = sp.value
-  server = Bun.serve({
-    port: 0,
-    fetch(req) {
-      const p = new URL(req.url).pathname
-      if (p === "/form")
-        return new Response(FORM_HTML, { headers: { "content-type": "text/html" } })
-      return new Response(`<html><body><h1>Index</h1></body></html>`, {
-        headers: { "content-type": "text/html" },
-      })
-    },
-  })
-  return true
-})()
-
-afterAll(async () => {
-  if (realPort && realHandle) await realPort.close(realHandle)
-  server?.stop(true)
-  rmSync(TEMP_ROOT, { recursive: true, force: true })
-})
+const realChrome = capability("chrome-cdp")
+const REAL_CHROME_RAN = canExecute(realChrome)
 
 describe.skipIf(!REAL_CHROME_RAN)(
-  "REAL chrome — cdp-adapter port direct (SSRF gate is tool-layer-only)",
+  `REAL chrome — cdp-adapter port direct (SSRF gate is tool-layer-only) [${realChrome.verdict}]`,
   () => {
-    // Non-null inside the block: REAL_CHROME_RAN === true ⇒ these were assigned.
+    // Non-null inside the block: the bring-up below throws rather than leaving
+    // these undefined, so a half-started fixture can never masquerade as a pass.
     const port = (): BrowserPort => realPort as BrowserPort
     const handle = (): BrowserHandle => realHandle as BrowserHandle
     const origin = (): string => `http://127.0.0.1:${(server as ReturnType<typeof Bun.serve>).port}`
+
+    beforeAll(async () => {
+      tempRoot = mkdtempSync(join(tmpdir(), "qbe-"))
+      const probe = createCdpBrowser({
+        spawner: defaultProcessSpawner,
+        transport: defaultCdpTransport,
+        fs: defaultBrowserFs,
+        scheduler: realScheduler,
+        clock: realClock,
+        profileRoot: tempRoot,
+        endpointTimeoutMs: ENDPOINT_TIMEOUT_MS,
+        commandTimeoutMs: CDP_COMMAND_TIMEOUT_MS,
+      })
+      const sp = await probe.spawn()
+      // The receipt said a session comes up on this host. If it does not come up
+      // HERE that is a regression, not an absence — fail, never quietly skip.
+      if (!sp.ok) throw new Error(`chrome bring-up failed after a green receipt: ${sp.error.kind}`)
+      realPort = probe
+      realHandle = sp.value
+      server = Bun.serve({
+        port: 0,
+        fetch(req) {
+          const p = new URL(req.url).pathname
+          if (p === "/form")
+            return new Response(FORM_HTML, { headers: { "content-type": "text/html" } })
+          return new Response(`<html><body><h1>Index</h1></body></html>`, {
+            headers: { "content-type": "text/html" },
+          })
+        },
+      })
+    })
+
+    afterAll(async () => {
+      if (realPort && realHandle) await realPort.close(realHandle)
+      server?.stop(true)
+      if (tempRoot !== undefined) rmSync(tempRoot, { recursive: true, force: true })
+    })
 
     test("(16) navigate returns the fixture <title> through the real port", async () => {
       const nav = await port().navigate(handle(), `${origin()}/form`)

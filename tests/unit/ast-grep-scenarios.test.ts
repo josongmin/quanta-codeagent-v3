@@ -15,24 +15,24 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { execSync } from "node:child_process"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { z } from "zod"
 import type { ToolContext, ToolEvent } from "@/tool"
 import { astGrepTool } from "@/tool/ast-grep"
+import { canExecute, capability } from "../../tools/dev/capability-receipt-consumer"
 import { present } from "../_helpers/expect-present"
 
-// ─── binary probe (sync, once) ──────────────────────────────────────────────
-
-let astGrepAvailable = false
-try {
-  execSync("ast-grep --version", { stdio: "pipe" })
-  astGrepAvailable = true
-} catch {
-  // binary absent
-}
+// ─── capability receipt (TVH-11: read, never probe) ─────────────────────────
+//
+// Was `execSync("ast-grep --version")` at MODULE LOAD. GROUP 2 (`S-BIN-*`)
+// asserts the BINARY-ABSENT behaviour, so it is gated on the binary being
+// PROVEN absent rather than on "not proven present": with no receipt the
+// verdict is `blocked` and neither direction runs, because nobody looked.
+const astGrep = capability("ast-grep")
+const astGrepAvailable = canExecute(astGrep)
+const astGrepProvenAbsent = astGrep.verdict === "skipped-unsupported"
 
 // ─── helper: drain the execute generator ────────────────────────────────────
 
@@ -140,7 +140,7 @@ describe("S-PROBE-5: description contains 'ast-grep'", () => {
 // ════════════════════════════════════════════════════════════════════════════
 
 describe("S-BIN-1: execute with real args but no binary -> ok:false", () => {
-  test.skipIf(astGrepAvailable)("yields ok:false when ast-grep binary is absent", async () => {
+  test.skipIf(!astGrepProvenAbsent)("yields ok:false when ast-grep binary is absent", async () => {
     // Red-on-injection: remove the probeAstGrep guard → the tool attempts to
     // exec ast-grep, which fails with a non-zero exit and the error falls
     // through to an unexpected code path; ok may become true; test fails.
@@ -150,7 +150,7 @@ describe("S-BIN-1: execute with real args but no binary -> ok:false", () => {
 })
 
 describe("S-BIN-2: error message contains installation guidance", () => {
-  test.skipIf(astGrepAvailable)("output mentions 'brew' or 'cargo' or 'install'", async () => {
+  test.skipIf(!astGrepProvenAbsent)("output mentions 'brew' or 'cargo' or 'install'", async () => {
     // Red-on-injection: strip the installation-hint string in probeAstGrep →
     // output is an empty or generic error; users get no actionable guidance;
     // this test fails.
@@ -160,23 +160,26 @@ describe("S-BIN-2: error message contains installation guidance", () => {
 })
 
 describe("S-BIN-3: result shape is {ok:false, output:string} not a throw", () => {
-  test.skipIf(astGrepAvailable)("binary-absent path returns object, does not throw", async () => {
-    // Red-on-injection: replace the probeError yield with a bare `throw` →
-    // the generator propagates an uncaught exception; callers crash; this
-    // test fails because threw becomes true.
-    let threw = false
-    let result: { ok: boolean; output: string } | null = null
-    try {
-      result = await runTool({ pattern: "console.log($A)" }, tmpDir)
-    } catch {
-      threw = true
-    }
-    expect(threw).toBe(false)
-    expect(result).not.toBeNull()
-    expect(present(result, "result").ok).toBe(false)
-    expect(typeof present(result, "result").output).toBe("string")
-    expect(present(result, "result").output.length).toBeGreaterThan(0)
-  })
+  test.skipIf(!astGrepProvenAbsent)(
+    "binary-absent path returns object, does not throw",
+    async () => {
+      // Red-on-injection: replace the probeError yield with a bare `throw` →
+      // the generator propagates an uncaught exception; callers crash; this
+      // test fails because threw becomes true.
+      let threw = false
+      let result: { ok: boolean; output: string } | null = null
+      try {
+        result = await runTool({ pattern: "console.log($A)" }, tmpDir)
+      } catch {
+        threw = true
+      }
+      expect(threw).toBe(false)
+      expect(result).not.toBeNull()
+      expect(present(result, "result").ok).toBe(false)
+      expect(typeof present(result, "result").output).toBe("string")
+      expect(present(result, "result").output.length).toBeGreaterThan(0)
+    },
+  )
 })
 
 // ════════════════════════════════════════════════════════════════════════════

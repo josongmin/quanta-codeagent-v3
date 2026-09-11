@@ -30,8 +30,20 @@ import {
   parseMethodAtLineStdout,
   type SiblingOverrideSite,
 } from "@/runner/batch/eval/cha-multisite"
+import { canExecute, capability } from "../../tools/dev/capability-receipt-consumer"
 
-const hasPython = spawnSync("python3", ["--version"], { stdio: "ignore" }).status === 0
+// ─── capability receipt (TVH-11) ────────────────────────────────────────────
+//
+// Was `spawnSync("python3", ["--version"])` at MODULE LOAD: a child process
+// charged to importing this file, once per file across the corpus that asks
+// the same question. One bounded probe per tier answers it now, and the
+// answer arrives as an immutable receipt.
+//
+// `canExecute` is true ONLY for a probed-present interpreter: an absent
+// receipt is `blocked`, which skips the gated teeth VISIBLY instead of
+// guessing either way.
+const python = capability("python3")
+const hasPython = canExecute(python)
 
 /** Real bash -c exec (the production shape) for the gated real-python teeth. */
 const realExec: ChaExec = async (cmd, cwd, timeoutMs) => {

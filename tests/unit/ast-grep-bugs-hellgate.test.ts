@@ -11,18 +11,22 @@
  * previously opened with `if (!astGrepAvailable) { return }`, which bun tallies
  * as a PASS — on a machine without ast-grep this file reported 22/22 green while
  * 8 tests (including the B1 fs-jail SECURITY cases) executed zero assertions.
- * `B2-2` is gated the other way (`skipIf(astGrepAvailable)`) — it is only
- * meaningful when the binary is ABSENT. Purely structural source ratchets run
- * always.
+ * `B2-2` is gated the other way (`skipIf(!astGrepProvenAbsent)`) — it is only
+ * meaningful when the binary is PROVEN ABSENT. Purely structural source
+ * ratchets run always.
+ *
+ * TVH-11: the availability answer comes from the tier's capability receipt, not
+ * from an `execSync` this file runs at module load. See the block above the two
+ * flags for why the two directions stopped being complements.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { execSync } from "node:child_process"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { ToolContext, ToolEvent } from "@/tool"
 import { astGrepTool } from "@/tool/ast-grep"
+import { canExecute, capability } from "../../tools/dev/capability-receipt-consumer"
 import { present } from "../_helpers/expect-present"
 
 // ─── source-level ratchets ──────────────────────────────────────────────────
@@ -32,15 +36,21 @@ const AST_GREP_SRC = readFileSync(
   "utf8",
 )
 
-// ─── binary probe (sync, once) ──────────────────────────────────────────────
-
-let astGrepAvailable = false
-try {
-  execSync("ast-grep --version", { stdio: "pipe" })
-  astGrepAvailable = true
-} catch {
-  // binary absent
-}
+// ─── capability receipt (TVH-11: read, never probe) ─────────────────────────
+//
+// This was `execSync("ast-grep --version")` at MODULE LOAD — a real child
+// process paid by anyone who merely imported this file, three times over
+// across the ast-grep suites. The runner now probes once per tier and hands
+// down an immutable receipt; this reads it.
+//
+// The two gate directions are NOT complements any more, and that is the point.
+// `astGrepAvailable` means the producer PROVED the binary works.
+// `astGrepProvenAbsent` means the producer PROVED it is missing. When no
+// receipt exists the verdict is `blocked` and BOTH are false — every arm is a
+// visible skip, because "nobody looked" is not evidence for either branch.
+const astGrep = capability("ast-grep")
+const astGrepAvailable = canExecute(astGrep)
+const astGrepProvenAbsent = astGrep.verdict === "skipped-unsupported"
 
 // ─── helper: drain the execute generator ────────────────────────────────────
 
@@ -287,7 +297,7 @@ describe("B2: probe cache must not permanently cache failure", () => {
     expect(astGrepTool.name).toBe("ast_grep")
   })
 
-  test.skipIf(astGrepAvailable)(
+  test.skipIf(!astGrepProvenAbsent)(
     "B2-2: structural source-code pattern — failure must not permanently block re-probe",
     async () => {
       // Verify that if we call the tool twice when binary is absent, both calls

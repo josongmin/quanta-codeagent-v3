@@ -1,0 +1,762 @@
+{
+  "schema": "quanta.module-load-effect-allowlist.v1",
+  "baseline": {
+    "owner": "test-verification-hardening lane (TVH-08 / TVH-12 burndown)",
+    "expiresAt": "2026-12-31",
+    "maxEffects": 150,
+    "reason": "Frozen pre-existing module-load external effects, inventoried by TVH-11 when the guard landed. TVH-11 owned fourteen files and fixed them; every entry here belongs to a file another lane is editing concurrently. The set may only SHRINK: an entry that stops matching is reported as stale and fails the guard, so a fixed file cannot leave its exemption behind for the next one to slip into. Burn this down per owner rather than raising maxEffects.",
+    "effects": [
+      {
+        "file": "src/agent/plugin-app-resolver/__tests__/folder-git-resolver.hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "src/apps/bench/absent-family-default-owner.test.ts",
+        "kind": "temp-dir",
+        "callsite": "describe>(iife)>alloc>mkdtempSync"
+      },
+      {
+        "file": "src/apps/bench/composition-root-dispatch.nightly.test.ts",
+        "kind": "temp-dir",
+        "callsite": "(iife)>mkdtempSync"
+      },
+      {
+        "file": "src/apps/bench/composition-root-dispatch.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "src/apps/bench/promax-family.test.ts",
+        "kind": "temp-dir",
+        "callsite": "(iife)>writeJsonl>mkdtempSync"
+      },
+      {
+        "file": "src/apps/bench/python-verifier-wiring.test.ts",
+        "kind": "temp-dir",
+        "callsite": "(iife)>mkdtempSync"
+      },
+      {
+        "file": "src/apps/cli/at-autocomplete/__tests__/provider.hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "describe>mkdtempSync"
+      },
+      {
+        "file": "src/tool/find-refs/find-refs.test.ts",
+        "kind": "temp-dir",
+        "callsite": "describe>mkdtempSync"
+      },
+      {
+        "file": "tests/contract/remote-cli-docker.test.ts",
+        "kind": "spawn",
+        "callsite": "pickLiveImage>inspectImage>probeArgv>Bun.spawn"
+      },
+      {
+        "file": "tests/contract/remote-cli-docker.test.ts",
+        "kind": "spawn",
+        "callsite": "probeArgv>Bun.spawn"
+      },
+      {
+        "file": "tests/contract/remote-cli-docker.test.ts",
+        "kind": "spawn",
+        "callsite": "(iife)>Bun.spawn"
+      },
+      {
+        "file": "tests/integration/apply-patch-tool.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/integration/bench-resume-determinism.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/integration/cli/mode-slash-gate-e2e.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/integration/git-review-diff-e2e.test.ts",
+        "kind": "spawn",
+        "callsite": "hasGit>Bun.spawn"
+      },
+      {
+        "file": "tests/integration/git-tools-e2e.test.ts",
+        "kind": "spawn",
+        "callsite": "hasGit>Bun.spawn"
+      },
+      {
+        "file": "tests/integration/git-tools.test.ts",
+        "kind": "spawn",
+        "callsite": "hasGit>Bun.spawn"
+      },
+      {
+        "file": "tests/integration/headless-bootstrap-optional-ports.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/integration/interactive-turn-assembler-optional-ports.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/integration/jsonrpc-x-session-envelope-cross.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/integration/longtail-new-tools-e2e.test.ts",
+        "kind": "spawn",
+        "callsite": "hasGit>Bun.spawn"
+      },
+      {
+        "file": "tests/integration/memory-sqlite.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/integration/mode-cycle-permission-live-e2e.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/integration/read-file-unchanged-dedup-real-loop-e2e.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/integration/runtime-fast-apply-fallback.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/integration/sep8-remediation/r10/search-embedding.integration.test.ts",
+        "kind": "temp-dir",
+        "callsite": "describe>mkdtempSync"
+      },
+      {
+        "file": "tests/integration/sequential-todo-loop-e2e.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/integration/session-cli-subprocess.test.ts",
+        "kind": "spawn",
+        "callsite": "gitAvailable>runGit>Bun.spawn"
+      },
+      {
+        "file": "tests/integration/session-envelope-hell-e2e.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/integration/session-envelope-store-seam.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/integration/session-envelope-stress.nightly.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/integration/test-runner.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/integration/tool-review-diff-source-frontdoor.test.ts",
+        "kind": "spawn",
+        "callsite": "hasGit>Bun.spawn"
+      },
+      {
+        "file": "tests/integration/tool-review-diff-source.test.ts",
+        "kind": "spawn",
+        "callsite": "hasGit>Bun.spawn"
+      },
+      {
+        "file": "tests/integration/typed-failures-e2e.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/smoke/observation-lsp-e2e.test.ts",
+        "kind": "spawn",
+        "callsite": "pyrightAvailable>execSync"
+      },
+      {
+        "file": "tests/smoke/observation-lsp-extreme-e2e.test.ts",
+        "kind": "spawn",
+        "callsite": "pyrightAvailable>execSync"
+      },
+      {
+        "file": "tests/unit/_arch/repo-index-hygiene.test.ts",
+        "kind": "spawn",
+        "callsite": "loadIndex>Bun.spawnSync"
+      },
+      {
+        "file": "tests/unit/apply-patch-fast-apply-wire-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/apply-patch-staleness-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/apps/bench/batch-sdk-parity.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/apps/bench/family-selector-honored.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/apps/bench/promax/promax-bundle-assembly.test.ts",
+        "kind": "temp-dir",
+        "callsite": "(iife)>alloc>mkdtempSync"
+      },
+      {
+        "file": "tests/unit/apps/bench/promax/promax-bundle-assembly.test.ts",
+        "kind": "temp-dir",
+        "callsite": "describe>alloc>mkdtempSync"
+      },
+      {
+        "file": "tests/unit/apps/bench/promax/promax-bundle-assembly.test.ts",
+        "kind": "temp-dir",
+        "callsite": "describe>writeFetchTree>alloc>mkdtempSync"
+      },
+      {
+        "file": "tests/unit/apps/bench/promax/promax-campaign-fail-closed.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/apps/bench/promax/promax-campaign-gate-teeth.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/apps/bench/promax/promax-campaign-gate-wiring.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/apps/bench/promax/promax-fullremote-selection-authority.test.ts",
+        "kind": "temp-dir",
+        "callsite": "writeFixture>scratch>mkdtempSync"
+      },
+      {
+        "file": "tests/unit/apps/bench/promax/promax-fullremote-selection-authority.test.ts",
+        "kind": "temp-dir",
+        "callsite": "writeManifest>writeFixture>scratch>mkdtempSync"
+      },
+      {
+        "file": "tests/unit/apps/bench/promax/promax-gold-absence-lifecycle.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/apps/bench/promax/promax-no-leak-boundary.test.ts",
+        "kind": "temp-dir",
+        "callsite": "describe>layout>alloc>mkdtempSync"
+      },
+      {
+        "file": "tests/unit/apps/bench/promax/promax-one-reader.test.ts",
+        "kind": "temp-dir",
+        "callsite": "alloc>mkdtempSync"
+      },
+      {
+        "file": "tests/unit/apps/bench/promax/promax-one-reader.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/apps/bench/promax/promax-prepare-tool.test.ts",
+        "kind": "temp-dir",
+        "callsite": "alloc>mkdtempSync"
+      },
+      {
+        "file": "tests/unit/apps/bench/promax/promax-prepare-tool.test.ts",
+        "kind": "temp-dir",
+        "callsite": "describe>run>alloc>mkdtempSync"
+      },
+      {
+        "file": "tests/unit/apps/bench/terminal/scoring-parity.test.ts",
+        "kind": "spawn",
+        "callsite": "describe>upstream>Bun.spawnSync"
+      },
+      {
+        "file": "tests/unit/apps/web-daemon/readout-production-wiring-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/bash-async-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/bash-auto-background-knob-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/bash-detach-await-kill-e2e-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/bash-mode-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/bash-output-cap-delegation-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/bash-prompt-consent-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/bash.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/bench-family-wire-shape.test.ts",
+        "kind": "temp-dir",
+        "callsite": "alloc>mkdtempSync"
+      },
+      {
+        "file": "tests/unit/bench-full-remote-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "allocTempDir>mkdtempSync"
+      },
+      {
+        "file": "tests/unit/bench-full-remote-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/bench-sdk-runtime.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/cli-image-loader.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/cli-preflight-applicability-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "describe>mkdtempSync"
+      },
+      {
+        "file": "tests/unit/cli/cli-feature-gates-drift-hellgate.test.ts",
+        "kind": "spawn",
+        "callsite": "searchableSourcePaths>execSync"
+      },
+      {
+        "file": "tests/unit/cli/cli-feature-gates-drift-hellgate.test.ts",
+        "kind": "spawn",
+        "callsite": "consumedGates>Bun.spawnSync"
+      },
+      {
+        "file": "tests/unit/cli/fetch-rules-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "describe>mkdtempSync"
+      },
+      {
+        "file": "tests/unit/cli/image-cmd.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/dev/external-toolchain-coverage.test.ts",
+        "kind": "spawn",
+        "callsite": "trackedTestFiles>Bun.spawnSync"
+      },
+      {
+        "file": "tests/unit/dotenv.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/edit-atomic-precondition-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/edit-eol.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/edit-fresh-hash-apply-patch-audit-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "describe>mkdtempSync"
+      },
+      {
+        "file": "tests/unit/edit-fresh-hash-apply-patch-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "describe>mkdtempSync"
+      },
+      {
+        "file": "tests/unit/edit-fresh-hash-file-history-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "describe>mkdtempSync"
+      },
+      {
+        "file": "tests/unit/edit-fresh-hash-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "describe>mkdtempSync"
+      },
+      {
+        "file": "tests/unit/edit-fresh-hash-mtime-interaction-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "describe>mkdtempSync"
+      },
+      {
+        "file": "tests/unit/edit-fresh-hash-mtime-interaction-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "describe>mkdtempSync"
+      },
+      {
+        "file": "tests/unit/edit-fresh-hash-mtime-interaction-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "describe>mkdtempSync"
+      },
+      {
+        "file": "tests/unit/edit-fresh-hash-notebook-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "describe>mkdtempSync"
+      },
+      {
+        "file": "tests/unit/edit-fresh-hash-strategies-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/edit-fresh-hash-write-scripted-parity-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "describe>mkdtempSync"
+      },
+      {
+        "file": "tests/unit/edit-fresh-hash-write-scripted-parity-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "describe>mkdtempSync"
+      },
+      {
+        "file": "tests/unit/edit-fresh-hash-write-scripted-parity-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "describe>mkdtempSync"
+      },
+      {
+        "file": "tests/unit/edit-line-ranges-e2e-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/edit-line-ranges-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/edit-strategy-hint.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/edit.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/exfil-rails-glob.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/exfil-rails-write-budget-mutators-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/exfil-rails-write-budget.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/exfil-write-budget-adversarial-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/fs-jail-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/fs-jail-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/fs-jail.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/fs-jail.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/git-write-guard-patch-scripted-push.hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/glob.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/grep.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/ipynb-cell-read-pipeline-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/jun04-completeness-critic-r3-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/llm-replay-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/mcp-roots-supervised-wire-e2e-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/mcp-sampling-live-wire-e2e-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/memory/decay-frequency-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "describe>mkdtempSync"
+      },
+      {
+        "file": "tests/unit/patch/applier-scored-tier-e2e.hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/patch/integration.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/permission/shell-predicate-population-hellgate.test.ts",
+        "kind": "spawn",
+        "callsite": "(iife)>execFileSync"
+      },
+      {
+        "file": "tests/unit/permission/shell-predicate-population-hellgate.test.ts",
+        "kind": "spawn",
+        "callsite": "(iife)>execFileSync"
+      },
+      {
+        "file": "tests/unit/plane-a-secret-boundary-guard.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/project-env-sandbox-hellgate.test.ts",
+        "kind": "spawn",
+        "callsite": "hasBin>spawnSync"
+      },
+      {
+        "file": "tests/unit/read-binary-device-guard-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/read-file-unchanged-dedup-e2e-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/read-utf16-bom-encoding-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/read.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/redaction.test.ts",
+        "kind": "temp-dir",
+        "callsite": "describe>describe>mkdtempSync"
+      },
+      {
+        "file": "tests/unit/repro-test/real-pytest-grounding.test.ts",
+        "kind": "spawn",
+        "callsite": "pytestAvailable>Bun.spawnSync"
+      },
+      {
+        "file": "tests/unit/runner/batch/promax-report-surface.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/runtime/bench-exec-tree-kill-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/runtime/shell-snapshot-bun-spawner-hellgate.test.ts",
+        "kind": "spawn",
+        "callsite": "hasBin>Bun.spawn"
+      },
+      {
+        "file": "tests/unit/sandbox-escalation-bash-wire-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/sandbox-escalation-per-session-slot-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/scripted-replace-atomic-stale-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/scripted-replace.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/secret-detection-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "describe>mkdtempSync"
+      },
+      {
+        "file": "tests/unit/security-rails-interactive-cli-wire-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/session-envelope-streaming.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/spawn-helper-consolidation-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/staleness-default-on-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/storage.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/tool-cluster-hardening-r1-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/tool/apply-patch.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/tool/bash-evidence-executor-known-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/tool/git-compose-e2e.hellgate.test.ts",
+        "kind": "spawn",
+        "callsite": "hasGit>Bun.spawn"
+      },
+      {
+        "file": "tests/unit/tool/glob-gitignore-mtime.test.ts",
+        "kind": "git-init",
+        "callsite": "describe>initGit>execFileSync"
+      },
+      {
+        "file": "tests/unit/tool/glob-gitignore-mtime.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/tool/glob-pattern-jail-escape-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/tool/grep-jail-escape-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/tool/read-dedup-content-truth-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/tool/typed-failures.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/tools/test-resilience-bounded-child-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/tools/test-resilience-diagnosis-hellgate.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      },
+      {
+        "file": "tests/unit/write.test.ts",
+        "kind": "temp-dir",
+        "callsite": "mkdtempSync"
+      }
+    ]
+  },
+  "entries": []
+}

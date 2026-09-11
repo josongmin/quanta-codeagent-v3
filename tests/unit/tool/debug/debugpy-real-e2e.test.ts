@@ -19,17 +19,25 @@ import { join } from "node:path"
 import { gateOn } from "@/shared"
 import { makeDebugInspectTool } from "@/tool/debug/tool"
 import type { ToolContext, ToolEvent, ToolResult } from "@/tool/types"
+import { canExecute, capability } from "../../../../tools/dev/capability-receipt-consumer"
 
-const hasDebugpy = (): boolean => {
-  try {
-    return (
-      Bun.spawnSync(["python3", "-c", "import debugpy"], { stdout: "ignore", stderr: "ignore" })
-        .exitCode === 0
-    )
-  } catch {
-    return false
-  }
-}
+// ─── capability receipt (TVH-11: read, never probe) ─────────────────────────
+//
+// Every gate in this file used to answer its own question with a module-load
+// `Bun.spawnSync`: debugpy, `xcrun -f lldb-dap`, `lldb-dap --help`, `clang
+// --version`, `cargo --version`, `node --version`. The `&&` chains hid some of
+// them behind the lane env — but NOT `lldbDapPath()`, which ran `xcrun`
+// unconditionally on every macOS import of this file even with the lane OFF,
+// and `xcrun` is not a cheap call. Six probes, one per gate, at discovery time.
+//
+// All six are now findings in the tier's capability receipt. Reading it starts
+// nothing, so the lane env genuinely decides whether anything external happens.
+const debugpy = capability("debugpy")
+const lldbDap = capability("lldb-dap")
+const clang = capability("clang")
+const cargo = capability("cargo")
+const node = capability("node")
+const LLDB = canExecute(lldbDap) ? lldbDap.resolved : undefined
 // REAL-ON-DEMAND LANE. Toolchain presence alone used to be the gate, so on a
 // developer machine that HAS the toolchain these ran inside the ordinary unit
 // suite and blew the per-test speed budget (`tools/dev/unit-speed-budget.json`,
@@ -44,7 +52,7 @@ const hasDebugpy = (): boolean => {
 // absent), so gating without that step silently dropped 8 cases from the blocking
 // merge gate.
 const D =
-  gateOn(process.env, "QUANTA_REAL_TOOLCHAIN_E2E") && hasDebugpy() ? describe : describe.skip
+  gateOn(process.env, "QUANTA_REAL_TOOLCHAIN_E2E") && canExecute(debugpy) ? describe : describe.skip
 
 /** Write a program to a fresh temp dir, run debug_inspect, return the result. */
 const debugProgram = async (
@@ -320,38 +328,11 @@ D("debug_inspect — REAL debugpy e2e battery", () => {
 // ── SECOND LANGUAGE: C/C++ via lldb-dap (proves the tool is language-agnostic
 //    over `adapterCommand`; surfaced the `terminate`-at-breakpoint hang debugpy
 //    masked). Gated on lldb-dap + clang being present. ──────────────────────
-const lldbDapPath = (): string | undefined => {
-  try {
-    const r = Bun.spawnSync(["xcrun", "-f", "lldb-dap"], { stdout: "pipe", stderr: "ignore" })
-    if (r.exitCode === 0) {
-      const p = r.stdout.toString().trim()
-      if (p.length > 0) return p
-    }
-  } catch {
-    /* not macOS / no xcrun */
-  }
-  try {
-    if (
-      Bun.spawnSync(["lldb-dap", "--help"], { stdout: "ignore", stderr: "ignore" }).exitCode === 0
-    )
-      return "lldb-dap"
-  } catch {
-    /* not on PATH */
-  }
-  return undefined
-}
-const hasClang = (): boolean => {
-  try {
-    return (
-      Bun.spawnSync(["clang", "--version"], { stdout: "ignore", stderr: "ignore" }).exitCode === 0
-    )
-  } catch {
-    return false
-  }
-}
-const LLDB = lldbDapPath()
+// `LLDB` (the resolved adapter path — Xcode's `xcrun -f lldb-dap` answer when
+// there is one, else the PATH name) comes from the receipt; see the capability
+// block at the top of the file.
 const DL =
-  gateOn(process.env, "QUANTA_REAL_TOOLCHAIN_E2E") && LLDB !== undefined && hasClang()
+  gateOn(process.env, "QUANTA_REAL_TOOLCHAIN_E2E") && LLDB !== undefined && canExecute(clang)
     ? describe
     : describe.skip
 
@@ -452,17 +433,8 @@ DL("debug_inspect — REAL lldb-dap e2e (C, second language)", () => {
 // ── THIRD LANGUAGE: Rust via lldb-dap (same adapter as C, just `cargo build`).
 //    Proves Rust DAP and exercises the realpath source-path matching (rustc's
 //    DWARF comp_dir uses the canonical path; on macOS /tmp → /private/tmp). ──
-const hasCargo = (): boolean => {
-  try {
-    return (
-      Bun.spawnSync(["cargo", "--version"], { stdout: "ignore", stderr: "ignore" }).exitCode === 0
-    )
-  } catch {
-    return false
-  }
-}
 const DR =
-  gateOn(process.env, "QUANTA_REAL_TOOLCHAIN_E2E") && LLDB !== undefined && hasCargo()
+  gateOn(process.env, "QUANTA_REAL_TOOLCHAIN_E2E") && LLDB !== undefined && canExecute(cargo)
     ? describe
     : describe.skip
 
@@ -539,17 +511,8 @@ DR("debug_inspect — REAL Rust e2e via lldb-dap (third language)", () => {
 
 // ── FOURTH carrier: Node via CDP (node --inspect-brk), no DAP adapter. Proves
 //    the `debug_inspect` tool's `adapter:"node"` path against a REAL node. ──
-const hasNode = (): boolean => {
-  try {
-    return (
-      Bun.spawnSync(["node", "--version"], { stdout: "ignore", stderr: "ignore" }).exitCode === 0
-    )
-  } catch {
-    return false
-  }
-}
 const DNODE =
-  gateOn(process.env, "QUANTA_REAL_TOOLCHAIN_E2E") && hasNode() ? describe : describe.skip
+  gateOn(process.env, "QUANTA_REAL_TOOLCHAIN_E2E") && canExecute(node) ? describe : describe.skip
 
 DNODE("debug_inspect — REAL Node e2e via CDP (node --inspect-brk)", () => {
   test("stops in a node program and reports the stack + local over CDP", async () => {
