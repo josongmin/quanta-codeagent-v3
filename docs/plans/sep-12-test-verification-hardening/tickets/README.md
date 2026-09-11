@@ -300,3 +300,44 @@ full-only 10개, nightly-only 14개가 tier를 가르는 전부다. 어떤 파�
 - **hosted 증거 없음.** GitHub Actions 빌링이 2026-07-10부터 차단돼 job이 시작하지 않는다.
   matrix↔monolith verdict 동등성, branch protection live read-back은 **권한 blocker**다.
 - **timing v2 store 없음.** `unit-speed-budget`의 완료 기준은 clean-tree 캠페인 1회가 필요하다.
+
+
+---
+
+## 2차 감사 대응 (사용자 액션리스트)
+
+사용자 감사가 지적한 결함을 dependency 순서대로 처리했다. 각 항목은
+red-on-injection 뮤턴트로 확인했고, **등가 뮤턴트는 등가라고 적었다**.
+
+| # | 결함 | 조치 | 뮤턴트 |
+|---|---|---|---:|
+| P0-1 | chunk receipt가 파일 **개수**만 증명 — 남의 파일 147개도 green | exact-set 공통 helper(`executed-file-set.ts`), receipt v3→v4가 ids+digest 보관 | 4/4 |
+| P0-2 | scan receipt가 `manifestSha256.length!==64`만 검사, suite/tier 무검증 | v2 authority 5필드, consumer가 트리에서 **독립 재계산**, 좁은 tier는 발행 자체를 거부 | 7/7 |
+| P0-3 | capability lane 전체에 1 file/1 case floor | manifest 파생 floor + **그룹별** 검사. pty 8/8 · toolchain 10/14 · contract 5/5 | 6/6 |
+| 4 | drained:false인데 lease 해제 | quarantine 레코드 + keeper. liveness는 keeper가 아니라 **survivor**로 판정 | 7/7 |
+| 5 | inherited lease가 64-hex 아무거나 통과 | 소유자 리스너가 토큰을 **발급하고 응답**. fabricate/replay/rebind 동시 차단 | 5/5 |
+| 6 | top-level child 3곳 무제한 | 하나의 bounded primitive로 통합(12분 inactivity·4시간 backstop), 그 뒤 DAG 배선 | 8/9 (1 equivalent) |
+| 7 | tier 미지정이 전체 universe 선택 | tier 필수화, flag/env 불일치 fail-closed, 별칭 전부 명시 | 2/2 |
+| 9 | matrix `full` vs monolith `pr` | plan v4가 tier+population digest 보관, `--expect-tier`, 100파일 floor | 5/5 |
+| 10 | exemption이 뒤에 붙은 명령을 은폐 | segment 단위 매칭. 배관(`\|\| true`, `\| tee`)은 기존 개념 재사용 | 2/2 |
+| 11 | manifest digest가 destructure한 필드만 해시 | dispatch schema 닫힌 universe + 컴파일/런타임 드리프트 가드 | 4/4 |
+| 12 | frozen base OID가 child에 미전달 | env로 전달, non-main base 보존, `<absent>` sentinel 구분, base 이동 보고 | 5/5 |
+| 13 | daemon 상태가 receipt identity 밖 | `hostCapabilityFingerprint`(소비자 0이던 모듈)를 두 receipt에 배선 | 2/2 |
+
+### 이 과정에서 드러난 선존 결함 (캠페인이 만든 것 아님)
+
+게이트를 **실제로 돌리자** origin/main에 이미 red이던 것들이 나왔다.
+
+- `no-raw-process-env-knob-ratchet` 44/43 — `src/`가 origin/main과 byte-identical인데 44.
+- `terminal-surface` ownership fence — `readSite` 경로 포인터를 leak으로 오판.
+- `src-no-sketchy-code` 7건 — 무시된 주입 시계, 삼킨 catch, 메시지 기반 라우팅, 미등록 knob 2개.
+
+전부 ceiling 상향 없이 구조적으로 닫았다. 2건(bootstrap-phases, session-main)은
+이미 allowlist된 composition root의 분리본이라 **실제 부채를 적어서** 분류했다.
+
+### 반복해서 나온 패턴
+
+**built-but-unwired**. 이 캠페인이 찾은 것만 넷이다: `gate-dag.ts`,
+`bounded-child.ts`(docstring이 gate.ts를 명시), `capabilityProducerFloors()`
+("이게 써야 할 숫자"라고 적혀 있음), `hostCapabilityFingerprint`. 전부 완성돼
+있었고 전부 생산 소비자가 0이었다. 옆 docstring은 결함을 **과거형으로** 설명한다.
