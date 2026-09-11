@@ -98,10 +98,43 @@ describe("byte-identical — terminal addition changes NO existing default regis
   })
 })
 
+// The user's exact forbidden list — these belong ONLY in the src/apps/ entry-point shim.
+const FORBIDDEN = /TerminalBench|terminal-bench|\bHarbor\b|\bBaseAgent\b/i
+
+/** The INTEGRATION half: a client, a shim — never merely a suite discriminant. */
+const INTEGRATION_ONLY = /\bHarbor\b|\bBaseAgent\b/i
+
+/**
+ * A quoted path INTO `apps/` is a pointer at the owned region, not a leak out
+ * of it.
+ *
+ * The fence's premise — "verified: zero hits in `src/` outside `apps/`" — went
+ * stale. `config/knob-inventory/extra.ts` declares a Terminal-Bench knob whose
+ * `readSite` is the literal `"apps/bench/terminal/harbor-command.ts"`, and
+ * `\bHarbor\b` matches it because the next character is a hyphen. Nothing had
+ * run this fence in long enough for anyone to see it: the only gate that does
+ * is the full suite.
+ *
+ * Renaming the pointer would make the metadata wrong, and exempting the FILE
+ * would blind the rest of it. So the carve-out is the smallest true statement:
+ * text of the form `"apps/<path>"` cannot reach Harbor, import a shim, or run a
+ * container — it names where the owner lives.
+ */
+const APPS_PATH_LITERAL = /["'`]apps\/[A-Za-z0-9_\-./]+["'`]/g
+const withoutAppsPointers = (text: string): string => text.replace(APPS_PATH_LITERAL, '""')
+
+/** One file's verdict, so the scan loop stays a loop and not a decision tree. */
+type FenceVerdict = "clean" | "integration" | "discriminant" | "apps-pointer"
+
+const fenceVerdict = (raw: string, isUnionModule: boolean): FenceVerdict => {
+  const text = withoutAppsPointers(raw)
+  if (INTEGRATION_ONLY.test(text)) return "integration"
+  if (!FORBIDDEN.test(text)) return FORBIDDEN.test(raw) ? "apps-pointer" : "clean"
+  return isUnionModule ? "clean" : "discriminant"
+}
+
 describe("ownership boundary — no Terminal-Bench naming leaks outside src/apps/", () => {
   test('no "TerminalBench|terminal-bench|Harbor|BaseAgent" in src/ (excluding src/apps/)', () => {
-    // The user's exact forbidden list — these belong ONLY in the src/apps/ entry-point shim.
-    const FORBIDDEN = /TerminalBench|terminal-bench|\bHarbor\b|\bBaseAgent\b/i
     const srcDir = join(import.meta.dir, "..") // src/
     const offenders: string[] = []
     // Glob scans NON-TS too: the only genuinely TB-aware artifact is the Python BaseAgent shim,
@@ -147,7 +180,6 @@ describe("ownership boundary — no Terminal-Bench naming leaks outside src/apps
      * circular.
      */
     const DISCRIMINANT_ONLY = /TerminalBench|terminal-bench/i
-    const INTEGRATION_ONLY = /\bHarbor\b|\bBaseAgent\b/i
     const CANONICAL_REPORT_UNION: readonly string[] = [
       "runner/batch/report.ts",
       "runner/batch/report-envelope.ts",
@@ -168,49 +200,24 @@ describe("ownership boundary — no Terminal-Bench naming leaks outside src/apps
         skipDirs: ["apps", "__tests__"],
       },
     )
-    /**
-     * A quoted path INTO `apps/` is a pointer at the owned region, not a leak
-     * out of it.
-     *
-     * The fence's premise — stated above as "verified: zero hits in `src/`
-     * outside `apps/`" — went stale. `config/knob-inventory/extra.ts` declares
-     * a Terminal-Bench knob whose `readSite` is the literal string
-     * `"apps/bench/terminal/harbor-command.ts"`, and `\bHarbor\b` matches it
-     * because the next character is a hyphen. Nothing had run this fence in
-     * long enough for anyone to see it: the only gate that does is the full
-     * suite.
-     *
-     * Renaming the pointer would make the metadata wrong, and exempting the
-     * FILE would blind the rest of it. So the carve-out is the smallest true
-     * statement: text of the form `"apps/<path>"` cannot reach Harbor, import
-     * a shim, or run a container — it names where the owner lives. Anything
-     * else in the same file is still an offence, and the pointers themselves
-     * are enumerated below so a new one is a deliberate act.
-     */
-    const APPS_PATH_LITERAL = /["'`]apps\/[A-Za-z0-9_\-./]+["'`]/g
-    const withoutAppsPointers = (text: string): string => text.replace(APPS_PATH_LITERAL, '""')
+    const verdicts = scanned.map((rel) => ({
+      rel,
+      verdict: fenceVerdict(
+        readFileSync(join(srcDir, rel), "utf8"),
+        CANONICAL_REPORT_UNION.includes(rel),
+      ),
+    }))
+    const named = (kind: FenceVerdict): string[] =>
+      verdicts.filter((row) => row.verdict === kind).map((row) => row.rel)
 
-    const integrationOffenders: string[] = []
-    const pointerFiles: string[] = []
-    for (const rel of scanned) {
-      const raw = readFileSync(join(srcDir, rel), "utf8")
-      const text = withoutAppsPointers(raw)
-      if (FORBIDDEN.test(raw) && !FORBIDDEN.test(text)) pointerFiles.push(rel)
-      // The integration tokens are forbidden everywhere outside apps/ — no
-      // exemption, including inside the canonical report union.
-      if (INTEGRATION_ONLY.test(text)) integrationOffenders.push(rel)
-      if (!FORBIDDEN.test(text)) continue
-      // Discriminant naming is tolerated ONLY in the enumerated union modules.
-      if (CANONICAL_REPORT_UNION.includes(rel) && !INTEGRATION_ONLY.test(text)) continue
-      offenders.push(rel)
-    }
-    expect(integrationOffenders).toEqual([])
+    expect(named("integration")).toEqual([])
+    offenders.push(...named("discriminant"))
     expect(offenders).toEqual([])
 
     // The carve-out is RATCHETED: exactly the files whose only hit is a pointer
     // into apps/. A new one has to be added here on purpose, which is the whole
     // difference between a narrowed rule and a hole.
-    expect(pointerFiles).toEqual(["config/knob-inventory/extra.ts"])
+    expect(named("apps-pointer")).toEqual(["config/knob-inventory/extra.ts"])
 
     // ANTI-VACUITY: the narrowing must not have disarmed the rule. A real
     // integration leak in the same shape is still caught.
