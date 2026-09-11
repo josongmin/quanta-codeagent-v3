@@ -55,7 +55,12 @@ const usesNativeShardSpool = (source: string): boolean =>
   (source.match(/Bun\.spawn\s*\(/g) ?? []).length === 0 &&
   /stdoutFd:\s*spoolFd/.test(source) &&
   /stderrFd:\s*spoolFd/.test(source) &&
-  /readFileSync\s*\(\s*spoolPath/.test(source)
+  // The runner reads the spool FILE rather than relaying the child's output
+  // through a JS stream. It used to be `readFileSync(spoolPath)` — the whole
+  // file, twice — and is now a bounded window read from the end, which is the
+  // same property with the runner's own RSS protected.
+  /readSpoolTail\s*\(\s*spoolPath/.test(source) &&
+  !/readFileSync\s*\(\s*spoolPath/.test(source)
 
 const workerBailsAfterFirstFailure = (source: string): boolean =>
   (source.match(/registry\.spawnWorker\s*\(/g) ?? []).length === 1 &&
@@ -270,7 +275,14 @@ describe("test:ci admission gate", () => {
     expect(packageJson.scripts?.test).toContain("tools/dev/run-test-shards.ts")
     expect(shardRunner).toContain("const SHARD_INACTIVITY_TIMEOUT_MS = 12 * 60_000")
     expect(shardRunner).toContain("lastProgressAt = Date.now()")
-    expect(shardRunner).toContain("idle=$" + "{idleMs}ms")
+    // The notice must say WHAT the worker was doing AND which bound it crossed.
+    // It used to be a single `idle=…ms` string, because inactivity was the only
+    // bound; there are now three (inactivity, total wall, output cap) and the
+    // message names the one that fired — a kill notice that cannot say why is
+    // not a lead.
+    expect(shardRunner).toContain("describeWatchdogKill(action, tick)")
+    expect(shardRunner).toContain("SHARD_TOTAL_WALL_TIMEOUT_MS")
+    expect(shardRunner).toContain("SHARD_OUTPUT_CAP_BYTES")
     expect(shardRunner).toContain("discoverSuiteFiles(")
     expect(shardRunner).toContain("planTestChunks(manifest")
     expect(shardTreatsAdmissionDeadlineAsStartupOnly(shardRunner)).toBe(true)
@@ -282,10 +294,16 @@ describe("test:ci admission gate", () => {
         ),
       ),
     ).toBe(false)
-    expect(shardRunner).toContain("chunkInputScopeSha256(")
+    // The input-scope digest is computed by the cache-scope resolver now, not
+    // inline: a chunk is only scoped when it is BOTH resource-certified and
+    // declared-input certified, and that decision needs both registries.
+    expect(shardRunner).toContain("resolveChunkCacheScope(")
     expect(shardOwnsSourceJsCleanupOnce(shardRunner)).toBe(true)
     expect(shardRunner).toContain("loadTestTimings(TIMING_STORE)")
-    expect(shardRunner).toContain("harvestTimings(cached, result)")
+    // Timings are journalled per chunk and committed ONCE, instead of
+    // rewriting the whole store on every chunk completion.
+    expect(shardRunner).toContain("journal.record(")
+    expect(shardRunner).toContain("journal.commit()")
     expect(shardRunner).toContain("result.executedFiles === plan.files.length")
     expect(shardRunner).toContain("aborting remaining shards")
     expect(shardRunner).not.toContain(["--shard=", "{shard}"].join("$"))
@@ -328,6 +346,15 @@ describe("test:ci admission gate", () => {
     // make this guard fail even if the spool variables and comments remain.
     const piped = runShardSource.replace("stdoutFd: spoolFd", 'stdout: "pipe"')
     expect(usesNativeShardSpool(piped)).toBe(false)
+
+    // Red-on-injection: loading the WHOLE spool back into the runner's memory
+    // is the defect the bounded tail replaced — a pathological producer would
+    // otherwise be answered by materialising everything it produced.
+    const wholeFile = runShardSource.replace(
+      "readSpoolTail(spoolPath, SPOOL_REPLAY_BYTES)",
+      'readFileSync(spoolPath, "utf8")',
+    )
+    expect(usesNativeShardSpool(wholeFile)).toBe(false)
 
     // Red-on-injection: a direct Bun.spawn worker shares the runner's process
     // group and cannot be tree-killed; the guard must reject it.

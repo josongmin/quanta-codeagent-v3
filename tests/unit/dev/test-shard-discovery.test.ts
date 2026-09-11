@@ -196,8 +196,12 @@ describe("tier population floor", () => {
       rmSync(valid, { force: true })
     }
 
-    for (const row of cases) {
-      const path = join(tmpdir(), `tier-pop-${process.pid}-${Date.now()}-${Math.random()}.json`)
+    // Index, not `Math.random()`: uniqueness within this loop is what is
+    // needed, and the determinism ratchet correctly refuses unseeded randomness
+    // that decides anything about a run — including a filename that ends up in
+    // a failure message.
+    for (const [index, row] of cases.entries()) {
+      const path = join(tmpdir(), `tier-pop-${process.pid}-${Date.now()}-${index}.json`)
       try {
         writeFileSync(path, JSON.stringify(row.body), "utf8")
         expect(() => loadTierPopulationFloors(path), row.why).toThrow(row.match)
