@@ -174,7 +174,12 @@ describe("test:ci admission gate", () => {
         ),
       ),
     ).toBe(false)
-    expect(packageJson.scripts?.["verify:smoke"]).toContain("smoke-battery.test.ts")
+    // `verify:smoke` no longer names the canary files itself. `smoke` had TWO
+    // authorities — this script ran two files, `gate.ts smoke` ran seven static
+    // gates, and they shared no manifest — so the script now delegates to the
+    // gate runner and the manifest owns the canary as `smoke-canary`.
+    expect(packageJson.scripts?.["verify:smoke"]).toBe("bun run tools/dev/gate.ts smoke")
+    expect(packageJson.scripts?.["test:smoke-canary"]).toContain("smoke-battery.test.ts")
     expect(packageJson.scripts?.["verify:prepush"]).toContain("gate.ts prepush")
     expect(packageJson.scripts?.["verify:prepush"]).not.toContain("verify:prepush")
     expect(packageJson.scripts?.["verify:full"]).toContain("gate.ts full")

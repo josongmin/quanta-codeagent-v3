@@ -33,8 +33,18 @@ import type { GateContractEntry } from "./gate-manifest-contract"
 import type { VerificationTier } from "./verification-result"
 import { gatesForTier } from "./verification-tier"
 
-/** Which stage a gate belongs to. `precommit` must stay fast enough to run on
- *  every commit (static analysis only — no test suite). */
+/**
+ * Which stage a gate belongs to. `precommit` must stay fast enough to run on
+ * every commit.
+ *
+ * It was "static analysis only — no test suite", and that is still the rule for
+ * SUITES. The one exception is `smoke-canary`: two focused deterministic files,
+ * measured at 0.95-1.43s over three runs on a loaded box. They are here because
+ * `smoke` previously had two authorities — `bun run verify:smoke` ran those two
+ * files and `gate.ts smoke` ran seven static gates, sharing no manifest, so the
+ * tier could not be reasoned about from one place. A second authority costs more
+ * than a second of wall time.
+ */
 export type GateStage = "precommit" | "prepush"
 
 export interface Gate {
@@ -81,6 +91,14 @@ export interface Gate {
 
 export const GATES: readonly Gate[] = [
   // ── precommit: static, no test suite ───────────────────────────────────────
+  {
+    id: "smoke-canary",
+    stage: "precommit",
+    run: "bun run test:smoke-canary",
+    why: "the deterministic critical canary `verify:smoke` used to own privately — two authorities called `smoke` that shared no manifest, so the tier could not be reasoned about from one place",
+    notInWorkflow:
+      "smoke is the pre-commit fast lane; CI's merge gate runs the full suite, which already contains both canary files",
+  },
   {
     id: "typecheck",
     stage: "precommit",
@@ -254,7 +272,13 @@ const STATIC_TIERS: readonly VerificationTier[] = ["smoke", "prepush", "pr", "fu
 const PREPUSH_STATIC_TIERS: readonly VerificationTier[] = ["prepush", "pr", "full", "nightly"]
 const SUITE_TIERS: readonly VerificationTier[] = ["prepush", "pr", "full", "nightly"]
 
+/** The canary gate exists so `smoke` is a real tier; the same two files already
+ *  run inside the full suite, so registering it elsewhere would execute them
+ *  twice for no extra coverage. */
+const SMOKE_ONLY_TIERS: readonly VerificationTier[] = ["smoke"]
+
 export const tiersForGate = (gate: Gate): readonly VerificationTier[] => {
+  if (gate.id === "smoke-canary") return SMOKE_ONLY_TIERS
   if (gate.id === "typecheck") return PREPUSH_STATIC_TIERS
   if (gate.stage === "precommit") return STATIC_TIERS
   return SUITE_TIERS
@@ -542,6 +566,7 @@ export const GATE_CONTRACT: readonly GateContractEntry[] = [
   // 3-gates-into-1 consolidation (`fc-validate`/`fc-diff`/`fc-lint` -> `fc-ci`)
   // and then refused every gate command at HEAD until it was noticed.
   { id: "typecheck", stage: "precommit" },
+  { id: "smoke-canary", stage: "precommit" },
   { id: "lint", stage: "precommit" },
   { id: "lint-debt", stage: "precommit" },
   { id: "fc-check-changed", stage: "precommit" },

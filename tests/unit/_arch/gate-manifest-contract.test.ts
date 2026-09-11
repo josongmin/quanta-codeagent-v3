@@ -38,7 +38,7 @@ import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { GATE_CONTRACT, GATES } from "../../../tools/dev/gate-manifest"
+import { GATE_CONTRACT, GATES, gatesForVerificationTier } from "../../../tools/dev/gate-manifest"
 import {
   formatGateManifestViolations,
   type GateContractEntry,
@@ -124,9 +124,16 @@ describe("gate manifest contract", () => {
     expect(idsOfKind(violations, "missing")).toEqual(["fc-diff", "fc-lint", "fc-validate"])
     expect(idsOfKind(violations, "unexpected")).toEqual(["fc-ci"])
 
-    // The count floor that shipped would have been satisfied by this manifest.
-    const precommitCount = manifest().filter((g) => g.stage === "precommit").length
-    expect(precommitCount).toBe(8)
+    // The count floor that shipped would have been satisfied by this manifest,
+    // and that is the invariant — not today's number, which legitimately moves
+    // every time a gate is added. A count sees a difference of 2; the exact set
+    // names 4 gates.
+    const contractedPrecommit = oldContract.filter((entry) => entry.stage === "precommit").length
+    const actualPrecommit = manifest().filter((gate) => gate.stage === "precommit").length
+    expect(Math.abs(contractedPrecommit - actualPrecommit)).toBeLessThan(
+      idsOfKind(violations, "missing").length + idsOfKind(violations, "unexpected").length,
+    )
+    expect(actualPrecommit).toBeGreaterThanOrEqual(6)
   })
 
   test("a duplicated gate id is RED", () => {
@@ -186,5 +193,55 @@ describe("gate manifest contract", () => {
 
     // The stale count floor must not come back in any form.
     expect(source).not.toContain("MIN_OWNED")
+  })
+})
+
+/**
+ * `smoke` had two authorities and they shared no manifest.
+ *
+ * `bun run verify:smoke` ran two focused files; `bun tools/dev/gate.ts smoke`
+ * ran seven static gates. Neither knew about the other, so "is smoke green"
+ * had two answers and the tier could not be reasoned about from one place.
+ * The canary is now a manifest gate and the script delegates to the runner.
+ */
+describe("smoke has one authority", () => {
+  test("the canary is in the manifest and the script delegates to the gate runner", () => {
+    const smokeIds = gatesForVerificationTier("smoke").map((gate) => gate.id)
+    expect(smokeIds).toContain("smoke-canary")
+
+    const pkg = JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8")) as {
+      readonly scripts: Readonly<Record<string, string>>
+    }
+    expect(pkg.scripts["verify:smoke"]).toBe("bun run tools/dev/gate.ts smoke")
+
+    // The gate runs the SAME string a human runs — never a reimplementation.
+    const gate = GATES.find((entry) => entry.id === "smoke-canary")
+    expect(gate?.run).toBe("bun run test:smoke-canary")
+    expect(pkg.scripts["test:smoke-canary"]).toContain("smoke-battery.test.ts")
+    expect(pkg.scripts["test:smoke-canary"]).toContain("conflict-parser-differential-fuzz")
+  })
+
+  test("the canary is not re-executed by the tiers that already contain its files", () => {
+    // Both canary files live in tests/unit, so every suite tier runs them
+    // inside the full suite. Registering the gate there too would buy a second
+    // execution and no coverage.
+    for (const tier of ["prepush", "pr", "full", "nightly"] as const) {
+      const ids = gatesForVerificationTier(tier).map((gate) => gate.id)
+      expect({ tier, hasCanary: ids.includes("smoke-canary") }).toEqual({ tier, hasCanary: false })
+      // ANTI-VACUITY: the tier must have gates at all.
+      expect(ids.length).toBeGreaterThan(5)
+    }
+  })
+
+  test("smoke runs no external toolchain and no full discovery", () => {
+    // The tier contract: static core plus a deterministic critical canary.
+    const runs = gatesForVerificationTier("smoke").map((gate) => gate.run)
+    expect(runs.length).toBeGreaterThan(1)
+    for (const run of runs) {
+      expect({
+        run,
+        isSuite: /run-test-shards|test:full|e2e:pty|real-toolchain/.test(run),
+      }).toEqual({ run, isSuite: false })
+    }
   })
 })
