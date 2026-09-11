@@ -259,7 +259,7 @@ precommit: ok — 9 of 9 gate(s) passed
 > 캠페인 3커밋 전에 추가된 파일 6개가 어떤 catalog 항목에서도 참조되지 않았다.
 > 죽은 gate는 선을 지키지 않는다 — 선이 움직였다는 사실을 가릴 뿐이다.
 
-### tier membership (clean HEAD, `--discover-only`)
+### tier membership (clean HEAD `1d153a109`, `--discover-only`)
 
 | tier | files | digest |
 |---|---:|---|
@@ -271,14 +271,23 @@ precommit: ok — 9 of 9 gate(s) passed
 `prepush == pr`은 **의도된 미완**이며 interlock으로 고정돼 있다.
 시작 시점에는 prepush/pr/full이 **하나의 동일 digest**였다.
 
+**커버리지는 줄지 않았다** — tier가 갈렸다는 것과 테스트가 사라졌다는 것은 다르다:
+
+    pr ⊂ full ⊂ nightly            (strict, 측정)
+    nightly (3,962) == universe     (3,962)
+    universe 에서 유실:              0
+
+full-only 10개, nightly-only 14개가 tier를 가르는 전부다. 어떤 파일도 어느 tier에도
+속하지 않는 상태로 떨어지지 않는다.
+
 ### 기타 current-HEAD 게이트
 
 | 게이트 | 상태 |
 |---|---|
 | `typecheck:all` | clean |
 | `lint:debt` | 23 diagnostics, 회귀 0, ceiling 상향 0 |
-| `test-determinism-ratchet` | ✓ (wall 165 / random 36 / sleep_budgeted 51,470ms) |
-| `module-load-effect-guard` | files 4,037 · effects 150 · violations 0 |
+| `test-determinism-ratchet` | ✓ (files 4,041 · wall 165 · random 36 · sleep_budgeted 51,470ms) |
+| `module-load-effect-guard` | files 4,041 · effects 150 · violations 0 |
 | `awaited-sleep-budget` / `temp-lifecycle` | exit 0 |
 | `test-resource-certification --check` | exit 0 (548 certified / 14 exclusive / 0 missing) |
 | `tests/unit/_arch` (32 files) | 398 / 398 |
