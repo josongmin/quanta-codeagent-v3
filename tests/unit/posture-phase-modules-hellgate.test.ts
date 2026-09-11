@@ -122,6 +122,46 @@ describe("posture phase-module seam", () => {
         },
       )
     }
+
+    /**
+     * ANTI-VACUUM FLOOR for the block above.
+     *
+     * Making the skip visible fixed the silent PASS but not the silence: all
+     * FOUR presets have since left the registry, so the whole "core teeth"
+     * block asserts nothing and says so only as a skip count nobody reads.
+     *
+     * Which preset a module composite should reproduce is the bench owner's
+     * call, not this guard's, so the drift is RECORDED rather than guessed at.
+     * The record is one-directional: a fifth preset going missing fails here,
+     * and so does a recorded one coming back, which is what stops this list
+     * from becoming a permanent excuse.
+     */
+    const KNOWN_REMOVED_PRESETS: readonly string[] = [
+      // Removed by the v4→v6 registry reshape; `agentless-v3-thin-strict`
+      // itself still ships, its `-select` / `-closure-select-clean` variants
+      // do not, and the whole `agentless-v4-proof-clean` family is gone.
+      "agentless-v3-thin-strict-select",
+      "agentless-v3-thin-strict-closure-select-clean",
+      "agentless-v4-proof-clean",
+      "agentless-v4-proof-clean-execfull",
+    ]
+
+    test("DRIFT: every equivalence is either exercisable or a RECORDED removal", () => {
+      const missing = EQUIVALENCES.filter(({ preset }) => KNOB_PRESETS[preset] === undefined).map(
+        ({ preset }) => preset,
+      )
+      expect(missing.filter((preset) => !KNOWN_REMOVED_PRESETS.includes(preset))).toEqual([])
+      // A recorded removal that came back is a record nobody maintained.
+      expect(KNOWN_REMOVED_PRESETS.filter((preset) => KNOB_PRESETS[preset] !== undefined)).toEqual(
+        [],
+      )
+      // ANTI-VACUITY: the table itself must still name something, and the
+      // registry must still be loaded — an empty `KNOB_PRESETS` would make
+      // every arm above trivially true.
+      expect(EQUIVALENCES.length).toBeGreaterThanOrEqual(4)
+      expect(Object.keys(KNOB_PRESETS).length).toBeGreaterThanOrEqual(10)
+      expect(KNOB_PRESETS[THIN_BASE]).toBeDefined()
+    })
   })
 
   describe("detachability (paired-control)", () => {
