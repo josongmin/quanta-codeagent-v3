@@ -113,10 +113,14 @@ const nextLineRunStep = (
   file: string,
   lines: readonly string[],
   index: number,
+  name: string | undefined,
 ): ParsedRunStep | undefined => {
   const next = (lines[index + 1] ?? "").trim()
   if (next === "" || next.startsWith("-") || next.startsWith("#")) return undefined
-  return { step: { file, raw: next, lines: [next] }, lastLine: index + 1 }
+  return {
+    step: { file, ...(name === undefined ? {} : { name }), raw: next, lines: [next] },
+    lastLine: index + 1,
+  }
 }
 
 const blockRunStep = (
@@ -125,6 +129,7 @@ const blockRunStep = (
   index: number,
   indent: number,
   indicator: string,
+  name: string | undefined,
 ): ParsedRunStep => {
   const body: string[] = []
   let lastLine = index
@@ -139,6 +144,7 @@ const blockRunStep = (
   return {
     step: {
       file,
+      ...(name === undefined ? {} : { name }),
       raw: body.join(" "),
       lines: indicator === ">-" ? [body.join(" ")] : body,
     },
@@ -146,23 +152,37 @@ const blockRunStep = (
   }
 }
 
+/**
+ * `name` is threaded through every branch because it was threaded through NONE
+ * of them. `localUsesStep`/`externalUsesStep` carried the step name, but every
+ * `run:` step was built without it, so `step.name` was permanently `undefined`
+ * for commands — and `isExempt`'s `e.step === step.name` arm could never match
+ * one. A `run:` exemption therefore HAD to be a file-wide substring, which is
+ * the wildcard hole this guard's own docstring warns about: `{ match: "bun run
+ * lint" }` also covers `lint:debt`. Carrying the name makes an exact,
+ * step-scoped exemption expressible for commands too.
+ */
 const parseRunStep = (
   file: string,
   lines: readonly string[],
   index: number,
+  name: string | undefined,
 ): ParsedRunStep | undefined => {
   const match = /^(\s*)(?:- )?run:(.*)$/.exec(lines[index] ?? "")
   if (match === null) return undefined
   const indent = (match[1] ?? "").length
   const head = (match[2] ?? "").trim()
   if (head === "") {
-    const nextLine = nextLineRunStep(file, lines, index)
+    const nextLine = nextLineRunStep(file, lines, index, name)
     if (nextLine !== undefined) return nextLine
   }
   if (head !== ">-" && head !== "|") {
-    return { step: { file, raw: head, lines: [head] }, lastLine: index }
+    return {
+      step: { file, ...(name === undefined ? {} : { name }), raw: head, lines: [head] },
+      lastLine: index,
+    }
   }
-  return blockRunStep(file, lines, index, indent, head)
+  return blockRunStep(file, lines, index, indent, head, name)
 }
 
 const workflowStepsInFile = (file: string): readonly WorkflowStep[] => {
@@ -176,7 +196,7 @@ const workflowStepsInFile = (file: string): readonly WorkflowStep[] => {
       out.push(uses)
       continue
     }
-    const run = parseRunStep(file, lines, index)
+    const run = parseRunStep(file, lines, index, name)
     if (run === undefined) continue
     out.push(run.step)
     index = run.lastLine
@@ -364,11 +384,29 @@ describe("gate manifest ↔ workflow parity", () => {
     return (nameLine ?? "").replace(/^\s*-\s*name\s*:\s*/, "").trim()
   }
 
-  const conditionalStepBody = (lines: readonly string[], index: number): string =>
-    [
-      ...lines.slice(Math.max(0, index - 8), index).reverse(),
-      ...lines.slice(index, index + 8),
-    ].join("\n")
+  /**
+   * The body of the step that OWNS the line at `index`, by real step
+   * boundaries.
+   *
+   * This was a +/-8-line window, which bleeds across step boundaries in both
+   * directions. It produced a false positive the moment a conditional step
+   * followed a gate step — three `capability result (…)` publishers carrying
+   * `if: always()` were reported as neutering the `e2e:pty`, `test:real-toolchain`
+   * and `test:contract` gates that merely happened to sit above them. And it
+   * misses the symmetric case: an `if:` nine lines from its own step's `run` was
+   * never associated with it at all.
+   *
+   * A step starts at a `- ` item under `steps:` and ends before the next one, so
+   * the boundary is exactly what YAML already says it is.
+   */
+  const conditionalStepBody = (lines: readonly string[], index: number): string => {
+    const isStepStart = (line: string): boolean => /^\s*-\s/.test(line)
+    let start = index
+    while (start > 0 && !isStepStart(lines[start] ?? "")) start -= 1
+    let end = index + 1
+    while (end < lines.length && !isStepStart(lines[end] ?? "")) end += 1
+    return lines.slice(start, end).join("\n")
+  }
 
   const conditionalGateOffenders = (file: string): readonly string[] => {
     const offenders: string[] = []
@@ -413,7 +451,35 @@ describe("gate manifest ↔ workflow parity", () => {
     // coverage used to sail through the old `> 15`.
     expect(steps.length).toBeGreaterThanOrEqual(28)
     expect(normalized.some((c) => c === "bun run lint")).toBe(true)
-    expect(normalized.some((c) => c.includes("tests/contract"))).toBe(true)
+    // The contract lane's canonical command. It used to be `bun test
+    // tests/contract` here and `bun run test:contract` (clean-js + --parallel=1)
+    // in package.json — two commands under one name. Anchored on the canonical
+    // one so this floor cannot be satisfied by the drifted spelling.
+    expect(normalized.some((c) => c.includes("test:contract"))).toBe(true)
+  })
+
+  test("a `run:` step carries its name, so an exemption can be step-scoped", () => {
+    // Every `run:` step used to be parsed WITHOUT its name, so `isExempt`'s
+    // `e.step === step.name` arm could never match a command — a `run:`
+    // exemption had to be a file-wide substring, which is the wildcard hole this
+    // file's own docstring warns about (`{ match: "bun run lint" }` also covers
+    // `lint:debt`). Pinned structurally: a run step with a `- name:` above it
+    // must report that name.
+    const named = steps.filter((st) => st.name !== undefined && !st.raw.startsWith("uses"))
+    expect(named.length).toBeGreaterThanOrEqual(10)
+    const capability = steps.find((st) => st.lines.some((l) => l === "bun run capability:pty"))
+    expect(capability?.name).toBe("capability result (pty)")
+
+    // …and the exemptions that rely on it are genuinely step-scoped, not a
+    // substring that would also cover a sibling lane.
+    const stepScopedRuns = WORKFLOW_EXEMPT.filter(
+      (e) => e.step !== undefined && e.exact === true && e.match.startsWith("bun run capability:"),
+    )
+    expect(stepScopedRuns.map((e) => e.step).sort()).toEqual([
+      "capability result (contract)",
+      "capability result (pty)",
+      "capability result (toolchain)",
+    ])
   })
 
   test("anti-vacuity: the manifest is non-empty and both stages are populated", () => {

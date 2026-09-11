@@ -366,6 +366,21 @@ jobs:
         # it is the likeliest place for a stray file to be written next to the
         # repo rather than into the harness's temp HOME.
         run: bun run tools/dev/worktree-pollution-guard.ts -- bun run e2e:pty
+      - name: capability result (pty)
+        # A capability lane exits 0 having executed NOTHING when its host lacks
+        # the capability, so `success` alone proves no coverage. `required`
+        # consumes this artifact and treats zero executed cases — and an absent
+        # artifact — as failure. `always()` because a lane that died before the
+        # reporter wrote anything must publish `failedSetup`, not silence.
+        if: ${{ always() }}
+        run: bun run capability:pty
+      - name: publish capability-result.v1 (pty)
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: capability-result-${{ github.run_id }}-${{ github.run_attempt }}-pty
+          path: .cache/capability/pty.json
+          if-no-files-found: error
 
   web:
     name: web
@@ -422,6 +437,21 @@ jobs:
         # 8. With the env set, the arms whose toolchain is absent degrade to VISIBLE
         # skips, which is the posture every other gate in this file already has.
         run: QUANTA_REAL_TOOLCHAIN_E2E=1 bun run test:real-toolchain
+      - name: capability result (toolchain)
+        # A capability lane exits 0 having executed NOTHING when its host lacks
+        # the capability, so `success` alone proves no coverage. `required`
+        # consumes this artifact and treats zero executed cases — and an absent
+        # artifact — as failure. `always()` because a lane that died before the
+        # reporter wrote anything must publish `failedSetup`, not silence.
+        if: ${{ always() }}
+        run: bun run capability:toolchain
+      - name: publish capability-result.v1 (toolchain)
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: capability-result-${{ github.run_id }}-${{ github.run_attempt }}-toolchain
+          path: .cache/capability/toolchain.json
+          if-no-files-found: error
 
   pyramid:
     name: pyramid (unit + integration)
@@ -450,9 +480,17 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.14
+      - name: download capability results
+        if: ${{ always() }}
+        uses: actions/download-artifact@v4
+        with:
+          pattern: capability-result-${{ github.run_id }}-${{ github.run_attempt }}-*
+          path: .cache/capability
+          merge-multiple: true
       - run: bun run tools/dev/verification-required-results.ts
         env:
           QUANTA_REQUIRED_NEEDS: ${{ toJSON(needs) }}
+          QUANTA_CAPABILITY_RESULTS_DIR: .cache/capability
 
   feature-catalog-pr:
     name: feature-catalog (PR — added src must be in fc)
@@ -499,7 +537,27 @@ jobs:
       - name: docker sanity (ubuntu runners ship the daemon)
         run: docker version
       - name: contract suite
-        run: bun test tests/contract
+        # The canonical command, not a second spelling of it. This job used to
+        # run `bun test tests/contract` while `package.json` defined
+        # `test:contract` as clean-js + the same suite at --parallel=1, so the
+        # local gate and the merge gate had different cleanup and different
+        # concurrency under one name.
+        run: bun run test:contract
+      - name: capability result (contract)
+        # A capability lane exits 0 having executed NOTHING when its host lacks
+        # the capability, so `success` alone proves no coverage. `required`
+        # consumes this artifact and treats zero executed cases — and an absent
+        # artifact — as failure. `always()` because a lane that died before the
+        # reporter wrote anything must publish `failedSetup`, not silence.
+        if: ${{ always() }}
+        run: bun run capability:contract
+      - name: publish capability-result.v1 (contract)
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: capability-result-${{ github.run_id }}-${{ github.run_attempt }}-contract
+          path: .cache/capability/contract.json
+          if-no-files-found: error
 
   eval:
     name: eval (real LLM — non-blocking)

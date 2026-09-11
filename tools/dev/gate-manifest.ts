@@ -207,7 +207,12 @@ export const GATES: readonly Gate[] = [
   {
     id: "contract",
     stage: "prepush",
-    run: "bun test tests/contract",
+    // `bun run test:contract`, not `bun test tests/contract`. Those were two
+    // different commands under one name: the package script adds the source-JS
+    // cleanup and pins `--parallel=1`, and ci.yml ran the bare form, so the
+    // local gate and the merge gate had different cleanup and different
+    // concurrency over the same docker/LSP/Python contract suite.
+    run: "bun run test:contract",
     why: 'real docker + language servers + python/lancedb. LOCALLY THIS PASSES BY SKIPPING: the ci.yml job sets REQUIRE_CONTRACT=1 at the JOB level ("absent dependency = hard fail, never a silent skip") and the manifest pins the command string, not the env — so a local PASS here means "nothing was missing that I checked", not "the contracts hold"',
   },
 ]
@@ -311,6 +316,62 @@ export const WORKFLOW_EXEMPT: readonly {
     match: "uses: actions/cache/restore@v4",
     exact: true,
     why: "the shadow planner restores measured timing hints; the frozen plan and worker receipts still determine the verdict",
+  },
+  // The capability-result producer/consumer edge. Exact, and named step by step:
+  // these publish and consume the `quanta.capability-result.v1` artifact that
+  // proves a capability lane executed something, and they are receipts ABOUT the
+  // gates rather than gates themselves. A lane that exits 0 having skipped every
+  // arm is a success-shaped job over zero coverage, which is what the required
+  // aggregator now refuses — so these steps must run even when the lane failed,
+  // hence `if: always()`.
+  {
+    file: "ci.yml",
+    step: "capability result (pty)",
+    match: "bun run capability:pty",
+    exact: true,
+    why: "reduces the PTY lane's JUnit to executed/skipped counts; a receipt about the e2e-pty gate, not a gate",
+  },
+  {
+    file: "ci.yml",
+    step: "capability result (toolchain)",
+    match: "bun run capability:toolchain",
+    exact: true,
+    why: "reduces the real-toolchain lane's JUnit to executed/skipped counts; a receipt about the real-toolchain-e2e gate",
+  },
+  {
+    file: "ci.yml",
+    step: "capability result (contract)",
+    match: "bun run capability:contract",
+    exact: true,
+    why: "reduces the contract lane's JUnit to executed/skipped counts; a receipt about the contract gate",
+  },
+  {
+    file: "ci.yml",
+    step: "publish capability-result.v1 (pty)",
+    match: "uses: actions/upload-artifact@v4",
+    exact: true,
+    why: "publishes the PTY lane's executed-case proof for the required aggregator",
+  },
+  {
+    file: "ci.yml",
+    step: "publish capability-result.v1 (toolchain)",
+    match: "uses: actions/upload-artifact@v4",
+    exact: true,
+    why: "publishes the real-toolchain lane's executed-case proof for the required aggregator",
+  },
+  {
+    file: "ci.yml",
+    step: "publish capability-result.v1 (contract)",
+    match: "uses: actions/upload-artifact@v4",
+    exact: true,
+    why: "publishes the contract lane's executed-case proof for the required aggregator",
+  },
+  {
+    file: "ci.yml",
+    step: "download capability results",
+    match: "uses: actions/download-artifact@v4",
+    exact: true,
+    why: "the required aggregator consumes every capability lane's executed-case proof; an absent artifact is a failure, not a skip",
   },
   {
     file: "ci.yml",
