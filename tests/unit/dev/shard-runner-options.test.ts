@@ -13,12 +13,33 @@
  * no script hands the flag to this runner again.
  */
 
-import { describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { parseShardRunnerOptions } from "../../../tools/dev/test-shard-options"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
+
+/**
+ * Every case here parses options, and the parser reads
+ * `QUANTA_VERIFICATION_TIER`. Inside a campaign that variable is SET — the gate
+ * exports it — so a case naming its own `--tier` passed standalone and failed
+ * under prepush with "contradicts QUANTA_VERIFICATION_TIER". The assertion was
+ * right and the test was ambient.
+ *
+ * Applied file-wide rather than per case: a test that reads the environment and
+ * does not control it is testing the box it happens to run on.
+ */
+const ORIGINAL_TIER = process.env.QUANTA_VERIFICATION_TIER
+
+beforeEach(() => {
+  delete process.env.QUANTA_VERIFICATION_TIER
+})
+
+afterEach(() => {
+  if (ORIGINAL_TIER === undefined) delete process.env.QUANTA_VERIFICATION_TIER
+  else process.env.QUANTA_VERIFICATION_TIER = ORIGINAL_TIER
+})
 
 describe("shard runner options", () => {
   test("--parallel is refused, not silently ignored", () => {
