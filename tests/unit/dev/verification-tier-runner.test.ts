@@ -50,9 +50,14 @@ describe("verification-tier-runner", () => {
       },
     })
     expect(spawned).toEqual(["lint"])
+    // `tests` CONSUMES `lint`, so its reason is that its input failed — not
+    // that a flag stopped the run. The old sequencer short-circuited on
+    // fail-fast before it looked at `consumes` and reported the less
+    // actionable of the two; the DAG reports the specific one. `heavy` is
+    // independent and stays `not-run`, which is what this test is named for.
     expect(result.gates.map((gate) => [gate.id, gate.outcome])).toEqual([
       ["lint", "failed"],
-      ["tests", "not-run"],
+      ["tests", "skipped-input"],
       ["heavy", "not-run"],
     ])
   })

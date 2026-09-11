@@ -122,6 +122,15 @@ const makeRepo = (
     "external-toolchain.ts",
     "verdict-env.ts",
     "gate-manifest-contract.ts",
+    // `gate.ts` runs every gate through the bounded child primitive now, and
+    // `verification-tier.ts` sequences them through the DAG scheduler. Both
+    // pull `process-observer` / `test-shard-lifecycle` transitively; the
+    // fixture's own self-scan above caught the direct imports, these are the
+    // ones only a run would have found.
+    "bounded-child.ts",
+    "gate-dag.ts",
+    "process-observer.ts",
+    "test-shard-lifecycle.ts",
   ]) {
     copyFileSync(join(SOURCE_DIR, dependency), join(root, "tools", "dev", dependency))
   }
@@ -191,6 +200,43 @@ describe("gate.ts fixture copies every local import", () => {
       }
       expect(fixture).toContain(`${spec}.ts`)
     }
+  })
+
+  test("and every TRANSITIVE one, which only a run used to find", () => {
+    // The scan above reads `gate.ts`'s DIRECT imports. Routing gates through
+    // the bounded child added `bounded-child.ts`, which pulls
+    // `process-observer` and `test-shard-lifecycle`, and the DAG bridge added
+    // `gate-dag.ts` — the direct half was caught here, the transitive half only
+    // by the fixture failing to module-load. Same closed-universe check the
+    // campaign fixture has.
+    const seen = new Set<string>()
+    const queue = ["gate.ts"]
+    while (queue.length > 0) {
+      const file = queue.pop() as string
+      if (seen.has(file)) continue
+      seen.add(file)
+      let body: string
+      try {
+        body = readFileSync(join(SOURCE_DIR, file), "utf8")
+      } catch {
+        continue
+      }
+      for (const match of body.matchAll(/from "\.\/([A-Za-z0-9_-]+)"/g)) {
+        queue.push(`${match[1] as string}.ts`)
+      }
+    }
+    const fixture = readFileSync(import.meta.path, "utf8")
+    // `gate-manifest.ts` is SYNTHESISED by the fixture, and `gate.ts` is the
+    // subject; everything else has to be copied.
+    const required = [...seen].filter((file) => file !== "gate.ts" && file !== "gate-manifest.ts")
+    // ANTI-VACUITY: an empty closure would satisfy the loop below.
+    expect(required.length).toBeGreaterThan(8)
+    expect(required).toContain("bounded-child.ts")
+    const missing = required.filter((file) => !fixture.includes(`"${file}"`))
+    expect(
+      missing,
+      `add these to makeRepo — the fixture cannot module-load without them:\n  ${missing.join("\n  ")}`,
+    ).toEqual([])
   })
 })
 

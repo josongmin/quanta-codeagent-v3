@@ -1,3 +1,4 @@
+import { runGateDag } from "./gate-dag"
 import {
   finalizeVerificationResult,
   type GateResult,
@@ -88,53 +89,51 @@ export type GateRunAttempt = {
   readonly elapsedMs?: number
 }
 
-/** Single skip / fail-fast sequencer. CLI and tests must not reimplement this. */
+/**
+ * Single skip / fail-fast sequencer. CLI and tests must not reimplement this.
+ *
+ * Now a BRIDGE onto `runGateDag`, not a second implementation. There were two
+ * schedulers: this one, which awaited every gate in manifest order, and a
+ * ready-set DAG scheduler with resource exclusion and multi-input `consumes`
+ * that had no production call site at all. Two schedulers is one too many for a
+ * decision this load-bearing — the one nobody ran was where the newer thinking
+ * lived, and the one everybody ran could not express "wait for A and B".
+ *
+ * Concurrency is 1, which makes this behaviourally identical to the loop it
+ * replaces: every gate here drives a real toolchain, no gate declares the
+ * `resources` the scheduler would need to overlap them safely, and this
+ * repository carries a measured scar about contention producing a differently
+ * TIMED wrong answer rather than a slower right one. Raising it is a separate
+ * change, gated on gates declaring what they hold.
+ */
 export const stepGatePlan = async <T extends PlannedGate>(input: {
   readonly planned: readonly T[]
   readonly failFast: boolean
   readonly runGate: (gate: T) => GateRunAttempt | Promise<GateRunAttempt>
 }): Promise<readonly GateResult[]> => {
-  const results: GateResult[] = []
-  const poisoned = new Set<string>()
-  let stopped = false
-  for (const gate of input.planned) {
-    if (stopped) {
-      results.push({
-        id: gate.id,
-        outcome: "not-run",
-        elapsedMs: 0,
-        reason: "fail-fast",
-      })
-      continue
-    }
-    if (gate.consumes !== undefined && poisoned.has(gate.consumes)) {
-      poisoned.add(gate.id)
-      results.push({
-        id: gate.id,
-        outcome: "skipped-input",
-        elapsedMs: 0,
-        reason: `producer ${gate.consumes} failed`,
-      })
-      continue
-    }
-    const ran = await input.runGate(gate)
-    if (ran.ok) {
-      results.push({
-        id: gate.id,
-        outcome: "passed",
-        elapsedMs: ran.elapsedMs ?? 0,
-      })
-      continue
-    }
-    poisoned.add(gate.id)
-    results.push({
+  const byId = new Map(input.planned.map((gate) => [gate.id, gate]))
+  const results = await runGateDag({
+    // `PlannedGate.consumes` is a single id; the DAG takes a list. Widened
+    // here rather than at the manifest, so nothing has to be restated to get
+    // the new scheduler.
+    gates: input.planned.map((gate) => ({
       id: gate.id,
-      outcome: "failed",
-      elapsedMs: ran.elapsedMs ?? 0,
-    })
-    if (input.failFast) stopped = true
-  }
-  return results
+      ...(gate.consumes === undefined ? {} : { consumes: [gate.consumes] }),
+    })),
+    failFast: input.failFast,
+    concurrency: 1,
+    run: async (gate) => {
+      const planned = byId.get(gate.id)
+      if (planned === undefined) throw new Error(`stepGatePlan: unknown gate ${gate.id}`)
+      return await input.runGate(planned)
+    },
+  })
+  return results.map((result) => ({
+    id: result.id,
+    outcome: result.outcome,
+    elapsedMs: result.elapsedMs,
+    ...(result.reason === undefined ? {} : { reason: result.reason }),
+  }))
 }
 
 export const orchestrateGates = async (input: OrchestrateInput): Promise<VerificationResult> => {
