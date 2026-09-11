@@ -1,7 +1,7 @@
 # TVH-04 — resource certification·scheduler·lease 실배선
 
 - 우선순위: P1
-- 상태: OPEN
+- 상태: LANDED (scheduler 전환은 1/2/4 canary 대기)
 - 소유 lane: scheduler / resource certification / lease
 - 선행: TVH-02, TVH-03
 - 후속: TVH-05, TVH-09
@@ -74,3 +74,46 @@
 - [ ] policy와 planner resource 불일치가 0이다.
 - [ ] production runner가 certification digest와 acquired keys를 receipt에 기록한다.
 - [ ] lease 분할 후에도 checkout/git-common/cache 충돌이 없다.
+
+## 진행 (2026-09-12)
+
+- **LANDED `5c0754ab0`** — 두 숫자, 둘 다 실측.
+
+      policy/planner mismatch   362 → 0     (통합 시 독립 재확인)
+      certification            562 missing → 548 certified / 14 intentionally-exclusive
+
+  `pathResources`가 `classifyTestResource(id, "")`로 **빈 소스**를 넘겨서 path 휴리스틱이 항상 이겼고,
+  3,962개 중 362개가 planner가 실제 소스에서 계산한 값과 달랐다. `policy.resources`는 허구였고
+  scheduler는 애초에 그걸 쓰지도 않았다.
+
+- **단일 class가 위험을 가리고 있었다.** `classifyTestResource`는 첫 regex 매치를 반환하므로
+  Chrome을 띄우면서 worktree도 만드는 파일이 `worktree`로 채점됐고, `worktree`는 `pure`와 overlap한다.
+  2026-09-02 scar 그 자체가 보이지 않는 형태로 남아 있었다.
+
+      browser-worktree.test.ts   first-match: worktree
+                                 claims: browser-profile, git-common, host-cpu
+
+- **격리는 약화되지 않았다.** `resourceClassesOverlap`을 claim set에서 계산하되
+  기존 8×8 호환 행렬을 **셀 단위로 그대로** 재현한다(리터럴 표로 단언, spot-check 아님).
+
+- **정직한 부분: 현재 인증은 chunk 수준 병렬성을 0만큼 산다.**
+  class-level overlappable pair 732, claim-level 732, 새로 허용 0.
+  원인은 chunk **구성**이다 — membership이 class+sha bucket이라 chunk가 ~70개 파일의 claim 합집합을
+  소유하고, integration-path chunk 8개 중 6개가 14개 exclusive 파일 중 하나를 품는다.
+  파일 단위로는 다르다: 서로 다른 claim signature 30개, signature pair의 27%가 호환, 17개는 claim이 없다.
+  다음 슬라이스는 claim-signature bucketing이며 ROI와 함께 handoff에 적었다.
+
+- 인증은 import closure fixpoint(3,352 모듈)로 수행했고, closure 안에 불투명한 것이 하나라도 있으면
+  `intentionally-exclusive`다. `host-cpu`는 **의도적으로 비전이적**이다 —
+  전이시키면 `src/browser/**`가 자기 adapter 소스에 매치되면서 562개 중 297개가
+  `host-cpu: exclusive`가 되어 `pure` chunk 옆에서도 실행을 거부한다. CDP adapter에 도달하는 것은
+  브라우저를 띄우는 것이 아니다.
+- 뮤턴트 11개 전부 killed.
+
+### 남은 항목 (blocker)
+
+- `chunkClaimsOverlap`은 구현·검증·export됐지만 **scheduler에 배선되지 않았다**.
+  전환하려면 실제 shard 캠페인에서 1/2/4-worker verdict 동등성 canary가 필요하고,
+  그건 추론만으로 켤 수 있는 것이 아니다.
+- certification drift: 인증된 test 파일을 고치면 `--check`가 red가 된다(drift → exclusive → 현행 동작이라 안전).
+  비차단으로 먼저 배선할 것을 권고.
