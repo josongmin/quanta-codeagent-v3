@@ -14,7 +14,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import {
@@ -205,5 +205,76 @@ describe("diagnosis stays inside the budget it declares", () => {
     expect(body).toContain("Math.min(DEFAULT_BUDGET.perChildMs, remainingMs)")
     // ...and a child with no usable time is reported, not spawned to be killed.
     expect(body).toContain("childMs < 1_000")
+  })
+})
+
+/**
+ * A test file that contains no tests is a planned file that can never produce
+ * execution evidence.
+ *
+ * FOUND BY A REAL CAMPAIGN, not by reading. `tests/unit/apps/cli/
+ * cli-sdk-parity.test.ts` held a comment and `export {}` — its tests were
+ * removed as duplicates on 2026-06-08 — and the corpus selects by NAME, so it
+ * was planned into a chunk on every run since. `bun test` on it alone exits 1
+ * with `Ran 0 tests across 1 file` and writes no JUnit at all.
+ *
+ * The count check could never have seen it: 158 of 159 files reporting is
+ * `executedFiles === plan.files.length` only if you count the wrong thing. The
+ * exact-set check caught it on its first real campaign.
+ */
+describe("no test file is a tombstone", () => {
+  const TEST_ROOTS = ["tests", "src", "tools"] as const
+
+  /**
+   * Three registration shapes, all of them real in this tree and all found by
+   * running the corpus rather than by guessing:
+   *
+   *   1. `test(` / `describe(` directly.
+   *   2. a helper that registers them — `registerSliceBoundarySuite(config)`,
+   *      used by twenty slice-boundary files.
+   *   3. a bare `import "…test"` of another test module, which is how
+   *      `colocated-source-test-coverage.test.ts` executes 149 cases while
+   *      containing no `test(` of its own.
+   *
+   * A first version knew only the first two and called that file a tombstone.
+   */
+  const REGISTERS_CASES =
+    /^\s*(?:test|it|describe)\s*[.(]|register[A-Za-z]*(?:Suite|Tests|Cases)\s*\(|^\s*import\s+"[^"]*\.?test"/m
+
+  const walkable = (name: string): boolean => name !== "node_modules" && !name.startsWith(".")
+
+  const testFilesUnder = (dir: string): readonly string[] =>
+    readdirSync(resolve(REPO_ROOT, dir), { withFileTypes: true }).flatMap((entry) => {
+      const rel = `${dir}/${entry.name}`
+      if (entry.isDirectory()) return walkable(entry.name) ? testFilesUnder(rel) : []
+      return entry.name.endsWith(".test.ts") ? [rel] : []
+    })
+
+  const testFiles = (): readonly string[] => TEST_ROOTS.flatMap(testFilesUnder)
+
+  test("every `.test.ts` in the corpus registers at least one case", () => {
+    const files = testFiles()
+    // ANTI-VACUITY: the walk must find the real corpus, not an empty list.
+    expect(files.length).toBeGreaterThan(3_000)
+    const tombstones = files.filter(
+      (file) => !REGISTERS_CASES.test(readFileSync(resolve(REPO_ROOT, file), "utf8")),
+    )
+    expect(
+      tombstones,
+      "a `.test.ts` with no cases is planned into a chunk and can never report execution:\n  " +
+        `${tombstones.join("\n  ")}`,
+    ).toEqual([])
+  })
+
+  test("the detector is not vacuous — it fires on the shape it is named for", () => {
+    // The exact content of the file this found, minus its prose.
+    expect(REGISTERS_CASES.test("// a note about removed tests\nexport {}\n")).toBe(false)
+    // ...and accepts both real shapes.
+    expect(REGISTERS_CASES.test('describe("x", () => {})')).toBe(true)
+    expect(REGISTERS_CASES.test('test("x", () => {})')).toBe(true)
+    expect(REGISTERS_CASES.test("registerSliceBoundarySuite(config)")).toBe(true)
+    expect(REGISTERS_CASES.test('import "../../src/llm/empty-stream-breaker.test"')).toBe(true)
+    // ...and an ordinary import of a NON-test module is not a registration.
+    expect(REGISTERS_CASES.test('import { helper } from "./helper"')).toBe(false)
   })
 })
