@@ -44,6 +44,19 @@ evidence:
     - tools/dev/source-snapshot.ts
     - tools/dev/gate-manifest.ts
     - tools/dev/gate.ts
+    # Startup-cost extractions from this campaign's own commits
+    # (d934695a0, 12416ab25, 85a99bb6f — each also edits this campaign's
+    # tickets). The features are unchanged; a module was split so an entrypoint
+    # stops dragging its composition graph into every import. They were orphaned
+    # from the catalog only because `bun run precommit` could not run: the gate
+    # that reports them exited before dispatching, behind a stale ownership
+    # floor, and SEP12 restored it.
+    - src/apps/bench/run-main-dataset.ts
+    - src/runner/batch/instance-selection.ts
+    - src/apps/eval/cli-context.ts
+    - src/apps/cli/session-main.ts
+    - src/apps/cli/session-command-entry.ts
+    - src/apps/cli/top-level-usage.ts
   adrs: [3]
   tests:
     unit:

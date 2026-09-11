@@ -1,0 +1,147 @@
+id: sep12-verification-hardening
+title: SEP12-TVH — bounded verification lifecycle, exact receipts, and real tier separation
+section: 10
+subsystem: Dev tooling — verification safety, cost, and evidence
+order: 2441
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [headless]
+configurable: partial
+owners: ["@songmin"]
+labels: ["surface:dev"]
+depends_on: [sep9-verification-optimization]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-09-12"
+  evidence:
+    cli: "gate.ts tiers, shard runner bounds, capability lanes, determinism and hygiene ratchets"
+    web: "dev tooling; no browser affordance"
+purpose: |
+  SEP9 gave verification a shared vocabulary. SEP12 makes the parts that decide a
+  verdict bounded, exact, and separable.
+
+  Four defects it closes were live at its base HEAD: every `gate.ts` command
+  exited 1 before dispatching a gate, behind a count floor left stale by a
+  legitimate 3-gates-into-1 consolidation; every shard worker was handed a
+  symlink to the developer's whole `~/Library`; the required aggregator knew how
+  many producers answered but not which ones, so one success row was a PASS over
+  a seven-producer merge gate; and every process observation was an unbounded
+  synchronous `ps`, so the watchdog could hang on the command it watches.
+
+  Tier names now buy different things. `prepush` deliberately still tracks the
+  PR population — the affected/changed selector is unwired, and narrowing to the
+  canary alone would take `bun run prepush` from 3,941 files to 8 — and an
+  interlock makes the premature flip RED.
+evidence:
+  code:
+    - tools/dev/gate-manifest-contract.ts
+    - tools/dev/gate-dag.ts
+    - tools/dev/worker-home.ts
+    - tools/dev/process-observer.ts
+    - tools/dev/shard-output-budget.ts
+    - tools/dev/test-shard-selection.ts
+    - tools/dev/test-tier-population.ts
+    - tools/dev/test-shard-cache-scope.ts
+    - tools/dev/test-shard-timeout-policy.ts
+    - tools/dev/test-capability-manifest.ts
+    - tools/dev/test-tier-accounting.ts
+    - tools/dev/capability-result.ts
+    - tools/dev/capability-receipt.ts
+    - tools/dev/capability-probe-producer.ts
+    - tools/dev/capability-receipt-consumer.ts
+    - tools/dev/capability-callsites.ts
+    - tools/dev/verification-required-producers.ts
+    - tools/dev/module-load-effects.ts
+    - tools/dev/module-load-effect-guard.ts
+    - tools/dev/preload-closure-probe.ts
+    - tools/dev/test-resource-analysis.ts
+    - tools/dev/test-resource-claims.ts
+    - tools/dev/test-resource-resolution.ts
+    - tools/dev/test-determinism-scan.ts
+    - tools/dev/test-determinism-ratchet.ts
+    - tools/dev/test-wall-clock-inventory.ts
+    - tools/dev/test-source-corpus.ts
+    - tools/dev/temp-lifecycle.ts
+    - tools/dev/self-skip-sites.ts
+    - tools/dev/nested-suite-targets.ts
+    - tools/dev/awaited-sleep-budget.ts
+    - tools/dev/bounded-child.ts
+    - tools/test-resilience/bounded-child.ts
+    - tools/test-resilience/failure-artifact.ts
+    - tools/test-resilience/diagnose.ts
+    - tools/test-resilience/junit.ts
+    - tools/test-resilience/quarantine.ts
+    - tools/test-resilience/cli.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/_arch/gate-manifest-contract.test.ts
+      - tests/unit/_arch/workflow-concurrency.test.ts
+      - tests/unit/_arch/module-load-effect-guard.test.ts
+      - tests/unit/dev/gate-dag.test.ts
+      - tests/unit/dev/worker-home-user-library.test.ts
+      - tests/unit/dev/process-observer.test.ts
+      - tests/unit/dev/process-lifecycle-kill-bounds.test.ts
+      - tests/unit/dev/shard-output-budget.test.ts
+      - tests/unit/dev/test-shard-selection.test.ts
+      - tests/unit/dev/test-shard-cache-incoherence.test.ts
+      - tests/unit/dev/test-shard-receipt-lifecycle.test.ts
+      - tests/unit/dev/test-shard-timing-hint-hardening.test.ts
+      - tests/unit/dev/capability-result.test.ts
+      - tests/unit/dev/test-capability-lanes.test.ts
+      - tests/unit/dev/required-producer-exactness.test.ts
+      - tests/unit/dev/test-resource-analysis.test.ts
+      - tests/unit/dev/test-resource-claims.test.ts
+      - tests/unit/dev/test-determinism-scan.test.ts
+      - tests/unit/dev/test-determinism-ratchet.test.ts
+      - tests/unit/dev/source-js-cleanup.test.ts
+      - tests/unit/dev/shard-runner-options.test.ts
+      - tests/unit/tools/test-resilience-bounded-child-hellgate.test.ts
+      - tests/unit/tools/test-resilience-diagnosis-hellgate.test.ts
+      - tests/unit/tools/test-resilience-quarantine-v2-hellgate.test.ts
+      - tests/unit/link-local-network-use-guard.test.ts
+      - tests/unit/repo-root-portability.test.ts
+    integration:
+      - tests/integration/test-shard-identity-safety.test.ts
+    contract: []
+config_refs:
+  env:
+    - QUANTA_TEST_NO_USER_LIBRARY
+    - QUANTA_REQUIRE_CAPABILITY
+    - QUANTA_CAPABILITY_RESULTS_DIR
+    - QUANTA_REAL_TOOLCHAIN_E2E
+knobs: []
+deliberate_hold:
+  reason: |
+    Three things are built, tested, and deliberately NOT switched on, each for a
+    stated reason rather than for lack of time.
+
+    `prepush` still selects the PR population: its canary is declared but the
+    affected/changed selector (`verification-selection.ts`) is a dry run nothing
+    consumes, and `gate.ts` exports the tier to the shard runner — so flipping it
+    alone would cut `bun run prepush` from 3,941 files to 8.
+
+    `chunkClaimsOverlap` is exported but the scheduler still uses the class
+    matrix: turning it on needs a 1/2/4-worker verdict-equality canary from a
+    real shard campaign.
+
+    Cache identity narrowing resolves `whole-tree` for every chunk today,
+    because both certification registries required for `certified` are empty of
+    the declared-input half.
+  promotion_path: |
+    Wire the selection layer into a gate, then flip PREPUSH_NARROWED_TO_CANARY —
+    the interlock test releases by itself. Run the worker-equality canary, then
+    enable claim overlap. Populate declared input scopes, then the cache narrows
+    per chunk with no further code change.
+notes: |
+  Tickets and the full landing log, including both hell-audit rounds:
+  docs/plans/sep-12-test-verification-hardening/tickets/README.md
+
+  Hosted evidence is an authority blocker, not an open task: GitHub Actions
+  billing has blocked every job since 2026-07-10, so the matrix-versus-monolith
+  verdict equality and the branch-protection read-back cannot be produced from
+  here.
