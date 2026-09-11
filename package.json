@@ -21,7 +21,7 @@
     "agent:batch": "bun run src/apps/agent/index.ts --mode batch",
     "agent:ci-bot": "bun run src/apps/agent/index.ts --mode ci-bot",
     "web:daemon": "bun run src/apps/web-daemon/index.ts",
-    "test:clean-js": "find tests tools -name '*.js' -delete && find src -name '*.js' ! -path 'src/ui/auth-ui.js' -delete",
+    "test:clean-js": "find tests tools \\( -type d -name '.*' \\) -prune -o -name '*.js' -print0 | xargs -0 rm -f && find src \\( -type d -name '.*' \\) -prune -o -name '*.js' ! -path 'src/ui/auth-ui.js' -print0 | xargs -0 rm -f",
     "test:admission": "bun fc check-changed",
     "test:admission:audit": "bun fc audit",
     "test": "bun run typecheck && bun run test:clean-js && bun run tools/dev/run-test-shards.ts --suite=full",
