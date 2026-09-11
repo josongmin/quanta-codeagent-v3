@@ -5,7 +5,10 @@ import { join, resolve } from "node:path"
 import {
   discoverInventory,
   discoverSuitePopulation,
+  lastInventoryEnumerationCount,
+  projectSuitePopulation,
   SUITE_FLOORS,
+  SUITE_ROOTS,
 } from "../../../tools/dev/test-shard-discovery"
 import {
   checkTierPopulation,
@@ -129,5 +132,76 @@ describe("tier population floor", () => {
     } finally {
       rmSync(path, { force: true })
     }
+  })
+})
+
+/**
+ * ONE filesystem enumeration per inventory.
+ *
+ * `discoverInventory` called `discoverSuitePopulation` four times over roots
+ * that overlap almost entirely — measured on this tree, `core ∪ integration ==
+ * full`, `unit ⊆ core`, `integration ⊆ full` — so the same directories were
+ * walked again and again, and the inventory is itself built more than once per
+ * campaign by discovery, policy enrollment and the matrix rails.
+ *
+ * ABBA against the previous implementation on this HEAD, 12 interleaved samples
+ * each on a loaded host: median 124ms → 45ms, with all eight populations
+ * byte-identical.
+ *
+ * The projection is only sound because suite membership is DEFINED by root, so
+ * the parity arm below is not decoration — it is the whole licence for the
+ * change, and it runs against the real tree rather than a fixture.
+ */
+describe("inventory projection", () => {
+  test("one snapshot, and every suite matches the walk it replaced", () => {
+    const inventory = discoverInventory(ROOT)
+    expect(lastInventoryEnumerationCount()).toBe(1)
+
+    for (const suite of Object.keys(SUITE_ROOTS) as (keyof typeof SUITE_ROOTS)[]) {
+      const walked = discoverSuitePopulation(ROOT, suite)
+      const projected = inventory.suites[suite]
+      expect({ suite, files: projected.files }).toEqual({ suite, files: walked.files })
+      expect({ suite, digest: projected.digestSha256 }).toEqual({
+        suite,
+        digest: walked.digestSha256,
+      })
+    }
+
+    // ANTI-VACUITY: a projection over an empty snapshot matches an empty walk.
+    expect(inventory.suites.full.files.length).toBeGreaterThanOrEqual(SUITE_FLOORS.full)
+    expect(inventory.suites.integration.files.length).toBeGreaterThanOrEqual(
+      SUITE_FLOORS.integration,
+    )
+  })
+
+  test("the suite relations the projection relies on still hold", () => {
+    const inventory = discoverInventory(ROOT)
+    const set = (name: keyof typeof SUITE_ROOTS): Set<string> =>
+      new Set(inventory.suites[name].files)
+    const full = set("full")
+    const core = set("core")
+    const unit = set("unit")
+    const integration = set("integration")
+    expect([...core].filter((f) => !full.has(f))).toEqual([])
+    expect([...unit].filter((f) => !core.has(f))).toEqual([])
+    expect([...integration].filter((f) => !full.has(f))).toEqual([])
+    expect(new Set([...core, ...integration]).size).toBe(full.size)
+  })
+
+  test("a root claims its own subtree and not a prefix-sharing sibling", () => {
+    // `tests/unit` must not absorb `tests/unit-helpers/...`, and `./src/` must
+    // normalise to the same thing as `src`.
+    const files = [
+      "tests/unit/a.test.ts",
+      "tests/unit-helpers/b.test.ts",
+      "src/c.test.ts",
+      "tools/d.test.ts",
+    ]
+    expect(projectSuitePopulation(files, "unit").files).toEqual(["tests/unit/a.test.ts"])
+    expect(projectSuitePopulation(files, "core").files).toEqual([
+      "tests/unit/a.test.ts",
+      "src/c.test.ts",
+      "tools/d.test.ts",
+    ])
   })
 })

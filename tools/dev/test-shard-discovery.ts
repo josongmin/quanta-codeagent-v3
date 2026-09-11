@@ -145,12 +145,74 @@ export interface DiscoveryInventory {
   readonly outOfBand: Record<OutOfBandName | "eval", DiscoveredPopulation>
 }
 
+/**
+ * How many filesystem enumerations the last `discoverInventory` performed.
+ *
+ * Exported so a guard can assert the number rather than infer it from a
+ * stopwatch. It is reset at the start of each inventory.
+ */
+let inventoryEnumerations = 0
+export const lastInventoryEnumerationCount = (): number => inventoryEnumerations
+
+/**
+ * Does `file` live under one of `roots`?
+ *
+ * Both sides are made repo-relative and slash-normalised first, because
+ * `SUITE_ROOTS` mixes the two spellings the repo already uses (`tests/unit` and
+ * `./src/`). A root matches its own directory and everything below it, never a
+ * sibling that merely shares a prefix (`tests/unit` must not claim
+ * `tests/unit-helpers/x.test.ts`).
+ */
+const normalizeRoot = (root: string): string => root.replace(/^\.\//u, "").replace(/\/+$/u, "")
+
+const underAnyRoot = (file: string, roots: readonly string[]): boolean =>
+  roots.some((root) => {
+    const prefix = normalizeRoot(root)
+    return prefix === "" || file === prefix || file.startsWith(`${prefix}/`)
+  })
+
+/**
+ * Project one suite out of a snapshot already in hand.
+ *
+ * `discoverInventory` used to call `discoverSuitePopulation` four times, and the
+ * four suites overlap heavily — `core ∪ integration == full`, `unit ⊆ core` —
+ * so the same directories were walked repeatedly. Measured at this HEAD: one
+ * `full` walk is ~50ms and the four-walk inventory is ~150ms, and the inventory
+ * is itself constructed more than once per campaign by discovery, policy
+ * enrollment and the matrix rails.
+ *
+ * The projection is only sound because suite membership is defined BY root, so
+ * it must produce byte-identical output to the walk it replaces;
+ * `tests/unit/dev/test-shard-discovery.test.ts` compares both, per suite, on the
+ * real tree.
+ */
+export const projectSuitePopulation = (
+  files: readonly string[],
+  suite: SuiteName,
+): DiscoveredPopulation => {
+  const roots = SUITE_ROOTS[suite]
+  const selected = files.filter((file) => underAnyRoot(file, roots))
+  return {
+    name: suite,
+    runner: "bun",
+    roots,
+    files: selected,
+    excluded: [],
+    digestSha256: digestFiles(selected),
+  }
+}
+
 export const discoverInventory = (repoRoot: string): DiscoveryInventory => {
+  // ONE enumeration. `full` is the superset of every other suite root, so every
+  // suite below is a filter over this list rather than another walk.
+  inventoryEnumerations = 0
+  const everything = toRepoRelative(repoRoot, discoverSuiteFiles(repoRoot, "full"))
+  inventoryEnumerations += 1
   const suites = {
-    full: discoverSuitePopulation(repoRoot, "full"),
-    core: discoverSuitePopulation(repoRoot, "core"),
-    unit: discoverSuitePopulation(repoRoot, "unit"),
-    integration: discoverSuitePopulation(repoRoot, "integration"),
+    full: projectSuitePopulation(everything, "full"),
+    core: projectSuitePopulation(everything, "core"),
+    unit: projectSuitePopulation(everything, "unit"),
+    integration: projectSuitePopulation(everything, "integration"),
   }
   for (const suite of Object.keys(SUITE_ROOTS) as SuiteName[]) {
     assertPopulationExact(suites[suite])
