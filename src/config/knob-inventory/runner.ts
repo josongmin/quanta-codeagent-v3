@@ -99,7 +99,7 @@ export const RUNNER: readonly KnobDeclaration[] = [
     group: "retrieval",
     home: "runtime-config",
     describe: "Lance vector DB base URL.",
-    readSite: "runner/assemble/search-index-backend.ts",
+    readSite: "runner/assemble/search-index-backend/vector-runtime.ts",
   },
   {
     envKey: "QUANTA_LANCE_TABLE",
@@ -108,7 +108,7 @@ export const RUNNER: readonly KnobDeclaration[] = [
     group: "retrieval",
     home: "runtime-config",
     describe: "Lance vector DB table name.",
-    readSite: "runner/assemble/search-index-backend.ts",
+    readSite: "runner/assemble/search-index-backend/vector-runtime.ts",
   },
   {
     envKey: "QUANTA_QDRANT_MAX_DIM",
@@ -126,7 +126,7 @@ export const RUNNER: readonly KnobDeclaration[] = [
     group: "retrieval",
     home: "runtime-config",
     describe: "Qdrant collection name.",
-    readSite: "runner/assemble/search-index-backend.ts",
+    readSite: "runner/assemble/search-index-backend/vector-runtime.ts",
   },
   {
     envKey: "QUANTA_QDRANT_BASE_URL",
@@ -135,7 +135,7 @@ export const RUNNER: readonly KnobDeclaration[] = [
     group: "retrieval",
     home: "runtime-config",
     describe: "Qdrant base URL.",
-    readSite: "runner/assemble/search-index-backend.ts",
+    readSite: "runner/assemble/search-index-backend/vector-runtime.ts",
   },
   {
     envKey: "QUANTA_RERANKER",
@@ -279,7 +279,7 @@ export const RUNNER: readonly KnobDeclaration[] = [
     home: "runtime-config",
     describe:
       "Live worktree-command progress gate (RFC-04) — when ON, the `worktree` command stages child-step renders as they land instead of one final render; resolved ONCE at the repl composition root via readCliKnob. Opt-in; unset ⇒ single final render, byte-identical.",
-    readSite: "apps/cli/repl.ts",
+    readSite: "apps/cli/session-main.ts",
   },
   {
     envKey: "QUANTA_POSTURE_SELECTOR",
