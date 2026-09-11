@@ -38,7 +38,27 @@ export interface CampaignHostSample {
 export interface CampaignReceipt {
   readonly schema: typeof CAMPAIGN_RECEIPT_SCHEMA
   readonly pid: number
+  /**
+   * The HEAD the campaign actually ran over — captured AFTER the repository
+   * lease is held.
+   *
+   * It used to be captured once, before the lease wait, and a contender can
+   * wait behind another checkout's campaign for a long time (the wrapper's own
+   * WAIT line reports elapsed seconds and the shard lane budgets minutes). Any
+   * commit landing in that window left this field describing a state the run
+   * never saw. `queuedHead` below preserves what it was when we got in line, so
+   * the drift is visible rather than overwritten.
+   */
   readonly head: string
+  /** HEAD when the campaign started waiting for the lease. */
+  readonly queuedHead: string
+  /** HEAD at exit. Differs from `head` only if the tree moved mid-campaign. */
+  readonly endHead: string | null
+  /** OID of the comparison base (`origin/main`) frozen with `head`, so local
+   *  and hosted admission compare the same commit range. */
+  readonly baseOid: string | null
+  /** True when `queuedHead !== head`: the tree moved while we waited. */
+  readonly headMovedInQueue: boolean
   readonly command: string
   /** Parsed from argv when the command is `gate.ts <tier>`; otherwise null. Not a verdict. */
   readonly verificationTier: VerificationTier | "precommit" | null
@@ -98,6 +118,10 @@ export const sampleCampaignHost = (): CampaignHostSample => ({
 export const buildCampaignReceipt = (input: {
   readonly pid: number
   readonly head: string
+  readonly queuedHead: string
+  readonly endHead: string | null
+  readonly baseOid: string | null
+  readonly headMovedInQueue: boolean
   readonly command: string
   readonly verificationTier: VerificationTier | "precommit" | null
   readonly leasePort: number | null
@@ -125,6 +149,10 @@ export const buildCampaignReceipt = (input: {
     schema: CAMPAIGN_RECEIPT_SCHEMA,
     pid: input.pid,
     head: input.head,
+    queuedHead: input.queuedHead,
+    endHead: input.endHead,
+    baseOid: input.baseOid,
+    headMovedInQueue: input.headMovedInQueue,
     command: input.command,
     verificationTier: input.verificationTier,
     leasePort: input.leasePort,

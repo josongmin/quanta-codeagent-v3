@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os"
 import { delimiter, join } from "node:path"
 import { gatesForStage } from "@/../tools/dev/gate-manifest"
+import { buildCampaignReceipt } from "@/../tools/dev/verification-campaign-receipt"
 import {
   mintExactVerificationReceipt,
   verificationReceiptPath,
@@ -599,4 +600,79 @@ describe("whole verification campaign lease", () => {
     expect(line, `no load line in:\n${out}`).toBeDefined()
     expect(/box quiet|waited \d+s for a quiet box|RAN HOT/.test(line ?? "")).toBe(true)
   }, 60_000)
+})
+
+/**
+ * The campaign HEAD was captured BEFORE the lease wait.
+ *
+ * `verification-campaign.ts` took one `git rev-parse HEAD` at startup and used
+ * it for the owner sidecar, the reuse receipt and the campaign receipt. But the
+ * wrapper can sit behind another checkout's lane for a long time — its own WAIT
+ * line reports elapsed seconds — and anything landing in that window left the
+ * receipt describing a state the run never saw.
+ *
+ * Three snapshots now: `queuedHead` (when we got in line), `head` (re-frozen
+ * once the lease is held, which is what the gates actually run over), and
+ * `endHead`. `headMovedInQueue` says plainly when they differ, and `baseOid`
+ * freezes the comparison base with the head so local and hosted admission look
+ * at the same commit range.
+ */
+describe("campaign head is frozen under the lease", () => {
+  test("the re-freeze happens AFTER the lease, not before", () => {
+    const source = readFileSync(
+      join(import.meta.dir, "..", "..", "..", "tools", "dev", "verification-campaign.ts"),
+      "utf8",
+    )
+    const leaseAt = source.indexOf("LEASE acquired port=")
+    const refreezeAt = source.indexOf('campaignHead = readRef("HEAD")')
+    const queuedAt = source.indexOf('const queuedHead = readRef("HEAD")')
+
+    // ANTI-VACUITY: all three markers must exist, or the ordering assertions
+    // below compare -1 against -1 and pass over nothing.
+    expect(queuedAt).toBeGreaterThan(-1)
+    expect(leaseAt).toBeGreaterThan(-1)
+    expect(refreezeAt).toBeGreaterThan(-1)
+
+    expect(queuedAt).toBeLessThan(leaseAt)
+    expect(refreezeAt).toBeGreaterThan(leaseAt)
+    // The queued value is preserved, never overwritten in place.
+    expect(source).toContain("queuedHead,")
+    expect(source).toContain("headMovedInQueue")
+  })
+
+  test("the receipt carries all three snapshots and the base", () => {
+    const receipt = buildCampaignReceipt({
+      pid: 1,
+      head: "b".repeat(40),
+      queuedHead: "a".repeat(40),
+      endHead: "b".repeat(40),
+      baseOid: "c".repeat(40),
+      headMovedInQueue: true,
+      command: "bun run tools/dev/gate.ts prepush",
+      verificationTier: "prepush",
+      leasePort: 1234,
+      leaseWaitMs: 5_000,
+      startedAtMs: 1_000,
+      finishedAtMs: 9_000,
+      outcome: "passed",
+      exitCode: 0,
+      drained: true,
+      survivingGroups: [],
+      hostAtStart: { cpus: 8, loadAverage1m: 1, totalMemoryBytes: 1 },
+      hostAtEnd: { cpus: 8, loadAverage1m: 1, totalMemoryBytes: 1 },
+    })
+    expect({
+      head: receipt.head,
+      queuedHead: receipt.queuedHead,
+      endHead: receipt.endHead,
+      baseOid: receipt.baseOid,
+      moved: receipt.headMovedInQueue,
+    }).toEqual({
+      head: "b".repeat(40),
+      queuedHead: "a".repeat(40),
+      endHead: "b".repeat(40),
+      baseOid: "c".repeat(40),
+      moved: true,
+    })
+  })
 })

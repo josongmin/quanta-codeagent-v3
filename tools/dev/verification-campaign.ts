@@ -74,7 +74,28 @@ const CAMPAIGN_QUIET_BOX_BUDGET_MS = 180_000
 
 const campaignStartedAtMs = Date.now()
 const hostAtStart = sampleCampaignHost()
-let campaignHead = capture(["git", "rev-parse", "HEAD"]).text.trim()
+const readRef = (ref: string): string => capture(["git", "rev-parse", ref]).text.trim()
+
+/**
+ * HEAD as it was when this campaign got IN LINE for the repository lease.
+ *
+ * Kept separate from the HEAD it actually runs over. The wrapper can wait behind
+ * another checkout for a long time — its own WAIT line reports elapsed seconds —
+ * and anything landing in that window used to overwrite nothing: the single
+ * capture happened before the wait, so the receipt described a state the run
+ * never saw.
+ */
+const queuedHead = readRef("HEAD")
+let campaignHead = queuedHead
+/** The comparison base, frozen WITH the head so local and hosted admission look
+ *  at the same commit range. `null` when there is no such ref (a fresh clone,
+ *  a detached CI checkout). */
+let campaignBaseOid: string | null = null
+try {
+  campaignBaseOid = readRef("origin/main")
+} catch {
+  campaignBaseOid = null
+}
 
 const isExactPrepushReuse =
   basename(command[0] ?? "") === "bun" &&
@@ -99,6 +120,12 @@ if (isExactPrepushReuse) {
         buildCampaignReceipt({
           pid: process.pid,
           head: campaignHead,
+          // This path never waited, so queued and running HEAD are the same by
+          // construction — recorded explicitly rather than left to be inferred.
+          queuedHead,
+          endHead: campaignHead,
+          baseOid: campaignBaseOid,
+          headMovedInQueue: false,
           command: command.join(" "),
           verificationTier,
           // No lane was taken: that IS the outcome being recorded.
@@ -157,6 +184,16 @@ let sidecarWritten = false
 let terminating = false
 let leaseWaitMs = 0
 
+/** HEAD at exit, or `null` if git cannot answer. A receipt field must never be
+ *  the reason a campaign fails. */
+const currentHeadOrNull = (): string | null => {
+  try {
+    return readRef("HEAD")
+  } catch {
+    return null
+  }
+}
+
 /** One place that turns "what just happened" into the campaign receipt. */
 const recordCampaign = (input: {
   readonly outcome: CampaignOutcome
@@ -170,6 +207,10 @@ const recordCampaign = (input: {
     buildCampaignReceipt({
       pid: process.pid,
       head: campaignHead,
+      queuedHead,
+      endHead: currentHeadOrNull(),
+      baseOid: campaignBaseOid,
+      headMovedInQueue: campaignHead !== queuedHead,
       command: command.join(" "),
       verificationTier,
       leasePort: lease?.port ?? null,
@@ -238,6 +279,23 @@ process.stdout.write(
   `[verification] LEASE acquired port=${lease.port} scope=whole-campaign ` +
     `lease_wait_ms=${leaseWaitMs}\n`,
 )
+
+// RE-FREEZE. Everything above happened while another checkout owned the lane.
+// The gates below run over whatever HEAD is NOW, so that is the head the receipt
+// must describe; `queuedHead` keeps the old value so the move is visible instead
+// of silently replaced.
+campaignHead = readRef("HEAD")
+try {
+  campaignBaseOid = readRef("origin/main")
+} catch {
+  campaignBaseOid = null
+}
+if (campaignHead !== queuedHead) {
+  process.stdout.write(
+    `[verification] HEAD MOVED while waiting for the lease: queued=${queuedHead} ` +
+      `running=${campaignHead} (waited ${Math.round(leaseWaitMs / 1_000)}s)\n`,
+  )
+}
 
 // Diagnostic sidecar only — never an authority. The kernel-owned port is the
 // lease; this file answers "who is holding the lane and since when" while the
