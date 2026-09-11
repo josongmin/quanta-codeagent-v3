@@ -6,16 +6,19 @@ import { join } from "node:path"
 import { runEvalCli } from "@/../src/apps/eval/index"
 import type { GroundingPayload } from "@/../src/apps/eval/storage"
 import { ResultStore } from "@/../src/apps/eval/storage"
+import { REPO_ROOT, repoFile } from "../_helpers/repo-root"
 
 /** The eval CLI imports the full harness even for argument validation. Bound
  * each hermetic child so a contended full-suite worker cannot leave a blocking
  * `spawnSync` child alive indefinitely; callers receive a diagnostic instead of
  * an opaque `status === null`. */
 const EVAL_CLI_CHILD_TIMEOUT_MS = 30_000
-const REPO_ROOT = "/Users/songmin/quanta-codeagent-v3"
+// Resolved from this file's location via the repository marker — never a
+// hard-coded checkout path. See tests/_helpers/repo-root.ts.
+const EVAL_ENTRY = repoFile("src/apps/eval/entry.ts")
 
 const runEvalProcess = (...args: string[]) => {
-  const out = spawnSync(process.execPath, ["run", "src/apps/eval/entry.ts", ...args], {
+  const out = spawnSync(process.execPath, ["run", EVAL_ENTRY, ...args], {
     cwd: REPO_ROOT,
     encoding: "utf8",
     timeout: EVAL_CLI_CHILD_TIMEOUT_MS,

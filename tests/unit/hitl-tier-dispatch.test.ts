@@ -19,6 +19,7 @@ import type { Tool, ToolEvent } from "@/tool"
 import { ToolRegistry } from "@/tool"
 import { bashTool } from "@/tool/bash"
 import { readTool } from "@/tool/read"
+import { REPO_ROOT } from "../_helpers/repo-root"
 
 const makeTool = (
   name: string,
@@ -253,7 +254,12 @@ describe("dispatchTool HITL gate (config.hitl.enabled=true)", () => {
         registry: new ToolRegistry([readTool as Tool]),
         hitl: { enabled: true },
         permission: { mode: "default" } as PermissionContext,
-        cwd: "/Users/songmin/quanta-codeagent-v3",
+        // A REAL cwd: this case drives the production `readTool` against
+        // `package.json`, so the path is resolved and read. Measured: with a
+        // foreign prefix here the case goes RED (`res.ok` false), so the
+        // previous hard-coded checkout path made this test pass on exactly one
+        // machine. Resolved from this file's location instead.
+        cwd: REPO_ROOT,
         onConfirm: async () => {
           confirmed++
           return true

@@ -359,6 +359,13 @@
     "tests/unit/knob-registry-completeness-ratchet-hellgate.test.ts#SRC": {
       "walked": 3374
     },
+    "tests/unit/link-local-network-use-guard.test.ts#SRC-TESTS": {
+      "walked": 303
+    },
+    "tests/unit/link-local-network-use-guard.test.ts#TESTS": {
+      "walked": 3726,
+      "matched": 19
+    },
     "tests/unit/lint-debt-ratchet-reach.test.ts#SRC": {
       "walked": 3765
     },

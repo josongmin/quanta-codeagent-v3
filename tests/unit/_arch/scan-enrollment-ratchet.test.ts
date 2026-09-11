@@ -133,6 +133,88 @@ const isEnrolled = (rel: string): boolean => (expectedIds()[rel] ?? []).length >
 const callsHelper = (rel: string): boolean =>
   /\bassertScanPopulation\s*\(/.test(stripComments(readFileSync(join(REPO_ROOT, rel), "utf8")))
 
+/**
+ * Every `assertScanPopulation(...)` argument list in a file, comments stripped.
+ *
+ * Brace-balanced from the opening paren rather than regex-to-the-first-`)`,
+ * because every real call passes an options OBJECT and a lazy match would stop
+ * inside it.
+ */
+const helperCallArguments = (source: string): readonly string[] => {
+  const text = stripComments(source)
+  const out: string[] = []
+  const marker = /\bassertScanPopulation\s*\(/g
+  let match = marker.exec(text)
+  while (match !== null) {
+    let depth = 1
+    let cursor = match.index + match[0].length
+    const start = cursor
+    while (cursor < text.length && depth > 0) {
+      const ch = text[cursor]
+      if (ch === "(") depth += 1
+      else if (ch === ")") depth -= 1
+      cursor += 1
+    }
+    out.push(text.slice(start, cursor - 1))
+    marker.lastIndex = cursor
+    match = marker.exec(text)
+  }
+  return out
+}
+
+/** The two options `scan-population.ts` documents as TEST SEAMs. */
+const FIXTURE_SEAMS = ["fixture", "baselinePath"] as const
+
+/**
+ * Does this argument list use a test seam, directly or through a one-hop const?
+ *
+ * Six of the helper hellgate's calls pass a shared `const alphaOpts = {...}`
+ * rather than an inline literal, so a purely inline match would call the file
+ * half-real. One hop is enough for the shape that exists and shallow enough that
+ * a seam cannot be smuggled in from far away.
+ */
+const usesFixtureSeam = (args: string, source: string): boolean => {
+  const inline = FIXTURE_SEAMS.some((seam) => new RegExp(`\\b${seam}\\s*:`).test(args))
+  if (inline) return true
+  // Anchored at the END, not by argument position: the first argument routinely
+  // contains commas (`join(beta, "mod.ts")`), which a positional `[^,]*` split
+  // cannot span — three call sites were mis-read as real scans that way.
+  const binding = /,\s*([A-Za-z_$][\w$]*)\s*$/.exec(args)?.[1]
+  if (binding === undefined) return false
+  const declared = new RegExp(`\\bconst\\s+${binding}\\s*=\\s*\\{([^}]*)\\}`).exec(source)?.[1]
+  return (
+    declared !== undefined &&
+    FIXTURE_SEAMS.some((seam) => new RegExp(`\\b${seam}\\s*:`).test(declared))
+  )
+}
+
+/**
+ * A file that ONLY measures temp fixtures has nothing to enroll.
+ *
+ * `fixture: true` and `baselinePath` are the helper's two documented TEST SEAMs
+ * — "this call measures a temp fixture, not this repository, so its reach is not
+ * recorded", and "point the floor at a different baseline file. Only the
+ * helper's own hellgate uses it". `assertScanPopulation` returns before
+ * `record()` for such a call.
+ *
+ * So the helper's OWN hellgate, which builds real git repos in tmpdir and pins
+ * their floors through those seams, was reported as an orphan with no payable
+ * fix: pinning a baseline id for it would create a floor nothing ever reports,
+ * which `scan-reach` then refuses as "pinned but no guard reported it". That is
+ * the "debt that cannot be paid" this ratchet's own note warns about.
+ *
+ * Narrow on purpose: EVERY call must use a seam. A file that mixes a fixture
+ * call with a real repository scan is still an orphan, so this cannot launder a
+ * guard that does measure this tree.
+ */
+const sourceMeasuresOnlyFixtures = (source: string): boolean => {
+  const calls = helperCallArguments(source)
+  return calls.length > 0 && calls.every((args) => usesFixtureSeam(args, source))
+}
+
+const measuresOnlyFixtures = (rel: string): boolean =>
+  sourceMeasuresOnlyFixtures(readFileSync(join(REPO_ROOT, rel), "utf8"))
+
 /** Scan identities are committed cross-checkout data. An absolute-path suffix
  *  binds the baseline to one clone and makes every linked worktree report the
  *  same live scan as both stale and unpinned. */
@@ -275,6 +357,11 @@ describe("scan enrollment", () => {
       const added = scanVerdictGuardPopulation()
         .filter((f) => !owed.has(f))
         .filter((f) => !isEnrolled(f))
+        // …and a file whose every helper call goes through a documented TEST
+        // SEAM is not a guard over this repository at all; see
+        // `measuresOnlyFixtures`. Enrolling it would pin a floor nothing ever
+        // reports, which `scan-reach` refuses in the other direction.
+        .filter((f) => !measuresOnlyFixtures(f))
       expect(
         added,
         added.length === 0
@@ -309,6 +396,7 @@ describe("scan enrollment", () => {
       const orphans = scanVerdictGuardPopulation()
         .filter((f) => callsHelper(f))
         .filter((f) => !isEnrolled(f))
+        .filter((f) => !measuresOnlyFixtures(f))
         .sort()
       expect(
         orphans,
@@ -320,6 +408,53 @@ describe("scan enrollment", () => {
     },
     FULL_SCAN_TIMEOUT_MS,
   )
+
+  test("🔴 the fixture seam cannot launder a guard that scans this repository", () => {
+    // The exemption above exists because the helper's OWN hellgate measures temp
+    // git repos through the two documented TEST SEAMs, so pinning a baseline id
+    // for it would create a floor nothing ever reports. That reasoning collapses
+    // the moment a seam call can sit beside a real one, so the rule is "EVERY
+    // call", and this executes that claim instead of asserting it in a comment.
+    const call = (args: string): string => `assertScan${"Population"}(${args})`
+
+    const allSeam = [
+      call('walk(root), root, { id: "fx", fixture: true, baselinePath: bl }'),
+      call('[a, b], root, { id: "fx", baselinePath: bl }'),
+    ].join("\n")
+    expect(sourceMeasuresOnlyFixtures(allSeam)).toBe(true)
+
+    // One real scan among them and the file is a guard again.
+    const mixed = `${allSeam}\n${call('walk(REPO_ROOT), REPO_ROOT, { id: "real-guard" }')}`
+    expect(sourceMeasuresOnlyFixtures(mixed)).toBe(false)
+
+    // The one-hop const form the hellgate actually uses, and its negative twin.
+    const viaConst = [
+      'const opts = { id: "fx", fixture: true, baselinePath: bl }',
+      call('[join(dir, "mod.ts")], root, opts'),
+    ].join("\n")
+    expect(sourceMeasuresOnlyFixtures(viaConst)).toBe(true)
+    const viaRealConst = [
+      'const opts = { id: "real-guard" }',
+      call('[join(dir, "mod.ts")], root, opts'),
+    ].join("\n")
+    expect(sourceMeasuresOnlyFixtures(viaRealConst)).toBe(false)
+
+    // A file that never calls the helper is not "fixture-only" either — that
+    // would make the exemption true of everything.
+    expect(sourceMeasuresOnlyFixtures("const x = 1")).toBe(false)
+
+    // …and the seams must still be documented as TEST SEAMs in the helper. If
+    // `baselinePath` ever becomes a production option, this exemption is wrong
+    // and this line is where that is noticed.
+    const helper = readFileSync(
+      join(REPO_ROOT, "tests", "unit", "_shared", "scan-population.ts"),
+      "utf8",
+    )
+    for (const seam of FIXTURE_SEAMS) {
+      const declaration = new RegExp(`TEST SEAM[\\s\\S]{0,1200}?readonly ${seam}\\?:`)
+      expect({ seam, documented: declaration.test(helper) }).toEqual({ seam, documented: true })
+    }
+  })
 
   test("🔴 no expectedIds entry names a file that is not enrolled", () => {
     // The other direction: an entry for a file that no longer calls the helper

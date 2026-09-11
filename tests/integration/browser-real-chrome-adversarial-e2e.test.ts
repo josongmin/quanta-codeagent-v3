@@ -33,15 +33,22 @@
  *                  DEFANGED — a malicious page cannot forge a `<system-reminder>`
  *                  boundary in tool output.
  *
- *   /ssrf-page   — a page whose OWN inline <script> does
- *                  `fetch('http://169.254.169.254/')` and then reports the
- *                  outcome to `/report`. DOCUMENTED BOUNDARY: the adapter
- *                  navigating to the FIXTURE is in-scope; the page's own in-page
- *                  fetch is the BROWSER's network, not ours. The navigate-SSRF
- *                  guard lives in the TOOL layer and gates only the url WE hand
- *                  the port — it cannot (and is not meant to) stop a page's own
- *                  subresource fetches. We assert + comment this is a boundary,
- *                  NOT a bug.
+ *   /ssrf-page   — a page whose OWN inline <script> fetches a cloud-metadata
+ *                  service cross-origin and reports the outcome to `/report`.
+ *                  The metadata service is a SECOND LOOPBACK ORIGIN, never the
+ *                  real link-local IMDS address (TVH-01): the old fixture made
+ *                  a genuine egress attempt to cloud infrastructure, and its
+ *                  outcome was host-dependent, which left the leak assertion
+ *                  vacuous. Both states are now deterministic and BOTH are
+ *                  asserted — `?mode=blocked` (403, no CORS ⇒ the browser
+ *                  rejects it) and `?mode=leak` (200 + a sentinel credential
+ *                  that really does reach page text, the paired control).
+ *                  DOCUMENTED BOUNDARY: the adapter navigating to the FIXTURE
+ *                  is in-scope; the page's own in-page fetch is the BROWSER's
+ *                  network, not ours. The navigate-SSRF guard lives in the TOOL
+ *                  layer and gates only the url WE hand the port — it cannot
+ *                  (and is not meant to) stop a page's own subresource fetches.
+ *                  We assert + comment this is a boundary, NOT a bug.
  *
  *   /download    — an `<a download>` that auto-clicks on load. We assert no file
  *                  escapes the temp profile: `Page.setDownloadBehavior:deny` is
@@ -156,23 +163,99 @@ const FIXTURES: Record<string, string> = {
     <button id="far" style="margin-top:20px">Far Below Fold</button>
     <div style="height:1000px">tail</div>
   </body></html>`,
-  // The page itself tries to reach the cloud metadata endpoint and REPORTS the
-  // outcome (blocked / leak) to /report. This is the browser's own network —
-  // out of our navigate-guard's scope (documented).
-  // NOTE: the leak marker is assembled at runtime ('LE'+'AK:') so the literal
-  // string "LEAK:" never appears in the <script> SOURCE — otherwise the
-  // collector's textContent-derived accessible name for <body> would carry the
-  // script source and a "no LEAK:" assertion would false-fail on inert source.
-  "/ssrf-page": `<!doctype html><html><head><title>ssrf fixture</title></head><body>
+  // Auto-clicking download anchor. With setDownloadBehavior:deny the browser
+  // refuses to write the file anywhere — nothing lands in the temp profile.
+  "/download": `<!doctype html><html><head><title>download fixture</title></head><body>
+    <h1>download fixture</h1>
+    <a id="dl" href="data:text/plain;charset=utf-8,ESCAPED_PAYLOAD" download="escape.txt">dl</a>
+    <script> document.getElementById('dl').click(); </script>
+  </body></html>`,
+}
+
+// ---- fake cloud-metadata service (loopback) ----------------------------------
+/**
+ * WHY THIS EXISTS (TVH-01). The `/ssrf-page` fixture used to do a REAL
+ * `fetch('http://169.254.169.254/latest/meta-data/')` — the AWS/GCE link-local
+ * IMDS address. Three problems, all of them measured rather than theoretical:
+ *
+ *   • It is a genuine egress attempt to cloud infrastructure from whatever host
+ *     runs the suite. On a cloud CI runner that endpoint is REAL and answers
+ *     with instance credentials.
+ *   • Its outcome is host-dependent: on a laptop it connect-times-out after an
+ *     OS-chosen interval (many seconds), on a cloud box it returns 200. The old
+ *     test could therefore assert only the synchronous "attempt" marker, and
+ *     its `expect(reports).not.toContain("ssrf=leak")` was VACUOUS — nothing on
+ *     a developer machine can ever produce that report, so the assertion held
+ *     no matter what the code did.
+ *   • The BLOCKED state was never asserted at all, for the same reason.
+ *
+ * The replacement is a second loopback origin standing in for the metadata
+ * service. It is a DIFFERENT origin from the fixture server (different port),
+ * so the page's request to it is a genuine cross-origin subresource fetch — the
+ * exact shape the real one had — and it makes all three states deterministic:
+ *
+ *   attempt — the page reports it synchronously AND {@link metaHits} records the
+ *             request actually ARRIVING at the metadata service. "The page said
+ *             it tried" and "the request left the page" are different claims;
+ *             the old fixture could only make the first.
+ *   blocked — `/blocked/…` answers 403 with no CORS header, so the browser
+ *             rejects the fetch exactly as an interposing egress guard would.
+ *   leaked  — `/latest/meta-data/` answers 200 + {@link META_SENTINEL} with
+ *             `access-control-allow-origin`, so the credential document really
+ *             does reach page text. This is the PAIRED CONTROL that makes the
+ *             blocked case's "no sentinel anywhere" assertion mean something.
+ */
+const META_SENTINEL = `IMDS-CRED-${Math.random().toString(36).slice(2, 12)}`
+let metaServer: ReturnType<typeof Bun.serve> | null = null
+let metaOrigin = ""
+/** Every path the fake metadata service was asked for — the egress read-back. */
+const metaHits: string[] = []
+
+const handleMetaFetch = (req: Request): Response => {
+  const url = new URL(req.url)
+  metaHits.push(url.pathname)
+  if (url.pathname.startsWith("/blocked/")) {
+    // The egress-denied shape. No `access-control-allow-origin`, so a browser
+    // rejects the fetch outright rather than handing the body to the page.
+    return new Response("egress denied", { status: 403 })
+  }
+  if (url.pathname === "/latest/meta-data/") {
+    return new Response(META_SENTINEL, {
+      headers: { "content-type": "text/plain", "access-control-allow-origin": "*" },
+    })
+  }
+  return new Response("not found", { status: 404 })
+}
+
+type SsrfMode = "blocked" | "leak"
+
+/** The metadata URL handed to the page for a given mode. */
+const metaUrlFor = (mode: SsrfMode): string =>
+  mode === "leak" ? `${metaOrigin}/latest/meta-data/` : `${metaOrigin}/blocked/latest/meta-data/`
+
+/**
+ * The `/ssrf-page` attacker fixture, generated per request so the loopback
+ * metadata origin (known only after `Bun.serve` picks a port) can be embedded.
+ *
+ * NOTE: the leak marker is assembled at runtime ('LE'+'AK:') so the literal
+ * string "LEAK:" never appears in the <script> SOURCE — otherwise the
+ * collector's textContent-derived accessible name for <body> would carry the
+ * script source and a "no LEAK:" assertion would false-fail on inert source.
+ * {@link META_SENTINEL} is never in the page source at all: it exists only in
+ * the metadata service's RESPONSE, so finding it in a snapshot is proof the
+ * response body reached page text.
+ */
+const ssrfPage = (mode: SsrfMode): string =>
+  `<!doctype html><html><head><title>ssrf fixture</title></head><body>
     <h1>ssrf fixture</h1>
     <div id="out">pending</div>
     <script>
       var LEAK = 'LE' + 'AK:';
-      // Report the ATTEMPT synchronously (deterministic; does not depend on the
-      // link-local connect-timeout, which on some hosts hangs for many seconds).
+      // Report the ATTEMPT synchronously, before the cross-origin request can
+      // settle — so "the page tried" is observable independently of the outcome.
       fetch('/report?k=ssrf&v=attempt');
-      fetch('http://169.254.169.254/latest/meta-data/')
-        .then(function (r) { return r.text(); })
+      fetch(${JSON.stringify(metaUrlFor(mode))})
+        .then(function (r) { if (!r.ok) { throw new Error('denied'); } return r.text(); })
         .then(function (t) {
           document.getElementById('out').textContent = LEAK + t;
           fetch('/report?k=ssrf&v=leak');
@@ -182,15 +265,7 @@ const FIXTURES: Record<string, string> = {
           fetch('/report?k=ssrf&v=blocked');
         });
     </script>
-  </body></html>`,
-  // Auto-clicking download anchor. With setDownloadBehavior:deny the browser
-  // refuses to write the file anywhere — nothing lands in the temp profile.
-  "/download": `<!doctype html><html><head><title>download fixture</title></head><body>
-    <h1>download fixture</h1>
-    <a id="dl" href="data:text/plain;charset=utf-8,ESCAPED_PAYLOAD" download="escape.txt">dl</a>
-    <script> document.getElementById('dl').click(); </script>
-  </body></html>`,
-}
+  </body></html>`
 
 // ---- fixture server + report sink --------------------------------------------
 // `reports` is the in-memory read-back log: every `/report?k=..&v=..` GET from a
@@ -206,6 +281,14 @@ const handleFetch = (req: Request): Response => {
   if (url.pathname === "/report") {
     reports.push(`${url.searchParams.get("k")}=${url.searchParams.get("v")}`)
     return new Response("ok", { headers: { "content-type": "text/plain" } })
+  }
+  if (url.pathname === "/ssrf-page") {
+    // Generated per request: the mode selects which fake-metadata route the
+    // page targets, so attempt / blocked / leaked are all reachable on demand.
+    const mode: SsrfMode = url.searchParams.get("mode") === "leak" ? "leak" : "blocked"
+    return new Response(ssrfPage(mode), {
+      headers: { "content-type": "text/html; charset=utf-8" },
+    })
   }
   const html = FIXTURES[url.pathname]
   if (html === undefined) return new Response("not found", { status: 404 })
@@ -250,6 +333,20 @@ const waitForReport = async (
     await settle(150)
   }
   return pred(reports)
+}
+
+/** Poll the fake metadata service's arrival log. Proves the page's request
+ *  really LEFT the page, independently of what the page reported about it. */
+const waitForMetaHit = async (
+  pred: (path: string) => boolean,
+  timeoutMs = 3000,
+): Promise<boolean> => {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (metaHits.some(pred)) return true
+    await settle(150)
+  }
+  return metaHits.some(pred)
 }
 
 const hasScrolled = (log: readonly string[]): boolean =>
@@ -297,6 +394,11 @@ const refFor = (yaml: string, re: RegExp): string | null => {
 beforeAll(async () => {
   server = Bun.serve({ port: 0, fetch: handleFetch })
   origin = `http://127.0.0.1:${server.port}`
+  // A SECOND loopback origin standing in for the cloud metadata service. A
+  // different port is a different origin, so the page's request to it is a real
+  // cross-origin subresource fetch — the same shape the link-local one had.
+  metaServer = Bun.serve({ port: 0, fetch: handleMetaFetch })
+  metaOrigin = `http://127.0.0.1:${metaServer.port}`
 
   if (!HAS_CHROME) return
   profileRoot = mkdtempSync(join(tmpdir(), "qbe-"))
@@ -323,6 +425,7 @@ afterAll(async () => {
     rmSync(profileRoot, { recursive: true, force: true })
   }
   server?.stop(true)
+  metaServer?.stop(true)
 })
 
 // =============================================================================
@@ -343,6 +446,38 @@ describe("adversarial e2e — chrome-independent invariants", () => {
     expect(reports).toContain("probe=1")
     const four = await fetch(`${origin}/nope`)
     expect(four.status).toBe(404)
+  })
+
+  test("the fake metadata service is deterministic in BOTH states over loopback (no link-local egress)", async () => {
+    // Chrome-independent half of the SSRF fixture: the two metadata routes are
+    // pinned here so a capability-absent host still proves the three states are
+    // SERVER-side deterministic, and so a broken fixture is distinguishable
+    // from a browser that simply did not run.
+    const before = metaHits.length
+    const leaked = await fetch(metaUrlFor("leak"))
+    expect(leaked.status).toBe(200)
+    expect(await leaked.text()).toBe(META_SENTINEL)
+    const denied = await fetch(metaUrlFor("blocked"))
+    expect(denied.status).toBe(403)
+    // No CORS header on the denied route — that is what makes a BROWSER reject
+    // the fetch rather than hand the 403 body to the page.
+    expect(denied.headers.get("access-control-allow-origin")).toBeNull()
+    expect(leaked.headers.get("access-control-allow-origin")).toBe("*")
+    // Both requests ARRIVED — the egress read-back the live tests rely on works.
+    expect(metaHits.length).toBe(before + 2)
+
+    // The served page targets the loopback service, and carries no link-local
+    // address. (The literal is assembled here so this assertion's own source
+    // cannot contain the thing it forbids.)
+    const linkLocal = ["169", "254", "169", "254"].join(".")
+    for (const mode of ["blocked", "leak"] as const) {
+      const page = await (await fetch(`${origin}/ssrf-page?mode=${mode}`)).text()
+      expect(page).toContain(metaUrlFor(mode))
+      expect(page).not.toContain(linkLocal)
+      // The sentinel is never in the page SOURCE — only in the response body —
+      // so a snapshot containing it is evidence about the response.
+      expect(page).not.toContain(META_SENTINEL)
+    }
   })
 
   test("guardPageText defangs a forged </system-reminder> closer + opener (pure)", () => {
@@ -638,14 +773,23 @@ describe.skipIf(!HAS_CHROME)("adversarial e2e — REAL chrome via cdp-adapter po
     if (h === null) return
     // This is exactly why read-backs above use /report + snapshot, NOT cdp():
     // the model-reachable Runtime.evaluate surface is closed.
+    // The expression is the exfiltration a model would actually attempt — a
+    // metadata-service fetch — pointed at the LOOPBACK fake service rather than
+    // the real link-local address. That is not only safer: it gives the denial
+    // a read-back. If the allowlist ever regressed and this expression RAN, the
+    // fake metadata service would record the hit, so `metaHits` below is a live
+    // leak channel rather than a restatement of the error kind.
+    const hitsBefore = metaHits.length
     const r = await P().cdp(h, "Runtime.evaluate", {
-      expression: "fetch('http://169.254.169.254/')",
+      expression: `fetch(${JSON.stringify(metaUrlFor("leak"))})`,
     })
     expect(r.ok).toBe(false)
     if (!r.ok) {
       expect(r.error.kind).toBe("cdp-method-denied")
       if (r.error.kind === "cdp-method-denied") expect(r.error.method).toBe("Runtime.evaluate")
     }
+    await settle(300)
+    expect(metaHits.length, "a DENIED Runtime.evaluate must not reach the network").toBe(hitsBefore)
   })
 
   test("Input.dispatchKeyEvent via cdp() is DENIED (model cannot synth raw input)", async () => {
@@ -697,40 +841,74 @@ describe.skipIf(!HAS_CHROME)("adversarial e2e — REAL chrome via cdp-adapter po
     if (snap.ok) expect(snap.value.yaml).toContain("forge fixture")
   })
 
-  test("DOCUMENTED BOUNDARY: a page's OWN in-page fetch is browser network, OUT of navigate-guard scope", async () => {
+  test("DOCUMENTED BOUNDARY + BLOCKED state: the page's OWN metadata fetch is browser network, and a denied one leaks nothing", async () => {
     if (need() === null) return
     reports.length = 0
-    // Isolated handle: the metadata fetch can hang in flight, so we keep it off
-    // the shared session.
+    metaHits.length = 0
     await withFreshHandle(async (h) => {
-      // Navigating the PORT to the fixture is fine (the port has no SSRF gate; the
-      // tool layer's guard — which would deny 127.0.0.1 / 169.254 — is one layer
-      // up and gates only the url WE pass). The page's inline <script> then does
-      // fetch('http://169.254.169.254/') on its own — that subresource request is
-      // the BROWSER's network stack, NOT a navigate WE issued, so it is by design
-      // outside the navigate-guard's scope. The PAGE reports its OWN outcome to
-      // /report; we assert + comment this is a boundary, NOT a bug.
-      const nav = await P().navigate(h, `${origin}/ssrf-page`, undefined)
+      // Navigating the PORT to the fixture is fine (the port has no SSRF gate;
+      // the tool layer's guard — which would deny 127.0.0.1 / link-local — is
+      // one layer up and gates only the url WE pass). The page's inline
+      // <script> then fetches the METADATA SERVICE on its own; that
+      // subresource request is the BROWSER's network stack, NOT a navigate WE
+      // issued, so it is by design outside the navigate-guard's scope. The
+      // PAGE reports its OWN outcome to /report; this is a boundary, NOT a bug.
+      const nav = await P().navigate(h, `${origin}/ssrf-page?mode=blocked`, undefined)
       expect(nav.ok).toBe(true)
       if (nav.ok) expect(nav.value.title).toBe("ssrf fixture")
-      // The PAGE issues its OWN fetch to the metadata host and reports the ATTEMPT
-      // synchronously (the eventual blocked/leak outcome depends on a link-local
-      // connect-timeout that can hang for many seconds, so we do not gate on it).
-      // The DOCUMENTED point: the navigate-guard never saw the 169.254 url (the
-      // page issued it, not us), and there is NO leak channel through OUR port —
-      // a leak would only ever surface as page text. (boundary, not a bug)
+
+      // STATE 1 — ATTEMPT. Two independent witnesses, because "the page says
+      // it tried" and "the request left the page" are different claims:
       expect(await waitForReport((log) => log.includes("ssrf=attempt"))).toBe(true)
-      // Crucially: the page never reports a LEAK (the link-local endpoint is
-      // unreachable from the test host) — and even if it did, it would be inert
-      // page text, not a port channel.
+      expect(await waitForMetaHit((p) => p === "/blocked/latest/meta-data/")).toBe(true)
+
+      // STATE 2 — BLOCKED. The metadata service answered 403 with no CORS
+      // header, so the browser rejected the fetch exactly as an interposing
+      // egress guard would, and the page took its `.catch` branch.
+      expect(await waitForReport((log) => log.includes("ssrf=blocked"))).toBe(true)
+      // STATE 3 — LEAKED — must NOT be reported here. This assertion is NOT
+      // vacuous: the very next test drives the same fixture against the
+      // 200-with-credentials route and proves the leak report + the sentinel
+      // in page text really do appear.
       expect(reports).not.toContain("ssrf=leak")
+
       const snap = await P().snapshot(h)
       expect(snap.ok).toBe(true)
       if (snap.ok) {
         expect(snap.value.yaml).toContain("ssrf fixture")
-        // No leaked metadata in the perception. (The leak marker is runtime-
-        // assembled so the inert script source can never trip this assertion.)
+        // No leaked metadata in the perception. The sentinel exists ONLY in
+        // the metadata service's response body — never in the page source —
+        // so its absence is a statement about the response, not about markup.
         expect(snap.value.yaml).not.toContain("LEAK:")
+        expect(snap.value.yaml).not.toContain(META_SENTINEL)
+      }
+    })
+  }, 20000)
+
+  test("PAIRED CONTROL — LEAKED state: when the metadata service answers, the credential DOES reach page text", async () => {
+    if (need() === null) return
+    reports.length = 0
+    metaHits.length = 0
+    // Without this case the blocked test above is a guard with nothing behind
+    // it: on the old fixture the link-local endpoint was unreachable from any
+    // dev box, so `not.toContain("ssrf=leak")` held no matter what the browser
+    // did. Here the leak is REAL and observed, which is what makes the other
+    // test's absence-assertion evidence.
+    await withFreshHandle(async (h) => {
+      const nav = await P().navigate(h, `${origin}/ssrf-page?mode=leak`, undefined)
+      expect(nav.ok).toBe(true)
+      expect(await waitForReport((log) => log.includes("ssrf=attempt"))).toBe(true)
+      expect(await waitForMetaHit((p) => p === "/latest/meta-data/")).toBe(true)
+      expect(await waitForReport((log) => log.includes("ssrf=leak"))).toBe(true)
+      expect(reports).not.toContain("ssrf=blocked")
+      const snap = await P().snapshot(h)
+      expect(snap.ok).toBe(true)
+      if (snap.ok) {
+        // The sentinel only ever existed in the HTTP response body, so seeing
+        // it in the snapshot proves the credential document reached page text
+        // — and therefore that the blocked case's absence really is absence.
+        expect(snap.value.yaml).toContain(META_SENTINEL)
+        expect(snap.value.yaml).toContain("LEAK:")
       }
     })
   }, 20000)

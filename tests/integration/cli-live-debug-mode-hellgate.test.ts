@@ -37,9 +37,15 @@ import { describe, expect, test } from "bun:test"
 import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { bunEntryArgv } from "../_helpers/repo-root"
 
-const REPO_ROOT = "/Users/songmin/quanta-codeagent-v3"
-const CLI_ENTRY = join(REPO_ROOT, "src/apps/cli/index.ts")
+// Repository-RELATIVE entry. The absolute path is resolved at spawn time by
+// walking up from this file to the repository marker
+// (tests/_helpers/repo-root.ts) — a hard-coded checkout path makes
+// `Bun.spawn(["bun", <missing path>, …])` exit non-zero with a message on
+// stderr, and "non-zero exit with a message on stderr" is exactly what several
+// cases below assert as a PASS.
+const CLI_ENTRY = "src/apps/cli/index.ts"
 /** Per-case timeout. Surface-slash dispatch should complete in <500ms in
  *  practice; the cap is loose so a heavily-loaded CI box doesn't flake. */
 const TEST_TIMEOUT_MS = 15_000
@@ -83,7 +89,7 @@ const runCli = async (args: string[], opts: RunOpts = {}): Promise<RunResult> =>
     ...opts.env,
   }
   const proc = Bun.spawn({
-    cmd: ["bun", CLI_ENTRY, ...args],
+    cmd: [...bunEntryArgv(CLI_ENTRY, args)],
     cwd,
     env,
     stdout: "pipe",

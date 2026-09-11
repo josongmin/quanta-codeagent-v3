@@ -6,6 +6,7 @@ import { join } from "node:path"
 import { loadSessionById, saveSessionById } from "@/session/store"
 import type { SavedSession, SavePayload, SessionMeta } from "@/session/types"
 import { __resetRuntimeConfig } from "@/shared/runtime-config"
+import { bunEntryArgv } from "../_helpers/repo-root"
 
 /**
  * HARD subprocess-spawn e2e for the session CLI. Public routing canaries use
@@ -35,9 +36,15 @@ import { __resetRuntimeConfig } from "@/shared/runtime-config"
  * OPENAI_API_KEY) is NOT picked up by `loadEnvFiles`.
  */
 
-const REPO_ROOT = "/Users/songmin/quanta-codeagent-v3"
-const CLI_ENTRY = join(REPO_ROOT, "src/apps/cli/index.ts")
-const SESSION_ENTRY = join(REPO_ROOT, "src/apps/cli/session-command-entry.ts")
+// Entries are resolved from THIS file's location by walking up to the
+// repository marker (tests/_helpers/repo-root.ts), never from a hard-coded
+// checkout path: `Bun.spawn(["bun", <missing path>, …])` exits non-zero with a
+// message on stderr, which is the same observable shape several cases below
+// assert as their PASS. The entries below are repository-RELATIVE; the argv
+// is built (and existence-checked) by `bunEntryArgv`, so a moved entrypoint
+// fails as a moved entrypoint instead of as a plausible CLI error.
+const CLI_ENTRY = "src/apps/cli/index.ts"
+const SESSION_ENTRY = "src/apps/cli/session-command-entry.ts"
 const TEST_TIMEOUT_MS = 15_000
 
 interface RunResult {
@@ -115,7 +122,7 @@ const runCli = async (
     ...opts.env,
   }
   const proc = Bun.spawn({
-    cmd: ["bun", entry, ...args],
+    cmd: [...bunEntryArgv(entry, args)],
     cwd,
     env,
     stdout: "pipe",
