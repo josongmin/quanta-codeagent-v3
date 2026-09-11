@@ -11,6 +11,7 @@ import {
   readCommittedRepositoryLeaseId,
   selectRepositoryLeaseIdentity,
   type TestShardLease,
+  VERIFICATION_LEASE_OWNER_IDENTITY_ENV,
   VERIFICATION_LEASE_OWNER_PID_ENV,
   VERIFICATION_LEASE_TOKEN_ENV,
 } from "./test-shard-lease"
@@ -384,8 +385,12 @@ try {
     cwd: REPO_ROOT,
     env: {
       ...executionEnv,
-      [VERIFICATION_LEASE_TOKEN_ENV]: randomBytes(32).toString("hex"),
+      // The LEASE's token, not a fresh one. A per-child `randomBytes` proved
+      // only that the parent could produce hex — nothing held the value, so
+      // nothing could refuse a value the parent never issued.
+      ...(lease === undefined ? {} : { [VERIFICATION_LEASE_TOKEN_ENV]: lease.token }),
       [VERIFICATION_LEASE_OWNER_PID_ENV]: String(process.pid),
+      [VERIFICATION_LEASE_OWNER_IDENTITY_ENV]: normalizeRepositoryIdentity(identity),
     },
     stdoutFd: 1,
     stderrFd: 2,

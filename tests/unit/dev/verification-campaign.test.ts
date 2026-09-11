@@ -161,6 +161,19 @@ const campaignImportClosure = (): readonly string[] => {
   return [...seen].filter((file) => !FIXTURE_SUPPLIES.has(file)).sort()
 }
 
+/**
+ * What a nested runner must now evaluate to claim an inherited lease.
+ *
+ * P1-5: a live ancestor pid beside 64 hex characters was the whole check, and
+ * nothing held the token — so this expression used to be a one-liner that could
+ * not fail for the right reason. It now performs the owner handshake.
+ */
+const INHERITED_STATE_EXPR =
+  "await m.inheritedTestShardLeaseState({ env: process.env, confirmToken: (t) => " +
+  "m.confirmLeaseToken(m.testShardLeasePort(m.normalizeRepositoryIdentity(" +
+  "process.env.QUANTA_VERIFICATION_LEASE_IDENTITY ?? '')), " +
+  "m.normalizeRepositoryIdentity(process.env.QUANTA_VERIFICATION_LEASE_IDENTITY ?? ''), t) })"
+
 const copyCampaignOwner = (root: string): string => {
   mkdirSync(join(root, "tools", "dev"), { recursive: true })
   for (const file of CAMPAIGN_MODULES) {
@@ -296,7 +309,10 @@ describe("whole verification campaign lease", () => {
         process.execPath,
         "-e",
         `const m = await import(${JSON.stringify(join(root, "tools", "dev", "test-shard-lease.ts"))}); ` +
-          `${publishMarker(firstMarker, "m.inheritedTestShardLeaseState(process.env)")} ` +
+          // The real handshake, in a real child, against the real owner's
+          // listener: the child asks the campaign whether it issued the token
+          // it was handed. Inventing one here would now be `invalid`.
+          `${publishMarker(firstMarker, INHERITED_STATE_EXPR)} ` +
           "await Bun.sleep(300)",
       ],
       cwd: root,

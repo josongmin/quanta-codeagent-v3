@@ -1,7 +1,9 @@
+import { randomBytes } from "node:crypto"
 import { readFileSync } from "node:fs"
 import { createConnection } from "node:net"
 import { join } from "node:path"
 import { clearLeaseQuarantine, quarantineVerdict, readLeaseQuarantine } from "./lease-quarantine"
+import { createProcessObserver } from "./process-observer"
 
 const LEASE_HOST = "127.0.0.1"
 const LEASE_PORT_BASE = 42_000
@@ -10,9 +12,24 @@ const LEASE_PROBE_TIMEOUT_MS = 500
 const LEASE_PROTOCOL = "quanta-verification-lease-v1"
 export const VERIFICATION_LEASE_TOKEN_ENV = "QUANTA_VERIFICATION_LEASE_TOKEN"
 export const VERIFICATION_LEASE_OWNER_PID_ENV = "QUANTA_VERIFICATION_LEASE_OWNER_PID"
+/**
+ * The repository identity the owner's lease is keyed on.
+ *
+ * A child cannot derive the owner's port without it: the identity comes from a
+ * git remote the child may not resolve the same way, and guessing wrong turns a
+ * handshake into a silent "no".
+ */
+export const VERIFICATION_LEASE_OWNER_IDENTITY_ENV = "QUANTA_VERIFICATION_LEASE_IDENTITY"
 
 export interface TestShardLease {
   readonly port: number
+  /**
+   * The nonce this lease ISSUED, held by its listener.
+   *
+   * A child proves inheritance by having the owner confirm it, so the value
+   * must come from here and never from a caller's own `randomBytes`.
+   */
+  readonly token: string
   release(): void
 }
 
@@ -101,45 +118,83 @@ export type InheritedLeaseState = "absent" | "valid" | "invalid"
 
 type ParentPid = (pid: number) => number | undefined
 
-const systemParentPid: ParentPid = (pid) => {
-  // The lease owner is normally the direct parent of a shard runner. Avoid a
-  // subprocess and its load-sensitive failure mode on that production path;
-  // `ps` is only needed while walking beyond the current process.
-  if (pid === process.pid) {
-    return Number.isSafeInteger(process.ppid) && process.ppid > 0 ? process.ppid : undefined
+/**
+ * Ancestors from ONE bounded snapshot, not a `ps` per hop.
+ *
+ * The predecessor ran `Bun.spawnSync(["ps", …])` with no timeout for every
+ * step beyond the current process — the same unbounded synchronous observation
+ * this ticket removed from the watchdog and the drain, on a path that decides
+ * whether a runner may skip lease acquisition. A wedged `ps` here hangs the
+ * decision; a slow one makes it load-sensitive.
+ */
+const snapshotParentPid = (): ParentPid => {
+  let parents: ReadonlyMap<number, number> | undefined
+  return (pid) => {
+    if (pid === process.pid) {
+      return Number.isSafeInteger(process.ppid) && process.ppid > 0 ? process.ppid : undefined
+    }
+    if (parents === undefined) {
+      const snapshot = createProcessObserver().snapshot()
+      parents = new Map(
+        snapshot.kind === "ok" ? snapshot.rows.map((row) => [row.pid, row.ppid] as const) : [],
+      )
+    }
+    const ppid = parents.get(pid)
+    return ppid !== undefined && ppid > 0 ? ppid : undefined
   }
-  const result = Bun.spawnSync(["ps", "-o", "ppid=", "-p", String(pid)], {
-    stdout: "pipe",
-    stderr: "ignore",
-  })
-  if (result.exitCode !== 0) return undefined
-  const parsed = Number.parseInt(result.stdout.toString().trim(), 10)
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined
+}
+
+export interface InheritedLeaseInput {
+  readonly env: NodeJS.ProcessEnv
+  readonly currentPid?: number
+  readonly parentPid?: ParentPid
+  /**
+   * Ask the OWNER whether it issued this token. Fails closed on any error.
+   *
+   * Injected so the handshake is testable without binding a real port, and
+   * REQUIRED in production: without it the token is only a shape.
+   */
+  readonly confirmToken?: (token: string) => Promise<boolean>
 }
 
 /**
- * A nested runner may skip reacquisition only when the outer campaign process
- * is still in its live ancestor chain. A stray/copied env value fails closed.
+ * A nested runner may skip reacquisition only when the outer campaign is still
+ * in its live ancestor chain AND still vouches for the token it was handed.
+ *
+ * The ancestor walk alone was not a proof of anything. The token was checked
+ * against `/^[a-f0-9]{64}$/` and nothing held the value, so any child under a
+ * live campaign could mint its own and skip acquisition, and a token kept from
+ * an earlier campaign replayed against the next one. The handshake makes the
+ * live owner the authority: a fabricated token was never issued, a replayed one
+ * belongs to a listener that is gone, and a rebound lane has a different token.
  */
-export const inheritedTestShardLeaseState = (
-  env: NodeJS.ProcessEnv,
-  currentPid = process.pid,
-  parentPid: ParentPid = systemParentPid,
-): InheritedLeaseState => {
+export const inheritedTestShardLeaseState = async (
+  input: InheritedLeaseInput,
+): Promise<InheritedLeaseState> => {
+  const { env } = input
   const token = env[VERIFICATION_LEASE_TOKEN_ENV]
   const ownerText = env[VERIFICATION_LEASE_OWNER_PID_ENV]
   if (token === undefined && ownerText === undefined) return "absent"
   if (!/^[a-f0-9]{64}$/.test(token ?? "")) return "invalid"
   const owner = Number.parseInt(ownerText ?? "", 10)
   if (!Number.isSafeInteger(owner) || owner <= 1) return "invalid"
-  let cursor = currentPid
+  const parentPid = input.parentPid ?? snapshotParentPid()
+  let cursor = input.currentPid ?? process.pid
   const visited = new Set<number>()
+  let ancestral = false
   while (cursor > 1 && !visited.has(cursor)) {
-    if (cursor === owner) return "valid"
+    if (cursor === owner) {
+      ancestral = true
+      break
+    }
     visited.add(cursor)
     cursor = parentPid(cursor) ?? 0
   }
-  return "invalid"
+  if (!ancestral) return "invalid"
+  // A live ancestor is necessary and NOT sufficient: pids are recycled, and a
+  // child of the right process can still be holding a token nobody issued.
+  if (input.confirmToken === undefined) return "invalid"
+  return (await input.confirmToken(token as string)) ? "valid" : "invalid"
 }
 
 /** Normalize SSH aliases and HTTPS remotes to the same owner/repository key. */
@@ -169,6 +224,25 @@ const leaseRequest = (digest: string): string => `${LEASE_PROTOCOL}?${digest}\n`
 const leaseResponse = (digest: string): string => `${LEASE_PROTOCOL}!${digest}\n`
 
 /**
+ * A nested runner proves inheritance by asking the OWNER, over the owner's own
+ * listener, whether it issued the token the child was handed.
+ *
+ * `inheritedTestShardLeaseState` used to accept any 64 hex characters beside a
+ * live ancestor pid. The campaign generated a fresh `randomBytes(32)` per child
+ * and nothing anywhere held the value, so the token proved only that somebody
+ * could produce hex — a child could mint its own and skip acquisition entirely,
+ * and a token kept from a previous campaign replayed against the next one.
+ *
+ * Binding it to the LIVE listener closes all three: a fabricated token was
+ * never issued, a replayed one belongs to a listener that is gone, and a
+ * rebound lane has a different token because the new owner minted it.
+ */
+const tokenRequest = (digest: string, token: string): string =>
+  `${LEASE_PROTOCOL}?token:${digest}:${token}\n`
+const TOKEN_OK = `${LEASE_PROTOCOL}!token-ok\n`
+const TOKEN_NO = `${LEASE_PROTOCOL}!token-no\n`
+
+/**
  * The listener answers an identity handshake so a contender can distinguish
  * "this repository's verification lane is busy" from "an unrelated service
  * happens to sit on the hashed port" — the latter previously stalled a
@@ -177,21 +251,34 @@ const leaseResponse = (digest: string): string => `${LEASE_PROTOCOL}!${digest}\n
 const tryListen = (
   port: number,
   digest: string,
-): Bun.TCPSocketListener<{ readonly digest: string; buffer: string }> | undefined => {
+  token: string,
+):
+  | Bun.TCPSocketListener<{ readonly digest: string; readonly token: string; buffer: string }>
+  | undefined => {
   try {
     return Bun.listen({
       hostname: LEASE_HOST,
       port,
-      data: { digest, buffer: "" },
+      data: { digest, token, buffer: "" },
       socket: {
         open(socket) {
-          socket.data = { digest: socket.data.digest, buffer: "" }
+          socket.data = { digest: socket.data.digest, token: socket.data.token, buffer: "" }
         },
         data(socket, data) {
           socket.data.buffer += new TextDecoder().decode(data)
           if (!socket.data.buffer.includes("\n")) return
           if (socket.data.buffer === leaseRequest(socket.data.digest)) {
             socket.end(leaseResponse(socket.data.digest))
+            return
+          }
+          // Constant answer either way: the challenge says yes or no and never
+          // echoes the held token, so a caller cannot walk it out of the owner.
+          if (socket.data.buffer.startsWith(`${LEASE_PROTOCOL}?token:`)) {
+            socket.end(
+              socket.data.buffer === tokenRequest(socket.data.digest, socket.data.token)
+                ? TOKEN_OK
+                : TOKEN_NO,
+            )
             return
           }
           socket.end(`${LEASE_PROTOCOL}!collision\n`)
@@ -202,6 +289,35 @@ const tryListen = (
     return undefined
   }
 }
+
+/** Ask the owner whether it issued this token. Never throws; a failure is `false`. */
+export const confirmLeaseToken = (
+  port: number,
+  identity: string,
+  token: string,
+): Promise<boolean> =>
+  new Promise((resolve) => {
+    const digest = leaseDigest(identity)
+    let settled = false
+    let response = ""
+    const finish = (ok: boolean): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      socket.destroy()
+      resolve(ok)
+    }
+    const socket = createConnection({ host: LEASE_HOST, port })
+    const timer = setTimeout(() => finish(false), LEASE_PROBE_TIMEOUT_MS)
+    socket.setEncoding("utf8")
+    socket.on("connect", () => socket.write(tokenRequest(digest, token)))
+    socket.on("data", (chunk: string) => {
+      response += chunk
+      if (response.includes("\n")) finish(response === TOKEN_OK)
+    })
+    socket.on("error", () => finish(false))
+    socket.on("end", () => finish(response === TOKEN_OK))
+  })
 
 type LeaseProbe = "valid" | "absent" | "occupied" | "collision"
 
@@ -257,10 +373,12 @@ const probeLeaseOrThrowOnCollision = async (port: number, digest: string): Promi
 const leaseFromListener = (
   port: number,
   listener: ReturnType<typeof tryListen> & object,
+  token: string,
 ): TestShardLease => {
   let released = false
   return {
     port,
+    token,
     release() {
       if (released) return
       released = true
@@ -352,8 +470,9 @@ const acquireRawTestShardLease = async (
     // accepted, not after.
     const blocked = quarantineBlock(identity, options)
     if (blocked === undefined) {
-      const listener = tryListen(port, digest)
-      if (listener !== undefined) return leaseFromListener(port, listener)
+      const token = randomBytes(32).toString("hex")
+      const listener = tryListen(port, digest, token)
+      if (listener !== undefined) return leaseFromListener(port, listener, token)
     } else if (Date.now() >= nextHeartbeatAt + startedAt) {
       options.onQuarantineWait?.(blocked)
     }
@@ -412,8 +531,12 @@ const slotIdentity = (scope: string, key: string, slot: string): string =>
 /** Bind without waiting. `undefined` means somebody else holds it right now. */
 const tryHoldLease = (identity: string): TestShardLease | undefined => {
   const port = testShardLeasePort(identity)
-  const listener = tryListen(port, leaseDigest(identity))
-  return listener === undefined ? undefined : leaseFromListener(port, listener)
+  // Keyed resource leases issue a token too, so the shape is uniform; nothing
+  // inherits one today, which is exactly why it must not be a special case
+  // waiting to be added without a listener that can confirm it.
+  const token = randomBytes(32).toString("hex")
+  const listener = tryListen(port, leaseDigest(identity), token)
+  return listener === undefined ? undefined : leaseFromListener(port, listener, token)
 }
 
 interface KeyAcquisition {

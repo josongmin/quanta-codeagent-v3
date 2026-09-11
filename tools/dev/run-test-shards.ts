@@ -42,11 +42,14 @@ import {
 } from "./test-shard-discovery"
 import {
   acquireTestShardLease,
+  confirmLeaseToken,
   inheritedTestShardLeaseState,
   normalizeRepositoryIdentity,
   readCommittedRepositoryLeaseId,
   selectRepositoryLeaseIdentity,
   type TestShardLease,
+  testShardLeasePort,
+  VERIFICATION_LEASE_OWNER_IDENTITY_ENV,
 } from "./test-shard-lease"
 import {
   describeProcessGroup,
@@ -1177,7 +1180,18 @@ const main = async (): Promise<void> => {
   // repository lane for this whole verification run. A live ancestor-owned
   // token means "do not reacquire" — reacquiring would deadlock against the
   // wrapper's own lease. A token that fails validation fails CLOSED.
-  const inheritedLease = inheritedTestShardLeaseState(process.env)
+  const inheritedLease = await inheritedTestShardLeaseState({
+    env: process.env,
+    // The handshake, not just the shape: ask the owner's own listener whether
+    // it issued this token. Without this the check was "any 64 hex characters
+    // beside a live ancestor pid", which a child can satisfy by inventing one.
+    confirmToken: async (token) => {
+      const raw = process.env[VERIFICATION_LEASE_OWNER_IDENTITY_ENV]
+      if (raw === undefined || raw === "") return false
+      const identity = normalizeRepositoryIdentity(raw)
+      return await confirmLeaseToken(testShardLeasePort(identity), identity, token)
+    },
+  })
   if (inheritedLease === "invalid") {
     throw new Error(
       "[test:shards] invalid inherited verification lease; refusing to bypass serialization",

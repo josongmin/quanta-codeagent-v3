@@ -251,9 +251,12 @@ describe("quarantine wiring", () => {
   test("acquisition consults the quarantine before accepting a bind", () => {
     const lease = source("tools/dev/test-shard-lease.ts")
     expect(lease).toContain("quarantineBlock(identity, options)")
-    // Checked BEFORE `tryListen`, because a free PORT is not a free LANE.
+    // Checked BEFORE the bind, because a free PORT is not a free LANE.
+    // Matched on the call NAME, not its argument list: pinning
+    // `tryListen(port, digest)` broke the moment the listener gained a token
+    // parameter, which is the brittleness this file criticises elsewhere.
     const check = lease.indexOf("quarantineBlock(identity, options)")
-    const bind = lease.indexOf("tryListen(port, digest)", check)
+    const bind = lease.indexOf("tryListen(", check)
     expect(check).toBeGreaterThan(0)
     expect(bind).toBeGreaterThan(check)
   })

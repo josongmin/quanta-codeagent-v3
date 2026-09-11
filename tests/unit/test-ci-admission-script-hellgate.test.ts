@@ -94,8 +94,35 @@ const scheduleCancelsPeersAndReapsAll = (source: string): boolean =>
   /resourceClassesOverlap\s*\(/.test(source) &&
   !/await\s+Promise\.all\s*\(/.test(source)
 
+/**
+ * The LAST `finally { … }` body, by brace matching.
+ *
+ * Was `/finally\s*\{([\s\S]*?)\}\s*\}/` — non-greedy, so it stopped at the
+ * first `}` followed by `}`. Adding a nested `if` inside the block truncated
+ * the captured body before `lease?.release()` and this guard reported "the
+ * runner does not drain before releasing" about a runner that does. A
+ * text-shaped guard that a correct edit turns red is a guard that gets
+ * relaxed; this one counts braces instead.
+ */
+const lastFinallyBody = (source: string): string | undefined => {
+  const keyword = source.lastIndexOf("finally")
+  if (keyword < 0) return undefined
+  const open = source.indexOf("{", keyword)
+  if (open < 0) return undefined
+  let depth = 0
+  for (let i = open; i < source.length; i += 1) {
+    const ch = source[i]
+    if (ch === "{") depth += 1
+    else if (ch === "}") {
+      depth -= 1
+      if (depth === 0) return source.slice(open + 1, i)
+    }
+  }
+  return undefined
+}
+
 const mainDrainsBeforeRelease = (source: string): boolean => {
-  const finallyBlock = /finally\s*\{([\s\S]*?)\}\s*\}/.exec(source)?.[1]
+  const finallyBlock = lastFinallyBody(source)
   if (finallyBlock === undefined) return false
   const drainAt = finallyBlock.indexOf("await drainCampaign(")
   const releaseAt = finallyBlock.indexOf("lease?.release()")
@@ -304,7 +331,14 @@ describe("test:ci admission gate", () => {
     // rewriting the whole store on every chunk completion.
     expect(shardRunner).toContain("journal.record(")
     expect(shardRunner).toContain("journal.commit()")
-    expect(shardRunner).toContain("result.executedFiles === plan.files.length")
+    // The chunk's execution is proved by the EXACT file set, not by a count.
+    // This marker used to pin `result.executedFiles === plan.files.length` —
+    // the very comparison P0-1 removed, so the guard was holding the defect in
+    // place. Asserts the current property instead, and that the count cannot
+    // come back.
+    expect(shardRunner).toContain("executedFileSetVerdict(")
+    expect(shardRunner).toContain("EXECUTED-SET MISMATCH")
+    expect(shardRunner).not.toContain("result.executedFiles === plan.files.length")
     expect(shardRunner).toContain("aborting remaining shards")
     expect(shardRunner).not.toContain(["--shard=", "{shard}"].join("$"))
     expect(shardRunner).toContain("checkout changed during run")

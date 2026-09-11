@@ -4,6 +4,7 @@ import {
   acquireKeyedTestShardLeases,
   acquireTestShardLease,
   canonicalLeaseRequests,
+  confirmLeaseToken,
   inheritedTestShardLeaseState,
   normalizeRepositoryIdentity,
   readCommittedRepositoryLeaseId,
@@ -107,36 +108,146 @@ describe("full-suite repository lease", () => {
     third.release()
   })
 
-  test("only a live ancestor-owned campaign lease may suppress reacquisition", () => {
-    const valid = inheritedTestShardLeaseState(
-      {
-        QUANTA_VERIFICATION_LEASE_TOKEN: "a".repeat(64),
-        QUANTA_VERIFICATION_LEASE_OWNER_PID: "42",
-      },
-      100,
-      (pid) => (pid === 100 ? 42 : undefined),
-    )
-    expect(valid).toBe("valid")
-
-    // Owner pid NOT in the ancestor chain: a copied/stray env fails closed.
-    expect(
-      inheritedTestShardLeaseState(
-        {
-          QUANTA_VERIFICATION_LEASE_TOKEN: "a".repeat(64),
-          QUANTA_VERIFICATION_LEASE_OWNER_PID: "77",
-        },
-        100,
-        (pid) => (pid === 100 ? 42 : undefined),
-      ),
-    ).toBe("invalid")
-    // Malformed token with an owner pid present is invalid, never absent.
-    expect(
-      inheritedTestShardLeaseState({ QUANTA_VERIFICATION_LEASE_OWNER_PID: "42" }, 100, (pid) =>
-        pid === 100 ? 42 : undefined,
-      ),
-    ).toBe("invalid")
-    expect(inheritedTestShardLeaseState({}, 100, () => undefined)).toBe("absent")
+  /**
+   * TVH P1-5. The token was checked against `/^[a-f0-9]{64}$/` and NOTHING
+   * held the value — the campaign minted a fresh `randomBytes(32)` per child
+   * and threw it into the env. So the check proved that somebody could produce
+   * hex: a child under a live campaign could invent its own token and skip
+   * acquisition entirely, and a token kept from an earlier campaign replayed
+   * against the next one.
+   *
+   * The owner's listener now issues the token and answers for it.
+   */
+  const chain = (pid: number): number | undefined => (pid === 100 ? 42 : undefined)
+  const TOKEN = "a".repeat(64)
+  const env = (token: string | undefined, owner: string | undefined) => ({
+    ...(token === undefined ? {} : { QUANTA_VERIFICATION_LEASE_TOKEN: token }),
+    ...(owner === undefined ? {} : { QUANTA_VERIFICATION_LEASE_OWNER_PID: owner }),
   })
+
+  test("a live ancestor is necessary and NOT sufficient", async () => {
+    // The whole ancestor chain is satisfied in every arm here; only the
+    // owner's answer differs, so the handshake provably decides.
+    expect(
+      await inheritedTestShardLeaseState({
+        env: env(TOKEN, "42"),
+        currentPid: 100,
+        parentPid: chain,
+        confirmToken: async () => true,
+      }),
+    ).toBe("valid")
+
+    expect(
+      await inheritedTestShardLeaseState({
+        env: env(TOKEN, "42"),
+        currentPid: 100,
+        parentPid: chain,
+        confirmToken: async () => false,
+      }),
+    ).toBe("invalid")
+  })
+
+  test("a token the owner never issued is refused", async () => {
+    // A fabricated token is well-formed hex under a genuine ancestor — the
+    // exact shape the predecessor accepted.
+    const asked: string[] = []
+    const verdict = await inheritedTestShardLeaseState({
+      env: env("f".repeat(64), "42"),
+      currentPid: 100,
+      parentPid: chain,
+      confirmToken: async (token) => {
+        asked.push(token)
+        return token === TOKEN
+      },
+    })
+    expect(verdict).toBe("invalid")
+    expect(asked).toEqual(["f".repeat(64)])
+  })
+
+  test("no verifier at all is INVALID, not a free pass", async () => {
+    // Fail closed: a caller that forgets the handshake must not get the
+    // pre-fix behaviour back by omission.
+    expect(
+      await inheritedTestShardLeaseState({
+        env: env(TOKEN, "42"),
+        currentPid: 100,
+        parentPid: chain,
+      }),
+    ).toBe("invalid")
+  })
+
+  test("the ancestor chain is still required, and is checked FIRST", async () => {
+    // Owner pid not in the chain: a copied env fails closed without the
+    // handshake even being attempted, so a stray value cannot probe the lane.
+    let asked = 0
+    expect(
+      await inheritedTestShardLeaseState({
+        env: env(TOKEN, "77"),
+        currentPid: 100,
+        parentPid: chain,
+        confirmToken: async () => {
+          asked += 1
+          return true
+        },
+      }),
+    ).toBe("invalid")
+    expect(asked).toBe(0)
+  })
+
+  test("malformed and absent stay distinguishable", async () => {
+    expect(
+      await inheritedTestShardLeaseState({
+        env: env(undefined, "42"),
+        currentPid: 100,
+        parentPid: chain,
+        confirmToken: async () => true,
+      }),
+    ).toBe("invalid")
+    expect(
+      await inheritedTestShardLeaseState({
+        env: {},
+        currentPid: 100,
+        parentPid: () => undefined,
+        confirmToken: async () => true,
+      }),
+    ).toBe("absent")
+  })
+
+  test("END TO END — the real listener answers for its own token only", async () => {
+    const identity = `lease-token-self-test-${process.pid}-${Date.now()}`
+    const normalized = normalizeRepositoryIdentity(identity)
+    const port = testShardLeasePort(normalized)
+    const lease = await acquireTestShardLease({ identity, waitMs: 5_000, pollMs: 10 })
+    try {
+      expect(lease.token).toMatch(/^[0-9a-f]{64}$/)
+      expect(await confirmLeaseToken(port, normalized, lease.token)).toBe(true)
+      // A different well-formed token, same live owner: refused.
+      expect(await confirmLeaseToken(port, normalized, "b".repeat(64))).toBe(false)
+    } finally {
+      lease.release()
+    }
+    // REPLAY: the same token against a lane whose owner is gone.
+    expect(await confirmLeaseToken(port, normalized, lease.token)).toBe(false)
+  }, 20_000)
+
+  test("a REBOUND lane issues a different token, so the old one stops working", async () => {
+    const identity = `lease-rebind-self-test-${process.pid}-${Date.now()}`
+    const normalized = normalizeRepositoryIdentity(identity)
+    const port = testShardLeasePort(normalized)
+    const first = await acquireTestShardLease({ identity, waitMs: 5_000, pollMs: 10 })
+    const firstToken = first.token
+    first.release()
+    const second = await acquireTestShardLease({ identity, waitMs: 5_000, pollMs: 10 })
+    try {
+      expect(second.token).not.toBe(firstToken)
+      expect(await confirmLeaseToken(port, normalized, firstToken)).toBe(false)
+      // ANTI-VACUITY: the CURRENT token still works, so "always false" is not
+      // what these arms are measuring.
+      expect(await confirmLeaseToken(port, normalized, second.token)).toBe(true)
+    } finally {
+      second.release()
+    }
+  }, 20_000)
 
   test("an unrelated listener on the hashed port fails fast as a collision", async () => {
     const identity = `lease-collision-self-test-${process.pid}-${Date.now()}`
