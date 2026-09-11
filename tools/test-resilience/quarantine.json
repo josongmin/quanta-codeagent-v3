@@ -1,12 +1,19 @@
 {
-  "_comment": "Known-flaky tests under the full parallel suite (2000+ files). Each PASSES in true isolation (-t) — the flake is parallelism/resource contention, NOT a code defect. maxCount is a one-directional ratchet: lower it as flakes are structurally fixed (replay seam for external-server, test-isolation for timing). NEVER raise without a recorded reason. HISTORY: started at 4 (2 LSP external-server + 1 node-repl timing); the 2 LSP entries were RETIRED by SOTA ① (real rust-analyzer tests gated behind QUANTA_REAL_TOOLCHAIN_E2E serial lane + deterministic replay coverage in evidence-lsp-bridge-replay-deterministic.test.ts) — ratchet lowered 4 -> 2. Then bench-closure-prompt-wiring-hellgate ('chaMultisiteSteer …') was RETIRED (aug-10) by threading localize-phase as an explicit postureOverride/stateOverride param into buildConfig instead of mutating the process-GLOBAL QUANTA_BENCH_LOCALIZE_PHASE knob via withEnv — the test now needs no env mutation, so the cross-file parallel bleed is gone at the source — ratchet lowered 2 -> 1.",
+  "_comment": "Known-flaky tests under the full parallel suite. Each PASSES in true isolation — the hypothesis is parallelism/resource contention, NOT a code defect. maxCount is a one-directional ratchet: lower it as flakes are structurally fixed. NEVER raise without a recorded reason. SCHEMA: every entry MUST carry owner, issue, firstSeenSha, fingerprint, resourceClaim, expiresAt and criticality; tools/test-resilience/quarantine.ts validates the (file, name) pair against the test names actually DECLARED in that file (AST), rejects an entry that matches zero or more than one live test, and turns an entry RED on or after its expiresAt. HISTORY: started at 4 (2 LSP external-server + 1 node-repl timing); the 2 LSP entries were RETIRED by SOTA (real rust-analyzer tests gated behind QUANTA_REAL_TOOLCHAIN_E2E serial lane + deterministic replay coverage in evidence-lsp-bridge-replay-deterministic.test.ts) — ratchet lowered 4 -> 2. Then bench-closure-prompt-wiring-hellgate ('chaMultisiteSteer ...') was RETIRED (aug-10) by threading localize-phase as an explicit postureOverride/stateOverride param into buildConfig instead of mutating the process-GLOBAL QUANTA_BENCH_LOCALIZE_PHASE knob via withEnv — ratchet lowered 2 -> 1. TVH-15 (sep-12) added the required provenance fields to the surviving entry. FINGERPRINT PROVENANCE: the one live fingerprint is HAND-RECORDED from the prose description of the 2026-06-16 observation, because no failure artifact existed when the entry was written; it is replaced by the artifact's own fingerprint the next time the test fails under the shard runner.",
   "maxCount": 1,
   "entries": [
     {
       "file": "tests/unit/runtime/node-repl-timeout-reap-hellgate.test.ts",
       "name": "a healthy exec still completes",
       "resourceClass": "timing",
-      "reason": "intra-file interference: the sibling timeout-reap tests spawn/kill real node children, pressuring the real `node -i` REPL stdout flush so the best-effort content capture (line 95) loses the race. Passes with -t isolation (4/4). Fix path: per-test child isolation or make content check non-fatal (its own comment says ok:true+reusability is the deterministic proof)."
+      "owner": "t <t@t.t>",
+      "issue": "TVH-15",
+      "firstSeenSha": "021359b826d36101bbbbd5728c16933f6f637907",
+      "fingerprint": "b99cde0e83da6dcaa6ccf92b54c3d66883a9d94dea697a57aa7498a8007c7691",
+      "resourceClaim": "exclusive:child-process-reaper",
+      "expiresAt": "2026-12-12",
+      "criticality": "non-blocking",
+      "reason": "intra-file interference: the sibling timeout-reap tests spawn/kill real node children, pressuring the real `node -i` REPL stdout flush so the best-effort content capture (line 95) loses the race. Passes with -t isolation (4/4). Fix path: per-test child isolation or make the content check non-fatal (its own comment says ok:true+reusability is the deterministic proof)."
     }
   ]
 }

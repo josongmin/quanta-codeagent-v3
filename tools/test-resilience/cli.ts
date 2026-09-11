@@ -1,207 +1,335 @@
 #!/usr/bin/env bun
 // biome-ignore-all lint/suspicious/noConsole: CLI tool — plain console.log/console.error is the intended IO surface.
 /**
- * Flake-resilient test runner (SOTA ④: auto-detect + quarantine).
+ * Flake DIAGNOSIS — advisory only, and structurally incapable of producing a PASS.
  *
- * The full parallel suite (2000+ files) intermittently flakes a handful of
- * resource-heavy tests (real rust-analyzer thundering-herd, child-process
- * reaper interference) that ALL pass in true isolation. Retrying blindly hides
- * real bugs; ignoring flakes erodes the signal. This runner does neither:
+ * # What changed and why
  *
- *   1. run the suite once, parse the failures
- *   2. re-run EACH failure in true isolation (`bun test <file> -t "<leaf>"`)
- *   3. classify: isolated-pass ⇒ FLAKE, isolated-fail ⇒ REAL
- *   4. REAL failures block (exit 1). FLAKES are checked against the quarantine
- *      ledger — a KNOWN flake passes; an UNKNOWN flake blocks (exit 1) so new
- *      flakiness can never slip in silently.
- *   5. the ledger count is a one-directional ratchet (`maxCount`).
+ * This used to be `run`: it executed `bun test tests/unit tests/integration`
+ * itself, parsed the failures, and re-ran each one. Three defects, all of them
+ * about AUTHORITY rather than about flakes:
+ *
+ *   1. It was a second broad-suite executor. It bypassed the managed shard
+ *      runner's tier selection, resource policy, worker HOMEs, cache, lease and
+ *      receipts — so its verdict answered for a run nobody had admitted.
+ *   2. Its per-failure isolation amplified: N failures became up to 2N children
+ *      (see `diagnose.ts`).
+ *   3. Its retry result sat next to a `return 0`, one edit away from being a
+ *      green.
+ *
+ * Now:
+ *
+ *   - `diagnose` CONSUMES `quanta.test-failure-attempt.v1`, written by whoever
+ *     holds the lease. **There is no fallback.** Without the artifact the tool
+ *     exits 2. A fallback is how the second authority came back last time.
+ *   - Diagnosis is deduplicated, batched one-child-per-file, and bounded by a
+ *     global child/time budget.
+ *   - **`diagnose` can never exit 0.** 0 is the universal success code, so the
+ *     only way a diagnostic result can be mistaken for a required PASS is if it
+ *     can produce one. It cannot: the exit vocabulary is 1 (confirmed-real
+ *     present), 3 (no confirmed-real — still not a pass) and 2 (fail-closed).
+ *     `tests/unit/tools/test-resilience-diagnosis-hellgate.test.ts` pins it.
+ *   - The report schema is `quanta.flake-diagnosis.v1`, which no gate reads.
  *
  * Commands:
- *   run [paths...]      run + isolate-classify (default paths: tests/unit tests/integration)
- *   quarantine-check    static ratchet: ledger entry count <= maxCount
+ *   diagnose --from-artifact <path> [--out <path>] [--first-failure-out <path>]
+ *   quarantine-check
  *
- * Exit: 0 = clean or only-known-flakes; 1 = real failure / new flake / ratchet breach; 2 = usage.
+ * Exit: 1 = confirmed-real failures; 3 = diagnosis without a confirmed-real;
+ *       2 = usage / missing / invalid artifact (fail closed); 0 = never.
  */
+
+import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { mayQuarantine, preserveFirstFailure } from "../dev/verification-first-failure"
+import { runBoundedChild } from "./bounded-child"
 import {
-  isQuarantined,
-  type ParsedFailure,
-  parseBunTestOutput,
-  type QuarantineLedger,
-} from "./parse"
+  type ChildEvidence,
+  classifyRecord,
+  DEFAULT_BUDGET,
+  type DiagnosisReport,
+  type DiagnosisRow,
+  outcomeCounts,
+  planDiagnosis,
+} from "./diagnose"
+import {
+  type FailureAttemptArtifact,
+  type FailureRecord,
+  parseFailureArtifact,
+  replayCommand,
+} from "./failure-artifact"
+import { parseJunitCases, selectorMatchedNothing } from "./junit"
+import type { QuarantineLedgerV2 } from "./quarantine"
+import { validateQuarantineLedger } from "./quarantine"
 
+const REPO_ROOT = join(import.meta.dir, "..", "..")
 const LEDGER_PATH = join(import.meta.dir, "quarantine.json")
 
-const loadLedger = async (): Promise<QuarantineLedger> => {
-  const raw = JSON.parse(await Bun.file(LEDGER_PATH).text()) as QuarantineLedger & {
-    _comment?: string
-  }
+const EXIT_CONFIRMED_REAL = 1
+const EXIT_FAIL_CLOSED = 2
+const EXIT_NO_CONFIRMED_REAL = 3
+
+const flag = (name: string): string | undefined => {
+  const index = process.argv.indexOf(name)
+  return index === -1 ? undefined : process.argv[index + 1]
+}
+
+const loadLedger = (): QuarantineLedgerV2 => {
+  const raw = JSON.parse(readFileSync(LEDGER_PATH, "utf8")) as QuarantineLedgerV2
   return { maxCount: raw.maxCount, entries: raw.entries }
 }
 
-const runBunTest = async (args: string[]): Promise<{ output: string; exitCode: number }> => {
-  const proc = Bun.spawn(["bun", "test", ...args], {
-    stdout: "pipe",
-    stderr: "pipe",
+/** Run ONE diagnostic child for a whole file's worth of failures. */
+const diagnoseBatch = async (
+  file: string,
+  selector: string,
+  perChildMs: number,
+): Promise<ChildEvidence> => {
+  const junitPath = join(
+    process.env.TMPDIR ?? "/tmp",
+    `flake-diagnosis-${process.pid}-${crypto.randomUUID()}.xml`,
+  )
+  const outcome = await runBoundedChild({
+    cmd: [
+      "bun",
+      "test",
+      file,
+      "-t",
+      selector,
+      "--reporter=junit",
+      `--reporter-outfile=${junitPath}`,
+    ],
+    cwd: REPO_ROOT,
     env: process.env,
+    limits: { totalMs: perChildMs, inactivityMs: Math.min(perChildMs, 30_000) },
   })
-  const [out, err] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  const exitCode = await proc.exited
-  return { output: `${out}\n${err}`, exitCode }
+  const combined = `${outcome.stdout}\n${outcome.stderr}`
+  if (outcome.survivors !== 0) {
+    console.error(
+      `[diagnose] WARN ${file}: survivors=${outcome.survivors ?? "unknown"} after the kill sequence`,
+    )
+  }
+  // "completed" means the CHILD gave a verdict. A deadline, a cancellation or a
+  // failed spawn is infrastructure, and a test must never be classified from it.
+  if (outcome.status !== "passed" && outcome.status !== "failed") {
+    console.error(
+      `[diagnose] ${file}: child stopped as ${outcome.status}` +
+        `${outcome.deadline === undefined ? "" : ` (${outcome.deadline} deadline)`} ` +
+        `after ${outcome.elapsedMs}ms of a declared ${outcome.deadlineBudgetMs}ms`,
+    )
+    return { completed: false, selectorMatchedNothing: false, statusByTestId: new Map() }
+  }
+  if (selectorMatchedNothing(combined)) {
+    return { completed: true, selectorMatchedNothing: true, statusByTestId: new Map() }
+  }
+  let xml = ""
+  try {
+    xml = readFileSync(junitPath, "utf8")
+  } catch {
+    // No JUnit file from a child that exited: a compile error or a crash before
+    // the reporter flushed. That is infrastructure, not a test verdict.
+    return { completed: false, selectorMatchedNothing: false, statusByTestId: new Map() }
+  }
+  const statusByTestId = new Map<string, "pass" | "fail" | "skip">()
+  for (const testCase of parseJunitCases(xml)) statusByTestId.set(testCase.testId, testCase.status)
+  return { completed: true, selectorMatchedNothing: false, statusByTestId }
 }
 
-/** "flake": passes when run alone. "real": still fails alone. "inconclusive":
- *  the `-t` pattern matched NOTHING (e.g. a name with regex-special chars) — we
- *  CANNOT confirm a flake, so it must NOT be silently treated as one. */
-type IsolationVerdict = "flake" | "real" | "inconclusive"
-
-/** Re-run ONE test in true isolation and classify it. */
-const classifyInIsolation = async (f: ParsedFailure): Promise<IsolationVerdict> => {
-  if (!f.file) return "inconclusive"
-  const { output } = await runBunTest([f.file, "-t", f.leaf])
-  const r = parseBunTestOutput(output)
-  // `-t` matched nothing (a name with regex-special chars — `(`/`[`/`{`/`*`/… —
-  // makes the pattern match zero tests). This is a SYSTEMATIC blind spot: a REAL
-  // failure whose name breaks `-t` was being labelled "inconclusive", so an
-  // operator could mistake it for an ambiguous flake and quarantine it. Fall back
-  // to FILE-level isolation: run the whole file alone. If the file fails, the
-  // failure is REAL; if the file is fully green, it was a parallelism FLAKE. Only
-  // a file with genuinely zero tests stays inconclusive.
-  if (r.pass === 0 && r.fail === 0 && r.error === 0) {
-    const { output: fileOut } = await runBunTest([f.file])
-    const fr = parseBunTestOutput(fileOut)
-    if (fr.fail > 0 || fr.error > 0) return "real"
-    if (fr.pass > 0) return "flake"
-    return "inconclusive"
-  }
-  // passes alone (and at least one test ran) ⇒ flake.
-  if (r.fail === 0 && r.error === 0 && r.pass > 0) return "flake"
-  return "real"
+const detailFor = (record: FailureRecord, evidence: ChildEvidence): string => {
+  if (!evidence.completed) return "diagnostic child did not complete within its bounds"
+  if (evidence.selectorMatchedNothing) return "`-t` selected no test — renamed, deleted or skipped"
+  const status = evidence.statusByTestId.get(record.testId)
+  if (status === undefined) return "the child produced no <testcase> for this exact test id"
+  return `isolated run reported ${status}; ONE observation is not a flake diagnosis`
 }
 
-const cmdRun = async (paths: string[]): Promise<number> => {
-  const targets = paths.length > 0 ? paths : ["tests/unit", "tests/integration"]
-  console.log(`[resilient] full run: bun test ${targets.join(" ")}`)
-  const { output, exitCode } = await runBunTest(targets)
-  const full = parseBunTestOutput(output)
-  console.log(`[resilient] ${full.pass} pass · ${full.fail} fail · ${full.error} error`)
-
-  if (full.failures.length === 0) {
-    // A bun-level failure (compile error / crash / no-tests-found) yields a
-    // non-zero exit with NO parsed test failures — never report that "clean".
-    if (exitCode !== 0) {
-      console.error(
-        `[resilient] ✗ bun exited ${exitCode} with no parsed test failures — likely a ` +
-          `compile error / crash / empty match. Surfacing (not 'clean'). Tail:`,
-      )
-      console.error(output.split("\n").slice(-15).join("\n"))
-      return 1
-    }
-    console.log("[resilient] ✓ clean — no failures")
-    return 0
+const cmdDiagnose = async (): Promise<number> => {
+  const artifactPath = flag("--from-artifact") ?? process.env.QUANTA_TEST_FAILURE_ARTIFACT
+  if (artifactPath === undefined || artifactPath === "") {
+    console.error(
+      "[diagnose] ✗ FAIL CLOSED: no failure artifact.\n" +
+        "  This tool no longer runs a suite of its own — the authoritative attempt is an INPUT.\n" +
+        "  Pass --from-artifact <quanta.test-failure-attempt.v1 path> or set QUANTA_TEST_FAILURE_ARTIFACT.\n" +
+        "  Producer wiring: docs/plans/sep-12-test-verification-hardening/handoff-tvh15.md",
+    )
+    return EXIT_FAIL_CLOSED
   }
+  let raw: unknown
+  try {
+    raw = JSON.parse(readFileSync(artifactPath, "utf8"))
+  } catch (error) {
+    console.error(`[diagnose] ✗ FAIL CLOSED: cannot read ${artifactPath}: ${String(error)}`)
+    return EXIT_FAIL_CLOSED
+  }
+  const load = parseFailureArtifact(raw)
+  if (load.kind !== "ok") {
+    console.error(
+      `[diagnose] ✗ FAIL CLOSED: ${artifactPath} is not a valid artifact: ${load.reason}`,
+    )
+    return EXIT_FAIL_CLOSED
+  }
+  return runDiagnosis(load.artifact)
+}
 
-  const firstFailures = full.failures.map((row) =>
+const preserveArtifact = (artifact: FailureAttemptArtifact): readonly unknown[] =>
+  artifact.failures.map((record) =>
     preserveFirstFailure(
       {
-        testId: `${row.file}::${row.leaf}`,
-        kind: "assertion",
-        fingerprint: `${row.file}:${row.leaf}`,
-        sha: "",
-        elapsedMs: 0,
+        testId: record.testId,
+        kind: record.kind,
+        fingerprint: record.fingerprint,
+        // The real SHA and the real elapsed, from the attempt that observed the
+        // failure. The old adapter wrote "" and 0 here, which made the preserved
+        // record unable to answer the only two questions it exists for.
+        sha: artifact.head,
+        elapsedMs: record.elapsedMs,
       },
-      { passed: false, fingerprint: `${row.file}:${row.leaf}` },
+      { passed: false, fingerprint: record.fingerprint },
     ),
   )
-  console.log(
-    `[resilient] first-failure preserved count=${firstFailures.length}; retry pass is not required green`,
-  )
-  if (process.env.QUANTA_VERIFICATION_REQUIRED === "1") {
-    console.error(
-      "[resilient] ✗ required lane keeps the first failure (isolation is diagnostic only)",
-    )
-    return 1
+
+const runDiagnosis = async (artifact: FailureAttemptArtifact): Promise<number> => {
+  const startedAt = Date.now()
+  const preserved = preserveArtifact(artifact)
+  const firstFailureOut = flag("--first-failure-out")
+  if (firstFailureOut !== undefined) {
+    writeFileSync(firstFailureOut, `${JSON.stringify(preserved, null, 2)}\n`)
   }
-
-  const ledger = await loadLedger()
-  const real: ParsedFailure[] = []
-  const knownFlake: ParsedFailure[] = []
-  const newFlake: ParsedFailure[] = []
-  const inconclusive: ParsedFailure[] = []
-
-  console.log(`[resilient] isolating ${full.failures.length} failure(s)…`)
-  for (const f of full.failures) {
-    const verdict = await classifyInIsolation(f)
-    if (verdict === "real") {
-      real.push(f)
-      console.log(`  ✗ REAL    ${f.file} :: ${f.leaf}`)
-    } else if (verdict === "inconclusive") {
-      inconclusive.push(f)
-      console.log(
-        `  ? INCONCLUSIVE ${f.file} :: ${f.leaf}  (-t matched no test — cannot confirm flake)`,
-      )
-    } else if (isQuarantined(f, ledger)) {
-      knownFlake.push(f)
-      console.log(`  ~ flake   ${f.file} :: ${f.leaf}  (known-quarantined)`)
-    } else {
-      newFlake.push(f)
-      console.log(`  ! NEW-FLAKE ${f.file} :: ${f.leaf}  (passes isolated, NOT in ledger)`)
+  console.log(
+    `[diagnose] artifact head=${artifact.head.slice(0, 12)} suite=${artifact.suite} ` +
+      `failures=${artifact.failures.length} seed=${artifact.replay.seed} ` +
+      `perm=${artifact.replay.permutation} cores=${artifact.replay.cores} ` +
+      `load1m=${artifact.replay.loadAverage1m} workers=${artifact.replay.workerParallel} ` +
+      `intra=${artifact.replay.intraParallel} claims=[${artifact.replay.resourceClaims.join(",")}] ` +
+      `runner_retries=${artifact.replay.retryCount}`,
+  )
+  if (artifact.replay.retryCount > 0) {
+    console.error(
+      `[diagnose] WARN the producing attempt already retried ${artifact.replay.retryCount}×; ` +
+        "its verdict is a retry verdict, and diagnosis inherits that ambiguity",
+    )
+  }
+  const plan = planDiagnosis(artifact.failures, DEFAULT_BUDGET)
+  console.log(
+    `[diagnose] plan: ${plan.batches.length} child(ren) for ${artifact.failures.length} failure(s) ` +
+      `(${plan.deduped.length} deduped, ${plan.overBudget.length} over budget)`,
+  )
+  const rows: DiagnosisRow[] = []
+  let childrenSpawned = 0
+  for (const batch of plan.batches) {
+    if (Date.now() - startedAt >= DEFAULT_BUDGET.maxTotalMs) {
+      for (const record of batch.records) {
+        rows.push({
+          file: record.file,
+          testId: record.testId,
+          fingerprint: record.fingerprint,
+          outcome: "inconclusive",
+          detail: "global diagnosis time budget exhausted before this batch ran",
+          replay: replayCommand(artifact, record),
+        })
+      }
+      continue
+    }
+    childrenSpawned += 1
+    const evidence = await diagnoseBatch(batch.file, batch.selector, DEFAULT_BUDGET.perChildMs)
+    for (const record of batch.records) {
+      rows.push({
+        file: record.file,
+        testId: record.testId,
+        fingerprint: record.fingerprint,
+        outcome: classifyRecord(record, evidence),
+        detail: detailFor(record, evidence),
+        replay: replayCommand(artifact, record),
+      })
     }
   }
-
-  console.log(
-    `[resilient] real=${real.length} known-flake=${knownFlake.length} new-flake=${newFlake.length} inconclusive=${inconclusive.length}`,
-  )
-  // Anything we could not positively classify as a known flake BLOCKS — a flake
-  // claim must be earned (isolated-green + in the ledger), never assumed.
-  if (real.length > 0 || newFlake.length > 0 || inconclusive.length > 0) {
-    console.error(
-      `[resilient] ✗ blocking: ${real.length} real, ${newFlake.length} new-flake, ` +
-        `${inconclusive.length} inconclusive. New flakes ⇒ add to quarantine.json (resourceClass + reason) or fix.`,
-    )
-    return 1
+  for (const record of plan.overBudget) {
+    rows.push({
+      file: record.file,
+      testId: record.testId,
+      fingerprint: record.fingerprint,
+      outcome: "inconclusive",
+      detail: `beyond the global child budget (${DEFAULT_BUDGET.maxChildren})`,
+      replay: replayCommand(artifact, record),
+    })
   }
-  console.log("[resilient] ✓ no real failures — all failures are known, isolated-green flakes.")
-  return 0
+  const report: DiagnosisReport = {
+    schema: "quanta.flake-diagnosis.v1",
+    advisory: true,
+    required: "failed",
+    head: artifact.head,
+    childrenSpawned,
+    elapsedMs: Date.now() - startedAt,
+    counts: outcomeCounts(rows),
+    rows,
+  }
+  const out = flag("--out")
+  if (out !== undefined) writeFileSync(out, `${JSON.stringify(report, null, 2)}\n`)
+  for (const row of rows) {
+    console.log(`  ${row.outcome.padEnd(24)} ${row.file} :: ${row.testId}\n      ${row.detail}`)
+    console.log(`      replay: ${row.replay}`)
+  }
+  console.log(
+    `[diagnose] children=${childrenSpawned} ` +
+      Object.entries(report.counts)
+        .map(([name, count]) => `${name}=${count}`)
+        .join(" "),
+  )
+  console.log(
+    "[diagnose] ADVISORY — the required verdict for this attempt is 'failed' and this run " +
+      "cannot change it. An observed-isolation-pass is ONE observation, not a flake diagnosis.",
+  )
+  return report.counts["confirmed-real"] > 0 ? EXIT_CONFIRMED_REAL : EXIT_NO_CONFIRMED_REAL
 }
 
-const cmdQuarantineCheck = async (): Promise<number> => {
-  const ledger = await loadLedger()
-  const n = ledger.entries.length
-  if (n > ledger.maxCount) {
-    console.error(
-      `[resilient] ✗ quarantine ratchet breached: ${n} entries > maxCount ${ledger.maxCount}`,
-    )
+const cmdQuarantineCheck = (): number => {
+  const ledger = loadLedger()
+  const violations = validateQuarantineLedger(ledger, {
+    nowMs: Date.now(),
+    readTestSource: (file) => {
+      try {
+        return readFileSync(join(REPO_ROOT, file), "utf8")
+      } catch {
+        return undefined
+      }
+    },
+  })
+  if (violations.length > 0) {
+    for (const violation of violations) {
+      console.error(`[quarantine] ✗ ${violation.kind} ${violation.entry}: ${violation.detail}`)
+    }
     return 1
   }
   const critical = ledger.entries.filter((entry) => !mayQuarantine(entry.file))
   if (critical.length > 0) {
-    console.error(
-      `[resilient] ✗ critical tests cannot be quarantined: ${critical.map((entry) => entry.file).join(", ")}`,
-    )
+    console.error(`[quarantine] ✗ critical tests quarantined: ${critical.length}`)
     return 1
   }
-  console.log(`[resilient] ✓ quarantine: ${n}/${ledger.maxCount} entries (within ratchet)`)
+  console.log(
+    `[quarantine] ✓ ${ledger.entries.length}/${ledger.maxCount} entries, all with owner, issue, ` +
+      "firstSeenSha, fingerprint, resource claim, live test id and an unexpired date",
+  )
   return 0
 }
 
 const main = async (): Promise<number> => {
-  const [cmd, ...rest] = process.argv.slice(2)
+  const cmd = process.argv[2]
   switch (cmd) {
+    case "diagnose":
+    // `run` is kept ONLY so `package.json`'s `test:resilient` fails LOUDLY with
+    // the fail-closed message instead of silently starting a broad suite. See
+    // the handoff for the replacement script string.
     case "run":
-      return cmdRun(rest)
+      return cmdDiagnose()
     case "quarantine-check":
       return cmdQuarantineCheck()
     default:
       console.error(
-        "usage: bun run tools/test-resilience/cli.ts <run [paths...] | quarantine-check>",
+        "usage: bun run tools/test-resilience/cli.ts " +
+          "<diagnose --from-artifact <path> [--out <path>] [--first-failure-out <path>] | quarantine-check>",
       )
-      return 2
+      return EXIT_FAIL_CLOSED
   }
 }
 
-process.exit(await main())
+if (import.meta.main) process.exit(await main())

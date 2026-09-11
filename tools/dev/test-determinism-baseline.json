@@ -1,0 +1,295 @@
+{
+  "schema": "quanta.test-determinism-baseline.v1",
+  "floors": {
+    "minFilesScanned": 3900,
+    "minWallSites": 150,
+    "minRandomSites": 30,
+    "minSleepFiles": 170
+  },
+  "randomTotal": 36,
+  "randomByFile": {
+    "src/agent/session-resource-registry/disk-adapter/__tests__/disk-store.hellgate.test.ts": {
+      "id-shaped": 1
+    },
+    "tests/integration/browser-real-chrome-adversarial-e2e.test.ts": {
+      "id-shaped": 1
+    },
+    "tests/integration/hexagonal-ports-closeout.test.ts": {
+      "id-shaped": 2
+    },
+    "tests/integration/multi-plane-e2e-hellgate.test.ts": {
+      "id-shaped": 1
+    },
+    "tests/integration/sqlite-gc-sigkill-mid-sweep-e2e.test.ts": {
+      "outcome-relevant": 1,
+      "reason": "SIGKILL fuzz picks a mid-sweep delay from Math.random()*4 — TVH-15 item 3. Replace with a seeded PRNG whose seed is printed in the failure receipt."
+    },
+    "tests/integration/test-shard-process-lifecycle-e2e.test.ts": {
+      "id-shaped": 1
+    },
+    "tests/unit/agent/compaction-event-reason-hellgate.test.ts": {
+      "id-shaped": 1
+    },
+    "tests/unit/agent/loop-throw-dispose-hellgate.test.ts": {
+      "unreachable-guard": 1
+    },
+    "tests/unit/apps/web-daemon/authenticated-operator-flow-e2e-hellgate.test.ts": {
+      "id-shaped": 2
+    },
+    "tests/unit/check-secrets-tool-hellgate.test.ts": {
+      "id-shaped": 1
+    },
+    "tests/unit/coverage-source-hellgate.test.ts": {
+      "id-shaped": 1
+    },
+    "tests/unit/dev/test-shard-cache-incoherence.test.ts": {
+      "id-shaped": 1,
+      "reason": "unique cache-file name built by string interpolation (id-shaped): the value only ever becomes part of a path, so no case, order or delay depends on it."
+    },
+    "tests/unit/integrations/github/webhook-server-attack-hellgate-r5.test.ts": {
+      "id-shaped": 1
+    },
+    "tests/unit/integrations/github/webhook-server.test.ts": {
+      "id-shaped": 1
+    },
+    "tests/unit/mcp-roots-supervised-wire-e2e-hellgate.test.ts": {
+      "id-shaped": 1
+    },
+    "tests/unit/mcp-sampling-live-wire-e2e-hellgate.test.ts": {
+      "id-shaped": 1
+    },
+    "tests/unit/microcompaction-wire-failclosed-hellgate.test.ts": {
+      "id-shaped": 3
+    },
+    "tests/unit/observability-metrics-hellgate.test.ts": {
+      "id-shaped": 1,
+      "outcome-relevant": 1,
+      "reason": "shuffles the flush order with sort(() => Math.random() - 0.5) — TVH-15 item 3. Replace with a fixed permutation corpus."
+    },
+    "tests/unit/per-tool-checkpoint-hellgate.test.ts": {
+      "id-shaped": 1
+    },
+    "tests/unit/phase-ttft-readonly-trio-hellgate.test.ts": {
+      "unreachable-guard": 1
+    },
+    "tests/unit/plugin-isolation-lifecycle-hellgate.test.ts": {
+      "outcome-relevant": 1,
+      "reason": "synthesises a fake pid from Math.floor(Math.random()*1e6); collision-free but unreproducible. Seeded counter is the deterministic form."
+    },
+    "tests/unit/retrieval/pipeline-hellgate.test.ts": {
+      "outcome-relevant": 1,
+      "reason": "1000 RRF hit SCORES drawn from Math.random() — the ranking under test depends on them. TVH-15 item 3."
+    },
+    "tests/unit/runner/diff-ops-hunks-stress.test.ts": {
+      "outcome-relevant": 1,
+      "reason": "selects which hunk indices to keep with Math.random() > 0.5 — the stress CASE is unseeded. TVH-15 item 3."
+    },
+    "tests/unit/session-envelope-hellgate.test.ts": {
+      "outcome-relevant": 1,
+      "reason": "shuffles key ORDER with sort(() => 0.3 - Math.random()) — TVH-15 item 3."
+    },
+    "tests/unit/session-envelope-streaming.test.ts": {
+      "id-shaped": 1
+    },
+    "tests/unit/skill/playbook/inline-trigger-hellgate.test.ts": {
+      "id-shaped": 1
+    },
+    "tests/unit/skill/runtime/disabled-store-cross-process-flock-hellgate.test.ts": {
+      "id-shaped": 1
+    },
+    "tests/unit/tool/pdf-read-hellgate.test.ts": {
+      "id-shaped": 1
+    },
+    "tests/unit/tool/worktree/worktree-dispatch-e2e.test.ts": {
+      "id-shaped": 1
+    },
+    "tests/unit/tool/worktree/worktree-slot-crash-stale-e2e-hellgate.test.ts": {
+      "id-shaped": 1
+    },
+    "tests/unit/tool/yaml-read-hellgate.test.ts": {
+      "id-shaped": 1
+    }
+  },
+  "sleepTotalMs": 73720,
+  "sleepMsByFile": {
+    "apps/web-frontend/src/components/slash-auth.test.ts": 5,
+    "src/agent/memory/stage1-store/__tests__/consolidator-hook-no-throw.hellgate.test.ts": 25,
+    "src/agent/session-resource-registry/disk-adapter/__tests__/disk-store-flock.hellgate.test.ts": 410,
+    "src/agent/session-resource-registry/disk-adapter/__tests__/disk-store.hellgate.test.ts": 70,
+    "src/agent/session-resource-registry/disk-adapter/__tests__/registry-freshness.hellgate.test.ts": 10,
+    "src/agent/sticky-model/__tests__/fs-store-lost-update.hellgate.test.ts": 80,
+    "src/apps/bench/trajectory.test.ts": 240,
+    "src/apps/cli/__tests__/background-ctrlb-turn-runner.hellgate.test.ts": 5,
+    "src/apps/cli/__tests__/background-turn-portal.hellgate.test.ts": 1,
+    "src/apps/cli/__tests__/elicitation-mid-turn-channel.hellgate.test.ts": 1,
+    "src/apps/cli/__tests__/raw-line-reader-editor.hellgate.test.ts": 2,
+    "src/apps/web-daemon/auth-routes.test.ts": 1,
+    "src/host/runtime/internal/__tests__/approval-inline-interactive.hellgate.test.ts": 5,
+    "src/kernel/session/__tests__/kernel-cancel.hellgate.test.ts": 60,
+    "src/mcp/transports/__tests__/http-sse-resumption-hellgate.test.ts": 50,
+    "src/mcp/transports/__tests__/t12-http-sse-lifecycle-hellgate.test.ts": 15,
+    "src/session/store-rename-fold-lock.test.ts": 40,
+    "src/session/store-save-lock-toctou.test.ts": 40,
+    "src/skill/playbook/__tests__/inline-trigger-boundary-hellgate.test.ts": 100,
+    "src/tool/container-exec/ipc-backend.test.ts": 60,
+    "tests/contract/lance-real-wire.test.ts": 75,
+    "tests/e2e-pty/cli-goal-pursuit-e2e.test.ts": 36875,
+    "tests/e2e-pty/cli-model-persistence-e2e.test.ts": 150,
+    "tests/e2e-pty/cli-usage-accounting-resume-e2e.test.ts": 5150,
+    "tests/integration/agent-abort.test.ts": 10,
+    "tests/integration/albb-14-automation-wire.test.ts": 65,
+    "tests/integration/approval-respond-mid-turn-web-daemon-e2e.test.ts": 25,
+    "tests/integration/automation-engine-tick-wire-hellgate.test.ts": 25,
+    "tests/integration/bench-observability.test.ts": 2,
+    "tests/integration/bench-verify-select-concurrency.test.ts": 75,
+    "tests/integration/browser-real-chrome-e2e.test.ts": 25,
+    "tests/integration/canvas-artifact-preview-daemon-e2e.test.ts": 200,
+    "tests/integration/canvas-tool-diff-usage-daemon-e2e.test.ts": 250,
+    "tests/integration/cli-background-turn-e2e.test.ts": 9,
+    "tests/integration/github-webhook-host-cli-hellgate.test.ts": 185,
+    "tests/integration/github-webhook-multi-secret-hellgate.test.ts": 95,
+    "tests/integration/github-webhook-reactor-e2e-hellgate.test.ts": 85,
+    "tests/integration/goal-approval-resume-attribution-e2e.test.ts": 10,
+    "tests/integration/goal-control-ws-daemon-e2e.test.ts": 10,
+    "tests/integration/goal-verify-ws-daemon-e2e.test.ts": 10,
+    "tests/integration/goal-work-ws-daemon-e2e.test.ts": 10,
+    "tests/integration/hitl-approval-e2e.test.ts": 12,
+    "tests/integration/mcp-auto-restart-real-process-e2e.test.ts": 5,
+    "tests/integration/mcp-stdio-egress-proxy-e2e.test.ts": 10,
+    "tests/integration/mcp-tools-listchanged-capability-gate.test.ts": 40,
+    "tests/integration/model-switch-ws-daemon-e2e.test.ts": 10,
+    "tests/integration/pyright-cross-file-resolution.test.ts": 50,
+    "tests/integration/search-pipeline-lance-wire.test.ts": 60,
+    "tests/integration/sep8-remediation/r05/h-sa-os-child-protocol.test.ts": 695,
+    "tests/integration/sep8-remediation/r06/ticker-reclaim.integration.test.ts": 15,
+    "tests/integration/sep8-remediation/r07/oauth-loopback-rebind.integration.test.ts": 25,
+    "tests/integration/side-agent-ipc-kill-mid-result-e2e.test.ts": 10,
+    "tests/integration/side-agent-process-llm-charter-e2e.test.ts": 20,
+    "tests/integration/side-agent-process-os-fork-e2e.test.ts": 10,
+    "tests/integration/stuck-detector-real-loop-e2e.test.ts": 5,
+    "tests/integration/test-shard-process-lifecycle-e2e.test.ts": 45,
+    "tests/measurement/rfc07-2m-line-watch-admission.test.ts": 110,
+    "tests/smoke/goal/goal-pursuit-smoke.test.ts": 10,
+    "tests/unit/agent/effect-channel.test.ts": 8,
+    "tests/unit/agent/sticky-model-write-order-hellgate.test.ts": 50,
+    "tests/unit/agent/streaming-boomerang-hellgate.test.ts": 220,
+    "tests/unit/ai-session-title-core-hellgate.test.ts": 10,
+    "tests/unit/ai-title-byok-reachability-hellgate.test.ts": 55,
+    "tests/unit/apps/cli/approval-verb-parity-hellgate.test.ts": 2,
+    "tests/unit/apps/cli/at-autocomplete/recursive-file-list-characterization.test.ts": 5,
+    "tests/unit/apps/cli/attach/attach-approval-verbs-hellgate.test.ts": 16,
+    "tests/unit/apps/cli/attach/attach-client.test.ts": 1535,
+    "tests/unit/apps/cli/attach/attach-e2e.test.ts": 10,
+    "tests/unit/apps/cli/attach/attach-model-pill-hellgate.test.ts": 30,
+    "tests/unit/apps/cli/turn-cancel-install-hellgate.test.ts": 25,
+    "tests/unit/apps/cli/turn-runner-hellgate.test.ts": 10,
+    "tests/unit/apps/web-daemon/authenticated-operator-flow-e2e-hellgate.test.ts": 3250,
+    "tests/unit/apps/web-daemon/model-switch-wire-hellgate.test.ts": 210,
+    "tests/unit/apps/web-daemon/server.test.ts": 126,
+    "tests/unit/assemble-caller-owned-wire-hellgate.test.ts": 10,
+    "tests/unit/auth/browser-flow.test.ts": 25,
+    "tests/unit/auth/chatgpt-refresh-transaction.test.ts": 20,
+    "tests/unit/auth/refresh.test.ts": 15,
+    "tests/unit/auto-sweep-hellgate.test.ts": 5,
+    "tests/unit/bash-async-hellgate.test.ts": 190,
+    "tests/unit/bench-pool-hellgate.test.ts": 200,
+    "tests/unit/bench-single-box-guard-hellgate.test.ts": 5,
+    "tests/unit/bench/bestk-passk-grade.test.ts": 1,
+    "tests/unit/boundary-cancellation-hellgate.test.ts": 10,
+    "tests/unit/caller-owned-registry-builder-hellgate.test.ts": 120,
+    "tests/unit/cli/automation-wire-hellgate.test.ts": 10,
+    "tests/unit/cli/gh-exec-policy-hellgate.test.ts": 50,
+    "tests/unit/cli/login-status-cmd.test.ts": 10,
+    "tests/unit/cli/mcp-lifecycle-cmd-hellgate.test.ts": 5,
+    "tests/unit/cli/serve-stdio-e2e-hellgate.test.ts": 50,
+    "tests/unit/cli/status-bar-suspended-paint-hellgate.test.ts": 30,
+    "tests/unit/dev/verification-campaign.test.ts": 6490,
+    "tests/unit/eval-grounding-diagnostics.test.ts": 5,
+    "tests/unit/git-env-and-budget-hellgate.test.ts": 110,
+    "tests/unit/hooks-timeout-cap-hellgate.test.ts": 255,
+    "tests/unit/hooks.test.ts": 5,
+    "tests/unit/host-resource-sampler.test.ts": 40,
+    "tests/unit/host/mcp-session-lifetime-hellgate.test.ts": 20,
+    "tests/unit/ipc/session-transport-fidelity-conformance.test.ts": 15,
+    "tests/unit/llm/model-catalog-probe-cancellation-hellgate.test.ts": 35,
+    "tests/unit/loop-activation-telemetry-hellgate.test.ts": 1,
+    "tests/unit/lsp-bridge-evidence-static-hellgate.test.ts": 300,
+    "tests/unit/lsp-nav-prewarm-ux-hellgate.test.ts": 10,
+    "tests/unit/lsp-prewarm-orchestration-hellgate.test.ts": 40,
+    "tests/unit/lsp-pump-death-hellgate.test.ts": 225,
+    "tests/unit/lsp-pyright-pool-hellgate.test.ts": 10,
+    "tests/unit/lsp-server-mem-budget.test.ts": 5,
+    "tests/unit/lsp-server-rss-watchdog.test.ts": 1160,
+    "tests/unit/lsp-warm-pool-hellgate.test.ts": 10,
+    "tests/unit/lsp/rust-analyzer-real-e2e.test.ts": 1000,
+    "tests/unit/mcp-oauth-hellgate.test.ts": 5,
+    "tests/unit/mcp/stdio-close-sigkill-escalation-hellgate.test.ts": 10,
+    "tests/unit/mcp/transport-port-hellgate.test.ts": 90,
+    "tests/unit/media/voice-input-hellgate.test.ts": 5,
+    "tests/unit/observability-health-snapshot-watcher-hellgate.test.ts": 30,
+    "tests/unit/observability/otel-exporter-hellgate.test.ts": 45,
+    "tests/unit/observability/spans.test.ts": 5,
+    "tests/unit/permission-store-hardening.test.ts": 20,
+    "tests/unit/permission/permission-store-concurrent-write-e2e-hellgate.test.ts": 1,
+    "tests/unit/permission/trust-scope-concurrent-grant-e2e-hellgate.test.ts": 1,
+    "tests/unit/plugin-isolation-host-hellgate.test.ts": 40,
+    "tests/unit/plugin-isolation-mcp-integration-hellgate.test.ts": 50,
+    "tests/unit/plugin-isolation-spawner-hellgate.test.ts": 100,
+    "tests/unit/plugin-isolation-spawner.test.ts": 575,
+    "tests/unit/realtime/t07-realtime-close-hellgate.test.ts": 600,
+    "tests/unit/repo-rules-loader-leaf-hellgate.test.ts": 5000,
+    "tests/unit/retrieval/embed-batcher-hellgate.test.ts": 40,
+    "tests/unit/retrieval/indexer-hellgate.test.ts": 20,
+    "tests/unit/retrieval/scanner-mtime-fastpath-hellgate.test.ts": 40,
+    "tests/unit/runtime/bench-exec-tree-kill-hellgate.test.ts": 300,
+    "tests/unit/runtime/guarded-spawn.test.ts": 160,
+    "tests/unit/runtime/node-repl-timeout-reap-hellgate.test.ts": 25,
+    "tests/unit/runtime/shell-background-detach-hellgate.test.ts": 310,
+    "tests/unit/runtime/shell-snapshot-bun-spawner-hellgate.test.ts": 100,
+    "tests/unit/sampler.test.ts": 20,
+    "tests/unit/scheduler-model-reroute-hellgate.test.ts": 1,
+    "tests/unit/scoped-env.test.ts": 30,
+    "tests/unit/sdk/connect.test.ts": 7,
+    "tests/unit/selection-executor.test.ts": 12,
+    "tests/unit/sep8-remediation/r03/session-memory-persistence.test.ts": 2,
+    "tests/unit/sep8-remediation/r06/scheduler-reclaim.test.ts": 100,
+    "tests/unit/sep8-remediation/r07/oauth-callback-close.test.ts": 40,
+    "tests/unit/sep8-remediation/r08/diagnostics-open-cache.test.ts": 35,
+    "tests/unit/sep8-remediation/r08/diagnostics-waiter.test.ts": 35,
+    "tests/unit/sep8-remediation/r11/c-f9-reauth-handshake.test.ts": 50,
+    "tests/unit/session-store.test.ts": 5,
+    "tests/unit/shell.test.ts": 10,
+    "tests/unit/skill/playbook/inline-trigger-hellgate.test.ts": 600,
+    "tests/unit/spawn-helper-consolidation-hellgate.test.ts": 100,
+    "tests/unit/stdio-stderr-drain-deadlock-hellgate.test.ts": 10,
+    "tests/unit/stream-timeout.test.ts": 280,
+    "tests/unit/streaming-cancellation-hellgate.test.ts": 10,
+    "tests/unit/streaming-dispatch-abort-abandon-hellgate.test.ts": 30,
+    "tests/unit/streaming-dispatch-hellgate.test.ts": 90,
+    "tests/unit/streaming-dispatch-refusal-shortcircuit.test.ts": 5,
+    "tests/unit/streaming-dispatch.test.ts": 10,
+    "tests/unit/subagent-6-fork-parity-hellgate.test.ts": 10,
+    "tests/unit/subagent-6-tools-hellgate.test.ts": 50,
+    "tests/unit/subagent-batch-hellgate.test.ts": 3,
+    "tests/unit/subagent-continue-from-ownership.hellgate.test.ts": 5,
+    "tests/unit/subagent-exec-tree-kill-hellgate.test.ts": 50,
+    "tests/unit/subagent-exec-tree-kill-scenarios-hellgate.test.ts": 120,
+    "tests/unit/subagent-fanout-hellgate.test.ts": 10,
+    "tests/unit/subagent-fork-live-wm-hellgate.test.ts": 5,
+    "tests/unit/subagent-nesting-effective-cap-ssot-hellgate.test.ts": 17,
+    "tests/unit/subagent-pty-close-tree-kill-hellgate.test.ts": 120,
+    "tests/unit/subagent-resume-depth-preservation-hellgate.test.ts": 5,
+    "tests/unit/subagent-tree-kill-composition-wire-hellgate.test.ts": 100,
+    "tests/unit/subagent6-live-assembly-hellgate.test.ts": 10,
+    "tests/unit/t13-misc-silentfail-hellgate.test.ts": 20,
+    "tests/unit/task-registry-lru.test.ts": 2,
+    "tests/unit/test-shard-lease.test.ts": 35,
+    "tests/unit/test-shard-plan.test.ts": 2,
+    "tests/unit/tool/async-tool-dispatch-hellgate.test.ts": 35,
+    "tests/unit/tool/browser-no-throw-hellgate.test.ts": 250,
+    "tests/unit/tool/debug/dap-tcp-transport.test.ts": 2000,
+    "tests/unit/tool/deferred-registry-hellgate.test.ts": 20,
+    "tests/unit/workflow/run-workflow-tool-hellgate.test.ts": 25,
+    "tests/unit/workflow/workflow-engine-hellgate.test.ts": 25
+  }
+}
