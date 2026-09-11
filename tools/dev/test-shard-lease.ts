@@ -21,6 +21,15 @@ export const VERIFICATION_LEASE_OWNER_PID_ENV = "QUANTA_VERIFICATION_LEASE_OWNER
  */
 export const VERIFICATION_LEASE_OWNER_IDENTITY_ENV = "QUANTA_VERIFICATION_LEASE_IDENTITY"
 
+/**
+ * The comparison base the campaign FROZE, handed to every child.
+ *
+ * Not in this module because it is about leases — it is here because this is
+ * the file that already owns the campaign-to-child environment contract, and
+ * splitting that contract across two modules is how one half drifts.
+ */
+export const VERIFICATION_BASE_OID_ENV = "QUANTA_VERIFICATION_BASE_OID"
+
 export interface TestShardLease {
   readonly port: number
   /**

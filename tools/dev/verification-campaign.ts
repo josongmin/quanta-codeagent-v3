@@ -11,6 +11,7 @@ import {
   readCommittedRepositoryLeaseId,
   selectRepositoryLeaseIdentity,
   type TestShardLease,
+  VERIFICATION_BASE_OID_ENV,
   VERIFICATION_LEASE_OWNER_IDENTITY_ENV,
   VERIFICATION_LEASE_OWNER_PID_ENV,
   VERIFICATION_LEASE_TOKEN_ENV,
@@ -308,7 +309,17 @@ process.stdout.write(
 // must describe; `queuedHead` keeps the old value so the move is visible instead
 // of silently replaced.
 campaignHead = readHead()
+const queuedBaseOid = campaignBaseOid
 campaignBaseOid = readRefOrNull("origin/main")
+if (queuedBaseOid !== campaignBaseOid) {
+  // Visible, not silent. A base that moved while this campaign waited changes
+  // which files a diff-scoped gate looks at, and a receipt that only carries
+  // the final value cannot show that it happened.
+  process.stdout.write(
+    `[verification] BASE MOVED while waiting for the lease: queued=${queuedBaseOid ?? "<absent>"} ` +
+      `running=${campaignBaseOid ?? "<absent>"}\n`,
+  )
+}
 if (campaignHead !== queuedHead) {
   process.stdout.write(
     `[verification] HEAD MOVED while waiting for the lease: queued=${queuedHead} ` +
@@ -391,6 +402,13 @@ try {
       ...(lease === undefined ? {} : { [VERIFICATION_LEASE_TOKEN_ENV]: lease.token }),
       [VERIFICATION_LEASE_OWNER_PID_ENV]: String(process.pid),
       [VERIFICATION_LEASE_OWNER_IDENTITY_ENV]: normalizeRepositoryIdentity(identity),
+      // TVH item 12. The campaign FROZE the comparison base and then handed the
+      // child nothing, so every consumer re-read the mutable `origin/main` —
+      // a fetch landing mid-campaign changed what `check-changed` and the
+      // affected-file selector compared against, while the receipt recorded the
+      // base as of the start. The receipt described a comparison that did not
+      // happen. Passed down so both ends use one value.
+      ...(campaignBaseOid === null ? {} : { [VERIFICATION_BASE_OID_ENV]: campaignBaseOid }),
     },
     stdoutFd: 1,
     stderrFd: 2,

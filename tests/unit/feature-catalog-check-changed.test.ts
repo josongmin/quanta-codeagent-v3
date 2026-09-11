@@ -1,5 +1,7 @@
 // meta-test: exercises tools/feature-catalog/* (lives outside src/, no @/ alias).
 import { describe, expect, test } from "bun:test"
+import { readFileSync } from "node:fs"
+import { resolve } from "node:path"
 import {
   type DiffFile,
   isExemptFromFc,
@@ -8,6 +10,7 @@ import {
   parseUntrackedFiles,
   runCheckChanged,
 } from "../../tools/feature-catalog/check-changed"
+import { checkChangedBase } from "../../tools/feature-catalog/cli"
 import type { Feature, LoadedFeature } from "../../tools/feature-catalog/schema"
 
 function feature(code: readonly string[]): Feature {
@@ -243,5 +246,80 @@ describe("mergeDiffSources", () => {
     const widened = runCheckChanged(mergeDiffSources(committed, untracked), [f(["src/known.ts"])])
     expect(widened.ok).toBe(false)
     expect(widened.addedUntracked).toEqual(["src/brand-new.ts"])
+  })
+})
+
+/**
+ * TVH item 12 — the campaign froze a base and handed the child nothing.
+ *
+ * `cmdCheckChanged` read the mutable `origin/main` ref on every invocation. The
+ * campaign wrapper freezes a base OID and records it in its receipt, but never
+ * passed it down — so a `git fetch` landing mid-campaign changed what this gate
+ * compared against while the receipt still named the base as of the start. The
+ * receipt described a comparison that did not happen.
+ */
+describe("the comparison base is the one the campaign froze", () => {
+  const OID = "a".repeat(40)
+
+  test("an explicit argument always wins", () => {
+    // An operator asking about a specific base is not overridden by an ambient
+    // one — otherwise `bun fc check-changed some-branch` would silently answer
+    // about something else inside a campaign.
+    expect(checkChangedBase(["feature/x"], { QUANTA_VERIFICATION_BASE_OID: OID })).toBe("feature/x")
+  })
+
+  test("the frozen OID is used when no argument is given", () => {
+    expect(checkChangedBase([], { QUANTA_VERIFICATION_BASE_OID: OID })).toBe(OID)
+  })
+
+  test("a NON-main base survives the handoff", () => {
+    // A PR against a release branch freezes that branch's OID. Nothing here may
+    // quietly substitute `origin/main`, which is what a hardcoded default does
+    // to every stacked or release-targeted PR.
+    const releaseOid = "b".repeat(40)
+    expect(checkChangedBase([], { QUANTA_VERIFICATION_BASE_OID: releaseOid })).toBe(releaseOid)
+    expect(checkChangedBase([], { QUANTA_VERIFICATION_BASE_OID: releaseOid })).not.toBe(
+      "origin/main",
+    )
+  })
+
+  test("the campaign's <absent> sentinel is not treated as a ref", () => {
+    // `<absent>` is how the campaign records "there is no origin/main in this
+    // checkout". Handing it to git turns a missing remote into `fatal: bad
+    // revision` in the middle of a gate.
+    expect(checkChangedBase([], { QUANTA_VERIFICATION_BASE_OID: "<absent>" })).toBe("origin/main")
+    for (const junk of ["", "origin/main", "not-a-sha", "A".repeat(40), "a".repeat(39)]) {
+      expect({ junk, base: checkChangedBase([], { QUANTA_VERIFICATION_BASE_OID: junk }) }).toEqual({
+        junk,
+        base: "origin/main",
+      })
+    }
+  })
+
+  test("with nothing set at all it still has a base", () => {
+    // ANTI-VACUITY: a resolver that returned undefined would satisfy the arms
+    // above and break every local invocation.
+    expect(checkChangedBase([], {})).toBe("origin/main")
+  })
+
+  test("WIRING — the campaign exports the frozen base and reports it moving", () => {
+    const campaign = readFileSync(
+      resolve(import.meta.dir, "..", "..", "tools", "dev", "verification-campaign.ts"),
+      "utf8",
+    )
+    expect(campaign).toContain("VERIFICATION_BASE_OID_ENV")
+    expect(campaign).toContain("campaignBaseOid === null ? {} :")
+    // A base that moved while the campaign waited is printed, not swallowed:
+    // it changes which files a diff-scoped gate looks at. Asserted as the live
+    // COMPARISON, not the message: a mutant that wrapped the report in
+    // `if (false)` left the string in place and this arm green.
+    expect(campaign).toContain("if (queuedBaseOid !== campaignBaseOid) {")
+    expect(campaign).toContain("BASE MOVED while waiting for the lease")
+    const cli = readFileSync(
+      resolve(import.meta.dir, "..", "..", "tools", "feature-catalog", "cli.ts"),
+      "utf8",
+    )
+    expect(cli).toContain("checkChangedBase(argv, process.env)")
+    expect(cli).not.toContain('const base = argv[0] ?? "origin/main"')
   })
 })

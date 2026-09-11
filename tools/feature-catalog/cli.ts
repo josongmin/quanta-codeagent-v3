@@ -684,8 +684,34 @@ function gitOrExit(args: readonly string[], label: string): string {
   return new TextDecoder().decode(proc.stdout)
 }
 
+/**
+ * The comparison base, in precedence order.
+ *
+ * TVH item 12: this read the mutable `origin/main` ref every time. A campaign
+ * freezes a base OID and records it in its receipt, but handed the child
+ * nothing — so a `git fetch` landing mid-campaign moved what this gate compared
+ * against while the receipt still named the base as of the start. The receipt
+ * described a comparison that did not happen.
+ *
+ * An explicit argument still wins: an operator asking about a specific base is
+ * not overridden by an ambient one.
+ */
+export const checkChangedBase = (
+  argv: readonly string[],
+  env: Readonly<Record<string, string | undefined>>,
+): string => {
+  const explicit = argv[0]
+  if (explicit !== undefined && explicit !== "") return explicit
+  const frozen = env.QUANTA_VERIFICATION_BASE_OID
+  // `<absent>` is the campaign's own sentinel for "there is no origin/main
+  // here", and it is not a ref. Falling back is right; treating it as one
+  // would turn a missing remote into `fatal: bad revision` mid-gate.
+  if (frozen !== undefined && /^[0-9a-f]{40}$/.test(frozen)) return frozen
+  return "origin/main"
+}
+
 async function cmdCheckChanged(argv: string[]): Promise<void> {
-  const base = argv[0] ?? "origin/main"
+  const base = checkChangedBase(argv, process.env)
   // Use git via the system shell; we don't have a direct git lib and one-shot
   // child process is sufficient.
   //
