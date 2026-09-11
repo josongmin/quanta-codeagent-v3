@@ -11,6 +11,7 @@ import {
 import { availableParallelism, loadavg } from "node:os"
 import { dirname, join, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { runBoundedChild } from "./bounded-child"
 import { executedFileSetVerdict } from "./executed-file-set"
 import {
   loadPolicyOverrides,
@@ -186,7 +187,12 @@ if (command === "worker") {
   const junitPath = join(outDir, junitFile)
   const receiptPath = join(outDir, `${stem}.receipt.json`)
   const startedAt = performance.now()
-  const proc = Bun.spawn({
+  // `await proc.exited` with no deadline: a matrix worker that wedged held its
+  // runner slot until the hosted job's own limit killed the whole thing, which
+  // reports as "the job timed out" and names no chunk. Bounded through the
+  // same primitive as the gate runner and the pollution guard, so the three
+  // rails cannot drift in what "bounded" means.
+  const outcome = await runBoundedChild({
     cmd: [
       "bun",
       "test",
@@ -199,11 +205,23 @@ if (command === "worker") {
     ],
     cwd: repoRoot,
     env: { ...process.env, QUANTA_TEST_CACHE: "off" },
-    stdin: "inherit",
-    stdout: "inherit",
-    stderr: "inherit",
+    // A chunk's OWN per-case timeout is `chunk.testTimeoutMs`; this is the
+    // bound on the whole chunk, derived from it rather than picked: enough room
+    // for every planned file to hit its individual ceiling, and not more.
+    limits: {
+      totalMs: Math.max(chunk.testTimeoutMs * Math.max(1, chunk.files.length), 10 * 60_000),
+      inactivityMs: Math.max(chunk.testTimeoutMs * 2, 12 * 60_000),
+    },
+    onStdout: (text) => process.stdout.write(text),
+    onStderr: (text) => process.stderr.write(text),
   })
-  const code = await proc.exited
+  if (outcome.status === "timed-out") {
+    process.stderr.write(
+      `[matrix] chunk ${chunk.id} killed on the ${outcome.deadline ?? "unknown"} deadline ` +
+        `after ${Math.round(outcome.elapsedMs / 1_000)}s\n`,
+    )
+  }
+  const code = outcome.exitCode ?? 1
   const elapsedMs = Math.max(1, Math.round(performance.now() - startedAt))
   const junitXml = existsSync(junitPath) ? readFileSync(junitPath, "utf8") : ""
   // One owner for "did it run what it was planned". The local shard runner

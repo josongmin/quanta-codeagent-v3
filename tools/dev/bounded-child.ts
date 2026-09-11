@@ -196,6 +196,16 @@ export interface BoundedChildRequest {
   readonly signalGroup?: (pgid: number, signal: NodeJS.Signals) => void
   /** Seam for the lifecycle tests; defaults to `processGroupAlive`. */
   readonly groupAlive?: (pgid: number) => boolean
+  /**
+   * Live pass-through, in addition to retention.
+   *
+   * `gate.ts` inherits stdio today so an operator watches a 45-minute campaign
+   * as it runs; piping without forwarding would trade that for the bounds.
+   * These get every chunk, uncapped, while the retained copy stays capped for
+   * the failure replay.
+   */
+  readonly onStdout?: (text: string) => void
+  readonly onStderr?: (text: string) => void
 }
 
 interface StreamDrain {
@@ -215,6 +225,7 @@ const drainStream = (
   stream: NodeJS.ReadableStream | null,
   cap: number,
   onByte: () => void,
+  forward?: (text: string) => void,
 ): StreamDrain => {
   const chunks: string[] = []
   let retained = 0
@@ -223,6 +234,10 @@ const drainStream = (
     const text = typeof chunk === "string" ? chunk : chunk.toString("utf8")
     total += text.length
     onByte()
+    // Forwarded UNCAPPED and unbuffered: the cap bounds what this process
+    // RETAINS for a failure replay, not what an operator is allowed to watch.
+    // Capping the live view too would make a long gate look hung.
+    forward?.(text)
     if (retained >= cap) return
     const room = cap - retained
     chunks.push(text.length <= room ? text : text.slice(0, room))
@@ -485,8 +500,8 @@ export const runBoundedChild = async (
   const bump = (): void => {
     lastByteAt = Date.now()
   }
-  const out = drainStream(child.stdout, limits.maxStreamBytes, bump)
-  const err = drainStream(child.stderr, limits.maxStreamBytes, bump)
+  const out = drainStream(child.stdout, limits.maxStreamBytes, bump, request.onStdout)
+  const err = drainStream(child.stderr, limits.maxStreamBytes, bump, request.onStderr)
 
   const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
     (resolve, reject) => {

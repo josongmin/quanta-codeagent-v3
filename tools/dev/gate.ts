@@ -35,7 +35,7 @@
 import { rmSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-
+import { runBoundedChild } from "./bounded-child"
 import { describeQuietBoxWait, loadPerCore, quietBoxBudgetMs, waitForQuietBox } from "./box-load"
 import { missingExternalTools } from "./external-toolchain"
 import {
@@ -291,14 +291,34 @@ const snapshotInvalidMessage = (
   `checkout changed during prepush (start=${frozen?.head ?? "unknown"}, ` +
     `end=${ending?.head ?? "unknown"}, endDirty=${ending?.status !== ""})`
 
-const runGate = (gate: Gate): GateRun => {
+/**
+ * The gate lifecycle bounds. NOT tuned, and not invented either.
+ *
+ * `inactivityMs` is the SAME 12 minutes the shard runner's watchdog already
+ * uses, established in this ticket against real chunk behaviour: a child that
+ * has produced no byte for twelve minutes is hung, whatever it is.
+ *
+ * `totalMs` is a backstop, not a performance budget. The longest legitimate
+ * campaign observed in this repository is roughly 45 minutes; the worst
+ * recorded pathology was a 4.7-hour full suite that never finished. Four hours
+ * sits above everything anyone has legitimately waited for and below the
+ * failure it exists to end, so it can only ever fire on the pathology.
+ *
+ * Both are LIVENESS bounds. A gate that fails because it was slow would be a
+ * host-performance verdict wearing a correctness verdict's clothes, which is
+ * exactly what TVH-15 separates elsewhere.
+ */
+const GATE_INACTIVITY_MS = 12 * 60_000
+const GATE_TOTAL_MS = 4 * 60 * 60_000
+
+const runGate = async (gate: Gate): Promise<GateRun> => {
   const started = Bun.nanoseconds()
   const loadAtStart = loadPerCore()
-  const proc = Bun.spawnSync({
+  const outcome = await runBoundedChild({
     // Through the shell: several gates carry a `--` pass-through the argv form
     // would have to re-tokenize, and re-tokenizing is how a runner drifts from
     // the command it claims to run.
-    cmd: ["sh", "-c", gate.run],
+    shell: gate.run,
     env: label === "precommit" ? process.env : { ...process.env, QUANTA_VERIFICATION_TIER: label },
     // The REPO ROOT, never the caller's cwd. `bun run precommit` happens to be
     // safe (bun chdirs to the package.json dir), but the documented direct form
@@ -306,21 +326,35 @@ const runGate = (gate: Gate): GateRun => {
     // caller's directory — the exact ambient-cwd class this repo ships
     // `test:cwd-parity:arch` for, and the runner was exempt from it.
     cwd: REPO_ROOT,
-    stdout: quiet ? "pipe" : "inherit",
-    stderr: quiet ? "pipe" : "inherit",
+    limits: { totalMs: GATE_TOTAL_MS, inactivityMs: GATE_INACTIVITY_MS },
+    // Live output is preserved: an operator watches a long campaign as it
+    // runs, and piping without forwarding would have traded that for the
+    // bounds. The RETAINED copy is still capped for the failure replay.
+    ...(quiet
+      ? {}
+      : {
+          onStdout: (text: string) => process.stdout.write(text),
+          onStderr: (text: string) => process.stderr.write(text),
+        }),
   })
-  const decode = (b: Uint8Array | undefined | null): string =>
-    b === undefined || b === null ? "" : new TextDecoder().decode(b)
   // stdout and stderr are kept APART. Concatenating them destroyed the
   // interleaving and, worse, spent the replay window on whichever stream was
   // longer: biome writes ~219 WARNINGS to one and its `Found N errors` summary
   // to the other, so a 40-line tail of the concatenation contained not one of
   // the ERROR diagnostics the gate exists to surface.
+  const timedOut = outcome.status === "timed-out"
   return {
-    ok: proc.exitCode === 0,
+    ok: outcome.status === "passed",
     ms: (Bun.nanoseconds() - started) / 1e6,
-    out: quiet ? decode(proc.stdout) : "",
-    err: quiet ? decode(proc.stderr) : "",
+    out: quiet ? outcome.stdout : "",
+    // A deadline kill leaves a non-zero exit and no explanation. Say which
+    // bound fired, in the stream the summary already replays — otherwise a
+    // hung gate reads as an ordinary failure of whatever it last printed.
+    err: timedOut
+      ? `${quiet ? outcome.stderr : ""}\n[gate] ${gate.id} killed on the ${outcome.deadline ?? "unknown"} deadline after ${Math.round(outcome.elapsedMs / 1_000)}s (budget ${Math.round(outcome.deadlineBudgetMs / 1_000)}s)`
+      : quiet
+        ? outcome.stderr
+        : "",
     // The 1-minute average is a trailing window, so the higher of the two ends
     // is the honest summary of what this gate competed with.
     peakLoadPerCore: Math.max(loadAtStart, loadPerCore()),
@@ -510,7 +544,7 @@ const gateResults = await stepGatePlan({
       printOut(`  [${gate.id}] ${describeQuietBoxWait(wait)}`)
       if (!wait.settled) hotGates.set(gate.id, wait.endPerCore)
     }
-    const executed = runGate(gate)
+    const executed = await runGate(gate)
     ranById.set(gate.id, { gate, ...executed })
     return { ok: executed.ok, elapsedMs: executed.ms }
   },

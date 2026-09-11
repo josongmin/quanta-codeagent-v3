@@ -66,6 +66,7 @@
 import { closeSync, openSync, readFileSync, readSync, statSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
+import { runBoundedChild } from "./bounded-child"
 
 const repoRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))))
 const allowlistPath = join(repoRoot, "tools/dev/worktree-pollution-allowlist.json")
@@ -187,6 +188,17 @@ const describePath = (rel: string): string => {
 // paired test without the guard trying to run a command at import time.
 if (import.meta.main) {
   const argv = process.argv.slice(2)
+
+  /**
+   * Same two liveness bounds as `gate.ts`, and for the same reason: this wrapper
+   * is what the gate spawns, so a looser bound here would be the one that
+   * actually decides. 12-minute inactivity is the shard runner's measured
+   * watchdog; the 4-hour total is a backstop above every legitimate campaign
+   * observed here and below the 4.7-hour pathology it exists to end.
+   */
+  const GUARD_INACTIVITY_MS = 12 * 60_000
+  const GUARD_TOTAL_MS = 4 * 60 * 60_000
+
   const command = argv[0] === "--" ? argv.slice(1) : argv
   if (command.length === 0) {
     console.error("usage: worktree-pollution-guard.ts -- <command> [args...]")
@@ -196,7 +208,24 @@ if (import.meta.main) {
   const allowlist = JSON.parse(readFileSync(allowlistPath, "utf8")) as Allowlist
   const before = snapshot()
 
-  const run = Bun.spawnSync(command, { cwd: repoRoot, stdout: "inherit", stderr: "inherit" })
+  // Bounded, and through the SAME primitive as the gate runner. This wrapper
+  // sits between `gate.ts` and `test:full:ci`, so an unbounded spawn here
+  // reinstated exactly the hang the gate's own deadline was added to end — the
+  // wrapper would wait forever on a child the gate could no longer see.
+  const run = await runBoundedChild({
+    cmd: command,
+    cwd: repoRoot,
+    env: process.env,
+    limits: { totalMs: GUARD_TOTAL_MS, inactivityMs: GUARD_INACTIVITY_MS },
+    onStdout: (text) => process.stdout.write(text),
+    onStderr: (text) => process.stderr.write(text),
+  })
+  if (run.status === "timed-out") {
+    process.stderr.write(
+      `worktree-pollution-guard: child killed on the ${run.deadline ?? "unknown"} deadline ` +
+        `after ${Math.round(run.elapsedMs / 1_000)}s\n`,
+    )
+  }
 
   const after = snapshot()
   const appeared = appearedDuring(before, after)
