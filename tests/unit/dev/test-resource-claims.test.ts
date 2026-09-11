@@ -22,7 +22,12 @@ import {
   resolveTestResourceSnapshot,
 } from "../../../tools/dev/test-resource-resolution"
 import { discoverSuiteFiles, SUITE_FLOORS } from "../../../tools/dev/test-shard-discovery"
-import { classifyTestResource, resourceClassesOverlap } from "../../../tools/dev/test-shard-plan"
+import {
+  chunkClaimsOverlap,
+  classifyTestResource,
+  resourceClassesOverlap,
+  type TestChunk,
+} from "../../../tools/dev/test-shard-plan"
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..")
 
@@ -388,5 +393,90 @@ describe("the certification registry", () => {
         false,
       )
     }
+  })
+})
+
+/**
+ * `chunkClaimsOverlap` — the claim-set form of `resourceClassesOverlap`, and
+ * the only place certification's value is observable.
+ *
+ * It was exported with ZERO call sites and ZERO tests. This campaign deleted
+ * `assertGateManifestMatchesContract` for exactly that shape, so this one owes
+ * either a proof or a delete. It earns its keep: the class form cannot express
+ * "two `port` chunks that hold different ports", and that is the entire reason
+ * the certification registry exists.
+ *
+ * The scheduler still passes CLASS labels. Flipping it needs a 1/2/4-worker
+ * verdict-equality canary from a real campaign, so the last test here is an
+ * interlock, not decoration.
+ */
+describe("chunk claim overlap", () => {
+  const chunk = (index: number, claims: readonly { key: string; mode: "shared" | "exclusive" }[]) =>
+    ({
+      index,
+      files: [`tests/unit/fixture-${index}.test.ts`],
+      resourceClass: "port",
+      predictedMs: 1_000,
+      claims,
+    }) satisfies TestChunk
+
+  test("two certified chunks of the same non-pure class may overlap; their class may not", () => {
+    const left = chunk(0, [{ key: "port:4317", mode: "exclusive" }])
+    const right = chunk(1, [{ key: "port:5555", mode: "exclusive" }])
+
+    // PAIRED CONTROL. Same two chunks, same scheduler question, two vocabularies.
+    // If this arm were also `true` the test would prove nothing about claims.
+    expect(resourceClassesOverlap(left.resourceClass, right.resourceClass)).toBe(false)
+    expect(chunkClaimsOverlap(left, right)).toBe(true)
+  })
+
+  test("one uncertified member collapses the whole chunk back to exclusive", () => {
+    // A chunk owns the UNION of its members, so a single unread file's
+    // `unknown` is contagious. This is the property that makes partial
+    // certification safe to land.
+    const certified = chunk(0, [{ key: "port:4317", mode: "exclusive" }])
+    const mixed = chunk(1, [
+      { key: "port:5555", mode: "exclusive" },
+      { key: "unknown", mode: "exclusive" },
+    ])
+    expect(chunkClaimsOverlap(certified, mixed)).toBe(false)
+    expect(chunkClaimsOverlap(mixed, certified)).toBe(false)
+  })
+
+  test("the browser CPU carve-out survives the claim form", () => {
+    // `host-cpu: exclusive` is the one claim a peer cannot opt out of by
+    // holding nothing: measured 2026-09-02, a real-Chrome file lost an
+    // honoured 60,000ms CDP budget by 1.88ms beside a 137-file `pure` chunk.
+    const browser = chunk(0, [
+      { key: "browser-profile", mode: "exclusive" },
+      { key: "host-cpu", mode: "exclusive" },
+    ])
+    const pure = chunk(1, [])
+    const disjoint = chunk(2, [{ key: "port:4317", mode: "exclusive" }])
+    expect(chunkClaimsOverlap(browser, pure)).toBe(false)
+    expect(chunkClaimsOverlap(browser, disjoint)).toBe(false)
+    expect(chunkClaimsOverlap(pure, browser)).toBe(false)
+  })
+
+  test("the ordinary lock rule still decides a shared key", () => {
+    const key = "lsp-workspace"
+    const sharedA = chunk(0, [{ key, mode: "shared" }])
+    const sharedB = chunk(1, [{ key, mode: "shared" }])
+    const writer = chunk(2, [{ key, mode: "exclusive" }])
+    expect(chunkClaimsOverlap(sharedA, sharedB)).toBe(true)
+    expect(chunkClaimsOverlap(sharedA, writer)).toBe(false)
+    expect(chunkClaimsOverlap(writer, sharedA)).toBe(false)
+    // ANTI-VACUITY: a function stuck at either constant fails one of these.
+    expect(chunkClaimsOverlap(chunk(3, []), chunk(4, []))).toBe(true)
+  })
+
+  test("INTERLOCK: the scheduler still schedules by class, and must until the canary exists", () => {
+    // Wiring this without a 1/2/4-worker verdict-equality run would widen
+    // real concurrency on the strength of a unit test. When that canary is
+    // produced, delete this arm in the same commit that changes the call.
+    const runner = readFileSync(resolve(REPO_ROOT, "tools/dev/run-test-shards.ts"), "utf8")
+    expect(runner).not.toContain("chunkClaimsOverlap")
+    const plan = readFileSync(resolve(REPO_ROOT, "tools/dev/test-shard-plan.ts"), "utf8")
+    expect(plan).toContain("NOT yet wired into the production scheduler")
   })
 })
