@@ -173,3 +173,68 @@ HIGH 생존자 4건 + MEDIUM 3건을 `6e9f4f5ca`에서 닫았다.
 - **방법론 플래그**: `waitForEmptyGroup`의 wall deadline을 지우는 뮤턴트는 **hang으로만** 드러난다.
   `bun test`에는 워치독이 없어 "아직 실행 중"과 구분되지 않는다. 이 뮤턴트가 공유 트리로
   새어나가 다른 레인의 kill path를 실제로 멈춰 세웠다.
+
+---
+
+## current-HEAD 실행 증거 (2026-09-12, clean tree)
+
+### `bun tools/dev/gate.ts precommit` — 캠페인의 핵심 receipt
+
+시작 시점(`85a99bb6f`)에는 **gate를 하나도 실행하지 못하고 exit 1**이었다.
+현재 HEAD:
+
+```
+  PASS  smoke-canary            1814ms
+  PASS  typecheck               1358ms
+  PASS  lint                   41710ms
+  PASS  lint-debt                621ms
+  PASS  fc-check-changed        1526ms
+  PASS  fc-ci                   1589ms
+  PASS  fc-reachability        20571ms
+  PASS  silent-catch-baseline    243ms
+  PASS  protocol-generated       232ms
+  [capabilities] absent on this host, so anything gated on them was skipped:
+    bwrap, chromium, chromium-browser, dlv, google-chrome,
+    google-chrome-stable, gopls, limactl, lldb-dap
+precommit: ok — 9 of 9 gate(s) passed
+```
+
+모든 gate가 `load/core 6.59–8.52 — OVERSUBSCRIBED` 상태에서 실행됐다(외부 세션 부하).
+부재 capability는 green 한 줄에 묻히지 않고 **이름이 나열된다**.
+
+> 죽어 있던 gate를 살리자 `fc-check-changed`가 즉시 **이전부터 red였던** 위반을 드러냈다:
+> 캠페인 3커밋 전에 추가된 파일 6개가 어떤 catalog 항목에서도 참조되지 않았다.
+> 죽은 gate는 선을 지키지 않는다 — 선이 움직였다는 사실을 가릴 뿐이다.
+
+### tier membership (clean HEAD, `--discover-only`)
+
+| tier | files | digest |
+|---|---:|---|
+| prepush | 3,938 | `40b5ac0828f7192f` |
+| pr | 3,938 | `40b5ac0828f7192f` |
+| full | 3,948 | `802693f292b3ca4b` |
+| nightly | 3,962 | `4460c37406ba25a8` |
+
+`prepush == pr`은 **의도된 미완**이며 interlock으로 고정돼 있다.
+시작 시점에는 prepush/pr/full이 **하나의 동일 digest**였다.
+
+### 기타 current-HEAD 게이트
+
+| 게이트 | 상태 |
+|---|---|
+| `typecheck:all` | clean |
+| `lint:debt` | 23 diagnostics, 회귀 0, ceiling 상향 0 |
+| `test-determinism-ratchet` | ✓ (wall 165 / random 36 / sleep_budgeted 51,470ms) |
+| `module-load-effect-guard` | files 4,037 · effects 150 · violations 0 |
+| `awaited-sleep-budget` / `temp-lifecycle` | exit 0 |
+| `test-resource-certification --check` | exit 0 (548 certified / 14 exclusive / 0 missing) |
+| `tests/unit/_arch` (32 files) | 398 / 398 |
+
+### 아직 없는 증거 (정직하게)
+
+- **healthy-load full/prepush 캠페인 receipt 없음.** 이 박스는 세션 내내 외부 부하
+  load 25–111이었고, 동시 실행 중인 다른 세션이 트리를 공유했다. ABBA 성능 비교는
+  단일 실행이나 부하 상태 숫자로 확정하지 않는다는 규칙에 따라 만들지 않았다.
+- **hosted 증거 없음.** GitHub Actions 빌링이 2026-07-10부터 차단돼 job이 시작하지 않는다.
+  matrix↔monolith verdict 동등성, branch protection live read-back은 **권한 blocker**다.
+- **timing v2 store 없음.** `unit-speed-budget`의 완료 기준은 clean-tree 캠페인 1회가 필요하다.
