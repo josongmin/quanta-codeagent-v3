@@ -34,6 +34,21 @@
 
 `run-test-shards --discover-only`와 현재 classifier를 read-only로 실행한 값이다. timing 값은 2026-09-09 v1 store의 오래된 scheduling weight이므로 현재 wall-time 증거로 사용하지 않는다.
 
+> **이 표는 2026-09-11 시점 스냅샷이다. 현재 값이 아니다.**
+>
+> 숫자를 덮어쓰지 않는다 — 그 시점에 무엇이 측정됐는지가 이 문서의 기록이고,
+> 고쳐 쓰면 측정 자체를 위조하는 것이다. 현재 값은 문서가 아니라 명령이 authority다:
+>
+> ```
+> bun tools/dev/run-test-shards.ts --suite=full --tier=<smoke|prepush|pr|full|nightly> --discover-only
+> bun tools/dev/test-tier-accounting.ts        # tier별 selected/excluded/digest
+> ```
+>
+> 이 캠페인 이후 바뀐 것(정본: `docs/plans/sep-12-test-verification-hardening/tickets/README.md`):
+> tier가 실제로 분리됐고(prepush/pr/full/nightly가 더 이상 한 population이 아니다),
+> `integration-path` 558은 562로, 외부 도구 fingerprint는 18이 아니라 27로 실측됐으며,
+> `PR/full 3,926 · nightly 3,930`은 tier 분리로 의미 자체가 달라졌다.
+
 | 항목 | 현재 값 | 남은 의미 |
 |---|---:|---|
 | full/core/unit/integration | 3,924 / 3,534 / 3,210 / 390 files | 모든 tier manifest의 current population 기준 |

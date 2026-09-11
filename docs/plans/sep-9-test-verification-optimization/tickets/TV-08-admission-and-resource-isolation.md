@@ -1,7 +1,8 @@
 # TV-08 — resource certification, 단일 admission 예산, lease 세분화
 
 - 우선순위: certification P0 / 대기 통합 P0 / lease 분할 P1
-- 상태: IMPLEMENTING — certification authority/audit와 keyed-lease primitive focused green; 558개 review와 campaign integration 미완료
+- 상태: SUPERSEDED — TVH-04(`docs/plans/sep-12-test-verification-hardening/tickets/TVH-04-resource-scheduler.md`)가 이어받았다. 아래 숫자는 2026-09-11 스냅샷이며 현재 값이 아니다(현재 `integration-path`는 562).
+- 이전 상태: IMPLEMENTING — certification authority/audit와 keyed-lease primitive focused green; 558개 review와 campaign integration 미완료
 - 소유자: 통합 담당
 - 선행: TV-01, TV-02, TV-04
 - lease 분할 추가 선행: TV-07, 격리 canary 증거
