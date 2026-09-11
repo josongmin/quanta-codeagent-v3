@@ -1,41 +1,88 @@
 import { randomUUID } from "node:crypto"
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs"
-import { dirname, relative } from "node:path"
+import {
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs"
+import { dirname, join, relative } from "node:path"
 import { externalToolchainFingerprint } from "./external-toolchain"
+import { timeoutCompatibility } from "./test-shard-timeout-policy"
+import {
+  isReceiptTimingRecord,
+  junitMaxCaseMs,
+  type ReceiptTimingRecord,
+} from "./test-shard-timings"
 import { isVerdictRelevantEnvKey, verdictDotenvSha256 } from "./verdict-env"
 
 export const TEST_SHARD_CACHE_TTL_MS = 24 * 60 * 60_000
+export const TEST_SHARD_RECEIPT_SCHEMA = "quanta.test-shard-success.v3" as const
+
+/**
+ * How much of the world a chunk's cache identity has to cover.
+ *
+ * `whole-tree` is the FAIL-SAFE: the complete tracked tree, the complete
+ * manifest, and the fingerprint of every external tool the host has. Any file
+ * the chunk contains that is not certified pins the whole chunk here.
+ *
+ * `certified` is earned. Every file in the chunk must be both input-certified
+ * (declared-v1: its own bytes plus its transitive import closure, and no
+ * forbidden edge that could read something undeclared) and resource-certified
+ * (TVH-04: its resource claims are known and its source digest still matches).
+ * Such a chunk's identity is its own declared inputs, the tool capabilities it
+ * actually claims, and the producer receipts it consumes — nothing global.
+ */
+export type ShardScopeKind = "whole-tree" | "certified"
 
 export interface TestShardCacheIdentity {
+  readonly scopeKind: ShardScopeKind
   /**
    * Content hash of everything tracked that a test can read. See
-   * {@link trackedTreeSha256}: this
-   * replaced a `src`+`tools` scan that could not see `tests/setup.ts`,
-   * `bunfig.toml` or any fixture, and therefore replayed green receipts across
-   * changes that alter every test's behaviour.
+   * {@link trackedTreeSha256}: this replaced a `src`+`tools` scan that could
+   * not see `tests/setup.ts`, `bunfig.toml` or any fixture. Part of the key
+   * for `whole-tree` chunks ONLY — a certified chunk states its own inputs.
    */
   readonly treeSha256: string
+  /** Tier namespace. Key material for `whole-tree` chunks ONLY. */
   readonly suite: string
+  /** Key material for `whole-tree` chunks ONLY. */
   readonly manifestSha256: string
   readonly shardIndex: number
   readonly shardFileCount: number
   readonly shardFilesSha256: string
-  readonly toolchainSha256: string
+  /** Bun/node/platform/arch. ALWAYS key material: it runs every test. */
+  readonly runtimeSha256: string
+  /** All 27 external tools when `whole-tree`; only the claimed ones when certified. */
+  readonly toolScopeSha256: string
   readonly testEnvSha256: string
   readonly junit: boolean
   /** Exact intra-worker file width. Concurrent green does not answer for serial. */
   readonly intraParallel: number
   readonly executionPolicySha256: string
-  /** whole-tree until every file in the chunk is declared-v1 certified. */
+  /** Stable policy/base/cap — NEVER the load-derived instance value. */
+  readonly timeoutPolicySha256: string
   readonly inputScopeSha256: string
+  /** Digest of the shared producer artifacts this chunk consumes. */
+  readonly producerReceiptsSha256: string
 }
 
 export interface SuccessfulTestShardReceipt extends TestShardCacheIdentity {
-  readonly schema: "quanta.test-shard-success.v2"
+  readonly schema: typeof TEST_SHARD_RECEIPT_SCHEMA
   readonly createdAtMs: number
   readonly expiresAtMs: number
   readonly executedFiles: number
   readonly scanReachRecords: readonly ScanReachRecord[]
+  /** Compatibility field, NOT identity: the load-derived value this run used. */
+  readonly testTimeoutMs: number
+  /** Longest single case observed under that timeout; -1 when unparseable. */
+  readonly maxObservedCaseMs: number
+  /** Per-file scheduling evidence so a cache HIT can rehydrate the store. */
+  readonly timingObservations: readonly ReceiptTimingRecord[]
+  /** Human-readable provenance of {@link TestShardCacheIdentity.scopeKind}. */
+  readonly scopeReason: string
   readonly junitXml?: string
   readonly receiptSha256: string
 }
@@ -120,10 +167,15 @@ const dedupePath = (value: string): string => {
  * QUANTA_ knob. Hashing ALL inherited env made an unrelated terminal variable
  * (ITERM_SESSION_ID, a new SSH agent socket) a guaranteed cache miss.
  * Worker-synthesized values are replaced by stable semantic placeholders.
+ *
+ * `QUANTA_TEST_TIMEOUT_SCALE` is deliberately NOT derived from the live
+ * timeout any more: it carries the stable policy base, for the same reason
+ * {@link TestShardCacheIdentity.timeoutPolicySha256} does. A busy host must
+ * not be a different cache universe.
  */
 export const testEnvironmentSha256 = (
   env: Readonly<Record<string, string | undefined>>,
-  testTimeoutMs: number,
+  timeoutPolicyBaseMs: number,
   /** REQUIRED, not optional: the untracked dotenv files under this root become
    *  environment inside the worker, and an argument that can be omitted is one
    *  that will be. */
@@ -136,7 +188,7 @@ export const testEnvironmentSha256 = (
     QUANTA_BENCH_RESULTS_DIR: "<worker-bench-results>",
     QUANTA_SCAN_REACH_RECORD: "<worker-scan-reach-sink>",
     QUANTA_TEST_SOURCE_JS_CLEANED_ROOT: "<repo-source-root>",
-    QUANTA_TEST_TIMEOUT_SCALE: String(testTimeoutMs / 60_000),
+    QUANTA_TEST_TIMEOUT_SCALE: String(timeoutPolicyBaseMs / 60_000),
   })
   const canonical = Object.entries(effective)
     .filter((entry): entry is [string, string] => entry[1] !== undefined)
@@ -147,9 +199,8 @@ export const testEnvironmentSha256 = (
   return sha256(JSON.stringify([canonical, verdictDotenvSha256(repoRoot)]))
 }
 
-export const testToolchainSha256 = (
-  externalTools: Record<string, string> = externalToolchainFingerprint(),
-): string =>
+/** The interpreter itself. Every chunk runs on it, so every chunk is bound to it. */
+export const testRuntimeSha256 = (): string =>
   sha256(
     JSON.stringify({
       bun: Bun.version,
@@ -157,39 +208,108 @@ export const testToolchainSha256 = (
       nodeCompatibility: process.version,
       platform: process.platform,
       arch: process.arch,
-      externalTools,
     }),
   )
+
+/**
+ * MEASURED DEFECT (2026-09-12): every chunk's identity carried the fingerprint
+ * of all 27 entries of `EXTERNAL_TOOLS` — docker, cargo, gopls, rust-analyzer,
+ * clangd, chrome… — so a `cargo install` or a Docker Desktop update changed
+ * the identity of every `pure` chunk that cannot spawn a subprocess at all.
+ *
+ * `claimed === undefined` keeps that whole-tool fail-safe. A certified chunk
+ * passes the tools its capability groups declare; a name with no fingerprint
+ * entry hashes as `<unknown-tool>` rather than vanishing, so a typo in a claim
+ * cannot silently drop a capability from the identity.
+ */
+export const toolScopeSha256 = (
+  fingerprint: Record<string, string> = externalToolchainFingerprint(),
+  claimed?: readonly string[],
+): string => {
+  if (claimed === undefined) {
+    return sha256(
+      JSON.stringify(
+        Object.entries(fingerprint).sort(([left], [right]) => left.localeCompare(right)),
+      ),
+    )
+  }
+  return sha256(
+    JSON.stringify(
+      [...new Set(claimed)]
+        .sort((left, right) => left.localeCompare(right))
+        .map((tool) => [tool, fingerprint[tool] ?? "<unknown-tool>"]),
+    ),
+  )
+}
+
+/** Whole-tree projection kept for callers that want one value for the host. */
+export const testToolchainSha256 = (
+  externalTools: Record<string, string> = externalToolchainFingerprint(),
+): string => sha256(JSON.stringify({ runtime: testRuntimeSha256(), externalTools }))
 
 const receiptPayload = (receipt: Omit<SuccessfulTestShardReceipt, "receiptSha256">): string =>
   JSON.stringify(receipt)
 
-/** Path key for exactly the fields {@link sameIdentity} compares. */
+const commonIdentityFields = (
+  identity: TestShardCacheIdentity,
+): Record<string, string | number | boolean> => ({
+  shardFileCount: identity.shardFileCount,
+  shardFilesSha256: identity.shardFilesSha256,
+  runtimeSha256: identity.runtimeSha256,
+  toolScopeSha256: identity.toolScopeSha256,
+  testEnvSha256: identity.testEnvSha256,
+  junit: identity.junit,
+  intraParallel: identity.intraParallel,
+  executionPolicySha256: identity.executionPolicySha256,
+  timeoutPolicySha256: identity.timeoutPolicySha256,
+  inputScopeSha256: identity.inputScopeSha256,
+  producerReceiptsSha256: identity.producerReceiptsSha256,
+})
+
+/**
+ * Path key for exactly the fields {@link sameIdentity} compares.
+ *
+ * `shardIndex` is deliberately NOT part of the identity: chunk composition is
+ * bound by `shardFilesSha256` (path + content of every file), while the
+ * ordinal is a presentation label that can shift when a NEIGHBOR chunk
+ * changes. For a certified chunk the tree digest, the tier name and the whole
+ * manifest digest are excluded for the same reason: they are not inputs to
+ * THIS chunk, they are properties of the campaign that happened to schedule it.
+ */
 export const testShardCacheIdentitySha256 = (identity: TestShardCacheIdentity): string =>
   sha256(
-    JSON.stringify({
-      treeSha256: identity.treeSha256,
-      suite: identity.suite,
-      manifestSha256: identity.manifestSha256,
-      shardFileCount: identity.shardFileCount,
-      shardFilesSha256: identity.shardFilesSha256,
-      toolchainSha256: identity.toolchainSha256,
-      testEnvSha256: identity.testEnvSha256,
-      junit: identity.junit,
-      intraParallel: identity.intraParallel,
-      executionPolicySha256: identity.executionPolicySha256,
-      inputScopeSha256: identity.inputScopeSha256,
-    }),
+    JSON.stringify(
+      identity.scopeKind === "certified"
+        ? { scopeKind: "certified", ...commonIdentityFields(identity) }
+        : {
+            scopeKind: "whole-tree",
+            treeSha256: identity.treeSha256,
+            suite: identity.suite,
+            manifestSha256: identity.manifestSha256,
+            ...commonIdentityFields(identity),
+          },
+    ),
   )
+
+/**
+ * Directory a chunk's receipt lives in.
+ *
+ * Certified chunks share ONE namespace: their identity no longer mentions a
+ * tier, so `full`, `pr` and `nightly` running the same files at the same
+ * policy are the same cache entry. Uncertified chunks keep the tier namespace
+ * their identity still names.
+ */
+export const chunkCacheNamespace = (identity: TestShardCacheIdentity): string =>
+  identity.scopeKind === "certified" ? "certified" : identity.suite
+
+export const chunkCacheFileName = (identity: TestShardCacheIdentity): string =>
+  `chunk-${testShardCacheIdentitySha256(identity)}.json`
 
 const sameIdentity = (
   receipt: SuccessfulTestShardReceipt,
   expected: TestShardCacheIdentity,
 ): boolean =>
-  // `shardIndex` is deliberately NOT part of the identity: chunk composition
-  // is bound by shardFilesSha256 (path + content of every file), while the
-  // ordinal is a presentation label that can shift when a NEIGHBOR chunk
-  // changes. Everything else must match exactly.
+  receipt.scopeKind === expected.scopeKind &&
   testShardCacheIdentitySha256(receipt) === testShardCacheIdentitySha256(expected)
 
 const isScanReachRecord = (value: unknown): value is ScanReachRecord => {
@@ -205,43 +325,88 @@ const isScanReachRecord = (value: unknown): value is ScanReachRecord => {
   )
 }
 
+const identityFieldsValid = (row: Record<string, unknown>): boolean =>
+  (row.scopeKind === "whole-tree" || row.scopeKind === "certified") &&
+  validSha256(row.treeSha256) &&
+  typeof row.suite === "string" &&
+  validSha256(row.manifestSha256) &&
+  Number.isSafeInteger(row.shardIndex) &&
+  (row.shardIndex as number) >= 1 &&
+  Number.isSafeInteger(row.shardFileCount) &&
+  (row.shardFileCount as number) >= 1 &&
+  validSha256(row.shardFilesSha256) &&
+  validSha256(row.runtimeSha256) &&
+  validSha256(row.toolScopeSha256) &&
+  validSha256(row.testEnvSha256) &&
+  typeof row.junit === "boolean" &&
+  Number.isSafeInteger(row.intraParallel) &&
+  (row.intraParallel as number) >= 1 &&
+  validSha256(row.executionPolicySha256) &&
+  validSha256(row.timeoutPolicySha256) &&
+  validSha256(row.inputScopeSha256) &&
+  validSha256(row.producerReceiptsSha256)
+
+const bodyFieldsValid = (row: Record<string, unknown>): boolean =>
+  Number.isSafeInteger(row.createdAtMs) &&
+  Number.isSafeInteger(row.expiresAtMs) &&
+  Number.isSafeInteger(row.executedFiles) &&
+  (row.executedFiles as number) >= 1 &&
+  Array.isArray(row.scanReachRecords) &&
+  row.scanReachRecords.every(isScanReachRecord) &&
+  Number.isSafeInteger(row.testTimeoutMs) &&
+  (row.testTimeoutMs as number) > 0 &&
+  typeof row.maxObservedCaseMs === "number" &&
+  Number.isFinite(row.maxObservedCaseMs) &&
+  Array.isArray(row.timingObservations) &&
+  row.timingObservations.every(isReceiptTimingRecord) &&
+  typeof row.scopeReason === "string" &&
+  (row.junitXml === undefined || typeof row.junitXml === "string") &&
+  validSha256(row.receiptSha256)
+
 const parseSuccessfulShardReceipt = (value: unknown): SuccessfulTestShardReceipt | undefined => {
   if (typeof value !== "object" || value === null) return undefined
   const row = value as Record<string, unknown>
-  if (
-    row.schema !== "quanta.test-shard-success.v2" ||
-    !validSha256(row.treeSha256) ||
-    typeof row.suite !== "string" ||
-    !validSha256(row.manifestSha256) ||
-    !Number.isSafeInteger(row.shardIndex) ||
-    (row.shardIndex as number) < 1 ||
-    !Number.isSafeInteger(row.shardFileCount) ||
-    (row.shardFileCount as number) < 1 ||
-    !validSha256(row.shardFilesSha256) ||
-    !validSha256(row.toolchainSha256) ||
-    !validSha256(row.testEnvSha256) ||
-    typeof row.junit !== "boolean" ||
-    !Number.isSafeInteger(row.intraParallel) ||
-    (row.intraParallel as number) < 1 ||
-    !validSha256(row.executionPolicySha256) ||
-    !validSha256(row.inputScopeSha256) ||
-    !Number.isSafeInteger(row.createdAtMs) ||
-    !Number.isSafeInteger(row.expiresAtMs) ||
-    !Number.isSafeInteger(row.executedFiles) ||
-    (row.executedFiles as number) < 1 ||
-    !Array.isArray(row.scanReachRecords) ||
-    !row.scanReachRecords.every(isScanReachRecord) ||
-    (row.junitXml !== undefined && typeof row.junitXml !== "string") ||
-    !validSha256(row.receiptSha256)
-  ) {
-    return undefined
-  }
+  if (row.schema !== TEST_SHARD_RECEIPT_SCHEMA) return undefined
+  if (!identityFieldsValid(row) || !bodyFieldsValid(row)) return undefined
   return row as unknown as SuccessfulTestShardReceipt
+}
+
+const junitShapeMiss = (receipt: SuccessfulTestShardReceipt): string | undefined => {
+  if (receipt.junit !== (receipt.junitXml !== undefined)) return "junit-mismatch"
+  if (receipt.junitXml === undefined) return undefined
+  return receipt.junitXml.includes("<testsuites") &&
+    receipt.junitXml.includes("</testsuites>") &&
+    receipt.junitXml.includes("<testcase")
+    ? undefined
+    : "junit-invalid"
+}
+
+/**
+ * A green receipt whose timing evidence was lost is INCOHERENT, and a miss is
+ * the bounded cure.
+ *
+ * MEASURED DEFECT (2026-09-12): the shard wrote its receipt and then harvested
+ * timings; a failed harvest left a green chunk with no per-file observations.
+ * Every later campaign hit that receipt, never re-ran the chunk, and never
+ * produced the timings — so `unit-speed-budget`, which exits 1 when an
+ * executed file has no runner timing, could not be satisfied by any number of
+ * retries. Missing timings now cost exactly ONE re-execution, and
+ * {@link writeSuccessfulTestShardReceiptAtomic} refuses to mint an incoherent
+ * receipt, so the re-execution cannot reproduce the same state.
+ */
+const timingCoherenceMiss = (receipt: SuccessfulTestShardReceipt): string | undefined => {
+  if (!receipt.junit) return undefined
+  if (receipt.timingObservations.length !== receipt.shardFileCount) {
+    return `timing-incoherent:${receipt.timingObservations.length}/${receipt.shardFileCount}`
+  }
+  return undefined
 }
 
 export const loadSuccessfulTestShardReceipt = (input: {
   readonly path: string
   readonly expected: TestShardCacheIdentity
+  /** REQUIRED: the timeout THIS campaign will use, for compatibility proof. */
+  readonly expectedTestTimeoutMs: number
   readonly nowMs?: number
 }): TestShardCacheLookup => {
   let parsed: unknown
@@ -265,48 +430,75 @@ export const loadSuccessfulTestShardReceipt = (input: {
     return { kind: "miss", reason: "expired" }
   }
   if (!sameIdentity(receipt, input.expected)) return { kind: "miss", reason: "input-mismatch" }
+  const timeout = timeoutCompatibility({
+    receiptTestTimeoutMs: receipt.testTimeoutMs,
+    receiptMaxObservedCaseMs: receipt.maxObservedCaseMs,
+    expectedTestTimeoutMs: input.expectedTestTimeoutMs,
+  })
+  if (timeout.kind === "incompatible") return { kind: "miss", reason: `timeout-${timeout.reason}` }
   if (receipt.executedFiles !== receipt.shardFileCount) {
     return { kind: "miss", reason: "discovery-mismatch" }
   }
-  if (receipt.junit !== (receipt.junitXml !== undefined)) {
-    return { kind: "miss", reason: "junit-mismatch" }
-  }
-  if (
-    receipt.junitXml !== undefined &&
-    (!receipt.junitXml.includes("<testsuites") ||
-      !receipt.junitXml.includes("</testsuites>") ||
-      !receipt.junitXml.includes("<testcase"))
-  ) {
-    return { kind: "miss", reason: "junit-invalid" }
-  }
+  const junitProblem = junitShapeMiss(receipt)
+  if (junitProblem !== undefined) return { kind: "miss", reason: junitProblem }
+  const timingProblem = timingCoherenceMiss(receipt)
+  if (timingProblem !== undefined) return { kind: "miss", reason: timingProblem }
   return { kind: "hit", receipt }
 }
 
-export const writeSuccessfulTestShardReceiptAtomic = (input: {
+export interface ShardReceiptWriteInput {
   readonly path: string
   readonly identity: TestShardCacheIdentity
   readonly executedFiles: number
   readonly scanReachRecords: readonly ScanReachRecord[]
+  readonly testTimeoutMs: number
+  readonly timingObservations: readonly ReceiptTimingRecord[]
+  readonly scopeReason: string
   readonly junitXml?: string
   readonly nowMs?: number
-}): SuccessfulTestShardReceipt => {
+}
+
+const refuseIncompleteReceipt = (input: ShardReceiptWriteInput): void => {
   if (
     input.executedFiles < 1 ||
     !Number.isSafeInteger(input.executedFiles) ||
     input.executedFiles !== input.identity.shardFileCount ||
     input.scanReachRecords.some((record) => !isScanReachRecord(record)) ||
-    input.identity.junit !== (input.junitXml !== undefined)
+    input.identity.junit !== (input.junitXml !== undefined) ||
+    !Number.isSafeInteger(input.testTimeoutMs) ||
+    input.testTimeoutMs <= 0
   ) {
     throw new Error("[test:shards] refusing to cache an incomplete shard receipt")
   }
+  if (input.timingObservations.some((record) => !isReceiptTimingRecord(record))) {
+    throw new Error("[test:shards] refusing to cache an invalid timing observation")
+  }
+  // The bound on the incoherence miss: a receipt that cannot rehydrate the
+  // timings of the files it claims is never written in the first place.
+  if (input.identity.junit && input.timingObservations.length !== input.identity.shardFileCount) {
+    throw new Error(
+      `[test:shards] refusing an incoherent receipt: ${input.timingObservations.length} timing ` +
+        `observation(s) for ${input.identity.shardFileCount} file(s)`,
+    )
+  }
+}
+
+export const writeSuccessfulTestShardReceiptAtomic = (
+  input: ShardReceiptWriteInput,
+): SuccessfulTestShardReceipt => {
+  refuseIncompleteReceipt(input)
   const createdAtMs = input.nowMs ?? Date.now()
   const payload: Omit<SuccessfulTestShardReceipt, "receiptSha256"> = {
-    schema: "quanta.test-shard-success.v2",
+    schema: TEST_SHARD_RECEIPT_SCHEMA,
     ...input.identity,
     createdAtMs,
     expiresAtMs: createdAtMs + TEST_SHARD_CACHE_TTL_MS,
     executedFiles: input.executedFiles,
     scanReachRecords: [...input.scanReachRecords],
+    testTimeoutMs: input.testTimeoutMs,
+    maxObservedCaseMs: input.junitXml === undefined ? -1 : junitMaxCaseMs(input.junitXml),
+    timingObservations: [...input.timingObservations],
+    scopeReason: input.scopeReason,
     ...(input.junitXml === undefined ? {} : { junitXml: input.junitXml }),
   }
   const receipt: SuccessfulTestShardReceipt = {
@@ -323,6 +515,181 @@ export const writeSuccessfulTestShardReceiptAtomic = (input: {
   }
   return receipt
 }
+
+/* ─────────────────────────────────────────────────────────────────────────
+ *  TTL GARBAGE COLLECTION
+ * ───────────────────────────────────────────────────────────────────────── */
+
+export interface ShardReceiptPruneReport {
+  readonly namespaces: readonly string[]
+  readonly examined: number
+  readonly removed: number
+  readonly bytesReclaimed: number
+  readonly kept: number
+}
+
+const receiptIsExpired = (path: string, nowMs: number): boolean => {
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as { expiresAtMs?: unknown }
+    return !(Number.isSafeInteger(parsed.expiresAtMs) && (parsed.expiresAtMs as number) > nowMs)
+  } catch {
+    return true
+  }
+}
+
+const sizeOf = (path: string): number => {
+  try {
+    return statSync(path).size
+  } catch {
+    return 0
+  }
+}
+
+/**
+ * MEASURED DEFECT (2026-09-12): the runner pruned `join(root, opts.suite)` —
+ * the bare tier name — while tier caches are written under `full:pr`,
+ * `full:nightly`, and (now) `certified`. Nothing ever collected those. It also
+ * ran only after every chunk went green, so a branch that keeps failing late
+ * accumulates the JUnit and scan payloads of the chunks that went green early.
+ * Measured on this checkout at the previous cache root: 307 receipts,
+ * 127 MiB, every one of them already expired, none collected.
+ *
+ * TTL is the ONLY criterion. The cache is shared across worktrees, so "not
+ * part of MY plan" is not evidence of staleness — a sibling checkout at
+ * another HEAD may still be resuming from its receipts.
+ */
+export const pruneExpiredShardReceipts = (
+  root: string,
+  nowMs = Date.now(),
+): ShardReceiptPruneReport => {
+  let namespaceEntries: string[]
+  try {
+    namespaceEntries = readdirSync(root)
+  } catch {
+    return { namespaces: [], examined: 0, removed: 0, bytesReclaimed: 0, kept: 0 }
+  }
+  const namespaces: string[] = []
+  let examined = 0
+  let removed = 0
+  let bytesReclaimed = 0
+  let kept = 0
+  for (const namespace of namespaceEntries.sort()) {
+    const dir = join(root, namespace)
+    let files: string[]
+    try {
+      files = readdirSync(dir)
+    } catch {
+      continue
+    }
+    namespaces.push(namespace)
+    for (const file of files) {
+      const path = join(dir, file)
+      examined += 1
+      if (!receiptIsExpired(path, nowMs)) {
+        kept += 1
+        continue
+      }
+      bytesReclaimed += sizeOf(path)
+      rmSync(path, { force: true })
+      removed += 1
+    }
+  }
+  return { namespaces, examined, removed, bytesReclaimed, kept }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+ *  RECEIPT-SIDE TIMING RECOVERY
+ * ───────────────────────────────────────────────────────────────────────── */
+
+export interface ShardReceiptTimingScan {
+  readonly timings: ReadonlyMap<string, number>
+  readonly receiptsRead: number
+  readonly receiptsAvailable: number
+  readonly recovered: number
+}
+
+/**
+ * Bounded recovery of per-file scheduling weights from green receipts.
+ *
+ * BOUNDED means two things and neither is a tuned number: the scan stops the
+ * moment every wanted file has a weight, and it never reads a receipt twice.
+ * A receipt older than the timing TTL is skipped — a replayed measurement must
+ * age out exactly like the one it replays.
+ */
+const receiptFilePaths = (root: string): readonly string[] => {
+  const paths: string[] = []
+  let namespaces: string[]
+  try {
+    namespaces = readdirSync(root).sort()
+  } catch {
+    return paths
+  }
+  for (const namespace of namespaces) {
+    try {
+      for (const file of readdirSync(join(root, namespace)).sort()) {
+        paths.push(join(root, namespace, file))
+      }
+    } catch {
+      /* a namespace removed mid-scan is simply not scanned */
+    }
+  }
+  return paths
+}
+
+/** Timing records a receipt file can contribute, or an empty list. */
+const receiptTimingRecords = (
+  path: string,
+  nowMs: number,
+  maxAgeMs: number,
+): readonly ReceiptTimingRecord[] => {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(readFileSync(path, "utf8"))
+  } catch {
+    return []
+  }
+  if (typeof parsed !== "object" || parsed === null) return []
+  const row = parsed as Record<string, unknown>
+  if (row.schema !== TEST_SHARD_RECEIPT_SCHEMA || !Array.isArray(row.timingObservations)) return []
+  if (!Number.isSafeInteger(row.createdAtMs)) return []
+  const ageMs = nowMs - (row.createdAtMs as number)
+  if (ageMs < 0 || ageMs > maxAgeMs) return []
+  return row.timingObservations.filter(isReceiptTimingRecord)
+}
+
+/**
+ * Bounded recovery of per-file scheduling weights from green receipts.
+ *
+ * BOUNDED means two things and neither is a tuned number: the scan stops the
+ * moment every wanted file has a weight, and it never reads a receipt twice.
+ * A receipt older than the timing TTL is skipped — a replayed measurement must
+ * age out exactly like the one it replays.
+ */
+export const scanShardReceiptTimings = (
+  root: string,
+  wanted: ReadonlySet<string>,
+  nowMs = Date.now(),
+  maxAgeMs = 14 * 24 * 60 * 60_000,
+): ShardReceiptTimingScan => {
+  const timings = new Map<string, number>()
+  const outstanding = new Set(wanted)
+  const paths = receiptFilePaths(root)
+  let receiptsRead = 0
+  for (const path of paths) {
+    if (outstanding.size === 0) break
+    receiptsRead += 1
+    for (const record of receiptTimingRecords(path, nowMs, maxAgeMs)) {
+      if (!outstanding.has(record.file)) continue
+      timings.set(record.file, record.schedulingWeightMs)
+      outstanding.delete(record.file)
+    }
+  }
+  return { timings, receiptsRead, receiptsAvailable: paths.length, recovered: timings.size }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+ *  SCAN REACH
+ * ───────────────────────────────────────────────────────────────────────── */
 
 export interface ScanReachRecord {
   readonly id: string

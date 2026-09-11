@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
+import { writeSuccessfulTestShardReceiptAtomic } from "../../../tools/dev/test-shard-receipt"
 
 /**
  * The unit speed budget stopped executing the unit suite for itself and now
@@ -73,12 +74,33 @@ const run = (
     ),
   ]
   const timingsPath = `${xmlPath}.timings.json`
+  // The CURRENT store schema. This fixture used to write `quanta.test-timings.v1`
+  // with `{ ms, sampledAtMs }` entries — a shape `loadTestTimings` has never
+  // accepted — so every assertion below about runner-timed file cost was
+  // measuring the empty-store path instead of the store.
   writeFileSync(
     timingsPath,
     `${JSON.stringify({
-      schema: "quanta.test-timings.v1",
+      schema: "quanta.test-timings.v2",
       entries: Object.fromEntries(
-        files.map((file) => [file, { ms: timingOverrides[file] ?? 1, sampledAtMs: Date.now() }]),
+        files.map((file) => [
+          file,
+          {
+            samples: [
+              {
+                schedulingWeightMs: timingOverrides[file] ?? 1,
+                suiteMs: timingOverrides[file] ?? 1,
+                chunkOverheadShareMs: 0,
+                observedChunkWallMs: timingOverrides[file] ?? 1,
+                sampledAtMs: Date.now(),
+                runnerClass: "pure",
+                policyDigest: "fixture",
+                intraParallel: 1,
+                loadPerCore: 0,
+              },
+            ],
+          },
+        ]),
       ),
     })}\n`,
   )
@@ -191,5 +213,107 @@ describe("unit speed budget over the full-suite receipt", () => {
     expect(result.code).toBe(1)
     expect(result.err).toContain("slowest unit file")
     expect(result.err).toContain("runner/module-aware screen=60000ms")
+  })
+})
+
+/** Run with an explicitly-supplied timings file (or none at all). */
+const runRaw = (
+  xmlPath: string,
+  args: readonly string[],
+): { readonly code: number; readonly out: string; readonly err: string } => {
+  const proc = Bun.spawnSync([process.execPath, SCRIPT, xmlPath, ...args], {
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  return { code: proc.exitCode ?? 1, out: proc.stdout.toString(), err: proc.stderr.toString() }
+}
+
+describe("missing runner timings are a bounded coverage miss, never an unclearable red", () => {
+  test("an absent store REPORTS why and does not fail the gate — twice running", () => {
+    const xml = mergedJunit(fastUnitSuites())
+    const absent = `${xml}.no-such-store.json`
+
+    // MEASURED at HEAD: three consecutive invocations all exited 1 with
+    // `is missing 12/12 executed file(s)`, and nothing in that path ever
+    // created the store — an unclearable gate.
+    const first = runRaw(xml, ["--scope=tests/unit/", `--timings=${absent}`])
+    const second = runRaw(xml, ["--scope=tests/unit/", `--timings=${absent}`])
+
+    expect(first.code, `${first.out}\n${first.err}`).toBe(0)
+    expect(second.code).toBe(0)
+    expect(first.err).toContain("INCOHERENT timing evidence")
+    expect(first.err).toContain("cold (absent)")
+    expect(first.err).toContain("bounded coverage miss, not a gate failure")
+    // The degradation is COUNTED in the summary, never silent.
+    expect(first.out).toContain("timing-coverage=0/12")
+  })
+
+  test("ANTI-VACUITY — a real per-test regression still fails with no timings at all", () => {
+    // Same missing-store condition, one genuinely slow case. If the branch
+    // above had simply stopped asserting, this would pass too.
+    const xml = mergedJunit([
+      ...fastUnitSuites(),
+      suite("tests/unit/slow.test.ts", [{ name: "very slow unit case", seconds: 90 }]),
+    ])
+    const result = runRaw(xml, ["--scope=tests/unit/", `--timings=${xml}.absent.json`])
+
+    expect(result.code).toBe(1)
+    expect(result.err).toContain("REGRESSION")
+  })
+
+  test("`--receipts` rehydrates the missing files from green shard receipts", () => {
+    const xml = mergedJunit(fastUnitSuites())
+    const receiptsRoot = join(dirname(xml), "shard-receipts")
+    const namespace = join(receiptsRoot, "full:pr")
+    mkdirSync(namespace, { recursive: true })
+    const files = Array.from({ length: 12 }, (_, index) => `tests/unit/fixture-${index}.test.ts`)
+    writeSuccessfulTestShardReceiptAtomic({
+      path: join(namespace, "chunk.json"),
+      identity: {
+        scopeKind: "whole-tree",
+        treeSha256: "a".repeat(64),
+        suite: "full:pr",
+        manifestSha256: "b".repeat(64),
+        shardIndex: 1,
+        shardFileCount: files.length,
+        shardFilesSha256: "c".repeat(64),
+        runtimeSha256: "d".repeat(64),
+        toolScopeSha256: "e".repeat(64),
+        testEnvSha256: "f".repeat(64),
+        junit: true,
+        intraParallel: 1,
+        executionPolicySha256: "0".repeat(64),
+        timeoutPolicySha256: "1".repeat(64),
+        inputScopeSha256: "2".repeat(64),
+        producerReceiptsSha256: "3".repeat(64),
+      },
+      executedFiles: files.length,
+      scanReachRecords: [],
+      testTimeoutMs: 120_000,
+      timingObservations: files.map((file) => ({
+        file,
+        schedulingWeightMs: 7,
+        suiteMs: 7,
+        chunkOverheadShareMs: 0,
+        observedChunkWallMs: 7,
+        runnerClass: "pure",
+        policyDigest: "policy",
+        intraParallel: 1,
+        loadPerCore: 0,
+      })),
+      scopeReason: "fixture",
+      junitXml: readFileSync(xml, "utf8"),
+    })
+
+    const result = runRaw(xml, [
+      "--scope=tests/unit/",
+      `--timings=${xml}.absent.json`,
+      `--receipts=${receiptsRoot}`,
+    ])
+
+    expect(result.code, `${result.out}\n${result.err}`).toBe(0)
+    // Full coverage restored from the receipts, so no incoherence is reported.
+    expect(result.out).toContain("timing-coverage=12/12")
+    expect(result.err).not.toContain("INCOHERENT")
   })
 })

@@ -25,6 +25,8 @@ import {
   resolveTestPopulation,
   selectTestPoliciesForTier,
 } from "./test-policy"
+import { loadTestResourceCertificationsSafe } from "./test-resource-certification"
+import { resolveChunkCacheScope } from "./test-shard-cache-scope"
 import {
   discoverInventory,
   discoverSuiteFiles,
@@ -59,28 +61,34 @@ import {
   type TestResourceClass,
 } from "./test-shard-plan"
 import {
+  chunkCacheNamespace,
   loadSuccessfulTestShardReceipt,
   mergeScanReachSinks,
+  pruneExpiredShardReceipts,
   type SuccessfulTestShardReceipt,
   shardFilesSha256,
   type TestShardCacheIdentity,
   testEnvironmentSha256,
+  testRuntimeSha256,
   testShardCacheIdentitySha256,
-  testToolchainSha256,
   trackedTreeSha256,
   writeScanReachReceiptAtomic,
   writeSuccessfulTestShardReceiptAtomic,
 } from "./test-shard-receipt"
 import { type ShardSelection, selectShardManifest } from "./test-shard-selection"
+import { currentTimeoutPolicy, timeoutPolicySha256 } from "./test-shard-timeout-policy"
 import {
   harvestChunkTimingObservations,
   loadTestTimings,
-  mergeTestTimingObservations,
+  openTimingJournal,
+  receiptTimingSamples,
+  recoverAbandonedTimingJournals,
+  type TimingJournal,
+  type TimingSample,
 } from "./test-shard-timings"
 import { loadTierPopulationFloors } from "./test-tier-population"
 import { ADMISSION_DEADLINE_ENV } from "./verification-admission"
 import { executionPolicyDigest } from "./verification-execution-policy"
-import { chunkInputScopeSha256 } from "./verification-input-scope"
 import { sharedVerificationCacheRoot } from "./verification-receipt"
 import { applyUserLibraryDecision, type UserLibraryDecision } from "./worker-home"
 
@@ -101,6 +109,41 @@ const SCAN_REACH_RECEIPT = join(REPO_ROOT, ".cache", "scan-reach-receipt.json")
 const SHARED_CACHE_ROOT = sharedVerificationCacheRoot(REPO_ROOT)
 const SHARD_CACHE_ROOT = join(SHARED_CACHE_ROOT, "test-shards", "v3")
 const TIMING_STORE = join(SHARED_CACHE_ROOT, "test-timings-v2.json")
+
+/**
+ * Every shard-cache root version this checkout could still be holding bytes for.
+ *
+ * A root version bump orphans the previous one WHOLESALE: nothing reaches it
+ * again, so nothing collects it. Measured on this checkout while wiring the
+ * namespace-complete prune, the superseded `v2` root held 307 receipts and
+ * 127 MiB, every one expired. Sweeping by TTL across all versions costs one
+ * `readdir` per root and removes the only thing that made a cache bump a leak.
+ */
+const shardCacheRootsToSweep = (): readonly string[] => {
+  const base = join(SHARED_CACHE_ROOT, "test-shards")
+  try {
+    return readdirSync(base, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && /^v\d+$/u.test(entry.name))
+      .map((entry) => join(base, entry.name))
+      .sort()
+  } catch {
+    // No cache yet. Nothing to sweep is the correct answer, not an error.
+    return []
+  }
+}
+
+/** TTL-only collection across every cache root version, reported when it bites. */
+const sweepExpiredShardCaches = (): void => {
+  for (const root of shardCacheRootsToSweep()) {
+    const pruned = pruneExpiredShardReceipts(root)
+    if (pruned.removed === 0) continue
+    process.stderr.write(
+      `[test:shards] cache GC removed ${pruned.removed} expired receipt(s) ` +
+        `(${Math.round(pruned.bytesReclaimed / 1024 ** 2)} MiB) across ` +
+        `${pruned.namespaces.length} namespace(s) under ${root}; kept ${pruned.kept}\n`,
+    )
+  }
+}
 const TEST_POLICY_OVERRIDES = join(REPO_ROOT, "tools", "dev", "test-policy-overrides.json")
 // Extreme-load regime: the same load/(2*cpus) pressure formula that saturates
 // the per-test timeout cap. At or beyond it, starting a fresh worker mostly
@@ -284,7 +327,11 @@ const junitShardPath = (junitOut: string, index: number): string => `${junitOut}
  * TTL pruning still bounds the directory.
  */
 const chunkCachePath = (identity: TestShardCacheIdentity): string =>
-  join(SHARD_CACHE_ROOT, identity.suite, `chunk-${testShardCacheIdentitySha256(identity)}.json`)
+  join(
+    SHARD_CACHE_ROOT,
+    chunkCacheNamespace(identity),
+    `chunk-${testShardCacheIdentitySha256(identity)}.json`,
+  )
 
 const prepareJunit = (junitOut: string, indices: readonly number[]): void => {
   // Bun's JUnit reporter does not create the target directory; on a fresh
@@ -314,35 +361,6 @@ const mergeJunit = (junitOut: string, indices: readonly number[]): void => {
     junitOut,
     `<?xml version="1.0" encoding="UTF-8"?>\n<testsuites name="bun test sharded">\n${bodies.join("\n")}\n</testsuites>\n`,
   )
-}
-
-/**
- * TTL-based garbage collection. The cache directory is SHARED across
- * worktrees, so "not part of MY current plan" is not evidence of staleness —
- * a sibling checkout at another HEAD may still be resuming from its receipts.
- * Only receipts past their own expiry (or unreadable) are dropped.
- */
-const pruneStaleChunkReceipts = (suite: SuiteName, nowMs = Date.now()): void => {
-  const dir = join(SHARD_CACHE_ROOT, suite)
-  let entries: string[]
-  try {
-    entries = readdirSync(dir)
-  } catch {
-    return
-  }
-  for (const entry of entries) {
-    const path = join(dir, entry)
-    let expired = true
-    try {
-      const parsed = JSON.parse(readFileSync(path, "utf8")) as { expiresAtMs?: unknown }
-      expired = !(
-        Number.isSafeInteger(parsed.expiresAtMs) && (parsed.expiresAtMs as number) > nowMs
-      )
-    } catch {
-      expired = true
-    }
-    if (expired) rmSync(path, { force: true })
-  }
 }
 
 /**
@@ -576,6 +594,8 @@ interface CachedChunk {
   readonly cachePath: string
   /** Decided once, at plan time, so the receipt's identity and the run agree. */
   readonly intraParallel: number
+  /** Why this chunk got the cache scope it did, recorded in the receipt. */
+  readonly scopeReason: string
 }
 
 const validateCompletedShard = (before: GitSnapshot, completed: CompletedShard): string => {
@@ -636,49 +656,67 @@ const materializeCachedJunit = (
   writeFileSync(junitShardPath(opts.junitOut, chunkIndex), receipt.junitXml)
 }
 
+/**
+ * Measured per-file wall time for one green chunk.
+ *
+ * The observations are BOTH the receipt's timing evidence and the journal's
+ * entry, so a cache hit can rehydrate what the executed run measured. A green
+ * receipt whose timing write was lost used to be unrepairable: every later
+ * campaign hit it, never re-ran the chunk, and the speed budget stayed red.
+ */
+const chunkTimingObservations = (
+  cached: CachedChunk,
+  result: ShardRunResult,
+  junitXml: string,
+): ReadonlyMap<string, TimingSample> => {
+  // Bun writes the JUnit `file` attribute RELATIVE to the worker's cwd (the
+  // repo root) even when the command line carried absolute paths, so the
+  // harvest must look suites up by the same relative key (measured on 1.3.14).
+  const relFiles = cached.chunk.files.map((file) => relative(REPO_ROOT, file))
+  return harvestChunkTimingObservations(junitXml, relFiles, result.elapsedMs, {
+    runnerClass: cached.chunk.resourceClass,
+    policyDigest: cached.identity.executionPolicySha256,
+    intraParallel: cached.intraParallel,
+    loadPerCore: Math.max(0, (loadavg()[0] ?? 0) / availableParallelism()),
+  })
+}
+
 const cacheSuccessfulShard = (
   cached: CachedChunk,
   result: ShardRunResult,
   opts: RunnerOptions,
+  journal: TimingJournal,
+  testTimeoutMs: number,
 ): void => {
   if (result.executedFiles === undefined) {
     throw new Error(`[test:shards] chunk ${cached.chunk.index} has no executed-file receipt`)
   }
   const junitXml = readFileSync(result.junitPath, "utf8")
   junitBody(junitXml, cached.chunk.index)
+  const observations = chunkTimingObservations(cached, result, junitXml)
+  // One APPEND per chunk. The store itself is written once, at campaign end —
+  // it used to be read, sorted and rewritten on every chunk completion, up to
+  // 44 whole-store rewrites per full campaign. Timing is a scheduler hint and
+  // never a verdict input, so a journal failure is reported and the run goes on.
+  try {
+    journal.record(observations)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    process.stderr.write(
+      `[test:shards] WARN timing journal failed for chunk ${cached.chunk.index}: ${message}\n`,
+    )
+  }
   if (opts.cacheMode === "off") return
   writeSuccessfulTestShardReceiptAtomic({
     path: cached.cachePath,
     identity: { ...cached.identity, junit: true },
     executedFiles: result.executedFiles,
     scanReachRecords: mergeScanReachSinks([result.scanReachSink]),
+    testTimeoutMs,
+    timingObservations: [...observations].map(([file, sample]) => ({ file, ...sample })),
+    scopeReason: cached.scopeReason,
     junitXml,
   })
-}
-
-/** Every green chunk feeds measured per-file wall time back to the planner. */
-const harvestTimings = (cached: CachedChunk, result: ShardRunResult): void => {
-  try {
-    const junitXml = readFileSync(result.junitPath, "utf8")
-    // Bun writes the JUnit `file` attribute RELATIVE to the worker's cwd (the
-    // repo root) even when the command line carried absolute paths, so the
-    // harvest must look suites up by the same relative key (measured on 1.3.14).
-    const relFiles = cached.chunk.files.map((file) => relative(REPO_ROOT, file))
-    const observations = harvestChunkTimingObservations(junitXml, relFiles, result.elapsedMs, {
-      runnerClass: cached.chunk.resourceClass,
-      policyDigest: cached.identity.executionPolicySha256,
-      intraParallel: cached.intraParallel,
-      loadPerCore: Math.max(0, (loadavg()[0] ?? 0) / availableParallelism()),
-    })
-    mergeTestTimingObservations(TIMING_STORE, observations)
-  } catch (error) {
-    // Timing is a scheduler hint, never a verdict input; a harvest failure is
-    // reported and the campaign continues.
-    const message = error instanceof Error ? error.message : String(error)
-    process.stderr.write(
-      `[test:shards] WARN timing harvest failed for chunk ${cached.chunk.index}: ${message}\n`,
-    )
-  }
 }
 
 const loadPressure = (): number => {
@@ -743,6 +781,7 @@ const executeChunks = async (input: {
   readonly before: GitSnapshot
   readonly testTimeoutMs: number
   readonly registry: ShardProcessRegistry
+  readonly journal: TimingJournal
 }): Promise<readonly string[]> => {
   const totalChunks = input.chunks.length
   const scanReachSinks = new Map<number, string>()
@@ -758,6 +797,7 @@ const executeChunks = async (input: {
     const lookup = loadSuccessfulTestShardReceipt({
       path: cached.cachePath,
       expected: cached.identity,
+      expectedTestTimeoutMs: input.testTimeoutMs,
     })
     if (lookup.kind === "miss") {
       process.stdout.write(
@@ -767,6 +807,15 @@ const executeChunks = async (input: {
       continue
     }
     materializeCachedJunit(input.opts, cached.chunk.index, lookup.receipt)
+    // A cache HIT must restore the scheduling evidence the executed run
+    // produced, or the speed budget sees a green shard with no timings and
+    // fails forever with no way to repair it. The sample keeps the RECEIPT's
+    // creation time, never `now`: a replayed measurement ages out exactly like
+    // the one it replays.
+    input.journal.record(
+      receiptTimingSamples(lookup.receipt.timingObservations),
+      lookup.receipt.createdAtMs,
+    )
     scanReachSinks.set(
       cached.chunk.index,
       materializeCachedScanReachSink(input.runRoot, lookup.receipt),
@@ -806,8 +855,7 @@ const executeChunks = async (input: {
           snapshot: await gitSnapshot(),
         }
         const sink = validateCompletedShard(input.before, completedShard)
-        cacheSuccessfulShard(cached, result, input.opts)
-        harvestTimings(cached, result)
+        cacheSuccessfulShard(cached, result, input.opts, input.journal, input.testTimeoutMs)
         return { index: cached.chunk.index, sink }
       },
     })),
@@ -946,6 +994,107 @@ const selectManifest = (opts: RunnerOptions): ShardSelection =>
     selectForTier: (files, tier) => tierSelection(files, tier as RunnerOptions["tier"]),
   })
 
+/**
+ * One cache identity per chunk, decided once so the receipt describes the
+ * schedule the run will actually use.
+ *
+ * Extracted from `main()` rather than inlined: the identity is where four
+ * separate correctness properties meet — the stable timeout policy, the input
+ * scope, the tool scope and the intra-worker width — and burying it in an
+ * already-long entrypoint is how the load-derived timeout ended up hashed into
+ * it unnoticed.
+ */
+/**
+ * The resource registry, or nothing, never a dead campaign.
+ *
+ * The registry is mid-migration (module at schema v2, JSON still v1). A registry
+ * that will not parse must mean "nothing is certified" — which keeps every chunk
+ * on the whole-tree fail-safe identity — rather than stopping the run.
+ */
+const loadResourceCertificationsOrWarn = (): ReturnType<
+  typeof loadTestResourceCertificationsSafe
+>["certifications"] => {
+  const load = loadTestResourceCertificationsSafe(
+    join(REPO_ROOT, "tools", "dev", "test-resource-certifications.json"),
+  )
+  if (load.error !== undefined) {
+    process.stderr.write(
+      `[test:shards] WARN resource certifications unreadable (${load.error}); ` +
+        "every chunk keeps the whole-tree cache identity\n",
+    )
+  }
+  return load.certifications
+}
+
+const buildCachedChunks = (input: {
+  readonly chunks: readonly TestChunk[]
+  readonly opts: RunnerOptions
+  readonly treeSha256: string
+  readonly manifestDigest: string
+  readonly runtimeSha256: string
+  readonly envSha256: string
+  readonly timeoutPolicyDigest: string
+  readonly resourceCertifications: Parameters<
+    typeof resolveChunkCacheScope
+  >[0]["resourceCertifications"]
+  readonly cpuCount: number
+  readonly concurrency: number
+}): readonly CachedChunk[] =>
+  input.chunks.map((chunk) => {
+    const filesSha256 = shardFilesSha256(REPO_ROOT, chunk.files)
+    const intraParallel = chooseIntraWorkerParallelism({
+      resourceClass: chunk.resourceClass,
+      cpuCount: input.cpuCount,
+      workers: input.concurrency,
+      pressure: loadPressure(),
+    })
+    // Certified only when EVERY file is both resource-certified and
+    // declared-input certified. The registry currently holds zero
+    // certifications, so this resolves to `whole-tree` for every chunk and the
+    // cache behaves exactly as it does today — the narrowing is available and
+    // proven by test, not yet exercised in production.
+    const scope = resolveChunkCacheScope({
+      repoRoot: REPO_ROOT,
+      ids: chunk.files.map((file) => relative(REPO_ROOT, file)),
+      resourceCertifications: input.resourceCertifications,
+    })
+    const identity: TestShardCacheIdentity = {
+      scopeKind: scope.kind,
+      treeSha256: input.treeSha256,
+      suite: cacheSuiteName(input.opts),
+      manifestSha256: input.manifestDigest,
+      shardIndex: chunk.index,
+      shardFileCount: chunk.files.length,
+      shardFilesSha256: filesSha256,
+      runtimeSha256: input.runtimeSha256,
+      toolScopeSha256: scope.toolScopeSha256,
+      testEnvSha256: input.envSha256,
+      junit: true,
+      intraParallel,
+      executionPolicySha256: executionPolicyDigest({
+        version: "v2",
+        runnerIdentity: `bun-${Bun.version}-${process.platform}-${process.arch}`,
+        intraParallel,
+        timeoutPolicyDigest: input.timeoutPolicyDigest,
+        isolationPolicyDigest: new Bun.CryptoHasher("sha256")
+          .update(chunk.resourceClass)
+          .digest("hex"),
+        environmentDigest: input.envSha256,
+        cacheMode: input.opts.cacheMode,
+      }),
+      timeoutPolicySha256: input.timeoutPolicyDigest,
+      inputScopeSha256: scope.inputScopeSha256,
+      producerReceiptsSha256: scope.producerReceiptsSha256,
+    }
+    return {
+      chunk,
+      intraParallel,
+      cachePath: chunkCachePath(identity),
+      identity,
+      scopeReason: scope.reason,
+    }
+  })
+
 const main = async (): Promise<void> => {
   const opts = parseOptions(process.argv.slice(2))
   if (opts.discoverOnly) {
@@ -1020,6 +1169,9 @@ const main = async (): Promise<void> => {
     const { discovered: discoveredManifest, manifest, tiered } = selectManifest(opts)
     const manifestDigest = manifestSha256(manifest)
     const treeSha256 = trackedTreeSha256(REPO_ROOT)
+    // Fold anything an interrupted campaign already measured back in, before
+    // this campaign reads the store for planning.
+    recoverAbandonedTimingJournals(TIMING_STORE)
     const timings = loadTestTimings(TIMING_STORE)
     const chunks = planTestChunks(manifest, {
       predictMs: (file) => timings.get(relative(REPO_ROOT, file)),
@@ -1048,55 +1200,34 @@ const main = async (): Promise<void> => {
         `non_pure_files=${nonPureFiles}\n`,
     )
 
-    const toolchainSha256 = testToolchainSha256()
-    const envSha256 = testEnvironmentSha256(process.env, testTimeoutMs, REPO_ROOT)
+    const runtimeSha256 = testRuntimeSha256()
+    // The STABLE policy base, not the load-derived instance value. A 1-minute
+    // load average moved the 120/240/300s timeout, and that number was hashed
+    // into the execution-policy digest — so identical code missed every chunk
+    // purely because the box got busier. The executed timeout still follows load.
+    const timeoutPolicy = currentTimeoutPolicy()
+    const envSha256 = testEnvironmentSha256(process.env, timeoutPolicy.baseMs, REPO_ROOT)
+    const timeoutPolicyDigest = timeoutPolicySha256(timeoutPolicy)
+    // SAFE loader: the resource registry is mid-migration (module at schema v2,
+    // JSON still v1), and a registry that will not parse must mean "nothing is
+    // certified", never a dead campaign.
+    const resourceCertifications = loadResourceCertificationsOrWarn()
+    const journal = openTimingJournal({ storePath: TIMING_STORE })
     // One decision per chunk, made here so the receipt's identity describes the
     // schedule the run will actually use. `workers` is the concurrency the host
     // measured at campaign start; the per-start measurement can still drop the
     // WORKER count later, but a chunk's own file concurrency stays fixed.
-    const cachedChunks: readonly CachedChunk[] = chunks.map((chunk) => {
-      const filesSha256 = shardFilesSha256(REPO_ROOT, chunk.files)
-      const intraParallel = chooseIntraWorkerParallelism({
-        resourceClass: chunk.resourceClass,
-        cpuCount,
-        workers: concurrency,
-        pressure: loadPressure(),
-      })
-      const identity: TestShardCacheIdentity = {
-        treeSha256,
-        suite: cacheSuiteName(opts),
-        manifestSha256: manifestDigest,
-        shardIndex: chunk.index,
-        shardFileCount: chunk.files.length,
-        shardFilesSha256: filesSha256,
-        toolchainSha256,
-        testEnvSha256: envSha256,
-        junit: true,
-        intraParallel,
-        executionPolicySha256: executionPolicyDigest({
-          version: "v2",
-          runnerIdentity: `bun-${Bun.version}-${process.platform}-${process.arch}`,
-          intraParallel,
-          timeoutPolicyDigest: new Bun.CryptoHasher("sha256")
-            .update(String(testTimeoutMs))
-            .digest("hex"),
-          isolationPolicyDigest: new Bun.CryptoHasher("sha256")
-            .update(chunk.resourceClass)
-            .digest("hex"),
-          environmentDigest: envSha256,
-          cacheMode: opts.cacheMode,
-        }),
-        inputScopeSha256: chunkInputScopeSha256(
-          REPO_ROOT,
-          chunk.files.map((file) => relative(REPO_ROOT, file)),
-        ),
-      }
-      return {
-        chunk,
-        intraParallel,
-        cachePath: chunkCachePath(identity),
-        identity,
-      }
+    const cachedChunks = buildCachedChunks({
+      chunks,
+      opts,
+      treeSha256,
+      manifestDigest,
+      runtimeSha256,
+      envSha256,
+      timeoutPolicyDigest,
+      resourceCertifications,
+      cpuCount,
+      concurrency,
     })
 
     const scanReachSinks = await executeChunksWithSourcePostflight({
@@ -1106,7 +1237,16 @@ const main = async (): Promise<void> => {
       before,
       testTimeoutMs,
       registry,
+      journal,
     })
+    // THE ONE store write of the campaign, whatever the chunk count. It used to
+    // be a whole-store read-sort-rewrite per completed chunk — up to 44 per full
+    // run.
+    const committed = journal.commit()
+    process.stdout.write(
+      `[test:shards] timing store committed files=${committed.files} ` +
+        `writes=${committed.storeWrites} recovered_journals=${committed.recoveredJournals}\n`,
+    )
 
     const after = await gitSnapshot()
     if (!sameSnapshot(before, after)) {
@@ -1127,12 +1267,18 @@ const main = async (): Promise<void> => {
         chunks.map(({ index }) => index),
       )
     }
-    pruneStaleChunkReceipts(opts.suite)
     process.stdout.write(
       `[test:shards] PASS suite=${opts.suite} chunks=${chunks.length}/${chunks.length} ` +
         `manifest_files=${manifest.length} head=${before.head}\n`,
     )
   } finally {
+    // Bounded GC on EVERY exit, green or red. It used to run only after total
+    // success, so a repeatedly-red branch accumulated expired payloads forever,
+    // and it swept the bare `full` directory while tier caches are written to
+    // `full:pr` / `full:nightly` — measured on this checkout, the superseded v2
+    // root alone held 307 receipts / 127 MiB, all expired. TTL is the only
+    // criterion, so a sibling worktree resuming from its own receipts survives.
+    sweepExpiredShardCaches()
     // Drain before release: the run root is deleted only once every worker
     // group is confirmed empty, and the lease is released only after that —
     // a surviving descendant must never overlap the next campaign.
