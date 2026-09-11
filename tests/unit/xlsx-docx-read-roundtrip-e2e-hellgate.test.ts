@@ -17,16 +17,25 @@
  * together, default-OFF).
  */
 
-import { describe, expect, test } from "bun:test"
-import { mkdtempSync } from "node:fs"
+import { afterEach, describe, expect, test } from "bun:test"
 import { writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { deflateRawSync } from "node:zlib"
 import { buildDefaultTools } from "@/tool"
 import { buildXlsx } from "@/tool/document/authoring/xlsx"
 import { textEntry, unzip, type ZipEntry } from "@/tool/document/authoring/zip-store"
 import type { Tool, ToolContext, ToolResult } from "@/tool/types"
+import { makeTempDirOwner } from "../_helpers/temp-dir"
+
+/**
+ * Every temp root this file makes, removed in `afterEach` whether the case
+ * passed, failed, or threw. Before this, each `mkdtempSync` here had no `rm`
+ * anywhere in the file and left one directory per case per run.
+ */
+const tempRoots = makeTempDirOwner()
+afterEach(() => {
+  tempRoots.disposeAll()
+})
 
 const ctx = (cwd: string): ToolContext => ({ cwd, signal: new AbortController().signal })
 
@@ -149,7 +158,7 @@ describe("xlsx/docx read e2e — readers are base tools (always on)", () => {
 describe("xlsx_write → xlsx_read TRUE round-trip", () => {
   test("write real .xlsx (multi-sheet, XML-special, numbers) → read back via tool", async () => {
     const tools = buildDefaultTools({ officeAuthoring: true })
-    const dir = mkdtempSync(join(tmpdir(), "xlsx-rt-"))
+    const dir = tempRoots.create("xlsx-rt-")
     const writeRes = await run(
       toolByName(tools, "xlsx_write"),
       {
@@ -191,7 +200,7 @@ describe("xlsx_write → xlsx_read TRUE round-trip", () => {
 
   test("reading a specific sheet by name", async () => {
     const tools = buildDefaultTools({ officeAuthoring: true })
-    const dir = mkdtempSync(join(tmpdir(), "xlsx-rt2-"))
+    const dir = tempRoots.create("xlsx-rt2-")
     await run(
       toolByName(tools, "xlsx_write"),
       {
@@ -212,7 +221,7 @@ describe("xlsx_write → xlsx_read TRUE round-trip", () => {
 describe("docx_write → docx_read TRUE round-trip", () => {
   test("write real .docx → read text back via tool", async () => {
     const tools = buildDefaultTools({ officeAuthoring: true })
-    const dir = mkdtempSync(join(tmpdir(), "docx-rt-"))
+    const dir = tempRoots.create("docx-rt-")
     const writeRes = await run(
       toolByName(tools, "docx_write"),
       {
@@ -238,7 +247,7 @@ describe("docx_write → docx_read TRUE round-trip", () => {
 describe("DEFLATE real-world-shaped fixture reads correctly through the tool", () => {
   test("a method-8 .xlsx on disk reads back (not STORED-only)", async () => {
     const tools = buildDefaultTools({ officeAuthoring: true })
-    const dir = mkdtempSync(join(tmpdir(), "xlsx-deflate-"))
+    const dir = tempRoots.create("xlsx-deflate-")
     // Author a STORED xlsx in-memory, re-zip its parts as DEFLATE, write to disk.
     const stored = buildXlsx({ sheets: [{ name: "Z", rows: [["compressed", 7]] }] })
     const parts = unzip(stored)

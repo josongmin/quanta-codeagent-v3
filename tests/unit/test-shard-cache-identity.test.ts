@@ -34,18 +34,22 @@ import {
 } from "../../tools/dev/test-shard-receipt"
 
 const identity = (over: Partial<TestShardCacheIdentity> = {}): TestShardCacheIdentity => ({
+  scopeKind: "whole-tree",
   suite: "full",
   manifestSha256: "a".repeat(64),
   shardIndex: 3,
   shardFileCount: 2,
   shardFilesSha256: "b".repeat(64),
-  toolchainSha256: "c".repeat(64),
+  runtimeSha256: "9".repeat(64),
+  toolScopeSha256: "c".repeat(64),
   testEnvSha256: "d".repeat(64),
   treeSha256: "e".repeat(64),
   junit: false,
   intraParallel: 1,
   executionPolicySha256: "f".repeat(64),
   inputScopeSha256: "1".repeat(64),
+  timeoutPolicySha256: "2".repeat(64),
+  producerReceiptsSha256: "3".repeat(64),
   ...over,
 })
 
@@ -61,8 +65,11 @@ const roundTrip = (
       identity: written,
       executedFiles: 2,
       scanReachRecords: [],
+      testTimeoutMs: 120_000,
+      timingObservations: [],
+      scopeReason: "test",
     })
-    return loadSuccessfulTestShardReceipt({ path, expected })
+    return loadSuccessfulTestShardReceipt({ path, expected, expectedTestTimeoutMs: 120_000 })
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -85,6 +92,9 @@ describe("shard cache identity — what may and may not invalidate a receipt", (
         identity: identity(),
         executedFiles: 2,
         scanReachRecords: [],
+        testTimeoutMs: 120_000,
+        timingObservations: [],
+        scopeReason: "test",
       })
       const raw = Bun.file(path)
       expect(raw).toBeDefined()
@@ -112,7 +122,10 @@ describe("shard cache identity — what may and may not invalidate a receipt", (
       { manifestSha256: "9".repeat(64) },
       { shardFileCount: 3 },
       { shardFilesSha256: "9".repeat(64) },
-      { toolchainSha256: "9".repeat(64) },
+      { runtimeSha256: "8".repeat(64) },
+      { toolScopeSha256: "9".repeat(64) },
+      { timeoutPolicySha256: "9".repeat(64) },
+      { producerReceiptsSha256: "9".repeat(64) },
       { testEnvSha256: "9".repeat(64) },
       { junit: true },
       { intraParallel: 8 },
@@ -202,9 +215,14 @@ describe("shard cache identity — what may and may not invalidate a receipt", (
           receiptSha256: "a".repeat(64),
         })}\n`,
       )
-      expect(loadSuccessfulTestShardReceipt({ path, expected: identity(), nowMs: 2 }).kind).toBe(
-        "miss",
-      )
+      expect(
+        loadSuccessfulTestShardReceipt({
+          path,
+          expected: identity(),
+          expectedTestTimeoutMs: 120_000,
+          nowMs: 2,
+        }).kind,
+      ).toBe("miss")
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
@@ -226,6 +244,9 @@ describe("shard cache identity — what may and may not invalidate a receipt", (
         identity: identity(),
         executedFiles: 2,
         scanReachRecords: [],
+        testTimeoutMs: 120_000,
+        timingObservations: [],
+        scopeReason: "test",
       })
       const fs = require("node:fs") as typeof import("node:fs")
       const parsed = JSON.parse(fs.readFileSync(path, "utf8")) as Record<string, unknown>
@@ -235,6 +256,7 @@ describe("shard cache identity — what may and may not invalidate a receipt", (
       const lookup = loadSuccessfulTestShardReceipt({
         path,
         expected: identity({ treeSha256: "not-a-sha" as string }),
+        expectedTestTimeoutMs: 120_000,
       })
 
       expect(lookup.kind).toBe("miss")
@@ -249,7 +271,13 @@ describe("shard cache identity — what may and may not invalidate a receipt", (
     try {
       const path = join(dir, "chunk.json")
       writeFileSync(path, "{ not json")
-      expect(loadSuccessfulTestShardReceipt({ path, expected: identity() }).kind).toBe("miss")
+      expect(
+        loadSuccessfulTestShardReceipt({
+          path,
+          expected: identity(),
+          expectedTestTimeoutMs: 120_000,
+        }).kind,
+      ).toBe("miss")
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

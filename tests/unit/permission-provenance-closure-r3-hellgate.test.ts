@@ -261,19 +261,24 @@ describe.each(STRATEGIES)("SANDBOX pillar — repo cannot loosen ANY axis [%s]",
     expect(m.sandbox.networkIsolated).toBe(true)
   })
 
-  test("4. repo NARROW (adds networkIsolated the user lacked) is KEPT under most-restrictive", () => {
-    // Under most-restrictive the safest sub-axis always wins regardless of source,
-    // so a repo TIGHTENING networkIsolated is honoured.
-    if (strat !== "most-restrictive") return
-    const m = merge(
-      {
-        perUser: P({ sandbox: SBX({ networkIsolated: false }) }),
-        perRepo: P({ sandbox: SBX({ networkIsolated: true }) }),
-      },
-      strat,
-    )
-    expect(m.sandbox.networkIsolated).toBe(true)
-  })
+  // `if (strat !== "most-restrictive") return` reported this case as a PASS for
+  // every OTHER strategy in the matrix — green, absent from the skip counter,
+  // and asserting nothing. `skipIf` makes the non-applicable strategies visible.
+  test.skipIf(strat !== "most-restrictive")(
+    "4. repo NARROW (adds networkIsolated the user lacked) is KEPT under most-restrictive",
+    () => {
+      // Under most-restrictive the safest sub-axis always wins regardless of
+      // source, so a repo TIGHTENING networkIsolated is honoured.
+      const m = merge(
+        {
+          perUser: P({ sandbox: SBX({ networkIsolated: false }) }),
+          perRepo: P({ sandbox: SBX({ networkIsolated: true }) }),
+        },
+        strat,
+      )
+      expect(m.sandbox.networkIsolated).toBe(true)
+    },
+  )
 })
 
 /* ════════════════════════════════════════════════════════════════════════ */

@@ -34,10 +34,8 @@
  * the genuine bomb is capped at 32 MiB by zlib). No timing assertions.
  */
 
-import { describe, expect, test } from "bun:test"
-import { mkdtempSync } from "node:fs"
+import { afterEach, describe, expect, test } from "bun:test"
 import { writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { deflateRawSync } from "node:zlib"
 import { buildDocx } from "@/tool/document/authoring/docx"
@@ -54,6 +52,17 @@ import {
 import { docxReadTool } from "@/tool/document/docx-read"
 import { xlsxReadTool } from "@/tool/document/xlsx-read"
 import type { Tool, ToolContext, ToolResult } from "@/tool/types"
+import { makeTempDirOwner } from "../_helpers/temp-dir"
+
+/**
+ * Every temp root this file makes, removed in `afterEach` whether the case
+ * passed, failed, or threw. Before this, each `mkdtempSync` here had no `rm`
+ * anywhere in the file and left one directory per case per run.
+ */
+const tempRoots = makeTempDirOwner()
+afterEach(() => {
+  tempRoots.disposeAll()
+})
 
 const ctx = (cwd: string): ToolContext => ({ cwd, signal: new AbortController().signal })
 
@@ -189,7 +198,7 @@ const FOUR_GIB_LIE = 0xfffffffe
 
 describe("H15 — DEFLATE entry LIES about uncompressed size → reader rejects on declared cap", () => {
   test("xlsx_read: tampered workbook.xml declaring 4 GiB → typed error, no rows, no OOM", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "xlsx-bomb-decl-"))
+    const dir = tempRoots.create("xlsx-bomb-decl-")
 
     // 1. Author a LEGIT xlsx, then re-zip its parts as DEFLATE while LYING about
     //    the workbook part's uncompressed size. Everything else is honest.
@@ -224,7 +233,7 @@ describe("H15 — DEFLATE entry LIES about uncompressed size → reader rejects 
   })
 
   test("docx_read: tampered document.xml declaring 4 GiB → typed error, no text, no OOM", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "docx-bomb-decl-"))
+    const dir = tempRoots.create("docx-bomb-decl-")
 
     const stored = buildDocx({
       paragraphs: [{ kind: "paragraph", runs: [{ text: "CLASSIFIED body text" }] }],
@@ -255,7 +264,7 @@ describe("H15 — DEFLATE entry LIES about uncompressed size → reader rejects 
 
 describe("H15 — DEFLATE entry that GENUINELY inflates past the per-entry cap → capped, no OOM", () => {
   test("xlsx_read: workbook.xml that really expands to > 32 MiB → typed error, no rows", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "xlsx-bomb-real-"))
+    const dir = tempRoots.create("xlsx-bomb-real-")
 
     // A genuinely-compressible buffer JUST over the per-entry cap. Deflated, this
     // is a few KB on disk; inflating it would cross ZIP_MAX_ENTRY_BYTES, so the
@@ -311,7 +320,7 @@ describe("H15 — the DEFLATE-bomb guards are present (removing them turns the a
   test("a method-8 entry within cap still reads (no over-broad rejection / false positive)", async () => {
     // Twin to the bomb: an HONEST in-cap DEFLATE entry must STILL round-trip, so
     // the cap defends without breaking legitimate compressed Office files.
-    const dir = mkdtempSync(join(tmpdir(), "xlsx-bomb-control-"))
+    const dir = tempRoots.create("xlsx-bomb-control-")
     const stored = buildXlsx({ sheets: [{ name: "Z", rows: [["alive", 7]] }] })
     const honest = buildDeflateBombZip(partsOf(stored).map((p) => ({ entry: p })))
     await writeFile(join(dir, "honest.xlsx"), honest)

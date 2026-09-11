@@ -4,15 +4,24 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { runShell } from "../../src/runtime"
 import { isGitRepo, WorktreeError, withWorktree } from "../../src/runtime/worktree"
+import { hasBinary } from "../_helpers/capability-lane"
 
-const gitAvailable = async (): Promise<boolean> => {
-  try {
-    const r = await runShell("git --version")
-    return r.exitCode === 0
-  } catch {
-    return false
-  }
-}
+/**
+ * Each of the four cases below used to open with
+ *
+ *     if (!(await gitAvailable())) return
+ *
+ * and `gitAvailable` spawned `git --version`. On a host without git that is a
+ * PASS: bun cannot see that a body returned early, so the case is green, absent
+ * from the skip counter, and indistinguishable in the reporter from one that
+ * really exercised `withWorktree`. The self-skip ratchet did not catch it either
+ * — its regex required the whole `test(` header on one line, and biome wraps
+ * these across four lines because of the trailing timeout argument.
+ *
+ * `hasBinary` is PATH resolution rather than a subprocess, so the probe costs
+ * nothing at module load, and `skipIf` makes the absence VISIBLE.
+ */
+const GIT_AVAILABLE = hasBinary("git")
 
 /** Init a throwaway git repo with one commit; returns its absolute path. */
 const makeRepo = async (): Promise<string> => {
@@ -31,10 +40,9 @@ describe("withWorktree", () => {
   // isolation. Generous per-test budget keeps them deterministic under load.
   const GIT_TEST_TIMEOUT = 30_000
 
-  test(
+  test.skipIf(!GIT_AVAILABLE)(
     "rejects a non-git directory",
     async () => {
-      if (!(await gitAvailable())) return // env guard: skip when git absent
       const dir = await mkdtemp(join(tmpdir(), "wt-nogit-"))
       try {
         expect(isGitRepo(dir)).resolves.toBe(false)
@@ -46,10 +54,9 @@ describe("withWorktree", () => {
     GIT_TEST_TIMEOUT,
   )
 
-  test(
+  test.skipIf(!GIT_AVAILABLE)(
     "clean run auto-removes the worktree and returns the body value",
     async () => {
-      if (!(await gitAvailable())) return
       const repo = await makeRepo()
       try {
         let ranIn = ""
@@ -70,10 +77,9 @@ describe("withWorktree", () => {
     GIT_TEST_TIMEOUT,
   )
 
-  test(
+  test.skipIf(!GIT_AVAILABLE)(
     "dirty run keeps the worktree (removed=false)",
     async () => {
-      if (!(await gitAvailable())) return
       const repo = await makeRepo()
       try {
         const { info } = await withWorktree("dirty1", repo, async (p) => {
@@ -90,10 +96,9 @@ describe("withWorktree", () => {
     GIT_TEST_TIMEOUT,
   )
 
-  test(
+  test.skipIf(!GIT_AVAILABLE)(
     "a throw in the body force-removes the worktree and rethrows",
     async () => {
-      if (!(await gitAvailable())) return
       const repo = await makeRepo()
       try {
         await expect(

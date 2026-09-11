@@ -33,11 +33,19 @@
  * circuits BEFORE the agent loop is constructed.
  */
 
-import { describe, expect, test } from "bun:test"
-import { mkdtempSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { afterEach, describe, expect, test } from "bun:test"
 import { bunEntryArgv } from "../_helpers/repo-root"
+import { makeTempDirOwner } from "../_helpers/temp-dir"
+
+/**
+ * Every temp root this file makes, removed in `afterEach` whether the case
+ * passed, failed, or threw. Before this, each `mkdtempSync` here had no `rm`
+ * anywhere in the file and left one directory per case per run.
+ */
+const tempRoots = makeTempDirOwner()
+afterEach(() => {
+  tempRoots.disposeAll()
+})
 
 // Repository-RELATIVE entry. The absolute path is resolved at spawn time by
 // walking up from this file to the repository marker
@@ -73,7 +81,7 @@ interface RunOpts {
  *            out cleanly.
  */
 const runCli = async (args: string[], opts: RunOpts = {}): Promise<RunResult> => {
-  const cwd = mkdtempSync(join(tmpdir(), "cli-live-debug-"))
+  const cwd = tempRoots.create("cli-live-debug-")
   // Layer the parent PATH/HOME ONLY — drop every other parent env var so
   // a developer's `ANTHROPIC_API_KEY=<real>` or `QUANTA_*` leak cannot
   // affect the outcome.

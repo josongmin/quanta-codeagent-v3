@@ -76,7 +76,18 @@ export interface RatchetStats {
   readonly wallSites: number
   readonly randomSites: number
   readonly sleepFiles: number
+  /** Every tier, for context. */
   readonly sleepTotalMs: number
+  /**
+   * The ORDINARY tier only — the number the budget is actually compared against.
+   *
+   * Printed beside the all-tier figure because they legitimately differ: a
+   * nightly real-time canary is the intended DESTINATION for a wait that cannot
+   * be replaced by a readiness predicate, so it counts toward what the suite
+   * costs but not toward what the ordinary budget allows. Showing one number
+   * would make the baseline look wrong by exactly the size of that canary.
+   */
+  readonly budgetedSleepTotalMs: number
 }
 
 export interface RatchetResult {
@@ -160,6 +171,9 @@ const checkRandom = (
   return violations
 }
 
+/** The `*.nightly.test.ts` / `*.nightly-*.test.ts` convention the corpus already uses. */
+const NIGHTLY_FILE = /\.nightly(?:\.|-)/u
+
 const checkSleep = (
   scans: readonly FileScan[],
   baseline: DeterminismBaseline,
@@ -167,6 +181,21 @@ const checkSleep = (
   const violations: Violation[] = []
   let total = 0
   for (const scan of scans) {
+    // NIGHTLY-ONLY files are outside this budget, and that is the point of the
+    // budget rather than an exception to it.
+    //
+    // A real-time canary that cannot be replaced by a readiness predicate is
+    // supposed to END UP in a `*.nightly.test.ts` sibling — that is the fix, not
+    // the regression. Charging the destination against the same ceiling scores a
+    // successful MOVE as growth: the 16-second quiet-window wait left the PTY
+    // PR lane (that file went 22,650ms -> 6,600ms, ordinary corpus 34,530ms ->
+    // 18,530ms) and landed here, and this loop called the arrival a violation.
+    //
+    // The ordinary tier keeps a stricter, per-file instrument in
+    // `tools/dev/awaited-sleep-budget.ts`, which also forbids any single
+    // ordinary wait of 15s or more. One authority per tier, not two disagreeing
+    // about the same file.
+    if (NIGHTLY_FILE.test(scan.file)) continue
     total += scan.sleepTotalMs
     if (scan.sleepTotalMs === 0) continue
     const budget = baseline.sleepMsByFile[scan.file] ?? 0
@@ -218,6 +247,9 @@ export const evaluateDeterminismRatchet = (
     randomSites: scans.reduce((sum, scan) => sum + scan.random.length, 0),
     sleepFiles: scans.filter((scan) => scan.sleepTotalMs > 0).length,
     sleepTotalMs: scans.reduce((sum, scan) => sum + scan.sleepTotalMs, 0),
+    budgetedSleepTotalMs: scans
+      .filter((scan) => !NIGHTLY_FILE.test(scan.file))
+      .reduce((sum, scan) => sum + scan.sleepTotalMs, 0),
   }
   const wall = checkWall(scans, inventory)
   return {
@@ -243,7 +275,9 @@ const main = async (): Promise<number> => {
   console.log(
     `[determinism] files=${result.stats.filesScanned} wall=${result.stats.wallSites} ` +
       `random=${result.stats.randomSites} sleep_files=${result.stats.sleepFiles} ` +
-      `sleep_total_ms=${result.stats.sleepTotalMs} stale_inventory_rows=${result.staleInventoryKeys.length}`,
+      `sleep_total_ms=${result.stats.sleepTotalMs} ` +
+      `sleep_budgeted_ms=${result.stats.budgetedSleepTotalMs} ` +
+      `stale_inventory_rows=${result.staleInventoryKeys.length}`,
   )
   for (const violation of result.violations) {
     console.error(`[determinism] ✗ ${violation.kind} ${violation.at}\n    ${violation.detail}`)

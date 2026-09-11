@@ -18,27 +18,46 @@
  * in the rendered env block.
  */
 
-import { describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { probeRepoMap3, renderEnvBlock } from "@/agent"
 import { makeRepoMapScan, type RepoMapShell } from "@/runner/assemble/repo-map-scan"
 
 // ── on-disk fixture ──────────────────────────────────────────────────────
-const base = mkdtempSync(join(tmpdir(), "repo3-e2e-"))
-const gitRoot = join(base, "monorepo")
-const cwd = join(gitRoot, "pkg")
-const userHome = join(base, "home")
+//
+// This fixture used to be built at MODULE SCOPE. Importing the file — which
+// discovery does, and which any `-t`-filtered run does without executing a
+// single case here — created a `repo3-e2e-*` root and wrote eight files into
+// it, and nothing could remove it: a module-scope `mkdtemp` runs before any
+// hook is registered and outlives a run that selects no test in this file.
+//
+// The paths are now materialised in `beforeAll` and removed in `afterAll`, so
+// both the cost and the cleanup belong to actually running the suite.
+let base = ""
+let gitRoot = ""
+let cwd = ""
+let userHome = ""
 
-mkdirSync(join(cwd, "nested"), { recursive: true })
-mkdirSync(join(gitRoot, "other"), { recursive: true })
-mkdirSync(userHome, { recursive: true })
-writeFileSync(join(cwd, "a.ts"), "a")
-writeFileSync(join(cwd, "b.ts"), "b")
-writeFileSync(join(cwd, "nested", "c.ts"), "c")
-writeFileSync(join(gitRoot, "other", "x.ts"), "x")
-writeFileSync(join(userHome, "notes.md"), "n")
+beforeAll(() => {
+  base = mkdtempSync(join(tmpdir(), "repo3-e2e-"))
+  gitRoot = join(base, "monorepo")
+  cwd = join(gitRoot, "pkg")
+  userHome = join(base, "home")
+  mkdirSync(join(cwd, "nested"), { recursive: true })
+  mkdirSync(join(gitRoot, "other"), { recursive: true })
+  mkdirSync(userHome, { recursive: true })
+  writeFileSync(join(cwd, "a.ts"), "a")
+  writeFileSync(join(cwd, "b.ts"), "b")
+  writeFileSync(join(cwd, "nested", "c.ts"), "c")
+  writeFileSync(join(gitRoot, "other", "x.ts"), "x")
+  writeFileSync(join(userHome, "notes.md"), "n")
+})
+
+afterAll(() => {
+  rmSync(base, { recursive: true, force: true })
+})
 
 /** Real shell adapter backed by Bun.spawn (the same shape `@/runtime`'s
  *  runShell satisfies — we inline it so the test stays self-contained). */

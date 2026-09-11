@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test"
-import { isNotebook, type NotebookRenderOpts, renderNotebook } from "@/tool/read/ipynb"
+import {
+  isNotebook,
+  MAX_NOTEBOOK_CELLS,
+  MAX_OUTPUTS_PER_CELL,
+  type NotebookRenderOpts,
+  renderNotebook,
+} from "@/tool/read/ipynb"
 
 // jun-6 (ADR-0481) — PURE `renderNotebook` hellgate. Adversarial / edge cases
 // over crafted nbformat JSON: base64 image blobs MUST be stripped (token-
@@ -269,36 +275,56 @@ describe("renderNotebook — fail-soft on odd shapes (NO THROW)", () => {
 // read pipeline's offset/limit ever pages it. The per-output char cap leaves two
 // holes: (a) a notebook with millions of cells, and (b) a single cell carrying
 // tens of thousands of (individually-capped) outputs whose SUM is unbounded.
+//
+// SPLIT — the exhaustive magnitudes live in
+// `tests/unit/ipynb-render-document-caps.nightly.test.ts`. MEASURED peak RSS of
+// this file before the split: 620/620/622 MiB over a ~53 MiB interpreter
+// baseline, of which the single `50k outputs` case accounted for 547 MiB and
+// `200k cells` for 134 MiB. After: 115/107/107 MiB. What stays here is
+// the CAP BOUNDARY, which is what distinguishes a capping render from a
+// non-capping one; what moved is the MAGNITUDE, which distinguishes a render
+// that caps BEFORE materialising from one that caps after. Both properties are
+// still asserted — see `tests/_helpers/split-universe.ts` for the union.
 describe("renderNotebook — document-level DoS caps", () => {
-  test("a notebook with 200k cells renders only MAX_NOTEBOOK_CELLS + an elision marker", () => {
-    const cells = Array.from({ length: 200_000 }, () => ({
+  test("[case:doc-cap-cells-boundary] one cell past MAX_NOTEBOOK_CELLS elides exactly one", () => {
+    // MINIMUM: cap + 1. At exactly the cap a capping and a non-capping render
+    // are indistinguishable, so 5001 is the smallest input that can fail. The
+    // assertions are on the exact header count and the exact elision text — not
+    // on a length threshold, which is what forced the previous version of this
+    // property to use 200,000 cells before it could fail.
+    const cells = Array.from({ length: MAX_NOTEBOOK_CELLS + 1 }, () => ({
       cell_type: "code",
       source: ["x = 1\n"],
     }))
     const s = renderNotebook(JSON.stringify({ cells }), OPTS) as string
-    // The 5k-cell cap keeps the render bounded — NOT a multi-megabyte string.
-    expect(s.length).toBeLessThan(1_000_000)
-    expect(s).toContain("[cell 4999 · code]")
-    expect(s.includes("[cell 5000 · code]")).toBe(false)
-    expect(s).toContain("195000 more cell(s) elided")
+    expect((s.match(/\[cell \d+ · code\]/g) ?? []).length).toBe(MAX_NOTEBOOK_CELLS)
+    expect(s).toContain(`[cell ${MAX_NOTEBOOK_CELLS - 1} · code]`)
+    expect(s.includes(`[cell ${MAX_NOTEBOOK_CELLS} · code]`)).toBe(false)
+    expect(s).toContain("1 more cell(s) elided")
   })
 
-  test("a single cell with 50k capped outputs is bounded by MAX_OUTPUTS_PER_CELL", () => {
-    const outputs = Array.from({ length: 50_000 }, () => ({
+  test("[case:doc-cap-outputs-boundary] one output past MAX_OUTPUTS_PER_CELL elides exactly one", () => {
+    // MINIMUM: cap + 1 outputs, each AT the 2000-char per-output cap. The width
+    // is load-bearing: with narrower outputs a render that applies only the
+    // character cap and never the count cap would still pass.
+    const outputs = Array.from({ length: MAX_OUTPUTS_PER_CELL + 1 }, () => ({
       output_type: "stream",
       text: "y".repeat(2_000),
     }))
     const nb = JSON.stringify({ cells: [{ cell_type: "code", source: ["spam()\n"], outputs }] })
     const s = renderNotebook(nb, { includeOutputs: true, maxOutputChars: 2000 }) as string
-    // 64 outputs × ≤2000 chars ≪ the 100MB a naive render would produce.
-    expect(s.length).toBeLessThan(200_000)
-    expect(s).toContain("more output(s) elided")
+    expect(s).toContain(`1 more output(s) elided: output cap ${MAX_OUTPUTS_PER_CELL}`)
+    // …and the cap really bounds the render: 65 uncapped outputs would be 130k.
+    expect(s.length).toBeLessThan(MAX_OUTPUTS_PER_CELL * 2_000 + 5_000)
   })
 
-  test("a notebook AT the cell cap (5000) renders every cell, no elision marker", () => {
-    const cells = Array.from({ length: 5_000 }, () => ({ cell_type: "code", source: ["a\n"] }))
+  test("[case:doc-cap-at-cell-cap] a notebook AT the cell cap (5000) renders every cell, no elision marker", () => {
+    const cells = Array.from({ length: MAX_NOTEBOOK_CELLS }, () => ({
+      cell_type: "code",
+      source: ["a\n"],
+    }))
     const s = renderNotebook(JSON.stringify({ cells }), OPTS) as string
-    expect(s).toContain("[cell 4999 · code]")
+    expect(s).toContain(`[cell ${MAX_NOTEBOOK_CELLS - 1} · code]`)
     expect(s.includes("more cell(s) elided")).toBe(false)
   })
 })

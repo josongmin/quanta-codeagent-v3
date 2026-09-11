@@ -11,8 +11,8 @@
  * model-visible envelope carries the folder listing + git body.
  */
 
-import { describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
@@ -22,10 +22,23 @@ import {
 } from "@/agent/mention-injection"
 import { buildDefaultMentionResolver } from "@/agent/mention-runner"
 
-const root = mkdtempSync(join(tmpdir(), "mention-fg-e2e-"))
-mkdirSync(join(root, "lib"))
-writeFileSync(join(root, "lib", "z.ts"), "z")
-writeFileSync(join(root, "lib", "a.ts"), "a")
+// Built in `beforeAll`, not at module scope. A module-scope `mkdtemp` runs on
+// IMPORT — during discovery, and during any `-t`-filtered run that executes no
+// case in this file — and no `afterAll` can remove a root created before the
+// hooks were registered. This one leaked a `mention-fg-e2e-*` directory per
+// import.
+let root = ""
+
+beforeAll(() => {
+  root = mkdtempSync(join(tmpdir(), "mention-fg-e2e-"))
+  mkdirSync(join(root, "lib"))
+  writeFileSync(join(root, "lib", "z.ts"), "z")
+  writeFileSync(join(root, "lib", "a.ts"), "a")
+})
+
+afterAll(() => {
+  rmSync(root, { recursive: true, force: true })
+})
 
 const gitProvider = async (sub: "status" | "diff" | "log"): Promise<string | null> => {
   if (sub === "status") return "M lib/a.ts\n?? scratch.txt"

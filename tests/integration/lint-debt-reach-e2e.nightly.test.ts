@@ -31,7 +31,6 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { collectBiomeTargets } from "../../tools/dev/biome-targets"
-import { nightlyStressEnabled } from "../../tools/dev/verification-nightly-manifest"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..")
 const BIOME_BIN = join(REPO_ROOT, "node_modules/.bin/biome")
@@ -103,18 +102,22 @@ describe("lint-debt reach — every biome diagnostic lands on an enumerated file
    * unenumerated file happens to be clean — but it is the form the ceiling
    * actually consumes, so it is pinned in that form too.
    */
-  test.skipIf(!nightlyStressEnabled())(
-    "nightly: every diagnostic biome raises under src/ and tests/ lands on an enumerated file",
-    () => {
-      const diagnostics = biomeDiagnosticsOverRoots()
-      expect(diagnostics.length).toBeGreaterThan(0) // anti-vacuity
+  // ONE authority: the `.nightly.` in this file's NAME. `tools/dev/test-policy.ts`
+  // maps that to `nightly`-only membership, and the runner selects the file or
+  // does not. The `test.skipIf(!nightlyStressEnabled())` that used to stand here
+  // was a SECOND authority over the same decision: the nightly campaign had to
+  // both select the file AND export `QUANTA_TEST_STRESS=1`, so a nightly run
+  // that selected it and forgot the variable reported a green SKIP for the one
+  // case the file exists to run. Two authorities over one decision means the
+  // weaker one silently wins.
+  test("nightly: every diagnostic biome raises under src/ and tests/ lands on an enumerated file", () => {
+    const diagnostics = biomeDiagnosticsOverRoots()
+    expect(diagnostics.length).toBeGreaterThan(0) // anti-vacuity
 
-      const enumerated = new Set(targets)
-      const unseen = diagnostics
-        .map((d) => relPathOf(d))
-        .filter((rel) => rel !== "" && !enumerated.has(rel))
-      expect([...new Set(unseen)].sort()).toEqual([])
-    },
-    300_000,
-  )
+    const enumerated = new Set(targets)
+    const unseen = diagnostics
+      .map((d) => relPathOf(d))
+      .filter((rel) => rel !== "" && !enumerated.has(rel))
+    expect([...new Set(unseen)].sort()).toEqual([])
+  }, 300_000)
 })

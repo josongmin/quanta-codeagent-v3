@@ -47,17 +47,27 @@ export interface CapabilityCallsiteInput {
  * consumer module. `undefined` means the file does not consume the receipt at
  * all, and a `capability(...)` call in it is somebody else's function.
  */
+/** The local name a `{ capability as X }` clause binds, if this clause has one. */
+const aliasInClause = (bindings: ts.NamedImportBindings): string | undefined => {
+  if (!ts.isNamedImports(bindings)) return undefined
+  for (const element of bindings.elements) {
+    const imported = (element.propertyName ?? element.name).text
+    if (imported === "capability") return element.name.text
+  }
+  return undefined
+}
+
+const importsConsumer = (statement: ts.Statement): statement is ts.ImportDeclaration =>
+  ts.isImportDeclaration(statement) &&
+  ts.isStringLiteral(statement.moduleSpecifier) &&
+  statement.moduleSpecifier.text.includes(CAPABILITY_CONSUMER_MODULE)
+
 const importedCapabilityAlias = (source: ts.SourceFile): string | undefined => {
   for (const statement of source.statements) {
-    if (!ts.isImportDeclaration(statement)) continue
-    if (!ts.isStringLiteral(statement.moduleSpecifier)) continue
-    if (!statement.moduleSpecifier.text.includes(CAPABILITY_CONSUMER_MODULE)) continue
+    if (!importsConsumer(statement)) continue
     const bindings = statement.importClause?.namedBindings
-    if (bindings === undefined || !ts.isNamedImports(bindings)) continue
-    for (const element of bindings.elements) {
-      const imported = (element.propertyName ?? element.name).text
-      if (imported === "capability") return element.name.text
-    }
+    const alias = bindings === undefined ? undefined : aliasInClause(bindings)
+    if (alias !== undefined) return alias
   }
   return undefined
 }
@@ -105,5 +115,7 @@ export const scanCapabilityCallsites = (
     .flatMap((input) => capabilityCallsites(input))
     .sort(
       (a, b) =>
-        a.file.localeCompare(b.file) || a.line - b.line || a.capabilityId.localeCompare(b.capabilityId),
+        a.file.localeCompare(b.file) ||
+        a.line - b.line ||
+        a.capabilityId.localeCompare(b.capabilityId),
     )

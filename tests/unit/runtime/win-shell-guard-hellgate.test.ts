@@ -110,12 +110,16 @@ describe("P16 — runShell win32 e2e (no silent spawn)", () => {
     }
   })
 
-  test("HELL-WIN-E2E2: real spawn still works on the host (non-win32 byte path is live)", async () => {
-    // Sanity that the legacy path is untouched on the actual test host (darwin/
-    // linux). If the host is genuinely win32 this would need cmd; CI is POSIX.
-    if (realDesc?.value === "win32") return
-    const result = await runShell("printf hello")
-    expect(result.exitCode).toBe(0)
-    expect(result.stdout).toBe("hello")
-  })
+  // Sanity that the legacy path is untouched on the actual test host (darwin/
+  // linux). On a genuinely win32 host this would need cmd, so it does not run
+  // there — and that has to be a VISIBLE skip rather than an early `return`,
+  // which bun reports as a pass with no assertion.
+  test.skipIf(realDesc?.value === "win32")(
+    "HELL-WIN-E2E2: real spawn still works on the host (non-win32 byte path is live)",
+    async () => {
+      const result = await runShell("printf hello")
+      expect(result.exitCode).toBe(0)
+      expect(result.stdout).toBe("hello")
+    },
+  )
 })

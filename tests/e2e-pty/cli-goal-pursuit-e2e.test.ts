@@ -13,10 +13,18 @@
  * Gated on `PTY_AVAILABLE` (visible skip on a Bun build without openpty).
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { submitPtyLine, typePtyLine } from "../../tools/dev/pty-slash-submit"
+import {
+  attachToSecondThread,
+  type GoalBooterPorts,
+  makeGoalBooter,
+  replayEntry,
+  sleep,
+  submitLine,
+  typeText,
+} from "./goal-pursuit-harness"
 import { drivePtyCli, PTY_AVAILABLE, type PtyCli } from "./pty-harness"
 
 // Wait for the readline prompt rendered after setRawMode, not the welcome
@@ -27,24 +35,6 @@ const T = 60_000
 const INSTALLED_CLI = process.env.QUANTA_E2E_CLI_BIN
 const cliCommand =
   INSTALLED_CLI === undefined ? undefined : ([INSTALLED_CLI] as readonly [string, ...string[]])
-
-const replayEntry = (
-  marker: string,
-  extraEvents: readonly Record<string, unknown>[] = [],
-): string =>
-  JSON.stringify({
-    id: "replay",
-    events: [
-      { type: "text_delta", delta: marker },
-      ...extraEvents,
-      { type: "usage", inputTokens: 1, outputTokens: 1, model: "replay" },
-      { type: "message_stop", stop_reason: "end_turn" },
-    ],
-  })
-
-const sleep = async (ms: number): Promise<void> => {
-  await new Promise<void>((resolve) => setTimeout(resolve, ms))
-}
 
 const waitForScreenTextAfter = async (
   cli: PtyCli,
@@ -58,21 +48,6 @@ const waitForScreenTextAfter = async (
     await sleep(25)
   }
   throw new Error(`waitForScreenTextAfter timed out (${timeoutMs}ms) for ${text}`)
-}
-
-/** Drive the raw editor as real keystrokes. A whole command in one PTY write can
- * outrun slash-palette state transitions and turn this into a chunking test.
- *
- * The leading `/` used to be guarded by `sleep(500)` — a guess that loses under
- * load, after which the line submits as an ordinary model prompt. The shared
- * helper waits for the slash to REGISTER in the input lane and throws at the
- * drop instead. */
-const typeText = async (cli: PtyCli, text: string): Promise<void> => {
-  await typePtyLine(cli, text, { keyDelayMs: 20 })
-}
-
-const submitLine = async (cli: PtyCli, line: string): Promise<void> => {
-  await submitPtyLine(cli, line, { keyDelayMs: 20 })
 }
 
 describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
@@ -115,50 +90,17 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
 
   /** Boot the actual interactive CLI with a deterministic LLM and an explicit
    * production quiet-window configuration. */
-  const bootWithGoalContinuation = async (args: {
-    readonly cassette: string
-    readonly idleMs: number
-    readonly replayDelayMs?: number
-    /** Explicitly exercise the shipped opt-out path with the same replay
-     * harness; absence must leave the continuation queue untouched. */
-    readonly goalEnforce?: boolean
-    readonly idleSuppress?: boolean
-    readonly backgroundTurn?: boolean
-    /** GOAL-04 rail 11 — id-mode argv (`--new-session` / `--resume <id>`) so a
-     *  test can restart the PROCESS against the same durable session. */
-    readonly argv?: readonly string[]
-  }): Promise<PtyCli> => {
-    const cassettePath = join(cwd, "goal-continuation.jsonl")
-    writeFileSync(cassettePath, args.cassette)
-    const c = drivePtyCli({
-      ...(cliCommand === undefined ? {} : { command: cliCommand }),
-      ...(args.argv === undefined ? {} : { args: args.argv }),
-      cwd,
-      env: {
-        QUANTA_SESSIONS_DIR: sessionsDir,
-        ...(args.goalEnforce === false ? { QUANTA_GOAL: "0" } : {}),
-        QUANTA_IDLE_MS: String(args.idleMs),
-        QUANTA_GOAL_QUIET_MS: String(args.idleMs),
-        ...(args.idleSuppress === false ? { QUANTA_IDLE_SUPPRESS: "0" } : {}),
-        ...(args.backgroundTurn === true ? { QUANTA_BG_TURN: "1" } : {}),
-        QUANTA_LLM_REPLAY: cassettePath,
-        ...(args.replayDelayMs === undefined
-          ? {}
-          : { QUANTA_LLM_REPLAY_DELAY_MS: String(args.replayDelayMs) }),
-        QUANTA_MEMORY: "off",
-        QUANTA_MEMORY_AUTO: "0",
-        QUANTA_ENABLE_PROMPT_SUGGESTION: "0",
-      },
-    })
-    cli = c
-    // Use the suite budget for process boot as well. A fixed 15s sub-budget
-    // flakes before raw-mode readiness on shared/contended CI hosts even though
-    // the enclosing test still has ample time and `waitFor` returns immediately
-    // on healthy hosts.
-    await c.waitFor(BOOT, T)
-    await sleep(50)
-    return c
+  const ports: GoalBooterPorts = {
+    cwd: () => cwd,
+    sessionsDir: () => sessionsDir,
+    setCli: (next) => {
+      cli = next
+    },
   }
+  const booter = makeGoalBooter(ports)
+  /** Boot the actual interactive CLI with a deterministic LLM and an explicit
+   *  production quiet-window configuration. Shared with the nightly sibling. */
+  const bootWithGoalContinuation = booter.bootWithGoalContinuation
 
   test(
     "/help lists /goal — the command is registered at the surface",
@@ -486,21 +428,7 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
     T,
   )
 
-  /** Poll the durable session bytes until `pred` holds (the per-turn save is
-   *  asynchronous to the streamed output). Returns false on timeout so the
-   *  caller asserts rather than hanging. */
-  const waitForDurableGoal = async (
-    pred: (raw: string) => boolean,
-    timeoutMs = 20_000,
-  ): Promise<boolean> => {
-    const deadline = Date.now() + timeoutMs
-    while (Date.now() < deadline) {
-      const file = readdirSync(sessionsDir).find((name) => name.endsWith(".json"))
-      if (file !== undefined && pred(readFileSync(join(sessionsDir, file), "utf8"))) return true
-      await sleep(100)
-    }
-    return false
-  }
+  const waitForDurableGoal = booter.waitForDurableGoal
 
   test("GOAL-04 rail 11 — the objective survives a real PROCESS RESTART, and a clear survives it too", async () => {
     // The durable objective snapshot rides the PER-TURN save, so the goal is
@@ -559,61 +487,26 @@ describe.skipIf(!PTY_AVAILABLE)("CLI /goal (Pursuing goal) e2e (PTY)", () => {
     expect(third.screen()).not.toContain("Goal: survive the restart")
   }, 180_000)
 
-  test("attach to thread B cancels thread A's pending continuation before its body can run", async () => {
-    const first = await bootWithGoalContinuation({
-      cassette: `${replayEntry("A_SAVE")}\n`,
-      idleMs: 15_000,
-      argv: ["--new-session"],
-    })
-    await submitLine(first, "/goal thread A must not wake after attach")
-    await first.waitFor("Goal created", T)
-    await submitLine(first, "/goal criterion add remains unmet")
-    await first.waitFor("Criterion added.", T)
-    await submitLine(first, "persist A")
-    await first.waitFor("A_SAVE", T)
-    expect(await waitForDurableGoal((raw) => raw.includes("thread A must not wake"))).toBe(true)
-    first.kill()
-    await Promise.race([first.exited, sleep(3_000)])
-    cli = undefined
-    const aId = readdirSync(sessionsDir)
-      .find((name) => name.endsWith(".json"))
-      ?.slice(0, -5)
-    expect(aId).toBeDefined()
-
-    const second = await bootWithGoalContinuation({
-      cassette: `${replayEntry("B_SAVE")}\n`,
-      idleMs: 15_000,
-      argv: ["--new-session"],
-    })
-    await submitLine(second, "persist B")
-    await second.waitFor("B_SAVE", T)
-    const countDeadline = Date.now() + 20_000
-    while (
-      Date.now() < countDeadline &&
-      readdirSync(sessionsDir).filter((name) => name.endsWith(".json")).length < 2
-    ) {
-      await sleep(100)
-    }
-    second.kill()
-    await Promise.race([second.exited, sleep(3_000)])
-    cli = undefined
-    const bId = readdirSync(sessionsDir)
-      .filter((name) => name.endsWith(".json"))
-      .map((name) => name.slice(0, -5))
-      .find((id) => id !== aId)
-    expect(bId).toBeDefined()
-
-    const attached = await bootWithGoalContinuation({
-      cassette: `${replayEntry("A_CONTINUATION_MUST_NOT_RUN")}\n`,
-      idleMs: 15_000,
-      argv: ["--resume", aId as string],
-    })
-    await submitLine(attached, `/fork attach ${bId as string}`)
-    await attached.waitFor(`now editing ${bId as string}`, T)
-    await sleep(16_000)
+  test("[case:goal-attach-typed-decision] attach to thread B leaves no goal on the attached session", async () => {
+    // PR LANE. The three-process setup is shared with the nightly sibling via
+    // `attachToSecondThread`, so both lanes exercise the identical scenario.
+    //
+    // What is asserted here is the OBSERVABLE state: after `/fork attach`, the
+    // session in the editor is B, and B has no goal — which is the thing that
+    // regresses first if attach stops re-pointing the surface objective store.
+    //
+    // What is NOT asserted here is the temporal half — that thread A's
+    // ALREADY-ARMED continuation stays quiet across a full 15 s quiet window.
+    // That needs 16 real seconds of waiting and no readiness predicate can
+    // stand in for it, so it is the one real-time canary and it lives in
+    // `tests/e2e-pty/cli-goal-quiet-window.nightly.test.ts`. MEASURED: that
+    // single `await sleep(16_000)` was 16,000 of this file's 22,650 ms of
+    // awaited fixed sleeps, and 46% of the repository's entire 34,530 ms.
+    const attached = await attachToSecondThread(booter, ports, "A_CONTINUATION_MUST_NOT_RUN")
     expect(attached.screen()).not.toContain("A_CONTINUATION_MUST_NOT_RUN")
     await submitLine(attached, "/goal")
     await attached.waitFor("No goal set.", T)
+    expect(attached.screen()).not.toContain("A_CONTINUATION_MUST_NOT_RUN")
   }, 180_000)
 
   test("GOAL-05A rail 16 — a settled autonomous turn ANNOUNCES itself without being asked", async () => {

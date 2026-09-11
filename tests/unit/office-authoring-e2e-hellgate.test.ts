@@ -15,12 +15,21 @@
 // OWN STORED-ZIP reader (`parseStoredZip`) + a sheet-XML cell parse. When the
 // real xlsx_read lands, the same `.xlsx` this test writes is its fixture.
 
-import { describe, expect, test } from "bun:test"
-import { mkdtempSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { afterEach, describe, expect, test } from "bun:test"
 import { join } from "node:path"
 import { buildDefaultTools, parseStoredZip } from "@/tool"
 import type { Tool, ToolContext, ToolResult } from "@/tool/types"
+import { makeTempDirOwner } from "../_helpers/temp-dir"
+
+/**
+ * Every temp root this file makes, removed in `afterEach` whether the case
+ * passed, failed, or threw. Before this, each `mkdtempSync` here had no `rm`
+ * anywhere in the file and left one directory per case per run.
+ */
+const tempRoots = makeTempDirOwner()
+afterEach(() => {
+  tempRoots.disposeAll()
+})
 
 const ctx = (cwd: string): ToolContext => ({ cwd, signal: new AbortController().signal })
 
@@ -91,7 +100,7 @@ describe("office-authoring e2e — TRUE xlsx round-trip", () => {
     const xlsxWrite = toolByName(tools, "xlsx_write")
     expect(xlsxWrite).toBeDefined()
 
-    const dir = mkdtempSync(join(tmpdir(), "office-e2e-"))
+    const dir = tempRoots.create("office-e2e-")
     const input = {
       path: "report.xlsx",
       sheets: [
@@ -130,7 +139,7 @@ describe("office-authoring e2e — docx structure round-trip", () => {
   test("docx_write → on-disk .docx → re-parse document.xml has the heading + run", async () => {
     const tools = buildDefaultTools({ officeAuthoring: true })
     const docxWrite = toolByName(tools, "docx_write")
-    const dir = mkdtempSync(join(tmpdir(), "office-e2e-docx-"))
+    const dir = tempRoots.create("office-e2e-docx-")
     const res = await run(
       docxWrite as Tool,
       {

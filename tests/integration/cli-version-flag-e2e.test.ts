@@ -16,32 +16,33 @@
  * GREEN after.
  */
 import { describe, expect, test } from "bun:test"
-import { mkdtempSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { withTempDir } from "../_helpers/temp-dir"
 
 const CLI_ENTRY = new URL("../../src/apps/cli/index.ts", import.meta.url).pathname
 const TIMEOUT_MS = 20000
 
-const runCli = async (args: string[]): Promise<{ exit: number; out: string }> => {
-  const cwd = mkdtempSync(join(tmpdir(), "cli-version-"))
-  const proc = Bun.spawn({
-    cmd: ["bun", CLI_ENTRY, ...args],
-    cwd,
-    env: {
-      PATH: process.env.PATH ?? "/usr/bin:/bin",
-      HOME: process.env.HOME ?? "/tmp",
-      QUANTA_PROVIDER: "anthropic",
-      ANTHROPIC_API_KEY: "test",
-      NO_COLOR: "1",
-    },
-    stdout: "pipe",
-    stderr: "pipe",
-    stdin: "ignore",
+const runCli = async (args: string[]): Promise<{ exit: number; out: string }> =>
+  // The isolated cwd is OWNED here: `withTempDir` removes it whether the spawn
+  // succeeds, throws, or the assertions below fail. Before this, each of the two
+  // cases left a `cli-version-*` root behind on every run.
+  withTempDir("cli-version-", async (cwd) => {
+    const proc = Bun.spawn({
+      cmd: ["bun", CLI_ENTRY, ...args],
+      cwd,
+      env: {
+        PATH: process.env.PATH ?? "/usr/bin:/bin",
+        HOME: process.env.HOME ?? "/tmp",
+        QUANTA_PROVIDER: "anthropic",
+        ANTHROPIC_API_KEY: "test",
+        NO_COLOR: "1",
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+      stdin: "ignore",
+    })
+    const [out, exit] = await Promise.all([new Response(proc.stdout).text(), proc.exited])
+    return { exit, out }
   })
-  const [out, exit] = await Promise.all([new Response(proc.stdout).text(), proc.exited])
-  return { exit, out }
-}
 
 describe("top-level --version / -v flag (jun-11 #7)", () => {
   test(

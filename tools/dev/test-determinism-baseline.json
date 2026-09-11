@@ -22,7 +22,7 @@
     },
     "tests/integration/sqlite-gc-sigkill-mid-sweep-e2e.test.ts": {
       "outcome-relevant": 1,
-      "reason": "SIGKILL fuzz picks a mid-sweep delay from Math.random()*4 — TVH-15 item 3. Replace with a seeded PRNG whose seed is printed in the failure receipt."
+      "reason": "SIGKILL fuzz picks a mid-sweep delay from Math.random()*4 \u2014 TVH-15 item 3. Replace with a seeded PRNG whose seed is printed in the failure receipt."
     },
     "tests/integration/test-shard-process-lifecycle-e2e.test.ts": {
       "id-shaped": 1
@@ -64,7 +64,7 @@
     "tests/unit/observability-metrics-hellgate.test.ts": {
       "id-shaped": 1,
       "outcome-relevant": 1,
-      "reason": "shuffles the flush order with sort(() => Math.random() - 0.5) — TVH-15 item 3. Replace with a fixed permutation corpus."
+      "reason": "shuffles the flush order with sort(() => Math.random() - 0.5) \u2014 TVH-15 item 3. Replace with a fixed permutation corpus."
     },
     "tests/unit/per-tool-checkpoint-hellgate.test.ts": {
       "id-shaped": 1
@@ -78,15 +78,15 @@
     },
     "tests/unit/retrieval/pipeline-hellgate.test.ts": {
       "outcome-relevant": 1,
-      "reason": "1000 RRF hit SCORES drawn from Math.random() — the ranking under test depends on them. TVH-15 item 3."
+      "reason": "1000 RRF hit SCORES drawn from Math.random() \u2014 the ranking under test depends on them. TVH-15 item 3."
     },
     "tests/unit/runner/diff-ops-hunks-stress.test.ts": {
       "outcome-relevant": 1,
-      "reason": "selects which hunk indices to keep with Math.random() > 0.5 — the stress CASE is unseeded. TVH-15 item 3."
+      "reason": "selects which hunk indices to keep with Math.random() > 0.5 \u2014 the stress CASE is unseeded. TVH-15 item 3."
     },
     "tests/unit/session-envelope-hellgate.test.ts": {
       "outcome-relevant": 1,
-      "reason": "shuffles key ORDER with sort(() => 0.3 - Math.random()) — TVH-15 item 3."
+      "reason": "shuffles key ORDER with sort(() => 0.3 - Math.random()) \u2014 TVH-15 item 3."
     },
     "tests/unit/session-envelope-streaming.test.ts": {
       "id-shaped": 1
@@ -110,7 +110,7 @@
       "id-shaped": 1
     }
   },
-  "sleepTotalMs": 73720,
+  "sleepTotalMs": 51470,
   "sleepMsByFile": {
     "apps/web-frontend/src/components/slash-auth.test.ts": 5,
     "src/agent/memory/stage1-store/__tests__/consolidator-hook-no-throw.hellgate.test.ts": 25,

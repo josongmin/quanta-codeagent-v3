@@ -11,9 +11,8 @@
 //   - versioned sibling on an existing file (never silent overwrite),
 //   - empty / edge specs never throw.
 
-import { describe, expect, test } from "bun:test"
-import { mkdtempSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { afterEach, describe, expect, test } from "bun:test"
+import { writeFileSync } from "node:fs"
 import { join } from "node:path"
 import {
   buildDocx,
@@ -26,6 +25,17 @@ import {
 } from "@/tool"
 import { textEntry } from "@/tool/document/authoring"
 import type { ToolContext, ToolResult } from "@/tool/types"
+import { makeTempDirOwner } from "../_helpers/temp-dir"
+
+/**
+ * Every temp root this file makes, removed in `afterEach` whether the case
+ * passed, failed, or threw. Before this, each `mkdtempSync` here had no `rm`
+ * anywhere in the file and left one directory per case per run.
+ */
+const tempRoots = makeTempDirOwner()
+afterEach(() => {
+  tempRoots.disposeAll()
+})
 
 const ctx = (cwd: string): ToolContext => ({ cwd, signal: new AbortController().signal })
 
@@ -211,7 +221,7 @@ describe("docx — valid package + paragraphs present", () => {
 
 describe("xlsx_write tool — jail + versioning + no-throw", () => {
   test("writes a real .xlsx to a jailed path", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "office-xlsx-"))
+    const dir = tempRoots.create("office-xlsx-")
     const res = await runTool(
       xlsxWriteTool,
       { path: "out.xlsx", sheets: [{ name: "S", rows: [["a", 1]] }] },
@@ -223,7 +233,7 @@ describe("xlsx_write tool — jail + versioning + no-throw", () => {
   })
 
   test("a path outside cwd is rejected with permission_denied (no write)", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "office-jail-"))
+    const dir = tempRoots.create("office-jail-")
     const res = await runTool(
       xlsxWriteTool,
       { path: "../escape.xlsx", sheets: [{ name: "S", rows: [] }] },
@@ -234,7 +244,7 @@ describe("xlsx_write tool — jail + versioning + no-throw", () => {
   })
 
   test("an existing target lands at a versioned -vN sibling (never overwrite)", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "office-ver-"))
+    const dir = tempRoots.create("office-ver-")
     writeFileSync(join(dir, "tracker.xlsx"), "PRE-EXISTING")
     const res = await runTool(
       xlsxWriteTool,
@@ -251,7 +261,7 @@ describe("xlsx_write tool — jail + versioning + no-throw", () => {
   })
 
   test("invalid input → typed ok:false (no throw)", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "office-bad-"))
+    const dir = tempRoots.create("office-bad-")
     const res = await runTool(xlsxWriteTool, { path: "", sheets: [] }, ctx(dir))
     expect(res.ok).toBe(false)
   })
@@ -265,7 +275,7 @@ describe("xlsx_write tool — jail + versioning + no-throw", () => {
 
 describe("docx_write tool — jail + versioning", () => {
   test("writes a real .docx and re-reads document.xml", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "office-docx-"))
+    const dir = tempRoots.create("office-docx-")
     const res = await runTool(
       docxWriteTool,
       { path: "memo.docx", paragraphs: [{ kind: "heading", level: 2, text: "Hi" }] },
@@ -279,7 +289,7 @@ describe("docx_write tool — jail + versioning", () => {
   })
 
   test("jail escape rejected", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "office-docx-jail-"))
+    const dir = tempRoots.create("office-docx-jail-")
     const res = await runTool(docxWriteTool, { path: "/etc/x.docx", paragraphs: [] }, ctx(dir))
     expect(res.ok).toBe(false)
     expect(res.failure?.mode).toBe("permission_denied")
