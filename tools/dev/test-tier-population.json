@@ -1,0 +1,21 @@
+{
+  "schema": "quanta.test-tier-population.v1",
+  "tiers": {
+    "prepush": {
+      "minFiles": 3900,
+      "reason": "measured 3932 selected at 85a99bb6f; prepush is not yet narrowed to changed+canary, so it still tracks the full population"
+    },
+    "pr": {
+      "minFiles": 3900,
+      "reason": "measured 3932 selected at 85a99bb6f; lower this in the same diff that excludes capability-gated files from the merge-blocking population"
+    },
+    "full": {
+      "minFiles": 3900,
+      "reason": "measured 3932 selected at 85a99bb6f; full is the deterministic whole population minus nightly-exhaustive files"
+    },
+    "nightly": {
+      "minFiles": 3900,
+      "reason": "measured 3938 selected at 85a99bb6f; nightly is full plus the 6 physically separated nightly-exhaustive files, plus capability fan-out"
+    }
+  }
+}

@@ -72,6 +72,7 @@ import {
   loadTestTimings,
   mergeTestTimingObservations,
 } from "./test-shard-timings"
+import { checkTierPopulation, loadTierPopulationFloors } from "./test-tier-population"
 import { ADMISSION_DEADLINE_ENV } from "./verification-admission"
 import { executionPolicyDigest } from "./verification-execution-policy"
 import { chunkInputScopeSha256 } from "./verification-input-scope"
@@ -877,6 +878,61 @@ const emitDiscovery = (opts: RunnerOptions): void => {
 const cacheSuiteName = (opts: RunnerOptions): string =>
   opts.tier === undefined ? opts.suite : `${opts.suite}:${opts.tier}`
 
+/**
+ * Discover the suite, check the two floors that mean DIFFERENT things, then
+ * return the tier's selection.
+ *
+ * The floors were one check over one input: `SUITE_FLOORS[suite]` applied to the
+ * list AFTER tier selection. So a single message — "the corpus shrank under the
+ * runner" — covered both real corpus loss (a suite root that stopped yielding
+ * files) and a tier deliberately selecting fewer. The second cannot happen today
+ * only because prepush/pr/full resolve to the identical 3,932-file set, which is
+ * the defect TVH-02 is about; the moment PR is narrowed, an intended reduction
+ * would have been reported as corpus loss, pointing at the wrong file.
+ */
+const selectManifest = (
+  opts: RunnerOptions,
+): {
+  readonly discovered: readonly string[]
+  readonly manifest: readonly string[]
+  readonly tiered: ReturnType<typeof tierSelection>
+} => {
+  const discovered = [...discoverSuiteFiles(REPO_ROOT, opts.suite)]
+  // A FLOOR, not a printout. `manifest_files=N` was reported and compared to
+  // nothing: a suite root that still exists but stops yielding test files — a
+  // naming change, a bad merge, a directory renamed under a dot prefix —
+  // shrinks the corpus silently and the campaign still prints PASS. Same
+  // argument scan-reach-baseline.json makes for scanning guards, applied to the
+  // suite the whole verdict rests on. Over the PRE-SELECTION universe, which is
+  // where corpus loss actually shows up.
+  const floor = SUITE_FLOORS[opts.suite]
+  if (discovered.length < floor) {
+    throw new Error(
+      `[test:shards] INVALID — suite=${opts.suite} discovered ${discovered.length} test files, ` +
+        `below the pinned floor of ${floor}. The corpus shrank under the runner; a green over ` +
+        "it would describe a smaller universe than the one this gate claims.",
+    )
+  }
+  const tiered = tierSelection(
+    discovered.map((file) => relative(REPO_ROOT, file)),
+    opts.tier,
+  )
+  const selectedIds = new Set(tiered.files)
+  const manifest = discovered.filter((file) => selectedIds.has(relative(REPO_ROOT, file)))
+  // …and the OTHER failure, with its own input and its own message: what the
+  // tier selected out of that intact universe.
+  if (opts.tier !== undefined) {
+    const population = checkTierPopulation({
+      tier: opts.tier,
+      selected: manifest.length,
+      discovered: discovered.length,
+      floors: loadTierPopulationFloors(),
+    })
+    if (!population.ok) throw new Error(population.message)
+  }
+  return { discovered, manifest, tiered }
+}
+
 const main = async (): Promise<void> => {
   const opts = parseOptions(process.argv.slice(2))
   if (opts.discoverOnly) {
@@ -948,27 +1004,7 @@ const main = async (): Promise<void> => {
         "[test:shards] INVALID — authoritative receipts require a clean checkout. Commit or stash changes first.",
       )
     }
-    const discoveredManifest = [...discoverSuiteFiles(REPO_ROOT, opts.suite)]
-    const tiered = tierSelection(
-      discoveredManifest.map((file) => relative(REPO_ROOT, file)),
-      opts.tier,
-    )
-    const selectedIds = new Set(tiered.files)
-    const manifest = discoveredManifest.filter((file) => selectedIds.has(relative(REPO_ROOT, file)))
-    // A FLOOR, not a printout. `manifest_files=N` was reported and compared to
-    // nothing: a suite root that still exists but stops yielding test files —
-    // a naming change, a bad merge, a directory renamed under a dot prefix —
-    // shrinks the corpus silently and the campaign still prints PASS. This is
-    // the same argument scan-reach-baseline.json makes for scanning guards,
-    // applied to the suite the whole verdict rests on.
-    const floor = SUITE_FLOORS[opts.suite]
-    if (manifest.length < floor) {
-      throw new Error(
-        `[test:shards] INVALID — suite=${opts.suite} discovered ${manifest.length} test files, ` +
-          `below the pinned floor of ${floor}. The corpus shrank under the runner; a green over ` +
-          "it would describe a smaller universe than the one this gate claims.",
-      )
-    }
+    const { discovered: discoveredManifest, manifest, tiered } = selectManifest(opts)
     const manifestDigest = manifestSha256(manifest)
     const treeSha256 = trackedTreeSha256(REPO_ROOT)
     const timings = loadTestTimings(TIMING_STORE)
@@ -991,7 +1027,8 @@ const main = async (): Promise<void> => {
       .reduce((count, chunk) => count + chunk.files.length, 0)
     process.stdout.write(
       `[test:shards] frozen head=${before.head} suite=${opts.suite} tier=${opts.tier ?? "legacy"} dirty=no ` +
-        `manifest_files=${manifest.length} manifest_sha256=${manifestDigest} ` +
+        `discovered_files=${discoveredManifest.length} manifest_files=${manifest.length} ` +
+        `manifest_sha256=${manifestDigest} ` +
         `policy_sha256=${tiered.policySha256 ?? "legacy"} ` +
         `chunks=${chunks.length} timed_files=${timings.size} workers=${concurrency} ` +
         `test_timeout_ms=${testTimeoutMs} load_1m=${loadAverage1m.toFixed(2)} cpus=${cpuCount} ` +

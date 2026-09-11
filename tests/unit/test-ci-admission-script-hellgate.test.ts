@@ -118,20 +118,38 @@ describe("test:ci admission gate", () => {
   })
 
   test("serializes every shared-process test entrypoint", () => {
-    const serialScripts = [
-      "test",
-      "test:unit",
-      "test:unit:ci",
-      "test:fast",
-      "test:integration",
-      "test:full:ci",
-      "test:shard",
-      "test:contract",
-      "test:cov",
-      "test:watch",
-    ]
-    for (const name of serialScripts) {
-      expect(packageJson.scripts?.[name], name).toContain("--parallel=1")
+    // SPLIT BY EXECUTOR, because `--parallel=1` only means something to one of
+    // them. It is a real `bun test` flag — "run test files in N worker
+    // processes, implies --isolate" — and the shared-`mock.module`/env/cwd
+    // corpus genuinely needs it. But `tools/dev/run-test-shards.ts` had
+    // `if (arg === "--parallel=1") continue`: a silent no-op. Five scripts
+    // passed it to the shard runner and READ as serial-isolated while the
+    // runner chose its own intra-worker width, up to 8-wide for `pure` chunks.
+    // Asserting the flag on those scripts pinned the misconception, not the
+    // serialization.
+    const scripts = packageJson.scripts ?? {}
+    const directBunTest = ["test:fast", "test:shard", "test:contract", "test:cov", "test:watch"]
+    for (const name of directBunTest) {
+      expect(scripts[name], name).toContain("--parallel=1")
+      expect(scripts[name], name).not.toContain("run-test-shards.ts")
+    }
+
+    // The shard-runner entrypoints get their serialization from the runner's
+    // resource classes and scheduler, which is where a shared-process hazard is
+    // actually expressed. The flag must NOT be there: the runner now refuses it
+    // rather than absorbing it (tests/unit/dev/shard-runner-options.test.ts).
+    const shardRunner = ["test", "test:unit", "test:unit:ci", "test:integration", "test:full:ci"]
+    for (const name of shardRunner) {
+      expect(scripts[name], name).toContain("run-test-shards.ts")
+      expect(scripts[name], name).not.toContain("--parallel")
+    }
+
+    // ANTI-VACUITY: both lists must be non-empty and must together cover every
+    // script that runs a broad test population, so a renamed script silently
+    // leaves the guard instead of failing it.
+    expect(directBunTest.length + shardRunner.length).toBe(10)
+    for (const name of [...directBunTest, ...shardRunner]) {
+      expect({ name, present: name in scripts }).toEqual({ name, present: true })
     }
   })
 
@@ -169,9 +187,9 @@ describe("test:ci admission gate", () => {
     expect(packageJson.scripts?.["test:ci"]).not.toContain("verify:")
     // The one authoritative execution the receipt-consuming gates derive from.
     const full = packageJson.scripts?.["test:full:ci"] ?? ""
-    expect(full).toContain(
-      "run-test-shards.ts --suite=full --junit-out=.cache/full-junit.xml --parallel=1",
-    )
+    expect(full).toContain("run-test-shards.ts --suite=full --junit-out=.cache/full-junit.xml")
+    // …and not the no-op flag the shard runner used to swallow.
+    expect(full).not.toContain("--parallel")
   })
 
   test("tests/README documents every verify:* script that package.json owns", async () => {

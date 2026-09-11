@@ -83,7 +83,22 @@ export const parseShardRunnerOptions = (args: readonly string[]): RunnerOptions 
     state.tier = shardTier(process.env.QUANTA_VERIFICATION_TIER)
   }
   for (const arg of args) {
-    if (arg === "--parallel=1") continue
+    // `--parallel=<N>` is a REAL `bun test` flag (N worker processes, implies
+    // --isolate), and three package scripts passed `--parallel=1` to this
+    // runner believing it meant "serial". This runner swallowed it silently and
+    // then chose its own intra-worker width — up to 8-wide for `pure` chunks.
+    // So the command read as serial-isolated and executed as nothing of the
+    // kind. Rejected rather than re-accepted: the shard runner's concurrency is
+    // a scheduling decision made per dispatch from the CPU/memory budget, not a
+    // caller argument, and an argument that silently means nothing is worse
+    // than one that is refused.
+    if (arg.startsWith("--parallel=") || arg === "--parallel") {
+      throw new Error(
+        `[test:shards] ${arg} is not a shard-runner option. It is a \`bun test\` flag and was ` +
+          "accepted here as a silent no-op while the runner chose its own intra-worker width. " +
+          "The shard runner derives concurrency per dispatch from the host CPU/memory budget.",
+      )
+    }
     if (arg === "--discover-only") {
       state.discoverOnly = true
       continue

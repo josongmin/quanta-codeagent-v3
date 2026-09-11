@@ -30,8 +30,12 @@ describe("typecheck contract", () => {
     const full = pkg.scripts["test:full:ci"] ?? ""
     expect(full).toContain("bun run test:clean-js")
     expect(full).toContain(
-      "bun run tools/dev/run-test-shards.ts --suite=full --junit-out=.cache/full-junit.xml --parallel=1",
+      "bun run tools/dev/run-test-shards.ts --suite=full --junit-out=.cache/full-junit.xml",
     )
+    // `--parallel=1` used to be appended here. It is a `bun test` flag the shard
+    // runner silently swallowed, so the command read as serial-isolated and ran
+    // with the runner's own intra-worker width; the runner now refuses it.
+    expect(full).not.toContain("--parallel")
     // `typecheck:all` already covers src+tests+tools. Routing through the public
     // `test` script here would immediately repeat the src+tools typecheck.
     expect(full).not.toMatch(/\bbun run test(?:\s|$)/)

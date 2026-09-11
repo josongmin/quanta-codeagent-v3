@@ -90,6 +90,8 @@ export interface Gate {
   readonly needsQuietBox?: string
 }
 export const GATES: readonly Gate[] = ${JSON.stringify(entries, null, 2)}
+export const GATE_CONTRACT: readonly { readonly id: string; readonly stage: GateStage }[] =
+  GATES.map((gate) => ({ id: gate.id, stage: gate.stage }))
 export const gatesForStage = (stage: GateStage): readonly Gate[] =>
   stage === "precommit" ? GATES.filter((gate) => gate.stage === "precommit") : GATES
 export const gatesForVerificationTier = (_tier: string): readonly Gate[] => GATES
@@ -119,6 +121,7 @@ const makeRepo = (
     "verification-tier.ts",
     "external-toolchain.ts",
     "verdict-env.ts",
+    "gate-manifest-contract.ts",
   ]) {
     copyFileSync(join(SOURCE_DIR, dependency), join(root, "tools", "dev", dependency))
   }

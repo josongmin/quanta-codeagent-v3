@@ -272,9 +272,10 @@ export const parseArgs = (
   const rest = argv.filter((a, i) => a !== "--batch" && i !== valueIdx)
 
   // Anything else beginning with `-` is BUN's, not ours, and is forwarded
-  // verbatim. Treating it as a path is not cosmetic: every default script
-  // (`test`, `test:unit`, `test:fast`, `test:shard`) passes `--parallel=1`, and
-  // this suite behaves materially differently in parallel — a parallel sweep of
+  // verbatim. Treating it as a path is not cosmetic: the scripts that invoke
+  // `bun test` directly (`test:fast`, `test:shard`, `test:sandbox`, `test:cov`,
+  // `test:contract`, `verify:smoke`) pass `--parallel=1`, and this suite behaves
+  // materially differently in parallel — a parallel sweep of
   // `tests/unit src` produced ~74 failures that ALL passed in isolation, pure
   // shared-`mock.module`/env/cwd artifacts. A runner that dropped the flag would
   // turn the serial suite parallel while reporting normally.
