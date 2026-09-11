@@ -202,16 +202,30 @@ HIGH 생존자 4건 + MEDIUM 3건을 `6e9f4f5ca`에서 닫았다.
 - `CapabilityFloor`의 file floor가 미검증이라 `executedCases: 5, executedFiles: []`가 통과했다.
 - `assertGateManifestMatchesContract`는 호출부 0의 죽은 가드 — 테스트가 아니라 **삭제**했다.
 
-### 아직 열린 어딧 항목
+### R3 — 어딧 항목 종결 (2026-09-12)
 
-- F7/F8: link-local 분류기의 production 소스 미스캔과 4개 egress 형태 미탐지.
-- LL-b/c/e/f/h: 분류기의 **정밀도** 규칙(데이터를 데이터로 유지하는 쪽) 5건이 미검증.
-- `verification-receipt` VR-13: `homeCapabilitySha256` payload에 `home` 자체가 빠져 있어
-  내부 레이아웃이 같은 두 HOME이 동일 해시가 된다.
-- `test-shard-lifecycle` LC-13: `maxPollMs < pollMs`면 스케줄이 뒤집힌다.
-- **방법론 플래그**: `waitForEmptyGroup`의 wall deadline을 지우는 뮤턴트는 **hang으로만** 드러난다.
-  `bun test`에는 워치독이 없어 "아직 실행 중"과 구분되지 않는다. 이 뮤턴트가 공유 트리로
-  새어나가 다른 레인의 kill path를 실제로 멈춰 세웠다.
+R1/R2가 열어둔 항목을 전부 닫았다. 각 건은 "이미 고쳐져 있었는가"를 **뮤턴트로** 확인했다.
+
+| 항목 | 실제 상태 | 처리 |
+|---|---|---|
+| F7/F8 link-local production 스캔·egress 4형태 | 열려 있었음 | `8e576eee1` |
+| LL 정밀도 규칙 (데이터를 데이터로) | **paired control 0건** — 세 규칙 모두 grep으로 되돌려도 green | `06bd6714c` |
+| VR-13 `homeCapabilitySha256` | `home`은 payload에 **있었다**. 없는 건 증명이었다 — 필드를 지워도 28/28 green | `948498381` |
+| LC-13 `maxPollMs < pollMs` | clamp는 각 호출부에 **복제**돼 있었다. 세 번째 호출자는 아무것도 상속받지 못한다 | `1656dd2ae` |
+| `chunkClaimsOverlap` | call site 0 · 테스트 0. 이 캠페인이 같은 이유로 죽은 가드를 삭제한 적 있다 | `c4ebde26d` |
+| `posture-phase-modules-hellgate` skip 4건 | preset 4개가 registry에서 전부 사라져 블록 전체가 무의미 | `63da154bb` |
+
+교훈이 반복된다: **"고쳐져 있다"와 "증명돼 있다"는 다르다.** VR-13은 코드가 맞고
+테스트가 틀렸고, LC-13은 두 호출부가 맞고 계약이 없었다. 둘 다 뮤턴트를 넣기 전까지
+"닫힌 항목"으로 보였다.
+
+### 구조적으로 닫을 수 없는 것 (기록)
+
+- **방법론 플래그**: `waitForEmptyGroup`의 wall deadline을 지우는 뮤턴트는 **hang으로만**
+  드러난다. `bun test`에는 워치독이 없어 "아직 실행 중"과 구분되지 않는다. 이 뮤턴트가
+  공유 트리로 새어나가 다른 레인의 kill path를 실제로 멈춰 세웠다.
+- **`EQUIVALENCES` 4건**: 어떤 preset을 재현해야 하는지는 bench 소유자의 판단이다.
+  추측하지 않고 one-directional 기록으로 남겨 새 drift만 RED가 되게 했다.
 
 ---
 
