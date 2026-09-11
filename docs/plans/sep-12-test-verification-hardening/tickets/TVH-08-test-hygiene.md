@@ -1,5 +1,6 @@
 # TVH-08 — heavy test·skip·fixed wait·temp hygiene
 
+- 상태: LANDED (일부 전제는 측정으로 반증)
 - 우선순위: P1/P2
 - 상태: OPEN
 - 소유 lane: test authors / fixture hygiene
@@ -69,3 +70,42 @@
 - [ ] setup/cleanup 비용이 timing receipt에서 보인다.
 - [ ] unbounded readiness loop와 ordinary module-load external effect가 0이다.
 - [ ] ordinary mkdtemp는 모두 owner-scoped `finally` cleanup을 가지며 temp leak census가 0이다.
+
+## 진행 (2026-09-12)
+
+- **LANDED `a3a6219ae`**.
+
+| 항목 | 측정 |
+|---|---|
+| temp 누수 | 9개 파일이 disposal 없음. 소유 `/private/tmp` prefix: **68 → 100 (실행당 +32)** → 수정 후 **100 → 100 (+0)**. 통합 시 1개 파일로 독립 재현: HEAD 버전 +9/run, 수정본 0 |
+| PTY 고정 대기 | 파일 awaited sleep **22,650ms → 6,600ms**, ordinary 코퍼스 **34,530 → 18,530ms**. 실행 16 pass / **153.74s → 140.09s** |
+| ipynb | peak RSS **620 MiB → 115 MiB** canary, 크기는 nightly sibling |
+| nested suite | `bench-results-fence`가 `bench-write-artifacts` 전체를 2회 실행 + 정상 membership = cold full에서 3회. 2.51s → 2.15s, 중복 case 실행 10개 제거 |
+
+- **self-skip 탐지기가 포매터에 의해 무력화돼 있었다.** `test(` 헤더가 한 줄이어야 매치했는데
+  biome가 per-test timeout을 3번째 인자로 줄바꿈하면서 `worktree.test.ts`의 early return 4개가 숨었다.
+  **포매터가 규칙 적용 여부를 결정하고 있었다.** AST 질문으로 교체.
+- **분석기가 census 도중 자기 버그를 찾았다**: assignment에서 `parent.left`를 검사해
+  올바른 148개 site(`let dir` + `beforeEach`)를 누수로 오분류. `parent.right`로 수정.
+
+### 티켓 전제 5건이 current HEAD에서 성립하지 않아 **반증**했다 (우회가 아니라)
+
+`plan-mode-stress-100k-ops` 183ms/115 MiB · `resource-limit-boundary` 186ms/93 MiB ·
+`mcp-inbound-adversarial` 368ms/87 MiB · `conflict-parser` 310ms/69 MiB ·
+`xlsx-docx-read` 483ms/68 MiB (baseline 51–56 MiB).
+그리고 **item 11**: `web-daemon/server.test.ts`는 29 테스트에 1.40s — boot당 ~50ms다.
+case마다 새 daemon이 **가장 강한 격리**이고, 0.5초와 바꾸는 것은 속도를 위해 커버리지를 지우는 것이다.
+reset red-on-injection을 설계했다가 측정 후 폐기했다.
+
+### 부수 발견 (소유자 판단 필요)
+
+`posture-phase-modules-hellgate`의 "equivalence to shipped presets" 블록이 **완전히 vacuous**였다.
+preset 이름 4개가 전부 `KNOB_PRESETS`에서 사라져 4개 case가 아무것도 단언하지 않고 green을 보고했다.
+self-skip을 변환하니 4개 visible skip이 됐다.
+
+### 남은 항목
+
+- 여전히 무거운 파일(handoff에 ROI와 함께): `tool-cluster-hardening-r1` 366 MiB,
+  `delta-token-identity` 261 MiB, `ipynb-render-property-fuzz-r2` 238 MiB
+  (500/800 seed는 0.4초로 무관하고 50MB chunked case만 중요하다).
+- 새 가드 2개는 기존에 등록된 walk에 얹혀 있다. 별도 `_arch` 파일로 분리하려면 3단계 등록 절차가 필요하다.
