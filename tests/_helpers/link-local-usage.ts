@@ -312,6 +312,36 @@ const stepThroughCall = (call: ts.CallExpression | ts.NewExpression, child: ts.N
   return { kind: "stop" }
 }
 
+/**
+ * The sink name for an ASSIGNMENT that issues a request, or `undefined`.
+ *
+ * Split out of `stopAt` so each guard is readable on its own: the walk only
+ * understood call arguments and HTML attributes, so `img.src = addr` and
+ * `location.href = addr` — the canonical browser egress shapes — were invisible.
+ * Every condition here is a PRECISION rule with a paired control in the guard's
+ * data corpus; widening any one of them turns the classifier into an
+ * over-detector that flags a data field.
+ */
+const requestingAssignmentSink = (
+  parent: ts.BinaryExpression,
+  child: ts.Node,
+): string | undefined => {
+  // Only when the address is on the RIGHT. A literal on the left of a
+  // comparison, or one being assigned INTO, is not egress.
+  if (parent.right !== child) return undefined
+  const target = parent.left
+  if (!ts.isPropertyAccessExpression(target)) return undefined
+  const property = target.name.text
+  if (!REQUESTING_PROPERTIES.has(property)) return undefined
+  // `href` alone is ambiguous — an anchor's href inside a data structure is not
+  // a request. It counts when the receiver navigates.
+  if (property === "href") {
+    const root = rootIdentifier(target.expression)
+    if (root === undefined || !NAVIGATING_RECEIVERS.has(root)) return undefined
+  }
+  return `assignment to .${property}`
+}
+
 /** The walk's answer AT this parent, or `undefined` to keep climbing. */
 const stopAt = (parent: ts.Node, child: ts.Node): SinkWalkResult | undefined => {
   const stopped = (sink?: string): SinkWalkResult =>
@@ -323,21 +353,7 @@ const stopAt = (parent: ts.Node, child: ts.Node): SinkWalkResult | undefined => 
     return step.kind === "through" ? undefined : stopped(step.sink)
   }
   if (ts.isBinaryExpression(parent) && parent.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
-    // ASSIGNMENT to a requesting property. Only when the address is on the
-    // RIGHT — `img.src` on the left of a comparison, or a literal being
-    // assigned INTO by something else, is not egress.
-    if (parent.right !== child) return stopped()
-    const target = parent.left
-    if (!ts.isPropertyAccessExpression(target)) return stopped()
-    const property = target.name.text
-    if (!REQUESTING_PROPERTIES.has(property)) return stopped()
-    // `href` alone is ambiguous — an anchor's href in a data structure is not a
-    // request. It counts when the receiver navigates.
-    if (property === "href") {
-      const root = rootIdentifier(target.expression)
-      if (root === undefined || !NAVIGATING_RECEIVERS.has(root)) return stopped()
-    }
-    return stopped(`assignment to .${property}`)
+    return stopped(requestingAssignmentSink(parent, child))
   }
   if (ts.isTaggedTemplateExpression(parent)) {
     const tag = finalIdentifier(parent.tag)
