@@ -353,7 +353,16 @@ interface UnindexedChunk {
 const splitOverCapacityBucket = (bin: readonly WeightedFile[]): readonly WeightedFile[][] => {
   if (bin.length <= MAX_CHUNK_FILES) return [[...bin]]
   const parts = Math.ceil(bin.length / MAX_CHUNK_FILES)
-  const byName = [...bin].sort((left, right) => left.file.localeCompare(right.file))
+  // CODE-UNIT order, not `localeCompare`. The chunk's own `files` list (below)
+  // and the manifest (`[...manifest].sort()`) both use the default comparator,
+  // and `shardFilesSha256` is computed from that list — so partitioning by ICU
+  // collation would make an over-capacity bucket's membership, and therefore its
+  // cache receipt, depend on the host's locale data. Dormant while no bucket
+  // exceeds the ceiling; armed the moment this path is first used, which is what
+  // the split exists for.
+  const byName = [...bin].sort((left, right) =>
+    left.file < right.file ? -1 : left.file > right.file ? 1 : 0,
+  )
   const out: WeightedFile[][] = Array.from({ length: parts }, () => [])
   byName.forEach((entry, index) => {
     // `min(parts - 1, …)` so the remainder lands in the last part rather than

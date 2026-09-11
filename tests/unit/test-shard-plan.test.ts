@@ -962,3 +962,45 @@ describe("targetChunkCount is refused, not ignored", () => {
     expect(chunks.length).toBe(1)
   })
 })
+
+describe("over-capacity split is locale-independent", () => {
+  const MAX_CHUNK_FILES = 160
+  const oneBucket = { classify: () => "pure" as const, membershipFile: () => "fixed" }
+
+  /** 200 names whose code-unit order and ICU order differ ACROSS the ceiling. */
+  const collationCorpus = (): readonly string[] => [
+    ...Array.from({ length: 100 }, (_, i) => `tests/unit/a_${String(i).padStart(3, "0")}.test.ts`),
+    ...Array.from({ length: 100 }, (_, i) => `tests/unit/A-${String(i).padStart(3, "0")}.test.ts`),
+  ]
+
+  test("partitioning uses code-unit order, matching the manifest and the digest", () => {
+    // `shardFilesSha256` is computed from the chunk's `files`, which are sorted
+    // with the DEFAULT comparator, as is the manifest. Partitioning the bucket
+    // with `localeCompare` makes an over-capacity bucket's membership — and
+    // therefore its cache receipt — depend on the host's ICU collation data.
+    const corpus = collationCorpus()
+    const byCodeUnit = [...corpus].sort()
+    const byLocale = [...corpus].sort((left, right) => left.localeCompare(right))
+
+    // ANTI-VACUITY, and the reason this fixture and not a simpler one: the two
+    // comparators must disagree ACROSS the 160-file boundary, or both strategies
+    // produce the same partition and the assertion below proves nothing.
+    expect(byCodeUnit).not.toEqual(byLocale)
+    expect(new Set(byCodeUnit.slice(0, MAX_CHUNK_FILES))).not.toEqual(
+      new Set(byLocale.slice(0, MAX_CHUNK_FILES)),
+    )
+
+    const chunks = planTestChunks(corpus, oneBucket)
+    expect(chunks.length).toBe(2)
+    // Compared as a SET of partitions: `planTestChunks` orders the returned
+    // chunks by their first file, which is itself a locale comparison, so
+    // indexing into the array would assert the wrong thing for the right reason.
+    const partitions = chunks.map((chunk) => [...chunk.files].sort().join("\n")).sort()
+    expect(partitions).toEqual(
+      [
+        byCodeUnit.slice(0, MAX_CHUNK_FILES).join("\n"),
+        byCodeUnit.slice(MAX_CHUNK_FILES).join("\n"),
+      ].sort(),
+    )
+  })
+})

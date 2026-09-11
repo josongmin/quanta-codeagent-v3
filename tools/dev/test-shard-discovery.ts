@@ -81,12 +81,29 @@ const existingRoots = (repoRoot: string, roots: readonly string[]): readonly str
   roots.map((root) => resolve(repoRoot, root)).filter((dir) => existsSync(dir))
 
 /**
+ * How many filesystem enumerations have happened since the last reset.
+ *
+ * Incremented inside `discoverSuiteFiles`, which is the only walk, so the number
+ * cannot drift from the behaviour it describes. `discoverInventory` resets it,
+ * and a guard asserts it is 1 there — re-walking one suite makes it 2.
+ */
+let enumerations = 0
+export const lastInventoryEnumerationCount = (): number => enumerations
+
+/**
  * Discover the sorted test-file list the shard runner will actually execute.
  * Reuses `expandTestFiles` — do not reimplement glob here. Missing suite roots
  * fail the same way the campaign runner does (`statSync` inside expand).
  */
-export const discoverSuiteFiles = (repoRoot: string, suite: SuiteName): readonly string[] =>
-  expandTestFiles(SUITE_ROOTS[suite].map((root) => resolve(repoRoot, root)))
+export const discoverSuiteFiles = (repoRoot: string, suite: SuiteName): readonly string[] => {
+  // Counted HERE, at the only place an enumeration actually happens. It used to
+  // be a literal `+= 1` beside the one call in `discoverInventory`, which made
+  // `expect(lastInventoryEnumerationCount()).toBe(1)` an assertion that one
+  // hard-coded line had executed once — re-walking a suite, or reverting the
+  // projection entirely, left the guard green.
+  enumerations += 1
+  return expandTestFiles(SUITE_ROOTS[suite].map((root) => resolve(repoRoot, root)))
+}
 
 export const discoverSuitePopulation = (
   repoRoot: string,
@@ -146,15 +163,6 @@ export interface DiscoveryInventory {
 }
 
 /**
- * How many filesystem enumerations the last `discoverInventory` performed.
- *
- * Exported so a guard can assert the number rather than infer it from a
- * stopwatch. It is reset at the start of each inventory.
- */
-let inventoryEnumerations = 0
-export const lastInventoryEnumerationCount = (): number => inventoryEnumerations
-
-/**
  * Does `file` live under one of `roots`?
  *
  * Both sides are made repo-relative and slash-normalised first, because
@@ -205,9 +213,8 @@ export const projectSuitePopulation = (
 export const discoverInventory = (repoRoot: string): DiscoveryInventory => {
   // ONE enumeration. `full` is the superset of every other suite root, so every
   // suite below is a filter over this list rather than another walk.
-  inventoryEnumerations = 0
+  enumerations = 0
   const everything = toRepoRelative(repoRoot, discoverSuiteFiles(repoRoot, "full"))
-  inventoryEnumerations += 1
   const suites = {
     full: projectSuitePopulation(everything, "full"),
     core: projectSuitePopulation(everything, "core"),

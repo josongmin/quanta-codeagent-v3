@@ -98,6 +98,37 @@ describe("shard manifest selection", () => {
     expect(selectorCalls).toBe(0)
   })
 
+  test("a universe below the TIER floor with no narrowing is corpus loss, not selection", () => {
+    // The audit finding. `SUITE_FLOORS.full` is 3,600 and the tier floor is
+    // 3,900, so a corpus that lost 100 files lands in the band between them: the
+    // suite floor does not reach it, and the tier check used to print "this is a
+    // SELECTION shrink, not corpus loss" while `selected === discovered` — i.e.
+    // while nothing had been narrowed at all. Exactly the mis-attribution the
+    // split exists to remove, pointing the other way.
+    const whole = files(85)
+    const thrown = ((): Error => {
+      try {
+        selectShardManifest(
+          input({
+            discovered: whole,
+            suiteFloor: 80,
+            tierFloors: {
+              schema: "quanta.test-tier-population.v1",
+              tiers: { pr: { minFiles: 90, reason: "fixture floor above the suite floor" } },
+            },
+            selectForTier: (ids) => ({ files: ids }),
+          }),
+        )
+        throw new Error("expected a throw")
+      } catch (error) {
+        return error as Error
+      }
+    })()
+    expect(thrown).toBeInstanceOf(CorpusLostError)
+    expect(thrown.message).toContain("NOTHING was narrowed")
+    expect(thrown.message).not.toContain("SELECTION shrink")
+  })
+
   test("an empty tier selection is named as an empty selection", () => {
     expect(() => selectShardManifest(input({ selectForTier: () => ({ files: [] }) }))).toThrow(
       /selected zero of 100/,

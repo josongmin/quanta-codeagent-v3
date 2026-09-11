@@ -122,7 +122,15 @@ export const selectShardManifest = (input: ShardSelectionInput): ShardSelection 
     discovered: input.discovered.length,
     floors: input.tierFloors,
   })
-  if (!population.ok) throw new TierSelectionError(population.message)
+  if (!population.ok) {
+    // A universe that fell below the TIER floor without any narrowing is corpus
+    // loss that the lower suite floor did not reach, so it must carry the corpus
+    // error — reporting it as a selection defect sends the reader to the policy
+    // file for a problem in the tree.
+    throw population.kind === "universe-below-tier-floor"
+      ? new CorpusLostError(population.message)
+      : new TierSelectionError(population.message)
+  }
 
   return { discovered: input.discovered, manifest, tiered }
 }

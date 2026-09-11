@@ -15,14 +15,29 @@ const packageJson = (await Bun.file(
 const shardRunner = await Bun.file(
   join(import.meta.dir, "..", "..", "tools", "dev", "run-test-shards.ts"),
 ).text()
-const runShardSource = shardRunner.slice(
-  shardRunner.indexOf("const runShard ="),
-  shardRunner.indexOf("const main ="),
-)
-const mainSource = shardRunner.slice(
-  shardRunner.indexOf("const main ="),
-  shardRunner.indexOf("await main()"),
-)
+/**
+ * Slice a declaration out of the runner by its real boundaries.
+ *
+ * These were `indexOf(start) .. indexOf(end)`, and a DOCSTRING that mentioned
+ * `await main()` while explaining why the runner cannot be imported landed at a
+ * lower offset than `const main =`. The slice went negative-length, `mainSource`
+ * became `""`, and three guards — drain-before-release, the signal handler, and
+ * the repository-lane serialization — passed over an empty string with no
+ * output. `lastIndexOf` anchors on the real call, and the floor below makes an
+ * empty slice loud instead of vacuously satisfied.
+ */
+const sliceDeclaration = (source: string, from: string, to: string): string => {
+  const start = source.indexOf(from)
+  const end = source.lastIndexOf(to)
+  if (start === -1) throw new Error(`admission guard: runner has no ${from}`)
+  if (end <= start) {
+    throw new Error(`admission guard: ${to} does not follow ${from} — the slice would be empty`)
+  }
+  return source.slice(start, end)
+}
+
+const runShardSource = sliceDeclaration(shardRunner, "const runShard =", "const main =")
+const mainSource = sliceDeclaration(shardRunner, "const main =", "await main()")
 const planSource = await Bun.file(
   join(import.meta.dir, "..", "..", "tools", "dev", "test-shard-plan.ts"),
 ).text()
@@ -98,6 +113,17 @@ const wiresRepositoryLease = (source: string): boolean =>
   /finally\s*\{[\s\S]*?lease\?\.release\s*\(\s*\)/.test(source)
 
 describe("test:ci admission gate", () => {
+  test("ANTI-VACUITY — the runner slices this file reads are non-empty", () => {
+    // Every `toContain` below is satisfied by "" only in the negative form, but
+    // the positive ones went RED silently pointing at the wrong cause when a
+    // docstring reordered the anchors. Pinned explicitly so the NEXT time an
+    // anchor moves, the failure names the slice rather than the property.
+    expect(runShardSource.length).toBeGreaterThan(500)
+    expect(mainSource.length).toBeGreaterThan(2_000)
+    expect(mainSource).toContain("acquireTestShardLease")
+    expect(runShardSource).toContain("registry.spawnWorker")
+  })
+
   test("uses the live feature-catalog changed-file authority", () => {
     const script = packageJson.scripts?.["test:admission"]
     expect(script).toBe("bun fc check-changed")
@@ -121,35 +147,64 @@ describe("test:ci admission gate", () => {
     // SPLIT BY EXECUTOR, because `--parallel=1` only means something to one of
     // them. It is a real `bun test` flag — "run test files in N worker
     // processes, implies --isolate" — and the shared-`mock.module`/env/cwd
-    // corpus genuinely needs it. But `tools/dev/run-test-shards.ts` had
-    // `if (arg === "--parallel=1") continue`: a silent no-op. Five scripts
-    // passed it to the shard runner and READ as serial-isolated while the
-    // runner chose its own intra-worker width, up to 8-wide for `pure` chunks.
-    // Asserting the flag on those scripts pinned the misconception, not the
-    // serialization.
+    // corpus genuinely needs it: a parallel sweep of `tests/unit src` produced
+    // ~74 failures that ALL passed in isolation. But
+    // `tools/dev/run-test-shards.ts` had `if (arg === "--parallel=1") continue`:
+    // a silent no-op. Five scripts passed it to the shard runner and READ as
+    // serial-isolated while the runner chose its own intra-worker width.
+    //
+    // DERIVED, not listed. The previous version hard-coded two arrays and
+    // asserted `length === 10`, which is the same snapshot-instead-of-invariant
+    // shape this campaign already fixed once — and it silently omitted
+    // `test:pollution` (the whole unit corpus in one process) and
+    // `eval:retrieval`, under a test titled "every shared-process entrypoint".
     const scripts = packageJson.scripts ?? {}
-    const directBunTest = ["test:fast", "test:shard", "test:contract", "test:cov", "test:watch"]
-    for (const name of directBunTest) {
-      expect(scripts[name], name).toContain("--parallel=1")
-      expect(scripts[name], name).not.toContain("run-test-shards.ts")
+
+    /** A `bun test` target that is a DIRECTORY or a glob, i.e. a broad sweep. */
+    const runsBroadBunTest = (command: string): boolean => {
+      const at = command.indexOf("bun test ")
+      if (at === -1) return false
+      return command
+        .slice(at + "bun test ".length)
+        .split(/\s+/u)
+        .some((token) => token.startsWith("tests/") && !token.endsWith(".test.ts"))
     }
+    const usesShardRunner = (command: string): boolean => command.includes("run-test-shards.ts")
+
+    const broad = Object.entries(scripts).filter(([, command]) => runsBroadBunTest(command))
+    const shardRunner = Object.entries(scripts).filter(([, command]) => usesShardRunner(command))
+
+    // ANTI-VACUITY, over the real script set rather than a constant: both
+    // populations must be non-trivial, or every assertion below is about
+    // nothing. Floors, not equalities, so adding an eleventh broad script is a
+    // legitimate edit rather than an automatic red.
+    expect(broad.length).toBeGreaterThanOrEqual(7)
+    expect(shardRunner.length).toBeGreaterThanOrEqual(5)
+
+    const unserialised = broad
+      .filter(([, command]) => !usesShardRunner(command))
+      .filter(([, command]) => !/--parallel=1\b/u.test(command))
+      .map(([name]) => name)
+    expect(
+      unserialised,
+      unserialised.length === 0
+        ? ""
+        : "these sweep a whole test directory in ONE bun process without --parallel=1, so they " +
+            `inherit the shared mock.module/env/cwd corruption: ${unserialised.join(", ")}`,
+    ).toEqual([])
 
     // The shard-runner entrypoints get their serialization from the runner's
     // resource classes and scheduler, which is where a shared-process hazard is
-    // actually expressed. The flag must NOT be there: the runner now refuses it
-    // rather than absorbing it (tests/unit/dev/shard-runner-options.test.ts).
-    const shardRunner = ["test", "test:unit", "test:unit:ci", "test:integration", "test:full:ci"]
-    for (const name of shardRunner) {
-      expect(scripts[name], name).toContain("run-test-shards.ts")
-      expect(scripts[name], name).not.toContain("--parallel")
-    }
+    // actually expressed. The flag must NOT be there: the runner now refuses it.
+    const smuggled = shardRunner
+      .filter(([, command]) => /--parallel/u.test(command))
+      .map(([name]) => name)
+    expect(smuggled).toEqual([])
 
-    // ANTI-VACUITY: both lists must be non-empty and must together cover every
-    // script that runs a broad test population, so a renamed script silently
-    // leaves the guard instead of failing it.
-    expect(directBunTest.length + shardRunner.length).toBe(10)
-    for (const name of [...directBunTest, ...shardRunner]) {
-      expect({ name, present: name in scripts }).toEqual({ name, present: true })
+    // The two the hard-coded lists had missed, named so a future deletion is a
+    // deliberate edit rather than an omission nobody notices.
+    for (const name of ["test:pollution", "eval:retrieval"]) {
+      expect({ name, broad: runsBroadBunTest(scripts[name] ?? "") }).toEqual({ name, broad: true })
     }
   })
 

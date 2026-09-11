@@ -87,11 +87,27 @@ export const loadTierPopulationFloors = (
 
 export type TierPopulationVerdict =
   | { readonly ok: true; readonly floor: number }
-  | { readonly ok: false; readonly message: string }
+  | {
+      readonly ok: false
+      readonly kind:
+        | "no-floor"
+        | "empty-selection"
+        | "narrowed"
+        | "universe-below-tier-floor"
+        | "over-selected"
+      readonly message: string
+    }
 
 /**
  * Check a tier's SELECTED population. Distinct from the suite floor in both
  * input and message, so a narrowed tier never reports as a lost corpus.
+ *
+ * …and, since the audit, not the other way round either. The shortfall branch
+ * had `discovered` in hand and never compared it: it printed "this is a
+ * SELECTION shrink, not corpus loss" unconditionally. The suite floor for `full`
+ * is 3,600 and the tier floor is 3,900, so any corpus loss landing in that
+ * 300-file band was reported with a message that explicitly DENIED corpus loss —
+ * the exact mis-attribution the split exists to remove, pointing the other way.
  */
 export const checkTierPopulation = (input: {
   readonly tier: string
@@ -103,37 +119,53 @@ export const checkTierPopulation = (input: {
   if (floor === undefined) {
     return {
       ok: false,
+      kind: "no-floor",
       message:
         `[test:shards] INVALID — tier=${input.tier} has no committed population floor in ` +
         `test-tier-population.json. An unlisted tier is not a default: add it, with a reason, ` +
         "in the same diff that introduced the tier.",
     }
   }
-  if (input.selected === 0) {
-    return {
-      ok: false,
-      message:
-        `[test:shards] INVALID — tier=${input.tier} selected zero of ${input.discovered} ` +
-        "discovered files. The corpus is intact; the SELECTION is empty.",
-    }
-  }
-  if (input.selected < floor.minFiles) {
-    return {
-      ok: false,
-      message:
-        `[test:shards] INVALID — tier=${input.tier} selected ${input.selected} files, below its ` +
-        `committed floor of ${floor.minFiles} (${floor.reason}). The suite discovered ` +
-        `${input.discovered} files, so this is a SELECTION shrink, not corpus loss. If the ` +
-        "narrowing is intended, lower the floor in the same diff and say why.",
-    }
-  }
   if (input.selected > input.discovered) {
     return {
       ok: false,
+      kind: "over-selected",
       message:
         `[test:shards] INVALID — tier=${input.tier} selected ${input.selected} files from a ` +
         `universe of ${input.discovered}. Selection cannot exceed discovery.`,
     }
   }
-  return { ok: true, floor: floor.minFiles }
+  if (input.selected === 0) {
+    return {
+      ok: false,
+      kind: "empty-selection",
+      message:
+        `[test:shards] INVALID — tier=${input.tier} selected zero of ${input.discovered} ` +
+        "discovered files. The corpus is intact; the SELECTION is empty.",
+    }
+  }
+  if (input.selected >= floor.minFiles) return { ok: true, floor: floor.minFiles }
+
+  // BELOW THE FLOOR — now say WHICH of the two things happened.
+  if (input.selected === input.discovered) {
+    return {
+      ok: false,
+      kind: "universe-below-tier-floor",
+      message:
+        `[test:shards] INVALID — tier=${input.tier} selected all ${input.selected} discovered ` +
+        `files, and that is still below its committed floor of ${floor.minFiles} ` +
+        `(${floor.reason}). NOTHING was narrowed: the universe itself shrank past what this ` +
+        "tier promises. The suite floor did not catch it because it sits lower — fix the corpus, " +
+        "or lower both floors together and say why.",
+    }
+  }
+  return {
+    ok: false,
+    kind: "narrowed",
+    message:
+      `[test:shards] INVALID — tier=${input.tier} selected ${input.selected} files, below its ` +
+      `committed floor of ${floor.minFiles} (${floor.reason}). The suite discovered ` +
+      `${input.discovered} files, so this is a SELECTION shrink, not corpus loss. If the ` +
+      "narrowing is intended, lower the floor in the same diff and say why.",
+  }
 }

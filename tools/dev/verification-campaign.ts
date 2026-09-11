@@ -74,7 +74,33 @@ const CAMPAIGN_QUIET_BOX_BUDGET_MS = 180_000
 
 const campaignStartedAtMs = Date.now()
 const hostAtStart = sampleCampaignHost()
-const readRef = (ref: string): string => capture(["git", "rev-parse", ref]).text.trim()
+/**
+ * Resolve a git ref, or `null` if git could not.
+ *
+ * `capture` concatenates stdout AND stderr and never throws, so the previous
+ * `capture(...).text.trim()` returned git's four-line `fatal: ambiguous
+ * argument 'origin/main'` as if it were an OID whenever the ref was absent — a
+ * fresh clone, a detached CI checkout, or a repository whose default branch is
+ * not `origin/main`. Every `try/catch` around it was therefore dead code, and
+ * the documented "null when there is no such ref" was unreachable.
+ *
+ * The shape check is deliberate and not paranoia: a ref that resolves must give
+ * 40 hex characters, and anything else is a message, not an object name.
+ */
+const readRefOrNull = (ref: string): string | null => {
+  const result = capture(["git", "rev-parse", ref])
+  if (result.code !== 0) return null
+  const value = result.text.trim()
+  return /^[0-9a-f]{40}$/.test(value) ? value : null
+}
+
+/** HEAD must resolve; a campaign over a repository git cannot read is not a
+ *  campaign. Throws rather than inventing a value. */
+const readHead = (): string => {
+  const head = readRefOrNull("HEAD")
+  if (head === null) throw new Error("[verification] git cannot resolve HEAD in this checkout")
+  return head
+}
 
 /**
  * HEAD as it was when this campaign got IN LINE for the repository lease.
@@ -85,17 +111,12 @@ const readRef = (ref: string): string => capture(["git", "rev-parse", ref]).text
  * capture happened before the wait, so the receipt described a state the run
  * never saw.
  */
-const queuedHead = readRef("HEAD")
+const queuedHead = readHead()
 let campaignHead = queuedHead
 /** The comparison base, frozen WITH the head so local and hosted admission look
  *  at the same commit range. `null` when there is no such ref (a fresh clone,
  *  a detached CI checkout). */
-let campaignBaseOid: string | null = null
-try {
-  campaignBaseOid = readRef("origin/main")
-} catch {
-  campaignBaseOid = null
-}
+let campaignBaseOid: string | null = readRefOrNull("origin/main")
 
 const isExactPrepushReuse =
   basename(command[0] ?? "") === "bun" &&
@@ -186,13 +207,7 @@ let leaseWaitMs = 0
 
 /** HEAD at exit, or `null` if git cannot answer. A receipt field must never be
  *  the reason a campaign fails. */
-const currentHeadOrNull = (): string | null => {
-  try {
-    return readRef("HEAD")
-  } catch {
-    return null
-  }
-}
+const currentHeadOrNull = (): string | null => readRefOrNull("HEAD")
 
 /** One place that turns "what just happened" into the campaign receipt. */
 const recordCampaign = (input: {
@@ -284,12 +299,8 @@ process.stdout.write(
 // The gates below run over whatever HEAD is NOW, so that is the head the receipt
 // must describe; `queuedHead` keeps the old value so the move is visible instead
 // of silently replaced.
-campaignHead = readRef("HEAD")
-try {
-  campaignBaseOid = readRef("origin/main")
-} catch {
-  campaignBaseOid = null
-}
+campaignHead = readHead()
+campaignBaseOid = readRefOrNull("origin/main")
 if (campaignHead !== queuedHead) {
   process.stdout.write(
     `[verification] HEAD MOVED while waiting for the lease: queued=${queuedHead} ` +

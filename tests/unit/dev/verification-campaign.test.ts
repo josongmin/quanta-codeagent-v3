@@ -624,8 +624,8 @@ describe("campaign head is frozen under the lease", () => {
       "utf8",
     )
     const leaseAt = source.indexOf("LEASE acquired port=")
-    const refreezeAt = source.indexOf('campaignHead = readRef("HEAD")')
-    const queuedAt = source.indexOf('const queuedHead = readRef("HEAD")')
+    const refreezeAt = source.indexOf("campaignHead = readHead()")
+    const queuedAt = source.indexOf("const queuedHead = readHead()")
 
     // ANTI-VACUITY: all three markers must exist, or the ordering assertions
     // below compare -1 against -1 and pass over nothing.
@@ -638,6 +638,41 @@ describe("campaign head is frozen under the lease", () => {
     // The queued value is preserved, never overwritten in place.
     expect(source).toContain("queuedHead,")
     expect(source).toContain("headMovedInQueue")
+  })
+
+  test("a checkout with no origin/main records baseOid null, not a git error string", () => {
+    // `capture` concatenates stdout AND stderr and never throws, so the previous
+    // `capture(...).text.trim()` handed back git's four-line `fatal: ambiguous
+    // argument 'origin/main'` as if it were an object name — on a fresh clone, a
+    // detached CI checkout, or any repo whose default branch is not
+    // `origin/main`. Every try/catch around it was dead code.
+    const root = mkdtempSync(join(tmpdir(), "quanta-no-origin-"))
+    roots.push(root)
+    writeFileSync(join(root, "a.txt"), "x\n")
+    initCommittedRepo(root)
+
+    const probe = Bun.spawnSync(["git", "rev-parse", "origin/main"], {
+      cwd: root,
+      env: cleanLeaseEnv() as NodeJS.ProcessEnv,
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    // ANTI-VACUITY: the fixture must really lack the ref, or this proves nothing.
+    expect(probe.exitCode).not.toBe(0)
+
+    const text = `${probe.stdout.toString()}${probe.stderr.toString()}`.trim()
+    // What the old code would have stored, shown rather than described.
+    expect(text.length).toBeGreaterThan(40)
+    expect(/^[0-9a-f]{40}$/.test(text)).toBe(false)
+
+    // …and the shape the fix keys on.
+    const source = readFileSync(
+      join(import.meta.dir, "..", "..", "..", "tools", "dev", "verification-campaign.ts"),
+      "utf8",
+    )
+    expect(source).toContain("readRefOrNull")
+    expect(source).toContain("/^[0-9a-f]{40}$/")
+    expect(source).not.toContain('capture(["git", "rev-parse", ref]).text.trim()')
   })
 
   test("the receipt carries all three snapshots and the base", () => {
