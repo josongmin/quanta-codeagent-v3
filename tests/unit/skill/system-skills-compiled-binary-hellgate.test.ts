@@ -29,9 +29,9 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 
 const REPO_ROOT = new URL("../../../", import.meta.url).pathname
 
@@ -51,10 +51,16 @@ describe("system skills survive `bun build --compile`", () => {
 
       // The probe entry must live INSIDE the repo so bare specifiers (`@/…`)
       // resolve at build time.
-      const entry = join(REPO_ROOT, `__compiled-skills-probe-${process.pid}.ts`)
+      const entry = join(
+        REPO_ROOT,
+        ".cache",
+        "compiled-probe",
+        `compiled-skills-probe-${process.pid}.ts`,
+      )
       const out = mkdtempSync(join(tmpdir(), "compiled-skills-"))
       const bin = join(out, "probe")
       try {
+        mkdirSync(dirname(entry), { recursive: true })
         writeFileSync(
           entry,
           [

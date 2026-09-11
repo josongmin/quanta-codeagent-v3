@@ -52,6 +52,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -59,7 +60,7 @@ import {
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { join, relative } from "node:path"
 import {
   bunEntryArgv,
   bunEntryArgvFrom,
@@ -286,5 +287,67 @@ describe("repo-root helper — portability", () => {
         false,
       )
     }
+  })
+})
+
+/**
+ * A killed worker must not be able to dirty the tracked tree.
+ *
+ * MEASURED: a prepush campaign bailed on a failing chunk, cancelled its peers,
+ * and one of them died inside a compiled-probe test whose `finally` therefore
+ * never ran. It left `__compiled-parser-probe-38563.ts` in the REPO ROOT, where
+ * the next run's typecheck, lint and lint:debt all read it. The campaign's own
+ * end-snapshot caught it as `endDirty=true` and invalidated an otherwise
+ * complete run — the guard worked, and the cause was still there.
+ *
+ * `finally` is not the fix. A SIGKILL has no `finally`. The fix is to write
+ * where a leak cannot matter: inside the repo, because bun resolves `@/…` and
+ * `node_modules` by walking up from the entry, but under `.cache/`, which is
+ * gitignored. Resolution is identical — measured, the compiled probe still
+ * reports `{ready: true, verdict: "hard-deny"}` from there.
+ */
+describe("no test writes a scratch entry to the repo root", () => {
+  const ROOT_SCRATCH =
+    /join\(\s*REPO_ROOT\s*,\s*`[^`/]*\$\{[^}]*\}[^`/]*\.(?:ts|js|mjs|cjs|json|txt)`/
+
+  const walkableDir = (name: string): boolean => name !== "node_modules" && !name.startsWith(".")
+
+  /**
+   * `import.meta.path` is skipped: this file must contain the forbidden shape
+   * VERBATIM to prove the detector fires on it, so it is the one file the
+   * detector cannot read. Named, not pattern-excluded — a second exemption
+   * would have to be written here on purpose.
+   */
+  const leaksToRoot = (full: string): boolean =>
+    full !== import.meta.path && ROOT_SCRATCH.test(readFileSync(full, "utf8"))
+
+  const rootWritersUnder = (dir: string): readonly string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) return walkableDir(entry.name) ? rootWritersUnder(full) : []
+      if (!entry.name.endsWith(".test.ts")) return []
+      return leaksToRoot(full) ? [relative(REPO_ROOT, full)] : []
+    })
+
+  test("every compiled-probe entry lives under an ignored directory", () => {
+    const offenders = rootWritersUnder(join(REPO_ROOT, "tests"))
+    expect(
+      offenders,
+      "a pid-named scratch file at the repo root survives a SIGKILL and breaks the NEXT " +
+        `run's typecheck/lint. Write it under .cache/ instead:\n  ${offenders.join("\n  ")}`,
+    ).toEqual([])
+  })
+
+  test("the detector fires on the exact shape that leaked", () => {
+    // ANTI-VACUITY: the arm above passes for a detector that matches nothing.
+    const LEAKED = ["join(REPO_ROOT, `__compiled-parser-probe-", "{process.pid}.ts`)"].join("$")
+    expect(ROOT_SCRATCH.test(LEAKED)).toBe(true)
+    // ...and not on the fixed form it was moved to, nor on ordinary reads.
+    const FIXED = [
+      'join(REPO_ROOT, ".cache", "compiled-probe", `entry-',
+      "{process.pid}.ts`)",
+    ].join("$")
+    expect(ROOT_SCRATCH.test(FIXED)).toBe(false)
+    expect(ROOT_SCRATCH.test('join(REPO_ROOT, "package.json")')).toBe(false)
   })
 })

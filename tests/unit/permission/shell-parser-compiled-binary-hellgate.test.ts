@@ -28,9 +28,9 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 
 const REPO_ROOT = new URL("../../../", import.meta.url).pathname
 
@@ -38,13 +38,22 @@ describe("I — the shell effect authority survives compilation", () => {
   test(
     "a compiled binary arms the grammar and still hard-denies a structural bypass",
     async () => {
-      // The entry must live INSIDE the repo: bun resolves bare specifiers
-      // (`@/…`, `web-tree-sitter`) against the nearest `node_modules`, so a
-      // scratch-dir entry cannot be compiled at all.
-      const entry = join(REPO_ROOT, `__compiled-parser-probe-${process.pid}.ts`)
+      // INSIDE the repo, because bun resolves bare specifiers (`@/…`,
+      // `web-tree-sitter`) against the nearest `node_modules` and a scratch-dir
+      // entry cannot be compiled at all — but under `.cache/`, not at the ROOT.
+      //
+      // MEASURED: a campaign killed this worker mid-test, the `finally` never
+      // ran, and `__compiled-parser-probe-38563.ts` was left in the repo root,
+      // where the next run's typecheck, lint and lint:debt all read it. The
+      // prepush guard caught it as `endDirty=true` and invalidated an otherwise
+      // complete campaign. `.cache/` is gitignored and resolution is identical
+      // — bun walks UP for both `node_modules` and the tsconfig — so a killed
+      // worker can no longer dirty the tracked tree.
+      const entry = join(REPO_ROOT, ".cache", "compiled-probe", `entry-${process.pid}.ts`)
       const out = mkdtempSync(join(tmpdir(), "compiled-probe-"))
       const bin = join(out, "probe")
       try {
+        mkdirSync(dirname(entry), { recursive: true })
         writeFileSync(
           entry,
           [
@@ -91,11 +100,14 @@ describe("I — the shell effect authority survives compilation", () => {
       // buys is that `QUANTA_TREE_SITTER_DIR` — which already existed — now
       // actually works, because init no longer aborts before any grammar is
       // looked up. This asserts exactly that, and nothing stronger.
-      const entry = join(REPO_ROOT, `__compiled-retrieval-probe-${process.pid}.ts`)
+      // Same reason as above: inside the repo for resolution, under an ignored
+      // directory so a killed worker cannot leave it in the tracked tree.
+      const entry = join(REPO_ROOT, ".cache", "compiled-probe", `retrieval-${process.pid}.ts`)
       const out = mkdtempSync(join(tmpdir(), "compiled-retrieval-"))
       const bin = join(out, "probe")
       const grammarDir = join(REPO_ROOT, "node_modules/@vscode/tree-sitter-wasm/wasm")
       try {
+        mkdirSync(dirname(entry), { recursive: true })
         writeFileSync(
           entry,
           [

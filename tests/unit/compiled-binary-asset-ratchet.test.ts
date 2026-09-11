@@ -52,6 +52,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -61,7 +62,7 @@ import {
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
-import { join, relative, resolve } from "node:path"
+import { dirname, join, relative, resolve } from "node:path"
 import { stripComments } from "./_shared/strip-comments"
 
 const REPO_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "")
@@ -412,11 +413,17 @@ describe("compiled-binary asset ratchet", () => {
       // The entry must live INSIDE the repo: bun resolves bare specifiers
       // (`@/…`, `web-tree-sitter`) against the nearest `node_modules`, so a
       // scratch-dir entry cannot be compiled at all.
-      const entry = join(REPO_ROOT, `__compiled-asset-ratchet-probe-${process.pid}.ts`)
+      const entry = join(
+        REPO_ROOT,
+        ".cache",
+        "compiled-probe",
+        `compiled-asset-ratchet-probe-${process.pid}.ts`,
+      )
       const out = mkdtempSync(join(tmpdir(), "compiled-asset-probe-"))
       const bin = join(out, "probe")
       const grammarDir = join(REPO_ROOT, "node_modules/@vscode/tree-sitter-wasm/wasm")
       try {
+        mkdirSync(dirname(entry), { recursive: true })
         writeFileSync(
           entry,
           [

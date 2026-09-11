@@ -41,9 +41,9 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { runtimeConfigFromEnv } from "@/shared/runtime-config"
 
 const REPO_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "")
@@ -106,10 +106,16 @@ describe("side-agent fork port survives compilation", () => {
   test(
     "a COMPILED binary run OUTSIDE the repo resolves a REAL worker path and REFUSES to fork",
     () => {
-      const entry = join(REPO_ROOT, `__side-agent-fork-probe-${process.pid}.ts`)
+      const entry = join(
+        REPO_ROOT,
+        ".cache",
+        "compiled-probe",
+        `side-agent-fork-probe-${process.pid}.ts`,
+      )
       const out = mkdtempSync(join(tmpdir(), "side-agent-fork-probe-"))
       const bin = join(out, "probe")
       try {
+        mkdirSync(dirname(entry), { recursive: true })
         writeFileSync(entry, PROBE, "utf8")
         const build = Bun.spawnSync({
           cmd: ["bun", "build", "--compile", entry, "--outfile", bin],
@@ -148,8 +154,14 @@ describe("side-agent fork port survives compilation", () => {
       // The guard must fire ONLY in a compiled binary. If this control ever goes
       // red, the "fix" broke the working path instead of describing it, which is
       // the regression a one-sided compiled assertion cannot see.
-      const entry = join(REPO_ROOT, `__side-agent-fork-src-probe-${process.pid}.ts`)
+      const entry = join(
+        REPO_ROOT,
+        ".cache",
+        "compiled-probe",
+        `side-agent-fork-src-probe-${process.pid}.ts`,
+      )
       try {
+        mkdirSync(dirname(entry), { recursive: true })
         writeFileSync(entry, PROBE, "utf8")
         const result = runProbe(["bun", "run", entry], REPO_ROOT)
         expect(result.exists).toBe(true)

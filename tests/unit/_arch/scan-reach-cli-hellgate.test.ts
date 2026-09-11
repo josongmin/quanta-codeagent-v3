@@ -22,9 +22,9 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import {
   AUTHORITATIVE_SCAN_TIERS,
   scanReachAuthorityProblem,
@@ -384,20 +384,26 @@ describe("scan-reach CLI decision", () => {
     const dir = mkdtempSync(join(tmpdir(), "scan-reach-cli-"))
     const sink = join(dir, "sink.jsonl")
     const fixtureBaseline = join(dir, "baseline.json")
-    const fixture = join(REPO_ROOT, `zzz-scan-reach-probe-${process.pid}.test.ts`)
+    // Under `.cache/`, not at the repo ROOT. A pid-named `.test.ts` at the root
+    // is worse than a stray file: the corpus walker discovers `*.test.ts`, so a
+    // campaign running while this one existed would have planned it into a
+    // chunk. And a SIGKILL has no `finally` — measured on a real campaign,
+    // which left a sibling probe in the root and invalidated the run.
+    const fixture = join(REPO_ROOT, ".cache", "scan-reach-probe", `probe-${process.pid}.test.ts`)
     try {
       const srcDir = join(REPO_ROOT, "src", "shared")
       writeFileSync(
         fixtureBaseline,
         JSON.stringify({ note: "fixture", scans: { "probe#SHARED": { walked: 1 } } }),
       )
+      mkdirSync(dirname(fixture), { recursive: true })
       writeFileSync(
         fixture,
         [
           `import { test, expect } from "bun:test"`,
           `import { readdirSync } from "node:fs"`,
           `import { join } from "node:path"`,
-          `import { assertScanPopulation } from "./tests/unit/_shared/scan-population"`,
+          `import { assertScanPopulation } from "../../tests/unit/_shared/scan-population"`,
           `test("records reach, then fails", () => {`,
           `  const root = ${JSON.stringify(srcDir)}`,
           `  const files = readdirSync(root).filter((f) => f.endsWith(".ts"))`,
