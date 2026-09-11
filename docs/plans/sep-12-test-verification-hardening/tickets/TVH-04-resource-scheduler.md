@@ -1,7 +1,7 @@
 # TVH-04 — resource certification·scheduler·lease 실배선
 
 - 우선순위: P1
-- 상태: LANDED (scheduler 전환은 1/2/4 canary 대기)
+- 상태: LANDED — 562 파일 인증(현재 548 certified / 14 intentionally-exclusive / 0 missing). 의도된 보류: claim-overlap 스케줄러 전환은 1/2/4-worker 등가 canary 대기(interlock 있음)
 - 소유 lane: scheduler / resource certification / lease
 - 선행: TVH-02, TVH-03
 - 후속: TVH-05, TVH-09

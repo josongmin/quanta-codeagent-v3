@@ -1,7 +1,7 @@
 # TVH-13 — memory/output/temp-disk resource envelope
 
 - 우선순위: P0/P1
-- 상태: OPEN
+- 상태: PARTIAL — spool 512MiB 상한·40분 total wall·tail-only 읽기·실패 경로 cache sweep·per-kind retention 착륙. 미착륙: RSS 기반 admission/throttle, maxTempBytes·maxChildProcesses claim
 - 소유 lane: shard admission / telemetry / output retention
 - 선행: TVH-04, TVH-05
 - 후속: TVH-09, TVH-10

@@ -1,7 +1,7 @@
 # TVH-14 — top-level verification DAG와 bounded gate lifecycle
 
 - 우선순위: P1
-- 상태: IN PROGRESS (항목 0 착륙)
+- 상태: PARTIAL — manifest exact 계약과 ready-set 스케줄러는 착륙, 그러나 `gate.ts`는 여전히 직렬 `stepGatePlan`을 쓴다. 배선은 bounded child primitive 선행(의도된 보류 4번째)
 - 소유 lane: gate orchestration / lifecycle / critical path
 - 선행: TVH-04, TVH-06, TVH-07, TVH-12
 - 후속: TVH-09, TVH-10

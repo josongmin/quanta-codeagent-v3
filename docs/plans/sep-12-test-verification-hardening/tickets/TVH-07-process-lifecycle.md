@@ -1,7 +1,7 @@
 # TVH-07 — process lifecycle·timeout·cleanup 표준화
 
 - 우선순위: P0/P1
-- 상태: P0 LANDED (나머지 진행 중)
+- 상태: LANDED — bounded process observer(70초 drain 1,400→34 snapshot), identity-safe kill, 3중 watchdog 경계, retry 증폭 제거. 열림: LC-13 `maxPollMs < pollMs` 스케줄 역전
 - 소유 lane: child process lifecycle / watchdog
 - 선행: TVH-01
 - 후속: TVH-08, TVH-09

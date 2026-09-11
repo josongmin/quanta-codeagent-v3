@@ -84,7 +84,9 @@ TVH-02와 TVH-03의 파일별 분리, TVH-11의 probe helper, TVH-12의 각 prod
 
 ## 착륙 로그 (2026-09-12, local main)
 
-`85a99bb6f` 이후 16 커밋. 각 항목은 측정치와 red-on-injection을 커밋 메시지에 담고 있다.
+`85a99bb6f` 이후 42 커밋. 각 항목은 측정치와 red-on-injection을 커밋 메시지에 담고 있다.
+
+### 1~16 — P0와 tier 분리
 
 | 커밋 | 내용 |
 |---|---|
@@ -105,23 +107,60 @@ TVH-02와 TVH-03의 파일별 분리, TVH-11의 probe helper, TVH-12의 각 prod
 | `6523ab56c` | `test:clean-js`가 무시된 scratch의 `.js`를 **삭제**하고 있었다 |
 | `e818b72fc` | tier 3개가 한 population이던 상태 해소 + prepush 조기 축소 interlock |
 
-### 현재 tier membership (current HEAD)
+### 17~42 — 어딧 대응, 스케줄러, hygiene, 등록
 
-    prepush 3925   pr 3925   full 3935   nightly 3948
+| 커밋 | 내용 |
+|---|---|
+| `137fb6e60` | 적대 어딧 R1이 찾은 6건 — **main이 RED였다**(내 docstring이 slice를 빈 문자열로 만들어 가드 3개가 통과) |
+| `c48602062` | top-level gate용 ready-set 스케줄러 (배선은 보류, 이유는 아래) |
+| `c1a87073d` | 계속 출력하는 chunk가 불사였고, 종료 시 전체 로그를 RAM으로 다시 읽었다 |
+| `e0b20052a` | eval cron과 merge gate가 concurrency lane 하나를 공유 |
+| `1097325af` | pollution 가드가 fail-closed의 근거인 `git status`에서 hang 가능 |
+| `3f6f61018` | 내가 미등록으로 착륙시킨 스캔 가드 2개 등록 |
+| `d18368cc2` | suite discovery가 Chrome·Python·Git·서버를 **spawn하지 않게** 됨 |
+| `277931291` | flake 도구가 두 번째 광역 suite를 돌려 실패 20건을 child 40개로 증폭 |
+| `7cf5f435f` | 손상된 scheduling hint 하나가 전체 plan을 죽였고, cache는 전건 miss |
+| `6e9f4f5ca` | 뮤테이션 어딧(155 뮤턴트)의 HIGH 생존자 전건 차단 |
+| `8e576eee1` | SSRF 가드가 production 소스를 본 적이 없었고 egress 4형태를 놓쳤다 |
+| `30d0b9f10` | requesting-assignment 규칙을 sink walk에서 분리 |
+| `fd00812fb` | SEP9 인벤토리를 날짜 스냅샷으로 표기(재작성 대신) |
+| `b059d8a8d` | 내 timing/watchdog 작업이 무효화한 가드 marker 3개 갱신 |
+| `5c0754ab0` | 562개 미인증 파일, 그리고 아무도 읽지 않는 policy 필드 |
+| `a3a6219ae` | run당 temp 32개, 16초 대기, 같은 suite 3회 실행 |
+| `8b6cbbdd5` | 이 캠페인의 도구 등록 + **죽은 gate가 가리고 있던 파일 6개** |
+| `c94d6dc24` | current-HEAD 실행 receipt |
+| `c4ebde26d` | `chunkClaimsOverlap`이 call site 0·테스트 0으로 export돼 있었다 |
 
-`prepush == pr`은 **의도된 미완**이다. `gate.ts`가 tier를 shard runner에 넘기므로
-prepush를 canary-only로 좁히면 `bun run prepush`가 3,941 → 8파일이 된다.
-affected/changed selector가 어떤 gate에도 연결되지 않은 상태에서의 축소는 커버리지 붕괴이며,
-`PREPUSH_NARROWED_TO_CANARY` interlock이 조기 플립을 RED로 만든다.
+(문서 전용 커밋 `b9073c8fe`·`04a4a8072`·`54250b900`·`c7c061c49`·`b336710f1`·`5a012bcea`·`7844d73ae`는 생략)
 
-### 아직 열린 항목
+## 티켓 최종 상태
 
-- TVH-04 resource certification(561 integration-path 미인증), TVH-05 timing/cache,
-  TVH-08 heavy fixture/temp hygiene, TVH-09 hosted matrix 승격, TVH-13 resource envelope,
-  TVH-14 DAG runner, TVH-10 closeout.
-- TVH-11 / TVH-15는 별도 lane에서 진행 중(미커밋).
-- `lint:debt`가 현재 RED — 원인은 전부 진행 중 lane 파일.
-- hosted CI 증거는 없다. Actions 빌링 차단이 2026-07-10부터 유효하므로 hosted receipt는 외부 blocker다.
+| 티켓 | 상태 | 핵심 |
+|---|---|---|
+| TVH-01 safety/portability | **LANDED** | worker HOME·절대경로·실 metadata egress. 열림: 분류기 정밀도 5건 |
+| TVH-02 tier contract | **LANDED** | exact gate 계약, tier 4종 digest 분리. prepush 축소는 interlock 보류 |
+| TVH-03 capability lanes | **LANDED** | 부재 capability가 PASS로 기록되지 않음 |
+| TVH-04 resource scheduler | **LANDED** | 548 certified / 14 exclusive / 0 missing. overlap 전환은 canary 보류 |
+| TVH-05 timing/cache | **LANDED** | 증거(timing v2 store)는 clean-tree 캠페인 필요 |
+| TVH-06 receipt integrity | **LANDED** | 3-way exact producer 비교. 열림: VR-13 |
+| TVH-07 process lifecycle | **LANDED** | drain snapshot 1,400→34. 열림: LC-13 |
+| TVH-08 test hygiene | **LANDED** | 전제 5건은 측정으로 반증 |
+| TVH-09 hosted matrix | **BLOCKED** | 외부 권한 — Actions 빌링 차단 |
+| TVH-10 closeout | **PARTIAL** | 문서 완료, healthy-load ABBA 미생성 |
+| TVH-11 probe amortization | **LANDED** | discovery 4-walk→1, module-load effect 0 |
+| TVH-12 producer dedup | **PARTIAL** | producer→receipt 전환은 hosted lane과 결합 |
+| TVH-13 resource envelope | **PARTIAL** | spool/wall/sweep/retention 착륙, RSS admission 미착륙 |
+| TVH-14 DAG runner | **PARTIAL** | 스케줄러는 있으나 `gate.ts`는 여전히 직렬 |
+| TVH-15 flake determinism | **LANDED** | sleep budget 73,720→51,470ms |
+
+## 의도된 보류 4건 (시간 부족이 아니라 근거 부족)
+
+| 보류 | 왜 | 승격 조건 |
+|---|---|---|
+| prepush canary 축소 | selector가 어느 gate에도 연결돼 있지 않아 3,938→8 커버리지 붕괴 | selector 배선 후 `PREPUSH_NARROWED_TO_CANARY` 플립, interlock 자동 해제 |
+| `chunkClaimsOverlap` 전환 | 실 캠페인 없는 동시성 확대 | 1/2/4-worker verdict 등가 canary |
+| declared-input cache 축소 | 인증 registry의 declared-input 절반이 비어 전 chunk가 `whole-tree` | input scope 등록만으로 코드 변경 없이 축소됨 |
+| `runGateDag` 배선 | `Bun.spawnSync(["sh","-c",…])`에 process-group kill이 없다. 둘을 동시에 띄우고 둘 다 못 죽이는 스케줄러는 직렬 루프보다 나쁘다 | bounded child primitive 착륙 + gate에 `resources[]` 선언 |
 
 ---
 

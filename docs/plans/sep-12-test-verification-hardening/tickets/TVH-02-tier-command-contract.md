@@ -1,7 +1,7 @@
 # TVH-02 — tier·명령·membership 계약 정상화
 
 - 우선순위: P0/P1
-- 상태: IN PROGRESS (P0 착륙 / tier membership 진행 중)
+- 상태: LANDED — exact gate 계약, smoke 단일 authority, tier 4종 분리(digest 상이). 의도된 보류: prepush 축소는 selector 배선 전까지 interlock으로 고정
 - 소유 lane: verification policy / command integration
 - 선행: TVH-01
 - 후속: TVH-03, TVH-08, TVH-09

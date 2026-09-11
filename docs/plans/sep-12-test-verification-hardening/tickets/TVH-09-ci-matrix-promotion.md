@@ -1,7 +1,7 @@
 # TVH-09 — hosted matrix parity와 required 승격
 
 - 우선순위: P1
-- 상태: OPEN
+- 상태: BLOCKED (외부 권한) — concurrency lane 분리와 per-kind retention은 착륙. matrix↔monolith verdict 등가 receipt는 Actions 빌링 차단(2026-07-10~)으로 생성 불가
 - 소유 lane: CI matrix / required-check integration
 - 선행: TVH-02~TVH-07
 - 후속: TVH-10

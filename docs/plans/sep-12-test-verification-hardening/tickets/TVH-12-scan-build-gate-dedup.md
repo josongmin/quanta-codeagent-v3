@@ -1,7 +1,7 @@
 # TVH-12 — scan/build/gate producer 중복 제거
 
 - 우선순위: P1
-- 상태: IN PROGRESS
+- 상태: PARTIAL — scan-reach 등록·source-clean 경계·discovery 중복 제거는 착륙. lint-debt/catalog/compiled-probe producer→receipt 전환은 hosted lane과 묶여 있어 미착륙
 - 소유 lane: static producers / artifact receipts / hosted CI setup
 - 선행: TVH-02, TVH-05, TVH-06
 - 후속: TVH-09, TVH-10

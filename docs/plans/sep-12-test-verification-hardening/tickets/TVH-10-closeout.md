@@ -1,7 +1,7 @@
 # TVH-10 — 문서 정합성·성능 측정·최종 closeout
 
 - 우선순위: P2
-- 상태: OPEN
+- 상태: PARTIAL — 문서/티켓/catalog closeout 완료. healthy-load ABBA와 full/nightly receipt는 미생성(세션 내내 외부 부하 load 25–120)
 - 소유 lane: integration / documentation / performance receipts
 - 선행: TVH-01~TVH-09, TVH-11~TVH-15
 

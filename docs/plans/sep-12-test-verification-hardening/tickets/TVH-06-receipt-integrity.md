@@ -1,7 +1,7 @@
 # TVH-06 — exact execution·capability receipt 무결성
 
 - 우선순위: P0/P1
-- 상태: P0 LANDED (나머지 진행 중)
+- 상태: LANDED — required가 producer exact ID/needs/workflow 3-way 비교, campaign이 queued/running/end 3-snapshot 기록, dirty-tree receipt 재사용 차단. 열림: VR-13 `homeCapabilitySha256` payload에 `home` 누락
 - 소유 lane: receipt schema / proof consumers
 - 선행: TVH-02. capability/cache closeout은 TVH-03, TVH-05 이후
 - 후속: TVH-09, TVH-10

@@ -1,7 +1,7 @@
 # TVH-03 — real toolchain·capability lane 분리
 
 - 우선순위: P0
-- 상태: LANDED (browser/bwrap/docker 그룹은 lane gate 대기)
+- 상태: LANDED — capability lane이 JUnit 실행 증명 발행, 부재는 skipped-capability/failed-setup으로 기록
 - 소유 lane: toolchain fixtures / hosted capability CI
 - 선행: TVH-01, TVH-02
 - 후속: TVH-06, TVH-09

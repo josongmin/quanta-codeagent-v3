@@ -1,7 +1,7 @@
 # TVH-11 — discovery/module-load probe 제거와 비용 가시화
 
 - 우선순위: P0/P1
-- 상태: IN PROGRESS
+- 상태: LANDED — inventory 4-walk→1 snapshot(ABBA median 124→45ms), module-load external effect 0(4,037 files / 150 effects / 0 violations)
 - 소유 lane: test discovery / capability fixtures / timing telemetry
 - 선행: TVH-03, TVH-05, TVH-07
 - 후속: TVH-10

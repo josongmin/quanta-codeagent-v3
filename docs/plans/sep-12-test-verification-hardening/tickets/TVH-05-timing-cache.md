@@ -1,7 +1,7 @@
 # TVH-05 — timing·cache 정확성 및 성능
 
 - 우선순위: P1
-- 상태: OPEN
+- 상태: LANDED (증거 부족) — 손상된 timing hint의 전체 plan 붕괴와 cache 전면 miss를 수정. 열림: timing v2 store는 clean-tree 캠페인 1회가 있어야 생성된다
 - 소유 lane: timing telemetry / shard cache
 - 선행: TVH-02, TVH-04
 - 후속: TVH-06, TVH-09, TVH-10

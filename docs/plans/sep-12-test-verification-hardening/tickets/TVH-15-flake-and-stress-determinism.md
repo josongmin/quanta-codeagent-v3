@@ -1,7 +1,7 @@
 # TVH-15 — wall-clock flake·random stress·rerun 증폭 제거
 
 - 우선순위: P1/P2
-- 상태: IN PROGRESS
+- 상태: LANDED — determinism ratchet 재긴축(sleep budget 73,720→51,470ms), wall-clock inventory, awaited-sleep budget 게이트
 - 소유 lane: test determinism / virtual time / measurement policy
 - 선행: TVH-02, TVH-05, TVH-08
 - 후속: TVH-10

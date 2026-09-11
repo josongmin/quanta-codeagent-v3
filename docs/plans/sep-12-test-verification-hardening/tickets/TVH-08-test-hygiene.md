@@ -1,6 +1,6 @@
 # TVH-08 — heavy test·skip·fixed wait·temp hygiene
 
-- 상태: LANDED (일부 전제는 측정으로 반증)
+- 상태: LANDED — temp 32개/run·16초 대기·3중 실행 제거, ignored scratch 삭제 사고 차단. 전제 5건은 측정으로 반증됨(티켓 본문 참조)
 - 우선순위: P1/P2
 - 상태: OPEN
 - 소유 lane: test authors / fixture hygiene
