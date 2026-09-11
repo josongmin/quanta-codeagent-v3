@@ -9,49 +9,49 @@
  * `QUANTA_REAL_TOOLCHAIN_E2E` (`bun run test:real-toolchain`) — see the lane
  * note above the gates below. Verified 2026-06-10.
  */
-import { describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, expect, test } from "bun:test"
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { gateOn } from "@/shared"
 import { defaultRuntimePort } from "@/tool/evidence"
 import { buildEvidence } from "@/tool/evidence/builder"
 import { detectToolchain, runToolchain } from "@/tool/testrun"
+import {
+  assertCapabilityNotBlocked,
+  boundedVersion,
+  capabilityGate,
+  hasBinary,
+  hasLldbDap,
+  hasPythonModule,
+  laneDescribe,
+  reportExecuted,
+} from "../../../_helpers/capability-lane"
 
-const has = (bin: string, ...a: string[]): boolean => {
-  try {
-    return Bun.spawnSync([bin, ...a], { stdout: "ignore", stderr: "ignore" }).exitCode === 0
-  } catch {
-    return false
-  }
-}
-const hasDebugpy = (): boolean => has("python3", "-c", "import debugpy")
-const lldbDap = (): boolean => {
-  if (has("lldb-dap", "--help")) return true
-  try {
-    return (
-      Bun.spawnSync(["xcrun", "-f", "lldb-dap"], { stdout: "ignore", stderr: "ignore" })
-        .exitCode === 0
-    )
-  } catch {
-    return false
-  }
-}
-// REAL-ON-DEMAND LANE. Toolchain presence alone used to be the gate, so on a
-// developer machine that HAS the toolchain these ran inside the ordinary unit
-// suite and blew the per-test speed budget (`tools/dev/unit-speed-budget.json`,
-// 8,529ms; measured here at 10,131ms / 9,469ms), a ceiling that may only go
-// DOWN. The `-real-e2e.test.ts` sibling `runtime-rust-real-e2e.test.ts` already
-// required `QUANTA_REAL_TOOLCHAIN_E2E`; this file did not, so the suffix meant
-// two different things. Same suffix, same lane now: a VISIBLE skip by default,
-// run by `bun run test:real-toolchain`. CI still runs this lane —
-// `.github/workflows/ci.yml` has an explicit `QUANTA_REAL_TOOLCHAIN_E2E=1 bun run
-// test:real-toolchain` step, added after an audit measured that ubuntu-latest DOES
-// ship node, go, cargo, python3 and npm (only clangd, lldb-dap, dlv and debugpy are
-// absent), so gating without that step silently dropped 8 cases from the blocking
-// merge gate.
-const REAL_E2E = gateOn(process.env, "QUANTA_REAL_TOOLCHAIN_E2E")
-const D = REAL_E2E && hasDebugpy() ? describe : describe.skip
+const GROUP = "native-debugger"
+const FILE = "tests/unit/tool/evidence/runtime-real-e2e.test.ts"
+
+/**
+ * CAPABILITY GROUP `native-debugger`, lane `nightly-heavy`.
+ *
+ * Three arms, three declared needs, one manifest entry. Every probe is BOUNDED:
+ * `debugpy` genuinely requires an interpreter import (no stat can answer it) and
+ * so runs `python3 -c "import debugpy"` under an explicit 5s deadline, while the
+ * lldb-dap and dlv probes are PATH/toolchain-path resolution. The previous
+ * versions were `Bun.spawnSync` with no timeout, at module load, on every
+ * ordinary unit run — measured at 10,131ms / 9,469ms per case, past the
+ * 8,529ms per-test budget.
+ *
+ * The interpreter probe is only paid when the LANE is selected; on an ordinary
+ * run the gate short-circuits on the env before probing anything.
+ */
+const laneOn = process.env.QUANTA_REAL_TOOLCHAIN_E2E !== undefined
+const PY_GATE = capabilityGate({
+  group: GROUP,
+  file: FILE,
+  needs: { debugpy: laneOn && hasPythonModule("debugpy") },
+})
+const D = laneDescribe(GROUP, PY_GATE)
+
 const buildSources = (_dir: string) => ({
   detect: (c: string) =>
     detectToolchain(c, { fileExists: async (n: string) => existsSync(join(c, n)) }),
@@ -74,6 +74,18 @@ const TEST_PY = [
 ].join("\n")
 
 D("defaultRuntimePort — REAL debugpy runtime capture in the evidence packet", () => {
+  beforeAll(() => assertCapabilityNotBlocked({ group: GROUP, file: FILE }, PY_GATE))
+  afterAll(() =>
+    reportExecuted(PY_GATE, GROUP, FILE, "real debugpy captured stack + locals", () => ({
+      debugpyVersion: boundedVersion([
+        "python3",
+        "-c",
+        "import debugpy;print(debugpy.__version__)",
+      ]),
+      pythonVersion: boundedVersion(["python3", "--version"]),
+    })),
+  )
+
   test("buildEvidence captures the failing test's stack + locals (the values that explain the failure)", async () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "rt-")))
     writeFileSync(join(dir, "pyproject.toml"), '[project]\nname = "t"\nversion = "0.1.0"\n')
@@ -97,8 +109,21 @@ D("defaultRuntimePort — REAL debugpy runtime capture in the evidence packet", 
 })
 
 // ── RUST runtime via lldb-dap (cargo test --no-run → test binary under lldb) ──
-const DR = REAL_E2E && has("cargo", "--version") && lldbDap() ? describe : describe.skip
+const RS_GATE = capabilityGate({
+  group: GROUP,
+  file: FILE,
+  needs: { cargo: hasBinary("cargo"), "lldb-dap": hasLldbDap() },
+})
+const DR = laneDescribe(GROUP, RS_GATE)
 DR("defaultRuntimePort — REAL Rust runtime capture (cargo + lldb-dap)", () => {
+  beforeAll(() => assertCapabilityNotBlocked({ group: GROUP, file: FILE }, RS_GATE))
+  afterAll(() =>
+    reportExecuted(RS_GATE, GROUP, FILE, "real cargo test binary under lldb-dap", () => ({
+      cargoVersion: boundedVersion(["cargo", "--version"]),
+      lldbDapVersion: boundedVersion(["lldb-dap", "--version"]),
+    })),
+  )
+
   test("buildEvidence captures the failing Rust test's locals (result=10)", async () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "rt-rs-")))
     mkdirSync(join(dir, "src"), { recursive: true })
@@ -137,10 +162,25 @@ DR("defaultRuntimePort — REAL Rust runtime capture (cargo + lldb-dap)", () => 
 })
 
 // ── GO runtime via dlv dap (over the TCP transport — its first real consumer) ──
+// `dlv` is commonly installed to ~/go/bin, which is not always on PATH; stat it
+// there rather than spawning it to find out.
 const dlvOk = (): boolean =>
-  has("dlv", "version") || has(`${process.env.HOME}/go/bin/dlv`, "version")
-const DG = REAL_E2E && has("go", "version") && dlvOk() ? describe : describe.skip
+  hasBinary("dlv") || Bun.file(`${process.env.HOME ?? ""}/go/bin/dlv`).size > 0
+const GO_GATE = capabilityGate({
+  group: GROUP,
+  file: FILE,
+  needs: { go: hasBinary("go"), dlv: dlvOk() },
+})
+const DG = laneDescribe(GROUP, GO_GATE)
 DG("defaultRuntimePort — REAL Go runtime capture (dlv dap over TCP)", () => {
+  beforeAll(() => assertCapabilityNotBlocked({ group: GROUP, file: FILE }, GO_GATE))
+  afterAll(() =>
+    reportExecuted(GO_GATE, GROUP, FILE, "real dlv dap captured a Go failure over TCP", () => ({
+      goVersion: boundedVersion(["go", "version"]),
+      dlvVersion: boundedVersion(["dlv", "version"]),
+    })),
+  )
+
   test("buildEvidence captures the failing Go test's locals via the TCP DAP transport", async () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "rt-go-")))
     writeFileSync(join(dir, "go.mod"), "module t\ngo 1.25\n")

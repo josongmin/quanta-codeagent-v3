@@ -7,33 +7,41 @@
  *
  * AUTO-SKIPS without clang++ / lldb-dap / clangd. Verified 2026-06-10.
  */
-import { describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, expect, test } from "bun:test"
 import { mkdtempSync, realpathSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { evidenceLspStatic } from "@/agent/lsp-bridge"
-import { gateOn } from "@/shared"
 import { defaultRuntimePort } from "@/tool/evidence"
 import { buildEvidence } from "@/tool/evidence/builder"
 import type { Toolchain } from "@/tool/testrun"
+import {
+  assertCapabilityNotBlocked,
+  boundedVersion,
+  capabilityGate,
+  hasBinary,
+  hasLldbDap,
+  laneDescribe,
+  reportExecuted,
+} from "../../../_helpers/capability-lane"
 
-const has = (b: string, ...a: string[]): boolean => {
-  try {
-    return Bun.spawnSync([b, ...a], { stdout: "ignore", stderr: "ignore" }).exitCode === 0
-  } catch {
-    return false
-  }
-}
-const lldbDap = (): boolean => {
-  if (has("lldb-dap", "--help")) return true
-  try {
-    const r = Bun.spawnSync(["xcrun", "-f", "lldb-dap"], { stdout: "pipe", stderr: "ignore" })
-    return r.exitCode === 0 && r.stdout.toString().trim().length > 0
-  } catch {
-    return false
-  }
-}
-const cxx = (): boolean => has("clang++", "--version") || has("g++", "--version")
+const GROUP = "native-debugger"
+const FILE = "tests/unit/tool/evidence/runtime-cpp-real-e2e.test.ts"
+
+/**
+ * CAPABILITY GROUP `native-debugger`, lane `nightly-heavy`.
+ *
+ * The lldb-dap probe was an UNBOUNDED `Bun.spawnSync(["xcrun","-f","lldb-dap"])`
+ * at module load; `hasLldbDap` stats the Xcode / CLT toolchain paths instead, so
+ * an ordinary run that skips this file spawns nothing at all.
+ */
+const cxxPresent = hasBinary("clang++") || hasBinary("g++")
+const RUNTIME_GATE = capabilityGate({
+  group: GROUP,
+  file: FILE,
+  needs: { "clang++/g++": cxxPresent, "lldb-dap": hasLldbDap() },
+})
+const DRUN = laneDescribe(GROUP, RUNTIME_GATE)
 
 const SRC = [
   "#include <cassert>",
@@ -52,21 +60,21 @@ const writeCpp = (): string => {
   return dir
 }
 
-const REAL_E2E = gateOn(process.env, "QUANTA_REAL_TOOLCHAIN_E2E")
-
-// REAL-ON-DEMAND LANE. Toolchain presence alone was the gate, so on a developer
-// machine that HAS the toolchain these ran inside the ordinary unit suite and
-// their cost tracks whatever else the box is doing (measured: 3,455ms idle,
-// 9,387ms at load average 68 — past the 8,529ms per-test speed budget, a ceiling
-// that may only go DOWN). Same suffix, same lane as their `-real-e2e` siblings:
-// a VISIBLE skip by default, run by `bun run test:real-toolchain`. CI still runs
-// this lane — `.github/workflows/ci.yml` has an explicit
-// `QUANTA_REAL_TOOLCHAIN_E2E=1 bun run test:real-toolchain` step, added after an
-// audit measured that ubuntu-latest DOES ship node, go, cargo, python3 and npm
-// (only clangd, lldb-dap, dlv and debugpy are absent), so gating without that
-// step silently dropped 8 cases from the blocking merge gate.
-const DRUN = REAL_E2E && cxx() && lldbDap() ? describe : describe.skip
 DRUN("defaultRuntimePort — REAL C++ runtime (clang++ -g → lldb-dap)", () => {
+  beforeAll(() => assertCapabilityNotBlocked({ group: GROUP, file: FILE }, RUNTIME_GATE))
+  afterAll(() =>
+    reportExecuted(
+      RUNTIME_GATE,
+      GROUP,
+      FILE,
+      "real clang++ -g binary stopped under lldb-dap",
+      () => ({
+        clangVersion: boundedVersion(["clang++", "--version"]),
+        lldbDapVersion: boundedVersion(["lldb-dap", "--version"]),
+      }),
+    ),
+  )
+
   test("compiles + captures the failing assert's local over DAP", async () => {
     const dir = writeCpp()
     const tc: Toolchain = { kind: "cpp", command: ["true"], parser: "ctest" } // failure run stubbed; we test runtime
@@ -89,8 +97,26 @@ DRUN("defaultRuntimePort — REAL C++ runtime (clang++ -g → lldb-dap)", () => 
   }, 60_000)
 })
 
-const DSTATIC = REAL_E2E && has("clangd", "--version") ? describe : describe.skip
+const STATIC_GATE = capabilityGate({
+  group: GROUP,
+  file: FILE,
+  needs: { clangd: hasBinary("clangd") },
+})
+const DSTATIC = laneDescribe(GROUP, STATIC_GATE)
 DSTATIC("evidenceLspStatic — REAL clangd (Tier-2 C++ static)", () => {
+  beforeAll(() => assertCapabilityNotBlocked({ group: GROUP, file: FILE }, STATIC_GATE))
+  afterAll(() =>
+    reportExecuted(
+      STATIC_GATE,
+      GROUP,
+      FILE,
+      "real clangd answered hover at the C++ failure site",
+      () => ({
+        clangVersion: boundedVersion(["clangd", "--version"]),
+      }),
+    ),
+  )
+
   test("returns hover/type info at the C++ failure site", async () => {
     const dir = writeCpp()
     const ev = await evidenceLspStatic()(join(dir, "t.cpp"), 5, dir)

@@ -5,6 +5,7 @@ import {
   isKnownTestPath,
   loadPolicyOverrides,
   policyDigest,
+  prepushTracksPrPopulation,
   resolveTestPolicy,
   resolveTestPopulation,
   selectTestPoliciesForTier,
@@ -28,9 +29,12 @@ const ciFullSuiteUsesPrTier = (workflow: string): boolean => {
 }
 
 describe("test-policy-enrollment", () => {
-  test("unknown files fail wide: full + exclusive + whole-tree", () => {
+  test("unknown files fail wide: full + nightly + exclusive + whole-tree", () => {
     const policy = resolveTestPolicy("mystery/not-enrolled.test.ts")
-    expect(policy.tiers).toEqual(["full"])
+    // TVH-03: `nightly` is the superset tier, so an unenrolled file must appear
+    // there too — otherwise "no file is in zero tiers" stops being checkable and
+    // an unowned test can fall out of the corpus without anything going red.
+    expect(policy.tiers).toEqual(["full", "nightly"])
     expect(policy.resources).toEqual(["exclusive"])
     expect(policy.inputScope).toBe("whole-tree")
     expect(policy.reviewNeeded).toBe(true)
@@ -68,9 +72,35 @@ describe("test-policy-enrollment", () => {
   test("known tests preserve merge coverage while nightly entrypoints are physically isolated", () => {
     const regular = resolveTestPolicy("tests/integration/regular.test.ts")
     const nightly = resolveTestPolicy("tests/integration/expensive.nightly.test.ts")
-    expect(regular.tiers).toEqual(["prepush", "pr", "full", "nightly"])
+    // TVH-02/03 — THE DEFECT THIS CASE USED TO ENCODE. It asserted
+    // `["prepush", "pr", "full", "nightly"]`, i.e. that every known test is
+    // registered into every tier. That is precisely why `--tier=prepush`,
+    // `--tier=pr` and `--tier=full` produced one identical digest, and it made
+    // "prepush" and "PR" and "full" three names for one population.
+    //
+    // The contract now: a known ordinary test is merge-blocking and part of the
+    // deterministic population, but is NOT a nightly-exhaustive entrypoint. The
+    // `prepush` half is staged — see `prepushTracksPrPopulation` — because the
+    // affected/changed selector is unwired, and narrowing prepush to the canary
+    // alone would have taken `bun run prepush` from 3,941 files to 8.
+    expect(regular.tiers).toEqual(
+      prepushTracksPrPopulation()
+        ? ["prepush", "pr", "full", "nightly"]
+        : ["pr", "full", "nightly"],
+    )
+    // The invariants that hold in BOTH states: an ordinary test blocks a merge,
+    // is never unconditional by default, and is never nightly-only.
+    expect(regular.tiers).toContain("pr")
+    expect(regular.tiers).toContain("full")
+    expect(regular.alwaysRun).toBe(false)
+    // …and the collapse this case used to encode — every known test in every
+    // tier INCLUDING being its own canary — stays impossible.
+    expect(regular.tiers.includes("prepush") && regular.alwaysRun).toBe(false)
     expect(nightly.tiers).toEqual(["nightly"])
     const policies = [regular, nightly]
+    expect(selectTestPoliciesForTier(policies, "prepush").map(({ id }) => id)).toEqual(
+      prepushTracksPrPopulation() ? [regular.id] : [],
+    )
     expect(selectTestPoliciesForTier(policies, "pr").map(({ id }) => id)).toEqual([regular.id])
     expect(selectTestPoliciesForTier(policies, "full").map(({ id }) => id)).toEqual([regular.id])
     expect(selectTestPoliciesForTier(policies, "nightly").map(({ id }) => id)).toEqual([
@@ -123,6 +153,56 @@ describe("test-policy-enrollment", () => {
     expect(fullIds).not.toContain("tests/integration/session-envelope-stress.nightly.test.ts")
   })
 
+  test("the default rule cannot collapse the tiers into one population", () => {
+    // The regression this closes is a DEFAULT, so it is stated over the real
+    // corpus rather than over one synthetic id: a future edit that puts
+    // `prepush` back into DEFAULT_KNOWN_TIERS, or drops the capability/nightly
+    // separation, re-collapses these and this goes red.
+    const inventory = discoverInventory(ROOT)
+    const policies = resolveTestPopulation(
+      inventory.suites.full.files,
+      loadPolicyOverrides(OVERRIDES).overrides,
+    )
+    // ANTI-VACUUM: a collapsed corpus would make every comparison below trivial.
+    expect(policies.length).toBeGreaterThan(3_600)
+    const sizes = (["prepush", "pr", "full", "nightly"] as const).map(
+      (tier) => selectTestPoliciesForTier(policies, tier).length,
+    )
+    const [prepush, pr, full, nightly] = sizes as [number, number, number, number]
+
+    // The ORIGINAL defect, stated exactly: all four resolving to one population.
+    expect(new Set(sizes).size, `four tiers selected ${sizes.join("/")} files`).toBeGreaterThan(1)
+
+    // The three separations that are real today and permanent: a PR may not
+    // depend on an installed toolchain, full excludes nightly-exhaustive files,
+    // and nightly is the superset.
+    expect({ pr, full, nightly, prOk: pr < full, fullOk: full < nightly }).toEqual({
+      pr,
+      full,
+      nightly,
+      prOk: true,
+      fullOk: true,
+    })
+
+    // prepush is tied to the CONTRACT, not to today's number. While the
+    // affected/changed half of its contract is unwired it tracks PR exactly;
+    // when `verification-selection.ts` lands and the flag flips, this tightens
+    // to a strict subset by itself. Either way it can never EXCEED pr.
+    expect({
+      tracksPr: prepushTracksPrPopulation(),
+      equal: prepush === pr,
+      within: prepush <= pr,
+    }).toEqual({
+      tracksPr: prepushTracksPrPopulation(),
+      equal: prepushTracksPrPopulation(),
+      within: true,
+    })
+
+    // …and they are ORDERED, which is what makes them a hierarchy rather than
+    // four unrelated lists: prepush ⊆ PR ⊂ full ⊂ nightly.
+    expect(sizes).toEqual([...sizes].sort((left, right) => left - right))
+  })
+
   test("injecting an unregistered contract file into inventory comparison fails", () => {
     const inventory = discoverInventory(ROOT)
     const withInjected = [...inventory.suites.full.files, "tests/contract/injected-missing.test.ts"]
@@ -134,5 +214,67 @@ describe("test-policy-enrollment", () => {
     const file = loadPolicyOverrides(OVERRIDES)
     expect(file.schema).toBe("quanta.test-policy-overrides.v1")
     expect(Array.isArray(file.overrides)).toBe(true)
+  })
+})
+
+/**
+ * THE HAZARD THAT NEARLY SHIPPED.
+ *
+ * `gate.ts` exports `QUANTA_VERIFICATION_TIER=<label>` to every gate, and the
+ * shard runner reads it. So the tier's membership IS what `bun run prepush`
+ * executes — there is no second, wider path. Measured while integrating TVH-03:
+ *
+ *     $ QUANTA_VERIFICATION_TIER=prepush bun tools/dev/run-test-shards.ts \
+ *         --suite=full --discover-only
+ *     selected 8   name full:prepush
+ *
+ * against 3,941 before. Narrowing prepush to the always-run canary is the RIGHT
+ * end state, but only once the other half of its contract — the affected/changed
+ * selection — actually feeds it. With the selector still a dry run that nothing
+ * consumes, the same edit is a 99.8% coverage collapse wearing the word "tier".
+ *
+ * This is the interlock, not a comment about one.
+ */
+describe("prepush may not narrow before its selector is wired", () => {
+  const REPO = join(import.meta.dir, "..", "..", "..")
+
+  const selectorIsConsumed = (): boolean => {
+    // "Consumed" means a gate or the runner ACTS on it — `verify:scope` existing
+    // as a standalone diagnostic script is exactly the state that is not enough.
+    const consumers = [
+      join(REPO, "tools", "dev", "gate-manifest.ts"),
+      join(REPO, "tools", "dev", "run-test-shards.ts"),
+      join(REPO, "tools", "dev", "verification-campaign.ts"),
+    ]
+    return consumers.some((path) => {
+      const source = readFileSync(path, "utf8")
+      return source.includes("verification-selection") || source.includes("verify-scope")
+    })
+  }
+
+  test("the canary-only tier is gated on a selector that some gate actually consumes", () => {
+    expect({
+      narrowed: !prepushTracksPrPopulation(),
+      selectorConsumed: selectorIsConsumed(),
+    }).toEqual({
+      narrowed: selectorIsConsumed() ? !prepushTracksPrPopulation() : false,
+      selectorConsumed: selectorIsConsumed(),
+    })
+
+    // ANTI-VACUITY: the consumer scan must be reading real files, or "not
+    // consumed" is a statement about an empty search.
+    const manifest = readFileSync(join(REPO, "tools", "dev", "gate-manifest.ts"), "utf8")
+    expect(manifest.length).toBeGreaterThan(1_000)
+    expect(manifest).toContain("full-suite")
+  })
+
+  test("the tier a prepush gate executes is the tier this policy declares", () => {
+    // The coupling that made the hazard real: if gate.ts stopped exporting the
+    // tier, this policy would be describing a population nothing runs, and the
+    // interlock above would be guarding nothing.
+    const gate = readFileSync(join(REPO, "tools", "dev", "gate.ts"), "utf8")
+    expect(gate).toContain("QUANTA_VERIFICATION_TIER")
+    const options = readFileSync(join(REPO, "tools", "dev", "test-shard-options.ts"), "utf8")
+    expect(options).toContain("QUANTA_VERIFICATION_TIER")
   })
 })

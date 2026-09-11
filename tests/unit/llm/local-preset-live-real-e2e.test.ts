@@ -30,16 +30,43 @@
  * `tests/unit/llm/local-preset-smoke-hellgate.test.ts`.
  */
 
-import { describe, expect, test } from "bun:test"
+import { beforeAll, expect, test } from "bun:test"
 import { OpenAIAdapter } from "@/llm/adapters/openai"
 import type { StreamEvent } from "@/llm/types"
-import { gateOn } from "@/shared"
+import {
+  assertCapabilityNotBlocked,
+  capabilityGate,
+  hasBinary,
+  laneDescribe,
+  reportCapability,
+} from "../../_helpers/capability-lane"
 
-/** Opt-in lane, mirroring every other `*-real-e2e.test.ts` in this repo. */
-const REAL_E2E = gateOn(process.env, "QUANTA_REAL_TOOLCHAIN_E2E")
+const GROUP = "local-model"
+const FILE = "tests/unit/llm/local-preset-live-real-e2e.test.ts"
 
 const OLLAMA_BASE = "http://127.0.0.1:11434/v1"
 const OLLAMA_TAGS = "http://127.0.0.1:11434/api/tags"
+
+/**
+ * TYPED CAPABILITY RESULT, replacing a literal `expect(true).toBe(true)`.
+ *
+ * The previous body printed "documented no-server outcome, not a pass" and then
+ * asserted `true`, so bun reported `1 pass`, the junit carried a passing case,
+ * and `test:real-toolchain` printed the same green a host that really ran a
+ * 150s inference prints. The prose was the only place the truth lived.
+ *
+ * Now: no server ⇒ `blocked-missing` (RED when this group is REQUIRED, a
+ * VISIBLE bun skip otherwise); lane not selected ⇒ `skipped-unsupported`.
+ * Neither is ever a passing assertion.
+ */
+const GATE = capabilityGate({
+  group: GROUP,
+  file: FILE,
+  // `ollama` on PATH is the cheapest bounded evidence the daemon could be up;
+  // whether it ANSWERS is settled by the bounded HTTP probe in beforeAll,
+  // because a CLI's inode is not a running server.
+  needs: { ollama: hasBinary("ollama") },
+})
 
 /** Probe the local Ollama server. Returns a model name that exists, or null. */
 const probeOllama = async (): Promise<string | null> => {
@@ -61,22 +88,47 @@ const collect = async (it: AsyncIterable<StreamEvent>): Promise<StreamEvent[]> =
   return out
 }
 
-describe.skipIf(!REAL_E2E)(
+/** Resolved once, in a bounded setup step — never at module load. */
+let liveModel: string | null = null
+
+laneDescribe(GROUP, GATE)(
   "RFC05-3 LIVE Ollama streaming tool-call smoke (honest reachability)",
   () => {
+    beforeAll(async () => {
+      liveModel = await probeOllama()
+      if (liveModel !== null) return
+      // The lane WAS selected and the binary IS present, but the daemon does
+      // not answer. That is `blocked-missing`, and in a REQUIRED job it is the
+      // finding — not a reason to assert `true`.
+      reportCapability({
+        group: GROUP,
+        file: FILE,
+        outcome: "blocked-missing",
+        detail: `no local Ollama server answered ${OLLAMA_TAGS} within 3s`,
+      })
+      assertCapabilityNotBlocked({ group: GROUP, file: FILE }, { ...GATE, available: false })
+    })
+
     test("real Ollama /v1/chat/completions streams text or a structured tool-call through the Chat adapter", async () => {
-      const model = await probeOllama()
+      const model = liveModel
       if (model === null) {
-        // HONEST: no live server reachable in this sandbox — document, do not fake.
-        // biome-ignore lint/suspicious/noConsole: visible skip — a live smoke MUST print WHY it did not run
-        console.warn(
-          `[RFC05-3] no local Ollama server reachable at ${OLLAMA_BASE} — live tool-call smoke SKIPPED (documented no-server outcome, not a pass).`,
+        // Reached only when this group is NOT required: beforeAll already
+        // reported `blocked-missing`. Fail the case rather than pass it — a
+        // capability lane that was SELECTED and could not run has not proven
+        // anything, and `test:real-toolchain` must not print green over it.
+        throw new Error(
+          `[capability] ${GROUP} blocked-missing in ${FILE}: no local Ollama server reachable at ` +
+            `${OLLAMA_BASE}. Start \`ollama serve\` or deselect this group; an unreachable live ` +
+            "model is not a pass.",
         )
-        expect(true).toBe(true)
-        return
       }
-      // biome-ignore lint/suspicious/noConsole: visible receipt — record the live model actually exercised
-      console.warn(`[RFC05-3] live Ollama reachable; smoke model=${model}`)
+      reportCapability({
+        group: GROUP,
+        file: FILE,
+        outcome: "executed",
+        detail: "live Ollama reachable",
+        receipt: { ollamaBaseUrl: OLLAMA_BASE, ollamaModel: model },
+      })
       // The REAL Chat adapter — no fake client. Ollama ignores the placeholder key.
       const adapter = new OpenAIAdapter({
         apiKey: "ollama-local-no-auth",
@@ -118,11 +170,18 @@ describe.skipIf(!REAL_E2E)(
       const hadText = events.some((e) => e.type === "text_delta")
       const hadToolCall = events.some((e) => e.type === "tool_use_end")
       expect(hadText || hadToolCall).toBe(true)
-      // biome-ignore lint/suspicious/noConsole: visible receipt — record the live-smoke outcome (events/kinds)
-      console.warn(
-        `[RFC05-3] live smoke PASS — events=${events.length} kinds=${[...kinds].join(",")} ` +
-          `text=${hadText} toolCall=${hadToolCall}`,
-      )
+      reportCapability({
+        group: GROUP,
+        file: FILE,
+        outcome: "executed",
+        detail: `live smoke completed — events=${events.length} kinds=${[...kinds].join(",")}`,
+        receipt: {
+          ollamaBaseUrl: OLLAMA_BASE,
+          ollamaModel: model,
+          streamedText: String(hadText),
+          streamedToolCall: String(hadToolCall),
+        },
+      })
     }, 160_000)
   },
 )

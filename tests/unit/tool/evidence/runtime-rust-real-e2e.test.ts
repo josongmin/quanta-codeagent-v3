@@ -7,37 +7,43 @@
  *
  * AUTO-SKIPS without cargo + lldb-dap. Verified 2026-06-10.
  */
-import { describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, expect, test } from "bun:test"
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { gateOn } from "@/shared"
 import { defaultRuntimePort } from "@/tool/evidence"
 import { buildEvidence } from "@/tool/evidence/builder"
 import { detectToolchain, runToolchain } from "@/tool/testrun"
+import {
+  assertCapabilityNotBlocked,
+  boundedVersion,
+  capabilityGate,
+  hasBinary,
+  hasLldbDap,
+  laneDescribe,
+  reportExecuted,
+} from "../../../_helpers/capability-lane"
 
-const has = (b: string, ...a: string[]): boolean => {
-  try {
-    return Bun.spawnSync([b, ...a], { stdout: "ignore", stderr: "ignore" }).exitCode === 0
-  } catch {
-    return false
-  }
-}
-const lldbAvailable = (): boolean => {
-  if (has("lldb-dap", "--help")) return true
-  try {
-    const r = Bun.spawnSync(["xcrun", "-f", "lldb-dap"], { stdout: "pipe", stderr: "ignore" })
-    return r.exitCode === 0 && r.stdout.toString().trim().length > 0
-  } catch {
-    return false
-  }
-}
-// SOTA ① real-on-demand lane: real cargo + lldb-dap thunders under the parallel
-// suite. Runs only when QUANTA_REAL_TOOLCHAIN_E2E is set (`test:real-toolchain`).
-const D =
-  gateOn(process.env, "QUANTA_REAL_TOOLCHAIN_E2E") && has("cargo", "--version") && lldbAvailable()
-    ? describe
-    : describe.skip
+const GROUP = "native-debugger"
+const FILE = "tests/unit/tool/evidence/runtime-rust-real-e2e.test.ts"
+
+/**
+ * CAPABILITY GROUP `native-debugger`, lane `nightly-heavy`.
+ *
+ * ubuntu-latest ships NONE of clangd, lldb-dap, dlv or debugpy, so a
+ * PR-required arm here would be a permanent visible skip wearing a gate's
+ * clothes. The probe no longer shells out: `lldb-dap` lives inside the Xcode /
+ * Command Line Tools toolchain on macOS rather than on PATH, and the old
+ * fallback was an UNBOUNDED `Bun.spawnSync(["xcrun", "-f", "lldb-dap"])` at
+ * module load — a wedged `xcrun` stalled the whole ordinary suite for a file
+ * that was going to skip. `hasLldbDap` stats the two known toolchain paths.
+ */
+const GATE = capabilityGate({
+  group: GROUP,
+  file: FILE,
+  needs: { cargo: hasBinary("cargo"), "lldb-dap": hasLldbDap() },
+})
+const D = laneDescribe(GROUP, GATE)
 
 const LIB_RS = [
   "pub fn compute(n: i32) -> i32 { let mut t = 0; for i in 0..n { t += i; } t }",
@@ -54,6 +60,14 @@ const LIB_RS = [
 ].join("\n")
 
 D("defaultRuntimePort — REAL Rust runtime via lldb-dap (second runtime language)", () => {
+  beforeAll(() => assertCapabilityNotBlocked({ group: GROUP, file: FILE }, GATE))
+  afterAll(() =>
+    reportExecuted(GATE, GROUP, FILE, "real cargo test binary under lldb-dap", () => ({
+      cargoVersion: boundedVersion(["cargo", "--version"]),
+      lldbDapVersion: boundedVersion(["lldb-dap", "--version"]),
+    })),
+  )
+
   test("buildEvidence captures the rust test's locals (the value behind the failure)", async () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "rtrs-")))
     mkdirSync(join(dir, "src"), { recursive: true })

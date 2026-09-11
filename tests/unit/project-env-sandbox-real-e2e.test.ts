@@ -5,7 +5,7 @@
  * spawning `uv`. `bun run test:real-toolchain` sets the explicit enable flag
  * and selects this `*-real-e2e.test.ts` filename.
  */
-import { describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -14,10 +14,30 @@ import {
   materializeProjectEnvPyproject,
   materializeProjectEnvSourceShimFile,
 } from "@/runner/batch/corpus/project-env"
+import {
+  assertCapabilityNotBlocked,
+  boundedVersion,
+  capabilityGate,
+  capabilityLaneSelected,
+  hasBinary,
+  reportExecuted,
+} from "../_helpers/capability-lane"
 
-const ENABLED = process.env.QUANTA_REAL_TOOLCHAIN_E2E === "1"
-const hasUv = (): boolean => spawnSync("uv", ["--version"], { stdio: "ignore" }).status === 0
-const HAS_UV = ENABLED && hasUv()
+const GROUP = "python-uv-build"
+const FILE = "tests/unit/project-env-sandbox-real-e2e.test.ts"
+
+/**
+ * CAPABILITY GROUP `python-uv-build`, lane `nightly-heavy`.
+ *
+ * Five real `uv` editable builds, 240s budget each, resolving packages from the
+ * network — deterministic only in the sense that the same registry answers the
+ * same way, which is not a property a merge may block on. The presence probe was
+ * an UNBOUNDED `spawnSync("uv", ["--version"])`; PATH resolution establishes the
+ * same thing without a subprocess.
+ */
+const GATE = capabilityGate({ group: GROUP, file: FILE, needs: { uv: hasBinary("uv") } })
+const ENABLED = capabilityLaneSelected()
+const HAS_UV = GATE.available
 
 const mkTmp = (label: string): string => mkdtempSync(join(tmpdir(), `proj-env-real-${label}-`))
 
@@ -95,6 +115,16 @@ const uvEditableBuilds = (dir: string, extraArgv: readonly string[]): boolean =>
 }
 
 describe("project-env real-build materialization (explicit real-toolchain tier)", () => {
+  beforeAll(() => assertCapabilityNotBlocked({ group: GROUP, file: FILE }, GATE))
+  afterAll(() => {
+    if (!HAS_UV) return
+    reportExecuted(GATE, GROUP, FILE, "real uv editable builds exercised", () => ({
+      uvVersion: boundedVersion(["uv", "--version"]),
+      pythonVersion: boundedVersion(["python3", "--version"]),
+      dependencyLockSha256: "<not-locked: uv resolves from the registry per run>",
+    }))
+  })
+
   test.skipIf(!ENABLED)("the explicitly requested tier has uv available", () => {
     expect(HAS_UV).toBe(true)
   })

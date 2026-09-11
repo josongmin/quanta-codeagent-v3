@@ -8,36 +8,32 @@
  *
  * AUTO-SKIPS without node. Verified 2026-06-10.
  */
-import { describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, expect, test } from "bun:test"
 import { mkdtempSync, realpathSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { gateOn } from "@/shared"
 import { defaultRuntimePort } from "@/tool/evidence"
 import { buildEvidence } from "@/tool/evidence/builder"
 import { runToolchain, type Toolchain } from "@/tool/testrun"
+import {
+  assertCapabilityNotBlocked,
+  boundedVersion,
+  capabilityGate,
+  hasBinary,
+  laneDescribe,
+  reportExecuted,
+} from "../../../_helpers/capability-lane"
 
-const has = (b: string, ...a: string[]): boolean => {
-  try {
-    return Bun.spawnSync([b, ...a], { stdout: "ignore", stderr: "ignore" }).exitCode === 0
-  } catch {
-    return false
-  }
-}
-const REAL_E2E = gateOn(process.env, "QUANTA_REAL_TOOLCHAIN_E2E")
+const GROUP = "node-runtime-cdp"
+const FILE = "tests/unit/tool/evidence/runtime-node-real-e2e.test.ts"
 
-// REAL-ON-DEMAND LANE. Toolchain presence alone was the gate, so on a developer
-// machine that HAS the toolchain these ran inside the ordinary unit suite and
-// their cost tracks whatever else the box is doing (measured: 3,455ms idle,
-// 9,387ms at load average 68 — past the 8,529ms per-test speed budget, a ceiling
-// that may only go DOWN). Same suffix, same lane as their `-real-e2e` siblings:
-// a VISIBLE skip by default, run by `bun run test:real-toolchain`. CI still runs
-// this lane — `.github/workflows/ci.yml` has an explicit
-// `QUANTA_REAL_TOOLCHAIN_E2E=1 bun run test:real-toolchain` step, added after an
-// audit measured that ubuntu-latest DOES ship node, go, cargo, python3 and npm
-// (only clangd, lldb-dap, dlv and debugpy are absent), so gating without that
-// step silently dropped 8 cases from the blocking merge gate.
-const D = REAL_E2E && has("node", "--version") ? describe : describe.skip
+// CAPABILITY GROUP `node-runtime-cdp` — the only NON-DAP runtime carrier, which
+// is why it is its own group rather than an arm of the debugger group. Toolchain
+// presence alone used to be the gate, so on a dev machine with node these ran
+// inside the ordinary unit suite (measured 3,455ms idle, 9,387ms at load 68 —
+// past the 8,529ms per-test budget, a ceiling that may only go DOWN).
+const GATE = capabilityGate({ group: GROUP, file: FILE, needs: { node: hasBinary("node") } })
+const D = laneDescribe(GROUP, GATE)
 
 // A node:test file that self-runs inline (one process). `result` is 10 (0+1+2+3+4),
 // the assertion expects 99 → fails. The CDP breakpoint lands on the assert line.
@@ -57,6 +53,13 @@ const TEST_MJS = [
 ].join("\n")
 
 D("defaultRuntimePort — REAL Node runtime via CDP (fourth language, non-DAP carrier)", () => {
+  beforeAll(() => assertCapabilityNotBlocked({ group: GROUP, file: FILE }, GATE))
+  afterAll(() =>
+    reportExecuted(GATE, GROUP, FILE, "real node --inspect-brk CDP capture", () => ({
+      nodeVersion: boundedVersion(["node", "--version"]),
+    })),
+  )
+
   test("buildEvidence captures the node test's locals (the value behind the failure)", async () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "rtnode-")))
     writeFileSync(join(dir, "m.test.mjs"), TEST_MJS)

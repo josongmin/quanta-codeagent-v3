@@ -5,34 +5,37 @@
  * fuses it into a real buildEvidence packet. AUTO-SKIPS without cargo +
  * rust-analyzer. Verified 2026-06-10.
  */
-import { describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, expect, test } from "bun:test"
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { evidenceLspStatic } from "@/agent/lsp-bridge"
-import { gateOn } from "@/shared"
 import { buildEvidence } from "@/tool/evidence/builder"
 import { detectToolchain, runToolchain } from "@/tool/testrun"
+import {
+  assertCapabilityNotBlocked,
+  boundedVersion,
+  capabilityGate,
+  hasBinary,
+  laneDescribe,
+  reportExecuted,
+} from "../_helpers/capability-lane"
 
-const has = (b: string, ...a: string[]): boolean => {
-  try {
-    return Bun.spawnSync([b, ...a], { stdout: "ignore", stderr: "ignore" }).exitCode === 0
-  } catch {
-    return false
-  }
-}
-// SOTA ① — real-on-demand lane. This spawns a REAL rust-analyzer + cargo, which
-// under the full parallel suite (2000+ files) gets CPU-starved and returns empty
-// hover ⇒ flake. It now runs ONLY in the opt-in serial lane (`bun run
-// test:real-toolchain`, which sets QUANTA_REAL_TOOLCHAIN_E2E=1 --parallel=1); the
-// default suite skips it. The SAME fusion logic is covered deterministically by
-// evidence-lsp-bridge-replay-deterministic.test.ts (REPLAYED lspStatic port).
-const D =
-  gateOn(process.env, "QUANTA_REAL_TOOLCHAIN_E2E") &&
-  has("cargo", "--version") &&
-  has("rust-analyzer", "--version")
-    ? describe
-    : describe.skip
+const GROUP = "lsp-rust"
+const FILE = "tests/unit/evidence-lsp-bridge-real-e2e.test.ts"
+
+// CAPABILITY GROUP `lsp-rust`. A REAL rust-analyzer + cargo under the full
+// parallel suite gets CPU-starved and returns an EMPTY hover ⇒ flake, so this
+// runs only in the opt-in serial lane. The SAME fusion logic stays covered
+// deterministically by evidence-lsp-bridge-replay-deterministic.test.ts
+// (REPLAYED lspStatic port), which is why moving this file out of PR membership
+// loses no coverage.
+const GATE = capabilityGate({
+  group: GROUP,
+  file: FILE,
+  needs: { cargo: hasBinary("cargo"), "rust-analyzer": hasBinary("rust-analyzer") },
+})
+const D = laneDescribe(GROUP, GATE)
 
 const project = (): string => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "evbridge-")))
@@ -59,6 +62,14 @@ const project = (): string => {
 }
 
 D("evidenceLspStatic — PRODUCTION LSP static port (real rust-analyzer)", () => {
+  beforeAll(() => assertCapabilityNotBlocked({ group: GROUP, file: FILE }, GATE))
+  afterAll(() =>
+    reportExecuted(GATE, GROUP, FILE, "real cargo + rust-analyzer exercised", () => ({
+      cargoVersion: boundedVersion(["cargo", "--version"]),
+      rustAnalyzerVersion: boundedVersion(["rust-analyzer", "--version"]),
+    })),
+  )
+
   test("queries the real server at a failure site and returns StaticEvidence", async () => {
     const dir = project()
     const port = evidenceLspStatic()

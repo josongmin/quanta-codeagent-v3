@@ -6,32 +6,36 @@
  * gap (Go already had failure + DAP runtime; this gives it static parity with
  * Python/Rust). AUTO-SKIPS without `go` + `gopls`. Verified 2026-06-10.
  */
-import { describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, expect, test } from "bun:test"
 import { existsSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { evidenceLspStatic } from "@/agent/lsp-bridge"
-import { gateOn } from "@/shared"
 import { buildEvidence } from "@/tool/evidence/builder"
 import { detectToolchain, runToolchain } from "@/tool/testrun"
+import {
+  assertCapabilityNotBlocked,
+  boundedVersion,
+  capabilityGate,
+  hasBinary,
+  laneDescribe,
+  reportExecuted,
+} from "../_helpers/capability-lane"
 
-const has = (b: string, ...a: string[]): boolean => {
-  try {
-    return Bun.spawnSync([b, ...a], { stdout: "ignore", stderr: "ignore" }).exitCode === 0
-  } catch {
-    return false
-  }
-}
-// gopls has no `--version` flag (it errors), but `gopls version` is the probe.
-// SOTA ① — real-on-demand lane (see evidence-lsp-bridge-real-e2e.test.ts): real
-// gopls thunders under the parallel suite, so this runs only when
-// QUANTA_REAL_TOOLCHAIN_E2E is set (`bun run test:real-toolchain`, serial).
-const D =
-  gateOn(process.env, "QUANTA_REAL_TOOLCHAIN_E2E") &&
-  has("go", "version") &&
-  has("gopls", "version")
-    ? describe
-    : describe.skip
+const GROUP = "lsp-go"
+const FILE = "tests/unit/evidence-lsp-bridge-go-real-e2e.test.ts"
+
+// CAPABILITY GROUP `lsp-go`. The probe is PATH resolution, not
+// `Bun.spawnSync([bin, "version"])` at module load: the old form paid two
+// unbounded spawns on every ordinary `bun test tests/unit` run where this file
+// then skipped, and a cold `gopls` answering slowly stalled the suite with no
+// diagnostic. Presence of the binary is exactly what the old probe established.
+const GATE = capabilityGate({
+  group: GROUP,
+  file: FILE,
+  needs: { go: hasBinary("go"), gopls: hasBinary("gopls") },
+})
+const D = laneDescribe(GROUP, GATE)
 
 const project = (): string => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "evbridge-go-")))
@@ -58,6 +62,14 @@ const project = (): string => {
 }
 
 D("evidenceLspStatic — PRODUCTION LSP static port (real gopls)", () => {
+  beforeAll(() => assertCapabilityNotBlocked({ group: GROUP, file: FILE }, GATE))
+  afterAll(() =>
+    reportExecuted(GATE, GROUP, FILE, "real go + gopls exercised", () => ({
+      goVersion: boundedVersion(["go", "version"]),
+      goplsVersion: boundedVersion(["gopls", "version"]),
+    })),
+  )
+
   test("queries the real gopls server at a Go failure site and returns StaticEvidence", async () => {
     const dir = project()
     const port = evidenceLspStatic()

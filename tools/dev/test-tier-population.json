@@ -3,19 +3,19 @@
   "tiers": {
     "prepush": {
       "minFiles": 3900,
-      "reason": "measured 3932 selected at 85a99bb6f; prepush is not yet narrowed to changed+canary, so it still tracks the full population"
+      "reason": "measured 3925 selected at c7e91b306. prepush still tracks the PR population: the canary half of its contract is declared but the affected/changed half (verification-selection.ts) is a dry run nothing consumes, and narrowing to the canary alone would have taken `bun run prepush` from 3941 files to 8. Lower this in the same diff that wires the selection."
     },
     "pr": {
       "minFiles": 3900,
-      "reason": "measured 3932 selected at 85a99bb6f; lower this in the same diff that excludes capability-gated files from the merge-blocking population"
+      "reason": "measured 3925 selected at c7e91b306 = universe minus 6 nightly-exhaustive minus 17 lane-gated capability files"
     },
     "full": {
       "minFiles": 3900,
-      "reason": "measured 3932 selected at 85a99bb6f; full is the deterministic whole population minus nightly-exhaustive files"
+      "reason": "measured 3935 selected at c7e91b306 = universe minus 6 nightly-exhaustive minus 7 nightly-heavy capability files"
     },
     "nightly": {
       "minFiles": 3900,
-      "reason": "measured 3938 selected at 85a99bb6f; nightly is full plus the 6 physically separated nightly-exhaustive files, plus capability fan-out"
+      "reason": "measured 3948 selected at c7e91b306 = the whole discovered universe; nightly is set-equal to it, which is what makes `no file is in zero tiers` checkable"
     }
   }
 }

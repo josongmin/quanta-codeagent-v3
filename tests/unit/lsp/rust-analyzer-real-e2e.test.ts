@@ -7,27 +7,31 @@
  * AUTO-SKIPS when rust-analyzer + cargo are absent (CI without the toolchain
  * stays green). Verified 2026-06-10 with rust-analyzer 1.95.0.
  */
-import { describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { RustAnalyzerAdapter } from "@/lsp"
-import { gateOn } from "@/shared"
+import {
+  assertCapabilityNotBlocked,
+  boundedVersion,
+  capabilityGate,
+  hasBinary,
+  laneDescribe,
+  reportExecuted,
+} from "../../_helpers/capability-lane"
 import { nth, present } from "../../_helpers/expect-present"
 
-const has = (bin: string, arg = "--version"): boolean => {
-  try {
-    return Bun.spawnSync([bin, arg], { stdout: "ignore", stderr: "ignore" }).exitCode === 0
-  } catch {
-    return false
-  }
-}
-// SOTA ① real-on-demand lane: real rust-analyzer thunders under the parallel
-// suite. Runs only when QUANTA_REAL_TOOLCHAIN_E2E is set (`test:real-toolchain`).
-const D =
-  gateOn(process.env, "QUANTA_REAL_TOOLCHAIN_E2E") && has("rust-analyzer") && has("cargo")
-    ? describe
-    : describe.skip
+const GROUP = "lsp-rust"
+const FILE = "tests/unit/lsp/rust-analyzer-real-e2e.test.ts"
+
+// CAPABILITY GROUP `lsp-rust`.
+const GATE = capabilityGate({
+  group: GROUP,
+  file: FILE,
+  needs: { "rust-analyzer": hasBinary("rust-analyzer"), cargo: hasBinary("cargo") },
+})
+const D = laneDescribe(GROUP, GATE)
 
 const MAIN_RS = [
   "fn add(a: i32, b: i32) -> i32 {", // line 0
@@ -94,6 +98,14 @@ const pollDefinition = async (
 }
 
 D("RustAnalyzerAdapter — REAL rust-analyzer LSP e2e", () => {
+  beforeAll(() => assertCapabilityNotBlocked({ group: GROUP, file: FILE }, GATE))
+  afterAll(() =>
+    reportExecuted(GATE, GROUP, FILE, "real rust-analyzer answered definition + hover", () => ({
+      cargoVersion: boundedVersion(["cargo", "--version"]),
+      rustAnalyzerVersion: boundedVersion(["rust-analyzer", "--version"]),
+    })),
+  )
+
   test("definition + hover on a function call resolve through real rust-analyzer", async () => {
     const dir = mkdtempSync(join(tmpdir(), "ra-"))
     mkdirSync(join(dir, "src"), { recursive: true })

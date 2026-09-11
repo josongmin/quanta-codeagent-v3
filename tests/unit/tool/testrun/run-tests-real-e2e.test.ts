@@ -7,21 +7,23 @@
  * Each block AUTO-SKIPS when its toolchain is absent. Verified 2026-06-10
  * (cargo 1.95, go 1.25.4, python3 unittest).
  */
-import { describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { gateOn } from "@/shared"
 import { makeRunTestsTool } from "@/tool/testrun/tool"
 import type { ToolContext, ToolEvent, ToolResult } from "@/tool/types"
+import {
+  assertCapabilityNotBlocked,
+  boundedVersion,
+  capabilityGate,
+  hasBinary,
+  laneDescribe,
+  reportExecuted,
+} from "../../../_helpers/capability-lane"
 
-const has = (bin: string, ...args: string[]): boolean => {
-  try {
-    return Bun.spawnSync([bin, ...args], { stdout: "ignore", stderr: "ignore" }).exitCode === 0
-  } catch {
-    return false
-  }
-}
+const GROUP = "language-test-matrix"
+const FILE = "tests/unit/tool/testrun/run-tests-real-e2e.test.ts"
 const run = async (cwd: string): Promise<ToolResult> => {
   const tool = makeRunTestsTool()
   const ctx = { cwd, signal: new AbortController().signal } as ToolContext
@@ -32,21 +34,35 @@ const run = async (cwd: string): Promise<ToolResult> => {
   return r
 }
 
-const REAL_E2E = gateOn(process.env, "QUANTA_REAL_TOOLCHAIN_E2E")
+/**
+ * CAPABILITY GROUP `language-test-matrix` — the normalized
+ * `{passed, failed:[{name,file,line,message}]}` shape over three REAL runners.
+ * One group, one provisioning step: go + cargo + python3. Probes are PATH
+ * resolution, so the ordinary suite pays no spawn for a file it skips.
+ */
+const GATE = capabilityGate({
+  group: GROUP,
+  file: FILE,
+  needs: {
+    go: hasBinary("go"),
+    cargo: hasBinary("cargo"),
+    python3: hasBinary("python3"),
+  },
+})
+const D = laneDescribe(GROUP, GATE)
 
-// REAL-ON-DEMAND LANE. Toolchain presence alone was the gate, so on a developer
-// machine that HAS the toolchain these ran inside the ordinary unit suite and
-// their cost tracks whatever else the box is doing (measured: 3,455ms idle,
-// 9,387ms at load average 68 — past the 8,529ms per-test speed budget, a ceiling
-// that may only go DOWN). Same suffix, same lane as their `-real-e2e` siblings:
-// a VISIBLE skip by default, run by `bun run test:real-toolchain`. CI still runs
-// this lane — `.github/workflows/ci.yml` has an explicit
-// `QUANTA_REAL_TOOLCHAIN_E2E=1 bun run test:real-toolchain` step, added after an
-// audit measured that ubuntu-latest DOES ship node, go, cargo, python3 and npm
-// (only clangd, lldb-dap, dlv and debugpy are absent), so gating without that
-// step silently dropped 8 cases from the blocking merge gate.
-const Dgo = REAL_E2E && has("go", "version") ? describe : describe.skip
+const reportMatrixExecuted = (): void =>
+  reportExecuted(GATE, GROUP, FILE, "real go / cargo / python unittest runs parsed", () => ({
+    goVersion: boundedVersion(["go", "version"]),
+    cargoVersion: boundedVersion(["cargo", "--version"]),
+    pythonVersion: boundedVersion(["python3", "--version"]),
+  }))
+
+const Dgo = D
 Dgo("run_tests — REAL go test -json", () => {
+  beforeAll(() => assertCapabilityNotBlocked({ group: GROUP, file: FILE }, GATE))
+  afterAll(reportMatrixExecuted)
+
   test("detects go, runs, reports the failing test by name + file:line", async () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "tr-go-")))
     writeFileSync(join(dir, "go.mod"), "module t\ngo 1.25\n")
@@ -67,7 +83,7 @@ Dgo("run_tests — REAL go test -json", () => {
   }, 60_000)
 })
 
-const Drs = REAL_E2E && has("cargo", "--version") ? describe : describe.skip
+const Drs = D
 Drs("run_tests — REAL cargo test", () => {
   test("detects rust, runs, reports the failing test + file:line", async () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "tr-rs-")))
@@ -97,7 +113,7 @@ Drs("run_tests — REAL cargo test", () => {
   }, 120_000)
 })
 
-const Dpy = REAL_E2E && has("python3", "--version") ? describe : describe.skip
+const Dpy = D
 Dpy("run_tests — REAL python unittest", () => {
   test("detects python, runs, reports the failing test + message", async () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "tr-py-")))

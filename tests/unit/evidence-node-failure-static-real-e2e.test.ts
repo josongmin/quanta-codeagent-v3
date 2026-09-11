@@ -7,7 +7,7 @@
  *
  * AUTO-SKIPS without `bun` + `typescript-language-server`. Verified 2026-06-10.
  */
-import { describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, expect, test } from "bun:test"
 import {
   existsSync,
   mkdirSync,
@@ -21,18 +21,41 @@ import { dirname, join } from "node:path"
 import { evidenceLspStatic } from "@/agent/lsp-bridge"
 import { buildEvidence } from "@/tool/evidence/builder"
 import { runToolchain, type Toolchain } from "@/tool/testrun"
+import {
+  assertCapabilityNotBlocked,
+  boundedVersion,
+  capabilityGate,
+  hasBinary,
+  laneDescribe,
+  reportExecuted,
+} from "../_helpers/capability-lane"
 
-const has = (b: string, ...a: string[]): boolean => {
-  try {
-    return Bun.spawnSync([b, ...a], { stdout: "ignore", stderr: "ignore" }).exitCode === 0
-  } catch {
-    return false
-  }
-}
-const D =
-  has("bun", "--version") && has("typescript-language-server", "--version")
-    ? describe
-    : describe.skip
+const GROUP = "lsp-typescript"
+const FILE = "tests/unit/evidence-node-failure-static-real-e2e.test.ts"
+
+/**
+ * REGISTERED IN EXACTLY ONE LANE.
+ *
+ * This file carried the `-real-e2e.test.ts` suffix but NO `QUANTA_REAL_TOOLCHAIN_E2E`
+ * gate, so on a host with `typescript-language-server` it spawned a real
+ * tsserver TWICE per campaign: once inside the ordinary unit suite (which the
+ * suffix is supposed to keep it out of) and again inside
+ * `test:real-toolchain`, which selects by that same suffix. Same file, same
+ * work, two payments, and the ordinary one blew the per-test speed budget.
+ *
+ * Now it is a declared member of `lsp-typescript` in the capability manifest,
+ * gated on the lane like every sibling — so the ordinary tiers do not select it
+ * at all and the capability job runs it once.
+ */
+const GATE = capabilityGate({
+  group: GROUP,
+  file: FILE,
+  needs: {
+    bun: hasBinary("bun"),
+    "typescript-language-server": hasBinary("typescript-language-server"),
+  },
+})
+const D = laneDescribe(GROUP, GATE)
 
 const project = (): string => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "evnode-")))
@@ -63,6 +86,14 @@ const project = (): string => {
 }
 
 D("Evidence keystone — REAL bun test failure localizes + fuses tsserver static", () => {
+  beforeAll(() => assertCapabilityNotBlocked({ group: GROUP, file: FILE }, GATE))
+  afterAll(() =>
+    reportExecuted(GATE, GROUP, FILE, "real bun-test failure enriched by a real tsserver", () => ({
+      bunVersion: boundedVersion(["bun", "--version"]),
+      typescriptLanguageServerVersion: boundedVersion(["typescript-language-server", "--version"]),
+    })),
+  )
+
   test("parseNodeTest localizes a real bun failure, and static enrichment fires", async () => {
     const dir = project()
     // Run the REAL `bun test` as the node toolchain; parser "node" localizes it.

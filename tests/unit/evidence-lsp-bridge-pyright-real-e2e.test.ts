@@ -13,25 +13,35 @@
  * the silent-degrade) ⇒ RED. AUTO-SKIPS without pyright (opt-in serial lane,
  * same gate as the rust-analyzer real e2e: QUANTA_REAL_TOOLCHAIN_E2E=1).
  */
-import { describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, expect, test } from "bun:test"
 import { mkdtempSync, realpathSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { evidenceLspStatic } from "@/agent/lsp-bridge"
-import { gateOn } from "@/shared"
+import {
+  assertCapabilityNotBlocked,
+  boundedVersion,
+  capabilityGate,
+  hasBinary,
+  laneDescribe,
+  reportExecuted,
+} from "../_helpers/capability-lane"
 
-const pyrightOnPath = (): boolean => {
-  try {
-    return Bun.which("pyright-langserver") !== null
-  } catch {
-    return false
-  }
-}
+const GROUP = "lsp-pyright"
+const FILE = "tests/unit/evidence-lsp-bridge-pyright-real-e2e.test.ts"
 
-// Same opt-in serial lane as evidence-lsp-bridge-real-e2e (a real LSP server under
-// the full 2000-file parallel suite gets CPU-starved → empty → flake).
-const D =
-  gateOn(process.env, "QUANTA_REAL_TOOLCHAIN_E2E") && pyrightOnPath() ? describe : describe.skip
+// CAPABILITY GROUP `lsp-pyright`. Same opt-in serial lane as the rust sibling
+// (a real LSP server under the full parallel suite gets CPU-starved → empty →
+// flake), now declared in the manifest rather than implied by a filename.
+const GATE = capabilityGate({
+  group: GROUP,
+  file: FILE,
+  needs: {
+    "pyright-langserver": hasBinary("pyright-langserver"),
+    python3: hasBinary("python3"),
+  },
+})
+const D = laneDescribe(GROUP, GATE)
 
 /** A 2-file Python project: `main.py` imports + calls `helpers.compute`. The
  *  failure site is the call line — a real pyright must resolve `compute` there
@@ -55,6 +65,14 @@ const project = (): { dir: string; main: string; line: number } => {
 }
 
 D("evidenceLspStatic — PRODUCTION pyright port rooted at a sandbox (real server)", () => {
+  beforeAll(() => assertCapabilityNotBlocked({ group: GROUP, file: FILE }, GATE))
+  afterAll(() =>
+    reportExecuted(GATE, GROUP, FILE, "real pyright-langserver served a sandbox", () => ({
+      pyrightVersion: boundedVersion(["pyright-langserver", "--version"]),
+      pythonVersion: boundedVersion(["python3", "--version"]),
+    })),
+  )
+
   test("a real pyright resolves a symbol at the sandbox failure site (not inert)", async () => {
     const { dir, main, line } = project()
     const port = evidenceLspStatic()

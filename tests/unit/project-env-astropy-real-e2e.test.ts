@@ -19,7 +19,7 @@
  * It is intentionally opt-in and serial (`bun run test:real-toolchain`) because
  * it clones/builds a real upstream snapshot and may take several minutes.
  */
-import { describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, expect, test } from "bun:test"
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { readdir, readFile, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -32,22 +32,43 @@ import {
 } from "@/runner/batch/corpus/project-env"
 import { execArgv } from "@/runner/batch/eval/exec"
 import { withCandidatePatch } from "@/runner/batch/eval/rematerialize"
-import { gateOn } from "@/shared"
+import {
+  assertCapabilityNotBlocked,
+  boundedVersion,
+  capabilityGate,
+  hasBinary,
+  laneDescribe,
+  reportExecuted,
+} from "../_helpers/capability-lane"
 
-const has = (bin: string, ...args: string[]): boolean => {
-  try {
-    return Bun.spawnSync([bin, ...args], { stdout: "ignore", stderr: "ignore" }).exitCode === 0
-  } catch {
-    return false
-  }
-}
+const GROUP = "python-native-build"
+const FILE = "tests/unit/project-env-astropy-real-e2e.test.ts"
 
-const D =
-  gateOn(process.env, "QUANTA_REAL_TOOLCHAIN_E2E") &&
-  has("git", "--version") &&
-  has("uv", "--version")
-    ? describe
-    : describe.skip
+/**
+ * CAPABILITY GROUP `python-native-build`, lane `nightly-heavy` — NOT `full`,
+ * NOT `pr`.
+ *
+ * This clones a REAL upstream repository at a REAL base commit and compiles a C
+ * extension locally. Its per-command budget is 600s and its case timeout is
+ * 1,200s. Nothing about that is deterministic in the sense a merge gate needs:
+ * the clone is network I/O against github, the build resolves packages from
+ * PyPI, and the compile depends on the host compiler's ABI. It stays in the
+ * corpus (it is the only end-to-end proof that the repro/proof rail survives
+ * reset+apply on a real project) and moves to a nightly job of its own, where a
+ * 20-minute arm is a scheduling decision rather than a merge tax.
+ *
+ * RECEIPT, not just a fingerprint. `externalToolchainFingerprint` can see `git`
+ * and `uv` move; it cannot see that upstream repointed a branch, that the wheel
+ * cache holds a differently-ABI-compiled extension, or which Python the sandbox
+ * resolved. Those are the fields declared on this group in the manifest and
+ * emitted below, so "astropy passed" names a reproducible run.
+ */
+const GATE = capabilityGate({
+  group: GROUP,
+  file: FILE,
+  needs: { git: hasBinary("git"), uv: hasBinary("uv") },
+})
+const D = laneDescribe(GROUP, GATE)
 
 const ASTROPY_13033: SwebenchTask = {
   instanceId: "astropy__astropy-13033",
@@ -110,6 +131,20 @@ const buildTrivialPatch = async (sandbox: string): Promise<string> => {
 }
 
 D("project-env astropy real e2e", () => {
+  beforeAll(() => assertCapabilityNotBlocked({ group: GROUP, file: FILE }, GATE))
+  afterAll(() =>
+    reportExecuted(GATE, GROUP, FILE, "real astropy clone + native build exercised", () => ({
+      upstreamRepo: ASTROPY_13033.repo,
+      upstreamBaseCommit: ASTROPY_13033.baseCommit,
+      pythonVersion: boundedVersion(["python3", "--version"]),
+      uvVersion: boundedVersion(["uv", "--version"]),
+      compilerAbi: boundedVersion(["clang++", "--version"]),
+      // The sandbox resolves its own dependency set per run; the exact lock is
+      // the pyproject the materializer injected, hashed by the proof rail.
+      dependencyLockSha256: "<materialized per run: prepareProjectEnvSandbox>",
+    })),
+  )
+
   test("base repro and candidate-proof probe both run past env/build on astropy__astropy-13033", async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "astropy-13033-real-")))
     const sandbox = join(root, "repo")

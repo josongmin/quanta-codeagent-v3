@@ -1,4 +1,70 @@
 {
   "schema": "quanta.test-policy-overrides.v1",
-  "overrides": []
+  "_note": "EXACT ids only. Pattern-wide promotion is forbidden: a rule that matches a glob silently enrols every file a future author happens to name that way. Every row needs owner + reason + expiresAt, and `prepush` membership must agree with `alwaysRun` (prepush IS the always-run canary) and must also appear in `pr` (a canary a merge does not run cannot block one). Capability membership is NOT expressible here — it lives in tools/dev/test-capability-manifest.ts, and resolveTestPolicy refuses an override that puts a capability member back into the PR tier.",
+  "overrides": [
+    {
+      "id": "tests/unit/smoke-battery.test.ts",
+      "owner": "verification-rail",
+      "reason": "half of the existing `verify:smoke` command (package.json), i.e. the repo's already-declared deterministic critical canary. prepush must run it before it runs anything that was changed.",
+      "expiresAt": "2027-03-31",
+      "tiers": ["prepush", "pr", "full", "nightly"],
+      "alwaysRun": true
+    },
+    {
+      "id": "tests/unit/git/conflict-parser-differential-fuzz.canary.test.ts",
+      "owner": "verification-rail",
+      "reason": "the other half of `verify:smoke`, and the only file carrying the repo's `.canary.test.ts` suffix — the existing always-run convention, read rather than invented.",
+      "expiresAt": "2027-03-31",
+      "tiers": ["prepush", "pr", "full", "nightly"],
+      "alwaysRun": true
+    },
+    {
+      "id": "tests/unit/dev/test-policy-enrollment.test.ts",
+      "owner": "verification-rail",
+      "reason": "guards tier membership itself. If it is red, every other tier's selection is untrustworthy, so selecting it by change-detection would be circular — it must run unconditionally.",
+      "expiresAt": "2027-03-31",
+      "tiers": ["prepush", "pr", "full", "nightly"],
+      "alwaysRun": true
+    },
+    {
+      "id": "tests/unit/dev/test-capability-lanes.test.ts",
+      "owner": "verification-rail",
+      "reason": "the capability-manifest / lane-separation guard. Same circularity as above: it decides which files the other tiers contain.",
+      "expiresAt": "2027-03-31",
+      "tiers": ["prepush", "pr", "full", "nightly"],
+      "alwaysRun": true
+    },
+    {
+      "id": "tests/unit/dev/external-toolchain-coverage.test.ts",
+      "owner": "verification-rail",
+      "reason": "an exact verification receipt SKIPS every gate, and this guard is what keeps the capability fingerprint bound to the corpus. A stale fingerprint replays a green the host can no longer earn, which poisons every tier at once.",
+      "expiresAt": "2027-03-31",
+      "tiers": ["prepush", "pr", "full", "nightly"],
+      "alwaysRun": true
+    },
+    {
+      "id": "tests/unit/dev/external-toolchain.test.ts",
+      "owner": "verification-rail",
+      "reason": "pins the fingerprint probe's own properties (no realpath, absence is a value, subprocess-free fast path). The coverage guard above is meaningless if the probe underneath it is wrong.",
+      "expiresAt": "2027-03-31",
+      "tiers": ["prepush", "pr", "full", "nightly"],
+      "alwaysRun": true
+    },
+    {
+      "id": "tests/unit/_arch/gate-manifest-workflow-parity.test.ts",
+      "owner": "verification-rail",
+      "reason": "the only thing keeping the local gate manifest and the hosted workflows from drifting. A change-selected run cannot catch a drift introduced by a workflow edit it did not select.",
+      "expiresAt": "2027-03-31",
+      "tiers": ["prepush", "pr", "full", "nightly"],
+      "alwaysRun": true
+    },
+    {
+      "id": "tests/unit/test-shard-plan.test.ts",
+      "owner": "verification-rail",
+      "reason": "resource classification and chunk planning — the layer that decides what may run concurrently. A regression here corrupts every shard campaign's result rather than failing it.",
+      "expiresAt": "2027-03-31",
+      "tiers": ["prepush", "pr", "full", "nightly"],
+      "alwaysRun": true
+    }
+  ]
 }

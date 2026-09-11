@@ -4,33 +4,49 @@
  * static at the failure site. No fakes for the fused sources. AUTO-SKIPS when
  * cargo + rust-analyzer are absent. Verified 2026-06-10.
  */
-import { describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, expect, test } from "bun:test"
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { evidenceLspStatic } from "@/agent/lsp-bridge"
-import { gateOn } from "@/shared"
 import { buildEvidence, type EvidenceSources } from "@/tool/evidence/builder"
 import { detectToolchain, runToolchain } from "@/tool/testrun"
+import {
+  assertCapabilityNotBlocked,
+  boundedVersion,
+  capabilityGate,
+  hasBinary,
+  laneDescribe,
+  reportExecuted,
+} from "../../../_helpers/capability-lane"
 
-const has = (bin: string, ...a: string[]): boolean => {
-  try {
-    return Bun.spawnSync([bin, ...a], { stdout: "ignore", stderr: "ignore" }).exitCode === 0
-  } catch {
-    return false
-  }
-}
-// SOTA ① real-on-demand lane: real rust-analyzer+cargo thunders under the
-// parallel suite (same root cause as evidence-lsp-bridge-real-e2e). Runs only
-// when QUANTA_REAL_TOOLCHAIN_E2E is set (`bun run test:real-toolchain`, serial).
-const D =
-  gateOn(process.env, "QUANTA_REAL_TOOLCHAIN_E2E") &&
-  has("cargo", "--version") &&
-  has("rust-analyzer", "--version")
-    ? describe
-    : describe.skip
+const GROUP = "lsp-rust"
+const FILE = "tests/unit/tool/evidence/keystone-real-e2e.test.ts"
+
+// CAPABILITY GROUP `lsp-rust` — same real cargo + rust-analyzer as its two
+// siblings, so one job provisions the toolchain once for all three.
+const GATE = capabilityGate({
+  group: GROUP,
+  file: FILE,
+  needs: { cargo: hasBinary("cargo"), "rust-analyzer": hasBinary("rust-analyzer") },
+})
+const D = laneDescribe(GROUP, GATE)
 
 D("buildEvidence — REAL keystone fusion (cargo failure + rust-analyzer static)", () => {
+  beforeAll(() => assertCapabilityNotBlocked({ group: GROUP, file: FILE }, GATE))
+  afterAll(() =>
+    reportExecuted(
+      GATE,
+      GROUP,
+      FILE,
+      "real cargo failure fused with real rust-analyzer static",
+      () => ({
+        cargoVersion: boundedVersion(["cargo", "--version"]),
+        rustAnalyzerVersion: boundedVersion(["rust-analyzer", "--version"]),
+      }),
+    ),
+  )
+
   test("one call returns a packet fusing the real failure + real LSP static", async () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "kst-")))
     mkdirSync(join(dir, "src"), { recursive: true })
