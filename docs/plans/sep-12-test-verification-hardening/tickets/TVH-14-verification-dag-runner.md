@@ -1,7 +1,7 @@
 # TVH-14 — top-level verification DAG와 bounded gate lifecycle
 
 - 우선순위: P1
-- 상태: OPEN
+- 상태: IN PROGRESS (항목 0 착륙)
 - 소유 lane: gate orchestration / lifecycle / critical path
 - 선행: TVH-04, TVH-06, TVH-07, TVH-12
 - 후속: TVH-09, TVH-10
@@ -47,3 +47,13 @@
 - [ ] resource claim 없는 임의 병렬화가 없다.
 - [ ] 모든 verification tier가 비교 가능한 exact receipt를 발행한다.
 - [ ] manifest validation drift가 listing 경로에 숨지 않는다.
+
+## 진행 (2026-09-12)
+
+- **LANDED `151040786`** — 확정 결함 0(manifest validation self-consistency) 해소.
+  list/plan/run이 공유하는 **순수** validator를 `tools/dev/gate-manifest-contract.ts`에 두고
+  `--list` 분기 앞에서 실행한다. validator는 gate를 하나도 spawn하지 않는다.
+  exact gate ID + stage ownership + dangling/cyclic `consumes`를 검사하며 위반은 ID로 지목한다.
+  DAG 전환의 선행 조건이 충족됐다.
+- 남은 항목: gate schema 확장(`dependsOn[]`/`resources[]`/`timeout`/`outputBudget`),
+  ready-set 병렬 실행, bounded lifecycle primitive로 `Bun.spawnSync` 교체, 단일 admission deadline.

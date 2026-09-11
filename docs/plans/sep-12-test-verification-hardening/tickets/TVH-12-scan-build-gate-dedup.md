@@ -1,7 +1,7 @@
 # TVH-12 — scan/build/gate producer 중복 제거
 
 - 우선순위: P1
-- 상태: OPEN
+- 상태: IN PROGRESS
 - 소유 lane: static producers / artifact receipts / hosted CI setup
 - 선행: TVH-02, TVH-05, TVH-06
 - 후속: TVH-09, TVH-10
@@ -77,3 +77,13 @@
 - [ ] CI/nightly dependency install은 repository Git config를 변경하지 않는다.
 - [ ] cleanup과 discovery가 ignored ambient corpus 및 겹치는 suite 수에 선형 증폭되지 않는다.
 - [ ] root/frontend dependency install은 lock-correlated receipt 하나를 소비하고 executable-exists shortcut이 없다.
+
+## 진행 (2026-09-12)
+
+- **LANDED `52044ab1f`** — 확정 결함 12(`discoverInventory`의 4회 중복 walk) 해소.
+  suite membership은 root로 정의되므로 한 snapshot에서 projection한다.
+  ABBA(HEAD 구현 대비, 12 샘플 interleave, loaded host, median): **124ms → 45ms**,
+  filesystem enumeration **4 → 1**(타이머가 아니라 카운터로 단언). 8개 population 전부 digest 동일.
+  root 매칭은 subtree exact(`tests/unit`이 `tests/unit-helpers/**`를 삼키지 않음).
+- 남은 항목: static/catalog/repo-scan/compiled-probe producer receipt, non-vacuity mirror,
+  cwd-parity root arm 재사용, `test:clean-js`의 ignored scratch walk, dependency-ready receipt.

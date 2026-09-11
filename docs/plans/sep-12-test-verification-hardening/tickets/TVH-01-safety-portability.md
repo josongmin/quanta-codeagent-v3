@@ -1,7 +1,7 @@
 # TVH-01 — 테스트 안전성·이식성 결함 제거
 
 - 우선순위: P0
-- 상태: OPEN
+- 상태: IN PROGRESS (worker HOME 착륙 / 절대경로·metadata 진행 중)
 - 소유 lane: test-runtime safety / browser fixture
 - 선행: 없음
 - 후속: TVH-03, TVH-06, TVH-07
@@ -38,3 +38,15 @@
 - [ ] 테스트가 cloud metadata endpoint에 실제 요청하지 않는다.
 - [ ] test worker가 사용자 `~/Library` 전체를 노출하지 않는다.
 - [ ] local/macOS와 hosted/Linux의 차이가 명시적 capability로 표현된다.
+
+## 진행 (2026-09-12)
+
+- **LANDED `49d86642b`** — worker HOME의 `~/Library` 전면 대여 제거. `browser` class chunk만 대여하고
+  `QUANTA_TEST_NO_USER_LIBRARY=1`로 완전 차단. 정책은 `tools/dev/worker-home.ts`(runner는 top-level
+  `await main()`이라 import 불가)에 두고, 가드가 decision 함수와 **runner 호출부의 class-aware 여부**를 둘 다 검사한다.
+  측정: 추적 3,957 파일 중 `browser` 12개(실제 Chrome 구동은 3개), full plan 44 chunk → 대여 대상이 44→browser chunk로 축소.
+  red-on-injection: class 검사 제거 시 2/4 RED, 호출부 무조건화 시 source arm RED.
+- **잔여(정직한 blocker)**: browser lane 자체의 `~/Library` 제거는 Chrome capability producer가 disposable
+  profile을 소유하고 navigate rate(cold 2/6 vs lent 6/6)를 재측정한 receipt가 있어야 한다. 측정 없이 지우면
+  안전 결함을 귀속 불가능한 flake로 바꾼다.
+- 절대경로 3개 test entrypoint와 metadata endpoint fixture는 별도 lane에서 진행 중.

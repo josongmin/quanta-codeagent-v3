@@ -1,7 +1,7 @@
 # TVH-02 — tier·명령·membership 계약 정상화
 
 - 우선순위: P0/P1
-- 상태: OPEN
+- 상태: IN PROGRESS (P0 착륙 / tier membership 진행 중)
 - 소유 lane: verification policy / command integration
 - 선행: TVH-01
 - 후속: TVH-03, TVH-08, TVH-09
@@ -72,3 +72,47 @@
 - [ ] selective plan이 shadow receipt를 생산한다.
 - [ ] 선택 축소와 corpus 유실이 서로 다른 오류로 보고된다.
 - [ ] 현재 manifest가 첫 gate 전 ownership validation을 통과하고 list가 검증을 우회하지 않는다.
+
+## 진행 (2026-09-12)
+
+### LANDED
+
+- **`151040786` — gate ownership floor drift (P0).** current HEAD에서 `bun run precommit` /
+  `prepush` / 모든 `gate.ts <tier>`가 gate 1개도 실행하지 못하고 exit 1 하던 상태를 확인·수정.
+  원인은 `a6703e00d`의 `fc-validate`/`fc-diff`/`fc-lint` → `fc-ci` 통합 후 `MIN_OWNED.precommit=10`이
+  그대로 남은 것. 숫자 floor를 exact `(id, stage)` 계약 `GATE_CONTRACT`로 교체하고, 순수 validator를
+  `--list` 분기 **앞**에서 실행해 list/run 경로가 같은 검증을 통과하게 했다.
+  위반 종류: missing / unexpected / mis-staged / duplicate / dangling-consumes / consumes-cycle /
+  empty-stage / empty-contract(anti-vacuum). 전부 offending ID를 이름으로 지목한다.
+  검증: `gate.ts precommit`이 typecheck(17.5s) 통과 후 lint 진입. lint-debt gate 삭제 주입 시
+  `--list`와 run 양쪽 RED.
+
+- **`831d032b2` — suite floor와 tier 선택 floor 분리 + `--parallel=1` no-op 제거.**
+  - floor가 tier 선택 **뒤**에 적용돼 "corpus 유실"과 "의도적 tier 축소"가 같은 메시지였다.
+    suite floor는 pre-selection universe로, tier population floor는 committed
+    `tools/dev/test-tier-population.json`으로 분리(미등록 tier는 default가 아니라 fail closed).
+  - `--parallel=1`은 실제 `bun test` 플래그인데 shard runner가 `continue`로 삼켰다. 5개 스크립트가
+    직렬-isolate로 읽히면서 runner는 pure chunk를 최대 8-wide로 돌렸다. runner가 거부하도록 바꾸고
+    해당 스크립트에서 제거.
+  - `test-ci-admission-script-hellgate`가 이 오해를 고정하고 있어 executor별로 분리(direct `bun test`는
+    플래그 유지, shard runner는 금지), 양방향 anti-vacuity 추가.
+  - 회귀 복구: `151040786`이 `gate-receipt.test.ts`를 18/18 RED로 만든 것(fixture의 `makeRepo`가
+    `gate-manifest-contract.ts` 미복사) 수정. fixture 자체 self-scan이 잡았는데 그 파일을 안 돌리고 착륙시킨 것.
+
+- **`fbb536f62` — contract argv drift 해소.** ci.yml `bun test tests/contract` vs package
+  `test:contract`(clean-js + `--parallel=1`)를 canonical 하나로 통일. 부수로 parity guard 2개 구조 결함 수정:
+  `conditionalStepBody`의 ±8줄 윈도우 → 실제 YAML step 경계, `run:` step이 name을 싣지 않아
+  step-scoped exemption이 구조적으로 불가능했던 것(=wildcard substring 구멍의 원인) 해소.
+
+### 현재 tier membership (current HEAD 측정, `--discover-only`)
+
+prepush / pr / full이 동일 집합·동일 digest, nightly만 +6. tier 분리 자체는 TVH-03 lane과 함께 진행 중.
+
+### 남은 항목
+
+- tier별 실제 membership 분리(TVH-03 capability manifest와 결합).
+- `verify:smoke` vs `gate.ts smoke` authority 통합.
+- `test:resilient` broad run 제거(TVH-15와 결합).
+- `targetChunkCount` dead parameter.
+- base SHA freeze(local/CI 동일 commit range).
+- exemption wildcard substring → exact 전환 잔여분.

@@ -1,7 +1,7 @@
 # TVH-06 — exact execution·capability receipt 무결성
 
 - 우선순위: P0/P1
-- 상태: OPEN
+- 상태: P0 LANDED (나머지 진행 중)
 - 소유 lane: receipt schema / proof consumers
 - 선행: TVH-02. capability/cache closeout은 TVH-03, TVH-05 이후
 - 후속: TVH-09, TVH-10
@@ -80,3 +80,29 @@
 - [ ] stale/wrong-suite/wrong-tier/wrong-capability receipt 재사용이 불가능하다.
 - [ ] current-HEAD 외 receipt는 closeout 근거로 사용되지 않는다.
 - [ ] required producer missing/extra 및 capability zero-execution이 green으로 집계되지 않는다.
+
+## 진행 (2026-09-12)
+
+- **LANDED `14348d545`** — required aggregator가 producer 개수만 보고 **어떤** producer인지 몰랐다.
+  current HEAD 실측:
+
+      $ QUANTA_REQUIRED_NEEDS='{"static-code":{"result":"success"}}' \
+          bun tools/dev/verification-required-results.ts; echo $?
+      0
+
+  7-producer merge gate에 row 1개로 PASS. SSOT(`verification-required-producers.ts`)를 만들고
+  SSOT ↔ `needs` 키 ↔ ci.yml `required.needs` 3-way exact 비교로 교체. missing/unknown/extra 모두
+  fail closed하며 offending ID를 출력한다. all-skipped success-shaped envelope도 RED.
+  receipt: issued→expires duration 계약(mint·validate 양쪽), `origin/main` base OID와 HOME 파생 capability
+  digest를 context에 결합(각각 고유 miss 사유).
+  **감사 정정**: future-skew 거부는 이미 있었다(`issuedAtMs > now + 60s`). 새 구멍이 아니었다.
+
+- **LANDED `fbb536f62`** — producer 쪽 배선. `pty`/`toolchain`/`contract` lane이 JUnit을 내고,
+  bounded reducer(`tools/dev/capability-result.ts`)가 `quanta.capability-result.v1`로 축약해 업로드하며
+  `required`가 전부 다운로드한다. `if: always()`라 reporter 전에 죽은 lane은 침묵이 아니라 `failedSetup`을 낸다.
+  end-to-end 실측: 전 case skip인 lane이 exit 0 + green row를 만들어도
+  `capability producer "pty" executed 0 case(s), floor is 1`로 exit 1.
+
+- **남은 항목**: exact executed file set 비교(local runner), scan-reach producer tier 제한,
+  postflight attribution, matrix universe floor, inherited lease nonce handshake,
+  dependency materialization receipt, manifest/policy projection의 unknown field 거부.
