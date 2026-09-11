@@ -149,6 +149,12 @@ const NETWORK_FIXTURES: readonly { readonly why: string; readonly source: string
   },
   { why: "a fetch of a url built by concatenation", source: `fetch("http://" + "${A}" + "/")` },
   { why: "new URL passed to fetch", source: `fetch(new URL("http://${A}/"))` },
+  {
+    // The shaping list is what keeps a re-shaped url attributable. Drop a
+    // member and the wrapper hides the request from the walk.
+    why: "an encoded url passed to fetch",
+    source: `fetch(encodeURI("http://${A}/latest/meta-data/"))`,
+  },
   { why: "a spawned curl", source: `Bun.spawn(["curl", "-s", "http://${A}/latest/meta-data/"])` },
   { why: "execSync with a shell command line", source: `execSync("curl -s http://${A}/")` },
   { why: "a node http.get", source: `http.get("http://${A}/latest/meta-data/", cb)` },
@@ -261,6 +267,26 @@ const DATA_FIXTURES: readonly { readonly why: string; readonly source: string }[
   {
     why: "a peer-host stub",
     source: `const reboundPrivatePeer: ResolvePeerHost = () => "${A}"`,
+  },
+  {
+    // PRECISION for SHELL_REQUESTING_WORD. A requesting word somewhere in the
+    // same document is not a command whose target is this address: only option
+    // flags may sit between the two.
+    why: "a requesting word with a real argument of its own before the address",
+    source: `const doc = \`<pre>curl https://example.com/ then browse to http://${A}/</pre>\``,
+  },
+  {
+    // PRECISION for HTML_REQUESTING_ATTRIBUTE. The attribute is checked in the
+    // text BEFORE the address; one that follows it consumes something else.
+    why: "a requesting attribute that comes after the address, on another value",
+    source: `const page = \`<img alt="fallback for ${A}" src="/local.png">\``,
+  },
+  {
+    // PRECISION for the URL_SHAPING pass-through: re-shaping a url is not
+    // fetching it. `new URL(x)` is transparent precisely so that `fetch(new
+    // URL(x))` stays network while a bare construction stays data.
+    why: "a url constructed and never requested",
+    source: `const parsed = new URL("http://${A}/latest/meta-data/")`,
   },
 ]
 
