@@ -71,3 +71,37 @@
 - [ ] nightly가 cold verdict + warm scheduling telemetry로 동작한다.
 - [ ] full campaign당 timing store commit 수가 O(1)이다.
 - [ ] cache identity가 실제 input/capability/execution semantics를 반영한다.
+
+## 진행 (2026-09-12)
+
+- **LANDED `7cf5f435f`** — 5개 결함, 각각 변경 전에 재현함.
+  - **손상된 hint 하나가 캠페인 전체를 죽였다.** validator가 `typeof entries !== "object"`를 물었고
+    `null`/`[]` 둘 다 통과 → `Object.entries(null)`에서 TypeError. **scheduling hint(조언 데이터)가 verdict를 막았다.**
+    이제 typed read + content-addressed quarantine, `kind:"cold"`는 `"measured"`와 다른 타입이라
+    fallback이 측정으로 읽힐 수 없다.
+  - **미래 timestamp가 불멸이었다.** `now - sampledAt <= maxAge`에 상한이 없어 +100y 표본 하나가
+    영원히 newest-cohort authority가 됐다. 정직한 50ms 표본 옆에 999,999ms 위조를 두고 측정:
+    before는 모든 horizon에서 위조가 cohort를 선택, after는 정직한 값이 살아남는다.
+    새 임계값이 아니라 receipt에 이미 적용되던 규칙과 동일하다.
+  - **캐시가 전부 miss했다.** 모든 chunk 키가 전체 tracked tree + 전체 manifest + tier label +
+    외부 도구 **27개**(실측; 티켓은 18) 전역 fingerprint를 담았다. docs-only 커밋이나 무관한 Docker 설치가
+    44개 chunk 전부를 무효화했다. 이제 scoped이지만 **양쪽 registry가 비어 있어 현재 HEAD에선
+    모든 chunk가 여전히 `whole-tree`** — 축소는 구현·검증됐고 켜지지 않았다.
+  - **바쁜 박스가 다른 캐시 우주였다.** 1분 load가 120/240/300s timeout을 옮기고 그 값이
+    execution-policy digest에 들어갔다. 이제 stable policy base만 identity이고,
+    실제 구현을 probe해서 얻는다(리터럴 복사 아님). 실행 timeout은 여전히 load를 따른다.
+    호환은 proof-carrying: 확대는 항상 hit, 축소는 receipt의 모든 case가 좁은 예산 안에 끝났을 때만 hit.
+  - **store가 chunk마다 재작성됐다.** full 캠페인당 최대 44회 whole-store read-modify-write →
+    chunk당 NDJSON 1줄 append + 캠페인 끝 **1회** 기록. 중단된 런은 journal로 복구.
+  - **timing write 유실이 복구 불가였다.** green receipt는 남고 timing이 없으면 이후 캠페인이
+    계속 hit → 재실행 없음 → speed budget 영구 red. HEAD에서 재현: 상태 변화 없이 3연속 exit 1,
+    `missing 12/12 executed file(s)` — **이 체크아웃에서 그 게이트는 현재 충족 불가능하다**(store 부재).
+  - **prune이 아무도 안 쓰는 디렉터리를 쓸었다.** tier 캐시는 `full:pr`/`full:nightly`에 쓰는데
+    bare `full`만 청소. 실측: 307 receipts / 127 MiB, 전부 만료, 전부 도달 불가.
+    이제 모든 cache root **버전**의 모든 namespace를 `finally`에서 TTL-only로 쓴다.
+- 뮤턴트 14개 전부 killed.
+
+### 남은 항목
+- healthy-load `test-timings-v2.json`이 아직 없다(완료 기준 1). clean tree 캠페인이 필요하다.
+- `producerReceiptsSha256`은 실제 identity 필드지만 값이 비어 있다(TVH-12가 채운다).
+- nightly workflow의 verdict cache ↔ scheduling telemetry 분리는 미착수.
