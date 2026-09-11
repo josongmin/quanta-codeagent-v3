@@ -41,6 +41,7 @@ import { existsSync } from "node:fs"
 import { readFile, stat } from "node:fs/promises"
 import { errMessage } from "@/shared"
 import { bold, cyan, dim, green, red, renderBox, yellow } from "@/ui/ui-helpers"
+import { readCliKnob } from "./cli-knobs-accessor"
 import { applyMcpServerToggle, type McpToggleAction, writeMcpConfigAtomic } from "./mcp-config-rmw"
 import { NOT_WIRED_EXIT, notWired } from "./not-wired"
 import type { SlashCommand, SlashContext } from "./slash-commands"
@@ -132,13 +133,25 @@ declare module "./slash-commands" {
 /* env knobs                                                           */
 /* ------------------------------------------------------------------ */
 
-const isOn = (v: string | undefined): boolean => {
-  if (v === undefined) return false
-  const n = v.trim().toLowerCase()
-  return n !== "" && n !== "0" && n !== "false" && n !== "off" && n !== "no"
-}
-
-const isVerbose = (): boolean => isOn(process.env.QUANTA_MCP_VERBOSE)
+/**
+ * `QUANTA_MCP_VERBOSE` is a REGISTERED knob — `cli-knobs.ts` declares it
+ * `kind: "bool"`, `default: false`, and even names this file as its `readSite`
+ * — but the read was raw, so `/config set` and `/knobs set` could not reach it.
+ * A knob the registry advertises and the code ignores is worse than an
+ * undeclared env var: the surface promises a control that does nothing.
+ *
+ * The local `isOn` it replaces was a THIRD boolean vocabulary (truthy unless
+ * explicitly falsy), so `QUANTA_MCP_VERBOSE=banana` turned verbose output ON.
+ * `readCliKnob` uses the `readBool` SSOT, where an unrecognized token falls
+ * back to the registry default instead of being read as consent.
+ *
+ * `=== true` rather than `?? false`: for a REGISTERED knob the accessor always
+ * resolves a value, because `resolveRaw` falls through to the registry default
+ * — so a `??` fallback here would be a branch no input can reach, and one that
+ * would quietly absorb the knob being unregistered. "Unset means off" is a
+ * fact of the declaration, pinned by a test, not of a local default.
+ */
+const isVerbose = (): boolean => readCliKnob("QUANTA_MCP_VERBOSE", "bool") === true
 
 /* ------------------------------------------------------------------ */
 /* formatters                                                          */

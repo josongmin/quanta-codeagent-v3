@@ -11,6 +11,12 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { setColorPolicy } from "@/ui/ui-helpers"
+import { CLI_KNOBS, type CliKnob } from "../../src/apps/cli/cli-knobs"
+import {
+  __resetCliKnobOverrides,
+  readCliKnob,
+  setCliKnobOverride,
+} from "../../src/apps/cli/cli-knobs-accessor"
 import {
   formatUptime,
   type McpServerInfo,
@@ -317,6 +323,77 @@ describe("/mcp — verbose mode", () => {
     expect(cap.out).toContain("env:")
     expect(cap.out).toContain("MCP_TOKEN")
     expect(cap.out).toContain("values hidden")
+  })
+
+  /**
+   * `QUANTA_MCP_VERBOSE` is declared in `cli-knobs.ts` with this file as its
+   * `readSite`, but the read was `process.env` directly — so the knob the
+   * surface advertises was unreachable from `/knobs set`, and its documented
+   * boolean vocabulary was not the one enforced.
+   *
+   * Surfaced by `no-raw-process-env-knob-ratchet`, which had been RED at 44/43
+   * on origin/main itself. Nothing reported it because the only gate that runs
+   * it is the full suite.
+   */
+  const verboseFixture = (): Captured =>
+    buildCtx({
+      servers: [
+        server({
+          name: "fs",
+          toolCount: 1,
+          tools: [{ name: "t", description: "d", required: [] }],
+          command: ["bun", "fs.ts"],
+          envKeys: ["MCP_TOKEN"],
+        }),
+      ],
+    })
+
+  test("the knob is REGISTERED, which is what makes unset mean off", () => {
+    // `isVerbose` reads `=== true` with no local fallback, so quiet-by-default
+    // is the registry's `default: false` and nothing else. If the declaration
+    // were dropped the accessor would return undefined, and this states that
+    // out loud instead of letting a `??` swallow it.
+    const knob = CLI_KNOBS.find((k: CliKnob) => k.envKey === "QUANTA_MCP_VERBOSE")
+    expect(knob).toBeDefined()
+    expect({ kind: knob?.kind, default: knob?.default }).toEqual({ kind: "bool", default: false })
+    expect(process.env.QUANTA_MCP_VERBOSE).toBeUndefined()
+    expect(readCliKnob("QUANTA_MCP_VERBOSE", "bool")).toBe(false)
+  })
+
+  test("a session override reaches it with no env var set", async () => {
+    // The whole point of the registry: `/knobs set` participates. With the raw
+    // read this assertion could not pass, because nothing consulted the store.
+    expect(process.env.QUANTA_MCP_VERBOSE).toBeUndefined()
+    expect(setCliKnobOverride("QUANTA_MCP_VERBOSE", "1")).toBe(true)
+    try {
+      const cap = verboseFixture()
+      await runMcpRender([], cap.ctx)
+      expect(cap.out).toContain("cmd:")
+    } finally {
+      __resetCliKnobOverrides()
+    }
+
+    // PAIRED CONTROL: cleared override, still no env — back to quiet.
+    const quiet = verboseFixture()
+    await runMcpRender([], quiet.ctx)
+    expect(quiet.out).not.toContain("cmd:")
+  })
+
+  test("an unrecognized value is not consent", async () => {
+    // The replaced local helper was truthy-unless-explicitly-falsy, so this
+    // turned verbose output ON. The registry vocabulary is 1/on/true/yes, and
+    // anything else falls back to the declared default of false.
+    process.env.QUANTA_MCP_VERBOSE = "banana"
+    const cap = verboseFixture()
+    await runMcpRender([], cap.ctx)
+    expect(cap.out).not.toContain("cmd:")
+
+    // ANTI-VACUITY: the fixture DOES render `cmd:` when the knob is really on,
+    // so "absent" above is a verdict rather than a fixture that never shows it.
+    process.env.QUANTA_MCP_VERBOSE = "yes"
+    const on = verboseFixture()
+    await runMcpRender([], on.ctx)
+    expect(on.out).toContain("cmd:")
   })
 })
 
