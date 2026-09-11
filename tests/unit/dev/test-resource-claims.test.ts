@@ -475,8 +475,17 @@ describe("chunk claim overlap", () => {
     // real concurrency on the strength of a unit test. When that canary is
     // produced, delete this arm in the same commit that changes the call.
     const runner = readFileSync(resolve(REPO_ROOT, "tools/dev/run-test-shards.ts"), "utf8")
-    expect(runner).not.toContain("chunkClaimsOverlap")
-    const plan = readFileSync(resolve(REPO_ROOT, "tools/dev/test-shard-plan.ts"), "utf8")
-    expect(plan).toContain("NOT yet wired into the production scheduler")
+    // The PRESENT property, not the absence of a string: the runner hands the
+    // scheduler a CLASS label. A stale `not.toContain` would also fire on a
+    // comment that merely names the function.
+    expect(runner).toMatch(
+      /runResourceAwareSchedule<[\s\S]*?resourceClass: cached\.chunk\.resourceClass/,
+    )
+    const imported = runner.slice(0, runner.indexOf("\n\n"))
+    // ANTI-VACUITY: a blank line moved into the import block would shrink this
+    // slice to nothing, and "nothing" contains no forbidden symbol either.
+    expect(imported).toContain("runResourceAwareSchedule")
+    expect(imported).toContain("resourceClassesOverlap")
+    expect(imported).not.toContain("chunkClaimsOverlap")
   })
 })
