@@ -13,8 +13,10 @@ import { dirname, join, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { runBoundedChild } from "./bounded-child"
 import { executedFileSetVerdict } from "./executed-file-set"
+import { scanReachMembershipSha256 } from "./scan-reach-authority"
 import {
   loadPolicyOverrides,
+  policyDigest,
   resolveTestPopulation,
   selectTestPoliciesForTier,
 } from "./test-policy"
@@ -24,6 +26,7 @@ import {
   chooseShardTestTimeoutMs,
   planTestChunks,
 } from "./test-shard-plan"
+import { testToolchainSha256 } from "./test-shard-receipt"
 import { junitExecutedFiles, loadTestTimings } from "./test-shard-timings"
 import {
   aggregateMatrixReceipts,
@@ -33,6 +36,7 @@ import {
   workerReceipt,
 } from "./verification-matrix"
 import { sharedVerificationCacheRoot } from "./verification-receipt"
+import { assertKnownTier } from "./verification-tier"
 
 const repoRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))))
 const timingStore = join(sharedVerificationCacheRoot(repoRoot), "test-timings-v2.json")
@@ -43,6 +47,12 @@ const args = process.argv.slice(3)
 const valueArg = (name: string): string | undefined => {
   const prefix = `${name}=`
   return args.find((arg) => arg.startsWith(prefix))?.slice(prefix.length)
+}
+
+/** Present-or-absent, unlike requiredArg: an omitted comparison is not an error. */
+const optionalArg = (name: string): string | undefined => {
+  const value = valueArg(name)
+  return value === undefined || value === "" ? undefined : value
 }
 
 const requiredArg = (name: string): string => {
@@ -93,16 +103,19 @@ const safeArtifactStem = (chunkId: string): string => {
 
 if (command === "plan") {
   const headSha = await cleanGitHead()
+  // REQUIRED, never the literal it used to be. The planner hardcoded "full"
+  // while the monolith ran `QUANTA_VERIFICATION_TIER: pr` — 3,951 files against
+  // 3,941 — so a verdict-equality claim between the two was not a statement
+  // that could ever be true.
+  // Validated against the closed tier union, so a typo is a named refusal
+  // rather than a plan that selects nothing and aggregates to green.
+  const tier = assertKnownTier(requiredArg("--tier"))
   const discoveredFiles = discoverSuiteFiles(repoRoot, "full")
-  const selectedIds = new Set(
-    selectTestPoliciesForTier(
-      resolveTestPopulation(
-        discoveredFiles.map((file) => relative(repoRoot, file)),
-        loadPolicyOverrides(policyOverrides).overrides,
-      ),
-      "full",
-    ).map(({ id }) => id),
+  const policies = resolveTestPopulation(
+    discoveredFiles.map((file) => relative(repoRoot, file)),
+    loadPolicyOverrides(policyOverrides).overrides,
   )
+  const selectedIds = new Set(selectTestPoliciesForTier(policies, tier).map(({ id }) => id))
   const files = discoveredFiles.filter((file) => selectedIds.has(relative(repoRoot, file)))
   const timings = loadTestTimings(timingStore)
   const cpuCount = availableParallelism()
@@ -113,8 +126,16 @@ if (command === "plan") {
     predictMs: (file) => timings.get(relative(repoRoot, file)),
     membershipFile: (file) => relative(repoRoot, file),
   })
+  const population = {
+    tier,
+    universe: discoveredFiles.length,
+    membershipSha256: scanReachMembershipSha256(repoRoot, [...selectedIds]),
+    policySha256: policyDigest(policies),
+    capabilitySha256: testToolchainSha256(),
+  }
   const plan = planVerificationMatrix(
     headSha,
+    population,
     chunks.map((chunk) => ({
       id: `${chunk.resourceClass}-${chunk.index}`,
       files: chunk.files.map((file) => relative(repoRoot, file)),
@@ -149,6 +170,17 @@ if (command === "plan") {
 
 if (command === "aggregate") {
   const plan = parseVerificationMatrixPlan(JSON.parse(readFileSync(requiredArg("--plan"), "utf8")))
+  // The shadow matrix exists to be compared against the monolith. A plan built
+  // for a different tier cannot be that comparison, and before the plan carried
+  // a tier at all nothing could have said so — the planner hardcoded "full"
+  // while the monolith ran "pr", 3,951 files against 3,941.
+  const expectTier = optionalArg("--expect-tier")
+  if (expectTier !== undefined && plan.population.tier !== expectTier) {
+    throw new Error(
+      `[matrix] plan tier "${plan.population.tier}" is not the "${expectTier}" this ` +
+        "aggregation was asked to compare; refusing to report an equality that cannot hold",
+    )
+  }
   const receiptsDir = requiredArg("--receipts")
   const receiptPaths = readdirSync(receiptsDir)
     .filter((name) => name.endsWith(".receipt.json"))

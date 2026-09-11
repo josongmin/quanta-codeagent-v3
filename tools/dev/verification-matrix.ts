@@ -11,10 +11,36 @@ export type MatrixChunk = {
   readonly intraParallel: number
 }
 
+/**
+ * What the matrix and the monolith must agree about before their verdicts can
+ * be compared.
+ *
+ * TVH item 9. The monolith ran with `QUANTA_VERIFICATION_TIER: pr` and the
+ * planner hardcoded the literal `"full"` — measured, 3,941 files against 3,951
+ * — so "matrix equals monolith" was never a statement that could be true. The
+ * plan carried a HEAD and a chunk list and nothing that would have shown it.
+ *
+ * v4 carries the tier and the population identity, so a comparison against the
+ * wrong tier is a named refusal rather than a quiet mismatch nobody attributes.
+ */
+export interface MatrixPopulation {
+  /** The tier this plan SELECTED. Not the suite, and never assumed. */
+  readonly tier: string
+  /** Files the suite roots yielded BEFORE tier selection. */
+  readonly universe: number
+  /** sha256 over the sorted selected ids — the set, comparable in one field. */
+  readonly membershipSha256: string
+  /** Digest of the tier-assignment policy that produced the selection. */
+  readonly policySha256: string
+  /** Host capability fingerprint, so two runners are distinguishable. */
+  readonly capabilitySha256: string
+}
+
 export type VerificationMatrixPlan = {
-  readonly schema: "quanta.verification-matrix.v3"
+  readonly schema: "quanta.verification-matrix.v4"
   readonly headSha: string
   readonly planSha256: string
+  readonly population: MatrixPopulation
   readonly chunks: readonly MatrixChunk[]
 }
 
@@ -70,19 +96,52 @@ const canonicalChunks = (chunks: readonly MatrixChunk[]): readonly MatrixChunk[]
     })
 }
 
-const planIdentity = (headSha: string, chunks: readonly MatrixChunk[]): string =>
-  digest(JSON.stringify({ headSha, chunks }))
+const planIdentity = (
+  headSha: string,
+  population: MatrixPopulation,
+  chunks: readonly MatrixChunk[],
+): string => digest(JSON.stringify({ headSha, population, chunks }))
+
+const SHA256 = /^[0-9a-f]{64}$/
+
+/** Fewest files a matrix plan may claim to cover. */
+export const MATRIX_PLAN_FILE_FLOOR = 100
 
 export const planVerificationMatrix = (
   headSha: string,
+  population: MatrixPopulation,
   chunks: readonly MatrixChunk[],
 ): VerificationMatrixPlan => {
   if (!/^[0-9a-f]{40}$/.test(headSha)) throw new Error("matrix plan requires an exact HEAD SHA")
+  if (population.tier === "") throw new Error("matrix plan requires a tier")
+  for (const [field, value] of [
+    ["membershipSha256", population.membershipSha256],
+    ["policySha256", population.policySha256],
+    ["capabilitySha256", population.capabilitySha256],
+  ] as const) {
+    if (!SHA256.test(value)) throw new Error(`matrix plan ${field} must be a sha256`)
+  }
   const canonical = canonicalChunks(chunks)
+  // ANTI-VACUUM FLOOR. A plan over one file is shaped exactly like a real one,
+  // aggregates to a green, and proves nothing — the same zero-coverage green
+  // the capability floors exist for, one layer up. The universe must also
+  // exceed what was selected or the "population" is a fiction.
+  const selected = canonical.reduce((total, chunk) => total + chunk.files.length, 0)
+  if (selected < MATRIX_PLAN_FILE_FLOOR) {
+    throw new Error(
+      `matrix plan covers ${selected} file(s); floor is ${MATRIX_PLAN_FILE_FLOOR}`,
+    )
+  }
+  if (population.universe < selected) {
+    throw new Error(
+      `matrix plan universe ${population.universe} is smaller than the ${selected} it selected`,
+    )
+  }
   return {
-    schema: "quanta.verification-matrix.v3",
+    schema: "quanta.verification-matrix.v4",
     headSha,
-    planSha256: planIdentity(headSha, canonical),
+    population,
+    planSha256: planIdentity(headSha, population, canonical),
     chunks: canonical,
   }
 }
@@ -90,11 +149,14 @@ export const planVerificationMatrix = (
 export const parseVerificationMatrixPlan = (value: unknown): VerificationMatrixPlan => {
   if (typeof value !== "object" || value === null) throw new Error("invalid matrix plan")
   const row = value as Partial<VerificationMatrixPlan>
-  if (row.schema !== "quanta.verification-matrix.v3") throw new Error("invalid matrix plan schema")
+  if (row.schema !== "quanta.verification-matrix.v4") throw new Error("invalid matrix plan schema")
   if (typeof row.headSha !== "string" || !Array.isArray(row.chunks)) {
     throw new Error("invalid matrix plan fields")
   }
-  const rebuilt = planVerificationMatrix(row.headSha, row.chunks)
+  if (typeof row.population !== "object" || row.population === null) {
+    throw new Error("invalid matrix plan population")
+  }
+  const rebuilt = planVerificationMatrix(row.headSha, row.population, row.chunks)
   if (row.planSha256 !== rebuilt.planSha256) throw new Error("matrix plan digest mismatch")
   return rebuilt
 }

@@ -61,6 +61,7 @@ jobs:
         name: freeze exact-HEAD matrix plan
         run: >-
           bun run tools/dev/verification-matrix-cli.ts plan
+          --tier=pr
           --out=.cache/verification-matrix/plan.json
           --github-output="$GITHUB_OUTPUT"
       - name: upload exact plan
@@ -146,8 +147,15 @@ jobs:
           path: .cache/verification-matrix/receipts
           merge-multiple: true
       - name: aggregate exact membership and JUnit receipts
+        # `--expect-tier` is the whole point of the shadow matrix: it exists to
+        # be compared against the monolith, which runs QUANTA_VERIFICATION_TIER
+        # `pr` in the full-suite job below. The planner used to hardcode `full`
+        # — 3,951 files against the monolith's 3,941 — so "the matrix agrees
+        # with the monolith" was never a claim that could be true, and nothing
+        # in the plan would have shown it.
         run: >-
           bun run tools/dev/verification-matrix-cli.ts aggregate
+          --expect-tier=pr
           --plan=.cache/verification-matrix/plan/plan.json
           --receipts=.cache/verification-matrix/receipts
           --out=.cache/verification-matrix/aggregate.json
