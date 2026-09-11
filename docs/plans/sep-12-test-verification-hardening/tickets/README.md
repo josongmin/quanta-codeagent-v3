@@ -122,3 +122,54 @@ affected/changed selector가 어떤 gate에도 연결되지 않은 상태에서�
 - TVH-11 / TVH-15는 별도 lane에서 진행 중(미커밋).
 - `lint:debt`가 현재 RED — 원인은 전부 진행 중 lane 파일.
 - hosted CI 증거는 없다. Actions 빌링 차단이 2026-07-10부터 유효하므로 hosted receipt는 외부 blocker다.
+
+---
+
+## 헬어딧 결과 (2026-09-12)
+
+`85a99bb6f..HEAD` 범위에 적대 어딧 2라운드를 돌렸다.
+
+### R1 — 적대 어딧 (10건)
+
+| # | 심각도 | 내용 | 처리 |
+|---|---|---|---|
+| F1 | HIGH | **main이 RED였다.** 내가 `c7e91b306`에 넣은 docstring이 `await main()`을 `const main =`보다 앞 offset에 두면서 slice가 음수 길이가 됐고, `mainSource`가 `""`가 되어 drain-before-release·signal handler·repository-lane 직렬화 **가드 3개가 빈 문자열 위를 통과**했다 | `137fb6e60` |
+| F2 | MED-HIGH | discovery enumeration 카운터가 계측이 아니었다. 호출부 옆의 리터럴 `+= 1`이라 projection을 통째로 되돌려도 13/13 green. "4→1, 타이머가 아니라 단언" 주장은 거짓이었다 | `137fb6e60` |
+| F3 | MED-HIGH | tier floor가 **실제 corpus 유실을 "선택 축소"로 오귀속**했다. suite floor 3,600과 tier floor 3,900 사이 300 구간에서 `selected === discovered`인데도 "SELECTION shrink, not corpus loss"를 출력 | `137fb6e60` |
+| F4 | MED | `readRef`가 git exit code를 무시했다. `origin/main`이 없는 체크아웃에서 `baseOid`에 git의 4줄 fatal 메시지가 저장됐고, 주변 `try/catch`는 전부 죽은 코드였다 | `137fb6e60` |
+| F5 | MED | `baseOid`가 커밋 메시지의 주장과 달리 아무도 소비하지 않는다 | 커밋 메시지 정정 |
+| F6 | MED | split 전략 선택 근거 표가 receipt에 영향 없는 양을 측정했다(`treeSha256`이 어차피 전 chunk를 무효화) | 커밋 메시지 정정 |
+| F7 | MED-LOW | link-local 가드가 production `src/**/*.ts` 3,435개를 스캔하지 않는다 | 미처리(열림) |
+| F8 | MED-LOW | 분류기가 `Image().src=`, XHR `.open()`, `location.href=`, `importScripts`를 놓친다 | 미처리(열림) |
+| F9 | LOW | `.toBe(10)` 스냅샷 + `test:pollution`/`eval:retrieval`/`e2e:pty` 미커버 | `137fb6e60` |
+| F10 | LOW | over-capacity split이 locale 의존 비교자를 썼다 | `137fb6e60` |
+
+### R2 — 뮤테이션 어딧 (155 뮤턴트, 27 생존)
+
+kill 요약: `process-observer` 13/13, `test-shard-discovery` 7/7, `worker-home` 3/3,
+`test-shard-options` 2/2, `gate.ts` 3/3, `test-shard-lifecycle` 18/19.
+
+HIGH 생존자 4건 + MEDIUM 3건을 `6e9f4f5ca`에서 닫았다.
+
+- `$`shell`` egress가 SSRF 가드를 통과했다(`SHELL_TAGS` 비워도 12/12 green).
+- 문서 어디든 skip이 있으면 **block-form case 전부가 미실행으로 읽혔다**. 모든 fixture의
+  실행 case가 self-closing이라 body 분기에 들어간 적이 없었다. `executedCases`는 required가
+  게이트하는 바로 그 값이다.
+- **dirty tree에서 만든 receipt가 재사용 가능했다.** context 비교는 receipt↔current만 보고,
+  바뀌지 않은 dirt는 자기 자신과 완벽히 일치한다.
+- campaign receipt의 새 필드 4개가 **producer 미검증**이었다. 한 시간 대기한 런이
+  `headMovedInQueue: false`를 보고해도 아무도 몰랐다.
+- `loadTierPopulationFloors`가 `minFiles`/`reason`/schema를 하나도 검증하지 않았다.
+- `CapabilityFloor`의 file floor가 미검증이라 `executedCases: 5, executedFiles: []`가 통과했다.
+- `assertGateManifestMatchesContract`는 호출부 0의 죽은 가드 — 테스트가 아니라 **삭제**했다.
+
+### 아직 열린 어딧 항목
+
+- F7/F8: link-local 분류기의 production 소스 미스캔과 4개 egress 형태 미탐지.
+- LL-b/c/e/f/h: 분류기의 **정밀도** 규칙(데이터를 데이터로 유지하는 쪽) 5건이 미검증.
+- `verification-receipt` VR-13: `homeCapabilitySha256` payload에 `home` 자체가 빠져 있어
+  내부 레이아웃이 같은 두 HOME이 동일 해시가 된다.
+- `test-shard-lifecycle` LC-13: `maxPollMs < pollMs`면 스케줄이 뒤집힌다.
+- **방법론 플래그**: `waitForEmptyGroup`의 wall deadline을 지우는 뮤턴트는 **hang으로만** 드러난다.
+  `bun test`에는 워치독이 없어 "아직 실행 중"과 구분되지 않는다. 이 뮤턴트가 공유 트리로
+  새어나가 다른 레인의 kill path를 실제로 멈춰 세웠다.
