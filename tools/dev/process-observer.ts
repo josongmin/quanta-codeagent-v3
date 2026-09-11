@@ -524,6 +524,34 @@ export interface PollSchedule {
  */
 export const DEFAULT_POLL_SCHEDULE: PollSchedule = { initialMs: 50, maxMs: 3_000, factor: 2 }
 
+/**
+ * Build a schedule that cannot poll faster than it was asked to.
+ *
+ * The invariant `maxMs >= initialMs` was held by a `Math.max` REPEATED at each
+ * of the two call sites, so a third caller inherited nothing. An inverted pair
+ * does not error and does not slow down — `nextPollDelay` returns `maxMs` on
+ * every attempt, so `{ initialMs: 3_000, maxPollMs: 50 }` reads as "poll
+ * rarely" and executes as "poll 60x more often", spending the snapshot budget
+ * this module exists to bound. A `factor` below 1 is the same defect in the
+ * other term: delays shrink with each attempt instead of backing off.
+ *
+ * Clamped, not rejected, because the only caller is a process-group drain and
+ * an exception there abandons the cleanup. The values that CANNOT be clamped
+ * into a terminating loop do throw: a non-finite or non-positive `initialMs`
+ * makes `pollTickCount` accumulate NaN and spin forever.
+ */
+export const pollSchedule = (overrides: Partial<PollSchedule> = {}): PollSchedule => {
+  const initialMs = overrides.initialMs ?? DEFAULT_POLL_SCHEDULE.initialMs
+  if (!Number.isFinite(initialMs) || initialMs <= 0) {
+    throw new Error(`poll schedule: initialMs must be a positive finite number, got ${initialMs}`)
+  }
+  const requestedMax = overrides.maxMs ?? DEFAULT_POLL_SCHEDULE.maxMs
+  const maxMs = Number.isFinite(requestedMax) ? Math.max(initialMs, requestedMax) : initialMs
+  const requestedFactor = overrides.factor ?? DEFAULT_POLL_SCHEDULE.factor
+  const factor = Number.isFinite(requestedFactor) ? Math.max(1, requestedFactor) : 1
+  return { initialMs, maxMs, factor }
+}
+
 export const nextPollDelay = (attempt: number, schedule: PollSchedule): number => {
   const raw = schedule.initialMs * schedule.factor ** Math.max(0, attempt)
   return Math.max(1, Math.round(Math.min(schedule.maxMs, raw)))

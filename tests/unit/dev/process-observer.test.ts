@@ -17,6 +17,8 @@
  */
 
 import { describe, expect, test } from "bun:test"
+import { readFileSync } from "node:fs"
+import { resolve } from "node:path"
 import {
   createProcessObserver,
   DEFAULT_POLL_SCHEDULE,
@@ -31,6 +33,7 @@ import {
   parseIdentityRow,
   parseProcessRow,
   parseProcessRows,
+  pollSchedule,
   pollTickCount,
   renderProcessRow,
   rowsInGroup,
@@ -39,6 +42,8 @@ import {
   treeRssKib,
   walkDescendants,
 } from "../../../tools/dev/process-observer"
+
+const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..")
 
 /** Verbatim rows from `ps -Ao pid=,ppid=,pgid=,stat=,rss=,pcpu=,etime=,lstart=,comm=`. */
 const REAL_ROWS = [
@@ -436,4 +441,79 @@ describe("process-observer — the TARGETED identity probe carries its own witne
     expect(observer.identity(gone)).toEqual({ kind: "leader-exited" })
     await Promise.resolve()
   }, 15_000)
+})
+
+/**
+ * LC-13 — the `maxMs >= initialMs` invariant lived as a `Math.max` repeated at
+ * each call site, so it protected the two callers that remembered it and no
+ * one else.
+ *
+ * The failure is not an error and not a slowdown, which is why it stayed open:
+ * with `maxMs < initialMs` every attempt returns `maxMs`, so a schedule written
+ * to mean "poll rarely" executes as "poll far more often" and spends exactly
+ * the snapshot budget this module was built to bound — the same budget a
+ * 70-second drain cut from ~1,400 observations to ~35.
+ */
+describe("pollSchedule", () => {
+  test("an inverted pair is clamped, not silently honoured as a faster poll", () => {
+    const inverted = pollSchedule({ initialMs: 3_000, maxMs: 50 })
+    expect(inverted).toEqual({ initialMs: 3_000, maxMs: 3_000, factor: 2 })
+
+    // The defect, stated as cost: over a 70-second window the unclamped pair
+    // buys far more observations than the schedule it was written to describe.
+    const raw = { initialMs: 3_000, maxMs: 50, factor: 2 }
+    expect(pollTickCount(70_000, raw)).toBeGreaterThan(1_000)
+    expect(pollTickCount(70_000, inverted)).toBeLessThanOrEqual(30)
+  })
+
+  test("a factor below 1 backs OFF rather than accelerating", () => {
+    // factor 0: attempt 0 still yields 50ms (`0 ** 0 === 1`), and every attempt
+    // after it yields 0, which `nextPollDelay`'s 1ms floor turns into a 1ms
+    // spin — 1 + 950 observations to cover one second.
+    expect(pollTickCount(1_000, { initialMs: 50, maxMs: 3_000, factor: 0 })).toBe(951)
+    expect(pollSchedule({ factor: 0 }).factor).toBe(1)
+    expect(pollSchedule({ factor: 0.5 }).factor).toBe(1)
+    expect(pollTickCount(1_000, pollSchedule({ factor: 0 }))).toBe(20)
+  })
+
+  test("values that cannot terminate a loop throw instead of clamping", () => {
+    // `pollTickCount` accumulates NaN and `elapsed < windowMs` never holds.
+    for (const initialMs of [Number.NaN, Number.POSITIVE_INFINITY, 0, -50]) {
+      expect(() => pollSchedule({ initialMs }), `initialMs ${initialMs}`).toThrow(
+        /positive finite number/,
+      )
+    }
+    // A non-finite ceiling has a safe reading — "no ceiling beyond the first
+    // interval" — so it clamps rather than aborting a drain in progress.
+    expect(pollSchedule({ initialMs: 50, maxMs: Number.NaN })).toEqual({
+      initialMs: 50,
+      maxMs: 50,
+      factor: 2,
+    })
+    expect(pollSchedule({ factor: Number.NaN }).factor).toBe(1)
+  })
+
+  test("the defaults survive the constructor unchanged", () => {
+    // ANTI-VACUITY: a constructor that returned a constant would satisfy the
+    // clamping arms above too.
+    expect(pollSchedule()).toEqual(DEFAULT_POLL_SCHEDULE)
+    expect(pollSchedule({ initialMs: 10, maxMs: 200, factor: 3 })).toEqual({
+      initialMs: 10,
+      maxMs: 200,
+      factor: 3,
+    })
+  })
+
+  test("both production drains build their schedule through it", () => {
+    // The repeated `Math.max` is what made LC-13 reachable. A third caller must
+    // inherit the invariant instead of re-deriving it.
+    for (const file of ["tools/dev/test-shard-lifecycle.ts", "tools/dev/bounded-child.ts"]) {
+      const source = readFileSync(resolve(REPO_ROOT, file), "utf8")
+      expect({ file, uses: source.includes("pollSchedule(") }).toEqual({ file, uses: true })
+      expect({ file, rederives: /Math\.max\([^)]*[Ii]nitialMs/.test(source) }).toEqual({
+        file,
+        rederives: false,
+      })
+    }
+  })
 })

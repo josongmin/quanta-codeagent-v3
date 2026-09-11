@@ -1,7 +1,6 @@
 import { spawn } from "node:child_process"
 import { rmSync } from "node:fs"
 import {
-  DEFAULT_POLL_SCHEDULE,
   defaultProcessObserver,
   hasRunningMemberRows,
   type LeaderIdentity,
@@ -10,6 +9,7 @@ import {
   type PollSchedule,
   type ProcessObserver,
   type ProcessSnapshot,
+  pollSchedule,
   renderProcessRow,
   rowsInGroup,
   type SnapshotUnavailableReason,
@@ -186,14 +186,11 @@ export const processGroupHoldsResources = (
   deps: Partial<ProcessLifecycleDeps> = {},
 ): boolean => probeGroup(pgid, resolveProcessLifecycleDeps(deps)).kind !== "empty"
 
-const scheduleFor = (options: KillProcessTreeOptions): PollSchedule => {
-  const initialMs = options.pollMs ?? DEFAULT_POLL_SCHEDULE.initialMs
-  return {
-    initialMs,
-    maxMs: Math.max(initialMs, options.maxPollMs ?? DEFAULT_POLL_SCHEDULE.maxMs),
-    factor: DEFAULT_POLL_SCHEDULE.factor,
-  }
-}
+const scheduleFor = (options: KillProcessTreeOptions): PollSchedule =>
+  pollSchedule({
+    ...(options.pollMs === undefined ? {} : { initialMs: options.pollMs }),
+    ...(options.maxPollMs === undefined ? {} : { maxMs: options.maxPollMs }),
+  })
 
 /**
  * Poll until the group empties or the deadline passes.

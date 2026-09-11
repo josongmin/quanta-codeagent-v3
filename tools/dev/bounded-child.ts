@@ -80,11 +80,11 @@
 
 import { spawn } from "node:child_process"
 import {
-  DEFAULT_POLL_SCHEDULE,
   DEFAULT_SNAPSHOT_TIMEOUT_MS,
   defaultProcessObserver,
   nextPollDelay,
   type ProcessObserver,
+  pollSchedule,
   rowsInGroup,
 } from "./process-observer"
 import {
@@ -275,10 +275,7 @@ const waitForEmptyGroup = async (
   deadline: number,
   context: ReaperContext,
 ): Promise<KillTreeOutcome> => {
-  const schedule = {
-    ...DEFAULT_POLL_SCHEDULE,
-    maxMs: Math.max(DEFAULT_POLL_SCHEDULE.initialMs, context.limits.maxPollMs),
-  }
+  const schedule = pollSchedule({ maxMs: context.limits.maxPollMs })
   for (let attempt = 0; ; attempt += 1) {
     if (!context.groupAlive(pgid)) return { kind: "emptied" }
     const probe = probeGroupFromSnapshot(context.observer.snapshot(), pgid)
