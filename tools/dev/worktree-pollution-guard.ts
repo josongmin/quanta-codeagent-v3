@@ -98,17 +98,55 @@ export const appearedDuring = (
   after: ReadonlySet<string>,
 ): readonly string[] => [...after].filter((p) => !before.has(p)).sort()
 
+/**
+ * How long the baseline `git status` may take.
+ *
+ * It was unbounded. `git status` is normally milliseconds, but it blocks on
+ * `.git/index.lock` while another process holds it, and this repository is
+ * routinely worked by concurrent sessions — a contended lock was observed during
+ * this campaign. An unbounded sync spawn there wedges the guard, and with it the
+ * gate it wraps, with no output at all. Generous enough that a cold status on a
+ * large tree is never the reason.
+ */
+const STATUS_TIMEOUT_MS = 60_000
+
+/**
+ * Typed so a HANG is distinguishable from a FAILURE.
+ *
+ * Both fail closed — without a baseline the guard cannot tell "nothing leaked"
+ * from "we never looked" — but they need different messages, because one is
+ * "git is broken here" and the other is "something else is holding the lock".
+ */
+export type StatusFailure =
+  | { readonly kind: "exit"; readonly code: number; readonly stderr: string }
+  | { readonly kind: "timeout"; readonly timeoutMs: number }
+
+export const describeStatusFailure = (failure: StatusFailure): string =>
+  failure.kind === "timeout"
+    ? `worktree-pollution-guard: \`git status\` did not return within ${failure.timeoutMs}ms. ` +
+      "Another process is most likely holding .git/index.lock; the guard cannot take a " +
+      "baseline, and no baseline is not the same as no pollution."
+    : `worktree-pollution-guard: \`git status\` failed (exit ${failure.code}): ${failure.stderr}`
+
 const snapshot = (): ReadonlySet<string> => {
   const proc = Bun.spawnSync(["git", "status", "--porcelain=v1", "-uall", "-z"], {
     cwd: repoRoot,
     stdout: "pipe",
     stderr: "pipe",
+    timeout: STATUS_TIMEOUT_MS,
   })
+  // A timed-out spawnSync reports `exitCode: null` with a signal, which the old
+  // `!== 0` check would have blamed on git.
+  if (proc.exitCode === null) {
+    throw new Error(describeStatusFailure({ kind: "timeout", timeoutMs: STATUS_TIMEOUT_MS }))
+  }
   if (proc.exitCode !== 0) {
-    // Fail CLOSED: without a baseline the guard cannot distinguish "nothing
-    // leaked" from "we never looked", and the second must not read as a pass.
     throw new Error(
-      `worktree-pollution-guard: \`git status\` failed (exit ${proc.exitCode}): ${proc.stderr.toString().trim()}`,
+      describeStatusFailure({
+        kind: "exit",
+        code: proc.exitCode,
+        stderr: proc.stderr.toString().trim(),
+      }),
     )
   }
   return parseUntracked(proc.stdout.toString())
