@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { GATES } from "../../../tools/dev/gate-manifest"
 import { testEnvironmentSha256 } from "../../../tools/dev/test-shard-receipt"
 import {
   ABSENT_BASE_OID,
@@ -20,6 +21,10 @@ import {
   verificationReceiptPath,
   verificationToolchainSha256,
 } from "../../../tools/dev/verification-receipt"
+import {
+  assertClosedDispatchSchema,
+  verificationManifestSha256,
+} from "../../../tools/dev/verification-receipt-probe"
 
 /** A root with no dotenv files, so the dotenv half of the fingerprint is a
  *  constant and these comparisons stay about the ENV half. */
@@ -442,5 +447,73 @@ describe("a dirty checkout can never mint a reusable receipt", () => {
     // Without this arm, "always refuse" satisfies both assertions above.
     const receipt = mintExactVerificationReceipt(context(), 1_000, 5_000)
     expect(validateExactVerificationReceipt(receipt, context(), 2_000)).toEqual({ ok: true })
+  })
+})
+
+/**
+ * TVH item 11 — the manifest digest hashed the fields somebody destructured.
+ *
+ * Six fields were named in a destructuring pattern. `needsQuietBox` was not one
+ * of them, and it changes DISPATCH: a gate carrying it makes the runner wait
+ * for the box to go quiet before starting. So adding or removing it produced a
+ * manifest the receipt called identical, and a green minted under one dispatch
+ * policy replayed under another.
+ *
+ * Destructuring is exactly how that happens — a new field is simply not
+ * mentioned, and nothing notices.
+ */
+describe("the dispatch schema is a closed universe", () => {
+  const gate = (overrides: Record<string, unknown> = {}) =>
+    ({ id: "a", stage: "precommit", run: "true", why: "because", ...overrides }) as never
+
+  test("EVERY dispatch field moves the digest when it is toggled", () => {
+    const base = verificationManifestSha256([gate()])
+    const toggles: Readonly<Record<string, unknown>> = {
+      id: "b",
+      stage: "prepush",
+      run: "false",
+      consumes: "producer",
+      hostDependent: "docker",
+      notInWorkflow: "local only",
+      needsQuietBox: "a toolchain that loses to contention",
+    }
+    for (const [field, value] of Object.entries(toggles)) {
+      expect({
+        field,
+        moved: verificationManifestSha256([gate({ [field]: value })]) !== base,
+      }).toEqual({ field, moved: true })
+    }
+  })
+
+  test("a NON-dispatch field does not — rewording a reason is not a new manifest", () => {
+    // The other half of "closed": the exclusions are deliberate, not an
+    // accident of what someone remembered to hash. Without this arm, hashing
+    // the whole object would satisfy the test above and invalidate a green
+    // campaign every time a comment changed.
+    const base = verificationManifestSha256([gate()])
+    expect(verificationManifestSha256([gate({ why: "a different explanation" })])).toBe(base)
+  })
+
+  test("a field in NO dispatch class is a schema error, not a silent omission", () => {
+    // The shape a hand-edited manifest or a widened type produces first: data
+    // carries a key the classification does not know about.
+    expect(() => verificationManifestSha256([gate({ retries: 3 })])).toThrow(
+      /gate field\(s\) retries are in no dispatch class/,
+    )
+    expect(() => assertClosedDispatchSchema([gate({ timeoutMs: 1, outputBudget: 2 })])).toThrow(
+      /outputBudget, timeoutMs/,
+    )
+    // ANTI-VACUITY: the real manifest passes, so this is a guard and not a ban.
+    expect(() => assertClosedDispatchSchema([...GATES])).not.toThrow()
+    expect(verificationManifestSha256([...GATES])).toMatch(/^[0-9a-f]{64}$/)
+  })
+
+  test("the REAL manifest's digest depends on its quiet-box gate", () => {
+    // Wiring, not a fixture: the shipped manifest has a gate that declares
+    // needsQuietBox, and dropping it must move the identity.
+    const real = [...GATES]
+    expect(real.some((row) => row.needsQuietBox !== undefined)).toBe(true)
+    const stripped = real.map(({ needsQuietBox: _drop, ...rest }) => rest as never)
+    expect(verificationManifestSha256(stripped)).not.toBe(verificationManifestSha256(real))
   })
 })
