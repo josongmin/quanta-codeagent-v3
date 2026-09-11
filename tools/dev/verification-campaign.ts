@@ -4,8 +4,10 @@ import { basename, dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { describeQuietBoxWait, quietBoxBudgetMs, waitForQuietBox } from "./box-load"
 import { gatesForStage } from "./gate-manifest"
+import { type LeaseQuarantineRecord, quarantineLane, quarantinePath } from "./lease-quarantine"
 import {
   acquireTestShardLease,
+  normalizeRepositoryIdentity,
   readCommittedRepositoryLeaseId,
   selectRepositoryLeaseIdentity,
   type TestShardLease,
@@ -17,6 +19,7 @@ import { ADMISSION_DEADLINE_ENV } from "./verification-admission"
 import {
   buildCampaignReceipt,
   type CampaignOutcome,
+  type CampaignQuarantine,
   sampleCampaignHost,
   writeCampaignReceipt,
 } from "./verification-campaign-receipt"
@@ -47,6 +50,8 @@ const LEASE_OWNER_SIDECAR = join(sharedVerificationCacheRoot(REPO_ROOT), "lease-
 // Diagnostic history, one file per campaign outcome. Never read to decide
 // whether to re-run — that is the exact receipt's job.
 const CAMPAIGN_RECEIPT = join(sharedVerificationCacheRoot(REPO_ROOT), "last-campaign.json")
+const QUARANTINE_PATH = quarantinePath(sharedVerificationCacheRoot(REPO_ROOT))
+let quarantineRecord: LeaseQuarantineRecord | undefined
 
 const capture = (args: readonly string[]): { readonly code: number; readonly text: string } => {
   const result = Bun.spawnSync([...args], { cwd: REPO_ROOT, stdout: "pipe", stderr: "pipe" })
@@ -216,6 +221,7 @@ const recordCampaign = (input: {
   readonly cancellationReason?: string
   readonly drained: boolean
   readonly survivingGroups: readonly number[]
+  readonly quarantine?: CampaignQuarantine
 }): void => {
   writeCampaignReceipt(
     CAMPAIGN_RECEIPT,
@@ -239,6 +245,7 @@ const recordCampaign = (input: {
         : { cancellationReason: input.cancellationReason }),
       drained: input.drained,
       survivingGroups: input.survivingGroups,
+      ...(input.quarantine === undefined ? {} : { quarantine: input.quarantine }),
       hostAtStart,
       hostAtEnd: sampleCampaignHost(),
     }),
@@ -405,6 +412,19 @@ try {
       `[verification] INVALID — campaign group(s) unaccounted for: ${outcome.survivors.join(", ")}; ` +
         "refusing to bless this campaign\n",
     )
+    // ...and HOLD the lane. Refusing to bless a campaign while handing the
+    // next contender a checkout whose ports, HOME and worktrees are still in
+    // use is the weaker half of the same rule. Written before `release()`
+    // below: the kernel frees the port the moment this process exits, so a
+    // record written afterwards has a window a contender can win.
+    if (outcome.groups.length > 0) {
+      quarantineRecord = quarantineLane({
+        path: QUARANTINE_PATH,
+        repositoryId: normalizeRepositoryIdentity(identity),
+        groups: outcome.groups,
+        log: (line) => process.stderr.write(line),
+      })
+    }
   }
   // A signal path already wrote its own receipt and exits; do not overwrite it.
   if (!terminating) {
@@ -413,6 +433,15 @@ try {
       exitCode: campaignExitCode,
       drained: outcome.drained,
       survivingGroups: outcome.survivors,
+      ...(quarantineRecord === undefined
+        ? {}
+        : {
+            quarantine: {
+              keeperPid: quarantineRecord.keeperPid,
+              expiresAtMs: quarantineRecord.expiresAtMs,
+              groups: quarantineRecord.survivors,
+            },
+          }),
     })
   }
   removeOwnerSidecar()

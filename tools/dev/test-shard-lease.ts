@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs"
 import { createConnection } from "node:net"
 import { join } from "node:path"
+import { clearLeaseQuarantine, quarantineVerdict, readLeaseQuarantine } from "./lease-quarantine"
 
 const LEASE_HOST = "127.0.0.1"
 const LEASE_PORT_BASE = 42_000
@@ -65,6 +66,15 @@ export interface TestShardLeaseOptions {
   readonly onWait?: (port: number, elapsedMs: number) => void
   /** Aborting cancels the WAIT (never an already-acquired lease). */
   readonly signal?: AbortSignal
+  /**
+   * Where to look for a quarantine left by a campaign that could not account
+   * for its workers. Omitted ⇒ no quarantine gate, which is the right default
+   * for the keyed resource leases; the REPOSITORY lane passes it.
+   */
+  readonly quarantinePath?: string
+  /** Injected so the gate is testable without a real process tree. */
+  readonly isGroupAlive?: (pgid: number) => boolean
+  readonly onQuarantineWait?: (reason: string) => void
 }
 
 export interface RepositoryIdentityInputs {
@@ -272,6 +282,42 @@ export const acquireTestShardLease = async (
   acquireRawTestShardLease(normalizeRepositoryIdentity(options.identity), options)
 
 /**
+ * `undefined` when the lane is takeable; otherwise the reason it is not.
+ *
+ * A stale record is REMOVED here rather than merely ignored: leaving it behind
+ * means every future contender re-derives the same "actually it is fine"
+ * answer, and the first one to crash mid-check leaves it looking authoritative
+ * again.
+ */
+const quarantineBlock = (
+  identity: string,
+  options: Omit<TestShardLeaseOptions, "identity">,
+): string | undefined => {
+  const path = options.quarantinePath
+  if (path === undefined) return undefined
+  const verdict = quarantineVerdict({
+    record: readLeaseQuarantine(path),
+    repositoryId: identity,
+    nowMs: Date.now(),
+    isAlive: options.isGroupAlive ?? defaultGroupAlive,
+  })
+  if (verdict.kind === "blocked") return verdict.reason
+  if (verdict.kind === "stale") clearLeaseQuarantine(path)
+  return undefined
+}
+
+/** `kill(-pgid, 0)`: existence only, no signal delivered. */
+const defaultGroupAlive = (pgid: number): boolean => {
+  try {
+    process.kill(-pgid, 0)
+    return true
+  } catch (error) {
+    // EPERM means it exists and is not ours — still alive, still a hazard.
+    return (error as { code?: string }).code === "EPERM"
+  }
+}
+
+/**
  * Acquire on an identity string EXACTLY as given.
  *
  * `acquireTestShardLease` runs its identity through
@@ -300,8 +346,17 @@ const acquireRawTestShardLease = async (
     if (options.signal?.aborted) {
       throw new Error(`[test:shards] repository lease wait aborted on ${LEASE_HOST}:${port}`)
     }
-    const listener = tryListen(port, digest)
-    if (listener !== undefined) return leaseFromListener(port, listener)
+    // A free PORT is not a free LANE. The previous owner may have exited
+    // without accounting for its workers, and the kernel hands the port back
+    // the moment it does — so the quarantine is checked BEFORE the bind is
+    // accepted, not after.
+    const blocked = quarantineBlock(identity, options)
+    if (blocked === undefined) {
+      const listener = tryListen(port, digest)
+      if (listener !== undefined) return leaseFromListener(port, listener)
+    } else if (Date.now() >= nextHeartbeatAt + startedAt) {
+      options.onQuarantineWait?.(blocked)
+    }
     // Announce the wait BEFORE the (up to 500ms) identity probe, so a waiting
     // contender is visible immediately.
     const elapsedMs = Date.now() - startedAt

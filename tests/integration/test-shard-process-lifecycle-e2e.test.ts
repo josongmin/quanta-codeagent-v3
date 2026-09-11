@@ -279,7 +279,19 @@ describe("shard worker process lifecycle", () => {
     mkdirSync(runRoot, { recursive: true })
     const survivorRegistry = {
       cancelAll: () =>
-        Promise.resolve({ drained: false, survivors: [12345] as const, abandoned: [] as const }),
+        Promise.resolve({
+          drained: false,
+          survivors: [12345] as const,
+          abandoned: [] as const,
+          groups: [
+            {
+              pgid: 12345,
+              leaderPid: -1,
+              verdict: "still-running",
+              detail: "still alive after the drain deadline",
+            },
+          ] as const,
+        }),
     }
     const lines: string[] = []
     const outcome = await drainCampaign({

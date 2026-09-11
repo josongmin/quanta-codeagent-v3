@@ -94,6 +94,24 @@ export interface DrainOutcome {
   /** Groups still holding resources, plus every group we had to abandon. */
   readonly survivors: readonly number[]
   readonly abandoned: readonly AbandonedGroup[]
+  /**
+   * The same groups, carrying what the campaign knew about each.
+   *
+   * `survivors` is a bare pgid list, which is enough to print and not enough to
+   * hand off: a quarantine record has to say WHY a group was left alone
+   * (`recycled` is a different problem from `unverified`, and both differ from
+   * "still running after the drain deadline"), and an operator needs the
+   * leader pid to go look.
+   */
+  readonly groups: readonly DrainedGroupRecord[]
+}
+
+export interface DrainedGroupRecord {
+  readonly pgid: number
+  /** Leader pid at spawn; `-1` when the identity was never resolvable. */
+  readonly leaderPid: number
+  readonly verdict: "still-running" | "recycled" | "unverified"
+  readonly detail: string
 }
 
 /**
@@ -508,10 +526,33 @@ export class ShardProcessRegistry {
     // An abandoned group was never observed empty, so the campaign cannot claim
     // a clean drain — it can only report which groups it had to abandon.
     const abandoned = [...this.abandoned.values()]
+    const leaderPidOf = (pgid: number): number => {
+      const worker = [...this.tracked].find((row) => row.pgid === pgid)
+      if (worker === undefined) return -1
+      return worker.leader.kind === "identity" ? pgid : -1
+    }
     return {
       drained: survivors.length === 0 && abandoned.length === 0,
       survivors: [...survivors, ...abandoned.map((group) => group.pgid)],
       abandoned,
+      groups: [
+        ...survivors.map(
+          (pgid): DrainedGroupRecord => ({
+            pgid,
+            leaderPid: leaderPidOf(pgid),
+            verdict: "still-running",
+            detail: "still alive after the drain deadline",
+          }),
+        ),
+        ...abandoned.map(
+          (group): DrainedGroupRecord => ({
+            pgid: group.pgid,
+            leaderPid: -1,
+            verdict: group.reason,
+            detail: group.detail,
+          }),
+        ),
+      ],
     }
   }
 }

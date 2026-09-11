@@ -17,6 +17,7 @@ import {
   executedFileSetDigest,
   executedFileSetVerdict,
 } from "./executed-file-set"
+import { quarantineLane, quarantinePath } from "./lease-quarantine"
 import { AUTHORITATIVE_SCAN_TIERS, scanReachAuthorityFor } from "./scan-reach-authority"
 import {
   describeWatchdogKill,
@@ -42,6 +43,7 @@ import {
 import {
   acquireTestShardLease,
   inheritedTestShardLeaseState,
+  normalizeRepositoryIdentity,
   readCommittedRepositoryLeaseId,
   selectRepositoryLeaseIdentity,
   type TestShardLease,
@@ -114,6 +116,7 @@ const SCAN_REACH_RECEIPT = join(REPO_ROOT, ".cache", "scan-reach-receipt.json")
 // Shard receipts and timings live in the git-common-dir cache: keyed by exact
 // HEAD + file content + toolchain, a green from any worktree serves them all.
 const SHARED_CACHE_ROOT = sharedVerificationCacheRoot(REPO_ROOT)
+const QUARANTINE_PATH = quarantinePath(SHARED_CACHE_ROOT)
 const SHARD_CACHE_ROOT = join(SHARED_CACHE_ROOT, "test-shards", "v3")
 const TIMING_STORE = join(SHARED_CACHE_ROOT, "test-timings-v2.json")
 
@@ -1181,6 +1184,7 @@ const main = async (): Promise<void> => {
     )
   }
   let lease: TestShardLease | undefined
+  let leaseIdentity: string | undefined
   if (inheritedLease === "valid") {
     process.stdout.write("[test:shards] LEASE inherited scope=whole-campaign\n")
   } else {
@@ -1194,8 +1198,16 @@ const main = async (): Promise<void> => {
       commonDir,
       cwd: process.cwd(),
     })
+    // NORMALISED, like the lease itself: `acquireTestShardLease` runs its
+    // identity through `normalizeRepositoryIdentity` before hashing a port,
+    // so a quarantine written under the raw string is compared against a
+    // different key and never blocks. A behavioural acquisition test caught
+    // that; the source-shaped wiring assertions did not.
+    leaseIdentity = normalizeRepositoryIdentity(identity)
     lease = await acquireTestShardLease({
       identity,
+      quarantinePath: QUARANTINE_PATH,
+      onQuarantineWait: (reason) => process.stdout.write(`[test:shards] WAIT ${reason}\n`),
       onWait: (port, elapsedMs) =>
         process.stdout.write(
           `[test:shards] WAIT repository lease port=${port} elapsed=${Math.round(elapsedMs / 1_000)}s; ` +
@@ -1368,6 +1380,19 @@ const main = async (): Promise<void> => {
         `[test:shards] INVALID — worker group(s) unaccounted for: ${drain.survivors.join(", ")}; ` +
           "refusing to bless this run\n",
       )
+      // The verdict was already honest; the HANDOFF was not. Releasing here
+      // gave the next contender a lane whose ports, HOME and worktrees are
+      // still held by processes this campaign could not account for. Written
+      // BEFORE the release, because the kernel frees the port the instant this
+      // process exits.
+      if (leaseIdentity !== undefined && drain.groups.length > 0) {
+        quarantineLane({
+          path: QUARANTINE_PATH,
+          repositoryId: leaseIdentity,
+          groups: drain.groups,
+          log: (line) => process.stderr.write(line),
+        })
+      }
     }
     lease?.release()
   }

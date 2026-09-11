@@ -22,6 +22,17 @@ import type { VerificationTier } from "./verification-result"
 
 export const CAMPAIGN_RECEIPT_SCHEMA = "quanta.verification-campaign-receipt.v1" as const
 
+export interface CampaignQuarantine {
+  readonly keeperPid: number
+  readonly expiresAtMs: number
+  readonly groups: readonly {
+    readonly pgid: number
+    readonly leaderPid: number
+    readonly verdict: string
+    readonly detail: string
+  }[]
+}
+
 /**
  * `reused` is a real outcome, not a non-event: a campaign that returned on the
  * exact receipt did happen, and leaving it out let `last-campaign.json`
@@ -75,6 +86,17 @@ export interface CampaignReceipt {
   /** Did every worker process group actually empty before release? */
   readonly drained: boolean
   readonly survivingGroups: readonly number[]
+  /**
+   * Present only when the lane was HELD rather than handed on.
+   *
+   * `drained: false` with a bare pgid list said the campaign failed to account
+   * for its workers and said nothing about what happened next — and what
+   * happened next was an unconditional `release()`. The record names the
+   * keeper, the deadline after which the quarantine is treated as a keeper bug
+   * rather than a reason, and each group's identity verdict, because
+   * `recycled` and `unverified` send an operator to different places.
+   */
+  readonly quarantine?: CampaignQuarantine
   readonly hostAtStart: CampaignHostSample
   readonly hostAtEnd: CampaignHostSample
   readonly timing: {
@@ -133,6 +155,7 @@ export const buildCampaignReceipt = (input: {
   readonly cancellationReason?: string
   readonly drained: boolean
   readonly survivingGroups: readonly number[]
+  readonly quarantine?: CampaignQuarantine
   readonly hostAtStart: CampaignHostSample
   readonly hostAtEnd: CampaignHostSample
 }): CampaignReceipt => {
@@ -167,6 +190,7 @@ export const buildCampaignReceipt = (input: {
       : { cancellationReason: input.cancellationReason }),
     drained: input.drained,
     survivingGroups: [...input.survivingGroups],
+    ...(input.quarantine === undefined ? {} : { quarantine: input.quarantine }),
     hostAtStart: input.hostAtStart,
     hostAtEnd: input.hostAtEnd,
     timing,

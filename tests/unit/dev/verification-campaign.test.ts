@@ -32,6 +32,12 @@ const CAMPAIGN_MODULES = [
   "verification-admission.ts",
   "verification-result.ts",
   "test-shard-lease.ts",
+  // The lease now refuses a lane a previous campaign left quarantined, and
+  // both the lease and the campaign import the record. Third time this exact
+  // omission has broken a synthetic campaign in this ticket: the fixture
+  // copies an explicit module list, so a new import here is a RED nobody sees
+  // until the file runs.
+  "lease-quarantine.ts",
   "test-shard-lifecycle.ts",
   // `test-shard-lifecycle` imports the bounded `ps` adapter; without it the
   // scratch campaign cannot even module-load.
@@ -106,6 +112,53 @@ const initCommittedRepo = (root: string): void => {
   writeFileSync(join(root, "tracked.txt"), "baseline\n")
   git(root, ["add", "."])
   git(root, ["commit", "-qm", "fixture"])
+}
+
+/**
+ * CLOSED UNIVERSE — the module list must cover its own import graph.
+ *
+ * The scratch campaign copies an EXPLICIT list into a temp tree, so adding an
+ * import to any module in it produces `Cannot find module` at run time and
+ * nothing before that. This exact omission has broken this fixture three times
+ * in one ticket: `gate-manifest-contract.ts`, then `process-observer.ts`, then
+ * `lease-quarantine.ts`. Each was found by running the file, which is the one
+ * thing a list like this makes easy to skip.
+ *
+ * Derived from the real sources rather than maintained beside them, so the
+ * next import is a named failure instead of a copy that silently lacks it.
+ */
+const RELATIVE_IMPORT = /from\s+"\.\/([A-Za-z0-9_-]+)"/g
+
+/**
+ * TWO entrypoints, because the campaign SPAWNS a gate command: rooting only at
+ * the campaign misses everything `gate.ts` pulls in, and `verification-nightly-
+ * manifest.ts` sat in the list for exactly that reason with no derivation that
+ * explained it.
+ */
+const CAMPAIGN_ENTRYPOINTS = ["verification-campaign.ts", "gate.ts"] as const
+
+/** `gate.ts` is a root, not a copy: the fixture writes its own synthetic gate. */
+const FIXTURE_SUPPLIES = new Set<string>(["gate.ts"])
+
+const campaignImportClosure = (): readonly string[] => {
+  const seen = new Set<string>()
+  const queue = [...CAMPAIGN_ENTRYPOINTS]
+  while (queue.length > 0) {
+    const file = queue.pop() as string
+    if (seen.has(file)) continue
+    seen.add(file)
+    let body: string
+    try {
+      body = readFileSync(source(file), "utf8")
+    } catch {
+      continue
+    }
+    for (const match of body.matchAll(RELATIVE_IMPORT)) {
+      const next = `${match[1] as string}.ts`
+      if (!seen.has(next)) queue.push(next)
+    }
+  }
+  return [...seen].filter((file) => !FIXTURE_SUPPLIES.has(file)).sort()
 }
 
 const copyCampaignOwner = (root: string): string => {
@@ -818,5 +871,29 @@ describe("campaign head is frozen under the lease", () => {
       baseOid: "c".repeat(40),
       moved: true,
     })
+  })
+})
+
+describe("the scratch campaign's module list is closed", () => {
+  test("every module the campaign imports is copied into the fixture", () => {
+    const needed = campaignImportClosure()
+    // ANTI-VACUITY: an empty or trivial closure would satisfy any list.
+    expect(needed.length).toBeGreaterThanOrEqual(CAMPAIGN_MODULES.length)
+    expect(needed).toContain("verification-campaign.ts")
+    expect(needed).toContain("lease-quarantine.ts")
+
+    const copied = new Set(CAMPAIGN_MODULES)
+    const missing = needed.filter((file) => !copied.has(file))
+    expect(
+      missing,
+      `add these to CAMPAIGN_MODULES — the scratch campaign cannot module-load without them:\n  ${missing.join("\n  ")}`,
+    ).toEqual([])
+  })
+
+  test("the list carries nothing the campaign no longer imports", () => {
+    // The other direction: a module dropped from the graph but left in the
+    // list is a copy nobody needs and a claim nobody checks.
+    const needed = new Set(campaignImportClosure())
+    expect(CAMPAIGN_MODULES.filter((file) => !needed.has(file))).toEqual([])
   })
 })
