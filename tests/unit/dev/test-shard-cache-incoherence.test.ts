@@ -178,7 +178,7 @@ const decide = (
   writeSuccessfulTestShardReceiptAtomic({
     path,
     identity: written,
-    executedFiles: 1,
+    executedFileIds: ["tests/unit/a.test.ts"],
     scanReachRecords: [],
     testTimeoutMs: timeouts.wrote ?? BASELINE_TIMEOUT_MS,
     timingObservations: [observation],

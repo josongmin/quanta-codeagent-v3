@@ -287,7 +287,7 @@ describe("missing runner timings are a bounded coverage miss, never an unclearab
         inputScopeSha256: "2".repeat(64),
         producerReceiptsSha256: "3".repeat(64),
       },
-      executedFiles: files.length,
+      executedFileIds: files,
       scanReachRecords: [],
       testTimeoutMs: 120_000,
       timingObservations: files.map((file) => ({

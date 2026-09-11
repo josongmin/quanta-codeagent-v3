@@ -22,9 +22,10 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { executedFileSetDigest } from "../../tools/dev/executed-file-set"
 import {
   loadSuccessfulTestShardReceipt,
   type TestShardCacheIdentity,
@@ -63,7 +64,7 @@ const roundTrip = (
     writeSuccessfulTestShardReceiptAtomic({
       path,
       identity: written,
-      executedFiles: 2,
+      executedFileIds: ["tests/unit/a.test.ts", "tests/unit/b.test.ts"],
       scanReachRecords: [],
       testTimeoutMs: 120_000,
       timingObservations: [],
@@ -90,7 +91,7 @@ describe("shard cache identity — what may and may not invalidate a receipt", (
       writeSuccessfulTestShardReceiptAtomic({
         path,
         identity: identity(),
-        executedFiles: 2,
+        executedFileIds: ["tests/unit/a.test.ts", "tests/unit/b.test.ts"],
         scanReachRecords: [],
         testTimeoutMs: 120_000,
         timingObservations: [],
@@ -210,7 +211,7 @@ describe("shard cache identity — what may and may not invalidate a receipt", (
           filesRunConcurrently: true,
           createdAtMs: 1,
           expiresAtMs: 1 + 24 * 60 * 60_000,
-          executedFiles: 2,
+          executedFileIds: ["tests/unit/a.test.ts", "tests/unit/b.test.ts"],
           scanReachRecords: [],
           receiptSha256: "a".repeat(64),
         })}\n`,
@@ -242,7 +243,7 @@ describe("shard cache identity — what may and may not invalidate a receipt", (
       writeSuccessfulTestShardReceiptAtomic({
         path,
         identity: identity(),
-        executedFiles: 2,
+        executedFileIds: ["tests/unit/a.test.ts", "tests/unit/b.test.ts"],
         scanReachRecords: [],
         testTimeoutMs: 120_000,
         timingObservations: [],
@@ -278,6 +279,196 @@ describe("shard cache identity — what may and may not invalidate a receipt", (
           expectedTestTimeoutMs: 120_000,
         }).kind,
       ).toBe("miss")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+/**
+ * A cache HIT restores a VERDICT. Until v4 it restored a COUNT.
+ *
+ * `executedFiles: number` meant a reused receipt asserted "146 files ran" —
+ * satisfied by 146 of somebody else's files, because the receipt recorded the
+ * plan and never the execution. The schema now carries the ids and a digest
+ * OF those ids, so a hit can be re-checked instead of trusted.
+ */
+describe("cache hit restores the executed SET", () => {
+  const FILES = ["tests/unit/a.test.ts", "tests/unit/b.test.ts"] as const
+
+  /**
+   * Two tamper modes, because the receipt has two layers and they catch
+   * different attacks.
+   *
+   * `tamper` edits the JSON and leaves `receiptSha256` alone: the integrity
+   * signature catches it, and the reason is `integrity`. That layer already
+   * existed and these tests must not claim credit for it.
+   *
+   * `remint` edits the JSON and RE-SIGNS it, which is what a writer with a
+   * regression produces — a receipt that is perfectly self-consistent and
+   * describes an execution that did not happen. Only the executed-set checks
+   * see that one, so it is the shape worth pinning.
+   */
+  const resign = (row: Record<string, unknown>): Record<string, unknown> => {
+    const { receiptSha256: _drop, ...body } = row
+    return { ...body, receiptSha256: Bun.CryptoHasher.hash("sha256", JSON.stringify(body), "hex") }
+  }
+
+  const write = (
+    dir: string,
+    overrides: Record<string, unknown> = {},
+    mode: "tamper" | "remint" = "remint",
+  ): string => {
+    const path = join(dir, "chunk.json")
+    writeSuccessfulTestShardReceiptAtomic({
+      path,
+      identity: identity(),
+      executedFileIds: [...FILES],
+      scanReachRecords: [],
+      testTimeoutMs: 120_000,
+      timingObservations: [],
+      scopeReason: "test",
+    })
+    if (Object.keys(overrides).length > 0) {
+      const row = {
+        ...(JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>),
+        ...overrides,
+      }
+      writeFileSync(path, JSON.stringify(mode === "remint" ? resign(row) : row))
+    }
+    return path
+  }
+
+  const load = (path: string) =>
+    loadSuccessfulTestShardReceipt({ path, expected: identity(), expectedTestTimeoutMs: 120_000 })
+
+  test("a hit carries the ids and a digest that matches them", () => {
+    const dir = mkdtempSync(join(tmpdir(), "shard-cache-set-"))
+    try {
+      const hit = load(write(dir))
+      expect(hit.kind).toBe("hit")
+      if (hit.kind !== "hit") throw new Error("unreachable")
+      expect(hit.receipt.executedFileIds).toEqual([...FILES])
+      expect(hit.receipt.executedDigestSha256).toBe(executedFileSetDigest([...FILES]))
+      expect(hit.receipt.executedDigestSha256).toMatch(/^[0-9a-f]{64}$/)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("an untouched receipt still verifies after a re-sign — the harness is honest", () => {
+    // ANTI-VACUITY for every `remint` arm below: if re-signing did not produce
+    // a receipt the loader accepts, those arms would be testing the harness.
+    const dir = mkdtempSync(join(tmpdir(), "shard-cache-resign-"))
+    try {
+      expect(load(write(dir, { scopeReason: "test" })).kind).toBe("hit")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("an edit WITHOUT re-signing is caught by the integrity layer", () => {
+    const dir = mkdtempSync(join(tmpdir(), "shard-cache-integrity-"))
+    try {
+      const miss = load(write(dir, { executedFileIds: ["tests/unit/x.test.ts"] }, "tamper"))
+      expect(miss.kind).toBe("miss")
+      if (miss.kind !== "miss") throw new Error("unreachable")
+      expect(miss.reason).toBe("integrity")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("SUBSTITUTION at the same count is a MISS, where v3 was a hit", () => {
+    // The whole defect, at the cache layer: two ids, two ids, neither planned.
+    const dir = mkdtempSync(join(tmpdir(), "shard-cache-sub-"))
+    try {
+      const swapped = ["tests/unit/x.test.ts", "tests/unit/y.test.ts"]
+      expect(swapped.length).toBe(FILES.length) // a count check sees no problem
+      const miss = load(write(dir, { executedFileIds: swapped }))
+      // The ids no longer agree with the digest the receipt was signed with.
+      expect(miss.kind).toBe("miss")
+      if (miss.kind !== "miss") throw new Error("unreachable")
+      expect(miss.reason).toBe("executed-digest-mismatch")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("a forged digest over the RIGHT ids is still a miss", () => {
+    const dir = mkdtempSync(join(tmpdir(), "shard-cache-forge-"))
+    try {
+      const miss = load(write(dir, { executedDigestSha256: "9".repeat(64) }))
+      expect(miss.kind).toBe("miss")
+      if (miss.kind !== "miss") throw new Error("unreachable")
+      expect(miss.reason).toBe("executed-digest-mismatch")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("dropping a file is a discovery miss, named as one", () => {
+    const dir = mkdtempSync(join(tmpdir(), "shard-cache-drop-"))
+    try {
+      const miss = load(
+        write(dir, {
+          executedFileIds: ["tests/unit/a.test.ts"],
+          executedDigestSha256: executedFileSetDigest(["tests/unit/a.test.ts"]),
+        }),
+      )
+      expect(miss.kind).toBe("miss")
+      if (miss.kind !== "miss") throw new Error("unreachable")
+      expect(miss.reason).toBe("discovery-mismatch")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("a v3 receipt cannot be read as a v4 proof", () => {
+    // Old receipts carry a count and no ids. They must MISS, not be coerced
+    // into a set-shaped claim they never made.
+    const dir = mkdtempSync(join(tmpdir(), "shard-cache-v3-"))
+    try {
+      const path = write(dir)
+      const row = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>
+      delete row.executedFileIds
+      delete row.executedDigestSha256
+      writeFileSync(
+        path,
+        JSON.stringify({ ...row, schema: "quanta.test-shard-success.v3", executedFiles: 2 }),
+      )
+      expect(load(path).kind).toBe("miss")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("the writer refuses a set that disagrees with the identity it is filed under", () => {
+    const dir = mkdtempSync(join(tmpdir(), "shard-cache-refuse-"))
+    try {
+      const path = join(dir, "chunk.json")
+      const base = {
+        path,
+        identity: identity(),
+        scanReachRecords: [],
+        testTimeoutMs: 120_000,
+        timingObservations: [],
+        scopeReason: "test",
+      } as const
+      // shardFileCount is 2 for `identity()`.
+      expect(() =>
+        writeSuccessfulTestShardReceiptAtomic({
+          ...base,
+          executedFileIds: ["tests/unit/a.test.ts"],
+        }),
+      ).toThrow("refusing to cache")
+      // ...and a set padded to the right LENGTH by repeating one id.
+      expect(() =>
+        writeSuccessfulTestShardReceiptAtomic({
+          ...base,
+          executedFileIds: ["tests/unit/a.test.ts", "tests/unit/a.test.ts"],
+        }),
+      ).toThrow("refusing to cache")
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from "node:fs"
 import { dirname, join, relative } from "node:path"
+import { executedFileSetDigest } from "./executed-file-set"
 import { externalToolchainFingerprint } from "./external-toolchain"
 import { timeoutCompatibility } from "./test-shard-timeout-policy"
 import {
@@ -19,7 +20,7 @@ import {
 import { isVerdictRelevantEnvKey, verdictDotenvSha256 } from "./verdict-env"
 
 export const TEST_SHARD_CACHE_TTL_MS = 24 * 60 * 60_000
-export const TEST_SHARD_RECEIPT_SCHEMA = "quanta.test-shard-success.v3" as const
+export const TEST_SHARD_RECEIPT_SCHEMA = "quanta.test-shard-success.v4" as const
 
 /**
  * How much of the world a chunk's cache identity has to cover.
@@ -73,7 +74,17 @@ export interface SuccessfulTestShardReceipt extends TestShardCacheIdentity {
   readonly schema: typeof TEST_SHARD_RECEIPT_SCHEMA
   readonly createdAtMs: number
   readonly expiresAtMs: number
-  readonly executedFiles: number
+  /**
+   * The EXACT repository-relative ids the worker's JUnit says it ran.
+   *
+   * v3 stored a COUNT. A cache HIT therefore restored the claim "146 files
+   * ran", which 146 of somebody else's files satisfies: the receipt recorded
+   * the plan and never the execution, so nothing downstream could tell. v4
+   * stores the set and checks it against the identity it is filed under.
+   */
+  readonly executedFileIds: readonly string[]
+  /** sha256 over the sorted ids. Checked against the list on every read. */
+  readonly executedDigestSha256: string
   readonly scanReachRecords: readonly ScanReachRecord[]
   /** Compatibility field, NOT identity: the load-derived value this run used. */
   readonly testTimeoutMs: number
@@ -349,8 +360,11 @@ const identityFieldsValid = (row: Record<string, unknown>): boolean =>
 const bodyFieldsValid = (row: Record<string, unknown>): boolean =>
   Number.isSafeInteger(row.createdAtMs) &&
   Number.isSafeInteger(row.expiresAtMs) &&
-  Number.isSafeInteger(row.executedFiles) &&
-  (row.executedFiles as number) >= 1 &&
+  Array.isArray(row.executedFileIds) &&
+  (row.executedFileIds as unknown[]).length >= 1 &&
+  (row.executedFileIds as unknown[]).every((id) => typeof id === "string" && id !== "") &&
+  typeof row.executedDigestSha256 === "string" &&
+  /^[a-f0-9]{64}$/.test(row.executedDigestSha256 as string) &&
   Array.isArray(row.scanReachRecords) &&
   row.scanReachRecords.every(isScanReachRecord) &&
   Number.isSafeInteger(row.testTimeoutMs) &&
@@ -436,8 +450,13 @@ export const loadSuccessfulTestShardReceipt = (input: {
     expectedTestTimeoutMs: input.expectedTestTimeoutMs,
   })
   if (timeout.kind === "incompatible") return { kind: "miss", reason: `timeout-${timeout.reason}` }
-  if (receipt.executedFiles !== receipt.shardFileCount) {
+  if (receipt.executedFileIds.length !== receipt.shardFileCount) {
     return { kind: "miss", reason: "discovery-mismatch" }
+  }
+  // The digest must be OF the list it travels with. A receipt carrying some
+  // other set's digest is how an exact-set claim gets forged after the fact.
+  if (receipt.executedDigestSha256 !== executedFileSetDigest(receipt.executedFileIds)) {
+    return { kind: "miss", reason: "executed-digest-mismatch" }
   }
   const junitProblem = junitShapeMiss(receipt)
   if (junitProblem !== undefined) return { kind: "miss", reason: junitProblem }
@@ -449,7 +468,8 @@ export const loadSuccessfulTestShardReceipt = (input: {
 export interface ShardReceiptWriteInput {
   readonly path: string
   readonly identity: TestShardCacheIdentity
-  readonly executedFiles: number
+  /** Normalized ids from the worker's own JUnit — not the runner's tally. */
+  readonly executedFileIds: readonly string[]
   readonly scanReachRecords: readonly ScanReachRecord[]
   readonly testTimeoutMs: number
   readonly timingObservations: readonly ReceiptTimingRecord[]
@@ -460,9 +480,9 @@ export interface ShardReceiptWriteInput {
 
 const refuseIncompleteReceipt = (input: ShardReceiptWriteInput): void => {
   if (
-    input.executedFiles < 1 ||
-    !Number.isSafeInteger(input.executedFiles) ||
-    input.executedFiles !== input.identity.shardFileCount ||
+    input.executedFileIds.length < 1 ||
+    new Set(input.executedFileIds).size !== input.executedFileIds.length ||
+    input.executedFileIds.length !== input.identity.shardFileCount ||
     input.scanReachRecords.some((record) => !isScanReachRecord(record)) ||
     input.identity.junit !== (input.junitXml !== undefined) ||
     !Number.isSafeInteger(input.testTimeoutMs) ||
@@ -493,7 +513,8 @@ export const writeSuccessfulTestShardReceiptAtomic = (
     ...input.identity,
     createdAtMs,
     expiresAtMs: createdAtMs + TEST_SHARD_CACHE_TTL_MS,
-    executedFiles: input.executedFiles,
+    executedFileIds: [...input.executedFileIds].sort(),
+    executedDigestSha256: executedFileSetDigest(input.executedFileIds),
     scanReachRecords: [...input.scanReachRecords],
     testTimeoutMs: input.testTimeoutMs,
     maxObservedCaseMs: input.junitXml === undefined ? -1 : junitMaxCaseMs(input.junitXml),

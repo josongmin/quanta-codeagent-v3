@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
+import { executedFileSetDigest } from "../../../tools/dev/executed-file-set"
 import { junitExecutedFiles } from "../../../tools/dev/test-shard-timings"
 import {
   aggregateMatrixReceipts,
@@ -32,6 +33,7 @@ describe("verification matrix aggregate", () => {
     readonly planSha256?: string
     readonly snapshotStable?: boolean
     readonly executedFiles?: readonly string[]
+    readonly executedDigestSha256?: string
     readonly testTimeoutMs?: number
     readonly intraParallel?: number
   }) =>
@@ -41,6 +43,11 @@ describe("verification matrix aggregate", () => {
       chunkId: input.chunkId,
       plannedFiles: input.files,
       executedFiles: input.executedFiles ?? input.files,
+      // Default to the digest OF the executed list, so a fixture that does not
+      // care about the digest still produces a self-consistent receipt and the
+      // forged-digest arm below is the only place the two disagree.
+      executedDigestSha256:
+        input.executedDigestSha256 ?? executedFileSetDigest(input.executedFiles ?? input.files),
       testTimeoutMs: input.testTimeoutMs ?? 120_000,
       intraParallel: input.intraParallel ?? 8,
       outcome: input.outcome,

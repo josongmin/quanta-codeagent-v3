@@ -13,6 +13,11 @@ import {
 import { availableParallelism, freemem, loadavg, tmpdir, totalmem } from "node:os"
 import { dirname, join, relative, resolve } from "node:path"
 import {
+  type ExecutedFileSetVerdict,
+  executedFileSetDigest,
+  executedFileSetVerdict,
+} from "./executed-file-set"
+import {
   describeWatchdogKill,
   isKill,
   shardWatchdogAction,
@@ -79,6 +84,7 @@ import { type ShardSelection, selectShardManifest } from "./test-shard-selection
 import { currentTimeoutPolicy, timeoutPolicySha256 } from "./test-shard-timeout-policy"
 import {
   harvestChunkTimingObservations,
+  junitExecutedFiles,
   loadTestTimings,
   openTimingJournal,
   receiptTimingSamples,
@@ -598,6 +604,40 @@ interface CachedChunk {
   readonly scopeReason: string
 }
 
+/**
+ * Did this chunk run the files it was planned?
+ *
+ * Reads the worker's own JUnit — an artifact the runner does not write — and
+ * compares the EXACT set. The predecessor compared `result.executedFiles ===
+ * plan.files.length`, so 147 of somebody else's files was a pass, and the
+ * timing and cache receipts it minted claimed the planned set had been run.
+ *
+ * A JUnit that cannot be read is a failure to prove, not a proof: there is no
+ * fallback to the count.
+ */
+const executedSetOf = (plan: TestChunk, result: ShardRunResult): ExecutedFileSetVerdict => {
+  let junitXml: string
+  try {
+    junitXml = readFileSync(result.junitPath, "utf8")
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    return {
+      ok: false,
+      executed: [],
+      digestSha256: executedFileSetDigest([]),
+      missing: [...plan.files],
+      unexpected: [],
+      duplicate: [],
+      reason: `junit unreadable at ${result.junitPath}: ${message}`,
+    }
+  }
+  return executedFileSetVerdict({
+    repoRoot: REPO_ROOT,
+    plannedRaw: plan.files,
+    executedRaw: junitExecutedFiles(junitXml),
+  })
+}
+
 const validateCompletedShard = (before: GitSnapshot, completed: CompletedShard): string => {
   const { plan, totalChunks, result, snapshot } = completed
   if (!sameSnapshot(before, snapshot)) {
@@ -606,7 +646,14 @@ const validateCompletedShard = (before: GitSnapshot, completed: CompletedShard):
         `(start=${before.head}, current=${snapshot.head}). Aborting remaining shards.`,
     )
   }
-  if (result.code === 0 && !result.timedOut && result.executedFiles === plan.files.length) {
+  if (result.code === 0 && !result.timedOut) {
+    const set = executedSetOf(plan, result)
+    if (!set.ok) {
+      throw new Error(
+        `[test:shards] EXECUTED-SET MISMATCH chunk=${plan.index}/${totalChunks} — the worker ` +
+          `exited 0 but did not run the planned files: ${set.reason}`,
+      )
+    }
     return result.scanReachSink
   }
   if (result.cancelled && !result.timedOut) {
@@ -688,10 +735,21 @@ const cacheSuccessfulShard = (
   journal: TimingJournal,
   testTimeoutMs: number,
 ): void => {
-  if (result.executedFiles === undefined) {
-    throw new Error(`[test:shards] chunk ${cached.chunk.index} has no executed-file receipt`)
-  }
   const junitXml = readFileSync(result.junitPath, "utf8")
+  // The receipt records what the JUNIT says ran, not what the runner launched.
+  // `validateCompletedShard` has already refused any chunk whose set differs,
+  // so this is the proven set — re-derived here rather than passed along, so a
+  // future caller cannot hand this function a set nothing verified.
+  const executedSet = executedFileSetVerdict({
+    repoRoot: REPO_ROOT,
+    plannedRaw: cached.chunk.files,
+    executedRaw: junitExecutedFiles(junitXml),
+  })
+  if (!executedSet.ok) {
+    throw new Error(
+      `[test:shards] refusing to cache chunk ${cached.chunk.index}: ${executedSet.reason}`,
+    )
+  }
   junitBody(junitXml, cached.chunk.index)
   const observations = chunkTimingObservations(cached, result, junitXml)
   // One APPEND per chunk. The store itself is written once, at campaign end —
@@ -710,7 +768,7 @@ const cacheSuccessfulShard = (
   writeSuccessfulTestShardReceiptAtomic({
     path: cached.cachePath,
     identity: { ...cached.identity, junit: true },
-    executedFiles: result.executedFiles,
+    executedFileIds: executedSet.executed,
     scanReachRecords: mergeScanReachSinks([result.scanReachSink]),
     testTimeoutMs,
     timingObservations: [...observations].map(([file, sample]) => ({ file, ...sample })),

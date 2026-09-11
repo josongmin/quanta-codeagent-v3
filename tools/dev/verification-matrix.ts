@@ -1,3 +1,4 @@
+import { executedFileSetDigest } from "./executed-file-set"
 import { TEST_RESOURCE_CLASSES, type TestResourceClass } from "./test-shard-plan"
 
 export type MatrixChunk = {
@@ -106,6 +107,8 @@ export type MatrixWorkerReceipt = {
   readonly plannedFiles: readonly string[]
   /** Files independently recovered from JUnit, never copied from the plan. */
   readonly executedFiles: readonly string[]
+  /** sha256 over the sorted executed ids — the set, in one comparable field. */
+  readonly executedDigestSha256: string
   readonly testTimeoutMs: number
   readonly intraParallel: number
   readonly outcome: "passed" | "failed" | "cancelled"
@@ -120,6 +123,8 @@ export const workerReceipt = (input: {
   readonly chunkId: string
   readonly plannedFiles: readonly string[]
   readonly executedFiles: readonly string[]
+  /** sha256 over the sorted executed ids — the set, in one comparable field. */
+  readonly executedDigestSha256: string
   readonly testTimeoutMs: number
   readonly intraParallel: number
   readonly outcome: "passed" | "failed" | "cancelled"
@@ -133,6 +138,7 @@ export const workerReceipt = (input: {
   chunkId: input.chunkId,
   plannedFiles: [...input.plannedFiles].sort(),
   executedFiles: [...input.executedFiles].sort(),
+  executedDigestSha256: input.executedDigestSha256,
   testTimeoutMs: input.testTimeoutMs,
   intraParallel: input.intraParallel,
   outcome: input.outcome,
@@ -153,6 +159,8 @@ export const parseMatrixWorkerReceipt = (value: unknown): MatrixWorkerReceipt =>
     !row.plannedFiles.every((file) => typeof file === "string" && isSafeRelativePath(file)) ||
     !Array.isArray(row.executedFiles) ||
     !row.executedFiles.every((file) => typeof file === "string" && isSafeRelativePath(file)) ||
+    typeof row.executedDigestSha256 !== "string" ||
+    !/^[0-9a-f]{64}$/.test(row.executedDigestSha256) ||
     !Number.isSafeInteger(row.testTimeoutMs) ||
     (row.testTimeoutMs as number) < 1 ||
     !Number.isSafeInteger(row.intraParallel) ||
@@ -189,6 +197,12 @@ const reasonsForReceipt = (
     ...reasonIf(receipt.planSha256 !== plan.planSha256, `wrong-plan:${id}`),
     ...reasonIf(!sameFiles(expected?.files ?? [], receipt.plannedFiles), `stale-plan:${id}`),
     ...reasonIf(!sameFiles(expected?.files ?? [], receipt.executedFiles), `stale-executed:${id}`),
+    // The digest must agree with the list it summarises: a receipt carrying a
+    // digest of some OTHER set is how an exact-set claim gets forged.
+    ...reasonIf(
+      receipt.executedDigestSha256 !== executedFileSetDigest(receipt.executedFiles),
+      `executed-digest-mismatch:${id}`,
+    ),
     ...reasonIf(receipt.testTimeoutMs !== expected?.testTimeoutMs, `wrong-timeout:${id}`),
     ...reasonIf(receipt.intraParallel !== expected?.intraParallel, `wrong-parallel:${id}`),
     ...reasonIf(!receipt.snapshotStable, `snapshot-drift:${id}`),

@@ -91,7 +91,7 @@ const writeReceipt = (
   writeSuccessfulTestShardReceiptAtomic({
     path,
     identity: identity(over),
-    executedFiles: 1,
+    executedFileIds: ["tests/unit/a.test.ts"],
     scanReachRecords: [],
     testTimeoutMs: 120_000,
     timingObservations: [observation],
@@ -173,7 +173,7 @@ describe("a green receipt and its timings cannot disagree", () => {
       writeSuccessfulTestShardReceiptAtomic({
         path: join(root, "chunk.json"),
         identity: identity({ shardFileCount: 2 }),
-        executedFiles: 2,
+        executedFileIds: ["tests/unit/a.test.ts", "tests/unit/b.test.ts"],
         scanReachRecords: [],
         testTimeoutMs: 120_000,
         timingObservations: [observation],

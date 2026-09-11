@@ -678,7 +678,7 @@ describe("same-INPUTS successful shard cache", () => {
     writeSuccessfulTestShardReceiptAtomic({
       path: receiptPath,
       identity,
-      executedFiles: 1,
+      executedFileIds: ["tests/unit/a.test.ts"],
       scanReachRecords: [{ id: "guard", walked: 4, matched: 2 }],
       testTimeoutMs: 120_000,
       timingObservations: [],
@@ -807,7 +807,7 @@ describe("same-INPUTS successful shard cache", () => {
       writeSuccessfulTestShardReceiptAtomic({
         path: receiptPath,
         identity,
-        executedFiles: 0,
+        executedFileIds: [],
         scanReachRecords: [],
         testTimeoutMs: 120_000,
         timingObservations: [],
@@ -818,14 +818,14 @@ describe("same-INPUTS successful shard cache", () => {
     writeSuccessfulTestShardReceiptAtomic({
       path: receiptPath,
       identity,
-      executedFiles: 1,
+      executedFileIds: ["tests/unit/a.test.ts"],
       scanReachRecords: [],
       testTimeoutMs: 120_000,
       timingObservations: [],
       scopeReason: "test",
     })
     const tampered = JSON.parse(readFileSync(receiptPath, "utf8")) as Record<string, unknown>
-    tampered.executedFiles = 2
+    tampered.executedFileIds = ["tests/unit/a.test.ts", "tests/unit/b.test.ts"]
     writeFileSync(receiptPath, JSON.stringify(tampered))
     expect(
       loadSuccessfulTestShardReceipt({

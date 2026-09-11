@@ -11,6 +11,7 @@ import {
 import { availableParallelism, loadavg } from "node:os"
 import { dirname, join, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { executedFileSetVerdict } from "./executed-file-set"
 import {
   loadPolicyOverrides,
   resolveTestPopulation,
@@ -205,12 +206,19 @@ if (command === "worker") {
   const code = await proc.exited
   const elapsedMs = Math.max(1, Math.round(performance.now() - startedAt))
   const junitXml = existsSync(junitPath) ? readFileSync(junitPath, "utf8") : ""
-  const executedFiles = junitExecutedFiles(junitXml).map((file) => {
-    const absolute = resolve(repoRoot, file)
-    return relative(repoRoot, absolute)
+  // One owner for "did it run what it was planned". The local shard runner
+  // compared a COUNT until this helper existed; a sorted-join here and a
+  // `length ===` there is how the two rails came to disagree.
+  const executedSet = executedFileSetVerdict({
+    repoRoot,
+    plannedRaw: chunk.files,
+    executedRaw: junitExecutedFiles(junitXml),
   })
-  const exactExecutedSet =
-    [...executedFiles].sort().join("\n") === [...chunk.files].sort().join("\n")
+  const executedFiles = executedSet.executed
+  const exactExecutedSet = executedSet.ok
+  if (!exactExecutedSet) {
+    process.stderr.write(`[matrix] executed-set mismatch ${chunk.id}: ${executedSet.reason}\n`)
+  }
   const junitOk = junitXml.includes("<testcase") && executedFiles.length > 0
   let snapshotStable = false
   try {
@@ -225,6 +233,7 @@ if (command === "worker") {
     chunkId: chunk.id,
     plannedFiles: chunk.files,
     executedFiles,
+    executedDigestSha256: executedSet.digestSha256,
     testTimeoutMs: chunk.testTimeoutMs,
     intraParallel: chunk.intraParallel,
     outcome: code === 0 && junitOk && exactExecutedSet && snapshotStable ? "passed" : "failed",
