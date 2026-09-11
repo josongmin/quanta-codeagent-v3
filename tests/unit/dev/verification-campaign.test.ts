@@ -38,6 +38,10 @@ const CAMPAIGN_MODULES = [
   // copies an explicit module list, so a new import here is a RED nobody sees
   // until the file runs.
   "lease-quarantine.ts",
+  // `gate.ts` runs every gate through the bounded child, and
+  // `verification-tier.ts` sequences them through the DAG scheduler.
+  "bounded-child.ts",
+  "gate-dag.ts",
   "test-shard-lifecycle.ts",
   // `test-shard-lifecycle` imports the bounded `ps` adapter; without it the
   // scratch campaign cannot even module-load.
