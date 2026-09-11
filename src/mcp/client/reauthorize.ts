@@ -8,6 +8,7 @@
  *  auth rejection. `tools/call` whose completion is unknown is NEVER auto-replayed.
  *  Old pending requests fail (they must not hang on the rebuilt carrier). */
 
+import { errMessage, logger } from "@/shared"
 import type { JsonRpcMessage } from "../jsonrpc"
 import type { McpTransport } from "../transports/port"
 import type { McpServerConfig } from "../types"
@@ -157,7 +158,13 @@ export const bindReauthSession = (client: ReauthBindTarget): ReauthSession => ({
     client.negotiatedVersion = result.negotiatedVersion
   },
   closeQuiet: async (transport) => {
-    await transport?.close().catch(() => {})
+    // Best-effort, but NOT silent: a transport that cannot be closed during
+    // reauthorization leaks a connection, and swallowing the reason is how a
+    // leak becomes unattributable. There is nothing to do about it here — the
+    // reauth path must continue — so it is recorded and dropped deliberately.
+    await transport?.close().catch((error: unknown) => {
+      logger.debug(`mcp reauthorize: transport close failed: ${errMessage(error)}`)
+    })
   },
   setRefreshing: (value) => {
     client.refreshing = value

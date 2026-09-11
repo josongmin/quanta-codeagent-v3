@@ -540,15 +540,50 @@ describe("scan-reach shard receipt", () => {
       { id: "a", walked: 8 },
       { id: "b", walked: 10, matched: 3 },
     ])
+    const authority = {
+      suite: "full",
+      tier: "full",
+      membershipSha256: "c".repeat(64),
+      policySha256: "d".repeat(64),
+      capabilitySha256: "e".repeat(64),
+    } as const
     writeScanReachReceiptAtomic({
       path: receiptPath,
       head: "a".repeat(40),
-      suite: "full",
       manifestSha256: "b".repeat(64),
       sinks: [left, right],
+      authority,
     })
     const receipt = JSON.parse(readFileSync(receiptPath, "utf8")) as Record<string, unknown>
-    expect(receipt.schema).toBe("quanta.scan-reach-receipt.v1")
+    expect(receipt.schema).toBe("quanta.scan-reach-receipt.v2")
+    // The authority travels WITH the receipt, so a consumer can recompute and
+    // compare rather than take the digest's word for it.
+    expect(receipt.tier).toBe("full")
+    expect(receipt.membershipSha256).toBe("c".repeat(64))
+    expect(receipt.policySha256).toBe("d".repeat(64))
+    expect(receipt.capabilitySha256).toBe("e".repeat(64))
+
+    // A narrowed tier is refused at the SOURCE, not merely distrusted later.
+    for (const tier of ["pr", "prepush", "unit", ""]) {
+      expect(() =>
+        writeScanReachReceiptAtomic({
+          path: receiptPath,
+          head: "a".repeat(40),
+          manifestSha256: "b".repeat(64),
+          sinks: [left, right],
+          authority: { ...authority, tier },
+        }),
+      ).toThrow(/refusing to mint a scan-reach receipt from tier/)
+    }
+    expect(() =>
+      writeScanReachReceiptAtomic({
+        path: receiptPath,
+        head: "a".repeat(40),
+        manifestSha256: "b".repeat(64),
+        sinks: [left, right],
+        authority: { ...authority, suite: "unit" },
+      }),
+    ).toThrow(/refusing to mint a scan-reach receipt from suite/)
     expect(receipt.childExit).toBe(0)
     expect(receipt.records).toEqual([
       { id: "a", walked: 8 },

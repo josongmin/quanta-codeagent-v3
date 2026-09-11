@@ -17,6 +17,7 @@ import {
   executedFileSetDigest,
   executedFileSetVerdict,
 } from "./executed-file-set"
+import { AUTHORITATIVE_SCAN_TIERS, scanReachAuthorityFor } from "./scan-reach-authority"
 import {
   describeWatchdogKill,
   isKill,
@@ -299,19 +300,29 @@ const workerConcurrency = async (): Promise<1 | 2> =>
 const writeScanReachReceipt = (input: {
   readonly head: string
   readonly suite: SuiteName
+  readonly tier: string | undefined
+  readonly manifest: readonly string[]
   readonly manifestSha256: string
   readonly sinks: readonly string[]
 }): void => {
-  // Only full covers every enrolled scan id. A unit receipt is internally
-  // successful but incomplete and would make the closed-universe consumer
-  // report src/integration ids as stale.
+  // Only full covers every enrolled scan id, and only an unnarrowed tier walks
+  // all of it. A `unit` suite or a `pr` tier run is internally successful and
+  // describes a DIFFERENT population; minting a receipt for it is how a floor
+  // ratchet ends up reading a subset as a regression.
   if (input.suite !== "full") return
+  const tier = input.tier ?? "full"
+  if (!AUTHORITATIVE_SCAN_TIERS.includes(tier)) return
   writeScanReachReceiptAtomic({
     path: SCAN_REACH_RECEIPT,
     head: input.head,
-    suite: input.suite,
     manifestSha256: input.manifestSha256,
     sinks: input.sinks,
+    authority: scanReachAuthorityFor({
+      repoRoot: REPO_ROOT,
+      suite: "full",
+      tier,
+      files: input.manifest,
+    }),
   })
 }
 
@@ -1316,6 +1327,8 @@ const main = async (): Promise<void> => {
     writeScanReachReceipt({
       head: before.head,
       suite: opts.suite,
+      tier: opts.tier,
+      manifest,
       manifestSha256: manifestDigest,
       sinks: scanReachSinks,
     })

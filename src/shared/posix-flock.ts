@@ -41,6 +41,32 @@ export const posixFlock = (fd: number, operation: number): number => {
   return cached(fd, operation)
 }
 
+/**
+ * Why these are CLASSES and not messages.
+ *
+ * `migration/external-config/ledger.ts` branched on
+ * `err.message.includes("exclusive lock timeout")` to turn a contended write
+ * into `false` instead of a throw. A string compare against another module's
+ * error text is a contract nobody declared: rewording this message for clarity
+ * would silently convert a handled contention into a crash, and nothing
+ * connects the two ends — no type, no test, no import.
+ */
+export class ExclusiveLockTimeoutError extends Error {
+  readonly kind = "exclusive-lock-timeout" as const
+  constructor(readonly lockPath: string) {
+    super(`exclusive lock timeout: ${lockPath}`)
+    this.name = "ExclusiveLockTimeoutError"
+  }
+}
+
+export class ExclusiveLockAbortedError extends Error {
+  readonly kind = "exclusive-lock-aborted" as const
+  constructor(readonly lockPath: string) {
+    super(`exclusive lock aborted: ${lockPath}`)
+    this.name = "ExclusiveLockAbortedError"
+  }
+}
+
 /** Canonical fd-lifetime transaction wrapper. The pathname is stable and is
  * never unlinked; process death releases the kernel lock. */
 export const withPosixFileLock = async <T>(
@@ -61,9 +87,9 @@ export const withPosixFileLock = async <T>(
   const deadline = Date.now() + (opts.timeoutMs ?? 10_000)
   try {
     for (;;) {
-      if (opts.signal?.aborted === true) throw new Error("exclusive lock aborted")
+      if (opts.signal?.aborted === true) throw new ExclusiveLockAbortedError(normalized)
       if (posixFlock(fd, LOCK_EX | LOCK_NB) === 0) break
-      if (Date.now() > deadline) throw new Error("exclusive lock timeout")
+      if (Date.now() > deadline) throw new ExclusiveLockTimeoutError(normalized)
       await sleep(10)
     }
     const next = new Set(heldPaths.getStore())

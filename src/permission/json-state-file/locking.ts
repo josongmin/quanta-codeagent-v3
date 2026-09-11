@@ -58,16 +58,21 @@ const sleep = (ms: number): Promise<void> =>
 
 /**
  * Acquire an exclusive flock on `lockPath`. Returns false on timeout, I/O
- * failure, or nested reentrancy. `now` is ignored — age steal is gone;
- * the parameter remains so existing call sites compile.
+ * failure, or nested reentrancy.
+ *
+ * `now` used to be accepted, documented as ignored, and then `void`-ed — while
+ * `engine.ts` was passing `st.lockNow` (the caller's `opts.now ?? Date.now`) on
+ * every call. So a test that injected a clock to make the timeout deterministic
+ * got the wall clock anyway, and the domain-clock scan flagged the two
+ * `Date.now()` reads that resulted. The parameter is now used, which is both
+ * what the caller already believed and what makes this loop replay-stable.
  */
 export const acquireLock = async (
   lockPath: string,
   _tmpSuffix?: string,
-  _now: () => number = Date.now,
+  now: () => number = Date.now,
   timeoutMs: number = LOCK_TIMEOUT_MS,
 ): Promise<boolean> => {
-  void _now
   try {
     mkdirSync(dirname(lockPath), { recursive: true, mode: 0o700 })
   } catch {
@@ -79,14 +84,14 @@ export const acquireLock = async (
   } catch {
     return false
   }
-  const deadline = Date.now() + timeoutMs
+  const deadline = now() + timeoutMs
   for (;;) {
     if (posixFlock(fd, LOCK_EX | LOCK_NB) === 0) {
       const rec: Held = { fd }
       heldFds.set(lockPath, rec)
       return true
     }
-    if (Date.now() > deadline) {
+    if (now() > deadline) {
       closeSync(fd)
       return false
     }

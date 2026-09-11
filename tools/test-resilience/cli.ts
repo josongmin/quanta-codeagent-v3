@@ -253,7 +253,13 @@ const runDiagnosis = async (artifact: FailureAttemptArtifact): Promise<number> =
       replay: replayCommand(artifact, record),
     })
   }
-  const report: DiagnosisReport = {
+  // Named `diagnosis`, not `report`: this is a `quanta.flake-diagnosis.v1`
+  // artifact and NOT the canonical bench report, which BFND-02 requires to have
+  // exactly one writer. My earlier commit called the local `report` and the
+  // single-writer ratchet counted this file as a second writer of something it
+  // has nothing to do with — invisible until the suite that owns that ratchet
+  // actually ran.
+  const diagnosis: DiagnosisReport = {
     schema: "quanta.flake-diagnosis.v1",
     advisory: true,
     required: "failed",
@@ -264,14 +270,14 @@ const runDiagnosis = async (artifact: FailureAttemptArtifact): Promise<number> =
     rows,
   }
   const out = flag("--out")
-  if (out !== undefined) writeFileSync(out, `${JSON.stringify(report, null, 2)}\n`)
+  if (out !== undefined) writeFileSync(out, `${JSON.stringify(diagnosis, null, 2)}\n`)
   for (const row of rows) {
     console.log(`  ${row.outcome.padEnd(24)} ${row.file} :: ${row.testId}\n      ${row.detail}`)
     console.log(`      replay: ${row.replay}`)
   }
   console.log(
     `[diagnose] children=${childrenSpawned} ` +
-      Object.entries(report.counts)
+      Object.entries(diagnosis.counts)
         .map(([name, count]) => `${name}=${count}`)
         .join(" "),
   )
@@ -279,7 +285,7 @@ const runDiagnosis = async (artifact: FailureAttemptArtifact): Promise<number> =
     "[diagnose] ADVISORY — the required verdict for this attempt is 'failed' and this run " +
       "cannot change it. An observed-isolation-pass is ONE observation, not a flake diagnosis.",
   )
-  return report.counts["confirmed-real"] > 0 ? EXIT_CONFIRMED_REAL : EXIT_NO_CONFIRMED_REAL
+  return diagnosis.counts["confirmed-real"] > 0 ? EXIT_CONFIRMED_REAL : EXIT_NO_CONFIRMED_REAL
 }
 
 const cmdQuarantineCheck = (): number => {

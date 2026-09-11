@@ -222,6 +222,19 @@ export const DAEMON: readonly KnobDeclaration[] = [
     readSite: "remote/runner/docker-adapter.ts",
   },
   {
+    // Declared because it is READ: `remote-dependencies/seams.ts` falls back to
+    // "default" when unset. The knob-registry ratchet found it undeclared, and
+    // an undeclared read is one `/config set` cannot reach — the surface offers
+    // a remote-runner control the code does not honour.
+    envKey: "QUANTA_REMOTE_LIMA_VM",
+    kind: "string",
+    default: "default",
+    group: "remote",
+    home: "runtime-config",
+    describe: "Lima VM name the remote runner attaches to.",
+    readSite: "apps/cli/remote-dependencies/seams.ts",
+  },
+  {
     envKey: "QUANTA_SANDBOX",
     kind: "enum",
     default: "default",

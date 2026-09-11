@@ -2,6 +2,18 @@ import type { KnobDeclaration } from "./types"
 
 export const HOST: readonly KnobDeclaration[] = [
   {
+    // ADR-0134 org-config directory override. Read at
+    // `skill-inputs/org-config-dir.ts` through a module-local ENV_KEY const,
+    // which is why the completeness ratchet saw a read with no declaration.
+    envKey: "QUANTA_ORG_CONFIG_DIR",
+    kind: "string",
+    default: undefined,
+    group: "host-gate",
+    home: "runtime-config",
+    describe: "Org-wide config directory (default ~/.config/quanta/org).",
+    readSite: "runner/assemble/session-authorities/skill-inputs/org-config-dir.ts",
+  },
+  {
     envKey: "QUANTA_BG_MAX_QUEUED",
     kind: "int",
     default: undefined,

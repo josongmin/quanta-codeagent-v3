@@ -28,6 +28,12 @@
  */
 import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
+import {
+  type ScanReachAuthority,
+  scanReachAuthorityFor,
+  scanReachAuthorityProblem,
+} from "./scan-reach-authority"
+import { discoverSuitePopulation } from "./test-shard-discovery"
 
 export interface ScanReach {
   readonly walked: number
@@ -51,10 +57,9 @@ export interface ScanReachReceiptRecord extends ScanReach {
  * therefore binds it to the current Git snapshot instead of treating `.cache`
  * as trusted state.
  */
-export interface ScanReachReceipt {
-  readonly schema: "quanta.scan-reach-receipt.v1"
+export interface ScanReachReceipt extends ScanReachAuthority {
+  readonly schema: "quanta.scan-reach-receipt.v2"
   readonly head: string
-  readonly suite: "unit" | "full"
   readonly manifestSha256: string
   readonly childExit: 0
   readonly records: readonly ScanReachReceiptRecord[]
@@ -65,20 +70,37 @@ export interface ReceiptSnapshot {
   readonly status: string
 }
 
+/**
+ * Why this takes the current authority instead of trusting the receipt.
+ *
+ * The predecessor validated `manifestSha256.length !== 64` — a LENGTH, so any
+ * 64 hex characters passed and the digest named nothing. `suite` sat in the
+ * type and was never compared, so a `unit` receipt (a strict subset of the
+ * enrolled ids) stood in for the full universe. There was no `tier` at all, so
+ * `--suite=full --tier=pr` — 3,938 of 3,962 files — minted a receipt the
+ * closed-universe consumer accepted.
+ *
+ * That matters here specifically because scan-reach is a FLOOR: a receipt from
+ * a narrower population carries lower reach for ids it never walked, and this
+ * consumer either reports that as a regression in the wrong place or accepts it
+ * and lets a guard ship with a reach nobody measured.
+ */
 export const observedFromReceipt = (
   receipt: ScanReachReceipt,
   snapshot: ReceiptSnapshot,
+  current: ScanReachAuthority,
 ): ReadonlyMap<string, ScanReach> | undefined => {
   if (
-    receipt.schema !== "quanta.scan-reach-receipt.v1" ||
+    receipt.schema !== "quanta.scan-reach-receipt.v2" ||
     receipt.childExit !== 0 ||
     receipt.head !== snapshot.head ||
     snapshot.status !== "" ||
-    receipt.manifestSha256.length !== 64 ||
+    !/^[0-9a-f]{64}$/.test(receipt.manifestSha256) ||
     receipt.records.length === 0
   ) {
     return undefined
   }
+  if (scanReachAuthorityProblem(receipt, current) !== undefined) return undefined
   const observed = new Map<string, ScanReach>()
   for (const { id, walked, matched } of receipt.records) {
     if (id === "" || !Number.isSafeInteger(walked) || walked < 0) return undefined
@@ -271,15 +293,35 @@ const currentGitSnapshot = (): ReceiptSnapshot | undefined => {
   return { head: head.stdout.toString().trim(), status: status.stdout.toString() }
 }
 
+/**
+ * The authority is RECOMPUTED here, against the tree, at read time.
+ *
+ * Discovering the full population costs one filesystem snapshot (measured 45ms
+ * on this tree) and is the whole difference between checking a receipt and
+ * letting it certify itself.
+ */
+export const currentScanReachAuthority = (repoRoot: string): ScanReachAuthority =>
+  scanReachAuthorityFor({
+    repoRoot,
+    suite: "full",
+    tier: "full",
+    files: [...discoverSuitePopulation(repoRoot, "full").files],
+  })
+
 export const readUsableShardReceipt = (
   path: string = SHARD_RECEIPT_PATH,
+  current?: ScanReachAuthority,
 ): ReadonlyMap<string, ScanReach> | undefined => {
   if (!existsSync(path)) return undefined
   const snapshot = currentGitSnapshot()
   if (snapshot === undefined) return undefined
   try {
     const receipt = JSON.parse(readFileSync(path, "utf8")) as ScanReachReceipt
-    return observedFromReceipt(receipt, snapshot)
+    return observedFromReceipt(
+      receipt,
+      snapshot,
+      current ?? currentScanReachAuthority(resolve(import.meta.dir, "..", "..")),
+    )
   } catch {
     return undefined
   }

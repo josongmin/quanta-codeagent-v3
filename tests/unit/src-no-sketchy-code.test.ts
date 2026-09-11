@@ -77,6 +77,10 @@ const RULES: readonly Rule[] = [
       "apps/cli/fetch-rules-wire.ts":
         "Injection-first: `process.env` is ONLY the default for the injected `env` param (tests pass a fake env); the gate is read off that param via `gateOn(env, ...)`, never a module-level process.env. Same DI-boundary posture as config-migration-notice.ts.",
       "apps/bench/index.ts": "bench CLI has its own dotenv shim; same bootstrap posture as the CLI",
+      "apps/bench/remote/box-session/bootstrap-phases.ts":
+        "Box BOOTSTRAP phase — the two QUANTA_SWEBENCH_* reads happen once, while building the pip spec for the grading shim, in the same launch-time posture as apps/bench/index.ts and run-main.ts. RECORDED DEBT, not a clean bill: `FullRemoteConfig` already declares `swebenchDatasetName` and `swebenchPipSpec` and NOTHING sets them, so the `cfg.x ?? process.env.Y` fallback does all the work. Its sibling `swebenchDatasetFamily` documents the intended shape verbatim — 'the launching side threads the resolved value here instead of letting each consumer re-derive it from ambient env'. Threading these two the same way needs the fields on BenchRunConfig and every bench composition root updated; until then the read stays here rather than moving somewhere it would be harder to find.",
+      "apps/cli/session-main.ts":
+        "CLI composition root extracted from apps/cli/repl.ts + index.ts (both already allowlisted) by 85a99bb6f. Its ONLY process.env is the launch-time bag handed to `buildSessionAuthorities`, which is what a composition root is for; downstream receives resolved authorities. Same CLI-bootstrap posture as apps/cli/index.ts.",
       "apps/bench/boot-llm-wire.ts":
         "God-code split of apps/bench/run-main.ts (already allowlisted, at the 1000-line god-MODULE ceiling) — the BOOT question moved here verbatim: `env: process.env` handed to the launch-time provider/model resolution, plus the two QUANTA_BENCH_REASONING_* launch reads. All are call-time arguments into functions that take an env parameter; downstream receives resolved values. Same bench-bootstrap posture as apps/bench/run-main.ts.",
       "apps/bench/run-main.ts":

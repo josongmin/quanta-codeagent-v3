@@ -10,6 +10,7 @@
 import { createHash, randomUUID } from "node:crypto"
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
+import { ExclusiveLockTimeoutError } from "@/shared"
 import { withMigrationFileLock } from "./exclusive-lock"
 import type {
   DetectedConfigItem,
@@ -148,7 +149,11 @@ export const recordDisposition = async (
       return true
     })
   } catch (err) {
-    if (err instanceof Error && err.message.includes("exclusive lock timeout")) return false
+    // Contention is an expected outcome here, not a failure: another writer
+    // holds the ledger and this caller reports "not written". Branching on the
+    // structured error means rewording the message cannot silently turn that
+    // back into a crash.
+    if (err instanceof ExclusiveLockTimeoutError) return false
     throw err
   }
 }

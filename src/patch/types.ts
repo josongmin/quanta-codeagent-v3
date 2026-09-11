@@ -1,3 +1,5 @@
+import { errMessage } from "@/shared"
+
 // V4A apply_patch — type definitions.
 //
 // Reference: [[codex-v4a-patch-grammar]] (full EBNF).
@@ -178,7 +180,7 @@ export class PatchRollbackIncompleteError extends Error {
     const paths = uniquePaths(failedUndos)
     const detail = failedUndos.map((f) => `${f.path}: ${f.cause}`).join("; ")
     super(
-      `Patch commit failed and rollback was incomplete (${paths.join(", ")}): ${stringifyUnknown(originalError)}; leftover/uncertain: ${detail}`,
+      `Patch commit failed and rollback was incomplete (${paths.join(", ")}): ${errMessage(originalError)}; leftover/uncertain: ${detail}`,
     )
     this.name = "PatchRollbackIncompleteError"
     this.originalError = originalError
@@ -196,11 +198,6 @@ function uniquePaths(failedUndos: readonly UndoFailure[]): readonly string[] {
     out.push(f.path)
   }
   return out
-}
-
-function stringifyUnknown(error: unknown): string {
-  if (error instanceof Error) return error.message
-  return String(error)
 }
 
 /**

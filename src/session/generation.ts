@@ -12,6 +12,7 @@
 
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises"
 import { dirname } from "node:path"
+import { errMessage } from "@/shared"
 
 const generations = new Map<string, number>()
 const tombstones = new Set<string>()
@@ -67,7 +68,7 @@ export const readDurableSessionGeneration = async (
     raw = await readFile(path, "utf8")
   } catch (error) {
     if (isErrno(error, "ENOENT")) return { kind: "ok", state: INITIAL_DURABLE_GENERATION }
-    return { kind: "unreadable", reason: error instanceof Error ? error.message : String(error) }
+    return { kind: "unreadable", reason: errMessage(error) }
   }
   try {
     const parsed: unknown = JSON.parse(raw)
@@ -83,7 +84,7 @@ export const readDurableSessionGeneration = async (
     }
     return { kind: "corrupt", reason: "invalid generation record" }
   } catch (error) {
-    return { kind: "corrupt", reason: error instanceof Error ? error.message : String(error) }
+    return { kind: "corrupt", reason: errMessage(error) }
   }
 }
 

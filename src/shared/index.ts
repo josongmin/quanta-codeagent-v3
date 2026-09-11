@@ -141,6 +141,8 @@ export {
 } from "./operator-notice"
 export { omitUndef } from "./optional"
 export {
+  ExclusiveLockAbortedError,
+  ExclusiveLockTimeoutError,
   LOCK_EX,
   LOCK_NB,
   LOCK_UN,

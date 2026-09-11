@@ -25,12 +25,19 @@ import { describe, expect, test } from "bun:test"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-
 import {
+  AUTHORITATIVE_SCAN_TIERS,
+  scanReachAuthorityProblem,
+  scanReachMembershipSha256,
+  testPolicySha256,
+} from "@/../tools/dev/scan-reach-authority"
+import {
+  currentScanReachAuthority,
   decide,
   observedFromReceipt,
   type ScanReach,
   type ScanReachBaseline,
+  type ScanReachReceipt,
   scanReachChildArgs,
 } from "@/../tools/dev/scan-reach-baseline"
 
@@ -41,45 +48,156 @@ const baselineOf = (scans: Record<string, ScanReach>): ScanReachBaseline => ({
   scans,
 })
 
+/**
+ * The authority a receipt has to match. Fixture values, because these tests are
+ * about the COMPARISON; the real one is recomputed from the tree by
+ * `currentScanReachAuthority`, which the wiring test below pins.
+ */
+const AUTHORITY = {
+  suite: "full",
+  tier: "full",
+  membershipSha256: "1".repeat(64),
+  policySha256: "2".repeat(64),
+  capabilitySha256: "3".repeat(64),
+} as const
+
+const CLEAN = { head: "abc", status: "" } as const
+
+const receiptFor = (overrides: Partial<ScanReachReceipt> = {}): ScanReachReceipt => ({
+  schema: "quanta.scan-reach-receipt.v2",
+  head: "abc",
+  manifestSha256: "a".repeat(64),
+  childExit: 0,
+  records: [{ id: "f#one", walked: 10 }],
+  ...AUTHORITY,
+  ...overrides,
+})
+
 describe("scan-reach CLI decision", () => {
   test("exact-HEAD clean shard receipt replaces the dedicated child", () => {
     const observed = observedFromReceipt(
-      {
-        schema: "quanta.scan-reach-receipt.v1",
-        head: "abc",
-        suite: "unit",
-        manifestSha256: "a".repeat(64),
-        childExit: 0,
+      receiptFor({
         records: [
           { id: "f#one", walked: 10 },
           { id: "f#one", walked: 8 },
         ],
-      },
-      { head: "abc", status: "" },
+      }),
+      CLEAN,
+      AUTHORITY,
     )
     expect(observed?.get("f#one")).toEqual({ walked: 8 })
   })
 
   test("stale, dirty, malformed, or failed shard receipts are never consumed", () => {
-    const base = {
-      schema: "quanta.scan-reach-receipt.v1" as const,
-      head: "abc",
-      suite: "unit" as const,
-      manifestSha256: "a".repeat(64),
-      childExit: 0 as const,
-      records: [{ id: "f#one", walked: 10 }],
+    const base = receiptFor()
+    expect(observedFromReceipt(base, { head: "different", status: "" }, AUTHORITY)).toBeUndefined()
+    expect(
+      observedFromReceipt(base, { head: "abc", status: " M changed.ts" }, AUTHORITY),
+    ).toBeUndefined()
+    expect(
+      observedFromReceipt(receiptFor({ manifestSha256: "short" }), CLEAN, AUTHORITY),
+    ).toBeUndefined()
+    expect(
+      observedFromReceipt(receiptFor({ records: [{ id: "f#one", walked: -1 }] }), CLEAN, AUTHORITY),
+    ).toBeUndefined()
+  })
+
+  /**
+   * TVH P0-2. The predecessor checked `manifestSha256.length !== 64` — a
+   * LENGTH. Any 64 hex characters passed and the digest named nothing. `suite`
+   * was in the type and never compared, so a `unit` receipt stood in for the
+   * full universe, and there was no `tier`, so `--suite=full --tier=pr` (3,938
+   * of 3,962 files) minted a receipt the closed-universe consumer accepted.
+   *
+   * scan-reach is a FLOOR ratchet, so the consequence is not "slightly weaker
+   * evidence": a receipt from a narrower population reports lower reach for ids
+   * it never walked, which is read as a regression in the wrong place — or
+   * accepted, letting a guard ship with a reach nobody measured.
+   */
+  describe("a receipt must describe the run the consumer needs", () => {
+    const rejected = (overrides: Partial<ScanReachReceipt>): void => {
+      expect(observedFromReceipt(receiptFor(overrides), CLEAN, AUTHORITY)).toBeUndefined()
     }
-    expect(observedFromReceipt(base, { head: "different", status: "" })).toBeUndefined()
-    expect(observedFromReceipt(base, { head: "abc", status: " M changed.ts" })).toBeUndefined()
-    expect(
-      observedFromReceipt({ ...base, manifestSha256: "short" }, { head: "abc", status: "" }),
-    ).toBeUndefined()
-    expect(
-      observedFromReceipt(
-        { ...base, records: [{ id: "f#one", walked: -1 }] },
-        { head: "abc", status: "" },
-      ),
-    ).toBeUndefined()
+
+    test("a UNIT-suite receipt is not evidence for the full universe", () => {
+      rejected({ suite: "unit" })
+    })
+
+    test("a PREPUSH-tier receipt is refused as a narrowed tier", () => {
+      rejected({ tier: "prepush" })
+      expect(scanReachAuthorityProblem(receiptFor({ tier: "prepush" }), AUTHORITY)).toBe(
+        "non-authoritative-tier",
+      )
+    })
+
+    test("a REDUCED full (--tier=pr) is not a full-universe proof", () => {
+      rejected({ tier: "pr" })
+      expect(scanReachAuthorityProblem(receiptFor({ tier: "pr" }), AUTHORITY)).toBe(
+        "non-authoritative-tier",
+      )
+    })
+
+    test("a receipt claiming `full` while carrying another population is RED", () => {
+      // The tier label is authoritative and the membership still disagrees —
+      // the case a tier check ALONE would wave through.
+      rejected({ membershipSha256: "9".repeat(64) })
+      expect(
+        scanReachAuthorityProblem(receiptFor({ membershipSha256: "9".repeat(64) }), AUTHORITY),
+      ).toBe("membership-mismatch")
+    })
+
+    test("a FAKE manifest digest no longer passes on its length", () => {
+      // 64 valid hex characters, naming nothing. This is the exact shape the
+      // length check accepted — caught now because the MEMBERSHIP is compared
+      // against a recomputed one rather than being taken on trust.
+      rejected({ membershipSha256: "abcdef0123456789".repeat(4) })
+
+      // And the provenance digest is checked for SHAPE, not length: 64
+      // characters that are not hex is not a sha256, and a survivor proved the
+      // old `length !== 64` could not tell the difference.
+      rejected({ manifestSha256: "z".repeat(64) })
+      rejected({ manifestSha256: "A".repeat(64) })
+      // ANTI-VACUITY: a real digest in the same field still passes.
+      expect(
+        observedFromReceipt(receiptFor({ manifestSha256: "0".repeat(64) }), CLEAN, AUTHORITY),
+      ).toBeDefined()
+    })
+
+    test("an OLD tier policy is RED — the population rules moved", () => {
+      rejected({ policySha256: "8".repeat(64) })
+      expect(
+        scanReachAuthorityProblem(receiptFor({ policySha256: "8".repeat(64) }), AUTHORITY),
+      ).toBe("policy-mismatch")
+    })
+
+    test("a different host capability set is RED", () => {
+      rejected({ capabilitySha256: "7".repeat(64) })
+    })
+
+    test("a v1 receipt cannot be read as a v2 proof", () => {
+      rejected({ schema: "quanta.scan-reach-receipt.v1" as ScanReachReceipt["schema"] })
+    })
+
+    test("the CURRENT exact full receipt is the only thing that passes", () => {
+      // ANTI-VACUITY: every arm above returns undefined, so the suite would be
+      // satisfied by a consumer that rejects everything.
+      const observed = observedFromReceipt(receiptFor(), CLEAN, AUTHORITY)
+      expect(observed?.get("f#one")).toEqual({ walked: 10 })
+      expect(scanReachAuthorityProblem(receiptFor(), AUTHORITY)).toBeUndefined()
+    })
+  })
+
+  test("the consumer recomputes the authority from the tree, never from the receipt", () => {
+    // A receipt that carries its own authority certifies itself. This is the
+    // arm that keeps the comparison a check rather than an echo.
+    const current = currentScanReachAuthority(REPO_ROOT)
+    expect(current.suite).toBe("full")
+    expect(current.tier).toBe("full")
+    expect(current.membershipSha256).toMatch(/^[0-9a-f]{64}$/)
+    expect(current.policySha256).toBe(testPolicySha256(REPO_ROOT))
+    // ...and it is a digest of the REAL population, not of an empty walk.
+    expect(current.membershipSha256).not.toBe(scanReachMembershipSha256(REPO_ROOT, []))
+    expect(AUTHORITATIVE_SCAN_TIERS).toEqual(["full", "nightly"])
   })
 
   test("harvest runs in one isolated worker — parallel test state cannot erase an observed scan", () => {

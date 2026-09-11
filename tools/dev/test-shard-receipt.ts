@@ -11,6 +11,7 @@ import {
 import { dirname, join, relative } from "node:path"
 import { executedFileSetDigest } from "./executed-file-set"
 import { externalToolchainFingerprint } from "./external-toolchain"
+import { AUTHORITATIVE_SCAN_TIERS, type ScanReachAuthority } from "./scan-reach-authority"
 import { timeoutCompatibility } from "./test-shard-timeout-policy"
 import {
   isReceiptTimingRecord,
@@ -761,10 +762,27 @@ export const mergeScanReachSinks = (sinks: readonly string[]): readonly ScanReac
 export const writeScanReachReceiptAtomic = (input: {
   readonly path: string
   readonly head: string
-  readonly suite: "unit" | "full"
   readonly manifestSha256: string
   readonly sinks: readonly string[]
+  readonly authority: ScanReachAuthority
 }): void => {
+  // Refused at the SOURCE, not only at the consumer. A narrowed tier walks a
+  // subset of the enrolled ids, so a receipt it mints is not weaker evidence —
+  // it is evidence about a different population, and writing one at all invites
+  // a future consumer to read it as the real thing.
+  if (!AUTHORITATIVE_SCAN_TIERS.includes(input.authority.tier)) {
+    throw new Error(
+      `[test:shards] refusing to mint a scan-reach receipt from tier ` +
+        `"${input.authority.tier}": only ${AUTHORITATIVE_SCAN_TIERS.join("/")} walk the whole ` +
+        "enrolled universe",
+    )
+  }
+  if (input.authority.suite !== "full") {
+    throw new Error(
+      `[test:shards] refusing to mint a scan-reach receipt from suite ` +
+        `"${input.authority.suite}": only full covers every enrolled scan id`,
+    )
+  }
   const records = mergeScanReachSinks(input.sinks)
   if (records.length === 0) {
     throw new Error("[test:shards] scan-reach receipt is empty after a successful suite")
@@ -775,11 +793,11 @@ export const writeScanReachReceiptAtomic = (input: {
     temporary,
     `${JSON.stringify(
       {
-        schema: "quanta.scan-reach-receipt.v1",
+        schema: "quanta.scan-reach-receipt.v2",
         head: input.head,
-        suite: input.suite,
         manifestSha256: input.manifestSha256,
         childExit: 0,
+        ...input.authority,
         records,
       },
       null,
