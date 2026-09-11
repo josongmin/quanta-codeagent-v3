@@ -120,6 +120,93 @@ describe("tier population floor", () => {
     }
   })
 
+  test("every field the record promises is actually validated at load", () => {
+    // Three mutation survivors: removing the `minFiles`, the `reason` and the
+    // schema checks each left the suite green. The docstring calls this "a
+    // reviewable data file with a reason per tier"; nothing enforced it, so
+    // `minFiles: 0` or `reason: ""` would load clean and the floor would be a
+    // number nobody picked.
+    const cases: readonly {
+      readonly why: string
+      readonly body: unknown
+      readonly match: RegExp
+    }[] = [
+      {
+        why: "a zero floor is not a floor",
+        body: {
+          schema: "quanta.test-tier-population.v1",
+          tiers: { pr: { minFiles: 0, reason: "x" } },
+        },
+        match: /non-positive minFiles/,
+      },
+      {
+        why: "a negative floor",
+        body: {
+          schema: "quanta.test-tier-population.v1",
+          tiers: { pr: { minFiles: -1, reason: "x" } },
+        },
+        match: /non-positive minFiles/,
+      },
+      {
+        why: "a non-integer floor",
+        body: {
+          schema: "quanta.test-tier-population.v1",
+          tiers: { pr: { minFiles: 1.5, reason: "x" } },
+        },
+        match: /non-positive minFiles/,
+      },
+      {
+        why: "an empty reason is not a reason",
+        body: {
+          schema: "quanta.test-tier-population.v1",
+          tiers: { pr: { minFiles: 10, reason: "  " } },
+        },
+        match: /no reason/,
+      },
+      {
+        why: "a foreign schema must not be read as this one",
+        body: {
+          schema: "quanta.test-tier-population.v0",
+          tiers: { pr: { minFiles: 10, reason: "x" } },
+        },
+        match: /unknown tier population schema/,
+      },
+      {
+        why: "tiers must be an object, not an array",
+        body: { schema: "quanta.test-tier-population.v1", tiers: [] },
+        match: /must be an object/,
+      },
+    ]
+
+    // ANTI-VACUITY: the corpus must be non-trivial, and the VALID shape must
+    // still load — otherwise "everything throws" satisfies every case above.
+    expect(cases.length).toBeGreaterThanOrEqual(6)
+    const valid = join(tmpdir(), `tier-pop-valid-${process.pid}-${Date.now()}.json`)
+    try {
+      writeFileSync(
+        valid,
+        JSON.stringify({
+          schema: "quanta.test-tier-population.v1",
+          tiers: { pr: { minFiles: 10, reason: "a real reason" } },
+        }),
+        "utf8",
+      )
+      expect(loadTierPopulationFloors(valid).tiers.pr?.minFiles).toBe(10)
+    } finally {
+      rmSync(valid, { force: true })
+    }
+
+    for (const row of cases) {
+      const path = join(tmpdir(), `tier-pop-${process.pid}-${Date.now()}-${Math.random()}.json`)
+      try {
+        writeFileSync(path, JSON.stringify(row.body), "utf8")
+        expect(() => loadTierPopulationFloors(path), row.why).toThrow(row.match)
+      } finally {
+        rmSync(path, { force: true })
+      }
+    }
+  })
+
   test("an emptied record is rejected at load time", () => {
     const path = join(tmpdir(), `tier-pop-${process.pid}-${Date.now()}.json`)
     try {

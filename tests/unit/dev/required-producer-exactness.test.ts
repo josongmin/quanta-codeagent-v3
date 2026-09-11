@@ -451,3 +451,62 @@ describe("the CLI actually consumes the guard (wiring proof)", () => {
     }
   }, 30_000)
 })
+
+/**
+ * `CapabilityFloor` has TWO numbers and only one was exercised.
+ *
+ * Mutation survivor: deleting the `executedFiles.length < minimumExecutedFiles`
+ * branch left the suite 32/32 green, because every fixture that tripped the
+ * floor tripped the CASE half. An artifact claiming `executedCases: 5` with
+ * `executedFiles: []` therefore passed — a lane that reports cases belonging to
+ * no file it names, which is exactly the shape a mis-attributed or fabricated
+ * artifact has. Raising the file floor would also have been invisible.
+ */
+describe("the capability file floor is real, not decoration", () => {
+  const producer = capabilityProducers()[0]
+
+  test("cases without files is refused", () => {
+    if (producer === undefined) throw new Error("no capability producer to test")
+    const verdict = validateCapabilityResult(producer, {
+      schema: "quanta.capability-result.v1",
+      producer: producer.id,
+      executedFiles: [],
+      executedCases: 5,
+      skippedUnsupported: 0,
+      blockedMissing: 0,
+      failedSetup: 0,
+    })
+    expect(verdict.ok).toBe(false)
+    if (verdict.ok) throw new Error("unreachable")
+    expect(verdict.reason).toContain("file")
+  })
+
+  test("PAIRED CONTROL — the same artifact with one named file is accepted", () => {
+    // Without this arm, "always refuse" satisfies the case above.
+    if (producer === undefined) throw new Error("no capability producer to test")
+    const verdict = validateCapabilityResult(producer, {
+      schema: "quanta.capability-result.v1",
+      producer: producer.id,
+      executedFiles: ["tests/e2e-pty/a.test.ts"],
+      executedCases: 5,
+      skippedUnsupported: 0,
+      blockedMissing: 0,
+      failedSetup: 0,
+    })
+    expect(verdict.ok).toBe(true)
+  })
+
+  test("both floors are declared, and neither is zero", () => {
+    // ANTI-VACUITY: a floor of 0 makes the branch above unreachable, which is
+    // how the survivor hid in the first place.
+    const producers = capabilityProducers()
+    expect(producers.length).toBeGreaterThan(0)
+    for (const row of producers) {
+      expect({
+        id: row.id,
+        files: row.capability?.minimumExecutedFiles ?? 0,
+        cases: row.capability?.minimumExecutedCases ?? 0,
+      }).toEqual({ id: row.id, files: 1, cases: 1 })
+    }
+  })
+})

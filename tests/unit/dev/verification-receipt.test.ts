@@ -377,3 +377,39 @@ describe("shared verification cache root", () => {
     }
   })
 })
+
+/**
+ * A receipt minted over uncommitted changes may never be reused.
+ *
+ * Mutation survivor: deleting `if (receipt.statusSha256 !== cleanStatusSha256)`
+ * left the suite 43/43 green. The context comparison only checks
+ * receipt-against-current, so UNCHANGED dirt matches itself perfectly — and the
+ * whole point of this rule is that a receipt describing a dirty tree is
+ * worthless even when the tree has not moved since, because the verdict was
+ * taken over state no commit contains.
+ */
+describe("a dirty checkout can never mint a reusable receipt", () => {
+  const dirty = new Bun.CryptoHasher("sha256").update("?? scratch.txt\n").digest("hex")
+
+  test("a receipt whose status is not the clean sentinel is refused", () => {
+    const receipt = mintExactVerificationReceipt(context({ statusSha256: dirty }), 1_000, 5_000)
+    expect(
+      validateExactVerificationReceipt(receipt, context({ statusSha256: dirty }), 2_000),
+    ).toEqual({ ok: false, reason: "receipt describes a dirty checkout" })
+  })
+
+  test("…even when the working tree has not changed since", () => {
+    // The exact hole: same dirt on both sides. Every field matches, so a
+    // receipt-vs-current comparison alone would say "reusable".
+    const receipt = mintExactVerificationReceipt(context({ statusSha256: dirty }), 1_000, 5_000)
+    const current = context({ statusSha256: dirty })
+    expect(receipt.statusSha256).toBe(current.statusSha256)
+    expect(validateExactVerificationReceipt(receipt, current, 2_000).ok).toBe(false)
+  })
+
+  test("PAIRED CONTROL — the same receipt over a clean tree is reusable", () => {
+    // Without this arm, "always refuse" satisfies both assertions above.
+    const receipt = mintExactVerificationReceipt(context(), 1_000, 5_000)
+    expect(validateExactVerificationReceipt(receipt, context(), 2_000)).toEqual({ ok: true })
+  })
+})

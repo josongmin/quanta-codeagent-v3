@@ -115,6 +115,43 @@ describe("capability-result", () => {
     })
   })
 
+  test("a skip elsewhere in the document does not unexecute a BLOCK-form case", () => {
+    // Mutation survivor: `skipped = /<skipped\b/.test(body)` -> `.test(xml)`
+    // passed every fixture, because each fixture's EXECUTED case was
+    // self-closing and so never entered the body branch at all. That is not the
+    // shape a real lane emits — Bun writes `<testcase …>` with children for any
+    // case that produced output, beside `<skipped />` siblings for the rest.
+    const xml = junit(
+      `<testcase name="ran" file="f.test.ts"><system-out>hello</system-out></testcase>` +
+        `<testcase name="did not" file="f.test.ts"><skipped/></testcase>`,
+    )
+    expect(countJunitExecution(xml)).toEqual({
+      executedFiles: ["f.test.ts"],
+      executedCases: 1,
+      skippedCases: 1,
+    })
+
+    // …and the document-scoped reading really would get this wrong, which is
+    // what makes the assertion above load-bearing rather than incidental.
+    const documentScoped = /<skipped\b/u.test(xml)
+    expect(documentScoped).toBe(true)
+  })
+
+  test("the first block-form case is not unexecuted by a LATER skip", () => {
+    // Ordering matters for a scan: a document-scoped test also mis-reads the
+    // case that comes BEFORE the skip, which is the common layout when a lane
+    // runs a few arms and skips the rest.
+    const xml = junit(
+      `<testcase name="a" file="f.test.ts"><system-out>x</system-out></testcase>` +
+        `<testcase name="b" file="g.test.ts"><skipped/></testcase>` +
+        `<testcase name="c" file="h.test.ts"><failure message="boom"/></testcase>`,
+    )
+    const counts = countJunitExecution(xml)
+    expect(counts.executedFiles).toEqual(["f.test.ts", "h.test.ts"])
+    expect(counts.executedCases).toBe(2)
+    expect(counts.skippedCases).toBe(1)
+  })
+
   test("an empty report is zero, not a crash", () => {
     expect(countJunitExecution(junit(""))).toEqual({
       executedFiles: [],

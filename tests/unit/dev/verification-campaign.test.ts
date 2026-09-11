@@ -617,6 +617,31 @@ describe("whole verification campaign lease", () => {
  * freezes the comparison base with the head so local and hosted admission look
  * at the same commit range.
  */
+/**
+ * The argument object of every `buildCampaignReceipt({...})` call, brace-balanced.
+ *
+ * The two call sites sit at different indentation, and a lazy regex found only
+ * one — which would have made the field checks assert over half the producer.
+ */
+const buildCampaignReceiptCallArgs = (source: string): readonly string[] => {
+  const out: string[] = []
+  let at = source.indexOf("buildCampaignReceipt({")
+  while (at !== -1) {
+    let depth = 0
+    let cursor = source.indexOf("{", at)
+    const start = cursor + 1
+    do {
+      const ch = source[cursor]
+      if (ch === "{") depth += 1
+      else if (ch === "}") depth -= 1
+      cursor += 1
+    } while (depth > 0 && cursor < source.length)
+    out.push(source.slice(start, cursor - 1))
+    at = source.indexOf("buildCampaignReceipt({", cursor)
+  }
+  return out
+}
+
 describe("campaign head is frozen under the lease", () => {
   test("the re-freeze happens AFTER the lease, not before", () => {
     const source = readFileSync(
@@ -673,6 +698,90 @@ describe("campaign head is frozen under the lease", () => {
     expect(source).toContain("readRefOrNull")
     expect(source).toContain("/^[0-9a-f]{40}$/")
     expect(source).not.toContain('capture(["git", "rev-parse", ref]).text.trim()')
+  })
+
+  test("the PRODUCER feeds the builder the right value for each field", () => {
+    // Four mutation survivors lived here: `headMovedInQueue: false`,
+    // `endHead: campaignHead`, `queuedHead: campaignHead`, and dropping the
+    // base re-read. Coverage was one source-ORDER check plus a pure
+    // pass-through of the builder, so every way of feeding the builder the
+    // WRONG value was unguarded — a run that waited an hour behind another
+    // checkout would report `headMovedInQueue: false` and nothing would notice.
+    //
+    // Structural, because the producer is a top-level statement sequence in a
+    // module that ends in a campaign: what can be asserted is that each field
+    // is fed from its own distinct source, not from the same one.
+    const source = readFileSync(
+      join(import.meta.dir, "..", "..", "..", "tools", "dev", "verification-campaign.ts"),
+      "utf8",
+    )
+    const receiptCalls = buildCampaignReceiptCallArgs(source)
+    // ANTI-VACUITY: both call sites must be found, or the field checks below
+    // pass over an empty list.
+    expect(receiptCalls.length).toBeGreaterThanOrEqual(2)
+
+    for (const call of receiptCalls) {
+      // `queuedHead` must be the queued snapshot, never the running one.
+      expect({ call: call.slice(0, 40), ok: /queuedHead[,:]/u.test(call) }).toEqual({
+        call: call.slice(0, 40),
+        ok: true,
+      })
+      expect(call).not.toContain("queuedHead: campaignHead")
+      // `headMovedInQueue` must be COMPUTED, not a literal.
+      expect(call).not.toContain("headMovedInQueue: false,\n      command")
+      expect(
+        /headMovedInQueue: (?:true|false)\b/u.test(call) && !call.includes("never waited"),
+      ).toBe(false)
+    }
+
+    // `endHead` on the terminal path must be read fresh, not aliased to the
+    // frozen running head — the whole point is noticing a tree that moved
+    // DURING the campaign.
+    expect(source).toContain("endHead: currentHeadOrNull()")
+    // …and the base is re-read under the lease, beside the head re-freeze.
+    const refreeze = source.indexOf("campaignHead = readHead()")
+    expect(refreeze).toBeGreaterThan(-1)
+    expect(source.slice(refreeze, refreeze + 200)).toContain('readRefOrNull("origin/main")')
+  })
+
+  test("headMovedInQueue is derived from the two heads, not asserted", () => {
+    // The builder is pure, so this half is executable: the flag must follow the
+    // inputs in BOTH directions, which a hard-coded `false` cannot do.
+    const base = {
+      pid: 1,
+      command: "bun run tools/dev/gate.ts prepush",
+      verificationTier: "prepush" as const,
+      leasePort: 1,
+      leaseWaitMs: 0,
+      startedAtMs: 1_000,
+      finishedAtMs: 2_000,
+      outcome: "passed" as const,
+      exitCode: 0,
+      drained: true,
+      survivingGroups: [] as readonly number[],
+      hostAtStart: { cpus: 8, loadAverage1m: 1, totalMemoryBytes: 1 },
+      hostAtEnd: { cpus: 8, loadAverage1m: 1, totalMemoryBytes: 1 },
+      baseOid: null,
+      endHead: null,
+    }
+    const moved = buildCampaignReceipt({
+      ...base,
+      head: "b".repeat(40),
+      queuedHead: "a".repeat(40),
+      headMovedInQueue: true,
+    })
+    const still = buildCampaignReceipt({
+      ...base,
+      head: "a".repeat(40),
+      queuedHead: "a".repeat(40),
+      headMovedInQueue: false,
+    })
+    expect({ moved: moved.headMovedInQueue, still: still.headMovedInQueue }).toEqual({
+      moved: true,
+      still: false,
+    })
+    expect(moved.queuedHead).not.toBe(moved.head)
+    expect(still.queuedHead).toBe(still.head)
   })
 
   test("the receipt carries all three snapshots and the base", () => {

@@ -167,6 +167,19 @@ const NETWORK_FIXTURES: readonly { readonly why: string; readonly source: string
     source: `const page = \`<img src="http://${A}/meta.png" />\``,
   },
   {
+    // MUTATION SURVIVOR, closed: emptying `SHELL_TAGS` left the suite 12/12
+    // green, so a future ``await $`curl http://<addr>/latest/meta-data` ``
+    // would have passed the SSRF guard. `NETWORK_SINKS` and
+    // `NETWORK_RECEIVERS` were both covered; the third sink family — tagged
+    // shell templates — was not.
+    why: "a Bun shell tag running curl",
+    source: `await $\`curl -s http://${A}/latest/meta-data/\``,
+  },
+  {
+    why: "a Bun shell tag through the `sh` alias",
+    source: `await sh\`wget -qO- http://${A}/\``,
+  },
+  {
     why: "a CDP Runtime.evaluate expression",
     source: `port.cdp(h, "Runtime.evaluate", { expression: "fetch('http://${A}/')" })`,
   },

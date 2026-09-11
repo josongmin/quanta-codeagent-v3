@@ -272,15 +272,3 @@ export const formatGateManifestViolations = (
     "The contract is tools/dev/gate-manifest.ts:GATE_CONTRACT. Edit it in the same diff as the manifest change — never widen a floor to clear this."
   )
 }
-
-/**
- * The one call both the listing path and the run path make. Throws with the
- * full report so a caller cannot accidentally continue over a red manifest.
- */
-export const assertGateManifestMatchesContract = (
-  gates: readonly GateUnderContract[],
-  contract: readonly GateContractEntry[],
-): void => {
-  const violations = validateGateManifest(gates, contract)
-  if (violations.length > 0) throw new Error(formatGateManifestViolations(violations))
-}
