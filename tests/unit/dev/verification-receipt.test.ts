@@ -209,9 +209,40 @@ describe("content-bound exact verification receipt", () => {
       expect(verificationHomeCapabilitySha256("/home/u", { ...tools, dlv: "<missing>" })).not.toBe(
         baseline,
       )
-      // HOME itself moved, with every tool byte-identical.
+      // VR-13. This arm used to pass the SAME absolute tool map under a second
+      // HOME, and its comment claimed that proved HOME was bound. It did not:
+      // `/home/u/go/bin/dlv` stops matching the `/home/other` prefix, so the
+      // TOOLS term emptied and the digest moved for the other reason. Deleting
+      // `home` from the hashed payload left this file 28/28 green.
+      //
+      // The real case is two homes laid out identically — two accounts on one
+      // box, or a runner beside a developer, both sharing one receipt cache
+      // because it lives in the git common dir. `homeDerivedToolResolution`
+      // reports paths RELATIVE to home, so the tools term is byte-identical
+      // and only the home value itself can separate them.
+      const mirrored = { dlv: "/home/other/go/bin/dlv 1:2 4096 1700000000" }
+      expect(homeDerivedToolResolution("/home/other", mirrored)).toEqual(
+        homeDerivedToolResolution("/home/u", tools),
+      )
+      expect(verificationHomeCapabilitySha256("/home/other", mirrored)).not.toBe(baseline)
+
+      // The weaker arm still belongs here: a home move that ALSO strands the
+      // tools must miss, and for a reason this digest can state.
       expect(verificationHomeCapabilitySha256("/home/other", tools)).not.toBe(baseline)
       expect(verificationHomeCapabilitySha256(undefined, tools)).not.toBe(baseline)
+      expect(verificationHomeCapabilitySha256("", tools)).not.toBe(
+        verificationHomeCapabilitySha256(undefined, tools),
+      )
+
+      // An UNSET home must key no tools at all. Without the empty-home guard
+      // the prefix degenerates to "/", every absolute path matches, and the
+      // whole system toolchain folds into this digest — which is the one thing
+      // the docstring promises it does not do: an unrelated /usr/bin upgrade
+      // would then be reported as a HOME capability miss.
+      expect(homeDerivedToolResolution("", tools)).toEqual([])
+      expect(verificationHomeCapabilitySha256(undefined, tools)).toBe(
+        verificationHomeCapabilitySha256(undefined, { git: "/usr/bin/git 9:9 1 2" }),
+      )
       // A tool OUTSIDE home keys nothing here — that is toolchainSha256's job,
       // and duplicating it would make every unrelated upgrade a HOME miss.
       expect(
