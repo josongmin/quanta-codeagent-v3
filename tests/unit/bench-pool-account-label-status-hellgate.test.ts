@@ -44,6 +44,14 @@ const emitPoolPass = (
 
 const sshResponse = (args: readonly string[]): SpawnResult => {
   const command = commandFromArgs(args)
+  // The family-profile readiness probe, added with `assertBoxProfileReady`,
+  // ends `&& echo OK` and the caller requires stdout to contain "OK". This
+  // stub had no branch for it and fell through to `spawnOk("")`, so bootstrap
+  // threw "dataset-family=verified readiness probe failed" and both cases here
+  // failed on provisioning before either could assert anything about account
+  // labels. Answering what the probe ASKS FOR rather than a sentinel of the
+  // stub's own choosing is what keeps the two from drifting again.
+  if (command.trim().endsWith("echo OK")) return spawnOk("OK")
   if (command.includes("READY")) return spawnOk("READY")
   if (command.includes("run.exit")) return spawnOk("0\n==XQ-RUN-EXIT-XQ==\n")
   if (command.includes("mkdir ~/.pool-grade.lock")) return spawnOk("LOCKED")

@@ -50,6 +50,12 @@ const spawnOk = (stdout: string): SpawnResult => ({ code: 0, stdout, stderr: "" 
 const lastArg = (args: readonly string[]): string => args[args.length - 1] ?? ""
 
 const sshControlResponse = (command: string): SpawnResult | undefined => {
+  // The family-profile readiness probe ends `&& echo OK` and its caller
+  // requires stdout to contain "OK". Without a branch for it this stub fell
+  // through and bootstrap threw "dataset-family=verified readiness probe
+  // failed", so every case here failed on provisioning before it could assert
+  // anything. Answering what the probe ASKS FOR keeps the two from drifting.
+  if (command.trim().endsWith("echo OK")) return spawnOk("OK")
   if (command.includes("READY")) return spawnOk("READY")
   if (command.includes("run.exit") || command.includes("XQ-RUN-EXIT-XQ")) {
     return spawnOk("0\n==XQ-RUN-EXIT-XQ==\n")

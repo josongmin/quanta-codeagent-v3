@@ -127,6 +127,12 @@ const mockSpawn = (opts: { rateLimited?: Set<string> } = {}) => {
   }
   const routeSsh = (args: string[]): SpawnResult => {
     const command = args[args.length - 1] ?? ""
+    // The family-profile readiness probe ends `&& echo OK` and its caller
+    // requires stdout to contain "OK". Without a branch for it this stub fell
+    // through and bootstrap threw "dataset-family=verified readiness probe
+    // failed", so every case here failed on provisioning before it could assert
+    // anything. Answering what the probe ASKS FOR keeps the two from drifting.
+    if (command.trim().endsWith("echo OK")) return ok("OK")
     if (command.includes("READY")) return ok("READY")
     if (command.includes("run.exit")) return ok("0\n==XQ-RUN-EXIT-XQ==\n")
     if (command.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
