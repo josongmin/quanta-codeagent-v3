@@ -76,6 +76,7 @@ import { ADMISSION_DEADLINE_ENV } from "./verification-admission"
 import { executionPolicyDigest } from "./verification-execution-policy"
 import { chunkInputScopeSha256 } from "./verification-input-scope"
 import { sharedVerificationCacheRoot } from "./verification-receipt"
+import { type UserLibraryDecision, userLibraryDecision } from "./worker-home"
 
 /**
  * Authoritative local full-suite runner.
@@ -317,7 +318,7 @@ const pruneStaleChunkReceipts = (suite: SuiteName, nowMs = Date.now()): void => 
 }
 
 /**
- * Lend the worker HOME the real `~/Library`, and nothing else.
+ * Chrome's HOME dependency, scoped to the lane that actually has one.
  *
  * The scratch HOME exists so a test cannot read the developer's real
  * `~/.quanta`; QUANTA_HOME and QUANTA_PREFS_HOME are set explicitly, so that
@@ -335,16 +336,39 @@ const pruneStaleChunkReceipts = (suite: SuiteName, nowMs = Date.now()): void => 
  * target moved the rate; an EMPTY Library skeleton measures like no Library
  * at all, which is why an earlier persistent-but-cold directory did not help.
  *
- * Best effort: if the link cannot be made the tests still run, they just
- * inherit that 1-in-3 navigate.
+ * WHAT CHANGED. That measurement licensed a Chrome workaround; it was applied
+ * to EVERY worker. A full suite plans 44 chunks and 12 files classify
+ * `browser` (only three of which drive a real Chrome — the rest match the
+ * detector on a string literal), so ~43 of 44 workers were handed a symlink to
+ * the developer's entire `~/Library` for a browser they never start. That is
+ * real user state — Mail, Keychains, Safari, Messages, every app's Application
+ * Support — reachable from any test that resolves HOME, on a host where tests
+ * routinely spawn shells. It is also invisible to cache identity and absent on
+ * Linux CI, so the local and hosted lanes were not running the same thing.
+ *
+ * The lend is now scoped to `browser` chunks, and `QUANTA_TEST_NO_USER_LIBRARY=1`
+ * removes it entirely (the browser lane then inherits the measured 1-in-3
+ * navigate). Retiring it for the browser lane too needs the Chrome capability
+ * producer to own a disposable profile and re-measure the navigate rate — until
+ * that receipt exists, silently dropping it here would trade a safety defect
+ * for a flake nobody could attribute.
+ *
+ * Returns what it did, so the worker's own log says which HOME it ran under.
  */
-const lendRealUserLibrary = (workerHome: string): void => {
+const lendRealUserLibrary = (
+  workerHome: string,
+  resourceClass: TestResourceClass,
+): UserLibraryDecision | "unavailable" => {
+  const decision = userLibraryDecision(resourceClass, process.env)
+  if (decision !== "lend") return decision
   try {
     const real = join(homedir(), "Library")
-    if (!existsSync(real)) return
+    if (!existsSync(real)) return "unavailable"
     symlinkSync(real, join(workerHome, "Library"))
+    return "lend"
   } catch {
     // Already linked, or a platform without this convention.
+    return "unavailable"
   }
 }
 
@@ -392,9 +416,10 @@ const runShard = async (
   const benchResults = join(workerRoot, "bench-results")
   mkdirSync(workerTmp, { recursive: true })
   mkdirSync(quantaHome, { recursive: true })
-  lendRealUserLibrary(workerHome)
+  const userLibrary = lendRealUserLibrary(workerHome, plan.resourceClass)
   mkdirSync(prefsHome, { recursive: true })
   mkdirSync(benchResults, { recursive: true })
+  process.stdout.write(`[test:shards] chunk=${shard} user_library=${userLibrary}\n`)
   const spoolPath = join(workerRoot, `chunk-${plan.index}.log`)
   writeFileSync(scanReachSink, "")
   const spoolFd = openSync(spoolPath, "w")
