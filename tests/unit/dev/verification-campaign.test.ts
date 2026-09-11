@@ -135,7 +135,7 @@ const RELATIVE_IMPORT = /from\s+"\.\/([A-Za-z0-9_-]+)"/g
  * manifest.ts` sat in the list for exactly that reason with no derivation that
  * explained it.
  */
-const CAMPAIGN_ENTRYPOINTS = ["verification-campaign.ts", "gate.ts"] as const
+const CAMPAIGN_ENTRYPOINTS: readonly string[] = ["verification-campaign.ts", "gate.ts"]
 
 /** `gate.ts` is a root, not a copy: the fixture writes its own synthetic gate. */
 const FIXTURE_SUPPLIES = new Set<string>(["gate.ts"])
@@ -882,7 +882,7 @@ describe("the scratch campaign's module list is closed", () => {
     expect(needed).toContain("verification-campaign.ts")
     expect(needed).toContain("lease-quarantine.ts")
 
-    const copied = new Set(CAMPAIGN_MODULES)
+    const copied = new Set<string>(CAMPAIGN_MODULES)
     const missing = needed.filter((file) => !copied.has(file))
     expect(
       missing,
@@ -894,6 +894,7 @@ describe("the scratch campaign's module list is closed", () => {
     // The other direction: a module dropped from the graph but left in the
     // list is a copy nobody needs and a claim nobody checks.
     const needed = new Set(campaignImportClosure())
-    expect(CAMPAIGN_MODULES.filter((file) => !needed.has(file))).toEqual([])
+    const declared: readonly string[] = CAMPAIGN_MODULES
+    expect(declared.filter((file) => !needed.has(file))).toEqual([])
   })
 })
