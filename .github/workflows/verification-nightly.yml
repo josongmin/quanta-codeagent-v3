@@ -9,6 +9,15 @@ on:
     - cron: "0 4 * * *"
   workflow_dispatch:
 
+# NOT cancel-in-progress: a nightly is a 180-minute cache-off campaign, and
+# cancelling one that is 170 minutes in to start a fresh one throws away the only
+# deterministic evidence of the day. Queueing is the right behaviour — GitHub
+# keeps at most one pending run per group, so cron, a manual dispatch and a retry
+# can no longer run three campaigns over each other.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
 

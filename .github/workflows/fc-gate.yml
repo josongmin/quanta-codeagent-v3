@@ -28,6 +28,13 @@ on:
   push:
     branches: [main]
 
+# Same key shape as ci.yml: this workflow is a REQUIRED context on the same PRs,
+# and it had no concurrency at all — a superseded commit's catalog run kept going
+# while the new one started, so two full catalog loads raced for the same lane.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 

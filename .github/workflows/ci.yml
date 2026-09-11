@@ -18,8 +18,13 @@ on:
   schedule:
     - cron: "0 6 * * *" # nightly eval (06:00 UTC)
 
+# The key includes the EVENT, not just the ref. `github.ref` on a schedule is
+# `refs/heads/main`, identical to a push, so the 06:00 eval cron and required
+# main verification shared one lane: a non-blocking 60-minute eval could queue
+# the merge gate behind it. Purposes are separate lanes; only a superseded PR
+# head is cancelled.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -65,6 +70,8 @@ jobs:
           path: .cache/verification-matrix/plan.json
           if-no-files-found: error
           include-hidden-files: true
+          # Explicit, not the repository default (the frozen plan / eval report a rerun is compared against).
+          retention-days: 14
 
   full-shard:
     name: full-shard (shadow)
@@ -107,6 +114,8 @@ jobs:
           path: .cache/verification-matrix/worker/
           if-no-files-found: error
           include-hidden-files: true
+          # Explicit, not the repository default (worker detail: the bulk of the bytes, and superseded as soon as the aggregate exists).
+          retention-days: 3
 
   full-aggregate:
     name: full-aggregate (shadow)
@@ -150,6 +159,8 @@ jobs:
           path: .cache/verification-matrix/aggregate.json
           if-no-files-found: error
           include-hidden-files: true
+          # Explicit, not the repository default (closeout evidence — the aggregate verdict and each lane's executed-case proof).
+          retention-days: 30
 
   static-code:
     name: static-code
@@ -381,6 +392,8 @@ jobs:
           name: capability-result-${{ github.run_id }}-${{ github.run_attempt }}-pty
           path: .cache/capability/pty.json
           if-no-files-found: error
+          # Explicit, not the repository default (closeout evidence — the aggregate verdict and each lane's executed-case proof).
+          retention-days: 30
 
   web:
     name: web
@@ -452,6 +465,8 @@ jobs:
           name: capability-result-${{ github.run_id }}-${{ github.run_attempt }}-toolchain
           path: .cache/capability/toolchain.json
           if-no-files-found: error
+          # Explicit, not the repository default (closeout evidence — the aggregate verdict and each lane's executed-case proof).
+          retention-days: 30
 
   pyramid:
     name: pyramid (unit + integration)
@@ -558,6 +573,8 @@ jobs:
           name: capability-result-${{ github.run_id }}-${{ github.run_attempt }}-contract
           path: .cache/capability/contract.json
           if-no-files-found: error
+          # Explicit, not the repository default (closeout evidence — the aggregate verdict and each lane's executed-case proof).
+          retention-days: 30
 
   eval:
     name: eval (real LLM — non-blocking)
@@ -592,3 +609,5 @@ jobs:
         with:
           name: eval-report
           path: eval-report.txt
+          # Explicit, not the repository default (the frozen plan / eval report a rerun is compared against).
+          retention-days: 14
