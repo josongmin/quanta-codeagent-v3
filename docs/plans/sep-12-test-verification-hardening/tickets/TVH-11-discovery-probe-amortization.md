@@ -1,7 +1,7 @@
 # TVH-11 — discovery/module-load probe 제거와 비용 가시화
 
 - 우선순위: P0/P1
-- 상태: OPEN
+- 상태: IN PROGRESS
 - 소유 lane: test discovery / capability fixtures / timing telemetry
 - 선행: TVH-03, TVH-05, TVH-07
 - 후속: TVH-10
@@ -42,3 +42,11 @@
 - [ ] 동일 capability probe를 file 수만큼 반복하지 않는다.
 - [ ] discovery/cleanup overhead가 timing top-N과 receipt에 보인다.
 - [ ] comment-only env gate가 존재할 수 없도록 manifest와 source가 일치한다.
+
+## 진행 (2026-09-12)
+
+- 작업 중(별도 lane). `tools/dev/capability-probe-producer.ts`, `capability-receipt.ts`,
+  `capability-receipt-consumer.ts`, `module-load-effect-guard.ts` 등이 트리에 있으나 미커밋.
+- 통합 요구사항: TVH-03의 `tools/dev/test-capability-manifest.ts`와 `quanta.capability-result.v1`이
+  이미 착륙했으므로 **세 번째 스키마를 만들지 말 것**.
+- 현재 `lint:debt` RED에 이 lane 파일 다수 포함(lsp-pyright/lsp-typescript의 noUnusedVariables 등).

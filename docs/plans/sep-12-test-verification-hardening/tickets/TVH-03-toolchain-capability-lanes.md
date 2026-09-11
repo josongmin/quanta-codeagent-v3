@@ -1,7 +1,7 @@
 # TVH-03 — real toolchain·capability lane 분리
 
 - 우선순위: P0
-- 상태: OPEN
+- 상태: LANDED (browser/bwrap/docker 그룹은 lane gate 대기)
 - 소유 lane: toolchain fixtures / hosted capability CI
 - 선행: TVH-01, TVH-02
 - 후속: TVH-06, TVH-09
@@ -63,3 +63,35 @@
 - [ ] real-toolchain 결과가 executed/skipped/blocked/setup-failed를 구분한다.
 - [ ] unpinned runtime install이 테스트 body/module load에 없다.
 - [ ] heavyweight capability는 독립 timeout과 artifact를 가진다.
+
+## 진행 (2026-09-12)
+
+- **LANDED `e818b72fc`** — tier 이름 3개가 한 population이던 상태를 해소.
+
+      before  prepush 3941  pr 3941  full 3941  (동일 digest)  nightly 3947
+      after   prepush 3925  pr 3925  full 3935           nightly 3948
+
+  `pr` = universe − 6 nightly-exhaustive − 17 lane-gated capability.
+  `full` = universe − 6 nightly-exhaustive − 7 nightly-heavy capability.
+  `nightly` = universe와 set-equal, **digest가 before와 동일** = 커버리지 보존 증명(어떤 파일도 모든 tier에서 빠지지 않음).
+  tier별 `selected + excluded = universe`가 맞고 제외마다 reason class가 붙는다.
+
+- **통합 중 발견한 위험(막음)**: `gate.ts`가 모든 gate에 `QUANTA_VERIFICATION_TIER`를 넘기고 shard runner가
+  이를 읽으므로 **tier membership = 실제 실행 집합**이다. prepush를 canary-only로 좁히면
+  `QUANTA_VERIFICATION_TIER=prepush ... --discover-only` → **selected 8** (기존 3,941).
+  affected/changed selector(`verification-selection.ts`)가 아직 아무 gate도 소비하지 않으므로
+  이건 tier 축소가 아니라 커버리지 붕괴다. prepush는 PR population 유지하고
+  `PREPUSH_NARROWED_TO_CANARY` 플래그 + interlock 테스트로 고정했다(selector 미배선 상태에서 플립 시 RED).
+
+- capability 결과는 required aggregator가 이미 검증하는 `quanta.capability-result.v1` 그대로 사용(스키마 이중화 없음).
+  `expect(true).toBe(true)` self-pass 제거, `QUANTA_REQUIRE_CAPABILITY=<group>`로 부재를 skip이 아닌 fail로.
+  jest/mocha module-load `npm i` 제거, astropy clone/build는 nightly native-build 그룹으로.
+
+- red-on-injection 10건 전부 RED 후 byte-identical 복원.
+
+### 남은 항목 (blocker로 명시)
+
+- `test:real-toolchain`이 아직 `find` blob (package.json, 통합 담당).
+- astropy `dependencyLockSha256`는 placeholder.
+- browser / bwrap / docker-lima 그룹은 `declared-pending-gate`: lane env gate가 없어 membership 미변경.
+  gate 없이 옮기면 커버리지가 조용히 빠진다.

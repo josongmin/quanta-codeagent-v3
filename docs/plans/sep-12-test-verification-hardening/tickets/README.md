@@ -79,3 +79,46 @@ TVH-02와 TVH-03의 파일별 분리, TVH-11의 probe helper, TVH-12의 각 prod
 - required matrix와 단일 full의 current-HEAD verdict equality 및 hosted artifact가 있다.
 - required aggregator는 expected producer ID exact set과 capability별 executed floor를 검증하고 missing/skip/zero-case green을 거부한다.
 - 성능 수치는 healthy-load current-HEAD ABBA에서만 확정한다.
+
+---
+
+## 착륙 로그 (2026-09-12, local main)
+
+`85a99bb6f` 이후 16 커밋. 각 항목은 측정치와 red-on-injection을 커밋 메시지에 담고 있다.
+
+| 커밋 | 내용 |
+|---|---|
+| `151040786` | gate ownership floor drift — **모든 gate 명령이 HEAD에서 죽어 있었다** (precommit 8 vs floor 10). exact `(id, stage)` 계약으로 교체, list/run 공통 validator |
+| `49d86642b` | worker HOME의 `~/Library` 전면 대여 → browser chunk로 한정 |
+| `831d032b2` | suite floor(pre-selection) ↔ tier floor(post-selection) 분리, `--parallel=1` no-op 거부, 오해를 고정하던 가드 executor별 분리 |
+| `14348d545` | required aggregator가 producer **개수**만 보던 것 → SSOT/needs/workflow 3-way exact 비교 |
+| `fbb536f62` | capability lane이 실행 증명을 발행(JUnit→`capability-result.v1`), contract argv drift 해소, parity guard 구조 결함 2건 |
+| `52044ab1f` | discovery 4회 중복 walk → 1 snapshot projection (ABBA median 124ms→45ms) |
+| `26ae28aea` | membership bucket이 ceiling까지 **여유 1파일** — throw 대신 결정론적 분할 |
+| `9365c21c6` | 절대경로 3개 entrypoint + SSRF fixture의 실제 link-local 요청 제거 |
+| `f3d49f529` | bounded process observer + identity-safe kill (70초 drain 1400→34 snapshot) |
+| `3772f7df6` | `smoke` 이중 authority 통합 |
+| `7bea20017` | `targetChunkCount` dead parameter 거부 |
+| `8b96f06f5` | campaign이 **대기 전** HEAD를 기록하던 것 → queued/running/end 3-snapshot + base OID |
+| `c7e91b306` | 두 floor의 실행 증거 부재(dirty tree에선 도달조차 안 함) → selector 추출, 4 mutant killed |
+| `741b68fe5` | `~/Library` 가드가 source만 읽던 것 → 실제 파일시스템 효과 검증, 5 mutant killed |
+| `6523ab56c` | `test:clean-js`가 무시된 scratch의 `.js`를 **삭제**하고 있었다 |
+| `e818b72fc` | tier 3개가 한 population이던 상태 해소 + prepush 조기 축소 interlock |
+
+### 현재 tier membership (current HEAD)
+
+    prepush 3925   pr 3925   full 3935   nightly 3948
+
+`prepush == pr`은 **의도된 미완**이다. `gate.ts`가 tier를 shard runner에 넘기므로
+prepush를 canary-only로 좁히면 `bun run prepush`가 3,941 → 8파일이 된다.
+affected/changed selector가 어떤 gate에도 연결되지 않은 상태에서의 축소는 커버리지 붕괴이며,
+`PREPUSH_NARROWED_TO_CANARY` interlock이 조기 플립을 RED로 만든다.
+
+### 아직 열린 항목
+
+- TVH-04 resource certification(561 integration-path 미인증), TVH-05 timing/cache,
+  TVH-08 heavy fixture/temp hygiene, TVH-09 hosted matrix 승격, TVH-13 resource envelope,
+  TVH-14 DAG runner, TVH-10 closeout.
+- TVH-11 / TVH-15는 별도 lane에서 진행 중(미커밋).
+- `lint:debt`가 현재 RED — 원인은 전부 진행 중 lane 파일.
+- hosted CI 증거는 없다. Actions 빌링 차단이 2026-07-10부터 유효하므로 hosted receipt는 외부 blocker다.

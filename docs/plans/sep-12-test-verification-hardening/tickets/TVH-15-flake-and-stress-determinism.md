@@ -1,7 +1,7 @@
 # TVH-15 — wall-clock flake·random stress·rerun 증폭 제거
 
 - 우선순위: P1/P2
-- 상태: OPEN
+- 상태: IN PROGRESS
 - 소유 lane: test determinism / virtual time / measurement policy
 - 선행: TVH-02, TVH-05, TVH-08
 - 후속: TVH-10
@@ -46,3 +46,12 @@
 - [ ] fixed wait가 protocol/state readiness를 대신하지 않는다.
 - [ ] flaky failure를 전체 campaign 재실행 없이 exact seed/fixture로 재현할 수 있다.
 - [ ] diagnostic retry가 bounded·deduplicated이며 quarantine에는 owner·issue·expiry·fingerprint가 있다.
+
+## 진행 (2026-09-12)
+
+- 작업 중(별도 lane). `tools/test-resilience/{bounded-child,diagnose,failure-artifact,junit}.ts`,
+  `tools/dev/test-determinism-*.ts`, `test-wall-clock-inventory.*`가 트리에 있으나 미커밋.
+- 통합 요구사항: bounded child lifecycle은 이미 착륙한 `tools/dev/process-observer.ts`와
+  `test-shard-lifecycle.ts`의 typed kill outcome을 **소비**해야 한다(중복 구현 금지).
+- 요구 측정치(미수령): 한 파일 20 실패 시 diagnostic child 수 before/after,
+  hung/infinite-output 주입 시 survivor 수와 종료 시간.

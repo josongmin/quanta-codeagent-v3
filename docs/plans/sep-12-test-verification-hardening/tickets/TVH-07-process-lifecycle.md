@@ -1,7 +1,7 @@
 # TVH-07 — process lifecycle·timeout·cleanup 표준화
 
 - 우선순위: P0/P1
-- 상태: OPEN
+- 상태: P0 LANDED (나머지 진행 중)
 - 소유 lane: child process lifecycle / watchdog
 - 선행: TVH-01
 - 후속: TVH-08, TVH-09
@@ -85,3 +85,27 @@
 - [ ] total wall과 inactivity timeout이 별도 동작한다.
 - [ ] timeout 후 child survivor와 temp root가 없다.
 - [ ] 한 chunk가 계속 출력하며 job timeout까지 점유할 수 없다.
+
+## 진행 (2026-09-12)
+
+- **LANDED `f3d49f529`** — 같은 계층의 fail-open 2종.
+  1. 모든 process 관측이 timeout 없는 sync `ps`였다. RSS 샘플당 2회, drain/identity가 각각 추가.
+     `ps`가 hang하면 JS 이벤트루프·inactivity watchdog·TERM→KILL deadline이 함께 정지 —
+     watchdog이 감시 대상 명령에 막힌다. poll은 60s TERM + 10s KILL 동안 flat 50ms:
+
+         70초 drain, flat 50ms poll : 1400 snapshots
+         70초 drain, backed off     :   34 snapshots
+
+     `tools/dev/process-observer.ts` 하나로 통합(명시 timeout, 50ms→3s 기하 backoff,
+     한 tick의 snapshot을 RSS/identity/drain이 공유). 미반환 observer도 선언된 deadline 안에 typed failure로 종료.
+  2. `leaderIdentity`가 "leader 종료"와 "`ps`가 답을 못 함"을 둘 다 `undefined`로 반환했고
+     `killTracked`가 둘 다 kill 가능으로 취급 → `ps` 불가 시 pid 재사용 보호가 완전히 꺼짐.
+     typed 결과로 교체, `unknown`은 `unverified`이고 signal을 보내지 않으며 drain을 clean으로 주장하지 않는다.
+     `empty-output`을 4번째 unavailable 사유로 추가(`ps -A`가 exit 0 + 0 row면 "전부 drained"로 읽혔다).
+
+- injection RED: unknown을 kill 가능으로 되돌리기(6 tests, 낯선 pgid에 실제 SIGTERM), flat poll 복원(cap 40 대비 1403), identity probe의 sentinel 제거.
+- 부수: process-lifecycle e2e의 잠복 race 수정(SIGTERM을 **worker** pid 파일 기준으로 보내 driver의 handler 설치 전에 도달, exit 143). timeout 상향 없이 readiness marker로 해결.
+
+### 남은 항목
+- shard total wall deadline, spool 상한, `gate.ts`/`worktree-pollution-guard`의 sync spawn 교체,
+  단일 admission deadline, real CLI helper 9개의 stdout/stderr 동시 drain, `tools/test-resilience` bounded lifecycle(진행 중).
