@@ -841,3 +841,108 @@ describe("what a watchdog kill reports", () => {
     expect(watchdogAction({ ...base, spoolBytes: 3283, alreadyKilling: true })).toBe("progressed")
   })
 })
+
+/**
+ * MEMBERSHIP CAPACITY — a growing corpus must not stop the runner planning.
+ *
+ * `MAX_CHUNK_FILES` is a CHECKPOINT bound: "a failed campaign forfeits at most
+ * this many files of green coverage per chunk". Exceeding it is a scheduling
+ * fact, not corruption — but it was a `throw`, so the only repair available was
+ * raising the ceiling, i.e. deleting the bound the error message is about.
+ *
+ * Measured on the real tree at this HEAD: bucket `pure:4` held 159 of 160.
+ * Two more files hashing into it and EVERY shard command would have died with
+ * `membership bucket pure exceeds 160 files`.
+ *
+ *     pure:4  159    pure:13 147    pure:22 146    pure:23 142
+ *
+ * Splitting is local and content-derived: the current corpus plans to the
+ * byte-identical 44 chunks it did before (verified against the previous
+ * implementation), so no cache receipt is invalidated by the change itself.
+ */
+describe("membership bucket capacity", () => {
+  const MAX_CHUNK_FILES = 160
+
+  const syntheticPure = (count: number): readonly string[] =>
+    Array.from(
+      { length: count },
+      (_, index) => `tests/unit/cap-${String(index).padStart(5, "0")}.test.ts`,
+    )
+
+  /**
+   * Force every file into ONE membership bucket.
+   *
+   * `bucketForFile` hashes the membership name into 24 `pure` buckets, so a few
+   * hundred synthetic files spread ~20 per bucket and never reach the ceiling —
+   * a first version of this test used plain synthetic files and passed with the
+   * split REMOVED, i.e. it asserted nothing. A constant membership name is the
+   * honest way to exercise the over-capacity path through the real planner.
+   */
+  const oneBucket = { classify: () => "pure" as const, membershipFile: () => "fixed" }
+
+  test("an over-capacity bucket splits instead of stopping the plan", () => {
+    const files = syntheticPure(MAX_CHUNK_FILES * 3 + 7)
+    const chunks = planTestChunks(files, oneBucket)
+
+    // ANTI-VACUITY: the fixture must actually overflow, or the assertions below
+    // are about a bucket that never filled.
+    expect(chunks.length).toBeGreaterThan(1)
+    expect(files.length).toBeGreaterThan(MAX_CHUNK_FILES)
+
+    const oversized = chunks.filter((chunk) => chunk.files.length > MAX_CHUNK_FILES)
+    expect(oversized.map((chunk) => chunk.files.length)).toEqual([])
+
+    const seen = chunks.flatMap((chunk) => chunk.files)
+    expect(seen.length).toBe(files.length)
+    expect(new Set(seen).size).toBe(files.length)
+  })
+
+  test("the split is deterministic regardless of input order", () => {
+    const files = syntheticPure(MAX_CHUNK_FILES * 2 + 3)
+    const shape = (input: readonly string[]): string =>
+      planTestChunks(input, oneBucket)
+        .map((chunk) => chunk.files.join(","))
+        .sort()
+        .join("|")
+    expect(shape(files)).toBe(shape([...files].reverse()))
+    expect(shape(files).split("|").length).toBeGreaterThan(1)
+  })
+
+  test("appending a file re-composes at most one sub-chunk", () => {
+    // The split strategy was chosen by MEASUREMENT, not preference. Files that
+    // change sub-chunk (i.e. lose a cache receipt) when the bucket grows by one:
+    //
+    //     161->162   round-robin 80    contiguous 1    hash 87
+    //     320->321   round-robin 320   contiguous 0    hash 320
+    //
+    // and hashing into ceil(n/MAX) parts was disqualified outright — at 320
+    // files its largest part held 161, breaking the ceiling itself.
+    // Sized at exactly 2x the ceiling so the append CROSSES a part boundary
+    // (parts 2 -> 3). That is the discriminating case: below a crossing, both
+    // strategies happen to preserve the same shapes, and an earlier version of
+    // this test could not tell them apart.
+    const base = syntheticPure(MAX_CHUNK_FILES * 2)
+    const grown = [...base, "tests/unit/cap-zzzzz.test.ts"]
+    const composition = (files: readonly string[]): ReadonlySet<string> =>
+      new Set(planTestChunks(files, oneBucket).map((chunk) => chunk.files.join(",")))
+    const before = composition(base)
+    const after = composition(grown)
+    // ANTI-VACUITY: the fixture must have split, or nothing could be preserved.
+    expect(before.size).toBeGreaterThan(1)
+    expect(composition(grown).size).toBe(before.size + 1)
+    const preserved = [...before].filter((shape) => after.has(shape))
+    expect(preserved.length).toBeGreaterThanOrEqual(before.size - 1)
+  })
+
+  test("a bucket at exactly the ceiling stays one chunk", () => {
+    const chunks = planTestChunks(syntheticPure(MAX_CHUNK_FILES), oneBucket)
+    expect(chunks.length).toBe(1)
+    expect(chunks[0]?.files.length).toBe(MAX_CHUNK_FILES)
+  })
+
+  test("one file past the ceiling splits into two, not more", () => {
+    const chunks = planTestChunks(syntheticPure(MAX_CHUNK_FILES + 1), oneBucket)
+    expect(chunks.length).toBe(2)
+    expect(chunks.reduce((sum, chunk) => sum + chunk.files.length, 0)).toBe(MAX_CHUNK_FILES + 1)
+  })
+})

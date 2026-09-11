@@ -302,6 +302,53 @@ interface UnindexedChunk {
   readonly predictedMs: number
 }
 
+/**
+ * Split one over-capacity bucket into the fewest sub-chunks that fit.
+ *
+ * `MAX_CHUNK_FILES` is a CHECKPOINT bound — "a failed campaign forfeits at most
+ * this many files of green coverage per chunk" — so exceeding it is a
+ * scheduling fact, not a corruption. It was a `throw`, which turned a growing
+ * corpus into a runner that refuses to plan at all. Measured on this tree,
+ * bucket `pure:4` holds 159 of 160: TWO more files hashing there and every
+ * shard command dies with "membership bucket pure exceeds 160 files", with no
+ * repair available except raising the ceiling — i.e. deleting the bound the
+ * message is about.
+ *
+ * # Why contiguous slices of the sorted list
+ *
+ * Three candidate splits were measured for how many files change sub-chunk
+ * (i.e. lose a cache receipt) when the bucket grows by one file:
+ *
+ *     bucket  append-last                insert-early
+ *     size    round-robin/contig/hash    round-robin/contig/hash
+ *     161->162      80 /   1 /  87            161 / 161 /  87
+ *     200->201     100 /  40 / 104            200 / 200 / 104
+ *     320->321     320 /   0 / 320            320 / 320 / 320
+ *     400->401     133 /  80 / 130            267 / 400 / 138
+ *
+ * Contiguous wins the common case — a new test file appended to a bucket moves
+ * 0-90 files rather than 80-320. Hashing into `ceil(n/MAX)` parts was also
+ * DISQUALIFIED outright: hash buckets are uneven, so at 320 files its largest
+ * part held 161 and broke the very ceiling this function exists to respect.
+ *
+ * Honest limitation: NO position-based split is stable against a file inserted
+ * early in the sort order, because every later index shifts. That case
+ * re-composes the bucket. It is the rarer one, and the alternative that would
+ * fix it (rendezvous hashing) buys it at the cost of the ceiling guarantee.
+ */
+const splitOverCapacityBucket = (bin: readonly WeightedFile[]): readonly WeightedFile[][] => {
+  if (bin.length <= MAX_CHUNK_FILES) return [[...bin]]
+  const parts = Math.ceil(bin.length / MAX_CHUNK_FILES)
+  const byName = [...bin].sort((left, right) => left.file.localeCompare(right.file))
+  const out: WeightedFile[][] = Array.from({ length: parts }, () => [])
+  byName.forEach((entry, index) => {
+    // `min(parts - 1, …)` so the remainder lands in the last part rather than
+    // creating a part beyond the allocation.
+    ;(out[Math.min(parts - 1, Math.floor(index / MAX_CHUNK_FILES))] ?? []).push(entry)
+  })
+  return out.filter((part) => part.length > 0)
+}
+
 /** Per-class fixed membership buckets. Timing still labels launch order, not
  *  which files share a chunk. */
 const chunkOneGroup = (
@@ -320,21 +367,18 @@ const chunkOneGroup = (
   }
   return [...bins.entries()]
     .sort(([left], [right]) => left - right)
-    .map(([, bin]) => {
-      if (bin.length > MAX_CHUNK_FILES) {
-        throw new Error(
-          `[test:shards] membership bucket ${resourceClass} exceeds ${MAX_CHUNK_FILES} files`,
+    .flatMap(([, bin]) =>
+      splitOverCapacityBucket(bin).map((part) => {
+        const ordered = [...part].sort(
+          (left, right) => right.weightMs - left.weightMs || left.file.localeCompare(right.file),
         )
-      }
-      const ordered = [...bin].sort(
-        (left, right) => right.weightMs - left.weightMs || left.file.localeCompare(right.file),
-      )
-      return {
-        files: [...bin].map(({ file }) => file).sort(),
-        resourceClass,
-        predictedMs: Math.round(ordered.reduce((sum, entry) => sum + entry.weightMs, 0)),
-      }
-    })
+        return {
+          files: [...part].map(({ file }) => file).sort(),
+          resourceClass,
+          predictedMs: Math.round(ordered.reduce((sum, entry) => sum + entry.weightMs, 0)),
+        }
+      }),
+    )
 }
 
 export const planTestChunks = (
