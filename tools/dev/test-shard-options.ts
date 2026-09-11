@@ -59,13 +59,20 @@ interface MutableRunnerOptions {
   cacheMode: CacheMode
 }
 
-const applyNamedOption = (state: MutableRunnerOptions, arg: string): boolean => {
+const applyNamedOption = (
+  state: MutableRunnerOptions,
+  arg: string,
+  onFlagTier: (tier: Exclude<VerificationTier, "smoke">) => void,
+): boolean => {
   const cacheMode = cacheModeOption(arg)
   if (cacheMode !== undefined) state.cacheMode = cacheMode
   const suite = suiteOption(arg)
   if (suite !== undefined) state.suite = suite
   const tier = tierOption(arg)
-  if (tier !== undefined) state.tier = tier
+  if (tier !== undefined) {
+    state.tier = tier
+    onFlagTier(tier)
+  }
   const junitOut = junitOption(arg)
   if (junitOut !== undefined) state.junitOut = junitOut
   return (
@@ -79,9 +86,16 @@ export const parseShardRunnerOptions = (args: readonly string[]): RunnerOptions 
     discoverOnly: false,
     cacheMode: envCacheMode(),
   }
-  if (process.env.QUANTA_VERIFICATION_TIER !== undefined) {
-    state.tier = shardTier(process.env.QUANTA_VERIFICATION_TIER)
-  }
+  // The env is a source AND a cross-check, never a silent default. `--tier`
+  // and `QUANTA_VERIFICATION_TIER` disagreeing means the caller believes one
+  // population and the gate arranged another; picking either silently is how a
+  // command string comes to mean two different runs.
+  const envTier =
+    process.env.QUANTA_VERIFICATION_TIER === undefined
+      ? undefined
+      : shardTier(process.env.QUANTA_VERIFICATION_TIER)
+  if (envTier !== undefined) state.tier = envTier
+  let flagTier: Exclude<VerificationTier, "smoke"> | undefined
   for (const arg of args) {
     // `--parallel=<N>` is a REAL `bun test` flag (N worker processes, implies
     // --isolate), and three package scripts passed `--parallel=1` to this
@@ -103,11 +117,37 @@ export const parseShardRunnerOptions = (args: readonly string[]): RunnerOptions 
       state.discoverOnly = true
       continue
     }
-    if (applyNamedOption(state, arg)) continue
+    if (
+      applyNamedOption(state, arg, (tier) => {
+        flagTier = tier
+      })
+    ) {
+      continue
+    }
     throw new Error(`unknown shard runner argument: ${arg}`)
   }
   if (state.junitOut !== undefined && state.suite !== "unit" && state.suite !== "full") {
     throw new Error("JUnit shard receipts are reserved for --suite=unit or --suite=full")
+  }
+  // TVH item 7. An absent tier used to select the ENTIRE discovered universe:
+  // measured on this tree, `--suite=full` with no tier runs 3,965 files where
+  // `--tier=full` runs 3,951. So `bun test` and `bun run test:full:ci` ran the
+  // NIGHTLY population by omission, and which population a command ran depended
+  // on whether an ambient `QUANTA_VERIFICATION_TIER` happened to be set by
+  // whoever invoked it. Two runs of the same command string, two different
+  // meanings, and no receipt anywhere said which.
+  if (state.tier === undefined) {
+    throw new Error(
+      "[test:shards] --tier is required: an absent tier selected the whole universe " +
+        "(the nightly population) by omission. Pass --tier=prepush|pr|full|nightly, or run " +
+        "through a gate that sets QUANTA_VERIFICATION_TIER.",
+    )
+  }
+  if (flagTier !== undefined && envTier !== undefined && flagTier !== envTier) {
+    throw new Error(
+      `[test:shards] --tier=${flagTier} contradicts QUANTA_VERIFICATION_TIER=${envTier}; ` +
+        "refusing to pick one silently",
+    )
   }
   return state
 }

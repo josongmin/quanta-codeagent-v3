@@ -15,8 +15,7 @@
 
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
-import { join } from "node:path"
-
+import { join, resolve } from "node:path"
 import { parseShardRunnerOptions } from "../../../tools/dev/test-shard-options"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
@@ -60,5 +59,79 @@ describe("shard runner options", () => {
       command.includes("run-test-shards.ts"),
     )
     expect(shardScripts.length).toBeGreaterThanOrEqual(5)
+  })
+})
+
+/**
+ * TVH item 7 — a command that did not name a tier ran the whole universe.
+ *
+ * `tier === undefined` fell through to the entire discovered population.
+ * MEASURED on this tree: `--suite=full` with no tier selects 3,965 files where
+ * `--tier=full` selects 3,951. So `bun test` and a hand-run `test:full:ci` were
+ * executing the NIGHTLY population by omission — and which population a command
+ * ran depended on whether an ambient `QUANTA_VERIFICATION_TIER` happened to be
+ * set by whoever invoked it. The same command string, two meanings, and no
+ * receipt anywhere recorded which.
+ */
+describe("the tier is stated, never assumed", () => {
+  const withEnv = <T>(value: string | undefined, run: () => T): T => {
+    const previous = process.env.QUANTA_VERIFICATION_TIER
+    if (value === undefined) delete process.env.QUANTA_VERIFICATION_TIER
+    else process.env.QUANTA_VERIFICATION_TIER = value
+    try {
+      return run()
+    } finally {
+      if (previous === undefined) delete process.env.QUANTA_VERIFICATION_TIER
+      else process.env.QUANTA_VERIFICATION_TIER = previous
+    }
+  }
+
+  test("no tier anywhere is REFUSED, and the message says what to pass", () => {
+    withEnv(undefined, () => {
+      expect(() => parseShardRunnerOptions(["--suite=full"])).toThrow(/--tier is required/)
+      expect(() => parseShardRunnerOptions(["--suite=full"])).toThrow(/prepush\|pr\|full\|nightly/)
+    })
+  })
+
+  test("a flag alone is enough, and an env alone is enough", () => {
+    // ANTI-VACUITY: "always throw" would satisfy the arm above.
+    withEnv(undefined, () => {
+      expect(parseShardRunnerOptions(["--suite=full", "--tier=full"]).tier).toBe("full")
+    })
+    withEnv("prepush", () => {
+      expect(parseShardRunnerOptions(["--suite=full"]).tier).toBe("prepush")
+    })
+  })
+
+  test("a flag and an env that AGREE are fine", () => {
+    withEnv("full", () => {
+      expect(parseShardRunnerOptions(["--suite=full", "--tier=full"]).tier).toBe("full")
+    })
+  })
+
+  test("a flag and an env that DISAGREE fail closed", () => {
+    // The caller believes one population and the gate arranged another.
+    // Silently picking either is how a command string comes to mean two runs.
+    withEnv("prepush", () => {
+      expect(() => parseShardRunnerOptions(["--suite=full", "--tier=nightly"])).toThrow(
+        /contradicts QUANTA_VERIFICATION_TIER/,
+      )
+    })
+  })
+
+  test("every package alias that invokes the runner names a tier", () => {
+    const pkg = JSON.parse(
+      readFileSync(resolve(import.meta.dir, "..", "..", "..", "package.json"), "utf8"),
+    ) as { readonly scripts: Readonly<Record<string, string>> }
+    const invokers = Object.entries(pkg.scripts).filter(([, body]) =>
+      body.includes("run-test-shards.ts"),
+    )
+    // ANTI-VACUITY: the scan must find the aliases at all.
+    expect(invokers.length).toBeGreaterThanOrEqual(5)
+    const untiered = invokers.filter(([, body]) => !body.includes("--tier=")).map(([name]) => name)
+    // `test:full:ci` is the GATE's command: the gate supplies the tier through
+    // the environment, because it runs at several tiers. Run by hand it now
+    // fails closed, which is the intended outcome and not an exemption.
+    expect(untiered).toEqual(["test:full:ci"])
   })
 })
