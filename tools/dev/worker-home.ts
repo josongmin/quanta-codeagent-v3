@@ -24,6 +24,10 @@
  * assert it directly instead of re-deriving it from a source grep.
  */
 
+import { existsSync, symlinkSync } from "node:fs"
+import { homedir } from "node:os"
+import { join } from "node:path"
+
 /** Mirrors `TestResourceClass` structurally to avoid importing the planner. */
 export type WorkerResourceClass = string
 
@@ -56,4 +60,35 @@ export const userLibraryDecision = (
   if (resourceClass !== "browser") return "not-browser"
   if (env.QUANTA_TEST_NO_USER_LIBRARY === "1") return "opted-out"
   return "lend"
+}
+
+/**
+ * Apply the decision to a real worker HOME.
+ *
+ * Lives here, not in the runner, so a guard can execute it. A source scan for a
+ * class-aware call site is not a proof: a call that passes `resourceClass` in
+ * FORM while computing it wrongly reads identically. What a test can check
+ * instead is the only thing that matters — whether a `Library` entry appears
+ * under the worker HOME for each class.
+ *
+ * `sourceLibrary` is injectable so the guard does not have to reach into the
+ * developer's real home to observe the effect.
+ */
+export const applyUserLibraryDecision = (input: {
+  readonly workerHome: string
+  readonly resourceClass: WorkerResourceClass
+  readonly env?: WorkerHomeEnv
+  readonly sourceLibrary?: string
+}): UserLibraryDecision | "unavailable" => {
+  const decision = userLibraryDecision(input.resourceClass, input.env ?? process.env)
+  if (decision !== "lend") return decision
+  try {
+    const real = input.sourceLibrary ?? join(homedir(), "Library")
+    if (!existsSync(real)) return "unavailable"
+    symlinkSync(real, join(input.workerHome, "Library"))
+    return "lend"
+  } catch {
+    // Already linked, or a platform without this convention.
+    return "unavailable"
+  }
 }

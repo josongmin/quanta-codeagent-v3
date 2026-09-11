@@ -23,20 +23,33 @@
  * 6/6 with the Library lent in. It is scoped to the lane that has a Chrome, and
  * `QUANTA_TEST_NO_USER_LIBRARY=1` removes it entirely.
  *
- * # Why the source arm is here too
+ * # Three arms, because two of them are not enough
  *
- * The decision function alone cannot prove the runner USES it — a correct policy
- * module beside an unconditional call site is exactly the shape the defect had.
- * The second arm reads the runner and asserts the call is class-aware, with an
- * anti-vacuity floor so a rename fails loudly instead of matching nothing.
+ * The DECISION arm tests the predicate. The EFFECT arm applies it to a real
+ * temp worker HOME and checks whether a `Library` entry actually appears —
+ * necessary because a call that passes `resourceClass` in FORM while computing
+ * it wrongly reads identically to a correct one. The WIRING arm reads the runner
+ * and asserts it delegates rather than holding its own copy of the symlink, with
+ * an anti-vacuity floor so a rename fails loudly instead of matching nothing.
+ *
+ * Every temp root is owner-scoped and removed in `afterAll`; this file leaves no
+ * /tmp residue.
  */
 
-import { describe, expect, test } from "bun:test"
-import { readFileSync } from "node:fs"
+import { afterAll, describe, expect, test } from "bun:test"
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { TEST_RESOURCE_CLASSES } from "../../../tools/dev/test-shard-plan"
-import { userLibraryDecision } from "../../../tools/dev/worker-home"
+import { applyUserLibraryDecision, userLibraryDecision } from "../../../tools/dev/worker-home"
+
+/** Owner-scoped: every temp root this file creates is removed here, so the
+ *  suite leaves no /tmp residue behind it. */
+const made: string[] = []
+afterAll(() => {
+  for (const dir of made.splice(0)) rmSync(dir, { recursive: true, force: true })
+})
 
 const RUNNER = join(import.meta.dir, "..", "..", "..", "tools", "dev", "run-test-shards.ts")
 
@@ -73,13 +86,61 @@ describe("worker HOME: real ~/Library exposure", () => {
     expect(userLibraryDecision("browser", { QUANTA_TEST_NO_USER_LIBRARY: "true" })).toBe("lend")
   })
 
-  test("the runner's call site is class-aware, not unconditional", () => {
+  test("EFFECT — a Library link appears for the browser class and for nothing else", () => {
+    // The source arm below is necessary but not sufficient: a call that passes
+    // `resourceClass` in FORM while computing it wrongly reads identically. This
+    // one checks the only thing that matters — whether the link is really there.
+    const source = mkdtempSync(join(tmpdir(), "quanta-fake-library-"))
+    made.push(source)
+    writeFileSync(join(source, "marker.txt"), "real user library stand-in\n")
+
+    const observed: Record<string, boolean> = {}
+    for (const resourceClass of TEST_RESOURCE_CLASSES) {
+      const workerHome = mkdtempSync(join(tmpdir(), "quanta-worker-home-"))
+      made.push(workerHome)
+      applyUserLibraryDecision({ workerHome, resourceClass, env: {}, sourceLibrary: source })
+      observed[resourceClass] = existsSync(join(workerHome, "Library"))
+    }
+    const linked = Object.entries(observed)
+      .filter(([, present]) => present)
+      .map(([name]) => name)
+    expect(linked).toEqual(["browser"])
+
+    // ANTI-VACUITY: the fixture must be capable of producing a link at all, or
+    // "only browser" is a statement about a mechanism that never fires.
+    expect(observed.browser).toBe(true)
+    expect(TEST_RESOURCE_CLASSES.length).toBeGreaterThanOrEqual(8)
+  })
+
+  test("EFFECT — the kill switch really prevents the link", () => {
+    const source = mkdtempSync(join(tmpdir(), "quanta-fake-library-"))
+    made.push(source)
+    writeFileSync(join(source, "marker.txt"), "real user library stand-in\n")
+    const workerHome = mkdtempSync(join(tmpdir(), "quanta-worker-home-"))
+    made.push(workerHome)
+    const outcome = applyUserLibraryDecision({
+      workerHome,
+      resourceClass: "browser",
+      env: { QUANTA_TEST_NO_USER_LIBRARY: "1" },
+      sourceLibrary: source,
+    })
+    expect(outcome).toBe("opted-out")
+    expect(existsSync(join(workerHome, "Library"))).toBe(false)
+  })
+
+  test("WIRING — the runner delegates and does not re-implement the link", () => {
     const source = readFileSync(RUNNER, "utf8")
 
-    // ANTI-VACUITY first: if either marker is renamed, fail here rather than
-    // let a `not.toContain` pass over a file that no longer says anything.
+    // ANTI-VACUITY first: if the marker is renamed, fail here rather than let a
+    // `not.toContain` pass over a file that no longer says anything.
     expect(source).toContain("lendRealUserLibrary")
-    expect(source).toContain("userLibraryDecision")
+    expect(source).toContain("applyUserLibraryDecision(")
+
+    // The runner must not hold its own copy of the effect. It did: a
+    // `symlinkSync(join(homedir(), "Library"), …)` inline, which is why the
+    // policy could only ever be checked by reading the source.
+    expect(source).not.toContain("symlinkSync")
+    expect(source).not.toContain("homedir()")
 
     const callSites = [...source.matchAll(/lendRealUserLibrary\(([^)]*)\)/gu)]
       .map((match) => (match[1] ?? "").trim())

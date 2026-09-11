@@ -1,6 +1,5 @@
 import {
   closeSync,
-  existsSync,
   mkdirSync,
   mkdtempSync,
   openSync,
@@ -8,10 +7,9 @@ import {
   readFileSync,
   rmSync,
   statSync,
-  symlinkSync,
   writeFileSync,
 } from "node:fs"
-import { availableParallelism, freemem, homedir, loadavg, tmpdir, totalmem } from "node:os"
+import { availableParallelism, freemem, loadavg, tmpdir, totalmem } from "node:os"
 import { dirname, join, relative, resolve } from "node:path"
 import { sampleTreeRssBytes } from "./shard-rss"
 import {
@@ -78,7 +76,7 @@ import { ADMISSION_DEADLINE_ENV } from "./verification-admission"
 import { executionPolicyDigest } from "./verification-execution-policy"
 import { chunkInputScopeSha256 } from "./verification-input-scope"
 import { sharedVerificationCacheRoot } from "./verification-receipt"
-import { type UserLibraryDecision, userLibraryDecision } from "./worker-home"
+import { applyUserLibraryDecision, type UserLibraryDecision } from "./worker-home"
 
 /**
  * Authoritative local full-suite runner.
@@ -360,19 +358,7 @@ const pruneStaleChunkReceipts = (suite: SuiteName, nowMs = Date.now()): void => 
 const lendRealUserLibrary = (
   workerHome: string,
   resourceClass: TestResourceClass,
-): UserLibraryDecision | "unavailable" => {
-  const decision = userLibraryDecision(resourceClass, process.env)
-  if (decision !== "lend") return decision
-  try {
-    const real = join(homedir(), "Library")
-    if (!existsSync(real)) return "unavailable"
-    symlinkSync(real, join(workerHome, "Library"))
-    return "lend"
-  } catch {
-    // Already linked, or a platform without this convention.
-    return "unavailable"
-  }
-}
+): UserLibraryDecision | "unavailable" => applyUserLibraryDecision({ workerHome, resourceClass })
 
 interface ShardRunResult {
   readonly code: number
