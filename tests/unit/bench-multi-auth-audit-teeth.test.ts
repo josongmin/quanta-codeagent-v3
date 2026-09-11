@@ -125,24 +125,38 @@ const mockSpawn = (opts: { rateLimited?: Set<string> } = {}) => {
       (args[args.length - 1] ?? "").match(/~\/runs\/([^/]+)\/instances\.jsonl/)?.[1] ?? "x"
     onData?.(`[PASS] ${runId}__inst-1 (turns=2)\n`)
   }
+  /**
+   * Fixed-string command replies.
+   *
+   * The family-profile readiness probe ends `&& echo OK` and its caller
+   * requires stdout to contain "OK". Without a branch for it this stub fell
+   * through and bootstrap threw "dataset-family=verified readiness probe
+   * failed", so every case here failed on provisioning before it could assert
+   * anything. Answering what the probe ASKS FOR keeps the two from drifting.
+   */
+  const literalSshReply = (command: string): string | undefined => {
+    if (command.trim().endsWith("echo OK")) return "OK"
+    if (command.includes("READY")) return "READY"
+    if (command.includes("run.exit")) return "0\n==XQ-RUN-EXIT-XQ==\n"
+    if (command.includes("mkdir ~/.pool-grade.lock")) return "LOCKED"
+    if (command.includes("rmdir ~/.pool-grade.lock")) return ""
+    return undefined
+  }
+
+  /** Replies derived from the run id embedded in the command. */
+  const derivedSshReply = (command: string): string | undefined => {
+    const report = command.match(/cat ~\/runs\/([^/]+)\/report\.json/)
+    if (report) return JSON.stringify({ resolved_ids: [`x__${report[1]}-1`] })
+    const runLog = command.match(/tail -\d+ ~\/runs\/([^/]+)\/run\.log/)
+    if (runLog && opts.rateLimited?.has(runLog[1] ?? "")) {
+      return "[FAIL][generation_error] z (turns=2)"
+    }
+    return undefined
+  }
+
   const routeSsh = (args: string[]): SpawnResult => {
     const command = args[args.length - 1] ?? ""
-    // The family-profile readiness probe ends `&& echo OK` and its caller
-    // requires stdout to contain "OK". Without a branch for it this stub fell
-    // through and bootstrap threw "dataset-family=verified readiness probe
-    // failed", so every case here failed on provisioning before it could assert
-    // anything. Answering what the probe ASKS FOR keeps the two from drifting.
-    if (command.trim().endsWith("echo OK")) return ok("OK")
-    if (command.includes("READY")) return ok("READY")
-    if (command.includes("run.exit")) return ok("0\n==XQ-RUN-EXIT-XQ==\n")
-    if (command.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
-    if (command.includes("rmdir ~/.pool-grade.lock")) return ok("")
-    const report = command.match(/cat ~\/runs\/([^/]+)\/report\.json/)
-    if (report) return ok(JSON.stringify({ resolved_ids: [`x__${report[1]}-1`] }))
-    const runLog = command.match(/tail -\d+ ~\/runs\/([^/]+)\/run\.log/)
-    if (runLog && opts.rateLimited?.has(runLog[1] ?? ""))
-      return ok("[FAIL][generation_error] z (turns=2)")
-    return ok("")
+    return ok(literalSshReply(command) ?? derivedSshReply(command) ?? "")
   }
   const route = (cmd: string, args: string[]): SpawnResult => {
     if (cmd === "curl") return ok("9.9.9.9") // ifconfig.me public-IP probe (SG ingress)
