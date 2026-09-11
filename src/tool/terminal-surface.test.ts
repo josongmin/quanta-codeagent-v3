@@ -168,9 +168,34 @@ describe("ownership boundary — no Terminal-Bench naming leaks outside src/apps
         skipDirs: ["apps", "__tests__"],
       },
     )
+    /**
+     * A quoted path INTO `apps/` is a pointer at the owned region, not a leak
+     * out of it.
+     *
+     * The fence's premise — stated above as "verified: zero hits in `src/`
+     * outside `apps/`" — went stale. `config/knob-inventory/extra.ts` declares
+     * a Terminal-Bench knob whose `readSite` is the literal string
+     * `"apps/bench/terminal/harbor-command.ts"`, and `\bHarbor\b` matches it
+     * because the next character is a hyphen. Nothing had run this fence in
+     * long enough for anyone to see it: the only gate that does is the full
+     * suite.
+     *
+     * Renaming the pointer would make the metadata wrong, and exempting the
+     * FILE would blind the rest of it. So the carve-out is the smallest true
+     * statement: text of the form `"apps/<path>"` cannot reach Harbor, import
+     * a shim, or run a container — it names where the owner lives. Anything
+     * else in the same file is still an offence, and the pointers themselves
+     * are enumerated below so a new one is a deliberate act.
+     */
+    const APPS_PATH_LITERAL = /["'`]apps\/[A-Za-z0-9_\-./]+["'`]/g
+    const withoutAppsPointers = (text: string): string => text.replace(APPS_PATH_LITERAL, '""')
+
     const integrationOffenders: string[] = []
+    const pointerFiles: string[] = []
     for (const rel of scanned) {
-      const text = readFileSync(join(srcDir, rel), "utf8")
+      const raw = readFileSync(join(srcDir, rel), "utf8")
+      const text = withoutAppsPointers(raw)
+      if (FORBIDDEN.test(raw) && !FORBIDDEN.test(text)) pointerFiles.push(rel)
       // The integration tokens are forbidden everywhere outside apps/ — no
       // exemption, including inside the canonical report union.
       if (INTEGRATION_ONLY.test(text)) integrationOffenders.push(rel)
@@ -181,6 +206,24 @@ describe("ownership boundary — no Terminal-Bench naming leaks outside src/apps
     }
     expect(integrationOffenders).toEqual([])
     expect(offenders).toEqual([])
+
+    // The carve-out is RATCHETED: exactly the files whose only hit is a pointer
+    // into apps/. A new one has to be added here on purpose, which is the whole
+    // difference between a narrowed rule and a hole.
+    expect(pointerFiles).toEqual(["config/knob-inventory/extra.ts"])
+
+    // ANTI-VACUITY: the narrowing must not have disarmed the rule. A real
+    // integration leak in the same shape is still caught.
+    expect(
+      FORBIDDEN.test(withoutAppsPointers('readSite: "apps/bench/terminal/harbor-command.ts"')),
+    ).toBe(false)
+    expect(FORBIDDEN.test(withoutAppsPointers('import { HarborClient } from "./harbor"'))).toBe(
+      true,
+    )
+    expect(FORBIDDEN.test(withoutAppsPointers("class BaseAgent {}"))).toBe(true)
+    expect(FORBIDDEN.test(withoutAppsPointers('const suite = "terminal-bench"'))).toBe(true)
+    // A pointer OUT of apps/ is not a pointer at the owner and stays forbidden.
+    expect(FORBIDDEN.test(withoutAppsPointers('const p = "runner/harbor-command.ts"'))).toBe(true)
 
     // Anti-vacuity: the exemption must be LIVE, not a dead list. Each enumerated
     // module must actually exist and actually carry the discriminant — otherwise
