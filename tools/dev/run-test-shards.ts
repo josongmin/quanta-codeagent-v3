@@ -5,12 +5,19 @@ import {
   openSync,
   readdirSync,
   readFileSync,
+  readSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs"
 import { availableParallelism, freemem, loadavg, tmpdir, totalmem } from "node:os"
 import { dirname, join, relative, resolve } from "node:path"
+import {
+  describeWatchdogKill,
+  isKill,
+  shardWatchdogAction,
+  spoolTailWindow,
+} from "./shard-output-budget"
 import { sampleTreeRssBytes } from "./shard-rss"
 import {
   loadPolicyOverrides,
@@ -50,7 +57,6 @@ import {
   spoolTail,
   type TestChunk,
   type TestResourceClass,
-  watchdogAction,
 } from "./test-shard-plan"
 import {
   loadSuccessfulTestShardReceipt,
@@ -114,6 +120,28 @@ const SHARD_INACTIVITY_TIMEOUT_MS = 12 * 60_000
 const WATCHDOG_TAIL_LINES = 20
 
 const SHARD_WATCHDOG_POLL_MS = 1_000
+/**
+ * A chunk may not outlive this, however chatty it is.
+ *
+ * There was NO total wall bound: only a 12-minute inactivity timer that any
+ * byte reset. A worker in a `console.log` loop was maximally "alive" by that
+ * measure and ran to the JOB timeout — the outer boundary the watchdog exists to
+ * stay inside. 40 minutes is roughly 3x the inactivity window and far above any
+ * observed chunk.
+ */
+const SHARD_TOTAL_WALL_TIMEOUT_MS = 40 * 60_000
+/**
+ * Past this many bytes, continued output stops counting as progress.
+ *
+ * Not a style rule about logging. The spool is the complete stdout+stderr of up
+ * to 160 test files; 512MiB is far beyond any real suite and is the point at
+ * which "still writing" has stopped being evidence of anything.
+ */
+const SHARD_OUTPUT_CAP_BYTES = 512 * 1024 * 1024
+/** How much of the spool to replay at the end. The whole file used to be read
+ *  into memory twice — the reaction to a pathological producer was to load
+ *  everything it produced. */
+const SPOOL_REPLAY_BYTES = 8 * 1024 * 1024
 const SOURCE_JS_CLEANED_ROOT_ENV = "QUANTA_TEST_SOURCE_JS_CLEANED_ROOT"
 const SOURCE_ROOT = join(REPO_ROOT, "src")
 const PRESERVED_SOURCE_JS = new Set([join(SOURCE_ROOT, "ui", "auth-ui.js")])
@@ -473,27 +501,32 @@ const runShard = async (
       }
       const spoolBytes = statSync(spoolPath).size
       const idleMs = Date.now() - lastProgressAt
-      const action = watchdogAction({
+      const tick = {
         spoolBytes,
         lastSpoolBytes,
         idleMs,
+        elapsedMs: Math.round(performance.now() - startedAt),
         inactivityTimeoutMs: SHARD_INACTIVITY_TIMEOUT_MS,
+        totalWallTimeoutMs: SHARD_TOTAL_WALL_TIMEOUT_MS,
+        outputCapBytes: SHARD_OUTPUT_CAP_BYTES,
         alreadyKilling: timedOut,
-      })
+      }
+      const action = shardWatchdogAction(tick)
       if (action === "progressed") {
         lastSpoolBytes = spoolBytes
         lastProgressAt = Date.now()
         return
       }
-      if (action !== "kill") return
+      if (!isKill(action)) return
       timedOut = true
-      // Say what it was doing. A chunk holds ~100 files, and "idle=600000ms"
-      // over all of them is not a lead; the last thing the worker wrote is.
+      // Say what it was doing, and WHICH bound it crossed. A chunk holds ~100
+      // files, and "idle=600000ms" over all of them is not a lead; the last
+      // thing the worker wrote is.
       process.stderr.write(
-        `[test:shards] TIMEOUT chunk=${shard} idle=${idleMs}ms; ` +
+        `[test:shards] TIMEOUT chunk=${shard} ${describeWatchdogKill(action, tick)}; ` +
           `killing worker process tree.\nProcess group (pgid pid ppid stat %cpu elapsed cmd):\n` +
           `${describeProcessGroup(handle.pid)}\nLast output:\n` +
-          `${spoolTail(readFileSync(spoolPath, "utf8"), WATCHDOG_TAIL_LINES)}\n`,
+          `${spoolTail(readSpoolTail(spoolPath, SPOOL_REPLAY_BYTES), WATCHDOG_TAIL_LINES)}\n`,
       )
       void handle.cancel()
     }, SHARD_WATCHDOG_POLL_MS)
@@ -504,7 +537,15 @@ const runShard = async (
     closed = true
     const code = exit.code ?? -1
     const spoolBytes = statSync(spoolPath).size
-    const output = readFileSync(spoolPath, "utf8")
+    // The TAIL, not the file. A chunk that wrote past the replay window says so
+    // rather than silently handing back a truncated log.
+    const output = readSpoolTail(spoolPath, SPOOL_REPLAY_BYTES)
+    if (spoolBytes > SPOOL_REPLAY_BYTES) {
+      process.stdout.write(
+        `[test:shards] chunk=${shard} spool is ${spoolBytes} bytes; replaying the last ` +
+          `${SPOOL_REPLAY_BYTES}. Full output: ${spoolPath}\n`,
+      )
+    }
     process.stdout.write(output)
     const executedFiles = parseExecutedFileCount(output)
     const elapsedMs = Math.round(performance.now() - startedAt)
@@ -821,6 +862,26 @@ const executeChunksWithSourcePostflight = async (
   if (sourceJsError !== undefined) throw sourceJsError
   if (receipts === undefined) throw new Error("[test:shards] missing execution receipts")
   return receipts
+}
+
+/**
+ * Read at most `windowBytes` from the END of a file.
+ *
+ * `readFileSync(spool, "utf8")` over a multi-hundred-megabyte spool is the
+ * runner spending its own RSS on the output of the thing it is trying to bound.
+ */
+const readSpoolTail = (path: string, windowBytes: number): string => {
+  const size = statSync(path).size
+  const window = spoolTailWindow(size, windowBytes)
+  if (window.length === 0) return ""
+  const fd = openSync(path, "r")
+  try {
+    const buffer = Buffer.allocUnsafe(window.length)
+    readSync(fd, buffer, 0, window.length, window.start)
+    return buffer.toString("utf8")
+  } finally {
+    closeSync(fd)
+  }
 }
 
 const digestFiles = (files: readonly string[]): string =>
