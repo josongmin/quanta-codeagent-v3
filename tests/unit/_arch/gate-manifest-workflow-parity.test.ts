@@ -240,16 +240,64 @@ const normalize = (cmd: string): string =>
     .replace(/\s+/g, " ")
     .trim()
 
+/**
+ * TVH item 10 — a substring exemption hid whatever was appended to it.
+ *
+ * `cmd.includes(exemption.match)` accepted the whole command as long as some
+ * exempt text appeared ANYWHERE in it. So
+ *
+ *   bun install --frozen-lockfile && bun run unregistered-gate
+ *
+ * matched the `bun install --frozen-lockfile` exemption and the second half —
+ * a blocking gate in no manifest — was never compared to anything. Exactly the
+ * shape the `file`-scoping note above this list already describes: an exemption
+ * granted for one thing covering another.
+ *
+ * Shell operators are separators, not characters in a command. Splitting on
+ * them makes an exemption cover a SEGMENT, so appending to an exempt command
+ * produces a segment nothing covers.
+ */
+const SHELL_SEPARATORS = /\s*(?:&&|\|\||;|\|)\s*/
+
+export const commandSegments = (cmd: string): readonly string[] =>
+  cmd
+    .split(SHELL_SEPARATORS)
+    .map((segment) => segment.trim())
+    .filter((segment) => segment !== "")
+
 const exemptionMatches = (cmd: string, exemption: (typeof WORKFLOW_EXEMPT)[number]): boolean =>
   exemption.exact === true ? cmd === exemption.match : cmd.includes(exemption.match)
 
-const isExempt = (cmd: string, step: WorkflowStep): boolean =>
-  WORKFLOW_EXEMPT.some(
-    (e) =>
-      (e.file === "*" || e.file === step.file) &&
-      (e.step === undefined || e.step === step.name) &&
-      exemptionMatches(cmd, e),
-  )
+const exemptionAppliesTo = (
+  step: WorkflowStep,
+  exemption: (typeof WORKFLOW_EXEMPT)[number],
+): boolean =>
+  (exemption.file === "*" || exemption.file === step.file) &&
+  (exemption.step === undefined || exemption.step === step.name)
+
+/**
+ * EVERY segment must be covered. One exempt half does not exempt the other.
+ *
+ * An exact exemption still compares against the whole command, because an
+ * exact entry names one specific step's one specific command and splitting it
+ * would change what the author wrote down.
+ */
+export const isExempt = (cmd: string, step: WorkflowStep): boolean => {
+  const applicable = WORKFLOW_EXEMPT.filter((e) => exemptionAppliesTo(step, e))
+  if (applicable.some((e) => e.exact === true && exemptionMatches(cmd, e))) return true
+  const substringMatch = (text: string): boolean =>
+    applicable.some((e) => e.exact !== true && exemptionMatches(text, e))
+  // Only the segments that LOOK LIKE AN INVOCATION are candidate gates. `tee
+  // eval-report.txt` and the `true` in `|| true` are plumbing, and this file
+  // already owns that distinction — reusing it keeps ONE notion of "a command"
+  // rather than inventing a second that could disagree with the first.
+  const invocations = commandSegments(cmd).filter((segment) => LOOKS_LIKE_A_COMMAND.test(segment))
+  // A line with no invocation at all is a `uses:` step or shell scaffolding.
+  // Those were always decided by the whole-string match and there is nothing to
+  // append to them, so splitting would only break what already worked.
+  if (invocations.length === 0) return substringMatch(cmd)
+  return invocations.every(substringMatch)
+}
 
 describe("gate manifest ↔ workflow parity", () => {
   test("required CI and deterministic nightly pin the same Bun runtime", () => {
@@ -540,5 +588,80 @@ describe("gate manifest ↔ workflow parity", () => {
     expect(new Set(GATES.map((g) => g.id)).size).toBe(GATES.length)
     for (const g of GATES)
       expect({ id: g.id, why: g.why.length > 20 }).toEqual({ id: g.id, why: true })
+  })
+})
+
+/**
+ * TVH item 10 — what a substring exemption used to hide.
+ *
+ * `cmd.includes(exemption.match)` accepted a whole command as long as some
+ * exempt text appeared anywhere in it, so appending a blocking gate to an
+ * exempt command made the appended half invisible. The `file` scoping note on
+ * `WORKFLOW_EXEMPT` already describes this exact shape one level up: an
+ * exemption granted for one thing covering another.
+ */
+describe("a compound command cannot hide behind an exempt half", () => {
+  const step = (raw: string): WorkflowStep => ({
+    file: "ci.yml",
+    name: "install dependencies",
+    raw,
+    lines: [raw],
+  })
+
+  test("the exempt command alone is still exempt", () => {
+    // ANTI-VACUITY: without this the arms below are satisfied by a matcher
+    // that exempts nothing at all.
+    expect(isExempt("bun install --frozen-lockfile", step("bun install --frozen-lockfile"))).toBe(
+      true,
+    )
+  })
+
+  test("APPENDING an un-gated command to it is NOT exempt", () => {
+    const smuggled = "bun install --frozen-lockfile && bun run unregistered-gate"
+    expect(isExempt(smuggled, step(smuggled))).toBe(false)
+  })
+
+  test("every operator separates, not just &&", () => {
+    for (const joiner of ["&&", "||", ";", "|"]) {
+      const smuggled = `bun install --frozen-lockfile ${joiner} bun run unregistered-gate`
+      expect({ joiner, exempt: isExempt(smuggled, step(smuggled)) }).toEqual({
+        joiner,
+        exempt: false,
+      })
+    }
+  })
+
+  test("PREPENDING is caught too — order is not the protection", () => {
+    const smuggled = "bun run unregistered-gate && bun install --frozen-lockfile"
+    expect(isExempt(smuggled, step(smuggled))).toBe(false)
+  })
+
+  test("two exempt halves are still exempt", () => {
+    // The rule is "every invocation is covered", not "compound is forbidden".
+    const both = "bun install --frozen-lockfile && bun install --frozen-lockfile"
+    expect(isExempt(both, step(both))).toBe(true)
+  })
+
+  test("shell plumbing is not a gate", () => {
+    // `|| true` and `| tee` produce segments that are not invocations. Treating
+    // them as candidate gates would have made two real workflow steps fail for
+    // the wrong reason — both of them exist in ci.yml today.
+    expect(commandSegments("bun fc gates || true")).toEqual(["bun fc gates", "true"])
+    expect(commandSegments("bun run x --n 1 | tee report.txt")).toEqual([
+      "bun run x --n 1",
+      "tee report.txt",
+    ])
+  })
+
+  test("segmentation keeps a plain command whole", () => {
+    const plain = "bun run tools/dev/gate.ts precommit --quiet"
+    expect(commandSegments(plain)).toEqual([plain])
+  })
+
+  test("a `uses:` step is still decided by the whole string", () => {
+    // Nothing can be appended to a `uses:` line, so splitting it would only
+    // break what already worked.
+    const uses = "uses: actions/checkout@v4"
+    expect(isExempt(uses, { file: "ci.yml", raw: uses, lines: [uses] })).toBe(true)
   })
 })
