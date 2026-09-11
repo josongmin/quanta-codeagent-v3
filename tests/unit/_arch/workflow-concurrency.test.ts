@@ -26,6 +26,8 @@ import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { parse as parseYaml } from "yaml"
 
+import { assertScanPopulation } from "../_shared/scan-population"
+
 const WORKFLOW_DIR = join(import.meta.dir, "..", "..", "..", ".github", "workflows")
 
 interface WorkflowConcurrency {
@@ -71,6 +73,19 @@ const ghExpr = (body: string): string => `\${${"{"} ${body} ${"}"}}`
 const WORKFLOWS = readdirSync(WORKFLOW_DIR)
   .filter((file) => file.endsWith(".yml") || file.endsWith(".yaml"))
   .sort()
+
+// ENROLLED. This file states zero-verdicts over a walked corpus, so its reach is
+// pinned rather than assumed: a workflow directory that stops yielding files
+// would otherwise make every assertion below trivially true.
+assertScanPopulation(
+  WORKFLOWS.map((file) => join(WORKFLOW_DIR, file)),
+  WORKFLOW_DIR,
+  {
+    collectable: (name) => name.endsWith(".yml") || name.endsWith(".yaml"),
+    id: "tests/unit/_arch/workflow-concurrency.test.ts#WORKFLOWS",
+    topLevelOnly: true,
+  },
+)
 
 describe("workflow concurrency lanes", () => {
   test("ANTI-VACUITY — the workflow corpus is real and carries the files under test", () => {

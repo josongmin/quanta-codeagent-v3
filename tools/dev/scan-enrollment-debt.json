@@ -1,5 +1,5 @@
 {
-  "note": "Scanning guards that state a zero-verdict but pin no MEASURED reach — their floor, if any, is a number written at the call site, which cannot see a subtree disappear. Enforced by tests/unit/_arch/scan-enrollment-ratchet.test.ts. `unenrolled` may only SHRINK: a new guard must call assertScanPopulation (tests/unit/_shared/scan-population.ts) and pin its reach in tools/dev/scan-reach-baseline.json, and a guard that enrolls must be removed from here. `failsClosed` is NOT debt either — it names enumerations that need no reach floor because an EMPTY walk turns their verdict red by itself, and each entry's file must call `assertFailsClosedOnEmpty`, which executes that claim instead of asserting it in a comment. `externalCorpus` is NOT debt — it names guards the helper can never measure because their corpus is not the repo, and each entry is checked against the host path it claims. `expectedIds` records, per enrolled file, the baseline ids that file must REPORT at runtime; `bun run scan-reach` refuses when one is missing. NO TOTALS ARE WRITTEN HERE. A hand-maintained count drifts the moment one side moves — this note said '56 unenrolled of 86' while the arrays said 54 of 87 — so the number is whatever the arrays are.",
+  "note": "Scanning guards that state a zero-verdict but pin no MEASURED reach \u2014 their floor, if any, is a number written at the call site, which cannot see a subtree disappear. Enforced by tests/unit/_arch/scan-enrollment-ratchet.test.ts. `unenrolled` may only SHRINK: a new guard must call assertScanPopulation (tests/unit/_shared/scan-population.ts) and pin its reach in tools/dev/scan-reach-baseline.json, and a guard that enrolls must be removed from here. `failsClosed` is NOT debt either \u2014 it names enumerations that need no reach floor because an EMPTY walk turns their verdict red by itself, and each entry's file must call `assertFailsClosedOnEmpty`, which executes that claim instead of asserting it in a comment. `externalCorpus` is NOT debt \u2014 it names guards the helper can never measure because their corpus is not the repo, and each entry is checked against the host path it claims. `expectedIds` records, per enrolled file, the baseline ids that file must REPORT at runtime; `bun run scan-reach` refuses when one is missing. NO TOTALS ARE WRITTEN HERE. A hand-maintained count drifts the moment one side moves \u2014 this note said '56 unenrolled of 86' while the arrays said 54 of 87 \u2014 so the number is whatever the arrays are.",
   "unenrolled": [],
   "externalCorpus": [
     {
@@ -11,16 +11,22 @@
     {
       "file": "tests/unit/_arch/gated-test-scope-ratchet.test.ts",
       "site": "countTestFilesUnder",
-      "why": "counts the files a gate positional selects, so a walk that reached nothing scores every token at zero and the verdict reports every token as selecting nothing — red, not green. A reach floor adds nothing to a consumer that already cannot pass over an empty walk."
+      "why": "counts the files a gate positional selects, so a walk that reached nothing scores every token at zero and the verdict reports every token as selecting nothing \u2014 red, not green. A reach floor adds nothing to a consumer that already cannot pass over an empty walk."
     }
   ],
   "expectedIds": {
-    "src/agent/converge/purity.test.ts": ["src/agent/converge/purity.test.ts#src-agent-converge"],
+    "src/agent/converge/purity.test.ts": [
+      "src/agent/converge/purity.test.ts#src-agent-converge"
+    ],
     "src/agent/prompt-graph/role-drift.ratchet.test.ts": [
       "src/agent/prompt-graph/role-drift.ratchet.test.ts#src"
     ],
-    "src/apps/bench/benchmark-suite.test.ts": ["src/apps/bench/benchmark-suite.test.ts#BENCH"],
-    "src/tool/terminal-surface.test.ts": ["src/tool/terminal-surface.test.ts#SRC-NON-APPS"],
+    "src/apps/bench/benchmark-suite.test.ts": [
+      "src/apps/bench/benchmark-suite.test.ts#BENCH"
+    ],
+    "src/tool/terminal-surface.test.ts": [
+      "src/tool/terminal-surface.test.ts#SRC-NON-APPS"
+    ],
     "tests/adversarial/aug02-feeder-deferred-status.test.ts": [
       "tests/adversarial/aug02-feeder-deferred-status.test.ts#SRC"
     ],
@@ -71,15 +77,21 @@
     "tests/unit/_arch/tool-context-isp-ratchet.test.ts": [
       "tests/unit/_arch/tool-context-isp-ratchet.test.ts#TOOL-DIR"
     ],
-    "tests/unit/_arch/ts-exports-ssot.test.ts": ["tests/unit/_arch/ts-exports-ssot.test.ts#TOOLS"],
-    "tests/unit/activity-slice-boundary.test.ts": ["slice-boundary:activity"],
+    "tests/unit/_arch/ts-exports-ssot.test.ts": [
+      "tests/unit/_arch/ts-exports-ssot.test.ts#TOOLS"
+    ],
+    "tests/unit/activity-slice-boundary.test.ts": [
+      "slice-boundary:activity"
+    ],
     "tests/unit/activity/activity-store-constructor-owner-ratchet.test.ts": [
       "tests/unit/activity/activity-store-constructor-owner-ratchet.test.ts#SRC-DIR"
     ],
     "tests/unit/agent-import-cycle.test.ts": [
       "tests/unit/agent-import-cycle.test.ts#src-agent-toplevel"
     ],
-    "tests/unit/agent-slice-boundary.test.ts": ["slice-boundary:agent"],
+    "tests/unit/agent-slice-boundary.test.ts": [
+      "slice-boundary:agent"
+    ],
     "tests/unit/ambient-global-capture-ratchet.test.ts": [
       "tests/unit/ambient-global-capture-ratchet.test.ts#SRC-DIR"
     ],
@@ -114,14 +126,24 @@
     "tests/unit/apps/cli/session-cmd-shim-removal-hellgate.test.ts": [
       "tests/unit/apps/cli/session-cmd-shim-removal-hellgate.test.ts#srcRoot"
     ],
-    "tests/unit/artifact-slice-boundary.test.ts": ["slice-boundary:artifact"],
-    "tests/unit/attention-slice-boundary.test.ts": ["slice-boundary:attention"],
+    "tests/unit/artifact-slice-boundary.test.ts": [
+      "slice-boundary:artifact"
+    ],
+    "tests/unit/attention-slice-boundary.test.ts": [
+      "slice-boundary:attention"
+    ],
     "tests/unit/audit-ratchet/error-message-canonical-hellgate.test.ts": [
       "tests/unit/audit-ratchet/error-message-canonical-hellgate.test.ts#SRC-DIR"
     ],
-    "tests/unit/auth-slice-boundary.test.ts": ["slice-boundary:auth"],
-    "tests/unit/browser-slice-boundary.test.ts": ["slice-boundary:browser"],
-    "tests/unit/capability-slice-boundary.test.ts": ["slice-boundary:capability"],
+    "tests/unit/auth-slice-boundary.test.ts": [
+      "slice-boundary:auth"
+    ],
+    "tests/unit/browser-slice-boundary.test.ts": [
+      "slice-boundary:browser"
+    ],
+    "tests/unit/capability-slice-boundary.test.ts": [
+      "slice-boundary:capability"
+    ],
     "tests/unit/cli/cli-feature-gates-drift-hellgate.test.ts": [
       "tests/unit/cli/cli-feature-gates-drift-hellgate.test.ts#SRC"
     ],
@@ -134,13 +156,19 @@
     "tests/unit/cli/terminal-chrome-hellgate.test.ts": [
       "tests/unit/cli/terminal-chrome-hellgate.test.ts#src-apps-cli"
     ],
-    "tests/unit/codemode-slice-boundary.test.ts": ["slice-boundary:codemode"],
+    "tests/unit/codemode-slice-boundary.test.ts": [
+      "slice-boundary:codemode"
+    ],
     "tests/unit/config-knob-inventory-leaf-hellgate.test.ts": [
       "tests/unit/config-knob-inventory-leaf-hellgate.test.ts#INVENTORY",
       "tests/unit/config-knob-inventory-leaf-hellgate.test.ts#SCHEMA"
     ],
-    "tests/unit/config-slice-boundary.test.ts": ["slice-boundary:config"],
-    "tests/unit/connectors-slice-boundary.test.ts": ["slice-boundary:connectors"],
+    "tests/unit/config-slice-boundary.test.ts": [
+      "slice-boundary:config"
+    ],
+    "tests/unit/connectors-slice-boundary.test.ts": [
+      "slice-boundary:connectors"
+    ],
     "tests/unit/dangerous-gate-strict-ratchet-hellgate.test.ts": [
       "tests/unit/dangerous-gate-strict-ratchet-hellgate.test.ts#SRC"
     ],
@@ -162,7 +190,9 @@
     "tests/unit/edit-fresh-hash-mutating-tool-completeness-ratchet.test.ts": [
       "tests/unit/edit-fresh-hash-mutating-tool-completeness-ratchet.test.ts#TOOL"
     ],
-    "tests/unit/eval-no-sketchy-code.test.ts": ["tests/unit/eval-no-sketchy-code.test.ts#EVAL"],
+    "tests/unit/eval-no-sketchy-code.test.ts": [
+      "tests/unit/eval-no-sketchy-code.test.ts#EVAL"
+    ],
     "tests/unit/feature-catalog-reachability.test.ts": [
       "tests/unit/feature-catalog-reachability.test.ts#FEATURE-YAMLS"
     ],
@@ -172,9 +202,15 @@
     "tests/unit/gate-vocabulary-ratchet-hellgate.test.ts": [
       "tests/unit/gate-vocabulary-ratchet-hellgate.test.ts#SRC"
     ],
-    "tests/unit/git-slice-boundary.test.ts": ["slice-boundary:git"],
-    "tests/unit/god-code-ratchet.test.ts": ["tests/unit/god-code-ratchet.test.ts#SRC"],
-    "tests/unit/host-slice-boundary.test.ts": ["slice-boundary:host"],
+    "tests/unit/git-slice-boundary.test.ts": [
+      "slice-boundary:git"
+    ],
+    "tests/unit/god-code-ratchet.test.ts": [
+      "tests/unit/god-code-ratchet.test.ts#SRC"
+    ],
+    "tests/unit/host-slice-boundary.test.ts": [
+      "slice-boundary:host"
+    ],
     "tests/unit/host/bootstrap-host-extraction-hellgate.test.ts": [
       "tests/unit/host/bootstrap-host-extraction-hellgate.test.ts#CLI-REPL",
       "tests/unit/host/bootstrap-host-extraction-hellgate.test.ts#HOST-BOOTSTRAP"
@@ -182,12 +218,18 @@
     "tests/unit/identity-mid-session-rebuilder-owner-wire-hellgate.test.ts": [
       "tests/unit/identity-mid-session-rebuilder-owner-wire-hellgate.test.ts#dir"
     ],
-    "tests/unit/integrations-slice-boundary.test.ts": ["slice-boundary:integrations"],
+    "tests/unit/integrations-slice-boundary.test.ts": [
+      "slice-boundary:integrations"
+    ],
     "tests/unit/integrations/github/slice-fence-static-hellgate-r3.test.ts": [
       "tests/unit/integrations/github/slice-fence-static-hellgate-r3.test.ts#SLICE-DIR"
     ],
-    "tests/unit/ipc-slice-boundary.test.ts": ["slice-boundary:ipc"],
-    "tests/unit/kernel-slice-boundary.test.ts": ["slice-boundary:kernel"],
+    "tests/unit/ipc-slice-boundary.test.ts": [
+      "slice-boundary:ipc"
+    ],
+    "tests/unit/kernel-slice-boundary.test.ts": [
+      "slice-boundary:kernel"
+    ],
     "tests/unit/kernel/knob-schema-ssot-lock-ratchet.test.ts": [
       "tests/unit/kernel/knob-schema-ssot-lock-ratchet.test.ts#src-runner-knobs-knobs"
     ],
@@ -202,8 +244,12 @@
       "tests/unit/lint-debt-ratchet-reach.test.ts#SRC",
       "tests/unit/lint-debt-ratchet-reach.test.ts#TESTS"
     ],
-    "tests/unit/llm-slice-boundary.test.ts": ["slice-boundary:llm"],
-    "tests/unit/lsp-slice-boundary.test.ts": ["slice-boundary:lsp"],
+    "tests/unit/llm-slice-boundary.test.ts": [
+      "slice-boundary:llm"
+    ],
+    "tests/unit/lsp-slice-boundary.test.ts": [
+      "slice-boundary:lsp"
+    ],
     "tests/unit/manifest-codex-compat-hellgate.test.ts": [
       "tests/unit/manifest-codex-compat-hellgate.test.ts#SYSTEM-SKILLS"
     ],
@@ -212,19 +258,27 @@
       "tests/unit/mention-first-line-parity-hellgate.test.ts#PLUGIN-APP-RESOLVER",
       "tests/unit/mention-first-line-parity-hellgate.test.ts#SRC-CONSUMERS"
     ],
-    "tests/unit/mcp-slice-boundary.test.ts": ["slice-boundary:mcp"],
-    "tests/unit/media-slice-boundary.test.ts": ["slice-boundary:media"],
+    "tests/unit/mcp-slice-boundary.test.ts": [
+      "slice-boundary:mcp"
+    ],
+    "tests/unit/media-slice-boundary.test.ts": [
+      "slice-boundary:media"
+    ],
     "tests/unit/memory-fence-no-llm-import-hellgate.test.ts": [
       "tests/unit/memory-fence-no-llm-import-hellgate.test.ts#MEMORY-ROOT"
     ],
     "tests/unit/memory-fence-stays-clean-hellgate.test.ts": [
       "tests/unit/memory-fence-stays-clean-hellgate.test.ts#MEMORY-ROOT"
     ],
-    "tests/unit/memory-slice-boundary.test.ts": ["slice-boundary:memory"],
+    "tests/unit/memory-slice-boundary.test.ts": [
+      "slice-boundary:memory"
+    ],
     "tests/unit/memory/cross-session-inject-removed-ratchet.test.ts": [
       "tests/unit/memory/cross-session-inject-removed-ratchet.test.ts#SRC-ROOT"
     ],
-    "tests/unit/migration-slice-boundary.test.ts": ["slice-boundary:migration"],
+    "tests/unit/migration-slice-boundary.test.ts": [
+      "slice-boundary:migration"
+    ],
     "tests/unit/no-benchmark-overfit-steer-ratchet.test.ts": [
       "tests/unit/no-benchmark-overfit-steer-ratchet.test.ts#BATCH-DRIVER-LANES",
       "tests/unit/no-benchmark-overfit-steer-ratchet.test.ts#BENCH-DRIVER-LANES"
@@ -245,7 +299,9 @@
     "tests/unit/no-timebomb-auth-fixtures-hellgate.test.ts": [
       "tests/unit/no-timebomb-auth-fixtures-hellgate.test.ts#TESTS"
     ],
-    "tests/unit/objective-slice-boundary.test.ts": ["slice-boundary:objective"],
+    "tests/unit/objective-slice-boundary.test.ts": [
+      "slice-boundary:objective"
+    ],
     "tests/unit/objective/authority-boundary-ratchet.test.ts": [
       "tests/unit/objective/authority-boundary-ratchet.test.ts#SRC"
     ],
@@ -257,7 +313,9 @@
       "tests/unit/observability-audit-ratchet.test.ts#TOOL",
       "tests/unit/observability-audit-ratchet.test.ts#SUBAGENT"
     ],
-    "tests/unit/observability-slice-boundary.test.ts": ["slice-boundary:observability"],
+    "tests/unit/observability-slice-boundary.test.ts": [
+      "slice-boundary:observability"
+    ],
     "tests/unit/observability/new-slice-metrics-hellgate.test.ts": [
       "tests/unit/observability/new-slice-metrics-hellgate.test.ts#AGENT/ERROR-ROUTING",
       "tests/unit/observability/new-slice-metrics-hellgate.test.ts#AGENT/GIT-DIRECTIVES",
@@ -274,27 +332,43 @@
       "tests/unit/orphan-orchestrator-ratchet.test.ts#TESTS",
       "tests/unit/orphan-orchestrator-ratchet.test.ts#DRIVER"
     ],
-    "tests/unit/patch-slice-boundary.test.ts": ["slice-boundary:patch"],
-    "tests/unit/permission-slice-boundary.test.ts": ["slice-boundary:permission"],
+    "tests/unit/patch-slice-boundary.test.ts": [
+      "slice-boundary:patch"
+    ],
+    "tests/unit/permission-slice-boundary.test.ts": [
+      "slice-boundary:permission"
+    ],
     "tests/unit/permission/posture/e3-direct-writer-ratchet.test.ts": [
       "tests/unit/permission/posture/e3-direct-writer-ratchet.test.ts#SRC"
     ],
     "tests/unit/permission/single-pep-fence-hellgate.test.ts": [
       "tests/unit/permission/single-pep-fence-hellgate.test.ts#SRC"
     ],
-    "tests/unit/plugin-isolation-slice-boundary.test.ts": ["slice-boundary:plugin-isolation"],
-    "tests/unit/protocol-slice-boundary.test.ts": ["slice-boundary:protocol"],
+    "tests/unit/plugin-isolation-slice-boundary.test.ts": [
+      "slice-boundary:plugin-isolation"
+    ],
+    "tests/unit/protocol-slice-boundary.test.ts": [
+      "slice-boundary:protocol"
+    ],
     "tests/unit/quanta-home-root-ssot-ratchet-hellgate.test.ts": [
       "tests/unit/quanta-home-root-ssot-ratchet-hellgate.test.ts#SRC"
     ],
-    "tests/unit/radar-slice-boundary.test.ts": ["slice-boundary:radar"],
-    "tests/unit/reactor-slice-boundary.test.ts": ["slice-boundary:reactor"],
-    "tests/unit/realtime-slice-boundary.test.ts": ["slice-boundary:realtime"],
+    "tests/unit/radar-slice-boundary.test.ts": [
+      "slice-boundary:radar"
+    ],
+    "tests/unit/reactor-slice-boundary.test.ts": [
+      "slice-boundary:reactor"
+    ],
+    "tests/unit/realtime-slice-boundary.test.ts": [
+      "slice-boundary:realtime"
+    ],
     "tests/unit/realtime/voice-session-hellgate.test.ts": [
       "tests/unit/realtime/voice-session-hellgate.test.ts#SRC",
       "tests/unit/realtime/voice-session-hellgate.test.ts#VOICE-SESSION"
     ],
-    "tests/unit/remote-slice-boundary.test.ts": ["slice-boundary:remote"],
+    "tests/unit/remote-slice-boundary.test.ts": [
+      "slice-boundary:remote"
+    ],
     "tests/unit/repair-shadow-js-ratchet.test.ts": [
       "tests/unit/repair-shadow-js-ratchet.test.ts#REPAIR-DIR"
     ],
@@ -304,17 +378,23 @@
     "tests/unit/retrieval-bridge-deleted-ratchet.test.ts": [
       "tests/unit/retrieval-bridge-deleted-ratchet.test.ts#SRC-ROOT"
     ],
-    "tests/unit/retrieval-slice-boundary.test.ts": ["slice-boundary:retrieval"],
+    "tests/unit/retrieval-slice-boundary.test.ts": [
+      "slice-boundary:retrieval"
+    ],
     "tests/unit/retrieval/budget-probe-hellgate.test.ts": [
       "tests/unit/retrieval/budget-probe-hellgate.test.ts#src/agent",
       "tests/unit/retrieval/budget-probe-hellgate.test.ts#src/apps",
       "tests/unit/retrieval/budget-probe-hellgate.test.ts#src/runner"
     ],
-    "tests/unit/rules-slice-boundary.test.ts": ["slice-boundary:rules"],
+    "tests/unit/rules-slice-boundary.test.ts": [
+      "slice-boundary:rules"
+    ],
     "tests/unit/runagent-callsite-authority-fence-hellgate.test.ts": [
       "tests/unit/runagent-callsite-authority-fence-hellgate.test.ts#SRC"
     ],
-    "tests/unit/runner-slice-boundary.test.ts": ["slice-boundary:runner"],
+    "tests/unit/runner-slice-boundary.test.ts": [
+      "slice-boundary:runner"
+    ],
     "tests/unit/runner/closure-repair-driver-parity.test.ts": [
       "tests/unit/runner/closure-repair-driver-parity.test.ts#DRIVER-DIR"
     ],
@@ -337,7 +417,9 @@
     "tests/unit/runtime-config-no-dead-knob-ratchet.test.ts": [
       "tests/unit/runtime-config-no-dead-knob-ratchet.test.ts#SRC"
     ],
-    "tests/unit/runtime-slice-boundary.test.ts": ["slice-boundary:runtime"],
+    "tests/unit/runtime-slice-boundary.test.ts": [
+      "slice-boundary:runtime"
+    ],
     "tests/unit/runtime/exec-cluster-spawn-env-scrub-ban-hellgate.test.ts": [
       "tests/unit/runtime/exec-cluster-spawn-env-scrub-ban-hellgate.test.ts#SRC"
     ],
@@ -347,35 +429,57 @@
     "tests/unit/runtime/worktree-checkout-progress-retired.test.ts": [
       "tests/unit/runtime/worktree-checkout-progress-retired.test.ts#SRC"
     ],
-    "tests/unit/scheduler-slice-boundary.test.ts": ["slice-boundary:scheduler"],
-    "tests/unit/sdk-slice-boundary.test.ts": ["slice-boundary:sdk"],
-    "tests/unit/security-slice-boundary.test.ts": ["slice-boundary:security"],
+    "tests/unit/scheduler-slice-boundary.test.ts": [
+      "slice-boundary:scheduler"
+    ],
+    "tests/unit/sdk-slice-boundary.test.ts": [
+      "slice-boundary:sdk"
+    ],
+    "tests/unit/security-slice-boundary.test.ts": [
+      "slice-boundary:security"
+    ],
     "tests/unit/sep5-ratchet-enrollment.test.ts": [
       "tests/unit/sep5-ratchet-enrollment.test.ts#TESTS"
     ],
-    "tests/unit/session-slice-boundary.test.ts": ["slice-boundary:session"],
+    "tests/unit/session-slice-boundary.test.ts": [
+      "slice-boundary:session"
+    ],
     "tests/unit/session-turn-driver-thin-surface-hellgate.test.ts": [
       "tests/unit/session-turn-driver-thin-surface-hellgate.test.ts#session-loop-slice"
     ],
-    "tests/unit/shared-slice-boundary.test.ts": ["slice-boundary:shared"],
-    "tests/unit/side-agent-slice-boundary.test.ts": ["slice-boundary:side-agent"],
+    "tests/unit/shared-slice-boundary.test.ts": [
+      "slice-boundary:shared"
+    ],
+    "tests/unit/side-agent-slice-boundary.test.ts": [
+      "slice-boundary:side-agent"
+    ],
     "tests/unit/side-agent-stopall-wiring-guard.test.ts": [
       "tests/unit/side-agent-stopall-wiring-guard.test.ts#SRC"
     ],
     "tests/unit/silent-catch-24h-ratchet.test.ts": [
       "tests/unit/silent-catch-24h-ratchet.test.ts#dir"
     ],
-    "tests/unit/skill-slice-boundary.test.ts": ["slice-boundary:skill"],
+    "tests/unit/skill-slice-boundary.test.ts": [
+      "slice-boundary:skill"
+    ],
     "tests/unit/skill/runtime/f4-discovery-owner-ratchet.test.ts": [
       "tests/unit/skill/runtime/f4-discovery-owner-ratchet.test.ts#WEB-DAEMON-DIR"
     ],
     "tests/unit/slice-boundary-config-parity.test.ts": [
       "tests/unit/slice-boundary-config-parity.test.ts#UNIT-ENTRYPOINTS"
     ],
-    "tests/unit/src-no-sketchy-code.test.ts": ["tests/unit/src-no-sketchy-code.test.ts#SRC"],
-    "tests/unit/storage-slice-boundary.test.ts": ["slice-boundary:storage"],
-    "tests/unit/stream-slice-boundary.test.ts": ["slice-boundary:stream"],
-    "tests/unit/subagent-slice-boundary.test.ts": ["slice-boundary:subagent"],
+    "tests/unit/src-no-sketchy-code.test.ts": [
+      "tests/unit/src-no-sketchy-code.test.ts#SRC"
+    ],
+    "tests/unit/storage-slice-boundary.test.ts": [
+      "slice-boundary:storage"
+    ],
+    "tests/unit/stream-slice-boundary.test.ts": [
+      "slice-boundary:stream"
+    ],
+    "tests/unit/subagent-slice-boundary.test.ts": [
+      "slice-boundary:subagent"
+    ],
     "tests/unit/surface-coupling-ratchet.test.ts": [
       "tests/unit/surface-coupling-ratchet.test.ts#APPS-DIR"
     ],
@@ -397,15 +501,29 @@
     "tests/unit/tool-no-throw-contract-guard.test.ts": [
       "tests/unit/tool-no-throw-contract-guard.test.ts#TOOL-DIR"
     ],
-    "tests/unit/tool-slice-boundary.test.ts": ["slice-boundary:tool"],
+    "tests/unit/tool-slice-boundary.test.ts": [
+      "slice-boundary:tool"
+    ],
     "tests/unit/tool-surface-manifest-hellgate.test.ts": [
       "tests/unit/tool-surface-manifest-hellgate.test.ts#FEATURE-YAMLS"
     ],
-    "tests/unit/ui-slice-boundary.test.ts": ["slice-boundary:ui"],
-    "tests/unit/voice-slice-boundary.test.ts": ["slice-boundary:voice"],
+    "tests/unit/ui-slice-boundary.test.ts": [
+      "slice-boundary:ui"
+    ],
+    "tests/unit/voice-slice-boundary.test.ts": [
+      "slice-boundary:voice"
+    ],
     "tests/unit/wire-batch-mode-focus-fork-otel-hellgate.test.ts": [
       "tests/unit/wire-batch-mode-focus-fork-otel-hellgate.test.ts#loopDir"
     ],
-    "tests/unit/workflow-slice-boundary.test.ts": ["slice-boundary:workflow"]
+    "tests/unit/workflow-slice-boundary.test.ts": [
+      "slice-boundary:workflow"
+    ],
+    "tests/unit/_arch/workflow-concurrency.test.ts": [
+      "tests/unit/_arch/workflow-concurrency.test.ts#WORKFLOWS"
+    ],
+    "tests/unit/dev/source-js-cleanup.test.ts": [
+      "tests/unit/dev/source-js-cleanup.test.ts#TRACKED_JS"
+    ]
   }
 }

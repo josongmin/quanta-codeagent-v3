@@ -39,6 +39,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { assertScanPopulation } from "../_shared/scan-population"
+
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 
 const cleanJsCommand = (): string => {
@@ -147,19 +149,28 @@ describe("test:clean-js", () => {
       .filter((line) => line.trim() !== "")
     expect(listed).toEqual([])
 
-    // ANTI-VACUITY: `git ls-files` must be working here, or an empty result
-    // proves nothing. The repo does track .js files, just not under src/.
+    // ANTI-VACUITY, through the SHARED mechanism rather than a hand-written
+    // floor: `git ls-files` must be working here, or an empty `src/` result
+    // proves nothing. The repo does track .js files, just not under src/, and
+    // that reach is pinned in scan-reach-baseline.json so it cannot quietly
+    // drop to zero.
     const anywhere = Bun.spawnSync(["git", "ls-files", "*.js"], {
       cwd: REPO_ROOT,
       stdout: "pipe",
       stderr: "pipe",
     })
-    expect(
-      anywhere.stdout
-        .toString()
-        .split("\n")
-        .filter((line) => line.trim() !== "").length,
-    ).toBeGreaterThan(5)
+    const trackedJs = anywhere.stdout
+      .toString()
+      .split("\n")
+      .filter((line) => line.trim() !== "")
+    assertScanPopulation(
+      trackedJs.map((rel) => join(REPO_ROOT, rel)),
+      REPO_ROOT,
+      {
+        collectable: (name) => name.endsWith(".js"),
+        id: "tests/unit/dev/source-js-cleanup.test.ts#TRACKED_JS",
+      },
+    )
 
     expect(existsSync(join(REPO_ROOT, "src", "ui", "auth-ui.js"))).toBe(false)
     expect(existsSync(join(REPO_ROOT, "src", "apps", "cli", "auth-ui.ts"))).toBe(true)

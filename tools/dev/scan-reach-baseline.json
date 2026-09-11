@@ -1,5 +1,5 @@
 {
-  "note": "Committed REACH floors for the repo's scanning guards, one row per scan. Floors only go UP. `reach < floor` is a REGRESSION: the scan shrank, so every verdict derived from it is worthless until that is explained. A scan with no row FAILS rather than defaulting — a closed universe is the only thing that stops a new guard shipping with no reach at all. Lock in growth with `bun run scan-reach --tighten`, which refuses while any scan is below its floor and rewrites only rows that already exist. `walked` proves the anchor (the scan reached a real corpus); `matched` proves the predicate (the guard's own matcher still selects something) — a matcher that rotted selects nothing while the walk stays full.",
+  "note": "Committed REACH floors for the repo's scanning guards, one row per scan. Floors only go UP. `reach < floor` is a REGRESSION: the scan shrank, so every verdict derived from it is worthless until that is explained. A scan with no row FAILS rather than defaulting \u2014 a closed universe is the only thing that stops a new guard shipping with no reach at all. Lock in growth with `bun run scan-reach --tighten`, which refuses while any scan is below its floor and rewrites only rows that already exist. `walked` proves the anchor (the scan reached a real corpus); `matched` proves the predicate (the guard's own matcher still selects something) \u2014 a matcher that rotted selects nothing while the walk stays full.",
   "scans": {
     "slice-boundary:activity": {
       "walked": 12
@@ -593,6 +593,12 @@
     },
     "tests/unit/wire-batch-mode-focus-fork-otel-hellgate.test.ts#loopDir": {
       "walked": 27
+    },
+    "tests/unit/_arch/workflow-concurrency.test.ts#WORKFLOWS": {
+      "walked": 7
+    },
+    "tests/unit/dev/source-js-cleanup.test.ts#TRACKED_JS": {
+      "walked": 18
     }
   }
 }
