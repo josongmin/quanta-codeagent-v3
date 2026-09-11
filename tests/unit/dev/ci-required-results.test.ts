@@ -110,18 +110,27 @@ describe("required check truth table", () => {
   })
 
   test("empty needs or a skipped required job fail closed", () => {
-    expect(aggregateRequiredNeeds({})).toBe("fail")
-    expect(
-      aggregateRequiredNeeds({
+    // The third assertion here used to be `.toBe("pass")` for a TWO-row needs
+    // object, which is the defect TVH-06 fixes: a partial producer set was a
+    // pass. The exact set is now compared three ways, so a partial set is RED
+    // and names what is missing. Full coverage of that lives in
+    // `required-producer-exactness.test.ts`.
+    const workflowYaml = readFileSync(
+      join(import.meta.dir, "../../../.github/workflows/ci.yml"),
+      "utf8",
+    )
+    expect(aggregateRequiredNeeds({ needs: {}, workflowYaml }).ok).toBe(false)
+    const partial = aggregateRequiredNeeds({
+      needs: {
         "static-code": { result: "success" },
         contract: { result: "skipped" },
-      }),
-    ).toBe("fail")
-    expect(
-      aggregateRequiredNeeds({
-        "static-code": { result: "success" },
-        catalog: { result: "success" },
-      }),
-    ).toBe("pass")
+      },
+      workflowYaml,
+    })
+    expect(partial.ok).toBe(false)
+    expect(partial.ok ? [] : partial.reasons).toContain(
+      "missing producer ids in needs: catalog, full-suite, pty, toolchain, web",
+    )
+    expect(partial.ok ? [] : partial.reasons).toContain('producer "contract" concluded "skipped"')
   })
 })

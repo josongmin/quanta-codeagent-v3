@@ -4,13 +4,19 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { testEnvironmentSha256 } from "../../../tools/dev/test-shard-receipt"
 import {
+  ABSENT_BASE_OID,
   cleanStatusSha256,
+  DEFAULT_RECEIPT_TTL_MS,
+  homeDerivedToolResolution,
+  MAX_RECEIPT_TTL_MS,
   mintExactVerificationReceipt,
   readExactVerificationReceipt,
   sharedVerificationCacheRoot,
   type VerificationContext,
   validateExactVerificationReceipt,
+  verificationBaseOid,
   verificationEnvironmentSha256,
+  verificationHomeCapabilitySha256,
   verificationReceiptPath,
   verificationToolchainSha256,
 } from "../../../tools/dev/verification-receipt"
@@ -26,6 +32,8 @@ const context = (overrides: Partial<VerificationContext> = {}): VerificationCont
   dependencySha256: "d".repeat(64),
   toolchainSha256: "e".repeat(64),
   environmentSha256: "f".repeat(64),
+  baseOid: "b".repeat(40),
+  homeCapabilitySha256: "1".repeat(64),
   ...overrides,
 })
 
@@ -42,12 +50,16 @@ describe("content-bound exact verification receipt", () => {
     "dependencySha256",
     "toolchainSha256",
     "environmentSha256",
+    "baseOid",
+    "homeCapabilitySha256",
   ] as const) {
     test(`${field} drift invalidates instead of reusing`, () => {
       const receipt = mintExactVerificationReceipt(context(), 1_000, 5_000)
       const result = validateExactVerificationReceipt(
         receipt,
-        context({ [field]: field === "head" ? "9".repeat(40) : "9".repeat(64) }),
+        context({
+          [field]: field === "head" || field === "baseOid" ? "9".repeat(40) : "9".repeat(64),
+        }),
         2_000,
       )
       expect(result.ok).toBe(false)
@@ -62,6 +74,174 @@ describe("content-bound exact verification receipt", () => {
       reason: "receipt expired",
     })
     expect(validateExactVerificationReceipt({ schema: "wrong" }, context(), 2_000).ok).toBe(false)
+  })
+
+  describe("issued→expiry is a SCHEMA contract, not the receipt's own claim", () => {
+    test("[7] an expiry extended to 30 days misses with the duration reason", () => {
+      // The hole: validation was `expiresAtMs > now`, which reads the file's
+      // own claim about its lifetime and believes it. Editing one integer in a
+      // JSON file bought a month of skipping every gate, and the miss reason
+      // would have been… nothing, because it was a hit.
+      const honest = mintExactVerificationReceipt(context(), 1_000, DEFAULT_RECEIPT_TTL_MS)
+      expect(validateExactVerificationReceipt(honest, context(), 2_000)).toEqual({ ok: true })
+
+      const thirtyDaysMs = 30 * 24 * 60 * 60_000
+      const extended = { ...honest, expiresAtMs: honest.issuedAtMs + thirtyDaysMs }
+      const result = validateExactVerificationReceipt(extended, context(), 2_000)
+      expect(result.ok).toBe(false)
+      if (!result.ok) {
+        expect(result.reason).toBe(
+          `receipt ttl ${thirtyDaysMs}ms exceeds the schema maximum ${MAX_RECEIPT_TTL_MS}ms`,
+        )
+        // Distinct from every other miss reason — not a generic "invalid".
+        expect(result.reason).not.toBe("receipt expired")
+      }
+    })
+
+    test("exactly the maximum is allowed; one millisecond over is not", () => {
+      const atMax = mintExactVerificationReceipt(context(), 1_000, MAX_RECEIPT_TTL_MS)
+      expect(validateExactVerificationReceipt(atMax, context(), 2_000)).toEqual({ ok: true })
+      expect(
+        validateExactVerificationReceipt(
+          { ...atMax, expiresAtMs: atMax.expiresAtMs + 1 },
+          context(),
+          2_000,
+        ).ok,
+      ).toBe(false)
+      expect(MAX_RECEIPT_TTL_MS).toBe(6 * 60 * 60_000)
+    })
+
+    test("minting cannot produce what the validator would reject", () => {
+      // One rule at both ends, so mint and validate cannot drift apart.
+      expect(() => mintExactVerificationReceipt(context(), 1_000, MAX_RECEIPT_TTL_MS + 1)).toThrow(
+        /exceeds|schema maximum/,
+      )
+      expect(() => mintExactVerificationReceipt(context(), 1_000, 0)).toThrow()
+    })
+
+    test("an expiry at or before issue is RED rather than a zero-length hit", () => {
+      const receipt = mintExactVerificationReceipt(context(), 1_000, 5_000)
+      expect(
+        validateExactVerificationReceipt({ ...receipt, expiresAtMs: 1_000 }, context(), 900),
+      ).toEqual({
+        ok: false,
+        reason: "receipt ttl is not positive — expires at or before it was issued",
+      })
+    })
+
+    test("[8] an issuedAtMs in the future misses", () => {
+      const receipt = mintExactVerificationReceipt(context(), 10_000_000, 5_000)
+      expect(validateExactVerificationReceipt(receipt, context(), 1_000)).toEqual({
+        ok: false,
+        reason: "receipt issued in the future",
+      })
+      // …and the 60s tolerance is a tolerance, not a loophole: inside it the
+      // receipt is still usable, outside it is not.
+      const nearly = mintExactVerificationReceipt(context(), 1_030_000, 5_000)
+      expect(validateExactVerificationReceipt(nearly, context(), 1_000_000)).toEqual({ ok: true })
+      const beyond = mintExactVerificationReceipt(context(), 1_061_000, 5_000)
+      expect(validateExactVerificationReceipt(beyond, context(), 1_000_000)).toEqual({
+        ok: false,
+        reason: "receipt issued in the future",
+      })
+    })
+  })
+
+  describe("the mutable comparison base and HOME are part of the identity", () => {
+    test("[9] a moved origin/main misses with the base-OID reason", () => {
+      // HEAD and status are unchanged; `git fetch` moved what the run compares
+      // AGAINST. Gate selection, diff scoping and scan-reach baselines all read
+      // origin/main, so this is a different verification — and the receipt had
+      // no field for it.
+      const receipt = mintExactVerificationReceipt(context({ baseOid: "1".repeat(40) }), 1_000)
+      const result = validateExactVerificationReceipt(
+        receipt,
+        context({ baseOid: "2".repeat(40) }),
+        2_000,
+      )
+      expect(result).toEqual({
+        ok: false,
+        reason: `baseOid mismatch: comparison base origin/main was ${"1".repeat(40)}, now ${"2".repeat(40)}`,
+      })
+      // Losing the ref entirely is a miss too — absence is a value.
+      expect(
+        validateExactVerificationReceipt(receipt, context({ baseOid: ABSENT_BASE_OID }), 2_000).ok,
+      ).toBe(false)
+    })
+
+    test("verificationBaseOid answers a real repository and says <absent> otherwise", () => {
+      const repoRoot = join(import.meta.dir, "../../..")
+      const oid = verificationBaseOid(repoRoot)
+      const expected = Bun.spawnSync(
+        ["git", "rev-parse", "--verify", "--quiet", "origin/main^{commit}"],
+        {
+          cwd: repoRoot,
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+      )
+      expect(oid).toBe(
+        expected.exitCode === 0 && expected.stdout.toString().trim() !== ""
+          ? expected.stdout.toString().trim()
+          : ABSENT_BASE_OID,
+      )
+      expect(verificationBaseOid(repoRoot, "refs/heads/no-such-ref-tvh06")).toBe(ABSENT_BASE_OID)
+    })
+
+    test("[10] a HOME-derived tool path or version change misses with that reason", () => {
+      const tools = { dlv: "/home/u/go/bin/dlv 1:2 4096 1700000000", git: "/usr/bin/git 1:3 900 1" }
+      const baseline = verificationHomeCapabilitySha256("/home/u", tools)
+      // Same tool, rebuilt: dev:ino / size / mtime move.
+      expect(
+        verificationHomeCapabilitySha256("/home/u", {
+          ...tools,
+          dlv: "/home/u/go/bin/dlv 1:2 5000 1800000000",
+        }),
+      ).not.toBe(baseline)
+      // Same tool, different HOME-relative location.
+      expect(
+        verificationHomeCapabilitySha256("/home/u", {
+          ...tools,
+          dlv: "/home/u/.local/bin/dlv 1:2 4096 1700000000",
+        }),
+      ).not.toBe(baseline)
+      // Lost entirely.
+      expect(verificationHomeCapabilitySha256("/home/u", { ...tools, dlv: "<missing>" })).not.toBe(
+        baseline,
+      )
+      // HOME itself moved, with every tool byte-identical.
+      expect(verificationHomeCapabilitySha256("/home/other", tools)).not.toBe(baseline)
+      expect(verificationHomeCapabilitySha256(undefined, tools)).not.toBe(baseline)
+      // A tool OUTSIDE home keys nothing here — that is toolchainSha256's job,
+      // and duplicating it would make every unrelated upgrade a HOME miss.
+      expect(
+        verificationHomeCapabilitySha256("/home/u", { ...tools, git: "/usr/bin/git 9:9 1 2" }),
+      ).toBe(baseline)
+      // It is NOT a hash of the home directory: only resolved tool paths.
+      expect(homeDerivedToolResolution("/home/u", tools)).toEqual([
+        ["dlv", "/go/bin/dlv 1:2 4096 1700000000"],
+      ])
+
+      const receipt = mintExactVerificationReceipt(
+        context({ homeCapabilitySha256: baseline }),
+        1_000,
+      )
+      expect(
+        validateExactVerificationReceipt(
+          receipt,
+          context({
+            homeCapabilitySha256: verificationHomeCapabilitySha256("/home/u", {
+              ...tools,
+              dlv: "<missing>",
+            }),
+          }),
+          2_000,
+        ),
+      ).toEqual({
+        ok: false,
+        reason: "homeCapabilitySha256 mismatch: HOME or HOME-derived tool resolution changed",
+      })
+    })
   })
 
   test("a host capability change invalidates the receipt that skips every gate", () => {
@@ -168,6 +348,8 @@ describe("shared verification cache root", () => {
       dependencySha256: "d".repeat(64),
       toolchainSha256: "e".repeat(64),
       environmentSha256: "f".repeat(64),
+      baseOid: "b".repeat(40),
+      homeCapabilitySha256: "1".repeat(64),
     }
     try {
       expect(readExactVerificationReceipt(path)).toBeUndefined()

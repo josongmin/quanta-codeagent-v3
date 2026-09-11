@@ -5,8 +5,10 @@ import {
   readExactVerificationReceipt,
   type VerificationContext,
   validateExactVerificationReceipt,
+  verificationBaseOid,
   verificationDependencySha256,
   verificationEnvironmentSha256,
+  verificationHomeCapabilitySha256,
   verificationReceiptPath,
   verificationToolchainSha256,
 } from "./verification-receipt"
@@ -68,6 +70,10 @@ export const verificationContextForSnapshot = (
   dependencySha256: verificationDependencySha256(repoRoot),
   toolchainSha256: verificationToolchainSha256(),
   environmentSha256: verificationEnvironmentSha256(env),
+  // The two moving parts a same-HEAD, same-status receipt used to be blind to:
+  // the remote comparison base, and HOME-derived tool resolution.
+  baseOid: verificationBaseOid(repoRoot),
+  homeCapabilitySha256: verificationHomeCapabilitySha256(env.HOME),
 })
 
 /**
