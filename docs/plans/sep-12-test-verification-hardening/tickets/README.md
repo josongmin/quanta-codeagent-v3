@@ -84,7 +84,7 @@ TVH-02와 TVH-03의 파일별 분리, TVH-11의 probe helper, TVH-12의 각 prod
 
 ## 착륙 로그 (2026-09-12, local main)
 
-`85a99bb6f` 이후 93 커밋 (`e8795ac5e` 기준 측정). 각 항목은 측정치와 red-on-injection을
+`85a99bb6f` 이후 110 커밋 (`280300e5e` 기준 측정; 동시 세션 커밋 포함). 각 항목은 측정치와 red-on-injection을
 커밋 메시지에 담고 있다. 아래 표는 1~16번 묶음만 나열하며, 이후 커밋은 섹션별로 이어진다 —
 "42"는 표에 적힌 행 수도 아니고 실제 커밋 수도 아니었다.
 
@@ -261,14 +261,19 @@ precommit: ok — 9 of 9 gate(s) passed
 > 캠페인 3커밋 전에 추가된 파일 6개가 어떤 catalog 항목에서도 참조되지 않았다.
 > 죽은 gate는 선을 지키지 않는다 — 선이 움직였다는 사실을 가릴 뿐이다.
 
-### tier membership (clean HEAD `e8795ac5e`, `--discover-only`, 재측정)
+### tier membership (HEAD `280300e5e`, `--discover-only`, 재측정)
 
 | tier | files | digest |
 |---|---:|---|
-| prepush | 3,941 | `b70ca76d56551c02` |
-| pr | 3,941 | `b70ca76d56551c02` |
-| full | 3,951 | `6dccaa9ab297d84f` |
-| nightly | 3,965 | `0e8f348f3815dc7f` |
+| prepush | 3,944 | `bb4cf51376e18f18` |
+| pr | 3,944 | `bb4cf51376e18f18` |
+| full | 3,954 | `3438930588af7024` |
+| nightly | 3,968 | `eb560f5a634f84d4` |
+
+> 이 표는 **한 커밋 안에서도 움직인다.** 위 수치는 `280300e5e` 측정이며, 같은 세션에서
+> `e8795ac5e` 기준으로는 3,941 / 3,951 / 3,965였다 — 동시 세션이 테스트 파일을 추가하면
+> 바로 바뀐다. 그래서 이 표의 계약은 "절대값"이 아니라 **측정 기준 커밋을 같이 적는 것**과
+> 아래 관계식이다.
 
 이 표는 원래 `1d153a109` 측정치(3,938 / 3,948 / 3,962, digest 4종 전부 상이)를
 "current-HEAD"라고 적어두고 36 커밋 동안 갱신하지 않았다. **관계는 그대로였고
@@ -282,11 +287,37 @@ precommit: ok — 9 of 9 gate(s) passed
 **커버리지는 줄지 않았다** — tier가 갈렸다는 것과 테스트가 사라졌다는 것은 다르다:
 
     pr ⊂ full ⊂ nightly            (strict, 측정)
-    nightly (3,965) == universe     (3,965)
+    nightly (3,968) == universe     (3,968)
     universe 에서 유실:              0
 
 full-only 10개, nightly-only 14개가 tier를 가르는 전부다. 어떤 파일도 어느 tier에도
 속하지 않는 상태로 떨어지지 않는다.
+
+### 3차 셀프어딧(3병렬) 후속 — 실측 후 수정한 결함 (HEAD `280300e5e`)
+
+세 라운드의 findings를 **전부 직접 재현한 뒤** 고쳤다. 서브에이전트 보고를 그대로 신뢰하지
+않았고, 한 건(`pty` 플로어 수치)은 라운드 간 주장이 엇갈려 직접 측정으로 판정했다.
+
+| # | 결함 | 실측 증거 | 커밋 |
+|---|---|---|---|
+| 1 | 캐시 재사용이 여전히 count 기반 — id를 바꿔치기하고 digest 재계산·재서명한 receipt가 `hit` | `verdict: hit ["tests/unit/x.test.ts","tests/unit/y.test.ts"]` (계획에 없는 2개 파일) | `5ff0ef9fc` |
+| 2 | scan-reach receipt를 **어떤 tier도 통과할 수 없었다** | full→`membership-mismatch`, nightly→`wrong-tier`, pr→`non-authoritative-tier` | `28ceba210` |
+| 3 | quarantine이 양방향 inert (campaign은 읽지 않고, runner는 campaign 아래서 쓰지 않음) | 같은 record에 대해 `quarantinePath` 없이 ACQUIRED port=47451 / 있으면 refused | `eb52ea7ed` |
+| 4 | `spawnDetachedKeeper`가 detach하지 않음 | parent pgid 26124 == keeper pgid 26124 (`ps`); setsid 후 keeper pid == pgid | `b84c2bc24` |
+| 5 | unbounded child 금지가 **두 철자만** 막았다 (array form·`Promise.all` 안의 `proc.exited`) | 9개 sibling capture가 무제한; `timeout:600` vs `sleep 3` → 605ms SIGTERM | `4d98b6fb4` |
+| 6 | 문서 9건이 틀렸다 (tier 표 전 항목·commit 수·닫힌 항목 3개·hold #4·ADR 렌더링) | 아래 tier 표 및 각 절 | `7ff3ee577` |
+| 7 | `--tier=pr --tier=nightly`가 조용히 마지막 것을 채택 | `"name": "full:nightly"` 3,965 files | `bb5120aeb` |
+| 8 | 소스 4개가 grep에 **바이너리** — 모든 검색에 침묵으로 답함 | `git grep -I` exit 1 / `grep -c` 무출력; fingerprint·digest는 전후 동일 | `7347a64a8` |
+| 9 | exemption segmenter 우회 10가지 (`&`·개행·`timeout`·`env`·subshell·`$()`·`xargs`·`docker`·`cargo`·`git`) | 각 shape로 unregistered gate 밀반입 성공 | `c2cef9ec3` |
+| 10 | matrix plan floor 100 (실제 tier 3,900) + population digest 3개를 아무것도 비교 안 함 | pr/nightly가 universe는 같고 membership digest는 다름 | `a9a1cc498` |
+| 11 | root-scratch 가드가 8가지 중 1가지만 잡음 + `import.meta.path` 예외가 죽은 코드(사유도 거짓) | 8 shape 측정표; 이름 기반 1차 시도는 오탐 119건 | `308013c6b` |
+| 12 | capability **그룹별 case 플로어가 전부 dead data** (v1이 총합만 발행) | `toolchain` 7그룹 floor 4/2/1/1/1/2/3 중 어느 것도 읽히지 않음 | `085045945` |
+| 13 | DAG bridge의 "behaviourally identical" 주장이 거짓 | dispatch `b,a` vs result `a,b`; `skipped-input` 사유 변경 | `280300e5e` |
+
+부수적으로 **내 자신의 결함 3건**을 같은 도구들이 잡아냈다: 새 greppability 가드 파일 자체가
+금지 바이트를 품고 있었고(추적 전엔 green, 커밋하자 red), 새 plumbing 규칙이
+`QUANTA_X=1 bun run y`를 scaffolding으로 오분류했고, prefilter/parser 분리에서 좁힌 prefilter가
+통과했다. 셋 다 커밋 메시지에 그대로 남겼다.
 
 ### 기타 current-HEAD 게이트
 
@@ -294,11 +325,12 @@ full-only 10개, nightly-only 14개가 tier를 가르는 전부다. 어떤 파�
 |---|---|
 | `typecheck:all` | clean |
 | `lint:debt` | 23 diagnostics, 회귀 0, ceiling 상향 0 |
-| `test-determinism-ratchet` | ✓ (files 4,044 · wall 165 · random 36 · sleep_budgeted 51,470ms) |
-| `module-load-effect-guard` | files 4,044 · effects 150 · violations 0 |
+| `test-determinism-ratchet` | ✓ (files 4,047 · wall 165 · random 36 · sleep_budgeted 51,470ms) |
+| `module-load-effect-guard` | files 4,047 · effects 150 · violations 0 |
 | `awaited-sleep-budget` / `temp-lifecycle` | exit 0 |
 | `test-resource-certification --check` | exit 0 (548 certified / 14 intentionally-exclusive / 0 missing) — 재생성 후 |
-| `tests/unit/_arch` (32 files) | 421 / 421 |
+| `tests/unit/_arch` (33 files) | 427 / 427 |
+| `precommit` (9 gates) | 9 / 9 PASS (load 52 OVERSUBSCRIBED로 기록됨) |
 
 > 이 표의 두 행은 감사에서 **거짓으로 확인돼 고친 것**이다.
 > `test-determinism-ratchet`은 exit 1이었다 — 캠페인이 직접 넣은
@@ -308,6 +340,9 @@ full-only 10개, nightly-only 14개가 tier를 가르는 전부다. 어떤 파�
 > `1656dd2ae`가 건드린 파일 1개가 source-drift, 3개가 closure under-declare.
 > 재생성했고 claim은 전부 **확장**이며 삭제는 0이다.
 > **아직 남은 결함: 이 audit을 실행하는 gate/workflow/test가 없다** (`--check` 25.8s wall).
+> 이 세션 안에서만 두 번 드리프트했다 — `1656dd2ae`가 만진 파일 1개, 그리고 내가
+> vacuous guard를 고친 `tests/unit/_arch/worktree-pollution-guard.test.ts` 1개.
+> 테스트를 건드리면 반드시 드리프트하고, 아무도 실행하지 않으므로 아무도 모른다.
 
 ### 아직 없는 증거 (정직하게)
 
