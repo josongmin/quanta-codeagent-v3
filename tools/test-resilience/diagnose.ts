@@ -190,7 +190,7 @@ export const outcomeCounts = (
  *
  * The schema is `quanta.flake-diagnosis.v1`, deliberately NOT the shape any
  * gate consumes. A required verdict comes from
- * `quanta.test-shard-success.v2` / `quanta.capability-result.v1`; nothing reads
+ * `quanta.test-shard-success.v4` / `quanta.capability-result.v2`; nothing reads
  * this, so a local diagnosis cannot be mistaken for a PASS by a consumer either.
  */
 export interface DiagnosisReport {

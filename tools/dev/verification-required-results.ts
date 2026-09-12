@@ -41,7 +41,7 @@ export interface RequiredAggregationInput {
   readonly needs: Readonly<Record<string, { readonly result?: unknown }>>
   /** Text of the workflow that declares the aggregator job's `needs:` list. */
   readonly workflowYaml: string
-  /** `capability-result.v1` artifacts by producer id. Absent = fail closed. */
+  /** `capability-result.v2` artifacts by producer id. Absent = fail closed. */
   readonly capabilityResults?: Readonly<Record<string, unknown>>
   readonly producers?: readonly RequiredProducer[]
   readonly policy?: VerificationOutcome

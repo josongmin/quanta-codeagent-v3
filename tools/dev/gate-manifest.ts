@@ -342,7 +342,7 @@ export const WORKFLOW_EXEMPT: readonly {
     why: "the shadow planner restores measured timing hints; the frozen plan and worker receipts still determine the verdict",
   },
   // The capability-result producer/consumer edge. Exact, and named step by step:
-  // these publish and consume the `quanta.capability-result.v1` artifact that
+  // these publish and consume the `quanta.capability-result.v2` artifact that
   // proves a capability lane executed something, and they are receipts ABOUT the
   // gates rather than gates themselves. A lane that exits 0 having skipped every
   // arm is a success-shaped job over zero coverage, which is what the required
