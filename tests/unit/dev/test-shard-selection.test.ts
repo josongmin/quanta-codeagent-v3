@@ -79,6 +79,36 @@ describe("shard manifest selection", () => {
     expect(narrowed).not.toThrow(/corpus shrank under the runner/)
   })
 
+  /**
+   * ★ WIRING — the SCOPE is decided here, and only an arm through this function
+   * can see it.
+   *
+   * `checkTierPopulation` takes the scope as an input, so arms that call it
+   * directly pass their own and prove nothing about the caller. MEASURED:
+   * pinning `scope: "universe"` at this call site — which makes every narrow
+   * suite report as a shrunken universe again — left every arm in the sibling
+   * file green.
+   */
+  test("a narrower suite is classified as such by THIS function, not by its caller", () => {
+    // 40 discovered, all selected, against a tier floor of 80: the shape that is
+    // byte-identical between "the universe shrank" and "you asked for a smaller
+    // suite". `suiteFloor` is cleared, so the corpus check above does not fire.
+    const narrowSuite = (): unknown =>
+      selectShardManifest(input({ suite: "unit", discovered: files(40), suiteFloor: 30 }))
+    expect(narrowSuite).toThrow(TierSelectionError)
+    expect(narrowSuite).toThrow(/not corpus loss BY THAT MEASURE/)
+    expect(narrowSuite).toThrow(/suite=unit/)
+    // The claim names the floor it rests on rather than asserting intactness.
+    expect(narrowSuite).toThrow(/pre-selection floor of 30/)
+
+    // PAIRED CONTROL — the SAME shortfall on the universe suite is still corpus
+    // loss, with the original message and the original error class.
+    const universe = (): unknown =>
+      selectShardManifest(input({ suite: "full", discovered: files(40), suiteFloor: 30 }))
+    expect(universe).toThrow(CorpusLostError)
+    expect(universe).toThrow(/universe itself shrank/)
+  })
+
   test("the universe is checked BEFORE tier policy runs", () => {
     // With both faults present the verdict must name the universe, because a
     // tier cannot be judged against a corpus that is already gone. Proven by

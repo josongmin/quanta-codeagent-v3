@@ -18,10 +18,15 @@
 
   | script | suite | selected | tier floor |
   |---|---|---|---|
-  | `bun run test:unit` | core | 3583 | 3900 |
-  | `bun run test:unit:ci` | unit | 3258 | 3900 |
+  | `bun run test:unit` | core | 3589 | 3900 |
+  | `bun run test:unit:ci` | unit | 3264 | 3900 |
   | `bun run test:integration` | integration | 394 | 3900 |
-  | `bun run test` | full | 3948 | 3900 (통과) |
+  | `bun run test` | full | 3983 | 3900 (통과) |
+
+  (위 수치는 재측정본이다. 처음 적은 3583/3258/3948은 10커밋 만에 이미 낡았다 —
+  corpus가 자라기 때문이다. 그래서 arm은 이 숫자를 고정하지 않고 "각 suite가
+  universe tier floor 아래이면서 자기 suite floor 이상"이라는 성질만 고정한다.
+  숫자를 박아두면 다음 사람이 성질을 확인하는 대신 숫자를 고치게 된다.)
 
   `test:full:ci`는 `--tier`가 없지만 깨지지 않았다: hosted CI는 `QUANTA_VERIFICATION_TIER: pr`을 세우고 로컬 `prepush`는 `gate.ts:323`이 label을 tier로 세운다. 게이트/워크플로 참조가 있는 엔트리포인트는 이 하나뿐이라 위 3개는 게이트 파손이 아니라 **문서화된 명령의 영구 실패**다.
   진단은 고쳤다(`suite-narrower-than-tier-floor`): 좁은 suite는 이제 corpus loss로 오보고되지 않는다. 거부 자체는 유지한다 — universe floor를 낮춰 통과시키는 것이 이 레코드가 막으려는 papering이다. suite/tier 쌍별 floor를 commit하는 것이 이 티켓의 잔여 작업이다.

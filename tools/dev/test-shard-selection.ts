@@ -124,6 +124,13 @@ export const selectShardManifest = (input: ShardSelectionInput): ShardSelection 
     // Passed so the refusal can tell a narrower SUITE apart from a shrunken
     // universe. Without it both are `selected === discovered < floor`.
     suite: input.suite,
+    suiteFloor: input.suiteFloor,
+    // Decided HERE, where `suite` is typed as `SuiteName`, so a typo is a
+    // compile error. The checker used to compare against a bare string constant
+    // with no relation to the suite names, and an audit showed that renaming it
+    // left every arm green while production took the wrong branch for the whole
+    // tree.
+    scope: input.suite === "full" ? "universe" : "narrower-suite",
   })
   if (!population.ok) {
     // A universe that fell below the TIER floor without any narrowing is corpus

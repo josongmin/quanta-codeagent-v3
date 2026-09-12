@@ -13,7 +13,6 @@ import {
 import {
   checkTierPopulation,
   loadTierPopulationFloors,
-  TIER_FLOOR_UNIVERSE_SUITE,
 } from "../../../tools/dev/test-tier-population"
 
 const ROOT = resolve(import.meta.dir, "..", "..", "..")
@@ -140,35 +139,46 @@ describe("tier population floor", () => {
    */
   test("a narrower suite is not corpus loss, and says so", () => {
     const committed = loadTierPopulationFloors()
-    const at = (suite: string, count: number) =>
+    const at = (suite: string, count: number, suiteFloor: number) =>
       checkTierPopulation({
         tier: "nightly",
         selected: count,
         discovered: count,
         floors: committed,
         suite,
+        suiteFloor,
+        // The SCOPE, not a string comparison against a bare constant. The caller
+        // owns it because that is where `suite` is typed.
+        scope: suite === "full" ? "universe" : "narrower-suite",
       })
 
-    for (const [suite, count] of [
-      ["core", 3_583],
-      ["unit", 3_258],
-      ["integration", 394],
+    // Counts are RANGES, not the figures measured on one day. The exact numbers
+    // drifted within ten commits of being written down (core 3583 -> 3589, unit
+    // 3258 -> 3264, full 3948 -> 3983) and an arm that pins them teaches the
+    // next person to update a number rather than to check a property. What
+    // matters is that each suite sits below the universe tier floor and at or
+    // above its own.
+    for (const [suite, count, suiteFloor] of [
+      ["core", 3_400, SUITE_FLOORS.core],
+      ["unit", 3_100, SUITE_FLOORS.unit],
+      ["integration", 380, SUITE_FLOORS.integration],
     ] as const) {
-      const verdict = at(suite, count)
+      const verdict = at(suite, count, suiteFloor)
       expect({ suite, ok: verdict.ok }).toEqual({ suite, ok: false })
       if (verdict.ok) throw new Error("unreachable")
       expect({ suite, kind: verdict.kind }).toEqual({
         suite,
         kind: "suite-narrower-than-tier-floor",
       })
-      expect(verdict.message).toContain("THE CORPUS IS INTACT")
+      expect(verdict.message).toContain("not corpus loss BY THAT MEASURE")
+      expect(verdict.message).toContain(String(suiteFloor))
       expect(verdict.message).not.toContain("universe itself shrank")
     }
 
     // PAIRED CONTROL 1 — the universe suite really falling short is still
     // corpus loss, with the original message. The arms above must not have
     // reclassified it.
-    const shrunk = at(TIER_FLOOR_UNIVERSE_SUITE, 3_000)
+    const shrunk = at("full", 3_000, SUITE_FLOORS.full)
     expect(shrunk.ok).toBe(false)
     if (shrunk.ok) throw new Error("unreachable")
     expect(shrunk.kind).toBe("universe-below-tier-floor")
@@ -188,7 +198,7 @@ describe("tier population floor", () => {
 
     // PAIRED CONTROL 3 — a healthy universe still passes, so the arms are not
     // simply making every input fail.
-    expect(at(TIER_FLOOR_UNIVERSE_SUITE, 3_948).ok).toBe(true)
+    expect(at("full", 3_948, SUITE_FLOORS.full).ok).toBe(true)
   })
 
   test("the committed record covers every tier the runner can be asked for", () => {
