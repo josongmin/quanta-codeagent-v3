@@ -93,6 +93,83 @@ import {
   processGroupAlive,
 } from "./test-shard-lifecycle"
 
+/**
+ * Ceiling for a SHORT synchronous capture — `git rev-parse`, a tool version.
+ *
+ * Two minutes is not a guess about how long `git` takes; it is far beyond any
+ * healthy answer and still finite. The value being finite is the whole point:
+ * an unbounded `Bun.spawnSync(["git", …])` on a path that decides a verdict
+ * wedges the campaign with no output and no diagnosis, which is the defect this
+ * module was written for — and it survived here in the ARRAY form of the same
+ * call long after the object form was banned.
+ */
+export const CAPTURE_TIMEOUT_MS = 120_000
+
+export interface BoundedCapture {
+  readonly exitCode: number | null
+  readonly signalCode: string | null
+  readonly stdout: string
+  readonly stderr: string
+  readonly elapsedMs: number
+  /** The ceiling fired: no exit code of its own, and the clock reached it. */
+  readonly timedOut: boolean
+}
+
+/**
+ * One bounded synchronous capture.
+ *
+ * # What this is NOT
+ *
+ * It is not `runBoundedChild`. There is no process group, so a child that forks
+ * grandchildren and dies leaves them — MEASURED in this module's own fixtures.
+ * `Bun.spawnSync`'s `timeout` signals the direct child only (verified on Bun
+ * 1.3.14: `timeout: 700` against `sleep 10` returned in 703ms with
+ * `exitCode: null, signalCode: "SIGTERM"`).
+ *
+ * So this is for the OTHER shape: a short capture of a known tool that spawns
+ * nothing, where the missing piece was a ceiling rather than a reaper. A long
+ * child with descendants belongs in `runBoundedChild`, and the guard over the
+ * verification rails is what keeps the two from being confused.
+ */
+export const runBoundedCapture = (input: {
+  readonly command: readonly string[]
+  readonly cwd?: string
+  readonly env?: Record<string, string | undefined>
+  readonly timeoutMs?: number
+  /**
+   * `"ignore"` for a child whose output the caller does not read.
+   *
+   * Not a detail: piping means buffering the whole stream in this process, and
+   * this module's own docstring records a driver reaching 1,936 MB against a
+   * child that only echoed. A caller that wants the exit code and the clock must
+   * be able to say so instead of paying for output it discards.
+   */
+  readonly capture?: "pipe" | "ignore"
+}): BoundedCapture => {
+  const timeoutMs = input.timeoutMs ?? CAPTURE_TIMEOUT_MS
+  const sink = input.capture ?? "pipe"
+  const startedAt = Date.now()
+  const result = Bun.spawnSync([...input.command], {
+    ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
+    ...(input.env === undefined ? {} : { env: input.env }),
+    stdout: sink,
+    stderr: sink,
+    timeout: timeoutMs,
+  })
+  const elapsedMs = Date.now() - startedAt
+  return {
+    exitCode: result.exitCode,
+    signalCode: result.signalCode ?? null,
+    stdout: result.stdout?.toString() ?? "",
+    stderr: result.stderr?.toString() ?? "",
+    elapsedMs,
+    // An external SIGTERM and our own ceiling look identical in the result, so
+    // the clock is what separates them. Reported rather than thrown: some
+    // callers treat a failed capture as "absent" and must keep doing so.
+    timedOut: result.exitCode === null && elapsedMs >= timeoutMs,
+  }
+}
+
 export interface BoundedChildLimits {
   /** Hard wall bound on the child's RUN, before the kill sequence starts. */
   readonly totalMs: number

@@ -66,7 +66,7 @@
 import { closeSync, openSync, readFileSync, readSync, statSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { runBoundedChild } from "./bounded-child"
+import { runBoundedCapture, runBoundedChild } from "./bounded-child"
 
 const repoRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))))
 const allowlistPath = join(repoRoot, "tools/dev/worktree-pollution-allowlist.json")
@@ -130,27 +130,26 @@ export const describeStatusFailure = (failure: StatusFailure): string =>
     : `worktree-pollution-guard: \`git status\` failed (exit ${failure.code}): ${failure.stderr}`
 
 const snapshot = (): ReadonlySet<string> => {
-  const proc = Bun.spawnSync(["git", "status", "--porcelain=v1", "-uall", "-z"], {
+  // Through the shared primitive rather than a hand-written `timeout:`. This
+  // call was already bounded; the guard over these rails now bans the raw form
+  // outright, because the same rails carried FIVE unbounded siblings that each
+  // looked fine on their own line.
+  const proc = runBoundedCapture({
+    command: ["git", "status", "--porcelain=v1", "-uall", "-z"],
     cwd: repoRoot,
-    stdout: "pipe",
-    stderr: "pipe",
-    timeout: STATUS_TIMEOUT_MS,
+    timeoutMs: STATUS_TIMEOUT_MS,
   })
-  // A timed-out spawnSync reports `exitCode: null` with a signal, which the old
+  // A timed-out capture reports `exitCode: null` with a signal, which the old
   // `!== 0` check would have blamed on git.
   if (proc.exitCode === null) {
     throw new Error(describeStatusFailure({ kind: "timeout", timeoutMs: STATUS_TIMEOUT_MS }))
   }
   if (proc.exitCode !== 0) {
     throw new Error(
-      describeStatusFailure({
-        kind: "exit",
-        code: proc.exitCode,
-        stderr: proc.stderr.toString().trim(),
-      }),
+      describeStatusFailure({ kind: "exit", code: proc.exitCode, stderr: proc.stderr.trim() }),
     )
   }
-  return parseUntracked(proc.stdout.toString())
+  return parseUntracked(proc.stdout)
 }
 
 /** A short, safe preview so a reader can tell a test fixture from real work. */

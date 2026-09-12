@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto"
+import { CAPTURE_TIMEOUT_MS, runBoundedCapture } from "./bounded-child"
 
 import type { Gate } from "./gate-manifest"
 import {
@@ -98,14 +99,10 @@ export const verificationManifestSha256 = (gates: readonly Gate[]): string => {
 }
 
 const gitOutput = (repoRoot: string, args: readonly string[]): string => {
-  const proc = Bun.spawnSync(["git", ...args], {
-    cwd: repoRoot,
-    stdout: "pipe",
-    stderr: "pipe",
-  })
+  const proc = runBoundedCapture({ command: ["git", ...args], cwd: repoRoot })
   if (proc.exitCode !== 0) {
     throw new Error(
-      `\`git ${args.join(" ")}\` failed (exit ${proc.exitCode}): ${proc.stderr.toString().trim()}`,
+      `\`git ${args.join(" ")}\` ${proc.timedOut ? `exceeded ${CAPTURE_TIMEOUT_MS}ms` : `failed (exit ${proc.exitCode})`}: ${proc.stderr.trim()}`,
     )
   }
   return proc.stdout.toString()

@@ -288,20 +288,21 @@ describe("the keeper outlives the group that spawned it", () => {
         path,
         "detach-probe/repo",
       ],
-      { stdin: "ignore", stdout: "ignore", stderr: "ignore" },
+      { stdin: "ignore", stdout: "ignore", stderr: "pipe" },
     )
     keeper.unref()
     try {
-      // POLL, not a fixed sleep: paid only until the child has run `setsid`.
-      // The bound is under the unit speed ceiling (8,529ms) so a FAILING run
-      // reports the detach it came for rather than also tripping the budget.
-      const deadline = Date.now() + 5_000
-      let keeperPgid = ""
-      while (Date.now() < deadline) {
-        keeperPgid = pgidOf(keeper.pid)
-        if (keeperPgid !== "" && keeperPgid !== ownPgid) break
-        await Bun.sleep(25)
+      // READINESS, not a timer: the keeper announces its session on stderr as
+      // its first act, so the observation happens after `setsid` has returned
+      // rather than after an interval somebody guessed. `bun test`'s own
+      // per-test timeout is the backstop if it never speaks.
+      let announced = ""
+      for await (const chunk of keeper.stderr as ReadableStream<Uint8Array>) {
+        announced += new TextDecoder().decode(chunk)
+        if (announced.includes("\n")) break
       }
+      expect(announced).toContain("[quarantine] keeper session=")
+      const keeperPgid = pgidOf(keeper.pid)
       expect({ left: keeperPgid !== ownPgid, own: keeperPgid === String(keeper.pid) }).toEqual({
         left: true,
         own: true,

@@ -36,6 +36,7 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
+import { runBoundedCapture } from "./bounded-child"
 import { scanShardReceiptTimings } from "./test-shard-receipt"
 import { readTestTimingStore } from "./test-shard-timings"
 import { sharedVerificationCacheRoot } from "./verification-receipt"
@@ -45,6 +46,10 @@ const budgetPath = join(repoRoot, "tools/dev/unit-speed-budget.json")
 
 /** A junit run this small means the reporter/glob broke — never pass over it. */
 const MIN_TESTCASES = 1000
+
+/** Ceiling for re-running ONE test file alone. Ten minutes is ~14x the whole
+ *  unit FILE ceiling this tool enforces; anything past it is a wedged test. */
+const SINGLE_FILE_RERUN_TIMEOUT_MS = 10 * 60_000
 
 type Budget = { readonly slowestMs: number; readonly slowestFileMs: number; readonly note?: string }
 type Case = {
@@ -229,11 +234,17 @@ const confirmStandalone = (c: Case): { readonly ms: number; readonly how: string
   // change exists to remove, reintroduced in its newest code.
   rmSync(out, { force: true })
   const startedNs = Bun.nanoseconds()
-  const run = Bun.spawnSync({
-    cmd: ["bun", "test", c.file, "--reporter=junit", `--reporter-outfile=${out}`],
+  // BOUNDED. This is the gate that RE-RUNS a suspect test file, so it is the one
+  // place in the budget check that can hang for as long as a wedged test wants.
+  // The ceiling is far past the file ceiling this tool enforces (43,517ms today)
+  // — a file that reaches it is the pathology, not a slow machine.
+  const run = runBoundedCapture({
+    command: ["bun", "test", c.file, "--reporter=junit", `--reporter-outfile=${out}`],
     cwd: repoRoot,
-    stdout: "ignore",
-    stderr: "ignore",
+    timeoutMs: SINGLE_FILE_RERUN_TIMEOUT_MS,
+    // The verdict comes from the junit file, never from the stream, and
+    // buffering a runaway printer here would be its own failure.
+    capture: "ignore",
   })
   const wallMs = (Bun.nanoseconds() - startedNs) / 1e6
   let xmlText: string
@@ -255,9 +266,14 @@ const confirmStandalone = (c: Case): { readonly ms: number; readonly how: string
   // gives its workers — came back fast, and the gate downgraded a real
   // regression to "contention, not a slow test".
   if (run.exitCode !== 0) {
+    // A timed-out re-run reports `exitCode: null`, and "exit null" would send
+    // the reader looking for a crash. The ceiling is a different fact.
+    const why = run.timedOut
+      ? `KILLED at the ${SINGLE_FILE_RERUN_TIMEOUT_MS}ms ceiling`
+      : `FAILED (exit ${run.exitCode})`
     return {
       ms: c.ms,
-      how: `re-run FAILED (exit ${run.exitCode}) — screen number stands; a red re-run measures nothing`,
+      how: `re-run ${why} — screen number stands; a red re-run measures nothing`,
     }
   }
   // The FILE's wall time counts too. junit `time` is per-test and excludes module

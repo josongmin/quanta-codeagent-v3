@@ -256,24 +256,45 @@ describe("gate scheduling stays serial until resources are declared", () => {
     // happening to be a chain. Two independent gates, concurrency 2: they
     // overlap. The same pair at 1: they do not. Without this, "concurrency: 1"
     // could be decoration over a scheduler that never overlaps anyway.
-    const overlapped = async (concurrency: number): Promise<boolean> => {
+    //
+    // A MICROTASK yield, not a timer. The first version slept 15ms in each gate
+    // so the two could overlap in real time, which bought nothing: the
+    // scheduler's decision is made before any timer fires, and the determinism
+    // ratchet is right that a test which waits on the clock is a test that can
+    // be wrong on a loaded machine. Measured at both widths, one yield is
+    // enough and three change nothing.
+    const observe = async (
+      concurrency: number,
+    ): Promise<{ readonly overlapped: boolean; readonly order: string }> => {
+      const events: string[] = []
       let running = 0
       let sawOverlap = false
       await runGateDag({
         gates: [{ id: "a" }, { id: "b" }],
         failFast: false,
         concurrency,
-        run: async () => {
+        run: async (gate) => {
           running += 1
           if (running > 1) sawOverlap = true
-          await Bun.sleep(15)
+          events.push(`enter:${gate.id}`)
+          await Promise.resolve()
+          events.push(`exit:${gate.id}`)
           running -= 1
           return { ok: true }
         },
       })
-      return sawOverlap
+      return { overlapped: sawOverlap, order: events.join(" ") }
     }
-    expect(await overlapped(2)).toBe(true)
-    expect(await overlapped(1)).toBe(false)
+    // The ORDER as well as the flag: "both were running at once" and "b never
+    // started until a had finished" are the two halves of the claim, and a
+    // counter alone cannot show the second.
+    expect(await observe(2)).toEqual({
+      overlapped: true,
+      order: "enter:a enter:b exit:a exit:b",
+    })
+    expect(await observe(1)).toEqual({
+      overlapped: false,
+      order: "enter:a exit:a enter:b exit:b",
+    })
   })
 })

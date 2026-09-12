@@ -2,6 +2,7 @@ import { createHash } from "node:crypto"
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs"
 import { arch, hostname, platform, release } from "node:os"
 import { delimiter, dirname, join } from "node:path"
+import { runBoundedCapture } from "./bounded-child"
 import { externalToolchainFingerprint, hostCapabilityFingerprint } from "./external-toolchain"
 import { isVerdictRelevantEnvKey, verdictDotenvSha256 } from "./verdict-env"
 
@@ -271,12 +272,11 @@ export const ABSENT_BASE_OID = "<absent>" as const
  * that no longer exists.
  */
 export const verificationBaseOid = (repoRoot: string, ref = "origin/main"): string => {
-  const result = Bun.spawnSync(["git", "rev-parse", "--verify", "--quiet", `${ref}^{commit}`], {
+  const result = runBoundedCapture({
+    command: ["git", "rev-parse", "--verify", "--quiet", `${ref}^{commit}`],
     cwd: repoRoot,
-    stdout: "pipe",
-    stderr: "pipe",
   })
-  const oid = result.stdout.toString().trim()
+  const oid = result.stdout.trim()
   return result.exitCode === 0 && oid !== "" ? oid : ABSENT_BASE_OID
 }
 
@@ -323,12 +323,11 @@ const commonDirByRoot = new Map<string, string | undefined>()
 
 const gitCommonDir = (repoRoot: string): string | undefined => {
   if (commonDirByRoot.has(repoRoot)) return commonDirByRoot.get(repoRoot)
-  const result = Bun.spawnSync(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], {
+  const result = runBoundedCapture({
+    command: ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
     cwd: repoRoot,
-    stdout: "pipe",
-    stderr: "pipe",
   })
-  const dir = result.exitCode === 0 ? result.stdout.toString().trim() : ""
+  const dir = result.exitCode === 0 ? result.stdout.trim() : ""
   const resolved = dir === "" ? undefined : dir
   commonDirByRoot.set(repoRoot, resolved)
   return resolved

@@ -28,6 +28,7 @@
  */
 import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
+import { runBoundedCapture } from "./bounded-child"
 import {
   type ScanReachAuthority,
   scanReachAuthorityFor,
@@ -285,13 +286,13 @@ export const harvest = (sink: string): Map<string, ScanReach> => {
 }
 
 const currentGitSnapshot = (): ReceiptSnapshot | undefined => {
-  const head = Bun.spawnSync(["git", "rev-parse", "HEAD"], { stdout: "pipe", stderr: "pipe" })
-  const status = Bun.spawnSync(["git", "status", "--porcelain=v1", "-uall"], {
-    stdout: "pipe",
-    stderr: "pipe",
-  })
+  // BOUNDED: a wedged `git status` here stops the gate with no output at all.
+  // A failed or timed-out capture reads as "no snapshot", which the caller
+  // already treats as "do not reuse a receipt" — the fail-closed direction.
+  const head = runBoundedCapture({ command: ["git", "rev-parse", "HEAD"] })
+  const status = runBoundedCapture({ command: ["git", "status", "--porcelain=v1", "-uall"] })
   if (head.exitCode !== 0 || status.exitCode !== 0) return undefined
-  return { head: head.stdout.toString().trim(), status: status.stdout.toString() }
+  return { head: head.stdout.trim(), status: status.stdout }
 }
 
 /**
@@ -467,6 +468,9 @@ export const decide = (run: ReachRun): ReachDecision => {
   return { exit: 0, doTighten: false, lines }
 }
 
+/** Ceiling for the harvest child: the shard runner's own per-command wall. */
+const HARVEST_TIMEOUT_MS = 40 * 60_000
+
 if (import.meta.main) {
   const receiptObserved = readUsableShardReceipt()
   let observed: ReadonlyMap<string, ScanReach>
@@ -485,13 +489,8 @@ if (import.meta.main) {
     // alone leaves 49 pinned rows reporting nothing — which the STALE check then
     // fails on, correctly and unhelpfully.
     const grep = (pattern: string): readonly string[] =>
-      new TextDecoder()
-        .decode(
-          Bun.spawnSync(["git", "grep", "-l", pattern, "--", "tests", "src"], {
-            stdout: "pipe",
-          }).stdout,
-        )
-        .split("\n")
+      runBoundedCapture({ command: ["git", "grep", "-l", pattern, "--", "tests", "src"] })
+        .stdout.split("\n")
         .filter((f) => f !== "")
     const direct = grep("assertScanPopulation")
     const indirect = direct
@@ -506,13 +505,33 @@ if (import.meta.main) {
     // The repo's own suites run at `--timeout=60000`. Keep the fallback child
     // equivalent to the authoritative runner: a tighter private timeout turns
     // ordinary contention into a false regression.
-    const child = Bun.spawnSync(scanReachChildArgs(files), {
+    // The harvest itself: a real `bun test` over every enrolled guard file. It
+    // had no ceiling at all, so a single wedged guard hung `bun run scan-reach`
+    // indefinitely. The bound matches the shard runner's per-command wall
+    // (40 minutes) because this is the same kind of child.
+    //
+    // KNOWN GAP, stated rather than implied: this is a bounded CAPTURE, not
+    // `runBoundedChild`, so the ceiling signals the direct child and does not
+    // reap a group. Adopting the reaper here means making this synchronous CLI
+    // asynchronous, which is a separate change; the ceiling is the part that
+    // was missing entirely.
+    const child = runBoundedCapture({
+      command: scanReachChildArgs(files),
       env: { ...process.env, QUANTA_SCAN_REACH_RECORD: sink },
-      stdout: "pipe",
-      stderr: "pipe",
+      timeoutMs: HARVEST_TIMEOUT_MS,
     })
-    childExit = child.exitCode
-    childOutput = `${child.stdout.toString()}${child.stderr.toString()}`
+    if (child.timedOut) {
+      process.stderr.write(
+        `scan-reach: harvest KILLED at the ${HARVEST_TIMEOUT_MS}ms ceiling; ` +
+          "the reach numbers below describe an incomplete run and are refused\n",
+      )
+    }
+    // A killed child has no exit code of its own. 124 is `timeout(1)`'s
+    // convention for "the ceiling fired", and it must be NON-ZERO: a harvest
+    // that was killed measured an incomplete run, and `childExit === 0` is what
+    // licenses the reach numbers.
+    childExit = child.exitCode ?? 124
+    childOutput = `${child.stdout}${child.stderr}`
     observed = harvest(sink)
     rmSync(sink, { force: true })
   }

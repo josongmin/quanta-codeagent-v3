@@ -35,7 +35,7 @@
 import { rmSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { runBoundedChild } from "./bounded-child"
+import { CAPTURE_TIMEOUT_MS, runBoundedCapture, runBoundedChild } from "./bounded-child"
 import { describeQuietBoxWait, loadPerCore, quietBoxBudgetMs, waitForQuietBox } from "./box-load"
 import { missingExternalTools } from "./external-toolchain"
 import {
@@ -196,17 +196,17 @@ interface GateReceipt {
 }
 
 const gitOutput = (args: readonly string[]): string => {
-  const proc = Bun.spawnSync(["git", ...args], {
-    cwd: REPO_ROOT,
-    stdout: "pipe",
-    stderr: "pipe",
-  })
+  // BOUNDED. The gates themselves were moved onto `runBoundedChild`; this
+  // capture, which decides whether the checkout is clean enough to gate at all,
+  // kept the unbounded ARRAY form of the same call the guard had banned in its
+  // object form.
+  const proc = runBoundedCapture({ command: ["git", ...args], cwd: REPO_ROOT })
   if (proc.exitCode !== 0) {
     throw new Error(
-      `\`git ${args.join(" ")}\` failed (exit ${proc.exitCode}): ${proc.stderr.toString().trim()}`,
+      `\`git ${args.join(" ")}\` ${proc.timedOut ? `exceeded ${CAPTURE_TIMEOUT_MS}ms` : `failed (exit ${proc.exitCode})`}: ${proc.stderr.trim()}`,
     )
   }
-  return proc.stdout.toString()
+  return proc.stdout
 }
 
 const gitSnapshot = (): GitSnapshot => ({

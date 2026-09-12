@@ -1,7 +1,7 @@
-import { randomBytes } from "node:crypto"
 import { mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { basename, dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
+import { runBoundedCapture } from "./bounded-child"
 import { describeQuietBoxWait, quietBoxBudgetMs, waitForQuietBox } from "./box-load"
 import { gatesForStage } from "./gate-manifest"
 import { type LeaseQuarantineRecord, quarantineLane, quarantinePath } from "./lease-quarantine"
@@ -56,10 +56,10 @@ const QUARANTINE_PATH = quarantinePath(sharedVerificationCacheRoot(REPO_ROOT))
 let quarantineRecord: LeaseQuarantineRecord | undefined
 
 const capture = (args: readonly string[]): { readonly code: number; readonly text: string } => {
-  const result = Bun.spawnSync([...args], { cwd: REPO_ROOT, stdout: "pipe", stderr: "pipe" })
+  const result = runBoundedCapture({ command: args, cwd: REPO_ROOT })
   return {
     code: result.exitCode ?? 1,
-    text: `${result.stdout.toString()}${result.stderr.toString()}`,
+    text: `${result.stdout}${result.stderr}`,
   }
 }
 

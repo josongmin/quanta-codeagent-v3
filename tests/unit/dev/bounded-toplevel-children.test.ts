@@ -23,15 +23,49 @@
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
-import { DEFAULT_CHILD_LIMITS, runBoundedChild } from "../../../tools/dev/bounded-child"
+import {
+  CAPTURE_TIMEOUT_MS,
+  DEFAULT_CHILD_LIMITS,
+  runBoundedCapture,
+  runBoundedChild,
+} from "../../../tools/dev/bounded-child"
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..")
 const source = (rel: string): string => readFileSync(resolve(REPO_ROOT, rel), "utf8")
 
+/** The rails whose child is a LONG one: a gate, a guard, a matrix worker. */
 const RAILS = [
   "tools/dev/gate.ts",
   "tools/dev/worktree-pollution-guard.ts",
   "tools/dev/verification-matrix-cli.ts",
+] as const
+
+/**
+ * Every verification rail that starts a child at all, long or short.
+ *
+ * An audit found that the guard below banned two SPELLINGS and not the shape:
+ * `Bun.spawnSync({…})` and `await proc.exited`. So these survived, in the same
+ * three rails the ban was written for and in six of their siblings:
+ *
+ *   gate.ts                     `Bun.spawnSync(["git", …])` — array form
+ *   verification-matrix-cli.ts  `proc.exited` inside a `Promise.all`
+ *   unit-speed-budget.ts        `Bun.spawnSync({cmd:["bun","test",…]})`, the
+ *                               gate that RE-RUNS a suspect test file
+ *   scan-reach-baseline.ts      the harvest child itself, plus three git reads
+ *   verification-{campaign,receipt,receipt-probe}.ts, test-shard-receipt.ts
+ *
+ * Each decides a verdict from a child's output, so each could wedge a campaign
+ * with no bound, no output and no diagnosis. The ban is now on the CALL, not on
+ * a spelling of it.
+ */
+const CHILD_RAILS = [
+  ...RAILS,
+  "tools/dev/verification-campaign.ts",
+  "tools/dev/verification-receipt.ts",
+  "tools/dev/verification-receipt-probe.ts",
+  "tools/dev/test-shard-receipt.ts",
+  "tools/dev/unit-speed-budget.ts",
+  "tools/dev/scan-reach-baseline.ts",
 ] as const
 
 describe("top-level children are bounded", () => {
@@ -59,17 +93,68 @@ describe("top-level children are bounded", () => {
     expect(codeOnly('const u = "https://x/y"')).toContain("https://x/y")
   })
 
-  test("no rail spawns a top-level child any other way", () => {
-    // The exact shapes that were there: a synchronous shell spawn, and an
-    // `await proc.exited` with no deadline beside it.
-    for (const rail of RAILS) {
+  test("no verification rail spawns a child any other way", () => {
+    // Not two spellings — the CALL. `Bun.spawnSync({…})` was banned while
+    // `Bun.spawnSync([…])` sat four lines away in the same file, and
+    // `await proc.exited` was banned while `proc.exited` inside a `Promise.all`
+    // was the same unbounded wait with different punctuation.
+    for (const rail of CHILD_RAILS) {
       const body = codeOnly(source(rail))
-      expect({ rail, sync: /Bun\.spawnSync\(\{/.test(body) }).toEqual({ rail, sync: false })
-      expect({ rail, unbounded: /await proc\.exited/.test(body) }).toEqual({
+      expect({ rail, raw: /Bun\.spawn(Sync)?\s*\(/.test(body) }).toEqual({ rail, raw: false })
+      expect({ rail, awaited: /proc\.exited/.test(body) }).toEqual({ rail, awaited: false })
+      // ANTI-VACUITY: a rail that stopped starting children would satisfy the
+      // two bans above by doing nothing, and the list would then guard a set of
+      // files with nothing to guard.
+      expect({
         rail,
-        unbounded: false,
-      })
+        bounded: /runBounded(Child|Capture)\s*\(/.test(body),
+      }).toEqual({ rail, bounded: true })
     }
+    // ...and the list itself cannot be quietly emptied.
+    expect(CHILD_RAILS.length).toBeGreaterThanOrEqual(9)
+  })
+
+  /**
+   * The short-capture ceiling, behaviourally.
+   *
+   * Structural arms cannot tell a real bound from a named constant that is
+   * never passed, and this is the one bound in the module that a test can prove
+   * in under a second.
+   */
+  test("a short capture is killed at its ceiling, and a fast one is not", () => {
+    // `sleep 3`, not `sleep 30`: on the FAILING side of this arm the child runs
+    // to completion, and a probe that takes longer than the unit speed ceiling
+    // would report two problems while only having one.
+    const slow = runBoundedCapture({ command: ["bash", "-c", "sleep 3"], timeoutMs: 600 })
+    expect({
+      timedOut: slow.timedOut,
+      exitCode: slow.exitCode,
+      signalCode: slow.signalCode,
+    }).toEqual({ timedOut: true, exitCode: null, signalCode: "SIGTERM" })
+    // No wall assertion here on purpose. `exitCode: null` with `SIGTERM` IS the
+    // proof that the ceiling fired: a child that ran to completion reports 0,
+    // which is exactly how the mutant that drops the `timeout:` option fails.
+    // Asserting elapsed time would add a clock this claim does not need.
+
+    // PAIRED CONTROL: without this, a capture that always reported `timedOut`
+    // would satisfy the arm above.
+    const quick = runBoundedCapture({ command: ["bash", "-c", "echo hi; echo err >&2"] })
+    expect({
+      timedOut: quick.timedOut,
+      exitCode: quick.exitCode,
+      stdout: quick.stdout,
+      stderr: quick.stderr,
+    }).toEqual({ timedOut: false, exitCode: 0, stdout: "hi\n", stderr: "err\n" })
+
+    // The discard sink returns empty text rather than throwing or hanging: a
+    // caller that reads the verdict from a junit file must be able to refuse
+    // the buffer this module's own docstring measured at 1,936 MB.
+    const ignored = runBoundedCapture({ command: ["bash", "-c", "echo hi"], capture: "ignore" })
+    expect({ stdout: ignored.stdout, exitCode: ignored.exitCode }).toEqual({
+      stdout: "",
+      exitCode: 0,
+    })
+    expect(CAPTURE_TIMEOUT_MS).toBe(120_000)
   })
 
   test("the gate and the guard it spawns declare the SAME bounds", () => {

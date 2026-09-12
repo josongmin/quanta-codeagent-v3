@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from "node:fs"
 import { dirname, join, relative } from "node:path"
+import { CAPTURE_TIMEOUT_MS, runBoundedCapture } from "./bounded-child"
 import { executedFileSetDigest } from "./executed-file-set"
 import { externalToolchainFingerprint, hostCapabilityFingerprint } from "./external-toolchain"
 import { AUTHORITATIVE_SCAN_TIERS, type ScanReachAuthority } from "./scan-reach-authority"
@@ -136,14 +137,14 @@ export const shardFilesSha256 = (repoRoot: string, files: readonly string[]): st
  * HEAD and the working tree are the same thing here.
  */
 export const trackedTreeSha256 = (repoRoot: string): string => {
-  const result = Bun.spawnSync(["git", "ls-tree", "-r", "HEAD", "--format=%(path) %(objectname)"], {
+  const result = runBoundedCapture({
+    command: ["git", "ls-tree", "-r", "HEAD", "--format=%(path) %(objectname)"],
     cwd: repoRoot,
-    stdout: "pipe",
-    stderr: "pipe",
   })
   if (result.exitCode !== 0) {
     throw new Error(
-      `[test:shards] cannot read the tree for cache identity: ${result.stderr.toString()}`,
+      `[test:shards] cannot read the tree for cache identity` +
+        `${result.timedOut ? ` (exceeded ${CAPTURE_TIMEOUT_MS}ms)` : ""}: ${result.stderr}`,
     )
   }
   const hasher = new Bun.CryptoHasher("sha256")

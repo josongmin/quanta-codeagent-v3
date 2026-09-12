@@ -11,7 +11,7 @@ import {
 import { availableParallelism, loadavg } from "node:os"
 import { dirname, join, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
-import { runBoundedChild } from "./bounded-child"
+import { CAPTURE_TIMEOUT_MS, runBoundedCapture, runBoundedChild } from "./bounded-child"
 import { executedFileSetVerdict } from "./executed-file-set"
 import { scanReachMembershipSha256 } from "./scan-reach-authority"
 import {
@@ -71,20 +71,19 @@ const writeJsonAtomic = (path: string, value: unknown): void => {
   renameSync(temporary, path)
 }
 
-const captureGit = async (args: readonly string[]): Promise<string> => {
-  const proc = Bun.spawn({
-    cmd: ["git", ...args],
-    cwd: repoRoot,
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  const [stdout, stderr, code] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ])
-  if (code !== 0) throw new Error(`git ${args.join(" ")} failed: ${stderr.trim()}`)
-  return stdout
+const captureGit = (args: readonly string[]): string => {
+  // The guard banned `await proc.exited`; this awaited it inside a
+  // `Promise.all`, which is the same unbounded wait spelled differently. A
+  // wedged `git status` here held a matrix worker slot until the hosted job's
+  // own limit killed everything, reported as "the job timed out" and naming no
+  // chunk.
+  const proc = runBoundedCapture({ command: ["git", ...args], cwd: repoRoot })
+  if (proc.exitCode !== 0) {
+    throw new Error(
+      `git ${args.join(" ")} ${proc.timedOut ? `exceeded ${CAPTURE_TIMEOUT_MS}ms` : "failed"}: ${proc.stderr.trim()}`,
+    )
+  }
+  return proc.stdout
 }
 
 const cleanGitHead = async (): Promise<string> => {
