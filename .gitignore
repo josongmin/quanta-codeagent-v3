@@ -144,3 +144,13 @@ tools/trajectory-viewer/data.js
 #   outside the workspace, which is a separate design item. Redact-before-spill is
 #   likewise out of scope here: `@/tool` may not import `@/agent`'s redaction.
 .quanta/tool-output/
+
+# `bun build --compile` scratch. Bun writes `.<hash>-<n>.bun-build` beside the
+# CWD while linking and removes it on success — but a worker killed mid-compile
+# leaves one behind, and four compiled-binary tests run `bun build` with
+# `cwd: REPO_ROOT` because bare specifiers resolve from there. MEASURED: a
+# campaign invalidated itself with `checkout changed after chunk 28/44` over two
+# of these, and the tree was clean again by the time anyone looked. No test can
+# clean it up — bun owns the name and the timing — so ignoring it is the only
+# place the fix can live.
+.*.bun-build

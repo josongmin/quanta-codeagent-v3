@@ -71,6 +71,16 @@ evidence:
       - tests/unit/dev/verification-campaign.test.ts
       - tests/unit/dev/gate-receipt.test.ts
       - tests/unit/dev/fixture-module-closure.test.ts
+      # Hellgate-grade: both drive the REAL composition path rather than a
+      # pure helper. `test-ci-admission-script-hellgate` reads the shipped
+      # runner and admission script and asserts the lifecycle they actually
+      # wire (drain before release, one lease acquisition, bounded children);
+      # `scan-reach-cli-hellgate` builds a repository, runs the real CLI over a
+      # FAILING child, and proves a full harvest is not a pass. Both existed and
+      # neither was listed, which is why the DoD ratchet read this feature as
+      # having no e2e at all.
+      - tests/unit/test-ci-admission-script-hellgate.test.ts
+      - tests/unit/_arch/scan-reach-cli-hellgate.test.ts
     integration: []
     contract: []
 config_refs:
