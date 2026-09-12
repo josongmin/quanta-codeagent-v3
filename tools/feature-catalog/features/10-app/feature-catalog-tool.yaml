@@ -41,6 +41,11 @@ evidence:
     - tools/feature-catalog/audit.ts
     - tools/feature-catalog/lint.ts
     - tools/feature-catalog/check-changed.ts
+    # `config_refs.env` name validation — an env var the catalog offers an operator
+    # must be one some code reads. Lives in tools/dev/ because it walks src/ like the
+    # other dev scanners; enrolled here because `bun fc` is the surface that renders
+    # the field it validates.
+    - tools/dev/catalog-config-refs.ts
     - tools/feature-catalog/yaml.ts
     - tools/feature-catalog/refresh-baseline.ts
     - tools/feature-catalog/README.md
@@ -55,6 +60,7 @@ evidence:
       - tests/unit/feature-catalog-yaml.test.ts
       - tests/unit/feature-catalog-baseline.test.ts
       - tests/unit/feature-catalog-check-changed.test.ts
+      - tests/unit/dev/catalog-config-refs.test.ts
     integration: []
     contract: []
 knobs: []
