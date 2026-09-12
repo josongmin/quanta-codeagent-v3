@@ -25,6 +25,9 @@ export interface VersionDeps {
    *  banner shows) so the flag reports the real build version regardless of the
    *  user's cwd — the cwd walk is unreliable outside the quanta repo. */
   readonly version?: string
+  /** The compiled-binary build stamp, INJECTED so the fallback is reachable from a
+   *  source-run test. Absent ⇒ `resolveCommit` reads the real `build-stamp`. */
+  readonly bakedCommit?: string
 }
 
 /** Build the `/version` line(s). Pure: returns the rendered string so tests
@@ -32,7 +35,7 @@ export interface VersionDeps {
 export const renderVersion = (deps: VersionDeps = {}): string => {
   const env = deps.env ?? process.env
   const version = deps.version ?? resolveVersion(env, deps.cwd ?? process.cwd())
-  const commit = resolveCommit(env)
+  const commit = resolveCommit(env, deps.bakedCommit)
   const head = commit !== undefined ? `quanta ${version} (${commit})` : `quanta ${version}`
   return `${head}\n${process.platform}-${process.arch} · ${repoUrl(env)}`
 }

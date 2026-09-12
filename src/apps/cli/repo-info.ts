@@ -11,6 +11,7 @@
 
 import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
+import { buildCommitLabel } from "./build-stamp"
 
 /** Canonical GitHub web URL for this project. Overridable via
  *  `QUANTA_REPO_URL` (forks / mirrors). No trailing slash. */
@@ -91,9 +92,28 @@ export const resolveVersion = (
   return sanitizeLine(readPackageVersion(cwd) ?? "unknown")
 }
 
-/** Optional short commit hash for the version line. `QUANTA_COMMIT` only —
- *  absent ⇒ `undefined` (no git shell-out from a read-only command). */
-export const resolveCommit = (env: NodeJS.ProcessEnv = process.env): string | undefined => {
+/**
+ * Short commit hash for the version line: an explicit `QUANTA_COMMIT` first, then
+ * the identity baked into a compiled binary.
+ *
+ * Still no git shell-out — this is a read-only command and a subprocess here would
+ * make `--version` depend on the cwd being a repo. The baked value is what makes
+ * the flag answer honestly from a compiled binary, where previously every build of
+ * every commit printed the same `package.json` version.
+ *
+ * Explicit env wins so a test can seed a known value, and so an operator can
+ * override a stamp they distrust.
+ */
+export const resolveCommit = (
+  env: NodeJS.ProcessEnv = process.env,
+  /** The baked label, INJECTED. `build-stamp` reads `process.env` at module load,
+   *  so a compiled binary is the only place it is ever populated — and a test
+   *  running from source could not otherwise exercise this branch at all. It was
+   *  measured: deleting the fallback left the suite green until this became a
+   *  parameter. */
+  baked: string | undefined = buildCommitLabel(),
+): string | undefined => {
   const c = env.QUANTA_COMMIT?.trim()
-  return c !== undefined && c.length > 0 ? sanitizeLine(c).slice(0, 12) : undefined
+  if (c !== undefined && c.length > 0) return sanitizeLine(c).slice(0, 12)
+  return baked === undefined || baked.length === 0 ? undefined : sanitizeLine(baked).slice(0, 20)
 }
