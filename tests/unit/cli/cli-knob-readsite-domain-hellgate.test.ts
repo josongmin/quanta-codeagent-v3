@@ -232,6 +232,7 @@ describe("cli-knob read-site domain ratchet (ADR-0527)", () => {
     expect(keysOf('process.env.QUANTA_Y === "full"')).toEqual(["QUANTA_Y"])
 
     // Prose the census must NOT count. The first is live at login-cmd.ts:64.
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: this string IS source code, fed to the parser verbatim
     expect(keysOf('`${dim("Set ")}${cyan("QUANTA_OAUTH_CLIENT_ID")}`')).toEqual([])
     expect(keysOf('throw new Error("QUANTA_X failed")')).toEqual([])
     expect(keysOf('lines.push("  QUANTA_X  a knob")')).toEqual([])
