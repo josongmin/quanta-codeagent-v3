@@ -15,12 +15,14 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
   clearLeaseQuarantine,
+  KEEPER_SCRIPT_PATH,
   LEASE_QUARANTINE_SCHEMA,
+  type LeaseQuarantineRead,
   type LeaseQuarantineRecord,
   parseLeaseQuarantine,
   QUARANTINE_TTL_MS,
@@ -145,13 +147,50 @@ describe("lease quarantine", () => {
     expect(expired.reason).toContain("expired")
   })
 
-  test("another repository's quarantine never blocks this one", () => {
-    expect(verdictFor(record({ repositoryId: "other/repo" }), alive(4242)).kind).toBe("stale")
+  test("another repository's quarantine never blocks this one — and is never deleted", () => {
+    // `stale` is the DELETABLE verdict, and a foreign record was reported as
+    // stale. Measured end to end: the owner read `blocked`, a contender with a
+    // different identity read `stale` and swept the file, and the owner's next
+    // contender then read `clear` and took a lane whose poisoned groups were
+    // still alive. One quarantine path per git common-dir, and two identities can
+    // coexist there.
+    const verdict = verdictFor(record({ repositoryId: "other/repo" }), alive(4242))
+    expect(verdict.kind).toBe("foreign")
+    expect(verdict.kind === "foreign" ? verdict.reason : "").toContain("other/repo")
   })
 
-  test("a malformed record is not a lock", () => {
-    // Fail-closed is right for a VERDICT and wrong for a lane: an unparseable
-    // file would otherwise brick verification with no way to name the reason.
+  test("a malformed record is REFUSED as a record, and blocks the lane until its TTL", () => {
+    // The original rule here was "a malformed record is not a lock", because an
+    // unparseable file would otherwise brick verification with no way to name the
+    // reason. That objection is answered rather than ignored: an unreadable record
+    // now blocks, the reason names the parse failure and the file's age, and past
+    // the 30-minute TTL it goes stale like any other — so the brick is bounded and
+    // diagnosable instead of the lane being handed over.
+    //
+    // MEASURED before this: truncated JSON, a float `createdAtMs`, a string
+    // `pgid`, an unknown schema and a zero-byte file each read as `clear`, which
+    // is indistinguishable from "no quarantine was ever written" — and the record
+    // is written from a teardown `finally`, the one place a partial write is
+    // likely.
+    const now = 10 * 60_000
+    const unreadable = { kind: "unreadable", reason: "unparseable json", writtenAtMs: now } as const
+    expect(
+      quarantineVerdict({
+        read: unreadable,
+        repositoryId: "owner/repo",
+        nowMs: now + 1_000,
+        isAlive: alive(4242),
+      }).kind,
+    ).toBe("blocked")
+    expect(
+      quarantineVerdict({
+        read: unreadable,
+        repositoryId: "owner/repo",
+        nowMs: now + QUARANTINE_TTL_MS + 1,
+        isAlive: alive(4242),
+      }).kind,
+    ).toBe("stale")
+
     for (const bad of [
       null,
       {},
@@ -329,22 +368,68 @@ describe("the keeper outlives the group that spawned it", () => {
   }, 20_000)
 })
 
+describe("the keeper script the default spawner points at", () => {
+  test("it exists, and the module refuses to write a record without it", () => {
+    // Every other arm injects `spawnKeeper`, and the detach arm spawns the script
+    // directly, so the production default was exercised by nothing: a mutation
+    // audit renamed it to `…-keeper-MISSING.ts` and the suite stayed green. A
+    // keeper that never runs means every quarantine waits out its full 30-minute
+    // TTL instead of clearing when the survivors exit.
+    expect(existsSync(KEEPER_SCRIPT_PATH)).toBe(true)
+    expect(KEEPER_SCRIPT_PATH.endsWith("tools/dev/lease-quarantine-keeper.ts")).toBe(true)
+    // ...and the guard is in the production path, not just in this assertion.
+    expect(readFileSync(KEEPER_SCRIPT_PATH, "utf8")).toContain("export const keeperTick")
+    expect(
+      readFileSync(
+        join(import.meta.dir, "..", "..", "..", "tools/dev/lease-quarantine.ts"),
+        "utf8",
+      ),
+    ).toContain("refusing to write a record")
+  })
+})
+
 describe("the keeper", () => {
-  test("holds while a group lives, releases once they are gone", () => {
-    expect(keeperTick(record(), "owner/repo", 2_000, alive(4242))).toBe("hold")
-    expect(keeperTick(record(), "owner/repo", 2_000, alive())).toBe("release")
+  const held = (row: LeaseQuarantineRecord): LeaseQuarantineRead => ({
+    kind: "record",
+    record: row,
   })
 
-  test("releases a record that is not its own, and an expired one", () => {
-    // A keeper that outlived its record must not sit forever on someone
-    // else's file.
+  test("holds while a group lives, releases once they are gone", () => {
+    expect(keeperTick(held(record()), "owner/repo", 2_000, alive(4242))).toBe("hold")
+    expect(keeperTick(held(record()), "owner/repo", 2_000, alive())).toBe("release")
+  })
+
+  test("DETACHES from a record that is not its own, instead of deleting it", () => {
+    // `release` deletes. A keeper that answered `release` on a foreign record
+    // removed a live quarantine protecting somebody else's poisoned lane —
+    // measured end to end: owner blocked, foreign contender swept, owner then
+    // read `clear`.
     expect(
-      keeperTick(record({ repositoryId: "other/repo" }), "owner/repo", 2_000, alive(4242)),
-    ).toBe("release")
-    expect(keeperTick(record(), "owner/repo", 1_000 + QUARANTINE_TTL_MS, alive(4242))).toBe(
+      keeperTick(held(record({ repositoryId: "other/repo" })), "owner/repo", 2_000, alive(4242)),
+    ).toBe("detach")
+  })
+
+  test("an expired record is released; an ABSENT one is held, not released", () => {
+    expect(keeperTick(held(record()), "owner/repo", 1_000 + QUARANTINE_TTL_MS, alive(4242))).toBe(
       "release",
     )
-    expect(keeperTick(undefined, "owner/repo", 2_000, alive(4242))).toBe("release")
+    // `quarantineLane` spawns the keeper BEFORE it writes the record, so that no
+    // record ever names a pid that was never started. The keeper's first tick
+    // therefore races the write, and answering `release` there DELETED the record
+    // it exists to watch. Measured: `recordOnDisk=false -> release`.
+    expect(keeperTick({ kind: "absent" }, "owner/repo", 2_000, alive(4242))).toBe("hold")
+  })
+
+  test("an UNREADABLE record holds the lane, and stops holding past the TTL", () => {
+    const unreadable = (writtenAtMs: number): LeaseQuarantineRead => ({
+      kind: "unreadable",
+      reason: "unparseable json",
+      writtenAtMs,
+    })
+    expect(keeperTick(unreadable(2_000), "owner/repo", 3_000, alive(4242))).toBe("hold")
+    expect(
+      keeperTick(unreadable(2_000), "owner/repo", 3_000 + QUARANTINE_TTL_MS, alive(4242)),
+    ).toBe("release")
   })
 })
 

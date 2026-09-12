@@ -21,9 +21,10 @@
 import { dlopen, FFIType, suffix } from "bun:ffi"
 import {
   clearLeaseQuarantine,
+  type LeaseQuarantineRead,
   type LeaseQuarantineRecord,
   quarantineVerdict,
-  readLeaseQuarantine,
+  readLeaseQuarantineOutcome,
 } from "./lease-quarantine"
 
 const POLL_MS = 1_000
@@ -61,13 +62,25 @@ const groupAlive = (pgid: number): boolean => {
   }
 }
 
+export type KeeperAction = "hold" | "release" | "detach"
+
 export const keeperTick = (
-  record: LeaseQuarantineRecord | undefined,
+  read: LeaseQuarantineRead,
   repositoryId: string,
   nowMs: number,
   isAlive: (pgid: number) => boolean,
-): "hold" | "release" => {
-  const verdict = quarantineVerdict({ record, repositoryId, nowMs, isAlive })
+): KeeperAction => {
+  const verdict = quarantineVerdict({ read, repositoryId, nowMs, isAlive })
+  // `foreign` is somebody else's record: the keeper must neither hold on it nor
+  // DELETE it, and `release` deletes. It stops watching instead.
+  if (verdict.kind === "foreign") return "detach"
+  // An ABSENT record right after spawn is the write it is waiting for:
+  // `quarantineLane` spawns the keeper BEFORE it writes, so that the record can
+  // never name a pid that was never started. MEASURED: the keeper's first tick
+  // against an absent record answered `release`, which deletes — so a keeper that
+  // won that race removed the record it existed to watch. Holding on absence is
+  // bounded by `absentGraceMs` below.
+  if (read.kind === "absent") return "hold"
   return verdict.kind === "blocked" ? "hold" : "release"
 }
 
@@ -86,11 +99,28 @@ if (import.meta.main) {
           "a group-wide signal will take it down with the campaign and the record " +
           "will wait out its TTL instead of being released early\n",
   )
+  // How long the keeper waits for the record its spawner is about to write.
+  // Bounded: a keeper that was started and then abandoned must not poll forever.
+  const absentGraceMs = 30_000
+  const startedAtMs = Date.now()
   for (;;) {
-    const record = readLeaseQuarantine(path)
-    if (keeperTick(record, repositoryId, Date.now(), groupAlive) === "release") {
+    const read = readLeaseQuarantineOutcome(path)
+    const action = keeperTick(read, repositoryId, Date.now(), groupAlive)
+    if (action === "detach") {
+      process.stderr.write(
+        `[quarantine] keeper detaching: ${repositoryId} does not own this record\n`,
+      )
+      process.exit(0)
+    }
+    if (action === "release") {
       clearLeaseQuarantine(path)
       process.stderr.write(`[quarantine] released ${repositoryId}\n`)
+      process.exit(0)
+    }
+    if (read.kind === "absent" && Date.now() - startedAtMs > absentGraceMs) {
+      process.stderr.write(
+        `[quarantine] keeper giving up: no record appeared at ${path} within ${absentGraceMs}ms\n`,
+      )
       process.exit(0)
     }
     await Bun.sleep(POLL_MS)

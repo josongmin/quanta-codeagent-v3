@@ -31,7 +31,15 @@
  * survivors have exited is stale no matter who is holding it.
  */
 
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs"
 import { dirname, join } from "node:path"
 
 export const LEASE_QUARANTINE_SCHEMA = "quanta.lease-quarantine.v1" as const
@@ -100,6 +108,17 @@ export type QuarantineVerdict =
   | { readonly kind: "clear" }
   | { readonly kind: "blocked"; readonly reason: string; readonly alive: readonly number[] }
   | { readonly kind: "stale"; readonly reason: string }
+  /**
+   * Another repository's lane. Not blocking (it is not about us) and NOT
+   * deletable — `stale` is, and a foreign record was being reported as stale.
+   *
+   * MEASURED: a record written for `owner/repo` with a genuinely live survivor,
+   * read as `other/repo`, answered `stale`; the contender's sweep then removed
+   * the file, and the OWNER's next contender read `clear` and took a lane whose
+   * poisoned processes were still running. One quarantine path per git
+   * common-dir, and two identities can coexist there, so this was reachable.
+   */
+  | { readonly kind: "foreign"; readonly reason: string }
 
 /**
  * May a contender take the lane?
@@ -110,15 +129,41 @@ export type QuarantineVerdict =
  * is recorded for forensics and for the operator, not as the gate.
  */
 export const quarantineVerdict = (input: {
-  readonly record: LeaseQuarantineRecord | undefined
+  /** Prefer `read`: a bare `undefined` cannot say "unreadable". */
+  readonly record?: LeaseQuarantineRecord | undefined
+  readonly read?: LeaseQuarantineRead
   readonly repositoryId: string
   readonly nowMs: number
   readonly isAlive: (pgid: number) => boolean
 }): QuarantineVerdict => {
-  const { record, repositoryId, nowMs, isAlive } = input
-  if (record === undefined) return { kind: "clear" }
+  const { repositoryId, nowMs, isAlive } = input
+  const read: LeaseQuarantineRead =
+    input.read ??
+    (input.record === undefined ? { kind: "absent" } : { kind: "record", record: input.record })
+  if (read.kind === "absent") return { kind: "clear" }
+  if (read.kind === "unreadable") {
+    // FAIL CLOSED, bounded by the only metadata a corrupt body cannot corrupt.
+    // A record we cannot parse may describe live survivors; treating it as an
+    // empty lane is the fail-open this type exists to remove. Past the TTL it is
+    // stale like any other, so a corrupt file cannot brick the lane forever.
+    const ageMs = nowMs - read.writtenAtMs
+    if (ageMs >= QUARANTINE_TTL_MS) {
+      return {
+        kind: "stale",
+        reason: `unreadable quarantine written ${ageMs}ms ago, past the ${QUARANTINE_TTL_MS}ms ttl (${read.reason})`,
+      }
+    }
+    return {
+      kind: "blocked",
+      reason:
+        `lane quarantined by an UNREADABLE record written ${ageMs}ms ago (${read.reason}); ` +
+        "refusing the lane because a record we cannot parse may describe live survivors",
+      alive: [],
+    }
+  }
+  const record = read.record
   if (record.repositoryId !== repositoryId) {
-    return { kind: "stale", reason: `quarantine belongs to "${record.repositoryId}"` }
+    return { kind: "foreign", reason: `quarantine belongs to "${record.repositoryId}"` }
   }
   if (nowMs >= record.expiresAtMs) {
     return {
@@ -147,12 +192,73 @@ export const writeLeaseQuarantine = (path: string, record: LeaseQuarantineRecord
   renameSync(temporary, path)
 }
 
-export const readLeaseQuarantine = (path: string): LeaseQuarantineRecord | undefined => {
+/**
+ * ABSENT and UNREADABLE are different answers, and collapsing them was fail-open.
+ *
+ * This returned `undefined` for both, and `quarantineVerdict` mapped `undefined`
+ * to `clear`. MEASURED — every one of these read as "the lane is free", each
+ * indistinguishable from "no quarantine was ever written":
+ *
+ *   truncated JSON            unreadable -> clear
+ *   float createdAtMs         unreadable -> clear
+ *   pgid as a string          unreadable -> clear
+ *   unknown schema v2         unreadable -> clear
+ *   zero-byte file            unreadable -> clear
+ *
+ * The record is written in a TEARDOWN path — `writeFileSync` then `rename`, from
+ * the `finally` of a campaign that just failed to drain — which is precisely when
+ * a partial write is likely. So the one input most likely to be malformed was the
+ * one treated as permission to take the lane.
+ *
+ * An unreadable record is now reported as such, and the caller decides with the
+ * only metadata that survives a corrupt body: the file's own mtime.
+ */
+export type LeaseQuarantineRead =
+  | { readonly kind: "absent" }
+  | { readonly kind: "unreadable"; readonly reason: string; readonly writtenAtMs: number }
+  | { readonly kind: "record"; readonly record: LeaseQuarantineRecord }
+
+export const readLeaseQuarantineOutcome = (path: string): LeaseQuarantineRead => {
+  let text: string
   try {
-    return parseLeaseQuarantine(JSON.parse(readFileSync(path, "utf8")))
+    text = readFileSync(path, "utf8")
   } catch {
-    return undefined
+    return { kind: "absent" }
   }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch (error) {
+    return {
+      kind: "unreadable",
+      reason: `unparseable json: ${String(error)}`,
+      writtenAtMs: mtimeOf(path),
+    }
+  }
+  const record = parseLeaseQuarantine(parsed)
+  if (record === undefined) {
+    return {
+      kind: "unreadable",
+      reason: "json does not satisfy quanta.lease-quarantine.v1",
+      writtenAtMs: mtimeOf(path),
+    }
+  }
+  return { kind: "record", record }
+}
+
+const mtimeOf = (path: string): number => {
+  try {
+    return statSync(path).mtimeMs
+  } catch {
+    return 0
+  }
+}
+
+/** The record, or `undefined` for absent OR unreadable. Prefer the outcome form:
+ *  this shape is what made a corrupt record read as an empty lane. */
+export const readLeaseQuarantine = (path: string): LeaseQuarantineRecord | undefined => {
+  const outcome = readLeaseQuarantineOutcome(path)
+  return outcome.kind === "record" ? outcome.record : undefined
 }
 
 /** Remove a record. Safe when absent; never throws into a teardown path. */
@@ -178,11 +284,26 @@ export interface QuarantineHandoffInput {
   readonly log?: (line: string) => void
 }
 
+/** The keeper script this module spawns. Exported so a test can prove it exists. */
+export const KEEPER_SCRIPT_PATH = join(import.meta.dir, "lease-quarantine-keeper.ts")
+
 const spawnDetachedKeeper = (path: string, repositoryId: string): number => {
-  const child = Bun.spawn(
-    ["bun", join(import.meta.dir, "lease-quarantine-keeper.ts"), path, repositoryId],
-    { stdin: "ignore", stdout: "ignore", stderr: "ignore" },
-  )
+  // Every test injects `spawnKeeper`, and the detach test spawns the script
+  // directly, so this default was exercised by nothing: a mutation audit renamed
+  // the script to a path that does not exist and the whole suite stayed green.
+  // A missing keeper means no record is ever released early and every quarantine
+  // waits out its full TTL — the exact failure the detach work claimed to fix.
+  if (!existsSync(KEEPER_SCRIPT_PATH)) {
+    throw new Error(
+      `[quarantine] keeper script missing at ${KEEPER_SCRIPT_PATH}; refusing to write a record ` +
+        "whose keeper can never run",
+    )
+  }
+  const child = Bun.spawn(["bun", KEEPER_SCRIPT_PATH, path, repositoryId], {
+    stdin: "ignore",
+    stdout: "ignore",
+    stderr: "ignore",
+  })
   child.unref()
   return child.pid
 }

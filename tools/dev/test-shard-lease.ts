@@ -2,7 +2,11 @@ import { randomBytes } from "node:crypto"
 import { readFileSync } from "node:fs"
 import { createConnection } from "node:net"
 import { join } from "node:path"
-import { clearLeaseQuarantine, quarantineVerdict, readLeaseQuarantine } from "./lease-quarantine"
+import {
+  clearLeaseQuarantine,
+  quarantineVerdict,
+  readLeaseQuarantineOutcome,
+} from "./lease-quarantine"
 import { createProcessObserver } from "./process-observer"
 
 const LEASE_HOST = "127.0.0.1"
@@ -474,12 +478,18 @@ const quarantineBlock = (
   const path = options.quarantinePath
   if (path === undefined) return undefined
   const verdict = quarantineVerdict({
-    record: readLeaseQuarantine(path),
+    // The OUTCOME, not the bare record: a corrupt record used to read as an
+    // empty lane, which is the one input a teardown-path writer is most likely
+    // to produce.
+    read: readLeaseQuarantineOutcome(path),
     repositoryId: identity,
     nowMs: Date.now(),
     isAlive: options.isGroupAlive ?? defaultGroupAlive,
   })
   if (verdict.kind === "blocked") return verdict.reason
+  // `stale` is ours and provably over, so removing it stops every later
+  // contender re-deriving the same answer. `foreign` is NOT ours: deleting it
+  // wiped a live record protecting somebody else's poisoned lane.
   if (verdict.kind === "stale") clearLeaseQuarantine(path)
   return undefined
 }
