@@ -79,7 +79,7 @@ export interface ReceiptSnapshot {
  * 64 hex characters passed and the digest named nothing. `suite` sat in the
  * type and was never compared, so a `unit` receipt (a strict subset of the
  * enrolled ids) stood in for the full universe. There was no `tier` at all, so
- * `--suite=full --tier=pr` — 3,938 of 3,962 files — minted a receipt the
+ * `--suite=full --tier=pr` — 3,941 of 3,965 files at this HEAD — minted a receipt the
  * closed-universe consumer accepted.
  *
  * That matters here specifically because scan-reach is a FLOOR: a receipt from

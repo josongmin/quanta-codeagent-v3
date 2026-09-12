@@ -59,25 +59,58 @@ interface MutableRunnerOptions {
   cacheMode: CacheMode
 }
 
+/**
+ * The option name this argument sets, or `undefined` when it sets none.
+ *
+ * Returned so the caller can refuse a REPEAT. The parser already refuses
+ * `--tier` contradicting `QUANTA_VERIFICATION_TIER` with "refusing to pick one
+ * silently" — and then picked one silently when the contradiction was between
+ * two flags on the SAME command line. Measured: `--tier=pr --tier=nightly`
+ * discovered the nightly population (3,965 files) and printed
+ * `"name": "full:nightly"`, while `--suite=unit --suite=full` ran the full
+ * suite. Last-one-wins is exactly the "a command string means two different
+ * runs" failure the env cross-check exists to close.
+ */
 const applyNamedOption = (
   state: MutableRunnerOptions,
   arg: string,
   onFlagTier: (tier: Exclude<VerificationTier, "smoke">) => void,
-): boolean => {
+): "cache" | "suite" | "tier" | "junit-out" | undefined => {
   const cacheMode = cacheModeOption(arg)
-  if (cacheMode !== undefined) state.cacheMode = cacheMode
+  if (cacheMode !== undefined) {
+    state.cacheMode = cacheMode
+    return "cache"
+  }
   const suite = suiteOption(arg)
-  if (suite !== undefined) state.suite = suite
+  if (suite !== undefined) {
+    state.suite = suite
+    return "suite"
+  }
   const tier = tierOption(arg)
   if (tier !== undefined) {
     state.tier = tier
     onFlagTier(tier)
+    return "tier"
   }
   const junitOut = junitOption(arg)
-  if (junitOut !== undefined) state.junitOut = junitOut
-  return (
-    cacheMode !== undefined || suite !== undefined || tier !== undefined || junitOut !== undefined
-  )
+  if (junitOut !== undefined) {
+    state.junitOut = junitOut
+    return "junit-out"
+  }
+  return undefined
+}
+
+/** Refuse a second value for one option, naming both. */
+const recordOptionOnce = (seen: Map<string, string>, option: string, arg: string): void => {
+  const first = seen.get(option)
+  if (first !== undefined) {
+    throw new Error(
+      `[test:shards] --${option} given twice (${first}, then ${arg}); refusing to pick one ` +
+        "silently. Two values for one option make a command string mean two different runs, " +
+        "and the last one quietly won.",
+    )
+  }
+  seen.set(option, arg)
 }
 
 export const parseShardRunnerOptions = (args: readonly string[]): RunnerOptions => {
@@ -96,6 +129,8 @@ export const parseShardRunnerOptions = (args: readonly string[]): RunnerOptions 
       : shardTier(process.env.QUANTA_VERIFICATION_TIER)
   if (envTier !== undefined) state.tier = envTier
   let flagTier: Exclude<VerificationTier, "smoke"> | undefined
+  /** Which value-bearing options were already given, and with what argument. */
+  const seen = new Map<string, string>()
   for (const arg of args) {
     // `--parallel=<N>` is a REAL `bun test` flag (N worker processes, implies
     // --isolate), and three package scripts passed `--parallel=1` to this
@@ -117,11 +152,11 @@ export const parseShardRunnerOptions = (args: readonly string[]): RunnerOptions 
       state.discoverOnly = true
       continue
     }
-    if (
-      applyNamedOption(state, arg, (tier) => {
-        flagTier = tier
-      })
-    ) {
+    const named = applyNamedOption(state, arg, (tier) => {
+      flagTier = tier
+    })
+    if (named !== undefined) {
+      recordOptionOnce(seen, named, arg)
       continue
     }
     throw new Error(`unknown shard runner argument: ${arg}`)
