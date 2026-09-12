@@ -94,6 +94,20 @@ export interface KnobAccess {
   readonly form: KnobAccessForm
   readonly file: string
   readonly line: number
+  /**
+   * For `form: "call-arg"` only — the callee's source text (`env`, `gateOn`,
+   * `obj.method`), or `undefined` when the callee is not a plain identifier or
+   * property access.
+   *
+   * The census deliberately counts EVERY exact-text `QUANTA_*` literal passed to
+   * any call, because a key it cannot attribute must still count as read or the
+   * completeness ratchet under-reports and a genuine orphan escapes. That makes
+   * `call-arg` the one imprecise form: `console.log("QUANTA_X")` is
+   * indistinguishable from `env("QUANTA_X")` by shape alone. Consumers that need
+   * precision rather than coverage — the read-site DOMAIN ratchet, where a false
+   * read is a false PASS — narrow on this field.
+   */
+  readonly callee?: string | undefined
 }
 
 export interface KnobAccessCensus {
@@ -165,7 +179,13 @@ const classify = (node: ts.Node): KnobAccessKind =>
   isDeleteTarget(node) ? "delete" : isAssignmentTarget(node) ? "write" : "read"
 
 /** One emitter, shared by the per-form visitors below. */
-type Push = (key: string, kind: KnobAccessKind, form: KnobAccessForm, node: ts.Node) => void
+type Push = (
+  key: string,
+  kind: KnobAccessKind,
+  form: KnobAccessForm,
+  node: ts.Node,
+  callee?: string,
+) => void
 
 /** `<anything>.QUANTA_X` — the reserved namespace makes the object irrelevant. */
 const visitPropertyAccess = (node: ts.Node, push: Push): void => {
@@ -226,17 +246,30 @@ const visitDestructure = (node: ts.Node, push: Push): void => {
 
 /** One argument of a call: an exact-text key literal, or an identifier that
  *  resolves to a key in this file (`gateOn(env, SOME_ENV)`). */
-const visitCallArg = (a: ts.Expression, aliases: ReadonlyMap<string, string>, push: Push): void => {
+/** The callee's source text when it is a plain identifier or property access. */
+const calleeText = (node: ts.CallExpression): string | undefined => {
+  const e = node.expression
+  if (ts.isIdentifier(e)) return e.text
+  if (ts.isPropertyAccessExpression(e)) return `${e.expression.getText()}.${e.name.text}`
+  return undefined
+}
+
+const visitCallArg = (
+  a: ts.Expression,
+  aliases: ReadonlyMap<string, string>,
+  callee: string | undefined,
+  push: Push,
+): void => {
   if (ts.isStringLiteralLike(a)) {
     const t = a.text
     if (!KEY_RE.test(t)) return
-    push(t, isPrefixToken(t) ? "prefix" : "read", "call-arg", a)
+    push(t, isPrefixToken(t) ? "prefix" : "read", "call-arg", a, callee)
     return
   }
   if (!ts.isIdentifier(a)) return
   const resolved = aliases.get(a.text)
   if (resolved === undefined) return
-  push(resolved, isPrefixToken(resolved) ? "prefix" : "read", "call-arg", a)
+  push(resolved, isPrefixToken(resolved) ? "prefix" : "read", "call-arg", a, callee)
 }
 
 /**
@@ -250,7 +283,8 @@ const visitCallArg = (a: ts.Expression, aliases: ReadonlyMap<string, string>, pu
  */
 const visitCallArgs = (node: ts.Node, aliases: ReadonlyMap<string, string>, push: Push): void => {
   if (!ts.isCallExpression(node)) return
-  for (const a of node.arguments) visitCallArg(a, aliases, push)
+  const callee = calleeText(node)
+  for (const a of node.arguments) visitCallArg(a, aliases, callee, push)
 }
 
 /** Census one parsed file. Pure w.r.t. the filesystem. */
@@ -258,8 +292,8 @@ export const censusSource = (file: string, text: string): KnobAccess[] => {
   const sf = ts.createSourceFile(file, text, ts.ScriptTarget.ESNext, true, ts.ScriptKind.TS)
   const aliases = collectLocalAliases(sf)
   const hits: KnobAccess[] = []
-  const push: Push = (key, kind, form, node) => {
-    hits.push({ key, kind, form, file, line: lineOf(sf, node) })
+  const push: Push = (key, kind, form, node, callee) => {
+    hits.push({ key, kind, form, file, line: lineOf(sf, node), callee })
   }
   const visit = (node: ts.Node): void => {
     visitPropertyAccess(node, push)
