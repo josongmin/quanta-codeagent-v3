@@ -61,7 +61,12 @@ const optIns = (): OptIn[] => {
   for (const rel of files) {
     const lines = readFileSync(join(REPO_ROOT, rel), "utf8").split("\n")
     for (let i = 0; i < lines.length; i++) {
-      for (const m of (lines[i] as string).matchAll(/Opt-in: (QUANTA_[A-Z0-9_]+)=(\S+?)["',\s]/g)) {
+      // The token runs to a delimiter OR to end of line. The first version required
+      // a trailing `["',\s]`, so a describe written as a TEMPLATE literal whose line
+      // ends at the token evaded it entirely — measured: `Opt-in: QUANTA_AUTOMATION=on`
+      // at end of line inside a backtick string left the guard at 4 pass / 0 fail
+      // while `/help` printed the forbidden token.
+      for (const m of (lines[i] as string).matchAll(/Opt-in: (QUANTA_[A-Z0-9_]+)=([^\s"'`,)]+)/g)) {
         out.push({ file: rel, line: i + 1, key: m[1] as string, token: m[2] as string })
       }
     }
@@ -70,10 +75,23 @@ const optIns = (): OptIn[] => {
 }
 
 describe("slash Opt-in token parity", () => {
-  test("ANTI-VACUITY: there are Opt-in strings to check", () => {
-    const found = optIns()
-    expect(found.length, "no `Opt-in:` strings found — re-anchor this guard").toBeGreaterThan(4)
-    expect(new Set(found.map((o) => o.key)).size).toBeGreaterThan(4)
+  /**
+   * The population is PINNED as a set, not floored as a count.
+   *
+   * A `> 4` floor against a real population of six cannot see one row go missing —
+   * the same blindness, in the same file, as the regex hole above. Naming the keys
+   * makes a disappearing `Opt-in:` string a failure instead of a smaller number.
+   */
+  test("ANTI-VACUITY: the Opt-in population is exactly the known set", () => {
+    const keys = [...new Set(optIns().map((o) => o.key))].sort()
+    expect(keys).toEqual([
+      "QUANTA_ATTENTION_NAV",
+      "QUANTA_AUTOMATION",
+      "QUANTA_POSTURE_SELECTOR",
+      "QUANTA_RADAR",
+      "QUANTA_SKILL_ACTIONS",
+      "QUANTA_VOICE_LIVE",
+    ])
   })
 
   test("every Opt-in names the same token the shared hint recommends", () => {

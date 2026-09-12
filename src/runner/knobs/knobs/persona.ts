@@ -16,9 +16,15 @@
  * (the existing seam in `src/agent/prompt.ts`). For `default` the rebuilt
  * prompt is byte-identical to the no-persona path (the personaLines helper
  * returns an empty array on `default`) — so a knob set to `default`
- * explicitly is still a no-op against the baseline. `hotToggleable: true`:
- * a host that swaps persona mid-session (slash-command, REPL `/persona`)
- * gets a freshly-built system on the next turn.
+ * explicitly is still a no-op against the baseline.
+ *
+ * `hotToggleable` is FALSE (see the field and its note below). This header used to
+ * describe it as `true` — "a host that swaps persona mid-session gets a freshly-built
+ * system on the next turn" — while the field twenty lines down said otherwise and
+ * explained at length that no such host exists. The commit that corrected the field
+ * left this sentence, and a later sweep of three other `hotToggleable: true` claims
+ * missed it too, even though `knobs-set-liveness-honesty-hellgate` points the reader
+ * here by name. Restore the sentence with the field, not before it.
  */
 
 import type { AgentConfig } from "@/agent"

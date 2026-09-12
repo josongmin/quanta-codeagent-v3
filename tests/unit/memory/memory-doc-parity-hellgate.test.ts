@@ -137,11 +137,40 @@ describe("memory store docs match the runtime default (P1-2)", () => {
     )
   })
 
-  test("the top-level env list agrees with the memory section", () => {
+  /**
+   * The bullet is asserted on its OWN CONTENT, not against a blocklist.
+   *
+   * This was `not.toContain("미설정 시 OFF")` — one spelling — which is exactly the
+   * evasion the path axis above had already been rewritten to remove. Measured: a
+   * README keeping `**store는 기본 ON**` in the section while the bullet said
+   * `기본값은 비활성(store 없음)` passed all seven tests. Fixed one axis, left the
+   * identical shape one test below.
+   */
+  test("the top-level env list states the posture the registry declares", () => {
     const md = read("README.md")
     const line = md.split("\n").find((l) => l.startsWith("- `QUANTA_MEMORY` ("))
     expect(line, "README lost its top-level QUANTA_MEMORY bullet").toBeDefined()
-    expect(line ?? "").not.toContain("미설정 시 OFF")
+    const text = line ?? ""
+    if (DECLARED_DEFAULT_IS_ON) {
+      // The bullet must name the store the unset knob actually builds.
+      expect(
+        text,
+        `the registry declares QUANTA_MEMORY default=${DECLARED_MEMORY_DEFAULT}, so the bullet must say what an unset knob builds`,
+      ).toContain("미설정 시 durable sqlite")
+    }
+    // The UNSET clause only — up to the first `;` or `,`. A looser pattern over the
+    // whole bullet fires on the correct text, because the same line legitimately
+    // says `` `off`/`0`=비활성 `` about the OTHER values. My first attempt did
+    // exactly that: a blunt matcher that reports the honest sentence as a lie, which
+    // is the failure this file exists to stop, inverted.
+    const unsetClause = /미설정[^;,)]*/.exec(text)?.[0] ?? ""
+    expect(unsetClause, "the bullet lost its 미설정 clause").not.toBe("")
+    for (const off of ["OFF", "off", "비활성", "없음", "disabled"]) {
+      expect(
+        unsetClause.includes(off),
+        `the bullet's unset clause claims the store is off: "${unsetClause}"`,
+      ).toBe(false)
+    }
   })
 
   test("the memory-compose docstring does not describe the pre-0557 contract", () => {
