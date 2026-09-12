@@ -589,7 +589,7 @@ const dedupe = (effects: readonly ModuleLoadEffect[]): readonly ModuleLoadEffect
   const seen = new Set<string>()
   const out: ModuleLoadEffect[] = []
   for (const e of effects) {
-    const key = `${e.file} ${e.kind} ${e.callsite} ${e.line}`
+    const key = `${e.file}\u0000${e.kind}\u0000${e.callsite}\u0000${e.line}`
     if (seen.has(key)) continue
     seen.add(key)
     out.push(e)

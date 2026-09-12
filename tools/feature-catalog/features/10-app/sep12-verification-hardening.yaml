@@ -108,6 +108,7 @@ evidence:
       - tests/unit/tools/test-resilience-quarantine-v2-hellgate.test.ts
       - tests/unit/link-local-network-use-guard.test.ts
       - tests/unit/repo-root-portability.test.ts
+      - tests/unit/_arch/source-is-greppable.test.ts
     integration:
       - tests/integration/test-shard-identity-safety.test.ts
     contract: []
