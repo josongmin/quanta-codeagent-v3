@@ -39,6 +39,14 @@ export const SESSION_FORBIDDEN_KNOBS: ReadonlySet<string> = new Set([
   "QUANTA_MAX_DESCENDANT_DEPTH",
   "QUANTA_MAX_SPAWN_DEPTH",
   "QUANTA_SUBAGENT_MAX_DEPTH",
+  // The STARTUP PERMISSION POSTURE. `/knobs set QUANTA_PERMISSION=bypass` was accepted
+  // and stored, and `resolveCatalogValues` then displayed it as `source: "session"`
+  // with the overridden mark — a security boundary showing as moved. It was inert only
+  // because the reader is `process.env`-only and ignores the override store: an
+  // accident, not a control. Every other operator entry point for the posture goes
+  // through `isPermissionMode` and a surface that owns the change (`/posture`, the web
+  // control verb, `serve --stdio`); a session knob set is not one of them.
+  "QUANTA_PERMISSION",
 ])
 
 /** True if `envKey` is a security-boundary knob that a session override may NOT set. */

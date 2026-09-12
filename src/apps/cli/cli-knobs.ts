@@ -292,7 +292,8 @@ export const CLI_KNOBS: readonly CliKnob[] = [
     kind: "int",
     default: 60000,
     group: "notify",
-    describe: "Idle threshold before the nudge is considered (ms).",
+    describe:
+      "Idle threshold before the nudge is considered (ms). Neutralised by QUANTA_IDLE_SUPPRESS=0 (the threshold becomes Infinity, so the nudge never fires).",
     readSite: "repl/session-runtime-config.ts",
   },
   {

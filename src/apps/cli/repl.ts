@@ -198,10 +198,13 @@ export const resolveIdleGuardLimits = (runtime: {
     runtime.idleSuppressOn && Number.isFinite(runtime.idleMs)
       ? runtime.idleMs
       : Number.POSITIVE_INFINITY,
-  defaultSnoozeMs:
-    runtime.idleSuppressOn && Number.isFinite(runtime.snoozeDefaultMs)
-      ? runtime.snoozeDefaultMs
-      : 300_000,
+  // NOT gated on `idleSuppressOn` either. `defaultSnoozeMs` is consumed by the EXPLICIT
+  // `/snooze` gesture (`registry-surface.ts` → `idleMonitor.snooze()` → `durationMs ??
+  // snoozeMs`), not by idleness. With presence tracking off, an operator who set
+  // `QUANTA_SNOOZE_DEFAULT_MS=60000` silently got 300000 and the CLI printed "snoozed
+  // (default duration)" without naming it. The reject rail was decoupled first; this is
+  // the same copy-paste, one field over.
+  defaultSnoozeMs: Number.isFinite(runtime.snoozeDefaultMs) ? runtime.snoozeDefaultMs : 300_000,
   // NOT gated on `idleSuppressOn` — see the note above.
   rejectThreshold:
     Number.isFinite(runtime.rejectLimit) && runtime.rejectLimit > 0

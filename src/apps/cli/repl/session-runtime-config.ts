@@ -1,5 +1,11 @@
 import { type Provider, resolveBootSelection } from "@/llm"
-import type { PermissionMode, ReviewerSandboxProfile } from "@/permission"
+import {
+  ALL_PERMISSION_MODES,
+  isPermissionMode,
+  type PermissionMode,
+  type ReviewerSandboxProfile,
+} from "@/permission"
+import { logger } from "@/shared"
 import {
   argvImages,
   argvPrompt,
@@ -52,6 +58,47 @@ export interface SessionRuntimeConfig {
 
 /** Consolidate the session surface's process/env/argv reads into one typed
  *  config object so bootstrap and host wiring consume plain data. */
+/**
+ * A positive-int knob, with the declared fallback and a warning on garbage.
+ *
+ * `Number(env(key, "40"))` was the shape at four call sites below, and it accepted
+ * both an EMPTY value and non-numeric text. `env(k, d)` is `process.env[k] ?? d`, and
+ * `??` does not catch `""` — so `export QUANTA_MAX_TURNS=` (a bare export, or an unset
+ * variable in a shell script) produced `Number("") === 0`, and the turn loop
+ * (`for (turn = 1; turn <= cfg.maxTurns; …)`) never ran a single iteration while the
+ * session reported `finish("max_turns", 0)`. Measured: `""` and `"  "` both give 0,
+ * `"abc"` gives NaN, and NaN fails the same comparison. A session that silently does
+ * nothing and reports a plausible reason is the worst debuggability in this file.
+ *
+ * `allowZero` is for `QUANTA_REJECT_LIMIT`, where `0` is the DOCUMENTED off-switch
+ * (`reject-counter.ts`: "threshold = Infinity ⇒ shouldAutoExit() is always false.
+ * That's how QUANTA_REJECT_LIMIT=0 disables the mechanism").
+ */
+const intKnob = (key: string, fallback: number, allowZero = false): number => {
+  const raw = env(key, "").trim()
+  if (raw === "") return fallback
+  const n = Number(raw)
+  const ok = Number.isFinite(n) && n >= 0 && (allowZero || n > 0)
+  if (!ok) {
+    logger.warn(
+      `${key}='${raw}' is not a ${allowZero ? "non-negative" : "positive"} number; using ${fallback}`,
+    )
+    return fallback
+  }
+  return n
+}
+
+/** `QUANTA_PERMISSION`, validated against the closed set with a warning. */
+const readPermissionMode = (): PermissionMode => {
+  const raw = env("QUANTA_PERMISSION", "default").trim()
+  if (isPermissionMode(raw)) return raw
+  logger.warn(
+    `QUANTA_PERMISSION='${raw}' is not a permission mode; using 'default'. ` +
+      `Accepted: ${ALL_PERMISSION_MODES.join(" | ")}`,
+  )
+  return "default"
+}
+
 export const readSessionRuntimeConfig = (): SessionRuntimeConfig => {
   // MR-01 — ONE authority for provider + boot model + "did the operator pin it"
   // (`@/llm` `resolveBootSelection`). The interactive CLI has NO `--model` flag
@@ -84,9 +131,17 @@ export const readSessionRuntimeConfig = (): SessionRuntimeConfig => {
     // whose model id was literally `" "` while `pinned` said false. Both now
     // come from the one resolution.
     modelPinnedExplicitly: boot.pinned,
-    mode: env("QUANTA_PERMISSION", "default") as PermissionMode,
+    // VALIDATED, not cast. This was `env(…) as PermissionMode`, so
+    // `QUANTA_PERMISSION=bypassPermissions` (the Claude Code spelling), `BYPASS` or any
+    // typo produced a mode no gate recognises. The gate fails CLOSED — an unknown mode
+    // falls through to `ask`, identical to `default`, so there is no escalation — but
+    // the operator's posture request evaporated with no diagnostic, and
+    // `describe().permissionMode` echoed the bogus string to the web surface and
+    // observability. `isPermissionMode` already guards the other seven operator entry
+    // points; this was the one that did not.
+    mode: readPermissionMode(),
     sandboxProfile: parseCliReviewerSandboxProfile(process.env.QUANTA_SANDBOX),
-    maxTurns: Number(env("QUANTA_MAX_TURNS", "40")),
+    maxTurns: intKnob("QUANTA_MAX_TURNS", 40),
     mcpConfigPath: resolveMcpConfigPath(process.env),
     spinnerIntervalMs: env("QUANTA_SPINNER_INTERVAL_MS", "80"),
     observeDir: observeDir(),
@@ -95,9 +150,9 @@ export const readSessionRuntimeConfig = (): SessionRuntimeConfig => {
     newSession: newSessionFlag(),
     title: titleFlag(),
     idleSuppressOn: env("QUANTA_IDLE_SUPPRESS", "1") !== "0",
-    idleMs: Number(env("QUANTA_IDLE_MS", "60000")),
-    snoozeDefaultMs: Number(env("QUANTA_SNOOZE_DEFAULT_MS", "300000")),
-    rejectLimit: Number(env("QUANTA_REJECT_LIMIT", "20")),
+    idleMs: intKnob("QUANTA_IDLE_MS", 60_000),
+    snoozeDefaultMs: intKnob("QUANTA_SNOOZE_DEFAULT_MS", 300_000),
+    rejectLimit: intKnob("QUANTA_REJECT_LIMIT", 20, /* allowZero */ true),
     // ADR-0301 — surface-side argv scan for `--playbook-trigger`. The wire
     // helper enforces env-on precedence; this is the bare CLI echo.
     playbookTriggerFlag: playbookTriggerFlag(),

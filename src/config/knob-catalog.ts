@@ -14,6 +14,8 @@
  */
 
 /** The lowest-common-denominator knob shape every registry maps onto. */
+import { ALL_PERMISSION_MODES } from "@/permission"
+
 export interface UnifiedKnob {
   readonly envKey: string
   readonly kind: "bool" | "int" | "float" | "string" | "enum" | "list"
@@ -188,6 +190,11 @@ export const searchCatalog = (
  * them (the reader still validates). A NEW closed enum should add its set here.
  */
 export const KNOB_ENUM_VALUES: ReadonlyMap<string, readonly string[]> = new Map([
+  // The startup permission posture. It is declared `kind: "enum"` and its describe
+  // names the four values, but it was absent here — so `setCatalogKnob`'s membership
+  // gate saw `allowed === undefined` and accepted anything. Derived from the closed
+  // union, never re-typed.
+  ["QUANTA_PERMISSION", [...ALL_PERMISSION_MODES]],
   ["QUANTA_LOG_LEVEL", ["debug", "info", "warn", "error"]],
   ["QUANTA_PTY_BACKEND", ["tmux", "bun", "both"]],
   ["QUANTA_PROMPT_CACHE_TTL", ["5m", "1h"]],

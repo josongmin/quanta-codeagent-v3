@@ -85,6 +85,12 @@ const READ_CALLEES: ReadonlySet<string> = new Set([
   "gateOnStrict",
   "getKnobOverride",
   "intEnv",
+  // `repl/session-runtime-config.ts`'s positive-int reader. Added when four
+  // `Number(env(k, "d"))` sites moved behind it: `env(k, d)` is `process.env[k] ?? d`
+  // and `??` does not catch `""`, so `export QUANTA_MAX_TURNS=` gave `Number("") === 0`
+  // and a zero-turn session reported as `max_turns`. The CLOSED UNIVERSE arm caught the
+  // new callee immediately and named it, which is the arm working.
+  "intKnob",
   "opts.envPort.get",
   "readCliKnob",
 ])
@@ -206,7 +212,7 @@ describe("cli-knob read-site domain ratchet (ADR-0527)", () => {
     ).toEqual([])
     // Neither set may rot into the other, and neither may be emptied.
     for (const c of READ_CALLEES) expect(NON_READ_CALLEES.has(c)).toBe(false)
-    expect(READ_CALLEES.size).toBe(8)
+    expect(READ_CALLEES.size).toBe(9)
     expect(NON_READ_CALLEES.size).toBe(2)
   })
 

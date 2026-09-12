@@ -87,7 +87,17 @@ describe("idle guards — the approval rail is independent of idle presence", ()
     expect(resolveIdleGuardLimits(runtime({ idleSuppressOn: false })).idleThresholdMs).toBe(
       Number.POSITIVE_INFINITY,
     )
-    expect(resolveIdleGuardLimits(runtime({ idleSuppressOn: true })).defaultSnoozeMs).toBe(7777)
-    expect(resolveIdleGuardLimits(runtime({ idleSuppressOn: false })).defaultSnoozeMs).toBe(300_000)
+    // `defaultSnoozeMs` is NO LONGER coupled either — it is consumed by the explicit
+    // `/snooze` gesture, not by idleness, so `QUANTA_IDLE_SUPPRESS=0` silently
+    // overriding the operator's `QUANTA_SNOOZE_DEFAULT_MS` with 300000 was the same
+    // copy-paste one field over.
+    for (const on of [true, false]) {
+      expect(resolveIdleGuardLimits(runtime({ idleSuppressOn: on })).defaultSnoozeMs).toBe(7777)
+    }
+    expect(
+      resolveIdleGuardLimits(runtime({ idleSuppressOn: false, snoozeDefaultMs: Number.NaN }))
+        .defaultSnoozeMs,
+      "a non-finite value still falls back",
+    ).toBe(300_000)
   })
 })

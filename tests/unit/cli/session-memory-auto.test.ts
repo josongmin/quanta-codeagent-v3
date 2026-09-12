@@ -116,8 +116,11 @@ describe("session-memory-auto", () => {
   })
 
   test("buildSessionMemoryAutoWires loads memory_summary.md as a separate field", async () => {
-    mkdirSync(join(tempHome, ".quanta", "memory"), { recursive: true })
-    writeFileSync(join(tempHome, ".quanta", "memory", "memory_summary.md"), "- durable hint\n")
+    // `homeDir` is the QUANTA HOME, so the consolidator layout is `<home>/memory/`.
+    // It was `<home>/.quanta/memory/` while the memory plane resolved against an OS
+    // home instead of following QUANTA_HOME.
+    mkdirSync(join(tempHome, "memory"), { recursive: true })
+    writeFileSync(join(tempHome, "memory", "memory_summary.md"), "- durable hint\n")
 
     const llm = { stream: async function* () {} } as never
     const out = await buildSessionMemoryAutoWires({
