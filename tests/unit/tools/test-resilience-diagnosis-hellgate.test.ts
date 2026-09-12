@@ -372,6 +372,27 @@ test("case (1) [amp] passes alone", () => { expect(1).toBe(1) })
     expect(child.exitCode).toBe(3)
   }, 120_000)
 
+  /**
+   * WHY THIS CASE SETS THE ENV EXPLICITLY.
+   *
+   * It used to pass no env at all and assert exit 2 plus the "no longer runs a
+   * suite of its own" line. Two defects, both measured:
+   *
+   *  1. NOT HERMETIC. `diagnose` resolves its default artifact from the SHARED
+   *     verification cache (`sharedVerificationCacheRoot`, deliberately — an
+   *     earlier audit found the script reading a path the runner never wrote).
+   *     That root is shared across every worktree, so a leftover artifact from
+   *     ANY run makes this case run a REAL diagnosis: measured exit 3 with
+   *     `children=1 observed-isolation-pass=1`, not the fail-closed path.
+   *  2. THE ASSERTED MESSAGE BELONGS TO A BRANCH THIS CALL CANNOT REACH. There
+   *     are three fail-closed branches, and only the first prints "no longer runs
+   *     a suite of its own". Reaching it needs an EMPTY artifact path, which
+   *     `failureAttemptPath()` never returns. With the shared artifact merely
+   *     absent the call lands in the second branch ("cannot read <path>"), which
+   *     is exit 2 but a different message.
+   *
+   * So both branches are now exercised on purpose, each with its own message.
+   */
   test("with no artifact the tool FAILS CLOSED rather than running a suite", () => {
     const child = Bun.spawnSync(
       ["bun", join(REPO_ROOT, "tools", "test-resilience", "cli.ts"), "diagnose"],
@@ -379,12 +400,32 @@ test("case (1) [amp] passes alone", () => { expect(1).toBe(1) })
         cwd: REPO_ROOT,
         stdout: "pipe",
         stderr: "pipe",
-        env: { ...process.env, PATH: process.env.PATH ?? "" },
+        // Empty, not absent: an absent var falls back to the SHARED cache path.
+        env: { ...process.env, PATH: process.env.PATH ?? "", QUANTA_TEST_FAILURE_ARTIFACT: "" },
       },
     )
     expect(child.exitCode).toBe(2)
     expect(child.stderr.toString()).toContain("FAIL CLOSED")
     // The old behaviour, named so a regression is unmistakable.
     expect(child.stderr.toString()).toContain("no longer runs a suite of its own")
+    // …and it must NOT have run anything.
+    expect(child.stdout.toString()).not.toContain("children=")
+  })
+
+  test("with an artifact path that does not exist the tool FAILS CLOSED naming the path", () => {
+    const absent = join(REPO_ROOT, ".cache", `absent-artifact-${process.pid}-${Date.now()}.json`)
+    const child = Bun.spawnSync(
+      ["bun", join(REPO_ROOT, "tools", "test-resilience", "cli.ts"), "diagnose"],
+      {
+        cwd: REPO_ROOT,
+        stdout: "pipe",
+        stderr: "pipe",
+        env: { ...process.env, PATH: process.env.PATH ?? "", QUANTA_TEST_FAILURE_ARTIFACT: absent },
+      },
+    )
+    expect(child.exitCode).toBe(2)
+    expect(child.stderr.toString()).toContain("FAIL CLOSED")
+    expect(child.stderr.toString()).toContain(absent)
+    expect(child.stdout.toString()).not.toContain("children=")
   })
 })
