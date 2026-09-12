@@ -239,6 +239,95 @@ describe("quarantine handoff", () => {
   })
 })
 
+/**
+ * `spawnDetachedKeeper` did not detach anything.
+ *
+ * MEASURED: `Bun.spawn` has no `detached` option, and `unref()` only stops the
+ * PARENT from waiting — parent pid 26134 pgid 26124, child pid 26152 pgid 26124.
+ * A terminal Ctrl-C signals the whole foreground process group, so the process
+ * spawned to outlive the campaign died with it, and the record then sat until
+ * its four-hour TTL instead of being cleared when the survivors exited.
+ *
+ * Ground truth from `ps`, not from the option name: this is the second time in
+ * this campaign that a promise in a symbol's NAME was the only evidence the
+ * behaviour existed.
+ */
+describe("the keeper outlives the group that spawned it", () => {
+  const pgidOf = (pid: number): string =>
+    new TextDecoder()
+      .decode(Bun.spawnSync(["ps", "-o", "pgid=", "-p", String(pid)], { stdout: "pipe" }).stdout)
+      .trim()
+
+  test("it leaves the spawner's process group and leads its own", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "keeper-detach-"))
+    const ownPgid = pgidOf(process.pid)
+    // The survivor is THIS process's group, so the verdict is `blocked` and the
+    // keeper stays up long enough to be observed.
+    const now = Date.now()
+    const path = quarantinePath(dir)
+    writeLeaseQuarantine(
+      path,
+      record({
+        repositoryId: "detach-probe/repo",
+        createdAtMs: now,
+        expiresAtMs: now + QUARANTINE_TTL_MS,
+        survivors: [
+          {
+            pgid: Number(ownPgid),
+            leaderPid: process.pid,
+            verdict: "probe",
+            detail: "this test's own group, so the keeper holds",
+          },
+        ],
+      }),
+    )
+    const keeper = Bun.spawn(
+      [
+        "bun",
+        join(import.meta.dir, "..", "..", "..", "tools", "dev", "lease-quarantine-keeper.ts"),
+        path,
+        "detach-probe/repo",
+      ],
+      { stdin: "ignore", stdout: "ignore", stderr: "ignore" },
+    )
+    keeper.unref()
+    try {
+      // POLL, not a fixed sleep: paid only until the child has run `setsid`.
+      // The bound is under the unit speed ceiling (8,529ms) so a FAILING run
+      // reports the detach it came for rather than also tripping the budget.
+      const deadline = Date.now() + 5_000
+      let keeperPgid = ""
+      while (Date.now() < deadline) {
+        keeperPgid = pgidOf(keeper.pid)
+        if (keeperPgid !== "" && keeperPgid !== ownPgid) break
+        await Bun.sleep(25)
+      }
+      expect({ left: keeperPgid !== ownPgid, own: keeperPgid === String(keeper.pid) }).toEqual({
+        left: true,
+        own: true,
+      })
+
+      // PAIRED CONTROL, and the reason the fix is needed: an ordinary
+      // `Bun.spawn` + `unref()` child stays in this process's group, so the
+      // measurement above is not just reading a value that is always different.
+      const plain = Bun.spawn(["bash", "-c", "sleep 30"], {
+        stdin: "ignore",
+        stdout: "ignore",
+        stderr: "ignore",
+      })
+      plain.unref()
+      try {
+        expect(pgidOf(plain.pid)).toBe(ownPgid)
+      } finally {
+        plain.kill()
+      }
+    } finally {
+      keeper.kill()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }, 20_000)
+})
+
 describe("the keeper", () => {
   test("holds while a group lives, releases once they are gone", () => {
     expect(keeperTick(record(), "owner/repo", 2_000, alive(4242))).toBe("hold")
