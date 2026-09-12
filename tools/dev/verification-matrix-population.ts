@@ -27,7 +27,9 @@
  * an echo.
  */
 
+import { createHash } from "node:crypto"
 import { relative } from "node:path"
+import { missingExternalTools } from "./external-toolchain"
 import { scanReachMembershipSha256 } from "./scan-reach-authority"
 import {
   loadPolicyOverrides,
@@ -36,9 +38,13 @@ import {
   selectTestPoliciesForTier,
 } from "./test-policy"
 import { discoverSuiteFiles } from "./test-shard-discovery"
-import { testToolchainSha256 } from "./test-shard-receipt"
 import { loadTierPopulationFloors, type TierPopulationFile } from "./test-tier-population"
-import { MATRIX_PLAN_FILE_FLOOR, type MatrixPopulation } from "./verification-matrix"
+import {
+  MATRIX_PLAN_FILE_FLOOR,
+  type MatrixPopulation,
+  parseVerificationMatrixPlan,
+  type VerificationMatrixPlan,
+} from "./verification-matrix"
 import { assertKnownTier } from "./verification-tier"
 
 /**
@@ -62,6 +68,32 @@ export const matrixPlanFileFloor = (
   }
   return Math.max(MATRIX_PLAN_FILE_FLOOR, committed)
 }
+
+/**
+ * The coverage-relevant capability difference between two hosts, and nothing else.
+ *
+ * # The regression this replaces
+ *
+ * This field was `testToolchainSha256()`, and making the comparison REAL (it was
+ * previously written and compared to nothing) turned it into a plan no hosted run
+ * could ever validate. That digest is over each tool's ABSOLUTE PATH plus
+ * `dev:inode size mtime` — measured, `bun` contributes
+ * `/Users/…/bun 16777232:885871694 63096576 1778626532000`. The matrix plans on
+ * one `ubuntu-latest` VM, runs workers on four more and aggregates on a sixth;
+ * inodes and mtimes cannot agree across them, so every worker and the aggregator
+ * would refuse with `capability-mismatch`. That is the same "a cache that can only
+ * miss looks exactly like one that works" defect this module's sibling commit
+ * fixed one layer up, reintroduced eighty minutes later by its own author.
+ *
+ * What actually changes coverage between hosts is WHICH TOOLS ARE ABSENT — a
+ * worker without docker skips what a planner with docker counted. Names are
+ * comparable across machines; inodes are not. Measured on this box: 27 tools
+ * fingerprinted, 9 absent.
+ */
+export const capabilityGapSha256 = (missing: readonly string[] = missingExternalTools()): string =>
+  createHash("sha256")
+    .update(JSON.stringify([...missing].sort()))
+    .digest("hex")
 
 export interface CurrentMatrixPopulation {
   readonly population: MatrixPopulation
@@ -102,7 +134,7 @@ export const currentMatrixPopulation = (input: {
       universe: discovered.length,
       membershipSha256: scanReachMembershipSha256(input.repoRoot, [...selectedIds]),
       policySha256,
-      capabilitySha256: input.capabilitySha256 ?? testToolchainSha256(),
+      capabilitySha256: input.capabilitySha256 ?? capabilityGapSha256(),
     },
     files,
     policySha256,
@@ -134,6 +166,48 @@ export const matrixPopulationProblem = (
   if (plan.policySha256 !== current.policySha256) return "policy-mismatch"
   if (plan.capabilitySha256 !== current.capabilitySha256) return "capability-mismatch"
   return undefined
+}
+
+/**
+ * Parse a plan and check it against the checkout it is about to be used on.
+ *
+ * # Why this is not in the CLI
+ *
+ * It was, and a mutation audit walked straight through it: the only guard was
+ * `expect(cli).toContain("matrixPopulationProblem(")`, so
+ * `if (problem !== undefined)` could be narrowed to
+ * `if (problem === "wrong-tier")` — ignoring four of the five verdicts — and
+ * `matrixPlanFileFloor(tier)` could be replaced with the literal `1`, both with
+ * the suite green. A string that appears in a file says nothing about what the
+ * file DOES with it.
+ *
+ * Importable, so the arms drive the real comparison instead of grepping for it.
+ */
+export const loadMatrixPlanForCheckout = (input: {
+  readonly raw: unknown
+  readonly repoRoot: string
+  readonly policyOverridesPath: string
+  /** Injected only by tests that need a fixed population. */
+  readonly currentPopulation?: MatrixPopulation
+  readonly floors?: TierPopulationFile
+}): VerificationMatrixPlan => {
+  const tier = (input.raw as { population?: { tier?: unknown } }).population?.tier
+  if (typeof tier !== "string") throw new Error("[matrix] plan has no population tier")
+  const floor =
+    input.floors === undefined ? matrixPlanFileFloor(tier) : matrixPlanFileFloor(tier, input.floors)
+  const plan = parseVerificationMatrixPlan(input.raw, floor)
+  const current =
+    input.currentPopulation ??
+    currentMatrixPopulation({
+      repoRoot: input.repoRoot,
+      tier: plan.population.tier,
+      policyOverridesPath: input.policyOverridesPath,
+    }).population
+  const problem = matrixPopulationProblem(plan.population, current)
+  if (problem !== undefined) {
+    throw new Error(describeMatrixPopulationProblem(problem, plan.population, current))
+  }
+  return plan
 }
 
 /** The refusal text, naming the field and both values. */

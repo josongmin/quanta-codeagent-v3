@@ -29,9 +29,8 @@ import {
 } from "./verification-matrix"
 import {
   currentMatrixPopulation,
-  describeMatrixPopulationProblem,
+  loadMatrixPlanForCheckout,
   matrixPlanFileFloor,
-  matrixPopulationProblem,
 } from "./verification-matrix-population"
 import { sharedVerificationCacheRoot } from "./verification-receipt"
 import { assertKnownTier } from "./verification-tier"
@@ -158,31 +157,16 @@ if (command === "plan") {
   process.exit(0)
 }
 
-/**
- * Parse a plan and check it against the checkout it is about to be used on.
- *
- * Both consumers share this, because the defect was that each checked a
- * DIFFERENT subset: `aggregate` compared the tier only, `worker` compared the
- * HEAD only, and the three population digests were compared by nobody. A plan
- * carrying three arbitrary 64-hex strings passed every check and then stood in
- * for a verdict-equality claim against the monolith.
- */
-const loadPlanForThisCheckout = (path: string): VerificationMatrixPlan => {
-  const raw = JSON.parse(readFileSync(path, "utf8")) as unknown
-  const tier = (raw as { population?: { tier?: unknown } }).population?.tier
-  if (typeof tier !== "string") throw new Error("[matrix] plan has no population tier")
-  const plan = parseVerificationMatrixPlan(raw, matrixPlanFileFloor(tier))
-  const current = currentMatrixPopulation({
+// The plan check lives in `verification-matrix-population.ts` so it can be
+// driven by tests: a mutation audit showed that the `toContain` guard over this
+// call site allowed four of the five population verdicts to be ignored and the
+// derived floor to be replaced with `1`.
+const loadPlanForThisCheckout = (path: string): VerificationMatrixPlan =>
+  loadMatrixPlanForCheckout({
+    raw: JSON.parse(readFileSync(path, "utf8")) as unknown,
     repoRoot,
-    tier: plan.population.tier,
     policyOverridesPath: policyOverrides,
   })
-  const problem = matrixPopulationProblem(plan.population, current.population)
-  if (problem !== undefined) {
-    throw new Error(describeMatrixPopulationProblem(problem, plan.population, current.population))
-  }
-  return plan
-}
 
 if (command === "aggregate") {
   const plan = loadPlanForThisCheckout(requiredArg("--plan"))

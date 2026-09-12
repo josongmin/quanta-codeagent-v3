@@ -61,6 +61,45 @@ export const executedFileSetDigest = (ids: readonly string[]): string =>
 
 const sorted = (values: Iterable<string>): readonly string[] => [...values].sort()
 
+/**
+ * The two places a shard's executed set decides something, as one function.
+ *
+ * # Why this is not an `if` in the runner
+ *
+ * It was — `if (!set.ok) throw …` in `validateCompletedShard`, and
+ * `if (!executedSet.ok) throw …` in `cacheSuccessfulShard` — and a mutation
+ * audit turned BOTH into `if (set.duplicate.length > 99)` with the suite green.
+ * The only guard was `expect(runner).toContain("executedFileSetVerdict(")` plus
+ * two message strings, and a mutant that neuters the branch leaves every one of
+ * those strings in place. `run-test-shards.ts` ends in a top-level `await
+ * main()`, so nothing in it can be called from a test; the decision has to live
+ * where a test can reach it.
+ *
+ * `undefined` means "this set is the planned set". Anything else is the message
+ * the campaign aborts with, and the two phases keep their distinct wording
+ * because they send a reader to different places: one is a worker that lied
+ * about what it ran, the other is a receipt about to record that lie.
+ */
+export const executedSetRefusal = (input: {
+  readonly verdict: ExecutedFileSetVerdict
+  readonly phase: "verdict" | "cache"
+  readonly chunkIndex: number
+  readonly totalChunks?: number
+}): string | undefined => {
+  if (input.verdict.ok) return undefined
+  if (input.phase === "cache") {
+    return `[test:shards] refusing to cache chunk ${input.chunkIndex}: ${input.verdict.reason}`
+  }
+  const chunk =
+    input.totalChunks === undefined
+      ? String(input.chunkIndex)
+      : `${input.chunkIndex}/${input.totalChunks}`
+  return (
+    `[test:shards] EXECUTED-SET MISMATCH chunk=${chunk} — the worker ` +
+    `exited 0 but did not run the planned files: ${input.verdict.reason}`
+  )
+}
+
 /** Raw spellings that collapse onto one id — one id per offending group. */
 const collapsingIds = (repoRoot: string, rawSpellings: readonly string[]): readonly string[] => {
   const spellingsById = new Map<string, Set<string>>()
