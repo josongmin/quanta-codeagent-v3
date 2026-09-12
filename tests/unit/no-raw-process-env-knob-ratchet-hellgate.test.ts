@@ -78,6 +78,16 @@ const isExempt = (path: string): boolean =>
   // flag accessors") AND that this ratchet's own burn-down note calls out as reads
   // that "legitimately STAY raw" (launch-params RESUME/STATE_PATH/OBSERVE_DIR).
   path.endsWith("src/apps/cli/internal/argv.ts") ||
+  // BUILD-TIME CONSTANTS, and the raw read is the mechanism, not a shortcut.
+  // `bun build --env='QUANTA_BUILD_*'` (tools/bin/build-cli.ts) substitutes these
+  // three `process.env.QUANTA_BUILD_*` reads with LITERALS at compile time, which is
+  // how a shipped binary knows the commit it came from. Routing them through
+  // `readCliKnob`/`runtimeConfig` would defeat the feature outright: the inliner
+  // matches `process.env.<NAME>`, so an accessor call is not substituted and the
+  // stamp is permanently absent. There is nothing for `/config set` to intercept
+  // either — in a binary these are not environment at all. Same composition-root
+  // class as the launch-flag accessors above, one phase earlier.
+  path.endsWith("src/apps/cli/build-stamp.ts") ||
   path.endsWith("src/runner/batch/report.ts") ||
   path.includes("src/apps/bench/") ||
   path.includes("src/runner/batch/eval/") ||
