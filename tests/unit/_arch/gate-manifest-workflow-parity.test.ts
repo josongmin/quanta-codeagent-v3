@@ -365,13 +365,46 @@ const matchingParen = (text: string, open: number): number => {
   return -1
 }
 
+/** Text between the next pair of backticks, and the index just past it. */
+const backtickSpan = (text: string, from: number): { inner: string; next: number } | undefined => {
+  const open = text.indexOf("`", from)
+  if (open === -1) return undefined
+  const close = text.indexOf("`", open + 1)
+  if (close === -1) return undefined
+  return { inner: text.slice(open + 1, close).trim(), next: close + 1 }
+}
+
+/**
+ * Every command SUBSTITUTION inside a segment, recursively.
+ *
+ * Three spellings, because the first version handled one. MEASURED at the commit
+ * that introduced it, with `bun install --frozen-lockfile` as the exempt half:
+ *
+ *   echo "$(bun run smuggled-gate)"      judged      (the one it closed)
+ *   echo `bun run smuggled-gate`         slipped     POSIX-classic backticks
+ *   export R=`bun run smuggled-gate`     slipped
+ *   cat <(bun run smuggled-gate)         slipped     process substitution
+ *
+ * A substitution RUNS a command whatever encloses it and whichever spelling it
+ * uses, so all three are judged on their own. `$(`, `<(` and `>(` are all
+ * paren-matched; backticks are delimited rather than nested, which is why they
+ * are scanned separately.
+ */
 const substitutions = (segment: string): readonly string[] => {
   const found: string[] = []
-  for (let at = segment.indexOf("$("); at !== -1; at = segment.indexOf("$(", at + 2)) {
-    const close = matchingParen(segment, at + 1)
-    if (close === -1) continue
-    const inner = segment.slice(at + 2, close).trim()
-    if (inner !== "") found.push(inner, ...substitutions(inner))
+  for (const opener of ["$(", "<(", ">("] as const) {
+    for (let at = segment.indexOf(opener); at !== -1; at = segment.indexOf(opener, at + 2)) {
+      const close = matchingParen(segment, at + 1)
+      if (close === -1) continue
+      const inner = segment.slice(at + 2, close).trim()
+      if (inner !== "") found.push(inner, ...substitutions(inner))
+    }
+  }
+  for (let at = 0; ; ) {
+    const span = backtickSpan(segment, at)
+    if (span === undefined) break
+    if (span.inner !== "") found.push(span.inner, ...substitutions(span.inner))
+    at = span.next
   }
   return found
 }
@@ -464,8 +497,26 @@ describe("an exempt command cannot smuggle a second one", () => {
         why: "a NESTED substitution",
         cmd: `${EXEMPT} && echo "$(dirname $(bun run smuggled-gate))"`,
       },
+      // Three more spellings of the same thing, each measured slipping past the
+      // `$()`-only version of this rule.
+      {
+        why: "POSIX-classic BACKTICKS",
+        cmd: `${EXEMPT} && echo \`bun run smuggled-gate\``,
+      },
+      {
+        why: "a backtick substitution assigned by export",
+        cmd: `${EXEMPT} && export R=\`bun run smuggled-gate\``,
+      },
+      {
+        why: "PROCESS substitution",
+        cmd: `${EXEMPT} && cat <(bun run smuggled-gate)`,
+      },
+      {
+        why: "a backtick nested inside a $( )",
+        cmd: `${EXEMPT} && echo "$(dirname \`bun run smuggled-gate\`)"`,
+      },
     ]
-    expect(smuggled.length).toBeGreaterThanOrEqual(12)
+    expect(smuggled.length).toBeGreaterThanOrEqual(16)
     for (const { why, cmd } of smuggled) {
       expect({ why, exempt: isExempt(cmd, step) }).toEqual({ why, exempt: false })
     }

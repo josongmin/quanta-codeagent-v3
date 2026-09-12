@@ -211,6 +211,15 @@ export const testEnvironmentSha256 = (
     // gated describes run at all.
     QUANTA_CAPABILITY_RECEIPT:
       env.QUANTA_CAPABILITY_RECEIPT === undefined ? undefined : "<campaign-capability-receipt>",
+    // The BINDING is placeheld too, and that is a correction. It is
+    // `sha256(head + policySha256 + toolchainSha256)`, so hashing it put the git
+    // HEAD back into the certified identity — which excludes tree and head on
+    // purpose — and re-admitted the whole 27-entry toolchain fingerprint that
+    // `toolScopeSha256` had just narrowed. What belongs here is
+    // `QUANTA_CAPABILITY_VERDICTS`: which gated describes will run, stable across
+    // commits and across an unrelated tool's mtime.
+    QUANTA_CAPABILITY_BINDING:
+      env.QUANTA_CAPABILITY_BINDING === undefined ? undefined : "<campaign-capability-binding>",
   })
   const canonical = Object.entries(effective)
     .filter((entry): entry is [string, string] => entry[1] !== undefined)

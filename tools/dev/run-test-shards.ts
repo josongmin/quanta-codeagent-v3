@@ -13,6 +13,7 @@ import {
 import { availableParallelism, freemem, loadavg, tmpdir, totalmem } from "node:os"
 import { dirname, join, relative, resolve } from "node:path"
 import { capabilityReceiptEnvForCampaign } from "./capability-probe-producer"
+import { MAX_CAPABILITY_RECEIPT_TTL_MS } from "./capability-receipt"
 import {
   type ExecutedFileSetVerdict,
   executedFileSetDigest,
@@ -1368,24 +1369,38 @@ const main = async (): Promise<void> => {
       // survivors and leave the timing journal behind — measured as a quarantine
       // file that exists on the finally path and not on this one.
       accountForSurvivors: (outcome) => {
-        if (outcome.groups.length > 0) {
-          quarantineLane({
-            path: QUARANTINE_PATH,
-            repositoryId: leaseIdentity,
-            groups: outcome.groups,
-            log: (line) => process.stderr.write(line),
-          })
+        // INDEPENDENTLY guarded. These two were one try/catch in the caller, so
+        // a quarantine write that threw — and `quarantineLane` now throws by
+        // design when the keeper script is missing — skipped the journal commit
+        // as well, losing the forensics in exactly the state that needs them.
+        try {
+          if (outcome.groups.length > 0) {
+            quarantineLane({
+              path: QUARANTINE_PATH,
+              repositoryId: leaseIdentity,
+              groups: outcome.groups,
+              log: (line) => process.stderr.write(line),
+            })
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          process.stderr.write(`[test:shards] WARN signal-path quarantine failed: ${message}\n`)
         }
         // Timing is a scheduler hint, never a verdict input, so committing it on
         // the way out is safe — and NOT committing it is what left orphan
         // journals in the shared cache for a recycled pid to strand forever.
-        const committed = openJournal?.commit()
-        process.stderr.write(
-          committed === undefined
-            ? `[test:shards] no timing journal open at ${signal}\n`
-            : `[test:shards] journal committed on ${signal}: files=${committed.files} ` +
-                `writes=${committed.storeWrites}\n`,
-        )
+        try {
+          const committed = openJournal?.commit()
+          process.stderr.write(
+            committed === undefined
+              ? `[test:shards] no timing journal open at ${signal}\n`
+              : `[test:shards] journal committed on ${signal}: files=${committed.files} ` +
+                  `writes=${committed.storeWrites}\n`,
+          )
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          process.stderr.write(`[test:shards] WARN signal-path journal commit failed: ${message}\n`)
+        }
       },
       releaseLease: () => lease?.release(),
       log: (line) => process.stderr.write(line),
@@ -1420,11 +1435,42 @@ const main = async (): Promise<void> => {
     // impossible branch is cheaper than a cast that hides it.
     const receiptTier = opts.tier
     if (receiptTier === undefined) throw new Error("[test:shards] unreachable: tier is required")
+    // Probed under a WORKER-SHAPED home, not this process's.
+    //
+    // Every worker runs with `HOME` set to a fresh `runRoot/worker-N/home`, and
+    // only the `browser` class is lent the real `~/Library`. MEASURED with the
+    // same probes under both: `debugpy/cargo/lancedb` are available at the
+    // runner's HOME and absent at a worker's. Probing here and answering for
+    // there told workers a toolchain was present that they cannot reach, which
+    // turns a skip into a red on a clean checkout.
+    //
+    // Under-claiming is the safe direction: a browser worker may have more than
+    // this says, and the cost is a `skipped-capability`, never a false green.
+    const probeHome = join(runRoot, "capability-probe-home")
+    mkdirSync(join(probeHome, ".quanta"), { recursive: true })
     const capability = await capabilityReceiptEnvForCampaign({
       repoRoot: REPO_ROOT,
       tier: receiptTier,
       head: before.head,
-      outPath: join(SHARED_CACHE_ROOT, "capability", `${opts.suite}-${receiptTier}.receipt.json`),
+      probeEnv: { ...(process.env as Record<string, string>), HOME: probeHome },
+      // The campaign's own ceiling, not the one-hour default: a receipt that
+      // expires mid-campaign sends every later worker back to skipping
+      // everything, silently and green.
+      ttlMs: MAX_CAPABILITY_RECEIPT_TTL_MS,
+      // Per PROCESS, not per suite-tier. The shared cache root is one directory
+      // for every worktree of a clone, so `${suite}-${tier}.receipt.json` is a
+      // single path two campaigns write to: the second producer's binding lands
+      // while the first campaign's workers are still reading, and every one of
+      // them then fails the binding check and goes fully blocked — silent green,
+      // everything skipped. The lease normally serialises campaigns, but an
+      // inherited lease or a stale QUANTA_VERIFICATION_LEASE_* in a shell makes
+      // it reachable, and a unique name removes the class rather than arguing
+      // about the window.
+      outPath: join(
+        SHARED_CACHE_ROOT,
+        "capability",
+        `${opts.suite}-${receiptTier}-${process.pid}.receipt.json`,
+      ),
     })
     process.stdout.write(
       `[test:shards] capability receipt tier=${opts.tier} binding=${capability.bindingSha256.slice(0, 16)} ` +
@@ -1579,12 +1625,21 @@ const main = async (): Promise<void> => {
       // BEFORE the release, because the kernel frees the port the instant this
       // process exits.
       if (drain.groups.length > 0) {
-        quarantineLane({
-          path: QUARANTINE_PATH,
-          repositoryId: leaseIdentity,
-          groups: drain.groups,
-          log: (line) => process.stderr.write(line),
-        })
+        // Guarded like the signal path. Bare, a throw here replaced the real
+        // verdict ("3 chunks red") with a quarantine error AND skipped
+        // `lease?.release()` on the next line — measured. The record is
+        // best-effort; the verdict and the release are not.
+        try {
+          quarantineLane({
+            path: QUARANTINE_PATH,
+            repositoryId: leaseIdentity,
+            groups: drain.groups,
+            log: (line) => process.stderr.write(line),
+          })
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          process.stderr.write(`[test:shards] WARN quarantine write failed: ${message}\n`)
+        }
       }
     }
     lease?.release()

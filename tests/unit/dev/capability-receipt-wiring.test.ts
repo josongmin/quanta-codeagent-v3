@@ -8,19 +8,30 @@
  * `describe.skip`, and the gated files reported PASS having executed nothing. On
  * every host. Since the artifact was introduced.
  *
- * MEASURED on this box, the same files with and without a receipt:
+ * The blast radius, counted STATICALLY, because a static count is the same on
+ * every host and a pass count is not:
  *
- *   glob-gitignore-mtime-hellgate        0 pass / 8 skip  ->  8 pass
- *   cha-multisite-hellgate               5 pass / 9 skip  -> 14 pass
- *   project-env-snapshot-wiring          0 pass / 3 skip  ->  3 pass
- *   contract/lsp-pyright                 0 pass / 1 skip  ->  3 pass
- *   contract/lsp-typescript              0 pass / 1 skip  ->  3 pass
- *   sphinx-ra-shim                       0 pass / 3 skip  ->  2 pass
- *   ast-grep {bugs,e2e,scenarios}       23 pass / 31 skip -> 28 pass
+ *   15 test files contain a `canExecute` gate
+ *   33 describe-gating call sites across them
  *
- * Thirty-three cases that ran nowhere. The files that still skip — browser,
- * sandbox, debugpy — skip because the host genuinely lacks chromium, bwrap and
- * debugpy, which is the answer the receipt exists to give.
+ * Recompute both rather than trusting them:
+ *
+ *   grep -rln canExecute tests --include='*.ts' | grep -v _helpers/ | wc -l
+ *   grep -rn  canExecute tests --include='*.ts' | grep -v _helpers/ | wc -l
+ *
+ * With no receipt every one of those 33 resolves `blocked-missing`, which the
+ * lane turns into `describe.skip`, which Bun reports as a PASSING file. The
+ * paired control below drives exactly that state.
+ *
+ * # Why there is no recovered-case total here
+ *
+ * An earlier version of this comment claimed "thirty-three cases that ran
+ * nowhere" over a per-file table. That number does not belong in a docstring: a
+ * second count of the same corpus on the same box gave 27, and I cannot
+ * attribute the difference, so I will not present either as a fact. A recovered
+ * count is a function of what the host has installed at that moment, which is
+ * the one thing the receipt exists to stop mattering. No arm below depends on
+ * it; they assert the WIRING, which is host-independent.
  *
  * # Why these arms and not a wiring grep
  *
@@ -35,17 +46,22 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import {
+  CAPABILITY_VERDICTS_ENV,
   capabilityReceiptEnvForCampaign,
   type ProbeSpawner,
   type SpawnedProbe,
 } from "../../../tools/dev/capability-probe-producer"
 import {
+  CAPABILITY_LINE_PREFIX,
   CAPABILITY_RECEIPT_BINDING_ENV,
   CAPABILITY_RECEIPT_PATH_ENV,
   CAPABILITY_REQUIRE_ENV,
   capabilityRequiredFor,
 } from "../../../tools/dev/capability-receipt"
 import {
+  __resetCapabilityReportingForTests,
+  canExecute,
+  capability,
   decideFromReceipt,
   loadCapabilityReceipt,
 } from "../../../tools/dev/capability-receipt-consumer"
@@ -87,6 +103,11 @@ const produce = async (
     tier: "pr",
     head: "a".repeat(40),
     outPath,
+    // REQUIRED, and deliberately not `process.env`: the producer's whole
+    // correctness condition is that probes run under the env the CONSUMERS get.
+    // bun does not typecheck test files, so an omitted required field here is
+    // a `{...undefined}` that silently probes under an EMPTY env.
+    probeEnv: { PATH: process.env.PATH ?? "", HOME: "/nonexistent-probe-home" },
     spawn: spawnerRefusing(missing),
     totalDeadlineMs: 10_000,
   })
@@ -100,13 +121,20 @@ describe("the capability receipt has a producer, and the consumer accepts it", (
       const out = join(dir, "receipt.json")
       const env = await produce(out, ["debugpy", "lancedb"])
 
-      // Both halves, because the binding was silently optional: the consumer
-      // compares it only when this second variable is present.
+      // All THREE, exhaustively: the binding was silently optional (the consumer
+      // compares it only when present) and the verdicts digest is what the shard
+      // cache identity is allowed to move on. An arm that named two of three
+      // passed while the third was absent.
       expect(Object.keys(env).sort()).toEqual(
-        [CAPABILITY_RECEIPT_BINDING_ENV, CAPABILITY_RECEIPT_PATH_ENV].sort(),
+        [
+          CAPABILITY_RECEIPT_BINDING_ENV,
+          CAPABILITY_RECEIPT_PATH_ENV,
+          CAPABILITY_VERDICTS_ENV,
+        ].sort(),
       )
       expect(env[CAPABILITY_RECEIPT_PATH_ENV]).toBe(out)
       expect(env[CAPABILITY_RECEIPT_BINDING_ENV]).toMatch(/^[0-9a-f]{64}$/)
+      expect(env[CAPABILITY_VERDICTS_ENV]).toMatch(/^[0-9a-f]{64}$/)
 
       const load = loadCapabilityReceipt(env, (path) => readFileSync(path, "utf8"))
       expect(load.ok).toBe(true)
@@ -153,22 +181,40 @@ describe("the capability receipt has a producer, and the consumer accepts it", (
     const digest = (extra: Record<string, string>): string =>
       testEnvironmentSha256({ ...base, ...extra }, 60_000, REPO_ROOT)
 
+    // THE PATH does not move it: a per-pid receipt filename would otherwise miss
+    // the cache on every campaign.
     const pathA = digest({ [CAPABILITY_RECEIPT_PATH_ENV]: "/tmp/a.json" })
     const pathB = digest({ [CAPABILITY_RECEIPT_PATH_ENV]: "/tmp/b.json" })
     expect(pathA).toBe(pathB)
 
-    const bindingA = digest({
-      [CAPABILITY_RECEIPT_PATH_ENV]: "/tmp/a.json",
-      [CAPABILITY_RECEIPT_BINDING_ENV]: "a".repeat(64),
-    })
-    const bindingB = digest({
-      [CAPABILITY_RECEIPT_PATH_ENV]: "/tmp/a.json",
-      [CAPABILITY_RECEIPT_BINDING_ENV]: "b".repeat(64),
-    })
-    expect(bindingA).not.toBe(bindingB)
+    // THE BINDING does not move it either, and this arm asserted the opposite
+    // until the identity was measured. The binding digests
+    // `{head, policySha256, toolchainSha256}`, and `toolchainSha256` is over each
+    // tool's absolute path plus `dev:inode size mtime` — so it moves between two
+    // checkouts of the same commit on the same box. Letting it into the identity
+    // is a cache that can only miss, which looks exactly like one that works.
+    const withBinding = (binding: string): string =>
+      digest({
+        [CAPABILITY_RECEIPT_PATH_ENV]: "/tmp/a.json",
+        [CAPABILITY_RECEIPT_BINDING_ENV]: binding,
+        [CAPABILITY_VERDICTS_ENV]: "c".repeat(64),
+      })
+    expect(withBinding("a".repeat(64))).toBe(withBinding("b".repeat(64)))
+
+    // THE VERDICTS DO. This is the one that matters: it digests which gated
+    // describes will run, so a green earned where lancedb was absent is not
+    // replayed on a host where it is present.
+    const withVerdicts = (verdicts: string): string =>
+      digest({
+        [CAPABILITY_RECEIPT_PATH_ENV]: "/tmp/a.json",
+        [CAPABILITY_RECEIPT_BINDING_ENV]: "a".repeat(64),
+        [CAPABILITY_VERDICTS_ENV]: verdicts,
+      })
+    expect(withVerdicts("c".repeat(64))).not.toBe(withVerdicts("d".repeat(64)))
+
     // ...and wiring the receipt at all changes the identity, so receipts minted
     // before the capability lanes could run are not reused for runs where they can.
-    expect(digest({})).not.toBe(pathA)
+    expect(digest({})).not.toBe(withVerdicts("c".repeat(64)))
   })
 })
 
@@ -214,5 +260,134 @@ describe("required-capability switch", () => {
     // ...and the retired singular name does nothing, so a stale export cannot
     // half-arm the corpus.
     expect(capabilityRequired("lsp-rust", { QUANTA_REQUIRE_CAPABILITY: "1" })).toBe(false)
+  })
+})
+
+/**
+ * ★ The strictness switch was unreachable from twelve of its fifteen consumers,
+ * and the receipt path reported nothing at all.
+ *
+ * MEASURED across the corpus:
+ *
+ *   15 files consume the receipt (`canExecute`)
+ *    3 of them call `requireCapability` — the three under `tests/contract/`
+ *   12 call `canExecute` and nothing else
+ *
+ * So `QUANTA_REQUIRE_CAPABILITIES` armed 3/15 of its own corpus. The other
+ * twelve selected `describe.skip` on `blocked-missing`, printed no line, and
+ * exited 0. `tests/_helpers/capability-lane.ts` had already closed this exact
+ * hole for the OTHER capability system, with a docstring explaining that
+ * `available ? describe : describe.skip` "is wrong in exactly the case that
+ * matters" — and the receipt system shipped the same shape anyway.
+ *
+ * These arms drive `canExecute` itself, which is where the requirement now
+ * lives, so no future consumer can be written that bypasses it.
+ */
+describe("a required capability cannot be skipped past", () => {
+  const REQUIRE = { QUANTA_REQUIRE_CAPABILITIES: "1" } as const
+
+  /**
+   * A receipt in which `id` TIMED OUT and `absent` was REFUSED, so one receipt
+   * carries both verdicts and the control is not reading a receipt that says
+   * yes to everything it was not asked about.
+   */
+  const timedOutReceipt = async (
+    dir: string,
+    id: string,
+    absent: string,
+  ): Promise<Record<string, string>> => {
+    const produced = await capabilityReceiptEnvForCampaign({
+      repoRoot: REPO_ROOT,
+      tier: "pr",
+      head: "b".repeat(40),
+      outPath: join(dir, "timeout.json"),
+      probeEnv: { PATH: process.env.PATH ?? "", HOME: "/nonexistent-probe-home" },
+      // Never settles, so the producer's total deadline decides — which is the
+      // only way to get a real `probe-timeout` rather than a hand-built one.
+      spawn: (argv: readonly string[]): SpawnedProbe => {
+        const line = argv.join(" ")
+        if (line.includes(id)) {
+          return {
+            exited: new Promise<number>(() => {}),
+            stdout: new Promise<string>(() => {}),
+            kill: () => {},
+          }
+        }
+        const refused = line.includes(absent)
+        return {
+          exited: Promise.resolve(refused ? 127 : 0),
+          stdout: Promise.resolve(refused ? "" : `${argv[0] ?? "fake"}\n`),
+          kill: () => {},
+        }
+      },
+      totalDeadlineMs: 700,
+    })
+    return { ...produced.env }
+  }
+
+  test("BLOCKED-MISSING under the switch is a throw, not a skip", () => {
+    // The state the tree shipped in: no receipt anywhere.
+    const load = loadCapabilityReceipt({}, (path) => readFileSync(path, "utf8"))
+    const decision = decideFromReceipt(load, "git")
+    expect(decision.verdict).toBe("blocked-missing")
+
+    expect(() => canExecute(decision, REQUIRE)).toThrow(/blocked-missing/)
+    // PAIRED CONTROL 1 — unset is the default and every ordinary local run.
+    expect(canExecute(decision, {})).toBe(false)
+    // PAIRED CONTROL 2 — the list grammar names ONE id, so a different id is
+    // still only a skip. Naming one used to make every id strict.
+    expect(canExecute(decision, { QUANTA_REQUIRE_CAPABILITIES: "lancedb" })).toBe(false)
+    expect(() => canExecute(decision, { QUANTA_REQUIRE_CAPABILITIES: "git" })).toThrow(/git/)
+  })
+
+  test("PROBE-TIMEOUT is failed-setup, and failed-setup is not absence", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "cap-timeout-"))
+    try {
+      const env = await timedOutReceipt(dir, "debugpy", "lancedb")
+      const load = loadCapabilityReceipt(env, (path) => readFileSync(path, "utf8"))
+      expect(load.ok).toBe(true)
+
+      const timedOut = decideFromReceipt(load, "debugpy")
+      // "we could not find out" is a DIFFERENT fact from "this host lacks it",
+      // and the consumer's status table is the only place that distinction
+      // survives. It used to be laundered into a skip by the lane boundary.
+      expect(timedOut.verdict).toBe("failed-setup")
+      expect(() => canExecute(timedOut, REQUIRE)).toThrow(/failed-setup/)
+
+      // PAIRED CONTROL — a capability that really is absent is
+      // `skipped-unsupported`, and that stays a skip even under the switch,
+      // because an absent tool is the answer the receipt exists to give.
+      const absent = decideFromReceipt(load, "lancedb")
+      expect(absent.verdict).toBe("skipped-unsupported")
+      expect(canExecute(absent, REQUIRE)).toBe(false)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }, 30_000)
+
+  test("every receipt decision is REPORTED, behind the prefix both systems share", async () => {
+    __resetCapabilityReportingForTests()
+    const written: string[] = []
+    const real = process.stdout.write.bind(process.stdout)
+    process.stdout.write = ((chunk: string) => {
+      written.push(String(chunk))
+      return true
+    }) as typeof process.stdout.write
+    try {
+      capability("git")
+      capability("git")
+    } finally {
+      process.stdout.write = real
+    }
+    const lines = written.filter((line) => line.startsWith(CAPABILITY_LINE_PREFIX))
+    // Exactly one: a tally that double-counts a file asking twice is not a tally.
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toContain("capability=git")
+    expect(lines[0]).toContain("verdict=")
+
+    // ...and it is the SAME prefix the lane system writes, so one grep is a
+    // complete tally instead of half of one.
+    const { CAPABILITY_LINE_PREFIX: lanePrefix } = await import("../../_helpers/capability-lane")
+    expect(lanePrefix).toBe(CAPABILITY_LINE_PREFIX)
   })
 })

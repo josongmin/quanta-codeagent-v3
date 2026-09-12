@@ -44,7 +44,11 @@
  */
 
 import { describe as describeFn } from "bun:test"
-import { CAPABILITY_REQUIRE_ENV, capabilityRequiredFor } from "../../tools/dev/capability-receipt"
+import {
+  CAPABILITY_LINE_PREFIX,
+  CAPABILITY_REQUIRE_ENV,
+  capabilityRequiredFor,
+} from "../../tools/dev/capability-receipt"
 import { CAPABILITY_GROUPS } from "../../tools/dev/test-capability-manifest"
 
 export type CapabilityOutcome =
@@ -67,8 +71,13 @@ export interface CapabilityResult {
 
 const KNOWN_GROUPS: ReadonlySet<string> = new Set(CAPABILITY_GROUPS.map((group) => group.id))
 
-/** Marker the CI aggregator greps for. Stable, one line, parseable. */
-export const CAPABILITY_LINE_PREFIX = "[capability]"
+/**
+ * Marker the CI aggregator greps for. Stable, one line, parseable.
+ *
+ * Re-exported, not defined: the receipt consumer writes the same prefix, and a
+ * second literal would let the two halves drift into two greps.
+ */
+export { CAPABILITY_LINE_PREFIX }
 
 /**
  * Record an outcome. Writes one line to stdout and returns the result so a

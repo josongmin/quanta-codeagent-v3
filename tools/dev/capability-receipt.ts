@@ -48,6 +48,26 @@ export const CAPABILITY_RECEIPT_BINDING_ENV = "QUANTA_CAPABILITY_BINDING"
 export const CAPABILITY_REQUIRE_ENV = "QUANTA_REQUIRE_CAPABILITIES"
 
 /**
+ * The marker every capability outcome is written behind, in BOTH capability
+ * systems.
+ *
+ * # Why it lives here and not next to one of its writers
+ *
+ * This repository grew two of them. `tests/_helpers/capability-lane.ts` decides
+ * the `*-real-e2e` lanes from live `Bun.which` probes and reports every outcome
+ * on a line starting with this prefix. `capability-receipt-consumer.ts` decides
+ * the receipt-gated files and, MEASURED, reported NOTHING: the only
+ * `[capability]` text in it was inside a throw. So a receipt lane that skipped
+ * every case was textually identical to one that ran them — the precise defect
+ * the lane helper's own docstring says it exists to remove, still open one
+ * system over.
+ *
+ * Owning the prefix in the module both systems already import is what makes
+ * `grep '^\[capability\]'` a complete tally rather than a tally of one half.
+ */
+export const CAPABILITY_LINE_PREFIX = "[capability]"
+
+/**
  * Is `id` REQUIRED to have actually been exercised?
  *
  * # One name, one grammar
