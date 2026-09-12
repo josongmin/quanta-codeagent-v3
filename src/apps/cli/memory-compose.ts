@@ -23,14 +23,21 @@ import { envFileSourceOf } from "@/shared/env-files"
 import { readCliKnob } from "./cli-knobs-accessor"
 
 /**
- * Build the long-term memory store from env (ADR-0413 default-ON). Unset /
- * bare-truthy `QUANTA_MEMORY` (the CLI seeds `1`) ⇒ the VOLATILE `InMemoryStore`
- * — gone at process exit (ADR-0555 makes the banner + `/memory stats` say so);
- * `=sqlite` ⇒ on-disk `SqliteStore` at `QUANTA_MEMORY_PATH` (default
- * `.quanta/memory.sqlite`, the ONLY persistent opt-in); `=off/0/false/no` ⇒ no
- * store (legacy byte-identical escape hatch). The full `QUANTA_MEMORY_*` knob
+ * Build the long-term memory store from env (ADR-0413 default-ON, ADR-0557
+ * durable-by-default). Unset / bare-truthy `QUANTA_MEMORY` (the CLI seeds `1`)
+ * ⇒ the DURABLE `SqliteStore` at `~/.quanta/memory/memory.sqlite`; an existing
+ * legacy `<cwd>/.quanta/memory.sqlite` is honored instead, once, with a
+ * migration notice. `=memory` ⇒ the explicit VOLATILE `InMemoryStore`, gone at
+ * process exit (ADR-0555 makes the banner + `/memory stats` say so);
+ * `=off/0/false/no` ⇒ no store (legacy byte-identical escape hatch);
+ * `QUANTA_MEMORY_PATH` overrides the file. The full `QUANTA_MEMORY_*` knob
  * table lives in ADR-0413 + `cli-knobs.ts`. Legacy shim — delegates to
  * `buildMemoryForSession` so the default-ON contract is centralized.
+ *
+ * NOTE — this docstring described the PRE-0557 contract (unset ⇒ volatile,
+ * `=sqlite` the only durable opt-in) for two and a half weeks after the flip.
+ * `tests/unit/memory/memory-doc-parity-hellgate.test.ts` now derives the claim
+ * from the runtime resolver so the two cannot drift again silently.
  */
 export const buildStore = (): ReturnType<typeof buildStoreCore> =>
   buildMemoryForSession(process.env).store

@@ -35,7 +35,7 @@ First-time / returning-after-months:
 - `QUANTA_PROVIDER` — `anthropic` | `openai` (기본: 키로 자동 추론)
 - `QUANTA_MODEL` (기본 provider별: `claude-sonnet-4-6` / `gpt-4o`)
 - `QUANTA_MAX_TURNS` (기본 `40`), `QUANTA_PERMISSION` (`default`|`acceptEdits`|`bypass`|`auto`)
-- `QUANTA_MEMORY` (`sqlite`|`memory`, 미설정 시 OFF) — 메모리 표는 아래 참조
+- `QUANTA_MEMORY` (미설정 시 durable sqlite; `memory`=휘발, `off`/`0`=비활성) — 메모리 표는 아래 참조
 - `QUANTA_PLAN=1` / `--plan` (plan mode), `QUANTA_METRICS=1` (메트릭)
 - `QUANTA_STATE_PATH` / `--state`, `QUANTA_RESUME` / `--resume` (state 영속·resume, 기본 OFF)
 - `QUANTA_MCP_CONFIG` — MCP 서버 설정 JSON 파일 경로 (미설정 시 OFF)
@@ -50,13 +50,16 @@ First-time / returning-after-months:
 ADR-0008). store가 켜지면 종료된 세션을 LLM으로 distill해 구조화 지식으로
 적재하고, 다음 세션 시작 시 임베딩 기반 하이브리드 회상으로 관련 메모리를
 주입한다. 중복은 LLM 중재로 merge/supersede되고 tier별 정원으로 eviction된다.
-**전부 기본 OFF** — `QUANTA_MEMORY` 미설정 시 루프는 byte-for-byte 불변이고,
-임베더/LLM 부재 시 lexical 회상으로 graceful degrade한다. 신규 npm 의존성 0.
+**store는 기본 ON** (ADR-0557) — `QUANTA_MEMORY` 미설정 시 durable sqlite가
+`~/.quanta/memory/memory.sqlite`에 열린다. 0557 이전 기본값은 휘발 in-memory였고
+영속되는 게 없었다. 끄려면 `QUANTA_MEMORY=off`(또는 `0`/`false`/`no`) — 그때
+루프는 byte-for-byte 불변이다. 임베더/LLM 부재 시 lexical 회상으로 graceful
+degrade한다. 신규 npm 의존성 0.
 
 | 환경변수 | 값 / 기본 | 효과 |
 |---|---|---|
-| `QUANTA_MEMORY` | `sqlite` \| `memory` \| 미설정(OFF) | 영속 store: 온디스크 sqlite / 휘발 in-memory / 없음 |
-| `QUANTA_MEMORY_PATH` | 기본 `.quanta/memory.sqlite` | sqlite store 파일 경로 |
+| `QUANTA_MEMORY` | 미설정·truthy=`sqlite`(기본) \| `memory` \| `off`/`0`/`false`/`no` | 영속 store: 온디스크 sqlite(기본) / 휘발 in-memory / 없음 |
+| `QUANTA_MEMORY_PATH` | 기본 `~/.quanta/memory/memory.sqlite` | sqlite store 파일 경로. 레거시 `<cwd>/.quanta/memory.sqlite`가 이미 있으면 그 파일을 계속 쓰고 마이그레이션 안내를 1회 출력 |
 | `QUANTA_MEMORY_EMBED` | `off` \| 기타(기본 ON) | `off`면 임베딩 비활성(lexical만). store + `OPENAI_API_KEY` 있을 때만 ON |
 | `QUANTA_MEMORY_EMBED_MODEL` | 기본 `text-embedding-3-small` | 임베딩 모델 override |
 | `QUANTA_MEMORY_RECALL_LIMIT` | 정수, 기본 5 | 회상 컨텍스트에 접는 최대 엔트리 수 |
