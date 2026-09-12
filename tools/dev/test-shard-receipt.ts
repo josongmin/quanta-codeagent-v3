@@ -426,6 +426,21 @@ export const loadSuccessfulTestShardReceipt = (input: {
   readonly expected: TestShardCacheIdentity
   /** REQUIRED: the timeout THIS campaign will use, for compatibility proof. */
   readonly expectedTestTimeoutMs: number
+  /**
+   * The ids the CALLER is asking about, repo-relative.
+   *
+   * An adversarial audit proved the reuse path was still count-based. v4 put the
+   * executed ids in the receipt and checked them against `shardFileCount` and
+   * against a digest of THE SAME ARRAY IN THE SAME FILE — both self-consistent
+   * by construction. Nothing compared them to the chunk being asked about, and
+   * `shardFilesSha256` hashes file CONTENT, not the id set. Measured: a receipt
+   * whose ids were swapped, whose digest was recomputed and which was re-signed
+   * returned `hit` for a completely different chunk.
+   *
+   * Required, not optional: a caller that omits it is exactly the caller that
+   * reintroduces the hole.
+   */
+  readonly expectedFileIds: readonly string[]
   readonly nowMs?: number
 }): TestShardCacheLookup => {
   let parsed: unknown
@@ -462,6 +477,12 @@ export const loadSuccessfulTestShardReceipt = (input: {
   // other set's digest is how an exact-set claim gets forged after the fact.
   if (receipt.executedDigestSha256 !== executedFileSetDigest(receipt.executedFileIds)) {
     return { kind: "miss", reason: "executed-digest-mismatch" }
+  }
+  // ...and the list must be the CALLER's set. Everything above compares the
+  // receipt to itself; this is the only check that connects it to the chunk
+  // whose green is about to be reused.
+  if (receipt.executedDigestSha256 !== executedFileSetDigest(input.expectedFileIds)) {
+    return { kind: "miss", reason: "executed-set-not-this-chunk" }
   }
   const junitProblem = junitShapeMiss(receipt)
   if (junitProblem !== undefined) return { kind: "miss", reason: junitProblem }

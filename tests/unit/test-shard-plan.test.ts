@@ -710,10 +710,12 @@ describe("same-INPUTS successful shard cache", () => {
       producerReceiptsSha256: "3".repeat(64),
     }
     const nowMs = 1_800_000_000_000
+    // The chunk the caller planned; every lookup below asks about THIS set.
+    const executed = ["tests/unit/a.test.ts"]
     writeSuccessfulTestShardReceiptAtomic({
       path: receiptPath,
       identity,
-      executedFileIds: ["tests/unit/a.test.ts"],
+      executedFileIds: executed,
       scanReachRecords: [{ id: "guard", walked: 4, matched: 2 }],
       testTimeoutMs: 120_000,
       timingObservations: [],
@@ -726,6 +728,7 @@ describe("same-INPUTS successful shard cache", () => {
         path: receiptPath,
         expected: identity,
         expectedTestTimeoutMs: 120_000,
+        expectedFileIds: executed,
         nowMs,
       }).kind,
     ).toBe("hit")
@@ -751,6 +754,7 @@ describe("same-INPUTS successful shard cache", () => {
           path: receiptPath,
           expected,
           expectedTestTimeoutMs: 120_000,
+          expectedFileIds: executed,
           nowMs,
         }),
       ).toEqual({
@@ -764,6 +768,7 @@ describe("same-INPUTS successful shard cache", () => {
         path: receiptPath,
         expectedTestTimeoutMs: 120_000,
         expected: { ...identity, intraParallel: 8 },
+        expectedFileIds: executed,
         nowMs,
       }),
     ).toEqual({ kind: "miss", reason: "input-mismatch" })
@@ -776,6 +781,7 @@ describe("same-INPUTS successful shard cache", () => {
         path: receiptPath,
         expectedTestTimeoutMs: 120_000,
         expected: { ...identity, shardIndex: 2 },
+        expectedFileIds: executed,
         nowMs,
       }).kind,
     ).toBe("hit")
@@ -784,6 +790,7 @@ describe("same-INPUTS successful shard cache", () => {
         path: receiptPath,
         expectedTestTimeoutMs: 120_000,
         expected: identity,
+        expectedFileIds: executed,
         nowMs: nowMs + TEST_SHARD_CACHE_TTL_MS,
       }),
     ).toEqual({ kind: "miss", reason: "expired" })
@@ -798,6 +805,7 @@ describe("same-INPUTS successful shard cache", () => {
       path: receiptPath,
       expected: identity,
       expectedTestTimeoutMs: 120_000,
+      expectedFileIds: executed,
       nowMs,
     })
     expect(hit.kind === "hit" ? hit.receipt.scanReachRecords : []).toEqual([
@@ -833,6 +841,7 @@ describe("same-INPUTS successful shard cache", () => {
         path: receiptPath,
         expected: identity,
         expectedTestTimeoutMs: 120_000,
+        expectedFileIds: ["tests/unit/a.test.ts"],
       }),
     ).toEqual({
       kind: "miss",
@@ -867,6 +876,7 @@ describe("same-INPUTS successful shard cache", () => {
         path: receiptPath,
         expected: identity,
         expectedTestTimeoutMs: 120_000,
+        expectedFileIds: ["tests/unit/a.test.ts"],
       }),
     ).toEqual({
       kind: "miss",

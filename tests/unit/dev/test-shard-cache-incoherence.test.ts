@@ -167,6 +167,9 @@ const observation = {
 
 const NOW = 1_800_000_000_000
 
+/** The one-file chunk `decide` files a green for. */
+const EXECUTED = ["tests/unit/a.test.ts"] as const
+
 /** Write a green receipt for `written`, then ask for `expected`. */
 const decide = (
   dir: string,
@@ -178,7 +181,7 @@ const decide = (
   writeSuccessfulTestShardReceiptAtomic({
     path,
     identity: written,
-    executedFileIds: ["tests/unit/a.test.ts"],
+    executedFileIds: [...EXECUTED],
     scanReachRecords: [],
     testTimeoutMs: timeouts.wrote ?? BASELINE_TIMEOUT_MS,
     timingObservations: [observation],
@@ -190,6 +193,7 @@ const decide = (
     path,
     expected,
     expectedTestTimeoutMs: timeouts.expects ?? BASELINE_TIMEOUT_MS,
+    expectedFileIds: [...EXECUTED],
     nowMs: NOW + 1,
   })
   return lookup.kind === "hit" ? "hit" : `miss:${lookup.reason}`

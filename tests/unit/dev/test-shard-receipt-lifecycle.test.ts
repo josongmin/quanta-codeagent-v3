@@ -83,6 +83,9 @@ const observation = {
   loadPerCore: 0,
 }
 
+/** The one-file chunk `writeReceipt` files a green for. */
+const EXECUTED = ["tests/unit/a.test.ts"] as const
+
 const writeReceipt = (
   path: string,
   createdAtMs: number,
@@ -91,7 +94,7 @@ const writeReceipt = (
   writeSuccessfulTestShardReceiptAtomic({
     path,
     identity: identity(over),
-    executedFileIds: ["tests/unit/a.test.ts"],
+    executedFileIds: [...EXECUTED],
     scanReachRecords: [],
     testTimeoutMs: 120_000,
     timingObservations: [observation],
@@ -202,6 +205,7 @@ describe("a green receipt and its timings cannot disagree", () => {
       path,
       expected: identity(),
       expectedTestTimeoutMs: 120_000,
+      expectedFileIds: [...EXECUTED],
       nowMs: NOW + 1,
     })
 
@@ -215,6 +219,7 @@ describe("a green receipt and its timings cannot disagree", () => {
         path,
         expected: identity(),
         expectedTestTimeoutMs: 120_000,
+        expectedFileIds: [...EXECUTED],
         nowMs: NOW + 1,
       }).kind,
     ).toBe("hit")
@@ -229,6 +234,7 @@ describe("a green receipt and its timings cannot disagree", () => {
       path,
       expected: identity(),
       expectedTestTimeoutMs: 120_000,
+      expectedFileIds: [...EXECUTED],
       nowMs: NOW + 1,
     })
 

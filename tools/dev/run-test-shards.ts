@@ -950,6 +950,9 @@ const executeChunks = async (input: {
       path: cached.cachePath,
       expected: cached.identity,
       expectedTestTimeoutMs: input.testTimeoutMs,
+      // The ids THIS chunk is asking about. Without them the reuse path
+      // compared the receipt only to itself.
+      expectedFileIds: cached.chunk.files.map((file) => relative(REPO_ROOT, file)),
     })
     if (lookup.kind === "miss") {
       process.stdout.write(

@@ -54,6 +54,9 @@ const identity = (over: Partial<TestShardCacheIdentity> = {}): TestShardCacheIde
   ...over,
 })
 
+/** The chunk every helper in this file is asking about. */
+const PLANNED = ["tests/unit/a.test.ts", "tests/unit/b.test.ts"] as const
+
 const roundTrip = (
   written: TestShardCacheIdentity,
   expected: TestShardCacheIdentity,
@@ -64,13 +67,18 @@ const roundTrip = (
     writeSuccessfulTestShardReceiptAtomic({
       path,
       identity: written,
-      executedFileIds: ["tests/unit/a.test.ts", "tests/unit/b.test.ts"],
+      executedFileIds: [...PLANNED],
       scanReachRecords: [],
       testTimeoutMs: 120_000,
       timingObservations: [],
       scopeReason: "test",
     })
-    return loadSuccessfulTestShardReceipt({ path, expected, expectedTestTimeoutMs: 120_000 })
+    return loadSuccessfulTestShardReceipt({
+      path,
+      expected,
+      expectedTestTimeoutMs: 120_000,
+      expectedFileIds: [...PLANNED],
+    })
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -221,6 +229,7 @@ describe("shard cache identity — what may and may not invalidate a receipt", (
           path,
           expected: identity(),
           expectedTestTimeoutMs: 120_000,
+          expectedFileIds: [...PLANNED],
           nowMs: 2,
         }).kind,
       ).toBe("miss")
@@ -258,6 +267,7 @@ describe("shard cache identity — what may and may not invalidate a receipt", (
         path,
         expected: identity({ treeSha256: "not-a-sha" as string }),
         expectedTestTimeoutMs: 120_000,
+        expectedFileIds: [...PLANNED],
       })
 
       expect(lookup.kind).toBe("miss")
@@ -277,6 +287,7 @@ describe("shard cache identity — what may and may not invalidate a receipt", (
           path,
           expected: identity(),
           expectedTestTimeoutMs: 120_000,
+          expectedFileIds: [...PLANNED],
         }).kind,
       ).toBe("miss")
     } finally {
@@ -305,9 +316,17 @@ describe("cache hit restores the executed SET", () => {
    * existed and these tests must not claim credit for it.
    *
    * `remint` edits the JSON and RE-SIGNS it, which is what a writer with a
-   * regression produces — a receipt that is perfectly self-consistent and
-   * describes an execution that did not happen. Only the executed-set checks
-   * see that one, so it is the shape worth pinning.
+   * regression produces — a receipt that describes an execution that did not
+   * happen. Only the executed-set checks see that one, so it is the shape worth
+   * pinning.
+   *
+   * A re-signed receipt has TWO degrees of freedom, and an audit caught this
+   * helper conflating them: overriding `executedFileIds` alone leaves the
+   * digest stale, so the loader's SELF-consistency check fires and the arm
+   * never reaches the check that compares the receipt to the caller's chunk.
+   * `remint` therefore re-derives the digest from the ids it just wrote — the
+   * receipt really is internally consistent — and a caller that wants the
+   * stale-digest shape passes `executedDigestSha256` explicitly.
    */
   const resign = (row: Record<string, unknown>): Record<string, unknown> => {
     const { receiptSha256: _drop, ...body } = row
@@ -334,13 +353,27 @@ describe("cache hit restores the executed SET", () => {
         ...(JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>),
         ...overrides,
       }
+      if (
+        mode === "remint" &&
+        Array.isArray(row.executedFileIds) &&
+        overrides.executedDigestSha256 === undefined
+      ) {
+        row.executedDigestSha256 = executedFileSetDigest(row.executedFileIds as string[])
+      }
       writeFileSync(path, JSON.stringify(mode === "remint" ? resign(row) : row))
     }
     return path
   }
 
   const load = (path: string) =>
-    loadSuccessfulTestShardReceipt({ path, expected: identity(), expectedTestTimeoutMs: 120_000 })
+    loadSuccessfulTestShardReceipt({
+      path,
+      expected: identity(),
+      expectedTestTimeoutMs: 120_000,
+      // The chunk the CALLER planned. Every arm below tampers with what the
+      // receipt says was executed; this is the fixed thing it is compared to.
+      expectedFileIds: [...FILES],
+    })
 
   test("a hit carries the ids and a digest that matches them", () => {
     const dir = mkdtempSync(join(tmpdir(), "shard-cache-set-"))
@@ -381,15 +414,79 @@ describe("cache hit restores the executed SET", () => {
 
   test("SUBSTITUTION at the same count is a MISS, where v3 was a hit", () => {
     // The whole defect, at the cache layer: two ids, two ids, neither planned.
+    //
+    // MEASURED before the caller check existed: this exact receipt — ids
+    // swapped, digest recomputed over the swapped ids, re-signed, so every
+    // check the loader had compared the receipt only to itself — returned
+    // `hit` and the runner skipped the chunk.
     const dir = mkdtempSync(join(tmpdir(), "shard-cache-sub-"))
     try {
       const swapped = ["tests/unit/x.test.ts", "tests/unit/y.test.ts"]
       expect(swapped.length).toBe(FILES.length) // a count check sees no problem
-      const miss = load(write(dir, { executedFileIds: swapped }))
-      // The ids no longer agree with the digest the receipt was signed with.
+      const path = write(dir, { executedFileIds: swapped })
+      // The receipt is INTERNALLY sound: count, digest and signature all agree.
+      const row = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>
+      expect(row.executedFileIds).toEqual(swapped)
+      expect(row.executedDigestSha256).toBe(executedFileSetDigest(swapped))
+      const miss = load(path)
+      // ...and it still misses, because it is not THIS chunk's green.
+      expect(miss.kind).toBe("miss")
+      if (miss.kind !== "miss") throw new Error("unreachable")
+      expect(miss.reason).toBe("executed-set-not-this-chunk")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("a HALF-fixed writer — ids swapped, digest left stale — is the other miss", () => {
+    // Distinct from the arm above and from `tamper`: the signature is valid,
+    // so the integrity layer is silent, and the two executed-set checks are
+    // reached in order. Naming both reasons is what stops either check from
+    // being deleted while the suite stays green.
+    const dir = mkdtempSync(join(tmpdir(), "shard-cache-sub-stale-"))
+    try {
+      const swapped = ["tests/unit/x.test.ts", "tests/unit/y.test.ts"]
+      const path = write(dir, {
+        executedFileIds: swapped,
+        executedDigestSha256: executedFileSetDigest([...FILES]),
+      })
+      const row = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>
+      expect(row.executedDigestSha256).not.toBe(executedFileSetDigest(swapped))
+      const miss = load(path)
       expect(miss.kind).toBe("miss")
       if (miss.kind !== "miss") throw new Error("unreachable")
       expect(miss.reason).toBe("executed-digest-mismatch")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("the caller's own chunk is what a hit is checked against, both ways", () => {
+    // PAIRED CONTROL for the check above: an honest receipt misses when the
+    // CALLER asks about a different chunk, so `executed-set-not-this-chunk` is
+    // not a property of tampered receipts — it is a comparison.
+    const dir = mkdtempSync(join(tmpdir(), "shard-cache-caller-"))
+    try {
+      const path = write(dir)
+      expect(load(path).kind).toBe("hit")
+      const other = loadSuccessfulTestShardReceipt({
+        path,
+        expected: identity(),
+        expectedTestTimeoutMs: 120_000,
+        expectedFileIds: ["tests/unit/a.test.ts", "tests/unit/c.test.ts"],
+      })
+      expect(other.kind).toBe("miss")
+      if (other.kind !== "miss") throw new Error("unreachable")
+      expect(other.reason).toBe("executed-set-not-this-chunk")
+      // ORDER, not just membership: the digest is over the set as recorded, and
+      // a reordered ask must not be treated as a different chunk.
+      const reordered = loadSuccessfulTestShardReceipt({
+        path,
+        expected: identity(),
+        expectedTestTimeoutMs: 120_000,
+        expectedFileIds: [...FILES].reverse(),
+      })
+      expect(reordered.kind).toBe("hit")
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
