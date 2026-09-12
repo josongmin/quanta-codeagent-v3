@@ -216,3 +216,73 @@ silent-failure ratchet 4 fail은 독립 재현됐다.
 교정 장치로 이번 보완에서 넣은 것: 뮤테이션을 돌리기 전에 **뮤턴트가 실제로 적용됐는지
 확인**한다. 이번에 무효 뮤테이션이 6건 나왔고(문법 오류, 들여쓰기 불일치, biome 재포맷),
 그중 몇은 "생존"이나 "red"로 잘못 읽힐 수 있었다. `0 pass 1 fail`은 어설션 발화가 아니다.
+
+---
+
+## E. 보완 작업(remediation) 자체의 거짓 주장 — 3라운드 적대 검증 결과
+
+§A–D는 원래 23커밋에 대한 것이다. 그 보완으로 landed한 커밋들도 같은 방식으로 검증했고,
+**같은 두 곳에서 같은 종류로 틀렸다**: 회귀 프로브의 결과 판정, 그리고 전수 열거.
+
+### E-1 `dd1c2c1af` — "`--tool-profile=full` … all exit 0, unchanged" (FALSE)
+
+실측:
+
+```
+$ bun run src/apps/cli/index.ts --tool-profile=full
+[error] --tool-profile must be one of write|ask|minimal|code-only, got 'full'
+exit 64
+```
+
+`full`은 유효한 profile이 아니다(`agent-args.ts`의 선존 validator). "unchanged"는
+참이지만 "exit 0"은 거짓이고, **회귀 프로브가 실패하는 명령을 통과로 기록했다**.
+= `=value` 형태가 성공 경로에서 한 번도 실행되지 않았다는 뜻이다. **직접 확인.**
+
+### E-2 `dd1c2c1af` — "The only forms that change are slash commands typed WITHOUT the slash" (INCOMPLETE)
+
+두 형태가 더 바뀐다:
+
+1. 인용 없는 `--word`를 포함한 one-shot 프롬프트 — `quanta explain the --verbose flag`가
+   exit 64. 이전엔 `"explain the flag"`로 조용히 변형돼 청구되는 호출이 나갔다. 개선이지만
+   **문서화된 `quanta [PROMPT]` 형태가 영향을 받았고** 그걸 적지 않았다.
+2. `--`로 시작하는 valued-flag 값 전부 — 이게 `400d31171`에서 고친 회귀다.
+
+**직접 확인.**
+
+### E-3 `e8c39f6b7` — "The six default-ON wrappers are in [6 files]" (INCOMPLETE)
+
+`parseEnvFlag(…, true)`를 포함한 파일은 **11개**다(정의/선언 파일 포함). 내가 센 것은
+"본문이 `parseEnvFlag(x, true)`인 wrapper 정의" 6개였고, 문장은 그걸 구분하지 않았다.
+누락된 것 중 하나가 `runner/assemble/memory-factory.ts` — **같은 세션 H-1의 주제 파일**이다.
+그리고 sweep이 `readBool(…, true)`를 제외했는데, `env-flag.ts`가 두 형태를 **동등하다고
+문서화**한다. 즉 "정확히 이 둘뿐"이라는 결론은 자기 SSOT보다 좁은 범위에 의존했다.
+독립 어딧이 그 범위가 놓치는 hit 하나를 추적했고 결함이 아님을 확인했다 — **결론은
+살아남지만 열거는 아니다.** **직접 확인.**
+
+### E-4 `eda90cd7b` 뮤테이션 표 — "read corpus starved → 0 pass 1 fail" (DRIFTED)
+
+실측 **5 pass 2 fail**(`reads.size > 400` 바닥과 stale-EXCEPTIONS 테스트가 둘 다 발화).
+방향은 맞고 숫자가 틀렸다 — 7-테스트 파일에서 `0 pass 1 fail`은 불가능하다. 같은 표의
+`no-raw-env` 행("the matcher broken → 2 pass 0 fail → now 43/43 held")은 **사이트가
+사라진 뮤테이션**을 기록한 것이라 모호하다. 실제 단일 `RAW` 소스를 깨면 **1 pass 1 fail**이고
+paired control은 진짜로 load-bearing이다.
+
+### E-5 `ff2363436` — "matching commits (control) — asserts the verdict, no STALE"
+
+순수 함수에 대해서만 참이었다. 실제 표면(`fc build`/`fc diff`)으로는 도달 불가였고,
+`bc46375b1`에서 설계 자체를 걷어냈다(§A-9 후속).
+
+---
+
+## F. 반복된 메타 결함 — 무효 뮤테이션
+
+이 세션에서 **무효 뮤턴트가 6건** 나왔다. 원인은 문법 오류(3), 들여쓰기 불일치(1),
+biome 재포맷으로 앵커 소실(2)이다. 그중 몇은 `0 pass 1 fail`로 나타나 "발화"로,
+몇은 무변경이라 "생존"으로 오독될 수 있었다.
+
+교정 규칙: **뮤테이션을 실행하기 전에 뮤턴트가 적용됐는지 확인한다.** 치환 후 문자열
+존재를 assert하거나 diff를 출력한다. `0 pass 1 fail`은 어설션 발화가 아니라 로드 실패다.
+
+그리고 가드 하나는 **첫 시도가 한쪽 방향만 봤다.** POSIX `--` 불변식을 "플래그 모양
+토큰이 프롬프트에 안 닿아야 한다"로만 썼더니, 마커를 지우면 **닿는 토큰이 줄어들어서**
+안 잡혔다. 도착을 어설션해야 했다. 한쪽 방향 어설션은 반대 방향 회귀에 무력하다.
