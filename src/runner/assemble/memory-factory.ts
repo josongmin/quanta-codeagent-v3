@@ -47,6 +47,7 @@
  *     (removed with ADR-0556).
  */
 
+import { homedir } from "node:os"
 import type { AgentConfig } from "@/agent"
 import { InMemoryStore, type PersistentStorePort } from "@/memory"
 import { resolveStorePath, type StorePathResolution } from "@/memory/store-path"
@@ -161,6 +162,17 @@ const resolveSessionStorePath = (
   // `quantaHomeDirFrom({})` is `~/.quanta`, so the default path is unchanged.
   return resolveStorePath({
     homeDir: override?.homeDir ?? quantaHomeDirFrom(env),
+    // The PRE-RELOCATION probe, ONLY when the home came from the env.
+    //
+    // Without it, an operator who set QUANTA_HOME or QUANTA_CONFIG_DIR and has an
+    // existing store at `<os-home>/.quanta/memory/` silently gets a fresh empty one
+    // when the memory plane started following the home.
+    //
+    // But an EXPLICIT `override.homeDir` is a caller that knows its own root — a test
+    // injecting a scratch dir, a surface with its own home. There is no relocation to
+    // compensate for there, so the probe is skipped. Injected so `resolveStorePath`
+    // stays pure. The probe only ever produces a NOTICE; it never redirects the path.
+    ...(override?.homeDir === undefined ? { osHomeDir: homedir() } : {}),
     cwd: override?.cwd ?? process.cwd(),
     explicitPath: override?.storePath ?? env.QUANTA_MEMORY_PATH,
   })

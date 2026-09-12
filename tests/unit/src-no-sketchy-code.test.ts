@@ -57,6 +57,8 @@ const RULES: readonly Rule[] = [
     why: "All env reads must go through `runtimeConfig()` (src/shared/runtime-config.ts) so garbage values are validated + logged at startup.",
     allowlist: {
       "shared/runtime-config.ts": "the single legitimate process.env owner — validates + freezes",
+      "apps/cli/build-stamp.ts":
+        "BUILD-TIME CONSTANTS, and the raw read IS the mechanism. `bun build --env='QUANTA_BUILD_*'` (tools/bin/build-cli.ts) substitutes these three `process.env.QUANTA_BUILD_*` reads with LITERALS at compile time, which is how a shipped binary knows the commit it came from. The inliner matches `process.env.<NAME>` textually, so routing them through `runtimeConfig()` leaves the accessor unsubstituted and the stamp permanently absent — the SSOT would defeat the feature. In a compiled binary these are not environment at all. THIRD exemption for this one file: `no-raw-process-env-knob-ratchet` and `gate-vocabulary-ratchet` already grant it for the same reason, and this scanner was missed BOTH times, so the file sat red here while the other two were green. See the three-way consistency pin below.",
       "apps/cli/dotenv.ts":
         "user-facing dotenv loader writes into process.env BEFORE any module reads runtimeConfig()",
       "apps/cli/index.ts": "CLI bootstraps the same loader before module-level reads",

@@ -39,6 +39,10 @@ const RAW = /homedir\(\)\s*,\s*"\.quanta"/
 const ALLOWLIST: ReadonlyMap<string, string> = new Map([
   ["src/shared/quanta-home.ts", "THE resolver — the one place the root literal lives"],
   [
+    "src/memory/store-path.ts",
+    "`preRelocationHomeStorePath` — the OS-home-scoped path is the POINT: it is where the memory store lived before the plane followed QUANTA_HOME, probed so a relocated home does not silently orphan an existing store. Notice-only, never a redirect. This entry exists because the widened detector correctly found it.",
+  ],
+  [
     "src/runner/batch/corpus/paths.ts",
     "bench: honors the unified root (CONFIG_DIR ?? HOME) but keeps its OWN macOS Library / ~/.quanta default (NOT quantaHomeDir's ~/.quanta) so /tmp-reaping persistence holds",
   ],
@@ -79,6 +83,75 @@ const scanRawHomeSites = (srcRoot: string): string[] => {
   return hits
 }
 
+const calleeName = (n: ts.CallExpression): string => {
+  if (ts.isPropertyAccessExpression(n.expression)) return n.expression.name.text
+  if (ts.isIdentifier(n.expression)) return n.expression.text
+  return ""
+}
+
+/** The root literal, or a path that STARTS at it (`.quanta/memory`, `.quanta/x`). */
+const isRootLiteral = (t: string): boolean => t === ".quanta" || t.startsWith(".quanta/")
+
+/** File-local `const X = ".quanta…"` bindings, so `join(home, SUB)` resolves.
+ *
+ *  This is the exact shape the ORIGINAL defect had:
+ *  `const QUANTA_MEMORY_SUBDIR = ".quanta/memory"` joined onto a parameter NAMED
+ *  `homedir` that shadowed the import. Measured against the pre-fix `paths.ts`: the
+ *  first version of this detector matched ZERO — both because the fast-reject tested
+ *  for `".quanta"` with a closing quote and because the predicate required the second
+ *  argument to BE `".quanta"`. The commit that added it claimed to close the
+ *  const-hoisted evasion and closed only the shape it injected as a mutant. */
+const rootAliases = (sf: ts.SourceFile): Set<string> => {
+  const out = new Set<string>()
+  const visit = (n: ts.Node): void => {
+    if (
+      ts.isVariableDeclaration(n) &&
+      ts.isIdentifier(n.name) &&
+      n.initializer !== undefined &&
+      ts.isStringLiteralLike(n.initializer) &&
+      isRootLiteral(n.initializer.text)
+    ) {
+      out.add(n.name.text)
+    }
+    ts.forEachChild(n, visit)
+  }
+  ts.forEachChild(sf, visit)
+  return out
+}
+
+/** `join|resolve(<something mentioning "home">, <the root literal or an alias>, …)`. */
+const isHomeJoinedRoot = (n: ts.Node, sf: ts.SourceFile, aliases: ReadonlySet<string>): boolean => {
+  if (!ts.isCallExpression(n) || n.arguments.length < 2) return false
+  const name = calleeName(n)
+  if (name !== "join" && name !== "resolve") return false
+  const second = n.arguments[1] as ts.Expression
+  const isRoot = ts.isStringLiteralLike(second)
+    ? isRootLiteral(second.text)
+    : ts.isIdentifier(second) && aliases.has(second.text)
+  if (!isRoot) return false
+  return /home/i.test((n.arguments[0] as ts.Expression).getText(sf))
+}
+
+const homeJoinedRootSites = (): string[] => {
+  const out: string[] = []
+  for (const file of walk(SRC)) {
+    const text = readFileSync(file, "utf8")
+    // No closing quote: `".quanta/memory"` must reach the parser too.
+    if (!text.includes('".quanta')) continue
+    const rel = `src/${file.slice(SRC.length + 1)}`
+    const sf = ts.createSourceFile(rel, text, ts.ScriptTarget.ESNext, true, ts.ScriptKind.TS)
+    const aliases = rootAliases(sf)
+    const visit = (n: ts.Node): void => {
+      if (isHomeJoinedRoot(n, sf, aliases)) {
+        out.push(`${rel}:${sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1}`)
+      }
+      ts.forEachChild(n, visit)
+    }
+    ts.forEachChild(sf, visit)
+  }
+  return out.sort()
+}
+
 describe("quanta home root SSOT ratchet", () => {
   test("ANTI-VACUITY: the walk reaches a real, populated `src/` tree", () => {
     // An empty walk and a clean tree produce the same verdict here: no
@@ -103,9 +176,15 @@ describe("quanta home root SSOT ratchet", () => {
     expect(offenders).toEqual([])
   })
 
-  test("allowlist has no dead entries (every allowlisted file still has a raw site)", () => {
-    const sites = new Set(scanRawHomeSites(SRC))
-    const dead = [...ALLOWLIST.keys()].filter((f) => !sites.has(f))
+  /** ONE allowlist, TWO detectors — an entry is alive if EITHER census finds it.
+   *
+   *  This checked only the raw-adjacency census, so adding an entry for a file the
+   *  SECOND detector finds (`join(<home-param>, ".quanta", …)`, no `homedir()` token)
+   *  reported it as dead. The allowlist grants both scanners, so both decide liveness. */
+  test("allowlist has no dead entries (every allowlisted file still has a site)", () => {
+    const raw = new Set(scanRawHomeSites(SRC))
+    const joined = new Set(homeJoinedRootSites().map((x) => x.split(":")[0] as string))
+    const dead = [...ALLOWLIST.keys()].filter((f) => !raw.has(f) && !joined.has(f))
     // A dead entry means the file was migrated/removed — prune it so the
     // allowlist can't silently grant future raw sites in that file.
     expect(dead).toEqual([])
@@ -143,40 +222,6 @@ describe("quanta home root SSOT ratchet", () => {
    */
   const HOME_JOIN_CEILING = 15
 
-  const calleeName = (n: ts.CallExpression): string => {
-    if (ts.isPropertyAccessExpression(n.expression)) return n.expression.name.text
-    if (ts.isIdentifier(n.expression)) return n.expression.text
-    return ""
-  }
-
-  /** `join|resolve(<something mentioning "home">, ".quanta", …)`. */
-  const isHomeJoinedRoot = (n: ts.Node, sf: ts.SourceFile): boolean => {
-    if (!ts.isCallExpression(n) || n.arguments.length < 2) return false
-    const name = calleeName(n)
-    if (name !== "join" && name !== "resolve") return false
-    const second = n.arguments[1] as ts.Expression
-    if (!ts.isStringLiteralLike(second) || second.text !== ".quanta") return false
-    return /home/i.test((n.arguments[0] as ts.Expression).getText(sf))
-  }
-
-  const homeJoinedRootSites = (): string[] => {
-    const out: string[] = []
-    for (const file of walk(SRC)) {
-      const text = readFileSync(file, "utf8")
-      if (!text.includes('".quanta"')) continue
-      const rel = `src/${file.slice(SRC.length + 1)}`
-      const sf = ts.createSourceFile(rel, text, ts.ScriptTarget.ESNext, true, ts.ScriptKind.TS)
-      const visit = (n: ts.Node): void => {
-        if (isHomeJoinedRoot(n, sf)) {
-          out.push(`${rel}:${sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1}`)
-        }
-        ts.forEachChild(n, visit)
-      }
-      ts.forEachChild(sf, visit)
-    }
-    return out.sort()
-  }
-
   test(`home-joined root literals stay <= ${HOME_JOIN_CEILING} (burn-down only)`, () => {
     const sites = homeJoinedRootSites().filter((s) => !ALLOWLIST.has(s.split(":")[0] as string))
     // biome-ignore lint/suspicious/noConsole: ratchet visibility for reviewers
@@ -201,8 +246,12 @@ describe("quanta home root SSOT ratchet", () => {
     // …and a project-scoped join must NOT be, or the ceiling counts the wrong thing.
     expect(sites.some((s) => s.startsWith("src/tool/registry.ts"))).toBe(false)
     expect(sites.some((s) => s.startsWith("src/permission/trust-scope-store.ts"))).toBe(false)
-    // The memory plane, the site that motivated this arm, is now absent entirely.
-    expect(sites.some((s) => s.startsWith("src/memory/"))).toBe(false)
+    // The memory plane's CONSOLIDATOR is gone from the census — that was the defect.
+    expect(sites.some((s) => s.startsWith("src/memory/consolidate/"))).toBe(false)
+    // `store-path.ts` IS in the raw census (its OS-home join is deliberate, see the
+    // allowlist) and the ceiling arm filters it out. Asserting both directions keeps
+    // the allowlist honest: a dead entry would make the first expectation fail.
+    expect(sites.some((s) => s.startsWith("src/memory/store-path.ts"))).toBe(true)
   })
 
   test("DETECTOR has teeth (red-on-injection)", () => {

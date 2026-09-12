@@ -1,7 +1,7 @@
 import { CachingEmbedder, OpenAIEmbedder } from "@/agent"
 import { type EmbedderPort, InMemoryStore, type PersistentStorePort, SqliteStore } from "@/memory"
 import { defaultDurableStorePath } from "@/memory/store-path"
-import { quantaHomeDirFrom } from "@/shared/quanta-home"
+import { quantaHomeDir } from "@/shared/quanta-home"
 
 /**
  * Surface-agnostic store + embedder assembly. No env reads — the surface
@@ -19,10 +19,12 @@ export interface StoreAssembleInput {
    *  ADR-0557 home-scoped `<quanta-home>/memory/memory.sqlite` when omitted (the
    *  factory always passes a resolved path; this fallback is for direct callers).
    *
-   *  The fallback derives the QUANTA home from `process.env`, not from
-   *  `os.homedir()`. It used to use the OS home, so a direct caller running under a
-   *  relocated `QUANTA_HOME` opened the developer's real store — the one plane that
-   *  did not follow the home. */
+   *  The fallback derives the QUANTA home through `quantaHomeDir()` — the
+   *  `runtimeConfig()`-backed SSOT — not from `os.homedir()` and not from a raw
+   *  `process.env` read. It used to use the OS home, so a direct caller running under
+   *  a relocated `QUANTA_HOME` opened the developer's real store; my first fix for
+   *  that reached for `quantaHomeDirFrom(process.env)`, which traded one rule
+   *  violation for another and turned `src-no-sketchy-code` red. */
   path?: string | undefined
 }
 
@@ -33,7 +35,7 @@ export interface StoreAssembleInput {
  *  attributed fallback to the volatile kind so the reported `kind` stays true. */
 export const buildStoreCore = (input: StoreAssembleInput): PersistentStorePort | undefined => {
   if (input.kind === "sqlite") {
-    return new SqliteStore(input.path ?? defaultDurableStorePath(quantaHomeDirFrom(process.env)))
+    return new SqliteStore(input.path ?? defaultDurableStorePath(quantaHomeDir()))
   }
   if (input.kind === "memory") return new InMemoryStore()
   return undefined

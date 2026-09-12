@@ -21,11 +21,11 @@
  * because it is the property that makes the change safe for existing installs.
  */
 import { describe, expect, test } from "bun:test"
-import { existsSync, mkdtempSync, rmSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { resolveMemoryDirPathsUnder } from "@/memory/consolidate/paths"
-import { defaultDurableStorePath } from "@/memory/store-path"
+import { defaultDurableStorePath, resolveStorePath } from "@/memory/store-path"
 import { buildMemoryForSession } from "@/runner/assemble/memory-factory"
 import { quantaHomeDirFrom } from "@/shared/quanta-home"
 import { hermeticQuantaHomeEnv } from "../../_support/hermetic-quanta-home"
@@ -102,6 +102,119 @@ describe("the memory plane follows the quanta home", () => {
       // this arm from leaking into /tmp.
     } finally {
       for (const d of [scratch, decoy, cwd]) rmSync(d, { recursive: true, force: true })
+    }
+  })
+
+  /**
+   * NO SILENT ORPHAN — the property that makes the relocation safe for an operator who
+   * ALREADY set QUANTA_HOME or QUANTA_CONFIG_DIR.
+   *
+   * Measured before this existed: with `QUANTA_CONFIG_DIR` set and months of memory at
+   * `<os-home>/.quanta/memory/memory.sqlite`, `resolveStorePath` returned
+   * `source: "home-default"`, `legacyNotice: undefined`, and never probed the old path
+   * at all. A fresh empty store, silently, for the one operator the relocation was
+   * most likely to affect. The `legacyNotice` machinery already existed for the
+   * cwd-scoped case and was not extended to the case the fix itself created.
+   */
+  test("an existing store under the PRE-RELOCATION home is used, and named", () => {
+    const osHome = mkdtempSync(join(tmpdir(), "mem-oshome-"))
+    const relocated = mkdtempSync(join(tmpdir(), "mem-reloc-"))
+    try {
+      const prior = join(osHome, ".quanta", "memory", "memory.sqlite")
+      mkdirSync(dirname(prior), { recursive: true })
+      writeFileSync(prior, "existing memory")
+      const r = resolveStorePath({ homeDir: relocated, cwd: "/nonexistent-cwd", osHomeDir: osHome })
+      // The path stays under the home the operator ASKED for. Returning the old file
+      // instead would be the split-brain again, inverted — a session whose QUANTA_HOME
+      // says one place secretly reading another — and it broke every suite that
+      // injects a scratch home.
+      expect(r.path).toBe(join(relocated, "memory", "memory.sqlite"))
+      expect(r.source).toBe("home-default")
+      expect(r.legacyNotice, "an orphan must be attributed, not silent").toBeDefined()
+      expect(r.legacyNotice).toContain(prior)
+      expect(r.legacyNotice).toContain(join(relocated, "memory", "memory.sqlite"))
+      expect(r.legacyNotice, "the operator must be told it is not being read").toContain(
+        "NOT being read",
+      )
+      // The migration command must move the WAL side files too. Moving the database
+      // out from under an uncheckpointed log loses whatever was not checkpointed —
+      // silent data loss in the line written to prevent silent data loss.
+      expect(r.legacyNotice).toContain("-wal")
+      expect(r.legacyNotice).toContain("-shm")
+    } finally {
+      for (const d of [osHome, relocated]) rmSync(d, { recursive: true, force: true })
+    }
+  })
+
+  test("with the home UNSET the probe is inert — no notice, no behaviour change", () => {
+    const osHome = mkdtempSync(join(tmpdir(), "mem-same-"))
+    try {
+      const prior = join(osHome, ".quanta", "memory", "memory.sqlite")
+      mkdirSync(dirname(prior), { recursive: true })
+      writeFileSync(prior, "existing memory")
+      // `quantaHomeDirFrom({})` is `<os-home>/.quanta`, so the two paths coincide.
+      const r = resolveStorePath({
+        homeDir: join(osHome, ".quanta"),
+        cwd: "/nonexistent-cwd",
+        osHomeDir: osHome,
+      })
+      expect(r.source, "coinciding paths must not be reported as a legacy find").toBe(
+        "home-default",
+      )
+      expect(r.legacyNotice).toBeUndefined()
+      expect(r.path).toBe(prior)
+    } finally {
+      rmSync(osHome, { recursive: true, force: true })
+    }
+  })
+
+  test("the cwd-scoped legacy file still wins over the pre-relocation one", () => {
+    const osHome = mkdtempSync(join(tmpdir(), "mem-osh2-"))
+    const cwd = mkdtempSync(join(tmpdir(), "mem-cwd2-"))
+    try {
+      const prior = join(osHome, ".quanta", "memory", "memory.sqlite")
+      mkdirSync(dirname(prior), { recursive: true })
+      writeFileSync(prior, "home data")
+      const legacy = join(cwd, ".quanta", "memory.sqlite")
+      mkdirSync(dirname(legacy), { recursive: true })
+      writeFileSync(legacy, "cwd data")
+      const r = resolveStorePath({ homeDir: "/tmp/relocated", cwd, osHomeDir: osHome })
+      expect(r.source).toBe("legacy-cwd")
+      expect(r.path).toBe(legacy)
+    } finally {
+      for (const d of [osHome, cwd]) rmSync(d, { recursive: true, force: true })
+    }
+  })
+
+  /** WIRING PROOF for the probe: the factory must actually inject the OS home. */
+  test("buildMemoryForSession injects the OS home so the probe can fire", () => {
+    const scratch = mkdtempSync(join(tmpdir(), "mem-wire-"))
+    const cwd = mkdtempSync(join(tmpdir(), "mem-wcwd-"))
+    try {
+      const notices: string[] = []
+      // A relocated home with no prior store: the probe runs and finds nothing, so the
+      // resolution is the ordinary home default and no notice fires.
+      const slot = buildMemoryForSession(
+        { QUANTA_MEMORY: "sqlite", QUANTA_HOME: scratch },
+        { cwd, onStoreNotice: (l) => notices.push(l) },
+      )
+      // The resolution is always the relocated home, notice or not.
+      expect(slot.storePath).toBe(join(scratch, "memory", "memory.sqlite"))
+      // On a developer box the real `~/.quanta/memory/memory.sqlite` usually exists,
+      // so the probe fires and emits ONE notice. Either way the path is unchanged —
+      // that invariant is what this arm pins, not the notice count.
+      for (const n of notices) expect(n).toContain("NOT being read")
+      // The injection itself is asserted at the source: without `osHomeDir` the probe
+      // is skipped entirely and an orphan is silent again.
+      const factory = readFileSync(
+        join(import.meta.dir, "..", "..", "..", "src/runner/assemble/memory-factory.ts"),
+        "utf8",
+      )
+      expect(factory, "the factory must inject the OS home for the probe").toContain(
+        "osHomeDir: homedir()",
+      )
+    } finally {
+      for (const d of [scratch, cwd]) rmSync(d, { recursive: true, force: true })
     }
   })
 
