@@ -37,6 +37,7 @@ import {
   CAPABILITY_RECEIPT_BINDING_ENV,
   CAPABILITY_RECEIPT_PATH_ENV,
   CAPABILITY_REQUIRE_ENV,
+  capabilityRequiredFor,
   type CapabilityFinding,
   type CapabilityReceipt,
   validateCapabilityReceipt,
@@ -190,7 +191,8 @@ export const requireCapability = (
   decision: CapabilityDecision,
   env: ConsumerEnv = process.env,
 ): CapabilityDecision => {
-  const strict = (env[CAPABILITY_REQUIRE_ENV] ?? "").length > 0
+  // Per capability, not per process: naming one id used to make every id strict.
+  const strict = capabilityRequiredFor(decision.capability, env)
   if (strict && (decision.verdict === "blocked-missing" || decision.verdict === "failed-setup")) {
     throw new Error(
       `[capability] "${decision.capability}" is ${decision.verdict} but ${CAPABILITY_REQUIRE_ENV} is set: ${decision.detail}`,

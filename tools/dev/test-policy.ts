@@ -241,7 +241,7 @@ const defaultPolicy = (id: string): TestPolicy => {
 }
 
 /** Everything one override row must satisfy. Throws with the offending id. */
-const assertOverrideRow = (row: TestPolicyOverride): void => {
+const assertOverrideRow = (row: TestPolicyOverride, nowMs: number): void => {
   if (row.id === "" || row.owner === "" || row.reason === "") {
     throw new Error("override requires id, owner, and reason")
   }
@@ -250,6 +250,27 @@ const assertOverrideRow = (row: TestPolicyOverride): void => {
   // the only thing that forces a re-read.
   if (row.expiresAt === undefined || !/^\d{4}-\d{2}-\d{2}$/u.test(row.expiresAt)) {
     throw new Error(`override ${row.id} needs an expiresAt of the form YYYY-MM-DD`)
+  }
+  // ...and the date is COMPARED to the clock. An audit found this field
+  // validated for FORMAT only: `expiresAt: "2020-01-01"` loaded clean and kept
+  // moving a file out of the PR tier five years later. Both sibling ledgers
+  // (`module-load-effect-guard.ts`, `tools/test-resilience/quarantine.ts`)
+  // already expire their entries against `Date.now()`; the one that decides
+  // TIER MEMBERSHIP did not, which is the one where an expiry silently lapsing
+  // removes a file from a blocking gate.
+  //
+  // End of day, like the sibling guard: an entry that expires today is still
+  // valid today.
+  const expiresAtMs = Date.parse(`${row.expiresAt}T23:59:59Z`)
+  if (!Number.isFinite(expiresAtMs)) {
+    throw new Error(`override ${row.id} has an unparseable expiresAt ${row.expiresAt}`)
+  }
+  if (expiresAtMs < nowMs) {
+    throw new Error(
+      `override ${row.id} EXPIRED ${row.expiresAt} (owner ${row.owner}): ` +
+        "re-read the exception and either renew it with a reason or delete it. " +
+        "A lapsed tier override silently keeps a file out of a blocking gate.",
+    )
   }
   // prepush IS the always-run canary. Letting the two drift apart would make
   // "always-run" a label rather than a membership.
@@ -267,7 +288,11 @@ const assertOverrideRow = (row: TestPolicyOverride): void => {
   }
 }
 
-export const loadPolicyOverrides = (path: string): TestPolicyFile => {
+export const loadPolicyOverrides = (
+  path: string,
+  /** Injected so a test can drive the expiry boundary without waiting for it. */
+  nowMs: number = Date.now(),
+): TestPolicyFile => {
   const parsed = JSON.parse(readFileSync(path, "utf8")) as TestPolicyFile
   if (parsed.schema !== "quanta.test-policy-overrides.v1") {
     throw new Error(`unknown policy override schema: ${String(parsed.schema)}`)
@@ -275,7 +300,7 @@ export const loadPolicyOverrides = (path: string): TestPolicyFile => {
   if (!Array.isArray(parsed.overrides)) throw new Error("overrides must be an array")
   const seen = new Set<string>()
   for (const row of parsed.overrides) {
-    assertOverrideRow(row)
+    assertOverrideRow(row, nowMs)
     if (seen.has(row.id)) throw new Error(`duplicate override: ${row.id}`)
     seen.add(row.id)
   }

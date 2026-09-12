@@ -47,6 +47,41 @@ export const CAPABILITY_RECEIPT_BINDING_ENV = "QUANTA_CAPABILITY_BINDING"
 /** Set by CI: `blocked` / `failed-setup` must then THROW instead of skipping. */
 export const CAPABILITY_REQUIRE_ENV = "QUANTA_REQUIRE_CAPABILITIES"
 
+/**
+ * Is `id` REQUIRED to have actually been exercised?
+ *
+ * # One name, one grammar
+ *
+ * There were two names for this switch and neither was set anywhere:
+ * `QUANTA_REQUIRE_CAPABILITIES` (read by the receipt consumer, where ANY
+ * non-empty value made EVERY capability strict) and `QUANTA_REQUIRE_CAPABILITY`
+ * (read by the `*-real-e2e` lane helper, where the value was `1` or a
+ * comma-separated group list). So the rule "a blocked capability must be RED in a
+ * required job" was off in both dialects, and setting either one armed half the
+ * corpus with the wrong grammar.
+ *
+ *   unset / "" / "0"  -> nothing is required
+ *   "1"               -> everything is required
+ *   "a,b"             -> exactly `a` and `b` are required
+ *
+ * The list form is the reason this is a function and not a boolean: naming one
+ * capability used to make all of them strict, which is a different run than the
+ * operator asked for.
+ */
+export const capabilityRequiredFor = (
+  id: string,
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): boolean => {
+  const raw = (env[CAPABILITY_REQUIRE_ENV] ?? "").trim()
+  if (raw === "" || raw === "0") return false
+  if (raw === "1") return true
+  return raw
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== "")
+    .includes(id)
+}
+
 export type CapabilityStatus = "available" | "unavailable" | "probe-timeout" | "probe-error"
 
 export const CAPABILITY_STATUSES: readonly CapabilityStatus[] = [

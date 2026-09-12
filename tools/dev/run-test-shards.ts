@@ -24,6 +24,7 @@ import {
   writeFailureAttemptArtifact,
 } from "./failure-attempt-producer"
 import { quarantineLane, quarantinePath } from "./lease-quarantine"
+import { capabilityReceiptEnvForCampaign } from "./capability-probe-producer"
 import { mintableScanReachAuthority } from "./scan-reach-authority"
 import {
   describeWatchdogKill,
@@ -453,6 +454,9 @@ const runShard = async (
   testTimeoutMs: number,
   registry: ShardProcessRegistry,
   intraParallel: number,
+  /** The campaign's capability receipt env. Passed, never ambient: which
+   *  capabilities a worker could see is an INPUT to its verdict. */
+  capabilityEnv: Record<string, string>,
 ): Promise<ShardRunResult> => {
   const shard = `${plan.index}/${totalChunks}`
   const workerRootEarly = join(runRoot, `worker-${plan.index}`)
@@ -491,6 +495,10 @@ const runShard = async (
   const workerEnv = { ...process.env }
   delete workerEnv[ADMISSION_DEADLINE_ENV]
   workerEnv[SOURCE_JS_CLEANED_ROOT_ENV] = SOURCE_ROOT
+  // The campaign's capability receipt, both halves. Without the binding the
+  // consumer compares only the toolchain digest — an audit found that half
+  // silently optional, and shipping the path alone ships the unbound version.
+  Object.assign(workerEnv, capabilityEnv)
   let closed = false
   try {
     const startedAt = performance.now()
@@ -934,6 +942,8 @@ const executeChunks = async (input: {
   readonly testTimeoutMs: number
   readonly registry: ShardProcessRegistry
   readonly journal: TimingJournal
+  /** `QUANTA_CAPABILITY_RECEIPT` + `QUANTA_CAPABILITY_BINDING` for the workers. */
+  readonly capabilityEnv: Record<string, string>
 }): Promise<readonly string[]> => {
   const totalChunks = input.chunks.length
   const scanReachSinks = new Map<number, string>()
@@ -1002,6 +1012,7 @@ const executeChunks = async (input: {
           input.testTimeoutMs,
           input.registry,
           cached.intraParallel,
+          input.capabilityEnv,
         )
         const completedShard = {
           plan: cached.chunk,
@@ -1357,6 +1368,33 @@ const main = async (): Promise<void> => {
         "[test:shards] INVALID — authoritative receipts require a clean checkout. Commit or stash changes first.",
       )
     }
+    // THE CAPABILITY RECEIPT, once per campaign.
+    //
+    // This artifact had fifteen consumers and no producer: nothing invoked
+    // `capability-probe-producer.ts` and nothing set its two environment
+    // variables, so every `capability("<id>")` answered `blocked-missing` and the
+    // gated describes turned into `describe.skip`. The files then reported PASS
+    // having executed nothing, on every host. Measured recovery on this box: 33
+    // cases that ran nowhere now run, and the ones that still skip do so because
+    // the host genuinely lacks chromium, bwrap or debugpy.
+    //
+    // Produced HERE rather than in a gate because the receipt must describe the
+    // host the WORKERS run on, and this is the process that owns their env.
+    // `opts.tier` is optional in the type and REQUIRED by the parser; naming the
+    // impossible branch is cheaper than a cast that hides it.
+    const receiptTier = opts.tier
+    if (receiptTier === undefined) throw new Error("[test:shards] unreachable: tier is required")
+    const capability = await capabilityReceiptEnvForCampaign({
+      repoRoot: REPO_ROOT,
+      tier: receiptTier,
+      head: before.head,
+      outPath: join(SHARED_CACHE_ROOT, "capability", `${opts.suite}-${receiptTier}.receipt.json`),
+    })
+    process.stdout.write(
+      `[test:shards] capability receipt tier=${opts.tier} binding=${capability.bindingSha256.slice(0, 16)} ` +
+        `available=${Object.values(capability.receipt.capabilities).filter((f) => f.status === "available").length}/` +
+        `${Object.keys(capability.receipt.capabilities).length}\n`,
+    )
     const { discovered: discoveredManifest, manifest, tiered } = selectManifest(opts)
     const manifestDigest = manifestSha256(manifest)
     const treeSha256 = trackedTreeSha256(REPO_ROOT)
@@ -1397,7 +1435,14 @@ const main = async (): Promise<void> => {
     // into the execution-policy digest — so identical code missed every chunk
     // purely because the box got busier. The executed timeout still follows load.
     const timeoutPolicy = currentTimeoutPolicy()
-    const envSha256 = testEnvironmentSha256(process.env, timeoutPolicy.baseMs, REPO_ROOT)
+    // The WORKERS' env, not this process's: the capability binding decides which
+    // gated describes execute, so a cache identity that ignored it would replay a
+    // green earned on a differently-capable host.
+    const envSha256 = testEnvironmentSha256(
+      { ...process.env, ...capability.env },
+      timeoutPolicy.baseMs,
+      REPO_ROOT,
+    )
     const timeoutPolicyDigest = timeoutPolicySha256(timeoutPolicy)
     // SAFE loader: the resource registry is mid-migration (module at schema v2,
     // JSON still v1), and a registry that will not parse must mean "nothing is
@@ -1425,6 +1470,7 @@ const main = async (): Promise<void> => {
       chunks: cachedChunks,
       opts,
       runRoot,
+      capabilityEnv: capability.env,
       before,
       testTimeoutMs,
       registry,
