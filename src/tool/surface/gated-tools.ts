@@ -300,15 +300,13 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     adr: "0103",
     note: "GitHub PR/issue tools — opt-in via QUANTA_GIT_TOOLS (CLI) or via ci-bot wiring (QUANTA_CI_BOT_GH_WRITE unlocks mutating subset gh_pr_resolve_thread + gh_pr_edit_labels in ci-bot mode).",
   },
-  {
-    name: "lsp_diagnostics",
-    origin: "@/tool lspDiagnosticsTool",
-    gate: { kind: "env-flag", env: "QUANTA_LSP" },
-    default: { cli: "opt-in" },
-    risk: "read-only",
-    adr: "0141",
-    note: "Opt-in — needs a language server running.",
-  },
+  // `lsp_diagnostics` used to sit here and NO SUCH TOOL EXISTS. `lspDiagnosticsTool()`
+  // returns `diagnosticsTool(lspDiagnosticsProvider())` (agent/lsp-bridge/diagnostics.ts:54)
+  // and that tool's name is `"diagnostics"` (tool/diagnostics/index.ts:114) — already a
+  // BASE row above. `QUANTA_LSP` swaps the diagnostics PROVIDER; it does not register a
+  // second tool, so the model never had a `lsp_diagnostics` to call. The row survived
+  // because the completeness scan grepped `src/tool`, which contains THIS file: every
+  // manifest row proved itself, and the "no stale rows" direction was vacuous.
   {
     name: "lsp_references",
     group: ["lsp_document_symbol", "lsp_workspace_symbol", "lsp_code_action", "lsp_signature_help"],

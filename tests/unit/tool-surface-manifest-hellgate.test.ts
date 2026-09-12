@@ -268,7 +268,16 @@ describe("tool-surface manifest — FULL-universe completeness (the guard that w
       // live outside src/agent/tier1 (they are not tier-1 session-feature builders,
       // but leaf tool factories that get composed at the runner level). Extend the
       // scan so these tools cannot silently escape the two-way drift guard.
-      "grep -rhoE 'name: \"[a-z_]+\"' src/tool src/subagent src/agent/tier1 src/agent/budget-tool.ts src/agent/memory-tools.ts src/skill/skill-creator.ts",
+      // `--exclude` the manifest's OWN definition files. Without it the scan reads
+      // `src/tool/surface/{manifest,gated-tools}.ts`, so every catalogued name is
+      // "found" by virtue of being catalogued and the reverse direction below
+      // ("no stale rows") can never fail. Measured: with self included the scan
+      // returned exactly the 194 manifest names and zero stale; excluded it
+      // returns 193 and names `lsp_diagnostics`, a row for a tool that has never
+      // existed. `src/tool/index.ts` re-exports the manifest, so it goes too.
+      "grep -rhoE 'name: \"[a-z_]+\"' src/tool src/subagent src/agent/tier1 " +
+        "src/agent/budget-tool.ts src/agent/memory-tools.ts src/skill/skill-creator.ts " +
+        "--exclude=manifest.ts --exclude=gated-tools.ts",
       // Anchored on this file, not on the ambient cwd. Without it the paths above
       // resolve against wherever the runner was launched: from a foreign working
       // directory grep reported `No such file or directory` and 3 of this file's
