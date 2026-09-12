@@ -61,17 +61,27 @@ describe("isExemptFromFc", () => {
     expect(isExemptFromFc(".claude/worktrees/agent-abc/src/foo.ts")).toBe(true)
     expect(isExemptFromFc("tools/feature-catalog/audit.ts")).toBe(true)
   })
-  test("tools/dev/ (the repo's own build+test harness) is exempt, but catalogued tools are NOT", () => {
-    // Paired control. The exemption exists because no `tools/dev/` file has ever
-    // been in fc evidence — it is the harness the repo runs on itself, not a
-    // shipped feature. It must NOT widen to `tools/`: tools/pm/check.ts,
-    // tools/god-code/detect.ts and tools/arch-gen/main.ts are real fc entries,
-    // and exempting them would silently retire a live gate.
-    expect(isExemptFromFc("tools/dev/cwd-parity-check.ts")).toBe(true)
-    expect(isExemptFromFc("tools/dev/typecheck.ts")).toBe(true)
+  test("tools/ is NOT exempt — including tools/dev, whose exemption's premise went false", () => {
+    // This test used to assert `tools/dev/**` WAS exempt, and cited the reason the
+    // source gave: "no `tools/dev/` file has ever been in fc evidence". That stopped
+    // being true while both the exemption and this assertion sat unchanged —
+    // measured 51 of 102 tracked `tools/dev/*.ts` are referenced by `evidence.code`,
+    // most of it enrolled by the sep-9/sep-12 verification campaigns. So the test was
+    // pinning a premise, not a contract, and the pin is what kept the premise alive.
+    //
+    // No bulk enrolment follows: `runCheckChanged` blocks on ADDED and only reports
+    // MODIFIED, so the 51 uncatalogued files stay quiet and only a NEW one must say
+    // what it is.
+    expect(isExemptFromFc("tools/dev/cwd-parity-check.ts")).toBe(false)
+    expect(isExemptFromFc("tools/dev/typecheck.ts")).toBe(false)
     expect(isExemptFromFc("tools/pm/check.ts")).toBe(false)
     expect(isExemptFromFc("tools/god-code/detect.ts")).toBe(false)
     expect(isExemptFromFc("tools/arch-gen/main.ts")).toBe(false)
+    // Paired control — the exemptions that remain, and why each is narrow.
+    // `tools/feature-catalog/**` is the gate's own implementation; the trajectory
+    // timeline renders recorded bench cassettes for debugging.
+    expect(isExemptFromFc("tools/feature-catalog/audit.ts")).toBe(true)
+    expect(isExemptFromFc("tools/trajectory-timeline.ts")).toBe(true)
   })
   test("non-.ts files are exempt (covered by extension check)", () => {
     expect(isExemptFromFc("src/foo.json")).toBe(true)
