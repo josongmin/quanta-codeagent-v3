@@ -185,3 +185,154 @@ export const scanToolNameLiterals = (repoRoot: string): ToolNameLiteral[] => {
   }
   return out
 }
+
+/* ── HITL posture, the axis with no runtime guard ───────────────────────────── */
+
+/**
+ * What a declaration says, as opposed to what it might do.
+ *
+ * `dynamic` is its own answer and not a synonym for unknown-so-assume-safe: a
+ * body this census cannot reduce to a literal is reported as `dynamic` so the
+ * consumer must decide, rather than silently classified.
+ */
+export type DeclaredBool = "true" | "false" | "dynamic" | "absent"
+
+/** One tool literal's DECLARED permission posture. */
+export interface ToolPosture extends ToolNameLiteral {
+  /** What `isReadOnly` returns, when it can be reduced to a literal. */
+  readonly readOnly: DeclaredBool
+  /** Whether a `hitlTier` member is declared at all. Absent is the SAFE state:
+   *  `inferToolTierDetailed` then falls through to the `isReadOnly()` branch and
+   *  a write-capable tool gets `always-confirm` / `needs-sandbox`. */
+  readonly hasHitlTier: boolean
+  /** Every HITL-tier string literal `hitlTier`'s body can yield. */
+  readonly tiers: readonly string[]
+  /** `hitlTier`'s body is not a bare string literal (a conditional, or an
+   *  identifier closed over from the factory). The tiers list is then a lower
+   *  bound, not the whole answer. */
+  readonly tierDynamic: boolean
+}
+
+/** The closed HITL tier vocabulary, mirrored from `@/permission`. A literal
+ *  outside it is a typo or a new tier, and either way must not be silently
+ *  swallowed by the census. */
+export const HITL_TIERS: readonly string[] = [
+  "none",
+  "pre-approval-ok",
+  "always-confirm",
+  "hand-off-required",
+]
+
+const arrowBody = (init: ts.Expression): ts.Node | undefined => {
+  if (!ts.isArrowFunction(init) && !ts.isFunctionExpression(init)) return undefined
+  return init.body
+}
+
+const declaredBoolOf = (obj: ts.ObjectLiteralExpression): DeclaredBool => {
+  for (const p of obj.properties) {
+    if (!ts.isPropertyAssignment(p)) continue
+    const n = p.name
+    if (!(ts.isIdentifier(n) || ts.isStringLiteral(n)) || n.text !== "isReadOnly") continue
+    const body = arrowBody(p.initializer)
+    if (body === undefined) return "dynamic"
+    if (body.kind === ts.SyntaxKind.TrueKeyword) return "true"
+    if (body.kind === ts.SyntaxKind.FalseKeyword) return "false"
+    return "dynamic"
+  }
+  return "absent"
+}
+
+const tiersOf = (
+  obj: ts.ObjectLiteralExpression,
+): { hasHitlTier: boolean; tiers: string[]; tierDynamic: boolean } => {
+  for (const p of obj.properties) {
+    if (!ts.isPropertyAssignment(p)) continue
+    const n = p.name
+    if (!(ts.isIdentifier(n) || ts.isStringLiteral(n)) || n.text !== "hitlTier") continue
+    const body = arrowBody(p.initializer)
+    if (body === undefined) return { hasHitlTier: true, tiers: [], tierDynamic: true }
+    if (ts.isStringLiteralLike(body)) {
+      return { hasHitlTier: true, tiers: [body.text], tierDynamic: false }
+    }
+    // Not a bare literal. Collect every tier literal reachable in the body as a
+    // LOWER BOUND and say so, rather than reporting an empty set that would read
+    // as "cannot return none".
+    const tiers: string[] = []
+    const walk = (node: ts.Node): void => {
+      if (ts.isStringLiteralLike(node) && HITL_TIERS.includes(node.text)) tiers.push(node.text)
+      ts.forEachChild(node, walk)
+    }
+    walk(body)
+    return { hasHitlTier: true, tiers: [...new Set(tiers)], tierDynamic: true }
+  }
+  return { hasHitlTier: false, tiers: [], tierDynamic: false }
+}
+
+/**
+ * Extract the DECLARED permission posture of every tool literal in one module.
+ *
+ * # Why this exists
+ *
+ * `inferToolTierDetailed` (`src/permission/policy.ts`) is:
+ *
+ *   if (confirm) return { tier: "always-confirm", reason: "declared" }
+ *   if (explicit) return { tier: explicit, reason: "declared" }
+ *   return tool.isReadOnly()
+ *     ? { tier: "none", reason: "inferred" }
+ *     : { tier: "always-confirm", reason: "needs-sandbox" }
+ *
+ * `"none"` is a truthy string, so an EXPLICIT `hitlTier: () => "none"`
+ * short-circuits the fail-closed branch directly below it. The fail-closed
+ * default protects only tools that OMIT `hitlTier`; a tool that declares its way
+ * out is never questioned. `src/agent/hitl-tier-registry.ts` ratchets operator
+ * OVERRIDES escalate-only, ships zero built-in annotations, and clamps nothing
+ * about a tool's own declaration.
+ *
+ * Measured: a probe with `isReadOnly: () => false` and `hitlTier: () => "none"`
+ * passed 125 HITL / permission / tool test files — 2419 pass, 1 skip, 0 fail —
+ * and `precommit: ok — 9 of 9`. Every existing assertion on this axis is
+ * per-tool (`expect(tool.hitlTier?.(x)).toBe("none")`); none loops a set.
+ *
+ * # Why source and not a fixture
+ *
+ * The manifest names 60 distinct origin modules for its gated rows, so a runtime
+ * two-way comparison means importing and port-stubbing all 60, and it would still
+ * miss MCP-bridged tools. A declaration is exactly what this invariant is about —
+ * it is about what a tool is ALLOWED to SAY — so the source is the right
+ * instrument here, and it is complete over every tool with a literal name.
+ */
+export const extractToolPostures = (file: string, source: string): ToolPosture[] => {
+  const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true)
+  const out: ToolPosture[] = []
+  const walk = (node: ts.Node): void => {
+    if (ts.isObjectLiteralExpression(node)) {
+      const lit = nameLiteralOf(node)
+      const admittedBy = shapeKeyOf(node)
+      if (lit !== undefined && admittedBy !== undefined) {
+        const t = tiersOf(node)
+        out.push({
+          name: lit.text,
+          file,
+          line: sf.getLineAndCharacterOfPosition(lit.getStart(sf)).line + 1,
+          admittedBy,
+          readOnly: declaredBoolOf(node),
+          hasHitlTier: t.hasHitlTier,
+          tiers: t.tiers,
+          tierDynamic: t.tierDynamic,
+        })
+      }
+    }
+    ts.forEachChild(node, walk)
+  }
+  walk(sf)
+  return out
+}
+
+/** The posture census over a checkout. */
+export const scanToolPostures = (repoRoot: string): ToolPosture[] => {
+  const out: ToolPosture[] = []
+  for (const f of censusFiles(repoRoot)) {
+    out.push(...extractToolPostures(f, readFileSync(join(repoRoot, f), "utf-8")))
+  }
+  return out
+}

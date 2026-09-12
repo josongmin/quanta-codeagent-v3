@@ -214,6 +214,15 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
   glob: null,
   localize: null,
   diagnostics: null,
+  // NOT a read-only built-in, despite sitting next to them — `testRunnerTool`
+  // declares `isReadOnly: () => false` and its own docstring says "NOT read-only
+  // and NOT concurrency-safe: arbitrary project tests have side effects". It is
+  // classified `null` DELIBERATELY: running the project's own suite is the
+  // canonical inner-loop action, which is the same reason it carries
+  // `hitlTier: () => "pre-approval-ok"`, and its resolved shell command still
+  // faces the HARD_DENY denylist through the permission policy. Recorded here
+  // because it previously sat under the `// Read-only built-ins` heading with no
+  // reason, so the exemption read as a classification mistake.
   test_runner: null,
   lsp_definition: null,
   lsp_references: null,
