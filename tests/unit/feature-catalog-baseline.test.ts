@@ -1,6 +1,7 @@
 // meta-test: exercises tools/feature-catalog/* (lives outside src/, no @/ alias).
 import { describe, expect, test } from "bun:test"
 import { readFile } from "node:fs/promises"
+import { BASELINE_PATH } from "../../tools/feature-catalog/paths"
 import {
   composeBaseline,
   countBiomeErrors,
@@ -163,7 +164,12 @@ describe("the refresher carries every block it does not measure", () => {
   })
 
   test("the real baseline.json on disk still carries its fc block", async () => {
-    const raw = JSON.parse(await readFile("tools/feature-catalog/baseline.json", "utf8")) as {
+    // BASELINE_PATH, not a cwd-relative literal. The catalog's own `paths.ts`
+    // anchors on `import.meta.dir` precisely because a relative literal resolves
+    // to nothing from any other directory — and "no baseline loaded" reads as a
+    // clean one to every assertion below. `repo-path-anchor-ratchet` refuses the
+    // literal, and went red on `main` when this landed.
+    const raw = JSON.parse(await readFile(BASELINE_PATH, "utf8")) as {
       fc?: { orphan_adr_paths_grandfathered?: unknown[] }
     }
     expect(raw.fc, "baseline.json lost its fc block — fc lint's allowlist is gone").toBeDefined()
