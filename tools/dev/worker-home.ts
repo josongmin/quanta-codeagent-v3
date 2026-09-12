@@ -27,6 +27,18 @@
 import { existsSync, symlinkSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
+import {
+  CAPABILITY_RECEIPT_BINDING_ENV,
+  CAPABILITY_RECEIPT_PATH_ENV,
+  CAPABILITY_VERDICTS_ENV,
+} from "./capability-receipt"
+
+/** The three variables a campaign receipt delivers. All three, or none. */
+export const CAMPAIGN_CAPABILITY_ENV: readonly string[] = [
+  CAPABILITY_RECEIPT_PATH_ENV,
+  CAPABILITY_RECEIPT_BINDING_ENV,
+  CAPABILITY_VERDICTS_ENV,
+]
 
 /** Mirrors `TestResourceClass` structurally to avoid importing the planner. */
 export type WorkerResourceClass = string
@@ -149,6 +161,27 @@ export const workerSpawnEnv = (input: WorkerSpawnEnvInput): Record<string, strin
     QUANTA_SCAN_REACH_RECORD: input.scanReachSink,
     QUANTA_TEST_TIMEOUT_SCALE: String(input.testTimeoutMs / 60_000),
   }
+  // ALL THREE OR NONE. The docstring said "Empty is legal; partial is not" and
+  // nothing enforced it: a bag carrying the receipt PATH without the BINDING
+  // passed straight through, and the consumer compares the binding only when it
+  // is present — so the worker reads an UNBOUND receipt, which is the version
+  // this commit's predecessor said shipping would be shipping.
+  //
+  // This replaces a check on whether the capability values survived the spread.
+  // That one was unreachable: the collision refusal below already guarantees the
+  // two key sets are disjoint, and `capabilityEnv` is spread after `base`, so
+  // for any plain object it could not fire. An audit measured 27 input shapes
+  // and reached it with none of them. A guard that cannot fail is not a guard.
+  const present = CAMPAIGN_CAPABILITY_ENV.filter((key) => key in input.capabilityEnv)
+  if (present.length > 0 && present.length < CAMPAIGN_CAPABILITY_ENV.length) {
+    const missing = CAMPAIGN_CAPABILITY_ENV.filter((key) => !(key in input.capabilityEnv))
+    throw new Error(
+      `[worker-home] partial capability env: ${present.join(", ")} present, ` +
+        `${missing.join(", ")} missing. The consumer compares the binding only when it is ` +
+        "present, so a path without one is an UNBOUND receipt, and a worker without the " +
+        "verdicts digest replays a green earned on a differently capable host.",
+    )
+  }
   // Disjointness is a property of the two key sets, not a hope about ordering.
   // If a per-worker override ever adopts a capability variable's name, the two
   // orderings of this spread stop being equivalent and one of them is silently
@@ -165,17 +198,6 @@ export const workerSpawnEnv = (input: WorkerSpawnEnvInput): Record<string, strin
     ...input.base,
     ...input.capabilityEnv,
     ...perWorker,
-  }
-  const undelivered = Object.entries(input.capabilityEnv).filter(
-    ([key, value]) => env[key] !== value,
-  )
-  if (undelivered.length > 0) {
-    throw new Error(
-      `[worker-home] capability variable(s) ${undelivered
-        .map(([key]) => key)
-        .join(", ")} did not survive worker env composition. A worker without the ` +
-        "receipt skips every gated describe and reports a pass; refusing to launch one.",
-    )
   }
   return env
 }

@@ -15,20 +15,19 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs"
+import { mkdtempSync, openSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
-import { CAPABILITY_VERDICTS_ENV } from "../../../tools/dev/capability-probe-producer"
+import { join, resolve } from "node:path"
+import ts from "typescript"
 import {
   CAPABILITY_RECEIPT_BINDING_ENV,
   CAPABILITY_RECEIPT_PATH_ENV,
+  CAPABILITY_VERDICTS_ENV,
 } from "../../../tools/dev/capability-receipt"
-import {
-  applyUserLibraryDecision,
-  userLibraryDecision,
-  type WorkerSpawnEnvInput,
-  workerSpawnEnv,
-} from "../../../tools/dev/worker-home"
+import { ShardProcessRegistry } from "../../../tools/dev/test-shard-lifecycle"
+import { type WorkerSpawnEnvInput, workerSpawnEnv } from "../../../tools/dev/worker-home"
+
+const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..")
 
 const CAPABILITY_ENV = {
   [CAPABILITY_RECEIPT_PATH_ENV]: "/run/capability/pr.receipt.json",
@@ -90,61 +89,143 @@ describe("a shard worker cannot be launched without the campaign receipt", () =>
     const none = workerSpawnEnv(input({ capabilityEnv: {} }))
     expect(none[CAPABILITY_RECEIPT_PATH_ENV]).toBeUndefined()
     expect(none.HOME).toBe("/run/worker-3/home")
+
+    // ...and PARTIAL is refused, which the docstring claimed and nothing
+    // enforced. The consumer compares the binding only when it is present, so a
+    // path without one is an UNBOUND receipt; and without the verdicts digest a
+    // worker replays a green earned on a differently capable host.
+    for (const missing of [
+      CAPABILITY_RECEIPT_PATH_ENV,
+      CAPABILITY_RECEIPT_BINDING_ENV,
+      CAPABILITY_VERDICTS_ENV,
+    ]) {
+      const partial = Object.fromEntries(
+        Object.entries(CAPABILITY_ENV).filter(([key]) => key !== missing),
+      )
+      expect(() => workerSpawnEnv(input({ capabilityEnv: partial }))).toThrow(
+        /partial capability env/,
+      )
+    }
   })
 })
 
 /**
- * ★ One receipt describes one HOME shape, and the workers do not all have one.
+ * ★ The composition is correct and nothing proved the runner CALLS it.
  *
- * The producer probes under a scratch HOME because probing under the runner's
- * real HOME was measured to flip `debugpy`, `cargo` and `lancedb` from ok to
- * FAIL between the probe and the worker. But `userLibraryDecision` lends the
- * developer's real `~/Library` to `browser`-class workers and to no others, so
- * a browser worker is strictly MORE capable than the home the probe ran in.
+ * That is the defect class this whole ticket is about — fifteen consumers and no
+ * producer — reproduced inside its own fix. An audit found the mutant:
+ * `capabilityEnv: {}` at the one call site in `run-test-shards.ts` reinstates
+ * the original failure (every worker launched without the receipt, every gated
+ * describe skipped, every file reporting PASS) with every arm above still green,
+ * and it is both typecheck-clean and lint-clean.
  *
- * That direction is fail-safe: the receipt under-reports, so a lane skips
- * rather than falsely running, and a skip is visible on the `[capability]`
- * line. The direction that would be unsafe is the one already fixed. These arms
- * pin which direction it is, so a change to the lending policy cannot quietly
- * reverse it.
+ * `run-test-shards.ts` ends in a top-level `await main()` and cannot be
+ * imported, so the call site is reached by PARSING it. A `toContain` would not
+ * do: the mutant leaves the identifier `capabilityEnv` in place as a property
+ * name. What distinguishes them is the property's VALUE — a reference to the
+ * campaign's bag, or a literal standing in for it.
  */
-describe("the probe HOME is no more capable than the workers", () => {
-  test("only the browser class reaches the real Library", () => {
-    for (const resourceClass of ["pure", "heavy", "debug", "network", "browser"]) {
-      expect({ resourceClass, decision: userLibraryDecision(resourceClass, {}) }).toEqual({
-        resourceClass,
-        decision: resourceClass === "browser" ? "lend" : "not-browser",
-      })
+describe("the runner really hands the receipt to the worker", () => {
+  const RUNNER = join(REPO_ROOT, "tools", "dev", "run-test-shards.ts")
+
+  test("WIRING — the spawn's env is workerSpawnEnv, fed the campaign's own bag", () => {
+    const source = ts.createSourceFile(
+      "run-test-shards.ts",
+      readFileSync(RUNNER, "utf8"),
+      ts.ScriptTarget.ESNext,
+      true,
+      ts.ScriptKind.TS,
+    )
+
+    const spawnCalls: ts.CallExpression[] = []
+    const walk = (node: ts.Node): void => {
+      if (
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        node.expression.name.text === "spawnWorker"
+      ) {
+        spawnCalls.push(node)
+      }
+      node.forEachChild(walk)
     }
-    // The opt-out is the lane's only escape, and it is per-run not per-class.
-    expect(userLibraryDecision("browser", { QUANTA_TEST_NO_USER_LIBRARY: "1" })).toBe("opted-out")
+    walk(source)
+
+    // ANTI-VACUITY: exactly one live spawn. Zero means the parse missed it and
+    // every assertion below would be over an empty set.
+    expect(spawnCalls).toHaveLength(1)
+    const options = spawnCalls[0]?.arguments[0]
+    if (options === undefined || !ts.isObjectLiteralExpression(options)) {
+      throw new Error("spawnWorker is not called with an object literal")
+    }
+    const property = options.properties.find(
+      (one): one is ts.PropertyAssignment =>
+        ts.isPropertyAssignment(one) && ts.isIdentifier(one.name) && one.name.text === "env",
+    )
+    if (property === undefined) throw new Error("spawnWorker has no `env` property")
+
+    // The env must BE the checked composition, not an object literal beside it.
+    expect(ts.isCallExpression(property.initializer)).toBe(true)
+    const call = property.initializer as ts.CallExpression
+    expect(ts.isIdentifier(call.expression) ? call.expression.text : "").toBe("workerSpawnEnv")
+
+    const input = call.arguments[0]
+    if (input === undefined || !ts.isObjectLiteralExpression(input)) {
+      throw new Error("workerSpawnEnv is not called with an object literal")
+    }
+    const capability = input.properties.find(
+      (one) =>
+        (ts.isPropertyAssignment(one) || ts.isShorthandPropertyAssignment(one)) &&
+        ts.isIdentifier(one.name) &&
+        one.name.text === "capabilityEnv",
+    )
+    if (capability === undefined) throw new Error("workerSpawnEnv is not given capabilityEnv")
+    // Shorthand (`capabilityEnv,`) or a plain identifier. A literal — `{}`, or
+    // anything else standing in for the campaign's bag — is the mutant.
+    if (ts.isPropertyAssignment(capability)) {
+      expect(ts.isIdentifier(capability.initializer)).toBe(true)
+    } else {
+      expect(ts.isShorthandPropertyAssignment(capability)).toBe(true)
+    }
   })
 
-  test("a non-browser worker HOME has no Library, so the probe HOME matches it", () => {
-    const dir = mkdtempSync(join(tmpdir(), "worker-home-"))
+  test("BEHAVIOUR — all three variables reach a real child process", async () => {
+    // The composition arms are pure. This one spawns the REAL registry worker
+    // the runner uses, so "the bag is right" becomes "a process got it". One
+    // `bun -e` child, no campaign, no lease.
+    const dir = mkdtempSync(join(tmpdir(), "spawn-proof-"))
     try {
-      const sourceLibrary = join(dir, "fake-real-library")
-      mkdirSync(sourceLibrary, { recursive: true })
-
-      // The shape the capability probe runs under, and the shape 43 of 44
-      // chunks get: no Library entry.
-      const plain = join(dir, "plain-home")
-      mkdirSync(plain, { recursive: true })
-      expect(
-        applyUserLibraryDecision({ workerHome: plain, resourceClass: "pure", sourceLibrary }),
-      ).toBe("not-browser")
-      expect(existsSync(join(plain, "Library"))).toBe(false)
-
-      // PAIRED CONTROL — the browser class really does get one, which is why
-      // the receipt can only ever under-report for that class and not over.
-      const browser = join(dir, "browser-home")
-      mkdirSync(browser, { recursive: true })
-      expect(
-        applyUserLibraryDecision({ workerHome: browser, resourceClass: "browser", sourceLibrary }),
-      ).toBe("lend")
-      expect(existsSync(join(browser, "Library"))).toBe(true)
+      const outPath = join(dir, "out.json")
+      const fd = openSync(outPath, "w")
+      const registry = new ShardProcessRegistry()
+      const handle = registry.spawnWorker({
+        // `process.execPath`, not "bun": the fixture base deliberately carries a
+        // minimal PATH, and resolving the runtime through it would make this arm
+        // depend on the developer's shell.
+        cmd: [
+          process.execPath,
+          "-e",
+          "console.log(JSON.stringify({" +
+            "receipt:process.env.QUANTA_CAPABILITY_RECEIPT," +
+            "binding:process.env.QUANTA_CAPABILITY_BINDING," +
+            "verdicts:process.env.QUANTA_CAPABILITY_VERDICTS," +
+            "home:process.env.HOME}))",
+        ],
+        cwd: REPO_ROOT,
+        env: workerSpawnEnv(
+          input({ base: { PATH: process.env.PATH ?? "" }, workerHome: join(dir, "home") }),
+        ),
+        stdoutFd: fd,
+        stderrFd: fd,
+      })
+      const exit = await handle.exited
+      expect(exit.code).toBe(0)
+      const seen = JSON.parse(readFileSync(outPath, "utf8")) as Record<string, string>
+      expect(seen.receipt).toBe(CAPABILITY_ENV[CAPABILITY_RECEIPT_PATH_ENV])
+      expect(seen.binding).toBe(CAPABILITY_ENV[CAPABILITY_RECEIPT_BINDING_ENV])
+      expect(seen.verdicts).toBe(CAPABILITY_ENV[CAPABILITY_VERDICTS_ENV])
+      expect(seen.home).toBe(join(dir, "home"))
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
-  })
+  }, 30_000)
 })
