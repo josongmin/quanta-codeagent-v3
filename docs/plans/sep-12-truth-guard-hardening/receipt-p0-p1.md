@@ -434,3 +434,50 @@ precommit 레인에 없어서 게이트가 못 잡았고, 내 변경 파일을 �
 
 precommit 재실행: **ok — 9 of 9 gate(s) passed** (load/core 1.92~2.48).
 
+## 풀 유닛 스위트 — 실행하고, 귀속까지 했다
+
+```
+bun test tests/unit --parallel=4   (load 61→64)
+  41,271 pass · 131 fail · 17 errors · 144 skip · 339,200 expect · 3,255 files · 2,381s
+재실행                              (load 31)
+  76 fail
+```
+
+131 → 76. 같은 트리, 같은 명령이다. 그 차이 자체가 대부분이 비결정적이라는 증거다.
+
+### 내 것이 아니다 — 세 겹으로 확인
+
+1. **교집합 0.** 실패 76건의 describe 이름을 내 커밋이 건드린 테스트 파일 16개 전부와
+   대조 → 히트 0. 실패 도메인은 silent-failure ratchet · session-setup · retrieval
+   bridge · capability vocabulary · BFND-02 writer ownership 등.
+2. **좁은 재실행은 clean.** 내 변경에 직접 연결된 23 스위트 → **291 pass / 0 fail**.
+3. **기준선 대비 불변.** 기준선 `e8795ac5e` 를 격리 트리로 풀어 같은 지표를 셌다:
+
+   ```
+   기준선 src/ bare `} catch {` : 1194
+   현재   src/ bare `} catch {` : 1194
+   ```
+
+   내 18커밋이 이 숫자를 1도 바꾸지 않았다. 그리고 내 18커밋의 추가 라인 전수에
+   `} catch {` / `catch → return []|{}|""|0|false` 가 **0건**이고 라쳇의 ceiling 상수도
+   기준선과 동일하다.
+
+### 진짜 red 와 부하 플레이크의 분리
+
+부하 19 에서 상위 4개 실패 파일을 격리 재실행:
+
+```
+retrieval-bridge-deleted-ratchet      pass
+module-load-effect-guard              pass
+canonical-report-envelope             pass
+silent-failure-growth-ratchet         4 fail   ← 저부하에서도 red
+```
+
+즉 76건 중 대부분은 부하 플레이크이고, `silent-failure-growth-ratchet` 4건은 **진짜
+red 이며 기준선에서 이미 red 였다**(bare catch 1148 > ceiling 1143, empty-literal
+106 > 105). 내 작업 범위 밖이고, 이 세션에서 건드리지 않았다 — 남의 라쳇 부채를
+같은 커밋에 섞으면 귀속이 다시 불가능해진다.
+
+**이 스위트 실행은 receipt 가 아니다.** clean checkout 도, 저부하도, exact-HEAD 동일성도
+충족하지 않는다. 회귀 귀속 증거로만 읽어야 한다.
+
