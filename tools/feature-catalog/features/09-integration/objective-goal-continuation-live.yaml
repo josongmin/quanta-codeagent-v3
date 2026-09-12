@@ -163,6 +163,14 @@ evidence:
       - tests/integration/objective-verifier-real-command-e2e.test.ts
     contract:
       - tests/e2e-pty/cli-goal-pursuit-e2e.test.ts
+      # OUT-OF-BAND, and stated so the catalogue does not imply a per-commit proof:
+      # `tests/smoke/**` is run by `bun run smoke:goal`, never by a gate. That is
+      # `gated-test-scope-ratchet`'s recorded decision for the whole directory —
+      # "drives a real agent loop with recorded replay; minutes of wall clock and
+      # deliberately off the per-commit path" — not an oversight here. The suite is
+      # real (325 lines, 19 expectations, anti-vacuum controls) and composes the
+      # production objective authority against a deterministic replay LLM, so it
+      # costs nothing and reaches no network; what it does not do is run on a commit.
       - tests/smoke/goal/goal-pursuit-smoke.test.ts
 knobs:
   - name: QUANTA_GOAL
@@ -232,3 +240,11 @@ notes: |
   A dedicated production-composition Goal smoke proves pursuit settlement,
   strict verifier execution, budget stop/no-extra-wake, and a five-component
   anti-vacuum floor; it deliberately does not reuse the generic runAgent fixture.
+  That smoke is OUT-OF-BAND: `tests/smoke/**` is run by `bun run smoke:goal` and
+  by no gate, which is `gated-test-scope-ratchet`'s recorded decision for the whole
+  directory ("drives a real agent loop with recorded replay; minutes of wall clock
+  and deliberately off the per-commit path"), not an omission here. It costs
+  nothing and reaches no network — the LLM is a deterministic replay — so the only
+  thing it does not do is run on a commit. Stated because the catalogue otherwise
+  reads as if this proof were re-established per commit, and nothing in `fc`
+  distinguishes a file that exists from a file that runs.
