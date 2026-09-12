@@ -10,7 +10,7 @@ monitoring: partial
 modes: [interactive, headless]
 configurable: integrated
 owners: ["@songmin"]
-labels: ["rfc:aug02-05", "surface:cli", "gate:default-off", "safety"]
+labels: ["rfc:aug02-05", "surface:cli", "default-off", "safety"]
 config_refs:
   env: ["QUANTA_LLM_ENDPOINT", "QUANTA_ENDPOINT_API_KEY"]
 purpose: |

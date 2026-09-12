@@ -115,4 +115,52 @@ describe("DOF-00 default-off authority ledger hellgate", () => {
       `reachability=wired contradicts activation=unwired (a wired feature has a live consumer): ${victim.feature_id}`,
     )
   })
+
+  /**
+   * The eligibility label is an EXACT array-element match, so a near-miss spelling
+   * does not fail — it silently removes the feature from the audited population.
+   *
+   * Five aug-02 RFC features carried `gate:default-off` instead of `default-off`
+   * and sat outside this ledger for weeks. Nothing could notice: the checker asks
+   * "which features are labelled?", and an unlabelled feature is not a violation,
+   * it is absent. `QUANTA_PROC_PANEL` therefore read as a knob nobody had decided
+   * about, when the truth is nobody had ever been asked.
+   *
+   * Two invariants, both derived from the label census rather than a hand-list:
+   * nothing may spell the eligibility label almost-right, and the `gate:`
+   * namespace stays what its three remaining users made it — an ENV KEY holder,
+   * not a second place to write a posture.
+   */
+  test("no label spells the eligibility posture almost-right", async () => {
+    const catalog = await catalogOnce
+    const nearMiss = catalog.flatMap(({ feature }) =>
+      (feature.labels ?? [])
+        .filter((label) => label !== "default-off" && /default[-_ ]?off/i.test(label))
+        .map((label) => `${feature.id}: ${label}`),
+    )
+    expect(
+      nearMiss,
+      "the eligibility label must be the exact literal `default-off` — anything else is absent from the ledger, not rejected by it",
+    ).toEqual([])
+    // Anti-vacuity: the census must have found the real population, or an empty
+    // catalog satisfies the assertion above.
+    const eligible = catalog.filter(({ feature }) => (feature.labels ?? []).includes("default-off"))
+    expect(
+      eligible.length,
+      "no default-off features found — this guard read nothing",
+    ).toBeGreaterThan(80)
+  })
+
+  test("the `gate:` label namespace holds env keys, not postures", async () => {
+    const catalog = await catalogOnce
+    const offenders = catalog.flatMap(({ feature }) =>
+      (feature.labels ?? [])
+        .filter((label) => label.startsWith("gate:") && !/^gate:QUANTA_[A-Z0-9_]+$/.test(label))
+        .map((label) => `${feature.id}: ${label}`),
+    )
+    expect(
+      offenders,
+      "`gate:` names the env var that gates the feature (its three other users all do); a posture belongs in the bare label",
+    ).toEqual([])
+  })
 })

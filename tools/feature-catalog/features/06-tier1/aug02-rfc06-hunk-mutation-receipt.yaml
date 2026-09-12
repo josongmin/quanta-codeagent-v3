@@ -10,7 +10,7 @@ monitoring: partial
 modes: [interactive]
 configurable: integrated
 owners: ["@songmin"]
-labels: ["rfc:aug02-06", "surface:cli", "gate:default-off"]
+labels: ["rfc:aug02-06", "surface:cli", "default-off"]
 config_refs:
   env: ["QUANTA_HUNK_MUTATION_RECEIPT"]
   runtime: ["hunkMutationReceipt"]

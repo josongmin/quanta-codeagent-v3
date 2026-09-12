@@ -10,7 +10,7 @@ monitoring: partial
 modes: [interactive]
 configurable: integrated
 owners: ["@songmin"]
-labels: ["rfc:aug02-02", "surface:cli", "gate:default-off"]
+labels: ["rfc:aug02-02", "surface:cli", "default-off"]
 config_refs:
   env: ["QUANTA_PROC_PANEL"]
   cli: ["/ps"]

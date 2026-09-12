@@ -2309,3 +2309,90 @@ rows:
     rollback: QUANTA_WORKTREE_TOOL 미설정
     duplicate_of: null
     lifecycle_evidence: null
+  # ── aug-02 RFC batch (label typo recovered) ────────────────────────────────
+  # These five carried `gate:default-off` instead of the canonical `default-off`.
+  # The checker's eligibility filter is an EXACT array-element match, so all five
+  # were silently outside the audited population — `QUANTA_PROC_PANEL` looked like
+  # a feature nobody had ever decided about, when in fact nobody had ever been
+  # asked. Labels and rows land together: fixing only one side is 5 errors either
+  # way (missing eligible row, or row outside bounded eligibility).
+  - feature_id: aug02-rfc01-context-headroom-advisory
+    gate_owner: [QUANTA_CONTEXT_HEADROOM_ADVISORY]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    # Genuinely default-OFF and fully wired: `gateOnStrict` (exact "1") at
+    # src/shared/runtime-config.ts:125. The advisory rides the per-turn context, so
+    # its token and behaviour cost want a measurement before it goes on by default.
+    decision: measure-first
+    owner_seam: src/shared/runtime-config.ts
+    rollback: unset QUANTA_CONTEXT_HEADROOM_ADVISORY
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: aug02-rfc02-ps-proc-panel
+    gate_owner: [QUANTA_PROC_PANEL]
+    activation: env/config
+    effective_default: { cli: off, web: na, bench: na, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    # The gate decides slash REGISTRATION only (readCliKnob ?? false at
+    # slash/registry-surface.ts:474) and `/ps` is list-only and redacted, so
+    # turning it on adds one read-only surface and changes no loop behaviour.
+    decision: enable-now
+    owner_seam: src/apps/cli/slash/registry-surface.ts
+    rollback: unset QUANTA_PROC_PANEL
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: aug02-rfc04-mcp-hot-reload
+    gate_owner: [QUANTA_MCP_HOT_RELOAD]
+    activation: env/config
+    effective_default: { cli: off, web: na, bench: na, headless: na, daemon: off }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    # src/host/mcp-composition.ts:93 reads it through `parseEnvFlag(…, false)`, and
+    # parseEnvFlag treats an EMPTY string as true — so `export QUANTA_MCP_HOT_RELOAD=`
+    # enables a default-OFF feature, and the registry default cannot stop it. Route
+    # to the bool SSOT before deciding whether to promote.
+    decision: repair-first
+    owner_seam: src/host/mcp-composition.ts
+    rollback: unset QUANTA_MCP_HOT_RELOAD
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: aug02-rfc05-configured-endpoint
+    gate_owner: [QUANTA_LLM_ENDPOINT, QUANTA_CENTRAL_CONFIG]
+    activation: env/config
+    effective_default: { cli: na, web: na, bench: na, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: credential
+    # Not a boolean at all: `QUANTA_LLM_ENDPOINT` is a profile SELECTOR and the read
+    # is double-gated behind `runtimeConfig().centralConfig`. "Off" here is "no
+    # profile named", which no effective_default column can express — hence `na`
+    # across the board rather than a fabricated `off`.
+    decision: hold
+    owner_seam: src/apps/cli/configured-endpoint-wire.ts
+    rollback: unset QUANTA_LLM_ENDPOINT
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: aug02-rfc06-hunk-mutation-receipt
+    gate_owner: [QUANTA_HUNK_MUTATION_RECEIPT]
+    activation: env/config
+    effective_default: { cli: off, web: na, bench: na, headless: na, daemon: na }
+    # PRODUCER-ONLY, and the reason is a co-gate defect: the journal store is built
+    # by `buildHunkUndoStore()` (repl/runtime-context-compose.ts), which returns
+    # undefined unless `QUANTA_HUNK_UNDO` is on. The consumers require
+    # `(hunkMutationReceipt || hunkUndo) && mutationJournal !== undefined`. So
+    # `QUANTA_HUNK_MUTATION_RECEIPT=1` ALONE writes no receipt — this knob cannot
+    # enable its own feature.
+    reachability: producer-only
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: repair-first
+    owner_seam: src/apps/cli/repl/runtime-context-compose.ts
+    rollback: unset QUANTA_HUNK_MUTATION_RECEIPT
+    duplicate_of: null
+    lifecycle_evidence: null

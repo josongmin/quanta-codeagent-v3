@@ -10,7 +10,7 @@ monitoring: partial
 modes: [interactive, headless]
 configurable: integrated
 owners: ["@songmin"]
-labels: ["rfc:aug02-04", "surface:cli", "gate:default-off"]
+labels: ["rfc:aug02-04", "surface:cli", "default-off"]
 config_refs:
   env: ["QUANTA_MCP_HOT_RELOAD"]
 purpose: |
