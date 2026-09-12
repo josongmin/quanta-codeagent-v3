@@ -32,6 +32,7 @@ import {
   type ScanReachAuthority,
   scanReachAuthorityFor,
   scanReachAuthorityProblem,
+  UNTIERED_SCAN_POPULATION,
 } from "./scan-reach-authority"
 import { discoverSuitePopulation } from "./test-shard-discovery"
 
@@ -304,7 +305,10 @@ export const currentScanReachAuthority = (repoRoot: string): ScanReachAuthority 
   scanReachAuthorityFor({
     repoRoot,
     suite: "full",
-    tier: "full",
+    // NOT `"full"`: this walk applies no tier selection, and the `full` TIER is
+    // a strictly smaller population than an untiered walk of the `full` SUITE.
+    // Labelling it `full` is what made every receipt unusable.
+    tier: UNTIERED_SCAN_POPULATION,
     files: [...discoverSuitePopulation(repoRoot, "full").files],
   })
 

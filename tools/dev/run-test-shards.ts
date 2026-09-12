@@ -24,7 +24,7 @@ import {
   writeFailureAttemptArtifact,
 } from "./failure-attempt-producer"
 import { quarantineLane, quarantinePath } from "./lease-quarantine"
-import { AUTHORITATIVE_SCAN_TIERS, scanReachAuthorityFor } from "./scan-reach-authority"
+import { mintableScanReachAuthority } from "./scan-reach-authority"
 import {
   describeWatchdogKill,
   isKill,
@@ -317,24 +317,23 @@ const writeScanReachReceipt = (input: {
   readonly manifestSha256: string
   readonly sinks: readonly string[]
 }): void => {
-  // Only full covers every enrolled scan id, and only an unnarrowed tier walks
-  // all of it. A `unit` suite or a `pr` tier run is internally successful and
-  // describes a DIFFERENT population; minting a receipt for it is how a floor
-  // ratchet ends up reading a subset as a regression.
-  if (input.suite !== "full") return
-  const tier = input.tier ?? "full"
-  if (!AUTHORITATIVE_SCAN_TIERS.includes(tier)) return
+  // Whether this run may record an authority at all, and under which label, is
+  // decided by the module the CONSUMER also uses — an absent `--tier` is not the
+  // `full` tier, and the two halves disagreeing about that made every receipt
+  // unusable.
+  const authority = mintableScanReachAuthority({
+    repoRoot: REPO_ROOT,
+    suite: input.suite,
+    tier: input.tier,
+    manifest: input.manifest,
+  })
+  if (authority === undefined) return
   writeScanReachReceiptAtomic({
     path: SCAN_REACH_RECEIPT,
     head: input.head,
     manifestSha256: input.manifestSha256,
     sinks: input.sinks,
-    authority: scanReachAuthorityFor({
-      repoRoot: REPO_ROOT,
-      suite: "full",
-      tier,
-      files: input.manifest,
-    }),
+    authority,
   })
 }
 

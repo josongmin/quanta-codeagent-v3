@@ -27,9 +27,11 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import {
   AUTHORITATIVE_SCAN_TIERS,
+  mintableScanReachAuthority,
   scanReachAuthorityProblem,
   scanReachMembershipSha256,
   testPolicySha256,
+  UNTIERED_SCAN_POPULATION,
 } from "@/../tools/dev/scan-reach-authority"
 import {
   currentScanReachAuthority,
@@ -40,6 +42,7 @@ import {
   type ScanReachReceipt,
   scanReachChildArgs,
 } from "@/../tools/dev/scan-reach-baseline"
+import { discoverSuitePopulation } from "@/../tools/dev/test-shard-discovery"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 
@@ -192,12 +195,19 @@ describe("scan-reach CLI decision", () => {
     // arm that keeps the comparison a check rather than an echo.
     const current = currentScanReachAuthority(REPO_ROOT)
     expect(current.suite).toBe("full")
-    expect(current.tier).toBe("full")
+    // NOT `"full"`. The consumer applies no tier selection, and the `full` TIER
+    // is a strictly smaller population than an untiered walk of the `full`
+    // SUITE — the mislabel that made every receipt unusable.
+    expect(current.tier).toBe(UNTIERED_SCAN_POPULATION)
     expect(current.membershipSha256).toMatch(/^[0-9a-f]{64}$/)
     expect(current.policySha256).toBe(testPolicySha256(REPO_ROOT))
     // ...and it is a digest of the REAL population, not of an empty walk.
     expect(current.membershipSha256).not.toBe(scanReachMembershipSha256(REPO_ROOT, []))
-    expect(AUTHORITATIVE_SCAN_TIERS).toEqual(["full", "nightly"])
+    expect(AUTHORITATIVE_SCAN_TIERS).toEqual([UNTIERED_SCAN_POPULATION, "full", "nightly"])
+    // The untiered label must never be mistakable for a tier the runner accepts
+    // on the command line, or "no selection" and "the full tier" would be the
+    // same string again.
+    expect(["prepush", "pr", "full", "nightly"]).not.toContain(UNTIERED_SCAN_POPULATION)
   })
 
   test("harvest runs in one isolated worker — parallel test state cannot erase an observed scan", () => {
@@ -444,4 +454,124 @@ describe("scan-reach CLI decision", () => {
       rmSync(dir, { recursive: true, force: true })
     }
   }, 120_000)
+})
+
+/**
+ * TVH audit R1 — both halves were guarded, and the PAIR was never executed.
+ *
+ * The producer minted `tier: input.tier ?? "full"` over the tier-selected
+ * manifest. The consumer recomputed the UNTIERED universe and labelled it
+ * `tier: "full"`. Every fixture in this file supplied the same label to both
+ * sides, so the disagreement was invisible.
+ *
+ * MEASURED on this tree before the fix, against the real consumer:
+ *
+ *   --tier=full    3,951 files  ->  membership-mismatch
+ *   --tier=nightly 3,965 files  ->  wrong-tier
+ *
+ * i.e. no run of any tier could produce a receipt that was ever accepted, and
+ * the failure is silent by design: `readUsableShardReceipt` returns `undefined`
+ * and `bun run scan-reach` re-runs the entire harvest. A cache that can only
+ * miss looks exactly like a cache that is working.
+ */
+describe("producer and consumer agree on one population", () => {
+  const universe = (): readonly string[] => [...discoverSuitePopulation(REPO_ROOT, "full").files]
+
+  test("an untiered full run mints an authority the REAL consumer accepts", () => {
+    const authority = mintableScanReachAuthority({
+      repoRoot: REPO_ROOT,
+      suite: "full",
+      tier: undefined,
+      manifest: universe(),
+    })
+    expect(authority?.tier).toBe(UNTIERED_SCAN_POPULATION)
+    if (authority === undefined) throw new Error("unreachable")
+    expect(
+      scanReachAuthorityProblem(authority, currentScanReachAuthority(REPO_ROOT)),
+    ).toBeUndefined()
+  })
+
+  test("a nightly run mints one too — the label differs, the population does not", () => {
+    const authority = mintableScanReachAuthority({
+      repoRoot: REPO_ROOT,
+      suite: "full",
+      tier: "nightly",
+      manifest: universe(),
+    })
+    if (authority === undefined) throw new Error("unreachable")
+    expect(authority.tier).toBe("nightly")
+    expect(
+      scanReachAuthorityProblem(authority, currentScanReachAuthority(REPO_ROOT)),
+    ).toBeUndefined()
+  })
+
+  test("ONE file short of the universe is a membership mismatch, not an accept", () => {
+    // ANTI-VACUITY for both arms above: acceptance is not unconditional, and
+    // the check is over the id SET rather than over a count or a label.
+    const short = universe().slice(1)
+    const authority = mintableScanReachAuthority({
+      repoRoot: REPO_ROOT,
+      suite: "full",
+      tier: undefined,
+      manifest: short,
+    })
+    if (authority === undefined) throw new Error("unreachable")
+    expect(short.length).toBe(universe().length - 1)
+    expect(scanReachAuthorityProblem(authority, currentScanReachAuthority(REPO_ROOT))).toBe(
+      "membership-mismatch",
+    )
+  })
+
+  test("a narrowed tier and a narrower suite never mint at all", () => {
+    for (const tier of ["pr", "prepush"]) {
+      expect({
+        tier,
+        authority: mintableScanReachAuthority({
+          repoRoot: REPO_ROOT,
+          suite: "full",
+          tier,
+          manifest: universe(),
+        }),
+      }).toEqual({ tier, authority: undefined })
+    }
+    expect(
+      mintableScanReachAuthority({
+        repoRoot: REPO_ROOT,
+        suite: "unit",
+        tier: undefined,
+        manifest: universe(),
+      }),
+    ).toBeUndefined()
+  })
+})
+
+/**
+ * The membership digest is over IDS, and a caller's spelling is not an id.
+ *
+ * `relative(repoRoot, file)` resolves a RELATIVE input against `process.cwd()`,
+ * never against `repoRoot`. The producer holds absolute paths and the consumer
+ * holds repo-relative ones, so the two agreed only while the process happened to
+ * start at the repository root; from a subdirectory or a worktree the consumer's
+ * digest changed and nothing else's did.
+ */
+describe("membership digest is spelling-independent", () => {
+  test("absolute and relative spellings of one set hash the same", () => {
+    // A root that is NOT the cwd, which is the whole point: under the previous
+    // implementation these two differed by the distance from cwd to `/virtual`.
+    const root = "/virtual/repo"
+    const relative = ["src/a.test.ts", "tests/unit/b.test.ts"]
+    const absolute = relative.map((file) => `${root}/${file}`)
+    expect(scanReachMembershipSha256(root, relative)).toBe(
+      scanReachMembershipSha256(root, absolute),
+    )
+    // ...and `..` segments collapse rather than producing a second id for one
+    // file, which is how a substitution hides inside a matching count.
+    expect(scanReachMembershipSha256(root, ["src/../src/a.test.ts"])).toBe(
+      scanReachMembershipSha256(root, ["src/a.test.ts"]),
+    )
+    // ANTI-VACUITY: distinct sets still hash differently.
+    expect(scanReachMembershipSha256(root, relative)).not.toBe(
+      scanReachMembershipSha256(root, ["src/a.test.ts"]),
+    )
+  })
 })
