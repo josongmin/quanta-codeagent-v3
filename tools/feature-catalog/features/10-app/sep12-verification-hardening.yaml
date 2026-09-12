@@ -76,6 +76,7 @@ evidence:
     - tools/test-resilience/junit.ts
     - tools/test-resilience/quarantine.ts
     - tools/test-resilience/cli.ts
+    - tools/dev/verification-matrix-population.ts
   adrs:
     # QUOTED. Unquoted, YAML reads 0558 as the integer 558 and the catalog
     # renders "ADR-558", so a grep for this ADR's own id misses its entry.

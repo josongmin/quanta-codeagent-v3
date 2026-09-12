@@ -13,21 +13,13 @@ import { dirname, join, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { CAPTURE_TIMEOUT_MS, runBoundedCapture, runBoundedChild } from "./bounded-child"
 import { executedFileSetVerdict } from "./executed-file-set"
-import { scanReachMembershipSha256 } from "./scan-reach-authority"
-import {
-  loadPolicyOverrides,
-  policyDigest,
-  resolveTestPopulation,
-  selectTestPoliciesForTier,
-} from "./test-policy"
-import { discoverSuiteFiles } from "./test-shard-discovery"
 import {
   chooseIntraWorkerParallelism,
   chooseShardTestTimeoutMs,
   planTestChunks,
 } from "./test-shard-plan"
-import { testToolchainSha256 } from "./test-shard-receipt"
 import { junitExecutedFiles, loadTestTimings } from "./test-shard-timings"
+import type { VerificationMatrixPlan } from "./verification-matrix"
 import {
   aggregateMatrixReceipts,
   parseMatrixWorkerReceipt,
@@ -35,6 +27,12 @@ import {
   planVerificationMatrix,
   workerReceipt,
 } from "./verification-matrix"
+import {
+  currentMatrixPopulation,
+  describeMatrixPopulationProblem,
+  matrixPlanFileFloor,
+  matrixPopulationProblem,
+} from "./verification-matrix-population"
 import { sharedVerificationCacheRoot } from "./verification-receipt"
 import { assertKnownTier } from "./verification-tier"
 
@@ -86,11 +84,11 @@ const captureGit = (args: readonly string[]): string => {
   return proc.stdout
 }
 
-const cleanGitHead = async (): Promise<string> => {
-  const [head, status] = await Promise.all([
-    captureGit(["rev-parse", "HEAD"]),
-    captureGit(["status", "--porcelain"]),
-  ])
+// Synchronous since the captures became bounded synchronous ones. The
+// `Promise.all` it used to sit in was where an unbounded `proc.exited` hid.
+const cleanGitHead = (): string => {
+  const head = captureGit(["rev-parse", "HEAD"])
+  const status = captureGit(["status", "--porcelain"])
   if (status !== "") throw new Error("matrix execution requires a clean exact-HEAD checkout")
   return head.trim()
 }
@@ -101,7 +99,7 @@ const safeArtifactStem = (chunkId: string): string => {
 }
 
 if (command === "plan") {
-  const headSha = await cleanGitHead()
+  const headSha = cleanGitHead()
   // REQUIRED, never the literal it used to be. The planner hardcoded "full"
   // while the monolith ran `QUANTA_VERIFICATION_TIER: pr` — 3,951 files against
   // 3,941 — so a verdict-equality claim between the two was not a statement
@@ -109,13 +107,10 @@ if (command === "plan") {
   // Validated against the closed tier union, so a typo is a named refusal
   // rather than a plan that selects nothing and aggregates to green.
   const tier = assertKnownTier(requiredArg("--tier"))
-  const discoveredFiles = discoverSuiteFiles(repoRoot, "full")
-  const policies = resolveTestPopulation(
-    discoveredFiles.map((file) => relative(repoRoot, file)),
-    loadPolicyOverrides(policyOverrides).overrides,
-  )
-  const selectedIds = new Set(selectTestPoliciesForTier(policies, tier).map(({ id }) => id))
-  const files = discoveredFiles.filter((file) => selectedIds.has(relative(repoRoot, file)))
+  // The population comes from the module the CONSUMER also uses, so the planner
+  // has nothing of its own to get wrong and the two cannot drift.
+  const current = currentMatrixPopulation({ repoRoot, tier, policyOverridesPath: policyOverrides })
+  const files = current.files
   const timings = loadTestTimings(timingStore)
   const cpuCount = availableParallelism()
   const loadAverage1m = loadavg()[0] ?? 0
@@ -125,16 +120,12 @@ if (command === "plan") {
     predictMs: (file) => timings.get(relative(repoRoot, file)),
     membershipFile: (file) => relative(repoRoot, file),
   })
-  const population = {
-    tier,
-    universe: discoveredFiles.length,
-    membershipSha256: scanReachMembershipSha256(repoRoot, [...selectedIds]),
-    policySha256: policyDigest(policies),
-    capabilitySha256: testToolchainSha256(),
-  }
   const plan = planVerificationMatrix(
     headSha,
-    population,
+    current.population,
+    // The tier's COMMITTED floor, not the module's absolute one: the literal
+    // 100 was 39x below the population this plan covers.
+    matrixPlanFileFloor(tier),
     chunks.map((chunk) => ({
       id: `${chunk.resourceClass}-${chunk.index}`,
       files: chunk.files.map((file) => relative(repoRoot, file)),
@@ -167,8 +158,34 @@ if (command === "plan") {
   process.exit(0)
 }
 
+/**
+ * Parse a plan and check it against the checkout it is about to be used on.
+ *
+ * Both consumers share this, because the defect was that each checked a
+ * DIFFERENT subset: `aggregate` compared the tier only, `worker` compared the
+ * HEAD only, and the three population digests were compared by nobody. A plan
+ * carrying three arbitrary 64-hex strings passed every check and then stood in
+ * for a verdict-equality claim against the monolith.
+ */
+const loadPlanForThisCheckout = (path: string): VerificationMatrixPlan => {
+  const raw = JSON.parse(readFileSync(path, "utf8")) as unknown
+  const tier = (raw as { population?: { tier?: unknown } }).population?.tier
+  if (typeof tier !== "string") throw new Error("[matrix] plan has no population tier")
+  const plan = parseVerificationMatrixPlan(raw, matrixPlanFileFloor(tier))
+  const current = currentMatrixPopulation({
+    repoRoot,
+    tier: plan.population.tier,
+    policyOverridesPath: policyOverrides,
+  })
+  const problem = matrixPopulationProblem(plan.population, current.population)
+  if (problem !== undefined) {
+    throw new Error(describeMatrixPopulationProblem(problem, plan.population, current.population))
+  }
+  return plan
+}
+
 if (command === "aggregate") {
-  const plan = parseVerificationMatrixPlan(JSON.parse(readFileSync(requiredArg("--plan"), "utf8")))
+  const plan = loadPlanForThisCheckout(requiredArg("--plan"))
   // The shadow matrix exists to be compared against the monolith. A plan built
   // for a different tier cannot be that comparison, and before the plan carried
   // a tier at all nothing could have said so — the planner hardcoded "full"
@@ -205,8 +222,8 @@ if (command === "aggregate") {
 }
 
 if (command === "worker") {
-  const plan = parseVerificationMatrixPlan(JSON.parse(readFileSync(requiredArg("--plan"), "utf8")))
-  const currentHead = await cleanGitHead()
+  const plan = loadPlanForThisCheckout(requiredArg("--plan"))
+  const currentHead = cleanGitHead()
   if (currentHead !== plan.headSha) throw new Error(`matrix worker HEAD mismatch`)
   const chunkId = requiredArg("--chunk")
   const chunk = plan.chunks.find((candidate) => candidate.id === chunkId)
@@ -271,7 +288,7 @@ if (command === "worker") {
   const junitOk = junitXml.includes("<testcase") && executedFiles.length > 0
   let snapshotStable = false
   try {
-    snapshotStable = (await cleanGitHead()) === plan.headSha
+    snapshotStable = cleanGitHead() === plan.headSha
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     process.stderr.write(`[matrix] checkout changed during ${chunk.id}: ${message}\n`)

@@ -104,12 +104,30 @@ const planIdentity = (
 
 const SHA256 = /^[0-9a-f]{64}$/
 
-/** Fewest files a matrix plan may claim to cover. */
+/**
+ * Absolute floor on the FLOOR, not on the plan.
+ *
+ * This was the plan's whole anti-vacuum floor, at 100 files, while the tier it
+ * plans for selects 3,941 and `test-tier-population.json` commits every tier to
+ * 3,900 — so the guard was 39x weaker than a number the repository had already
+ * agreed on, and a plan over 2.5% of a tier aggregated to a green. The real
+ * floor now comes from that record (`matrixPlanFileFloor`); this constant keeps
+ * a committed record from weakening it by data.
+ */
 export const MATRIX_PLAN_FILE_FLOOR = 100
 
 export const planVerificationMatrix = (
   headSha: string,
   population: MatrixPopulation,
+  /**
+   * The fewest files this plan may cover, from the tier's committed record.
+   *
+   * REQUIRED, and not defaulted to `MATRIX_PLAN_FILE_FLOOR`: a default is how
+   * the literal came to be the whole check. Callers derive it with
+   * `matrixPlanFileFloor(tier)`. Ahead of `chunks` so that it reads with the
+   * population it constrains rather than trailing a multi-line array.
+   */
+  minFiles: number,
   chunks: readonly MatrixChunk[],
 ): VerificationMatrixPlan => {
   if (!/^[0-9a-f]{40}$/.test(headSha)) throw new Error("matrix plan requires an exact HEAD SHA")
@@ -127,10 +145,13 @@ export const planVerificationMatrix = (
   // the capability floors exist for, one layer up. The universe must also
   // exceed what was selected or the "population" is a fiction.
   const selected = canonical.reduce((total, chunk) => total + chunk.files.length, 0)
-  if (selected < MATRIX_PLAN_FILE_FLOOR) {
+  if (minFiles < MATRIX_PLAN_FILE_FLOOR) {
     throw new Error(
-      `matrix plan covers ${selected} file(s); floor is ${MATRIX_PLAN_FILE_FLOOR}`,
+      `matrix plan floor ${minFiles} is below the absolute floor ${MATRIX_PLAN_FILE_FLOOR}`,
     )
+  }
+  if (selected < minFiles) {
+    throw new Error(`matrix plan covers ${selected} file(s); floor is ${minFiles}`)
   }
   if (population.universe < selected) {
     throw new Error(
@@ -146,7 +167,10 @@ export const planVerificationMatrix = (
   }
 }
 
-export const parseVerificationMatrixPlan = (value: unknown): VerificationMatrixPlan => {
+export const parseVerificationMatrixPlan = (
+  value: unknown,
+  minFiles: number,
+): VerificationMatrixPlan => {
   if (typeof value !== "object" || value === null) throw new Error("invalid matrix plan")
   const row = value as Partial<VerificationMatrixPlan>
   if (row.schema !== "quanta.verification-matrix.v4") throw new Error("invalid matrix plan schema")
@@ -156,7 +180,7 @@ export const parseVerificationMatrixPlan = (value: unknown): VerificationMatrixP
   if (typeof row.population !== "object" || row.population === null) {
     throw new Error("invalid matrix plan population")
   }
-  const rebuilt = planVerificationMatrix(row.headSha, row.population, row.chunks)
+  const rebuilt = planVerificationMatrix(row.headSha, row.population, minFiles, row.chunks)
   if (row.planSha256 !== rebuilt.planSha256) throw new Error("matrix plan digest mismatch")
   return rebuilt
 }
