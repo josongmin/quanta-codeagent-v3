@@ -27,18 +27,13 @@ import { createArtifactRegistry, monotonicIdFactory } from "@/artifact"
 import type { ToolUseBlock } from "@/llm"
 import { defaultPromptCacheObserver } from "@/observability/prompt-cache"
 import type { PermissionContext } from "@/permission"
-import {
-  buildDefaultTools,
-  type SideAgentDaemonPort,
-  sideAgentTools,
-  type Tool,
-  ToolRegistry,
-} from "@/tool"
+import { type SideAgentDaemonPort, sideAgentTools, type Tool, ToolRegistry } from "@/tool"
 import { artifactTools } from "@/tool/artifact"
 import { coverageCheckTool } from "@/tool/coverage_check"
 import type { McpConnectorDiscoveryPort, McpInstallOutcome } from "@/tool/mcp-connector"
 import { mcpConnectorTools } from "@/tool/mcp-connector"
 import { promptCacheStatusTool } from "@/tool/prompt_cache_status"
+import { assertBroadlyWiredFixture, buildBroadlyWiredTools } from "./_shared/wired-tool-ports"
 
 const call = (name: string, input: unknown): ToolUseBlock => ({
   type: "tool_use",
@@ -448,39 +443,20 @@ describe("artifact_* — list/get read-only, register/destroy mutating", () => {
 
 describe("MUTATING_TOOL_TABLE — every conditionally-wired tool is classified (no UnknownToolError)", () => {
   test("a fully-wired buildDefaultTools has NO tool missing from the plan-mode table", () => {
-    const noKeyImageGen = { generate: async () => ({ kind: "no_key" as const }) }
-    const fakeResources = {
-      listResources: async () => ({ ok: true as const, value: [] }),
-      readResource: async () => ({ ok: true as const, value: [] }),
-      listPrompts: async () => ({ ok: true as const, value: [] }),
-      getPrompt: async () => ({ ok: true as const, value: { messages: [] } }),
-    }
-    const fakePty = {
-      list: async () => [],
-      attach: async () => ({ ok: true as const, value: { handle: "h", cursor: 0 } }),
-      write: async () => ({ ok: true as const, value: undefined }),
-      read: async () => ({ ok: true as const, value: { chunks: [], nextSeq: 0 } }),
-      resize: async () => ({ ok: true as const, value: undefined }),
-      detach: async () => ({ ok: true as const, value: undefined }),
-      kill: async () => ({ ok: true as const, value: undefined }),
-    }
-    const fakeConnectors = { list: () => [], install: () => ({ ok: false as const, error: "x" }) }
-    const fakeArtifact = createArtifactRegistry({ now: () => 1, idFactory: monotonicIdFactory() })
-    const tools = buildDefaultTools({
-      structuredPatch: true,
-      coverageCheck: true,
-      // biome-ignore lint/suspicious/noExplicitAny: structural fake leaf ports
-      imageGen: noKeyImageGen as any,
-      officeAuthoring: true,
-      // biome-ignore lint/suspicious/noExplicitAny: structural fake leaf ports
-      mcpResources: fakeResources as any,
-      progressUpdate: true,
-      // biome-ignore lint/suspicious/noExplicitAny: structural fake leaf ports
-      ptySession: fakePty as any,
-      // biome-ignore lint/suspicious/noExplicitAny: structural fake leaf ports
-      mcpConnectors: fakeConnectors as any,
-      artifactRegistry: fakeArtifact,
-    })
+    // The port bag here used to be NINE hand-picked ports out of thirty, and an
+    // adversarial round used the gap: a write-capable, HITL-exempt tool gated on
+    // `notebookEdit` — outside the bag — landed with two source files edited and
+    // this file green (90 pass / 0 fail across four gate files, 2419 pass across
+    // 125 HITL/permission/tool files, `precommit ok — 9 of 9`). The same probe
+    // gated on `structuredPatch`, which WAS in the bag, went red. The resistance
+    // was a coincidence of which ports someone had remembered.
+    //
+    // The bag is now an exhaustive `Record<keyof DefaultToolPorts, PortPlan>` in
+    // `./_shared/wired-tool-ports`, so a NEW port is a compile error until someone
+    // decides what this fixture does with it. A `satisfies` would not have caught
+    // the omission: it checks the values present, not that every key is.
+    const tools = buildBroadlyWiredTools()
+    assertBroadlyWiredFixture(tools)
     const missing = tools
       .map((t) => t.name)
       .filter((n) => {

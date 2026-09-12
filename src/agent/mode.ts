@@ -587,6 +587,46 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
   gh_pr_code_tour: null,
   git_co_change: null,
   ci_finding: null,
+  // ─── sep-13 — the TEN tools the R3 closeout's own guard could not see ──────
+  // The R3 closeout added entries "so plan-mode dispatch never trips
+  // UnknownToolError" and proved it with a fixture that wired NINE of the thirty
+  // `DefaultToolPorts`. With all thirty wired, ten more tools appear in no row at
+  // all. MEASURED: `buildDefaultTools` with the full port plan yields 66 tools and
+  // these ten threw from `isMutatingTool`.
+  //
+  // Read-only ⇒ `null`, by this table's own rule. `threads_handoff` emits a
+  // `quanta://threads/{id}` deeplink and mutates nothing; `ask_user` asks the
+  // operator a question; `reflect` records the agent's own reasoning; `fetch_rules`
+  // reads rule files; `projects_kb` reads a knowledge base whose only write lands
+  // in the in-session store (the same posture as `ci_finding` above). For these
+  // five the classification CHANGES behaviour: plan mode went from denying with a
+  // confusing "not classified" reason to allowing them, which is what plan mode is
+  // for — asking the operator and fetching rules are plan-mode activities.
+  threads_handoff: null,
+  ask_user: null,
+  reflect: null,
+  fetch_rules: null,
+  projects_kb: null,
+  // Write-capable ⇒ a mutating kind. For these five the DENIAL is unchanged —
+  // `UnknownToolError` already denied them — and only the reason becomes correct.
+  // `automation_update` creates/pauses/cancels recurring automations in the engine
+  // port: durable agent-side state with no FS/shell/git effect, the same kind as
+  // `artifact_register` and `permission_propose_pattern`. `notebook_edit` rewrites
+  // `.ipynb` cells through the same FS jail `edit` uses. `debug_inspect` launches a
+  // program under a debug adapter, `run_tests` detects and runs the project suite
+  // (with an optional model-supplied `command`), and `collect_evidence` runs that
+  // suite and fuses the result — all three execute code, the same kind as `bash`.
+  //
+  // OPEN, and deliberately NOT resolved here: `test_runner` is classified `null`
+  // for running the project's own suite, while `run_tests` and `collect_evidence`
+  // do the same thing and are classified mutating. Making them match means either
+  // widening plan mode or narrowing `test_runner`, and both are behaviour decisions
+  // that deserve their own change rather than riding a UnknownToolError fix.
+  automation_update: "working_state_write",
+  notebook_edit: "write_filesystem",
+  debug_inspect: "bash_mutating",
+  run_tests: "bash_mutating",
+  collect_evidence: "bash_mutating",
 })
 
 /** SINGLE SOURCE OF TRUTH for the "caller-wire" tool-name allowlist.

@@ -15,12 +15,12 @@ import {
 } from "@/agent/mode"
 import {
   createUpdateWorkingStateTool,
-  defaultTools,
   gitTools,
   lspNavTools,
   nullLspNavProvider,
   requestUserInputTool,
 } from "@/tool"
+import { assertBroadlyWiredFixture, buildBroadlyWiredTools } from "./_shared/wired-tool-ports"
 
 describe("mode mutating-table cross-check (ADR-0036)", () => {
   // Caller-wire tools: registered ONLY when the relevant AgentConfig slot is
@@ -32,8 +32,18 @@ describe("mode mutating-table cross-check (ADR-0036)", () => {
   // two former hand-maintained copies can no longer diverge — adding a
   // caller-wire tool is ONE edit alongside its table entry.
   const callerWireToolNames = CALLER_WIRE_TOOL_NAMES
+  // BROADLY wired, not the bare `defaultTools` singleton. With the bare set, a tool
+  // reachable only through a `DefaultToolPort` is invisible here, so its table
+  // entry reads as an ORPHAN and the natural repair is to add a caller-wire
+  // allowlist row — growing a hand-maintained list to paper over a fixture that
+  // cannot see. MEASURED: ten such tools (automation_update, threads_handoff,
+  // ask_user, reflect, fetch_rules, notebook_edit, debug_inspect, run_tests,
+  // collect_evidence, projects_kb) had no table row at all, and this test could not
+  // have reported them either way. The port plan is an exhaustive
+  // `Record<keyof DefaultToolPorts, …>`, so a new port is a compile error there.
+  const broadlyWired = buildBroadlyWiredTools()
   const allTools = [
-    ...defaultTools.map((t) => t.name),
+    ...broadlyWired.map((t) => t.name),
     ...gitTools().map((t) => t.name),
     ...lspNavTools(nullLspNavProvider).map((t) => t.name),
     createUpdateWorkingStateTool(undefined).name,
@@ -49,6 +59,10 @@ describe("mode mutating-table cross-check (ADR-0036)", () => {
   // the e2e drift detector derive their caller-wire set from the SAME exported
   // constant, and every name in it is (a) classified in the table and (b) NOT
   // already enumerable (so it isn't double-counted / silently stale).
+  test("the broadly-wired fixture is intact (an empty set satisfies every loop)", () => {
+    assertBroadlyWiredFixture(broadlyWired)
+  })
+
   test("caller-wire allowlist is the exported SSOT (no local hand-maintained copy)", () => {
     // Identity: the test's allowlist IS the exported constant, not a copy.
     expect(callerWireToolNames).toBe(CALLER_WIRE_TOOL_NAMES)

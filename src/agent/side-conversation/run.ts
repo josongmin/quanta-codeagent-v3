@@ -227,6 +227,27 @@ export const SIDE_CONVERSATION_TOOL_EXCLUSIONS: readonly string[] = Object.freez
   // is a main-session background-scheduler control surface (like `subagent_poll`),
   // not part of a lightweight side-conversation's exploration set. Excluded.
   "subagent_force_background",
+  // sep-13 — the five read-only tools that gained a `planModeMutatingTable` row
+  // when the table's ten missing classifications were filled in. Each is `null`
+  // (plan-safe) and each is a MAIN-SESSION surface, not part of a lightweight
+  // delegated exploration:
+  //   `ask_user` interrogates the operator, which a delegated side-conv may not do
+  //     (the same parent-interaction rationale as `enter_plan_mode`);
+  //   `reflect` records the agent's own reasoning into the main run's trace;
+  //   `projects_kb` browses an external knowledge base and writes into the main
+  //     session's store;
+  //   `threads_handoff` emits a `quanta://threads/{id}` deeplink that hands the
+  //     MAIN thread to another surface;
+  //   `fetch_rules` reads project rule files — plausibly useful, but `read` and
+  //     `grep` already cover it, and widening the side-conv surface is a separate
+  //     decision from classifying the table.
+  // Excluding all five keeps SIDE_CONVERSATION_TOOL_NAMES byte-identical, so the
+  // table fix changes nothing here.
+  "ask_user",
+  "fetch_rules",
+  "projects_kb",
+  "reflect",
+  "threads_handoff",
 ])
 
 // ===========================================================================

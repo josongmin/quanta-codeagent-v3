@@ -38,6 +38,7 @@ import {
   nullLspNavProvider,
   requestUserInputTool,
 } from "@/tool"
+import { buildBroadlyWiredTools } from "../unit/_shared/wired-tool-ports"
 
 /* ────────────────────────────── env baseline ─────────────────────────────── */
 
@@ -72,9 +73,16 @@ beforeEach(() => {
 // `tests/unit/mode-mutating-table.test.ts` imports the SAME constant — the two
 // formerly hand-maintained copies can no longer diverge.
 
+// BROADLY wired, not the bare `defaultTools` singleton — see the sibling note in
+// `tests/unit/mode-mutating-table.test.ts`. With the bare set a tool reachable only
+// through a `DefaultToolPort` is invisible, so its table entry reads as an ORPHAN
+// and the repair looks like adding a caller-wire row. MEASURED: ten tools had no
+// table row at all and neither detector could report them.
+const BROADLY_WIRED = buildBroadlyWiredTools()
+
 const ALL_REGISTERED_TOOL_NAMES = (() => {
   const names = new Set<string>()
-  for (const t of defaultTools) names.add(t.name)
+  for (const t of BROADLY_WIRED) names.add(t.name)
   for (const t of gitTools()) names.add(t.name)
   for (const t of lspNavTools(nullLspNavProvider)) names.add(t.name)
   names.add(createUpdateWorkingStateTool(undefined).name)
