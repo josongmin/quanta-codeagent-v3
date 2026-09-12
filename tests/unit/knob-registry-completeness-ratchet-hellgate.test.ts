@@ -25,7 +25,9 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { join } from "node:path"
+import { readFileSync } from "node:fs"
+import { basename, join } from "node:path"
+import ts from "typescript"
 import {
   censusFiles,
   censusSource,
@@ -230,7 +232,7 @@ const EXCEPTIONS: ReadonlyMap<string, string> = new Map<string, string>([
   // a knob in `/knobs` that only tests are supposed to touch.
   [
     "QUANTA_SIDE_AGENT_TEST_MODE",
-    "test-only: the forked side-agent worker's protocol seam (no_finding|throw|multi|late) in src/side-agent/worker-entry.mjs, set ONLY by tests/integration/sep8-remediation/r05. Direct sibling of QUANTA_SIDE_AGENT_LLM_REPLAY above. Unreachable in a compiled binary — nodeProcessForkPort throws SideAgentForkUnsupportedError before forking — and the port is not even constructed unless QUANTA_SUBAGENT_PROCESS is on (default-OFF)",
+    "test-only: the forked side-agent worker's protocol seam (no_finding|throw|multi|late) in src/side-agent/worker-entry.mjs, set ONLY by tests/integration/sep8-remediation/r05. Direct sibling of QUANTA_SIDE_AGENT_LLM_REPLAY above. Unreachable in a compiled binary — nodeProcessForkPort throws SideAgentForkUnsupportedError before forking — and the port is not even constructed unless QUANTA_SIDE_AGENT_PROCESS is on (default-OFF)",
   ],
   // BUILD-TIME CONSTANTS — not operator knobs. These three are INLINED by
   // `bun build --env='QUANTA_BUILD_*'` at compile time, so in a shipped binary they
@@ -249,11 +251,6 @@ const EXCEPTIONS: ReadonlyMap<string, string> = new Map<string, string>([
   [
     "QUANTA_BUILD_TIME",
     "build-time: inlined alongside QUANTA_BUILD_COMMIT; distinguishes two builds of the same commit",
-  ],
-  // RETIRED — present as a REFUSAL input, not a value input.
-  [
-    "QUANTA_TB_BEST_OF_N",
-    "retired: apps/bench/terminal/config.ts reads it only to REFUSE the run (assertNoTerminalBestOfN). Declaring it would advertise a knob whose sole effect is an error, which is worse than not listing it",
   ],
 ])
 
@@ -333,7 +330,7 @@ const ORPHAN_CEILING = 0
 
 describe("knob-registry completeness ratchet (ADR-0503 P0)", () => {
   test(`orphan QUANTA_* reads (declared nowhere) stay <= ${ORPHAN_CEILING}`, () => {
-    const { declared, orphans, files } = scan()
+    const { declared, orphans, files, reads } = scan()
     // The corpus floor. `ORPHAN_CEILING` is 0, so `orphans.size <= 0` is satisfied
     // by a scan that read NOTHING — and this file once printed
     // `declared=0 orphans=0/0` while passing against an empty mirror of the tree.
@@ -365,19 +362,78 @@ describe("knob-registry completeness ratchet (ADR-0503 P0)", () => {
       declared.size,
       "no knob declarations found — the completeness verdict is over an empty scan",
     ).toBeGreaterThan(400)
+    // The THIRD floor, and the one this file shipped without. `files` and
+    // `declared` are both computed from the corpus, so both survive a scan whose
+    // READ resolution has broken. Measured: widening `isExcludedFromScan` to
+    // cover all of `src/` collapses reads to 0 while files stays >3000 and
+    // declared stays 674 — and this test passed. The only thing that fired was a
+    // sibling test, and that backstop holds only while EXCEPTIONS is non-empty,
+    // which this file's own guidance ("keep this SMALL") works against.
+    expect(
+      reads.size,
+      "no QUANTA_* reads resolved — every knob is trivially declared because nothing was read",
+    ).toBeGreaterThan(400)
     expect(orphans.size).toBeLessThanOrEqual(ORPHAN_CEILING)
   }, 30_000)
 
   /**
    * The escape hatch is measured too.
    *
-   * While the ceiling sat pinned at 0, `EXCEPTIONS` grew from 1 row to 41 and
-   * nothing asserted its size or its contents. Two rows were pure decoration:
-   * `QUANTA_OTEL_ENDPOINT` and `QUANTA_CONTEXT_1M` were DECLARED as well as
-   * excepted, and `!declared && !excepted` already filtered them, so those rows
-   * had never once changed an outcome. A row nobody checks is a ceiling nobody
-   * raised.
+   * While the ceiling sat pinned at 0, `EXCEPTIONS` grew from 1 row to its
+   * current size and nothing asserted either. ONE row was pure decoration:
+   * `QUANTA_OTEL_ENDPOINT` was DECLARED as well as excepted, and
+   * `!declared && !excepted` already filtered it, so that row had never once
+   * changed an outcome. A row nobody checks is a ceiling nobody raised.
+   *
+   * (An earlier version of this comment, and the commit message that added it,
+   * said TWO rows were inert and named `QUANTA_CONTEXT_1M` as the second.
+   * `QUANTA_CONTEXT_1M` was never in `EXCEPTIONS` at all — it appears only in a
+   * fixture line further down this file.)
    */
+  /**
+   * The list's SIZE is pinned, and the pin is checked against the SOURCE rather
+   * than the Map.
+   *
+   * `EXCEPTIONS` is a `Map` literal, so a duplicated key is silently collapsed —
+   * the later row wins and the earlier one becomes unreachable. That is not
+   * hypothetical: `QUANTA_TB_BEST_OF_N` was keyed twice, and the second row (added
+   * by the commit that also added the "no inert row" and "no stale row" tests)
+   * overwrote a longer, more precise reason. All three quality tests read the Map,
+   * so none of them could see it. Counting the literal rows in this file's own
+   * text is the only way a duplicate becomes visible.
+   */
+  test("EXCEPTIONS is pinned in size and free of duplicate keys", () => {
+    const src = readFileSync(join(import.meta.dir, basename(import.meta.path)), "utf8")
+    const block = src.slice(
+      src.indexOf("const EXCEPTIONS: ReadonlyMap<string, string> = new Map<string, string>(["),
+    )
+    const sf = ts.createSourceFile("e.ts", block, ts.ScriptTarget.ESNext, true, ts.ScriptKind.TS)
+    let rows: string[] | undefined
+    const visit = (node: ts.Node): void => {
+      if (rows === undefined && ts.isArrayLiteralExpression(node)) {
+        const keys = node.elements
+          .filter(ts.isArrayLiteralExpression)
+          .map((e) => e.elements[0])
+          .filter((e): e is ts.StringLiteral => e !== undefined && ts.isStringLiteral(e))
+          .map((e) => e.text)
+        if (keys.length > 0) rows = keys
+      }
+      ts.forEachChild(node, visit)
+    }
+    ts.forEachChild(sf, visit)
+    const literalRows = rows ?? []
+    expect(literalRows.length, "could not parse the EXCEPTIONS literal").toBeGreaterThan(20)
+    const dupes = literalRows.filter((k, i) => literalRows.indexOf(k) !== i)
+    expect(dupes, "these keys appear twice in the EXCEPTIONS literal — the later row wins").toEqual(
+      [],
+    )
+    // Every literal row must survive into the Map, and the size is frozen. An
+    // exception is the only way past a ceiling of 0, so growing this list is the
+    // same act as raising the ceiling.
+    expect(EXCEPTIONS.size).toBe(literalRows.length)
+    expect(EXCEPTIONS.size).toBe(40)
+  })
+
   test("no EXCEPTIONS row is inert — excepting a DECLARED key does nothing", () => {
     const { declared } = scan()
     const redundant = [...EXCEPTIONS.keys()].filter((key) => declared.has(key))

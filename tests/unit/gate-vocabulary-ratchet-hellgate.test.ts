@@ -57,6 +57,30 @@ function* walk(dir: string): Generator<string> {
  *  foreign working directory. */
 const REPO_ROOT = join(import.meta.dir, "..", "..")
 
+/**
+ * Files whose raw gate comparison is the MECHANISM rather than a shortcut.
+ *
+ * `shared/env-flag.ts` is the SSOT itself — the raw comparisons there ARE
+ * `gateOn`/`gateDisabled`.
+ *
+ * `apps/cli/build-stamp.ts` reads `process.env.QUANTA_BUILD_DIRTY === "1"`, and
+ * `bun build --env='QUANTA_BUILD_*'` (`tools/bin/build-cli.ts`) substitutes that
+ * read with a LITERAL at compile time. That substitution matches
+ * `process.env.<NAME>` textually, so routing it through `gateOn` would leave the
+ * accessor call unsubstituted and the stamp permanently absent — the SSOT helper
+ * would defeat the feature. The SIBLING ratchet
+ * (`no-raw-process-env-knob-ratchet-hellgate.test.ts`) already grants this exact
+ * file the same exemption for the same reason.
+ *
+ * The sibling exemption was added and this one was not, so `build-stamp.ts`
+ * landed as a hard RED against a ceiling of 0 that says "NEVER raise it" — the
+ * stale-sibling failure this campaign is about, committed by the campaign.
+ */
+const RAW_GATE_EXEMPT: readonly string[] = ["shared/env-flag.ts", "src/apps/cli/build-stamp.ts"]
+
+const isExemptFromRawGateScan = (path: string): boolean =>
+  RAW_GATE_EXEMPT.some((suffix) => path.endsWith(suffix))
+
 const scanRawGates = (): { total: number; byFile: Record<string, number>; files: number } => {
   const byFile: Record<string, number> = {}
   const sourceRoot = join(REPO_ROOT, "src")
@@ -69,7 +93,7 @@ const scanRawGates = (): { total: number; byFile: Record<string, number>; files:
   let files = 0
   for (const file of scanned) {
     files++
-    if (file.endsWith("shared/env-flag.ts")) continue // the SSOT lives here
+    if (isExemptFromRawGateScan(file)) continue
     let n = 0
     for (const line of readFileSync(file, "utf8").split("\n")) {
       if (isCommentLine(line)) continue
@@ -88,6 +112,10 @@ const scanRawGates = (): { total: number; byFile: Record<string, number>; files:
  *  `=== "1"|"on"|"off"` comparison is a regression — use the SSOT helpers. NEVER
  *  raise it. */
 const RAW_GATE_CEILING = 0
+
+/** Exempting a file is the only way past a ceiling of 0, so the list is pinned.
+ *  Raising this number is the same act as raising the ceiling. */
+const RAW_GATE_EXEMPT_COUNT = 2
 
 describe("gate-vocabulary SSOT — canonical readers exist", () => {
   test("gateOn is opt-in (default OFF), accepts the full truthy vocab", () => {
@@ -126,6 +154,26 @@ describe("gate-vocabulary SSOT — canonical readers exist", () => {
 })
 
 describe("gate-vocabulary ratchet — raw comparisons only ever decrease", () => {
+  test("the exemption list is pinned and every entry is load-bearing", () => {
+    expect(RAW_GATE_EXEMPT.length).toBe(RAW_GATE_EXEMPT_COUNT)
+    expect(new Set(RAW_GATE_EXEMPT).size).toBe(RAW_GATE_EXEMPT_COUNT)
+    // An exemption that excuses nothing is decoration; one that excuses a file
+    // with no raw comparison hides nothing and should be deleted instead. Each
+    // entry must name a file that EXISTS and that the scanner would otherwise
+    // count — so the list cannot accumulate rows nobody verified.
+    for (const suffix of RAW_GATE_EXEMPT) {
+      const abs = suffix.startsWith("src/") ? join(REPO_ROOT, suffix) : undefined
+      const file = abs ?? [...walk(join(REPO_ROOT, "src"))].find((f) => f.endsWith(suffix))
+      expect(file, `${suffix} matches no file under src/`).toBeDefined()
+      const hits = readFileSync(file as string, "utf8")
+        .split("\n")
+        .filter((l) => !isCommentLine(l) && RAW_GATE.test(l)).length
+      expect(hits, `${suffix} is exempt but has no raw gate comparison to excuse`).toBeGreaterThan(
+        0,
+      )
+    }
+  })
+
   test(`raw QUANTA gate comparisons in src/ stay <= ${RAW_GATE_CEILING} (burn-down)`, () => {
     const { total, byFile, files } = scanRawGates()
     // Anti-vacuity, and here it is the ONLY possible one. The ceiling is ZERO —

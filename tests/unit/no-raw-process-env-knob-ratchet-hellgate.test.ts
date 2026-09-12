@@ -26,6 +26,9 @@ import { assertScanPopulation } from "./_shared/scan-population"
 const RAW =
   /process\.env\.QUANTA_[A-Z0-9_]+|process\.env\[\s*[`"']QUANTA_|gate(?:On|Disabled)(?:Strict)?\s*\(\s*process\.env\b|\{[^}]*\bQUANTA_[A-Z0-9_]+[^}]*\}\s*=\s*process\.env\b/
 
+/** `RAW` with the `g` flag, for counting every occurrence on a line. */
+const RAW_GLOBAL = new RegExp(RAW.source, "g")
+
 const isComment = (l: string): boolean => {
   const t = l.trimStart()
   return t.startsWith("//") || t.startsWith("*") || t.startsWith("/*")
@@ -124,9 +127,11 @@ const scan = (): { total: number; byFile: Record<string, number>; files: number 
     for (const line of readFileSync(file, "utf8").split("\n")) {
       if (isComment(line)) continue
       // count each occurrence on the line (a line may read >1 knob)
-      const m = line.match(
-        /process\.env\.QUANTA_[A-Z0-9_]+|process\.env\[\s*[`"']QUANTA_|gate(?:On|Disabled)(?:Strict)?\s*\(\s*process\.env\b|\{[^}]*\bQUANTA_[A-Z0-9_]+[^}]*\}\s*=\s*process\.env\b/g,
-      )
+      // Derived from RAW, never re-typed. A byte-identical inline clone used to
+      // sit here: the paired control below exercises `RAW`, the scan used the
+      // copy, so breaking the copy collapsed the corpus 43 -> 0 and left the
+      // suite GREEN. The `files > 2984` floor cannot see a broken matcher.
+      const m = line.match(RAW_GLOBAL)
       if (m) n += m.length
     }
     if (n > 0) byFile[file.replace(/^.*src\//, "src/")] = n

@@ -14,7 +14,7 @@
  *   envSource.QUANTA_BROWSER_MCP_CONFIG   bag aliased to `envSource`
  *   args.envSource.QUANTA_BG_STORE_DIR    bag nested behind a field
  *   (env as { QUANTA_LLM_REPLAY?: string }).QUANTA_LLM_REPLAY
- *   intEnv("QUANTA_SHELL_SNAPSHOT_TIMEOUT_MS")
+ *   intEnv("QUANTA_SHELL_SNAPSHOT_TIMEOUT")
  *
  * A seventh regex would have closed six of those and left the seventh. The
  * classification below is structural instead.
