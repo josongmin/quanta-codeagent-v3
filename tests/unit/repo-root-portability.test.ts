@@ -330,7 +330,14 @@ describe("no test writes a scratch entry to the repo root", () => {
     })
 
   test("every compiled-probe entry lives under an ignored directory", () => {
-    const offenders = rootWritersUnder(join(REPO_ROOT, "tests"))
+    // All three roots that hold `.test.ts`, not just `tests/`. A self-audit
+    // found this walking `tests/` alone: there is nothing to find under `src/`
+    // or `tools/` today, and a guard scoped to where the last offender happened
+    // to live is a guard the next one walks around. Measured: 303 colocated test
+    // files under `src/` and 17 under `tools/` were outside it.
+    const offenders = ["tests", "src", "tools"].flatMap((root) =>
+      rootWritersUnder(join(REPO_ROOT, root)),
+    )
     expect(
       offenders,
       "a pid-named scratch file at the repo root survives a SIGKILL and breaks the NEXT " +
