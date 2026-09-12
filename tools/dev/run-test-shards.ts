@@ -19,6 +19,7 @@ import {
 } from "./executed-file-set"
 import {
   buildFailureAttemptArtifact,
+  failureAttemptPath,
   failureRecordsFromJunit,
   writeFailureAttemptArtifact,
 } from "./failure-attempt-producer"
@@ -632,7 +633,7 @@ interface CachedChunk {
 }
 
 /** Where the authoritative attempt's failures are published. */
-const FAILURE_ATTEMPT_PATH = join(SHARED_CACHE_ROOT, "failure-attempt.json")
+const FAILURE_ATTEMPT_PATH = failureAttemptPath(SHARED_CACHE_ROOT)
 
 /**
  * Publish the first failing chunk's failures, or `undefined` when there is

@@ -7,6 +7,7 @@ import {
   hostCapabilityFingerprint,
 } from "../../../tools/dev/external-toolchain"
 import { GATES } from "../../../tools/dev/gate-manifest"
+import { resolveChunkCacheScope } from "../../../tools/dev/test-shard-cache-scope"
 import { testEnvironmentSha256, toolScopeSha256 } from "../../../tools/dev/test-shard-receipt"
 import {
   ABSENT_BASE_OID,
@@ -566,16 +567,46 @@ describe("daemon state is part of receipt identity", () => {
     expect(Object.keys(externalToolchainFingerprint())).not.toContain("docker-daemon")
   })
 
-  test("both receipt owners default to the capability set, not the PATH set", () => {
-    const source = (rel: string): string =>
-      readFileSync(resolve(import.meta.dir, "..", "..", "..", rel), "utf8")
-    for (const rel of ["tools/dev/verification-receipt.ts", "tools/dev/test-shard-receipt.ts"]) {
-      const body = source(rel)
-      expect({ rel, wired: body.includes("= hostCapabilityFingerprint()") }).toEqual({
-        rel,
-        wired: true,
-      })
-    }
+  test("the PRODUCTION cache identity includes daemon state, measured", () => {
+    // The source-shaped version of this test asserted
+    // `body.includes("= hostCapabilityFingerprint()")`, which matched the
+    // DEFAULT PARAMETER and said nothing about the caller. A wiring audit found
+    // the caller passing `input.toolchainFingerprint ?? externalToolchainFingerprint()`
+    // — an explicit argument — so the default never fired and every real chunk's
+    // identity still excluded docker/lima/ollama. The test's own comment called
+    // itself "the whole wiring claim".
+    //
+    // This computes the value the runner actually uses and compares it to the
+    // PATH-only value. They must differ, or daemon state is not in the identity.
+    const scope = resolveChunkCacheScope({
+      repoRoot: resolve(import.meta.dir, "..", "..", ".."),
+      ids: ["tests/unit/a.test.ts"],
+      resourceCertifications: [],
+    })
+    expect(scope.toolScopeSha256).not.toBe(toolScopeSha256(externalToolchainFingerprint()))
+    expect(scope.toolScopeSha256).toBe(toolScopeSha256(hostCapabilityFingerprint()))
+
+    // ANTI-VACUITY: the two fingerprints must actually differ on this host, or
+    // "not equal" is unachievable and the arm above proves nothing.
+    const host = Object.keys(hostCapabilityFingerprint())
+    const path = new Set(Object.keys(externalToolchainFingerprint()))
+    expect(host.filter((key) => !path.has(key))).toContain("docker-daemon")
+  })
+
+  test("the exact receipt's owner takes the capability set by default", () => {
+    // This one IS decided by the default: `verificationContextForSnapshot`
+    // calls `verificationToolchainSha256()` with no argument.
+    const probe = readFileSync(
+      resolve(import.meta.dir, "..", "..", "..", "tools/dev/verification-receipt-probe.ts"),
+      "utf8",
+    )
+    expect(probe).toContain("toolchainSha256: verificationToolchainSha256()")
+    expect(verificationToolchainSha256()).toBe(
+      verificationToolchainSha256(hostCapabilityFingerprint()),
+    )
+    expect(verificationToolchainSha256()).not.toBe(
+      verificationToolchainSha256(externalToolchainFingerprint()),
+    )
   })
 
   test("a DECLARED tool scope still narrows — this does not re-inflate it", () => {

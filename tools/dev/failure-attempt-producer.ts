@@ -24,7 +24,7 @@
  */
 
 import { mkdirSync, writeFileSync } from "node:fs"
-import { dirname } from "node:path"
+import { dirname, join } from "node:path"
 import {
   type FailureAttemptArtifact,
   type FailureRecord,
@@ -32,6 +32,19 @@ import {
   failureFingerprint,
 } from "../test-resilience/failure-artifact"
 import { parseJunitCases } from "../test-resilience/junit"
+
+/**
+ * The ONE path this artifact lives at.
+ *
+ * A wiring audit found the producer writing
+ * `<git-common>/quanta-verification-cache/failure-attempt.json` while the
+ * `test:flake:diagnose` script read `.cache/test-failure-attempt.json` — a
+ * different directory AND a different filename. The artifact was real, current
+ * and read by nobody. Exported so the consumer resolves it rather than
+ * restating a literal that can drift again.
+ */
+export const failureAttemptPath = (sharedCacheRoot: string): string =>
+  join(sharedCacheRoot, "failure-attempt.json")
 
 /** Bytes of a failure body kept for human triage. */
 const MESSAGE_BYTES = 2_000

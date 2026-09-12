@@ -41,7 +41,9 @@
 
 import { readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
+import { failureAttemptPath } from "../dev/failure-attempt-producer"
 import { mayQuarantine, preserveFirstFailure } from "../dev/verification-first-failure"
+import { sharedVerificationCacheRoot } from "../dev/verification-receipt"
 import { runBoundedChild } from "./bounded-child"
 import {
   type ChildEvidence,
@@ -164,7 +166,15 @@ const detailFor = (record: FailureRecord, evidence: ChildEvidence): string => {
 }
 
 const cmdDiagnose = async (): Promise<number> => {
-  const artifactPath = flag("--from-artifact") ?? process.env.QUANTA_TEST_FAILURE_ARTIFACT
+  // Resolved from the PRODUCER, not restated. A wiring audit found this script
+  // reading `.cache/test-failure-attempt.json` while the runner wrote
+  // `<git-common>/quanta-verification-cache/failure-attempt.json` — a different
+  // directory and a different filename, so a real, current artifact was read by
+  // nobody. An explicit flag or env still wins; the default now cannot drift.
+  const artifactPath =
+    flag("--from-artifact") ??
+    process.env.QUANTA_TEST_FAILURE_ARTIFACT ??
+    failureAttemptPath(sharedVerificationCacheRoot(REPO_ROOT))
   if (artifactPath === undefined || artifactPath === "") {
     console.error(
       "[diagnose] ✗ FAIL CLOSED: no failure artifact.\n" +

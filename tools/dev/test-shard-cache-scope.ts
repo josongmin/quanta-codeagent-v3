@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import { externalToolchainFingerprint } from "./external-toolchain"
+import { hostCapabilityFingerprint } from "./external-toolchain"
 import { CAPABILITY_GROUPS } from "./test-capability-manifest"
 import {
   resolveResourceCertification,
@@ -107,7 +107,7 @@ const wholeTree = (input: ChunkScopeInput, reason: string): ChunkCacheScope => (
   reason,
   inputScopeSha256: WHOLE_TREE_INPUT_SCOPE_SHA256,
   toolScopeSha256: toolScopeSha256(
-    input.toolchainFingerprint ?? externalToolchainFingerprint(),
+    input.toolchainFingerprint ?? hostCapabilityFingerprint(),
     undefined,
   ),
   producerReceiptsSha256: producerReceiptsSha256(input.producerReceipts ?? []),
@@ -161,7 +161,7 @@ export const resolveChunkCacheScope = (input: ChunkScopeInput): ChunkCacheScope 
       }),
     ),
     toolScopeSha256: toolScopeSha256(
-      input.toolchainFingerprint ?? externalToolchainFingerprint(),
+      input.toolchainFingerprint ?? hostCapabilityFingerprint(),
       claimedTools,
     ),
     producerReceiptsSha256: producerReceiptsSha256(input.producerReceipts ?? []),

@@ -19,9 +19,11 @@ import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import {
   buildFailureAttemptArtifact,
+  failureAttemptPath,
   failureRecordsFromJunit,
   writeFailureAttemptArtifact,
 } from "../../../tools/dev/failure-attempt-producer"
+import { sharedVerificationCacheRoot } from "../../../tools/dev/verification-receipt"
 import { parseFailureArtifact } from "../../../tools/test-resilience/failure-artifact"
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..")
@@ -168,6 +170,42 @@ describe("the runner publishes the attempt", () => {
     const thrown = body.indexOf("aborting remaining shards", emit)
     expect(emit).toBeGreaterThan(0)
     expect(thrown).toBeGreaterThan(emit)
+  })
+
+  test("the consumer resolves the SAME path the producer writes", () => {
+    // A wiring audit found the producer writing
+    // `<git-common>/quanta-verification-cache/failure-attempt.json` while
+    // `test:flake:diagnose` read `.cache/test-failure-attempt.json` — a
+    // different directory AND filename. The artifact was real, current, and read
+    // by nobody, and both source-shaped guards were green because each side
+    // contained its own literal.
+    //
+    // One owner now, and both ends are asserted against it rather than against
+    // a string.
+    const root = sharedVerificationCacheRoot(REPO_ROOT)
+    const owned = failureAttemptPath(root)
+    expect(runner()).toContain("failureAttemptPath(SHARED_CACHE_ROOT)")
+    const consumer = readFileSync(resolve(REPO_ROOT, "tools/test-resilience/cli.ts"), "utf8")
+    expect(consumer).toContain("failureAttemptPath(sharedVerificationCacheRoot(REPO_ROOT))")
+    // Neither side may carry a hand-written path for it. Comments stripped:
+    // both files now EXPLAIN the old literal, and a guard that reads prose
+    // finds its own explanation and calls it the defect — the same trap the
+    // bounded-child guard hit.
+    const codeOnly = (body: string): string =>
+      body.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1")
+    expect(codeOnly(runner())).not.toContain('"failure-attempt.json"')
+    expect(codeOnly(consumer)).not.toContain("test-failure-attempt.json")
+    // ANTI-VACUITY for the stripper: it must keep code and drop prose.
+    expect(codeOnly('const a = 1 // "failure-attempt.json"')).toContain("const a = 1")
+    expect(codeOnly('const a = 1 // "failure-attempt.json"')).not.toContain("failure-attempt")
+    const pkg = JSON.parse(readFileSync(resolve(REPO_ROOT, "package.json"), "utf8")) as {
+      readonly scripts: Readonly<Record<string, string>>
+    }
+    expect(pkg.scripts["test:flake:diagnose"]).not.toContain("--from-artifact")
+    // ANTI-VACUITY: the owner must produce a real absolute path under the
+    // shared cache, not an empty string both sides trivially agree on.
+    expect(owned).toContain("quanta-verification-cache")
+    expect(owned.endsWith("failure-attempt.json")).toBe(true)
   })
 
   test("publishing can never turn a test failure into a runner crash", () => {
