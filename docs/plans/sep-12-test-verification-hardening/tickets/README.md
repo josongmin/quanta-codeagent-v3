@@ -341,3 +341,51 @@ red-on-injection 뮤턴트로 확인했고, **등가 뮤턴트는 등가라고 �
 `bounded-child.ts`(docstring이 gate.ts를 명시), `capabilityProducerFloors()`
 ("이게 써야 할 숫자"라고 적혀 있음), `hostCapabilityFingerprint`. 전부 완성돼
 있었고 전부 생산 소비자가 0이었다. 옆 docstring은 결함을 **과거형으로** 설명한다.
+
+
+---
+
+## prepush 실행 로그 (2026-09-12, clean tree, healthy load)
+
+부하가 8–20까지 떨어진 창에서 prepush를 반복 실행했다. **매 실행마다 red가 하나씩
+줄었고, 전부 캠페인이 만든 게이트가 찾아낸 것이다.**
+
+| 실행 | 결과 | 원인 | 귀속 |
+|---:|---|---|---|
+| 1 | full-suite RED | `no-raw-process-env-knob-ratchet` 44/43 | origin/main 선존 |
+| 2 | gate 1 전 거부 | 내가 캠페인 중 트리를 더럽힘 | **내 절차 실수** (가드는 정상 작동) |
+| 3 | EXECUTED-SET MISMATCH chunk 38 | 0-테스트 묘비 파일 (6월부터) | 선존 — **개수 비교로는 영원히 못 봄** |
+| 4 | chunk 36 RED | bench stub이 readiness probe에 잘못된 sentinel | 선존 (3파일 12케이스) |
+| 5 | BUG-1 RED | 같은 stub 결함 2파일 더 | 선존 (32케이스) |
+| 6 | endDirty=true | kill된 worker가 repo 루트에 scratch 유출 | 선존 (5파일 6지점) |
+| 7 | options 파싱 RED | tier 필수화가 ambient env 노출 테스트를 깨뜨림 | **내 회귀** |
+| 8 | readSite RED | god-module split 후 낡은 포인터 5개 | 선존 |
+| 9 | **inactivity watchdog 발화** | chunk 38이 720초 무출력 | 기존 미해결 Bun stall |
+
+### 9번이 이 캠페인의 증거다
+
+```
+[test:shards] TIMEOUT chunk=38/44 inactive: nothing written for 720701ms
+              (ceiling 720000ms); killing worker process tree.
+[test:shards] END chunk=38/44 exit=130 timeout elapsed_ms=727828
+```
+
+`sep-04-bun-test-intermittent-stall`은 메모리에 **미해결**로 기록된 결함이다.
+캠페인이 고친 것은 stall 자체가 아니라 **그것이 무한정 매달리지 않는다**는 것이다.
+720초 경계는 이 티켓에서 측정으로 정한 값이고, 처음으로 실제 무언가를 끝냈다.
+
+### P0-1 가드가 실제로 잡은 것
+
+3번은 이 캠페인 전체를 정당화한다. `tests/unit/apps/cli/cli-sdk-parity.test.ts`는
+2026-06-08에 테스트가 전부 삭제되고 주석과 `export {}`만 남은 파일인데, 코퍼스가
+**이름으로** 선택하므로 그 이후 모든 캠페인이 chunk에 넣고 돌렸다. 단독 실행하면
+`Ran 0 tests across 1 file`로 exit 1이고 JUnit을 쓰지 않는다.
+
+**개수 비교(`executedFiles === plan.files.length`)로는 이것을 영원히 볼 수 없다.**
+exact-set 비교가 첫 실제 캠페인에서 잡았다.
+
+### item 19도 실제 실패에서 동작 확인
+
+chunk 36 실패 시 `failure-attempt.json`이 발행됐고, `parseFailureArtifact`가
+그대로 수용했다 — producer→consumer 배선이 합성 fixture가 아니라 실제 실패에서
+end-to-end로 확인됐다.
