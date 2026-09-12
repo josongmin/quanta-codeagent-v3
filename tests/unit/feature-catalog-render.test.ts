@@ -3,7 +3,6 @@ import { describe, expect, test } from "bun:test"
 import {
   buildEvidenceSummary,
   buildMetaLines,
-  isBaselineFresh,
   renderCatalog,
 } from "../../tools/feature-catalog/render"
 import type { Feature, LoadedFeature } from "../../tools/feature-catalog/schema"
@@ -332,9 +331,8 @@ describe("renderCatalog — full output structure", () => {
         tsc: { exit: 0, errors: 0 },
         biome: { exit: 0, errors: 0 },
       },
-      commit: "cafe1234",
     })
-    expect(md).toContain("1952/0/2/5624 (154 files). 측정 시각: 2026-05-21 (커밋 cafe1234).")
+    expect(md).toContain("1952/0/2/5624 (154 files). 측정: 2026-05-21, 커밋 cafe1234.")
   })
 
   test("trailer prose is inserted before footer", () => {
@@ -414,7 +412,6 @@ describe("renderCatalog — full output structure", () => {
         tsc: { exit: 0, errors: 0 },
         biome: { exit: 0, errors: 0 },
       },
-      commit: "abc123",
     })
     const expected = [
       "<!-- AUTO-GENERATED from tools/feature-catalog/. Do not edit. Run `bun fc build`. -->",
@@ -456,7 +453,7 @@ describe("renderCatalog — full output structure", () => {
       "",
       "---",
       "",
-      "> 검증 베이스라인: tsc clean · biome clean · 10/0/0/30 (3 files). 측정 시각: 2026-01-01 (커밋 abc123).",
+      "> 검증 베이스라인 — 측정 시점의 기록이며, 이 문서가 생성된 트리의 판정이 아니다. tsc clean · biome clean · 10/0/0/30 (3 files). 측정: 2026-01-01, 커밋 abc123. 재측정: `bun run tools/feature-catalog/refresh-baseline.ts`.",
       "",
     ].join("\n")
     expect(md).toBe(expected)
@@ -499,22 +496,27 @@ describe("baseline footer renders the measured toolchain verdict (P0-2)", () => 
         tsc,
         biome,
       },
-      commit: "deadbeef",
     })
 
   /**
-   * A verdict is only asserted for the tree it was measured on.
+   * PROVENANCE, not currency.
    *
-   * The first fix here replaced a hardcoded `tsc 0 · biome clean` with a value
-   * rendered from `baseline.json`. That removed one falsehood and installed its
-   * mirror: the recorded measurement was from 2026-05-29 and the tree at render
-   * time measured tsc exit 0 / 0 errors and biome exit 0 / 0 errors, so the
-   * generated doc asserted two toolchain failures that did not exist — and the
-   * `fc-ci` diff gate pinned that byte-for-byte. Deriving from data is not the
-   * same as being true; the data has to be about this tree.
+   * A first fix here rendered STALE unless `measured_at_commit` equalled the commit
+   * being rendered. Measured, two ways: the generated doc is byte-pinned by the
+   * `fc-ci` diff gate, so a HEAD-dependent footer makes the pinned artifact unstable;
+   * and the fresh branch was unreachable regardless, because writing `baseline.json`
+   * dirties the tree and committing it creates a commit the baseline cannot name.
+   * The footer now states what was measured and when, and claims nothing about now.
    */
-  const staleFooter = (measuredAt: string | null, renderedAt: string | null): string =>
-    renderCatalog({
+  test("the footer never claims the measurement describes this tree", () => {
+    const md = footer({ exit: 0, errors: 0 }, { exit: 0, errors: 0 })
+    expect(md).toContain("측정 시점의 기록이며, 이 문서가 생성된 트리의 판정이 아니다")
+    expect(md).toContain("커밋 deadbeef")
+    expect(md).toContain("refresh-baseline.ts")
+  })
+
+  test("an unrecorded measurement commit renders as 미기록, never as a hash", () => {
+    const md = renderCatalog({
       features: [],
       prose: { intro: "", trailers: [] },
       baseline: {
@@ -524,57 +526,14 @@ describe("baseline footer renders the measured toolchain verdict (P0-2)", () => 
         expect: 1,
         files: 1,
         generated_at: "2026-05-29",
-        measured_at_commit: measuredAt,
+        measured_at_commit: null,
         tsc: { exit: 2, errors: 38 },
         biome: { exit: 1, errors: 14 },
       },
-      commit: renderedAt,
     })
-
-  test("a baseline measured at another commit asserts NOTHING", () => {
-    const md = staleFooter("aaaaaaa", "bbbbbbb")
-    expect(md).toContain("STALE")
-    expect(md).toContain("판정을 주장하지 않는다")
-    // The measurement is still reported, so the reader can see what was recorded.
+    expect(md).toContain("커밋 미기록")
+    // The measurement is still reported in full.
     expect(md).toContain("FAIL(exit 2, errors 38)")
-    expect(md).toContain("aaaaaaa")
-  })
-
-  test("an unrecorded measurement commit is stale, not fresh", () => {
-    expect(staleFooter(null, "bbbbbbb")).toContain("STALE")
-    expect(staleFooter(null, "bbbbbbb")).toContain("미기록")
-  })
-
-  test("an unknown rendering commit is stale — a dirty tree cannot certify", () => {
-    expect(staleFooter("aaaaaaa", null)).toContain("STALE")
-    expect(staleFooter("aaaaaaa", "")).toContain("STALE")
-  })
-
-  test("matching commits DO assert the verdict — the stale path is not universal", () => {
-    const md = staleFooter("aaaaaaa", "aaaaaaa")
-    expect(md).not.toContain("STALE")
-    expect(md).toContain("검증 베이스라인: tsc FAIL(exit 2, errors 38)")
-  })
-
-  test("isBaselineFresh is exact, never a prefix or substring match", () => {
-    const b = {
-      pass: 1,
-      fail: 0,
-      skip: 0,
-      expect: 1,
-      files: 1,
-      generated_at: "x",
-      measured_at_commit: "abc1234",
-      tsc: null,
-      biome: null,
-    }
-    expect(isBaselineFresh(b, "abc1234")).toBe(true)
-    expect(isBaselineFresh(b, "abc12345")).toBe(false)
-    expect(isBaselineFresh(b, "abc123")).toBe(false)
-    expect(isBaselineFresh(b, "")).toBe(false)
-    expect(isBaselineFresh(b, null)).toBe(false)
-    expect(isBaselineFresh({ ...b, measured_at_commit: null }, "abc1234")).toBe(false)
-    expect(isBaselineFresh({ ...b, measured_at_commit: "" }, "abc1234")).toBe(false)
   })
 
   test("a failing tsc/biome baseline is NEVER rendered as clean", () => {

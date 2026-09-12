@@ -41,6 +41,25 @@ describe("the dirty bit", () => {
     expect(dirtyFromPorcelain(" M a\n M b")).toBe("1")
   })
 
+  /**
+   * A FAILED probe is not a clean tree.
+   *
+   * `build-cli.ts`'s `git()` helper collapses a non-zero exit to `""`, so the first
+   * version of this could not tell the two apart. Proven by execution with a shim
+   * whose `git status` exits 128 (an `index.lock` collision — a hazard this repo
+   * hits with concurrent sessions) against a genuinely modified tree: the build
+   * printed `dirty=0`, a confident CLEAN stamp on a dirty tree. That is the same
+   * one-directional lie `parsePresetDirty` refuses `yes` to prevent.
+   */
+  test("a failed probe fails safe to dirty, never to clean", () => {
+    expect(dirtyFromPorcelain(null)).toBe("1")
+    expect(resolveDirtyBit(undefined, () => null)).toBe("1")
+    // An honoured preset still wins — the caller knows more than the probe.
+    expect(resolveDirtyBit("0", () => null)).toBe("0")
+    // …but an UNHONOURED preset must not rescue a failed probe into clean.
+    expect(resolveDirtyBit("yes", () => null)).toBe("1")
+  })
+
   test("an honoured preset wins over the measurement, and is not merely merged", () => {
     let measured = 0
     const porcelain = (): string => {
@@ -77,6 +96,16 @@ describe("build-cli.ts measures the tracked tree only", () => {
     expect(src).not.toMatch(/git\("status", "--porcelain"\)/)
   })
 
+  /** The probe must go through the helper that reports FAILURE, not the one that
+   *  collapses it to an empty string. */
+  test("the dirty probe distinguishes a failed git from a clean tree", () => {
+    const src = buildCli()
+    expect(src).toContain('gitOrNull("status"')
+    expect(src, "the collapsing helper must not feed the dirty bit").not.toMatch(
+      /resolveDirtyBit\([^)]*\bgit\("status"/s,
+    )
+  })
+
   test("the dirty decision is delegated, not re-implemented inline", () => {
     expect(buildCli()).toContain("resolveDirtyBit(")
   })
@@ -108,8 +137,13 @@ describe("install-quanta-cli.sh captures the state BEFORE it bumps", () => {
     expect(exportAt).toBeLessThan(buildAt)
     // And the capture must itself exclude untracked files, or it records the same
     // false positive it exists to avoid.
-    const captureBlock = src.slice(0, exportAt + 200)
+    const captureBlock = src.slice(0, exportAt + 400)
     expect(captureBlock).toContain("--untracked-files=no")
+    // …and it must check the EXIT STATUS. `2>/dev/null` plus an empty-string test
+    // made a failing probe stamp the binary clean on a dirty tree.
+    expect(captureBlock, "the shell capture must branch on git's exit status").toMatch(
+      /if\s+dirty_out=\$\(git/,
+    )
   })
 
   test("the bump still precedes the build — the binary bundles pkg.version", () => {

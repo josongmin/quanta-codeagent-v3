@@ -18,7 +18,6 @@
  *
  * No logger — plain console.log/console.error.
  */
-import { execFileSync } from "node:child_process"
 import { access, mkdir, readdir, readFile, writeFile } from "node:fs/promises"
 import { dirname, isAbsolute, join, relative, resolve } from "node:path"
 import {
@@ -79,31 +78,6 @@ import { parseYaml, stringifyYaml } from "./yaml"
  * that passed for the wrong reason. An explicit absolute root keeps the fixture
  * reachable without letting the ambient cwd decide anything.
  */
-/**
- * The commit being rendered, for baseline provenance. Returns `null` when git is
- * unavailable or the tree is dirty.
- *
- * A DIRTY tree deliberately reads as no-commit: the measurement would describe
- * the committed state while the doc describes the working tree, and "close
- * enough" is how the footer came to assert two toolchain failures that did not
- * exist. Failing to stale is the safe direction — the footer then reports what
- * was measured instead of claiming a verdict.
- */
-const headCommit = (): string | null => {
-  try {
-    const dirty = execFileSync("git", ["status", "--porcelain", "--untracked-files=no"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim()
-    if (dirty !== "") return null
-    return execFileSync("git", ["rev-parse", "HEAD"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim()
-  } catch {
-    return null
-  }
-}
 
 const resolveRepoRoot = (): string => {
   // Both spellings. Matching only the exact token meant `--repo-root=<abs>` was
@@ -174,7 +148,7 @@ async function cmdBuild(): Promise<void> {
   const features = await loadFeaturesStrict(FEATURES_DIR)
   const prose = await loadProse(PROSE_DIR)
   const baseline = await loadBaseline(BASELINE)
-  const md = renderCatalog({ features, prose, baseline, commit: headCommit() })
+  const md = renderCatalog({ features, prose, baseline })
   await mkdir(dirname(OUTPUT_MD), { recursive: true })
   await writeFile(OUTPUT_MD, md, "utf8")
   console.log(`wrote ${OUTPUT_MD} (${md.length} bytes, ${features.length} features)`)
@@ -364,7 +338,7 @@ async function cmdDiff(loadedFeatures?: readonly LoadedFeature[]): Promise<void>
   const features = loadedFeatures ?? (await loadFeaturesStrict(FEATURES_DIR))
   const prose = await loadProse(PROSE_DIR)
   const baseline = await loadBaseline(BASELINE)
-  const fresh = renderCatalog({ features, prose, baseline, commit: headCommit() })
+  const fresh = renderCatalog({ features, prose, baseline })
   let current = ""
   try {
     current = await readFile(OUTPUT_MD, "utf8")

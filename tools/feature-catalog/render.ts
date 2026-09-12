@@ -38,7 +38,19 @@ export interface Baseline {
    * value only moved the falsehood: the doc then asserted two toolchain failures
    * that did not exist, and the `fc-ci` diff gate pinned that byte-for-byte.
    *
-   * A verdict is asserted ONLY when this equals the commit being rendered.
+   * The footer PRINTS this and never compares it to the rendering commit.
+   *
+   * A first attempt did compare, rendering STALE unless they matched. Two problems,
+   * both measured. (1) The generated doc is byte-pinned by the `fc-ci` diff gate, so
+   * making it a function of HEAD makes the pinned artifact unstable — a rebuild at a
+   * different commit produces a different file. (2) The fresh branch is unreachable
+   * anyway: writing `baseline.json` dirties the tree, so the render right after a
+   * refresh always sees a dirty tree, and committing the baseline creates a NEW
+   * commit whose hash the baseline could not have recorded. There is no ordering
+   * that satisfies both.
+   *
+   * So the footer states provenance and claims no currency, for any baseline. That
+   * is byte-stable and cannot become false.
    */
   measured_at_commit: string | null
   /** `null` ⇒ the block was absent or malformed on disk. Rendered `unknown`,
@@ -52,9 +64,6 @@ export interface RenderInput {
   features: readonly LoadedFeature[]
   prose: ProseFiles
   baseline: Baseline | null
-  /** The commit being rendered, for baseline provenance. `null` ⇒ unknown, which
-   *  makes every baseline verdict stale — the fail-closed direction. */
-  commit?: string | null
 }
 
 export interface ProseFiles {
@@ -176,22 +185,13 @@ export function renderCatalog(input: RenderInput): string {
   // Footer with baseline
   if (input.baseline) {
     const b = input.baseline
-    const fresh = isBaselineFresh(b, input.commit ?? null)
-    if (fresh) {
-      out.push(
-        `> 검증 베이스라인: tsc ${toolVerdict(b.tsc)} · biome ${toolVerdict(b.biome)} · ` +
-          `${b.pass}/${b.fail}/${b.skip}/${b.expect} (${b.files} files). ` +
-          `측정 시각: ${b.generated_at} (커밋 ${b.measured_at_commit ?? "unknown"}).`,
-      )
-    } else {
-      out.push(
-        `> 검증 베이스라인: STALE — 이 트리에서 측정된 값이 아니므로 판정을 주장하지 않는다. ` +
-          `기록된 측정: tsc ${toolVerdict(b.tsc)} · biome ${toolVerdict(b.biome)} · ` +
-          `${b.pass}/${b.fail}/${b.skip}/${b.expect} (${b.files} files), ` +
-          `측정 시각 ${b.generated_at}, 커밋 ${b.measured_at_commit ?? "미기록"}. ` +
-          `\`bun run tools/feature-catalog/refresh-baseline.ts\`로 재측정.`,
-      )
-    }
+    out.push(
+      `> 검증 베이스라인 — 측정 시점의 기록이며, 이 문서가 생성된 트리의 판정이 아니다. ` +
+        `tsc ${toolVerdict(b.tsc)} · biome ${toolVerdict(b.biome)} · ` +
+        `${b.pass}/${b.fail}/${b.skip}/${b.expect} (${b.files} files). ` +
+        `측정: ${b.generated_at}, 커밋 ${b.measured_at_commit ?? "미기록"}. ` +
+        `재측정: \`bun run tools/feature-catalog/refresh-baseline.ts\`.`,
+    )
   } else {
     out.push("> 검증 베이스라인: (baseline.json 없음)")
   }
@@ -205,21 +205,6 @@ export function renderCatalog(input: RenderInput): string {
  *  used to carry the literal `tsc 0 · biome clean` while `baseline.json` recorded
  *  38 tsc errors and 14 biome errors, and the generated doc is byte-pinned by the
  *  `fc-ci` diff gate — so the repo preserved a claim its own data contradicted. */
-/**
- * A baseline asserts a verdict only when it was measured at the commit being
- * rendered. An unrecorded commit, or any other commit, is STALE — the doc then
- * reports what was measured and when, and claims nothing about now.
- *
- * Time-based staleness was considered and rejected: a measurement from an hour
- * ago on a different commit is no more evidence about this tree than one from
- * three months ago, and a threshold in days would be a number nobody validated.
- */
-export function isBaselineFresh(b: Baseline, commit: string | null): boolean {
-  if (commit === null || commit === "") return false
-  if (b.measured_at_commit === null || b.measured_at_commit === "") return false
-  return b.measured_at_commit === commit
-}
-
 function toolVerdict(status: BaselineToolStatus | null): string {
   if (status === null) return "unknown"
   return status.exit === 0 && status.errors === 0

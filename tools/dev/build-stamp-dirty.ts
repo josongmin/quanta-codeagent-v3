@@ -34,7 +34,21 @@ export const parsePresetDirty = (raw: string | undefined): "0" | "1" | undefined
 /**
  * `1` when tracked files are modified relative to HEAD, else `0`.
  *
- * `porcelain` MUST come from `git status --porcelain --untracked-files=no`.
+ * `porcelain` MUST come from `git status --porcelain --untracked-files=no`, and
+ * `null` means THE PROBE FAILED — not that the tree is clean.
+ *
+ * That distinction is the whole point of the parameter type. The first version took
+ * a plain `string`, and `build-cli.ts`'s `git()` helper collapses a non-zero exit to
+ * `""`, so a failed `git status` was indistinguishable from a clean tree. Proven by
+ * execution with a shim whose `status` fails (an `index.lock` collision — a hazard
+ * this repo hits with concurrent sessions) against a genuinely modified tree: the
+ * build stamped `dirty=0`, a confident CLEAN claim on a dirty tree. That is exactly
+ * the one-directional lie `parsePresetDirty` refuses `yes` to prevent, reintroduced
+ * one function away by the purity refactor.
+ *
+ * A failed probe answers `1`: "I could not confirm the tree is clean." The stamp
+ * then claims less than it knows rather than more.
+ *
  * With untracked files counted, a git worktree's `node_modules` SYMLINK reads as
  * drift — `.gitignore`'s `node_modules/` has a trailing slash and matches
  * directories only — so a clean tracked tree stamped `-dirty`.
@@ -43,9 +57,13 @@ export const parsePresetDirty = (raw: string | undefined): "0" | "1" | undefined
  * detected. The bit answers "are tracked files modified relative to this commit",
  * which is the question the commit label asks.
  */
-export const dirtyFromPorcelain = (porcelain: string): "0" | "1" =>
-  porcelain.trim() === "" ? "0" : "1"
+export const dirtyFromPorcelain = (porcelain: string | null): "0" | "1" => {
+  if (porcelain === null) return "1"
+  return porcelain.trim() === "" ? "0" : "1"
+}
 
 /** The composed decision: an honoured preset, else the measurement. */
-export const resolveDirtyBit = (preset: string | undefined, porcelain: () => string): "0" | "1" =>
-  parsePresetDirty(preset) ?? dirtyFromPorcelain(porcelain())
+export const resolveDirtyBit = (
+  preset: string | undefined,
+  porcelain: () => string | null,
+): "0" | "1" => parsePresetDirty(preset) ?? dirtyFromPorcelain(porcelain())

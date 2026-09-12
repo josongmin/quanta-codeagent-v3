@@ -56,6 +56,13 @@ const git = (...args: readonly string[]): string => {
   return r.status === 0 ? (r.stdout ?? "").trim() : ""
 }
 
+/** `null` when git FAILED, as distinct from a clean tree. `git()` above collapses
+ *  both to `""`, which made a failed `status` stamp the binary CLEAN. */
+const gitOrNull = (...args: readonly string[]): string | null => {
+  const r = spawnSync("git", [...args], { encoding: "utf8" })
+  return r.status === 0 ? (r.stdout ?? "").trim() : null
+}
+
 /** Empty when git is unavailable or this is not a checkout — the stamp is then
  *  absent rather than wrong, and `--version` renders exactly as it did before. */
 const commit = git("rev-parse", "--short=12", "HEAD")
@@ -65,7 +72,7 @@ const commit = git("rev-parse", "--short=12", "HEAD")
  *  from before it did. See `tools/dev/build-stamp-dirty.ts` for both decisions and
  *  why they are pure. */
 const dirty = resolveDirtyBit(process.env.QUANTA_BUILD_DIRTY, () =>
-  git("status", "--porcelain", "--untracked-files=no"),
+  gitOrNull("status", "--porcelain", "--untracked-files=no"),
 )
 const buildTime = new Date().toISOString()
 

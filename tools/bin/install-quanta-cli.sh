@@ -92,9 +92,13 @@ if [[ "$SKIP_BUILD" -eq 0 ]]; then
   # was stamped `-dirty` and the bit carried no information. build-cli.ts honours a
   # pre-set QUANTA_BUILD_DIRTY for exactly this. `--untracked-files=no` so an
   # untracked node_modules symlink in a worktree does not read as drift.
-  if [[ -z "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no 2>/dev/null)" ]]; then
-    export QUANTA_BUILD_DIRTY=0
+  # A FAILED `git status` must not read as clean. `2>/dev/null` plus an empty-string
+  # test made a failing probe (an index.lock collision, no git on PATH) stamp the
+  # binary CLEAN on a dirty tree. Check the exit status, and fail safe to dirty.
+  if dirty_out=$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no 2>/dev/null); then
+    if [[ -z "$dirty_out" ]]; then export QUANTA_BUILD_DIRTY=0; else export QUANTA_BUILD_DIRTY=1; fi
   else
+    echo "install-quanta-cli: warning: git status failed; stamping the build as dirty" >&2
     export QUANTA_BUILD_DIRTY=1
   fi
   echo "install-quanta-cli: tracked tree dirty=${QUANTA_BUILD_DIRTY} (captured pre-bump)"
