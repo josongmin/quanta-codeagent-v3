@@ -22,6 +22,9 @@
  */
 
 import { describe, expect, test } from "bun:test"
+import { readFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import {
   DEFAULT_POLL_SCHEDULE,
   type LeaderIdentity,
@@ -31,10 +34,12 @@ import {
 } from "../../../tools/dev/process-observer"
 import {
   classifyKillTarget,
+  type DrainOutcome,
   KILL_TARGET_PERMITS_SIGNAL,
   type KillTargetVerdict,
   killProcessTreeOutcome,
   probeGroupFromSnapshot,
+  terminateCampaignOnSignal,
 } from "../../../tools/dev/test-shard-lifecycle"
 
 const PGID = 4242
@@ -292,5 +297,102 @@ describe("classifyKillTarget — 'no evidence' is not permission", () => {
       "recycled",
       "unverified",
     ])
+  })
+})
+
+/**
+ * ★ The INTERRUPT path released the lane with unaccounted survivors.
+ *
+ * `lease-quarantine.ts` exists because "both campaign owners … call
+ * `lease?.release()` unconditionally" on a failed drain. The `finally` halves
+ * were fixed; the signal halves were not. MEASURED with a registry reporting
+ * `drained:false, groups:[{pgid:999901}]`:
+ *
+ *   SIGNAL path   leaseReleased=true   quarantineFileExists=false
+ *   finally path                       quarantineFileExists=true
+ *
+ * One Ctrl-C then handed the next contender a lane whose ports, `$HOME` and
+ * worktrees were still held — and the campaign that did it printed only `WARN`.
+ *
+ * The caller's `.then((code) => process.exit(code))` is the other half: the main
+ * `finally` never runs, so the timing journal was never committed either. The
+ * orphan journals in the shared cache are the artifact of exactly that.
+ */
+describe("the signal path accounts before it releases", () => {
+  const undrainedRegistry = {
+    cancelAll: async (): Promise<DrainOutcome> => ({
+      drained: false,
+      survivors: [999_901],
+      abandoned: [],
+      groups: [{ pgid: 999_901, leaderPid: 1, verdict: "still-running", detail: "probe" }],
+    }),
+  } as never
+
+  test("accounting runs BEFORE the lease is released, and sees the surviving groups", async () => {
+    let released = false
+    let sawGroups = -1
+    let accountedWhileHeld = false
+    const code = await terminateCampaignOnSignal({
+      registry: undrainedRegistry,
+      runRoot: join(tmpdir(), `signal-accounting-${process.pid}`),
+      signal: "SIGINT",
+      log: () => {},
+      accountForSurvivors: (outcome) => {
+        sawGroups = outcome.groups.length
+        accountedWhileHeld = !released
+      },
+      releaseLease: () => {
+        released = true
+      },
+    })
+    expect({ code, sawGroups, accountedWhileHeld, released }).toEqual({
+      code: 130,
+      sawGroups: 1,
+      accountedWhileHeld: true,
+      released: true,
+    })
+  })
+
+  test("an accounting FAILURE still releases the lease, and says why", async () => {
+    // A quarantine write that throws must not strand the lane on a signal path:
+    // the record is best-effort, the release is not optional.
+    const lines: string[] = []
+    let released = false
+    const code = await terminateCampaignOnSignal({
+      registry: undrainedRegistry,
+      runRoot: join(tmpdir(), `signal-accounting-fail-${process.pid}`),
+      signal: "SIGTERM",
+      log: (line) => lines.push(line),
+      accountForSurvivors: () => {
+        throw new Error("disk full")
+      },
+      releaseLease: () => {
+        released = true
+      },
+    })
+    expect({ code, released }).toEqual({ code: 143, released: true })
+    expect(lines.join("")).toContain("signal-path accounting failed: disk full")
+  })
+
+  test("both owners hold the lane on their signal path, not only in `finally`", () => {
+    // Source-shaped on purpose: a real Ctrl-C against a real campaign is not a
+    // unit test. What IS checked behaviourally is the ordering above; what this
+    // adds is that each owner's signal path names the quarantine at all.
+    const source = (rel: string): string =>
+      readFileSync(join(import.meta.dir, "..", "..", "..", rel), "utf8")
+    const runner = source("tools/dev/run-test-shards.ts")
+    expect(runner).toContain("accountForSurvivors: (outcome) => {")
+    // The runner's hook does BOTH things the `finally` does.
+    const hook = runner.slice(runner.indexOf("accountForSurvivors: (outcome) => {"))
+    expect(hook.slice(0, hook.indexOf("releaseLease:"))).toContain("quarantineLane({")
+    expect(hook.slice(0, hook.indexOf("releaseLease:"))).toContain("openJournal?.commit()")
+
+    const campaign = source("tools/dev/verification-campaign.ts")
+    const terminate = campaign.slice(campaign.indexOf("const terminate = (signal"))
+    const body = terminate.slice(0, terminate.indexOf('process.on("SIGINT"'))
+    expect(body).toContain("quarantineLane({")
+    // ...and it is written BEFORE the release, which is the whole point: the
+    // kernel frees the port the instant this process exits.
+    expect(body.indexOf("quarantineLane({")).toBeLessThan(body.indexOf("lease?.release()"))
   })
 })

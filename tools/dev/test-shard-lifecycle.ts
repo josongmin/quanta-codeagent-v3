@@ -712,14 +712,47 @@ export const terminationExitCode = (signal: NodeJS.Signals): number =>
 export interface CampaignTerminationInput extends CampaignCleanupInput {
   readonly signal: NodeJS.Signals
   releaseLease(): void
+  /**
+   * The accounting the `finally` path does, run on the SIGNAL path too, BEFORE
+   * the lease is released.
+   *
+   * # The defect
+   *
+   * `lease-quarantine.ts` exists because "both campaign owners … call
+   * `lease?.release()` unconditionally" on a failed drain. The `finally` halves
+   * were fixed and the INTERRUPT halves were not. MEASURED with a registry that
+   * reports `drained:false, groups:[{pgid:999901}]`:
+   *
+   *   SIGNAL path     leaseReleased=true   quarantineFileExists=false
+   *   finally path                         quarantineFileExists=true
+   *
+   * So one Ctrl-C on a campaign whose workers survived SIGKILL handed the next
+   * contender a lane whose ports, `$HOME` and worktrees were still held, and the
+   * campaign that did it printed only `WARN`.
+   *
+   * The same hook also carries the work `process.exit()` skipped: the caller's
+   * `.then((code) => process.exit(code))` means the main `finally` never runs, so
+   * the timing journal was never committed. The orphan journals found in the
+   * shared cache are the artifact of exactly that.
+   *
+   * Never throws into the signal path: an accounting failure must not stop the
+   * lease from being released, and a swallowed reason is printed.
+   */
+  accountForSurvivors?(outcome: DrainOutcome): void
 }
 
-/** Signal path: cancel every group, drain, release the lease, pick the exit code. */
+/** Signal path: cancel every group, drain, ACCOUNT, release the lease, exit code. */
 export const terminateCampaignOnSignal = async (
   input: CampaignTerminationInput,
 ): Promise<number> => {
   input.log(`[test:shards] SIGNAL ${input.signal}; cancelling worker group(s)\n`)
-  await drainCampaign(input)
+  const outcome = await drainCampaign(input)
+  try {
+    input.accountForSurvivors?.(outcome)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    input.log(`[test:shards] WARN signal-path accounting failed: ${message}\n`)
+  }
   input.releaseLease()
   return terminationExitCode(input.signal)
 }

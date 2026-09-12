@@ -280,12 +280,41 @@ const terminate = (signal: NodeJS.Signals): void => {
         `[verification] WARN campaign group(s) survived SIGKILL: ${outcome.survivors.join(", ")}\n`,
       )
     }
+    // HOLD THE LANE, on this path too. `lease-quarantine.ts` exists because both
+    // campaign owners released unconditionally on a failed drain; the `finally`
+    // half below was fixed and this one was not. Measured with a registry
+    // reporting `drained:false, groups:[{pgid:999901}]`: the finally path wrote a
+    // record and the signal path wrote none, then released. Written BEFORE the
+    // release, because the kernel frees the port the instant this process exits.
+    let signalQuarantine: LeaseQuarantineRecord | undefined
+    if (outcome.groups.length > 0) {
+      try {
+        signalQuarantine = quarantineLane({
+          path: QUARANTINE_PATH,
+          repositoryId: QUARANTINE_KEY,
+          groups: outcome.groups,
+          log: (line) => process.stderr.write(line),
+        })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        process.stderr.write(`[verification] WARN signal-path quarantine failed: ${message}\n`)
+      }
+    }
     recordCampaign({
       outcome: "terminated",
       exitCode: terminationExitCode(signal),
       cancellationReason: `signal:${signal}`,
       drained: outcome.drained,
       survivingGroups: outcome.survivors,
+      ...(signalQuarantine === undefined
+        ? {}
+        : {
+            quarantine: {
+              keeperPid: signalQuarantine.keeperPid,
+              expiresAtMs: signalQuarantine.expiresAtMs,
+              groups: signalQuarantine.survivors,
+            },
+          }),
     })
     removeOwnerSidecar()
     lease?.release()
