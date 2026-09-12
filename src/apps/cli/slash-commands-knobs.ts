@@ -328,17 +328,31 @@ const setCatalogKnob = (id: string, raw: string, ctx: SlashContext): number | un
   // `hotToggleable` is the canonical liveness field and it is REQUIRED on every
   // catalog row, so this is a fact the catalog already carries — not a new one.
   //
-  // The old line claimed `(session override; live this session)` unconditionally,
-  // for all 674 rows. Measured: exactly ONE row is `hotToggleable: true`, and its
-  // own source says the apply path is dead. So the sentence was false on every
-  // row a user could reach, and the runner path two functions below has warned
-  // correctly the whole time — the same knob told you the truth or lied depending
-  // on whether you spelled it as a runner id or an envKey.
+  // The original line claimed `(session override; live this session)`
+  // unconditionally, for all 674 rows, while at the time exactly ONE row was
+  // `hotToggleable: true` and its own source said that apply path was dead — so
+  // the sentence was false on every row a user could reach. (That row has since
+  // been corrected to `false`, leaving ZERO hot-toggleable rows; see
+  // `knobs-set-liveness-honesty-hellgate`.)
+  //
+  // The first replacement said "run `/knobs save` and restart, or export it, to
+  // take effect", and half of that is also false. `/knobs save` does write the
+  // file, but NOTHING in production reads it back: `readCliKnob`'s chain is
+  // session-override -> env -> registry default (`cli-knobs-accessor.ts`
+  // `resolveRaw`), with no config-file layer, and `bootstrapKnobs` — the only code
+  // that resolves `knobs.json` — has zero production callers and says so itself
+  // ("the file is write-only in prod today", `knobs-bootstrap.ts`). Measured: set,
+  // save, restart with the same QUANTA_HOME, and the knob reads its default.
+  // A message that tells the operator to run a command that does nothing is the
+  // exact defect this file was edited to remove.
+  //
+  // `export` is the only advice that is true, so it is the only advice given.
   ctx.out(
     cat.hotToggleable === true
       ? `/knobs: ${id} = ${raw} (session override; live this session)\n`
-      : `/knobs: ${id} = ${raw} (session override STORED — this knob is read at startup, ` +
-          `so run \`/knobs save\` and restart, or export it, to take effect)\n`,
+      : `/knobs: ${id} = ${raw} (session override stored — this knob is read once at ` +
+          `startup, so the running session keeps its current value; ` +
+          `export ${cat.envKey ?? id}=${raw} to apply it)\n`,
   )
   return 0
 }
@@ -400,8 +414,18 @@ const doReset = (args: readonly string[], wire: KnobsSurfaceWire, ctx: SlashCont
   }
   const id = args[0] as string
   if (allKnobs().get(id) === undefined) {
-    // catalog knob (envKey) — clear its CLI-accessor session override
+    // catalog knob (envKey) — clear its CLI-accessor session override.
+    //
+    // This branch printed "cleared" unconditionally, so `/knobs reset QUANTA_X`
+    // in a session that never set anything reported a clear that did not happen,
+    // while `/knobs reset <runner-id>` twelve lines below correctly said "no-op".
+    // Exactly the per-spelling asymmetry `1ac18b507` removed from `/knobs set`,
+    // left in place two functions away.
     if (buildKnobCatalog().has(id)) {
+      if (getKnobOverride(id) === undefined) {
+        ctx.out(`/knobs: ${id} had no session override (no-op)\n`)
+        return 0
+      }
       setCliKnobOverride(id, undefined)
       ctx.out(`/knobs: ${id} session override cleared\n`)
       return 0
@@ -604,13 +628,21 @@ const defaultWire: KnobsSurfaceWire = {
         `${id} is a security-boundary knob — set it via env / managed config only, not a session override`,
       )
     }
-    // Surface a non-fatal warning when the knob is read once at boot and
-    // cannot take effect mid-session — the override is still saved for the
-    // next process via `/knobs save`. `hotToggleable` DEFAULTS to false
-    // (types.ts), so only an explicit `true` suppresses the warning — an
-    // undeclared knob must not be advertised as live (UUX-4-21 honesty).
+    // Surface a non-fatal warning when the knob is read once at boot and cannot
+    // take effect mid-session. `hotToggleable` DEFAULTS to false (types.ts), so
+    // only an explicit `true` suppresses the warning — an undeclared knob must not
+    // be advertised as live (UUX-4-21 honesty).
+    //
+    // This used to say "saved for next session", which `1ac18b507` cited as the
+    // path that "has warned correctly the whole time" and used as its correctness
+    // reference. It has not: `/knobs save` writes `knobs.json` and no production
+    // code reads it back, so the next session does NOT pick the override up. The
+    // reference was itself false, in the same direction.
     if (knob !== undefined && knob.hotToggleable !== true) {
-      return `knob '${id}' is not hot-toggleable — saved for next session`
+      return (
+        `knob '${id}' is not hot-toggleable — the override applies only to later reads ` +
+        `in this session; export ${envKey}=${raw} to apply it at startup`
+      )
     }
     return undefined
   },
