@@ -413,3 +413,24 @@ gate.ts: authoritative prepush receipts require a clean checkout; refusing befor
 남은 조건 — cold prepush 완주 · shard 1-8/8 · 부분 아닌 JUnit receipt · exact-HEAD
 동일성 — 은 **clean 체크아웃 + 저부하** 에서 별도로 받아야 한다. 이 세션에서
 충족했다고 적지 않는다.
+
+## 회귀 판정 (receipt 아님)
+
+내가 건드린 파일에 직접 연결된 23 스위트:
+
+```
+291 pass / 0 fail   (load 58 — 넓은 스위트는 이 부하에서 귀속 불가라 좁혔다)
+```
+
+첫 실행은 **1 fail** 이었고 내 결함이었다. `no-raw-process-env` 라쳇이 46/43 —
+`build-stamp.ts` 의 `process.env.QUANTA_BUILD_*` 3개가 헤드룸 0을 넘겼다. 이 라쳇은
+precommit 레인에 없어서 게이트가 못 잡았고, 내 변경 파일을 좁게 돌려서만 드러났다.
+
+**ceiling 은 올리지 않았다** (43 유지). 파일을 exempt 했고 사유는 "여기선 raw read 가
+우회가 아니라 메커니즘" 이다. `bun build --env` 는 `process.env.<NAME>` 을 리터럴로
+치환하는데 accessor 호출은 치환 대상이 아니므로, `readCliKnob` 으로 라우팅하면 스탬프가
+영구히 부재하고 기능이 조용히 죽는다. 그리고 출하 바이너리 안에서 이 값들은 환경변수가
+아니라 리터럴이므로 `/config set` 이 가로챌 대상 자체가 없다.
+
+precommit 재실행: **ok — 9 of 9 gate(s) passed** (load/core 1.92~2.48).
+
