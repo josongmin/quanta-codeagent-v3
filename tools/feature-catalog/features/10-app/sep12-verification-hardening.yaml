@@ -77,7 +77,7 @@ evidence:
     - tools/test-resilience/quarantine.ts
     - tools/test-resilience/cli.ts
   adrs:
-    - ADR-0558
+    - 0558
   tests:
     unit:
       - tests/unit/_arch/gate-manifest-contract.test.ts
