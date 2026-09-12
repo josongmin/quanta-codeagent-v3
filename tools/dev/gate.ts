@@ -44,8 +44,8 @@ import {
   type Gate,
   gatesForStage,
   gatesForVerificationTier,
-  tiersForGate,
   plannedGatesForLabel,
+  tiersForGate,
 } from "./gate-manifest"
 import { formatGateManifestViolations, validateGateManifest } from "./gate-manifest-contract"
 import { admissionFromEnv } from "./verification-admission"
@@ -579,6 +579,18 @@ const snapshotStable =
 
 const failed = results.filter((r) => !r.ok)
 printOut(`\n──── ${label} summary`)
+// WHAT THIS RUN COULD NOT CHECK — printed for every outcome, not only a green one.
+//
+// This line used to live inside the all-green branch, so on any red run — which is
+// every run this box has produced for weeks — the reader was never told that a whole
+// lane sat out. The disclosure matters MORE on a red: a failure list read without it
+// looks like the complete set of problems.
+const absentTools = missingExternalTools()
+if (absentTools.length > 0) {
+  printOut(
+    `  [capabilities] absent on this host, so anything gated on them was skipped: ${absentTools.join(", ")}`,
+  )
+}
 for (const r of results) {
   const hd = r.ok && r.gate.hostDependent !== undefined ? "  [host-dependent]" : ""
   // A red on a saturated box is reported WITH the saturation. The last time it
@@ -607,15 +619,6 @@ if (
       ? ""
       : ` (${marked.length} host-dependent: ${marked.map((r) => r.gate.id).join(", ")} ` +
         "— may have passed by finding nothing to check here)"
-  const absent = missingExternalTools()
-  if (absent.length > 0) {
-    // Say what this green could NOT check. Absence is already part of the
-    // receipt's identity, so a box that later gains one of these cannot replay
-    // this result — but nothing told the reader that a whole lane sat out.
-    printOut(
-      `  [capabilities] absent on this host, so anything gated on them was skipped: ${absent.join(", ")}`,
-    )
-  }
   printOut(`${label}: ok — ${results.length} of ${planned.length} gate(s) passed${note}`)
   if (writesExactReceipt) {
     if (endingSnapshot !== undefined) {

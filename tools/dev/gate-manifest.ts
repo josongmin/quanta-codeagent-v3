@@ -208,6 +208,8 @@ export const GATES: readonly Gate[] = [
     why: "the `*-real-e2e.test.ts` lane — 43 cases that run in NO other gate, because the env gate that keeps them out of the unit speed budget also kept them out of every gate",
     needsQuietBox:
       "real rust-analyzer/gopls/pyright indexing a fixture project. MEASURED on this 16-core box, same commit and command: at load 52 evidence-lsp-bridge-real-e2e goes 1 pass / 1 fail (a starved server answers with an EMPTY hover); at load 3.9 it goes 2 pass in 5.2s. The lane was already moved out of the parallel suite for exactly this, but it starts right after a 30-chunk full suite",
+    hostDependent:
+      "every case needs a real external toolchain, and each one SKIPS when its tool is absent rather than failing. Measured on this box: 11 of the 35 capability-group member files cannot execute (gopls, lldb-dap, dlv, chromium, bwrap absent; lima-vm and ollama-daemon down), so a PASS here can mean the lane found nothing to run.",
   },
   {
     id: "web-frontend",
@@ -232,6 +234,8 @@ export const GATES: readonly Gate[] = [
     // concurrency over the same docker/LSP/Python contract suite.
     run: "bun run test:contract",
     why: 'real docker + language servers + python/lancedb. LOCALLY THIS PASSES BY SKIPPING: the ci.yml job sets REQUIRE_CONTRACT=1 at the JOB level ("absent dependency = hard fail, never a silent skip") and the manifest pins the command string, not the env — so a local PASS here means "nothing was missing that I checked", not "the contracts hold"',
+    hostDependent:
+      "docker / language servers / python / lancedb. `REQUIRE_CONTRACT=1` is set at the ci.yml JOB level and the manifest pins the command string, not the env, so locally an absent dependency is a SKIP and the gate still reports PASS. This field was added to the type with this exact gate in mind and then set on nothing: the `why` above said the gate passes by skipping while `hostDependent` stayed undefined, so the summary never marked it and the closing line counted it as ordinary coverage.",
   },
 ]
 
