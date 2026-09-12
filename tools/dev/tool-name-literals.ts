@@ -112,6 +112,13 @@ export const SSOT_FILES: readonly string[] = [
   "src/tool/surface/gated-tools.ts",
 ]
 
+const propKeyName = (p: ts.ObjectLiteralElementLike): string | undefined => {
+  const n = p.name
+  if (n === undefined) return undefined
+  if (ts.isIdentifier(n) || ts.isStringLiteral(n)) return n.text
+  return undefined
+}
+
 const shapeKeyOf = (obj: ts.ObjectLiteralExpression): string | undefined => {
   for (const p of obj.properties) {
     const n = p.name
@@ -333,6 +340,80 @@ export const scanToolPostures = (repoRoot: string): ToolPosture[] => {
   const out: ToolPosture[] = []
   for (const f of censusFiles(repoRoot)) {
     out.push(...extractToolPostures(f, readFileSync(join(repoRoot, f), "utf-8")))
+  }
+  return out
+}
+
+/* ── the census's own blind spot, enumerated ────────────────────────────────── */
+
+/** An object literal that declares `hitlTier` but carries no `name: "<literal>"`,
+ *  so {@link extractToolPostures} cannot attribute it to a tool. */
+export interface UnattributedTierDeclaration {
+  readonly file: string
+  readonly line: number
+  /** Whether the literal spreads another object (a name could arrive from there). */
+  readonly spreads: boolean
+  /** Whether it has a `name` key at all (a computed or shorthand one). */
+  readonly hasNameKey: boolean
+}
+
+/**
+ * Every place a HITL tier is declared that the posture census cannot attribute.
+ *
+ * WHY THIS IS NEEDED. `extractToolPostures` keys on a `name` STRING LITERAL. A
+ * tool built by a generic factory — `make(name, description, schema, readOnly, …)`
+ * in `src/subagent/agent-tools-6.ts` builds the six router tools that way — has a
+ * computed name, so it is invisible there. Those six are safe for a STRUCTURAL
+ * reason rather than a lucky one: the factory takes no `hitlTier` parameter and
+ * sets none, so `inferToolTierDetailed` falls through to the `isReadOnly()`
+ * fail-closed branch. Add a `hitlTier` parameter to that factory and the
+ * invariant could be broken with nothing to see it.
+ *
+ * So the consumer enumerates this instead of assuming the census is total.
+ * MEASURED on this tree: two, and both are permission-INSPECTOR metadata objects
+ * (`src/apps/cli/permission-explain.ts`, `src/permission/inspect.ts`) that report
+ * a tier they were handed — neither is a tool.
+ */
+/** Classify ONE object literal for the unattributed-tier scan. Split out of the
+ *  walker: inline, the walker scored 41 on the cognitive-complexity ratchet. */
+const unattributedTierOf = (
+  node: ts.ObjectLiteralExpression,
+): { spreads: boolean; hasNameKey: boolean } | undefined => {
+  const keys = node.properties.map(propKeyName)
+  if (!keys.includes("hitlTier")) return undefined
+  if (nameLiteralOf(node) !== undefined) return undefined
+  return {
+    spreads: node.properties.some((p) => ts.isSpreadAssignment(p)),
+    hasNameKey: keys.includes("name"),
+  }
+}
+
+export const scanUnattributedTierDeclarations = (
+  repoRoot: string,
+): UnattributedTierDeclaration[] => {
+  const out: UnattributedTierDeclaration[] = []
+  for (const f of censusFiles(repoRoot)) {
+    const sf = ts.createSourceFile(
+      f,
+      readFileSync(join(repoRoot, f), "utf-8"),
+      ts.ScriptTarget.Latest,
+      true,
+    )
+    const walk = (node: ts.Node): void => {
+      if (ts.isObjectLiteralExpression(node)) {
+        const hit = unattributedTierOf(node)
+        if (hit !== undefined) {
+          out.push({
+            file: f,
+            line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
+            spreads: hit.spreads,
+            hasNameKey: hit.hasNameKey,
+          })
+        }
+      }
+      ts.forEachChild(node, walk)
+    }
+    walk(sf)
   }
   return out
 }

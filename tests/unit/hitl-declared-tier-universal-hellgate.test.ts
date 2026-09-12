@@ -45,11 +45,18 @@
  * cross-check for the cases a source census cannot reduce.
  */
 import { describe, expect, test } from "bun:test"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { isMutatingTool, mutatingToolKind } from "@/agent/mode"
 import { inferToolTierDetailed } from "@/permission"
 import type { Tool } from "@/tool"
 import { makeBashTool } from "@/tool/bash"
-import { HITL_TIERS, scanToolPostures, type ToolPosture } from "../../tools/dev/tool-name-literals"
+import {
+  HITL_TIERS,
+  scanToolPostures,
+  scanUnattributedTierDeclarations,
+  type ToolPosture,
+} from "../../tools/dev/tool-name-literals"
 import { assertBroadlyWiredFixture, buildBroadlyWiredTools } from "./_shared/wired-tool-ports"
 
 const REPO_ROOT = new URL("../..", import.meta.url).pathname
@@ -131,6 +138,46 @@ describe("HITL — a write-capable declaration may not claim tier none", () => {
       (p) => p.name,
     )
     expect(unresolved).toEqual(["bash"])
+  })
+
+  test("every tier declaration the census cannot attribute is a reviewed non-tool", () => {
+    // THE CENSUS IS NOT TOTAL, and this arm is what keeps that honest. It keys on a
+    // `name` STRING LITERAL, so a tool built by a generic factory with a computed
+    // name is invisible: `make(name, description, schema, readOnly, …)` in
+    // `src/subagent/agent-tools-6.ts` builds the six router tools that way.
+    //
+    // Those six are safe STRUCTURALLY, not luckily: that factory takes no
+    // `hitlTier` parameter and sets none, so `inferToolTierDetailed` falls through
+    // to the `isReadOnly()` fail-closed branch. Give the factory a `hitlTier`
+    // parameter and this arm is what notices.
+    const unattributed = scanUnattributedTierDeclarations(REPO_ROOT)
+    const REVIEWED_NON_TOOLS: Readonly<Record<string, string>> = {
+      "src/apps/cli/permission-explain.ts":
+        "buildToolMeta returns InspectToolMeta — it REPORTS the tier resolveToolTier handed it for a tool found in the registry; it declares nothing",
+      "src/permission/inspect.ts":
+        "the inspector's result object echoes the resolved tier for the /permission surface; it declares nothing",
+    }
+    for (const d of unattributed) {
+      expect(
+        REVIEWED_NON_TOOLS[d.file],
+        `${d.file}:${d.line} declares a HITL tier the posture census cannot attribute to a ` +
+          `tool name (spreads=${d.spreads} hasNameKey=${d.hasNameKey}). Either give it a ` +
+          `literal name so the invariant covers it, or review it here.`,
+      ).toBeDefined()
+    }
+    // The reviewed list must not outlive what it exempts, and each reason must be one.
+    const seen = new Set(unattributed.map((d) => d.file))
+    for (const [file, why] of Object.entries(REVIEWED_NON_TOOLS)) {
+      expect(seen.has(file), `${file} is reviewed but declares no tier any more`).toBe(true)
+      expect(why.split(" ").length, `the reason for ${file} is not a reason`).toBeGreaterThan(10)
+    }
+    // The 6-tool router's factory must stay tier-free — the structural reason above.
+    const factory = readFileSync(join(REPO_ROOT, "src/subagent/agent-tools-6.ts"), "utf8")
+    expect(
+      factory.includes("hitlTier"),
+      "agent-tools-6.ts now mentions hitlTier. Its `make` factory builds six tools with " +
+        "COMPUTED names, so a tier set there is invisible to the posture census.",
+    ).toBe(false)
   })
 
   test("a tool literal without isReadOnly is a CONTRACT, not a tool object", () => {
