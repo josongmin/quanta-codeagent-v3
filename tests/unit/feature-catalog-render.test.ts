@@ -327,6 +327,8 @@ describe("renderCatalog — full output structure", () => {
         expect: 5624,
         files: 154,
         generated_at: "2026-05-21",
+        tsc: { exit: 0, errors: 0 },
+        biome: { exit: 0, errors: 0 },
       },
     })
     expect(md).toContain("1952/0/2/5624 (154 files). 최종 빌드: 2026-05-21.")
@@ -398,7 +400,16 @@ describe("renderCatalog — full output structure", () => {
         intro: "Round-1 baseline.",
         trailers: [{ name: "99-policy.md", content: "Policy." }],
       },
-      baseline: { pass: 10, fail: 0, skip: 0, expect: 30, files: 3, generated_at: "2026-01-01" },
+      baseline: {
+        pass: 10,
+        fail: 0,
+        skip: 0,
+        expect: 30,
+        files: 3,
+        generated_at: "2026-01-01",
+        tsc: { exit: 0, errors: 0 },
+        biome: { exit: 0, errors: 0 },
+      },
     })
     const expected = [
       "<!-- AUTO-GENERATED from tools/feature-catalog/. Do not edit. Run `bun fc build`. -->",
@@ -440,9 +451,86 @@ describe("renderCatalog — full output structure", () => {
       "",
       "---",
       "",
-      "> 검증 베이스라인: tsc 0 · biome clean · 10/0/0/30 (3 files). 최종 빌드: 2026-01-01.",
+      "> 검증 베이스라인: tsc clean · biome clean · 10/0/0/30 (3 files). 최종 빌드: 2026-01-01.",
       "",
     ].join("\n")
     expect(md).toBe(expected)
+  })
+})
+
+/**
+ * Hellgate — the footer's toolchain verdict is RENDERED FROM THE MEASUREMENT,
+ * never asserted.
+ *
+ * WHY THIS EXISTS. `renderCatalog` emitted the literal string `tsc 0 · biome
+ * clean` while `baseline.json` recorded `tsc {exit:2, errors:38}` and `biome
+ * {exit:1, errors:14}`. The loader made the claim unfalsifiable by construction:
+ * it flattened only the test totals and dropped the toolchain block, so the data
+ * that contradicted the sentence never reached the renderer. The generated
+ * `docs/10.feature-catalog.md` is then byte-pinned by the `fc-ci` diff gate and
+ * by CI, so the repo actively PRESERVED a false statement about its own health.
+ *
+ * Contract: clean is claimed only for exit 0 AND zero errors. A non-zero exit or
+ * a non-zero error count renders a FAIL carrying both numbers. An absent or
+ * malformed block renders `unknown` — fail-closed, because "we did not measure"
+ * must never read the same as "we measured and it was clean".
+ */
+describe("baseline footer renders the measured toolchain verdict (P0-2)", () => {
+  const footer = (
+    tsc: { exit: number; errors: number } | null,
+    biome: { exit: number; errors: number } | null,
+  ): string =>
+    renderCatalog({
+      features: [],
+      prose: { intro: "", trailers: [] },
+      baseline: {
+        pass: 1,
+        fail: 0,
+        skip: 0,
+        expect: 1,
+        files: 1,
+        generated_at: "2026-01-01",
+        tsc,
+        biome,
+      },
+    })
+
+  test("a failing tsc/biome baseline is NEVER rendered as clean", () => {
+    const md = footer({ exit: 2, errors: 38 }, { exit: 1, errors: 14 })
+    expect(md).not.toContain("tsc 0")
+    expect(md).not.toContain("biome clean")
+    expect(md).toContain("tsc FAIL(exit 2, errors 38)")
+    expect(md).toContain("biome FAIL(exit 1, errors 14)")
+  })
+
+  test("both numbers travel — a mutated count cannot hide behind the verdict word", () => {
+    const md = footer({ exit: 1, errors: 7 }, { exit: 3, errors: 0 })
+    expect(md).toContain("tsc FAIL(exit 1, errors 7)")
+    // exit != 0 with zero errors is still a FAIL: the tool refused to answer.
+    expect(md).toContain("biome FAIL(exit 3, errors 0)")
+  })
+
+  test("errors without a failing exit is still a FAIL (fail-closed on either axis)", () => {
+    const md = footer({ exit: 0, errors: 5 }, { exit: 0, errors: 0 })
+    expect(md).toContain("tsc FAIL(exit 0, errors 5)")
+    expect(md).toContain("biome clean")
+  })
+
+  test("PAIRED CONTROL — a genuinely clean baseline renders clean", () => {
+    const md = footer({ exit: 0, errors: 0 }, { exit: 0, errors: 0 })
+    expect(md).toContain("tsc clean · biome clean")
+    expect(md).not.toContain("FAIL")
+  })
+
+  test("an absent toolchain block renders unknown, never clean", () => {
+    const md = footer(null, null)
+    expect(md).toContain("tsc unknown · biome unknown")
+    expect(md).not.toContain("clean")
+  })
+
+  test("one side unknown does not contaminate the other", () => {
+    const md = footer(null, { exit: 0, errors: 0 })
+    expect(md).toContain("tsc unknown")
+    expect(md).toContain("biome clean")
   })
 })

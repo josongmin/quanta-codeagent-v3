@@ -11,6 +11,14 @@ import { join } from "node:path"
 import type { Feature, LoadedFeature, Maturity } from "./schema"
 import { computeGrade, SECTION_NAMES } from "./schema"
 
+/** One toolchain's measured outcome. `clean` is exit 0 AND zero errors — both
+ *  axes, because a tool that refused to run (non-zero exit, zero errors parsed)
+ *  has not reported health either. */
+export interface BaselineToolStatus {
+  exit: number
+  errors: number
+}
+
 export interface Baseline {
   pass: number
   fail: number
@@ -18,6 +26,11 @@ export interface Baseline {
   expect: number
   files: number
   generated_at: string
+  /** `null` ⇒ the block was absent or malformed on disk. Rendered `unknown`,
+   *  NEVER clean: "not measured" must not read like "measured and healthy".
+   *  Required (not optional) so a caller cannot omit it into a silent clean. */
+  tsc: BaselineToolStatus | null
+  biome: BaselineToolStatus | null
 }
 
 export interface RenderInput {
@@ -146,7 +159,8 @@ export function renderCatalog(input: RenderInput): string {
   if (input.baseline) {
     const b = input.baseline
     out.push(
-      `> 검증 베이스라인: tsc 0 · biome clean · ${b.pass}/${b.fail}/${b.skip}/${b.expect} (${b.files} files). 최종 빌드: ${b.generated_at}.`,
+      `> 검증 베이스라인: tsc ${toolVerdict(b.tsc)} · biome ${toolVerdict(b.biome)} · ` +
+        `${b.pass}/${b.fail}/${b.skip}/${b.expect} (${b.files} files). 최종 빌드: ${b.generated_at}.`,
     )
   } else {
     out.push("> 검증 베이스라인: (baseline.json 없음)")
@@ -156,6 +170,17 @@ export function renderCatalog(input: RenderInput): string {
 }
 
 // --- Helpers ---------------------------------------------------------------
+
+/** Render a toolchain's verdict FROM its measurement. Never asserts: the footer
+ *  used to carry the literal `tsc 0 · biome clean` while `baseline.json` recorded
+ *  38 tsc errors and 14 biome errors, and the generated doc is byte-pinned by the
+ *  `fc-ci` diff gate — so the repo preserved a claim its own data contradicted. */
+function toolVerdict(status: BaselineToolStatus | null): string {
+  if (status === null) return "unknown"
+  return status.exit === 0 && status.errors === 0
+    ? "clean"
+    : `FAIL(exit ${status.exit}, errors ${status.errors})`
+}
 
 function groupBySection(features: readonly LoadedFeature[]): Map<number, LoadedFeature[]> {
   const map = new Map<number, LoadedFeature[]>()
@@ -369,11 +394,19 @@ export async function loadProse(dir = "tools/feature-catalog/prose"): Promise<Pr
   return { intro, trailers }
 }
 
-/** Read `baseline.json` produced by `refresh-baseline.ts`. The on-disk schema
- *  is rich (tsc/biome/per-tier breakdown) but the renderer only needs the flat
- *  totals shown in the footer — flatten here so the renderer stays tight. */
+/** Read `baseline.json` produced by `refresh-baseline.ts`. The on-disk schema is
+ *  rich (per-tier breakdown); flatten the parts the footer reports. The tsc/biome
+ *  blocks are carried THROUGH rather than dropped — dropping them is what let the
+ *  footer assert `tsc 0 · biome clean` with no data able to contradict it. */
+interface BaselineToolFileShape {
+  exit?: unknown
+  errors?: unknown
+}
+
 interface BaselineFileShape {
   generated_at?: string
+  tsc?: BaselineToolFileShape
+  biome?: BaselineToolFileShape
   tests?: {
     pass?: number
     fail?: number
@@ -381,6 +414,17 @@ interface BaselineFileShape {
     expect_count?: number
     files?: number
   }
+}
+
+/** Accept a toolchain block ONLY when both numbers are present and finite.
+ *  Anything else is `null` (⇒ rendered `unknown`) rather than a defaulted zero,
+ *  which is what would turn a missing measurement back into a clean claim. */
+function readToolStatus(raw: BaselineToolFileShape | undefined): BaselineToolStatus | null {
+  if (raw === undefined) return null
+  const { exit, errors } = raw
+  if (typeof exit !== "number" || !Number.isFinite(exit)) return null
+  if (typeof errors !== "number" || !Number.isFinite(errors)) return null
+  return { exit, errors }
 }
 
 export async function loadBaseline(
@@ -406,6 +450,8 @@ export async function loadBaseline(
         expect: t.expect_count,
         files: t.files,
         generated_at: raw.generated_at,
+        tsc: readToolStatus(raw.tsc),
+        biome: readToolStatus(raw.biome),
       }
     }
     return null
