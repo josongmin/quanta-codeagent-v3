@@ -96,7 +96,6 @@ evidence:
     - src/agent/lsp-bridge.ts
     - src/agent/mention-runner/default-resolver.ts
     - src/agent/mention-runner/skill-resolver.ts
-    - src/agent/mention-runner/default-resolver.ts
     - src/agent/plugin-app-resolver/composite-resolver.ts
     - src/agent/plugin-app-resolver/file-resolver.ts
     - src/apps/agent/assemble.ts
@@ -122,12 +121,12 @@ evidence:
       - src/host/runtime/internal/__tests__/mention-symbol-deps.hellgate.test.ts
       - src/agent/mention-runner/__tests__/default-resolver.hellgate.test.ts
       - src/agent/mention-runner/__tests__/skill-resolver.hellgate.test.ts
-      - src/agent/mention-runner/__tests__/default-resolver.hellgate.test.ts
       - src/agent/plugin-app-resolver/__tests__/file-resolver.hellgate.test.ts
       - src/agent/plugin-app-resolver/__tests__/composite-resolver.hellgate.test.ts
       - src/agent/plugin-app-resolver/__tests__/composite-resolver-file.hellgate.test.ts
       - src/host/runtime/internal/__tests__/mention-wire.hellgate.test.ts
       - tests/unit/mention-first-line-parity-hellgate.test.ts
+      - tests/unit/mention/mention-gate-declared-default-parity-hellgate.test.ts
     integration: []
     contract: []
 knobs:

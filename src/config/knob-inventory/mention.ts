@@ -134,22 +134,30 @@ export const MENTION: readonly KnobDeclaration[] = [
   // The two GATES that decide whether the caps above are ever consulted. They sat
   // undeclared beside their own byte/ratio caps: read as `isOn(opts.env, "KEY")`,
   // a key-as-argument form the scanner could not see.
+  //
+  // BOTH are default-ON, like every sibling that reads through the same helper:
+  // `isOn = (env, key) => parseEnvFlag(env[key], /* defaultOn */ true)`
+  // (`agent/mention-runner/default-resolver.ts:119`). They were first declared here
+  // with `default: false` and a describe that said an unset knob yields no resolver
+  // — both false. Ground truth: unset ⇒ true, `""` ⇒ true, unrecognized ⇒ true;
+  // only `0`/`off`/`false`/`no` opt out.
   {
     envKey: "QUANTA_MENTION_FILE",
     kind: "bool",
-    default: false,
+    default: true,
     group: "host-gate",
     describe:
-      "Resolve `@file` mentions. Unset ⇒ the resolver returns undefined and the mention is left literal.",
+      "Resolve `@file` mentions (default ON). `=off` ⇒ the resolver is omitted and the mention is left literal.",
     home: "runtime-config",
     readSite: "agent/mention-runner/default-resolver.ts",
   },
   {
     envKey: "QUANTA_MENTION_SKILL",
     kind: "bool",
-    default: false,
+    default: true,
     group: "host-gate",
-    describe: "Resolve `@skill` mentions. Unset ⇒ the resolver returns undefined.",
+    describe:
+      "Resolve `@skill` mentions (default ON, and only when a skill registry is injected). `=off` ⇒ omitted.",
     home: "runtime-config",
     readSite: "agent/mention-runner/default-resolver.ts",
   },
