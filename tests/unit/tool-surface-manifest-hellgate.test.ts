@@ -12,7 +12,6 @@
 //     list — assert the resolved set.
 
 import { describe, expect, test } from "bun:test"
-import { execSync } from "node:child_process"
 import { readFileSync } from "node:fs"
 import { basename, join } from "node:path"
 import { createSubagentMailbox } from "@/agent/subagent-mailbox"
@@ -27,12 +26,21 @@ import {
   entryToolNames,
   GATED_TOOLS,
   seedEnvVarsForSurface,
+  shouldSeedOn,
   TOOL_SURFACES,
   type Tool,
+  type ToolSurfaceEntry,
 } from "@/tool"
 import { objectiveTools } from "@/tool/objective"
 import { createTmuxAdapter } from "@/tool/pty"
 import { subagentMailboxTools } from "@/tool/subagent-mailbox"
+import {
+  censusFiles,
+  extractToolNameLiterals,
+  SSOT_FILES,
+  scanToolNameLiterals,
+  TOOL_SHAPE_KEYS,
+} from "../../tools/dev/tool-name-literals"
 import { gatherYamlFiles, loadFeatures } from "../../tools/feature-catalog/schema"
 import { assertScanPopulation } from "./_shared/scan-population"
 
@@ -203,6 +211,35 @@ describe("tool-surface manifest — CLI default-ON seed derives from the SSOT", 
     expect("env" in (entry?.gate ?? {})).toBe(false)
   })
 
+  test("the Skill/ToolSearch row must NOT carry a gate env (it would seed the opt-OUT)", () => {
+    // Same hazard as `search_codebase` above, hit for real while cataloguing these
+    // two: the first version of the row said `env: "QUANTA_SKILLS"`, and the seed
+    // assertion below went red with QUANTA_SKILLS added. `shouldSeedOn` turns a
+    // config-slot gate WITH an env into a CLI seed, and the CLI exports its seeded
+    // gates into child processes — so it would turn skills ON for surfaces that
+    // pass `skillsConfig: undefined` today. QUANTA_SKILLS is the opt-OUT for this
+    // slot (`readCliKnob("QUANTA_SKILLS","bool") ?? true` on the CLI,
+    // `parseEnvFlag(env.QUANTA_SKILLS, true)` on the web daemon), not the opt-in.
+    const entry = GATED_TOOLS.find((e) => e.name === "Skill")
+    expect(entry, "the Skill row is gone — the two tools are uncatalogued again").toBeDefined()
+    expect(entry?.gate).toEqual({ kind: "config-slot", slot: "skills" })
+    expect("env" in (entry?.gate ?? {})).toBe(false)
+    expect(entry?.group).toEqual(["ToolSearch"])
+    expect(entry?.default.cli).toBe("on")
+    expect(entry?.default.web).toBe("on")
+    expect(shouldSeedOn(entry as ToolSurfaceEntry, "cli")).toBe(false)
+  })
+
+  test("branch_search is catalogued opt-in everywhere and never seeded", () => {
+    const entry = GATED_TOOLS.find((e) => e.name === "branch_search")
+    expect(entry, "the branch_search row is gone").toBeDefined()
+    expect(entry?.risk).toBe("spawns-subagent")
+    expect(entry?.default).toEqual({})
+    for (const surface of TOOL_SURFACES) {
+      expect(shouldSeedOn(entry as ToolSurfaceEntry, surface), `seeded on ${surface}`).toBe(false)
+    }
+  })
+
   test("seedEnvVarsForSurface('cli') is exactly the CLI-default-ON tool gates", () => {
     // jun-26 coordination-trio gating: QUANTA_SUBAGENT_MAILBOX / QUANTA_TEAM_PEER_MSG /
     // QUANTA_OBJECTIVE_TOOLS were FLIPPED to opt-in (engagement-UNVERIFIED, frontier
@@ -258,78 +295,186 @@ describe("tool-surface manifest — FULL-universe completeness (the guard that w
   // tools (advisor/delegate/plan/mcp-tasks/... + 3 ORPHANS) sat uncatalogued.
   // This source-scan pins EVERY `name: "x"` in the tool-defining slices against
   // the manifest, so a new tool — or a new orphan — can never silently escape.
-  const scanRegisteredToolNames = (): Set<string> => {
-    const out = execSync(
-      // src/skill/skill-creator.ts is scanned explicitly so an agent-callable tool
-      // defined OUTSIDE src/tool (skill_create lives there but is registered from
-      // src/agent/tier1) cannot escape the manifest completeness scan. Scoped to the
-      // single source file (not all of src/skill) to avoid picking up SKILL.md
-      // frontmatter names / test-fixture `name:` literals that are not tools.
-      // src/agent/budget-tool.ts and src/agent/memory-tools.ts define tools that
-      // live outside src/agent/tier1 (they are not tier-1 session-feature builders,
-      // but leaf tool factories that get composed at the runner level). Extend the
-      // scan so these tools cannot silently escape the two-way drift guard.
-      // `--exclude` the manifest's OWN definition files — see SCAN_CMD.
-      SCAN_CMD,
-      // Anchored on this file, not on the ambient cwd. Without it the paths above
-      // resolve against wherever the runner was launched: from a foreign working
-      // directory grep reported `No such file or directory` and 3 of this file's
-      // 36 assertions failed. A completeness scan that cannot reach its sources
-      // cannot tell "no orphan tools" from "I never looked".
-      { cwd: join(import.meta.dir, "..", "..") },
-    ).toString()
-    const re = /name: "([a-z_]+)"/g
-    const found = new Set<string>()
-    for (let m = re.exec(out); m !== null; m = re.exec(out)) found.add(m[1] as string)
-    return found
-  }
+  /**
+   * The completeness census.
+   *
+   * WAS a `grep -rhoE 'name: "[a-z_]+"'` over six hand-curated roots. Four holes,
+   * every one measured on this tree:
+   *
+   *   1. `[a-z_]` excluded digits and uppercase. A tool named `apply_patch_v2`
+   *      with `isReadOnly: () => false` and `hitlTier: () => "none"` — strictly
+   *      weaker than the `apply_patch` beside it — registered behind a conditional
+   *      port with no manifest row, and this file reported 38 pass / 0 fail.
+   *      Two source files edited, zero test or manifest edits, `precommit` said
+   *      `ok — 9 of 9`. Three real tools were living in that hole.
+   *   2. grep read COMMENTS. Prose alone naming `zz_ghost_stale_tool` made the
+   *      scan "find" it, masking a stale row; prose naming a DELETED tool
+   *      produced a false RED whose natural repair is to ADD a ghost row.
+   *   3. `--exclude=<basename>` matched a basename anywhere, not a path.
+   *   4. `grep -r` ignored extensions, so the TRACKED
+   *      `src/tool/lsp_nav/code-action.ts.tmp` contributed a name.
+   *
+   * Now an AST census — see `tools/dev/tool-name-literals`, which carries the
+   * evidence for each hole. Comments and formatting are not in the AST;
+   * exclusion is by PATH; the file list is `git ls-files` filtered to `*.ts`.
+   *
+   * MEASURED at the commit that wired it: 3430 files, 197 literals, 196 distinct,
+   * and the manifest's 193 names are ALL found — the census is a superset by
+   * exactly the three tools this commit catalogues, with zero false positives.
+   * The three `name:` literals a widened regex would have added and this does not
+   * (`Sheet1`, `Enter`, `...`) are excluded structurally: their object literals
+   * carry no `TOOL_SHAPE_KEYS` member.
+   *
+   * STILL INVISIBLE, said rather than implied: a computed name (`name: TOOL_NAME`)
+   * and an MCP-bridged tool built from a runtime handshake have no source literal
+   * for ANY source instrument to find. That is why this is the cheap backstop and
+   * the assembled-registry comparison is the authority.
+   */
+  const REPO_ROOT = join(import.meta.dir, "..", "..")
+  const scanRegisteredToolNames = (): Set<string> =>
+    new Set(scanToolNameLiterals(REPO_ROOT).map((h) => h.name))
+
+  test("the manifest's own definition files cannot feed the census", () => {
+    // WHY THIS MATTERS. If the manifest's rows reach the census, every catalogued
+    // name is "found" by virtue of being catalogued and the reverse direction —
+    // no stale manifest row — can never fail. Under the grep that was a fragile
+    // `--exclude`: deleting two words from the command string restored the exact
+    // vacuity it existed to prevent (one injected stale row: caught 35 pass /
+    // 1 fail with the exclusion, silent 36 pass / 0 fail without it), and nothing
+    // asserted it.
+    //
+    // Under the census it is STRUCTURAL, and the path exclusion is now merely
+    // defence in depth. MEASURED: `gated-tools.ts` carries 73 raw `name: "x"`
+    // literals and the extractor admits ZERO of them, because a manifest row's
+    // siblings are `origin` / `gate` / `default` / `risk` / `note` and not one
+    // `TOOL_SHAPE_KEYS` member. Stated this way rather than as a
+    // "the exclusion has something to exclude" floor, which would be FALSE here —
+    // I wrote that floor first and it failed with `Received: 0`.
+    for (const f of SSOT_FILES) {
+      const hits = extractToolNameLiterals(f, readFileSync(join(REPO_ROOT, f), "utf8"))
+      expect(hits, `${f} now feeds the census — the reverse direction is vacuous`).toEqual([])
+    }
+    // The shape narrowing is load-bearing, so prove it on a manifest row verbatim.
+    const row = `const r = { name: "read", origin: "@/tool/read", gate: { kind: "always" },`
+    expect(extractToolNameLiterals("src/tool/surface/gated-tools.ts", `${row} }`)).toEqual([])
+    // …and the path exclusion is still declared, so a future manifest that DOES
+    // inline a tool-shaped literal is out by two independent mechanisms.
+    expect(SSOT_FILES).toEqual(["src/tool/surface/manifest.ts", "src/tool/surface/gated-tools.ts"])
+    for (const f of SSOT_FILES)
+      expect(censusFiles(REPO_ROOT), `${f} is in the file list`).not.toContain(f)
+  })
+
+  test("the census reached something, and says how much", () => {
+    // A scan that examined nothing reports "no uncatalogued tool" too. The real
+    // floor here is the OTHER direction — an empty census fails "no stale rows"
+    // with all 193 manifest names — but that couples two tests, so the reach is
+    // also stated on its own. MEASURED at the commit that wired this: 3430 files,
+    // 197 literals, 196 distinct names.
+    const files = censusFiles(REPO_ROOT)
+    expect(
+      files.length,
+      "the census reached almost no files — did git ls-files fail?",
+    ).toBeGreaterThan(3000)
+    const hits = scanToolNameLiterals(REPO_ROOT)
+    expect(hits.length, "the extractor matched almost nothing").toBeGreaterThan(150)
+    // Superset, not equality: a literal can legitimately appear in more than one
+    // file, and the census is a backstop that may over-report a tool built in a
+    // file the manifest groups elsewhere.
+    const found = new Set(hits.map((h) => h.name))
+    for (const n of ALL_MANIFEST_TOOL_NAMES) {
+      expect(found.has(n), `${n} is catalogued but the census cannot see it`).toBe(true)
+    }
+  })
+
+  test("the census is not scoped to a hand-curated root list", () => {
+    // Hole 4. The grep named six roots; `src/agent/branch-search/` and `src/skill/`
+    // (minus the one file bolted on after an EARLIER miss) were outside them, and
+    // that is where the three uncatalogued tools lived. `buildSkillBlock` mints
+    // three tools and only `skill_create` was catalogued — the two siblings from
+    // the same builder in the same directory were never added.
+    const files = censusFiles(REPO_ROOT)
+    for (const f of [
+      "src/agent/branch-search/tool.ts",
+      "src/skill/skill-tool.ts",
+      "src/skill/tool-search.ts",
+    ]) {
+      expect(files, `${f} is outside the census — the root-list hole is back`).toContain(f)
+    }
+    // A tracked non-`.ts` file must not contribute. `grep -r` read
+    // `src/tool/lsp_nav/code-action.ts.tmp` and counted its `lsp_code_action`.
+    expect(files.filter((f) => !f.endsWith(".ts"))).toEqual([])
+  })
 
   /**
-   * The completeness scan, hoisted so a test can assert the exclusions are present.
+   * The extractor's VERDICT on each shape that beat the grep.
    *
-   * WHY THE EXCLUSIONS. Without them the scan reads
-   * `src/tool/surface/{manifest,gated-tools}.ts`, so every catalogued name is "found"
-   * by virtue of being catalogued and the reverse direction ("no stale rows") can
-   * never fail. That is not hypothetical: injecting one stale row
-   * (`name: "zz_ghost_stale_tool"`, in no real source) is caught WITH the exclusions
-   * (35 pass / 1 fail) and silent WITHOUT them (36 pass / 0 fail). Deleting two
-   * words from this string restored the exact vacuity it exists to prevent, and
-   * nothing asserted it.
-   *
-   * CURRENT MEASUREMENT, corrected. An earlier version of this comment said the scan
-   * "returned exactly the 194 manifest names" with self included and "193 and names
-   * `lsp_diagnostics`" with it excluded. That was true when a row existed for a tool
-   * that never did; `1b5b8a2` removed it, so both variants now return 193 and the
-   * name sets are identical. `--exclude=gated-tools.ts` therefore excludes 73 real
-   * literals that would all be found elsewhere anyway, and `--exclude=manifest.ts`
-   * currently excludes ZERO literals — it is defensive against the manifest ever
-   * inlining names, not load-bearing today. Both are asserted below rather than
-   * described, because a currently-inert exclusion is exactly the kind that gets
-   * tidied away.
-   *
-   * The same comment also claimed "`src/tool/index.ts` re-exports the manifest, so it
-   * goes too". There is no such exclusion, and it happens not to matter — that file
-   * carries no `name: "x"` literals either. Removed rather than left as a false
-   * description of the command.
+   * The old file asserted `expect(SCAN_CMD).toContain("--exclude=…")` — it pinned
+   * the command STRING and never the behaviour. That is the assertion whose
+   * absence let a digit-named write-capable tool land green.
    */
-  const SCAN_CMD =
-    "grep -rhoE 'name: \"[a-z_]+\"' src/tool src/subagent src/agent/tier1 " +
-    "src/agent/budget-tool.ts src/agent/memory-tools.ts src/skill/skill-creator.ts " +
-    "--exclude=manifest.ts --exclude=gated-tools.ts"
+  describe("the extractor's verdict on the shapes that beat the grep", () => {
+    const F = "src/tool/fixture.ts"
+    const namesIn = (src: string): string[] => extractToolNameLiterals(F, src).map((h) => h.name)
 
-  test("the completeness scan still excludes the manifest's own definition files", () => {
-    expect(SCAN_CMD).toContain("--exclude=gated-tools.ts")
-    expect(SCAN_CMD).toContain("--exclude=manifest.ts")
-    // …and the gated-tools exclusion must still have something to exclude, or the
-    // assertion above passes over an empty file.
-    const gated = readFileSync(
-      join(import.meta.dir, "..", "..", "src/tool/surface/gated-tools.ts"),
-      "utf8",
-    )
-    expect(
-      gated.match(/name: "[a-z_]+"/g)?.length ?? 0,
-      "gated-tools.ts carries no name literals — the exclusion guards nothing",
-    ).toBeGreaterThan(50)
+    test("a digit in the name is found (hole 1 — the live escape)", () => {
+      expect(
+        namesIn(`export const t = { name: "apply_patch_v2", isReadOnly: () => false }`),
+      ).toEqual(["apply_patch_v2"])
+    })
+
+    test("an uppercase name is found (hole 1 — Skill / ToolSearch)", () => {
+      expect(namesIn(`export const t = { name: "ToolSearch", inputSchema: z.object({}) }`)).toEqual(
+        ["ToolSearch"],
+      )
+    })
+
+    test("a name mentioned only in a comment is NOT found (hole 2, the masking half)", () => {
+      const src = [
+        `// Historical note: the registry once had \`{ name: "zz_ghost_stale_tool" }\`;`,
+        `// it was removed in a refactor.`,
+        `/* isReadOnly: () => true, name: "zz_block_comment_tool" */`,
+        `export const t = { name: "real_tool", isReadOnly: () => true }`,
+      ].join("\n")
+      expect(namesIn(src)).toEqual(["real_tool"])
+    })
+
+    test("a name with no space after the colon is found (the formatting hole)", () => {
+      expect(namesIn(`export const t = {name:"no_space_tool",isReadOnly:()=>true}`)).toEqual([
+        "no_space_tool",
+      ])
+    })
+
+    test("a line-wrapped literal is found (the formatting hole)", () => {
+      expect(
+        namesIn(`export const t = {\n  name:\n    "wrapped_tool",\n  isReadOnly: () => true,\n}`),
+      ).toEqual(["wrapped_tool"])
+    })
+
+    test("a `name` on a non-tool object is NOT found (why the census can span all of src)", () => {
+      // The three real occurrences on this tree: a spreadsheet tab, a key name, a
+      // judge placeholder. A widened regex would have reported all three.
+      const src = [
+        `const sheet = { name: "Sheet1", rows: [] }`,
+        `const key = { name: "Enter", code: 13 }`,
+        `const t = { name: "real_tool", hitlTier: () => "none" }`,
+      ].join("\n")
+      expect(namesIn(src)).toEqual(["real_tool"])
+    })
+
+    test("the admitting key is reported, so a widening of TOOL_SHAPE_KEYS is auditable", () => {
+      expect(TOOL_SHAPE_KEYS).toContain("isReadOnly")
+      const hits = extractToolNameLiterals(
+        F,
+        `const t = { name: "x", isConcurrencySafe: () => true }`,
+      )
+      expect(hits.map((h) => h.admittedBy)).toEqual(["isConcurrencySafe"])
+    })
+
+    test("a computed name is NOT found, and the census says so rather than implying it", () => {
+      // Stated as a KNOWN limit. The runtime-parity gate is the instrument that
+      // closes it; a source census cannot.
+      expect(namesIn(`const t = { name: TOOL_NAME, isReadOnly: () => true }`)).toEqual([])
+    })
   })
 
   test("every registered tool name is catalogued in the manifest (no uncatalogued tool)", () => {

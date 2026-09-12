@@ -952,6 +952,32 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     adr: "ADR-0136",
     note: "ADR-0136 budget ledger tool. Agent-queryable cost surface: shows per-session / per-day / per-model cumulative spend and soft/hard breach state. Wired by tier1/budget.ts buildBudgetBlock when config.budgetLedger is provided (QUANTA_BUDGET_LEDGER on + ledger minted by the composition root). Absent ⇒ tool not registered, byte-identical default menu. Read-only (the ledger is an event-log; budget_status only reads the computed snapshot). Opt-in EVERYWHERE.",
   },
+  {
+    name: "Skill",
+    group: ["ToolSearch"],
+    origin:
+      "@/agent/tier1 buildSkillBlock (createSkillTool @/skill/skill-tool · createToolSearchTool @/skill/tool-search)",
+    // NO `env` — deliberately, and this is the load-bearing part of the row.
+    // `shouldSeedOn` turns a config-slot gate WITH an `env` into a CLI seed, so
+    // declaring `QUANTA_SKILLS` here would make the CLI export QUANTA_SKILLS=1 into
+    // every child process it spawns, turning skills on for surfaces that pass
+    // skillsConfig: undefined today. QUANTA_SKILLS is the opt-OUT for this slot, not
+    // the opt-in. Same shape and same reason as `search_codebase`.
+    gate: { kind: "config-slot", slot: "skills" },
+    default: { cli: "on", web: "on" },
+    risk: "read-only",
+    note: 'UNCATALOGUED UNTIL NOW — and default-ON on two surfaces while invisible to this SSOT. buildSkillBlock mints THREE tools and only skill_create was catalogued, because src/skill/skill-creator.ts had been bolted onto the old completeness grep\'s root list after an earlier miss; these two siblings, from the same builder, were never added, and their uppercase names were also outside that grep\'s [a-z_] class. Both read-only: Skill resolves a skill name through the runtime authority at invoke time; ToolSearch searches the live registry specs (and, in catalog:"skills" mode, the live searchable projection). Gate is the config.skills slot, which BOTH the CLI (readCliKnob("QUANTA_SKILLS","bool") ?? true, apps/cli/internal.ts) and the web daemon (parseEnvFlag(env.QUANTA_SKILLS, true), web-daemon/runtime-factory/session-collaborators.ts) default to ON — so QUANTA_SKILLS=0 is the opt-OUT. terminal + serve-stdio pass skillsConfig: undefined ⇒ absent. Both are already in MUTATING_TOOL_TABLE as read-only, which is how the plan-mode SSOT knew them while this one did not.',
+  },
+  {
+    name: "branch_search",
+    origin:
+      "@/agent/branch-search/tool (branchSearchTool via branch-search-runner buildBranchSearchTool, tier1/branch-search.ts)",
+    gate: { kind: "config-slot", slot: "branchSearch", env: "QUANTA_BENCH_BRANCH_SEARCH" },
+    default: {},
+    risk: "spawns-subagent",
+    adr: "ADR-0433",
+    note: "UNCATALOGUED UNTIL NOW, and the one of the three that is WRITE-CAPABLE (isReadOnly: () => false, isConcurrencySafe: () => false). It was invisible only because src/agent/branch-search/ was outside the old grep's six hand-curated roots. Runs N parallel candidate agent runs in isolated workspaces (worktree or copy), scores each by tsc/test/lint/lsp_diag/patch_size verifiers, and returns the winner; branchSearch is STRIPPED from the child config so a candidate cannot recursively fan out. Default-OFF every surface (opt-in): it owns heavy concurrency internally. HITL posture is safe by omission — it declares no hitlTier, so inferToolTierDetailed fails closed to always-confirm via the needs-sandbox branch.",
+  },
 ]
 
 /** Resolve a single tool/group's availability on a surface given a default-state
