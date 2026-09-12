@@ -177,13 +177,32 @@ export const quarantineVerdict = (
   if (record.repositoryId !== repositoryId) {
     return { kind: "foreign", reason: `quarantine belongs to "${record.repositoryId}"` }
   }
+  const alive = record.survivors.map((group) => group.pgid).filter((pgid) => isAlive(pgid))
   if (nowMs >= record.expiresAtMs) {
+    // THE TTL CEILING IS DELIBERATE — a crashed keeper must not brick
+    // verification for everyone — but it was SILENT about the one fact that
+    // makes releasing dangerous. Liveness was computed only on the path below,
+    // so an expired record released the lane saying "quarantine expired 12ms
+    // ago (keeper pid 4242)" whether every survivor had exited or all of them
+    // were still running. The contender then took a lane over live poisoned
+    // process groups with nothing in any receipt to say so.
+    //
+    // Still `stale`; the ceiling still wins. What changes is that the release
+    // now names the groups it is releasing over, so the campaign receipt that
+    // records this verdict records the risk with it.
+    const expiredForMs = nowMs - record.expiresAtMs
     return {
       kind: "stale",
-      reason: `quarantine expired ${nowMs - record.expiresAtMs}ms ago (keeper pid ${record.keeperPid})`,
+      reason:
+        alive.length === 0
+          ? `quarantine expired ${expiredForMs}ms ago (keeper pid ${record.keeperPid}); ` +
+            "every quarantined group has exited"
+          : `quarantine expired ${expiredForMs}ms ago (keeper pid ${record.keeperPid}) with ` +
+            `${alive.length} of ${record.survivors.length} group(s) STILL ALIVE ` +
+            `(${alive.join(", ")}) — the ttl ceiling is releasing a lane whose processes are ` +
+            "still running",
     }
   }
-  const alive = record.survivors.map((group) => group.pgid).filter((pgid) => isAlive(pgid))
   if (alive.length === 0) {
     return { kind: "stale", reason: "every quarantined group has exited" }
   }

@@ -149,6 +149,41 @@ describe("lease quarantine", () => {
     expect(expired.reason).toContain("expired")
   })
 
+  /**
+   * ★ The ceiling released the lane without saying what it was releasing over.
+   *
+   * Liveness was computed only AFTER the expiry branch returned, so an expired
+   * record produced the same sentence — "quarantine expired 12ms ago (keeper pid
+   * 4242)" — whether every survivor had exited or all of them were still
+   * running. The contender then took a lane over live poisoned process groups,
+   * and nothing in the campaign receipt that records this verdict said so.
+   *
+   * The ceiling still wins: a crashed keeper must not brick verification for
+   * everyone. What the arms pin is that the release NAMES the groups it is
+   * releasing over.
+   */
+  test("an expired quarantine says whether it is releasing over LIVE groups", () => {
+    const rec = record()
+    const overLive = verdictFor(rec, alive(4242), rec.expiresAtMs + 5)
+    expect(overLive.kind).toBe("stale")
+    if (overLive.kind !== "stale") throw new Error("unreachable")
+    expect(overLive.reason).toContain("STILL ALIVE")
+    expect(overLive.reason).toContain("4242")
+    expect(overLive.reason).toContain("ttl ceiling is releasing")
+
+    // PAIRED CONTROL 1 — expired with everything already gone is the benign
+    // case, and it must NOT carry the warning, or the warning means nothing.
+    const overDead = verdictFor(rec, alive(), rec.expiresAtMs + 5)
+    expect(overDead.kind).toBe("stale")
+    if (overDead.kind !== "stale") throw new Error("unreachable")
+    expect(overDead.reason).toContain("every quarantined group has exited")
+    expect(overDead.reason).not.toContain("STILL ALIVE")
+
+    // PAIRED CONTROL 2 — before the ceiling, a live group still BLOCKS. The
+    // arms above must not have turned the ceiling into the only verdict.
+    expect(verdictFor(rec, alive(4242), rec.expiresAtMs - 1).kind).toBe("blocked")
+  })
+
   test("another repository's quarantine never blocks this one — and is never deleted", () => {
     // `stale` is the DELETABLE verdict, and a foreign record was reported as
     // stale. Measured end to end: the owner read `blocked`, a contender with a
