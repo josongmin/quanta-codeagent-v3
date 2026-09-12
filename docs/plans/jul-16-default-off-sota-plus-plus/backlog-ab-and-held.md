@@ -5,7 +5,7 @@
 > **Closure 현황 (2026-08-23 source re-audit)**: eligible 184행, **wired 175/184 = 95.1%**, runtime CLI seed 31, unknown-surface 0, unknown-value 0, checker error 0. `compaction-event-emit`와 `context-change-injection`은 normal host에 항상 조립되는 production wire라 default-off denominator에서 제외했다. `fast-apply-merge`는 명시적 host `FastApplyMergeReviewSeam`을 `ToolContext`까지 전달한다; env/model만으로는 계속 fail-closed다.
 > decisions: measure-first 72 · **enable-now 70** · repair-first 2 · hold 40. (2026-08-25: ADR-0556 retired `memory-cross-session-inject`, −1 wired/measure-first.)
 >
-> **남은 8행의 성격**: 4개는 실제 외부 계약/credential 또는 image policy가 먼저 필요하고, 3개는 producer-only여서 수명 소유자가 없으며, 1개는 실행 loop producer가 없는 transport seam이다. 가짜 consumer 또는 자동승인을 만들지 않는 한 이들은 `wired`가 될 수 없다. measure-first 67행은 행동/비용을 바꿔 **efficacy A/B(operator 결정)**가 선행돼야 기본값을 바꿀 수 있다.
+> **남은 9행의 성격**: 4개는 실제 외부 계약/credential 또는 image policy가 먼저 필요하고, 3개는 producer-only여서 수명 소유자가 없으며, 1개는 실행 loop producer가 없는 transport seam이다. 가짜 consumer 또는 자동승인을 만들지 않는 한 이들은 `wired`가 될 수 없다. measure-first 72행은 행동/비용을 바꿔 **efficacy A/B(operator 결정)**가 선행돼야 기본값을 바꿀 수 있다.
 
 ### 2026-07-19 구조 재감사 — 레저 정정과 실제 잔여 blocker
 

@@ -11,6 +11,7 @@
 import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
 import { loadDefaultOffLedger } from "../../tools/feature-catalog/default-off-ledger-checker"
+import { loadFeatures } from "../../tools/feature-catalog/schema"
 
 const ROOT = join(import.meta.dir, "..", "..")
 const LEDGER_PATH = join(ROOT, "tools/feature-catalog/default-off-ledger.yaml")
@@ -30,10 +31,14 @@ interface LedgerPlanMetrics {
   readonly repairFirst: number
   readonly hold: number
   readonly dormant: number
+  /** Total catalogued features. Not a ledger figure, but the plan quotes it beside
+   *  the ledger ones and it drifted the same way — 1,028 against a real 1,071. */
+  readonly features: number
 }
 
 const metricsOf = async (): Promise<LedgerPlanMetrics> => {
   const ledger = await loadDefaultOffLedger(LEDGER_PATH)
+  const features = (await loadFeatures(join(ROOT, "tools/feature-catalog/features"))).length
   const count = (predicate: (row: (typeof ledger.rows)[number]) => boolean): number =>
     ledger.rows.filter(predicate).length
   const rows = ledger.rows.length
@@ -47,6 +52,7 @@ const metricsOf = async (): Promise<LedgerPlanMetrics> => {
     repairFirst: count((row) => row.decision === "repair-first"),
     hold: count((row) => row.decision === "hold"),
     dormant: count((row) => row.reachability !== "wired"),
+    features,
   }
 }
 
@@ -58,10 +64,21 @@ const summaryNeedles = (
     `decisions {measure-first ${metrics.measureFirst}, enable-now ${metrics.enableNow}, repair-first ${metrics.repairFirst}, hold ${metrics.hold}}`,
     `closure **${metrics.wired}/${metrics.rows} wired (${metrics.percent}%)**`,
     `The ${metrics.dormant} non-wired rows`,
+    // The four figures the DOF-90 row and the two ledger bullets state in PROSE
+    // rather than in the closure fraction. `49005aa60` updated the fraction and
+    // the decisions map inside the same table cell and left these behind, and the
+    // ratchet could not see them because it pinned only the fraction. `eligible`
+    // was also being reported as the WIRED count, which is a different number.
+    `(${metrics.measureFirst} measure-first), with ${metrics.hold} deliberate holds`,
+    `authority ledger is fully populated — **${metrics.rows} eligible rows** (${metrics.wired} of them wired)`,
+    `Authority ledger: **${metrics.rows} eligible rows** (${metrics.wired} wired)`,
+    `all exit 0 for **${metrics.features.toLocaleString("en-US")} features**`,
   ],
   "docs/plans/jul-16-default-off-sota-plus-plus/backlog-ab-and-held.md": [
     `eligible ${metrics.rows}행, **wired ${metrics.wired}/${metrics.rows} = ${metrics.percent}%**`,
     `decisions: measure-first ${metrics.measureFirst} · **enable-now ${metrics.enableNow}** · repair-first ${metrics.repairFirst} · hold ${metrics.hold}.`,
+    `**남은 ${metrics.dormant}행의 성격**`,
+    `measure-first ${metrics.measureFirst}행은`,
   ],
   "docs/plans/jul-16-default-off-sota-plus-plus/sota-plus-plus-execution-plan.md": [
     `**${metrics.wired}/${metrics.rows} wired (${metrics.percent}%)**`,
