@@ -1425,9 +1425,17 @@ const main = async (): Promise<void> => {
     // `capability-probe-producer.ts` and nothing set its two environment
     // variables, so every `capability("<id>")` answered `blocked-missing` and the
     // gated describes turned into `describe.skip`. The files then reported PASS
-    // having executed nothing, on every host. Measured recovery on this box: 33
-    // cases that ran nowhere now run, and the ones that still skip do so because
-    // the host genuinely lacks chromium, bwrap or debugpy.
+    // having executed nothing, on every host.
+    //
+    // This comment used to add "measured recovery on this box: 33 cases that ran
+    // nowhere now run, and the ones that still skip do so because the host
+    // genuinely lacks chromium, bwrap or debugpy". Every clause of that was
+    // wrong, and a commit that claimed to have withdrawn it corrected two copies
+    // and left this one. A second count of the same corpus gave 27, not 33, and
+    // the difference is unattributed. `/usr/bin/python3 -c 'import debugpy'`
+    // succeeds here — it resolves under $HOME, so it is absent for a WORKER and
+    // present on the host. And chromium did not skip for absence at all: nothing
+    // probed it, because the campaign producer had no chrome parameter.
     //
     // Produced HERE rather than in a gate because the receipt must describe the
     // host the WORKERS run on, and this is the process that owns their env.

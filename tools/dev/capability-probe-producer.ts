@@ -134,6 +134,16 @@ interface CandidateOutcome {
   readonly detail: string
   readonly resolved?: string
   readonly timedOut: boolean
+  /**
+   * The spawn itself threw — ENOENT, EACCES, a vanished interpreter.
+   *
+   * Distinct from `timedOut` and from a non-zero exit, and it was collapsed into
+   * neither: `runCandidate` caught the throw, returned `timedOut: false`, and
+   * `probeCapability` then reported `unavailable`. "We could not run the probe"
+   * became "this host does not have the tool", which is the same laundering as
+   * `probe-timeout` into absence, one layer down.
+   */
+  readonly threw?: boolean
 }
 
 export interface SpawnedProbe {
@@ -192,6 +202,7 @@ const runCandidate = async (
         ok: false,
         detail: `spawn threw: ${String(error)}`,
         timedOut: false,
+        threw: true,
       },
       probe: null,
     }
@@ -273,8 +284,14 @@ export const probeCapability = async (
       probeMs,
     }
   }
-  const anyTimedOut = settled.some((s) => s.outcome.timedOut)
-  const status: CapabilityStatus = anyTimedOut ? "probe-timeout" : "unavailable"
+  // Three failure kinds, most-specific first. A throw means the probe never ran;
+  // a timeout means it ran and did not answer; anything else is a definitive
+  // negative, which is the only one that means "this host lacks it".
+  const status: CapabilityStatus = settled.some((s) => s.outcome.threw === true)
+    ? "probe-error"
+    : settled.some((s) => s.outcome.timedOut)
+      ? "probe-timeout"
+      : "unavailable"
   return {
     status,
     detail:
@@ -540,7 +557,25 @@ export const produceCapabilityReceipt = async (
   // probes still add up to an unbounded producer.
   const all = Promise.all(
     specs.map(async (spec) => {
-      capabilities[spec.id] = await probeCapability(spec, options.spawn ?? bunSpawner, env)
+      // ONE probe must not kill the producer. A rejected probe used to reject
+      // the whole `Promise.all`, so a spawner that throws — an interpreter that
+      // vanished between resolution and spawn, a permissions error — took the
+      // campaign's entire receipt with it, and the workers then got no receipt
+      // at all: every gated describe skipped, every file green.
+      //
+      // `probe-error` is also the one `CapabilityStatus` nothing ever produced.
+      // It was declared, classified by the consumer as `failed-setup`, and
+      // unreachable — a closed union with a dead arm, which is a classification
+      // nobody can test. This is the shape that produces it.
+      try {
+        capabilities[spec.id] = await probeCapability(spec, options.spawn ?? bunSpawner, env)
+      } catch (error) {
+        capabilities[spec.id] = {
+          status: "probe-error",
+          detail: `the probe itself threw: ${error instanceof Error ? error.message : String(error)}`,
+          probeMs: 0,
+        }
+      }
     }),
   ).then(() => true)
   const finished = await withDeadline(all, deadlineMs, () => false)
