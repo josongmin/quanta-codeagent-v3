@@ -10,7 +10,7 @@ monitoring: n-a
 modes: [interactive]
 configurable: integrated
 config_refs:
-  env: [QUANTA_PILL, QUANTA_PILLS, QUANTA_EFFORT, QUANTA_SANDBOX, QUANTA_PILL_WORKSPACE, QUANTA_PILL_MODE, QUANTA_PILL_SKILLS, QUANTA_PILL_SANDBOX, QUANTA_PILL_RULES]
+  env: [QUANTA_PILLS, QUANTA_EFFORT, QUANTA_SANDBOX, QUANTA_PILL_WORKSPACE, QUANTA_PILL_MODE, QUANTA_PILL_SKILLS, QUANTA_PILL_SANDBOX, QUANTA_PILL_RULES]
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:codex"]
 depends_on: [repl-code-smell-cleanup, repl-interactive-surface, slashctx-6-ports-wire-completion, multimodal-image-input, shell-output-delta-streaming]

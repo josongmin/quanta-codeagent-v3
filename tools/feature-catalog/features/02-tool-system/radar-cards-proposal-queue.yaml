@@ -52,7 +52,7 @@ evidence:
       - tests/unit/radar/radar-hellgate.test.ts
       - tests/unit/radar/radar-e2e-hellgate.test.ts
       - tests/unit/radar/bug-fix-card-hellgate.test.ts
-knobs: [QUANTA_RADAR, QUANTA_RADAR_FILE, QUANTA_RADAR_TASK_MS, QUANTA_RADAR_PRUNE_MS]
+knobs: [QUANTA_RADAR, QUANTA_RADAR_FILE, QUANTA_RADAR_TASK_MS]
 deliberate_hold:
   reason: |
     LIVE end-to-end (jun-15): producer hook + /radar surface + gated store wired

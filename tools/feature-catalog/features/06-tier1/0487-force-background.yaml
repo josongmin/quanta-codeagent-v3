@@ -13,7 +13,7 @@ owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:cursor", "default-off"]
 depends_on: [background-subagent, subagent-bg-tools-trio]
 config_refs:
-  env: [QUANTA_FORCE_BACKGROUND, QUANTA_FORCE_BACKGROUND_SUBAGENT_BG, QUANTA_FORCE_BACKGROUND_SUBAGENT_QUEUE]
+  env: [QUANTA_FORCE_BACKGROUND, QUANTA_SUBAGENT_QUEUE]
 surface_integration:
   cli: full
   web: missing
@@ -47,7 +47,7 @@ evidence:
       - tests/unit/force-background-promote-hellgate.test.ts
     integration: []
     contract: []
-knobs: ["QUANTA_FORCE_BACKGROUND", "QUANTA_FORCE_BACKGROUND_SUBAGENT_BG", "QUANTA_FORCE_BACKGROUND_SUBAGENT_QUEUE"]
+knobs: ["QUANTA_FORCE_BACKGROUND", "QUANTA_SUBAGENT_QUEUE"]
 deliberate_hold:
   reason: |
     Control-op + tool are shipped behind QUANTA_SUBAGENT_QUEUE / QUANTA_FORCE_BACKGROUND

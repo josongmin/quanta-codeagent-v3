@@ -84,7 +84,7 @@
   `PREPUSH_NARROWED_TO_CANARY` 플래그 + interlock 테스트로 고정했다(selector 미배선 상태에서 플립 시 RED).
 
 - capability 결과는 required aggregator가 이미 검증하는 `quanta.capability-result.v1` 그대로 사용(스키마 이중화 없음).
-  `expect(true).toBe(true)` self-pass 제거, `QUANTA_REQUIRE_CAPABILITY=<group>`로 부재를 skip이 아닌 fail로.
+  `expect(true).toBe(true)` self-pass 제거, `QUANTA_REQUIRE_CAPABILITIES=<group>`로 부재를 skip이 아닌 fail로.
   jest/mocha module-load `npm i` 제거, astropy clone/build는 nightly native-build 그룹으로.
 
 - red-on-injection 10건 전부 RED 후 byte-identical 복원.
