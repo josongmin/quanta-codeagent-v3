@@ -2,6 +2,7 @@ import { parseAgentArgs, type ToolProfileToken } from "@/host/runtime/agent-args
 import { isFalsyToken } from "@/shared"
 import { readCliKnob } from "../cli-knobs-accessor"
 import { isPathLikeToken } from "../resume"
+import { VALUED_TOP_LEVEL_FLAGS } from "../top-level-flags"
 
 /**
  * CLI argv / flag accessors + default-OFF feature-gate predicates (ADR-0024
@@ -129,14 +130,7 @@ export const gitCoChangeEnabled = (): boolean =>
  * by {@link argvPrompt} (so the value is skipped, not treated as a positional)
  * and {@link argvImages} (which extracts `--image` values).
  */
-const VALUED_FLAGS = [
-  "--state",
-  "--resume",
-  "--observe-dir",
-  "--title",
-  "--image",
-  "--tool-profile",
-] as const
+const VALUED_FLAGS = VALUED_TOP_LEVEL_FLAGS
 
 /**
  * Resolve the shipping CLI's tool-profile flag through the canonical host
