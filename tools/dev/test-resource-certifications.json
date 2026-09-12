@@ -2842,7 +2842,7 @@
       "testId": "tests/integration/cli-attention-navigation.test.ts",
       "sourceSha256": "44cc835b9ccbdc2510df4506a3d9ba9e064dfcdce73fd7aafa55cf656380883f",
       "owner": "verification",
-      "reason": "Claims enumerated from the import closure (1703 repository modules) by quanta.test-resource-analysis.v1; every reachable module and external specifier is accounted for.",
+      "reason": "Claims enumerated from the import closure (1720 repository modules) by quanta.test-resource-analysis.v1; every reachable module and external specifier is accounted for.",
       "status": "certified",
       "isolation": "process",
       "claims": [
@@ -2884,7 +2884,7 @@
         }
       ],
       "analyzer": "quanta.test-resource-analysis.v1",
-      "moduleCount": 1703
+      "moduleCount": 1720
     },
     {
       "testId": "tests/integration/cli-background-turn-e2e.test.ts",
@@ -14588,7 +14588,7 @@
       "testId": "tests/unit/_arch/worktree-pollution-guard.test.ts",
       "sourceSha256": "d10285292b5a1a4222f55edf7718994ccceec965da8f483689987113cf540b2b",
       "owner": "verification",
-      "reason": "Claims enumerated from the import closure (2 repository modules) by quanta.test-resource-analysis.v1; every reachable module and external specifier is accounted for.",
+      "reason": "Claims enumerated from the import closure (5 repository modules) by quanta.test-resource-analysis.v1; every reachable module and external specifier is accounted for.",
       "status": "certified",
       "isolation": "process",
       "claims": [
@@ -14599,10 +14599,14 @@
         {
           "key": "git-common",
           "mode": "exclusive"
+        },
+        {
+          "key": "process-env",
+          "mode": "exclusive"
         }
       ],
       "analyzer": "quanta.test-resource-analysis.v1",
-      "moduleCount": 2
+      "moduleCount": 5
     },
     {
       "testId": "tests/unit/activity/worktree-producer-hellgate.test.ts",
@@ -15228,10 +15232,14 @@
       "testId": "tests/unit/cli/mcp-lifecycle-cmd-hellgate.test.ts",
       "sourceSha256": "0962470d4b3d2ad400b7bed2bb580b74c3883c327127c78715e2ec44c53315a7",
       "owner": "verification",
-      "reason": "Claims enumerated from the import closure (47 repository modules) by quanta.test-resource-analysis.v1; every reachable module and external specifier is accounted for.",
+      "reason": "Claims enumerated from the import closure (72 repository modules) by quanta.test-resource-analysis.v1; every reachable module and external specifier is accounted for.",
       "status": "certified",
       "isolation": "process",
       "claims": [
+        {
+          "key": "docker-daemon",
+          "mode": "exclusive"
+        },
         {
           "key": "lsp-workspace",
           "mode": "exclusive"
@@ -15242,7 +15250,7 @@
         }
       ],
       "analyzer": "quanta.test-resource-analysis.v1",
-      "moduleCount": 47
+      "moduleCount": 72
     },
     {
       "testId": "tests/unit/cli/mcp-name-surface-parity.test.ts",
@@ -15376,7 +15384,7 @@
     },
     {
       "testId": "tests/unit/dev/process-observer.test.ts",
-      "sourceSha256": "466ae848fe3966369e1ecb0900bc6d2f1373286f71dc9b421c6ec46150e7dd71",
+      "sourceSha256": "c40ce141aeca7b0cb9a4aa122668180276cd81d6902d79893a891490dbc49318",
       "owner": "verification",
       "reason": "Claims enumerated from the import closure (2 repository modules) by quanta.test-resource-analysis.v1; every reachable module and external specifier is accounted for.",
       "status": "certified",
@@ -17216,17 +17224,41 @@
       "testId": "tests/unit/integrations/github/slice-fence-static-hellgate-r3.test.ts",
       "sourceSha256": "154d63079ade79a6cd6f4ec37850bc8752faf7784b3a532ef673debc30c7d79f",
       "owner": "verification",
-      "reason": "Claims enumerated from the import closure (5 repository modules) by quanta.test-resource-analysis.v1; every reachable module and external specifier is accounted for.",
+      "reason": "Claims enumerated from the import closure (22 repository modules) by quanta.test-resource-analysis.v1; every reachable module and external specifier is accounted for.",
       "status": "certified",
       "isolation": "process",
       "claims": [
         {
+          "key": "browser-profile",
+          "mode": "exclusive"
+        },
+        {
           "key": "child-process",
           "mode": "shared"
+        },
+        {
+          "key": "docker-daemon",
+          "mode": "exclusive"
+        },
+        {
+          "key": "git-common",
+          "mode": "exclusive"
+        },
+        {
+          "key": "lsp-workspace",
+          "mode": "exclusive"
+        },
+        {
+          "key": "port:ephemeral",
+          "mode": "exclusive"
+        },
+        {
+          "key": "process-env",
+          "mode": "exclusive"
         }
       ],
       "analyzer": "quanta.test-resource-analysis.v1",
-      "moduleCount": 5
+      "moduleCount": 22
     },
     {
       "testId": "tests/unit/integrations/github/url-anchor-injection-hellgate-r5.test.ts",
