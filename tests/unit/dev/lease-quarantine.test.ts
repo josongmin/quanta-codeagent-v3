@@ -21,6 +21,7 @@ import { join } from "node:path"
 import {
   clearLeaseQuarantine,
   KEEPER_SCRIPT_PATH,
+  keeperSpawnRefusal,
   LEASE_QUARANTINE_SCHEMA,
   type LeaseQuarantineRead,
   type LeaseQuarantineRecord,
@@ -456,14 +457,49 @@ describe("the keeper script the default spawner points at", () => {
     // TTL instead of clearing when the survivors exit.
     expect(existsSync(KEEPER_SCRIPT_PATH)).toBe(true)
     expect(KEEPER_SCRIPT_PATH.endsWith("tools/dev/lease-quarantine-keeper.ts")).toBe(true)
-    // ...and the guard is in the production path, not just in this assertion.
-    expect(readFileSync(KEEPER_SCRIPT_PATH, "utf8")).toContain("export const keeperTick")
-    expect(
-      readFileSync(
-        join(import.meta.dir, "..", "..", "..", "tools/dev/lease-quarantine.ts"),
-        "utf8",
-      ),
-    ).toContain("refusing to write a record")
+  })
+
+  /**
+   * The previous version of this arm asserted
+   * `expect(source).toContain("refusing to write a record")` against
+   * `lease-quarantine.ts`. That is a SOURCE-STRING guard: delete the
+   * `existsSync` check, leave the sentence in a comment, and it stays green. It
+   * was written as the fix for an untested default and reintroduced the exact
+   * defect class it was fixing.
+   */
+  test("the refusal is a DECISION, driven here rather than grepped for", () => {
+    const missing = keeperSpawnRefusal("/nonexistent/lease-quarantine-keeper.ts", () => false)
+    expect(missing).toContain("refusing to write a record")
+    expect(missing).toContain("/nonexistent/lease-quarantine-keeper.ts")
+
+    // PAIRED CONTROL — the SHIPPED path must not refuse. This is the wiring
+    // proof the string match only pretended to be: if the script is renamed or
+    // moved, this fails, and it fails with the real path in the message.
+    expect(keeperSpawnRefusal()).toBeUndefined()
+  })
+
+  test("the DEFAULT spawner refuses, without any arm replacing it", () => {
+    // Every other arm passes `spawnKeeper`, which is what left the production
+    // default unexercised. This one passes NO spawner, so the real
+    // `spawnDetachedKeeper` runs and its refusal branch is the thing under test.
+    const dir = mkdtempSync(join(tmpdir(), "keeper-default-"))
+    try {
+      const path = join(dir, "quarantine.json")
+      expect(() =>
+        quarantineLane({
+          path,
+          repositoryId: "owner/repo",
+          groups: [{ pgid: 4_242, leaderPid: 4_242, verdict: "ours", detail: "survivor" }],
+          keeperScriptPath: join(dir, "keeper-that-is-not-there.ts"),
+        }),
+      ).toThrow(/refusing to write a record/)
+
+      // ...and NOTHING was written. A record whose keeper can never run holds
+      // the lane for the full TTL, which is worse than not quarantining at all.
+      expect(existsSync(path)).toBe(false)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 
