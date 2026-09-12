@@ -28,6 +28,7 @@ import { buildCiBotWiring } from "@/../src/apps/agent/mode-presets/ci-bot"
 import { buildAsyncDeferredTools } from "@/../src/host/runtime/agent-arg-builder/gated-tool-ports"
 import { resolveGitBudget, withBudget } from "@/tool/git"
 import type { GitRunner } from "@/tool/git/types"
+import { sliceBetween } from "./_shared/slice-between"
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
@@ -143,7 +144,9 @@ describe("B3/B4-MANIFEST — gh tools manifest entry documents QUANTA_CI_BOT_GH_
     // a reader inspecting the manifest learns about both activation paths.
     // This test pins that documentation: if someone removes it while refactoring
     // the manifest, the test turns red before B3/B4 silently regress.
-    const ghEntry = src.slice(src.indexOf('"gh_pr_view"'), src.indexOf("lsp_diagnostics"))
+    const ghEntry = sliceBetween(src, '"gh_pr_view"', 'name: "lsp_references"', {
+      label: "src/tool/surface/gated-tools.ts",
+    })
     expect(ghEntry).toContain("QUANTA_CI_BOT_GH_WRITE")
   })
 })

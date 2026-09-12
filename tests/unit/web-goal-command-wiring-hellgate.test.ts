@@ -20,6 +20,8 @@
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join, resolve } from "node:path"
+import { sliceBetween } from "./_shared/slice-between"
+import { stripComments } from "./_shared/strip-comments"
 
 const ROOT = resolve(import.meta.dir, "..", "..")
 const read = (file: string): string => readFileSync(join(ROOT, file), "utf8")
@@ -74,11 +76,21 @@ describe("web /goal — the composition root threads live senders", () => {
 
 describe("web /goal — the control verbs are threaded, not stubbed", () => {
   test("the catalogue gives the goal builder the structured reader", () => {
-    const catalog = read(CATALOG)
-    const goalCall = catalog.slice(catalog.indexOf("buildGoalSlashCommands({"))
+    // COMMENTS STRIPPED FIRST, and the window anchored on NAMED KEYS.
+    //
+    // This asserted `/readGoalReadout\(/` over `slice(0, indexOf("})"))`, which was
+    // wrong in both directions. Measured: replacing the wiring with
+    // `readGoal: displayOnlyGoalReader` while leaving the identifier in a nearby
+    // COMMENT left the test green (a false PASS on the thing it is named for), and
+    // adding one benign line containing `})` before `readGoal:` moved the window end
+    // in front of the key and turned it red with the wiring untouched (a false RED).
+    const catalog = stripComments(read(CATALOG))
+    const goalEntry = sliceBetween(catalog, "buildGoalSlashCommands({", "sendObjectiveMutate:", {
+      label: "slash-catalog.ts buildGoalSlashCommands entry",
+    })
 
-    expect(goalCall).toContain("readGoal")
-    expect(goalCall.slice(0, goalCall.indexOf("})"))).toMatch(/readGoalReadout\(/)
+    // The ASSIGNMENT, not the identifier: a mention cannot satisfy this.
+    expect(goalEntry).toMatch(/readGoal:\s*\(\)\s*=>\s*readGoalReadout\(/)
   })
 
   test("the builder owns the control verbs, not just show/set/work", () => {

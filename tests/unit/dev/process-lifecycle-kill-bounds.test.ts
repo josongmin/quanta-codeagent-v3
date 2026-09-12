@@ -41,6 +41,7 @@ import {
   probeGroupFromSnapshot,
   terminateCampaignOnSignal,
 } from "../../../tools/dev/test-shard-lifecycle"
+import { sliceBetween } from "../_shared/slice-between"
 
 const PGID = 4242
 
@@ -384,12 +385,21 @@ describe("the signal path accounts before it releases", () => {
     expect(runner).toContain("accountForSurvivors: (outcome) => {")
     // The runner's hook does BOTH things the `finally` does.
     const hook = runner.slice(runner.indexOf("accountForSurvivors: (outcome) => {"))
-    expect(hook.slice(0, hook.indexOf("releaseLease:"))).toContain("quarantineLane({")
-    expect(hook.slice(0, hook.indexOf("releaseLease:"))).toContain("openJournal?.commit()")
+    // `quarantineLane({` occurs twice in this file, so a window widened by a missing
+    // `releaseLease:` anchor is SATISFIED by the unrelated occurrence — the hook can
+    // stop quarantining and this stays green. Measured before `sliceBetween`:
+    // renaming the end anchor turned a correct RED back into 17 pass / 0 fail.
+    const hookBody = sliceBetween(hook, 0, "releaseLease:", {
+      label: "run-test-shards.ts accountForSurvivors",
+    })
+    expect(hookBody).toContain("quarantineLane({")
+    expect(hookBody).toContain("openJournal?.commit()")
 
     const campaign = source("tools/dev/verification-campaign.ts")
     const terminate = campaign.slice(campaign.indexOf("const terminate = (signal"))
-    const body = terminate.slice(0, terminate.indexOf('process.on("SIGINT"'))
+    const body = sliceBetween(terminate, 0, 'process.on("SIGINT"', {
+      label: "verification-campaign.ts terminate",
+    })
     expect(body).toContain("quarantineLane({")
     // ...and it is written BEFORE the release, which is the whole point: the
     // kernel frees the port the instant this process exits.
