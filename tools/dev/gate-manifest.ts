@@ -161,6 +161,8 @@ export const GATES: readonly Gate[] = [
       "in the worktree is caught at the source. It replaced three separate suite gates that " +
       "each re-bought discovery and re-queued on the repository lane; every receipt-consuming " +
       "gate below derives its verdict from this run's junit/scan-reach receipts",
+    hostDependent:
+      'the suite\'s population includes capability files that SKIP rather than fail when their tool is absent, and they are NOT lane-gated — `capabilityMembershipFor` indexes only lane-gated groups, so `declared-pending-gate` members classify as ordinary and land in this gate\'s tiers. Measured: `tests/integration/os-sandbox-bwrap-real-exec-e2e.test.ts` is `["prepush","pr","full","nightly"]` and runs 3 pass / 2 skip on this host. This gate is the one whose green everyone reads, and it was the third pass-by-skipping gate left unmarked when the field was first set.',
   },
   {
     id: "unit-speed-budget",
@@ -209,7 +211,7 @@ export const GATES: readonly Gate[] = [
     needsQuietBox:
       "real rust-analyzer/gopls/pyright indexing a fixture project. MEASURED on this 16-core box, same commit and command: at load 52 evidence-lsp-bridge-real-e2e goes 1 pass / 1 fail (a starved server answers with an EMPTY hover); at load 3.9 it goes 2 pass in 5.2s. The lane was already moved out of the parallel suite for exactly this, but it starts right after a 30-chunk full suite",
     hostDependent:
-      "every case needs a real external toolchain, and each one SKIPS when its tool is absent rather than failing. Measured on this box: 11 of the 35 capability-group member files cannot execute (gopls, lldb-dap, dlv, chromium, bwrap absent; lima-vm and ollama-daemon down), so a PASS here can mean the lane found nothing to run.",
+      'every case needs a real external toolchain, and each one SKIPS when its tool is absent rather than failing — so a PASS here can mean the lane found nothing to run. Deliberately states the MECHANISM and not a count: the first version said "11 of the 35 capability-group member files", which is arithmetically true of the REPO and wrong for this gate — 5 of those 11 live in `tests/integration/` and this gate runs only the 17 `tests/unit/**/*-real-e2e.test.ts` files. A number in a prose field drifts the moment the corpus or the host moves; the mechanism does not.',
   },
   {
     id: "web-frontend",
@@ -235,7 +237,7 @@ export const GATES: readonly Gate[] = [
     run: "bun run test:contract",
     why: 'real docker + language servers + python/lancedb. LOCALLY THIS PASSES BY SKIPPING: the ci.yml job sets REQUIRE_CONTRACT=1 at the JOB level ("absent dependency = hard fail, never a silent skip") and the manifest pins the command string, not the env — so a local PASS here means "nothing was missing that I checked", not "the contracts hold"',
     hostDependent:
-      "docker / language servers / python / lancedb. `REQUIRE_CONTRACT=1` is set at the ci.yml JOB level and the manifest pins the command string, not the env, so locally an absent dependency is a SKIP and the gate still reports PASS. This field was added to the type with this exact gate in mind and then set on nothing: the `why` above said the gate passes by skipping while `hostDependent` stayed undefined, so the summary never marked it and the closing line counted it as ordinary coverage.",
+      'passes by SKIPPING locally, and the reason is NOT the one you would guess. Measured on this box: `bun run test:contract` reports 8 pass / 5 skip with pyright-langserver, typescript-language-server and python3 all PRESENT and docker up — every skip is `blocked-missing … "no capability receipt: QUANTA_CAPABILITY_RECEIPT is unset — the tier runner did not produce one"`. The gate\'s command never sets that env; only `run-test-shards.ts` does, and this gate does not go through it. `REQUIRE_CONTRACT=1` at the ci.yml JOB level is what turns an absent dependency into a hard fail there, and the manifest pins the command string, not the env. So a local PASS means the receipt was missing, not that the contracts hold — and the repair is wiring the receipt into `test:contract`, not installing docker. (An earlier version of this string named the absent-tool cause and would have sent the next reader to install dependencies that are already here.)',
   },
 ]
 

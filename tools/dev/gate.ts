@@ -585,8 +585,16 @@ printOut(`\n──── ${label} summary`)
 // every run this box has produced for weeks — the reader was never told that a whole
 // lane sat out. The disclosure matters MORE on a red: a failure list read without it
 // looks like the complete set of problems.
+//
+// SCOPED to tiers that can actually be affected. Hoisting it unconditionally made
+// `precommit` and `smoke` print "anything gated on them was skipped: bwrap, chromium,
+// gopls, …" when NEITHER tier contains a single gate that touches a capability — a
+// true sentence about the host, stated where it says nothing about the run. The
+// `hostDependent` marks are exactly the gates that can pass by finding nothing, so
+// their presence in the plan is the condition.
 const absentTools = missingExternalTools()
-if (absentTools.length > 0) {
+const planHasHostDependent = planned.some((g) => g.hostDependent !== undefined)
+if (absentTools.length > 0 && planHasHostDependent) {
   printOut(
     `  [capabilities] absent on this host, so anything gated on them was skipped: ${absentTools.join(", ")}`,
   )
