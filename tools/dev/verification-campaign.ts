@@ -3,7 +3,7 @@ import { basename, dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { runBoundedCapture } from "./bounded-child"
 import { describeQuietBoxWait, quietBoxBudgetMs, waitForQuietBox } from "./box-load"
-import { gatesForStage } from "./gate-manifest"
+import { gatesForStage, plannedGatesForLabel } from "./gate-manifest"
 import { type LeaseQuarantineRecord, quarantineLane, quarantinePath } from "./lease-quarantine"
 import {
   acquireTestShardLease,
@@ -137,7 +137,11 @@ const isExactPrepushReuse =
 // lease before executing gate 1.
 if (isExactPrepushReuse) {
   try {
-    const probe = probeExactVerificationReceipt(REPO_ROOT, gatesForStage("prepush"))
+    // The SAME list `gate.ts` mints over. This probed `gatesForStage("prepush")`
+    // (20 gates) while the producer minted over `gatesForVerificationTier`
+    // (19 — `smoke-canary` is smoke-only), so the digests could never match and
+    // this fast path was dead for every receipt anyone writes.
+    const probe = probeExactVerificationReceipt(REPO_ROOT, plannedGatesForLabel("prepush"))
     if (probe.ok) {
       process.stdout.write(
         `[verification] REUSED exact receipt before repository lease head=${probe.head} path=${probe.path}\n`,

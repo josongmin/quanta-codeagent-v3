@@ -45,6 +45,7 @@ import {
   gatesForStage,
   gatesForVerificationTier,
   tiersForGate,
+  plannedGatesForLabel,
 } from "./gate-manifest"
 import { formatGateManifestViolations, validateGateManifest } from "./gate-manifest-contract"
 import { admissionFromEnv } from "./verification-admission"
@@ -369,7 +370,7 @@ const runGate = async (gate: Gate): Promise<GateRun> => {
  * gate into the other one, is loud instead of reassuring — and, unlike the count
  * floor it replaced, it cannot be cleared by editing a number.
  */
-const planned = label === "precommit" ? gatesForStage("precommit") : gatesForVerificationTier(label)
+const planned = plannedGatesForLabel(label)
 const overallStarted = Bun.nanoseconds()
 const plannedManifestSha256 = verificationManifestSha256(planned)
 // D4 — a `consumes` that names nothing real disarms the whole mechanism with no

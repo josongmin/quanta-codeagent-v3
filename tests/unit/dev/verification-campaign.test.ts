@@ -10,7 +10,7 @@ import {
 } from "node:fs"
 import { tmpdir } from "node:os"
 import { delimiter, join } from "node:path"
-import { gatesForStage } from "@/../tools/dev/gate-manifest"
+import { plannedGatesForLabel } from "@/../tools/dev/gate-manifest"
 import { buildCampaignReceipt } from "@/../tools/dev/verification-campaign-receipt"
 import {
   mintExactVerificationReceipt,
@@ -211,7 +211,15 @@ export const GATE_CONTRACT: readonly { readonly id: string; readonly stage: Gate
   GATES.map((gate) => ({ id: gate.id, stage: gate.stage }))
 export const gatesForStage = (stage: GateStage): readonly Gate[] =>
   stage === "precommit" ? GATES.filter((gate) => gate.stage === "precommit") : GATES
-export const gatesForVerificationTier = (_tier: string): readonly Gate[] => GATES
+// NOT \`=> GATES\`. The real selector drops gates whose tiers exclude this tier —
+// \`smoke-canary\` is smoke-only — and a stub that returns everything makes
+// \`gatesForStage\` and \`gatesForVerificationTier\` identical. That is exactly why
+// the producer/consumer manifest mismatch (19 gates vs 20) was invisible to these
+// fixtures for its whole life.
+export const gatesForVerificationTier = (tier: string): readonly Gate[] =>
+  GATES.filter((gate) => tiersForGate(gate).includes(tier))
+export const plannedGatesForLabel = (label: string): readonly Gate[] =>
+  label === "precommit" ? gatesForStage("precommit") : gatesForVerificationTier(label)
 export const tiersForGate = (gate: Gate): readonly string[] =>
   gate.stage === "precommit"
     ? ["smoke", "prepush", "pr", "full", "nightly"]
@@ -372,7 +380,12 @@ describe("whole verification campaign lease", () => {
         verificationContextForSnapshot(
           root,
           { head, status: "" },
-          verificationManifestSha256(gatesForStage("prepush")),
+          // The list the PRODUCER mints over, via the one owner. This said
+          // `gatesForStage("prepush")` — 20 gates — while `gate.ts` mints over
+          // `plannedGatesForLabel` (19), and the degenerate stub made the two
+          // identical inside the fixture. So these arms exercised a reuse that
+          // could never happen in production.
+          verificationManifestSha256(plannedGatesForLabel("prepush")),
           nestedGateEnv,
         ),
       ),
@@ -565,7 +578,12 @@ describe("whole verification campaign lease", () => {
         verificationContextForSnapshot(
           root,
           { head, status: "" },
-          verificationManifestSha256(gatesForStage("prepush")),
+          // The list the PRODUCER mints over, via the one owner. This said
+          // `gatesForStage("prepush")` — 20 gates — while `gate.ts` mints over
+          // `plannedGatesForLabel` (19), and the degenerate stub made the two
+          // identical inside the fixture. So these arms exercised a reuse that
+          // could never happen in production.
+          verificationManifestSha256(plannedGatesForLabel("prepush")),
           nestedGateEnv,
         ),
       ),

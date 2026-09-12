@@ -94,7 +94,15 @@ export const GATE_CONTRACT: readonly { readonly id: string; readonly stage: Gate
   GATES.map((gate) => ({ id: gate.id, stage: gate.stage }))
 export const gatesForStage = (stage: GateStage): readonly Gate[] =>
   stage === "precommit" ? GATES.filter((gate) => gate.stage === "precommit") : GATES
-export const gatesForVerificationTier = (_tier: string): readonly Gate[] => GATES
+// NOT \`=> GATES\`. The real selector drops gates whose tiers exclude this tier —
+// \`smoke-canary\` is smoke-only — and a stub that returns everything makes
+// \`gatesForStage\` and \`gatesForVerificationTier\` identical. That is exactly why
+// the producer/consumer manifest mismatch (19 gates vs 20) was invisible to these
+// fixtures for its whole life.
+export const gatesForVerificationTier = (tier: string): readonly Gate[] =>
+  GATES.filter((gate) => tiersForGate(gate).includes(tier))
+export const plannedGatesForLabel = (label: string): readonly Gate[] =>
+  label === "precommit" ? gatesForStage("precommit") : gatesForVerificationTier(label)
 export const tiersForGate = (gate: Gate): readonly string[] =>
   gate.stage === "precommit"
     ? ["smoke", "prepush", "pr", "full", "nightly"]
