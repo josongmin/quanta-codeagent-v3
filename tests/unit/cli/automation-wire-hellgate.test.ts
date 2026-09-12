@@ -49,6 +49,7 @@ import {
   DEFAULT_AUTOMATION_INTERVAL_MS,
 } from "@/scheduler/runtime-wire"
 import type { AgentLoopPort, RRule } from "@/scheduler/types"
+import { logger } from "@/shared"
 import { buildDefaultTools } from "@/tool"
 import { automationUpdateTool } from "@/tool/automation_update"
 import type { ToolContext, ToolEvent } from "@/tool/types"
@@ -652,17 +653,83 @@ describe("ADR-0279/0280 — automation wire hellgate", () => {
   // Wire / cleanup (4)
   // ───────────────────────────────────────────────────────────────────────
 
-  test("HELL-AW-19: default-OFF ⇒ assembleAutomation returns null", () => {
+  /**
+   * P1-1 — the activation vocabulary is the repo-wide bool SSOT, not a private
+   * `=== "on"`.
+   *
+   * WHY THIS CHANGED. `/cron`, `/schedule` and `/inbox` all print the D-6 hint
+   * `hint: set QUANTA_AUTOMATION=1 to enable`, and this test used to PIN `"1"`
+   * and `"true"` as INACTIVE. So the surface told the operator a value the
+   * runtime refused, and the suite certified that refusal. Every other gate this
+   * hint serves reads through `@/shared#gateOn`/`isTruthyToken`; automation was
+   * the single holdout. The fix moves the runtime onto the SSOT rather than
+   * rewriting the hint, because `=1` is the one token EVERY gate accepts —
+   * including the strict `=== "1"` gates (`QUANTA_UNTRUSTED_ENVELOPE`), which is
+   * why a vocabulary list in the shared helper would be false for them.
+   *
+   * This is a BEHAVIOUR change, not a wording change: `QUANTA_AUTOMATION=1` now
+   * constructs an engine slot where it previously returned null.
+   */
+  test("HELL-AW-19: unset / canonical falsy ⇒ assembleAutomation returns null", () => {
     expect(assembleAutomation(makeEnv({}), { agentLoop: noopAgentLoop })).toBeNull()
-    expect(
-      assembleAutomation(makeEnv({ [AUTOMATION_ENV_FLAG]: "off" }), { agentLoop: noopAgentLoop }),
-    ).toBeNull()
-    expect(
-      assembleAutomation(makeEnv({ [AUTOMATION_ENV_FLAG]: "1" }), { agentLoop: noopAgentLoop }),
-    ).toBeNull()
-    expect(
-      assembleAutomation(makeEnv({ [AUTOMATION_ENV_FLAG]: "true" }), { agentLoop: noopAgentLoop }),
-    ).toBeNull()
+    for (const off of ["off", "0", "false", "no", "OFF", " off "]) {
+      expect(
+        assembleAutomation(makeEnv({ [AUTOMATION_ENV_FLAG]: off }), { agentLoop: noopAgentLoop }),
+        `${AUTOMATION_ENV_FLAG}=${JSON.stringify(off)} must stay off`,
+      ).toBeNull()
+    }
+  })
+
+  test("HELL-AW-19b: every canonical truthy token activates (the hint says `=1`)", () => {
+    for (const on of ["1", "on", "true", "yes", "ON", "True", " 1 "]) {
+      const slot = assembleAutomation(makeEnv({ [AUTOMATION_ENV_FLAG]: on }), {
+        agentLoop: noopAgentLoop,
+      })
+      expect(slot, `${AUTOMATION_ENV_FLAG}=${JSON.stringify(on)} must activate`).not.toBeNull()
+      // The slot is inert data (engine + handler + interval) — no timer is armed
+      // until `startAutomationEngineTicker`, so there is nothing to tear down.
+      expect(slot?.tickIntervalMs).toBe(DEFAULT_AUTOMATION_INTERVAL_MS)
+      expect(slot?.handler).toBeInstanceOf(Function)
+    }
+  })
+
+  test("HELL-AW-19c: an unrecognized token fails CLOSED and says so", () => {
+    const warnings: string[] = []
+    const prev = logger.warn
+    logger.warn = (m: string) => {
+      warnings.push(m)
+    }
+    try {
+      expect(
+        assembleAutomation(makeEnv({ [AUTOMATION_ENV_FLAG]: "yep" }), {
+          agentLoop: noopAgentLoop,
+        }),
+      ).toBeNull()
+    } finally {
+      logger.warn = prev
+    }
+    // Fail-closed is not enough on its own: a typo that behaves exactly like
+    // `off` with no output is how an operator loses an hour to a one-character
+    // mistake. The canonical falsy spellings stay SILENT (asserted below).
+    expect(warnings.join("\n")).toContain(AUTOMATION_ENV_FLAG)
+    expect(warnings.join("\n")).toContain("yep")
+  })
+
+  test("HELL-AW-19d: PAIRED CONTROL — a canonical falsy token warns NOTHING", () => {
+    const warnings: string[] = []
+    const prev = logger.warn
+    logger.warn = (m: string) => {
+      warnings.push(m)
+    }
+    try {
+      for (const off of ["off", "0", "false", "no"]) {
+        assembleAutomation(makeEnv({ [AUTOMATION_ENV_FLAG]: off }), { agentLoop: noopAgentLoop })
+      }
+      assembleAutomation(makeEnv({}), { agentLoop: noopAgentLoop })
+    } finally {
+      logger.warn = prev
+    }
+    expect(warnings).toEqual([])
   })
 
   test("HELL-AW-20: stop() ⇒ clean teardown (no further ticks)", () => {

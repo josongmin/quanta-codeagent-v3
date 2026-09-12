@@ -5,7 +5,9 @@
  * `AutomationEngineSlot` consumed by `AgentConfig.automationEngine`
  * (ADR-0215 engine seam + ADR-0240 loop-helper ticker arm/disarm).
  *
- * Default-OFF: `QUANTA_AUTOMATION !== "on"` ⇒ returns `null`. The caller's
+ * Default-OFF: `QUANTA_AUTOMATION` absent or falsy (`0`/`false`/`off`/`no`) ⇒
+ * returns `null`; any canonical truthy token (`1`/`on`/`true`/`yes`) activates.
+ * An unrecognized token fails CLOSED and warns. The caller's
  * spread-conditional in `apps/agent/index.ts` OMITS the slot — the legacy
  * byte-identical path is preserved (RFC §1.2).
  *
@@ -26,7 +28,7 @@
 import { Database } from "bun:sqlite"
 import { mkdirSync } from "node:fs"
 import { dirname } from "node:path"
-import { logger, quantaHomePath, writeStderr } from "@/shared"
+import { isFalsyToken, isTruthyToken, logger, quantaHomePath, writeStderr } from "@/shared"
 import type { AgentEvent } from "@/stream"
 import {
   type AutomationEnginePort,
@@ -200,13 +202,32 @@ export const assembleAutomation = (
   deps: AssembleAutomationDeps,
 ): AutomationEngineSlot | null => {
   const flag = env.get(AUTOMATION_ENV_FLAG)
-  if (flag !== "on") return null
+  if (!isTruthyToken(flag)) {
+    // P1-1 — activation rides the repo-wide bool vocabulary (`@/shared`
+    // GATE_TRUTHY = 1|on|true|yes), not a private `=== "on"`. `/cron`,
+    // `/schedule` and `/inbox` all print `hint: set QUANTA_AUTOMATION=1`, and
+    // `=1` used to be REFUSED here — the surface named a value the runtime
+    // rejected. `=1` is the token every gate accepts (the strict `=== "1"`
+    // gates included), so the runtime moved onto the SSOT rather than the hint
+    // moving off it.
+    //
+    // Fail-closed either way, but a token that is neither truthy nor falsy is
+    // almost always a typo, and behaving silently like `off` is what makes it
+    // expensive to find. Canonical falsy spellings stay silent.
+    if (flag !== undefined && flag.trim() !== "" && !isFalsyToken(flag)) {
+      logger.warn(
+        `${AUTOMATION_ENV_FLAG}='${flag}' is not a recognized boolean; automation engine ` +
+          `disabled (fail-closed). Use ${AUTOMATION_ENV_FLAG}=1 (also accepts on/true/yes).`,
+      )
+    }
+    return null
+  }
 
   const intervalRaw = env.get(AUTOMATION_INTERVAL_ENV)
   const tickIntervalMs = parseInterval(intervalRaw)
   if (tickIntervalMs === null) {
     logger.warn(
-      `${AUTOMATION_ENV_FLAG}=on but ${AUTOMATION_INTERVAL_ENV}='${intervalRaw}' is invalid; ` +
+      `${AUTOMATION_ENV_FLAG}='${flag}' but ${AUTOMATION_INTERVAL_ENV}='${intervalRaw}' is invalid; ` +
         `automation engine disabled. Set a positive integer (default ${DEFAULT_AUTOMATION_INTERVAL_MS}).`,
     )
     return null
