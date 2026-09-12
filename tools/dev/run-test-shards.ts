@@ -676,9 +676,16 @@ const emitFailureAttempt = (
       ? FAILURE_ATTEMPT_PATH
       : undefined
   } catch (error) {
-    process.stderr.write(
-      `[test:shards] WARN could not publish the failure artifact: ${error instanceof Error ? error.message : String(error)}\n`,
-    )
+    // A worker killed on a deadline never flushed its JUnit, so there is
+    // nothing to publish and that is the expected outcome rather than a
+    // defect. Say which case this is: "could not publish" on its own reads
+    // like a failure of the publishing, and sends the reader to the wrong file.
+    const why = result.timedOut
+      ? "worker was killed on a deadline before its JUnit was written"
+      : error instanceof Error
+        ? error.message
+        : String(error)
+    process.stderr.write(`[test:shards] no failure artifact for chunk ${plan.index}: ${why}\n`)
     return undefined
   }
 }

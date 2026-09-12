@@ -177,7 +177,11 @@ describe("the runner publishes the attempt", () => {
     const start = body.indexOf("const emitFailureAttempt =")
     const region = body.slice(start, body.indexOf("\n}\n", start))
     expect(region).toContain("try {")
-    expect(region).toContain("WARN could not publish the failure artifact")
+    expect(region).toContain("no failure artifact for chunk")
+    // A deadline kill never flushed a JUnit, so there is nothing to publish and
+    // that is expected — the message must distinguish it from a publishing
+    // failure, or it sends the reader to the wrong file.
+    expect(region).toContain("killed on a deadline before its JUnit was written")
   })
 })
 
