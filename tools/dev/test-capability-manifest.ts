@@ -122,7 +122,7 @@ export interface CapabilityGroup {
    * Which EXISTING required-producer this group's executed counts roll up into.
    *
    * NOT a second artifact schema. `tools/dev/capability-result.ts` already
-   * reduces a lane's JUnit into `quanta.capability-result.v1`, and
+   * reduces a lane's JUnit into `quanta.capability-result.v2`, and
    * `tools/dev/verification-required-producers.ts` already validates a
    * `CapabilityFloor` against it — for three COARSE producers (`pty`,
    * `toolchain`, `contract`) whose floor is 1 file / 1 case. This field makes
@@ -514,7 +514,7 @@ export const FIXTURE_INSTALL_TIMEOUT_MS = 180_000
 /**
  * Per-group floors in the EXACT shape `verification-required-producers.ts`
  * already validates (`CapabilityFloor`), so the fan-out reuses the existing
- * `quanta.capability-result.v1` rail rather than growing a second one.
+ * `quanta.capability-result.v2` rail rather than growing a second one.
  *
  * Today three coarse producers (`pty`, `toolchain`, `contract`) carry a
  * `ZERO_EXECUTION_FLOOR` of 1 file / 1 case. That is enough to catch "the job
@@ -693,7 +693,7 @@ const shapeProblems = (group: CapabilityGroup): readonly CapabilityManifestProbl
   if (!requiredProducerIdsCached().has(group.producer)) {
     push(
       `producer "${group.producer}" is not a required-producer id — the fan-out would publish a ` +
-        "quanta.capability-result.v1 artifact nothing aggregates",
+        "quanta.capability-result.v2 artifact nothing aggregates",
     )
   }
   // A group whose members were REMOVED from the ordinary tiers, or that lives

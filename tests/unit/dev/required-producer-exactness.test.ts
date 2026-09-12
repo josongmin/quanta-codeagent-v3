@@ -67,14 +67,34 @@ const greenNeeds = (
 const requiredMembers = (producer: string): readonly string[] =>
   capabilityFloorFor(producer).groups.flatMap((group) => [...group.members])
 
+/**
+ * Cases distributed so every GROUP clears its own case floor.
+ *
+ * v1 published only a total, so this fixture could meet the producer total and
+ * say nothing about the groups. The per-group case floor is enforced now, and a
+ * fixture that spread its cases unevenly would fail it — which is the shape a
+ * real lane fails in.
+ */
 const executedArtifact = (producer: string): CapabilityResult => {
   const floor = capabilityFloorFor(producer)
-  const members = requiredMembers(producer)
+  const byFile: Record<string, number> = {}
+  for (const group of floor.groups) {
+    const perMember = Math.max(1, Math.ceil(group.minimumExecutedCases / group.members.length))
+    for (const member of group.members) byFile[member] = perMember
+  }
+  if (Object.keys(byFile).length === 0) {
+    byFile[`tests/${producer}/one.test.ts`] = Math.max(1, floor.minimumExecutedCases)
+  }
+  const executedFiles = Object.keys(byFile)
   return {
     schema: CAPABILITY_RESULT_SCHEMA,
     producer,
-    executedFiles: members.length > 0 ? members : [`tests/${producer}/one.test.ts`],
-    executedCases: Math.max(floor.minimumExecutedCases, members.length),
+    executedFiles,
+    // The SUM, not a guess: the validator now refuses a total that does not
+    // match the per-file counts, because a total nobody can decompose is the
+    // field that let a group hide.
+    executedCases: executedFiles.reduce((total, file) => total + (byFile[file] ?? 0), 0),
+    executedCasesByFile: byFile,
     skippedUnsupported: 0,
     blockedMissing: 0,
     failedSetup: 0,
@@ -335,6 +355,7 @@ describe("capability zero-execution floor", () => {
           ...executedArtifact("pty"),
           executedFiles: [],
           executedCases: 0,
+          executedCasesByFile: {},
           skippedUnsupported: 8,
         },
       },
@@ -492,30 +513,41 @@ describe("the capability file floor is real, not decoration", () => {
   test("cases without files is refused", () => {
     if (producer === undefined) throw new Error("no capability producer to test")
     const verdict = validateCapabilityResult(producer, {
-      schema: "quanta.capability-result.v1",
+      schema: CAPABILITY_RESULT_SCHEMA,
       producer: producer.id,
       executedFiles: [],
       // ABOVE the case floor on purpose, so the FILE half is what trips. The
       // derived floors made the case check fire first and hid the file check
       // again — the same way the original survivor hid.
       executedCases: 999,
+      executedCasesByFile: {},
       skippedUnsupported: 0,
       blockedMissing: 0,
       failedSetup: 0,
     })
     expect(verdict.ok).toBe(false)
     if (verdict.ok) throw new Error("unreachable")
-    expect(verdict.reason).toMatch(/file\(s\)/)
+    // v2 refuses this one check EARLIER and says something sharper: 999 cases
+    // belonging to no file is now a decomposition failure, not a floor failure.
+    // The invariant the arm exists for is unchanged — cases with no files is
+    // refused — and the reason now names why the number cannot be believed.
+    expect(verdict.reason).toMatch(/per-file case counts sum to 0, artifact says 999/)
   })
 
   test("PAIRED CONTROL — the same artifact with one named file is accepted", () => {
     // Without this arm, "always refuse" satisfies the case above.
     if (producer === undefined) throw new Error("no capability producer to test")
+    const members = requiredMembers(producer.id)
+    // 999 cases spread over the named files, because the total must now
+    // decompose: an artifact whose count belongs to no file it names is exactly
+    // what the arm above refuses.
+    const perFile = Math.ceil(999 / Math.max(1, members.length))
     const verdict = validateCapabilityResult(producer, {
-      schema: "quanta.capability-result.v1",
+      schema: CAPABILITY_RESULT_SCHEMA,
       producer: producer.id,
-      executedFiles: [...requiredMembers(producer.id)],
-      executedCases: 999,
+      executedFiles: [...members],
+      executedCases: perFile * members.length,
+      executedCasesByFile: Object.fromEntries(members.map((member) => [member, perFile])),
       skippedUnsupported: 0,
       blockedMissing: 0,
       failedSetup: 0,
@@ -565,15 +597,44 @@ describe("the capability file floor is real, not decoration", () => {
       (producer) => producer.id === "toolchain",
     ) as RequiredProducer
 
-    const artifactFor = (files: readonly string[], cases: number): unknown => ({
-      schema: "quanta.capability-result.v1",
-      producer: "toolchain",
-      executedFiles: [...files],
-      executedCases: cases,
-      skippedUnsupported: 0,
-      blockedMissing: 0,
-      failedSetup: 0,
-    })
+    /**
+     * `cases` distributed so that every group with executed members clears its
+     * OWN case floor, and the total reaches `cases`.
+     *
+     * An even spread is not enough, and finding that out is the point: 14 cases
+     * over 10 files is 2 each, and `language-test-matrix` declares a floor of 3
+     * over its single member. The first version of this helper spread evenly and
+     * the new per-group check failed it — correctly. A fixture that cannot meet
+     * the per-group floors is describing a lane that did not run its groups.
+     */
+    const artifactFor = (files: readonly string[], cases: number): unknown => {
+      const floorFor = (file: string): number => {
+        const group = capabilityFloorFor("toolchain").groups.find((candidate) =>
+          candidate.members.includes(file),
+        )
+        if (group === undefined) return 1
+        return Math.max(1, Math.ceil(group.minimumExecutedCases / group.members.length))
+      }
+      const byFile: Record<string, number> = Object.fromEntries(
+        files.map((file) => [file, floorFor(file)]),
+      )
+      let total = files.reduce((sum, file) => sum + (byFile[file] ?? 0), 0)
+      const first = files[0]
+      if (first !== undefined && total < cases) {
+        byFile[first] = (byFile[first] ?? 0) + (cases - total)
+        total = cases
+      }
+      return {
+        schema: CAPABILITY_RESULT_SCHEMA,
+        producer: "toolchain",
+        executedFiles: [...files],
+        executedCases: total,
+        executedCasesByFile: byFile,
+        skippedUnsupported: 0,
+        blockedMissing: 0,
+        failedSetup: 0,
+      }
+    }
 
     const allMembers = capabilityFloorFor("toolchain").groups.flatMap((group) => [...group.members])
 
@@ -604,12 +665,107 @@ describe("the capability file floor is real, not decoration", () => {
       }
     })
 
+    /**
+     * The CASE floor per group, which v1 could not check at all.
+     *
+     * Every group declares `minExecutedCases` — `toolchain`'s seven are 4, 2, 1,
+     * 1, 1, 2 and 3 — and the artifact published only a TOTAL, so the consumer
+     * compared 14 against 14 and none of the seven numbers was ever read. A
+     * group whose files ran while its cases did not was invisible behind a
+     * sibling that over-ran.
+     */
+    /**
+     * One case per member of `starved`, its own floor for every other group, and
+     * the producer total padded OUTSIDE the starved group.
+     *
+     * Padding `allMembers[0]` pushed `lsp-rust` itself to 53 cases and the arm
+     * passed for the wrong reason: the total has to be satisfied by a DIFFERENT
+     * group, or this is not the case the total-only check was blind to.
+     */
+    const starvedArtifact = (starved: string): unknown => {
+      const byFile: Record<string, number> = {}
+      for (const group of capabilityFloorFor("toolchain").groups) {
+        const perMember =
+          group.id === starved
+            ? 1
+            : Math.max(1, Math.ceil(group.minimumExecutedCases / group.members.length))
+        for (const member of group.members) byFile[member] = perMember
+      }
+      const members = capabilityFloorFor("toolchain").groups.find(
+        (group) => group.id === starved,
+      )?.members
+      const padded = allMembers.find((file) => !(members ?? []).includes(file)) as string
+      byFile[padded] = (byFile[padded] ?? 0) + 50
+      return {
+        schema: CAPABILITY_RESULT_SCHEMA,
+        producer: "toolchain",
+        executedFiles: allMembers,
+        executedCases: Object.values(byFile).reduce((sum, count) => sum + count, 0),
+        executedCasesByFile: byFile,
+        skippedUnsupported: 0,
+        blockedMissing: 0,
+        failedSetup: 0,
+      }
+    }
+
+    test("a group whose FILES ran but whose CASES did not is RED, and it is named", () => {
+      const starvable = capabilityFloorFor("toolchain").groups.filter(
+        (group) => group.minimumExecutedCases > group.members.length,
+      )
+      // ANTI-VACUITY: at least one group declares more cases than it has
+      // members, or the loop below asserts nothing.
+      expect(starvable.length).toBeGreaterThanOrEqual(1)
+      for (const group of starvable) {
+        const verdict = validateCapabilityResult(toolchain, starvedArtifact(group.id))
+        expect({ group: group.id, ok: verdict.ok }).toEqual({ group: group.id, ok: false })
+        if (verdict.ok) throw new Error("unreachable")
+        expect(verdict.reason).toContain(`capability group "${group.id}"`)
+        expect(verdict.reason).toContain(`floor is ${group.minimumExecutedCases}`)
+      }
+    })
+
+    /**
+     * The per-file map is what makes the check above possible, so it has to be
+     * describable — and refusable.
+     */
+    test("a total that does not decompose into its files is REFUSED", () => {
+      const base = artifactFor(allMembers, 14) as Record<string, unknown>
+      for (const [why, override] of [
+        ["a total larger than the sum", { executedCases: 9_999 }],
+        [
+          "a file with zero cases",
+          {
+            executedCasesByFile: {
+              ...(base.executedCasesByFile as object),
+              [allMembers[0] as string]: 0,
+            },
+          },
+        ],
+        [
+          "a count for a file that did not execute",
+          {
+            executedCasesByFile: {
+              ...(base.executedCasesByFile as object),
+              "tests/never-ran.test.ts": 3,
+            },
+          },
+        ],
+        ["no map at all", { executedCasesByFile: undefined }],
+      ] as const) {
+        const verdict = validateCapabilityResult(toolchain, { ...base, ...override })
+        expect({ why, ok: verdict.ok }).toEqual({ why, ok: false })
+      }
+      // PAIRED CONTROL: the intact artifact passes.
+      expect(validateCapabilityResult(toolchain, base).ok).toBe(true)
+    })
+
     test("1 executed + 999 skipped no longer clears the lane", () => {
       const one = validateCapabilityResult(toolchain, {
-        schema: "quanta.capability-result.v1",
+        schema: CAPABILITY_RESULT_SCHEMA,
         producer: "toolchain",
         executedFiles: [allMembers[0] as string],
         executedCases: 1,
+        executedCasesByFile: { [allMembers[0] as string]: 1 },
         skippedUnsupported: 999,
         blockedMissing: 0,
         failedSetup: 0,

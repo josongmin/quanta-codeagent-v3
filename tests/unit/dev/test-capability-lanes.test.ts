@@ -136,7 +136,7 @@ describe("capability manifest is internally closed", () => {
   })
 
   test("every group rolls up into an EXISTING required producer, never a new schema", () => {
-    // `tools/dev/capability-result.ts` already emits `quanta.capability-result.v1`
+    // `tools/dev/capability-result.ts` already emits `quanta.capability-result.v2`
     // and `verification-required-producers.ts` already validates a floor against
     // it, for three coarse producers. These groups refine those; they must not
     // introduce a fourth vocabulary the aggregator cannot read.
@@ -181,7 +181,7 @@ describe("capability manifest is internally closed", () => {
 
   test("every declared capability group has a non-zero executed floor", () => {
     // A group with zero executed files is RED, not PASS — case 4. Stated
-    // against the EXISTING `quanta.capability-result.v1` validator rather than a
+    // against the EXISTING `quanta.capability-result.v2` validator rather than a
     // second one, so the floors this manifest declares are the floors CI checks.
     const floors = capabilityProducerFloors()
     expect(floors.length).toBe(CAPABILITY_GROUPS.length)
@@ -204,10 +204,11 @@ describe("a capability job that executed nothing is RED", () => {
   test("zero executed files/cases fails; a real execution passes", () => {
     if (producer === undefined) throw new Error("toolchain producer missing")
     const zero = {
-      schema: "quanta.capability-result.v1",
+      schema: "quanta.capability-result.v2",
       producer: "toolchain",
       executedFiles: [],
       executedCases: 0,
+      executedCasesByFile: {},
       skippedUnsupported: 61,
       blockedMissing: 0,
       failedSetup: 0,
@@ -220,9 +221,22 @@ describe("a capability job that executed nothing is RED", () => {
     // PAIRED CONTROL — and it now has to name the REAL members. One invented
     // path with one case used to pass this, which was the whole defect: the
     // floor was 1 file / 1 case for a lane of seven groups.
+    // v2 also requires the case count to decompose per file, and every GROUP to
+    // clear its own case floor — `language-test-matrix` declares 3 over a single
+    // member, so "the producer total, spread evenly" is no longer a pass.
     const floor = capabilityFloorFor("toolchain")
     const members = floor.groups.flatMap((group) => [...group.members])
-    const one = { ...zero, executedFiles: members, executedCases: floor.minimumExecutedCases }
+    const byFile: Record<string, number> = {}
+    for (const group of floor.groups) {
+      const perMember = Math.max(1, Math.ceil(group.minimumExecutedCases / group.members.length))
+      for (const member of group.members) byFile[member] = perMember
+    }
+    const one = {
+      ...zero,
+      executedFiles: members,
+      executedCases: Object.values(byFile).reduce((sum, count) => sum + count, 0),
+      executedCasesByFile: byFile,
+    }
     expect(validateCapabilityResult(producer, one).ok).toBe(true)
     // ...and the invented path alone is refused.
     expect(
@@ -230,6 +244,7 @@ describe("a capability job that executed nothing is RED", () => {
         ...zero,
         executedFiles: ["tests/unit/x-real-e2e.test.ts"],
         executedCases: 1,
+        executedCasesByFile: { "tests/unit/x-real-e2e.test.ts": 1 },
       }).ok,
     ).toBe(false)
 
@@ -541,7 +556,8 @@ describe("the capability lane contains no self-pass", () => {
    * The measured defect: `local-preset-live-real-e2e.test.ts` printed
    * "documented no-server outcome, not a pass" and then executed
    * `expect(true).toBe(true)`. Bun reported `1 pass`; the junit carried a
-   * passing case; `capability-result.v1` counted it as EXECUTED. Nothing
+   * passing case; `capability-result.v1` counted it as EXECUTED (v2 keeps that
+   * reading and adds the per-file counts). Nothing
    * downstream could tell it from a host that ran a 150s inference.
    */
   const SELF_PASS = [

@@ -47,7 +47,7 @@ import { externalToolchainFingerprint } from "./external-toolchain"
  * THE SAME FOUR WORDS AS `tests/_helpers/capability-lane.ts`.
  *
  * That helper owns how a capability lane REPORTS its outcome to the required
- * aggregator (`quanta.capability-result.v1`). This module owns how a test LEARNS
+ * aggregator (`quanta.capability-result.v2`). This module owns how a test LEARNS
  * whether the capability is there without probing for it. They are two halves of
  * one story and must not invent two vocabularies — a `CapabilityDecision` from
  * here is handed to `reportCapability` there with no translation, and

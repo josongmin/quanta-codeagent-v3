@@ -95,9 +95,12 @@ export const requiredCapabilityGroups = (
 /**
  * A producer's floor, derived from the manifest.
  *
- * A producer with no required group keeps the zero-execution floor: `pty` has
- * no manifest group, and dropping to "no floor at all" because the manifest is
- * silent would reinstate the success-shaped empty job this guard exists for.
+ * A producer with no required group keeps the zero-execution floor of 1 file and
+ * 1 case: dropping to "no floor at all" because the manifest is silent would
+ * reinstate the success-shaped empty job this guard exists for. Measured at this
+ * HEAD, that applies to `web` and `full-suite`; `pty` HAS a manifest group
+ * (8 members, floors 8/8), and the sentence here claimed it did not long after
+ * the group landed.
  */
 export const capabilityFloorFor = (
   producerId: string,
@@ -239,10 +242,10 @@ export const parseWorkflowJobGraph = (workflowYaml: string): WorkflowJobGraph =>
 }
 
 /* ------------------------------------------------------------------ */
-/* capability-result.v1                                                */
+/* capability-result.v2                                                */
 /* ------------------------------------------------------------------ */
 
-export const CAPABILITY_RESULT_SCHEMA = "quanta.capability-result.v1" as const
+export const CAPABILITY_RESULT_SCHEMA = "quanta.capability-result.v2" as const
 
 /**
  * What a capability job must publish for its `success` to mean anything.
@@ -259,6 +262,8 @@ export interface CapabilityResult {
   /** Exact test file paths that executed at least one case. */
   readonly executedFiles: readonly string[]
   readonly executedCases: number
+  /** Executed cases per file — what makes a per-group CASE floor checkable. */
+  readonly executedCasesByFile: Readonly<Record<string, number>>
   readonly skippedUnsupported: number
   readonly blockedMissing: number
   readonly failedSetup: number
@@ -273,10 +278,53 @@ const isCount = (value: unknown): value is number =>
 
 /**
  * ABSENT IS A FAILURE, NOT A PASS. A capability job that publishes no
- * `capability-result.v1` artifact has proved nothing about what it executed,
+ * `capability-result.v2` artifact has proved nothing about what it executed,
  * and "proved nothing" is the state this guard exists to reject — treating it
  * as a pass reintroduces the zero-coverage green through the back door.
  */
+/**
+ * The per-file case map must describe exactly the files that executed.
+ *
+ * A map that omits a file, names one that did not execute, carries a zero, or
+ * does not sum to the published total is a map that cannot support a per-group
+ * floor — and a silently-absent map would make the new check pass for the same
+ * reason the old one did.
+ */
+const perFileCaseProblem = (
+  producerId: string,
+  result: Partial<CapabilityResult>,
+): string | undefined => {
+  const byFile = result.executedCasesByFile
+  if (typeof byFile !== "object" || byFile === null || Array.isArray(byFile)) {
+    return `capability producer "${producerId}" reports no per-file case counts (schema v2)`
+  }
+  const files = [...(result.executedFiles ?? [])]
+  const keys = Object.keys(byFile)
+  const missing = files.filter((file) => !keys.includes(file))
+  const unexpected = keys.filter((key) => !files.includes(key))
+  if (missing.length > 0 || unexpected.length > 0) {
+    return (
+      `capability producer "${producerId}" per-file case counts do not match its executed ` +
+      `files (missing ${missing.length}, unexpected ${unexpected.length})`
+    )
+  }
+  let sum = 0
+  for (const file of files) {
+    const count = byFile[file]
+    if (!isCount(count) || count < 1) {
+      return `capability producer "${producerId}" reports ${String(count)} case(s) for ${file}`
+    }
+    sum += count
+  }
+  if (sum !== result.executedCases) {
+    return (
+      `capability producer "${producerId}" per-file case counts sum to ${sum}, ` +
+      `artifact says ${String(result.executedCases)}`
+    )
+  }
+  return undefined
+}
+
 export const validateCapabilityResult = (
   producer: RequiredProducer,
   candidate: unknown,
@@ -321,6 +369,8 @@ export const validateCapabilityResult = (
       reason: `capability producer "${producer.id}" reports malformed executed/skipped counts`,
     }
   }
+  const byFileProblem = perFileCaseProblem(producer.id, result)
+  if (byFileProblem !== undefined) return { ok: false, reason: byFileProblem }
   if (result.failedSetup > 0) {
     return {
       ok: false,
@@ -340,6 +390,7 @@ export const validateCapabilityResult = (
   // to seven groups, and "10 files ran" says nothing about whether pyright ran
   // at all. Attribution is exact membership, never a path prefix.
   const executed = new Set(result.executedFiles)
+  const casesByFile = result.executedCasesByFile ?? {}
   for (const group of floor.groups) {
     const ran = group.members.filter((member) => executed.has(member))
     if (ran.length < group.minimumExecutedFiles) {
@@ -349,6 +400,20 @@ export const validateCapabilityResult = (
           `capability group "${group.id}" (producer "${producer.id}") executed ` +
           `${ran.length} of its ${group.members.length} member file(s), floor is ` +
           `${group.minimumExecutedFiles}`,
+      }
+    }
+    // ...and its CASE floor, which v1 could not check at all: the artifact
+    // published only a total, so a group whose files ran but whose cases did not
+    // was invisible behind a sibling that over-ran. Each group declares its own
+    // `minExecutedCases` and every one of them was dead data.
+    const cases = ran.reduce((total, member) => total + (casesByFile[member] ?? 0), 0)
+    if (cases < group.minimumExecutedCases) {
+      return {
+        ok: false,
+        reason:
+          `capability group "${group.id}" (producer "${producer.id}") executed ` +
+          `${cases} case(s) across its ${ran.length} executed file(s), floor is ` +
+          `${group.minimumExecutedCases}`,
       }
     }
   }

@@ -1,6 +1,6 @@
 /**
  * `tools/dev/capability-result` — turn one capability lane's JUnit into the
- * `quanta.capability-result.v1` artifact the required aggregator consumes.
+ * `quanta.capability-result.v2` artifact the required aggregator consumes.
  *
  * # Why a success conclusion is not evidence
  *
@@ -43,12 +43,25 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname } from "node:path"
 
 export interface CapabilityResultV1 {
-  readonly schema: "quanta.capability-result.v1"
+  readonly schema: "quanta.capability-result.v2"
   /** MUST equal the workflow job id the required aggregator expects. */
   readonly producer: string
   /** Exact paths with at least one case that actually ran. */
   readonly executedFiles: readonly string[]
   readonly executedCases: number
+  /**
+   * Executed cases PER FILE, which is what makes a per-group case floor
+   * checkable.
+   *
+   * v1 counted this and threw it away, publishing only the file list and the
+   * total. The consumer therefore enforced each capability group's FILE floor
+   * and could only compare the producer's TOTAL cases — so `toolchain`, which
+   * fans out to seven groups with case floors of 4, 2, 1, 1, 1, 2 and 3, was
+   * satisfied by one group running fourteen cases while another contributed a
+   * file that executed nothing. That is the zero-coverage green this rail exists
+   * to refuse, one level down.
+   */
+  readonly executedCasesByFile: Readonly<Record<string, number>>
   /** Cases the host could not run (a visible skip). */
   readonly skippedUnsupported: number
   /** A dependency the lane declared REQUIRED was absent. Hard failure. */
@@ -61,6 +74,8 @@ export interface JunitCounts {
   readonly executedFiles: readonly string[]
   readonly executedCases: number
   readonly skippedCases: number
+  /** Per-file executed case counts, in the same order as `executedFiles`. */
+  readonly executedCasesByFile: Readonly<Record<string, number>>
 }
 
 const attribute = (tag: string, name: string): string | undefined => {
@@ -102,10 +117,14 @@ export const countJunitExecution = (xml: string): JunitCounts => {
     }
     match = caseTag.exec(xml)
   }
+  const files = [...executedByFile.keys()].sort((left, right) => left.localeCompare(right))
   return {
-    executedFiles: [...executedByFile.keys()].sort((left, right) => left.localeCompare(right)),
+    executedFiles: files,
     executedCases,
     skippedCases,
+    executedCasesByFile: Object.fromEntries(
+      files.map((file) => [file, executedByFile.get(file) ?? 0]),
+    ),
   }
 }
 
@@ -117,10 +136,11 @@ export const capabilityResultFromJunit = (input: {
 }): CapabilityResultV1 => {
   const counts = countJunitExecution(input.xml)
   return {
-    schema: "quanta.capability-result.v1",
+    schema: "quanta.capability-result.v2",
     producer: input.producer,
     executedFiles: counts.executedFiles,
     executedCases: counts.executedCases,
+    executedCasesByFile: counts.executedCasesByFile,
     skippedUnsupported: counts.skippedCases,
     blockedMissing: input.blockedMissing ?? 0,
     failedSetup: input.failedSetup ?? 0,
@@ -139,10 +159,11 @@ export const capabilityResultFromJunit = (input: {
  * missing upload.
  */
 export const capabilityResultForMissingJunit = (producer: string): CapabilityResultV1 => ({
-  schema: "quanta.capability-result.v1",
+  schema: "quanta.capability-result.v2",
   producer,
   executedFiles: [],
   executedCases: 0,
+  executedCasesByFile: {},
   skippedUnsupported: 0,
   blockedMissing: 0,
   failedSetup: 1,

@@ -34,6 +34,7 @@ describe("capability-result", () => {
     expect(countJunitExecution(xml)).toEqual({
       executedFiles: [],
       executedCases: 0,
+      executedCasesByFile: {},
       skippedCases: 2,
     })
   })
@@ -46,6 +47,7 @@ describe("capability-result", () => {
     expect(countJunitExecution(xml)).toEqual({
       executedFiles: ["f.test.ts"],
       executedCases: 2,
+      executedCasesByFile: { "f.test.ts": 2 },
       skippedCases: 0,
     })
   })
@@ -59,6 +61,7 @@ describe("capability-result", () => {
     expect(countJunitExecution(xml)).toEqual({
       executedFiles: ["f.test.ts"],
       executedCases: 1,
+      executedCasesByFile: { "f.test.ts": 1 },
       skippedCases: 2,
     })
   })
@@ -82,10 +85,11 @@ describe("capability-result", () => {
       xml: junit(`<testcase name="a" file="f.test.ts"><skipped/></testcase>`),
     })
     expect(result).toEqual({
-      schema: "quanta.capability-result.v1",
+      schema: "quanta.capability-result.v2",
       producer: "pty",
       executedFiles: [],
       executedCases: 0,
+      executedCasesByFile: {},
       skippedUnsupported: 1,
       blockedMissing: 0,
       failedSetup: 0,
@@ -128,6 +132,7 @@ describe("capability-result", () => {
     expect(countJunitExecution(xml)).toEqual({
       executedFiles: ["f.test.ts"],
       executedCases: 1,
+      executedCasesByFile: { "f.test.ts": 1 },
       skippedCases: 1,
     })
 
@@ -156,6 +161,7 @@ describe("capability-result", () => {
     expect(countJunitExecution(junit(""))).toEqual({
       executedFiles: [],
       executedCases: 0,
+      executedCasesByFile: {},
       skippedCases: 0,
     })
   })
