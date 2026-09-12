@@ -178,9 +178,13 @@ export const replayTrajectoryPort = (args: {
  * verify-guard …) takes the port `resolveLLM` returns, so wrapping here records
  * the ENTIRE run.
  *
- * Gate: `QUANTA_BENCH_RECORD_TRAJECTORY`. Absent / "" / "0" ⇒ NO wrap
- * (byte-identical). "1" | "on" ⇒ record to the unified default
- * `<benchHome>/runs/<runId>/trajectory.jsonl`. Any other value ⇒ the cassette path.
+ * Gate: `QUANTA_BENCH_RECORD_TRAJECTORY`. Only `"0"` ⇒ NO wrap (byte-identical).
+ * Absent, `""`, `"1"` and `"on"` ALL record to the unified default
+ * `<benchHome>/runs/<runId>/trajectory.jsonl`; any other value ⇒ that path.
+ *
+ * This line said `Absent / "" / "0" ⇒ NO wrap` — in the same file as the default-ON
+ * flip, contradicting the docstring 120 lines above it and the resolver it sits on.
+ * Measured: `resolveBenchTrajectoryDefault({})` and `{RECORD:""}` both return a path.
  */
 export const maybeRecordTrajectory = (llm: LLMPort): LLMPort => {
   const mode = resolveBenchTrajectoryMode()

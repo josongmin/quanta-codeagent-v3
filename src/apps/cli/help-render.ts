@@ -194,7 +194,20 @@ export const ENV_TABLE: readonly EnvRow[] = [
     defaultLabel: "(probe)",
     describe: "Explicit python for SWE-bench",
   },
-  { key: "QUANTA_BENCH_TIMEOUT_MS", defaultLabel: "120000", describe: "Per-instance wall-clock" },
+  {
+    key: "QUANTA_BENCH_TIMEOUT_MS",
+    // `(mode)` is a SENTINEL, not a number, because one number cannot be right. The
+    // bench runner's default is 1_200_000 (`run-main.ts` DEFAULT_BENCH_TIMEOUT_MS,
+    // "jun-25: raised 10→20 min") and the batch mode preset's is 120_000
+    // (`mode-presets/batch.ts` BATCH_DEFAULT_TIMEOUT_MS). This row said `120000`
+    // unqualified — the batch number, under the bench heading, 10× low for the path an
+    // operator reading `--help` is most likely on. Someone sizing a run saw 2 minutes
+    // and got 20; someone setting `=300000` believed they were raising the cap while
+    // cutting it fourfold. Both real numbers now live in `describe`, where they cannot
+    // be mistaken for one default.
+    defaultLabel: "(mode)",
+    describe: "Per-instance wall-clock — bench 1200000, batch 120000",
+  },
   { key: "QUANTA_MAX_TURNS", defaultLabel: "(preset)", describe: "Max turns per instance" },
   {
     key: "QUANTA_SWEBENCH_PREPARE_FORCE",
@@ -282,7 +295,7 @@ const isSentinelLabel = (label: string): boolean =>
  *     catalog field is a `*Disabled` flag (label `"on"`, default `false`):
  *     e.g. `QUANTA_FS_JAIL` ("on") ↔ `fsJailDisabled` (false). Comparing these
  *     would false-positive. */
-const isDefaultCheckable = (row: EnvRow, knob: UnifiedKnob): boolean => {
+export const isDefaultCheckable = (row: EnvRow, knob: UnifiedKnob): boolean => {
   if (knob.default === undefined) return false
   if (isSentinelLabel(row.defaultLabel)) return false
   if (knob.kind === "bool" && row.defaultLabel === "on") return false

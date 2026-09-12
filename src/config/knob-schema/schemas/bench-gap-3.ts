@@ -116,9 +116,17 @@ export const benchRecordTrajectorySchema: KnobSchema<string> = {
   id: "bench-record-trajectory",
   envKey: "QUANTA_BENCH_RECORD_TRAJECTORY",
   kind: "string",
-  default: "",
+  // DEFAULT-ON. `""` used to sit here and it was false in two of its three stated
+  // cases: measured, `resolveBenchTrajectoryDefault({})` and `{RECORD:""}` BOTH return
+  // a real path, and only `"0"` returns nothing. The code's flip is a named, argued
+  // commit (`8b9d2923f` "default-ON full trajectory logging (SOTA)") with two hellgates
+  // asserting it; this declaration was authored the FOLLOWING day from the pre-flip
+  // docstring and never described current behaviour. So the declaration was wrong, not
+  // the code. The sentinel is the resolved path shape, not a literal, because the real
+  // default is computed per run.
+  default: "<benchHome>/runs/<runId>/trajectory.jsonl",
   describe:
-    "Bench: record the run's LLM trajectory to a replayable JSONL cassette (DEFAULT-OFF). Unset/''/'0' ⇒ no recording (byte-identical). '1'|'on' ⇒ the unified bench-home default (<benchHome>/runs/<runId>/trajectory.jsonl — co-located with observe/predictions, NOT the repo cwd); any other value ⇒ that path. Enables replaying a FAILED run deterministically up to any turn and DIVERGING there (bench-native 'fork from a point'; the CLI fork_session feature is REPL-scoped and cannot reach bench trajectories). Recording splits per INSTANCE — each run's localize/repro/repair phases land in ONE file `<dir>/trajectories/<ts>-<instanceId>.jsonl` (+ `.meta.json` sidecar), so one FILE = one SESSION (SWE-agent shape). full-remote propagates the gate to the box + fetches the whole `trajectories/` dir back into `<benchHome>/full-remote/trajectories/<box>/`. The 'debug' token additionally enables the debug tier: the bench debug-sink enrichment AND the terminal brain's full-history report.debug dump (live system prompt + full messages transcript).",
+    "Bench: record the run's LLM trajectory to a replayable JSONL cassette (DEFAULT-ON — recording is opt-OUT). Unset/''/'1'/'on' ⇒ recording to the unified bench-home default (<benchHome>/runs/<runId>/trajectory.jsonl — co-located with observe/predictions, NOT the repo cwd); '0' is the ONLY opt-out; any other value ⇒ that path. Enables replaying a FAILED run deterministically up to any turn and DIVERGING there (bench-native 'fork from a point'; the CLI fork_session feature is REPL-scoped and cannot reach bench trajectories). Recording splits per INSTANCE — each run's localize/repro/repair phases land in ONE file `<dir>/trajectories/<ts>-<instanceId>.jsonl` (+ `.meta.json` sidecar), so one FILE = one SESSION (SWE-agent shape). full-remote propagates the gate to the box + fetches the whole `trajectories/` dir back into `<benchHome>/full-remote/trajectories/<box>/`. The 'debug' token additionally enables the debug tier: the bench debug-sink enrichment AND the terminal brain's full-history report.debug dump (live system prompt + full messages transcript).",
   readSite:
     "apps/bench/trajectory.ts + apps/terminal/brain-mode.ts (resolveDebugDumpOn, debug-tier report.debug)",
   surfaces: BENCH,

@@ -28,6 +28,7 @@ import {
   auditEnvTableDrift,
   ENV_TABLE,
   type EnvRow,
+  isDefaultCheckable,
   renderHelp,
 } from "../../../src/apps/cli/help-render"
 import { buildKnobCatalog, type UnifiedKnob } from "../../../src/apps/cli/knob-catalog-wire"
@@ -36,6 +37,40 @@ import { stripAnsi } from "../../../src/ui/ui-helpers"
 
 describe("ENV_TABLE ↔ unified catalog drift guard (live)", () => {
   const catalog = buildKnobCatalog()
+
+  /**
+   * The SKIPPED rows that still advertise a concrete literal, pinned as a set.
+   *
+   * `isDefaultCheckable` returns false for a row whose catalog default is `undefined`,
+   * which is the rule that swallowed `QUANTA_BENCH_TIMEOUT_MS`: `--help` said `120000`,
+   * the registry declared nothing, and the bench runner's real default is 1_200_000 —
+   * 10x, unchecked, for months. That row now carries a `(mode)` sentinel and both real
+   * numbers in its describe.
+   *
+   * The remaining eight are the blast radius. Seven were verified accurate against a
+   * code literal; `QUANTA_SESSIONS_DIR` is unverified rather than endorsed. Any of them
+   * can rot next, silently, so a NEW member has to be added here deliberately.
+   */
+  test("the unchecked-but-concrete rows are exactly the known set", () => {
+    const catalog = buildKnobCatalog()
+    const skipped = ENV_TABLE.filter((row) => {
+      const u = catalog.get(row.key)
+      if (u !== undefined && isDefaultCheckable(row, u)) return false
+      const l = row.defaultLabel
+      return l !== "" && !/^\(.*\)$/.test(l)
+    }).map((r) => r.key)
+    expect(skipped.sort()).toEqual([
+      // inverted `*Disabled` bools — documented, and comparing them would false-positive
+      "QUANTA_FS_JAIL",
+      "QUANTA_GOAL",
+      "QUANTA_HITL_OVERRIDES",
+      "QUANTA_HOME",
+      "QUANTA_LLM_STREAM_FIRST_CHUNK_MS",
+      "QUANTA_LLM_STREAM_IDLE_MS",
+      "QUANTA_SESSIONS_DIR",
+      "QUANTA_SESSION_LIST_MAX",
+    ])
+  })
 
   test("MEMBERSHIP: every ENV_TABLE key exists in buildKnobCatalog()", () => {
     const findings = auditEnvTableDrift(ENV_TABLE, catalog)
@@ -62,7 +97,9 @@ describe("ENV_TABLE ↔ unified catalog drift guard (live)", () => {
       const u = catalog.get(row.key)
       return u !== undefined && isDefaultCheckable(row, u)
     })
-    expect(checked.length).toBeGreaterThanOrEqual(4)
+    // Measured 12 of 38. The floor was `>= 4` — roughly 3x slack, so two thirds of the
+    // coverage could evaporate silently. Raised to the measurement.
+    expect(checked.length).toBeGreaterThanOrEqual(12)
   })
 })
 
@@ -122,13 +159,10 @@ describe("renderHelp still renders the env section + floor knobs", () => {
   })
 })
 
-/** Local mirror of the audit's "is this row safe to default-check" predicate,
- *  used only by the teeth test above. Kept tiny + in sync with help-render. */
-const isDefaultCheckable = (row: EnvRow, knob: UnifiedKnob): boolean => {
-  if (knob.default === undefined) return false
-  if (/^\(.*\)$/.test(row.defaultLabel)) return false
-  if (row.defaultLabel.startsWith("~")) return false
-  if (row.defaultLabel.includes("|")) return false
-  if (knob.kind === "bool" && row.defaultLabel === "on") return false
-  return true
-}
+/* The predicate is IMPORTED from `help-render`, not mirrored here.
+ *
+ * A local copy sat here claiming to be "kept tiny + in sync with help-render", and it
+ * was not: it carried `startsWith("~")` and `includes("|")` rules the production
+ * predicate folds into `isSentinelLabel`. So the teeth test measured coverage of a
+ * DIFFERENT predicate than the audit uses — the same cloned-matcher shape that let the
+ * raw-env ratchet's corpus collapse 43 → 0 while its suite stayed green. */

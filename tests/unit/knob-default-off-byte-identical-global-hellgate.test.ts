@@ -71,6 +71,23 @@ interface AllowlistEntry {
 }
 
 const NON_FALSY_DEFAULT_ALLOWLIST: Readonly<Record<string, AllowlistEntry>> = {
+  // NOT default-off, and honestly declared as such.
+  //
+  // This knob is DEFAULT-ON: `resolveBenchTrajectoryDefault({})` returns a real path,
+  // and `"0"` is the only opt-out (`8b9d2923f`, "default-ON full trajectory logging
+  // (SOTA)", with two hellgates asserting it). It declared `default: ""` for 2.5
+  // months and was auto-proven default-off by this very guard, BECAUSE `""` is falsy.
+  //
+  // That is the guard's structural blind spot, worth naming here rather than in a
+  // commit message that scrolls away: it validates a declaration against ITSELF, never
+  // against the reader. A knob whose declaration lies is auto-proven compliant. This
+  // entry exists because correcting the declaration turned the gate red — which is the
+  // gate working, and the only reason the lie surfaced at all.
+  QUANTA_BENCH_RECORD_TRAJECTORY: {
+    expectedDefault: "<benchHome>/runs/<runId>/trajectory.jsonl",
+    reason:
+      "DEFAULT-ON by deliberate design (8b9d2923f): bench runs record their LLM trajectory unless QUANTA_BENCH_RECORD_TRAJECTORY=0. Not byte-identical when unset — it writes a JSONL cassette under the bench home (never the repo cwd), which is the SOTA posture for replayable bench runs and is opt-OUT. The declared default is the resolved path SHAPE, not a literal, because the real value is computed per run.",
+  },
   // Sentinel-off enums — parse never RETURNS the default; unset ⇒ this disposition.
   QUANTA_BENCH_ISSUE_HINT: {
     expectedDefault: "off",
