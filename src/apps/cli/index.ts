@@ -196,6 +196,29 @@ const routeBatch = async (): Promise<never> => {
   process.exit(code)
 }
 
+/**
+ * Reject unknown top-level flags BEFORE any LLM/REPL wiring, exiting 64 (EX_USAGE).
+ *
+ * Called once every subcommand short-circuit has returned, so `argv` here is the
+ * bare top-level form and a `--`-prefixed token the table does not advertise is a
+ * typo, not a subcommand's flag. Without this, `argvPrompt` dropped the flag and
+ * kept its VALUE as a positional: `quanta --resumee xyz` sent `xyz` to the model as
+ * the seed prompt and fired a billed request.
+ *
+ * A separate function rather than inline, because inlining it put `main` over the
+ * cognitive-complexity ratchet.
+ */
+const exitOnUnknownTopLevelFlag = async (argv: readonly string[]): Promise<void> => {
+  const unknown = unknownTopLevelFlags(argv)
+  if (unknown.length === 0) return
+  const { topLevelUsage } = await import("./top-level-usage")
+  process.stderr.write(
+    `quanta: unknown flag${unknown.length === 1 ? "" : "s"}: ${unknown.join(", ")}\n\n` +
+      topLevelUsage(),
+  )
+  process.exit(64)
+}
+
 const main = async (): Promise<void> => {
   // S1 — OS sandbox wire-up. Reads `QUANTA_SANDBOX` ONCE at boot (after
   // dotenv load so `.env.local` overrides are honored). Default-OFF: when
@@ -322,22 +345,7 @@ const main = async (): Promise<void> => {
     process.exit(0)
   }
 
-  // Reject unknown top-level flags BEFORE any LLM/REPL wiring.
-  //
-  // Every subcommand short-circuit above has already returned, so `rawArgs` here
-  // is the bare top-level form and a `--`-prefixed token it does not recognise is
-  // a typo, not a subcommand's flag. Without this, `argvPrompt` dropped the flag
-  // and kept its VALUE as a positional: `quanta --resumee xyz` sent `xyz` to the
-  // model as the seed prompt and fired a billed request. Exit 64 (EX_USAGE).
-  const unknownFlags = unknownTopLevelFlags(rawArgs)
-  if (unknownFlags.length > 0) {
-    const { topLevelUsage } = await import("./top-level-usage")
-    process.stderr.write(
-      `quanta: unknown flag${unknownFlags.length === 1 ? "" : "s"}: ${unknownFlags.join(", ")}\n\n` +
-        topLevelUsage(),
-    )
-    process.exit(64)
-  }
+  await exitOnUnknownTopLevelFlag(rawArgs)
 
   // DOF-11 — validate the shipping CLI's profile flag before session/LLM
   // assembly, then seed the existing bootstrap authority. `/profile` mutates
