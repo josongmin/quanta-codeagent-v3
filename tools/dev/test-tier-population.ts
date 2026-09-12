@@ -94,9 +94,20 @@ export type TierPopulationVerdict =
         | "empty-selection"
         | "narrowed"
         | "universe-below-tier-floor"
+        | "suite-narrower-than-tier-floor"
         | "over-selected"
       readonly message: string
     }
+
+/**
+ * The suite whose discovered population these floors were measured over.
+ *
+ * Every `reason` in `test-tier-population.json` is phrased against the
+ * UNIVERSE — "universe minus 6 nightly-exhaustive minus 17 lane-gated
+ * capability files" — so the numbers only mean what they say for the suite that
+ * IS the universe.
+ */
+export const TIER_FLOOR_UNIVERSE_SUITE = "full" as const
 
 /**
  * Check a tier's SELECTED population. Distinct from the suite floor in both
@@ -114,6 +125,11 @@ export const checkTierPopulation = (input: {
   readonly selected: number
   readonly discovered: number
   readonly floors: TierPopulationFile
+  /**
+   * Which suite was discovered. Optional, and absent means "the universe" —
+   * which is what every caller meant before this parameter existed.
+   */
+  readonly suite?: string
 }): TierPopulationVerdict => {
   const floor = input.floors.tiers[input.tier]
   if (floor === undefined) {
@@ -146,7 +162,31 @@ export const checkTierPopulation = (input: {
   }
   if (input.selected >= floor.minFiles) return { ok: true, floor: floor.minFiles }
 
-  // BELOW THE FLOOR — now say WHICH of the two things happened.
+  // BELOW THE FLOOR — now say WHICH of the THREE things happened.
+  //
+  // The third was invisible and its message was actively wrong. A narrower
+  // suite selects every file it discovered and still lands under a floor
+  // measured over the universe, which looks EXACTLY like corpus loss:
+  // `selected === discovered < floor`. MEASURED against these floors, three of
+  // the four shard-runner entry points in package.json hit it and can never
+  // run — `--suite=core` selects 3583, `--suite=unit` 3258 and
+  // `--suite=integration` 394, all against a floor of 3900 — and each was told
+  // "the universe itself shrank past what this tier promises ... fix the
+  // corpus", sending the reader to look for a loss that is not there.
+  if (input.suite !== undefined && input.suite !== TIER_FLOOR_UNIVERSE_SUITE) {
+    return {
+      ok: false,
+      kind: "suite-narrower-than-tier-floor",
+      message:
+        `[test:shards] INVALID — suite=${input.suite} discovered ${input.discovered} files and ` +
+        `tier=${input.tier} selected ${input.selected} of them, below the committed floor of ` +
+        `${floor.minFiles}. THE CORPUS IS INTACT. That floor is measured over the ` +
+        `\`${TIER_FLOOR_UNIVERSE_SUITE}\` suite (${floor.reason}), so it does not describe a ` +
+        `narrower suite, and comparing the two is meaningless rather than failing. ` +
+        `Run tier=${input.tier} against --suite=${TIER_FLOOR_UNIVERSE_SUITE}, or commit a floor ` +
+        "for this suite/tier pair. Do not lower the universe floor to make this pass.",
+    }
+  }
   if (input.selected === input.discovered) {
     return {
       ok: false,

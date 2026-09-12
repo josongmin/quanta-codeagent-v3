@@ -13,6 +13,7 @@ import {
 import {
   checkTierPopulation,
   loadTierPopulationFloors,
+  TIER_FLOOR_UNIVERSE_SUITE,
 } from "../../../tools/dev/test-tier-population"
 
 const ROOT = resolve(import.meta.dir, "..", "..", "..")
@@ -108,6 +109,86 @@ describe("tier population floor", () => {
   test("a healthy tier passes and reports the floor it cleared", () => {
     const verdict = checkTierPopulation({ tier: "pr", selected: 3932, discovered: 3932, floors })
     expect(verdict).toEqual({ ok: true, floor: 100 })
+  })
+
+  /**
+   * ★ A narrower SUITE under a whole-tree floor was reported as corpus loss.
+   *
+   * Every reason in `test-tier-population.json` is phrased against the universe
+   * ("universe minus 6 nightly-exhaustive minus 17 lane-gated capability
+   * files"), so the numbers only mean what they say for the suite that IS the
+   * universe. A narrower suite selects every file it discovered and still lands
+   * under that floor, which is byte-identical to corpus loss:
+   * `selected === discovered < floor`.
+   *
+   * MEASURED against the committed floors at this HEAD, three of the four
+   * shard-runner entry points in `package.json` hit it and can never run:
+   *
+   *   bun run test:unit         --suite=core         3583 selected / floor 3900
+   *   bun run test:unit:ci      --suite=unit         3258 selected / floor 3900
+   *   bun run test:integration  --suite=integration   394 selected / floor 3900
+   *
+   * Each was told "the universe itself shrank past what this tier promises …
+   * fix the corpus", which sends the reader to look for a loss that is not
+   * there. The refusal STAYS a refusal — comparing a narrow suite to a
+   * whole-tree floor is meaningless, and lowering the universe floor to make it
+   * pass is the papering this record exists to prevent. What changes is that it
+   * now names the real cause. Committing per-suite floors is TVH-02's, whose
+   * ticket already owns "`test:unit`을 실제 unit으로 고치거나 `test:core`로
+   * rename한다" — and whose line 16 attributed this to the SUITE floor of 3,600
+   * when the blocker measured here is the TIER floor of 3,900.
+   */
+  test("a narrower suite is not corpus loss, and says so", () => {
+    const committed = loadTierPopulationFloors()
+    const at = (suite: string, count: number) =>
+      checkTierPopulation({
+        tier: "nightly",
+        selected: count,
+        discovered: count,
+        floors: committed,
+        suite,
+      })
+
+    for (const [suite, count] of [
+      ["core", 3_583],
+      ["unit", 3_258],
+      ["integration", 394],
+    ] as const) {
+      const verdict = at(suite, count)
+      expect({ suite, ok: verdict.ok }).toEqual({ suite, ok: false })
+      if (verdict.ok) throw new Error("unreachable")
+      expect({ suite, kind: verdict.kind }).toEqual({
+        suite,
+        kind: "suite-narrower-than-tier-floor",
+      })
+      expect(verdict.message).toContain("THE CORPUS IS INTACT")
+      expect(verdict.message).not.toContain("universe itself shrank")
+    }
+
+    // PAIRED CONTROL 1 — the universe suite really falling short is still
+    // corpus loss, with the original message. The arms above must not have
+    // reclassified it.
+    const shrunk = at(TIER_FLOOR_UNIVERSE_SUITE, 3_000)
+    expect(shrunk.ok).toBe(false)
+    if (shrunk.ok) throw new Error("unreachable")
+    expect(shrunk.kind).toBe("universe-below-tier-floor")
+    expect(shrunk.message).toContain("universe itself shrank")
+
+    // PAIRED CONTROL 2 — a caller that passes no suite meant the universe,
+    // which is what every caller meant before the parameter existed.
+    const legacy = checkTierPopulation({
+      tier: "nightly",
+      selected: 3_000,
+      discovered: 3_000,
+      floors: committed,
+    })
+    expect(legacy.ok).toBe(false)
+    if (legacy.ok) throw new Error("unreachable")
+    expect(legacy.kind).toBe("universe-below-tier-floor")
+
+    // PAIRED CONTROL 3 — a healthy universe still passes, so the arms are not
+    // simply making every input fail.
+    expect(at(TIER_FLOOR_UNIVERSE_SUITE, 3_948).ok).toBe(true)
   })
 
   test("the committed record covers every tier the runner can be asked for", () => {
