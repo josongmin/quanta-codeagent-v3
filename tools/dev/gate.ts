@@ -586,18 +586,26 @@ printOut(`\n──── ${label} summary`)
 // lane sat out. The disclosure matters MORE on a red: a failure list read without it
 // looks like the complete set of problems.
 //
-// SCOPED to tiers that can actually be affected. Hoisting it unconditionally made
+// THE CLAIM IS SCOPED, THE DISCLOSURE IS NOT. Hoisting it unconditionally made
 // `precommit` and `smoke` print "anything gated on them was skipped: bwrap, chromium,
 // gopls, …" when NEITHER tier contains a single gate that touches a capability — a
-// true sentence about the host, stated where it says nothing about the run. The
-// `hostDependent` marks are exactly the gates that can pass by finding nothing, so
-// their presence in the plan is the condition.
+// true sentence about the host, stated where it says nothing about the run. But
+// suppressing the LINE instead of narrowing the CLAIM made the log and the receipt
+// disagree: `missingCapabilities` is part of the receipt's IDENTITY (a box that gains
+// a tool cannot replay this green), so it is recorded for every tier, and a reader of
+// the log was then told less than a reader of the receipt. `gate-receipt.test.ts`
+// caught exactly that: 9 absences in the receipt, no line in the summary.
+//
+// So both readers are told about every absence, and the sentence says what it means
+// for THIS plan. `hostDependent` marks are exactly the gates that can pass by finding
+// nothing, so their presence is what distinguishes the two claims.
 const absentTools = missingExternalTools()
 const planHasHostDependent = planned.some((g) => g.hostDependent !== undefined)
-if (absentTools.length > 0 && planHasHostDependent) {
-  printOut(
-    `  [capabilities] absent on this host, so anything gated on them was skipped: ${absentTools.join(", ")}`,
-  )
+if (absentTools.length > 0) {
+  const claim = planHasHostDependent
+    ? "so anything gated on them was skipped"
+    : "and no gate in this plan depends on them, so this run is unaffected"
+  printOut(`  [capabilities] absent on this host, ${claim}: ${absentTools.join(", ")}`)
 }
 for (const r of results) {
   const hd = r.ok && r.gate.hostDependent !== undefined ? "  [host-dependent]" : ""

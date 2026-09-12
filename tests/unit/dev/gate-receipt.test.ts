@@ -68,6 +68,7 @@ const manifestSource = (
   runs: readonly string[],
   consumesByIndex: Readonly<Record<number, string>> = {},
   quietBoxByIndex: Readonly<Record<number, string>> = {},
+  hostDependentByIndex: Readonly<Record<number, string>> = {},
 ): string => {
   const entries = runs.map((run, index) => ({
     id: `gate-${index + 1}`,
@@ -76,6 +77,9 @@ const manifestSource = (
     why: `behavioral fixture gate ${index + 1}`,
     ...(consumesByIndex[index] === undefined ? {} : { consumes: consumesByIndex[index] }),
     ...(quietBoxByIndex[index] === undefined ? {} : { needsQuietBox: quietBoxByIndex[index] }),
+    ...(hostDependentByIndex[index] === undefined
+      ? {}
+      : { hostDependent: hostDependentByIndex[index] }),
   }))
   return `
 export type GateStage = "precommit" | "prepush"
@@ -114,6 +118,7 @@ const makeRepo = (
   runs: readonly string[],
   consumesByIndex: Readonly<Record<number, string>> = {},
   quietBoxByIndex: Readonly<Record<number, string>> = {},
+  hostDependentByIndex: Readonly<Record<number, string>> = {},
 ): string => {
   const root = mkdtempSync(join(tmpdir(), "quanta-gate-receipt-"))
   roots.push(root)
@@ -144,7 +149,7 @@ const makeRepo = (
   }
   writeFileSync(
     join(root, "tools", "dev", "gate-manifest.ts"),
-    manifestSource(runs, consumesByIndex, quietBoxByIndex),
+    manifestSource(runs, consumesByIndex, quietBoxByIndex, hostDependentByIndex),
   )
   // The exact receipt lands under .cache/; an untracked receipt must not dirty
   // the NEXT run's frozen snapshot (mirrors the real repository's ignore).
@@ -270,6 +275,35 @@ describe("a green states what it could not check", () => {
     const line = result.stdout.split("\n").find((text) => text.includes("[capabilities]"))
     expect(line, `no capability line in:\n${result.stdout}`).toBeDefined()
     for (const tool of receipt.missingCapabilities) expect(line).toContain(tool)
+
+    // THE CLAIM, not just the list. This fixture's 21 gates are all `true` and none
+    // is `hostDependent`, so nothing here could have been skipped for a missing tool
+    // — and the line must say that rather than assert a skip that did not happen.
+    // An earlier fix SUPPRESSED the line for such a plan, which is how the log and
+    // the receipt came to disagree: the receipt records absences for every tier
+    // because they are part of its replay identity.
+    expect(line).toContain("no gate in this plan depends on them")
+    expect(line).not.toContain("was skipped")
+  })
+
+  behaviorTest("a plan WITH a host-dependent gate claims the skip instead", () => {
+    // PAIRED CONTROL for the arm above: the same absences, the other sentence. Without
+    // it, "no gate in this plan depends on them" could be the only sentence the code
+    // can produce and the arm above would still pass.
+    const root = makeRepo(
+      Array.from({ length: 21 }, () => "true"),
+      {},
+      {},
+      { 0: "this fixture gate is marked host-dependent so the plan carries one" },
+    )
+    const result = runGate(root, "prepush")
+    expect(result.code, result.stderr).toBe(0)
+    const receipt = receiptFrom(result.stdout)
+    if (receipt.missingCapabilities.length === 0) return
+    const line = result.stdout.split("\n").find((text) => text.includes("[capabilities]"))
+    expect(line, `no capability line in:\n${result.stdout}`).toBeDefined()
+    expect(line).toContain("was skipped")
+    expect(line).not.toContain("no gate in this plan depends on them")
   })
 })
 

@@ -58,8 +58,12 @@ const DRIVEN = [
   "QUANTA_MEMORY_EMBED_MODEL",
   "QUANTA_SUBAGENT",
   "QUANTA_LOG_LEVEL",
-  // ADR-0557: the durable default resolves under `os.homedir()` (= $HOME).
+  // ADR-0557 + the sep-13 relocation: the durable default resolves under the
+  // QUANTA home, not `$HOME`. `HOME` is still driven for the dotenv-provenance
+  // cases, and `QUANTA_HOME` is what actually moves the store — see beforeEach.
   "HOME",
+  "QUANTA_HOME",
+  "QUANTA_CONFIG_DIR",
 ] as const
 const saved: Record<string, string | undefined> = {}
 let tmp: string
@@ -87,8 +91,21 @@ beforeEach(() => {
   // realpath: macOS `/tmp` is a symlink and `process.cwd()` reports the resolved
   // path, so provenance (resolved against cwd) must be compared realpath-to-realpath.
   tmp = realpathSync(mkdtempSync(join(tmpdir(), "memory-truth-egress-")))
-  // ADR-0557: redirect the durable default's home to the temp dir.
+  // Redirect the durable default's home to the temp dir.
+  //
+  // SETTING `HOME` IS NOT ENOUGH, and this file measured it: the store path now
+  // resolves through `quantaHomeDirFrom(env)` —
+  // `QUANTA_CONFIG_DIR ?? QUANTA_HOME ?? join(homedir(), ".quanta")` — the same
+  // resolver sessions and knobs use, so memory stopped being the one plane a
+  // relocated home did not move. `homedir()` does NOT honour a mutated
+  // `process.env.HOME` here, so with only `HOME` set this suite resolved to
+  // `/Users/<me>/.quanta/memory/memory.sqlite` and `buildTooling` OPENED THE
+  // DEVELOPER'S REAL STORE. `QUANTA_HOME` is the supported relocation knob, and
+  // it is pointed at `<tmp>/.quanta` so the asserted path shape is the real
+  // default layout rather than a bare temp dir.
   process.env.HOME = tmp
+  process.env.QUANTA_HOME = join(tmp, ".quanta")
+  __resetRuntimeConfig()
 })
 
 afterEach(() => {
@@ -159,10 +176,35 @@ describe("T1 — buildMemoryForSession reports the resolved store kind", () => {
     expect(slot.kind).toBe("sqlite")
   })
 
-  test("unset (default-ON) ⇒ kind === 'sqlite' at <home>/.quanta/memory/memory.sqlite", () => {
-    const slot = buildMemoryForSession({} as NodeJS.ProcessEnv, { homeDir: tmp, cwd: tmp })
+  test("unset (default-ON) ⇒ kind === 'sqlite' at <quanta-home>/memory/memory.sqlite", () => {
+    // `override.homeDir` is the QUANTA home, not the OS home — that is the point of
+    // the relocation (memory follows QUANTA_HOME / QUANTA_CONFIG_DIR like sessions
+    // and knobs). So the injected root is `<tmp>/.quanta` and the file lands one
+    // level under it. This previously injected a bare `tmp` and asserted
+    // `<tmp>/.quanta/memory/...`, which only held while the seam meant the OS home.
+    const home = join(tmp, ".quanta")
+    const slot = buildMemoryForSession({} as NodeJS.ProcessEnv, { homeDir: home, cwd: tmp })
     expect(slot.kind).toBe("sqlite")
-    expect(slot.storePath).toBe(join(tmp, ".quanta", "memory", "memory.sqlite"))
+    expect(slot.storePath).toBe(join(home, "memory", "memory.sqlite"))
+  })
+
+  test("the resolved store NEVER escapes the scratch home", () => {
+    // The arm that would have caught the regression this file just recorded. With
+    // only `HOME` redirected, `buildTooling` resolved the developer's REAL
+    // `~/.quanta/memory/memory.sqlite` and every assertion about `kind` still
+    // passed — a suite writing to the real store while reporting green.
+    for (const env of [{}, { QUANTA_MEMORY: "1" }, { QUANTA_MEMORY: "sqlite" }]) {
+      const slot = buildMemoryForSession(env as NodeJS.ProcessEnv, {
+        homeDir: join(tmp, ".quanta"),
+        cwd: tmp,
+      })
+      expect(
+        slot.storePath ?? tmp,
+        `escaped the scratch home for ${JSON.stringify(env)}`,
+      ).toContain(tmp)
+    }
+    const t = realTooling()
+    expect(t.memoryStorePath ?? tmp, "buildTooling escaped the scratch home").toContain(tmp)
   })
 
   test("QUANTA_MEMORY=sqlite + path ⇒ kind === 'sqlite' AND the resolved path is carried", () => {
@@ -201,6 +243,9 @@ describe("T2 — buildTooling banner tells the truth about the store kind", () =
     expect(line).not.toContain("volatile")
     expect(line).toContain("embed=off")
     expect(t.memoryKind).toBe("sqlite")
+    // `<tmp>/.quanta` is QUANTA_HOME (set in beforeEach), so the file is one level
+    // under it. Asserted as an absolute path, not a suffix, so an escape to the
+    // real `~/.quanta` cannot satisfy it.
     expect(t.memoryStorePath).toBe(join(tmp, ".quanta", "memory", "memory.sqlite"))
   })
 
