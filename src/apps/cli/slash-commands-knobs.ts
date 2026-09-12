@@ -325,7 +325,21 @@ const setCatalogKnob = (id: string, raw: string, ctx: SlashContext): number | un
     )
     return 1
   }
-  ctx.out(`/knobs: ${id} = ${raw} (session override; live this session)\n`)
+  // `hotToggleable` is the canonical liveness field and it is REQUIRED on every
+  // catalog row, so this is a fact the catalog already carries — not a new one.
+  //
+  // The old line claimed `(session override; live this session)` unconditionally,
+  // for all 674 rows. Measured: exactly ONE row is `hotToggleable: true`, and its
+  // own source says the apply path is dead. So the sentence was false on every
+  // row a user could reach, and the runner path two functions below has warned
+  // correctly the whole time — the same knob told you the truth or lied depending
+  // on whether you spelled it as a runner id or an envKey.
+  ctx.out(
+    cat.hotToggleable === true
+      ? `/knobs: ${id} = ${raw} (session override; live this session)\n`
+      : `/knobs: ${id} = ${raw} (session override STORED — this knob is read at startup, ` +
+          `so run \`/knobs save\` and restart, or export it, to take effect)\n`,
+  )
   return 0
 }
 

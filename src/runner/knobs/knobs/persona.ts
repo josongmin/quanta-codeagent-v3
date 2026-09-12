@@ -73,7 +73,14 @@ export const personaKnob: Knob<PersonaKind> = {
   apply: applyPersona,
   describe: "System prompt persona (default | friendly | pragmatic | codex)",
   source: "ADR-0068",
-  hotToggleable: true,
+  // Was `true`, and it was the ONLY `true` in 674 catalog rows — which made it the
+  // sole basis on which `/knobs set` could claim a live session override. The apply
+  // path is dead and this file says so above: `personaKnob` is not in
+  // `wireInteractiveKnobs` and there is no `/persona` command, so `apply` never
+  // fires on a live surface. Claiming hot-toggleability for a dead apply is how the
+  // honest field became the dishonest one. Flip it back the day a live surface
+  // exists — and add the test that proves the swap took effect in the same change.
+  hotToggleable: false,
 }
 
 registerKnob(personaKnob)
