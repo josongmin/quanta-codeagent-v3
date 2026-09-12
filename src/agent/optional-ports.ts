@@ -13,6 +13,7 @@ import { projectAgentEventToAgentStateObservation } from "@/protocol/agent-state
 import {
   emitOperatorNotice,
   errMessage,
+  gateDisabled,
   gateOn,
   gateOnStrict,
   itemStreamEnabled,
@@ -39,6 +40,11 @@ import type { AgentConfig } from "./types"
 
 const QUANTA_FAST_APPLY_ENV = "QUANTA_FAST_APPLY"
 const QUANTA_EFFORT_AUTO_ENV = "QUANTA_EFFORT_AUTO"
+/** The MASTER subagent capability gate (ADR-0011). `buildSubagentConfig`
+ *  (apps/cli) already folds this into every child knob; the env-derived wires
+ *  below have to honour the same switch or an explicit `QUANTA_SUBAGENT=0`
+ *  is silently overridden by a seeded child gate. */
+const QUANTA_SUBAGENT_ENV = "QUANTA_SUBAGENT"
 const QUANTA_SUBAGENT_MAILBOX_ENV = "QUANTA_SUBAGENT_MAILBOX"
 /** RFC-02 / ADR-0436 — `spawn_batch` fan-out tool gate. */
 const QUANTA_SUBAGENT_BATCH_ENV = "QUANTA_SUBAGENT_BATCH"
@@ -111,6 +117,13 @@ type OptionalPortBase = Pick<
 // `=== "on"`, which silently ignored `=1` (the followup-task footgun). Superset:
 // the value `"on"` still activates, unset is still OFF.
 const envGateOn = (env: OptionalPortEnv, key: string): boolean => gateOn(env, key)
+
+/** Whether the operator EXPLICITLY turned subagents off. Only the canonical
+ *  falsy vocabulary (`0`/`false`/`off`/`no`, via `@/shared#gateDisabled`) counts —
+ *  unset and unrecognized tokens keep the documented default-ON posture, so this
+ *  is a kill switch and never a silent posture flip. */
+const subagentMasterDisabled = (env: OptionalPortEnv): boolean =>
+  gateDisabled(env, QUANTA_SUBAGENT_ENV)
 
 const resolveModelPort = (base: OptionalPortBase, modelId: string): LLMPort | null => {
   if (base.llm.model === modelId) return base.llm
@@ -200,7 +213,14 @@ export const wireOptionalAgentPorts = <T extends OptionalPortBase>(
   // gate `QUANTA_SUBAGENT_MAILBOX=on` flips it on with the per-sender DoS cap
   // BAKED IN — the audit-H R2 contract becomes a property of every production
   // wiring instead of a knob a downstream caller might forget to set.
-  if (next.subagentMailbox === undefined && envGateOn(env, QUANTA_SUBAGENT_MAILBOX_ENV)) {
+  // The mailbox is subagent DELIVERY substrate, so an explicitly disabled master
+  // means there is nothing to deliver to — minting it would be dead weight the
+  // tier-1 builder then advertises. Caller-provided mailboxes are untouched.
+  if (
+    next.subagentMailbox === undefined &&
+    !subagentMasterDisabled(env) &&
+    envGateOn(env, QUANTA_SUBAGENT_MAILBOX_ENV)
+  ) {
     next = { ...next, subagentMailbox: createDefaultSubagentMailbox() } as T
   }
 
@@ -645,6 +665,13 @@ const applyFollowupFlags = (
 }
 
 const wireSubagentToolGates = <T extends OptionalPortBase>(base: T, env: OptionalPortEnv): T => {
+  // MASTER GATE FIRST. An empty `subagent` block IS the runner-enabling default,
+  // so minting one from a child gate re-enabled a capability the operator had
+  // explicitly switched off — and `QUANTA_SUBAGENT_FOLLOWUP` is seeded `=1` by the
+  // apps/cli gate loop, which made that the DEFAULT outcome on the interactive CLI.
+  // `base` is returned verbatim: a caller-supplied block is code, not env, and code
+  // outranks a gate (ADR-0332), so it survives unchanged rather than being deleted.
+  if (subagentMasterDisabled(env)) return base
   const wantBatch = envGateOn(env, QUANTA_SUBAGENT_BATCH_ENV)
   const wantIntrospect = envGateOn(env, QUANTA_SUBAGENT_INTROSPECT_ENV)
   const wantFollowup = envGateOn(env, QUANTA_SUBAGENT_FOLLOWUP_ENV)

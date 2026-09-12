@@ -242,3 +242,144 @@ describe("subagent tool knobs — composition-root wire (ADR-0436/0437)", () => 
     ).not.toThrow()
   })
 })
+
+/**
+ * Hellgate — the `QUANTA_SUBAGENT` MASTER kill switch governs this wire too.
+ *
+ * WHY THIS EXISTS. `buildSubagentConfig` (apps/cli) already folds the master
+ * into every child knob (`subagentFeatureKnobs(enabled, env)`), so on the CLI
+ * `QUANTA_SUBAGENT=0` removed the runner. `wireOptionalAgentPorts` — the wire
+ * EVERY surface calls, including the CLI via `agent-arg-builder.ts` — never read
+ * the master at all: any one child gate minted `subagent: {}`, and that empty
+ * block IS the runner-enabling default. `QUANTA_SUBAGENT_FOLLOWUP` is seeded to
+ * `"1"` by the CLI gate loop, so an operator who explicitly disabled subagents
+ * still got a runner and the model could still fan out. The doc on
+ * `buildSubagentConfig` promises "restores the byte-identical no-subagent loop";
+ * this suite is what makes that promise true on the shared wire.
+ *
+ * Contract:
+ *   - An EXPLICIT falsy master (`0`/`false`/`off`/`no`, the `@/shared#gateDisabled`
+ *     vocabulary) blocks every ENV-DERIVED child wire.
+ *   - A caller-supplied `base.subagent` is NOT deleted or rewritten — the host
+ *     asked for it in code, which outranks an env gate (ADR-0332 caller
+ *     precedence). Under a disabled master it survives VERBATIM (same object).
+ *   - Master unset ⇒ unchanged behaviour (default-ON), so this is not a silent
+ *     posture flip for anyone who never set the knob.
+ */
+describe("QUANTA_SUBAGENT master kill switch — env-derived child wires (P0-1)", () => {
+  const CHILD_GATES = [
+    "QUANTA_SUBAGENT_BATCH",
+    "QUANTA_SUBAGENT_INTROSPECT",
+    "QUANTA_SUBAGENT_FOLLOWUP",
+  ] as const
+
+  // ── the defect: one child gate resurrected a disabled master ───────────────
+  for (const gate of CHILD_GATES) {
+    test(`master=false + ${gate}=on ⇒ NO subagent block, NO dep ports, zero tools`, () => {
+      const wired = wireOptionalAgentPorts(baseConfig(), {
+        QUANTA_SUBAGENT: "false",
+        [gate]: "on",
+      })
+      expect(wired.subagent).toBeUndefined()
+      expect(wired.subagentAgentMeta).toBeUndefined()
+      expect(wired.subagentTurnWake).toBeUndefined()
+      expect(wired.subagentMailbox).toBeUndefined()
+      expect(toolNames(wired)).toEqual([])
+    })
+  }
+
+  test("all three child gates on at once cannot outvote an explicit false master", () => {
+    const wired = wireOptionalAgentPorts(baseConfig(), {
+      QUANTA_SUBAGENT: "0",
+      QUANTA_SUBAGENT_BATCH: "1",
+      QUANTA_SUBAGENT_INTROSPECT: "1",
+      QUANTA_SUBAGENT_FOLLOWUP: "1",
+      QUANTA_SUBAGENT_STEER: "1",
+      QUANTA_SUBAGENT_MAILBOX: "1",
+    })
+    expect(wired.subagent).toBeUndefined()
+    expect(wired.subagentMailbox).toBeUndefined()
+    expect(toolNames(wired)).toEqual([])
+  })
+
+  // Every falsy spelling in the `@/shared#gateDisabled` vocabulary disables —
+  // the same grammar `buildSubagentConfig` already honours, so the two paths
+  // agree on what "off" means instead of each inventing one.
+  test("every canonical falsy spelling of the master disables the child wires", () => {
+    for (const off of ["0", "false", "off", "no", "OFF", " false "]) {
+      const wired = wireOptionalAgentPorts(baseConfig(), {
+        QUANTA_SUBAGENT: off,
+        QUANTA_SUBAGENT_FOLLOWUP: "on",
+      })
+      expect(wired.subagent, `master=${JSON.stringify(off)} must disable`).toBeUndefined()
+    }
+  })
+
+  // ── caller precedence: code beats env, in BOTH directions ──────────────────
+  test("a caller-provided subagent block survives a false master VERBATIM", () => {
+    const callerRegistry = new TaskRegistry()
+    const callerBlock = { enableIntrospect: true, taskRegistry: callerRegistry } as const
+    const base = { ...baseConfig(), subagent: callerBlock } as unknown as AgentConfig
+    const wired = wireOptionalAgentPorts(base, {
+      QUANTA_SUBAGENT: "false",
+      QUANTA_SUBAGENT_BATCH: "on",
+      QUANTA_SUBAGENT_FOLLOWUP: "on",
+    })
+    // Same object — not a spread copy, not a mutated clone, not deleted.
+    expect(wired.subagent).toBe(callerBlock)
+    expect(wired.subagent?.taskRegistry).toBe(callerRegistry)
+    // And the env-derived flags were NOT folded in on top of it.
+    expect(wired.subagent?.enableBatchSpawn).toBeUndefined()
+    expect(wired.subagent?.enableFollowup).toBeUndefined()
+    expect(wired.subagentTurnWake).toBeUndefined()
+  })
+
+  // ── paired controls: the guard must not disable the default path ───────────
+  test("PAIRED CONTROL — master UNSET ⇒ child gates wire exactly as before", () => {
+    const wired = wireOptionalAgentPorts(baseConfig(), {
+      QUANTA_SUBAGENT_BATCH: "on",
+      QUANTA_SUBAGENT_INTROSPECT: "on",
+      QUANTA_SUBAGENT_FOLLOWUP: "on",
+    })
+    expect(wired.subagent?.enableBatchSpawn).toBe(true)
+    expect(wired.subagent?.enableIntrospect).toBe(true)
+    expect(wired.subagent?.enableFollowup).toBe(true)
+    expect(wired.subagentAgentMeta).toBeDefined()
+    expect(wired.subagentTurnWake).toBeDefined()
+    expect(toolNames(wired).sort()).toEqual(["followup_task", "list_agents", "spawn_batch"])
+  })
+
+  test("PAIRED CONTROL — master explicitly TRUE ⇒ child gates wire", () => {
+    for (const on of ["1", "on", "true", "yes"]) {
+      const wired = wireOptionalAgentPorts(baseConfig(), {
+        QUANTA_SUBAGENT: on,
+        QUANTA_SUBAGENT_BATCH: "on",
+      })
+      expect(wired.subagent?.enableBatchSpawn, `master=${on} must allow`).toBe(true)
+    }
+  })
+
+  // An unrecognized master token is NOT falsy, so it must keep the default-ON
+  // posture (lenient vocabulary, `readBool`-compatible) rather than silently
+  // becoming a kill switch.
+  test("PAIRED CONTROL — an unrecognized master token keeps the default-ON posture", () => {
+    for (const junk of ["", "  ", "banana", "2"]) {
+      const wired = wireOptionalAgentPorts(baseConfig(), {
+        QUANTA_SUBAGENT: junk,
+        QUANTA_SUBAGENT_BATCH: "on",
+      })
+      expect(wired.subagent?.enableBatchSpawn, `master=${JSON.stringify(junk)}`).toBe(true)
+    }
+  })
+
+  // Steer rides the followup substrate, so the master has to reach it too —
+  // otherwise `mode:"steer"` stays admitted on a disabled runner.
+  test("master=false blocks the steer plane that rides followup", () => {
+    const wired = wireOptionalAgentPorts(baseConfig(), {
+      QUANTA_SUBAGENT: "off",
+      QUANTA_SUBAGENT_FOLLOWUP: "on",
+      QUANTA_SUBAGENT_STEER: "on",
+    })
+    expect(wired.subagent).toBeUndefined()
+  })
+})
