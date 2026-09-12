@@ -41,14 +41,24 @@ const EXEMPT_PATTERNS: readonly RegExp[] = [
   // bench cassettes for debugging; they are not user-facing surfaces.
   /^tools\/trajectory-timeline\.ts$/,
   /^tools\/trajectory-viewer\//,
-  // `tools/dev/` is the build/test harness the repo runs ON itself — typecheck,
-  // biome wrapper, lint-debt ceiling, worktree-pollution guard, sandboxed-test,
-  // unit-speed budget, cwd-parity control. None of it ships in a binary and none
-  // of it has ever been catalogued (0 of ~20 files appear in any `evidence.code`),
-  // so requiring an fc entry for the NEXT one only makes that one arbitrary.
-  // Deliberately NOT `^tools\//`: tools/pm, tools/god-code and tools/arch-gen ARE
-  // catalogued features (they encode product policy) and must stay gated.
-  /^tools\/dev\//,
+  // `tools/dev/` USED to be exempt here, on the stated grounds that "none of it has
+  // ever been catalogued (0 of ~20 files appear in any evidence.code), so requiring
+  // an fc entry for the NEXT one only makes that one arbitrary".
+  //
+  // That premise is measurably false, and became false while the exemption sat here.
+  // Measured at this commit: 102 tracked `tools/dev/*.ts`, and **51 of them ARE
+  // referenced** by `evidence.code` — an exact half, most of it enrolled by the
+  // sep-9/sep-12 verification campaigns. The coverage the exemption was meant to
+  // keep principled had become a coin flip, and the ONE thing the gate exists to
+  // stop — a new harness file landing uncatalogued — was the thing it allowed.
+  //
+  // Removed rather than re-justified. The asymmetry already in this function does the
+  // rest: an ADDED file blocks, a MODIFIED one is informational. So the 51 that are
+  // not yet catalogued stay quiet until someone deliberately enrolls them, and the
+  // next NEW harness file has to say what it is. No bulk-enrolment churn.
+  //
+  // Deliberately still NOT `^tools\//` for the rest: tools/pm, tools/god-code and
+  // tools/arch-gen ARE catalogued features (they encode product policy).
 ]
 
 /** True ⇒ this src file is exempt from the "must be in fc" rule. */

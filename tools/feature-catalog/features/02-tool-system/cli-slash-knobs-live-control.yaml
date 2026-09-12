@@ -54,11 +54,18 @@ evidence:
     - src/shared/runtime-config.ts
     - src/config/knob-catalog.ts
     - src/apps/cli/cli-knobs-accessor.ts
+    # The completeness instrument for the same governance plane: the AST census
+    # that replaced the regex scanner which reported `orphans=0` over 63
+    # undeclared reads. Enrolled here rather than in a new entry because it has
+    # no surface of its own — it exists to keep THIS catalog honest.
+    - tools/dev/knob-env-access.ts
   adrs: [503]
   tests:
     unit:
       - tests/unit/cli/slash-knobs.test.ts
       - tests/unit/shared/knob-overrides.test.ts
+      - tests/unit/dev/knob-env-access.test.ts
+      - tests/unit/knob-registry-completeness-ratchet-hellgate.test.ts
     integration:
       - tests/integration/cli/knob-control-plane-e2e-hellgate.test.ts
     contract: []
