@@ -253,7 +253,11 @@ const isTestFile = (file: string): boolean => /\.test\.[cm]?ts$|(^|\/)__tests__\
 const orphansOf = (
   reads: ReadonlyMap<string, KnobAccess>,
   declared: ReadonlySet<string>,
-  excepted: ReadonlySet<string>,
+  /** Membership only. `EXCEPTIONS` is a Map (key → reason) and the injection test
+   *  passes a Set, so the parameter is typed to what is actually used — widening it
+   *  to `ReadonlySet` looked right and did not typecheck, which `bun test` cannot
+   *  tell you: it does not typecheck `.test.ts` at all. Only `typecheck:all` does. */
+  excepted: { readonly has: (key: string) => boolean },
 ): Map<string, string> =>
   new Map(
     [...reads]
