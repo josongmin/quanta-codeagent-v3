@@ -121,7 +121,29 @@ const anyNameRe = (names: Iterable<string>): RegExp =>
  * naming it in a string is talking about it, and outside `tests/` naming it in
  * a string IS how declarations are written (`envKey: "QUANTA_X"`).
  */
-const isTestFile = (rel: string): boolean => rel.startsWith("tests/")
+const isTestFile = (rel: string): boolean =>
+  rel.startsWith("tests/") || /(?:^|\/)__tests__\//.test(rel) || /\.test\.tsx?$/.test(rel)
+
+/**
+ * `process.env.X = "1"` and `delete process.env.X` are WRITES, and a write is
+ * not a read — the same distinction `knob-env-access.ts` draws, and the one the
+ * test docstring claimed this module drew when it did not.
+ *
+ * MEASURED: a block of nine `process.env.QUANTA_* = "1"` writes in
+ * `tests/unit/jun6-all-knobs-on-composition-hellgate.test.ts` would have backed
+ * nine names on its own, inside the very directory where a bare literal is
+ * already refused.
+ */
+const isWriteTarget = (node: ts.Node): boolean => {
+  const parent = node.parent
+  if (parent === undefined) return false
+  if (ts.isDeleteExpression(parent)) return true
+  return (
+    ts.isBinaryExpression(parent) &&
+    parent.left === node &&
+    parent.operatorToken.kind === ts.SyntaxKind.EqualsToken
+  )
+}
 
 const evidenceFromTs = (
   rel: string,
@@ -137,23 +159,90 @@ const evidenceFromTs = (
     if (declared.has(name) && !found.has(name)) found.set(name, { kind, where: at(node) })
   }
   const visit = (node: ts.Node): void => {
-    if (
-      literalsAreEvidence &&
-      (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))
-    ) {
-      note(node.text, "ts-literal", node)
-    } else if (ts.isPropertyAccessExpression(node)) {
-      note(node.name.text, "ts-access", node)
-    } else if (ts.isElementAccessExpression(node)) {
-      const argument = node.argumentExpression
-      if (ts.isStringLiteral(argument)) note(argument.text, "ts-access", node)
-    } else if (ts.isBindingElement(node) && ts.isIdentifier(node.name)) {
-      note(node.name.text, "ts-access", node)
-    }
+    const hit = classifyNode(node, literalsAreEvidence)
+    if (hit !== undefined) note(hit.name, hit.kind, node)
     node.forEachChild(visit)
   }
   visit(sf)
 }
+
+/**
+ * The KEY of a write is part of the write.
+ *
+ * `bag["QUANTA_X"] = "1"` is excluded as an element access and was then
+ * re-admitted one node down, because outside a test file a bare literal IS
+ * evidence by design — that is how declarations are spelled
+ * (`envKey: "QUANTA_X"`). So the exclusion has to reach the literal too.
+ */
+const isWriteKeyLiteral = (node: ts.Node): boolean => {
+  const parent = node.parent
+  return (
+    parent !== undefined &&
+    ts.isElementAccessExpression(parent) &&
+    parent.argumentExpression === node &&
+    isWriteTarget(parent)
+  )
+}
+
+/** The key a node names, and how, or `undefined` when it names none. */
+const classifyNode = (
+  node: ts.Node,
+  literalsAreEvidence: boolean,
+): { readonly name: string; readonly kind: EnvEvidenceKind } | undefined => {
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+    if (isWriteKeyLiteral(node)) return undefined
+    return literalsAreEvidence ? { name: node.text, kind: "ts-literal" } : undefined
+  }
+  if (isWriteTarget(node)) return undefined
+  if (ts.isPropertyAccessExpression(node)) return { name: node.name.text, kind: "ts-access" }
+  if (ts.isElementAccessExpression(node)) {
+    // A template literal with no substitutions is the same key written a
+    // different way: `process.env[`QUANTA_X`]` was invisible.
+    const argument = node.argumentExpression
+    return ts.isStringLiteral(argument) || ts.isNoSubstitutionTemplateLiteral(argument)
+      ? { name: argument.text, kind: "ts-access" }
+      : undefined
+  }
+  if (ts.isBindingElement(node)) {
+    // `const { QUANTA_X: alias } = env` binds `alias` and READS `QUANTA_X`.
+    // Reading `node.name` recorded the alias and missed the key — and, in the
+    // other direction, recorded a name destructured off an unrelated object.
+    const key = node.propertyName ?? node.name
+    return ts.isIdentifier(key) || ts.isStringLiteral(key)
+      ? { name: key.text, kind: "ts-access" }
+      : undefined
+  }
+  return undefined
+}
+
+/**
+ * Text with line comments removed, for the two shapes that cannot be parsed.
+ *
+ * # The hole this closes
+ *
+ * The module's thesis is "a comment is not a node… that is why this is a
+ * parse". It was true of the two TypeScript shapes and FALSE of the other two,
+ * which are raw-text regexes. MEASURED: two operator-facing names,
+ * `QUANTA_GH_TRIGGER_PHRASES` and `QUANTA_GH_TRUST_SCOPE`, were called alive by
+ * these two lines and nothing else in the tree —
+ *
+ *   .github/workflows/quanta-pr-bot.yml.template:166
+ *     #       QUANTA_GH_TRIGGER_PHRASES="@quanta,/quanta,@my-bot"
+ *
+ * — while the values actually come from the `--phrases` and `--trust-scope` CLI
+ * flags. `docs/integrations/github/SETUP.md` tells operators to set both as
+ * workflow env, which is the "instruction that silently does nothing" this guard
+ * exists to catch, and the guard published `0 unbacked`.
+ *
+ * Line comments only. A `/* … *\/` block or a quoted `#` inside a shell string
+ * is not worth a second parser here: the shapes this feeds are already the
+ * weakest two, and the arms pin the case that actually occurred.
+ */
+const withoutLineComments = (text: string): string =>
+  text
+    .split("\n")
+    .filter((line) => !/^\s*(?:#|\/\/)/.test(line))
+    .join("\n")
 
 const evidenceFromQuoted = (
   rel: string,
@@ -163,7 +252,7 @@ const evidenceFromQuoted = (
 ): void => {
   for (const name of declared) {
     if (found.has(name)) continue
-    if (new RegExp(`["']${reEscape(name)}["']`).test(text)) {
+    if (new RegExp(`["']${reEscape(name)}["']`).test(withoutLineComments(text))) {
       found.set(name, { kind: "quoted", where: rel })
     }
   }
@@ -177,7 +266,7 @@ const evidenceFromWorkflow = (
 ): void => {
   for (const name of declared) {
     if (found.has(name)) continue
-    if (new RegExp(`\\b${reEscape(name)}\\b`).test(text)) {
+    if (new RegExp(`\\b${reEscape(name)}\\b`).test(withoutLineComments(text))) {
       found.set(name, { kind: "workflow", where: rel })
     }
   }
@@ -197,6 +286,12 @@ export const envEvidenceIndex = (
     const isWorkflow = rel.startsWith(".github/workflows/")
     if (!isWorkflow && !TS_SOURCE.test(rel) && !NON_TS_SOURCE.test(rel)) continue
     const text = readFileSync(join(repoRoot, rel), "utf8")
+    // Prefiltering on the RAW text, deliberately. Stripping comments first would
+    // narrow the parse set, and MEASURED it does not pay: the `readFileSync`
+    // over ~9,500 files dominates, and running the stripper on all of them cost
+    // more than the ~500 parses it saved (7.1-7.6s became 8.0-9.1s). The two
+    // raw-text shapes strip inside themselves, where it is a correctness rule
+    // rather than a filter.
     if (!prefilter.test(text)) continue
     if (isWorkflow) evidenceFromWorkflow(rel, text, names, found)
     else if (TS_SOURCE.test(rel)) evidenceFromTs(rel, text, names, found)

@@ -10,7 +10,14 @@ monitoring: n-a
 modes: [daemon, ci-bot]
 configurable: integrated
 config_refs:
-  env: [QUANTA_GH_ACTIONS_TRIGGER, QUANTA_GH_TRIGGER_PHRASES, QUANTA_GH_TRUST_SCOPE]
+  # QUANTA_GH_TRIGGER_PHRASES and QUANTA_GH_TRUST_SCOPE used to be listed here
+  # and are read by nothing: the values come from the `--trigger-phrase` and
+  # `--trust-scope` CLI flags (src/apps/cli/from-pr-cmd-runner.ts:112-117). Their
+  # only occurrence outside this catalog was two COMMENTED lines in
+  # .github/workflows/quanta-pr-bot.yml.template, a file gate-manifest.ts itself
+  # classifies as "a template, not an installed workflow".
+  env: [QUANTA_GH_ACTIONS_TRIGGER]
+  cli: ["--trigger-phrase", "--trust-scope"]
 owners: ["@songmin"]
 labels: ["surface:cli", "integration:github", "default-off"]
 depends_on:
@@ -73,12 +80,14 @@ knobs:
   - name: QUANTA_GH_ACTIONS_TRIGGER
     default: 'undefined'
     purpose: 'Default-OFF gate; "1" arms the from-pr cycle, anything else short-circuits exit 0.'
-  - name: QUANTA_GH_TRIGGER_PHRASES
+  - name: '--trigger-phrase'
+    where: cli
     default: '@quanta,/quanta'
-    purpose: 'Comma-separated trigger phrases passed to the mention filter; honors the same matcher as ADR-0314.'
-  - name: QUANTA_GH_TRUST_SCOPE
+    purpose: 'Repeatable trigger phrase for the mention filter; honors the same matcher as ADR-0314. A CLI flag, not an env knob — it was listed as QUANTA_GH_TRIGGER_PHRASES and nothing read that.'
+  - name: '--trust-scope'
+    where: cli
     default: 'collaborator'
-    purpose: 'Default trust scope for the mention filter — collaborator/member/owner gate.'
+    purpose: 'Trust scope for the mention filter — collaborator/member/owner gate. A CLI flag, not an env knob; QUANTA_GH_TRUST_SCOPE was read by nothing.'
 deliberate_hold:
   reason: |
     CLI sub-command registry wiring (binding `from-pr` into the top-level
