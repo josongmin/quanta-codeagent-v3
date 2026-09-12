@@ -112,7 +112,7 @@ import { loadTierPopulationFloors } from "./test-tier-population"
 import { ADMISSION_DEADLINE_ENV } from "./verification-admission"
 import { executionPolicyDigest } from "./verification-execution-policy"
 import { sharedVerificationCacheRoot } from "./verification-receipt"
-import { applyUserLibraryDecision, type UserLibraryDecision } from "./worker-home"
+import { applyUserLibraryDecision, type UserLibraryDecision, workerSpawnEnv } from "./worker-home"
 
 /**
  * Authoritative local full-suite runner.
@@ -497,10 +497,6 @@ const runShard = async (
   const workerEnv = { ...process.env }
   delete workerEnv[ADMISSION_DEADLINE_ENV]
   workerEnv[SOURCE_JS_CLEANED_ROOT_ENV] = SOURCE_ROOT
-  // The campaign's capability receipt, both halves. Without the binding the
-  // consumer compares only the toolchain digest — an audit found that half
-  // silently optional, and shipping the path alone ships the unbound version.
-  Object.assign(workerEnv, capabilityEnv)
   let closed = false
   try {
     const startedAt = performance.now()
@@ -523,17 +519,21 @@ const runShard = async (
         ...junitArgs,
       ],
       cwd: REPO_ROOT,
-      env: {
-        ...workerEnv,
-        HOME: workerHome,
-        TMPDIR: workerTmp,
-        PWD: REPO_ROOT,
-        QUANTA_HOME: quantaHome,
-        QUANTA_PREFS_HOME: prefsHome,
-        QUANTA_BENCH_RESULTS_DIR: benchResults,
-        QUANTA_SCAN_REACH_RECORD: scanReachSink,
-        QUANTA_TEST_TIMEOUT_SCALE: String(testTimeoutMs / 60_000),
-      },
+      // Composed by `worker-home`, which REFUSES to hand back a bag missing the
+      // campaign's capability variables. A worker launched without them does not
+      // fail — it skips every gated describe and reports a pass.
+      env: workerSpawnEnv({
+        base: workerEnv,
+        capabilityEnv,
+        workerHome,
+        workerTmp,
+        repoRoot: REPO_ROOT,
+        quantaHome,
+        prefsHome,
+        benchResults,
+        scanReachSink,
+        testTimeoutMs,
+      }),
       stdoutFd: spoolFd,
       stderrFd: spoolFd,
     })
