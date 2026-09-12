@@ -37,13 +37,29 @@ import type { MentionResolverPort } from "@/agent/mention-injection"
 import { buildDefaultMentionResolver } from "@/agent/mention-runner"
 import { KNOB_INVENTORY } from "@/config/knob-inventory"
 
-const CWD = mkdtempSync(join(tmpdir(), "mention-gate-parity-"))
+/**
+ * Created on FIRST USE, not at module load.
+ *
+ * `mkdtempSync` at module scope is a module-load external effect, and
+ * `tests/unit/_arch/module-load-effect-guard.test.ts` refuses one with no
+ * allowlist entry — it went red on `main` when this landed. The effect is also
+ * paid by any run that only collects this file, or filters every test out of it.
+ */
+let cwdDir: string | undefined
+const cwd = (): string => {
+  cwdDir ??= mkdtempSync(join(tmpdir(), "mention-gate-parity-"))
+  return cwdDir
+}
 
 /** Minimal stand-ins for the ports each gate additionally requires. A gate that
  *  is ON but whose port is missing also yields an absent method, which would
  *  read as "the gate is OFF" — so every port is supplied. */
 const PORTS = {
-  cwd: CWD,
+  // A GETTER: `PORTS` is a module-scope const, so a plain `cwd: cwd()` would
+  // still create the directory at module load, which is the thing being fixed.
+  get cwd(): string {
+    return cwd()
+  },
   skills: { lookup: () => ({ name: "s", description: "d" }) },
   lsp: { lookup: async () => null },
   semantic: { lookup: async () => null },

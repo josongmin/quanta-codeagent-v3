@@ -1,7 +1,10 @@
 // meta-test: exercises tools/feature-catalog/* (lives outside src/, no @/ alias).
 import { describe, expect, test } from "bun:test"
 import { readFile } from "node:fs/promises"
-import { join } from "node:path"
+import { BASELINE_PATH } from "../../tools/feature-catalog/paths"
+// Kept from the other resolution of this conflict: the ratchet that refuses the
+// literal has `full-suite` as its only home, and `full-suite` has never completed
+// on this host, so the red it correctly reported sat unread on main.
 import {
   composeBaseline,
   countBiomeErrors,
@@ -164,12 +167,15 @@ describe("the refresher carries every block it does not measure", () => {
   })
 
   test("the real baseline.json on disk still carries its fc block", async () => {
-    // Anchored on THIS file, not the ambient cwd. A relative path here reads the
-    // wrong file (or none) when the runner is launched from anywhere but the repo
-    // root, which `repo-path-anchor-ratchet` forbids — and which it caught: this arm
-    // sat RED on main, inside a tier that never completes.
-    const baselinePath = join(import.meta.dir, "..", "..", "tools/feature-catalog/baseline.json")
-    const raw = JSON.parse(await readFile(baselinePath, "utf8")) as {
+    // BASELINE_PATH, not a cwd-relative literal. The catalog's own `paths.ts`
+    // anchors on `import.meta.dir` precisely because a relative literal resolves
+    // to nothing from any other directory — and "no baseline loaded" reads as a
+    // clean one to every assertion below. `repo-path-anchor-ratchet` refuses the
+    // literal, and went red on `main` when this landed.
+    const raw = JSON.parse(await readFile(BASELINE_PATH, "utf8")) as {
+      // Kept from the other resolution of this conflict: the ratchet that refuses the
+      // literal has `full-suite` as its only home, and `full-suite` has never completed
+      // on this host, so the red it correctly reported sat unread on main.
       fc?: { orphan_adr_paths_grandfathered?: unknown[] }
     }
     expect(raw.fc, "baseline.json lost its fc block — fc lint's allowlist is gone").toBeDefined()
