@@ -1419,6 +1419,54 @@ async function loadL3ReachabilityGrandfathered(): Promise<Set<string>> {
   }
 }
 
+/**
+ * PARTIAL-dead evidence: an `≥L3` feature whose `evidence.code` contains dead src
+ * files while at least one is live.
+ *
+ * `computeReachabilityOffenders` only fires when ALL of a feature's src evidence is
+ * dead, so one live file hides any number of dead ones. Measured at this commit:
+ * 0 all-dead (the existing gate is genuinely clean) and 85 features carrying 107
+ * dead evidence files between them. `evidence.code` fan-in is ~1.95x, so appending
+ * to an entry makes the all-dead test strictly less likely to fire — the blind spot
+ * widens with use.
+ *
+ * NOT flipped to `some(isDead)`. That would fail 85 features at once, and the
+ * difference between a dead WIRING file and a dead auxiliary one is not recorded
+ * anywhere in the schema, so the gate could not tell a real overclaim from a
+ * barrel. `.d.ts` files are excluded outright: a type declaration is never
+ * "reached" by an import graph, so counting one is a measurement error, not a
+ * finding.
+ *
+ * Surfaced and ratcheted instead, so the number cannot grow while the decision
+ * about primary-vs-auxiliary evidence is made deliberately.
+ */
+export interface PartialDeadRow {
+  readonly id: string
+  readonly maturity: string
+  readonly dead: readonly string[]
+  readonly total: number
+}
+
+export const computePartialDeadEvidence = (
+  features: readonly LoadedFeature[],
+  reach: { readonly reached: ReadonlySet<string> },
+  floor: string = REACHABILITY_FLOOR,
+): PartialDeadRow[] => {
+  const floorRank = maturityRank(floor)
+  const rows: PartialDeadRow[] = []
+  for (const { feature } of features) {
+    if (maturityRank(feature.maturity) < floorRank) continue
+    const src = feature.evidence.code.filter(
+      (c) => c.startsWith("src/") && c.endsWith(".ts") && !c.endsWith(".d.ts"),
+    )
+    if (src.length === 0) continue
+    const dead = src.filter((c) => !reach.reached.has(c))
+    if (dead.length === 0 || dead.length === src.length) continue
+    rows.push({ id: feature.id, maturity: feature.maturity, dead, total: src.length })
+  }
+  return rows.sort((a, b) => a.id.localeCompare(b.id))
+}
+
 async function cmdReachability(argv: string[]): Promise<void> {
   const strict = argv.includes("--strict")
   const symbols = argv.includes("--symbols")
@@ -1438,6 +1486,13 @@ async function cmdReachability(argv: string[]): Promise<void> {
     `reachability: ${reach.reached.size}/${reach.allFiles.size} src files reached; ` +
       `${offenders.length} feature(s) ≥${REACHABILITY_FLOOR} ${mode} (overclaim) ` +
       `— ${netNew.length} net-new, ${known.length} grandfathered:`,
+  )
+  const partial = computePartialDeadEvidence(features, reach)
+  const partialFiles = partial.reduce((n, r) => n + r.dead.length, 0)
+  console.log(
+    `reachability: partial-dead evidence — ${partial.length} feature(s) carry ` +
+      `${partialFiles} dead src file(s) alongside live ones (the all-dead test above ` +
+      `cannot see these; .d.ts excluded)`,
   )
   for (const o of netNew) console.log(`  NEW  ${o.id} [${o.maturity}] (${o.kind}) ${o.first}`)
   for (const o of known) console.log(`  (gf) ${o.id} [${o.maturity}] (${o.kind}) ${o.first}`)
