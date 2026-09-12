@@ -232,6 +232,24 @@ const EXCEPTIONS: ReadonlyMap<string, string> = new Map<string, string>([
     "QUANTA_SIDE_AGENT_TEST_MODE",
     "test-only: the forked side-agent worker's protocol seam (no_finding|throw|multi|late) in src/side-agent/worker-entry.mjs, set ONLY by tests/integration/sep8-remediation/r05. Direct sibling of QUANTA_SIDE_AGENT_LLM_REPLAY above. Unreachable in a compiled binary — nodeProcessForkPort throws SideAgentForkUnsupportedError before forking — and the port is not even constructed unless QUANTA_SUBAGENT_PROCESS is on (default-OFF)",
   ],
+  // BUILD-TIME CONSTANTS — not operator knobs. These three are INLINED by
+  // `bun build --env='QUANTA_BUILD_*'` at compile time, so in a shipped binary they
+  // are literals, not environment. Setting one at runtime changes nothing, and
+  // listing them in `/knobs` would advertise three settings that cannot be set.
+  // They are recorded here instead, which is where the census expects a read that
+  // is genuinely not a knob to be accounted for.
+  [
+    "QUANTA_BUILD_COMMIT",
+    "build-time: inlined by tools/bin/build-cli.ts via `bun build --env`; the commit a compiled binary was built from, not a runtime setting",
+  ],
+  [
+    "QUANTA_BUILD_DIRTY",
+    "build-time: inlined alongside QUANTA_BUILD_COMMIT; whether the tree was modified at build time, so a dirty build cannot borrow a clean commit's identity",
+  ],
+  [
+    "QUANTA_BUILD_TIME",
+    "build-time: inlined alongside QUANTA_BUILD_COMMIT; distinguishes two builds of the same commit",
+  ],
   // RETIRED — present as a REFUSAL input, not a value input.
   [
     "QUANTA_TB_BEST_OF_N",

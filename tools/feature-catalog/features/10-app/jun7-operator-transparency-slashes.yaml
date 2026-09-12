@@ -39,6 +39,11 @@ evidence:
     - src/apps/cli/version-cmd.ts
     - src/apps/cli/bug-cmd.ts
     - src/apps/cli/repo-info.ts
+    # The binary's own identity, which `/version` now reports. Enrolled here rather
+    # than as its own entry: it has no surface of its own, it makes THIS one's
+    # version line answer honestly from a compiled binary.
+    - src/apps/cli/build-stamp.ts
+    - tools/bin/build-cli.ts
     - src/apps/cli/slash/registry-app.ts
   adrs: []
   tests:

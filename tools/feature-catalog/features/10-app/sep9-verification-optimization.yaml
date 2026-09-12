@@ -57,6 +57,9 @@ evidence:
     - src/apps/cli/session-main.ts
     - src/apps/cli/session-command-entry.ts
     - src/apps/cli/top-level-usage.ts
+    # The flag table `top-level-usage` renders FROM; the usage block used to be
+    # hand-written prose and advertised three flags no parser consumes.
+    - src/apps/cli/top-level-flags.ts
   adrs: [3]
   tests:
     unit:
