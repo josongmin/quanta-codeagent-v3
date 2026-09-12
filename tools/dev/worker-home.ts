@@ -92,3 +92,90 @@ export const applyUserLibraryDecision = (input: {
     return "unavailable"
   }
 }
+
+/**
+ * Everything a shard worker's environment is composed from, in one place.
+ *
+ * # Why the composition moved here
+ *
+ * It was an object literal at the `spawnWorker` call site:
+ *
+ *   env: { ...workerEnv, HOME: workerHome, TMPDIR: workerTmp, … }
+ *
+ * with `Object.assign(workerEnv, capabilityEnv)` fifteen lines earlier. That is
+ * correct and it is also unguarded in the one way that matters: the campaign's
+ * capability receipt reaches the gated `describe` blocks through those two
+ * variables and nothing else. Drop them, or let a later spread win, and every
+ * capability answers `blocked-missing`, every gated block becomes
+ * `describe.skip`, and the suite reports a PASS having executed nothing — the
+ * exact defect the receipt was built to end, which lived in this tree for the
+ * whole life of the artifact because a producer was never called.
+ *
+ * A source grep cannot catch that. `run-test-shards.ts` ends in a top-level
+ * `await main()` and cannot be imported, which is the same reason
+ * `userLibraryDecision` lives here. So the composition is a function, and the
+ * delivery invariant is enforced by the function rather than asserted about it.
+ */
+export interface WorkerSpawnEnvInput {
+  /** The runner's environment, already stripped of the admission deadline. */
+  readonly base: WorkerHomeEnv
+  /** The campaign receipt's variables. Empty is legal; partial is not. */
+  readonly capabilityEnv: Readonly<Record<string, string>>
+  readonly workerHome: string
+  readonly workerTmp: string
+  readonly repoRoot: string
+  readonly quantaHome: string
+  readonly prefsHome: string
+  readonly benchResults: string
+  readonly scanReachSink: string
+  readonly testTimeoutMs: number
+}
+
+/**
+ * The worker's environment, with the capability variables proven present.
+ *
+ * Throws rather than returning a bag that is missing them: a worker launched
+ * without the receipt does not fail, it SKIPS, and a skip is reported as a
+ * pass. There is no safe degraded mode, so this refuses to produce one.
+ */
+export const workerSpawnEnv = (input: WorkerSpawnEnvInput): Record<string, string | undefined> => {
+  const perWorker: Record<string, string> = {
+    HOME: input.workerHome,
+    TMPDIR: input.workerTmp,
+    PWD: input.repoRoot,
+    QUANTA_HOME: input.quantaHome,
+    QUANTA_PREFS_HOME: input.prefsHome,
+    QUANTA_BENCH_RESULTS_DIR: input.benchResults,
+    QUANTA_SCAN_REACH_RECORD: input.scanReachSink,
+    QUANTA_TEST_TIMEOUT_SCALE: String(input.testTimeoutMs / 60_000),
+  }
+  // Disjointness is a property of the two key sets, not a hope about ordering.
+  // If a per-worker override ever adopts a capability variable's name, the two
+  // orderings of this spread stop being equivalent and one of them is silently
+  // wrong — so neither is allowed to exist.
+  const collisions = Object.keys(perWorker).filter((key) => key in input.capabilityEnv)
+  if (collisions.length > 0) {
+    throw new Error(
+      `[worker-home] per-worker override(s) ${collisions.join(", ")} collide with the ` +
+        "campaign capability env. One of them would be silently discarded, and which one " +
+        "depends on spread order. Rename the override.",
+    )
+  }
+  const env: Record<string, string | undefined> = {
+    ...input.base,
+    ...input.capabilityEnv,
+    ...perWorker,
+  }
+  const undelivered = Object.entries(input.capabilityEnv).filter(
+    ([key, value]) => env[key] !== value,
+  )
+  if (undelivered.length > 0) {
+    throw new Error(
+      `[worker-home] capability variable(s) ${undelivered
+        .map(([key]) => key)
+        .join(", ")} did not survive worker env composition. A worker without the ` +
+        "receipt skips every gated describe and reports a pass; refusing to launch one.",
+    )
+  }
+  return env
+}

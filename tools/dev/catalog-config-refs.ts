@@ -97,12 +97,39 @@ const reEscape = (name: string): string => name.replace(/[.*+?^${}()|[\]\\]/g, "
 const anyNameRe = (names: Iterable<string>): RegExp =>
   new RegExp([...names].map(reEscape).join("|"))
 
+/**
+ * In a TEST file, only an ACCESS counts — a bare literal does not.
+ *
+ * # Caught by this guard's own arm
+ *
+ * `catalog-config-refs.test.ts` writes `const retired = "QUANTA_REQUIRE_CAPABILITY"`
+ * to assert that the retired name has no evidence. The moment that file became
+ * tracked, `git ls-files` included it and the guard found its own arm's literal
+ * and called the name alive. A guard whose fixtures manufacture evidence for the
+ * names it tests measures nothing, and it would have been satisfied forever.
+ *
+ * # Why not exclude `tests/` outright
+ *
+ * MEASURED: six declared names are backed ONLY by a file under `tests/` —
+ * `QUANTA_SMOKE_LIVE`, `QUANTA_SMOKE_MODEL`, `QUANTA_LLM_PROVIDER`,
+ * `QUANTA_OLLAMA_URL`, `QUANTA_OLLAMA_MODEL`, `GOOGLE_APPLICATION_CREDENTIALS`
+ * — and every one is a real `process.env.X` read by the smoke battery or the
+ * eval harness, which legitimately live there. Dropping the root would invent
+ * six false claims to avoid one.
+ *
+ * So the line is the SHAPE, not the directory: reading a variable is using it,
+ * naming it in a string is talking about it, and outside `tests/` naming it in
+ * a string IS how declarations are written (`envKey: "QUANTA_X"`).
+ */
+const isTestFile = (rel: string): boolean => rel.startsWith("tests/")
+
 const evidenceFromTs = (
   rel: string,
   text: string,
   declared: ReadonlySet<string>,
   found: Map<string, EnvEvidence>,
 ): void => {
+  const literalsAreEvidence = !isTestFile(rel)
   const sf = ts.createSourceFile(rel, text, ts.ScriptTarget.ESNext, true, ts.ScriptKind.TSX)
   const at = (node: ts.Node): string =>
     `${rel}:${sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1}`
@@ -110,7 +137,10 @@ const evidenceFromTs = (
     if (declared.has(name) && !found.has(name)) found.set(name, { kind, where: at(node) })
   }
   const visit = (node: ts.Node): void => {
-    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+    if (
+      literalsAreEvidence &&
+      (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))
+    ) {
       note(node.text, "ts-literal", node)
     } else if (ts.isPropertyAccessExpression(node)) {
       note(node.name.text, "ts-access", node)
