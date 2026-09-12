@@ -1,7 +1,7 @@
 # TVH-01 — 테스트 안전성·이식성 결함 제거
 
 - 우선순위: P0
-- 상태: LANDED — worker HOME 대여 차단·절대경로 3건·SSRF fixture 실 egress 제거·production 소스 스캔까지. 열림: 분류기 정밀도 규칙 LL-b/c/e/f/h 5건 미검증
+- 상태: LANDED — worker HOME 대여 차단·절대경로 3건·SSRF fixture 실 egress 제거·production 소스 스캔까지. LL-b/c/e/f/h 5건은 `06bd6714c`에서 paired control로 닫힘 (F7/F8은 여전히 열림: README 표 참조)
 - 소유 lane: test-runtime safety / browser fixture
 - 선행: 없음
 - 후속: TVH-03, TVH-06, TVH-07

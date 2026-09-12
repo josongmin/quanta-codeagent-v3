@@ -8,8 +8,8 @@
  * existed. `suite` was in the type and never compared, so a `suite: "unit"`
  * receipt — which walks a strict subset of the enrolled scan ids — was accepted
  * as proof for the closed full universe. And there was no `tier` at all, so a
- * `--suite=full --tier=pr` run, 3,938 of the 3,962 files, minted a receipt that
- * stood in for the full-universe scan.
+ * `--suite=full --tier=pr` run — 3,941 of the 3,965 files as measured at this
+ * HEAD — minted a receipt that stood in for the full-universe scan.
  *
  * The consequence is specific, not theoretical: scan-reach is a FLOOR ratchet.
  * A receipt from a narrower population reports lower reach for the ids it did

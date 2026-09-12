@@ -121,9 +121,22 @@ const wholeTree = (input: ChunkScopeInput, reason: string): ChunkCacheScope => (
  * claims known and does its source still match them"; TVH-05's declared input
  * scope answers "can this file read anything it has not declared". Both are
  * required because they cover different failure modes, and neither is
- * reinvented here — `test-resource-certifications.json` currently holds ZERO
- * certifications, so at this HEAD every chunk resolves to the `whole-tree`
- * fail-safe and the cache behaves exactly as it did before.
+ * reinvented here.
+ *
+ * At this HEAD every chunk still resolves to the `whole-tree` fail-safe, and it
+ * is worth being exact about WHICH half does it, because the first version of
+ * this comment named the wrong one. `test-resource-certifications.json` holds
+ * 562 rows, 548 of them `certified` — not zero. What is empty is the
+ * DECLARED-INPUT opt-in: `declaredInputOptIn()` returns a set of size 0, so
+ * `certifyDeclaredInputs` refuses every file. Measured, with the real registry
+ * passed in:
+ *
+ *   a resource-certified file -> whole-tree, `input-not-opted-in:<id>`
+ *   an uncertified file       -> whole-tree, `resource-missing:<id>`
+ *
+ * Same conclusion, different cause — and the difference is the whole
+ * promotion path: populating the opt-in narrows the cache with no code change,
+ * while "populate the registry" would have been work already done.
  */
 export const resolveChunkCacheScope = (input: ChunkScopeInput): ChunkCacheScope => {
   if (input.ids.length === 0) return wholeTree(input, "empty-chunk")

@@ -127,22 +127,43 @@ describe("baseline git status is bounded", () => {
       join(import.meta.dir, "..", "..", "..", "tools", "dev", "worktree-pollution-guard.ts"),
       "utf8",
     )
-    // Compared as a LIST of markers rather than one `toContain` per line: a
-    // failing `toContain` over a 200-line source prints the whole file, which
-    // is unreadable and hides which marker actually went missing.
-    const markers = [
-      'Bun.spawnSync(["git", "status"',
-      "STATUS_TIMEOUT_MS",
-      "timeout: STATUS_TIMEOUT_MS",
-      // A timed-out spawnSync reports `exitCode: null`, which the old `!== 0`
-      // check would have blamed on git. Measured shape on this Bun:
-      //   Bun.spawnSync(["sh","-c","sleep 5"], {timeout: 400})
-      //   → exitCode null, signalCode SIGTERM, elapsed 404ms
-      "proc.exitCode === null",
-    ]
-    const absent = markers.filter((marker) => !source.includes(marker))
-    expect(absent).toEqual([])
+    // The ceiling must be INSIDE the spawn's own argument list.
+    //
+    // The previous version of this arm looked for `timeoutMs: STATUS_TIMEOUT_MS`
+    // anywhere in the file, and the error-message builder four lines below the
+    // spawn contains exactly that text — so deleting the option from the spawn
+    // left this test green. MEASURED: with the option removed, `timeoutMs`
+    // occurrences went 4 -> 3 and the suite still passed.
+    //
+    // Brace-matched, so a nested object in the argument list cannot truncate the
+    // slice the way a lazy regex would.
+    const at = source.indexOf("runBoundedCapture(")
+    expect(at).toBeGreaterThan(0)
+    let depth = 0
+    let end = at + "runBoundedCapture".length
+    for (; end < source.length; end += 1) {
+      const char = source[end]
+      if (char === "(" || char === "{") depth += 1
+      else if (char === ")" || char === "}") {
+        depth -= 1
+        if (depth === 0) break
+      }
+    }
+    const call = source.slice(at, end + 1)
+    // ANTI-VACUITY: an empty or truncated slice would satisfy nothing below,
+    // but a slice that swallowed the whole file would satisfy everything.
+    expect(call.length).toBeGreaterThan(40)
+    expect(call.length).toBeLessThan(400)
+    const absentFromCall = ['command: ["git", "status"', "timeoutMs: STATUS_TIMEOUT_MS"].filter(
+      (marker) => !call.includes(marker),
+    )
+    expect(absentFromCall).toEqual([])
 
+    // ...and the timed-out shape is READ, not assumed. A timed-out capture
+    // reports `exitCode: null`, which the old `!== 0` check blamed on git.
+    // Measured on this Bun: `timeout: 600` against `sleep 3` -> exitCode null,
+    // SIGTERM, 605ms.
+    expect(source).toContain("proc.exitCode === null")
     // ANTI-VACUITY: the file must really have been read.
     expect(source.length).toBeGreaterThan(2_000)
   })
