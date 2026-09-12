@@ -1,0 +1,218 @@
+# 정정 기록 — 이 캠페인의 커밋 메시지가 틀린 것들
+
+`e8795ac5e..2f7d67a22` 구간의 23커밋(truth-guard 캠페인)에 대해 5라운드 적대 어딧을
+돌렸다. 회귀는 없었고 digest·ledger·partial-dead·manifest 같은 **검증 가능한 측정은
+대부분 정확했다.** 거짓은 두 곳에 몰렸다: **자기 작업량 회계**와 **출하 순서 주장**.
+
+히스토리는 재작성하지 않는다 — 이 repo에는 동시 세션이 커밋하고, ref rewrite는 그
+세션의 작업을 파괴한다. 따라서 정정은 이 문서가 정본이다.
+
+각 항목은 `커밋 — 주장 → 실측` 형식이고, **누가 측정했는지**를 명시한다. 서브에이전트
+보고를 그대로 옮긴 것은 없다. 내가 직접 재측정하지 못한 항목은 그렇게 적었다.
+
+---
+
+## A. FALSE — 사실이 아니었던 주장
+
+### A-1 `e71e717ae` — 빌드 스탬프 캡처 순서 (가장 심각: 문장만 아니라 기능이 그 실패에 있었다)
+
+주장: *"The stamp is captured BEFORE anything else can touch the tree.
+`install-quanta-cli.sh` bumps `package.json` and then builds; capturing after that
+bump would make every single build read `dirty`, which is worse than no stamp because
+it is a stamp that always lies in the same direction."*
+
+실측: `tools/bin/install-quanta-cli.sh`가 88행에서 `package.json`을 **쓰고** 103행에서
+`bun run build`를 호출한다. 그 커밋이 "피했다"고 적은 실패모드가 출하된 동작이었다.
+게다가 `git status --porcelain`은 untracked까지 세므로, worktree의 `node_modules`
+심볼릭(`.gitignore`의 `node_modules/`는 trailing slash라 디렉터리만 매치)만으로도
+clean tracked tree가 dirty로 읽혔다. 그 커밋의 수동 검증 기록
+`quanta 1.0.035 (6a82f65d1c9d-dirty)`를 나는 스탬프 성공으로 읽었다.
+
+**직접 확인**했고 `023a03d6c`에서 고쳤다. 두 독립 어딧이 같은 결론에 도달했다.
+
+### A-2 `40248e442` — "DECLARED, 19"
+
+실측: `git diff cd1a84f6a..40248e442 -- src/`의 신규 `envKey:` 행 = **24**. 같은 커밋
+메시지의 자기 항목 나열(14+2+4+2+2)도 이미 24다. **직접 확인.**
+
+### A-3 `40248e442` — "EXCEPTED, 2"
+
+실효 신규 예외는 **1건**이다. `QUANTA_TB_BEST_OF_N`은 `cd1a84f6a` 시점에 이미 예외로
+있었고, 이 커밋이 **같은 Map 키를 두 번째로** 넣어 더 길고 정확한 기존 사유를 덮었다.
+Map 리터럴은 중복 키를 조용히 마지막 것으로 접으므로, 같은 커밋이 추가한 세 개의
+품질 테스트(inert / stale / has-a-reason) 전부가 Map을 읽기 때문에 **구조적으로 볼 수
+없었다.** **직접 확인**했고 `eda90cd7b`에서 내 행을 삭제하고 리터럴 파싱 기반 중복
+검출을 추가했다.
+
+### A-4 `cd1a84f6a` — "Two EXCEPTIONS rows are inert — `QUANTA_OTEL_ENDPOINT` and `QUANTA_CONTEXT_1M`"
+
+`QUANTA_CONTEXT_1M`은 `EXCEPTIONS`에 **없었다.** 파일 아래쪽 fixture 라인에만 나온다.
+inert였던 것은 1행이다. 같은 거짓이 소스 docstring에도 박혀 있었다. **직접 확인**했고
+`eda90cd7b`에서 고쳤다.
+
+### A-5 `40248e442` — 예외 사유의 게이트 키 이름
+
+*"the port is not even constructed unless `QUANTA_SUBAGENT_PROCESS` is on"* — 실제
+게이트는 `QUANTA_SIDE_AGENT_PROCESS`다. `QUANTA_SUBAGENT_PROCESS`라는 철자는 그
+문장 외에 트리 어디에도 없다. **직접 확인**했고 `eda90cd7b`에서 고쳤다.
+
+### A-6 `cd1a84f6a` — scanner docstring이 없는 키를 인용
+
+`intEnv("QUANTA_SHELL_SNAPSHOT_TIMEOUT_MS")` — 실제 키는
+`QUANTA_SHELL_SNAPSHOT_TIMEOUT`이고 `_MS` 철자는 그 docstring에만 존재했다.
+**직접 확인**했고 `eda90cd7b`에서 고쳤다.
+
+### A-7 `1ac18b507` — "the runner path two functions below has warned correctly the whole time"
+
+그 경로의 경고는 `saved for next session`으로 끝났고, 다음 세션은 오버라이드를 읽지
+않는다. `readCliKnob`의 해석 체인에 config-file 레이어가 없고 `bootstrapKnobs`는
+프로덕션 호출자가 0이다. **내가 correctness reference로 쓴 문장 자체가 같은 방향으로
+거짓이었다.** 그리고 그 커밋이 넣은 대체 문장(`/knobs save` 후 재시작)도 절반 거짓이다.
+**직접 확인**했고 `615355c69`에서 세 메시지를 고쳤다.
+
+### A-8 `bb26bf9e1` — "that feature cites no tests at all (`evidence.tests` is empty)"
+
+`real-api-smoke-eval`의 `evidence.tests.eval`에는 항목이 있다. 결론(그 뮤턴트가 red가
+아니다)은 성립하지만 **이유가 다르다**: 가드의 subject가 unit/integration/contract뿐이다.
+같은 테스트 파일의 docstring은 정반대를 적어 자기모순이었다. **어딧 보고 기준이며 나는
+독립 재측정하지 않았다.**
+
+### A-9 `7a79ea6df` — 푸터를 "고쳤다"는 주장
+
+문장은 참이었지만(리터럴을 제거하고 `baseline.json`에서 렌더) **결과가 반대 방향의
+거짓**이었다. 그 baseline은 2026-05-29 측정이고, 렌더 시점의 트리는 `tsc exit 0 /
+0 errors`, `biome exit 0 / 0 errors`다. 생성 문서가 **존재하지 않는 툴체인 실패 2건을
+주장**하게 됐고 `fc-ci` diff 게이트가 그걸 byte 단위로 고정했다. **직접 측정**했고
+`ff2363436`에서 provenance(`measured_at_commit`) 기반 STALE 렌더로 고쳤다.
+
+### A-10 `a2f50a23e` — "enrolled where each one already belongs … none of the three has a surface of its own"
+
+`cli-single-binary-build` feature가 존재하고, 그 purpose가 바로 그 빌드 명령을
+서술하며, evidence에 `package.json`을 이미 갖고 있었다. **직접 확인**했고 `023a03d6c`
+에서 `tools/bin/build-cli.ts`를 그쪽으로 옮겼다.
+
+### A-11 `1ac18b507` — "Measured: exactly ONE row is `hotToggleable: true`"
+
+같은 커밋이 그 한 행(`QUANTA_PERSONA`)을 `false`로 바꿨으므로 **쓰는 순간 0이었다.**
+같은 커밋이 추가한 hellgate의 헤더도 "exactly ONE"이라 적고 그 파일 69행은 `[]`를
+어설션한다 — 추가된 한 파일 안에서 자기모순. **직접 확인**했고 `789f8b805`에서
+두 문장을 과거 시제로 고치고 현재 count를 0으로 명시했다.
+
+### A-12 `db4e5f7` — 어휘를 넓혔지만 자기 help는 안 고침
+
+게이트를 canonical truthy set으로 넓힌 이유가 *"힌트가 거짓말을 멈추게"*였는데,
+`/cron`의 `describe`는 `Opt-in: QUANTA_AUTOMATION=on`으로 남았다. 같은 스위치에 대한
+두 operator-facing 문자열이 두 파일에서 불일치. **직접 확인**했고 `789f8b805`에서
+고치고 `slash-optin-token-parity-hellgate`로 고정했다.
+
+### A-13 `49005aa60` — "8 needles across 3 plan docs updated atomically"
+
+라쳇이 고정하는 8개는 옮겼다. **같은 파일, 일부는 같은 표 셀 안의 6개 figure가 남았다**:
+`71 measure-first`(→72), `39 deliberate holds`(→40), `175 eligible rows`×2(→184; 175는
+wired 수), `1,028 features`(→1,071), `남은 8행`(→9), `measure-first 67행`(→72).
+eligible/wired 혼동이 그중 최악이다 — 분모를 분자로 보고해 ledger가 완전히 닫힌 것처럼
+읽힌다. **직접 실측**했고 `f23e08453`에서 고치고 6개 전부 파생 needle로 만들었다.
+
+---
+
+## B. DRIFTED / UNREPRODUCIBLE — 거짓은 아니지만 그 숫자로는 재현되지 않는다
+
+### B-1 `ca6812fa4` — "this one fires on its own first run"
+
+ceiling을 실측치(83/105)에 맞췄으므로 **첫 실행에서 어설션은 발화하지 않는다.** 같은
+메시지 두 줄 아래가 `5 pass / 0 fail [83/83]`을 보여준다. 뮤턴트로만 red다.
+"print한다"는 뜻이면 참이지만 문장은 과장이다. **직접 확인.**
+
+### B-2 `ca6812fa4` — fan-in "5,398 entries / 2,763 distinct"
+
+독립 파서로 **5,314 / 2,716**(비율 1.957), 다른 어딧은 **5,409 / 2,738**. 셋 다 다르다 —
+`code:` 블록이 `evidence:`에 속하는지 판정하는 방식에 따라 달라진다. 논지에 필요한 것은
+비율(≈1.96, "약 2배")이므로 소스 docstring에서 정확한 쌍을 지우고 비율만 남겼다.
+**직접 실측.**
+
+### B-3 `cd1a84f6a` — read census "984 sites / 622 distinct"
+
+그 커밋의 scanner 버전 전용 수치다. `40248e442`가 const-key call-arg 해석을 넓혔고,
+HEAD scanner로는 **1,036 sites / 650 distinct**다. "reproducible"이라 적으려면 어느
+scanner인지 명시해야 했다. **직접 실측.**
+
+### B-4 `cd1a84f6a` — "orphan post-exception 28 (production 26, test 2)"
+
+산술이 닫히지 않는다. 독립 재구성은 **27 (25, 2)**다. 나는 그 커밋 시점 코퍼스를
+재구성하지 않았으므로 **어딧 보고 기준**으로 기록한다.
+
+### B-5 `6a82f65d1` — "`--help` 13 flags"
+
+실측 **14**. `--help` 출력의 `Common flags:` 이하 행 수. **직접 실측.**
+
+### B-6 `5f8f14609` — "the 16 test files my commits touch"
+
+커밋이 범위를 적지 않아 재구성이 불가능하다. `e8795ac5e..5f8f14609`의 `.test.ts` 변경은
+30개지만 그 구간에는 동시 세션 커밋이 섞여 있다. **숫자를 정정하지 않고
+UNREPRODUCIBLE로 남긴다** — 어떤 재구성도 16을 주지 않는다는 것만 확실하다.
+
+### B-7 `b0cce0938` / `f5a34dc2d` — "51 of 102 tools/dev files referenced"
+
+현재 실측 **104 tracked / 53 referenced / 51 not**. 51은 referenced가 아니라
+not-referenced 수와 일치한다. 어느 쪽이든 그 커밋의 문장은 지금 성립하지 않는다.
+**직접 실측.** (이 숫자는 계속 움직이므로 소스 주석에 박지 않았다.)
+
+### B-8 `5f8f14609` — 풀 유닛 "41,271 pass / 131 fail / 17 err / 2,381s"
+
+부하 의존. 그 커밋 자신이 receipt가 아니라고 적었다. 동시 세션 캠페인이 돌던 중의
+40분 런은 상호 오염이라 재현 불가. `3,255 files`, bare-catch `1194/1194`,
+silent-failure ratchet 4 fail은 독립 재현됐다.
+
+### B-9 `5f8f14609` — "23 suites, 291 pass / 0 fail"
+
+스위트 집합을 명시하지 않아 정확 재현 불가. `0 fail` 방향은 확인됐다.
+
+### B-10 `b0c042bb6` (receipt) — `precommit 9 of 9 passed`
+
+오늘 HEAD에서는 8/9인 적이 있었고, 유일한 red는 동시 세션의 미커밋 변경이 원인으로
+소스 추적됐다. 이 23커밋 귀속이 아니다.
+
+---
+
+## C. 확인했고 참이었던 것 (재어딧 금지)
+
+- `lspDiagnosticsTool()` → `diagnosticsTool(...)`, 실제 이름 `diagnostics`,
+  `lsp_diagnostics`는 존재한 적 없음. (형제 `lsp_references` /
+  `lsp_workspace_symbol`은 실존 — 이름 하나만 틀렸다.)
+- `bun build`에 `--define` 없음(주면 exit 0로 조용히 미치환), `--env='QUANTA_BUILD_*'`는
+  동작. 실제 빌드로 확인.
+- `QUANTA_HUNK_MUTATION_RECEIPT=1` 단독으로는 영수증이 안 써진다(co-gate 결함, 미해결).
+- `parseEnvFlag` 빈 문자열 = true → `export QUANTA_X=`가 default-OFF를 켠다.
+- `QUANTA_UNTRUSTED_ENVELOPE`가 strict `=== "1"`이라 공유 힌트의 어휘 나열은 그 knob에
+  대해 거짓이 된다 — `=1`만 보편적으로 참인 토큰.
+- `allKnobs()`는 등록 모듈 import 전에 0. static census로 바꾼 판단은 옳았다.
+- HEAD declared 674 / orphans 0/0, ORPHAN_CEILING 0 유지.
+- ledger 179→184 / wired 171→175 / 95.5→95.1% / repair-first 0→2 / dormant 8→9 전부 일치.
+- partial-dead 83 features / 105 files, `.d.ts` 제외 없으면 85/107. 정확.
+- manifest 스캔 194(self 포함) / 193(제외), 차집합은 `lsp_diagnostics` 단 하나.
+- gate producer 19 / consumer 20 / 차이 `smoke-canary`, digest 두 개 앞 16자 일치.
+- raw-env 43/43, CEILING 불변(exemption만 추가).
+- `--help`가 광고했던 phantom 3개(`--lsp-tools` / `--git-tools` / `--metrics`)는 실제로
+  top-level 파서가 안 읽고, 숨겼던 6개는 실제로 읽는다.
+- 새 가드 9개 전부 `prepush+pr+full+nightly` tier에서 도달 가능.
+- 신규 knob 24개 전부 CLI `/knobs` 674행에 등장.
+
+---
+
+## D. 패턴 — 왜 거짓이 이 두 곳에 몰렸는가
+
+검증 가능한 측정은 정확했다. 틀린 것은 **내가 방금 한 일을 세는 문장**과 **다른 파일의
+순서를 서술하는 문장**이다. 둘의 공통점은 **재측정 없이 서술했다**는 것이다. 게이트를
+돌려 나온 숫자는 맞았고, 내가 머리로 센 숫자는 틀렸다.
+
+같은 세션 안에서 다음 세 가지가 반복됐고, 이 캠페인이 잡으려던 결함 클래스와 동일하다:
+
+1. **가드를 만들면서 그 가드가 잡아야 할 결함을 같은 커밋에 심었다** — 중복 예외 키,
+   자기모순 hotToggleable 문장, 반대 방향이 된 푸터.
+2. **디텍터를 교체하면서 형제를 두고 갔다** — completeness는 AST census로, readsite는
+   regex로. 결과는 14개 false positive와 막힌 게이트.
+3. **"고쳤다"는 메시지가 여전히 실행 불가능한 지시를 담았다** — `/knobs save` 후 재시작.
+
+교정 장치로 이번 보완에서 넣은 것: 뮤테이션을 돌리기 전에 **뮤턴트가 실제로 적용됐는지
+확인**한다. 이번에 무효 뮤테이션이 6건 나왔고(문법 오류, 들여쓰기 불일치, biome 재포맷),
+그중 몇은 "생존"이나 "red"로 잘못 읽힐 수 있었다. `0 pass 1 fail`은 어설션 발화가 아니다.

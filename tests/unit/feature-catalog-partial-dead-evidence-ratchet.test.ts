@@ -8,8 +8,14 @@
  * dead ones. Measured at this commit: 0 all-dead — the existing gate is genuinely
  * clean — and 83 features carrying 105 dead src files between them.
  *
- * It gets worse with use, not better. `evidence.code` has ~1.95x fan-in (5,398
- * entries over 2,763 distinct paths), so appending a path to an entry makes its
+ * The precise pair "5,398 entries over 2,763 distinct paths" used to sit here. It
+ * does not reproduce: an independent parser measures 5,314 / 2,716 and a second
+ * measured 5,409 / 2,738, all giving a ratio near 1.96. The counts depend on how a
+ * parser decides which `code:` blocks belong to `evidence:`; the RATIO is what the
+ * argument needs, so only the ratio is stated.
+ *
+ * It gets worse with use, not better. `evidence.code` has roughly 2x fan-in — each
+ * source path appears in about two features — so appending a path to an entry makes its
  * all-dead test strictly LESS likely to fire. The blind spot widens every time the
  * catalogue is filled in.
  *
