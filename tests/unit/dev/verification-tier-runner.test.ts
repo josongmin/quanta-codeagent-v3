@@ -7,6 +7,7 @@ import { finalizeVerificationResult, type GateResult } from "../../../tools/dev/
 import {
   assertKnownTier,
   orchestrateGates,
+  stepGatePlan,
   type TierGate,
   tierFromGateCommand,
 } from "../../../tools/dev/verification-tier"
@@ -236,6 +237,34 @@ describe("gate scheduling stays serial until resources are declared", () => {
     expect(source).toMatch(/concurrency:\s*1,/)
     // Not "some number": the literal 1. A raise is then a visible diff here.
     expect(source).not.toMatch(/concurrency:\s*(?!1,)\d+,/)
+  })
+
+  /**
+   * The bridge's docstring claimed it was "behaviourally identical to the loop it
+   * replaces". It is not, in two ways that a reader of a gate report would
+   * notice, so both are measured here rather than asserted in prose.
+   */
+  test("dispatch follows the ready set; the RESULT list stays in manifest order", async () => {
+    const dispatched: string[] = []
+    const results = await stepGatePlan({
+      // `a` is declared FIRST and consumes `b`, so a manifest-order loop would
+      // have run `a` first and skipped it for a missing input.
+      planned: [
+        { id: "a", tiers: ["prepush"], consumes: "b" },
+        { id: "b", tiers: ["prepush"] },
+      ],
+      failFast: false,
+      runGate: (gate: TierGate) => {
+        dispatched.push(gate.id)
+        return { ok: true }
+      },
+    })
+    expect(dispatched).toEqual(["b", "a"])
+    // ...and the report order is the MANIFEST order, which every consumer of
+    // `GateResult[]` — the summary line, the receipt, the exit code — reads
+    // positionally.
+    expect(results.map((result: GateResult) => result.id)).toEqual(["a", "b"])
+    expect(results.map((result: GateResult) => result.outcome)).toEqual(["passed", "passed"])
   })
 
   test("no gate declares `resources`, which is WHY it stays 1", () => {

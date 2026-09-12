@@ -99,12 +99,26 @@ export type GateRunAttempt = {
  * decision this load-bearing — the one nobody ran was where the newer thinking
  * lived, and the one everybody ran could not express "wait for A and B".
  *
- * Concurrency is 1, which makes this behaviourally identical to the loop it
- * replaces: every gate here drives a real toolchain, no gate declares the
- * `resources` the scheduler would need to overlap them safely, and this
+ * Concurrency is 1: every gate here drives a real toolchain, no gate declares
+ * the `resources` the scheduler would need to overlap them safely, and this
  * repository carries a measured scar about contention producing a differently
  * TIMED wrong answer rather than a slower right one. Raising it is a separate
  * change, gated on gates declaring what they hold.
+ *
+ * NOT "behaviourally identical to the loop it replaces", which is what this
+ * docstring used to claim. Two differences, both measured, both deliberate, and
+ * both pinned by tests:
+ *
+ *  1. A gate whose PRODUCER failed now reports `skipped-input`, where the old
+ *     sequencer short-circuited on fail-fast first and reported the less
+ *     actionable of the two reasons.
+ *  2. Dispatch follows the ready set, so a gate declared BEFORE its producer run
+ *     after it — measured `planned [a(consumes b), b]` dispatches `b,a`. The
+ *     RESULT list stays in manifest order (`a,b`), which is what the report and
+ *     every consumer of `GateResult[]` depend on.
+ *
+ * Serial it is; identical it is not, and saying so is cheaper than someone
+ * discovering it from a changed message.
  */
 export const stepGatePlan = async <T extends PlannedGate>(input: {
   readonly planned: readonly T[]
