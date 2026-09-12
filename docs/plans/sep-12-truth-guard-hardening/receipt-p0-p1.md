@@ -353,3 +353,63 @@ bun fc check-changed                   ok
 - 설치 바이너리 교체 (`bun run install:cli`) — 코드/검증과 분리된 별도 액션
 - `tool` 스위트에서 관측된 1~4 fail은 `test-resilience`/`bounded-child` 타이밍
   플레이크. 내 커밋 파일 전수에 미포함, 격리 재실행 3/3 초록, 부하 71.88.
+
+---
+
+# 최종 게이트 실행 (2026-09-12)
+
+## 통과
+
+```
+bun run precommit                      ok — 9 of 9 gate(s) passed
+  smoke-canary 1702ms · typecheck 20298ms · lint 30097ms · lint-debt 570ms
+  fc-check-changed 1459ms · fc-ci 1536ms · fc-reachability 12831ms
+  silent-catch-baseline 326ms · protocol-generated 392ms
+bun run tools/dev/typecheck.ts all     passed (full tree, src + tests)
+bun run lint                           clean (경고 1건, 내 파일 아님)
+bun run lint:debt                      23 diagnostics / 2 rules, 천장 위반 0
+bun test tests/unit/god-code-ratchet   9 pass / 0 fail
+bun fc validate / build / diff          1071 resolved · wrote · no changes
+```
+
+`protocol-generated`와 `fc diff`가 통과한다 = 생성물 드리프트 0.
+
+## precommit 첫 실행이 내 신규 코드 3개를 잡았다
+
+이번 세션에 랜딩한 가드 두 개가 방금 쓴 파일에 발화했다. 기록해 둔다 — 남의 코드만
+잡는 가드는 검증된 가드가 아니다.
+
+- `knob-registry-completeness` → `orphans=3`: `QUANTA_BUILD_{COMMIT,DIRTY,TIME}`.
+  선언이 아니라 예외로 처리했다. `bun build --env` 가 컴파일 타임에 인라인하므로
+  출하 바이너리에선 리터럴이고, 런타임에 설정해도 아무 일이 없다. `/knobs` 에 올리면
+  설정 불가능한 설정 3개를 광고하는 것.
+- `fc-check-changed` → 신규 3파일 BLOCK. **두 커밋 전에 `tools/dev` 일괄 면제를
+  제거했기 때문에** 가능했다. 각자 이미 속한 엔트리에 등록(build-stamp+build-cli →
+  `version-cmd`/`repo-info` 소유 엔트리, top-level-flags → `top-level-usage` 소유
+  엔트리). 신규 엔트리 0 — 셋 다 자기 서피스가 없다.
+
+## authoritative prepush: 만들지 못했다 (이유 명시)
+
+```
+gate.ts: authoritative prepush receipts require a clean checkout; refusing before gate 1:
+  ?? node_modules
+[verification] RAN HOT — load/core still 4.36 after 180s;
+               a failure below may be contention, not code
+```
+
+두 가지가 동시에 막는다.
+
+1. **clean checkout 부재.** worktree 는 메인 `node_modules` 심볼릭이 untracked 로
+   남는다. per-worktree `.git/worktrees/<n>/info/exclude` 는 이 경우 효과가 없었고,
+   공유 `.git/info/exclude` 는 동시 세션과 공유되는 파일이라 건드리지 않았다(한 번
+   넣었다가 되돌렸음). 메인 체크아웃도 동시 세션의 `tools/dev/lease-*` 4파일로 dirty.
+2. **부하.** 실행 시점 load average 45.80 → 64.25. 게이트 자신이 HOT 경고를 냈고,
+   이 조건의 red 는 code 인지 contention 인지 귀속 불가. 억지로 돌리면 동시 세션의
+   캠페인 receipt 도 오염된다.
+
+그래서 **prepush receipt 를 주장하지 않는다.** 대신 회귀 판정만 별도로 했고
+(`bun test tests/unit`), 그 결과는 receipt 가 아니라 회귀 증거로만 읽어야 한다.
+
+남은 조건 — cold prepush 완주 · shard 1-8/8 · 부분 아닌 JUnit receipt · exact-HEAD
+동일성 — 은 **clean 체크아웃 + 저부하** 에서 별도로 받아야 한다. 이 세션에서
+충족했다고 적지 않는다.
