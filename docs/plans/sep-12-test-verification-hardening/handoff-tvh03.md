@@ -287,17 +287,32 @@ PTY_AVAILABLE=false across all 8 files" hole TVH-03 names. `contract` likewise:
   each provisioning only its own `needs` (the manifest's `provision` string per
   need is the exact command family: `rustup component add rust-analyzer`,
   `go install golang.org/x/tools/gopls`, `npm i -g pyright`, …).
-- Each job: `QUANTA_REAL_TOOLCHAIN_E2E=1 QUANTA_REQUIRE_CAPABILITY=<group.id>
+- Each job: `QUANTA_REAL_TOOLCHAIN_E2E=1 QUANTA_REQUIRE_CAPABILITIES=<group.id>
   bun run test:capability:group --group=<group.id>`.
-  `QUANTA_REQUIRE_CAPABILITY` is what turns an absent tool into RED —
+  `QUANTA_REQUIRE_CAPABILITIES` is what turns an absent tool into RED —
   `tests/_helpers/capability-lane.ts` selects the real `describe` (not
   `describe.skip`) for a required-but-blocked group so its `beforeAll` throws.
-  VERIFIED on this host, where `gopls` is genuinely absent:
 
-      QUANTA_REAL_TOOLCHAIN_E2E=1 QUANTA_REQUIRE_CAPABILITY=lsp-go \
+  THE NAME IN THIS SECTION WAS WRONG. It said `QUANTA_REQUIRE_CAPABILITY`
+  (singular), which is what the lane helper read while the receipt consumer read
+  `QUANTA_REQUIRE_CAPABILITIES` (plural) with a different grammar. The two are
+  now one name and one grammar — `1` for everything, or a comma list naming
+  exactly the ids it names — and the singular does nothing. A job copied from
+  the earlier version of this file armed NOTHING and reported a pass.
+
+  RE-VERIFIED on this host under the surviving name, where `gopls` is absent:
+
+      QUANTA_REAL_TOOLCHAIN_E2E=1 QUANTA_REQUIRE_CAPABILITIES=lsp-go \
         bun test tests/unit/evidence-lsp-bridge-go-real-e2e.test.ts
       → [capability] group=lsp-go … outcome=blocked-missing detail="absent on this host: gopls"
-      → error: [capability] REQUIRED group lsp-go is blocked-missing … 0 pass 1 fail
+      → error: [capability] REQUIRED group lsp-go is blocked-missing … QUANTA_REQUIRE_CAPABILITIES
+        names this group, so an absent capability is the failure, not a reason to pass.
+      → 0 pass 1 fail
+
+  PAIRED CONTROL, same file, switch unset: 0 pass 4 skip 0 fail. So the RED is
+  the switch's doing and not the host's. (The counts differ because the switch
+  names ONE group: the required group's cases are selected into the real
+  `describe` and fail, and the file's other groups still skip.)
 
 - Each job then publishes its artifact:
   `bun run tools/dev/capability-result.ts --producer=<group.id>

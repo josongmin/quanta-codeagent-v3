@@ -14,7 +14,7 @@ owners: ["@songmin"]
 labels: ["surface:core", "absorbed:codex", "absorbed:cursor"]
 depends_on: [phase1-stage1-store, memory-outcome-enum, phase2-auto-trigger-wire, phase2-promotion-gate, agent-types-split]
 config_refs:
-  env: ["QUANTA_BENCH_LOCALIZE_PHASE", "QUANTA_CAP_ENFORCE", "QUANTA_MEMORY_SUBDIR"]
+  env: ["QUANTA_BENCH_LOCALIZE_PHASE", "QUANTA_CAP_ENFORCE"]
 surface_integration:
   cli: full
   web: missing

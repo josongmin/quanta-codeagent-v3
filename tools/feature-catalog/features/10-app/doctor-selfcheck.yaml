@@ -12,7 +12,7 @@ configurable: static
 owners: ["@songmin"]
 labels: ["surface:cli", "diagnostic", "read-only", "closed-port-di"]
 config_refs:
-  env: [QUANTA_DOCTOR]
+  env: []
   cli: ["--json"]
 surface_integration:
   cli: full
@@ -51,15 +51,12 @@ evidence:
       - tests/unit/doctor-selfcheck-hellgate.test.ts
     integration: []
     contract: []
-knobs:
-  - name: QUANTA_DOCTOR
-    where: env
-    default: "1"
-    purpose: |
-      Optional module-load gate for parity with /rewind/-/memory (default
-      registered — read-only diagnostic). Setting "0" removes /doctor from
-      the registry. Registration is a one-line entry in the shared app slash
-      registry (registry-app.ts); see the implementation report.
+# No env knob. `QUANTA_DOCTOR` was listed here with the purpose "Setting \"0\"
+# removes /doctor from the registry", and nothing reads it: the name appears
+# only in docs/plans/jun-6-doctor-selfcheck.md, which calls it optional and
+# "if desired". It was a proposal recorded as a shipped knob. The intent stays
+# in deliberate_hold below, where an unbuilt thing belongs.
+knobs: []
 deliberate_hold:
   reason: |
     L3 (wired seam, registration is a one-line shared-registry edit reported

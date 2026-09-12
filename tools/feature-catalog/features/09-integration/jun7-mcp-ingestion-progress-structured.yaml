@@ -13,7 +13,7 @@ owners: ["@songmin"]
 labels: ["surface:core", "absorbed:codex", "absorbed:claude"]
 depends_on: [mcp-tool-annotations-content, mcp-tool-bridge]
 config_refs:
-  env: ["QUANTA_MCP_PROGRESS"]
+  env: []
 surface_integration:
   cli: full
   web: missing
