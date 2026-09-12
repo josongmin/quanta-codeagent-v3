@@ -286,3 +286,124 @@ biome 재포맷으로 앵커 소실(2)이다. 그중 몇은 `0 pass 1 fail`로 �
 그리고 가드 하나는 **첫 시도가 한쪽 방향만 봤다.** POSIX `--` 불변식을 "플래그 모양
 토큰이 프롬프트에 안 닿아야 한다"로만 썼더니, 마커를 지우면 **닿는 토큰이 줄어들어서**
 안 잡혔다. 도착을 어설션해야 했다. 한쪽 방향 어설션은 반대 방향 회귀에 무력하다.
+
+## G. 라운드 6 — 도구표면/HITL 축 (sep-13)
+
+R6-A(도구표면 SSOT regex 구멍)가 보고한 것을 직접 재현·확정하고 전량 수정했다.
+아래는 **수정 전에 측정된 사실**이며, 각 항목은 red-on-injection으로 닫혔다.
+
+### G-1 완전성 가드가 grep이었고, 네 구멍 모두 실측됐다 — 구멍 하나는 LIVE
+
+`tests/unit/tool-surface-manifest-hellgate.test.ts`의
+`grep -rhoE 'name: "[a-z_]+"'`:
+
+| 구멍 | 측정 |
+|---|---|
+| `[a-z_]`가 숫자·대문자 제외 | `apply_patch_v2`(`isReadOnly:false` + `hitlTier:"none"`)가 38 pass / 0 fail, precommit 9 of 9 |
+| grep이 주석을 읽음 | 주석만으로 `zz_ghost_stale_tool`을 "찾아" stale row를 마스킹; 삭제된 도구를 언급한 산문은 **거짓 RED**를 만들고 그 자연스러운 수리는 고스트 row 추가 |
+| `--exclude`가 basename 매칭 | 오늘 점유자 없음 |
+| root 목록 수작업 + 확장자 무시 | 추적 중인 `src/tool/lsp_nav/code-action.ts.tmp`가 `lsp_code_action`을 기여 |
+
+세 도구가 첫 구멍에 살아 있었다: `Skill`·`ToolSearch`(CLI·web **default-ON**),
+`branch_search`(write-capable). 셋 다 tier-1 빌더가 `extraTools`로 민팅하고
+`session-resources.ts`에서 라이브 레지스트리에 들어간다. plan-mode SSOT
+(`MUTATING_TOOL_TABLE`)는 셋 다 알고 있었고 **도구-접근 SSOT만 못 보고 있었다**.
+
+인과 증명: `buildSkillBlock`은 도구 셋을 민팅하는데 `skill_create`만 카탈로그에
+있었다 — `src/skill/skill-creator.ts`가 **이전 탈출 이후** grep root 목록에
+덧붙여졌기 때문. 같은 빌더·같은 디렉토리의 형제 둘은 추가되지 않았고, 대문자라서
+root만 넓혀도 안 보였다.
+
+### G-2 write-capable 도구가 HITL을 선언으로 빠져나갈 수 있었다
+
+`inferToolTierDetailed`는 `explicit` tier를 `isReadOnly()` fail-closed 분기
+**앞에서** 반환한다. `"none"`은 truthy이므로 명시적 `hitlTier: () => "none"`이
+바로 위 분기를 단락시킨다. fail-closed 기본값은 `hitlTier`를 **생략한** 도구만
+보호한다.
+
+측정: `isReadOnly:false` + `hitlTier:"none"` 프로브가 HITL/permission/tool
+테스트 파일 125개에서 **2419 pass, 1 skip, 0 fail**, `precommit ok — 9 of 9`.
+기존 단정은 모두 per-tool이고 집합을 도는 것이 하나도 없었다.
+
+오늘 짝은 일치한다(tier-none 12곳 전부 `isReadOnly: () => true`). 없던 것은
+**그 상태를 유지시키는 불변식**이다.
+
+### G-3 port bag이 탈출 벡터였다 — `satisfies`로는 못 잡는다
+
+`wired-tools-dispatch-permission-r3-hellgate`는 30개 포트 중 **9개**만 배선했다.
+`notebookEdit`(bag 밖) 기반 프로브는 살아남고 `structuredPatch`(bag 안) 기반은
+red였다 — 저항이 "누가 어떤 포트를 기억했는가"의 우연이었다. 지금은
+`Record<keyof DefaultToolPorts, PortPlan>`(30 entries, unwired 3 + 사유 + 개수 핀)
+이므로 새 포트는 컴파일 에러다. `satisfies`는 존재하는 값만 검사하고 모든 키가
+있는지는 검사하지 않는다.
+
+### G-4 plan-mode 표에 열 개가 없었고, 그걸 약속한 가드가 9/30만 봤다
+
+전 포트 배선 시 `automation_update` `threads_handoff` `ask_user` `reflect`
+`fetch_rules` `notebook_edit` `debug_inspect` `run_tests` `collect_evidence`
+`projects_kb` 열 개가 어떤 row에도 없었다 → plan-mode dispatch가
+`UnknownToolError`. R3 closeout이 정확히 이걸 막겠다고 추가한 가드가
+9/30 포트만 배선했기 때문.
+
+거짓-RED 방향도 실측했다. `notebook_edit` row 삭제 시:
+
+| fixture | 결과 |
+|---|---|
+| broad | 512 pass / 4 fail — 도구가 MISSING으로 보고됨 |
+| bare | 8 pass / 1 fail — 삭제는 **안 보이고**, 형제 row 9개가 ORPHAN으로 보고됨 |
+
+즉 bare fixture에서 diff는 정당한 row 9개를 가리키며 지우라고 말한다. 그래서
+allowlist를 키우지 않고 **fixture를 옮겼다**.
+
+### G-5 내 보완 작업 자체의 거짓 주장 — 이번에도 둘
+
+- **Skill row에 `env: "QUANTA_SKILLS"`를 썼다.** CLI seed 단정이 정확히 red를
+  냈다: `shouldSeedOn`은 env를 가진 config-slot 게이트를 **CLI seed로 만들고**,
+  CLI는 seed된 게이트를 자식 프로세스로 내보낸다 → `skillsConfig: undefined`인
+  표면에서도 skills가 켜진다. `QUANTA_SKILLS`는 이 슬롯의 **opt-OUT**이다
+  (`readCliKnob(...) ?? true`, `parseEnvFlag(env.QUANTA_SKILLS, true)`).
+  `search_codebase`와 같은 모양으로 고치고 되돌아오지 못하게 가드를 붙였다.
+- **SSOT 제외가 "제외할 것이 있다"는 floor를 50으로 썼다.** `Received: 0`으로
+  실패했다. shape 좁히기(`TOOL_SHAPE_KEYS`) 아래서 path 제외는 **inert**다:
+  `gated-tools.ts`는 raw `name:` 리터럴 73개를 갖지만 추출기는 0개를 받아들인다
+  (manifest row의 형제는 `origin`/`gate`/`default`/`risk`/`note`). 측정된 사실로
+  다시 썼고 path 제외는 이중 방어로 남겼다.
+
+### G-6 내 새 census도 total이 아니었다 (자기 어딧)
+
+선언 불변식은 `name` **문자열 리터럴**에 걸려 있어, 계산된 이름으로 빌드되는
+도구는 안 보인다. `src/subagent/agent-tools-6.ts`의
+`make(name, description, schema, readOnly, …)`가 라우터 6도구를 그렇게 만든다.
+그 6개는 **구조적으로** 안전하다(그 팩토리는 `hitlTier` 파라미터가 없다) — 운이
+좋아서가 아니다. 하지만 팩토리에 `hitlTier`를 주면 한 줄로 6개가 동시에 뚫린다.
+그래서 census가 **자기 사각지대를 열거**하게 만들었다:
+`scanUnattributedTierDeclarations` = 리터럴 이름 없이 `hitlTier`를 선언하는 객체
+리터럴 전부. 실측 2개, 둘 다 permission **inspector** 메타데이터.
+
+### G-7 남의 라이브 RED 하나 — 귀속하고 고쳤다
+
+`tests/unit/tools/test-resilience-diagnosis-hellgate.test.ts`의
+"with no artifact the tool FAILS CLOSED"가 red였다. 내 것이 아니다(내 src 변경
+두 개를 되돌려도 24 pass / 1 fail). 결함 둘:
+
+1. **비-hermetic.** `diagnose`의 기본 artifact는 **공유** verification cache에서
+   해석되므로(의도적 — 이전 어딧이 러너가 쓰지 않는 경로를 읽는 걸 잡았다),
+   이 repo의 어떤 실행이 남긴 artifact든 이 케이스를 실제 진단으로 만든다.
+   실측 exit 3, `children=1 observed-isolation-pass=1`.
+2. **단정한 메시지가 도달 불가 분기의 것.** fail-closed 분기 셋 중 첫째만
+   "no longer runs a suite of its own"을 출력하고, 거기 가려면 빈 artifact 경로가
+   필요한데 `failureAttemptPath()`는 빈 문자열을 절대 반환하지 않는다. 공유
+   캐시가 비어 있어도 둘째 분기("cannot read")로 가고 메시지가 다르다.
+
+두 분기를 각자 의도적으로 실행하게 고쳤다.
+
+### G-8 열어둔 것 (결정 필요, 임의로 좁히거나 넓히지 않았다)
+
+- `test_runner`는 프로젝트 자체 스위트 실행을 이유로 `null`인데, `run_tests`와
+  `collect_evidence`는 같은 일을 하면서 mutating으로 분류됐다. 맞추려면 plan mode를
+  넓히거나 `test_runner`를 좁혀야 하고, 둘 다 `UnknownToolError` 수정에 얹을 일이
+  아니다.
+- 도구표면 완전성의 **최종** 권위는 조립된 레지스트리여야 한다. 현재 소스 census가
+  권위이고 런타임 arm이 교차검증이다. 조립 가능한 최대 집합은 193 중 66이며,
+  나머지를 덮으려면 60개 origin 모듈 fixture가 필요하다. MCP 브릿지 도구는 어느
+  소스 계측으로도 보이지 않는다.
