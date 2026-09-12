@@ -14,6 +14,17 @@
 - `test:unit`은 `suite=core`를 실행한다.
 - `verify:smoke`는 2개 focused test이고 `gate.ts smoke`는 7개 static gate다.
 - runner의 suite floor 3,600이 tier 선택 뒤 적용되어 향후 PR을 3,600 미만으로 줄이면 의도적 축소도 실패한다.
+- 정정: 위 항목은 원인을 **suite floor 3,600**으로 적었지만, 실제로 지금 막고 있는 것은 **tier floor 3,900**이다. `test-tier-population.json`의 floor는 네 tier 모두 3,900이고 reason이 전부 universe 기준("universe minus …")으로 쓰여 있는데, 이 floor가 suite로 좁혀진 selection에 그대로 적용된다. 그래서 shard runner 엔트리포인트 4개 중 3개가 **항상 실행 불가**다 (current-HEAD 실측):
+
+  | script | suite | selected | tier floor |
+  |---|---|---|---|
+  | `bun run test:unit` | core | 3583 | 3900 |
+  | `bun run test:unit:ci` | unit | 3258 | 3900 |
+  | `bun run test:integration` | integration | 394 | 3900 |
+  | `bun run test` | full | 3948 | 3900 (통과) |
+
+  `test:full:ci`는 `--tier`가 없지만 깨지지 않았다: hosted CI는 `QUANTA_VERIFICATION_TIER: pr`을 세우고 로컬 `prepush`는 `gate.ts:323`이 label을 tier로 세운다. 게이트/워크플로 참조가 있는 엔트리포인트는 이 하나뿐이라 위 3개는 게이트 파손이 아니라 **문서화된 명령의 영구 실패**다.
+  진단은 고쳤다(`suite-narrower-than-tier-floor`): 좁은 suite는 이제 corpus loss로 오보고되지 않는다. 거부 자체는 유지한다 — universe floor를 낮춰 통과시키는 것이 이 레코드가 막으려는 papering이다. suite/tier 쌍별 floor를 commit하는 것이 이 티켓의 잔여 작업이다.
 - `--parallel=1`은 parser가 조용히 무시한다.
 - `targetChunkCount`는 검증만 하고 실제 membership에는 사용하지 않는다.
 - `verify:scope`는 dry-run이며 gate/workflow가 결과를 소비하지 않는다.

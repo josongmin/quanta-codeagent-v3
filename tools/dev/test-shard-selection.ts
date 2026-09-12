@@ -121,12 +121,18 @@ export const selectShardManifest = (input: ShardSelectionInput): ShardSelection 
     selected: manifest.length,
     discovered: input.discovered.length,
     floors: input.tierFloors,
+    // Passed so the refusal can tell a narrower SUITE apart from a shrunken
+    // universe. Without it both are `selected === discovered < floor`.
+    suite: input.suite,
   })
   if (!population.ok) {
     // A universe that fell below the TIER floor without any narrowing is corpus
     // loss that the lower suite floor did not reach, so it must carry the corpus
     // error — reporting it as a selection defect sends the reader to the policy
     // file for a problem in the tree.
+    // Only a genuinely shrunken universe is corpus loss. A narrower suite under
+    // a whole-tree floor is a mismatched pair of inputs, which is the operator's
+    // to fix, not the tree's.
     throw population.kind === "universe-below-tier-floor"
       ? new CorpusLostError(population.message)
       : new TierSelectionError(population.message)
