@@ -23,6 +23,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
+import ts from "typescript"
 import { assertScanPopulation } from "./_shared/scan-population"
 
 const SRC = join(import.meta.dir, "..", "..", "src")
@@ -108,6 +109,100 @@ describe("quanta home root SSOT ratchet", () => {
     // A dead entry means the file was migrated/removed — prune it so the
     // allowlist can't silently grant future raw sites in that file.
     expect(dead).toEqual([])
+  })
+
+  /**
+   * SECOND DETECTOR — the root literal joined onto ANY home-ish value.
+   *
+   * `RAW` only matches `homedir()` IMMEDIATELY followed by `".quanta"`. Two shapes
+   * evade it, and both were live:
+   *
+   *  - the literal hoisted into a const: `memory/consolidate/paths.ts` had
+   *    `const QUANTA_MEMORY_SUBDIR = ".quanta/memory"` and joined it onto a parameter
+   *    NAMED `homedir` that shadowed the import. Proven: rewriting it to the raw
+   *    spelling made this file go red instantly, so the plane had been a real
+   *    split-brain site the whole time and invisible. Measured consequence — with
+   *    `QUANTA_HOME` relocated, sessions and knobs moved and the memory store did not.
+   *  - a home passed in as a PARAMETER: `join(homeDir, ".quanta", …)` has no
+   *    `homedir()` token at all.
+   *
+   * This arm censuses `join(<home-ish>, ".quanta", …)` by AST and pins the count. The
+   * home-ish test is whether the first argument's source text mentions "home" — not an
+   * arbitrary threshold but the actual signal that separates the HOME root from the
+   * legitimately project-scoped `join(cwd, ".quanta", …)` / `join(projectRoot, …)`
+   * sites, of which there are 11. A shape it fails to recognise UNDER-reports.
+   *
+   * Measured: 18 home-ish sites, 15 outside the allowlist. My first hand probe said 13
+   * — its output was truncated by a `tail`, and the number I would have written into
+   * the ceiling was wrong by two. The ceiling is the test's own census.
+   *
+   * The ceiling is the measured population, not zero. Each remaining site takes a
+   * home from its caller and may or may not be getting a QUANTA home — deciding that
+   * needs the call graph per plane, which is a burn-down, not a sweep. What this
+   * forbids is a NEW one.
+   */
+  const HOME_JOIN_CEILING = 15
+
+  const calleeName = (n: ts.CallExpression): string => {
+    if (ts.isPropertyAccessExpression(n.expression)) return n.expression.name.text
+    if (ts.isIdentifier(n.expression)) return n.expression.text
+    return ""
+  }
+
+  /** `join|resolve(<something mentioning "home">, ".quanta", …)`. */
+  const isHomeJoinedRoot = (n: ts.Node, sf: ts.SourceFile): boolean => {
+    if (!ts.isCallExpression(n) || n.arguments.length < 2) return false
+    const name = calleeName(n)
+    if (name !== "join" && name !== "resolve") return false
+    const second = n.arguments[1] as ts.Expression
+    if (!ts.isStringLiteralLike(second) || second.text !== ".quanta") return false
+    return /home/i.test((n.arguments[0] as ts.Expression).getText(sf))
+  }
+
+  const homeJoinedRootSites = (): string[] => {
+    const out: string[] = []
+    for (const file of walk(SRC)) {
+      const text = readFileSync(file, "utf8")
+      if (!text.includes('".quanta"')) continue
+      const rel = `src/${file.slice(SRC.length + 1)}`
+      const sf = ts.createSourceFile(rel, text, ts.ScriptTarget.ESNext, true, ts.ScriptKind.TS)
+      const visit = (n: ts.Node): void => {
+        if (isHomeJoinedRoot(n, sf)) {
+          out.push(`${rel}:${sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1}`)
+        }
+        ts.forEachChild(n, visit)
+      }
+      ts.forEachChild(sf, visit)
+    }
+    return out.sort()
+  }
+
+  test(`home-joined root literals stay <= ${HOME_JOIN_CEILING} (burn-down only)`, () => {
+    const sites = homeJoinedRootSites().filter((s) => !ALLOWLIST.has(s.split(":")[0] as string))
+    // biome-ignore lint/suspicious/noConsole: ratchet visibility for reviewers
+    console.log(`[home-joined-root] ${sites.length}/${HOME_JOIN_CEILING} sites`)
+    if (sites.length > HOME_JOIN_CEILING) {
+      throw new Error(
+        `${sites.length} \`join(<home>, ".quanta", …)\` site(s) (ceiling ${HOME_JOIN_CEILING}). ` +
+          `Each takes a home from its caller and hard-codes the root, which is how the ` +
+          `memory plane stopped following QUANTA_HOME. Derive from \`quantaHomeDir()\` / ` +
+          `\`quantaHomeDirFrom(env)\`:\n${sites.map((x) => `  ${x}`).join("\n")}`,
+      )
+    }
+    expect(sites.length).toBeLessThanOrEqual(HOME_JOIN_CEILING)
+  })
+
+  test("the second detector distinguishes home-scoped from project-scoped", () => {
+    const sites = homeJoinedRootSites()
+    expect(sites.length, "the AST census found nothing — it stopped resolving").toBeGreaterThan(5)
+    // The resolver itself must be in the census, or the detector is not seeing the
+    // one site it is guaranteed to be able to see.
+    expect(sites.some((s) => s.startsWith("src/shared/quanta-home.ts"))).toBe(true)
+    // …and a project-scoped join must NOT be, or the ceiling counts the wrong thing.
+    expect(sites.some((s) => s.startsWith("src/tool/registry.ts"))).toBe(false)
+    expect(sites.some((s) => s.startsWith("src/permission/trust-scope-store.ts"))).toBe(false)
+    // The memory plane, the site that motivated this arm, is now absent entirely.
+    expect(sites.some((s) => s.startsWith("src/memory/"))).toBe(false)
   })
 
   test("DETECTOR has teeth (red-on-injection)", () => {

@@ -24,9 +24,22 @@ surface_integration:
     web: "pure cross-cutting path env override, no UI affordance on any surface"
 purpose: |
   Single env override that relocates every Quanta-owned persistent path —
-  permission-state, bench corpus/artifacts, prefs fallback parent, and other
-  feature-site path derivations. NOT owned by any one subsystem: permission-
-  store, bench/corpus/paths, and runtime-config SSOT all consume it. Absent ⇒
+  permission-state, bench corpus/artifacts, prefs fallback parent, the memory
+  plane (store + consolidator layout), and other feature-site path
+  derivations. NOT owned by any one subsystem: permission-store,
+  bench/corpus/paths, memory/consolidate/paths, and runtime-config SSOT all
+  consume it.
+
+  The word "every" was FALSE until sep-13. `memory/consolidate/paths.ts`
+  resolved `os.homedir() + .quanta/memory`, so a relocated home moved sessions
+  and knobs while the memory store stayed in the developer's real home — and
+  the repo's own `hermeticQuantaHomeEnv` was therefore not hermetic for memory.
+  The plane now resolves under the home like the rest; `<home>/memory/…`
+  replaces `<os-home>/.quanta/memory/…`, which is the same path when nothing
+  is set. Pinned by `memory-follows-quanta-home-hellgate`, including a wiring
+  proof through `buildMemoryForSession`.
+
+  Absent ⇒
   feature sites compute `~/.quanta` (per ADR-0046 convention). Routed
   exclusively through `runtimeConfig().quantaHome` — no direct
   `process.env.QUANTA_HOME` reads outside the SSOT. Distinct from
@@ -36,6 +49,7 @@ purpose: |
 evidence:
   code:
     - src/shared/runtime-config.ts
+    - src/memory/consolidate/paths.ts
     - src/permission/permission-store.ts
     - src/apps/bench/corpus/paths.ts
     - src/apps/cli/help-render.ts

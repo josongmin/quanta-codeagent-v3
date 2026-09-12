@@ -12,7 +12,7 @@
  *   D1 — env `{}` and `{QUANTA_MEMORY:"1"}` ⇒ kind=sqlite at
  *        `<home>/.quanta/memory/memory.sqlite`
  *   D2 — PERSISTENCE: put, rebuild with the same env/home, recall finds it
- *   D3 — DIRECTORY CREATION: no `.quanta/` under home ⇒ construction succeeds
+ *   D3 — DIRECTORY CREATION: no `memory/` under the quanta home ⇒ construction succeeds
  *   D4 — paired controls: `=memory` ⇒ InMemoryStore; `=off` ⇒ no store;
  *        `QUANTA_MEMORY_PATH=<x>` ⇒ that path
  *   D5 — LEGACY: `<cwd>/.quanta/memory.sqlite` exists ⇒ that file is used and
@@ -72,7 +72,12 @@ const build = (e: NodeJS.ProcessEnv, extra: MemorySessionOverride = {}) => {
   return slot
 }
 
-const expectedDefault = (): string => join(home, ".quanta", "memory", "memory.sqlite")
+/** `override.homeDir` is the QUANTA HOME, so the store sits at `<home>/memory/…`.
+ *  It used to be an OS home joined with `.quanta/memory`, which is why memory was the
+ *  one plane a relocated `QUANTA_HOME` did not move. With nothing set the resolved
+ *  path is unchanged (`quantaHomeDirFrom({})` is `~/.quanta`); only the meaning of
+ *  this injected root changed. */
+const expectedDefault = (): string => join(home, "memory", "memory.sqlite")
 
 const entry = (id: string, text: string): MemoryEntry => ({
   id,
@@ -86,12 +91,12 @@ const entry = (id: string, text: string): MemoryEntry => ({
 /* D1 — default kind + path                                            */
 /* ------------------------------------------------------------------ */
 
-describe("D1 — the default store is sqlite at the HOME-scoped path", () => {
+describe("D1 — the default store is sqlite at the quanta-home-scoped path", () => {
   test.each([
     {},
     { QUANTA_MEMORY: "1" },
     { QUANTA_MEMORY: "true" },
-  ])("env %p ⇒ kind=sqlite, storePath=<home>/.quanta/memory/memory.sqlite", (e) => {
+  ])("env %p ⇒ kind=sqlite, storePath=<quanta-home>/memory/memory.sqlite", (e) => {
     const slot = build(env(e))
     expect(slot.kind).toBe("sqlite")
     expect(slot.storePath).toBe(expectedDefault())
@@ -126,11 +131,11 @@ describe("D2 — an entry put through the default store survives a rebuild", () 
 /* D3 — the parent directory is created on open                        */
 /* ------------------------------------------------------------------ */
 
-describe("D3 — a home with no .quanta/ does not crash the open", () => {
-  test("construction succeeds and creates <home>/.quanta/memory/", () => {
-    expect(existsSync(join(home, ".quanta"))).toBe(false)
+describe("D3 — a home with no memory/ does not crash the open", () => {
+  test("construction succeeds and creates <quanta-home>/memory/", () => {
+    expect(existsSync(join(home, "memory"))).toBe(false)
     expect(() => build(env({}))).not.toThrow()
-    expect(existsSync(join(home, ".quanta", "memory"))).toBe(true)
+    expect(existsSync(join(home, "memory"))).toBe(true)
     expect(existsSync(expectedDefault())).toBe(true)
   })
 
@@ -239,10 +244,11 @@ describe("D5 — legacy <cwd>/.quanta/memory.sqlite keeps being used (honest, no
 describe("D6 — a store-open failure never kills the session", () => {
   const isRoot = process.getuid?.() === 0
   test.skipIf(isRoot)(
-    "unwritable <home>/.quanta ⇒ InMemoryStore + kind=memory + ONE attributed notice, no throw",
+    "an unwritable <quanta-home> ⇒ InMemoryStore + kind=memory + ONE attributed notice, no throw",
     () => {
-      mkdirSync(join(home, ".quanta"), { recursive: true })
-      chmodSync(join(home, ".quanta"), 0o500)
+      // The store's parent is `<quanta-home>/memory`; denying write on the home
+      // itself is what stops `mkdir -p` from creating it.
+      chmodSync(home, 0o500)
       let slot: ReturnType<typeof build> | undefined
       expect(() => {
         slot = build(env({ QUANTA_MEMORY: "1" }))
@@ -282,7 +288,7 @@ describe("D7 — WAL/shm side files land under home, not under cwd", () => {
     const slot = build(env({}))
     if (!slot.store) throw new Error("default must yield a store")
     await slot.store.save(entry("d7", "wal probe"))
-    const dir = join(home, ".quanta", "memory")
+    const dir = join(home, "memory")
     const names = readdirSync(dir)
     expect(names).toContain("memory.sqlite")
     expect(names).toContain("memory.sqlite-wal")

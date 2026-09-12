@@ -1,7 +1,6 @@
 import { Database } from "bun:sqlite"
 import { readFileSync, writeFileSync } from "node:fs"
 import * as fsp from "node:fs/promises"
-import { homedir } from "node:os"
 import { join } from "node:path"
 import type { AgentConfig } from "@/agent"
 import { runMemoryPhase2AutoTrigger } from "@/agent/memory-consolidator-hook"
@@ -27,13 +26,13 @@ import {
 } from "@/memory"
 import { assembleMemoryAuto } from "@/memory/auto-trigger"
 import { ChildProcessGitPort } from "@/memory/consolidate/git"
-import { resolveMemoryDirPaths } from "@/memory/consolidate/paths"
+import { resolveMemoryDirPathsUnder } from "@/memory/consolidate/paths"
 import { LlmPhase2Port } from "@/memory/consolidate/phase2-llm"
 import { loadMemorySummary } from "@/memory/consolidate/reader"
 import type { NodeFsLike } from "@/memory/consolidate/writer"
 import { type DreamOutcomeKind, INITIAL_DREAM_STATE } from "@/memory/dream/types"
 import { redactSecrets } from "@/security"
-import { errMessage, gateOn, throwIfAborted } from "@/shared"
+import { errMessage, gateOn, quantaHomeDirFrom, throwIfAborted } from "@/shared"
 
 const noopWarn = (_msg: string): void => {}
 
@@ -364,7 +363,10 @@ export const buildSessionMemoryAutoWires = async (
 
   const now = input.now ?? Date.now
   const logWarn = input.logWarn ?? noopWarn
-  const paths = resolveMemoryDirPaths(input.homeDir ?? homedir())
+  // `input.homeDir`, when supplied, is the QUANTA home root; otherwise derive it from
+  // the injected env so a relocated `QUANTA_HOME` / `QUANTA_CONFIG_DIR` moves memory
+  // with sessions and knobs. `homedir()` was the OS home, which never did.
+  const paths = resolveMemoryDirPathsUnder(input.homeDir ?? quantaHomeDirFrom(input.env))
   const writer = new FileMemoryWriter(paths, nodeFsPort, new ChildProcessGitPort(), { now })
   await writer.ensureDir()
   // T01 (audit L5 M-10): gate on the caller signal before opening the SQLite

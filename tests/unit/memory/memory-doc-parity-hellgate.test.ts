@@ -26,16 +26,26 @@
  */
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
+import { homedir } from "node:os"
 import { join } from "node:path"
 import { KNOB_INVENTORY } from "../../../src/config/knob-inventory"
 import { defaultDurableStorePath, legacyCwdStorePath } from "../../../src/memory/store-path"
+import { quantaHomeDirFrom } from "../../../src/shared/quanta-home"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 const read = (rel: string): string => readFileSync(join(REPO_ROOT, rel), "utf8")
 
-/** The home-default path with the home prefix stripped — the fragment any doc
- *  has to name to be describing the CURRENT default. Derived, never typed. */
-const DEFAULT_PATH_FRAGMENT = defaultDurableStorePath("/H").slice("/H/".length)
+/** The home-default path with the OS-home prefix stripped — the fragment any doc has
+ *  to name to be describing the CURRENT default. Derived, never typed.
+ *
+ *  Derived through `quantaHomeDirFrom({})` rather than a synthetic root, because the
+ *  resolver's argument is now the QUANTA home: `defaultDurableStorePath("/H")` is
+ *  `/H/memory/memory.sqlite`, while what the README has to name is the path an
+ *  operator sees with nothing set — `~/.quanta/memory/memory.sqlite`. Passing a fake
+ *  root produced a fragment that no correct doc could contain. */
+const DEFAULT_PATH_FRAGMENT = defaultDurableStorePath(quantaHomeDirFrom({})).slice(
+  `${homedir()}/`.length,
+)
 /** The PRE-0557 cwd-relative default, likewise derived. Docs may still mention
  *  it (the legacy file is honored) but must not present it as THE default. */
 const LEGACY_PATH_FRAGMENT = legacyCwdStorePath("/C").slice("/C/".length)

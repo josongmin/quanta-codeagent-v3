@@ -19,17 +19,24 @@
  */
 import { existsSync } from "node:fs"
 import * as path from "node:path"
-import { resolveMemoryDirPaths } from "./consolidate/paths"
+import { resolveMemoryDirPathsUnder } from "./consolidate/paths"
 
-/** File name of the durable store inside `~/.quanta/memory/`. */
+/** File name of the durable store inside `<quanta-home>/memory/`. */
 export const DURABLE_STORE_FILENAME = "memory.sqlite"
 
 /** Pre-0557 cwd-relative default, kept verbatim for legacy detection. */
 export const LEGACY_CWD_STORE_RELPATH = path.join(".quanta", "memory.sqlite")
 
-/** `<home>/.quanta/memory/memory.sqlite`. Pure. */
-export const defaultDurableStorePath = (homeDir: string): string =>
-  path.join(resolveMemoryDirPaths(homeDir).root, DURABLE_STORE_FILENAME)
+/**
+ * `<quanta-home>/memory/memory.sqlite`. Pure.
+ *
+ * `quantaHome` is the QUANTA home root (`QUANTA_CONFIG_DIR ?? QUANTA_HOME ?? ~/.quanta`),
+ * NOT an OS home. It used to be an OS home joined with `.quanta/memory`, which is why
+ * memory was the one plane a relocated `QUANTA_HOME` did not move. Unset resolves to
+ * `~/.quanta`, so the default path is unchanged.
+ */
+export const defaultDurableStorePath = (quantaHome: string): string =>
+  path.join(resolveMemoryDirPathsUnder(quantaHome).root, DURABLE_STORE_FILENAME)
 
 /** `<cwd>/.quanta/memory.sqlite` — where the old default lived. Pure. */
 export const legacyCwdStorePath = (cwd: string): string => path.join(cwd, LEGACY_CWD_STORE_RELPATH)

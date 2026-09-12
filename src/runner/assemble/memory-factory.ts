@@ -47,7 +47,6 @@
  *     (removed with ADR-0556).
  */
 
-import { homedir } from "node:os"
 import type { AgentConfig } from "@/agent"
 import { InMemoryStore, type PersistentStorePort } from "@/memory"
 import { resolveStorePath, type StorePathResolution } from "@/memory/store-path"
@@ -56,7 +55,7 @@ import {
   parseMemoryThreadMode,
   parseMemoryWriteGuardPct,
 } from "@/runner/knobs/memory-mode-parse"
-import { errMessage, gateDisabled, gateOn, logger } from "@/shared"
+import { errMessage, gateDisabled, gateOn, logger, quantaHomeDirFrom } from "@/shared"
 import { parseEnvFlag } from "./env-flag"
 import { buildMemoryConfigCore, type MemoryConfigAssembleInput, parseRecallTiers } from "./memory"
 import { buildStoreCore } from "./store"
@@ -97,9 +96,12 @@ export interface MemorySessionOverride {
   readonly recallLimit?: number
   /** Override the sqlite path. Wins over `QUANTA_MEMORY_PATH`. */
   readonly storePath?: string
-  /** ADR-0557 — home directory the default `~/.quanta/memory/memory.sqlite`
-   *  is resolved under. Defaults to `env.HOME`, then `os.homedir()`; tests
-   *  inject a temp dir so the real home is never touched. */
+  /** ADR-0557 — the QUANTA HOME the default `<quanta-home>/memory/memory.sqlite`
+   *  is resolved under. Defaults to `quantaHomeDirFrom(env)`
+   *  (`QUANTA_CONFIG_DIR ?? QUANTA_HOME ?? ~/.quanta`); tests inject a temp dir so
+   *  the real home is never touched. It used to default to `env.HOME` then
+   *  `os.homedir()`, which is why a relocated `QUANTA_HOME` moved sessions and knobs
+   *  but not the store. */
   readonly homeDir?: string
   /** ADR-0557 — working directory the LEGACY `<cwd>/.quanta/memory.sqlite`
    *  is probed under. Defaults to `process.cwd()` (the exact directory the
@@ -143,10 +145,9 @@ const resolveStoreKind = (raw: string | undefined): MemoryStoreKind | undefined 
 
 /** ADR-0557 — resolve the sqlite path for one session: explicit
  *  (`override.storePath` > `QUANTA_MEMORY_PATH`) > legacy cwd file (if it
- *  exists) > home default. Home: `override.homeDir` > the env view's own
- *  `HOME` (Node's `os.homedir()` semantics, and pure w.r.t. the injected env —
- *  Bun caches `os.homedir()` at startup so a runtime `HOME` change would
- *  otherwise be ignored) > `os.homedir()`. Cwd: `override.cwd` >
+ *  exists) > home default. Home: `override.homeDir` > `quantaHomeDirFrom(env)`
+ *  (`QUANTA_CONFIG_DIR ?? QUANTA_HOME ?? ~/.quanta`, pure w.r.t. the injected env).
+ *  Cwd: `override.cwd` >
  *  `process.cwd()` (the directory the pre-0557 relative default resolved
  *  against). The result is reported on the slot for the sqlite kind so
  *  surfaces name the file the store actually opened. */
@@ -154,9 +155,12 @@ const resolveSessionStorePath = (
   env: NodeJS.ProcessEnv,
   override: MemorySessionOverride | undefined,
 ): StorePathResolution => {
-  const envHome = env.HOME !== undefined && env.HOME !== "" ? env.HOME : undefined
+  // The QUANTA home, not the OS home. This read `env.HOME ?? homedir()`, so memory
+  // was the one plane a relocated `QUANTA_HOME` / `QUANTA_CONFIG_DIR` did not move:
+  // sessions and knobs followed it and the store stayed in the developer's real home.
+  // `quantaHomeDirFrom({})` is `~/.quanta`, so the default path is unchanged.
   return resolveStorePath({
-    homeDir: override?.homeDir ?? envHome ?? homedir(),
+    homeDir: override?.homeDir ?? quantaHomeDirFrom(env),
     cwd: override?.cwd ?? process.cwd(),
     explicitPath: override?.storePath ?? env.QUANTA_MEMORY_PATH,
   })

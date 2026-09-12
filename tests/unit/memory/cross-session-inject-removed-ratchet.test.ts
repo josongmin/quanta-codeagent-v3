@@ -305,7 +305,9 @@ describe("cross-session inject removed ratchet (ADR-0556)", () => {
   test("(d) PAIRED CONTROL: live memory-auto wires ⇒ `session_ctx` byte-identical to the pure memory_summary.md build; no B header", async () => {
     const tempHome = mkdtempSync(join(tmpdir(), "q-cross-session-removed-"))
     try {
-      const memoryRoot = join(tempHome, ".quanta", "memory")
+      // `homeDir` is the QUANTA HOME, so the consolidator layout is `<home>/memory/`.
+      // It was `<home>/.quanta/memory/` while memory resolved against an OS home.
+      const memoryRoot = join(tempHome, "memory")
       mkdirSync(memoryRoot, { recursive: true })
       await writeFile(join(memoryRoot, "memory_summary.md"), MEMORY_SUMMARY_MD, "utf8")
       await writeFile(join(memoryRoot, "stage1.jsonl"), `${PRODUCTION_SHAPED_JSONL}\n`, "utf8")
