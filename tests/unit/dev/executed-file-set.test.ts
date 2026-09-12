@@ -17,8 +17,10 @@ import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import {
+  type ExecutedFileSetVerdict,
   executedFileSetDigest,
   executedFileSetVerdict,
+  executedSetRefusal,
   normalizeExecutedPath,
 } from "../../../tools/dev/executed-file-set"
 
@@ -155,10 +157,16 @@ describe("executed-set wiring", () => {
     const runner = source("tools/dev/run-test-shards.ts")
     expect(runner).not.toContain("result.executedFiles === plan.files.length")
     expect(runner).toContain("executedFileSetVerdict(")
-    expect(runner).toContain("EXECUTED-SET MISMATCH")
+    // The MESSAGE moved into the module with the decision; what this arm can
+    // still see is that the runner asks the module and throws the answer.
+    expect(runner).toContain('phase: "verdict"')
+    expect(runner).toContain("if (refusal !== undefined) throw new Error(refusal)")
     // And it reads the JUnit the worker wrote rather than trusting the runner's
     // own tally of what it launched.
     expect(runner).toMatch(/executedRaw: junitExecutedFiles\(junitXml\)/)
+    // The wording itself is pinned where it now lives, so neither half can go
+    // missing silently.
+    expect(source("tools/dev/executed-file-set.ts")).toContain("EXECUTED-SET MISMATCH")
   })
 
   test("the receipt is minted from the PROVEN set, not from the runner's tally", () => {
@@ -172,8 +180,10 @@ describe("executed-set wiring", () => {
     expect(mint).not.toBe("")
     const body = mint.slice(0, mint.indexOf("\n}\n"))
     expect(body).toContain("executedFileSetVerdict(")
-    expect(body).toContain("refusing to cache chunk")
+    expect(body).toContain('phase: "cache"')
+    expect(body).toContain("if (cacheRefusal !== undefined)")
     expect(body).toContain("executedFileIds: executedSet.executed")
+    expect(source("tools/dev/executed-file-set.ts")).toContain("refusing to cache chunk")
     // ...and never re-introduces the count it replaced.
     expect(body).not.toContain("result.executedFiles")
   })
@@ -189,5 +199,75 @@ describe("executed-set wiring", () => {
     const aggregate = source("tools/dev/verification-matrix.ts")
     expect(aggregate).toContain("executed-digest-mismatch")
     expect(aggregate).toContain("executedFileSetDigest(receipt.executedFiles)")
+  })
+})
+
+/**
+ * The DECISION, not the source string.
+ *
+ * A mutation audit turned both of the runner's executed-set branches into
+ * `if (set.duplicate.length > 99)` and this file stayed green, because its wiring
+ * arms are `expect(runner).toContain("executedFileSetVerdict(")` and two message
+ * strings — all of which survive a neutered branch verbatim. The decision now
+ * lives in the module and these arms drive it.
+ */
+describe("executedSetRefusal", () => {
+  const planned = ["tests/unit/a.test.ts", "tests/unit/b.test.ts"]
+  const verdictFor = (executed: readonly string[]): ExecutedFileSetVerdict =>
+    executedFileSetVerdict({ repoRoot: REPO_ROOT, plannedRaw: planned, executedRaw: executed })
+
+  test("the planned set is not refused, in either phase", () => {
+    for (const phase of ["verdict", "cache"] as const) {
+      expect(
+        executedSetRefusal({ verdict: verdictFor(planned), phase, chunkIndex: 3, totalChunks: 44 }),
+      ).toBeUndefined()
+    }
+  })
+
+  test("a SUBSTITUTED set is refused in both phases, with the phase's own wording", () => {
+    // Two files ran, two files were planned, and neither is the other: the exact
+    // shape a count check waves through.
+    const swapped = verdictFor(["tests/unit/x.test.ts", "tests/unit/y.test.ts"])
+    const asVerdict = executedSetRefusal({
+      verdict: swapped,
+      phase: "verdict",
+      chunkIndex: 3,
+      totalChunks: 44,
+    })
+    expect(asVerdict).toContain("EXECUTED-SET MISMATCH chunk=3/44")
+    expect(asVerdict).toContain("exited 0 but did not run the planned files")
+    expect(asVerdict).toContain("missing=2")
+
+    const asCache = executedSetRefusal({ verdict: swapped, phase: "cache", chunkIndex: 3 })
+    expect(asCache).toContain("refusing to cache chunk 3")
+    // The two phases must not collapse into one message: one is a worker that
+    // lied about what it ran, the other is a receipt about to record that lie.
+    expect(asCache).not.toContain("EXECUTED-SET MISMATCH")
+  })
+
+  test("every non-ok category refuses, not just a missing file", () => {
+    const cases: readonly (readonly [string, readonly string[]])[] = [
+      ["a missing file", ["tests/unit/a.test.ts"]],
+      ["an unexpected file", [...planned, "tests/unit/z.test.ts"]],
+      ["a collapsing pair of spellings", ["tests/unit/a.test.ts", "tests/unit/../unit/a.test.ts"]],
+    ]
+    for (const [why, executed] of cases) {
+      const verdict = verdictFor(executed)
+      expect({ why, ok: verdict.ok }).toEqual({ why, ok: false })
+      expect({
+        why,
+        refused: executedSetRefusal({ verdict, phase: "cache", chunkIndex: 1 }) !== undefined,
+      }).toEqual({ why, refused: true })
+    }
+  })
+
+  test("the mutant that survived is now caught: duplicate-count is not the test", () => {
+    // `if (set.duplicate.length > 99)` was the audit's mutant. A substituted set
+    // has ZERO duplicates, so any branch keyed on duplicates accepts it — which
+    // is why the refusal has to be keyed on `ok`.
+    const swapped = verdictFor(["tests/unit/x.test.ts", "tests/unit/y.test.ts"])
+    expect(swapped.duplicate).toEqual([])
+    expect(swapped.ok).toBe(false)
+    expect(executedSetRefusal({ verdict: swapped, phase: "cache", chunkIndex: 7 })).toBeDefined()
   })
 })

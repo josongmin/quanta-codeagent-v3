@@ -12,10 +12,12 @@ import {
 } from "node:fs"
 import { availableParallelism, freemem, loadavg, tmpdir, totalmem } from "node:os"
 import { dirname, join, relative, resolve } from "node:path"
+import { capabilityReceiptEnvForCampaign } from "./capability-probe-producer"
 import {
   type ExecutedFileSetVerdict,
   executedFileSetDigest,
   executedFileSetVerdict,
+  executedSetRefusal,
 } from "./executed-file-set"
 import {
   buildFailureAttemptArtifact,
@@ -24,7 +26,6 @@ import {
   writeFailureAttemptArtifact,
 } from "./failure-attempt-producer"
 import { quarantineLane, quarantinePath } from "./lease-quarantine"
-import { capabilityReceiptEnvForCampaign } from "./capability-probe-producer"
 import { mintableScanReachAuthority } from "./scan-reach-authority"
 import {
   describeWatchdogKill,
@@ -743,12 +744,16 @@ const validateCompletedShard = (before: GitSnapshot, completed: CompletedShard):
   }
   if (result.code === 0 && !result.timedOut) {
     const set = executedSetOf(plan, result)
-    if (!set.ok) {
-      throw new Error(
-        `[test:shards] EXECUTED-SET MISMATCH chunk=${plan.index}/${totalChunks} — the worker ` +
-          `exited 0 but did not run the planned files: ${set.reason}`,
-      )
-    }
+    // The DECISION lives in `executed-file-set.ts`, where a test can drive it.
+    // Both of these branches were mutable to `duplicate.length > 99` with the
+    // suite green, because the only guard was a string search over this file.
+    const refusal = executedSetRefusal({
+      verdict: set,
+      phase: "verdict",
+      chunkIndex: plan.index,
+      totalChunks,
+    })
+    if (refusal !== undefined) throw new Error(refusal)
     return result.scanReachSink
   }
   if (result.cancelled && !result.timedOut) {
@@ -847,10 +852,13 @@ const cacheSuccessfulShard = (
     plannedRaw: cached.chunk.files,
     executedRaw: junitExecutedFiles(junitXml),
   })
-  if (!executedSet.ok) {
-    throw new Error(
-      `[test:shards] refusing to cache chunk ${cached.chunk.index}: ${executedSet.reason}`,
-    )
+  const cacheRefusal = executedSetRefusal({
+    verdict: executedSet,
+    phase: "cache",
+    chunkIndex: cached.chunk.index,
+  })
+  if (cacheRefusal !== undefined) {
+    throw new Error(cacheRefusal)
   }
   junitBody(junitXml, cached.chunk.index)
   const observations = chunkTimingObservations(cached, result, junitXml)

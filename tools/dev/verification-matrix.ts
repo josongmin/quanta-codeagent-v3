@@ -32,12 +32,22 @@ export interface MatrixPopulation {
   readonly membershipSha256: string
   /** Digest of the tier-assignment policy that produced the selection. */
   readonly policySha256: string
-  /** Host capability fingerprint, so two runners are distinguishable. */
+  /**
+   * The capability GAP — a digest of the sorted names of the external tools this
+   * host is missing.
+   *
+   * v4 carried a host FINGERPRINT here (absolute path + inode + size + mtime per
+   * tool). Once the field was actually compared, no hosted plan could validate:
+   * the planner, four workers and the aggregator are six different VMs. Names
+   * travel; inodes do not. The schema bump is deliberate — the field kept its
+   * name and changed its meaning, and a v4 plan reinterpreted under v5 rules
+   * would be exactly the silent drift this module exists to refuse.
+   */
   readonly capabilitySha256: string
 }
 
 export type VerificationMatrixPlan = {
-  readonly schema: "quanta.verification-matrix.v4"
+  readonly schema: "quanta.verification-matrix.v5"
   readonly headSha: string
   readonly planSha256: string
   readonly population: MatrixPopulation
@@ -159,7 +169,7 @@ export const planVerificationMatrix = (
     )
   }
   return {
-    schema: "quanta.verification-matrix.v4",
+    schema: "quanta.verification-matrix.v5",
     headSha,
     population,
     planSha256: planIdentity(headSha, population, canonical),
@@ -173,7 +183,7 @@ export const parseVerificationMatrixPlan = (
 ): VerificationMatrixPlan => {
   if (typeof value !== "object" || value === null) throw new Error("invalid matrix plan")
   const row = value as Partial<VerificationMatrixPlan>
-  if (row.schema !== "quanta.verification-matrix.v4") throw new Error("invalid matrix plan schema")
+  if (row.schema !== "quanta.verification-matrix.v5") throw new Error("invalid matrix plan schema")
   if (typeof row.headSha !== "string" || !Array.isArray(row.chunks)) {
     throw new Error("invalid matrix plan fields")
   }

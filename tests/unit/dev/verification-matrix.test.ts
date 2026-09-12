@@ -13,6 +13,7 @@ import {
 } from "../../../tools/dev/verification-matrix"
 import {
   currentMatrixPopulation,
+  loadMatrixPlanForCheckout,
   matrixPlanFileFloor,
   matrixPopulationProblem,
 } from "../../../tools/dev/verification-matrix-population"
@@ -428,7 +429,10 @@ describe("matrix tier wiring", () => {
     // arm names the call rather than a copy of the policy code.
     expect(cli).toContain("currentMatrixPopulation({")
     expect(cli).toContain("matrixPlanFileFloor(tier)")
-    expect(cli).toContain("matrixPopulationProblem(")
+    // The population COMPARISON moved into the module the arms below drive. A
+    // mutation audit proved why: a `toContain` over this call site allowed four
+    // of the five verdicts to be ignored.
+    expect(cli).toContain("loadMatrixPlanForCheckout({")
     expect(cli).not.toContain('tier: "full"')
     expect(cli).toContain("--expect-tier")
   })
@@ -489,6 +493,103 @@ describe("matrix tier wiring", () => {
     // Three real discoveries over ~4,000 files. Explicit, because the default
     // 5s cut it off at 4.1s and a "timed out" there reads as a hang.
   }, 30_000)
+
+  /**
+   * The consumer, driven rather than grepped.
+   *
+   * A mutation audit narrowed `if (problem !== undefined)` to
+   * `if (problem === "wrong-tier")` and replaced `matrixPlanFileFloor(tier)` with
+   * the literal `1`, both with this file green: the only guard was
+   * `expect(cli).toContain("matrixPopulationProblem(")`. Every verdict is now
+   * exercised through the real loader.
+   */
+  describe("loadMatrixPlanForCheckout", () => {
+    const HEAD_SHA = "a".repeat(40)
+    const REPO = resolve(import.meta.dir, "..", "..", "..")
+    const OVERRIDES = resolve(REPO, "tools/dev/test-policy-overrides.json")
+    const population = {
+      tier: "pr",
+      universe: 4_000,
+      membershipSha256: "1".repeat(64),
+      policySha256: "2".repeat(64),
+      capabilitySha256: "3".repeat(64),
+    } as const
+    const FLOORS = {
+      schema: "quanta.test-tier-population.v1",
+      tiers: { pr: { minFiles: 100, reason: "fixture" } },
+    } as never
+    const chunk150 = {
+      id: "pure-0",
+      files: Array.from({ length: 150 }, (_, index) => `tests/unit/gen-${index}.test.ts`),
+      resourceClass: "pure" as const,
+      predictedMs: 1_000,
+      testTimeoutMs: 120_000,
+      intraParallel: 8,
+    }
+    const planFixture = planVerificationMatrix(HEAD_SHA, population, 100, [chunk150])
+
+    test("a plan whose population matches this checkout is accepted", () => {
+      const loaded = loadMatrixPlanForCheckout({
+        raw: JSON.parse(JSON.stringify(planFixture)) as unknown,
+        repoRoot: REPO,
+        policyOverridesPath: OVERRIDES,
+        currentPopulation: population,
+        floors: FLOORS,
+      })
+      expect(loaded.planSha256).toBe(planFixture.planSha256)
+    })
+
+    test("EVERY population verdict refuses, not just the tier", () => {
+      // The mutant ignored four of these five and stayed green.
+      const drifts: readonly (readonly [string, Record<string, unknown>])[] = [
+        ["wrong-tier", { tier: "nightly" }],
+        ["universe-mismatch", { universe: 3_999 }],
+        ["membership-mismatch", { membershipSha256: "9".repeat(64) }],
+        ["policy-mismatch", { policySha256: "9".repeat(64) }],
+        ["capability-mismatch", { capabilitySha256: "9".repeat(64) }],
+      ]
+      for (const [expected, drift] of drifts) {
+        expect(() =>
+          loadMatrixPlanForCheckout({
+            raw: JSON.parse(JSON.stringify(planFixture)) as unknown,
+            repoRoot: REPO,
+            policyOverridesPath: OVERRIDES,
+            currentPopulation: { ...population, ...drift },
+            floors: FLOORS,
+          }),
+        ).toThrow(new RegExp(expected))
+      }
+    })
+
+    test("the FLOOR is applied on the consumer side too", () => {
+      // The mutant replaced the derived floor with `1`, so a one-chunk plan over
+      // 150 files passed a 3,900-file tier. Here the same plan is refused by a
+      // record that demands more than it covers.
+      expect(() =>
+        loadMatrixPlanForCheckout({
+          raw: JSON.parse(JSON.stringify(planFixture)) as unknown,
+          repoRoot: REPO,
+          policyOverridesPath: OVERRIDES,
+          currentPopulation: population,
+          floors: {
+            schema: "quanta.test-tier-population.v1",
+            tiers: { pr: { minFiles: 3_900, reason: "fixture" } },
+          } as never,
+        }),
+      ).toThrow(/covers 150 file\(s\); floor is 3900/)
+    })
+
+    test("a plan with no population tier is refused before anything else", () => {
+      expect(() =>
+        loadMatrixPlanForCheckout({
+          raw: { schema: "quanta.verification-matrix.v5", chunks: [] },
+          repoRoot: REPO,
+          policyOverridesPath: OVERRIDES,
+          floors: FLOORS,
+        }),
+      ).toThrow(/no population tier/)
+    })
+  })
 
   test("the plan floor is the tier's COMMITTED floor, not a literal", () => {
     // MEASURED: the literal was 100 against a 3,941-file population, and the
