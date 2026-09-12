@@ -112,7 +112,8 @@ export const CONST_KEYED: readonly KnobDeclaration[] = [
     default: false,
     group: "agent-feature",
     home: "runtime-config",
-    describe: "Prompt-suggestion orchestrator (opt-in).",
+    describe:
+      "Prompt-suggestion orchestrator (opt-in). STRICT: only the literal `=1` arms it (not on/true/yes).",
     readSite: "agent/prompt-suggestion/orchestrator.ts",
   },
   {
@@ -121,7 +122,8 @@ export const CONST_KEYED: readonly KnobDeclaration[] = [
     default: false,
     group: "agent-feature",
     home: "runtime-config",
-    describe: "Proactive self-wake reactor (opt-in).",
+    describe:
+      "Proactive self-wake reactor (opt-in). STRICT: only the literal `=1` arms it (not on/true/yes).",
     readSite: "reactor/self-wake.ts",
   },
   {
@@ -240,7 +242,8 @@ export const CONST_KEYED: readonly KnobDeclaration[] = [
     default: false,
     group: "integration",
     home: "runtime-config",
-    describe: "GitHub Actions event-source trigger (opt-in).",
+    describe:
+      "GitHub Actions event-source trigger (opt-in). STRICT: only the literal `=1` arms it (not on/true/yes).",
     readSite: "integrations/github/event-source-actions.ts",
   },
   {
@@ -259,7 +262,8 @@ export const CONST_KEYED: readonly KnobDeclaration[] = [
     default: false,
     group: "security",
     home: "runtime-config",
-    describe: "TLS-MITM master switch (strict; pairs with _ACK).",
+    describe:
+      "TLS-MITM master switch (strict; pairs with _ACK). STRICT: only the literal `=1` arms it (not on/true/yes).",
     readSite: "runtime/network-proxy/mitm-gate.ts",
   },
   {

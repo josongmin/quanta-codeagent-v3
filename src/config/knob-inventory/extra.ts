@@ -898,7 +898,8 @@ export const EXTRA: readonly KnobDeclaration[] = [
     default: false,
     group: "integration",
     home: "runtime-config",
-    describe: "Maturity gate for the stdio serving transport; only the exact value 1 enables it.",
+    describe:
+      "Maturity gate for the stdio serving transport; only the exact value 1 enables it. STRICT: only the literal `=1` arms it (not on/true/yes).",
     readSite: "apps/cli/serve-stdio-cmd.ts",
   },
   {
@@ -936,7 +937,7 @@ export const EXTRA: readonly KnobDeclaration[] = [
     group: "web-daemon",
     home: "runtime-config",
     describe:
-      "Explicitly acknowledge an unauthenticated wildcard web-daemon bind; loopback remains the safe default.",
+      "Explicitly acknowledge an unauthenticated wildcard web-daemon bind; loopback remains the safe default. STRICT: only the literal `=1` arms it (not on/true/yes).",
     readSite: "apps/web-daemon/index.ts",
   },
   {

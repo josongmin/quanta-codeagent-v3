@@ -28,7 +28,8 @@ export const KNOBS_C: readonly RuntimeConfigKnob[] = [
     kind: "bool",
     default: false,
     group: "observability",
-    describe: "Disable logger label-keyed rate limiter.",
+    describe:
+      "Disable logger label-keyed rate limiter. STRICT: only the literal `=off` disables it (not 0/false/no).",
   },
   {
     envKey: "QUANTA_HOOK_TIMEOUT_MS",
@@ -56,14 +57,16 @@ export const KNOBS_C: readonly RuntimeConfigKnob[] = [
     kind: "bool",
     default: false,
     group: "misc",
-    describe: "Codex-shape manifest ingest normalizer.",
+    describe:
+      "Codex-shape manifest ingest normalizer. STRICT: only the literal `=1` arms it (not on/true/yes).",
   },
   {
     envKey: "QUANTA_CENTRAL_CONFIG",
     kind: "bool",
     default: false,
     group: "misc",
-    describe: "Repo-local central config loader gate (strict).",
+    describe:
+      "Repo-local central config loader gate (strict). STRICT: only the literal `=1` arms it (not on/true/yes).",
   },
   {
     envKey: "QUANTA_CONFIG_DIR",

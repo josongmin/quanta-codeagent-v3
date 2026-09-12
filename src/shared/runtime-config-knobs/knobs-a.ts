@@ -21,7 +21,8 @@ export const KNOBS_A: readonly RuntimeConfigKnob[] = [
     kind: "bool",
     default: false,
     group: "compaction",
-    describe: "Background speculative compaction (ADR-0473).",
+    describe:
+      "Background speculative compaction (ADR-0473). STRICT: only the literal `=1` arms it (not on/true/yes).",
   },
   {
     envKey: "QUANTA_CONTEXT_HEADROOM_ADVISORY",
@@ -29,7 +30,7 @@ export const KNOBS_A: readonly RuntimeConfigKnob[] = [
     default: false,
     group: "compaction",
     describe:
-      "Context-headroom advisory (RFC-01 A7): strict-1 opt-in, emits one edge-latched context_headroom_crossed event per upward threshold crossing. Default OFF ⇒ byte-identical.",
+      "Context-headroom advisory (RFC-01 A7): strict-1 opt-in, emits one edge-latched context_headroom_crossed event per upward threshold crossing. Default OFF ⇒ byte-identical. STRICT: only the literal `=1` arms it (not on/true/yes).",
   },
   {
     envKey: "QUANTA_HUNK_MUTATION_RECEIPT",
@@ -81,7 +82,8 @@ export const KNOBS_A: readonly RuntimeConfigKnob[] = [
     kind: "bool",
     default: false,
     group: "tool",
-    describe: "Untrusted-source envelope gate.",
+    describe:
+      "Untrusted-source envelope gate. STRICT: only the literal `=1` arms it (not on/true/yes).",
   },
   {
     envKey: "QUANTA_MODEL_REROUTE_EVENT",
@@ -89,14 +91,15 @@ export const KNOBS_A: readonly RuntimeConfigKnob[] = [
     default: false,
     group: "tool",
     describe:
-      "Wire a production sink so a real FallbackLLM provider swap emits a model_route_changed AgentEvent on the live stream.",
+      "Wire a production sink so a real FallbackLLM provider swap emits a model_route_changed AgentEvent on the live stream. STRICT: only the literal `=1` arms it (not on/true/yes).",
   },
   {
     envKey: "QUANTA_EDIT_REPAIR_LOOP",
     kind: "bool",
     default: false,
     group: "tool",
-    describe: "Edit-repair-loop (lint-delta) gate.",
+    describe:
+      "Edit-repair-loop (lint-delta) gate. STRICT: only the literal `=1` arms it (not on/true/yes).",
   },
   {
     envKey: "QUANTA_READ_DEDUP",
@@ -149,7 +152,8 @@ export const KNOBS_A: readonly RuntimeConfigKnob[] = [
     kind: "bool",
     default: false,
     group: "meta",
-    describe: "Cross-surface capability-exposure layer master gate (consistency probe).",
+    describe:
+      "Cross-surface capability-exposure layer master gate (consistency probe). STRICT: only the literal `=1` arms it (not on/true/yes).",
   },
   {
     envKey: "QUANTA_FILE_HISTORY",
@@ -270,7 +274,8 @@ export const KNOBS_A: readonly RuntimeConfigKnob[] = [
     kind: "bool",
     default: false,
     group: "tool",
-    describe: "Model-apply MERGE rung gate.",
+    describe:
+      "Model-apply MERGE rung gate. STRICT: only the literal `=1` arms it (not on/true/yes).",
   },
   {
     envKey: "QUANTA_FAST_APPLY_MODEL",
@@ -284,7 +289,8 @@ export const KNOBS_A: readonly RuntimeConfigKnob[] = [
     kind: "bool",
     default: false,
     group: "tool",
-    describe: "Auto-escalate edit to the whitespace-tolerant fuzzy ladder on exact-miss.",
+    describe:
+      "Auto-escalate edit to the whitespace-tolerant fuzzy ladder on exact-miss. STRICT: only the literal `=1` arms it (not on/true/yes).",
   },
   {
     envKey: "QUANTA_EDIT_FRESH_HASH",
@@ -307,14 +313,16 @@ export const KNOBS_A: readonly RuntimeConfigKnob[] = [
     kind: "bool",
     default: false,
     group: "tool",
-    describe: "code-mode Phase-1 security gate (strict).",
+    describe:
+      "code-mode Phase-1 security gate (strict). STRICT: only the literal `=1` arms it (not on/true/yes).",
   },
   {
     envKey: "QUANTA_CODE_MODE_ONLY",
     kind: "bool",
     default: false,
     group: "tool",
-    describe: "code-mode Phase-3 steering gate (strict).",
+    describe:
+      "code-mode Phase-3 steering gate (strict). STRICT: only the literal `=1` arms it (not on/true/yes).",
   },
   {
     envKey: "QUANTA_CODE_MODE_MEM_BYTES",
@@ -350,7 +358,8 @@ export const KNOBS_A: readonly RuntimeConfigKnob[] = [
     kind: "bool",
     default: false,
     group: "mcp",
-    describe: "Skill→MCP auto-attach gate.",
+    describe:
+      "Skill→MCP auto-attach gate. STRICT: only the literal `=1` arms it (not on/true/yes).",
   },
   {
     envKey: "QUANTA_MCP_SAMPLING",
@@ -414,7 +423,8 @@ export const KNOBS_A: readonly RuntimeConfigKnob[] = [
     kind: "bool",
     default: false,
     group: "memory",
-    describe: "Incremental context-estimate gate.",
+    describe:
+      "Incremental context-estimate gate. STRICT: only the literal `=1` arms it (not on/true/yes).",
   },
   {
     envKey: "QUANTA_AUTO_DREAM",

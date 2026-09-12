@@ -484,7 +484,8 @@ export const CLI_KNOBS: readonly CliKnob[] = [
     kind: "bool",
     default: true,
     group: "render",
-    describe: "Markdown syntax highlighting.",
+    describe:
+      "Markdown syntax highlighting. STRICT: only the literal `=0` disables it (not off/false/no).",
     readSite: "internal.ts",
   },
   {

@@ -147,7 +147,8 @@ export const KNOBS_B: readonly RuntimeConfigKnob[] = [
     kind: "bool",
     default: false,
     group: "permission",
-    describe: "Opt-in for dangerous remembered patterns.",
+    describe:
+      "Opt-in for dangerous remembered patterns. STRICT: only the literal `=1` arms it (not on/true/yes).",
   },
   {
     envKey: "QUANTA_DENY_REASON",
@@ -204,7 +205,8 @@ export const KNOBS_B: readonly RuntimeConfigKnob[] = [
     kind: "bool",
     default: false,
     group: "permission",
-    describe: "Glob-in-write-path guard gate.",
+    describe:
+      "Glob-in-write-path guard gate. STRICT: only the literal `=1` arms it (not on/true/yes).",
   },
   {
     envKey: "QUANTA_WRITE_BUDGET",
@@ -225,7 +227,7 @@ export const KNOBS_B: readonly RuntimeConfigKnob[] = [
     kind: "bool",
     default: false,
     group: "permission",
-    describe: "Exfil-scouting gate.",
+    describe: "Exfil-scouting gate. STRICT: only the literal `=1` arms it (not on/true/yes).",
   },
   {
     envKey: "QUANTA_EXFIL_SCOUTING_K",
@@ -239,7 +241,8 @@ export const KNOBS_B: readonly RuntimeConfigKnob[] = [
     kind: "bool",
     default: false,
     group: "permission",
-    describe: "Per-action LLM risk assessor gate.",
+    describe:
+      "Per-action LLM risk assessor gate. STRICT: only the literal `=1` arms it (not on/true/yes).",
   },
   {
     envKey: "QUANTA_AUTO_REVIEW",
@@ -247,7 +250,7 @@ export const KNOBS_B: readonly RuntimeConfigKnob[] = [
     default: false,
     group: "permission",
     describe:
-      "T03 auto-approval reviewer gate — seed the session with the guardian-approvals posture so an LLM side-agent renders approvals (HARD_DENY still runs first).",
+      "T03 auto-approval reviewer gate — seed the session with the guardian-approvals posture so an LLM side-agent renders approvals (HARD_DENY still runs first). STRICT: only the literal `=1` arms it (not on/true/yes).",
   },
   {
     envKey: "QUANTA_APPROVAL_LADDER",
@@ -327,7 +330,8 @@ export const KNOBS_B: readonly RuntimeConfigKnob[] = [
     kind: "bool",
     default: false,
     group: "llm",
-    describe: "Workspace-trust attestation for credential-helper.",
+    describe:
+      "Workspace-trust attestation for credential-helper. STRICT: only the literal `=1` arms it (not on/true/yes).",
   },
   {
     envKey: "QUANTA_PROMPT_CACHE_TTL",
@@ -348,21 +352,24 @@ export const KNOBS_B: readonly RuntimeConfigKnob[] = [
     kind: "bool",
     default: false,
     group: "llm",
-    describe: "User rule-overlay auto-mode classifier.",
+    describe:
+      "User rule-overlay auto-mode classifier. STRICT: only the literal `=1` arms it (not on/true/yes).",
   },
   {
     envKey: "QUANTA_CIRCUMVENT_DETECT",
     kind: "bool",
     default: false,
     group: "llm",
-    describe: "Denied-effect re-attempt tracker gate.",
+    describe:
+      "Denied-effect re-attempt tracker gate. STRICT: only the literal `=1` arms it (not on/true/yes).",
   },
   {
     envKey: "QUANTA_FS_OWNERSHIP_ENFORCE",
     kind: "bool",
     default: false,
     group: "permission",
-    describe: "Hard-enforce subagent owned/forbidden FS surfaces at dispatch (§20.4).",
+    describe:
+      "Hard-enforce subagent owned/forbidden FS surfaces at dispatch (§20.4). STRICT: only the literal `=1` arms it (not on/true/yes).",
   },
   {
     envKey: "QUANTA_API_KEY_HELPER",
