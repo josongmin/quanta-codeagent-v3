@@ -98,6 +98,7 @@ evidence:
       - tests/unit/dev/test-shard-timing-hint-hardening.test.ts
       - tests/unit/dev/capability-result.test.ts
       - tests/unit/dev/test-capability-lanes.test.ts
+      - tests/unit/dev/capability-receipt-wiring.test.ts
       - tests/unit/dev/required-producer-exactness.test.ts
       - tests/unit/dev/test-resource-analysis.test.ts
       - tests/unit/dev/test-resource-claims.test.ts

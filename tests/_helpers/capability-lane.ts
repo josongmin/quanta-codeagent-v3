@@ -44,6 +44,7 @@
  */
 
 import { describe as describeFn } from "bun:test"
+import { CAPABILITY_REQUIRE_ENV, capabilityRequiredFor } from "../../tools/dev/capability-receipt"
 import { CAPABILITY_GROUPS } from "../../tools/dev/test-capability-manifest"
 
 export type CapabilityOutcome =
@@ -101,23 +102,18 @@ export const reportCapability = (result: CapabilityResult): CapabilityResult => 
 /**
  * Is this job REQUIRED to actually exercise the capability?
  *
- * `QUANTA_REQUIRE_CAPABILITY` is either `1` (every group) or a comma-separated
- * list of group ids. A required job that cannot reach its capability is
- * `blocked-missing` and must go RED — "the tool was not installed" is the
- * failure a required capability job exists to report, not an excuse for a pass.
+ * Delegates to `capabilityRequiredFor`, which owns the one name and the one
+ * grammar. This helper read `QUANTA_REQUIRE_CAPABILITY` (singular) while the
+ * receipt consumer read `QUANTA_REQUIRE_CAPABILITIES` (plural) with a different
+ * grammar, so arming one armed half the corpus. A required job that cannot reach
+ * its capability is `blocked-missing` and must go RED — "the tool was not
+ * installed" is the failure a required capability job exists to report, not an
+ * excuse for a pass.
  */
 export const capabilityRequired = (
   group: string,
   env: Readonly<Record<string, string | undefined>> = process.env,
-): boolean => {
-  const raw = env.QUANTA_REQUIRE_CAPABILITY
-  if (raw === undefined || raw === "" || raw === "0") return false
-  if (raw === "1") return true
-  return raw
-    .split(",")
-    .map((entry) => entry.trim())
-    .includes(group)
-}
+): boolean => capabilityRequiredFor(group, env)
 
 /** Is the `*-real-e2e` capability lane selected at all? */
 export const capabilityLaneSelected = (
@@ -326,7 +322,7 @@ export const assertCapabilityNotBlocked = (
   if (!capabilityRequired(input.group, env)) return
   throw new Error(
     `[capability] REQUIRED group ${input.group} is ${verdict.outcome} in ${input.file}: ` +
-      `${verdict.detail}. QUANTA_REQUIRE_CAPABILITY names this group, so an absent capability ` +
+      `${verdict.detail}. ${CAPABILITY_REQUIRE_ENV} names this group, so an absent capability ` +
       "is the failure, not a reason to pass.",
   )
 }

@@ -202,6 +202,15 @@ export const testEnvironmentSha256 = (
     QUANTA_SCAN_REACH_RECORD: "<worker-scan-reach-sink>",
     QUANTA_TEST_SOURCE_JS_CLEANED_ROOT: "<repo-source-root>",
     QUANTA_TEST_TIMEOUT_SCALE: String(timeoutPolicyBaseMs / 60_000),
+    // The capability receipt's PATH is per-campaign scratch, like the four
+    // worker paths above — hashing it would make every campaign a cache miss.
+    // Its BINDING is deliberately NOT placeheld: it digests the host's actual
+    // capabilities, and a green earned with lancedb present must not be
+    // replayed on a box without it. That is the same argument the toolchain
+    // fingerprint already makes, applied to the artifact that decides which
+    // gated describes run at all.
+    QUANTA_CAPABILITY_RECEIPT:
+      env.QUANTA_CAPABILITY_RECEIPT === undefined ? undefined : "<campaign-capability-receipt>",
   })
   const canonical = Object.entries(effective)
     .filter((entry): entry is [string, string] => entry[1] !== undefined)

@@ -38,9 +38,11 @@
  */
 
 import { createHash } from "node:crypto"
-import { chmodSync, mkdirSync, renameSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import {
+  CAPABILITY_RECEIPT_BINDING_ENV,
+  CAPABILITY_RECEIPT_PATH_ENV,
   type CapabilityBinding,
   type CapabilityFinding,
   type CapabilityReceipt,
@@ -577,6 +579,84 @@ export const capabilityPolicySha256 = (
   return createHash("sha256").update(`${ids}\n${overrides}`).digest("hex")
 }
 
+/**
+ * The receipt a campaign's workers read, and the env that points them at it.
+ *
+ * # The defect this closes
+ *
+ * This module had FIFTEEN consumers and no producer. Nothing invoked its CLI —
+ * not `package.json`, not `.github/workflows/`, not `gate-manifest.ts`, not the
+ * shard runner — and nothing set `QUANTA_CAPABILITY_RECEIPT`. So every
+ * `capability("<id>")` answered `blocked-missing`, `canExecute` turned that into
+ * `describe.skip`, and the affected files reported PASS having executed nothing,
+ * on every host, forever.
+ *
+ * MEASURED on this box, the same files with and without a receipt:
+ *
+ *   glob-gitignore-mtime-hellgate        0 pass / 8 skip  ->  8 pass
+ *   cha-multisite-hellgate               5 pass / 9 skip  -> 14 pass
+ *   project-env-snapshot-wiring          0 pass / 3 skip  ->  3 pass
+ *   contract/lsp-{pyright,typescript}    0 pass / 1 skip  ->  3 pass each
+ *   sphinx-ra-shim                       0 pass / 3 skip  ->  2 pass
+ *   ast-grep {bugs,e2e,scenarios}       23 pass / 31 skip -> 28 pass
+ *
+ * Thirty-three cases that never ran anywhere. The ones that still skip —
+ * browser, sandbox, debugpy — skip because this host genuinely lacks chromium,
+ * bwrap and debugpy, which is the answer the receipt is supposed to give.
+ *
+ * # Why a function and not more CLI
+ *
+ * A decision buried in a `cliMain` can only be guarded by asserting that some
+ * string appears in a source file, and this campaign has now been bitten by that
+ * exact shape four times. This is importable, so the round trip — produce, then
+ * have the real consumer read it — is a test rather than a grep.
+ */
+export const capabilityReceiptEnvForCampaign = async (input: {
+  readonly repoRoot: string
+  readonly tier: string
+  readonly head: string
+  readonly outPath: string
+  readonly env?: Record<string, string>
+  readonly readText?: (path: string) => string
+  readonly totalDeadlineMs?: number
+  readonly spawn?: ProbeSpawner
+}): Promise<{
+  readonly path: string
+  readonly bindingSha256: string
+  readonly env: Record<string, string>
+  readonly receipt: CapabilityReceipt
+}> => {
+  const env = input.env ?? (process.env as Record<string, string>)
+  const specs = capabilityCatalogue(env)
+  const readText = input.readText ?? ((path: string): string => readFileSync(path, "utf8"))
+  const receipt = await produceCapabilityReceipt({
+    tier: input.tier,
+    binding: {
+      head: input.head.length > 0 ? input.head : "<unknown-head>",
+      policySha256: capabilityPolicySha256(input.repoRoot, specs, readText),
+      toolchainSha256: toolchainSha256(),
+    },
+    specs,
+    env,
+    ...(input.totalDeadlineMs === undefined ? {} : { totalDeadlineMs: input.totalDeadlineMs }),
+    ...(input.spawn === undefined ? {} : { spawn: input.spawn }),
+  })
+  writeCapabilityReceipt(input.outPath, receipt)
+  return {
+    path: input.outPath,
+    bindingSha256: receipt.bindingSha256,
+    // BOTH halves. The binding is what makes the receipt refuse a foreign host;
+    // an audit found the consumer comparing it only when this second variable
+    // happened to be set, so shipping one without the other is shipping the
+    // unbound version.
+    env: {
+      [CAPABILITY_RECEIPT_PATH_ENV]: input.outPath,
+      [CAPABILITY_RECEIPT_BINDING_ENV]: receipt.bindingSha256,
+    },
+    receipt,
+  }
+}
+
 // ── CLI (the runner's call site; see docs/plans/.../handoff-tvh11.md) ───────
 
 const cliMain = async (): Promise<number> => {
@@ -613,8 +693,9 @@ const cliMain = async (): Promise<number> => {
   for (const [id, finding] of Object.entries(receipt.capabilities).sort()) {
     process.stdout.write(`  ${id.padEnd(28)} ${finding.status.padEnd(14)} ${finding.probeMs}ms\n`)
   }
-  process.stdout.write(`export ${"QUANTA_CAPABILITY_RECEIPT"}=${out}\n`)
-  process.stdout.write(`export ${"QUANTA_CAPABILITY_BINDING"}=${receipt.bindingSha256}\n`)
+  // Through the constants the CONSUMER reads, not literals beside them.
+  process.stdout.write(`export ${CAPABILITY_RECEIPT_PATH_ENV}=${out}\n`)
+  process.stdout.write(`export ${CAPABILITY_RECEIPT_BINDING_ENV}=${receipt.bindingSha256}\n`)
   const ledgerNow = probeLedger()
   process.stdout.write(
     `  ledger started=${ledgerNow.processesStarted} exited=${ledgerNow.processesExited} timers=${ledgerNow.timersCreated}/${ledgerNow.timersCleared}\n`,

@@ -215,6 +215,42 @@ describe("test-policy-enrollment", () => {
     expect(file.schema).toBe("quanta.test-policy-overrides.v1")
     expect(Array.isArray(file.overrides)).toBe(true)
   })
+
+  /**
+   * `expiresAt` was validated for FORMAT and never compared to the clock.
+   *
+   * An audit set a live row to `2020-01-01` and it loaded clean, still moving the
+   * file out of the PR tier five years later. Both sibling ledgers already expire
+   * their entries against `Date.now()` — `module-load-effect-guard.ts:193` and
+   * `tools/test-resilience/quarantine.ts` — and the one that decides TIER
+   * MEMBERSHIP did not, which is the one where a lapsed exception silently keeps
+   * a file out of a blocking gate.
+   */
+  test("a LAPSED override is refused, and the message names the row and its owner", () => {
+    const live = loadPolicyOverrides(OVERRIDES)
+    const latest = live.overrides
+      .map((row) => Date.parse(`${row.expiresAt}T23:59:59Z`))
+      .reduce((a, b) => Math.max(a, b), 0)
+    // ANTI-VACUITY: there is something to expire, and it has not expired today.
+    expect(live.overrides.length).toBeGreaterThanOrEqual(5)
+    expect(latest).toBeGreaterThan(Date.now())
+
+    // The same file, read from a clock one day past the last expiry.
+    expect(() => loadPolicyOverrides(OVERRIDES, latest + 24 * 60 * 60_000)).toThrow(/EXPIRED/)
+    const message = (() => {
+      try {
+        loadPolicyOverrides(OVERRIDES, latest + 24 * 60 * 60_000)
+        return ""
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error)
+      }
+    })()
+    expect(message).toMatch(/override .+ EXPIRED \d{4}-\d{2}-\d{2} \(owner .+\)/)
+
+    // PAIRED CONTROL: one millisecond BEFORE that boundary the same file loads,
+    // so the arm above is about the date and not about the loader refusing.
+    expect(loadPolicyOverrides(OVERRIDES, latest).overrides.length).toBe(live.overrides.length)
+  })
 })
 
 /**

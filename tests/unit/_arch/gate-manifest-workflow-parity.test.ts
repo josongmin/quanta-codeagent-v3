@@ -332,11 +332,57 @@ const stripWrappers = (segment: string): string => {
   }
 }
 
-export const commandSegments = (cmd: string): readonly string[] =>
-  cmd
+/**
+ * Every command SUBSTITUTION inside a segment, quoted or not, recursively.
+ *
+ * `stripWrappers` only unwrapped an UNQUOTED `$( … )` that was the whole
+ * segment, so the shapes real YAML writes kept a plumbing prefix and were
+ * dropped as scaffolding. Measured against this file's own `isExempt`, with
+ * `bun install --frozen-lockfile` as the exempt half:
+ *
+ *   echo "$(bun run smuggled-gate)"        slipped past
+ *   cat  "$(bun run smuggled-gate)"        slipped past
+ *   export REPORT=$(bun run smuggled-gate) slipped past
+ *
+ * A substitution RUNS a command, so its contents are judged on their own
+ * whatever encloses them. Paren-matched, because `$(a $(b))` is legal.
+ *
+ * Refuted while checking: multi-line `if`/`while`/`for` blocks were reported as
+ * bypasses and are not — a bare newline is already a separator, so the body is
+ * its own segment and was judged. Recorded so nobody re-chases it.
+ */
+/** Index of the `)` that closes the `(` at `open`, or -1 when unbalanced. */
+const matchingParen = (text: string, open: number): number => {
+  let depth = 0
+  for (let cursor = open; cursor < text.length; cursor += 1) {
+    const char = text[cursor]
+    if (char === "(") depth += 1
+    else if (char === ")") {
+      depth -= 1
+      if (depth === 0) return cursor
+    }
+  }
+  return -1
+}
+
+const substitutions = (segment: string): readonly string[] => {
+  const found: string[] = []
+  for (let at = segment.indexOf("$("); at !== -1; at = segment.indexOf("$(", at + 2)) {
+    const close = matchingParen(segment, at + 1)
+    if (close === -1) continue
+    const inner = segment.slice(at + 2, close).trim()
+    if (inner !== "") found.push(inner, ...substitutions(inner))
+  }
+  return found
+}
+
+export const commandSegments = (cmd: string): readonly string[] => {
+  const outer = cmd
     .split(SHELL_SEPARATORS)
     .map((segment) => stripWrappers(segment))
     .filter((segment) => segment !== "")
+  return [...outer, ...outer.flatMap((segment) => substitutions(segment))]
+}
 
 const exemptionMatches = (cmd: string, exemption: (typeof WORKFLOW_EXEMPT)[number]): boolean =>
   exemption.exact === true ? cmd === exemption.match : cmd.includes(exemption.match)
@@ -399,10 +445,52 @@ describe("an exempt command cannot smuggle a second one", () => {
       { why: "cargo", cmd: `${EXEMPT} && cargo test --all` },
       { why: "git", cmd: `${EXEMPT} && git push --force` },
       { why: "a path invocation", cmd: `${EXEMPT} && ./scripts/deploy.sh` },
+      // A command SUBSTITUTION runs a command. These three kept a plumbing
+      // prefix, so the inversion to fail-closed dropped them as scaffolding —
+      // measured slipping past the first version of that inversion.
+      {
+        why: "a QUOTED substitution behind echo",
+        cmd: `${EXEMPT} && echo "$(bun run smuggled-gate)"`,
+      },
+      {
+        why: "a quoted substitution behind cat",
+        cmd: `${EXEMPT} && cat "$(bun run smuggled-gate)"`,
+      },
+      {
+        why: "a substitution assigned by export",
+        cmd: `${EXEMPT} && export R=$(bun run smuggled-gate)`,
+      },
+      {
+        why: "a NESTED substitution",
+        cmd: `${EXEMPT} && echo "$(dirname $(bun run smuggled-gate))"`,
+      },
     ]
     expect(smuggled.length).toBeGreaterThanOrEqual(12)
     for (const { why, cmd } of smuggled) {
       expect({ why, exempt: isExempt(cmd, step) }).toEqual({ why, exempt: false })
+    }
+  })
+
+  /**
+   * Reported as bypasses and REFUTED by measurement, kept so the next audit does
+   * not re-chase them: a bare newline is already a separator, so the body of a
+   * multi-line block is its own segment and was judged all along.
+   */
+  test("multi-line blocks were never a bypass — the body is its own segment", () => {
+    const blocks: readonly (readonly [string, string])[] = [
+      ["if", `if [ -n "$X" ]; then\n  bun run smuggled-gate\nfi\n${EXEMPT}`],
+      ["while", `while read -r f; do\n  bun run smuggled-gate\ndone\n${EXEMPT}`],
+      ["for", `for f in a b; do bun run smuggled-gate; done\n${EXEMPT}`],
+    ]
+    for (const [why, cmd] of blocks) {
+      expect({ why, exempt: isExempt(cmd, step) }).toEqual({ why, exempt: false })
+      // In SOME segment, not as an exact element: the `for` one-liner splits on
+      // `;` into `do bun run smuggled-gate`, which is judged because `do` is
+      // plumbing only as a whole segment. Pinning the tokenisation instead of
+      // the invariant is how a guard breaks on a rewrite that changed nothing.
+      expect(
+        commandSegments(cmd).some((segment) => segment.includes("bun run smuggled-gate")),
+      ).toBe(true)
     }
   })
 
