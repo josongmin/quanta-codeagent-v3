@@ -21,6 +21,7 @@ import { join } from "node:path"
 import {
   clearLeaseQuarantine,
   KEEPER_SCRIPT_PATH,
+  keeperSpawnRefusal,
   LEASE_QUARANTINE_SCHEMA,
   type LeaseQuarantineRead,
   type LeaseQuarantineRecord,
@@ -146,6 +147,41 @@ describe("lease quarantine", () => {
     expect(expired.kind).toBe("stale")
     if (expired.kind !== "stale") throw new Error("unreachable")
     expect(expired.reason).toContain("expired")
+  })
+
+  /**
+   * ★ The ceiling released the lane without saying what it was releasing over.
+   *
+   * Liveness was computed only AFTER the expiry branch returned, so an expired
+   * record produced the same sentence — "quarantine expired 12ms ago (keeper pid
+   * 4242)" — whether every survivor had exited or all of them were still
+   * running. The contender then took a lane over live poisoned process groups,
+   * and nothing in the campaign receipt that records this verdict said so.
+   *
+   * The ceiling still wins: a crashed keeper must not brick verification for
+   * everyone. What the arms pin is that the release NAMES the groups it is
+   * releasing over.
+   */
+  test("an expired quarantine says whether it is releasing over LIVE groups", () => {
+    const rec = record()
+    const overLive = verdictFor(rec, alive(4242), rec.expiresAtMs + 5)
+    expect(overLive.kind).toBe("stale")
+    if (overLive.kind !== "stale") throw new Error("unreachable")
+    expect(overLive.reason).toContain("STILL ALIVE")
+    expect(overLive.reason).toContain("4242")
+    expect(overLive.reason).toContain("ttl ceiling is releasing")
+
+    // PAIRED CONTROL 1 — expired with everything already gone is the benign
+    // case, and it must NOT carry the warning, or the warning means nothing.
+    const overDead = verdictFor(rec, alive(), rec.expiresAtMs + 5)
+    expect(overDead.kind).toBe("stale")
+    if (overDead.kind !== "stale") throw new Error("unreachable")
+    expect(overDead.reason).toContain("every quarantined group has exited")
+    expect(overDead.reason).not.toContain("STILL ALIVE")
+
+    // PAIRED CONTROL 2 — before the ceiling, a live group still BLOCKS. The
+    // arms above must not have turned the ceiling into the only verdict.
+    expect(verdictFor(rec, alive(4242), rec.expiresAtMs - 1).kind).toBe("blocked")
   })
 
   test("another repository's quarantine never blocks this one — and is never deleted", () => {
@@ -456,14 +492,49 @@ describe("the keeper script the default spawner points at", () => {
     // TTL instead of clearing when the survivors exit.
     expect(existsSync(KEEPER_SCRIPT_PATH)).toBe(true)
     expect(KEEPER_SCRIPT_PATH.endsWith("tools/dev/lease-quarantine-keeper.ts")).toBe(true)
-    // ...and the guard is in the production path, not just in this assertion.
-    expect(readFileSync(KEEPER_SCRIPT_PATH, "utf8")).toContain("export const keeperTick")
-    expect(
-      readFileSync(
-        join(import.meta.dir, "..", "..", "..", "tools/dev/lease-quarantine.ts"),
-        "utf8",
-      ),
-    ).toContain("refusing to write a record")
+  })
+
+  /**
+   * The previous version of this arm asserted
+   * `expect(source).toContain("refusing to write a record")` against
+   * `lease-quarantine.ts`. That is a SOURCE-STRING guard: delete the
+   * `existsSync` check, leave the sentence in a comment, and it stays green. It
+   * was written as the fix for an untested default and reintroduced the exact
+   * defect class it was fixing.
+   */
+  test("the refusal is a DECISION, driven here rather than grepped for", () => {
+    const missing = keeperSpawnRefusal("/nonexistent/lease-quarantine-keeper.ts", () => false)
+    expect(missing).toContain("refusing to write a record")
+    expect(missing).toContain("/nonexistent/lease-quarantine-keeper.ts")
+
+    // PAIRED CONTROL — the SHIPPED path must not refuse. This is the wiring
+    // proof the string match only pretended to be: if the script is renamed or
+    // moved, this fails, and it fails with the real path in the message.
+    expect(keeperSpawnRefusal()).toBeUndefined()
+  })
+
+  test("the DEFAULT spawner refuses, without any arm replacing it", () => {
+    // Every other arm passes `spawnKeeper`, which is what left the production
+    // default unexercised. This one passes NO spawner, so the real
+    // `spawnDetachedKeeper` runs and its refusal branch is the thing under test.
+    const dir = mkdtempSync(join(tmpdir(), "keeper-default-"))
+    try {
+      const path = join(dir, "quarantine.json")
+      expect(() =>
+        quarantineLane({
+          path,
+          repositoryId: "owner/repo",
+          groups: [{ pgid: 4_242, leaderPid: 4_242, verdict: "ours", detail: "survivor" }],
+          keeperScriptPath: join(dir, "keeper-that-is-not-there.ts"),
+        }),
+      ).toThrow(/refusing to write a record/)
+
+      // ...and NOTHING was written. A record whose keeper can never run holds
+      // the lane for the full TTL, which is worse than not quarantining at all.
+      expect(existsSync(path)).toBe(false)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 

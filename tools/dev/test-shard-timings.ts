@@ -484,12 +484,42 @@ const abandonedJournalPaths = (
   return { paths, skippedLive }
 }
 
+/**
+ * Add one observation, IDEMPOTENTLY.
+ *
+ * # The crash window this closes
+ *
+ * `recoverAbandonedTimingJournals` writes the store and THEN removes the
+ * journals it folded. A process that dies between those two statements leaves a
+ * journal whose observations are already in the store, and the next campaign
+ * folds it again. Nothing deduplicated, so the same observation was appended
+ * once per recovery — and the window is only `TEST_TIMING_MAX_SAMPLES`.
+ *
+ * MEASURED, one abandoned journal carrying a single 2,000ms observation
+ * replayed against a store holding three honest samples of 100, 900 and 500ms:
+ *
+ *   baseline          [100, 900, 500]
+ *   after replay 1    [100, 900, 500, 2000]
+ *   after replay 3    [100, 900, 500, 2000, 2000, 2000]
+ *   after replay 12   [2000 x 12]   — 0 of 3 honest samples left
+ *
+ * The scheduler plans chunk membership from these weights, so a crash loop does
+ * not merely lose history: it manufactures a weight the corpus never produced
+ * and balances every future campaign against it.
+ *
+ * Identity is `(file, sampledAtMs)`. A file belongs to exactly one chunk per
+ * campaign and the timestamp is read from the clock at observation time, so two
+ * samples of one file at the same millisecond are the same observation, never
+ * two.
+ */
 const appendSample = (
   entries: Map<string, TimingObservation[]>,
   file: string,
   sample: TimingObservation,
 ): void => {
-  const samples = [...(entries.get(file) ?? []), sample]
+  const existing = entries.get(file) ?? []
+  if (existing.some((seen) => seen.sampledAtMs === sample.sampledAtMs)) return
+  const samples = [...existing, sample]
     .sort((left, right) => left.sampledAtMs - right.sampledAtMs)
     .slice(-TEST_TIMING_MAX_SAMPLES)
   entries.set(file, samples)

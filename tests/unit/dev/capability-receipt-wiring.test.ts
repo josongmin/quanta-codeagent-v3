@@ -47,10 +47,14 @@ import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import {
   CAPABILITY_VERDICTS_ENV,
+  CHROME_CAPABILITY_ID,
+  campaignCapabilityIds,
   capabilityReceiptEnvForCampaign,
   type ProbeSpawner,
+  produceCapabilityReceipt,
   type SpawnedProbe,
 } from "../../../tools/dev/capability-probe-producer"
+import type { CapabilityFinding } from "../../../tools/dev/capability-receipt"
 import {
   CAPABILITY_LINE_PREFIX,
   CAPABILITY_RECEIPT_BINDING_ENV,
@@ -389,5 +393,90 @@ describe("a required capability cannot be skipped past", () => {
     // complete tally instead of half of one.
     const { CAPABILITY_LINE_PREFIX: lanePrefix } = await import("../../_helpers/capability-lane")
     expect(lanePrefix).toBe(CAPABILITY_LINE_PREFIX)
+  })
+})
+
+/**
+ * ★ `chrome-cdp` was in the corpus's vocabulary and in NO receipt any production
+ * path could mint.
+ *
+ * `capabilityReceiptEnvForCampaign` — the function the shard runner calls — had
+ * no chrome parameter at all. `cliMain` was the only caller that set one, and
+ * the CLI is invoked by nothing: not `package.json`, not `.github/workflows/`,
+ * not `gate-manifest.ts`. So `capability("chrome-cdp")` answered
+ * `blocked-missing` on every host, 17 gated tests across two browser files
+ * skipped, and every one reported PASS.
+ *
+ * Three things kept it invisible:
+ *
+ *  - `produceCapabilityReceipt` gated the probe on
+ *    `includeChrome === true && chromeProfileRoot !== undefined`, a SILENT AND:
+ *    ask for chrome, forget the profile root, get a receipt without it and no
+ *    diagnostic.
+ *  - the drift guard that exists to catch "an id nothing probes" built its
+ *    `known` set by hand and appended `CHROME_CAPABILITY_ID`, whitelisting the
+ *    one id that was broken.
+ *  - `probeChromeBringUp` drives the real browser port and ignores the injected
+ *    spawner, so no arm could assert chrome was in a receipt without launching a
+ *    browser. It is injectable now, which is what makes these arms possible.
+ */
+describe("a campaign receipt carries chrome", () => {
+  const fakeChrome = async (): Promise<CapabilityFinding> => ({
+    status: "available",
+    detail: "fake bring-up",
+    resolved: "/fake/chrome",
+    probeMs: 1,
+  })
+
+  test("chrome is in the receipt, and the real consumer can execute it", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "cap-chrome-"))
+    try {
+      const out = join(dir, "receipt.json")
+      const produced = await capabilityReceiptEnvForCampaign({
+        repoRoot: REPO_ROOT,
+        tier: "pr",
+        head: "c".repeat(40),
+        outPath: out,
+        probeEnv: { PATH: process.env.PATH ?? "", HOME: "/nonexistent-probe-home" },
+        spawn: spawnerRefusing(["debugpy"]),
+        probeChrome: fakeChrome,
+        totalDeadlineMs: 10_000,
+      })
+      expect(Object.keys(produced.receipt.capabilities)).toContain(CHROME_CAPABILITY_ID)
+
+      const load = loadCapabilityReceipt(produced.env, (path) => readFileSync(path, "utf8"))
+      expect(decideFromReceipt(load, CHROME_CAPABILITY_ID).verdict).toBe("executed")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }, 30_000)
+
+  test("every id the corpus may ask for is one a campaign receipt carries", () => {
+    // The SSOT the drift guard now reads instead of appending chrome by hand.
+    const ids = campaignCapabilityIds({})
+    expect(ids).toContain(CHROME_CAPABILITY_ID)
+    // ANTI-VACUITY: the catalogue half must be there too, or the set could
+    // shrink to the one hardcoded entry and still satisfy the line above.
+    expect(ids.length).toBeGreaterThan(8)
+    expect(ids).toContain("git")
+  })
+
+  test("asking for chrome without a profile root is REFUSED, not silently dropped", async () => {
+    // The silent AND. A receipt minted without the capability answers
+    // blocked-missing, which every gated describe turns into a skip reporting PASS.
+    await expect(
+      produceCapabilityReceipt({
+        tier: "pr",
+        binding: {
+          head: "d".repeat(40),
+          policySha256: "e".repeat(64),
+          toolchainSha256: "f".repeat(64),
+        },
+        specs: [],
+        includeChrome: true,
+        probeChrome: fakeChrome,
+        totalDeadlineMs: 1_000,
+      }),
+    ).rejects.toThrow(/chromeProfileRoot/)
   })
 })

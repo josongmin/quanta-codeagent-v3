@@ -43,6 +43,7 @@ import { dirname, join } from "node:path"
 import {
   CAPABILITY_RECEIPT_BINDING_ENV,
   CAPABILITY_RECEIPT_PATH_ENV,
+  CAPABILITY_VERDICTS_ENV,
   type CapabilityBinding,
   type CapabilityFinding,
   type CapabilityReceipt,
@@ -412,6 +413,24 @@ export const capabilityCatalogue = (
 export const CHROME_CAPABILITY_ID = "chrome-cdp"
 
 /**
+ * Every capability id a CAMPAIGN receipt will carry.
+ *
+ * The drift guard — "every capability the corpus ASKS for is one the producer
+ * PROBES" — built its `known` set as `capabilityCatalogue(...).ids` plus a
+ * hardcoded `CHROME_CAPABILITY_ID`. That hardcode was the whole reason the guard
+ * stayed green while chrome was in no receipt any production path could mint:
+ * the guard's own docstring says an unprobed id "returns blocked-missing, which
+ * is a VISIBLE SKIP, so the suite stays green and the cases quietly stop
+ * running", and that was chrome's live state.
+ *
+ * One list, read by the producer and by the guard, so an id can only be
+ * "expected" while something actually produces it.
+ */
+export const campaignCapabilityIds = (
+  env: Record<string, string> = process.env as Record<string, string>,
+): readonly string[] => [...capabilityCatalogue(env).map((spec) => spec.id), CHROME_CAPABILITY_ID]
+
+/**
  * A REAL CDP bring-up, because presence is not usability: `availability()`
  * only proves the binary exists, and the sandboxed-CI failure this replaces was
  * a Chrome that was present and could not come up. Done ONCE here instead of
@@ -490,6 +509,15 @@ export interface ProduceOptions {
   readonly includeChrome?: boolean
   readonly specs?: readonly CapabilitySpec[]
   readonly spawn?: ProbeSpawner
+  /**
+   * The chrome bring-up, injectable.
+   *
+   * `probeChromeBringUp` drives the real browser port and ignores `spawn`, so
+   * before this existed NO test could assert that a campaign receipt carries
+   * `chrome-cdp` without launching a browser. That is why the capability went
+   * missing from every production receipt with every arm green.
+   */
+  readonly probeChrome?: (profileRoot: string, timeoutMs: number) => Promise<CapabilityFinding>
   readonly env?: Record<string, string>
   readonly ttlMs?: number
 }
@@ -523,8 +551,20 @@ export const produceCapabilityReceipt = async (
     }
   }
 
-  if (options.includeChrome === true && options.chromeProfileRoot !== undefined) {
-    capabilities[CHROME_CAPABILITY_ID] = await probeChromeBringUp(
+  if (options.includeChrome === true) {
+    // A SILENT AND is how the whole capability vanished. This read
+    // `includeChrome === true && chromeProfileRoot !== undefined`, so a caller
+    // that asked for chrome and forgot the profile root got a receipt with no
+    // chrome in it and no diagnostic — and the consumer then answered
+    // `blocked-missing`, which is a visible skip that reports PASS.
+    if (options.chromeProfileRoot === undefined) {
+      throw new Error(
+        "[capability] includeChrome was requested without a chromeProfileRoot. A receipt " +
+          "minted without the capability answers blocked-missing, which every gated describe " +
+          "turns into a skip that reports PASS.",
+      )
+    }
+    capabilities[CHROME_CAPABILITY_ID] = await (options.probeChrome ?? probeChromeBringUp)(
       options.chromeProfileRoot,
       Math.min(deadlineMs, 45_000),
     )
@@ -673,7 +713,7 @@ export const capabilityVerdictsSha256 = (receipt: CapabilityReceipt): string =>
 
 /** The env key the shard cache identity hashes. Distinct from the binding on
  *  purpose: the binding refuses a foreign receipt, this decides cache reuse. */
-export const CAPABILITY_VERDICTS_ENV = "QUANTA_CAPABILITY_VERDICTS"
+export { CAPABILITY_VERDICTS_ENV }
 
 export const capabilityReceiptEnvForCampaign = async (input: {
   readonly repoRoot: string
@@ -693,6 +733,33 @@ export const capabilityReceiptEnvForCampaign = async (input: {
    *  and sends every later worker back to skipping everything, silently green. */
   readonly ttlMs?: number
   readonly spawn?: ProbeSpawner
+  /**
+   * Probe chrome too. Defaults to TRUE for a real campaign.
+   *
+   * # Why it defaults on, and why `spawn` decides
+   *
+   * `chrome-cdp` is in the corpus's capability vocabulary — 17 gated tests
+   * across two browser files ask for it — and it was in NO receipt any
+   * production path could mint. This function had no chrome parameter at all,
+   * `cliMain` was the only caller that set one, and the CLI is invoked by
+   * nothing. So `capability("chrome-cdp")` answered `blocked-missing` on every
+   * host, every gated describe skipped, and all 17 reported PASS. That is the
+   * defect this whole artifact exists to end, surviving inside its own fix.
+   *
+   * Costed before defaulting it on: `probeChromeBringUp` calls
+   * `port.availability()` first and returns `unavailable` with NO spawn when
+   * there is no binary, so a host without chrome pays a stat, not a launch.
+   *
+   * It is excluded when a `spawn` override is supplied, because the chrome probe
+   * does not go through that spawner — it drives the real browser port. A caller
+   * injecting a fake spawner is testing the wiring, and launching a real browser
+   * underneath it would be the opposite of hermetic.
+   */
+  readonly includeChrome?: boolean
+  /** Where the chrome probe puts its throwaway profile. Defaults beside the receipt. */
+  readonly chromeProfileRoot?: string
+  /** Injected so an arm can prove chrome is in the receipt without a browser. */
+  readonly probeChrome?: (profileRoot: string, timeoutMs: number) => Promise<CapabilityFinding>
 }): Promise<{
   readonly path: string
   readonly bindingSha256: string
@@ -711,6 +778,11 @@ export const capabilityReceiptEnvForCampaign = async (input: {
     },
     specs,
     env,
+    includeChrome:
+      input.includeChrome ?? (input.spawn === undefined || input.probeChrome !== undefined),
+    ...(input.probeChrome === undefined ? {} : { probeChrome: input.probeChrome }),
+    chromeProfileRoot:
+      input.chromeProfileRoot ?? join(dirname(input.outPath), "chrome-probe-profile"),
     ...(input.totalDeadlineMs === undefined ? {} : { totalDeadlineMs: input.totalDeadlineMs }),
     ...(input.ttlMs === undefined ? {} : { ttlMs: input.ttlMs }),
     ...(input.spawn === undefined ? {} : { spawn: input.spawn }),

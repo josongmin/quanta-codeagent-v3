@@ -39,10 +39,7 @@ import {
   capabilityCallsites,
   scanCapabilityCallsites,
 } from "../../../tools/dev/capability-callsites"
-import {
-  CHROME_CAPABILITY_ID,
-  capabilityCatalogue,
-} from "../../../tools/dev/capability-probe-producer"
+import { campaignCapabilityIds } from "../../../tools/dev/capability-probe-producer"
 import {
   CAPABILITY_VERDICTS,
   type CapabilityVerdict,
@@ -561,7 +558,13 @@ describe("capability vocabulary and ids do not drift", () => {
     // `blocked-missing`, which is a VISIBLE SKIP, so the suite stays green and
     // the cases quietly stop running. Structural, not grep: a call expression
     // whose callee is the identifier imported from the consumer module.
-    const known = new Set([...capabilityCatalogue({}).map((spec) => spec.id), CHROME_CAPABILITY_ID])
+    // Read from the producer's own list of what a CAMPAIGN receipt carries,
+    // rather than rebuilt here with a hardcoded chrome exception. That exception
+    // is why this guard stayed green for the whole life of the defect it exists
+    // to catch: `chrome-cdp` was in NO receipt any production path could mint,
+    // so all 17 gated browser tests answered `blocked-missing` and skipped
+    // green, and the guard whitelisted the one id that was actually broken.
+    const known = new Set(campaignCapabilityIds({}))
     const callsites = scanCapabilityCallsites(readCorpusInputs(REPO_ROOT))
     expect(callsites.length, "no file consumes the capability receipt at all").toBeGreaterThan(0)
     const unknown = callsites.filter((site) => !known.has(site.capabilityId))
@@ -578,9 +581,7 @@ describe("capability vocabulary and ids do not drift", () => {
     const asked = new Set(
       scanCapabilityCallsites(readCorpusInputs(REPO_ROOT)).map((site) => site.capabilityId),
     )
-    const orphaned = [...capabilityCatalogue({}).map((s) => s.id), CHROME_CAPABILITY_ID].filter(
-      (id) => !asked.has(id),
-    )
+    const orphaned = [...campaignCapabilityIds({})].filter((id) => !asked.has(id))
     expect(orphaned, "capabilities probed every tier that no test consumes").toEqual([])
   })
 
@@ -588,7 +589,7 @@ describe("capability vocabulary and ids do not drift", () => {
     // Teeth for the two drift guards above, driven on a synthetic corpus so the
     // real one stays untouched: the SAME `known` set and the SAME scanner must
     // name a file that asks for something nothing probes.
-    const known = new Set([...capabilityCatalogue({}).map((spec) => spec.id), CHROME_CAPABILITY_ID])
+    const known = new Set(campaignCapabilityIds({}))
     const injected = scanCapabilityCallsites([
       {
         path: "tests/unit/injected.test.ts",

@@ -314,3 +314,95 @@ describe("timing writes are O(1) per campaign and survive an interrupt", () => {
     expect(timings.has("x.test.ts")).toBe(false)
   })
 })
+
+/**
+ * ★ Recovery was not idempotent, and the crash window that replays it is the
+ * one the recovery exists for.
+ *
+ * `recoverAbandonedTimingJournals` writes the store and THEN removes the
+ * journals it folded. A process that dies between those two statements leaves a
+ * journal whose observations are already in the store, so the next campaign
+ * folds it again. Nothing deduplicated and the window is only
+ * `TEST_TIMING_MAX_SAMPLES`, so one replayed observation does not merely repeat
+ * — it EVICTS the honest history one slot at a time.
+ *
+ * MEASURED before the fix, a single 2,000ms observation replayed against three
+ * honest samples of 100, 900 and 500ms:
+ *
+ *   after replay  1   [100, 900, 500, 2000]
+ *   after replay  3   [100, 900, 500, 2000, 2000, 2000]
+ *   after replay 12   [2000 x 12]   — 0 of 3 honest samples left
+ *
+ * The scheduler plans chunk membership from these weights, so a crash loop
+ * manufactures a weight the corpus never produced and balances every later
+ * campaign against it.
+ */
+describe("folding the same abandoned journal twice changes nothing", () => {
+  const FILE = "tests/unit/replayed.test.ts"
+
+  const weightsOf = (storePath: string): readonly number[] => {
+    const parsed = JSON.parse(readFileSync(storePath, "utf8")) as {
+      entries: Record<string, { samples: { schedulingWeightMs: number }[] }>
+    }
+    return (parsed.entries[FILE]?.samples ?? []).map((one) => one.schedulingWeightMs)
+  }
+
+  test("twelve replays of one journal leave one sample, not twelve", () => {
+    const dir = scratch()
+    const storePath = join(dir, "test-timings-v2.json")
+
+    // Three honest observations, committed the way a campaign commits them.
+    for (const [ms, at] of [
+      [100, NOW - 3_000],
+      [900, NOW - 2_000],
+      [500, NOW - 1_000],
+    ] as const) {
+      const journal = openTimingJournal({ storePath })
+      journal.record(new Map([[FILE, { ...sample(ms), sampledAtMs: at }]]), at)
+      journal.commit(NOW)
+    }
+    expect(weightsOf(storePath)).toEqual([100, 900, 500])
+
+    // An abandoned journal from a dead pid, in the real on-disk shape.
+    const orphan = `${storePath}.journal-999901-deadbeef.ndjson`
+    const line = JSON.stringify({
+      schema: "quanta.test-timings-journal.v1",
+      observations: { [FILE]: { ...sample(2_000), sampledAtMs: NOW } },
+    })
+
+    // Restored before each round, which is exactly what a crash between
+    // `writeStoreAtomic` and the `rmSync` that removes it produces.
+    for (let round = 1; round <= 12; round += 1) {
+      writeFileSync(orphan, `${line}\n`)
+      recoverAbandonedTimingJournals(storePath, { nowMs: NOW, isAlive: () => false })
+    }
+
+    // Folded ONCE. And every honest sample is still there: the window is 12, so
+    // twelve replays used to fill it completely.
+    expect(weightsOf(storePath)).toEqual([100, 900, 500, 2_000])
+  })
+
+  test("PAIRED CONTROL — two genuinely different observations both survive", () => {
+    // The dedupe keys on `(file, sampledAtMs)`. If it keyed on the file alone,
+    // or dropped anything already present for that file, a second real campaign
+    // would silently stop contributing history.
+    const dir = scratch()
+    const storePath = join(dir, "test-timings-v2.json")
+    for (const [ms, at] of [
+      [100, NOW - 2_000],
+      [400, NOW - 1_000],
+    ] as const) {
+      const journal = openTimingJournal({ storePath })
+      journal.record(new Map([[FILE, { ...sample(ms), sampledAtMs: at }]]), at)
+      journal.commit(NOW)
+    }
+    expect(weightsOf(storePath)).toEqual([100, 400])
+
+    // ...and the same millisecond with a DIFFERENT weight is still one
+    // observation, because one file is measured once per campaign.
+    const journal = openTimingJournal({ storePath })
+    journal.record(new Map([[FILE, { ...sample(9_999), sampledAtMs: NOW - 1_000 }]]), NOW - 1_000)
+    journal.commit(NOW)
+    expect(weightsOf(storePath)).toEqual([100, 400])
+  })
+})

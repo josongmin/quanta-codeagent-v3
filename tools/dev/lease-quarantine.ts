@@ -128,24 +128,26 @@ export type QuarantineVerdict =
  * must not hold it after the processes it was watching are gone. The keeper pid
  * is recorded for forensics and for the operator, not as the gate.
  */
-export const quarantineVerdict = (input: {
-  /**
-   * EXACTLY ONE of these, enforced by the type.
-   *
-   * Making both optional was a new fail-open one level up: `quarantineVerdict({
-   * repositoryId, nowMs, isAlive })` typechecked under `--strict` and answered
-   * `clear`, and supplying both silently used `read` with no diagnostic. The
-   * union makes "which question are you asking" a thing the caller must say.
-   */
-  readonly repositoryId: string
-  readonly nowMs: number
-  readonly isAlive: (pgid: number) => boolean
-} & (
-  | { readonly read: LeaseQuarantineRead; readonly record?: never }
-  /** Legacy shape. Cannot express "unreadable", so it still maps a corrupt
-   *  record to `clear`; kept only for the arms that predate the outcome type. */
-  | { readonly record: LeaseQuarantineRecord | undefined; readonly read?: never }
-)): QuarantineVerdict => {
+export const quarantineVerdict = (
+  input: {
+    /**
+     * EXACTLY ONE of these, enforced by the type.
+     *
+     * Making both optional was a new fail-open one level up: `quarantineVerdict({
+     * repositoryId, nowMs, isAlive })` typechecked under `--strict` and answered
+     * `clear`, and supplying both silently used `read` with no diagnostic. The
+     * union makes "which question are you asking" a thing the caller must say.
+     */
+    readonly repositoryId: string
+    readonly nowMs: number
+    readonly isAlive: (pgid: number) => boolean
+  } & (
+    | { readonly read: LeaseQuarantineRead; readonly record?: never }
+    /** Legacy shape. Cannot express "unreadable", so it still maps a corrupt
+     *  record to `clear`; kept only for the arms that predate the outcome type. */
+    | { readonly record: LeaseQuarantineRecord | undefined; readonly read?: never }
+  ),
+): QuarantineVerdict => {
   const { repositoryId, nowMs, isAlive } = input
   const read: LeaseQuarantineRead =
     input.read ??
@@ -175,13 +177,32 @@ export const quarantineVerdict = (input: {
   if (record.repositoryId !== repositoryId) {
     return { kind: "foreign", reason: `quarantine belongs to "${record.repositoryId}"` }
   }
+  const alive = record.survivors.map((group) => group.pgid).filter((pgid) => isAlive(pgid))
   if (nowMs >= record.expiresAtMs) {
+    // THE TTL CEILING IS DELIBERATE — a crashed keeper must not brick
+    // verification for everyone — but it was SILENT about the one fact that
+    // makes releasing dangerous. Liveness was computed only on the path below,
+    // so an expired record released the lane saying "quarantine expired 12ms
+    // ago (keeper pid 4242)" whether every survivor had exited or all of them
+    // were still running. The contender then took a lane over live poisoned
+    // process groups with nothing in any receipt to say so.
+    //
+    // Still `stale`; the ceiling still wins. What changes is that the release
+    // now names the groups it is releasing over, so the campaign receipt that
+    // records this verdict records the risk with it.
+    const expiredForMs = nowMs - record.expiresAtMs
     return {
       kind: "stale",
-      reason: `quarantine expired ${nowMs - record.expiresAtMs}ms ago (keeper pid ${record.keeperPid})`,
+      reason:
+        alive.length === 0
+          ? `quarantine expired ${expiredForMs}ms ago (keeper pid ${record.keeperPid}); ` +
+            "every quarantined group has exited"
+          : `quarantine expired ${expiredForMs}ms ago (keeper pid ${record.keeperPid}) with ` +
+            `${alive.length} of ${record.survivors.length} group(s) STILL ALIVE ` +
+            `(${alive.join(", ")}) — the ttl ceiling is releasing a lane whose processes are ` +
+            "still running",
     }
   }
-  const alive = record.survivors.map((group) => group.pgid).filter((pgid) => isAlive(pgid))
   if (alive.length === 0) {
     return { kind: "stale", reason: "every quarantined group has exited" }
   }
@@ -291,25 +312,54 @@ export interface QuarantineHandoffInput {
   readonly nowMs?: number
   /** Injected so the handoff is testable without detaching a real process. */
   readonly spawnKeeper?: (path: string, repositoryId: string) => number
+  /**
+   * Injected so an arm can drive the REAL default spawner's refusal without
+   * moving a tracked file. Every other arm replaces the spawner entirely, which
+   * is what left the default untested.
+   */
+  readonly keeperScriptPath?: string
   readonly log?: (line: string) => void
 }
 
 /** The keeper script this module spawns. Exported so a test can prove it exists. */
 export const KEEPER_SCRIPT_PATH = join(import.meta.dir, "lease-quarantine-keeper.ts")
 
-const spawnDetachedKeeper = (path: string, repositoryId: string): number => {
-  // Every test injects `spawnKeeper`, and the detach test spawns the script
-  // directly, so this default was exercised by nothing: a mutation audit renamed
-  // the script to a path that does not exist and the whole suite stayed green.
-  // A missing keeper means no record is ever released early and every quarantine
-  // waits out its full TTL — the exact failure the detach work claimed to fix.
-  if (!existsSync(KEEPER_SCRIPT_PATH)) {
-    throw new Error(
-      `[quarantine] keeper script missing at ${KEEPER_SCRIPT_PATH}; refusing to write a record ` +
-        "whose keeper can never run",
-    )
-  }
-  const child = Bun.spawn(["bun", KEEPER_SCRIPT_PATH, path, repositoryId], {
+/**
+ * Why the default spawner must refuse, or `undefined` when it may spawn.
+ *
+ * # Why this is a function and not an `if`
+ *
+ * It was an `if` inside `spawnDetachedKeeper`, and every arm injects
+ * `spawnKeeper` while the detach arm spawns the script directly — so the
+ * production default was exercised by nothing. A mutation audit renamed the
+ * script to a path that does not exist and the whole suite stayed green. A
+ * missing keeper means no record is ever released early and every quarantine
+ * waits out its full 30-minute TTL: the exact failure the detach work claimed to
+ * fix.
+ *
+ * The arm added afterwards was `expect(source).toContain("refusing to write a
+ * record")` — a SOURCE-STRING guard, which stays green when the check is deleted
+ * and the sentence left behind in a comment. That is the defect class this
+ * campaign exists to remove, reintroduced in the fix for it. Importable and
+ * injectable, so the arms drive the decision instead of grepping for it.
+ */
+export const keeperSpawnRefusal = (
+  scriptPath: string = KEEPER_SCRIPT_PATH,
+  exists: (path: string) => boolean = existsSync,
+): string | undefined =>
+  exists(scriptPath)
+    ? undefined
+    : `[quarantine] keeper script missing at ${scriptPath}; refusing to write a record ` +
+      "whose keeper can never run"
+
+const spawnDetachedKeeper = (
+  path: string,
+  repositoryId: string,
+  scriptPath: string = KEEPER_SCRIPT_PATH,
+): number => {
+  const refusal = keeperSpawnRefusal(scriptPath)
+  if (refusal !== undefined) throw new Error(refusal)
+  const child = Bun.spawn(["bun", scriptPath, path, repositoryId], {
     stdin: "ignore",
     stdout: "ignore",
     stderr: "ignore",
@@ -330,7 +380,10 @@ const spawnDetachedKeeper = (path: string, repositoryId: string): number => {
  */
 export const quarantineLane = (input: QuarantineHandoffInput): LeaseQuarantineRecord => {
   const nowMs = input.nowMs ?? Date.now()
-  const keeperPid = (input.spawnKeeper ?? spawnDetachedKeeper)(input.path, input.repositoryId)
+  const keeperPid =
+    input.spawnKeeper === undefined
+      ? spawnDetachedKeeper(input.path, input.repositoryId, input.keeperScriptPath)
+      : input.spawnKeeper(input.path, input.repositoryId)
   const record: LeaseQuarantineRecord = {
     schema: LEASE_QUARANTINE_SCHEMA,
     repositoryId: input.repositoryId,

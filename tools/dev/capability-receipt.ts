@@ -45,6 +45,17 @@ export const CAPABILITY_RECEIPT_PATH_ENV = "QUANTA_CAPABILITY_RECEIPT"
 /** Optional: the runner's own claim about what the receipt must be bound to. */
 export const CAPABILITY_RECEIPT_BINDING_ENV = "QUANTA_CAPABILITY_BINDING"
 /** Set by CI: `blocked` / `failed-setup` must then THROW instead of skipping. */
+/**
+ * The digest of the receipt's VERDICTS, which is the only part of the receipt
+ * allowed to move the shard cache identity.
+ *
+ * Lives beside its two siblings because the three are one contract: a worker
+ * given some of them and not others reads an unbound or unidentified receipt.
+ * `worker-home.ts` enforces all-or-nothing over exactly this set, and it cannot
+ * do that while one third of the set lives in the producer.
+ */
+export const CAPABILITY_VERDICTS_ENV = "QUANTA_CAPABILITY_VERDICTS"
+
 export const CAPABILITY_REQUIRE_ENV = "QUANTA_REQUIRE_CAPABILITIES"
 
 /**
