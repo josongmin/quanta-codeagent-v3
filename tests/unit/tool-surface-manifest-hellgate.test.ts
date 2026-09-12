@@ -13,7 +13,8 @@
 
 import { describe, expect, test } from "bun:test"
 import { execSync } from "node:child_process"
-import { join } from "node:path"
+import { readFileSync } from "node:fs"
+import { basename, join } from "node:path"
 import { createSubagentMailbox } from "@/agent/subagent-mailbox"
 import { buildEnterPlanBlock, buildPlanExitBlock } from "@/agent/tier1"
 import { createObjectiveCapabilities, createObjectiveStore } from "@/objective"
@@ -268,16 +269,8 @@ describe("tool-surface manifest — FULL-universe completeness (the guard that w
       // live outside src/agent/tier1 (they are not tier-1 session-feature builders,
       // but leaf tool factories that get composed at the runner level). Extend the
       // scan so these tools cannot silently escape the two-way drift guard.
-      // `--exclude` the manifest's OWN definition files. Without it the scan reads
-      // `src/tool/surface/{manifest,gated-tools}.ts`, so every catalogued name is
-      // "found" by virtue of being catalogued and the reverse direction below
-      // ("no stale rows") can never fail. Measured: with self included the scan
-      // returned exactly the 194 manifest names and zero stale; excluded it
-      // returns 193 and names `lsp_diagnostics`, a row for a tool that has never
-      // existed. `src/tool/index.ts` re-exports the manifest, so it goes too.
-      "grep -rhoE 'name: \"[a-z_]+\"' src/tool src/subagent src/agent/tier1 " +
-        "src/agent/budget-tool.ts src/agent/memory-tools.ts src/skill/skill-creator.ts " +
-        "--exclude=manifest.ts --exclude=gated-tools.ts",
+      // `--exclude` the manifest's OWN definition files — see SCAN_CMD.
+      SCAN_CMD,
       // Anchored on this file, not on the ambient cwd. Without it the paths above
       // resolve against wherever the runner was launched: from a foreign working
       // directory grep reported `No such file or directory` and 3 of this file's
@@ -290,6 +283,54 @@ describe("tool-surface manifest — FULL-universe completeness (the guard that w
     for (let m = re.exec(out); m !== null; m = re.exec(out)) found.add(m[1] as string)
     return found
   }
+
+  /**
+   * The completeness scan, hoisted so a test can assert the exclusions are present.
+   *
+   * WHY THE EXCLUSIONS. Without them the scan reads
+   * `src/tool/surface/{manifest,gated-tools}.ts`, so every catalogued name is "found"
+   * by virtue of being catalogued and the reverse direction ("no stale rows") can
+   * never fail. That is not hypothetical: injecting one stale row
+   * (`name: "zz_ghost_stale_tool"`, in no real source) is caught WITH the exclusions
+   * (35 pass / 1 fail) and silent WITHOUT them (36 pass / 0 fail). Deleting two
+   * words from this string restored the exact vacuity it exists to prevent, and
+   * nothing asserted it.
+   *
+   * CURRENT MEASUREMENT, corrected. An earlier version of this comment said the scan
+   * "returned exactly the 194 manifest names" with self included and "193 and names
+   * `lsp_diagnostics`" with it excluded. That was true when a row existed for a tool
+   * that never did; `1b5b8a2` removed it, so both variants now return 193 and the
+   * name sets are identical. `--exclude=gated-tools.ts` therefore excludes 73 real
+   * literals that would all be found elsewhere anyway, and `--exclude=manifest.ts`
+   * currently excludes ZERO literals — it is defensive against the manifest ever
+   * inlining names, not load-bearing today. Both are asserted below rather than
+   * described, because a currently-inert exclusion is exactly the kind that gets
+   * tidied away.
+   *
+   * The same comment also claimed "`src/tool/index.ts` re-exports the manifest, so it
+   * goes too". There is no such exclusion, and it happens not to matter — that file
+   * carries no `name: "x"` literals either. Removed rather than left as a false
+   * description of the command.
+   */
+  const SCAN_CMD =
+    "grep -rhoE 'name: \"[a-z_]+\"' src/tool src/subagent src/agent/tier1 " +
+    "src/agent/budget-tool.ts src/agent/memory-tools.ts src/skill/skill-creator.ts " +
+    "--exclude=manifest.ts --exclude=gated-tools.ts"
+
+  test("the completeness scan still excludes the manifest's own definition files", () => {
+    expect(SCAN_CMD).toContain("--exclude=gated-tools.ts")
+    expect(SCAN_CMD).toContain("--exclude=manifest.ts")
+    // …and the gated-tools exclusion must still have something to exclude, or the
+    // assertion above passes over an empty file.
+    const gated = readFileSync(
+      join(import.meta.dir, "..", "..", "src/tool/surface/gated-tools.ts"),
+      "utf8",
+    )
+    expect(
+      gated.match(/name: "[a-z_]+"/g)?.length ?? 0,
+      "gated-tools.ts carries no name literals — the exclusion guards nothing",
+    ).toBeGreaterThan(50)
+  })
 
   test("every registered tool name is catalogued in the manifest (no uncatalogued tool)", () => {
     const manifest = new Set(ALL_MANIFEST_TOOL_NAMES)
@@ -429,9 +470,41 @@ describe("tool-surface manifest — manifest→CATALOG completeness gate (root-c
     expect(uncatalogued).toEqual([])
   })
 
-  test("KNOWN_UNCATALOGUED_GATES entries each carry a reason (no bare parks)", () => {
+  /**
+   * The park list gets the three protections its sibling allowlist already has.
+   *
+   * `knob-registry-completeness-ratchet-hellgate` learned each of these the hard way:
+   * a duplicate key (`QUANTA_TB_BEST_OF_N`, keyed twice, the later row silently
+   * overwriting a better reason — invisible to every test that reads the Map), an
+   * unpinned size (the docblock said "may only ever SHRINK" and nothing enforced it),
+   * and a reason threshold of `> 0` that a single space satisfies. Measured on THIS
+   * list before the port: an 8th row for an env that is not a gate, a duplicate key,
+   * and a reason of `" "` all passed at 36 pass / 0 fail.
+   */
+  test("KNOWN_UNCATALOGUED_GATES is pinned in size and free of duplicate keys", () => {
+    const src = readFileSync(join(import.meta.dir, basename(import.meta.path)), "utf8")
+    const block = src.slice(
+      src.indexOf("const KNOWN_UNCATALOGUED_GATES: ReadonlyMap<string, string> = new Map"),
+    )
+    const literalKeys = [...block.matchAll(/^\s*\[\s*"(QUANTA_[A-Z0-9_]+)"/gm)].map(
+      (m) => m[1] as string,
+    )
+    expect(literalKeys.length, "could not parse the park literal").toBeGreaterThan(3)
+    const dupes = literalKeys.filter((k, i) => literalKeys.indexOf(k) !== i)
+    expect(dupes, "these keys appear twice — the Map keeps only the later row").toEqual([])
+    expect(KNOWN_UNCATALOGUED_GATES.size).toBe(literalKeys.length)
+    // BURN-DOWN ONLY. The docblock says a new entry is a governance regression;
+    // this is what makes that true.
+    expect(KNOWN_UNCATALOGUED_GATES.size).toBe(7)
+  })
+
+  test("KNOWN_UNCATALOGUED_GATES entries each carry a real reason (no bare parks)", () => {
     for (const [env, reason] of KNOWN_UNCATALOGUED_GATES) {
-      expect(reason.length, `park for ${env} needs a reason`).toBeGreaterThan(0)
+      // `> 0` let a single space through. The sibling requires 20 after trimming.
+      expect(
+        reason.trim().length,
+        `park for ${env} needs a real reason, not "${reason}"`,
+      ).toBeGreaterThanOrEqual(20)
     }
   })
 
