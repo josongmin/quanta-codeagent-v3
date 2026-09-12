@@ -51,7 +51,9 @@ export interface DefaultToolPorts {
   /** ADR-0280 — when a host-wired `AutomationEnginePort` is passed,
    *  `automation_update` is appended to the default tool set. Absent ⇒
    *  the tool is NOT registered (byte-identical default tools). The
-   *  composition root passes this only when `QUANTA_AUTOMATION === "on"`
+   *  composition root passes this only when `QUANTA_AUTOMATION` is truthy
+   *  (`1`/`on`/`true`/`yes` — the literal `"on"` was the only accepted token
+   *  until db4e5f7)
    *  (see `src/apps/agent/index.ts` + `src/scheduler/runtime-wire.ts`). */
   automationEngine?: AutomationEnginePort
   /** ADR-0295 — sandbox-driven HITL. The bash tool's `hitlTier` closes over

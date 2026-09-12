@@ -106,7 +106,7 @@ export const maybeStartLspPrewarm = (cfg: AgentConfig): void => {
  * of the SHARED session lifecycle so ALL surfaces that assemble an
  * `AgentConfig` (web-daemon / headless, not just the CLI REPL) get scheduled-
  * fire delivery. Previously `startAutomationEngineTicker` had exactly one non-
- * test call site (the CLI), so a non-CLI surface with `QUANTA_AUTOMATION=on`
+ * test call site (the CLI), so a non-CLI surface with `QUANTA_AUTOMATION=1`
  * scheduled fires but never ticked them.
  *
  * Delegates to `startAutomationEngineTicker`, which already returns `undefined`

@@ -1452,12 +1452,12 @@ async function loadL3ReachabilityGrandfathered(): Promise<Set<string>> {
  *
  * `computeReachabilityOffenders` only fires when ALL of a feature's src evidence is
  * dead, so one live file hides any number of dead ones. Measured at this commit:
- * 0 all-dead (the existing gate is genuinely clean) and 85 features carrying 107
+ * 0 all-dead (the existing gate is genuinely clean) and 83 features carrying 105
  * dead evidence files between them. `evidence.code` fan-in is ~1.95x, so appending
  * to an entry makes the all-dead test strictly less likely to fire — the blind spot
  * widens with use.
  *
- * NOT flipped to `some(isDead)`. That would fail 85 features at once, and the
+ * NOT flipped to `some(isDead)`. That would fail 83 features at once, and the
  * difference between a dead WIRING file and a dead auxiliary one is not recorded
  * anywhere in the schema, so the gate could not tell a real overclaim from a
  * barrel. `.d.ts` files are excluded outright: a type declaration is never

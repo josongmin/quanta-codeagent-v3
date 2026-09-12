@@ -138,7 +138,7 @@ const runCronCreate = async (args: readonly string[], ctx: SlashContext): Promis
 export const cronCmd: SlashCommand = {
   name: "/cron",
   describe:
-    "List/create scheduled automations (/cron, /cron create <RRULE> <title> [-- <prompt>]). Opt-in: QUANTA_AUTOMATION=on",
+    "List/create scheduled automations (/cron, /cron create <RRULE> <title> [-- <prompt>]). Opt-in: QUANTA_AUTOMATION=1",
   category: "other",
   async run(args: readonly string[], ctx: SlashContext): Promise<number> {
     if (ctx.automation === undefined) {

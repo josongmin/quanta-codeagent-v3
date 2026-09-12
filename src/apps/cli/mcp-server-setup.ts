@@ -292,8 +292,8 @@ const assembleAndServe = async (io: McpServerCmdIo, deps?: McpServerCmdDeps): Pr
   }
 
   // T06 — LSP-as-MCP bridge. quanta already owns the LSP client AND read-only
-  // LSP tools (`lsp_diagnostics` / `lsp_references` / `lsp_workspace_symbol` /
-  // …), but this headless `assembleAgentConfig` path wires neither the `lsp`
+  // LSP tools (`diagnostics` / `lsp_references` / `lsp_workspace_symbol` / …),
+  // but this headless `assembleAgentConfig` path wires neither the `lsp`
   // knob nor the CLI's `QUANTA_LSP_TOOLS` surface — so they never reach this
   // server's registry. When `QUANTA_LSP_MCP` is set we merge the EXISTING tools
   // in (NOT new duplicates), giving an external/CLI client real code

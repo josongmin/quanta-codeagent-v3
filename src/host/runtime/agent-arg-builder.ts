@@ -361,7 +361,10 @@ const resolveForkSession = (
 export const AUTOMATION_FIRES_DROPPED_COUNTER = "automation.fires_dropped_no_handler"
 
 /** ADR-0279 — composition-root automation slot. Returns `null` when
- *  `QUANTA_AUTOMATION !== "on"` (slot OMITTED; byte-identical legacy).
+ *  `QUANTA_AUTOMATION` is unset or falsy (slot OMITTED; byte-identical legacy).
+ *  The gate accepted only the literal `"on"` until db4e5f7; it now takes the
+ *  canonical truthy set (`1`/`on`/`true`/`yes`), which is what every surface hint
+ *  already told the operator.
  *  When the env gate is on, constructs an `AutomationEngineSlot` over an
  *  in-memory engine + a stub `AgentLoopPort` that logs a warn line
  *  (mode-preset hosts can override the slot post-construction to wire
@@ -499,7 +502,7 @@ const resolveBaseSlotState = (
   const toolProfile = resolveToolProfile(p.toolProfile)
   const focusChain = resolveFocusChain(p.focusChainEvery)
   // ADR-0279 — automation engine composition-root wire. Returns `null`
-  // when `QUANTA_AUTOMATION !== "on"` (default-OFF byte-identical legacy);
+  // when `QUANTA_AUTOMATION` is unset or falsy (default-OFF byte-identical legacy);
   // when on, returns a fully-wired slot the loop-helpers ticker consumes
   // (ADR-0240). The default tools also gain `automation_update` when the
   // engine is present (ADR-0280; conditional registration below).

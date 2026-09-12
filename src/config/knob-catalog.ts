@@ -27,7 +27,11 @@ export interface UnifiedKnob {
    *  read-routing target. */
   readonly home: "cli" | "runtime-config" | "runner-knobs" | "bench"
   /** Whether a `/config set` can change it live this session (only @/runner
-   *  knobs with hotToggleable today; declaration-only knobs are restart-scoped). */
+   *  knobs COULD carry hotToggleable; declaration-only knobs are restart-scoped).
+   *  Measured: ZERO of the 674 catalog rows are `hotToggleable: true` — the last
+   *  one, `QUANTA_PERSONA`, was corrected to `false` because its apply path was
+   *  dead. The live-toggle branches downstream are therefore unreachable today;
+   *  `knobs-set-liveness-honesty-hellgate` pins that as a fact, not an intent. */
   readonly hotToggleable: boolean
   readonly readSite?: string
 }

@@ -331,9 +331,15 @@ const setCatalogKnob = (id: string, raw: string, ctx: SlashContext): number | un
   // The original line claimed `(session override; live this session)`
   // unconditionally, for all 674 rows, while at the time exactly ONE row was
   // `hotToggleable: true` and its own source said that apply path was dead — so
-  // the sentence was false on every row a user could reach. (That row has since
-  // been corrected to `false`, leaving ZERO hot-toggleable rows; see
-  // `knobs-set-liveness-honesty-hellgate`.)
+  // the sentence was false on every row a user could reach.
+  //
+  // `1ac18b507` then corrected that row (`QUANTA_PERSONA`) to `false` in the same
+  // commit, so ZERO rows are hot-toggleable and the `true` branch below is
+  // currently UNREACHABLE for every knob. `knobs-set-liveness-honesty-hellgate`
+  // pins the count at zero as a measured fact. The branch is kept rather than
+  // deleted because the field is the declared contract and a knob with a real
+  // apply path would use it; if the count stays zero, the branch and the field
+  // should go together, not one without the other.
   //
   // The first replacement said "run `/knobs save` and restart, or export it, to
   // take effect", and half of that is also false. `/knobs save` does write the

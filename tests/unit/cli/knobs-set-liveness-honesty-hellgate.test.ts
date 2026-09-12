@@ -4,11 +4,16 @@
  * WHY THIS EXISTS, and why it is a separate file.
  *
  * `setCatalogKnob` printed `(session override; live this session)` unconditionally.
- * Measured: the unified catalog has 674 rows and exactly ONE is
- * `hotToggleable: true` — `QUANTA_PERSONA`, whose own source says the apply path is
+ * Measured at the time: the unified catalog had 674 rows and exactly ONE was
+ * `hotToggleable: true` — `QUANTA_PERSONA`, whose own source said the apply path was
  * dead (`personaKnob` is not in `wireInteractiveKnobs`, there is no `/persona`
  * command, so `apply` never fires on a live surface). So the sentence was false on
  * every row an operator could reach.
+ *
+ * The commit that added this file also corrected that row to `false`, so the count
+ * is now ZERO and the live branch is unreachable for all 674 rows. This header said
+ * "exactly ONE" while line 69 asserted `[]` — self-contradictory within one added
+ * file. The assertion was right; the sentence is now past-tense.
  *
  * Worse, the runner path two functions away has warned correctly the whole time.
  * The same knob therefore answered differently depending on spelling: `/knobs set

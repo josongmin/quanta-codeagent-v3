@@ -501,7 +501,7 @@ export const HOST: readonly KnobDeclaration[] = [
     group: "host-gate",
     home: "runtime-config",
     describe:
-      "Automation engine durable store selector ('sqlite' ⇒ on-disk; else in-memory). INERT unless QUANTA_AUTOMATION=on wires the engine — setting sqlite alone does nothing.",
+      "Automation engine durable store selector ('sqlite' ⇒ on-disk; else in-memory). INERT unless QUANTA_AUTOMATION is truthy (1/on/true/yes) and wires the engine — setting sqlite alone does nothing.",
     readSite: "scheduler/runtime-wire.ts",
   },
   {

@@ -3,7 +3,7 @@
  *
  * 6-action closed input schema (`create | list | pause | resume | cancel
  * | get`) over an `AutomationEnginePort`. Registered in `buildDefaultTools`
- * ONLY when `QUANTA_AUTOMATION === "on"` — absent ⇒ the model never sees
+ * ONLY when `QUANTA_AUTOMATION` is truthy (`1`/`on`/`true`/`yes`) — absent ⇒ the model never sees
  * the tool (byte-identical default set).
  *
  * The tool is a CLOSURE-OVER-ENGINE factory (`automationUpdateTool(engine)`)
