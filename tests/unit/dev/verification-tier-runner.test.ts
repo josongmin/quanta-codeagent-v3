@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test"
-import { join } from "node:path"
-import { gatesForVerificationTier } from "../../../tools/dev/gate-manifest"
+import { readFileSync } from "node:fs"
+import { join, resolve } from "node:path"
+import { runGateDag } from "../../../tools/dev/gate-dag"
+import { GATES, gatesForVerificationTier } from "../../../tools/dev/gate-manifest"
 import { finalizeVerificationResult, type GateResult } from "../../../tools/dev/verification-result"
 import {
   assertKnownTier,
@@ -203,5 +205,75 @@ describe("campaign command tier parse", () => {
     expect(tierFromGateCommand(["bun", "run", "tools/dev/gate.ts", "precommit"])).toBe("precommit")
     expect(tierFromGateCommand(["bun", "-e", "process.exit(0)"])).toBeNull()
     expect(tierFromGateCommand(["bun", "run", "tools/dev/gate.ts", "merge-green"])).toBeNull()
+  })
+})
+
+/**
+ * INTERLOCK — the gate scheduler stays serial until gates declare what they hold.
+ *
+ * ADR-0558 states "concurrency stays 1 until gates declare what they hold, and a
+ * test fails if it is raised". A self-audit found that claim resting on an
+ * accident: raising it DID break two tests, but both were about fail-fast
+ * ORDERING and neither mentions concurrency. A guard nobody named is a guard
+ * that gets explained away the next time it goes red.
+ *
+ * Every gate here drives a real toolchain — a type checker, a linter, a language
+ * server, a full suite — and this repository carries a measured scar about
+ * contention producing a differently TIMED wrong answer rather than a slower
+ * right one. `runGateDag` can overlap safely only when gates declare
+ * `resources`, and none does.
+ */
+describe("gate scheduling stays serial until resources are declared", () => {
+  const bridge = (): string =>
+    readFileSync(
+      resolve(import.meta.dir, "..", "..", "..", "tools", "dev", "verification-tier.ts"),
+      "utf8",
+    )
+
+  test("stepGatePlan dispatches through the DAG at concurrency 1", () => {
+    const source = bridge()
+    expect(source).toContain("runGateDag({")
+    expect(source).toMatch(/concurrency:\s*1,/)
+    // Not "some number": the literal 1. A raise is then a visible diff here.
+    expect(source).not.toMatch(/concurrency:\s*(?!1,)\d+,/)
+  })
+
+  test("no gate declares `resources`, which is WHY it stays 1", () => {
+    // The promotion condition, asserted rather than described. When a gate
+    // gains `resources`, this arm goes red and whoever added it is the one who
+    // decides whether the width may move.
+    const declared = GATES.filter(
+      (gate) => (gate as { readonly resources?: readonly string[] }).resources !== undefined,
+    ).map((gate) => gate.id)
+    expect(declared).toEqual([])
+    // ANTI-VACUITY: the manifest must be loaded and non-trivial, or "nothing
+    // declares resources" is true of an empty list.
+    expect(GATES.length).toBeGreaterThanOrEqual(15)
+  })
+
+  test("the DAG would overlap if the width were raised — the 1 is load-bearing", async () => {
+    // Proves the serial behaviour comes from the width and not from the graph
+    // happening to be a chain. Two independent gates, concurrency 2: they
+    // overlap. The same pair at 1: they do not. Without this, "concurrency: 1"
+    // could be decoration over a scheduler that never overlaps anyway.
+    const overlapped = async (concurrency: number): Promise<boolean> => {
+      let running = 0
+      let sawOverlap = false
+      await runGateDag({
+        gates: [{ id: "a" }, { id: "b" }],
+        failFast: false,
+        concurrency,
+        run: async () => {
+          running += 1
+          if (running > 1) sawOverlap = true
+          await Bun.sleep(15)
+          running -= 1
+          return { ok: true }
+        },
+      })
+      return sawOverlap
+    }
+    expect(await overlapped(2)).toBe(true)
+    expect(await overlapped(1)).toBe(false)
   })
 })

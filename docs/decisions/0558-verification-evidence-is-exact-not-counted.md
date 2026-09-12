@@ -104,5 +104,15 @@ campaign indefinitely — which is the difference this ADR is about.
 - **Wire the DAG scheduler at concurrency > 1 now.** Every gate drives a real
   toolchain, no gate declares the `resources` the scheduler needs, and this
   repository has a measured scar about contention producing a differently TIMED
-  wrong answer. Concurrency stays 1 until gates declare what they hold, and a
-  test fails if it is raised before then.
+  wrong answer. Concurrency stays 1 until gates declare what they hold.
+
+  A self-audit caught this sentence resting on an accident. Raising the width DID
+  break two tests, and both were about fail-fast ORDERING — neither mentioned
+  concurrency, so the next person to see them go red would have been right to
+  explain them away. `tests/unit/dev/verification-tier-runner.test.ts` now names
+  the interlock and it bites in BOTH directions: raising the literal fails one
+  arm, and a gate gaining `resources` fails the other, which is the promotion
+  condition asserted rather than described. A third arm proves the `1` is
+  load-bearing — the same two-gate graph overlaps at width 2 and does not at
+  width 1 — so the serial behaviour cannot be mistaken for a scheduler that
+  never overlaps anyway.
