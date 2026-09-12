@@ -191,6 +191,16 @@ export const argvPrompt = (): string => {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     if (a === undefined) continue
+    // POSIX end of options — everything after `--` is prompt text, including a
+    // token that looks like a flag. Without this there is NO way to write
+    // `quanta explain the --verbose flag`: the dash token was silently dropped and
+    // the prompt became "explain the flag", and since the unknown-flag check
+    // landed it exits 64 instead. The escape hatch has to exist for the rejection
+    // to be reasonable.
+    if (a === "--") {
+      for (const rest of argv.slice(i + 1)) positionals.push(rest)
+      break
+    }
     if (a.startsWith("-")) {
       // A valued flag also consumes its following token, so skip the value too
       // (prevents `--state foo` from leaving `foo` as a stray positional).

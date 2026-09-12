@@ -283,7 +283,8 @@ export const CLI_KNOBS: readonly CliKnob[] = [
     kind: "bool",
     default: true,
     group: "notify",
-    describe: "Suppress the idle nudge. Default-ON; `=0` lets the nudge fire.",
+    describe:
+      "Idle-presence tracking for the notify nudge. Default-ON ⇒ the nudge FIRES after QUANTA_IDLE_MS of inactivity; `=0` (the only accepted off-token) disables presence tracking, so the nudge never fires and QUANTA_IDLE_MS / QUANTA_SNOOZE_DEFAULT_MS are ignored.",
     readSite: "repl/session-runtime-config.ts",
   },
   {
@@ -318,7 +319,8 @@ export const CLI_KNOBS: readonly CliKnob[] = [
     kind: "int",
     default: undefined,
     group: "session",
-    describe: "Shell-snapshot capture timeout (ms). Unset ⇒ the built-in default.",
+    describe:
+      "Shell-snapshot capture timeout (ms). Unset ⇒ the built-in default. Requires QUANTA_SHELL_SNAPSHOT.",
     readSite: "internal/shell-snapshot.ts",
   },
   {
@@ -326,7 +328,8 @@ export const CLI_KNOBS: readonly CliKnob[] = [
     kind: "int",
     default: undefined,
     group: "session",
-    describe: "Age (ms) above which a stored shell snapshot is swept.",
+    describe:
+      "Age (ms) above which a stored shell snapshot is swept. Unset ⇒ 10 days. Requires QUANTA_SHELL_SNAPSHOT.",
     readSite: "internal/shell-snapshot.ts",
   },
   {
@@ -334,7 +337,8 @@ export const CLI_KNOBS: readonly CliKnob[] = [
     kind: "int",
     default: undefined,
     group: "session",
-    describe: "Size cap (MiB) for a single captured shell snapshot.",
+    describe:
+      "Total byte budget (MiB) for the shell-snapshot DIRECTORY — oldest snapshots are evicted first at session-start prune, NOT a per-file cap. Unset ⇒ 100 MiB. Requires QUANTA_SHELL_SNAPSHOT.",
     readSite: "internal/shell-snapshot.ts",
   },
   {
@@ -342,7 +346,8 @@ export const CLI_KNOBS: readonly CliKnob[] = [
     kind: "int",
     default: undefined,
     group: "session",
-    describe: "Cap on reactive compaction attempts before the breaker opens.",
+    describe:
+      "Cap on CONSECUTIVE reactive compactions before the breaker opens. Unset ⇒ 3. Requires QUANTA_COMPACT_BREAKER.",
     readSite: "internal.ts",
   },
   {
@@ -350,7 +355,8 @@ export const CLI_KNOBS: readonly CliKnob[] = [
     kind: "int",
     default: undefined,
     group: "session",
-    describe: "Cap on proactive compaction attempts before the breaker opens.",
+    describe:
+      "Cap on proactive compactions that shed too little to count as progress (< 15% of pre-compaction tokens) before the breaker opens — NOT a cap on attempts. Unset ⇒ 3. Requires QUANTA_COMPACT_BREAKER.",
     readSite: "internal.ts",
   },
   // Slash-registration gates. Both are default-ON opt-OUT and both were read as
@@ -370,7 +376,8 @@ export const CLI_KNOBS: readonly CliKnob[] = [
     kind: "int",
     default: undefined,
     group: "session",
-    describe: "Row cap for `/memory list`.",
+    describe:
+      "Row cap for `/memory list`. Unset ⇒ 20 (which `/memory --help` already prints), and any value is clamped to a hard cap of 200.",
     readSite: "memory-cmd.ts",
   },
   {

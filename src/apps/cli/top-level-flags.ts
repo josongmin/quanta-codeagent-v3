@@ -180,12 +180,24 @@ export const renderTopLevelFlagRows = (): readonly string[] =>
  */
 export const unknownTopLevelFlags = (argv: readonly string[]): string[] => {
   const known = new Set<string>(ALL_TOP_LEVEL_FLAG_TOKENS)
+  const valued = new Set<string>(VALUED_TOP_LEVEL_FLAGS)
   const out: string[] = []
-  for (const token of argv) {
-    if (!token.startsWith("--") || token === "--") continue
+  for (let i = 0; i < argv.length; i++) {
+    const token = argv[i] as string
+    // POSIX end of options: everything after `--` is positional, by definition.
+    if (token === "--") break
+    if (!token.startsWith("--")) continue
     const eq = token.indexOf("=")
     const flag = eq === -1 ? token : token.slice(0, eq)
-    if (known.has(flag)) continue
+    if (known.has(flag)) {
+      // A valued flag in its bare form CONSUMES the next token, whatever it looks
+      // like. `argvPrompt` has always skipped it; this did not, so
+      // `quanta --title --wip-fix-the-parser` exited 64 on a legitimate value.
+      // Two consumers of one table, disagreeing — the mirror of the defect this
+      // function was added to fix.
+      if (eq === -1 && valued.has(flag)) i += 1
+      continue
+    }
     if (!out.includes(flag)) out.push(flag)
   }
   return out

@@ -152,24 +152,72 @@ const cliComposeShellEvent = (
     : undefined
 }
 
-/** ADR-0299 — build the surface-side idle/reject guards (CLI seam). */
-const cliBuildIdleGuards: Parameters<typeof setupSession>[0]["buildIdleGuards"] = (runtime) => {
+/**
+ * ADR-0299 — build the surface-side idle/reject guards (CLI seam).
+ *
+ * EXPORTED for the guard, not for reuse. This was a module-local `const`, so no
+ * test could reach the decision it owns, and it silently coupled a safety rail to
+ * an unrelated knob for as long as it existed.
+ *
+ * The idle monitor's two fields DO belong to `idleSuppressOn` — that knob is the
+ * presence-tracking switch, and with it off there is no idleness to threshold.
+ *
+ * The reject counter does NOT. It counts consecutive tool-approval DENIALS, and
+ * `reject-counter.ts` documents exactly one way to disable it: "`threshold =
+ * Infinity` ⇒ `shouldAutoExit()` is always false. That's how `QUANTA_REJECT_LIMIT=0`
+ * disables the mechanism — no internal kill-switch needed." Gating it on
+ * `idleSuppressOn` added a second kill switch that nothing documents and that no
+ * describe mentions. Measured: with `QUANTA_IDLE_SUPPRESS=0` and
+ * `QUANTA_REJECT_LIMIT=3`, the limit resolved to Infinity and the auto-exit never
+ * fired across 50 consecutive denials.
+ *
+ * Removing that conjunct turns a safety rail back ON for anyone running with
+ * `QUANTA_IDLE_SUPPRESS=0`; `QUANTA_REJECT_LIMIT=0` remains the documented way off.
+ */
+export interface IdleGuardLimits {
+  readonly idleThresholdMs: number
+  readonly defaultSnoozeMs: number
+  readonly rejectThreshold: number
+}
+
+/**
+ * The three resolved limits, as a pure function of the session runtime config.
+ *
+ * Separated from construction because the factories return NARROW ports
+ * (`BootstrapIdleMonitor`, `BootstrapRejectCounter`) that expose neither the
+ * resolved threshold nor the limit — so a test could observe the guards but not the
+ * decision, which is where the defect was.
+ */
+export const resolveIdleGuardLimits = (runtime: {
+  readonly idleSuppressOn: boolean
+  readonly idleMs: number
+  readonly snoozeDefaultMs: number
+  readonly rejectLimit: number
+}): IdleGuardLimits => ({
+  idleThresholdMs:
+    runtime.idleSuppressOn && Number.isFinite(runtime.idleMs)
+      ? runtime.idleMs
+      : Number.POSITIVE_INFINITY,
+  defaultSnoozeMs:
+    runtime.idleSuppressOn && Number.isFinite(runtime.snoozeDefaultMs)
+      ? runtime.snoozeDefaultMs
+      : 300_000,
+  // NOT gated on `idleSuppressOn` — see the note above.
+  rejectThreshold:
+    Number.isFinite(runtime.rejectLimit) && runtime.rejectLimit > 0
+      ? runtime.rejectLimit
+      : Number.POSITIVE_INFINITY,
+})
+
+export const cliBuildIdleGuards: Parameters<typeof setupSession>[0]["buildIdleGuards"] = (
+  runtime,
+) => {
+  const limits = resolveIdleGuardLimits(runtime)
   const idleMonitor = createIdleMonitor({
-    idleThresholdMs:
-      runtime.idleSuppressOn && Number.isFinite(runtime.idleMs)
-        ? runtime.idleMs
-        : Number.POSITIVE_INFINITY,
-    defaultSnoozeMs:
-      runtime.idleSuppressOn && Number.isFinite(runtime.snoozeDefaultMs)
-        ? runtime.snoozeDefaultMs
-        : 300_000,
+    idleThresholdMs: limits.idleThresholdMs,
+    defaultSnoozeMs: limits.defaultSnoozeMs,
   })
-  const rejectCounter = createRejectCounter({
-    threshold:
-      runtime.idleSuppressOn && Number.isFinite(runtime.rejectLimit) && runtime.rejectLimit > 0
-        ? runtime.rejectLimit
-        : Number.POSITIVE_INFINITY,
-  })
+  const rejectCounter = createRejectCounter({ threshold: limits.rejectThreshold })
   return { idleMonitor, rejectCounter }
 }
 

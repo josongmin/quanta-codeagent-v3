@@ -29,6 +29,7 @@
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
+import { argvPrompt } from "@/apps/cli/internal/argv"
 import {
   ALL_TOP_LEVEL_FLAG_TOKENS,
   TOP_LEVEL_FLAGS,
@@ -154,10 +155,44 @@ describe("top-level flag registry ↔ parser parity", () => {
       expect(unknownTopLevelFlags(["--tool-profil=full"])).toEqual(["--tool-profil"])
     })
 
-    test("single-dash tokens and the POSIX end-of-options marker are left alone", () => {
+    test("single-dash tokens are left alone", () => {
       // An earlier scanner in this campaign over-matched `-lc` and `-p` and had to
       // be narrowed; this one is double-dash only by construction.
-      expect(unknownTopLevelFlags(["-lc", "-p", "-x", "--"])).toEqual([])
+      expect(unknownTopLevelFlags(["-lc", "-p", "-x"])).toEqual([])
+    })
+
+    /**
+     * A valued flag CONSUMES the next token, whatever it looks like.
+     *
+     * This function shipped without consulting `VALUED_TOP_LEVEL_FLAGS` — declared
+     * twenty lines above it, in the same file, for exactly this job — so
+     * `quanta --title --wip-fix-the-parser` exited 64 on a legitimate value.
+     * `argvPrompt` had always skipped it, so the two consumers of one table
+     * disagreed: the mirror of the defect this function was added to fix.
+     */
+    test("a valued flag's value is not mistaken for a flag", () => {
+      for (const f of TOP_LEVEL_FLAGS.filter((x) => x.valued === true)) {
+        expect(unknownTopLevelFlags([f.flag, "--looks-like-a-flag"]), f.flag).toEqual([])
+        expect(unknownTopLevelFlags([f.flag, "plain-value"]), f.flag).toEqual([])
+      }
+      // The `=value` form does NOT consume the next token.
+      expect(unknownTopLevelFlags(["--title=hello", "--nope"])).toEqual(["--nope"])
+      // A NON-valued flag does not consume the next token either.
+      expect(unknownTopLevelFlags(["--plan", "--nope"])).toEqual(["--nope"])
+    })
+
+    /**
+     * POSIX end of options. Without it there is NO way to write
+     * `quanta -- explain the --verbose flag`: before the rejection landed the dash
+     * token was silently dropped and the prompt became "explain the flag" with a
+     * billed call; after it, exit 64. A rejection needs an escape hatch to be
+     * reasonable, and `argvPrompt` honours the same marker.
+     */
+    test("everything after a bare -- is positional, not a flag", () => {
+      expect(unknownTopLevelFlags(["--", "--not-a-flag"])).toEqual([])
+      expect(unknownTopLevelFlags(["--", "explain", "the", "--verbose", "flag"])).toEqual([])
+      // …but a flag BEFORE the marker is still checked.
+      expect(unknownTopLevelFlags(["--nope", "--", "--whatever"])).toEqual(["--nope"])
     })
 
     test("positionals are never flags", () => {
@@ -166,6 +201,62 @@ describe("top-level flag registry ↔ parser parity", () => {
 
     test("each unknown flag is reported once, in argv order", () => {
       expect(unknownTopLevelFlags(["--bbb", "--aaa", "--bbb"])).toEqual(["--bbb", "--aaa"])
+    })
+
+    /**
+     * THE INVARIANT, not just the two behaviours: `argvPrompt` and
+     * `unknownTopLevelFlags` are the two production consumers of one table, and they
+     * must agree about which tokens are flags and which are values.
+     *
+     * Both defects in this area were disagreements between them. `argvPrompt` skipped
+     * an unknown flag but kept its VALUE as a positional, so a typo became a billed
+     * prompt. Then `unknownTopLevelFlags` landed without consulting
+     * `VALUED_TOP_LEVEL_FLAGS`, so a known flag's legitimate value was rejected. Each
+     * consumer was individually testable and individually passed.
+     */
+    const promptFor = (argv: readonly string[]): string => {
+      const prior = process.argv
+      try {
+        process.argv = ["bun", "x", ...argv]
+        return argvPrompt()
+      } finally {
+        process.argv = prior
+      }
+    }
+
+    test("a flag and its value are accepted by the checker and kept out of the prompt", () => {
+      const cases: readonly (readonly string[])[] = [
+        ["--title", "--wip-fix-the-parser"],
+        ["--title", "my title", "hello"],
+        ["--resume", "--abc"],
+        ["--title=hello", "world"],
+        ["--plan", "hello"],
+        ["--image", "--pic.png", "describe it"],
+      ]
+      for (const argv of cases) {
+        expect(unknownTopLevelFlags(argv), `${JSON.stringify(argv)} must be accepted`).toEqual([])
+        const words = promptFor(argv).split(" ")
+        for (const token of argv.filter((t) => t.startsWith("--"))) {
+          expect(words.includes(token), `${token} reached the prompt`).toBe(false)
+        }
+      }
+    })
+
+    test("BOTH consumers treat everything after `--` as prompt text", () => {
+      const argv = ["--", "explain", "the", "--verbose", "flag"]
+      expect(unknownTopLevelFlags(argv), "the checker must not reject past the marker").toEqual([])
+      // The direction a one-sided assertion misses: the tokens must ARRIVE, not just
+      // fail to be rejected. Dropping the marker from `argvPrompt` alone silently
+      // yields "explain the flag" and only this assertion sees it.
+      expect(promptFor(argv)).toBe("explain the --verbose flag")
+      expect(promptFor(["--", "--not-a-flag"])).toBe("--not-a-flag")
+    })
+
+    test("the rejected case is exactly the billed prompt it prevents", () => {
+      expect(unknownTopLevelFlags(["--resumee", "xyz"])).toEqual(["--resumee"])
+      expect(promptFor(["--resumee", "xyz"]), "this is what used to be sent to the model").toBe(
+        "xyz",
+      )
     })
 
     /** Paired control: the check is only sound because the table is complete, which
