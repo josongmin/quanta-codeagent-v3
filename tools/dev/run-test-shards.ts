@@ -52,6 +52,7 @@ import {
   inheritedTestShardLeaseState,
   normalizeRepositoryIdentity,
   readCommittedRepositoryLeaseId,
+  resolveLaneOwnership,
   selectRepositoryLeaseIdentity,
   type TestShardLease,
   testShardLeasePort,
@@ -1287,28 +1288,32 @@ const main = async (): Promise<void> => {
     )
   }
   let lease: TestShardLease | undefined
-  let leaseIdentity: string | undefined
-  if (inheritedLease === "valid") {
+  // ONE call answers both questions, so no branch can own the workers without
+  // knowing the key its survivors must be quarantined under. This used to be
+  // set only in the branch that ACQUIRES, which meant that under a campaign —
+  // the normal path — the runner wrote no quarantine record at all.
+  const ownership = await resolveLaneOwnership({
+    inherited: inheritedLease === "valid",
+    env: process.env,
+    ownIdentity: async () => {
+      const [remote, commonDir] = await Promise.all([
+        capture(["git", "remote", "get-url", "origin"]),
+        capture(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"]),
+      ])
+      return selectRepositoryLeaseIdentity({
+        repositoryId: readCommittedRepositoryLeaseId(REPO_ROOT),
+        remote,
+        commonDir,
+        cwd: process.cwd(),
+      })
+    },
+  })
+  const leaseIdentity = ownership.quarantineKey
+  if (ownership.acquireIdentity === undefined) {
     process.stdout.write("[test:shards] LEASE inherited scope=whole-campaign\n")
   } else {
-    const [remote, commonDir] = await Promise.all([
-      capture(["git", "remote", "get-url", "origin"]),
-      capture(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"]),
-    ])
-    const identity = selectRepositoryLeaseIdentity({
-      repositoryId: readCommittedRepositoryLeaseId(REPO_ROOT),
-      remote,
-      commonDir,
-      cwd: process.cwd(),
-    })
-    // NORMALISED, like the lease itself: `acquireTestShardLease` runs its
-    // identity through `normalizeRepositoryIdentity` before hashing a port,
-    // so a quarantine written under the raw string is compared against a
-    // different key and never blocks. A behavioural acquisition test caught
-    // that; the source-shaped wiring assertions did not.
-    leaseIdentity = normalizeRepositoryIdentity(identity)
     lease = await acquireTestShardLease({
-      identity,
+      identity: ownership.acquireIdentity,
       quarantinePath: QUARANTINE_PATH,
       onQuarantineWait: (reason) => process.stdout.write(`[test:shards] WAIT ${reason}\n`),
       onWait: (port, elapsedMs) =>
@@ -1488,7 +1493,7 @@ const main = async (): Promise<void> => {
       // still held by processes this campaign could not account for. Written
       // BEFORE the release, because the kernel frees the port the instant this
       // process exits.
-      if (leaseIdentity !== undefined && drain.groups.length > 0) {
+      if (drain.groups.length > 0) {
         quarantineLane({
           path: QUARANTINE_PATH,
           repositoryId: leaseIdentity,

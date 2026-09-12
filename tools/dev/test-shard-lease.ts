@@ -206,6 +206,57 @@ export const inheritedTestShardLeaseState = async (
   return (await input.confirmToken(token as string)) ? "valid" : "invalid"
 }
 
+/**
+ * Who owns the lane, and under which key a survivor must be quarantined.
+ *
+ * # The defect
+ *
+ * The runner set its quarantine key ONLY in the branch that acquires a lease.
+ * Under a campaign — the normal path, where the wrapper owns the lane — the key
+ * stayed `undefined` and the `if (leaseIdentity !== undefined)` guard at the
+ * drain site silently skipped the write. So the quarantine was inert exactly
+ * when it mattered: the campaign's own drain accounts only for groups the
+ * CAMPAIGN spawned, and a shard worker group the runner could not account for
+ * was then quarantined by nobody.
+ *
+ * Both facts come out of one call, so a branch cannot supply one and forget the
+ * other: `acquireIdentity` is absent precisely when an ancestor owns the lane,
+ * and `quarantineKey` is present either way, because owning the WORKERS is what
+ * makes a process responsible for the record — not owning the lease.
+ */
+export interface LaneOwnership {
+  /** `undefined` when an ancestor owns the lane and reacquiring would deadlock. */
+  readonly acquireIdentity: string | undefined
+  /** The key a contender reads. Always the normalised form, because
+   *  `acquireTestShardLease` hashes its port from that and a record written
+   *  under the raw string is compared against a different key and never blocks. */
+  readonly quarantineKey: string
+}
+
+export const resolveLaneOwnership = async (input: {
+  readonly inherited: boolean
+  readonly env: Record<string, string | undefined>
+  /** Called only when this process must acquire, so an inherited run does not
+   *  pay for two `git` invocations it cannot use. */
+  readonly ownIdentity: () => Promise<string>
+}): Promise<LaneOwnership> => {
+  if (!input.inherited) {
+    const identity = await input.ownIdentity()
+    return { acquireIdentity: identity, quarantineKey: normalizeRepositoryIdentity(identity) }
+  }
+  const owner = input.env[VERIFICATION_LEASE_OWNER_IDENTITY_ENV]
+  if (owner === undefined || owner === "") {
+    // Fail closed. A run whose quarantine key is unknown cannot hold the lane
+    // on behalf of its own survivors, and that is the state the defect above
+    // produced silently.
+    throw new Error(
+      "[test:shards] inherited verification lease carries no owner identity; " +
+        "refusing to run a lane whose quarantine key is unknown",
+    )
+  }
+  return { acquireIdentity: undefined, quarantineKey: normalizeRepositoryIdentity(owner) }
+}
+
 /** Normalize SSH aliases and HTTPS remotes to the same owner/repository key. */
 export const normalizeRepositoryIdentity = (remote: string): string => {
   const value = remote.trim().replace(/\.git$/, "")

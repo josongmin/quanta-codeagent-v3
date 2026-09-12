@@ -190,6 +190,15 @@ const identity = selectRepositoryLeaseIdentity({
   commonDir,
   cwd: REPO_ROOT,
 })
+/**
+ * The key a contender reads, derived ONCE.
+ *
+ * `acquireTestShardLease` normalises before hashing a port, so a record written
+ * under the raw identity is compared against a different key and never blocks.
+ * Two call sites derived it separately; one owner here is what keeps the
+ * exported environment identity and the quarantine record the same string.
+ */
+const QUARANTINE_KEY = normalizeRepositoryIdentity(identity)
 
 /**
  * ONE termination path, installed before anything can be signalled.
@@ -290,6 +299,13 @@ const leaseWaitStartedAtMs = Date.now()
 lease = await acquireTestShardLease({
   identity,
   signal: waitAborter.signal,
+  // The campaign WRITES this record on a failed drain and, until this line,
+  // never read it: a free port is not a free lane, and the next campaign took
+  // a checkout whose ports, HOME and worktrees were still held by the
+  // previous one's survivors. Measured: the same acquisition without this
+  // option acquired over a blocking record in 0ms.
+  quarantinePath: QUARANTINE_PATH,
+  onQuarantineWait: (reason) => process.stdout.write(`[verification] WAIT ${reason}\n`),
   onWait: (port, elapsedMs) =>
     process.stdout.write(
       `[verification] WAIT repository lease port=${port} elapsed=${Math.round(elapsedMs / 1_000)}s; ` +
@@ -401,7 +417,7 @@ try {
       // nothing could refuse a value the parent never issued.
       ...(lease === undefined ? {} : { [VERIFICATION_LEASE_TOKEN_ENV]: lease.token }),
       [VERIFICATION_LEASE_OWNER_PID_ENV]: String(process.pid),
-      [VERIFICATION_LEASE_OWNER_IDENTITY_ENV]: normalizeRepositoryIdentity(identity),
+      [VERIFICATION_LEASE_OWNER_IDENTITY_ENV]: QUARANTINE_KEY,
       // TVH item 12. The campaign FROZE the comparison base and then handed the
       // child nothing, so every consumer re-read the mutable `origin/main` —
       // a fetch landing mid-campaign changed what `check-changed` and the
@@ -443,7 +459,7 @@ try {
     if (outcome.groups.length > 0) {
       quarantineRecord = quarantineLane({
         path: QUARANTINE_PATH,
-        repositoryId: normalizeRepositoryIdentity(identity),
+        repositoryId: QUARANTINE_KEY,
         groups: outcome.groups,
         log: (line) => process.stderr.write(line),
       })

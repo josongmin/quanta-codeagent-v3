@@ -31,7 +31,12 @@ import {
   writeLeaseQuarantine,
 } from "../../../tools/dev/lease-quarantine"
 import { keeperTick } from "../../../tools/dev/lease-quarantine-keeper"
-import { acquireTestShardLease } from "../../../tools/dev/test-shard-lease"
+import {
+  acquireTestShardLease,
+  normalizeRepositoryIdentity,
+  resolveLaneOwnership,
+  testShardLeasePort,
+} from "../../../tools/dev/test-shard-lease"
 
 const GROUP = {
   pgid: 4242,
@@ -60,6 +65,39 @@ const verdictFor = (
   isAlive: (pgid: number) => boolean,
   nowMs = 2_000,
 ) => quarantineVerdict({ record: rec, repositoryId: "owner/repo", nowMs, isAlive })
+
+/**
+ * Comment-stripped source, because a guard that can read its own explanation
+ * passes for the wrong reason — this campaign tripped over that three times.
+ */
+const withoutComments = (text: string): string =>
+  text.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ")
+
+/**
+ * Every `acquireTestShardLease(...)` call in `text`, argument list included.
+ *
+ * Brace-matched rather than regex-matched: a `finally\s*\{([\s\S]*?)\}` guard
+ * elsewhere in this campaign truncated at the first `}}` the moment a nested
+ * object appeared, and silently guarded a prefix of what it claimed to.
+ */
+const leaseAcquisitionCalls = (text: string): readonly string[] => {
+  const needle = "acquireTestShardLease("
+  const calls: string[] = []
+  for (let at = text.indexOf(needle); at !== -1; at = text.indexOf(needle, at + 1)) {
+    let depth = 0
+    let cursor = at + needle.length - 1
+    for (; cursor < text.length; cursor += 1) {
+      const char = text[cursor]
+      if (char === "(" || char === "{") depth += 1
+      else if (char === ")" || char === "}") {
+        depth -= 1
+        if (depth === 0) break
+      }
+    }
+    calls.push(text.slice(at, cursor + 1))
+  }
+  return calls
+}
 
 describe("lease quarantine", () => {
   test("a live survivor BLOCKS the lane, and the reason names it", () => {
@@ -248,6 +286,55 @@ describe("quarantine wiring", () => {
     expect(campaign.indexOf("lease?.release()", held)).toBeGreaterThan(held)
   })
 
+  /**
+   * WRITING a record and never READING one is half a quarantine, and this file
+   * shipped exactly that: the campaign wrote the record on a failed drain and
+   * acquired without `quarantinePath`, so the next campaign took the lane over
+   * its own predecessor's survivors. Measured before the fix, same identity,
+   * same record, injected keeper:
+   *
+   *   without quarantinePath -> ACQUIRED port=47451 (record ignored)
+   *   with    quarantinePath -> refused: lane quarantined by pid …, 1 of 1 alive
+   *
+   * The arm above could not see it: it asserted the WRITE. So this one is over
+   * every acquisition in the tree, found by brace matching rather than by a
+   * regex that stops at the first `}` — an earlier guard in this campaign broke
+   * exactly that way once a nested object appeared in the argument list.
+   */
+  test("EVERY acquisition of the repository lane consults the quarantine", () => {
+    const owners = [
+      "tools/dev/run-test-shards.ts",
+      "tools/dev/verification-campaign.ts",
+      "tools/dev/test-shard-lease.ts",
+    ]
+
+    // ANTI-VACUITY: the stripper must not empty the file, and the search must
+    // find the calls that exist. A guard over zero call sites is green forever.
+    const found = owners.flatMap((file) => {
+      const text = withoutComments(source(file))
+      expect({ file, hasCode: text.includes("acquireTestShardLease") }).toEqual({
+        file,
+        hasCode: true,
+      })
+      return leaseAcquisitionCalls(text).map((call) => ({ file, call }))
+    })
+    // The two lane owners. `test-shard-lease.ts` is in the list because it is
+    // where a third acquirer would most plausibly be added, and its own
+    // definition is not a call — so if that ever changes, this list must be
+    // updated rather than silently covering fewer sites.
+    expect(found.map(({ file }) => file).sort()).toEqual([
+      "tools/dev/run-test-shards.ts",
+      "tools/dev/verification-campaign.ts",
+    ])
+
+    for (const { file, call } of found) {
+      expect({ file, quarantineChecked: call.includes("quarantinePath") }).toEqual({
+        file,
+        quarantineChecked: true,
+      })
+    }
+  })
+
   test("acquisition consults the quarantine before accepting a bind", () => {
     const lease = source("tools/dev/test-shard-lease.ts")
     expect(lease).toContain("quarantineBlock(identity, options)")
@@ -315,4 +402,85 @@ describe("quarantine wiring", () => {
       rmSync(dir, { recursive: true, force: true })
     }
   }, 20_000)
+})
+
+/**
+ * The runner set its quarantine key only in the branch that ACQUIRES a lease.
+ * Under a campaign — the normal path, where the wrapper owns the lane — the key
+ * stayed `undefined` and `if (leaseIdentity !== undefined)` silently skipped
+ * the write. The quarantine was therefore inert exactly where it mattered: the
+ * campaign's own drain accounts only for groups the CAMPAIGN spawned, so a
+ * shard worker group the runner could not account for was quarantined by nobody.
+ */
+describe("lane ownership names the key in both shapes", () => {
+  const OWNER_ENV = "QUANTA_VERIFICATION_LEASE_IDENTITY"
+
+  test("an inherited lane still knows the key its survivors belong to", async () => {
+    let ownCalls = 0
+    const ownership = await resolveLaneOwnership({
+      inherited: true,
+      env: { [OWNER_ENV]: "git@github.com:acme/widgets.git" },
+      ownIdentity: async () => {
+        ownCalls += 1
+        return "/not/asked"
+      },
+    })
+    // Not acquiring is the point — reacquiring would deadlock against the
+    // wrapper's own lease — but the KEY is present anyway.
+    expect(ownership.acquireIdentity).toBeUndefined()
+    expect(ownership.quarantineKey).toBe("acme/widgets")
+    // ...and an inherited run does not pay for two `git` invocations.
+    expect(ownCalls).toBe(0)
+  })
+
+  test("an owning run acquires under the raw identity and quarantines under the key", async () => {
+    const ownership = await resolveLaneOwnership({
+      inherited: false,
+      env: {},
+      ownIdentity: async () => "/Users/someone/quanta-codeagent-v3",
+    })
+    // RAW for the acquisition, because that is what the lease hashes, and
+    // NORMALISED for the record, because that is what a contender compares.
+    expect(ownership.acquireIdentity).toBe("/Users/someone/quanta-codeagent-v3")
+    expect(ownership.quarantineKey).toBe("someone/quanta-codeagent-v3")
+  })
+
+  test("an inherited lane with no owner identity fails CLOSED", async () => {
+    // The silent-undefined state is what the defect produced. A run that
+    // cannot name its key must not run at all.
+    for (const env of [{}, { [OWNER_ENV]: "" }]) {
+      await expect(
+        resolveLaneOwnership({ inherited: true, env, ownIdentity: async () => "unused" }),
+      ).rejects.toThrow(/no owner identity/)
+    }
+  })
+
+  test("the key a contender reads is the one the lease hashed its port from", async () => {
+    // The normalisation is not cosmetic: `acquireTestShardLease` runs its
+    // identity through `normalizeRepositoryIdentity` before hashing, so a
+    // record under the raw string is compared against a different key and
+    // never blocks.
+    const raw = "/Users/someone/quanta-codeagent-v3"
+    const ownership = await resolveLaneOwnership({
+      inherited: false,
+      env: {},
+      ownIdentity: async () => raw,
+    })
+    expect(ownership.quarantineKey).toBe(normalizeRepositoryIdentity(raw))
+    // BEHAVIOURAL: take the lane under the RAW identity, exactly as the runner
+    // does, and the port it lands on is the one derived from the key the record
+    // is written under. Hashing the raw string instead lands elsewhere
+    // (measured 45790 vs 43098), which is how a record can end up describing a
+    // lane no contender is looking at.
+    const unique = `${raw}-${process.pid}-${Date.now()}`
+    const key = (
+      await resolveLaneOwnership({ inherited: false, env: {}, ownIdentity: async () => unique })
+    ).quarantineKey
+    const lease = await acquireTestShardLease({ identity: unique, waitMs: 2_000, pollMs: 10 })
+    try {
+      expect(lease.port).toBe(testShardLeasePort(key))
+    } finally {
+      lease.release()
+    }
+  })
 })
