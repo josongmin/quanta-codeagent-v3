@@ -14586,7 +14586,7 @@
     },
     {
       "testId": "tests/unit/_arch/worktree-pollution-guard.test.ts",
-      "sourceSha256": "d10285292b5a1a4222f55edf7718994ccceec965da8f483689987113cf540b2b",
+      "sourceSha256": "48e587f778c6eb815dfc2b57f99930bd182c90c35e8c0a583769012f3fc9670c",
       "owner": "verification",
       "reason": "Claims enumerated from the import closure (5 repository modules) by quanta.test-resource-analysis.v1; every reachable module and external specifier is accounted for.",
       "status": "certified",
