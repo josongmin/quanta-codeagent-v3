@@ -1352,6 +1352,10 @@ const main = async (): Promise<void> => {
   // the lease. Without a handler the runner dies instantly and leaves live
   // workers overlapping the next campaign.
   let terminating = false
+  // Set once the journal exists. The handler is installed BEFORE it opens — a
+  // signal in that window must not find a half-built one — so "nothing to
+  // commit" is a real state rather than a missing case.
+  let openJournal: TimingJournal | undefined
   const onTerminationSignal = (signal: NodeJS.Signals): void => {
     if (terminating) return
     terminating = true
@@ -1359,6 +1363,30 @@ const main = async (): Promise<void> => {
       registry,
       runRoot,
       signal,
+      // The SAME accounting the `finally` does. `process.exit` below skips that
+      // block entirely, so a Ctrl-C used to release the lane with unaccounted
+      // survivors and leave the timing journal behind — measured as a quarantine
+      // file that exists on the finally path and not on this one.
+      accountForSurvivors: (outcome) => {
+        if (outcome.groups.length > 0) {
+          quarantineLane({
+            path: QUARANTINE_PATH,
+            repositoryId: leaseIdentity,
+            groups: outcome.groups,
+            log: (line) => process.stderr.write(line),
+          })
+        }
+        // Timing is a scheduler hint, never a verdict input, so committing it on
+        // the way out is safe — and NOT committing it is what left orphan
+        // journals in the shared cache for a recycled pid to strand forever.
+        const committed = openJournal?.commit()
+        process.stderr.write(
+          committed === undefined
+            ? `[test:shards] no timing journal open at ${signal}\n`
+            : `[test:shards] journal committed on ${signal}: files=${committed.files} ` +
+                `writes=${committed.storeWrites}\n`,
+        )
+      },
       releaseLease: () => lease?.release(),
       log: (line) => process.stderr.write(line),
     }).then((code) => process.exit(code))
@@ -1457,6 +1485,7 @@ const main = async (): Promise<void> => {
     // certified", never a dead campaign.
     const resourceCertifications = loadResourceCertificationsOrWarn()
     const journal = openTimingJournal({ storePath: TIMING_STORE })
+    openJournal = journal
     // One decision per chunk, made here so the receipt's identity describes the
     // schedule the run will actually use. `workers` is the concurrency the host
     // measured at campaign start; the per-start measurement can still drop the
