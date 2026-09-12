@@ -156,3 +156,37 @@ export const renderTopLevelFlagRows = (): readonly string[] =>
     const left = f.value === undefined ? spellings : `${spellings} ${f.value}`
     return `  ${left.padEnd(36)} ${f.describe}`
   })
+
+/**
+ * Every `--`-prefixed token in `argv` that the table does not advertise.
+ *
+ * WHY THIS EXISTS. `argvPrompt`'s allowlist drops every `-`-prefixed token, and
+ * its docstring concluded "no new top-level flag can ever leak". The FLAG does not
+ * leak; its VALUE does. An unknown flag is not in `VALUED_TOP_LEVEL_FLAGS`, so the
+ * loop never skips the following token, and that token becomes a positional —
+ * i.e. the seed prompt. Measured: `quanta --resumee xyz`, a one-character typo of
+ * `--resume`, silently sent `xyz` to the model and fired a billed request. Three
+ * other spellings (`--lsp-tools`, `--git-tools`, `--definitely-not-a-flag`) were
+ * swallowed with exit 0 and a REPL.
+ *
+ * `ALL_TOP_LEVEL_FLAG_TOKENS` was built for exactly this and had no production
+ * consumer — only the parity test imported it.
+ *
+ * Scope: DOUBLE-dash only. Single-dash tokens are left alone deliberately; an
+ * earlier pass of this campaign built a scanner that over-matched `-lc` and `-p`
+ * and had to be narrowed, and the aliases the table does advertise (`-h`, `-v`)
+ * short-circuit before any caller reaches here. A bare `--` (POSIX end of options)
+ * is not a flag.
+ */
+export const unknownTopLevelFlags = (argv: readonly string[]): string[] => {
+  const known = new Set<string>(ALL_TOP_LEVEL_FLAG_TOKENS)
+  const out: string[] = []
+  for (const token of argv) {
+    if (!token.startsWith("--") || token === "--") continue
+    const eq = token.indexOf("=")
+    const flag = eq === -1 ? token : token.slice(0, eq)
+    if (known.has(flag)) continue
+    if (!out.includes(flag)) out.push(flag)
+  }
+  return out
+}

@@ -32,6 +32,7 @@ import { join } from "node:path"
 import {
   ALL_TOP_LEVEL_FLAG_TOKENS,
   TOP_LEVEL_FLAGS,
+  unknownTopLevelFlags,
   VALUED_TOP_LEVEL_FLAGS,
 } from "../../../src/apps/cli/top-level-flags"
 import { topLevelUsage } from "../../../src/apps/cli/top-level-usage"
@@ -118,6 +119,63 @@ describe("top-level flag registry ↔ parser parity", () => {
       unadvertised,
       "a parser reads this flag but --help never mentions it — the direction that hid --version, --image, --tool-profile",
     ).toEqual([])
+  })
+
+  /**
+   * The table's third consumer: rejecting what it does not advertise.
+   *
+   * `ALL_TOP_LEVEL_FLAG_TOKENS` was built by this campaign and had NO production
+   * consumer — only this test imported it. Meanwhile `argvPrompt`'s allowlist
+   * dropped every `-`-prefixed token and its docstring concluded "no new top-level
+   * flag can ever leak". The flag does not leak; its VALUE does. An unknown flag is
+   * not in `VALUED_TOP_LEVEL_FLAGS`, so the loop never skips the following token
+   * and that token becomes the seed prompt. Measured against the real CLI:
+   * `quanta --resumee xyz` — a one-character typo of `--resume` — sent `xyz` to the
+   * model and fired a billed request.
+   */
+  describe("unknownTopLevelFlags", () => {
+    test("a typo is reported, and its value is what was at stake", () => {
+      expect(unknownTopLevelFlags(["--resumee", "xyz"])).toEqual(["--resumee"])
+      // The value must NOT be reported as a flag — the error names the typo only.
+      expect(unknownTopLevelFlags(["--resumee", "xyz"])).not.toContain("xyz")
+    })
+
+    test("every advertised spelling is accepted, aliases included", () => {
+      expect(unknownTopLevelFlags([...ALL_TOP_LEVEL_FLAG_TOKENS])).toEqual([])
+      for (const t of ALL_TOP_LEVEL_FLAG_TOKENS) {
+        expect(unknownTopLevelFlags([t]), `${t} is advertised but rejected`).toEqual([])
+      }
+    })
+
+    test("the `--flag=value` form is matched on the flag half", () => {
+      const valued = TOP_LEVEL_FLAGS.filter((f) => f.valued === true)
+      expect(valued.length).toBeGreaterThan(3)
+      for (const f of valued) expect(unknownTopLevelFlags([`${f.flag}=v`])).toEqual([])
+      expect(unknownTopLevelFlags(["--tool-profil=full"])).toEqual(["--tool-profil"])
+    })
+
+    test("single-dash tokens and the POSIX end-of-options marker are left alone", () => {
+      // An earlier scanner in this campaign over-matched `-lc` and `-p` and had to
+      // be narrowed; this one is double-dash only by construction.
+      expect(unknownTopLevelFlags(["-lc", "-p", "-x", "--"])).toEqual([])
+    })
+
+    test("positionals are never flags", () => {
+      expect(unknownTopLevelFlags(["fix the bug", "--plan"])).toEqual([])
+    })
+
+    test("each unknown flag is reported once, in argv order", () => {
+      expect(unknownTopLevelFlags(["--bbb", "--aaa", "--bbb"])).toEqual(["--bbb", "--aaa"])
+    })
+
+    /** Paired control: the check is only sound because the table is complete, which
+     *  the two parity directions above establish. If it were empty, this would
+     *  reject everything — so assert it is not. */
+    test("ANTI-VACUITY: the accepted set is non-trivial", () => {
+      expect(ALL_TOP_LEVEL_FLAG_TOKENS.length).toBeGreaterThan(10)
+      expect(unknownTopLevelFlags(["--plan"])).toEqual([])
+      expect(unknownTopLevelFlags(["--nope"])).toEqual(["--nope"])
+    })
   })
 
   test("the rendered help actually contains every advertised flag", () => {

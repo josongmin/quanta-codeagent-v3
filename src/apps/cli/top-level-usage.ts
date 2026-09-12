@@ -14,6 +14,7 @@ export const topLevelUsage = (): string =>
     "Usage:",
     "  quanta [PROMPT]                      Run a one-shot prompt",
     "  quanta                               Start interactive REPL",
+    "  quanta /<command> [args]             Run a slash command directly (`quanta /version`, `quanta /doctor`)",
     "  quanta session <subcommand> ...      Session management (see `quanta session --help`)",
     "  quanta remote <subcommand> ...       Remote execution plane (see `quanta remote --help`)",
     "  quanta attach [ws-url]               Join a running daemon's shared session over WS",

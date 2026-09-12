@@ -14,6 +14,7 @@ import { SessionStartupError } from "./repl/session-startup-error"
 import { installCliSandbox } from "./sandbox-wire"
 import { isSlashCommand } from "./slash-engine"
 import { captureStatusBootProjection } from "./status-cmd"
+import { unknownTopLevelFlags } from "./top-level-flags"
 import { installUnhandledRejectionDefense } from "./unhandled-rejection-defense"
 import { renderVersion } from "./version-cmd"
 import { QUANTA_VERSION } from "./welcome-banner"
@@ -319,6 +320,23 @@ const main = async (): Promise<void> => {
   if (rawArgs.includes("--version") || rawArgs.includes("-v")) {
     process.stdout.write(`${renderVersion({ version: QUANTA_VERSION })}\n`)
     process.exit(0)
+  }
+
+  // Reject unknown top-level flags BEFORE any LLM/REPL wiring.
+  //
+  // Every subcommand short-circuit above has already returned, so `rawArgs` here
+  // is the bare top-level form and a `--`-prefixed token it does not recognise is
+  // a typo, not a subcommand's flag. Without this, `argvPrompt` dropped the flag
+  // and kept its VALUE as a positional: `quanta --resumee xyz` sent `xyz` to the
+  // model as the seed prompt and fired a billed request. Exit 64 (EX_USAGE).
+  const unknownFlags = unknownTopLevelFlags(rawArgs)
+  if (unknownFlags.length > 0) {
+    const { topLevelUsage } = await import("./top-level-usage")
+    process.stderr.write(
+      `quanta: unknown flag${unknownFlags.length === 1 ? "" : "s"}: ${unknownFlags.join(", ")}\n\n` +
+        topLevelUsage(),
+    )
+    process.exit(64)
   }
 
   // DOF-11 — validate the shipping CLI's profile flag before session/LLM
