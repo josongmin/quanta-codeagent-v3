@@ -1,6 +1,7 @@
 // meta-test: exercises tools/feature-catalog/* (lives outside src/, no @/ alias).
 import { describe, expect, test } from "bun:test"
 import { readFile } from "node:fs/promises"
+import { join } from "node:path"
 import {
   composeBaseline,
   countBiomeErrors,
@@ -163,7 +164,12 @@ describe("the refresher carries every block it does not measure", () => {
   })
 
   test("the real baseline.json on disk still carries its fc block", async () => {
-    const raw = JSON.parse(await readFile("tools/feature-catalog/baseline.json", "utf8")) as {
+    // Anchored on THIS file, not the ambient cwd. A relative path here reads the
+    // wrong file (or none) when the runner is launched from anywhere but the repo
+    // root, which `repo-path-anchor-ratchet` forbids — and which it caught: this arm
+    // sat RED on main, inside a tier that never completes.
+    const baselinePath = join(import.meta.dir, "..", "..", "tools/feature-catalog/baseline.json")
+    const raw = JSON.parse(await readFile(baselinePath, "utf8")) as {
       fc?: { orphan_adr_paths_grandfathered?: unknown[] }
     }
     expect(raw.fc, "baseline.json lost its fc block — fc lint's allowlist is gone").toBeDefined()

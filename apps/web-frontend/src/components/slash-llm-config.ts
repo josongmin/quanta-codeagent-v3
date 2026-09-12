@@ -113,7 +113,22 @@ const postConfig = async (
     const label = Object.entries(body)
       .map(([k, v]) => `${k}=${v ?? "(cleared)"}`)
       .join(" ")
-    ep.onResult?.(`applied: ${label}`, "ok")
+    // NOT "applied". The POST sets the key in the daemon's `process.env`, and these
+    // values are resolved ONCE at the composition root and threaded into the LLM
+    // adapter as constructor config — `resolveWebBootLLM(env)` runs before the server
+    // listens, and the adapter's own contract says it "never reads process.env". So
+    // the running session cannot see the change.
+    //
+    // This printed `applied: <keys>` in green on the strength of a docstring in
+    // `web-daemon/server/http.ts` that claimed "the adapter layer reads these on every
+    // LLM call". That claim was false and is corrected there. Same shape as the CLI's
+    // `/knobs set`, which told the operator to run `/knobs save` and restart when
+    // nothing reads the file: a green confirmation for a change that does not land.
+    ep.onResult?.(
+      `${label} — stored for the NEXT daemon start; the running session keeps its ` +
+        `current adapter. Export it and restart the daemon to apply it now.`,
+      "ok",
+    )
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
     ep.onResult?.(`config network error: ${msg}`, "err")
@@ -252,9 +267,37 @@ export const buildLlmConfigSlashCommands = (ep: LlmConfigEndpoint): readonly Sla
         )
         return plan.reason === "no_slug" ? "/retry-with " : ""
       }
-      await postConfig(ep, { QUANTA_MODEL: plan.slug })
+      // Route the override through `set_model`, the SAME live door `/model` uses.
+      //
+      // This used to `postConfig(ep, { QUANTA_MODEL: plan.slug })` — the exact write
+      // the comment on the `/model` entry above says "changes nothing: the daemon
+      // builds its port ONCE at boot ... it never reads QUANTA_MODEL". So the resend
+      // went out under the OLD model and the toast said "model override + resend".
+      // `/model` was migrated to `set_model` in aug-28 and this entry was left behind.
+      if (ep.sendControlRequest === undefined) {
+        ep.onResult?.("/retry-with: no live session socket — cannot switch models", "err")
+        return ""
+      }
+      if (!ep.sendControlRequest({ kind: "set_model", model: plan.slug })) {
+        ep.onResult?.("/retry-with: socket not open — nothing was sent", "err")
+        return ""
+      }
+      // The switch applies out-of-band, so WAIT for it before resending. Resending
+      // first is what made the old path silently use the previous model.
+      const applied = await awaitModelApplied(ep, plan.slug)
+      if (applied === false) {
+        ep.onResult?.(
+          `/retry-with: ${plan.slug} did not become the effective model — the daemon ` +
+            `rejected it (off-catalog) or the switch has not applied yet; nothing was resent`,
+          "err",
+        )
+        return ""
+      }
       ep.resend?.(plan.resendText)
-      ep.onResult?.(`retrying last message under ${plan.slug} (model override + resend)`, "ok")
+      ep.onResult?.(
+        `retrying last message under ${plan.slug} (switch confirmed, then resend)`,
+        "ok",
+      )
       return ""
     },
   },

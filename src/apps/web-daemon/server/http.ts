@@ -10,8 +10,23 @@ import { isSessionForbidden, logger } from "@/shared"
 
 /**
  * Allowlist of `process.env` keys the `/config` HTTP endpoint may write.
- * The adapter layer reads these on every LLM call, so a successful POST
- * takes effect on the user's next turn (no daemon restart needed).
+ *
+ * WHAT A SUCCESSFUL POST DOES, AND DOES NOT, DO. It sets the key in the daemon's
+ * `process.env`. It does NOT take effect on the running session: these values are
+ * resolved ONCE, at the composition root, and threaded into the adapter as plain
+ * constructor config (`llm/factory.ts` `resolveServiceTier`/`resolveReasoningEffort`
+ * → `new OpenAIResponsesAdapter({...})`), and the daemon builds that port once
+ * (`resolveWebBootLLM(env)`, before the server listens). The adapter's own contract
+ * says so: "this adapter never reads process.env".
+ *
+ * This docstring used to claim the opposite — "The adapter layer reads these on every
+ * LLM call, so a successful POST takes effect on the user's next turn (no daemon
+ * restart needed)" — while the adapter twenty files away documented that it never
+ * reads env. Two docstrings in one repo, contradicting, and the web `/fast`,
+ * `/standard`, `/flex` and `/effort` commands printed a green "applied" on the
+ * strength of this one.
+ *
+ * A write here is therefore for the NEXT daemon start. The callers say so.
  *
  * Hard rules:
  *   - Keys are closed-enumerated (no arbitrary env injection).
