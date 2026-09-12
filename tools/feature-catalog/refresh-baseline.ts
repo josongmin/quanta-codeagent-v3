@@ -13,7 +13,8 @@
  * Zero new deps — only Bun built-ins. Pure parser is exported for unit
  * testing without spawning subprocesses (slow + flaky in CI).
  */
-import { writeFile } from "node:fs/promises"
+import { execFileSync } from "node:child_process"
+import { readFile, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { collectBiomeTargets } from "../dev/biome-targets"
@@ -114,8 +115,11 @@ interface TierCount {
   tests: number
 }
 
-interface Baseline {
+export interface Baseline {
   generated_at: string
+  /** The commit measured. `null` when the tree is dirty or git is unavailable —
+   *  the renderer treats that as STALE and asserts no verdict. */
+  measured_at_commit: string | null
   tsc: { exit: number; errors: number }
   biome: { exit: number; errors: number }
   tests: {
@@ -130,7 +134,73 @@ interface Baseline {
       contract: TierCount
     }
   }
+  /**
+   * The `fc` sub-ratchet block: `empty_stubs_max` plus the grandfathered
+   * orphan-ADR and L3-reachability allowlists that `bun fc lint` compares against.
+   *
+   * This tool does not measure it, so it must be CARRIED. It used to build a fresh
+   * object with no `fc` key and write it over the file, so one run would have
+   * deleted the cap and all nineteen grandfathered ADR paths and turned a
+   * tolerated backlog into a red gate. Nobody had run it, which is the only reason
+   * the data survived.
+   */
+  fc?: unknown
 }
+
+/**
+ * The commit the measurement describes, or `null` when it describes nothing
+ * citable.
+ *
+ * A dirty tree returns `null` on purpose: the measurement would be of the working
+ * tree while the recorded provenance would name the commit, and that gap is how
+ * the catalog footer came to assert two toolchain failures the tree did not have.
+ */
+const measuredCommit = (repoRoot: string): string | null => {
+  try {
+    const dirty = execFileSync("git", ["status", "--porcelain", "--untracked-files=no"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim()
+    if (dirty !== "") return null
+    return execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim()
+  } catch {
+    return null
+  }
+}
+
+/** Read the existing file for the blocks this refresher does NOT measure. */
+const readPriorBaseline = async (path: string): Promise<{ fc?: unknown }> => {
+  try {
+    return JSON.parse(await readFile(path, "utf8")) as { fc?: unknown }
+  } catch {
+    return {}
+  }
+}
+
+/** The measurements this tool actually takes — everything else must be carried. */
+export type BaselineMeasurements = Omit<Baseline, "fc">
+
+/**
+ * Merge fresh measurements over the prior file, CARRYING every block this tool
+ * does not measure.
+ *
+ * Pure and exported so the carry is provable without running the forty-minute
+ * suite `main()` needs. Proven loss without it: the prior `fc` block holds
+ * `empty_stubs_max` and nineteen grandfathered orphan-ADR paths that `bun fc lint`
+ * compares against, and the un-merged write dropped all of it.
+ */
+export const composeBaseline = (
+  prior: { fc?: unknown },
+  measured: BaselineMeasurements,
+): Baseline => ({
+  ...measured,
+  ...(prior.fc !== undefined ? { fc: prior.fc } : {}),
+})
 
 /** Serialize with stable key order + indent 2 for diff-friendly snapshots. */
 const stringify = (b: Baseline): string => `${JSON.stringify(b, null, 2)}\n`
@@ -167,8 +237,10 @@ const main = async (): Promise<number> => {
   // per-directory split in its summary, so we leave tests=0 and files=0
   // here — the catalog renderer can compute file counts from the FS if it
   // wants finer detail.
-  const baseline: Baseline = {
+  const prior = await readPriorBaseline(join(repoRoot, "tools/feature-catalog/baseline.json"))
+  const baseline = composeBaseline(prior, {
     generated_at: new Date().toISOString(),
+    measured_at_commit: measuredCommit(repoRoot),
     tsc: { exit: tsc.exit, errors: tscErrors },
     biome: { exit: biome.exit, errors: biomeErrors },
     tests: {
@@ -183,7 +255,7 @@ const main = async (): Promise<number> => {
         contract: { files: 0, tests: 0 },
       },
     },
-  }
+  })
 
   const outPath = join(repoRoot, "tools/feature-catalog/baseline.json")
   await writeFile(outPath, stringify(baseline), "utf8")

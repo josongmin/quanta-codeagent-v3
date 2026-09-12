@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test"
 import {
   buildEvidenceSummary,
   buildMetaLines,
+  isBaselineFresh,
   renderCatalog,
 } from "../../tools/feature-catalog/render"
 import type { Feature, LoadedFeature } from "../../tools/feature-catalog/schema"
@@ -327,11 +328,13 @@ describe("renderCatalog — full output structure", () => {
         expect: 5624,
         files: 154,
         generated_at: "2026-05-21",
+        measured_at_commit: "cafe1234",
         tsc: { exit: 0, errors: 0 },
         biome: { exit: 0, errors: 0 },
       },
+      commit: "cafe1234",
     })
-    expect(md).toContain("1952/0/2/5624 (154 files). 최종 빌드: 2026-05-21.")
+    expect(md).toContain("1952/0/2/5624 (154 files). 측정 시각: 2026-05-21 (커밋 cafe1234).")
   })
 
   test("trailer prose is inserted before footer", () => {
@@ -407,9 +410,11 @@ describe("renderCatalog — full output structure", () => {
         expect: 30,
         files: 3,
         generated_at: "2026-01-01",
+        measured_at_commit: "abc123",
         tsc: { exit: 0, errors: 0 },
         biome: { exit: 0, errors: 0 },
       },
+      commit: "abc123",
     })
     const expected = [
       "<!-- AUTO-GENERATED from tools/feature-catalog/. Do not edit. Run `bun fc build`. -->",
@@ -451,7 +456,7 @@ describe("renderCatalog — full output structure", () => {
       "",
       "---",
       "",
-      "> 검증 베이스라인: tsc clean · biome clean · 10/0/0/30 (3 files). 최종 빌드: 2026-01-01.",
+      "> 검증 베이스라인: tsc clean · biome clean · 10/0/0/30 (3 files). 측정 시각: 2026-01-01 (커밋 abc123).",
       "",
     ].join("\n")
     expect(md).toBe(expected)
@@ -490,10 +495,87 @@ describe("baseline footer renders the measured toolchain verdict (P0-2)", () => 
         expect: 1,
         files: 1,
         generated_at: "2026-01-01",
+        measured_at_commit: "deadbeef",
         tsc,
         biome,
       },
+      commit: "deadbeef",
     })
+
+  /**
+   * A verdict is only asserted for the tree it was measured on.
+   *
+   * The first fix here replaced a hardcoded `tsc 0 · biome clean` with a value
+   * rendered from `baseline.json`. That removed one falsehood and installed its
+   * mirror: the recorded measurement was from 2026-05-29 and the tree at render
+   * time measured tsc exit 0 / 0 errors and biome exit 0 / 0 errors, so the
+   * generated doc asserted two toolchain failures that did not exist — and the
+   * `fc-ci` diff gate pinned that byte-for-byte. Deriving from data is not the
+   * same as being true; the data has to be about this tree.
+   */
+  const staleFooter = (measuredAt: string | null, renderedAt: string | null): string =>
+    renderCatalog({
+      features: [],
+      prose: { intro: "", trailers: [] },
+      baseline: {
+        pass: 1,
+        fail: 0,
+        skip: 0,
+        expect: 1,
+        files: 1,
+        generated_at: "2026-05-29",
+        measured_at_commit: measuredAt,
+        tsc: { exit: 2, errors: 38 },
+        biome: { exit: 1, errors: 14 },
+      },
+      commit: renderedAt,
+    })
+
+  test("a baseline measured at another commit asserts NOTHING", () => {
+    const md = staleFooter("aaaaaaa", "bbbbbbb")
+    expect(md).toContain("STALE")
+    expect(md).toContain("판정을 주장하지 않는다")
+    // The measurement is still reported, so the reader can see what was recorded.
+    expect(md).toContain("FAIL(exit 2, errors 38)")
+    expect(md).toContain("aaaaaaa")
+  })
+
+  test("an unrecorded measurement commit is stale, not fresh", () => {
+    expect(staleFooter(null, "bbbbbbb")).toContain("STALE")
+    expect(staleFooter(null, "bbbbbbb")).toContain("미기록")
+  })
+
+  test("an unknown rendering commit is stale — a dirty tree cannot certify", () => {
+    expect(staleFooter("aaaaaaa", null)).toContain("STALE")
+    expect(staleFooter("aaaaaaa", "")).toContain("STALE")
+  })
+
+  test("matching commits DO assert the verdict — the stale path is not universal", () => {
+    const md = staleFooter("aaaaaaa", "aaaaaaa")
+    expect(md).not.toContain("STALE")
+    expect(md).toContain("검증 베이스라인: tsc FAIL(exit 2, errors 38)")
+  })
+
+  test("isBaselineFresh is exact, never a prefix or substring match", () => {
+    const b = {
+      pass: 1,
+      fail: 0,
+      skip: 0,
+      expect: 1,
+      files: 1,
+      generated_at: "x",
+      measured_at_commit: "abc1234",
+      tsc: null,
+      biome: null,
+    }
+    expect(isBaselineFresh(b, "abc1234")).toBe(true)
+    expect(isBaselineFresh(b, "abc12345")).toBe(false)
+    expect(isBaselineFresh(b, "abc123")).toBe(false)
+    expect(isBaselineFresh(b, "")).toBe(false)
+    expect(isBaselineFresh(b, null)).toBe(false)
+    expect(isBaselineFresh({ ...b, measured_at_commit: null }, "abc1234")).toBe(false)
+    expect(isBaselineFresh({ ...b, measured_at_commit: "" }, "abc1234")).toBe(false)
+  })
 
   test("a failing tsc/biome baseline is NEVER rendered as clean", () => {
     const md = footer({ exit: 2, errors: 38 }, { exit: 1, errors: 14 })

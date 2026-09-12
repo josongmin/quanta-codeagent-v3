@@ -26,6 +26,21 @@ export interface Baseline {
   expect: number
   files: number
   generated_at: string
+  /**
+   * The commit the measurement was taken at, or `null` when the file does not
+   * record one.
+   *
+   * Without this the footer asserted a verdict with no way to know whether the
+   * measurement described the tree being rendered. It did not: the recorded
+   * `tsc FAIL(exit 2, errors 38) · biome FAIL(exit 1, errors 14)` was measured
+   * 2026-05-29 and the tree at render time measured `tsc exit 0, 0 errors` and
+   * `biome exit 0, 0 errors`. Replacing a false `clean` literal with a rendered
+   * value only moved the falsehood: the doc then asserted two toolchain failures
+   * that did not exist, and the `fc-ci` diff gate pinned that byte-for-byte.
+   *
+   * A verdict is asserted ONLY when this equals the commit being rendered.
+   */
+  measured_at_commit: string | null
   /** `null` ⇒ the block was absent or malformed on disk. Rendered `unknown`,
    *  NEVER clean: "not measured" must not read like "measured and healthy".
    *  Required (not optional) so a caller cannot omit it into a silent clean. */
@@ -37,6 +52,9 @@ export interface RenderInput {
   features: readonly LoadedFeature[]
   prose: ProseFiles
   baseline: Baseline | null
+  /** The commit being rendered, for baseline provenance. `null` ⇒ unknown, which
+   *  makes every baseline verdict stale — the fail-closed direction. */
+  commit?: string | null
 }
 
 export interface ProseFiles {
@@ -158,10 +176,22 @@ export function renderCatalog(input: RenderInput): string {
   // Footer with baseline
   if (input.baseline) {
     const b = input.baseline
-    out.push(
-      `> 검증 베이스라인: tsc ${toolVerdict(b.tsc)} · biome ${toolVerdict(b.biome)} · ` +
-        `${b.pass}/${b.fail}/${b.skip}/${b.expect} (${b.files} files). 최종 빌드: ${b.generated_at}.`,
-    )
+    const fresh = isBaselineFresh(b, input.commit ?? null)
+    if (fresh) {
+      out.push(
+        `> 검증 베이스라인: tsc ${toolVerdict(b.tsc)} · biome ${toolVerdict(b.biome)} · ` +
+          `${b.pass}/${b.fail}/${b.skip}/${b.expect} (${b.files} files). ` +
+          `측정 시각: ${b.generated_at} (커밋 ${b.measured_at_commit ?? "unknown"}).`,
+      )
+    } else {
+      out.push(
+        `> 검증 베이스라인: STALE — 이 트리에서 측정된 값이 아니므로 판정을 주장하지 않는다. ` +
+          `기록된 측정: tsc ${toolVerdict(b.tsc)} · biome ${toolVerdict(b.biome)} · ` +
+          `${b.pass}/${b.fail}/${b.skip}/${b.expect} (${b.files} files), ` +
+          `측정 시각 ${b.generated_at}, 커밋 ${b.measured_at_commit ?? "미기록"}. ` +
+          `\`bun run tools/feature-catalog/refresh-baseline.ts\`로 재측정.`,
+      )
+    }
   } else {
     out.push("> 검증 베이스라인: (baseline.json 없음)")
   }
@@ -175,6 +205,21 @@ export function renderCatalog(input: RenderInput): string {
  *  used to carry the literal `tsc 0 · biome clean` while `baseline.json` recorded
  *  38 tsc errors and 14 biome errors, and the generated doc is byte-pinned by the
  *  `fc-ci` diff gate — so the repo preserved a claim its own data contradicted. */
+/**
+ * A baseline asserts a verdict only when it was measured at the commit being
+ * rendered. An unrecorded commit, or any other commit, is STALE — the doc then
+ * reports what was measured and when, and claims nothing about now.
+ *
+ * Time-based staleness was considered and rejected: a measurement from an hour
+ * ago on a different commit is no more evidence about this tree than one from
+ * three months ago, and a threshold in days would be a number nobody validated.
+ */
+export function isBaselineFresh(b: Baseline, commit: string | null): boolean {
+  if (commit === null || commit === "") return false
+  if (b.measured_at_commit === null || b.measured_at_commit === "") return false
+  return b.measured_at_commit === commit
+}
+
 function toolVerdict(status: BaselineToolStatus | null): string {
   if (status === null) return "unknown"
   return status.exit === 0 && status.errors === 0
@@ -405,6 +450,7 @@ interface BaselineToolFileShape {
 
 interface BaselineFileShape {
   generated_at?: string
+  measured_at_commit?: unknown
   tsc?: BaselineToolFileShape
   biome?: BaselineToolFileShape
   tests?: {
@@ -450,6 +496,12 @@ export async function loadBaseline(
         expect: t.expect_count,
         files: t.files,
         generated_at: raw.generated_at,
+        // A non-string (absent, null, number) is `null` ⇒ stale. Never defaulted
+        // to the rendering commit, which would forge freshness.
+        measured_at_commit:
+          typeof raw.measured_at_commit === "string" && raw.measured_at_commit !== ""
+            ? raw.measured_at_commit
+            : null,
         tsc: readToolStatus(raw.tsc),
         biome: readToolStatus(raw.biome),
       }

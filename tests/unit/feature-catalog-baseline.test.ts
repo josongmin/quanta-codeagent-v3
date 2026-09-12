@@ -1,6 +1,8 @@
 // meta-test: exercises tools/feature-catalog/* (lives outside src/, no @/ alias).
 import { describe, expect, test } from "bun:test"
+import { readFile } from "node:fs/promises"
 import {
+  composeBaseline,
   countBiomeErrors,
   countTscErrors,
   parseBunTestOutput,
@@ -114,5 +116,59 @@ describe("countBiomeErrors", () => {
 
   test("clean output → 0", () => {
     expect(countBiomeErrors("Checked 315 files in 372ms. No fixes applied.")).toBe(0)
+  })
+})
+
+describe("the refresher carries every block it does not measure", () => {
+  const measured = {
+    generated_at: "2026-09-12T00:00:00.000Z",
+    measured_at_commit: "abc1234",
+    tsc: { exit: 0, errors: 0 },
+    biome: { exit: 0, errors: 0 },
+    tests: {
+      pass: 1,
+      fail: 0,
+      skip: 0,
+      expect_count: 1,
+      files: 1,
+      by_tier: {
+        unit: { files: 0, tests: 0 },
+        integration: { files: 0, tests: 0 },
+        contract: { files: 0, tests: 0 },
+      },
+    },
+  }
+
+  /**
+   * `refresh-baseline.ts` built a fresh object with no `fc` key and wrote it over
+   * the file. A single run would have DELETED `empty_stubs_max` and the nineteen
+   * grandfathered orphan-ADR paths that `bun fc lint` compares against, turning a
+   * tolerated backlog into a red gate. Nobody had run it, which is the only reason
+   * the data survived.
+   */
+  test("the fc sub-ratchet block survives a refresh", () => {
+    const fc = {
+      empty_stubs_max: 0,
+      orphan_adr_paths_grandfathered: ["docs/decisions/0166-burnrate-alerts.md"],
+    }
+    const out = composeBaseline({ fc }, measured)
+    expect(out.fc).toEqual(fc)
+    // and the measurements really are replaced, not merged away
+    expect(out.tsc).toEqual({ exit: 0, errors: 0 })
+    expect(out.measured_at_commit).toBe("abc1234")
+  })
+
+  test("an absent fc block is not invented", () => {
+    expect("fc" in composeBaseline({}, measured)).toBe(false)
+  })
+
+  test("the real baseline.json on disk still carries its fc block", async () => {
+    const raw = JSON.parse(await readFile("tools/feature-catalog/baseline.json", "utf8")) as {
+      fc?: { orphan_adr_paths_grandfathered?: unknown[] }
+    }
+    expect(raw.fc, "baseline.json lost its fc block — fc lint's allowlist is gone").toBeDefined()
+    // Anti-vacuity: an empty allowlist would satisfy "defined" while having lost
+    // every row it exists to hold.
+    expect(raw.fc?.orphan_adr_paths_grandfathered?.length ?? 0).toBeGreaterThan(10)
   })
 })
