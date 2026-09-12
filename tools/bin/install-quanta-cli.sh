@@ -84,6 +84,21 @@ warn_path() {
 }
 
 if [[ "$SKIP_BUILD" -eq 0 ]]; then
+  # Capture the tracked-tree dirty state BEFORE the version bump, and hand it to
+  # the build.
+  #
+  # The bump has to precede the build (the binary bundles pkg.version), so by the
+  # time build-cli.ts runs, package.json is always modified — every install binary
+  # was stamped `-dirty` and the bit carried no information. build-cli.ts honours a
+  # pre-set QUANTA_BUILD_DIRTY for exactly this. `--untracked-files=no` so an
+  # untracked node_modules symlink in a worktree does not read as drift.
+  if [[ -z "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no 2>/dev/null)" ]]; then
+    export QUANTA_BUILD_DIRTY=0
+  else
+    export QUANTA_BUILD_DIRTY=1
+  fi
+  echo "install-quanta-cli: tracked tree dirty=${QUANTA_BUILD_DIRTY} (captured pre-bump)"
+
   # Bump the patch segment of the version in package.json before each build.
   current_ver=$(bun -e "console.log(require('${REPO_ROOT}/package.json').version)")
   IFS='.' read -r v_major v_minor v_patch <<< "$current_ver"

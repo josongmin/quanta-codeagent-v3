@@ -43,7 +43,6 @@ evidence:
     # than as its own entry: it has no surface of its own, it makes THIS one's
     # version line answer honestly from a compiled binary.
     - src/apps/cli/build-stamp.ts
-    - tools/bin/build-cli.ts
     - src/apps/cli/slash/registry-app.ts
   adrs: []
   tests:

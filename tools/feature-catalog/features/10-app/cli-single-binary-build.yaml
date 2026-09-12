@@ -1,5 +1,5 @@
 id: cli-single-binary-build
-title: bun build --compile → dist/agent single binary
+title: bun run tools/bin/build-cli.ts → dist/agent single binary (build-stamped)
 section: 10
 subsystem: CLI distribution
 order: 81
@@ -20,11 +20,16 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    cli: "runs in the interactive CLI — 5/5 src evidence file(s) reachable from src/apps/cli/index.ts import graph; the 3 tools/ entries are the build path itself and are not import-reachable by design"
     web: "pure build/distribution tooling, no user-visible runtime affordance on any surface"
 purpose: |
   `bun run build` produces a single self-contained executable at
-  `dist/agent` via `bun build --compile --minify src/apps/cli/index.ts`.
+  `dist/agent`. It runs `tools/bin/build-cli.ts`, which shells out to
+  `bun build --compile --minify --env=QUANTA_BUILD_* src/apps/cli/index.ts`
+  and first resolves the build stamp (`QUANTA_BUILD_COMMIT` /
+  `_DIRTY` / `_TIME`) so a shipped binary can name the commit it came
+  from. `package.json` used to hold the raw `bun build` line; a stamp
+  needs a step before the compile, which a package script cannot have.
   This is the distribution path for the v3 CLI — no `bun` runtime
   required on the target machine. ADR-0045 (progress-audit system
   skill) explicitly anticipates this compile path for SKILL.md
@@ -33,6 +38,9 @@ purpose: |
 evidence:
   code:
     - package.json
+    - tools/bin/build-cli.ts
+    - tools/bin/install-quanta-cli.sh
+    - tools/dev/build-stamp-dirty.ts
     - src/apps/cli/index.ts
     - src/skill/system-skills/index.ts
     - src/apps/cli/repl.ts
@@ -40,7 +48,7 @@ evidence:
     - src/apps/cli/sandbox-wire.ts
   adrs: [45]
   tests:
-    unit: ["tests/unit/cli-argv-prompt.test.ts", "tests/unit/cli-resume-heuristic.test.ts", "tests/unit/cli-summarizer.test.ts", "tests/unit/env-knob-branches.test.ts"]
+    unit: ["tests/unit/cli-argv-prompt.test.ts", "tests/unit/cli-resume-heuristic.test.ts", "tests/unit/cli-summarizer.test.ts", "tests/unit/env-knob-branches.test.ts", "tests/unit/dev/build-stamp-dirty-hellgate.test.ts"]
     integration: ["tests/integration/cli-export-assembly.test.ts", "tests/integration/session-ux-e2e.test.ts"]
     contract: []
 knobs: []

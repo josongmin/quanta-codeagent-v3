@@ -3,7 +3,8 @@
  * that every unit test in this repo is structurally blind to.
  *
  * WHY THIS EXISTS. The shipping CLI is a single-file binary
- * (`bun build --compile --minify src/apps/cli/index.ts --outfile dist/agent`).
+ * (`bun run tools/bin/build-cli.ts`, which shells out to `bun build --compile
+ * --minify --env=QUANTA_BUILD_* src/apps/cli/index.ts --outfile dist/agent`).
  * There is no `node_modules` beside it. Any code that resolves a runtime path
  * from its OWN install location — `createRequire`, `require.resolve`,
  * `import.meta.url`/`dir`, `__dirname` — resolves something real from source and

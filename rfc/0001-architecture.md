@@ -476,7 +476,7 @@ function evaluate(action: ToolAction, ctx: PermissionContext): PermissionDecisio
     "lint": "biome check src tests",
     "lint:fix": "biome check --write src tests",
     "format": "biome format --write src tests",
-    "build": "bun build --compile --minify src/apps/cli/index.ts --outfile dist/agent",
+    "build": "bun run tools/bin/build-cli.ts",
     "bench": "bun run src/apps/bench/index.ts",
     "probe": "bun run src/apps/probe/index.ts"
   },
