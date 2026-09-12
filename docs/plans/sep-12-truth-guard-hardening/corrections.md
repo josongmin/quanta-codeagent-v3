@@ -407,3 +407,55 @@ allowlist를 키우지 않고 **fixture를 옮겼다**.
   권위이고 런타임 arm이 교차검증이다. 조립 가능한 최대 집합은 193 중 66이며,
   나머지를 덮으려면 60개 origin 모듈 fixture가 필요하다. MCP 브릿지 도구는 어느
   소스 계측으로도 보이지 않는다.
+
+### G-9 풀 유닛 단일프로세스 실행 — 17 red의 귀속 (sep-13)
+
+`bun test tests/unit` 1프로세스: **41,569 pass / 144 skip / 17 fail**,
+3,267 파일, 262s. 17개를 전부 **격리 재실행**해서 귀속했다.
+
+| 구분 | 수 | 내용 |
+|---|---|---|
+| 내 것 — 고쳤다 | 3 | `memory-truth-and-egress` T1·T2, `gate-receipt` |
+| 단일프로세스 인공물 (격리 GREEN) | 2 | `patch-slice-boundary` 14/0, `mention-filter-fuzz-r2` 28/0 |
+| **선존 real red — 내 것 아님** | **12** | 아래 7파일 |
+
+격리에서도 재현되는 12개(=선존 real red):
+
+| 파일 | 격리 결과 |
+|---|---|
+| `tests/unit/silent-failure-growth-ratchet.test.ts` | 8 pass / **4 fail** |
+| `tests/unit/apps/bench/promax/promax-gold-absence-lifecycle.test.ts` | 17 / **2** |
+| `tests/unit/_arch/merge-symbol-loss-ratchet.test.ts` | 15 / **1** |
+| `tests/unit/runner-storage-leak-hellgate.test.ts` | 7 / **1** |
+| `tests/unit/runtime/node-repl-hellgate.test.ts` | 16 / **1** |
+| `tests/unit/src-no-sketchy-code.test.ts` | 5 / **1** |
+| `tests/unit/test-ci-admission-script-hellgate.test.ts` | 14 / **1** |
+| `tests/unit/test-fixtures-do-not-leak-tmp.test.ts` | 24 / **1** |
+
+**귀속 근거 (추측 아님).** `silent-failure-growth-ratchet`은 bare `} catch {`
+1148 > ceiling 1143. ceiling을 마지막으로 건드린 커밋(`b827d0ad9`) 이후 `src/**`에
+추가된 bare catch는 **26개**이고, 파일별로는 `src/mcp/transports/isolated.ts`(3),
+`src/session/index-store.ts`(2), `src/permission/json-state-file/locking.ts`(2),
+`src/agent/session-resource-registry/auto-sweep.ts`(2) 외 17파일 각 1. **내가 만진
+src 파일은 하나도 없다** (내 campaign 파일 9개 중 bare catch는
+`slash-commands-knobs.ts`의 1개, 내가 추가한 것이 아니다). 추가한 커밋들은
+sep-8/sep-5 레인(`84d3acfcd`, `532a67991`, `f29d541af`, `d7a249c35`, …)이다.
+
+`test-ci-admission-script-hellgate`는 `tools/dev/run-test-shards.ts`의 문자열을
+단정한다 — 이 파일은 **사용자/병렬 작업 소유로 선언된 13개 dirty
+`tools/dev/**`** 중 하나다. 만지지 않았다.
+
+`promax-gold-absence-lifecycle`은 원격 벤치 박스 bootstrap readiness probe가
+필요하다(`[full-remote] … readiness probe failed`). `node-repl-hellgate`는
+provider credential 상속을 보는데 `Received: ""`.
+
+**왜 아무도 못 봤는가 — 이 캠페인의 through-line 그대로.** 로컬에서 완주하는 유일한
+tier는 `precommit`(9 gate)이고 거기엔 이 유닛 라쳇이 하나도 없다. CI는 빌링으로
+42일째 막혀 있다. 그래서 main은 **격리에서 재현되는 real red 12개**를 안고 green을
+보고한다.
+
+**고치지 않은 이유.** 7파일이 다른 레인(bench 원격박스 · node-repl 크리덴셜 ·
+merge 히스토리 · tmp 누수 burndown · shard 러너 · storage WAL)에 걸쳐 있고,
+라쳇 초과분은 `jul-30-ratchet-burndown-classify-not-paper` 규칙상 항목별 구조
+분류가 필요하다(ceiling bump 금지). 별도 캠페인이며, 여기서 범위를 임의로
+넓히지 않았다.
