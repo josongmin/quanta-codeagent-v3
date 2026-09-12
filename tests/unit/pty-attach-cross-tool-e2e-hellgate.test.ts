@@ -375,13 +375,42 @@ describe("§6 output cap + surrogate — a >32 KiB pane is truncated + well-form
   test("pty_read of a 200 KiB pane truncates with a marker (no token explosion)", async () => {
     const fake = mkFakeTmux()
     const base = baseWith({ ptyExec: fake.exec })
+    // OBSERVED provenance, like the surrogate case below. This drove
+    // `quanta-big`, whose pane is pre-existing scrollback this tool instance
+    // never saw written — and `strongestChunkClass` fails those closed to
+    // `secret`, so Layer-1 replaced the whole body and there was no truncation
+    // marker to find. The test was written before that rule existed and has
+    // been asserting the wrong thing since; the case below pins the rule
+    // itself, so this one can go back to being about TRUNCATION.
+    // A write FIRST, so the chunks this read returns have observed provenance.
+    // Without it `strongestChunkClass` fails closed to `secret` and Layer-1
+    // replaces the whole body — no truncation marker to find, and no truncation
+    // exercised either.
+    const reg = base.registry as ToolRegistry
+    await drive(reg, "pty_write", { handle: "tmux:quanta-foo", data: "echo hi" })
+    fake.setPane("quanta-foo", "B".repeat(200 * 1024))
+    const res = await drive(reg, "pty_read", { handle: "tmux:quanta-foo", sinceSeq: 0 })
+    expect(res.ok).toBe(true)
+    expect(res.block.content).toContain("chars truncated")
+    expect(res.block.content.length).toBeLessThan(80 * 1024)
+  })
+
+  test("UNOBSERVED scrollback is whole-output redacted, not truncated", async () => {
+    // The other half, so neither behaviour can be "fixed" into the other. A
+    // pane this instance never observed being written has unknown provenance,
+    // and unknown is not public: `quanta-big` is exactly that shape.
+    const fake = mkFakeTmux()
+    const base = baseWith({ ptyExec: fake.exec })
     const res = await drive(base.registry as ToolRegistry, "pty_read", {
       handle: "tmux:quanta-big",
       sinceSeq: 0,
     })
     expect(res.ok).toBe(true)
-    expect(res.block.content).toContain("chars truncated")
-    expect(res.block.content.length).toBeLessThan(80 * 1024)
+    expect(res.block.content).toContain("[REDACTED:source_class_secret]")
+    expect(res.block.content).toContain("<pty:tmux:quanta-big>")
+    expect(res.block.content).not.toContain("chars truncated")
+    // ...and the 200 KiB body is gone entirely, not merely marked.
+    expect(res.block.content).not.toContain("BBBB")
   })
 
   test("a surrogate pair straddling the cap is NOT split (no lone surrogate)", async () => {
@@ -390,13 +419,22 @@ describe("§6 output cap + surrogate — a >32 KiB pane is truncated + well-form
     // A pane of astral chars (😀 = a surrogate PAIR). A naive head+tail slice at
     // an odd UTF-16 index would cut a pair in half; the r5 fix snaps the cut.
     const pane = "😀".repeat(40 * 1024) // 80 KiB code units > the 32 KiB cap
+    // Same write-first reason as above — and this case needed it MORE. It
+    // asserts the output is well-formed UTF-16, and
+    // `[REDACTED:source_class_secret] (origin: …)` is perfectly well-formed
+    // ASCII: the redaction path satisfied every assertion here while the
+    // surrogate snapping it exists for was never reached. A vacuous pass, not a
+    // failing one, which is why only its sibling went red.
+    const reg = base.registry as ToolRegistry
+    await drive(reg, "pty_write", { handle: "tmux:quanta-foo", data: "echo hi" })
     fake.setPane("quanta-foo", pane)
-    const res = await drive(base.registry as ToolRegistry, "pty_read", {
-      handle: "tmux:quanta-foo",
-      sinceSeq: 0,
-    })
+    const res = await drive(reg, "pty_read", { handle: "tmux:quanta-foo", sinceSeq: 0 })
     expect(res.ok).toBe(true)
     const text = res.block.content as string
+    // ANTI-VACUITY: the surrogate walk below passes over any ASCII string, so
+    // the output must actually BE the truncated astral pane.
+    expect(text).toContain("chars truncated")
+    expect(text).toContain("😀")
     // A well-formed string survives a UTF-8 round-trip with NO U+FFFD from a
     // lone surrogate (a split pair re-encodes to the replacement char).
     expect(Buffer.from(text, "utf8").toString("utf8")).toBe(text)
