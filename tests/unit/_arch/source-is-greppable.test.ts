@@ -1,0 +1,104 @@
+/**
+ * ★ A source file that `grep` calls BINARY is a file every grep-shaped guard
+ * silently skips.
+ *
+ * Found while reading `tools/test-resilience/failure-artifact.ts`: `grep -n
+ * fingerprint <file>` printed nothing at all, and so did `grep -n export`, while
+ * `head` showed both on screen. The file contained ONE literal NUL byte, written
+ * into a template literal as the separator:
+ *
+ *   return sha256(`${testId}<NUL>${normalised}`)
+ *
+ * Four files carried nine of them. `git grep -I` — "ignore binary" — excludes
+ * such a file (measured: exit 1 for a pattern that is in it), and this platform's
+ * `grep` returns no output rather than the usual "Binary file … matches", so the
+ * result is indistinguishable from "the symbol is not there". The escape
+ * A backslash-u escape is the SAME character to the runtime and keeps the
+ * file text:
+ * `failureFingerprint("a > b", "expected 3 to be 4")` is
+ * b21910ac1d96cb55faac888581623f6544fabdc81ece47f85e971d10a59d1a91 before and
+ * after, and the module-load guard reports the same 150 effects over the same
+ * 4,044 files.
+ *
+ * The guard caught its own author. This file was written with the offending byte
+ * pasted into the docstring above, and the arm below passed — because the file
+ * was still UNTRACKED, so `git ls-files` never listed it. It went red on the
+ * commit that added it. A guard whose subject is "every tracked file" cannot see
+ * itself until it is tracked, which is worth knowing before trusting one green
+ * run of it.
+ *
+ * This is not a style rule. This repository's own scan-reach harvest decides
+ * which files to run from `git grep -l`, several ratchets read sources as text,
+ * and an auditor greps. A file that answers "no matches" to everything is a hole
+ * in all of them at once, and nothing else in the tree would have reported it.
+ */
+
+import { describe, expect, test } from "bun:test"
+import { resolve } from "node:path"
+
+const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..")
+
+const gitLines = (args: readonly string[]): readonly string[] =>
+  new TextDecoder()
+    .decode(
+      Bun.spawnSync(["git", ...args], {
+        cwd: REPO_ROOT,
+        stdout: "pipe",
+        stderr: "pipe",
+        // Bounded like every other child this repository starts. A wedged `git`
+        // here would hang the suite with no diagnosis.
+        timeout: 120_000,
+      }).stdout,
+    )
+    .split("\n")
+    .filter((line) => line !== "")
+
+/** Tracked files that git classifies as TEXT are the ones grep can see. */
+const notGreppable = (input: {
+  readonly tracked: readonly string[]
+  readonly text: readonly string[]
+}): readonly string[] => {
+  const text = new Set(input.text)
+  return input.tracked.filter((file) => !text.has(file))
+}
+
+describe("every tracked source is greppable", () => {
+  test("the comparison itself is right, on synthetic lists", () => {
+    // ANTI-VACUITY for the real arm below: a detector that returned `[]` for
+    // everything would pass it on any tree.
+    expect(notGreppable({ tracked: ["a.ts", "b.ts"], text: ["a.ts"] })).toEqual(["b.ts"])
+    expect(notGreppable({ tracked: ["a.ts"], text: ["a.ts", "extra.ts"] })).toEqual([])
+  })
+
+  test("no tracked TypeScript file is classified binary by git", () => {
+    // `-E .` matches any character, so this lists every tracked file with at
+    // least one non-empty line that git will search as text. `-I` is the flag
+    // that does the excluding, which is why it is the one used here.
+    const tracked = gitLines(["ls-files", "--", "*.ts", "*.tsx"])
+    const text = gitLines(["grep", "-I", "-l", "-E", ".", "--", "*.ts", "*.tsx"])
+
+    // ANTI-VACUITY: an empty `tracked` list, or a `git` that failed and returned
+    // nothing, must not read as success. 7,881 tracked at the time of writing.
+    expect(tracked.length).toBeGreaterThan(7_000)
+    expect(text.length).toBeGreaterThan(7_000)
+
+    // Named, not counted: the point of the failure is which file to go fix.
+    expect(notGreppable({ tracked, text })).toEqual([])
+  })
+
+  test("the four files that carried NUL bytes are searchable for their own symbols", () => {
+    // The specific regression, pinned by SYMBOL rather than by byte: these
+    // files each defined something that `grep` could not find.
+    const pins: readonly (readonly [string, string])[] = [
+      ["tools/test-resilience/failure-artifact.ts", "failureFingerprint"],
+      ["tools/dev/module-load-effects.ts", "effect"],
+      ["tools/dev/test-resource-resolution.ts", "resolveTestResource"],
+      ["tools/dev/module-load-effect-guard.ts", "callsite"],
+    ]
+    for (const [file, symbol] of pins) {
+      // `-I` again: the flag whose exclusion was the defect.
+      const found = gitLines(["grep", "-I", "-l", symbol, "--", file])
+      expect({ file, symbol, found }).toEqual({ file, symbol, found: [file] })
+    }
+  })
+})

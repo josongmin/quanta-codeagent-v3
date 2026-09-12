@@ -84,7 +84,9 @@ TVH-02와 TVH-03의 파일별 분리, TVH-11의 probe helper, TVH-12의 각 prod
 
 ## 착륙 로그 (2026-09-12, local main)
 
-`85a99bb6f` 이후 42 커밋. 각 항목은 측정치와 red-on-injection을 커밋 메시지에 담고 있다.
+`85a99bb6f` 이후 93 커밋 (`e8795ac5e` 기준 측정). 각 항목은 측정치와 red-on-injection을
+커밋 메시지에 담고 있다. 아래 표는 1~16번 묶음만 나열하며, 이후 커밋은 섹션별로 이어진다 —
+"42"는 표에 적힌 행 수도 아니고 실제 커밋 수도 아니었다.
 
 ### 1~16 — P0와 tier 분리
 
@@ -137,13 +139,13 @@ TVH-02와 TVH-03의 파일별 분리, TVH-11의 probe helper, TVH-12의 각 prod
 
 | 티켓 | 상태 | 핵심 |
 |---|---|---|
-| TVH-01 safety/portability | **LANDED** | worker HOME·절대경로·실 metadata egress. 열림: 분류기 정밀도 5건 |
-| TVH-02 tier contract | **LANDED** | exact gate 계약, tier 4종 digest 분리. prepush 축소는 interlock 보류 |
+| TVH-01 safety/portability | **LANDED** | worker HOME·절대경로·실 metadata egress. LL-b/c/e/f/h paired control로 분류기 정밀도 닫음(`06bd6714c`) |
+| TVH-02 tier contract | **LANDED** | exact gate 계약, tier 4종 / **digest 3종** 분리(prepush==pr은 의도된 미완). prepush 축소는 interlock 보류 |
 | TVH-03 capability lanes | **LANDED** | 부재 capability가 PASS로 기록되지 않음 |
-| TVH-04 resource scheduler | **LANDED** | 548 certified / 14 exclusive / 0 missing. overlap 전환은 canary 보류 |
+| TVH-04 resource scheduler | **LANDED** | 548 certified / 14 intentionally-exclusive / 0 missing(재생성 후). overlap 전환은 canary 보류, audit 실행 gate는 없음 |
 | TVH-05 timing/cache | **LANDED** | 증거(timing v2 store)는 clean-tree 캠페인 필요 |
-| TVH-06 receipt integrity | **LANDED** | 3-way exact producer 비교. 열림: VR-13 |
-| TVH-07 process lifecycle | **LANDED** | drain snapshot 1,400→34. 열림: LC-13 |
+| TVH-06 receipt integrity | **LANDED** | 3-way exact producer 비교. VR-13은 `948498381`에서 닫힘(`homeCapabilitySha256` producer/consumer 양쪽) |
+| TVH-07 process lifecycle | **LANDED** | drain snapshot 1,400→34. LC-13은 `1656dd2ae`에서 닫힘(`pollSchedule` 중앙 clamp) |
 | TVH-08 test hygiene | **LANDED** | 전제 5건은 측정으로 반증 |
 | TVH-09 hosted matrix | **BLOCKED** | 외부 권한 — Actions 빌링 차단 |
 | TVH-10 closeout | **PARTIAL** | 문서 완료, healthy-load ABBA 미생성 |
@@ -259,22 +261,28 @@ precommit: ok — 9 of 9 gate(s) passed
 > 캠페인 3커밋 전에 추가된 파일 6개가 어떤 catalog 항목에서도 참조되지 않았다.
 > 죽은 gate는 선을 지키지 않는다 — 선이 움직였다는 사실을 가릴 뿐이다.
 
-### tier membership (clean HEAD `1d153a109`, `--discover-only`)
+### tier membership (clean HEAD `e8795ac5e`, `--discover-only`, 재측정)
 
 | tier | files | digest |
 |---|---:|---|
-| prepush | 3,938 | `40b5ac0828f7192f` |
-| pr | 3,938 | `40b5ac0828f7192f` |
-| full | 3,948 | `802693f292b3ca4b` |
-| nightly | 3,962 | `4460c37406ba25a8` |
+| prepush | 3,941 | `b70ca76d56551c02` |
+| pr | 3,941 | `b70ca76d56551c02` |
+| full | 3,951 | `6dccaa9ab297d84f` |
+| nightly | 3,965 | `0e8f348f3815dc7f` |
 
-`prepush == pr`은 **의도된 미완**이며 interlock으로 고정돼 있다.
+이 표는 원래 `1d153a109` 측정치(3,938 / 3,948 / 3,962, digest 4종 전부 상이)를
+"current-HEAD"라고 적어두고 36 커밋 동안 갱신하지 않았다. **관계는 그대로였고
+절대값과 digest 전부가 틀렸다.** 코퍼스가 커지면 숫자가 움직이는 게 정상이며,
+문서가 그걸 따라가지 않는 것이 결함이다.
+
+`prepush == pr`은 **의도된 미완**이며 interlock으로 고정돼 있다. 즉 tier는 4종이지만
+**digest는 3종**이다 — prepush와 pr은 바이트 단위로 같은 모집단이다.
 시작 시점에는 prepush/pr/full이 **하나의 동일 digest**였다.
 
 **커버리지는 줄지 않았다** — tier가 갈렸다는 것과 테스트가 사라졌다는 것은 다르다:
 
     pr ⊂ full ⊂ nightly            (strict, 측정)
-    nightly (3,962) == universe     (3,962)
+    nightly (3,965) == universe     (3,965)
     universe 에서 유실:              0
 
 full-only 10개, nightly-only 14개가 tier를 가르는 전부다. 어떤 파일도 어느 tier에도
@@ -286,11 +294,20 @@ full-only 10개, nightly-only 14개가 tier를 가르는 전부다. 어떤 파�
 |---|---|
 | `typecheck:all` | clean |
 | `lint:debt` | 23 diagnostics, 회귀 0, ceiling 상향 0 |
-| `test-determinism-ratchet` | ✓ (files 4,041 · wall 165 · random 36 · sleep_budgeted 51,470ms) |
-| `module-load-effect-guard` | files 4,041 · effects 150 · violations 0 |
+| `test-determinism-ratchet` | ✓ (files 4,044 · wall 165 · random 36 · sleep_budgeted 51,470ms) |
+| `module-load-effect-guard` | files 4,044 · effects 150 · violations 0 |
 | `awaited-sleep-budget` / `temp-lifecycle` | exit 0 |
-| `test-resource-certification --check` | exit 0 (548 certified / 14 exclusive / 0 missing) |
-| `tests/unit/_arch` (32 files) | 398 / 398 |
+| `test-resource-certification --check` | exit 0 (548 certified / 14 intentionally-exclusive / 0 missing) — 재생성 후 |
+| `tests/unit/_arch` (32 files) | 421 / 421 |
+
+> 이 표의 두 행은 감사에서 **거짓으로 확인돼 고친 것**이다.
+> `test-determinism-ratchet`은 exit 1이었다 — 캠페인이 직접 넣은
+> `verification-tier-runner.test.ts`의 `Bun.sleep(15)` 2개가 sleep budget을
+> 51,470 → 51,525ms로 올렸다. 타이머를 microtask 순서 관찰로 교체해 baseline으로 복귀.
+> `test-resource-certification --check`도 exit 1이었다 — 캠페인 자신의 커밋
+> `1656dd2ae`가 건드린 파일 1개가 source-drift, 3개가 closure under-declare.
+> 재생성했고 claim은 전부 **확장**이며 삭제는 0이다.
+> **아직 남은 결함: 이 audit을 실행하는 gate/workflow/test가 없다** (`--check` 25.8s wall).
 
 ### 아직 없는 증거 (정직하게)
 

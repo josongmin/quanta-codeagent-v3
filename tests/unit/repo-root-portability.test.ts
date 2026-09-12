@@ -61,6 +61,7 @@ import {
 } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, relative } from "node:path"
+import { mightWriteToRoot, rootScratchWrites } from "../../tools/dev/root-scratch-scan"
 import {
   bunEntryArgv,
   bunEntryArgvFrom,
@@ -307,26 +308,44 @@ describe("repo-root helper — portability", () => {
  * reports `{ready: true, verdict: "hard-deny"}` from there.
  */
 describe("no test writes a scratch entry to the repo root", () => {
-  const ROOT_SCRATCH =
-    /join\(\s*REPO_ROOT\s*,\s*`[^`/]*\$\{[^}]*\}[^`/]*\.(?:ts|js|mjs|cjs|json|txt)`/
+  /**
+   * The predecessor was ONE regex:
+   *
+   *   /join\(\s*REPO_ROOT\s*,\s*`[^`/]*\$\{[^}]*\}[^`/]*\.(?:ts|js|mjs|cjs|json|txt)`/
+   *
+   * It caught the line that leaked and, measured against eight realistic
+   * spellings of the same mistake, one of eight — `resolve` instead of `join`,
+   * a fixed name, a `${ROOT}/…` template, a `.md` extension, no extension, a
+   * lowercase binding, an aliased one. An extension list and one helper name is
+   * not the invariant.
+   *
+   * It also carried a dead exemption: "`import.meta.path` is skipped: this file
+   * must contain the forbidden shape VERBATIM". It does not — the arm below
+   * builds the shape by joining two halves precisely so that it does not — so
+   * the skip protected nothing and its stated reason was false. Both are gone:
+   * the fixtures here are STRINGS passed to a parser, which no parse can mistake
+   * for a call.
+   */
+  /**
+   * A literal `${…}`, built rather than written.
+   *
+   * These fixtures are SOURCE CODE, so they have to contain a template-curly —
+   * which is exactly what `noTemplateCurlyInString` catches in an ordinary
+   * string, and ten new sites would have been a ratchet regression. Composing it
+   * keeps the ratchet meaningful instead of exempting this file from it.
+   */
+  const curly = (expression: string): string => `\${${expression}}`
+
+  const scan = (source: string): readonly string[] =>
+    rootScratchWrites(source).map((hit) => `${hit.callee}:${hit.text}`)
 
   const walkableDir = (name: string): boolean => name !== "node_modules" && !name.startsWith(".")
 
-  /**
-   * `import.meta.path` is skipped: this file must contain the forbidden shape
-   * VERBATIM to prove the detector fires on it, so it is the one file the
-   * detector cannot read. Named, not pattern-excluded — a second exemption
-   * would have to be written here on purpose.
-   */
-  const leaksToRoot = (full: string): boolean =>
-    full !== import.meta.path && ROOT_SCRATCH.test(readFileSync(full, "utf8"))
-
-  const rootWritersUnder = (dir: string): readonly string[] =>
+  const testFilesUnder = (dir: string): readonly string[] =>
     readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
       const full = join(dir, entry.name)
-      if (entry.isDirectory()) return walkableDir(entry.name) ? rootWritersUnder(full) : []
-      if (!entry.name.endsWith(".test.ts")) return []
-      return leaksToRoot(full) ? [relative(REPO_ROOT, full)] : []
+      if (entry.isDirectory()) return walkableDir(entry.name) ? testFilesUnder(full) : []
+      return entry.name.endsWith(".test.ts") ? [full] : []
     })
 
   test("every compiled-probe entry lives under an ignored directory", () => {
@@ -335,26 +354,104 @@ describe("no test writes a scratch entry to the repo root", () => {
     // or `tools/` today, and a guard scoped to where the last offender happened
     // to live is a guard the next one walks around. Measured: 303 colocated test
     // files under `src/` and 17 under `tools/` were outside it.
-    const offenders = ["tests", "src", "tools"].flatMap((root) =>
-      rootWritersUnder(join(REPO_ROOT, root)),
-    )
+    const offenders = ["tests", "src", "tools"]
+      .flatMap((root) => testFilesUnder(join(REPO_ROOT, root)))
+      .flatMap((full) => {
+        const text = readFileSync(full, "utf8")
+        // The prefilter decides only what gets PARSED, and the arm below pins
+        // that it never hides a shape the parser would flag.
+        if (!mightWriteToRoot(text)) return []
+        return rootScratchWrites(text, full).map(
+          (hit) => `${relative(REPO_ROOT, full)}:${hit.line} ${hit.callee}(${hit.text})`,
+        )
+      })
     expect(
       offenders,
       "a pid-named scratch file at the repo root survives a SIGKILL and breaks the NEXT " +
         `run's typecheck/lint. Write it under .cache/ instead:\n  ${offenders.join("\n  ")}`,
     ).toEqual([])
+    // MEASURED on this box: walk 0.6s over 3,989 files, read+prefilter 2.7s,
+    // parse 1.8s over the survivors. The explicit budget is generous because
+    // bun's default 5s cut it off and "timed out" reads as a hang; it stays
+    // under the unit FILE ceiling (43,517ms) and the per-test one (8,529ms).
+  }, 60_000)
+
+  const ROOT_BINDING = 'const REPO_ROOT = resolve(import.meta.dir, "..", "..")\n'
+
+  /**
+   * Every spelling of the leak the predecessor MISSED.
+   *
+   * Shared by the detector arm and the prefilter arm on purpose: the prefilter
+   * decides what gets parsed, so it has to accept everything the parser flags,
+   * and checking it against two hand-picked snippets let a narrowed prefilter
+   * pass — measured, when the old `join(REPO_ROOT,` shape was restored.
+   */
+  const LEAKS: readonly (readonly [string, string])[] = [
+    [
+      "the leak, verbatim",
+      `writeFileSync(join(REPO_ROOT, \`__probe-${curly("process.pid")}.ts\`), x)`,
+    ],
+    ["a fixed name", 'writeFileSync(join(REPO_ROOT, "probe.ts"), x)'],
+    [
+      "resolve instead of join",
+      `writeFileSync(resolve(REPO_ROOT, \`p-${curly("process.pid")}.ts\`), x)`,
+    ],
+    ["a template path", `writeFileSync(\`${curly("REPO_ROOT")}/p-${curly("process.pid")}.ts\`, x)`],
+    [
+      "an extension outside the old list",
+      `writeFileSync(join(REPO_ROOT, \`p-${curly("x")}.md\`), y)`,
+    ],
+    ["no extension at all", `writeFileSync(join(REPO_ROOT, \`p-${curly("x")}\`), y)`],
+    ["a rename DESTINATION", `renameSync(tmp, join(REPO_ROOT, \`p-${curly("x")}.ts\`))`],
+    ["a directory, not a file", `mkdirSync(join(REPO_ROOT, \`scratch-${curly("x")}\`))`],
+  ]
+
+  test("the detector fires on every spelling of the leak, not just the one that happened", () => {
+    // ANTI-VACUITY for the corpus arm, which passes for a detector that matches
+    // nothing.
+    expect(LEAKS.length).toBeGreaterThanOrEqual(8)
+    for (const [why, code] of LEAKS) {
+      expect({ why, flagged: scan(ROOT_BINDING + code).length }).toEqual({ why, flagged: 1 })
+    }
+
+    // PAIRED CONTROL: the legitimate shapes stay silent, or this guard would
+    // fire on hundreds of ordinary reads and be turned off.
+    const allowed: readonly (readonly [string, string])[] = [
+      ["a READ is not a write", `${ROOT_BINDING}readFileSync(join(REPO_ROOT, "package.json"))`],
+      [
+        "the fixed form the leak moved to",
+        `${ROOT_BINDING}writeFileSync(join(REPO_ROOT, ".cache/probe.ts"), x)`,
+      ],
+      [
+        "an ignored dot leaf",
+        `${ROOT_BINDING}mkdirSync(join(REPO_ROOT, ".cache"), { recursive: true })`,
+      ],
+      [
+        "a temp fixture that happens to be called `root`",
+        'const root = mkdtempSync("/tmp/x")\nwriteFileSync(join(root, "a.txt"), x)',
+      ],
+      ["a write under tmpdir", `writeFileSync(join(tmpdir(), \`p-${curly("x")}.ts\`), y)`],
+    ]
+    for (const [why, code] of allowed) {
+      expect({ why, flagged: scan(code) }).toEqual({ why, flagged: [] })
+    }
   })
 
-  test("the detector fires on the exact shape that leaked", () => {
-    // ANTI-VACUITY: the arm above passes for a detector that matches nothing.
-    const LEAKED = ["join(REPO_ROOT, `__compiled-parser-probe-", "{process.pid}.ts`)"].join("$")
-    expect(ROOT_SCRATCH.test(LEAKED)).toBe(true)
-    // ...and not on the fixed form it was moved to, nor on ordinary reads.
-    const FIXED = [
-      'join(REPO_ROOT, ".cache", "compiled-probe", `entry-',
-      "{process.pid}.ts`)",
-    ].join("$")
-    expect(ROOT_SCRATCH.test(FIXED)).toBe(false)
-    expect(ROOT_SCRATCH.test('join(REPO_ROOT, "package.json")')).toBe(false)
+  test("the prefilter never hides a shape the parser would flag", () => {
+    // The prefilter is an optimisation over the PARSE, and an optimisation that
+    // skips a real offender is the defect this whole block exists for. Checked
+    // against the same table the parser is checked against, not against two
+    // hand-picked snippets: the narrow version of the prefilter passed that.
+    for (const [why, code] of LEAKS) {
+      expect({ why, considered: mightWriteToRoot(ROOT_BINDING + code) }).toEqual({
+        why,
+        considered: true,
+      })
+    }
+    // ...and it does exclude something, or it is not a filter.
+    expect(mightWriteToRoot("const a = 1\nexpect(a).toBe(1)")).toBe(false)
+    expect(mightWriteToRoot(`${ROOT_BINDING}readFileSync(join(REPO_ROOT, "package.json"))`)).toBe(
+      false,
+    )
   })
 })

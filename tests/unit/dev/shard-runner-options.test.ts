@@ -140,6 +140,56 @@ describe("the tier is stated, never assumed", () => {
     })
   })
 
+  /**
+   * The same sentence, one line down.
+   *
+   * "Refusing to pick one silently" was enforced between a FLAG and the ENV,
+   * and last-one-wins between two flags on the same command line. MEASURED
+   * before this: `--tier=pr --tier=nightly --discover-only` reported
+   * `"name": "full:nightly"` over 3,965 files, and
+   * `--suite=unit --suite=full` ran the full suite.
+   */
+  test("one option given twice is refused, whichever option it is", () => {
+    const cases: readonly { readonly why: string; readonly argv: readonly string[] }[] = [
+      { why: "two tiers", argv: ["--suite=full", "--tier=pr", "--tier=nightly"] },
+      { why: "two suites", argv: ["--suite=unit", "--suite=full", "--tier=pr"] },
+      { why: "two cache modes", argv: ["--tier=pr", "--cache=off", "--cache=read-write"] },
+      {
+        why: "two junit paths",
+        argv: ["--suite=unit", "--tier=pr", "--junit-out=.cache/a.xml", "--junit-out=.cache/b.xml"],
+      },
+      // An identical repeat is refused too. It is unambiguous, but a wrapper
+      // that appends an option it was already given is the shape that produced
+      // the conflicting case, and "the second one was the same" is not a
+      // property the parser should have to reason about.
+      { why: "the same tier twice", argv: ["--suite=full", "--tier=pr", "--tier=pr"] },
+    ]
+    expect(cases.length).toBeGreaterThanOrEqual(5)
+    for (const { why, argv } of cases) {
+      expect(() => parseShardRunnerOptions(argv), why).toThrow(/given twice/)
+    }
+
+    // PAIRED CONTROL: every one of those options, once each, still parses — so
+    // the arm above is not satisfied by a parser that refuses everything.
+    const parsed = parseShardRunnerOptions([
+      "--suite=unit",
+      "--tier=pr",
+      "--cache=off",
+      "--junit-out=.cache/unit-junit.xml",
+    ])
+    expect({
+      suite: parsed.suite,
+      tier: parsed.tier,
+      cacheMode: parsed.cacheMode,
+      junitOut: parsed.junitOut,
+    }).toEqual({
+      suite: "unit",
+      tier: "pr",
+      cacheMode: "off",
+      junitOut: ".cache/unit-junit.xml",
+    })
+  })
+
   test("every package alias that invokes the runner names a tier", () => {
     const pkg = JSON.parse(
       readFileSync(resolve(import.meta.dir, "..", "..", "..", "package.json"), "utf8"),

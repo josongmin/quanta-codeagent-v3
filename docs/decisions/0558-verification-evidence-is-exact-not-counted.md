@@ -18,7 +18,7 @@ NUMBER, and each number was satisfiable without the thing it stood for.
   the execution, so nothing downstream could tell.
 - A scan-reach receipt was accepted when `manifestSha256.length !== 64`. Any 64
   hex characters passed. `suite` sat in the type and was never compared; there
-  was no `tier` at all, so `--suite=full --tier=pr` — 3,938 of 3,962 files —
+  was no `tier` at all, so `--suite=full --tier=pr` — 3,941 of 3,965 files at this HEAD —
   minted a receipt the closed-universe consumer accepted. scan-reach is a FLOOR
   ratchet, so a narrower population reports lower reach for ids it never walked.
 - A capability lane cleared `1 executed file, 1 executed case`. A `toolchain`
@@ -71,6 +71,14 @@ though wired, and all had zero production consumers.
 7. **Every top-level child is bounded by one primitive**, with the 12-minute
    inactivity bound the shard watchdog already used and a 4-hour backstop above
    every legitimate campaign observed here. There is one scheduler, not two.
+
+   This claim was first written while the guard behind it banned two SPELLINGS
+   rather than the call: `Bun.spawnSync({…})` and `await proc.exited`. Nine
+   sibling captures in the same rails — `gate.ts`'s own `git` reads, the matrix
+   CLI's `proc.exited` inside a `Promise.all`, the unit-speed-budget re-run, the
+   scan-reach harvest — were unbounded when the sentence was written, and the
+   guard now bans the call across ten rails. "Every" is load-bearing, and it took
+   an adversarial audit to make it true.
 
 8. **A tier is stated, never assumed.** An absent tier used to select the whole
    universe, and which population a command ran depended on an ambient

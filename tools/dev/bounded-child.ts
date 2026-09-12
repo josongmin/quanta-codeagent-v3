@@ -15,7 +15,10 @@
  *
  * …and its synchronous twin, `Bun.spawnSync(["sh", "-c", command])` with no
  * `timeout`, which is how every top-level gate, the worktree-pollution guard
- * and the unit-speed-budget confirmation currently run.
+ * and the unit-speed-budget confirmation USED to run. All three are on this
+ * module now; the sentence stayed in the present tense for two of them long
+ * after they moved, which is the same defect class this file exists to close,
+ * spelled in prose.
  *
  * Four defects, all reachable from one wedged child. MEASURED against that
  * exact primitive on darwin 24.6, with fixtures that fork a grandchild and

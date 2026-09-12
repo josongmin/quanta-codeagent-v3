@@ -233,7 +233,7 @@ export const resolveTestResourceSnapshot = (
   for (const id of [...byId.keys()].sort()) {
     const row = byId.get(id) as ResolvedTestResource
     hasher.update(
-      `${id} ${row.resourceClass} ${row.certification} ${row.claims
+      `${id}\u0000${row.resourceClass}\u0000${row.certification}\u0000${row.claims
         .map(({ key, mode }) => `${key}=${mode}`)
         .join(",")}\n`,
     )

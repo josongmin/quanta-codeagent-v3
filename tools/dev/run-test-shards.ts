@@ -1214,10 +1214,12 @@ const buildCachedChunks = (input: {
       pressure: loadPressure(),
     })
     // Certified only when EVERY file is both resource-certified and
-    // declared-input certified. The registry currently holds zero
-    // certifications, so this resolves to `whole-tree` for every chunk and the
-    // cache behaves exactly as it does today — the narrowing is available and
-    // proven by test, not yet exercised in production.
+    // declared-input certified. This resolves to `whole-tree` for every chunk
+    // today — not because the resource registry is empty (it holds 562 rows,
+    // 548 certified) but because the DECLARED-INPUT opt-in set is: measured
+    // `input-not-opted-in` for a file that is fully resource-certified. So the
+    // narrowing is available and proven by test, not yet exercised in
+    // production, and the remaining step is data rather than code.
     const scope = resolveChunkCacheScope({
       repoRoot: REPO_ROOT,
       ids: chunk.files.map((file) => relative(REPO_ROOT, file)),

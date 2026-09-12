@@ -36,7 +36,8 @@ event that does not exist.
 ## What keeps the process alive
 
 The worker pair is `bun test` (parent) and `bun test --test-worker --isolate`
-(child). The child holds **608 open handles**:
+(child). The child held **608 open handles**, of which these types were
+tabulated at the time:
 
 | type | count |
 |---|---:|
@@ -45,10 +46,22 @@ The worker pair is `bun test` (parent) and `bun test --test-worker --isolate`
 | REG | 5 |
 | KQUEUE | 3 |
 
-The 590 directory handles cover the source tree — 360 under `src/`, 212 under
+> **These breakdowns are PARTIAL, and an audit caught them being presented as
+> complete.** They sum to 606 of 608; the directory split below sums to 582 of
+> 590. No `lsof` output was retained, so the missing 2 handles and 8 directories
+> cannot be re-derived — the rows above are what was transcribed, not the whole
+> table. Keeping the raw output was the thing to do and was not done.
+>
+> The load-bearing observation does not depend on the exact totals: an isolated
+> worker holding **~590 open directories** after its files have finished is the
+> anomaly, and it is two orders of magnitude past what any test in the set opens.
+> The precise count is what a fix would be measured against, and that number
+> will have to be re-taken.
+
+The directory handles cover the source tree — 360 under `src/`, 212 under
 `node_modules/`, 10 under `tests/` — and every path appears **twice**. The count
-is stable: measured at t+10s, t+20s and t+30s it was 608 each time, so this is
-not an active leak but a set that is opened and never released.
+was stable: read at t+10s, t+20s and t+30s it was 608 each time, so this is not
+an active leak but a set that is opened and never released.
 
 Three of the unix sockets are the child's stdin/stdout/stderr, connected to the
 parent. The child ALSO holds the same two socket peers at fds 578 and 215 — the
@@ -107,16 +120,36 @@ COMBINATION, which is why single-file reproduction attempts have always failed.
 Both are required. A serial run of the same files passes, and a parallel run
 without worker isolation passes.
 
-### Rate
+### Rate — OBSERVED, not established
 
-Six consecutive runs of the same 39 files at `--parallel=8 --isolate`: **1
-stall**. A run at `--parallel=2` stalled while `--parallel=4` and `--parallel=8`
-passed in the same session, so the width is not a threshold — it is a race, and
-`--parallel=1` removes it by removing the concurrency rather than by being below
-a line.
+One stall was observed across six consecutive runs of the same 39 files at
+`--parallel=8 --isolate`. That is the observation; it is **not** a rate, and an
+audit was right to say so:
 
-That rate is why this was never reproduced before. A single attempt has roughly
-a one-in-six chance, and the previous twelve attempts were single files.
+- No run log, timing or artifact was retained, so the six runs cannot be
+  re-counted from anything but this sentence.
+- Runs at `--parallel=2`, `4` and `8` happened in the same session — one stall at
+  width 2 — so the denominator for any single configuration is not recorded.
+- Every row in the bisection table above is a SINGLE observation. If the true
+  rate is near one in six, a single pass has roughly an 83% chance even for a
+  configuration that does stall. So "neither half of the 39 stalls alone" and
+  "both dimensions are required" are stated with more confidence than one
+  observation each can carry.
+
+What the evidence does support: the combination stalls at least sometimes, a
+serial run of the same files completed, and the failure is not a slow test (see
+the kqueue evidence above, which is a direct observation of one stalled process).
+
+What would settle it: N runs per configuration with each run's exit status,
+duration and `lsof`/`sample` output retained, on a QUIET box. This box has not
+been quiet — measured load average 29.4 with another session's `bun test`
+campaign running in a worktree while this note was being corrected — and a
+stall-rate measurement taken under foreign load would be its own false number.
+That is the same rule this campaign applies to performance ABBA, applied to a
+failure rate.
+
+The honest reason this was not reproduced for twelve attempts remains: those
+attempts used single files, and the combination is what matters.
 
 ## Next step for whoever picks this up
 

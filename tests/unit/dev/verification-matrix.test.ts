@@ -3,12 +3,19 @@ import { readFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { executedFileSetDigest } from "../../../tools/dev/executed-file-set"
 import { junitExecutedFiles } from "../../../tools/dev/test-shard-timings"
+import { loadTierPopulationFloors } from "../../../tools/dev/test-tier-population"
 import {
   aggregateMatrixReceipts,
+  MATRIX_PLAN_FILE_FLOOR,
   parseVerificationMatrixPlan,
   planVerificationMatrix,
   workerReceipt,
 } from "../../../tools/dev/verification-matrix"
+import {
+  currentMatrixPopulation,
+  matrixPlanFileFloor,
+  matrixPopulationProblem,
+} from "../../../tools/dev/verification-matrix-population"
 
 describe("verification matrix aggregate", () => {
   const HEAD = "a".repeat(40)
@@ -26,6 +33,16 @@ describe("verification matrix aggregate", () => {
    * files is shaped exactly like a real one, aggregates to a green, and proves
    * nothing.
    */
+  /**
+   * The floor these fixtures plan against.
+   *
+   * `MATRIX_PLAN_FILE_FLOOR` (100) used to be the only floor there was, and an
+   * audit found it 39x below the population it guards. It is now a floor on the
+   * FLOOR, and production derives the real one from the tier's committed record
+   * — proven in its own arm below, against the real file.
+   */
+  const FIXTURE_FLOOR = MATRIX_PLAN_FILE_FLOOR
+
   const manyFiles = (prefix: string, count: number): readonly string[] =>
     Array.from({ length: count }, (_, index) => `${prefix}-${index}.test.ts`)
   const POPULATION = {
@@ -36,7 +53,7 @@ describe("verification matrix aggregate", () => {
     capabilitySha256: "3".repeat(64),
   } as const
   const planFor = (population = POPULATION) =>
-    planVerificationMatrix(HEAD, population, [
+    planVerificationMatrix(HEAD, population, FIXTURE_FLOOR, [
       chunk("pure-0", manyFiles("a", 60)),
       chunk("pure-1", manyFiles("b", 60)),
     ])
@@ -78,48 +95,50 @@ describe("verification matrix aggregate", () => {
   ])
 
   test("plan identity binds exact HEAD and canonical chunk membership", () => {
-    const reordered = planVerificationMatrix(HEAD, POPULATION, [
+    const reordered = planVerificationMatrix(HEAD, POPULATION, FIXTURE_FLOOR, [
       chunk("pure-1", manyFiles("b", 60)),
       chunk("pure-0", manyFiles("a", 60)),
     ])
     expect(reordered).toEqual(plan)
     expect(plan.planSha256).toHaveLength(64)
     expect(
-      planVerificationMatrix(HEAD, POPULATION, [
+      planVerificationMatrix(HEAD, POPULATION, FIXTURE_FLOOR, [
         { ...chunk("pure-0", manyFiles("a", 60)), intraParallel: 1 },
         chunk("pure-1", manyFiles("b", 60)),
       ]).planSha256,
     ).not.toBe(plan.planSha256)
-    expect(() => parseVerificationMatrixPlan({ ...plan, headSha: "b".repeat(40) })).toThrow(
-      /digest mismatch/,
-    )
+    expect(() =>
+      parseVerificationMatrixPlan({ ...plan, headSha: "b".repeat(40) }, FIXTURE_FLOOR),
+    ).toThrow(/digest mismatch/)
   })
 
   test("plan rejects empty, duplicate, absolute, and escaping populations", () => {
-    expect(() => planVerificationMatrix(HEAD, POPULATION, [])).toThrow(/empty matrix plan/)
+    expect(() => planVerificationMatrix(HEAD, POPULATION, FIXTURE_FLOOR, [])).toThrow(
+      /empty matrix plan/,
+    )
     expect(() =>
-      planVerificationMatrix(HEAD, POPULATION, [
+      planVerificationMatrix(HEAD, POPULATION, FIXTURE_FLOOR, [
         chunk("a", ["one.test.ts"]),
         chunk("a", ["two.test.ts"]),
       ]),
     ).toThrow(/duplicate matrix chunk id/)
     expect(() =>
-      planVerificationMatrix(HEAD, POPULATION, [
+      planVerificationMatrix(HEAD, POPULATION, FIXTURE_FLOOR, [
         chunk("a", ["one.test.ts"]),
         chunk("b", ["one.test.ts"]),
       ]),
     ).toThrow(/duplicate matrix file/)
     expect(() =>
-      planVerificationMatrix(HEAD, POPULATION, [chunk("a", ["/tmp/x.test.ts"])]),
-    ).toThrow(/unsafe matrix file/)
-    expect(() => planVerificationMatrix(HEAD, POPULATION, [chunk("a", ["../x.test.ts"])])).toThrow(
-      /unsafe matrix file/,
-    )
-    expect(() =>
-      planVerificationMatrix(HEAD, POPULATION, [chunk("a", ["tests/../x.test.ts"])]),
+      planVerificationMatrix(HEAD, POPULATION, FIXTURE_FLOOR, [chunk("a", ["/tmp/x.test.ts"])]),
     ).toThrow(/unsafe matrix file/)
     expect(() =>
-      planVerificationMatrix(HEAD, POPULATION, [chunk("bad:id", ["x.test.ts"])]),
+      planVerificationMatrix(HEAD, POPULATION, FIXTURE_FLOOR, [chunk("a", ["../x.test.ts"])]),
+    ).toThrow(/unsafe matrix file/)
+    expect(() =>
+      planVerificationMatrix(HEAD, POPULATION, FIXTURE_FLOOR, [chunk("a", ["tests/../x.test.ts"])]),
+    ).toThrow(/unsafe matrix file/)
+    expect(() =>
+      planVerificationMatrix(HEAD, POPULATION, FIXTURE_FLOOR, [chunk("bad:id", ["x.test.ts"])]),
     ).toThrow(/unsafe matrix chunk id/)
   })
 
@@ -280,12 +299,15 @@ describe("verification matrix aggregate", () => {
     expect(workflow).toContain("include-hidden-files: true")
     expect(workflow).not.toContain("QUANTA_MATRIX_CHUNK_FILES")
     expect(workflow).toContain("test-timings-v2.json")
-    const matrixCli = readFileSync(
-      join(import.meta.dir, "../../../tools/dev/verification-matrix-cli.ts"),
+    // The CLI's selection moved into `verification-matrix-population.ts` — one
+    // owner for the planner and both consumers — so the markers follow it. The
+    // discovery root is still the `full` SUITE; the tier is what narrows it.
+    const population = readFileSync(
+      join(import.meta.dir, "../../../tools/dev/verification-matrix-population.ts"),
       "utf8",
     )
-    expect(matrixCli).toMatch(/selectTestPoliciesForTier\s*\(/)
-    expect(matrixCli).toContain('"full"')
+    expect(population).toMatch(/selectTestPoliciesForTier\s*\(/)
+    expect(population).toContain('discoverSuiteFiles(input.repoRoot, "full")')
   })
 })
 
@@ -319,8 +341,11 @@ describe("a plan says which population it covers", () => {
     capabilitySha256: "3".repeat(64),
     ...overrides,
   })
+  const FIXTURE_FLOOR = MATRIX_PLAN_FILE_FLOOR
   const build = (overrides: Record<string, unknown> = {}, count = 150) =>
-    planVerificationMatrix(HEAD40, pop(overrides) as never, [chunkOf("pure-0", files("a", count))])
+    planVerificationMatrix(HEAD40, pop(overrides) as never, FIXTURE_FLOOR, [
+      chunkOf("pure-0", files("a", count)),
+    ])
 
   test("the tier travels WITH the plan and is part of its identity", () => {
     const asPr = build()
@@ -363,19 +388,27 @@ describe("a plan says which population it covers", () => {
   test("a v3 plan cannot be read as a v4 one", () => {
     const v4 = build()
     expect(() =>
-      parseVerificationMatrixPlan({ ...v4, schema: "quanta.verification-matrix.v3" }),
+      parseVerificationMatrixPlan(
+        { ...v4, schema: "quanta.verification-matrix.v3" },
+        FIXTURE_FLOOR,
+      ),
     ).toThrow(/invalid matrix plan schema/)
     // ...and a v4 plan with its population stripped is not silently accepted.
     const { population: _dropped, ...withoutPopulation } = v4
-    expect(() => parseVerificationMatrixPlan(withoutPopulation)).toThrow(/population/)
+    expect(() => parseVerificationMatrixPlan(withoutPopulation, FIXTURE_FLOOR)).toThrow(
+      /population/,
+    )
     // ANTI-VACUITY: the intact plan round-trips.
-    expect(parseVerificationMatrixPlan(v4).planSha256).toBe(v4.planSha256)
+    expect(parseVerificationMatrixPlan(v4, FIXTURE_FLOOR).planSha256).toBe(v4.planSha256)
   })
 
   test("tampering with the population is caught by the plan digest", () => {
     const v4 = build()
     expect(() =>
-      parseVerificationMatrixPlan({ ...v4, population: { ...v4.population, tier: "full" } }),
+      parseVerificationMatrixPlan(
+        { ...v4, population: { ...v4.population, tier: "full" } },
+        FIXTURE_FLOOR,
+      ),
     ).toThrow(/digest mismatch/)
   })
 })
@@ -390,11 +423,95 @@ describe("matrix tier wiring", () => {
   test("the planner takes a tier and no longer hardcodes one", () => {
     const cli = read("tools/dev/verification-matrix-cli.ts")
     expect(cli).toContain('assertKnownTier(requiredArg("--tier"))')
-    expect(cli).toContain("selectTestPoliciesForTier(policies, tier)")
-    expect(cli).not.toContain(
-      'selectTestPoliciesForTier(\n        policies,\n        "full",\n      )',
-    )
+    // The selection itself moved into `verification-matrix-population.ts`, which
+    // is the point: the planner and both consumers call ONE function, so this
+    // arm names the call rather than a copy of the policy code.
+    expect(cli).toContain("currentMatrixPopulation({")
+    expect(cli).toContain("matrixPlanFileFloor(tier)")
+    expect(cli).toContain("matrixPopulationProblem(")
+    expect(cli).not.toContain('tier: "full"')
     expect(cli).toContain("--expect-tier")
+  })
+
+  /**
+   * BEHAVIOURAL, because the arm above can only see that a call exists.
+   *
+   * The planner used to compute the population inline while the consumers
+   * compared a subset of it, and the three population digests were compared by
+   * nobody at all — a plan carrying three arbitrary 64-hex strings passed every
+   * check. These run the real thing against the real tree.
+   */
+  test("the population is recomputed from the tree, and differs by tier", () => {
+    const forTier = (tier: string) =>
+      currentMatrixPopulation({
+        repoRoot: resolve(import.meta.dir, "..", "..", ".."),
+        tier,
+        policyOverridesPath: resolve(
+          import.meta.dir,
+          "..",
+          "..",
+          "..",
+          "tools/dev/test-policy-overrides.json",
+        ),
+      }).population
+
+    const pr = forTier("pr")
+    const nightly = forTier("nightly")
+    // Same universe, different selections: the membership digest is what makes
+    // the difference visible, and it is the field nothing compared.
+    expect(pr.universe).toBe(nightly.universe)
+    expect(pr.membershipSha256).not.toBe(nightly.membershipSha256)
+    expect(pr.membershipSha256).toMatch(/^[0-9a-f]{64}$/)
+    // Recomputation is stable, or every consumer would refuse every plan.
+    expect(forTier("pr")).toEqual(pr)
+
+    // The comparison a consumer makes: this population against itself passes,
+    // and any single field being off is named.
+    expect(matrixPopulationProblem(pr, pr)).toBeUndefined()
+    // Tier first, because "you planned a different tier" and "the tree moved"
+    // send someone to two different places.
+    expect(matrixPopulationProblem(pr, nightly)).toBe("wrong-tier")
+    // The membership check is what catches the case a tier LABEL cannot: the
+    // same tier name over a different selection.
+    expect(matrixPopulationProblem({ ...pr, membershipSha256: nightly.membershipSha256 }, pr)).toBe(
+      "membership-mismatch",
+    )
+    expect(matrixPopulationProblem({ ...pr, tier: "full" }, pr)).toBe("wrong-tier")
+    expect(matrixPopulationProblem({ ...pr, universe: pr.universe - 1 }, pr)).toBe(
+      "universe-mismatch",
+    )
+    expect(matrixPopulationProblem({ ...pr, policySha256: "9".repeat(64) }, pr)).toBe(
+      "policy-mismatch",
+    )
+    expect(matrixPopulationProblem({ ...pr, capabilitySha256: "9".repeat(64) }, pr)).toBe(
+      "capability-mismatch",
+    )
+    // Three real discoveries over ~4,000 files. Explicit, because the default
+    // 5s cut it off at 4.1s and a "timed out" there reads as a hang.
+  }, 30_000)
+
+  test("the plan floor is the tier's COMMITTED floor, not a literal", () => {
+    // MEASURED: the literal was 100 against a 3,941-file population, and the
+    // record every other rail uses commits the same tiers to 3,900.
+    const floors = loadTierPopulationFloors()
+    for (const tier of ["prepush", "pr", "full", "nightly"]) {
+      const committed: number | undefined = floors.tiers[tier]?.minFiles
+      expect({ tier, floor: matrixPlanFileFloor(tier, floors) }).toEqual({
+        tier,
+        floor: committed as number,
+      })
+      expect(committed ?? 0).toBeGreaterThan(MATRIX_PLAN_FILE_FLOOR * 30)
+    }
+    // An unknown tier is a named refusal, not a default.
+    expect(() => matrixPlanFileFloor("made-up", floors)).toThrow(/no committed population floor/)
+    // ...and a record that named a tiny number cannot weaken it below the
+    // absolute floor.
+    expect(
+      matrixPlanFileFloor("tiny", {
+        schema: "quanta.test-tier-population.v1",
+        tiers: { tiny: { minFiles: 3, reason: "fixture" } },
+      } as never),
+    ).toBe(MATRIX_PLAN_FILE_FLOOR)
   })
 
   test("the workflow plans and aggregates the SAME tier the monolith runs", () => {
