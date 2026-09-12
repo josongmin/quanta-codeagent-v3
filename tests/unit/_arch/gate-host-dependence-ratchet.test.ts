@@ -13,11 +13,12 @@
  *
  * The three marked gates and why, each measured on this host:
  *
- *  - `contract` — `bun run test:contract` is 8 pass / 5 skip with pyright, tsserver and
- *    python3 all PRESENT and docker up; every skip is "no capability receipt:
- *    QUANTA_CAPABILITY_RECEIPT is unset".
- *  - `real-toolchain-e2e` — every case needs a real external toolchain and skips when
- *    its tool is absent.
+ *  - `contract` — 8 pass / 5 skip: THREE are the unset capability receipt with the tools
+ *    present, TWO are a genuinely absent `limactl`. The reason said absent tools, then
+ *    said every skip was the receipt; both were wrong, so it now names both causes.
+ *  - `real-toolchain-e2e` — 42 of its 50 skips are the unset receipt with the tool
+ *    PRESENT (debugpy 1.8.21); only 8 are an absent tool (gopls). Same cause as
+ *    `contract`, and the reason named absent tools until it was measured.
  *  - `full-suite` — `declared-pending-gate` capability members are NOT lane-gated, so
  *    they classify as ordinary and land in this gate's tiers;
  *    `os-sandbox-bwrap-real-exec-e2e` is `["prepush","pr","full","nightly"]` and runs
@@ -72,17 +73,47 @@ describe("gate host-dependence ratchet", () => {
    * which runs 17 files, 5 of the 11 living in a directory it never reaches. A number
    * in a prose field drifts the moment the corpus or the host moves.
    */
-  test("no mark states a bare file count", () => {
+  /**
+   * The escape hatch is a PHRASE, not a word, and the count shapes are plural.
+   *
+   * The first version matched only `/\b\d+ of (the )?\d+\b/` and exempted any reason
+   * containing `MECHANISM` case-insensitively. Both were bypassable, measured:
+   * `"2 of 17 member files cannot execute; that is the mechanism."` passed 4/0, because
+   * the everyday word exempts it; and `"only 2/17 member files execute; two of
+   * seventeen."` passed 4/0, because `N/M` and spelled-out numbers are invisible.
+   */
+  test("no mark states a bare count as its claim", () => {
+    const COUNT_SHAPES: readonly RegExp[] = [
+      /\b\d+ of (?:the )?\d+\b/i,
+      /\b\d+ ?\/ ?\d+\b/,
+      /\b\d+ out of \d+\b/i,
+      /\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve) of (?:the )?(?:\w+teen|\w+ty|one|two|three|four|five|six|seven|eight|nine|ten)\b/i,
+    ]
+    // The exemption is a PHRASE that states the count is not the claim — not a word
+    // that can appear for any reason.
+    const EXEMPTING_PHRASES: readonly string[] = [
+      "the mechanism does not drift",
+      "no count of FILES",
+      "not a count",
+      "wrong for this gate",
+    ]
     for (const g of GATES) {
-      if (g.hostDependent === undefined) continue
-      const bare = /\b\d+ of (the )?\d+\b/.exec(g.hostDependent)
-      // A count is allowed only where the sentence also says it is NOT the claim.
-      if (bare !== null) {
-        expect(
-          /drifts|not a count|wrong for this gate|MECHANISM/i.test(g.hostDependent),
-          `${g.id} states "${bare[0]}" without saying why a count is not the claim`,
-        ).toBe(true)
-      }
+      const why = g.hostDependent
+      if (why === undefined) continue
+      const hit = COUNT_SHAPES.map((re) => re.exec(why)).find((m) => m !== null)
+      if (hit === null || hit === undefined) continue
+      expect(
+        EXEMPTING_PHRASES.some((ph) => why.includes(ph)),
+        `${g.id} states "${hit[0]}" without a phrase saying the count is not the claim. ` +
+          `A count in a prose field drifts: this session had three answers for one gate.`,
+      ).toBe(true)
+    }
+  })
+
+  /** The exemption list must not be satisfiable by an ordinary word. */
+  test("the count exemption is a phrase, not a bare word", () => {
+    for (const ph of ["the mechanism does not drift", "no count of FILES", "not a count"]) {
+      expect(ph.split(" ").length, `"${ph}" is a single word`).toBeGreaterThan(2)
     }
   })
 })

@@ -21,6 +21,7 @@
  * because it is the property that makes the change safe for existing installs.
  */
 import { describe, expect, test } from "bun:test"
+import { spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { dirname, join } from "node:path"
@@ -141,6 +142,72 @@ describe("the memory plane follows the quanta home", () => {
       // silent data loss in the line written to prevent silent data loss.
       expect(r.legacyNotice).toContain("-wal")
       expect(r.legacyNotice).toContain("-shm")
+    } finally {
+      for (const d of [osHome, relocated]) rmSync(d, { recursive: true, force: true })
+    }
+  })
+
+  /**
+   * The notice fires ONLY while the destination is absent, and its command cannot
+   * clobber.
+   *
+   * Measured on the first version: the notice re-fired on every launch (3 of 3), launch
+   * 1 CREATES the destination, and the printed bare `mv` then replaced the new session's
+   * store with the old one — real fixture, destination held `NEW-SESSION-DATA`, ran the
+   * command, destination became `OLD-MONTHS-OF-DATA`. The same silent data loss the
+   * helper was written to prevent, one level up.
+   */
+  test("no notice once this home has its own store — a `mv` would destroy the newer one", () => {
+    const osHome = mkdtempSync(join(tmpdir(), "mem-both-"))
+    const relocated = mkdtempSync(join(tmpdir(), "mem-both2-"))
+    try {
+      const prior = join(osHome, ".quanta", "memory", "memory.sqlite")
+      mkdirSync(dirname(prior), { recursive: true })
+      writeFileSync(prior, "old months of data")
+      const dest = join(relocated, "memory", "memory.sqlite")
+      mkdirSync(dirname(dest), { recursive: true })
+      writeFileSync(dest, "this session's data")
+      const r = resolveStorePath({ homeDir: relocated, cwd: "/nonexistent-cwd", osHomeDir: osHome })
+      expect(r.path).toBe(dest)
+      expect(
+        r.legacyNotice,
+        "recommending a `mv` onto an existing store is how the newer one gets destroyed",
+      ).toBeUndefined()
+    } finally {
+      for (const d of [osHome, relocated]) rmSync(d, { recursive: true, force: true })
+    }
+  })
+
+  test("the migration command is no-clobber and exits 0 when there are no side files", () => {
+    const osHome = mkdtempSync(join(tmpdir(), "mem-cmd-"))
+    const relocated = mkdtempSync(join(tmpdir(), "mem-cmd2-"))
+    try {
+      const prior = join(osHome, ".quanta", "memory", "memory.sqlite")
+      mkdirSync(dirname(prior), { recursive: true })
+      writeFileSync(prior, "OLD")
+      const r = resolveStorePath({ homeDir: relocated, cwd: "/nonexistent-cwd", osHomeDir: osHome })
+      const cmd = /running\): (.+)$/.exec(r.legacyNotice ?? "")?.[1]
+      expect(cmd, "the notice must carry a runnable command").toBeDefined()
+      // RUN IT, twice, against real files — a string assertion is not enough. A
+      // `toContain("mv -n")` is satisfied by the side-file loop while the MAIN move is
+      // still a clobbering bare `mv`, which is exactly how that mutant survived.
+      //
+      // Pass 1: no side files, empty destination — the case that used to exit 1 with
+      // the migration complete.
+      const res = spawnSync("sh", ["-c", cmd as string], { encoding: "utf8" })
+      expect(res.status, `exit ${res.status}: ${res.stderr}`).toBe(0)
+      expect(readFileSync(join(relocated, "memory", "memory.sqlite"), "utf8")).toBe("OLD")
+
+      // Pass 2: the destination now EXISTS and holds this session's data, and the old
+      // path has data again. The command must not replace it.
+      mkdirSync(dirname(prior), { recursive: true })
+      writeFileSync(prior, "OLD-AGAIN")
+      writeFileSync(join(relocated, "memory", "memory.sqlite"), "THIS-SESSION")
+      spawnSync("sh", ["-c", cmd as string], { encoding: "utf8" })
+      expect(
+        readFileSync(join(relocated, "memory", "memory.sqlite"), "utf8"),
+        "the command clobbered the newer store",
+      ).toBe("THIS-SESSION")
     } finally {
       for (const d of [osHome, relocated]) rmSync(d, { recursive: true, force: true })
     }

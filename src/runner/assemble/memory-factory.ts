@@ -110,7 +110,12 @@ export interface MemorySessionOverride {
   readonly cwd?: string
   /** ADR-0557 — attributed notice sink for the two store-level events
    *  (legacy file honored / sqlite open failed ⇒ volatile fallback). Defaults
-   *  to `logger.warn`; never swallowed. */
+   *  to `logger.warn` — which the WEB DAEMON SWALLOWS: `terminal-io`'s `writeStderr`
+   *  is a no-op until a composition root calls `setTerminalIo`, and only
+   *  `apps/cli/index.ts` does. A web surface with a relocated home therefore gets
+   *  neither the old store nor a notice, and the same silence covers the legacy-cwd
+   *  notice and the sqlite-open-failure fallback. Recorded here rather than fixed:
+   *  the repair is a web-side sink, not a change to this default. */
   readonly onStoreNotice?: (line: string) => void
 }
 

@@ -62,13 +62,17 @@ const withTmpHome = (run: (home: string) => ReturnType<typeof buildMemoryForSess
 describe("buildMemoryForSession — default-ON contract", () => {
   // ADR-0557: the unset default WAS the volatile InMemoryStore ("never writes
   // to disk"); it is now the DURABLE sqlite store under the injected home.
-  test("env unset ⇒ both slots present (store=DURABLE SqliteStore under <home>/.quanta/memory, config truthy)", () => {
+  // `override.homeDir` is the QUANTA HOME, so the layout is `<home>/memory/`. It was
+  // `<home>/.quanta/memory/` while the memory plane resolved against an OS home instead
+  // of following QUANTA_HOME; with the env unset the resolved path is unchanged, only
+  // the meaning of this INJECTED root moved.
+  test("env unset ⇒ both slots present (store=DURABLE SqliteStore under <quanta-home>/memory, config truthy)", () => {
     withTmpHome((home) => {
       const slot = buildMemoryForSession(env({}), { homeDir: home, cwd: home })
       expect(slot.store).toBeInstanceOf(SqliteStore)
       expect(slot.kind).toBe("sqlite")
-      expect(slot.storePath).toBe(join(home, ".quanta", "memory", "memory.sqlite"))
-      expect(existsSync(join(home, ".quanta", "memory", "memory.sqlite"))).toBe(true)
+      expect(slot.storePath).toBe(join(home, "memory", "memory.sqlite"))
+      expect(existsSync(join(home, "memory", "memory.sqlite"))).toBe(true)
       expect(typeof slot.store?.recall).toBe("function")
       expect(slot.config).toBeDefined()
       return slot

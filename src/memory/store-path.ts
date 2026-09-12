@@ -88,14 +88,27 @@ export interface ResolveStorePathInput {
 
 /** The migration command a notice prints. Moves the sqlite AND its side files.
  *
+ *  `mv -n`, and an `if` rather than `&&` in the loop. Two measured defects in the
+ *  first version:
+ *
+ *  - a bare `mv` OVERWROTE the destination. The pre-relocation notice re-fired on
+ *    every launch, and launch 1 CREATES the destination — so from launch 2 onward the
+ *    printed command replaced the new session's store with the old one. Real fixture:
+ *    destination held `NEW-SESSION-DATA`, ran the command, destination became
+ *    `OLD-MONTHS-OF-DATA`, no prompt, no backup. The same failure this helper was
+ *    written to prevent, one level up.
+ *  - `[ -e … ] && mv …` was the last element of the `&&` chain, so a clean shutdown
+ *    with no side files made the whole command exit 1 with the migration COMPLETE.
+ *    Measured exit=1 on the common case.
+ *
  *  `-wal` and `-shm` were omitted for as long as this notice existed. An operator who
  *  followed it moved the database out from under an uncheckpointed write-ahead log and
  *  lost whatever had not been checkpointed — silent data loss, in the line written to
  *  prevent silent data loss. `mv` on a missing side file is a hard error, so each is
  *  guarded. */
 const migrationCommand = (from: string, to: string): string =>
-  `mkdir -p "${path.dirname(to)}" && mv "${from}" "${to}"` +
-  ` && for s in -wal -shm; do [ -e "${from}$s" ] && mv "${from}$s" "${to}$s"; done`
+  `mkdir -p "${path.dirname(to)}" && mv -n "${from}" "${to}"` +
+  ` && for s in -wal -shm; do if [ -e "${from}$s" ]; then mv -n "${from}$s" "${to}$s"; fi; done`
 
 /** Resolve the sqlite path: explicit > legacy cwd file > pre-relocation home file >
  *  home default. Pure given `exists`. */
@@ -131,7 +144,12 @@ export const resolveStorePath = (input: ResolveStorePathInput): StorePathResolut
   // Skipped when the paths coincide (an unset home), so the common case is silent.
   if (input.osHomeDir !== undefined && input.osHomeDir !== "") {
     const prior = preRelocationHomeStorePath(input.osHomeDir)
-    if (prior !== home && exists(prior)) {
+    // Only while the destination is still ABSENT. The notice recommends a `mv`, and a
+    // `mv` is only the right answer when there is nothing to move onto: once this home
+    // has its own store, the operator has TWO stores and moving one over the other
+    // destroys the newer. Measured — without this the notice re-fired on every launch
+    // (3 of 3) recommending a command that had become destructive.
+    if (prior !== home && exists(prior) && !exists(home)) {
       return {
         path: home,
         source: "home-default",
