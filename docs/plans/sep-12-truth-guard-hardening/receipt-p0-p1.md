@@ -204,3 +204,152 @@ worktree에서 별도로 돌려야 한다.
 - P1-6 `tools/dev` blanket exemption 제거 (선행 조건 해소됨)
 - P2 `/knobs set` 표시, top-level flag registry, build identity, evidence
   population, primary reachability, dependency asset probe
+
+---
+
+# P1-3 ~ P2 receipt (continuation)
+
+- 상태: IMPLEMENTED and MERGED to local `main` incrementally, 11 commits.
+- 각 항목은 커밋 하나, 병합은 `main`을 브랜치로 당긴 뒤 `--ff-only`. 병합 직전마다
+  내 테스트 재실행 + `main` HEAD 재확인(동시 세션이 캠페인 중).
+
+## P1-3 — knob completeness: AST 센서스로 교체
+
+`isReadLine`이 3개 구문만 보았고, 트리는 10개를 쓴다. `ORPHAN_CEILING`은 몇 달째
+0이었고 로그도 `orphans=0/0`을 찍었다. 실제 미선언은 **63**.
+
+| | |
+|---|---|
+| 파싱 파일 (git ls-files) | 3,734 |
+| declared (정적) | 650 |
+| read 사이트 / distinct | 984 / 622 |
+| write / delete / prefix | 36 / 21 / 2 distinct |
+| orphan 예외 전 | **63** |
+| orphan 예외 후 | **28** (프로덕션 26 + 테스트 2) |
+
+처리: **19 선언**(cli-knobs 14 · host 2 · runner 4 · mention 2 · extra 2) +
+**2 예외**(`QUANTA_SIDE_AGENT_TEST_MODE`, `QUANTA_TB_BEST_OF_N`) + 테스트 corpus
+제외 2. `ORPHAN_CEILING=0` 유지 — 상향 없음.
+
+유저 정정 2건이 스캐너로 확증됨: `QUANTA_ALLOW_UNSIGNED`는 write(
+`plugin-isolation/bun-spawner.ts:87`), `QUANTA_BENCH_`/`QUANTA_SWEBENCH_PRO_`는
+prefix. 둘 다 read 집합에 없음.
+
+측정 중 함정 하나를 직접 밟았다: 처음 `allKnobs()`로 declared를 모아 **0**이 나왔다.
+등록 모듈 import 전엔 비어 있어 runner knob 전부가 orphan으로 뒤집힌다. 기존 라쳇이
+정적 스캔을 고집한 이유가 이것이고, 같은 방식으로 맞췄다.
+
+RED-on-injection: 프로덕션 파일에 한 줄씩 주입(cp 백업 원복, `git checkout --`
+미사용) — property / bracket / alias(`e.`) / cast / destructure / call-arg /
+const-key **7형태 전부 1/0 트립**, write-only는 0/0. 구 regex는 3/7만 보았다.
+
+## P1-4 — tool manifest 자기충족
+
+`scanRegisteredToolNames()`가 `src/tool`을 grep하고 그 안에 매니페스트 자신이 있다.
+모든 행이 자기를 증명 ⇒ "no stale rows" 방향이 구조적으로 발화 불가.
+
+```
+스캔 WITH 매니페스트    194 → stale: none
+스캔 WITHOUT 매니페스트  193 → stale: lsp_diagnostics
+```
+
+`lsp_diagnostics`는 존재한 적 없다. `lspDiagnosticsTool()`이
+`diagnosticsTool(lspDiagnosticsProvider())`를 반환하고 그 도구 이름은
+`"diagnostics"`(이미 BASE 행). `QUANTA_LSP`는 provider 교체다.
+
+결함 재현: 유령 행 + 제외 유지 → 35/1(문다), 유령 행 + 제외 제거 → **36/0**(눈감는다).
+
+빌더 프로브는 추가하지 않았다 — 79행에 `buildDefaultTools()` 정확 일치가 이미 있다.
+
+## P1-5 — default-off ledger 라벨
+
+`gate:default-off` 5개가 정확 일치 필터에서 조용히 제외. **누락이 아니라 부재**라
+위반으로도 안 잡혔다. 라벨 + row를 같은 변경에(한쪽만 하면 각각 5건 RED).
+
+decision은 게이트 실코드에서: rfc01 `measure-first`(gateOnStrict) · rfc02
+`enable-now`(등록만, read-only) · rfc04 `repair-first`(`parseEnvFlag`의 빈문자열=true
+구멍) · rfc05 `hold`(bool 아님, selector+centralConfig 이중게이트) · rfc06
+`repair-first`(**co-gate 결함** — 저널 스토어가 `QUANTA_HUNK_UNDO`에 걸려 자기 게이트로
+자기 기능을 못 켬). ledger 첫 `repair-first` 2건.
+
+metrics 179→184행, wired 171→175, 95.5→95.1%, repair-first 0→2, dormant 8→9 —
+plan 문서 3개 needle 8개 동시 갱신(파이프라인이 정확 일치를 요구, 과거 2회 정상 작동).
+
+드리프트 가드 신설: 정본 철자 near-miss 금지 + `gate:` 네임스페이스는 env 키 전용.
+뮤턴트 3건(4 fail / 3 fail / 1 fail).
+
+## P1-6 — tools/dev 면제
+
+면제 근거가 소스에 "0 of ~20 catalogued"라 적혀 있었다. 실측 **51/102**. 절반이
+카탈로그된 상태라 커버리지가 동전던지기였고, 게이트가 유일하게 막아야 할 신규 파일이
+정확히 통과 대상이었다.
+
+일괄 등록 없음 — `runCheckChanged`의 ADDED=blocker / MODIFIED=advisory 비대칭이
+그 일을 한다. 첫 적발 대상은 내 `tools/dev/knob-env-access.ts`였고
+`cli-slash-knobs-live-control`에 등록했다.
+
+결함 재현: 신규 파일 + 면제 제거 → BLOCK, 면제 복원 → ok.
+첫 뮤턴트는 무효였다(`knob-env-access.ts`가 이미 `origin/main`에 있어 MODIFIED) —
+가드가 아니라 프로브가 틀렸고 진짜 신규 파일로 다시 증명했다.
+
+## P2 — 표시·배포·증명
+
+**`/knobs set`**: catalog 674행 전부에 "live this session"을 주장했다.
+`hotToggleable: true`는 카탈로그 전체에 **1개**(`QUANTA_PERSONA`)이고 그 소스가
+스스로 apply 경로가 DEAD라고 적는다. `hotToggleable`을 canonical로 쓰고 그 1개를
+false로 내렸다. 기존 스위트는 `setOverride`를 가짜 wire로 스텁해 프로듀서를 안 탄다
+(`slash-knobs.test.ts:208`) — 새 테스트는 조립된 `knobsCmd`를 직접 쓰고 스텁 금지.
+
+**top-level 플래그**: `--lsp-tools`·`--git-tools`·`--metrics`는 파서 없음(구현된 적
+없음), 실제 파싱되는 6개는 미광고. 테이블로 만들고 usage를 렌더, `VALUED_FLAGS`를
+흡수(병존하면 세 번째 목록). 양방향 가드. 내 스캐너가 두 번 틀렸고 둘 다 기록:
+`-lc`/`-p` 오탐 → 좁힘, 그 다음 `--image`/`--tool-profile` 오탐 → **스캐너가 틀린 것**
+이라 3개 실제 read 형태로 넓힘(표를 줄이지 않음).
+
+**build identity**: `bun build`에 `--define`이 **없다**. 주면 exit 0으로 아무것도
+치환하지 않는다 — 스탬프 기능에 최악의 실패다. `--env='QUANTA_BUILD_*'`가 동작.
+repo 밖에서 확인:
+
+```
+/tmp $ dist/agent --version   → quanta 1.0.035 (6a82f65d1c9d-dirty)
+repo $ bun run …/index.ts --version → quanta 1.0.035   (스탬프 없음, 불변)
+```
+
+내 커버리지가 두 번 실패했고 둘 다 기록: bake fallback 삭제가 초록(모듈 로드 시
+env 읽어 소스 실행에선 영구 부재) → 주입 파라미터로. `-dirty` 분기 삭제도 초록 →
+`composeCommitLabel(commit, dirty)` 순수 함수로.
+
+**evidence population**: 4,083 tracked / 4,041 실행가능 / **진짜 고아 9**(나머지 33은
+web `.test.tsx`, vitest가 실제로 돌림 = 회계 공백). 그중 하나가 L3 feature의
+`contract` evidence(`objective-goal-continuation-live` → goal smoke). `check-evidence`의
+존재 계약은 건드리지 않고 별도 가드 신설. `gated-test-scope-ratchet`이 이미
+`tests/smoke`/`tests/eval`을 out-of-band로 선언·검사하므로 **재구축하지 않고 인용**.
+내 가드가 세 번 틀렸고 전부 뮤턴트로 잡힘: 배럴/하네스 오탐 8건 → 규칙 좁힘 · 임의
+`deliberate_hold` 수용(정작 그 케이스는 headless/batch hold) → 실행 사실 요구 ·
+"smoke" 단어 수용(그 feature가 이미 smoke를 길게 서술) → 실행 부재 주장으로 강화.
+
+**partial-dead reachability**: `src.every(isDead)`라 live 1개가 dead 다수를 가린다.
+실측 **all-dead 0 / partial 83 feature · 105 파일**. fan-in 1.95배라 카탈로그를
+채울수록 사각이 커진다. `some()` 치환은 83건 동시 실패 + primary/auxiliary 축이
+스키마에 없어 판정 불가 ⇒ **가시화 + 감소전용 라쳇**까지. blocker 승격은 스키마 필드
++ 83 triage의 별도 캠페인임을 명시. `.d.ts` 제외가 85/107→83/105의 차이.
+
+## 레일
+
+```
+bun run tools/dev/typecheck.ts src     passed (매 커밋)
+bun run tools/dev/typecheck.ts tests   EXIT 0
+biome check <변경 파일>                 clean (repo-wide lint:fix 미사용)
+bun fc ci                              EXIT 0 (1071 resolved / diff: no changes)
+bun fc check-changed                   ok
+```
+
+## 미실행 / 미완
+
+- `bun run precommit` / `QUANTA_TEST_CACHE=off bun run prepush` / shard 1-8 / JUnit
+  receipt — 세션 내내 부하 25~72, 동시 세션 캠페인 진행 중. 성능·ABBA 수치 0건 주장.
+- primary/auxiliary evidence 축 (partial-dead blocker 승격의 선행)
+- `tests/smoke`·`tests/eval` 실행 레인 승격 (이미 의도적 out-of-band)
+- 설치 바이너리 교체 (`bun run install:cli`) — 코드/검증과 분리된 별도 액션
+- `tool` 스위트에서 관측된 1~4 fail은 `test-resilience`/`bounded-child` 타이밍
+  플레이크. 내 커밋 파일 전수에 미포함, 격리 재실행 3/3 초록, 부하 71.88.
