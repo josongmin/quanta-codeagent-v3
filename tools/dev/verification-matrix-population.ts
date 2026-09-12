@@ -79,9 +79,11 @@ export const matrixPlanFileFloor = (
  * could ever validate. That digest is over each tool's ABSOLUTE PATH plus
  * `dev:inode size mtime` — measured, `bun` contributes
  * `/Users/…/bun 16777232:885871694 63096576 1778626532000`. The matrix plans on
- * one `ubuntu-latest` VM, runs workers on four more and aggregates on a sixth;
- * inodes and mtimes cannot agree across them, so every worker and the aggregator
- * would refuse with `capability-mismatch`. That is the same "a cache that can only
+ * one `ubuntu-latest` VM (`full-plan`), runs `full-shard` as a matrix over
+ * `fromJSON(needs.full-plan.outputs.chunks)` — a count decided at plan time, not
+ * a fixed one — and aggregates on another; inodes and mtimes cannot agree across
+ * fresh VMs, so every worker and the aggregator would refuse with
+ * `capability-mismatch`. That is the same "a cache that can only
  * miss looks exactly like one that works" defect this module's sibling commit
  * fixed one layer up, reintroduced eighty minutes later by its own author.
  *

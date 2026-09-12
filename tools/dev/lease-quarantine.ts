@@ -129,13 +129,23 @@ export type QuarantineVerdict =
  * is recorded for forensics and for the operator, not as the gate.
  */
 export const quarantineVerdict = (input: {
-  /** Prefer `read`: a bare `undefined` cannot say "unreadable". */
-  readonly record?: LeaseQuarantineRecord | undefined
-  readonly read?: LeaseQuarantineRead
+  /**
+   * EXACTLY ONE of these, enforced by the type.
+   *
+   * Making both optional was a new fail-open one level up: `quarantineVerdict({
+   * repositoryId, nowMs, isAlive })` typechecked under `--strict` and answered
+   * `clear`, and supplying both silently used `read` with no diagnostic. The
+   * union makes "which question are you asking" a thing the caller must say.
+   */
   readonly repositoryId: string
   readonly nowMs: number
   readonly isAlive: (pgid: number) => boolean
-}): QuarantineVerdict => {
+} & (
+  | { readonly read: LeaseQuarantineRead; readonly record?: never }
+  /** Legacy shape. Cannot express "unreadable", so it still maps a corrupt
+   *  record to `clear`; kept only for the arms that predate the outcome type. */
+  | { readonly record: LeaseQuarantineRecord | undefined; readonly read?: never }
+)): QuarantineVerdict => {
   const { repositoryId, nowMs, isAlive } = input
   const read: LeaseQuarantineRead =
     input.read ??

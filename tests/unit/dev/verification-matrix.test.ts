@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { executedFileSetDigest } from "../../../tools/dev/executed-file-set"
+import { testToolchainSha256 } from "../../../tools/dev/test-shard-receipt"
 import { junitExecutedFiles } from "../../../tools/dev/test-shard-timings"
 import { loadTierPopulationFloors } from "../../../tools/dev/test-tier-population"
 import {
@@ -12,6 +13,7 @@ import {
   workerReceipt,
 } from "../../../tools/dev/verification-matrix"
 import {
+  capabilityGapSha256,
   currentMatrixPopulation,
   loadMatrixPlanForCheckout,
   matrixPlanFileFloor,
@@ -579,6 +581,95 @@ describe("matrix tier wiring", () => {
       ).toThrow(/covers 150 file\(s\); floor is 3900/)
     })
 
+    /**
+     * WITHOUT the injections.
+     *
+     * Every arm above passes both `currentPopulation` and `floors`, and the CLI
+     * passes neither — so an audit replaced the derived floor with the literal
+     * `1` and made the comparison a tautology (`?? plan.population`), and all 23
+     * arms stayed green. These drive the branch production actually takes.
+     */
+    test("with NO injections it derives the population and the floor itself", () => {
+      const real = currentMatrixPopulation({
+        repoRoot: REPO,
+        tier: "pr",
+        policyOverridesPath: OVERRIDES,
+      })
+      // A plan that honestly describes this checkout, over enough files to clear
+      // the tier's committed floor.
+      const honest = planVerificationMatrix(HEAD_SHA, real.population, matrixPlanFileFloor("pr"), [
+        {
+          id: "pure-0",
+          files: real.files
+            .slice(0, matrixPlanFileFloor("pr"))
+            .map((file) => file.replace(`${REPO}/`, "")),
+          resourceClass: "pure" as const,
+          predictedMs: 1_000,
+          testTimeoutMs: 120_000,
+          intraParallel: 8,
+        },
+      ])
+      const loaded = loadMatrixPlanForCheckout({
+        raw: JSON.parse(JSON.stringify(honest)) as unknown,
+        repoRoot: REPO,
+        policyOverridesPath: OVERRIDES,
+      })
+      expect(loaded.planSha256).toBe(honest.planSha256)
+
+      // ...and a plan whose population is one field off is refused by the REAL
+      // comparison. Three things make this arm bite where a looser one did not:
+      //
+      //  - the field is the MEMBERSHIP digest, because `universe` is caught
+      //    earlier by the plan's own "universe smaller than selected" rebuild;
+      //  - the drifted plan is MINTED, not edited, so its own `planSha256` is
+      //    self-consistent and cannot be what refuses it;
+      //  - the expected reason is exact. Allowing `digest mismatch` as an
+      //    alternative let a mutant that compares the plan to ITSELF
+      //    (`?? plan.population`) pass, because the edited plan then failed on
+      //    its digest instead.
+      const driftedPlan = planVerificationMatrix(
+        HEAD_SHA,
+        { ...real.population, membershipSha256: "9".repeat(64) },
+        matrixPlanFileFloor("pr"),
+        honest.chunks,
+      )
+      expect(() =>
+        loadMatrixPlanForCheckout({
+          raw: JSON.parse(JSON.stringify(driftedPlan)) as unknown,
+          repoRoot: REPO,
+          policyOverridesPath: OVERRIDES,
+        }),
+      ).toThrow(/membership-mismatch/)
+    }, 60_000)
+
+    test("with NO injections the REAL floor refuses a plan that covers too little", () => {
+      // The literal-`1` mutant lives here: a one-chunk plan over 150 files must
+      // be refused by the tier's committed 3,900, not waved through.
+      const real = currentMatrixPopulation({
+        repoRoot: REPO,
+        tier: "pr",
+        policyOverridesPath: OVERRIDES,
+      })
+      const tooSmall = planVerificationMatrix(HEAD_SHA, real.population, 100, [
+        {
+          id: "pure-0",
+          files: real.files.slice(0, 150).map((file) => file.replace(`${REPO}/`, "")),
+          resourceClass: "pure" as const,
+          predictedMs: 1_000,
+          testTimeoutMs: 120_000,
+          intraParallel: 8,
+        },
+      ])
+      expect(matrixPlanFileFloor("pr")).toBeGreaterThan(150)
+      expect(() =>
+        loadMatrixPlanForCheckout({
+          raw: JSON.parse(JSON.stringify(tooSmall)) as unknown,
+          repoRoot: REPO,
+          policyOverridesPath: OVERRIDES,
+        }),
+      ).toThrow(/covers 150 file\(s\); floor is/)
+    }, 60_000)
+
     test("a plan with no population tier is refused before anything else", () => {
       expect(() =>
         loadMatrixPlanForCheckout({
@@ -589,6 +680,42 @@ describe("matrix tier wiring", () => {
         }),
       ).toThrow(/no population tier/)
     })
+  })
+
+  /**
+   * The capability field is a HOST GAP, not a host fingerprint.
+   *
+   * It had no coverage at all, so restoring `testToolchainSha256()` — the
+   * per-machine `path dev:ino size mtime` digest that no hosted plan can ever
+   * match — passed 23 arms.
+   */
+  test("the population's capability field is the missing-tool gap, not a fingerprint", () => {
+    const population = currentMatrixPopulation({
+      repoRoot: resolve(import.meta.dir, "..", "..", ".."),
+      tier: "pr",
+      policyOverridesPath: resolve(
+        import.meta.dir,
+        "..",
+        "..",
+        "..",
+        "tools/dev/test-policy-overrides.json",
+      ),
+    }).population
+    expect(population.capabilitySha256).toBe(capabilityGapSha256())
+    // The regression this replaced: a digest over absolute paths, inodes, sizes
+    // and mtimes, which differs on every machine.
+    expect(population.capabilitySha256).not.toBe(testToolchainSha256())
+  }, 60_000)
+
+  test("the gap digest is order-insensitive and moves with the gap", () => {
+    expect(capabilityGapSha256(["bwrap", "chromium"])).toBe(
+      capabilityGapSha256(["chromium", "bwrap"]),
+    )
+    expect(capabilityGapSha256(["bwrap"])).not.toBe(capabilityGapSha256(["bwrap", "chromium"]))
+    // ANTI-VACUITY: an empty gap is still a value, not a crash, and differs from
+    // a non-empty one.
+    expect(capabilityGapSha256([])).toMatch(/^[0-9a-f]{64}$/)
+    expect(capabilityGapSha256([])).not.toBe(capabilityGapSha256(["bwrap"]))
   })
 
   test("the plan floor is the tier's COMMITTED floor, not a literal", () => {

@@ -30,6 +30,7 @@ import {
   quarantinePath,
   quarantineVerdict,
   readLeaseQuarantine,
+  readLeaseQuarantineOutcome,
   writeLeaseQuarantine,
 } from "../../../tools/dev/lease-quarantine"
 import { keeperTick } from "../../../tools/dev/lease-quarantine-keeper"
@@ -366,6 +367,84 @@ describe("the keeper outlives the group that spawned it", () => {
       rmSync(dir, { recursive: true, force: true })
     }
   }, 20_000)
+})
+
+/**
+ * The PRODUCER, not a hand-written verdict input.
+ *
+ * The arms that assert "an unreadable record blocks the lane" drove
+ * `quarantineVerdict` with a literal `{kind:"unreadable", …}`. So the mapping the
+ * fix actually consists of — a parse failure becoming `unreadable` WITH the
+ * file's mtime — was tested by nothing, and an audit restored the whole fail-open
+ * by making both `unreadable` returns say `absent` instead: 25 arms stayed green.
+ */
+describe("readLeaseQuarantineOutcome maps corruption to unreadable, not absent", () => {
+  const corrupt: readonly (readonly [string, string])[] = [
+    ["truncated json", '{"schema":"quanta.lease-quarantine.v1","repositoryI'],
+    ["zero bytes", ""],
+    ["valid json, wrong shape", '{"hello":"world"}'],
+    ["unknown schema", JSON.stringify({ ...record(), schema: "quanta.lease-quarantine.v2" })],
+    [
+      "pgid as a string",
+      JSON.stringify({
+        ...record(),
+        survivors: [{ pgid: "4242", leaderPid: 1, verdict: "x", detail: "" }],
+      }),
+    ],
+    ["float createdAtMs", JSON.stringify({ ...record(), createdAtMs: 1.5 })],
+  ]
+
+  test("every corrupt file reads as UNREADABLE and blocks, with the file's own age", () => {
+    const dir = mkdtempSync(join(tmpdir(), "quarantine-corrupt-"))
+    try {
+      const path = quarantinePath(dir)
+      for (const [why, body] of corrupt) {
+        writeFileSync(path, body)
+        const read = readLeaseQuarantineOutcome(path)
+        expect({ why, kind: read.kind }).toEqual({ why, kind: "unreadable" })
+        if (read.kind !== "unreadable") throw new Error("unreachable")
+        // The mtime is what bounds the block; a zero would make every corrupt
+        // record instantly stale and re-open the fail-open by another route.
+        expect({ why, hasAge: read.writtenAtMs > 0 }).toEqual({ why, hasAge: true })
+        const verdict = quarantineVerdict({
+          read,
+          repositoryId: "owner/repo",
+          nowMs: read.writtenAtMs + 1_000,
+          isAlive: () => true,
+        })
+        expect({ why, verdict: verdict.kind }).toEqual({ why, verdict: "blocked" })
+      }
+      // PAIRED CONTROL: a well-formed record on the same path reads as a record.
+      writeFileSync(path, JSON.stringify(record()))
+      expect(readLeaseQuarantineOutcome(path).kind).toBe("record")
+      // ...and an ABSENT file is absent, not unreadable — the two answers this
+      // type exists to keep apart.
+      rmSync(path, { force: true })
+      expect(readLeaseQuarantineOutcome(path).kind).toBe("absent")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("the same corruption past the TTL goes stale, so a bad file cannot brick the lane", () => {
+    const dir = mkdtempSync(join(tmpdir(), "quarantine-corrupt-ttl-"))
+    try {
+      const path = quarantinePath(dir)
+      writeFileSync(path, "{ not json")
+      const read = readLeaseQuarantineOutcome(path)
+      if (read.kind !== "unreadable") throw new Error("unreachable")
+      expect(
+        quarantineVerdict({
+          read,
+          repositoryId: "owner/repo",
+          nowMs: read.writtenAtMs + QUARANTINE_TTL_MS + 1,
+          isAlive: () => true,
+        }).kind,
+      ).toBe("stale")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
 })
 
 describe("the keeper script the default spawner points at", () => {

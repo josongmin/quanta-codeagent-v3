@@ -601,8 +601,16 @@ export const capabilityPolicySha256 = (
  *   ast-grep {bugs,e2e,scenarios}       23 pass / 31 skip -> 28 pass
  *
  * Thirty-three cases that never ran anywhere. The ones that still skip —
- * browser, sandbox, debugpy — skip because this host genuinely lacks chromium,
- * bwrap and debugpy, which is the answer the receipt is supposed to give.
+ * browser and sandbox — skip because this host genuinely lacks chromium and
+ * bwrap, which is the answer the receipt exists to give.
+ *
+ * debugpy is NOT one of those, and calling it "genuinely absent" was wrong.
+ * MEASURED: `/usr/bin/python3 -c 'import debugpy'` succeeds (1.8.21) and resolves
+ * to `~/Library/Python/3.9/lib/python/site-packages/debugpy` — a USER site
+ * directory, i.e. a path under `$HOME`. Under the scratch HOME the workers get,
+ * the same import raises `ModuleNotFoundError`. So `unavailable` is the correct
+ * verdict FOR A WORKER and a wrong description of the host, and the two only
+ * agree because the probe now runs under a worker-shaped HOME.
  *
  * # Why a function and not more CLI
  *
@@ -610,15 +618,80 @@ export const capabilityPolicySha256 = (
  * string appears in a source file, and this campaign has now been bitten by that
  * exact shape four times. This is importable, so the round trip — produce, then
  * have the real consumer read it — is a test rather than a grep.
+ *
+ * # The receipt must describe the WORKERS' environment, not the runner's
+ *
+ * The first version of this probed in the runner's process and handed the answer
+ * to workers that run with `HOME` set to a fresh scratch directory
+ * (`run-test-shards.ts` gives every worker `runRoot/worker-N/home`, and lends the
+ * real `~/Library` only to the `browser` class). MEASURED, same probes, two
+ * HOMEs:
+ *
+ *   HOME=~            debugpy=ok    cargo=ok    lancedb=ok
+ *   HOME=<scratch>    debugpy=FAIL  cargo=FAIL  lancedb=FAIL
+ *
+ * So the receipt said "available", `canExecute` returned true, the gated describe
+ * RAN, and the body then reached for a toolchain that is not there where the
+ * worker runs. Before the wiring those cases skipped; after it they would go red
+ * on a clean checkout. `probeEnv` is REQUIRED for exactly that reason: the
+ * environment the answer is about is not a detail the caller may omit.
+ *
+ * Under-claiming is the safe direction and is deliberate: a `browser` worker that
+ * is lent `~/Library` may have MORE than the receipt says, and the cost of that
+ * is a skip recorded as `skipped-capability`, never a false green.
  */
+/**
+ * What the workers could actually DO, as one comparable value.
+ *
+ * NOT the binding. `bindingSha256` is `sha256(head + policySha256 +
+ * toolchainSha256)`, and feeding it into the shard cache identity put two things
+ * back that do not belong there:
+ *
+ *   - the git HEAD, which `testShardCacheIdentitySha256` deliberately excludes
+ *     for certified chunks ("not inputs to THIS chunk, properties of the
+ *     campaign that happened to schedule it") — measured, two heads produced two
+ *     identities for the same chunk;
+ *   - the whole 27-entry external-toolchain fingerprint, each entry
+ *     `path dev:ino size mtime`, which `toolScopeSha256` had narrowed the same
+ *     day precisely because a `cargo install` changed the identity of every
+ *     `pure` chunk that cannot spawn a subprocess at all.
+ *
+ * The coverage-relevant fact is the VERDICT per capability: which gated describes
+ * will run. That is what belongs in the identity, and it is stable across commits
+ * and across an unrelated tool's mtime.
+ */
+export const capabilityVerdictsSha256 = (receipt: CapabilityReceipt): string =>
+  createHash("sha256")
+    .update(
+      JSON.stringify(
+        Object.entries(receipt.capabilities)
+          .map(([id, finding]) => [id, finding.status] as const)
+          .sort(([left], [right]) => left.localeCompare(right)),
+      ),
+    )
+    .digest("hex")
+
+/** The env key the shard cache identity hashes. Distinct from the binding on
+ *  purpose: the binding refuses a foreign receipt, this decides cache reuse. */
+export const CAPABILITY_VERDICTS_ENV = "QUANTA_CAPABILITY_VERDICTS"
+
 export const capabilityReceiptEnvForCampaign = async (input: {
   readonly repoRoot: string
   readonly tier: string
   readonly head: string
   readonly outPath: string
-  readonly env?: Record<string, string>
+  /**
+   * The environment the probes run under, which must be the one the CONSUMERS
+   * get. REQUIRED: an optional environment is an environment a caller forgets,
+   * and this exact field is what made the first version answer about the wrong
+   * host.
+   */
+  readonly probeEnv: Record<string, string>
   readonly readText?: (path: string) => string
   readonly totalDeadlineMs?: number
+  /** Campaign ceiling. The one-hour default expires mid-campaign on a long run
+   *  and sends every later worker back to skipping everything, silently green. */
+  readonly ttlMs?: number
   readonly spawn?: ProbeSpawner
 }): Promise<{
   readonly path: string
@@ -626,7 +699,7 @@ export const capabilityReceiptEnvForCampaign = async (input: {
   readonly env: Record<string, string>
   readonly receipt: CapabilityReceipt
 }> => {
-  const env = input.env ?? (process.env as Record<string, string>)
+  const env = input.probeEnv
   const specs = capabilityCatalogue(env)
   const readText = input.readText ?? ((path: string): string => readFileSync(path, "utf8"))
   const receipt = await produceCapabilityReceipt({
@@ -639,6 +712,7 @@ export const capabilityReceiptEnvForCampaign = async (input: {
     specs,
     env,
     ...(input.totalDeadlineMs === undefined ? {} : { totalDeadlineMs: input.totalDeadlineMs }),
+    ...(input.ttlMs === undefined ? {} : { ttlMs: input.ttlMs }),
     ...(input.spawn === undefined ? {} : { spawn: input.spawn }),
   })
   writeCapabilityReceipt(input.outPath, receipt)
@@ -652,6 +726,8 @@ export const capabilityReceiptEnvForCampaign = async (input: {
     env: {
       [CAPABILITY_RECEIPT_PATH_ENV]: input.outPath,
       [CAPABILITY_RECEIPT_BINDING_ENV]: receipt.bindingSha256,
+      // Separate from the binding, and it is the one the cache identity hashes.
+      [CAPABILITY_VERDICTS_ENV]: capabilityVerdictsSha256(receipt),
     },
     receipt,
   }
