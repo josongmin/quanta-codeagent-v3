@@ -225,8 +225,39 @@ const workflowSteps = (): readonly WorkflowStep[] => {
  * shell scaffolding (`{`, `echo …`, `done`, `fi`, a bare variable assignment)
  * does not.
  */
-const LOOKS_LIKE_A_COMMAND =
-  /^(?:[A-Z_][A-Z0-9_]*=\S*\s+)*(?:bun|bunx|npm|npx|yarn|pnpm|node|deno|sh|bash|python3?|make|\.\/|tools\/|scripts\/)/
+/**
+ * Interpreters this repository actually invokes. Kept as a CROSS-CHECK on the
+ * plumbing rule below — every one of these must be judged, never skipped — and
+ * no longer as the rule itself. As an allowlist it decided by omission:
+ * `docker run`, `cargo test`, `git push` and `xargs bun run …` were all
+ * "not a command" and therefore not judged.
+ */
+const KNOWN_INTERPRETERS =
+  /^(?:[A-Z_][A-Z0-9_]*=\S*\s+)*(?:bun|bunx|npm|npx|yarn|pnpm|node|deno|sh|bash|python3?|make|cargo|docker|go|uv|pip3?|pytest|ruff|gradle|mvn|\.\/|tools\/|scripts\/)/
+
+/**
+ * Shell scaffolding — the ONLY thing allowed to escape judgement.
+ *
+ * This is the inversion of the original rule, and it is the reason the bypasses
+ * existed. `LOOKS_LIKE_A_COMMAND` was an allowlist of interpreters, so a segment
+ * it did not recognise was dropped from the candidate list and the exempt step
+ * kept its exemption: `docker run acme/gate`, `cargo test --all`,
+ * `git push --force` and `xargs -n1 bun run …` all slipped past, measured.
+ *
+ * Fail closed instead: a segment is a candidate gate unless it is recognisably
+ * NOT a command. `tee eval-report.txt`, the `true` in `|| true`, a bare
+ * assignment and the `{`/`done`/`fi` of a multi-line block are plumbing; the
+ * rest is judged.
+ *
+ * The `$` on the assignment alternative is load-bearing and a new arm caught its
+ * absence: without it `QUANTA_X=1 bun run y` — which this file's own docstring
+ * calls "the manifest's OWN idiom" — read as a bare assignment and was skipped.
+ * A standalone assignment is plumbing; an assignment PREFIXING a command is the
+ * command. Verified against the real `.github/workflows/` tree: adopting
+ * this changed no verdict, so it is strictly stronger at no cost.
+ */
+const IS_PLUMBING =
+  /^(?:echo\b|printf\b|tee\b|cat\b|true$|false$|:$|cd\b|export\b|set\b|if\b|then$|else$|elif\b|fi$|for\b|while\b|do$|done$|case\b|esac$|\{$|\}$|\[|exit\b|[A-Za-z_][A-Za-z0-9_]*=\S*$)/
 
 const normalize = (cmd: string): string =>
   cmd
@@ -257,12 +288,54 @@ const normalize = (cmd: string): string =>
  * them makes an exemption cover a SEGMENT, so appending to an exempt command
  * produces a segment nothing covers.
  */
-const SHELL_SEPARATORS = /\s*(?:&&|\|\||;|\|)\s*/
+/**
+ * Every shell operator that ENDS one command and starts another.
+ *
+ * `&&`, `||`, `;` and `|` were covered; `&` and a bare NEWLINE were not, and a
+ * `run: |` block is newline-separated by construction. MEASURED against the
+ * `bun install --frozen-lockfile` exemption, with an unregistered gate appended:
+ *
+ *   … && bun run unregistered-gate    judged      (the one case that worked)
+ *   … &  bun run unregistered-gate    slips past
+ *   … \n bun run unregistered-gate    slips past
+ *
+ * `&&` must be tried before `&`, which alternation order gives.
+ */
+const SHELL_SEPARATORS = /\s*(?:&&|\|\||;|\||&|\r?\n)\s*/
+
+/**
+ * Wrappers that run ANOTHER command, stripped so the real one is judged.
+ *
+ * These were the other half of the bypass: the segment existed, and
+ * `LOOKS_LIKE_A_COMMAND` did not recognise it, so it was dropped from the
+ * `invocations` list and the step stayed exempt. MEASURED as slipping past:
+ * `timeout 600 bun run …`, `env FOO=1 bun run …`, `( bun run … )`,
+ * `echo $(bun run …)`, `xargs -n1 bun run …`.
+ */
+const stripWrappers = (segment: string): string => {
+  let text = segment.trim()
+  for (;;) {
+    const before = text
+    // A subshell or a command substitution: judge what is INSIDE it.
+    text = text.replace(/^\(\s*([\s\S]*?)\s*\)$/, "$1").trim()
+    text = text.replace(/^[a-z_]+\s+\$\(\s*([\s\S]*?)\s*\)$/, "$1").trim()
+    text = text.replace(/^\$\(\s*([\s\S]*?)\s*\)$/, "$1").trim()
+    // `timeout 600 …`, `env A=1 B=2 …`, `nice -n 5 …`, `xargs -n1 …`, `sudo …`.
+    text = text
+      .replace(/^timeout\s+(?:-[^\s]+\s+)*[0-9]+[smhd]?\s+/, "")
+      .replace(/^env\s+(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*/, "")
+      .replace(/^nice\s+(?:-n\s*-?[0-9]+\s+)?/, "")
+      .replace(/^xargs\s+(?:-[^\s]+\s*)*/, "")
+      .replace(/^sudo\s+(?:-[^\s]+\s+)*/, "")
+      .trim()
+    if (text === before) return text
+  }
+}
 
 export const commandSegments = (cmd: string): readonly string[] =>
   cmd
     .split(SHELL_SEPARATORS)
-    .map((segment) => segment.trim())
+    .map((segment) => stripWrappers(segment))
     .filter((segment) => segment !== "")
 
 const exemptionMatches = (cmd: string, exemption: (typeof WORKFLOW_EXEMPT)[number]): boolean =>
@@ -291,13 +364,101 @@ export const isExempt = (cmd: string, step: WorkflowStep): boolean => {
   // eval-report.txt` and the `true` in `|| true` are plumbing, and this file
   // already owns that distinction — reusing it keeps ONE notion of "a command"
   // rather than inventing a second that could disagree with the first.
-  const invocations = commandSegments(cmd).filter((segment) => LOOKS_LIKE_A_COMMAND.test(segment))
+  const invocations = commandSegments(cmd).filter((segment) => !IS_PLUMBING.test(segment))
   // A line with no invocation at all is a `uses:` step or shell scaffolding.
   // Those were always decided by the whole-string match and there is nothing to
   // append to them, so splitting would only break what already worked.
   if (invocations.length === 0) return substringMatch(cmd)
   return invocations.every(substringMatch)
 }
+
+/**
+ * The exemption matcher, against every shape that got past it.
+ *
+ * The substring hole was closed once — "an exemption covers a SEGMENT, so
+ * appending to an exempt command produces a segment nothing covers" — and the
+ * SEGMENTER had holes of its own. Each row below was measured slipping past the
+ * previous version, with `bun install --frozen-lockfile` as the exempt half and
+ * an unregistered gate appended.
+ */
+describe("an exempt command cannot smuggle a second one", () => {
+  const step = { file: "ci.yml", name: "install", raw: "", lines: [] as string[] } as WorkflowStep
+  const EXEMPT = "bun install --frozen-lockfile"
+
+  test("every separator, wrapper and runner is judged", () => {
+    const smuggled: readonly { readonly why: string; readonly cmd: string }[] = [
+      { why: "&& (the one case that already worked)", cmd: `${EXEMPT} && bun run smuggled-gate` },
+      { why: "background &", cmd: `${EXEMPT} & bun run smuggled-gate` },
+      { why: "newline, which every `run: |` block uses", cmd: `${EXEMPT}\nbun run smuggled-gate` },
+      { why: "timeout wrapper", cmd: `${EXEMPT} && timeout 600 bun run smuggled-gate` },
+      { why: "env wrapper", cmd: `${EXEMPT} && env FOO=1 bun run smuggled-gate` },
+      { why: "subshell", cmd: `${EXEMPT} && ( bun run smuggled-gate )` },
+      { why: "command substitution", cmd: `${EXEMPT} && echo $(bun run smuggled-gate)` },
+      { why: "xargs", cmd: `${EXEMPT} && xargs -n1 bun run smuggled-gate` },
+      { why: "docker", cmd: `${EXEMPT} && docker run acme/gate` },
+      { why: "cargo", cmd: `${EXEMPT} && cargo test --all` },
+      { why: "git", cmd: `${EXEMPT} && git push --force` },
+      { why: "a path invocation", cmd: `${EXEMPT} && ./scripts/deploy.sh` },
+    ]
+    expect(smuggled.length).toBeGreaterThanOrEqual(12)
+    for (const { why, cmd } of smuggled) {
+      expect({ why, exempt: isExempt(cmd, step) }).toEqual({ why, exempt: false })
+    }
+  })
+
+  test("PAIRED CONTROL — the exempt command alone is still exempt, wrapped or not", () => {
+    // Without this, "refuse everything" satisfies the arm above and every
+    // legitimate exemption in the file stops working.
+    const allowed: readonly string[] = [
+      EXEMPT,
+      `${EXEMPT} && ${EXEMPT}`,
+      `timeout 600 ${EXEMPT}`,
+      `( ${EXEMPT} )`,
+      `${EXEMPT} | tee install.log`,
+      `${EXEMPT} || true`,
+    ]
+    for (const cmd of allowed) {
+      expect({ cmd, exempt: isExempt(cmd, step) }).toEqual({ cmd, exempt: true })
+    }
+  })
+
+  test("every interpreter this repo knows about is JUDGED, never treated as plumbing", () => {
+    // The cross-check that keeps the two rules from drifting apart: the old
+    // allowlist's members must all fall on the judged side of the new rule.
+    const samples = [
+      "bun run x",
+      "bunx biome check",
+      "npm run build",
+      "npx tsc",
+      "node script.js",
+      "deno run a.ts",
+      "sh tools/x.sh",
+      "bash -c x",
+      "python3 -m pytest",
+      "make all",
+      "cargo test",
+      "docker run acme/x",
+      "go test ./...",
+      "uv run pytest",
+      "pip3 install -r r.txt",
+      "ruff check",
+      "./scripts/x.sh",
+      "tools/dev/x.ts",
+      "QUANTA_X=1 bun run y",
+    ]
+    for (const sample of samples) {
+      expect({ sample, known: KNOWN_INTERPRETERS.test(sample) }).toEqual({ sample, known: true })
+      expect({ sample, plumbing: IS_PLUMBING.test(sample) }).toEqual({ sample, plumbing: false })
+    }
+    // ...and the plumbing side is not empty, or the rule above is vacuous.
+    for (const scaffold of ["echo hi", "tee out.txt", "true", "done", "fi", "}", "FOO=1"]) {
+      expect({ scaffold, plumbing: IS_PLUMBING.test(scaffold) }).toEqual({
+        scaffold,
+        plumbing: true,
+      })
+    }
+  })
+})
 
 describe("gate manifest ↔ workflow parity", () => {
   test("required CI and deterministic nightly pin the same Bun runtime", () => {
@@ -562,7 +723,7 @@ describe("gate manifest ↔ workflow parity", () => {
       const stepExempt = isExempt(st.raw, st)
       for (const line of st.lines) {
         const c = normalize(line)
-        if (stepExempt && !LOOKS_LIKE_A_COMMAND.test(c)) continue
+        if (stepExempt && IS_PLUMBING.test(c)) continue
         if (!isExempt(c, st) && !manifestRuns.has(c) && !missing.includes(c)) missing.push(c)
       }
     }
