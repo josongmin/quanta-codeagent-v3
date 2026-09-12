@@ -131,4 +131,26 @@ export const MENTION: readonly KnobDeclaration[] = [
     describe: "@thread: mention prior-session summary resolver (default ON; =off to disable).",
     readSite: "agent/mention-runner/default-resolver.ts",
   },
+  // The two GATES that decide whether the caps above are ever consulted. They sat
+  // undeclared beside their own byte/ratio caps: read as `isOn(opts.env, "KEY")`,
+  // a key-as-argument form the scanner could not see.
+  {
+    envKey: "QUANTA_MENTION_FILE",
+    kind: "bool",
+    default: false,
+    group: "host-gate",
+    describe:
+      "Resolve `@file` mentions. Unset ⇒ the resolver returns undefined and the mention is left literal.",
+    home: "runtime-config",
+    readSite: "agent/mention-runner/default-resolver.ts",
+  },
+  {
+    envKey: "QUANTA_MENTION_SKILL",
+    kind: "bool",
+    default: false,
+    group: "host-gate",
+    describe: "Resolve `@skill` mentions. Unset ⇒ the resolver returns undefined.",
+    home: "runtime-config",
+    readSite: "agent/mention-runner/default-resolver.ts",
+  },
 ]

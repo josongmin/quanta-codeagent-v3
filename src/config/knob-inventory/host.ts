@@ -649,4 +649,25 @@ export const HOST: readonly KnobDeclaration[] = [
       "Lineage seam — spawning-agent depth threaded across the side-agent fork boundary so the forked worker runs at its TRUE depth; absent/forged floors to 0 (can only deepen, never widen). Set by the host, not an operator dial.",
     readSite: "side-agent/process-registry.ts",
   },
+  // Read as `envSource.KEY` — a bag aliased away from `env`, invisible to the
+  // old scanner. Both select an EXTERNAL path, so there is no sensible default.
+  {
+    envKey: "QUANTA_BROWSER_MCP_CONFIG",
+    kind: "string",
+    default: undefined,
+    group: "mcp",
+    describe:
+      "Path to a browser-MCP server config JSON. Unset ⇒ the browser MCP server is not composed.",
+    home: "runtime-config",
+    readSite: "host/mcp-composition.ts",
+  },
+  {
+    envKey: "QUANTA_BROWSER_MCP_PLUGIN_DIR",
+    kind: "string",
+    default: undefined,
+    group: "mcp",
+    describe: "Directory scanned for browser-MCP plugins. Unset ⇒ no plugin discovery.",
+    home: "runtime-config",
+    readSite: "host/mcp-composition.ts",
+  },
 ]

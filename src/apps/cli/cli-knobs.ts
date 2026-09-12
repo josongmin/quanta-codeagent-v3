@@ -262,6 +262,133 @@ export const CLI_KNOBS: readonly CliKnob[] = [
     describe: "Turn-indicator spinner frame interval (ms).",
     readSite: "repl/cli-feature-config.ts",
   },
+  // The five session-surface settings below share the `env(key, default)` helper
+  // with `QUANTA_MAX_TURNS` / `QUANTA_SPINNER_INTERVAL_MS` two lines apart in
+  // `repl/session-runtime-config.ts`, and those two were declared. These were not
+  // — the completeness ratchet's regex could not see `env("KEY", d)` because `env`
+  // is a FUNCTION there, not a bag, so the omission never tripped anything. They
+  // are ordinary operator settings, not internals: a permission posture, the idle
+  // nudge, snooze, and the reject cap.
+  {
+    envKey: "QUANTA_PERMISSION",
+    kind: "enum",
+    default: "default",
+    group: "session",
+    describe:
+      "Startup permission posture: default | acceptEdits | bypass | auto. `/posture` and `/mode` change it in-session.",
+    readSite: "repl/session-runtime-config.ts",
+  },
+  {
+    envKey: "QUANTA_IDLE_SUPPRESS",
+    kind: "bool",
+    default: true,
+    group: "notify",
+    describe: "Suppress the idle nudge. Default-ON; `=0` lets the nudge fire.",
+    readSite: "repl/session-runtime-config.ts",
+  },
+  {
+    envKey: "QUANTA_IDLE_MS",
+    kind: "int",
+    default: 60000,
+    group: "notify",
+    describe: "Idle threshold before the nudge is considered (ms).",
+    readSite: "repl/session-runtime-config.ts",
+  },
+  {
+    envKey: "QUANTA_SNOOZE_DEFAULT_MS",
+    kind: "int",
+    default: 300000,
+    group: "notify",
+    describe: "Default snooze window applied when the operator defers a nudge (ms).",
+    readSite: "repl/session-runtime-config.ts",
+  },
+  {
+    envKey: "QUANTA_REJECT_LIMIT",
+    kind: "int",
+    default: 20,
+    group: "session",
+    describe: "Consecutive tool-approval rejections tolerated before the turn gives up.",
+    readSite: "repl/session-runtime-config.ts",
+  },
+  // Shell-snapshot caps. Read through the local `intEnv("KEY")` helper, which is
+  // why the regex scanner never saw them: the key is a call ARGUMENT, not a bag
+  // property, and there is no `=`/`:` in front of the literal to anchor on.
+  {
+    envKey: "QUANTA_SHELL_SNAPSHOT_TIMEOUT",
+    kind: "int",
+    default: undefined,
+    group: "session",
+    describe: "Shell-snapshot capture timeout (ms). Unset ⇒ the built-in default.",
+    readSite: "internal/shell-snapshot.ts",
+  },
+  {
+    envKey: "QUANTA_SHELL_SNAPSHOT_CLEANUP",
+    kind: "int",
+    default: undefined,
+    group: "session",
+    describe: "Age (ms) above which a stored shell snapshot is swept.",
+    readSite: "internal/shell-snapshot.ts",
+  },
+  {
+    envKey: "QUANTA_SHELL_SNAPSHOT_MAX_MB",
+    kind: "int",
+    default: undefined,
+    group: "session",
+    describe: "Size cap (MiB) for a single captured shell snapshot.",
+    readSite: "internal/shell-snapshot.ts",
+  },
+  {
+    envKey: "QUANTA_COMPACT_BREAKER_REACTIVE_MAX",
+    kind: "int",
+    default: undefined,
+    group: "session",
+    describe: "Cap on reactive compaction attempts before the breaker opens.",
+    readSite: "internal.ts",
+  },
+  {
+    envKey: "QUANTA_COMPACT_BREAKER_PROACTIVE_MAX",
+    kind: "int",
+    default: undefined,
+    group: "session",
+    describe: "Cap on proactive compaction attempts before the breaker opens.",
+    readSite: "internal.ts",
+  },
+  // Slash-registration gates. Both are default-ON opt-OUT and both were read as
+  // `isOn(e.KEY, "1")` — the bag is named `e`, so `/\benv\./` could not match and
+  // neither key was declared anywhere. `/knobs set` answered `unknown knob` for
+  // them, which is the discoverability failure this registry exists to prevent.
+  {
+    envKey: "QUANTA_MEMORY_SLASH",
+    kind: "bool",
+    default: true,
+    group: "session",
+    describe: "Register the `/memory` command. Default-ON; `=0` removes the surface.",
+    readSite: "memory-cmd.ts",
+  },
+  {
+    envKey: "QUANTA_MEMORY_LIST_MAX",
+    kind: "int",
+    default: undefined,
+    group: "session",
+    describe: "Row cap for `/memory list`.",
+    readSite: "memory-cmd.ts",
+  },
+  {
+    envKey: "QUANTA_DREAM_SLASH",
+    kind: "bool",
+    default: true,
+    group: "session",
+    describe: "Register the `/dream` command. Default-ON; `=0` removes the surface.",
+    readSite: "dream-cmd.ts",
+  },
+  {
+    envKey: "QUANTA_REWIND",
+    kind: "bool",
+    default: true,
+    group: "session",
+    describe: "Register the `/rewind` command. Default-ON; `=0` removes the surface.",
+    readSite: "rewind-cmd.ts",
+  },
   {
     envKey: "QUANTA_TIMELINE",
     kind: "int",

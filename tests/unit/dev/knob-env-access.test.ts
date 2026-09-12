@@ -71,6 +71,19 @@ describe("knob-env-access — one test per access form", () => {
     expect(keysOf('const v = intEnv("QUANTA_J")')).toContain("QUANTA_J")
     expect(formOf('const v = intEnv("QUANTA_J")', "QUANTA_J")).toBe("call-arg")
   })
+
+  // `gateOnStrict(env, CONTEXT_1M_FLAG)`. The regex could not see this call, so it
+  // counted the const DEFINITION instead — which meant a const declared and never
+  // used read as a live read. Resolving at the CALL is narrower and truer.
+  test("const-keyed call — `gateOn(env, KEY_CONST)` resolves through the local const", () => {
+    const src = 'const FLAG = "QUANTA_K1"\nconst v = gateOnStrict(env, FLAG)'
+    expect(keysOf(src)).toContain("QUANTA_K1")
+    expect(formOf(src, "QUANTA_K1")).toBe("call-arg")
+  })
+
+  test("a const declared but never passed anywhere is NOT a read", () => {
+    expect(keysOf('const UNUSED = "QUANTA_K2"')).toEqual([])
+  })
 })
 
 describe("knob-env-access — what must NOT count as a read", () => {

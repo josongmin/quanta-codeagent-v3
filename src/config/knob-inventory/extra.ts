@@ -948,4 +948,28 @@ export const EXTRA: readonly KnobDeclaration[] = [
     describe: "Enable the CLI working-state panel and its /state projection.",
     readSite: "apps/cli/repl/surface-compose/core-state.ts",
   },
+  // Deterministic LLM replay. A real operator seam (point it at a recorded JSONL
+  // and the session replays it), read through a CAST bag —
+  // `(env as { QUANTA_LLM_REPLAY?: string }).QUANTA_LLM_REPLAY` — which no
+  // bag-shaped pattern reaches. `QUANTA_LLM_ENDPOINT` is declared here too, so
+  // this is the llm-domain home rather than a new one.
+  {
+    envKey: "QUANTA_LLM_REPLAY",
+    kind: "string",
+    default: undefined,
+    group: "llm",
+    describe:
+      "Path to a recorded LLM JSONL to replay instead of calling a provider. Unset ⇒ live calls.",
+    home: "runtime-config",
+    readSite: "llm/factory.ts",
+  },
+  {
+    envKey: "QUANTA_LLM_REPLAY_DELAY_MS",
+    kind: "int",
+    default: undefined,
+    group: "llm",
+    describe: "Artificial per-chunk delay (ms) during replay, for pacing-sensitive reproductions.",
+    home: "runtime-config",
+    readSite: "llm/factory.ts",
+  },
 ]

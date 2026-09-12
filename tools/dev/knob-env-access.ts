@@ -224,15 +224,33 @@ const visitDestructure = (node: ts.Node, push: Push): void => {
   }
 }
 
-/** `f(…, "QUANTA_X", …)` — exact-text literal only, so messages are excluded. */
-const visitCallArgs = (node: ts.Node, push: Push): void => {
-  if (!ts.isCallExpression(node)) return
-  for (const a of node.arguments) {
-    if (!ts.isStringLiteralLike(a)) continue
+/** One argument of a call: an exact-text key literal, or an identifier that
+ *  resolves to a key in this file (`gateOn(env, SOME_ENV)`). */
+const visitCallArg = (a: ts.Expression, aliases: ReadonlyMap<string, string>, push: Push): void => {
+  if (ts.isStringLiteralLike(a)) {
     const t = a.text
-    if (!KEY_RE.test(t)) continue
+    if (!KEY_RE.test(t)) return
     push(t, isPrefixToken(t) ? "prefix" : "read", "call-arg", a)
+    return
   }
+  if (!ts.isIdentifier(a)) return
+  const resolved = aliases.get(a.text)
+  if (resolved === undefined) return
+  push(resolved, isPrefixToken(resolved) ? "prefix" : "read", "call-arg", a)
+}
+
+/**
+ * `f(…, "QUANTA_X", …)` — exact-text literal only, so messages are excluded — and
+ * `f(env, KEY_CONST)` where the const resolves to a key in THIS file.
+ *
+ * The const form is the `gateOn(env, SOME_ENV)` indirection. The regex scanner
+ * could not see the call at all, so it counted the const DEFINITION instead,
+ * which meant a const declared and never used still read as a live read.
+ * Resolving at the CALL is both narrower and truer.
+ */
+const visitCallArgs = (node: ts.Node, aliases: ReadonlyMap<string, string>, push: Push): void => {
+  if (!ts.isCallExpression(node)) return
+  for (const a of node.arguments) visitCallArg(a, aliases, push)
 }
 
 /** Census one parsed file. Pure w.r.t. the filesystem. */
@@ -247,7 +265,7 @@ export const censusSource = (file: string, text: string): KnobAccess[] => {
     visitPropertyAccess(node, push)
     visitElementAccess(node, aliases, push)
     visitDestructure(node, push)
-    visitCallArgs(node, push)
+    visitCallArgs(node, aliases, push)
     ts.forEachChild(node, visit)
   }
   ts.forEachChild(sf, visit)

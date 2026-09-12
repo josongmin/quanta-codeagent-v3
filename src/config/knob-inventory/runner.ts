@@ -311,4 +311,42 @@ export const RUNNER: readonly KnobDeclaration[] = [
       "`/skill` slash-command registration gate (RFC-06 F5) — when ON, registers the skill-actions command (copy/discover/invoke skills); resolved via readCliKnob in slash/skill.ts (isSkillActionsEnabled). Opt-in; unset ⇒ the command is never registered so `/help` + the command table are byte-identical (parity with `/posture`).",
     readSite: "apps/cli/slash/skill.ts",
   },
+  // Background-turn plane caps, read as `args.envSource.KEY` — a bag nested
+  // behind a field, two hops past anything a bag-shaped pattern could match.
+  {
+    envKey: "QUANTA_BG_MAX_CONCURRENT",
+    kind: "int",
+    default: undefined,
+    group: "agent-feature",
+    describe: "Concurrent background turns allowed. Unset ⇒ the plane's built-in cap.",
+    home: "runtime-config",
+    readSite: "runner/session-execution-plane.ts",
+  },
+  {
+    envKey: "QUANTA_BG_MAX_RETAINED",
+    kind: "int",
+    default: undefined,
+    group: "agent-feature",
+    describe: "Completed background turns retained for inspection.",
+    home: "runtime-config",
+    readSite: "runner/session-execution-plane.ts",
+  },
+  {
+    envKey: "QUANTA_BG_STORE_DIR",
+    kind: "string",
+    default: undefined,
+    group: "agent-feature",
+    describe: "Directory for durable background-turn records. Unset ⇒ in-memory only.",
+    home: "runtime-config",
+    readSite: "runner/session-execution-plane.ts",
+  },
+  {
+    envKey: "QUANTA_AUTO_BACKGROUND_THRESHOLD_MS",
+    kind: "int",
+    default: undefined,
+    group: "agent-feature",
+    describe: "Elapsed time (ms) after which a long turn is offered to the background plane.",
+    home: "runtime-config",
+    readSite: "runner/session-execution-plane.ts",
+  },
 ]

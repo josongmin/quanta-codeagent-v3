@@ -25,32 +25,15 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
-import { assertScanPopulation } from "./_shared/scan-population"
-
-/** A QUANTA_* env-var read is ALWAYS either quoted (`"QUANTA_X"` — bracket
- *  access / gate-helper arg / `envKey:` decl) or a dot-access (`env.QUANTA_X`,
- *  `process.env.QUANTA_X`). A BARE identifier (`gateOn(env, QUANTA_X_ENV)`) is a
- *  CONST reference whose VALUE is the real var (declared at the const site) — NOT
- *  a distinct knob, so we must NOT count the const name. These two precise
- *  extractors skip const-name false-positives (the `*_ENV` noise). */
-const QUOTED = /[`"'](QUANTA_[A-Z0-9_]+)[`"']/g // backtick ⇒ template-bracket env[`X`]
-const ENV_DOT = /\benv\.(QUANTA_[A-Z0-9_]+)\b/g
-// destructure read: `const { QUANTA_X, QUANTA_Y } = env` / `… = process.env`
-const DESTRUCT = /\{([^}]*\bQUANTA_[A-Z0-9_]+[^}]*)\}\s*=\s*(?:process\.)?env\b/g
-const TOKEN = /\bQUANTA_[A-Z0-9_]+/g
-
-/** Every real-read QUANTA_* token on a line (quoted ∪ env-dot ∪ destructure). */
-const knobsOnLine = (line: string): string[] => {
-  const out: string[] = []
-  for (const m of line.matchAll(QUOTED)) out.push(m[1] as string)
-  for (const m of line.matchAll(ENV_DOT)) out.push(m[1] as string)
-  for (const d of line.matchAll(DESTRUCT)) {
-    for (const t of (d[1] as string).matchAll(TOKEN)) out.push(t[0])
-  }
-  return out
-}
+import {
+  censusFiles,
+  censusSource,
+  declaredKeysInSources,
+  type KnobAccess,
+  readKeys,
+  trackedSourceFiles,
+} from "../../tools/dev/knob-env-access"
 
 /** Files that DECLARE knobs (their QUANTA_* tokens are the registry, not orphan
  *  reads). The canonical reads live here by design. */
@@ -81,53 +64,6 @@ const isExcludedFromScan = (path: string): boolean =>
 
 /** A line that READS an env var (vs merely mentioning the token in prose / an
  *  error string). Requires an env-access or gate-helper on the line. */
-const isReadLine = (line: string): boolean => {
-  const t = line.trimStart()
-  if (t.startsWith("//") || t.startsWith("*") || t.startsWith("/*")) return false
-  return (
-    /\bprocess\.env\b/.test(line) ||
-    /\benv\s*[.[]/.test(line) ||
-    /\bgate(?:On|Disabled)(?:Strict)?\s*\(/.test(line) ||
-    /\bparseEnvFlag\s*\(/.test(line) ||
-    // the CLI-LOCAL typed accessor `readCliKnob("QUANTA_X", …)` — a REAL env read
-    // (session>env>registry-default) that carries no `process.env`/`gateOn`/`env.`
-    // token, so it was INVISIBLE to the clauses above. That blind spot let a
-    // readCliKnob key declared in NO registry pass green (proven when
-    // QUANTA_WORKTREE_PROGRESS was unregistered; re-proven for
-    // QUANTA_POSTURE_SELECTOR + QUANTA_SKILL_ACTIONS). Same read form the sibling
-    // cli-knob-readsite-domain ratchet already scans (ADR-0527).
-    /\breadCliKnob\s*\(/.test(line) ||
-    // destructure read: `const { QUANTA_X } = env` / `… = process.env`
-    /\}\s*=\s*(?:process\.)?env\b/.test(line) ||
-    // const-keyed gate: `const FOO_ENV = "QUANTA_X"` then `gateOn(env, FOO_ENV)`.
-    // The gateOn line has only a BARE const ref (invisible), so we instead count
-    // the const DEFINITION (a QUANTA literal being ASSIGNED). Precise `= "..."`
-    // form (incl. backtick) excludes error/log strings like `Error("QUANTA_X failed")`.
-    /[=:]\s*[`"']QUANTA_[A-Z0-9_]+[`"']/.test(line)
-  )
-}
-
-function* walk(dir: string): Generator<string> {
-  for (const entry of readdirSync(dir)) {
-    const p = join(dir, entry)
-    const s = statSync(p)
-    if (s.isDirectory()) yield* walk(p)
-    else if (entry.endsWith(".ts")) yield p
-  }
-}
-
-/** Declared tokens in a declaration file = every quoted/env-dot QUANTA_* on any
- *  non-comment line (declarations use `env["X"]` / `envKey: "X"` — both quoted). */
-const declaredTokensIn = (text: string): Set<string> => {
-  const out = new Set<string>()
-  for (const line of text.split("\n")) {
-    const t = line.trimStart()
-    if (t.startsWith("//") || t.startsWith("*") || t.startsWith("/*")) continue
-    for (const tok of knobsOnLine(line)) out.add(tok)
-  }
-  return out
-}
-
 /** EXCEPTIONS — tokens that look like knob reads but are NOT a registrable knob
  *  (e.g. a doc/error-string literal, a const NAME echoed in a read line). Each
  *  MUST carry a reason. Keep this SMALL; prefer registering a real knob. */
@@ -194,10 +130,10 @@ const EXCEPTIONS: ReadonlyMap<string, string> = new Map<string, string>([
     "QUANTA_BENCH_NO_PROGRESS_ABORT_S",
     "bench-only: full-remote no-progress (wedged-box) idle-abort budget (resolveNoProgressBudgetMs, read at the full.ts composition root), same class as QUANTA_BENCH_HEALTH_ABORT — not a shipped /config knob",
   ],
-  [
-    "QUANTA_OTEL_ENDPOINT",
-    "infra: operator OTEL collector URL (apps/bench OTLP export + reverse tunnel, read at the bench composition root), not a user /config knob",
-  ],
+  // `QUANTA_OTEL_ENDPOINT` used to sit here. It is DECLARED in
+  // knob-inventory/daemon.ts, so `!declared && !excepted` already filtered it and
+  // the row never once changed an outcome — which is exactly what the inert-row
+  // assertion below now refuses to let happen again.
   [
     "QUANTA_OTEL_RUN_ID",
     "infra: OTEL trace-viewer deep-link run id (apps/bench/otel + default-trace-sink, operator tracing), not a user /config knob",
@@ -290,43 +226,58 @@ const EXCEPTIONS: ReadonlyMap<string, string> = new Map<string, string>([
     "QUANTA_SWEBENCH_PRO_DOCKERHUB_USERNAME",
     "bench-only: SWE-bench-Pro DockerHub namespace for prebuilt images (apps/bench/run-main), read at the bench composition root, not a shipped /config knob",
   ],
+  // TEST-ONLY SEAMS — read by a harness, never by an operator. Declaring one puts
+  // a knob in `/knobs` that only tests are supposed to touch.
+  [
+    "QUANTA_SIDE_AGENT_TEST_MODE",
+    "test-only: the forked side-agent worker's protocol seam (no_finding|throw|multi|late) in src/side-agent/worker-entry.mjs, set ONLY by tests/integration/sep8-remediation/r05. Direct sibling of QUANTA_SIDE_AGENT_LLM_REPLAY above. Unreachable in a compiled binary — nodeProcessForkPort throws SideAgentForkUnsupportedError before forking — and the port is not even constructed unless QUANTA_SUBAGENT_PROCESS is on (default-OFF)",
+  ],
+  // RETIRED — present as a REFUSAL input, not a value input.
+  [
+    "QUANTA_TB_BEST_OF_N",
+    "retired: apps/bench/terminal/config.ts reads it only to REFUSE the run (assertNoTerminalBestOfN). Declaring it would advertise a knob whose sole effect is an error, which is worse than not listing it",
+  ],
 ])
 
-const collectDeclaredKnobs = (files: Iterable<string>): Set<string> => {
-  const declared = new Set<string>()
-  for (const file of files) {
-    if (!isDeclarationFile(file)) continue
-    for (const token of declaredTokensIn(readFileSync(file, "utf8"))) declared.add(token)
-  }
-  return declared
-}
+/**
+ * The corpus. `git ls-files` rather than a directory walk: this tree carries two
+ * gitignored mirrors of `src` (`tools/dev/.scratch`, `.pristine-audit`, together
+ * ~12k files), and a readdir corpus makes this ceiling mean different numbers on
+ * a developer machine and on a fresh clone.
+ */
+const REPO_ROOT = join(import.meta.dir, "..", "..")
+const isTestFile = (file: string): boolean => /\.test\.[cm]?ts$|(^|\/)__tests__\//.test(file)
 
-const recordKnobReads = (reads: Map<string, string>, file: string): void => {
-  const relativeFile = file.replace(/^.*\/quanta-codeagent-v3\//, "")
-  for (const [index, line] of readFileSync(file, "utf8").split("\n").entries()) {
-    if (!isReadLine(line)) continue
-    for (const token of knobsOnLine(line)) {
-      if (!reads.has(token)) reads.set(token, `${relativeFile}:${index + 1}`)
-    }
-  }
-}
+/** The two filters this ratchet applies, as a pure function so an injected
+ *  census can drive them without touching the tree. */
+const orphansOf = (
+  reads: ReadonlyMap<string, KnobAccess>,
+  declared: ReadonlySet<string>,
+  excepted: ReadonlySet<string>,
+): Map<string, string> =>
+  new Map(
+    [...reads]
+      .filter(([token]) => !declared.has(token) && !excepted.has(token))
+      .map(([token, access]) => [token, `${access.file}:${access.line}`] as const),
+  )
 
-const collectKnobReads = (files: Iterable<string>): Map<string, string> => {
-  const reads = new Map<string, string>()
-  for (const file of files) {
-    if (isDeclarationFile(file) || isExcludedFromScan(file)) continue
-    recordKnobReads(reads, file)
-  }
-  return reads
-}
-
-const findOrphanKnobs = (declared: ReadonlySet<string>, reads: ReadonlyMap<string, string>) =>
-  new Map([...reads].filter(([token]) => !declared.has(token) && !EXCEPTIONS.has(token)))
-
-const scan = (): { declared: Set<string>; orphans: Map<string, string> } => {
-  const files = [...walk(join(import.meta.dir, "..", "..", "src"))]
-  const declared = collectDeclaredKnobs(files)
-  return { declared, orphans: findOrphanKnobs(declared, collectKnobReads(files)) }
+const scan = (): {
+  declared: Set<string>
+  orphans: Map<string, string>
+  reads: Map<string, KnobAccess>
+  files: readonly string[]
+} => {
+  const files = trackedSourceFiles(REPO_ROOT, ["src"])
+  const census = censusFiles(REPO_ROOT, files)
+  const declared = declaredKeysInSources(REPO_ROOT, files, isDeclarationFile)
+  // A test that reads an env key is not evidence of an operator knob, and the
+  // registry exists for operator discoverability. Excluded EXPLICITLY rather than
+  // by accident — the population assertion below keeps the narrowing honest.
+  const reads = readKeys(
+    census,
+    (f) => isDeclarationFile(f) || isExcludedFromScan(f) || isTestFile(f),
+  )
+  return { declared, orphans: orphansOf(reads, declared, EXCEPTIONS), reads, files }
 }
 
 /** Frozen ceiling = current orphan high-water mark (ADR-0503 P0 baseline).
@@ -360,11 +311,14 @@ const ORPHAN_CEILING = 0
 
 describe("knob-registry completeness ratchet (ADR-0503 P0)", () => {
   test(`orphan QUANTA_* reads (declared nowhere) stay <= ${ORPHAN_CEILING}`, () => {
-    const sourceRoot = join(import.meta.dir, "..", "..", "src")
-    assertScanPopulation([...walk(sourceRoot)], sourceRoot, {
-      id: "tests/unit/knob-registry-completeness-ratchet-hellgate.test.ts#SRC",
-    })
-    const { declared, orphans } = scan()
+    const { declared, orphans, files } = scan()
+    // The corpus floor. `ORPHAN_CEILING` is 0, so `orphans.size <= 0` is satisfied
+    // by a scan that read NOTHING — and this file once printed
+    // `declared=0 orphans=0/0` while passing against an empty mirror of the tree.
+    expect(
+      files.length,
+      "the tracked-source corpus collapsed — the completeness verdict is over an empty scan",
+    ).toBeGreaterThan(3000)
     // biome-ignore lint/suspicious/noConsole: ratchet visibility for reviewers
     console.log(
       `[knob-completeness] declared=${declared.size} orphans=${orphans.size}/${ORPHAN_CEILING}`,
@@ -390,43 +344,101 @@ describe("knob-registry completeness ratchet (ADR-0503 P0)", () => {
       "no knob declarations found — the completeness verdict is over an empty scan",
     ).toBeGreaterThan(400)
     expect(orphans.size).toBeLessThanOrEqual(ORPHAN_CEILING)
-  }, 15_000)
+  }, 30_000)
 
-  // RED-ON-INJECTION: prove the scanner actually CATCHES an orphan read and does
-  // NOT false-positive on a declared one — else the ceiling is a vacuous 0.
-  test("scanner catches an undeclared read but not a declared one", () => {
-    expect(isReadLine(`  const x = gateOn(env, "QUANTA_FAKE_ORPHAN")`)).toBe(true)
-    expect(isReadLine(`  // QUANTA_FAKE_ORPHAN is just a comment`)).toBe(false)
-    expect(isReadLine(`  throw new Error("QUANTA_FAKE_ORPHAN failed")`)).toBe(false)
-    // R4 blind-spot close: the CLI-LOCAL `readCliKnob("QUANTA_X", …)` accessor is a
-    // REAL env read and MUST be scanned — else a readCliKnob key declared in no
-    // registry passes green (the QUANTA_POSTURE_SELECTOR / QUANTA_SKILL_ACTIONS hole).
-    expect(isReadLine(`  readCliKnob("QUANTA_FAKE_ORPHAN", "bool") ?? false`)).toBe(true)
-    expect(knobsOnLine(`  readCliKnob("QUANTA_FAKE_ORPHAN", "bool") ?? false`)).toEqual([
-      "QUANTA_FAKE_ORPHAN",
+  /**
+   * The escape hatch is measured too.
+   *
+   * While the ceiling sat pinned at 0, `EXCEPTIONS` grew from 1 row to 41 and
+   * nothing asserted its size or its contents. Two rows were pure decoration:
+   * `QUANTA_OTEL_ENDPOINT` and `QUANTA_CONTEXT_1M` were DECLARED as well as
+   * excepted, and `!declared && !excepted` already filtered them, so those rows
+   * had never once changed an outcome. A row nobody checks is a ceiling nobody
+   * raised.
+   */
+  test("no EXCEPTIONS row is inert — excepting a DECLARED key does nothing", () => {
+    const { declared } = scan()
+    const redundant = [...EXCEPTIONS.keys()].filter((key) => declared.has(key))
+    expect(
+      redundant,
+      "these keys are declared in a registry AND excepted — the exception row is dead, delete it",
+    ).toEqual([])
+  }, 30_000)
+
+  test("no EXCEPTIONS row is stale — an exception for a key nothing reads is dead", () => {
+    const { reads } = scan()
+    // A row may legitimately outlive its read for one commit (the read is removed
+    // first), so the assertion names the rows rather than counting them.
+    const unread = [...EXCEPTIONS.keys()].filter((key) => !reads.has(key))
+    expect(
+      unread,
+      "these keys are excepted but no longer read anywhere — delete the row in the same change",
+    ).toEqual([])
+  }, 30_000)
+
+  test("every EXCEPTIONS row carries a reason", () => {
+    const empty = [...EXCEPTIONS.entries()].filter(([, why]) => why.trim().length < 20)
+    expect(
+      empty.map(([k]) => k),
+      "an exception without a real reason is a silent ceiling raise",
+    ).toEqual([])
+  })
+
+  /**
+   * RED-ON-INJECTION at the RATCHET, not at the scanner.
+   *
+   * `tests/unit/dev/knob-env-access.test.ts` proves the census SEES each access
+   * form. What this proves is the wiring: that a seen read with no declaration and
+   * no exception actually becomes an orphan here, and that the two filters this
+   * ratchet applies (declared, excepted) each remove one and only one.
+   *
+   * Both halves matter. With only the positive case, "everything is an orphan"
+   * passes. With only the negatives, "nothing is ever an orphan" passes — which is
+   * the state this file was in for the seven access forms the regex could not see.
+   */
+  test("an undeclared read becomes an orphan; a declared or excepted one does not", () => {
+    const injected = [
+      "const a = env.QUANTA_INJ_UNDECLARED",
+      "const b = env.QUANTA_INJ_DECLARED",
+      "const c = env.QUANTA_INJ_EXCEPTED",
+    ].join("\n")
+    const reads = new Map(
+      censusSource("injected.ts", injected)
+        .filter((x) => x.kind === "read")
+        .map((x) => [x.key, x] as const),
+    )
+    expect([...reads.keys()].sort()).toEqual([
+      "QUANTA_INJ_DECLARED",
+      "QUANTA_INJ_EXCEPTED",
+      "QUANTA_INJ_UNDECLARED",
     ])
-    // ...but a readCliKnob NAMED in prose (not called) is NOT a read
-    expect(isReadLine(`   * the source readCliKnob(envKey,"bool") resolves to`)).toBe(false)
-    // quoted + env-dot are caught; bare const-name (the `*_ENV` indirection) is NOT
-    expect(knobsOnLine(`gateOn(env, "QUANTA_FAKE_ORPHAN")`)).toEqual(["QUANTA_FAKE_ORPHAN"])
-    expect(knobsOnLine(`const x = process.env.QUANTA_DOT_READ`)).toEqual(["QUANTA_DOT_READ"])
-    expect(knobsOnLine(`gateOnStrict(env, QUANTA_CODE_MODE_ENV)`)).toEqual([]) // bare const ref skipped
-    // P2-R1 fix: a const-keyed gate is caught at its DEFINITION line (the QUANTA
-    // literal being assigned), closing the `gateOn(env, CONST)` false-negative hole.
-    expect(isReadLine(`const CONTEXT_1M_FLAG = "QUANTA_CONTEXT_1M"`)).toBe(true)
-    expect(knobsOnLine(`const CONTEXT_1M_FLAG = "QUANTA_CONTEXT_1M"`)).toEqual([
-      "QUANTA_CONTEXT_1M",
-    ])
-    expect(isReadLine(`  throw new Error("QUANTA_X failed")`)).toBe(false) // error string still NOT a read
-    // R3 mutation-test: destructure + template-bracket evasion forms are caught.
-    expect(isReadLine("const { QUANTA_DESTRUCT } = env")).toBe(true)
-    expect(knobsOnLine("const { QUANTA_DESTRUCT, QUANTA_TWO } = process.env")).toEqual([
-      "QUANTA_DESTRUCT",
-      "QUANTA_TWO",
-    ])
-    expect(isReadLine("const x = env[`QUANTA_TMPL`]")).toBe(true)
-    expect(knobsOnLine("const x = env[`QUANTA_TMPL`]")).toEqual(["QUANTA_TMPL"])
-    // a non-QUANTA destructure is harmless (read-line but yields no tokens)
-    expect(knobsOnLine("const { foo, bar } = env")).toEqual([])
+
+    const orphans = orphansOf(
+      reads,
+      new Set(["QUANTA_INJ_DECLARED"]),
+      new Set(["QUANTA_INJ_EXCEPTED"]),
+    )
+    expect([...orphans.keys()]).toEqual(["QUANTA_INJ_UNDECLARED"])
+
+    // Each filter removes exactly one — neither is a no-op that the other covers.
+    expect(
+      [...orphansOf(reads, new Set(), new Set(["QUANTA_INJ_EXCEPTED"])).keys()].sort(),
+    ).toEqual(["QUANTA_INJ_DECLARED", "QUANTA_INJ_UNDECLARED"])
+    expect(
+      [...orphansOf(reads, new Set(["QUANTA_INJ_DECLARED"]), new Set()).keys()].sort(),
+    ).toEqual(["QUANTA_INJ_EXCEPTED", "QUANTA_INJ_UNDECLARED"])
+  })
+
+  // A write is not a read. `process.env.QUANTA_ALLOW_UNSIGNED = "1"` is a process
+  // seeding a CHILD, and the regex scanner counted it — which asked the registry
+  // to declare a value nothing ever reads back.
+  test("a write-only access never reaches the orphan set", () => {
+    const reads = new Map(
+      censusSource("injected.ts", 'process.env.QUANTA_INJ_WRITE = "1"')
+        .filter((x) => x.kind === "read")
+        .map((x) => [x.key, x] as const),
+    )
+    expect(reads.size).toBe(0)
+    expect(orphansOf(reads, new Set(), new Set()).size).toBe(0)
   })
 })
