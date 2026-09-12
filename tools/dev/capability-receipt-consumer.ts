@@ -31,6 +31,7 @@
  * after something has already been started.
  */
 
+import { test } from "bun:test"
 import { createHash } from "node:crypto"
 import { readFileSync } from "node:fs"
 import {
@@ -216,11 +217,71 @@ const reportDecision = (decision: CapabilityDecision): CapabilityDecision => {
 }
 
 /**
+ * A required capability that cannot run becomes a FAILING TEST, not a throw.
+ *
+ * # Why not a throw, and why not in `canExecute`
+ *
+ * The requirement lived in `canExecute`, and two audits measured what that
+ * cost:
+ *
+ *  - **It was bypassable.** `tests/unit/tool/debug/debugpy-real-e2e.test.ts`
+ *    writes `gateOn(env, "QUANTA_REAL_TOOLCHAIN_E2E") && canExecute(debugpy)` at
+ *    four sites. `&&` short-circuits, so with the lane off `canExecute` — and
+ *    the requirement — never ran. MEASURED: `QUANTA_REQUIRE_CAPABILITIES=1`
+ *    against a `failed-setup` receipt gave `0 pass 21 skip 0 fail`, exit 0.
+ *    `capability()` is called unconditionally at module scope in every one of
+ *    these files, so the requirement belongs here, where nothing can route
+ *    around it.
+ *
+ *  - **A module-scope throw deletes the file.** Every call site is at module
+ *    scope, and Bun discards a module's whole registry when its body throws —
+ *    including tests registered BEFORE the throw. MEASURED over the eight
+ *    consumer files under `tests/unit/`: `28 pass / 75 skip` became
+ *    `0 pass / 8 fail`, "Ran 8 tests" where it had said "Ran 103". Ninety-five
+ *    tests vanished, 28 of them passing and capability-independent, and nothing
+ *    in the output said coverage had been lost.
+ *    `browser-agent-loop-e2e.test.ts` was the sharpest: 15 mock-only tests in
+ *    four ungated describes, destroyed for a chrome verdict they never touch.
+ *
+ * A registered failing test is loud, attributed, counted, and costs the file
+ * nothing else. If registration is impossible — `capability()` called from
+ * inside a running test rather than at module scope — it throws instead, so the
+ * loudness never depends on where it was called.
+ */
+export const capabilityRequirementFailure = (
+  decision: CapabilityDecision,
+  env: ConsumerEnv = process.env,
+): string | undefined => {
+  if (!capabilityRequiredFor(decision.capability, env)) return undefined
+  if (decision.verdict !== "blocked-missing" && decision.verdict !== "failed-setup")
+    return undefined
+  return (
+    `${CAPABILITY_LINE_PREFIX} "${decision.capability}" is ${decision.verdict} ` +
+    `but ${CAPABILITY_REQUIRE_ENV} names it: ${decision.detail}`
+  )
+}
+
+const requireOrRegisterFailure = (decision: CapabilityDecision, env: ConsumerEnv): void => {
+  const message = capabilityRequirementFailure(decision, env)
+  if (message === undefined) return
+  try {
+    test(`${CAPABILITY_LINE_PREFIX} REQUIRED ${decision.capability} is ${decision.verdict}`, () => {
+      throw new Error(message)
+    })
+  } catch {
+    throw new Error(message)
+  }
+}
+
+/**
  * The call a test module makes. The only I/O is the one cached `readFileSync`
  * of the receipt, plus the one reported line the tally needs.
  */
-export const capability = (name: string): CapabilityDecision =>
-  reportDecision(decideFromReceipt(capabilityReceipt(), name))
+export const capability = (name: string, env: ConsumerEnv = process.env): CapabilityDecision => {
+  const decision = reportDecision(decideFromReceipt(capabilityReceipt(), name))
+  requireOrRegisterFailure(decision, env)
+  return decision
+}
 
 /**
  * CI contract, mirroring `tests/contract/_guard.ts`: when the environment
@@ -267,13 +328,11 @@ export const requireCapability = (
  *
  * Unset (the default, and every ordinary local run) this changes nothing.
  */
-export const canExecute = (
-  decision: CapabilityDecision,
-  env: ConsumerEnv = process.env,
-): boolean => {
-  requireCapability(decision, env)
-  return decision.verdict === "executed"
-}
+export const canExecute = (decision: CapabilityDecision): boolean => decision.verdict === "executed"
 
-/** `describe.skipIf(...)`-friendly: skip unless the capability really executed. */
-export const skipUnlessExecuted = (decision: CapabilityDecision): boolean => !canExecute(decision)
+// `skipUnlessExecuted` lived here with zero call sites, documented as
+// "`describe.skipIf(...)`-friendly". It is removed rather than kept: while the
+// requirement lived in `canExecute` it would have thrown from inside a
+// `skipIf`, and it took no `env`, so it would have read the real `process.env`
+// even when its caller passed an injected one. A convenience export nobody uses
+// is a trap for the next file that finds it.

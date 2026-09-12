@@ -100,14 +100,25 @@ export type TierPopulationVerdict =
     }
 
 /**
- * The suite whose discovered population these floors were measured over.
+ * Which suite these floors were measured over, decided by the CALLER.
  *
  * Every `reason` in `test-tier-population.json` is phrased against the
  * UNIVERSE — "universe minus 6 nightly-exhaustive minus 17 lane-gated
  * capability files" — so the numbers only mean what they say for the suite that
  * IS the universe.
+ *
+ * This was a bare `TIER_FLOOR_UNIVERSE_SUITE = "full" as const` with no type or
+ * runtime relation to `SuiteName`. An audit showed the arm could not see it
+ * drift: renaming the constant to `"fulll"` left EVERY arm green, including all
+ * three paired controls, while production `suite: "full"` silently took the
+ * narrow branch for the whole tree. The arm was sensitive to exactly the three
+ * values its loop happened to iterate.
+ *
+ * `selectShardManifest` holds `suite: SuiteName`, so it decides this with a
+ * comparison the compiler checks, and a typo is a type error rather than a
+ * verdict change.
  */
-export const TIER_FLOOR_UNIVERSE_SUITE = "full" as const
+export type TierPopulationScope = "universe" | "narrower-suite"
 
 /**
  * Check a tier's SELECTED population. Distinct from the suite floor in both
@@ -130,6 +141,13 @@ export const checkTierPopulation = (input: {
    * which is what every caller meant before this parameter existed.
    */
   readonly suite?: string
+  /** Universe or a narrower suite. Absent means universe, as above. */
+  readonly scope?: TierPopulationScope
+  /**
+   * This suite's committed PRE-selection floor, so the refusal can say what its
+   * claim about the corpus rests on instead of asserting one it never checked.
+   */
+  readonly suiteFloor?: number
 }): TierPopulationVerdict => {
   const floor = input.floors.tiers[input.tier]
   if (floor === undefined) {
@@ -173,18 +191,28 @@ export const checkTierPopulation = (input: {
   // `--suite=integration` 394, all against a floor of 3900 — and each was told
   // "the universe itself shrank past what this tier promises ... fix the
   // corpus", sending the reader to look for a loss that is not there.
-  if (input.suite !== undefined && input.suite !== TIER_FLOOR_UNIVERSE_SUITE) {
+  if (input.scope === "narrower-suite") {
+    // NOT "the corpus is intact" — that was asserted and never checked, and for
+    // `--suite=integration` (floor 330, tier floor 3900) it was printed
+    // unconditionally, including after a collapse from 394 files to 330. What
+    // IS checked is the suite's own pre-selection floor, which the caller
+    // enforces before reaching here, so the claim names it.
+    const rests =
+      input.suiteFloor === undefined
+        ? "The suite's own pre-selection floor was checked separately"
+        : `The suite's own pre-selection floor of ${input.suiteFloor} was cleared by the ` +
+          `${input.discovered} discovered files, so this is not corpus loss BY THAT MEASURE`
     return {
       ok: false,
       kind: "suite-narrower-than-tier-floor",
       message:
-        `[test:shards] INVALID — suite=${input.suite} discovered ${input.discovered} files and ` +
-        `tier=${input.tier} selected ${input.selected} of them, below the committed floor of ` +
-        `${floor.minFiles}. THE CORPUS IS INTACT. That floor is measured over the ` +
-        `\`${TIER_FLOOR_UNIVERSE_SUITE}\` suite (${floor.reason}), so it does not describe a ` +
-        `narrower suite, and comparing the two is meaningless rather than failing. ` +
-        `Run tier=${input.tier} against --suite=${TIER_FLOOR_UNIVERSE_SUITE}, or commit a floor ` +
-        "for this suite/tier pair. Do not lower the universe floor to make this pass.",
+        `[test:shards] INVALID — suite=${input.suite ?? "<unnamed>"} discovered ` +
+        `${input.discovered} files and tier=${input.tier} selected ${input.selected} of them, ` +
+        `below the committed floor of ${floor.minFiles}. ${rests}. That tier floor is measured ` +
+        `over the whole discovered universe (${floor.reason}), so it does not describe a ` +
+        "narrower suite, and comparing the two is meaningless rather than failing. Run this " +
+        "tier against the universe suite, or commit a floor for this suite/tier pair. Do not " +
+        "lower the universe floor to make this pass.",
     }
   }
   if (input.selected === input.discovered) {

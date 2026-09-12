@@ -11,13 +11,20 @@
  * The blast radius, counted STATICALLY, because a static count is the same on
  * every host and a pass count is not:
  *
- *   15 test files contain a `canExecute` gate
- *   33 describe-gating call sites across them
+ *   13 test files consume the receipt and gate on it
+ *   17 `canExecute` invocations across them
+ *    3 of the 13 also call `requireCapability` (the `tests/contract/` three)
  *
- * Recompute both rather than trusting them:
+ * The numbers above were 15 and 33, and both were wrong. The bare grep counts
+ * two files that are not consumers — one mentions `canExecute` in a COMMENT and
+ * never imports the module, the other is the test OF the mechanism, whose own
+ * assertions and docstring supplied fourteen of the matches. Recompute by
+ * intersecting the two facts that make a consumer, not by matching a word:
  *
- *   grep -rln canExecute tests --include='*.ts' | grep -v _helpers/ | wc -l
- *   grep -rn  canExecute tests --include='*.ts' | grep -v _helpers/ | wc -l
+ *   comm -12 \
+ *     <(grep -rln canExecute tests --include='*.ts' | grep -v _helpers/ | sort) \
+ *     <(grep -rln 'from "[^"]*capability-receipt-consumer"' tests --include='*.ts' | sort) \
+ *     | grep -v capability-receipt-wiring
  *
  * With no receipt every one of those 33 resolves `blocked-missing`, which the
  * lane turns into `describe.skip`, which Bun reports as a PASSING file. The
@@ -66,6 +73,7 @@ import {
   __resetCapabilityReportingForTests,
   canExecute,
   capability,
+  capabilityRequirementFailure,
   decideFromReceipt,
   loadCapabilityReceipt,
 } from "../../../tools/dev/capability-receipt-consumer"
@@ -335,13 +343,18 @@ describe("a required capability cannot be skipped past", () => {
     const decision = decideFromReceipt(load, "git")
     expect(decision.verdict).toBe("blocked-missing")
 
-    expect(() => canExecute(decision, REQUIRE)).toThrow(/blocked-missing/)
+    expect(capabilityRequirementFailure(decision, REQUIRE)).toContain("blocked-missing")
     // PAIRED CONTROL 1 — unset is the default and every ordinary local run.
-    expect(canExecute(decision, {})).toBe(false)
+    expect(capabilityRequirementFailure(decision, {})).toBeUndefined()
+    expect(canExecute(decision)).toBe(false)
     // PAIRED CONTROL 2 — the list grammar names ONE id, so a different id is
     // still only a skip. Naming one used to make every id strict.
-    expect(canExecute(decision, { QUANTA_REQUIRE_CAPABILITIES: "lancedb" })).toBe(false)
-    expect(() => canExecute(decision, { QUANTA_REQUIRE_CAPABILITIES: "git" })).toThrow(/git/)
+    expect(
+      capabilityRequirementFailure(decision, { QUANTA_REQUIRE_CAPABILITIES: "lancedb" }),
+    ).toBeUndefined()
+    expect(
+      capabilityRequirementFailure(decision, { QUANTA_REQUIRE_CAPABILITIES: "git" }),
+    ).toContain("git")
   })
 
   test("PROBE-TIMEOUT is failed-setup, and failed-setup is not absence", async () => {
@@ -356,14 +369,52 @@ describe("a required capability cannot be skipped past", () => {
       // and the consumer's status table is the only place that distinction
       // survives. It used to be laundered into a skip by the lane boundary.
       expect(timedOut.verdict).toBe("failed-setup")
-      expect(() => canExecute(timedOut, REQUIRE)).toThrow(/failed-setup/)
+      expect(capabilityRequirementFailure(timedOut, REQUIRE)).toContain("failed-setup")
 
       // PAIRED CONTROL — a capability that really is absent is
       // `skipped-unsupported`, and that stays a skip even under the switch,
       // because an absent tool is the answer the receipt exists to give.
       const absent = decideFromReceipt(load, "lancedb")
       expect(absent.verdict).toBe("skipped-unsupported")
-      expect(canExecute(absent, REQUIRE)).toBe(false)
+      expect(capabilityRequirementFailure(absent, REQUIRE)).toBeUndefined()
+      expect(canExecute(absent)).toBe(false)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }, 30_000)
+
+  test("a probe that THROWS is probe-error, and probe-error is failed-setup", async () => {
+    // The one `CapabilityStatus` nothing ever produced: declared, classified by
+    // the consumer, and unreachable — a closed union with a dead arm, which is a
+    // classification nobody can test. A rejected probe also used to reject the
+    // whole `Promise.all` and take the campaign's entire receipt with it, so the
+    // workers got NO receipt: every gated describe skipped, every file green.
+    const dir = mkdtempSync(join(tmpdir(), "cap-throw-"))
+    try {
+      const out = join(dir, "receipt.json")
+      const produced = await capabilityReceiptEnvForCampaign({
+        repoRoot: REPO_ROOT,
+        tier: "pr",
+        head: "e".repeat(40),
+        outPath: out,
+        probeEnv: { PATH: process.env.PATH ?? "", HOME: "/nonexistent-probe-home" },
+        spawn: (argv: readonly string[]): SpawnedProbe => {
+          if (argv.join(" ").includes("git")) throw new Error("spawn exploded")
+          return {
+            exited: Promise.resolve(0),
+            stdout: Promise.resolve(`${argv[0] ?? "fake"}\n`),
+            kill: () => {},
+          }
+        },
+        totalDeadlineMs: 10_000,
+      })
+      expect(produced.receipt.capabilities.git?.status).toBe("probe-error")
+      // PAIRED CONTROL — the other capabilities still answered, so one bad probe
+      // no longer costs the campaign its receipt.
+      expect(produced.receipt.capabilities.node?.status).toBe("available")
+
+      const load = loadCapabilityReceipt(produced.env, (path) => readFileSync(path, "utf8"))
+      expect(decideFromReceipt(load, "git").verdict).toBe("failed-setup")
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
@@ -387,12 +438,65 @@ describe("a required capability cannot be skipped past", () => {
     // Exactly one: a tally that double-counts a file asking twice is not a tally.
     expect(lines).toHaveLength(1)
     expect(lines[0]).toContain("capability=git")
-    expect(lines[0]).toContain("verdict=")
+    // The VERDICT VALUE, not just the key. `toContain("verdict=")` was the whole
+    // assertion, so hardcoding `verdict=executed` in the reported line — the
+    // original "a lane that executed nothing looks like one that executed
+    // everything" defect, reintroduced inside the line added to fix it — passed.
+    expect(lines[0]).toContain("verdict=blocked-missing")
 
-    // ...and it is the SAME prefix the lane system writes, so one grep is a
-    // complete tally instead of half of one.
+    // ...and it is the SAME prefix the lane system writes, so one grep spans
+    // both halves instead of one.
     const { CAPABILITY_LINE_PREFIX: lanePrefix } = await import("../../_helpers/capability-lane")
     expect(lanePrefix).toBe(CAPABILITY_LINE_PREFIX)
+  })
+
+  test("the tally is keyed PER CAPABILITY, not per process", () => {
+    // The dedupe Set's stated reason. The previous arm asked for one name twice
+    // and asserted one line, which `if (reported.size > 0) return` also
+    // satisfies — so the keying that the Set exists for was untested and a
+    // process could report its first capability and go silent for the rest.
+    __resetCapabilityReportingForTests()
+    const written: string[] = []
+    const real = process.stdout.write.bind(process.stdout)
+    process.stdout.write = ((chunk: string) => {
+      written.push(String(chunk))
+      return true
+    }) as typeof process.stdout.write
+    try {
+      capability("git")
+      capability("node")
+      capability("git")
+    } finally {
+      process.stdout.write = real
+    }
+    const lines = written.filter((line) => line.startsWith(CAPABILITY_LINE_PREFIX))
+    expect(lines).toHaveLength(2)
+    expect(lines.filter((line) => line.includes("capability=git"))).toHaveLength(1)
+    expect(lines.filter((line) => line.includes("capability=node"))).toHaveLength(1)
+  })
+
+  test("a REQUIRED capability that cannot run is a failing TEST, not a dead module", () => {
+    // MEASURED before this: the requirement lived in `canExecute` and threw at
+    // module scope, so Bun discarded each file's whole registry. Over the eight
+    // consumer files under tests/unit/, `28 pass / 75 skip` became
+    // `0 pass / 8 fail` — 95 tests gone, 28 of them passing and
+    // capability-independent, with nothing saying coverage was lost.
+    //
+    // It also could not be reached through `gateOn(...) && canExecute(...)`,
+    // which short-circuits: MEASURED `0 pass 21 skip 0 fail`, exit 0, with the
+    // switch on and a `failed-setup` verdict on screen. `capability()` is called
+    // unconditionally at module scope in every consumer, so the requirement
+    // lives there now and nothing can route around it.
+    const load = loadCapabilityReceipt({}, (path) => readFileSync(path, "utf8"))
+    const blocked = decideFromReceipt(load, "debugpy")
+    expect(
+      capabilityRequirementFailure(blocked, { QUANTA_REQUIRE_CAPABILITIES: "debugpy" }),
+    ).toContain("blocked-missing")
+    // PAIRED CONTROL — a capability the switch does not name stays silent, so
+    // naming one does not make every id strict.
+    expect(
+      capabilityRequirementFailure(blocked, { QUANTA_REQUIRE_CAPABILITIES: "lancedb" }),
+    ).toBeUndefined()
   })
 })
 
@@ -479,4 +583,45 @@ describe("a campaign receipt carries chrome", () => {
       }),
     ).rejects.toThrow(/chromeProfileRoot/)
   })
+})
+
+/**
+ * ★ End to end, in a real `bun test` process.
+ *
+ * Every arm above drives a function. None of them proves `capability()` reaches
+ * the requirement, and that wiring is the whole point: an audit's mutant that
+ * disabled it left every arm green. These two spawn a real run of a real
+ * consumer file, which is the only place the module-scope path exists.
+ */
+describe("the switch, in a real run of a real consumer", () => {
+  const CONSUMER = "tests/unit/tool/glob-gitignore-mtime-hellgate.test.ts"
+
+  const runConsumer = (extra: Record<string, string>): { out: string; code: number } => {
+    const result = Bun.spawnSync([process.execPath, "test", CONSUMER], {
+      cwd: REPO_ROOT,
+      env: { ...process.env, ...extra },
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    return {
+      out: `${result.stdout.toString()}${result.stderr.toString()}`,
+      code: result.exitCode ?? -1,
+    }
+  }
+
+  test("a required-but-blocked capability fails the run, and names itself", () => {
+    const armed = runConsumer({ QUANTA_REQUIRE_CAPABILITIES: "git" })
+    expect(armed.out).toContain("REQUIRED git is blocked-missing")
+    expect(armed.code).not.toBe(0)
+  }, 60_000)
+
+  test("PAIRED CONTROL — unset, the same file is green and reports its skips", () => {
+    const quiet = runConsumer({ QUANTA_REQUIRE_CAPABILITIES: "" })
+    expect(quiet.code).toBe(0)
+    expect(quiet.out).not.toContain("REQUIRED git")
+    // The skips still REPORT. A requirement that killed the module would take
+    // these with it — measured at 95 tests lost across eight files when the
+    // throw lived in `canExecute`.
+    expect(quiet.out).toMatch(/\d+ skip/)
+  }, 60_000)
 })

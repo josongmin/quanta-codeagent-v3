@@ -162,10 +162,13 @@ jobs:
 #  2. In your repo settings → Secrets and variables → Actions, add ONE of:
 #       - ANTHROPIC_API_KEY   (Claude provider)
 #       - OPENAI_API_KEY      (OpenAI provider; quanta picks via env)
-#  3. (Optional) Customize trigger phrases or trust scope by exporting
-#       QUANTA_GH_TRIGGER_PHRASES="@quanta,/quanta,@my-bot"
-#       QUANTA_GH_TRUST_SCOPE=collaborator|maintainer|owner|any-human
-#     under `env:` in the `respond` job.
+#  3. (Optional) Customize trigger phrases or trust scope with CLI FLAGS on the
+#     `quanta from-pr` step — they are not environment variables:
+#       --trigger-phrase "@quanta" --trigger-phrase "@my-bot"
+#       --trust-scope collaborator|maintainer|owner|any-human
+#     This block used to name QUANTA_GH_TRIGGER_PHRASES and QUANTA_GH_TRUST_SCOPE
+#     under `env:`. Nothing has ever read them, so anyone who followed it got the
+#     defaults and no error.
 #  4. Open a PR and comment `@quanta please review` — the bot will ack
 #     within ~30s.
 #

@@ -59,8 +59,11 @@ Default: `@quanta` and `/quanta`. Override under the `env:` block of the
 `respond` job:
 
 ```yaml
-env:
-  QUANTA_GH_TRIGGER_PHRASES: "@quanta,/quanta,@my-bot"
+# NOT an environment variable. `QUANTA_GH_TRIGGER_PHRASES` appeared here and in
+# the feature catalog and is read by NOTHING — its only other occurrence in the
+# tree was a commented line in a workflow TEMPLATE. The value comes from a
+# repeatable CLI flag (src/apps/cli/from-pr-cmd-runner.ts:116).
+- run: quanta from-pr --trigger-phrase "@quanta" --trigger-phrase "@my-bot"
 ```
 
 The matcher is case-insensitive and whitespace-collapsing; phrases inside
@@ -73,8 +76,9 @@ Default: `collaborator` — accepts comments from anyone with Triage / Write /
 Maintain / Admin. Override:
 
 ```yaml
-env:
-  QUANTA_GH_TRUST_SCOPE: maintainer   # or owner | any-human
+# Also a CLI flag, not an environment variable, for the same reason as above
+# (src/apps/cli/from-pr-cmd-runner.ts:112).
+- run: quanta from-pr --trust-scope maintainer   # or owner | any-human
 ```
 
 Use `any-human` only in trusted private repos — it accepts any
@@ -123,7 +127,7 @@ non-bot account.
    impossible.
 7. **`@quanta` mentioned but no reaction.** The case-insensitive `contains()`
    pre-filter only sees `@quanta` and `/quanta` by default. Custom phrases
-   set via `QUANTA_GH_TRIGGER_PHRASES` are honored by the in-process mention
+   passed with `--trigger-phrase` are honored by the in-process mention
    filter, NOT by the cheap workflow `if:` — extend the `if:` block too if
    you want the runner to start at all on a custom phrase.
 
