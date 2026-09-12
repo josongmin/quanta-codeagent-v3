@@ -284,6 +284,37 @@ export const tiersForGate = (gate: Gate): readonly VerificationTier[] => {
   return SUITE_TIERS
 }
 
+/**
+ * The gates a `gate.ts <label>` invocation will actually plan, for any label.
+ *
+ * # The defect
+ *
+ * `gate.ts` planned `label === "precommit" ? gatesForStage("precommit") :
+ * gatesForVerificationTier(label)` and minted its exact-verification receipt over
+ * that list. `verification-campaign.ts` probed the SAME receipt with
+ * `gatesForStage("prepush")`. MEASURED:
+ *
+ *   producer  gatesForVerificationTier("prepush")  19 gates  9e2ec5b465ebe094
+ *   consumer  gatesForStage("prepush")             20 gates  4cee19d6ddf274af
+ *   in consumer not producer: ["smoke-canary"]
+ *   feeding the producer's receipt to the consumer: manifestSha256 mismatch
+ *   control, producer to producer:                  ok
+ *
+ * So `bun run prepush --reuse-receipt` ALWAYS acquired the repository lease and
+ * re-ran the whole campaign; the "REUSED exact receipt before repository lease"
+ * fast path could not fire for any receipt anyone mints. The rejection is
+ * semi-silent: it prints `receipt not reusable (manifestSha256 mismatch)`, the
+ * same words a legitimate manifest edit produces.
+ *
+ * Why no test caught it: both fixtures stub `gatesForVerificationTier` to return
+ * every gate, which makes the two selectors identical — a guard held against a
+ * fixture that shared its own assumption.
+ *
+ * One owner, so a probe and a mint cannot mean different lists again.
+ */
+export const plannedGatesForLabel = (label: GateStage | VerificationTier): readonly Gate[] =>
+  label === "precommit" ? gatesForStage("precommit") : gatesForVerificationTier(label)
+
 export const gatesForVerificationTier = (tier: VerificationTier): readonly Gate[] => {
   const selected = gatesForTier(
     GATES.map((gate) =>

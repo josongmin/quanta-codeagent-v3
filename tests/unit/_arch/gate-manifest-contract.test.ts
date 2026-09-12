@@ -38,7 +38,13 @@ import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { GATE_CONTRACT, GATES, gatesForVerificationTier } from "../../../tools/dev/gate-manifest"
+import {
+  GATE_CONTRACT,
+  GATES,
+  gatesForStage,
+  gatesForVerificationTier,
+  plannedGatesForLabel,
+} from "../../../tools/dev/gate-manifest"
 import {
   formatGateManifestViolations,
   type GateContractEntry,
@@ -242,6 +248,74 @@ describe("smoke has one authority", () => {
         run,
         isSuite: /run-test-shards|test:full|e2e:pty|real-toolchain/.test(run),
       }).toEqual({ run, isSuite: false })
+    }
+  })
+})
+
+/**
+ * ★ The producer and the consumer of the exact-verification receipt selected
+ * DIFFERENT gate lists, so the pre-lease reuse path could never fire.
+ *
+ * MEASURED:
+ *
+ *   gate.ts        plannedGatesForLabel("prepush")   19 gates  9e2ec5b465ebe094
+ *   campaign       gatesForStage("prepush")          20 gates  4cee19d6ddf274af
+ *   in consumer not producer: ["smoke-canary"]
+ *
+ * `bun run prepush --reuse-receipt` therefore ALWAYS took the lease and re-ran the
+ * whole campaign, and the rejection printed the same words a legitimate manifest
+ * edit produces. Both fixtures stubbed `gatesForVerificationTier` to return every
+ * gate, which made the two selectors identical inside the tests — a guard held
+ * against a fixture that shared its own assumption.
+ */
+describe("one gate list for the receipt's producer and consumer", () => {
+  test("the two selectors really do differ, so the owner is load-bearing", () => {
+    const stage = gatesForStage("prepush")
+    const planned = plannedGatesForLabel("prepush")
+    // ANTI-VACUITY: if these were equal, `plannedGatesForLabel` would be
+    // decoration and this whole defect class would be untestable.
+    expect(stage.length).toBeGreaterThan(planned.length)
+    const plannedIds = new Set(planned.map((gate) => gate.id))
+    expect(stage.filter((gate) => !plannedIds.has(gate.id)).map((gate) => gate.id)).toEqual([
+      "smoke-canary",
+    ])
+  })
+
+  test("precommit still selects the precommit stage, and every tier is planned", () => {
+    expect(
+      plannedGatesForLabel("precommit")
+        .map((gate) => gate.id)
+        .sort(),
+    ).toEqual(
+      gatesForStage("precommit")
+        .map((gate) => gate.id)
+        .sort(),
+    )
+    for (const tier of ["prepush", "pr", "full", "nightly"] as const) {
+      expect({ tier, planned: plannedGatesForLabel(tier).length }).toEqual({
+        tier,
+        planned: gatesForVerificationTier(tier).length,
+      })
+      expect(plannedGatesForLabel(tier).length).toBeGreaterThan(0)
+    }
+  })
+
+  test("both call sites go through the owner, not through a selector of their own", () => {
+    const source = (rel: string): string =>
+      readFileSync(join(import.meta.dir, "..", "..", "..", rel), "utf8")
+    const gate = source("tools/dev/gate.ts")
+    const campaign = source("tools/dev/verification-campaign.ts")
+    expect(gate).toContain("const planned = plannedGatesForLabel(label)")
+    expect(campaign).toContain('plannedGatesForLabel("prepush")')
+    // ...and neither reconstructs the ternary the owner replaced.
+    for (const [name, body] of [
+      ["gate.ts", gate],
+      ["verification-campaign.ts", campaign],
+    ] as const) {
+      expect({
+        name,
+        reconstructed: /label === "precommit" \? gatesForStage/.test(body),
+      }).toEqual({ name, reconstructed: false })
     }
   })
 })
