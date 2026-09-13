@@ -31,12 +31,20 @@ describe("session paths", () => {
     // "Default" means NO root override at all. The test preload fences QUANTA_HOME at
     // scratch, and QUANTA_CONFIG_DIR outranks it, so both are cleared here along with
     // the sessions override. Resolution is a pure path computation — nothing is
-    // created — and `afterEach` restores the fence.
-    delete process.env.QUANTA_SESSIONS_DIR
-    delete process.env.QUANTA_HOME
-    delete process.env.QUANTA_CONFIG_DIR
-    __resetRuntimeConfig()
-    expect(sessionsRoot()).toBe(join(homedir(), ".quanta", "sessions"))
+    // created. The fenced QUANTA_HOME is put back by name: bun runs every file in one
+    // process, and a fence left deleted stays off for the files after this one.
+    const priorQuantaHome = process.env.QUANTA_HOME
+    try {
+      delete process.env.QUANTA_SESSIONS_DIR
+      delete process.env.QUANTA_HOME
+      delete process.env.QUANTA_CONFIG_DIR
+      __resetRuntimeConfig()
+      expect(sessionsRoot()).toBe(join(homedir(), ".quanta", "sessions"))
+    } finally {
+      if (priorQuantaHome === undefined) delete process.env.QUANTA_HOME
+      else process.env.QUANTA_HOME = priorQuantaHome
+      __resetRuntimeConfig()
+    }
   })
 
   test("QUANTA_SESSIONS_DIR overrides the root", () => {
