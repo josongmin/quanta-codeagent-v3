@@ -123,7 +123,7 @@ describe("tool posture (HELL-SVT-03/04/05)", () => {
     expect(tool.isConcurrencySafe({} as never)).toBe(false)
   })
 
-  test("HITL tier resolves always-confirm (declared through capability needs-sandbox)", () => {
+  test("HITL tier resolves always-confirm (the fail-closed default for an undeclared writer)", () => {
     expect(inferToolTierDetailed(tool as never, {})).toEqual({
       tier: "always-confirm",
       reason: "needs-sandbox",

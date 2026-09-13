@@ -74,7 +74,14 @@ export const shadowVerifyInputSchema = z.object({
     .array(z.enum(["lint", "typecheck", "test"]))
     .min(1)
     .describe("Which checks to run in the scratch overlay"),
-  test_target: z.string().optional().describe("Targeted test path/pattern for 'test' check"),
+  // A path or pattern, never an option: quoting keeps it one shell word, but `bun test`
+  // still parses a word that starts with `-` — `--preload=/host/evil.ts` ran a host file
+  // outside the scratch tree (round-9 audit).
+  test_target: z
+    .string()
+    .refine((t) => !t.startsWith("-"), "test_target is a test path or pattern, not an option")
+    .optional()
+    .describe("Targeted test path/pattern for 'test' check (must not start with '-')"),
 })
 export type ShadowVerifyInput = z.infer<typeof shadowVerifyInputSchema>
 
@@ -142,8 +149,10 @@ export const shadowVerifyTool = (port: ShadowVerifyPortMirror): Tool<ShadowVerif
   // No `hitlTier` and no `capability`, on purpose. It executes model-controlled code with
   // host access and no OS sandbox — the posture of `bash` without a sandbox profile — and
   // that is exactly what the fail-closed default gives an undeclared writer:
-  // `{ always-confirm, needs-sandbox }`. Declaring it again would be a second statement
-  // of one fact (mutation-checked: removing either declaration changed nothing).
+  // `{ always-confirm, needs-sandbox }`. Declaring `capability: needs-sandbox` would
+  // restate it (measured: no change). Declaring `hitlTier: "always-confirm"` would NOT: the
+  // reason becomes `declared`, which bypass mode does not relax — a stricter posture than
+  // sandboxless bash, and not the one intended.
   // The `test` check's shell line, for the HARD_DENY denylist. Lint/typecheck run no
   // shell line.
   extractShellCommand: (input: ShadowVerifyInput): string | null =>

@@ -94,6 +94,21 @@ describe("shadow_verify is gated as code execution", () => {
   })
 })
 
+describe("the test target is a path, not an option", () => {
+  test("a target that starts with '-' is refused by the schema, before any spawn", async () => {
+    const events: { type: string; result?: { ok: boolean; output: string } }[] = []
+    for await (const ev of tool.execute(
+      { patch: "p", checks: ["test"], test_target: "--preload=/host/evil.ts" } as never,
+      { signal: new AbortController().signal } as never,
+    )) {
+      events.push(ev as never)
+    }
+    const result = events.find((e) => e.type === "result")?.result
+    expect(result?.ok).toBe(false)
+    expect(result?.output).toContain("not an option")
+  })
+})
+
 describe("the test target is one shell word", () => {
   const HOSTILE = ["x; touch PWNED", "$(touch PWNED)", "`touch PWNED`", "a'b; touch PWNED; echo '"]
 
