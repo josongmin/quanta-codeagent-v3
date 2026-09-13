@@ -44,7 +44,6 @@ export const CAPABILITY_RECEIPT_FUTURE_SKEW_TOLERANCE_MS = 60_000
 export const CAPABILITY_RECEIPT_PATH_ENV = "QUANTA_CAPABILITY_RECEIPT"
 /** Optional: the runner's own claim about what the receipt must be bound to. */
 export const CAPABILITY_RECEIPT_BINDING_ENV = "QUANTA_CAPABILITY_BINDING"
-/** Set by CI: `blocked` / `failed-setup` must then THROW instead of skipping. */
 /**
  * The digest of the receipt's VERDICTS, which is the only part of the receipt
  * allowed to move the shard cache identity.
@@ -56,6 +55,12 @@ export const CAPABILITY_RECEIPT_BINDING_ENV = "QUANTA_CAPABILITY_BINDING"
  */
 export const CAPABILITY_VERDICTS_ENV = "QUANTA_CAPABILITY_VERDICTS"
 
+/**
+ * The ids for which `blocked-missing` / `failed-setup` is a registered failing
+ * test instead of a skip (grammar: `capabilityRequiredFor`). An operator or CI may
+ * set it; the shard runner and `with-capability-receipt` widen it with every id
+ * their receipt answered definitely (`definiteCapabilityIds`).
+ */
 export const CAPABILITY_REQUIRE_ENV = "QUANTA_REQUIRE_CAPABILITIES"
 
 /**
@@ -73,8 +78,10 @@ export const CAPABILITY_REQUIRE_ENV = "QUANTA_REQUIRE_CAPABILITIES"
  * the lane helper's own docstring says it exists to remove, still open one
  * system over.
  *
- * Owning the prefix in the module both systems already import is what makes
- * `grep '^\[capability\]'` a complete tally rather than a tally of one half.
+ * Owning the prefix in the module both systems already import puts both halves
+ * behind one `grep '^\[capability\]'`. That is NOT a complete tally: the receipt
+ * consumer prints once per capability per process, and a shard worker runs many
+ * files. The per-file account is the junit record (`capabilityRecordName`).
  */
 export const CAPABILITY_LINE_PREFIX = "[capability]"
 
