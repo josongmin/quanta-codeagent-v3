@@ -1,10 +1,11 @@
 /**
  * ADR-0249 — types for the node-REPL persistent-kernel primitive.
  *
- * The kernel is a long-running `node -i` subprocess whose variable bindings
+ * The kernel is a long-running node REPL subprocess whose variable bindings
  * survive across `exec` calls. Codex's reference pattern lives at
  * `~/.codex/node_repl/active_execs/{execId}.json` — quanta mirrors that
- * shape (handle metadata only) under `~/.quanta/node_repl/active_execs/`.
+ * shape (handle metadata only) under `<quanta home>/node_repl/active_execs/`
+ * (`QUANTA_CONFIG_DIR ?? QUANTA_HOME ?? ~/.quanta`).
  *
  * `KernelError` is a closed union (project convention — see
  * `src/shared/errors.ts`) so policy code can branch on `.kind` without

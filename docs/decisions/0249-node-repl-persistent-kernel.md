@@ -9,8 +9,8 @@
   `src/runtime/node-repl/types.ts` (typed `KernelId`, `KernelSpec`, `KernelState`,
   `ExecResult`, `KernelError`),
   `src/runtime/node-repl/port.ts` (closed `NodeReplKernel` port),
-  `src/runtime/node-repl/default-kernel.ts` (production `Bun.spawn(["node","-i"])` adapter),
-  `src/runtime/node-repl/state-store.ts` (`~/.quanta/node_repl/active_execs/{id}.json`, 0600/0700),
+  `src/runtime/node-repl/default-kernel.ts` (production node-REPL adapter; `node -i` until sep-14),
+  `src/runtime/node-repl/state-store.ts` (`<quanta home>/node_repl/active_execs/{id}.json`, 0600/0700),
   `src/runtime/node-repl/headless-stub.ts` (deterministic test adapter — no real spawn),
   `src/runtime/node-repl/index.ts` (barrel),
   `tests/unit/runtime/node-repl-hellgate.test.ts` (16 cases).
@@ -49,8 +49,8 @@ hold.
 src/runtime/node-repl/
   types.ts            — KernelId, KernelSpec, KernelState, ExecResult, KernelError
   port.ts             — NodeReplKernel { spawn, exec, status, kill, list }
-  default-kernel.ts   — Bun.spawn(["node","-i"]) + line-protocol stdin/stdout
-  state-store.ts      — ~/.quanta/node_repl/active_execs/{id}.json (0600 / dir 0700)
+  default-kernel.ts   — promptless node:repl + line-protocol stdin/stdout
+  state-store.ts      — <quanta home>/node_repl/active_execs/{id}.json (0600 / dir 0700)
   headless-stub.ts    — deterministic no-spawn adapter for tests
   index.ts            — barrel
 ```
@@ -118,12 +118,20 @@ schedule on it.
 
 ### Default adapter (`default-kernel.ts`)
 
-- `Bun.spawn(["node", "-i", "--no-warnings"], { stdin: "pipe", stdout: "pipe", stderr: "pipe" })`
-- Line-protocol around node's interactive REPL: write `code + "\n"` then
-  a unique sentinel `\n;"__quanta_repl_done_${execId}__";\n`. Read stdout
-  until the sentinel echoes back; everything before is the exec's
-  stdout. Stderr is drained in parallel.
-- State transitions: `starting` → (banner consumed) → `ready` → (exec
+- Spawned through the scrubbed-env funnel as `node --no-warnings -e <boot>`, where the
+  boot script starts `node:repl` with `prompt: ""`, `displayPrompt` disabled and
+  `ignoreUndefined: true` (stdin/stdout/stderr piped). **Amended sep-14:** this was
+  `node -i`, whose banner, `> ` / `| ` prompts and `undefined` echoes had to be scrubbed
+  from the capture; the sentinel's own echo (`> '__sentinel__'`) left a stray `'` on
+  every exec once the scrub stripped prompts, and output beginning with `> ` / `... `
+  or equal to `undefined` was rewritten or dropped.
+- Line-protocol: write `code + "\n"` then the statement
+  `;void process.stdout.write("\n__quanta_repl_done_<nonce>__");`. Read stdout until the
+  sentinel arrives; everything before it, minus the statement's newline and one line
+  end, is the exec's stdout. Stderr is drained in parallel. (Uncaught errors are
+  printed by the REPL to STDOUT as `Uncaught …`, as `node -i` also did — see
+  corrections §I for the `hadError` consequence.)
+- State transitions: `starting` → (warm-up sentinel read) → `ready` → (exec
   in flight) → `running` → (exec done) → `idle` → … → `dead` (process
   exit, kill, or unrecoverable parse error).
 - AbortSignal during `exec` writes `.exit` to stdin and resolves with
@@ -136,8 +144,9 @@ schedule on it.
 
 ### State store (`state-store.ts`)
 
-- Directory: `~/.quanta/node_repl/active_execs/` (mode 0700, created on
-  first write).
+- Directory: `<quanta home>/node_repl/active_execs/` (mode 0700, created on
+  first write). **Amended sep-14:** was `~/.quanta/…` from `os.homedir()`, which ignored
+  a relocated `QUANTA_HOME`.
 - Per-kernel file: `{id}.json`, mode 0600, body:
   `{ id, pid, startedAtMs, lastUseMs, sessionId }`.
 - Written on spawn-success; updated on every successful `exec` (the

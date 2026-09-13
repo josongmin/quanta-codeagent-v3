@@ -1,5 +1,5 @@
 /**
- * ADR-0249 — production `Bun.spawn(["node","-i"])`-backed kernel adapter.
+ * ADR-0249 — production node-REPL-backed kernel adapter.
  *
  * Sibling to the deterministic `headless-stub.ts` test adapter. The slice
  * (`port.ts`) consumes a closed `NodeReplKernel` port; this adapter is the
@@ -7,15 +7,22 @@
  * threaded into whatever tool wires it (deferred; this round delivers the
  * kernel primitive only).
  *
- * Line-protocol around node's interactive REPL:
- *   1. spawn `node -i --no-warnings` with stdin/stdout/stderr piped.
- *   2. consume the banner ("Welcome to Node…", `>` prompt) until a
- *      caller-side warm-up sentinel echoes back — marks `state = "ready"`.
- *   3. on each `exec(code)`:
- *        write `code + "\n" + ";\"__quanta_repl_done_${execNonce}__\";\n"`
- *      then read stdout until the sentinel echoes. Everything before is
- *      the exec's stdout body. Stderr is drained in parallel into a
- *      separate buffer.
+ * Line-protocol around a node REPL that prints ONLY the program's output:
+ *   1. spawn `node --no-warnings -e <REPL_BOOT>` with stdin/stdout/stderr piped. The
+ *      boot script starts `node:repl` with an empty prompt, `displayPrompt` disabled
+ *      and `ignoreUndefined` — no banner, no `> ` / `| ` prompts, no `undefined` echoes.
+ *   2. write the sentinel statement and read until it arrives — `state = "ready"`.
+ *   3. on each `exec(code)`: write `code`, a newline, and the sentinel statement, which
+ *      prints `"\n" + sentinel` and nothing after it. Everything before the sentinel is
+ *      the exec's stdout body. Stderr is drained in parallel into a separate buffer.
+ *
+ *   It spawned `node -i` and scrubbed prompts out of the capture afterwards. Measured
+ *   on Node 25.9, `node -i` interleaves a banner, `> ` prompts, `| ` continuation
+ *   prompts and `undefined` echoes with real output, and the sentinel's own echo
+ *   arrived as `> '__sentinel__'` — so every exec returned a stray `'` once the scrub
+ *   began stripping prompts instead of dropping lines (round-8 audit), and output that
+ *   legitimately began with `> ` or `... `, or was the word `undefined`, was mangled
+ *   or dropped. There is nothing to scrub when nothing is printed.
  *   4. AbortSignal → write `.exit\n` to stdin; state → "dead";
  *      resolve with `{ kind: "exec-aborted" }`.
  *
@@ -72,6 +79,18 @@ interface LiveKernel {
 
 const DEFAULT_READY_TIMEOUT_MS = 5_000
 const SENTINEL_PREFIX = "__quanta_repl_done_"
+
+/** `node -e` program: a REPL on stdin/stdout that prints no prompt of any kind and does
+ *  not echo `undefined`. Everything else — result echoes, `console.log`, uncaught error
+ *  lines — is exactly what `node -i` prints. */
+const REPL_BOOT =
+  'const r=require("node:repl").start({prompt:"",input:process.stdin,output:process.stdout,' +
+  "terminal:false,ignoreUndefined:true});r.displayPrompt=()=>{};"
+
+/** The statement that ends every write: prints a newline and the sentinel, returns
+ *  `undefined` (so nothing is echoed after it). */
+const sentinelStatement = (sentinel: string): string =>
+  `;void process.stdout.write(${JSON.stringify(`\n${sentinel}`)});\n`
 
 /** Build a production-shaped `NodeReplKernel`. STATEFUL — call once at
  *  composition-root and reuse across the session. */
@@ -132,7 +151,7 @@ const killQuietly = (proc: ReturnType<typeof Bun.spawn>): void => {
 }
 
 /**
- * Launch `node -i` with a SCRUBBED environment.
+ * Launch the node REPL with a SCRUBBED environment.
  *
  * This called `Bun.spawn` with no `env`, so the child inherited the whole parent
  * environment — `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` and every other credential the
@@ -149,10 +168,18 @@ const killQuietly = (proc: ReturnType<typeof Bun.spawn>): void => {
  *
  * Now it goes through the branded funnel: `env` is required and must be minted by
  * `asScrubbedEnv(scrubEnv())`, so an inherit-by-omission spawn is a type error here.
+ *
+ * WHAT THE SCRUB IS NOT: a secret boundary. It removes credentials from the CHILD's
+ * environment only. Code in the REPL runs as the same OS user as the agent, and that
+ * user can read the parent's startup environment — measured on macOS, a child spawned
+ * with a scrubbed env printed the parent's key via `ps eww -o command= -p $PPID` — and
+ * can read any key file the user can. e0c1912c0 said "neither provider key reaches the
+ * REPL"; that holds for `process.env` and not beyond it. The controls that bound this
+ * tool are its approval (`node_repl` is always-confirm) and the OS sandbox, not the scrub.
  */
 const launchNode = (nodeBin: string): Result<SpawnedProcess, KernelError> => {
   try {
-    const proc = bunScrubbedSpawner([nodeBin, "-i", "--no-warnings"], {
+    const proc = bunScrubbedSpawner([nodeBin, "--no-warnings", "-e", REPL_BOOT], {
       cwd: process.cwd(),
       env: asScrubbedEnv(scrubEnv()),
       stdin: "pipe",
@@ -191,7 +218,7 @@ const warmUpNode = async (
 ): Promise<{ ok: true } | { ok: false; detail: string }> => {
   const sentinel = `${SENTINEL_PREFIX}${randomNonce()}__`
   try {
-    ;(proc.stdin as { write: (s: string) => unknown }).write(`;"${sentinel}";\n`)
+    ;(proc.stdin as { write: (s: string) => unknown }).write(sentinelStatement(sentinel))
   } catch (e) {
     killQuietly(proc)
     return { ok: false, detail: errMessage(e) }
@@ -448,7 +475,7 @@ const writeExec = (
   code: string,
 ): { ok: true; sentinel: string } | { ok: false; detail: string } => {
   const sentinel = `${SENTINEL_PREFIX}${randomNonce()}__`
-  const wrapped = `${code}\n;"${sentinel}";\n`
+  const wrapped = `${code}\n${sentinelStatement(sentinel)}`
   const w = writeStdin(k, wrapped)
   if (!w.ok) return { ok: false, detail: w.detail }
   return { ok: true, sentinel }
@@ -472,30 +499,18 @@ const finishExec = (
   release()
   return ok({
     id,
-    stdout: scrubReplNoise(body),
+    stdout: replOutput(body),
     stderr: stderrText,
     hadError: stderrText.length > 0,
   })
 }
 
-/** Strip REPL prompt / undefined echoes from a captured body. node's
- *  interactive REPL pads `>` prompts and `undefined` lines around each
- *  statement; for downstream consumers the noise is irrelevant.
- *
- *  A leading prompt is STRIPPED, not a reason to drop the line. The REPL can deliver a
- *  statement's output on the same chunk as the prompt, as `"> SCRUBBED"`; the old filter
- *  dropped every line starting with `"> "`, so that output vanished and `exec` returned
- *  an empty stdout for a statement that printed. Measured: raw capture showed the line
- *  arriving that way on some runs, and the credential test then saw `""`. */
-export const scrubReplNoise = (raw: string): string =>
-  raw
-    .split("\n")
-    .map((line) => line.replace(/^\s*(?:(?:>|\.\.\.)(?:\s+|$))+/, ""))
-    .filter((line) => {
-      const t = line.trim()
-      return t !== "" && t !== "undefined"
-    })
-    .join("\n")
+/**
+ * The exec's stdout from a captured body: the sentinel statement's leading newline is
+ * removed, then one trailing newline (a result echo or `console.log` ends with one). No
+ * line is dropped or rewritten — the REPL prints no prompts, so nothing needs scrubbing.
+ */
+export const replOutput = (body: string): string => body.replace(/\n$/, "").replace(/\n$/, "")
 
 interface ReadResult {
   ok: true

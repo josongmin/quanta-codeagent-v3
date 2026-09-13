@@ -35,9 +35,9 @@ import {
   listKernels,
   stateDir,
 } from "@/runtime/node-repl"
-import { scrubReplNoise } from "@/runtime/node-repl/default-kernel"
+import { replOutput } from "@/runtime/node-repl/default-kernel"
 import { __resetRuntimeConfig } from "@/shared"
-import { withTempDirSync } from "../../_helpers/temp-dir"
+import { withTempDir, withTempDirSync } from "../../_helpers/temp-dir"
 
 const MISSING_NODE = "__quanta_definitely_no_such_node_bin__"
 
@@ -128,7 +128,9 @@ describe("ADR-0249 node-repl-hellgate", () => {
     expect(out, "the kernel produced nothing to judge").toContain("KEY=")
     expect(out).not.toContain("probe-startup-secret")
     expect(out).not.toContain("probe-openai-secret")
-    expect(out).toContain("KEY=SCRUBBED OAI=SCRUBBED")
+    // EXACT: the probe prints the exec's stdout plus its own newline, and nothing else.
+    // `toContain` here let every exec carry a stray `'` unseen.
+    expect(out).toBe("KEY=SCRUBBED OAI=SCRUBBED\n")
   })
 
   test("HELL-NR-02A PAIRED CONTROL: the allowlisted environment still reaches the kernel", () => {
@@ -138,12 +140,50 @@ describe("ADR-0249 node-repl-hellgate", () => {
     expect(out).toContain("PATH_SET=yes")
   })
 
-  test("HELL-NR-02B a prompt prefixed onto output is stripped, not a reason to drop the line", () => {
-    expect(scrubReplNoise("> SCRUBBED")).toBe("SCRUBBED")
-    expect(scrubReplNoise("> > KEY=x")).toBe("KEY=x")
-    expect(scrubReplNoise("... done")).toBe("done")
-    expect(scrubReplNoise(">\n...\n> \nundefined\n\n2")).toBe("2")
-    expect(scrubReplNoise(">not-a-prompt")).toBe(">not-a-prompt")
+  /**
+   * HELL-NR-02B — the REAL kernel returns exactly what the code printed.
+   *
+   * The kernel ran `node -i` and scrubbed prompts from the capture. The sentinel's echo
+   * arrived as `> '__sentinel__'`, so once the scrub stripped prompts every exec ended
+   * in a stray `'` (`1+1` gave `"2\n'"`), and output that began with `> ` / `... ` or
+   * was the word `undefined` was rewritten or dropped. The stub arms could not see it.
+   */
+  test("HELL-NR-02B the real kernel's stdout is exact — no prompt, echo or sentinel residue", async () => {
+    await withTempDir("qnr-exact-", async (home) => {
+      const k = createDefaultNodeReplKernel({ home })
+      const sp = await k.spawn({ sessionId: "exact" })
+      expect(sp.ok, JSON.stringify(sp)).toBe(true)
+      if (!sp.ok) return
+      const cases: ReadonlyArray<readonly [string, string]> = [
+        ["1+1", "2"],
+        ["let x = 42", ""],
+        ["x", "42"],
+        ['console.log("hello")', "hello"],
+        ['console.log("> quoted")', "> quoted"],
+        ['console.log("... ellipsis")', "... ellipsis"],
+        ['console.log("undefined")', "undefined"],
+        // Blank lines inside output survive (the old scrub dropped every empty line).
+        ['console.log(["a", "", "b"].join(String.fromCharCode(10)))', "a\n\nb"],
+        ["function f(a) {\n  return a * 2\n}\nf(21)", "42"],
+      ]
+      try {
+        for (const [code, expected] of cases) {
+          const out = await k.exec(sp.value.id, code, { timeoutMs: 10_000 })
+          expect(out.ok, `${code}: ${JSON.stringify(out)}`).toBe(true)
+          if (!out.ok) return
+          expect(out.value.stdout, code).toBe(expected)
+        }
+      } finally {
+        await k.kill(sp.value.id)
+      }
+    })
+  }, 60_000)
+
+  test("HELL-NR-02C replOutput removes only the protocol's newline and one line end", () => {
+    expect(replOutput("2\n\n")).toBe("2")
+    expect(replOutput("\n")).toBe("")
+    expect(replOutput("> kept\n... kept\nundefined\n\n")).toBe("> kept\n... kept\nundefined")
+    expect(replOutput("a\n\n\n")).toBe("a\n")
   })
 
   // ─── HELL-NR-03 — exec "1+1" returns "2" ───────────────────────────────
