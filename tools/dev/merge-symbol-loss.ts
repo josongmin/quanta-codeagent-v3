@@ -102,8 +102,15 @@ export interface GitReadPort {
   readonly listMerges: (rev: string, maxMerges: number) => readonly string[]
   /**
    * The common ancestor a 3-way merge of `parents` compares against
-   * (`git merge-base --octopus`). `undefined` when they share no history, in which
-   * case nothing can be proven trivial and every loss stays reported.
+   * (`git merge-base --octopus --all`). `undefined` when they share no history OR share
+   * more than one best common ancestor — in both cases nothing can be proven trivial and
+   * every loss stays reported.
+   *
+   * Several bases is a criss-cross history, and there git's recursive/ort strategy
+   * merges the bases into a VIRTUAL base that no commit's file equals. Picking one of
+   * them — what `--octopus` without `--all` does — excused a real loss (round-8 audit,
+   * reproduced: `git merge` kept the symbol, the merge dropped it, the detector filed
+   * it under `trivial`).
    */
   readonly mergeBase: (parents: readonly string[]) => string | undefined
 }
@@ -184,13 +191,19 @@ export const createGitReadPort = (cwd: string = REPO_ROOT): GitReadPort => ({
   // --batch` for BOTH the parent and the merge, so the file reads as zero
   // exports on each side and every loss in it is silently invisible. `-z` emits
   // raw NUL-separated bytes, which cat-file resolves.
+  //
+  // `--no-renames`: with rename detection on, a path renamed away appears only under its
+  // NEW name, so the old path — where the parent's exports were — was never read, and a
+  // merge that renamed a file and dropped symbols from it examined zero files (round-8
+  // audit, reproduced). As a delete plus an add, the old path is compared; a rename one
+  // line of history made alone is still excused by the 3-way rule below.
   changedFiles: (from, to) =>
-    git(["diff", "-z", "--name-only", from, to], cwd)
+    git(["diff", "-z", "--no-renames", "--name-only", from, to], cwd)
       .split("\0")
       .filter((l) => l.length > 0),
   readFiles: (sha, paths) => catFileBatch(cwd, sha, paths),
   mergeBase: (parents) => {
-    const res = spawnSync("git", ["merge-base", "--octopus", ...parents], {
+    const res = spawnSync("git", ["merge-base", "--octopus", "--all", ...parents], {
       cwd,
       encoding: "utf8",
     })
@@ -201,8 +214,11 @@ export const createGitReadPort = (cwd: string = REPO_ROOT): GitReadPort => ({
     if (res.status !== 0) {
       throw new Error(`git merge-base --octopus failed (${res.status}): ${res.stderr ?? ""}`)
     }
-    const base = (res.stdout ?? "").trim()
-    return base === "" ? undefined : base
+    const bases = (res.stdout ?? "")
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0)
+    return bases.length === 1 ? bases[0] : undefined
   },
   listMerges: (rev, maxMerges) =>
     git(["log", "--merges", "--format=%H", "-n", String(maxMerges), rev], cwd)
@@ -407,7 +423,9 @@ const mergeSideExports = (
  *    from the base;
  *  - an "evil merge" that edits a file neither parent changed: no parent's file
  *    equals the merge's;
- *  - any merge whose parents share no base: nothing is compared, nothing excused.
+ *  - any merge whose parents share no base: nothing is compared, nothing excused;
+ *  - a criss-cross merge (several best common ancestors): there is no single base to
+ *    compare, so nothing is excused (see `GitReadPort.mergeBase`).
  */
 export const isTrivialOneSidedChange = (
   file: string,
@@ -482,16 +500,18 @@ export const scanMerge = (sha: string, port: GitReadPort): MergeScan => {
 // `tests/unit/_arch/merge-symbol-loss-ratchet.test.ts`)
 // ---------------------------------------------------------------------------
 
-/** CLI default: the whole reachable merge history of this repo is ~70 merges. */
+/** CLI default: above the whole reachable merge history of this repo (91 merges at
+ *  421e3abcb). */
 export const DEFAULT_MAX_MERGES = 200
 
 /**
  * How many of the newest merges the ratchet enforces. Bounded so the unit test
- * stays fast (the full ~70-merge history is a ~30s scan).
+ * stays fast (the full 91-merge history is a 19-23s scan; measured below).
  *
  * WHY 14, CORRECTED. This used to say widening past 14 "pulls in `deeaa91da` and
  * the `aug02-integration` chain, which carry real (small) historical losses". They
- * did not. Every one of those losses — 681 across 90 of the 91 reachable merges —
+ * did not. Every one of those losses — 693 across the 26 non-incident merges that
+ * reported any, of 91 reachable (re-measured at 421e3abcb; "681" here was wrong) —
  * was a trivial one-sided change the pre-3-way detector could not tell from a loss
  * (see {@link isTrivialOneSidedChange}). MEASURED with the 3-way rule, at any
  * window from 14 to the full 91, the only unexcused loss is the grandfathered

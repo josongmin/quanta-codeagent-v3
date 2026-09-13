@@ -173,9 +173,10 @@ export type BudgetLimitSource = "product" | "user"
 /**
  * The first version compared each parent to the merge and never read the base, so a
  * symbol one line of history deleted in an ORDINARY commit read as lost relative to
- * a parent that had simply not touched the file. Measured on this repository: every
- * reported loss in 90 of 91 merges had that shape — 681 of them — and the only merge
- * that did not was the recorded incident. These cases pin both halves: the trivial
+ * a parent that had simply not touched the file. Measured on this repository (the
+ * pre-3-way detector at 421e3abcb, 91 merges): 27 merges reported 767 losses; outside
+ * the recorded incident (74) that is 693 losses in 26 merges, every one of that shape.
+ * (An earlier version of this comment said "681"; re-measured twice, it is 693.) These cases pin both halves: the trivial
  * shape is reported as `trivial`, and every shape that is NOT trivial stays a loss.
  */
 describe("merge symbol-loss detector — trivial one-sided change vs real loss", () => {

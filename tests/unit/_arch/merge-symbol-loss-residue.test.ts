@@ -13,6 +13,10 @@
  *  4. `git diff --name-only` quotes non-ASCII paths (`core.quotePath` defaults
  *     ON), and the quoted spec then misses on `cat-file --batch` for BOTH
  *     sides — zero exports before, zero after, a silent blind spot.
+ *  5. (round 8) the 3-way rule compared against ONE merge base in a criss-cross
+ *     history, where git merges against a virtual base — a real loss read as trivial.
+ *  6. (round 8) rename detection listed a renamed-away file only under its new name,
+ *     so the old path was never read and a rename that dropped symbols examined 0 files.
  */
 
 import { describe, expect, test } from "bun:test"
@@ -20,7 +24,6 @@ import { spawnSync } from "node:child_process"
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-
 import {
   createGitReadPort,
   extractExportedSymbols,
@@ -30,6 +33,7 @@ import {
   type SymbolLoss,
   scanMerge,
 } from "../../../tools/dev/merge-symbol-loss"
+import { withTempDirSync } from "../../_helpers/temp-dir"
 import { fakeMergeGitPort } from "../_shared/fake-merge-git-port"
 
 // ---------------------------------------------------------------------------
@@ -310,5 +314,151 @@ describe("residue — symbol matching is unchanged", () => {
     const loss: SymbolLoss = { file: "src/a.ts", symbol: "cap", parent: "P" }
     expect(isExcusedByMessage("drop cap", loss)).toBe(true)
     expect(isExcusedByMessage("feeder checkpoint capture", loss)).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 5 and 6. Criss-cross bases and renames, through the REAL git port
+// ---------------------------------------------------------------------------
+
+const commitAll = (dir: string, message: string): string => {
+  runGit(dir, ["add", "-A"])
+  runGit(dir, ["commit", "-qm", message])
+  return runGit(dir, ["rev-parse", "HEAD"]).trim()
+}
+
+const initRepo = (dir: string): void => {
+  runGit(dir, ["init", "-q", "-b", "main"])
+  runGit(dir, ["config", "user.email", "t@example.com"])
+  runGit(dir, ["config", "user.name", "test"])
+  runGit(dir, ["config", "commit.gpgsign", "false"])
+  mkdirSync(join(dir, "src"), { recursive: true })
+}
+
+describe("residue 5 — a criss-cross merge has no single base to excuse against", () => {
+  /**
+   * X1 removes S; Y1 is unrelated. MX = merge(X1, Y1). MY = merge(Y1, X1) with
+   * `-s ours`, so MY KEEPS S. MX and MY now have two best common ancestors (X1, Y1).
+   * FINAL = merge(MX, MY) taking MX's file — dropping S, which git's own recursive
+   * merge keeps. Picking one base (Y1, whose file equals MY's) made that look trivial.
+   */
+  const build = (dir: string): { mx: string; my: string; final: string } => {
+    initRepo(dir)
+    const f = join(dir, "src", "f.ts")
+    writeFileSync(f, "export const keepMe = 1\nexport const S = 2\nexport const pad = 3\n")
+    const b0 = commitAll(dir, "base")
+    runGit(dir, ["checkout", "-q", "-b", "x"])
+    writeFileSync(f, "export const keepMe = 1\nexport const pad = 3\n")
+    const x1 = commitAll(dir, "X1 removes S")
+    runGit(dir, ["checkout", "-q", "-b", "y", b0])
+    writeFileSync(join(dir, "src", "y.ts"), "export const y = 1\n")
+    const y1 = commitAll(dir, "Y1 unrelated")
+    runGit(dir, ["checkout", "-q", "-b", "mx", x1])
+    runGit(dir, ["merge", "-q", "--no-ff", "-m", "MX", y1])
+    const mx = runGit(dir, ["rev-parse", "HEAD"]).trim()
+    runGit(dir, ["checkout", "-q", "-b", "my", y1])
+    runGit(dir, ["merge", "-q", "--no-ff", "-s", "ours", "-m", "MY keeps S", x1])
+    const my = runGit(dir, ["rev-parse", "HEAD"]).trim()
+    runGit(dir, ["checkout", "-q", "-b", "final", mx])
+    spawnSync("git", ["merge", "-q", "--no-ff", "--no-commit", my], { cwd: dir })
+    writeFileSync(f, runGit(dir, ["show", `${mx}:src/f.ts`]))
+    // The message must not name the file or the symbol: the escape hatch would excuse
+    // the loss by message, and this test is about the 3-way rule.
+    const final = commitAll(dir, "final")
+    return { mx, my, final }
+  }
+
+  test("RED: the dropped symbol is a LOSS, not trivial", () => {
+    withTempDirSync("msl-crisscross-", (dir) => {
+      const { mx, my, final } = build(dir)
+      // Ground truth: two best common ancestors.
+      expect(runGit(dir, ["merge-base", "--all", mx, my]).trim().split("\n")).toHaveLength(2)
+      const port = createGitReadPort(dir)
+      expect(port.mergeBase([mx, my])).toBeUndefined()
+      const scan = scanMerge(final, port)
+      expect(scan.trivial.some((l) => l.symbol === "S")).toBe(false)
+      expect(scan.excused).toEqual([])
+      expect(scan.losses.some((l) => l.file === "src/f.ts" && l.symbol === "S")).toBe(true)
+    })
+  })
+
+  test("PAIRED CONTROL: MX itself — one base, one side removed S — is still trivial", () => {
+    withTempDirSync("msl-crisscross-ctl-", (dir) => {
+      const { mx } = build(dir)
+      const scan = scanMerge(mx, createGitReadPort(dir))
+      expect(scan.trivial.some((l) => l.symbol === "S")).toBe(true)
+      expect(scan.losses).toEqual([])
+    })
+  })
+})
+
+describe("residue 6 — a renamed-away path is still compared", () => {
+  const build = (dir: string, dropInMerge: boolean): string => {
+    initRepo(dir)
+    // Eight exports, two dropped: similar enough that git's rename detection (50%
+    // threshold) pairs the files. A smaller file reads as delete+add either way and
+    // cannot tell the two diff modes apart (measured: with three exports this passed
+    // with rename detection ON).
+    const names = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta"]
+    writeFileSync(
+      join(dir, "src", "big.ts"),
+      names.map((n, i) => `export const ${n} = ${i}`).join("\n") + "\n",
+    )
+    const r0 = commitAll(dir, "add big")
+    runGit(dir, ["checkout", "-q", "-b", "a"])
+    writeFileSync(join(dir, "src", "a.ts"), "export const a = 1\n")
+    commitAll(dir, "A unrelated")
+    runGit(dir, ["checkout", "-q", "-b", "b", r0])
+    writeFileSync(
+      join(dir, "src", "big.ts"),
+      `${runGit(dir, ["show", "HEAD:src/big.ts"])}export const addedOnB = 1\n`,
+    )
+    const rb = commitAll(dir, "B adds addedOnB")
+    runGit(dir, ["checkout", "-q", "a"])
+    spawnSync("git", ["merge", "-q", "--no-ff", "--no-commit", rb], { cwd: dir })
+    runGit(dir, ["mv", "src/big.ts", "src/moved.ts"])
+    if (dropInMerge) {
+      const kept = runGit(dir, ["show", ":src/moved.ts"])
+        .split("\n")
+        .filter((l) => !l.includes("addedOnB") && !l.includes("theta"))
+        .join("\n")
+      writeFileSync(join(dir, "src", "moved.ts"), kept)
+    }
+    return commitAll(dir, "merge b (reorganise)")
+  }
+
+  test("PAIRED CONTROL: a rename one branch made in an ordinary commit is not a loss", () => {
+    withTempDirSync("msl-rename-ctl-", (dir) => {
+      initRepo(dir)
+      writeFileSync(join(dir, "src", "big.ts"), "export const alpha = 1\nexport const beta = 2\n")
+      const r0 = commitAll(dir, "add big")
+      runGit(dir, ["checkout", "-q", "-b", "renamer"])
+      runGit(dir, ["mv", "src/big.ts", "src/moved.ts"])
+      commitAll(dir, "rename")
+      runGit(dir, ["checkout", "-q", "-b", "other", r0])
+      writeFileSync(join(dir, "src", "o.ts"), "export const o = 1\n")
+      commitAll(dir, "unrelated")
+      runGit(dir, ["merge", "-q", "--no-ff", "-m", "merge renamer", "renamer"])
+      const merge = runGit(dir, ["rev-parse", "HEAD"]).trim()
+      const scan = scanMerge(merge, createGitReadPort(dir))
+      // The old path IS compared now, and the 3-way rule excuses it: the base and the
+      // keeping parent agree, and the merge took the renaming parent's side.
+      expect(scan.losses).toEqual([])
+      expect(scan.trivial.map((l) => l.symbol).sort()).toEqual(["alpha", "beta"])
+    })
+  })
+
+  test("RED: a merge that renames a file and drops exports reports the drop", () => {
+    withTempDirSync("msl-rename-", (dir) => {
+      const merge = build(dir, true)
+      // Ground truth: with rename detection, git lists only the NEW path.
+      const parent = runGit(dir, ["rev-parse", `${merge}^1`]).trim()
+      expect(runGit(dir, ["diff", "--name-only", parent, merge]).trim()).toBe("src/moved.ts")
+      const scan = scanMerge(merge, createGitReadPort(dir))
+      expect(scan.filesExamined).toBeGreaterThan(0)
+      const lost = new Set(scan.losses.map((l) => l.symbol))
+      expect(lost.has("addedOnB")).toBe(true)
+      expect(lost.has("theta")).toBe(true)
+    })
   })
 })
