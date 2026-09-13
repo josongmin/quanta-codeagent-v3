@@ -42,6 +42,7 @@ import {
   CAPABILITY_REQUIRE_ENV,
   type CapabilityFinding,
   type CapabilityReceipt,
+  capabilityRecordName,
   capabilityRequiredFor,
   validateCapabilityReceipt,
 } from "./capability-receipt"
@@ -262,15 +263,30 @@ export const capabilityRequirementFailure = (
   )
 }
 
-const requireOrRegisterFailure = (decision: CapabilityDecision, env: ConsumerEnv): void => {
+/** `true` when the decision is a requirement failure, which is then its own record. */
+const requireOrRegisterFailure = (decision: CapabilityDecision, env: ConsumerEnv): boolean => {
   const message = capabilityRequirementFailure(decision, env)
-  if (message === undefined) return
+  if (message === undefined) return false
   try {
     test(`${CAPABILITY_LINE_PREFIX} REQUIRED ${decision.capability} is ${decision.verdict}`, () => {
       throw new Error(message)
     })
   } catch {
     throw new Error(message)
+  }
+  return true
+}
+
+/** See `capabilityRecordName`: a non-executed decision is recorded in the file that asked. */
+const recordNonExecuted = (decision: CapabilityDecision): void => {
+  if (decision.verdict === "executed") return
+  try {
+    test.skip(
+      capabilityRecordName(decision.capability, decision.verdict, decision.detail),
+      () => {},
+    )
+  } catch {
+    // Asked from inside a running test, where nothing can register. The line stands.
   }
 }
 
@@ -286,7 +302,7 @@ export const capability = (name: string, env: ConsumerEnv = process.env): Capabi
   // shard worker, because there git is `executed`.
   const load = env === process.env ? capabilityReceipt() : loadCapabilityReceipt(env)
   const decision = reportDecision(decideFromReceipt(load, name))
-  requireOrRegisterFailure(decision, env)
+  if (!requireOrRegisterFailure(decision, env)) recordNonExecuted(decision)
   return decision
 }
 

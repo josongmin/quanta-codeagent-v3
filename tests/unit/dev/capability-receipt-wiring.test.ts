@@ -587,6 +587,62 @@ describe("a campaign receipt carries chrome", () => {
     }
   }, 30_000)
 
+  test("the browser file's fail-loud arm: a slow bring-up is failed-setup, a refusal is a regression", async () => {
+    // Driven through the REAL browser file with a produced receipt. The arm used
+    // to key on `resolved`, which a bring-up TIMEOUT also carries, so a loaded
+    // host read as an adapter regression.
+    const BROWSER = "tests/integration/browser-real-chrome-e2e.test.ts"
+    const runWith = async (finding: CapabilityFinding): Promise<string> => {
+      const dir = mkdtempSync(join(tmpdir(), "cap-chrome-loud-"))
+      try {
+        const produced = await capabilityReceiptEnvForCampaign({
+          repoRoot: REPO_ROOT,
+          tier: "pr",
+          head: "f".repeat(40),
+          outPath: join(dir, "receipt.json"),
+          probeEnv: { PATH: process.env.PATH ?? "", HOME: "/nonexistent-probe-home" },
+          spawn: spawnerRefusing([]),
+          probeChrome: async () => finding,
+          totalDeadlineMs: 10_000,
+        })
+        const inherited = Object.fromEntries(
+          Object.entries(process.env).filter(
+            ([key]) => !CAMPAIGN_CAPABILITY_ENV.includes(key) && key !== CAPABILITY_REQUIRE_ENV,
+          ),
+        )
+        const result = Bun.spawnSync([process.execPath, "test", BROWSER, "-t", "presence report"], {
+          cwd: REPO_ROOT,
+          env: { ...inherited, ...produced.env },
+          stdout: "pipe",
+          stderr: "pipe",
+        })
+        return `${result.stdout.toString()}${result.stderr.toString()}`
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    }
+    const slow = await runWith({
+      status: "probe-timeout",
+      detail: "chrome bring-up did not finish within 45000ms",
+      resolved: "chromium",
+      probeMs: 45_000,
+    })
+    // PRECONDITION: the file really saw the injected verdict.
+    expect(slow).toContain(`capability=${CHROME_CAPABILITY_ID} verdict=failed-setup`)
+    expect(slow).toMatch(/\b0 fail\b/)
+    const refused = await runWith({
+      status: "unavailable",
+      detail: "chrome present but the CDP session would not come up: spawn-failed",
+      resolved: "chromium",
+      probeMs: 900,
+    })
+    expect(refused).toContain(`capability=${CHROME_CAPABILITY_ID} verdict=skipped-unsupported`)
+    expect(refused).toContain(
+      "(fail) browser real-chrome e2e — chrome presence report > chrome present",
+    )
+    expect(refused).toMatch(/\b1 fail\b/)
+  }, 90_000)
+
   test("every id the corpus may ask for is one a campaign receipt carries", () => {
     // The SSOT the drift guard now reads instead of appending chrome by hand.
     const ids = campaignCapabilityIds({})

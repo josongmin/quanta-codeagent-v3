@@ -475,7 +475,14 @@ describe("browser real-chrome e2e — chrome presence report", () => {
   test("chrome present ⇒ the adapter MUST bring a session up (no silent skip of a regression)", () => {
     // FAIL-LOUD (R3 audit [11]): on a machine WITH chrome, a bring-up failure is
     // a real regression the skip-gate would otherwise hide as 17 silent skips.
-    if (HAS_CHROME) {
+    //
+    // Except `failed-setup`. A bring-up that did not finish inside the probe's
+    // budget also carries the binary in `resolved`, so this arm read a loaded host
+    // as an adapter regression. The consumer RECORDS `failed-setup` in this file's
+    // junit (`[capability] RECORD chrome-cdp failed-setup: …`), which is the
+    // classification the rule asks for; a definite "present and would not come up"
+    // (`skipped-unsupported` with a binary) is still red here.
+    if (HAS_CHROME && realChrome.verdict !== "failed-setup") {
       expect(CHROME_USABLE).toBe(true) // realChrome.detail names the failure if this trips
     }
   })

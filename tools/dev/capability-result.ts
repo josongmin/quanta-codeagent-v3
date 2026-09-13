@@ -27,10 +27,16 @@
  *
  * `blockedMissing` and `failedSetup` are NOT skips. A lane that declared a
  * dependency required and did not get it is blocked, and provisioning that
- * broke is a setup failure; both are hard failures at the aggregator. They are
- * passed in by the caller because only the job knows whether its own missing
- * dependency was optional for that runner or demanded by policy
- * (`REQUIRE_CONTRACT=1` is exactly that distinction).
+ * broke is a setup failure; both are hard failures at the aggregator.
+ *
+ * They were ONLY passed in by the caller, as flags, and no lane passed them: all
+ * three `capability:*` scripts published `blocked=0 setup_failed=0` whatever
+ * happened, so the aggregator's two hard-failure checks could not fire. They are
+ * now also READ from the junit: every receipt consumer registers a skipped
+ * `[capability] RECORD <id> <verdict>` testcase in the file that asked (see
+ * `capabilityRecordName`). Records are not cases and are counted in neither
+ * `executedCases` nor `skippedUnsupported`. The flags remain for a dependency
+ * that is not a receipt capability.
  *
  * # Bounded by construction
  *
@@ -41,6 +47,7 @@
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname } from "node:path"
+import { parseCapabilityRecordName } from "./capability-receipt"
 
 export interface CapabilityResultV1 {
   readonly schema: "quanta.capability-result.v2"
@@ -76,6 +83,9 @@ export interface JunitCounts {
   readonly skippedCases: number
   /** Per-file executed case counts, in the same order as `executedFiles`. */
   readonly executedCasesByFile: Readonly<Record<string, number>>
+  /** Distinct `file capability` pairs recorded as each non-executed verdict. */
+  readonly recordedBlockedMissing: number
+  readonly recordedFailedSetup: number
 }
 
 const attribute = (tag: string, name: string): string | undefined => {
@@ -92,30 +102,54 @@ const attribute = (tag: string, name: string): string | undefined => {
  * `<testcase …>…</testcase>` are both handled, and a case is skipped only when
  * a `<skipped` element appears inside its own body.
  */
-export const countJunitExecution = (xml: string): JunitCounts => {
-  const executedByFile = new Map<string, number>()
-  let executedCases = 0
-  let skippedCases = 0
+interface JunitCase {
+  readonly file: string
+  readonly skipped: boolean
+  readonly name: string
+}
+
+const junitCases = (xml: string): JunitCase[] => {
+  const cases: JunitCase[] = []
   const caseTag = /<testcase\b([^>]*?)(\/?)>/gu
-  let match = caseTag.exec(xml)
-  while (match !== null) {
+  for (let match = caseTag.exec(xml); match !== null; match = caseTag.exec(xml)) {
     const attrs = match[1] ?? ""
-    const selfClosing = match[2] === "/"
     let skipped = false
-    if (!selfClosing) {
+    if (match[2] !== "/") {
       const closeAt = xml.indexOf("</testcase>", caseTag.lastIndex)
       const body = closeAt === -1 ? "" : xml.slice(caseTag.lastIndex, closeAt)
       skipped = /<skipped\b/u.test(body)
     }
-    // Bun writes the file path as `file`; other emitters use `classname`.
-    const file = attribute(attrs, "file") ?? attribute(attrs, "classname") ?? "<unknown>"
-    if (skipped) {
+    cases.push({
+      // Bun writes the file path as `file`; other emitters use `classname`.
+      file: attribute(attrs, "file") ?? attribute(attrs, "classname") ?? "<unknown>",
+      skipped,
+      // Undecoded: the record prefix has nothing XML escapes, and the id and verdict
+      // are read only up to the first ": ".
+      name: attribute(attrs, "name") ?? "",
+    })
+  }
+  return cases
+}
+
+export const countJunitExecution = (xml: string): JunitCounts => {
+  const executedByFile = new Map<string, number>()
+  let executedCases = 0
+  let skippedCases = 0
+  const recorded = { "blocked-missing": new Set<string>(), "failed-setup": new Set<string>() }
+  for (const one of junitCases(xml)) {
+    // A record is a SKIPPED case with the record name. A case that ran is a case,
+    // whatever it is called, so a name cannot hide coverage or invent a record.
+    const record = one.skipped ? parseCapabilityRecordName(one.name) : undefined
+    if (record !== undefined) {
+      if (record.verdict === "blocked-missing" || record.verdict === "failed-setup") {
+        recorded[record.verdict].add(`${one.file} ${record.capability}`)
+      }
+    } else if (one.skipped) {
       skippedCases += 1
     } else {
       executedCases += 1
-      executedByFile.set(file, (executedByFile.get(file) ?? 0) + 1)
+      executedByFile.set(one.file, (executedByFile.get(one.file) ?? 0) + 1)
     }
-    match = caseTag.exec(xml)
   }
   const files = [...executedByFile.keys()].sort((left, right) => left.localeCompare(right))
   return {
@@ -125,6 +159,8 @@ export const countJunitExecution = (xml: string): JunitCounts => {
     executedCasesByFile: Object.fromEntries(
       files.map((file) => [file, executedByFile.get(file) ?? 0]),
     ),
+    recordedBlockedMissing: recorded["blocked-missing"].size,
+    recordedFailedSetup: recorded["failed-setup"].size,
   }
 }
 
@@ -142,8 +178,8 @@ export const capabilityResultFromJunit = (input: {
     executedCases: counts.executedCases,
     executedCasesByFile: counts.executedCasesByFile,
     skippedUnsupported: counts.skippedCases,
-    blockedMissing: input.blockedMissing ?? 0,
-    failedSetup: input.failedSetup ?? 0,
+    blockedMissing: (input.blockedMissing ?? 0) + counts.recordedBlockedMissing,
+    failedSetup: (input.failedSetup ?? 0) + counts.recordedFailedSetup,
   }
 }
 

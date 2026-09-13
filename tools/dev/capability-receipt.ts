@@ -44,7 +44,6 @@ export const CAPABILITY_RECEIPT_FUTURE_SKEW_TOLERANCE_MS = 60_000
 export const CAPABILITY_RECEIPT_PATH_ENV = "QUANTA_CAPABILITY_RECEIPT"
 /** Optional: the runner's own claim about what the receipt must be bound to. */
 export const CAPABILITY_RECEIPT_BINDING_ENV = "QUANTA_CAPABILITY_BINDING"
-/** Set by CI: `blocked` / `failed-setup` must then THROW instead of skipping. */
 /**
  * The digest of the receipt's VERDICTS, which is the only part of the receipt
  * allowed to move the shard cache identity.
@@ -56,6 +55,12 @@ export const CAPABILITY_RECEIPT_BINDING_ENV = "QUANTA_CAPABILITY_BINDING"
  */
 export const CAPABILITY_VERDICTS_ENV = "QUANTA_CAPABILITY_VERDICTS"
 
+/**
+ * The ids for which `blocked-missing` / `failed-setup` is a registered failing
+ * test instead of a skip (grammar: `capabilityRequiredFor`). An operator or CI may
+ * set it; the shard runner and `with-capability-receipt` widen it with every id
+ * their receipt answered definitely (`definiteCapabilityIds`).
+ */
 export const CAPABILITY_REQUIRE_ENV = "QUANTA_REQUIRE_CAPABILITIES"
 
 /**
@@ -73,10 +78,37 @@ export const CAPABILITY_REQUIRE_ENV = "QUANTA_REQUIRE_CAPABILITIES"
  * the lane helper's own docstring says it exists to remove, still open one
  * system over.
  *
- * Owning the prefix in the module both systems already import is what makes
- * `grep '^\[capability\]'` a complete tally rather than a tally of one half.
+ * Owning the prefix in the module both systems already import puts both halves
+ * behind one `grep '^\[capability\]'`. That is NOT a complete tally: the receipt
+ * consumer prints once per capability per process, and a shard worker runs many
+ * files. The per-file account is the junit record (`capabilityRecordName`).
  */
 export const CAPABILITY_LINE_PREFIX = "[capability]"
+
+/**
+ * The skipped test a consumer registers, in the ASKING file, for a decision that
+ * did not execute.
+ *
+ * The stdout line is printed once per capability per PROCESS, and a shard worker
+ * runs many files in one process, so only the first asker was ever named. And
+ * nothing read the line: `capability-result` took `blockedMissing` and
+ * `failedSetup` from command-line flags no lane passed, so the aggregator's two
+ * hard-failure checks could not fire. A junit testcase is attributed to its file
+ * and read by the reducer that already reads that junit.
+ */
+export const capabilityRecordName = (capability: string, verdict: string, detail: string): string =>
+  `${CAPABILITY_LINE_PREFIX} RECORD ${capability} ${verdict}: ${detail}`
+
+export const parseCapabilityRecordName = (
+  name: string,
+): { readonly capability: string; readonly verdict: string } | undefined => {
+  const prefix = `${CAPABILITY_LINE_PREFIX} RECORD `
+  if (!name.startsWith(prefix)) return undefined
+  const match = /^(\S+) ([a-z-]+): /u.exec(name.slice(prefix.length))
+  return match?.[1] === undefined || match[2] === undefined
+    ? undefined
+    : { capability: match[1], verdict: match[2] }
+}
 
 /**
  * Is `id` REQUIRED to have actually been exercised?
