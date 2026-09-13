@@ -21,7 +21,7 @@ import {
 } from "@/tool"
 import { isAvailable } from "./availability"
 import { lspNavProvider } from "./nav"
-import { specFor, uriToPath } from "./servers"
+import { specFor, startLspClient, uriToPath } from "./servers"
 
 /* ------------------------------------------------------------------------- *
  * LSP rename (ADR-0404, S2) — the `lsp_rename_apply` mutating tool.
@@ -61,16 +61,7 @@ const lspRenameApplyPort = (cwd: string): RenameApplyPort => {
       // A held client from a prior aborted call must not leak.
       await stopHeld()
       const client = spec.create(cwd)
-      try {
-        await client.start()
-      } catch (e) {
-        logger.warn("lsp: failed to start language server (rename)", {
-          bin: spec.bin,
-          error: errMessage(e),
-        })
-        await client.stop().catch(() => undefined)
-        return null
-      }
+      if (!(await startLspClient(client, spec.bin, "rename"))) return null
       held = client
       let edit: RenameWorkspaceEdit | null
       try {
@@ -113,16 +104,7 @@ export const lspCodeActionPort = (getCwd: () => string): CodeActionPort => {
       if (!spec) return null
       if (!(await isAvailable(spec.bin))) return null
       const client = spec.create(getCwd())
-      try {
-        await client.start()
-      } catch (e) {
-        logger.warn("lsp: failed to start language server (code-action)", {
-          bin: spec.bin,
-          error: errMessage(e),
-        })
-        await stopClient(client, "code-action/start-fail")
-        return null
-      }
+      if (!(await startLspClient(client, spec.bin, "code-action"))) return null
       try {
         return await new DefaultCodeActionAdapter(client).resolveCodeActions(
           file,
@@ -174,16 +156,7 @@ const lspFormatPort = (getCwd: () => string): FormatPort => ({
     if (!spec) return null
     if (!(await isAvailable(spec.bin))) return null
     const client = spec.create(getCwd())
-    try {
-      await client.start()
-    } catch (e) {
-      logger.warn("lsp: failed to start language server (format)", {
-        bin: spec.bin,
-        error: errMessage(e),
-      })
-      await stopClient(client, "format/start-fail")
-      return null
-    }
+    if (!(await startLspClient(client, spec.bin, "format"))) return null
     try {
       return await new DefaultFormatAdapter(client).format(file, range, signal)
     } finally {
@@ -200,16 +173,7 @@ const lspSignatureHelpPort = (getCwd: () => string): SignatureHelpPort => ({
     if (!spec) return null
     if (!(await isAvailable(spec.bin))) return null
     const client = spec.create(getCwd())
-    try {
-      await client.start()
-    } catch (e) {
-      logger.warn("lsp: failed to start language server (signature-help)", {
-        bin: spec.bin,
-        error: errMessage(e),
-      })
-      await stopClient(client, "signature-help/start-fail")
-      return null
-    }
+    if (!(await startLspClient(client, spec.bin, "signature-help"))) return null
     try {
       return await new DefaultSignatureHelpAdapter(client).signatureHelp(file, line, col, signal)
     } finally {

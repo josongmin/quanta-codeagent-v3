@@ -16,6 +16,10 @@ export interface LspClientOptions {
   workspaceConfiguration?: Readonly<Record<string, unknown>>
   /** Optional whole-tree process killer supplied by the composition root. */
   processTreeKiller?: LspProcessTreeKiller
+  /** Runs before the server process is spawned; a throw refuses the launch. A language
+   *  server executes code from its workspace, so the agent's factory puts the
+   *  workspace-trust check here — at the spawn, where no caller can go around it. */
+  beforeSpawn?: () => void
 }
 
 export type LspProcessTreeSignal = "SIGTERM" | "SIGKILL"

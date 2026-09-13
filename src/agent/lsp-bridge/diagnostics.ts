@@ -1,5 +1,4 @@
 import { extname } from "node:path"
-import { errMessage, logger } from "@/shared"
 // Direct files, not the `@/tool` BARREL, which re-exports all of `src/tool`
 // (973 lines, 76 exports).
 //
@@ -20,7 +19,7 @@ import type { Tool } from "@/tool/types/tool-contract"
 import { attachLspDiagnosticsHook, type LspDiagnosticsHookHandle } from "../lsp-diagnostics-hook"
 import type { AgentConfig } from "../types"
 import { isAvailable } from "./availability"
-import { specFor } from "./servers"
+import { specFor, startLspClient } from "./servers"
 
 /** The real provider: extension → server, with graceful unavailability. */
 export const lspDiagnosticsProvider = (): DiagnosticsProvider => ({
@@ -35,13 +34,7 @@ export const lspDiagnosticsProvider = (): DiagnosticsProvider => ({
     if (!spec) return null
     if (!(await isAvailable(spec.bin))) return null
     const client = spec.create(cwd)
-    try {
-      await client.start()
-    } catch (e) {
-      logger.warn("lsp: failed to start language server", { bin: spec.bin, error: errMessage(e) })
-      await client.stop().catch(() => undefined)
-      return null
-    }
+    if (!(await startLspClient(client, spec.bin, "diagnostics"))) return null
     return client
   },
 })

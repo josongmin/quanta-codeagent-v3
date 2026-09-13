@@ -35,5 +35,5 @@ export { createScratchWorktreePort } from "./scratch-worktree"
 export const createShadowVerifyAdapters = (repoRoot: string): ShadowVerifyDeps => ({
   scratch: createScratchWorktreePort(repoRoot),
   applier: createV4AApplyPort(),
-  checker: createLspTestCheckPort(),
+  checker: createLspTestCheckPort({ trustRoot: repoRoot }),
 })

@@ -3,6 +3,7 @@ import { mkdir, readFile, realpath, unlink } from "node:fs/promises"
 import { join as joinPath } from "node:path"
 import type { ElicitationPrompterFactory, McpReloadableSource, SamplingWiringInput } from "@/agent"
 import { applyMcpClientWiring, loadMcpTools, type McpStoppable } from "@/agent"
+import { isWorkspaceTrusted, untrustedWorkspaceMessage } from "@/agent/workspace-trust"
 import {
   createCliOAuthCallback,
   deriveChallengeS256,
@@ -413,6 +414,26 @@ export const readMcpConfig = async (
     })
   const path = resolveMcpConfigPath(envSource, projectRoot)
   if (!path) return []
+  // A path the operator named (QUANTA_MCP_CONFIG / the browser plugin knobs) is their
+  // config. The project fallback is `<project>/.mcp.json`, a file that arrives with a
+  // clone and names commands to spawn, so it loads only in a trusted folder — the design
+  // this function had before the fallback existed ("never auto-loaded from the tree").
+  if (
+    projectRoot !== undefined &&
+    resolveMcpConfigPath(envSource) === undefined &&
+    !isWorkspaceTrusted(projectRoot)
+  ) {
+    if (await Bun.file(path).exists()) {
+      slog.warn("mcp.project.untrusted", { path })
+      emitOperatorNotice({
+        severity: "warn",
+        source: "mcp",
+        message: untrustedWorkspaceMessage(`The MCP servers in ${path}`, projectRoot),
+        hint: "no project MCP server was started",
+      })
+    }
+    return []
+  }
   try {
     const raw = await Bun.file(path).text()
     const parsed = JSON.parse(raw) as unknown

@@ -21,6 +21,7 @@
  * The per-subcommand handlers live under `./commands/<name>.ts`; this file is
  * the thin argv parser + dispatcher + composition root (ADR-0536 P0 cleanup).
  */
+import { installWorkspaceTrustAuthority, TRUST_EVERY_FOLDER } from "@/agent/workspace-trust"
 import { errMessage, logger } from "@/shared"
 import { knownDatasetFamilyTokens } from "./dataset-family-token"
 import { routeBenchTerminalIo } from "./entry-bootstrap"
@@ -216,6 +217,10 @@ const main = async (): Promise<void> => {
 // Only run when invoked directly (not when imported by a test) so unit tests
 // can exercise the helpers without launching the CLI.
 if (import.meta.main) {
+  // Workspace trust (`@/agent/workspace-trust`): this harness runs agents in trees it
+  // created itself and executes their code anyway (dataset checkouts and their tests), so
+  // every folder it works in is trusted — language-server grounding stays on.
+  installWorkspaceTrustAuthority(TRUST_EVERY_FOLDER)
   // OTLP span export (ADR-0268) — this is the PRIMARY bench entry: the operator's
   // `quanta-bench run --swebench …` AND the full-remote box (which runs
   // `bun run src/apps/bench/cli.ts run --swebench …`). When QUANTA_OTEL_ENDPOINT is

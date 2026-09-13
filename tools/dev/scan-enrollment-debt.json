@@ -156,6 +156,9 @@
     "tests/unit/cli/terminal-chrome-hellgate.test.ts": [
       "tests/unit/cli/terminal-chrome-hellgate.test.ts#src-apps-cli"
     ],
+    "tests/unit/cli/workspace-trust-hellgate.test.ts": [
+      "tests/unit/cli/workspace-trust-hellgate.test.ts#SRC"
+    ],
     "tests/unit/codemode-slice-boundary.test.ts": [
       "slice-boundary:codemode"
     ],

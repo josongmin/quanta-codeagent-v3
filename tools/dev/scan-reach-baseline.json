@@ -297,6 +297,9 @@
     "tests/unit/cli/terminal-chrome-hellgate.test.ts#src-apps-cli": {
       "walked": 352
     },
+    "tests/unit/cli/workspace-trust-hellgate.test.ts#SRC": {
+      "walked": 3439
+    },
     "tests/unit/config-knob-inventory-leaf-hellgate.test.ts#INVENTORY": {
       "walked": 8
     },

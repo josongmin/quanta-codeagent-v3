@@ -8,6 +8,7 @@ import {
 } from "@/agent"
 import type { ConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import { createClassifierBackedAutoReview } from "@/agent/reviewer-port"
+import { isWorkspaceTrusted } from "@/agent/workspace-trust"
 import type { SessionBootstrapResult } from "@/host/bootstrap"
 import { type AssemblerEnv, buildInteractiveTurnAssembler } from "@/host/runtime"
 import type { MentionLiveSources } from "@/host/runtime/internal/mention-source-deps"
@@ -365,12 +366,17 @@ const securityOverlaySlots = (
  *  mint + consult agree. Gate off ⇒ `undefined` ⇒ no [P] verb + the gate skips
  *  trust-scope (default-OFF, byte-identical). Extracted from
  *  {@link composeCliRuntimeContext} (god-fn ratchet) — pure code motion. */
-const hydrateTrustScope = async (
+export const hydrateTrustScope = async (
   cwd: string,
   env: Readonly<Record<string, string | undefined>>,
 ): Promise<{ registry: TrustScopeRegistry; projectKey: string } | undefined> => {
   if (!gateOn(env, "QUANTA_TRUST_SCOPE")) return undefined
-  const registry = createPersistentTrustScopeRegistry({ projectRoot: cwd })
+  // The overlay is `<cwd>/.quanta/project-grants.json`, a file a clone can carry, and its
+  // records ALLOW tools. It is read only in a trusted folder; elsewhere the user's own
+  // `~/.quanta/grants.json` still applies, keyed by this project.
+  const registry = createPersistentTrustScopeRegistry(
+    isWorkspaceTrusted(cwd) ? { projectRoot: cwd } : {},
+  )
   await registry.hydrate()
   return { registry, projectKey: cwd }
 }

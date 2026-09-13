@@ -1,0 +1,49 @@
+id: workspace-trust-launch-gate
+title: Folder trust gates repository-controlled launches (LSP servers, project MCP, plugins, grants)
+section: 3
+subsystem: Workspace trust (@/agent/workspace-trust) + process entries
+order: 91
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+owners: ["@songmin"]
+labels: [surface:cli, security-touched]
+depends_on: [central-config-project-trust]
+surface_integration:
+  cli: full
+  web: partial
+  method: audited
+  verified: "2026-09-14"
+  evidence:
+    cli: "the CLI entry installs the recorded decisions before any route, and the interactive REPL asks once before the session starts"
+    web: "the web daemon entry installs the recorded decisions (same ~/.quanta/trust.json); it has no UI to grant trust yet"
+purpose: |
+  클론과 함께 오는 파일이 고르는 실행 — 워크스페이스 코드를 실행하는 언어 서버(pyright의 .venv python,
+  워크스페이스 tsserver, rust-analyzer build.rs), 프로젝트 .mcp.json 명령, .quanta/plugins MCP 명령,
+  .quanta/project-grants.json 허용 — 을 폴더 신뢰 하나로 게이트한다. 기본 비신뢰, 신뢰는 trust.json /
+  QUANTA_TRUSTED_PATHS / 대화형 CLI 1회 질문으로만. 언어 서버는 spawn 직전(beforeSpawn)에 확인하고,
+  에이전트는 게이트된 팩토리로만 서버를 만든다(census). 모든 import.meta.main 진입점을 분류하는 테스트.
+evidence:
+  code:
+    - src/agent/workspace-trust.ts
+    - src/host/workspace-trust.ts
+    - src/host/trust-persist.ts
+    - src/apps/cli/repl/workspace-trust-prompt.ts
+    - src/agent/lsp-bridge/servers.ts
+    - src/host/mcp-composition.ts
+  adrs:
+    - docs/decisions/0559-workspace-trust-gates-repository-controlled-launches.md
+  tests:
+    unit:
+      - tests/unit/cli/workspace-trust-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - QUANTA_TRUSTED_PATHS
+deliberate_hold: null
+notes: |
+  하네스 진입점(bench cli/index, eval, terminal brain-mode)은 스스로 만든 트리를 전부 신뢰한다.
+  헤드리스 에이전트의 ci-bot/daemon 모드는 기록과 무관하게 비신뢰. web daemon 신뢰 부여 UI는 후속.

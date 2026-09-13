@@ -64,6 +64,7 @@ import {
 } from "@/agent/plugin-mcp-launcher"
 import { type AgentMode, modeLoadsRepoRules } from "@/agent/run-mode"
 import type { AgentConfig } from "@/agent/types"
+import { isWorkspaceTrusted } from "@/agent/workspace-trust"
 import { activatePluginsFromMentions } from "./composite-activation"
 import { createPluginActivationHandler } from "./handler"
 
@@ -153,6 +154,11 @@ export const autoWirePluginActivation = (
 
     // Cwd guard — a malformed cfg without cwd cannot scan anything.
     if (typeof cfg.cwd !== "string" || cfg.cwd.length === 0) return
+
+    // The mode policy above only knows which surfaces run in untrusted trees; an
+    // interactive session in a folder nobody trusted is one too. A plugin manifest's
+    // `mcpServers[].command` is spawned, so the folder must be trusted (workspace-trust).
+    if (!isWorkspaceTrusted(cfg.cwd)) return
 
     const fs = deps.fs ?? defaultNodeFs
     const root = deps.pluginRoot ?? join(cfg.cwd, ".quanta", "plugins")

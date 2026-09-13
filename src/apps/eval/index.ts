@@ -25,6 +25,7 @@
  * The exported application runner owns argument parsing and output routing.
  * The guarded process wrapper below only binds terminal streams and exit codes.
  */
+import { installWorkspaceTrustAuthority, TRUST_EVERY_FOLDER } from "@/agent/workspace-trust"
 import { DEFAULT_MODEL, type LLMPort, type Provider, pickProvider, tryCreateLLM } from "@/llm"
 import { errMessage, logger, setTerminalIo } from "@/shared"
 import { loadEnvFiles } from "@/shared/env-files"
@@ -858,5 +859,9 @@ export const runEvalCliProcess = async (argv: readonly string[]): Promise<void> 
 
 if (import.meta.main) {
   loadEnvFiles([".env.dev", ".env.local", ".env"])
+  // Workspace trust (`@/agent/workspace-trust`): this harness runs agents in trees it
+  // created itself and executes their code anyway (dataset checkouts and their tests), so
+  // every folder it works in is trusted — language-server grounding stays on.
+  installWorkspaceTrustAuthority(TRUST_EVERY_FOLDER)
   await runEvalCliProcess(process.argv.slice(2))
 }

@@ -24,9 +24,10 @@
 import { readFile, realpath } from "node:fs/promises"
 import { join } from "node:path"
 import * as readline from "node:readline/promises"
+import { makeTrustPersistence } from "@/host/trust-persist"
+import { installResolvedWorkspaceTrust } from "@/host/workspace-trust"
 import { buildSearchPipelineFromEnv, clearSearchPipelineWireForTests } from "@/runner/assemble"
 import { loadEnvFiles } from "@/shared/env-files"
-import { makeTrustPersistence } from "./trust-persist"
 
 loadEnvFiles([".env.dev", ".env.local", ".env"])
 
@@ -34,6 +35,7 @@ import { loadNamedAgents } from "@/agent"
 import { loadCommandHookBindings } from "@/agent/command-hooks"
 import { bindingsFromHookEvents } from "@/agent/command-hooks/settings-loader"
 import type { CommandHookBinding } from "@/agent/command-hooks/types"
+import { installWorkspaceTrustAuthority, UNTRUSTED_EVERYWHERE } from "@/agent/workspace-trust"
 import {
   canonicalizeTrustedPaths,
   mergeDiskLayers,
@@ -427,6 +429,41 @@ const applyAsyncRootConfigSources = async (p: AssembleRequestPartial): Promise<v
 }
 
 /**
+ * Workspace trust for the headless agent process (`@/agent/workspace-trust`). ci-bot and
+ * daemon run in trees an outsider wrote (a PR checkout, a webhook worktree), so nothing
+ * there is trusted, whatever the operator recorded. Every other mode uses the recorded
+ * decisions (`~/.quanta/trust.json`, `QUANTA_TRUSTED_PATHS`); there is no terminal to ask.
+ * An argv this cannot parse leaves the fail-closed default; `runMain` reports the error.
+ */
+export const AGENT_MODE_WORKSPACE_TRUST: Record<AgentArgs["mode"], "recorded" | "never"> = {
+  interactive: "recorded",
+  headless: "recorded",
+  ide: "recorded",
+  batch: "recorded",
+  "ci-bot": "never",
+  daemon: "never",
+}
+
+const installAgentWorkspaceTrust = async (argv: readonly string[]): Promise<void> => {
+  let mode: AgentArgs["mode"]
+  try {
+    mode = parseAgentArgs([...argv]).mode
+  } catch (e) {
+    if (e instanceof AgentArgsError) return
+    throw e
+  }
+  if (AGENT_MODE_WORKSPACE_TRUST[mode] === "never") {
+    installWorkspaceTrustAuthority(UNTRUSTED_EVERYWHERE)
+    return
+  }
+  await installResolvedWorkspaceTrust({
+    cwd: process.cwd(),
+    trustedPaths: runtimeConfig().trustedPaths,
+    warn: (message) => process.stderr.write(`${message}\n`),
+  })
+}
+
+/**
  * The entry function. Pure routing — every effectful concern (IO, exit) is
  * injectable via {@link MainDeps}. Production caller at the bottom of this
  * file wires the defaults: real argv, dynamic import, stdout/stderr writers,
@@ -557,15 +594,17 @@ if (import.meta.main) {
   process.on("beforeExit", () => {
     void otelExport.teardown()
   })
-  runMain().catch((e) => {
-    process.stderr.write(`fatal: ${errMessage(e)}\n`)
-    // ADR-0303 — honor a typed launcher error's exit code (e.g.
-    // ProviderKeyMissingError ⇒ 2, preserving the prior missing-credentials
-    // POSIX exit); generic errors stay exit 1.
-    const code =
-      typeof (e as { exitCode?: unknown })?.exitCode === "number"
-        ? (e as { exitCode: number }).exitCode
-        : 1
-    process.exit(code)
-  })
+  installAgentWorkspaceTrust(process.argv.slice(2))
+    .then(() => runMain())
+    .catch((e) => {
+      process.stderr.write(`fatal: ${errMessage(e)}\n`)
+      // ADR-0303 — honor a typed launcher error's exit code (e.g.
+      // ProviderKeyMissingError ⇒ 2, preserving the prior missing-credentials
+      // POSIX exit); generic errors stay exit 1.
+      const code =
+        typeof (e as { exitCode?: unknown })?.exitCode === "number"
+          ? (e as { exitCode: number }).exitCode
+          : 1
+      process.exit(code)
+    })
 }

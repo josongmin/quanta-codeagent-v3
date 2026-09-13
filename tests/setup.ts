@@ -11,6 +11,7 @@ import { __setBranchRunAgentForTest } from "@/agent/branch-search-runner/run-age
 // The leaf, not the `@/agent/lsp-bridge` barrel: the barrel reaches
 // `diagnostics.ts` and from there all of `src/tool`.
 import { __setLspAvailabilityOverrideForTest } from "@/agent/lsp-bridge/availability"
+import { installWorkspaceTrustAuthority } from "@/agent/workspace-trust"
 import { __resetDefaultMetricSink } from "@/observability/metrics/in-memory-registry"
 import { __resetSpanSink } from "@/observability/spans"
 import { __resetKnobOverrides } from "@/shared/knob-overrides"
@@ -21,6 +22,7 @@ import { decideBenchResultsDir } from "./_support/bench-results-fence"
 import {
   CHILD_PROCESS_SPAWNERS,
   decideQuantaHomeFence,
+  isScratch,
   scratchPrefixesFor,
   staleScratchRoots,
   withFencedEnv,
@@ -133,6 +135,16 @@ if (benchResultsFence.action === "redirect") {
   }
   syncBuiltinESMExports()
 }
+
+// Workspace trust (`@/agent/workspace-trust`). Production entries install an authority;
+// a test process has none, so every folder would be untrusted. Scratch folders are the
+// tests' own trees (fixtures written by the test itself), so they are trusted here — and
+// only they: a test that points a language server or a project `.mcp.json` at the repo or
+// the developer's folders gets the production refusal. The gate's own hellgate installs
+// its own authorities and restores this one.
+installWorkspaceTrustAuthority({
+  isTrusted: (path) => isScratch(path, scratchPrefixesFor(tmpdir())),
+})
 
 beforeEach(() => {
   setTerminalIo({

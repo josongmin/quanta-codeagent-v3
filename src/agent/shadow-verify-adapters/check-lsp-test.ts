@@ -29,28 +29,12 @@ import * as nodeFs from "node:fs/promises"
 import * as path from "node:path"
 import { extname } from "node:path"
 import type { Diagnostic, DiagnosticSeverity } from "@/lsp"
-import { type LspClient, PyrightAdapter, TypescriptAdapter } from "@/lsp"
 import { runShell } from "@/runtime"
 import { errMessage, logger } from "@/shared"
 import { projectShadowTestCommand } from "@/tool/shadow-verify"
 import { isAvailable } from "../lsp-bridge/availability"
+import { PYRIGHT, type ServerSpec, TYPESCRIPT } from "../lsp-bridge/servers"
 import type { ShadowCheck, ShadowCheckPort, ShadowDiagnostic } from "../shadow-verify"
-
-/** Local view of the per-language wiring; mirrors `@/agent/lsp-bridge` but
- *  scoped so this adapter does not depend on bridge internals. */
-interface ServerSpec {
-  bin: string
-  create(cwd: string): LspClient
-}
-
-const PYRIGHT: ServerSpec = {
-  bin: "pyright-langserver",
-  create: (cwd) => new PyrightAdapter({ cwd }),
-}
-const TYPESCRIPT: ServerSpec = {
-  bin: "typescript-language-server",
-  create: (cwd) => new TypescriptAdapter({ cwd }),
-}
 
 const SERVERS: ReadonlyArray<{ exts: readonly string[]; spec: ServerSpec }> = [
   { exts: [".py", ".pyi"], spec: PYRIGHT },
@@ -184,14 +168,27 @@ const collectGroupDiagnostics = async (
   serverFiles: readonly string[],
   handle: string,
   check: "lint" | "typecheck",
+  trustRoot: string | undefined,
 ): Promise<ShadowDiagnostic[]> => {
-  const client = spec.create(handle)
+  // The scratch tree is a copy of `trustRoot` plus the patch, so the copy's origin is what
+  // workspace trust is asked about.
+  const client = spec.create(handle, trustRoot)
   try {
     await client.start()
   } catch (e) {
     logger.warn("shadow-verify: LSP start failed", { bin: spec.bin, error: errMessage(e) })
     await client.stop().catch(() => undefined)
-    return []
+    // Not an empty list: an empty list reads as "the check ran and found nothing", and a
+    // server that never started — refused by workspace trust or crashed — checked nothing.
+    return [
+      {
+        file: "",
+        line: 0,
+        severity: "error",
+        message: `${check} did not run: ${errMessage(e)}`,
+        source: check,
+      },
+    ]
   }
   const diagnostics: ShadowDiagnostic[] = []
   try {
@@ -221,6 +218,7 @@ const collectGroupDiagnostics = async (
 const runLspCheck = async (
   handle: string,
   check: "lint" | "typecheck",
+  trustRoot: string | undefined,
 ): Promise<readonly ShadowDiagnostic[]> => {
   let files: string[]
   try {
@@ -241,7 +239,7 @@ const runLspCheck = async (
   const diagnostics: ShadowDiagnostic[] = []
   for (const { spec, files: serverFiles } of byBin.values()) {
     if (!(await isAvailable(spec.bin))) continue
-    const groupDiags = await collectGroupDiagnostics(spec, serverFiles, handle, check)
+    const groupDiags = await collectGroupDiagnostics(spec, serverFiles, handle, check, trustRoot)
     diagnostics.push(...groupDiags)
   }
   return diagnostics
@@ -302,7 +300,13 @@ const runTestCheck = async (
  * dispatches to the matching adapter (LSP for lint/typecheck, shell for test).
  * NO-THROW: every internal failure ⇒ error-severity diag in the returned list.
  */
-export const createLspTestCheckPort = (): ShadowCheckPort => ({
+export const createLspTestCheckPort = (
+  opts: {
+    /** The repository the scratch trees are forked from; its trust decides whether the
+     *  lint/typecheck language servers may start. Absent ⇒ the scratch path itself. */
+    readonly trustRoot?: string
+  } = {},
+): ShadowCheckPort => ({
   async run(
     handle: string,
     check: ShadowCheck,
@@ -313,7 +317,7 @@ export const createLspTestCheckPort = (): ShadowCheckPort => ({
       switch (check) {
         case "lint":
         case "typecheck":
-          return await runLspCheck(handle, check)
+          return await runLspCheck(handle, check, opts.trustRoot)
         case "test":
           return await runTestCheck(handle, testTarget, signal)
       }

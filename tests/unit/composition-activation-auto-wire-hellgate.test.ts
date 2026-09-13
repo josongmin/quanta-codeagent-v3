@@ -35,11 +35,12 @@
  * so no real fs access happens.
  */
 
-import { describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import type { ParsedMention } from "@/agent/mention-injection"
 import { autoWirePluginActivation } from "@/agent/plugin-activation-handler"
 import type { FilesystemPort } from "@/agent/plugin-discovery"
 import type { AgentConfig } from "@/agent/types"
+import { folderDecisionsAuthority, installWorkspaceTrustAuthority } from "@/agent/workspace-trust"
 
 // ─── Helpers ────────────────────────────────────────────────────────────
 
@@ -100,6 +101,15 @@ const skillMention = (target: string): ParsedMention => ({
 // ─── Tests ──────────────────────────────────────────────────────────────
 
 describe("ADR-0350 — autoWirePluginActivation hellgate", () => {
+  // The fixture root `/work` stands for a folder the operator trusted: plugin manifests are
+  // wired only in one (workspace-trust; the untrusted refusal is pinned in
+  // tests/unit/cli/workspace-trust-hellgate.test.ts).
+  let restoreTrust: () => void = () => {}
+  beforeEach(() => {
+    restoreTrust = installWorkspaceTrustAuthority(folderDecisionsAuthority([["/work", true]]))
+  })
+  afterEach(() => restoreTrust())
+
   test("1. caller-override-precedence — pre-set activator is preserved", () => {
     const preset: AgentConfig["activatePlugins"] = async () => ({
       handles: [],

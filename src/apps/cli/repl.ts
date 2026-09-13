@@ -57,6 +57,7 @@ import {
   composeSurfaceWires,
   createSurfaceState,
 } from "./repl/surface-compose"
+import { maybeConfirmWorkspaceTrust } from "./repl/workspace-trust-prompt"
 import type { RewindSlashState } from "./rewind-cmd"
 import { createCliRewindGitPort } from "./rewind-git"
 import { switchToSessionCwd } from "./session-io"
@@ -356,6 +357,7 @@ export const paintWelcomeBanner = (setup: Awaited<ReturnType<typeof setupSession
 
 export const runRepl = async (): Promise<void> => {
   await maybePickSession()
+  await maybeConfirmWorkspaceTrust()
   const convStore = defaultConversationCheckpointStore()
   const responsesStore = defaultResponsesContinuationStore()
   const setup = await setupSession(sessionSetupDeps, { convStore, responsesStore })

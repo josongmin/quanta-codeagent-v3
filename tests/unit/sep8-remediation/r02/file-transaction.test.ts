@@ -3,10 +3,10 @@ import { readFileSync } from "node:fs"
 import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { makeTrustPersistence } from "@/apps/agent/trust-persist"
 import { withExclusiveFileLock } from "@/auth/file-transaction/exclusive-lock"
 import { createNodeLockFileStore } from "@/auth/node-lock-file-store"
 import { type TrustPersistencePort, type TrustRecord, TrustStore } from "@/config"
+import { makeTrustPersistence } from "@/host/trust-persist"
 import {
   isThrottled,
   loadMigrationLedgerDetailed,

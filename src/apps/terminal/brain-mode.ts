@@ -31,6 +31,7 @@
 import { composeSystemPromptForSurface, type SurfaceProfile } from "@/agent"
 import { defaultConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import { promptSurfaceProfileForRunMode } from "@/agent/system-prompt"
+import { installWorkspaceTrustAuthority, TRUST_EVERY_FOLDER } from "@/agent/workspace-trust"
 import { bootstrapSession } from "@/host/bootstrap"
 import type { LLMPort, Message } from "@/llm"
 import { defaultResponsesContinuationStore } from "@/llm/responses-continuation-store"
@@ -954,6 +955,10 @@ const buildRealLlm = async (model: string | undefined): Promise<LLMPort> => {
 }
 
 if (import.meta.main) {
+  // Workspace trust (`@/agent/workspace-trust`): this harness runs agents in trees it
+  // created itself and executes their code anyway (dataset checkouts and their tests), so
+  // every folder it works in is trusted — language-server grounding stays on.
+  installWorkspaceTrustAuthority(TRUST_EVERY_FOLDER)
   void runMain()
 }
 /* c8 ignore stop */

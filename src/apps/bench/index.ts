@@ -73,6 +73,8 @@
  *
  * Never crashes when keys are absent — prints guidance and exits 0.
  */
+
+import { installWorkspaceTrustAuthority, TRUST_EVERY_FOLDER } from "@/agent/workspace-trust"
 import { errMessage, logger } from "@/shared"
 import { routeBenchTerminalIo } from "./entry-bootstrap"
 import { bootBenchOtelExport } from "./otel"
@@ -104,6 +106,10 @@ routeBenchTerminalIo()
 // trigger the CLI entry point. Bun sets `import.meta.main` only for the file
 // the runtime started from; unit tests start from `bun test` and never match.
 if (import.meta.main) {
+  // Workspace trust (`@/agent/workspace-trust`): this harness runs agents in trees it
+  // created itself and executes their code anyway (dataset checkouts and their tests), so
+  // every folder it works in is trusted — language-server grounding stays on.
+  installWorkspaceTrustAuthority(TRUST_EVERY_FOLDER)
   // OTLP span export (ADR-0268) — boot wire for the bench process when invoked
   // directly (legacy `bun run src/apps/bench/index.ts …`). Uses the SHARED boot
   // seam (same as cli.ts) so this entry also auto-issues a run id + prints the

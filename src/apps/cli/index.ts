@@ -1,10 +1,11 @@
 import { SessionBootstrapError } from "@/host/bootstrap"
 import { AgentArgsError } from "@/host/runtime"
+import { installResolvedWorkspaceTrust } from "@/host/workspace-trust"
 import { applyGoalPreset } from "@/objective"
 import { installOtelSpanExportFromEnv } from "@/observability/otel-span-export"
 import { selectRemoteRunner } from "@/remote"
 import { pickProviderCore, projectLlmTransport } from "@/runner/assemble"
-import { errMessage, gateDisabled, logger, setTerminalIo } from "@/shared"
+import { errMessage, gateDisabled, logger, runtimeConfig, setTerminalIo } from "@/shared"
 import { CLI_SEEDED_GATE_NAMES } from "./cli-seeded-gates"
 import { loadEnvFiles } from "./dotenv"
 import { applyToolProfileFlag } from "./internal/argv"
@@ -227,6 +228,13 @@ const main = async (): Promise<void> => {
   // one-line stderr warning before the first sandboxed command runs.
   await installCliSandbox()
   wireOtelSpanExport()
+  // Workspace trust, decided once for the process before any route can start a language
+  // server or a project MCP server. Recorded decisions only; the interactive REPL asks.
+  await installResolvedWorkspaceTrust({
+    cwd: process.cwd(),
+    trustedPaths: runtimeConfig().trustedPaths,
+    warn: (message) => process.stderr.write(`${message}\n`),
+  })
 
   // Early route: `quanta session …` is fully handled by the subcommand
   // dispatcher and never touches the agent loop / REPL wiring below.

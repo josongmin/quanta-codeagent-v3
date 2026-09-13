@@ -98,6 +98,7 @@ export class LspClient implements LspPort {
   private readonly workspaceFolders: readonly string[]
   private readonly workspaceConfiguration: Readonly<Record<string, unknown>>
   private readonly spec: LspClientSpec
+  private readonly beforeSpawn: (() => void) | undefined
 
   private readonly transport: LspTransport
   private readonly correlator: RequestCorrelator
@@ -152,6 +153,7 @@ export class LspClient implements LspPort {
     this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
     this.workspaceFolders = options.workspaceFolders ?? []
     this.workspaceConfiguration = options.workspaceConfiguration ?? {}
+    this.beforeSpawn = options.beforeSpawn
 
     this.transport = new LspTransport(command, cwd, options.processTreeKiller, {
       onMessage: (msg) => this.dispatch(msg),
@@ -176,6 +178,7 @@ export class LspClient implements LspPort {
   async start(signal?: AbortSignal): Promise<void> {
     throwIfAborted(signal, "LSP start")
     if (this.proc) return
+    this.beforeSpawn?.()
     this.transport.spawn(() => this.onProcessExit())
 
     const onAbort = () => {

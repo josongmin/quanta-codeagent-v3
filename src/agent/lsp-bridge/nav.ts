@@ -1,10 +1,10 @@
 import { extname } from "node:path"
 import { type LspClient, LspRequestError } from "@/lsp"
-import { errMessage, logger } from "@/shared"
 import type { StaticEvidence as EvidenceStatic, LspNavProvider, LspNavSession } from "@/tool"
 import { sleep } from "../loop/sleep"
+import { assertWorkspaceTrusted } from "../workspace-trust"
 import { isAvailable } from "./availability"
-import { NEVER_ABORTED, specFor, uriToPath } from "./servers"
+import { NEVER_ABORTED, specFor, startLspClient, uriToPath } from "./servers"
 import { warmPools } from "./warm-pool"
 
 /* ------------------------------------------------------------------------- *
@@ -64,18 +64,14 @@ export const lspNavProvider = (): LspNavProvider => ({
     // Warm-capable engines (pyright today) route through a shared, idle-TTL
     // pooled workspace per cwd; everything else stays fresh-per-call.
     const warmPool = warmPools.get(spec)
-    if (warmPool) return warmPool.open(filePath, cwd, signal)
-    const client = spec.create(cwd)
-    try {
-      await client.start(signal)
-    } catch (e) {
-      logger.warn("lsp: failed to start language server (nav)", {
-        bin: spec.bin,
-        error: errMessage(e),
-      })
-      await client.stop().catch(() => undefined)
-      return null
+    if (warmPool) {
+      // The pool starts its server behind its own error handling; ask first, so a refusal
+      // reaches the tool as a reason rather than as "no session".
+      assertWorkspaceTrusted(`Language server ${spec.bin}`, cwd)
+      return warmPool.open(filePath, cwd, signal)
     }
+    const client = spec.create(cwd)
+    if (!(await startLspClient(client, spec.bin, "nav", signal))) return null
     return adaptToNavSession(client)
   },
 })

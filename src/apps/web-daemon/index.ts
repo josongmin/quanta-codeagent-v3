@@ -22,10 +22,11 @@
 
 import type { FollowerCoControlDispatcher } from "@/agent/thread-follower"
 import { isFollowerCoControlEnabled } from "@/agent/thread-follower"
+import { installResolvedWorkspaceTrust } from "@/host/workspace-trust"
 import { installOtelSpanExportFromEnv } from "@/observability/otel-span-export"
 import { type SupportedReadModels, supported } from "@/protocol/session"
 import type { RuntimeFacade } from "@/sdk/runtime"
-import { errMessage, gateOn, gateOnStrict } from "@/shared"
+import { errMessage, gateOn, gateOnStrict, runtimeConfig } from "@/shared"
 import type { ObservableRuntimeFacade } from "./runtime-factory"
 import {
   type AgentStatePorts,
@@ -484,6 +485,14 @@ export const main = async (overrides?: Partial<WebDaemonConfig>): Promise<WebDae
 if (import.meta.main) {
   void (async (): Promise<void> => {
     try {
+      // Workspace trust for every folder a session opens (`@/agent/workspace-trust`):
+      // the operator's recorded decisions. The daemon has no terminal to ask; a folder
+      // trusted at the CLI's question is trusted here, since both read the same file.
+      await installResolvedWorkspaceTrust({
+        cwd: process.cwd(),
+        trustedPaths: runtimeConfig().trustedPaths,
+        warn: (message) => process.stderr.write(`${message}\n`),
+      })
       await main()
     } catch (error: unknown) {
       process.stderr.write(`web-daemon: fatal: ${errMessage(error)}\n`)

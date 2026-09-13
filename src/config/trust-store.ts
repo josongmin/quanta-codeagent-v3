@@ -129,6 +129,12 @@ export class TrustStore {
     return rec?.trusted === true
   }
 
+  /** Every recorded decision, `true` for a grant and `false` for an explicit untrust —
+   *  what a folder-inheriting consumer (the workspace-trust authority) builds from. */
+  decisions(): ReadonlyArray<readonly [string, boolean]> {
+    return [...this.records].map(([path, rec]) => [path, rec.trusted] as const)
+  }
+
   /** Record an explicit trust grant for a canonical path. `now` is the
    *  host-supplied epoch-ms (injected clock — the store never reads time). */
   setTrusted(path: string, now: number, cwd?: string): void {
