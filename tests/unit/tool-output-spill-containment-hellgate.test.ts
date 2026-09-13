@@ -10,10 +10,27 @@
  * into a write outside the repo plus deletion of every `*.txt` past keep=50 in
  * the symlink's target (measured: 80 files → 49 left, 1 foreign file written).
  *
- * Every arm drives the REAL default `ToolRegistry` and the real `read` tool over
- * a scratch repo. Refused arms assert the victim directory is left at exactly 80
- * files with 0 foreign entries and that the model-facing result names the
- * refused path. Paired controls prove a real directory still spills and prunes.
+ * What the 20 tests drive, over a scratch repo:
+ * - 10 registry arms run the REAL `ToolRegistry.run`: the default registry and
+ *   `read` tool for the four symlink arms, the sub-budget arm, the two
+ *   real-directory controls, and the `unavailable` and `write-failed` registry
+ *   arms; a one-tool registry for the evidence-merge arm. Each asserts the exact
+ *   `result.evidence`: `spillRefusal` on a refusal, `{ fullLogPath }` on a
+ *   persisted spill, none within budget.
+ * - Only the seeded-victim arms (`.quanta/tool-output` link, `.quanta` link,
+ *   dangling link, sub-budget) assert the victim is left at exactly 80 files
+ *   with 0 foreign entries. The EMPTY-outside arm asserts `outside` stays empty
+ *   instead; the merge and IO arms have no victim.
+ * - 7 structured arms call `capToolOutput` / `createEvictionSpillPort`
+ *   directly: the not-spill-location and not-a-directory kinds, `write-failed`
+ *   through injected failing writers (with a recording prune fs and a paired
+ *   working write), and on the real filesystem the `unavailable` capToolOutput
+ *   and eviction-port arms and the `write-failed` eviction-port arm.
+ * - 3 pins: one static pin (KEEP differs from DEFAULT_SPILL_KEEP), one static
+ *   type pin (enforced by tsc, not bun test), and one runtime drift guard over
+ *   SPILL_DIR_REFUSAL_KINDS.
+ * The IO arms (an unwritable working directory, an unwritable real
+ * `.quanta/tool-output`) skip visibly under uid 0.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
