@@ -40,7 +40,10 @@ export type PortPlan =
  *
  * The three `unwired` entries register NO tool — they change the behaviour of a
  * tool that is already in `BASE_TOOL_NAMES` — so wiring them would add nothing
- * to a census of registered tools. Everything that can add a tool is wired.
+ * to a census of registered tools. Everything that can add a tool to
+ * `buildDefaultTools` is wired. (`containerExec` and `containerWriteFile` feed
+ * `buildTerminalTools` instead; the assembled universe in `assembled-tool-universe.ts`
+ * builds that too. An earlier version of this line claimed full coverage without it.)
  */
 export const PORT_PLAN: Record<keyof DefaultToolPorts, PortPlan> = {
   fs: {

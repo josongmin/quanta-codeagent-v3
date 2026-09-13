@@ -49,17 +49,21 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { classifiedMutatingKind } from "@/agent/mode"
 import { type HITLTier, inferToolTierDetailed } from "@/permission"
+import type { OsSandboxProfile } from "@/runtime"
 import type { Tool } from "@/tool"
 import { makeBashTool } from "@/tool/bash"
 import {
+  extractToolPostures,
   HITL_TIERS,
   scanToolPostures,
   scanUnattributedTierDeclarations,
   type ToolPosture,
 } from "../../tools/dev/tool-name-literals"
+import { assembleToolUniverse } from "./_shared/assembled-tool-universe"
 import { assertBroadlyWiredFixture, buildBroadlyWiredTools } from "./_shared/wired-tool-ports"
 
 const REPO_ROOT = new URL("../..", import.meta.url).pathname
+const UNIVERSE = await assembleToolUniverse()
 const POSTURES: readonly ToolPosture[] = scanToolPostures(REPO_ROOT)
 
 /* ── the declaration invariant, over every tool literal in src/ ───────────── */
@@ -151,12 +155,22 @@ describe("HITL — a write-capable declaration may not claim tier none", () => {
     // to the `isReadOnly()` fail-closed branch. Give the factory a `hitlTier`
     // parameter and this arm is what notices.
     const unattributed = scanUnattributedTierDeclarations(REPO_ROOT)
-    const REVIEWED_NON_TOOLS: Readonly<Record<string, string>> = {
-      "src/apps/cli/permission-explain.ts":
-        "buildToolMeta returns InspectToolMeta — it REPORTS the tier resolveToolTier handed it for a tool found in the registry; it declares nothing",
-      "src/permission/inspect.ts":
-        "the inspector's result object echoes the resolved tier for the /permission surface; it declares nothing",
+    // Keyed by file WITH AN EXACT COUNT. Keyed by file alone, an audit appended a
+    // const-named, write-capable, tier-none tool to `src/permission/inspect.ts`: the scan
+    // reported a new declaration at L436, and the gate stayed green because the file was
+    // already reviewed.
+    const REVIEWED_NON_TOOLS: Readonly<Record<string, { count: number; why: string }>> = {
+      "src/apps/cli/permission-explain.ts": {
+        count: 1,
+        why: "buildToolMeta returns InspectToolMeta — it REPORTS the tier resolveToolTier handed it for a tool found in the registry; it declares nothing",
+      },
+      "src/permission/inspect.ts": {
+        count: 1,
+        why: "the inspector's result object echoes the resolved tier for the /permission surface; it declares nothing",
+      },
     }
+    const perFile = new Map<string, number>()
+    for (const d of unattributed) perFile.set(d.file, (perFile.get(d.file) ?? 0) + 1)
     for (const d of unattributed) {
       expect(
         REVIEWED_NON_TOOLS[d.file],
@@ -165,10 +179,11 @@ describe("HITL — a write-capable declaration may not claim tier none", () => {
           `literal name so the invariant covers it, or review it here.`,
       ).toBeDefined()
     }
-    // The reviewed list must not outlive what it exempts, and each reason must be one.
-    const seen = new Set(unattributed.map((d) => d.file))
-    for (const [file, why] of Object.entries(REVIEWED_NON_TOOLS)) {
-      expect(seen.has(file), `${file} is reviewed but declares no tier any more`).toBe(true)
+    for (const [file, { count, why }] of Object.entries(REVIEWED_NON_TOOLS)) {
+      expect(
+        perFile.get(file) ?? 0,
+        `${file}: reviewed ${count}, found ${perFile.get(file) ?? 0}`,
+      ).toBe(count)
       expect(why.split(" ").length, `the reason for ${file} is not a reason`).toBeGreaterThan(10)
     }
     // The 6-tool router's factory must stay tier-free — the structural reason above.
@@ -199,6 +214,64 @@ describe("HITL — a write-capable declaration may not claim tier none", () => {
   })
 })
 
+/* ── the posture extractor's verdict on the shapes that beat it ───────────── */
+
+describe("HITL — the posture census reads the shapes an audit used to escape it", () => {
+  // 22 shapes got a write-capable tier-none tool past the first census. The POLICY now
+  // voids that declaration whatever its shape, so these are about the census's accuracy
+  // as an early warning: each shape is either reduced exactly, or reported as dynamic
+  // with nothing reduced, so the unresolved arm names it.
+  const one = (src: string): ToolPosture => {
+    const hits = extractToolPostures("src/tool/fixture.ts", src)
+    expect(hits.length, `expected one posture in: ${src}`).toBe(1)
+    return hits[0] as ToolPosture
+  }
+
+  test("method shorthand is reduced exactly", () => {
+    const p = one(
+      `const t = { name: "m", isReadOnly() { return false }, hitlTier() { return "none" } }`,
+    )
+    expect([p.readOnly, p.tiers, p.tierDynamic]).toEqual(["false", ["none"], false])
+  })
+
+  test("a block-bodied arrow with a single return is reduced exactly", () => {
+    const p = one(
+      `const t = { name: "b", isReadOnly: () => { return false }, hitlTier: () => { return "none" } }`,
+    )
+    expect([p.readOnly, p.tiers, p.tierDynamic]).toEqual(["false", ["none"], false])
+  })
+
+  test("a computed string key is the same key", () => {
+    const p = one(
+      `const t = { name: "c", ["isReadOnly"]: () => false, ["hitlTier"]: () => "none" }`,
+    )
+    expect([p.readOnly, p.tiers]).toEqual(["false", ["none"]])
+  })
+
+  test("a class with methods is read", () => {
+    const p = one(
+      `class K { name = "k"; isReadOnly() { return false } hitlTier() { return "none" as const } }`,
+    )
+    expect([p.readOnly, p.tiers, p.tierDynamic]).toEqual(["false", ["none"], false])
+  })
+
+  test("a tier held in a module const reduces to NOTHING and is reported dynamic", () => {
+    // The apply_patch escape: `(input) => blank ? "pre-approval-ok" : PATCH_TIER`. The
+    // census collects "pre-approval-ok" as a lower bound and cannot see PATCH_TIER — so it
+    // must say dynamic, never claim the set is complete.
+    const p = one(
+      `const t = { name: "k2", isReadOnly: () => false, hitlTier: (i) => (i ? "pre-approval-ok" : PATCH_TIER) }`,
+    )
+    expect(p.tierDynamic).toBe(true)
+    expect(p.tiers).toEqual(["pre-approval-ok"])
+  })
+
+  test("a shorthand `{ hitlTier }` is declared-but-unreducible", () => {
+    const p = one(`const t = { name: "s", isReadOnly: () => false, hitlTier }`)
+    expect([p.hasHitlTier, p.tierDynamic, p.tiers]).toEqual([true, true, []])
+  })
+})
+
 /* ── the runtime cross-check ──────────────────────────────────────────────── */
 
 const PROBE = { command: "echo hi", path: "x.ts", content: "", op: "read" } as never
@@ -206,10 +279,21 @@ const PROBE = { command: "echo hi", path: "x.ts", content: "", op: "read" } as n
 const tierOf = (t: Tool): string => inferToolTierDetailed(t as never, PROBE).tier
 
 describe("HITL — the assembled registry agrees with the declarations", () => {
-  const TOOLS = buildBroadlyWiredTools()
+  // The ASSEMBLED universe, not only `buildDefaultTools`: an audit found `container_exec`
+  // and `container_write_file` never reached these arms, because their ports feed
+  // `buildTerminalTools`, and the fixture's docstring said everything that could add a
+  // tool was wired.
+  const TOOLS = UNIVERSE.tools
 
   test("the fixture is intact (an empty set satisfies every loop below)", () => {
-    assertBroadlyWiredFixture(TOOLS)
+    assertBroadlyWiredFixture(buildBroadlyWiredTools())
+    expect(TOOLS.length, "the assembled universe collapsed").toBeGreaterThan(140)
+    for (const name of ["container_exec", "container_write_file"]) {
+      expect(
+        TOOLS.some((t) => t.name === name),
+        `${name} is not assembled`,
+      ).toBe(true)
+    }
   })
 
   test("no assembled write-capable tool resolves to tier none", () => {
@@ -224,14 +308,18 @@ describe("HITL — the assembled registry agrees with the declarations", () => {
     // where `tier = tierForProfile(opts.sandboxProfile)`. That is an exhaustive
     // switch returning only pre-approval-ok or always-confirm — asserted here
     // rather than read once and trusted.
-    const PROFILES = [
-      undefined,
-      "off",
-      "read-only",
-      "workspace-write",
-      "workspace-write-net",
-      "danger-full-access",
-    ] as const
+    // EXHAUSTIVE by type, not by memory: an audit added a `"workspace-write-audit"` member
+    // to `SandboxProfile` with `tierForProfile` returning "none" for it, and this arm —
+    // then a hand-typed array — stayed green. A `Record` over the union is a compile
+    // error until the new profile is listed here.
+    const PROFILE_PLAN: Record<OsSandboxProfile, true> = {
+      off: true,
+      "read-only": true,
+      "workspace-write": true,
+      "workspace-write-net": true,
+      "danger-full-access": true,
+    }
+    const PROFILES = [undefined, ...(Object.keys(PROFILE_PLAN) as OsSandboxProfile[])]
     for (const profile of PROFILES) {
       const tool =
         profile === undefined ? makeBashTool() : makeBashTool({ sandboxProfile: profile })

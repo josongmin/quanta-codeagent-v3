@@ -72,7 +72,7 @@
  * backstop, not the authority.
  */
 import { execFileSync } from "node:child_process"
-import { readFileSync } from "node:fs"
+import { readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
 import ts from "typescript"
 
@@ -115,30 +115,89 @@ export const SSOT_FILES: readonly string[] = [
   "src/tool/surface/gated-tools-ports.ts",
 ]
 
-const propKeyName = (p: ts.ObjectLiteralElementLike): string | undefined => {
-  const n = p.name
-  if (n === undefined) return undefined
-  if (ts.isIdentifier(n) || ts.isStringLiteral(n)) return n.text
-  return undefined
+/**
+ * A tool-shaped CONTAINER: an object literal, or a class. An adversarial audit
+ * registered `class SpawnBatchUnattendedTool implements Tool { name = "…"; hitlTier() {…} }`
+ * and the census, which only read object literals, never saw it.
+ */
+type Container = ts.ObjectLiteralExpression | ts.ClassDeclaration | ts.ClassExpression
+
+const isContainer = (node: ts.Node): node is Container =>
+  ts.isObjectLiteralExpression(node) || ts.isClassDeclaration(node) || ts.isClassExpression(node)
+
+/** One member of a container, reduced to what the census reads. */
+interface Member {
+  readonly key: string | undefined
+  /** A value expression, type wrappers removed (`as const`, `satisfies`, parens, `!`). */
+  readonly value: ts.Expression | undefined
+  /** A function body, for arrow / function-expression values, methods and getters. */
+  readonly body: ts.Node | undefined
+  readonly spread: boolean
 }
 
-const shapeKeyOf = (obj: ts.ObjectLiteralExpression): string | undefined => {
-  for (const p of obj.properties) {
-    const n = p.name
-    if (n === undefined) continue
-    if (!ts.isIdentifier(n) && !ts.isStringLiteral(n)) continue
-    if (TOOL_SHAPE_KEYS.includes(n.text)) return n.text
+/** Strip `x as const`, `x satisfies T`, `(x)`, `<T>x` and `x!`. `name: "x" as const`
+ *  was invisible: the initializer is an AsExpression, not a string literal. */
+const unwrap = (e: ts.Expression): ts.Expression => {
+  let cur = e
+  while (
+    ts.isAsExpression(cur) ||
+    ts.isSatisfiesExpression(cur) ||
+    ts.isParenthesizedExpression(cur) ||
+    ts.isTypeAssertionExpression(cur) ||
+    ts.isNonNullExpression(cur)
+  ) {
+    cur = cur.expression
+  }
+  return cur
+}
+
+const keyOf = (name: ts.PropertyName | undefined): string | undefined => {
+  if (name === undefined) return undefined
+  if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isPrivateIdentifier(name)) {
+    return name.text
+  }
+  // `["hitlTier"]: …` — a computed key that is a string literal is still that key.
+  if (ts.isComputedPropertyName(name) && ts.isStringLiteralLike(name.expression)) {
+    return name.expression.text
   }
   return undefined
 }
 
-const nameLiteralOf = (obj: ts.ObjectLiteralExpression): ts.StringLiteralLike | undefined => {
-  for (const p of obj.properties) {
-    if (!ts.isPropertyAssignment(p)) continue
-    const n = p.name
-    const key = ts.isIdentifier(n) || ts.isStringLiteral(n) ? n.text : undefined
-    if (key !== "name") continue
-    if (ts.isStringLiteralLike(p.initializer)) return p.initializer
+const functionBodyOf = (e: ts.Expression | undefined): ts.Node | undefined => {
+  if (e === undefined) return undefined
+  const u = unwrap(e)
+  return ts.isArrowFunction(u) || ts.isFunctionExpression(u) ? u.body : undefined
+}
+
+const memberOf = (m: ts.ObjectLiteralElementLike | ts.ClassElement): Member => {
+  if (ts.isSpreadAssignment(m))
+    return { key: undefined, value: undefined, body: undefined, spread: true }
+  if (ts.isPropertyAssignment(m) || ts.isPropertyDeclaration(m)) {
+    const value = m.initializer === undefined ? undefined : unwrap(m.initializer)
+    return { key: keyOf(m.name), value, body: functionBodyOf(value), spread: false }
+  }
+  if (ts.isMethodDeclaration(m) || ts.isGetAccessorDeclaration(m)) {
+    return { key: keyOf(m.name), value: undefined, body: m.body, spread: false }
+  }
+  // Shorthand `{ hitlTier }`, setters, index signatures: a key with nothing the census
+  // can reduce, reported as such rather than dropped.
+  return {
+    key: keyOf((m as { name?: ts.PropertyName }).name),
+    value: undefined,
+    body: undefined,
+    spread: false,
+  }
+}
+
+const membersOf = (c: Container): Member[] =>
+  ts.isObjectLiteralExpression(c) ? c.properties.map(memberOf) : c.members.map(memberOf)
+
+const shapeKeyOf = (c: Container): string | undefined =>
+  membersOf(c).find((m) => m.key !== undefined && TOOL_SHAPE_KEYS.includes(m.key))?.key
+
+const nameLiteralOf = (c: Container): ts.StringLiteralLike | undefined => {
+  for (const m of membersOf(c)) {
+    if (m.key === "name" && m.value !== undefined && ts.isStringLiteralLike(m.value)) return m.value
   }
   return undefined
 }
@@ -155,7 +214,7 @@ export const extractToolNameLiterals = (file: string, source: string): ToolNameL
   const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true)
   const out: ToolNameLiteral[] = []
   const walk = (node: ts.Node): void => {
-    if (ts.isObjectLiteralExpression(node)) {
+    if (isContainer(node)) {
       const lit = nameLiteralOf(node)
       const admittedBy = shapeKeyOf(node)
       if (lit !== undefined && admittedBy !== undefined) {
@@ -173,28 +232,53 @@ export const extractToolNameLiterals = (file: string, source: string): ToolNameL
   return out
 }
 
-/** Tracked `src/**\/*.ts`, test files and the two SSOT files removed. */
+/** Tracked and untracked-but-not-ignored `src/**\/*.ts`, tests and the SSOT files removed. */
 export const censusFiles = (repoRoot: string): string[] => {
-  const raw = execFileSync("git", ["ls-files", "-z", "--", "src"], {
-    cwd: repoRoot,
-    encoding: "utf-8",
-    maxBuffer: 64 * 1024 * 1024,
-  })
-  return raw
-    .split("\0")
+  // `--others --exclude-standard` too: an UNTRACKED new tool file was invisible, so a
+  // write-capable tool at tier none stayed green locally until someone ran `git add`.
+  const raw = execFileSync(
+    "git",
+    ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "src"],
+    {
+      cwd: repoRoot,
+      encoding: "utf-8",
+      maxBuffer: 64 * 1024 * 1024,
+    },
+  )
+  return [...new Set(raw.split("\0"))]
     .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts") && !f.endsWith(".d.ts"))
     .filter((f) => !SSOT_FILES.includes(f))
     .sort()
 }
 
-/** The whole census over a checkout. */
-export const scanToolNameLiterals = (repoRoot: string): ToolNameLiteral[] => {
-  const out: ToolNameLiteral[] = []
-  for (const f of censusFiles(repoRoot)) {
-    out.push(...extractToolNameLiterals(f, readFileSync(join(repoRoot, f), "utf-8")))
-  }
-  return out
+/**
+ * Per-process memo of one extractor's result for one file, keyed by path, size and
+ * mtime. A single hellgate file ran the full 3430-file parse four times, and under a
+ * loaded box one of those tests crossed bun's 5s timeout (5304ms) — a red that is about
+ * the box, not the code. A changed file changes its mtime or size, so a mutation made
+ * between runs is re-read.
+ */
+const memo = new Map<string, { readonly stamp: string; readonly value: unknown }>()
+const cachedExtract = <T>(
+  kind: string,
+  repoRoot: string,
+  file: string,
+  extract: (file: string, source: string) => T,
+): T => {
+  const abs = join(repoRoot, file)
+  const st = statSync(abs)
+  const stamp = `${st.size}:${st.mtimeMs}`
+  const key = `${kind}\0${abs}`
+  const hit = memo.get(key)
+  if (hit !== undefined && hit.stamp === stamp) return hit.value as T
+  const value = extract(file, readFileSync(abs, "utf-8"))
+  memo.set(key, { stamp, value })
+  return value
 }
+
+/** The whole census over a checkout. */
+export const scanToolNameLiterals = (repoRoot: string): ToolNameLiteral[] =>
+  censusFiles(repoRoot).flatMap((f) => cachedExtract("names", repoRoot, f, extractToolNameLiterals))
 
 /* ── HITL posture, the axis with no runtime guard ───────────────────────────── */
 
@@ -233,49 +317,48 @@ export const HITL_TIERS: readonly string[] = [
   "hand-off-required",
 ]
 
-const arrowBody = (init: ts.Expression): ts.Node | undefined => {
-  if (!ts.isArrowFunction(init) && !ts.isFunctionExpression(init)) return undefined
-  return init.body
+/** The single value a function body yields, when it has exactly one: an expression
+ *  body, or a block whose only statement is `return <expr>`. */
+const soleReturnOf = (body: ts.Node): ts.Expression | undefined => {
+  if (!ts.isBlock(body)) return ts.isExpression(body) ? unwrap(body) : undefined
+  if (body.statements.length !== 1) return undefined
+  const only = body.statements[0]
+  return only !== undefined && ts.isReturnStatement(only) && only.expression !== undefined
+    ? unwrap(only.expression)
+    : undefined
 }
 
-const declaredBoolOf = (obj: ts.ObjectLiteralExpression): DeclaredBool => {
-  for (const p of obj.properties) {
-    if (!ts.isPropertyAssignment(p)) continue
-    const n = p.name
-    if (!(ts.isIdentifier(n) || ts.isStringLiteral(n)) || n.text !== "isReadOnly") continue
-    const body = arrowBody(p.initializer)
-    if (body === undefined) return "dynamic"
-    if (body.kind === ts.SyntaxKind.TrueKeyword) return "true"
-    if (body.kind === ts.SyntaxKind.FalseKeyword) return "false"
-    return "dynamic"
-  }
-  return "absent"
+const memberNamed = (c: Container, key: string): Member | undefined =>
+  membersOf(c).find((m) => m.key === key)
+
+const declaredBoolOf = (c: Container): DeclaredBool => {
+  const m = memberNamed(c, "isReadOnly")
+  if (m === undefined) return "absent"
+  const v = m.body !== undefined ? soleReturnOf(m.body) : m.value
+  if (v?.kind === ts.SyntaxKind.TrueKeyword) return "true"
+  if (v?.kind === ts.SyntaxKind.FalseKeyword) return "false"
+  return "dynamic"
 }
 
-const tiersOf = (
-  obj: ts.ObjectLiteralExpression,
-): { hasHitlTier: boolean; tiers: string[]; tierDynamic: boolean } => {
-  for (const p of obj.properties) {
-    if (!ts.isPropertyAssignment(p)) continue
-    const n = p.name
-    if (!(ts.isIdentifier(n) || ts.isStringLiteral(n)) || n.text !== "hitlTier") continue
-    const body = arrowBody(p.initializer)
-    if (body === undefined) return { hasHitlTier: true, tiers: [], tierDynamic: true }
-    if (ts.isStringLiteralLike(body)) {
-      return { hasHitlTier: true, tiers: [body.text], tierDynamic: false }
-    }
-    // Not a bare literal. Collect every tier literal reachable in the body as a
-    // LOWER BOUND and say so, rather than reporting an empty set that would read
-    // as "cannot return none".
-    const tiers: string[] = []
-    const walk = (node: ts.Node): void => {
-      if (ts.isStringLiteralLike(node) && HITL_TIERS.includes(node.text)) tiers.push(node.text)
-      ts.forEachChild(node, walk)
-    }
-    walk(body)
-    return { hasHitlTier: true, tiers: [...new Set(tiers)], tierDynamic: true }
+const tiersOf = (c: Container): { hasHitlTier: boolean; tiers: string[]; tierDynamic: boolean } => {
+  const m = memberNamed(c, "hitlTier")
+  if (m === undefined) return { hasHitlTier: false, tiers: [], tierDynamic: false }
+  if (m.body === undefined) return { hasHitlTier: true, tiers: [], tierDynamic: true }
+  const sole = soleReturnOf(m.body)
+  if (sole !== undefined && ts.isStringLiteralLike(sole)) {
+    return { hasHitlTier: true, tiers: [sole.text], tierDynamic: false }
   }
-  return { hasHitlTier: false, tiers: [], tierDynamic: false }
+  // Not a bare literal. Collect every tier literal reachable in the body as a LOWER
+  // BOUND and say so, rather than reporting an empty set that reads as "cannot return
+  // none". A tier held in a module const (`: PATCH_TIER`) collects nothing, so it lands
+  // in the unresolved set the gate pins by name.
+  const tiers: string[] = []
+  const walk = (node: ts.Node): void => {
+    if (ts.isStringLiteralLike(node) && HITL_TIERS.includes(node.text)) tiers.push(node.text)
+    ts.forEachChild(node, walk)
+  }
+  walk(m.body)
+  return { hasHitlTier: true, tiers: [...new Set(tiers)], tierDynamic: true }
 }
 
 /**
@@ -315,7 +398,7 @@ export const extractToolPostures = (file: string, source: string): ToolPosture[]
   const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true)
   const out: ToolPosture[] = []
   const walk = (node: ts.Node): void => {
-    if (ts.isObjectLiteralExpression(node)) {
+    if (isContainer(node)) {
       const lit = nameLiteralOf(node)
       const admittedBy = shapeKeyOf(node)
       if (lit !== undefined && admittedBy !== undefined) {
@@ -339,13 +422,8 @@ export const extractToolPostures = (file: string, source: string): ToolPosture[]
 }
 
 /** The posture census over a checkout. */
-export const scanToolPostures = (repoRoot: string): ToolPosture[] => {
-  const out: ToolPosture[] = []
-  for (const f of censusFiles(repoRoot)) {
-    out.push(...extractToolPostures(f, readFileSync(join(repoRoot, f), "utf-8")))
-  }
-  return out
-}
+export const scanToolPostures = (repoRoot: string): ToolPosture[] =>
+  censusFiles(repoRoot).flatMap((f) => cachedExtract("postures", repoRoot, f, extractToolPostures))
 
 /* ── the census's own blind spot, enumerated ────────────────────────────────── */
 
@@ -380,14 +458,14 @@ export interface UnattributedTierDeclaration {
 /** Classify ONE object literal for the unattributed-tier scan. Split out of the
  *  walker: inline, the walker scored 41 on the cognitive-complexity ratchet. */
 const unattributedTierOf = (
-  node: ts.ObjectLiteralExpression,
+  node: Container,
 ): { spreads: boolean; hasNameKey: boolean } | undefined => {
-  const keys = node.properties.map(propKeyName)
-  if (!keys.includes("hitlTier")) return undefined
+  const members = membersOf(node)
+  if (!members.some((m) => m.key === "hitlTier")) return undefined
   if (nameLiteralOf(node) !== undefined) return undefined
   return {
-    spreads: node.properties.some((p) => ts.isSpreadAssignment(p)),
-    hasNameKey: keys.includes("name"),
+    spreads: members.some((m) => m.spread),
+    hasNameKey: members.some((m) => m.key === "name"),
   }
 }
 
@@ -403,7 +481,7 @@ export const scanUnattributedTierDeclarations = (
       true,
     )
     const walk = (node: ts.Node): void => {
-      if (ts.isObjectLiteralExpression(node)) {
+      if (isContainer(node)) {
         const hit = unattributedTierOf(node)
         if (hit !== undefined) {
           out.push({

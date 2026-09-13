@@ -251,14 +251,16 @@ describe("tool-surface manifest — CLI default-ON seed derives from the SSOT", 
     expect(shouldSeedOn(entry as ToolSurfaceEntry, "cli")).toBe(false)
   })
 
-  test("branch_search is catalogued opt-in everywhere and never seeded", () => {
+  test("branch_search: default-ON for the ide preset, opt-in elsewhere, never seeded on the CLI", () => {
+    // The first version of this row said "Default-OFF every surface" and this arm pinned
+    // it, while `ide.test.ts` and `daemon.test.ts` already asserted the unified agent's
+    // ide and daemon presets turn it on.
     const entry = GATED_TOOLS.find((e) => e.name === "branch_search")
     expect(entry, "the branch_search row is gone").toBeDefined()
     expect(entry?.risk).toBe("spawns-subagent")
-    expect(entry?.default).toEqual({})
-    for (const surface of TOOL_SURFACES) {
-      expect(shouldSeedOn(entry as ToolSurfaceEntry, surface), `seeded on ${surface}`).toBe(false)
-    }
+    expect(entry?.default).toEqual({ ide: "on" })
+    expect(shouldSeedOn(entry as ToolSurfaceEntry, "cli"), "the CLI must not seed it").toBe(false)
+    expect(seedEnvVarsForSurface("cli")).not.toContain("QUANTA_BENCH_BRANCH_SEARCH")
   })
 
   test("seedEnvVarsForSurface('cli') is exactly the CLI-default-ON tool gates", () => {
@@ -498,6 +500,24 @@ describe("tool-surface manifest — FULL-universe completeness (the guard that w
         `const t = { name: "x", isConcurrencySafe: () => true }`,
       )
       expect(hits.map((h) => h.admittedBy)).toEqual(["isConcurrencySafe"])
+    })
+
+    test('`name: "x" as const` and `satisfies` wrappers are found', () => {
+      // An audit's probe named a tool `"x" as const`: the initializer is an AsExpression,
+      // not a string literal, and the census skipped it.
+      expect(
+        namesIn(`const t = { name: "as_const_tool" as const, isReadOnly: () => true }`),
+      ).toEqual(["as_const_tool"])
+      expect(
+        namesIn(`const t = { name: ("paren_tool" satisfies string), isReadOnly: () => true }`),
+      ).toEqual(["paren_tool"])
+    })
+
+    test("a CLASS tool is found", () => {
+      // `class SpawnBatchUnattendedTool implements Tool { name = "…"; hitlTier() {…} }` was
+      // registered by an audit with both hellgates green: only object literals were read.
+      const src = `class T { readonly name = "class_tool" as const; isReadOnly(): boolean { return false } }`
+      expect(namesIn(src)).toEqual(["class_tool"])
     })
 
     test("a computed name is NOT found, and the census says so rather than implying it", () => {
