@@ -134,7 +134,7 @@ describe("shard manifest selection", () => {
     const narrowed = (): unknown =>
       selectShardManifest(input({ selectForTier: (ids) => ({ files: ids.slice(0, 10) }) }))
     expect(narrowed).toThrow(TierSelectionError)
-    expect(narrowed).toThrow(/The corpus did not shrink/)
+    expect(narrowed).toThrow(/The SELECTION is the cause/)
     // …and it must NOT claim the corpus is gone, which is the whole point.
     expect(narrowed).not.toThrow(/corpus shrank under the runner|left the CORPUS/)
   })

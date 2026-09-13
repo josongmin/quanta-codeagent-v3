@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs"
+import { existsSync, realpathSync } from "node:fs"
 import { relative, resolve } from "node:path"
 import { expandTestFiles } from "./sandboxed-test"
 
@@ -264,22 +264,38 @@ export const suiteMembers = (paths: readonly string[], suite: SuiteName): readon
 
 /** Every `*.test.ts` the git index tracks under a suite's roots, repo-relative. */
 export const trackedSuiteTestFiles = (repoRoot: string, suite: SuiteName): readonly string[] => {
-  const roots = SUITE_ROOTS[suite].map(normalizeRoot)
-  const result = Bun.spawnSync(["git", "ls-files", "-z", "--", ...roots], {
-    cwd: repoRoot,
-    stdout: "pipe",
-    stderr: "pipe",
-    timeout: 30_000,
-  })
-  if (result.exitCode !== 0) {
+  const git = (args: readonly string[]): string => {
+    const result = Bun.spawnSync(["git", ...args], {
+      cwd: repoRoot,
+      stdout: "pipe",
+      stderr: "pipe",
+      timeout: 30_000,
+    })
+    if (result.exitCode !== 0) {
+      throw new Error(
+        `[discovery] git ${args[0]} failed (${String(result.exitCode)}): ${result.stderr.toString().trim()}. ` +
+          "Discovery completeness is proven against the git index; without one it cannot be.",
+      )
+    }
+    return result.stdout.toString()
+  }
+  // From a nested directory `ls-files` lists only that subtree, and completeness
+  // then passed over nothing — measured from a pristine extract kept inside the repo.
+  const top = git(["rev-parse", "--show-toplevel"]).trim()
+  if (realpathSync(top) !== realpathSync(repoRoot)) {
     throw new Error(
-      `[discovery] git ls-files failed (${String(result.exitCode)}): ${result.stderr.toString().trim()}`,
+      `[discovery] ${repoRoot} is not the top level of its git work tree (${top}); the tracked set ` +
+        "would be a subtree and the completeness check vacuous",
     )
   }
-  return result.stdout
-    .toString()
+  const roots = SUITE_ROOTS[suite].map(normalizeRoot)
+  // A file deleted in the work tree but not yet staged is still in the index. It
+  // is not discovery loss — it is a dirty tree, which a campaign refuses on its
+  // own — so it is not counted as tracked here.
+  const deleted = new Set(git(["ls-files", "-z", "--deleted", "--", ...roots]).split("\0"))
+  return git(["ls-files", "-z", "--", ...roots])
     .split("\0")
-    .filter((path) => path.endsWith(".test.ts"))
+    .filter((path) => path.endsWith(".test.ts") && !deleted.has(path))
     .sort((left, right) => left.localeCompare(right))
 }
 

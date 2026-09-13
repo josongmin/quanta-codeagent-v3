@@ -40,7 +40,7 @@
  * absorb exactly the shrink this record exists to notice.
  */
 
-import { readFileSync, writeFileSync } from "node:fs"
+import { readFileSync, realpathSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { parsePolicyOverrides, selectIdsForTier } from "./test-policy"
 import {
@@ -86,8 +86,10 @@ export type NarrowSuiteName = Exclude<SuiteName, "full">
  * subset of `core` and takes its share of `core`'s slack. The loader recomputes
  * every floor and refuses a file where any differs, so a floor cannot be lowered
  * by editing one number — and an arm recounts the whole record from
- * `measuredAt` (`measureTierPopulation`), so it cannot be lowered consistently
- * either.
+ * `measuredAt` (`measureTierPopulation`), so its COUNTS cannot be lowered
+ * consistently either. The universe floors in `tiers` are the one picked input:
+ * a recount carries them, so lowering one is not caught by the recount — it is a
+ * visible edit of a reviewed number, and `measuredAt` must be in HEAD's history.
  */
 export interface NarrowSuiteFloors {
   /** The commit the counts were measured at. `--measure` recounts it exactly. */
@@ -389,6 +391,21 @@ export const checkTierPopulation = (input: {
     }
   }
   if (input.selected >= floor.minFiles) return { ok: true, floor: floor.minFiles }
+  return attributeShortfall(input, floor, label)
+}
+
+/** Why `selected` is under the floor, attributed against the measurement. */
+const attributeShortfall = (
+  input: {
+    readonly tier: string
+    readonly suite: SuiteName
+    readonly selected: number
+    readonly discovered: number
+    readonly floors: TierPopulationFile
+  },
+  floor: TierPopulationFloor,
+  label: string,
+): TierPopulationVerdict => {
   // Attributed against the MEASUREMENT, not against `selected === discovered`.
   const suites = input.floors.suites
   const measuredDiscovered = suites.discovered[input.suite]
@@ -399,11 +416,21 @@ export const checkTierPopulation = (input: {
   const lost = measuredDiscovered - input.discovered
   const excludedNow = input.discovered - input.selected
   const excludedThen = measuredDiscovered - measuredSelected
+  // COUNTERFACTUALS, not net deltas. A net count blamed the corpus for a file
+  // deleted (and committed) long before, when the floor was actually broken by a
+  // later override — "restore them" was advice that left it red. Which single
+  // change would clear the floor on its own is what sends someone to the right file.
+  const restoringCorpusClears = measuredDiscovered - excludedNow >= floor.minFiles
+  const revertingSelectionClears = input.discovered - excludedThen >= floor.minFiles
   const facts =
     `The suite discovers ${input.discovered} files and selection excludes ${excludedNow}; at ` +
-    `${suites.measuredAt} it discovered ${measuredDiscovered} and excluded ${excludedThen}.`
+    `${suites.measuredAt} it discovered ${measuredDiscovered} and excluded ${excludedThen}. ` +
+    `Restoring the corpus alone would ${restoringCorpusClears ? "" : "NOT "}clear the floor; ` +
+    `reverting the selection alone would ${revertingSelectionClears ? "" : "NOT "}clear it.`
   const remeasure = "`bun run tools/dev/test-tier-population.ts --measure`"
-  if (lost > 0) {
+  const corpusIsTheCause =
+    restoringCorpusClears !== revertingSelectionClears ? restoringCorpusClears : lost > 0
+  if (corpusIsTheCause) {
     return {
       ok: false,
       kind:
@@ -412,8 +439,8 @@ export const checkTierPopulation = (input: {
           : "suite-below-its-tier-floor",
       message:
         `[test:shards] INVALID — ${label} selected ${input.selected} files, below its committed ` +
-        `floor of ${floor.minFiles} (${floor.reason}). ${facts} ${lost} file(s) left the CORPUS — ` +
-        `restore them. If removing them was intended, re-measure with ${remeasure} in the same diff.`,
+        `floor of ${floor.minFiles} (${floor.reason}). ${facts} ${Math.max(lost, 0)} file(s) left the ` +
+        `CORPUS — restore them. If removing them was intended, re-measure with ${remeasure} in the same diff.`,
     }
   }
   return {
@@ -421,9 +448,9 @@ export const checkTierPopulation = (input: {
     kind: "narrowed",
     message:
       `[test:shards] INVALID — ${label} selected ${input.selected} files, below its committed ` +
-      `floor of ${floor.minFiles} (${floor.reason}). ${facts} The corpus did not shrink; selection ` +
-      `excludes ${excludedNow - excludedThen} more file(s). If the narrowing is intended, re-measure ` +
-      `with ${remeasure} in the same diff and say why.`,
+      `floor of ${floor.minFiles} (${floor.reason}). ${facts} The SELECTION is the cause: it ` +
+      `excludes ${excludedNow - excludedThen} more file(s)${lost > 0 ? ` (and ${lost} left the corpus)` : ""}. ` +
+      `If the narrowing is intended, re-measure with ${remeasure} in the same diff and say why.`,
   }
 }
 
@@ -439,6 +466,47 @@ const gitText = (repoRoot: string, args: readonly string[]): string => {
   }
   return result.stdout.toString()
 }
+
+/**
+ * `repoRoot` must BE the work tree's top level. `git ls-tree` without
+ * `--full-tree` and `git ls-files` both list only what is under the current
+ * directory, so a run from a nested copy (the pristine `git archive` extract kept
+ * inside the repo) counted zero files — which recounted to a record of zeros and
+ * made the completeness check vacuous.
+ */
+export const assertGitTopLevel = (repoRoot: string): void => {
+  const top = gitText(repoRoot, ["rev-parse", "--show-toplevel"]).trim()
+  if (realpathSync(top) !== realpathSync(repoRoot)) {
+    throw new Error(
+      `[tier-population] ${repoRoot} is not the top level of its git work tree (${top}); ` +
+        "a recount or completeness check from here would see only a subtree",
+    )
+  }
+}
+
+/**
+ * History the recount needs. A shallow clone does not have `measuredAt`: CI's
+ * default `actions/checkout` is depth 1, and the recount arms threw
+ * `Needed a single revision` in the merge-blocking job. The workflows now fetch
+ * full history for every job that runs these arms, and a workflow arm holds that.
+ */
+const assertFullHistory = (repoRoot: string): void => {
+  if (gitText(repoRoot, ["rev-parse", "--is-shallow-repository"]).trim() === "true") {
+    throw new Error(
+      "[tier-population] this is a SHALLOW clone, so the commit the record was measured at is not " +
+        "here. Check out with full history (`actions/checkout` `fetch-depth: 0`).",
+    )
+  }
+}
+
+/** `measuredAt` must be in HEAD's history: a record measured on another branch describes another tree. */
+export const measuredAtIsAncestor = (repoRoot: string, measuredAt: string): boolean =>
+  Bun.spawnSync(["git", "merge-base", "--is-ancestor", measuredAt, "HEAD"], {
+    cwd: repoRoot,
+    stdout: "ignore",
+    stderr: "ignore",
+    timeout: 60_000,
+  }).exitCode === 0
 
 const NARROW_ORDER: readonly NarrowSuiteName[] = ["core", "integration", "unit"]
 
@@ -465,12 +533,27 @@ export const measureTierPopulation = (input: {
   readonly rev: string
   readonly tiers: TierPopulationFile["tiers"]
 }): TierPopulationFile => {
+  assertGitTopLevel(input.repoRoot)
+  assertFullHistory(input.repoRoot)
   const sha = gitText(input.repoRoot, ["rev-parse", "--short=9", `${input.rev}^{commit}`]).trim()
-  const universe = gitText(input.repoRoot, ["ls-tree", "-r", "-z", "--name-only", sha])
+  const universe = gitText(input.repoRoot, [
+    "ls-tree",
+    "-r",
+    "-z",
+    "--full-tree",
+    "--name-only",
+    sha,
+  ])
     .split("\0")
     .filter(isDiscoverableTestPath)
+  // The override file AS OF that commit, judged at that commit's time. Judged
+  // today, its rows' own expiry dates made the recount throw from the day after
+  // they lapsed — even after the current file renewed them.
+  const committedAtMs =
+    Number(gitText(input.repoRoot, ["show", "-s", "--format=%ct", sha]).trim()) * 1000
   const overrides = parsePolicyOverrides(
     gitText(input.repoRoot, ["show", `${sha}:tools/dev/test-policy-overrides.json`]),
+    committedAtMs,
   ).overrides
   const discovered = Object.fromEntries(
     (Object.keys(SUITE_ROOTS) as SuiteName[]).map((suite) => [

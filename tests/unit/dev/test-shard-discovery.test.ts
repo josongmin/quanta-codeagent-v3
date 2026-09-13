@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test"
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join, relative, resolve } from "node:path"
+import { dirname, join, relative, resolve } from "node:path"
+import { parse as parseYaml } from "yaml"
 import { loadPolicyOverrides, selectIdsForTier } from "../../../tools/dev/test-policy"
 import {
   discoverInventory,
@@ -23,6 +24,7 @@ import {
   CORPUS_LOSS_KINDS,
   checkTierPopulation,
   loadTierPopulationFloors,
+  measuredAtIsAncestor,
   measureTierPopulation,
   SUITE_SCOPE,
   TIER_POPULATION_PATH,
@@ -159,7 +161,7 @@ describe("tier population floor", () => {
     expect(verdict.ok).toBe(false)
     if (verdict.ok) throw new Error("unreachable")
     expect(verdict.kind).toBe("narrowed")
-    expect(verdict.message).toContain("The corpus did not shrink")
+    expect(verdict.message).toContain("The SELECTION is the cause")
     expect(verdict.message).toContain("3932")
     expect(verdict.message).not.toContain("left the CORPUS")
   })
@@ -670,10 +672,14 @@ describe("the population record and discovery completeness", () => {
       rev: committed.suites.measuredAt,
       tiers: committed.tiers,
     })
-    // Red here after a classification change (capability manifest, known prefixes,
-    // overrides) means the record describes a policy that no longer exists:
+    // Red here after a CLASSIFICATION-CODE change (capability manifest, known
+    // prefixes) means the record describes a policy that no longer exists:
     // `bun run tools/dev/test-tier-population.ts --measure` and commit the result.
+    // An override-file change does not red this — the recount reads the overrides
+    // of `measuredAt`, which is what keeps the record a recount rather than a guess.
     expect(recount).toEqual(committed)
+    // ...and the measurement is of THIS history, not another branch's.
+    expect(measuredAtIsAncestor(ROOT, committed.suites.measuredAt)).toBe(true)
   }, 60_000)
 
   test("RED ON INJECTION: a consistently lowered record loads, and the recount refuses it", () => {
@@ -757,5 +763,235 @@ describe("the population record and discovery completeness", () => {
         "tests/unit/a.test.tsx",
       ].map(isDiscoverableTestPath),
     ).toEqual([true, false, false, false])
+  })
+})
+
+/**
+ * ★ Third adversarial audit of the tier record and completeness check.
+ *
+ * Every arm drives a synthetic git repository, because each defect was about
+ * git state a real checkout does not normally have: a depth-1 clone (CI's
+ * default, where the recount threw in the merge-blocking job), a run from a
+ * nested directory (where completeness passed over nothing), an override file
+ * whose rows had expired since the measurement, an uncommitted deletion, and a
+ * record measured on a branch HEAD never saw.
+ */
+describe("the tier record in the git states CI and humans actually produce", () => {
+  const git = (cwd: string, ...args: string[]): string => {
+    const result = Bun.spawnSync(["git", ...args], {
+      cwd,
+      stdout: "pipe",
+      stderr: "pipe",
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: "t",
+        GIT_AUTHOR_EMAIL: "t@t",
+        GIT_COMMITTER_NAME: "t",
+        GIT_COMMITTER_EMAIL: "t@t",
+      },
+    })
+    if (result.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${result.stderr.toString()}`)
+    return result.stdout.toString()
+  }
+  const overrides = (rows: readonly object[] = []): string =>
+    JSON.stringify({ schema: "quanta.test-policy-overrides.v1", overrides: rows })
+  const repo = (files: Readonly<Record<string, string>>, committedAt?: string) => {
+    const base = realpathSync(mkdtempSync(join(tmpdir(), "tier-git-")))
+    const root = join(base, "repo")
+    mkdirSync(root)
+    git(root, "init", "-q", "-b", "main")
+    for (const [rel, body] of Object.entries(files)) {
+      mkdirSync(dirname(join(root, rel)), { recursive: true })
+      writeFileSync(join(root, rel), body)
+    }
+    git(root, "add", "-A")
+    if (committedAt === undefined) git(root, "commit", "-q", "-m", "a")
+    else {
+      const result = Bun.spawnSync(["git", "commit", "-q", "-m", "a"], {
+        cwd: root,
+        env: {
+          ...process.env,
+          GIT_AUTHOR_NAME: "t",
+          GIT_AUTHOR_EMAIL: "t@t",
+          GIT_COMMITTER_NAME: "t",
+          GIT_COMMITTER_EMAIL: "t@t",
+          GIT_AUTHOR_DATE: committedAt,
+          GIT_COMMITTER_DATE: committedAt,
+        },
+      })
+      if (result.exitCode !== 0) throw new Error(result.stderr.toString())
+    }
+    return { base, root }
+  }
+  const CORPUS = {
+    "tests/unit/a.test.ts": "",
+    "tests/unit/b.test.ts": "",
+    "tools/dev/test-policy-overrides.json": overrides(),
+  }
+  const TIERS = loadTierPopulationFloors().tiers
+
+  test("a SHALLOW clone is refused by name, and full history measures", () => {
+    const { base, root } = repo(CORPUS)
+    try {
+      git(root, "commit", "-q", "--allow-empty", "-m", "b")
+      const shallow = join(base, "shallow")
+      git(base, "clone", "-q", "--depth", "1", `file://${root}`, shallow)
+      expect(() => measureTierPopulation({ repoRoot: shallow, rev: "HEAD", tiers: TIERS })).toThrow(
+        /SHALLOW clone/,
+      )
+      // PAIRED CONTROL: the same history, complete, measures.
+      expect(
+        measureTierPopulation({ repoRoot: root, rev: "HEAD", tiers: TIERS }).suites.discovered.unit,
+      ).toBe(2)
+    } finally {
+      rmSync(base, { recursive: true, force: true })
+    }
+  })
+
+  test("a run from a nested directory is refused, not counted as an empty corpus", () => {
+    const { base, root } = repo(CORPUS)
+    try {
+      const nested = join(root, ".pristine-audit")
+      mkdirSync(nested)
+      expect(() => measureTierPopulation({ repoRoot: nested, rev: "HEAD", tiers: TIERS })).toThrow(
+        /not the top level/,
+      )
+      expect(() => trackedSuiteTestFiles(nested, "unit")).toThrow(/not the top level/)
+      expect(trackedSuiteTestFiles(root, "unit")).toEqual([
+        "tests/unit/a.test.ts",
+        "tests/unit/b.test.ts",
+      ])
+    } finally {
+      rmSync(base, { recursive: true, force: true })
+    }
+  })
+
+  test("an override row is judged at the MEASURED commit's time, not today", () => {
+    // Committed in 2025 with a row expiring mid-2025: valid then, expired today.
+    const { base, root } = repo(
+      {
+        ...CORPUS,
+        "tools/dev/test-policy-overrides.json": overrides([
+          {
+            id: "tests/unit/a.test.ts",
+            owner: "verification-rail",
+            reason: "fixture",
+            expiresAt: "2025-06-01",
+            tiers: ["pr", "full", "nightly"],
+          },
+        ]),
+      },
+      "2025-01-01T00:00:00Z",
+    )
+    try {
+      expect(
+        measureTierPopulation({ repoRoot: root, rev: "HEAD", tiers: TIERS }).suites.discovered.unit,
+      ).toBe(2)
+    } finally {
+      rmSync(base, { recursive: true, force: true })
+    }
+  })
+
+  test("a record measured on a branch HEAD never saw is not an ancestor", () => {
+    const { base, root } = repo(CORPUS)
+    try {
+      git(root, "checkout", "-q", "-b", "elsewhere")
+      git(root, "commit", "-q", "--allow-empty", "-m", "branch-only")
+      const branchOnly = git(root, "rev-parse", "HEAD").trim()
+      git(root, "checkout", "-q", "main")
+      expect(measuredAtIsAncestor(root, branchOnly)).toBe(false)
+      expect(measuredAtIsAncestor(root, "HEAD")).toBe(true)
+    } finally {
+      rmSync(base, { recursive: true, force: true })
+    }
+  })
+
+  test("an UNCOMMITTED deletion is a dirty tree, not discovery loss; a dot-directory move still is", () => {
+    const { base, root } = repo(CORPUS)
+    try {
+      rmSync(join(root, "tests/unit/b.test.ts"))
+      expect(trackedSuiteTestFiles(root, "unit")).toEqual(["tests/unit/a.test.ts"])
+      const discovered = discoverSuiteFiles(root, "unit").map((file) => relative(root, file))
+      expect(
+        discoveryCompletenessProblems({
+          suite: "unit",
+          discovered,
+          tracked: trackedSuiteTestFiles(root, "unit"),
+        }),
+      ).toEqual([])
+      // PAIRED CONTROL: a committed move under a dot directory is still tracked and undiscovered.
+      mkdirSync(join(root, "tests/unit/.moved"), { recursive: true })
+      git(root, "mv", "tests/unit/a.test.ts", "tests/unit/.moved/a.test.ts")
+      git(root, "commit", "-q", "-am", "move")
+      const after = discoverSuiteFiles(root, "unit").map((file) => relative(root, file))
+      const problems = discoveryCompletenessProblems({
+        suite: "unit",
+        discovered: after,
+        tracked: trackedSuiteTestFiles(root, "unit"),
+      })
+      expect(problems.join(" ")).toContain("tests/unit/.moved/a.test.ts")
+    } finally {
+      rmSync(base, { recursive: true, force: true })
+    }
+  })
+
+  test("attribution is COUNTERFACTUAL: the single change that would clear the floor is named", () => {
+    // Measured: 100 discovered, 90 selected, floor 85 (slack 5).
+    const measured = fixtureFloors({ pr: 85 }, undefined, { discovered: 100, selected: 90 })
+    const check = (selected: number, discovered: number) =>
+      checkTierPopulation({
+        tier: "pr",
+        suite: "full",
+        selected,
+        discovered,
+        suiteFloor: 1,
+        floors: measured,
+      })
+    // M1: 3 files deleted and committed earlier (harmless within slack), then an
+    // override excluded 10 more. Net counts blamed the corpus ("restore them"), and
+    // restoring them left it red. Reverting the selection alone clears it.
+    const m1 = check(77, 97)
+    if (m1.ok) throw new Error("unreachable")
+    expect(m1.kind).toBe("narrowed")
+    expect(m1.message).toContain("reverting the selection alone would clear it")
+    expect(m1.message).toContain("Restoring the corpus alone would NOT clear the floor")
+    // M2 (the other direction): 12 selected files deleted, exclusions unchanged.
+    const m2 = check(78, 88)
+    if (m2.ok) throw new Error("unreachable")
+    expect(CORPUS_LOSS_KINDS.has(m2.kind)).toBe(true)
+    expect(m2.message).toContain("Restoring the corpus alone would clear the floor")
+  })
+})
+
+describe("every workflow job that runs the tier-selected tests has full history", () => {
+  test("fetch-depth: 0 on each job whose steps run the shard suite, the matrix worker or nightly", () => {
+    const jobsThatRunTheArms: string[] = []
+    const shallow: string[] = []
+    for (const workflow of [
+      ".github/workflows/ci.yml",
+      ".github/workflows/verification-nightly.yml",
+    ]) {
+      const doc = parseYaml(readFileSync(join(ROOT, workflow), "utf8")) as {
+        jobs: Record<
+          string,
+          { steps?: { uses?: string; run?: string; with?: Record<string, unknown> }[] }
+        >
+      }
+      for (const [id, job] of Object.entries(doc.jobs)) {
+        const steps = job.steps ?? []
+        const runs = steps.map((step) => step.run ?? "").join("\n")
+        if (!/test:full:ci|verify:nightly|verification-matrix-cli\.ts worker/.test(runs)) continue
+        jobsThatRunTheArms.push(`${workflow}#${id}`)
+        const checkout = steps.find((step) => step.uses?.startsWith("actions/checkout@") === true)
+        if (checkout?.with?.["fetch-depth"] !== 0) shallow.push(`${workflow}#${id}`)
+      }
+    }
+    // ANTI-VACUITY: the three jobs that run them today.
+    expect(jobsThatRunTheArms.sort()).toEqual([
+      ".github/workflows/ci.yml#full-shard",
+      ".github/workflows/ci.yml#full-suite",
+      ".github/workflows/verification-nightly.yml#nightly",
+    ])
+    expect(shallow).toEqual([])
   })
 })

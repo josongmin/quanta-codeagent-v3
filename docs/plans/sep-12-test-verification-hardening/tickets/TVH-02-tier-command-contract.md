@@ -67,7 +67,14 @@
     `--measure` 재측정이다.
   - 레코드는 `bun run tools/dev/test-tier-population.ts --measure`가 커밋 트리·그 커밋의 override
     파일로 재계산해 쓰고, arm이 `measuredAt` 재계산과 **완전 일치**를 요구한다. 손으로 일관되게
-    낮춘 레코드는 로더는 통과하지만 이 arm이 거부한다.
+    낮춘 **측정값**은 로더는 통과하지만 이 arm이 거부한다. 단 `tiers.*.minFiles`(universe floor)는
+    재계산이 그대로 싣고 가는 유일한 고른 값이라 이 arm으로는 막히지 않는다 — 리뷰되는 숫자의
+    가시적 편집이다(3차 감사 R3B-3).
+  - 3차 감사 대응: CI의 depth-1 checkout에서는 `measuredAt`이 없어 재계산 arm이 throw했다 →
+    tier 선택 테스트를 돌리는 job 3개(`full-shard`·`full-suite`·nightly)에 `fetch-depth: 0`,
+    workflow arm이 이를 강제. shallow·nested 디렉터리는 이름 붙은 거부, 과거 override 행은 그
+    커밋 시각 기준 만료 판정, `measuredAt`은 HEAD의 조상이어야 함, 미스테이징 삭제는 완전성
+    손실이 아님, 원인 판정은 순증감이 아니라 counterfactual.
   - 캠페인의 git snapshot을 선택 **전에** 찍는다(후에 찍으면 선택 중 착륙한 커밋이 양쪽 snapshot에
     다 들어가 비교를 통과했다).
 
