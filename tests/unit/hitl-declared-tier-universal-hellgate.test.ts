@@ -48,7 +48,7 @@ import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { classifiedMutatingKind } from "@/agent/mode"
-import { inferToolTierDetailed } from "@/permission"
+import { type HITLTier, inferToolTierDetailed } from "@/permission"
 import type { Tool } from "@/tool"
 import { makeBashTool } from "@/tool/bash"
 import {
@@ -278,5 +278,91 @@ describe("HITL — the assembled registry agrees with the declarations", () => {
       POSTURES.filter((p) => p.readOnly === "false" && classifiedMutatingKind(p.name) !== undefined)
         .length,
     ).toBeGreaterThan(50)
+  })
+})
+
+/* ── the enforcement: the policy, not a census ────────────────────────────── */
+
+describe("HITL — the POLICY voids a writer's declared none, whatever shape declares it", () => {
+  // The census above is an EARLY WARNING. It cannot be the guarantee: whether a function
+  // can return "none" is not decidable from its source, and an adversarial audit made the
+  // always-on `apply_patch` and `bash` resolve to "none" for real inputs (a ternary keyed
+  // on the input, a module const for the tier) with both source hellgates, typecheck,
+  // lint and 2255 HITL/permission/tool tests green. `inferToolTierDetailed` now treats a
+  // declared "none" on a write-capable tool as no declaration at all.
+  const NONE = "none" as const
+  const SHAPES: ReadonlyArray<
+    readonly [string, { isReadOnly(): boolean; hitlTier(i: unknown): HITLTier }]
+  > = [
+    ["arrow literal", { isReadOnly: () => false, hitlTier: () => "none" }],
+    [
+      "method shorthand",
+      {
+        isReadOnly: () => false,
+        hitlTier() {
+          return "none"
+        },
+      },
+    ],
+    ["module const", { isReadOnly: () => false, hitlTier: () => NONE }],
+    [
+      "input-conditional (the apply_patch escape)",
+      {
+        isReadOnly: () => false,
+        hitlTier: (i: unknown) =>
+          ((i as { patch?: string } | undefined)?.patch ?? "") === "" ? "pre-approval-ok" : NONE,
+      },
+    ],
+    [
+      "class instance",
+      new (class {
+        isReadOnly(): boolean {
+          return false
+        }
+        hitlTier(): HITLTier {
+          return "none"
+        }
+      })(),
+    ],
+  ]
+
+  for (const [label, tool] of SHAPES) {
+    test(`${label}: a writer declaring none resolves exactly as an undeclared writer`, () => {
+      const input = { patch: "*** Begin Patch\n*** Update File: a.ts\n", command: "npm run x" }
+      expect(tool.hitlTier(input), "the probe must really declare none").toBe("none")
+      expect(inferToolTierDetailed(tool as never, input)).toEqual({
+        tier: "always-confirm",
+        reason: "needs-sandbox",
+      })
+    })
+  }
+
+  test("the real apply_patch and bash, rewired the way the audit did, are clamped", () => {
+    const TOOLS_BY_NAME = new Map(buildBroadlyWiredTools().map((t) => [t.name, t]))
+    for (const name of ["apply_patch", "bash"]) {
+      const real = TOOLS_BY_NAME.get(name)
+      expect(real, `${name} is not assembled`).toBeDefined()
+      const rewired = { ...(real as Tool), hitlTier: (): HITLTier => NONE }
+      expect(rewired.isReadOnly()).toBe(false)
+      expect(inferToolTierDetailed(rewired as never, { command: "npm run x" }).tier).not.toBe(
+        "none",
+      )
+    }
+  })
+
+  test("PAIRED CONTROL: a read-only tool's declared none stands", () => {
+    // Without this the clamp could be "none never survives", which would put every
+    // read-only tool behind a prompt.
+    expect(
+      inferToolTierDetailed({ isReadOnly: () => true, hitlTier: () => "none" } as never, {}),
+    ).toEqual({ tier: "none", reason: "declared" })
+  })
+
+  test("PAIRED CONTROL: a writer's other declarations are untouched", () => {
+    for (const tier of ["pre-approval-ok", "always-confirm", "hand-off-required"] as const) {
+      expect(
+        inferToolTierDetailed({ isReadOnly: () => false, hitlTier: () => tier } as never, {}),
+      ).toEqual({ tier, reason: "declared" })
+    }
   })
 })

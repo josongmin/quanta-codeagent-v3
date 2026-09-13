@@ -234,7 +234,8 @@ interface HITLToolDuck {
 
 /** Infer the effective HITL tier for a call, WITH the reason it resolved that
  *  way (jul-10, D-1 follow-through — the PDP split's first-class output; see
- *  `pdp.ts`). The tool's own `hitlTier(input)` wins ("declared"); otherwise
+ *  `pdp.ts`). The tool's own `hitlTier(input)` wins ("declared") — EXCEPT a
+ *  declared "none" on a write-capable tool, which is void (see below); otherwise
  *  read-only ⇒ "none" ("inferred"), mutating ⇒ "always-confirm" (FAIL-CLOSED
  *  — see module comment) with reason "needs-sandbox": the unclassified-
  *  mutating catch-all (e.g. an MCP tool with no `hitlTier`) is gated because
@@ -262,6 +263,22 @@ export const inferToolTierDetailed = (
   // NEVER rides the needs-sandbox bypass fallthrough (parity with the previous
   // `if (confirm) return "always-confirm"` behavior under every mode).
   if (confirm) return { tier: "always-confirm", reason: "declared" }
+  // A WRITE-CAPABLE tool cannot declare its way below the fail-closed default.
+  //
+  // `"none"` is truthy, so before this line an explicit `hitlTier` of "none" returned
+  // here and the `isReadOnly()` branch below never ran. The fail-closed default only
+  // protected tools that OMITTED `hitlTier`. Every guard added against that hole was a
+  // census of what tools SAY, and no census can prove a function never returns "none":
+  // an adversarial audit made the always-on `apply_patch` and `bash` resolve to "none"
+  // for real inputs — a ternary keyed on the input, a module const for the tier — while
+  // both source hellgates, typecheck, lint and 2255 HITL/permission/tool tests stayed
+  // green. So the rule lives where the tier is decided: a declared "none" on a tool
+  // whose `isReadOnly()` is false is treated as no declaration at all, and resolves
+  // exactly as an undeclared writer does. Every shape, every input, every surface, and
+  // MCP-bridged tools included.
+  if (explicit === "none" && !tool.isReadOnly()) {
+    return { tier: "always-confirm", reason: "needs-sandbox" }
+  }
   if (explicit) return { tier: explicit, reason: "declared" }
   return tool.isReadOnly()
     ? { tier: "none", reason: "inferred" }
