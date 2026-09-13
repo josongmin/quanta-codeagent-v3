@@ -140,6 +140,29 @@ const migrationCommand = (from: string, to: string): string => {
   )
 }
 
+/**
+ * The directory-level twin of {@link migrationCommand}, for the pre-relocation home.
+ *
+ * The memory plane is a DIRECTORY, not a file: the sqlite store and its `-wal`/`-shm`,
+ * and the consolidator's `MEMORY.md`, `raw_memories.md`, `memory_summary.md` and
+ * `stage1.sqlite`. Moving only the store (the first version) left the rest behind in
+ * the old home while the consolidator read and wrote a fresh set under the new one.
+ * So this moves `<old home>/memory` whole — the side files travel by construction —
+ * and REFUSES if the destination exists, unless it is an EMPTY real directory (a
+ * component that created it holds nothing), which it removes first.
+ */
+const memoryDirMigrationCommand = (fromDir: string, toDir: string): string => {
+  const f = shq(fromDir)
+  const t = shq(toDir)
+  return (
+    `( set -e; ` +
+    `if [ -e ${t} ] || [ -L ${t} ]; then ` +
+    `if [ -d ${t} ] && [ ! -L ${t} ] && [ -z "$(ls -A ${t})" ]; then rmdir ${t}; ` +
+    `else echo 'memory migrate: '${t}' already exists; nothing moved' >&2; exit 1; fi; fi; ` +
+    `mkdir -p ${shq(path.dirname(toDir))}; mv ${f} ${t} )`
+  )
+}
+
 /** The notice for two stores that BOTH exist. Names them; recommends nothing
  *  destructive, because which one holds the data the operator wants is not knowable
  *  here. */
@@ -148,23 +171,53 @@ const twoStoresNotice = (using: string, other: string, why: string): string =>
   `They are not merged and nothing will move either one. To use the other, set ` +
   `QUANTA_MEMORY_PATH=${shq(other)}; once you no longer need it, remove it.`
 
-/** The pre-relocation branch of {@link resolveStorePath}: the home store is `home`, an
- *  OS-home store may exist at `prior`. */
-const resolvePriorHomeStore = (
-  prior: string,
-  home: string,
-  exists: (p: string) => boolean,
-  sameFile: (a: string, b: string) => boolean,
-): StorePathResolution => {
+/** Where the memory plane's HOME came from. */
+export type MemoryHomeSource = "home-default" | "pre-relocation-home"
+
+export interface MemoryHomeResolution {
+  /** The Quanta home whose `memory/` directory this session uses. */
+  readonly home: string
+  readonly source: MemoryHomeSource
+  /** The one attributed line to emit, when there is something to say. */
+  readonly notice?: string
+}
+
+export interface ResolveMemoryHomeInput {
+  /** The Quanta home root (`QUANTA_CONFIG_DIR ?? QUANTA_HOME ?? ~/.quanta`). */
+  readonly quantaHome: string
+  /** The OS home, for the pre-relocation probe. Omit ⇒ no probe. */
+  readonly osHomeDir?: string | undefined
+  readonly exists?: ((p: string) => boolean) | undefined
+  readonly sameFile?: ((a: string, b: string) => boolean) | undefined
+}
+
+/**
+ * Which Quanta home the memory PLANE uses — the store and the consolidator together.
+ *
+ * ONE decision for the whole `memory/` directory. It used to be made for the sqlite file
+ * alone (`resolveStorePath`), while `session-memory-auto` resolved the consolidator's
+ * files from the relocated home unconditionally. So a relocated operator with existing
+ * memory had the store read in place from the old home and `MEMORY.md` /
+ * `raw_memories.md` / `memory_summary.md` / `stage1.sqlite` started fresh under the new
+ * one, the old ones silently orphaned, and the migration command moved only the store
+ * (round-8 audit). Both planes now call this.
+ */
+export const resolveMemoryHome = (input: ResolveMemoryHomeInput): MemoryHomeResolution => {
+  const here: MemoryHomeResolution = { home: input.quantaHome, source: "home-default" }
+  if (input.osHomeDir === undefined || input.osHomeDir === "") return here
+  const exists = input.exists ?? existsSync
+  const sameFile = input.sameFile ?? sameFileOnDisk
+  const priorHome = path.join(input.osHomeDir, ".quanta")
+  const prior = preRelocationHomeStorePath(input.osHomeDir)
+  const current = defaultDurableStorePath(input.quantaHome)
   // Skipped when the paths coincide (an unset home), so the common case is silent.
-  if (prior === home || !exists(prior)) return { path: home, source: "home-default" }
-  if (exists(home)) {
-    if (sameFile(prior, home)) return { path: home, source: "home-default" }
+  if (prior === current || !exists(prior)) return here
+  if (exists(current)) {
+    if (sameFile(prior, current)) return here
     return {
-      path: home,
-      source: "home-default",
-      legacyNotice: twoStoresNotice(
-        home,
+      ...here,
+      notice: twoStoresNotice(
+        current,
         prior,
         "where memory lived before the plane followed QUANTA_HOME/QUANTA_CONFIG_DIR",
       ),
@@ -174,16 +227,18 @@ const resolvePriorHomeStore = (
   // resolution under the relocated home and only PRINTED a notice — and opening that
   // path CREATED the destination on the very launch that printed it. So the notice
   // fired exactly once, and the command it recommended could only ever find a
-  // destination already there. Reading the existing store where it is creates no
-  // second store: the notice repeats every launch until the operator migrates, and
-  // the command stays valid until they do.
+  // destination already there. Reading the existing memory where it is creates no
+  // second one: the notice repeats every launch until the operator migrates, and the
+  // command stays valid until they do.
+  const priorDir = resolveMemoryDirPathsUnder(priorHome).root
+  const currentDir = resolveMemoryDirPathsUnder(input.quantaHome).root
   return {
-    path: prior,
+    home: priorHome,
     source: "pre-relocation-home",
-    legacyNotice:
-      `memory store: using ${prior}, where memory lived before the plane followed ` +
-      `QUANTA_HOME/QUANTA_CONFIG_DIR; this home's store would be ${home}. ` +
-      `To migrate (with no quanta running): ${migrationCommand(prior, home)}`,
+    notice:
+      `memory: using ${priorDir}, where memory lived before the plane followed ` +
+      `QUANTA_HOME/QUANTA_CONFIG_DIR; this home's memory directory would be ${currentDir}. ` +
+      `To migrate (with no quanta running): ${memoryDirMigrationCommand(priorDir, currentDir)}`,
   }
 }
 
@@ -218,5 +273,15 @@ export const resolveStorePath = (input: ResolveStorePathInput): StorePathResolut
   if (input.osHomeDir === undefined || input.osHomeDir === "") {
     return { path: home, source: "home-default" }
   }
-  return resolvePriorHomeStore(preRelocationHomeStorePath(input.osHomeDir), home, exists, sameFile)
+  const memory = resolveMemoryHome({
+    quantaHome: input.homeDir,
+    osHomeDir: input.osHomeDir,
+    exists,
+    sameFile,
+  })
+  return {
+    path: defaultDurableStorePath(memory.home),
+    source: memory.source,
+    ...(memory.notice !== undefined ? { legacyNotice: memory.notice } : {}),
+  }
 }

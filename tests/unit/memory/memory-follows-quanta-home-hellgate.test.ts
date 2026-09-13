@@ -30,6 +30,7 @@ import { dirname, join } from "node:path"
 import { resolveMemoryDirPathsUnder } from "@/memory/consolidate/paths"
 import { defaultDurableStorePath, resolveStorePath } from "@/memory/store-path"
 import { buildMemoryForSession } from "@/runner/assemble/memory-factory"
+import { buildSessionMemoryAutoWires } from "@/runner/session-memory-auto"
 import { quantaHomeDirFrom } from "@/shared/quanta-home"
 import { makeTempDirOwner } from "../../_helpers/temp-dir"
 import {
@@ -167,11 +168,14 @@ describe("the memory plane follows the quanta home", () => {
       const r = resolveStorePath({ homeDir: relocated, cwd: "/nonexistent-cwd", osHomeDir: osHome })
       expect(r.path, "the existing store must be read where it is").toBe(prior)
       expect(r.source).toBe("pre-relocation-home")
-      expect(r.legacyNotice).toContain(prior)
-      expect(r.legacyNotice).toContain(dest)
+      // The notice names the two memory DIRECTORIES — the unit that moves.
+      expect(r.legacyNotice).toContain(dirname(prior))
+      expect(r.legacyNotice).toContain(dirname(dest))
       expect(commandOf(r.legacyNotice), "the notice must carry a runnable command").toBeDefined()
-      expect(r.legacyNotice).toContain("-wal")
-      expect(r.legacyNotice).toContain("-shm")
+      // The whole memory DIRECTORY moves — the WAL/SHM and the consolidator's files with it.
+      expect(commandOf(r.legacyNotice)).toContain(
+        `mv '${join(osHome, ".quanta", "memory")}' '${join(relocated, "memory")}'`,
+      )
     } finally {
       for (const d of [osHome, relocated]) rmSync(d, { recursive: true, force: true })
     }
@@ -206,12 +210,17 @@ describe("the memory plane follows the quanta home", () => {
       const dest = join(relocated, "memory", "memory.sqlite")
       sqliteWithRows(prior, 40)
       writeFileSync(`${prior}-wal`, "")
+      // The consolidator's files live in the same directory and must travel too.
+      writeFileSync(join(dirname(prior), "MEMORY.md"), "# prior memory\n")
+      writeFileSync(join(dirname(prior), "memory_summary.md"), "- prior hint\n")
       const r = resolveStorePath({ homeDir: relocated, cwd: "/nonexistent-cwd", osHomeDir: osHome })
       const res = spawnSync("sh", ["-c", commandOf(r.legacyNotice) as string], { encoding: "utf8" })
       expect(res.status, `exit ${res.status}: ${res.stderr}`).toBe(0)
       expect(rowCount(dest), "rows did not arrive").toBe(40)
       expect(existsSync(prior), "the old store is still there").toBe(false)
       expect(existsSync(`${dest}-wal`), "the WAL side file did not travel").toBe(true)
+      expect(readFileSync(join(relocated, "memory", "MEMORY.md"), "utf8")).toBe("# prior memory\n")
+      expect(existsSync(join(relocated, "memory", "memory_summary.md"))).toBe(true)
       const after = resolveStorePath({
         homeDir: relocated,
         cwd: "/nonexistent-cwd",
@@ -253,6 +262,70 @@ describe("the memory plane follows the quanta home", () => {
       } finally {
         for (const d of [osHome, relocated]) rmSync(d, { recursive: true, force: true })
       }
+    }
+  })
+
+  test("an EMPTY destination directory does not block the migration; a non-empty one does", () => {
+    const osHome = temps.create("mem-emptydest-")
+    const relocated = temps.create("mem-emptydest2-")
+    const prior = join(osHome, ".quanta", "memory", "memory.sqlite")
+    sqliteWithRows(prior, 4)
+    const cmd = commandOf(
+      resolveStorePath({ homeDir: relocated, cwd: "/nonexistent-cwd", osHomeDir: osHome })
+        .legacyNotice,
+    ) as string
+    // Something created `<home>/memory/` and put nothing in it.
+    mkdirSync(join(relocated, "memory"), { recursive: true })
+    const res = spawnSync("sh", ["-c", cmd], { encoding: "utf8" })
+    expect(res.status, `exit ${res.status}: ${res.stderr}`).toBe(0)
+    expect(rowCount(join(relocated, "memory", "memory.sqlite"))).toBe(4)
+    // Paired control: a destination holding anything at all is refused.
+    const osHome2 = temps.create("mem-fulldest-")
+    const relocated2 = temps.create("mem-fulldest2-")
+    sqliteWithRows(join(osHome2, ".quanta", "memory", "memory.sqlite"), 4)
+    const cmd2 = commandOf(
+      resolveStorePath({ homeDir: relocated2, cwd: "/nonexistent-cwd", osHomeDir: osHome2 })
+        .legacyNotice,
+    ) as string
+    mkdirSync(join(relocated2, "memory"), { recursive: true })
+    writeFileSync(join(relocated2, "memory", "MEMORY.md"), "newer")
+    const refused = spawnSync("sh", ["-c", cmd2], { encoding: "utf8" })
+    expect(refused.status).not.toBe(0)
+    expect(refused.stderr).toContain("nothing moved")
+    expect(rowCount(join(osHome2, ".quanta", "memory", "memory.sqlite"))).toBe(4)
+  })
+
+  test("THE CONSOLIDATOR follows the same decision: it reads the unmigrated home's files in place", async () => {
+    const osHome = temps.create("mem-auto-")
+    const relocated = temps.create("mem-auto2-")
+    const priorDir = join(osHome, ".quanta", "memory")
+    sqliteWithRows(join(priorDir, "memory.sqlite"), 2)
+    writeFileSync(join(priorDir, "memory_summary.md"), "- prior hint\n")
+    const llm = { stream: async function* () {} } as never
+    const env = { QUANTA_HOME: relocated, HOME: osHome }
+    const before = await buildSessionMemoryAutoWires({ env, llm, sessionId: "auto-reloc" })
+    try {
+      expect(before?.memorySummaryMd, "the consolidator split from the store").toBe(
+        "- prior hint\n",
+      )
+      expect(existsSync(join(relocated, "memory")), "a second memory directory was created").toBe(
+        false,
+      )
+    } finally {
+      before?.dispose()
+    }
+    // Paired control: once the directory is migrated, the relocated home is used.
+    const cmd = commandOf(
+      resolveStorePath({ homeDir: relocated, cwd: "/nonexistent-cwd", osHomeDir: osHome })
+        .legacyNotice,
+    ) as string
+    expect(spawnSync("sh", ["-c", cmd], { encoding: "utf8" }).status).toBe(0)
+    writeFileSync(join(relocated, "memory", "memory_summary.md"), "- migrated hint\n")
+    const after = await buildSessionMemoryAutoWires({ env, llm, sessionId: "auto-reloc-2" })
+    try {
+      expect(after?.memorySummaryMd).toBe("- migrated hint\n")
+    } finally {
+      after?.dispose()
     }
   })
 

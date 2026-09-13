@@ -31,6 +31,7 @@ import { LlmPhase2Port } from "@/memory/consolidate/phase2-llm"
 import { loadMemorySummary } from "@/memory/consolidate/reader"
 import type { NodeFsLike } from "@/memory/consolidate/writer"
 import { type DreamOutcomeKind, INITIAL_DREAM_STATE } from "@/memory/dream/types"
+import { resolveMemoryHome } from "@/memory/store-path"
 import { redactSecrets } from "@/security"
 import { errMessage, gateOn, quantaHomeDirFrom, throwIfAborted } from "@/shared"
 
@@ -363,10 +364,20 @@ export const buildSessionMemoryAutoWires = async (
 
   const now = input.now ?? Date.now
   const logWarn = input.logWarn ?? noopWarn
-  // `input.homeDir`, when supplied, is the QUANTA home root; otherwise derive it from
-  // the injected env so a relocated `QUANTA_HOME` / `QUANTA_CONFIG_DIR` moves memory
-  // with sessions and knobs. `homedir()` was the OS home, which never did.
-  const paths = resolveMemoryDirPathsUnder(input.homeDir ?? quantaHomeDirFrom(input.env))
+  // `input.homeDir`, when supplied, is the QUANTA home root (a caller that knows its own
+  // root; no probe). Otherwise the SAME decision the store makes: the relocated home, or
+  // the pre-relocation home in place while an existing store there is unmigrated — so
+  // the consolidator's files never split from the store (round-8 audit). The OS home for
+  // the probe comes from the injected env, as in the memory factory.
+  const memoryHome =
+    input.homeDir ??
+    resolveMemoryHome({
+      quantaHome: quantaHomeDirFrom(input.env),
+      ...(input.env.HOME !== undefined && input.env.HOME !== ""
+        ? { osHomeDir: input.env.HOME }
+        : {}),
+    }).home
+  const paths = resolveMemoryDirPathsUnder(memoryHome)
   const writer = new FileMemoryWriter(paths, nodeFsPort, new ChildProcessGitPort(), { now })
   await writer.ensureDir()
   // T01 (audit L5 M-10): gate on the caller signal before opening the SQLite
