@@ -380,8 +380,12 @@ describe("test:ci admission gate", () => {
     // override would hide the production precedence contract from tests that
     // intentionally mutate QUANTA_HOME; and the composer must not repoint
     // QUANTA_CONFIG_DIR at the worker home either.
-    expect(env.QUANTA_CONFIG_DIR).not.toBe("/w/home/.quanta")
-    expect(env.QUANTA_BENCH_HOME).not.toBe("/w/home/.quanta/bench")
+    // EXACT: the base value passes through untouched. `.not.toBe(<worker path>)` forbade
+    // one repointing and admitted every other — composing `QUANTA_CONFIG_DIR: prefsHome`
+    // passed this file 15/0 (round-8 audit). (The test preload's fence then removes an
+    // ambient real root inside the worker; that is the fence's job, not the composer's.)
+    expect(env.QUANTA_CONFIG_DIR).toBe("/real/config")
+    expect(env.QUANTA_BENCH_HOME).toBe("/real/bench")
     expect(shardRunner).toContain("writeScanReachReceipt(")
     expect(optionsSource).toContain("--junit-out=")
     expect(optionsSource).toContain("--cache=")
