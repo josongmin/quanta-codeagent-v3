@@ -28,8 +28,12 @@
  *   4. sqlite opt-in:         QUANTA_MEMORY=sqlite + temp path writes a real
  *      on-disk file, persists, and a fresh factory call REOPENS + restores it.
  *   5. home-scoped, not cwd:  env unset ⇒ the store lands under
- *      `<home>/.quanta/memory/` and NO `.quanta/memory.sqlite` appears in the
+ *      `<quanta home>/memory/` and NO `.quanta/memory.sqlite` appears in the
  *      cwd (proven by running inside a temp cwd with a temp home — ADR-0557).
+ *      `override.homeDir` is the QUANTA home root since f4b71f89f (memory follows
+ *      QUANTA_HOME), so the store is `<homeDir>/memory/memory.sqlite`; these two arms
+ *      still expected the OS-home spelling `<homeDir>/.quanta/memory/…` and were red
+ *      from that commit until sep-14 — the integration tier was not run against it.
  *   6. escape byte-identical: QUANTA_MEMORY=off AND override.storeDisabled both
  *      collapse to `{}` ⇒ config has NO store ⇒ the loop's recall/persist are
  *      skipped ⇒ the LLM sees the SAME messages as a legacy no-memory run.
@@ -326,8 +330,8 @@ describe("ADR-0414 e2e — sqlite is an explicit opt-in (on-disk persist + reope
 // ADR-0557: this section USED to pin "the volatile default writes NOTHING to
 // disk". The default is now the durable home-scoped sqlite store; what stays
 // pinned is the half that mattered for repo hygiene — nothing lands in the cwd.
-describe("ADR-0557 e2e — durable default writes under HOME, never into the cwd", () => {
-  test("env unset ⇒ store at <home>/.quanta/memory/memory.sqlite; no .quanta/ in the temp cwd", async () => {
+describe("ADR-0557 e2e — durable default writes under the quanta home, never into the cwd", () => {
+  test("env unset ⇒ store at <quanta home>/memory/memory.sqlite; no .quanta/ in the temp cwd", async () => {
     const { dir, cleanup } = mkTmp("nodisk")
     const home = mkTmp("home")
     const prevCwd = process.cwd()
@@ -335,11 +339,11 @@ describe("ADR-0557 e2e — durable default writes under HOME, never into the cwd
       process.chdir(dir)
       const slot = buildMemoryForSession(env({}), { homeDir: home.dir, cwd: dir })
       expect(slot.store).toBeInstanceOf(SqliteStore)
-      expect(slot.storePath).toBe(join(home.dir, ".quanta", "memory", "memory.sqlite"))
+      expect(slot.storePath).toBe(join(home.dir, "memory", "memory.sqlite"))
       // Drive a real write through the store — the durable store writes
-      // under HOME, and STILL nothing under the cwd.
+      // under the quanta home, and STILL nothing under the cwd.
       await slot.store?.save(entry({ id: "v1", text: "durable under home" }))
-      expect(existsSync(join(home.dir, ".quanta", "memory", "memory.sqlite"))).toBe(true)
+      expect(existsSync(join(home.dir, "memory", "memory.sqlite"))).toBe(true)
 
       // No `.quanta` dir, no sqlite file anywhere in the temp cwd.
       const top = readdirSync(dir)
@@ -354,7 +358,7 @@ describe("ADR-0557 e2e — durable default writes under HOME, never into the cwd
     }
   })
 
-  test("bare truthy QUANTA_MEMORY=1 (the CLI seed) is durable too (under HOME, nothing in cwd)", async () => {
+  test("bare truthy QUANTA_MEMORY=1 (the CLI seed) is durable too (under the quanta home, nothing in cwd)", async () => {
     const { dir, cleanup } = mkTmp("truthy")
     const home = mkTmp("home")
     const prevCwd = process.cwd()
@@ -367,7 +371,7 @@ describe("ADR-0557 e2e — durable default writes under HOME, never into the cwd
       expect(slot.store).toBeInstanceOf(SqliteStore)
       await slot.store?.save(entry({ id: "t1", text: "truthy durable" }))
       expect(existsSync(join(dir, ".quanta"))).toBe(false)
-      expect(existsSync(join(home.dir, ".quanta", "memory", "memory.sqlite"))).toBe(true)
+      expect(existsSync(join(home.dir, "memory", "memory.sqlite"))).toBe(true)
       if (slot.store instanceof SqliteStore) slot.store.close()
     } finally {
       process.chdir(prevCwd)
