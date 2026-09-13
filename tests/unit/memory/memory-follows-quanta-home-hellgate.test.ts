@@ -20,7 +20,9 @@
  * resolved root is byte-identical to the old one. That equality is asserted below,
  * because it is the property that makes the change safe for existing installs.
  */
-import { describe, expect, test } from "bun:test"
+
+import { Database } from "bun:sqlite"
+import { afterAll, describe, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
@@ -29,9 +31,14 @@ import { resolveMemoryDirPathsUnder } from "@/memory/consolidate/paths"
 import { defaultDurableStorePath, resolveStorePath } from "@/memory/store-path"
 import { buildMemoryForSession } from "@/runner/assemble/memory-factory"
 import { quantaHomeDirFrom } from "@/shared/quanta-home"
-import { hermeticQuantaHomeEnv } from "../../_support/hermetic-quanta-home"
+import {
+  cleanupHermeticQuantaHomes,
+  hermeticQuantaHomeEnv,
+} from "../../_support/hermetic-quanta-home"
 
 const storeFor = (env: NodeJS.ProcessEnv): string => defaultDurableStorePath(quantaHomeDirFrom(env))
+
+afterAll(() => cleanupHermeticQuantaHomes())
 
 describe("the memory plane follows the quanta home", () => {
   test("an unset home resolves to the pre-existing default, byte for byte", () => {
@@ -107,39 +114,55 @@ describe("the memory plane follows the quanta home", () => {
   })
 
   /**
-   * NO SILENT ORPHAN — the property that makes the relocation safe for an operator who
-   * ALREADY set QUANTA_HOME or QUANTA_CONFIG_DIR.
+   * NO SILENT ORPHAN, AND A NOTICE THAT STAYS ACTIONABLE.
    *
-   * Measured before this existed: with `QUANTA_CONFIG_DIR` set and months of memory at
-   * `<os-home>/.quanta/memory/memory.sqlite`, `resolveStorePath` returned
-   * `source: "home-default"`, `legacyNotice: undefined`, and never probed the old path
-   * at all. A fresh empty store, silently, for the one operator the relocation was
-   * most likely to affect. The `legacyNotice` machinery already existed for the
-   * cwd-scoped case and was not extended to the case the fix itself created.
+   * Two designs failed here, both measured.
+   *  1. No probe: with `QUANTA_CONFIG_DIR` set and months of memory at
+   *     `<os-home>/.quanta/memory/memory.sqlite`, the resolution returned a fresh empty
+   *     store and no notice.
+   *  2. Notice only, resolution under the relocated home: opening that path CREATED the
+   *     destination on the launch that printed the notice. The notice therefore fired
+   *     exactly once, and the `mv -n` it recommended then found a destination already
+   *     there, skipped, and exited 0 — the old store orphaned, reported as success.
+   *     An adversarial audit reproduced it through the real factory: launch 1 notice,
+   *     launch 2 silent, command exit 0, 40 old rows left behind, new store holding 1.
+   *
+   * Now the existing store is read IN PLACE — the same answer the cwd-scoped legacy
+   * store has always had — so no second store is created, the notice repeats every
+   * launch until the operator migrates, and the command stays valid until they do.
    */
-  test("an existing store under the PRE-RELOCATION home is used, and named", () => {
+  const sqliteWithRows = (file: string, rows: number): void => {
+    mkdirSync(dirname(file), { recursive: true })
+    const db = new Database(file, { create: true })
+    db.exec("CREATE TABLE IF NOT EXISTS t (v TEXT)")
+    for (let i = 0; i < rows; i++) db.run("INSERT INTO t (v) VALUES (?)", [`row-${i}`])
+    db.close()
+  }
+  const rowCount = (file: string): number => {
+    const db = new Database(file, { readonly: true })
+    try {
+      return (db.query("SELECT COUNT(*) AS n FROM t").get() as { n: number }).n
+    } finally {
+      db.close()
+    }
+  }
+  const commandOf = (notice: string | undefined): string | undefined =>
+    /running\): (.+)$/.exec(notice ?? "")?.[1]
+
+  test("an existing pre-relocation store is read in place, and the notice carries a migration", () => {
     const osHome = mkdtempSync(join(tmpdir(), "mem-oshome-"))
     const relocated = mkdtempSync(join(tmpdir(), "mem-reloc-"))
     try {
       const prior = join(osHome, ".quanta", "memory", "memory.sqlite")
       mkdirSync(dirname(prior), { recursive: true })
       writeFileSync(prior, "existing memory")
+      const dest = join(relocated, "memory", "memory.sqlite")
       const r = resolveStorePath({ homeDir: relocated, cwd: "/nonexistent-cwd", osHomeDir: osHome })
-      // The path stays under the home the operator ASKED for. Returning the old file
-      // instead would be the split-brain again, inverted — a session whose QUANTA_HOME
-      // says one place secretly reading another — and it broke every suite that
-      // injects a scratch home.
-      expect(r.path).toBe(join(relocated, "memory", "memory.sqlite"))
-      expect(r.source).toBe("home-default")
-      expect(r.legacyNotice, "an orphan must be attributed, not silent").toBeDefined()
+      expect(r.path, "the existing store must be read where it is").toBe(prior)
+      expect(r.source).toBe("pre-relocation-home")
       expect(r.legacyNotice).toContain(prior)
-      expect(r.legacyNotice).toContain(join(relocated, "memory", "memory.sqlite"))
-      expect(r.legacyNotice, "the operator must be told it is not being read").toContain(
-        "NOT being read",
-      )
-      // The migration command must move the WAL side files too. Moving the database
-      // out from under an uncheckpointed log loses whatever was not checkpointed —
-      // silent data loss in the line written to prevent silent data loss.
+      expect(r.legacyNotice).toContain(dest)
+      expect(commandOf(r.legacyNotice), "the notice must carry a runnable command").toBeDefined()
       expect(r.legacyNotice).toContain("-wal")
       expect(r.legacyNotice).toContain("-shm")
     } finally {
@@ -147,69 +170,142 @@ describe("the memory plane follows the quanta home", () => {
     }
   })
 
-  /**
-   * The notice fires ONLY while the destination is absent, and its command cannot
-   * clobber.
-   *
-   * Measured on the first version: the notice re-fired on every launch (3 of 3), launch
-   * 1 CREATES the destination, and the printed bare `mv` then replaced the new session's
-   * store with the old one — real fixture, destination held `NEW-SESSION-DATA`, ran the
-   * command, destination became `OLD-MONTHS-OF-DATA`. The same silent data loss the
-   * helper was written to prevent, one level up.
-   */
-  test("no notice once this home has its own store — a `mv` would destroy the newer one", () => {
-    const osHome = mkdtempSync(join(tmpdir(), "mem-both-"))
-    const relocated = mkdtempSync(join(tmpdir(), "mem-both2-"))
+  test("THROUGH THE FACTORY: two launches before migrating create no second store and both notify", () => {
+    const osHome = mkdtempSync(join(tmpdir(), "mem-launch-"))
+    const relocated = mkdtempSync(join(tmpdir(), "mem-launch2-"))
+    const cwd = mkdtempSync(join(tmpdir(), "mem-launch-cwd-"))
     try {
       const prior = join(osHome, ".quanta", "memory", "memory.sqlite")
-      mkdirSync(dirname(prior), { recursive: true })
-      writeFileSync(prior, "old months of data")
       const dest = join(relocated, "memory", "memory.sqlite")
-      mkdirSync(dirname(dest), { recursive: true })
-      writeFileSync(dest, "this session's data")
+      sqliteWithRows(prior, 40)
+      const env = { QUANTA_MEMORY: "sqlite", QUANTA_HOME: relocated, HOME: osHome }
+      for (const launch of [1, 2]) {
+        const notices: string[] = []
+        const slot = buildMemoryForSession(env, { cwd, onStoreNotice: (l) => notices.push(l) })
+        expect(slot.storePath, `launch ${launch} opened the wrong store`).toBe(prior)
+        expect(notices.length, `launch ${launch} was silent`).toBe(1)
+        expect(existsSync(dest), `launch ${launch} created a second store`).toBe(false)
+      }
+    } finally {
+      for (const d of [osHome, relocated, cwd]) rmSync(d, { recursive: true, force: true })
+    }
+  })
+
+  test("RUN the command: it migrates real rows, and the next launch is silent and relocated", () => {
+    const osHome = mkdtempSync(join(tmpdir(), "mem-run-"))
+    const relocated = mkdtempSync(join(tmpdir(), "mem-run2-"))
+    try {
+      const prior = join(osHome, ".quanta", "memory", "memory.sqlite")
+      const dest = join(relocated, "memory", "memory.sqlite")
+      sqliteWithRows(prior, 40)
+      writeFileSync(`${prior}-wal`, "")
       const r = resolveStorePath({ homeDir: relocated, cwd: "/nonexistent-cwd", osHomeDir: osHome })
-      expect(r.path).toBe(dest)
-      expect(
-        r.legacyNotice,
-        "recommending a `mv` onto an existing store is how the newer one gets destroyed",
-      ).toBeUndefined()
+      const res = spawnSync("sh", ["-c", commandOf(r.legacyNotice) as string], { encoding: "utf8" })
+      expect(res.status, `exit ${res.status}: ${res.stderr}`).toBe(0)
+      expect(rowCount(dest), "rows did not arrive").toBe(40)
+      expect(existsSync(prior), "the old store is still there").toBe(false)
+      expect(existsSync(`${dest}-wal`), "the WAL side file did not travel").toBe(true)
+      const after = resolveStorePath({
+        homeDir: relocated,
+        cwd: "/nonexistent-cwd",
+        osHomeDir: osHome,
+      })
+      expect(after).toEqual({ path: dest, source: "home-default" })
     } finally {
       for (const d of [osHome, relocated]) rmSync(d, { recursive: true, force: true })
     }
   })
 
-  test("the migration command is no-clobber and exits 0 when there are no side files", () => {
-    const osHome = mkdtempSync(join(tmpdir(), "mem-cmd-"))
-    const relocated = mkdtempSync(join(tmpdir(), "mem-cmd2-"))
+  test("the command REFUSES — non-zero, nothing moved — when the destination or its WAL exists", () => {
+    // `mv -n` exited 0 on a skip and still moved the side files: measured with real
+    // SQLite, the new store went from 5 rows to 50 OLD rows via the carried WAL.
+    for (const occupied of ["", "-wal"]) {
+      const osHome = mkdtempSync(join(tmpdir(), "mem-refuse-"))
+      const relocated = mkdtempSync(join(tmpdir(), "mem-refuse2-"))
+      try {
+        const prior = join(osHome, ".quanta", "memory", "memory.sqlite")
+        const dest = join(relocated, "memory", "memory.sqlite")
+        sqliteWithRows(prior, 50)
+        writeFileSync(`${prior}-wal`, "OLD-WAL")
+        const cmd = commandOf(
+          resolveStorePath({ homeDir: relocated, cwd: "/nonexistent-cwd", osHomeDir: osHome })
+            .legacyNotice,
+        ) as string
+        if (occupied === "") sqliteWithRows(dest, 5)
+        else {
+          mkdirSync(dirname(dest), { recursive: true })
+          writeFileSync(`${dest}-wal`, "NEWER")
+        }
+        const res = spawnSync("sh", ["-c", cmd], { encoding: "utf8" })
+        expect(res.status, `occupied "${occupied}" must refuse`).not.toBe(0)
+        expect(res.stderr).toContain("nothing moved")
+        expect(rowCount(prior), "the old store was touched").toBe(50)
+        expect(readFileSync(`${prior}-wal`, "utf8"), "the old WAL moved").toBe("OLD-WAL")
+        if (occupied === "") expect(rowCount(dest), "the newer store was changed").toBe(5)
+        else expect(readFileSync(`${dest}-wal`, "utf8")).toBe("NEWER")
+      } finally {
+        for (const d of [osHome, relocated]) rmSync(d, { recursive: true, force: true })
+      }
+    }
+  })
+
+  test("hostile directory names are data, not shell", () => {
+    // Paths used to sit inside DOUBLE quotes: a legacy cwd named `$(touch PWNED)` created
+    // PWNED when the notice was pasted.
+    for (const hostile of [
+      "$(touch PWNED_SUB)",
+      "`touch PWNED_TICK`",
+      '"; touch PWNED_DQ; echo "',
+      "proj$HOME",
+      "it's",
+    ]) {
+      const root = mkdtempSync(join(tmpdir(), "mem-hostile-"))
+      try {
+        const cwd = join(root, hostile)
+        const legacy = join(cwd, ".quanta", "memory.sqlite")
+        sqliteWithRows(legacy, 3)
+        const home = join(root, "qhome")
+        const r = resolveStorePath({ homeDir: home, cwd })
+        const res = spawnSync("sh", ["-c", commandOf(r.legacyNotice) as string], {
+          encoding: "utf8",
+          cwd: root,
+        })
+        expect(res.status, `${hostile}: exit ${res.status} ${res.stderr}`).toBe(0)
+        expect(rowCount(join(home, "memory", "memory.sqlite")), hostile).toBe(3)
+        const markers = spawnSync("find", [root, "-name", "PWNED*"], { encoding: "utf8" }).stdout
+        expect(markers, `${hostile} executed`).toBe("")
+      } finally {
+        rmSync(root, { recursive: true, force: true })
+      }
+    }
+  })
+
+  test("two stores: the session keeps this home's, and the notice recommends nothing destructive", () => {
+    const osHome = mkdtempSync(join(tmpdir(), "mem-both-"))
+    const relocated = mkdtempSync(join(tmpdir(), "mem-both2-"))
+    const cwd = mkdtempSync(join(tmpdir(), "mem-both-cwd-"))
     try {
       const prior = join(osHome, ".quanta", "memory", "memory.sqlite")
-      mkdirSync(dirname(prior), { recursive: true })
-      writeFileSync(prior, "OLD")
+      const dest = join(relocated, "memory", "memory.sqlite")
+      sqliteWithRows(prior, 7)
+      sqliteWithRows(dest, 2)
       const r = resolveStorePath({ homeDir: relocated, cwd: "/nonexistent-cwd", osHomeDir: osHome })
-      const cmd = /running\): (.+)$/.exec(r.legacyNotice ?? "")?.[1]
-      expect(cmd, "the notice must carry a runnable command").toBeDefined()
-      // RUN IT, twice, against real files — a string assertion is not enough. A
-      // `toContain("mv -n")` is satisfied by the side-file loop while the MAIN move is
-      // still a clobbering bare `mv`, which is exactly how that mutant survived.
-      //
-      // Pass 1: no side files, empty destination — the case that used to exit 1 with
-      // the migration complete.
-      const res = spawnSync("sh", ["-c", cmd as string], { encoding: "utf8" })
-      expect(res.status, `exit ${res.status}: ${res.stderr}`).toBe(0)
-      expect(readFileSync(join(relocated, "memory", "memory.sqlite"), "utf8")).toBe("OLD")
-
-      // Pass 2: the destination now EXISTS and holds this session's data, and the old
-      // path has data again. The command must not replace it.
-      mkdirSync(dirname(prior), { recursive: true })
-      writeFileSync(prior, "OLD-AGAIN")
-      writeFileSync(join(relocated, "memory", "memory.sqlite"), "THIS-SESSION")
-      spawnSync("sh", ["-c", cmd as string], { encoding: "utf8" })
+      expect(r.path).toBe(dest)
+      expect(r.legacyNotice, "an orphan must still be named").toContain(prior)
       expect(
-        readFileSync(join(relocated, "memory", "memory.sqlite"), "utf8"),
-        "the command clobbered the newer store",
-      ).toBe("THIS-SESSION")
+        commandOf(r.legacyNotice),
+        "no command may be offered onto an existing store",
+      ).toBeUndefined()
+      expect(r.legacyNotice).not.toContain("mv ")
+      // The legacy-cwd store gets the same treatment when the home store exists too.
+      const legacy = join(cwd, ".quanta", "memory.sqlite")
+      sqliteWithRows(legacy, 1)
+      const l = resolveStorePath({ homeDir: relocated, cwd })
+      expect(l.path).toBe(legacy)
+      expect(commandOf(l.legacyNotice)).toBeUndefined()
+      expect(l.legacyNotice).toContain(dest)
     } finally {
-      for (const d of [osHome, relocated]) rmSync(d, { recursive: true, force: true })
+      for (const d of [osHome, relocated, cwd]) rmSync(d, { recursive: true, force: true })
     }
   })
 
@@ -225,11 +321,7 @@ describe("the memory plane follows the quanta home", () => {
         cwd: "/nonexistent-cwd",
         osHomeDir: osHome,
       })
-      expect(r.source, "coinciding paths must not be reported as a legacy find").toBe(
-        "home-default",
-      )
-      expect(r.legacyNotice).toBeUndefined()
-      expect(r.path).toBe(prior)
+      expect(r).toEqual({ path: prior, source: "home-default" })
     } finally {
       rmSync(osHome, { recursive: true, force: true })
     }
@@ -253,36 +345,39 @@ describe("the memory plane follows the quanta home", () => {
     }
   })
 
-  /** WIRING PROOF for the probe: the factory must actually inject the OS home. */
-  test("buildMemoryForSession injects the OS home so the probe can fire", () => {
-    const scratch = mkdtempSync(join(tmpdir(), "mem-wire-"))
-    const cwd = mkdtempSync(join(tmpdir(), "mem-wcwd-"))
+  test("the factory takes the OS home from the injected env, never homedir()", () => {
+    // Because a found pre-relocation store is now read IN PLACE, the probe's reach
+    // decides whose store a session opens. `homedir()` answers the developer's real home
+    // and cannot be redirected inside a running bun process, so a suite relocating only
+    // QUANTA_HOME would have opened the real store.
+    const relocated = mkdtempSync(join(tmpdir(), "mem-nohome-"))
+    const cwd = mkdtempSync(join(tmpdir(), "mem-nohome-cwd-"))
     try {
       const notices: string[] = []
-      // A relocated home with no prior store: the probe runs and finds nothing, so the
-      // resolution is the ordinary home default and no notice fires.
       const slot = buildMemoryForSession(
-        { QUANTA_MEMORY: "sqlite", QUANTA_HOME: scratch },
+        { QUANTA_MEMORY: "sqlite", QUANTA_HOME: relocated },
         { cwd, onStoreNotice: (l) => notices.push(l) },
       )
-      // The resolution is always the relocated home, notice or not.
-      expect(slot.storePath).toBe(join(scratch, "memory", "memory.sqlite"))
-      // On a developer box the real `~/.quanta/memory/memory.sqlite` usually exists,
-      // so the probe fires and emits ONE notice. Either way the path is unchanged —
-      // that invariant is what this arm pins, not the notice count.
-      for (const n of notices) expect(n).toContain("NOT being read")
-      // The injection itself is asserted at the source: without `osHomeDir` the probe
-      // is skipped entirely and an orphan is silent again.
+      expect(slot.storePath, "no HOME in the env must mean no probe").toBe(
+        join(relocated, "memory", "memory.sqlite"),
+      )
+      expect(notices).toEqual([])
       const factory = readFileSync(
         join(import.meta.dir, "..", "..", "..", "src/runner/assemble/memory-factory.ts"),
         "utf8",
       )
-      expect(factory, "the factory must inject the OS home for the probe").toContain(
-        "osHomeDir: homedir()",
-      )
+      expect(factory).toContain("osHomeDir: env.HOME")
+      expect(factory).not.toMatch(/osHomeDir:\s*homedir\(\)/)
     } finally {
-      for (const d of [scratch, cwd]) rmSync(d, { recursive: true, force: true })
+      for (const d of [relocated, cwd]) rmSync(d, { recursive: true, force: true })
     }
+  })
+
+  test("hermeticQuantaHomeEnv pins HOME, so the probe cannot reach the developer's store", () => {
+    const env = hermeticQuantaHomeEnv(process.env, "memory-probe-fence")
+    expect(env.HOME, "HOME must be a scratch dir").not.toBe(homedir())
+    expect(env.HOME?.startsWith(tmpdir())).toBe(true)
+    expect(env.QUANTA_CONFIG_DIR).not.toBe(env.HOME)
   })
 
   /** ANTI-VACUITY: the helper under test must actually be doing the join, or every

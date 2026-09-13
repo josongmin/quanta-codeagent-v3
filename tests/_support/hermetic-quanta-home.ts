@@ -36,14 +36,23 @@ export const hermeticQuantaHomeDir = (label = "quanta-home"): string => {
 
 /**
  * An env bag whose Quanta home is a fresh scratch dir. `base` is spread FIRST so
- * a caller's own keys survive, but `QUANTA_CONFIG_DIR` is applied AFTER on
+ * a caller's own keys survive, but `QUANTA_CONFIG_DIR` and `HOME` are applied AFTER on
  * purpose: a caller passing `process.env` must not be able to re-point the home
  * at the real one by accident (which is exactly how the defect above shipped).
  */
 export const hermeticQuantaHomeEnv = (
   base: NodeJS.ProcessEnv = {},
   label = "quanta-home",
-): NodeJS.ProcessEnv => ({ ...base, QUANTA_CONFIG_DIR: hermeticQuantaHomeDir(label) })
+): NodeJS.ProcessEnv => {
+  // HOME is pinned too, to a scratch OS home beside the Quanta one. The memory
+  // factory's PRE-RELOCATION probe looks for an existing store under `env.HOME` and
+  // reads it IN PLACE when this home has none; with a relocated QUANTA_CONFIG_DIR and
+  // the caller's real HOME, that store is the developer's own. A relocated Quanta home
+  // with a real OS home is exactly the shape of an operator mid-migration, so the bag
+  // must not look like one.
+  const quantaHome = hermeticQuantaHomeDir(label)
+  return { ...base, HOME: hermeticQuantaHomeDir(`${label}-os`), QUANTA_CONFIG_DIR: quantaHome }
+}
 
 /** Remove every scratch home this module handed out. Idempotent. */
 export const cleanupHermeticQuantaHomes = (): void => {

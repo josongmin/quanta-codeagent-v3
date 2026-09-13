@@ -42,7 +42,7 @@ export const defaultDurableStorePath = (quantaHome: string): string =>
 export const legacyCwdStorePath = (cwd: string): string => path.join(cwd, LEGACY_CWD_STORE_RELPATH)
 
 /** Where the resolved path came from, in precedence order. */
-export type StorePathSource = "explicit" | "legacy-cwd" | "home-default"
+export type StorePathSource = "explicit" | "legacy-cwd" | "pre-relocation-home" | "home-default"
 
 /** `<os-home>/.quanta/memory/memory.sqlite` — where the store lived before the memory
  *  plane started following `QUANTA_HOME`/`QUANTA_CONFIG_DIR`. Pure.
@@ -86,29 +86,54 @@ export interface ResolveStorePathInput {
   readonly osHomeDir?: string | undefined
 }
 
-/** The migration command a notice prints. Moves the sqlite AND its side files.
+/** POSIX single-quote a path: the only quoting in which the shell expands nothing. */
+const shq = (p: string): string => `'${p.replaceAll("'", "'\\''")}'`
+
+/**
+ * The migration command a notice prints. Moves the sqlite AND its side files, and
+ * REFUSES rather than skips.
  *
- *  `mv -n`, and an `if` rather than `&&` in the loop. Two measured defects in the
- *  first version:
+ * Four versions, four measured defects, each worth keeping in view:
  *
- *  - a bare `mv` OVERWROTE the destination. The pre-relocation notice re-fired on
- *    every launch, and launch 1 CREATES the destination — so from launch 2 onward the
- *    printed command replaced the new session's store with the old one. Real fixture:
- *    destination held `NEW-SESSION-DATA`, ran the command, destination became
- *    `OLD-MONTHS-OF-DATA`, no prompt, no backup. The same failure this helper was
- *    written to prevent, one level up.
- *  - `[ -e … ] && mv …` was the last element of the `&&` chain, so a clean shutdown
- *    with no side files made the whole command exit 1 with the migration COMPLETE.
- *    Measured exit=1 on the common case.
+ *  1. `-wal`/`-shm` omitted: moving the database out from under an uncheckpointed
+ *     write-ahead log lost whatever had not been checkpointed.
+ *  2. a bare `mv` OVERWROTE the destination: destination `NEW-SESSION-DATA` became
+ *     `OLD-MONTHS-OF-DATA`, no prompt.
+ *  3. `mv -n` fixed the overwrite and made the command SILENT: `-n` exits 0 when it
+ *     skips. The launch that printed the pre-relocation notice then CREATED the
+ *     destination, so an operator who quit and ran the command got exit 0, the old
+ *     store left where it was, and a new store holding one row — an orphan reported as
+ *     success. And because `-n` skipped only the database, the old `-wal`/`-shm` still
+ *     moved next to the NEW file: measured with real SQLite, the new store went from
+ *     5 rows to 50 OLD rows and the old store to 0, `integrity_check` ok, exit 0.
+ *  4. paths were interpolated inside DOUBLE quotes, where the shell still expands
+ *     `$(…)`, backticks and `$VAR`. A legacy cwd directory named `$(touch PWNED)`
+ *     created `PWNED` when the notice was pasted.
  *
- *  `-wal` and `-shm` were omitted for as long as this notice existed. An operator who
- *  followed it moved the database out from under an uncheckpointed write-ahead log and
- *  lost whatever had not been checkpointed — silent data loss, in the line written to
- *  prevent silent data loss. `mv` on a missing side file is a hard error, so each is
- *  guarded. */
-const migrationCommand = (from: string, to: string): string =>
-  `mkdir -p "${path.dirname(to)}" && mv -n "${from}" "${to}"` +
-  ` && for s in -wal -shm; do if [ -e "${from}$s" ]; then mv -n "${from}$s" "${to}$s"; fi; done`
+ * Now: everything is single-quoted; the whole thing runs in a subshell so a refusal
+ * cannot close the operator's interactive shell; it refuses with a message and a
+ * non-zero exit if the destination or either side file already exists; and then it
+ * moves with plain `mv`, so any failure is a failure.
+ */
+const migrationCommand = (from: string, to: string): string => {
+  const f = shq(from)
+  const t = shq(to)
+  return (
+    `( set -e; ` +
+    `for s in '' -wal -shm; do if [ -e ${t}"$s" ]; then ` +
+    `echo 'memory migrate: '${t}"$s"' already exists; nothing moved' >&2; exit 1; fi; done; ` +
+    `mkdir -p ${shq(path.dirname(to))}; mv ${f} ${t}; ` +
+    `for s in -wal -shm; do if [ -e ${f}"$s" ]; then mv ${f}"$s" ${t}"$s"; fi; done )`
+  )
+}
+
+/** The notice for two stores that BOTH exist. Names them; recommends nothing
+ *  destructive, because which one holds the data the operator wants is not knowable
+ *  here. */
+const twoStoresNotice = (using: string, other: string, why: string): string =>
+  `memory store: TWO stores exist. This session uses ${using}; another is at ${other} (${why}). ` +
+  `They are not merged and nothing will move either one. To use the other, set ` +
+  `QUANTA_MEMORY_PATH=${shq(other)}; once you no longer need it, remove it.`
 
 /** Resolve the sqlite path: explicit > legacy cwd file > pre-relocation home file >
  *  home default. Pure given `exists`. */
@@ -120,46 +145,48 @@ export const resolveStorePath = (input: ResolveStorePathInput): StorePathResolut
   const legacy = legacyCwdStorePath(input.cwd)
   const home = defaultDurableStorePath(input.homeDir)
   if (exists(legacy)) {
+    // In place, as before: user data is never moved or copied. But the migration
+    // command is offered ONLY while the destination is absent — if the home store
+    // exists too, a move would at best skip and at worst carry the legacy WAL onto it.
     return {
       path: legacy,
       source: "legacy-cwd",
-      legacyNotice:
-        `memory store: using legacy cwd-scoped ${legacy}; the default is now ${home}. ` +
-        `To migrate (with no quanta running): ${migrationCommand(legacy, home)}`,
+      legacyNotice: exists(home)
+        ? twoStoresNotice(legacy, home, "the home default")
+        : `memory store: using legacy cwd-scoped ${legacy}; the default is now ${home}. ` +
+          `To migrate (with no quanta running): ${migrationCommand(legacy, home)}`,
     }
   }
-  // PRE-RELOCATION: NOTICE ONLY, never a redirect.
-  //
-  // When the home has moved, an existing store at the pre-relocation path would
-  // otherwise be silently orphaned — measured: `source: "home-default"`,
-  // `legacyNotice: undefined`, and the old path never probed.
-  //
-  // The notice does NOT change `path`. Returning the old file instead was the first
-  // shape of this fix and it is the split-brain again, inverted: a session whose
-  // `QUANTA_HOME` says one place would secretly read another. Measured — it also broke
-  // every suite that injects a scratch home, resolving ten of them to the developer's
-  // real store. So the resolution stays under the home the operator asked for, and the
-  // operator is TOLD what is at the old path and how to move it.
-  //
+  if (input.osHomeDir === undefined || input.osHomeDir === "") {
+    return { path: home, source: "home-default" }
+  }
+  const prior = preRelocationHomeStorePath(input.osHomeDir)
   // Skipped when the paths coincide (an unset home), so the common case is silent.
-  if (input.osHomeDir !== undefined && input.osHomeDir !== "") {
-    const prior = preRelocationHomeStorePath(input.osHomeDir)
-    // Only while the destination is still ABSENT. The notice recommends a `mv`, and a
-    // `mv` is only the right answer when there is nothing to move onto: once this home
-    // has its own store, the operator has TWO stores and moving one over the other
-    // destroys the newer. Measured — without this the notice re-fired on every launch
-    // (3 of 3) recommending a command that had become destructive.
-    if (prior !== home && exists(prior) && !exists(home)) {
-      return {
-        path: home,
-        source: "home-default",
-        legacyNotice:
-          `memory store: this session uses ${home}, but an existing store is at ${prior} ` +
-          `(where memory lived before the plane followed QUANTA_HOME/QUANTA_CONFIG_DIR). ` +
-          `It is NOT being read — set QUANTA_MEMORY_PATH to use it, or migrate ` +
-          `(with no quanta running): ${migrationCommand(prior, home)}`,
-      }
+  if (prior === home || !exists(prior)) return { path: home, source: "home-default" }
+  if (exists(home)) {
+    return {
+      path: home,
+      source: "home-default",
+      legacyNotice: twoStoresNotice(
+        home,
+        prior,
+        "where memory lived before the plane followed QUANTA_HOME/QUANTA_CONFIG_DIR",
+      ),
     }
   }
-  return { path: home, source: "home-default" }
+  // IN PLACE, the same answer the legacy-cwd store gets. The previous shape kept the
+  // resolution under the relocated home and only PRINTED a notice — and opening that
+  // path CREATED the destination on the very launch that printed it. So the notice
+  // fired exactly once, and the command it recommended could only ever find a
+  // destination already there. Reading the existing store where it is creates no
+  // second store: the notice repeats every launch until the operator migrates, and
+  // the command stays valid until they do.
+  return {
+    path: prior,
+    source: "pre-relocation-home",
+    legacyNotice:
+      `memory store: using ${prior}, where memory lived before the plane followed ` +
+      `QUANTA_HOME/QUANTA_CONFIG_DIR; this home's store would be ${home}. ` +
+      `To migrate (with no quanta running): ${migrationCommand(prior, home)}`,
+  }
 }

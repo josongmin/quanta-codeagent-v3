@@ -32,8 +32,11 @@
  * SLICE FENCE: this file lives in `src/runner/assemble/` so the CLI app
  * surface (`src/apps/cli/internal.ts`) and the unified-agent composition
  * root (`src/apps/agent/index.ts`) both depend on it without violating
- * the `runner → apps` direction. The factory is PURE w.r.t. its `env`
- * input (no `process.env` reads); the surface owns the env read.
+ * the `runner → apps` direction. The factory reads no `process.env` and no
+ * `homedir()` — the OS home for the pre-relocation probe comes from `env.HOME` — and
+ * its one ambient read is `process.cwd()`, when `override.cwd` is absent, for the
+ * legacy cwd-scoped store. (An earlier version said "PURE … no `process.env` reads"
+ * while calling `homedir()`, which reads `$HOME`.)
  *
  * BYTE-IDENTICAL ESCAPE HATCH (sealed by hellgate):
  *   - `override.storeDisabled === true` ⇒ `{}` (all slots omitted)
@@ -47,7 +50,6 @@
  *     (removed with ADR-0556).
  */
 
-import { homedir } from "node:os"
 import type { AgentConfig } from "@/agent"
 import { InMemoryStore, type PersistentStorePort } from "@/memory"
 import { resolveStorePath, type StorePathResolution } from "@/memory/store-path"
@@ -170,14 +172,23 @@ const resolveSessionStorePath = (
     // The PRE-RELOCATION probe, ONLY when the home came from the env.
     //
     // Without it, an operator who set QUANTA_HOME or QUANTA_CONFIG_DIR and has an
-    // existing store at `<os-home>/.quanta/memory/` silently gets a fresh empty one
-    // when the memory plane started following the home.
+    // existing store at `<os-home>/.quanta/memory/` silently gets a fresh empty one.
+    // With it, that store is read IN PLACE until migrated (see `resolveStorePath`).
     //
-    // But an EXPLICIT `override.homeDir` is a caller that knows its own root — a test
-    // injecting a scratch dir, a surface with its own home. There is no relocation to
-    // compensate for there, so the probe is skipped. Injected so `resolveStorePath`
-    // stays pure. The probe only ever produces a NOTICE; it never redirects the path.
-    ...(override?.homeDir === undefined ? { osHomeDir: homedir() } : {}),
+    // An EXPLICIT `override.homeDir` is a caller that knows its own root — a test
+    // injecting a scratch dir, a surface with its own home — so the probe is skipped.
+    //
+    // The OS home comes from the INJECTED env, not `homedir()`. Because the resolution
+    // now reads a found pre-relocation store in place, the probe's reach decides whose
+    // store a session opens: a suite that relocates QUANTA_HOME to a scratch dir while
+    // `homedir()` still answers the developer's real home would open the REAL store.
+    // `homedir()` also cannot be redirected inside a running bun process (it ignores a
+    // later `process.env.HOME = …`), so a test could not fence it even deliberately.
+    // Every production caller passes `process.env`, whose HOME is the OS home; an env
+    // without HOME skips the probe rather than guessing.
+    ...(override?.homeDir === undefined && env.HOME !== undefined && env.HOME !== ""
+      ? { osHomeDir: env.HOME }
+      : {}),
     cwd: override?.cwd ?? process.cwd(),
     explicitPath: override?.storePath ?? env.QUANTA_MEMORY_PATH,
   })
@@ -277,7 +288,8 @@ export const resolveMemoryConfigFromEnv = (
  *   `QUANTA_MEMORY=off` (or any falsey value) still flips the whole
  *   bundle to `{}` — single knob escape hatch.
  *
- * Pure: never reads `process.env`. The surface owns the env read.
+ * Reads no `process.env` and no `homedir()`; falls back to `process.cwd()` when
+ * `override.cwd` is absent. The surface owns the env read.
  * Deterministic: same input ⇒ same shape (store identity is freshly
  * allocated each call — surfaces share a single call per session).
  */
