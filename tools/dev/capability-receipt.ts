@@ -79,6 +79,31 @@ export const CAPABILITY_REQUIRE_ENV = "QUANTA_REQUIRE_CAPABILITIES"
 export const CAPABILITY_LINE_PREFIX = "[capability]"
 
 /**
+ * The skipped test a consumer registers, in the ASKING file, for a decision that
+ * did not execute.
+ *
+ * The stdout line is printed once per capability per PROCESS, and a shard worker
+ * runs many files in one process, so only the first asker was ever named. And
+ * nothing read the line: `capability-result` took `blockedMissing` and
+ * `failedSetup` from command-line flags no lane passed, so the aggregator's two
+ * hard-failure checks could not fire. A junit testcase is attributed to its file
+ * and read by the reducer that already reads that junit.
+ */
+export const capabilityRecordName = (capability: string, verdict: string, detail: string): string =>
+  `${CAPABILITY_LINE_PREFIX} RECORD ${capability} ${verdict}: ${detail}`
+
+export const parseCapabilityRecordName = (
+  name: string,
+): { readonly capability: string; readonly verdict: string } | undefined => {
+  const prefix = `${CAPABILITY_LINE_PREFIX} RECORD `
+  if (!name.startsWith(prefix)) return undefined
+  const match = /^(\S+) ([a-z-]+): /u.exec(name.slice(prefix.length))
+  return match?.[1] === undefined || match[2] === undefined
+    ? undefined
+    : { capability: match[1], verdict: match[2] }
+}
+
+/**
  * Is `id` REQUIRED to have actually been exercised?
  *
  * # One name, one grammar

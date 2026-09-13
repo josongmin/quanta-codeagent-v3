@@ -36,6 +36,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
+  capabilityCallProblems,
+  capabilityCalls,
   capabilityCallsites,
   scanCapabilityCallsites,
 } from "../../../tools/dev/capability-callsites"
@@ -630,5 +632,68 @@ describe("capability vocabulary and ids do not drift", () => {
       ].join("\n"),
     })
     expect(aliased.map((site) => site.capabilityId)).toEqual(["git"])
+  })
+
+  test("🔴 every ambient capability call names its id statically and asks at module scope", () => {
+    // The two drift guards above read only the ids the scanner can SEE. It used
+    // to see one shape — a bare imported name, one string literal — and skipped
+    // every other call without a word, so `capability(REAL_CHROME_CAPABILITY)`
+    // was a consumer neither guard had ever compared to the catalogue.
+    const corpus = readCorpusInputs(REPO_ROOT)
+    expect(capabilityCallProblems(corpus)).toEqual([])
+    // SENTINEL from the real corpus: the constant-bound call is now resolved.
+    // Without it the line above would also pass for a scanner that sees nothing.
+    const sites = scanCapabilityCallsites(corpus)
+    expect(sites).toContainEqual(
+      expect.objectContaining({
+        file: "tests/integration/browser-real-chrome-e2e.test.ts",
+        capabilityId: "chrome-cdp",
+      }),
+    )
+  })
+
+  test("🔴 RED ON INJECTION: every call shape the drift guard cannot vouch for is named", () => {
+    const text = [
+      `import { test } from "bun:test"`,
+      `import { capability } from "../../tools/dev/capability-receipt-consumer"`,
+      `import * as consumer from "../../tools/dev/capability-receipt-consumer"`,
+      `let mutable = "git"`,
+      `const ids = { chrome: "chrome-cdp" }`,
+      `const a = capability(mutable)`,
+      `const b = capability(ids.chrome)`,
+      `const c = consumer.capability(mutable)`,
+      `test("asks too late", () => { capability("git") })`,
+      `const helper = (id: string) => capability(id)`,
+      ``,
+    ].join("\n")
+    expect(capabilityCallProblems([{ path: "tests/unit/injected.test.ts", text }])).toEqual([
+      "tests/unit/injected.test.ts:10 ambient-call-inside-a-function",
+      "tests/unit/injected.test.ts:10 unresolved-id",
+      "tests/unit/injected.test.ts:6 unresolved-id",
+      "tests/unit/injected.test.ts:7 unresolved-id",
+      "tests/unit/injected.test.ts:8 unresolved-id",
+      "tests/unit/injected.test.ts:9 ambient-call-inside-a-function",
+    ])
+  })
+
+  test("PAIRED CONTROL: a constant id, an explicit env and a stranger's function are fine", () => {
+    const text = [
+      `import { test } from "bun:test"`,
+      `import * as consumer from "../../tools/dev/capability-receipt-consumer"`,
+      `import { capability as cap } from "../../tools/dev/capability-receipt-consumer"`,
+      `const ID = "lancedb"`,
+      `const a = cap(ID)`,
+      `const b = consumer.capability("git")`,
+      // The mechanism's own tests pass an env; that is not the campaign receipt.
+      `test("drives the mechanism", () => { cap("git", {}) })`,
+      `const other = { capability: (id: string) => id }`,
+      `const c = other.capability(ID + "x")`,
+      ``,
+    ].join("\n")
+    const input = { path: "tests/unit/control.test.ts", text }
+    expect(capabilityCallProblems([input])).toEqual([])
+    expect(capabilityCallsites(input).map((site) => site.capabilityId)).toEqual(["lancedb", "git"])
+    // The explicit-env call is SEEN, just not counted as a campaign consumer.
+    expect(capabilityCalls(input).filter((call) => !call.ambient)).toHaveLength(1)
   })
 })
