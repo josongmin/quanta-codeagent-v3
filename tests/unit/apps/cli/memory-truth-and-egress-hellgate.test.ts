@@ -189,22 +189,28 @@ describe("T1 — buildMemoryForSession reports the resolved store kind", () => {
   })
 
   test("the resolved store NEVER escapes the scratch home", () => {
-    // The arm that would have caught the regression this file just recorded. With
-    // only `HOME` redirected, `buildTooling` resolved the developer's REAL
-    // `~/.quanta/memory/memory.sqlite` and every assertion about `kind` still
-    // passed — a suite writing to the real store while reporting green.
-    for (const env of [{}, { QUANTA_MEMORY: "1" }, { QUANTA_MEMORY: "sqlite" }]) {
-      const slot = buildMemoryForSession(env as NodeJS.ProcessEnv, {
-        homeDir: join(tmp, ".quanta"),
-        cwd: tmp,
-      })
+    // The arm that would have caught the regression this file recorded: with only `HOME`
+    // redirected, `buildTooling` resolved the developer's REAL
+    // `~/.quanta/memory/memory.sqlite` while every `kind` assertion passed.
+    //
+    // Every call goes through ENV resolution. The first version injected
+    // `override.homeDir` for three of its four checks, which bypasses exactly the
+    // resolution that escaped: an audit removed the QUANTA_HOME redirect and three of the
+    // four still passed.
+    for (const extra of [{}, { QUANTA_MEMORY: "1" }, { QUANTA_MEMORY: "sqlite" }]) {
+      const slot = buildMemoryForSession({ ...process.env, ...extra }, { cwd: tmp })
+      expect(slot.storePath, `no store path for ${JSON.stringify(extra)}`).toBeDefined()
       expect(
-        slot.storePath ?? tmp,
-        `escaped the scratch home for ${JSON.stringify(env)}`,
-      ).toContain(tmp)
+        (slot.storePath as string).startsWith(`${tmp}/`),
+        `escaped the scratch home for ${JSON.stringify(extra)}: ${slot.storePath}`,
+      ).toBe(true)
     }
     const t = realTooling()
-    expect(t.memoryStorePath ?? tmp, "buildTooling escaped the scratch home").toContain(tmp)
+    expect(t.memoryStorePath).toBeDefined()
+    expect(
+      (t.memoryStorePath as string).startsWith(`${tmp}/`),
+      `buildTooling escaped the scratch home: ${t.memoryStorePath}`,
+    ).toBe(true)
   })
 
   test("QUANTA_MEMORY=sqlite + path ⇒ kind === 'sqlite' AND the resolved path is carried", () => {

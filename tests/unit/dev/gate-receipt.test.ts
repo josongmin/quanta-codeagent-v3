@@ -302,8 +302,30 @@ describe("a green states what it could not check", () => {
     if (receipt.missingCapabilities.length === 0) return
     const line = result.stdout.split("\n").find((text) => text.includes("[capabilities]"))
     expect(line, `no capability line in:\n${result.stdout}`).toBeDefined()
-    expect(line).toContain("was skipped")
+    expect(line).toContain("may have skipped work gated on them")
+    expect(line, "the claim must name the gate that ran").toContain("gate-1")
     expect(line).not.toContain("no gate in this plan depends on them")
+  })
+
+  behaviorTest("a host-dependent gate that did NOT run is not claimed to have skipped", () => {
+    // Measured on the previous cut: `--bail` stopped before the only host-dependent
+    // gate, the receipt recorded it `not_run`, and the log still said "so anything gated
+    // on them was skipped". The claim was scoped by what was PLANNED, not what RAN.
+    const root = makeRepo(
+      ["false", ...Array.from({ length: 20 }, () => "true")],
+      {},
+      {},
+      { 20: "planned host-dependent gate that --bail never reaches" },
+    )
+    const result = runGate(root, "prepush", ["--bail"])
+    expect(result.code, "gate-1 fails, so the run is red").not.toBe(0)
+    const receipt = receiptFrom(result.stdout)
+    if (receipt.missingCapabilities.length === 0) return
+    expect(receipt.gates.find((g) => g.id === "gate-21")?.status).toBe("not_run")
+    const line = result.stdout.split("\n").find((text) => text.includes("[capabilities]"))
+    expect(line, `no capability line in:\n${result.stdout}`).toBeDefined()
+    expect(line).toContain("did not run, so nothing was skipped for them")
+    expect(line).not.toContain("may have skipped")
   })
 })
 

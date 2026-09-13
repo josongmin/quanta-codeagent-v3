@@ -425,7 +425,10 @@ test("case (1) [amp] passes alone", () => { expect(1).toBe(1) })
     )
     expect(child.exitCode).toBe(2)
     expect(child.stderr.toString()).toContain("FAIL CLOSED")
-    expect(child.stderr.toString()).toContain(absent)
+    // The tool's OWN sentence must name the path. `toContain(absent)` alone was satisfied
+    // by the OS's ENOENT text, which already contains it: a mutant that dropped the path
+    // from the message still passed 26 / 0.
+    expect(child.stderr.toString()).toContain(`cannot read ${absent}:`)
     expect(child.stdout.toString()).not.toContain("children=")
   })
 })

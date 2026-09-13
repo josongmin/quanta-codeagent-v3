@@ -589,22 +589,30 @@ printOut(`\n──── ${label} summary`)
 // THE CLAIM IS SCOPED, THE DISCLOSURE IS NOT. Hoisting it unconditionally made
 // `precommit` and `smoke` print "anything gated on them was skipped: bwrap, chromium,
 // gopls, …" when NEITHER tier contains a single gate that touches a capability — a
-// true sentence about the host, stated where it says nothing about the run. But
-// suppressing the LINE instead of narrowing the CLAIM made the log and the receipt
-// disagree: `missingCapabilities` is part of the receipt's IDENTITY (a box that gains
-// a tool cannot replay this green), so it is recorded for every tier, and a reader of
-// the log was then told less than a reader of the receipt. `gate-receipt.test.ts`
-// caught exactly that: 9 absences in the receipt, no line in the summary.
+// true sentence about the host, stated where it says nothing about the run. Suppressing
+// the LINE for such a plan was the wrong fix: on `prepush`, which writes the exact
+// receipt, `missingCapabilities` is part of the receipt's IDENTITY, and a reader of the
+// log was then told less than a reader of the receipt (`gate-receipt.test.ts`: 9
+// absences in the receipt, no line). (An earlier version of this comment said the
+// field is "recorded for every tier". Only `prepush` writes a receipt.)
 //
-// So both readers are told about every absence, and the sentence says what it means
-// for THIS plan. `hostDependent` marks are exactly the gates that can pass by finding
-// nothing, so their presence is what distinguishes the two claims.
+// So every absence is disclosed, and the sentence is scoped by what ACTUALLY RAN. The
+// previous cut scoped it by what was PLANNED, and an audit measured it claiming a skip
+// that never happened: `--bail` stopped before the only host-dependent gate (receipt
+// `not_run`), and a host-dependent consumer skipped because its input gate failed —
+// both printed "so anything gated on them was skipped".
 const absentTools = missingExternalTools()
-const planHasHostDependent = planned.some((g) => g.hostDependent !== undefined)
+const ranHostDependent = results
+  .filter((r) => r.gate.hostDependent !== undefined)
+  .map((r) => r.gate.id)
+const plannedHostDependent = planned.some((g) => g.hostDependent !== undefined)
 if (absentTools.length > 0) {
-  const claim = planHasHostDependent
-    ? "so anything gated on them was skipped"
-    : "and no gate in this plan depends on them, so this run is unaffected"
+  const claim =
+    ranHostDependent.length > 0
+      ? `so host-dependent gates that ran (${ranHostDependent.join(", ")}) may have skipped work gated on them`
+      : plannedHostDependent
+        ? "and the host-dependent gates in this plan did not run, so nothing was skipped for them"
+        : "and no gate in this plan depends on them, so this run is unaffected"
   printOut(`  [capabilities] absent on this host, ${claim}: ${absentTools.join(", ")}`)
 }
 for (const r of results) {
