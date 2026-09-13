@@ -126,11 +126,15 @@ schedule on it.
   every exec once the scrub stripped prompts, and output beginning with `> ` / `... `
   or equal to `undefined` was rewritten or dropped.
 - Line-protocol: write `code + "\n"` then the statement
-  `;void process.stdout.write("\n__quanta_repl_done_<nonce>__");`. Read stdout until the
-  sentinel arrives; everything before it, minus the statement's newline and one line
-  end, is the exec's stdout. Stderr is drained in parallel. (Uncaught errors are
-  printed by the REPL to STDOUT as `Uncaught …`, as `node -i` also did — see
-  corrections §I for the `hadError` consequence.)
+  `;void (process.stderr.write("\n<sentinel>"), process.stdout.write("\n<sentinel>"));`.
+  Each stream is read up to its own sentinel; everything before it, minus the
+  statement's newline and one line end, is the exec's stdout / stderr. **Amended
+  sep-14:** stderr used to be drained with a read that resolved only at process exit,
+  and the REPL printed uncaught errors to STDOUT, so `hadError` was false for every
+  throw on a live kernel. The boot script now routes uncaught errors to stderr through
+  the REPL's `handleError` option, and serialises evaluation so an awaited command
+  completes (callback or `handleError`) before the sentinel statement runs — without
+  that, awaited results and rejections landed on the NEXT exec.
 - State transitions: `starting` → (warm-up sentinel read) → `ready` → (exec
   in flight) → `running` → (exec done) → `idle` → … → `dead` (process
   exit, kill, or unrecoverable parse error).

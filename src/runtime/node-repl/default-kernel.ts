@@ -13,8 +13,9 @@
  *      and `ignoreUndefined` — no banner, no `> ` / `| ` prompts, no `undefined` echoes.
  *   2. write the sentinel statement and read until it arrives — `state = "ready"`.
  *   3. on each `exec(code)`: write `code`, a newline, and the sentinel statement, which
- *      prints `"\n" + sentinel` and nothing after it. Everything before the sentinel is
- *      the exec's stdout body. Stderr is drained in parallel into a separate buffer.
+ *      prints `"\n" + sentinel` to stderr and then stdout, and nothing after it. Each
+ *      stream is read up to its own sentinel: before it is that exec's stdout / stderr.
+ *      Uncaught errors go to stderr (REPL `handleError`), so `hadError` means it threw.
  *
  *   It spawned `node -i` and scrubbed prompts out of the capture afterwards. Measured
  *   on Node 25.9, `node -i` interleaves a banner, `> ` prompts, `| ` continuation
@@ -72,25 +73,59 @@ interface LiveKernel {
   state: KernelState
   proc: ReturnType<typeof Bun.spawn>
   stdoutReader: ChunkReader
-  stderrBuf: string[]
+  stderrReader: ChunkReader
   /** Mutex — one exec at a time; the second call awaits this. */
   pending: Promise<unknown>
 }
 
 const DEFAULT_READY_TIMEOUT_MS = 5_000
 const SENTINEL_PREFIX = "__quanta_repl_done_"
+/** How long, after an exec's STDOUT sentinel arrived, its STDERR sentinel may take. Both
+ *  are written by one statement (stderr first); only pipe delivery separates them. */
+const STDERR_SENTINEL_GRACE_MS = 5_000
 
-/** `node -e` program: a REPL on stdin/stdout that prints no prompt of any kind and does
- *  not echo `undefined`. Everything else — result echoes, `console.log`, uncaught error
- *  lines — is exactly what `node -i` prints. */
-const REPL_BOOT =
-  'const r=require("node:repl").start({prompt:"",input:process.stdin,output:process.stdout,' +
-  "terminal:false,ignoreUndefined:true});r.displayPrompt=()=>{};"
+/**
+ * `node -e` program: a REPL on stdin/stdout that prints no prompt of any kind, does not
+ * echo `undefined`, sends uncaught errors to STDERR, and evaluates one command at a time.
+ *
+ * Errors. The REPL prints an uncaught error to its OUTPUT stream (`Uncaught Error: boom`),
+ * as `node -i` does, so the kernel's stderr-based `hadError` was false for every thrown
+ * error and the `node_repl` tool reported `ok:true` for code that threw (measured on
+ * Node 25.9). `handleError` is the REPL's own hook, consulted before it prints.
+ *
+ * Serial evaluation. With top-level `await`, the REPL starts evaluating the NEXT line —
+ * the sentinel statement — while the awaited promise is pending, so an awaited result or
+ * rejection arrived AFTER the sentinel: measured, `await Promise.reject(…)` returned no
+ * error and the next exec carried it; a throw after `await` was lost. `r.eval` is wrapped
+ * so a command starts only when the previous one COMPLETED. Measured completion signals:
+ * success and `Recoverable` (multi-line input) call the eval callback; an uncaught error,
+ * sync or awaited, never does — it reaches `handleError` instead. So either releases the
+ * queue. Limit: an error from a timer an EARLIER exec scheduled, arriving while a later
+ * awaited command is pending, releases that command's queue early.
+ *
+ * On a Node without `handleError` the option is ignored: errors stay on stdout, and an
+ * awaited command that rejects never releases the queue, so the exec times out.
+ */
+const REPL_BOOT = [
+  'const repl=require("node:repl"),util=require("node:util");',
+  "let busy=false;const queue=[];",
+  "const next=()=>{const n=queue.shift();if(n)start(n);else busy=false};",
+  "const start=(a)=>{busy=true;ev.call(r,a[0],a[1],a[2],(e,v)=>{try{a[3](e,v)}finally{next()}})};",
+  'const r=repl.start({prompt:"",input:process.stdin,output:process.stdout,terminal:false,',
+  "ignoreUndefined:true,handleError:(e)=>{",
+  'process.stderr.write("Uncaught "+(e instanceof Error&&e.stack?e.stack:util.inspect(e))+"\\n");',
+  'if(busy)next();return "ignore"}});',
+  "r.displayPrompt=()=>{};const ev=r.eval;",
+  "r.eval=(c,x,f,cb)=>{if(busy)queue.push([c,x,f,cb]);else start([c,x,f,cb])};",
+].join("")
 
-/** The statement that ends every write: prints a newline and the sentinel, returns
- *  `undefined` (so nothing is echoed after it). */
-const sentinelStatement = (sentinel: string): string =>
-  `;void process.stdout.write(${JSON.stringify(`\n${sentinel}`)});\n`
+/** The statement that ends every write: prints a newline and the sentinel to STDERR and
+ *  then STDOUT, and returns `undefined` (so nothing is echoed after it). Each stream is
+ *  read up to its own copy, which is what attributes stderr to one exec. */
+const sentinelStatement = (sentinel: string): string => {
+  const marker = JSON.stringify(`\n${sentinel}`)
+  return `;void (process.stderr.write(${marker}), process.stdout.write(${marker}));\n`
+}
 
 /** Build a production-shaped `NodeReplKernel`. STATEFUL — call once at
  *  composition-root and reuse across the session. */
@@ -139,7 +174,7 @@ type KernelCtx = ReturnType<typeof kernelState>
 interface SpawnedProcess {
   readonly proc: ReturnType<typeof Bun.spawn>
   readonly stdoutReader: ChunkReader
-  readonly stderrBuf: string[]
+  readonly stderrReader: ChunkReader
 }
 
 const killQuietly = (proc: ReturnType<typeof Bun.spawn>): void => {
@@ -189,9 +224,14 @@ const launchNode = (nodeBin: string): Result<SpawnedProcess, KernelError> => {
     const stdoutReader = (
       proc.stdout as ReadableStream<Uint8Array>
     ).getReader() as unknown as ChunkReader
-    const stderrBuf: string[] = []
-    void drainStderr(proc, stderrBuf)
-    return ok({ proc, stdoutReader, stderrBuf })
+    // Read per exec, up to that exec's sentinel. It was drained with
+    // `new Response(stderr).text()`, which resolves only when the stream CLOSES — at
+    // process exit — so a live kernel's stderr buffer was always empty when an exec
+    // finished, and `hadError` could not be true for a running kernel at all.
+    const stderrReader = (
+      proc.stderr as ReadableStream<Uint8Array>
+    ).getReader() as unknown as ChunkReader
+    return ok({ proc, stdoutReader, stderrReader })
   } catch (e) {
     const detail = errMessage(e)
     if (detail.toLowerCase().includes("enoent")) return err({ kind: "node-missing", detail })
@@ -199,21 +239,10 @@ const launchNode = (nodeBin: string): Result<SpawnedProcess, KernelError> => {
   }
 }
 
-const drainStderr = async (
-  proc: ReturnType<typeof Bun.spawn>,
-  stderrBuf: string[],
-): Promise<void> => {
-  try {
-    const text = await new Response(proc.stderr as ReadableStream<Uint8Array>).text()
-    if (text.length > 0) stderrBuf.push(text)
-  } catch {
-    // process died; nothing to drain
-  }
-}
-
 const warmUpNode = async (
   proc: ReturnType<typeof Bun.spawn>,
   stdoutReader: ChunkReader,
+  stderrReader: ChunkReader,
   readyTimeoutMs: number,
 ): Promise<{ ok: true } | { ok: false; detail: string }> => {
   const sentinel = `${SENTINEL_PREFIX}${randomNonce()}__`
@@ -224,9 +253,10 @@ const warmUpNode = async (
     return { ok: false, detail: errMessage(e) }
   }
   const read = await readUntil(stdoutReader, sentinel, readyTimeoutMs)
-  if (read.ok) return { ok: true }
+  const readErr = read.ok ? await readUntil(stderrReader, sentinel, readyTimeoutMs) : read
+  if (readErr.ok) return { ok: true }
   killQuietly(proc)
-  return { ok: false, detail: read.error }
+  return { ok: false, detail: readErr.error }
 }
 
 const reapWhenExited = (
@@ -278,7 +308,15 @@ const executeWithLock = async (
     execOpts?.timeoutMs ?? 0,
     execOpts?.signal,
   )
-  if (read.ok) return finishExec(k, id, read.body, touchIfHome, release)
+  if (read.ok) {
+    const errRead = await readUntil(k.stderrReader, write.sentinel, STDERR_SENTINEL_GRACE_MS)
+    if (errRead.ok) return finishExec(k, id, read.body, errRead.body, touchIfHome, release)
+    // The stdout sentinel arrived and the stderr one did not: the streams are out of step,
+    // and every later exec would read the wrong stderr. Nothing trustworthy is left.
+    markDead(k, id, removeIfHome, dropKernel)
+    release()
+    return err({ kind: "kernel-dead", id })
+  }
   const aborted = read.error === "aborted"
   if (aborted) markDeadAndExit(k, id, removeIfHome, dropKernel)
   else markDead(k, id, removeIfHome, dropKernel)
@@ -302,7 +340,7 @@ const spawnOps = (ctx: KernelCtx): Pick<NodeReplKernel, "spawn"> => {
       const id = idStr as KernelId
       const launched = launchNode(nodeBin)
       if (!launched.ok) return launched
-      const { proc, stdoutReader, stderrBuf } = launched.value
+      const { proc, stdoutReader, stderrReader } = launched.value
 
       const now = Date.now()
       const pid = proc.pid ?? 0
@@ -314,7 +352,7 @@ const spawnOps = (ctx: KernelCtx): Pick<NodeReplKernel, "spawn"> => {
         sessionId: spawnOpts.sessionId,
       }
 
-      const warmup = await warmUpNode(proc, stdoutReader, readyTimeoutMs)
+      const warmup = await warmUpNode(proc, stdoutReader, stderrReader, readyTimeoutMs)
       if (!warmup.ok) return err({ kind: "spawn-failed", detail: warmup.detail })
 
       kernels.set(id, {
@@ -322,7 +360,7 @@ const spawnOps = (ctx: KernelCtx): Pick<NodeReplKernel, "spawn"> => {
         state: "ready",
         proc,
         stdoutReader,
-        stderrBuf,
+        stderrReader,
         pending: Promise.resolve(),
       })
       writeIfHome(spec)
@@ -481,17 +519,17 @@ const writeExec = (
   return { ok: true, sentinel }
 }
 
-/** Finalise a successful read: drain stderr buffer, bump lastUseMs,
- *  transition to idle, release the lock, and return the ExecResult. */
+/** Finalise a successful read: bump lastUseMs, transition to idle, release the lock,
+ *  and return the ExecResult built from both streams' bodies. */
 const finishExec = (
   k: LiveKernel,
   id: KernelId,
   body: string,
+  stderrBody: string,
   touchIfHome: (id: KernelId, ms: number) => void,
   release: () => void,
 ): Result<ExecResult, KernelError> => {
-  const stderrText = k.stderrBuf.join("")
-  k.stderrBuf.length = 0
+  const stderrText = replOutput(stderrBody)
   const now = Date.now()
   k.spec = { ...k.spec, lastUseMs: now }
   touchIfHome(id, now)

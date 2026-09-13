@@ -165,6 +165,9 @@ describe("ADR-0249 node-repl-hellgate", () => {
         // Blank lines inside output survive (the old scrub dropped every empty line).
         ['console.log(["a", "", "b"].join(String.fromCharCode(10)))', "a\n\nb"],
         ["function f(a) {\n  return a * 2\n}\nf(21)", "42"],
+        // An awaited result belongs to THIS exec, not the next one.
+        ["await new Promise((r) => setTimeout(r, 30)); 40 + 2", "42"],
+        ["x", "42"],
       ]
       try {
         for (const [code, expected] of cases) {
@@ -173,6 +176,51 @@ describe("ADR-0249 node-repl-hellgate", () => {
           if (!out.ok) return
           expect(out.value.stdout, code).toBe(expected)
         }
+      } finally {
+        await k.kill(sp.value.id)
+      }
+    })
+  }, 60_000)
+
+  /**
+   * HELL-NR-02D — on the REAL kernel, code that throws reports `hadError`.
+   *
+   * The REPL printed uncaught errors to STDOUT, and the kernel drained stderr only at
+   * process exit, so a running kernel returned `hadError: false` with `Uncaught …` in
+   * stdout for every throw — and the `node_repl` tool reported `ok:true`. The stub arms
+   * (HELL-NR-04/05) model the contract; this is the adapter keeping it.
+   */
+  test("HELL-NR-02D the real kernel classifies a throw as an error, and stays usable", async () => {
+    await withTempDir("qnr-throw-", async (home) => {
+      const k = createDefaultNodeReplKernel({ home })
+      const sp = await k.spawn({ sessionId: "throw" })
+      expect(sp.ok, JSON.stringify(sp)).toBe(true)
+      if (!sp.ok) return
+      try {
+        await k.exec(sp.value.id, "let kept = 41", { timeoutMs: 10_000 })
+        for (const [code, needle] of [
+          ["throw new Error('boom')", "Error: boom"],
+          ["nope.x", "ReferenceError"],
+          // Awaited errors: the REPL evaluated the sentinel before the promise settled, so
+          // the first went to the NEXT exec and the second was lost.
+          ["await Promise.reject(new Error('async-boom'))", "async-boom"],
+          ["await new Promise((r) => setTimeout(r, 50)); throw new Error('late')", "late"],
+        ] as const) {
+          const out = await k.exec(sp.value.id, code, { timeoutMs: 10_000 })
+          expect(out.ok, `${code}: ${JSON.stringify(out)}`).toBe(true)
+          if (!out.ok) return
+          expect(out.value.hadError, code).toBe(true)
+          expect(out.value.stderr, code).toContain(needle)
+          expect(out.value.stdout, code).toBe("")
+        }
+        // The error did not wedge or desynchronise the kernel: state survives, and a clean
+        // exec after it reports no error and no leftover stderr (paired control).
+        const after = await k.exec(sp.value.id, "kept + 1", { timeoutMs: 10_000 })
+        expect(after.ok).toBe(true)
+        if (!after.ok) return
+        expect(after.value.stdout).toBe("42")
+        expect(after.value.hadError).toBe(false)
+        expect(after.value.stderr).toBe("")
       } finally {
         await k.kill(sp.value.id)
       }
