@@ -86,8 +86,11 @@ describe("front door — runConfigMigrationImport STAGES an imported skill (not 
   test("a project .claude/skills/*/SKILL.md rides the import → reported staged, live dir stays empty", async () => {
     await write(join(project, ".claude", "skills", "imported-helper", "SKILL.md"), SKILL)
 
-    // Drive the REAL startup import entry (both gates on, HOME → temp home).
-    const { notice } = await runConfigMigrationImport(project)
+    // Drive the REAL startup import entry (both gates on). The temp home goes through the
+    // `homeDir` seam: `process.env.HOME = home` above does not move `os.homedir()` in Bun,
+    // so this call wrote the developer's real `~/.quanta/external_config_migration.json`
+    // and staged skills there, while the "live dir stays empty" check read the temp home.
+    const { notice } = await runConfigMigrationImport(project, process.env, home)
 
     // The import ran and persisted (STAGED) — the summary mentions the skills
     // item. RED-ON-INJECTION: with the `skillStage` wire removed the skill fails

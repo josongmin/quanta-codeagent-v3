@@ -7,7 +7,9 @@
  * a fixed precedence and NEVER returns a tmp path.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { existsSync } from "node:fs"
 import { tmpdir } from "node:os"
+import { join } from "node:path"
 import {
   benchHome,
   benchInstanceWorkSlug,
@@ -16,8 +18,10 @@ import {
   benchWorkRoot,
 } from "@/../src/apps/bench/corpus/paths"
 import { __resetRuntimeConfig } from "@/shared"
+import { makeTempDirOwner } from "../_helpers/temp-dir"
 
 const SAVED = { ...process.env }
+const scratch = makeTempDirOwner()
 
 beforeEach(() => {
   for (const k of ["QUANTA_BENCH_HOME", "QUANTA_HOME"]) delete process.env[k]
@@ -26,6 +30,7 @@ beforeEach(() => {
 afterEach(() => {
   process.env = { ...SAVED }
   __resetRuntimeConfig()
+  scratch.disposeAll()
 })
 
 describe("benchHome — persistent root precedence", () => {
@@ -47,17 +52,29 @@ describe("benchHome — persistent root precedence", () => {
     expect(home).toContain("bench")
   })
 
-  test("work + runs roots live under benchHome and are not tmp", () => {
+  /**
+   * These three resolvers CREATE their directory, so they run against a scratch bench
+   * home. Against the default they made `work/`, `runs/` and `runs/run-xyz/` in the
+   * developer's real bench root on every run (measured). What they owe is exact
+   * composition under `benchHome()`; that the default `benchHome()` is not tmp is the
+   * pure test above, and exact composition under it carries that property down.
+   */
+  test("work + runs roots are exactly <benchHome>/work and /runs, and exist", () => {
+    process.env.QUANTA_BENCH_HOME = scratch.create("bench-paths-")
+    __resetRuntimeConfig()
     const home = benchHome()
-    expect(benchWorkRoot().startsWith(home)).toBe(true)
-    expect(benchRunsRoot().startsWith(home)).toBe(true)
-    expect(benchWorkRoot().startsWith(tmpdir())).toBe(false)
-    expect(benchRunsRoot().startsWith(tmpdir())).toBe(false)
+    expect(benchWorkRoot()).toBe(join(home, "work"))
+    expect(benchRunsRoot()).toBe(join(home, "runs"))
+    expect(existsSync(join(home, "work"))).toBe(true)
+    expect(existsSync(join(home, "runs"))).toBe(true)
   })
 
   test("benchRunDir groups under runs/<runId>", () => {
+    process.env.QUANTA_BENCH_HOME = scratch.create("bench-paths-")
+    __resetRuntimeConfig()
     const dir = benchRunDir("run-xyz")
     expect(dir).toBe(`${benchRunsRoot()}/run-xyz`)
+    expect(existsSync(dir)).toBe(true)
   })
 
   test("agent-visible work slug is stable and does not expose the instance id", () => {

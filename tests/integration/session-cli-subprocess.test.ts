@@ -117,6 +117,14 @@ const runCli = async (
   const env: Record<string, string> = {
     PATH: process.env.PATH ?? "/usr/bin:/bin",
     HOME: process.env.HOME ?? "/tmp",
+    // The child CLI resolves its memory store and stage1 WAL under the Quanta home. This
+    // clean env rebuilt everything but HOME, so the child wrote the developer's real
+    // `~/.quanta/memory` (measured: 35 entries, including a git repo). Carry the fenced
+    // roots the preload set.
+    ...(process.env.QUANTA_HOME !== undefined ? { QUANTA_HOME: process.env.QUANTA_HOME } : {}),
+    ...(process.env.QUANTA_PREFS_HOME !== undefined
+      ? { QUANTA_PREFS_HOME: process.env.QUANTA_PREFS_HOME }
+      : {}),
     QUANTA_PROVIDER: "anthropic",
     ANTHROPIC_API_KEY: "test",
     ...opts.env,

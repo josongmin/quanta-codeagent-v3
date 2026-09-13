@@ -1,5 +1,6 @@
 // Preloaded by bun test (see bunfig.toml). Keep global test setup here.
 import { afterEach, beforeEach } from "bun:test"
+import { rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 // The LEAF, not the runner: the runner reaches `@/agent/loop` and from there
@@ -15,6 +16,7 @@ import { quantaHomeDirFrom } from "@/shared/quanta-home"
 import { __resetRuntimeConfig } from "@/shared/runtime-config"
 import { setTerminalIo } from "@/shared/terminal-io"
 import { decideBenchResultsDir } from "./_support/bench-results-fence"
+import { decideQuantaHomeFence, scratchPrefixesFor } from "./_support/quanta-home-fence"
 
 // FORCING FUNCTION (aug-22 incident): `writeReport`/`writeArtifacts` fan out to
 // `mirrorReportToSsot`, whose DEFAULT sink is the operator's LIVE
@@ -58,6 +60,30 @@ const benchResultsFence = decideBenchResultsDir({
 if (benchResultsFence.action === "redirect") {
   process.env.QUANTA_BENCH_RESULTS_DIR = benchResultsFence.dir
   __resetRuntimeConfig()
+}
+
+// FENCE (sep-13): the Quanta home roots. Forty-nine test files wrote Quanta state into
+// the HOME the test process started with — on a normal run, the developer's. The policy
+// and the measurement live in `_support/quanta-home-fence.ts`; this applies it before any
+// test runs. The scratch root is per process, created lazily by whatever writes into it,
+// and removed at exit so a run leaves nothing in TMPDIR.
+{
+  const scratchRoot = join(tmpdir(), "quanta-test-home", String(process.pid))
+  const fence = decideQuantaHomeFence({
+    env: process.env,
+    scratchRoot,
+    scratchPrefixes: scratchPrefixesFor(tmpdir()),
+  })
+  for (const key of fence.unset) delete process.env[key]
+  for (const [key, value] of Object.entries(fence.set)) process.env[key] = value
+  if (fence.unset.length > 0 || Object.keys(fence.set).length > 0) __resetRuntimeConfig()
+  process.on("exit", () => {
+    try {
+      rmSync(scratchRoot, { recursive: true, force: true })
+    } catch {
+      // Best effort at process exit; there is no later point to report from.
+    }
+  })
 }
 
 beforeEach(() => {

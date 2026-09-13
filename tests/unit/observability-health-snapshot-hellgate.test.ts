@@ -35,6 +35,7 @@ import {
   type ObservabilityBag,
   withFullObservability,
 } from "@/observability/metrics/observability-helper"
+import { quantaHomeDir } from "@/shared/quanta-home"
 
 /* ────────────────────────────────────────────────────────────────────────── */
 /* Fixtures                                                                   */
@@ -297,7 +298,10 @@ describe("ADR-0180 withFullObservability integration", () => {
     // string + warning recorded). Both prove the helper attempted the default
     // path resolution; neither shape proves anything else escaped.
     if (finalPath !== "") {
-      expect(finalPath.endsWith(`${"/"}.quanta/health.json`)).toBe(true)
+      // EXACT, and hermetic: the default is `<quanta home>/health.json`, and the test
+      // preload points the quanta home at scratch. The previous suffix check passed by
+      // writing the operator's real `~/.quanta/health.json`, which its comment accepted.
+      expect(finalPath).toBe(join(quantaHomeDir(), "health.json"))
     } else {
       expect(warnings.length).toBeGreaterThan(0)
     }

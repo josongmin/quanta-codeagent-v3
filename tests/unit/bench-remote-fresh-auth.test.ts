@@ -23,6 +23,16 @@ afterEach(() => {
   TEMP_DIRS.clear()
 })
 
+/**
+ * NOT `{}`. The refresh takes a cross-process lock beside the ChatGPT token store, and an
+ * empty bag resolves that store through `QUANTA_PREFS_HOME ?? homedir()` — so every run
+ * took a real lock file in the developer's `~/.quanta/locks` (measured: 4 entries). The
+ * preload's fenced prefs home is carried explicitly instead.
+ */
+const HERMETIC_ENV: Record<string, string | undefined> = {
+  QUANTA_PREFS_HOME: process.env.QUANTA_PREFS_HOME,
+}
+
 describe("refreshRemoteAuthJson", () => {
   test("refreshes and persists the access token before remote ship", async () => {
     const path = tempAuthFile({
@@ -32,7 +42,7 @@ describe("refreshRemoteAuthJson", () => {
       account_id: "acct-old",
     })
     const out = await refreshRemoteAuthJson(path, {
-      env: {},
+      env: HERMETIC_ENV,
       nowMs: () => Date.parse("2026-06-21T00:00:00.000Z"),
       fetchImpl: async () =>
         new Response(JSON.stringify({ access_token: "ACCESS-new", expires_in: 3600 }), {
@@ -59,7 +69,7 @@ describe("refreshRemoteAuthJson", () => {
 
     await expect(
       refreshRemoteAuthJson(path, {
-        env: {},
+        env: HERMETIC_ENV,
         fetchImpl: async () =>
           new Response(JSON.stringify({ error: "invalid_grant" }), {
             status: 401,
@@ -81,7 +91,7 @@ describe("refreshRemoteAuthJson", () => {
     let acquired = 0
     let released = 0
     const out = await refreshRemoteAuthJson(path, {
-      env: {},
+      env: HERMETIC_ENV,
       nowMs: () => Date.parse("2026-06-21T00:00:00.000Z"),
       lock: {
         tryAcquire: async () => {
@@ -112,7 +122,7 @@ describe("refreshRemoteAuthJson", () => {
     })
     await expect(
       refreshRemoteAuthJson(path, {
-        env: {},
+        env: HERMETIC_ENV,
         nowMs: () => now,
         lock: {
           tryAcquire: async () => "would-wait",

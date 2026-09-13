@@ -64,9 +64,14 @@ const REAL_ENV = { ...process.env }
 /** Reset env to a clean, key-free, anthropic-pinned baseline before each test
  *  so a dev machine's live OPENAI/ANTHROPIC keys + any QUANTA_* knobs can't
  *  perturb the default-OFF assertions. Each test sets only the knobs it needs. */
+/** The Quanta-home roots the test preload points at scratch. The wipe below keeps them:
+ *  deleting them sent the durable memory store — default-ON at the home — into the
+ *  developer's real `~/.quanta/memory` on every run (measured: 5 entries). */
+const HOME_FENCE_KEYS = new Set(["QUANTA_HOME", "QUANTA_PREFS_HOME"])
+
 const resetEnv = (): void => {
   for (const k of Object.keys(process.env)) {
-    if (k.startsWith("QUANTA_")) delete process.env[k]
+    if (k.startsWith("QUANTA_") && !HOME_FENCE_KEYS.has(k)) delete process.env[k]
   }
   delete process.env.OPENAI_API_KEY
   delete process.env.ANTHROPIC_API_KEY
