@@ -13,7 +13,8 @@
  *
  *   13 test files consume the receipt and gate on it
  *   17 `canExecute` invocations across them
- *    3 of the 13 also call `requireCapability` (the `tests/contract/` three)
+ *    3 of the 13 used to call `requireCapability` too (the `tests/contract/`
+ *      three); the requirement now lives in `capability()` and they do not
  *
  * The numbers above were 15 and 33, and both were wrong. The bare grep counts
  * two files that are not consumers — one mentions `canExecute` in a COMMENT and
@@ -26,7 +27,7 @@
  *     <(grep -rln 'from "[^"]*capability-receipt-consumer"' tests --include='*.ts' | sort) \
  *     | grep -v capability-receipt-wiring
  *
- * With no receipt every one of those 33 resolves `blocked-missing`, which the
+ * With no receipt every one of those 17 resolves `blocked-missing`, which the
  * lane turns into `describe.skip`, which Bun reports as a PASSING file. The
  * paired control below drives exactly that state.
  *
@@ -298,7 +299,7 @@ describe("required-capability switch", () => {
  * MEASURED across the corpus:
  *
  *   15 files consume the receipt (`canExecute`)
- *    3 of them call `requireCapability` — the three under `tests/contract/`
+ *    3 of them called `requireCapability` — the three under `tests/contract/`
  *   12 call `canExecute` and nothing else
  *
  * So `QUANTA_REQUIRE_CAPABILITIES` armed 3/15 of its own corpus. The other
@@ -353,7 +354,7 @@ describe("a required capability cannot be skipped past", () => {
     return { ...produced.env }
   }
 
-  test("BLOCKED-MISSING under the switch is a throw, not a skip", () => {
+  test("BLOCKED-MISSING under the switch is a requirement failure, not a skip", () => {
     // The state the tree shipped in: no receipt anywhere.
     const load = loadCapabilityReceipt({}, (path) => readFileSync(path, "utf8"))
     const decision = decideFromReceipt(load, "git")

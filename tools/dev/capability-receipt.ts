@@ -113,6 +113,43 @@ export const capabilityRequiredFor = (
     .includes(id)
 }
 
+/**
+ * The ids a receipt answered DEFINITELY — present or absent — which are the ones
+ * a campaign may safely require.
+ *
+ * A requirement only fires on `blocked-missing` or `failed-setup`. For an id the
+ * receipt answered `available` or `unavailable`, a worker that HAS the receipt
+ * sees `executed` or `skipped-unsupported` and never fires; the only way it can
+ * fire is a worker that did NOT get the receipt. So arming exactly these ids turns
+ * "the receipt was lost on the way to a worker" from a silent skip into a named
+ * failure, without ever reddening a campaign whose receipt arrives. `probe-timeout`
+ * and `probe-error` are left unarmed: a slow host must not become a red one.
+ */
+export const definiteCapabilityIds = (receipt: {
+  readonly capabilities: Readonly<Record<string, { readonly status: string }>>
+}): readonly string[] =>
+  Object.entries(receipt.capabilities)
+    .filter(([, finding]) => finding.status === "available" || finding.status === "unavailable")
+    .map(([id]) => id)
+    .sort()
+
+/** An operator's own `QUANTA_REQUIRE_CAPABILITIES` is widened, never replaced or narrowed. */
+export const mergeRequiredCapabilities = (
+  existing: string | undefined,
+  ids: readonly string[],
+): string => {
+  const raw = (existing ?? "").trim()
+  if (raw === "1") return "1"
+  const current =
+    raw === "" || raw === "0"
+      ? []
+      : raw
+          .split(",")
+          .map((id) => id.trim())
+          .filter(Boolean)
+  return [...new Set([...current, ...ids])].sort().join(",")
+}
+
 export type CapabilityStatus = "available" | "unavailable" | "probe-timeout" | "probe-error"
 
 export const CAPABILITY_STATUSES: readonly CapabilityStatus[] = [

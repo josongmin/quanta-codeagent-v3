@@ -13,7 +13,12 @@ import {
 import { availableParallelism, freemem, loadavg, tmpdir, totalmem } from "node:os"
 import { dirname, join, relative, resolve } from "node:path"
 import { capabilityReceiptEnvForCampaign } from "./capability-probe-producer"
-import { MAX_CAPABILITY_RECEIPT_TTL_MS } from "./capability-receipt"
+import {
+  CAPABILITY_REQUIRE_ENV,
+  definiteCapabilityIds,
+  MAX_CAPABILITY_RECEIPT_TTL_MS,
+  mergeRequiredCapabilities,
+} from "./capability-receipt"
 import {
   type ExecutedFileSetVerdict,
   executedFileSetDigest,
@@ -1502,6 +1507,20 @@ const main = async (): Promise<void> => {
       `[test:shards] capability receipt tier=${opts.tier} binding=${capability.bindingSha256.slice(0, 16)} ` +
         `available=${Object.values(capability.receipt.capabilities).filter((f) => f.status === "available").length}/` +
         `${Object.keys(capability.receipt.capabilities).length}\n`,
+    )
+    // ARM the strictness switch for every id the receipt answered definitely, in
+    // THIS process's environment — not in the capability bag. Workers inherit it
+    // through `base`, so a hop that drops the bag still delivers the switch, and
+    // the worker then answers `blocked-missing` under a requirement: a named
+    // failure instead of a gated describe skipping green. That is the runtime
+    // proof for the whole receipt chain; the structural arm only ever saw its
+    // last hop, and an audit found eight mutants on the others.
+    process.env[CAPABILITY_REQUIRE_ENV] = mergeRequiredCapabilities(
+      process.env[CAPABILITY_REQUIRE_ENV],
+      definiteCapabilityIds(capability.receipt),
+    )
+    process.stdout.write(
+      `[test:shards] capability switch armed for ${definiteCapabilityIds(capability.receipt).length} id(s)\n`,
     )
     const { discovered: discoveredManifest, manifest, tiered } = selection
     const manifestDigest = manifestSha256(manifest)
