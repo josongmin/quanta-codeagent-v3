@@ -253,30 +253,42 @@ export const SPILL_DIR_REFUSAL_KINDS = [
 ] as const
 export type SpillDirRefusalKind = (typeof SPILL_DIR_REFUSAL_KINDS)[number]
 
-export interface SpillDirRefusal {
-  readonly kind: SpillDirRefusalKind
-  /** The component that failed its check (the whole spill dir for
-   *  `not-spill-location`). */
-  readonly path: string
-  /** The IO error message — set for `unavailable` only. */
-  readonly cause?: string
+/** What each refusal kind carries besides its `kind`. `path` is the component
+ *  that failed its check (the whole spill dir for `not-spill-location`). Only
+ *  the IO kind has a `cause`, and it always has one. */
+interface SpillDirRefusalDetail {
+  readonly "not-spill-location": { readonly path: string }
+  readonly symlink: { readonly path: string }
+  readonly "not-a-directory": { readonly path: string }
+  readonly unavailable: { readonly path: string; readonly cause: string }
 }
 
-/** Model- and log-facing reason for each refusal kind. */
-export const SPILL_DIR_REFUSAL_REASON: Record<
-  SpillDirRefusalKind,
-  (refusal: SpillDirRefusal) => string
-> = {
+export type SpillDirRefusalOf<K extends SpillDirRefusalKind> = {
+  readonly kind: K
+} & SpillDirRefusalDetail[K]
+
+export type SpillDirRefusal = {
+  [K in SpillDirRefusalKind]: SpillDirRefusalOf<K>
+}[SpillDirRefusalKind]
+
+/** Model- and log-facing reason for each refusal kind, typed per kind so a
+ *  renderer reads only the fields its kind carries. */
+export const SPILL_DIR_REFUSAL_REASON: {
+  readonly [K in SpillDirRefusalKind]: (refusal: SpillDirRefusalOf<K>) => string
+} = {
   "not-spill-location": (r) => `${r.path} is not a <working directory>/.quanta/tool-output path`,
   symlink: (r) =>
     `${r.path} is a symbolic link; tool output is only written to a real directory inside the working directory`,
   "not-a-directory": (r) => `${r.path} is not a directory`,
-  unavailable: (r) =>
-    `${r.path} could not be created or inspected (${r.cause ?? "no error detail"})`,
+  unavailable: (r) => `${r.path} could not be created or inspected (${r.cause})`,
 }
 
-export const describeSpillRefusal = (refusal: SpillDirRefusal): string =>
+/** Correlates the refusal's kind with its renderer (the generic keeps
+ *  `SPILL_DIR_REFUSAL_REASON[kind]` and the refusal on the same `K`). */
+const renderRefusal = <K extends SpillDirRefusalKind>(refusal: SpillDirRefusalOf<K>): string =>
   SPILL_DIR_REFUSAL_REASON[refusal.kind](refusal)
+
+export const describeSpillRefusal = (refusal: SpillDirRefusal): string => renderRefusal(refusal)
 
 declare const containedSpillDirBrand: unique symbol
 /** A spill directory whose quanta-created components were each verified, by

@@ -36,8 +36,10 @@ import { defaultTools, type ToolContext, ToolRegistry, type ToolResult } from "@
 import {
   capToolOutput,
   DEFAULT_SPILL_KEEP,
+  describeSpillRefusal,
   SPILL_DIR_REFUSAL_KINDS,
   SPILL_DIR_REFUSAL_REASON,
+  type SpillDirRefusal,
 } from "@/tool/output-spill"
 import { scopedEnv } from "../_support/scoped-env"
 
@@ -276,6 +278,24 @@ describe("NW-2 capToolOutput refusal kinds (structured)", () => {
       [...SPILL_DIR_REFUSAL_KINDS].sort(),
     )
   })
+
+  test("static type pin: an IO refusal needs its cause, and a containment refusal cannot carry one", () => {
+    // Checked by `tsc` only (bun test does not typecheck): each directive fails
+    // the typecheck as unused if the refusal type admits that shape.
+    const refusals: SpillDirRefusal[] = [
+      // @ts-expect-error — `unavailable` without the IO error that caused it
+      { kind: "unavailable", path: "/r/.quanta" },
+      // @ts-expect-error — a containment refusal is not an IO failure
+      { kind: "symlink", path: "/r/.quanta", cause: "EACCES" },
+      { kind: "unavailable", path: "/r/.quanta", cause: "EACCES: permission denied" },
+      { kind: "symlink", path: "/r/.quanta" },
+    ]
+
+    expect(refusals.slice(2).map(describeSpillRefusal)).toEqual([
+      "/r/.quanta could not be created or inspected (EACCES: permission denied)",
+      "/r/.quanta is a symbolic link; tool output is only written to a real directory inside the working directory",
+    ])
+  })
 })
 
 // Root ignores directory mode bits, so an unwritable working directory cannot be
@@ -308,9 +328,11 @@ describe.skipIf(IS_ROOT)(
 
       const r = await capToolOutput("B".repeat(1_000), { maxChars: 10, spillDir: spillDirOf() })
 
-      expect(r.spillRefusal?.kind).toBe("unavailable")
-      expect(r.spillRefusal?.path).toBe(join(repo, ".quanta"))
-      expect(r.spillRefusal?.cause).toContain("EACCES")
+      expect(r.spillRefusal).toEqual({
+        kind: "unavailable",
+        path: join(repo, ".quanta"),
+        cause: expect.stringContaining("EACCES"),
+      })
       expect(r.spillPath).toBeUndefined()
     })
 
