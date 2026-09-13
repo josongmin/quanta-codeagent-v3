@@ -22,15 +22,16 @@
  */
 
 import { Database } from "bun:sqlite"
-import { afterAll, describe, expect, test } from "bun:test"
+import { afterAll, afterEach, describe, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { resolveMemoryDirPathsUnder } from "@/memory/consolidate/paths"
 import { defaultDurableStorePath, resolveStorePath } from "@/memory/store-path"
 import { buildMemoryForSession } from "@/runner/assemble/memory-factory"
 import { quantaHomeDirFrom } from "@/shared/quanta-home"
+import { makeTempDirOwner } from "../../_helpers/temp-dir"
 import {
   cleanupHermeticQuantaHomes,
   hermeticQuantaHomeEnv,
@@ -38,6 +39,12 @@ import {
 
 const storeFor = (env: NodeJS.ProcessEnv): string => defaultDurableStorePath(quantaHomeDirFrom(env))
 
+/** Every scratch dir is OWNED, so it is removed even when an assertion throws before a
+ *  test's own `finally` runs. The tmp-leak ratchet flagged thirteen bare `mkdtempSync`
+ *  sites here; the per-test `for (const d of [...]) rmSync(d)` cleanup is a form its
+ *  checker does not recognise, and the owner is the shape the repo standardises on. */
+const temps = makeTempDirOwner()
+afterEach(() => temps.disposeAll())
 afterAll(() => cleanupHermeticQuantaHomes())
 
 describe("the memory plane follows the quanta home", () => {
@@ -90,9 +97,9 @@ describe("the memory plane follows the quanta home", () => {
    * reports `storePath`, so it is what has to be asserted.
    */
   test("buildMemoryForSession resolves the store under the quanta home, not HOME", () => {
-    const scratch = mkdtempSync(join(tmpdir(), "mem-home-"))
-    const decoy = mkdtempSync(join(tmpdir(), "mem-decoy-"))
-    const cwd = mkdtempSync(join(tmpdir(), "mem-cwd-"))
+    const scratch = temps.create("mem-home-")
+    const decoy = temps.create("mem-decoy-")
+    const cwd = temps.create("mem-cwd-")
     try {
       const slot = buildMemoryForSession(
         { QUANTA_MEMORY: "sqlite", QUANTA_HOME: scratch, HOME: decoy },
@@ -150,8 +157,8 @@ describe("the memory plane follows the quanta home", () => {
     /running\): (.+)$/.exec(notice ?? "")?.[1]
 
   test("an existing pre-relocation store is read in place, and the notice carries a migration", () => {
-    const osHome = mkdtempSync(join(tmpdir(), "mem-oshome-"))
-    const relocated = mkdtempSync(join(tmpdir(), "mem-reloc-"))
+    const osHome = temps.create("mem-oshome-")
+    const relocated = temps.create("mem-reloc-")
     try {
       const prior = join(osHome, ".quanta", "memory", "memory.sqlite")
       mkdirSync(dirname(prior), { recursive: true })
@@ -171,9 +178,9 @@ describe("the memory plane follows the quanta home", () => {
   })
 
   test("THROUGH THE FACTORY: two launches before migrating create no second store and both notify", () => {
-    const osHome = mkdtempSync(join(tmpdir(), "mem-launch-"))
-    const relocated = mkdtempSync(join(tmpdir(), "mem-launch2-"))
-    const cwd = mkdtempSync(join(tmpdir(), "mem-launch-cwd-"))
+    const osHome = temps.create("mem-launch-")
+    const relocated = temps.create("mem-launch2-")
+    const cwd = temps.create("mem-launch-cwd-")
     try {
       const prior = join(osHome, ".quanta", "memory", "memory.sqlite")
       const dest = join(relocated, "memory", "memory.sqlite")
@@ -192,8 +199,8 @@ describe("the memory plane follows the quanta home", () => {
   })
 
   test("RUN the command: it migrates real rows, and the next launch is silent and relocated", () => {
-    const osHome = mkdtempSync(join(tmpdir(), "mem-run-"))
-    const relocated = mkdtempSync(join(tmpdir(), "mem-run2-"))
+    const osHome = temps.create("mem-run-")
+    const relocated = temps.create("mem-run2-")
     try {
       const prior = join(osHome, ".quanta", "memory", "memory.sqlite")
       const dest = join(relocated, "memory", "memory.sqlite")
@@ -220,8 +227,8 @@ describe("the memory plane follows the quanta home", () => {
     // `mv -n` exited 0 on a skip and still moved the side files: measured with real
     // SQLite, the new store went from 5 rows to 50 OLD rows via the carried WAL.
     for (const occupied of ["", "-wal"]) {
-      const osHome = mkdtempSync(join(tmpdir(), "mem-refuse-"))
-      const relocated = mkdtempSync(join(tmpdir(), "mem-refuse2-"))
+      const osHome = temps.create("mem-refuse-")
+      const relocated = temps.create("mem-refuse2-")
       try {
         const prior = join(osHome, ".quanta", "memory", "memory.sqlite")
         const dest = join(relocated, "memory", "memory.sqlite")
@@ -259,7 +266,7 @@ describe("the memory plane follows the quanta home", () => {
       "proj$HOME",
       "it's",
     ]) {
-      const root = mkdtempSync(join(tmpdir(), "mem-hostile-"))
+      const root = temps.create("mem-hostile-")
       try {
         const cwd = join(root, hostile)
         const legacy = join(cwd, ".quanta", "memory.sqlite")
@@ -281,9 +288,9 @@ describe("the memory plane follows the quanta home", () => {
   })
 
   test("two stores: the session keeps this home's, and the notice recommends nothing destructive", () => {
-    const osHome = mkdtempSync(join(tmpdir(), "mem-both-"))
-    const relocated = mkdtempSync(join(tmpdir(), "mem-both2-"))
-    const cwd = mkdtempSync(join(tmpdir(), "mem-both-cwd-"))
+    const osHome = temps.create("mem-both-")
+    const relocated = temps.create("mem-both2-")
+    const cwd = temps.create("mem-both-cwd-")
     try {
       const prior = join(osHome, ".quanta", "memory", "memory.sqlite")
       const dest = join(relocated, "memory", "memory.sqlite")
@@ -310,7 +317,7 @@ describe("the memory plane follows the quanta home", () => {
   })
 
   test("with the home UNSET the probe is inert — no notice, no behaviour change", () => {
-    const osHome = mkdtempSync(join(tmpdir(), "mem-same-"))
+    const osHome = temps.create("mem-same-")
     try {
       const prior = join(osHome, ".quanta", "memory", "memory.sqlite")
       mkdirSync(dirname(prior), { recursive: true })
@@ -328,8 +335,8 @@ describe("the memory plane follows the quanta home", () => {
   })
 
   test("the cwd-scoped legacy file still wins over the pre-relocation one", () => {
-    const osHome = mkdtempSync(join(tmpdir(), "mem-osh2-"))
-    const cwd = mkdtempSync(join(tmpdir(), "mem-cwd2-"))
+    const osHome = temps.create("mem-osh2-")
+    const cwd = temps.create("mem-cwd2-")
     try {
       const prior = join(osHome, ".quanta", "memory", "memory.sqlite")
       mkdirSync(dirname(prior), { recursive: true })
@@ -350,8 +357,8 @@ describe("the memory plane follows the quanta home", () => {
     // decides whose store a session opens. `homedir()` answers the developer's real home
     // and cannot be redirected inside a running bun process, so a suite relocating only
     // QUANTA_HOME would have opened the real store.
-    const relocated = mkdtempSync(join(tmpdir(), "mem-nohome-"))
-    const cwd = mkdtempSync(join(tmpdir(), "mem-nohome-cwd-"))
+    const relocated = temps.create("mem-nohome-")
+    const cwd = temps.create("mem-nohome-cwd-")
     try {
       const notices: string[] = []
       const slot = buildMemoryForSession(

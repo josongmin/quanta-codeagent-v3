@@ -29,13 +29,11 @@
  * closed and nothing else.
  */
 
-import { describe, expect, test } from "bun:test"
-import { mkdtempSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { afterAll, describe, expect, test } from "bun:test"
 import type { MentionResolverPort } from "@/agent/mention-injection"
 import { buildDefaultMentionResolver } from "@/agent/mention-runner"
 import { KNOB_INVENTORY } from "@/config/knob-inventory"
+import { makeTempDirOwner } from "../../_helpers/temp-dir"
 
 /**
  * Created on FIRST USE, not at module load.
@@ -46,10 +44,14 @@ import { KNOB_INVENTORY } from "@/config/knob-inventory"
  * paid by any run that only collects this file, or filters every test out of it.
  */
 let cwdDir: string | undefined
+const temps = makeTempDirOwner()
 const cwd = (): string => {
-  cwdDir ??= mkdtempSync(join(tmpdir(), "mention-gate-parity-"))
+  // Owned and disposed. It was a bare `mkdtempSync` with no `rm` anywhere, so every run
+  // left a `mention-gate-parity-*` directory behind — the tmp-leak ratchet's red.
+  cwdDir ??= temps.create("mention-gate-parity-")
   return cwdDir
 }
+afterAll(() => temps.disposeAll())
 
 /** Minimal stand-ins for the ports each gate additionally requires. A gate that
  *  is ON but whose port is missing also yields an absent method, which would
