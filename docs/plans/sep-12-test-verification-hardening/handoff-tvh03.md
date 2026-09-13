@@ -371,8 +371,8 @@ from `prepush`, `pr` and `full`. What that file needs from its owner:
    `timeout` on Bun 1.3.14 — verified: a 5s sleep under `timeout: 300` returns
    in 302ms with SIGTERM.
 4. It must report through `capabilityGate` / `laneDescribe(GATE)` /
-   `reportExecuted` like its 16 siblings (`assertCapabilityNotBlocked` only for
-   an absence found at runtime, inside a hook), or the
+   `reportExecuted` like its 16 siblings (`capabilitySetupFailed` from a hook
+   for a fixture or service that turns out to be unreachable), or the
    `native-debugger` group's executed count will be short by one file and the
    group floor (4 files / 6 cases) will not be reachable.
 5. `tests/unit/dev/test-capability-lanes.test.ts` asserts from source that every

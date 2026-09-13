@@ -92,11 +92,34 @@ const bindingNames = (name: ts.BindingName): readonly string[] =>
         ts.isOmittedExpression(element) ? [] : bindingNames(element.name),
       )
 
+/** `var` names anywhere in a function's body, nested functions excluded: they hoist. */
+const hoistedVars = (scope: ts.SignatureDeclaration): readonly string[] => {
+  const names: string[] = []
+  const visit = (node: ts.Node): void => {
+    if (ts.isFunctionLike(node)) return
+    if (
+      ts.isVariableDeclarationList(node) &&
+      (node.flags & (ts.NodeFlags.Const | ts.NodeFlags.Let)) === 0
+    ) {
+      for (const declaration of node.declarations) names.push(...bindingNames(declaration.name))
+    }
+    node.forEachChild(visit)
+  }
+  scope.forEachChild((child) => {
+    if (!ts.isParameter(child)) visit(child)
+  })
+  return names
+}
+
 /** The names a scope node declares for its own body. */
 const declaredIn = (scope: ts.Node): readonly string[] => {
   if (ts.isFunctionLike(scope)) {
     const own = ts.isFunctionExpression(scope) && scope.name !== undefined ? [scope.name.text] : []
-    return [...own, ...scope.parameters.flatMap((parameter) => bindingNames(parameter.name))]
+    return [
+      ...own,
+      ...scope.parameters.flatMap((parameter) => bindingNames(parameter.name)),
+      ...hoistedVars(scope),
+    ]
   }
   if (ts.isCatchClause(scope)) {
     return scope.variableDeclaration === undefined
@@ -165,9 +188,18 @@ const moduleStringConstants = (source: ts.SourceFile): ReadonlyMap<string, strin
   return out
 }
 
+/**
+ * Deferred code: a function body, or an INSTANCE field initializer, which runs
+ * per construction (`class L { d = capability("git") }` reported module scope).
+ */
 const insideFunction = (node: ts.Node): boolean => {
-  for (let at = node.parent; at !== undefined; at = at.parent) {
+  for (let child: ts.Node = node, at = node.parent; at !== undefined; child = at, at = at.parent) {
     if (ts.isFunctionLike(at)) return true
+    const instanceField =
+      ts.isPropertyDeclaration(at) &&
+      at.initializer === child &&
+      (ts.getCombinedModifierFlags(at) & ts.ModifierFlags.Static) === 0
+    if (instanceField) return true
   }
   return false
 }
@@ -202,10 +234,38 @@ const inStatementBranch = (child: ts.Node, parent: ts.Node): boolean => {
   return ts.isWhileStatement(parent) || ts.isDoStatement(parent) || ts.isCatchClause(parent)
 }
 
+/** Is `binary` a DEFAULT inside an assignment pattern: `({ a: b = x } = o)`, `[b = x] = arr`? */
+const isPatternDefault = (binary: ts.BinaryExpression): boolean => {
+  if (binary.operatorToken.kind !== ts.SyntaxKind.EqualsToken) return false
+  let current: ts.Node = binary
+  while (
+    current.parent !== undefined &&
+    (ts.isArrayLiteralExpression(current.parent) ||
+      ts.isObjectLiteralExpression(current.parent) ||
+      ts.isPropertyAssignment(current.parent) ||
+      ts.isSpreadElement(current.parent) ||
+      ts.isParenthesizedExpression(current.parent))
+  ) {
+    current = current.parent
+  }
+  if (current === binary) return false
+  const holder = current.parent
+  if (holder === undefined) return false
+  if (ts.isForOfStatement(holder) || ts.isForInStatement(holder)) {
+    return holder.initializer === current
+  }
+  return (
+    ts.isBinaryExpression(holder) &&
+    holder.left === current &&
+    holder.operatorToken.kind === ts.SyntaxKind.EqualsToken
+  )
+}
+
 const inExpressionBranch = (child: ts.Node, parent: ts.Node): boolean => {
   if (ts.isConditionalExpression(parent)) return child !== parent.condition
   if (ts.isBinaryExpression(parent)) {
-    return SHORT_CIRCUIT.has(parent.operatorToken.kind) && child === parent.right
+    if (child !== parent.right) return false
+    return SHORT_CIRCUIT.has(parent.operatorToken.kind) || isPatternDefault(parent)
   }
   // `a?.b(capability("x"))` and `a?.[capability("x")]`: skipped when `a` is nullish.
   if (ts.isCallExpression(parent) || ts.isElementAccessExpression(parent)) {
@@ -242,49 +302,151 @@ const unwrapExpression = (node: ts.Expression): ts.Expression => {
   return at
 }
 
-const AMBIENT_ROOTS: ReadonlySet<string> = new Set(["process", "Bun", "globalThis"])
+const AMBIENT_ROOTS: readonly string[] = ["process", "Bun", "globalThis", "global"]
+const PROCESS_MODULES: ReadonlySet<string> = new Set(["process", "node:process"])
 
-/**
- * An object literal that cannot carry the campaign's receipt: no spread, no
- * shorthand (a bare name is a value the scan cannot see), and no value naming
- * `process`, `Bun` or `globalThis`.
- */
-const isInertObjectLiteral = (node: ts.Expression): boolean => {
-  if (!ts.isObjectLiteralExpression(node)) return false
-  let inert = true
-  const visit = (at: ts.Node): void => {
-    if (ts.isSpreadAssignment(at) || ts.isShorthandPropertyAssignment(at)) inert = false
-    if (ts.isIdentifier(at) && AMBIENT_ROOTS.has(at.text)) inert = false
-    if (inert) at.forEachChild(visit)
+/** What one file lets an env argument be proven against. */
+interface EnvFacts {
+  /** Every binding of each name: an initialised `const`'s initializer, else `undefined`. */
+  readonly bindings: ReadonlyMap<string, readonly (ts.Expression | undefined)[]>
+  /** Names that can hold the ambient env: roots, `node:process` imports, anything bound from one. */
+  readonly ambient: ReadonlySet<string>
+  /** Names written through: `Object.assign(x, …)`, `x.k = …`, `x[k] = …`. */
+  readonly mutated: ReadonlySet<string>
+}
+
+/** An identifier used as a VALUE, not as a member or key name. */
+const isValueIdentifier = (node: ts.Identifier): boolean => {
+  const parent = node.parent
+  if (
+    (ts.isPropertyAccessExpression(parent) || ts.isPropertyAssignment(parent)) &&
+    parent.name === node
+  ) {
+    return false
   }
-  node.forEachChild(visit)
-  return inert
+  return !(ts.isBindingElement(parent) && parent.propertyName === node)
 }
 
 /**
- * Every binding of every variable name in the file: its initializer when it is an
- * initialised `const`, otherwise `undefined` (a `let`, a `var`, no initializer).
+ * Does `node` read a name in `ambient`, or `import.meta`? Not inside a function it
+ * contains: a function VALUE whose body mentions `process` is not an env, and a
+ * call's result is the documented untraced case (`isInertObjectLiteral`).
  */
-const variableBindings = (
-  source: ts.SourceFile,
-): ReadonlyMap<string, readonly (ts.Expression | undefined)[]> => {
-  const out = new Map<string, (ts.Expression | undefined)[]>()
-  const visit = (node: ts.Node): void => {
-    if (
-      ts.isVariableDeclaration(node) &&
-      ts.isIdentifier(node.name) &&
-      ts.isVariableDeclarationList(node.parent)
-    ) {
-      const isConst = (node.parent.flags & ts.NodeFlags.Const) !== 0
-      const list = out.get(node.name.text) ?? []
-      list.push(isConst ? node.initializer : undefined)
-      out.set(node.name.text, list)
+const readsAmbient = (node: ts.Node, ambient: ReadonlySet<string>): boolean => {
+  let found = false
+  const visit = (at: ts.Node): void => {
+    if (found || ts.isFunctionLike(at)) return
+    if (ts.isMetaProperty(at) && at.keywordToken === ts.SyntaxKind.ImportKeyword) found = true
+    else if (ts.isIdentifier(at) && ambient.has(at.text) && isValueIdentifier(at)) found = true
+    else at.forEachChild(visit)
+  }
+  visit(node)
+  return found
+}
+
+const rootIdentifier = (node: ts.Expression): ts.Identifier | undefined => {
+  let at = unwrapExpression(node)
+  while (ts.isPropertyAccessExpression(at) || ts.isElementAccessExpression(at)) {
+    at = unwrapExpression(at.expression)
+  }
+  return ts.isIdentifier(at) ? at : undefined
+}
+
+/** The names a node binds, each with the initializer that can prove it (a plain `const` only). */
+const declaredBindings = (
+  node: ts.Node,
+): readonly (readonly [string, ts.Expression | undefined])[] => {
+  if (ts.isVariableDeclaration(node) && ts.isVariableDeclarationList(node.parent)) {
+    const isConst = (node.parent.flags & ts.NodeFlags.Const) !== 0
+    const init = isConst && ts.isIdentifier(node.name) ? node.initializer : undefined
+    return bindingNames(node.name).map((name) => [name, init] as const)
+  }
+  if (ts.isParameter(node)) return bindingNames(node.name).map((name) => [name, undefined] as const)
+  if ((ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) && node.name !== undefined) {
+    return [[node.name.text, undefined]]
+  }
+  if (ts.isImportClause(node) || ts.isImportSpecifier(node) || ts.isNamespaceImport(node)) {
+    return node.name === undefined ? [] : [[node.name.text, undefined]]
+  }
+  return []
+}
+
+const importedFromProcess = (source: ts.SourceFile): readonly string[] =>
+  source.statements.flatMap((statement) => {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) {
+      return []
     }
+    if (!PROCESS_MODULES.has(statement.moduleSpecifier.text)) return []
+    const clause = statement.importClause
+    const named = clause?.namedBindings
+    const names =
+      named === undefined
+        ? []
+        : ts.isNamespaceImport(named)
+          ? [named.name]
+          : named.elements.map((one) => one.name)
+    return [...(clause?.name === undefined ? [] : [clause.name]), ...names].map((name) => name.text)
+  })
+
+/** The name a write goes through: `Object.assign(x, …)`, `x.k = …`, `x[k] = …`. */
+const writtenThrough = (node: ts.Node, source: ts.SourceFile): ts.Identifier | undefined => {
+  if (ts.isCallExpression(node) && node.expression.getText(source) === "Object.assign") {
+    return node.arguments[0] === undefined ? undefined : rootIdentifier(node.arguments[0])
+  }
+  if (!ts.isBinaryExpression(node) || node.operatorToken.kind !== ts.SyntaxKind.EqualsToken) {
+    return undefined
+  }
+  const left = unwrapExpression(node.left)
+  return ts.isPropertyAccessExpression(left) || ts.isElementAccessExpression(left)
+    ? rootIdentifier(left)
+    : undefined
+}
+
+const envFacts = (source: ts.SourceFile): EnvFacts => {
+  const bindings = new Map<string, (ts.Expression | undefined)[]>()
+  const derived: (readonly [readonly string[], ts.Expression])[] = []
+  const mutated = new Set<string>()
+  const visit = (node: ts.Node): void => {
+    for (const [name, init] of declaredBindings(node)) {
+      bindings.set(name, [...(bindings.get(name) ?? []), init])
+    }
+    if (ts.isVariableDeclaration(node) && node.initializer !== undefined) {
+      derived.push([bindingNames(node.name), node.initializer])
+    }
+    const written = writtenThrough(node, source)
+    if (written !== undefined) mutated.add(written.text)
     node.forEachChild(visit)
   }
   source.forEachChild(visit)
-  return out
+  const ambient = new Set([...AMBIENT_ROOTS, ...importedFromProcess(source)])
+  // To a fixed point: `const a = process.env; const b = a; const { env } = process`.
+  for (let grew = true; grew; ) {
+    grew = false
+    for (const [names, init] of derived) {
+      if (names.every((name) => ambient.has(name)) || !readsAmbient(init, ambient)) continue
+      for (const name of names) ambient.add(name)
+      grew = true
+    }
+  }
+  return { bindings, ambient, mutated }
 }
+
+/**
+ * An object literal that cannot carry the campaign's receipt: only `key: value`
+ * members, none of which reads an ambient name (`EnvFacts.ambient`) or
+ * `import.meta`.
+ *
+ * A value computed by a CALL is not followed: `{ K: read() }` is trusted. That is
+ * the one shape left, because the mechanism's own arm passes a produced receipt's
+ * fields, and a call's result cannot be proven either way without its body.
+ */
+const isInertObjectLiteral = (node: ts.Expression, facts: EnvFacts): boolean =>
+  ts.isObjectLiteralExpression(node) &&
+  node.properties.every(
+    // Plain `key: value` members only: a getter or method runs code on read, and
+    // a spread or shorthand is a value the scan cannot see.
+    (property) => ts.isPropertyAssignment(property) && !readsAmbient(property, facts.ambient),
+  )
 
 /**
  * Is the env argument one the CAMPAIGN receipt cannot be in?
@@ -295,27 +457,26 @@ const variableBindings = (
  * same receipt — measured, each of `capability("x", Bun.env)`,
  * `const env = process.env; capability("x", env)` and
  * `capability("x", { ...process.env })` came back with no problem and no callsite.
+ * A second audit found a dozen more: `import { env } from "node:process"`,
+ * `import.meta.env`, `global.process`, a value read through an alias, and a
+ * literal later filled by `Object.assign(env, process.env)`.
  *
  * Now only what is provably inert is injected: an inert object literal, or a name
- * whose EVERY binding in the file is a `const` initialised to one (a name match,
- * not a scope resolution, so a second binding of the name must not be trusted).
- * Anything the scan cannot prove — a call's result, a parameter, a property — is
- * ambient.
+ * nothing writes through whose EVERY binding in the file — parameters, catch
+ * bindings and patterns included — is a `const` initialised to one. (A name
+ * match, not a scope resolution, so any second binding makes it untrusted.)
  */
-const isInjectedEnv = (
-  argument: ts.Expression,
-  bindings: ReadonlyMap<string, readonly (ts.Expression | undefined)[]>,
-): boolean => {
+const isInjectedEnv = (argument: ts.Expression, facts: EnvFacts): boolean => {
   const bare = unwrapExpression(argument)
-  if (isInertObjectLiteral(bare)) return true
-  if (!ts.isIdentifier(bare)) return false
-  const bound = bindings.get(bare.text)
+  if (isInertObjectLiteral(bare, facts)) return true
+  if (!ts.isIdentifier(bare) || facts.mutated.has(bare.text)) return false
+  const bound = facts.bindings.get(bare.text)
   return (
     bound !== undefined &&
     bound.length > 0 &&
     bound.every(
       (initializer) =>
-        initializer !== undefined && isInertObjectLiteral(unwrapExpression(initializer)),
+        initializer !== undefined && isInertObjectLiteral(unwrapExpression(initializer), facts),
     )
   )
 }
@@ -358,6 +519,10 @@ const inTypePosition = (node: ts.Node): boolean => {
 
 /** Declarations and members whose `name` is a name, not a use of a binding. */
 const NAMED_DECLARATION: readonly ((node: ts.Node) => boolean)[] = [
+  ts.isTypeParameterDeclaration,
+  ts.isModuleDeclaration,
+  ts.isClassExpression,
+  ts.isFunctionExpression,
   ts.isPropertyAccessExpression,
   ts.isPropertyAssignment,
   ts.isMethodDeclaration,
@@ -390,6 +555,11 @@ const isNamePosition = (node: ts.Identifier): boolean => {
     ts.isNamespaceImport(parent) ||
     inTypePosition(node) ||
     (ts.isBindingElement(parent) && parent.propertyName === node) ||
+    // A label: `capability: for (…) break capability`.
+    ((ts.isLabeledStatement(parent) ||
+      ts.isBreakStatement(parent) ||
+      ts.isContinueStatement(parent)) &&
+      parent.label === node) ||
     (NAMED_DECLARATION.some((is) => is(parent)) &&
       (parent as ts.Node & { readonly name?: ts.Node }).name === node)
   )
@@ -467,7 +637,7 @@ export const capabilityCalls = (input: CapabilityCallsiteInput): readonly Capabi
   const bindings = consumerBindings(source)
   if (bindings.names.size === 0 && bindings.namespaces.size === 0) return []
   const constants = moduleStringConstants(source)
-  const variables = variableBindings(source)
+  const facts = envFacts(source)
   const out: CapabilityCall[] = []
   const visit = (node: ts.Node): void => {
     if (ts.isCallExpression(node) && callsConsumer(node, bindings)) {
@@ -476,7 +646,7 @@ export const capabilityCalls = (input: CapabilityCallsiteInput): readonly Capabi
         file: input.path,
         line: source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1,
         capabilityId,
-        ambient: node.arguments[1] === undefined || !isInjectedEnv(node.arguments[1], variables),
+        ambient: node.arguments[1] === undefined || !isInjectedEnv(node.arguments[1], facts),
         moduleScope: !insideFunction(node),
         conditional: underCondition(node),
       })

@@ -113,6 +113,9 @@ export const capabilityRecordName = (capability: string, verdict: string, detail
  */
 export const laneGroupSubject = (group: string): string => `group ${group}`
 
+/** Is a record's subject a lane GROUP (`laneGroupSubject`) rather than a receipt id? */
+export const isLaneGroupSubject = (subject: string): boolean => subject.startsWith("group ")
+
 /** A subject: a receipt id, or `group <id>` (`laneGroupSubject`). */
 const SUBJECT = "((?:group )?\\S+)"
 

@@ -34,8 +34,8 @@ import { beforeAll, expect, test } from "bun:test"
 import { OpenAIAdapter } from "@/llm/adapters/openai"
 import type { StreamEvent } from "@/llm/types"
 import {
-  assertCapabilityNotBlocked,
   capabilityGate,
+  capabilitySetupFailed,
   hasBinary,
   laneDescribe,
   reportCapability,
@@ -55,9 +55,12 @@ const OLLAMA_TAGS = "http://127.0.0.1:11434/api/tags"
  * and `test:real-toolchain` printed the same green a host that really ran a
  * 150s inference prints. The prose was the only place the truth lived.
  *
- * Now: no server ⇒ `blocked-missing` (RED when this group is REQUIRED, a
- * VISIBLE bun skip otherwise); lane not selected ⇒ `skipped-unsupported`.
- * Neither is ever a passing assertion.
+ * Now: lane not selected ⇒ `skipped-unsupported`; no `ollama` binary ⇒
+ * `blocked-missing` (a recorded skip, RED when this group is REQUIRED); the
+ * binary present and no server answering ⇒ `failed-setup` from `beforeAll`, RED
+ * in every selected run. None is ever a passing assertion, and the last is not a
+ * case either: it used to throw from the test body when the group was optional,
+ * which counted as an executed case in an executed file.
  */
 const GATE = capabilityGate({
   group: GROUP,
@@ -95,32 +98,20 @@ laneDescribe(GATE)("RFC05-3 LIVE Ollama streaming tool-call smoke (honest reacha
   beforeAll(async () => {
     liveModel = await probeOllama()
     if (liveModel !== null) return
-    // The lane WAS selected and the binary IS present, but the daemon does
-    // not answer. That is `blocked-missing`, and in a REQUIRED job it is the
-    // finding — not a reason to assert `true`.
-    const blocked = {
-      ...GATE,
-      available: false,
-      outcome: "blocked-missing",
-      detail: `no local Ollama server answered ${OLLAMA_TAGS} within 3s`,
-    } as const
-    reportCapability({ group: GROUP, file: FILE, outcome: blocked.outcome, detail: blocked.detail })
-    assertCapabilityNotBlocked({ group: GROUP, file: FILE }, blocked)
+    // The lane WAS selected and the binary IS present, but the daemon does not
+    // answer: the fixture this lane needs could not be reached. A hook failure,
+    // which `capability-result` counts as failed-setup and never as coverage.
+    capabilitySetupFailed(
+      GROUP,
+      FILE,
+      `no local Ollama server answered ${OLLAMA_TAGS} within 3s; start \`ollama serve\` or deselect this group`,
+    )
   })
 
   test("real Ollama /v1/chat/completions streams text or a structured tool-call through the Chat adapter", async () => {
     const model = liveModel
-    if (model === null) {
-      // Reached only when this group is NOT required: beforeAll already
-      // reported `blocked-missing`. Fail the case rather than pass it — a
-      // capability lane that was SELECTED and could not run has not proven
-      // anything, and `test:real-toolchain` must not print green over it.
-      throw new Error(
-        `[capability] ${GROUP} blocked-missing in ${FILE}: no local Ollama server reachable at ` +
-          `${OLLAMA_BASE}. Start \`ollama serve\` or deselect this group; an unreachable live ` +
-          "model is not a pass.",
-      )
-    }
+    // Unreachable: `beforeAll` refuses a server that did not answer.
+    if (model === null) throw new Error(`[capability] ${GROUP}: no live model resolved`)
     reportCapability({
       group: GROUP,
       file: FILE,

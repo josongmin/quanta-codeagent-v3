@@ -587,6 +587,11 @@ describe("capability vocabulary and ids do not drift", () => {
     expect(receiptIds.size).toBeGreaterThan(8)
     expect(groupIds.length).toBeGreaterThan(8)
     expect(groupIds.filter((id) => receiptIds.has(id))).toEqual([])
+    // SHAPES the record names depend on: `[capability] RECORD group <id> <verdict>:`
+    // is read as one subject only because a group id has no space, and a receipt
+    // id named `group` would read as the start of one.
+    expect(groupIds.filter((id) => !/^[a-z0-9-]+$/u.test(id))).toEqual([])
+    expect([...receiptIds].filter((id) => !/^[a-z0-9-]+$/u.test(id) || id === "group")).toEqual([])
   })
 
   test("🔴 every capability the producer PROBES is one some file ASKS for", () => {
@@ -766,6 +771,26 @@ describe("capability vocabulary and ids do not drift", () => {
       `const viaLet = capability("id-let", reused)`,
       `const viaCast = capability("id-cast", (globalThis.process.env as Record<string, string>))`,
       `test("inside", () => { capability("id-inside", Bun.env) })`,
+      // A second audit's shapes, each once called injected.
+      `import { env as processEnv } from "node:process"`,
+      `import * as proc from "process"`,
+      `const KEY = "QUANTA_CAPABILITY_RECEIPT"`,
+      `const viaAliasValue = capability("id-alias-value", { [KEY]: alias[KEY] })`,
+      `const viaProcessImport = capability("id-process-import", { R: processEnv.R })`,
+      `const viaProcessNamespace = capability("id-process-namespace", { R: proc.env.R })`,
+      `const viaImportMeta = capability("id-import-meta", { R: import.meta.env.R })`,
+      `const viaGlobal = capability("id-global", { R: (global as any)["process"].env.R })`,
+      `const viaGetter = capability("id-getter", { get R() { return "x" } })`,
+      `const filled = {}`,
+      `Object.assign(filled, process.env)`,
+      `const viaAssigned = capability("id-assigned", filled)`,
+      `const written = {}`,
+      `written.R = process.env.R`,
+      `const viaWritten = capability("id-written", written)`,
+      `const { env: destructured } = process`,
+      `const viaDestructured = capability("id-destructured", { R: destructured.R })`,
+      `const shadow = {}`,
+      `const shadowed = (shadow: Record<string, string>) => capability("id-param", shadow)`,
       ``,
     ]
     const input = { path: "tests/unit/ambient-shapes.test.ts", text: lines.join("\n") }
@@ -779,11 +804,24 @@ describe("capability vocabulary and ids do not drift", () => {
       "id-let",
       "id-cast",
       "id-inside",
+      "id-alias-value",
+      "id-process-import",
+      "id-process-namespace",
+      "id-import-meta",
+      "id-global",
+      "id-getter",
+      "id-assigned",
+      "id-written",
+      "id-destructured",
+      "id-param",
     ])
-    const at = lines.findIndex((line) => line.includes("id-inside")) + 1
-    expect(capabilityCallProblems([input])).toEqual([
-      `${input.path}:${at} ambient-call-inside-a-function`,
-    ])
+    const at = (id: string): number => lines.findIndex((line) => line.includes(`"${id}"`)) + 1
+    expect(capabilityCallProblems([input])).toEqual(
+      [
+        `${input.path}:${at("id-inside")} ambient-call-inside-a-function`,
+        `${input.path}:${at("id-param")} ambient-call-inside-a-function`,
+      ].sort(),
+    )
     // PAIRED CONTROL: a name bound twice, once inert and once not, is not trusted;
     // bound once to an inert literal, it is injected.
     const control = [
@@ -825,6 +863,14 @@ describe("capability vocabulary and ids do not drift", () => {
       `const { capability: renamed } = { capability: 1 }`,
       // Type-only: `implements` is erased, so naming the binding there is not a use.
       `class Impl implements consumer.capability {}`,
+      // Names, not uses: a label, a type parameter, a namespace, expression names.
+      `capability: for (const _ of []) { break capability }`,
+      `function generic<capability>(value: capability) { return value }`,
+      `declare namespace capability {}`,
+      `const Klass = class capability {}`,
+      `const named = function capability() {}`,
+      // A \`var\` in a nested block hoists to the function and shadows the import.
+      `function hoisting() { if (Math.random() > 2) { var capability = () => 1 } return capability() }`,
       ``,
     ].join("\n")
     expect(capabilityCallProblems([{ path: "tests/unit/clean.test.ts", text: clean }])).toEqual([])
@@ -842,6 +888,9 @@ describe("capability vocabulary and ids do not drift", () => {
       `switch (mode) { case "a": capability("git") }`,
       `gate ||= capability("git")`,
       `const r5 = { alias: capability }`,
+      `let r6, r7; ({ a: r6 = capability("git") } = options)`,
+      `;[r7 = capability("git")] = [undefined]`,
+      `class Deferred { field = capability("git") }`,
       // Runtime: a class `extends` clause evaluates its expression.
       `class Sub extends consumer.capability {}`,
       ``,
@@ -850,9 +899,20 @@ describe("capability vocabulary and ids do not drift", () => {
     const problems = capabilityCallProblems([input])
     const line = (fragment: string): number => lines.findIndex((one) => one.includes(fragment)) + 1
     const expected = [
-      ...["r1", "r2", "r3", "r4", "while", "for (let", "catch", "case", "||="].map(
-        (fragment) => `${input.path}:${line(fragment)} conditional-call`,
-      ),
+      ...[
+        "r1",
+        "r2",
+        "r3",
+        "r4",
+        "while",
+        "for (let",
+        "catch",
+        "case",
+        "||=",
+        "a: r6",
+        "[r7 =",
+      ].map((fragment) => `${input.path}:${line(fragment)} conditional-call`),
+      `${input.path}:${line("class Deferred")} ambient-call-inside-a-function`,
       `${input.path}:${line("r5")} indirect-use`,
       `${input.path}:${line("Sub")} indirect-use`,
     ].sort()

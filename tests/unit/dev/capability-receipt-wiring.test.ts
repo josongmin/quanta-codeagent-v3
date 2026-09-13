@@ -474,13 +474,14 @@ describe("a required capability cannot be skipped past", () => {
     // two assertions below catches that in one of those two environments.
     const dir = mkdtempSync(join(tmpdir(), "cap-env-"))
     try {
-      const produced = await produce(join(dir, "receipt.json"), [])
+      const minted = await produce(join(dir, "receipt.json"), [])
       // Passed as a literal of the two variables the consumer reads. The callsite
-      // scan treats any env it cannot prove inert — like `produced` itself — as the
-      // campaign's receipt, and asks that of a call inside a test.
+      // scan treats any env it cannot prove inert — like `minted` itself — as the
+      // campaign's receipt, and asks that of a call inside a test. Its taint is by
+      // NAME: this was `produced`, which another test here binds from process.env.
       const givenEnv = {
-        [CAPABILITY_RECEIPT_PATH_ENV]: produced[CAPABILITY_RECEIPT_PATH_ENV],
-        [CAPABILITY_RECEIPT_BINDING_ENV]: produced[CAPABILITY_RECEIPT_BINDING_ENV],
+        [CAPABILITY_RECEIPT_PATH_ENV]: minted[CAPABILITY_RECEIPT_PATH_ENV],
+        [CAPABILITY_RECEIPT_BINDING_ENV]: minted[CAPABILITY_RECEIPT_BINDING_ENV],
       }
       expect(capability("git", givenEnv).verdict).toBe("executed")
       expect(capability("git", NO_RECEIPT).verdict).toBe("blocked-missing")

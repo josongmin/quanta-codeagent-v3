@@ -15,6 +15,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
+import { execFileSync } from "node:child_process"
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
@@ -63,9 +64,10 @@ describe("capability-result", () => {
   })
 
   test("a failing case IS executed — it is coverage that found something", () => {
+    // `line` as Bun writes it for every real case.
     const xml = junit(
-      `<testcase name="a" file="f.test.ts"><failure message="boom"/></testcase>` +
-        `<testcase name="b" file="f.test.ts"/>`,
+      `<testcase name="a" file="f.test.ts" line="3"><failure message="boom"/></testcase>` +
+        `<testcase name="b" file="f.test.ts" line="4"/>`,
     )
     expect(countJunitExecution(xml)).toEqual({
       executedFiles: ["f.test.ts"],
@@ -74,6 +76,26 @@ describe("capability-result", () => {
       skippedCases: 0,
       recordedBlockedMissing: 0,
       recordedFailedSetup: 0,
+    })
+  })
+
+  test("a failing HOOK is not a case: it is failed-setup, and its file is not executed", () => {
+    // Bun's shape for a `beforeAll` throw: `(unnamed)`, a failure, no `line`, and
+    // the describe's cases gone. Counted as a case, an npm install that failed in
+    // two lane files met the js-test-runner floor of 2 files / 2 cases.
+    const xml = junit(
+      `<testcase name="(unnamed)" classname="lane" file="f.test.ts"><failure type="AssertionError" /></testcase>` +
+        `<testcase name="(unnamed)" classname="lane" file="g.test.ts"><failure type="AssertionError" /></testcase>` +
+        // PAIRED CONTROL: a real case named "" still carries `line`.
+        `<testcase name="" file="h.test.ts" line="11"><failure type="AssertionError" /></testcase>`,
+    )
+    expect(countJunitExecution(xml)).toEqual({
+      executedFiles: ["h.test.ts"],
+      executedCases: 1,
+      executedCasesByFile: { "h.test.ts": 1 },
+      skippedCases: 0,
+      recordedBlockedMissing: 0,
+      recordedFailedSetup: 2,
     })
   })
 
@@ -178,7 +200,7 @@ describe("capability-result", () => {
     const xml = junit(
       `<testcase name="a" file="f.test.ts"><system-out>x</system-out></testcase>` +
         `<testcase name="b" file="g.test.ts"><skipped/></testcase>` +
-        `<testcase name="c" file="h.test.ts"><failure message="boom"/></testcase>`,
+        `<testcase name="c" file="h.test.ts" line="9"><failure message="boom"/></testcase>`,
     )
     const counts = countJunitExecution(xml)
     expect(counts.executedFiles).toEqual(["f.test.ts", "h.test.ts"])
@@ -362,6 +384,21 @@ describe("a receipt decision that did not execute is a RECORD the artifact count
   })
 })
 
+/**
+ * A statement of its block that no earlier `return` or `throw` in that block cuts
+ * off. An audit moved the fresh-chunk push below the `return` beside it and the
+ * WIRING arm stayed green while fresh chunks fed nothing.
+ */
+const pushIsReached = (call: ts.CallExpression): boolean => {
+  const statement = call.parent
+  if (!ts.isExpressionStatement(statement) || !ts.isBlock(statement.parent)) return false
+  const siblings = statement.parent.statements
+  const at = siblings.indexOf(statement)
+  return siblings
+    .slice(0, at)
+    .every((earlier) => !ts.isReturnStatement(earlier) && !ts.isThrowStatement(earlier))
+}
+
 /** The text a call's object-literal argument gives `name`; a shorthand gives its own name. */
 const propertyText = (
   call: ts.CallExpression | undefined,
@@ -381,26 +418,27 @@ describe("a lane gate that did not execute is a RECORD too", () => {
   const LANE = join(REPO_ROOT, "tests", "_helpers", "capability-lane")
 
   /** A real lane file with one absent need, run by a real `bun test` into junit. */
+  /** A lane file with one absent need whose NAME spans two lines: its detail does too. */
+  const BLOCKED_LANE = [
+    `import { test } from "bun:test"`,
+    `import { capabilityGate, laneDescribe } from ${JSON.stringify(LANE)}`,
+    `const GATE = capabilityGate({ group: ${JSON.stringify(GROUP)}, file: "lane.test.ts", needs: { "tool\\nline-two": false } })`,
+    `laneDescribe(GATE)("the lane", () => {`,
+    `  test("case one", () => {})`,
+    `  test("case two", () => {})`,
+    `})`,
+    ``,
+  ].join("\n")
+
+  /** A lane file, run by a real `bun test` into junit. */
   const runLane = (
     env: Readonly<Record<string, string>>,
+    body: string = BLOCKED_LANE,
   ): { readonly code: number; readonly out: string; readonly xml: string } => {
     const dir = mkdtempSync(join(tmpdir(), "lane-record-"))
     try {
       const file = join(dir, "lane.test.ts")
-      writeFileSync(
-        file,
-        [
-          `import { test } from "bun:test"`,
-          `import { capabilityGate, laneDescribe } from ${JSON.stringify(LANE)}`,
-          // A need whose NAME spans two lines: its detail does too.
-          `const GATE = capabilityGate({ group: ${JSON.stringify(GROUP)}, file: "lane.test.ts", needs: { "tool\\nline-two": false } })`,
-          `laneDescribe(GATE)("the lane", () => {`,
-          `  test("case one", () => {})`,
-          `  test("case two", () => {})`,
-          `})`,
-          ``,
-        ].join("\n"),
-      )
+      writeFileSync(file, body)
       const junitPath = join(dir, "junit.xml")
       const inherited = Object.fromEntries(
         Object.entries(process.env).filter(
@@ -449,35 +487,84 @@ describe("a lane gate that did not execute is a RECORD too", () => {
     ])
   }, 60_000)
 
-  test("PAIRED CONTROL — optional and blocked: green, and still the record, across a newline", () => {
+  test("PAIRED CONTROL — optional and blocked: green, the record kept across a newline, and not HARD", () => {
     // The detail names a need spanning two lines. Bun writes a newline in a test
     // name as a leading `&#10;`, which hid the record's prefix (measured).
     const run = runLane({ QUANTA_REAL_TOOLCHAIN_E2E: "1" })
     expect(run.code).toBe(0)
-    expect(tally(run.xml)).toEqual({ executedCases: 0, skipped: 2, blocked: 1, setup: 0 })
+    expect(capabilityRecordsFromJunit(run.xml)).toEqual([
+      expect.objectContaining({
+        capability: `group ${GROUP}`,
+        verdict: "blocked-missing",
+        required: false,
+      }),
+    ])
+    // A lane group absent on a host it is not required on is the host's property,
+    // not a hard failure: it failed the PR `required` gate for nightly-heavy groups
+    // the floors exclude on purpose.
+    expect(tally(run.xml)).toEqual({ executedCases: 0, skipped: 2, blocked: 0, setup: 0 })
   }, 60_000)
 
-  test("an absence found inside a hook escalates only blocked-missing, and only when required", async () => {
-    const { assertCapabilityNotBlocked } = await import("../../_helpers/capability-lane")
-    const at = { group: GROUP, file: "lane.test.ts" }
-    const verdict = (outcome: "blocked-missing" | "skipped-unsupported") =>
-      ({ available: false, outcome, missing: ["tool"], detail: "absent" }) as const
-    expect(() =>
-      assertCapabilityNotBlocked(at, verdict("blocked-missing"), {
-        QUANTA_REQUIRE_CAPABILITIES: GROUP,
-      }),
-    ).toThrow(`[capability] REQUIRED group ${GROUP} is blocked-missing`)
-    // An unselected lane is a policy, not an absence, even under `=1`.
-    expect(() =>
-      assertCapabilityNotBlocked(at, verdict("skipped-unsupported"), {
-        QUANTA_REQUIRE_CAPABILITIES: "1",
-      }),
-    ).not.toThrow()
-    expect(() =>
-      assertCapabilityNotBlocked(at, verdict("blocked-missing"), {
-        QUANTA_REQUIRE_CAPABILITIES: "",
-      }),
-    ).not.toThrow()
+  test("REAL RUN — a fixture that failed in `beforeAll` is failed-setup, not two executed files", () => {
+    const run = runLane(
+      { QUANTA_REAL_TOOLCHAIN_E2E: "1" },
+      [
+        `import { beforeAll, test } from "bun:test"`,
+        `import { capabilityGate, capabilitySetupFailed, laneDescribe } from ${JSON.stringify(LANE)}`,
+        `const GATE = capabilityGate({ group: ${JSON.stringify(GROUP)}, file: "lane.test.ts", needs: { present: true } })`,
+        `laneDescribe(GATE)("the lane", () => {`,
+        `  beforeAll(() => capabilitySetupFailed(${JSON.stringify(GROUP)}, "lane.test.ts", "npm install failed"))`,
+        `  test("case one", () => {})`,
+        `})`,
+        ``,
+      ].join("\n"),
+    )
+    expect(run.code).not.toBe(0)
+    expect(tally(run.xml)).toEqual({ executedCases: 0, skipped: 0, blocked: 0, setup: 1 })
+  }, 60_000)
+
+  test("every lane gate is called at module top level, where its record can register", () => {
+    // Inside a hook or a test, registration throws: an optional absence then left
+    // no record and a required one became an `(unnamed)` failure.
+    const misplaced = (path: string, text: string): readonly string[] => {
+      const source = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+      const found: string[] = []
+      const visit = (node: ts.Node): void => {
+        if (
+          ts.isCallExpression(node) &&
+          node.expression.getText(source) === "capabilityGate" &&
+          ts.findAncestor(node.parent, ts.isFunctionLike) !== undefined
+        ) {
+          found.push(
+            `${path}:${source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1}`,
+          )
+        }
+        node.forEachChild(visit)
+      }
+      visit(source)
+      return found
+    }
+    const files = execFileSync("git", ["ls-files", "-z", "tests"], {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+    })
+      .split("\0")
+      .filter((path) => path.endsWith(".test.ts"))
+    const lanes = files.filter((path) =>
+      readFileSync(join(REPO_ROOT, path), "utf8").includes("capabilityGate("),
+    )
+    // ANTI-VACUITY: the lane corpus is still there.
+    expect(lanes.length).toBeGreaterThanOrEqual(16)
+    expect(
+      lanes.flatMap((path) => misplaced(path, readFileSync(join(REPO_ROOT, path), "utf8"))),
+    ).toEqual([])
+    // RED ON INJECTION.
+    expect(
+      misplaced(
+        "tests/unit/injected.test.ts",
+        'beforeAll(() => { capabilityGate({ group: "g", file: "f", needs: {} }) })\n',
+      ),
+    ).toEqual(["tests/unit/injected.test.ts:1"])
   })
 
   test("PAIRED CONTROL — an unselected lane under `=1` is a skipped-unsupported record, not a red", () => {
@@ -512,6 +599,10 @@ describe("the shard runner reads the records a campaign produces", () => {
         node.expression.expression.getText(tree) === "input.capabilityRecords"
       ) {
         pushes.push(node.getText(tree))
+        expect({ push: node.getText(tree), reached: pushIsReached(node) }).toEqual({
+          push: node.getText(tree),
+          reached: true,
+        })
       }
       node.forEachChild(walk)
     }

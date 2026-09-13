@@ -365,30 +365,14 @@ export const laneDescribe = (verdict: CapabilityGateVerdict): typeof describeFn 
   verdict.available ? describeFn : describeFn.skip
 
 /**
- * The RED half for an absence found AFTER the gate, inside a running hook — a
- * daemon that does not answer (`local-preset-live-real-e2e`). A gate's own
- * absence is registered by `capabilityGate` and never reaches here.
+ * A fixture that could not be built while the capability WAS present — an
+ * install that failed, a daemon that does not answer. Always a throw, from a hook:
+ * `failed-setup` is a defect in the lane, never a host property, and
+ * `capability-result` counts a failing hook as exactly that, never as a case.
  *
- * Only `blocked-missing` is escalated, as in `recordGate`. Nothing can register
- * from a running hook, so this throws; Bun writes that as an unnamed failure,
- * which is why a gate never uses it.
- *
- * Deliberately an `Error`, not an `expect` — so it is usable from `beforeAll`
- * and from a setup step, where a failed expectation is not always attributed.
- */
-export const assertCapabilityNotBlocked = (
-  input: { readonly group: string; readonly file: string },
-  verdict: CapabilityGateVerdict,
-  env: Readonly<Record<string, string | undefined>> = process.env,
-): void => {
-  if (verdict.available || verdict.outcome !== "blocked-missing") return
-  if (!capabilityRequired(input.group, env)) return
-  throw new Error(requiredMessage(input.group, input.file, verdict))
-}
-
-/**
- * A fixture that could not be built while the capability WAS present.
- * Always a throw: `failed-setup` is a defect in the lane, never a host property.
+ * (`assertCapabilityNotBlocked` lived here for an absence found inside a hook.
+ * Its one caller, the Ollama lane, now reports that as the setup failure it is,
+ * and a gate's own absence is registered by `capabilityGate`.)
  */
 export const capabilitySetupFailed = (
   group: string,
