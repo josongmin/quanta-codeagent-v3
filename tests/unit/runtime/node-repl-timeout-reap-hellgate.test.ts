@@ -13,7 +13,10 @@
  * it would not exercise the kill/evict path) and asserts the OS process is gone.
  */
 import { describe, expect, test } from "bun:test"
+import { existsSync } from "node:fs"
+import { join } from "node:path"
 import { createDefaultNodeReplKernel } from "@/runtime/node-repl/default-kernel"
+import { quantaHomeDir } from "@/shared/quanta-home"
 
 /** `process.kill(pid, 0)` probes liveness without signalling: throws ESRCH once
  *  the process is gone. Poll briefly so the OS has a tick to reap after SIGTERM. */
@@ -39,6 +42,11 @@ describe("node-repl exec-timeout reaps the child (U2)", () => {
     const { id, pid } = spawned.value
     expect(kernel.list().some((k) => k.spec.id === id)).toBe(true)
     expect(await waitDead(pid, 200)).toBe(false) // alive before the timeout
+    // With no `home`, the on-disk handle lands in the QUANTA home — the preload's scratch
+    // one. The default used to be the OS home's `.quanta`, so this test wrote a handle
+    // into the developer's real store on every run.
+    const handle = join(quantaHomeDir(), "node_repl", "active_execs", `${id}.json`)
+    expect(existsSync(handle)).toBe(true)
 
     // A synchronous infinite loop blocks the REPL from ever evaluating the
     // post-code sentinel line ⇒ read-timeout fires. `node -i` installs no
@@ -50,6 +58,7 @@ describe("node-repl exec-timeout reaps the child (U2)", () => {
     // THE FIX — observable contract of markDead:
     expect(kernel.list().some((k) => k.spec.id === id)).toBe(false) // Map evicted
     expect(kernel.status(id)).toBe("dead")
+    expect(existsSync(handle)).toBe(false) // …and the handle with it
     // …and the OS child is actually gone (the part the old markDead skipped).
     expect(await waitDead(pid)).toBe(true)
 

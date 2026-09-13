@@ -43,8 +43,8 @@ import type { ExecResult, KernelError, KernelId, KernelSpec, KernelState } from 
 export interface DefaultKernelOptions {
   /** Override for the `node` binary path. Default: `"node"` (PATH lookup). */
   readonly nodeBin?: string
-  /** Filesystem `HOME` for the on-disk handle store. Defaults to the
-   *  caller's HOME (state-store falls back to `os.homedir()`). */
+  /** Filesystem `HOME` for the on-disk handle store (`<home>/.quanta/…`). Omitted, the
+   *  store is the Quanta home (`QUANTA_CONFIG_DIR ?? QUANTA_HOME ?? ~/.quanta`). */
   readonly home?: string
   /** Hard cap on the initial banner-consume window. Default 5_000 ms. */
   readonly readyTimeoutMs?: number

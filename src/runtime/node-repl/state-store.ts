@@ -1,8 +1,8 @@
 /**
  * ADR-0249 — filesystem layer for node-repl kernel handles.
  *
- * Lives under `~/.quanta/node_repl/active_execs/` (directory created on
- * first write, mode 0700). Each kernel is a single `{id}.json` file
+ * Lives under `<quanta home>/node_repl/active_execs/` — `QUANTA_CONFIG_DIR ??
+ * QUANTA_HOME ?? ~/.quanta` — (directory created on first write, mode 0700). Each kernel is a single `{id}.json` file
  * written with mode 0600 so other users on a multi-tenant host cannot
  * read the `sessionId ↔ pid` linkage — defense-in-depth on top of the
  * OS-process boundary.
@@ -23,14 +23,24 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs"
-import { homedir } from "node:os"
 import { join } from "node:path"
+import { quantaHomeDir } from "@/shared/quanta-home"
 import type { KernelId, KernelSpec } from "./types"
 
-/** Resolve the on-disk directory. Exported so tests can override `HOME`
- *  and verify the path discipline. */
-export const stateDir = (home: string = homedir()): string =>
-  join(home, ".quanta", "node_repl", "active_execs")
+/**
+ * Resolve the on-disk directory.
+ *
+ * With no argument this is the Quanta home, like every other home-scoped store. The
+ * default used to be the OS home's `.quanta`, which ignored `QUANTA_HOME` — so a
+ * relocated home still wrote kernel handles into the OS home, and the test suite's
+ * scratch home did not contain them (measured: the reap hellgate left handles in the
+ * developer's real `node_repl/active_execs`). An explicit `home` keeps its meaning — a
+ * filesystem HOME, the seam the state-store tests use.
+ */
+export const stateDir = (home?: string): string =>
+  home === undefined
+    ? join(quantaHomeDir(), "node_repl", "active_execs")
+    : join(home, ".quanta", "node_repl", "active_execs")
 
 const ID_PATTERN = /[^A-Za-z0-9._-]/g
 
@@ -62,7 +72,7 @@ const filePath = (dir: string, id: KernelId | string): string => join(dir, `${id
 
 /** Persist a fresh kernel spec. Mode 0600. Synchronous so a follow-up
  *  `list()` immediately sees the new entry without an await window. */
-export const writeKernel = (spec: KernelSpec, home: string = homedir()): void => {
+export const writeKernel = (spec: KernelSpec, home?: string): void => {
   const dir = stateDir(home)
   ensureDir(dir)
   const body = JSON.stringify(spec)
@@ -72,7 +82,7 @@ export const writeKernel = (spec: KernelSpec, home: string = homedir()): void =>
 /** Bump `lastUseMs` on disk after a successful exec. Idempotent: if
  *  the file vanished concurrently, this is a no-op (the orphan reaper
  *  may have run). */
-export const touchKernel = (id: KernelId, lastUseMs: number, home: string = homedir()): void => {
+export const touchKernel = (id: KernelId, lastUseMs: number, home?: string): void => {
   const dir = stateDir(home)
   const path = filePath(dir, id)
   if (!existsSync(path)) return
@@ -91,7 +101,7 @@ export const touchKernel = (id: KernelId, lastUseMs: number, home: string = home
 }
 
 /** Remove the on-disk handle. Idempotent — missing file is fine. */
-export const removeKernel = (id: KernelId, home: string = homedir()): void => {
+export const removeKernel = (id: KernelId, home?: string): void => {
   const dir = stateDir(home)
   const path = filePath(dir, id)
   if (!existsSync(path)) return
@@ -104,7 +114,7 @@ export const removeKernel = (id: KernelId, home: string = homedir()): void => {
 
 /** Load every kernel handle on disk. Files that fail JSON parse are
  *  silently dropped (treated as corrupt orphans the caller should reap). */
-export const listKernels = (home: string = homedir()): KernelSpec[] => {
+export const listKernels = (home?: string): KernelSpec[] => {
   const dir = stateDir(home)
   if (!existsSync(dir)) return []
   const out: KernelSpec[] = []

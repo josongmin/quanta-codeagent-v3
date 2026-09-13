@@ -21,6 +21,7 @@
  *   14 default-OFF: nothing in `src/` constructs the kernel by default
  *   15 successful exec bumps `lastUseMs` on the spec      (stub)
  *   16 list() reports inUse:false for ready/idle, true for running  (stub)
+ *   17 the default handle dir is the Quanta home; an explicit home keeps `<home>/.quanta`
  */
 
 import { describe, expect, test } from "bun:test"
@@ -35,6 +36,7 @@ import {
   stateDir,
 } from "@/runtime/node-repl"
 import { scrubReplNoise } from "@/runtime/node-repl/default-kernel"
+import { __resetRuntimeConfig } from "@/shared"
 
 const MISSING_NODE = "__quanta_definitely_no_such_node_bin__"
 
@@ -299,6 +301,26 @@ describe("ADR-0249 node-repl-hellgate", () => {
       expect(listed[0]?.id).toBe(sp.value.id)
     } finally {
       dropTmp(home)
+    }
+  })
+
+  // ─── HELL-NR-17 — the default handle dir follows the Quanta home ──────
+  test("HELL-NR-17 stateDir() is <QUANTA_HOME>/node_repl/active_execs; stateDir(home) is <home>/.quanta/…", () => {
+    const relocated = mkTmpHome()
+    const saved = process.env.QUANTA_HOME
+    try {
+      process.env.QUANTA_HOME = relocated
+      __resetRuntimeConfig()
+      expect(stateDir()).toBe(join(relocated, "node_repl", "active_execs"))
+      // The explicit argument is a filesystem HOME, not a Quanta home — unchanged.
+      expect(stateDir("/some/home")).toBe(
+        join("/some/home", ".quanta", "node_repl", "active_execs"),
+      )
+    } finally {
+      if (saved === undefined) delete process.env.QUANTA_HOME
+      else process.env.QUANTA_HOME = saved
+      __resetRuntimeConfig()
+      dropTmp(relocated)
     }
   })
 
