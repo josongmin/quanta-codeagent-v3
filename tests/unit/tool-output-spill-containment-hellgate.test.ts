@@ -18,6 +18,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import {
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -30,6 +31,7 @@ import {
 } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { createEvictionSpillPort } from "@/agent/tool-result-evict"
 import { defaultTools, type ToolContext, ToolRegistry, type ToolResult } from "@/tool"
 import {
   capToolOutput,
@@ -60,6 +62,8 @@ beforeEach(() => {
 })
 afterEach(() => {
   env.afterEach()
+  // The unavailable arms leave the repo at 0o555; restore before removing it.
+  chmodSync(repo, 0o755)
   rmSync(root, { recursive: true, force: true })
 })
 
@@ -122,6 +126,25 @@ describe("NW-2 refused arms — a symlinked spill location is never written or p
     expect(after.foreign).toEqual([])
     expect(after.intact).toBe(VICTIM_NOTES)
     expect(readdirSync(outside)).toEqual(["tool-output"])
+    expect(result.output).toContain(
+      `was NOT persisted to disk: ${join(repo, ".quanta")} is a symbolic link;`,
+    )
+    expect(result.evidence?.fullLogPath).toBeUndefined()
+  })
+
+  test("`.quanta` → EMPTY out-of-repo dir: no `tool-output` is created through the link", async () => {
+    // Nothing is seeded in `outside`, so a `tool-output` created through the
+    // `.quanta` link (a recursive pre-create, or a walk that makes `tool-output`
+    // before it has checked `.quanta`) shows up as an entry here.
+    const outside = join(root, "outside")
+    mkdirSync(outside)
+    symlinkSync("../outside", join(repo, ".quanta"))
+
+    const result = await readThroughRegistry("generated.txt")
+
+    expect(readdirSync(outside)).toEqual([])
+    expect(result.ok).toBe(true)
+    expect(result.output.startsWith("<truncated-output>\n")).toBe(true)
     expect(result.output).toContain(
       `was NOT persisted to disk: ${join(repo, ".quanta")} is a symbolic link;`,
     )
@@ -227,3 +250,51 @@ describe("NW-2 capToolOutput refusal kinds (structured)", () => {
     )
   })
 })
+
+// Root ignores directory mode bits, so an unwritable working directory cannot be
+// staged under uid 0 (visible skip, not a silent pass).
+const IS_ROOT = typeof process.getuid === "function" && process.getuid() === 0
+
+describe.skipIf(IS_ROOT)(
+  "NW-2 unavailable — an unwritable working directory refuses the spill, never throws",
+  () => {
+    const spillDirOf = (): string => join(repo, ".quanta", "tool-output")
+
+    test("registry `read`: the result is an excerpt naming the uncreatable `.quanta`", async () => {
+      chmodSync(repo, 0o555)
+
+      const result = await readThroughRegistry("generated.txt")
+
+      expect(result.ok).toBe(true)
+      expect(result.output.startsWith("<truncated-output>\n")).toBe(true)
+      expect(result.output).toContain(
+        `was NOT persisted to disk: ${join(repo, ".quanta")} could not be created or inspected (`,
+      )
+      expect(result.output).toContain("row-0 ")
+      expect(result.output).toContain("row-1999 ")
+      expect(result.evidence?.fullLogPath).toBeUndefined()
+      expect(existsSync(join(repo, ".quanta"))).toBe(false)
+    })
+
+    test("capToolOutput: structured `unavailable` refusal at `<repo>/.quanta` with the IO cause", async () => {
+      chmodSync(repo, 0o555)
+
+      const r = await capToolOutput("B".repeat(1_000), { maxChars: 10, spillDir: spillDirOf() })
+
+      expect(r.spillRefusal?.kind).toBe("unavailable")
+      expect(r.spillRefusal?.path).toBe(join(repo, ".quanta"))
+      expect(r.spillRefusal?.cause).toContain("EACCES")
+      expect(r.spillPath).toBeUndefined()
+    })
+
+    test("eviction spill port: returns the unpersisted block instead of throwing", () => {
+      chmodSync(repo, 0o555)
+
+      const block = createEvictionSpillPort({ spillDir: spillDirOf() }).persist("hello", "u1")
+
+      expect(block).toStartWith('<unpersisted-output chars="5">')
+      expect(block).toContain(`${join(repo, ".quanta")} could not be created or inspected (`)
+      expect(block).not.toContain("<persisted-output")
+    })
+  },
+)

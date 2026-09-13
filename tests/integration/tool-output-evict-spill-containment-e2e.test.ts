@@ -18,6 +18,8 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import {
+  chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -102,6 +104,8 @@ beforeEach(() => {
 })
 afterEach(() => {
   env.afterEach()
+  // The unavailable arm leaves the repo at 0o555; restore before removing it.
+  chmodSync(repo, 0o755)
   rmSync(root, { recursive: true, force: true })
 })
 
@@ -187,6 +191,46 @@ describe("NW-2 eviction spill — refused arms through the real loop", () => {
         `not persisted to disk: ${join(repo, ".quanta")} is a symbolic link;`,
       )
     }
+  })
+
+  test("`.quanta` → EMPTY out-of-repo dir: no `tool-output` is created through the link", async () => {
+    // Nothing is seeded in `outside`, so a `tool-output` created through the
+    // `.quanta` link (a recursive pre-create, or a walk that makes `tool-output`
+    // before it has checked `.quanta`) shows up as an entry here.
+    const outside = join(root, "outside")
+    mkdirSync(outside)
+    symlinkSync("../outside", join(repo, ".quanta"))
+
+    const cleared = await runEviction()
+
+    expect(readdirSync(outside)).toEqual([])
+    expect(cleared.length).toBeGreaterThan(0)
+    for (const block of cleared) {
+      expect(block.content).toContain(
+        `not persisted to disk: ${join(repo, ".quanta")} is a symbolic link;`,
+      )
+    }
+  })
+})
+
+// Root ignores directory mode bits, so an unwritable working directory cannot be
+// staged under uid 0 (visible skip, not a silent pass).
+const IS_ROOT = typeof process.getuid === "function" && process.getuid() === 0
+
+describe.skipIf(IS_ROOT)("NW-2 eviction spill — an unwritable working directory", () => {
+  test("every cleared block names the uncreatable `.quanta` and the turn completes", async () => {
+    chmodSync(repo, 0o555)
+
+    const cleared = await runEviction()
+
+    expect(cleared.length).toBeGreaterThan(0)
+    for (const block of cleared) {
+      expect(block.content).toContain(
+        `not persisted to disk: ${join(repo, ".quanta")} could not be created or inspected (`,
+      )
+      expect(block.content).not.toContain("<persisted-output")
+    }
+    expect(existsSync(join(repo, ".quanta"))).toBe(false)
   })
 })
 
