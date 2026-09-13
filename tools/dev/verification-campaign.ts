@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url"
 import { runBoundedCapture } from "./bounded-child"
 import { describeQuietBoxWait, quietBoxBudgetMs, waitForQuietBox } from "./box-load"
 import { gatesForStage, plannedGatesForLabel } from "./gate-manifest"
-import { type LeaseQuarantineRecord, quarantineLane, quarantinePath } from "./lease-quarantine"
+import { type LeaseQuarantineRecord, quarantineLane } from "./lease-quarantine"
 import {
   acquireTestShardLease,
   normalizeRepositoryIdentity,
@@ -52,8 +52,10 @@ const LEASE_OWNER_SIDECAR = join(sharedVerificationCacheRoot(REPO_ROOT), "lease-
 // Diagnostic history, one file per campaign outcome. Never read to decide
 // whether to re-run — that is the exact receipt's job.
 const CAMPAIGN_RECEIPT = join(sharedVerificationCacheRoot(REPO_ROOT), "last-campaign.json")
-const QUARANTINE_PATH = quarantinePath(sharedVerificationCacheRoot(REPO_ROOT))
+const LEGACY_QUARANTINE_CACHE_ROOT = sharedVerificationCacheRoot(REPO_ROOT)
 let quarantineRecord: LeaseQuarantineRecord | undefined
+/** Set by the lease gate when it released a quarantine to give us this lane. */
+let laneReleasedOver: string | undefined
 
 const capture = (args: readonly string[]): { readonly code: number; readonly text: string } => {
   const result = runBoundedCapture({ command: args, cwd: REPO_ROOT })
@@ -259,6 +261,7 @@ const recordCampaign = (input: {
         ? {}
         : { cancellationReason: input.cancellationReason }),
       drained: input.drained,
+      ...(laneReleasedOver === undefined ? {} : { laneReleasedOver }),
       survivingGroups: input.survivingGroups,
       ...(input.quarantine === undefined ? {} : { quarantine: input.quarantine }),
       hostAtStart,
@@ -294,7 +297,7 @@ const terminate = (signal: NodeJS.Signals): void => {
     if (outcome.groups.length > 0) {
       try {
         signalQuarantine = quarantineLane({
-          path: QUARANTINE_PATH,
+          legacyCacheRoot: LEGACY_QUARANTINE_CACHE_ROOT,
           repositoryId: QUARANTINE_KEY,
           groups: outcome.groups,
           log: (line) => process.stderr.write(line),
@@ -337,8 +340,12 @@ lease = await acquireTestShardLease({
   // a checkout whose ports, HOME and worktrees were still held by the
   // previous one's survivors. Measured: the same acquisition without this
   // option acquired over a blocking record in 0ms.
-  quarantinePath: QUARANTINE_PATH,
+  legacyQuarantineCacheRoot: LEGACY_QUARANTINE_CACHE_ROOT,
   onQuarantineWait: (reason) => process.stdout.write(`[verification] WAIT ${reason}\n`),
+  onQuarantineRelease: (reason) => {
+    process.stdout.write(`[verification] QUARANTINE RELEASED ${reason}\n`)
+    laneReleasedOver = reason
+  },
   onWait: (port, elapsedMs) =>
     process.stdout.write(
       `[verification] WAIT repository lease port=${port} elapsed=${Math.round(elapsedMs / 1_000)}s; ` +
@@ -490,12 +497,21 @@ try {
     // below: the kernel frees the port the moment this process exits, so a
     // record written afterwards has a window a contender can win.
     if (outcome.groups.length > 0) {
-      quarantineRecord = quarantineLane({
-        path: QUARANTINE_PATH,
-        repositoryId: QUARANTINE_KEY,
-        groups: outcome.groups,
-        log: (line) => process.stderr.write(line),
-      })
+      // GUARDED, like the other three call sites. Bare, a throw here skipped
+      // `recordCampaign` — leaving the PREVIOUS campaign's receipt, possibly
+      // `passed`, as the current one — and `removeOwnerSidecar`, which kept
+      // naming a dead pid.
+      try {
+        quarantineRecord = quarantineLane({
+          legacyCacheRoot: LEGACY_QUARANTINE_CACHE_ROOT,
+          repositoryId: QUARANTINE_KEY,
+          groups: outcome.groups,
+          log: (line) => process.stderr.write(line),
+        })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        process.stderr.write(`[verification] WARN quarantine write failed: ${message}\n`)
+      }
     }
   }
   // A signal path already wrote its own receipt and exits; do not overwrite it.

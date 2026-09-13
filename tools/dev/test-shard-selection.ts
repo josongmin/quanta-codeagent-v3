@@ -37,8 +37,19 @@
  * reported as "the corpus shrank under the runner".
  */
 
+import {
+  loadPolicyOverrides,
+  policyDigest,
+  resolveTestPopulation,
+  selectTestPoliciesForTier,
+} from "./test-policy"
 import type { SuiteName } from "./test-shard-discovery"
-import { checkTierPopulation, type TierPopulationFile } from "./test-tier-population"
+import {
+  CORPUS_LOSS_KINDS,
+  checkTierPopulation,
+  type TierPopulationFile,
+} from "./test-tier-population"
+import { assertKnownTier } from "./verification-tier"
 
 export interface TierSelection {
   readonly files: readonly string[]
@@ -118,32 +129,42 @@ export const selectShardManifest = (input: ShardSelectionInput): ShardSelection 
 
   const population = checkTierPopulation({
     tier: input.tier,
+    suite: input.suite,
     selected: manifest.length,
     discovered: input.discovered.length,
-    floors: input.tierFloors,
-    // Passed so the refusal can tell a narrower SUITE apart from a shrunken
-    // universe. Without it both are `selected === discovered < floor`.
-    suite: input.suite,
     suiteFloor: input.suiteFloor,
-    // Decided HERE, where `suite` is typed as `SuiteName`, so a typo is a
-    // compile error. The checker used to compare against a bare string constant
-    // with no relation to the suite names, and an audit showed that renaming it
-    // left every arm green while production took the wrong branch for the whole
-    // tree.
-    scope: input.suite === "full" ? "universe" : "narrower-suite",
+    floors: input.tierFloors,
   })
   if (!population.ok) {
-    // A universe that fell below the TIER floor without any narrowing is corpus
-    // loss that the lower suite floor did not reach, so it must carry the corpus
-    // error — reporting it as a selection defect sends the reader to the policy
-    // file for a problem in the tree.
-    // Only a genuinely shrunken universe is corpus loss. A narrower suite under
-    // a whole-tree floor is a mismatched pair of inputs, which is the operator's
-    // to fix, not the tree's.
-    throw population.kind === "universe-below-tier-floor"
+    // The corpus kinds carry the corpus error and every other kind the selection
+    // error, so a reader is sent to the tree or to the policy file correctly.
+    throw CORPUS_LOSS_KINDS.has(population.kind)
       ? new CorpusLostError(population.message)
       : new TierSelectionError(population.message)
   }
 
   return { discovered: input.discovered, manifest, tiered }
+}
+
+/**
+ * Tier policy applied to repo-relative ids — the runner's selection, importable.
+ *
+ * It lived inside `run-test-shards.ts`, which ends in a top-level `await main()`
+ * and cannot be imported, so an arm that wanted to check "every suite × tier the
+ * runner can be asked for clears its committed floor" had to re-implement the
+ * selection it was checking. Now the runner and the arm call the same function.
+ */
+export const tierSelectionFromPolicy = (
+  relativeFiles: readonly string[],
+  tier: string | undefined,
+  overridesPath: string,
+): TierSelection => {
+  if (tier === undefined) return { files: relativeFiles }
+  const overrides = loadPolicyOverrides(overridesPath).overrides
+  const policies = resolveTestPopulation(relativeFiles, overrides)
+  const selected = selectTestPoliciesForTier(policies, assertKnownTier(tier))
+  if (selected.length === 0) {
+    throw new Error(`[test:shards] INVALID — tier=${tier} selected zero files`)
+  }
+  return { files: selected.map(({ id }) => id), policySha256: policyDigest(policies) }
 }

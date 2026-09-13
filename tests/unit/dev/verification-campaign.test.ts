@@ -38,6 +38,7 @@ const CAMPAIGN_MODULES = [
   // copies an explicit module list, so a new import here is a RED nobody sees
   // until the file runs.
   "lease-quarantine.ts",
+  "repository-identity.ts",
   // `gate.ts` runs every gate through the bounded child, and
   // `verification-tier.ts` sequences them through the DAG scheduler.
   "bounded-child.ts",

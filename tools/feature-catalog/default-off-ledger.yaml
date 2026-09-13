@@ -899,7 +899,7 @@ rows:
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: github-pr-from-pr-cli
-    gate_owner: [QUANTA_GH_ACTIONS_TRIGGER, QUANTA_GH_TRIGGER_PHRASES, QUANTA_GH_TRUST_SCOPE]
+    gate_owner: [QUANTA_GH_ACTIONS_TRIGGER]
     activation: env/config
     effective_default: { cli: na, web: na, bench: off, headless: off, daemon: off }
     reachability: wired

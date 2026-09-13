@@ -161,20 +161,32 @@ export const workerSpawnEnv = (input: WorkerSpawnEnvInput): Record<string, strin
     QUANTA_SCAN_REACH_RECORD: input.scanReachSink,
     QUANTA_TEST_TIMEOUT_SCALE: String(input.testTimeoutMs / 60_000),
   }
-  // ALL THREE OR NONE. The docstring said "Empty is legal; partial is not" and
-  // nothing enforced it: a bag carrying the receipt PATH without the BINDING
-  // passed straight through, and the consumer compares the binding only when it
-  // is present — so the worker reads an UNBOUND receipt, which is the version
-  // this commit's predecessor said shipping would be shipping.
-  //
-  // This replaces a check on whether the capability values survived the spread.
-  // That one was unreachable: the collision refusal below already guarantees the
-  // two key sets are disjoint, and `capabilityEnv` is spread after `base`, so
-  // for any plain object it could not fire. An audit measured 27 input shapes
-  // and reached it with none of them. A guard that cannot fail is not a guard.
-  const present = CAMPAIGN_CAPABILITY_ENV.filter((key) => key in input.capabilityEnv)
+  const bag = input.capabilityEnv
+  // ONLY the three campaign variables. This also rules out a per-worker override
+  // adopting one of their names, which a separate collision check used to guard —
+  // and with this rule that check could never fire, so it is gone rather than
+  // kept as a guard that cannot fail.
+  const stray = Object.keys(bag).filter((key) => !CAMPAIGN_CAPABILITY_ENV.includes(key))
+  if (stray.length > 0) {
+    throw new Error(
+      `[worker-home] ${stray.join(", ")} is not a campaign capability variable. The capability ` +
+        `bag carries exactly ${CAMPAIGN_CAPABILITY_ENV.join(", ")}; anything else would collide ` +
+        "with a per-worker override, and which one won would depend on spread order.",
+    )
+  }
+  // PRESENT means an OWN key with a non-empty string. `key in bag` counted a key
+  // inherited through the prototype, and an own key holding `undefined` or "",
+  // as present — and the spread then delivered nothing for them.
+  const present = CAMPAIGN_CAPABILITY_ENV.filter((key) => Object.hasOwn(bag, key))
+  const empty = present.filter((key) => typeof bag[key] !== "string" || bag[key] === "")
+  if (empty.length > 0) {
+    throw new Error(`[worker-home] capability variable(s) ${empty.join(", ")} present but empty`)
+  }
+  // ALL THREE OR NONE. The consumer compares the binding only when it is present,
+  // so a path without one is an UNBOUND receipt; without the verdicts digest a
+  // worker replays a green earned on a differently capable host.
   if (present.length > 0 && present.length < CAMPAIGN_CAPABILITY_ENV.length) {
-    const missing = CAMPAIGN_CAPABILITY_ENV.filter((key) => !(key in input.capabilityEnv))
+    const missing = CAMPAIGN_CAPABILITY_ENV.filter((key) => !present.includes(key))
     throw new Error(
       `[worker-home] partial capability env: ${present.join(", ")} present, ` +
         `${missing.join(", ")} missing. The consumer compares the binding only when it is ` +
@@ -182,21 +194,17 @@ export const workerSpawnEnv = (input: WorkerSpawnEnvInput): Record<string, strin
         "verdicts digest replays a green earned on a differently capable host.",
     )
   }
-  // Disjointness is a property of the two key sets, not a hope about ordering.
-  // If a per-worker override ever adopts a capability variable's name, the two
-  // orderings of this spread stop being equivalent and one of them is silently
-  // wrong — so neither is allowed to exist.
-  const collisions = Object.keys(perWorker).filter((key) => key in input.capabilityEnv)
-  if (collisions.length > 0) {
-    throw new Error(
-      `[worker-home] per-worker override(s) ${collisions.join(", ")} collide with the ` +
-        "campaign capability env. One of them would be silently discarded, and which one " +
-        "depends on spread order. Rename the override.",
-    )
-  }
+  // The runner's OWN environment never supplies a receipt. The all-or-nothing
+  // check above looked only at the bag, so an empty bag let a stale receipt in
+  // the runner's env — even a path with no binding — straight through to the
+  // worker. The TVH-11 handoff tells developers to `export` these variables, so
+  // that environment is not hypothetical.
+  const base = Object.fromEntries(
+    Object.entries(input.base).filter(([key]) => !CAMPAIGN_CAPABILITY_ENV.includes(key)),
+  )
   const env: Record<string, string | undefined> = {
-    ...input.base,
-    ...input.capabilityEnv,
+    ...base,
+    ...Object.fromEntries(present.map((key) => [key, bag[key]])),
     ...perWorker,
   }
   return env

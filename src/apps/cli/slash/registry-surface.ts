@@ -506,8 +506,10 @@ const psCmd: SlashCommand = {
  *    - `adopt <id>`     — `setStatus(id,"adopted")` (drops from listActive).
  *    - `dismiss <id>`   — `setStatus(id,"dismissed")` (drops from listActive).
  *    - `engage <id>`    — `recordEngagement(id)` (++count; stays active).
- *    - `prune`          — expire cards older than `QUANTA_RADAR_PRUNE_MS`
- *                         (default 24h) by `createdAtMs`.
+ *    - `prune`          — expire cards older than `ctx.radarPruneOlderThanMs`
+ *                         (default 24h) by `createdAtMs`. There is no env
+ *                         variable for this; `QUANTA_RADAR_PRUNE_MS` was named
+ *                         here and read by nothing.
  *  Absent slot ⇒ "not wired in this surface" + exit 0 (default-OFF
  *  byte-identical, parity with `/agents`). */
 /**

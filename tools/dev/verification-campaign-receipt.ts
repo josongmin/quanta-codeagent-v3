@@ -23,7 +23,8 @@ import type { VerificationTier } from "./verification-result"
 export const CAMPAIGN_RECEIPT_SCHEMA = "quanta.verification-campaign-receipt.v1" as const
 
 export interface CampaignQuarantine {
-  readonly keeperPid: number
+  /** `null` when no keeper could be started; the record still blocks while survivors live. */
+  readonly keeperPid: number | null
   readonly expiresAtMs: number
   readonly groups: readonly {
     readonly pgid: number
@@ -97,6 +98,13 @@ export interface CampaignReceipt {
    * `recycled` and `unverified` send an operator to different places.
    */
   readonly quarantine?: CampaignQuarantine
+  /**
+   * The reason a quarantine was RELEASED when this campaign acquired the lane —
+   * in particular an expired one released over groups still alive. That reason
+   * was computed and dropped on every path, so nothing recorded what the lane
+   * had been handed over.
+   */
+  readonly laneReleasedOver?: string
   readonly hostAtStart: CampaignHostSample
   readonly hostAtEnd: CampaignHostSample
   readonly timing: {
@@ -156,6 +164,7 @@ export const buildCampaignReceipt = (input: {
   readonly drained: boolean
   readonly survivingGroups: readonly number[]
   readonly quarantine?: CampaignQuarantine
+  readonly laneReleasedOver?: string
   readonly hostAtStart: CampaignHostSample
   readonly hostAtEnd: CampaignHostSample
 }): CampaignReceipt => {
@@ -191,6 +200,7 @@ export const buildCampaignReceipt = (input: {
     drained: input.drained,
     survivingGroups: [...input.survivingGroups],
     ...(input.quarantine === undefined ? {} : { quarantine: input.quarantine }),
+    ...(input.laneReleasedOver === undefined ? {} : { laneReleasedOver: input.laneReleasedOver }),
     hostAtStart: input.hostAtStart,
     hostAtEnd: input.hostAtEnd,
     timing,

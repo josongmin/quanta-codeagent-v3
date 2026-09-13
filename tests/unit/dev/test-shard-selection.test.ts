@@ -30,6 +30,7 @@
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
+import ts from "typescript"
 
 import {
   CorpusLostError,
@@ -41,10 +42,46 @@ import type { TierPopulationFile } from "../../../tools/dev/test-tier-population
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 
-const floors: TierPopulationFile = {
-  schema: "quanta.test-tier-population.v1",
-  tiers: { pr: { minFiles: 80, reason: "fixture" }, full: { minFiles: 80, reason: "fixture" } },
-}
+/** A v2 record in memory; the loader re-derives, `checkTierPopulation` does not. */
+const recordWith = (
+  tiers: Readonly<Record<string, number>>,
+  narrow: Readonly<Record<"core" | "unit" | "integration", number>> = {
+    core: 1,
+    unit: 1,
+    integration: 1,
+  },
+): TierPopulationFile => ({
+  schema: "quanta.test-tier-population.v2",
+  tiers: Object.fromEntries(
+    Object.entries(tiers).map(([t, minFiles]) => [t, { minFiles, reason: "fixture" }]),
+  ),
+  suites: {
+    measuredAt: "fixture",
+    universeSelected: Object.fromEntries(Object.keys(tiers).map((t) => [t, 0])),
+    floors: {
+      core: Object.fromEntries(
+        Object.keys(tiers).map((t) => [
+          t,
+          { selected: 0, minFiles: narrow.core, reason: "fixture" },
+        ]),
+      ),
+      unit: Object.fromEntries(
+        Object.keys(tiers).map((t) => [
+          t,
+          { selected: 0, minFiles: narrow.unit, reason: "fixture" },
+        ]),
+      ),
+      integration: Object.fromEntries(
+        Object.keys(tiers).map((t) => [
+          t,
+          { selected: 0, minFiles: narrow.integration, reason: "fixture" },
+        ]),
+      ),
+    },
+  },
+})
+
+const floors: TierPopulationFile = recordWith({ pr: 80, full: 80 })
 
 const files = (count: number, prefix = "/abs/repo/tests/unit"): readonly string[] =>
   Array.from(
@@ -80,33 +117,43 @@ describe("shard manifest selection", () => {
   })
 
   /**
-   * ★ WIRING — the SCOPE is decided here, and only an arm through this function
-   * can see it.
-   *
-   * `checkTierPopulation` takes the scope as an input, so arms that call it
-   * directly pass their own and prove nothing about the caller. MEASURED:
-   * pinning `scope: "universe"` at this call site — which makes every narrow
-   * suite report as a shrunken universe again — left every arm in the sibling
-   * file green.
+   * ★ WIRING — the floor is chosen HERE, by suite, and only an arm through this
+   * function can see it. `checkTierPopulation` is also driven directly in the
+   * sibling file, where a mutation at this call site is invisible.
    */
-  test("a narrower suite is classified as such by THIS function, not by its caller", () => {
-    // 40 discovered, all selected, against a tier floor of 80: the shape that is
-    // byte-identical between "the universe shrank" and "you asked for a smaller
-    // suite". `suiteFloor` is cleared, so the corpus check above does not fire.
-    const narrowSuite = (): unknown =>
-      selectShardManifest(input({ suite: "unit", discovered: files(40), suiteFloor: 30 }))
-    expect(narrowSuite).toThrow(TierSelectionError)
-    expect(narrowSuite).toThrow(/not corpus loss BY THAT MEASURE/)
-    expect(narrowSuite).toThrow(/suite=unit/)
-    // The claim names the floor it rests on rather than asserting intactness.
-    expect(narrowSuite).toThrow(/pre-selection floor of 30/)
+  test("a narrow suite is judged by its own floor through THIS function", () => {
+    const record = recordWith({ pr: 80 }, { core: 60, unit: 30, integration: 20 })
+    // 40 selected clears unit's 30 and fails the universe's 80.
+    expect(() =>
+      selectShardManifest(
+        input({ suite: "unit", discovered: files(40), suiteFloor: 1, tierFloors: record }),
+      ),
+    ).not.toThrow()
+    expect(() =>
+      selectShardManifest(
+        input({ suite: "full", discovered: files(40), suiteFloor: 1, tierFloors: record }),
+      ),
+    ).toThrow(CorpusLostError)
 
-    // PAIRED CONTROL — the SAME shortfall on the universe suite is still corpus
-    // loss, with the original message and the original error class.
-    const universe = (): unknown =>
-      selectShardManifest(input({ suite: "full", discovered: files(40), suiteFloor: 30 }))
-    expect(universe).toThrow(CorpusLostError)
-    expect(universe).toThrow(/universe itself shrank/)
+    // Below its own floor with nothing narrowed: corpus loss, for a narrow suite too.
+    expect(() =>
+      selectShardManifest(
+        input({ suite: "integration", discovered: files(10), suiteFloor: 1, tierFloors: record }),
+      ),
+    ).toThrow(CorpusLostError)
+
+    // Narrowed below its own floor: a selection shrink.
+    expect(() =>
+      selectShardManifest(
+        input({
+          suite: "core",
+          discovered: files(90),
+          suiteFloor: 1,
+          tierFloors: record,
+          selectForTier: (ids) => ({ files: ids.slice(0, 50) }),
+        }),
+      ),
+    ).toThrow(TierSelectionError)
   })
 
   test("the universe is checked BEFORE tier policy runs", () => {
@@ -142,10 +189,7 @@ describe("shard manifest selection", () => {
           input({
             discovered: whole,
             suiteFloor: 80,
-            tierFloors: {
-              schema: "quanta.test-tier-population.v1",
-              tiers: { pr: { minFiles: 90, reason: "fixture floor above the suite floor" } },
-            },
+            tierFloors: recordWith({ pr: 90 }),
             selectForTier: (ids) => ({ files: ids }),
           }),
         )
@@ -231,10 +275,56 @@ describe("shard manifest selection", () => {
     expect(source).not.toContain("SUITE_FLOORS[opts.suite]\n    if (manifest.length")
     expect(source).not.toContain("checkTierPopulation(")
 
-    // ANTI-VACUITY: the runner must still pass the pieces that make the split
-    // meaningful — the absolute discovery, the id bridge, and both floors.
-    for (const marker of ["idOf:", "suiteFloor:", "tierFloors:", "selectForTier:"]) {
-      expect({ marker, present: source.includes(marker) }).toEqual({ marker, present: true })
+    // STRUCTURE, not markers. The previous arm checked that the text
+    // `suiteFloor:` existed, which `suiteFloor: SUITE_FLOORS.integration` —
+    // every suite judged against integration's 330 — also satisfies. Every call
+    // to `selectShardManifest` in the runner (the campaign AND `--discover-only`)
+    // must pass these exact expressions.
+    const tree = ts.createSourceFile(
+      "run-test-shards.ts",
+      source,
+      ts.ScriptTarget.ESNext,
+      true,
+      ts.ScriptKind.TS,
+    )
+    const calls: ts.CallExpression[] = []
+    const walk = (node: ts.Node): void => {
+      if (
+        ts.isCallExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === "selectShardManifest"
+      ) {
+        calls.push(node)
+      }
+      node.forEachChild(walk)
+    }
+    walk(tree)
+    expect(calls).toHaveLength(2)
+    for (const call of calls) {
+      const argument = call.arguments[0]
+      if (argument === undefined || !ts.isObjectLiteralExpression(argument)) {
+        throw new Error("selectShardManifest is not called with an object literal")
+      }
+      const value = (name: string): string => {
+        const property = argument.properties.find(
+          (one): one is ts.PropertyAssignment =>
+            ts.isPropertyAssignment(one) && ts.isIdentifier(one.name) && one.name.text === name,
+        )
+        return property === undefined ? "<absent>" : property.initializer.getText(tree)
+      }
+      const line = tree.getLineAndCharacterOfPosition(call.getStart(tree)).line + 1
+      expect({
+        line,
+        suite: value("suite"),
+        suiteFloor: value("suiteFloor"),
+        tierFloors: value("tierFloors"),
+      }).toEqual({
+        line,
+        suite: "opts.suite",
+        suiteFloor: "SUITE_FLOORS[opts.suite]",
+        tierFloors: "loadTierPopulationFloors()",
+      })
+      expect(value("selectForTier")).toContain("tierSelectionFromPolicy(")
     }
   })
 })

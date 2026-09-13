@@ -306,10 +306,10 @@ const foldSamples = (
   for (const [file, update] of updates) {
     const sample: TimingObservation = { ...update, sampledAtMs }
     if (!isTimingObservation(sample)) continue
-    const samples = [...(entries.get(file) ?? []), sample]
-      .sort((left, right) => left.sampledAtMs - right.sampledAtMs)
-      .slice(-TEST_TIMING_MAX_SAMPLES)
-    entries.set(file, samples)
+    // Through `appendSample`, the one idempotent append. This loop appended
+    // inline, so the direct-merge path had no dedupe — and the commit that added
+    // the dedupe claimed all three call sites had it.
+    appendSample(entries, file, sample)
   }
   return entries
 }

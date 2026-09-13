@@ -23,8 +23,10 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import ts from "typescript"
 import {
   loadTestTimings,
+  mergeTestTimingObservations,
   openTimingJournal,
   readTestTimingStore,
   recoverAbandonedTimingJournals,
@@ -404,5 +406,86 @@ describe("folding the same abandoned journal twice changes nothing", () => {
     journal.record(new Map([[FILE, { ...sample(9_999), sampledAtMs: NOW - 1_000 }]]), NOW - 1_000)
     journal.commit(NOW)
     expect(weightsOf(storePath)).toEqual([100, 400])
+  })
+})
+
+/**
+ * ★ The same observation under two timestamps is two samples to the dedupe.
+ *
+ * The dedupe keys on `(file, sampledAtMs)`. The runner stamped the journal with
+ * one `Date.now()` and the receipt with a second one taken afterwards — 1-3ms
+ * apart in 5,611 of 10,164 live samples — and a cache HIT replays the receipt's
+ * time. So every HIT added one copy of an observation already in the store.
+ * The direct-merge path also appended inline, with no dedupe at all, while the
+ * commit that introduced the dedupe claimed every call site had it.
+ */
+describe("one observation, one sample, on every path", () => {
+  const FILE = "tests/unit/merged.test.ts"
+
+  test("the direct merge path is idempotent too", () => {
+    const dir = scratch()
+    const storePath = join(dir, "test-timings-v2.json")
+    const sample = {
+      schedulingWeightMs: 300,
+      suiteMs: 300,
+      chunkOverheadShareMs: 0,
+      observedChunkWallMs: 300,
+      runnerClass: "pure",
+      policyDigest: "policy",
+      intraParallel: 1,
+      loadPerCore: 0,
+    }
+    mergeTestTimingObservations(storePath, new Map([[FILE, sample]]), NOW)
+    mergeTestTimingObservations(storePath, new Map([[FILE, sample]]), NOW)
+    const store = JSON.parse(readFileSync(storePath, "utf8")) as {
+      entries: Record<string, { samples: unknown[] }>
+    }
+    expect(store.entries[FILE]?.samples).toHaveLength(1)
+  })
+
+  test("WIRING — the runner stamps the journal and the receipt with ONE clock read", () => {
+    const source = readFileSync(
+      join(import.meta.dir, "..", "..", "..", "tools", "dev", "run-test-shards.ts"),
+      "utf8",
+    )
+    const tree = ts.createSourceFile(
+      "run-test-shards.ts",
+      source,
+      ts.ScriptTarget.ESNext,
+      true,
+      ts.ScriptKind.TS,
+    )
+    let recordStamp: string | undefined
+    let receiptStamp: string | undefined
+    const walk = (node: ts.Node): void => {
+      if (ts.isCallExpression(node)) {
+        const callee = node.expression.getText(tree)
+        if (callee === "journal.record" && node.arguments.length === 2) {
+          recordStamp = node.arguments[1]?.getText(tree)
+        }
+        const options = node.arguments[0]
+        if (
+          callee === "writeSuccessfulTestShardReceiptAtomic" &&
+          options !== undefined &&
+          ts.isObjectLiteralExpression(options)
+        ) {
+          const nowMs = options.properties.find(
+            (one): one is ts.PropertyAssignment =>
+              ts.isPropertyAssignment(one) &&
+              ts.isIdentifier(one.name) &&
+              one.name.text === "nowMs",
+          )
+          receiptStamp = nowMs?.initializer.getText(tree)
+        }
+      }
+      node.forEachChild(walk)
+    }
+    walk(tree)
+    // Both present, and the SAME identifier. A missing `nowMs` falls back to a
+    // second `Date.now()` inside the receipt writer, which is the defect.
+    expect({ recordStamp, receiptStamp }).toEqual({
+      recordStamp: "observedAtMs",
+      receiptStamp: "observedAtMs",
+    })
   })
 })

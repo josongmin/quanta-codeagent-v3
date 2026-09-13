@@ -1,13 +1,22 @@
 import { randomBytes } from "node:crypto"
-import { readFileSync } from "node:fs"
+import { readFileSync, renameSync } from "node:fs"
 import { createConnection } from "node:net"
 import { join } from "node:path"
 import {
   clearLeaseQuarantine,
+  expiredQuarantinePath,
+  groupAlive,
+  type LeaseQuarantineRead,
+  laneQuarantinePath,
+  laneSlotVerdict,
+  leaseQuarantineRoot,
+  legacyQuarantinePath,
+  type QuarantineVerdict,
   quarantineVerdict,
   readLeaseQuarantineOutcome,
 } from "./lease-quarantine"
 import { createProcessObserver } from "./process-observer"
+import { normalizeRepositoryIdentity } from "./repository-identity"
 
 const LEASE_HOST = "127.0.0.1"
 const LEASE_PORT_BASE = 42_000
@@ -97,14 +106,22 @@ export interface TestShardLeaseOptions {
   /** Aborting cancels the WAIT (never an already-acquired lease). */
   readonly signal?: AbortSignal
   /**
-   * Where to look for a quarantine left by a campaign that could not account
-   * for its workers. Omitted ⇒ no quarantine gate, which is the right default
-   * for the keyed resource leases; the REPOSITORY lane passes it.
+   * The environment the quarantine ROOT is read from. The repository lane ALWAYS
+   * consults its slot now: an optional `quarantinePath` made "an acquisition
+   * forgot to pass it" a silent bypass, guarded only by a source-string arm.
    */
-  readonly quarantinePath?: string
+  readonly env?: Readonly<Record<string, string | undefined>>
+  /** The git common-dir cache, so a LIVE record an older checkout wrote still blocks. */
+  readonly legacyQuarantineCacheRoot?: string
   /** Injected so the gate is testable without a real process tree. */
   readonly isGroupAlive?: (pgid: number) => boolean
   readonly onQuarantineWait?: (reason: string) => void
+  /**
+   * Called with the reason BEFORE a quarantine is released. The expired-over-live
+   * warning used to be computed and then dropped on every path, with the record
+   * deleted in the same call — the only evidence of what the lane was handed over.
+   */
+  readonly onQuarantineRelease?: (reason: string) => void
 }
 
 export interface RepositoryIdentityInputs {
@@ -259,13 +276,6 @@ export const resolveLaneOwnership = async (input: {
     )
   }
   return { acquireIdentity: undefined, quarantineKey: normalizeRepositoryIdentity(owner) }
-}
-
-/** Normalize SSH aliases and HTTPS remotes to the same owner/repository key. */
-export const normalizeRepositoryIdentity = (remote: string): string => {
-  const value = remote.trim().replace(/\.git$/, "")
-  const match = /[:/]([^/:]+\/[^/]+)$/.exec(value)
-  return match?.[1] ?? value
 }
 
 export const selectRepositoryLeaseIdentity = (inputs: RepositoryIdentityInputs): string => {
@@ -461,7 +471,7 @@ const leaseFromListener = (
 export const acquireTestShardLease = async (
   options: TestShardLeaseOptions,
 ): Promise<TestShardLease> =>
-  acquireRawTestShardLease(normalizeRepositoryIdentity(options.identity), options)
+  acquireRawTestShardLease(normalizeRepositoryIdentity(options.identity), options, true)
 
 /**
  * `undefined` when the lane is takeable; otherwise the reason it is not.
@@ -471,38 +481,60 @@ export const acquireTestShardLease = async (
  * answer, and the first one to crash mid-check leaves it looking authoritative
  * again.
  */
+/**
+ * Release a quarantine the verdict says is over — telling someone, and keeping
+ * the record when it expired over groups that are still alive.
+ */
+const releaseQuarantine = (
+  path: string,
+  read: LeaseQuarantineRead,
+  reason: string,
+  options: Omit<TestShardLeaseOptions, "identity">,
+  isAlive: (pgid: number) => boolean,
+): void => {
+  options.onQuarantineRelease?.(reason)
+  if (read.kind === "record" && read.record.survivors.some((group) => isAlive(group.pgid))) {
+    try {
+      renameSync(path, expiredQuarantinePath(path, read.record))
+      return
+    } catch {
+      /* fall through: a record we cannot move is still re-evaluated on the next read */
+    }
+  }
+  clearLeaseQuarantine(path)
+}
+
 const quarantineBlock = (
   identity: string,
   options: Omit<TestShardLeaseOptions, "identity">,
 ): string | undefined => {
-  const path = options.quarantinePath
-  if (path === undefined) return undefined
-  const verdict = quarantineVerdict({
-    // The OUTCOME, not the bare record: a corrupt record used to read as an
-    // empty lane, which is the one input a teardown-path writer is most likely
-    // to produce.
-    read: readLeaseQuarantineOutcome(path),
+  const nowMs = Date.now()
+  const isAlive = options.isGroupAlive ?? groupAlive
+  const slot = laneQuarantinePath(identity, leaseQuarantineRoot(options.env))
+  const slotRead = readLeaseQuarantineOutcome(slot)
+  const lane = laneSlotVerdict({ read: slotRead, identity, nowMs, isAlive })
+  const legacyPath =
+    options.legacyQuarantineCacheRoot === undefined
+      ? undefined
+      : legacyQuarantinePath(options.legacyQuarantineCacheRoot)
+  const legacyRead: LeaseQuarantineRead =
+    legacyPath === undefined ? { kind: "absent" } : readLeaseQuarantineOutcome(legacyPath)
+  const legacy: QuarantineVerdict = quarantineVerdict({
+    read: legacyRead,
     repositoryId: identity,
-    nowMs: Date.now(),
-    isAlive: options.isGroupAlive ?? defaultGroupAlive,
+    nowMs,
+    isAlive,
   })
-  if (verdict.kind === "blocked") return verdict.reason
-  // `stale` is ours and provably over, so removing it stops every later
-  // contender re-deriving the same answer. `foreign` is NOT ours: deleting it
-  // wiped a live record protecting somebody else's poisoned lane.
-  if (verdict.kind === "stale") clearLeaseQuarantine(path)
-  return undefined
-}
-
-/** `kill(-pgid, 0)`: existence only, no signal delivered. */
-const defaultGroupAlive = (pgid: number): boolean => {
-  try {
-    process.kill(-pgid, 0)
-    return true
-  } catch (error) {
-    // EPERM means it exists and is not ours — still alive, still a hazard.
-    return (error as { code?: string }).code === "EPERM"
+  const blocked = [lane, legacy].flatMap((verdict) =>
+    verdict.kind === "blocked" ? [verdict.reason] : [],
+  )
+  if (blocked.length > 0) return blocked.join("; ")
+  if (lane.kind === "stale") releaseQuarantine(slot, slotRead, lane.reason, options, isAlive)
+  // In the SHARED legacy file `foreign` still means a stranger's live lane: never deleted.
+  if (legacy.kind === "stale" && legacyPath !== undefined) {
+    releaseQuarantine(legacyPath, legacyRead, `legacy: ${legacy.reason}`, options, isAlive)
   }
+  return undefined
 }
 
 /**
@@ -520,6 +552,8 @@ const defaultGroupAlive = (pgid: number): boolean => {
 const acquireRawTestShardLease = async (
   identity: string,
   options: Omit<TestShardLeaseOptions, "identity">,
+  /** The repository lane consults its slot; keyed resource leases never do. */
+  consultQuarantine: boolean,
 ): Promise<TestShardLease> => {
   const port = testShardLeasePort(identity)
   const digest = leaseDigest(identity)
@@ -538,7 +572,7 @@ const acquireRawTestShardLease = async (
     // without accounting for its workers, and the kernel hands the port back
     // the moment it does — so the quarantine is checked BEFORE the bind is
     // accepted, not after.
-    const blocked = quarantineBlock(identity, options)
+    const blocked = consultQuarantine ? quarantineBlock(identity, options) : undefined
     if (blocked === undefined) {
       const token = randomBytes(32).toString("hex")
       const listener = tryListen(port, digest, token)
@@ -638,11 +672,15 @@ const waiterFor = (
     ...(options.signal === undefined ? {} : { signal: options.signal }),
   }
   return (identity) =>
-    acquireRawTestShardLease(identity, {
-      waitMs: Math.max(1, deadline - Date.now()),
-      ...rest,
-      onWait: (port, waitedMs) => options.onWait?.(request.key, port, waitedMs),
-    })
+    acquireRawTestShardLease(
+      identity,
+      {
+        waitMs: Math.max(1, deadline - Date.now()),
+        ...rest,
+        onWait: (port, waitedMs) => options.onWait?.(request.key, port, waitedMs),
+      },
+      false,
+    )
 }
 
 /** The gate AND every reader slot: no reader can arrive while the gate is
@@ -740,3 +778,5 @@ export const acquireKeyedTestShardLeases = async (
     },
   }
 }
+
+export { normalizeRepositoryIdentity }

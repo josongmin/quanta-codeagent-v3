@@ -26,7 +26,7 @@ import {
   failureRecordsFromJunit,
   writeFailureAttemptArtifact,
 } from "./failure-attempt-producer"
-import { quarantineLane, quarantinePath } from "./lease-quarantine"
+import { quarantineLane } from "./lease-quarantine"
 import { mintableScanReachAuthority } from "./scan-reach-authority"
 import {
   describeWatchdogKill,
@@ -35,12 +35,7 @@ import {
   spoolTailWindow,
 } from "./shard-output-budget"
 import { sampleTreeRssBytes } from "./shard-rss"
-import {
-  loadPolicyOverrides,
-  policyDigest,
-  resolveTestPopulation,
-  selectTestPoliciesForTier,
-} from "./test-policy"
+
 import { loadTestResourceCertificationsSafe } from "./test-resource-certification"
 import { resolveChunkCacheScope } from "./test-shard-cache-scope"
 import {
@@ -96,7 +91,11 @@ import {
   writeScanReachReceiptAtomic,
   writeSuccessfulTestShardReceiptAtomic,
 } from "./test-shard-receipt"
-import { type ShardSelection, selectShardManifest } from "./test-shard-selection"
+import {
+  type ShardSelection,
+  selectShardManifest,
+  tierSelectionFromPolicy,
+} from "./test-shard-selection"
 import { currentTimeoutPolicy, timeoutPolicySha256 } from "./test-shard-timeout-policy"
 import {
   harvestChunkTimingObservations,
@@ -129,7 +128,6 @@ const SCAN_REACH_RECEIPT = join(REPO_ROOT, ".cache", "scan-reach-receipt.json")
 // Shard receipts and timings live in the git-common-dir cache: keyed by exact
 // HEAD + file content + toolchain, a green from any worktree serves them all.
 const SHARED_CACHE_ROOT = sharedVerificationCacheRoot(REPO_ROOT)
-const QUARANTINE_PATH = quarantinePath(SHARED_CACHE_ROOT)
 const SHARD_CACHE_ROOT = join(SHARED_CACHE_ROOT, "test-shards", "v3")
 const TIMING_STORE = join(SHARED_CACHE_ROOT, "test-timings-v2.json")
 
@@ -867,8 +865,14 @@ const cacheSuccessfulShard = (
   // it used to be read, sorted and rewritten on every chunk completion, up to
   // 44 whole-store rewrites per full campaign. Timing is a scheduler hint and
   // never a verdict input, so a journal failure is reported and the run goes on.
+  // ONE timestamp for the observation and for the receipt that stores it. They
+  // were two `Date.now()` reads, 1-3ms apart in 5,611 of 10,164 live samples, so
+  // a later cache HIT replayed the observation under the receipt's time and the
+  // journal's `(file, sampledAtMs)` dedupe saw a different sample: one extra copy
+  // per HIT, moving the median it plans chunks from.
+  const observedAtMs = Date.now()
   try {
-    journal.record(observations)
+    journal.record(observations, observedAtMs)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     process.stderr.write(
@@ -885,6 +889,7 @@ const cacheSuccessfulShard = (
     timingObservations: [...observations].map(([file, sample]) => ({ file, ...sample })),
     scopeReason: cached.scopeReason,
     junitXml,
+    nowMs: observedAtMs,
   })
 }
 
@@ -1120,36 +1125,32 @@ const readSpoolTail = (path: string, windowBytes: number): string => {
 const digestFiles = (files: readonly string[]): string =>
   new Bun.CryptoHasher("sha256").update(files.join("\0")).digest("hex")
 
-const tierSelection = (
-  relativeFiles: readonly string[],
-  tier: RunnerOptions["tier"],
-): { readonly files: readonly string[]; readonly policySha256?: string } => {
-  if (tier === undefined) return { files: relativeFiles }
-  const overrides = loadPolicyOverrides(TEST_POLICY_OVERRIDES).overrides
-  const policies = resolveTestPopulation(relativeFiles, overrides)
-  const selected = selectTestPoliciesForTier(policies, tier)
-  if (selected.length === 0) {
-    throw new Error(`[test:shards] INVALID — tier=${tier} selected zero files`)
-  }
-  return {
-    files: selected.map(({ id }) => id),
-    policySha256: policyDigest(policies),
-  }
-}
-
+/**
+ * `--discover-only` goes through the SAME selection a campaign does, floors
+ * included. It skipped `selectShardManifest`, so every combination a real run
+ * refuses exited 0 here — measured, 32 of 32 — and it could not be used as the
+ * preflight it looks like.
+ */
 const emitDiscovery = (opts: RunnerOptions): void => {
   const inventory = discoverInventory(REPO_ROOT)
-  const selected = inventory.suites[opts.suite]
-  const tiered = tierSelection(selected.files, opts.tier)
+  const suite = inventory.suites[opts.suite]
+  const selection = selectShardManifest({
+    suite: opts.suite,
+    tier: opts.tier,
+    discovered: suite.files,
+    suiteFloor: SUITE_FLOORS[opts.suite],
+    tierFloors: loadTierPopulationFloors(),
+    selectForTier: (ids, tier) => tierSelectionFromPolicy(ids, tier, TEST_POLICY_OVERRIDES),
+  })
   const selectedPopulation =
     opts.tier === undefined
-      ? selected
+      ? suite
       : {
-          ...selected,
-          name: `${selected.name}:${opts.tier}`,
-          files: tiered.files,
-          digestSha256: digestFiles(tiered.files),
-          policySha256: tiered.policySha256,
+          ...suite,
+          name: `${suite.name}:${opts.tier}`,
+          files: selection.tiered.files,
+          digestSha256: digestFiles(selection.tiered.files),
+          policySha256: selection.tiered.policySha256,
         }
   process.stdout.write(
     `${JSON.stringify({ schema: "quanta.shard-discovery.v1", selected: selectedPopulation, inventory }, null, 2)}\n`,
@@ -1176,7 +1177,7 @@ const selectManifest = (opts: RunnerOptions): ShardSelection =>
     idOf: (file) => relative(REPO_ROOT, file),
     suiteFloor: SUITE_FLOORS[opts.suite],
     tierFloors: loadTierPopulationFloors(),
-    selectForTier: (files, tier) => tierSelection(files, tier as RunnerOptions["tier"]),
+    selectForTier: (files, tier) => tierSelectionFromPolicy(files, tier, TEST_POLICY_OVERRIDES),
   })
 
 /**
@@ -1288,6 +1289,12 @@ const main = async (): Promise<void> => {
     emitDiscovery(opts)
     return
   }
+  // SELECTED FIRST — before the lease (which can wait on another checkout), the
+  // source-JS preflight, and the capability probe (which launches Chrome). A
+  // refused suite/tier used to be reported only after all three, and on a dirty
+  // tree the clean-checkout refusal fired first and hid it.
+  const selection = selectManifest(opts)
+  const selectedAt = await gitSnapshot()
   // A campaign wrapper (verification-campaign.ts) may already own the
   // repository lane for this whole verification run. A live ancestor-owned
   // token means "do not reacquire" — reacquiring would deadlock against the
@@ -1336,8 +1343,10 @@ const main = async (): Promise<void> => {
   } else {
     lease = await acquireTestShardLease({
       identity: ownership.acquireIdentity,
-      quarantinePath: QUARANTINE_PATH,
+      legacyQuarantineCacheRoot: SHARED_CACHE_ROOT,
       onQuarantineWait: (reason) => process.stdout.write(`[test:shards] WAIT ${reason}\n`),
+      onQuarantineRelease: (reason) =>
+        process.stdout.write(`[test:shards] QUARANTINE RELEASED ${reason}\n`),
       onWait: (port, elapsedMs) =>
         process.stdout.write(
           `[test:shards] WAIT repository lease port=${port} elapsed=${Math.round(elapsedMs / 1_000)}s; ` +
@@ -1376,7 +1385,7 @@ const main = async (): Promise<void> => {
         try {
           if (outcome.groups.length > 0) {
             quarantineLane({
-              path: QUARANTINE_PATH,
+              legacyCacheRoot: SHARED_CACHE_ROOT,
               repositoryId: leaseIdentity,
               groups: outcome.groups,
               log: (line) => process.stderr.write(line),
@@ -1417,6 +1426,15 @@ const main = async (): Promise<void> => {
     if (before.status !== "") {
       throw new Error(
         "[test:shards] INVALID — authoritative receipts require a clean checkout. Commit or stash changes first.",
+      )
+    }
+    // The selection above ran before the lease. If HEAD or the worktree moved
+    // while this process waited for the lane, the manifest describes a tree the
+    // campaign is not about to run.
+    if (before.head !== selectedAt.head || before.status !== selectedAt.status) {
+      throw new Error(
+        `[test:shards] INVALID — the checkout moved between selection (${selectedAt.head}) and the ` +
+          `campaign start (${before.head}). Re-run; the manifest no longer describes this tree.`,
       )
     }
     // THE CAPABILITY RECEIPT, once per campaign.
@@ -1485,7 +1503,7 @@ const main = async (): Promise<void> => {
         `available=${Object.values(capability.receipt.capabilities).filter((f) => f.status === "available").length}/` +
         `${Object.keys(capability.receipt.capabilities).length}\n`,
     )
-    const { discovered: discoveredManifest, manifest, tiered } = selectManifest(opts)
+    const { discovered: discoveredManifest, manifest, tiered } = selection
     const manifestDigest = manifestSha256(manifest)
     const treeSha256 = trackedTreeSha256(REPO_ROOT)
     // Fold anything an interrupted campaign already measured back in, before
@@ -1639,7 +1657,7 @@ const main = async (): Promise<void> => {
         // best-effort; the verdict and the release are not.
         try {
           quarantineLane({
-            path: QUARANTINE_PATH,
+            legacyCacheRoot: SHARED_CACHE_ROOT,
             repositoryId: leaseIdentity,
             groups: drain.groups,
             log: (line) => process.stderr.write(line),

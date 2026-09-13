@@ -34,8 +34,8 @@ purpose: |
      mints a per-call `progressToken`, registers a per-token sink, routes inbound
      ticks via `dispatch`→`routeProgressNotification`, and the bridge's
      `streamMcpCall` relays them as real-time `ToolEvent.progress` through a
-     producer/consumer async-queue. DEFAULT-OFF seam (`McpToolBindOpts.progress`,
-     env `QUANTA_MCP_PROGRESS`): off ⇒ NO `onProgress` ⇒ NO `_meta.progressToken`
+     producer/consumer async-queue. DEFAULT-OFF seam (`McpToolBindOpts.progress`;
+     no env variable is registered yet): off ⇒ NO `onProgress` ⇒ NO `_meta.progressToken`
      on the wire (byte-identical request; a strict server never sees an
      unexpected `_meta`).
    - §19.5 tools/list_changed — `notifications/tools/list_changed` joins the
@@ -60,9 +60,12 @@ evidence:
     integration: []
     contract: []
 knobs:
-  - name: QUANTA_MCP_PROGRESS
-    where: src/agent/mcp-bridge.ts (McpToolBindOpts.progress seam)
-    default: "0"
-    purpose: opt-in to streaming notifications/progress (off ⇒ no _meta on the wire)
+  # A CODE option, not an env knob. This was `name: QUANTA_MCP_PROGRESS`, and no
+  # code reads that variable: the seam is `McpToolBindOpts.progress`, and the
+  # notes below already say the runner-knob registration is future work.
+  - name: McpToolBindOpts.progress
+    where: src/agent/mcp-bridge.ts
+    default: "false"
+    purpose: opt-in to streaming notifications/progress (off ⇒ no _meta on the wire). No env variable exists yet.
 deliberate_hold: null
-notes: 'jun-7 Wave R2 (completes §19 MCP ingestion alongside the landed §19.1/§19.3). result `_meta` is intentionally NOT surfaced (no ToolResult slot / no consumer — carrying it would be dead). The QUANTA_MCP_PROGRESS knob is a documented seam (bridge gate wired); the runner-knob registration is a future one-liner.'
+notes: 'jun-7 Wave R2 (completes §19 MCP ingestion alongside the landed §19.1/§19.3). result `_meta` is intentionally NOT surfaced (no ToolResult slot / no consumer — carrying it would be dead). The progress seam is a code option (bridge gate wired); an env knob for it does not exist yet — registering one is a future one-liner.'

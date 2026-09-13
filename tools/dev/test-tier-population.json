@@ -1,5 +1,5 @@
 {
-  "schema": "quanta.test-tier-population.v1",
+  "schema": "quanta.test-tier-population.v2",
   "tiers": {
     "prepush": {
       "minFiles": 3900,
@@ -16,6 +16,83 @@
     "nightly": {
       "minFiles": 3900,
       "reason": "measured 3948 selected at c7e91b306 = the whole discovered universe; nightly is set-equal to it, which is what makes `no file is in zero tiers` checkable"
+    }
+  },
+  "suites": {
+    "measuredAt": "baf5e2e9f",
+    "universeSelected": {
+      "prepush": 3969,
+      "pr": 3969,
+      "full": 3979,
+      "nightly": 3993
+    },
+    "floors": {
+      "core": {
+        "prepush": {
+          "selected": 3579,
+          "minFiles": 3517,
+          "reason": "measured 3579 of 3599 discovered, twice, at baf5e2e9f; share floor((3969-3900)*3579/3969)=62 of the universe slack"
+        },
+        "pr": {
+          "selected": 3579,
+          "minFiles": 3517,
+          "reason": "measured 3579 of 3599 discovered, twice, at baf5e2e9f; share floor((3969-3900)*3579/3969)=62 of the universe slack"
+        },
+        "full": {
+          "selected": 3589,
+          "minFiles": 3518,
+          "reason": "measured 3589 of 3599 discovered, twice, at baf5e2e9f; share floor((3979-3900)*3589/3979)=71 of the universe slack"
+        },
+        "nightly": {
+          "selected": 3599,
+          "minFiles": 3516,
+          "reason": "measured 3599 of 3599 discovered, twice, at baf5e2e9f; share floor((3993-3900)*3599/3993)=83 of the universe slack"
+        }
+      },
+      "integration": {
+        "prepush": {
+          "selected": 390,
+          "minFiles": 384,
+          "reason": "measured 390 of 394 discovered, twice, at baf5e2e9f; share floor((3969-3900)*390/3969)=6 of the universe slack"
+        },
+        "pr": {
+          "selected": 390,
+          "minFiles": 384,
+          "reason": "measured 390 of 394 discovered, twice, at baf5e2e9f; share floor((3969-3900)*390/3969)=6 of the universe slack"
+        },
+        "full": {
+          "selected": 390,
+          "minFiles": 383,
+          "reason": "measured 390 of 394 discovered, twice, at baf5e2e9f; share floor((3979-3900)*390/3979)=7 of the universe slack"
+        },
+        "nightly": {
+          "selected": 394,
+          "minFiles": 385,
+          "reason": "measured 394 of 394 discovered, twice, at baf5e2e9f; share floor((3993-3900)*394/3993)=9 of the universe slack"
+        }
+      },
+      "unit": {
+        "prepush": {
+          "selected": 3254,
+          "minFiles": 3198,
+          "reason": "measured 3254 of 3273 discovered, twice, at baf5e2e9f; share floor((3579-3517)*3254/3579)=56 of core's slack"
+        },
+        "pr": {
+          "selected": 3254,
+          "minFiles": 3198,
+          "reason": "measured 3254 of 3273 discovered, twice, at baf5e2e9f; share floor((3579-3517)*3254/3579)=56 of core's slack"
+        },
+        "full": {
+          "selected": 3264,
+          "minFiles": 3200,
+          "reason": "measured 3264 of 3273 discovered, twice, at baf5e2e9f; share floor((3589-3518)*3264/3589)=64 of core's slack"
+        },
+        "nightly": {
+          "selected": 3273,
+          "minFiles": 3198,
+          "reason": "measured 3273 of 3273 discovered, twice, at baf5e2e9f; share floor((3599-3516)*3273/3599)=75 of core's slack"
+        }
+      }
     }
   }
 }
