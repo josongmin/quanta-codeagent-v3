@@ -65,9 +65,15 @@
  *     `bash -i -c`, but the argv is built by `{bash,zsh}-capture.ts` to CAPTURE
  *     the operator's own interactive shell; no model/user command is run and
  *     the operator env is the subject of the snapshot.
- *   - `runtime/node-repl/default-kernel.ts` (`node -i`) and the
- *     `runtime/os-sandbox/*` exec adapters (env passed through from the caller)
- *     — not shells; a different charter.
+ *   - the `runtime/os-sandbox/*` exec adapters (env passed through from the caller).
+ *   - `runtime/node-repl/default-kernel.ts` (`node -i`) WAS listed here as "not a shell;
+ *     a different charter". That was the wrong test: the REPL runs model-authored
+ *     JavaScript, which reads `process.env` as easily as a shell does, and the kernel
+ *     spawned with no `env` at all. Measured with a provider key present at startup, the
+ *     kernel printed it. It now spawns through `bunScrubbedSpawner` with
+ *     `asScrubbedEnv(scrubEnv())`, so it imports the funnel and is IN this derivation.
+ *     The binary list below stays shell-only; an interpreter REPL is covered by routing
+ *     through the funnel, where an inherit-by-omission spawn is a type error.
  */
 
 import { describe, expect, test } from "bun:test"

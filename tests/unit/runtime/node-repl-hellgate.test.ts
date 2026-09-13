@@ -24,7 +24,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { KernelId } from "@/runtime/node-repl"
@@ -34,6 +34,7 @@ import {
   listKernels,
   stateDir,
 } from "@/runtime/node-repl"
+import { scrubReplNoise } from "@/runtime/node-repl/default-kernel"
 
 const MISSING_NODE = "__quanta_definitely_no_such_node_bin__"
 
@@ -79,25 +80,67 @@ describe("ADR-0249 node-repl-hellgate", () => {
     }
   })
 
-  test("HELL-NR-02A production kernel does not inherit provider credentials", async () => {
-    const previous = process.env.ANTHROPIC_API_KEY
-    process.env.ANTHROPIC_API_KEY = "ordinary-looking-parent-secret"
-    const k = createDefaultNodeReplKernel()
+  /**
+   * HELL-NR-02A — the production kernel does not inherit provider credentials.
+   *
+   * The first version set `process.env.ANTHROPIC_API_KEY` INSIDE this test process. A
+   * Bun child gets the environment the process STARTED with, not later edits, so the key
+   * never reached the kernel whether or not it scrubbed — the test could not see the leak
+   * it named, and passed or failed (8 of 10, 9 of 10 at two commits) on how the REPL
+   * split its output. With the key present at startup, the unfixed kernel printed it.
+   *
+   * So the secret goes where production has it: in the startup environment of a separate
+   * process that builds the real kernel.
+   */
+  const runKernelProbe = (code: string, env: Record<string, string>): string => {
+    const home = mkTmpHome()
     try {
-      const sp = await k.spawn({ sessionId: "env-scrub" })
-      expect(sp.ok).toBe(true)
-      if (!sp.ok) return
-      const out = await k.exec(
-        sp.value.id,
-        'console.log(process.env.ANTHROPIC_API_KEY ?? "SCRUBBED")',
+      const script = join(home, "probe.ts")
+      writeFileSync(
+        script,
+        `import { createDefaultNodeReplKernel } from ${JSON.stringify(join(import.meta.dir, "..", "..", "..", "src/runtime/node-repl/default-kernel.ts"))}\n` +
+          `const k = createDefaultNodeReplKernel({ home: ${JSON.stringify(home)} })\n` +
+          `const sp = await k.spawn({ sessionId: "env-scrub" })\n` +
+          `if (!sp.ok) { console.log("SPAWN-FAILED " + JSON.stringify(sp.error)); process.exit(0) }\n` +
+          `const out = await k.exec(sp.value.id, ${JSON.stringify(code)})\n` +
+          `console.log(out.ok ? out.value.stdout : "EXEC-FAILED " + JSON.stringify(out.error))\n` +
+          `await k.kill(sp.value.id)\n`,
       )
-      expect(out.ok).toBe(true)
-      if (out.ok) expect(out.value.stdout).toContain("SCRUBBED")
-      await k.kill(sp.value.id)
+      const res = Bun.spawnSync([process.execPath, script], {
+        env: { PATH: process.env.PATH ?? "", HOME: home, ...env },
+        stdout: "pipe",
+        stderr: "pipe",
+      })
+      return res.stdout.toString()
     } finally {
-      if (previous === undefined) delete process.env.ANTHROPIC_API_KEY
-      else process.env.ANTHROPIC_API_KEY = previous
+      dropTmp(home)
     }
+  }
+
+  test("HELL-NR-02A production kernel does not inherit provider credentials", () => {
+    const out = runKernelProbe(
+      'console.log("KEY=" + (process.env.ANTHROPIC_API_KEY ?? "SCRUBBED") + " OAI=" + (process.env.OPENAI_API_KEY ?? "SCRUBBED"))',
+      { ANTHROPIC_API_KEY: "probe-startup-secret", OPENAI_API_KEY: "probe-openai-secret" },
+    )
+    expect(out, "the kernel produced nothing to judge").toContain("KEY=")
+    expect(out).not.toContain("probe-startup-secret")
+    expect(out).not.toContain("probe-openai-secret")
+    expect(out).toContain("KEY=SCRUBBED OAI=SCRUBBED")
+  })
+
+  test("HELL-NR-02A PAIRED CONTROL: the allowlisted environment still reaches the kernel", () => {
+    // Without this, a kernel spawned with an EMPTY env would pass the arm above — and
+    // `node` resolves nothing without PATH.
+    const out = runKernelProbe('console.log("PATH_SET=" + (process.env.PATH ? "yes" : "no"))', {})
+    expect(out).toContain("PATH_SET=yes")
+  })
+
+  test("HELL-NR-02B a prompt prefixed onto output is stripped, not a reason to drop the line", () => {
+    expect(scrubReplNoise("> SCRUBBED")).toBe("SCRUBBED")
+    expect(scrubReplNoise("> > KEY=x")).toBe("KEY=x")
+    expect(scrubReplNoise("... done")).toBe("done")
+    expect(scrubReplNoise(">\n...\n> \nundefined\n\n2")).toBe("2")
+    expect(scrubReplNoise(">not-a-prompt")).toBe(">not-a-prompt")
   })
 
   // ─── HELL-NR-03 — exec "1+1" returns "2" ───────────────────────────────

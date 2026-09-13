@@ -28,6 +28,8 @@
  */
 
 import { err, errMessage, ok, type Result } from "@/shared"
+import { scrubEnv } from "../sandbox"
+import { asScrubbedEnv, bunScrubbedSpawner } from "../scrubbed-spawn"
 import type {
   KernelListing,
   NodeReplExecOptions,
@@ -129,13 +131,34 @@ const killQuietly = (proc: ReturnType<typeof Bun.spawn>): void => {
   }
 }
 
+/**
+ * Launch `node -i` with a SCRUBBED environment.
+ *
+ * This called `Bun.spawn` with no `env`, so the child inherited the whole parent
+ * environment — `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` and every other credential the
+ * agent process holds — and the REPL exists to run model-authored JavaScript, which can
+ * read `process.env` and print it. Measured with the key present at process start: the
+ * kernel printed `KEY=probe-startup-secret`. Production builds this kernel when
+ * `QUANTA_NODE_REPL` is on.
+ *
+ * It was missed twice. The exec-cluster scrub ban classified `node -i` as "not a shell;
+ * a different charter", and the unit test that claimed to pin it set the key with
+ * `process.env.ANTHROPIC_API_KEY = …` inside the running test — which a Bun child does
+ * not inherit — so it could not see the leak it named, and passed or failed on how the
+ * REPL split its output.
+ *
+ * Now it goes through the branded funnel: `env` is required and must be minted by
+ * `asScrubbedEnv(scrubEnv())`, so an inherit-by-omission spawn is a type error here.
+ */
 const launchNode = (nodeBin: string): Result<SpawnedProcess, KernelError> => {
   try {
-    const proc = Bun.spawn([nodeBin, "-i", "--no-warnings"], {
+    const proc = bunScrubbedSpawner([nodeBin, "-i", "--no-warnings"], {
+      cwd: process.cwd(),
+      env: asScrubbedEnv(scrubEnv()),
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
-    })
+    }) as ReturnType<typeof Bun.spawn>
     const stdoutReader = (
       proc.stdout as ReadableStream<Uint8Array>
     ).getReader() as unknown as ChunkReader
@@ -457,20 +480,22 @@ const finishExec = (
 
 /** Strip REPL prompt / undefined echoes from a captured body. node's
  *  interactive REPL pads `>` prompts and `undefined` lines around each
- *  statement; for downstream consumers the noise is irrelevant. */
-const scrubReplNoise = (raw: string): string => {
-  return raw
+ *  statement; for downstream consumers the noise is irrelevant.
+ *
+ *  A leading prompt is STRIPPED, not a reason to drop the line. The REPL can deliver a
+ *  statement's output on the same chunk as the prompt, as `"> SCRUBBED"`; the old filter
+ *  dropped every line starting with `"> "`, so that output vanished and `exec` returned
+ *  an empty stdout for a statement that printed. Measured: raw capture showed the line
+ *  arriving that way on some runs, and the credential test then saw `""`. */
+export const scrubReplNoise = (raw: string): string =>
+  raw
     .split("\n")
+    .map((line) => line.replace(/^\s*(?:(?:>|\.\.\.)(?:\s+|$))+/, ""))
     .filter((line) => {
       const t = line.trim()
-      if (t === "") return false
-      if (t === ">" || t === "...") return false
-      if (t === "undefined") return false
-      if (t.startsWith("> ") || t.startsWith("... ")) return false
-      return true
+      return t !== "" && t !== "undefined"
     })
     .join("\n")
-}
 
 interface ReadResult {
   ok: true
