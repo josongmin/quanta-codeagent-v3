@@ -19,10 +19,9 @@
  *     so the old path was never read and a rename that dropped symbols examined 0 files.
  */
 
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import {
   createGitReadPort,
@@ -33,7 +32,7 @@ import {
   type SymbolLoss,
   scanMerge,
 } from "../../../tools/dev/merge-symbol-loss"
-import { withTempDirSync } from "../../_helpers/temp-dir"
+import { makeTempDirOwner, withTempDirSync } from "../../_helpers/temp-dir"
 import { fakeMergeGitPort } from "../_shared/fake-merge-git-port"
 
 // ---------------------------------------------------------------------------
@@ -233,8 +232,15 @@ const runGit = (cwd: string, args: readonly string[]): string => {
  * actual git plumbing, which is the only way the `core.quotePath` blind spot
  * shows up at all.
  */
+/** OWNED, so the repo is removed even when an assertion throws. It was a bare
+ *  `mkdtempSync` that nothing removed — one leaked repo per call, three calls a run. The
+ *  tmp-leak ratchet stopped seeing it once other tests in this file bound a `dir` through
+ *  `withTempDirSync` (it matches by binding name), and reported the file as improved. */
+const nonAsciiRepos = makeTempDirOwner()
+afterEach(() => nonAsciiRepos.disposeAll())
+
 const buildNonAsciiMergeRepo = (): { dir: string; merge: string } => {
-  const dir = mkdtempSync(join(tmpdir(), "merge-symbol-loss-nonascii-"))
+  const dir = nonAsciiRepos.create("merge-symbol-loss-nonascii-")
   const g = (...args: string[]): string => runGit(dir, args)
   g("init", "-q", "-b", "main")
   g("config", "user.email", "t@example.com")

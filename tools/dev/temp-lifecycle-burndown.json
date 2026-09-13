@@ -43,7 +43,6 @@
     "tests/integration/session-ux-e2e.test.ts": 1,
     "tests/integration/shell-snapshot-runshell-wire-hellgate.test.ts": 1,
     "tests/scripts/github-pr-bot-e2e-hellgate.ts": 1,
-    "tests/unit/_arch/merge-symbol-loss-residue.test.ts": 1,
     "tests/unit/_arch/scan-population-floor-hellgate.test.ts": 1,
     "tests/unit/apps/agent/local-env-wire-hellgate.test.ts": 3,
     "tests/unit/apps/bench/promax/_bootstrap-exec-harness.ts": 1,
