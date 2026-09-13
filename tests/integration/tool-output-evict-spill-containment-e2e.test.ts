@@ -12,10 +12,14 @@
  * deletion in the symlink's target.
  *
  * Drives the REAL `runAgent` loop (the production composition of the port) over a
- * scratch repo. Refused arms: the victim stays at exactly 80 files and 0 foreign
- * entries, and every cleared block tells the model the original was not
- * persisted and why. Paired control: a real directory still receives one spill
- * file per cleared block and is pruned to `DEFAULT_SPILL_KEEP`.
+ * scratch repo. Symlink arms: the seeded victim stays at exactly 80 files and 0
+ * foreign entries (the EMPTY-outside arm instead asserts `outside` stays empty),
+ * and every cleared block tells the model the original was not persisted and
+ * why. IO arms (uid 0 skips them visibly): an unwritable working directory and
+ * an unwritable real `.quanta/tool-output` each give cleared blocks that name the
+ * path that could not be created or written. Paired control: a real directory
+ * still receives one spill file per cleared block and is pruned to
+ * `DEFAULT_SPILL_KEEP`.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
@@ -247,6 +251,35 @@ describe.skipIf(IS_ROOT)("NW-2 eviction spill — an unwritable working director
     expect(existsSync(join(repo, ".quanta"))).toBe(false)
   })
 })
+
+describe.skipIf(IS_ROOT)(
+  "NW-2 eviction spill — a real but unwritable `.quanta/tool-output`",
+  () => {
+    const spillDirOf = (): string => join(repo, ".quanta", "tool-output")
+    afterEach(() => {
+      if (existsSync(spillDirOf())) chmodSync(spillDirOf(), 0o755)
+    })
+
+    test("every cleared block names its unwritable spill file and the turn completes", async () => {
+      mkdirSync(spillDirOf(), { recursive: true })
+      chmodSync(spillDirOf(), 0o555)
+
+      const cleared = await runEviction()
+
+      expect(cleared).toHaveLength(EXPECTED_CLEARED)
+      const escapedDir = spillDirOf().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+      for (const block of cleared) {
+        expect(block.content).toMatch(
+          new RegExp(
+            `not persisted to disk: ${escapedDir}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.txt could not be written \\(EACCES`,
+          ),
+        )
+        expect(block.content).not.toContain("<persisted-output")
+      }
+      expect(readdirSync(spillDirOf())).toEqual([])
+    })
+  },
+)
 
 describe("NW-2 eviction spill — paired control", () => {
   test("real `.quanta/tool-output` with 80 files: one spill per cleared block, pruned to DEFAULT_SPILL_KEEP", async () => {

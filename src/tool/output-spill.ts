@@ -243,24 +243,30 @@ export async function pruneSpillDirAsync(
  */
 const SPILL_DIR_SEGMENTS = [".quanta", "tool-output"] as const
 
-/** Why a spill directory was refused. Closed set; each kind renders exactly one
- *  reason ({@link SPILL_DIR_REFUSAL_REASON}). */
+/** Why an over-budget output was not persisted. Closed set; each kind renders
+ *  exactly one reason ({@link SPILL_DIR_REFUSAL_REASON}). The first three are
+ *  containment refusals; `unavailable` (opening the directory) and
+ *  `write-failed` (writing the spill file into the opened directory) are IO
+ *  failures. Either way nothing is pruned. */
 export const SPILL_DIR_REFUSAL_KINDS = [
   "not-spill-location",
   "symlink",
   "not-a-directory",
   "unavailable",
+  "write-failed",
 ] as const
 export type SpillDirRefusalKind = (typeof SPILL_DIR_REFUSAL_KINDS)[number]
 
 /** What each refusal kind carries besides its `kind`. `path` is the component
- *  that failed its check (the whole spill dir for `not-spill-location`). Only
- *  the IO kind has a `cause`, and it always has one. */
+ *  that failed its check (the whole spill dir for `not-spill-location`, the
+ *  spill file for `write-failed`). Only the IO kinds have a `cause`, and they
+ *  always have one. */
 interface SpillDirRefusalDetail {
   readonly "not-spill-location": { readonly path: string }
   readonly symlink: { readonly path: string }
   readonly "not-a-directory": { readonly path: string }
   readonly unavailable: { readonly path: string; readonly cause: string }
+  readonly "write-failed": { readonly path: string; readonly cause: string }
 }
 
 export type SpillDirRefusalOf<K extends SpillDirRefusalKind> = {
@@ -281,6 +287,7 @@ export const SPILL_DIR_REFUSAL_REASON: {
     `${r.path} is a symbolic link; tool output is only written to a real directory inside the working directory`,
   "not-a-directory": (r) => `${r.path} is not a directory`,
   unavailable: (r) => `${r.path} could not be created or inspected (${r.cause})`,
+  "write-failed": (r) => `${r.path} could not be written (${r.cause})`,
 }
 
 /** Correlates the refusal's kind with its renderer (the generic keeps
@@ -289,6 +296,18 @@ const renderRefusal = <K extends SpillDirRefusalKind>(refusal: SpillDirRefusalOf
   SPILL_DIR_REFUSAL_REASON[refusal.kind](refusal)
 
 export const describeSpillRefusal = (refusal: SpillDirRefusal): string => renderRefusal(refusal)
+
+/** The refusal for a spill file whose write threw or rejected after its
+ *  directory was opened. Shared by {@link capToolOutput} and the eviction spill
+ *  adapter so both report a failed write the same way. */
+export const writeFailedRefusal = (
+  path: string,
+  e: unknown,
+): SpillDirRefusalOf<"write-failed"> => ({
+  kind: "write-failed",
+  path,
+  cause: errMessage(e),
+})
 
 declare const containedSpillDirBrand: unique symbol
 /** A spill directory whose quanta-created components were each verified, by
@@ -400,7 +419,8 @@ export interface CapToolOutputOptions {
    * Injected writer for the spill file (path, data), called only after the
    * spill dir was opened. Defaults to an async writeFile (`node:fs/promises`)
    * — never sync IO on the shared event loop. A returned Promise is AWAITED
-   * before the result is produced. Override in tests to avoid the file write.
+   * before the result is produced; a throw or rejection is the `write-failed`
+   * refusal. Override in tests to avoid the file write.
    */
   write?: (path: string, data: string) => void | Promise<void>
   /**
@@ -420,10 +440,10 @@ export interface CapToolOutputOptions {
 export interface CapToolOutputResult {
   /** The (possibly excerpted) output to hand back to the model. */
   output: string
-  /** Absolute-ish spill path written, when the output was over cap. */
+  /** The spill file, set only when the full output was written to it. */
   spillPath?: string
-  /** Set when the output was over cap but the spill dir was refused: nothing
-   *  was written or pruned, and `output` says so. */
+  /** Set when the output was over cap but not persisted — the spill dir was
+   *  refused or the write failed. Nothing was pruned, and `output` says why. */
   spillRefusal?: SpillDirRefusal
 }
 
@@ -453,16 +473,23 @@ export function envMaxChars(env: Record<string, string | undefined>): number {
 }
 
 /**
- * If `output` exceeds `maxChars`, persist the FULL output to
- * `<spillDir>/<uuid>.txt` and return a head+tail excerpt wrapped in a
- * `<persisted-output>` marker (faithfully echoing CC's `MYH` placeholder —
- * see analysis/agent-loop-message-normalization.md §2.2). Sub-cap outputs are
+ * If `output` exceeds `maxChars`, open `spillDir` with {@link openSpillDirAsync},
+ * write the FULL output to `<spillDir>/<uuid>.txt`, prune the directory, and
+ * return a head+tail excerpt wrapped in a `<persisted-output>` marker (faithfully
+ * echoing CC's `MYH` placeholder — see
+ * analysis/agent-loop-message-normalization.md §2.2). Sub-cap outputs are
  * returned byte-identical with no IO.
  *
- * Pure except for the single `write` call (injectable for tests). ASYNC end
- * to end (jun-10 silent-failure audit #21): this runs on the UNIVERSAL
- * tool-result path (`ToolRegistry.run`), shared by every session of the web
- * daemon — the spill write and the GC prune must never block the event loop.
+ * When the directory is refused or the write fails, nothing is pruned,
+ * `spillPath` is unset, `spillRefusal` says why, and `output` is a
+ * `<truncated-output>` excerpt carrying the same reason. Spill IO never makes
+ * this throw.
+ *
+ * IO: the directory is opened with real per-component `mkdir` + `lstat` calls
+ * (not injectable); the write (`write`) and the prune (`spillFs`) are
+ * injectable for tests. ASYNC end to end (jun-10 silent-failure audit #21):
+ * this runs on the UNIVERSAL tool-result path (`ToolRegistry.run`), shared by
+ * every session of the web daemon — no spill IO may block the event loop.
  */
 export async function capToolOutput(
   output: string,
@@ -474,25 +501,17 @@ export async function capToolOutput(
   }
 
   const opened = await openSpillDirAsync(opts.spillDir)
-  if (!opened.ok) {
-    // Fail closed: no write, no prune. The model gets the excerpt plus the
-    // reason the rest is gone; the operator gets the same reason in the log.
-    const reason = describeSpillRefusal(opened.refusal)
-    logger.warn(`output-spill.capToolOutput: spill refused — ${reason}`)
-    const marker =
-      `<truncated-output>\n` +
-      `Output (${output.length} chars) exceeded the ${maxChars}-char tool-result ` +
-      `budget and was NOT persisted to disk: ${reason}.\n` +
-      `Only this excerpt is available; narrow the call (e.g. offset/limit or a filter) ` +
-      `to see the omitted part.\n` +
-      excerptLines(output) +
-      `</truncated-output>`
-    return { output: marker, spillRefusal: opened.refusal }
-  }
+  if (!opened.ok) return refusedSpill(output, maxChars, opened.refusal)
 
   const spillPath = join(opened.dir, `${randomUUID()}.txt`)
   const write = opts.write ?? defaultWrite
-  await write(spillPath, output)
+  try {
+    await write(spillPath, output)
+  } catch (e) {
+    // The same fail-closed result as a refused directory, and no prune. A
+    // partly written file can remain; the next successful spill's prune bounds it.
+    return refusedSpill(output, maxChars, writeFailedRefusal(spillPath, e))
+  }
 
   // Bound the spill dir so it can never grow unboundedly. Best-effort:
   // pruneSpillDirAsync never throws/rejects, so a GC failure cannot break
@@ -513,6 +532,26 @@ export async function capToolOutput(
     `</persisted-output>`
 
   return { output: marker, spillPath }
+}
+
+/** Fail closed: the model gets the excerpt plus the reason the rest is gone; the
+ *  operator gets the same reason in the log. */
+function refusedSpill(
+  output: string,
+  maxChars: number,
+  refusal: SpillDirRefusal,
+): CapToolOutputResult {
+  const reason = describeSpillRefusal(refusal)
+  logger.warn(`output-spill.capToolOutput: spill refused — ${reason}`)
+  const marker =
+    `<truncated-output>\n` +
+    `Output (${output.length} chars) exceeded the ${maxChars}-char tool-result ` +
+    `budget and was NOT persisted to disk: ${reason}.\n` +
+    `Only this excerpt is available; narrow the call (e.g. offset/limit or a filter) ` +
+    `to see the omitted part.\n` +
+    excerptLines(output) +
+    `</truncated-output>`
+  return { output: marker, spillRefusal: refusal }
 }
 
 /** The head + tail excerpt block shared by the persisted and the refused

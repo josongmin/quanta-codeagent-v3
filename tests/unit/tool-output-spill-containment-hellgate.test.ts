@@ -40,6 +40,7 @@ import {
   SPILL_DIR_REFUSAL_KINDS,
   SPILL_DIR_REFUSAL_REASON,
   type SpillDirRefusal,
+  type SpillFsOps,
 } from "@/tool/output-spill"
 import { scopedEnv } from "../_support/scoped-env"
 
@@ -80,6 +81,31 @@ const readThroughRegistry = (file: string): Promise<ToolResult> =>
 const seedNotes = (dir: string): void => {
   mkdirSync(dir, { recursive: true })
   for (let i = 0; i < VICTIM_NOTES; i++) writeFileSync(join(dir, `note-${i}.txt`), `precious-${i}`)
+}
+
+/** A spill file name as `capToolOutput` makes it: `<uuid>.txt`. */
+const UUID_TXT = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.txt"
+const reSource = (literal: string): string => literal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+
+/** A prune fs that records every call, so an arm can tell whether a prune ran. */
+const recordingSpillFs = (): { readonly fs: SpillFsOps; readonly calls: string[] } => {
+  const calls: string[] = []
+  return {
+    calls,
+    fs: {
+      readdir: (dir) => {
+        calls.push(`readdir ${dir}`)
+        return []
+      },
+      mtimeMs: (path) => {
+        calls.push(`mtimeMs ${path}`)
+        return 0
+      },
+      remove: (path) => {
+        calls.push(`remove ${path}`)
+      },
+    },
+  }
 }
 
 /** Exact census of a seeded directory: every entry name, and whether each note
@@ -273,6 +299,94 @@ describe("NW-2 capToolOutput refusal kinds (structured)", () => {
     expect(r.output).toContain(`${join(repo, ".quanta")} is not a directory`)
   })
 
+  test("a failed spill write is a `write-failed` refusal and the directory is not pruned; a working write prunes", async () => {
+    const spillDir = join(repo, ".quanta", "tool-output")
+    const recorder = recordingSpillFs()
+    const writes: string[] = []
+
+    const thrown = await capToolOutput(big, {
+      maxChars: 10,
+      spillDir,
+      spillFs: recorder.fs,
+      write: (path) => {
+        writes.push(path)
+        throw new Error("ENOSPC: no space left on device")
+      },
+    })
+    const rejected = await capToolOutput(big, {
+      maxChars: 10,
+      spillDir,
+      spillFs: recorder.fs,
+      write: async (path) => {
+        writes.push(path)
+        throw new Error("EIO: i/o error")
+      },
+    })
+
+    const spillFile = new RegExp(`^${reSource(spillDir)}/${UUID_TXT}$`)
+    expect(thrown.spillRefusal).toEqual({
+      kind: "write-failed",
+      path: expect.stringMatching(spillFile),
+      cause: "ENOSPC: no space left on device",
+    })
+    expect(rejected.spillRefusal).toEqual({
+      kind: "write-failed",
+      path: expect.stringMatching(spillFile),
+      cause: "EIO: i/o error",
+    })
+    expect(recorder.calls).toEqual([])
+    // Each refusal names the exact file its writer was handed.
+    expect([thrown.spillRefusal?.path, rejected.spillRefusal?.path]).toEqual(writes)
+    expect(thrown.spillPath).toBeUndefined()
+    expect(thrown.output).toStartWith("<truncated-output>\n")
+    expect(thrown.output).toContain(
+      `was NOT persisted to disk: ${thrown.spillRefusal?.path} could not be written (ENOSPC: no space left on device).`,
+    )
+
+    // Paired control: the same recorder sees the prune after a write that works.
+    const persisted = await capToolOutput(big, {
+      maxChars: 10,
+      spillDir,
+      spillFs: recorder.fs,
+      write: () => {},
+    })
+    expect(recorder.calls).toEqual([`readdir ${spillDir}`])
+    expect(persisted.spillRefusal).toBeUndefined()
+    expect(persisted.spillPath).toMatch(spillFile)
+  })
+
+  test("eviction port: a failed spill write returns the unpersisted block and the directory is not pruned; a working write prunes", () => {
+    const spillDir = join(repo, ".quanta", "tool-output")
+    const recorder = recordingSpillFs()
+    const failing = createEvictionSpillPort({
+      spillDir,
+      fileName: () => "evicted.txt",
+      spillFs: recorder.fs,
+      write: () => {
+        throw new Error("ENOSPC: no space left on device")
+      },
+    })
+    const working = createEvictionSpillPort({
+      spillDir,
+      fileName: () => "kept.txt",
+      spillFs: recorder.fs,
+      write: () => {},
+    })
+
+    const block = failing.persist("hello", "u1")
+
+    expect(block).toBe(
+      `<unpersisted-output chars="5"> full original tool output was not persisted to disk: ` +
+        `${join(spillDir, "evicted.txt")} could not be written (ENOSPC: no space left on device); ` +
+        `it cannot be re-read </unpersisted-output>`,
+    )
+    expect(recorder.calls).toEqual([])
+    expect(working.persist("hello", "u2")).toStartWith(
+      `<persisted-output path="${join(spillDir, "kept.txt")}" chars="5">`,
+    )
+    expect(recorder.calls).toEqual([`readdir ${spillDir}`])
+  })
+
   test("drift guard: every refusal kind has exactly one rendered reason", () => {
     expect(Object.keys(SPILL_DIR_REFUSAL_REASON).sort()).toEqual(
       [...SPILL_DIR_REFUSAL_KINDS].sort(),
@@ -344,6 +458,52 @@ describe.skipIf(IS_ROOT)(
       expect(block).toStartWith('<unpersisted-output chars="5">')
       expect(block).toContain(`${join(repo, ".quanta")} could not be created or inspected (`)
       expect(block).not.toContain("<persisted-output")
+    })
+  },
+)
+
+describe.skipIf(IS_ROOT)(
+  "NW-2 write-failed — a real but unwritable `.quanta/tool-output` refuses the spill, never throws",
+  () => {
+    const spillDirOf = (): string => join(repo, ".quanta", "tool-output")
+    const lockSpillDir = (): void => {
+      mkdirSync(spillDirOf(), { recursive: true })
+      chmodSync(spillDirOf(), 0o555)
+    }
+    afterEach(() => {
+      if (existsSync(spillDirOf())) chmodSync(spillDirOf(), 0o755)
+    })
+
+    test("registry `read`: the result is an excerpt naming the unwritable spill file", async () => {
+      lockSpillDir()
+
+      const result = await readThroughRegistry("generated.txt")
+
+      expect(result.ok).toBe(true)
+      expect(result.output.startsWith("<truncated-output>\n")).toBe(true)
+      expect(result.output).toMatch(
+        new RegExp(
+          `was NOT persisted to disk: ${reSource(spillDirOf())}/${UUID_TXT} could not be written \\(EACCES`,
+        ),
+      )
+      expect(result.output).toContain("row-0 ")
+      expect(result.output).toContain("row-1999 ")
+      expect(result.evidence?.fullLogPath).toBeUndefined()
+      expect(readdirSync(spillDirOf())).toEqual([])
+    })
+
+    test("eviction spill port: returns the unpersisted block naming the unwritable spill file", () => {
+      lockSpillDir()
+
+      const block = createEvictionSpillPort({
+        spillDir: spillDirOf(),
+        fileName: () => "evicted.txt",
+      }).persist("hello", "u1")
+
+      expect(block).toStartWith('<unpersisted-output chars="5">')
+      expect(block).toContain(`${join(spillDirOf(), "evicted.txt")} could not be written (EACCES`)
+      expect(block).not.toContain("<persisted-output")
+      expect(readdirSync(spillDirOf())).toEqual([])
     })
   },
 )
