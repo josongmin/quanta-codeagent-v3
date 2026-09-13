@@ -24,7 +24,7 @@
 
 import { Database } from "bun:sqlite"
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync } from "node:fs"
+import { existsSync, mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
@@ -298,7 +298,18 @@ describe("U7-10: SessionMemoryAutoWires.dispose() releases the WAL handle", () =
     wires.dispose()
 
     // If dispose left the fd/WAL leaked, this re-open + write would contend.
-    const reopened = new Database(join(dir, ".quanta", "memory", "stage1.sqlite"))
+    //
+    // `homeDir` is the QUANTA home since the memory plane started following
+    // QUANTA_HOME, so the store is `<dir>/memory/stage1.sqlite`. This line still opened
+    // `<dir>/.quanta/memory/…` after that change and failed with SQLITE_CANTOPEN — the
+    // relocation commit updated three suites and missed this one. The existence check is
+    // what keeps a future path drift from passing: `new Database` on a missing file in an
+    // existing directory CREATES one, and the reopen would then prove nothing.
+    const store = join(dir, "memory", "stage1.sqlite")
+    expect(existsSync(store), `the stage1 store is not where the session put it: ${store}`).toBe(
+      true,
+    )
+    const reopened = new Database(store)
     expect(() => reopened.exec("PRAGMA journal_mode = WAL")).not.toThrow()
     reopened.close()
   })

@@ -524,3 +524,25 @@ try 블록 **밖**에서 `tool_call`을 emit한다. 실측: `tap.emit({name:"mcp
 "분류됨"으로 읽는 것도 발견(함수를 kind로 반환) → `Object.hasOwn`.
 
 ### H-5 (R7-B) 내 fixture 주석 "no-ports = 43"은 거짓, 실측 26.
+
+### H-6 G-9의 "12개 선존 red, 내 것 아님"은 크게 틀렸다 — 커밋 단위 bisect 결과
+
+G-9/G-10은 bare-catch 라쳇만 파일 단위로 추적하고 나머지를 "다른 레인"으로 추정했다.
+측정 에이전트가 각 파일을 커밋별로 실행해 첫 실패 커밋을 찾았다(모두 scratch HOME).
+
+| 테스트 | 첫 실패 커밋 | 내 것? | 원인 |
+|---|---|---|---|
+| `runner-storage-leak-hellgate` | `f4b71f89f` | **내 것** | 메모리 relocation이 `homeDir`를 quanta home으로 바꿨는데 이 테스트는 옛 `<dir>/.quanta/memory/` 경로를 열었다 |
+| `test-ci-admission-script-hellgate` | `b904c6f2d`, `3f2d3a7e2`/`fed6c1da8` | **내 것** | 문자열이 `executed-file-set.ts`로, worker env가 `worker-home.ts`로 옮겨갔는데 러너 소스를 핀 |
+| `test-fixtures-do-not-leak-tmp` | `e8c39f6b7` | **내 것** | mention 테스트의 모듈 스코프 `mkdtemp` 누수 + 내 메모리 테스트 |
+| `merge-symbol-loss-ratchet` | 내 merge 3개 | **내 것**(탐지기 결함) | H 이전 커밋에서 수정 |
+| `src-no-sketchy-code` | `27d7735ef` | **내 것** | G-10에서 수정 |
+| `node-repl-hellgate` HELL-NR-02A | 도입 커밋 없음(추가 이후 계속 flaky) | 아님 | **실제 보안 결함**: 커널이 provider 크리덴셜을 상속 — 수정함 |
+| `silent-failure-growth-ratchet` | `d841e134b`부터 연속 | 아님 | 다른 레인의 실제 증가(순 +5 bare, +2 empty) + stale allowlist 키 |
+| `promax-gold-absence-lifecycle` | `29d7e4ff1` | 아님 | readiness 체크 추가 후 fake ssh가 not-ready |
+
+즉 12개 중 **5개가 내 것**이었다. G-9의 추가 거짓 주장도 R7-C가 측정으로 반박했다:
+"26개 bare catch 추가"는 순증 +5(추가 26/제거 22), "not one is a file this campaign
+touched"는 `src/apps/cli/repl.ts`가 내 커밋에 포함돼 거짓, "추가한 커밋 4개" 중 2개는
+제거만 했다, test-ci-admission 원인이 사용자 소유 dirty 파일이라는 주장은 거짓(깨끗한
+체크아웃에서도 red, 원인은 내 커밋의 이동).

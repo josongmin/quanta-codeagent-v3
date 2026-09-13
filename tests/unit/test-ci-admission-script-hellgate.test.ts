@@ -2,6 +2,7 @@
 
 import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
+import { workerSpawnEnv } from "../../tools/dev/worker-home"
 
 type PackageJson = { readonly scripts?: Record<string, string> }
 
@@ -14,6 +15,9 @@ const packageJson = (await Bun.file(
 ).json()) as PackageJson
 const shardRunner = await Bun.file(
   join(import.meta.dir, "..", "..", "tools", "dev", "run-test-shards.ts"),
+).text()
+const executedFileSet = await Bun.file(
+  join(import.meta.dir, "..", "..", "tools", "dev", "executed-file-set.ts"),
 ).text()
 /**
  * Slice a declaration out of the runner by its real boundaries.
@@ -337,7 +341,11 @@ describe("test:ci admission gate", () => {
     // place. Asserts the current property instead, and that the count cannot
     // come back.
     expect(shardRunner).toContain("executedFileSetVerdict(")
-    expect(shardRunner).toContain("EXECUTED-SET MISMATCH")
+    // The refusal MESSAGE moved to `executed-file-set.ts` in `b904c6f2d`; the runner now
+    // calls the helper that builds it. Pinning the string in the runner kept this red
+    // after a correct refactor, so both halves are asserted where they live.
+    expect(shardRunner).toContain("executedSetRefusal(")
+    expect(executedFileSet).toContain("EXECUTED-SET MISMATCH")
     expect(shardRunner).not.toContain("result.executedFiles === plan.files.length")
     expect(shardRunner).toContain("aborting remaining shards")
     expect(shardRunner).not.toContain(["--shard=", "{shard}"].join("$"))
@@ -347,15 +355,33 @@ describe("test:ci admission gate", () => {
     expect(shardRunner).toContain("opts.junitOut")
     expect(shardRunner).toContain("parseShardRunnerOptions")
     expect(shardRunner).toContain("cacheMode")
-    expect(shardRunner).toContain("QUANTA_SCAN_REACH_RECORD: scanReachSink")
-    expect(shardRunner).toContain("HOME: workerHome")
-    expect(shardRunner).toContain("QUANTA_HOME: quantaHome")
-    expect(shardRunner).not.toContain("QUANTA_CONFIG_DIR: quantaHome")
-    expect(shardRunner).toContain("QUANTA_PREFS_HOME: prefsHome")
-    // QUANTA_HOME already isolates the derived bench root. Injecting the more
-    // specific override would hide the production precedence contract from
-    // tests that intentionally mutate QUANTA_HOME.
-    expect(shardRunner).not.toContain("QUANTA_BENCH_HOME: benchHome")
+    // The worker environment is composed by `workerSpawnEnv` (tools/dev/worker-home.ts)
+    // since `3f2d3a7e2`; these five lines pinned object-literal spellings inside the
+    // runner for keys that had moved, and stayed red after a correct refactor. They now
+    // assert the COMPOSED BAG by calling the composer, and that the runner calls it.
+    expect(shardRunner).toContain("env: workerSpawnEnv({")
+    const env = workerSpawnEnv({
+      base: { QUANTA_CONFIG_DIR: "/real/config", QUANTA_BENCH_HOME: "/real/bench" },
+      capabilityEnv: {},
+      workerHome: "/w/home",
+      workerTmp: "/w/tmp",
+      repoRoot: "/repo",
+      quantaHome: "/w/home/.quanta",
+      prefsHome: "/w/prefs",
+      benchResults: "/w/bench-results",
+      scanReachSink: "/w/scan-reach.jsonl",
+      testTimeoutMs: 60_000,
+    } as never)
+    expect(env.HOME).toBe("/w/home")
+    expect(env.QUANTA_HOME).toBe("/w/home/.quanta")
+    expect(env.QUANTA_PREFS_HOME).toBe("/w/prefs")
+    expect(env.QUANTA_SCAN_REACH_RECORD).toBe("/w/scan-reach.jsonl")
+    // QUANTA_HOME already isolates the derived bench root. Injecting the more specific
+    // override would hide the production precedence contract from tests that
+    // intentionally mutate QUANTA_HOME; and the composer must not repoint
+    // QUANTA_CONFIG_DIR at the worker home either.
+    expect(env.QUANTA_CONFIG_DIR).not.toBe("/w/home/.quanta")
+    expect(env.QUANTA_BENCH_HOME).not.toBe("/w/home/.quanta/bench")
     expect(shardRunner).toContain("writeScanReachReceipt(")
     expect(optionsSource).toContain("--junit-out=")
     expect(optionsSource).toContain("--cache=")
