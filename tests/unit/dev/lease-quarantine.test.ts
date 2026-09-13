@@ -15,20 +15,25 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { basename, dirname, join } from "node:path"
 import {
   clearLeaseQuarantine,
+  expiredQuarantinePath,
   KEEPER_SCRIPT_PATH,
   keeperSpawnRefusal,
+  LEASE_QUARANTINE_DIR_ENV,
   LEASE_QUARANTINE_SCHEMA,
   type LeaseQuarantineRead,
   type LeaseQuarantineRecord,
+  laneQuarantinePath,
+  laneSlotVerdict,
+  leaseQuarantineRoot,
+  legacyQuarantinePath,
   parseLeaseQuarantine,
   QUARANTINE_TTL_MS,
   quarantineLane,
-  quarantinePath,
   quarantineVerdict,
   readLeaseQuarantine,
   readLeaseQuarantineOutcome,
@@ -256,10 +261,10 @@ describe("quarantine handoff", () => {
 
   test("the record is written and carries the forensics a receipt needs", () => {
     withDir((dir) => {
-      const path = quarantinePath(dir)
+      const path = laneQuarantinePath("owner/repo", dir)
       const spawned: string[][] = []
       const written = quarantineLane({
-        path,
+        env: { [LEASE_QUARANTINE_DIR_ENV]: dir },
         repositoryId: "owner/repo",
         groups: [GROUP, { pgid: 7, leaderPid: -1, verdict: "recycled", detail: "pid reused" }],
         nowMs: 5_000,
@@ -283,10 +288,10 @@ describe("quarantine handoff", () => {
 
   test("the keeper is spawned BEFORE the record exists, so the record never names a pid that was never started", () => {
     withDir((dir) => {
-      const path = quarantinePath(dir)
+      const path = laneQuarantinePath("owner/repo", dir)
       let recordAtSpawn: LeaseQuarantineRecord | undefined
       quarantineLane({
-        path,
+        env: { [LEASE_QUARANTINE_DIR_ENV]: dir },
         repositoryId: "owner/repo",
         groups: [GROUP],
         spawnKeeper: () => {
@@ -301,7 +306,7 @@ describe("quarantine handoff", () => {
 
   test("an unreadable or absent file reads as no quarantine", () => {
     withDir((dir) => {
-      const path = quarantinePath(dir)
+      const path = join(dir, "lease-quarantine.json")
       expect(readLeaseQuarantine(path)).toBeUndefined()
       writeFileSync(path, "not json")
       expect(readLeaseQuarantine(path)).toBeUndefined()
@@ -340,7 +345,7 @@ describe("the keeper outlives the group that spawned it", () => {
     // The survivor is THIS process's group, so the verdict is `blocked` and the
     // keeper stays up long enough to be observed.
     const now = Date.now()
-    const path = quarantinePath(dir)
+    const path = laneQuarantinePath("detach-probe/repo", dir)
     writeLeaseQuarantine(
       path,
       record({
@@ -419,7 +424,7 @@ describe("readLeaseQuarantineOutcome maps corruption to unreadable, not absent",
     ["truncated json", '{"schema":"quanta.lease-quarantine.v1","repositoryI'],
     ["zero bytes", ""],
     ["valid json, wrong shape", '{"hello":"world"}'],
-    ["unknown schema", JSON.stringify({ ...record(), schema: "quanta.lease-quarantine.v2" })],
+    ["unknown schema", JSON.stringify({ ...record(), schema: "quanta.lease-quarantine.v3" })],
     [
       "pgid as a string",
       JSON.stringify({
@@ -433,7 +438,7 @@ describe("readLeaseQuarantineOutcome maps corruption to unreadable, not absent",
   test("every corrupt file reads as UNREADABLE and blocks, with the file's own age", () => {
     const dir = mkdtempSync(join(tmpdir(), "quarantine-corrupt-"))
     try {
-      const path = quarantinePath(dir)
+      const path = join(dir, "lease-quarantine.json")
       for (const [why, body] of corrupt) {
         writeFileSync(path, body)
         const read = readLeaseQuarantineOutcome(path)
@@ -465,7 +470,7 @@ describe("readLeaseQuarantineOutcome maps corruption to unreadable, not absent",
   test("the same corruption past the TTL goes stale, so a bad file cannot brick the lane", () => {
     const dir = mkdtempSync(join(tmpdir(), "quarantine-corrupt-ttl-"))
     try {
-      const path = quarantinePath(dir)
+      const path = join(dir, "lease-quarantine.json")
       writeFileSync(path, "{ not json")
       const read = readLeaseQuarantineOutcome(path)
       if (read.kind !== "unreadable") throw new Error("unreachable")
@@ -504,7 +509,7 @@ describe("the keeper script the default spawner points at", () => {
    */
   test("the refusal is a DECISION, driven here rather than grepped for", () => {
     const missing = keeperSpawnRefusal("/nonexistent/lease-quarantine-keeper.ts", () => false)
-    expect(missing).toContain("refusing to write a record")
+    expect(missing).toContain("keeper script missing")
     expect(missing).toContain("/nonexistent/lease-quarantine-keeper.ts")
 
     // PAIRED CONTROL — the SHIPPED path must not refuse. This is the wiring
@@ -513,29 +518,53 @@ describe("the keeper script the default spawner points at", () => {
     expect(keeperSpawnRefusal()).toBeUndefined()
   })
 
-  test("the DEFAULT spawner refuses, without any arm replacing it", () => {
-    // Every other arm passes `spawnKeeper`, which is what left the production
-    // default unexercised. This one passes NO spawner, so the real
-    // `spawnDetachedKeeper` runs and its refusal branch is the thing under test.
+  /**
+   * ★ A missing keeper used to mean NO quarantine.
+   *
+   * The refusal threw and wrote nothing, on the claim that a keeperless record
+   * "holds the lane for the full TTL, which is worse than not quarantining at
+   * all". False: liveness is re-derived from the survivors on every read, so a
+   * keeperless record frees the lane the moment they exit. Refusing handed the
+   * next contender a lane with live survivors — measured by an audit.
+   */
+  test("the DEFAULT spawner with no keeper still writes a record that BLOCKS while survivors live", async () => {
     const dir = mkdtempSync(join(tmpdir(), "keeper-default-"))
     try {
-      const path = join(dir, "quarantine.json")
-      expect(() =>
-        quarantineLane({
-          path,
-          repositoryId: "owner/repo",
-          groups: [{ pgid: 4_242, leaderPid: 4_242, verdict: "ours", detail: "survivor" }],
-          keeperScriptPath: join(dir, "keeper-that-is-not-there.ts"),
-        }),
-      ).toThrow(/refusing to write a record/)
+      const identity = `keeperless/${process.pid}-${Date.now()}`
+      const env = { [LEASE_QUARANTINE_DIR_ENV]: dir }
+      const written = quarantineLane({
+        env,
+        repositoryId: identity,
+        groups: [{ pgid: 4_242, leaderPid: 4_242, verdict: "still-running", detail: "survivor" }],
+        keeperScriptPath: join(dir, "keeper-that-is-not-there.ts"),
+      })
+      expect(written.keeperPid).toBeNull()
+      expect(written.keeperRefusal).toContain("keeper script missing")
+      expect(readLeaseQuarantine(laneQuarantinePath(identity, dir))?.keeperPid).toBeNull()
 
-      // ...and NOTHING was written. A record whose keeper can never run holds
-      // the lane for the full TTL, which is worse than not quarantining at all.
-      expect(existsSync(path)).toBe(false)
+      await expect(
+        acquireTestShardLease({
+          identity,
+          env,
+          waitMs: 150,
+          pollMs: 10,
+          heartbeatMs: 0,
+          isGroupAlive: () => true,
+        }),
+      ).rejects.toThrow(/timed out/)
+      // PAIRED CONTROL — survivors gone, the same keeperless record frees the lane.
+      const granted = await acquireTestShardLease({
+        identity,
+        env,
+        waitMs: 2_000,
+        pollMs: 10,
+        isGroupAlive: () => false,
+      })
+      granted.release()
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
-  })
+  }, 20_000)
 })
 
 describe("the keeper", () => {
@@ -549,14 +578,18 @@ describe("the keeper", () => {
     expect(keeperTick(held(record()), "owner/repo", 2_000, alive())).toBe("release")
   })
 
-  test("DETACHES from a record that is not its own, instead of deleting it", () => {
+  test("never RELEASES a record naming another identity before that record's own ceiling", () => {
     // `release` deletes. A keeper that answered `release` on a foreign record
     // removed a live quarantine protecting somebody else's poisoned lane —
-    // measured end to end: owner blocked, foreign contender swept, owner then
-    // read `clear`.
-    expect(
-      keeperTick(held(record({ repositoryId: "other/repo" })), "owner/repo", 2_000, alive(4242)),
-    ).toBe("detach")
+    // measured end to end. The keeper now watches ITS slot, where such a record
+    // is misfiled rather than foreign, and it HOLDS: detaching would leave a
+    // misfiled record nobody releases, releasing would delete a live one.
+    const misfiled = record({ repositoryId: "other/repo" })
+    expect(keeperTick(held(misfiled), "owner/repo", 2_000, alive(4242))).toBe("hold")
+    // ...and only past the misfiled record's own ceiling does it let go.
+    expect(keeperTick(held(misfiled), "owner/repo", misfiled.expiresAtMs, alive(4242))).toBe(
+      "release",
+    )
   })
 
   test("an expired record is released; an ABSENT one is held, not released", () => {
@@ -593,7 +626,7 @@ describe("quarantine wiring", () => {
   test("the shard runner holds the lane instead of handing it on", () => {
     const runner = source("tools/dev/run-test-shards.ts")
     expect(runner).toContain("quarantineLane({")
-    expect(runner).toContain("quarantinePath: QUARANTINE_PATH")
+    expect(runner).toContain("legacyQuarantineCacheRoot: SHARED_CACHE_ROOT")
     // The write must happen BEFORE the release, or the kernel frees the port
     // into a window a contender can win.
     const nondrain = runner.indexOf("quarantineLane({")
@@ -652,10 +685,14 @@ describe("quarantine wiring", () => {
       "tools/dev/verification-campaign.ts",
     ])
 
+    // The gate now consults the slot UNCONDITIONALLY for the repository lane, so
+    // "passed a quarantine path" is no longer the question. What each owner must
+    // still pass is the LEGACY root: without it a live record written by an older
+    // checkout, into the old shared file, would be invisible during transition.
     for (const { file, call } of found) {
-      expect({ file, quarantineChecked: call.includes("quarantinePath") }).toEqual({
+      expect({ file, legacyRead: call.includes("legacyQuarantineCacheRoot") }).toEqual({
         file,
-        quarantineChecked: true,
+        legacyRead: true,
       })
     }
   })
@@ -681,9 +718,10 @@ describe("quarantine wiring", () => {
   test("a quarantined lane cannot be acquired, and a cleared one can", async () => {
     const dir = mkdtempSync(join(tmpdir(), "quarantine-acquire-"))
     try {
-      const path = quarantinePath(dir)
       // A unique identity, so the hashed port belongs to this test alone.
       const identity = `quarantine-test/${process.pid}-${Date.now()}`
+      const env = { [LEASE_QUARANTINE_DIR_ENV]: dir }
+      const path = laneQuarantinePath(identity, dir)
       // REAL timestamps: the fixture's synthetic 1_000 is decades in the past,
       // so the record read as expired and the lane was granted — the first
       // version of this test failed for that reason rather than for the one it
@@ -698,7 +736,7 @@ describe("quarantine wiring", () => {
       await expect(
         acquireTestShardLease({
           identity,
-          quarantinePath: path,
+          env,
           waitMs: 150,
           pollMs: 10,
           heartbeatMs: 0,
@@ -712,7 +750,7 @@ describe("quarantine wiring", () => {
       // stale record is cleared as a side effect and the lease is granted.
       const granted = await acquireTestShardLease({
         identity,
-        quarantinePath: path,
+        env,
         waitMs: 2_000,
         pollMs: 10,
         isGroupAlive: () => false,
@@ -808,4 +846,297 @@ describe("lane ownership names the key in both shapes", () => {
       lease.release()
     }
   })
+})
+
+/**
+ * ★ One slot per identity, on a root every copy of the repository shares.
+ *
+ * The record lived at `<git-common-dir>/quanta-verification-cache/lease-quarantine.json`:
+ * one file per git common-dir, while the LEASE is a port hashed from the committed
+ * identity and therefore shared by every clone on the host. An audit reproduced
+ * it with the real identity, cache-root and lease functions — two copies, one
+ * port (44934), two quarantine files, and the second copy acquired the lane over
+ * a live quarantined group of the first. The same shared leaf also let a second
+ * identity's write overwrite the first identity's record.
+ */
+describe("quarantine slots", () => {
+  const G = (pgid: number) => ({ pgid, leaderPid: pgid, verdict: "still-running", detail: "live" })
+  const withRoot = async (
+    fn: (root: string, env: Record<string, string>) => Promise<void> | void,
+  ) => {
+    const root = mkdtempSync(join(tmpdir(), "lane-slot-"))
+    try {
+      await fn(root, { [LEASE_QUARANTINE_DIR_ENV]: root })
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  }
+
+  test("two identities keep two slots, and the gate reads the one its writer used", async () => {
+    await withRoot(async (root, env) => {
+      const raw = `git@github.com:acme/slot-${process.pid}-${Date.now()}.git`
+      const other = `acme/other-${process.pid}-${Date.now()}`
+      quarantineLane({ repositoryId: raw, groups: [G(4242)], env, spawnKeeper: () => 7 })
+      quarantineLane({ repositoryId: other, groups: [G(5151)], env, spawnKeeper: () => 8 })
+      expect(readdirSync(root).filter((name) => name.endsWith(".json"))).toHaveLength(2)
+      expect(
+        readLeaseQuarantine(laneQuarantinePath(other, root))?.survivors.map((g) => g.pgid),
+      ).toEqual([5151])
+
+      // The RAW remote was written; the gate normalises — and still finds it.
+      const waits: string[] = []
+      await expect(
+        acquireTestShardLease({
+          identity: raw,
+          env,
+          waitMs: 150,
+          pollMs: 10,
+          heartbeatMs: 0,
+          isGroupAlive: (pgid) => pgid === 4242,
+          onQuarantineWait: (reason) => waits.push(reason),
+        }),
+      ).rejects.toThrow(/timed out/)
+      expect(waits.join(" ")).toContain("4242")
+    })
+  }, 20_000)
+
+  test("the leaf is a hash of the NORMALISED identity: no traversal, no collision", () => {
+    const ids = [
+      "owner/repo",
+      "owner:repo",
+      "owner_repo",
+      "repository-id:quanta-codeagent-v3",
+      "../../etc/passwd",
+      "a/b/../c",
+    ]
+    const paths = ids.map((id) => laneQuarantinePath(id, "/r"))
+    for (const path of paths) {
+      expect(dirname(path)).toBe("/r")
+      expect(basename(path)).toMatch(/^lease-quarantine-[0-9a-f]{32}\.json$/)
+    }
+    expect(new Set(paths).size).toBe(ids.length)
+    expect(laneQuarantinePath("git@github.com:acme/w.git", "/r")).toBe(
+      laneQuarantinePath("acme/w", "/r"),
+    )
+  })
+
+  test("the default root does not follow the checkout, HOME or TMPDIR", () => {
+    const a = leaseQuarantineRoot({ HOME: "/h1", TMPDIR: "/t1" })
+    const b = leaseQuarantineRoot({ HOME: "/h2", TMPDIR: "/t2" })
+    expect(a).toBe(b)
+    expect(a).not.toContain("quanta-verification-cache")
+    expect(() => leaseQuarantineRoot({ [LEASE_QUARANTINE_DIR_ENV]: "relative/dir" })).toThrow(
+      /absolute/,
+    )
+  })
+
+  test("TRANSITION — a live legacy record still blocks; a stranger's is never deleted", async () => {
+    await withRoot(async (root, env) => {
+      const cache = join(root, "cache")
+      const identity = `legacy/${process.pid}-${Date.now()}`
+      const now = Date.now()
+      writeLeaseQuarantine(
+        legacyQuarantinePath(cache),
+        record({ repositoryId: identity, createdAtMs: now, expiresAtMs: now + QUARANTINE_TTL_MS }),
+      )
+      await expect(
+        acquireTestShardLease({
+          identity,
+          env,
+          legacyQuarantineCacheRoot: cache,
+          waitMs: 150,
+          pollMs: 10,
+          heartbeatMs: 0,
+          isGroupAlive: () => true,
+        }),
+      ).rejects.toThrow(/timed out/)
+
+      writeLeaseQuarantine(
+        legacyQuarantinePath(cache),
+        record({
+          repositoryId: "someone/else",
+          createdAtMs: now,
+          expiresAtMs: now + QUARANTINE_TTL_MS,
+        }),
+      )
+      const before = readFileSync(legacyQuarantinePath(cache), "utf8")
+      const granted = await acquireTestShardLease({
+        identity,
+        env,
+        legacyQuarantineCacheRoot: cache,
+        waitMs: 2_000,
+        pollMs: 10,
+        isGroupAlive: () => true,
+      })
+      granted.release()
+      expect(readFileSync(legacyQuarantinePath(cache), "utf8")).toBe(before)
+    })
+  }, 20_000)
+
+  test("the legacy mirror serves old readers and never clobbers a record it does not own", async () => {
+    await withRoot((root, env) => {
+      const cache = join(root, "cache")
+      const identity = `mirror/${process.pid}`
+      writeLeaseQuarantine(legacyQuarantinePath(cache), record({ repositoryId: "someone/else" }))
+      const before = readFileSync(legacyQuarantinePath(cache), "utf8")
+      quarantineLane({
+        repositoryId: identity,
+        groups: [G(1)],
+        env,
+        legacyCacheRoot: cache,
+        spawnKeeper: () => 9,
+      })
+      expect(readFileSync(legacyQuarantinePath(cache), "utf8")).toBe(before)
+
+      rmSync(legacyQuarantinePath(cache))
+      quarantineLane({
+        repositoryId: identity,
+        groups: [G(1)],
+        env,
+        legacyCacheRoot: cache,
+        spawnKeeper: () => 9,
+      })
+      expect(readLeaseQuarantine(legacyQuarantinePath(cache))?.repositoryId).toBe(identity)
+      expect(readdirSync(cache).filter((name) => name.includes(".mirror-"))).toEqual([])
+    })
+  })
+
+  test("a record for another identity in OUR slot blocks until its own ceiling", () => {
+    const misfiled = record({
+      repositoryId: "other/repo",
+      createdAtMs: 1_000,
+      expiresAtMs: 1_000 + QUARANTINE_TTL_MS,
+    })
+    const read: LeaseQuarantineRead = { kind: "record", record: misfiled }
+    expect(
+      laneSlotVerdict({ read, identity: "owner/repo", nowMs: 2_000, isAlive: () => false }).kind,
+    ).toBe("blocked")
+    expect(
+      laneSlotVerdict({
+        read,
+        identity: "owner/repo",
+        nowMs: misfiled.expiresAtMs,
+        isAlive: () => false,
+      }).kind,
+    ).toBe("stale")
+  })
+
+  test("a second quarantine CARRIES the first one's live survivors and drops its dead ones", async () => {
+    await withRoot((root, env) => {
+      const identity = `merge/${process.pid}`
+      const path = laneQuarantinePath(identity, root)
+      quarantineLane({
+        repositoryId: identity,
+        groups: [G(111)],
+        env,
+        isAlive: () => true,
+        spawnKeeper: () => 1,
+      })
+      quarantineLane({
+        repositoryId: identity,
+        groups: [G(222)],
+        env,
+        isAlive: (p) => p === 111,
+        spawnKeeper: () => 2,
+      })
+      expect(readLeaseQuarantine(path)?.survivors.map((g) => g.pgid)).toEqual([222, 111])
+      quarantineLane({
+        repositoryId: identity,
+        groups: [G(333)],
+        env,
+        isAlive: () => false,
+        spawnKeeper: () => 3,
+      })
+      expect(readLeaseQuarantine(path)?.survivors.map((g) => g.pgid)).toEqual([333])
+    })
+  })
+
+  /**
+   * ★ The warning about releasing over live groups reached NOBODY.
+   *
+   * `quarantineVerdict` computed "STILL ALIVE … the ttl ceiling is releasing a
+   * lane whose processes are still running", and the gate discarded the reason
+   * and deleted the record in the same call. Measured by an audit: zero callback
+   * invocations, zero bytes on stdout/stderr, record gone.
+   */
+  test("an expired release over live groups is REPORTED, and its record is kept", async () => {
+    await withRoot(async (root, env) => {
+      const identity = `expired/${process.pid}-${Date.now()}`
+      const path = laneQuarantinePath(identity, root)
+      const past = Date.now() - QUARANTINE_TTL_MS - 5_000
+      writeLeaseQuarantine(
+        path,
+        record({
+          repositoryId: identity,
+          createdAtMs: past,
+          expiresAtMs: past + QUARANTINE_TTL_MS,
+        }),
+      )
+      const released: string[] = []
+      const lease = await acquireTestShardLease({
+        identity,
+        env,
+        waitMs: 2_000,
+        pollMs: 10,
+        isGroupAlive: () => true,
+        onQuarantineRelease: (reason) => released.push(reason),
+      })
+      lease.release()
+      expect(released.join(" ")).toContain("STILL ALIVE")
+      expect(existsSync(path)).toBe(false)
+      expect(existsSync(expiredQuarantinePath(path, record({ createdAtMs: past })))).toBe(true)
+    })
+  }, 20_000)
+
+  /**
+   * The DEFAULT spawner's success path: argv, `unref`, and the injected script.
+   * An audit's mutants swapping argv, deleting `unref()` (a real hang: the owner
+   * lives until the keeper exits) and spawning `KEEPER_SCRIPT_PATH` instead of
+   * the injected path all left every arm green.
+   */
+  test("the default spawner hands the keeper its slot and does not hold the owner open", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "keeper-argv-"))
+    const argvOut = join(dir, "argv.json")
+    const release = join(dir, "release")
+    const stub = join(dir, "stub-keeper.ts")
+    writeFileSync(
+      stub,
+      [
+        'import { existsSync, writeFileSync } from "node:fs"',
+        `writeFileSync(${JSON.stringify(argvOut)}, JSON.stringify(process.argv.slice(2)))`,
+        `while (!existsSync(${JSON.stringify(release)})) await Bun.sleep(20)`,
+      ].join("\n"),
+    )
+    const root = join(dir, "root")
+    const moduleUrl = join(import.meta.dir, "..", "..", "..", "tools", "dev", "lease-quarantine.ts")
+    try {
+      const owner = Bun.spawn(
+        [
+          process.execPath,
+          "-e",
+          [
+            `import { quarantineLane } from ${JSON.stringify(moduleUrl)}`,
+            "quarantineLane({",
+            '  repositoryId: "acme/argv",',
+            '  groups: [{ pgid: 4242, leaderPid: 4242, verdict: "still-running", detail: "x" }],',
+            `  env: { ${LEASE_QUARANTINE_DIR_ENV}: ${JSON.stringify(root)} },`,
+            `  keeperScriptPath: ${JSON.stringify(stub)},`,
+            "})",
+          ].join("\n"),
+        ],
+        { stdout: "ignore", stderr: "pipe" },
+      )
+      // The owner EXITS while the stub keeper is still waiting — without `unref`
+      // this await would last as long as the keeper does.
+      expect(await owner.exited).toBe(0)
+      for (let tries = 0; tries < 250 && !existsSync(argvOut); tries += 1) await Bun.sleep(20)
+      expect(JSON.parse(readFileSync(argvOut, "utf8"))).toEqual([
+        laneQuarantinePath("acme/argv", root),
+        "acme/argv",
+      ])
+    } finally {
+      writeFileSync(release, "")
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }, 20_000)
 })

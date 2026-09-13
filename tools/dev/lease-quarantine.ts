@@ -31,18 +31,28 @@
  * survivors have exited is stale no matter who is holding it.
  */
 
+import { createHash } from "node:crypto"
 import {
   existsSync,
+  linkSync,
+  lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
   renameSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs"
-import { dirname, join } from "node:path"
+import { dirname, isAbsolute, join } from "node:path"
+import { normalizeRepositoryIdentity } from "./repository-identity"
 
-export const LEASE_QUARANTINE_SCHEMA = "quanta.lease-quarantine.v1" as const
+/**
+ * v2 allows a record with NO keeper. v1 is still read: a record written by an
+ * older checkout must keep blocking the lane it was written for.
+ */
+export const LEASE_QUARANTINE_SCHEMA = "quanta.lease-quarantine.v2" as const
+const LEASE_QUARANTINE_SCHEMA_V1 = "quanta.lease-quarantine.v1"
 
 /** A process group the campaign could not account for. */
 export interface QuarantinedGroup {
@@ -59,10 +69,16 @@ export interface QuarantinedGroup {
 }
 
 export interface LeaseQuarantineRecord {
-  readonly schema: typeof LEASE_QUARANTINE_SCHEMA
+  readonly schema: typeof LEASE_QUARANTINE_SCHEMA | typeof LEASE_QUARANTINE_SCHEMA_V1
   readonly repositoryId: string
-  /** The process that promised to watch the survivors out. */
-  readonly keeperPid: number
+  /**
+   * The process that promised to watch the survivors out, or `null` when none
+   * could be started. A keeperless record still blocks exactly while its
+   * survivors live: liveness never came from the keeper.
+   */
+  readonly keeperPid: number | null
+  /** Why no keeper runs, when `keeperPid` is `null`. */
+  readonly keeperRefusal?: string
   readonly survivors: readonly QuarantinedGroup[]
   readonly createdAtMs: number
   /**
@@ -73,8 +89,76 @@ export interface LeaseQuarantineRecord {
   readonly expiresAtMs: number
 }
 
-export const quarantinePath = (cacheRoot: string): string =>
+/** Absolute directory override for the quarantine root. Tests use it; production does not. */
+export const LEASE_QUARANTINE_DIR_ENV = "QUANTA_LEASE_QUARANTINE_DIR"
+
+/**
+ * One directory per HOST USER, because the lane it protects is one port per host.
+ *
+ * # Why not the git common-dir, where it was
+ *
+ * The lease is a listener on a port hashed from the committed repository
+ * identity, so two CLONES of this repository share one lane — serialising
+ * repository copies is exactly why that identity was committed. The quarantine
+ * lived under each copy's git common-dir, so two clones shared the port and not
+ * the record. MEASURED by an audit with the real identity, cache-root and lease
+ * functions: the second copy acquired the lane (port 44934) while a quarantined
+ * group of the first was still alive, and the paired control reading the first
+ * copy's file was blocked.
+ *
+ * Not `$TMPDIR` or `$HOME`: shells and the test fence rewrite both, and a root
+ * that moves with the environment splits the lane again. A reboot empties /tmp
+ * and kills every survivor with it, so a record cannot outlive what it describes.
+ */
+export const leaseQuarantineRoot = (
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): string => {
+  const override = env[LEASE_QUARANTINE_DIR_ENV]
+  if (override !== undefined && override !== "") {
+    if (!isAbsolute(override)) {
+      throw new Error(`[quarantine] ${LEASE_QUARANTINE_DIR_ENV} must be absolute: "${override}"`)
+    }
+    return override
+  }
+  return join("/tmp", `quanta-lease-quarantine-${process.getuid?.() ?? "nouid"}`)
+}
+
+/**
+ * The slot for ONE identity. A hash, because identities carry `/` and `:`, and
+ * of the NORMALISED identity, so a writer holding the raw remote and a gate
+ * holding the normalised key meet at the same file.
+ *
+ * One file per git common-dir was shared by every identity that common-dir ever
+ * saw, and a second identity's write overwrote the first's record.
+ */
+export const laneQuarantinePath = (
+  identity: string,
+  root: string = leaseQuarantineRoot(),
+): string => {
+  const key = normalizeRepositoryIdentity(identity)
+  if (key === "") throw new Error("[quarantine] refusing a slot for an empty identity")
+  const digest = createHash("sha256").update(key).digest("hex").slice(0, 32)
+  return join(root, `lease-quarantine-${digest}.json`)
+}
+
+/**
+ * TRANSITION ONLY: the old shared leaf under the git common-dir. Read so a live
+ * record written by an older checkout still blocks, and mirrored for older
+ * readers. `quarantinePath` is gone rather than aliased, so an old call site
+ * fails typecheck instead of quietly keeping the shared leaf.
+ */
+export const legacyQuarantinePath = (cacheRoot: string): string =>
   join(cacheRoot, "lease-quarantine.json")
+
+/** `kill(-pgid, 0)`: existence only. EPERM means it exists and is not ours — still a hazard. */
+export const groupAlive = (pgid: number): boolean => {
+  try {
+    process.kill(-pgid, 0)
+    return true
+  } catch (error) {
+    return (error as { code?: string }).code === "EPERM"
+  }
+}
 
 const isCount = (value: unknown): value is number =>
   typeof value === "number" && Number.isInteger(value)
@@ -95,9 +179,11 @@ const isGroup = (value: unknown): value is QuarantinedGroup => {
 export const parseLeaseQuarantine = (candidate: unknown): LeaseQuarantineRecord | undefined => {
   if (typeof candidate !== "object" || candidate === null) return undefined
   const row = candidate as Partial<LeaseQuarantineRecord>
-  if (row.schema !== LEASE_QUARANTINE_SCHEMA) return undefined
+  if (row.schema !== LEASE_QUARANTINE_SCHEMA && row.schema !== LEASE_QUARANTINE_SCHEMA_V1)
+    return undefined
   if (typeof row.repositoryId !== "string" || row.repositoryId === "") return undefined
-  if (!isCount(row.keeperPid) || (row.keeperPid as number) <= 0) return undefined
+  const keeperless = row.schema === LEASE_QUARANTINE_SCHEMA && row.keeperPid === null
+  if (!keeperless && (!isCount(row.keeperPid) || (row.keeperPid as number) <= 0)) return undefined
   if (!isCount(row.createdAtMs) || !isCount(row.expiresAtMs)) return undefined
   if (!Array.isArray(row.survivors) || row.survivors.length === 0) return undefined
   if (!row.survivors.every(isGroup)) return undefined
@@ -188,16 +274,17 @@ export const quarantineVerdict = (
     // process groups with nothing in any receipt to say so.
     //
     // Still `stale`; the ceiling still wins. What changes is that the release
-    // now names the groups it is releasing over, so the campaign receipt that
-    // records this verdict records the risk with it.
+    // names the groups it is releasing over — and, since an audit showed nothing
+    // printed or kept that reason, the gate now hands it to `onQuarantineRelease`
+    // and preserves an expired record over live groups instead of deleting it.
     const expiredForMs = nowMs - record.expiresAtMs
     return {
       kind: "stale",
       reason:
         alive.length === 0
-          ? `quarantine expired ${expiredForMs}ms ago (keeper pid ${record.keeperPid}); ` +
+          ? `quarantine expired ${expiredForMs}ms ago (keeper pid ${record.keeperPid ?? "none"}); ` +
             "every quarantined group has exited"
-          : `quarantine expired ${expiredForMs}ms ago (keeper pid ${record.keeperPid}) with ` +
+          : `quarantine expired ${expiredForMs}ms ago (keeper pid ${record.keeperPid ?? "none"}) with ` +
             `${alive.length} of ${record.survivors.length} group(s) STILL ALIVE ` +
             `(${alive.join(", ")}) — the ttl ceiling is releasing a lane whose processes are ` +
             "still running",
@@ -209,7 +296,7 @@ export const quarantineVerdict = (
   return {
     kind: "blocked",
     reason:
-      `lane quarantined by pid ${record.keeperPid}: ` +
+      `lane quarantined by ${record.keeperPid === null ? "a keeperless record" : `pid ${record.keeperPid}`}: ` +
       `${alive.length} of ${record.survivors.length} group(s) still alive ` +
       `(${alive.join(", ")})`,
     alive,
@@ -218,7 +305,7 @@ export const quarantineVerdict = (
 
 export const writeLeaseQuarantine = (path: string, record: LeaseQuarantineRecord): void => {
   mkdirSync(dirname(path), { recursive: true })
-  const temporary = `${path}.tmp-${record.keeperPid}`
+  const temporary = `${path}.tmp-${process.pid}`
   writeFileSync(temporary, `${JSON.stringify(record, null, 2)}\n`)
   renameSync(temporary, path)
 }
@@ -270,7 +357,7 @@ export const readLeaseQuarantineOutcome = (path: string): LeaseQuarantineRead =>
   if (record === undefined) {
     return {
       kind: "unreadable",
-      reason: "json does not satisfy quanta.lease-quarantine.v1",
+      reason: "json does not satisfy quanta.lease-quarantine.v1 or v2",
       writtenAtMs: mtimeOf(path),
     }
   }
@@ -306,16 +393,27 @@ export const clearLeaseQuarantine = (path: string): void => {
 export const QUARANTINE_TTL_MS = 30 * 60_000
 
 export interface QuarantineHandoffInput {
-  readonly path: string
   readonly repositoryId: string
   readonly groups: readonly QuarantinedGroup[]
-  readonly nowMs?: number
-  /** Injected so the handoff is testable without detaching a real process. */
-  readonly spawnKeeper?: (path: string, repositoryId: string) => number
   /**
-   * Injected so an arm can drive the REAL default spawner's refusal without
-   * moving a tracked file. Every other arm replaces the spawner entirely, which
-   * is what left the default untested.
+   * No `path`: a call site cannot pick a location. The slot comes from the
+   * identity and the root; tests move the root through this env only.
+   */
+  readonly env?: Readonly<Record<string, string | undefined>>
+  /** The git common-dir cache, for the transition mirror older checkouts read. */
+  readonly legacyCacheRoot?: string
+  readonly nowMs?: number
+  readonly isAlive?: (pgid: number) => boolean
+  /** Injected so the handoff is testable without detaching a real process. */
+  readonly spawnKeeper?: (
+    path: string,
+    repositoryId: string,
+    legacyPath: string | undefined,
+  ) => number
+  /**
+   * Injected so an arm can drive the REAL default spawner without moving a
+   * tracked file. Every other arm replaces the spawner entirely, which is what
+   * left the default untested.
    */
   readonly keeperScriptPath?: string
   readonly log?: (line: string) => void
@@ -325,47 +423,118 @@ export interface QuarantineHandoffInput {
 export const KEEPER_SCRIPT_PATH = join(import.meta.dir, "lease-quarantine-keeper.ts")
 
 /**
- * Why the default spawner must refuse, or `undefined` when it may spawn.
+ * Why the default spawner cannot start a keeper, or `undefined` when it can.
  *
- * # Why this is a function and not an `if`
- *
- * It was an `if` inside `spawnDetachedKeeper`, and every arm injects
- * `spawnKeeper` while the detach arm spawns the script directly — so the
- * production default was exercised by nothing. A mutation audit renamed the
- * script to a path that does not exist and the whole suite stayed green. A
- * missing keeper means no record is ever released early and every quarantine
- * waits out its full 30-minute TTL: the exact failure the detach work claimed to
- * fix.
- *
- * The arm added afterwards was `expect(source).toContain("refusing to write a
- * record")` — a SOURCE-STRING guard, which stays green when the check is deleted
- * and the sentence left behind in a comment. That is the defect class this
- * campaign exists to remove, reintroduced in the fix for it. Importable and
- * injectable, so the arms drive the decision instead of grepping for it.
+ * A decision an arm drives, not an `if`: the arm that preceded it was
+ * `expect(source).toContain("refusing to write a record")`, which survives the
+ * check being deleted and the sentence left in a comment.
  */
 export const keeperSpawnRefusal = (
   scriptPath: string = KEEPER_SCRIPT_PATH,
   exists: (path: string) => boolean = existsSync,
 ): string | undefined =>
-  exists(scriptPath)
-    ? undefined
-    : `[quarantine] keeper script missing at ${scriptPath}; refusing to write a record ` +
-      "whose keeper can never run"
+  exists(scriptPath) ? undefined : `[quarantine] keeper script missing at ${scriptPath}`
 
+/** Detached keeper; its stderr goes to a log beside the slot, not to nowhere. */
 const spawnDetachedKeeper = (
   path: string,
   repositoryId: string,
+  legacyPath: string | undefined,
   scriptPath: string = KEEPER_SCRIPT_PATH,
 ): number => {
   const refusal = keeperSpawnRefusal(scriptPath)
   if (refusal !== undefined) throw new Error(refusal)
-  const child = Bun.spawn(["bun", scriptPath, path, repositoryId], {
-    stdin: "ignore",
-    stdout: "ignore",
-    stderr: "ignore",
-  })
+  const log = openSync(`${path}.keeper.log`, "a")
+  const child = Bun.spawn(
+    ["bun", scriptPath, path, repositoryId, ...(legacyPath === undefined ? [] : [legacyPath])],
+    {
+      stdin: "ignore",
+      stdout: "ignore",
+      stderr: log,
+    },
+  )
   child.unref()
   return child.pid
+}
+
+/** A private directory we own, not a symlink a stranger planted in /tmp. */
+const ensurePrivateDirectory = (directory: string): void => {
+  mkdirSync(directory, { recursive: true, mode: 0o700 })
+  const stat = lstatSync(directory)
+  const uid = process.getuid?.()
+  if (!stat.isDirectory() || stat.isSymbolicLink() || (uid !== undefined && stat.uid !== uid)) {
+    throw new Error(
+      `[quarantine] refusing ${directory}: not a private directory owned by uid ${uid}`,
+    )
+  }
+}
+
+/**
+ * What a record in OUR slot naming another identity means.
+ *
+ * With one slot per identity it is not a stranger's lane — it is MISFILED:
+ * something wrote to our slot. Fail closed until its own ceiling. `foreign` keeps
+ * its old meaning only for the shared legacy file, where two identities
+ * genuinely coexisted.
+ */
+export const laneSlotVerdict = (input: {
+  readonly read: LeaseQuarantineRead
+  readonly identity: string
+  readonly nowMs: number
+  readonly isAlive: (pgid: number) => boolean
+}): QuarantineVerdict => {
+  const key = normalizeRepositoryIdentity(input.identity)
+  const verdict = quarantineVerdict({
+    read: input.read,
+    repositoryId: key,
+    nowMs: input.nowMs,
+    isAlive: input.isAlive,
+  })
+  if (verdict.kind !== "foreign" || input.read.kind !== "record") return verdict
+  const record = input.read.record
+  return input.nowMs >= record.expiresAtMs
+    ? {
+        kind: "stale",
+        reason: `misfiled record for "${record.repositoryId}" in the slot for "${key}", expired`,
+      }
+    : {
+        kind: "blocked",
+        alive: [],
+        reason: `misfiled record for "${record.repositoryId}" in the slot for "${key}" until ${record.expiresAtMs}`,
+      }
+}
+
+/** Where an expired record over LIVE groups is kept instead of being deleted. */
+export const expiredQuarantinePath = (path: string, record: LeaseQuarantineRecord): string =>
+  `${path}.expired-${record.createdAtMs}.json`
+
+/** Old checkouts read only the legacy file. Write it for them, never over a record we do not own. */
+const mirrorLegacyNoClobber = (
+  legacy: string,
+  record: LeaseQuarantineRecord,
+  log: ((line: string) => void) | undefined,
+): void => {
+  mkdirSync(dirname(legacy), { recursive: true })
+  const temporary = `${legacy}.mirror-${process.pid}`
+  writeFileSync(temporary, `${JSON.stringify(record, null, 2)}\n`)
+  try {
+    try {
+      linkSync(temporary, legacy)
+      return
+    } catch (error) {
+      if ((error as { code?: string }).code !== "EEXIST") throw error
+    }
+    const held = readLeaseQuarantineOutcome(legacy)
+    if (held.kind === "record" && held.record.repositoryId === record.repositoryId) {
+      renameSync(temporary, legacy)
+      return
+    }
+    log?.(
+      `[quarantine] legacy mirror left untouched: it holds ${held.kind === "record" ? `"${held.record.repositoryId}"` : held.kind}\n`,
+    )
+  } finally {
+    rmSync(temporary, { force: true })
+  }
 }
 
 /**
@@ -373,30 +542,63 @@ const spawnDetachedKeeper = (
  *
  * Written BEFORE the caller releases its lease, because the kernel frees the
  * port the instant this process exits and a record written afterwards has a
- * window a contender can win. Returns the record so the caller can put the
- * survivors, their identity verdicts and the keeper's pid in its receipt —
- * "refusing to bless this run" with no forensics is how these end up
- * unattributable.
+ * window a contender can win.
+ *
+ * # A missing keeper still writes the record
+ *
+ * It refused, on the claim that a keeperless record "holds the lane for the full
+ * TTL, which is worse than not quarantining at all". That is false: liveness is
+ * re-derived from the survivors on every read, so a keeperless record frees the
+ * lane the moment its survivors exit. Refusing turned "keeper missing" into NO
+ * quarantine, and the next contender took a lane with live survivors — measured.
+ *
+ * # Our own live survivors are merged, not overwritten
+ *
+ * The runner and the campaign wrapper can both fail to drain in one campaign.
+ * Each wrote a fresh record, and the second erased the first one's groups.
  */
 export const quarantineLane = (input: QuarantineHandoffInput): LeaseQuarantineRecord => {
   const nowMs = input.nowMs ?? Date.now()
-  const keeperPid =
-    input.spawnKeeper === undefined
-      ? spawnDetachedKeeper(input.path, input.repositoryId, input.keeperScriptPath)
-      : input.spawnKeeper(input.path, input.repositoryId)
+  const key = normalizeRepositoryIdentity(input.repositoryId)
+  const path = laneQuarantinePath(key, leaseQuarantineRoot(input.env))
+  const legacyPath =
+    input.legacyCacheRoot === undefined ? undefined : legacyQuarantinePath(input.legacyCacheRoot)
+  ensurePrivateDirectory(dirname(path))
+  let keeperPid: number | null = null
+  let keeperRefusal: string | undefined
+  try {
+    keeperPid =
+      input.spawnKeeper === undefined
+        ? spawnDetachedKeeper(path, key, legacyPath, input.keeperScriptPath)
+        : input.spawnKeeper(path, key, legacyPath)
+  } catch (error) {
+    keeperRefusal = error instanceof Error ? error.message : String(error)
+  }
+  const isAlive = input.isAlive ?? groupAlive
+  const existing = readLeaseQuarantineOutcome(path)
+  const carried =
+    existing.kind === "record" && existing.record.repositoryId === key
+      ? existing.record.survivors.filter(
+          (group) =>
+            isAlive(group.pgid) && !input.groups.some((fresh) => fresh.pgid === group.pgid),
+        )
+      : []
   const record: LeaseQuarantineRecord = {
     schema: LEASE_QUARANTINE_SCHEMA,
-    repositoryId: input.repositoryId,
+    repositoryId: key,
     keeperPid,
-    survivors: input.groups,
+    ...(keeperRefusal === undefined ? {} : { keeperRefusal }),
+    survivors: [...input.groups, ...carried],
     createdAtMs: nowMs,
     expiresAtMs: nowMs + QUARANTINE_TTL_MS,
   }
-  writeLeaseQuarantine(input.path, record)
+  writeLeaseQuarantine(path, record)
+  if (legacyPath !== undefined) mirrorLegacyNoClobber(legacyPath, record, input.log)
   input.log?.(
-    `[quarantine] lane held for ${input.repositoryId}: ` +
-      `${input.groups.length} group(s) [${input.groups.map((g) => `${g.pgid}:${g.verdict}`).join(", ")}] ` +
-      `keeper=${keeperPid} ttl=${QUARANTINE_TTL_MS}ms\n`,
+    `[quarantine] lane held for ${key} at ${path}: ${record.survivors.length} group(s) ` +
+      `[${record.survivors.map((g) => `${g.pgid}:${g.verdict}`).join(", ")}] ` +
+      `${keeperPid === null ? `NO KEEPER (${keeperRefusal ?? "unknown"})` : `keeper=${keeperPid}`} ` +
+      `ttl=${QUARANTINE_TTL_MS}ms\n`,
   )
   return record
 }

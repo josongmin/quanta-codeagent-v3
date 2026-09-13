@@ -26,7 +26,7 @@ import {
   failureRecordsFromJunit,
   writeFailureAttemptArtifact,
 } from "./failure-attempt-producer"
-import { quarantineLane, quarantinePath } from "./lease-quarantine"
+import { quarantineLane } from "./lease-quarantine"
 import { mintableScanReachAuthority } from "./scan-reach-authority"
 import {
   describeWatchdogKill,
@@ -128,7 +128,6 @@ const SCAN_REACH_RECEIPT = join(REPO_ROOT, ".cache", "scan-reach-receipt.json")
 // Shard receipts and timings live in the git-common-dir cache: keyed by exact
 // HEAD + file content + toolchain, a green from any worktree serves them all.
 const SHARED_CACHE_ROOT = sharedVerificationCacheRoot(REPO_ROOT)
-const QUARANTINE_PATH = quarantinePath(SHARED_CACHE_ROOT)
 const SHARD_CACHE_ROOT = join(SHARED_CACHE_ROOT, "test-shards", "v3")
 const TIMING_STORE = join(SHARED_CACHE_ROOT, "test-timings-v2.json")
 
@@ -1344,8 +1343,10 @@ const main = async (): Promise<void> => {
   } else {
     lease = await acquireTestShardLease({
       identity: ownership.acquireIdentity,
-      quarantinePath: QUARANTINE_PATH,
+      legacyQuarantineCacheRoot: SHARED_CACHE_ROOT,
       onQuarantineWait: (reason) => process.stdout.write(`[test:shards] WAIT ${reason}\n`),
+      onQuarantineRelease: (reason) =>
+        process.stdout.write(`[test:shards] QUARANTINE RELEASED ${reason}\n`),
       onWait: (port, elapsedMs) =>
         process.stdout.write(
           `[test:shards] WAIT repository lease port=${port} elapsed=${Math.round(elapsedMs / 1_000)}s; ` +
@@ -1384,7 +1385,7 @@ const main = async (): Promise<void> => {
         try {
           if (outcome.groups.length > 0) {
             quarantineLane({
-              path: QUARANTINE_PATH,
+              legacyCacheRoot: SHARED_CACHE_ROOT,
               repositoryId: leaseIdentity,
               groups: outcome.groups,
               log: (line) => process.stderr.write(line),
@@ -1656,7 +1657,7 @@ const main = async (): Promise<void> => {
         // best-effort; the verdict and the release are not.
         try {
           quarantineLane({
-            path: QUARANTINE_PATH,
+            legacyCacheRoot: SHARED_CACHE_ROOT,
             repositoryId: leaseIdentity,
             groups: drain.groups,
             log: (line) => process.stderr.write(line),
