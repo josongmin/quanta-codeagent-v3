@@ -19,9 +19,17 @@
  *   Symbol-level, SCOPED TO FILES THE MERGE TOUCHED. For merge M with parents
  *   P1..Pn, for each `.ts` (non-`.test.ts`, non-`.d.ts`) path in
  *   `git diff --name-only <parent> M`, extract exported symbol NAMES from
- *   `<parent>:<file>` and from `M:<file>`. A loss is a name present in a
+ *   `<parent>:<file>` and from `M:<file>`. A candidate is a name present in a
  *   parent's set and absent from the merge's. A file the merge deleted
  *   contributes ALL of its parent exports.
+ *
+ *   A candidate is NOT a loss when the merge only TOOK another parent's file: the
+ *   parent that still has the name left that file byte-identical to the
+ *   merge-base, and the merge's file is byte-identical to a parent that lacks it.
+ *   Those are reported as `trivial`. The incident is defined by the base ("the
+ *   merge-base LACKED those files"), and a detector that never read the base
+ *   reported every rename merged across lines as a loss — see
+ *   {@link isTrivialOneSidedChange} for the measurement.
  *
  * That shape separates the real case from controls. RE-MEASURE, do not trust
  * this table — it is a transcript, and history moves under it:
@@ -92,6 +100,12 @@ export interface GitReadPort {
    * --merges -n N` limits how many merges are printed, not how far it walks.
    */
   readonly listMerges: (rev: string, maxMerges: number) => readonly string[]
+  /**
+   * The common ancestor a 3-way merge of `parents` compares against
+   * (`git merge-base --octopus`). `undefined` when they share no history, in which
+   * case nothing can be proven trivial and every loss stays reported.
+   */
+  readonly mergeBase: (parents: readonly string[]) => string | undefined
 }
 
 const git = (args: readonly string[], cwd: string): string => {
@@ -175,6 +189,21 @@ export const createGitReadPort = (cwd: string = REPO_ROOT): GitReadPort => ({
       .split("\0")
       .filter((l) => l.length > 0),
   readFiles: (sha, paths) => catFileBatch(cwd, sha, paths),
+  mergeBase: (parents) => {
+    const res = spawnSync("git", ["merge-base", "--octopus", ...parents], {
+      cwd,
+      encoding: "utf8",
+    })
+    // Exit 1 is git's "no common ancestor" answer. Anything else is a failure to
+    // ask, and it is reported rather than read as "no base" — which would merely
+    // disable the trivial-merge exemption, but silently.
+    if (res.status === 1) return undefined
+    if (res.status !== 0) {
+      throw new Error(`git merge-base --octopus failed (${res.status}): ${res.stderr ?? ""}`)
+    }
+    const base = (res.stdout ?? "").trim()
+    return base === "" ? undefined : base
+  },
   listMerges: (rev, maxMerges) =>
     git(["log", "--merges", "--format=%H", "-n", String(maxMerges), rev], cwd)
       .split("\n")
@@ -280,6 +309,15 @@ export interface MergeScan {
   /** Losses the commit message named. Deliberate removal, on the record. */
   readonly excused: readonly SymbolLoss[]
   /**
+   * Symbols absent from the merge only because the merge TRIVIALLY took another
+   * parent's file: the parent that still had the symbol never changed that file
+   * since the merge-base, and the merge's file is byte-identical to a parent that
+   * lacks it. The deletion was authored in an ordinary commit on the other line of
+   * history, where this detector — scoped to merges — has nothing to say. Reported,
+   * never hidden: see {@link isTrivialOneSidedChange}.
+   */
+  readonly trivial: readonly SymbolLoss[]
+  /**
    * How many (parent, file) pairs were actually opened and parsed. The
    * anti-vacuity floor: a scan that examined 0 pairs found 0 losses for free,
    * and must never read as a pass.
@@ -348,15 +386,51 @@ const mergeSideExports = (
 }
 
 /**
- * The whole decision procedure, as a pure function of the port.
+ * Did the merge merely TAKE another parent's version of `file`, with the losing
+ * parent never having touched it?
  *
- * A non-merge commit (fewer than 2 parents) scans to an empty, zero-examined
- * result: this detector has nothing to say about linear history.
+ * WHY THIS EXISTS. The incident this detector is for is defined by the merge-base:
+ * "the merge-base LACKED those files and one parent ADDED them, so a plain 3-way
+ * merge would have KEPT them". The first version never read the base. It compared
+ * each parent to the merge, so a symbol one line of history deleted in an ordinary
+ * commit read as LOST relative to the other parent, which simply had not changed
+ * the file. MEASURED on this repository's own history: all five losses reported for
+ * the three `Merge branch 'main' into codex/truth-guard-hardening` merges
+ * (`cc6a58d30`, `5cf84a2ca`, `3b69c9704`) have exactly this shape — the base has the
+ * symbol, the keeping parent's file is byte-identical to the base, and the merge's
+ * file is byte-identical to the other parent, where a normal commit renamed or
+ * removed it. Git did the only thing a 3-way merge can do.
+ *
+ * WHAT IT DOES NOT EXCUSE, each by construction:
+ *  - the incident: a parent that ADDED the file differs from a base that lacks it;
+ *  - a symbol dropped from a file BOTH sides changed: the keeping parent differs
+ *    from the base;
+ *  - an "evil merge" that edits a file neither parent changed: no parent's file
+ *    equals the merge's;
+ *  - any merge whose parents share no base: nothing is compared, nothing excused.
  */
+export const isTrivialOneSidedChange = (
+  file: string,
+  losingParent: string,
+  parents: readonly string[],
+  contents: {
+    readonly base: ReadonlyMap<string, string | null> | undefined
+    readonly merge: ReadonlyMap<string, string | null>
+    readonly byParent: ReadonlyMap<string, ReadonlyMap<string, string | null>>
+  },
+): boolean => {
+  if (contents.base === undefined) return false
+  const at = (m: ReadonlyMap<string, string | null> | undefined): string | null =>
+    m?.get(file) ?? null
+  if (at(contents.byParent.get(losingParent)) !== at(contents.base)) return false
+  const merged = at(contents.merge)
+  return parents.some((q) => q !== losingParent && at(contents.byParent.get(q)) === merged)
+}
+
 export const scanMerge = (sha: string, port: GitReadPort): MergeScan => {
   const parents = port.parents(sha)
   if (parents.length < 2) {
-    return { sha, parents, subject: "", losses: [], excused: [], filesExamined: 0 }
+    return { sha, parents, subject: "", losses: [], excused: [], trivial: [], filesExamined: 0 }
   }
   const message = port.message(sha)
   const subject = message.split("\n")[0]?.trim() ?? ""
@@ -376,9 +450,21 @@ export const scanMerge = (sha: string, port: GitReadPort): MergeScan => {
       found,
     )
   }
-  const ambiguous = ambiguousBasenamesOf(found)
-  const excused = found.filter((l) => isExcusedByMessage(message, l, ambiguous))
-  const losses = found.filter((l) => !isExcusedByMessage(message, l, ambiguous))
+
+  // Only merges that report something pay for the base and the extra reads.
+  const base = found.length > 0 ? port.mergeBase(parents) : undefined
+  const lossPaths = [...new Set(found.map((l) => l.file))]
+  const contents = {
+    base: base === undefined ? undefined : port.readFiles(base, lossPaths),
+    merge: port.readFiles(sha, lossPaths),
+    byParent: new Map(parents.map((p) => [p, port.readFiles(p, lossPaths)])),
+  }
+  const trivial = found.filter((l) => isTrivialOneSidedChange(l.file, l.parent, parents, contents))
+  const substantive = found.filter((l) => !trivial.includes(l))
+
+  const ambiguous = ambiguousBasenamesOf(substantive)
+  const excused = substantive.filter((l) => isExcusedByMessage(message, l, ambiguous))
+  const losses = substantive.filter((l) => !isExcusedByMessage(message, l, ambiguous))
 
   return {
     sha,
@@ -386,6 +472,7 @@ export const scanMerge = (sha: string, port: GitReadPort): MergeScan => {
     subject,
     losses: sortLosses(losses),
     excused: sortLosses(excused),
+    trivial: sortLosses(trivial),
     filesExamined,
   }
 }
@@ -402,11 +489,20 @@ export const DEFAULT_MAX_MERGES = 200
  * How many of the newest merges the ratchet enforces. Bounded so the unit test
  * stays fast (the full ~70-merge history is a ~30s scan).
  *
- * 14 is not arbitrary: merges #2..#14 newest-first are ALL clean at 0 losses, so
- * this window is the largest one whose only dirty member is the recorded
- * incident. Widening it past 14 pulls in `deeaa91da` and the `aug02-integration`
- * chain, which carry real (small) historical losses and would each need their
- * own written justification rather than being waved through.
+ * WHY 14, CORRECTED. This used to say widening past 14 "pulls in `deeaa91da` and
+ * the `aug02-integration` chain, which carry real (small) historical losses". They
+ * did not. Every one of those losses — 681 across 90 of the 91 reachable merges —
+ * was a trivial one-sided change the pre-3-way detector could not tell from a loss
+ * (see {@link isTrivialOneSidedChange}). MEASURED with the 3-way rule, at any
+ * window from 14 to the full 91, the only unexcused loss is the grandfathered
+ * incident.
+ *
+ * 14 stays for COST, not cleanliness. A merge is enforced while it is among the
+ * newest 14, which includes the moment it lands, and history below the window is
+ * immutable, so re-scanning it catches nothing new. Measured scan time at load ~15:
+ * 14 merges 2.4s, 40 merges 7.4s, 91 merges 19-23s. Regressions of the DETECTOR
+ * itself are what a wider window would catch, and the synthetic cases plus the
+ * incident reference already pin those.
  */
 export const ENFORCED_MERGE_WINDOW = 14
 
@@ -473,7 +569,7 @@ export const scanMergeWindow = (
 
 /** One-line rendering of a scan, used by the CLI and by the ratchet's failure text. */
 export const formatMergeScan = (scan: MergeScan): string => {
-  const head = `${scan.sha.slice(0, 9)}  lost=${scan.losses.length}  excused=${scan.excused.length}  files=${scan.filesExamined}  ${scan.subject}`
+  const head = `${scan.sha.slice(0, 9)}  lost=${scan.losses.length}  excused=${scan.excused.length}  trivial=${scan.trivial.length}  files=${scan.filesExamined}  ${scan.subject}`
   const detail = scan.losses.map(
     (l) => `    - ${l.file}: ${l.symbol}  (kept in ${l.parent.slice(0, 9)})`,
   )

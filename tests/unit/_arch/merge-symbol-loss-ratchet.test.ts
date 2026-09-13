@@ -30,7 +30,6 @@ import {
   ENFORCED_MERGE_WINDOW,
   extractExportedSymbols,
   formatMergeScan,
-  type GitReadPort,
   GRANDFATHERED_MERGES,
   isExcusedByMessage,
   isGrandfathered,
@@ -39,36 +38,13 @@ import {
   scanMerge,
   scanMergeWindow,
 } from "../../../tools/dev/merge-symbol-loss"
+import { fakeMergeGitPort } from "../_shared/fake-merge-git-port"
 
 // ---------------------------------------------------------------------------
 // A synthetic repository. Two parents, one merge, contents we choose.
 // ---------------------------------------------------------------------------
 
-interface FakeCommit {
-  readonly parents: readonly string[]
-  readonly message: string
-  readonly files: Readonly<Record<string, string>>
-}
-
-const fakePort = (commits: Readonly<Record<string, FakeCommit>>): GitReadPort => {
-  const at = (sha: string): FakeCommit => {
-    const c = commits[sha]
-    if (c === undefined) throw new Error(`fake port: unknown sha ${sha}`)
-    return c
-  }
-  return {
-    parents: (sha) => at(sha).parents,
-    message: (sha) => at(sha).message,
-    changedFiles: (from, to) => {
-      const a = at(from).files
-      const b = at(to).files
-      const paths = new Set([...Object.keys(a), ...Object.keys(b)])
-      return [...paths].filter((p) => a[p] !== b[p]).sort()
-    },
-    readFiles: (sha, paths) => new Map(paths.map((p) => [p, at(sha).files[p] ?? null])),
-    listMerges: () => Object.keys(commits).filter((sha) => at(sha).parents.length >= 2),
-  }
-}
+const fakePort = fakeMergeGitPort
 
 /** Shared history both lanes inherit from the merge-base. */
 const LANE_SHARED = `
@@ -187,6 +163,134 @@ export type BudgetLimitSource = "product" | "user"
     const scan = scanMerge("P1", port)
     expect(scan.losses).toEqual([])
     expect(scan.filesExamined).toBe(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The 3-way rule — a merge that TOOK another parent's file is not a loss
+// ---------------------------------------------------------------------------
+
+/**
+ * The first version compared each parent to the merge and never read the base, so a
+ * symbol one line of history deleted in an ORDINARY commit read as lost relative to
+ * a parent that had simply not touched the file. Measured on this repository: every
+ * reported loss in 90 of 91 merges had that shape — 681 of them — and the only merge
+ * that did not was the recorded incident. These cases pin both halves: the trivial
+ * shape is reported as `trivial`, and every shape that is NOT trivial stays a loss.
+ */
+describe("merge symbol-loss detector — trivial one-sided change vs real loss", () => {
+  const SHARED = "export const keep = 1\nexport const renamedAway = 2\n"
+  const RENAMED = "export const keep = 1\nexport const renamedTo = 2\n"
+  const PATH = "src/lane/shared.ts"
+  const OTHER = "src/lane/other.ts"
+
+  test("a rename on one line, merged into a line that never touched the file, is TRIVIAL", () => {
+    // Exactly the shape of `5cf84a2ca`: P1 renamed in its own commit, P2 left the
+    // file at the base, and the merge took P1's file byte for byte.
+    const scan = scanMerge(
+      "M",
+      fakePort({
+        BASE: {
+          parents: [],
+          message: "base",
+          files: { [PATH]: SHARED, [OTHER]: "export const o = 1\n" },
+        },
+        P1: {
+          parents: ["BASE"],
+          message: "rename",
+          files: { [PATH]: RENAMED, [OTHER]: "export const o = 1\n" },
+        },
+        P2: {
+          parents: ["BASE"],
+          message: "unrelated",
+          files: { [PATH]: SHARED, [OTHER]: "export const o = 2\n" },
+        },
+        M: {
+          parents: ["P1", "P2"],
+          message: "Merge branch",
+          files: { [PATH]: RENAMED, [OTHER]: "export const o = 2\n" },
+        },
+      }),
+    )
+    expect(scan.losses).toEqual([])
+    expect(scan.trivial.map((l) => `${l.file}#${l.symbol}@${l.parent}`)).toEqual([
+      "src/lane/shared.ts#renamedAway@P2",
+    ])
+    // Reported, not hidden.
+    expect(formatMergeScan(scan)).toContain("trivial=1")
+  })
+
+  test("an EVIL merge — a file neither parent changed, edited by the merge — is a LOSS", () => {
+    const scan = scanMerge(
+      "M",
+      fakePort({
+        BASE: {
+          parents: [],
+          message: "base",
+          files: { [PATH]: SHARED, [OTHER]: "export const o = 1\n" },
+        },
+        P1: {
+          parents: ["BASE"],
+          message: "a",
+          files: { [PATH]: SHARED, [OTHER]: "export const o = 2\n" },
+        },
+        P2: {
+          parents: ["BASE"],
+          message: "b",
+          files: { [PATH]: SHARED, [OTHER]: "export const o = 3\n" },
+        },
+        M: {
+          parents: ["P1", "P2"],
+          message: "merge",
+          files: { [PATH]: RENAMED, [OTHER]: "export const o = 3\n" },
+        },
+      }),
+    )
+    expect(scan.trivial).toEqual([])
+    expect(scan.losses.map((l) => l.symbol)).toEqual(["renamedAway", "renamedAway"])
+  })
+
+  test("a symbol dropped from a file BOTH lines changed is a LOSS, even if one side dropped it", () => {
+    // P2 edited the file too, so taking P1's version discards P2's work in it. That is
+    // the "took one side wholesale" incident class, at file granularity.
+    const P2_EDIT = `${SHARED}export const p2Added = 3\n`
+    const scan = scanMerge(
+      "M",
+      fakePort({
+        BASE: { parents: [], message: "base", files: { [PATH]: SHARED } },
+        P1: { parents: ["BASE"], message: "rename", files: { [PATH]: RENAMED } },
+        P2: { parents: ["BASE"], message: "edit", files: { [PATH]: P2_EDIT } },
+        M: { parents: ["P1", "P2"], message: "merge", files: { [PATH]: RENAMED } },
+      }),
+    )
+    expect(scan.trivial).toEqual([])
+    expect(scan.losses.map((l) => `${l.symbol}@${l.parent}`).sort()).toEqual([
+      "p2Added@P2",
+      "renamedAway@P2",
+    ])
+  })
+
+  test("the recorded incident's shape — a file the base lacked, added by one parent — is never trivial", () => {
+    const scan = scanMerge("M", fakePort(syntheticCommits("merge", { [LANE_PATH]: MERGED_FILE })))
+    expect(scan.trivial).toEqual([])
+    expect(scan.losses.length).toBe(3)
+  })
+
+  test("parents with NO common base prove nothing trivial", () => {
+    const scan = scanMerge(
+      "M",
+      fakePort({
+        R1: { parents: [], message: "root 1", files: { [PATH]: SHARED } },
+        R2: { parents: [], message: "root 2", files: { [PATH]: "export const keep = 1\n" } },
+        M: {
+          parents: ["R1", "R2"],
+          message: "merge unrelated histories",
+          files: { [PATH]: "export const keep = 1\n" },
+        },
+      }),
+    )
+    expect(scan.trivial).toEqual([])
+    expect(scan.losses.map((l) => l.symbol)).toEqual(["renamedAway"])
   })
 })
 

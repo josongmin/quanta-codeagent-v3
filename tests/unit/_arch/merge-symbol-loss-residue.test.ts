@@ -24,44 +24,19 @@ import { join } from "node:path"
 import {
   createGitReadPort,
   extractExportedSymbols,
-  type GitReadPort,
   isExcusedByMessage,
   isGrandfathered,
   messageNamesPath,
   type SymbolLoss,
   scanMerge,
 } from "../../../tools/dev/merge-symbol-loss"
+import { fakeMergeGitPort } from "../_shared/fake-merge-git-port"
 
 // ---------------------------------------------------------------------------
 // A synthetic port (same shape the ratchet test uses).
 // ---------------------------------------------------------------------------
 
-interface FakeCommit {
-  readonly parents: readonly string[]
-  readonly message: string
-  readonly files: Readonly<Record<string, string>>
-}
-
-const fakePort = (commits: Readonly<Record<string, FakeCommit>>): GitReadPort => {
-  const at = (sha: string): FakeCommit => {
-    const c = commits[sha]
-    if (c === undefined) throw new Error(`fake port: unknown sha ${sha}`)
-    return c
-  }
-  return {
-    parents: (sha) => at(sha).parents,
-    message: (sha) => at(sha).message,
-    changedFiles: (from, to) => {
-      const a = at(from).files
-      const b = at(to).files
-      return [...new Set([...Object.keys(a), ...Object.keys(b)])]
-        .filter((p) => a[p] !== b[p])
-        .sort()
-    },
-    readFiles: (sha, paths) => new Map(paths.map((p) => [p, at(sha).files[p] ?? null])),
-    listMerges: () => Object.keys(commits).filter((sha) => at(sha).parents.length >= 2),
-  }
-}
+const fakePort = fakeMergeGitPort
 
 // ---------------------------------------------------------------------------
 // 1. The basename blanket-excuse
