@@ -59,6 +59,12 @@ export interface RunConfigMigrationInput {
    *  `SkillProposalArtifactPort` + approval machine). Absent ⇒ imported skills
    *  are NOT persisted (fail-closed). Only consumed by {@link importExternalConfig}. */
   readonly skillStage?: SkillStagePort
+  /** The memory directory an imported memory file is appended to (its `raw_memories.md`).
+   *  The host passes the directory the consolidator reads — `resolveMemoryHome` +
+   *  `resolveMemoryDirPathsUnder` — so an import never lands where memory is not read.
+   *  Absent ⇒ `<homeDir>/.quanta/memory`, which ignores QUANTA_HOME (round-9 audit: after a
+   *  relocation the import recreated the old directory, which nothing reads). */
+  readonly memoryDir?: string
 }
 
 /** Result of one orchestration run. */
@@ -300,6 +306,7 @@ export const importExternalConfig = async (
       converted,
       sourceKey,
       ...(input.skillStage !== undefined ? { skillStage: input.skillStage } : {}),
+      ...(input.memoryDir !== undefined ? { memoryDir: input.memoryDir } : {}),
     })
     persisted = persisted || persist.persisted
     persistWarnings.push(...persist.warnings)

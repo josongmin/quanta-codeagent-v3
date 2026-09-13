@@ -371,7 +371,10 @@ describe("the memory plane follows the quanta home", () => {
       sqliteWithRows(dest, 2)
       const r = resolveStorePath({ homeDir: relocated, cwd: "/nonexistent-cwd", osHomeDir: osHome })
       expect(r.path).toBe(dest)
-      expect(r.legacyNotice, "an orphan must still be named").toContain(prior)
+      expect(r.legacyNotice, "an orphan must still be named").toContain(dirname(prior))
+      // No store-only redirect: QUANTA_MEMORY_PATH alone would split the store from the
+      // consolidator, which stays on this home (round 9: following that advice did).
+      expect(r.legacyNotice).not.toContain("QUANTA_MEMORY_PATH=")
       expect(
         commandOf(r.legacyNotice),
         "no command may be offered onto an existing store",
@@ -419,7 +422,21 @@ describe("the memory plane follows the quanta home", () => {
     const other = temps.create("mem-alias-other-")
     sqliteWithRows(join(other, "memory", "memory.sqlite"), 1)
     const two = resolveStorePath({ homeDir: other, cwd, osHomeDir: osHome })
-    expect(two.legacyNotice).toContain("TWO stores exist")
+    expect(two.legacyNotice).toContain("TWO memory directories exist")
+  })
+
+  test("a relocated home with consolidator files and no store is NOT abandoned for the old store", () => {
+    // Deciding by the sqlite alone, this home's MEMORY.md and stage-1 data were orphaned the
+    // moment its store was missing and the old home still had one (round-9 audit).
+    const osHome = temps.create("mem-md-only-")
+    const relocated = temps.create("mem-md-only2-")
+    sqliteWithRows(join(osHome, ".quanta", "memory", "memory.sqlite"), 3)
+    mkdirSync(join(relocated, "memory"), { recursive: true })
+    writeFileSync(join(relocated, "memory", "MEMORY.md"), "# relocated memory\n")
+    const r = resolveStorePath({ homeDir: relocated, cwd: "/nonexistent-cwd", osHomeDir: osHome })
+    expect(r.source).toBe("home-default")
+    expect(r.path).toBe(join(relocated, "memory", "memory.sqlite"))
+    expect(r.legacyNotice).toContain("TWO memory directories exist")
   })
 
   test("with the home UNSET the probe is inert — no notice, no behaviour change", () => {

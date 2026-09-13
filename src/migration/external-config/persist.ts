@@ -79,6 +79,12 @@ export interface PersistConvertedInput {
   readonly enabled: boolean
   readonly homeDir: string
   readonly projectDir: string
+  /** The memory directory an imported memory file is appended to (its `raw_memories.md`).
+   *  The host passes the directory the consolidator reads — `resolveMemoryHome` +
+   *  `resolveMemoryDirPathsUnder` — so an import never lands where memory is not read.
+   *  Absent ⇒ `<homeDir>/.quanta/memory`, which ignores QUANTA_HOME (round-9 audit: after a
+   *  relocation the import recreated the old directory, which nothing reads). */
+  readonly memoryDir?: string
   /** The converter outputs to persist (only `ok:true` items are written). */
   readonly converted: readonly ConvertedItem[]
   /** Stable source key for the ledger `imported` record + throttle check. When
@@ -643,7 +649,7 @@ const persistSkills = async (
 // ─── memory → raw_memories.md APPEND (never MEMORY.md, never clobber) ─────
 //
 // An imported `~/.claude/CLAUDE.md` (memory form) is APPENDED to the existing
-// `<homeDir>/.quanta/memory/raw_memories.md` evidence trail — never written to
+// `<memory dir>/raw_memories.md` evidence trail — never written to
 // `MEMORY.md` (which must pass consolidation). The append is guarded against
 // double-import: a provenance MARKER keyed by the source path means re-running
 // the import does not append the same source twice.
@@ -653,12 +659,12 @@ const persistSkills = async (
 const memoryMarker = (sourcePath: string): string =>
   `<!-- quanta-imported-memory: ${sourcePath} -->`
 
-/** memory → APPEND to `<homeDir>/.quanta/memory/raw_memories.md`. Preserves any
+/** memory → APPEND to `<memory dir>/raw_memories.md`. Preserves any
  *  prior content (append, never overwrite). NEVER touches `MEMORY.md`.
  *  Idempotent: a source already appended (its provenance marker is present) is
  *  skipped. */
-const persistMemory = async (homeDir: string, value: ConvertedMemory): Promise<WriteOutcome> => {
-  const rawPath = join(homeDir, ".quanta", "memory", "raw_memories.md")
+const persistMemory = async (memoryDir: string, value: ConvertedMemory): Promise<WriteOutcome> => {
+  const rawPath = join(memoryDir, "raw_memories.md")
   const marker = memoryMarker(value.sourcePath)
   return withMigrationFileLock(`${rawPath}.lock`, async () => {
     let existing = ""
@@ -684,7 +690,7 @@ const persistMemory = async (homeDir: string, value: ConvertedMemory): Promise<W
 const persistOne = async (
   item: Extract<ConvertedItem, { ok: true }>,
   projectDir: string,
-  homeDir: string,
+  memoryDir: string,
   sync: ConfigWriteSync,
   skillStage: SkillStagePort | undefined,
 ): Promise<WriteOutcome> => {
@@ -704,7 +710,7 @@ const persistOne = async (
     case "skills":
       return persistSkills(item.value, skillStage)
     case "memory":
-      return persistMemory(homeDir, item.value)
+      return persistMemory(memoryDir, item.value)
   }
 }
 
@@ -746,7 +752,13 @@ const persistItemGuarded = async (
   sync: ConfigWriteSync,
 ): Promise<WriteOutcome> => {
   try {
-    return await persistOne(item, input.projectDir, input.homeDir, sync, input.skillStage)
+    return await persistOne(
+      item,
+      input.projectDir,
+      input.memoryDir ?? join(input.homeDir, ".quanta", "memory"),
+      sync,
+      input.skillStage,
+    )
   } catch (err) {
     const detail = (err as { code?: string }).code ?? errMessage(err)
     return {

@@ -163,6 +163,32 @@ const memoryDirMigrationCommand = (fromDir: string, toDir: string): string => {
   )
 }
 
+/** The files that make a memory directory "in use": the store and the consolidator's. A
+ *  home counts as having memory if ANY is present — deciding by the sqlite alone
+ *  orphaned a relocated home's `MEMORY.md` / stage-1 data whenever its store was absent
+ *  (round-9 audit). */
+const MEMORY_PLANE_FILES: readonly string[] = [
+  DURABLE_STORE_FILENAME,
+  "MEMORY.md",
+  "raw_memories.md",
+  "memory_summary.md",
+  "stage1.sqlite",
+]
+
+const hasMemory = (dir: string, exists: (p: string) => boolean): boolean =>
+  MEMORY_PLANE_FILES.some((f) => exists(path.join(dir, f)))
+
+/** The notice for two memory DIRECTORIES that both hold memory. Names them and recommends
+ *  nothing destructive. It must not recommend `QUANTA_MEMORY_PATH`: that moves the store
+ *  alone, and the consolidator keeps using this home — the split `resolveMemoryHome`
+ *  exists to prevent (round-9 audit: following the old advice split the plane again). */
+const twoMemoryDirsNotice = (using: string, other: string): string =>
+  `memory: TWO memory directories exist. This session uses ${using}; another is at ${other} ` +
+  "(where memory lived before the plane followed QUANTA_HOME/QUANTA_CONFIG_DIR). They are not " +
+  "merged and nothing will move either one. Pointing QUANTA_MEMORY_PATH at the other's store " +
+  "would split it from its MEMORY.md and consolidation files; to switch, stop quanta and swap " +
+  "the two directories."
+
 /** The notice for two stores that BOTH exist. Names them; recommends nothing
  *  destructive, because which one holds the data the operator wants is not knowable
  *  here. */
@@ -208,20 +234,13 @@ export const resolveMemoryHome = (input: ResolveMemoryHomeInput): MemoryHomeReso
   const exists = input.exists ?? existsSync
   const sameFile = input.sameFile ?? sameFileOnDisk
   const priorHome = path.join(input.osHomeDir, ".quanta")
-  const prior = preRelocationHomeStorePath(input.osHomeDir)
-  const current = defaultDurableStorePath(input.quantaHome)
+  const priorDir = resolveMemoryDirPathsUnder(priorHome).root
+  const currentDir = resolveMemoryDirPathsUnder(input.quantaHome).root
   // Skipped when the paths coincide (an unset home), so the common case is silent.
-  if (prior === current || !exists(prior)) return here
-  if (exists(current)) {
-    if (sameFile(prior, current)) return here
-    return {
-      ...here,
-      notice: twoStoresNotice(
-        current,
-        prior,
-        "where memory lived before the plane followed QUANTA_HOME/QUANTA_CONFIG_DIR",
-      ),
-    }
+  if (priorDir === currentDir || !hasMemory(priorDir, exists)) return here
+  if (hasMemory(currentDir, exists)) {
+    if (sameFile(priorDir, currentDir)) return here
+    return { ...here, notice: twoMemoryDirsNotice(currentDir, priorDir) }
   }
   // IN PLACE, the same answer the legacy-cwd store gets. The previous shape kept the
   // resolution under the relocated home and only PRINTED a notice — and opening that
@@ -230,8 +249,6 @@ export const resolveMemoryHome = (input: ResolveMemoryHomeInput): MemoryHomeReso
   // destination already there. Reading the existing memory where it is creates no
   // second one: the notice repeats every launch until the operator migrates, and the
   // command stays valid until they do.
-  const priorDir = resolveMemoryDirPathsUnder(priorHome).root
-  const currentDir = resolveMemoryDirPathsUnder(input.quantaHome).root
   return {
     home: priorHome,
     source: "pre-relocation-home",

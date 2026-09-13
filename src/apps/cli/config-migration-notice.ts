@@ -17,6 +17,8 @@
  */
 
 import { homedir } from "node:os"
+import { resolveMemoryDirPathsUnder } from "@/memory/consolidate/paths"
+import { resolveMemoryHome } from "@/memory/store-path"
 import {
   type ConvertedItem,
   importExternalConfig,
@@ -24,6 +26,7 @@ import {
   runConfigMigration,
 } from "@/migration/external-config"
 import { gateOn, runtimeConfig } from "@/shared"
+import { quantaHomeDirFrom } from "@/shared/quanta-home"
 import { discoverSystemSkills } from "@/skill"
 import {
   composeImportSkillStage,
@@ -189,12 +192,18 @@ export const runConfigMigrationImport = async (
     // so the operator can approve→promote (the loop is closed, not dark).
     const { stage, review } = composeImportSkillStage(importSkillsDir(home))
     const systemSkillNames = new Set((await discoverSystemSkills()).map((s) => s.name))
+    // The directory the consolidator reads — the SAME decision the store and
+    // session-memory-auto make — so an import is never appended where memory is not read.
+    const memoryDir = resolveMemoryDirPathsUnder(
+      resolveMemoryHome({ quantaHome: quantaHomeDirFrom(env), osHomeDir: home }).home,
+    ).root
     const result = await importExternalConfig({
       enabled: true,
       homeDir: home,
       projectDir: cwd,
       skillStage: stage,
       systemSkillNames,
+      memoryDir,
     })
     if (!result.ran || result.throttled || !result.persisted) return {}
     const writtenTypes = new Set<MigrationItemType>()

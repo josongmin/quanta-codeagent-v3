@@ -105,6 +105,22 @@ describe("front door — runConfigMigrationImport STAGES an imported skill (not 
     await expect(stat(livePath)).rejects.toBeDefined()
   })
 
+  test("an imported memory file is appended where the consolidator READS memory, not the OS home's .quanta", async () => {
+    // Round-9 audit: the import appended to `<os home>/.quanta/memory/raw_memories.md`
+    // whatever QUANTA_HOME said, so after a relocation it recreated a directory nothing
+    // reads. It now goes to the memory directory `resolveMemoryHome` picks.
+    await write(join(home, ".claude", "CLAUDE.md"), "# global memory\nremember the relocation")
+    const relocated = await mkdtemp(join(tmpdir(), "rfc034-import-qhome-"))
+    try {
+      await runConfigMigrationImport(project, { ...process.env, QUANTA_HOME: relocated }, home)
+      const raw = await readFile(join(relocated, "memory", "raw_memories.md"), "utf8")
+      expect(raw).toContain("remember the relocation")
+      await expect(stat(join(home, ".quanta", "memory", "raw_memories.md"))).rejects.toThrow()
+    } finally {
+      await rm(relocated, { recursive: true, force: true })
+    }
+  })
+
   test("RED baseline — WITHOUT a stage port the same import reports NO skills (fail-closed)", async () => {
     // This pins the pre-wire behavior the front door repairs: calling the slice
     // entry with NO skillStage leaves the imported skill unwritten, so `skills`
