@@ -402,7 +402,7 @@ describe("residue 6 — a renamed-away path is still compared", () => {
     const names = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta"]
     writeFileSync(
       join(dir, "src", "big.ts"),
-      names.map((n, i) => `export const ${n} = ${i}`).join("\n") + "\n",
+      `${names.map((n, i) => `export const ${n} = ${i}`).join("\n")}\n`,
     )
     const r0 = commitAll(dir, "add big")
     runGit(dir, ["checkout", "-q", "-b", "a"])

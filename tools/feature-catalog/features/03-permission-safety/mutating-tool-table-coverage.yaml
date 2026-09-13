@@ -36,6 +36,7 @@ purpose: |
 evidence:
   code:
     - src/agent/mode.ts
+    - src/agent/mode-caller-wire.ts
     - src/subagent/agent-tool.ts
   adrs:
     - docs/decisions/0036-plan-mode-dispatch-seam-block.md
