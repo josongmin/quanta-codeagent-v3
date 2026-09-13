@@ -31,10 +31,13 @@
  *                  selecting fewer files is a policy decision, not corpus loss.
  *
  * They were ONE check over ONE input: `SUITE_FLOORS[suite]` applied after tier
- * selection. That conflation is invisible today only because prepush, pr and
- * full resolve to the identical file set — which is itself the defect TVH-02 is
- * about. The moment PR is narrowed, an intended reduction would have been
- * reported as "the corpus shrank under the runner".
+ * selection. That conflation was invisible while prepush, pr and full resolved
+ * to one identical file set; once PR was narrowed, an intended reduction would
+ * have been reported as "the corpus shrank under the runner".
+ *
+ * Both floors carry slack, so neither catches a file that is still tracked and
+ * no longer discovered. That is checked first, at a threshold of zero
+ * (`discoveryCompletenessProblems`).
  */
 
 import {
@@ -43,7 +46,7 @@ import {
   resolveTestPopulation,
   selectTestPoliciesForTier,
 } from "./test-policy"
-import type { SuiteName } from "./test-shard-discovery"
+import { discoveryCompletenessProblems, type SuiteName } from "./test-shard-discovery"
 import {
   CORPUS_LOSS_KINDS,
   checkTierPopulation,
@@ -71,6 +74,13 @@ export interface ShardSelectionInput {
   readonly discovered: readonly string[]
   /** Policy id for a discovered file. Identity when they are already ids. */
   readonly idOf?: (file: string) => string
+  /**
+   * Repo-relative `*.test.ts` the git index tracks under the suite roots
+   * (`trackedSuiteTestFiles`). Required: discovery completeness is checked at a
+   * threshold of zero before any floor, and a check the caller can omit is one
+   * that will be.
+   */
+  readonly tracked: readonly string[]
   /** Pinned minimum for this suite's PRE-selection universe. */
   readonly suiteFloor: number
   /** Committed per-tier minimums for the POST-selection population. */
@@ -103,6 +113,18 @@ export class TierSelectionError extends Error {
  * a narrowed tier can never be reported as corpus loss.
  */
 export const selectShardManifest = (input: ShardSelectionInput): ShardSelection => {
+  const idOf = input.idOf ?? ((file: string): string => file)
+  const incomplete = discoveryCompletenessProblems({
+    suite: input.suite,
+    discovered: input.discovered.map(idOf),
+    tracked: input.tracked,
+  })
+  if (incomplete.length > 0) {
+    throw new CorpusLostError(
+      `[test:shards] INVALID — discovery is incomplete: ${incomplete.join("; ")}. ` +
+        "A green over this set would describe a smaller corpus than the tree holds.",
+    )
+  }
   if (input.discovered.length < input.suiteFloor) {
     throw new CorpusLostError(
       `[test:shards] INVALID — suite=${input.suite} discovered ${input.discovered.length} test ` +
@@ -119,7 +141,6 @@ export const selectShardManifest = (input: ShardSelectionInput): ShardSelection 
     }
   }
 
-  const idOf = input.idOf ?? ((file: string): string => file)
   const tiered = input.selectForTier(input.discovered.map(idOf), input.tier)
   const selected = new Set(tiered.files)
   // Filtered from `discovered` rather than taken from the policy layer, so the

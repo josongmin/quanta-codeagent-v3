@@ -48,6 +48,7 @@ import {
   discoverSuiteFiles,
   SUITE_FLOORS,
   type SuiteName,
+  trackedSuiteTestFiles,
 } from "./test-shard-discovery"
 import {
   acquireTestShardLease,
@@ -1143,6 +1144,7 @@ const emitDiscovery = (opts: RunnerOptions): void => {
     suite: opts.suite,
     tier: opts.tier,
     discovered: suite.files,
+    tracked: trackedSuiteTestFiles(REPO_ROOT, opts.suite),
     suiteFloor: SUITE_FLOORS[opts.suite],
     tierFloors: loadTierPopulationFloors(),
     selectForTier: (ids, tier) => tierSelectionFromPolicy(ids, tier, TEST_POLICY_OVERRIDES),
@@ -1180,6 +1182,7 @@ const selectManifest = (opts: RunnerOptions): ShardSelection =>
     // re-relativises them itself through `membershipFile`.
     discovered: [...discoverSuiteFiles(REPO_ROOT, opts.suite)],
     idOf: (file) => relative(REPO_ROOT, file),
+    tracked: trackedSuiteTestFiles(REPO_ROOT, opts.suite),
     suiteFloor: SUITE_FLOORS[opts.suite],
     tierFloors: loadTierPopulationFloors(),
     selectForTier: (files, tier) => tierSelectionFromPolicy(files, tier, TEST_POLICY_OVERRIDES),
@@ -1298,8 +1301,12 @@ const main = async (): Promise<void> => {
   // source-JS preflight, and the capability probe (which launches Chrome). A
   // refused suite/tier used to be reported only after all three, and on a dirty
   // tree the clean-checkout refusal fired first and hid it.
-  const selection = selectManifest(opts)
+  // The tree is snapshotted BEFORE it is read, not after. Taken after, a commit
+  // landing during discovery or policy resolution appeared in both this snapshot
+  // and the pre-run one, so the comparison passed over a manifest that had
+  // missed the commit's files.
   const selectedAt = await gitSnapshot()
+  const selection = selectManifest(opts)
   // A campaign wrapper (verification-campaign.ts) may already own the
   // repository lane for this whole verification run. A live ancestor-owned
   // token means "do not reacquire" — reacquiring would deadlock against the
