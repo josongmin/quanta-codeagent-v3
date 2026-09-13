@@ -171,14 +171,33 @@ describe("NW-2 refused arms — a symlinked spill location is never written or p
   test("sub-budget output in a symlinked repo is byte-identical and touches nothing", async () => {
     const victim = join(root, "victim")
     seedNotes(victim)
+    const link = join(repo, ".quanta", "tool-output")
     mkdirSync(join(repo, ".quanta"))
-    symlinkSync("../../victim", join(repo, ".quanta", "tool-output"))
+    symlinkSync("../../victim", link)
+    // Paired control: the same read in a scratch repo with no `.quanta` at all.
+    const control = join(root, "control")
+    mkdirSync(control)
+    writeFileSync(join(control, "small.txt"), "tiny\n")
 
     const result = await readThroughRegistry("small.txt")
+    const controlResult = await new ToolRegistry(defaultTools).run(
+      "read",
+      { path: join(control, "small.txt") },
+      { cwd: control, signal: new AbortController().signal },
+    )
 
-    expect(result.output).not.toContain("truncated-output")
-    expect(result.output).toContain("tiny")
-    expect(census(victim).entries).toHaveLength(VICTIM_NOTES)
+    expect(result.output).toBe("1\ttiny\n2\t")
+    expect(result.output).toBe(controlResult.output)
+    expect(result.ok).toBe(true)
+    expect(result.evidence?.fullLogPath).toBeUndefined()
+    const after = census(victim)
+    expect(after.entries).toHaveLength(VICTIM_NOTES)
+    expect(after.foreign).toEqual([])
+    expect(after.intact).toBe(VICTIM_NOTES)
+    // The link itself was neither replaced nor removed.
+    expect(lstatSync(link).isSymbolicLink()).toBe(true)
+    expect(readdirSync(join(repo, ".quanta"))).toEqual(["tool-output"])
+    expect(existsSync(join(control, ".quanta"))).toBe(false)
   })
 })
 
