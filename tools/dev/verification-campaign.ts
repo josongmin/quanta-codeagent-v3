@@ -344,7 +344,9 @@ lease = await acquireTestShardLease({
   onQuarantineWait: (reason) => process.stdout.write(`[verification] WAIT ${reason}\n`),
   onQuarantineRelease: (reason) => {
     process.stdout.write(`[verification] QUARANTINE RELEASED ${reason}\n`)
-    laneReleasedOver = reason
+    // EVERY release: the slot and the legacy file each report one, and keeping only
+    // the last let a stale legacy note replace the slot's "STILL ALIVE" warning.
+    laneReleasedOver = laneReleasedOver === undefined ? reason : `${laneReleasedOver}; ${reason}`
   },
   onWait: (port, elapsedMs) =>
     process.stdout.write(

@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test"
+import { mkdtempSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
   acquireKeyedTestShardLeases,
@@ -12,6 +14,16 @@ import {
   selectRepositoryLeaseIdentity,
   testShardLeasePort,
 } from "../../tools/dev/test-shard-lease"
+
+/**
+ * A scratch quarantine root for every acquisition here. Without it the lane read
+ * — and, since the reader checks the root, could chmod — the developer's real
+ * `/tmp/quanta-lease-quarantine-<uid>`, and a bad root on the host turned this
+ * suite into timeouts.
+ */
+const QUARANTINE_ENV = {
+  QUANTA_LEASE_QUARANTINE_DIR: mkdtempSync(join(tmpdir(), "shard-lease-quarantine-")),
+}
 
 describe("full-suite repository lease", () => {
   test("committed identity survives remote aliases, copies, and worktree paths", () => {
@@ -81,9 +93,15 @@ describe("full-suite repository lease", () => {
 
   test("a contender waits and acquires only after the current owner releases", async () => {
     const identity = `lease-self-test-${process.pid}-${Date.now()}`
-    const first = await acquireTestShardLease({ identity, waitMs: 5_000, pollMs: 5 })
+    const first = await acquireTestShardLease({
+      env: QUARANTINE_ENV,
+      identity,
+      waitMs: 5_000,
+      pollMs: 5,
+    })
     let heartbeats = 0
     const secondPending = acquireTestShardLease({
+      env: QUARANTINE_ENV,
       identity,
       waitMs: 5_000,
       pollMs: 5,
@@ -103,7 +121,12 @@ describe("full-suite repository lease", () => {
     second.release()
 
     // Red-on-injection/control: release must return ownership to the kernel.
-    const third = await acquireTestShardLease({ identity, waitMs: 100, pollMs: 5 })
+    const third = await acquireTestShardLease({
+      env: QUARANTINE_ENV,
+      identity,
+      waitMs: 100,
+      pollMs: 5,
+    })
     expect(third.port).toBe(first.port)
     third.release()
   })
@@ -217,7 +240,12 @@ describe("full-suite repository lease", () => {
     const identity = `lease-token-self-test-${process.pid}-${Date.now()}`
     const normalized = normalizeRepositoryIdentity(identity)
     const port = testShardLeasePort(normalized)
-    const lease = await acquireTestShardLease({ identity, waitMs: 5_000, pollMs: 10 })
+    const lease = await acquireTestShardLease({
+      env: QUARANTINE_ENV,
+      identity,
+      waitMs: 5_000,
+      pollMs: 10,
+    })
     try {
       expect(lease.token).toMatch(/^[0-9a-f]{64}$/)
       expect(await confirmLeaseToken(port, normalized, lease.token)).toBe(true)
@@ -234,10 +262,20 @@ describe("full-suite repository lease", () => {
     const identity = `lease-rebind-self-test-${process.pid}-${Date.now()}`
     const normalized = normalizeRepositoryIdentity(identity)
     const port = testShardLeasePort(normalized)
-    const first = await acquireTestShardLease({ identity, waitMs: 5_000, pollMs: 10 })
+    const first = await acquireTestShardLease({
+      env: QUARANTINE_ENV,
+      identity,
+      waitMs: 5_000,
+      pollMs: 10,
+    })
     const firstToken = first.token
     first.release()
-    const second = await acquireTestShardLease({ identity, waitMs: 5_000, pollMs: 10 })
+    const second = await acquireTestShardLease({
+      env: QUARANTINE_ENV,
+      identity,
+      waitMs: 5_000,
+      pollMs: 10,
+    })
     try {
       expect(second.token).not.toBe(firstToken)
       expect(await confirmLeaseToken(port, normalized, firstToken)).toBe(false)
@@ -263,9 +301,14 @@ describe("full-suite repository lease", () => {
     })
     try {
       const started = performance.now()
-      await expect(acquireTestShardLease({ identity, waitMs: 5_000, pollMs: 5 })).rejects.toThrow(
-        "repository lease port collision",
-      )
+      await expect(
+        acquireTestShardLease({
+          env: QUARANTINE_ENV,
+          identity,
+          waitMs: 5_000,
+          pollMs: 5,
+        }),
+      ).rejects.toThrow("repository lease port collision")
       // The old bind-only lease waited the FULL budget behind a foreign
       // listener; the handshake must diagnose it in one probe round.
       expect(performance.now() - started).toBeLessThan(1_000)
@@ -286,6 +329,7 @@ describe("full-suite repository lease", () => {
     let waiting = false
     try {
       const pending = acquireTestShardLease({
+        env: QUARANTINE_ENV,
         identity,
         waitMs: 5_000,
         pollMs: 5,
@@ -306,10 +350,16 @@ describe("full-suite repository lease", () => {
 
   test("an aborted wait raises instead of parking behind a busy lane", async () => {
     const identity = `lease-abort-self-test-${process.pid}-${Date.now()}`
-    const owner = await acquireTestShardLease({ identity, waitMs: 500, pollMs: 5 })
+    const owner = await acquireTestShardLease({
+      env: QUARANTINE_ENV,
+      identity,
+      waitMs: 500,
+      pollMs: 5,
+    })
     const aborter = new AbortController()
     try {
       const pending = acquireTestShardLease({
+        env: QUARANTINE_ENV,
         identity,
         waitMs: 5_000,
         pollMs: 5,

@@ -590,7 +590,15 @@ const acquireRawTestShardLease = async (
     const token = randomBytes(32).toString("hex")
     const listener = tryListen(port, digest, token)
     if (listener !== undefined) {
-      const blocked = consultQuarantine ? quarantineBlock(identity, options) : undefined
+      let blocked: string | undefined
+      try {
+        blocked = consultQuarantine ? quarantineBlock(identity, options) : undefined
+      } catch (error) {
+        // Bound before the read, so a throw here (a callback, a bad root) must not
+        // leave this process holding the lane with no lease to release it.
+        listener.stop(true)
+        throw error
+      }
       if (blocked === undefined) return leaseFromListener(port, listener, token)
       listener.stop(true)
       if (Date.now() >= nextHeartbeatAt + startedAt) options.onQuarantineWait?.(blocked)

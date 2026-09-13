@@ -1493,4 +1493,219 @@ describe("the lane is cleared only by its holder, and an error is not an empty l
       expect(readLeaseQuarantine(legacyQuarantinePath(cache))?.createdAtMs).toBe(fresh.createdAtMs)
     })
   })
+
+  test("R3 — a displaced unreadable record still blocks until its own ceiling", async () => {
+    await withRoot((root, env) => {
+      const identity = `displaced-hold/${process.pid}-${Date.now()}`
+      const path = laneQuarantinePath(identity, root)
+      writeFileSync(path, '{"schema":"quanta.lease-quarantine.v3"}')
+      const written = quarantineLane({
+        repositoryId: identity,
+        groups: [G(7171)],
+        env,
+        spawnKeeper: () => 1,
+      })
+      expect(written.holdUntilMs).toBeGreaterThan(Date.now())
+      const read = readLeaseQuarantineOutcome(path)
+      // The new record itself must be READABLE: an unreadable one also blocks, and
+      // for the wrong reason — the first version of this fix wrote a fractional
+      // hold that failed its own parse, and this arm passed anyway.
+      expect(read.kind).toBe("record")
+      // Our own group dead: the displaced record's unknown groups still hold the lane.
+      expect(
+        laneSlotVerdict({ read, identity, nowMs: Date.now(), isAlive: () => false }).kind,
+      ).toBe("blocked")
+      // ...until its ceiling.
+      expect(
+        laneSlotVerdict({
+          read,
+          identity,
+          nowMs: (written.holdUntilMs ?? 0) + 1,
+          isAlive: () => false,
+        }).kind,
+      ).toBe("stale")
+    })
+  })
+
+  test("R3 — a failed SLOT WRITE falls back to the legacy file with what the slot carried", async () => {
+    await withRoot(async (root, env) => {
+      const identity = `slot-write/${process.pid}-${Date.now()}`
+      const path = laneQuarantinePath(identity, root)
+      // A live record the new one must carry.
+      writeLeaseQuarantine(
+        path,
+        record({
+          repositoryId: identity,
+          survivors: [G(5151)],
+          createdAtMs: Date.now(),
+          expiresAtMs: Date.now() + QUARANTINE_TTL_MS,
+        }),
+      )
+      // A directory where the atomic temp file goes: EISDIR, even for root.
+      mkdirSync(`${path}.tmp-${process.pid}`)
+      const cache = join(root, "..", "cache")
+      const written = quarantineLane({
+        repositoryId: identity,
+        groups: [G(4242)],
+        env,
+        legacyCacheRoot: cache,
+        spawnKeeper: () => 1,
+        isAlive: () => true,
+      })
+      const legacy = readLeaseQuarantine(legacyQuarantinePath(cache))
+      expect(legacy?.createdAtMs).toBe(written.createdAtMs)
+      expect(legacy?.survivors.map((g) => g.pgid)).toEqual([4242, 5151])
+      rmSync(`${path}.tmp-${process.pid}`, { recursive: true, force: true })
+      // With nowhere to fall back to it throws, instead of returning a record nobody wrote.
+      mkdirSync(`${path}.tmp-${process.pid}`)
+      expect(() =>
+        quarantineLane({ repositoryId: identity, groups: [G(4242)], env, spawnKeeper: () => 1 }),
+      ).toThrow(/no legacy location/)
+      rmSync(`${path}.tmp-${process.pid}`, { recursive: true, force: true })
+    })
+  })
+
+  test("R3 — the legacy fallback never overwrites another identity's LIVE record", () => {
+    const base = mkdtempSync(join(tmpdir(), "legacy-foreign-"))
+    try {
+      const real = join(base, "real")
+      mkdirSync(real, { mode: 0o700 })
+      const link = join(base, "link")
+      symlinkSync(real, link)
+      const cache = join(base, "cache")
+      writeLeaseQuarantine(
+        legacyQuarantinePath(cache),
+        record({
+          repositoryId: "someone/else",
+          survivors: [G(8484)],
+          createdAtMs: Date.now(),
+          expiresAtMs: Date.now() + QUARANTINE_TTL_MS,
+        }),
+      )
+      const before = readFileSync(legacyQuarantinePath(cache), "utf8")
+      expect(() =>
+        quarantineLane({
+          repositoryId: `mine/${process.pid}`,
+          groups: [G(1)],
+          env: { [LEASE_QUARANTINE_DIR_ENV]: link },
+          legacyCacheRoot: cache,
+          spawnKeeper: () => 1,
+          isAlive: () => true,
+        }),
+      ).toThrow(/refusing to overwrite the legacy quarantine of "someone\/else"/)
+      expect(readFileSync(legacyQuarantinePath(cache), "utf8")).toBe(before)
+    } finally {
+      rmSync(base, { recursive: true, force: true })
+    }
+  })
+
+  test("R3 — a throw while holding the bound port releases the port", async () => {
+    await withRoot(async (root, env) => {
+      const identity = `bound-throw/${process.pid}-${Date.now()}`
+      const past = Date.now() - QUARANTINE_TTL_MS - 5_000
+      writeLeaseQuarantine(
+        laneQuarantinePath(identity, root),
+        record({
+          repositoryId: identity,
+          createdAtMs: past,
+          expiresAtMs: past + QUARANTINE_TTL_MS,
+        }),
+      )
+      await expect(
+        acquireTestShardLease({
+          identity,
+          env,
+          waitMs: 1_000,
+          pollMs: 10,
+          isGroupAlive: () => false,
+          onQuarantineRelease: () => {
+            throw new Error("callback exploded")
+          },
+        }),
+      ).rejects.toThrow(/callback exploded/)
+      // The port is free again: the next acquisition binds at once.
+      const lease = await acquireTestShardLease({ identity, env, waitMs: 1_000, pollMs: 10 })
+      lease.release()
+    })
+  }, 20_000)
+
+  test("R3 — the legacy MIRROR is written in the v1 shape older readers parse", async () => {
+    await withRoot((root, env) => {
+      const cache = join(root, "..", "mirror-cache")
+      quarantineLane({
+        repositoryId: `mirror-v1/${process.pid}`,
+        groups: [G(1)],
+        env,
+        legacyCacheRoot: cache,
+        spawnKeeper: () => {
+          throw new Error("no keeper")
+        },
+      })
+      const raw = JSON.parse(readFileSync(legacyQuarantinePath(cache), "utf8")) as Record<
+        string,
+        unknown
+      >
+      expect(raw.schema).toBe("quanta.lease-quarantine.v1")
+      // v1 requires a positive keeper pid; a keeperless v2 record would be unreadable there.
+      expect(typeof raw.keeperPid === "number" && raw.keeperPid > 0).toBe(true)
+      expect(raw).not.toHaveProperty("holdUntilMs")
+    })
+  })
+
+  test("R3 — the identity key moves ONLY for inputs the original transform left unstable", () => {
+    // The original one-step transform, verbatim: its stable outputs are live
+    // ports in running checkouts, and a rewrite moved four of them.
+    const original = (remote: string): string => {
+      const value = remote.trim().replace(/\.git$/, "")
+      const match = /[:/]([^/:]+\/[^/]+)$/.exec(value)
+      return match?.[1] ?? value
+    }
+    for (const input of [
+      "https://github.com/o/r/",
+      "https://github.com/o/r.git/",
+      "git-common:/Users/x/repo/.git",
+      "/Users/x/repo/",
+      "git@github.com:o/r.git",
+      "repository-id:quanta-codeagent-v3",
+    ]) {
+      const once = original(input)
+      if (original(once) === once) {
+        expect({ input, key: normalizeRepositoryIdentity(input) }).toEqual({ input, key: once })
+      }
+      expect(normalizeRepositoryIdentity(normalizeRepositoryIdentity(input))).toBe(
+        normalizeRepositoryIdentity(input),
+      )
+    }
+  })
+
+  test("R3 — the campaign receipt keeps EVERY release reason, not the last", () => {
+    // The slot and the legacy file each report a release; keeping the last let a
+    // stale legacy note replace the slot's "STILL ALIVE" warning in the receipt.
+    const source = readFileSync(
+      join(import.meta.dir, "..", "..", "..", "tools", "dev", "verification-campaign.ts"),
+      "utf8",
+    )
+    const tree = ts.createSourceFile(
+      "verification-campaign.ts",
+      source,
+      ts.ScriptTarget.ESNext,
+      true,
+      ts.ScriptKind.TS,
+    )
+    const writes: string[] = []
+    const walk = (node: ts.Node): void => {
+      if (
+        ts.isBinaryExpression(node) &&
+        node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        node.left.getText(tree) === "laneReleasedOver"
+      ) {
+        writes.push(node.right.getText(tree))
+      }
+      node.forEachChild(walk)
+    }
+    walk(tree)
+    expect(writes).toHaveLength(1)
+    expect(writes[0]).toContain("laneReleasedOver")
+    expect(writes[0]).toContain("reason")
+  })
 })

@@ -8,11 +8,27 @@
  */
 
 /** Normalize SSH aliases and HTTPS remotes to the same owner/repository key. */
+const normalizeOnce = (remote: string): string => {
+  const value = remote.trim().replace(/\.git$/, "")
+  const match = /[:/]([^/:]+\/[^/]+)$/.exec(value)
+  return match?.[1] ?? value
+}
+
 export const normalizeRepositoryIdentity = (remote: string): string => {
   // IDEMPOTENT, and an arm holds it to that: the quarantine writer normalises
   // once and the slot path normalises again, so `x.git.git` or a match with a
   // leading space was filed under a key its own slot did not hash to.
-  const value = remote.trim().replace(/(?:\.git|\/)+$/u, "")
-  const match = /[:/]([^/:]+\/[^/]+)$/u.exec(value)
-  return (match?.[1] ?? value).trim().replace(/(?:\.git|\/)+$/u, "")
+  //
+  // The FIXED POINT of the original one-step transform, not a new transform. A
+  // rewrite that also stripped trailing slashes moved the hashed port of every
+  // identity that ended in one — two checkouts on the old and new code would have
+  // run in parallel. Iterating changes only the inputs that were not already
+  // stable, which are exactly the ones that were misfiled.
+  let current = remote
+  for (let step = 0; step < 8; step += 1) {
+    const next = normalizeOnce(current)
+    if (next === current) return current
+    current = next
+  }
+  return current
 }

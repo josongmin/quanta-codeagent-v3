@@ -91,6 +91,12 @@ export interface LeaseQuarantineRecord {
    * keeper from bricking verification for everyone.
    */
   readonly expiresAtMs: number
+  /**
+   * Blocked until at least this time whatever the survivors say: the ceiling of an
+   * UNREADABLE record this one displaced. Its groups could not be read, so they
+   * cannot be carried — and moving the file aside used to lift the block it held.
+   */
+  readonly holdUntilMs?: number
 }
 
 /** Absolute directory override for the quarantine root. Tests use it; production does not. */
@@ -180,6 +186,11 @@ const isGroup = (value: unknown): value is QuarantinedGroup => {
   )
 }
 
+const hasValidTimes = (row: Partial<LeaseQuarantineRecord>): boolean =>
+  isCount(row.createdAtMs) &&
+  isCount(row.expiresAtMs) &&
+  (row.holdUntilMs === undefined || isCount(row.holdUntilMs))
+
 export const parseLeaseQuarantine = (candidate: unknown): LeaseQuarantineRecord | undefined => {
   if (typeof candidate !== "object" || candidate === null) return undefined
   const row = candidate as Partial<LeaseQuarantineRecord>
@@ -188,7 +199,7 @@ export const parseLeaseQuarantine = (candidate: unknown): LeaseQuarantineRecord 
   if (typeof row.repositoryId !== "string" || row.repositoryId === "") return undefined
   const keeperless = row.schema === LEASE_QUARANTINE_SCHEMA && row.keeperPid === null
   if (!keeperless && (!isCount(row.keeperPid) || (row.keeperPid as number) <= 0)) return undefined
-  if (!isCount(row.createdAtMs) || !isCount(row.expiresAtMs)) return undefined
+  if (!hasValidTimes(row)) return undefined
   if (!Array.isArray(row.survivors) || row.survivors.length === 0) return undefined
   if (!row.survivors.every(isGroup)) return undefined
   return row as LeaseQuarantineRecord
@@ -295,6 +306,8 @@ export const quarantineVerdict = (
             "still running",
     }
   }
+  const held = displacedHold(record, nowMs, expiresAtMs, alive)
+  if (held !== undefined) return held
   if (alive.length === 0) {
     return { kind: "stale", reason: "every quarantined group has exited" }
   }
@@ -307,6 +320,23 @@ export const quarantineVerdict = (
     alive,
   }
 }
+
+/** Blocked while a displaced unreadable record's ceiling (`holdUntilMs`) has not passed. */
+const displacedHold = (
+  record: LeaseQuarantineRecord,
+  nowMs: number,
+  expiresAtMs: number,
+  alive: readonly number[],
+): QuarantineVerdict | undefined =>
+  record.holdUntilMs !== undefined && nowMs < Math.min(record.holdUntilMs, expiresAtMs)
+    ? {
+        kind: "blocked",
+        reason:
+          `lane held until ${record.holdUntilMs} for an unreadable record this one displaced ` +
+          `(its groups could not be read; ${alive.length} of this record's own still alive)`,
+        alive,
+      }
+    : undefined
 
 export const writeLeaseQuarantine = (path: string, record: LeaseQuarantineRecord): void => {
   mkdirSync(dirname(path), { recursive: true })
@@ -591,7 +621,17 @@ const mirrorLegacyNoClobber = (
 ): void => {
   mkdirSync(dirname(legacy), { recursive: true })
   const temporary = `${legacy}.mirror-${process.pid}`
-  writeFileSync(temporary, `${JSON.stringify(record, null, 2)}\n`)
+  // v1 SHAPE, for the readers this mirror exists for. A v1-only reader parsed the
+  // v2 record as unreadable, which blocks by mtime: with the keeper no longer
+  // deleting, an old checkout waited out the full TTL over dead groups. Liveness
+  // in every version comes from the survivors, so the keeper pid is forensic.
+  const { holdUntilMs: _hold, keeperRefusal: _refusal, ...rest } = record
+  const mirrored = {
+    ...rest,
+    schema: LEASE_QUARANTINE_SCHEMA_V1,
+    keeperPid: record.keeperPid ?? process.pid,
+  }
+  writeFileSync(temporary, `${JSON.stringify(mirrored, null, 2)}\n`)
   try {
     try {
       linkSync(temporary, legacy)
@@ -656,35 +696,157 @@ const startKeeper = (
 }
 
 /**
- * The live groups an existing record already holds, whatever identity it names:
- * a record in OUR slot for another identity is misfiled, and its live groups
- * are still live. Overwriting it dropped them — measured, a survivor lost from a
- * replaced v3 record. An unreadable record's groups cannot be read, so the file
- * is kept beside the slot, and said, rather than silently replaced.
+ * What an existing record at `target` hands on to the record replacing it.
+ *
+ * - A readable record: its live groups. In OUR slot they are carried whatever
+ *   identity they name (a misfiled record's live groups are still live — an audit
+ *   measured one lost from a replaced v3 record). In the shared legacy file a
+ *   record of another identity is theirs, and is never taken over (see
+ *   `refuseForeignLegacy`).
+ * - An unreadable record: read once more (a transient EMFILE is not corruption),
+ *   then kept beside the slot, and its ceiling is carried as `holdUntilMs` —
+ *   moving it aside used to lift the block it held, measured
+ *   `unreadable blocked → record stale → ACQUIRED`.
  */
-const carryExisting = (
-  target: string,
-  groups: readonly QuarantinedGroup[],
-  isAlive: (pgid: number) => boolean,
-  nowMs: number,
-  log: ((line: string) => void) | undefined,
-): readonly QuarantinedGroup[] => {
-  const existing = readLeaseQuarantineOutcome(target)
+const carryExisting = (input: {
+  readonly target: string
+  readonly key: string
+  readonly groups: readonly QuarantinedGroup[]
+  readonly isAlive: (pgid: number) => boolean
+  readonly nowMs: number
+  readonly carryForeign: boolean
+  readonly log: ((line: string) => void) | undefined
+}): { readonly carried: readonly QuarantinedGroup[]; readonly holdUntilMs?: number } => {
+  let existing = readLeaseQuarantineOutcome(input.target)
+  if (existing.kind === "unreadable") existing = readLeaseQuarantineOutcome(input.target)
   if (existing.kind === "record") {
-    return existing.record.survivors.filter(
-      (group) => isAlive(group.pgid) && !groups.some((fresh) => fresh.pgid === group.pgid),
-    )
-  }
-  if (existing.kind === "unreadable") {
-    const displaced = `${target}.displaced-${nowMs}.json`
-    try {
-      renameSync(target, displaced)
-      log?.(`[quarantine] an unreadable record (${existing.reason}) was moved to ${displaced}\n`)
-    } catch (error) {
-      log?.(`[quarantine] an unreadable record could not be moved aside: ${String(error)}\n`)
+    const record = existing.record
+    if (!input.carryForeign && record.repositoryId !== input.key) return { carried: [] }
+    return {
+      carried: record.survivors.filter(
+        (group) =>
+          input.isAlive(group.pgid) && !input.groups.some((fresh) => fresh.pgid === group.pgid),
+      ),
+      ...(record.holdUntilMs === undefined ? {} : { holdUntilMs: record.holdUntilMs }),
     }
   }
-  return []
+  if (existing.kind === "absent") return { carried: [] }
+  const displaced = `${input.target}.displaced-${input.nowMs}.json`
+  try {
+    renameSync(input.target, displaced)
+    input.log?.(
+      `[quarantine] an unreadable record (${existing.reason}) was moved to ${displaced}\n`,
+    )
+  } catch (error) {
+    input.log?.(`[quarantine] an unreadable record could not be moved aside: ${String(error)}\n`)
+  }
+  // Rounded UP to an integer: an mtime has a fractional part, and a fractional
+  // hold made the new record fail its own parse — blocking for the wrong reason.
+  return { carried: [], holdUntilMs: Math.ceil(existing.writtenAtMs + QUARANTINE_TTL_MS) }
+}
+
+/**
+ * The shared legacy file holds ONE record. Another identity's record with live
+ * groups there is not ours to replace: overwriting it made its own reader see a
+ * `foreign` record, which does not block — measured, `ACQUIRED` over its live
+ * pgid. `mirrorLegacyNoClobber` refused exactly this; the fallback now does too.
+ */
+const refuseForeignLegacy = (
+  legacy: string,
+  key: string,
+  isAlive: (pgid: number) => boolean,
+): void => {
+  const held = readLeaseQuarantineOutcome(legacy)
+  if (held.kind !== "record" || held.record.repositoryId === key) return
+  if (!held.record.survivors.some((group) => isAlive(group.pgid))) return
+  throw new Error(
+    `[quarantine] refusing to overwrite the legacy quarantine of "${held.record.repositoryId}", ` +
+      "whose groups are still alive",
+  )
+}
+
+interface LaneContext {
+  readonly key: string
+  readonly nowMs: number
+  readonly groups: readonly QuarantinedGroup[]
+  readonly isAlive: (pgid: number) => boolean
+  readonly keeper: { readonly keeperPid: number | null; readonly keeperRefusal?: string }
+  readonly log: ((line: string) => void) | undefined
+}
+
+const recordWith = (
+  context: LaneContext,
+  carry: { readonly carried: readonly QuarantinedGroup[]; readonly holdUntilMs?: number },
+): LeaseQuarantineRecord => ({
+  schema: LEASE_QUARANTINE_SCHEMA,
+  repositoryId: context.key,
+  keeperPid: context.keeper.keeperPid,
+  ...(context.keeper.keeperRefusal === undefined
+    ? {}
+    : { keeperRefusal: context.keeper.keeperRefusal }),
+  survivors: [...context.groups, ...carry.carried],
+  createdAtMs: context.nowMs,
+  expiresAtMs: context.nowMs + QUARANTINE_TTL_MS,
+  ...(carry.holdUntilMs === undefined ? {} : { holdUntilMs: carry.holdUntilMs }),
+})
+
+/**
+ * Write `base` to the per-clone legacy file instead of the slot, MERGED with the
+ * legacy file's own same-identity record. `base` already carries what the slot
+ * held when the slot was readable; rebuilding from scratch dropped those groups.
+ */
+const fallBackToLegacy = (
+  context: LaneContext,
+  legacyPath: string | undefined,
+  base: LeaseQuarantineRecord,
+  why: string,
+): LeaseQuarantineRecord => {
+  if (legacyPath === undefined) {
+    // Nowhere to write. The caller's lane release must not read as a handoff.
+    throw new Error(`${why}; and no legacy location was given to fall back to`)
+  }
+  refuseForeignLegacy(legacyPath, context.key, context.isAlive)
+  const carry = carryExisting({
+    target: legacyPath,
+    key: context.key,
+    groups: base.survivors,
+    isAlive: context.isAlive,
+    nowMs: context.nowMs,
+    carryForeign: false,
+    log: context.log,
+  })
+  const holds = [base.holdUntilMs, carry.holdUntilMs].filter((one) => one !== undefined)
+  const record: LeaseQuarantineRecord = {
+    ...base,
+    survivors: [...base.survivors, ...carry.carried],
+    ...(holds.length === 0 ? {} : { holdUntilMs: Math.max(...holds) }),
+  }
+  mkdirSync(dirname(legacyPath), { recursive: true })
+  writeLeaseQuarantine(legacyPath, record)
+  context.log?.(
+    `[quarantine] WARN the host slot could not hold the record (${why}); it went to the ` +
+      `per-clone legacy file ${legacyPath}, which other clones of this repository cannot see\n`,
+  )
+  return record
+}
+
+const slotProblem = (path: string): string | undefined => {
+  try {
+    ensurePrivateDirectory(dirname(path))
+    return undefined
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error)
+  }
+}
+
+/** Write the slot; the failure text, or `undefined` when it was written. */
+const writeFailure = (path: string, record: LeaseQuarantineRecord): string | undefined => {
+  try {
+    writeLeaseQuarantine(path, record)
+    return undefined
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error)
+  }
 }
 
 export const quarantineLane = (input: QuarantineHandoffInput): LeaseQuarantineRecord => {
@@ -693,35 +855,38 @@ export const quarantineLane = (input: QuarantineHandoffInput): LeaseQuarantineRe
   const path = laneQuarantinePath(key, leaseQuarantineRoot(input.env))
   const legacyPath =
     input.legacyCacheRoot === undefined ? undefined : legacyQuarantinePath(input.legacyCacheRoot)
-  let slotRefusal: string | undefined
-  try {
-    ensurePrivateDirectory(dirname(path))
-  } catch (error) {
-    slotRefusal = error instanceof Error ? error.message : String(error)
+  const slotRefusal = slotProblem(path)
+  const context: LaneContext = {
+    key,
+    nowMs,
+    groups: input.groups,
+    isAlive: input.isAlive ?? groupAlive,
+    keeper: startKeeper(input, { path, key, legacyPath }, slotRefusal),
+    log: input.log,
   }
-  const target = slotRefusal === undefined ? path : legacyPath
-  if (target === undefined) {
-    // Nowhere to write. The caller's lane release must not read as a handoff.
-    throw new Error(`${slotRefusal}; and no legacy location was given to fall back to`)
-  }
-  const { keeperPid, keeperRefusal } = startKeeper(input, { path, key, legacyPath }, slotRefusal)
-  const carried = carryExisting(target, input.groups, input.isAlive ?? groupAlive, nowMs, input.log)
-  const record: LeaseQuarantineRecord = {
-    schema: LEASE_QUARANTINE_SCHEMA,
-    repositoryId: key,
-    keeperPid,
-    ...(keeperRefusal === undefined ? {} : { keeperRefusal }),
-    survivors: [...input.groups, ...carried],
-    createdAtMs: nowMs,
-    expiresAtMs: nowMs + QUARANTINE_TTL_MS,
-  }
-  writeLeaseQuarantine(target, record)
+  let record: LeaseQuarantineRecord
+  let inSlot = false
   if (slotRefusal !== undefined) {
-    input.log?.(
-      `[quarantine] WARN the host slot was refused (${slotRefusal}); the record went to the ` +
-        `per-clone legacy file ${target}, which other clones of this repository cannot see\n`,
+    record = fallBackToLegacy(
+      context,
+      legacyPath,
+      recordWith(context, { carried: [] }),
+      slotRefusal,
     )
-  } else if (legacyPath !== undefined) {
+  } else {
+    const slotted = recordWith(
+      context,
+      carryExisting({ ...context, target: path, carryForeign: true }),
+    )
+    // ENOSPC, EROFS, EACCES on the WRITE, after the directory checked out: it
+    // threw to the caller, which released the lane over live groups.
+    const failed = writeFailure(path, slotted)
+    inSlot = failed === undefined
+    record = inSlot
+      ? slotted
+      : fallBackToLegacy(context, legacyPath, slotted, `slot write failed: ${failed}`)
+  }
+  if (inSlot && legacyPath !== undefined) {
     // The mirror is a courtesy to older readers. Its failure used to escape AFTER
     // the slot was written, so the caller recorded no quarantine for a lane that
     // was quarantined.
@@ -731,10 +896,13 @@ export const quarantineLane = (input: QuarantineHandoffInput): LeaseQuarantineRe
       input.log?.(`[quarantine] legacy mirror failed: ${String(error)}\n`)
     }
   }
+  const keeperNote =
+    record.keeperPid === null
+      ? `NO KEEPER (${record.keeperRefusal ?? "unknown"})`
+      : `keeper=${record.keeperPid}`
   input.log?.(
-    `[quarantine] lane held for ${key} at ${target}: ${record.survivors.length} group(s) ` +
-      `[${record.survivors.map((g) => `${g.pgid}:${g.verdict}`).join(", ")}] ` +
-      `${keeperPid === null ? `NO KEEPER (${keeperRefusal ?? "unknown"})` : `keeper=${keeperPid}`} ` +
+    `[quarantine] lane held for ${key} at ${inSlot ? path : legacyPath}: ${record.survivors.length} group(s) ` +
+      `[${record.survivors.map((g) => `${g.pgid}:${g.verdict}`).join(", ")}] ${keeperNote} ` +
       `ttl=${QUARANTINE_TTL_MS}ms\n`,
   )
   return record
