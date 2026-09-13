@@ -19,6 +19,9 @@
  *     `git merge-tree` what the plain merge keeps.)
  *  6. (round 8) rename detection listed a renamed-away file only under its new name,
  *     so the old path was never read and a rename that dropped symbols examined 0 files.
+ *  7. (round 10) a loss was judged at its own path; when git's merge moved the file that
+ *     path is empty, so every drop there was excused. Conflicted paths excused nothing,
+ *     and unrelated histories aborted the scan.
  */
 
 import { afterEach, describe, expect, test } from "bun:test"
@@ -462,8 +465,11 @@ describe("residue 6 — a renamed-away path is still compared", () => {
       const merge = runGit(dir, ["rev-parse", "HEAD"]).trim()
       expect(runGit(dir, ["show", `${merge}:src/g.ts`])).toContain("export const s9")
       const scan = scanMerge(merge, createGitReadPort(dir))
+      // Every export moved to g.ts and the merge kept it there: not a loss, and not even
+      // a trivial one (round 10 — the old path was read, and git put the file at g.ts).
+      expect(scan.filesExamined).toBeGreaterThan(0)
       expect(scan.losses).toEqual([])
-      expect(scan.trivial.length).toBeGreaterThan(0)
+      expect(scan.trivial).toEqual([])
     })
   })
 
@@ -481,10 +487,11 @@ describe("residue 6 — a renamed-away path is still compared", () => {
       runGit(dir, ["merge", "-q", "--no-ff", "-m", "merge renamer", "renamer"])
       const merge = runGit(dir, ["rev-parse", "HEAD"]).trim()
       const scan = scanMerge(merge, createGitReadPort(dir))
-      // The old path IS compared now, and the 3-way rule excuses it: the base and the
-      // keeping parent agree, and the merge took the renaming parent's side.
+      // The old path IS compared, and git's merge put the file at moved.ts, where the
+      // merge commit has both exports: nothing was lost.
+      expect(scan.filesExamined).toBeGreaterThan(0)
       expect(scan.losses).toEqual([])
-      expect(scan.trivial.map((l) => l.symbol).sort()).toEqual(["alpha", "beta"])
+      expect(scan.trivial).toEqual([])
     })
   })
 
@@ -499,6 +506,138 @@ describe("residue 6 — a renamed-away path is still compared", () => {
       const lost = new Set(scan.losses.map((l) => l.symbol))
       expect(lost.has("addedOnB")).toBe(true)
       expect(lost.has("theta")).toBe(true)
+    })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 7. Where git's merge PUT the file (round 10), through the REAL git port
+// ---------------------------------------------------------------------------
+
+describe("residue 7 — a loss is judged where git's merge put the file", () => {
+  const exportsOf = (names: readonly string[]): string =>
+    `${names.map((n, i) => `export const ${n} = ${i}`).join("\n")}\n`
+
+  test("RED: git moved the file (rename on the other side) and the resolution dropped an export there", () => {
+    withTempDirSync("msl-r7-rename-", (dir) => {
+      initRepo(dir)
+      writeFileSync(join(dir, "src", "a.ts"), exportsOf(["keep1", "keep2", "keep3"]))
+      const base = commitAll(dir, "base")
+      runGit(dir, ["checkout", "-q", "-b", "side"])
+      runGit(dir, ["mv", "src/a.ts", "src/b.ts"])
+      commitAll(dir, "rename")
+      runGit(dir, ["checkout", "-q", "main"])
+      runGit(dir, ["reset", "-q", "--hard", base])
+      writeFileSync(
+        join(dir, "src", "a.ts"),
+        `${exportsOf(["keep1", "keep2", "keep3"])}export const BUDGET_CEILING = 99\n`,
+      )
+      commitAll(dir, "add")
+      spawnSync("git", ["merge", "-q", "--no-ff", "--no-commit", "side"], { cwd: dir })
+      // Ground truth: git's own merge keeps it, at the new path.
+      expect(runGit(dir, ["show", ":src/b.ts"])).toContain("BUDGET_CEILING")
+      writeFileSync(join(dir, "src", "b.ts"), exportsOf(["keep1", "keep2", "keep3"]))
+      const merge = commitAll(dir, "merge side")
+      const scan = scanMerge(merge, createGitReadPort(dir))
+      expect(scan.losses.map((l) => `${l.file}:${l.symbol}`)).toEqual(["src/a.ts:BUDGET_CEILING"])
+      expect(scan.trivial).toEqual([])
+    })
+  })
+
+  test("RED: a file added inside a directory the other side renamed, deleted by the resolution", () => {
+    withTempDirSync("msl-r7-dir-", (dir) => {
+      initRepo(dir)
+      mkdirSync(join(dir, "src", "old"), { recursive: true })
+      writeFileSync(join(dir, "src", "old", "a.ts"), exportsOf(["a1"]))
+      writeFileSync(join(dir, "src", "old", "b.ts"), exportsOf(["b1"]))
+      const base = commitAll(dir, "base")
+      runGit(dir, ["checkout", "-q", "-b", "side"])
+      runGit(dir, ["mv", "src/old", "src/new"])
+      commitAll(dir, "move dir")
+      runGit(dir, ["checkout", "-q", "main"])
+      runGit(dir, ["reset", "-q", "--hard", base])
+      writeFileSync(join(dir, "src", "old", "budget-limits.ts"), exportsOf(["clampBudgetLimit"]))
+      commitAll(dir, "add")
+      spawnSync("git", ["merge", "-q", "--no-ff", "--no-commit", "side"], { cwd: dir })
+      spawnSync("git", ["rm", "-q", "-f", "--ignore-unmatch", "src/new/budget-limits.ts"], {
+        cwd: dir,
+      })
+      spawnSync("git", ["rm", "-q", "-f", "--ignore-unmatch", "src/old/budget-limits.ts"], {
+        cwd: dir,
+      })
+      const merge = commitAll(dir, "merge side")
+      const scan = scanMerge(merge, createGitReadPort(dir))
+      expect(scan.losses.map((l) => `${l.file}:${l.symbol}`)).toEqual([
+        "src/old/budget-limits.ts:clampBudgetLimit",
+      ])
+    })
+  })
+
+  test("PAIRED CONTROL: in a conflicted file, an export one side deleted in a clean hunk is not the resolution's", () => {
+    withTempDirSync("msl-r7-conflict-", (dir) => {
+      initRepo(dir)
+      writeFileSync(
+        join(dir, "src", "f.ts"),
+        "export const legacyApi = 1\n\n\n\n\nexport const shared = 1\n",
+      )
+      const base = commitAll(dir, "base")
+      runGit(dir, ["checkout", "-q", "-b", "side"])
+      writeFileSync(join(dir, "src", "f.ts"), "\n\n\n\n\nexport const shared = 2\n")
+      commitAll(dir, "side drops legacyApi")
+      runGit(dir, ["checkout", "-q", "main"])
+      runGit(dir, ["reset", "-q", "--hard", base])
+      writeFileSync(
+        join(dir, "src", "f.ts"),
+        "export const legacyApi = 1\n\n\n\n\nexport const shared = 3\n",
+      )
+      commitAll(dir, "main edits shared")
+      spawnSync("git", ["merge", "-q", "--no-ff", "side"], { cwd: dir })
+      writeFileSync(join(dir, "src", "f.ts"), "\n\n\n\n\nexport const shared = 4\n")
+      const merge = commitAll(dir, "merge side")
+      const scan = scanMerge(merge, createGitReadPort(dir))
+      expect(scan.losses).toEqual([])
+      expect(scan.trivial.map((l) => l.symbol)).toEqual(["legacyApi"])
+    })
+  })
+
+  test("RED: in a conflicted file, an export either side still has is the resolution's to keep", () => {
+    withTempDirSync("msl-r7-conflict-red-", (dir) => {
+      initRepo(dir)
+      writeFileSync(join(dir, "src", "f.ts"), "export const kept = 1\nexport const shared = 1\n")
+      const base = commitAll(dir, "base")
+      runGit(dir, ["checkout", "-q", "-b", "side"])
+      writeFileSync(join(dir, "src", "f.ts"), "export const kept = 1\nexport const shared = 2\n")
+      commitAll(dir, "side")
+      runGit(dir, ["checkout", "-q", "main"])
+      runGit(dir, ["reset", "-q", "--hard", base])
+      writeFileSync(join(dir, "src", "f.ts"), "export const kept = 1\nexport const shared = 3\n")
+      commitAll(dir, "main")
+      spawnSync("git", ["merge", "-q", "--no-ff", "side"], { cwd: dir })
+      writeFileSync(join(dir, "src", "f.ts"), "export const shared = 4\n")
+      const merge = commitAll(dir, "merge side")
+      const scan = scanMerge(merge, createGitReadPort(dir))
+      expect(scan.losses.map((l) => l.symbol)).toContain("kept")
+    })
+  })
+
+  test("a merge of unrelated histories is scanned, not aborted", () => {
+    withTempDirSync("msl-r7-unrelated-", (dir) => {
+      initRepo(dir)
+      writeFileSync(join(dir, "src", "a.ts"), exportsOf(["x", "y"]))
+      commitAll(dir, "one")
+      runGit(dir, ["checkout", "-q", "--orphan", "other"])
+      runGit(dir, ["rm", "-q", "-rf", "."])
+      mkdirSync(join(dir, "src"), { recursive: true })
+      writeFileSync(join(dir, "src", "z.ts"), exportsOf(["z"]))
+      commitAll(dir, "two")
+      runGit(dir, ["checkout", "-q", "main"])
+      spawnSync("git", ["merge", "-q", "--allow-unrelated-histories", "--no-commit", "other"], {
+        cwd: dir,
+      })
+      writeFileSync(join(dir, "src", "a.ts"), exportsOf(["x"]))
+      const merge = commitAll(dir, "merge other")
+      const scan = scanMerge(merge, createGitReadPort(dir))
+      expect(scan.losses.map((l) => l.symbol)).toEqual(["y"])
     })
   })
 })

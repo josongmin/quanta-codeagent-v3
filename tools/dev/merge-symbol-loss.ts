@@ -105,6 +105,12 @@ export interface GitReadPort {
    * nothing can be excused for an octopus merge.
    */
   readonly autoMerge: (parents: readonly string[]) => AutoMerge | undefined
+  /**
+   * Paths `from` has that `to` holds under another name — `git diff --find-renames`,
+   * old path → new path. Asked of a parent and git's merge tree: when git moved a file,
+   * the parent's exports are to be looked for at the new path, not the empty old one.
+   */
+  readonly renames: (from: string, to: string) => ReadonlyMap<string, string>
 }
 
 /** The result of {@link GitReadPort.autoMerge}. */
@@ -181,6 +187,23 @@ const catFileBatch = (
   return out
 }
 
+/** `git diff -z --name-status` output → renamed old path → new path. A rename is
+ *  `R<score>\0old\0new\0`, a copy `C<score>\0src\0dst\0`, anything else `<status>\0path\0`. */
+export const parseRenames = (output: string): ReadonlyMap<string, string> => {
+  const fields = output.split("\0")
+  const out = new Map<string, string>()
+  let i = 0
+  while (i < fields.length) {
+    const status = fields[i] ?? ""
+    const twoPaths = status.startsWith("R") || status.startsWith("C")
+    const [first, second] = [fields[i + 1], fields[i + 2]]
+    if (status.startsWith("R") && first !== undefined && second !== undefined)
+      out.set(first, second)
+    i += status === "" ? 1 : twoPaths ? 3 : 2
+  }
+  return out
+}
+
 export const createGitReadPort = (cwd: string = REPO_ROOT): GitReadPort => ({
   parents: (sha) =>
     git(["rev-list", "--parents", "-n", "1", sha], cwd).trim().split(/\s+/).slice(1),
@@ -204,9 +227,19 @@ export const createGitReadPort = (cwd: string = REPO_ROOT): GitReadPort => ({
   readFiles: (sha, paths) => catFileBatch(cwd, sha, paths),
   autoMerge: (parents) => {
     if (parents.length !== 2) return undefined
+    // `--allow-unrelated-histories`: without it git refuses a merge of histories with no
+    // common base, and the refusal aborted the whole scan (round-10 audit, reproduced).
     const res = spawnSync(
       "git",
-      ["merge-tree", "--write-tree", "--name-only", "--no-messages", "-z", ...parents],
+      [
+        "merge-tree",
+        "--write-tree",
+        "--allow-unrelated-histories",
+        "--name-only",
+        "--no-messages",
+        "-z",
+        ...parents,
+      ],
       { cwd, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 },
     )
     // Exit 1 is "merged, with conflicts" (the tree still exists). Anything else is a
@@ -221,6 +254,8 @@ export const createGitReadPort = (cwd: string = REPO_ROOT): GitReadPort => ({
     }
     return { tree: tree.trim(), conflicted: new Set(rest.filter((f) => f.length > 0)) }
   },
+  renames: (from, to) =>
+    parseRenames(git(["diff", "-z", "--find-renames", "--name-status", from, to], cwd)),
   listMerges: (rev, maxMerges) =>
     git(["log", "--merges", "--format=%H", "-n", String(maxMerges), rev], cwd)
       .split("\n")
@@ -326,12 +361,11 @@ export interface MergeScan {
   /** Losses the commit message named. Deliberate removal, on the record. */
   readonly excused: readonly SymbolLoss[]
   /**
-   * Symbols absent from the merge only because the merge TRIVIALLY took another
-   * parent's file: the parent that still had the symbol never changed that file
-   * since the merge-base, and the merge's file is byte-identical to a parent that
-   * lacks it. The deletion was authored in an ordinary commit on the other line of
-   * history, where this detector — scoped to merges — has nothing to say. Reported,
-   * never hidden: see {@link isTrivialPerGitMerge}.
+   * Symbols absent from the merge because git's own merge of the parents lacks them too —
+   * the change was authored on a line of history, not by the merge's resolution, and this
+   * detector is scoped to resolutions. Reported, never hidden: see
+   * {@link isTrivialPerGitMerge}. (This said "the merge TRIVIALLY took another parent's
+   * byte-identical file", the rule two rounds replaced.)
    */
   readonly trivial: readonly SymbolLoss[]
   /**
@@ -421,15 +455,64 @@ const mergeSideExports = (
  * Asking git answers both: `git merge-tree --write-tree` IS the plain merge, with virtual
  * bases and rename detection.
  *
- * WHAT IT DOES NOT EXCUSE: a path git could not merge cleanly (the resolution is human);
- * an export git's merge keeps at that path; anything in an octopus merge.
+ * WHERE TO LOOK (round-10 audit, reproduced). My first version looked at the loss's own
+ * path. When git's merge MOVED the file — a rename on the other side, or a new file inside
+ * a renamed directory — that path is empty in git's tree, so every loss in the file was
+ * excused, including an export git's merge kept at the new path and the resolution then
+ * dropped. `placedAt` is where git's merge put the parent's file.
+ *
+ * A CONFLICTED path is git's text with both sides between markers. The export is excused
+ * only when its name appears nowhere in that text — neither side of any hunk has it, as
+ * when one side deleted it in a hunk that merged cleanly. My first version excused no
+ * conflicted path at all, and reported that clean deletion as a loss.
+ *
+ * WHAT IT DOES NOT EXCUSE: an export git's merge keeps; a name either side of a conflict
+ * still spells; anything in an octopus merge.
  */
 export const isTrivialPerGitMerge = (
   loss: SymbolLoss,
-  auto: AutoMerge | undefined,
-  autoExports: (path: string) => Set<string>,
-): boolean =>
-  auto !== undefined && !auto.conflicted.has(loss.file) && !autoExports(loss.file).has(loss.symbol)
+  placement: {
+    readonly auto: AutoMerge | undefined
+    readonly placedAt: string
+    readonly autoExports: (path: string) => Set<string>
+    readonly autoText: (path: string) => string | null
+  },
+): boolean => {
+  const { auto, placedAt } = placement
+  if (auto === undefined) return false
+  if (auto.conflicted.has(loss.file) || auto.conflicted.has(placedAt)) {
+    const text = placement.autoText(placedAt) ?? ""
+    return !messageNamesSymbol(text, loss.symbol)
+  }
+  return !placement.autoExports(placedAt).has(loss.symbol)
+}
+
+/** Where git's merge put each parent's files, and what it holds there. */
+const gitMergePlacement = (
+  sha: string,
+  parents: readonly string[],
+  found: readonly SymbolLoss[],
+  port: GitReadPort,
+) => {
+  const auto = port.autoMerge(parents)
+  const renamesByParent = new Map(
+    auto === undefined ? [] : parents.map((p) => [p, port.renames(p, auto.tree)] as const),
+  )
+  const placedAt = (l: SymbolLoss): string => renamesByParent.get(l.parent)?.get(l.file) ?? l.file
+  const placedPaths = [...new Set(found.map(placedAt))]
+  const autoFiles =
+    auto === undefined ? new Map<string, string | null>() : port.readFiles(auto.tree, placedPaths)
+  const autoExports =
+    auto === undefined ? () => new Set<string>() : mergeSideExports(auto.tree, placedPaths, port)
+  return {
+    auto,
+    placedAt,
+    autoExports,
+    autoText: (path: string) => autoFiles.get(path) ?? null,
+    /** The merge commit's exports at the placed paths — a moved export it kept is no loss. */
+    mergeExportsAtPlaced: mergeSideExports(sha, placedPaths, port),
+  }
+}
 
 export const scanMerge = (sha: string, port: GitReadPort): MergeScan => {
   const parents = port.parents(sha)
@@ -456,12 +539,23 @@ export const scanMerge = (sha: string, port: GitReadPort): MergeScan => {
   }
 
   // Only merges that report something pay for git's own merge and the extra reads.
-  const auto = found.length > 0 ? port.autoMerge(parents) : undefined
-  const lossPaths = [...new Set(found.map((l) => l.file))]
-  const autoExports =
-    auto === undefined ? () => new Set<string>() : mergeSideExports(auto.tree, lossPaths, port)
-  const trivial = found.filter((l) => isTrivialPerGitMerge(l, auto, autoExports))
-  const substantive = found.filter((l) => !trivial.includes(l))
+  const placement = found.length > 0 ? gitMergePlacement(sha, parents, found, port) : undefined
+  // A file git's merge moved, whose export the merge commit has at the new path, lost
+  // nothing: the parent-to-merge diff saw a delete and an add.
+  const candidates =
+    placement === undefined
+      ? found
+      : found.filter((l) => {
+          const at = placement.placedAt(l)
+          return at === l.file || !placement.mergeExportsAtPlaced(at).has(l.symbol)
+        })
+  const trivial =
+    placement === undefined
+      ? []
+      : candidates.filter((l) =>
+          isTrivialPerGitMerge(l, { ...placement, placedAt: placement.placedAt(l) }),
+        )
+  const substantive = candidates.filter((l) => !trivial.includes(l))
 
   const ambiguous = ambiguousBasenamesOf(substantive)
   const excused = substantive.filter((l) => isExcusedByMessage(message, l, ambiguous))

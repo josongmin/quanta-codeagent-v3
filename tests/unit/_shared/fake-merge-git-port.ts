@@ -10,7 +10,7 @@
  *
  * `autoMerge` here is a FILE-level three-way merge over the nearest common ancestor: a
  * path takes the side that changed it, and a path both sides changed differently is a
- * conflict. Real git merges lines, so two non-overlapping edits merge cleanly there; the
+ * conflict whose text holds both sides. `renames` matches whole files by content. Real git merges lines, so two non-overlapping edits merge cleanly there; the
  * synthetic cases only rely on the file-level answers, and the real-repository cases in
  * the residue suite exercise `git merge-tree` itself.
  */
@@ -23,7 +23,8 @@ export interface FakeCommit {
 }
 
 /** File-level three-way merge of one path: the side that changed wins; both changed
- *  differently is a conflict (resolved to `a`, like a merge that has not been edited). */
+ *  differently is a conflict, written the way git writes one — both sides between
+ *  markers (a side that deleted the file contributes nothing). */
 const mergePath = (
   a: string | undefined,
   b: string | undefined,
@@ -31,7 +32,8 @@ const mergePath = (
 ): { readonly value: string | undefined; readonly conflict: boolean } => {
   if (a === b || b === base) return { value: a, conflict: false }
   if (a === base) return { value: b, conflict: false }
-  return { value: a, conflict: true }
+  const sides = [a, b].filter((v): v is string => v !== undefined)
+  return { value: `<<<<<<< a\n${sides.join("\n=======\n")}\n>>>>>>> b\n`, conflict: true }
 }
 
 export const fakeMergeGitPort = (commits: Readonly<Record<string, FakeCommit>>): GitReadPort => {
@@ -78,6 +80,19 @@ export const fakeMergeGitPort = (commits: Readonly<Record<string, FakeCommit>>):
     },
     readFiles: (sha, paths) => new Map(paths.map((p) => [p, filesOf(sha)[p] ?? null])),
     listMerges: () => Object.keys(commits).filter((sha) => at(sha).parents.length >= 2),
+    // A rename is a path `from` has and `to` lacks whose exact content `to` holds at a
+    // path `from` lacks — enough for the whole-file moves these tests build.
+    renames: (from, to) => {
+      const a = filesOf(from)
+      const b = filesOf(to)
+      const out = new Map<string, string>()
+      for (const [oldPath, text] of Object.entries(a)) {
+        if (b[oldPath] !== undefined) continue
+        const newPath = Object.keys(b).find((p) => a[p] === undefined && b[p] === text)
+        if (newPath !== undefined) out.set(oldPath, newPath)
+      }
+      return out
+    },
     autoMerge: (parents): AutoMerge | undefined => {
       if (parents.length !== 2) return undefined
       const baseSha = nearestCommonAncestor(parents)
