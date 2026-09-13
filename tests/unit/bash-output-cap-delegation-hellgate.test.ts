@@ -79,7 +79,7 @@ describe("bash output cap delegation hellgate (TKT-001 / ADR-0411)", () => {
     let spilled = false
     const capped = await capToolOutput(body, {
       maxChars: 20_000,
-      spillDir: join(dir, "spill-3"),
+      spillDir: join(dir, ".quanta", "tool-output"),
       write: () => {
         spilled = true
       },

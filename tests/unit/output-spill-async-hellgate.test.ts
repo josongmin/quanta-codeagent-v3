@@ -15,6 +15,9 @@
  *    bounds the dir to the exact keep count);
  *  - the default (un-injected) path round-trips through the real filesystem
  *    and the real prune still bounds the dir — behavior preserved.
+ *
+ * Every over-cap arm spills into `<dir>/.quanta/tool-output`: the spill dir is
+ * opened for real by the NW-2 containment guard before any write or prune.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
@@ -24,8 +27,10 @@ import { join } from "node:path"
 import { capToolOutput, type SpillFsOpsAsync } from "../../src/tool/output-spill"
 
 let dir: string
+let spillDir: string
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "output-spill-async-"))
+  spillDir = join(dir, ".quanta", "tool-output")
 })
 afterEach(async () => {
   await rm(dir, { recursive: true, force: true })
@@ -39,7 +44,7 @@ describe("capToolOutput — async write seam is awaited (call shape)", () => {
     let writeSettled = false
     const r = await capToolOutput(big, {
       maxChars: 10,
-      spillDir: dir,
+      spillDir,
       // Async writer: the real write lands strictly later than the call. A
       // sync implementation that fires-and-forgets the returned promise
       // resolves before the file exists — fresh readback then fails.
@@ -59,7 +64,7 @@ describe("capToolOutput — async write seam is awaited (call shape)", () => {
 
   test("default (un-injected) write path: spill is readable back from real disk", async () => {
     const big = `${"A".repeat(20_000)}MIDDLE${"Z".repeat(20_000)}`
-    const spillDir = join(dir, "nested", "tool-output") // exercises lazy mkdir
+    // Neither component exists yet: exercises the lazy per-component mkdir.
     const r = await capToolOutput(big, { maxChars: 100, spillDir })
     expect(r.spillPath).toBeDefined()
     const onDisk = await readFile(r.spillPath as string, "utf8")
@@ -98,7 +103,7 @@ describe("capToolOutput — async GC prune (call shape via injected fs seam)", (
     }
     const r = await capToolOutput("Z".repeat(1000), {
       maxChars: 10,
-      spillDir: dir,
+      spillDir,
       write: () => {},
       spillKeep: 1,
       spillFs,
@@ -121,7 +126,7 @@ describe("capToolOutput — async GC prune (call shape via injected fs seam)", (
     }
     const r = await capToolOutput("Q".repeat(500), {
       maxChars: 10,
-      spillDir: dir,
+      spillDir,
       write: () => {},
       spillKeep: 1,
       spillFs,
@@ -131,7 +136,6 @@ describe("capToolOutput — async GC prune (call shape via injected fs seam)", (
   })
 
   test("default (un-injected) prune still bounds the REAL dir — exact count, newest survive", async () => {
-    const spillDir = join(dir, "spill")
     await mkdir(spillDir, { recursive: true })
     // Three pre-existing spills with explicitly OLD mtimes (no same-ms ties
     // with the fresh spill written below).

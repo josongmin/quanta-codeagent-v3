@@ -16,6 +16,9 @@
  */
 
 import { describe, expect, test } from "bun:test"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { estimateTokens } from "@/agent"
 import {
   createEvictionSpillPort,
@@ -252,26 +255,34 @@ describe("microcompaction tool-result eviction — pure pre-pass", () => {
   })
 
   test("default spill adapter persists the original via an injected writer", () => {
-    const writes = new Map<string, string>()
-    let n = 0
-    const port = createEvictionSpillPort({
-      spillDir: "/tmp/spill",
-      write: (path, data) => writes.set(path, data),
-      fileName: () => `f${n++}.txt`,
-      spillFs: { readdir: () => [], mtimeMs: () => 0, remove: () => {} },
-    })
-    const messages = transcript(4)
-    const r = microcompactToolResults({
-      messages,
-      keepRecent: 1,
-      tokensSavedFloor: 0,
-      spill: port,
-    })
-    expect(r.changed).toBe(true)
-    // The oldest original was written to the spill dir, byte-for-byte.
-    expect(writes.get("/tmp/spill/f0.txt")).toBe(bigBody("u0"))
-    const cleared = toolResults(r.messages)[0] as ToolResultBlock
-    expect(cleared.content).toContain("/tmp/spill/f0.txt")
+    // The adapter opens `<root>/.quanta/tool-output` for real (NW-2 containment)
+    // before handing the path to the injected writer.
+    const scratch = mkdtempSync(join(tmpdir(), "evict-spill-adapter-"))
+    const spillDir = join(scratch, ".quanta", "tool-output")
+    try {
+      const writes = new Map<string, string>()
+      let n = 0
+      const port = createEvictionSpillPort({
+        spillDir,
+        write: (path, data) => writes.set(path, data),
+        fileName: () => `f${n++}.txt`,
+        spillFs: { readdir: () => [], mtimeMs: () => 0, remove: () => {} },
+      })
+      const messages = transcript(4)
+      const r = microcompactToolResults({
+        messages,
+        keepRecent: 1,
+        tokensSavedFloor: 0,
+        spill: port,
+      })
+      expect(r.changed).toBe(true)
+      // The oldest original was written to the spill dir, byte-for-byte.
+      expect(writes.get(join(spillDir, "f0.txt"))).toBe(bigBody("u0"))
+      const cleared = toolResults(r.messages)[0] as ToolResultBlock
+      expect(cleared.content).toContain(join(spillDir, "f0.txt"))
+    } finally {
+      rmSync(scratch, { recursive: true, force: true })
+    }
   })
 
   test("C3 (jul-3) — default spill marker carries a best-effort retention caveat", () => {
@@ -279,18 +290,24 @@ describe("microcompaction tool-result eviction — pure pre-pass", () => {
     // later eviction can GC it before the model reads it. The default marker must
     // tell the model the Read is best-effort so a failed Read of a reclaimed path
     // is not treated as a hard error.
-    const port = createEvictionSpillPort({
-      spillDir: "/tmp/spill",
-      write: () => {},
-      fileName: () => "f0.txt",
-      spillFs: { readdir: () => [], mtimeMs: () => 0, remove: () => {} },
-    })
-    const marker = port.persist(bigBody("u0"), "u0")
-    expect(marker).toBeDefined()
-    // TEETH: pre-C3 the marker had no best-effort caveat.
-    expect(marker as string).toContain("best-effort")
-    // The path + retrieval instruction are still present (non-regression).
-    expect(marker as string).toContain("/tmp/spill/f0.txt")
-    expect(marker as string).toContain("Read that file")
+    const scratch = mkdtempSync(join(tmpdir(), "evict-spill-adapter-"))
+    const spillDir = join(scratch, ".quanta", "tool-output")
+    try {
+      const port = createEvictionSpillPort({
+        spillDir,
+        write: () => {},
+        fileName: () => "f0.txt",
+        spillFs: { readdir: () => [], mtimeMs: () => 0, remove: () => {} },
+      })
+      const marker = port.persist(bigBody("u0"), "u0")
+      expect(marker).toBeDefined()
+      // TEETH: pre-C3 the marker had no best-effort caveat.
+      expect(marker as string).toContain("best-effort")
+      // The path + retrieval instruction are still present (non-regression).
+      expect(marker as string).toContain(join(spillDir, "f0.txt"))
+      expect(marker as string).toContain("Read that file")
+    } finally {
+      rmSync(scratch, { recursive: true, force: true })
+    }
   })
 })

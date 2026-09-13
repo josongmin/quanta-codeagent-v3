@@ -1,4 +1,7 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import {
   capToolOutput,
   DEFAULT_SPILL_KEEP,
@@ -12,6 +15,18 @@ import {
   type SpillFsOps,
   TAIL_CHARS,
 } from "../../src/tool/output-spill"
+
+// Over-cap spills open `<root>/.quanta/tool-output` for real (NW-2 containment),
+// so over-cap arms spill into a scratch root; the file write stays injected.
+let scratch: string
+let spillDir: string
+beforeEach(() => {
+  scratch = mkdtempSync(join(tmpdir(), "output-spill-unit-"))
+  spillDir = join(scratch, ".quanta", "tool-output")
+})
+afterEach(() => {
+  rmSync(scratch, { recursive: true, force: true })
+})
 
 function collectingWrite() {
   const calls: Array<{ path: string; data: string }> = []
@@ -69,13 +84,14 @@ describe("capToolOutput — over cap", () => {
   test("persists full content and returns excerpt + marker", async () => {
     const { write, calls } = collectingWrite()
     const big = `${"A".repeat(20_000)}MIDDLE${"Z".repeat(20_000)}`
-    const r = await capToolOutput(big, { maxChars: 100, spillDir: "/tmp/spill", write })
+    const r = await capToolOutput(big, { maxChars: 100, spillDir, write })
 
     // full content written exactly once, untruncated
     expect(calls).toHaveLength(1)
     expect(calls[0]?.data).toBe(big)
     expect(calls[0]?.path).toBe(r.spillPath)
-    expect(r.spillPath).toMatch(/^\/tmp\/spill\/[0-9a-f-]{36}\.txt$/)
+    expect((r.spillPath as string).slice(0, spillDir.length + 1)).toBe(`${spillDir}/`)
+    expect((r.spillPath as string).slice(spillDir.length + 1)).toMatch(/^[0-9a-f-]{36}\.txt$/)
 
     // marker faithfully echoes CC's <persisted-output> wrapper
     expect(r.output.startsWith("<persisted-output>\n")).toBe(true)
@@ -95,7 +111,7 @@ describe("capToolOutput — over cap", () => {
     const mid = "M".repeat(5_000)
     const tail = "T".repeat(TAIL_CHARS)
     const big = head + mid + tail
-    const r = await capToolOutput(big, { maxChars: 10, spillDir: "/tmp/s", write })
+    const r = await capToolOutput(big, { maxChars: 10, spillDir, write })
 
     expect(r.output).toContain(head)
     expect(r.output).toContain(tail)
@@ -108,7 +124,7 @@ describe("capToolOutput — over cap", () => {
     const { write } = collectingWrite()
     // length 100, cap 10 → over cap, but < HEAD_CHARS+TAIL_CHARS
     const big = "x".repeat(60) + "y".repeat(40)
-    const r = await capToolOutput(big, { maxChars: 10, spillDir: "/tmp/s", write })
+    const r = await capToolOutput(big, { maxChars: 10, spillDir, write })
     expect(r.spillPath).toBeDefined()
     // 0 chars omitted: head covers whole string, tail empty
     expect(r.output).toContain("0 chars omitted")
@@ -119,7 +135,7 @@ describe("capToolOutput — over cap", () => {
     const { write, calls } = collectingWrite()
     const out = "q".repeat(1000)
     const max = envMaxChars({ QUANTA_TOOL_OUTPUT_MAX: "500" })
-    const r = await capToolOutput(out, { maxChars: max, spillDir: "/tmp/s", write })
+    const r = await capToolOutput(out, { maxChars: max, spillDir, write })
     expect(calls).toHaveLength(1)
     expect(r.output).toContain("500-char")
   })
@@ -289,7 +305,7 @@ describe("capToolOutput — GC wiring", () => {
     }
     const r = await capToolOutput("Z".repeat(1000), {
       maxChars: 10,
-      spillDir: "/spill",
+      spillDir,
       write,
       spillKeep: 1,
       spillFs,
@@ -329,7 +345,7 @@ describe("capToolOutput — GC wiring", () => {
     }
     const r = await capToolOutput("Q".repeat(500), {
       maxChars: 10,
-      spillDir: "/spill",
+      spillDir,
       write,
       spillKeep: 1,
       spillFs,

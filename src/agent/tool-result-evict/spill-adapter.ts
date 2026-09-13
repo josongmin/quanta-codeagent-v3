@@ -1,9 +1,13 @@
-import { mkdirSync, writeFileSync } from "node:fs"
+import { writeFileSync } from "node:fs"
 import { join } from "node:path"
+import { logger } from "@/shared"
 import {
   DEFAULT_SPILL_KEEP,
+  describeSpillRefusal,
+  openSpillDir,
   pruneSpillDir,
   resolveSpillKeep,
+  type SpillDirRefusal,
   type SpillFsOps,
 } from "@/tool/output-spill"
 import type { EvictionSpillPort } from "./types"
@@ -26,12 +30,19 @@ import type { EvictionSpillPort } from "./types"
  * (`evict.ts#clearedBody` try/catch): any writer/GC failure propagates as a
  * throw and degrades to a bare-placeholder clear — it never aborts the
  * microcompaction.
+ *
+ * CONTAINMENT (NW-2): the spill dir is opened by the SAME `openSpillDir` guard
+ * the registry spill uses. A refused dir (a repo-shipped `.quanta` or
+ * `.quanta/tool-output` symlink, a non-directory, or an IO failure) gets no
+ * write and no prune; the cleared block carries the refusal reason instead of
+ * a path, so the model knows the original cannot be re-read.
  */
 export interface DefaultEvictionSpillOptions {
-  /** Directory the originals are written into (`.quanta/tool-output`). */
+  /** `<cwd>/.quanta/tool-output`, the directory the originals are written into.
+   *  Opened by `openSpillDir` before every write or prune. */
   readonly spillDir: string
-  /** Injected writer (path, data) — defaults to a lazy mkdir + writeFileSync.
-   *  Override in tests to avoid disk IO. */
+  /** Injected writer (path, data), called only after the spill dir was opened —
+   *  defaults to writeFileSync. Override in tests to avoid the file write. */
   readonly write?: (path: string, data: string) => void
   /** Generate the spill file name (sans dir). Injected for deterministic tests;
    *  defaults to a random uuid (read at call time, not module load). */
@@ -43,9 +54,6 @@ export interface DefaultEvictionSpillOptions {
 }
 
 const defaultWrite = (path: string, data: string): void => {
-  const slash = path.lastIndexOf("/")
-  const dir = slash > 0 ? path.slice(0, slash) : ""
-  if (dir) mkdirSync(dir, { recursive: true })
   writeFileSync(path, data)
 }
 
@@ -62,6 +70,14 @@ const refMarker = (path: string, originalChars: number): string =>
   `Read fails, proceed without it) ` +
   `</persisted-output>`
 
+/** The cleared block's suffix when the spill dir was refused: no path to Read,
+ *  and the reason why. */
+const refusedMarker = (refusal: SpillDirRefusal, originalChars: number): string =>
+  `<unpersisted-output chars="${originalChars}">` +
+  ` full original tool output was not persisted to disk: ${describeSpillRefusal(refusal)}; ` +
+  `it cannot be re-read ` +
+  `</unpersisted-output>`
+
 export const createEvictionSpillPort = (opts: DefaultEvictionSpillOptions): EvictionSpillPort => {
   const write = opts.write ?? defaultWrite
   // Lazy `node:crypto` require avoided — randomUUID is read at call time so the
@@ -70,12 +86,19 @@ export const createEvictionSpillPort = (opts: DefaultEvictionSpillOptions): Evic
     opts.fileName ?? ((): string => `${(globalThis.crypto as Crypto).randomUUID()}.txt`)
   return {
     persist: (body: string): string | undefined => {
-      const spillPath = join(opts.spillDir, fileName())
+      const opened = openSpillDir(opts.spillDir)
+      if (!opened.ok) {
+        logger.warn(
+          `tool-result-evict.spill-adapter: spill refused — ${describeSpillRefusal(opened.refusal)}`,
+        )
+        return refusedMarker(opened.refusal, body.length)
+      }
+      const spillPath = join(opened.dir, fileName())
       write(spillPath, body)
       // Bound the dir (best-effort, never throws — see pruneSpillDir contract).
       const keep = resolveSpillKeep(opts.spillKeep ?? DEFAULT_SPILL_KEEP)
-      if (opts.spillFs !== undefined) pruneSpillDir(opts.spillDir, keep, opts.spillFs)
-      else pruneSpillDir(opts.spillDir, keep)
+      if (opts.spillFs !== undefined) pruneSpillDir(opened.dir, keep, opts.spillFs)
+      else pruneSpillDir(opened.dir, keep)
       return refMarker(spillPath, body.length)
     },
   }
