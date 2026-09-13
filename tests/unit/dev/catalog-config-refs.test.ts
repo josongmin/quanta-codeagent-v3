@@ -30,8 +30,10 @@ import { tmpdir } from "node:os"
 import { dirname, join, relative } from "node:path"
 import {
   activationEnvNames,
+  type CatalogEnvFields,
   type CatalogEnvSource,
   catalogCorpus,
+  catalogEnvSources,
   type DeclaredEnvNames,
   declaredEnvNames,
   describeUnbackedEnvNames,
@@ -79,16 +81,8 @@ const SENTINELS: readonly (readonly [string, EnvEvidenceKind, string])[] = [
   ["QUANTA_TERMINAL_BRAIN_REPO", "shell", "adapters/"],
 ]
 
-/** Each env-naming field on its own, so an arm can prove every one reached `declared`. */
-interface FieldNames {
-  readonly configRefs: readonly string[]
-  readonly knobs: readonly string[]
-  readonly gateOwner: readonly string[]
-  readonly activation: readonly string[]
-}
-
 interface Scan {
-  readonly fields: FieldNames
+  readonly fields: CatalogEnvFields
   readonly records: readonly CatalogEnvSource[]
   readonly declared: DeclaredEnvNames
   readonly files: readonly string[]
@@ -105,26 +99,9 @@ beforeAll(async () => {
   const ledger = await loadDefaultOffLedger(
     join(REPO_ROOT, "tools", "feature-catalog", "default-off-ledger.yaml"),
   )
-  const knobsOf = (feature: (typeof features)[number]["feature"]) =>
-    envKnobNames(feature.knobs as Parameters<typeof envKnobNames>[0])
-  const activationOf = (feature: (typeof features)[number]["feature"]) =>
-    activationEnvNames(feature.wiring?.activation)
-  const records: CatalogEnvSource[] = [
-    ...features.map(({ feature, path }) => ({
-      path: relative(REPO_ROOT, path),
-      env: [...(feature.config_refs?.env ?? []), ...knobsOf(feature), ...activationOf(feature)],
-    })),
-    ...ledger.rows.map((row) => ({
-      path: `tools/feature-catalog/default-off-ledger.yaml#${row.feature_id}.gate_owner`,
-      env: gateOwnerEnvNames(row.gate_owner),
-    })),
-  ]
-  const fields: FieldNames = {
-    configRefs: features.flatMap(({ feature }) => feature.config_refs?.env ?? []),
-    knobs: features.flatMap(({ feature }) => knobsOf(feature)),
-    gateOwner: ledger.rows.flatMap((row) => gateOwnerEnvNames(row.gate_owner)),
-    activation: features.flatMap(({ feature }) => activationOf(feature)),
-  }
+  const { records, fields } = catalogEnvSources(features, ledger.rows, (path) =>
+    relative(REPO_ROOT, path),
+  )
   const declared = declaredEnvNames(records)
   const files = catalogCorpus(REPO_ROOT)
   const all = envEvidenceAll(
@@ -180,7 +157,7 @@ describe("every env name the catalog offers is one some code reads", () => {
     // ledger's `env: []`, and dropping `config_refs.env`, `knobs` or `gate_owner`
     // from the scan left `declared.size > 400` — every such mutant was green.
     const { fields, declared } = scanned()
-    const all = Object.entries(fields) as [keyof FieldNames, readonly string[]][]
+    const all = Object.entries(fields) as [keyof CatalogEnvFields, readonly string[]][]
     for (const [field, names] of all) {
       // ANTI-VACUITY for the field itself, then membership of everything it names.
       expect({ field, names: names.length > 0 }).toEqual({ field, names: true })
@@ -198,6 +175,35 @@ describe("every env name the catalog offers is one some code reads", () => {
       const exclusive = fields[field].filter((name) => !others.has(name))
       expect({ field, exclusive: exclusive.length > 0 }).toEqual({ field, exclusive: true })
     }
+  })
+
+  test("EVERY field reaches the records, each proven by a synthetic name only it declares", () => {
+    // The real catalog cannot prove `activation`: its one key is also a knob.
+    const { records, fields } = catalogEnvSources(
+      [
+        { path: "/r/a.yaml", feature: { config_refs: { env: ["QUANTA_ONLY_CONFIG_REFS"] } } },
+        { path: "/r/b.yaml", feature: { knobs: [{ name: "QUANTA_ONLY_KNOB" }] } },
+        {
+          path: "/r/c.yaml",
+          feature: { wiring: { activation: [{ kind: "env", key: "QUANTA_ONLY_ACTIVATION" }] } },
+        },
+      ],
+      [{ feature_id: "d", gate_owner: ["QUANTA_ONLY_GATE_OWNER"] }],
+      (path) => path.replace("/r/", ""),
+    )
+    const declared = declaredEnvNames(records)
+    expect(Object.fromEntries([...declared].map(([name, paths]) => [name, paths]))).toEqual({
+      QUANTA_ONLY_CONFIG_REFS: ["a.yaml"],
+      QUANTA_ONLY_KNOB: ["b.yaml"],
+      QUANTA_ONLY_ACTIVATION: ["c.yaml"],
+      QUANTA_ONLY_GATE_OWNER: ["tools/feature-catalog/default-off-ledger.yaml#d.gate_owner"],
+    })
+    expect(fields).toEqual({
+      configRefs: ["QUANTA_ONLY_CONFIG_REFS"],
+      knobs: ["QUANTA_ONLY_KNOB"],
+      gateOwner: ["QUANTA_ONLY_GATE_OWNER"],
+      activation: ["QUANTA_ONLY_ACTIVATION"],
+    })
   })
 
   test("knobs WITHOUT `where: env`, and activation keys, are declarations too", () => {
@@ -457,6 +463,21 @@ describe("what counts as evidence", () => {
       QUANTA_TS_ARRREAD: "ts-access",
       QUANTA_EXPECT_DEAD: null,
       QUANTA_TEST_GATE: "ts-access",
+      // One line per rule a third audit deleted with every arm above green.
+      QUANTA_PY_SETDEFAULT: null,
+      QUANTA_PY_PUTENV: null,
+      QUANTA_PY_DELENV: null,
+      QUANTA_PY_SQWRITE: null,
+      QUANTA_PY_DICTKEY2: null,
+      QUANTA_PY_CASE: "quoted",
+      QUANTA_RS_ENVREMOVE: null,
+      QUANTA_RS_REMOVEVAR: null,
+      QUANTA_GO_UNSETENV: null,
+      QUANTA_TS_FORINWRITE: null,
+      QUANTA_TS_RESTWRITE: null,
+      QUANTA_SH_DQESC: "shell",
+      QUANTA_SH_SEMICOMMENT: null,
+      QUANTA_SH_ARGC: "shell",
     }
     const names = Object.keys(expected)
     const found = inFixture(
@@ -470,6 +491,13 @@ describe("what counts as evidence", () => {
           'os.environ.pop("QUANTA_PY_POP")',
           'if os.environ["QUANTA_PY_CMP"] == "1": pass',
           'label = f"QUANTA_PY_FSTRING"',
+          'os.environ.setdefault("QUANTA_PY_SETDEFAULT", "1")',
+          'os.putenv("QUANTA_PY_PUTENV", "1")',
+          'monkeypatch.delenv("QUANTA_PY_DELENV")',
+          "os.environ['QUANTA_PY_SQWRITE'] = '1'",
+          'env = {"A": "1", "QUANTA_PY_DICTKEY2": "1"}',
+          "match name:",
+          '    case "QUANTA_PY_CASE": pass',
         ].join("\n"),
         "tests/test_b.py": [
           'NAME = "QUANTA_PY_TESTNAME"',
@@ -479,8 +507,10 @@ describe("what counts as evidence", () => {
         "native/c.rs": [
           '// std::env::var("QUANTA_RS_COMMENT")',
           'std::env::set_var("QUANTA_RS_SETVAR", "1");',
+          'cmd.env_remove("QUANTA_RS_ENVREMOVE");',
+          'std::env::remove_var("QUANTA_RS_REMOVEVAR");',
         ].join("\n"),
-        "native/d.go": 'os.Setenv("QUANTA_GO_SETENV", "1")\n',
+        "native/d.go": 'os.Setenv("QUANTA_GO_SETENV", "1")\nos.Unsetenv("QUANTA_GO_UNSETENV")\n',
         "scripts/e.sh": [
           `# echo ${DOLLAR}QUANTA_SH_COMMENT`,
           `echo '${DOLLAR}QUANTA_SH_SQ'`,
@@ -498,6 +528,9 @@ describe("what counts as evidence", () => {
           'import os; os.environ.get("QUANTA_SH_EMBED")',
           'print("QUANTA_SH_EMBED_MENTION")',
           "PY",
+          `echo "\\"it's" ${DOLLAR}QUANTA_SH_DQESC`,
+          `echo hi;# ${DOLLAR}QUANTA_SH_SEMICOMMENT`,
+          `echo ${DOLLAR}# ${DOLLAR}QUANTA_SH_ARGC`,
         ].join("\n"),
         ".github/workflows/w.yml": [
           "jobs:",
@@ -521,10 +554,111 @@ describe("what counts as evidence", () => {
           '({ a: process.env.QUANTA_TS_OBJWRITE } = { a: "1" });',
           'for (process.env.QUANTA_TS_FORWRITE of ["1"]) {}',
           "const [x] = [process.env.QUANTA_TS_ARRREAD];",
+          "for (process.env.QUANTA_TS_FORINWRITE in { a: 1 }) {}",
+          '[...process.env.QUANTA_TS_RESTWRITE] = ["1"];',
         ].join("\n"),
         "tests/unit/j.test.ts": [
           "expect(process.env.QUANTA_EXPECT_DEAD).toBeUndefined()",
           "if (process.env.QUANTA_TEST_GATE) {}",
+        ].join("\n"),
+      },
+      names,
+    )
+    expect(backed(found, names)).toEqual(expected)
+  })
+
+  test("THIRD AUDIT — heredoc bodies, escapes, inline scripts and Python reads", () => {
+    // Every line below was a read the second version lost (or, the last two, a
+    // dead name it backed), measured old against new by the audit.
+    const expected: Readonly<Record<string, EnvEvidenceKind | null>> = {
+      QUANTA_AFTER_BODY_APOS: "shell",
+      QUANTA_AFTER_ANSI: "shell",
+      QUANTA_AFTER_ESCAPED: "shell",
+      QUANTA_AFTER_SUBST: "shell",
+      QUANTA_AFTER_BODY_QUOTE: null,
+      QUANTA_AFTER_DQ_OPENER: null,
+      QUANTA_AFTER_NESTED_ARITH: null,
+      QUANTA_AFTER_ARITH_CMD: null,
+      QUANTA_AFTER_HERESTRING: null,
+      QUANTA_BACKSLASH_EMBED: "shell",
+      QUANTA_GS_SCRIPT: "workflow",
+      QUANTA_GS_LITERAL: null,
+      QUANTA_BUN_HEREDOC: "shell",
+      QUANTA_BUN_E: "workflow",
+      QUANTA_BUN_E_MENTION: null,
+      QUANTA_PY_C: "shell",
+      QUANTA_POP_CONSUME: "quoted",
+      QUANTA_SETDEFAULT_VALUE: "quoted",
+      QUANTA_TUPLE_FOR: "quoted",
+    }
+    const names = Object.keys(expected)
+    const found = inFixture(
+      {
+        "scripts/body-apostrophe.sh": [
+          "cat <<EOF",
+          "Don't stop",
+          "EOF",
+          `echo ${DOLLAR}QUANTA_AFTER_BODY_APOS`,
+        ].join("\n"),
+        "scripts/ansi.sh": [`printf ${DOLLAR}'it\\'s'`, `echo ${DOLLAR}QUANTA_AFTER_ANSI`].join(
+          "\n",
+        ),
+        "scripts/escaped.sh": ["echo don\\'t", `echo ${DOLLAR}QUANTA_AFTER_ESCAPED`].join("\n"),
+        "scripts/subst.sh": [
+          `msg="${DOLLAR}(echo "don't")"`,
+          `echo ${DOLLAR}QUANTA_AFTER_SUBST`,
+        ].join("\n"),
+        // The reverse: an unbalanced double quote in a body must not unmask a comment.
+        "scripts/body-quote.sh": [
+          "cat <<EOF",
+          'a 5" screen',
+          "EOF",
+          `# ${DOLLAR}QUANTA_AFTER_BODY_QUOTE`,
+        ].join("\n"),
+        // Fake openers: each used to start a heredoc and unmask the comment after it.
+        "scripts/dq-opener.sh": [
+          'echo "use <<EOF for heredocs"',
+          `# ${DOLLAR}QUANTA_AFTER_DQ_OPENER`,
+        ].join("\n"),
+        "scripts/nested-arith.sh": [
+          `x=${DOLLAR}(( (1<<SHIFT) + 1 ))`,
+          `# ${DOLLAR}QUANTA_AFTER_NESTED_ARITH`,
+        ].join("\n"),
+        "scripts/arith-cmd.sh": ["(( y = x << SHIFT ))", `# ${DOLLAR}QUANTA_AFTER_ARITH_CMD`].join(
+          "\n",
+        ),
+        "scripts/herestring.sh": ["read a <<< word", `# ${DOLLAR}QUANTA_AFTER_HERESTRING`].join(
+          "\n",
+        ),
+        "scripts/backslash.sh": [
+          "python3 - <<\\PY",
+          'import os; os.environ.get("QUANTA_BACKSLASH_EMBED")',
+          "PY",
+        ].join("\n"),
+        ".github/workflows/scripts.yml": [
+          "jobs:",
+          "  a:",
+          "    steps:",
+          "      - uses: actions/github-script@v7",
+          "        with:",
+          "          script: |",
+          "            const v = process.env.QUANTA_GS_SCRIPT",
+          '            core.info("QUANTA_GS_LITERAL")',
+          "      - run: |",
+          "          bun -e 'console.log(process.env.QUANTA_BUN_E)'",
+          "          echo 'process.env.QUANTA_BUN_E_MENTION'",
+        ].join("\n"),
+        "scripts/bun-heredoc.sh": [
+          "bun - <<'JS'",
+          "console.log(process.env.QUANTA_BUN_HEREDOC)",
+          "JS",
+        ].join("\n"),
+        "scripts/py-c.sh": `python3 -c 'import os; print(os.environ.get("QUANTA_PY_C"))'\n`,
+        "tools/consume.py": [
+          'token = os.environ.pop("QUANTA_POP_CONSUME", None)',
+          'val = os.environ.setdefault("QUANTA_SETDEFAULT_VALUE", "1")',
+          'for n in "A", "QUANTA_TUPLE_FOR":',
+          "    pass",
         ].join("\n"),
       },
       names,
