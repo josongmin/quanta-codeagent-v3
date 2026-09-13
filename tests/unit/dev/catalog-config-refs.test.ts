@@ -451,6 +451,8 @@ describe("what counts as evidence", () => {
       QUANTA_PY_TESTNAME: null,
       QUANTA_PY_TESTREAD: "quoted",
       QUANTA_PY_TESTWRITE: null,
+      QUANTA_PY_TESTPOP: "quoted",
+      QUANTA_PY_TESTSETDEFAULT: "quoted",
       QUANTA_PY_FSTRING: null,
       QUANTA_MJS: "ts-access",
       QUANTA_CJS: "ts-access",
@@ -503,6 +505,9 @@ describe("what counts as evidence", () => {
           'NAME = "QUANTA_PY_TESTNAME"',
           'os.environ.get("QUANTA_PY_TESTREAD")',
           'os.environ["QUANTA_PY_TESTWRITE"] = "1"',
+          // In a test only a read CONTEXT counts, and a used `.pop` / `.setdefault` is one.
+          'token = os.environ.pop("QUANTA_PY_TESTPOP", None)',
+          'value = os.environ.setdefault("QUANTA_PY_TESTSETDEFAULT", "1")',
         ].join("\n"),
         "native/c.rs": [
           '// std::env::var("QUANTA_RS_COMMENT")',
