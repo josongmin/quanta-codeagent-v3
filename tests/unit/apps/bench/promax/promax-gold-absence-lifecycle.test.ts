@@ -454,6 +454,14 @@ interface BoxWire {
  */
 const boxWire = (box: FakeBox, bootstrapped: boolean): BoxWire => {
   const spawns: Array<{ cmd: string; args: string[] }> = []
+  // A FRESH box is not ready when it is first probed; bootstrap then RUNS on it, and the
+  // readiness check `29d7e4ff1` added after bootstrap (`assertBoxProfileReady`, "never a
+  // false-ready") must see the result. This fake answered that probe from a flag fixed
+  // at wire creation, so a freshly bootstrapped box stayed not-ready forever and chunk 1
+  // threw `readiness probe failed` — red since that commit, for a fake that did not model
+  // the new check, not for anything about gold absence.
+  let probedOnce = false
+  let ranAfterFirstProbe = false
   const spawn: SpawnFn = async (cmd, args) => {
     spawns.push({ cmd, args: [...args] })
     if (args.includes("run-instances")) {
@@ -462,7 +470,11 @@ const boxWire = (box: FakeBox, bootstrapped: boolean): BoxWire => {
     if (args.includes("describe-instances")) return ok("1.2.3.4")
     if (cmd !== "ssh") return ok("")
     const remote = args[args.length - 1] ?? ""
-    if (remote.includes("test -x ~/.bun/bin/bun")) return bootstrapped ? ok("OK\n") : ok("")
+    if (remote.includes("test -x ~/.bun/bin/bun")) {
+      probedOnce = true
+      return bootstrapped || ranAfterFirstProbe ? ok("OK\n") : ok("")
+    }
+    if (probedOnce) ranAfterFirstProbe = true
     return box.run(remote)
   }
   return { spawn, box, spawns }
