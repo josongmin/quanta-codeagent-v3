@@ -452,6 +452,11 @@ interface BoxWire {
  * decides whether `isBootstrapped`'s probe answers OK, which is what selects the
  * FRESH-PROVISION branch (`bootstrapBox`) or the WARM-REUSE branch.
  */
+/** A readiness probe and nothing else: a chain of `test -x|-d ~/…` ending in an echo,
+ *  optionally after the cloud-init wait. Other scripts that merely contain a `test -d`
+ *  go to the box. */
+const READINESS_PROBE_SHAPE = /(?:^|; )(?:test -[xd] ~\/\S+ && )+echo \w+$/
+
 const boxWire = (box: FakeBox, bootstrapped: boolean): BoxWire => {
   const spawns: Array<{ cmd: string; args: string[] }> = []
   // A FRESH box is not ready when it is first probed; bootstrap then RUNS on it, and the
@@ -461,23 +466,41 @@ const boxWire = (box: FakeBox, bootstrapped: boolean): BoxWire => {
   // threw `readiness probe failed` — red since that commit, for a fake that did not model
   // the new check, not for anything about gold absence.
   //
-  // Ready means the thing the probe checks for EXISTS: `~/.bun/bin/bun` after the box's
-  // `bun install`. The first version flipped to ready after ANY ssh command following
-  // the first probe, so a bootstrap that skipped `bun install` still passed both
-  // acceptance arms (round-8 audit; measured 18/1, caught only by the paired control).
-  let installed = false
+  // Ready means every path the probe tests EXISTS, each created where it really is:
+  // `~/.bun/bin/bun` by EC2 user-data (`curl … bun.sh/install`, before any ssh — so every
+  // launched box has it), `~/quanta/src` by the src rsync, `~/swebench-python` by the
+  // shim write. The first version flipped to ready after ANY ssh command following the
+  // first probe (round-8 audit; measured 18/1, caught only by the paired control). My
+  // round-8 fix keyed it on `bun install` and said that command produces
+  // `~/.bun/bin/bun`; it installs `~/quanta/node_modules`, which no probe tests, so a
+  // bootstrap that skipped the src rsync still came up ready (round-9 audit).
+  let srcSynced = false
+  let shimWritten = false
+  const pathExists = (path: string): boolean => {
+    if (path === "~/.bun/bin/bun") return true
+    if (path === "~/quanta/src") return bootstrapped || srcSynced
+    if (path === "~/swebench-python") return bootstrapped || shimWritten
+    return false
+  }
+  // `test -x A && test -d B && echo TOKEN` — the token is echoed only when every test holds.
+  const answerProbe = (remote: string): SpawnResult => {
+    const tested = [...remote.matchAll(/test -[xd] (\S+)/g)].map((m) => m[1] ?? "")
+    const token = /echo (\w+)\s*$/.exec(remote)?.[1] ?? ""
+    return tested.every(pathExists) ? ok(`${token}\n`) : ok("")
+  }
   const spawn: SpawnFn = async (cmd, args) => {
     spawns.push({ cmd, args: [...args] })
     if (args.includes("run-instances")) {
       throw new Error("SPEND GUARD: a warm/attach path reached RunInstances")
     }
     if (args.includes("describe-instances")) return ok("1.2.3.4")
+    if (cmd === "rsync" && (args[args.length - 1] ?? "").endsWith(":~/quanta/src/")) {
+      srcSynced = true
+    }
     if (cmd !== "ssh") return ok("")
     const remote = args[args.length - 1] ?? ""
-    if (remote.includes("test -x ~/.bun/bin/bun")) {
-      return bootstrapped || installed ? ok("OK\n") : ok("")
-    }
-    if (/~\/\.bun\/bin\/bun install\b/.test(remote)) installed = true
+    if (READINESS_PROBE_SHAPE.test(remote)) return answerProbe(remote)
+    if (remote.includes("cat > ~/swebench-python")) shimWritten = true
     return box.run(remote)
   }
   return { spawn, box, spawns }
