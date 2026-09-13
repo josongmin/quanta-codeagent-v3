@@ -4,6 +4,7 @@
  * charter IPC) are `runPass` adapters — they do not own cadence or wake counts.
  */
 
+import { errMessage, logger } from "@/shared"
 import {
   SideAgentError,
   type SideAgentEventSourcePort,
@@ -218,7 +219,10 @@ export const createDaemonEngine = (opts: DaemonEngineOpts): DaemonEngine => {
         maxTurns: opts.spec.maxTurnsPerWake,
         signal: abort.signal,
       })
-    } catch {
+    } catch (e) {
+      // The side agent is finished as "failed"; WHY its pass threw was not recorded
+      // anywhere an operator could read it.
+      logger.warn(`side agent: wake ${wakeId} pass threw: ${errMessage(e)}`)
       mut.inFlight = false
       mut.wakesDone += 1
       opts.finish("failed")

@@ -237,7 +237,11 @@ const SRC = join(__dirname, "..", "..", "src")
 // TIGHTENED 2026-09-01 (1147 -> 1143): Goal lifecycle/freshness, web projection,
 // metrics, and host dependency-resolution catches now bind and attribute their
 // failures instead of silently swallowing them. Keep the recovered headroom.
-const BARE_CATCH_BASELINE = 1143
+// TIGHTENED 2026-09-13 (1143 -> 1141): main sat at 1148 after the sep-8 lanes; seven
+// unbound catches that dropped a real error (MCP reauthorization, a side-agent pass,
+// two MCP transport handlers, two permission-lock failures, an unreadable sessions dir)
+// were bound and attributed.
+const BARE_CATCH_BASELINE = 1141
 // Re-measured 2026-06-25 (repo-cache GC + committed in-flight bench work): the
 // `reapStaleMirrorTemps` `stat(p).catch(() => null)` not-found PROBE (handled via
 // `if (st !== null …)`, a vanished orphan tmp is simply skipped) plus one further
@@ -300,7 +304,9 @@ const NULLISH_PROMISE_SWALLOW_BASELINE = 172
 // commands/terminal `defaultCanWriteDir`) were ALSO `catch { return []|false }`
 // fail-open masks, so binding them retires 3 units here too. Pinned to the live
 // prod count so the improvement cannot erode.
-const CATCH_RETURN_EMPTY_BASELINE = 105
+// TIGHTENED 2026-09-13 (105 -> 103): the two permission-lock `catch { return false }`
+// sites and the session-index `catch { return false }` now attribute their failure.
+const CATCH_RETURN_EMPTY_BASELINE = 103
 // Re-measured 2026-06-17 (RFC jun-17 LSP warm backend): +1 for
 // `startBackgroundLspPrewarm` in agent/lsp-bridge.ts — a fire-and-forget
 // session-start prewarm whose failure is a documented best-effort skip (the
@@ -566,17 +572,25 @@ describe("silent-failure growth ratchet (src/-wide, one-directional ceiling)", (
     const PINNED_ALLOWLIST: Readonly<Record<string, number>> = {
       // Atomic-write cleanup path (jun-10 audit #17 fix): chmod mode-preserve
       // + temp-file unlink AFTER the real write error is already rethrown —
-      // best-effort teardown with nothing left to surface. The 3rd (audit D10
-      // fix) is the post-rename parent-DIR fsync — durability hardening that is
-      // advisory by nature (the rename already landed; most fs don't need it),
-      // so a fsync failure is genuinely best-effort, not a stranded-work path.
-      "migration/external-config/persist.ts": 3,
+      // best-effort teardown with nothing left to surface.
+      //
+      // RE-KEYED sep-13. These two handlers moved VERBATIM from `persist.ts` to
+      // `persist-atomic.ts` in `742d61d0a`, which also deleted the copy-fallback path
+      // that held the third pinned site. The entry kept naming `persist.ts: 3`, so this
+      // arm reported `persist-atomic.ts: 2 (allowed 0)` — and it could not have noticed
+      // the stale key on its own, because the loop below only visited files that HAVE
+      // sites. It now checks the allowlist's direction too.
+      "migration/external-config/persist-atomic.ts": 2,
     }
     const { perFile } = countProd(DEBUG_ONLY_PROMISE_RE)
     const offenders: string[] = []
     for (const [file, n] of perFile) {
       const allowed = PINNED_ALLOWLIST[file] ?? 0
       if (n !== allowed) offenders.push(`  ${file}: ${n} (allowed ${allowed})`)
+    }
+    for (const [file, allowed] of Object.entries(PINNED_ALLOWLIST)) {
+      const n = perFile.get(file) ?? 0
+      if (n === 0) offenders.push(`  ${file}: 0 (allowed ${allowed}) — a stale allowlist key`)
     }
     if (offenders.length > 0) {
       throw new Error(

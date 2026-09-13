@@ -219,7 +219,10 @@ export const runReauthTransaction = async (session: ReauthSession): Promise<bool
     session.publishHandshake(handshake)
     await session.closeQuiet(old)
     return true
-  } catch {
+  } catch (e) {
+    // The old transport is restored and the call reports `false`; the REASON the
+    // re-authorization failed (a rejected token, a handshake error) was dropped entirely.
+    logger.warn(`mcp ${session.serverName}: re-authorization failed: ${errMessage(e)}`)
     session.unwire()
     await closeFailed(session, candidate)
     const generation = session.bumpGeneration()

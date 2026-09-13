@@ -171,8 +171,11 @@ export class IsolatedMcpTransport implements McpTransport {
     for (const handler of [...this.messageHandlers]) {
       try {
         handler(msg)
-      } catch {
-        // A failing handler must not poison sibling subscribers or the pump.
+      } catch (e) {
+        // A failing handler must not poison sibling subscribers or the pump — but a
+        // handler that throws on every message is a bug, and an unbound catch made it
+        // invisible.
+        logger.warn(`mcp isolated transport: a message handler threw: ${errMessage(e)}`)
       }
     }
   }
@@ -183,8 +186,9 @@ export class IsolatedMcpTransport implements McpTransport {
     for (const handler of [...this.exitHandlers]) {
       try {
         handler(reason)
-      } catch {
-        // ignore handler errors during teardown
+      } catch (e) {
+        // Teardown continues for the other handlers; the failure is attributed, not lost.
+        logger.warn(`mcp isolated transport: an exit handler threw (${reason}): ${errMessage(e)}`)
       }
     }
   }

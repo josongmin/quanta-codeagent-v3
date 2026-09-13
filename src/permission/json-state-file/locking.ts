@@ -12,7 +12,15 @@
 
 import { closeSync, mkdirSync, openSync } from "node:fs"
 import { dirname } from "node:path"
-import { LOCK_EX, LOCK_NB, LOCK_UN, OPEN_LOCK_FLAGS, posixFlock } from "@/shared"
+import {
+  errMessage,
+  LOCK_EX,
+  LOCK_NB,
+  LOCK_UN,
+  logger,
+  OPEN_LOCK_FLAGS,
+  posixFlock,
+} from "@/shared"
 
 /** Distinguished outcomes of a state `parse`. The engine takes the right
  *  action per outcome — schema mismatch quarantines to a versioned sidecar so
@@ -73,15 +81,19 @@ export const acquireLock = async (
   now: () => number = Date.now,
   timeoutMs: number = LOCK_TIMEOUT_MS,
 ): Promise<boolean> => {
+  // Both failures still answer "not locked"; the caller could not tell a read-only or
+  // missing state directory from contention, so the reason is attributed.
   try {
     mkdirSync(dirname(lockPath), { recursive: true, mode: 0o700 })
-  } catch {
+  } catch (e) {
+    logger.warn(`permission state lock: cannot create ${dirname(lockPath)}: ${errMessage(e)}`)
     return false
   }
   let fd: number
   try {
     fd = openSync(lockPath, OPEN_LOCK_FLAGS, 0o600)
-  } catch {
+  } catch (e) {
+    logger.warn(`permission state lock: cannot open ${lockPath}: ${errMessage(e)}`)
     return false
   }
   const deadline = now() + timeoutMs

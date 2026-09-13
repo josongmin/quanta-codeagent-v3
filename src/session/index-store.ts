@@ -196,7 +196,13 @@ const hasUnindexedSessionSnapshots = async (
       if (!name.endsWith(".json") || name.startsWith("index.")) continue
       if (!map.has(name.slice(0, -".json".length))) return true
     }
-  } catch {
+  } catch (e) {
+    // A sessions directory that does not exist yet has nothing unindexed in it; any
+    // other failure is attributed, because answering "not stale" for an unreadable
+    // directory hides sessions from the index.
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") {
+      logger.warn(`session index: cannot list ${dirname(indexPath)}: ${errMessage(e)}`)
+    }
     return false
   }
   return false
