@@ -93,6 +93,44 @@ const isScratch = (value: string, prefixes: readonly string[]): boolean => {
 const present = (v: string | undefined): v is string => v !== undefined && v.trim() !== ""
 
 export const OUTRANKING_ROOTS = ["QUANTA_CONFIG_DIR", "QUANTA_BENCH_HOME"] as const
+
+/**
+ * Per-subsystem overrides that name where Quanta WRITES its own state. Each outranks the
+ * Quanta home for its subsystem, so an operator who exported one (`QUANTA_SESSIONS_DIR`,
+ * `QUANTA_MEMORY_PATH`, …) aimed that subsystem of the whole suite at their real files
+ * however the roots were fenced (round-8 audit, reproduced for sessions, permission state
+ * and memory). Removed when the value is an absolute or `~` path outside scratch; a
+ * non-path value (`QUANTA_WEB_DB=memory`, `QUANTA_BENCH_RECORD_TRAJECTORY=0`) is a
+ * selector, not a location, and is kept. The classification of EVERY string knob in the
+ * catalogue — this list, the roots, and the reviewed non-state kinds — is enforced by
+ * `quanta-home-fence-hellgate`, so a new path knob cannot land unclassified.
+ */
+export const STATE_PATH_OVERRIDES = [
+  "QUANTA_BENCH_AUTH_FILE",
+  "QUANTA_BENCH_RECORD_TRAJECTORY",
+  "QUANTA_BENCH_SINGLE_BOX_GUARD_DIR",
+  "QUANTA_BENCH_TOKEN_BUDGET_DIR",
+  "QUANTA_BG_STORE_DIR",
+  "QUANTA_BUDGET_LEDGER_PATH",
+  "QUANTA_HISTORY_FILE",
+  "QUANTA_INDEX_DB_PATH",
+  "QUANTA_MEMORY_PATH",
+  "QUANTA_OBSERVE_DIR",
+  "QUANTA_OTEL_SAVE",
+  "QUANTA_PERMISSION_STATE",
+  "QUANTA_RADAR_FILE",
+  "QUANTA_SESSION_EVENT_LOG_DIR",
+  "QUANTA_SESSION_REGISTRY_DISK_DIR",
+  "QUANTA_SESSION_REGISTRY_SQLITE_PATH",
+  "QUANTA_SESSIONS_DIR",
+  "QUANTA_SKILLS_DIR",
+  "QUANTA_STATE_PATH",
+  "QUANTA_SWEBENCH_REPO_CACHE",
+  "QUANTA_WEB_DB",
+  "QUANTA_WEB_DB_DIR",
+] as const
+
+const pathLike = (v: string): boolean => v.startsWith("/") || v.startsWith("~")
 export const FENCED_ROOTS = ["HOME", "QUANTA_HOME", "QUANTA_PREFS_HOME"] as const
 
 export const decideQuantaHomeFence = (input: QuantaHomeFenceInput): QuantaHomeFenceDecision => {
@@ -103,6 +141,10 @@ export const decideQuantaHomeFence = (input: QuantaHomeFenceInput): QuantaHomeFe
     const v = input.env[key]
     if (v === undefined) continue
     if (!scratch(v)) unset.push(key)
+  }
+  for (const key of STATE_PATH_OVERRIDES) {
+    const v = input.env[key]
+    if (present(v) && pathLike(v.trim()) && !scratch(v.trim())) unset.push(key)
   }
   const set: Record<string, string> = {}
   const envHome = input.env.HOME

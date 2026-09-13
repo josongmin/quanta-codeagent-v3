@@ -121,6 +121,19 @@ describe("quanta-home fence — the policy", () => {
   })
 })
 
+describe("quanta-home fence — per-subsystem state overrides", () => {
+  test("an exported state path into the home is removed; scratch paths and selectors are kept", () => {
+    const d = decide({
+      QUANTA_SESSIONS_DIR: "/Users/me/.quanta/sessions",
+      QUANTA_MEMORY_PATH: "~/.quanta/memory/memory.sqlite",
+      QUANTA_PERMISSION_STATE: "/tmp/w/perm.json",
+      QUANTA_WEB_DB: "memory",
+      QUANTA_BENCH_RECORD_TRAJECTORY: "0",
+    })
+    expect([...d.unset].sort()).toEqual(["QUANTA_MEMORY_PATH", "QUANTA_SESSIONS_DIR"])
+  })
+})
+
 describe("quanta-home fence — stale roots of killed runs", () => {
   test("only numeric roots of DEAD pids are returned; a live pid is never touched", () => {
     const alive = new Set([100, 300])
