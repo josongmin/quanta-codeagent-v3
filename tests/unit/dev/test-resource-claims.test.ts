@@ -496,5 +496,14 @@ describe("chunk claim overlap", () => {
     expect(imported).toContain("runResourceAwareSchedule")
     expect(imported).toContain("resourceClassesOverlap")
     expect(imported).not.toContain("chunkClaimsOverlap")
+    // ...nor through a namespace or any other name: `claims.chunkClaimsOverlap(…)`
+    // passed the import check (measured). No identifier in the runner may name it.
+    const named: string[] = []
+    const visit = (node: ts.Node): void => {
+      if (ts.isIdentifier(node) && node.text === "chunkClaimsOverlap") named.push(node.text)
+      node.forEachChild(visit)
+    }
+    visit(tree)
+    expect(named).toEqual([])
   })
 })

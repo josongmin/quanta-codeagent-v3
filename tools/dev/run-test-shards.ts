@@ -42,7 +42,7 @@ import {
   failureRecordsFromJunit,
   writeFailureAttemptArtifact,
 } from "./failure-attempt-producer"
-import { quarantineLane } from "./lease-quarantine"
+import { quarantineOrHoldLane } from "./lease-quarantine"
 import { mintableScanReachAuthority } from "./scan-reach-authority"
 import {
   describeWatchdogKill,
@@ -1437,24 +1437,9 @@ const main = async (): Promise<void> => {
       // block entirely, so a Ctrl-C used to release the lane with unaccounted
       // survivors and leave the timing journal behind — measured as a quarantine
       // file that exists on the finally path and not on this one.
-      accountForSurvivors: (outcome) => {
-        // INDEPENDENTLY guarded. These two were one try/catch in the caller, so
-        // a quarantine write that threw — and `quarantineLane` now throws by
-        // design when the keeper script is missing — skipped the journal commit
-        // as well, losing the forensics in exactly the state that needs them.
-        try {
-          if (outcome.groups.length > 0) {
-            quarantineLane({
-              legacyCacheRoot: SHARED_CACHE_ROOT,
-              repositoryId: leaseIdentity,
-              groups: outcome.groups,
-              log: (line) => process.stderr.write(line),
-            })
-          }
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error)
-          process.stderr.write(`[test:shards] WARN signal-path quarantine failed: ${message}\n`)
-        }
+      accountForSurvivors: async (outcome) => {
+        // INDEPENDENTLY guarded, and the journal FIRST: holding the lane below can
+        // last until the survivors exit, and the forensics must not wait on it.
         // Timing is a scheduler hint, never a verdict input, so committing it on
         // the way out is safe — and NOT committing it is what left orphan
         // journals in the shared cache for a recycled pid to strand forever.
@@ -1469,6 +1454,16 @@ const main = async (): Promise<void> => {
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error)
           process.stderr.write(`[test:shards] WARN signal-path journal commit failed: ${message}\n`)
+        }
+        // A quarantine write that fails EVERYWHERE holds the lane instead of
+        // releasing it over live groups (`quarantineOrHoldLane`).
+        if (outcome.groups.length > 0) {
+          await quarantineOrHoldLane({
+            legacyCacheRoot: SHARED_CACHE_ROOT,
+            repositoryId: leaseIdentity,
+            groups: outcome.groups,
+            log: (line) => process.stderr.write(line),
+          })
         }
       },
       releaseLease: releaseCampaign,
@@ -1540,6 +1535,7 @@ const main = async (): Promise<void> => {
     const swept = sweepCapabilityReceipts({
       directory: capabilityReceiptDirectory(SHARED_CACHE_ROOT),
       nowMs: Date.now(),
+      log: (line) => process.stderr.write(line),
     })
     if (swept.length > 0) {
       process.stdout.write(
@@ -1742,21 +1738,16 @@ const main = async (): Promise<void> => {
       // BEFORE the release, because the kernel frees the port the instant this
       // process exits.
       if (drain.groups.length > 0) {
-        // Guarded like the signal path. Bare, a throw here replaced the real
-        // verdict ("3 chunks red") with a quarantine error AND skipped
-        // `lease?.release()` on the next line — measured. The record is
-        // best-effort; the verdict and the release are not.
-        try {
-          quarantineLane({
-            legacyCacheRoot: SHARED_CACHE_ROOT,
-            repositoryId: leaseIdentity,
-            groups: drain.groups,
-            log: (line) => process.stderr.write(line),
-          })
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error)
-          process.stderr.write(`[test:shards] WARN quarantine write failed: ${message}\n`)
-        }
+        // Never throws. Bare, a throw here replaced the real verdict ("3 chunks
+        // red") with a quarantine error AND skipped the release below — measured.
+        // And a write that fails everywhere HOLDS the lane until the groups exit
+        // (bounded), instead of releasing it over them.
+        await quarantineOrHoldLane({
+          legacyCacheRoot: SHARED_CACHE_ROOT,
+          repositoryId: leaseIdentity,
+          groups: drain.groups,
+          log: (line) => process.stderr.write(line),
+        })
       }
     }
     releaseCampaign()

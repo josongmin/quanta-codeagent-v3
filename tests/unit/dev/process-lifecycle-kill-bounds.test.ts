@@ -354,6 +354,34 @@ describe("the signal path accounts before it releases", () => {
     })
   })
 
+  test("an ASYNC accounting — a lane held until survivors exit — finishes before the release", async () => {
+    let released = false
+    let heldUntilRelease = false
+    let finish: () => void = () => {}
+    const held = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    const code = terminateCampaignOnSignal({
+      registry: undrainedRegistry,
+      runRoot: join(tmpdir(), `signal-accounting-async-${process.pid}`),
+      signal: "SIGINT",
+      log: () => {},
+      accountForSurvivors: async () => {
+        await held
+        heldUntilRelease = !released
+      },
+      releaseLease: () => {
+        released = true
+      },
+    })
+    // Still holding: the accounting has not finished, so nothing is released.
+    await Promise.resolve()
+    expect(released).toBe(false)
+    finish()
+    expect(await code).toBe(130)
+    expect({ heldUntilRelease, released }).toEqual({ heldUntilRelease: true, released: true })
+  })
+
   test("an accounting FAILURE still releases the lease, and says why", async () => {
     // A quarantine write that throws must not strand the lane on a signal path:
     // the record is best-effort, the release is not optional.
@@ -382,17 +410,19 @@ describe("the signal path accounts before it releases", () => {
     const source = (rel: string): string =>
       readFileSync(join(import.meta.dir, "..", "..", "..", rel), "utf8")
     const runner = source("tools/dev/run-test-shards.ts")
-    expect(runner).toContain("accountForSurvivors: (outcome) => {")
+    expect(runner).toContain("accountForSurvivors: async (outcome) => {")
     // The runner's hook does BOTH things the `finally` does.
-    const hook = runner.slice(runner.indexOf("accountForSurvivors: (outcome) => {"))
-    // `quarantineLane({` occurs twice in this file, so a window widened by a missing
-    // `releaseLease:` anchor is SATISFIED by the unrelated occurrence — the hook can
-    // stop quarantining and this stays green. Measured before `sliceBetween`:
-    // renaming the end anchor turned a correct RED back into 17 pass / 0 fail.
+    const hook = runner.slice(runner.indexOf("accountForSurvivors: async (outcome) => {"))
+    // The quarantine call occurs twice in this file, so a window widened by a
+    // missing `releaseLease:` anchor is SATISFIED by the unrelated occurrence — the
+    // hook can stop quarantining and this stays green. Measured before
+    // `sliceBetween`: renaming the end anchor turned a correct RED back into
+    // 17 pass / 0 fail.
     const hookBody = sliceBetween(hook, 0, "releaseLease:", {
       label: "run-test-shards.ts accountForSurvivors",
     })
-    expect(hookBody).toContain("quarantineLane({")
+    // AWAITED: it may hold the lane until the survivors exit.
+    expect(hookBody).toContain("await quarantineOrHoldLane({")
     expect(hookBody).toContain("openJournal?.commit()")
 
     const campaign = source("tools/dev/verification-campaign.ts")
@@ -400,9 +430,11 @@ describe("the signal path accounts before it releases", () => {
     const body = sliceBetween(terminate, 0, 'process.on("SIGINT"', {
       label: "verification-campaign.ts terminate",
     })
-    expect(body).toContain("quarantineLane({")
+    expect(body).toContain("await quarantineOrHoldLane({")
     // ...and it is written BEFORE the release, which is the whole point: the
     // kernel frees the port the instant this process exits.
-    expect(body.indexOf("quarantineLane({")).toBeLessThan(body.indexOf("lease?.release()"))
+    expect(body.indexOf("await quarantineOrHoldLane({")).toBeLessThan(
+      body.indexOf("lease?.release()"),
+    )
   })
 })

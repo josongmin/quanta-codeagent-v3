@@ -59,6 +59,8 @@ export interface SweepCapabilityReceiptsInput {
   readonly nowMs: number
   readonly isAlive?: (pid: number) => boolean
   readonly selfPid?: number
+  /** Where a failure is said. Housekeeping never throws: see `sweepCapabilityReceipts`. */
+  readonly log?: (line: string) => void
 }
 
 const expired = (path: string, nowMs: number): boolean => {
@@ -77,7 +79,14 @@ const pidOf = (pattern: RegExp, name: string): number | undefined => {
   return Number.isSafeInteger(pid) && pid > 0 ? pid : undefined
 }
 
-/** Removes what nothing can read (see the module doc); returns the removed names. */
+/**
+ * Removes what nothing can read (see the module doc); returns the removed names.
+ *
+ * NEVER throws. It is housekeeping before a campaign, and a directory it cannot
+ * list (EACCES, ENOTDIR) or an entry it cannot remove killed the runner, the
+ * wrapper and the matrix worker before they ran anything (measured). A disk that
+ * really cannot hold a receipt fails the receipt write that follows, by name.
+ */
 export const sweepCapabilityReceipts = (input: SweepCapabilityReceiptsInput): readonly string[] => {
   const isAlive = input.isAlive ?? processIsAlive
   const selfPid = input.selfPid ?? process.pid
@@ -85,8 +94,12 @@ export const sweepCapabilityReceipts = (input: SweepCapabilityReceiptsInput): re
   try {
     names = readdirSync(input.directory)
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return []
-    throw error
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      input.log?.(
+        `[capability] WARN cannot list ${input.directory} to sweep receipts: ${String(error)}\n`,
+      )
+    }
+    return []
   }
   const removed: string[] = []
   for (const name of names) {
@@ -96,9 +109,12 @@ export const sweepCapabilityReceipts = (input: SweepCapabilityReceiptsInput): re
     const owner = stagingPid ?? receiptPid
     if (owner === undefined || owner === selfPid) continue
     const dead = !isAlive(owner)
-    if (dead || (receiptPid !== undefined && expired(path, input.nowMs))) {
+    if (!dead && !(receiptPid !== undefined && expired(path, input.nowMs))) continue
+    try {
       rmSync(path, { force: true })
       removed.push(name)
+    } catch (error) {
+      input.log?.(`[capability] WARN cannot remove ${path}: ${String(error)}\n`)
     }
   }
   return removed.sort()

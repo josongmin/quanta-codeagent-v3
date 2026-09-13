@@ -23,6 +23,7 @@
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -702,6 +703,34 @@ describe("a lane outside the runner gets a receipt, under its own environment", 
       expect(sweepCapabilityReceipts({ directory: join(directory, "absent"), nowMs: now })).toEqual(
         [],
       )
+      // Housekeeping NEVER throws: an unlistable directory and an unremovable entry
+      // each killed the campaign before it ran anything. Both are said instead.
+      const lines: string[] = []
+      const log = (line: string): void => {
+        lines.push(line)
+      }
+      expect(
+        sweepCapabilityReceipts({ directory: join(directory, "notes.json"), nowMs: now, log }),
+      ).toEqual([])
+      const locked = join(directory, "locked")
+      mkdirSync(locked)
+      writeFileSync(join(locked, "pr-11.receipt.json"), "{}")
+      chmodSync(locked, 0o555)
+      try {
+        expect(
+          sweepCapabilityReceipts({
+            directory: locked,
+            nowMs: now,
+            isAlive: () => false,
+            selfPid: 99,
+            log,
+          }),
+        ).toEqual([])
+      } finally {
+        chmodSync(locked, 0o755)
+      }
+      expect(lines.join("")).toContain("cannot list")
+      expect(lines.join("")).toContain("cannot remove")
     } finally {
       rmSync(directory, { recursive: true, force: true })
     }

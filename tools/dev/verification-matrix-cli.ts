@@ -218,6 +218,11 @@ if (command === "worker") {
   const junitFile = `${stem}.junit.xml`
   const junitPath = join(outDir, junitFile)
   const receiptPath = join(outDir, `${stem}.receipt.json`)
+  // Ctrl-C and SIGTERM end the child through its own bound, so the lane below is
+  // disposed on that path too: without a handler the worker died at once and left
+  // the receipt, the scratch homes and an orphaned child behind (measured).
+  const interrupt = new AbortController()
+  for (const name of ["SIGINT", "SIGTERM"] as const) process.once(name, () => interrupt.abort())
   // The receipt its gated consumers read, as the monolith's workers get one. Made
   // before the clock starts: probing is not the chunk's time.
   const lane = await prepareCapabilityLane({
@@ -225,6 +230,8 @@ if (command === "worker") {
     env: { ...process.env, QUANTA_TEST_CACHE: "off" },
     repoRoot,
     cacheRoot: sharedVerificationCacheRoot(repoRoot),
+    // The monolith probes Chrome; a matrix that does not skips 17 browser cases it runs.
+    includeChrome: true,
   })
   const startedAt = performance.now()
   // `await proc.exited` with no deadline: a matrix worker that wedged held its
@@ -254,6 +261,7 @@ if (command === "worker") {
     },
     onStdout: (text) => process.stdout.write(text),
     onStderr: (text) => process.stderr.write(text),
+    signal: interrupt.signal,
   }).finally(() => lane.dispose())
   if (outcome.status === "timed-out") {
     process.stderr.write(

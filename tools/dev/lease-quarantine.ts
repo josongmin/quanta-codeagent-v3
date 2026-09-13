@@ -494,6 +494,68 @@ export interface QuarantineHandoffInput {
   readonly log?: (line: string) => void
 }
 
+export interface HoldLaneOptions {
+  readonly pollMs?: number
+  readonly deadlineMs?: number
+  readonly sleep?: (ms: number) => Promise<void>
+  readonly now?: () => number
+}
+
+/**
+ * `quarantineLane`, and when no record could be written ANYWHERE, keep the lane.
+ *
+ * Every owner caught the throw, printed a WARN and released the lease, so on a
+ * full or read-only disk — the slot and the per-clone legacy file share a volume
+ * on this host — the next contender took the lane over live groups (measured:
+ * `ACQUIRED over live pgid 424242`). With no record to hand the lane on, the only
+ * thing still holding it is this process's port. So this waits until the groups
+ * are gone, bounded by the record TTL, and says so; the caller releases after.
+ *
+ * Returns the record, or `undefined` when none could be written.
+ */
+export const quarantineOrHoldLane = async (
+  input: QuarantineHandoffInput & { readonly hold?: HoldLaneOptions },
+): Promise<LeaseQuarantineRecord | undefined> => {
+  try {
+    return quarantineLane(input)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    await holdWhileGroupsLive(input, message)
+    return undefined
+  }
+}
+
+const holdWhileGroupsLive = async (
+  input: QuarantineHandoffInput & { readonly hold?: HoldLaneOptions },
+  why: string,
+): Promise<void> => {
+  const isAlive = input.isAlive ?? groupAlive
+  const now = input.hold?.now ?? Date.now
+  const sleep =
+    input.hold?.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)))
+  const deadline = now() + (input.hold?.deadlineMs ?? QUARANTINE_TTL_MS)
+  const pollMs = input.hold?.pollMs ?? 1_000
+  input.log?.(
+    `[quarantine] WARN no quarantine record could be written (${why}); HOLDING the lane while ` +
+      `${input.groups.length} group(s) live, until ${new Date(deadline).toISOString()} at the latest\n`,
+  )
+  for (;;) {
+    const alive = input.groups.filter((group) => isAlive(group.pgid))
+    if (alive.length === 0) {
+      input.log?.("[quarantine] every held group has exited; releasing the lane\n")
+      return
+    }
+    if (now() >= deadline) {
+      input.log?.(
+        `[quarantine] WARN hold deadline reached with ${alive.length} group(s) alive ` +
+          `[${alive.map((group) => group.pgid).join(", ")}]; releasing the lane\n`,
+      )
+      return
+    }
+    await sleep(pollMs)
+  }
+}
+
 /** The keeper script this module spawns. Exported so a test can prove it exists. */
 export const KEEPER_SCRIPT_PATH = join(import.meta.dir, "lease-quarantine-keeper.ts")
 
@@ -731,14 +793,16 @@ const carryExisting = (input: {
     }
   }
   if (existing.kind === "absent") return { carried: [] }
+  // A second NAME for it, not a move. Renamed aside, the slot was empty until the
+  // replacement landed, and a replacement write that failed (ENOSPC) left it empty
+  // for good — measured, another clone then ACQUIRED. Linked, the unreadable
+  // record keeps blocking until the replacement is renamed over it.
   const displaced = `${input.target}.displaced-${input.nowMs}.json`
   try {
-    renameSync(input.target, displaced)
-    input.log?.(
-      `[quarantine] an unreadable record (${existing.reason}) was moved to ${displaced}\n`,
-    )
+    linkSync(input.target, displaced)
+    input.log?.(`[quarantine] an unreadable record (${existing.reason}) was kept as ${displaced}\n`)
   } catch (error) {
-    input.log?.(`[quarantine] an unreadable record could not be moved aside: ${String(error)}\n`)
+    input.log?.(`[quarantine] an unreadable record could not be kept aside: ${String(error)}\n`)
   }
   // Rounded UP to an integer: an mtime has a fractional part, and a fractional
   // hold made the new record fail its own parse — blocking for the wrong reason.
@@ -755,13 +819,17 @@ const refuseForeignLegacy = (
   legacy: string,
   key: string,
   isAlive: (pgid: number) => boolean,
+  nowMs: number,
 ): void => {
   const held = readLeaseQuarantineOutcome(legacy)
   if (held.kind !== "record" || held.record.repositoryId === key) return
-  if (!held.record.survivors.some((group) => isAlive(group.pgid))) return
+  // An active hold blocks with every survivor dead (`displacedHold`); overwriting
+  // it turned that identity's `blocked` into `foreign`.
+  const holding = held.record.holdUntilMs !== undefined && nowMs < held.record.holdUntilMs
+  if (!holding && !held.record.survivors.some((group) => isAlive(group.pgid))) return
   throw new Error(
     `[quarantine] refusing to overwrite the legacy quarantine of "${held.record.repositoryId}", ` +
-      "whose groups are still alive",
+      "which still holds its lane",
   )
 }
 
@@ -805,7 +873,7 @@ const fallBackToLegacy = (
     // Nowhere to write. The caller's lane release must not read as a handoff.
     throw new Error(`${why}; and no legacy location was given to fall back to`)
   }
-  refuseForeignLegacy(legacyPath, context.key, context.isAlive)
+  refuseForeignLegacy(legacyPath, context.key, context.isAlive, context.nowMs)
   const carry = carryExisting({
     target: legacyPath,
     key: context.key,

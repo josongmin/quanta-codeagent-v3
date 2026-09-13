@@ -3,6 +3,11 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import ts from "typescript"
+import {
+  CHROME_CAPABILITY_ID,
+  campaignReceiptMissingIds,
+} from "../../../tools/dev/capability-probe-producer"
+import type { CapabilityReceipt } from "../../../tools/dev/capability-receipt"
 import { executedFileSetDigest } from "../../../tools/dev/executed-file-set"
 import { testToolchainSha256 } from "../../../tools/dev/test-shard-receipt"
 import { junitExecutedFiles } from "../../../tools/dev/test-shard-timings"
@@ -21,6 +26,7 @@ import {
   matrixPlanFileFloor,
   matrixPopulationProblem,
 } from "../../../tools/dev/verification-matrix-population"
+import { prepareCapabilityLane } from "../../../tools/dev/with-capability-receipt"
 
 describe("verification matrix aggregate", () => {
   const HEAD = "a".repeat(40)
@@ -753,6 +759,24 @@ describe("matrix tier wiring", () => {
   })
 })
 
+/** The text a named call's object-literal argument gives `name`. */
+const callArgument = (tree: ts.SourceFile, callee: string, name: string): string | undefined => {
+  const calls: ts.CallExpression[] = []
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && node.expression.getText(tree) === callee) calls.push(node)
+    node.forEachChild(visit)
+  }
+  visit(tree)
+  const properties = calls.flatMap((call) => {
+    const bag = call.arguments[0]
+    return bag !== undefined && ts.isObjectLiteralExpression(bag) ? [...bag.properties] : []
+  })
+  const property = properties.find((one) => one.name?.getText(tree) === name)
+  return property !== undefined && ts.isPropertyAssignment(property)
+    ? property.initializer.getText(tree)
+    : undefined
+}
+
 /**
  * ★ Third adversarial audit: the shadow matrix ran a different coverage than the
  * runner it is compared with. Its workers got no capability receipt, so every
@@ -819,6 +843,49 @@ describe("the shadow matrix runs what the monolith runs", () => {
       rmSync(base, { recursive: true, force: true })
     }
   })
+
+  test("a matrix lane's receipt carries every id a campaign receipt carries, chrome included", async () => {
+    // The lane helper hardcoded `includeChrome: false` for the contract and
+    // toolchain lanes; the matrix worker inherited it, and all 17 gated browser
+    // cases skipped in the matrix while the monolith, which probes Chrome, ran them.
+    const scratch = mkdtempSync(join(tmpdir(), "matrix-chrome-"))
+    try {
+      const lane = await prepareCapabilityLane({
+        lane: "matrix-arm",
+        env: { PATH: process.env.PATH ?? "", HOME: tmpdir() },
+        cacheRoot: join(scratch, "cache"),
+        includeChrome: true,
+        spawn: (argv) => ({
+          exited: Promise.resolve(0),
+          stdout: Promise.resolve(`${argv[0] ?? "x"}\n`),
+          kill: () => {},
+        }),
+        probeChrome: async () => ({ status: "available", detail: "fake bring-up", probeMs: 1 }),
+      })
+      try {
+        const receipt = JSON.parse(
+          readFileSync(lane.env.QUANTA_CAPABILITY_RECEIPT ?? "", "utf8"),
+        ) as Pick<CapabilityReceipt, "capabilities">
+        expect(receipt.capabilities[CHROME_CAPABILITY_ID]?.status).toBe("available")
+        expect(campaignReceiptMissingIds(receipt, true, lane.env)).toEqual([])
+      } finally {
+        lane.dispose()
+      }
+    } finally {
+      rmSync(scratch, { recursive: true, force: true })
+    }
+    // ...and the worker asks for it, and ends its child on SIGINT/SIGTERM.
+    const cli = readFileSync(
+      resolve(import.meta.dir, "..", "..", "..", "tools/dev/verification-matrix-cli.ts"),
+      "utf8",
+    )
+    const tree = ts.createSourceFile("cli.ts", cli, ts.ScriptTarget.Latest, true)
+    expect(callArgument(tree, "prepareCapabilityLane", "includeChrome")).toBe("true")
+    expect(callArgument(tree, "runBoundedChild", "signal")).toBe("interrupt.signal")
+    expect(cli).toContain(
+      'for (const name of ["SIGINT", "SIGTERM"] as const) process.once(name, () => interrupt.abort())',
+    )
+  }, 60_000)
 
   test("a worker's child runs under the capability lane it prepared, which it then disposes", () => {
     const text = readFileSync(

@@ -36,7 +36,11 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs"
 import { tmpdir, userInfo } from "node:os"
 import { join, resolve } from "node:path"
 import { runBoundedChild } from "./bounded-child"
-import { capabilityReceiptEnvForCampaign, type ProbeSpawner } from "./capability-probe-producer"
+import {
+  type ChromeProbe,
+  capabilityReceiptEnvForCampaign,
+  type ProbeSpawner,
+} from "./capability-probe-producer"
 import {
   CAPABILITY_REQUIRE_ENV,
   definiteCapabilityIds,
@@ -78,7 +82,16 @@ export interface WithCapabilityReceiptInput {
 export type CapabilityLaneInput = Pick<
   WithCapabilityReceiptInput,
   "lane" | "env" | "repoRoot" | "spawn" | "hostHome" | "cacheRoot"
->
+> & {
+  /**
+   * Probe Chrome too. The contract and toolchain lanes drive no browser; the
+   * verification matrix runs the whole corpus, and without it every `chrome-cdp`
+   * consumer skipped where the monolith runner, which probes Chrome, ran them.
+   */
+  readonly includeChrome?: boolean
+  /** Injected by an arm, so the chrome half is proven without a browser. */
+  readonly probeChrome?: ChromeProbe
+}
 
 export interface CapabilityLane {
   /** The child's environment: scratch homes, the receipt's variables, the armed switch. */
@@ -104,7 +117,11 @@ export const prepareCapabilityLane = async (
     .trim()
   const cacheRoot = input.cacheRoot
   // What a killed wrapper or campaign could not remove (`capability-receipt-files`).
-  sweepCapabilityReceipts({ directory: capabilityReceiptDirectory(cacheRoot), nowMs: Date.now() })
+  sweepCapabilityReceipts({
+    directory: capabilityReceiptDirectory(cacheRoot),
+    nowMs: Date.now(),
+    log: (line) => process.stderr.write(line),
+  })
   const outPath = capabilityReceiptPathFor(cacheRoot, input.lane)
   const root = mkdtempSync(join(tmpdir(), `capability-lane-${input.lane}-`))
   const dispose = (): void => {
@@ -139,8 +156,10 @@ export const prepareCapabilityLane = async (
       probeEnv: base,
       hostHome: input.hostHome ?? userInfo().homedir,
       ttlMs: MAX_CAPABILITY_RECEIPT_TTL_MS,
-      // No lane here drives a browser; chrome bring-up would only cost them time.
-      includeChrome: false,
+      includeChrome: input.includeChrome ?? false,
+      // Inside the lane root, so `dispose` removes the throwaway profile too.
+      chromeProfileRoot: join(root, "chrome-probe-profile"),
+      ...(input.probeChrome === undefined ? {} : { probeChrome: input.probeChrome }),
       ...(input.spawn === undefined ? {} : { spawn: input.spawn }),
     })
     return {

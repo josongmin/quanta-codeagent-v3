@@ -3,8 +3,8 @@ import { basename, dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { runBoundedCapture } from "./bounded-child"
 import { describeQuietBoxWait, quietBoxBudgetMs, waitForQuietBox } from "./box-load"
-import { gatesForStage, plannedGatesForLabel } from "./gate-manifest"
-import { type LeaseQuarantineRecord, quarantineLane } from "./lease-quarantine"
+import { plannedGatesForLabel } from "./gate-manifest"
+import { type LeaseQuarantineRecord, quarantineOrHoldLane } from "./lease-quarantine"
 import {
   acquireTestShardLease,
   normalizeRepositoryIdentity,
@@ -295,17 +295,13 @@ const terminate = (signal: NodeJS.Signals): void => {
     // release, because the kernel frees the port the instant this process exits.
     let signalQuarantine: LeaseQuarantineRecord | undefined
     if (outcome.groups.length > 0) {
-      try {
-        signalQuarantine = quarantineLane({
-          legacyCacheRoot: LEGACY_QUARANTINE_CACHE_ROOT,
-          repositoryId: QUARANTINE_KEY,
-          groups: outcome.groups,
-          log: (line) => process.stderr.write(line),
-        })
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        process.stderr.write(`[verification] WARN signal-path quarantine failed: ${message}\n`)
-      }
+      // Never throws; a record that cannot be written anywhere HOLDS the lane.
+      signalQuarantine = await quarantineOrHoldLane({
+        legacyCacheRoot: LEGACY_QUARANTINE_CACHE_ROOT,
+        repositoryId: QUARANTINE_KEY,
+        groups: outcome.groups,
+        log: (line) => process.stderr.write(line),
+      })
     }
     recordCampaign({
       outcome: "terminated",
@@ -499,21 +495,16 @@ try {
     // below: the kernel frees the port the moment this process exits, so a
     // record written afterwards has a window a contender can win.
     if (outcome.groups.length > 0) {
-      // GUARDED, like the other three call sites. Bare, a throw here skipped
+      // Never throws, like the other three call sites. A bare throw here skipped
       // `recordCampaign` — leaving the PREVIOUS campaign's receipt, possibly
       // `passed`, as the current one — and `removeOwnerSidecar`, which kept
-      // naming a dead pid.
-      try {
-        quarantineRecord = quarantineLane({
-          legacyCacheRoot: LEGACY_QUARANTINE_CACHE_ROOT,
-          repositoryId: QUARANTINE_KEY,
-          groups: outcome.groups,
-          log: (line) => process.stderr.write(line),
-        })
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        process.stderr.write(`[verification] WARN quarantine write failed: ${message}\n`)
-      }
+      // naming a dead pid. A record that cannot be written anywhere HOLDS the lane.
+      quarantineRecord = await quarantineOrHoldLane({
+        legacyCacheRoot: LEGACY_QUARANTINE_CACHE_ROOT,
+        repositoryId: QUARANTINE_KEY,
+        groups: outcome.groups,
+        log: (line) => process.stderr.write(line),
+      })
     }
   }
   // A signal path already wrote its own receipt and exits; do not overwrite it.

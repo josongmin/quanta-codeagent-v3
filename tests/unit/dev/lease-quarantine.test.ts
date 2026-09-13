@@ -47,6 +47,7 @@ import {
   parseLeaseQuarantine,
   QUARANTINE_TTL_MS,
   quarantineLane,
+  quarantineOrHoldLane,
   quarantineVerdict,
   readLeaseQuarantine,
   readLeaseQuarantineOutcome,
@@ -628,25 +629,56 @@ describe("quarantine wiring", () => {
   const source = (rel: string): string =>
     readFileSync(join(import.meta.dir, "..", "..", "..", rel), "utf8")
 
+  /**
+   * Both owners, read from the parse: every quarantine goes through
+   * `quarantineOrHoldLane`, AWAITED, before the lease is released. A bare
+   * `quarantineLane` caught and released over live groups when no record could be
+   * written anywhere.
+   */
+  const quarantineCalls = (rel: string) => {
+    const text = source(rel)
+    const tree = ts.createSourceFile(rel, text, ts.ScriptTarget.Latest, true)
+    const calls: ts.CallExpression[] = []
+    const visit = (node: ts.Node): void => {
+      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) calls.push(node)
+      node.forEachChild(visit)
+    }
+    visit(tree)
+    const named = (name: string) =>
+      calls.filter((call) => (call.expression as ts.Identifier).text === name)
+    return { text, tree, bare: named("quarantineLane"), held: named("quarantineOrHoldLane") }
+  }
+
   test("the shard runner holds the lane instead of handing it on", () => {
-    const runner = source("tools/dev/run-test-shards.ts")
-    expect(runner).toContain("quarantineLane({")
-    expect(runner).toContain("legacyQuarantineCacheRoot: SHARED_CACHE_ROOT")
-    // The write must happen BEFORE the release, or the kernel frees the port
-    // into a window a contender can win.
-    const nondrain = runner.indexOf("quarantineLane({")
-    const release = runner.indexOf("lease?.release()", nondrain)
-    expect(nondrain).toBeGreaterThan(0)
-    expect(release).toBeGreaterThan(nondrain)
+    const { text, tree, bare, held } = quarantineCalls("tools/dev/run-test-shards.ts")
+    expect(text).toContain("legacyQuarantineCacheRoot: SHARED_CACHE_ROOT")
+    expect(bare).toHaveLength(0)
+    expect(held).toHaveLength(2)
+    expect(held.every((call) => ts.isAwaitExpression(call.parent))).toBe(true)
+    // The `finally` quarantines BEFORE its last statement releases: the kernel
+    // frees the port into a window a contender can win.
+    const finallyBlock = held
+      .map((call) =>
+        ts.findAncestor(
+          call,
+          (node) =>
+            ts.isBlock(node) && ts.isTryStatement(node.parent) && node.parent.finallyBlock === node,
+        ),
+      )
+      .find((block): block is ts.Block => block !== undefined)
+    expect(finallyBlock?.statements.at(-1)?.getText(tree)).toBe("releaseCampaign()")
   })
 
   test("the campaign wrapper does the same, and records it", () => {
-    const campaign = source("tools/dev/verification-campaign.ts")
-    expect(campaign).toContain("quarantineLane({")
-    expect(campaign).toContain("quarantine: {")
-    expect(campaign).toContain("keeperPid: quarantineRecord.keeperPid")
-    const held = campaign.indexOf("quarantineLane({")
-    expect(campaign.indexOf("lease?.release()", held)).toBeGreaterThan(held)
+    const { text, bare, held } = quarantineCalls("tools/dev/verification-campaign.ts")
+    expect(text).toContain("quarantine: {")
+    expect(text).toContain("keeperPid: quarantineRecord.keeperPid")
+    expect(bare).toHaveLength(0)
+    expect(held).toHaveLength(2)
+    expect(held.every((call) => ts.isAwaitExpression(call.parent))).toBe(true)
+    for (const call of held) {
+      expect(text.indexOf("lease?.release()", call.getStart())).toBeGreaterThan(call.getStart())
+    }
   })
 
   /**
@@ -1460,7 +1492,7 @@ describe("the lane is cleared only by its holder, and an error is not an empty l
       const displaced = readdirSync(root).filter((name) => name.includes(".displaced-"))
       expect(displaced).toHaveLength(1)
       expect(readFileSync(join(root, displaced[0] ?? ""), "utf8")).toContain("6161")
-      expect(lines.join("")).toContain("was moved to")
+      expect(lines.join("")).toContain("was kept as")
 
       writeLeaseQuarantine(
         path,
@@ -1727,5 +1759,132 @@ describe("the lane is cleared only by its holder, and an error is not an empty l
     expect(writes).toHaveLength(1)
     expect(writes[0]).toContain("laneReleasedOver")
     expect(writes[0]).toContain("reason")
+  })
+})
+
+/**
+ * ★ Fourth adversarial audit of the quarantine (e6547f183), each reproduced on a
+ * copy of the committed code.
+ */
+describe("a quarantine that cannot be written never lifts one or releases the lane", () => {
+  const G = (pgid: number) => ({ pgid, leaderPid: pgid, verdict: "still-running", detail: "live" })
+
+  test("a replacement write that FAILS after an unreadable record leaves that record blocking", () => {
+    const base = mkdtempSync(join(tmpdir(), "lane-r4-displace-"))
+    try {
+      const root = join(base, "root")
+      mkdirSync(root, { mode: 0o700 })
+      const env = { [LEASE_QUARANTINE_DIR_ENV]: root }
+      const identity = `r4-displace/${process.pid}`
+      const path = laneQuarantinePath(identity, root)
+      writeFileSync(path, "{ not json")
+      // The staging path is a directory, so the replacement cannot be written.
+      mkdirSync(`${path}.tmp-${process.pid}`)
+      quarantineLane({
+        repositoryId: identity,
+        groups: [G(4242)],
+        env,
+        legacyCacheRoot: join(base, "cache"),
+        spawnKeeper: () => 1,
+        isAlive: () => true,
+      })
+      // Moved aside, the slot was absent here and another clone ACQUIRED. Kept by a
+      // second name, the unreadable record is still in the slot, still blocking.
+      expect(readLeaseQuarantineOutcome(path).kind).toBe("unreadable")
+      expect(readdirSync(root).filter((name) => name.includes(".displaced-"))).toHaveLength(1)
+    } finally {
+      rmSync(base, { recursive: true, force: true })
+    }
+  })
+
+  test("the legacy fallback never overwrites another identity's ACTIVE HOLD, survivors dead or not", () => {
+    const base = mkdtempSync(join(tmpdir(), "lane-r4-hold-"))
+    try {
+      const cache = join(base, "cache")
+      const now = Date.now()
+      writeLeaseQuarantine(
+        legacyQuarantinePath(cache),
+        record({
+          repositoryId: "someone/else",
+          survivors: [G(8484)],
+          createdAtMs: now,
+          expiresAtMs: now + QUARANTINE_TTL_MS,
+          holdUntilMs: now + QUARANTINE_TTL_MS,
+        }),
+      )
+      const before = readFileSync(legacyQuarantinePath(cache), "utf8")
+      // A symlinked root: the slot refuses it, so the record goes to the fallback.
+      const real = join(base, "real")
+      mkdirSync(real, { mode: 0o700 })
+      const link = join(base, "link")
+      symlinkSync(real, link)
+      expect(() =>
+        quarantineLane({
+          repositoryId: `mine/${process.pid}`,
+          groups: [G(1)],
+          env: { [LEASE_QUARANTINE_DIR_ENV]: link },
+          legacyCacheRoot: cache,
+          spawnKeeper: () => 1,
+          // Their survivor is dead; only the hold keeps their lane.
+          isAlive: () => false,
+          nowMs: now,
+        }),
+      ).toThrow(/which still holds its lane/)
+      expect(readFileSync(legacyQuarantinePath(cache), "utf8")).toBe(before)
+    } finally {
+      rmSync(base, { recursive: true, force: true })
+    }
+  })
+
+  test("no record anywhere: the lane is HELD while the groups live, then released, and said so", async () => {
+    const lines: string[] = []
+    let clock = 0
+    let polls = 0
+    const alive = new Set([7070])
+    const result = await quarantineOrHoldLane({
+      repositoryId: `r4-hold/${process.pid}`,
+      groups: [G(7070)],
+      // A refused slot root and no legacy location: `quarantineLane` throws.
+      env: { [LEASE_QUARANTINE_DIR_ENV]: "relative/root" },
+      spawnKeeper: () => 1,
+      isAlive: (pgid) => alive.has(pgid),
+      log: (line) => lines.push(line),
+      hold: {
+        pollMs: 1_000,
+        now: () => clock,
+        sleep: async (ms) => {
+          polls += 1
+          clock += ms
+          if (polls === 3) alive.clear()
+        },
+      },
+    })
+    expect(result).toBeUndefined()
+    expect(polls).toBe(3)
+    expect(lines.join("")).toContain("HOLDING the lane while 1 group(s) live")
+    expect(lines.join("")).toContain("every held group has exited; releasing the lane")
+  })
+
+  test("...and a group that never exits is held no longer than the record TTL", async () => {
+    const lines: string[] = []
+    let clock = 0
+    const result = await quarantineOrHoldLane({
+      repositoryId: `r4-deadline/${process.pid}`,
+      groups: [G(7171)],
+      env: { [LEASE_QUARANTINE_DIR_ENV]: "relative/root" },
+      spawnKeeper: () => 1,
+      isAlive: () => true,
+      log: (line) => lines.push(line),
+      hold: {
+        pollMs: 60_000,
+        now: () => clock,
+        sleep: async (ms) => {
+          clock += ms
+        },
+      },
+    })
+    expect(result).toBeUndefined()
+    expect(clock).toBe(QUARANTINE_TTL_MS)
+    expect(lines.join("")).toContain("hold deadline reached with 1 group(s) alive [7171]")
   })
 })
