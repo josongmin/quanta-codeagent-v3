@@ -76,7 +76,7 @@
  * Blank counts as unset, because every resolver reads blank as absent.
  */
 import { join, resolve, sep } from "node:path"
-import { keptToolchainRoots } from "../../tools/dev/toolchain-roots"
+import { type ToolchainLink, toolchainLinks } from "../../tools/dev/toolchain-roots"
 
 export interface QuantaHomeFenceInput {
   readonly env: Readonly<Record<string, string | undefined>>
@@ -95,6 +95,8 @@ export interface QuantaHomeFenceInput {
 export interface QuantaHomeFenceDecision {
   readonly set: Readonly<Record<string, string>>
   readonly unset: readonly string[]
+  /** Toolchain roots to lend into the replaced HOME (`tools/dev/toolchain-roots.ts`). */
+  readonly lend: readonly ToolchainLink[]
 }
 
 export const isScratch = (value: string, prefixes: readonly string[]): boolean => {
@@ -167,19 +169,15 @@ export const decideQuantaHomeFence = (input: QuantaHomeFenceInput): QuantaHomeFe
   const set: Record<string, string> = {}
   const envHome = input.env.HOME
   const home = scratch(envHome) ? envHome : join(input.scratchRoot, "home")
-  if (home !== envHome) {
-    set.HOME = home
-    // Replacing a real HOME hides the toolchains that resolve through it; keep them.
-    Object.assign(
-      set,
-      keptToolchainRoots({ env: input.env, realHome: envHome, exists: input.exists }),
-    )
-  }
+  // Replacing a real HOME hides the toolchains that resolve through it; lend them.
+  const lend =
+    home === envHome ? [] : toolchainLinks({ home, realHome: envHome, exists: input.exists })
+  if (home !== envHome) set.HOME = home
   if (!scratch(input.env.QUANTA_HOME)) set.QUANTA_HOME = join(home, ".quanta")
   if (!scratch(input.env.QUANTA_PREFS_HOME)) {
     set.QUANTA_PREFS_HOME = join(input.scratchRoot, "prefs-home")
   }
-  return { set, unset }
+  return { set, unset, lend }
 }
 
 /** The macOS per-user temp root (`confstr(_CS_DARWIN_USER_TEMP_DIR)`) that `osTmp` sits

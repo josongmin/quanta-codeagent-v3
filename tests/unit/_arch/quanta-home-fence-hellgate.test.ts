@@ -41,6 +41,8 @@ describe("quanta-home fence — the policy", () => {
         QUANTA_PREFS_HOME: join(SCRATCH, "prefs-home"),
       },
       unset: [],
+      // No HOME was set, so no real one is being replaced and nothing is lent.
+      lend: [],
     })
   })
 
@@ -90,7 +92,7 @@ describe("quanta-home fence — the policy", () => {
       scratchPrefixes: workerPrefixes,
       exists: () => true,
     })
-    expect(d).toEqual({ set: {}, unset: [] })
+    expect(d).toEqual({ set: {}, unset: [], lend: [] })
   })
 
   test("roots a runner already pointed at scratch are kept, including the macOS alias", () => {
@@ -100,7 +102,7 @@ describe("quanta-home fence — the policy", () => {
       QUANTA_PREFS_HOME: "/tmp/w/prefs",
       QUANTA_CONFIG_DIR: "/var/folders/xy/T/cfg",
     })
-    expect(d).toEqual({ set: {}, unset: [] })
+    expect(d).toEqual({ set: {}, unset: [], lend: [] })
   })
 
   test("a kept scratch HOME with a non-scratch Quanta home gets the home's own .quanta", () => {
@@ -130,36 +132,52 @@ describe("quanta-home fence — the policy", () => {
 
 describe("quanta-home fence — toolchain roots survive the replaced HOME", () => {
   // rustup and cargo resolve their toolchains through HOME. Replacing HOME without
-  // these made every Rust arm of `test:real-toolchain` fail with "rustup could not
-  // choose a version of cargo to run" — seven of them, measured.
+  // them made every Rust arm of `test:real-toolchain` fail with "rustup could not
+  // choose a version of cargo to run" — seven of them, measured. They are LENT as
+  // links, because the tool under test spawns cargo through the product's env scrub,
+  // which passes HOME and nothing like RUSTUP_HOME.
   const real =
     (...present: string[]) =>
     (path: string) =>
       present.includes(path)
+  const home = join(SCRATCH, "home")
 
-  test("replacing a real HOME keeps the toolchain roots that exist under it", () => {
+  test("replacing a real HOME lends the toolchain roots that exist under it", () => {
     const d = decide({ HOME: "/Users/me" }, real("/Users/me/.rustup", "/Users/me/.cargo"))
-    expect(d.set).toMatchObject({
-      HOME: join(SCRATCH, "home"),
-      RUSTUP_HOME: "/Users/me/.rustup",
-      CARGO_HOME: "/Users/me/.cargo",
-    })
+    expect(d.set.HOME).toBe(home)
+    expect(d.lend).toEqual([
+      { link: join(home, ".rustup"), target: "/Users/me/.rustup" },
+      { link: join(home, ".cargo"), target: "/Users/me/.cargo" },
+    ])
+    // NOT Quanta state: nothing about the Quanta roots changes, and no variable is set.
+    expect(d.set).not.toHaveProperty("RUSTUP_HOME")
+    expect(d.set.QUANTA_HOME).toBe(join(home, ".quanta"))
   })
 
-  test("PAIRED CONTROLS — absent roots, an explicit root, and a kept scratch HOME add nothing", () => {
-    // A host without Rust gets nothing new.
-    expect(decide({ HOME: "/Users/me" }, real()).set).not.toHaveProperty("RUSTUP_HOME")
-    // An operator's own root is theirs.
-    const own = decide({ HOME: "/Users/me", CARGO_HOME: "/opt/cargo" }, real("/Users/me/.cargo"))
-    expect(own.set).not.toHaveProperty("CARGO_HOME")
-    // A worker HOME is kept, so nothing real is being replaced here: its roots come
-    // from the runner that spawned it (`toolchainRootsOfThisProcess`).
-    const worker = decide({ HOME: "/tmp/quanta-test-shards-1/worker-0/home" }, () => true)
-    expect(worker.set).not.toHaveProperty("RUSTUP_HOME")
-    // The roots are NOT Quanta state: the Quanta home still moves.
-    expect(decide({ HOME: "/Users/me" }, () => true).set.QUANTA_HOME).toBe(
-      join(SCRATCH, "home", ".quanta"),
-    )
+  test("PAIRED CONTROLS — absent roots, and a kept scratch HOME, lend nothing", () => {
+    expect(decide({ HOME: "/Users/me" }, real()).lend).toEqual([])
+    // A worker HOME is kept, so nothing real is being replaced: the runner that made
+    // it lent the roots (`lendToolchainsInto`).
+    expect(decide({ HOME: "/tmp/quanta-test-shards-1/worker-0/home" }, () => true).lend).toEqual([])
+  })
+
+  test("CANARY — inside this very test process, a lent root resolves where HOME points", () => {
+    // The preload applied the decision: when this process's real HOME had a
+    // toolchain root, the scratch HOME holds a link to it. Checked against the
+    // passwd home, which the fence cannot move.
+    const passwdHome = Bun.spawnSync(["sh", "-c", 'eval "printf %s ~$(id -un)"']).stdout.toString()
+    for (const leaf of [".rustup", ".cargo"]) {
+      const realRoot = join(passwdHome, leaf)
+      if (!Bun.spawnSync(["test", "-d", realRoot]).success) continue
+      const lent = join(process.env.HOME ?? "", leaf)
+      const resolved = Bun.spawnSync(["sh", "-c", `cd "${lent}" && pwd -P`])
+        .stdout.toString()
+        .trim()
+      const expected = Bun.spawnSync(["sh", "-c", `cd "${realRoot}" && pwd -P`])
+        .stdout.toString()
+        .trim()
+      expect({ leaf, resolved }).toEqual({ leaf, resolved: expected })
+    }
   })
 })
 

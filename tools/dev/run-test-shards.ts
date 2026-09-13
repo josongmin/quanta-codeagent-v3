@@ -120,7 +120,7 @@ import {
   type TimingSample,
 } from "./test-shard-timings"
 import { loadTierPopulationFloors } from "./test-tier-population"
-import { keptToolchainRoots } from "./toolchain-roots"
+import { lendToolchainRoots, toolchainLinks } from "./toolchain-roots"
 import { ADMISSION_DEADLINE_ENV } from "./verification-admission"
 import { executionPolicyDigest } from "./verification-execution-policy"
 import { sharedVerificationCacheRoot } from "./verification-receipt"
@@ -497,6 +497,7 @@ const runShard = async (
   mkdirSync(workerTmp, { recursive: true })
   mkdirSync(quantaHome, { recursive: true })
   const userLibrary = lendRealUserLibrary(workerHome, plan.resourceClass)
+  lendToolchainsInto(workerHome)
   mkdirSync(prefsHome, { recursive: true })
   mkdirSync(benchResults, { recursive: true })
   process.stdout.write(`[test:shards] chunk=${shard} user_library=${userLibrary}\n`)
@@ -505,9 +506,7 @@ const runShard = async (
   const spoolFd = openSync(spoolPath, "w")
   // Admission is complete before the shard runner starts. Never expose a
   // stale startup deadline to test code that may launch another local gate.
-  // The runner's own HOME is replaced per worker, so the toolchain roots behind
-  // it are pinned here — the same call the capability probe's env makes.
-  const workerEnv = { ...process.env, ...toolchainRootsOfThisProcess() }
+  const workerEnv = { ...process.env }
   delete workerEnv[ADMISSION_DEADLINE_ENV]
   workerEnv[SOURCE_JS_CLEANED_ROOT_ENV] = SOURCE_ROOT
   let closed = false
@@ -1147,9 +1146,13 @@ const readSpoolTail = (path: string, windowBytes: number): string => {
   }
 }
 
-/** See `tools/dev/toolchain-roots.ts`: what a replaced HOME would hide, from this process's HOME. */
-const toolchainRootsOfThisProcess = (): Readonly<Record<string, string>> =>
-  keptToolchainRoots({ env: process.env, realHome: process.env.HOME, exists: existsSync })
+/**
+ * Lend this process's toolchain roots into a HOME it is about to replace — a
+ * worker's or the capability probe's, through ONE call so the probe and the
+ * workers it answers for see the same toolchains (`tools/dev/toolchain-roots.ts`).
+ */
+const lendToolchainsInto = (home: string): readonly string[] =>
+  lendToolchainRoots(toolchainLinks({ home, realHome: process.env.HOME, exists: existsSync }))
 
 const digestFiles = (files: readonly string[]): string =>
   new Bun.CryptoHasher("sha256").update(files.join("\0")).digest("hex")
@@ -1511,15 +1514,12 @@ const main = async (): Promise<void> => {
     // this says, and the cost is a `skipped-capability`, never a false green.
     const probeHome = join(runRoot, "capability-probe-home")
     mkdirSync(join(probeHome, ".quanta"), { recursive: true })
+    lendToolchainsInto(probeHome)
     const capability = await capabilityReceiptEnvForCampaign({
       repoRoot: REPO_ROOT,
       tier: receiptTier,
       head: before.head,
-      probeEnv: {
-        ...(process.env as Record<string, string>),
-        ...toolchainRootsOfThisProcess(),
-        HOME: probeHome,
-      },
+      probeEnv: { ...(process.env as Record<string, string>), HOME: probeHome },
       hostHome: userInfo().homedir,
       // The campaign's own ceiling, not the one-hour default: a receipt that
       // expires mid-campaign sends every later worker back to skipping
