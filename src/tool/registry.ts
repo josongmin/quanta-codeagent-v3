@@ -227,17 +227,22 @@ export class ToolRegistry {
       spillKeep: cfg.toolOutputSpillKeep ?? DEFAULT_SPILL_KEEP,
     })
     if (capped.output === result.output) return result
-    // Route the spill path (if any) into the typed `evidence.fullLogPath` so
-    // the dispatch seam (`evidenceOf`) can flatten it onto `DispatchResult.
-    // fullLogPath` → trajectory `tool_end.fullLogPath`. exactOptionalPropertyTypes-
-    // safe: the `evidence` field is only set when we have something to add, and
-    // existing evidence subfields (stderr/exitCode) are merged through, not
-    // clobbered.
+    // Route the spill outcome into typed evidence: the spill path as
+    // `evidence.fullLogPath` (the dispatch seam `evidenceOf` flattens it onto
+    // `DispatchResult.fullLogPath` → trajectory `tool_end.fullLogPath`), or a
+    // refused/failed spill as `evidence.spillRefusal`, so an excerpt-only result
+    // differs from a persisted one by a field, not only by its text.
+    // exactOptionalPropertyTypes-safe: the `evidence` field is only set when we
+    // have something to add, and existing evidence subfields (stderr/exitCode)
+    // are merged through, not clobbered.
     const next: ToolResult = {
       ...result,
       output: capped.output,
       ...(capped.spillPath !== undefined
         ? { evidence: { ...result.evidence, fullLogPath: capped.spillPath } }
+        : {}),
+      ...(capped.spillRefusal !== undefined
+        ? { evidence: { ...result.evidence, spillRefusal: capped.spillRefusal } }
         : {}),
     }
     return next

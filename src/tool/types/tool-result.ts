@@ -11,6 +11,7 @@
  */
 import type { DocumentBlock, ImageBlock } from "@/llm"
 import type { SensitivityClass } from "@/security"
+import type { SpillDirRefusal } from "../output-spill"
 
 /**
  * ADR-0062 rule #3 — structured cap-as-instruction third channel.
@@ -278,6 +279,12 @@ export interface ToolResultEvidence {
   /** Absolute path to a full log when output spilled. Caller-resolved
    *  (FS jail still applies to the path). */
   fullLogPath?: string
+  /** NW-2: the output was over the tool-result budget but NOT persisted — the
+   *  spill directory was refused or the spill write failed — so `output` holds
+   *  only a head+tail excerpt and there is no {@link fullLogPath}. Set by
+   *  `ToolRegistry.run` from `capToolOutput`. Absent ⇒ the output was within
+   *  budget or was persisted in full. */
+  spillRefusal?: SpillDirRefusal
   /** B1 (RFC jul-3): the command was killed by a wall-clock DEADLINE before completing — the
    *  exit code is a kill sentinel and any output is PARTIAL. Downstream inspectors (the terminal
    *  verify-gate) must not treat a timed-out result as a completed observation. Absent ⇒ ran to

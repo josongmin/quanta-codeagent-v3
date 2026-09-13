@@ -31,8 +31,16 @@ import {
 } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { z } from "zod"
 import { createEvictionSpillPort } from "@/agent/tool-result-evict"
-import { defaultTools, type ToolContext, ToolRegistry, type ToolResult } from "@/tool"
+import {
+  defaultTools,
+  type Tool,
+  type ToolContext,
+  type ToolEvent,
+  ToolRegistry,
+  type ToolResult,
+} from "@/tool"
 import {
   capToolOutput,
   DEFAULT_SPILL_KEEP,
@@ -142,7 +150,11 @@ describe("NW-2 refused arms — a symlinked spill location is never written or p
     expect(result.output).not.toContain("<persisted-output>")
     expect(result.output).toContain("row-0 ")
     expect(result.output).toContain("row-1999 ")
-    expect(result.evidence?.fullLogPath).toBeUndefined()
+    // The refusal is a structured field, not only text: no fullLogPath, and the
+    // kind + path the spill guard refused.
+    expect(result.evidence).toEqual({
+      spillRefusal: { kind: "symlink", path: join(repo, ".quanta", "tool-output") },
+    })
   })
 
   test("`.quanta` itself → out-of-repo dir: its tool-output stays at 80 files, 0 foreign", async () => {
@@ -160,7 +172,9 @@ describe("NW-2 refused arms — a symlinked spill location is never written or p
     expect(result.output).toContain(
       `was NOT persisted to disk: ${join(repo, ".quanta")} is a symbolic link;`,
     )
-    expect(result.evidence?.fullLogPath).toBeUndefined()
+    expect(result.evidence).toEqual({
+      spillRefusal: { kind: "symlink", path: join(repo, ".quanta") },
+    })
   })
 
   test("`.quanta` → EMPTY out-of-repo dir: no `tool-output` is created through the link", async () => {
@@ -179,7 +193,9 @@ describe("NW-2 refused arms — a symlinked spill location is never written or p
     expect(result.output).toContain(
       `was NOT persisted to disk: ${join(repo, ".quanta")} is a symbolic link;`,
     )
-    expect(result.evidence?.fullLogPath).toBeUndefined()
+    expect(result.evidence).toEqual({
+      spillRefusal: { kind: "symlink", path: join(repo, ".quanta") },
+    })
   })
 
   test("dangling `.quanta/tool-output` symlink: nothing is created at its target", async () => {
@@ -197,6 +213,41 @@ describe("NW-2 refused arms — a symlinked spill location is never written or p
     expect(result.output).toContain(
       `was NOT persisted to disk: ${join(repo, ".quanta", "tool-output")} is a symbolic link;`,
     )
+    expect(result.evidence).toEqual({
+      spillRefusal: { kind: "symlink", path: join(repo, ".quanta", "tool-output") },
+    })
+  })
+
+  test("the refusal merges into a tool's own evidence instead of replacing it", async () => {
+    mkdirSync(join(repo, ".quanta"))
+    symlinkSync("../../victim", join(repo, ".quanta", "tool-output"))
+    const failing: Tool<Record<string, never>> = {
+      name: "failing-dump",
+      description: "test",
+      inputSchema: z.object({}),
+      isReadOnly: () => true,
+      isConcurrencySafe: () => true,
+      async *execute(): AsyncIterable<ToolEvent> {
+        yield {
+          type: "result",
+          result: {
+            ok: false,
+            output: "D".repeat(250_000),
+            evidence: { stderr: "boom", exitCode: 2 },
+          },
+        }
+      },
+    }
+
+    const result = await new ToolRegistry([failing as Tool]).run("failing-dump", {}, ctx())
+
+    expect(result.evidence).toEqual({
+      stderr: "boom",
+      exitCode: 2,
+      spillRefusal: { kind: "symlink", path: join(repo, ".quanta", "tool-output") },
+    })
+    expect(result.ok).toBe(false)
+    expect(result.output.startsWith("<truncated-output>\n")).toBe(true)
   })
 
   test("sub-budget output in a symlinked repo is byte-identical and touches nothing", async () => {
@@ -220,7 +271,7 @@ describe("NW-2 refused arms — a symlinked spill location is never written or p
     expect(result.output).toBe("1\ttiny\n2\t")
     expect(result.output).toBe(controlResult.output)
     expect(result.ok).toBe(true)
-    expect(result.evidence?.fullLogPath).toBeUndefined()
+    expect(result.evidence).toBeUndefined()
     const after = census(victim)
     expect(after.entries).toHaveLength(VICTIM_NOTES)
     expect(after.foreign).toEqual([])
@@ -258,6 +309,7 @@ describe("NW-2 paired controls — a real directory still spills and prunes", ()
     expect(spilled).toContain("row-1999 ")
     expect(result.output.startsWith("<persisted-output>\n")).toBe(true)
     expect(result.output).toContain(`The full output is at: ${fullLogPath}`)
+    expect(result.evidence).toEqual({ fullLogPath })
   })
 
   test("fresh repo (no `.quanta`): both components are created as real directories", async () => {
@@ -268,7 +320,7 @@ describe("NW-2 paired controls — a real directory still spills and prunes", ()
     expect(lstatSync(spillDir).isDirectory()).toBe(true)
     const files = readdirSync(spillDir)
     expect(files).toHaveLength(1)
-    expect(result.evidence?.fullLogPath).toBe(join(spillDir, files[0] as string))
+    expect(result.evidence).toEqual({ fullLogPath: join(spillDir, files[0] as string) })
   })
 })
 
@@ -433,7 +485,13 @@ describe.skipIf(IS_ROOT)(
       )
       expect(result.output).toContain("row-0 ")
       expect(result.output).toContain("row-1999 ")
-      expect(result.evidence?.fullLogPath).toBeUndefined()
+      expect(result.evidence).toEqual({
+        spillRefusal: {
+          kind: "unavailable",
+          path: join(repo, ".quanta"),
+          cause: expect.stringContaining("EACCES"),
+        },
+      })
       expect(existsSync(join(repo, ".quanta"))).toBe(false)
     })
 
@@ -488,7 +546,13 @@ describe.skipIf(IS_ROOT)(
       )
       expect(result.output).toContain("row-0 ")
       expect(result.output).toContain("row-1999 ")
-      expect(result.evidence?.fullLogPath).toBeUndefined()
+      expect(result.evidence).toEqual({
+        spillRefusal: {
+          kind: "write-failed",
+          path: expect.stringMatching(new RegExp(`^${reSource(spillDirOf())}/${UUID_TXT}$`)),
+          cause: expect.stringContaining("EACCES"),
+        },
+      })
       expect(readdirSync(spillDirOf())).toEqual([])
     })
 
