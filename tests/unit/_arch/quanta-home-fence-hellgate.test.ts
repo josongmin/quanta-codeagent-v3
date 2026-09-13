@@ -133,12 +133,15 @@ describe("quanta-home fence — stale roots of killed runs", () => {
 describe("quanta-home fence — the canary, from inside a real test process", () => {
   // The account's home from the user database, NOT `os.userInfo().homedir`: in Bun that
   // follows the startup HOME (measured), so under a probe HOME it names the probe and the
-  // canary would compare a root against itself.
-  const passwdHome = Bun.spawnSync(["sh", "-c", 'eval "printf %s ~$(id -un)"']).stdout.toString()
+  // canary would compare a root against itself. Resolved inside the tests, not at
+  // describe time: a spawn during module evaluation is what module-load-effect-guard bans.
+  const passwdHomeOf = (): string =>
+    Bun.spawnSync(["sh", "-c", 'eval "printf %s ~$(id -un)"']).stdout.toString()
 
   const inside = (p: string, root: string): boolean => p === root || p.startsWith(`${root}/`)
 
   test("every resolver-reachable root points at scratch, not the passwd home", () => {
+    const passwdHome = passwdHomeOf()
     expect(passwdHome.startsWith("/"), `no passwd home resolved: ${passwdHome}`).toBe(true)
     const roots: Record<string, string> = {
       // `env.HOME` is what the memory factory's pre-relocation probe reads; left real, it
@@ -164,6 +167,7 @@ describe("quanta-home fence — the canary, from inside a real test process", ()
   })
 
   test("the frozen runtime config agrees (the preload reset it after redirecting)", () => {
+    const passwdHome = passwdHomeOf()
     const cfg = runtimeConfig()
     expect(cfg.centralConfigDir === undefined || !inside(cfg.centralConfigDir, passwdHome)).toBe(
       true,
