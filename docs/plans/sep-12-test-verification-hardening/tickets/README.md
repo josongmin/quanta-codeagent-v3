@@ -397,6 +397,81 @@ red-on-injection 뮤턴트로 확인했고, **등가 뮤턴트는 등가라고 �
 
 ---
 
+## 3차 감사 대응 (2026-09-14, 병렬 적대 감사 2라운드) — 사용자 액션리스트
+
+범위는 `4db28a3f5..922910655`, local `main`이다. 1라운드는 감사 4개(capability·catalog·
+test-shards·quarantine)를 반영했다. 2라운드는 immutable snapshot `a128bc99d`에서 서로
+겹치지 않는 범위로 적대 감사 5개(capability 체인·catalog·shard tier·quarantine·주장 대
+실제)를 병렬로 돌렸다. 감사는 전부 read-only였고, 수정은 통합 담당 한 명이 순차로 반영했다.
+감사 보고는 직접 재현한 뒤에만 반영했다. 뮤턴트 원복은 cp 백업으로 했다.
+
+### 반영 완료
+
+| # | 결함 | 조치 | 뮤턴트 |
+|---|---|---|---:|
+| C1 | 워커가 receipt bag을 잃으면 gated describe가 skip으로 green | runner가 자기 `process.env`에 definite id로 `QUANTA_REQUIRE_CAPABILITIES`를 무장. bag이 빠지면 이름 붙은 실패 | 21 |
+| C2 | `test:contract`·`test:real-toolchain`에 receipt가 없음(로컬 skip-green, CI 계약 job은 red) | `with-capability-receipt.ts` 래퍼. probe와 child가 preload가 유지하는 scratch HOME 하나를 공유 | (C1에 포함) |
+| C3 | contract guard가 module-scope throw라 `--bail=1`에서 junit이 비고 같은 파일 case가 사라짐. `REQUIRE_CONTRACT=0`이 strict. lint sweep이 skip 경고를 삭제 | 등록형 실패, 스위치 문법 통일(`0/false/no/off`), 경고 복구 | (C1에 포함) |
+| C4 | aggregator의 `blockedMissing`·`failedSetup`이 아무도 넘기지 않는 CLI 플래그 전용이라 두 hard-failure 검사가 발화 불가 | consumer가 파일마다 `[capability] RECORD` testcase를 남기고 reducer가 집계. REQUIRED 실패도 record(실행 case 아님) | 18+17 |
+| C5 | call-site scanner가 상수·namespace·alias·dynamic import·조건부·`process.env` 2번째 인자를 못 봄 | 모든 호출 분류, 보증 불가 형태를 문제로 명시. consumer import 없는 파일은 파싱 생략 | (C4에 포함) |
+| C6 | campaign에서 `failed-setup`을 읽는 곳이 없음. 느린 Chrome(endpoint 15s timeout)을 `unavailable`로 기록해 fail-loud가 회귀로 오판 | runner가 fresh·cached chunk의 record를 PASS 줄 앞에 출력. endpoint timeout은 `probe-timeout`(예산 불변) | (C4에 포함) |
+| C7 | 늦게 도착한 probe가 이미 쓰고 무장한 receipt를 변경(map 공유). runner가 receipt를 지우지 않음 | mint snapshot, `finally`에서 삭제 | (C4에 포함) |
+| C8 | scratch HOME이 도구를 가려도 receipt는 "없음"이라고만 기록 | 실제 HOME에서 재probe해 `AVAILABLE under the real HOME` 표기(status·verdict digest 불변) | (C4에 포함) |
+| T1 | floor slack 때문에 `tools/`·`tests/meta`·`tests/adversarial`·`tests/measurement` 전체와 src 42개가 사라져도 16조합 green | discovery 완전성 threshold 0: tracked ⊆ discovered, root마다 ≥1 | 12 (11 red, 1개는 정책 suite가 잡음) |
+| T2 | prepush/pr/full의 실제 파일 삭제를 "SELECTION shrink … lower the floor"로 보고 | 레코드 v3가 측정 `discovered`를 보관하고 측정 대비로 판정. 조치 문구는 `--measure` | (T1에 포함) |
+| T3 | 일관되게 낮춘 레코드(`unit.selected=1`)가 로더를 통과 | `--measure`가 커밋 트리에서 재계산해 레코드를 씀. arm이 `measuredAt` 재계산과 완전 일치를 요구 | (T1에 포함) |
+| T4 | git snapshot을 선택 **후에** 찍어서 선택 중 착륙한 커밋이 비교를 통과 | 선택 전에 snapshot | (T1에 포함) |
+| Q1 | keeper가 TTL에 live 그룹 위의 expired 레코드를 path 기준으로 삭제 → "보관+보고" 경로가 실행되지 않음, 새 레코드도 삭제 가능 | keeper는 감시·로그만. 정리는 포트를 잡은 holder만 | 15 |
+| Q2 | 슬롯 확인 후 bind라서 쓰기·해제 사이 창과 대기자의 live 레코드 삭제가 재현됨 | bind 후 포트를 잡은 채로 읽음 | (Q1에 포함) |
+| Q3 | 모든 읽기 오류가 `absent`=free(chmod 000·slot 자리의 디렉터리·탐색 불가 root). mtime 실패가 1970=stale | ENOENT만 absent. 나머지는 block, mtime 불가 시 읽을 때마다 새로 나이 계산 | (Q1에 포함) |
+| Q4 | reader가 root를 검증 안 함. expiry 무상한. identity 비멱등. 병합에서 survivor 유실. mirror 실패가 quarantine을 숨김 | 비사설 root는 block, 느슨한 mode 교정, legacy fallback, TTL cap, 멱등 normalizer, misfiled 운반·unreadable 보관 | (Q1에 포함) |
+| Q5 | 테스트 arm이 stub keeper 프로세스를 영구 누수(호스트에서 18개 발견) | stub가 디렉터리가 사라지면 종료, arm이 종료를 assert. 남은 17개는 kill | — |
+| K1 | 가짜 heredoc·산술 `<<`·여러 줄 작은따옴표가 shell 마스킹을 꺼버림. quoted delimiter도 마스킹됨 | 줄 사이 quote 상태 유지, 마스킹된 코드에서 opener 탐지, delimiter 보존 | 21 |
+| K2 | workflow `env.X`를 스칼라 전체에서 매칭(step name·run 주석·echo 문자열) | `${{ }}`와 `if:` 값만 읽음 | (K1에 포함) |
+| K3 | Python·TS 구조분해 쓰기와 테스트 `expect(process.env.X)`를 읽기로 계산. 삭제된 tracked 파일이 스캔을 crash | 쓰기 제외, expect 제외, ENOENT skip, `wiring.activation` env key 추출 | (K1에 포함) |
+| K4 | 마스킹·언어 규칙 12개 이상과 필드 3개 누락이 각각 green(`declared.size > 400`이 고른 수) | 규칙마다 그 규칙만 결정하는 fixture 줄, 필드마다 전용 이름이 declared에 도달해야 함 | (K1에 포함) |
+| G1 | `--trust-scope owner`·`member`가 실제 댓글에 아무에게도 응답 안 함(OWNER/MEMBER가 collaborator로 먼저 접힘). SETUP.md 예시가 곧 먹통 봇 | association → scope 매핑, SETUP 표를 코드 동작으로 교정 | 2 |
+
+이번 세션 뮤턴트는 106개다. 105개가 red였고 1개(override tier 무시)는 현재 override로는
+등가지만 정책 suite가 잡는다.
+
+### 수치 (current HEAD 실측, 성능 주장 아님)
+
+| 항목 | 값 |
+|---|---|
+| contract 레인 | 8 pass/5 skip → receipt 후 14/3 → record 후 14/4, fail 0 유지 |
+| real-toolchain 레인 | 22 pass / 28 skip / **7 fail**(Rust 전부, 아래 A1) |
+| tracked vs discovered (full) | 3995 / 3995 |
+| catalog env | 532 declared / 0 unbacked |
+| tier 레코드 v3 (`34b1d74fc`) | discovered full 3995·core 3601·unit 3275·integration 394 |
+
+### 남은 액션 (기능 · 왜 · ROI)
+
+| # | 기능 | 왜 | ROI |
+|---|---|---|---|
+| A1 | test preload HOME fence가 toolchain root(`RUSTUP_HOME`·`CARGO_HOME`, Python user site)를 유지하도록 하거나, lane helper가 버전 probe 실패를 `failed-setup`으로 분류 | `4f8d4a89b`(다른 세션) 이후 Rust real-e2e 7개가 rustup toolchain을 못 찾아 fail. helper는 binary만 보고 `executed`라고 보고함. hermeticity와 도구 접근의 트레이드오프라 소유자 결정 필요 | 높음: 개발 호스트에서 toolchain 레인이 초록으로 돌아오고 lane 보고가 정직해짐 |
+| A2 | `resolveTestPopulation`의 source 분류(37 MB, 단일 프로세스 실측 ~5.5–6.1s) 가속: 내용 해시 영속 캐시 또는 `resourceEvidenceFor` 프로파일 | always-run prepush canary(`test-policy-enrollment`)가 부하에서 5s timeout. 모든 campaign 선택도 비용 지불. ABBA 측정 필수 | 높음: prepush flake 제거와 campaign 시작 단축 |
+| A3 | receipt 유효성을 runner lease 수명에 묶기(6h TTL, 실행 중 toolchain fingerprint 변경) | 무장한 스위치가 만료·지문 변경 후의 consumer를 전부 REQUIRED 실패로 만듦(메시지는 이유를 명시) | 중간: 장시간·동시 설치 상황의 가짜 red |
+| A4 | quarantine 슬롯과 legacy 쓰기가 둘 다 실패하면 survivor가 사는 동안 listener 유지(TTL cap) | 지금은 둘 다 실패 시 WARN 후 release | 중간: 드문 fs 장애에서 격리 누락 |
+| A5 | pgid 재사용 방어(leader start time을 `DrainedGroupRecord`까지 전달) | 죽은 그룹 pgid를 다른 프로세스가 재사용하면 alive로 오판 | 낮음–중간 |
+| A6 | catalog: registry 항목은 `readSite` 파일의 실제 read로 교차검증 | generic accessor(`cli-knobs-accessor.ts`)가 모든 inventory knob을 읽어서 행동 reader가 사라져도 backed로 남음. 현재 declaration 전용 파일로만 backed인 이름은 0 | 중간: 죽은 knob 탐지 정밀도 |
+| A7 | catalog tokenizer에 Go backtick·Rust raw string·Python f-string 내부 read 추가 | 지금은 false red 방향(누락 read)이라 시끄럽게 실패함 | 낮음 |
+| A8 | worker·probe·fence HOME 레이아웃 함수 하나로 통합 | runner·래퍼·fence가 같은 레이아웃을 따로 들고 있어 drift 위험 | 낮음–중간 |
+| A9 | universe floor 3900(`c7e91b306`에 고른 값) 재검토와 정기 `--measure` | corpus가 자라며 파생 floor slack이 커짐. 완전성 검사가 slack에 의존하지 않는 이유 | 낮음 |
+| A10 | healthy load에서 full-suite campaign 1회와 ABBA | 이번 세션은 부하 20–56 구간이라 campaign·성능 주장을 하지 않음 | 높음(증거) |
+
+### 외부 권한 blocker
+
+- 원격 push·PR·branch protection: 권한이 없어 하지 않았다. 전부 local `main`에만 있다.
+- hosted CI는 GitHub Actions 빌링 차단 상태다. 그래서 다음이 미검증이다:
+  - capability 레인과 `required` aggregator가 실제 runner에서 도는지.
+  - toolchain CI job이 rust-analyzer·gopls·pyright를 설치하지 않아 group floor가 구성상 실패할 가능성.
+- `ci.yml`의 capability 단계 이름은 `capability-result.v1`이라고 적혀 있지만 artifact는 v2다. gate-manifest가
+  단계 이름을 pin하고, ci.yml은 다른 세션이 편집 중이라 손대지 않았다.
+- `41a86c849` 커밋 설명의 근거(false green이 아니라 false RED)는 history를 rewrite하지 않는 한 고칠 수 없다.
+
+---
+
 ## prepush 실행 로그 (2026-09-12, clean tree, healthy load)
 
 부하가 8–20까지 떨어진 창에서 prepush를 반복 실행했다. **매 실행마다 red가 하나씩
