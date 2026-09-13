@@ -13,7 +13,7 @@
   `src/runtime/node-repl/state-store.ts` (`<quanta home>/node_repl/active_execs/{id}.json`, 0600/0700),
   `src/runtime/node-repl/headless-stub.ts` (deterministic test adapter — no real spawn),
   `src/runtime/node-repl/index.ts` (barrel),
-  `tests/unit/runtime/node-repl-hellgate.test.ts` (16 cases).
+  `tests/unit/runtime/node-repl-hellgate.test.ts` (16 cases at acceptance; later real-kernel protocol arms added).
 
 **ADR-number reconciliation.** Initially booked 0248 but a parallel-track ADR
 landed on that number first; per the user-deference / parallel-track renumber
@@ -118,23 +118,17 @@ schedule on it.
 
 ### Default adapter (`default-kernel.ts`)
 
-- Spawned through the scrubbed-env funnel as `node --no-warnings -e <boot>`, where the
-  boot script starts `node:repl` with `prompt: ""`, `displayPrompt` disabled and
-  `ignoreUndefined: true` (stdin/stdout/stderr piped). **Amended sep-14:** this was
-  `node -i`, whose banner, `> ` / `| ` prompts and `undefined` echoes had to be scrubbed
-  from the capture; the sentinel's own echo (`> '__sentinel__'`) left a stray `'` on
-  every exec once the scrub stripped prompts, and output beginning with `> ` / `... `
-  or equal to `undefined` was rewritten or dropped.
-- Line-protocol: write `code + "\n"` then the statement
-  `;void (process.stderr.write("\n<sentinel>"), process.stdout.write("\n<sentinel>"));`.
-  Each stream is read up to its own sentinel; everything before it, minus the
-  statement's newline and one line end, is the exec's stdout / stderr. **Amended
-  sep-14:** stderr used to be drained with a read that resolved only at process exit,
-  and the REPL printed uncaught errors to STDOUT, so `hadError` was false for every
-  throw on a live kernel. The boot script now routes uncaught errors to stderr through
-  the REPL's `handleError` option, and serialises evaluation so an awaited command
-  completes (callback or `handleError`) before the sentinel statement runs — without
-  that, awaited results and rejections landed on the NEXT exec.
+- Spawned through the scrubbed-env funnel as `node --no-warnings -e <boot>`. **Amended
+  sep-14 (three times — see the module doc for each measured failure):** the boot script
+  starts `node:repl` with a private input and output, rebinds `console` to the process,
+  and reads one JSON line `{ code, sentinel }` per command from stdin. Each command is
+  evaluated WHOLE by the REPL's `eval` (no readline line splitting), one at a time; it is
+  finished by its callback or by the REPL writing an uncaught error to its private
+  output (routed to stderr), whichever comes first. The value, if any, goes to stdout;
+  after two `setImmediate` turns the sentinel goes to stderr then stdout, and the kernel
+  reads each stream up to it. `hadError` is "the exec wrote to stderr" (a throw does).
+  Same behaviour measured on Node 22 and 25. The earlier `node -i` + prompt scrub, the
+  line-fed promptless REPL, and a serialised-eval variant each mis-attributed output.
 - State transitions: `starting` → (warm-up sentinel read) → `ready` → (exec
   in flight) → `running` → (exec done) → `idle` → … → `dead` (process
   exit, kill, or unrecoverable parse error).

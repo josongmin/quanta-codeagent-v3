@@ -1,7 +1,7 @@
 /**
  * ADR-0249 hellgate — node-REPL persistent-kernel slice.
  *
- * 16 adversarial cases proving the closed `NodeReplKernel` port + its two
+ * Adversarial cases (16 at ADR time; the real-kernel protocol arms 02A–02D came later) proving the closed `NodeReplKernel` port + its two
  * adapters (production `Bun.spawn` default + deterministic headless stub)
  * + the on-disk state-store satisfy the contract:
  *
@@ -167,6 +167,15 @@ describe("ADR-0249 node-repl-hellgate", () => {
         ["function f(a) {\n  return a * 2\n}\nf(21)", "42"],
         // An awaited result belongs to THIS exec, not the next one.
         ["await new Promise((r) => setTimeout(r, 30)); 40 + 2", "42"],
+        // A block AFTER an awaited line is one command (round-9: readline had split it).
+        [
+          "const r = await Promise.resolve([1, 2])\nfor (const v of r) {\n  console.log('item', v)\n}",
+          "item 1\nitem 2",
+        ],
+        [
+          "await new Promise((r) => setTimeout(r, 20))\nfunction g() {\n  return 41 + 1\n}\ng()",
+          "42",
+        ],
         ["x", "42"],
       ]
       try {
@@ -190,39 +199,70 @@ describe("ADR-0249 node-repl-hellgate", () => {
    * stdout for every throw — and the `node_repl` tool reported `ok:true`. The stub arms
    * (HELL-NR-04/05) model the contract; this is the adapter keeping it.
    */
+  /** One exec on a real kernel that must SUCCEED at the protocol level; returns its result
+   *  as `{ stdout, stderr, hadError }` (a protocol failure is rendered into stdout so an
+   *  expectation on it fails with the reason). */
+  const execOn = async (
+    k: ReturnType<typeof createDefaultNodeReplKernel>,
+    id: KernelId,
+    code: string,
+  ): Promise<{ stdout: string; stderr: string; hadError: boolean }> => {
+    const out = await k.exec(id, code, { timeoutMs: 10_000 })
+    return out.ok
+      ? { stdout: out.value.stdout, stderr: out.value.stderr, hadError: out.value.hadError }
+      : { stdout: `EXEC-FAILED ${JSON.stringify(out.error)}`, stderr: "", hadError: false }
+  }
+
   test("HELL-NR-02D the real kernel classifies a throw as an error, and stays usable", async () => {
     await withTempDir("qnr-throw-", async (home) => {
       const k = createDefaultNodeReplKernel({ home })
       const sp = await k.spawn({ sessionId: "throw" })
       expect(sp.ok, JSON.stringify(sp)).toBe(true)
       if (!sp.ok) return
+      const id = sp.value.id
       try {
-        await k.exec(sp.value.id, "let kept = 41", { timeoutMs: 10_000 })
-        for (const [code, needle] of [
+        await execOn(k, id, "let kept = 41")
+        const thrown: ReadonlyArray<readonly [string, string]> = [
           ["throw new Error('boom')", "Error: boom"],
           ["nope.x", "ReferenceError"],
           // Awaited errors: the REPL evaluated the sentinel before the promise settled, so
           // the first went to the NEXT exec and the second was lost.
           ["await Promise.reject(new Error('async-boom'))", "async-boom"],
           ["await new Promise((r) => setTimeout(r, 50)); throw new Error('late')", "late"],
-        ] as const) {
-          const out = await k.exec(sp.value.id, code, { timeoutMs: 10_000 })
-          expect(out.ok, `${code}: ${JSON.stringify(out)}`).toBe(true)
-          if (!out.ok) return
-          expect(out.value.hadError, code).toBe(true)
-          expect(out.value.stderr, code).toContain(needle)
-          expect(out.value.stdout, code).toBe("")
+        ]
+        for (const [code, needle] of thrown) {
+          const r = await execOn(k, id, code)
+          expect(r, code).toMatchObject({ hadError: true, stdout: "" })
+          expect(r.stderr, code).toContain(needle)
+        }
+        // An UNAWAITED rejection belongs to the exec that left it, not the next clean one.
+        const unawaited = await execOn(k, id, "Promise.reject(new Error('unawaited')); 'x'")
+        expect(unawaited).toMatchObject({ hadError: true, stdout: "'x'" })
+        expect(unawaited.stderr).toContain("unawaited")
+        // An error while a command is still awaiting ends THAT command; the next execs do
+        // not shift by one (round-9: every later result had moved to the next exec).
+        await execOn(
+          k,
+          id,
+          "Promise.reject(new Error('u')); await new Promise((r) => setTimeout(() => r('R'), 150))",
+        )
+        for (const tag of ["W1", "W2"]) {
+          const w = await execOn(
+            k,
+            id,
+            `await new Promise((r) => setTimeout(() => r('${tag}'), 200))`,
+          )
+          expect(w.stdout, tag).toBe(`'${tag}'`)
         }
         // The error did not wedge or desynchronise the kernel: state survives, and a clean
         // exec after it reports no error and no leftover stderr (paired control).
-        const after = await k.exec(sp.value.id, "kept + 1", { timeoutMs: 10_000 })
-        expect(after.ok).toBe(true)
-        if (!after.ok) return
-        expect(after.value.stdout).toBe("42")
-        expect(after.value.hadError).toBe(false)
-        expect(after.value.stderr).toBe("")
+        expect(await execOn(k, id, "kept + 1")).toEqual({
+          stdout: "42",
+          stderr: "",
+          hadError: false,
+        })
       } finally {
-        await k.kill(sp.value.id)
+        await k.kill(id)
       }
     })
   }, 60_000)

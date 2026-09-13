@@ -59,11 +59,16 @@ const schema = z.object({
     .int()
     .positive()
     .optional()
-    .describe("Per-exec wall-clock cap (ms). Omit for the kernel default."),
+    .describe(
+      "Per-exec wall-clock cap (ms). Omit for 120000 (the shell default). A timed-out exec ends the kernel and its bindings.",
+    ),
 })
 type Input = z.infer<typeof schema>
 
 type ResultSource = NonNullable<ToolResult["source"]>
+
+/** The exec deadline when the call names none — the shell's (`runtime/shell.ts`). */
+export const NODE_REPL_DEFAULT_EXEC_TIMEOUT_MS = 120_000
 
 const fail = (output: string, source?: ResultSource): ToolEvent => ({
   type: "result",
@@ -193,7 +198,10 @@ const handleExec = async (
   try {
     const result = await kernel.exec(targetId, input.code, {
       ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}),
-      ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
+      // Always bounded. The kernel's own default is no timeout, and once awaited commands
+      // really complete before the exec returns, `await new Promise(() => {})` is as
+      // unbounded as `while (true) {}` (round-9 audit: pending after 8 s with none set).
+      timeoutMs: input.timeoutMs ?? NODE_REPL_DEFAULT_EXEC_TIMEOUT_MS,
     })
     if (!result.ok) return fail(renderKernelError(result.error), source)
     const { stdout, stderr, hadError } = result.value
@@ -240,7 +248,7 @@ export const makeNodeReplTool = (kernel: NodeReplKernel): Tool<Input> => {
   return {
     name: "node_repl",
     description:
-      "Evaluate code in a PERSISTENT Node.js REPL kernel — a live `node -i` subprocess whose variable bindings survive across calls (`let x = 42` now, then `x` → `42` later). Full Node runtime (fs / require / async). Distinct from code_cell (one-shot WASM sandbox with NO persistent state). op:'exec' evaluates `code` in the session kernel (auto-spawned on first use); op:'list'/'status'/'kill' manage kernels. HIGH RISK: runs arbitrary Node code with full host access ⇒ always-confirm. Never throws — spawn/eval/abort faults return ok:false.",
+      "Evaluate code in a PERSISTENT Node.js REPL kernel — a live Node subprocess whose variable bindings survive across calls (`let x = 42` now, then `x` → `42` later). Full Node runtime (fs / require / async). Distinct from code_cell (one-shot WASM sandbox with NO persistent state). op:'exec' evaluates `code` in the session kernel (auto-spawned on first use); op:'list'/'status'/'kill' manage kernels. HIGH RISK: runs arbitrary Node code with full host access ⇒ always-confirm. Never throws — spawn/eval/abort faults return ok:false.",
     inputSchema: schema,
     isReadOnly: () => false,
     isConcurrencySafe: () => false,

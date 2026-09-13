@@ -28,7 +28,7 @@ purpose: |
   턴 사이 변수 바인딩이 보존되게 한다 (`let x = 42` 후 다음 턴에 `x` →
   `42`). 이번 라운드는 closed port + production `Bun.spawn` adapter +
   state-store (`<quanta home>/node_repl/active_execs/{id}.json`, 0600 / dir
-  0700) + 결정론적 headless stub + 16-case hellgate 까지만. 툴 wiring,
+  0700) + 결정론적 headless stub + hellgate(ADR 시점 16케이스) 까지만. 툴 wiring,
   full Jupyter protocol (`msg_id` / `parent_header`), multi-output frame,
   restart policy, conversation-checkpoint 연동은 deliberate hold.
 

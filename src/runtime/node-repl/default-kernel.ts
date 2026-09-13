@@ -7,25 +7,30 @@
  * threaded into whatever tool wires it (deferred; this round delivers the
  * kernel primitive only).
  *
- * Line-protocol around a node REPL that prints ONLY the program's output:
- *   1. spawn `node --no-warnings -e <REPL_BOOT>` with stdin/stdout/stderr piped. The
- *      boot script starts `node:repl` with an empty prompt, `displayPrompt` disabled
- *      and `ignoreUndefined` — no banner, no `> ` / `| ` prompts, no `undefined` echoes.
- *   2. write the sentinel statement and read until it arrives — `state = "ready"`.
- *   3. on each `exec(code)`: write `code`, a newline, and the sentinel statement, which
- *      prints `"\n" + sentinel` to stderr and then stdout, and nothing after it. Each
- *      stream is read up to its own sentinel: before it is that exec's stdout / stderr.
- *      Uncaught errors go to stderr (REPL `handleError`), so `hadError` means it threw.
+ * Protocol: one JSON line per command, evaluated WHOLE by the REPL's own `eval`.
+ *   1. spawn `node --no-warnings -e <REPL_BOOT>` with stdin/stdout/stderr piped.
+ *   2. warm-up: send `{ code: "void 0", sentinel }` and read both streams to the sentinel.
+ *   3. each `exec(code)` sends `{ code, sentinel }`. The boot script evaluates `code` as
+ *      ONE command, writes the echoed value (if any) to stdout and an uncaught error to
+ *      stderr, then writes `"\n" + sentinel` to stderr and stdout. Each stream is read up
+ *      to its own copy: before it is that exec's stdout / stderr.
+ *   4. AbortSignal / timeout → kill the child; state → "dead".
  *
- *   It spawned `node -i` and scrubbed prompts out of the capture afterwards. Measured
- *   on Node 25.9, `node -i` interleaves a banner, `> ` prompts, `| ` continuation
- *   prompts and `undefined` echoes with real output, and the sentinel's own echo
- *   arrived as `> '__sentinel__'` — so every exec returned a stray `'` once the scrub
- *   began stripping prompts instead of dropping lines (round-8 audit), and output that
- *   legitimately began with `> ` or `... `, or was the word `undefined`, was mangled
- *   or dropped. There is nothing to scrub when nothing is printed.
- *   4. AbortSignal → write `.exit\n` to stdin; state → "dead";
- *      resolve with `{ kind: "exec-aborted" }`.
+ * History, each step measured (Node 25.9 unless stated):
+ *   - `node -i` + a prompt scrub: every exec ended in a stray `'` (the sentinel's own
+ *     echo), and output starting with `> ` / `... ` or equal to `undefined` was mangled.
+ *   - a promptless REPL fed line by line: a throw printed to STDOUT, stderr was drained
+ *     only at exit (`hadError` never true), and with top-level `await` the REPL ran the
+ *     sentinel line while the awaited promise was pending, so results landed on the
+ *     next exec.
+ *   - that REPL with a serialised `eval` queue and `handleError`: readline had already
+ *     split later lines into commands, so a block after an `await` line broke; an error
+ *     during a pending await shifted every later result by one exec; and on Node 22
+ *     (no `handleError`) a plain throw wedged the kernel (round-9 audit).
+ *   Feeding the REPL's `eval` the whole command removes the line splitting, and a
+ *   command's completion is observable on Node 22 and 25 alike: success and an
+ *   incomplete command call back; an uncaught error (sync, awaited, or unhandled) is
+ *   written to the REPL's output stream, which carries nothing else in this mode.
  *
  * Synchronous `Bun.spawn` throw on ENOENT (`node` not on PATH) becomes
  * `{ kind: "node-missing", detail }` — same idiom as
@@ -54,7 +59,7 @@ export interface DefaultKernelOptions {
   /** Filesystem `HOME` for the on-disk handle store (`<home>/.quanta/…`). Omitted, the
    *  store is the Quanta home (`QUANTA_CONFIG_DIR ?? QUANTA_HOME ?? ~/.quanta`). */
   readonly home?: string
-  /** Hard cap on the initial banner-consume window. Default 5_000 ms. */
+  /** Hard cap on the warm-up command (spawn → first sentinel). Default 5_000 ms. */
   readonly readyTimeoutMs?: number
 }
 
@@ -85,47 +90,46 @@ const SENTINEL_PREFIX = "__quanta_repl_done_"
 const STDERR_SENTINEL_GRACE_MS = 5_000
 
 /**
- * `node -e` program: a REPL on stdin/stdout that prints no prompt of any kind, does not
- * echo `undefined`, sends uncaught errors to STDERR, and evaluates one command at a time.
+ * `node -e` program — see the module doc for why each piece exists.
  *
- * Errors. The REPL prints an uncaught error to its OUTPUT stream (`Uncaught Error: boom`),
- * as `node -i` does, so the kernel's stderr-based `hadError` was false for every thrown
- * error and the `node_repl` tool reported `ok:true` for code that threw (measured on
- * Node 25.9). `handleError` is the REPL's own hook, consulted before it prints.
- *
- * Serial evaluation. With top-level `await`, the REPL starts evaluating the NEXT line —
- * the sentinel statement — while the awaited promise is pending, so an awaited result or
- * rejection arrived AFTER the sentinel: measured, `await Promise.reject(…)` returned no
- * error and the next exec carried it; a throw after `await` was lost. `r.eval` is wrapped
- * so a command starts only when the previous one COMPLETED. Measured completion signals:
- * success and `Recoverable` (multi-line input) call the eval callback; an uncaught error,
- * sync or awaited, never does — it reaches `handleError` instead. So either releases the
- * queue. Limit: an error from a timer an EARLIER exec scheduled, arriving while a later
- * awaited command is pending, releases that command's queue early.
- *
- * On a Node without `handleError` the option is ignored: errors stay on stdout, and an
- * awaited command that rejects never releases the queue, so the exec times out.
+ * - The REPL gets a private input (unused) and a private OUTPUT stream: in this mode the
+ *   REPL writes only uncaught errors there, so a write is both "send to stderr" and
+ *   "this command finished with an error". `console` in the context is rebound to the
+ *   process console — the REPL binds it to its output, which would have made every
+ *   `console.log` look like an error.
+ * - Commands run one at a time; a command is finished by its callback or by an error
+ *   write, whichever comes first, exactly once. A late callback after an error is
+ *   ignored, so nothing shifts to the next exec.
+ * - The sentinel waits two `setImmediate` turns, so a rejection the command left
+ *   unhandled is reported on THAT exec rather than the next.
+ * Limit: if an error from an earlier exec's timer arrives while a later command is
+ * awaiting, that command is reported finished (with the error); its late value is dropped.
  */
 const REPL_BOOT = [
-  'const repl=require("node:repl"),util=require("node:util");',
-  "let busy=false;const queue=[];",
-  "const next=()=>{const n=queue.shift();if(n)start(n);else busy=false};",
-  "const start=(a)=>{busy=true;ev.call(r,a[0],a[1],a[2],(e,v)=>{try{a[3](e,v)}finally{next()}})};",
-  'const r=repl.start({prompt:"",input:process.stdin,output:process.stdout,terminal:false,',
-  "ignoreUndefined:true,handleError:(e)=>{",
-  'process.stderr.write("Uncaught "+(e instanceof Error&&e.stack?e.stack:util.inspect(e))+"\\n");',
-  'if(busy)next();return "ignore"}});',
-  "r.displayPrompt=()=>{};const ev=r.eval;",
-  "r.eval=(c,x,f,cb)=>{if(busy)queue.push([c,x,f,cb]);else start([c,x,f,cb])};",
+  'const repl=require("node:repl"),{PassThrough}=require("node:stream"),readline=require("node:readline");',
+  "const errors=new PassThrough();",
+  'const r=repl.start({prompt:"",input:new PassThrough(),output:errors,terminal:false,ignoreUndefined:true});',
+  "r.context.console=console;",
+  "let current=null;",
+  'errors.on("data",(c)=>{process.stderr.write(c);if(current!==null)current()});',
+  "const queue=[];let busy=false;",
+  "const pump=()=>{if(busy)return;const m=queue.shift();if(m===undefined)return;busy=true;let settled=false;",
+  'const marker="\\n"+m.sentinel;',
+  "const finish=()=>{if(settled)return;settled=true;current=null;",
+  "setImmediate(()=>setImmediate(()=>{process.stderr.write(marker);process.stdout.write(marker);busy=false;pump()}))};",
+  "current=finish;",
+  'try{r.eval(m.code,r.context,"REPL",(e,v)=>{if(settled)return;',
+  'if(e)process.stderr.write("Uncaught "+(e instanceof repl.Recoverable?"SyntaxError: Unexpected end of input":String((e&&e.stack)||e))+"\\n");',
+  'else if(v!==undefined)process.stdout.write(r.writer(v)+"\\n");',
+  "finish()})}",
+  'catch(e){process.stderr.write("Uncaught "+String((e&&e.stack)||e)+"\\n");finish()}};',
+  'readline.createInterface({input:process.stdin}).on("line",(l)=>{if(l.trim()==="")return;',
+  "let m;try{m=JSON.parse(l)}catch{return}queue.push(m);pump()});",
 ].join("")
 
-/** The statement that ends every write: prints a newline and the sentinel to STDERR and
- *  then STDOUT, and returns `undefined` (so nothing is echoed after it). Each stream is
- *  read up to its own copy, which is what attributes stderr to one exec. */
-const sentinelStatement = (sentinel: string): string => {
-  const marker = JSON.stringify(`\n${sentinel}`)
-  return `;void (process.stderr.write(${marker}), process.stdout.write(${marker}));\n`
-}
+/** One command on the wire. */
+const commandLine = (code: string, sentinel: string): string =>
+  `${JSON.stringify({ code, sentinel })}\n`
 
 /** Build a production-shaped `NodeReplKernel`. STATEFUL — call once at
  *  composition-root and reuse across the session. */
@@ -247,7 +251,7 @@ const warmUpNode = async (
 ): Promise<{ ok: true } | { ok: false; detail: string }> => {
   const sentinel = `${SENTINEL_PREFIX}${randomNonce()}__`
   try {
-    ;(proc.stdin as { write: (s: string) => unknown }).write(sentinelStatement(sentinel))
+    ;(proc.stdin as { write: (s: string) => unknown }).write(commandLine("void 0", sentinel))
   } catch (e) {
     killQuietly(proc)
     return { ok: false, detail: errMessage(e) }
@@ -457,7 +461,7 @@ const writeStdin = (k: LiveKernel, s: string): { ok: true } | { ok: false; detai
  *  stderr fds are reaped and the `proc.exited` promise resolves), removes
  *  the on-disk handle, and evicts the entry from the in-memory Map so dead
  *  kernels are never retained. Without the `k.proc.kill()` the timeout /
- *  write-failure paths would orphan a live `node -i` child forever (the
+ *  write-failure paths would orphan a live node child forever (the
  *  reaper parks on `proc.exited`, which never resolves on its own). */
 const markDead = (
   k: LiveKernel,
@@ -475,18 +479,15 @@ const markDead = (
   dropKernel(id)
 }
 
-/** Sibling to `markDead` — additionally issues `.exit` on stdin so the
- *  spawned REPL terminates gracefully when the caller's signal aborted,
- *  then falls through to the same teardown (kill + handle removal + Map
- *  eviction). */
+/** Sibling to `markDead` for an aborted exec. It wrote `.exit` to stdin first; the
+ *  channel now carries JSON commands only, so teardown is the kill itself (plus handle
+ *  removal and Map eviction). */
 const markDeadAndExit = (
   k: LiveKernel,
   id: KernelId,
   removeIfHome: (id: KernelId) => void,
   dropKernel: (id: KernelId) => void,
 ): void => {
-  // Best-effort graceful exit — a dead pipe just no-ops.
-  writeStdin(k, ".exit\n")
   markDead(k, id, removeIfHome, dropKernel)
 }
 
@@ -513,7 +514,7 @@ const writeExec = (
   code: string,
 ): { ok: true; sentinel: string } | { ok: false; detail: string } => {
   const sentinel = `${SENTINEL_PREFIX}${randomNonce()}__`
-  const wrapped = `${code}\n${sentinelStatement(sentinel)}`
+  const wrapped = commandLine(code, sentinel)
   const w = writeStdin(k, wrapped)
   if (!w.ok) return { ok: false, detail: w.detail }
   return { ok: true, sentinel }
@@ -564,7 +565,7 @@ interface ReadFail {
  *  `{ ok: false, error }`.
  *
  *  Exported for the timeout-race hellgate: the timer-cleanup-on-reject path
- *  cannot be driven through a real `node -i` child (its stdout reader does not
+ *  cannot be driven through a real node child (its stdout reader does not
  *  reject mid-wait on demand), so the test injects a `ChunkReader` whose
  *  `read()` rejects and asserts the bounded race timer is still cleared. */
 /** Injectable timer pair for the race below. Defaults to the ambient globals;
