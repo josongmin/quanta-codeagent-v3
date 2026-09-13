@@ -228,10 +228,11 @@ export class ToolRegistry {
     })
     if (capped.output === result.output) return result
     // Route the spill outcome into typed evidence: the spill path as
-    // `evidence.fullLogPath` (the dispatch seam `evidenceOf` flattens it onto
-    // `DispatchResult.fullLogPath` → trajectory `tool_end.fullLogPath`), or a
-    // refused/failed spill as `evidence.spillRefusal`, so an excerpt-only result
-    // differs from a persisted one by a field, not only by its text.
+    // `evidence.fullLogPath`, or a refused/failed spill as
+    // `evidence.spillRefusal`, so an excerpt-only result differs from a
+    // persisted one by a field, not only by its text. The dispatch seam
+    // (`evidenceOf`) flattens both onto `DispatchResult`, and from there they
+    // ride the `tool_result` event and its JSONL trajectory line.
     // exactOptionalPropertyTypes-safe: the `evidence` field is only set when we
     // have something to add, and existing evidence subfields (stderr/exitCode)
     // are merged through, not clobbered.

@@ -20,6 +20,7 @@ export const toolResultData = (event: EventOf<"tool_result">): Record<string, un
   ...(event.exitCode !== undefined ? { exitCode: event.exitCode } : {}),
   ...(event.executedCommand !== undefined ? { executedCommand: event.executedCommand } : {}),
   ...(event.fullLogPath !== undefined ? { fullLogPath: event.fullLogPath } : {}),
+  ...(event.spillRefusal !== undefined ? { spillRefusal: event.spillRefusal } : {}),
 })
 
 export const recoveryData = (event: EventOf<"recovery">): Record<string, unknown> => ({

@@ -22,22 +22,20 @@ import { openLintBracket, runEditCommandRepair } from "./edit-repair"
  *  layered halving. */
 const STDERR_TAIL_CAP = 4_000
 
+/** The `DispatchResult` fields {@link evidenceOf} projects from `ToolResult.evidence`. */
+type DispatchEvidence = Pick<
+  DispatchResult,
+  "stderrTail" | "exitCode" | "executedCommand" | "fullLogPath" | "spillRefusal" | "timedOut"
+>
+
 /** Read RFC-0002 §5.2 evidence from a `ToolResult.evidence` (CR3: typed, not
  *  duck-typed). The dispatch surface flattens the optional nested fields onto
- *  `DispatchResult` (`stderrTail` / `exitCode` / `fullLogPath`) — the stream
- *  and trajectory recorders consume those flat fields unchanged. Each output
- *  field is conditional-set so `exactOptionalPropertyTypes` never sees an
- *  `undefined` value. */
-const evidenceOf = (
-  result: ToolResult,
-): Pick<
-  DispatchResult,
-  "stderrTail" | "exitCode" | "executedCommand" | "fullLogPath" | "timedOut"
-> => {
-  const out: Pick<
-    DispatchResult,
-    "stderrTail" | "exitCode" | "executedCommand" | "fullLogPath" | "timedOut"
-  > = {}
+ *  `DispatchResult` (`stderrTail` / `exitCode` / `fullLogPath` / `spillRefusal`)
+ *  — the stream and trajectory recorders consume those flat fields unchanged.
+ *  Each output field is conditional-set so `exactOptionalPropertyTypes` never
+ *  sees an `undefined` value. */
+const evidenceOf = (result: ToolResult): DispatchEvidence => {
+  const out: DispatchEvidence = {}
   const ev = result.evidence
   if (ev === undefined) return out
   if (typeof ev.stderr === "string" && ev.stderr.length > 0) {
@@ -51,6 +49,7 @@ const evidenceOf = (
   if (typeof ev.fullLogPath === "string" && ev.fullLogPath.length > 0) {
     out.fullLogPath = ev.fullLogPath
   }
+  if (ev.spillRefusal !== undefined) out.spillRefusal = ev.spillRefusal
   return out
 }
 

@@ -5,6 +5,7 @@
 
 import type { ToolResultBlock } from "@/llm"
 import type { RedactionHit } from "@/security"
+import type { SpillDirRefusal } from "@/shared/spill-refusal-types"
 import type { NextAction, ToolFailure } from "@/tool"
 
 export interface DispatchResult {
@@ -35,6 +36,11 @@ export interface DispatchResult {
   executedCommand?: string
   /** Path to a persisted full log, only when the tool actually wrote one. */
   fullLogPath?: string
+  /** NW-2: the output was over the tool-result budget but was NOT persisted
+   *  (`ToolResult.evidence.spillRefusal`), so `preview` is a head+tail excerpt
+   *  and there is no {@link fullLogPath}. Omitted when the output was within
+   *  budget or persisted in full. */
+  spillRefusal?: SpillDirRefusal
   /**
    * ADR-0076 Gap-4 (`deny_and_steer` — Cursor REJECT_AND_TELL). Set ONLY on a
    * deny short-circuit produced when `onConfirm` returned a structured

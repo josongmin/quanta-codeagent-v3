@@ -52,7 +52,9 @@ import type { Span, TurnTimingCapture } from "@/observability"
 import { inferToolTier } from "@/permission"
 import type { RedactionHit } from "@/security"
 import { runtimeConfig } from "@/shared"
+import type { AgentEvent } from "@/stream"
 import { resolveDispatchPort } from "./dispatch"
+import type { DispatchResult } from "./dispatch-types"
 import { decideScopeEscalation, type ScopeVerdict } from "./skill-scope-escalation"
 import type { DispatchOutcome, InProgressIndicator, StreamingCall } from "./streaming-dispatch"
 import type { TurnSession, TurnState } from "./turn-context"
@@ -152,6 +154,55 @@ const patchHistoryOutcome = (
       slot.output = outcome.preview
       return
     }
+  }
+}
+
+/** The RFC-0002 §5.2 evidence fields a dispatch result may carry beyond
+ *  {@link DispatchOutcome} (flattened from `ToolResult.evidence` by the
+ *  dispatch seam's `evidenceOf`). */
+type DispatchEvidenceFields = Partial<
+  Pick<
+    DispatchResult,
+    | "durationMs"
+    | "stderrTail"
+    | "exitCode"
+    | "executedCommand"
+    | "fullLogPath"
+    | "spillRefusal"
+    | "timedOut"
+  >
+>
+
+/** RFC-0002 §5.2 enriched `tool_result` event for one dispatched call.
+ *  CONTRACT with Group E: the dispatch result exposes these EXACT optional
+ *  field names (`durationMs:number`, `stderrTail:string`, `exitCode:number`,
+ *  `fullLogPath:string`). Spread whichever are present so an absent field is
+ *  absent from the event (a result without evidence emits the byte-identical
+ *  base event). Pure; extracted from the dispatch callback so its cognitive
+ *  complexity stays under biome's cap. */
+const toolResultEvent = (
+  call: Pick<StreamingCall, "id" | "name">,
+  out: DispatchOutcome,
+): Extract<AgentEvent, { type: "tool_result" }> => {
+  const enriched = out as DispatchOutcome & DispatchEvidenceFields
+  return {
+    type: "tool_result",
+    id: call.id,
+    name: call.name,
+    ok: out.ok,
+    preview: out.preview,
+    ...(enriched.durationMs !== undefined ? { durationMs: enriched.durationMs } : {}),
+    ...(enriched.stderrTail !== undefined ? { stderrTail: enriched.stderrTail } : {}),
+    ...(enriched.exitCode !== undefined ? { exitCode: enriched.exitCode } : {}),
+    ...(enriched.executedCommand !== undefined
+      ? { executedCommand: enriched.executedCommand }
+      : {}),
+    ...(enriched.fullLogPath !== undefined ? { fullLogPath: enriched.fullLogPath } : {}),
+    // NW-2: a refused/failed spill — the preview is an excerpt with no full log.
+    ...(enriched.spillRefusal !== undefined ? { spillRefusal: enriched.spillRefusal } : {}),
+    // B1 (RFC jul-3): deadline-kill marker — the verify-gate excludes timed-out results
+    // from observed-evidence so a truncated diff can never stamp a verdict.
+    ...(enriched.timedOut === true ? { timedOut: true } : {}),
   }
 }
 
@@ -425,38 +476,9 @@ const dispatchCore = (
       // when no guard is wired and the helper short-circuits at its first
       // line. See {@link patchHistoryOutcome}.
       patchHistoryOutcome(toolHistory, call.id, out)
-      // RFC-0002 §5.2 enriched tool_result. CONTRACT with Group E: the
-      // dispatch result exposes these EXACT optional field names
-      // (`durationMs:number`, `stderrTail:string`, `exitCode:number`,
-      // `fullLogPath:string`). Spread whichever are present so this works
-      // the instant E lands and never throws while E is still in flight
-      // (pre-E the fields are simply absent → byte-identical emit). Pure
-      // observation: NullStream swallows it, control flow is untouched.
-      const enriched = out as typeof out & {
-        durationMs?: number
-        stderrTail?: string
-        exitCode?: number
-        executedCommand?: string
-        fullLogPath?: string
-        timedOut?: boolean
-      }
-      config.stream.emit({
-        type: "tool_result",
-        id: call.id,
-        name: call.name,
-        ok: out.ok,
-        preview: out.preview,
-        ...(enriched.durationMs !== undefined ? { durationMs: enriched.durationMs } : {}),
-        ...(enriched.stderrTail !== undefined ? { stderrTail: enriched.stderrTail } : {}),
-        ...(enriched.exitCode !== undefined ? { exitCode: enriched.exitCode } : {}),
-        ...(enriched.executedCommand !== undefined
-          ? { executedCommand: enriched.executedCommand }
-          : {}),
-        ...(enriched.fullLogPath !== undefined ? { fullLogPath: enriched.fullLogPath } : {}),
-        // B1 (RFC jul-3): deadline-kill marker — the verify-gate excludes timed-out results
-        // from observed-evidence so a truncated diff can never stamp a verdict.
-        ...(enriched.timedOut === true ? { timedOut: true } : {}),
-      })
+      // RFC-0002 §5.2 enriched tool_result. Pure observation: NullStream
+      // swallows it, control flow is untouched. See {@link toolResultEvent}.
+      config.stream.emit(toolResultEvent(call, out))
       return out
     } finally {
       // ADR-0512 P3 — the next tool's justification is the prose that precedes

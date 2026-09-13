@@ -3,6 +3,11 @@ import { lstatSync, mkdirSync, readdirSync, rmSync, type Stats, statSync } from 
 import { lstat, mkdir, readdir, rm, stat, writeFile } from "node:fs/promises"
 import { basename, dirname, join, resolve } from "node:path"
 import { errMessage, logger } from "@/shared"
+import type {
+  SpillDirRefusal,
+  SpillDirRefusalKind,
+  SpillDirRefusalOf,
+} from "@/shared/spill-refusal-types"
 
 /**
  * Oversized tool-output spill — Phase 1 absorption of Claude Code v2's
@@ -243,39 +248,16 @@ export async function pruneSpillDirAsync(
  */
 const SPILL_DIR_SEGMENTS = [".quanta", "tool-output"] as const
 
-/** Why an over-budget output was not persisted. Closed set; each kind renders
- *  exactly one reason ({@link SPILL_DIR_REFUSAL_REASON}). The first three are
- *  containment refusals; `unavailable` (opening the directory) and
- *  `write-failed` (writing the spill file into the opened directory) are IO
- *  failures. Either way nothing is pruned. */
-export const SPILL_DIR_REFUSAL_KINDS = [
-  "not-spill-location",
-  "symlink",
-  "not-a-directory",
-  "unavailable",
-  "write-failed",
-] as const
-export type SpillDirRefusalKind = (typeof SPILL_DIR_REFUSAL_KINDS)[number]
-
-/** What each refusal kind carries besides its `kind`. `path` is the component
- *  that failed its check (the whole spill dir for `not-spill-location`, the
- *  spill file for `write-failed`). Only the IO kinds have a `cause`, and they
- *  always have one. */
-interface SpillDirRefusalDetail {
-  readonly "not-spill-location": { readonly path: string }
-  readonly symlink: { readonly path: string }
-  readonly "not-a-directory": { readonly path: string }
-  readonly unavailable: { readonly path: string; readonly cause: string }
-  readonly "write-failed": { readonly path: string; readonly cause: string }
-}
-
-export type SpillDirRefusalOf<K extends SpillDirRefusalKind> = {
-  readonly kind: K
-} & SpillDirRefusalDetail[K]
-
-export type SpillDirRefusal = {
-  [K in SpillDirRefusalKind]: SpillDirRefusalOf<K>
-}[SpillDirRefusalKind]
+// Why an over-budget output was not persisted: the closed refusal kinds and
+// their per-kind shapes are defined in `@/shared/spill-refusal-types`, because
+// the refusal travels past this slice (dispatch result, `tool_result` event,
+// JSONL line). Re-exported here next to the renderers below.
+export type {
+  SpillDirRefusal,
+  SpillDirRefusalKind,
+  SpillDirRefusalOf,
+} from "@/shared/spill-refusal-types"
+export { SPILL_DIR_REFUSAL_KINDS } from "@/shared/spill-refusal-types"
 
 /** Model- and log-facing reason for each refusal kind, typed per kind so a
  *  renderer reads only the fields its kind carries. */

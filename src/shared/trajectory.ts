@@ -1,5 +1,6 @@
 import pkg from "../../package.json" with { type: "json" }
 import type { RunContext } from "./run-context"
+import type { SpillDirRefusal } from "./spill-refusal-types"
 
 /**
  * Trajectory schema v1 — the schema registry key (RFC-0002 §5.2 (governance: ADR-0539)).
@@ -139,6 +140,9 @@ export interface ToolResultData {
   stdoutTail: string
   stderrTail: string
   fullLogPath?: string
+  /** NW-2: over budget but not persisted — `stdoutTail` is an excerpt and there
+   *  is no {@link fullLogPath}. */
+  spillRefusal?: SpillDirRefusal
 }
 
 /**

@@ -5,6 +5,7 @@ import type {
   ResponsesContinuationPhase,
   ResponsesContinuationReason,
 } from "@/shared/llm-route-types"
+import type { SpillDirRefusal } from "@/shared/spill-refusal-types"
 import type { TurnPolicySnapshot } from "@/shared/turn-policy-types"
 
 /**
@@ -294,8 +295,8 @@ export type AgentEvent =
   | { type: "tool_progress"; id: string; name: string; message: string }
   // RFC-0002 §5.2 `tool_result` data contract: `preview` is the stdout tail;
   // the optional fields carry the rest of the mandated evidence (durationMs,
-  // stderrTail, exitCode, executedCommand, fullLogPath, timedOut) when the
-  // tool produced them.
+  // stderrTail, exitCode, executedCommand, fullLogPath, spillRefusal, timedOut)
+  // when the tool produced them.
   | {
       type: "tool_result"
       id: string
@@ -307,6 +308,9 @@ export type AgentEvent =
       exitCode?: number
       executedCommand?: string
       fullLogPath?: string
+      /** NW-2: over budget but NOT persisted — `preview` is an excerpt and there
+       *  is no `fullLogPath`; says why the spill was refused or failed. */
+      spillRefusal?: SpillDirRefusal
       /** B1 (RFC jul-3): the run was killed by a wall-clock deadline — exit code is a kill
        *  sentinel, output partial. Inspectors must not treat it as a completed observation. */
       timedOut?: boolean

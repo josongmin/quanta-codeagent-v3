@@ -11,7 +11,7 @@
  */
 import type { DocumentBlock, ImageBlock } from "@/llm"
 import type { SensitivityClass } from "@/security"
-import type { SpillDirRefusal } from "../output-spill"
+import type { SpillDirRefusal } from "@/shared/spill-refusal-types"
 
 /**
  * ADR-0062 rule #3 — structured cap-as-instruction third channel.
