@@ -16,7 +16,11 @@
 
 import { describe, expect, test } from "bun:test"
 import { parseDomModel } from "@/browser/cdp/collect"
-import { parseDevToolsActivePort, readDevToolsEndpoint } from "@/browser/cdp/dev-tools-endpoint"
+import {
+  DEVTOOLS_ENDPOINT_TIMEOUT_DETAIL,
+  parseDevToolsActivePort,
+  readDevToolsEndpoint,
+} from "@/browser/cdp/dev-tools-endpoint"
 import type { Clock, Scheduler } from "@/browser/cdp/ports"
 
 // scheduler that resolves immediately and advances a shared clock each poll
@@ -47,6 +51,46 @@ describe("HELLGATE endpoint — parse + poll", () => {
     expect(parseDevToolsActivePort("").ok).toBe(false)
     expect(parseDevToolsActivePort("notaport\n/x").ok).toBe(false)
     expect(parseDevToolsActivePort("  \n/x").ok).toBe(false)
+  })
+
+  test("HELL-EP-EXIT: a Chrome that EXITS is not a Chrome that is slow", async () => {
+    // A launch crash ("No usable sandbox!") used to poll the whole budget and come
+    // back as the timeout, which the capability probe reads as a slow host.
+    const env = tickEnv(50)
+    let polls = 0
+    const died = await readDevToolsEndpoint({
+      read: () => {
+        polls += 1
+        return null
+      },
+      exitCode: () => (polls >= 1 ? 1 : undefined),
+      scheduler: env.scheduler,
+      clock: env.clock,
+      timeoutMs: 10_000,
+    })
+    expect(died.ok).toBe(false)
+    if (!died.ok) {
+      expect(died.error).toEqual({
+        kind: "spawn-failed",
+        detail: "Chrome exited with code 1 before the DevTools endpoint was ready",
+      })
+    }
+    expect(env.state.t).toBeLessThan(10_000)
+    // PAIRED CONTROL: a live process that never writes the file is the timeout.
+    // ONE fake environment for clock and scheduler: two separate ones never
+    // advanced the clock the loop reads, and this control spun forever.
+    const liveEnv = tickEnv(50)
+    const slow = await readDevToolsEndpoint({
+      read: () => null,
+      exitCode: () => undefined,
+      scheduler: liveEnv.scheduler,
+      clock: liveEnv.clock,
+      timeoutMs: 200,
+    })
+    expect(slow).toEqual({
+      ok: false,
+      error: { kind: "spawn-failed", detail: DEVTOOLS_ENDPOINT_TIMEOUT_DETAIL },
+    })
   })
 
   test("HELL-EP-03: file appears after N polls ⇒ resolves", async () => {

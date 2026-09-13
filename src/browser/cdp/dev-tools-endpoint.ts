@@ -35,6 +35,15 @@ export interface ReadEndpointDeps {
   /** Abort the poll early (R1 audit [18] — without this an aborted turn hangs
    *  to the full timeout while the spawned Chrome keeps running). */
   readonly signal?: AbortSignal
+  /**
+   * The spawned process's exit code once it has exited, else `undefined`.
+   *
+   * Without it a Chrome that died at launch ("No usable sandbox!") polled the
+   * whole budget and was reported as the TIMEOUT below — which the capability
+   * probe reads as "slow host", so the failure the browser suite exists to catch
+   * skipped green.
+   */
+  readonly exitCode?: () => number | undefined
 }
 
 /**
@@ -53,6 +62,13 @@ export const readDevToolsEndpoint = async (
   const start = deps.clock.now()
   for (;;) {
     if (deps.signal?.aborted === true) return err({ kind: "cancelled" })
+    const exited = deps.exitCode?.()
+    if (exited !== undefined) {
+      return err({
+        kind: "spawn-failed",
+        detail: `Chrome exited with code ${exited} before the DevTools endpoint was ready`,
+      })
+    }
     const content = deps.read()
     if (content !== null) {
       const parsed = parseDevToolsActivePort(content)

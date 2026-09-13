@@ -480,10 +480,11 @@ describe("browser real-chrome e2e — chrome presence report", () => {
     // Except `failed-setup`. A bring-up that did not finish inside the probe's
     // budget also carries the binary in `resolved`, so this arm read a loaded host
     // as an adapter regression. The consumer RECORDS `failed-setup` in this file's
-    // junit (`[capability] RECORD chrome-cdp failed-setup: …`); the shard runner
-    // prints every such record before its PASS line, and the CI capability lanes
-    // fail `required` on one. A definite "present and would not come up"
-    // (`skipped-unsupported` with a binary) is still red here.
+    // junit (`[capability] RECORD chrome-cdp failed-setup: …`) and the shard runner
+    // prints it before its PASS line; this file is in no CI capability lane, so
+    // nothing fails on it. Only a bring-up still ALIVE when its budget ran out is
+    // `failed-setup`: a Chrome that EXITED before its endpoint (a launch crash) is
+    // `skipped-unsupported` with a binary, and that is still red here.
     if (HAS_CHROME && realChrome.verdict !== "failed-setup") {
       expect(CHROME_USABLE).toBe(true) // realChrome.detail names the failure if this trips
     }

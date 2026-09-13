@@ -182,7 +182,8 @@ the runtime — running them locally is opt-in. Behaviour:
 - Local default: missing runtime → `requireContract()` returns `false`, the
   test body skips, and one stderr line per dependency tells you which one was
   skipped and how to make it loud.
-- CI: set `REQUIRE_CONTRACT=1` (`0` and empty mean off). Missing runtime
+- CI: set `REQUIRE_CONTRACT=1` (`0`, `false`, `no`, `off` and empty mean off;
+  the same words as `QUANTA_REQUIRE_CAPABILITIES`). Missing runtime
   registers a failing test, `[contract] REQUIRED <name> is unavailable`, in
   that file — because CI is responsible for provisioning the dependency, so
   "absent" means "broken provisioning", not "developer laptop". It is a

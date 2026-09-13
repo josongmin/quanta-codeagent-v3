@@ -743,5 +743,16 @@ describe("what the receipt says about a capability the tests cannot reach", () =
       context,
     )
     expect(refused).toMatchObject({ status: "unavailable", resolved: "chromium" })
+    // A Chrome that EXITED before its endpoint is a refusal too — the launch crash
+    // the browser suite's fail-loud arm exists for — not a slow host.
+    expect(
+      chromeBringUpFailure(
+        {
+          kind: "spawn-failed",
+          detail: "Chrome exited with code 1 before the DevTools endpoint was ready",
+        },
+        context,
+      ).status,
+    ).toBe("unavailable")
   })
 })
