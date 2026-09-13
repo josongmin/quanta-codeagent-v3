@@ -20,9 +20,10 @@
  *
  * Collapsing `blocked-missing` into `skipped-unsupported` is the exact bug this
  * ticket exists to kill — "the tool is missing" and "our gate never ran" printed the
- * same green. Under `QUANTA_REQUIRE_CAPABILITIES` (CI), `blocked` and
- * `failed-setup` THROW; locally they produce a VISIBLE skip carrying the
- * reason.
+ * same green. For an id `QUANTA_REQUIRE_CAPABILITIES` names, `blocked` and
+ * `failed-setup` become a REGISTERED FAILING TEST in the asking file (a throw
+ * only when asked from inside a running test); otherwise they produce a VISIBLE
+ * skip carrying the reason.
  *
  * ## Fail closed BEFORE any spawn
  *
@@ -290,52 +291,22 @@ export const capability = (name: string, env: ConsumerEnv = process.env): Capabi
 }
 
 /**
- * CI contract, mirroring `tests/contract/_guard.ts`: when the environment
- * PROMISES the capabilities, a `blocked-missing` or `failed-setup` is a
- * provisioning failure and must be loud. Locally it is a visible skip.
+ * `true` only for `executed`. Every other verdict is a skip, never a pass.
  *
- * Absence (`skipped-unsupported`) never throws and never passes — the caller
- * turns it into a runner-visible skip.
- */
-export const requireCapability = (
-  decision: CapabilityDecision,
-  env: ConsumerEnv = process.env,
-): CapabilityDecision => {
-  // Per capability, not per process: naming one id used to make every id strict.
-  const strict = capabilityRequiredFor(decision.capability, env)
-  if (strict && (decision.verdict === "blocked-missing" || decision.verdict === "failed-setup")) {
-    throw new Error(
-      `${CAPABILITY_LINE_PREFIX} "${decision.capability}" is ${decision.verdict} ` +
-        `but ${CAPABILITY_REQUIRE_ENV} is set: ${decision.detail}`,
-    )
-  }
-  return decision
-}
-
-/**
- * `true` only for `executed`. Every other verdict is a skip, never a pass — and
- * under the strictness switch, `blocked-missing` and `failed-setup` are not even
- * a skip.
- *
- * # Why the requirement is INSIDE the predicate
- *
- * `requireCapability` is the throw that makes a required-but-absent capability
- * red. MEASURED across the corpus: of the fifteen files that consume the
- * receipt, THREE call it — the three under `tests/contract/`, which have their
- * own `_guard.ts`. The other twelve call `canExecute` and nothing else, so
- * `QUANTA_REQUIRE_CAPABILITIES` was unreachable from 80% of its own consumers.
- * Arming it did nothing for them; they skipped, and reported a pass.
- *
- * Folding the requirement into the predicate is what makes it impossible to
- * consume the receipt and bypass strictness. A predicate that throws is
- * unusual; a strictness switch that twelve of fifteen call sites cannot see is
- * worse, and the alternative was twelve call-site edits that the thirteenth new
- * file would not know to make.
- *
- * Unset (the default, and every ordinary local run) this changes nothing.
+ * PURE. The requirement used to live inside this predicate, because twelve of
+ * fifteen consumers called only `canExecute` and the throwing
+ * `requireCapability` beside it was unreachable from them. It now lives in
+ * `capability()`, which every consumer calls at module scope, and it registers a
+ * failing test instead of throwing (see `capabilityRequirementFailure`). A
+ * predicate that could throw inside a `describe.skipIf` was the price of the old
+ * placement, and it is no longer paid.
  */
 export const canExecute = (decision: CapabilityDecision): boolean => decision.verdict === "executed"
 
+// `requireCapability` lived here too. Its last three callers, under
+// `tests/contract/`, now call `capability()` alone, which enforces the same
+// requirement as a registered failure; an unused throwing twin is removed.
+//
 // `skipUnlessExecuted` lived here with zero call sites, documented as
 // "`describe.skipIf(...)`-friendly". It is removed rather than kept: while the
 // requirement lived in `canExecute` it would have thrown from inside a

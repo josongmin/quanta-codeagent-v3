@@ -30,7 +30,8 @@
  *                        platform cannot ever have the capability (bwrap on
  *                        macOS). A visible, policy-explicit non-selection.
  *   blocked-missing      the lane WAS selected and the capability is absent.
- *                        In a required job this is RED — see `requireCapability`.
+ *                        In a required job this is RED — see `capability()`
+ *                        in `tools/dev/capability-receipt-consumer.ts`.
  *   failed-setup         the capability is present but its fixture could not be
  *                        built (an install failed, a clone failed). Never a
  *                        skip: a broken fixture is a defect in the lane, not a
@@ -40,7 +41,7 @@
  *
  * Emitting a result must not create a passing assertion. `reportCapability` only
  * writes a machine-readable line; turning an outcome into a verdict is the
- * caller's explicit choice (`requireCapability`, or `describe.skip`).
+ * caller's explicit choice (a required capability, or `describe.skip`).
  */
 
 import { describe as describeFn } from "bun:test"

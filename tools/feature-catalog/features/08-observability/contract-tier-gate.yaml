@@ -24,7 +24,8 @@ purpose: |
   language-server)와 통신하므로 환경 가용성이 다르다. `tests/contract/_guard.ts`
   의 `requireContract(name, available)` 는 단일 결정점: 로컬에서 의존성이
   없으면 silent skip(`test.skipIf` 와 함께), 그러나 CI 가 `REQUIRE_CONTRACT=1`
-  로 설정한 경우엔 모듈 로드 시점에 throw → 전체 파일을 erroring 한다. 이는
+  로 설정한 경우엔 의존성 이름을 단 실패 테스트를 등록한다(모듈 로드 throw는
+  `--bail=1` junit 파일을 못 남겨 교체). 이는
   "broken integration ≡ 'tool not installed'" 식별 불가 hole 을 닫는다 —
   CI 는 의존성을 의도적으로 provisioning 하므로 absent = provisioning 또는
   integration 파손이고 그건 시끄럽게 fail 해야 한다는 invariant. Docker

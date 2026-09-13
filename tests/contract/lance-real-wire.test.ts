@@ -8,11 +8,7 @@ import {
   buildSearchPipelineFromEnv,
   clearSearchPipelineWireForTests,
 } from "@/../src/apps/agent/search-pipeline-wire"
-import {
-  canExecute,
-  capability,
-  requireCapability,
-} from "../../tools/dev/capability-receipt-consumer"
+import { canExecute, capability } from "../../tools/dev/capability-receipt-consumer"
 import { requireContract } from "./_guard"
 
 /**
@@ -28,12 +24,12 @@ import { requireContract } from "./_guard"
  * by PRIORITY (not by who finished first), losers are killed AND drained, and
  * every timer is cleared in a `finally`. This file now reads the answer.
  *
- * `requireCapability` keeps the CI contract that `_guard.ts` established: a
- * `blocked` or `failed-setup` under `QUANTA_REQUIRE_CAPABILITIES` throws rather
- * than skipping, because "the dependency is missing" and "our probe never ran"
- * must not print the same result.
+ * `capability()` keeps the CI contract that `_guard.ts` established: a
+ * `blocked` or `failed-setup` for an id `QUANTA_REQUIRE_CAPABILITIES` names is a
+ * registered failing test rather than a skip, because "the dependency is
+ * missing" and "our probe never ran" must not print the same result.
  */
-const lancePython = requireCapability(capability("lancedb"))
+const lancePython = capability("lancedb")
 const python = lancePython.resolved ?? null
 const available = requireContract("python+lancedb", canExecute(lancePython) && python !== null)
 

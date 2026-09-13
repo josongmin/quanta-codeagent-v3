@@ -180,12 +180,17 @@ Contract tests (Docker, language servers) **polite-skip** when the host lacks
 the runtime — running them locally is opt-in. Behaviour:
 
 - Local default: missing runtime → `requireContract()` returns `false`, the
-  test body skips, and a single `console.warn` per dependency tells you which
-  one was skipped and how to make it loud.
-- CI: set `REQUIRE_CONTRACT=1`. Missing runtime now **throws at module load**,
-  failing the file — because CI is responsible for provisioning the
-  dependency, so "absent" means "broken provisioning", not "developer
-  laptop".
+  test body skips, and one stderr line per dependency tells you which one was
+  skipped and how to make it loud.
+- CI: set `REQUIRE_CONTRACT=1` (`0` and empty mean off). Missing runtime
+  registers a failing test, `[contract] REQUIRED <name> is unavailable`, in
+  that file — because CI is responsible for provisioning the dependency, so
+  "absent" means "broken provisioning", not "developer laptop". It is a
+  registered failure rather than a module-load throw because the throw, under
+  `--bail=1 --reporter=junit`, wrote no junit file and stopped the next file.
+- `bun run test:contract` produces a capability receipt first, so the
+  receipt-gated files (`lancedb`, the two language servers) see what this host
+  has instead of answering `blocked-missing`.
 
 This closes the "broken integration looks identical to 'tool not installed'"
 hole that plain `skipIf` leaves open. See [tests/contract/_guard.ts](./contract/_guard.ts).

@@ -3,11 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync 
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { TypescriptAdapter } from "@/lsp"
-import {
-  canExecute,
-  capability,
-  requireCapability,
-} from "../../tools/dev/capability-receipt-consumer"
+import { canExecute, capability } from "../../tools/dev/capability-receipt-consumer"
 import { requireContract } from "./_guard"
 
 /**
@@ -19,12 +15,12 @@ import { requireContract } from "./_guard"
  * probes once, under one deadline, and this reads the receipt — importing the
  * file now starts nothing.
  *
- * `requireCapability` preserves the `_guard.ts` CI contract: under
- * `QUANTA_REQUIRE_CAPABILITIES`, a `blocked` receipt (nobody probed) or a
- * `failed-setup` (the probe wedged) THROWS instead of passing for the absent
- * tool's reason.
+ * `capability()` preserves the `_guard.ts` CI contract: for an id
+ * `QUANTA_REQUIRE_CAPABILITIES` names, a `blocked` receipt (nobody probed) or a
+ * `failed-setup` (the probe wedged) is a registered failing test instead of a
+ * pass for the absent tool's reason.
  */
-const lsp = requireCapability(capability("typescript-language-server"))
+const lsp = capability("typescript-language-server")
 const available = requireContract("typescript-language-server", canExecute(lsp))
 
 const tmpDirs: string[] = []
