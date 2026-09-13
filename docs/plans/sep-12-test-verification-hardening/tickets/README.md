@@ -409,7 +409,7 @@ test-shards·quarantine)를 반영했다. 2라운드는 immutable snapshot `a128
 
 | # | 결함 | 조치 | 뮤턴트 |
 |---|---|---|---:|
-| C1 | 워커가 receipt bag을 잃으면 gated describe가 skip으로 green | runner가 자기 `process.env`에 definite id로 `QUANTA_REQUIRE_CAPABILITIES`를 무장. bag이 빠지면 이름 붙은 실패 | 21 |
+| C1 | 워커가 receipt bag을 잃으면 gated describe가 skip으로 green | runner가 자기 `process.env`에 definite id로 `QUANTA_REQUIRE_CAPABILITIES`를 무장. bag이 빠지면 이름 붙은 실패 | 20 |
 | C2 | `test:contract`·`test:real-toolchain`에 receipt가 없음(로컬 skip-green, CI 계약 job은 red) | `with-capability-receipt.ts` 래퍼. probe와 child가 preload가 유지하는 scratch HOME 하나를 공유 | (C1에 포함) |
 | C3 | contract guard가 module-scope throw라 `--bail=1`에서 junit이 비고 같은 파일 case가 사라짐. `REQUIRE_CONTRACT=0`이 strict. lint sweep이 skip 경고를 삭제 | 등록형 실패, 스위치 문법 통일(`0/false/no/off`), 경고 복구 | (C1에 포함) |
 | C4 | aggregator의 `blockedMissing`·`failedSetup`이 아무도 넘기지 않는 CLI 플래그 전용이라 두 hard-failure 검사가 발화 불가 | consumer가 파일마다 `[capability] RECORD` testcase를 남기고 reducer가 집계. REQUIRED 실패도 record(실행 case 아님) | 18+17 |
@@ -432,8 +432,8 @@ test-shards·quarantine)를 반영했다. 2라운드는 immutable snapshot `a128
 | K4 | 마스킹·언어 규칙 12개 이상과 필드 3개 누락이 각각 green(`declared.size > 400`이 고른 수) | 규칙마다 그 규칙만 결정하는 fixture 줄, 필드마다 전용 이름이 declared에 도달해야 함 | (K1에 포함) |
 | G1 | `--trust-scope owner`·`member`가 실제 댓글에 아무에게도 응답 안 함(OWNER/MEMBER가 collaborator로 먼저 접힘). SETUP.md 예시가 곧 먹통 봇 | association → scope 매핑, SETUP 표를 코드 동작으로 교정 | 2 |
 
-이번 세션 뮤턴트는 106개다. 105개가 red였고 1개(override tier 무시)는 현재 override로는
-등가지만 정책 suite가 잡는다.
+이번 세션 뮤턴트는 105개다. 104개가 red였고 1개(override tier 무시)는 현재 override로는
+등가지만 정책 suite가 잡는다. (`c5e23b02f` 커밋 메시지의 "21 mutants"는 20이 맞다.)
 
 ### 수치 (current HEAD 실측, 성능 주장 아님)
 
