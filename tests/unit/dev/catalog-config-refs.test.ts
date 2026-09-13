@@ -221,6 +221,8 @@ describe("every env name the catalog offers is one some code reads", () => {
       activationEnvNames([
         { kind: "env", key: "QUANTA_ACTIVATE" },
         { kind: "config", key: "agent.flag" },
+        // An env-SHAPED key of another kind is not an env name either.
+        { kind: "config", key: "QUANTA_CFG" },
         { kind: "env", key: "lowercase" },
       ]),
     ).toEqual(["QUANTA_ACTIVATE"])
@@ -664,6 +666,171 @@ describe("what counts as evidence", () => {
           'val = os.environ.setdefault("QUANTA_SETDEFAULT_VALUE", "1")',
           'for n in "A", "QUANTA_TUPLE_FOR":',
           "    pass",
+        ].join("\n"),
+      },
+      names,
+    )
+    expect(backed(found, names)).toEqual(expected)
+  })
+
+  test("FOURTH AUDIT — interpreters by command word, spans across lines and depths, Python statements", () => {
+    // Each line was measured wrong against fc7fcb016 (or left a mutant green).
+    const expected: Readonly<Record<string, EnvEvidenceKind | null>> = {
+      // F1: a Python body whose line mentions bun/node is still Python.
+      QUANTA_PY_AFTER_BUN: "shell",
+      QUANTA_PY_COMMENT_AS_JS: null,
+      QUANTA_PY_BEFORE_PIPE_NODE: "shell",
+      // F2: a heredoc opened inside "$(…)" is a heredoc.
+      QUANTA_AFTER_SUBST_HEREDOC: "shell",
+      // F3: a multi-line inline script keeps its line breaks.
+      QUANTA_BUN_E_MULTILINE: "shell",
+      QUANTA_PY_C_MULTILINE: "shell",
+      // F4: double-quoted and nested inline scripts.
+      QUANTA_PY_C_DOUBLE: "shell",
+      QUANTA_BUN_E_IN_SUBST: "shell",
+      // F5: consuming pop/setdefault statements in a TEST are writes.
+      QUANTA_POP_MULTILINE: null,
+      QUANTA_POP_AFTER_SEMI: null,
+      QUANTA_POP_IN_LAMBDA: null,
+      QUANTA_POP_INDENTED: null,
+      // F6: brackets inside strings and comments do not hide a dict key.
+      QUANTA_KEY_AFTER_SMILEY: null,
+      QUANTA_KEY_AFTER_COMMENT: null,
+      // F7: a here-string's quote is not a heredoc delimiter.
+      QUANTA_HERESTRING_SQ: null,
+      QUANTA_AFTER_HERESTRING_SUBST: "shell",
+      // F8: an interpreter only as the COMMAND, with `=` flags.
+      QUANTA_ECHOED_BUN_E: null,
+      QUANTA_SECOND_ARG: null,
+      QUANTA_NODE_INPUT_TYPE: "shell",
+      // Mutation gaps: each input fails one surviving mutant.
+      QUANTA_K02: "shell",
+      QUANTA_K14: "shell",
+      QUANTA_K33: "shell",
+      QUANTA_K32: "shell",
+      QUANTA_K19: null,
+      QUANTA_K21: null,
+      QUANTA_K24: "shell",
+      QUANTA_K27: null,
+      QUANTA_K28: "shell",
+      QUANTA_K29: "shell",
+      QUANTA_K30: "shell",
+      QUANTA_K36: "shell",
+      QUANTA_K31: "shell",
+      QUANTA_K35: null,
+      QUANTA_AFTER_UNTERMINATED: null,
+      QUANTA_K40: "workflow",
+    }
+    const names = Object.keys(expected)
+    const found = inFixture(
+      {
+        "scripts/f1.sh": [
+          "bun install && python3 - <<'PY'",
+          'import os; os.environ.get("QUANTA_PY_AFTER_BUN")',
+          "PY",
+          "cd packages/node && python3 - <<'PY'",
+          '# os.environ["QUANTA_PY_COMMENT_AS_JS"] retired',
+          "PY",
+          "python3 - <<'PY' | node x.js",
+          'import os; os.environ.get("QUANTA_PY_BEFORE_PIPE_NODE")',
+          "PY",
+        ].join("\n"),
+        "scripts/f2.sh": [
+          `x="${DOLLAR}(cat <<'EOF'`,
+          "Don't",
+          "EOF",
+          ')"',
+          `echo ${DOLLAR}QUANTA_AFTER_SUBST_HEREDOC`,
+        ].join("\n"),
+        "scripts/f3.sh": [
+          "bun -e '",
+          "// read the flag",
+          "console.log(process.env.QUANTA_BUN_E_MULTILINE)",
+          "'",
+          "python3 -c '",
+          "# read",
+          'import os; print(os.environ.get("QUANTA_PY_C_MULTILINE"))',
+          "'",
+        ].join("\n"),
+        "scripts/f4.sh": [
+          `python3 -c "import os; print(os.environ.get('QUANTA_PY_C_DOUBLE'))"`,
+          `v="${DOLLAR}(bun -e 'console.log(process.env.QUANTA_BUN_E_IN_SUBST)')"`,
+        ].join("\n"),
+        "tests/test_f5.py": [
+          "os.environ.pop(",
+          '    "QUANTA_POP_MULTILINE", None)',
+          'os.environ.pop("A", None); os.environ.pop("QUANTA_POP_AFTER_SEMI", None)',
+          'request.addfinalizer(lambda: os.environ.pop("QUANTA_POP_IN_LAMBDA", None))',
+          "def cleanup():",
+          '    os.environ.pop("QUANTA_POP_INDENTED", None)',
+        ].join("\n"),
+        "tools/f6.py": [
+          'env = {"msg": ":)", "QUANTA_KEY_AFTER_SMILEY": "1"}',
+          "env = {",
+          "    # see [docs",
+          '    "QUANTA_KEY_AFTER_COMMENT": "1",',
+          "}",
+        ].join("\n"),
+        "scripts/f7.sh": [
+          `grep -q x <<< '${DOLLAR}QUANTA_HERESTRING_SQ'`,
+          `grep -q x <<< "${DOLLAR}(printf "don't")"`,
+          `echo ${DOLLAR}QUANTA_AFTER_HERESTRING_SUBST`,
+        ].join("\n"),
+        "scripts/f8.sh": [
+          "echo bun -e 'process.env.QUANTA_ECHOED_BUN_E'",
+          "node -e 'console.log(process.argv[1])' 'process.env.QUANTA_SECOND_ARG'",
+          "node --input-type=module -e 'console.log(process.env.QUANTA_NODE_INPUT_TYPE)'",
+        ].join("\n"),
+        "scripts/k-shell.sh": [
+          `x="${DOLLAR}(echo ${DOLLAR}((1+2)) "it's")"`,
+          `echo ${DOLLAR}QUANTA_K02`,
+          "\tcat <<-'EOF'",
+          "Don't",
+          "\tEOF",
+          `echo ${DOLLAR}QUANTA_K14`,
+          "cat <<-EOF",
+          "Don't",
+          "EOF",
+          `echo ${DOLLAR}QUANTA_K33`,
+          'cat <<"EOF"',
+          "Don't",
+          "EOF",
+          `echo ${DOLLAR}QUANTA_K32`,
+          "bun - <<'JS'",
+          "console.log(1)",
+          "JS",
+          "python3 - <<'PY'",
+          'import os; os.environ.get("QUANTA_K24")',
+          "PY",
+          "node -p 'process.env.QUANTA_K28'",
+          "bun run -e 'console.log(process.env.QUANTA_K29)'",
+          "node --no-warnings -e 'console.log(process.env.QUANTA_K30)'",
+          `python3 -u -c 'import os; os.environ.get("QUANTA_K36")'`,
+          "node - <<'JS'",
+          "console.log(process.env.QUANTA_K31)",
+          "JS",
+          `x="${DOLLAR}(( 1 << SHIFT ))"`,
+          `# ${DOLLAR}QUANTA_K35`,
+          "cat <<'EOF",
+          `# ${DOLLAR}QUANTA_AFTER_UNTERMINATED`,
+        ].join("\n"),
+        "tools/k21.sh": [
+          "python3 - <<'PY'",
+          'import os; os.environ["QUANTA_K21"] = "1"',
+          "PY",
+        ].join("\n"),
+        ".github/workflows/k.yml": [
+          "jobs:",
+          "  a:",
+          "    steps:",
+          "      - uses: some/action@v1",
+          "        with:",
+          "          script: process.env.QUANTA_K19",
+          `      - name: echo ${DOLLAR}QUANTA_K27`,
+          "        run: echo hi",
+          "      - uses: actions/github-script@v7",
+          "        with: oops",
+          `      - run: echo ${DOLLAR}{{ vars.QUANTA_K40 }}`,
         ].join("\n"),
       },
       names,

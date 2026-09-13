@@ -75,6 +75,18 @@
  * - Fourteen rules still had no fixture line, and the four catalog fields were
  *   composed in the test, where dropping `activation` was green.
  *
+ * # What the fourth audit found (in the third audit's fixes)
+ *
+ * - The interpreter of a heredoc or `-e` script was matched anywhere on the line:
+ *   `cd packages/node && python3 - <<'PY'` parsed Python as JavaScript, and
+ *   `echo bun -e '…'` was a script. It is now the command word of its segment.
+ * - A heredoc inside `"$(…)"` was masked as code; a multi-line quoted script lost
+ *   its line breaks; a double-quoted or nested script never matched its command;
+ *   `<<< '…'` kept its quote as a delimiter.
+ * - A consuming pop/setdefault was a write only if it started and fitted on its
+ *   line, and the dict-key test counted brackets inside strings and comments, in
+ *   a backward scan that took 14.5 s on an 8,000-name dict. It is one forward pass.
+ *
  * STILL a limit, measured and left: a registry literal counts wherever a
  * generic accessor reads `env[entry.envKey]` for every entry (the knob
  * inventory's is `cli-knobs-accessor.ts`), so removing a knob's BEHAVIOURAL
@@ -453,50 +465,125 @@ export const pythonStrings = (text: string): readonly StringToken[] => {
 const RAW_WRITE_CONTEXT =
   /(?:\.env|\.env_remove|set_var|remove_var|setenv|Setenv|putenv|delenv)\(\s*$/
 
-/** `os.environ.pop(` / `.setdefault(`: a write only as a bare statement (see `isPythonWrite`). */
-const PY_CONSUMING_CALL = /^[ \t]*[\w.]*environ\.(?:pop|setdefault)\(\s*$/u
+/**
+ * `os.environ.pop(` / `.setdefault(` whose value nothing uses: the call begins a
+ * statement — at a line start, after `;`, or after a `:` (`finally:`, `lambda:`).
+ * It was "starts its line and fits on it", so `os.environ.pop(\n "X")`, a second
+ * call after `;` and `lambda: os.environ.pop("X")` were reads (measured). A dict
+ * VALUE after a `:` reads as a write too; that is the rarer shape.
+ */
+const isConsumingStatement = (text: string, offset: number): boolean => {
+  const window = text.slice(Math.max(0, offset - 400), offset)
+  const call = /[\w.]*environ\.(?:pop|setdefault)\(\s*$/u.exec(window)
+  if (call === null) return false
+  return /(?:^|[\n;:])[ \t]*$/u.test(window.slice(0, call.index))
+}
 
 /**
- * The innermost bracket still open at `offset`, scanning back. Brackets inside
- * strings are counted too; a Python dict key whose enclosing literal holds an
- * unbalanced bracket in a string reads as not-a-key, which is the read side.
+ * The innermost bracket open at each string token of a Python text, found in ONE
+ * forward pass that skips strings and comments.
+ *
+ * It scanned backwards from every token, counting brackets inside strings and
+ * comments: `{"msg": ":)", "X": "1"}` lost its key (a dead name backed), and one
+ * dict of 8,000 names took 14.5 s against 14 ms (measured).
  */
-const innermostOpenBracket = (text: string, offset: number): string | undefined => {
-  const closes: string[] = []
-  const pairs: Readonly<Record<string, string>> = { ")": "(", "]": "[", "}": "{" }
-  for (let index = offset - 1; index >= 0; index -= 1) {
+interface PythonTokenContext {
+  /** The innermost bracket open at the token. */
+  readonly open: string | undefined
+  /** The last character of CODE before it: comments, strings' insides and whitespace skipped. */
+  readonly previous: string | undefined
+}
+
+const pythonOpenBrackets = (text: string): ReadonlyMap<number, PythonTokenContext> => {
+  const state = { open: [] as string[], previous: undefined as string | undefined }
+  const at = new Map<number, PythonTokenContext>()
+  for (let index = 0; index < text.length; ) {
     const character = text[index] ?? ""
-    if (character in pairs) closes.push(pairs[character] ?? "")
-    else if (character === "(" || character === "[" || character === "{") {
-      if (closes.length === 0) return character
-      closes.pop()
+    if (character === '"' || character === "'") {
+      at.set(index, { open: state.open.at(-1), previous: state.previous })
     }
+    index = pythonBracketStep(text, index, state)
   }
-  return undefined
+  return at
+}
+
+/** One step of `pythonOpenBrackets`: skip a comment or a string, or track a bracket. */
+const pythonBracketStep = (
+  text: string,
+  index: number,
+  state: { readonly open: string[]; previous: string | undefined },
+): number => {
+  const character = text[index] ?? ""
+  if (character === "#") {
+    const end = text.indexOf("\n", index)
+    return end === -1 ? text.length : end
+  }
+  if (character === '"' || character === "'") {
+    state.previous = character
+    return pythonStringEnd(text, index)
+  }
+  if ("([{".includes(character)) state.open.push(character)
+  else if (")]}".includes(character)) state.open.pop()
+  if (!/\s/u.test(character)) state.previous = character
+  return index + 1
+}
+
+/** Index just past the string starting at `start` (the tokenizer `pythonStrings` uses). */
+const pythonStringEnd = (text: string, start: number): number => {
+  const character = text[start] ?? ""
+  const triple = text.startsWith(character.repeat(3), start)
+  const quote = triple ? character.repeat(3) : character
+  let cursor = start + quote.length
+  while (
+    cursor < text.length &&
+    !text.startsWith(quote, cursor) &&
+    (triple || text[cursor] !== "\n")
+  ) {
+    cursor += text[cursor] === "\\" ? 2 : 1
+  }
+  return cursor + quote.length
+}
+
+/** One text's token contexts, kept while its tokens are classified. */
+let bracketCache:
+  | { readonly text: string; readonly map: ReadonlyMap<number, PythonTokenContext> }
+  | undefined
+const tokenContextAt = (text: string, offset: number): PythonTokenContext | undefined => {
+  if (bracketCache?.text !== text) bracketCache = { text, map: pythonOpenBrackets(text) }
+  return bracketCache.map.get(offset)
+}
+
+/** A dict KEY: `{` innermost, a `{` or `,` as the code before it, and a `:` after. */
+const isDictKey = (text: string, offset: number, after: string): boolean => {
+  const context = tokenContextAt(text, offset)
+  return (
+    /^\s*:/u.test(after) &&
+    context?.open === "{" &&
+    (context.previous === "{" || context.previous === ",")
+  )
 }
 
 /**
  * A Python token that is written, not read: `os.environ["X"] = "1"`,
- * `del os.environ["X"]`, a dict KEY (`env={"X": "1"}`), or a bare
+ * `del os.environ["X"]`, a dict KEY (`env={"X": "1"}`), or a consuming
  * `os.environ.pop("X")` / `.setdefault("X", …)` statement. All were backed — and
  * in a test file `environ[` is a read context, so the write qualified there.
  *
  * `token = os.environ.pop("X", None)` READS the value it removes, and
- * `v = os.environ.setdefault("X", "1")` returns it: both were writes. And
- * `for n in "A", "X":` matched the dict-key rule on its comma and colon; a key
- * now needs a `{` as the innermost open bracket.
+ * `v = os.environ.setdefault("X", "1")` returns it. And `for n in "A", "X":`
+ * matched the dict-key rule on its comma and colon; a key needs `{` as the
+ * innermost open bracket and `{` or `,` as the code before it (`isDictKey`).
  */
 const isPythonWrite = (text: string, offset: number, value: string): boolean => {
   const quoteLength =
     text.startsWith(`"${value}"`, offset) || text.startsWith(`'${value}'`, offset) ? 1 : 0
   const after = text.slice(offset + value.length + quoteLength * 2, offset + value.length + 40)
   const before = text.slice(Math.max(0, offset - 40), offset)
-  const lineHead = text.slice(text.lastIndexOf("\n", offset - 1) + 1, offset)
   return (
     /^\s*\]\s*=(?!=)/u.test(after) ||
     /\bdel\s+[\w.]*environ\[\s*$/u.test(before) ||
-    PY_CONSUMING_CALL.test(lineHead) ||
-    (/^\s*:/u.test(after) && /[{,]\s*$/u.test(before) && innermostOpenBracket(text, offset) === "{")
+    isConsumingStatement(text, offset) ||
+    isDictKey(text, offset, after)
   )
 }
 const RAW_READ_CONTEXT =
@@ -531,11 +618,23 @@ const scriptReads = (code: string, names: ReadonlySet<string>): readonly string[
   return found
 }
 
+/**
+ * The start of the simple command a text ends inside — after `;`, `&`, `|`, `(`,
+ * a newline or `$(` — and any `NAME=value` prefixes. An interpreter counts only as
+ * that command: `echo bun -e '…'` was an inline script, and so was a Python body
+ * whose line merely mentioned `node` (`cd packages/node && python3 - <<'PY'`).
+ */
+const SEGMENT = String.raw`(?:^|[;&|(\n]|\$\()\s*(?:[A-Za-z_]\w*=\S*\s+)*`
+const FLAGS = String.raw`(?:\s+-{1,2}[\w-]+(?:=\S*)?)*?`
+
 /** An interpreter handed code on its command line: `bun -e '…'`, `python3 -c '…'`. */
-const JS_INLINE =
-  /\b(?:bun|node|deno|tsx)(?:\s+run)?(?:\s+-{1,2}[\w-]+)*?\s+(?:-e|--eval|-p|--print)\s*$/u
-const PY_INLINE = /\bpython[\d.]*(?:\s+-{1,2}[\w-]+)*?\s+-c\s*$/u
-const JS_INTERPRETER = /\b(?:bun|node|deno|tsx)\b/u
+const JS_INLINE = new RegExp(
+  `${SEGMENT}(?:bun|node|deno|tsx)(?:\\s+run)?${FLAGS}\\s+(?:-e|--eval|-p|--print)\\s*$`,
+  "u",
+)
+const PY_INLINE = new RegExp(`${SEGMENT}python[\\d.]*${FLAGS}\\s+-c\\s*$`, "u")
+/** The command a heredoc feeds: the segment the opener sits in. */
+const JS_INTERPRETER = new RegExp(`${SEGMENT}(?:bun|node|deno|tsx)\\b[^;&|(\\n]*$`, "u")
 
 type ShellFrameKind = "single" | "ansi" | "double" | "substitution"
 
@@ -621,6 +720,8 @@ const heredocsOpenedBy = (bare: string): readonly PendingHeredoc[] => {
 class ShellLineMasker {
   code = ""
   bare = ""
+  /** Code emitted while the innermost context is a `$(…)` inside double quotes. */
+  substitutionBare = ""
   spans: QuotedSpan[] = []
 
   constructor(private readonly stack: ShellFrame[]) {}
@@ -641,12 +742,24 @@ class ShellLineMasker {
 
   private emit(piece: string): void {
     this.code += piece
-    if (!this.stack.some((frame) => frame.kind === "double")) this.bare += piece
+    if (this.stack.at(-1)?.kind === "substitution") this.substitutionBare += piece
+    else if (!this.stack.some((frame) => frame.kind === "double")) this.bare += piece
   }
 
+  /** Where an opener in the CURRENT context is looked for. */
+  contextBare(): string {
+    return this.stack.at(-1)?.kind === "substitution" ? this.substitutionBare : this.bare
+  }
+
+  /**
+   * A quoted span closes: recorded at ANY depth (`"$(bun -e '…')"` was lost at
+   * depth 2), and a closed single-quoted span leaves `''` in the code, so the next
+   * argument of `node -e '…' 'x'` is not read as the script.
+   */
   private close(frame: ShellFrame): void {
     this.stack.pop()
-    if (this.stack.length === 0) this.spans.push({ before: frame.before, text: frame.text })
+    this.spans.push({ before: frame.before, text: frame.text })
+    if (frame.kind !== "double") this.emit("''")
   }
 
   private inSingle(frame: ShellFrame, raw: string, index: number): number {
@@ -703,15 +816,19 @@ class ShellLineMasker {
     const character = raw[index] ?? ""
     // A quoted heredoc DELIMITER is kept: masked away, `<<'PY'` read as a bare
     // `<<` and the embedded interpreter's reads were never looked at.
+    // `(?<!<)`: `grep x <<< '$X'` is a here-string, whose quote is not a delimiter.
     const end = raw.indexOf(character, index + 1)
-    if (/<<-?\s*$/u.test(this.bare) && end !== -1) {
+    if (/(?<!<)<<-?\s*$/u.test(this.contextBare()) && end !== -1) {
       this.emit(raw.slice(index, end + 1))
       return end
     }
     const kind: ShellFrameKind =
       character === '"' ? "double" : this.code.endsWith("$") ? "ansi" : "single"
+    // The command in FRONT of the quote, taken before the quote is emitted: taken
+    // after, a double-quoted `python3 -c "…"` could never match its interpreter.
+    const before = this.code
     if (kind === "double") this.emit(character)
-    this.stack.push({ kind, before: this.code, parens: 0, text: "" })
+    this.stack.push({ kind, before, parens: 0, text: "" })
     return index
   }
 }
@@ -733,26 +850,39 @@ const shellLines = (text: string): readonly ShellLine[] => {
     const current = pending[0]
     if (current !== undefined) {
       const ends = raw.trim() === current.delimiter
-      out.push({
-        code: "",
-        raw,
-        spans: [],
-        ...(ends
-          ? {}
-          : { body: { heredoc: heredocs, literal: current.literal, command: current.command } }),
-      })
+      out.push(ends ? { code: "", raw, spans: [] } : bodyLine(raw, current, heredocs))
       if (ends) {
         pending.shift()
         heredocs += 1
       }
       continue
     }
-    const masker = new ShellLineMasker(stack)
-    masker.mask(raw)
-    out.push({ code: masker.code, raw, spans: masker.spans })
-    if (stack.length === 0) pending.push(...heredocsOpenedBy(masker.bare))
+    out.push(maskLine(raw, stack, pending))
   }
   return out
+}
+
+const bodyLine = (raw: string, heredoc: PendingHeredoc, index: number): ShellLine => ({
+  code: "",
+  raw,
+  spans: [],
+  body: { heredoc: index, literal: heredoc.literal, command: heredoc.command },
+})
+
+/** One line of code, masked with the carried `stack`; queues the heredocs it opens. */
+const maskLine = (raw: string, stack: ShellFrame[], pending: PendingHeredoc[]): ShellLine => {
+  // A span still open from an earlier line keeps its line break: joined without
+  // one, a `// comment` line swallowed the `bun -e '…'` code after it.
+  for (const frame of stack) if (frame.kind !== "substitution") frame.text += "\n"
+  const masker = new ShellLineMasker(stack)
+  masker.mask(raw)
+  // An opener counts where its context ends the line: at top level, or inside a
+  // `"$(…)"` that runs on (`x="$(cat <<'EOF'`, whose body used to be masked).
+  if (stack.length === 0) pending.push(...heredocsOpenedBy(masker.bare))
+  else if (stack.at(-1)?.kind === "substitution") {
+    pending.push(...heredocsOpenedBy(masker.substitutionBare))
+  }
+  return { code: masker.code, raw, spans: masker.spans }
 }
 
 /** The reads in a quoted argument handed to an interpreter (`bun -e '…'`). */
