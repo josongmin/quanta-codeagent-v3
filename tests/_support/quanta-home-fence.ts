@@ -76,9 +76,16 @@
  * Blank counts as unset, because every resolver reads blank as absent.
  */
 import { join, resolve, sep } from "node:path"
+import { keptToolchainRoots } from "../../tools/dev/toolchain-roots"
 
 export interface QuantaHomeFenceInput {
   readonly env: Readonly<Record<string, string | undefined>>
+  /**
+   * Required, not defaulted: the one impure question the policy asks (does a
+   * toolchain root exist under the HOME being replaced), injected so the policy
+   * stays a function a test can drive. See `tools/dev/toolchain-roots.ts`.
+   */
+  readonly exists: (path: string) => boolean
   /** This process's scratch root. */
   readonly scratchRoot: string
   /** Roots that count as scratch (see {@link scratchPrefixesFor}). */
@@ -160,7 +167,14 @@ export const decideQuantaHomeFence = (input: QuantaHomeFenceInput): QuantaHomeFe
   const set: Record<string, string> = {}
   const envHome = input.env.HOME
   const home = scratch(envHome) ? envHome : join(input.scratchRoot, "home")
-  if (home !== envHome) set.HOME = home
+  if (home !== envHome) {
+    set.HOME = home
+    // Replacing a real HOME hides the toolchains that resolve through it; keep them.
+    Object.assign(
+      set,
+      keptToolchainRoots({ env: input.env, realHome: envHome, exists: input.exists }),
+    )
+  }
   if (!scratch(input.env.QUANTA_HOME)) set.QUANTA_HOME = join(home, ".quanta")
   if (!scratch(input.env.QUANTA_PREFS_HOME)) {
     set.QUANTA_PREFS_HOME = join(input.scratchRoot, "prefs-home")

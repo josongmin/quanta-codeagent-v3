@@ -32,7 +32,7 @@
  * runner's worker layout, for the same reason.
  */
 
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs"
 import { tmpdir, userInfo } from "node:os"
 import { join, resolve } from "node:path"
 import { runBoundedChild } from "./bounded-child"
@@ -43,6 +43,7 @@ import {
   MAX_CAPABILITY_RECEIPT_TTL_MS,
   mergeRequiredCapabilities,
 } from "./capability-receipt"
+import { keptToolchainRoots } from "./toolchain-roots"
 import { sharedVerificationCacheRoot } from "./verification-receipt"
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..")
@@ -88,6 +89,8 @@ export const runWithCapabilityReceipt = async (
         (entry): entry is [string, string] => entry[1] !== undefined,
       ),
     ),
+    // What replacing HOME would hide from the child and its probes alike.
+    ...keptToolchainRoots({ env: input.env, realHome: input.env.HOME, exists: existsSync }),
     HOME: home,
     QUANTA_HOME: quantaHome,
     QUANTA_PREFS_HOME: prefsHome,

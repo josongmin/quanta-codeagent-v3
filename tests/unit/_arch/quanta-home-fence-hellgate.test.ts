@@ -26,8 +26,11 @@ import {
 
 const SCRATCH = "/tmp/quanta-test-home/4242"
 const PREFIXES = scratchPrefixesFor("/var/folders/xy/T")
-const decide = (env: Record<string, string | undefined>) =>
-  decideQuantaHomeFence({ env, scratchRoot: SCRATCH, scratchPrefixes: PREFIXES })
+/** No toolchain root exists unless an arm says so. */
+const decide = (
+  env: Record<string, string | undefined>,
+  exists: (path: string) => boolean = () => false,
+) => decideQuantaHomeFence({ env, scratchRoot: SCRATCH, scratchPrefixes: PREFIXES, exists })
 
 describe("quanta-home fence — the policy", () => {
   test("an empty environment becomes a fresh operator: HOME, and the Quanta home under it", () => {
@@ -85,6 +88,7 @@ describe("quanta-home fence — the policy", () => {
       },
       scratchRoot: `${root}/tmp/quanta-test-home/7`,
       scratchPrefixes: workerPrefixes,
+      exists: () => true,
     })
     expect(d).toEqual({ set: {}, unset: [] })
   })
@@ -121,6 +125,41 @@ describe("quanta-home fence — the policy", () => {
   test("the fenced key sets are what the resolvers actually read", () => {
     expect([...OUTRANKING_ROOTS]).toEqual(["QUANTA_CONFIG_DIR", "QUANTA_BENCH_HOME"])
     expect([...FENCED_ROOTS]).toEqual(["HOME", "QUANTA_HOME", "QUANTA_PREFS_HOME"])
+  })
+})
+
+describe("quanta-home fence — toolchain roots survive the replaced HOME", () => {
+  // rustup and cargo resolve their toolchains through HOME. Replacing HOME without
+  // these made every Rust arm of `test:real-toolchain` fail with "rustup could not
+  // choose a version of cargo to run" — seven of them, measured.
+  const real =
+    (...present: string[]) =>
+    (path: string) =>
+      present.includes(path)
+
+  test("replacing a real HOME keeps the toolchain roots that exist under it", () => {
+    const d = decide({ HOME: "/Users/me" }, real("/Users/me/.rustup", "/Users/me/.cargo"))
+    expect(d.set).toMatchObject({
+      HOME: join(SCRATCH, "home"),
+      RUSTUP_HOME: "/Users/me/.rustup",
+      CARGO_HOME: "/Users/me/.cargo",
+    })
+  })
+
+  test("PAIRED CONTROLS — absent roots, an explicit root, and a kept scratch HOME add nothing", () => {
+    // A host without Rust gets nothing new.
+    expect(decide({ HOME: "/Users/me" }, real()).set).not.toHaveProperty("RUSTUP_HOME")
+    // An operator's own root is theirs.
+    const own = decide({ HOME: "/Users/me", CARGO_HOME: "/opt/cargo" }, real("/Users/me/.cargo"))
+    expect(own.set).not.toHaveProperty("CARGO_HOME")
+    // A worker HOME is kept, so nothing real is being replaced here: its roots come
+    // from the runner that spawned it (`toolchainRootsOfThisProcess`).
+    const worker = decide({ HOME: "/tmp/quanta-test-shards-1/worker-0/home" }, () => true)
+    expect(worker.set).not.toHaveProperty("RUSTUP_HOME")
+    // The roots are NOT Quanta state: the Quanta home still moves.
+    expect(decide({ HOME: "/Users/me" }, () => true).set.QUANTA_HOME).toBe(
+      join(SCRATCH, "home", ".quanta"),
+    )
   })
 })
 

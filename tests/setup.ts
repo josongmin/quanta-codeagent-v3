@@ -1,7 +1,7 @@
 // Preloaded by bun test (see bunfig.toml). Keep global test setup here.
 import { afterAll, afterEach, beforeEach } from "bun:test"
 import childProcess from "node:child_process"
-import { readdirSync, rmSync } from "node:fs"
+import { existsSync, readdirSync, rmSync } from "node:fs"
 import { syncBuiltinESMExports } from "node:module"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -110,6 +110,7 @@ if (benchResultsFence.action === "redirect") {
     env: process.env,
     scratchRoot,
     scratchPrefixes: scratchPrefixesFor(tmpdir()),
+    exists: existsSync,
   })
   for (const key of fence.unset) delete process.env[key]
   for (const [key, value] of Object.entries(fence.set)) process.env[key] = value
