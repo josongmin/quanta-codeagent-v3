@@ -590,3 +590,64 @@ branded scrubbed-spawn funnel로 통과시키고, 시크릿을 **시작 환경**
 
 마이그레이션: 알림 1회 후 명령이 no-op로 성공 보고(고아) → in-place 읽기 + 거부하는 명령 +
 single-quote. gate capability 문장: 계획 기준 → 실행 기준. 무의미 arm 2개(escape arm, path arm) 강화.
+
+## I. 라운드 8 — 라운드 7 보완 커밋 19개에 대한 적대 어딧 (sep-13 → sep-14)
+
+컨텍스트 없는 리뷰어 3명(`audit-r8-{a,b,c}`, HEAD `b9fa28cab` 고정): A=도구표면·HITL·plan-mode,
+B=메모리·REPL·테스트 펜스·merge 탐지기, C=주장 재측정(객관). 반영한 모든 발견은 내가
+재현하거나 소스로 확인했다. 확인하지 않은 수치는 그렇게 적었다.
+
+### I-1 (A, CRITICAL) `shadow_verify`가 읽기 전용이라고 거짓 보고하며 모델 코드를 실행했다
+
+`isReadOnly: () => true`, `pre-approval-ok`. `test` 체크가 패치가 쓴 트리에서 `bun test`를
+돌리고 `test_target`을 `bash -lc`에 그대로 보간했다. plan 두 겹·정책 read-only allow·HARD_DENY·
+ownership fence가 전부 자기보고를 믿었다. 라운드 7에서 내가 이 도구에 `null` 행과 "non-fs"를
+준 것도 같은 자기보고에 기댄 것이다. → `4ebe02c71`: not read-only(선언 없는 writer 기본값 =
+sandboxless bash 자세), 인용된 단일 투영 명령, `bash_mutating`, fail-closed + UNFENCEABLE,
+manifest 실제 슬롯. **잔여:** 행과 플래그가 일관되게 거짓이면 게이트는 여전히 못 잡는다.
+
+### I-2 (B, HIGH) 펜스가 HOME을 남겨 테스트가 개발자 메모리 스토어를 in-place로 열었다
+
+재현: 시드한 레거시 스토어가 평범한 테스트 한 번에 sha 변경·WAL 전환·컬럼 11개 추가.
+49파일 측정은 probe HOME이 전부 비어 있어서 못 봤다. → `4f8d4a89b`: 샤드 러너와 같은
+fresh operator(HOME/QUANTA_HOME/PREFS) + 워커 루트 유지(F6) + 죽은 pid 루트 정리(F8).
+시드 스토어 ground truth 3파일 불변, HOME 뮤턴트는 다시 덮어씀.
+이 머신의 실제 `~/.quanta/memory` 파일 mtime(03:15/04:53)은 펜스 머지(23:05) 이전 — 펜스 이후 손상 없음.
+
+### I-3 나머지 확인·수정
+
+- (B F2) 경로 문자열 비교 → 같은 파일의 두 표기에 "하나 지우라" 안내 → `de5bd4512` dev+inode.
+  그 커밋 메시지는 memory가 QUANTA_HOME을 따르게 된 커밋을 `c84d68364`로 적었는데 **`f4b71f89f`가 맞다**.
+- (B F3) 실 REPL 모든 exec에 `'` 잔여 → `07439927e` 프롬프트 없는 `node:repl`.
+- (B F4) "provider 키가 REPL에 닿지 않는다"(`e0c1912c0`)는 자식 `process.env` 한정 — 부모 환경은
+  `ps eww $PPID`로 읽힘(내 재현). scrub은 비밀 경계가 아니라고 문서화.
+- (B F5/F10) criss-cross 기반 1개 선택 / rename 숨김 → `779e229f5`.
+- (A-2) manifest가 `shadow_verify` 게이트를 QUANTA_SHADOW로 오기 → `4ebe02c71`에서 실제 슬롯.
+- (A-4) `.not.toBe(<한 경로>)` 약한 오라클 → `9dc7aa92a`.
+- (C) 거짓 수치: merge 탐지기 "681"은 693(내 재측정: 91 merges, 27개가 767, 사건 74 제외 693).
+  H-6 "1143→1148 net (26 added, 22 removed)"는 산술부터 불일치(26−22=4); C의 커밋별 합산 29/24는
+  내가 재측정하지 않았다. H-6 "streak은 d841e134b부터"도 C 측정상 `29d7e4ff1`부터 red — 재측정 안 함.
+  stale 주석 6곳 정정: HITL 헤더의 "SOURCE census가 권위"·"66 of 193", `network_write`
+  "(none ship today)", census 헤더의 tracked-only·object-literal-only, cli-knobs의 QUANTA_MAX_TURNS,
+  git_push "only caller".
+
+### I-4 내 전체-티어 실행이 드러낸 내 red (어딧 밖)
+
+- `test-fixtures-do-not-leak-tmp`: 프리로드 `process.on("exit")`는 bun test에서 안 불림(실측) → 루트 99개 누수 → global `afterAll`.
+- `config-slice-boundary`: `27d7735ef`가 `@/config`에서 `@/permission` import → CLI wire로 이동 + 첫 게이트 테스트.
+- 세션 기본 루트 테스트 2개 → 이름 붙은 복원(`e9ed8451a`); `mode.ts` god-module 초과 → 원장 분리(`1dd971deb`);
+  ADR-0557 e2e 2개는 `f4b71f89f`부터 red(부모 13/0, 해당 11/2 실측) → `c54587043`.
+- **내 절차 실수:** `bun run precommit | tail -1 && git commit`은 tail의 종료코드를 읽는다. 커밋 4개
+  (`1dd971deb`,`c54587043`,`11788316f`,`779e229f5`)가 precommit exit 1 상태로 들어갔다(lint-debt 1건,
+  fc-check-changed BLOCK 1건). `fe00899b1`에서 해소, 이후 종료코드를 직접 읽는다.
+
+### I-5 열어둔 것
+
+- (B F7, LOW) 운영자가 export한 서브시스템 경로 override(QUANTA_SESSIONS_DIR 등)는 펜스를 통과한다.
+  경로형 knob 선언이 없어 규칙이 아니라 전수 분류표가 필요 — 별도 작업.
+- (A-3, MEDIUM) assembled universe는 픽스처가 호출하는 빌더와 manifest가 선언한 슬롯만 본다
+  (`memoryTools`, 미선언 슬롯 뒤의 신규 도구는 초록). 구조적 보강은 별도 커밋.
+- (B F9, PLAUSIBLE) 재배치 운영자의 sqlite는 옛 홈 in-place, MEMORY.md 등은 새 홈 — 미검증.
+- (B F11, PLAUSIBLE) promax fake가 bootstrap 없이 ready 가능 — 미검증.
+- (신규, 내 측정) 실 REPL은 uncaught 에러를 STDOUT으로 출력 → 커널 `hadError`가 거짓(false).
+- 원 결정 목록(G-8)은 그대로.
