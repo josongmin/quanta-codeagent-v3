@@ -111,6 +111,10 @@ const defaultSpillFsAsync: SpillFsOpsAsync = {
  * Best-effort bounded retention for the spill directory: keep at most `keep`
  * of the most-recently-modified `*.txt` spill files, deleting the rest.
  *
+ * `spillDir` is a {@link ContainedSpillDir}: this deletes files, so it only
+ * accepts a directory {@link openSpillDir} / {@link openSpillDirAsync} verified
+ * (NW-2). A plain path does not typecheck.
+ *
  * Contract:
  * - Behavior-preserving for the under-cap path: when the dir holds `<= keep`
  *   spill files nothing is removed (no GC churn on normal use).
@@ -119,7 +123,7 @@ const defaultSpillFsAsync: SpillFsOpsAsync = {
  *   list of paths it removed (empty on no-op or on swallowed failure).
  */
 export function pruneSpillDir(
-  spillDir: string,
+  spillDir: ContainedSpillDir,
   keep: number,
   fs: SpillFsOps = defaultSpillFs,
 ): string[] {
@@ -180,13 +184,14 @@ function pruneCandidates(
 
 /**
  * Async twin of {@link pruneSpillDir} — identical semantics (same
- * {@link pruneCandidates} policy, same never-throws best-effort contract,
- * same no-op-under-limit fast path) over an awaitable fs surface. This is the
- * prune the universal tool-result path uses so GC never issues blocking IO on
- * the shared event loop (jun-10 silent-failure audit #21).
+ * {@link ContainedSpillDir} parameter, same {@link pruneCandidates} policy, same
+ * never-throws best-effort contract, same no-op-under-limit fast path) over an
+ * awaitable fs surface. This is the prune the universal tool-result path uses so
+ * GC never issues blocking IO on the shared event loop (jun-10 silent-failure
+ * audit #21).
  */
 export async function pruneSpillDirAsync(
-  spillDir: string,
+  spillDir: ContainedSpillDir,
   keep: number,
   fs: SpillFsOpsAsync = defaultSpillFsAsync,
 ): Promise<string[]> {
@@ -276,7 +281,8 @@ export const describeSpillRefusal = (refusal: SpillDirRefusal): string =>
 declare const containedSpillDirBrand: unique symbol
 /** A spill directory whose quanta-created components were each verified, by
  *  `lstat`, to be a real directory. Only {@link openSpillDir} /
- *  {@link openSpillDirAsync} produce one. */
+ *  {@link openSpillDirAsync} produce one, and {@link pruneSpillDir} /
+ *  {@link pruneSpillDirAsync} accept nothing else. */
 export type ContainedSpillDir = string & { readonly [containedSpillDirBrand]: true }
 
 export type SpillDirVerdict =

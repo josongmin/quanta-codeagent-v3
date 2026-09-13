@@ -3,13 +3,16 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
+  type ContainedSpillDir,
   capToolOutput,
   DEFAULT_SPILL_KEEP,
   DEFAULT_TOOL_OUTPUT_MAX,
   envMaxChars,
   envSpillKeep,
   HEAD_CHARS,
+  openSpillDir,
   pruneSpillDir,
+  pruneSpillDirAsync,
   resolveMaxChars,
   resolveSpillKeep,
   type SpillFsOps,
@@ -164,6 +167,14 @@ describe("resolveSpillKeep / envSpillKeep", () => {
   })
 })
 
+/** The scratch `<root>/.quanta/tool-output`, opened by the NW-2 guard — the only
+ *  way to obtain a directory the prune accepts. */
+function openedSpillDir(): ContainedSpillDir {
+  const opened = openSpillDir(spillDir)
+  if (!opened.ok) throw new Error(`scratch spill dir refused: ${opened.refusal.kind}`)
+  return opened.dir
+}
+
 /** Build an in-memory SpillFsOps over a {name -> mtimeMs} map. */
 function memSpillFs(files: Record<string, number>) {
   const removed: string[] = []
@@ -186,8 +197,8 @@ function memSpillFs(files: Record<string, number>) {
 describe("pruneSpillDir — bounded retention", () => {
   test("no-op when at/under the keep limit (no GC churn on normal use)", () => {
     const { fs, removed } = memSpillFs({ "a.txt": 1, "b.txt": 2, "c.txt": 3 })
-    expect(pruneSpillDir("/spill", 3, fs)).toEqual([])
-    expect(pruneSpillDir("/spill", 5, fs)).toEqual([])
+    expect(pruneSpillDir(openedSpillDir(), 3, fs)).toEqual([])
+    expect(pruneSpillDir(openedSpillDir(), 5, fs)).toEqual([])
     expect(removed).toHaveLength(0)
   })
 
@@ -200,9 +211,11 @@ describe("pruneSpillDir — bounded retention", () => {
       "new2.txt": 500,
     }
     const { fs } = memSpillFs(files)
-    const gone = pruneSpillDir("/spill", 2, fs)
+    const gone = pruneSpillDir(openedSpillDir(), 2, fs)
     // 5 files, keep 2 newest (new2=500, new1=400) → 3 oldest removed
-    expect(gone.sort()).toEqual(["/spill/mid.txt", "/spill/old1.txt", "/spill/old2.txt"].sort())
+    expect(gone.sort()).toEqual(
+      [join(spillDir, "mid.txt"), join(spillDir, "old1.txt"), join(spillDir, "old2.txt")].sort(),
+    )
     expect(Object.keys(files).sort()).toEqual(["new1.txt", "new2.txt"])
   })
 
@@ -214,8 +227,8 @@ describe("pruneSpillDir — bounded retention", () => {
       "c.txt": 3,
     }
     const { fs } = memSpillFs(files)
-    const gone = pruneSpillDir("/spill", 2, fs)
-    expect(gone).toEqual(["/spill/a.txt"])
+    const gone = pruneSpillDir(openedSpillDir(), 2, fs)
+    expect(gone).toEqual([join(spillDir, "a.txt")])
     expect(Object.keys(files).sort()).toEqual(["b.txt", "c.txt", "keep.lock"])
   })
 
@@ -228,7 +241,7 @@ describe("pruneSpillDir — bounded retention", () => {
     }
     const { fs } = memSpillFs(files)
     const keep = envSpillKeep({ QUANTA_TOOL_OUTPUT_SPILL_KEEP: "1" })
-    pruneSpillDir("/spill", keep, fs)
+    pruneSpillDir(openedSpillDir(), keep, fs)
     expect(Object.keys(files)).toEqual(["f4.txt"])
   })
 
@@ -242,8 +255,8 @@ describe("pruneSpillDir — bounded retention", () => {
         throw new Error("should not be called")
       },
     }
-    expect(() => pruneSpillDir("/spill", 1, fs)).not.toThrow()
-    expect(pruneSpillDir("/spill", 1, fs)).toEqual([])
+    expect(() => pruneSpillDir(openedSpillDir(), 1, fs)).not.toThrow()
+    expect(pruneSpillDir(openedSpillDir(), 1, fs)).toEqual([])
   })
 
   test("per-file remove failure is swallowed; pruning continues", () => {
@@ -262,8 +275,8 @@ describe("pruneSpillDir — bounded retention", () => {
       },
     }
     // keep 1 (d=4 newest) → candidates a,b,c. a throws, b & c removed.
-    const gone = pruneSpillDir("/spill", 1, fs)
-    expect(gone.sort()).toEqual(["/spill/b.txt", "/spill/c.txt"].sort())
+    const gone = pruneSpillDir(openedSpillDir(), 1, fs)
+    expect(gone.sort()).toEqual([join(spillDir, "b.txt"), join(spillDir, "c.txt")].sort())
     expect(calls).toBe(3)
   })
 
@@ -278,8 +291,29 @@ describe("pruneSpillDir — bounded retention", () => {
     }
     // keep 2: survivors are the two stattable (good2=200, good1=100);
     // racing.txt (unstattable → -Infinity) is the lone prune candidate.
-    const gone = pruneSpillDir("/spill", 2, fs)
-    expect(gone).toEqual(["/spill/racing.txt"])
+    const gone = pruneSpillDir(openedSpillDir(), 2, fs)
+    expect(gone).toEqual([join(spillDir, "racing.txt")])
+  })
+})
+
+describe("pruneSpillDir / pruneSpillDirAsync take only a dir openSpillDir verified", () => {
+  test("STATIC PIN (tsc): a plain string path does not typecheck as a prune target", async () => {
+    // NW-2: prune deletes every `*.txt` past keep in the directory it is handed,
+    // so the only directory it may be handed is one `openSpillDir` verified. The
+    // parameter is the `ContainedSpillDir` brand; if it regressed to `string`,
+    // the `@ts-expect-error` lines below would be unused and tsc would FAIL.
+    // The closures are never invoked: this half is checked by tsc, not at runtime.
+    const { fs } = memSpillFs({ "a.txt": 1, "b.txt": 2 })
+    const rawPath: string = spillDir
+    // @ts-expect-error a plain string is not a ContainedSpillDir
+    const _rawSync = (): string[] => pruneSpillDir(rawPath, 1, fs)
+    // @ts-expect-error a plain string is not a ContainedSpillDir
+    const _rawAsync = (): Promise<string[]> => pruneSpillDirAsync(rawPath, 1, fs)
+
+    // Runtime half: the dir the guard returns is accepted and pruned.
+    const dir: ContainedSpillDir = openedSpillDir()
+    expect(await pruneSpillDirAsync(dir, 1, fs)).toEqual([join(spillDir, "a.txt")])
+    expect(pruneSpillDir(dir, 1, fs)).toEqual([])
   })
 })
 
