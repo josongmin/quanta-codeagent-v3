@@ -1,0 +1,318 @@
+{
+ "cluster": "C — shell hard-deny coverage holes (SEC-3 write_stdin + SEC-4 unresolvable destructive targets)",
+ "attackVerdicts": [
+  {
+   "attack": "DB-1: exec_command env-overlay fix via DEFAULT_ENV_ALLOWLIST over-restricts and guts the tool's documented 64-arbitrary-env feature",
+   "verdict": "CONFIRMED",
+   "evidence": "Probe p4 (real code): handleExecCommand({command:'printf %s \"$CFLAGS\">out',env:{CFLAGS:'-O2'}}) writes '-O2' to the child today — arbitrary declared env reaches the child. buildPtyEnv({parentEnv,declared:{CFLAGS,MYVAR,PYTHONPATH,BASH_ENV,HOME,PATH},inheritEnv:false}) returns keys {PATH,HOME,PYTHONPATH} only — CFLAGS/MYVAR/BASH_ENV all DROPPED. Schema tools-6.ts:83-88 documents 'a child shell that needs more than 64 NEW env vars'. Routing the overlay through the ~18-name DEFAULT_ENV_ALLOWLIST (env-scrub.ts:44-68) silently drops legit CFLAGS/MYVAR and — critically for bench — every per-repo build var. The code-injection channel is real (probe: BASH_ENV=rc.sh and HOME=fakehome/.bash_profile markers BOTH created via bash -lc login shell). Correct fix is a code-injecting-NAME denylist (BASH_ENV/ENV/SHELLOPTS/PS4/BASH_FUNC_*/LD_PRELOAD/DYLD_*/IFS + HOME must be handled), preserving the arbitrary overlay."
+  },
+  {
+   "attack": "DB-2: SEC-4 bypass-immune ASK floor flips legitimate scripted cleanup ADMIT→DENY inside the bench/eval lane",
+   "verdict": "CONFIRMED",
+   "evidence": "config-build.ts:721 mode='acceptEdits' + :619 onConfirm:async()=>false. Probe p3 (real runAdmissibilityGate over [bash,...6-tool]): rm -rf \"$BUILD_DIR\", rm -rf \"$@\", cd \"$T\"&&rm -rf *, rm -rf \"$DIR\"/* ALL ADMIT today under acceptEdits+onConfirm=false; assessShellCommand on each = 'unknown'. Under R1's floor these become the new kind→ask→onConfirm(false)→DENY. R1's compat/risks sections frame fail-closed deny for 'headless/SDK/non-TTY' and never name the bench lane's auto-declining onConfirm — a no-real-operator surface that decision (a) says must deny. This is a default-ON, bench-affecting change with UNMEASURED pass-rate impact (MEASURE-FIRST). NOTE: Claude Code (CJ→xU ask, QJ non-interactive→deny) has the SAME tension, so the direction is defensible parity — but it must be measured or gated, not shipped default-ON blind."
+  },
+  {
+   "attack": "DB-3: Option C alone does not deliver the task-required 'ONE shared stdin assessment path'; split writes and interpreter payloads still bypass",
+   "verdict": "CONFIRMED",
+   "evidence": "Probe p1: split 'rm -rf '+'~\\n' each assess safe-known; 'import shutil,os; shutil.rmtree(...)' safe-known. Probe p5 (real retained bash via write_stdin): 'tou'+'ch splitmarker\\n' RAN as one command (splitmarker created); the shell assembles across write_stdin calls. write_stdin has NO pendingInput buffer (only pty_write does, tools.ts:199-201, and it feeds provenance not the assessor). The task explicitly asks for per-session logical-line assembly incl. control chars + NUL rejection; R1 defers all of it to fast-follow, leaving the stated core requirement unmet. Mechanism check: a per-session line buffer WOULD catch 'rm -rf '+'~\\n'→'rm -rf ~' (both fragments before a newline), so option D is the right and needed mechanism, not optional."
+  },
+  {
+   "attack": "MH-1: node_repl is a fourth model-facing stdin-writing channel omitted from the design-body census",
+   "verdict": "CONFIRMED",
+   "evidence": "default-kernel.ts:448 (k.proc.stdin as {write}).write(s) feeds model-authored code into a live node -i child; :250 writes a sentinel. Source census of child-stdin writers: keyring/select, plugin bun-spawner, lsp transport, mcp stdio, ipc stdio-spawn, debug/port, node-repl, handlers-6(write_stdin), pty adapters — of these only write_stdin and (model-facing) node_repl are MODEL tool channels. node_repl is argv/JS (extract=null), hitlTier=always-confirm; probe p9: ADMIT under bypass-no-hitl, DENY under hitl+onConfirm=false. It belongs in the census allowlist WITH a reason (JS not shell-string), not given an extractor. Low severity but the task asked to 'census all tools that write to a child's stdin'."
+  },
+  {
+   "attack": "MH-2: R1's plan to make assessFind emit the new destructive-unresolved kind is DEAD code",
+   "verdict": "CONFIRMED",
+   "evidence": "policy-rules.ts:122-125 'find-action-flag-set' regex hard-denies ANY find with -delete/-exec/-execdir/-fprintf/-fprint/-fprint0/-fls/-ok/-okdir; hardDenyReason (policy.ts:71-100) runs the regex layer BEFORE assessShellCommand. Probe p1: hardDeny('find \"$ROOT\" -delete')=true (already). So assessFind never reaches the floor for the action-flag case. Genuine SEC-4 residuals are: xargs→rm (echo ~|xargs rm -rf→unknown), positional/var recursive rm (rm -rf \"$@\", rm -rf $1, x=~;rm -rf \"$x\"), chmod/chown -R $VAR, cd-into-unknown+glob — all confirmed 'unknown'/hardDeny=false in p1."
+  },
+  {
+   "attack": "Over-engineering: prefix-verb ([P]) grant for stdin tools mints a meaningless keystroke-fragment key; R1 put the fix only in userDecisions not changes[]",
+   "verdict": "CONFIRMED",
+   "evidence": "Probe p3: derivePrefixGrantKey('write_stdin|y')='write_stdin|y', ('write_stdin|rm -rf ./x')='write_stdin|rm' (commandOf trims the trailing \\n, so 'y\\n'→'y'→simple→prefix). A confirmation keystroke 'y' would mint a session prefix grant covering all later write_stdin payloads whose first token is 'y'. cli-approval-prompt.ts:205 offers prefixGrantLabel when action.shellCommand is present — after the SEC-3 extractor lands, stdin tools acquire shellCommand and gain the meaningless [P] verb. R1's changes[] does not close it."
+  },
+  {
+   "attack": "Floor placement in evaluateStack@1.5 sits above the post-denial-override axis (a user-override-approved command is re-asked)",
+   "verdict": "PLAUSIBLE-UNMEASURED",
+   "evidence": "Code-read only: evaluateStack (policy.ts) checks hardDeny→postDenialOverride→per-thread→per-host. A floor inserted at 1.5 (or in the gate before runPermissionStackGate) precedes post-denial override. permissionStack is default-OFF (gates.ts runPermissionStack returns null unless config.permissionStack?.enabled). I did not drive a full denied→seenRisk→override sequence against a floored command. Real but low; the recommended gate-step placement makes this a conscious, documented precedence (a stale override for one action-signature should arguably not authorize a different unresolved blast radius)."
+  }
+ ],
+ "r1ClaimCorrections": [
+  {
+   "claim": "`cat \"$X\"` assesses `unknown` (benign-unreadable), used as the SEC-4 unit paired control that must stay `unknown`",
+   "correction": "`cat \"$X\"` assesses `safe-known`, not `unknown` — cat is not a gated head so assessSimple returns null and assessByHead falls to `?? safe()`. The unit test #4 as written is RED today AND after the fix. The correct currently-`unknown` NON-destructive controls are `git \"$SUB\" status` and `diskutil $verb`; `cat \"$X\"`/`tar xzf \"$F\"`/`kill -9 $PID` are safe-known controls.",
+   "evidence": "Probe p1 (real parser via initShellEffectParser): cat \"$X\"→safe-known, tar xzf \"$F\"→safe-known, kill -9 $PID→safe-known; git \"$SUB\" status→unknown, diskutil $verb→unknown."
+  },
+  {
+   "claim": "hellgate #2: declared-extractShellCommand set over the assembled universe EXACTLY equals KNOWN = {bash, test_runner, pty_write, write_stdin}",
+   "correction": "The assembled universe declares extractShellCommand on 8 tools, mints duplicate instances of several, and its smell oracle flags run_tests. As specified (toEqual with the 4-name KNOWN, no dedup) the test cannot pass. KNOWN must be the full declared set {bash,test_runner,pty_write,write_stdin,exec_command,container_exec,container_write_file,shadow_verify}; names must be de-duplicated before comparison; run_tests+node_repl+send_input go in NON_CHANNEL_ALLOWLIST with reasons.",
+   "evidence": "Probe p2: assembleToolUniverse()=175 tools; declared (raw)=[bash,container_exec,container_write_file,exec_command,exec_command,pty_write,pty_write,shadow_verify,test_runner]; duplicate names include exec_command/pty_write/write_stdin; smell-positive-unhandled=[run_tests, write_stdin×2]."
+  },
+  {
+   "claim": "Option C 'Reuses the exact universal-floor semantics quanta already ships for confirm:\"sensitive\" (decideFloor, git push)' and adds 'no new gate step'",
+   "correction": "decideFloor (pdp.ts:47-52) keys on tool capability.confirm==='sensitive', evaluated in runHitlReviewGate. R1's shellReviewFloor is a NET-NEW per-command mechanism consulting assessShellCommand, wired into THREE functions (evaluate/evaluateStack/evaluateAuto) PLUS the runHitlReviewGate bypass-fallthrough guard — not a reuse and not 'no new gate step'. Additionally, confirm:'sensitive' is opted-OUT by config.hitl.autoApprove===true (gates.ts:202), so the confirm:'sensitive' route would NOT fire under SDK-embed (embed.ts:161 sets autoApprove:true) — the exact silent-run path SEC-4 targets. The floor therefore needs a strength BETWEEN confirm:'sensitive' (autoApprove opts out) and hand-off-required (unappealable): operator-approvable, bypass-immune, AND autoApprove-immune. Cleanest placement is ONE new gate floor-step over the already-resolved action.shellCommand (the SSOT), not three edits inside policy.ts.",
+   "evidence": "pdp.ts:47-52 decideFloor; gates.ts:202-204 autoApprove opts out always-confirm+universalFloor; embed.ts:161 hitl.autoApprove:true; policy.ts evaluate=chokepoint used only by gates.ts:585 + inspect.ts(read-only matrix), so a gate-level floor covers all production paths."
+  },
+  {
+   "claim": "exec_command sibling fix: build the declared-env overlay through DEFAULT_ENV_ALLOWLIST governance",
+   "correction": "That allowlist silently drops legitimate model-declared vars (CFLAGS/MYVAR/per-repo) the schema explicitly supports, breaking the feature and bench cleanup. The structural fix is a code-injecting-NAME DENYLIST that preserves the arbitrary overlay (BASH_ENV/ENV/BASH_FUNC_*/SHELLOPTS/PS4/LD_PRELOAD/DYLD_*/IFS; and drop HOME which via bash -lc sources an attacker .bash_profile).",
+   "evidence": "Probe p4: allowlist drops CFLAGS/MYVAR; HOME override caused .bash_profile marker to run under bash -lc."
+  }
+ ],
+ "confirmedHoles": [
+  {
+   "id": "SEC-3a",
+   "what": "write_stdin (6-tool router) declares no extractShellCommand, so bytes typed into a live PTY's stdin bypass HARD_DENY, the ownership fence, and content-scoped grants; the [a]lways grant key is the bare 'write_stdin' covering every later payload",
+   "evidence": "agent-tools-6.ts:185-194 make('write_stdin',…) has no extractor arg. Probe p10: registry.extractShellCommand('write_stdin',{data:'rm -rf ~\\n'})=null; actionKeyOf=bare 'write_stdin'. R1 p2/p9: write_stdin rm -rf ~ ADMITs under bypass; fenceWriteEffects=[] while pty_write/exec_command=[{path}].",
+   "severity": "high",
+   "defaultConfigExposure": "CLI default-ON (QUANTA_SUBAGENT_6TOOLS defaults true; gated-tools.ts:100-109). Exploitable under bypass/acceptEdits/non-TTY/SDK and after any single [a]lways on the bare tool key."
+  },
+  {
+   "id": "SEC-3b",
+   "what": "The shell-input completeness hellgate builds its census surface from buildDefaultTools, which excludes the 6-tool router — the guard cannot see write_stdin/exec_command/send_input, the exact tools needing the invariant",
+   "evidence": "Test line 69-76 uses buildDefaultTools; R1 p6 inCensusSurface=false for those three; my p2: assembleToolUniverse DOES contain them (with dups) and declares extractShellCommand on exec_command/container_exec/container_write_file/shadow_verify too.",
+   "severity": "high",
+   "defaultConfigExposure": "Guard is green-but-blind on HEAD; a new stdin tool without an extractor would not turn it red."
+  },
+  {
+   "id": "SEC-3c",
+   "what": "exec_command layers the model-supplied env UNFILTERED onto the scrubbed base, so BASH_ENV/HOME/SHELLOPTS+PS4/BASH_FUNC_*/LD_PRELOAD run arbitrary code the deny authority never sees (extractShellCommand returns only `command`)",
+   "evidence": "exec-command.ts:197-207 env={...scrubEnvFrom(process.env),...(input.env??{})}, Bun.spawn(['bash','-lc',cmd]). Probe p4: BASH_ENV=rc.sh and HOME=fakehome markers both created; exec_command actionKey='exec_command|make' regardless of env (p3) — env invisible to HARD_DENY/grant key.",
+   "severity": "high",
+   "defaultConfigExposure": "CLI default-ON with the 6-tool router; the injected env runs before any command the gate can read."
+  },
+  {
+   "id": "SEC-3d",
+   "what": "exec_command / write_stdin children are not OS-sandboxed (raw Bun.spawn, never consults getShellSandbox) unlike bash via runShell",
+   "evidence": "exec-command.ts:202 direct Bun.spawn; getShellSandbox consumers = run-argv.ts:119, bash-bg-registry.ts:162 only (grep). Not probed for regression on the PTY-retain path (code-read only).",
+   "severity": "medium",
+   "defaultConfigExposure": "CLI default-ON; children escape the OS sandbox even when a slot is installed for bash."
+  },
+  {
+   "id": "SEC-4",
+   "what": "Destructive commands with an UNRESOLVABLE target assess `unknown` and fall through to the ask/allow ladder — silently admitted under bypass/acceptEdits/non-TTY/SDK. hardDenyReason (policy.ts:98) consults only kind==='hard-deny'",
+   "evidence": "Probe p1: rm -rf \"$@\", rm -rf $1, x=~;rm -rf \"$x\", set -- ~;rm -rf \"$@\", cd \"$T\"&&rm -rf *, echo ~|xargs rm -rf, chmod -R 777 $ROOT all →unknown/hardDeny=false. Probe p3: rm -rf \"$@\" ADMITs under acceptEdits+onConfirm=false and bypass+autoApprove. rm -rf \"$DIR\"/* ADMITs under bypass-no-hitl and under bypass+hitl.enabled (needs-sandbox reason defers under bypass).",
+   "severity": "medium",
+   "defaultConfigExposure": "Default interactive mode still prompts (bash tier=always-confirm/needs-sandbox); the hole is bypass/acceptEdits/non-TTY/SDK-embed(autoApprove:true)/bench(onConfirm:false) and after grants."
+  },
+  {
+   "id": "SEC-4-interp",
+   "what": "Interpreter REPL payloads through write_stdin/pty_write into a python3 -i/node/perl foreground child are not shell; the shell grammar reads shutil.rmtree(...) as safe-known and the authority cannot know the PTY's foreground process from the content-only extractor",
+   "evidence": "Probe p1: import shutil,os; shutil.rmtree(os.path.expanduser('~'))→safe-known. Probe p5: bytes after 'python3 -' consumed as Python. PtyTable slot stores the LAUNCH command (exec-command.ts:24) — a real but unused signal; the pure input→data extractor cannot reach it.",
+   "severity": "medium",
+   "defaultConfigExposure": "Same as SEC-3a; honest residual — the OS sandbox is the real boundary, and interpreter-launched retained sessions should stay always-confirm (as node_repl already is)."
+  },
+  {
+   "id": "SEC-4-split",
+   "what": "Split/fragmented writes and tty line-editing evade any per-call byte assessment: the shell assembles bytes across write_stdin calls, and ^U/DEL/bracketed-paste change the logical line",
+   "evidence": "Probe p5: 'tou'+'ch splitmarker\\n' ran as touch. Probe p1: '\\x1b[200~cd / && rm -rf *\\x1b[201~\\n' and 'echo hi\\x15cd / && rm -rf *\\n' both safe-known. R1 p4 (real tmux tty): ^U kill-line, DEL erase, zsh bracketed-paste all change what runs vs the raw bytes.",
+   "severity": "medium",
+   "defaultConfigExposure": "Accidental-case closable via per-session logical-line assembly + NUL/control rejection (Codex #41354 parity); full tty line-editor emulation is out of scope — documented residual."
+  }
+ ],
+ "revisedDesign": {
+  "summary": "Split into SEC-3 (unconditional, bench-neutral, ship now) and SEC-4 (bench-affecting, gated on measurement + decisions). SEC-3: declare write_stdin.extractShellCommand on the SAME registry port HARD_DENY/actionKeyOf/the ownership fence already read; move the completeness census to the assembled universe (dedup, full KNOWN set); fix exec_command's env overlay via a code-injecting-name DENYLIST (NOT DEFAULT_ENV_ALLOWLIST, which guts the 64-arbitrary-env feature and bench). SEC-4: add ONE new ShellAssessmentKind 'ask-destructive-unresolved' emitted ONLY by destructive assessors with an unresolvable target (recursive+force delete, xargs→rm/sh, chmod/chown -R unresolvable, cd-into-unknown+glob — NOT assessFind, which the regex hard-denies first), consumed by ONE new gate floor-step over the already-resolved action.shellCommand — appealable by a real operator, bypass-immune AND autoApprove-immune, fail-closed to deny with no operator. This corrects R1's over-invasive evaluate/evaluateStack/evaluateAuto triple edit and its mischaracterization of the confirm:'sensitive' reuse.",
+  "structuralMechanism": "(1) SSOT extractor: write_stdin joins bash/pty_write/exec_command/test_runner/container_*/shadow_verify as an extractShellCommand-declaring tool, so ToolAction.shellCommand — the single value HARD_DENY, actionKeyOf and the fence read — is populated; the bare 'write_stdin' grant becomes content-keyed. (2) New verdict as a closed-union member: ShellAssessmentKind gains 'ask-destructive-unresolved', added to the exhaustive RANK Record<ShellAssessmentKind,number> (ranked 2.5, between unknown=2 and hard-deny=3) with a runtime drift-guard so tsc+runtime force every consumer to handle it; only the destructive assessors emit it, benign-unreadable (git/diskutil unknown) and safe-unreadable (cat/tar) are untouched. (3) ONE floor consumer at the single production chokepoint: a new gate step runShellFloorGate (sibling of runHandoffFloorGate) consults a new pure @/permission export shellFloorReason(action)=non-null iff assessShellCommand(action.shellCommand).kind==='ask-destructive-unresolved'; it routes through the existing resolveAskBranch (onConfirm→approve, no-onConfirm→deny fail-closed) and does NOT fall through under bypass or autoApprove — mirroring Claude Code's bypassImmune dangerousRemoval circuit breaker + QJ non-interactive→deny, without hand-off-required's unappealability. evaluate/evaluateStack/evaluateAuto and hardDenyReason stay byte-identical. (4) exec_command env: overlay through a code-injecting-name denylist, preserving arbitrary declared vars.",
+  "changes": [
+   {
+    "path": "src/subagent/agent-tools-6.ts",
+    "change": "SEC-3a: pass the 8th arg to make('write_stdin',…): extractShellCommand:(input)=>typeof (input as {data?:unknown}).data==='string' ? input.data : null — mirrors pty_write. Populates shellCommand for HARD_DENY, the fence, and content grants; auto-fixes the bare-'write_stdin' [a]lways amplifier."
+   },
+   {
+    "path": "tests/unit/shell-input-channel-completeness-hellgate.test.ts",
+    "change": "SEC-3b: change census surface from buildDefaultTools to assembleToolUniverse; de-duplicate names before comparison; set KNOWN = {bash,test_runner,pty_write,write_stdin,exec_command,container_exec,container_write_file,shadow_verify} each with danger/benign/expectedExtract probes; add run_tests+node_repl+send_input to NON_CHANNEL_ALLOWLIST with reasons (argv/JS/agent-message, not shell-string); keep strict set-equality after dedup + the smell backstop."
+   },
+   {
+    "path": "src/subagent/exec-command.ts",
+    "change": "SEC-3c: replace {...scrubEnvFrom(process.env),...(input.env??{})} with an overlay that first scrubs the parent, then merges input.env MINUS a code-injecting-name denylist {BASH_ENV,ENV,SHELLOPTS,BASHOPTS,PS4,IFS,LD_PRELOAD,LD_LIBRARY_PATH,DYLD_*,BASH_FUNC_*,HOME? (drop HOME override — bash -lc sources .bash_profile)}. Preserves CFLAGS/MYVAR/PYTHONPATH etc. SEC-3d (separate commit): route the Bun.spawn(['bash','-lc',cmd]) through getShellSandbox()/wrapSandboxArgv like runShell, or document+test the residual — verify no regression on the PTY-retain/grace path first."
+   },
+   {
+    "path": "src/permission/shell/assess.ts",
+    "change": "SEC-4: add 'ask-destructive-unresolved' to ShellAssessmentKind + an askUnresolved(rule,reason) constructor + a RANK entry (2.5-slot). Emit it INSTEAD OF unknown() in: assessDelete (recursive&&forced && unresolved/unknown-cwd operand only — leaves rm -f \"$LOG\" as unknown), stdinOperandVerdict (xargs→rm/sh), assessSimple (chmod/chown -R with unresolved operand), and the cd-into-unknown+glob delete path. Do NOT touch assessFind (find-action-flag-set regex hard-denies first — dead code). Leave every non-destructive unknown (git/diskutil) and safe (cat/tar) unchanged."
+   },
+   {
+    "path": "src/permission/policy.ts (or shell/index.ts)",
+    "change": "SEC-4: export shellFloorReason(action):{rule,reason}|null = non-null iff assessShellCommand(action.shellCommand).kind==='ask-destructive-unresolved'. hardDenyReason stays hard-deny-only (monotonic). Add the RANK runtime drift-guard beside RANK (Object.keys(RANK) must equal the ShellAssessmentKind members)."
+   },
+   {
+    "path": "src/agent/admissibility-gate/gates.ts",
+    "change": "SEC-4: add runShellFloorGate(call,config,permission,action,opts): if shellFloorReason(action)!==null, route through resolveAskBranch (onConfirm→approve admits; absent/decline→deny fail-closed). Do NOT fall through under bypass/acceptEdits, and do NOT honor hitl.autoApprove for this floor (distinct from the confirm:'sensitive' universal floor at line 202). Export it."
+   },
+   {
+    "path": "src/agent/admissibility-gate.ts",
+    "change": "SEC-4: wire runShellFloorGate immediately AFTER runHandoffFloorGate (step ~2.15), before runPermissionRequestHook/toolProfile/pattern/rules/HITL/stack/mode — so every mode converges on it after HARD_DENY and it precedes every allow-capable path."
+   },
+   {
+    "path": "src/apps/cli/repl/cli-approval-prompt.ts",
+    "change": "SEC-3 hardening: suppress the [P] prefix-grant verb for stdin channels (write_stdin/pty_write) — a keystroke fragment's program token is meaningless (probe: 'write_stdin|y'→'y'); offer content-keyed [a]lways only. SSOT the stdin-tool set next to KNOWN_SHELL_INPUT stdin subset."
+   },
+   {
+    "path": "src/tool/pty/tools.ts + src/subagent/handlers-6.ts (option D, SEC-4/SEC-3 fast-follow)",
+    "change": "Add a per-session (per-pid/per-handle) logical-line buffer that assembles fragmented writes up to a newline, rejects NUL and raw editing control bytes (Codex #41354 parity), and feeds the assembled line to shellFloorReason/HARD_DENY. write_stdin needs the buffer pty_write already has; unify both on one 'assess bytes into a child stdin' helper (Codex 'one assessment path'). Full tty line-editor emulation stays out of scope (documented residual)."
+   }
+  ],
+  "reusedExisting": [
+   "ToolAction.shellCommand + ToolRegistry.extractShellCommand (the SSOT port; withResolvedShellCommand already resolves it uniformly at gate entry)",
+   "actionKeyOf content-keying (auto-fixes the [a]lways amplifier once the extractor exists)",
+   "assessShellCommand + the exhaustive RANK Record + runtime drift-guard culture (exhaustive-record-classification-drift-guard)",
+   "resolveAskBranch's onConfirm→approve / no-operator→deny pipeline (no bespoke deny logic)",
+   "the runHandoffFloorGate 'floor pulled ahead of allow-capable gates' pattern (the new floor step is its sibling)",
+   "the assembled-tool-universe fixture as the census surface",
+   "pty_write's projectPtyInput/pendingInput per-handle buffer as the model for write_stdin's logical-line assembly",
+   "scrubEnvFrom leaf (parent scrub stays); only the input.env overlay gets a denylist"
+  ],
+  "compatibilityAndMigration": "SEC-3 is byte-identical for every non-attack path: HARD_DENY unchanged (monotonic), the census only widens KNOWN to tools already declaring the method, and the env denylist preserves CFLAGS/MYVAR/PYTHONPATH (only code-injecting names dropped — no legit SWE-bench build var affected). The one SEC-3 behavior change: literal HARD_DENY commands (rm -rf ~, curl|sh) typed into a PTY via write_stdin are now blocked in every mode. SEC-4 adds ONLY asks for recursive+force/xargs-rm/chmod-R/cd+glob with an unresolvable target; benign-unreadable (cat \"$X\", git \"$SUB\" status) and resolvable/relative (rm -rf ./build) are byte-identical paired controls. The SEC-4 behavior change (a destructive-unresolved command now prompts under bypass/acceptEdits and denies with no operator) is the intended N16 parity and MUST be measured on the bench smoke baseline before default-ON.",
+  "userVisibleBehavior": "SEC-3: a model typing rm -rf ~ (or any HARD_DENY command) into an attached PTY via write_stdin is blocked in every mode (was silently allowed under bypass); a single [a]lways on write_stdin no longer blanket-covers all later bytes; exec_command env can no longer smuggle BASH_ENV/LD_PRELOAD code. SEC-4: a generated rm -rf \"$@\" / rm -rf \"$BUILD_DIR\" / cd \"$T\"&&rm -rf * prompts even under bypass and is denied (appealable, operator can approve) in headless/SDK/bench, instead of running silently; ordinary rm -rf ./build, cat \"$X\", git status unchanged.",
+  "rollout": "SEC-3 (extractor + census + env denylist + prefix-verb suppression) DEFAULT-ON unconditionally — a security floor, bench-neutral by construction (no legit trajectory types a HARD_DENY command into stdin or declares BASH_ENV). exec_command OS-sandbox routing (SEC-3d) is a separate commit, verified for regression or documented as a tested residual. SEC-4 floor: land the assessment + gate wiring behind a MEASURE-FIRST gate — run the SWE-bench smoke baseline (tests/smoke/swebench) with the floor on vs off and confirm no pass-rate regression from denied cleanup before flipping default-ON; the only tunable is the static, reviewed SET of destructive heads (no runtime knob that could silently disable the floor).",
+  "costEstimate": "SEC-3a extractor = XS. SEC-3b census move = S (classify each newly-visible declaring tool + dedup). SEC-3c env denylist = S. SEC-3d sandbox routing = M (must not regress PTY-retain). SEC-4 new kind + drift guard + assessor edits + one gate step = M (closed-union → several red-on-injection tests). Option D logical-line assembly + NUL/control rejection = M."
+ },
+ "revisedTests": [
+  {
+   "name": "SEC-3a unit — write_stdin declares extractShellCommand and mints a content-scoped grant key",
+   "tier": "unit",
+   "seam": "ToolRegistry over createSubagent6Tools({}).tools; registry.extractShellCommand + actionKeyOf(registry,action)",
+   "assertions": "registry.extractShellCommand('write_stdin',{pid:1,data:'rm -rf ~\\n'})==='rm -rf ~\\n'; actionKeyOf===`write_stdin|rm -rf ~\\n` (content-keyed, NOT bare 'write_stdin'); non-string data → null.",
+   "pairedControl": "exec_command already extracts 'command'; pty_write already extracts 'data' (both unchanged)",
+   "mutationThatMustTurnRed": "delete write_stdin's extractShellCommand declaration → extract null, key bare 'write_stdin' → RED",
+   "redTodayProof": "Probe p10 on HEAD: extract=null, actionKey='write_stdin'. RED today."
+  },
+  {
+   "name": "SEC-3a integration — dangerous write_stdin stdin is DENIED through the REAL admissibility gate in bypass",
+   "tier": "integration",
+   "seam": "runAdmissibilityGate over ToolRegistry([bash,...createSubagent6Tools({}).tools]), permission {mode:'bypass'}, action derived exactly as dispatch (withResolvedShellCommand)",
+   "assertions": "write_stdin {pid,data:'rm -rf ~\\n'} → DispatchResult deny (not null); paired control write_stdin {pid,data:'git status\\n'} → null (admit); exec_command {command:'rm -rf ~'} already denies (proves the seam).",
+   "pairedControl": "benign stdin admits; exec_command HARD_DENY still fires",
+   "mutationThatMustTurnRed": "remove write_stdin extractShellCommand → shellCommand null → gate ADMITs → RED",
+   "redTodayProof": "R1 p2 + design analysis: write_stdin rm -rf ~ ADMITs under bypass on HEAD (extractor absent). RED today."
+  },
+  {
+   "name": "SEC-3b census ratchet — every shell-input channel over the ASSEMBLED universe is declared or allowlisted",
+   "tier": "ratchet/census",
+   "seam": "assembleToolUniverse() (contains the 6-tool router + pty + container tools); dedup names; declared-extractShellCommand set === full KNOWN; smell-positive ⇒ declared-or-allowlisted",
+   "assertions": "declared set (deduped) EXACTLY equals {bash,test_runner,pty_write,write_stdin,exec_command,container_exec,container_write_file,shadow_verify}; run_tests+node_repl+send_input ∈ NON_CHANNEL_ALLOWLIST with reasons; a synthetic undeclared stdin tool is flagged (red-on-injection block retained); drift either direction fails after dedup.",
+   "pairedControl": "the existing makeUndeclaredShellTool rogue is flagged by the oracle",
+   "mutationThatMustTurnRed": "remove write_stdin's extractor OR revert census to buildDefaultTools → write_stdin drops out / becomes invisible → RED",
+   "redTodayProof": "Probe p2: on HEAD the assembled universe declares 8 (with dups) but the test uses buildDefaultTools where write_stdin is absent; the new census is RED until the extractor lands. Note dedup is mandatory (dups present)."
+  },
+  {
+   "name": "SEC-4 unit — assessShellCommand emits ask-destructive-unresolved for destructive-unresolvable ONLY",
+   "tier": "unit",
+   "seam": "assessShellCommand via initShellEffectParser (pure)",
+   "assertions": "kind==='ask-destructive-unresolved' for: rm -rf \"$@\", rm -rf $1, x=~;rm -rf \"$x\", set -- ~;rm -rf \"$@\", cd \"$T\"&&rm -rf *, cd \"$(mktemp -d)\"&&rm -rf *, echo ~|xargs rm -rf, chmod -R 777 $ROOT. kind==='unknown' (NOT the new kind) for git \"$SUB\" status, diskutil $verb, rm -f \"$LOG\". kind==='safe-known' for cat \"$X\", tar xzf \"$F\", rm -rf ./build. kind==='hard-deny' unchanged for rm -rf ~, rm -rf $HOME, find \"$ROOT\" -delete (via regex). RANK(new) strictly between unknown and hard-deny.",
+   "pairedControl": "benign-unreadable stays unknown; safe-unreadable stays safe-known; single-file rm -f \"$LOG\" stays unknown; literal-catastrophic stays hard-deny",
+   "mutationThatMustTurnRed": "make assessDelete return unknown() for unresolvable recursive+force → destructive cases regress → RED; add the new kind to assessSimple's non-destructive branch → cat/git controls turn → RED",
+   "redTodayProof": "Probe p1: on HEAD all destructive-unresolved cases are plain 'unknown'; cat \"$X\"=safe-known, git \"$SUB\" status=unknown, rm -f \"$LOG\"=unknown — the new-kind assertions are unrepresentable today. RED. (Corrects R1 which used cat \"$X\" as an unknown control.)"
+  },
+  {
+   "name": "SEC-4 RANK completeness ratchet — closed union has a complete RANK Record + runtime drift guard",
+   "tier": "ratchet/census",
+   "seam": "import the ShellAssessmentKind members (frozen list) and assert RANK has exactly those keys at runtime; Record<ShellAssessmentKind,number> satisfies at tsc",
+   "assertions": "Object.keys(RANK) sorted === every ShellAssessmentKind member sorted (runtime); adding a member without a RANK entry fails at runtime AND tsc.",
+   "pairedControl": "n/a (structural census; labeled static+runtime)",
+   "mutationThatMustTurnRed": "add a ShellAssessmentKind member without a RANK entry → runtime guard RED",
+   "redTodayProof": "New guard; makes a future unranked verdict (silently ordered as 0/safe) impossible. Honestly labeled as a census, not a behavioral test."
+  },
+  {
+   "name": "SEC-4 gate integration — destructive-unresolved is floored in bypass/bench/SDK and denied without an operator, appealable by one",
+   "tier": "integration",
+   "seam": "runAdmissibilityGate with real [bash,...6-tool] registry across {bypass, acceptEdits} × {onConfirm present/absent} × {hitl.autoApprove:true}",
+   "assertions": "bash {command:'rm -rf \"$@\"'} bypass+onConfirm(approve) → ADMIT; bypass+onConfirm(decline) → DENY (confirm called); bypass+no-onConfirm → DENY (fail-closed, 0 confirms); acceptEdits+onConfirm(false) (bench posture) → DENY; bypass+hitl.autoApprove:true → still DENY/ask (NOT opted out, distinct from confirm:'sensitive'). PAIRED CONTROLS byte-identical: bash {command:'rm -rf ./build'} bypass → ADMIT 0 confirms; bash {command:'cat \"$X\"'} bypass → ADMIT; bash {command:'git status'} bypass → ADMIT.",
+   "pairedControl": "resolvable/benign/safe-unreadable admit silently; only destructive-unresolved is floored; autoApprove opts out an ordinary needs-sandbox tool but NOT this floor",
+   "mutationThatMustTurnRed": "remove the runShellFloorGate wire → rm -rf \"$@\" ADMITs under bypass → RED; broaden the new kind to cat \"$X\" → benign control flips to ask → RED (guards over-deny); let autoApprove opt out the floor → SDK path ADMITs → RED",
+   "redTodayProof": "Probe p3: on HEAD rm -rf \"$@\" ADMITs under acceptEdits+onConfirm=false; rm -rf \"$DIR\"/* ADMITs under bypass-no-hitl AND bypass+hitl.enabled; write_stdin rm -rf ~ ADMITs under bypass+autoApprove. RED today."
+  },
+  {
+   "name": "SEC-3c exec_command env sibling — code-injection env dropped, legit declared env preserved (the control that forces denylist-not-allowlist)",
+   "tier": "integration",
+   "seam": "handleExecCommand (real Bun.spawn) with a scratch cwd; assert marker files + a value readback",
+   "assertions": "exec_command {command:'true',env:{BASH_ENV:'<rc that touches M>'}} → M NOT created; {command:'true',env:{HOME:'<dir with .bash_profile touching M2>'}} → M2 NOT created; SHELLOPTS+PS4 variant → not created. PAIRED CONTROL (forces the denylist): {command:'printf %s \"$CFLAGS\">out',env:{CFLAGS:'-O2'}} → out contains '-O2' (legit non-allowlisted var REACHES the child). {command:'touch M3'} → M3 created (ordinary command runs).",
+   "pairedControl": "CFLAGS control must STAY green (it fails under R1's DEFAULT_ENV_ALLOWLIST fix, passes under the denylist fix); ordinary command still runs",
+   "mutationThatMustTurnRed": "revert env overlay to {...scrubEnvFrom(process.env),...(input.env)} → BASH_ENV marker created → RED; apply R1's DEFAULT_ENV_ALLOWLIST fix → CFLAGS control fails → RED (proves the allowlist breaks the feature)",
+   "redTodayProof": "Probe p4: on HEAD BASH_ENV + HOME markers created (injection open); CFLAGS reaches the child (control green). Injection RED today; the allowlist would break the control."
+  },
+  {
+   "name": "SEC-3a fence consequence — ownership fence sees write_stdin's out-of-owned-set write",
+   "tier": "unit",
+   "seam": "extractWriteEffects via a registry containing the 6-tool router, action shaped as dispatch does (shellCommand populated by the registry)",
+   "assertions": "write_stdin {data:'echo x > /repo/outside/y\\n'} with shellCommand set → extractWriteEffects returns [{path:/repo/outside/y}] (non-empty); pty_write/exec_command already non-empty for the same shape.",
+   "pairedControl": "pty_write/exec_command non-empty (fence works when shellCommand present)",
+   "mutationThatMustTurnRed": "remove write_stdin extractShellCommand → shellCommand null → [] → RED",
+   "redTodayProof": "R1 p9: write_stdin fenceWriteEffects=[] on HEAD while pty_write/exec_command=[{path}]. RED."
+  },
+  {
+   "name": "Option D — fragmented writes assembled into one logical line; NUL/control bytes rejected",
+   "tier": "integration",
+   "seam": "the shared assess-bytes-into-stdin helper backing write_stdin + pty_write (per-session line buffer)",
+   "assertions": "write_stdin('rm -rf ') then write_stdin('~\\n') assessed as the assembled line 'rm -rf ~' → HARD_DENY; a payload containing NUL is rejected (typed failure, not silently written); a bracketed-paste/^U payload is documented-residual (assert the buffer at least surfaces the raw dangerous token where present). Paired control: 'echo ' + 'hi\\n' assembles to a benign line → admit.",
+   "pairedControl": "benign fragmented writes still admit; single-shot benign write byte-identical",
+   "mutationThatMustTurnRed": "assess each write in isolation (no buffer) → split 'rm -rf '+'~\\n' both admit → RED",
+   "redTodayProof": "Probe p5: 'tou'+'ch splitmarker\\n' ran as touch (shell assembles across calls); write_stdin has no buffer today. RED. NOTE labeled: full tty line-editing (^U/DEL/bracketed-paste) is not emulated — OS sandbox is the boundary."
+  }
+ ],
+ "implementationOrder": [
+  "Commit 1 (SEC-3a, XS): agent-tools-6.ts write_stdin extractShellCommand. RED-first: SEC-3a unit + integration tests (extract/key/gate-deny) fail on HEAD, green after.",
+  "Commit 2 (SEC-3b, S): move completeness census to assembleToolUniverse with dedup + full KNOWN + allowlist. RED-first: the census ratchet is red until the surface swap + write_stdin extractor (commit 1) both land.",
+  "Commit 3 (SEC-3c, S): exec_command env code-injecting-name denylist. RED-first: env sibling integration test (BASH_ENV/HOME blocked, CFLAGS preserved) — injection arm red on HEAD, control arm guards against the allowlist mistake.",
+  "Commit 4 (SEC-3 hardening, XS): suppress [P] prefix verb for stdin channels in cli-approval-prompt. RED-first: a unit asserting no prefix verb offered for write_stdin/pty_write.",
+  "Commit 5 (SEC-4 assessment, M): new ShellAssessmentKind + RANK entry + drift guard + scoped emitters (NOT assessFind). RED-first: SEC-4 unit + RANK ratchet fail on HEAD.",
+  "Commit 6 (SEC-4 gate, M): shellFloorReason export + runShellFloorGate + wire after runHandoffFloorGate; autoApprove-immune. RED-first: SEC-4 gate integration fails on HEAD. GATE ON MEASUREMENT before flipping this default-ON.",
+  "Commit 7 (SEC-3d, M, separable): route exec_command Bun.spawn through getShellSandbox/wrapSandboxArgv, verified against the PTY-retain path, or document+test the residual.",
+  "Commit 8 (Option D, M, fast-follow): shared per-session logical-line buffer for write_stdin+pty_write + NUL/control rejection. RED-first: split-write test fails on HEAD."
+ ],
+ "fileOwnership": [
+  "src/subagent/agent-tools-6.ts",
+  "src/subagent/exec-command.ts",
+  "src/subagent/handlers-6.ts",
+  "src/permission/shell/assess.ts",
+  "src/permission/shell/index.ts",
+  "src/permission/policy.ts",
+  "src/agent/admissibility-gate/gates.ts",
+  "src/agent/admissibility-gate.ts",
+  "src/tool/pty/tools.ts",
+  "src/apps/cli/repl/cli-approval-prompt.ts",
+  "tests/unit/shell-input-channel-completeness-hellgate.test.ts",
+  "tests/unit/permission/ (new SEC-4 assess + RANK ratchet tests)",
+  "tests/integration/ (new SEC-3a gate + SEC-3c env + SEC-4 gate + option-D tests)"
+ ],
+ "userDecisions": [
+  {
+   "question": "SEC-4 floor default-ON now, or land behind a MEASURE-FIRST gate on the SWE-bench smoke baseline?",
+   "options": "(a) default-ON immediately; (b) implement + tests green, but measure smoke pass-rate (floor on vs off) and only flip default-ON after confirming no regression from denied cleanup",
+   "recommendation": "(b). config-build.ts wires acceptEdits + onConfirm:async()=>false; probe p3 proves rm -rf \"$BUILD_DIR\"/\"$@\"/cd+glob currently ADMIT there and would flip to DENY. Memory rule: measure before a bench-affecting default-ON change; SEC-3 ships now (bench-neutral), SEC-4 waits on the measurement.",
+   "blocking": true
+  },
+  {
+   "question": "When a floored destructive-unresolved command reaches an AUTONOMOUS surface with no real operator (headless / SDK-embed autoApprove:true / bench onConfirm:false / non-TTY bypass), deny or allow?",
+   "options": "(a) DENY (fail-closed; Claude Code QJ parity — non-interactive dangerous removal → deny); (b) allow (preserve today's silent-run)",
+   "recommendation": "(a) DENY, and make the floor autoApprove-immune (distinct from confirm:'sensitive' which gates.ts:202 opts out under autoApprove). A destructive command whose blast radius we cannot read, with nobody to ask, must not run unattended. This is the exact path SEC-4 targets (embed.ts:161 sets autoApprove:true). Couple with decision 1's measurement so the bench cost is known.",
+   "blocking": true
+  },
+  {
+   "question": "SEC-4 floor breadth — which destructive shapes fire when the target is unresolvable?",
+   "options": "(a) recursive+force delete only (rm -rf/rimraf/shred); (b) + xargs→rm/sh, chmod/chown -R, cd-into-unknown+glob; (c) also single-file (rm -f \"$LOG\", unlink, rmdir)",
+   "recommendation": "(b). Matches Claude Code N16 (recursive/mass-deletion + positional/possibly-empty var). Excludes single-file (c) so ordinary rm -f \"$LOG\" scripted cleanup is not prompted (probe p1 confirms rm -f \"$LOG\" stays plain unknown automatically since assessDelete only escalates on recursive&&forced). assessFind is EXCLUDED — the regex hard-denies it first (dead code, per MH-2).",
+   "blocking": true
+  },
+  {
+   "question": "exec_command OS-sandbox (SEC-3d): route through getShellSandbox now, or document + test as a residual?",
+   "options": "(a) route now (parity with bash's runShell); (b) document + test the residual and defer",
+   "recommendation": "(a) for the bash -lc spawn (it is a shell, same threat as bash) — but as its OWN commit, verified against the PTY-retain/grace path (not probed here; code-read only). The env-denylist fix (SEC-3c) ships regardless.",
+   "blocking": false
+  },
+  {
+   "question": "Option D (logical-line assembly + NUL/control rejection): block SEC-3 core, or fast-follow?",
+   "options": "(a) fold into SEC-3 as one shared stdin path now; (b) fast-follow after SEC-3 extractor",
+   "recommendation": "The task explicitly asks 'how every PTY-writing tool shares ONE assessment path assembling a logical command line'. Deliver at least the shared per-session line buffer + NUL rejection as commit 8 (not indefinitely deferred). Full tty line-editor emulation (^U/DEL/bracketed-paste) stays a documented residual — the OS sandbox is the real boundary there.",
+   "blocking": false
+  }
+ ],
+ "residualRisks": [
+  "Interpreter REPL payloads (python3 -i/node/perl) via write_stdin/pty_write into a retained child are not shell; the shell grammar reads shutil.rmtree(...) as safe-known and the content-only extractor cannot know the PTY's foreground process. The PtyTable slot DOES store the launch command (exec-command.ts:24) — an unused signal; the principled follow-up is to mark interpreter-launched retained sessions always-confirm (as node_repl already is). Not closed by SEC-3/SEC-4.",
+  "Raw-byte stdin assessment is best-effort vs tty line editing (^U/DEL/bracketed-paste); Option D closes the accidental split-write/NUL cases but a determined adversary on a live interactive shell can construct a logical line whose raw form assesses differently (R1 p4). The OS sandbox is the real boundary — and exec_command doesn't use it until SEC-3d.",
+  "SEC-4 floor at gate step ~2.15 precedes the (default-OFF) post-denial-override axis in evaluateStack, so a user who override-approved a specific action-signature is re-asked for a destructive-unresolved command. PLAUSIBLE-UNMEASURED (not driven end-to-end); arguably correct (a stale override should not authorize a different unresolved blast radius).",
+  "Regex HARD_DENY over-matches multi-line/chained benign commands (probe p6: 'rm -rf ./build\\nls ~\\n' → hardDeny=true). Pre-existing, orthogonal to this cluster; noted so a test author does not mistake it for a new false positive.",
+  "exec_command SEC-3d sandbox routing correctness (no regression on PTY-retain/grace) is UNVERIFIED — code-read only that it bypasses the slot. Must be probed before landing commit 7.",
+  "The SEC-4 measurement (decision 1) has no local bench trajectory in-repo to replay; requires an actual SWE-bench smoke run (tests/smoke/swebench, gpt-5 baseline) — cannot be settled from static probes."
+ ],
+ "readiness": "READY-WITH-DECISIONS. SEC-3 (extractor, census move w/ dedup + full KNOWN, env code-injecting-name DENYLIST, prefix-verb suppression) is READY and bench-neutral — ship now. SEC-4 (new ShellAssessmentKind + ONE gate floor-step) is designed and RED-provable but BLOCKED on three decisions: (1) measure-first vs default-ON given the confirmed bench ADMIT→DENY flip (config-build.ts:619/721, probe p3), (2) autonomous deny-vs-allow + autoApprove-immunity, (3) floor breadth. R1's core instinct (new verdict, appealable ASK floor, N16 parity) is sound, but three R1 specifics are WRONG and corrected here: the cat \\\"$X\\\" control (it is safe-known, not unknown), the census KNOWN set + missing dedup, and the evaluate/evaluateStack/evaluateAuto triple-edit placement (should be ONE gate floor-step; confirm:'sensitive' is NOT a drop-in reuse because autoApprove opts it out). The env fix MUST be a denylist, not DEFAULT_ENV_ALLOWLIST (which guts the feature and bench). assessFind must NOT be touched (dead code)."
+}

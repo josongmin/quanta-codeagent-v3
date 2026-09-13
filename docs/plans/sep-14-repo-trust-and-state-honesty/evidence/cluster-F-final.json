@@ -1,0 +1,1002 @@
+{
+ "cluster": "F — failure honesty. BUG-3: a typed provider failure loses its cause between the adapter and goal settlement. BUG-4: the web submit is non-atomic and the composer clears before the daemon accepts. This is the round-2 objective verdict at HEAD 08fd0e28c; the attacker ran at baf5e2e9f. Every attacker probe was re-run from wf/F-r2o and reproduced, and R1's probes p1/p3/p4 also reproduced on this HEAD. New probes: pk (Bun/SDK connection-error fields), pl (the existing blocker survives attach, continuation, and a fresh-process persist), pm (retry multiplication in the production RetryingLLM composition: 60 physical hits per turn), pn (resend with the same commandId after reconnect creates no duplicate turn). The repo was not modified.",
+ "attackVerdicts": [
+  {
+   "attack": "DB1 R1 receipt revision fence lifted by non-user revision movers (same-thread attach, continuation setNextActions, reconcile-on-read invalidation)",
+   "verdict": "CONFIRMED",
+   "evidence": "Re-ran pa: '1a after-attach {receiptRevAfter:2, domainRev:3, fenceHolds:false}' and '1b continuation setNextActions {ok:true, domainRev:3, fenceHolds:false}'. Source: authority.ts:865-866 (revision = max(live+1, persisted)); web-daemon/server.ts:438-444 (hydrate calls prepareObjectiveSnapshotForAttach); goal-wake-compose.ts:170-177 (any revision change calls onGoalMutation and re-arms); policy.ts:81 (setNextActions allowed for model and continuation). Third path is static only: freshness.ts:34-48 reaches objective-verifier-wire.ts:655-661, which commits invalidateVerification, and readout-compose.ts:68-72 runs it on a goal read. The code path exists; the bypass effect was not measured."
+  },
+  {
+   "attack": "DB2 A typed 'stopped with cause, operator clears' model already exists (Blocker/BlockerObservation)",
+   "verdict": "CONFIRMED",
+   "evidence": "types.ts:103-126 (Blocker.dependencyId, BlockerObservation); criteria-ops.ts:24-76 (dedupe by dependencyId, promotion at 3 distinct) and :123-133 (distinct attemptId/evidence); blocker-observation.ts:59-68 (cleared after progress); policy.ts:97 (clearBlocker allowed for user/system, forbidden for model/continuation). Already persisted (saved-session-schema.ts:251-252, build-objective.ts:182-191, restore.ts:285-306) and rendered on CLI (goal-render.ts:75-85,:142) and web (slash-goal.ts:326). New probe pl: after a system addBlocker, status is blocked and the decision is {skip:'not-active'}. It stays blocked after same-thread attach (rev 4), continuation setNextActions (rev 5), a model clearBlocker (actor-forbidden), and encodeObjectiveSnapshot into a fresh child process followed by a prepareObjectiveSnapshotForAttach commit."
+  },
+  {
+   "attack": "DB3 Inline turn.run{input} reuses startTurn, which never writes draftInput; pausedTurnOf reads draftInput, so the approval resume runs an empty prompt",
+   "verdict": "CONFIRMED",
+   "evidence": "Re-ran pc: 'A inline-input state {pausedPrompt:\"\", resumedHostPrompts:[\"\"]}' vs control B ['deploy it']. scheduler-turn-terminals.ts:131-147 (only turn.submit is special-cased); reducer.ts:398-432 (startTurn never touches draftInput); turn-runner.ts:271-277 (the host always appends a user text block from the prompt). The probe simulates the state inline input would leave, which is valid because startTurn does not write draftInput. Whether the provider also returns 400 on an empty text block is UNVERIFIED."
+  },
+  {
+   "attack": "DB4 R1 receipt semantics: duplicate-while-queued reads as rejected, drop-while-queued reads as not sent, yet the turn runs",
+   "verdict": "CONFIRMED",
+   "evidence": "Re-ran pf: [turn.started(A-run), rejected(B-run,duplicate_command), turn.completed(A-run), turn.started(B-run)…]. Re-ran pg: after the peer closes, hostPrompts is still ['turn A','turn B (queued)']. Source: bridge.ts:696-699 (a known id is rejected), :712-716 (pending until onCommand resolves), :547-551 (replays only from replayIndex); engine.ts:104-110 (single serial dispatch tail); session-hooks.ts:1146-1148 (any matching rejected frame settles as rejected). New probe pn: peer 2 reconnects and resends the same id, gets 'peer2 rejected(B-run,duplicate_command)', then the live 'peer2 turn.started(B-run)'. hostPrompts has exactly 2 entries, so no duplicate turn."
+  },
+  {
+   "attack": "DB5 Legacy surfaces still strand drafts; R1's new turn_run_draft_not_empty refusal makes web submits fail opaquely",
+   "verdict": "CONFIRMED",
+   "evidence": "Static. Pair builders: cli/attach/commands.ts:54-70 (buildLineCommands), attach-client.ts:338-360 (sequential sends), ipc/session/handle-verbs.ts:39-51, sdk/runtime/session.ts:184-187. draftInput is written only at reducer.ts:57 (deny) and :73 (append), and at scheduler-turn-terminals.ts:300/417/512. The web reads draftInput only in validation (envelope.ts:122). The end-to-end 'web unusable after a legacy strand' outcome needs a legacy client to strand a draft and was not driven."
+  },
+  {
+   "attack": "DB6 UX regression: keeping the draft pending until turn.started blocks queueing a second message",
+   "verdict": "CONFIRMED",
+   "evidence": "pf: B's turn.started arrives only after turn.completed(A). App.tsx:829-830: inputDisabled depends only on connection state and session id, so queueing works today."
+  },
+  {
+   "attack": "WC1 T1 anthropic-529 hits === 1 + streamRetries",
+   "verdict": "CONFIRMED",
+   "evidence": "anthropic.ts:138 sets maxRetries: 2. Re-ran pd: 'anthropic a529 {hitsForOneStreamCall:3}', so without RetryingLLM the loop costs 3×4=12 hits. New probe pm with the production RetryingLLM wrap: 'anthropic a529 {physicalHits:60}'."
+  },
+  {
+   "attack": "WC2 'insufficient_quota: no same-turn retries' holds only on the Responses path",
+   "verdict": "CONFIRMED",
+   "evidence": "openai.ts:370 sets maxRetries: 2. pd: 'openai-chat-sdk insufficient_quota {hitsForOneStreamCall:3}' vs 1 on Responses. pm: 'openai-chat-sdk insufficient_quota {physicalHits:60, reasonCode:provider.unknown}'."
+  },
+  {
+   "attack": "WC3 'bridge replays duplicates' is false for a pending command",
+   "verdict": "CONFIRMED",
+   "evidence": "bridge.ts:547-551 replays only when replayIndex has the id; pf shows the reject with no replay before the turn starts."
+  },
+  {
+   "attack": "WC4 connection-lost means outcome unknown, not 'not sent'",
+   "verdict": "CONFIRMED",
+   "evidence": "pg: hostPrompts includes 'turn B (queued)' after the peer closed. pn: a same-id resend after reconnect settles it without a duplicate turn."
+  },
+  {
+   "attack": "WC5 'paused-turn resume path unchanged' is false with inline input",
+   "verdict": "CONFIRMED",
+   "evidence": "pc; scheduler-turn-terminals.ts:141-146."
+  },
+  {
+   "attack": "WC6 'old daemon ignores input, fail-closed empty_turn_input' is false",
+   "verdict": "CONFIRMED",
+   "evidence": "codec.ts:170-172 asserts only causedByApprovalId on turn.run, so unknown fields pass. reducer.ts:445-457 then runs a stranded draft or pausedTurn; empty_turn_input is thrown only when neither exists."
+  },
+  {
+   "attack": "WC7 LLMErrorKind is not produced only by fromSdkError; synthetic kinds bypass T9(3)",
+   "verdict": "CONFIRMED",
+   "evidence": "37 `new LLMError(` sites across 21 src files (per-file counts: chatgpt-oauth 6, responses-stream 4, fallback 3…). Synthetic kinds: responses-stream.ts:482-486 and openai.ts:546-550 set rate_limit 'likely transport throttle'; chatgpt-oauth.ts:395-398 sets auth for an empty catalog. None of these set statusCode."
+  },
+  {
+   "attack": "WC8 usage_limited producer 'unchanged' is kind-blind",
+   "verdict": "CONFIRMED",
+   "evidence": "Re-ran ph: overloaded 529 with retry-after gives objectiveStatus usage_limited; 503 with retry-after gives usage_limited; no header gives active. emit-helpers.ts:397-417 checks only retryAfterMs; recovery-executor.ts:72 calls it for every non-success."
+  },
+  {
+   "attack": "WC9 R1 keeps and sanctions isPromptTooLong as a downstream text override ahead of the typed kind",
+   "verdict": "CONFIRMED",
+   "evidence": "Re-ran pe: anthropic 429 'Too many tokens, please wait' decides compact (neutral control: backoff); openai 401 mentioning 'context window' decides compact (control: error). recovery.ts:270-272; retry.ts:131-139 PTL_MARKERS includes 'too many tokens'. retry.ts:171-178 comment says no PTL kind exists, which is stale: context_window_exceeded exists (errors.ts:139)."
+  },
+  {
+   "attack": "WC10 T4/T5 runtime 'SDK union size' / LLMErrorKind tuple do not exist",
+   "verdict": "CONFIRMED",
+   "evidence": "No LLM_ERROR_KINDS in src. Hand-typed copies at tests/unit/retry-decorator-policy-hellgate.test.ts:40 and recovery-router-single-authority-adversarial-hellgate.test.ts:61. Repo pattern for a tuple with a two-way check: mutations.ts:124-150. Caveat: STOP_REASON_CODE is a runtime object (stop-category.ts:82), so a reasonCode-keyed guard over Object.values IS real."
+  },
+  {
+   "attack": "WC11 streak cap 3 is not a new magic number and matches Codex",
+   "verdict": "CONFIRMED",
+   "evidence": "criteria-ops.ts:61-63 already enforces 3-distinct-occurrence promotion for the same concept. Codex #41454 counts a narrower signal (_audit-2026-09-13-codex-rs-0.154.md:166)."
+  },
+  {
+   "attack": "MH1 Responses SSE `error` event has no dispatcher arm",
+   "verdict": "CONFIRMED",
+   "evidence": "Re-ran pj: errorOnly throws kind rate_limit 'likely transport'; contentThenError yields [llm_continuation, text_delta, message_stop:end_turn] and the turn completes. openai-responses-wire.ts:811-851 has no 'error' arm (falls to 'continue'), and :884-885 always yields message_stop end_turn at stream end. SDK types: responses.d.ts:1968-1989, :4846. Codex literal (_cli-symbols.txt): 'stream closed before response.completed' / 'response stream dropped before provider terminal event'."
+  },
+  {
+   "attack": "MH2 usage_limited producer ignores kind",
+   "verdict": "CONFIRMED",
+   "evidence": "ph (see WC8); gate objectiveBudgetEnforce is default-ON at runtime-config.ts:259-262 (`!gateDisabled(env,'QUANTA_GOAL')`)."
+  },
+  {
+   "attack": "MH3 PTL marker outranks typed kind",
+   "verdict": "CONFIRMED",
+   "evidence": "pe; recovery.ts:270-272. Also consumed at compaction.ts:929, which R1 missed."
+  },
+  {
+   "attack": "MH4 Bun connection failures never network",
+   "verdict": "CONFIRMED",
+   "evidence": "pd: ECONNREFUSED is kind unknown on all three adapters. New probe pk: the SDK APIConnectionError has cause.code 'ConnectionRefused', and a plain Bun fetch error has code 'ConnectionRefused'. errors.ts:428-436 NETWORK_CODES lists Node errno names only, and transportKind (:650-658) reads e.code only."
+  },
+  {
+   "attack": "MH5 retry ownership split SDK/RetryingLLM/loop",
+   "verdict": "CONFIRMED",
+   "evidence": "Measured larger than the attacker claimed. pm (RetryingLLM wrap as in repl.ts:136 / runner/assemble/llm.ts:283, plus the real loop): 529 costs 60 physical hits per turn, chat-SDK insufficient_quota costs 60, 401 costs 1. That is 3 (SDK) × 5 (RetryingLLM, DEFAULT_MAX_RETRIES 4 at retry.ts:53) × 4 (loop, recovery.ts:12)."
+  },
+  {
+   "attack": "MH6 duplicate provider-code extractor; structured branch dead for OpenAI",
+   "verdict": "CONFIRMED",
+   "evidence": "Re-ran pi: code=context_length_exceeded with no marker text gives kind bad_request, providerCode invalid_request_error. errors.ts:390-400 (extractProviderCode) and :578-590 (lowerProviderCode) both read .error.type first; openai core/error.js:13-18 sets .code and .type on the instance."
+  },
+  {
+   "attack": "MH7 permission_error table conflict auth vs cyber_policy",
+   "verdict": "PLAUSIBLE-UNMEASURED",
+   "evidence": "Static. A 403 hits STATUS_KIND first (errors.ts:633-639, :666-668), so classifyBadRequest's permission_error rule (:604) is reachable only on a 400/422 carrying permission_error, which no capture shows. The revised design removes the conflict with one 'by-status' row."
+  },
+  {
+   "attack": "MH8 Bedrock/Vertex not Anthropic envelope",
+   "verdict": "PLAUSIBLE-UNMEASURED",
+   "evidence": "bedrock-adapter.ts:193,227 and vertex-adapter.ts:201 call fromSdkError('anthropic'); vendor body shapes not captured."
+  },
+  {
+   "attack": "MH9 no recorded real provider error payloads in tests",
+   "verdict": "CONFIRMED",
+   "evidence": "`grep -rln 'authentication_error|insufficient_quota|billing_error|invalid_api_key' tests` returns 0 files. The only cassette is tests/fixtures/side-agent-llm-charter.cassette.jsonl."
+  },
+  {
+   "attack": "MH10 subagent provider auth/quota failure reaches parent as tool result",
+   "verdict": "PLAUSIBLE-UNMEASURED",
+   "evidence": "Not traced. Structurally, only claimed goal attempts settle (objective-settlement.ts:132-135 slot.take), so a subagent failure is not a goal settlement."
+  },
+  {
+   "attack": "JT-T1 exact counts ignore SDK retries; implementer bodies; env mutation",
+   "verdict": "CONFIRMED",
+   "evidence": "pd/pm. AnthropicAdapter has no baseURL option (anthropic.ts:126-145), so R1's T1 must mutate the process-global ANTHROPIC_BASE_URL."
+  },
+  {
+   "attack": "JT-T2 no paired negative for non-user revision movers",
+   "verdict": "CONFIRMED",
+   "evidence": "pa. Under the blocker design those movers become paired negatives (pl)."
+  },
+  {
+   "attack": "JT-T3 reads SESSION_STATUS_SETTLED back; optional-category control",
+   "verdict": "CONFIRMED",
+   "evidence": "Replaced by a behavioral assertion: turn.submit is admitted after a failed turn (today p2 gives turn_submit_not_idle). The SessionHost port (kernel/session/ports.ts:68-82; AgentOutcome.stopCategory optional at agent-outcome.ts:95) is an external port, so the 'required category' claim is scoped to loop-internal arms and the control stays legitimate."
+  },
+  {
+   "attack": "JT-T4 rows derived from implementation keys; marker-passing control",
+   "verdict": "CONFIRMED",
+   "evidence": "pi shows the marker control passes while the structured branch is dead."
+  },
+  {
+   "attack": "JT-T5 presumes nonexistent LLMErrorKind tuple",
+   "verdict": "CONFIRMED",
+   "evidence": "See WC10."
+  },
+  {
+   "attack": "JT-T6 skips attach path",
+   "verdict": "CONFIRMED",
+   "evidence": "restore vs replaceDomainForAttach (authority.ts:846-876). The blocker design needs no receipt migration, and pl covers the attach path in a fresh process."
+  },
+  {
+   "attack": "JT-T7 missing kind controls",
+   "verdict": "CONFIRMED",
+   "evidence": "ph."
+  },
+  {
+   "attack": "JT-T8 timing-based absence",
+   "verdict": "CONFIRMED",
+   "evidence": "Replaced by a state readout (blocked, zero armed timers) plus fired-timer hit counts in integration tests; the pty lane becomes optional."
+  },
+  {
+   "attack": "JT-T9 census flaws (duplicates tsc, bypassable, sanctions PTL, _arch collisions)",
+   "verdict": "CONFIRMED",
+   "evidence": "WC7/WC9. Revised: a compile-time @ts-expect-error pin (pattern exists in tests/unit/run-ledger-hellgate.test.ts) plus deletion of classifyErrorReason replace the census."
+  },
+  {
+   "attack": "JT-W1 missing queued-duplicate, drop, pause, cross-surface arms",
+   "verdict": "CONFIRMED",
+   "evidence": "pf, pg, pc, pn."
+  },
+  {
+   "attack": "JT-W2 no @testing-library; wrong semantics; fix 'mount App with jsdom, which vitest already provides'",
+   "verdict": "CONFIRMED",
+   "evidence": "The critique holds, but the proposed fix is REFUTED. apps/web-frontend/package.json has only vitest and typescript. vitest 2.1.9 lists jsdom as an OPTIONAL peer (node_modules/vitest/package.json:120-146). jsdom and happy-dom are absent from both node_modules. No vitest environment is configured (vite.config.ts), and tests say 'Node env (no DOM)' (composer/input-drop.test.tsx:11). The ci.yml:421-425 comment 'vitest provides jsdom' is itself false."
+  },
+  {
+   "attack": "JT-W3 ExpressionStatement census bypassable; web only",
+   "verdict": "CONFIRMED",
+   "evidence": "`void` and assignment bypass is inherent to position-based matching. Biome 2.4.15 schema has noFloatingPromises (configuration_schema.json:6324), but it cannot see boolean returns; effectiveness unmeasured."
+  },
+  {
+   "attack": "JT-W4 does not drive inline+approval",
+   "verdict": "CONFIRMED",
+   "evidence": "pc."
+  },
+  {
+   "attack": "OE1 interruption receipt + skips + cap + migration + fence = parallel model of blockers",
+   "verdict": "CONFIRMED",
+   "evidence": "pa part 2, pl."
+  },
+  {
+   "attack": "OE2 two-hop projection + many vendor tables + surviving code/marker rules",
+   "verdict": "CONFIRMED",
+   "evidence": "Revised: one classify precedence and one structured extractor keyed by LLMProvider. The vendor tables stay, but each is an exact projection of a vendor-typed field, with a 'by-status' row instead of a second rule."
+  },
+  {
+   "attack": "OE3 sanctioning isPromptTooLong downstream",
+   "verdict": "CONFIRMED",
+   "evidence": "pe; moved to the boundary."
+  },
+  {
+   "attack": "OE4 synthetic rate_limit throttle guess in the typed SSOT",
+   "verdict": "CONFIRMED",
+   "evidence": "responses-stream.ts:482-486, openai.ts:546-550. Revised: relabel to `network` (the stream ended before its terminal event). Retry behavior is identical: fallback_provider leads to loop backoff (recovery.ts:283-289) and decorator retry (decorator-policy.ts:76-79)."
+  },
+  {
+   "attack": "OE5 'no timer' receipt drops outcome-unknown; sendObjectiveMutation uses a timeout",
+   "verdict": "CONFIRMED",
+   "evidence": "session-hooks.ts:1122 OBJECTIVE_MUTATION_RECEIPT_TIMEOUT_MS=5_000. Codex webview app-initial…js:131839 ('An earlier turn submission is not yet confirmed') and :131995-132050 (outcome-unknown recorded in unconfirmedTurnSubmissions)."
+  },
+  {
+   "attack": "OE6 W2/W3 shape pins stand in for a type contract",
+   "verdict": "CONFIRMED",
+   "evidence": "Revised: the submit controller owns the composer clear, and the raw send is renamed to a unique token checked by a location census (labeled static)."
+  },
+  {
+   "attack": "OE7 T9(4) repo-wide message-scan census",
+   "verdict": "CONFIRMED",
+   "evidence": "Dropped."
+  },
+  {
+   "attack": "OE8 Anthropic mid-stream SSE parse of APIConnectionError.message",
+   "verdict": "CONFIRMED",
+   "evidence": "@anthropic-ai/sdk/streaming.js:53-54 calls error.js generate(undefined,…), which builds APIConnectionError(message=sse.data). Kept as a non-default user decision and labeled as a message-field parse."
+  }
+ ],
+ "r1ClaimCorrections": [
+  {
+   "claim": "Orchestrator: the web vitest suite is in no CI workflow. R1: vitest provides jsdom there.",
+   "correction": "The suite IS enrolled: ci.yml web job and gate-manifest.ts prepush `web-frontend`. It runs in vitest's default node environment, and no DOM library is installed. App or hook mount tests are therefore impossible without an install, and memory says installs are blocked.",
+   "evidence": ".github/workflows/ci.yml:407-432 (the comment at :421-425 claims jsdom); tools/dev/gate-manifest.ts:215-220; node_modules/vitest/package.json:120-146 (jsdom is an optional peer); `ls apps/web-frontend/node_modules/jsdom node_modules/jsdom` finds nothing; apps/web-frontend/src/composer/input-drop.test.tsx:11."
+  },
+  {
+   "claim": "The required-category ripple touches about 27 production files.",
+   "correction": "The loop-internal error arms are 14 literal producers plus 1 type declaration in 4 files: recovery.ts (10 producers, declaration at :136), recovery-executor.ts:85/147/203, same-turn-engine.ts:184 and types.ts:41. The consumer is turn-outcome.ts:98. Widening the kind union touches only codex-spec-router.ts:63 and error-routing/default-classifier.ts:65. The whole BUG-3 file list is about 36 files, mostly separate projections, not a type ripple.",
+   "evidence": "`grep -rn 'do: \"error\"' src`; `grep -rn 'kind: \"error\"' src/agent/loop`; `grep -rn 'switch (kind)' src/llm src/agent`."
+  },
+  {
+   "claim": "classifyErrorReason's only caller is turn-outcome.ts:98.",
+   "correction": "It is also re-exported from the public barrel and imported by four test files, all of which must be retargeted.",
+   "evidence": "src/agent/index.ts:414; tests/unit/loop-control-cutoff-fixes.test.ts:32; tests/unit/agent/empty-turn-exhaustion-hellgate.test.ts; tests/unit/agent/stop-truncation-nonsuccess-hellgate.test.ts; tests/unit/agent/stop-category.test.ts."
+  },
+  {
+   "claim": "insufficient_quota costs 4 provider hits per goal turn.",
+   "correction": "4 is the Responses fetch path without RetryingLLM. The production CLI and swappable-port composition wraps RetryingLLM, where the chat-SDK path costs 60 physical hits per turn, as does any retryable 529.",
+   "evidence": "Probe pm: '{physicalHits:60}' for a529 and oquota, 1 for a401; repl.ts:136; runner/assemble/llm.ts:283-286."
+  },
+  {
+   "claim": "R1's change list for removed symbols was complete (responsesStatusToKind is imported only by chatgpt-oauth; isPromptTooLong is used only by recovery).",
+   "correction": "The OpenAI models probe also uses responsesStatusToKind, and compaction's input-limit classification also uses isPromptTooLong.",
+   "evidence": "src/llm/adapters/openai-responses.ts:13,212; src/agent/compaction.ts:25,929; tests/unit/recovery-hellgate.test.ts:37,374."
+  },
+  {
+   "claim": "A table keyed by Anthropic.ErrorObject['type'] covers the API.",
+   "correction": "The SDK 0.40.1 ErrorObject union lacks `request_too_large` (413), which the bundled API doc lists. Any table keyed by the vendor union needs an explicit 'by-status' fallback for types outside it, and an exhaustive Record alone does not prove API coverage.",
+   "evidence": "node_modules/@anthropic-ai/sdk/resources/shared.d.ts:1-43; .extracted_source/claude-code-cli/src-2.1.270/error-codes-a6b3b967.md:9-19."
+  },
+  {
+   "claim": "The goal cause must persist in ProgressReceipt, with a schema migration.",
+   "correction": "Not needed. Persist the cause as an existing Blocker (dependencyId plus a bounded label) or BlockerObservation. Both are already in the v2 schema and the restore path, and the wake policy already honors them: status blocked makes the wake skip as not-active. A receipt field guarded by a revision fence can be bypassed (pa); a blocker cannot (pl).",
+   "evidence": "saved-session-schema.ts:251-252; restore.ts:285-306; goal-wake-policy.ts:143; probes pa, pl."
+  },
+  {
+   "claim": "Adding TurnRunCommand.input and adding a new command type are equally good choices.",
+   "correction": "The kernel checks `command.type === \"turn.run\"` as scattered literals, not exhaustively: in the goal-claim resume, the pre-abort gate and cancel-controller registration. A new command type would silently skip cancel registration and the pre-abort gate. A field on turn.run is therefore structurally safer inside the kernel, and the capability marker handles old-daemon skew. pausedTurnOf must also stop keying on draftInput.",
+   "evidence": "src/kernel/session/scheduler.ts:105-112, :325, :348; scheduler-turn-terminals.ts:131-147."
+  },
+  {
+   "claim": "R1 cited Codex `QuotaExceeded` as a quota error variant.",
+   "correction": "Confirmed, but the same token also appears among the std::io::ErrorKind strings. The relevant occurrence is the concatenated run of ApiError variant names.",
+   "evidence": "codex-cli/_cli-symbols.txt literal 'TransportApiStreamContextWindowExceededQuotaExceededRetryabledelayRateLimitExceededRateLimitInvalidRequestCyberPolicy' (found by byte-offset grep), distinct from '…StorageFullNotSeekableQuotaExceededFileTooLarge…'."
+  }
+ ],
+ "confirmedHoles": [
+  {
+   "id": "F-H1",
+   "what": "The typed LLMError is flattened to a string at the RecoveryAction/TurnResult error arms. The stop category is then re-derived from message text, so real auth, billing and quota failures are mislabeled runtime.unknown_error or provider.unknown.",
+   "evidence": "Probe p1 at HEAD 08fd0e28c: anthropic a401/a402/a403 give runtime.unknown_error; openai-chat-sdk o401 gives runtime.unknown_error; o429quota gives provider.unknown. Code: stop-category.ts:170-289; turn-outcome.ts:91-99; recovery.ts:136.",
+   "severity": "HIGH",
+   "defaultConfigExposure": "Every surface (CLI, web, SDK) and every default provider path. No gate."
+  },
+  {
+   "id": "F-H2",
+   "what": "The boundary reads the wrong structured field: the Anthropic envelope's outer type ('error') and OpenAI's .error.type instead of .code. lowerProviderCode duplicates the same logic, so the structured context_length_exceeded and invalid_image rules never fire.",
+   "evidence": "errors.ts:390-400, :578-617; probes p1 (providerCode 'error'), pi.",
+   "severity": "MED",
+   "defaultConfigExposure": "Default-on for all Anthropic and OpenAI SDK errors."
+  },
+  {
+   "id": "F-H3",
+   "what": "There is no quota or billing kind and 402 is unmapped. insufficient_quota is classified rate_limit, so the SDK, RetryingLLM and the loop all retry it.",
+   "evidence": "errors.ts:633-639; codex-spec-router.ts:66-67; probe pm measured 60 physical hits per turn on the chat-SDK path.",
+   "severity": "HIGH",
+   "defaultConfigExposure": "Default-on (the RetryingLLM wrap is in the production CLI and swappable-port composition)."
+  },
+  {
+   "id": "F-H4",
+   "what": "On the default OpenAI Responses surface (also used by chatgpt-oauth): HTTP errors carry no providerCode or retryAfterMs, response.failed always becomes server_error, and the SSE `error` event is ignored. A quota error then looks like a throttle, or the turn silently completes truncated.",
+   "evidence": "responses-stream.ts:444-453; openai-responses-wire.ts:754-762, :811-851, :884-885; probes p1, pj.",
+   "severity": "HIGH",
+   "defaultConfigExposure": "Default BYOK OpenAI surface (factory.ts:160-167) and chatgpt-oauth."
+  },
+  {
+   "id": "F-H5",
+   "what": "Bun connection failures are never classified as network.",
+   "evidence": "errors.ts:428-436, :650-658; probes pd, pk (cause.code 'ConnectionRefused').",
+   "severity": "MED",
+   "defaultConfigExposure": "Default-on under Bun on all three adapters."
+  },
+  {
+   "id": "F-H6",
+   "what": "A downstream PTL marker scan outranks the typed kind, so a typed 429 or 401 routes to compaction.",
+   "evidence": "recovery.ts:270-272; retry.ts:131-139; probe pe.",
+   "severity": "MED",
+   "defaultConfigExposure": "Default-on; triggered only by provider wording such as the Bedrock throttle text (real wording UNVERIFIED)."
+  },
+  {
+   "id": "F-H7",
+   "what": "The usage_limited producer ignores the error kind, so an overload or 503 with retry-after is labeled 'usage limit'.",
+   "evidence": "emit-helpers.ts:397-417; recovery-executor.ts:72; probe ph.",
+   "severity": "MED",
+   "defaultConfigExposure": "objectiveBudgetEnforce is default-ON (runtime-config.ts:259-262) whenever goal pursuit is on."
+  },
+  {
+   "id": "F-H8",
+   "what": "Kernel onTurnErrored discards outcome.stopCategory, so lastStopCategory is always runtime.unknown_error, and turn.failed carries no category.",
+   "evidence": "scheduler-turn-terminals.ts:505-535 (terminalStopFields({reason:'error'})); protocol/session/events.ts:149-151; session-hooks.ts:522-548.",
+   "severity": "HIGH",
+   "defaultConfigExposure": "Every kernel-hosted session: web daemon, attach, SDK runtime."
+  },
+  {
+   "id": "F-H9",
+   "what": "Web goal pursuit stalls silently after one failed turn. Kernel status 'failed' is not treated as idle, so the wake reports not-quiescent, turn.submit refuses, and /goal work says 'busy'.",
+   "evidence": "goal-wake-compose.ts:72-81; goal-work-compose.ts:102; reducer.ts:471; probe p3 (after the first wake: failed / not-quiescent / liveTimers [] / hits 1).",
+   "severity": "HIGH",
+   "defaultConfigExposure": "Web daemon with goal pursuit, default-ON."
+  },
+  {
+   "id": "F-H10",
+   "what": "Goal settlement records no cause. On the CLI an error receipt backs off exactly like a no-progress completion, all the way to the product cap, including for auth, quota and billing failures.",
+   "evidence": "objective-settlement.ts:39-47, :240-256; goal-wake-policy.ts:95-110, :164-172; probe p4 (3 errors → 120000, identical to 3 completed).",
+   "severity": "HIGH",
+   "defaultConfigExposure": "CLI interactive goal wake, default-ON."
+  },
+  {
+   "id": "F-H11",
+   "what": "Retry ownership is split across three layers, multiplying physical provider calls.",
+   "evidence": "anthropic.ts:138, openai.ts:370, retry.ts:53, recovery.ts:12; probe pm 60 hits.",
+   "severity": "MED",
+   "defaultConfigExposure": "Default-on in the production CLI and swappable-port composition."
+  },
+  {
+   "id": "F-H12",
+   "what": "Web submit sends a non-atomic input.append + turn.run, ignores both delivery booleans, and clears the draft and attachments unconditionally.",
+   "evidence": "session-hooks.ts:938-969; client.ts:352-373; App.tsx:759-762, :800-812.",
+   "severity": "HIGH",
+   "defaultConfigExposure": "Always-on web composer."
+  },
+  {
+   "id": "F-H13",
+   "what": "A stranded kernel draft (append applied, run lost) is glued onto the next prompt and blocks web goal wake.",
+   "evidence": "reducer.ts:66-90; goal-wake-compose.ts:78,158; probe p5.",
+   "severity": "HIGH",
+   "defaultConfigExposure": "Web and any wire client that uses the append+run pair (CLI attach, SDK remote handle)."
+  },
+  {
+   "id": "F-H14",
+   "what": "Web approval respond (plus its continuation run), plan-input answer, permission-mode and cancel senders ignore delivery results, and the UI dismisses optimistically.",
+   "evidence": "session-hooks.ts:1077-1091, :1243-1249, :1271; client.ts:383-411; App.tsx:1083-1100 (static).",
+   "severity": "MED",
+   "defaultConfigExposure": "Web; the approval-card path requires the inline approval gate."
+  },
+  {
+   "id": "F-H15",
+   "what": "Existing tests pin the wrong things: a stop-category matrix of synthetic strings, a hand-built retryAfterMs in the '429 real loop' e2e, and a pure-seam H2 instead of the onTurnErrored arm.",
+   "evidence": "tests/unit/agent/stop-category.test.ts:30-65; tests/integration/objective-usage-limited-429-real-loop-e2e.test.ts:66-76; tests/unit/kernel/stop-category-terminal-arms-hellgate.test.ts:46-55.",
+   "severity": "MED",
+   "defaultConfigExposure": "Test suite (CI and prepush)."
+  },
+  {
+   "id": "F-D1",
+   "what": "DESIGN hole in R1 (not in HEAD): attach and continuation mutations lift the receipt revision fence.",
+   "evidence": "Probe pa.",
+   "severity": "HIGH",
+   "defaultConfigExposure": "Would ship default-on if R1's design landed."
+  },
+  {
+   "id": "F-D2",
+   "what": "DESIGN hole in R1: inline turn input followed by an approval pause resumes with an empty prompt.",
+   "evidence": "Probe pc.",
+   "severity": "HIGH",
+   "defaultConfigExposure": "Would ship on web (and CLI attach once migrated)."
+  },
+  {
+   "id": "F-D3",
+   "what": "DESIGN hole in R1: its receipt treats duplicate_command as 'rejected' and connection loss as 'not sent', which invites duplicate turns.",
+   "evidence": "Probes pf, pg, pn.",
+   "severity": "HIGH",
+   "defaultConfigExposure": "Would ship on the always-on web composer."
+  }
+ ],
+ "revisedDesign": {
+  "summary": "BUG-3: classify once at the provider boundary from vendor-typed fields. Carry the StopCategory through the loop error arms (required there) and the kernel terminal. At goal settlement, project it onto the EXISTING Blocker/BlockerObservation model instead of a new receipt field. Stop-class failures add a dependency-keyed blocker in the same settleAttempt commit, so the goal derives `blocked` and the wake skips 'not-active'. Retry-class failures record a host observation that promotes to a blocker under the existing 3-distinct-attempt rule. Fix the web stall with one SESSION_STATUS_SETTLED table, and gate the usage_limited producer by kind. BUG-4: web and CLI attach submit one turn.run{input} command, negotiated by capability. The kernel records once what the running turn started with, so approval resume never keys on draftInput. On the web, one command-outcome SSOT models settled / rejected / admitted-earlier / undelivered / outcome-unknown, with no timer; resending the same commandId is idempotent. On delivery the composer text moves into a pending-submission entry and is restored on rejection, so queueing still works.",
+  "structuralMechanism": "(1) SSOT of failure meaning: an `LLM_ERROR_KINDS` const tuple in src/shared/errors.ts, with `type LLMErrorKind = (typeof LLM_ERROR_KINDS)[number]`. Drift is impossible, and the two hand-typed test copies are deleted. One `classifyProviderError(provider, e)` with a fixed precedence: abort → no status: transport code (e.code or e.cause.code ∈ NETWORK_CODES ∪ measured Bun 'ConnectionRefused') → network, otherwise unknown → vendor-typed code/type row (exact equality) → STATUS_KIND (+402→quota_exhausted) → 400/422 classifyBadRequest (marker lists live ONLY here) → 5xx. One structured extractor, `providerErrorFields: Record<LLMProvider, (e) => {type?, code?}>`, replaces extractProviderCode and lowerProviderCode. Vendor rows: ANTHROPIC_ERROR_TYPE_KIND: Record<AnthropicErrorType, LLMErrorKind | 'by-status'> over a src tuple, with a type-only two-way check against @anthropic-ai/sdk ErrorObject['type'] in src/llm; OPENAI_ERROR_CODE_KIND (partial, exact codes; unknown → by-status); RESPONSE_ERROR_CODE_KIND: Record<ResponseError['code'], LLMErrorKind> for response.failed. The fetch path goes through LLMError.fromHttpResponse, which runs the same extractor over the parsed body and headers. (2) A string-only loop failure is unrepresentable: RecoveryAction {do:'error'} and TurnResult {kind:'error'} REQUIRE `stopCategory: StopCategory`. It is produced only by stopCategoryForFailure(error) = STOP_REASON_CODE_BY_LLM_ERROR_KIND[kind] (Record<LLMErrorKind, StopReasonCode>), runtime.unknown_error for non-LLMError values, and named constructors for loop terminals. classifyErrorReason is deleted. The SessionHost port (AgentOutcome.stopCategory) stays optional because it is an external port; a missing category projects to stopCategoryForReason. (3) The goal projection reuses the blocker model. GOAL_FAILURE_DISPOSITION: Record<StopReasonCode, {kind:'none'} | {kind:'observe'} | {kind:'block', waitingOn}>, with a runtime guard over Object.values(STOP_REASON_CODE). The host passes `failure {disposition, dependencyId:'turn-failure:<code>' | 'turn-failure:transient', reason: STOP_PRESENTATION label, waitingOn}` inside ObjectiveAttemptSettlement. The authority applies it in the SAME settleAttempt commit (one revision bump): block → core.addDependencyBlocker, which dedupes by dependencyId and reuses promoteObservedBlocker; observe → core.observeBlocker with attemptId, skipped when gainedProgress. No receipt field and no schema migration. Only a user or system clearBlocker lifts it; model and continuation actors cannot (policy.ts:97). (4) SESSION_STATUS_SETTLED: Record<KernelSessionState['status'], boolean>, over a KERNEL_SESSION_STATUSES tuple, is the single answer to 'may new work start'. It is read by goal-wake-compose, goal-work-compose and the turn.submit reducer guard. (5) USAGE_WINDOW_BY_KIND: Record<LLMErrorKind, boolean> (only rate_limit true) gates markObjectiveUsageLimitedFrom429. (6) BUG-4 kernel SSOT: KernelSessionState.activeTurnInput {prompt, images, provenance?} is written ONLY by startTurn (kernel-internal, never projected) and cleared by terminals. pausedTurnOf returns it and the command-type ternary is deleted, so a new start path cannot lose the prompt. (7) Wire: TurnRunCommand.input?, codec validation, and a reducer arm that refuses when a draft is non-empty. The `inlineTurnInput` capability marker ensures new clients never send input to an old daemon. (8) Web: dispatchCommand(client, command, settledWhen) → Promise<CommandOutcome>, a closed union {settled|rejected{reason,issue}|admitted-earlier|undelivered|outcome-unknown}. The raw socket send is renamed to the unique token `sendRaw`, used only by that module. The composer clear lives only inside submitTurn.",
+  "changes": [
+   {
+    "path": "src/shared/errors.ts",
+    "change": "Add the LLM_ERROR_KINDS tuple (the type derives from it) and the new kind quota_exhausted. Replace extractProviderCode/lowerProviderCode with providerErrorFields keyed by LLMProvider: Anthropic reads e.error?.error?.type; OpenAI/chatgpt-oauth read e.code, then e.type. Add ANTHROPIC_ERROR_TYPES + ANTHROPIC_ERROR_TYPE_KIND: authentication_error→auth, permission_error→by-status, billing_error→quota_exhausted, rate_limit_error→rate_limit, overloaded_error→overloaded, api_error→server_error, timeout_error→server_error, not_found_error→not_found, invalid_request_error→by-status. Add OPENAI_ERROR_CODE_KIND: insufficient_quota→quota_exhausted, invalid_api_key→auth, rate_limit_exceeded→rate_limit, context_length_exceeded→context_window_exceeded, model_not_found→not_found, invalid_image/invalid_image_request→invalid_image. Add STATUS_KIND 402→quota_exhausted. The transport check also reads e.cause.code and accepts 'ConnectionRefused'. For status-less, non-transport errors, apply ADAPTER_CONTEXT_WINDOW_MARKERS here, so PTL detection happens only at the boundary. Add static fromHttpResponse(provider, {status, statusText, headers, bodyText}, prefix): strict JSON parse of {error:{code,type,message}}, the same classify, and parseRetryAfterMs. Add assertProviderErrorTablesInSync guards with injectable inputs."
+   },
+   {
+    "path": "src/shared/index.ts",
+    "change": "Export LLM_ERROR_KINDS."
+   },
+   {
+    "path": "src/llm/retry/codex-spec-router.ts",
+    "change": "Add case quota_exhausted → hitl_handoff (decorator-policy then derives no_retry)."
+   },
+   {
+    "path": "src/agent/error-routing/default-classifier.ts",
+    "change": "Add a quota_exhausted arm. The slice is unwired, but the exhaustive switch requires it to compile."
+   },
+   {
+    "path": "src/llm/responses-stream.ts",
+    "change": "assertResponsesResponseOk throws LLMError.fromHttpResponse. Delete responsesStatusToKind. Relabel the empty-stream synthetic kind from rate_limit to network: loop backoff and decorator retry stay the same, and the label becomes honest."
+   },
+   {
+    "path": "src/llm/adapters/openai-responses.ts",
+    "change": "The models probe (:206-216) uses LLMError.fromHttpResponse."
+   },
+   {
+    "path": "src/llm/adapters/chatgpt-oauth.ts",
+    "change": "The /models lookup (:381-390) uses fromHttpResponse. The empty-catalog `auth` stays (it is a documented account-access condition) but gains providerCode 'empty_catalog' so it is distinguishable."
+   },
+   {
+    "path": "src/llm/openai-responses-wire.ts",
+    "change": "Add a dispatcher arm for type 'error' (ResponseErrorEvent) that throws LLMError with kind = OPENAI_ERROR_CODE_KIND[code] ?? 'unknown' and providerCode = code. throwResponsesFailure maps response.error.code through RESPONSE_ERROR_CODE_KIND: server_error/vector_store_timeout→server_error, rate_limit_exceeded→rate_limit, invalid_prompt→bad_request, image_content_policy_violation→cyber_policy, the other image_* codes→invalid_image. A code outside the union falls back to OPENAI_ERROR_CODE_KIND, else unknown. Add a type-only two-way check of the RESPONSE_ERROR_CODES tuple against the SDK's ResponseError['code']."
+   },
+   {
+    "path": "src/llm/adapters/anthropic.ts",
+    "change": "Add optional `baseURL` to AnthropicConfig and pass it to the SDK constructor. It is a composition port; production passes nothing, so behavior is byte-identical. Export ANTHROPIC_SDK_MAX_RETRIES (=2) and use it. Add a type-only two-way check of ANTHROPIC_ERROR_TYPES against the SDK's ErrorObject['type']."
+   },
+   {
+    "path": "src/llm/adapters/openai.ts",
+    "change": "Export OPENAI_SDK_MAX_RETRIES (=2) and use it. Relabel the empty-stream synthetic kind from rate_limit to network."
+   },
+   {
+    "path": "src/agent/retry.ts",
+    "change": "Delete PTL_MARKERS and isPromptTooLong. classifyLLMError reads kind === 'context_window_exceeded'. Keep the RETRYABLE_MARKERS fallback for kind 'unknown' (documented residual)."
+   },
+   {
+    "path": "src/agent/compaction.ts",
+    "change": ":929 uses `e instanceof LLMError && e.kind === 'context_window_exceeded'`."
+   },
+   {
+    "path": "src/agent/recovery.ts",
+    "change": "The error arm requires stopCategory. decideTypedStreamError drops the isPromptTooLong precedence, so the typed kind decides first, and every `do:'error'` attaches stopCategoryForFailure(error). The malformed / empty / truncated / stop-abort / stop-hitl arms attach their named categories; the prefix text stays for display only."
+   },
+   {
+    "path": "src/agent/stop-category.ts",
+    "change": "Delete classifyErrorReason. Add codes provider.quota_exhausted, provider.server_error, provider.model_unavailable, provider.policy and provider.context_window, with presentation rows. Add STOP_REASON_CODE_BY_LLM_ERROR_KIND: overloaded→provider.overloaded; rate_limit→provider.rate_limit; server_error→provider.server_error; network→provider.network; auth→provider.auth; bad_request→provider.bad_request; not_found→provider.model_unavailable; not_implemented/stream_corrupt/unknown/too_many_failed_attempts→provider.unknown; aborted→system.abort; context_window_exceeded→provider.context_window; cyber_policy→provider.policy; thread_rollback_failed/sandbox_error→runtime.unknown_error; sandbox_blocked→shell.needs_approval; invalid_image→provider.bad_request; quota_exhausted→provider.quota_exhausted. Add stopCategoryForFailure, loop-terminal constructors, and assertStopReasonByKindInSync."
+   },
+   {
+    "path": "src/agent/index.ts",
+    "change": "Remove the classifyErrorReason export (:414); export stopCategoryForFailure."
+   },
+   {
+    "path": "src/agent/loop/types.ts",
+    "change": "TurnResult error arm becomes {kind:'error'; reason:string; stopCategory:StopCategory}."
+   },
+   {
+    "path": "src/agent/loop/recovery-executor.ts",
+    "change": ":85 forwards action.stopCategory; :147 attaches the compaction-thrash category; :203 attaches the compaction-thrash category for a reactive compaction failure."
+   },
+   {
+    "path": "src/agent/loop/same-turn-engine.ts",
+    "change": ":184 attaches the compaction-thrash category."
+   },
+   {
+    "path": "src/agent/loop/turn-outcome.ts",
+    "change": ":91-99 uses stopCategory: args.result.stopCategory."
+   },
+   {
+    "path": "src/agent/loop/emit-helpers.ts",
+    "change": "markObjectiveUsageLimitedFrom429 returns false unless USAGE_WINDOW_BY_KIND[error.kind] (Record<LLMErrorKind, boolean>; only rate_limit is true)."
+   },
+   {
+    "path": "src/kernel/session/state.ts",
+    "change": "Add the KERNEL_SESSION_STATUSES tuple (the status type derives from it). Add SESSION_STATUS_SETTLED {idle:true, failed:true, running:false, awaiting_approval:false, closed:false} with a guard. Add kernel-internal activeTurnInput?: {prompt, images, provenance?}."
+   },
+   {
+    "path": "src/kernel/session/reducer.ts",
+    "change": "handleTurnSubmit :471 uses !SESSION_STATUS_SETTLED[status]. startTurn gains a provenance parameter and writes activeTurnInput. handleTurnRun: when command.input is present, refuse with turn_run_draft_not_empty if hasDraftTurnInput, refuse with empty_turn_input if the input is empty, otherwise startTurn(input.text, input.images ?? [])."
+   },
+   {
+    "path": "src/kernel/session/scheduler-turn-terminals.ts",
+    "change": "pausedTurnOf returns state.activeTurnInput, and the command-type ternary is deleted. Terminal arms clear activeTurnInput. onTurnErrored passes category: args.result.outcome.stopCategory to terminalStopFields and stamps stopCategory on turn.failed. The thrown-host arm uses stopCategoryForFailure(error)."
+   },
+   {
+    "path": "src/protocol/session/events.ts",
+    "change": "TurnFailedEvent gains readonly stopCategory?: StopCategoryWire (additive; mirrors turn.completed)."
+   },
+   {
+    "path": "src/protocol/session/commands.ts",
+    "change": "TurnRunCommand gains readonly input?: {readonly text: string; readonly images?: readonly ImageBlock[]}."
+   },
+   {
+    "path": "src/protocol/session/codec.ts",
+    "change": "For turn.run with `input` present: assertObjectField, assertString(text), and a non-array images value throws bad_command_images_type."
+   },
+   {
+    "path": "src/protocol/session/capabilities.ts",
+    "change": "Add an inlineTurnInput boolean marker (normalized to false when absent)."
+   },
+   {
+    "path": "src/host/runtime/capabilities.ts",
+    "change": "Stamp inlineTurnInput: true. It is a kernel feature, so it is true for every composition."
+   },
+   {
+    "path": "src/protocol/session/builders.ts",
+    "change": "buildTurnRun(deps, meta, input?) emits the optional input."
+   },
+   {
+    "path": "src/apps/cli/attach/commands.ts",
+    "change": "buildLineCommands returns a single inline turn.run when the handshake manifest advertises inlineTurnInput, otherwise the legacy pair."
+   },
+   {
+    "path": "src/apps/cli/attach/attach-client.ts",
+    "change": "Pass the negotiated capability into buildLineCommands."
+   },
+   {
+    "path": "src/apps/web-daemon/goal-wake-compose.ts",
+    "change": "quiescent (:77) uses SESSION_STATUS_SETTLED."
+   },
+   {
+    "path": "src/apps/web-daemon/goal-work-compose.ts",
+    "change": ":102 uses SESSION_STATUS_SETTLED."
+   },
+   {
+    "path": "src/host/runtime/internal/context-binding/turn-runner.ts",
+    "change": "The thrown path (:185-189) settles with {reason:'error', stopCategory: stopCategoryForFailure(error)}."
+   },
+   {
+    "path": "src/host/runtime/internal/context-binding/objective-settlement.ts",
+    "change": "Add GOAL_FAILURE_DISPOSITION: Record<StopReasonCode, …> with a guard. block(user): provider.auth, provider.quota_exhausted, provider.model_unavailable, provider.policy, provider.bad_request, provider.context_window, compaction.thrash. observe: provider.rate_limit, provider.overloaded, provider.network, provider.server_error, provider.unknown, runtime.unknown_error, model.malformed_tool_use, model.empty_exhausted, model.output_truncated. none: the other 10 codes. settleObjectiveAttempt takes the code from outcome.stopCategory ?? stopCategoryForReason(outcome.reason) and passes `failure` in the settlement."
+   },
+   {
+    "path": "src/objective/mutations.ts",
+    "change": "ObjectiveAttemptSettlement gains failure?: {disposition:'block'|'observe'; dependencyId; reason; waitingOn}."
+   },
+   {
+    "path": "src/objective/authority.ts",
+    "change": "settleAttempt validates failure: bounded dependencyId with the 'turn-failure:' prefix, bounded reason, closed waitingOn; otherwise refused as 'invalid'. block → core.addDependencyBlocker. observe → core.observeBlocker({dependencyId, attemptId: settlement.attemptId, occurrenceEvidenceId:`${dependencyId}:${attemptId}`, reason, waitingOn}) unless gainedProgress. Both happen in the same commit."
+   },
+   {
+    "path": "src/objective/core-store/criteria-ops.ts",
+    "change": "Expose addDependencyBlocker, reusing promoteObservedBlocker (dedupe by dependencyId, capped)."
+   },
+   {
+    "path": "src/objective/store.ts",
+    "change": "Add addDependencyBlocker to the ObjectiveCore interface."
+   },
+   {
+    "path": "src/objective/authority-core-adapter.ts",
+    "change": "Add a no-op addDependencyBlocker for the legacy adapter."
+   },
+   {
+    "path": "apps/web-frontend/src/types/protocol.session.generated.ts",
+    "change": "Regenerate with `bun run build:protocol` (TurnFailedEvent.stopCategory, TurnRunCommand.input, inlineTurnInput)."
+   },
+   {
+    "path": "apps/web-frontend/src/lib/stop-presentation.ts",
+    "change": "Mirror the 5 new codes; update the drift hellgate in the same commit."
+   },
+   {
+    "path": "apps/web-frontend/src/ws/client.ts",
+    "change": "Rename send to sendRaw (a unique token). sendPlanInputAnswer returns boolean."
+   },
+   {
+    "path": "apps/web-frontend/src/ws/command-outcome.ts",
+    "change": "NEW. dispatchCommand(client, command, settledWhen): Promise<CommandOutcome>. A rejected frame with reason other than duplicate_command → rejected. duplicate_command → admitted-earlier, and it keeps waiting for settledWhen. sendRaw returning false → undelivered. The connection leaving 'connected' before settlement → outcome-unknown. No timer; an optional timeoutMs exists only to preserve sendObjectiveMutation's current behavior."
+   },
+   {
+    "path": "apps/web-frontend/src/ws/turn-submission.ts",
+    "change": "NEW. A pure pending-submission store keyed by commandId {text, images, state: queued|unknown}. submitTurn(deps) builds an inline turn.run, or the legacy pair keyed on the run id when the capability is absent. Undelivered → composer untouched. Delivered → composer cleared and an entry added. Rejected → text restored to the composer (appended if the composer is non-empty) plus one error row. turn.started with a matching causedByCommandId → entry removed. Outcome-unknown → the entry offers a resend of the identical frame (same commandId)."
+   },
+   {
+    "path": "apps/web-frontend/src/ws/session-hooks.ts",
+    "change": "The turn.failed reducer copies stopCategory onto the error row. Delete useSendTurn in favor of submitTurn. Rebuild sendObjectiveMutation on dispatchCommand, keeping its timeout. Approval respond settles on approval.resolved with a matching causedByCommandId. Permission and cancel go through dispatchCommand."
+   },
+   {
+    "path": "apps/web-frontend/src/App.tsx",
+    "change": "submit (:800-812) and the slash 'sent' arm (:759-762) call submitTurn, with no direct setDraft('') on submit paths. onApprovalDecision dismisses based on the outcome. onPlanInputAnswer injects resolved only when the answer was delivered."
+   },
+   {
+    "path": "apps/web-frontend/src/components/ChatPanel.tsx",
+    "change": "Render pending-submission entries (queued, or not confirmed with a Resend action)."
+   },
+   {
+    "path": "apps/web-frontend/src/components/MessageBubble.tsx",
+    "change": "Render the stopCategory badge and hint on error rows (turn.completed rows already carry it)."
+   },
+   {
+    "path": "src/apps/cli/repl/session-loop/turn-helpers.ts",
+    "change": "(decision) Print `stopped: <label> — <hint>` from STOP_PRESENTATION_BY_REASON_CODE for errored outcomes."
+   },
+   {
+    "path": "src/apps/cli/repl/goal-checkpoint-line.ts",
+    "change": "(decision) Append `· blocked: <label>` when the post-commit domain gained a turn-failure blocker."
+   }
+  ],
+  "compatibilityAndMigration": "Persistence: no schema change. Blockers and observations with dependencyId are already in the v2 schema (saved-session-schema.ts:251-252) and restore (restore.ts:285-306). An older binary reading a new file sees an ordinary blocked goal with a label as its reason, and its existing /goal unblock clears it. Receipts are unchanged. Wire: TurnFailedEvent.stopCategory, TurnRunCommand.input and capabilities.inlineTurnInput are all additive. An old frontend against a new daemon still uses the accepted legacy append+run path. A new frontend against an old daemon sees no marker (normalized false) and uses the legacy pair keyed on the run commandId, with draft restore on rejection. A client that ignores the marker and sends input to an old daemon hits the codec pass-through hazard described in WC6. LLMErrorKind gains quota_exhausted; the exhaustive switches (codex-spec-router, default-classifier) fail to compile until handled, so typecheck:all is mandatory because bun test does not typecheck. StopReasonCode gains 5 codes, none renamed; the web mirror and drift hellgate update in the same commit. Behavior changes: a 429 that mentions 'too many tokens' no longer compacts; an empty or truncated stream is labeled network instead of rate_limit (retry unchanged); an overload or 503 with retry-after no longer marks usage_limited; auth, quota/billing, model-unavailable, policy, bad-request, context and compaction-thrash failures block the goal until /goal unblock; three distinct transient-failure attempts without progress block it; kernel 'failed' counts as settled for web wake, /goal work and turn.submit. Anthropic mid-stream SSE errors stay kind unknown and are retried through the existing marker fallback unless decision D7 is taken.",
+  "userVisibleBehavior": "CLI: a revoked key or exhausted quota ends the turn with the raw error plus (decision D9) `stopped: Provider auth failed — <hint>`. /goal shows `status: blocked`, `blockers (/goal unblock to clear): - [user] Provider auth failed`, and `wake: idle (not-active)`. No further autonomous provider call happens until the user runs /goal unblock. Transient failures (overload, network, 5xx, unknown, or empty/truncated model output) keep today's backoff and show `(observing N/3)`; after three distinct failed attempts without progress the goal is blocked with 'turn-failure:transient'. Physical calls per quota failure drop from 60 to 3 on the chat-SDK path, or to 1 with decision D5. A 429 with retry-after on the default surface shows usage-limited with the exact retry time, and an overload no longer claims 'usage limit'. Web: failed turns show a typed badge and hint, and a failed goal turn no longer freezes pursuit as not-quiescent. A sent message appears as a queued entry even while another turn runs. If the daemon rejects it, the text returns to the composer with the reason. If the socket drops before confirmation, the entry says it is not confirmed and offers Resend, which cannot create a duplicate turn. Messages from separate sends are never glued together.",
+  "rollout": "Default-on, with no feature gate. These are honesty and correctness fixes to default-on paths: goal pursuit and objectiveBudgetEnforce are default-ON (runtime-config.ts:225-262), and the web composer is always on. Gating the fixes would leave the 60-call burn, the web stall and the lost-draft bug live by default, while code behind a default-OFF gate goes unexercised. inlineTurnInput is compatibility negotiation, not a flag. QUANTA_GOAL=0 remains the opt-out for goal pursuit itself. The retry-owner consolidation (D5) and treating a truncated stream as an error (D6) ship only on user decision.",
+  "costEstimate": "BUG-3 core (commits C1-C8): about 36 files including retargeted tests, 3.5-4.5 days with typecheck:all and one adversarial round. Boundary and Responses work: 1.5 days. Loop and kernel carry: 1 day. Blocker settlement, web stall and usage gate: 1 day. Tests: 1 day. BUG-4 (W1-W4): about 17 files, 2-3 days. Kernel SSOT, protocol/codec, capability and CLI attach: 0.75 day. Web outcome SSOT, submission store and App/ChatPanel: 1 day. Real-daemon e2e and vitest: 0.75 day. Siblings: 0.5 day. Decision-gated extras: D5 0.5 day, D6 0.5 day, D9 0.25 day.",
+  "reusedExisting": [
+   "Blocker / BlockerObservation / promoteObservedBlocker / observeBlocker / clearObservationsAfterProgress (src/objective/core-store/criteria-ops.ts, blocker-observation.ts) as the durable cause and the hysteresis",
+   "policy.ts clearBlocker actor row (user/system only), CLI /goal unblock, and web slash-goal clearBlocker",
+   "v2 persisted blocker schema + restore + prepareObjectiveSnapshotForAttach (no migration)",
+   "computeGoalWakeDelay 'not-active' skip for blocked goals",
+   "OBJECTIVE_OPERATION_KINDS tuple pattern (mutations.ts:124-150), reused for LLM_ERROR_KINDS and KERNEL_SESSION_STATUSES",
+   "STOP_REASON_CODE runtime object + STOP_PRESENTATION_BY_REASON_CODE + assertStopPresentationInSync + the web drift hellgate",
+   "stopCategoryForReason + terminalStopFields' optional category argument (scheduler-turn-terminals.ts:50-56)",
+   "codexSpecRoute exhaustive switch + decorator-policy derivation",
+   "parseRetryAfterMs / extractHeaders / ADAPTER_* marker lists (kept at the boundary only)",
+   "turn.completed's stopCategory wire pattern, reused for turn.failed",
+   "startTurn shared by turn.run and turn.submit; the GOAL P0-1 pausedTurn record",
+   "Bridge rejected frame + duplicate_command dedup window (128) + causedByCommandId on every event",
+   "serverAutoContinues capability-marker pattern",
+   "sendObjectiveMutation correlated receipt (rebuilt on the shared helper)",
+   "FakeWebSocket harness (client-send-truth.test.ts); real daemon + frontend SessionClient harness (authenticated-operator-flow-e2e-hellgate.test.ts); createRuntimeFromAgentConfigBase harness (goal-approval-resume-attribution-e2e.test.ts); tests/integration/_harness.ts ScriptedLLM/cfg",
+   "@ts-expect-error compile-pin pattern (tests/unit/run-ledger-hellgate.test.ts)"
+  ]
+ },
+ "revisedTests": [
+  {
+   "name": "F-T1 provider-error-boundary-structured-fields",
+   "tier": "unit",
+   "seam": "LLMError.fromSdkError, LLMError.fromHttpResponse (src/shared/errors.ts) and decideOnStreamError (src/agent/recovery.ts). Inputs are REAL vendor error instances built by the SDKs' own APIError.generate (node_modules/@anthropic-ai/sdk/error.js, node_modules/openai/core/error.js) and real SDK APIConnectionError with cause {code:'ConnectionRefused'}. No network.",
+   "setup": "Rows iterate the src tuples ANTHROPIC_ERROR_TYPES, OPENAI_KNOWN_ERROR_CODES and RESPONSE_ERROR_CODES. These tuples are separate from the Records and are checked two-way against the SDK unions (type-only, under typecheck:all). Expected kinds are a literal matrix in the test file, never read from the table. Every structured row uses message 'x', with no marker text. Body shapes come from the SDK typings (shared.d.ts, core/error.js generate) and are labeled SDK-typed, not live captures. A real Response object with retry-after: 2 drives fromHttpResponse.",
+   "assertions": "Per row, exact {kind, statusCode, providerCode, retryAfterMs}. Anthropic rows: providerCode is the inner type, never 'error'. 402 billing_error → quota_exhausted. OpenAI 429 code insufficient_quota → quota_exhausted, retryDispositionForKind === 'no_retry', and decideOnStreamError(...).do === 'error'. 400 code context_length_exceeded with message 'x' → context_window_exceeded. APIConnectionError with cause.code ConnectionRefused → network. fromHttpResponse(429, retry-after: 2) → retryAfterMs === 2000 and providerCode from the body. 429 whose body message is 'Too many tokens, please wait before trying again.' → kind rate_limit AND decideOnStreamError returns {do:'backoff', attempt:0}.",
+   "pairedControl": "Unknown OpenAI code 'zzz_unknown' with status 429 → rate_limit (by-status). Marker-only 400 'prompt is too long' with no code → context_window_exceeded (boundary marker kept). 403 permission_error → auth (label unchanged from today). Neutral 429 → backoff.",
+   "mutationThatMustTurnRed": "(a) Restore `.error.type`-first extraction: all Anthropic rows get providerCode 'error' and the 402 row becomes kind unknown. (b) Delete insufficient_quota from OPENAI_ERROR_CODE_KIND: kind becomes rate_limit and disposition retry. (c) Re-add the isPromptTooLong precedence in decideTypedStreamError: the 'Too many tokens' row decides compact. Before each mutation run, assert the mutation applied: the table lacks the key, or the exported decideOnStreamError returns compact for the probe row.",
+   "redTodayProof": "Probe pi: code=context_length_exceeded with no marker → bad_request with providerCode invalid_request_error. Probe pe: 429 'Too many tokens' → compact. Probe p1: a402billing kind unknown, and every Anthropic providerCode is 'error'. Probe pk: ConnectionRefused → unknown. quota_exhausted does not exist, so the import fails."
+  },
+  {
+   "name": "F-T2 responses-surface-typed-failures-real-adapter",
+   "tier": "integration",
+   "seam": "The REAL OpenAIResponsesAdapter.stream (default BYOK surface, factory.ts:160-167) → streamResponsesSurface → assertResponsesResponseOk / the parseResponsesEvents dispatcher, against a Bun.serve 127.0.0.1 server with per-path hit counters.",
+   "setup": "Fake key; baseURL option set per scenario. Scenarios: HTTP 401 {error:{code:'invalid_api_key',type:'invalid_request_error'}}; 429 insufficient_quota; 429 rate_limit_exceeded with retry-after: 2; 200 SSE [response.created, response.failed{error:{code:'rate_limit_exceeded'}}]; 200 SSE [created, error{code:'insufficient_quota'}]; 200 SSE [created, output_text.delta, error{code:'insufficient_quota'}]; a dead port (bind, then stop). The server is stopped in afterEach.",
+   "assertions": "The thrown value is an LLMError with exact {kind, statusCode, providerCode}: 401 → auth/401/invalid_api_key; 429 quota → quota_exhausted/429/insufficient_quota; 429 rate → rate_limit/429/rate_limit_exceeded with retryAfterMs === 2000; response.failed → rate_limit with providerCode rate_limit_exceeded; SSE error-only → quota_exhausted. Content-then-error: the event types yielded before the throw are exactly ['llm_continuation','text_delta'] (no message_stop), then it throws kind quota_exhausted. Dead port → network. Every scenario has hits === 1 (no hidden retry on the fetch path).",
+   "pairedControl": "A 200 SSE ending in response.completed yields a final message_stop:end_turn event, does not throw, and hits === 1.",
+   "mutationThatMustTurnRed": "Delete the 'error' dispatcher arm: content-then-error yields message_stop without throwing, and error-only becomes the synthetic network kind, so the kind assertion fails. Drop the header parse in fromHttpResponse: retryAfterMs is undefined. Restore kind:'server_error' in throwResponsesFailure: the response.failed row fails.",
+   "redTodayProof": "Probe pj: errorOnly throws kind rate_limit 'likely transport'; contentThenError '<none: turn completes>'. Probe p1: o429rate retryAfterMs undefined, oFailedQuota kind server_error, o401 no providerCode. Probe pd: Responses ECONNREFUSED → unknown."
+  },
+  {
+   "name": "F-T3 loop-terminal-stop-category-real-adapters",
+   "tier": "integration",
+   "seam": "runAgent (src/agent) → streamConsume → decideOnStreamError → applyNonSuccessRecoveryAction → resolveTurnLoopOutcome → finish, using the REAL AnthropicAdapter (via the new baseURL config port, no env mutation), the REAL OpenAIAdapter (chat SDK) and the REAL OpenAIResponsesAdapter. The loop owns retries; RetryingLLM is not wrapped.",
+   "setup": "tests/integration/_harness cfg(); recoveryBackoff.sleep is a no-op; the server sends retry-after-ms: 1 so SDK-internal waits are about 1ms. Expected hits are computed from the exported ANTHROPIC_SDK_MAX_RETRIES / OPENAI_SDK_MAX_RETRIES (the constants the constructors use) and RECOVERY_CAPS.streamRetries, never retyped.",
+   "assertions": "Per row: out.reason === 'error' and out.stopCategory deep-equals {kind:'failed', reasonCode, hint: the STOP_PRESENTATION hint}. anthropic 401 → provider.auth, hits === 1. anthropic 402 billing_error → provider.quota_exhausted, hits === 1. openai-chat 429 insufficient_quota → provider.quota_exhausted, hits === OPENAI_SDK_MAX_RETRIES+1. anthropic 529 → provider.overloaded, hits === (ANTHROPIC_SDK_MAX_RETRIES+1)×(1+RECOVERY_CAPS.streamRetries). responses 404 code model_not_found → provider.model_unavailable, hits === 1. The recorded stream contains exactly one `error` event.",
+   "pairedControl": "Each adapter against a 200 end_turn stream: reason 'completed', reasonCode 'completed.normal', hits === 1.",
+   "mutationThatMustTurnRed": "Map auth → provider.unknown in STOP_REASON_CODE_BY_LLM_ERROR_KIND: the 401 rows fail. Drop stopCategory from recovery-executor.ts:85: typecheck:all fails, and at runtime out.stopCategory is undefined so the test fails. Before each mutation run, assert the changed table value.",
+   "redTodayProof": "Probe p1: anthropic a401/a402 and openai-chat o401 → runtime.unknown_error; o429quota → provider.unknown. Probe pd: 3 SDK hits per call. No provider.quota_exhausted or provider.model_unavailable code exists today (stop-category.ts:82-151)."
+  },
+  {
+   "name": "F-T4 kernel-errored-terminal-carries-category-and-settles",
+   "tier": "unit",
+   "seam": "dispatchSessionCommand (src/kernel/session): input.append + turn.run with a SessionHost whose runTurn RETURNS {outcome:{reason:'error', stopCategory:{kind:'failed', reasonCode:'provider.auth', hint}}}, which goes through settleReturnedTurn → onTurnErrored. Then a real turn.submit dispatch through the scheduler's provenance validation and goal-attempt claim.",
+   "setup": "createKernelSessionState + InMemorySessionEventLog + fixed clock (pattern: tests/unit/kernel/turn-completed-cost-view-hellgate.test.ts). The host stub implements claimGoalAttempt following the existing turn.submit test pattern. No IO.",
+   "assertions": "Exactly 1 turn.failed event; turnFailed.stopCategory deep-equals the host's category; result.state.lastStopCategory deep-equals it; result.state.status === 'failed'. BEHAVIOR: the next turn.submit with expectedSessionRevision === state.revision dispatches without throwing, and its events contain exactly one turn.started whose causedByCommandId is the submit's commandId.",
+   "pairedControl": "Host returning {reason:'error'} with no stopCategory (the SessionHost port stays optional) → lastStopCategory.reasonCode === 'runtime.unknown_error' and turn.failed.stopCategory reasonCode runtime.unknown_error. Completed host → completed.normal. A submit while status is running still throws turn_submit_not_idle (settled table: running=false).",
+   "mutationThatMustTurnRed": "Revert onTurnErrored to terminalStopFields({reason:'error'}): lastStopCategory becomes runtime.unknown_error. Revert reducer.ts:471 to `status !== 'idle'`: the submit throws turn_submit_not_idle.",
+   "redTodayProof": "scheduler-turn-terminals.ts:517 passes no category. R1 probe p2: snapshot lastStopCategory runtime.unknown_error, and later submits throw turn_submit_not_idle. The existing H2 test drives only nextStateForTerminalTest (stop-category-terminal-arms-hellgate.test.ts:46-55)."
+  },
+  {
+   "name": "F-T5 goal-failure-blocks-through-existing-blocker-runtime-e2e",
+   "tier": "integration",
+   "seam": "createRuntimeFromAgentConfigBase (production composition) → runtime.createSession → session.turn.submitGoalContinuation → kernel → turn-runner runAgentSettled → settleObjectiveAttempt → authority settleAttempt (blocker or observation in the same commit). composeWebGoalWake (production web wake) runs with injected setTimeoutFn/clearTimeoutFn. The REAL AnthropicAdapter points at a 127.0.0.1 server through the baseURL port.",
+   "setup": "createObjectiveAuthority + attempt slot; authority.create(sessionId, {goal, successCriteria with a checked or manual contract}); recoveryBackoff.sleep no-op; timers recorded. Scenario A: 401 authentication_error. Scenario B: 529 overloaded for three goal turns. Scenario C: 200 success with no criterion progress for three turns.",
+   "assertions": "A, after one goal turn: receipts.length === 1 with turnOutcome 'error'; objective.status === 'blocked'; blockers mapped to {dependencyId, waitingOn, reason} deep-equal [{dependencyId:'turn-failure:provider.auth', waitingOn:'user', reason: STOP_PRESENTATION_BY_REASON_CODE['provider.auth'].label}]; blockerObservations === []; computeGoalWakeDelay(domain) deep-equals {skip:'not-active'}; wake.status() deep-equals {kind:'idle', skipReason:'not-active'}; live timers === 0; after firing every recorded timer, provider hits === 1. Bypass negatives, each followed by status 'blocked' and live timers === 0: (i) encodeObjectiveSnapshot → prepareObjectiveSnapshotForAttach(same live key).commit(); (ii) a continuation setNextActions commit; (iii) a model clearBlocker, which returns reason 'actor-forbidden'. B: after goal turns 1 and 2, status is 'active' and blockerObservations[0].occurrences.length is 1 then 2; after turn 3, status 'blocked', blockers[0].dependencyId === 'turn-failure:transient', and blockerObservations === [].",
+   "pairedControl": "Lift positive: a user clearBlocker gives status 'active' and exactly 1 armed timer. C: blockers === [], blockerObservations === [], and the decision deep-equals {delayMs:120000, reason:'no-progress-backoff'}, byte-identical to probe p4 completed n=3.",
+   "mutationThatMustTurnRed": "(a) Map provider.auth → {kind:'observe'} in GOAL_FAILURE_DISPOSITION: A stays active and a timer arms. (b) Drop failure handling in authority settleAttempt: blockers === []. (c) Revert goal-wake-compose quiescent to status === 'idle': after the user clearBlocker no timer arms (status is failed). (d) Change how the promotion threshold is applied: B blocks at a different turn. Before each mutation run, assert the mutated table row value.",
+   "redTodayProof": "R1 probe p2: receipt keys carry no cause; wake {delayMs:30000}. Probe p3: web wake is idle/not-quiescent with liveTimers [] after one failed turn. Probe pa: a receipt fence would be lifted by attach and continuation. Today settlement adds no blocker, so status stays 'active'."
+  },
+  {
+   "name": "F-T6 turn-failure-blocker-survives-fresh-process",
+   "tier": "integration",
+   "seam": "Authority settleAttempt with failure → encodeObjectiveSnapshot (build-objective.ts:219) → JSON file → a CHILD bun process that runs decodeObjectiveSnapshot + prepareObjectiveSnapshotForAttach(...).commit() (objective-store-wire.ts:183) → computeGoalWakeDelay, and prints JSON.",
+   "setup": "mkdtemp scratch dir under the test tmp fence; the child runs with HOME set to scratch; the child script is written into the temp dir and imports repo modules by absolute path; the temp dir is removed in afterEach.",
+   "assertions": "Child exit code === 0; restored status === 'blocked'; blockers[0].dependencyId === 'turn-failure:provider.auth'; blockers[0].waitingOn === 'user'; decision deep-equals {skip:'not-active'}. Reading the file back, threads[0].blockers[0].dependencyId === 'turn-failure:provider.auth'.",
+   "pairedControl": "A legacy-shaped snapshot with one error receipt and no blockers restores to status 'active' with decision {delayMs:30000, reason:'no-progress-backoff'} (probe p4 n=1).",
+   "mutationThatMustTurnRed": "Push the blocker without dependencyId in addDependencyBlocker: the child prints dependencyId undefined. Before spawning, assert the in-process domain lacks dependencyId.",
+   "redTodayProof": "Today settleAttempt adds no blocker (authority.ts:276-302), so the child restores 'active'. Probe pl shows the persist-and-attach mechanism itself works with a blocker."
+  },
+  {
+   "name": "F-T7 usage-limited-only-from-rate-limit-window (rework of objective-usage-limited-429-real-loop-e2e)",
+   "tier": "integration",
+   "seam": "runAgent with the REAL OpenAIResponsesAdapter → fromHttpResponse → recovery-executor markObjectiveUsageLimitedFrom429 → applyMeasuredUsageLimit → enforcing objective store. For the kind controls, SDK-built Anthropic errors (APIError.generate) go through ScriptedLLM.",
+   "setup": "Keeps the existing countingStore and env handling. The server returns 429 rate_limit_exceeded with retry-after: 30 on the first request and 200 end_turn on the second. Wall time is captured around the call.",
+   "assertions": "Responses 429 with retry-after: marks() === 1; status 'usage_limited'; usageLimitedUntil − stamp is within [30000, 30000 + measured wall delta]; out.reason === 'completed'.",
+   "pairedControl": "Anthropic 529 overloaded with retry-after 30 → marks() === 0 and status 'active'. Anthropic 503 with retry-after 30 → marks() === 0. 429 without retry-after → marks() === 0. QUANTA_GOAL=0 → marks() === 0.",
+   "mutationThatMustTurnRed": "Remove the USAGE_WINDOW_BY_KIND gate: the 529 control marks 1. Restore the status-only assertResponsesResponseOk: the Responses row marks 0.",
+   "redTodayProof": "Probe ph: 529 with retry-after → objectiveStatus usage_limited. Probe p1: o429rate retryAfterMs undefined. The current test hand-builds the LLMError (lines 66-76)."
+  },
+  {
+   "name": "F-T8 failure-projection-tables-exhaustive",
+   "tier": "unit",
+   "seam": "LLM_ERROR_KINDS, STOP_REASON_CODE_BY_LLM_ERROR_KIND, GOAL_FAILURE_DISPOSITION, SESSION_STATUS_SETTLED, KERNEL_SESSION_STATUSES and their assert*InSync guards (production code that runs at module load), plus a compile-time pin.",
+   "setup": "Import the tables. Guards accept an injectable (table, universe) only for red-on-injection. In the same commit, replace the two hand-typed ALL_KINDS copies (retry-decorator-policy-hellgate.test.ts:40, recovery-router-single-authority-adversarial-hellgate.test.ts:61) with LLM_ERROR_KINDS.",
+   "assertions": "The key set of STOP_REASON_CODE_BY_LLM_ERROR_KIND equals new Set(LLM_ERROR_KINDS), with size === LLM_ERROR_KINDS.length. The key set of GOAL_FAILURE_DISPOSITION equals new Set(Object.values(STOP_REASON_CODE)). Every mapped StopReasonCode is a key of STOP_PRESENTATION_BY_REASON_CODE. SESSION_STATUS_SETTLED's keys equal KERNEL_SESSION_STATUSES. Each guard throws naming the missing key when given the table minus one key, and naming the extra key when given the table plus one. COMPILE-TIME PIN (runs under typecheck:all, not bun test; labeled as such): `// @ts-expect-error` on a TurnResult literal {kind:'error', reason:'x'} without stopCategory, and on a RecoveryAction {do:'error', reason:'x'}.",
+   "pairedControl": "The guards do not throw on the production tables (called explicitly). Policy pins, labeled as policy (behavior is proven in F-T5): GOAL_FAILURE_DISPOSITION['completed.normal'].kind === 'none'.",
+   "mutationThatMustTurnRed": "Delete any one row: the guard throws at import, so the file fails to load. Remove stopCategory from the TurnResult type: the @ts-expect-error is unused and typecheck:all fails.",
+   "redTodayProof": "None of these symbols exist on HEAD (grep for LLM_ERROR_KINDS / SESSION_STATUS_SETTLED / GOAL_FAILURE_DISPOSITION finds 0), so the imports fail. The TurnResult error arm has no stopCategory (types.ts:41)."
+  },
+  {
+   "name": "F-T9 single-retry-owner-physical-hits (decision D5)",
+   "tier": "integration",
+   "seam": "Production decorateSwappableModelPort(inner = REAL AnthropicAdapter / OpenAIAdapter) (runner/assemble/llm.ts:279-292) → runAgent with real loop recovery.",
+   "setup": "The server sends retry-after-ms: 1; RetryingLLM uses the module's default sleep. Expected hits come from the exported constants: SDK max retries, an exported DEFAULT_MAX_RETRIES, and RECOVERY_CAPS.",
+   "assertions": "529 → physical hits === (ANTHROPIC_SDK_MAX_RETRIES+1)×(DEFAULT_MAX_RETRIES+1)×(1+RECOVERY_CAPS.streamRetries), with the single owner chosen in D5 making the other factors 1. insufficient_quota on the chat SDK → hits === OPENAI_SDK_MAX_RETRIES+1 (1 under D5).",
+   "pairedControl": "401 → hits === 1 on both adapters.",
+   "mutationThatMustTurnRed": "Restore a literal maxRetries: 2 while D5 sets the exported constant to 0, so the literal and the constant diverge. A labeled static pin that the constructor reads the constant, plus the measured hits, catches it.",
+   "redTodayProof": "Probe pm: a529 physicalHits 60; oquota physicalHits 60; a401 1."
+  },
+  {
+   "name": "W-T1 kernel-active-turn-input-ssot-approval-resume",
+   "tier": "unit",
+   "seam": "dispatchSessionCommand with the real reducer, scheduler, onApprovalRequested, approval.respond and bare turn.run resume. The host stub's first runTurn returns awaiting_approval with an approvalRequest, later calls complete, and it records prompts.",
+   "setup": "Three arms. (L) input.append('deploy it') + turn.run. (I) turn.run{input:{text:'deploy it'}}. (S) turn.submit{text:'deploy it', provenance} with a claimGoalAttempt stub. Fixed clock and InMemorySessionEventLog.",
+   "assertions": "In every arm the host prompts are exactly ['deploy it','deploy it'], and at the pause state.pausedTurn.prompt === 'deploy it'. In arm S, the resume claim's attemptId ends with '#resume-' plus the pause revision (existing GOAL P0-1 behavior). After the final completion, state.activeTurnInput === undefined.",
+   "pairedControl": "Arm L's full event-type sequence equals the sequence recorded from HEAD behavior, so the legacy path is byte-identical.",
+   "mutationThatMustTurnRed": "Make pausedTurnOf read state.draftInput for turn.run: arm I's host prompts become ['deploy it',''].",
+   "redTodayProof": "Probe pc: the inline state gives pausedPrompt '' and a resumed host prompt of ''. TurnRunCommand has no input field today (commands.ts:18-40)."
+  },
+  {
+   "name": "W-T2 reducer-codec-inline-turn-input",
+   "tier": "unit",
+   "seam": "reduceSessionCommand / dispatchSessionCommand handleTurnRun (reducer.ts) and decodeSessionCommand (codec.ts).",
+   "setup": "createKernelSessionState, fixed clock, host prompt recorder, and encoded wire strings for the codec cases.",
+   "assertions": "turn.run{input:{text:'x'}} with an empty draft: event types are exactly ['turn.started','session.state.updated']; turn.started.prompt === 'x' and its causedByCommandId is the command's id; host prompt === 'x'; every session.state.updated view has draftInput === ''. With draftInput 'stale': it throws SessionProtocolValidationError with issue 'turn_run_draft_not_empty', and the state read afterwards has the same revision and draftInput 'stale'. input.text '' with no images → issue 'empty_turn_input'. Codec: input 'str' → protocol validation error; input.text 1 → error; input.images {} → issue 'bad_command_images_type'.",
+   "pairedControl": "Bare turn.run with draftInput 'y' → prompt 'y' (legacy path unchanged). Bare turn.run with a pausedTurn and no draft → resumes pausedTurn.prompt.",
+   "mutationThatMustTurnRed": "Concatenate the input onto the existing draft instead of refusing: the prompt becomes 'stale\\nx' and nothing throws.",
+   "redTodayProof": "codec.ts:170-172 ignores input and reducer.ts:445-457 runs the draft, so the stale case prompts 'stale'."
+  },
+  {
+   "name": "W-T3 web-submit-real-daemon-e2e",
+   "tier": "integration",
+   "seam": "startWebDaemon (real Bun.serve WS, real bridge, engine queue, kernel and runtime) plus the frontend's REAL SessionClient, dispatchCommand and submitTurn imported from apps/web-frontend/src/ws. A recording WebSocket wrapper captures sent bytes. Harness: tests/unit/apps/web-daemon/authenticated-operator-flow-e2e-hellgate.test.ts. Placed in tests/integration to stay within the unit speed budget.",
+   "setup": "QUANTA_WEB_DB=off; bind 127.0.0.1; token auth as in the harness. A scripted LLM records each request's last user block and can hold turn A on a gate. The approval arm turns WEB_INLINE_APPROVAL_GATE on (serverAutoContinues).",
+   "assertions": "(1) Idle submit 'hello': exactly 1 command frame, decoded as type 'turn.run' with input.text 'hello'; outcome {kind:'settled'}; exactly one turn.started with causedByCommandId === commandId; the LLM saw 'hello'. (2) B submitted while A is held: B's outcome stays unsettled until A's turn.completed, then settles; host prompts are exactly ['A','B']; until then the submission store holds B as 'queued'. (3) Resend B's identical frame while it is queued: outcome 'admitted-earlier', then settled; host prompts exactly ['A','B']. (4) Drop the socket while B is queued: outcome 'outcome-unknown'; after reconnect, resending the same frame gives 'admitted-earlier' and then settles on the live turn.started; host prompts exactly ['A','B'] (probe pn). (5) Inline submit that pauses for approval, then approve (serverAutoContinues): host prompts exactly ['deploy it','deploy it']. (6) Pre-strand the kernel draft with a raw input.append('stale'), then inline-submit 'new': outcome is rejected with issue 'turn_run_draft_not_empty', the LLM request count is unchanged, and the snapshot shows draftInput 'stale'.",
+   "pairedControl": "A daemon composed without the inlineTurnInput marker: the client sends exactly 2 frames (input.append, turn.run) and the outcome is keyed on the run commandId. A submit with the socket already closed returns 'undelivered' with 0 frames.",
+   "mutationThatMustTurnRed": "(a) submitTurn sends the legacy pair even when the capability is present: arm (1) sees 2 frames. (b) dispatchCommand maps duplicate_command to rejected: arm (3) yields rejected. (c) Remove the reducer's inline arm: arm (1) is rejected with empty_turn_input.",
+   "redTodayProof": "session-hooks.ts:965-966 sends two frames and ignores the results. Probes pf/pg/pn show the bridge semantics. R1 probe p5 shows the stranded-draft glue."
+  },
+  {
+   "name": "W-T4 composer-submission-controller",
+   "tier": "web vitest",
+   "seam": "The real SessionClient over the FakeWebSocket harness (apps/web-frontend/src/ws/client-send-truth.test.ts), plus submitTurn, the turn-submission store and dispatchCommand. This is the same controller App.tsx calls. Runs in the node environment because no DOM is installed (see user decision D14).",
+   "setup": "FakeWebSocket driven through open → snapshot handshake with the inlineTurnInput marker; deterministic makeCommandId; a composer port object {getDraft, setDraft, getImages, clearImages} that records calls.",
+   "assertions": "(a) Socket not open: outcome 'undelivered'; composer draft === 'hi'; images length === 1; FakeWebSocket.sent.length === 0; store size === 0. (b) Delivered: composer draft === '' and the store has exactly 1 entry {text:'hi', state:'queued'}. A rejected frame with the same commandId and reason protocol_validation then restores composer draft === 'hi', empties the store, and appends exactly 1 error message. (c) turn.started and rejected frames for an unrelated commandId: the entry is still 'queued' after a microtask flush; a matching turn.started empties the store. (d) Rejected with duplicate_command: the entry stays 'queued'. (e) Connection changes to closed: the entry state is 'unknown'; resend() sends a frame byte-identical to the original (same commandId). STATIC WIRING PIN (labeled static; TypeScript AST over App.tsx): the composer onSubmit path references submitTurn, and App.tsx has exactly 1 setDraft(\"\") call site outside the submission controller (the slash 'draft' arm).",
+   "pairedControl": "In arm (b), the accepted path clears the composer, so the controller does not always retain text. In arm (c), unrelated frames do not settle the entry.",
+   "mutationThatMustTurnRed": "Clear the composer before checking the send result: arm (a) sees draft ''. Settle on any turn.started: arm (c) settles early. Treat duplicate_command as rejected: arm (d) restores the draft.",
+   "redTodayProof": "App.tsx:810-812 clears unconditionally after sendTurn, whose send results are ignored (session-hooks.ts:965-966). No submission store or dispatchCommand exists."
+  },
+  {
+   "name": "W-T5 raw-send-location-census",
+   "tier": "web vitest",
+   "seam": "STATIC PIN (labeled): TypeScript AST over apps/web-frontend/src/**/*.{ts,tsx}, excluding tests, using the typescript devDependency. It looks for the unique token `sendRaw` introduced by the rename.",
+   "setup": "Population assertion: the scanned file count equals the glob count and is > 0. Control fixtures are parsed in memory.",
+   "assertions": "The exact list of files containing any Identifier or PropertyAccess named sendRaw is ['ws/client.ts','ws/command-outcome.ts']. Every call to client.sendPlanInputAnswer, sendGoalWork, sendControlRequest or sendGoalVerify consumes its result (the parent is neither an ExpressionStatement nor `void`), unless the call is on an exact allowlist whose entries must each still match a live call.",
+   "pairedControl": "Fixture `const ok = client.sendRaw(x)` under a non-allowlisted path → exactly 1 finding. Fixture `void client.sendPlanInputAnswer(a,b)` → exactly 1 finding. A compliant fixture → 0 findings.",
+   "mutationThatMustTurnRed": "Reintroduce `client.sendRaw(cancel)` in session-hooks.ts: 1 finding.",
+   "redTodayProof": "HEAD has bare sends at session-hooks.ts:965, 966, 1077, 1083, 1243 and 1271, and App.tsx:1089. The rename does not exist yet, so the census fails on the token list."
+  }
+ ],
+ "implementationOrder": [
+  "C1. Test first: F-T8 (partial). Then feat: make the LLM_ERROR_KINDS tuple the SSOT for LLMErrorKind, and replace the two hand-typed ALL_KINDS test copies. RED: the import of LLM_ERROR_KINDS fails. GREEN: no behavior change.",
+  "C2. RED: F-T1. Then feat(errors): add providerErrorFields keyed by LLMProvider (deleting extractProviderCode and lowerProviderCode); add the Anthropic and OpenAI code tables with by-status rows; add the quota_exhausted kind and a 402 row; read transport cause.code, including the measured Bun 'ConnectionRefused'; add the codex-spec-router and default-classifier arms; add type-only SDK drift checks in src/llm. Run typecheck:all.",
+  "C3. RED: F-T2. Then feat(responses): use LLMError.fromHttpResponse on the Responses, chatgpt-oauth and models-probe paths (deleting responsesStatusToKind); add the `error` SSE dispatcher arm and the response.failed code table; relabel the empty-stream synthetic kind as network.",
+  "C4. RED: F-T1 row (c), plus retarget tests/unit/recovery-hellgate.test.ts:374. Then refactor: detect PTL only at the boundary (the status-less marker arm in errors.ts); make recovery decide on the typed kind first; make compaction.ts:929 read the kind; delete PTL_MARKERS and isPromptTooLong.",
+  "C5. RED: F-T3 and the rest of F-T8. Then feat(loop): add the 5 new StopReasonCodes with presentation rows and the web mirror (drift hellgate in the same commit); add STOP_REASON_CODE_BY_LLM_ERROR_KIND; require stopCategory on the RecoveryAction and TurnResult error arms; add the AnthropicAdapter baseURL port and export the SDK retry constants; delete classifyErrorReason and its barrel export. Retarget stop-category.test.ts, loop-control-cutoff-fixes.test.ts, empty-turn-exhaustion-hellgate.test.ts and stop-truncation-nonsuccess-hellgate.test.ts to assert action.stopCategory. Run typecheck:all.",
+  "C6. RED: F-T4, and replace the pure-seam H2 test in stop-category-terminal-arms-hellgate.test.ts. Then feat(kernel): carry the category on onTurnErrored and the thrown arm; add turn.failed.stopCategory (build:protocol regen, plus the web turn.failed row and MessageBubble badge with a vitest row); add KERNEL_SESSION_STATUSES and SESSION_STATUS_SETTLED, consumed by reducer.ts:471, goal-wake-compose.ts:77 and goal-work-compose.ts:102; settle the turn-runner thrown path with its category.",
+  "C7. RED: F-T7 (rework the existing e2e file). Then fix(usage-limit): add the USAGE_WINDOW_BY_KIND gate in markObjectiveUsageLimitedFrom429.",
+  "C8. RED: F-T5 and F-T6. Then feat(goal): add the GOAL_FAILURE_DISPOSITION projection in objective-settlement.ts; add ObjectiveAttemptSettlement.failure; have authority settleAttempt apply block or observe in the same commit; add core addDependencyBlocker reusing promoteObservedBlocker, with a no-op in the legacy adapter. Blocked on decisions D1 and D2.",
+  "C9 (decision D9). RED: a pty-free unit test on the turn-helpers output string, built from STOP_PRESENTATION. Then feat(cli): typed stop line and checkpoint blocker label.",
+  "C10 (decision D5). RED: F-T9. Then fix(llm): make one layer own retries (set the SDK maxRetries constant to 0 so quanta owns typed retries).",
+  "C11 (decision D6). RED: an extra F-T2 arm where content arrives, then EOF without response.completed, and a network error is expected. Then fix(responses): treat a stream that ends without a terminal event as an error (Codex parity).",
+  "W1. RED: W-T1 and W-T2. Then feat(kernel/protocol): add the activeTurnInput SSOT written by startTurn (pausedTurnOf reads it); add TurnRunCommand.input with codec validation and a reducer inline arm that refuses on a non-empty draft or empty input; stamp the inlineTurnInput capability marker in host capabilities; add an input param to buildTurnRun; regenerate with build:protocol. Blocked on decision D10.",
+  "W2. RED: W-T4. Then feat(web): add the command-outcome SSOT (dispatchCommand), rebuilding sendObjectiveMutation on it with its timeout preserved; add the turn-submission store and submitTurn; wire App.tsx submit and the slash 'sent' arm; render pending entries in ChatPanel; rename client.send to sendRaw and update client-send-truth.test.ts. Blocked on decision D11.",
+  "W3. RED: W-T3. Then test+feat: add the real-daemon web submit e2e; make CLI attach buildLineCommands send one inline turn.run when the manifest advertises inlineTurnInput.",
+  "W4. RED: W-T5. Then fix(web): approval respond settles on the approval.resolved outcome; the plan-input answer returns a boolean and injects resolved only when delivered; permission and cancel go through dispatchCommand."
+ ],
+ "fileOwnership": [
+  "src/shared/errors.ts",
+  "src/shared/index.ts",
+  "src/llm/retry/codex-spec-router.ts",
+  "src/agent/error-routing/default-classifier.ts",
+  "src/llm/responses-stream.ts",
+  "src/llm/adapters/openai-responses.ts",
+  "src/llm/adapters/chatgpt-oauth.ts",
+  "src/llm/openai-responses-wire.ts",
+  "src/llm/adapters/anthropic.ts",
+  "src/llm/adapters/openai.ts",
+  "src/agent/retry.ts",
+  "src/agent/compaction.ts",
+  "src/agent/recovery.ts",
+  "src/agent/stop-category.ts",
+  "src/agent/index.ts",
+  "src/agent/loop/types.ts",
+  "src/agent/loop/recovery-executor.ts",
+  "src/agent/loop/same-turn-engine.ts",
+  "src/agent/loop/turn-outcome.ts",
+  "src/agent/loop/emit-helpers.ts",
+  "src/kernel/session/state.ts",
+  "src/kernel/session/reducer.ts",
+  "src/kernel/session/scheduler-turn-terminals.ts",
+  "src/protocol/session/events.ts",
+  "src/protocol/session/commands.ts",
+  "src/protocol/session/codec.ts",
+  "src/protocol/session/capabilities.ts",
+  "src/protocol/session/builders.ts",
+  "src/host/runtime/capabilities.ts",
+  "src/host/runtime/internal/context-binding/turn-runner.ts",
+  "src/host/runtime/internal/context-binding/objective-settlement.ts",
+  "src/objective/mutations.ts",
+  "src/objective/authority.ts",
+  "src/objective/core-store/criteria-ops.ts",
+  "src/objective/store.ts",
+  "src/objective/authority-core-adapter.ts",
+  "src/apps/web-daemon/goal-wake-compose.ts",
+  "src/apps/web-daemon/goal-work-compose.ts",
+  "src/apps/cli/attach/commands.ts",
+  "src/apps/cli/attach/attach-client.ts",
+  "src/apps/cli/repl/session-loop/turn-helpers.ts",
+  "src/apps/cli/repl/goal-checkpoint-line.ts",
+  "apps/web-frontend/src/types/protocol.session.generated.ts",
+  "apps/web-frontend/src/lib/stop-presentation.ts",
+  "apps/web-frontend/src/ws/client.ts",
+  "apps/web-frontend/src/ws/command-outcome.ts (new)",
+  "apps/web-frontend/src/ws/turn-submission.ts (new)",
+  "apps/web-frontend/src/ws/session-hooks.ts",
+  "apps/web-frontend/src/App.tsx",
+  "apps/web-frontend/src/components/ChatPanel.tsx",
+  "apps/web-frontend/src/components/MessageBubble.tsx",
+  "apps/web-frontend/src/ws/client-send-truth.test.ts",
+  "apps/web-frontend/src/ws/objective-mutation-receipt.test.ts",
+  "apps/web-frontend/src/ws/command-outcome.test.ts (new, W-T4)",
+  "apps/web-frontend/src/ws/raw-send-census.test.ts (new, W-T5)",
+  "tests/unit/shared/provider-error-boundary-structured-fields.test.ts (new, F-T1)",
+  "tests/integration/responses-surface-typed-failures-real-adapter.test.ts (new, F-T2)",
+  "tests/integration/loop-terminal-stop-category-real-adapters.test.ts (new, F-T3)",
+  "tests/unit/kernel/errored-terminal-carries-category-hellgate.test.ts (new, F-T4)",
+  "tests/integration/goal-failure-blocks-existing-blocker-e2e.test.ts (new, F-T5)",
+  "tests/integration/turn-failure-blocker-fresh-process.test.ts (new, F-T6)",
+  "tests/integration/objective-usage-limited-429-real-loop-e2e.test.ts (F-T7 rework)",
+  "tests/unit/agent/failure-projection-tables.test.ts (new, F-T8)",
+  "tests/integration/single-retry-owner-physical-hits.test.ts (new, F-T9, decision-gated)",
+  "tests/unit/kernel/active-turn-input-approval-resume-hellgate.test.ts (new, W-T1)",
+  "tests/unit/kernel/turn-run-inline-input.test.ts (new, W-T2)",
+  "tests/integration/web-submit-real-daemon-e2e.test.ts (new, W-T3)",
+  "tests/unit/agent/stop-category.test.ts",
+  "tests/unit/loop-control-cutoff-fixes.test.ts",
+  "tests/unit/agent/empty-turn-exhaustion-hellgate.test.ts",
+  "tests/unit/agent/stop-truncation-nonsuccess-hellgate.test.ts",
+  "tests/unit/recovery-hellgate.test.ts",
+  "tests/unit/kernel/stop-category-terminal-arms-hellgate.test.ts",
+  "tests/unit/retry-decorator-policy-hellgate.test.ts",
+  "tests/unit/recovery-router-single-authority-adversarial-hellgate.test.ts",
+  "tests/unit/protocol/stop-presentation-web-drift-hellgate.test.ts"
+ ],
+ "userDecisions": [
+  {
+   "question": "D1: What should an unrecoverable provider or turn failure (auth, quota/billing, model unavailable, policy, bad request, context limit, compaction thrash) do to an active goal?",
+   "options": "(a) Add a dependency-keyed system blocker in the settlement commit. The goal becomes 'blocked' and the wake skips it. Only the user's /goal unblock lifts it. It survives attach and restart with no schema change (probe pl). (b) Clear the goal the way Claude Code does ('Goal cleared after an unrecoverable error… Run /goal again', chunk-3j0en1hg.js:158913-158934). This discards the criteria and verifier evidence. (c) R1's receipt field plus revision fence. Attach and continuation bypass it (probe pa).",
+   "recommendation": "(a)",
+   "blocking": true
+  },
+  {
+   "question": "D2: What should repeated transient failures (overload, network, 5xx, unknown, or malformed/empty/truncated model output) do?",
+   "options": "(a) Record a host observation under dependencyId 'turn-failure:transient' and reuse the existing rule that promotes to a blocker after 3 distinct attempts (criteria-ops.ts:61-63). Progress clears it. (b) No cap: keep today's no-progress backoff up to the product cap of 20 autonomous turns. (c) Claude Code's reprompt schedule [60s, 300s, 900s], then pause. This adds new constants.",
+   "recommendation": "(a). It adds no new number, and both the Claude Code and Codex baselines stop at about 3.",
+   "blocking": true
+  },
+  {
+   "question": "D3: Confirm the default disposition for each stop code.",
+   "options": "Defaults. Block: provider.auth, provider.quota_exhausted, provider.model_unavailable, provider.policy, provider.bad_request, provider.context_window, compaction.thrash. Observe: provider.rate_limit, provider.overloaded, provider.network, provider.server_error, provider.unknown, runtime.unknown_error, model.malformed_tool_use, model.empty_exhausted, model.output_truncated. None: completed.*, user.interrupt, system.abort, shell.needs_approval, turn.awaiting_approval, budget.*, model.refusal, loop.no_progress. Alternatives to consider: provider.bad_request → observe; system.abort (content filter) → block.",
+   "recommendation": "Accept the defaults. They follow Claude Code's stop/pause/retry split (chunk-3j0en1hg.js:159031-159130), with pause folded into block because both need the user to act.",
+   "blocking": false
+  },
+  {
+   "question": "D4: Should OpenAI insufficient_quota and Anthropic billing_error/402 be one error kind or two?",
+   "options": "(a) One kind, quota_exhausted, labeled 'Provider quota or billing limit reached'. providerCode keeps the vendor detail. (b) Separate kinds and stop codes for quota_exhausted and billing.",
+   "recommendation": "(a). The user's fix and the routing are the same for both, and one kind keeps the change smallest.",
+   "blocking": false
+  },
+  {
+   "question": "D5: Which layer should own retries? Measured: 60 physical provider calls in one turn for a 529 or a chat-SDK insufficient_quota under the production RetryingLLM wrap (probe pm).",
+   "options": "(a) Set the vendor SDK's maxRetries to 0 so quanta's typed router owns retries (RetryingLLM before the stream, loop recovery after). That gives 20 calls for a 529 and 1 for a quota error. (b) Also stop loop recovery from retrying kinds that RetryingLLM already retried, for about 5 calls. (c) Keep today's behavior.",
+   "recommendation": "(a) now, as a separate commit; (b) as a follow-up after measuring. The SDK cannot see quanta's typed error kinds.",
+   "blocking": false
+  },
+  {
+   "question": "D6: A Responses stream that ends after content but without response.completed currently completes silently. Should it be an error?",
+   "options": "(a) Throw kind network, matching Codex ('stream closed before response.completed'); the partial turn is retried. (b) Keep completing silently. The new `error` SSE handler already covers errors the provider announces.",
+   "recommendation": "(a), once you have checked that no OpenAI-compatible proxy in use omits response.completed.",
+   "blocking": false
+  },
+  {
+   "question": "D7: For a mid-stream Anthropic SSE error, should quanta parse the ErrorResponse JSON the SDK puts in APIConnectionError.message?",
+   "options": "(a) Strictly schema-parse it at the adapter boundary, labeled as a parse of the message field (streaming.js:53-54). (b) Leave it as kind unknown. It is retried through the RETRYABLE_MARKERS fallback and labeled 'Provider error'.",
+   "recommendation": "(b) for now. It does not change goal behavior (it is observe-class), and the SDK exposes no structured field for it.",
+   "blocking": false
+  },
+  {
+   "question": "D8: Anthropic's 400 'credit balance is too low' has no structured billing type (its type is invalid_request_error). Should quanta add a text marker at the boundary to catch it?",
+   "options": "(a) No marker: it stays kind bad_request, which blocks the goal with 'Provider rejected the request'. (b) Add one documented boundary marker that maps it to quota_exhausted, as Claude Code does (chunk-3j0en1hg.js:102244).",
+   "recommendation": "(a). The goal is blocked either way; only the label differs.",
+   "blocking": false
+  },
+  {
+   "question": "D9: Should the CLI print a typed stop line for errored turns and show a blocker label on the goal checkpoint line?",
+   "options": "(a) Yes: print `stopped: <label> — <hint>` and append `· blocked: <label>`. (b) Keep only the raw `error:` text.",
+   "recommendation": "(a). It serves the north star of showing why the agent stopped and what to do next.",
+   "blocking": false
+  },
+  {
+   "question": "D10: How should a web message submit be made atomic?",
+   "options": "(a) Add an input field to turn.run, advertised by an inlineTurnInput capability marker, with the kernel recording the running turn's input in one place (activeTurnInput). (b) Add a new `turn.send` command type. The kernel checks `command.type === 'turn.run'` literally in several places (scheduler.ts:112, 325, 348), which would silently skip cancel registration and the pre-abort gate for the new type. (c) Client-only: two receipts over the existing append+run. A stranded draft is still possible.",
+   "recommendation": "(a)",
+   "blocking": true
+  },
+  {
+   "question": "D11: How should the composer behave while a submission is unconfirmed?",
+   "options": "(a) On delivery, clear the composer and show a visible pending-submission entry. Restore the text on rejection, and offer Resend (same commandId) when the outcome is unknown. Queueing a message behind a running turn keeps working. (b) Keep the text in the composer and disable send until turn.started. That blocks queueing for the whole previous turn (probe pf). (c) Codex desktop style: refuse any new submission while one is unconfirmed (app-initial…js:131839).",
+   "recommendation": "(a)",
+   "blocking": true
+  },
+  {
+   "question": "D12: How should an unknown outcome be resolved after reconnecting?",
+   "options": "(a) A manual Resend action that sends the identical frame again. It is idempotent while the daemon stays up, within the bridge's 128-command dedup window (probe pn). (b) Resend automatically on reconnect.",
+   "recommendation": "(a). After a daemon restart the dedup window is gone, so an automatic resend could duplicate a turn that already ran.",
+   "blocking": false
+  },
+  {
+   "question": "D13: A legacy client left a draft stranded in the kernel, so the inline submit is refused with turn_run_draft_not_empty. How should the user recover?",
+   "options": "(a) Show the server's draftInput alongside the rejection and offer 'Send pending draft', which sends a bare turn.run (no new command). (b) Add a new input.clear command. (c) Concatenate the draft with the new text (today's behavior; rejected).",
+   "recommendation": "(a)",
+   "blocking": false
+  },
+  {
+   "question": "D14: Should the web frontend get a DOM environment (jsdom) so tests can mount App and the composer?",
+   "options": "(a) Install jsdom as a devDependency and set the vitest environment. Installs are blocked on this box per memory. (b) Test the extracted controller over FakeWebSocket, plus a static pin, labeled as such, that App is wired to it. No install needed.",
+   "recommendation": "(b) now; (a) once installs are possible.",
+   "blocking": false
+  },
+  {
+   "question": "D15: Should real provider error responses be recorded as test fixtures?",
+   "options": "(a) Capture a real 401 from each vendor using a deliberately invalid key (free). If a real exhausted account exists, also capture quota and billing errors. Store them with provenance. (b) Keep only bodies built from the SDK types, labeled as such.",
+   "recommendation": "(a) for the 401s. Quota and billing bodies stay SDK-typed and marked UNVERIFIED until captured.",
+   "blocking": false
+  },
+  {
+   "question": "D16: Should the public SDK session verbs (input.append/turn.run in handle-verbs.ts, and sdk/runtime/session.ts) get an atomic send verb?",
+   "options": "(a) Add turn.run({input}) to the verb surface now. (b) Do it as a follow-up. The in-process runtime verbs cannot lose a frame; the remote handle can.",
+   "recommendation": "(b), tracked as a follow-up for the remote handle.",
+   "blocking": false
+  }
+ ],
+ "residualRisks": [
+  "Vendor SDK unions can drift from the live API. SDK 0.40.1's ErrorObject lacks request_too_large (413), which the API doc lists. Types outside the union fall back to status. An exhaustive Record proves the SDK union is covered, not the API.",
+  "OpenAI error codes (insufficient_quota, invalid_api_key, model_not_found) and the ChatGPT usage_limit_reached/resets_at body come from public docs and Codex symbol tokens, not live captures (UNVERIFIED). Whether insufficient_quota appears on the Responses SSE error event is also UNVERIFIED.",
+  "Bun fetch/connection error codes other than the measured 'ConnectionRefused' (resets, DNS, TLS) stay kind unknown until measured. They are retried only through the surviving RETRYABLE_MARKERS fallback for kind unknown (retry.ts:161-164), a downstream text path this plan does not remove.",
+  "Bedrock and Vertex error bodies (x-amzn-errortype, google.rpc) are not captured, so those transports stay status-only.",
+  "The web command dedup window holds 128 commands with FIFO eviction. A pending entry can be evicted by 128 newer commands, and after a daemon restart a same-id resend can re-run a turn that already ran. D12 keeps resend manual for this reason.",
+  "An in-process pre-aborted turn.run with inline input settles without turn.started (scheduler-turn-execution.ts:280-300), so the client outcome stays unsettled until the connection changes. This is rare on the wire path (UNVERIFIED).",
+  "A turn-failure blocker persists its reason label as text. If a presentation label is later renamed, old blockers keep the old label; dependencyId still carries the code.",
+  "Treating kernel 'failed' as settled widens turn.submit admission. The serial dispatch queue (engine.ts:104-110) should prevent a race with a host that is still settling, but only F-T4/F-T5 show this; no adversarial round has checked it yet.",
+  "bun test does not typecheck. The required-category and kind-widening ripple is caught only by typecheck:all, and the compile pins run only there.",
+  "The web vitest suite runs in the node environment and cannot mount App, so App wiring is guarded only by a labeled static pin (D14). GH Actions may still be billing-blocked (memory aug-22, not re-checked), which would leave the prepush web-frontend gate as the effective check.",
+  "The subagent failure path (a role-model-override provider failing inside a child agent) is untraced and would not reach goal settlement (MH10).",
+  "Concurrent sessions commit to main; the working tree already shows modifications from another session. Re-check HEAD before each commit and never rewrite refs. The plan adds no _arch scan-guard enrollment, to avoid colliding with the sep-12 campaign."
+ ],
+ "readiness": "READY-WITH-DECISIONS. Every attack was checked against source or a re-run probe. On the goal side, R1's receipt fence is replaced with the existing blocker model; probe pl shows a blocker survives the revision movers that broke the fence. The BUG-4 receipt semantics are corrected per probes pf, pg and pn. Decisions D1, D2, D10 and D11 block commits C8, W1 and W2. Commits C1-C7 can start now."
+}

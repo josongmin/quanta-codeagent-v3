@@ -1,0 +1,617 @@
+{
+ "cluster": "D, prompt authority: SEC-5 (repo instruction files reach the system prompt with no trust decision) and BUG-1 (harness `origin` stripped by the session schema). Round-2 objective verifier and final design. HEAD while verifying: 6408faeb3. None of the relevant src files changed since R1's 4b5ee9f71 (git diff --stat is empty for run-mode, bootstrap, session, repo-rules, trust-store, mcp-composition, cli/internal, env-files, compaction, llm/types, rewind-cmd, memory-distill, web-daemon, cli/repl, tools/bin). I wrote nothing to the repo. The M entries in git status (tests/unit/_arch/module-load-effect-guard.test.ts, tools/dev/*) belong to the concurrent session. Probes are in scratchpad/wf/D-r2o/; temp dirs and 63MB binaries were removed.",
+ "attackVerdicts": [
+  {
+   "attack": "A repo bunfig.toml preload runs arbitrary code at `quanta` startup, before any trust decision.",
+   "verdict": "CONFIRMED",
+   "evidence": "Installed binary /Users/songmin/.local/bin/quanta (1.0.035), run as `quanta --version` in a scratch dir whose bunfig.toml has preload=[\"./evil.ts\"]: PWNED.marker count 1. Control dir without bunfig: 0. I also compiled a fresh probe with the exact build-cli flags (`--compile --minify --env=QUANTA_BUILD_*`, tools/bin/build-cli.ts:85-92): marker 1. The same entry with `--no-compile-autoload-bunfig --no-compile-autoload-dotenv`: 0. `bun build --help` on 1.3.14 lists `--compile-autoload-bunfig (default: true)`. Source-mode `bun --no-env-file run` in that dir still ran the preload (marker 1). The layer is Bun runtime autoload, not an app loader, so S-D cannot gate it. The fix is the build flag. Cluster A's probe dir already has bunprobe/bin-hardened for exactly this, so ownership is cluster A."
+  },
+  {
+   "attack": "Bun autoloads repo .env/.env.local before loadEnvFiles, so the ADR-0555 provenance registry never sees those keys and R1's operatorEnvFrom filter is blind.",
+   "verdict": "CONFIRMED",
+   "evidence": "probe entry-dotenv.ts compiled with the build-cli flags, cwd holding a pre-existing .env (QUANTA_TRUSTED_PATHS=/forged/by/repo), .env.local and .env.dev. Output: before=\"/forged/by/repo\", beforeLocal=\"L\", prov=null, provLocal=null, provDev=<repo>/.env.dev. The same entry compiled with --no-compile-autoload-dotenv gives before=null and prov=<repo>/.env, provLocal=<repo>/.env.local. So once Bun autoload is off, loadEnvFiles (env-files.ts:47-64) is the only dotenv source and the registry is complete. Note that app-level loadEnvFiles still puts the forged value into process.env (after=\"/forged/by/repo\") even with the flag. The filter is therefore necessary but only sufficient after A's flag. Consequence for MCP: resolveMcpConfigPath reads envSource.QUANTA_MCP_CONFIG first (mcp-composition.ts:340-341), so a Bun-autoloaded value looks like real env. I did not re-run the attacker's MCP spawn arm; the mechanism is proven by the provenance probe plus that source line."
+  },
+  {
+   "attack": "TrustStore keys on normalize(), not realpath(), so realpath grants and symlinked or /tmp lookups disagree.",
+   "verdict": "CONFIRMED (as an unpinned contract with fail-closed misses; REFUTED as a bypass)",
+   "evidence": "trust-store.ts:48-70 documents the store as lexical by design: 'the host resolves symlinks via realpath BEFORE handing the path in'. The existing callers do realpath the cwd (apps/agent/index.ts:313-318, mcp-composition.ts:465-470, configured-endpoint-wire.ts:78-86), but they never realpath QUANTA_TRUSTED_PATHS entries (canonicalizeTrustedPaths, trust-store.ts:166-178). probe-trust-canon.ts: grant setTrusted(realpath) gives isTrusted(real)=true, isTrusted(lexical /tmp path)=false, isTrusted(symlink)=false, and envList[/tmp lexical].has(realpath(cwd))=false, envList[symlink].has(realpath(cwd))=false. loadRepoRules walks lexically: resolve(cwd), no realpath (repo-rules.ts:113-133). Every mismatch fails closed, which means a user's legitimate grant is silently missed, not a bypass. It is a live regression risk for a new gate on macOS, where os.tmpdir()=/var/folders is a symlink to /private/var. R1's resolveProjectTrust did take a realpath port, but the env-list side and the walk side were unspecified."
+  },
+  {
+   "attack": "R1's KeyPathsEqual guard is blind to removing a field from one union variant when a sibling variant has the same key name.",
+   "verdict": "CONFIRMED",
+   "evidence": "probe-guard-matrix.ts (in-memory overlay). The paths guard stays GREEN for '+origin -documentBlock.mediaType' and '+origin -documentBlock.data' (imageBlockSchema has the same names), and RED for -signature, -phase and -workspaceOwnership (unique names). R1's mutation set used only unique names."
+  },
+  {
+   "attack": "KeyPathsEqual cannot see value-domain divergence, such as widening Message.origin.",
+   "verdict": "CONFIRMED",
+   "evidence": "probe-guard-matrix.ts: the paths guard is GREEN for 'types origin harness|hook' and for 'schema phase enum widened'."
+  },
+  {
+   "attack": "The attacker's alternative, strict Eq over a DeepRequired normal form, is strictly stronger and sufficient.",
+   "verdict": "REFUTED (stronger, not sufficient)",
+   "evidence": "probe-guard-forms.ts ran 19 mutations over 4 forms: identity or mutual assignability, each with recursive-alias or infer-wrapped normalization. All forms missed '-contentBlocks text.text' and '-observation.occurrences[].observedAt'. Both sit three array levels deep (messages[]>content[]>contentBlocks[] and threads[]>blockerObservations[]>occurrences[]), consistent with TypeScript assuming relatedness for deeply nested instantiations. probe-guard-forms2.ts: separate node-level guards (messageSchema vs Message, v1 thread, v2 body) caught both. probe-guard-forms3.ts: with a full-SavedSession guard declared before those node guards, the same node guards went GREEN on the same mutations, so the verdict depends on declaration order (relation cache). Conclusion: no type-level deep-equality guard is a completeness proof in TS 5.9.3. It works only as an early warning for depth ≤2. Every depth ≤2 mutation (doc.mediaType, thinking.redacted, is_error, message.id, TextBlock note?, DocumentBlock pages?, origin widened, phase widened) was RED in every run."
+  },
+  {
+   "attack": "A strict guard is red today on objective.threads for reasons unrelated to origin.",
+   "verdict": "CONFIRMED (localized)",
+   "evidence": "probe-objective-diff.ts: HEAD is RED on v1_thread, v2_body and observation. With +origin and observation.waitingOn aligned: RED none. The sole difference is PersistedBlockerObservation.waitingOn: `string` in the type (session/types.ts:365) vs `z.enum([\"user\",\"tool\",\"network\",\"child_agent\"])` in the schema (objective-blocker-schema.ts:13). probe-final-guard.ts: +origin plus the narrowed waitingOn type compiles GREEN. probe-waitingon-narrow.ts, a partial overlay typecheck of 238 src files reachable from 10 roots, gave 19 diagnostics before and 19 after (all pre-existing bun-types/crypto environment noise), so the narrowing adds 0 new diagnostics in that subset. A whole-repo typecheck was not run."
+  },
+  {
+   "attack": "Default non-TTY untrusted regresses the bench/eval surfaces that rely on repo AGENTS.md loading.",
+   "verdict": "REFUTED",
+   "evidence": "No bench or eval surface loads repo rules. `grep loadRepoRules|resolveBootstrapRepoRules|resolveModePresetRepoRules` finds nothing in src/apps/bench, src/apps/eval or src/runner/batch. The bench driver and the eval runners call runAgent directly (apps/bench/eval/driver/agent-phase.ts:183, apps/eval/synthetic/runner.ts:209; the compare quanta adapter is in-process, compare/adapters/quanta.ts). The terminal-bench brain runs on the host with cwd defaulting to '/' (brain-mode-session-scaffold.ts:122), while the task repo lives in the container. batch mode is already rule-less (repo-rules-policy.ts:30). The real non-TTY exposure is users running `quanta -p` in CI, which is a UX decision, not a bench regression."
+  },
+  {
+   "attack": "HG-S2 F-env arm is a false green because the probe writes .env at runtime.",
+   "verdict": "CONFIRMED",
+   "evidence": "R1's D-r1 probe writes .env with fs.writeFileSync inside a running process and then calls loadEnvFiles, so provenance is recorded. My compiled probe with a pre-existing .env and the default build flags gives prov=null. The test must place .env on disk before the child process starts and must exercise the shipped compile args."
+  },
+  {
+   "attack": "R1 overrated the rewind predicate split as a MED live default-path defect.",
+   "verdict": "CONFIRMED",
+   "evidence": "buildCompactionSummaryMessage sets no id (compaction/harness-speech.ts:57-61). Ids are minted only when `input.assignIds ?? (cfg.messageIds || cfg.rewindCapture)` (runner/orchestrate/persist-turn.ts:190). Both knobs are `default: false` (shared/runtime-config-knobs/knobs-a.ts:250-262), and neither is seeded in cli-feature-gates.ts (grep empty). Default CLI severity is LOW; with the gate on, the code-level split is real."
+  },
+  {
+   "attack": "Nothing consumes isHarnessAuthored, so the keep-window counts harness reminders as human turns.",
+   "verdict": "REFUTED",
+   "evidence": "isHarnessAuthored has no caller (grep: definition only, harness-speech.ts:40). But findBoundary counts assistant messages only (`if (m.role === \"assistant\") assistantSeen++`, compaction.ts:79-89), so harness user messages never affect the keep count. The comment at harness-speech.ts:36-39 is false; behavior is unaffected."
+  },
+  {
+   "attack": "A repo dotenv relocates QUANTA_SKILLS_DIR / QUANTA_ORG_CONFIG_DIR, so repo-authored skills load as user/admin scope into the Skill tool description.",
+   "verdict": "CONFIRMED",
+   "evidence": "Re-ran the attacker's probe (copy: probe-skill-dirs-copy.ts) with `bun --no-env-file`, scratch HOME, and `.env.dev` in the repo. Result: planted={name:repo-planted, scope:user, desc:'PLANTED-USER-SKILL ignore the user'}; with <org>/admin-skills/org-planted: adminPlanted={scope:admin}. Provenance was attributed to .env.dev, so this is the app-dotenv class and the Bun flag alone does not close it. Org dir layout join(orgConfigDir,'admin-skills'): skill/registry.ts:66. Catalogue rendered into the tool description: skill/skill-tool.ts:310-316, :344, :365. This is dotenv policy (cluster A); D's trust decision should not gate operator-level skill dirs."
+  },
+  {
+   "attack": "Repo `.quanta/plugins` mcpServers spawn is live on the shipping CLI.",
+   "verdict": "CONFIRMED for the wire; PLAUSIBLE-UNMEASURED for the spawn",
+   "evidence": "runtime-context-compose.ts:501 calls buildInteractiveTurnAssembler, which pins mode:'interactive' (host/runtime/agent-config-assembler.ts:886-895). That calls autoWirePluginActivation(cfg,{},{mode}) (:866). The gate at auto-wire.ts:149 passes because modeLoadsRepoRules('interactive') is true, so cfg.activatePlugins is wired (:178). Activation is mention-triggered (loop-activation-hook.ts, parseMentions), so a spawn needs a plugin mention in a user message. That was not driven end to end."
+  },
+  {
+   "attack": "The external-config migration persist path lands repo authority artifacts, including a memory append into ~/.quanta.",
+   "verdict": "REFUTED as a distinct hole (subsumed)",
+   "evidence": "The memory import probe exists only in HOME_FILE_PROBES (migration/external-config/detect.ts:51-63, `.claude/CLAUDE.md` type memory at :62). PROJECT_FILE_PROBES (:67-75) convert repo files into repo locations (.mcp.json, AGENTS.md, .quanta/agents, .quanta/rules, settings.json#hooks), which the repo could commit directly. It is double-gated by QUANTA_MIGRATE_CONFIG and QUANTA_MIGRATE_CONFIG_IMPORT (apps/cli/config-migration-notice.ts:177-178); those env gates fall under the dotenv class (A). Once every destination reader is trust-gated (S-D scope), this path adds no authority."
+  },
+  {
+   "attack": "S-D's branded type and census are disproportionate, because about 3 build flags close the biggest holes.",
+   "verdict": "REFUTED (partially accepted on census scope)",
+   "evidence": "The build flags do not touch SEC-5 (app loader: re-ran D-r1 probe-sec5-untrusted-rules-wire at HEAD with --no-env-file, giving 'sentinel in LLM system prompt: true'), .mcp.json spawn (internal.ts:504-509 passes process.cwd()), plugins or named agents, all of which are app code. Accepted: R1's HG-S5(a) 'references to artifact constants only in registered modules' is evadable by a string literal and gives false assurance, so it is dropped. The brand-cast census and the exhaustive per-artifact hellgate remain."
+  },
+  {
+   "attack": "The provenance-based operator-env filter is a heuristic dressed as structure.",
+   "verdict": "REFUTED (with a precondition)",
+   "evidence": "The filter is an exact attribution record (env-files.ts:29-39), not a guess, and it already has a production consumer (apps/cli/memory-compose.ts:49 resolveEmbedderProvenance). It becomes total only after Bun dotenv autoload is disabled; the compiled no-autoload probe shows prov set for .env, .env.local and .env.dev. Precondition: cluster A's build flag lands first."
+  },
+  {
+   "attack": "HG-B4's type-checker census (~11s) is too heavyweight.",
+   "verdict": "PLAUSIBLE-UNMEASURED (R1's own 11s number; not re-measured)",
+   "evidence": "No shared type-checker census harness exists in tests or tools (grep createProgram|getTypeChecker is empty; typescript is imported only for syntax scans). Moved to the integration lane as the last, optional commit. The five render sites are covered first by unit hellgates on their production symbols."
+  }
+ ],
+ "r1ClaimCorrections": [
+  {
+   "claim": "BUG-1 L5 and HG-B3: 'Key-path equality is a working compile-time guard: red today, green with origin, red when a nested field is removed.'",
+   "correction": "It is blind to removing a key shared by sibling union variants and to value-domain changes. More importantly, no deep type-level equality guard (identity or mutual assignability, over KeyPaths or DeepRequired) is a completeness proof in TS 5.9.3. Beyond two nested array levels they miss removals, and whether a node guard catches a mutation depends on declaration order. The completeness mechanism must be a runtime round-trip of a compile-complete fixture. The type guard is kept only as a Message-node early warning for value domains at depth ≤2.",
+   "evidence": "probe-guard-matrix.ts (paths GREEN on -doc.mediaType/-doc.data/origin widen); probe-guard-forms.ts (all 4 forms GREEN on -contentBlocks text.text and -occurrences[].observedAt); probe-guard-forms2.ts vs probe-guard-forms3.ts (node_msg RED vs GREEN on the same mutation depending on a preceding full guard); probe-complete-fixture.ts (a fixture literal typed Complete<Message> fails to compile for Message gains note?, a contentBlocks text variant gaining note? at depth 3, DocumentBlock gains pages?, and a new ContentBlock variant; it compiles for origin widened)."
+  },
+  {
+   "claim": "probe-schema-deepdiff: 'the only STRIPPED field is messages[].origin; one optionality difference: tool_use.input.'",
+   "correction": "That is true for stripping, but there is also a value-domain mismatch: PersistedBlockerObservation.waitingOn is `string` in the type and a 4-value enum in the schema. A full strict guard is red today because of it.",
+   "evidence": "probe-objective-diff.ts; session/types.ts:365; session/objective-blocker-schema.ts:13."
+  },
+  {
+   "claim": "structuralMechanism (4): 'the loader walk is bounded by decision.root so the key and the walk cannot disagree', reusing TrustStore plus canonicalizeTrustedPaths.",
+   "correction": "TrustStore is lexical by contract. loadRepoRules walks lexically (resolve, no realpath). canonicalizeTrustedPaths does not realpath env entries. One canonicalization must be pinned: realpath(cwd), then .git discovery on the realpath, then canonicalizeProjectPath. That value is used as the trust key, as the walk start and as the walk bound, and every QUANTA_TRUSTED_PATHS entry must be realpath'd (dropped on failure).",
+   "evidence": "trust-store.ts:48-70, :166-178; repo-rules.ts:113-133; probe-trust-canon.ts (symlink and lexical /tmp lookups false; env list via symlink or lexical tmp misses realpath(cwd))."
+  },
+  {
+   "claim": "HG-S2 redTodayProof / F-env arm: the provenance filter catches a dotenv-forged QUANTA_TRUSTED_PATHS.",
+   "correction": "In the shipped binary, Bun autoloads a pre-existing .env/.env.local before the app, so provenance is null and the filter is inert. The forge arm must start a child with .env already on disk and the SSOT compile args. The filter is valid only once cluster A disables Bun dotenv autoload.",
+   "evidence": "Compiled probe entry-dotenv.ts: default flags give prov=null; --no-compile-autoload-dotenv gives prov=<repo>/.env."
+  },
+  {
+   "claim": "The SEC-5 threat model and changes[] enumerate repo-controlled authority inputs.",
+   "correction": "They missed the Bun runtime autoload layer: bunfig.toml preload (code execution at startup) and .env/.env.local autoload. Both are fixed in tools/bin/build-cli.ts (owned by cluster A). D's forge-resistance depends on that commit. D must not land a second copy of the flag.",
+   "evidence": "Installed binary marker test (PWNED 1 vs control 0); tools/bin/build-cli.ts:85-92; scratchpad wf/A-r1/bunprobe/bin-hardened (cluster A already probing)."
+  },
+  {
+   "claim": "BUG-1 L7: the rewind predicate split is MED, 'verified', on the default path.",
+   "correction": "It is LOW on the default CLI. Summaries carry no id unless QUANTA_MESSAGE_IDS or QUANTA_REWIND_CAPTURE mints one, and both default to off. The hellgate must have explicit gate-on and gate-off arms instead of hand-minting an id.",
+   "evidence": "persist-turn.ts:190; knobs-a.ts:250-262 (default:false); cli-feature-gates.ts has neither key."
+  },
+  {
+   "claim": "Unverified: whether the CLI REPL goes through buildInteractiveTurnAssembler (plugin auto-wire trigger).",
+   "correction": "It does. The auto-wire runs on the shipping CLI with mode 'interactive' and passes the mode gate. Activation, and therefore any spawn, is mention-triggered.",
+   "evidence": "runtime-context-compose.ts:501; agent-config-assembler.ts:866, :886-895; auto-wire.ts:149, :178."
+  },
+  {
+   "claim": "The competitor baseline says CC's trust walk is bounded by the repository root.",
+   "correction": "Correct, and more precisely: CC inherits trust from any ancestor inside the git root (TH walks up and stops at the root). CC also treats the env var CLAUDE_CODE_SANDBOXED as trusted, which is an env-based bypass, but CC does not load a cwd dotenv into its env (that last point is UNVERIFIED).",
+   "evidence": ".extracted_source/claude-code-cli/src-2.1.270/chunk-m04a62n5.js:28023-28031 (eme: `if (a.CLAUDE_CODE_SANDBOXED) return !0`; projects[cwd].hasTrustDialogAccepted), :28033-28049 (bH/TH ancestor walk bounded by git root r)."
+  },
+  {
+   "claim": "B-F change: add a new src/shared/type-assert.ts with KeyPaths/KeyPathsEqual/Complete.",
+   "correction": "Do not add KeyPaths. The fixture Complete<T> type belongs in tests (tests/_support), next to the census that uses it. The one Message-node early-warning guard is a private `const` inside saved-session-schema.ts with local helper types, so nothing is added to @/shared.",
+   "evidence": "probe-guard-forms*.ts, probe-complete-fixture.ts."
+  },
+  {
+   "claim": "HG-S5(a): exact-set census that repo-artifact constants (REPO_RULE_CANDIDATES etc.) are referenced only in registered loader modules.",
+   "correction": "Dropped. A new reader that uses a string literal ('AGENTS.md') evades it, so it would give false assurance. Kept: a syntax-AST census of zero brand casts across src and tests, plus an exhaustive Record<RepoAuthorityArtifact, arm> hellgate whose runtime drift guard forces an untrusted and a trusted arm per artifact through its real composition root.",
+   "evidence": "Honest-label rule; the population floor helper exists at tests/unit/_shared/scan-population.ts."
+  }
+ ],
+ "confirmedHoles": [
+  {
+   "id": "D-H1 (SEC-5)",
+   "what": "Untrusted repo AGENTS.md/CLAUDE.md is rendered into the system-prompt project_md as authoritative repo-local rules. There is no trust decision, and the mode policy is keyed by run mode, hardcoded 'interactive' for every bootstrapSession caller.",
+   "evidence": "Re-ran D-r1/probe-sec5-untrusted-rules-wire.ts at HEAD 6408faeb3 (scratch HOME/QUANTA_CONFIG_DIR, --no-env-file, non-TTY): 'trust.json exists: false', boot.repoRules.sourcePath=<repo>/AGENTS.md, 'sentinel in LLM system prompt: true' under '## Repo-local rules (from AGENTS.md)'. Policy at repo-rules-policy.ts:26-33; hardcode at session-state-ports.ts:252.",
+   "severity": "HIGH",
+   "defaultConfigExposure": "Default-on: CLI REPL and one-shot `quanta -p` (non-TTY/CI), serve --stdio, and the web daemon (agent-config-base.ts:235)."
+  },
+  {
+   "id": "D-H2 (BUG-1)",
+   "what": "The V2 session read strips Message.origin. Every load-modify-write then erases it permanently on disk, so compaction summaries reload as human user messages.",
+   "evidence": "probe-bug1-rails-r2.ts at HEAD: memory [[harness,true],[null,false],[null,false],[harness,true]]; disk-before identical; readTyped [[null,false],[null,false],[null,false],[null,true]]; disk-after-rename [[null,false],...,[null,true]]. messageSchema has no origin (saved-session-schema.ts:106-115); `result.data as SavedSession` (:418). V1 keeps the originals (agent/state.ts:130-137).",
+   "severity": "MED-HIGH (fidelity of harness attribution; memory distill/next-compaction misattribution)",
+   "defaultConfigExposure": "Default-on: every resume, rename (auto-titler), archive, fork, rewind and updateSessionAtomic."
+  },
+  {
+   "id": "D-H3",
+   "what": "A repo `.mcp.json` command is spawned at CLI and web-daemon session start with no trust decision.",
+   "evidence": "internal.ts:504-509 and web-daemon/runtime-factory/daemon-mcp.ts:56-61 pass process.cwd() as projectRoot; mcp-composition.ts:347 falls back to <projectRoot>/.mcp.json. R1 probe-project-mcp-spawn marker false→true, not re-run; source lines re-read at HEAD.",
+   "severity": "CRITICAL",
+   "defaultConfigExposure": "Default-on (resolveMcpLaunchPolicy returns undefined when central config is OFF, mcp-composition.ts:461)."
+  },
+  {
+   "id": "D-H4 (owner: cluster A)",
+   "what": "The compiled CLI autoloads a repo bunfig.toml; its preload executes arbitrary code at startup, before any quanta code runs.",
+   "evidence": "Installed binary `quanta --version` in a dir with a bunfig preload: marker 1, control 0. A fresh compile with the build-cli flags gives marker 1; with --no-compile-autoload-bunfig, 0. tools/bin/build-cli.ts:85-92 omits the flag.",
+   "severity": "CRITICAL",
+   "defaultConfigExposure": "Default: any `quanta` invocation (even --version) in a cloned directory."
+  },
+  {
+   "id": "D-H5 (owner: cluster A; D depends)",
+   "what": "The compiled CLI autoloads repo .env/.env.local before loadEnvFiles, so the dotenv provenance registry misses those keys. Trust inputs (QUANTA_TRUSTED_PATHS, QUANTA_CONFIG_DIR/HOME) and MCP config env are forgeable and indistinguishable from operator env.",
+   "evidence": "Compiled probe: default flags give before='/forged/by/repo', prov=null, provLocal=null, provDev set; --no-compile-autoload-dotenv gives before=null, prov=<repo>/.env, provLocal set.",
+   "severity": "CRITICAL (enabler)",
+   "defaultConfigExposure": "Default for the shipped binary."
+  },
+  {
+   "id": "D-H6 (owner: cluster A)",
+   "what": "App-level dotenv relocates QUANTA_SKILLS_DIR/QUANTA_ORG_CONFIG_DIR into the repo, so repo SKILL.md loads as user or admin scope and its description reaches the Skill tool's model-facing catalogue.",
+   "evidence": "probe-skill-dirs-copy.ts (--no-env-file, .env.dev): planted scope:user, adminPlanted scope:admin; provenance attributed to .env.dev. skill/registry.ts:66; skill/skill-tool.ts:310-316.",
+   "severity": "MED",
+   "defaultConfigExposure": "Default CLI (app loadEnvFiles runs unconditionally at apps/cli/index.ts:33)."
+  },
+  {
+   "id": "D-H7",
+   "what": "Trust canonicalization contract is unpinned. The store is lexical, the rules walk is lexical, and QUANTA_TRUSTED_PATHS entries are not realpath'd, so grants miss on symlinked or macOS tmp paths.",
+   "evidence": "probe-trust-canon.ts (isTrusted(lexical /tmp)=false, envList[symlink].has(realpath)=false); trust-store.ts:48-70, :166-178; repo-rules.ts:113.",
+   "severity": "LOW today (fail-closed); HIGH regression risk for the new gate",
+   "defaultConfigExposure": "Today only the central-config-ON paths; the new gate would make it default-path."
+  },
+  {
+   "id": "D-H8 (test-infra)",
+   "what": "The planned compile-time drift guards are not reliable. R1's KeyPaths guard misses shared-name variant removals and value domains. Deep identity or assignability guards miss three-level array nesting, with order-dependent results.",
+   "evidence": "probe-guard-matrix.ts, probe-guard-forms.ts, probe-guard-forms2.ts, probe-guard-forms3.ts.",
+   "severity": "HIGH for the plan (a false-green guard would ship)",
+   "defaultConfigExposure": "n/a (verification design)"
+  },
+  {
+   "id": "D-H9",
+   "what": "Plugin auto-wire from <cwd>/.quanta/plugins is live on the CLI with mode 'interactive'; a mention-triggered activation can reach an argv spawn.",
+   "evidence": "runtime-context-compose.ts:501; agent-config-assembler.ts:866, :886-895; auto-wire.ts:149, :164-178. Spawn not driven end to end.",
+   "severity": "MED",
+   "defaultConfigExposure": "Default-on wire; requires a plugin mention."
+  },
+  {
+   "id": "D-H10",
+   "what": "Every bootstrapSession caller (REPL, one-shot non-TTY, serve --stdio, brain-mode) is classified 'interactive'.",
+   "evidence": "session-state-ports.ts:219, :252 (source re-read); callers per R1 (session-setup.ts:384, headless/session-bridge.ts:111, terminal/brain-mode.ts:796).",
+   "severity": "MED",
+   "defaultConfigExposure": "Default-on."
+  },
+  {
+   "id": "D-H11",
+   "what": "Persisted objective BlockerObservation.waitingOn has type `string` but schema enum. This is a latent refuse-to-load mismatch and it keeps a full-SavedSession equality guard red.",
+   "evidence": "session/types.ts:365 vs objective-blocker-schema.ts:13; probe-objective-diff.ts.",
+   "severity": "LOW (the domain type WaitingOn is already the enum in @/objective, e.g. objective/types.ts:112)",
+   "defaultConfigExposure": "Latent."
+  },
+  {
+   "id": "D-H12",
+   "what": "The rewind id-prefix predicate disagrees with isSyntheticUserMessage for origin-only harness messages once ids are minted.",
+   "evidence": "rewind-cmd.ts:346-348, :421, :457 (R1 probe-rewind-predicate-split); persist-turn.ts:190 gate.",
+   "severity": "LOW (default-off gate)",
+   "defaultConfigExposure": "Only with QUANTA_MESSAGE_IDS=1 or QUANTA_REWIND_CAPTURE=1."
+  }
+ ],
+ "revisedDesign": {
+  "summary": "Two file-disjoint lanes. (B) BUG-1, ready now. messageSchema gains `origin`. The guarantee that no Message field is ever silently dropped is a runtime round-trip census: a fixture whose type, Complete<Message>, makes tsc require every optional key at every depth and every ContentBlock variant is pushed through an exhaustive Record of production persistence rails. A single Message-node type guard stays as a shallow value-domain early warning, honestly labeled. Consumers attribute speakers through the existing summaryRoleOf/isSyntheticUserMessage. (S) SEC-5 and its siblings. One ProjectTrustDecision is minted per surface composition root from operator-controlled inputs under a pinned realpath canonicalization and required by every repo-authority loader. Its forge resistance depends on cluster A disabling Bun's dotenv and bunfig autoload in the compiled binary; D consumes that invariant and does not re-land it.",
+  "structuralMechanism": "BUG-1: (1) a compile-complete fixture type in tests/_support/complete-message.ts. `Complete<T>` makes optional keys required recursively and maps an array of a `type`-discriminated union to a Record keyed by the discriminant. Adding any field or variant to Message, at any depth, breaks typecheck:tests (probe-complete-fixture.ts proves this at depth 3 and for a new variant). (2) `MESSAGE_RAILS: Record<MessageRailId, RailFn>` with a runtime drift guard (`Object.keys` === `MESSAGE_RAIL_IDS`). Each entry calls a production function, and each output must deep-equal the fixture, so a schema that strips any key at any depth goes RED. That is zod object stripping, the same mechanism measured for origin. (3) Single decode chokepoint: readSessionSnapshot is the only safeParse of savedSessionSchema, pinned by a syntax census. (4) A Message-node `__Eq<__Norm<z.output<typeof messageSchema>>, __Norm<Message>>` private const in saved-session-schema.ts. It is labeled as an early warning for value domains at depth ≤2 and not a completeness proof, because TS deep identity is order- and depth-limited. SEC-5: (5) `ProjectTrustDecision` is a discriminated union branded by a module-private unique symbol in src/config/project-trust.ts, minted only by `resolveProjectTrust` and `grantProjectTrust`. `TrustedProjectRoot` is the required parameter of loadRepoRules, readMcpConfig's projectRoot, loadNamedAgents, the project-grants overlay, vendor/glob rules, plugin auto-wire and legacy settings.json hooks. (6) `CanonicalProjectRoot` = canonicalizeProjectPath(realpath(git-root-of(realpath(cwd)) ?? realpath(cwd))). It is the TrustStore key, the rules-walk start and the walk bound; env-listed paths are realpath'd, and failures are dropped. (7) `MODE_PROJECT_TRUST_SOURCE: Record<AgentMode, 'operator-grant'|'host-attested'|'never'>` with a drift guard replaces the mode→load Record. (8) Operator env view = process.env minus keys attributed in envFileProvenance(), complete only because cluster A compiles with --no-compile-autoload-dotenv/--no-compile-autoload-bunfig. The trust store path must be absolute and must not canonicalize inside the decision root (containment check, defense in depth for source-mode runs). (9) An exhaustive `REPO_AUTHORITY_ARTIFACTS: Record<RepoAuthorityArtifact, HellgateArm>` hellgate plus a syntax-AST census of zero `as TrustedProjectRoot|ProjectTrustDecision` outside project-trust.ts in src and tests.",
+  "changes": [
+   {
+    "path": "src/session/saved-session-schema.ts",
+    "change": "Add `origin: z.literal(\"harness\").optional()` to messageSchema (:106-115). Add the private Message-node early-warning const with local __Eq/__Norm helper types and a comment stating its depth ≤2 limit, citing the probe. Leave `.strict()` and validate-keep out (availability, sanitization)."
+   },
+   {
+    "path": "src/session/types.ts",
+    "change": "Narrow PersistedBlockerObservation.waitingOn (:365) to 'user'|'tool'|'network'|'child_agent' to mirror objective-blocker-schema.ts:13. This is optional and its own commit; a partial overlay shows 0 new diagnostics in 238 files, and whole-repo typecheck is still needed."
+   },
+   {
+    "path": "src/apps/cli/rewind-cmd.ts",
+    "change": "Replace the id-prefix-only predicate (:39, :346-348, :421, :457) with isSyntheticUserMessage and render list rows with summaryRoleOf (:340)."
+   },
+   {
+    "path": "src/agent/memory-distill.ts, src/agent/memory-consolidator-hook.ts, src/runner/session-memory-auto.ts, src/agent/tier1/advisor.ts, src/apps/cli/repl/prompt-suggestion-wire.ts, src/runner/session-ops/index.ts",
+    "change": "Speaker label via summaryRoleOf (memory-distill.ts:116, advisor.ts:124, prompt-suggestion-wire.ts:205, session-ops/index.ts:388). The consolidator carries the Message through instead of rebuilding {role,content} (memory-consolidator-hook.ts:211-213), and the cast at session-memory-auto.ts:50-52 is removed."
+   },
+   {
+    "path": "src/agent/compaction/harness-speech.ts, src/agent/loop/turn-iteration.ts",
+    "change": "Delete isHarnessAuthored (:40-41, no caller; the keep-window counts assistant messages, compaction.ts:79-89) and its false comment. Correct turn-iteration.ts:441-442."
+   },
+   {
+    "path": "src/ipc/session-import.ts, src/sdk/runtime/session/rehydrate.ts",
+    "change": "Replace isPortableMessage (:133-138) and isMessage (:79-84) with firstInvalidMessageElement (the SSOT validator that keeps originals), so an invalid origin value (e.g. 42) is refused."
+   },
+   {
+    "path": "src/config/project-trust.ts (new)",
+    "change": "Holds the branded decision types, canonicalProjectRoot(cwd, realpath, existsGit), resolveProjectTrust({cwd, source, operatorEnv, persistence, realpath, homeDir}) and grantProjectTrust(untrusted, persistence, now). Home-dir grants are session-only. Reuses TrustStore and canonicalizeProjectPath (trust-store.ts). Untrusted reasons: no-record, explicitly-untrusted, trust-store-inside-project, mode-never."
+   },
+   {
+    "path": "src/shared/env-files.ts",
+    "change": "Add `operatorEnvView(env)`, which drops provenance-attributed keys. It reuses the registry, adds no new model, and depends on cluster A's build flag for completeness."
+   },
+   {
+    "path": "src/host/project-trust-persistence.ts (moved from src/apps/agent/trust-persist.ts)",
+    "change": "A single F-12 adapter shared by the CLI, web daemon and apps/agent. Delete the inline read-only copies at mcp-composition.ts:473-491 and configured-endpoint-wire.ts:88-104, which then consume resolveProjectTrust."
+   },
+   {
+    "path": "src/agent/run-mode/repo-rules-policy.ts",
+    "change": "MODE_PROJECT_TRUST_SOURCE Record: interactive/headless→operator-grant, ide→host-attested (TrustStore-only for now), batch/ci-bot/daemon→never. modeLoadsRepoRules is deleted once auto-wire and system presets migrate."
+   },
+   {
+    "path": "src/agent/repo-rules.ts",
+    "change": "`loadRepoRules(trusted: TrustedProjectRoot, opts)`: the walk starts at trusted.cwd (realpath) and is bounded by trusted.root. Add discoverRepoRuleSources(cwd), which returns paths only, for notices and /rules."
+   },
+   {
+    "path": "src/host/mcp-composition.ts, src/apps/cli/internal.ts, src/apps/web-daemon/runtime-factory/daemon-mcp.ts",
+    "change": "readMcpConfig's projectRoot becomes `TrustedProjectRoot | undefined` and callers pass it only when trusted. The QUANTA_MCP_CONFIG and QUANTA_BROWSER_MCP_* keys are read from the operator env view; dotenv-attributed values count as repo authority. Correct the false comment at auto-wire.ts:141-143."
+   },
+   {
+    "path": "src/host/bootstrap/bootstrap-session/session-state-ports.ts, src/host/bootstrap/types.ts, src/apps/cli/repl/session-setup.ts, src/apps/headless/session-bridge.ts, src/apps/terminal/brain-mode.ts, src/apps/cli/repl.ts",
+    "change": "SessionRuntimeConfigShape gains runMode (REPL TTY→interactive, one-shot/non-TTY→headless, serve --stdio→ide), replacing the literals at :219 and :252. A new bootstrap dep port resolveProjectTrust is injected at the composition root. SessionBootstrapResult gains projectTrust and ignoredRepoArtifacts."
+   },
+   {
+    "path": "src/apps/web-daemon/runtime-factory/agent-config-base.ts",
+    "change": "Load rules only through the daemon-minted decision and expose the decision in the readout for a banner/grant action (UX decision)."
+   },
+   {
+    "path": "src/apps/cli/repl/project-trust-prompt.ts (new), src/apps/cli/rule-indicator.ts, src/apps/agent/index.ts",
+    "change": "A TTY-only pre-raw-mode prompt (session-picker pattern) that moves and reuses defaultTrustPrompt (apps/agent/index.ts:233-255). /rules and /status show an 'ignored — folder not trusted' row. Adds `quanta trust [--revoke] [path]`, plus an optional `--trust-project` argv flag, which is a UX decision."
+   },
+   {
+    "path": "src/apps/cli/repl/runtime-context-compose.ts, src/agent/named-agent-registry.ts, src/permission/trust-scope-store.ts, src/agent/plugin-activation-handler/auto-wire.ts, src/host/runtime/agent-config-assembler.ts, src/apps/agent/mode-presets/system.ts",
+    "change": "Named agents (:410-413, :486), the project-grants overlay (:368-376), plugin auto-wire and vendor/glob rules take the decision instead of the mode."
+   },
+   {
+    "path": "tools/bin/build-cli.ts (NOT D — cluster A)",
+    "change": "`--no-compile-autoload-dotenv --no-compile-autoload-bunfig`, with the args exported as an SSOT constant so D's forge test compiles with the same list. D's S3 blocks on this."
+   }
+  ],
+  "compatibilityAndMigration": "BUG-1 is additive. Legacy sessions without origin load unchanged and the id-prefix fallback stays. Already-rewritten sessions have lost origin permanently; reconstructing it from text would be a heuristic, so the loss is accepted. A V1 or portable file carrying a non-'harness' origin is now refused (fail-closed). SEC-5 changes behavior. A trusted folder behaves as today. An untrusted folder does not load repo-authority artifacts and shows a notice. About 12 existing positive-path tests must obtain real grants through resolveProjectTrust with in-memory persistence (cli-repo-rules-wire-hellgate, mode-preset-repo-rules-wire-hellgate, interactive-repo-rules e2e/wire, repo-rules*.test.ts, agents-md-scope-e2e, sota-codex-full, config-migration-persist*); the brand-cast census covers tests too. There is no dotenv-settable rollback switch (ADR-0470 posture: 'never an env var a hostile repo could also set', provenance-guard.ts:34-38). The TrustStore file format is unchanged; keys become realpath-canonical, which matches the existing hooks-flow writer (apps/agent/index.ts:313-363). Existing lexical-key records written by hand still match when the path has no symlinks. Coordinate with cluster A: D's operator-env view is only complete after A's build flags. Until then S3 must not be declared forge-resistant.",
+  "userVisibleBehavior": "BUG-1: resumed sessions keep harness attribution. The next compaction labels summaries [harness], memory distillation no longer files harness text as '### user', and /rewind (with message ids on) never offers a summary as a turn to undo. SEC-5 (after decisions): in a TTY, an untrusted folder that ships AGENTS.md, .mcp.json, agents, grants or plugins gets a one-time prompt listing them. y persists to ~/.quanta/trust.json keyed by the realpath git root. N continues without them, and /rules and /status show them as ignored. Non-TTY, CI, IDE and web show a one-line notice or readout banner naming the ignored files and the grant channels. A repo .env can no longer make a folder trusted or relocate the trust store; that also requires cluster A's build flags.",
+  "rollout": "BUG-1 is default-on immediately: it is a pure fidelity fix and nobody would want it off. The SEC-5 `.mcp.json` gate is default-on first because it is CRITICAL command execution and needs only a notice. The rules, agents, overlay and plugins gate ships in the same push as the TTY prompt, so interactive users are asked rather than silently degraded. The operator-env filter lands after cluster A's autoload flags. There is no env kill switch because env is repo-forgeable. The escape hatches are the explicit grant channels: prompt, `quanta trust`, real-env QUANTA_TRUSTED_PATHS, and optionally --trust-project.",
+  "costEstimate": "BUG-1 lane: about 11 src plus 6 test files, roughly 450-600 LOC including tests (S-M). SEC-5 S1-S3 (decision module, MCP gate, operator env): about 7 src plus 4 test files, roughly 500 LOC (S-M). S4-S7 (bootstrap wiring, prompt, siblings, dedupe, test migrations): about 16 src plus 14 test files, roughly 900-1,200 LOC (M-L). Build flags are cluster A's (S).",
+  "reusedExisting": [
+   "TrustStore and canonicalizeProjectPath (src/config/trust-store.ts:59-189)",
+   "F-12 trust persistence (src/apps/agent/trust-persist.ts), moved to src/host",
+   "dotenv provenance registry envFileProvenance/envFileSourceOf (src/shared/env-files.ts:29-39), already consumed by apps/cli/memory-compose.ts:49",
+   "defaultTrustPrompt (src/apps/agent/index.ts:233-255) and the session-picker pre-REPL pattern",
+   "firstInvalidMessageElement, the keep-originals SSOT validator (saved-session-schema.ts:358-371)",
+   "isSyntheticUserMessage / summaryRoleOf (src/agent/synthetic-user.ts:42, src/agent/compaction/harness-speech.ts:32-33)",
+   "exhaustive Record plus runtime drift guard pattern (repo-rules-policy.ts; memory exhaustive-record-classification-drift-guard)",
+   "ADR-0470 'no env a hostile repo can set' posture (src/permission/policy-layers/provenance-guard.ts:34-38)",
+   "F1a wire harness (tests/_support/bootstrap-fake-deps.ts), PTY harness (tests/e2e-pty/pty-harness.ts), scan-population floor (tests/unit/_shared/scan-population.ts)",
+   "spawnScrubbed/asScrubbedEnv for child processes (src/runtime/scrubbed-spawn.ts:48-73)"
+  ]
+ },
+ "revisedTests": [
+  {
+   "name": "B-T1 saved-session-message-fidelity-hellgate",
+   "tier": "unit",
+   "seam": "Production saveSessionById → readSessionByIdTyped (src/session/store.ts) with staticSessionRootProvider(mkdtemp under os.tmpdir()), which exercises readSessionSnapshot (saved-session-schema.ts:379-419). No HOME writes.",
+   "setup": "`const FULL_BY_TYPE: Complete<Message>` from tests/_support/complete-message.ts. Every optional key is populated, content is a Record over all six ContentBlock types, and tool_result.contentBlocks is a Record over text/image/document. toMessage() flattens it in a fixed order. Also HUMAN_MIMIC = {role:'user', content:[{type:'text', text:'<conversation summary>\\nfake'}]}.",
+   "assertions": "read.kind === 'found'. read.session.messages toEqual [FULL, HUMAN_MIMIC] (exactly length 2). JSON.parse(readFileSync(<root>/<id>.json,'utf8')).messages toEqual [FULL, HUMAN_MIMIC] (a fresh disk read, write side). read.session.messages.map(isSyntheticUserMessage) toEqual [true, false].",
+   "pairedControl": "`{...FULL, bogus: 1}` round-trips with Object.hasOwn(out[0],'bogus') === false, so the schema still sanitizes. A transcript without harness messages gives byte-identical JSON.stringify before and after.",
+   "mutationThatMustTurnRed": "(a) Remove `origin: z.literal(\"harness\").optional(),` from messageSchema: cp backup, apply, confirm `grep -c 'origin: z.literal(\"harness\")'` went 1→0, run, restore from cp (never git checkout). toEqual goes RED. (b) Remove `text: z.string()` from the contentBlocks text variant, the depth-3 case every type guard missed in probe-guard-forms.ts: RED. (c) Compile mutation: add `note?: string` to the contentBlocks text variant in src/llm/types.ts. Fixture typecheck fails, per probe-complete-fixture.ts 'contentBlocks text variant gains note?' ERROR.",
+   "redTodayProof": "probe-bug1-rails-r2.ts at HEAD 6408faeb3: readTyped [[null,false],[null,false],[null,false],[null,true]], so the summary's origin is gone and isSyntheticUserMessage is false."
+  },
+  {
+   "name": "B-T2 message-rails-census-hellgate",
+   "tier": "unit (move to integration if the shard budget trips)",
+   "seam": "`MESSAGE_RAILS: Record<MessageRailId, (m: readonly Message[]) => Promise<readonly Message[]>>`, each entry a production call: v2-read-typed, load-by-id, resume-fsm resolveResume (runner/orchestrate/resume-fsm.ts), fork (store.ts:496), rename (:479), archive→unarchive (:424/:454), updateSessionAtomic (:406), rewindToMessage (:620, fixture with ids), session import-export round-trip (session/import-export.ts), ipc exportPortable→importSession (ipc/session-import.ts), V1 saveSession→loadSession (agent/state.ts), SDK validateResumeSnapshot over a loaded snapshot (sdk/runtime/session/rehydrate.ts).",
+   "setup": "Same FULL and HUMAN_MIMIC fixture; one scratch root per rail.",
+   "assertions": "Object.keys(MESSAGE_RAILS).sort() toEqual [...MESSAGE_RAIL_IDS].sort() (runtime drift guard). For every rail id, unconditionally, output toEqual [FULL, HUMAN_MIMIC]. For each mutating rail (rename, archive, updateAtomic, rewind, fork), a fresh readFileSync of the resulting file gives messages.map(m=>m.origin??null) toEqual ['harness', null]. Syntax-AST census, labeled as a syntax pin: exactly 1 `savedSessionSchema.safeParse` call site in src, so the decode chokepoint covers every V2 rail.",
+   "pairedControl": "HUMAN_MIMIC maps to isSyntheticUserMessage === false after every rail, so the census yields zero false positives. The census scanner parses an in-test source string with a second safeParse call and must report exactly 2.",
+   "mutationThatMustTurnRed": "The same schema-line removal makes every V2 rail id RED while v1-state stays green, which documents V1's keep-originals behavior. A separate mutation, renameSession rebuilding messages as {role, content}, makes only the rename id RED.",
+   "redTodayProof": "probe-bug1-rails-r2.ts disk-after-rename is all null origin. R1's probe-bug1-meta-ops.ts showed the same for archive, rewind, updateAtomic and fork."
+  },
+  {
+   "name": "B-T3 message-schema value-domain early warning",
+   "tier": "ratchet/census (compile-time; typecheck:all in the gate manifest, tools/dev/gate-manifest.ts:103-105)",
+   "seam": "A private const in src/session/saved-session-schema.ts: `__Eq<__Norm<z.output<typeof messageSchema>>, __Norm<Message>>`.",
+   "setup": "None (type-level). The comment states the limit: an early warning for depth ≤2 and not a completeness proof; B-T1 and B-T2 are the proof.",
+   "assertions": "Compiles on the fixed tree.",
+   "pairedControl": "HEAD without origin is RED and with origin is GREEN (probe-guard-forms2.ts node_msg), so the guard is not always red.",
+   "mutationThatMustTurnRed": "Widen `origin?: \"harness\" | \"hook\"` in llm/types.ts, or add 'x' to the phase enum in the schema: TS2322 on the guard (probe-guard-forms2.ts rows 'types: origin widened' and 'schema: phase enum widened', node_msg=RED). Neither case is catchable by B-T1.",
+   "redTodayProof": "probe-guard-matrix.ts HEAD: dr_msg RED (missing origin)."
+  },
+  {
+   "name": "B-T4 rewind-harness-origin-hellgate",
+   "tier": "unit",
+   "seam": "Production persistTurn (runner/orchestrate/persist-turn.ts:188-211) mints ids, then saveSessionById/loadSessionById, then findToLastTargetForTest/resolveTargetForTest (apps/cli/rewind-cmd.ts).",
+   "setup": "Two describe blocks decided at collection time, with env set in beforeAll and runtimeConfig reset. ARM-ON sets QUANTA_MESSAGE_IDS=1; ARM-OFF leaves it unset. Transcript: [human m0, assistant, buildCompactionSummaryMessage(...), human, assistant].",
+   "assertions": "ARM-ON: the persisted summary has typeof id === 'string'; resolveTarget(summaryId) toEqual {kind:'err', message:`message-id not found: ${summaryId}`}; findToLastTarget returns exactly the id before the last human turn. ARM-OFF: the summary has no id and the rendered list rows are exactly the id-bearing human and assistant messages.",
+   "pairedControl": "A human message is {kind:'ok', fullId} in both arms. A legacy id-prefix-only harness message (makeSyntheticUserMessage) is still excluded.",
+   "mutationThatMustTurnRed": "Restore the id-prefix-only predicate at rewind-cmd.ts:346-348: in ARM-ON, resolveTarget(summaryId) returns ok.",
+   "redTodayProof": "R1 probe-rewind-predicate-split.ts: resolveTarget(m2) → {kind:'ok'}. Under ARM-ON on HEAD, the save→load step already strips origin (B-T1 proof), so the summary is indistinguishable."
+  },
+  {
+   "name": "B-T5 memory-distill-and-consolidator-attribution-hellgate",
+   "tier": "unit",
+   "seam": "Production distillSession (agent/memory-distill.ts) with a capturing LLMPort; runMemoryConsolidatorHook with a capturing Phase1 port.",
+   "setup": "[buildCompactionSummaryMessage, makeSyntheticUserMessage('hook-context'), human]; redaction disabled for byte comparison.",
+   "assertions": "Captured transcript headings in order toEqual ['harness','harness','user']. Consolidator rollout origins toEqual ['harness','harness',undefined].",
+   "pairedControl": "A human-only transcript yields ['user'] and a byte-identical prompt to HEAD's output for the same input, stored as a committed expectation string generated from the HEAD run.",
+   "mutationThatMustTurnRed": "Revert memory-distill.ts:116 to `### ${m.role}`, or restore the {role, content} rebuild at memory-consolidator-hook.ts:211-213.",
+   "redTodayProof": "R1 probe-memory-distill-role.ts: '### user' x3, '### harness' x0."
+  },
+  {
+   "name": "S-T1 project-trust-resolution",
+   "tier": "unit",
+   "seam": "The real resolveProjectTrust/grantProjectTrust (src/config/project-trust.ts) over the real TrustStore and a file-backed persistence port in a mkdtemp dir, with real fs.realpath.",
+   "setup": "Repo under os.tmpdir() with a `.git` dir (on macOS the lexical path differs from the realpath); a symlink to it; a nested child repo with its own `.git`; a scratch home dir.",
+   "assertions": "No record → {kind:'untrusted', reason:'no-record'}. Record keyed by realpath with cwd given lexically → trusted and root === realpathSync(repo). Cwd via symlink → trusted with the same root. Env QUANTA_TRUSTED_PATHS given as the lexical or symlink path → trusted via 'operator-env'. A parent-only record with cwd in the nested child repo → untrusted. A trust-store path inside the repo → untrusted('trust-store-inside-project'). An explicit {trusted:false} record → untrusted('explicitly-untrusted'). A grant with cwd === home → the in-session decision is trusted('session-grant'), and a NEW TrustStore loaded from the same file (fresh read) → untrusted. Mode source 'never' with a record present → untrusted('mode-never').",
+   "pairedControl": "An untrusted symlink target stays untrusted. A realpath-keyed record for an unrelated sibling dir does not trust the repo.",
+   "mutationThatMustTurnRed": "(a) Drop realpath on env entries: the env-symlink arm goes RED. (b) Drop the lookup-side realpath: the lexical-tmp arm goes RED. (c) Remove the containment check: RED. (d) Persist home grants: the fresh-read arm goes RED.",
+   "redTodayProof": "The module does not exist on HEAD. The equivalent behavior of today's derivation is measured by probe-trust-canon.ts (lexical /tmp lookup false; env list via symlink misses)."
+  },
+  {
+   "name": "S-T2 project-trust-forge-hellgate",
+   "tier": "integration (compiles a tiny entry, ~0.8s measured, and spawns children)",
+   "seam": "A child process built with the SSOT compile args exported from tools/bin/build-cli.ts (cluster A), whose entry performs the production sequence: loadEnvFiles(['.env.dev','.env.local','.env']) (same list as apps/cli/index.ts:33), then operatorEnvView, then resolveProjectTrust. The child is started via spawnScrubbed with cwd = the repo and a scratch HOME/QUANTA_CONFIG_DIR.",
+   "setup": "The dotenv files are written to disk BEFORE the child is spawned. Arms: F-env (.env: QUANTA_TRUSTED_PATHS=<realpath repo>), F-local (.env.local, same), F-dev (.env.dev, same), F-home (.env: QUANTA_CONFIG_DIR=.q plus a forged .q/trust.json keyed by realpath). The child prints its decision as JSON.",
+   "assertions": "F-env, F-local and F-dev each give {kind:'untrusted', reason:'no-record'}. F-home gives untrusted. Completeness invariant: in each arm, the child reports envFileSourceOf(key) === the absolute path of the file that holds the key.",
+   "pairedControl": "The same QUANTA_TRUSTED_PATHS supplied in the child's spawn env (no dotenv) gives trusted, via 'operator-env'. A real-env QUANTA_CONFIG_DIR outside the repo with a genuine record gives trusted via 'trust-store'.",
+   "mutationThatMustTurnRed": "(a) Remove `--no-compile-autoload-dotenv` from the exported compile args: F-env and F-local go RED (provenance null, forge trusted). (b) Remove the provenance filter in operatorEnvView: F-dev goes RED. Confirm (a) applied by grepping the args constant before the run.",
+   "redTodayProof": "Compiled probe with the HEAD build-cli flags: before='/forged/by/repo', prov=null, provLocal=null. Today's derivation `trustedFromEnv.has(realCwd)` (apps/agent/index.ts:323-326) would trust it."
+  },
+  {
+   "name": "S-T3 project-mcp-json-trust-hellgate",
+   "tier": "integration (spawns a benign child)",
+   "seam": "Real CLI loadFeatures → loadMcpFeatures → readMcpConfig → MCP client start (apps/cli/internal.ts:504-509), and web loadDaemonMcp (web-daemon/runtime-factory/daemon-mcp.ts), in a spawnScrubbed child with cwd = the repo.",
+   "setup": "Repo .mcp.json whose command is `sh -c touch <repo>/EXECUTED.marker`. A second repo additionally has a pre-existing .env setting QUANTA_MCP_CONFIG=<repo>/evil.json pointing at the same marker command.",
+   "assertions": "UNTRUSTED, both loaders, both repos: fresh existsSync(marker) === false and mcpConfigs.length === 0.",
+   "pairedControl": "A TRUSTED decision gives marker === true and mcpConfigs.length === 1. An operator spawn-env QUANTA_MCP_CONFIG pointing outside the repo, in an untrusted folder, gives mcpConfigs.length === 1.",
+   "mutationThatMustTurnRed": "Pass process.cwd() as projectRoot again at internal.ts:508: the marker appears in UNTRUSTED. Read QUANTA_MCP_CONFIG from raw process.env: the dotenv repo arm goes RED.",
+   "redTodayProof": "mcp-composition.ts:340-347 plus internal.ts:504-509 on HEAD; R1 probe-project-mcp-spawn marker false→true."
+  },
+  {
+   "name": "S-T4 cli-project-trust-rules-wire-hellgate",
+   "tier": "unit (same tier as the existing F1a hellgate)",
+   "seam": "Real bootstrapSession → buildBaseFromBootstrap → runAgent with a capturing LLM (tests/_support/bootstrap-fake-deps.ts). The resolveProjectTrust dep is the real function; only persistence is file-backed in a scratch dir.",
+   "setup": "Repo under os.tmpdir() (lexical path differs from realpath on macOS) with .git and AGENTS.md containing SENTINEL.",
+   "assertions": "UNTRUSTED: countOccurrences(system + message wire, SENTINEL) === 0; boot.repoRules === undefined; boot.projectTrust.kind === 'untrusted'; boot.ignoredRepoArtifacts toEqual [{artifact:'repo-rules', path: realpathSync(AGENTS.md)}].",
+   "pairedControl": "A record keyed by realpathSync(repo), with bootstrap cwd given as the LEXICAL tmp path, gives SENTINEL count === 1 and projectTrust.root === realpathSync(repo). A rule-less repo produces byte-identical system prompt bytes whether trusted or untrusted.",
+   "mutationThatMustTurnRed": "Bypass `decision.kind` in resolveBootstrapRepoRules: UNTRUSTED goes RED. Remove the lookup-side realpath: the TRUSTED control goes RED.",
+   "redTodayProof": "D-r1 probe-sec5-untrusted-rules-wire.ts re-run at HEAD 6408faeb3: 'sentinel in LLM system prompt: true'."
+  },
+  {
+   "name": "S-T5 bootstrap-surface-runmode-hellgate",
+   "tier": "integration",
+   "seam": "Real setupSession/bootstrapSession (apps/cli/repl/session-setup.ts:384) and openHeadlessRuntimeSession (apps/headless/session-bridge.ts:111).",
+   "setup": "TTY REPL shape, one-shot non-TTY shape (argPrompt set), and serve-stdio bridge.",
+   "assertions": "boot.projectTrust.source is exactly 'operator-grant', 'operator-grant' and 'host-attested' respectively; boot.promptSurfaceProfile run mode is 'interactive', 'headless' and 'ide'.",
+   "pairedControl": "The TTY REPL trusted arm keeps HEAD's interactive surface-profile bytes.",
+   "mutationThatMustTurnRed": "Hardcode 'interactive' at session-state-ports.ts:219/252 again: the headless and ide arms go RED.",
+   "redTodayProof": "session-state-ports.ts:219 and :252 literals on HEAD."
+  },
+  {
+   "name": "S-T6 repo-authority-artifacts-exhaustive-hellgate plus brand-cast census",
+   "tier": "unit (hellgate arms) plus ratchet/census (syntax AST, labeled as a syntax pin)",
+   "seam": "`REPO_AUTHORITY_ARTIFACTS: Record<RepoAuthorityArtifact, {untrusted: Arm; trusted: Arm}>` for repo-rules, project-mcp-json, named-agents (runtime-context-compose.ts:410-413), project-grants-overlay (:368-376), plugins (auto-wire via buildInteractiveTurnAssembler), vendor-glob-rules (mode-presets/system.ts), legacy-settings-hooks (apps/agent/index.ts:308). Each arm drives the real composition root.",
+   "setup": "One planted artifact per arm; decisions minted through resolveProjectTrust (never cast).",
+   "assertions": "Object.keys(REPO_AUTHORITY_ARTIFACTS).sort() toEqual [...REPO_AUTHORITY_ARTIFACT_IDS].sort(). Every untrusted arm reports its exact effect as absent (e.g. named agent registry names toEqual [], grants hasGrant('bash') === false, plugin activatePlugins === undefined). Census over src and tests: AsExpression/TypeAssertion nodes whose type is TrustedProjectRoot or ProjectTrustDecision outside src/config/project-trust.ts toEqual [], with a scan-population floor.",
+   "pairedControl": "Every trusted arm reports the effect present (exact name lists or counts). The census scanner, fed an in-test source string containing `x as TrustedProjectRoot`, yields exactly 1 violation.",
+   "mutationThatMustTurnRed": "Remove the decision check in the named-agents site: that arm goes RED. Add `as TrustedProjectRoot` in runtime-context-compose.ts: the census goes RED.",
+   "redTodayProof": "R1 probe-project-grants-overlay.ts (overlay hasGrant(bash)=true with no trust). Plugin auto-wire gate passes for interactive (auto-wire.ts:149)."
+  },
+  {
+   "name": "S-T7 cli-project-trust-prompt-e2e",
+   "tier": "e2e-pty (opt-in lane; describe.skipIf(!PTY_AVAILABLE) so the skip is visible at collection)",
+   "seam": "Real src/apps/cli/index.ts in a pty (tests/e2e-pty/pty-harness.ts) with a QUANTA_LLM_REPLAY cassette, scratch HOME/QUANTA_CONFIG_DIR, cwd = the repo.",
+   "setup": "The repo holds AGENTS.md and a .mcp.json marker command.",
+   "assertions": "The prompt lists exactly 'AGENTS.md' and '.mcp.json'. After 'n', the REPL accepts a first keystroke (raw-mode hazard check), fresh existsSync(marker) === false, and /rules shows 'ignored'. On relaunch, 'y' leaves JSON.parse(fresh read of trust.json) with exactly one key === realpath(repo) and trusted:true, marker === true, and /rules showing AGENTS.md active. A third launch shows no prompt.",
+   "pairedControl": "A dir with no repo-authority artifacts shows no prompt text.",
+   "mutationThatMustTurnRed": "Skip the prompt call in session-setup, or make grantProjectTrust not flush: the third launch prompts again.",
+   "redTodayProof": "No CLI trust prompt exists on HEAD. The only one is apps/agent/index.ts:233-255, reachable only through central-config hooks."
+  }
+ ],
+ "implementationOrder": [
+  "B1 (BUG-1, RED first): add tests/_support/complete-message.ts and B-T1. Fix: `origin` in messageSchema. Green: B-T1.",
+  "B2: B-T2 rails census (RED on the V2 rails is already fixed by B1, so write B-T2 against the B1 tree and prove it with the schema-line mutation). Then fix ipc/session-import.ts and sdk rehydrate to use firstInvalidMessageElement, with an arm refusing origin:42 as the RED-first case.",
+  "B3: B-T3 Message-node early-warning const in saved-session-schema.ts (RED-first: mutation origin widened).",
+  "B4: B-T4 rewind (RED on ARM-ON), then fix rewind-cmd.ts predicate and rendering.",
+  "B5: B-T5 (RED today), then summaryRoleOf in memory-distill, advisor, prompt-suggestion and session-ops; the consolidator carries Message; remove the session-memory-auto cast.",
+  "B6: delete isHarnessAuthored and fix the false comments (harness-speech.ts:34-41, turn-iteration.ts:441-442, synthetic-provenance-hellgate.test.ts:31 header). Optional: narrow waitingOn in session/types.ts:365, with whole-repo typecheck:all.",
+  "S0 (cluster A, dependency, not D): tools/bin/build-cli.ts adds --no-compile-autoload-dotenv/--no-compile-autoload-bunfig and exports the args constant, with A's own test. D does not land it.",
+  "S1 (RED: S-T1): src/config/project-trust.ts plus MODE_PROJECT_TRUST_SOURCE Record with drift guard (HG-S4 arms folded into S-T1).",
+  "S2 (RED: S-T3 untrusted arm): readMcpConfig projectRoot requires TrustedProjectRoot; CLI internal.ts and web daemon-mcp.ts mint the decision. Default-on.",
+  "S3 (RED: S-T2; blocked on S0): operatorEnvView in env-files.ts, consumed by resolveProjectTrust and the MCP env-path keys; containment refusal.",
+  "S4 (RED: S-T4, S-T5): runMode in SessionRuntimeConfigShape; bootstrap and web daemon consume the decision; loadRepoRules(TrustedProjectRoot); migrate the ~12 positive-path tests to real grants. Must ship in the same push as S5.",
+  "S5 (RED: S-T7; blocked on UX decision): TTY prompt (moved defaultTrustPrompt), `quanta trust`, /rules ignored rows, optional --trust-project.",
+  "S6 (RED: S-T6): named agents, grants overlay, plugins, vendor/glob rules and legacy hooks take the decision; brand-cast census; delete modeLoadsRepoRules.",
+  "S7: move trust-persist to src/host and collapse the three duplicated derivations (apps/agent/index.ts, mcp-composition.ts:458-496, configured-endpoint-wire.ts:74-108) onto resolveProjectTrust. Existing hooks/endpoint tests stay green as the byte-identity control.",
+  "B7 (optional, integration lane): type-checker census that Message.role is never rendered into strings, ratcheted to [] (ROI: prevents a sixth render site; cost ~11s per R1, unmeasured here)."
+ ],
+ "fileOwnership": [
+  "src/session/saved-session-schema.ts",
+  "src/session/types.ts",
+  "src/apps/cli/rewind-cmd.ts",
+  "src/agent/memory-distill.ts",
+  "src/agent/memory-consolidator-hook.ts",
+  "src/runner/session-memory-auto.ts",
+  "src/agent/tier1/advisor.ts",
+  "src/apps/cli/repl/prompt-suggestion-wire.ts",
+  "src/runner/session-ops/index.ts",
+  "src/agent/compaction/harness-speech.ts",
+  "src/agent/loop/turn-iteration.ts",
+  "src/ipc/session-import.ts",
+  "src/sdk/runtime/session/rehydrate.ts",
+  "tests/_support/complete-message.ts",
+  "tests/unit/session/saved-session-message-fidelity-hellgate.test.ts",
+  "tests/unit/session/message-rails-census-hellgate.test.ts",
+  "tests/unit/apps/cli/rewind-harness-origin-hellgate.test.ts",
+  "tests/unit/agent/memory-attribution-hellgate.test.ts",
+  "tests/unit/agent/synthetic-provenance-hellgate.test.ts",
+  "src/config/project-trust.ts",
+  "src/config/index.ts",
+  "src/shared/env-files.ts",
+  "src/host/project-trust-persistence.ts",
+  "src/apps/agent/trust-persist.ts",
+  "src/apps/agent/index.ts",
+  "src/agent/run-mode/repo-rules-policy.ts",
+  "src/agent/run-mode/index.ts",
+  "src/agent/index.ts",
+  "src/agent/repo-rules.ts",
+  "src/host/mcp-composition.ts",
+  "src/apps/cli/internal.ts",
+  "src/apps/web-daemon/runtime-factory/daemon-mcp.ts",
+  "src/apps/web-daemon/runtime-factory/agent-config-base.ts",
+  "src/host/bootstrap/bootstrap-session/session-state-ports.ts",
+  "src/host/bootstrap/types.ts",
+  "src/apps/cli/repl/session-setup.ts",
+  "src/apps/cli/repl.ts",
+  "src/apps/headless/session-bridge.ts",
+  "src/apps/terminal/brain-mode.ts",
+  "src/apps/cli/repl/project-trust-prompt.ts",
+  "src/apps/cli/rule-indicator.ts",
+  "src/apps/cli/configured-endpoint-wire.ts",
+  "src/apps/cli/repl/runtime-context-compose.ts",
+  "src/agent/named-agent-registry.ts",
+  "src/permission/trust-scope-store.ts",
+  "src/agent/plugin-activation-handler/auto-wire.ts",
+  "src/host/runtime/agent-config-assembler.ts",
+  "src/apps/agent/mode-presets/system.ts",
+  "tests/unit/config/project-trust.test.ts",
+  "tests/integration/project-trust-forge-hellgate.test.ts",
+  "tests/integration/project-mcp-json-trust-hellgate.test.ts",
+  "tests/unit/apps/cli/cli-repo-rules-wire-hellgate.test.ts",
+  "tests/integration/bootstrap-surface-runmode-hellgate.test.ts",
+  "tests/unit/repo-authority-artifacts-exhaustive-hellgate.test.ts",
+  "tests/e2e-pty/cli-project-trust-prompt.e2e.test.ts",
+  "tests/unit/mode-preset-repo-rules-wire-hellgate.test.ts",
+  "(test migrations, ~10 more: interactive-repo-rules e2e/wire, repo-rules*.test.ts, agents-md-scope-e2e, sota-codex-full, config-migration-persist*)",
+  "NOT OWNED (cluster A): tools/bin/build-cli.ts"
+ ],
+ "userDecisions": [
+  {
+   "question": "Who lands the Bun compile autoload flags (--no-compile-autoload-dotenv/--no-compile-autoload-bunfig) and the `.mcp.json` trust gate?",
+   "options": "(a) Cluster A owns the build flags; D owns the MCP gate via the shared ProjectTrustDecision. (b) D lands both. (c) An exec/MCP cluster owns the MCP gate and consumes D's resolveProjectTrust.",
+   "recommendation": "(a). A is already probing bunfig/dotenv hardening (wf/A-r1/bunprobe). One trust decision SSOT means the MCP gate should use D's module, whoever types it.",
+   "blocking": true
+  },
+  {
+   "question": "Interactive TTY, untrusted folder with repo-authority artifacts: what happens?",
+   "options": "(a) One-time prompt; decline continues without the artifacts. (b) Prompt; decline exits (CC 'No, exit', chunk-03ah04wm.js:526-545). (c) Notice only.",
+   "recommendation": "(a): asks once, never blocks work, and the decline is visible in /rules and /status.",
+   "blocking": true
+  },
+  {
+   "question": "Default for non-interactive surfaces (`quanta -p`, CI, serve --stdio, SDK)",
+   "options": "(a) Untrusted unless an operator grant (Codex exec: 'Not inside a trusted directory...', _cli-symbols.txt:21457). (b) Implicitly trusted like CC -p (chunk-m04a62n5.js:27866-27869).",
+   "recommendation": "(a). Bench/eval surfaces do not depend on repo rules (verified), so the cost falls on users running `quanta -p` in their own CI, who get a one-line notice naming the grant channels.",
+   "blocking": true
+  },
+  {
+   "question": "Grant channel for headless/CI",
+   "options": "(a) Real-env QUANTA_TRUSTED_PATHS only (valid once A's autoload flag lands). (b) Add a `--trust-project` argv flag (session-only, not persisted; argv is not repo-forgeable). (c) `quanta trust <path>` as a pre-step writing trust.json.",
+   "recommendation": "(b) plus (c), keeping (a) for compatibility. Argv is the one channel a repo file cannot forge even in source-mode runs.",
+   "blocking": false
+  },
+  {
+   "question": "Scope of the trust gate",
+   "options": "(a) Instruction files only. (b) All repo-authority artifacts through one decision: AGENTS.md/CLAUDE.md, .mcp.json, .quanta/agents and .claude/agents, .quanta/project-grants.json, .quanta/plugins, vendor/glob rules, legacy settings.json hooks.",
+   "recommendation": "(b).",
+   "blocking": true
+  },
+  {
+   "question": "Trust granularity",
+   "options": "(a) Realpath git root; nested repos need their own trust; loose dirs keyed at the exact cwd. (b) CC-style ancestor inheritance inside the git root (chunk-m04a62n5.js:28040-28049). (c) Exact cwd only.",
+   "recommendation": "(a). One key, one walk bound, and no ancestor record silently covering an unrelated subtree.",
+   "blocking": false
+  },
+  {
+   "question": "Web/Tauri trust UX",
+   "options": "(a) Readout banner plus a 'Trust folder' action (the daemon writes TrustStore; takes effect in a new session). (b) Native dialog at folder open. (c) Launch flag only.",
+   "recommendation": "(a) now.",
+   "blocking": false
+  },
+  {
+   "question": "IDE (serve --stdio) trust source",
+   "options": "(a) TrustStore/operator grant only. (b) A host-attested workspace-trust bit in the session.v1 handshake.",
+   "recommendation": "(a) now; (b) as a later protocol field.",
+   "blocking": false
+  },
+  {
+   "question": "Home directory grants",
+   "options": "(a) Session-only, never persisted (CC CHANGELOG-upstream.md:1618 per R1). (b) Persist like any folder.",
+   "recommendation": "(a).",
+   "blocking": false
+  },
+  {
+   "question": "Authority rank of TRUSTED repo rules vs the user request (prompt-body.ts:36-46 ranks L6 above L8)",
+   "options": "(a) The user request overrides repo rules except L1-L5 (Cursor main.js:58377-58379). (b) Keep repo rules above the user.",
+   "recommendation": "(a).",
+   "blocking": false
+  },
+  {
+   "question": "Protect trust.json and grants.json from model writes",
+   "options": "(a) Hard-deny bash/write/edit on the quanta home trust files (separate small change). (b) Leave as is.",
+   "recommendation": "(a), as its own change; otherwise the model can self-grant.",
+   "blocking": false
+  },
+  {
+   "question": "Should PersistedBlockerObservation.waitingOn be narrowed to the schema enum?",
+   "options": "(a) Narrow the type (a partial overlay showed 0 new diagnostics). (b) Leave it and do not add a full-SavedSession guard.",
+   "recommendation": "(a), in its own commit with typecheck:all. Not required for BUG-1, because the completeness proof is runtime.",
+   "blocking": false
+  },
+  {
+   "question": "Already-stripped sessions (BUG-1)",
+   "options": "(a) Accept the loss. (b) Reconstruct from summary header text.",
+   "recommendation": "(a). (b) is a text heuristic.",
+   "blocking": false
+  },
+  {
+   "question": "tool_use.input optional in the zod output",
+   "options": "(a) Leave it; document that z.unknown() makes the key optional. (b) Add a runtime refine rejecting an absent input.",
+   "recommendation": "(b), matching ipc import, which already rejects an absent input (session-import.ts:99-108 per R1).",
+   "blocking": false
+  }
+ ],
+ "residualRisks": [
+  "TypeScript deep identity and assignability are order- and depth-limited (probe-guard-forms*.ts), so the only completeness proof for Message fidelity is runtime (B-T1/B-T2). Top-level SavedSession subtrees (objective, rollback, meta) keep their existing per-RFC tests and get no Complete<> fixture in this plan.",
+  "Source-mode runs (`bun run src/apps/cli/index.ts`) still autoload a cwd bunfig.toml and .env unless started with --no-env-file; the flag does not stop bunfig (my probe: marker 1 with --no-env-file). Only the compiled binary is hardened by A's flags, so dev launch scripts are cluster A's residual.",
+  "The operator-env view is complete only once A's flags ship. If D's S3 lands first it must not claim forge resistance.",
+  "A brand-new reader of a repo-authority artifact that neither uses TrustedProjectRoot nor registers in REPO_AUTHORITY_ARTIFACTS is not caught mechanically, because 'authority' vs 'data' is semantic. The dropped constant-reference census would have been evadable anyway.",
+  "MESSAGE_RAILS is a hand list; its completeness rests on the single-decode chokepoint pin (one savedSessionSchema.safeParse) plus V1/ipc using firstInvalidMessageElement. A future rail with its own decoder needs its own entry.",
+  "Dotenv relocation of the skill dirs (D-H6) and dotenv-set feature gates (QUANTA_MIGRATE_CONFIG*, QUANTA_LLM_CREDENTIAL_TRUSTED) stay open until cluster A decides what a cwd dotenv may set.",
+  "Plugin spawn via mention (D-H9) was not driven end to end.",
+  "The waitingOn narrowing was typechecked only over 238 reachable files, not the whole repo.",
+  "Model self-grant by writing ~/.quanta/trust.json stays possible until the protected-path change lands.",
+  "The TOCTOU between the listed artifacts at grant time and later content matches CC and Codex behavior (they trust the folder, not a content digest).",
+  "Resume-then-save stripping through the real REPL loop is inferred from the store-level probes and was not driven through a pty session."
+ ],
+ "readiness": "READY-WITH-DECISIONS. The BUG-1 lane (B1-B6) is READY now: its files are disjoint from the SEC-5 lane, it needs no UX decisions, every RED is measured at HEAD 6408faeb3, and the guard design was corrected after probes showed type-level guards unreliable. SEC-5 S1 (a pure decision module) is READY. S2 and S3 are blocked on the ownership decision with cluster A: the build flags and D-H5 completeness must land first for S3 to be forge-resistant. S4-S6 are blocked on the TTY behavior, non-TTY default and gate scope decisions, and S4 must ship in the same push as S5."
+}

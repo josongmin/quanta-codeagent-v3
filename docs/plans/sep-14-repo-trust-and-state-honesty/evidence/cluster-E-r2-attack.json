@@ -1,0 +1,217 @@
+{
+ "cluster": "E — context occupancy (BUG-2). Round-2 adversary review of R1's \"Option C: ContextOccupancyLedger\" design. Probes are in /private/tmp/claude-501/-Users-songmin-quanta-codeagent-v3/61b6df3d-2c23-4938-9257-6cb354e928ed/scratchpad/wf/E-r2a/ (a1 to a6). No repo files were touched. The uncommitted tools/dev and tests/unit/dev edits and the untracked tools/dev/repository-identity.ts in git status belong to the concurrent session.",
+ "designBreaks": [
+  {
+   "attack": "Cross-prompt anchor plus per-turn injected messages that never enter working memory. Examples: @file mention injection (default-ON, up to 256 KiB), hook-context and context-change messages, and the trailing system-reminder (memory, skills, working state). R1 hashes a digest over the wm prefix, so after the next user prompt the digest still matches. But the provider count P included the injected content from the previous prompt, which is no longer sent.",
+   "bypassOrRegression": "REGRESSION introduced by the fix: occupancy is over-counted by the size of the vanished injection, which causes premature, lossy compaction. Today, round 1 of prompt 2 undercounts by about 9.3k. Under R1 it overcounts by 50k. The digest cannot detect this because the injected content is not in wm. Hashing the sent messages instead would not help either: the trailing reminder sits at the tail of every request, so the anchor would never be valid.",
+   "evidence": "Probe a1-mention-ephemeral.ts (real runAgent, mentionInjector returns 200k chars when the prompt contains @big). Prompt 1 sent providerInput 109351; the wm does not contain the mention (wm_contains_big false). Prompt 2 round 1 actual sent 59390. R1's anchored formula P + est(suffix) = 109390, so r1_overcount_tokens = 50000. Code: the mention is re-resolved from the latest user text every round and never stored (context-assembler.ts:147-169, :553-575). compile() appends injected messages after baseMessages and pushes the trailing reminder (prompt.ts:766-770, 796-815). @file is default-ON (host/runtime/agent-config-assembler.ts:715; mention-wire.ts:53-80; base.ts:20).",
+   "severity": "HIGH",
+   "reproduced": true
+  },
+  {
+   "attack": "R1 claims the fixed prefix is always counted and that display, warning and trigger agree by construction. The trigger runs in prepareTurnContext before this round's system prompt, visible tools (skill scope and plan-mode filter) and injected messages are assembled.",
+   "bypassOrRegression": "On an unanchored round, R1's estimate (system + tools + wm) still misses the per-turn injected channel: it undercounts by the full @file size. 'Identity' holds only for the instant between trigger and send, so the reading can never equal what the round actually sends.",
+   "evidence": "Probe a1 event order: [preflight#1, send#1, preflight#2, send#2]. r1_noanchor_undercount_prompt1 = 50086 (R1 estimate 59265 vs sent 109351). maybeCompact runs at context-assembler.ts:512-523. Assembly and emitPromptAssembled follow at :553-600. visibleSpecs is resolved later still, at stream-consume.ts:499, through filterSpecsByScope and filterSpecsByMode (:372-379).",
+   "severity": "MED",
+   "reproduced": true
+  },
+  {
+   "attack": "R1 removes the >=estimate trust gate because 'once the convention is structural, that question no longer exists'. But the adapters turn a missing prompt-side count into inputTokens:0.",
+   "bypassOrRegression": "Fail-OPEN: the anchor becomes 0, so occupancy is about 0 plus the suffix. Proactive compaction never fires, and /context and the warning show an almost empty window. Today's gate rejects this value.",
+   "evidence": "Probe a2-zero-input-usage.ts. (1) The real AnthropicAdapter against a 127.0.0.1 SSE server, where message_start usage has no input_tokens and message_delta carries input_tokens 90000, emits {type:'usage', inputTokens:0, outputTokens:10}. The adapter reads only output_tokens from message_delta (anthropic.ts:284). buildUsageEvent defaults inputTokens to 0 (adapters/shared.ts:127-130). (2) parseResponsesEvents with a response.completed whose usage has no input_tokens also yields inputTokens:0 (openai-responses-wire.ts:913). Today TokenBaselineBox.capture gives accepted:false with trigger 100000. R1's no-gate anchor total is 0. Which real vendors actually send this shape: UNVERIFIED.",
+   "severity": "HIGH",
+   "reproduced": true
+  },
+  {
+   "attack": "Window and threshold resolution after a /model switch to a candidate port that pins the 1M window key. R1's resolveOccupancyWindow copies 'the exact precedence compactIfNeeded uses today' (resolveWindowModel(config.llm, activeModel)).",
+   "bypassOrRegression": "The existing bug is carried into the SSOT. resolveWindowModel honours contextWindowKey only when the active model equals the boot model, so a switched 1M candidate compacts and warns at 123k against a 200k window instead of 923k against 1M. R1 left this UNKNOWN but designed over it anyway.",
+   "evidence": "Probe a6-switched-port-window.ts (real resolveActiveModelId, resolveWindowModel and resolveThreshold; routing authority stubbed) gives thresholdUsed 123000 and windowUsed 200000, versus 923000 and 1000000 for the served port's key. Code: emit-helpers.ts:346-352. Candidates are built with tryCreateLLM (agent-arg-builder/model-switch-wire.ts:71), and the factory pins contextWindowKey whenever QUANTA_CONTEXT_1M is active (factory.ts:207-218; context-1m.ts:49-59).",
+   "severity": "MED",
+   "reproduced": true
+  },
+  {
+   "attack": "Web surface consumer outside R1's change list: the web StatusBar has its own context warning.",
+   "bypassOrRegression": "After R1's fix the web shows a second warning with different logic: window ratio 0.8 using Math.floor, and no compaction threshold. It disagrees with the CLI warning for the same numbers. It also says 'the runtime will compact soon' on a surface with no compaction config. R1's H9 census tracks symbols, not arithmetic, so it cannot see this.",
+   "evidence": "Probe a3-web-warning-divergence.ts. At total 112000 and 150000 the CLI warns '91%/122% of compaction limit' while the web returns null. At 160000 the web returns 'context 80% full — the runtime will compact soon'. Code: apps/web-frontend/src/lib/context-warning.ts:15-24; StatusBar.tsx:26,48; App.tsx:849. The web base has no compaction slot (web-daemon/runtime-factory/agent-config-base.ts:251-300; only the CLI bootstrap base builds one, base.ts:255-290), so 'will compact' is false by static reading. R1's frontend change list names only protocol.ts, usage-adapter.ts, slash-context-gauge.ts and UsageBreakdownPanel.tsx.",
+   "severity": "MED",
+   "reproduced": true
+  },
+  {
+   "attack": "The ledger is owned per app composition root (CLI session-setup, web agent-config-base), with a run-scoped fallback in session-bootstrap. Other multi-turn session hosts built on the same runtime get nothing injected.",
+   "bypassOrRegression": "New cross-surface divergence: CLI keeps the anchor across prompts, while headless 'serve --stdio', terminal brain-mode and SDK RuntimeSession fall back to per-run ledgers. The same session would trigger at different points depending on surface. The natural single owner is createRuntimeSessionHost, which already holds per-session state such as emittedArtifactIds.",
+   "evidence": "createRuntimeFromBootstrap roots: src/apps/headless/session-bridge.ts:13-17, src/apps/terminal/brain-mode.ts, src/sdk/runtime/index.ts. Per-session host state lives at src/host/runtime/internal/context-binding.ts:383-401. R1 changes list only session-setup.ts:489-518 and web agent-config-base.ts:281-284. Static reading.",
+   "severity": "MED",
+   "reproduced": false
+  },
+  {
+   "attack": "Making surfaceId required on the usage StreamEvent.",
+   "bypassOrRegression": "Breaking change to the public SDK contract. src/sdk/types.ts:11 re-exports LLMPort, whose stream() yields StreamEvent. src/sdk/testing.ts:16 exposes FakeCompletion {events: StreamEvent[]}, and package.json publishes './sdk'. Third-party LLMPorts fail typecheck, and at runtime they silently fall back to the 'inferred-from-model-id' path, so the convention bug stays unfixed for them. R1's compatibility section says only 'No SDK re-export was found'.",
+   "evidence": "src/sdk/types.ts:11; src/sdk/testing.ts:16,63; package.json exports ./sdk; llm/types.ts:212-228 (the usage variant). Static reading.",
+   "severity": "MED",
+   "reproduced": false
+  },
+  {
+   "attack": "The rollout gate: a 'pre-landing measurement receipt' from the SWE-bench 6-pick smoke plus loop-d4-d5.",
+   "bypassOrRegression": "The measurement cannot see the trigger changes that matter: the cross-prompt anchor and the injected-message channel. Bench runs one runAgent per instance or repair round, with seeded history and no mentionInjector, so the receipt would come back roughly unchanged whether or not the regression in the first finding exists.",
+   "evidence": "Repair rounds are seeded new runs (runner/batch/eval/driver/context-types.ts:104-116). The bench config sets compaction:{} with no mention wire (runner/batch/eval/driver/config-build.ts:623; grep finds no mentionInjector in src/runner or src/apps/bench). loop-d4-d5 drives a single runAgent (R1's own L9).",
+   "severity": "MED",
+   "reproduced": false
+  },
+  {
+   "attack": "Fallback chains and cross-vendor /model switches. FallbackLLM reports the primary's model, surfaceId and contextWindowKey, and the anchor carries no model or tokenizer identity.",
+   "bypassOrRegression": "When the fallback provider serves, or after a switch between an Anthropic and an OpenAI model, the anchor measured in one tokenizer is applied to the other model's window. The window and threshold stay the primary's. The digest does not invalidate either case.",
+   "evidence": "src/llm/fallback.ts:170-205 (identity mirrored from providers[0]). R1's ProviderAnchor fields are {promptTokens, prefixLength, prefixDigest, fixedPrefixEstimate} with no model. Static reading.",
+   "severity": "LOW",
+   "reproduced": false
+  },
+  {
+   "attack": "A session-scoped mutable slot on AgentConfig gets inherited by config spreads.",
+   "bypassOrRegression": "branch_search candidates spread the whole parent config and run concurrently, so they would write into the parent session ledger (recordSend is not specified as root-only). Not reachable in CLI or web today because those hosts do not set branchSearch; the daemon and IDE presets enable it but inject no ledger.",
+   "evidence": "src/agent/branch-search-runner.ts:64,92-100; branch-search/propose.ts:138 (Promise.allSettled); daemon.ts:118 and ide.ts:128 set branchSearch by default. side-conversation.ts:135-137 documents that 'prompt-usage sinks' must not be spread into side runs, which is the same bug class. Static reading.",
+   "severity": "LOW",
+   "reproduced": false
+  }
+ ],
+ "wrongClaimsInR1": [
+  {
+   "claim": "L7 / recommended: the >=estimate gate 'was a proxy for was the cache arithmetic right. Once the convention is structural, that question no longer exists.'",
+   "whyWrong": "The gate also rejects prompt-side counts that were missing and coerced to 0 by the adapters. Removing it makes compaction fail open.",
+   "evidence": "Probe a2: AnthropicAdapter and parseResponsesEvents both emit inputTokens:0. The gate rejects it today (accepted false); R1's anchor is 0. adapters/shared.ts:127-130; openai-responses-wire.ts:913."
+  },
+  {
+   "claim": "Option C: 'Display ≡ warning ≡ trigger by construction … Fixes L4–L8 structurally: the fixed prefix is always counted; the anchor survives user turns and is automatically invalid after any rewrite.'",
+   "whyWrong": "Injected messages that never enter wm are neither 'fixed' nor in wm. They are missed on unanchored rounds and left stale in the anchor across prompts. The trigger also runs before the round is assembled, so it cannot equal the sent request.",
+   "evidence": "Probe a1: undercount 50086 on the no-anchor path; overcount 50000 on the cross-prompt anchor; order preflight#k before send#k."
+  },
+  {
+   "claim": "compatibilityAndMigration: 'No SDK re-export was found (grep over src/sdk)'.",
+   "whyWrong": "That grep checked compaction symbols only. The design's required surfaceId on StreamEvent changes the public LLMPort and FakeCompletion SDK types.",
+   "evidence": "src/sdk/types.ts:11; src/sdk/testing.ts:16,63; package.json exports './sdk'."
+  },
+  {
+   "claim": "H1 expected screen: '150k/200k', 'Context 25% left', 'compaction at 123k', warning '122%' under QUANTA_LLM_REPLAY.",
+   "whyWrong": "The replay seam returns a port with no model, so the window resolves as 'unknown' (max 0, threshold 120000). None of the asserted numbers can appear. The head line also starts with the '[bar]' glyphs, not '150k/200k'.",
+   "evidence": "Probe a4: {portModel:null, windowModel:'unknown', window:null, threshold:120000}; factory.ts:473-497; status-line.ts:163-166."
+  },
+  {
+   "claim": "H4: 'Object.keys(USAGE_CONVENTION_BY_SURFACE).sort() deep-equals the runtime LLM surface id list (drift guard, both directions)'.",
+   "whyWrong": "No runtime surface-id list exists. LlmSurfaceId is a type-only union, so the guard would compare two hand-written lists (a tautology) unless the union is first rebuilt from a const tuple, which R1 does not plan.",
+   "evidence": "src/shared/llm-route-types.ts:5. grep '\"openai-chat-completions\"' in src finds only openai.ts:350 and the type."
+  },
+  {
+   "claim": "H7: web frame 'compactThresholdTokens === 123000 for the pinned model'.",
+   "whyWrong": "This contradicts R1's own recommended user decision 6(b): the web frame carries no compactThresholdTokens and autoCompaction:false. It also runs into the replay-identity problem.",
+   "evidence": "R1 userDecisions[5] recommendation (b); probe a4; web base has no compaction (agent-config-base.ts:251-300)."
+  },
+  {
+   "claim": "H5(e): 'sum(categories.tokens) === total' together with 'residualClamped … true (Messages 0) when the anchor is smaller than the fixed estimate'.",
+   "whyWrong": "When the residual is clamped, the fixed categories alone exceed the total, so the stated sum invariant cannot hold. The CLI cell allocator and the web share math both assume segments sum to total.",
+   "evidence": "R1 H5 text; status-line.ts:153-157 (allocateCells over total); slash-context-gauge.ts:50-56 (share of spent)."
+  },
+  {
+   "claim": "Consumer inventory (L3) covers the CLI /context, the warning, the web canvas frame, the web /context readout and the slash gauge.",
+   "whyWrong": "It misses the web StatusBar warning (a second, divergent decision) and the string-keyed web category hue map, which the proposed category renames would silently break.",
+   "evidence": "apps/web-frontend/src/lib/context-warning.ts:15-24; StatusBar.tsx:26-48; canvas/category-hues.ts:26-34 (Record<string,…> keyed 'Conversation', 'MCP'); probe a3."
+  }
+ ],
+ "missedHoles": [
+  {
+   "what": "Injected messages that never enter wm (@file/@symbol mentions, hook context, context-change events, the trailing system-reminder with memory, skills and working state) are invisible to every occupancy computation today: display, trigger, and R1's no-anchor path. The anchor absorbs them inconsistently. Claude Code avoids this because attachments are transcript messages; quanta's sent request is not its transcript.",
+   "evidence": "Probe a1; context-assembler.ts:147-182, 553-598; prompt.ts:766-815; mention @file default-ON (agent-config-assembler.ts:715).",
+   "severity": "HIGH",
+   "reproduced": true
+  },
+  {
+   "what": "Adapters report a missing prompt-side count as inputTokens:0 instead of leaving it absent. That hides the 'provider did not report input' fact, which is the structural signal an honest anchor needs.",
+   "evidence": "Probe a2; adapters/shared.ts:124-137; anthropic.ts:268-284; openai-responses-wire.ts:909-915.",
+   "severity": "MED",
+   "reproduced": true
+  },
+  {
+   "what": "A switched candidate port's contextWindowKey is ignored by resolveWindowModel, which only consults config.llm. Compaction and the display resolve the 200k threshold on a 1M session.",
+   "evidence": "Probe a6: 123000/200000 used vs 923000/1000000 for the served port; emit-helpers.ts:346-352.",
+   "severity": "MED",
+   "reproduced": true
+  },
+  {
+   "what": "The web StatusBar has a second warning implementation with different ratio and rounding and no compaction threshold. It tells web users that the runtime will compact when the web daemon has no compaction slot.",
+   "evidence": "Probe a3; apps/web-frontend/src/lib/context-warning.ts:15-24.",
+   "severity": "MED",
+   "reproduced": true
+  },
+  {
+   "what": "No drift contract binds the daemon canvas frame (src/protocol/canvas/messages.ts) to the hand-maintained frontend mirror (apps/web-frontend/src/types/protocol.ts ContextUsageMessage). New fields such as source could be dropped on either side with every test green.",
+   "evidence": "apps/web-frontend/src/types/protocol.ts:14-20 (canvas mirrors are hand-maintained, not generated); grep for ContextUsageMessage finds only frontend-local tests plus src/protocol/canvas and canvas-emitter.",
+   "severity": "LOW",
+   "reproduced": false
+  },
+  {
+   "what": "Plan mode (filterSpecsByMode) and skill scope change the visible tool set between prompts. The trigger only knows the previous send's tools, so the fixed-prefix delta is stale exactly when the mode toggles.",
+   "evidence": "stream-consume.ts:372-379 and :499; the trigger runs earlier (context-assembler.ts:512).",
+   "severity": "LOW",
+   "reproduced": false
+  },
+  {
+   "what": "The statusLine payload has a second occupancy-derived field, exceeds_200k_tokens, which nothing fills (besides context_window). R1 cited :183; the actual line is :193.",
+   "evidence": "src/apps/cli/status-command-runner.ts:96,126-127,193-194; grep finds no producer of exceeds200kTokens.",
+   "severity": "LOW",
+   "reproduced": false
+  },
+  {
+   "what": "Migration cost is undercounted. Besides the 21 test files referencing the baseline internals, 13 more reference the snapshot usage path (snapshotToBreakdownInput, buildUsageBreakdownDefault, PromptAssembledSnapshot, onPromptAssembled) that R1 deletes.",
+   "evidence": "grep counts: 21 baseline test files; 13 snapshot-path test files.",
+   "severity": "LOW",
+   "reproduced": true
+  }
+ ],
+ "jankyTests": [
+  {
+   "test": "H1 cli-context-occupancy-e2e",
+   "whyVacuousOrWeak": "(1) Under QUANTA_LLM_REPLAY the port has no model, so 200k, 25% and 123k are unreachable (probe a4). The implementer will have to rewrite the expectations, most likely to whatever the code prints. (2) formatTokens shows values of 100k and above as whole k (status-line.ts:23-28), so the 'estimated suffix' is invisible: a mutation that drops the suffix estimate stays green. (3) Its only realistic control uses inputTokens 2000 against a real CLI prefix of about 9.5k or more, a state no provider produces. (4) R1 admits the test was never run.",
+   "fix": "Forward opts.model and contextWindowKey into the replay port (factory.ts replay branch via forwardPortIdentity) and assert that seam first. Choose a suffix large enough to cross a displayed k boundary (e.g. a 6k-char assistant reply), so removing the suffix changes the rendered head. Add a control where the anchor comes from a request that contained an @file and the next prompt has none."
+  },
+  {
+   "test": "H2 context-occupancy-single-measurement-hellgate",
+   "whyVacuousOrWeak": "(1) Round 2's expected value uses fixed(inputs[1]) and messages from llm.inputs[1] inside a preflight spy that fires before inputs[1] exists (probe a1 order). The set-difference 'messages not present in inputs[0]' is undefined for the per-turn reminder. As specified it cannot be implemented. (2) The round 1 expectation is computed with the same exported occupancy estimator, so it is a tautology and blind to the injected channel (50k miss, probe a1). (3) Mutation (3), visibleSpecs vs all specs, is a no-op without an armed skill gate or plan mode: filterSpecsByScope returns the same array (skill-gate.ts:55-57). (4) The paired control ('below 90% of 123k', spy never called) sits at 89% with defaultTools alone (probe a5: 109,461 tokens); the larger real CLI registry tips it over, so the control depends on registry size.",
+   "fix": "Assert at the send seam (onTurnStreamInput tap) that reading.totalTokens equals an independent chars/4 over the recorded request bytes (system + tools JSON + all sent messages) for unanchored rounds. Pin the display-vs-trigger identity separately. Arm plan mode or a skill scope when running mutation (3). Size the control history so the margin from both ratios is at least 10%, computed from the recorded request rather than hand arithmetic."
+  },
+  {
+   "test": "H3 context-occupancy-cross-turn-anchor-hellgate",
+   "whyVacuousOrWeak": "Every scenario uses plain-text prompts, so the regression where the anchor includes an injected message that is gone on the next prompt stays green (probe a1: +50,000). The formula is written against 'recorded inputs' without separating wm content from injected content.",
+   "fix": "Add the paired case: turn 1 contains @file, which the real CLI mention wire injects, and turn 2 does not. Assert round 1 of turn 2 is within the injected-size-free estimate of the recorded request, i.e. not P + suffix."
+  },
+  {
+   "test": "H4 usage-event-surface-convention-hellgate (drift guard)",
+   "whyVacuousOrWeak": "No runtime SSOT for LlmSurfaceId exists, so the 'both directions' guard compares two hand lists. There is also no case for a usage payload without a prompt-side count.",
+   "fix": "Turn LlmSurfaceId into `export const LLM_SURFACE_IDS = [...] as const` and derive the type from it; the guard reads that const. Add adapter cases (Anthropic message_start without input_tokens; Responses usage without input_tokens) that must yield 'prompt count absent', not 0."
+  },
+  {
+   "test": "H5 context-occupancy-measure (c) and (e)",
+   "whyVacuousOrWeak": "(c) pins 'accept any provider count', with no control for inputTokens 0 or absent, so the fail-open in probe a2 would be locked in as correct. (e) asserts sum(categories) === total alongside a clamped residual, which cannot both hold.",
+   "fix": "Split (c) into 'provider count below the estimate is accepted' and 'absent or zero prompt count never anchors' (paired). Define the clamped-case invariant explicitly (e.g. categories scaled, or a sum-exceeds-total flag rendered)."
+  },
+  {
+   "test": "H7 web-context-occupancy-daemon-e2e",
+   "whyVacuousOrWeak": "It asserts compactThresholdTokens 123000 on a surface R1 itself recommends marking autoCompaction:false. It relies on the replay port's model (probe a4). The 'exact frame count per ledger publish' has no defined publish semantics (recordSend, captureUsage, measure).",
+   "fix": "Assert autoCompaction:false and the absence of a threshold on web. Pin the model through a fixed replay-identity seam. Specify the publish events in the ledger contract before counting them."
+  },
+  {
+   "test": "H8 web-frontend usage labels (vitest)",
+   "whyVacuousOrWeak": "Hand-built frames only. Nothing binds them to what the daemon serializes (the canvas mirror is hand-maintained and has no drift test), so the test stays green if the daemon never sends source. It also skips the StatusBar warning and category-hues.",
+   "fix": "Generate the canvas ContextUsageMessage type the same way the session protocol is generated, or add a drift-contract test over src/protocol/canvas/messages.ts. Feed the frontend adapter a frame captured from the H7 daemon run. Cover lib/context-warning.ts and category-hues."
+  },
+  {
+   "test": "H9 context-occupancy-authority-census",
+   "whyVacuousOrWeak": "The '.inputTokens/.cacheReadTokens property reads' rule is name matching, not type resolution: 96 production reads fall outside src/llm and usage-accounting, e.g. side-conversation UsageTally. With 87 estimateTokens references across 21 files, it needs about 200 site keys built on (file, enclosing function), a key known to go stale. It cannot see arithmetic re-derivations such as apps/web-frontend/src/lib/context-warning.ts (probe a3), which is exactly the second computation that exists today.",
+   "fix": "Make re-derivation hard by type, not by allowlist. Render functions accept only the branded ContextOccupancy (or a projection whose constructor is module-private) and receive pre-computed percent and warn-level fields, so a frontend never divides total by max itself. Keep a small census of only the brand constructor and resolveOccupancyWindow call sites."
+  }
+ ],
+ "overEngineeringOrHeuristics": [
+  "The side ledger (sha256 prefix chain, WeakMap memo, attach/detach, observeTranscript host seam, deferred resume-persistence packet) re-implements what the transcript can carry. quanta already has local-only message metadata that is never sent to adapters (Message.id and provenance, src/llm/types.ts:11-40). Claude Code stores provider usage on the assistant message and walks back to it (chunk-3j0en1hg.js:106359-106399, Wm/ALn). A usage anchor on the message would travel with host history, resume, rewind and forks for free, with no mutable session slot for config spreads to inherit. The digest can stay as a field on that anchor.",
+  "USAGE_CONVENTION_BY_SURFACE as Record<LlmSurfaceId, Provider> plus a runtime 'drift guard' is ceremony without a runtime SSOT (LlmSurfaceId is type-only, llm-route-types.ts:5). The simpler structural move is to have the adapter emit disjoint buckets, or an explicit promptTokens that may be undefined, at the boundary where the grammar is known. That also makes the missing-count case in probe a2 representable instead of 0.",
+  "'Compaction buffer' and 'Free space' as category rows mix non-occupancy quantities into segments. That breaks the sum-to-total invariant used by the CLI cell allocator (status-line.ts:153-157), web share math (slash-context-gauge.ts:50-56) and the string-keyed hue map (category-hues.ts:26-34). Render them as separate head annotations.",
+  "The residualClamped flag and 'Messages = total − estimated fixed' residual hide estimator error inside the one category users care about. It is honest only if the frame also ships fixedEstimate vs providerTokens, which R1's H5 does not require.",
+  "WeakMap memo 'per message object': if it caches chain values rather than per-message content hashes, message objects reused at new positions after compaction (the kept suffix after a summary) return the old chain digest, and a stale anchor validates. R1 says 'correctness does not depend on identity', which holds only for per-message hashing. The design does not specify which. UNVERIFIED because nothing is implemented yet.",
+  "The rollout's measurement receipt (SWE-bench 6-pick + loop-d4-d5) is presented as evidence, but single-run bench instances without a mention wire cannot exercise the cross-prompt anchor or the injected-message channel, so it would be a ceremonial receipt (runner/batch/eval/driver/context-types.ts:104-116; config-build.ts:623)."
+ ]
+}

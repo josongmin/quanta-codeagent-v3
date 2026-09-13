@@ -1,0 +1,93 @@
+{
+ "cluster": "B — lsp-workspace-exec (SEC-2)",
+ "designBreaks": [
+  {
+   "attack": "extra.env escape hatch defeats R1's 'a credential-bearing env is a tsc error at the transport spawn' invariant. R1 makes bunScrubbedSpawner the single hardened port and uses its `extra` field for site-specific Bun.spawn opts. bunScrubbedSpawner (src/runtime/scrubbed-spawn.ts:73-85) destructures {cwd,env,...,extra} and spreads `...(extra ?? {})` AFTER the branded env, so an `extra:{env: process.env}` silently OVERRIDES the branded ScrubbedEnv at runtime. `extra` is typed Readonly<Record<string,unknown>> — the 'MUST NOT carry an env' rule is a comment, not a type.",
+   "bypassOrRegression": "R1's structural mechanism #1 ('an env that still carries credentials is a TYPE ERROR') is bypassable at any funnel call site that uses `extra`; the brand is not the backstop it is claimed to be.",
+   "evidence": "P-F (f-funnel-extra-env.ts): control (no extra) childSawKey=false; {extra:{env:parent-with-FAKE_PROVIDER_KEY}} → childSawKey=TRUE while scrubbedHasKey=false. Reproduced against the real production bunScrubbedSpawner.",
+   "severity": "medium",
+   "reproduced": true
+  },
+  {
+   "attack": "R1's class ratchet (hellgate test #5) proposes deriving the LSP population from 'any Bun.spawn whose argv head is in LSP_SERVER_BINARIES'. Neither real LSP spawn site has a string-literal argv head: transport.ts:73 spawns `this.command` (a PropertyAccessExpression assigned from a constructor param — no local initializer to resolve) and availability.ts:28 spawns `[bin,'--version']` (Identifier head `bin`). The existing derivation's argv-head resolver only handles string literals and locally-initialized identifiers and is fail-closed otherwise.",
+   "bypassOrRegression": "The headline 'makes an unscrubbed LSP spawn impossible to reintroduce' ratchet, as specified, matches NEITHER file it must catch. Its own anti-vacuity assertion ('transport.ts and availability.ts are IN the derived population') would fail under R1's own predicate. Post-fix the files are only caught because routing through the funnel trips the EXISTING IMPORTS_FUNNEL predicate — so the proposed argv-head extension is simultaneously unnecessary for the fixed state and incapable of catching a NEW literal-argv LSP spawn in a file that doesn't import the funnel (the original blind spot persists for the LSP-binary class).",
+   "evidence": "P-G (g-census-argv-shape.ts) via real TS AST: transport.ts:73 arg0Kind=PropertyAccessExpression `this.command` (arrayHead n/a); availability.ts:28 arg0Kind=ArrayLiteralExpression, arrayHead=Identifier:bin, isStringLiteralHead=false. Cross-checked against deriveClusterFiles' argvHeadIsShell/localInitializer (tests/unit/runtime/exec-cluster-spawn-env-scrub-ban-hellgate.test.ts:366-404).",
+   "severity": "high",
+   "reproduced": true
+  },
+  {
+   "attack": "R1's per-server initializationOptions hardening (buildScripts.enable=false, procMacro.enable=false, checkOnSave=false, noDeps) does NOT close the .cargo/config.toml [build] rustc-wrapper RCE. rust-analyzer still invokes rustc under the hardened init options, and cargo honors the repo's rustc-wrapper. Only the RUSTC_WRAPPER='' ENV delta neuters it.",
+   "bypassOrRegression": "R1's hellgate #2 asserts only 'build.rs does not run' with mutation 'set buildScripts.enable=true' — it never exercises rustc-wrapper. A fix that wires the init-options channel but drops/breaks the env delta leaves a live workspace RCE AND stays green. The env delta is load-bearing, not redundant with init options as the RCA implies.",
+   "evidence": "P-C3 (c3-rustc-wrapper.ts) real rust-analyzer: baseline wrapperRan=true (32x); init (R1 hardened init options only) wrapperRan=TRUE (18x); init+RUSTC_WRAPPER='' wrapperRan=false. Confirms both that .cargo/config.toml rustc-wrapper is a live RCE (R1 had it UNVERIFIED) and that init options alone do not close it.",
+   "severity": "high",
+   "reproduced": true
+  },
+  {
+   "attack": "R1's LSP_ENV_ALLOWLIST is a THIRD hand-rolled allowlist (alongside DEFAULT_ENV_ALLOWLIST and CI_ENV_ALLOWLIST in src/shared/env-scrub.ts) and its spec drops HOME/RUSTUP_HOME/CARGO_HOME (keeps only PATH+locale+SSL+TMPDIR). rust-analyzer on this machine is ~/.cargo/bin/rust-analyzer → a rustup PROXY that resolves toolchains via RUSTUP_HOME/CARGO_HOME/HOME.",
+   "bypassOrRegression": "Regression risk: a rustup-proxy rust-analyzer launched with the spec allowlist can hit 'rustup could not choose a version' (the exact artifact seen in R1's own P4 first run). It launched in my probe only because ~/.cargo/bin is absolute; a proxy that needs RUSTUP_HOME to locate the default toolchain would fail. MEMORY's 'do not add a sixth parallel model' applies — this needs to justify its divergence and keep the toolchain-home vars.",
+   "evidence": "P-H (h-allowlist-no-home.ts): rust-analyzer launched under the spec allowlist here, but only because the proxy path is absolute; the spec omits RUSTUP_HOME/CARGO_HOME/HOME which a rustup proxy generally requires. env-scrub.ts:44-101 shows two existing allowlists; a third narrows the SSOT.",
+   "severity": "medium",
+   "reproduced": true
+  }
+ ],
+ "wrongClaimsInR1": [
+  {
+   "claim": "availability.ts:28 Bun.spawn([bin,'--version']) 'omits env entirely (inherit-by-omission FULL env) and runs in the repo cwd — a second uncaught leak' (siblingHoles, severity high).",
+   "whyWrong": "Bun 1.3.14 Bun.spawn with NO env key does NOT pass the live process.env — it passes the process LAUNCH environment snapshot. A credential written to process.env AFTER launch (e.g. the quanta user's OpenAI key loaded from .env.dev via loadEnvFiles at src/apps/cli/index.ts:33 — see MEMORY sep-04-dotenv-decides-local-verdicts) does NOT reach the probe child; only a credential exported in the shell BEFORE bun started does. R1's transport leak IS complete (transport passes buildLspServerEnv(process.env)=live env), but the availability probe is a strictly weaker leak than 'full env', and any test that proves the availability leak by mutating process.env at runtime is vacuous.",
+   "evidence": "P-I3 (i3-env-modes.ts): env-less Bun.spawn child did NOT see process.env.ANTHROPIC_API_KEY set at runtime (sawApiKey=false, 55 vars, PATH present); env:process.env → sawApiKey=true. P-I4: a var exported before bun launch (ANTHROPIC_API_KEY=... bun ...) DID reach the env-less child (childSawLaunchKey=true)."
+  },
+  {
+   "claim": "rust-toolchain.toml rustup auto-install and .cargo/config.toml as availability-probe RCE vectors, 'high' severity (unverified), grounded in Codex's RUSTUP_AUTO_INSTALL=0 mitigation.",
+   "whyWrong": "For the availability probe (repo cwd), rustup REFUSES relative and ./-prefixed `path` toolchains ('invalid path toolchain', 'relative path toolchain'). Only an ABSOLUTE `path` executes a repo binary — and a malicious-repo author cannot know the absolute clone path in interactive use. So rust-toolchain.toml `path` is NOT a practical availability-probe RCE. The real, now-CONFIRMED rust RCE vectors are build.rs (via the transport-launched server) and .cargo/config.toml rustc-wrapper (P-C3), not the version probe's toolchain resolution.",
+   "evidence": "P-C (c-rustup-path-toolchain.ts): relative path toolchain → exit 1 'invalid path toolchain', marker <none>, both plain and R1/Codex-hardened env; absolute path toolchain → repo binary executed (marker written). P-C2: './evil-tc' → 'relative path toolchain' refusal."
+  },
+  {
+   "claim": "competitorBaseline: 'Claude Code CLI 2.1.270 does NOT spawn its own language servers — code intelligence comes through the IDE MCP connection (the VS Code extension owns the LSP).'",
+   "whyWrong": "CC 2.1.270 has a full in-process LSP Manager that spawns plugin-provided language servers itself over stdio, passing initializationOptions and a curated env. It launches with extendEnv:false and env {...Di(),...p?.env}, but Di() returns the FULL process.env in the common (no-proxy) case (early return `return process.env`), scrubbing only OTEL_* (per changelog) — so CC does NOT scrub provider creds from its LSP children. The correct baseline is 'CC self-launches LSP behind folder-trust but does not credential-scrub'; Codex remains the only strong env-scrub baseline. R1's 'no self-launch' framing is factually wrong and understates a usable baseline.",
+   "evidence": ".extracted_source/claude-code-cli/src-2.1.270/chunk-3j0en1hg.js ~L223362 `P.start(n.command, n.args||[], {env:n.env, cwd:n.workspaceFolder})` and L223396 `initializationOptions: n.initializationOptions ?? {}`; chunk-ngmp8r9p.js L3043-3052 spawn `env:{...Di(),...p?.env}, extendEnv:!1`; chunk-bdzrjgqf.js Di() ends `...return process.env` when no proxy/OTEL/color condition fires. CHANGELOG-upstream.md:3237 'Subprocesses (Bash, hooks, MCP, LSP) no longer inherit OTEL_* environment variables'."
+  }
+ ],
+ "missedHoles": [
+  {
+   "what": "The @symbol mention resolver is a SECOND, default-ON launch trigger for the LSP server that R1's RCA never models. On every user turn the loop calls config.mentionInjector (src/agent/loop/context-assembler.ts:151-155); the injector is set unconditionally by mentionResolverDep (src/host/runtime/agent-config-assembler.ts:162) with QUANTA_MENTION_SYMBOL default-ON (mention-symbol-deps.ts:266). A prompt containing `@FooBar` classifies to kind=symbol (parser.ts) and resolves through buildMentionSymbolDeps → lspNavProvider → the pyright warm pool → PYRIGHT.create → the repo interpreter/build.rs, carrying process.env. This path is NOT a tool, never reaches policy.evaluate/isReadOnly, and is UNAFFECTED by the nav kill-switch QUANTA_LSP_TOOLS=0. R1 frames the entire launch surface as 'the CLI-default-ON read-only nav tools' and every hellgate drives lspNavToolList/the tool execute — so this trigger is untested. (R1's launch-layer fix at transport/servers.create would incidentally cover it, but the RCA scope and the whole test matrix miss it, and R1's trust-decline U3 that returns 'null from create' is described only for the nav path.)",
+   "evidence": "P-A (a-mention-symbol-entry.ts): with QUANTA_LSP_TOOLS=0 (resolveLspNavMode→'none'), resolver.resolveSymbol('FooBar') drove the production mention stack and executed the planted repo .venv/bin/python 6x with FAKE_PROVIDER_KEY present (repoInterpreterExecs=6, first='REPO_INTERPRETER_EXEC key=sk-ant-FAKE-mention'). Semantic backend stubbed null; only the LSP path fired.",
+   "severity": "high",
+   "reproduced": true
+  },
+  {
+   "what": "pyright executes repo-controlled code through a LEGIT venv whose interpreter is a symlink to the system python — not only through a planted executable .venv/bin/python. pyright runs `<venv python> -B -I -c <sys.path probe>`; the -I flag does NOT stop site-packages .pth processing, and a .pth line beginning with `import` is executed by the interpreter. A .pth is plain text writable by the model's ordinary edit/write tool, inside a normal virtualenv. R1's P1/P2 and its risk model only exercise the executable-.venv/bin/python case, so a fix or test that merely refuses an executable planted interpreter (or checks 'is the interpreter a symlink to a trusted python') gives false assurance. R1's actual recommended fix (trusted pythonPath + venv site-packages via extraPaths) DOES close it — but the RCA and any narrow test do not surface this variant.",
+   "evidence": "P-D (d-pyright-pth.ts): a real `python3 -m venv` (interpreter = symlink→python3) + a site-packages zz_probe.pth → production PyrightAdapter executed the .pth 12x (first='PTH_EXEC key=sk-ant-FAKE-pth'); paired control with pythonPath=/usr/bin/python3 + venv site-packages on extraPaths → pthExecCount=0 AND definition still resolved.",
+   "severity": "medium",
+   "reproduced": true
+  },
+  {
+   "what": "R1's own class-ratchet gap persists for a NEW literal-argv LSP spawn. Because SHELL_BINARIES excludes pyright-langserver/rust-analyzer/etc and the argv-head resolver only sees local string literals, a brand-new file that writes `Bun.spawn(['rust-analyzer', ...], {env: process.env})` and does NOT import the funnel stays invisible to the derivation — the exact defect-1 blind spot the ratchet was built to prevent, still open for the LSP-binary class. R1 acknowledges extending the derivation but the extension it specifies (argv-head match) cannot be reconciled with the real sites' non-literal argv (see design break #2), so the class is not actually closed either way.",
+   "evidence": "deriveClusterFiles membership = FUNNEL | IMPORTS_FUNNEL | isUserCommandShell (test file L451-460); SHELL_BINARIES={bash,sh,zsh,dash,ksh} (L105); argvHeadIsShell returns false for non-literal/non-locally-initialized heads (L376-404). A new literal-argv LSP spawn is neither a shell nor a funnel importer.",
+   "severity": "medium",
+   "reproduced": false
+  }
+ ],
+ "jankyTests": [
+  {
+   "test": "Hellgate #4 'the LSP transport spawn env is scrubbed of secrets' — if any variant proves the availability-probe leak by setting process.env.X at runtime and spawning a real `<bin> --version`.",
+   "whyVacuousOrWeak": "Bun.spawn with no env key does not inherit runtime-mutated process.env (P-I3), so such an assertion passes GREEN even against the current unfixed availability.ts:28 — it measures nothing about that file. It also conflates the transport (leaks live process.env — real) with the availability probe (leaks only the launch-env snapshot).",
+   "fix": "For the transport, keep the recording-ScrubbedSpawner unit test (records the branded env from an explicit seeded parent — sound). For the availability probe specifically, the only faithful proof spawns a child that inherits the LAUNCH env (e.g. run a helper with the credential EXPORTED before the child bun starts, per P-I4) and asserts the scrubbed probe child cannot see it; a runtime process.env mutation is not a valid injection here."
+  },
+  {
+   "test": "Hellgate #2 'lsp_definition on a hostile Rust repo does NOT run workspace build.rs', mutationThatMustTurnRed = 'set cargo.buildScripts.enable back to true'.",
+   "whyVacuousOrWeak": "Asserts only that build.rs did not run and only mutates the init-options arm. It does not cover the .cargo/config.toml rustc-wrapper RCE, which stays LIVE under the hardened init options and is closed only by the RUSTC_WRAPPER='' env delta (P-C3). So the whole env-delta half of the rust fix can be deleted and this test stays green.",
+   "fix": "Add a paired assertion: plant a .cargo/config.toml [build] rustc-wrapper that writes a marker, and assert the marker is NOT written; make the mutation-that-must-turn-red 'drop RUSTC_WRAPPER='' from the envDelta' as well as 'buildScripts.enable=true'."
+  },
+  {
+   "test": "Hellgate #5 CLASS RATCHET — population = files whose Bun.spawn argv head ∈ LSP_SERVER_BINARIES, anti-vacuity asserts transport.ts and availability.ts are IN the population.",
+   "whyVacuousOrWeak": "Neither spawn site has a string-literal argv head (P-G: transport uses `this.command`; availability uses `[bin,...]`), so R1's proposed derivation predicate matches neither — the anti-vacuity assertion FAILS under R1's own predicate, i.e. the test as designed cannot pass while measuring what it claims. If forced green by loosening the predicate, it no longer pins the LSP-binary class.",
+   "fix": "Derive LSP membership by 'imports the LSP transport/adapter-base module' or 'resides under src/lsp/adapters' (a stable structural signal the real sites carry), then require the funnel/scrubber on those files — and label it honestly as an import/location census, not an argv-head census."
+  }
+ ],
+ "overEngineeringOrHeuristics": [
+  "A third hand-rolled env allowlist (LSP_ENV_ALLOWLIST) alongside DEFAULT_ENV_ALLOWLIST and CI_ENV_ALLOWLIST (src/shared/env-scrub.ts:44,86) — MEMORY explicitly warns against adding a parallel model; if an LSP allowlist is needed it should be derived from/adjacent to the SSOT with a documented per-var justification, and must retain HOME/RUSTUP_HOME/CARGO_HOME for the rustup-proxy case (P-H) rather than the PATH+locale+SSL+TMPDIR-only set R1 specifies.",
+  "R1 recommends stacking Options A+C+D (env-scrub + per-server init-hardening + trusted-toolchain + OS-sandbox wrap + trust-gate) as the headline recommendation; the OS-sandbox layer (C) is macOS/Linux-only and degrades to passthrough elsewhere and is not needed to close the proven vectors (env-scrub + RUSTC_WRAPPER='' + trusted pythonPath already reduce build.rs/rustc-wrapper/.pth to 0 in probes B/C3/D). Ship the proven env+config fix; defer C.",
+  "R1's trust-gate design 'servers.ts create(cwd) returns a null/degraded client when untrusted' conflicts with ServerSpec.create's non-null LspClient return type (src/agent/lsp-bridge/servers.ts:30) and with warm-pool's PYRIGHT.create factory — the degrade path is asserted but not typed/wired; it is hand-waved across the tool path and omitted entirely for the mention-injection path.",
+  "R1 leans on the ScrubbedEnv brand as the primary 'leak is a tsc error' guarantee, but the brand is defeated by bunScrubbedSpawner's untyped `extra` spread (P-F) — the real backstop is the census, so the brand should not be presented as the structural invariant."
+ ]
+}

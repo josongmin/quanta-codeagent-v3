@@ -1,0 +1,83 @@
+{
+ "cluster": "A — launch-cwd-trust (untrusted launch-cwd config/env reaches the process)",
+ "designBreaks": [
+  {
+   "attack": "Run any SOURCE-path launch (`bun run src/apps/cli/index.ts`, the package.json `dev`/`start`/`agent` scripts, `src/apps/eval/entry.ts`, or the terminal-bench brain shim which does `exec bun run \"$root/src/apps/terminal/brain-mode.ts\"`) from an untrusted cwd carrying a `.env`/`.env.local`.",
+   "bypassOrRegression": "Option 1 does NOT close the demonstrated SEC-1 exfil (nor QUANTA_PERMISSION / QUANTA_LLM_REPLAY / QUANTA_API_KEY_HELPER injection) on the source launch path. Bun autoloads the cwd `.env`/`.env.local` into process.env BEFORE any quanta code — the exact L2 front-running R1 diagnosed ONLY for compiled binaries. Option 1(B) trust-gates `src/shared/env-files.ts:60 loadEnvFiles`, but a value Bun already placed in process.env cannot be un-set by refusing to write it; Option 1(A)'s `--no-compile-autoload-*` build flags apply ONLY to `bun build --compile`, never to `bun run`. So the source path keeps two open channels and the recommended fix leaves it exploitable while R1's rollout calls the source path 'unaffected' (safe). Proven decisively: a probe that NEVER calls loadEnvFiles (simulating loadEnvFiles fully removed) still fired an arbitrary-command RCE via a Bun-autoloaded cwd `.env` (QUANTA_API_KEY_HELPER). R1's own flagship hellgate test #1 spawns `bun src/apps/cli/index.ts` from source — after the fix, the untrusted arm STILL egresses OPENAI_BASE_URL via Bun autoload, so the test stays RED unless it passes `--no-env-file`, which is the vacuity move R1 itself condemns in L7.",
+   "evidence": "prov probe (wf/A-r2a/prov, `bun run` source path): BEFORE_LOAD (before any loadEnvFiles) `OPENAI_BASE_URL=http://dotenv K_DOTENV=from-dotenv` already present — Bun autoloaded cwd .env on the SOURCE path. `bun --no-env-file` control: BEFORE_LOAD all undefined. rce2 probe (loadEnvFiles NEVER called): cwd `.env` with QUANTA_API_KEY_HELPER + QUANTA_API_KEY_HELPER_LEGACY_VENDOR=1 + QUANTA_LLM_CREDENTIAL_TRUSTED=1 → PWNED file created via buildLLMWithByok. build-cli flags: tools/bin/build-cli.ts:85-93 (compile only). Source entrypoints: src/apps/cli/index.ts:33, src/apps/agent/index.ts:31, src/apps/eval/entry.ts:16, src/apps/eval/index.ts:860; shim: adapters/terminal-bench/bin/quanta-terminal-brain last line `exec bun run \"$root/$brain_rel\"`.",
+   "severity": "HIGH",
+   "reproduced": true
+  },
+  {
+   "attack": "Drop a `bunfig.toml` with `preload=[\"./evil.ts\"]` into the launch cwd, then trigger any SOURCE-path launch (`bun <file>` or `bun run <file>`), including the terminal-bench brain shim whose CWD is set by Harbor (uncontrolled, potentially the attacker-authored task working dir).",
+   "bypassOrRegression": "Arbitrary code execution BEFORE any quanta code, on the source path, entirely uncovered by Option 1 and NOT suppressible by any bun runtime flag measured. Option 1(A)'s `--no-compile-autoload-bunfig` only affects the compiled binary. On the source path there is no clean flag: `--no-env-file` disables .env but the bunfig preload STILL RUNS. R1's L1 scopes Bun autoload to '--compile standalone binary' and the rollout frames source as the safe escape hatch — both wrong. This is the same class as R1's committed-web-daemon sibling, but on every non-compiled launch.",
+   "evidence": "srcpath probe arm S1 (`bun /abs/probe.ts` from evil cwd) and S2 (`bun run /abs/probe.ts`): both printed EVIL_PRELOAD_RAN_SOURCE_PATH. `bun --no-env-file /abs/probe.ts`: printed EVIL_PRELOAD_RAN_SOURCE_PATH (preload survives --no-env-file; only .env suppressed). Parent-walk arm S3: no autoload (cwd-only, not ancestor walk). Harbor's exact brain cwd is UNVERIFIED (mechanism reproduced, deployment specifics not).",
+   "severity": "HIGH",
+   "reproduced": true
+  }
+ ],
+ "wrongClaimsInR1": [
+  {
+   "claim": "R1 L1/L2: Bun's own autoload is a compiled-binary-only channel — '(a) Bun's OWN autoload: a --compile standalone binary autoloads the LAUNCH cwd's bunfig.toml (preload+[env]) AND .env/.env.local...'. R1 treats the two channels as (a) compiled Bun autoload + (b) the explicit source-path loadEnvFiles.",
+   "whyWrong": "`bun run` and `bun <file>` from SOURCE also autoload the cwd `.env`/`.env.local` and run the cwd `bunfig.toml` preload, front-running loadEnvFiles exactly as in a compiled binary. So the source path has BOTH channels active, not just the explicit loader. This is the load-bearing miscategorization behind the whole 'single load path to gate' design.",
+   "evidence": "prov probe BEFORE_LOAD on `bun run` shows cwd .env already in process.env; srcpath S1/S2 show EVIL_PRELOAD_RAN_SOURCE_PATH under `bun <file>` and `bun run`."
+  },
+  {
+   "claim": "R1 recommended.rollout / userDecisions #4: 'developers who want autoload run bun src/... from source (dev path), which is unaffected.' Presented as the safe fallback after the compiled binary stops autoloading.",
+   "whyWrong": "The source path is precisely where the bunfig-preload RCE and cwd `.env`/`.env.local` autoload remain fully open and un-gated. Calling it 'unaffected' is a false-safety claim: it is unaffected because the fix does nothing for it, not because it is safe.",
+   "evidence": "srcpath S1/S2 (preload + .env autoload on source); `--no-env-file` still runs preload; no build flag reaches `bun run`."
+  },
+  {
+   "claim": "R1 recommended.structuralMechanism: 'Bun's parallel channel is removed at build time so there is a single load path to gate' — invalid state made 'unrepresentable at LOAD time'.",
+   "whyWrong": "Only true for the compiled artifact. For every source/dev/bench/CI launch, two Bun-native channels (.env/.env.local autoload + bunfig preload) remain and neither is reachable by the loadEnvFiles trust gate (Bun sets the values before quanta runs; refusing to re-write them changes nothing). The invariant is NOT unrepresentable there.",
+   "evidence": "rce2 probe: RCE fired via Bun-autoloaded cwd .env with loadEnvFiles never called; --no-env-file still executed the bunfig preload."
+  },
+  {
+   "claim": "R1 costEstimate / reusedExisting: the composition-root trust resolution 'reuses trust-store wholesale' and is 'small and mechanical'.",
+   "whyWrong": "The CLI entry (src/apps/cli/index.ts) constructs NO TrustStore today (grep confirms zero trust/TrustStore/QUANTA_TRUSTED_PATHS references) — only apps/agent/index.ts does, and that is at line 322, AFTER its module-top loadEnvFiles at line 31. loadEnvFiles is a synchronous module-top side effect that must complete before other module-top env consumers (CLI_SEEDED gate seed at index.ts:53, applyGoalPreset at :34, captureStatusBootProjection at :56). Injecting an async TrustStore.load + realpath canonicalization + real-env snapshot ahead of a currently-sync module-top load is a non-trivial reordering, not 'mechanical'.",
+   "evidence": "grep of src/apps/cli/index.ts for trust* = 0 hits; src/apps/agent/index.ts:31 loadEnvFiles precedes TrustStore.load at :322; module-top consumers at index.ts:34/53/56."
+  }
+ ],
+ "missedHoles": [
+  {
+   "what": "QUANTA_API_KEY_HELPER via launch-cwd dotenv = direct arbitrary command execution during LLM assembly, requiring NEITHER bypass mode NOR replay. A cwd .env(.dev/.local) setting QUANTA_API_KEY_HELPER=<cmd> + QUANTA_API_KEY_HELPER_LEGACY_VENDOR=1 + QUANTA_LLM_CREDENTIAL_TRUSTED=1 causes buildLLMWithByok → buildCredentialSource → mintApiKey → realShellExec to run <cmd> on the first real turn. Critically, QUANTA_LLM_CREDENTIAL_TRUSTED is a SESSION_FORBIDDEN_KNOB (src/shared/knob-overrides.ts:31) — deliberately un-settable via `/knobs set` and the web `/config` verb — yet the cwd dotenv writes it straight to process.env, bypassing that hardening entirely. R1 enumerated QUANTA_LLM_REPLAY + QUANTA_PERMISSION but missed this cleaner RCE that defeats a knob explicitly hardened as security-boundary. (QUANTA_AWS_AUTH_REFRESH / QUANTA_GCP_AUTH_REFRESH are the same class.)",
+   "evidence": "rce probe: cwd .env.dev with the three knobs → PWNED file created. Chain: src/apps/cli/internal.ts:437-475 buildLLMWithByok; src/runner/assemble/llm.ts:365 buildCredentialSource; src/llm/credential-helper.ts:165-174 isTrusted()→shellExec; src/runner/assemble/llm.ts:354 realShellExec→runShell. Forbidden set: src/shared/knob-overrides.ts:24-51.",
+   "severity": "CRITICAL",
+   "reproduced": true
+  },
+  {
+   "what": "There is already a hand-maintained SSOT of 'security-boundary knobs an untrusted source must never set' — SESSION_FORBIDDEN_KNOBS (src/shared/knob-overrides.ts:24) — but it gates ONLY the `/knobs set` writer/reader and the web-daemon `/config` POST (src/apps/web-daemon/server/http.ts:60). The launch-cwd dotenv + Bun-autoload channels bypass it completely, and R1 never connects its fix to this existing inventory. This set (QUANTA_CODE_MODE, QUANTA_FS_JAIL, QUANTA_TLS_MITM, QUANTA_CENTRAL_CONFIG, QUANTA_PERMISSION, subagent depth caps, QUANTA_LLM_CREDENTIAL_TRUSTED) is the natural structural anchor a fix should extend to the dotenv channel — and its existence undercuts R1's Option-2 rejection ('no census can prove none'): the security denylist already exists and is maintained.",
+   "evidence": "src/shared/knob-overrides.ts:24-53 SESSION_FORBIDDEN_KNOBS + isSessionForbidden; src/apps/web-daemon/server/http.ts:60 configKeyWriteRejection. env-files.ts:60 loadEnvFiles takes no classification and writes any key.",
+   "severity": "MEDIUM",
+   "reproduced": true
+  },
+  {
+   "what": "The web-daemon `/config` POST is a THIRD launch-independent write channel into process.env (src/apps/web-daemon/server/http.ts:92 `process.env[key] = raw`) gated by CONFIG_ALLOWED_KEYS + isSessionForbidden. This is a separate model from the dotenv trust gate; R1's 'one trust SSOT' does not touch it. A launch-cwd threat and a running-daemon threat share the underlying process.env sink but have three different gates (loadEnvFiles: none; /knobs set: SESSION_FORBIDDEN; /config: CONFIG_ALLOWED_KEYS∩forbidden). R1 claims one SSOT closes 'all egress/security/knob keys at once' — but the daemon POST path is a parallel, already-shipped policy surface it doesn't reconcile.",
+   "evidence": "src/apps/web-daemon/server/http.ts:53-95; CONFIG_ALLOWED_KEYS / configKeyWriteRejection.",
+   "severity": "LOW",
+   "reproduced": false
+  }
+ ],
+ "jankyTests": [
+  {
+   "test": "R1 hellgate #1 — 'untrusted-cwd .env base URL must NOT egress the real credential', seam = spawn REAL `bun src/apps/cli/index.ts \"hi\"` from an untrusted source cwd whose .env sets OPENAI_BASE_URL, assert listener count 0 after the fix.",
+   "whyVacuousOrWeak": "On the SOURCE path Bun autoloads the cwd .env before any quanta code, so after Option 1 (which only trust-gates loadEnvFiles + adds --compile flags) the untrusted arm STILL egresses OPENAI_BASE_URL via Bun's autoload → the test stays RED, i.e. the fix does not make its own headline test green. The only way to make it green on the source path is to pass `--no-env-file` to the spawn — which suppresses the very front-running the test claims to guard, and is the exact vacuity R1 condemns in L7 (the R15 `--env-file=/dev/null` test). So the test is either red-after-fix (fix incomplete) or vacuous (autoload masked).",
+   "fix": "Build the PRODUCTION-hardened COMPILED binary (with the two --no-compile-autoload flags from the build SSOT) and spawn THAT from the untrusted cwd — the only launch mode Option 1 actually changes — in the integration / *-real-e2e lane (a real --compile is ~180s, over the tests/unit per-test budget). If the design intends to also cover source launches, the fix must first neutralize Bun's source-path autoload (e.g. re-exec the entry under `--no-env-file` plus a bunfig-neutralizing measure), and the test must exercise that; otherwise scope the assertion honestly to the compiled artifact."
+  },
+  {
+   "test": "R1 hellgate #3 — 'a --compile binary must NOT autoload cwd bunfig/dotenv', tier=unit, 'import the exact args array from tools/bin/build-cli.ts, or a shared constant', mutation = remove the flags from the production args ⇒ RED.",
+   "whyVacuousOrWeak": "build-cli.ts hard-codes its args INLINE (tools/bin/build-cli.ts:85-93 `const args = [...]`) with no exported constant. If the test builds a 'tiny entry' with flags it hard-codes itself, deleting the flags from build-cli.ts does NOT turn it red — production and test are decoupled, so the mutation-that-must-turn-red claim is false. It also mislabels the tier: a real `bun build --compile` is ~180s (the existing system-skills-compiled-binary-hellgate.test.ts uses `{ timeout: 180_000 }`), which violates the tests/unit per-test speed budget.",
+   "fix": "Extract the build args to an exported SSOT constant that BOTH build-cli.ts and the test import, so the test asserts the production array literally (and prefer folding the flag assertion into the census #4 which binds to source, not a rebuild). Move any real-compile test to integration / *-real-e2e."
+  },
+  {
+   "test": "R1 hellgate #4 — census/ratchet: 'static scan over tracked files for `--compile`; each must co-occur with both `--no-compile-autoload-*` flags or be allowlisted.'",
+   "whyVacuousOrWeak": "It is a source TEXT scan, and this repo JUST fixed (HEAD commit baf5e2e9f) a guard that 'still accepted comments, misparsed .ts, and could not see five dead switches' — substring/proximity scans here have a documented history of comment/parse holes. A naive scan can match `--compile` in a comment/README (apps/tauri-shell/binaries/README.md:10 literally prints the daemon compile line), accept a `--compile` whose flags sit on an unrelated command, or MISS the programmatic `Bun.build({ compile: true, ... })` form (no `--compile` token). R1 honestly labels it a static census (rule 10 ok), but 'both flags co-occur' by proximity is a heuristic that will drift.",
+   "fix": "Parse each build invocation as a unit (tokenize the argv/command, or the Bun.build options object) rather than substring-proximity; enumerate a CLOSED set of build sites (like tools/dev/compiled-binary-assets.json's closed universe) with exact per-site counts and a drift guard; explicitly cover the programmatic Bun.build API form and ignore comments/README strings."
+  }
+ ],
+ "overEngineeringOrHeuristics": [
+  "Option 1 keeps the ADR-0555 provenance registry 'for the trusted path', but under a load-time trust gate that registry is vestigial: on a trusted cwd everything loads so the apiKeyFrom-based embedder refusal (src/runner/assemble/store.ts:113-119) never fires, and on an untrusted cwd nothing loads so there is no key to attribute. R1's own L7 says provenance is the wrong instrument — the fix should plan to RETIRE the embedder provenance guard, not preserve it as a fifth half-model alongside the trust gate.",
+  "The real structural mechanism R1 needs is NOT a per-loader trusted:boolean plus a trust snapshot — it is recognizing that process.env is the single shared sink and that the security-relevant subset already has an SSOT (SESSION_FORBIDDEN_KNOBS). A complete fix quarantines/strips that hardened set from ANY untrusted launch-cwd source (dotenv AND Bun autoload AND any future channel) at the earliest possible point, rather than adding a boolean to one of three loaders while leaving the Bun-native channels and the /config channel on separate policies.",
+  "Option 1's 'snapshot the real env before any file load' is under-specified against the module-top ordering reality: loadEnvFiles runs as a synchronous top-level side effect, TrustStore.load is async and needs realpath, and the CLI entry builds no trust store at all today. R1 files this only as a 'risk' bullet; it is actually the load-bearing part of the fix and where a lazy implementation will silently regress (self-authorization or a reordering that makes CLI_SEEDED/applyGoalPreset read a half-populated env)."
+ ]
+}
