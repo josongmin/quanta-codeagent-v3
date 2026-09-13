@@ -641,7 +641,7 @@ fresh operator(HOME/QUANTA_HOME/PREFS) + 워커 루트 유지(F6) + 죽은 pid �
   (`1dd971deb`,`c54587043`,`11788316f`,`779e229f5`)가 precommit exit 1 상태로 들어갔다(lint-debt 1건,
   fc-check-changed BLOCK 1건). `fe00899b1`에서 해소, 이후 종료코드를 직접 읽는다.
 
-### I-5 열어둔 것
+### I-5 열어둔 것 (작성 시점) — 아래 I-6에서 전부 처리
 
 - (B F7, LOW) 운영자가 export한 서브시스템 경로 override(QUANTA_SESSIONS_DIR 등)는 펜스를 통과한다.
   경로형 knob 선언이 없어 규칙이 아니라 전수 분류표가 필요 — 별도 작업.
@@ -651,3 +651,26 @@ fresh operator(HOME/QUANTA_HOME/PREFS) + 워커 루트 유지(F6) + 죽은 pid �
 - (B F11, PLAUSIBLE) promax fake가 bootstrap 없이 ready 가능 — 미검증.
 - (신규, 내 측정) 실 REPL은 uncaught 에러를 STDOUT으로 출력 → 커널 `hadError`가 거짓(false).
 - 원 결정 목록(G-8)은 그대로.
+
+### I-6 I-5 처리 결과 (sep-14)
+
+- (F7) `STATE_PATH_OVERRIDES` 22개 + 카탈로그 string knob 204개 전수 분류(양방향 강제) → `cbd49357a`.
+  리뷰어 재현(sessions/permission state/memory path) 이제 scratch로 해석.
+- (A-3) 이름을 어떤 계측도 못 읽는 tool-shaped 컨테이너(`execute` 보유 + 비리터럴 이름)를
+  소스에서 전수 열거하고 파일별 개수로 리뷰 → `a7e97e289`. 감사 뮤턴트 2개 모두 red(60/1, 96/1).
+- (F9) 확인됨(소스). store만 옛 홈 in-place, 컨솔리데이터는 새 홈 → `resolveMemoryHome` 단일 결정 +
+  디렉터리 단위 마이그레이션 → `b5b42fa06`.
+- (F11) 부분 확인: `bun install` 생략 뮤턴트가 수용 arm을 통과(18/1, paired control만 red) →
+  fake가 설치 명령을 봐야 ready → `93d5fc492`(17/2).
+- (REPL hadError) 두 겹이었다: stderr를 프로세스 종료 시에만 읽음 + REPL이 에러를 STDOUT에 출력.
+  고치다 세 번째 발견: top-level await 중 REPL이 다음 줄(센티널)을 먼저 평가해 결과·거부가
+  **다음 exec로** 넘어감. `handleError`로 stderr 라우팅 + 평가 직렬화(완료 신호 = 콜백 또는
+  handleError, 실측) → `69defb3cf`. 한계(이전 exec의 타이머 에러)는 소스에 명시.
+
+### I-7 이번 처리 중 드러난 내 추가 결함
+
+- tmp-leak 라쳇: 내 `779e229f5`가 같은 파일에 `dir` 바인딩을 추가하자 라쳇(바인딩 이름 매칭)이
+  실제 누수(비ASCII repo 빌더, 실행당 3개, /tmp에 198개 누적)를 "cleaned"로 오판 → 실제 소유로 수정
+  `8a6d47647`. 라쳇의 이름 매칭 취약점 자체는 미수정(기록).
+- `@/apps/cli` import 슬라이스 격리: 분류 테스트를 `tests/unit/cli/`로 이동.
+- main에 다른 세션 커밋(`4db28a3f5`) — 파일 겹침 없음 확인 후 merge(`fc8f612d4`).
