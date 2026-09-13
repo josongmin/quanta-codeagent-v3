@@ -15,6 +15,8 @@
  *     sides — zero exports before, zero after, a silent blind spot.
  *  5. (round 8) the 3-way rule compared against ONE merge base in a criss-cross
  *     history, where git merges against a virtual base — a real loss read as trivial.
+ *     (Round 9: requiring a unique base instead over-reported; the rule now asks
+ *     `git merge-tree` what the plain merge keeps.)
  *  6. (round 8) rename detection listed a renamed-away file only under its new name,
  *     so the old path was never read and a rename that dropped symbols examined 0 files.
  */
@@ -341,7 +343,7 @@ const initRepo = (dir: string): void => {
   mkdirSync(join(dir, "src"), { recursive: true })
 }
 
-describe("residue 5 — a criss-cross merge has no single base to excuse against", () => {
+describe("residue 5 — a criss-cross merge is judged against git's own merge, not one base", () => {
   /**
    * X1 removes S; Y1 is unrelated. MX = merge(X1, Y1). MY = merge(Y1, X1) with
    * `-s ours`, so MY KEEPS S. MX and MY now have two best common ancestors (X1, Y1).
@@ -377,10 +379,14 @@ describe("residue 5 — a criss-cross merge has no single base to excuse against
   test("RED: the dropped symbol is a LOSS, not trivial", () => {
     withTempDirSync("msl-crisscross-", (dir) => {
       const { mx, my, final } = build(dir)
-      // Ground truth: two best common ancestors.
+      // Ground truth: two best common ancestors, and git's own merge KEEPS S.
       expect(runGit(dir, ["merge-base", "--all", mx, my]).trim().split("\n")).toHaveLength(2)
       const port = createGitReadPort(dir)
-      expect(port.mergeBase([mx, my])).toBeUndefined()
+      const auto = port.autoMerge([mx, my])
+      expect(auto?.conflicted.size).toBe(0)
+      expect(port.readFiles(auto?.tree ?? "", ["src/f.ts"]).get("src/f.ts")).toContain(
+        "export const S",
+      )
       const scan = scanMerge(final, port)
       expect(scan.trivial.some((l) => l.symbol === "S")).toBe(false)
       expect(scan.excused).toEqual([])
@@ -432,6 +438,34 @@ describe("residue 6 — a renamed-away path is still compared", () => {
     }
     return commitAll(dir, "merge b (reorganise)")
   }
+
+  test("PAIRED CONTROL: a rename on one side with an EDIT on the other is not a loss (round 9)", () => {
+    // The shape the unique-base rule reported as nine losses: `side` renames f.ts, `main`
+    // edits one export and adds one; git merges cleanly and every export survives in g.ts.
+    withTempDirSync("msl-rename-edit-", (dir) => {
+      initRepo(dir)
+      const names = ["s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8"]
+      writeFileSync(
+        join(dir, "src", "f.ts"),
+        `${names.map((n, i) => `export const ${n} = ${i}`).join("\n")}\n`,
+      )
+      const base = commitAll(dir, "base")
+      runGit(dir, ["checkout", "-q", "-b", "side"])
+      runGit(dir, ["mv", "src/f.ts", "src/g.ts"])
+      commitAll(dir, "rename")
+      runGit(dir, ["checkout", "-q", "main"])
+      runGit(dir, ["reset", "-q", "--hard", base])
+      const edited = `${names.map((n, i) => `export const ${n} = ${n === "s8" ? 80 : i}`).join("\n")}\nexport const s9 = 9\n`
+      writeFileSync(join(dir, "src", "f.ts"), edited)
+      commitAll(dir, "edit")
+      runGit(dir, ["merge", "-q", "--no-ff", "-m", "merge side", "side"])
+      const merge = runGit(dir, ["rev-parse", "HEAD"]).trim()
+      expect(runGit(dir, ["show", `${merge}:src/g.ts`])).toContain("export const s9")
+      const scan = scanMerge(merge, createGitReadPort(dir))
+      expect(scan.losses).toEqual([])
+      expect(scan.trivial.length).toBeGreaterThan(0)
+    })
+  })
 
   test("PAIRED CONTROL: a rename one branch made in an ordinary commit is not a loss", () => {
     withTempDirSync("msl-rename-ctl-", (dir) => {

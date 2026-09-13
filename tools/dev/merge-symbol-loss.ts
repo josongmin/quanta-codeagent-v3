@@ -23,13 +23,11 @@
  *   parent's set and absent from the merge's. A file the merge deleted
  *   contributes ALL of its parent exports.
  *
- *   A candidate is NOT a loss when the merge only TOOK another parent's file: the
- *   parent that still has the name left that file byte-identical to the
- *   merge-base, and the merge's file is byte-identical to a parent that lacks it.
- *   Those are reported as `trivial`. The incident is defined by the base ("the
- *   merge-base LACKED those files"), and a detector that never read the base
- *   reported every rename merged across lines as a loss — see
- *   {@link isTrivialOneSidedChange} for the measurement.
+ *   A candidate is NOT a loss when git's OWN merge of the parents drops it too: the
+ *   export is absent from that path in `git merge-tree --write-tree <p1> <p2>` and
+ *   the path merged without conflict. Those are reported as `trivial`. What the
+ *   detector exists for is the human part of a merge — a resolution that dropped
+ *   what git would have kept — see {@link isTrivialPerGitMerge}.
  *
  * That shape separates the real case from controls. RE-MEASURE, do not trust
  * this table — it is a transcript, and history moves under it:
@@ -37,11 +35,11 @@
  *   $ bun run tools/dev/merge-symbol-loss.ts \
  *       9b21d2fd2 79857f28b 615b9b586 528f01ae5 fc199ad3f \
  *     | grep -E '^[0-9a-f]{9}|^scanned'
- *   9b21d2fd2  lost=74  excused=0  files=91  merge: reconcile parallel goal and verification lanes
- *   79857f28b  lost=0  excused=0  files=24  Merge branch 'codex/true100-message-ids'
- *   615b9b586  lost=0  excused=0  files=17  Merge branch 'codex/feeder-checkpoint-capture'
- *   528f01ae5  lost=0  excused=0  files=44  Merge branch 'codex/rfc-def-skill-startup-render' into codex/def-integration
- *   fc199ad3f  lost=0  excused=0  files=9  Merge branch 'codex/rfc12-1-plan-dag'
+ *   9b21d2fd2  lost=70  excused=0  trivial=4  files=91  merge: reconcile parallel goal and verification lanes
+ *   79857f28b  lost=0  excused=0  trivial=0  files=24  Merge branch 'codex/true100-message-ids'
+ *   615b9b586  lost=0  excused=0  trivial=0  files=17  Merge branch 'codex/feeder-checkpoint-capture'
+ *   528f01ae5  lost=0  excused=0  trivial=0  files=44  Merge branch 'codex/rfc-def-skill-startup-render' into codex/def-integration
+ *   fc199ad3f  lost=0  excused=0  trivial=0  files=9  Merge branch 'codex/rfc12-1-plan-dag'
  *   scanned 5 merge(s), 185 (parent,file) pair(s); 1 with unexcused symbol loss
  *
  * The UNSCOPED variant (diffing all of `src` between parent and merge) was
@@ -101,18 +99,20 @@ export interface GitReadPort {
    */
   readonly listMerges: (rev: string, maxMerges: number) => readonly string[]
   /**
-   * The common ancestor a 3-way merge of `parents` compares against
-   * (`git merge-base --octopus --all`). `undefined` when they share no history OR share
-   * more than one best common ancestor — in both cases nothing can be proven trivial and
-   * every loss stays reported.
-   *
-   * Several bases is a criss-cross history, and there git's recursive/ort strategy
-   * merges the bases into a VIRTUAL base that no commit's file equals. Picking one of
-   * them — what `--octopus` without `--all` does — excused a real loss (round-8 audit,
-   * reproduced: `git merge` kept the symbol, the merge dropped it, the detector filed
-   * it under `trivial`).
+   * Git's own merge of `parents`, without the merge commit's human resolution:
+   * `git merge-tree --write-tree` (the ort strategy — virtual merge bases for a
+   * criss-cross history, rename detection). `undefined` for anything but two parents:
+   * nothing can be excused for an octopus merge.
    */
-  readonly mergeBase: (parents: readonly string[]) => string | undefined
+  readonly autoMerge: (parents: readonly string[]) => AutoMerge | undefined
+}
+
+/** The result of {@link GitReadPort.autoMerge}. */
+export interface AutoMerge {
+  /** A tree-ish {@link GitReadPort.readFiles} can read. */
+  readonly tree: string
+  /** Paths git could not merge cleanly. A loss in one is never excused. */
+  readonly conflicted: ReadonlySet<string>
 }
 
 const git = (args: readonly string[], cwd: string): string => {
@@ -195,30 +195,31 @@ export const createGitReadPort = (cwd: string = REPO_ROOT): GitReadPort => ({
   // `--no-renames`: with rename detection on, a path renamed away appears only under its
   // NEW name, so the old path — where the parent's exports were — was never read, and a
   // merge that renamed a file and dropped symbols from it examined zero files (round-8
-  // audit, reproduced). As a delete plus an add, the old path is compared; a rename one
-  // line of history made alone is still excused by the 3-way rule below.
+  // audit, reproduced). As a delete plus an add, the old path is compared; when git's own
+  // merge also moved the file, the loss at the old path is excused (isTrivialPerGitMerge).
   changedFiles: (from, to) =>
     git(["diff", "-z", "--no-renames", "--name-only", from, to], cwd)
       .split("\0")
       .filter((l) => l.length > 0),
   readFiles: (sha, paths) => catFileBatch(cwd, sha, paths),
-  mergeBase: (parents) => {
-    const res = spawnSync("git", ["merge-base", "--octopus", "--all", ...parents], {
-      cwd,
-      encoding: "utf8",
-    })
-    // Exit 1 is git's "no common ancestor" answer. Anything else is a failure to
-    // ask, and it is reported rather than read as "no base" — which would merely
-    // disable the trivial-merge exemption, but silently.
-    if (res.status === 1) return undefined
-    if (res.status !== 0) {
-      throw new Error(`git merge-base --octopus failed (${res.status}): ${res.stderr ?? ""}`)
+  autoMerge: (parents) => {
+    if (parents.length !== 2) return undefined
+    const res = spawnSync(
+      "git",
+      ["merge-tree", "--write-tree", "--name-only", "--no-messages", "-z", ...parents],
+      { cwd, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 },
+    )
+    // Exit 1 is "merged, with conflicts" (the tree still exists). Anything else is a
+    // failure to ask, reported rather than read as "nothing excusable" — which would
+    // merely widen what is reported, but silently.
+    if (res.status !== 0 && res.status !== 1) {
+      throw new Error(`git merge-tree failed (${res.status}): ${res.stderr ?? ""}`)
     }
-    const bases = (res.stdout ?? "")
-      .split("\n")
-      .map((l) => l.trim())
-      .filter((l) => l.length > 0)
-    return bases.length === 1 ? bases[0] : undefined
+    const [tree, ...rest] = (res.stdout ?? "").split("\0")
+    if (tree === undefined || tree.trim() === "") {
+      throw new Error(`git merge-tree printed no tree for ${parents.join(" ")}`)
+    }
+    return { tree: tree.trim(), conflicted: new Set(rest.filter((f) => f.length > 0)) }
   },
   listMerges: (rev, maxMerges) =>
     git(["log", "--merges", "--format=%H", "-n", String(maxMerges), rev], cwd)
@@ -330,7 +331,7 @@ export interface MergeScan {
    * since the merge-base, and the merge's file is byte-identical to a parent that
    * lacks it. The deletion was authored in an ordinary commit on the other line of
    * history, where this detector — scoped to merges — has nothing to say. Reported,
-   * never hidden: see {@link isTrivialOneSidedChange}.
+   * never hidden: see {@link isTrivialPerGitMerge}.
    */
   readonly trivial: readonly SymbolLoss[]
   /**
@@ -402,48 +403,33 @@ const mergeSideExports = (
 }
 
 /**
- * Did the merge merely TAKE another parent's version of `file`, with the losing
- * parent never having touched it?
+ * Would git's own merge of the parents have dropped this export too?
  *
- * WHY THIS EXISTS. The incident this detector is for is defined by the merge-base:
- * "the merge-base LACKED those files and one parent ADDED them, so a plain 3-way
- * merge would have KEPT them". The first version never read the base. It compared
- * each parent to the merge, so a symbol one line of history deleted in an ordinary
- * commit read as LOST relative to the other parent, which simply had not changed
- * the file. MEASURED on this repository's own history: all five losses reported for
- * the three `Merge branch 'main' into codex/truth-guard-hardening` merges
- * (`cc6a58d30`, `5cf84a2ca`, `3b69c9704`) have exactly this shape — the base has the
- * symbol, the keeping parent's file is byte-identical to the base, and the merge's
- * file is byte-identical to the other parent, where a normal commit renamed or
- * removed it. Git did the only thing a 3-way merge can do.
+ * WHY. The incident this detector is for is a merge RESOLUTION that dropped what a plain
+ * merge keeps ("the merge-base LACKED those files and one parent ADDED them"). Comparing
+ * each parent to the merge cannot tell that apart from an ordinary change git merged in:
+ * a symbol one line of history renamed reads as lost relative to the other parent.
  *
- * WHAT IT DOES NOT EXCUSE, each by construction:
- *  - the incident: a parent that ADDED the file differs from a base that lacks it;
- *  - a symbol dropped from a file BOTH sides changed: the keeping parent differs
- *    from the base;
- *  - an "evil merge" that edits a file neither parent changed: no parent's file
- *    equals the merge's;
- *  - any merge whose parents share no base: nothing is compared, nothing excused;
- *  - a criss-cross merge (several best common ancestors): there is no single base to
- *    compare, so nothing is excused (see `GitReadPort.mergeBase`).
+ * TWO EARLIER RULES, BOTH MEASURED WRONG:
+ *  - "the losing parent's file equals the merge-base and the merge took the other
+ *    parent's file" (4d28097c6) picked ONE base; in a criss-cross history git merges
+ *    against a virtual base, and a real loss was filed as trivial (round-8 audit);
+ *  - the same rule with a UNIQUE base required (779e229f5) excused nothing for the two
+ *    criss-cross merges in this repository (`aae56857e`, `f1e936d9c`), whose drops git's
+ *    own merge also makes, and a rename on one side with an edit on the other was
+ *    reported as nine losses because the losing parent had changed the file (round-9).
+ * Asking git answers both: `git merge-tree --write-tree` IS the plain merge, with virtual
+ * bases and rename detection.
+ *
+ * WHAT IT DOES NOT EXCUSE: a path git could not merge cleanly (the resolution is human);
+ * an export git's merge keeps at that path; anything in an octopus merge.
  */
-export const isTrivialOneSidedChange = (
-  file: string,
-  losingParent: string,
-  parents: readonly string[],
-  contents: {
-    readonly base: ReadonlyMap<string, string | null> | undefined
-    readonly merge: ReadonlyMap<string, string | null>
-    readonly byParent: ReadonlyMap<string, ReadonlyMap<string, string | null>>
-  },
-): boolean => {
-  if (contents.base === undefined) return false
-  const at = (m: ReadonlyMap<string, string | null> | undefined): string | null =>
-    m?.get(file) ?? null
-  if (at(contents.byParent.get(losingParent)) !== at(contents.base)) return false
-  const merged = at(contents.merge)
-  return parents.some((q) => q !== losingParent && at(contents.byParent.get(q)) === merged)
-}
+export const isTrivialPerGitMerge = (
+  loss: SymbolLoss,
+  auto: AutoMerge | undefined,
+  autoExports: (path: string) => Set<string>,
+): boolean =>
+  auto !== undefined && !auto.conflicted.has(loss.file) && !autoExports(loss.file).has(loss.symbol)
 
 export const scanMerge = (sha: string, port: GitReadPort): MergeScan => {
   const parents = port.parents(sha)
@@ -469,15 +455,12 @@ export const scanMerge = (sha: string, port: GitReadPort): MergeScan => {
     )
   }
 
-  // Only merges that report something pay for the base and the extra reads.
-  const base = found.length > 0 ? port.mergeBase(parents) : undefined
+  // Only merges that report something pay for git's own merge and the extra reads.
+  const auto = found.length > 0 ? port.autoMerge(parents) : undefined
   const lossPaths = [...new Set(found.map((l) => l.file))]
-  const contents = {
-    base: base === undefined ? undefined : port.readFiles(base, lossPaths),
-    merge: port.readFiles(sha, lossPaths),
-    byParent: new Map(parents.map((p) => [p, port.readFiles(p, lossPaths)])),
-  }
-  const trivial = found.filter((l) => isTrivialOneSidedChange(l.file, l.parent, parents, contents))
+  const autoExports =
+    auto === undefined ? () => new Set<string>() : mergeSideExports(auto.tree, lossPaths, port)
+  const trivial = found.filter((l) => isTrivialPerGitMerge(l, auto, autoExports))
   const substantive = found.filter((l) => !trivial.includes(l))
 
   const ambiguous = ambiguousBasenamesOf(substantive)
@@ -512,10 +495,9 @@ export const DEFAULT_MAX_MERGES = 200
  * the `aug02-integration` chain, which carry real (small) historical losses". They
  * did not. Every one of those losses — 693 across the 26 non-incident merges that
  * reported any, of 91 reachable (re-measured at 421e3abcb; "681" here was wrong) —
- * was a trivial one-sided change the pre-3-way detector could not tell from a loss
- * (see {@link isTrivialOneSidedChange}). MEASURED with the 3-way rule, at any
- * window from 14 to the full 91, the only unexcused loss is the grandfathered
- * incident.
+ * was a change git's own merge makes too, which the first detector could not tell from a
+ * loss (see {@link isTrivialPerGitMerge}). Re-measured with the git-merge rule (sep-14,
+ * full reachable history): the only unexcused loss is the grandfathered incident.
  *
  * 14 stays for COST, not cleanliness. A merge is enforced while it is among the
  * newest 14, which includes the moment it lands, and history below the window is
