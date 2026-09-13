@@ -546,3 +546,47 @@ G-9/G-10은 bare-catch 라쳇만 파일 단위로 추적하고 나머지를 "다
 touched"는 `src/apps/cli/repl.ts`가 내 커밋에 포함돼 거짓, "추가한 커밋 4개" 중 2개는
 제거만 했다, test-ci-admission 원인이 사용자 소유 dirty 파일이라는 주장은 거짓(깨끗한
 체크아웃에서도 red, 원인은 내 커밋의 이동).
+
+### H-7 (R7-A) HITL census는 보증이 될 수 없었다 — 규칙을 정책으로 옮김
+
+소스 census + 단일 probe 런타임 arm으로 "write-capable 도구는 tier none을 선언할 수 없다"를
+주장했다. 감사가 실제 도구로 깼다: `apply_patch`(입력 조건부 ternary + 모듈 const),
+`bash`(regex 조건), `spawn_batch`(method shorthand) — 전부 두 hellgate·typecheck·lint 통과,
+HITL 코퍼스 2000+ green. 함수가 "none"을 반환할 수 있는지는 소스로 결정 불가다.
+`inferToolTierDetailed`가 이제 write-capable 도구의 선언 "none"을 **무효**로 처리한다(선언
+없는 writer와 동일하게 resolve). census는 조기경보로 남기고 클래스·method·`as const`·
+untracked 파일까지 읽도록 확장.
+
+### H-8 (R7-A) 문서가 가리킨 runtime-parity 게이트가 존재하지 않았다
+
+`tool-name-literals.ts`와 manifest hellgate가 `tool-surface-runtime-parity-hellgate.test.ts`를
+권위로 지목했는데 트리·히스토리 어디에도 없었다. 그 뒤에 숨은 것: `positionTool`이 계산된
+이름으로 만드는 **라이브 LSP 도구 7개**가 미카탈로그. 게이트를 실제로 만들었다(실 빌더 10개,
+manifest가 선언한 슬롯으로 `buildSessionFeatures` 구동, 156개 이름). manifest 파일이 1000줄을
+넘어 god-module 라쳇이 걸렸고, 주석을 깎아 밑으로 숨기지 않고 port-gated 행을 분리했다.
+
+### H-9 plan-mode 표에 67개 행이 없었고, `git_push`/`git_stage`는 아무도 만들지 않는다
+
+카탈로그된 67개 이름에 plan-mode 행이 없었다. 각 행은 도구 자신의 `isReadOnly()`를 따라
+추가(dispatch 동작 불변). 이제 표와 manifest가 동일한 203개 이름이고, 픽스처가 못 닿는 행 47개가
+parity 게이트 원장과 이름 단위로 같아 **리스트 하나**로 통합. 그 과정에서 `git_push`/`git_stage`가
+`gitTools()` 멤버로 카탈로그됐지만 `gitTools()`는 만들지 않고 프로덕션 호출자도 없음을 확인 —
+`unwired`로 기록, wire-or-delete는 보안 결정이라 미결.
+
+### H-10 보안 결함: node REPL 커널이 provider 크리덴셜을 모델 코드에 넘겼다
+
+flaky red를 bisect하던 측정 에이전트가 발견. 이 캠페인이 도입한 것 아님. 커널이 env 없이
+`Bun.spawn` → 부모 환경 전체 상속. 두 번 놓쳤다: scrub 금지 라쳇이 `node -i`를 "셸 아님"으로
+분류, 테스트는 실행 중 `process.env`를 바꿔 자식이 못 보는 방식이라 결함을 볼 수 없었다.
+branded scrubbed-spawn funnel로 통과시키고, 시크릿을 **시작 환경**에 넣은 서브프로세스 테스트로 교체.
+
+### H-11 main의 선존 red 정리 — ceiling bump 없이
+
+- silent-failure 라쳇: 실제 오류를 버리던 catch 7개를 바인딩·귀속(동작 불변), ceiling 1143→1141,
+  105→103으로 조임. allowlist가 자기 stale key를 볼 수 없던 방향도 추가.
+- promax lifecycle: 새 readiness 체크를 모델링 못 한 fake를 상태 전이로 수정.
+
+### H-12 R7-C 발견 반영 요약
+
+마이그레이션: 알림 1회 후 명령이 no-op로 성공 보고(고아) → in-place 읽기 + 거부하는 명령 +
+single-quote. gate capability 문장: 계획 기준 → 실행 기준. 무의미 arm 2개(escape arm, path arm) 강화.
