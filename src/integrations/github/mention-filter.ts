@@ -123,12 +123,16 @@ export const createMentionFilter = (opts: MentionFilterOpts): MentionFilter => {
   }
 }
 
-/** GitHub's own association, where it names a scope directly. */
-const ASSOCIATION_SCOPE: Readonly<Record<string, TrustScope>> = {
-  OWNER: "owner",
-  MEMBER: "member",
-  COLLABORATOR: "collaborator",
-}
+/**
+ * GitHub's own association, where it names a scope directly. A `Map`, not an
+ * object: `ASSOCIATION_SCOPE["constructor"]` on an object literal is a function,
+ * and a function scope then ranked `undefined`, which passed every gate.
+ */
+const ASSOCIATION_SCOPE: ReadonlyMap<string, TrustScope> = new Map([
+  ["OWNER", "owner"],
+  ["MEMBER", "member"],
+  ["COLLABORATOR", "collaborator"],
+])
 
 /**
  * Resolve the sender's trust scope. Order: GitHub's `author_association` when it
@@ -142,7 +146,9 @@ const ASSOCIATION_SCOPE: Readonly<Record<string, TrustScope>> = {
  */
 const resolveScope = (event: NormalizedGhEvent): TrustScope => {
   const byAssociation =
-    event.sender.association === undefined ? undefined : ASSOCIATION_SCOPE[event.sender.association]
+    event.sender.association === undefined
+      ? undefined
+      : ASSOCIATION_SCOPE.get(event.sender.association)
   if (byAssociation !== undefined) return byAssociation
   if (event.sender.isCollaborator === true) return "collaborator"
   if (event.repo.owner === event.sender.login) return "owner"
