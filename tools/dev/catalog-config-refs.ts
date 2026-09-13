@@ -449,8 +449,9 @@ export const pythonStrings = (text: string): readonly StringToken[] => {
   return out
 }
 
+/** Go `os.Unsetenv(` ends in `setenv(`: its own alternative was dead, and no mutant of it could fail. */
 const RAW_WRITE_CONTEXT =
-  /(?:\.env|\.env_remove|set_var|remove_var|setenv|Setenv|Unsetenv|putenv|delenv)\(\s*$/
+  /(?:\.env|\.env_remove|set_var|remove_var|setenv|Setenv|putenv|delenv)\(\s*$/
 
 /** `os.environ.pop(` / `.setdefault(`: a write only as a bare statement (see `isPythonWrite`). */
 const PY_CONSUMING_CALL = /^[ \t]*[\w.]*environ\.(?:pop|setdefault)\(\s*$/u
