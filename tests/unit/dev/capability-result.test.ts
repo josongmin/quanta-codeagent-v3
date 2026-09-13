@@ -18,12 +18,21 @@ import { describe, expect, test } from "bun:test"
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
+import ts from "typescript"
 import { capabilityReceiptEnvForCampaign } from "../../../tools/dev/capability-probe-producer"
-import { capabilityRecordName } from "../../../tools/dev/capability-receipt"
 import {
+  type CapabilityFinding,
+  capabilityRecordName,
+  capabilityRequiredFailureName,
+  contractRequiredFailureName,
+  mintCapabilityReceipt,
+} from "../../../tools/dev/capability-receipt"
+import {
+  capabilityRecordsFromJunit,
   capabilityResultForMissingJunit,
   capabilityResultFromJunit,
   countJunitExecution,
+  describeCapabilityRecords,
 } from "../../../tools/dev/capability-result"
 import {
   requiredProducers,
@@ -292,11 +301,15 @@ describe("a receipt decision that did not execute is a RECORD the artifact count
     })
   }, 60_000)
 
-  test("PAIRED CONTROL — armed, the requirement failure is the record, not a second one", () => {
-    const { xml } = runFixture({ QUANTA_REQUIRE_CAPABILITIES: "git" })
+  test("armed, the requirement failure IS the record: counted once, and not as a case", () => {
+    const { xml, file } = runFixture({ QUANTA_REQUIRE_CAPABILITIES: "git" })
     expect(xml).toContain("REQUIRED git is blocked-missing")
     expect(xml).not.toContain("RECORD git")
-    expect(capabilityResultFromJunit({ producer: "contract", xml }).blockedMissing).toBe(0)
+    const result = capabilityResultFromJunit({ producer: "contract", xml })
+    // It used to be an EXECUTED case with `blocked=0`: the artifact contradicted
+    // the red job it described, and the failure could satisfy an executed floor.
+    expect(result.blockedMissing).toBe(1)
+    expect(result.executedCasesByFile).toEqual({ [file]: 1 })
   }, 60_000)
 
   test("PAIRED CONTROL — a receipt that says git runs leaves no record", async () => {
@@ -325,4 +338,86 @@ describe("a receipt decision that did not execute is a RECORD the artifact count
       rmSync(dir, { recursive: true, force: true })
     }
   }, 60_000)
+
+  test("a REQUIRED failure from either system is a record whether it failed or was filtered", () => {
+    const xml = junit(
+      `<testcase name="${xmlAttribute(capabilityRequiredFailureName("git", "failed-setup"))}" file="f.test.ts"><failure message="x"/></testcase>` +
+        // `-t` turns an unmatched REQUIRED test into a skip; it is still the record.
+        `<testcase name="${xmlAttribute(capabilityRequiredFailureName("lancedb", "blocked-missing"))}" file="f.test.ts"><skipped /></testcase>` +
+        `<testcase name="${xmlAttribute(contractRequiredFailureName("docker"))}" file="c.test.ts"><failure message="x"/></testcase>` +
+        `<testcase name="ran" file="f.test.ts"/>`,
+    )
+    const counts = countJunitExecution(xml)
+    expect({
+      executed: counts.executedCases,
+      skipped: counts.skippedCases,
+      blocked: counts.recordedBlockedMissing,
+      setup: counts.recordedFailedSetup,
+    }).toEqual({ executed: 1, skipped: 0, blocked: 2, setup: 1 })
+    expect(describeCapabilityRecords(capabilityRecordsFromJunit(xml))).toBe(
+      "blocked-missing=2 failed-setup=1 skipped-unsupported=0 — blocked-missing docker in c.test.ts; " +
+        "blocked-missing lancedb in f.test.ts; failed-setup git in f.test.ts",
+    )
+  })
+})
+
+describe("the shard runner reads the records a campaign produces", () => {
+  const RUNNER = join(REPO_ROOT, "tools", "dev", "run-test-shards.ts")
+
+  test("WIRING — cached and fresh chunks feed one collector, and it is printed before PASS", () => {
+    const source = readFileSync(RUNNER, "utf8")
+    const tree = ts.createSourceFile(
+      "run-test-shards.ts",
+      source,
+      ts.ScriptTarget.ESNext,
+      true,
+      ts.ScriptKind.TS,
+    )
+    const pushes: string[] = []
+    const walk = (node: ts.Node): void => {
+      if (
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        node.expression.name.text === "push" &&
+        node.expression.expression.getText(tree) === "input.capabilityRecords"
+      ) {
+        pushes.push(node.getText(tree))
+      }
+      node.forEachChild(walk)
+    }
+    walk(tree)
+    // One push per path: the cache replay reads the receipt's junit, the fresh
+    // chunk reads the worker's.
+    expect(pushes).toHaveLength(2)
+    expect(
+      pushes.some((one) => one.includes("capabilityRecordsFromJunit(lookup.receipt.junitXml")),
+    ).toBe(true)
+    expect(
+      pushes.some((one) =>
+        one.includes("capabilityRecordsFromJunit(readFileSync(result.junitPath"),
+      ),
+    ).toBe(true)
+    const summary = source.indexOf("describeCapabilityRecords(capabilityRecords)")
+    const pass = source.indexOf("`[test:shards] PASS suite=")
+    expect(summary).toBeGreaterThan(0)
+    expect(pass).toBeGreaterThan(summary)
+  })
+
+  test("a receipt is a SNAPSHOT: a probe answering after it was minted cannot change it", () => {
+    const capabilities: Record<string, CapabilityFinding> = {
+      git: { status: "probe-timeout", detail: "slow", probeMs: 1 },
+    }
+    const receipt = mintCapabilityReceipt({
+      tier: "pr",
+      binding: {
+        head: "a".repeat(40),
+        policySha256: "b".repeat(64),
+        toolchainSha256: "c".repeat(64),
+      },
+      capabilities,
+      deadlineMs: 1,
+    })
+    capabilities.git = { status: "available", detail: "late", probeMs: 2 }
+    expect(receipt.capabilities.git?.status).toBe("probe-timeout")
+  })
 })

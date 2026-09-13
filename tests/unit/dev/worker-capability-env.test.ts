@@ -254,11 +254,19 @@ describe("the runner really hands the receipt to the worker", () => {
             "receipt:process.env.QUANTA_CAPABILITY_RECEIPT," +
             "binding:process.env.QUANTA_CAPABILITY_BINDING," +
             "verdicts:process.env.QUANTA_CAPABILITY_VERDICTS," +
+            "require:process.env.QUANTA_REQUIRE_CAPABILITIES," +
             "home:process.env.HOME}))",
         ],
         cwd: REPO_ROOT,
         env: workerSpawnEnv(
-          input({ base: { PATH: process.env.PATH ?? "" }, workerHome: join(dir, "home") }),
+          input({
+            // The strictness switch rides in the BASE, not the bag: it is what
+            // turns a dropped bag into a named failure, so it must survive the
+            // real spawn path too — an audit's mutant stripping it there left
+            // every arm green.
+            base: { PATH: process.env.PATH ?? "", QUANTA_REQUIRE_CAPABILITIES: "git,lancedb" },
+            workerHome: join(dir, "home"),
+          }),
         ),
         stdoutFd: fd,
         stderrFd: fd,
@@ -269,6 +277,7 @@ describe("the runner really hands the receipt to the worker", () => {
       expect(seen.receipt).toBe(CAPABILITY_ENV[CAPABILITY_RECEIPT_PATH_ENV])
       expect(seen.binding).toBe(CAPABILITY_ENV[CAPABILITY_RECEIPT_BINDING_ENV])
       expect(seen.verdicts).toBe(CAPABILITY_ENV[CAPABILITY_VERDICTS_ENV])
+      expect(seen.require).toBe("git,lancedb")
       expect(seen.home).toBe(join(dir, "home"))
     } finally {
       for (const fd of fds) closeSync(fd)

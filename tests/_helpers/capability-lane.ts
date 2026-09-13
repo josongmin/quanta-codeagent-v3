@@ -30,8 +30,10 @@
  *                        platform cannot ever have the capability (bwrap on
  *                        macOS). A visible, policy-explicit non-selection.
  *   blocked-missing      the lane WAS selected and the capability is absent.
- *                        In a required job this is RED — see `capability()`
- *                        in `tools/dev/capability-receipt-consumer.ts`.
+ *                        RED only when `QUANTA_REQUIRE_CAPABILITIES` names this
+ *                        GROUP's id (or is `1`); otherwise a visible skip, and
+ *                        the CI aggregator's per-group executed floors are what
+ *                        catch a lane that ran nothing.
  *   failed-setup         the capability is present but its fixture could not be
  *                        built (an install failed, a clone failed). Never a
  *                        skip: a broken fixture is a defect in the lane, not a
@@ -73,7 +75,8 @@ export interface CapabilityResult {
 const KNOWN_GROUPS: ReadonlySet<string> = new Set(CAPABILITY_GROUPS.map((group) => group.id))
 
 /**
- * Marker the CI aggregator greps for. Stable, one line, parseable.
+ * The prefix of the human-readable outcome line. Nothing parses these lines:
+ * the CI aggregator reads the capability-result artifact, built from junit.
  *
  * Re-exported, not defined: the receipt consumer writes the same prefix, and a
  * second literal would let the two halves drift into two greps.
@@ -84,9 +87,9 @@ export { CAPABILITY_LINE_PREFIX }
  * Record an outcome. Writes one line to stdout and returns the result so a
  * caller can assert on it.
  *
- * An unknown group id THROWS rather than logging: a result attributed to a
- * group the manifest does not know is not counted by the fan-out, so it would
- * silently vanish from exactly the tally it exists to feed.
+ * An unknown group id THROWS rather than logging: a result attributed to a group
+ * the manifest does not know names nothing an operator or the manifest can act
+ * on, so it would be an outcome about nothing.
  */
 export const reportCapability = (result: CapabilityResult): CapabilityResult => {
   if (!KNOWN_GROUPS.has(result.group)) {

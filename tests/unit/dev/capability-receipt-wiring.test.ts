@@ -16,11 +16,11 @@
  *    3 of the 13 used to call `requireCapability` too (the `tests/contract/`
  *      three); the requirement now lives in `capability()` and they do not
  *
- * The numbers above were 15 and 33, and both were wrong. The bare grep counts
- * two files that are not consumers — one mentions `canExecute` in a COMMENT and
- * never imports the module, the other is the test OF the mechanism, whose own
- * assertions and docstring supplied fourteen of the matches. Recompute by
- * intersecting the two facts that make a consumer, not by matching a word:
+ * The numbers above were 15 and 33, and both were wrong. A bare grep for
+ * `canExecute` over-counts, and by more as tests OF the mechanism accumulate: at
+ * a128bc99d it matched 18 files outside `_helpers/`, five of them not consumers
+ * (comments, fixtures, and the mechanism's own arms). Recompute by intersecting
+ * the two facts that make a consumer, not by matching a word:
  *
  *   comm -12 \
  *     <(grep -rln canExecute tests --include='*.ts' | grep -v _helpers/ | sort) \

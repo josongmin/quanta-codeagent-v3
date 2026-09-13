@@ -1,7 +1,7 @@
 /**
  * CAPABILITY RECEIPT (TVH-11) — the schema, minting and validation. PURE.
  *
- * WHAT PROBLEM. Fourteen ordinary test files each answered "is Chrome / python
+ * WHAT PROBLEM. Ordinary test files (thirteen at a128bc99d) each answered "is Chrome / python
  * with lancedb / typescript-language-server / ast-grep / lldb-dap here?" by
  * ASKING THE HOST, at module load, once per file. That is the same question
  * answered N times, at discovery time, by spawning real processes — several
@@ -80,8 +80,9 @@ export const CAPABILITY_REQUIRE_ENV = "QUANTA_REQUIRE_CAPABILITIES"
  *
  * Owning the prefix in the module both systems already import puts both halves
  * behind one `grep '^\[capability\]'`. That is NOT a complete tally: the receipt
- * consumer prints once per capability per process, and a shard worker runs many
- * files. The per-file account is the junit record (`capabilityRecordName`).
+ * consumer prints once per capability per module instance, which is per file
+ * only under `--parallel`. The per-file account is the junit record
+ * (`capabilityRecordName`).
  */
 export const CAPABILITY_LINE_PREFIX = "[capability]"
 
@@ -89,12 +90,12 @@ export const CAPABILITY_LINE_PREFIX = "[capability]"
  * The skipped test a consumer registers, in the ASKING file, for a decision that
  * did not execute.
  *
- * The stdout line is printed once per capability per PROCESS, and a shard worker
- * runs many files in one process, so only the first asker was ever named. And
- * nothing read the line: `capability-result` took `blockedMissing` and
- * `failedSetup` from command-line flags no lane passed, so the aggregator's two
- * hard-failure checks could not fire. A junit testcase is attributed to its file
- * and read by the reducer that already reads that junit.
+ * The stdout line is printed once per capability per `bun test` process, and
+ * nothing read it: `capability-result` took `blockedMissing` and `failedSetup`
+ * from command-line flags no lane passed, so the aggregator's two hard-failure
+ * checks could not fire. A junit testcase is attributed to its file and read by
+ * the reducers that already read that junit: `capability-result` in the three CI
+ * capability lanes, and the shard runner's campaign summary.
  */
 export const capabilityRecordName = (capability: string, verdict: string, detail: string): string =>
   `${CAPABILITY_LINE_PREFIX} RECORD ${capability} ${verdict}: ${detail}`
@@ -110,6 +111,35 @@ export const parseCapabilityRecordName = (
     : { capability: match[1], verdict: match[2] }
 }
 
+/** The failing test a REQUIRED receipt capability registers (`capability-receipt-consumer`). */
+export const capabilityRequiredFailureName = (capability: string, verdict: string): string =>
+  `${CAPABILITY_LINE_PREFIX} REQUIRED ${capability} is ${verdict}`
+
+/** The failing test a REQUIRED contract dependency registers (`tests/contract/_guard.ts`). */
+export const contractRequiredFailureName = (dependency: string): string =>
+  `[contract] REQUIRED ${dependency} is unavailable`
+
+/**
+ * A REQUIRED failure, whichever system registered it, as the record it is.
+ *
+ * It was counted as an EXECUTED case: a file whose only real case was skipped
+ * showed `executedCases: 2`, the failure satisfied the group's executed floor,
+ * and the artifact said `blocked=0`. The job still failed through its exit
+ * code, so the artifact contradicted the job it described.
+ */
+export const parseRequiredFailureName = (
+  name: string,
+): { readonly capability: string; readonly verdict: string } | undefined => {
+  const capabilityMatch = /^\[capability\] REQUIRED (\S+) is ([a-z-]+)$/u.exec(name)
+  if (capabilityMatch?.[1] !== undefined && capabilityMatch[2] !== undefined) {
+    return { capability: capabilityMatch[1], verdict: capabilityMatch[2] }
+  }
+  const contractMatch = /^\[contract\] REQUIRED (.+) is unavailable$/u.exec(name)
+  return contractMatch?.[1] === undefined
+    ? undefined
+    : { capability: contractMatch[1], verdict: "blocked-missing" }
+}
+
 /**
  * Is `id` REQUIRED to have actually been exercised?
  *
@@ -123,21 +153,33 @@ export const parseCapabilityRecordName = (
  * required job" was off in both dialects, and setting either one armed half the
  * corpus with the wrong grammar.
  *
- *   unset / "" / "0"  -> nothing is required
- *   "1"               -> everything is required
- *   "a,b"             -> exactly `a` and `b` are required
+ *   unset / "" / "0" / "false" / "no" / "off"  -> nothing is required
+ *   "1" / "true" / "yes" / "on"                -> everything is required
+ *   "a,b"                                      -> exactly `a` and `b` are required
+ *
+ * (case-insensitive). `REQUIRE_CONTRACT` reads the same words through
+ * `switchWord`: it treated `true` as strict while this switch treated it as the
+ * one capability named "true", and merging then produced `git,true`.
  *
  * The list form is the reason this is a function and not a boolean: naming one
  * capability used to make all of them strict, which is a different run than the
  * operator asked for.
  */
+/** A strictness switch's value as a word, or `undefined` when it is a list. */
+export const switchWord = (value: string | undefined): "off" | "all" | undefined => {
+  const raw = (value ?? "").trim().toLowerCase()
+  if (["", "0", "false", "no", "off"].includes(raw)) return "off"
+  if (["1", "true", "yes", "on"].includes(raw)) return "all"
+  return undefined
+}
+
 export const capabilityRequiredFor = (
   id: string,
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): boolean => {
+  const word = switchWord(env[CAPABILITY_REQUIRE_ENV])
+  if (word !== undefined) return word === "all"
   const raw = (env[CAPABILITY_REQUIRE_ENV] ?? "").trim()
-  if (raw === "" || raw === "0") return false
-  if (raw === "1") return true
   return raw
     .split(",")
     .map((entry) => entry.trim())
@@ -155,7 +197,11 @@ export const capabilityRequiredFor = (
  * fire is a worker that did NOT get the receipt. So arming exactly these ids turns
  * "the receipt was lost on the way to a worker" from a silent skip into a named
  * failure, without ever reddening a campaign whose receipt arrives. `probe-timeout`
- * and `probe-error` are left unarmed: a slow host must not become a red one.
+ * and `probe-error` are left unarmed, so a slow host is not red locally or in a
+ * campaign — the campaign PRINTS its `failed-setup` records instead. In the three
+ * CI capability lanes a `failed-setup` record does fail `required`: there the
+ * lane's whole job is to have the capability, and a probe that could not answer
+ * means it did not verify.
  */
 export const definiteCapabilityIds = (receipt: {
   readonly capabilities: Readonly<Record<string, { readonly status: string }>>
@@ -170,12 +216,12 @@ export const mergeRequiredCapabilities = (
   existing: string | undefined,
   ids: readonly string[],
 ): string => {
-  const raw = (existing ?? "").trim()
-  if (raw === "1") return "1"
+  const word = switchWord(existing)
+  if (word === "all") return "1"
   const current =
-    raw === "" || raw === "0"
+    word === "off"
       ? []
-      : raw
+      : (existing ?? "")
           .split(",")
           .map((id) => id.trim())
           .filter(Boolean)
@@ -253,7 +299,10 @@ export const mintCapabilityReceipt = (input: MintCapabilityReceiptInput): Capabi
     issuedAtMs,
     expiresAtMs: issuedAtMs + ttlMs,
     deadlineMs: input.deadlineMs,
-    capabilities: input.capabilities,
+    // A SNAPSHOT. The producer keeps writing into its map when a probe answers
+    // after the total deadline, and the receipt it had already returned — and
+    // written, and armed the switch from — moved with it.
+    capabilities: { ...input.capabilities },
   }
 }
 

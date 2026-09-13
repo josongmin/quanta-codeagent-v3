@@ -17,6 +17,7 @@ export {
   realClock,
   realScheduler,
 } from "./cdp/defaults"
+export { DEVTOOLS_ENDPOINT_TIMEOUT_DETAIL } from "./cdp/dev-tools-endpoint"
 export {
   buildNetworkEntry,
   createNetworkBuffer,

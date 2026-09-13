@@ -576,6 +576,19 @@ describe("capability vocabulary and ids do not drift", () => {
     ).toEqual([])
   })
 
+  test("🔴 capability-lane GROUP ids and receipt capability ids never share a name", () => {
+    // Both are read from ONE switch, QUANTA_REQUIRE_CAPABILITIES. A group named
+    // after a capability (`cargo`, `node`) would make the whole group required
+    // wherever the capability is armed — the runner and the lane wrapper arm
+    // every definite receipt id automatically.
+    const receiptIds = new Set(campaignCapabilityIds({}))
+    const groupIds = CAPABILITY_GROUPS.map((group) => group.id)
+    // ANTI-VACUITY: both namespaces are non-trivial.
+    expect(receiptIds.size).toBeGreaterThan(8)
+    expect(groupIds.length).toBeGreaterThan(8)
+    expect(groupIds.filter((id) => receiptIds.has(id))).toEqual([])
+  })
+
   test("🔴 every capability the producer PROBES is one some file ASKS for", () => {
     // The other direction. A catalogue entry nobody consumes is a probe the
     // tier pays for on every run, forever, for nothing — and it reads as
@@ -674,6 +687,42 @@ describe("capability vocabulary and ids do not drift", () => {
       "tests/unit/injected.test.ts:8 unresolved-id",
       "tests/unit/injected.test.ts:9 ambient-call-inside-a-function",
     ])
+  })
+
+  test("🔴 RED ON INJECTION: aliases, dynamic imports, branches and a process.env argument are named", () => {
+    // A second audit ran each of these through the scanner and got `calls=[]`
+    // or no problem: the drift guard could not see them at all.
+    const lines = [
+      `import { capability } from "../../tools/dev/capability-receipt-consumer"`,
+      `import * as consumer from "../../tools/dev/capability-receipt-consumer"`,
+      `const ask = capability`,
+      `const viaCall = capability.call(undefined, "git")`,
+      `const viaIndex = consumer["capability"]("git")`,
+      `const parenthesised = (capability)("git")`,
+      `const lazy = await import("../../tools/dev/capability-receipt-consumer")`,
+      `const required = require("../../tools/dev/capability-receipt-consumer")`,
+      `const gated = process.env.X ? capability("git") : undefined`,
+      `if (process.env.Y) { capability("git") }`,
+      `const typo = capability("lldb_dap", process.env)`,
+      ``,
+    ]
+    const at = (fragment: string): number => lines.findIndex((line) => line.includes(fragment)) + 1
+    const input = { path: "tests/unit/injected-shapes.test.ts", text: lines.join("\n") }
+    const problems = capabilityCallProblems([input])
+    const expected = [
+      `${input.path}:${at("const ask")} indirect-use`,
+      `${input.path}:${at("viaCall")} indirect-use`,
+      `${input.path}:${at("viaIndex")} indirect-use`,
+      `${input.path}:${at("parenthesised")} indirect-use`,
+      `${input.path}:${at("lazy")} indirect-use`,
+      `${input.path}:${at("required")} indirect-use`,
+      `${input.path}:${at("gated")} conditional-call`,
+      `${input.path}:${at("if (process")} conditional-call`,
+    ]
+    for (const line of expected) expect(problems).toContain(line)
+    // `process.env` as the second argument reads the campaign receipt, so the
+    // typo is a CONSUMED id the drift guard now compares to the catalogue.
+    expect(capabilityCallsites(input).map((site) => site.capabilityId)).toContain("lldb_dap")
   })
 
   test("PAIRED CONTROL: a constant id, an explicit env and a stranger's function are fine", () => {

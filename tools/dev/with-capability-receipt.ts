@@ -33,7 +33,7 @@
  */
 
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { tmpdir, userInfo } from "node:os"
 import { join, resolve } from "node:path"
 import { runBoundedChild } from "./bounded-child"
 import { capabilityReceiptEnvForCampaign, type ProbeSpawner } from "./capability-probe-producer"
@@ -58,6 +58,8 @@ export interface WithCapabilityReceiptInput {
   readonly onStderr?: (text: string) => void
   /** Ctrl-C and SIGTERM, so the receipt is removed instead of left in the shared cache. */
   readonly signal?: AbortSignal
+  /** The real home the probes compare against; injected by the arm. */
+  readonly hostHome?: string
 }
 
 export const runWithCapabilityReceipt = async (
@@ -97,6 +99,7 @@ export const runWithCapabilityReceipt = async (
       head,
       outPath,
       probeEnv: base,
+      hostHome: input.hostHome ?? userInfo().homedir,
       ttlMs: MAX_CAPABILITY_RECEIPT_TTL_MS,
       // Neither lane drives a browser; chrome bring-up would only cost them time.
       includeChrome: false,

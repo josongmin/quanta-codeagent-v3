@@ -47,7 +47,7 @@
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname } from "node:path"
-import { parseCapabilityRecordName } from "./capability-receipt"
+import { parseCapabilityRecordName, parseRequiredFailureName } from "./capability-receipt"
 
 export interface CapabilityResultV1 {
   readonly schema: "quanta.capability-result.v2"
@@ -131,15 +131,60 @@ const junitCases = (xml: string): JunitCase[] => {
   return cases
 }
 
+export interface CapabilityRecordRow {
+  readonly file: string
+  readonly capability: string
+  readonly verdict: string
+}
+
+/**
+ * What a junit case says about a capability, if anything.
+ *
+ * A RECORD is a SKIPPED case with the record name: a case that ran is a case,
+ * whatever it is called, so a name cannot hide coverage or invent a record. A
+ * REQUIRED failure is a record whether it ran (failed) or a filter skipped it.
+ */
+const recordOf = (one: JunitCase): CapabilityRecordRow | undefined => {
+  const parsed =
+    (one.skipped ? parseCapabilityRecordName(one.name) : undefined) ??
+    parseRequiredFailureName(one.name)
+  return parsed === undefined ? undefined : { file: one.file, ...parsed }
+}
+
+/** Every capability record in a junit document, one row per case. */
+export const capabilityRecordsFromJunit = (xml: string): readonly CapabilityRecordRow[] =>
+  junitCases(xml).flatMap((one) => {
+    const row = recordOf(one)
+    return row === undefined ? [] : [row]
+  })
+
+/**
+ * One line for a campaign: counts per non-executed verdict, then each
+ * hard-failure record by name. Deduplicated per file and capability.
+ */
+export const describeCapabilityRecords = (rows: readonly CapabilityRecordRow[]): string => {
+  const unique = [
+    ...new Map(rows.map((row) => [`${row.verdict} ${row.capability} ${row.file}`, row])).values(),
+  ]
+  const count = (verdict: string): number => unique.filter((row) => row.verdict === verdict).length
+  const named = unique
+    .filter((row) => row.verdict === "blocked-missing" || row.verdict === "failed-setup")
+    .map((row) => `${row.verdict} ${row.capability} in ${row.file}`)
+    .sort()
+  return (
+    `blocked-missing=${count("blocked-missing")} failed-setup=${count("failed-setup")} ` +
+    `skipped-unsupported=${count("skipped-unsupported")}` +
+    (named.length === 0 ? "" : ` — ${named.join("; ")}`)
+  )
+}
+
 export const countJunitExecution = (xml: string): JunitCounts => {
   const executedByFile = new Map<string, number>()
   let executedCases = 0
   let skippedCases = 0
   const recorded = { "blocked-missing": new Set<string>(), "failed-setup": new Set<string>() }
   for (const one of junitCases(xml)) {
-    // A record is a SKIPPED case with the record name. A case that ran is a case,
-    // whatever it is called, so a name cannot hide coverage or invent a record.
-    const record = one.skipped ? parseCapabilityRecordName(one.name) : undefined
+    const record = recordOf(one)
     if (record !== undefined) {
       if (record.verdict === "blocked-missing" || record.verdict === "failed-setup") {
         recorded[record.verdict].add(`${one.file} ${record.capability}`)

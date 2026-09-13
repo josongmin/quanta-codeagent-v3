@@ -43,6 +43,7 @@ import {
   type CapabilityFinding,
   type CapabilityReceipt,
   capabilityRecordName,
+  capabilityRequiredFailureName,
   capabilityRequiredFor,
   validateCapabilityReceipt,
 } from "./capability-receipt"
@@ -177,7 +178,10 @@ export const decideFromReceipt = (load: ReceiptLoad, capability: string): Capabi
 }
 
 /**
- * One reported line per capability per process.
+ * One reported line per capability per module instance. Under `--parallel`, which
+ * every lane and the shard runner pass, each file gets its own, so the line
+ * repeats per file; without it, a later file asking the same question prints
+ * nothing. The per-file account is the junit record either way.
  *
  * Deduplicated because a file may ask twice (`debugpy-real-e2e` asks for five
  * capabilities and reads two of them at two sites), and a tally that
@@ -195,7 +199,8 @@ export const __resetCapabilityReportingForTests = (): void => {
  *
  * # The defect
  *
- * This module reported NOTHING. Fifteen files gate on it; twelve of them
+ * This module reported NOTHING. The files gating on it (fifteen by the grep of
+ * the day, thirteen once non-consumers are excluded); twelve of them
  * selected `describe.skip` on `blocked-missing` and exited 0 with no line, so a
  * receipt lane that executed nothing was byte-identical to one that executed
  * everything. `tests/_helpers/capability-lane.ts` had already written the
@@ -268,7 +273,7 @@ const requireOrRegisterFailure = (decision: CapabilityDecision, env: ConsumerEnv
   const message = capabilityRequirementFailure(decision, env)
   if (message === undefined) return false
   try {
-    test(`${CAPABILITY_LINE_PREFIX} REQUIRED ${decision.capability} is ${decision.verdict}`, () => {
+    test(capabilityRequiredFailureName(decision.capability, decision.verdict), () => {
       throw new Error(message)
     })
   } catch {
@@ -309,8 +314,8 @@ export const capability = (name: string, env: ConsumerEnv = process.env): Capabi
 /**
  * `true` only for `executed`. Every other verdict is a skip, never a pass.
  *
- * PURE. The requirement used to live inside this predicate, because twelve of
- * fifteen consumers called only `canExecute` and the throwing
+ * PURE. The requirement used to live inside this predicate, because every
+ * consumer outside `tests/contract/` called only `canExecute` and the throwing
  * `requireCapability` beside it was unreachable from them. It now lives in
  * `capability()`, which every consumer calls at module scope, and it registers a
  * failing test instead of throwing (see `capabilityRequirementFailure`). A

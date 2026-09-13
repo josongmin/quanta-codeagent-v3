@@ -10,7 +10,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs"
-import { availableParallelism, freemem, loadavg, tmpdir, totalmem } from "node:os"
+import { availableParallelism, freemem, loadavg, tmpdir, totalmem, userInfo } from "node:os"
 import { dirname, join, relative, resolve } from "node:path"
 import { capabilityReceiptEnvForCampaign } from "./capability-probe-producer"
 import {
@@ -19,6 +19,11 @@ import {
   MAX_CAPABILITY_RECEIPT_TTL_MS,
   mergeRequiredCapabilities,
 } from "./capability-receipt"
+import {
+  type CapabilityRecordRow,
+  capabilityRecordsFromJunit,
+  describeCapabilityRecords,
+} from "./capability-result"
 import {
   type ExecutedFileSetVerdict,
   executedFileSetDigest,
@@ -964,6 +969,12 @@ const executeChunks = async (input: {
   readonly journal: TimingJournal
   /** `QUANTA_CAPABILITY_RECEIPT` + `QUANTA_CAPABILITY_BINDING` for the workers. */
   readonly capabilityEnv: Record<string, string>
+  /**
+   * Every capability record in every chunk's junit, fresh or replayed. Collected
+   * so the campaign SAYS what it did not execute: a `failed-setup` used to be a
+   * skip in a green chunk with nothing reading it outside the CI lanes.
+   */
+  readonly capabilityRecords: CapabilityRecordRow[]
 }): Promise<readonly string[]> => {
   const totalChunks = input.chunks.length
   const scanReachSinks = new Map<number, string>()
@@ -992,6 +1003,7 @@ const executeChunks = async (input: {
       continue
     }
     materializeCachedJunit(input.opts, cached.chunk.index, lookup.receipt)
+    input.capabilityRecords.push(...capabilityRecordsFromJunit(lookup.receipt.junitXml ?? ""))
     // A cache HIT must restore the scheduling evidence the executed run
     // produced, or the speed budget sees a green shard with no timings and
     // fails forever with no way to repair it. The sample keeps the RECEIPT's
@@ -1051,6 +1063,9 @@ const executeChunks = async (input: {
           testTimeoutMs: input.testTimeoutMs,
         }
         const sink = validateCompletedShard(input.before, completedShard)
+        input.capabilityRecords.push(
+          ...capabilityRecordsFromJunit(readFileSync(result.junitPath, "utf8")),
+        )
         cacheSuccessfulShard(cached, result, input.opts, input.journal, input.testTimeoutMs)
         return { index: cached.chunk.index, sink }
       },
@@ -1378,6 +1393,8 @@ const main = async (): Promise<void> => {
   // signal in that window must not find a half-built one — so "nothing to
   // commit" is a real state rather than a missing case.
   let openJournal: TimingJournal | undefined
+  /** Removed in `finally`. Per-process names meant every campaign left one behind. */
+  let capabilityReceiptPath: string | undefined
   const onTerminationSignal = (signal: NodeJS.Signals): void => {
     if (terminating) return
     terminating = true
@@ -1491,6 +1508,7 @@ const main = async (): Promise<void> => {
       tier: receiptTier,
       head: before.head,
       probeEnv: { ...(process.env as Record<string, string>), HOME: probeHome },
+      hostHome: userInfo().homedir,
       // The campaign's own ceiling, not the one-hour default: a receipt that
       // expires mid-campaign sends every later worker back to skipping
       // everything, silently and green.
@@ -1510,6 +1528,7 @@ const main = async (): Promise<void> => {
         `${opts.suite}-${receiptTier}-${process.pid}.receipt.json`,
       ),
     })
+    capabilityReceiptPath = capability.path
     process.stdout.write(
       `[test:shards] capability receipt tier=${opts.tier} binding=${capability.bindingSha256.slice(0, 16)} ` +
         `available=${Object.values(capability.receipt.capabilities).filter((f) => f.status === "available").length}/` +
@@ -1601,11 +1620,13 @@ const main = async (): Promise<void> => {
       concurrency,
     })
 
+    const capabilityRecords: CapabilityRecordRow[] = []
     const scanReachSinks = await executeChunksWithSourcePostflight({
       chunks: cachedChunks,
       opts,
       runRoot,
       capabilityEnv: capability.env,
+      capabilityRecords,
       before,
       testTimeoutMs,
       registry,
@@ -1641,6 +1662,11 @@ const main = async (): Promise<void> => {
         chunks.map(({ index }) => index),
       )
     }
+    // Not a verdict input — a skipped capability is not a failure here — but never
+    // silent: the PASS below covers what ran, and this line says what did not.
+    process.stdout.write(
+      `[test:shards] capability records: ${describeCapabilityRecords(capabilityRecords)}\n`,
+    )
     process.stdout.write(
       `[test:shards] PASS suite=${opts.suite} chunks=${chunks.length}/${chunks.length} ` +
         `manifest_files=${manifest.length} head=${before.head}\n`,
@@ -1694,6 +1720,7 @@ const main = async (): Promise<void> => {
         }
       }
     }
+    if (capabilityReceiptPath !== undefined) rmSync(capabilityReceiptPath, { force: true })
     lease?.release()
   }
 }

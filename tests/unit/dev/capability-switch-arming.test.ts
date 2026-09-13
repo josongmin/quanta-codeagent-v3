@@ -26,8 +26,10 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import ts from "typescript"
+import { DEVTOOLS_ENDPOINT_TIMEOUT_DETAIL } from "@/browser"
 import {
   capabilityReceiptEnvForCampaign,
+  chromeBringUpFailure,
   type ProbeSpawner,
   type SpawnedProbe,
 } from "../../../tools/dev/capability-probe-producer"
@@ -99,6 +101,8 @@ describe("which ids a campaign arms, and how an operator's own list survives", (
       ["0", ["a"], "a"],
       ["1", ["a"], "1"],
       [" 1 ", ["a"], "1"],
+      ["true", ["a"], "1"],
+      ["OFF", ["a"], "a"],
       ["z, a ,", ["b", "a"], "a,b,z"],
       ["x", [], "x"],
     ]
@@ -224,6 +228,68 @@ describe("the runner arms the switch where a dropped bag cannot take it", () => 
       expect({ reader, count: calls.length }).toEqual({ reader, count: 1 })
       expect(statementIndexIn(block, calls[0] as ts.CallExpression)).toBeGreaterThan(armed)
     }
+  })
+
+  test("the runner probes under a worker-shaped HOME and compares against the real one", () => {
+    // Workers run under a fresh HOME, so a probe under the runner's own HOME
+    // answered for a process that does not exist. An audit dropped
+    // `HOME: probeHome` and every arm stayed green.
+    const calls = nodes(
+      (node): node is ts.CallExpression =>
+        ts.isCallExpression(node) && calleeName(node) === "capabilityReceiptEnvForCampaign",
+    )
+    expect(calls).toHaveLength(1)
+    const options = calls[0]?.arguments[0]
+    if (options === undefined || !ts.isObjectLiteralExpression(options)) {
+      throw new Error("capabilityReceiptEnvForCampaign is not given an object literal")
+    }
+    const property = (name: string): ts.Expression | undefined => {
+      const found = options.properties.find(
+        (one): one is ts.PropertyAssignment =>
+          ts.isPropertyAssignment(one) && ts.isIdentifier(one.name) && one.name.text === name,
+      )
+      return found?.initializer
+    }
+    const probeEnv = property("probeEnv")
+    if (probeEnv === undefined || !ts.isObjectLiteralExpression(probeEnv)) {
+      throw new Error("probeEnv is not an object literal")
+    }
+    const home = probeEnv.properties.find(
+      (one): one is ts.PropertyAssignment =>
+        ts.isPropertyAssignment(one) && ts.isIdentifier(one.name) && one.name.text === "HOME",
+    )
+    expect(home?.initializer.getText(source)).toBe("probeHome")
+    // HOME is the LAST property, so the spread before it cannot override it.
+    expect(probeEnv.properties.at(-1)).toBe(home)
+    expect(property("hostHome")?.getText(source)).toBe("userInfo().homedir")
+    const probeHome = nodes(
+      (node): node is ts.VariableDeclaration =>
+        ts.isVariableDeclaration(node) &&
+        ts.isIdentifier(node.name) &&
+        node.name.text === "probeHome",
+    )
+    expect(probeHome).toHaveLength(1)
+    expect(probeHome[0]?.initializer?.getText(source)).toMatch(/^join\(runRoot, /u)
+  })
+
+  test("the runner removes the receipt it produced, on every exit", () => {
+    // Named per process, so a runner that kept its receipt left one per campaign
+    // in the shared cache — an audit counted seven from one day.
+    const assigned = nodes(
+      (node): node is ts.BinaryExpression =>
+        ts.isBinaryExpression(node) &&
+        node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        node.left.getText(source) === "capabilityReceiptPath",
+    )
+    expect(assigned.map((node) => node.right.getText(source))).toEqual(["capability.path"])
+    const finallies = nodes((node): node is ts.TryStatement => ts.isTryStatement(node)).filter(
+      (one) => one.finallyBlock?.getText(source).includes("lease?.release()") === true,
+    )
+    expect(finallies.length).toBeGreaterThan(0)
+    const body = finallies.at(-1)?.finallyBlock?.getText(source) ?? ""
+    const removal = body.indexOf("rmSync(capabilityReceiptPath")
+    expect(removal).toBeGreaterThan(0)
+    expect(body.lastIndexOf("lease?.release()")).toBeGreaterThan(removal)
   })
 
   test("nothing else in the runner touches the switch", () => {
@@ -365,6 +431,7 @@ describe("a lane outside the runner gets a receipt, under its own environment", 
         [CAPABILITY_RECEIPT_PATH_ENV]: "/stale/receipt.json",
       },
       spawn: spawner(["lancedb"], probes),
+      hostHome: "/nonexistent-real-home",
       onStdout: (text) => {
         stdout += text
       },
@@ -394,7 +461,11 @@ describe("a lane outside the runner gets a receipt, under its own environment", 
     expect(seen.require.split(",")).toContain("lancedb")
     // One scratch HOME for the probes and the child, never the caller's.
     expect(probes.length).toBeGreaterThan(0)
-    expect(new Set(probes.map((probe) => probe.home))).toEqual(new Set([seen.home]))
+    // Plus the one re-probe of the unavailable id under the REAL home, which is
+    // how a receipt says "the test HOME hides it" instead of "absent".
+    expect(new Set(probes.map((probe) => probe.home))).toEqual(
+      new Set([seen.home, "/nonexistent-real-home"]),
+    )
     expect(seen.home).not.toBe(callerHome)
     expect(seen.home.startsWith(tmpdir())).toBe(true)
     // Gone afterwards: the shared cache is one directory for every worktree.
@@ -422,6 +493,7 @@ describe("a lane outside the runner gets a receipt, under its own environment", 
         // A HOME the preload does NOT keep, which is what a developer's shell has.
         env: { ...inheritedWithoutReceipt(), HOME: "/nonexistent-caller-home" },
         spawn: spawner([], probes),
+        hostHome: "/nonexistent-real-home",
         onStdout: (text) => {
           out += text
         },
@@ -507,8 +579,8 @@ describe("a lane outside the runner gets a receipt, under its own environment", 
 })
 
 describe("the contract guard fails as a test, and its switch has the capability grammar", () => {
-  test("unset, empty and 0 are off; anything else is on", () => {
-    const table = [undefined, "", "0", " 0 ", "1", "true"].map((value) => [
+  test("unset, empty, 0, false, no and off are off; anything else is on", () => {
+    const table = [undefined, "", "0", " 0 ", "false", "Off", "1", "true", "yes"].map((value) => [
       value,
       contractRequired(value),
     ])
@@ -517,9 +589,16 @@ describe("the contract guard fails as a test, and its switch has the capability 
       ["", false],
       ["0", false],
       [" 0 ", false],
+      ["false", false],
+      ["Off", false],
       ["1", true],
       ["true", true],
+      ["yes", true],
     ])
+    // ONE grammar: the capability switch reads `true` as "everything", not as a
+    // capability named "true".
+    expect(capabilityRequiredFor("git", { [CAPABILITY_REQUIRE_ENV]: "true" })).toBe(true)
+    expect(capabilityRequiredFor("git", { [CAPABILITY_REQUIRE_ENV]: "off" })).toBe(false)
   })
 
   const runFixture = (
@@ -596,4 +675,73 @@ describe("the contract guard fails as a test, and its switch has the capability 
     expect(run.out).toContain('"late-dep" is unavailable but REQUIRE_CONTRACT is set')
     expect(run.code).not.toBe(0)
   }, 60_000)
+})
+
+describe("what the receipt says about a capability the tests cannot reach", () => {
+  test("unavailable under the test HOME and present under the real one is SAID, not changed", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "hidden-by-home-"))
+    try {
+      const realHome = join(dir, "real-home")
+      // cargo answers only under the real HOME (a rustup proxy under ~/.cargo);
+      // node is absent under both.
+      const byHome: ProbeSpawner = (argv, env): SpawnedProbe => {
+        // By program name: "cargo" contains "go", and a substring test refused both.
+        const program = (argv[0] ?? "").split("/").at(-1) ?? ""
+        const refused = program === "node" || (program === "cargo" && env.HOME !== realHome)
+        return {
+          exited: Promise.resolve(refused ? 127 : 0),
+          stdout: Promise.resolve(refused ? "" : `${argv[0] ?? "fake"}\n`),
+          kill: () => {},
+        }
+      }
+      const produced = await capabilityReceiptEnvForCampaign({
+        repoRoot: REPO_ROOT,
+        tier: "pr",
+        head: "e".repeat(40),
+        outPath: join(dir, "receipt.json"),
+        probeEnv: { PATH: process.env.PATH ?? "", HOME: join(dir, "scratch-home") },
+        spawn: byHome,
+        includeChrome: false,
+        totalDeadlineMs: 10_000,
+        hostHome: realHome,
+      })
+      const cargo = produced.receipt.capabilities.cargo
+      const node = produced.receipt.capabilities.node
+      expect(cargo?.status).toBe("unavailable")
+      expect(cargo?.detail).toContain(`AVAILABLE under the real HOME ${realHome}`)
+      // PAIRED CONTROL: absent everywhere is just absent.
+      expect(node?.status).toBe("unavailable")
+      expect(node?.detail).not.toContain("AVAILABLE under the real HOME")
+      // The file the workers read carries the same words, and the verdict digest
+      // (which only statuses move) is the digest of what was written.
+      const written = JSON.parse(readFileSync(join(dir, "receipt.json"), "utf8")) as {
+        capabilities: Record<string, { detail: string }>
+      }
+      expect(written.capabilities.cargo?.detail).toContain("AVAILABLE under the real HOME")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }, 30_000)
+
+  test("a Chrome that ran out of time is probe-timeout; one that refused is unavailable", () => {
+    const context = {
+      binary: "chromium",
+      probeMs: 15_000,
+      endpointTimeoutDetail: DEVTOOLS_ENDPOINT_TIMEOUT_DETAIL,
+    }
+    expect(
+      chromeBringUpFailure(
+        { kind: "spawn-failed", detail: DEVTOOLS_ENDPOINT_TIMEOUT_DETAIL },
+        context,
+      ).status,
+    ).toBe("probe-timeout")
+    expect(chromeBringUpFailure({ kind: "timeout" }, context).status).toBe("probe-timeout")
+    // PAIRED CONTROL: a bring-up that failed for any other reason is a refusal,
+    // and keeps the binary so the fail-loud arm still sees "present".
+    const refused = chromeBringUpFailure(
+      { kind: "spawn-failed", detail: "Target.createTarget failed during bring-up" },
+      context,
+    )
+    expect(refused).toMatchObject({ status: "unavailable", resolved: "chromium" })
+  })
 })

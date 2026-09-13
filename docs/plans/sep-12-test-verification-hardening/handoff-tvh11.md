@@ -1,15 +1,17 @@
 # TVH-11 handoff — capability receipt producer + module-load effect guard
 
-Status: **implemented, uncommitted, unwired.** Every test file listed below is
-correct *today* without any runner change — absent a receipt the consumer
-returns a typed `blocked-missing`, which is a visible skip, never a pass and
-never a spawn. The wiring below is what turns those skips back into executions.
+Status (2026-09-14): **committed and wired.** The shard runner and
+`tools/dev/with-capability-receipt.ts` (the `test:contract` / `test:real-toolchain`
+lanes) call `capabilityReceiptEnvForCampaign` in-process; the CLI below is for a
+hand-run receipt and nothing invokes it. The original status line said
+"implemented, uncommitted, unwired", which is kept here only as history. Absent a
+receipt the consumer still returns a typed `blocked-missing`, a visible skip.
 
 ## 1. What landed
 
 | file | role |
 | --- | --- |
-| `tools/dev/capability-receipt.ts` | `quanta.capability-receipt.v1` schema, mint, validate. Pure. |
+| `tools/dev/capability-receipt.ts` | `quanta.capability-receipt.v1` schema, mint, validate. Pure. (The receipt schema is v1; the capability-RESULT artifact the aggregator reads is v2.) |
 | `tools/dev/capability-probe-producer.ts` | the ONLY module allowed to spawn to answer "can this host do X?". Parallel candidates, one total deadline, loser kill+drain, every timer cleared. CLI included. |
 | `tools/dev/capability-receipt-consumer.ts` | the test-side half. `readFileSync` + `statSync` only — no spawn, no socket, no network. |
 | `tools/dev/capability-callsites.ts` | AST extraction of `capability("<id>")` calls, for the bidirectional drift guard. |
@@ -53,14 +55,14 @@ export QUANTA_CAPABILITY_BINDING="<bindingSha256 printed by the producer>"
   (`external-toolchain.ts`, `statSync` only) and refuses a receipt whose
   `toolchainSha256` moved. That check needs no env at all.
 
-`--chrome` is opt-in because it performs a real CDP bring-up (≈4s here). Pass it
-for any tier that schedules `tests/integration/browser-*`; without it,
-`chrome-cdp` is absent from the receipt and the browser suites report
-`blocked-missing` (a visible skip), never a silent green.
+`--chrome` on the CLI is opt-in. A campaign's in-process receipt includes chrome
+by default (`campaignIncludesChrome`); the lane wrapper excludes it, because
+neither wrapped lane drives a browser.
 
-In CI, also set `QUANTA_REQUIRE_CAPABILITIES=1` on a tier that is *supposed* to
-have the capabilities: `blocked-missing` and `failed-setup` then THROW instead of
-skipping, matching the contract `tests/contract/_guard.ts` already established.
+`QUANTA_REQUIRE_CAPABILITIES` needs no CI setting to be useful: the runner and the
+lane wrapper arm it themselves for every id their receipt answered definitely
+(`definiteCapabilityIds`). A requirement failure is a REGISTERED failing test
+(`[capability] REQUIRED <id> is <verdict>`), not a throw.
 
 ### 2b. Produce the `meta-runtime` artifact (optional but strongly worth it)
 
@@ -102,7 +104,7 @@ There are **not** three capability schemas. There are two halves of one:
 
 - `tests/_helpers/capability-lane.ts` + `tools/dev/capability-result.ts`
   (TVH-03) own **reporting**: what a lane DID, reduced into
-  `quanta.capability-result.v1` for the required aggregator.
+  `quanta.capability-result.v2` for the required aggregator.
 - `tools/dev/capability-receipt*.ts` (TVH-11) own **discovery**: whether the
   capability is there, answered ONCE per tier so test modules stop probing at
   import.

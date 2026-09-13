@@ -76,9 +76,10 @@ const CDP_COMMAND_TIMEOUT_MS = pressureScaledTimeoutMs(30_000)
 const REAL_CHROME_CAPABILITY = "chrome-cdp"
 const realChrome = capability(REAL_CHROME_CAPABILITY)
 const CHROME_USABLE = canExecute(realChrome)
-// The producer sets `resolved` to the chrome BINARY PATH on every branch where
-// a binary exists — including "present but the session would not come up" — so
-// presence stays separable from usability without a second probe here.
+// The producer sets `resolved` to what `availability()` found — a browser NAME
+// such as "chromium", not a path — on every branch where one exists, including
+// "present but the session would not come up", so presence stays separable from
+// usability without a second probe here.
 const HAS_CHROME = realChrome.resolved !== undefined
 
 // ── fixture HTML ───────────────────────────────────────────────────────────
@@ -479,8 +480,9 @@ describe("browser real-chrome e2e — chrome presence report", () => {
     // Except `failed-setup`. A bring-up that did not finish inside the probe's
     // budget also carries the binary in `resolved`, so this arm read a loaded host
     // as an adapter regression. The consumer RECORDS `failed-setup` in this file's
-    // junit (`[capability] RECORD chrome-cdp failed-setup: …`), which is the
-    // classification the rule asks for; a definite "present and would not come up"
+    // junit (`[capability] RECORD chrome-cdp failed-setup: …`); the shard runner
+    // prints every such record before its PASS line, and the CI capability lanes
+    // fail `required` on one. A definite "present and would not come up"
     // (`skipped-unsupported` with a binary) is still red here.
     if (HAS_CHROME && realChrome.verdict !== "failed-setup") {
       expect(CHROME_USABLE).toBe(true) // realChrome.detail names the failure if this trips

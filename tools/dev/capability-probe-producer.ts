@@ -27,7 +27,9 @@
  * NO TOTAL BOUND. Nothing stopped a wedged host from stalling the whole suite.
  * There is one total deadline for the producer; when it fires, every
  * still-running capability is recorded `probe-timeout` (a VALUE, distinct from
- * `unavailable`) and every child is killed and drained.
+ * `unavailable`) and the receipt is minted from a SNAPSHOT. Children still running
+ * then are killed and drained by their own per-candidate deadline, after the
+ * receipt exists; their late answers cannot change it.
  *
  * ## Accounting
  *
@@ -461,6 +463,41 @@ export const campaignCapabilityIds = (
 ): readonly string[] => [...capabilityCatalogue(env).map((spec) => spec.id), CHROME_CAPABILITY_ID]
 
 /**
+ * What a failed Chrome bring-up means for the receipt.
+ *
+ * A bring-up that ran out of time is a probe that did not answer, not a Chrome
+ * that refused. The endpoint wait (15s) fires inside the probe's own budget (45s)
+ * and reports `spawn-failed`, so a loaded host was recorded `unavailable` with
+ * the binary in `resolved` — which the browser file's fail-loud arm reads as an
+ * adapter regression. Pure, so an arm can drive it without launching Chrome.
+ */
+export const chromeBringUpFailure = (
+  error: { readonly kind: string; readonly detail?: string },
+  context: {
+    readonly binary: string
+    readonly probeMs: number
+    readonly endpointTimeoutDetail: string
+  },
+): CapabilityFinding => {
+  const timedOut =
+    error.kind === "timeout" ||
+    (error.kind === "spawn-failed" && error.detail === context.endpointTimeoutDetail)
+  return timedOut
+    ? {
+        status: "probe-timeout",
+        detail: `chrome bring-up timed out inside the probe: ${error.kind}`,
+        resolved: context.binary,
+        probeMs: context.probeMs,
+      }
+    : {
+        status: "unavailable",
+        detail: `chrome present but the CDP session would not come up: ${error.kind}`,
+        resolved: context.binary,
+        probeMs: context.probeMs,
+      }
+}
+
+/**
  * A REAL CDP bring-up, because presence is not usability: `availability()`
  * only proves the binary exists, and the sandboxed-CI failure this replaces was
  * a Chrome that was present and could not come up. Done ONCE here instead of
@@ -516,12 +553,11 @@ export const probeChromeBringUp = async (
   }
   const result = spawned.value
   if (!result.ok) {
-    return {
-      status: "unavailable",
-      detail: `chrome present but the CDP session would not come up: ${result.error.kind}`,
-      resolved: binary,
+    return chromeBringUpFailure(result.error, {
+      binary,
       probeMs: Date.now() - startedAt,
-    }
+      endpointTimeoutDetail: browser.DEVTOOLS_ENDPOINT_TIMEOUT_DETAIL,
+    })
   }
   // The producer proves bring-up and then RELEASES it. A probe that leaves a
   // live Chrome behind is the double-spawn defect wearing a new hat.
@@ -882,6 +918,15 @@ export const capabilityReceiptEnvForCampaign = async (input: {
   readonly chromeProfileRoot?: string
   /** Injected so an arm can prove chrome is in the receipt without a browser. */
   readonly probeChrome?: ChromeProbe
+  /**
+   * The user's REAL home, when the probes run under a scratch one. Every id the
+   * scratch HOME answered `unavailable` is asked again under this one, and one
+   * that is there says so in its detail. The status is not changed — the tests
+   * really cannot reach it — but "the host lacks it" and "the test HOME hides it"
+   * send someone to different fixes. MEASURED on this host: `debugpy`, `cargo`
+   * and `lancedb` present at the real HOME and absent at a scratch one.
+   */
+  readonly hostHome?: string
 }): Promise<{
   readonly path: string
   readonly bindingSha256: string
@@ -926,10 +971,14 @@ export const capabilityReceiptEnvForCampaign = async (input: {
         "that asks for one would answer blocked-missing and skip green.",
     )
   }
-  writeCapabilityReceipt(input.outPath, receipt)
+  const annotated =
+    input.hostHome === undefined || input.hostHome === env.HOME
+      ? receipt
+      : await annotateHiddenByHome(receipt, specs, { ...env, HOME: input.hostHome }, input.spawn)
+  writeCapabilityReceipt(input.outPath, annotated)
   return {
     path: input.outPath,
-    bindingSha256: receipt.bindingSha256,
+    bindingSha256: annotated.bindingSha256,
     // BOTH halves. The binding is what makes the receipt refuse a foreign host;
     // an audit found the consumer comparing it only when this second variable
     // happened to be set, so shipping one without the other is shipping the
@@ -938,13 +987,43 @@ export const capabilityReceiptEnvForCampaign = async (input: {
       [CAPABILITY_RECEIPT_PATH_ENV]: input.outPath,
       [CAPABILITY_RECEIPT_BINDING_ENV]: receipt.bindingSha256,
       // Separate from the binding, and it is the one the cache identity hashes.
-      [CAPABILITY_VERDICTS_ENV]: capabilityVerdictsSha256(receipt),
+      [CAPABILITY_VERDICTS_ENV]: capabilityVerdictsSha256(annotated),
     },
-    receipt,
+    receipt: annotated,
   }
 }
 
-// ── CLI (the runner's call site; see docs/plans/.../handoff-tvh11.md) ───────
+/** See `hostHome`. Statuses are untouched, so the verdict digest is too. */
+const annotateHiddenByHome = async (
+  receipt: CapabilityReceipt,
+  specs: readonly CapabilitySpec[],
+  hostEnv: Record<string, string>,
+  spawn: ProbeSpawner | undefined,
+): Promise<CapabilityReceipt> => {
+  const unavailable = specs.filter(
+    (spec) => receipt.capabilities[spec.id]?.status === "unavailable",
+  )
+  const hostFindings = await Promise.all(
+    unavailable.map(
+      async (spec) => [spec.id, await probeCapability(spec, spawn, hostEnv)] as const,
+    ),
+  )
+  const capabilities = { ...receipt.capabilities }
+  for (const [id, host] of hostFindings) {
+    const finding = capabilities[id]
+    if (finding === undefined || host.status !== "available") continue
+    capabilities[id] = {
+      ...finding,
+      detail:
+        `${finding.detail}; AVAILABLE under the real HOME ${hostEnv.HOME} — the test HOME hides it ` +
+        "(a toolchain or package that resolves through HOME)",
+    }
+  }
+  return { ...receipt, capabilities }
+}
+
+// ── CLI (for a hand-run receipt; nothing invokes it — the runner and the lane
+//    wrapper call `capabilityReceiptEnvForCampaign` in-process) ───────────────
 
 const cliMain = async (): Promise<number> => {
   const { readFileSync } = await import("node:fs")

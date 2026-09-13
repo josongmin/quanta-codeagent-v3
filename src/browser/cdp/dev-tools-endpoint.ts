@@ -37,6 +37,14 @@ export interface ReadEndpointDeps {
   readonly signal?: AbortSignal
 }
 
+/**
+ * The detail of the one `spawn-failed` that means "not ready in time" rather than
+ * "could not start". Exported so a caller can tell a slow bring-up from a broken
+ * one without matching prose: the capability probe did not, and reported a
+ * loaded host's slow Chrome as "present but the CDP session would not come up".
+ */
+export const DEVTOOLS_ENDPOINT_TIMEOUT_DETAIL = "DevTools endpoint not ready before timeout"
+
 export const readDevToolsEndpoint = async (
   deps: ReadEndpointDeps,
 ): Promise<Result<string, BrowserError>> => {
@@ -52,7 +60,7 @@ export const readDevToolsEndpoint = async (
       // malformed (mid-write) — fall through and retry until timeout
     }
     if (deps.clock.now() - start >= timeoutMs) {
-      return err({ kind: "spawn-failed", detail: "DevTools endpoint not ready before timeout" })
+      return err({ kind: "spawn-failed", detail: DEVTOOLS_ENDPOINT_TIMEOUT_DETAIL })
     }
     // R3 audit [8]: race the poll sleep against abort and cancel the timer on
     // settle — without this an abort waits a full pollMs and leaks the timer.

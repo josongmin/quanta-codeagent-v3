@@ -118,6 +118,111 @@ const insideFunction = (node: ts.Node): boolean => {
   return false
 }
 
+const isLogical = (node: ts.Node): boolean =>
+  ts.isBinaryExpression(node) &&
+  (node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken ||
+    node.operatorToken.kind === ts.SyntaxKind.BarBarToken ||
+    node.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken)
+
+/**
+ * Under a branch or a loop. `const d = gate ? capability("git") : undefined` at
+ * module scope decides whether the file consults the receipt at all — the
+ * short-circuit the requirement moved into `capability()` to avoid.
+ */
+const underCondition = (node: ts.Node): boolean => {
+  for (let at = node.parent; at !== undefined && !ts.isSourceFile(at); at = at.parent) {
+    if (
+      ts.isConditionalExpression(at) ||
+      ts.isIfStatement(at) ||
+      ts.isSwitchStatement(at) ||
+      ts.isIterationStatement(at, false) ||
+      isLogical(at)
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+const isProcessEnv = (node: ts.Node | undefined): boolean =>
+  node !== undefined &&
+  ts.isPropertyAccessExpression(node) &&
+  ts.isIdentifier(node.expression) &&
+  node.expression.text === "process" &&
+  node.name.text === "env"
+
+/**
+ * Every way the consumer's `capability` escapes a direct call, which no call
+ * classification can see: an alias (`const ask = capability`), `.call`,
+ * `(capability)(…)`, `capability!(…)`, `consumer["capability"]`, a dynamic
+ * `import()` or `require()` of the module, or a re-export of it.
+ */
+const namesConsumerModule = (node: ts.Node | undefined): boolean =>
+  node !== undefined &&
+  ts.isStringLiteralLike(node) &&
+  node.text.includes(CAPABILITY_CONSUMER_MODULE)
+
+/** `import("…consumer")`, `require("…consumer")`, or `export … from "…consumer"`. */
+const reachesModuleIndirectly = (node: ts.Node): boolean =>
+  (ts.isCallExpression(node) &&
+    (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+      (ts.isIdentifier(node.expression) && node.expression.text === "require")) &&
+    namesConsumerModule(node.arguments[0])) ||
+  (ts.isExportDeclaration(node) && namesConsumerModule(node.moduleSpecifier))
+
+/** A NAME in a declaration or member position, which is not a use of the binding. */
+const isNamePosition = (node: ts.Identifier): boolean => {
+  const parent = node.parent
+  return (
+    ts.isImportSpecifier(parent) ||
+    ts.isNamespaceImport(parent) ||
+    (ts.isPropertyAccessExpression(parent) && parent.name === node) ||
+    (ts.isPropertyAssignment(parent) && parent.name === node) ||
+    (ts.isMethodDeclaration(parent) && parent.name === node) ||
+    (ts.isPropertyDeclaration(parent) && parent.name === node)
+  )
+}
+
+/** Any use of an imported binding other than calling it, or `ns.capability(…)`. */
+const isIndirectReference = (node: ts.Identifier, bindings: ConsumerBindings): boolean => {
+  if (isNamePosition(node)) return false
+  const parent = node.parent
+  if (bindings.names.has(node.text)) {
+    return !(ts.isCallExpression(parent) && parent.expression === node)
+  }
+  if (!bindings.namespaces.has(node.text)) return false
+  if (!ts.isPropertyAccessExpression(parent) || parent.expression !== node) return true
+  if (parent.name.text !== "capability") return false
+  return !(ts.isCallExpression(parent.parent) && parent.parent.expression === parent)
+}
+
+/**
+ * Every way the consumer's `capability` escapes a direct call, which no call
+ * classification can see: an alias (`const ask = capability`), `.call`,
+ * `(capability)(…)`, `capability!(…)`, `consumer["capability"]`, a dynamic
+ * `import()` or `require()` of the module, or a re-export of it.
+ */
+const indirectUses = (source: ts.SourceFile, bindings: ConsumerBindings): readonly ts.Node[] => {
+  const found: ts.Node[] = []
+  const visit = (node: ts.Node): void => {
+    if (reachesModuleIndirectly(node)) found.push(node)
+    if (ts.isIdentifier(node) && isIndirectReference(node, bindings)) found.push(node)
+    node.forEachChild(visit)
+  }
+  source.forEachChild(visit)
+  return found
+}
+
+/** A literal id, or one bound by a module-scope string constant. */
+const staticId = (
+  argument: ts.Expression | undefined,
+  constants: ReadonlyMap<string, string>,
+): string | undefined => {
+  if (argument === undefined) return undefined
+  if (ts.isStringLiteralLike(argument)) return argument.text
+  return ts.isIdentifier(argument) ? constants.get(argument.text) : undefined
+}
+
 /** One call of the consumer's `capability`, whatever its shape. */
 export interface CapabilityCall {
   readonly file: string
@@ -131,6 +236,8 @@ export interface CapabilityCall {
    */
   readonly ambient: boolean
   readonly moduleScope: boolean
+  /** Under a branch or loop at any scope (see `underCondition`). */
+  readonly conditional: boolean
 }
 
 export const capabilityCalls = (input: CapabilityCallsiteInput): readonly CapabilityCall[] => {
@@ -151,21 +258,16 @@ export const capabilityCalls = (input: CapabilityCallsiteInput): readonly Capabi
   const out: CapabilityCall[] = []
   const visit = (node: ts.Node): void => {
     if (ts.isCallExpression(node) && callsConsumer(node, bindings)) {
-      const argument = node.arguments[0]
-      const capabilityId =
-        argument === undefined
-          ? undefined
-          : ts.isStringLiteralLike(argument)
-            ? argument.text
-            : ts.isIdentifier(argument)
-              ? constants.get(argument.text)
-              : undefined
+      const capabilityId = staticId(node.arguments[0], constants)
       out.push({
         file: input.path,
         line: source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1,
         capabilityId,
-        ambient: node.arguments.length === 1,
+        // `capability(id, process.env)` reads the ambient receipt exactly like the
+        // one-argument form; only an injected env is the mechanism's own test.
+        ambient: node.arguments.length === 1 || isProcessEnv(node.arguments[1]),
         moduleScope: !insideFunction(node),
+        conditional: underCondition(node),
       })
     }
     node.forEachChild(visit)
@@ -184,7 +286,11 @@ export const capabilityCallsites = (
       : [],
   )
 
-export type CapabilityCallProblem = "unresolved-id" | "ambient-call-inside-a-function"
+export type CapabilityCallProblem =
+  | "unresolved-id"
+  | "ambient-call-inside-a-function"
+  | "conditional-call"
+  | "indirect-use"
 
 /**
  * The call shapes the drift guard cannot vouch for.
@@ -199,19 +305,41 @@ export type CapabilityCallProblem = "unresolved-id" | "ambient-call-inside-a-fun
  *    the receipt at all depends on a code path. Every consumer asks at module
  *    scope, where the answer is decided once, before any test is selected.
  */
+const callProblems = (call: CapabilityCall): readonly CapabilityCallProblem[] => {
+  if (!call.ambient) return []
+  const checks: readonly [boolean, CapabilityCallProblem][] = [
+    [call.capabilityId === undefined, "unresolved-id"],
+    [!call.moduleScope, "ambient-call-inside-a-function"],
+    [call.conditional, "conditional-call"],
+  ]
+  return checks.flatMap(([failed, problem]) => (failed ? [problem] : []))
+}
+
 export const capabilityCallProblems = (
   inputs: readonly CapabilityCallsiteInput[],
 ): readonly string[] =>
   inputs
-    .flatMap((input) => capabilityCalls(input))
-    .flatMap((call) => {
-      if (!call.ambient) return []
-      const problems: CapabilityCallProblem[] = []
-      if (call.capabilityId === undefined) problems.push("unresolved-id")
-      if (!call.moduleScope) problems.push("ambient-call-inside-a-function")
-      return problems.map((problem) => `${call.file}:${call.line} ${problem}`)
-    })
+    .flatMap((input) => [
+      ...capabilityCalls(input).flatMap((call) =>
+        callProblems(call).map((problem) => `${call.file}:${call.line} ${problem}`),
+      ),
+      ...indirectUseLines(input).map((line) => `${input.path}:${line} indirect-use`),
+    ])
     .sort()
+
+const indirectUseLines = (input: CapabilityCallsiteInput): readonly number[] => {
+  if (!input.text.includes(CAPABILITY_CONSUMER_MODULE)) return []
+  const source = ts.createSourceFile(
+    input.path,
+    input.text,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  )
+  return indirectUses(source, consumerBindings(source)).map(
+    (node) => source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1,
+  )
+}
 
 export const scanCapabilityCallsites = (
   inputs: readonly CapabilityCallsiteInput[],
