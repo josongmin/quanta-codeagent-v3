@@ -56,7 +56,11 @@ describe("SessionRootProvider", () => {
 
   describe("byte-identical default", () => {
     test("sessionsRootAsync() with no provider == sessionsRoot()", async () => {
+      // No root override at all (the preload's fenced QUANTA_HOME included), so the
+      // second assertion checks the real default. Pure resolution; afterEach restores.
       delete process.env.QUANTA_SESSIONS_DIR
+      delete process.env.QUANTA_HOME
+      delete process.env.QUANTA_CONFIG_DIR
       __resetRuntimeConfig()
       expect(await sessionsRootAsync()).toBe(sessionsRoot())
       expect(await sessionsRootAsync()).toBe(join(homedir(), ".quanta", "sessions"))

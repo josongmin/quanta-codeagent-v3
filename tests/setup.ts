@@ -1,5 +1,5 @@
 // Preloaded by bun test (see bunfig.toml). Keep global test setup here.
-import { afterEach, beforeEach } from "bun:test"
+import { afterAll, afterEach, beforeEach } from "bun:test"
 import { rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -66,7 +66,12 @@ if (benchResultsFence.action === "redirect") {
 // the HOME the test process started with — on a normal run, the developer's. The policy
 // and the measurement live in `_support/quanta-home-fence.ts`; this applies it before any
 // test runs. The scratch root is per process, created lazily by whatever writes into it,
-// and removed at exit so a run leaves nothing in TMPDIR.
+// and removed by a GLOBAL `afterAll` so a run leaves nothing in TMPDIR.
+//
+// Not `process.on("exit")`: measured on Bun 1.3.14, a preload's exit and beforeExit hooks
+// never fire under `bun test`, while its `afterAll` runs exactly once after the last file,
+// failing files included. The first version used the exit hook and left 99
+// `quanta-test-home/<pid>` roots behind in one afternoon.
 {
   const scratchRoot = join(tmpdir(), "quanta-test-home", String(process.pid))
   const fence = decideQuantaHomeFence({
@@ -77,12 +82,8 @@ if (benchResultsFence.action === "redirect") {
   for (const key of fence.unset) delete process.env[key]
   for (const [key, value] of Object.entries(fence.set)) process.env[key] = value
   if (fence.unset.length > 0 || Object.keys(fence.set).length > 0) __resetRuntimeConfig()
-  process.on("exit", () => {
-    try {
-      rmSync(scratchRoot, { recursive: true, force: true })
-    } catch {
-      // Best effort at process exit; there is no later point to report from.
-    }
+  afterAll(() => {
+    rmSync(scratchRoot, { recursive: true, force: true })
   })
 }
 

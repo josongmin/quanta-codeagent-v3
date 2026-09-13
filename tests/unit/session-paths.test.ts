@@ -28,7 +28,13 @@ describe("session paths", () => {
   })
 
   test("default root is ~/.quanta/sessions", () => {
+    // "Default" means NO root override at all. The test preload fences QUANTA_HOME at
+    // scratch, and QUANTA_CONFIG_DIR outranks it, so both are cleared here along with
+    // the sessions override. Resolution is a pure path computation — nothing is
+    // created — and `afterEach` restores the fence.
     delete process.env.QUANTA_SESSIONS_DIR
+    delete process.env.QUANTA_HOME
+    delete process.env.QUANTA_CONFIG_DIR
     __resetRuntimeConfig()
     expect(sessionsRoot()).toBe(join(homedir(), ".quanta", "sessions"))
   })

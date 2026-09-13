@@ -37,6 +37,7 @@ import {
 } from "@/runtime/node-repl"
 import { scrubReplNoise } from "@/runtime/node-repl/default-kernel"
 import { __resetRuntimeConfig } from "@/shared"
+import { withTempDirSync } from "../../_helpers/temp-dir"
 
 const MISSING_NODE = "__quanta_definitely_no_such_node_bin__"
 
@@ -306,21 +307,21 @@ describe("ADR-0249 node-repl-hellgate", () => {
 
   // ─── HELL-NR-17 — the default handle dir follows the Quanta home ──────
   test("HELL-NR-17 stateDir() is <QUANTA_HOME>/node_repl/active_execs; stateDir(home) is <home>/.quanta/…", () => {
-    const relocated = mkTmpHome()
     const saved = process.env.QUANTA_HOME
     try {
-      process.env.QUANTA_HOME = relocated
-      __resetRuntimeConfig()
-      expect(stateDir()).toBe(join(relocated, "node_repl", "active_execs"))
-      // The explicit argument is a filesystem HOME, not a Quanta home — unchanged.
-      expect(stateDir("/some/home")).toBe(
-        join("/some/home", ".quanta", "node_repl", "active_execs"),
-      )
+      withTempDirSync("qnr-relocated-", (relocated) => {
+        process.env.QUANTA_HOME = relocated
+        __resetRuntimeConfig()
+        expect(stateDir()).toBe(join(relocated, "node_repl", "active_execs"))
+        // The explicit argument is a filesystem HOME, not a Quanta home — unchanged.
+        expect(stateDir("/some/home")).toBe(
+          join("/some/home", ".quanta", "node_repl", "active_execs"),
+        )
+      })
     } finally {
       if (saved === undefined) delete process.env.QUANTA_HOME
       else process.env.QUANTA_HOME = saved
       __resetRuntimeConfig()
-      dropTmp(relocated)
     }
   })
 
