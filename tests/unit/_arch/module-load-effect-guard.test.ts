@@ -758,6 +758,8 @@ describe("capability vocabulary and ids do not drift", () => {
       `const viaBun = capability("id-bun", Bun.env)`,
       `const viaAlias = capability("id-alias", alias)`,
       `const viaSpread = capability("id-spread", { ...process.env })`,
+      // A spread of a name the scan does not resolve: no ambient root is written.
+      `const viaSpreadAlias = capability("id-spread-alias", { ...alias })`,
       `const viaValue = capability("id-value", { QUANTA_CAPABILITY_RECEIPT: process.env.QUANTA_CAPABILITY_RECEIPT })`,
       `const PATH = "x"`,
       `const viaShorthand = capability("id-shorthand", { PATH })`,
@@ -771,6 +773,7 @@ describe("capability vocabulary and ids do not drift", () => {
       "id-bun",
       "id-alias",
       "id-spread",
+      "id-spread-alias",
       "id-value",
       "id-shorthand",
       "id-let",

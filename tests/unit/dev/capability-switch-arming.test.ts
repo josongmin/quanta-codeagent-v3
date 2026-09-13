@@ -343,6 +343,9 @@ describe("the runner arms the switch where a dropped bag cannot take it", () => 
     )
   })
 
+  const unwrapAwait = (node: ts.Expression | undefined): ts.Expression | undefined =>
+    node !== undefined && ts.isAwaitExpression(node) ? node.expression : node
+
   test("a campaign sweeps receipts nothing can read BEFORE it writes its own, in the same directory", () => {
     // Only a kill runs no exit path at all; the audit counted six campaign
     // receipts from one day of killed runs.
@@ -370,6 +373,20 @@ describe("the runner arms the switch where a dropped bag cannot take it", () => 
     expect(sweep?.getStart(source) ?? Number.POSITIVE_INFINITY).toBeLessThan(
       produce?.getStart(source) ?? 0,
     )
+    // UNCONDITIONAL: each call is a declaration's whole initializer, in a
+    // statement of the same block. `const swept = [] || sweepCapabilityReceipts(…)`
+    // kept a call in the tree and never made it.
+    const statementBlock = (call: ts.CallExpression | undefined): ts.Node | undefined => {
+      const holder = call?.parent
+      const declaration =
+        holder !== undefined && ts.isAwaitExpression(holder) ? holder.parent : holder
+      if (declaration === undefined || !ts.isVariableDeclaration(declaration)) return undefined
+      if (unwrapAwait(declaration.initializer) !== call) return undefined
+      return declaration.parent.parent.parent
+    }
+    const block = statementBlock(sweep)
+    expect(block !== undefined && ts.isBlock(block)).toBe(true)
+    expect(statementBlock(produce)).toBe(block)
   })
 
   test("nothing else in the runner touches the switch", () => {
