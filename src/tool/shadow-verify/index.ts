@@ -147,8 +147,11 @@ export const shadowVerifyTool = (port: ShadowVerifyPortMirror): Tool<ShadowVerif
   // spawn N times the LSP+shell load; serialize at the dispatch seam.
   isConcurrencySafe: () => false,
   // No `hitlTier` and no `capability`, on purpose. It executes model-controlled code with
-  // host access and no OS sandbox — the posture of `bash` without a sandbox profile — and
-  // that is exactly what the fail-closed default gives an undeclared writer:
+  // host access. The `test` check goes through `runShell`, so an installed shell sandbox
+  // wraps it and the env is scrubbed; the lint/typecheck checks start language servers
+  // with the full environment and no sandbox (this said "no OS sandbox" for every check).
+  // Taken whole, that is the posture of `bash` without a sandbox profile, and it is
+  // exactly what the fail-closed default gives an undeclared writer:
   // `{ always-confirm, needs-sandbox }`. Declaring `capability: needs-sandbox` would
   // restate it (measured: no change). Declaring `hitlTier: "always-confirm"` would NOT: the
   // reason becomes `declared`, which bypass mode does not relax — a stricter posture than
