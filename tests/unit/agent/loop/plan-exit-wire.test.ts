@@ -1,12 +1,15 @@
 /**
- * ALBB-20 #1 — plan-exit-wire `rejected` branch observability.
+ * ALBB-20 #1 — plan-exit-wire `rejected` branch observability, and the posture it keeps.
  *
- * Red-on-injection: the `rejected` decision USED to `planStore.clear()` +
- * return with ZERO stream emit and ZERO operator reminder, while `approved`
- * emits `mode_changed`/`plan_snapshot` + pushes a reminder and
- * `changes_requested` pushes a reminder. This asserts the rejected branch now
- * emits a `mode_changed` (reason `plan_exit_rejected`) AND pushes an operator
- * reminder BEFORE clearing the store. Delete either ⇒ this goes red.
+ * Red-on-injection: the `rejected` decision USED to `planStore.clear()` + return with
+ * ZERO operator reminder, while `approved` and `changes_requested` push one. This asserts
+ * the rejected branch pushes a reminder BEFORE clearing the store.
+ *
+ * The ALBB-20 fix also switched the session to default mode and emitted `mode_changed`
+ * (reason `plan_exit_rejected`), and this file asserted exactly that. Default mode admits
+ * writes, so a rejection unlocked them (round-9 audit, reproduced in
+ * `tests/integration/request-plan-exit-lifecycle-e2e.test.ts`). The arm now asserts the
+ * mode does not move and no `mode_changed` is emitted.
  */
 
 import { describe, expect, test } from "bun:test"
@@ -40,7 +43,7 @@ const makeCfg = (planStore: PlanStore | undefined, emitted: AgentEvent[]): PlanL
 })
 
 describe("plan-exit-wire #1 rejected observability", () => {
-  test("rejected emits mode_changed + pushes reminder BEFORE clearing store", () => {
+  test("rejected pushes a reminder, clears the store, and stays in plan mode", () => {
     const emitted: AgentEvent[] = []
     const store = makeStore()
     const cfg = makeCfg(store, emitted)
@@ -52,17 +55,24 @@ describe("plan-exit-wire #1 rejected observability", () => {
       reminders,
     )
 
-    // store IS cleared (behavior preserved)
     expect(store.current()).toBeNull()
-    // NEW: a mode_changed event surfaced the exit
-    const modeChanged = emitted.find((e) => e.type === "mode_changed")
-    expect(modeChanged).toBeDefined()
-    if (modeChanged?.type === "mode_changed") {
-      expect(modeChanged.reason).toBe("plan_exit_rejected")
-      expect(modeChanged.to).toBe("default")
-    }
-    // NEW: an operator reminder is pushed
+    expect(cfg.collaborationMode).toBe("plan")
+    expect(cfg.planMode).toBe(true)
+    expect(emitted.filter((e) => e.type === "mode_changed")).toEqual([])
     expect(reminders.length).toBe(1)
     expect(reminders[0]?.injectAfterSystem).toContain("rejected")
+    expect(reminders[0]?.injectAfterSystem).toContain("Plan mode stays active")
+  })
+
+  test("PAIRED CONTROL: the same config under approved does leave plan mode", () => {
+    const emitted: AgentEvent[] = []
+    const cfg = makeCfg(makeStore(), emitted)
+    applyPendingPlanExit(
+      cfg,
+      { plan: "the plan text", outcome: buildPlanExit({ decision: "approved" }) },
+      [],
+    )
+    expect(cfg.collaborationMode).toBe("default")
+    expect(emitted.filter((e) => e.type === "mode_changed")).toHaveLength(1)
   })
 })

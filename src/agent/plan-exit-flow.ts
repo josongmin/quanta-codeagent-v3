@@ -19,7 +19,7 @@
  *                                  forge `approved` with feedback or
  *                                  `changes_requested` without)
  *     returns the decision       ⇒ the CALLER applies the state change
- *                                  (mode transition / re-enter plan / abort)
+ *                                  (mode transition / stay in plan)
  *                                  via planExitAllowsMutation +
  *                                  planExitStaysInPlan.
  *
@@ -157,9 +157,9 @@ export class PlanExitNotInPlanModeError extends QuantaError {
  * `changes_requested` (mirrors {@link PlanExitOutcome}).
  *
  * The caller uses `planExitAllowsMutation(decision)` to decide whether to
- * transition collaboration mode to `default`, and `planExitStaysInPlan(
- * decision)` to decide whether to re-enter plan with the feedback as a
- * follow-up.
+ * transition collaboration mode to `default`; every other decision stays in plan
+ * (`planExitStaysInPlan`), and only `changes_requested` carries feedback into the
+ * next turn.
  */
 export interface PlanExitFlowResult {
   readonly decision: PlanExitDecision

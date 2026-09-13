@@ -93,7 +93,13 @@ describe("request_plan_exit lifecycle e2e", () => {
     expect(planStore.current()).toBeNull()
   })
 
-  test("rejected clears the active PlanStore before the next turn", async () => {
+  // A rejection used to flip the next turn to default mode — `applyPendingPlanExit` ran the
+  // same transition as `approved` — although `planExitAllowsMutation("rejected")` is false
+  // and the CLI returns `rejected` as its FAIL-CLOSED answer to /cancel and to a dead input
+  // channel. The approved arm above is the paired control: same harness, same write, and
+  // there the write lands.
+  test("rejected discards the plan and keeps plan mode: a later write is still blocked", async () => {
+    const blocked = join(dir, "rejected.txt")
     const planStore = createInMemoryPlanStore({ now: () => 1 })
     const created = planStore.create({
       name: "Rejected plan",
@@ -101,9 +107,13 @@ describe("request_plan_exit lifecycle e2e", () => {
       todos: [{ content: "never do this" }],
     })
     expect(created.ok).toBe(true)
+    const stream = new RecordingStream()
     const llm = new FakeLLM([
       toolUse("pe1", "request_plan_exit", { plan: "1. Do the bad thing" }),
-      toolUse("cur1", "current_plan", {}),
+      multiToolUse([
+        { id: "cur1", name: "current_plan", input: {} },
+        { id: "w1", name: "write", input: { path: blocked, content: "nope" } },
+      ]),
       text("done"),
     ])
 
@@ -111,6 +121,7 @@ describe("request_plan_exit lifecycle e2e", () => {
       runAgent(
         cfg({
           llm,
+          stream,
           cwd: dir,
           planMode: true,
           planStore,
@@ -123,6 +134,11 @@ describe("request_plan_exit lifecycle e2e", () => {
     )
 
     expect(outcome.reason).toBe("completed")
+    expect(existsSync(blocked), "a rejected plan unlocked a write").toBe(false)
+    expect(toolResultTexts(outcome.messages).some((text) => text.includes("blocked in plan"))).toBe(
+      true,
+    )
+    expect(eventsOf(stream, "mode_changed")).toHaveLength(0)
     expect(planStore.current()).toBeNull()
     expect(toolResultTexts(outcome.messages).some((text) => text.includes("No active plan."))).toBe(
       true,

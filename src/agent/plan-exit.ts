@@ -7,8 +7,9 @@
  *
  *   - `approved`           ⇒ the plan is accepted; the agent may now mutate
  *                            (exit plan posture into execute posture).
- *   - `rejected`           ⇒ the plan is abandoned; the agent exits plan
- *                            posture WITHOUT mutating.
+ *   - `rejected`           ⇒ the plan is abandoned; the agent STAYS in plan
+ *                            posture with no plan. (This said it exits WITHOUT
+ *                            mutating; the only posture outside plan admits writes.)
  *   - `changes_requested`  ⇒ the operator wants revisions; the agent STAYS in
  *                            plan posture and revises. `feedback` is REQUIRED.
  *
@@ -96,7 +97,9 @@ export const buildPlanExit = (args: {
  *  MUTATE. Only `approved` grants mutation. */
 export const planExitAllowsMutation = (d: PlanExitDecision): boolean => d === "approved"
 
-/** True iff the agent should STAY in plan posture after this decision. Only
- *  `changes_requested` keeps the agent in plan (it revises the plan).
- *  `approved` exits to execute posture; `rejected` exits abandoning the plan. */
-export const planExitStaysInPlan = (d: PlanExitDecision): boolean => d === "changes_requested"
+/** True iff the agent should STAY in plan posture after this decision: every decision
+ *  that does not grant mutation. `changes_requested` stays to revise the plan;
+ *  `rejected` stays with the plan discarded. The only posture outside plan is default
+ *  mode, which admits writes, so "exit without mutating" is not a posture that exists —
+ *  this said `rejected` exits, and the loop did exactly that. */
+export const planExitStaysInPlan = (d: PlanExitDecision): boolean => !planExitAllowsMutation(d)

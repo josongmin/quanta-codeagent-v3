@@ -83,10 +83,12 @@ describe("plan-exit predicates", () => {
     }
   })
 
-  test("planExitStaysInPlan: only changes_requested", () => {
+  // `rejected` used to be false here, and the loop followed it out of plan mode into a
+  // posture that admits writes — the one thing `planExitAllowsMutation` forbids.
+  test("planExitStaysInPlan: every decision but approved", () => {
     const map: Record<PlanExitDecision, boolean> = {
       approved: false,
-      rejected: false,
+      rejected: true,
       changes_requested: true,
     }
     for (const d of ALL_PLAN_EXIT_DECISIONS) {
