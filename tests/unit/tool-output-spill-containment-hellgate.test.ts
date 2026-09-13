@@ -309,7 +309,7 @@ describe("NW-2 paired controls — a real directory still spills and prunes", ()
     expect(spilled).toContain("row-1999 ")
     expect(result.output.startsWith("<persisted-output>\n")).toBe(true)
     expect(result.output).toContain(`The full output is at: ${fullLogPath}`)
-    expect(result.evidence).toEqual({ fullLogPath })
+    expect(result.evidence).toEqual({ fullLogPath: join(spillDir, spillName) })
   })
 
   test("fresh repo (no `.quanta`): both components are created as real directories", async () => {
