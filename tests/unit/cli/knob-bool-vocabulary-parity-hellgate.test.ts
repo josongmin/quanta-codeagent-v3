@@ -113,7 +113,16 @@ const tokenOf = (a: KnobAccess): string | undefined => {
 }
 
 /** envKey → the strict token its read requires, for knobs read strictly. */
-const strictlyRead = (): Map<string, string> => {
+/**
+ * Computed ONCE, at module scope. The census parses every tracked src file. This file ran
+ * it three to four times inside test bodies — `unnamed()` calls it again — and under a
+ * loaded box the arms crossed bun's 5s per-test timeout (5065ms and 5754ms in five runs at
+ * load 39). Memoising alone moved the whole cost into whichever test ran first (6840ms at
+ * load 40). Module scope is where a one-time parse belongs: it reads files, starts no
+ * process, and no per-test timer covers it.
+ */
+const strictlyRead = (): Map<string, string> => STRICTLY_READ
+const computeStrictlyRead = (): Map<string, string> => {
   const files = trackedSourceFiles(REPO_ROOT, ["src"]).filter(
     (f) => !/\.test\.tsx?$/.test(f) && !f.includes("/__tests__/"),
   )
@@ -126,6 +135,8 @@ const strictlyRead = (): Map<string, string> => {
   }
   return out
 }
+
+const STRICTLY_READ: Map<string, string> = computeStrictlyRead()
 
 /** The describe names the token as a literal, in any of the ways we write it. */
 const namesToken = (describe: string, token: string): boolean =>

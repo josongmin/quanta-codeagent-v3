@@ -67,6 +67,11 @@ const COMPUTED_NAME_TOOLS: ReadonlySet<string> = new Set([
 const ASSEMBLED_NAMES: ReadonlySet<string> = new Set(
   (await assembleToolUniverse()).tools.map((t) => t.name),
 )
+// WARM the census cache at module scope. The extractor memoises per file, so every later
+// scan in this process is cheap — but the FIRST full parse of ~3400 files used to land
+// inside whichever test ran first, and in a single-process unit run at load ~40 that test
+// crossed bun's 5s per-test timeout. Module load has no per-test timer.
+scanToolNameLiterals(join(import.meta.dir, "..", ".."))
 
 const CATALOG_DIR = join(import.meta.dir, "..", "..", "tools/feature-catalog/features")
 const CATALOG_YAMLS = await gatherYamlFiles(CATALOG_DIR)
