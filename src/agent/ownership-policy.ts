@@ -208,6 +208,9 @@ export const fieldWriteEffects = (
  *    · `skill_create` — writes `<name>/SKILL.md` under the host skills dir; the
  *      absolute target is host-derived (not a cwd-relative input path).
  *    · `mcp_connector_install` — writes `.mcp.json` at a host-derived config path.
+ *    · `shadow_verify` — runs `bun test` / language servers over a tree the model's
+ *      patch wrote, so the write target is inside patch-authored code (the `node_repl`
+ *      case). It was "non-fs" and measured writing outside an enforced owned set.
  *  A security fence must not silently pass a write it cannot prove in-bounds, so
  *  under enforcement these are FAIL-CLOSED (denied) at the ownership seam rather
  *  than under-reported to a misleading anchor path. All are GATED (opt-in, never
@@ -219,6 +222,7 @@ const UNFENCEABLE_WRITE_TOOLS: ReadonlySet<string> = new Set([
   "node_repl",
   "skill_create",
   "mcp_connector_install",
+  "shadow_verify",
 ])
 
 /** True iff the tool writes to a target the ownership fence cannot statically
@@ -302,6 +306,9 @@ export const OWNERSHIP_WRITE_CLASSIFICATION: Readonly<Record<string, OwnershipWr
     shadow_rewind: "fail-closed",
     mcp_read_resource: "fail-closed",
     node_repl: "fail-closed",
+    // Runs code the model's patch wrote (a test file, a tsconfig plugin). Classified
+    // "non-fs" before, and measured writing outside an enforced owned set.
+    shadow_verify: "fail-closed",
     skill_create: "fail-closed",
     mcp_connector_install: "fail-closed",
     // non-fs — not arbitrary host-FS content authoring (out of fence scope)
@@ -335,7 +342,6 @@ export const OWNERSHIP_WRITE_CLASSIFICATION: Readonly<Record<string, OwnershipWr
     exit_worktree: "non-fs",
     worktree_status: "non-fs",
     shadow_snapshots: "non-fs", // list/register git-ref snapshots
-    shadow_verify: "non-fs", // runs a verify command, no arbitrary content write
     gh_pr_comment: "non-fs", // GitHub network
     gh_pr_create: "non-fs",
     gh_pr_auto_merge: "non-fs",

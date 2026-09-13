@@ -5,9 +5,11 @@
  *    HELL-SVT-01  tier-1 builder absent port ⇒ tool NOT registered (default-OFF,
  *                 byte-identical to legacy registry).
  *    HELL-SVT-02  tier-1 builder with port ⇒ exactly one tool, name "shadow_verify".
- *    HELL-SVT-03  tool registers as read-only (host workspace is never written).
+ *    HELL-SVT-03  tool registers as NOT read-only (its checks run patch-authored code).
  *    HELL-SVT-04  tool registers as non-concurrency-safe (worktree race avoidance).
- *    HELL-SVT-05  tool's HITL tier is `pre-approval-ok` (read-only against host).
+ *    HELL-SVT-05  tool's HITL tier is `always-confirm` — it RUNS patch-controlled code
+ *                 (see shadow-verify-executes-code-gating-hellgate; it was read-only +
+ *                 pre-approval-ok, and that was false).
  *    HELL-SVT-06  zod schema rejects empty patch + empty checks array.
  *    HELL-SVT-07  execute() yields a `progress` event before the result.
  *    HELL-SVT-08  execute() forwards `test_target` to the port verbatim.
@@ -24,6 +26,7 @@
 import { describe, expect, test } from "bun:test"
 import { buildShadowVerifyBlock } from "@/agent/tier1"
 import type { AgentConfig } from "@/agent/types"
+import { inferToolTierDetailed } from "@/permission"
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
 import {
   formatShadowDiagnostic,
@@ -112,16 +115,19 @@ describe("tool posture (HELL-SVT-03/04/05)", () => {
   const { port } = fakePort({ ok: true, applied: true, diagnostics: [] })
   const tool = shadowVerifyTool(port)
 
-  test("read-only", () => {
-    expect(tool.isReadOnly()).toBe(true)
+  test("NOT read-only — its checks execute code the patch controls", () => {
+    expect(tool.isReadOnly()).toBe(false)
   })
 
   test("not concurrency-safe", () => {
     expect(tool.isConcurrencySafe({} as never)).toBe(false)
   })
 
-  test("HITL tier is pre-approval-ok", () => {
-    expect(tool.hitlTier?.({} as never)).toBe("pre-approval-ok")
+  test("HITL tier resolves always-confirm (declared through capability needs-sandbox)", () => {
+    expect(inferToolTierDetailed(tool as never, {})).toEqual({
+      tier: "always-confirm",
+      reason: "needs-sandbox",
+    })
   })
 })
 

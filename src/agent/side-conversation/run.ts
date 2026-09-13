@@ -268,7 +268,6 @@ export const SIDE_CONVERSATION_TOOL_EXCLUSIONS: readonly string[] = Object.freez
   "lsp_signature_help",
   "objective_get",
   "report_agent_job_result",
-  "shadow_verify",
   "subagent_read_messages",
   "wait_agent",
 ])

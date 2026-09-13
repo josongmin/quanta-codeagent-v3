@@ -452,13 +452,22 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
   },
   {
     name: "shadow_rewind",
-    group: ["shadow_snapshots", "shadow_verify", "shadow_restore_partial"],
+    group: ["shadow_snapshots", "shadow_restore_partial"],
     origin: "@/agent/tier1/shadow",
     gate: { kind: "config-slot", slot: "shadowOdb", env: "QUANTA_SHADOW" },
     default: { cli: "opt-in" },
     risk: "mutating",
     adr: "0121",
     note: "Opt-in (QUANTA_SHADOW) — checkpoint/rewind over the shadow ODB.",
+  },
+  {
+    name: "shadow_verify",
+    origin: "@/agent/tier1/shadow-verify (buildShadowVerifyBlock)",
+    gate: { kind: "config-slot", slot: "shadowVerify", env: "QUANTA_SHADOW_VERIFY" },
+    default: { cli: "opt-in" },
+    risk: "mutating",
+    adr: "0400",
+    note: "Opt-in (QUANTA_SHADOW_VERIFY). ALSO minted by the observability wire (QUANTA_OBSERVABILITY=on) whenever it has a repo root. Built from its own `shadowVerify` slot, not `shadowOdb` — it sat in the QUANTA_SHADOW group, which does not expose it. Runs patch-controlled code: always-confirm, needs-sandbox.",
   },
   {
     name: "create_plan",

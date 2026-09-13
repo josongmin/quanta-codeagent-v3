@@ -10,7 +10,7 @@
  *      `"info"`. Server unavailable / language unsupported ⇒ EMPTY diagnostic
  *      list (graceful skip, mirrors `nullDiagnosticsProvider`).
  *
- *   - `"test"`                    → shell-out `bun test [target]` inside the
+ *   - `"test"`                    → shell-out `bun test ['target']` inside the
  *      scratch tree (`runShell`, scrubbed env). Exit 0 ⇒ no diagnostics;
  *      non-zero / timed-out ⇒ a SINGLE error-severity diagnostic carrying the
  *      tail of the combined output. `runShell` not found / shell command not
@@ -32,6 +32,7 @@ import type { Diagnostic, DiagnosticSeverity } from "@/lsp"
 import { type LspClient, PyrightAdapter, TypescriptAdapter } from "@/lsp"
 import { runShell } from "@/runtime"
 import { errMessage, logger } from "@/shared"
+import { projectShadowTestCommand } from "@/tool/shadow-verify"
 import { isAvailable } from "../lsp-bridge/availability"
 import type { ShadowCheck, ShadowCheckPort, ShadowDiagnostic } from "../shadow-verify"
 
@@ -258,7 +259,9 @@ const runTestCheck = async (
   testTarget: string | undefined,
   signal: AbortSignal | undefined,
 ): Promise<readonly ShadowDiagnostic[]> => {
-  const cmd = testTarget && testTarget.length > 0 ? `bun test ${testTarget}` : "bun test"
+  // Quoted, and the same line `shadow_verify` exposes to HARD_DENY. It interpolated the
+  // raw target, so `x; <cmd>` ran `<cmd>` through `bash -lc`.
+  const cmd = projectShadowTestCommand(testTarget)
   try {
     const r = await runShell(cmd, {
       cwd: handle,

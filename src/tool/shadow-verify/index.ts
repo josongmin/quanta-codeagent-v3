@@ -3,15 +3,21 @@
  *
  * Wraps a `ShadowVerifyPort` into an LLM-facing tool. The model can verify a
  * V4A or unified diff against a scratch overlay BEFORE applying it to the
- * real workspace — every check (lint / typecheck / test) runs inside the
- * disposable copy, the host tree is untouched regardless of outcome, and the
- * diagnostics are surfaced annotated by source.
+ * real workspace — every check (lint / typecheck / test) runs inside a
+ * disposable git worktree, and the diagnostics are surfaced annotated by source.
  *
- * HITL tier: `pre-approval-ok`. The verify call is READ-ONLY against the real
- * workspace (the scratch overlay is a disposable git worktree owned by the
- * adapter slice; the host tree is never written to). The OS sandbox profile +
- * the LLM's intent gates upstream of this tool decide whether the *resulting*
- * patch is ever applied — `shadow_verify` only inspects.
+ * NOT READ-ONLY, and gated like a sandboxless `bash`. It used to declare
+ * `isReadOnly: () => true` and `pre-approval-ok` on the premise that "the host tree
+ * is never written to". The worktree is a location, not a jail: the `test` check runs
+ * `bun test` over a tree the MODEL's patch wrote, so a patch that adds a test file
+ * runs arbitrary code with the session's full host access, and before quoting a
+ * `test_target` of `x; <cmd>` reached `bash -lc` verbatim. Measured (sep-13 audit):
+ * under both plan-mode layers `bash` was blocked while `shadow_verify` created a file
+ * on the host with zero confirmations, and it escaped an enforced ownership fence.
+ * The read-only self-report was what every gate trusted — plan mode's read-only
+ * bypass, the permission policy's read-only allow, and the HITL tier inference.
+ * Typecheck and lint are not exempt: a patch can add a tsconfig language-service
+ * plugin, which the scratch LSP loads.
  *
  * SLICE FENCE (ADR-0400 + RFC §3.1): `@/tool` MUST NOT `import type` from
  * `@/agent`. The wave-1 producer types (`ShadowVerifyPort` / `ShadowCheck` /
@@ -72,6 +78,19 @@ export const shadowVerifyInputSchema = z.object({
 })
 export type ShadowVerifyInput = z.infer<typeof shadowVerifyInputSchema>
 
+/** POSIX single-quote one shell word. */
+const shellWord = (s: string): string => `'${s.replace(/'/g, "'\\''")}'`
+
+/**
+ * The exact shell line the `test` check runs — the single source for the adapter that
+ * executes it and for `extractShellCommand`, so HARD_DENY evaluates the line that runs.
+ * The target is ONE quoted word: it names a test path or pattern, never shell syntax.
+ */
+export const projectShadowTestCommand = (testTarget: string | undefined): string =>
+  testTarget !== undefined && testTarget.length > 0
+    ? `bun test ${shellWord(testTarget)}`
+    : "bun test"
+
 /** Render one diagnostic as a stable single-line representation. Mirrors the
  *  `diagnostics` tool's `file:line [severity] message (source)` shape so the
  *  LLM sees a consistent format across pre-apply and post-apply checks. */
@@ -110,19 +129,25 @@ export const shadowVerifyTool = (port: ShadowVerifyPortMirror): Tool<ShadowVerif
     "scratch overlay (NEVER the real workspace), apply the patch there, run the " +
     "requested checks (lint / typecheck / test), and return diagnostics annotated " +
     "by source. `ok:true` iff the patch applied cleanly AND no error-severity " +
-    "diagnostic was produced. The real workspace is untouched regardless of " +
-    "outcome — apply through `apply_patch` / `edit` / `write` separately.",
+    "diagnostic was produced. The patch is not applied to the real workspace — " +
+    "apply through `apply_patch` / `edit` / `write` separately. The checks RUN the " +
+    "patched code, so each call needs the same approval as a shell command.",
   inputSchema: shadowVerifyInputSchema,
-  // Read-only against the host workspace: every side effect lives inside the
-  // scratch overlay the adapter slice provisions + tears down per call.
-  isReadOnly: () => true,
+  // NOT read-only: the checks execute code the patch controls (see the module doc).
+  isReadOnly: () => false,
   // Each call spins up a fresh worktree + (optionally) language servers + a
   // test runner. Concurrent calls would race on git's repo-level lock and
   // spawn N times the LSP+shell load; serialize at the dispatch seam.
   isConcurrencySafe: () => false,
-  // Read-only against the real workspace ⇒ pre-approval-ok. The model can
-  // call verify freely inside the accept-edits envelope without re-prompting.
-  hitlTier: (): "pre-approval-ok" => "pre-approval-ok",
+  // No `hitlTier` and no `capability`, on purpose. It executes model-controlled code with
+  // host access and no OS sandbox — the posture of `bash` without a sandbox profile — and
+  // that is exactly what the fail-closed default gives an undeclared writer:
+  // `{ always-confirm, needs-sandbox }`. Declaring it again would be a second statement
+  // of one fact (mutation-checked: removing either declaration changed nothing).
+  // The `test` check's shell line, for the HARD_DENY denylist. Lint/typecheck run no
+  // shell line.
+  extractShellCommand: (input: ShadowVerifyInput): string | null =>
+    input.checks.includes("test") ? projectShadowTestCommand(input.test_target) : null,
   async *execute(input: ShadowVerifyInput, ctx: CoreToolContext): AsyncIterable<ToolEvent> {
     const parsed = shadowVerifyInputSchema.safeParse(input)
     if (!parsed.success) {

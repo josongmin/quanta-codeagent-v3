@@ -682,10 +682,12 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
   lsp_signature_help: null,
   objective_get: null,
   report_agent_job_result: null,
-  shadow_verify: null,
   subagent_read_messages: null,
   wait_agent: null,
   // Write-capable: code execution and raw protocol access.
+  // `shadow_verify` runs `bun test` / language servers over a tree the model's patch
+  // wrote; it was `null` on its own `isReadOnly() === true`, which was false.
+  shadow_verify: "bash_mutating",
   container_exec: "bash_mutating",
   exec_command: "bash_mutating",
   write_stdin: "bash_mutating",
@@ -829,7 +831,6 @@ export const CALLER_WIRE_TOOL_NAMES = Object.freeze([
   "delegate",
   "followup_task",
   "fork_session",
-  "shadow_verify",
   "skill_create",
   "update_working_state",
   // Retrieval, search and bench-driver wiring.
