@@ -67,10 +67,12 @@ export interface WithCapabilityReceiptInput {
   /** The real home the probes compare against; injected by the arm. */
   readonly hostHome?: string
   /**
-   * Where the receipt goes. Defaults to the clone's shared verification cache; an
-   * arm passes scratch, or it leaves its receipts where every campaign sweeps.
+   * Where the receipt goes, and which directory this lane SWEEPS. Required: it
+   * defaulted to the clone's shared verification cache, and one arm that did not
+   * pass scratch swept the real cache from inside `bun test`. The CLI and the
+   * matrix worker pass `sharedVerificationCacheRoot` themselves.
    */
-  readonly cacheRoot?: string
+  readonly cacheRoot: string
 }
 
 export type CapabilityLaneInput = Pick<
@@ -100,7 +102,7 @@ export const prepareCapabilityLane = async (
   const head = Bun.spawnSync(["git", "rev-parse", "HEAD"], { cwd: repoRoot, timeout: 10_000 })
     .stdout.toString()
     .trim()
-  const cacheRoot = input.cacheRoot ?? sharedVerificationCacheRoot(repoRoot)
+  const cacheRoot = input.cacheRoot
   // What a killed wrapper or campaign could not remove (`capability-receipt-files`).
   sweepCapabilityReceipts({ directory: capabilityReceiptDirectory(cacheRoot), nowMs: Date.now() })
   const outPath = capabilityReceiptPathFor(cacheRoot, input.lane)
@@ -204,6 +206,7 @@ if (import.meta.main) {
       lane,
       cmd,
       env: process.env,
+      cacheRoot: sharedVerificationCacheRoot(REPO_ROOT),
       onStdout: (text) => process.stdout.write(text),
       onStderr: (text) => process.stderr.write(text),
       signal: interrupt.signal,

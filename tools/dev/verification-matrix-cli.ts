@@ -224,6 +224,7 @@ if (command === "worker") {
     lane: `matrix-${stem}`,
     env: { ...process.env, QUANTA_TEST_CACHE: "off" },
     repoRoot,
+    cacheRoot: sharedVerificationCacheRoot(repoRoot),
   })
   const startedAt = performance.now()
   // `await proc.exited` with no deadline: a matrix worker that wedged held its

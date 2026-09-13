@@ -122,6 +122,7 @@ describe("every HOME the rail replaces is lent to", () => {
     try {
       const code = await runWithCapabilityReceipt({
         lane: "arm-toolchain-roots",
+        cacheRoot: join(base, "cache"),
         cmd: [
           process.execPath,
           "-e",
