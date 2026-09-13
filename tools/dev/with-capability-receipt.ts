@@ -73,9 +73,29 @@ export interface WithCapabilityReceiptInput {
   readonly cacheRoot?: string
 }
 
-export const runWithCapabilityReceipt = async (
-  input: WithCapabilityReceiptInput,
-): Promise<number> => {
+export type CapabilityLaneInput = Pick<
+  WithCapabilityReceiptInput,
+  "lane" | "env" | "repoRoot" | "spawn" | "hostHome" | "cacheRoot"
+>
+
+export interface CapabilityLane {
+  /** The child's environment: scratch homes, the receipt's variables, the armed switch. */
+  readonly env: Record<string, string>
+  /** Removes the receipt and the scratch homes. Idempotent. */
+  readonly dispose: () => void
+}
+
+/**
+ * The receipt, homes and switch a lane's child runs under, without running it.
+ *
+ * Split out for the verification matrix's worker, which starts `bun test` under
+ * its own bound. It spawned with `{ ...process.env }`: no receipt, so every gated
+ * consumer answered `blocked-missing` and skipped green, while the shadow matrix
+ * exists to be compared with the monolith runner, which gives its workers one.
+ */
+export const prepareCapabilityLane = async (
+  input: CapabilityLaneInput,
+): Promise<CapabilityLane> => {
   const repoRoot = input.repoRoot ?? REPO_ROOT
   const head = Bun.spawnSync(["git", "rev-parse", "HEAD"], { cwd: repoRoot, timeout: 10_000 })
     .stdout.toString()
@@ -85,26 +105,30 @@ export const runWithCapabilityReceipt = async (
   sweepCapabilityReceipts({ directory: capabilityReceiptDirectory(cacheRoot), nowMs: Date.now() })
   const outPath = capabilityReceiptPathFor(cacheRoot, input.lane)
   const root = mkdtempSync(join(tmpdir(), `capability-lane-${input.lane}-`))
+  const dispose = (): void => {
+    rmSync(outPath, { force: true })
+    rmSync(root, { recursive: true, force: true })
+  }
   const home = join(root, "home")
   const quantaHome = join(home, ".quanta")
   const prefsHome = join(root, "prefs-home")
-  mkdirSync(quantaHome, { recursive: true })
-  mkdirSync(prefsHome, { recursive: true })
-  // What replacing HOME would hide from the child and its probes alike.
-  lendToolchainRoots(toolchainLinks({ home, realHome: input.env.HOME, exists: existsSync }))
-  // One base for the probes and the child. An inherited receipt in it is harmless:
-  // the produced `receipt.env` always carries all three variables and replaces it.
-  const base: Record<string, string> = {
-    ...Object.fromEntries(
-      Object.entries(input.env).filter(
-        (entry): entry is [string, string] => entry[1] !== undefined,
-      ),
-    ),
-    HOME: home,
-    QUANTA_HOME: quantaHome,
-    QUANTA_PREFS_HOME: prefsHome,
-  }
   try {
+    mkdirSync(quantaHome, { recursive: true })
+    mkdirSync(prefsHome, { recursive: true })
+    // What replacing HOME would hide from the child and its probes alike.
+    lendToolchainRoots(toolchainLinks({ home, realHome: input.env.HOME, exists: existsSync }))
+    // One base for the probes and the child. An inherited receipt in it is harmless:
+    // the produced `receipt.env` always carries all three variables and replaces it.
+    const base: Record<string, string> = {
+      ...Object.fromEntries(
+        Object.entries(input.env).filter(
+          (entry): entry is [string, string] => entry[1] !== undefined,
+        ),
+      ),
+      HOME: home,
+      QUANTA_HOME: quantaHome,
+      QUANTA_PREFS_HOME: prefsHome,
+    }
     const receipt = await capabilityReceiptEnvForCampaign({
       repoRoot,
       tier: input.lane,
@@ -113,13 +137,11 @@ export const runWithCapabilityReceipt = async (
       probeEnv: base,
       hostHome: input.hostHome ?? userInfo().homedir,
       ttlMs: MAX_CAPABILITY_RECEIPT_TTL_MS,
-      // Neither lane drives a browser; chrome bring-up would only cost them time.
+      // No lane here drives a browser; chrome bring-up would only cost them time.
       includeChrome: false,
       ...(input.spawn === undefined ? {} : { spawn: input.spawn }),
     })
-    const outcome = await runBoundedChild({
-      cmd: input.cmd,
-      cwd: repoRoot,
+    return {
       env: {
         ...base,
         ...receipt.env,
@@ -128,6 +150,23 @@ export const runWithCapabilityReceipt = async (
           definiteCapabilityIds(receipt.receipt),
         ),
       },
+      dispose,
+    }
+  } catch (error) {
+    dispose()
+    throw error
+  }
+}
+
+export const runWithCapabilityReceipt = async (
+  input: WithCapabilityReceiptInput,
+): Promise<number> => {
+  const lane = await prepareCapabilityLane(input)
+  try {
+    const outcome = await runBoundedChild({
+      cmd: input.cmd,
+      cwd: input.repoRoot ?? REPO_ROOT,
+      env: lane.env,
       limits: { totalMs: 4 * 60 * 60_000, inactivityMs: 12 * 60_000 },
       ...(input.onStdout === undefined ? {} : { onStdout: input.onStdout }),
       ...(input.onStderr === undefined ? {} : { onStderr: input.onStderr }),
@@ -143,8 +182,7 @@ export const runWithCapabilityReceipt = async (
     }
     return outcome.exitCode ?? 1
   } finally {
-    rmSync(outPath, { force: true })
-    rmSync(root, { recursive: true, force: true })
+    lane.dispose()
   }
 }
 

@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test"
-import { readFileSync } from "node:fs"
-import { join, resolve } from "node:path"
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { dirname, join, resolve } from "node:path"
+import ts from "typescript"
 import { executedFileSetDigest } from "../../../tools/dev/executed-file-set"
 import { testToolchainSha256 } from "../../../tools/dev/test-shard-receipt"
 import { junitExecutedFiles } from "../../../tools/dev/test-shard-timings"
@@ -748,5 +750,116 @@ describe("matrix tier wiring", () => {
     expect(ci).toContain("--expect-tier=pr")
     // The monolith's own tier, unchanged: this is the value the other two match.
     expect(ci).toContain("QUANTA_VERIFICATION_TIER: pr")
+  })
+})
+
+/**
+ * ★ Third adversarial audit: the shadow matrix ran a different coverage than the
+ * runner it is compared with. Its workers got no capability receipt, so every
+ * gated consumer skipped green, and its planner accepted a discovery the runner
+ * refuses.
+ */
+describe("the shadow matrix runs what the monolith runs", () => {
+  test("the planner refuses a discovery that lost a tracked test file", () => {
+    const base = realpathSync(mkdtempSync(join(tmpdir(), "matrix-lost-")))
+    const git = (...args: string[]): void => {
+      const run = Bun.spawnSync(["git", ...args], {
+        cwd: base,
+        stdout: "pipe",
+        stderr: "pipe",
+        env: {
+          ...process.env,
+          GIT_AUTHOR_NAME: "t",
+          GIT_AUTHOR_EMAIL: "t@t",
+          GIT_COMMITTER_NAME: "t",
+          GIT_COMMITTER_EMAIL: "t@t",
+        },
+      })
+      if (run.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${run.stderr.toString()}`)
+    }
+    const write = (rel: string, body = ""): void => {
+      mkdirSync(dirname(join(base, rel)), { recursive: true })
+      writeFileSync(join(base, rel), body)
+    }
+    try {
+      git("init", "-q", "-b", "main")
+      for (const root of ["unit", "meta", "adversarial", "measurement", "integration"]) {
+        write(`tests/${root}/a.test.ts`)
+      }
+      write("src/a.test.ts")
+      write("tools/a.test.ts")
+      const overridesPath = join(base, "overrides.json")
+      write(
+        "overrides.json",
+        JSON.stringify({ schema: "quanta.test-policy-overrides.v1", overrides: [] }),
+      )
+      const plan = (): string => {
+        try {
+          currentMatrixPopulation({
+            repoRoot: base,
+            tier: "pr",
+            policyOverridesPath: overridesPath,
+          })
+          return "planned"
+        } catch (error) {
+          return error instanceof Error ? error.message : String(error)
+        }
+      }
+      git("add", "-A")
+      git("commit", "-q", "-m", "a")
+      // PAIRED CONTROL: the same tree, complete, plans.
+      expect(plan()).toBe("planned")
+      // A tracked test under a dot-directory, which discovery does not walk.
+      write("tests/unit/.hidden/lost.test.ts")
+      git("add", "-A")
+      git("commit", "-q", "-m", "b")
+      expect(plan()).toContain("discovery is incomplete")
+      expect(plan()).toContain("tests/unit/.hidden/lost.test.ts")
+    } finally {
+      rmSync(base, { recursive: true, force: true })
+    }
+  })
+
+  test("a worker's child runs under the capability lane it prepared, which it then disposes", () => {
+    const text = readFileSync(
+      resolve(import.meta.dir, "..", "..", "..", "tools/dev/verification-matrix-cli.ts"),
+      "utf8",
+    )
+    const source = ts.createSourceFile("cli.ts", text, ts.ScriptTarget.Latest, true)
+    const found: ts.Node[] = []
+    const visit = (node: ts.Node): void => {
+      found.push(node)
+      node.forEachChild(visit)
+    }
+    visit(source)
+    const calls = (name: string): ts.CallExpression[] =>
+      found.filter(
+        (node): node is ts.CallExpression =>
+          ts.isCallExpression(node) && node.expression.getText(source) === name,
+      )
+    const [prepared] = calls("prepareCapabilityLane")
+    const declaration = prepared?.parent?.parent
+    expect(declaration !== undefined && ts.isVariableDeclaration(declaration)).toBe(true)
+    const laneName = (declaration as ts.VariableDeclaration).name.getText(source)
+    // The ONE bounded child, whose env is the lane's and nothing else.
+    const children = calls("runBoundedChild")
+    expect(children).toHaveLength(1)
+    const bag = children[0]?.arguments[0]
+    const env =
+      bag !== undefined && ts.isObjectLiteralExpression(bag)
+        ? bag.properties.find((one) => one.name?.getText(source) === "env")
+        : undefined
+    expect(
+      env !== undefined && ts.isPropertyAssignment(env) ? env.initializer.getText(source) : "",
+    ).toBe(`${laneName}.env`)
+    // Disposed whichever way the child ends.
+    const settle = children[0]?.parent
+    expect(
+      settle !== undefined &&
+        ts.isPropertyAccessExpression(settle) &&
+        settle.name.text === "finally" &&
+        ts.isCallExpression(settle.parent) &&
+        settle.parent.arguments[0]?.getText(source) === `() => ${laneName}.dispose()`,
+    ).toBe(true)
   })
 })

@@ -37,7 +37,11 @@ import {
   resolveTestPopulation,
   selectTestPoliciesForTier,
 } from "./test-policy"
-import { discoverSuiteFiles } from "./test-shard-discovery"
+import {
+  discoverSuiteFiles,
+  discoveryCompletenessProblems,
+  trackedSuiteTestFiles,
+} from "./test-shard-discovery"
 import { loadTierPopulationFloors, type TierPopulationFile } from "./test-tier-population"
 import {
   MATRIX_PLAN_FILE_FLOOR,
@@ -118,6 +122,20 @@ export const currentMatrixPopulation = (input: {
   readonly capabilitySha256?: string
 }): CurrentMatrixPopulation => {
   const discovered = discoverSuiteFiles(input.repoRoot, "full")
+  // The runner refuses a discovery that lost a tracked test file; the planner did
+  // not, so on such a tree it planned a smaller corpus while the runner it is
+  // compared with refused to run at all.
+  const incomplete = discoveryCompletenessProblems({
+    suite: "full",
+    discovered: discovered.map((file) => relative(input.repoRoot, file)),
+    tracked: trackedSuiteTestFiles(input.repoRoot, "full"),
+  })
+  if (incomplete.length > 0) {
+    throw new Error(
+      `[matrix] INVALID — discovery is incomplete: ${incomplete.join("; ")}. ` +
+        "A plan over this set would describe a smaller corpus than the tree holds.",
+    )
+  }
   const policies = resolveTestPopulation(
     discovered.map((file) => relative(input.repoRoot, file)),
     loadPolicyOverrides(input.policyOverridesPath).overrides,

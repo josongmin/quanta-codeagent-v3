@@ -23,7 +23,6 @@ import type { VerificationMatrixPlan } from "./verification-matrix"
 import {
   aggregateMatrixReceipts,
   parseMatrixWorkerReceipt,
-  parseVerificationMatrixPlan,
   planVerificationMatrix,
   workerReceipt,
 } from "./verification-matrix"
@@ -34,6 +33,7 @@ import {
 } from "./verification-matrix-population"
 import { sharedVerificationCacheRoot } from "./verification-receipt"
 import { assertKnownTier } from "./verification-tier"
+import { prepareCapabilityLane } from "./with-capability-receipt"
 
 const repoRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))))
 const timingStore = join(sharedVerificationCacheRoot(repoRoot), "test-timings-v2.json")
@@ -218,6 +218,13 @@ if (command === "worker") {
   const junitFile = `${stem}.junit.xml`
   const junitPath = join(outDir, junitFile)
   const receiptPath = join(outDir, `${stem}.receipt.json`)
+  // The receipt its gated consumers read, as the monolith's workers get one. Made
+  // before the clock starts: probing is not the chunk's time.
+  const lane = await prepareCapabilityLane({
+    lane: `matrix-${stem}`,
+    env: { ...process.env, QUANTA_TEST_CACHE: "off" },
+    repoRoot,
+  })
   const startedAt = performance.now()
   // `await proc.exited` with no deadline: a matrix worker that wedged held its
   // runner slot until the hosted job's own limit killed the whole thing, which
@@ -236,7 +243,7 @@ if (command === "worker") {
       `--reporter-outfile=${junitPath}`,
     ],
     cwd: repoRoot,
-    env: { ...process.env, QUANTA_TEST_CACHE: "off" },
+    env: lane.env,
     // A chunk's OWN per-case timeout is `chunk.testTimeoutMs`; this is the
     // bound on the whole chunk, derived from it rather than picked: enough room
     // for every planned file to hit its individual ceiling, and not more.
@@ -246,7 +253,7 @@ if (command === "worker") {
     },
     onStdout: (text) => process.stdout.write(text),
     onStderr: (text) => process.stderr.write(text),
-  })
+  }).finally(() => lane.dispose())
   if (outcome.status === "timed-out") {
     process.stderr.write(
       `[matrix] chunk ${chunk.id} killed on the ${outcome.deadline ?? "unknown"} deadline ` +
