@@ -55,16 +55,17 @@ of the description — all run through the redaction layer first.
 
 ### Trigger phrases
 
-Default: `@quanta` and `/quanta`. Override under the `env:` block of the
-`respond` job:
+Default: `@quanta` and `/quanta`. Override by adding flags to the `run:` line of
+the `run quanta from-pr` step. These are CLI flags, not environment variables:
 
 ```yaml
-# NOT an environment variable. `QUANTA_GH_TRIGGER_PHRASES` appeared here and in
-# the feature catalog and is read by NOTHING — its only other occurrence in the
-# tree was a commented line in a workflow TEMPLATE. The value comes from a
-# repeatable CLI flag (src/apps/cli/from-pr-cmd-runner.ts:116).
-- run: quanta from-pr --trigger-phrase "@quanta" --trigger-phrase "@my-bot"
+- name: run quanta from-pr
+  run: bun run src/apps/cli/from-pr-cmd-runner.ts --trigger-phrase "@quanta" --trigger-phrase "@my-bot"
 ```
+
+`--trigger-phrase` is repeatable. The step runs the runner file directly: there is
+no `quanta from-pr` subcommand in the installed CLI, and an earlier version of
+this page that said so gave a command that exits 64.
 
 The matcher is case-insensitive and whitespace-collapsing; phrases inside
 fenced code blocks (` ``` … ``` `) or 4-space-indented blocks are ignored
@@ -72,17 +73,22 @@ fenced code blocks (` ``` … ``` `) or 4-space-indented blocks are ignored
 
 ### Trust scope
 
-Default: `collaborator` — accepts comments from anyone with Triage / Write /
-Maintain / Admin. Override:
+Default: `collaborator`. Override with `--trust-scope`; the runner accepts exactly
+`collaborator`, `member`, `owner` and `public` and exits 64 on anything else:
 
 ```yaml
-# Also a CLI flag, not an environment variable, for the same reason as above
-# (src/apps/cli/from-pr-cmd-runner.ts:112).
-- run: quanta from-pr --trust-scope maintainer   # or owner | any-human
+- name: run quanta from-pr
+  run: bun run src/apps/cli/from-pr-cmd-runner.ts --trust-scope owner
 ```
 
-Use `any-human` only in trusted private repos — it accepts any
-non-bot account.
+What each admits today (`src/integrations/github/mention-filter.ts`):
+
+| scope | admits |
+|---|---|
+| `owner` | the repository owner |
+| `member` | the repository owner only — no sender currently resolves to `member`, so this ranks above `collaborator` without admitting anyone new |
+| `collaborator` | senders GitHub marks as collaborators, and the owner |
+| `public` | any non-bot account — use only in trusted private repos |
 
 ## Security defaults
 

@@ -1,243 +1,204 @@
 /**
- * ★ `config_refs.env` told operators to set variables that no code reads.
+ * ★ The catalog offered operators environment variables that no code reads.
  *
- * The field renders as "**Configurable**: partial · env: …" in
- * `docs/10.feature-catalog.md`. The catalog's existing guards check evidence
- * existence, code reachability and render shape; the NAMES in that field were
- * checked by nothing. MEASURED, THIRTEEN false claims across ten features —
- * including `QUANTA_REQUIRE_CAPABILITY`, which the TVH-03 handoff told CI
- * authors to set, and which has been superseded by a plural name with a
- * different grammar. A job copied from that handoff armed no capability and
- * reported a pass.
+ * `config_refs.env`, `knobs` and the default-off ledger's `gate_owner` all name
+ * env switches, and all three are read by operators and CI authors. The names
+ * were checked by nothing, and a CI job copied from the TVH-03 handoff set
+ * `QUANTA_REQUIRE_CAPABILITY`, which armed nothing, and reported a pass.
  *
- * The last two were found by an adversarial audit OF THIS GUARD, and they are
- * the reason the two raw-text shapes now strip comments:
- * `QUANTA_GH_TRIGGER_PHRASES` and `QUANTA_GH_TRUST_SCOPE` were called alive by
- * two `#`-COMMENTED lines in `.github/workflows/quanta-pr-bot.yml.template` — a
- * file `gate-manifest.ts` itself classifies as "a template, not an installed
- * workflow" — while the values come from the `--trigger-phrase` and
- * `--trust-scope` CLI flags. The guard's thesis is that a comment is not
- * evidence; it held for the two TypeScript shapes and not for the other two.
+ * Every rule in `tools/dev/catalog-config-refs.ts` has been wrong at least once,
+ * and each time an audit of the guard found it rather than the guard finding
+ * itself. So this file pins three different things, deliberately separately:
  *
- * # What makes this a guard and not a grep
+ *  - the RATCHET over the real tree (no declared name unread);
+ *  - SENTINELS that prove each root and each evidence shape still yields what it
+ *    yielded when measured, so a silently dead shape fails as a shape and not as
+ *    catalog drift;
+ *  - FIXTURE arms, one per rule, through the real function on a scratch tree.
  *
- * `grep -w QUANTA_REQUIRE_CAPABILITY` finds four hits — three docstrings saying
- * the name is retired and one test asserting it does nothing. A mention-based
- * guard would call the deadest name in the tree alive, and would be satisfied
- * in perpetuity by the very test that proves it dead. The arm below pins that
- * exact case, because it is the one that decides whether the whole design
- * measures anything.
+ * No totals of "how many false claims" appear here. Three successive versions of
+ * that sentence were wrong.
+ *
+ * The scan reads ~8,500 files. It runs in `beforeAll`, not at module load: a
+ * module-scope scan behind an import is invisible to the module-load effect
+ * guard, and it was paid by every run that merely collected this file.
  */
 
-import { describe, expect, test } from "bun:test"
+import { beforeAll, describe, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join, relative } from "node:path"
 import {
   type CatalogEnvSource,
+  catalogCorpus,
+  type DeclaredEnvNames,
   declaredEnvNames,
   describeUnbackedEnvNames,
+  type EnvEvidence,
+  type EnvEvidenceKind,
+  envEvidenceAll,
   envEvidenceIndex,
-  trackedFiles,
+  envKnobNames,
+  gateOwnerEnvNames,
   unbackedEnvNames,
 } from "../../../tools/dev/catalog-config-refs"
+import { loadDefaultOffLedger } from "../../../tools/feature-catalog/default-off-ledger-checker"
 import { REPO_ROOT } from "../../../tools/feature-catalog/paths"
 import { loadFeaturesStrict } from "../../../tools/feature-catalog/schema"
 
-const ROOTS = ["src", "tools", "tests", "apps", "native", ".github/workflows"] as const
-
-const features = await loadFeaturesStrict()
 /**
- * BOTH fields that name an environment variable.
- *
- * `config_refs.env` is the rendered operator-facing list. `knobs[]` entries
- * carry a `where` discriminator and only `where: "env"` names a variable — the
- * other entries are CLI flags (`--dry-run flag`), config paths
- * (`.quanta/environment.toml`) and TypeScript properties
- * (`AgentConfig.editRepair`). MEASURED: treating an absent `where` as env
- * produced 156 "unbacked" names, essentially all of them false; filtering to
- * `where === "env"` leaves 10 declarations, of which exactly one was unbacked —
- * `QUANTA_DOCTOR`, the same proposal-recorded-as-a-knob that `config_refs.env`
- * also claimed.
+ * Shell and workflow fixtures need a literal `${`. Spelled through this constant
+ * so a fixture is not mistaken for a broken template literal.
  */
-// `| undefined` on `where`, not just `?`: the tsconfig sets
-// `exactOptionalPropertyTypes`, so an optional property and one that may hold
-// `undefined` are different types, and the schema's knob is the latter.
-type CatalogKnob = string | { readonly name: string; readonly where?: string | undefined }
+const DOLLAR = "$"
 
-/**
- * A bare-string knob is the OTHER spelling, and it is where the rest of the
- * drift lived. MEASURED: 84 bare strings against 694 objects, and 49 of the 84
- * match `^[A-Z][A-Z0-9_]{3,}$`. That shape rule is not a guess about intent —
- * the non-env knob spellings in this corpus are CLI flags (`--dry-run flag`),
- * config paths (`.quanta/environment.toml`) and TypeScript properties
- * (`AgentConfig.editRepair`), none of which are all-caps-and-underscores.
- *
- * Under both spellings, 56 declared names and three unbacked, all three
- * invented: `QUANTA_FORCE_BACKGROUND_SUBAGENT_BG` / `_QUEUE` in a record whose
- * own `deliberate_hold` prose names the two variables that DO exist
- * (`QUANTA_FORCE_BACKGROUND`, `QUANTA_SUBAGENT_QUEUE`), and
- * `QUANTA_RADAR_PRUNE_MS` in a record whose prose describes `prune` as a
- * `/radar` subcommand.
- */
-const ENV_SHAPED_NAME = /^[A-Z][A-Z0-9_]{3,}$/
-
-const envKnobNames = (feature: { readonly knobs?: readonly CatalogKnob[] }): readonly string[] => {
-  const names: string[] = []
-  for (const knob of feature.knobs ?? []) {
-    if (typeof knob === "string") {
-      if (ENV_SHAPED_NAME.test(knob)) names.push(knob)
-    } else if (knob.where === "env" && knob.name.length > 0) {
-      names.push(knob.name)
-    }
-  }
-  return names
-}
-
-const records: CatalogEnvSource[] = features.map(({ feature, path }) => ({
-  path: relative(REPO_ROOT, path),
-  env: [...(feature.config_refs?.env ?? []), ...envKnobNames(feature)],
-}))
-const declared = declaredEnvNames(records)
-const files = trackedFiles(REPO_ROOT, ROOTS)
-
-/**
- * The names the arms below probe for, scanned in the SAME pass as the declared
- * ones.
- *
- * # Why one pass
- *
- * Each arm used to build its own index, and each build reads and parses every
- * one of ~9,500 tracked files. Three passes in one file, and MEASURED: run the
- * file on its own and two arms exceed Bun's default 5,000ms per-test timeout —
- * 4 runs out of 4 red. It passed under the gate only because the shard runner
- * hands workers `--timeout=120000`, so the file was red for a developer and
- * green for CI, which is the worse way round.
- */
 const RETIRED = "QUANTA_REQUIRE_CAPABILITY"
 const LIVE = "QUANTA_REQUIRE_CAPABILITIES"
 const FABRICATED = "QUANTA_NOTHING_READS_THIS_NAME"
 const REAL_CONTROL = "QUANTA_TEST_CACHE"
-const evidence = envEvidenceIndex(
-  REPO_ROOT,
-  [...declared.keys(), RETIRED, LIVE, FABRICATED, REAL_CONTROL],
-  files,
-)
+
+/**
+ * One name per root × shape, each MEASURED on this tree before being written
+ * here. A root that stops being scanned, or a shape that stops matching, fails
+ * on its sentinel and says which — the count floors this replaces could lose the
+ * entire `native/` root and pass, reporting the fallout as catalog drift.
+ */
+const SENTINELS: readonly (readonly [string, EnvEvidenceKind, string])[] = [
+  ["SCREEN_OCR_DEBUG", "quoted", "native/"],
+  ["QUANTA_SHADOW_MATRIX", "workflow", ".github/workflows/"],
+  ["VITE_QUANTA_WS_URL", "ts-literal", "apps/"],
+  ["QUANTA_TEST_NO_USER_LIBRARY", "ts-access", "tools/"],
+  ["QUANTA_SMOKE_LIVE", "ts-access", "tests/"],
+  // A `.ts` file with generic arrows. Parsed as TSX it misparses and the read
+  // at otel-exporter.ts:629 disappears; this name was then backed only by an
+  // inventory literal elsewhere.
+  ["QUANTA_OTEL_BATCH_SIZE", "ts-access", "src/observability/"],
+  ["QUANTA_BENCH_PRESET", "shell", "package.json"],
+  // An extensionless bash script outside every root the old corpus scanned.
+  ["QUANTA_TERMINAL_BRAIN_REPO", "shell", "adapters/"],
+]
+
+interface Scan {
+  readonly records: readonly CatalogEnvSource[]
+  readonly declared: DeclaredEnvNames
+  readonly files: readonly string[]
+  readonly all: ReadonlyMap<string, readonly EnvEvidence[]>
+}
+let scan: Scan | undefined
+const scanned = (): Scan => {
+  if (scan === undefined) throw new Error("beforeAll did not run")
+  return scan
+}
+
+beforeAll(async () => {
+  const features = await loadFeaturesStrict()
+  const ledger = await loadDefaultOffLedger(
+    join(REPO_ROOT, "tools", "feature-catalog", "default-off-ledger.yaml"),
+  )
+  const records: CatalogEnvSource[] = [
+    ...features.map(({ feature, path }) => ({
+      path: relative(REPO_ROOT, path),
+      env: [
+        ...(feature.config_refs?.env ?? []),
+        ...envKnobNames(feature.knobs as Parameters<typeof envKnobNames>[0]),
+      ],
+    })),
+    ...ledger.rows.map((row) => ({
+      path: `tools/feature-catalog/default-off-ledger.yaml#${row.feature_id}.gate_owner`,
+      env: gateOwnerEnvNames(row.gate_owner),
+    })),
+  ]
+  const declared = declaredEnvNames(records)
+  const files = catalogCorpus(REPO_ROOT)
+  const all = envEvidenceAll(
+    REPO_ROOT,
+    [
+      ...declared.keys(),
+      ...SENTINELS.map(([name]) => name),
+      RETIRED,
+      LIVE,
+      FABRICATED,
+      REAL_CONTROL,
+    ],
+    files,
+  )
+  scan = { records, declared, files, all }
+}, 120_000)
 
 describe("every env name the catalog offers is one some code reads", () => {
-  /**
-   * ANTI-VACUITY. Each of these was a way the ratchet below could pass while
-   * measuring nothing: a loader returning no records, a `git ls-files` that
-   * resolved no paths from a foreign cwd, or a field-extractor that understood
-   * one of the two YAML spellings. The last one really happened — a regex draft
-   * saw 147 of 444 names because two thirds of the catalog writes
-   * `env: [A, B]` rather than a block sequence.
-   */
-  /**
-   * ANTI-VACUITY, with floors that are actually load-bearing.
-   *
-   * They were `features > 900`, `declared > 400`, `files > 5_000` against real
-   * values of 1071 / 465 / 9512 — 16%, 14% and 47% of headroom. MEASURED: drop
-   * the ENTIRE `src` root, which carries 384 of the evidences, and the corpus
-   * falls to 5,685 files and 243 names go unbacked — and every one of those
-   * floors still passed. The ratchet was doing all the detection and the
-   * "anti-vacuity" arm was decoration.
-   *
-   * The floors below sit just under the measured values, so losing a root fails
-   * HERE, where the message says the scan did not reach the tree, instead of
-   * failing in the ratchet with 243 names that look like catalog drift.
-   */
-  test("anti-vacuity: the scan reached the catalog, the tree, and all four shapes", () => {
-    expect(features.length).toBeGreaterThan(1_000)
-    expect(declared.size).toBeGreaterThan(440)
-    expect(files.length).toBeGreaterThan(9_000)
-
-    const byShape = new Map<string, number>()
-    for (const found of evidence.values()) {
-      byShape.set(found.kind, (byShape.get(found.kind) ?? 0) + 1)
-    }
-    // Every shape the module declares must actually fire on this tree. A shape
-    // that silently stops matching would otherwise look like a clean catalog.
-    expect([...byShape.keys()].sort()).toEqual(["quoted", "ts-access", "ts-literal", "workflow"])
-    // ...and fire on more than a token. `ts-literal` alone carries 384 of 465;
-    // if it collapsed to one hit the shape-presence check above would still pass
-    // while the census had stopped measuring anything.
-    const floors: Readonly<Record<string, number>> = {
-      "ts-literal": 300,
-      "ts-access": 50,
-      workflow: 5,
-      quoted: 5,
-    }
-    for (const [shape, floor] of Object.entries(floors)) {
-      const seen = byShape.get(shape) ?? 0
-      expect({ shape, atLeast: floor, seen: seen >= floor }).toEqual({
-        shape,
-        atLeast: floor,
-        seen: true,
+  test("SENTINELS — every root and every shape still yields what it was measured to", () => {
+    const { all, declared, files } = scanned()
+    // Anti-vacuity on the inputs, loose on purpose: the sentinels are what bite.
+    expect(files.length).toBeGreaterThan(5_000)
+    expect(declared.size).toBeGreaterThan(400)
+    for (const [name, kind, prefix] of SENTINELS) {
+      const hit = (all.get(name) ?? []).find(
+        (evidence) => evidence.kind === kind && evidence.where.startsWith(prefix),
+      )
+      expect({ name, kind, prefix, found: hit !== undefined }).toEqual({
+        name,
+        kind,
+        prefix,
+        found: true,
       })
     }
+    // ...and the sentinels cover every shape the module declares.
+    expect([...new Set(SENTINELS.map(([, kind]) => kind))].sort()).toEqual([
+      "quoted",
+      "shell",
+      "ts-access",
+      "ts-literal",
+      "workflow",
+    ])
   })
 
   test("RATCHET — no declared env name is backed by nothing", () => {
-    const unbacked = unbackedEnvNames(declared, evidence)
-    // The message, not just the count: a failure has to say which name and
-    // which record, or the next person cannot act on it.
+    const { declared, all } = scanned()
+    const unbacked = unbackedEnvNames(declared, all)
     expect(unbacked.length === 0 ? "" : describeUnbackedEnvNames(unbacked)).toBe("")
   })
 
-  /**
-   * THE DISCRIMINATOR. `QUANTA_REQUIRE_CAPABILITY` is retired: the lane helper
-   * and the receipt consumer now read `QUANTA_REQUIRE_CAPABILITIES` with one
-   * grammar. The retired name still appears in three docstrings and, in
-   * `capability-receipt-wiring.test.ts`, as an object-literal KEY in the arm
-   * that asserts setting it does nothing.
-   *
-   * A comment is not a node, and an object-literal key is a WRITE (a bag being
-   * built), not a read — the same distinction `knob-env-access.ts` draws. So
-   * neither is evidence, and this arm fails the moment the rules soften into a
-   * substring search.
-   */
+  test("the ledger's gate_owner and knobs WITHOUT `where: env` are declarations too", () => {
+    const { records } = scanned()
+    // Both were extracted by nothing, and five names — three knobs, two ledger
+    // owners — sat unread behind that gap.
+    expect(records.some((record) => record.path.includes("default-off-ledger.yaml#"))).toBe(true)
+    expect(envKnobNames([{ name: "QUANTA_NO_WHERE" }])).toEqual(["QUANTA_NO_WHERE"])
+    expect(envKnobNames([{ name: "QUANTA_FILE_WHERE", where: "src/x.ts" }])).toEqual([
+      "QUANTA_FILE_WHERE",
+    ])
+    expect(envKnobNames(["QUANTA_BARE_STRING"])).toEqual(["QUANTA_BARE_STRING"])
+    // PAIRED CONTROLS — a CLI flag and a TypeScript property are not env names.
+    expect(envKnobNames([{ name: "--trigger-phrase", where: "cli" }])).toEqual([])
+    expect(envKnobNames([{ name: "AgentConfig.editRepair" }])).toEqual([])
+    expect(gateOwnerEnvNames(["QUANTA_GATE", "config.flag"])).toEqual(["QUANTA_GATE"])
+  })
+
   test("a retired name is NOT backed, though grep finds it four times", () => {
-    expect(evidence.has(RETIRED)).toBe(false)
-    // PAIRED CONTROL — the surviving name IS backed, so the arm above is not
-    // just proving the scan found nothing at all.
-    expect(evidence.get(LIVE)?.kind).toBe("ts-literal")
+    const { all } = scanned()
+    expect(all.has(RETIRED)).toBe(false)
+    expect(all.get(LIVE)?.some((evidence) => evidence.kind === "ts-literal")).toBe(true)
   })
 
   test("RED ON INJECTION — a fabricated name is reported, a real one is not", () => {
-    // Both probe names were in the single module-level scan, so these reuse it.
-    const injected = declaredEnvNames([
-      ...records,
-      { path: "tools/feature-catalog/features/00-injected.yaml", env: [FABRICATED] },
-    ])
-    const unbacked = unbackedEnvNames(injected, evidence)
+    const { records, all } = scanned()
+    const inject = (name: string) =>
+      declaredEnvNames([
+        ...records,
+        { path: "tools/feature-catalog/features/00-injected.yaml", env: [name] },
+      ])
+    const unbacked = unbackedEnvNames(inject(FABRICATED), all)
     expect(unbacked.map(({ name }) => name)).toEqual([FABRICATED])
-    expect(unbacked[0]?.records).toEqual(["tools/feature-catalog/features/00-injected.yaml"])
     expect(describeUnbackedEnvNames(unbacked)).toContain("00-injected.yaml")
-
-    // PAIRED CONTROL — the same injection with a name the tree really reads
-    // produces no finding, so the arm is detecting absence and not the
-    // injection itself.
-    const real = declaredEnvNames([
-      ...records,
-      { path: "tools/feature-catalog/features/00-injected.yaml", env: [REAL_CONTROL] },
-    ])
-    expect(unbackedEnvNames(real, evidence)).toEqual([])
+    expect(unbackedEnvNames(inject(REAL_CONTROL), all)).toEqual([])
   })
 })
 
 /**
- * ★ Each evidence shape, driven over a fixture tree.
- *
- * The ratchet above can only see holes that a CURRENTLY declared name falls
- * into. Every defect below was found by an adversarial audit and none of them
- * was visible to it: the offending names were either already correct in the
- * catalog, or — in the two that were not — backed by the very hole under test.
- *
- * `envEvidenceIndex` reads from a root it is given, so these are real files
- * through the real function, not a re-implementation of its rules.
+ * One rule at a time, through the real function on a scratch tree. Every case
+ * here was measured wrong in a previous version of the guard.
  */
-describe("what counts as evidence, one shape at a time", () => {
+describe("what counts as evidence", () => {
   const inFixture = (files: Readonly<Record<string, string>>, names: readonly string[]) => {
     const root = mkdtempSync(join(tmpdir(), "cfgrefs-fixture-"))
     try {
@@ -250,89 +211,155 @@ describe("what counts as evidence, one shape at a time", () => {
       rmSync(root, { recursive: true, force: true })
     }
   }
+  const backed = (found: ReadonlyMap<string, EnvEvidence>, names: readonly string[]) =>
+    Object.fromEntries(names.map((name) => [name, found.get(name)?.kind ?? null]))
 
-  test("a COMMENT is not evidence, in the two raw-text shapes too", () => {
-    // MEASURED: `QUANTA_GH_TRIGGER_PHRASES` and `QUANTA_GH_TRUST_SCOPE` were
-    // backed by two `#`-commented lines in a workflow TEMPLATE and nothing else
-    // in the tree, while their values come from CLI flags. The module's thesis
-    // is "a comment is not a node"; it held for the parsed shapes and not for
-    // the regex ones.
+  test("a COMMENT is never evidence — indented, trailing, block, or in a template", () => {
+    const names = [
+      "QUANTA_WF_TRAIL",
+      "QUANTA_WF_INDENT",
+      "QUANTA_WF_TEMPLATE",
+      "QUANTA_SW_BLOCK",
+      "QUANTA_WF_REAL",
+      "QUANTA_SW_REAL",
+    ]
     const found = inFixture(
       {
-        ".github/workflows/ci.yml":
-          '#   QUANTA_WF_COMMENT: "1"\njobs:\n  a:\n    env:\n      QUANTA_WF_REAL: "1"\n',
-        "native/x.swift":
-          '// legacy: environment["QUANTA_RS_COMMENT"] removed\nlet v = ProcessInfo.processInfo.environment["QUANTA_RS_REAL"]\n',
-      },
-      ["QUANTA_WF_COMMENT", "QUANTA_WF_REAL", "QUANTA_RS_COMMENT", "QUANTA_RS_REAL"],
-    )
-    expect(found.has("QUANTA_WF_COMMENT")).toBe(false)
-    expect(found.has("QUANTA_RS_COMMENT")).toBe(false)
-    // PAIRED CONTROLS — the live lines in the same two files still back theirs,
-    // so the arm is not just proving the shapes stopped working.
-    expect(found.get("QUANTA_WF_REAL")?.kind).toBe("workflow")
-    expect(found.get("QUANTA_RS_REAL")?.kind).toBe("quoted")
-  })
-
-  test("a WRITE is not a read", () => {
-    // `knob-env-access.ts` draws this line — "Writes are not reads … asking the
-    // registry to declare it as a knob an operator can set inverts the data
-    // flow" — and the test docstring claimed this module drew it too. It did
-    // not. A block of nine `process.env.QUANTA_* = "1"` writes in one hellgate
-    // would have backed nine names on its own.
-    const found = inFixture(
-      {
-        "src/w.ts": [
-          'process.env.QUANTA_ASSIGNED = "1"',
-          "delete process.env.QUANTA_DELETED",
-          'bag["QUANTA_ELEM_ASSIGNED"] = "1"',
-          "const read = process.env.QUANTA_READ",
+        ".github/workflows/ci.yml": [
+          "jobs: # QUANTA_WF_TRAIL",
+          "  a:",
+          "    # QUANTA_WF_INDENT is documented here",
+          "    steps:",
+          `      - run: echo ${DOLLAR}{{ vars.QUANTA_WF_REAL }}`,
+        ].join("\n"),
+        ".github/workflows/bot.yml.template": `      - run: echo ${DOLLAR}{{ vars.QUANTA_WF_TEMPLATE }}\n`,
+        "native/x.swift": [
+          '/* environment["QUANTA_SW_BLOCK"] was removed */',
+          'let v = ProcessInfo.processInfo.environment["QUANTA_SW_REAL"]',
         ].join("\n"),
       },
-      ["QUANTA_ASSIGNED", "QUANTA_DELETED", "QUANTA_ELEM_ASSIGNED", "QUANTA_READ"],
+      names,
     )
-    expect(found.has("QUANTA_ASSIGNED")).toBe(false)
-    expect(found.has("QUANTA_DELETED")).toBe(false)
-    expect(found.has("QUANTA_ELEM_ASSIGNED")).toBe(false)
-    // PAIRED CONTROL — the plain read beside them is still evidence.
-    expect(found.get("QUANTA_READ")?.kind).toBe("ts-access")
+    expect(backed(found, names)).toEqual({
+      QUANTA_WF_TRAIL: null,
+      QUANTA_WF_INDENT: null,
+      QUANTA_WF_TEMPLATE: null,
+      QUANTA_SW_BLOCK: null,
+      QUANTA_WF_REAL: "workflow",
+      QUANTA_SW_REAL: "quoted",
+    })
   })
 
-  test("FALSE-RED shapes: a renamed destructure and a template key are reads", () => {
-    // Both were unbacked, and an unbacked name is "fixed" by deleting a TRUE
-    // claim from the catalog — the precise harm this guard creates when wrong.
+  test("a WRITE is not a read, in every spelling measured as one", () => {
+    const names = [
+      "QUANTA_EQ",
+      "QUANTA_NULLISH",
+      "QUANTA_OR",
+      "QUANTA_PAREN",
+      "QUANTA_DEL",
+      "QUANTA_STRKEY",
+      "QUANTA_TYPE",
+      "QUANTA_RS_WRITE",
+      "QUANTA_RHS",
+      "QUANTA_RHS_ASSIGN",
+    ]
+    const found = inFixture(
+      {
+        // Semicolons on purpose: without them `"1"\n(process.env.X) = "1"` parses as a
+        // CALL of "1", and the fixture — not the guard — made a write look like a read.
+        // Semicolons on purpose: without them `"1"` followed by `(process.env.X) = "1"`
+        // parses as a CALL of "1", and the FIXTURE made a write look like a read.
+        "src/w.ts": [
+          'process.env.QUANTA_EQ = "1";',
+          'process.env.QUANTA_NULLISH ??= "1";',
+          'process.env["QUANTA_OR"] ||= "1";',
+          '(process.env.QUANTA_PAREN) = "1";',
+          "delete process.env.QUANTA_DEL;",
+          'const bag = { "QUANTA_STRKEY": "1" };',
+          'type T = "QUANTA_TYPE";',
+          // PAIRED CONTROL: a read on the RIGHT of `=` is still a read.
+          "const y = process.env.QUANTA_RHS;",
+          // ...and on the right of an assignment EXPRESSION — the case a write check
+          // that ignores which side it is on gets wrong. A declaration is not one.
+          "let z; z = process.env.QUANTA_RHS_ASSIGN;",
+        ].join("\n"),
+        "src/d.rs": 'cmd.env("QUANTA_RS_WRITE", "1");\n',
+      },
+      names,
+    )
+    expect(backed(found, names)).toEqual({
+      QUANTA_EQ: null,
+      QUANTA_NULLISH: null,
+      QUANTA_OR: null,
+      QUANTA_PAREN: null,
+      QUANTA_DEL: null,
+      QUANTA_STRKEY: null,
+      QUANTA_TYPE: null,
+      QUANTA_RS_WRITE: null,
+      QUANTA_RHS: "ts-access",
+      QUANTA_RHS_ASSIGN: "ts-access",
+    })
+  })
+
+  test("FALSE-RED shapes — each is a real read the guard used to miss", () => {
+    const names = [
+      "QUANTA_RENAMED",
+      "QUANTA_TEMPLATED",
+      "QUANTA_PATTERN",
+      "QUANTA_IN",
+      "QUANTA_AFTER_GENERIC",
+      "QUANTA_SH",
+      "QUANTA_PKG",
+      "QUANTA_RS_AFTER_CHAR",
+    ]
     const found = inFixture(
       {
         "src/r.ts": [
           "const { QUANTA_RENAMED: aliased } = env",
           "const t = process.env[`QUANTA_TEMPLATED`]",
-          "const { QUANTA_PLAIN } = env",
+          "let p; ({ QUANTA_PATTERN: p } = env)",
+          // Parsed as TSX, this generic arrow broke the tree and hid what followed.
+          "const id = <T>(x: T): T => x",
+          "const after = process.env.QUANTA_AFTER_GENERIC",
         ].join("\n"),
+        "tests/unit/in.test.ts": 'if ("QUANTA_IN" in process.env) {}\n',
+        "scripts/run": `#!/usr/bin/env bash\necho "${DOLLAR}{QUANTA_SH:-default}"\n`,
+        "package.json": JSON.stringify({
+          scripts: { bench: `QUANTA_X=1 run ${DOLLAR}{QUANTA_PKG:-a}` },
+        }),
+        // A char literal `'"'` used to open a string that swallowed the read after it.
+        "src/c.rs": 'let q = \'"\'; let v = std::env::var("QUANTA_RS_AFTER_CHAR");\n',
       },
-      ["QUANTA_RENAMED", "QUANTA_TEMPLATED", "QUANTA_PLAIN"],
+      names,
     )
-    expect(found.get("QUANTA_RENAMED")?.kind).toBe("ts-access")
-    expect(found.get("QUANTA_TEMPLATED")?.kind).toBe("ts-access")
-    expect(found.get("QUANTA_PLAIN")?.kind).toBe("ts-access")
+    expect(backed(found, names)).toEqual({
+      QUANTA_RENAMED: "ts-access",
+      QUANTA_TEMPLATED: "ts-access",
+      QUANTA_PATTERN: "ts-access",
+      QUANTA_IN: "ts-access",
+      QUANTA_AFTER_GENERIC: "ts-access",
+      QUANTA_SH: "shell",
+      QUANTA_PKG: "shell",
+      QUANTA_RS_AFTER_CHAR: "quoted",
+    })
   })
 
-  test("a colocated test file is a test file", () => {
-    // `isTestFile` was `rel.startsWith("tests/")`, and the repo's own full-suite
-    // population includes `./src/` and `./tools/`, which hold 320 `.test.ts`
-    // files. The self-evidence defect this rule closes was reintroducible by
-    // writing the fixture one directory over.
+  test("in a TEST file a literal only NAMES a variable; outside one it declares it", () => {
+    const names = ["QUANTA_SPEC", "QUANTA_TSX_TEST", "QUANTA_HELPER", "QUANTA_PROD"]
     const found = inFixture(
       {
-        "src/x/thing.test.ts": 'const named = "QUANTA_COLOCATED_LITERAL"',
-        "tools/dev/__tests__/other.ts": 'const named = "QUANTA_UNDERSCORE_LITERAL"',
-        "src/x/thing.ts": 'gateOn(env, "QUANTA_PRODUCTION_LITERAL")',
+        "src/x.spec.ts": 'const a = "QUANTA_SPEC"\n',
+        "apps/web/src/b.test.tsx": 'const b = "QUANTA_TSX_TEST"\n',
+        "tests/_helpers/h.ts": 'gateOn(env, "QUANTA_HELPER")\n',
+        "src/prod.ts": 'gateOn(env, "QUANTA_PROD")\n',
       },
-      ["QUANTA_COLOCATED_LITERAL", "QUANTA_UNDERSCORE_LITERAL", "QUANTA_PRODUCTION_LITERAL"],
+      names,
     )
-    expect(found.has("QUANTA_COLOCATED_LITERAL")).toBe(false)
-    expect(found.has("QUANTA_UNDERSCORE_LITERAL")).toBe(false)
-    // PAIRED CONTROL — outside a test file a literal IS evidence, because that
-    // is how declarations are written.
-    expect(found.get("QUANTA_PRODUCTION_LITERAL")?.kind).toBe("ts-literal")
+    expect(backed(found, names)).toEqual({
+      QUANTA_SPEC: null,
+      QUANTA_TSX_TEST: null,
+      QUANTA_HELPER: null,
+      QUANTA_PROD: "ts-literal",
+    })
   })
 })
