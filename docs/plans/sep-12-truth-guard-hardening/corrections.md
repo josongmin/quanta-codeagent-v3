@@ -674,3 +674,112 @@ fresh operator(HOME/QUANTA_HOME/PREFS) + 워커 루트 유지(F6) + 죽은 pid �
   `8a6d47647`. 라쳇의 이름 매칭 취약점 자체는 미수정(기록).
 - `@/apps/cli` import 슬라이스 격리: 분류 테스트를 `tests/unit/cli/`로 이동.
 - main에 다른 세션 커밋(`4db28a3f5`) — 파일 겹침 없음 확인 후 merge(`fc8f612d4`).
+
+## J. 라운드 9 — 라운드 8 보완 커밋에 대한 적대 어딧 (sep-14)
+
+컨텍스트 없는 리뷰어 3명(`audit-r9-{a,b,c}`, HEAD `22a20f0dc` 고정): A=보안·도구표면,
+B=메모리·REPL·펜스·merge 탐지기, C=주장 재측정(객관). 반영한 발견은 전부 내가 재현하거나
+소스로 확인했다. 리뷰어가 PLAUSIBLE로 둔 것은 내가 직접 재현한 뒤에만 고쳤다.
+
+### J-1 (B, HIGH×3) 내 REPL 직렬화 수정 `69defb3cf`가 커널을 망가뜨렸다
+
+라운드 8의 I-6에서 "hadError가 거짓" 문제를 고치며 넣은 직렬 `eval` 큐가 새 결함 다섯 개를
+만들었다. R1: await 뒤의 여러 줄 블록이 깨짐(readline이 이미 줄 단위 명령으로 쪼갬).
+R2: 대기 중 에러 한 번이면 이후 모든 exec 결과가 한 칸씩 밀림, 영구적. R3: Node 22(`handleError`
+없음)에서 평범한 throw가 커널을 멈춤. R4: 끝나지 않는 await가 무기한 대기(도구가 timeout 미전달).
+R5: 처리 안 된 rejection이 다음 exec 탓이 됨. R6: 모델에 보이는 설명의 `node -i` 잔존.
+→ `6d976eedc`: readline을 코드 경로에서 제거, `{code, sentinel}` JSON 한 줄을 통째로 REPL `eval`에
+전달, 에러는 REPL의 전용 출력 스트림으로 감지, 센티널은 setImmediate 두 턴 뒤, 도구 기본 120초.
+완료 신호는 Node 22.22와 25.9에서 직접 측정. 뮤턴트 3개 red. 한계(이전 exec가 건 타이머의 에러)는
+소스에 명시.
+
+### J-2 (A, HIGH) deny-all 네트워크 자세에 출구가 셋 — `9ec7dc6b1`
+
+A-F2를 고치다 넓어졌다. 가드가 셸 명령을 `command`/`cmd` 필드에서만 찾음(레지스트리 투영 무시),
+셸 줄 없이 코드를 돌리거나 네트워크를 쓰는 도구는 기여 0, 서브에이전트는 `dispatchGuard`를
+상속하지 않음. → 시임이 `facts.shellCommand` 전달, 이름 기반 거부 집합, 자식 상속, 그리고
+`bash_mutating`/`network_write` 행 전체의 정확한 분할 테스트(새 행은 배치 전까지 red).
+
+### J-3 (A) 도구표면 게이트의 구멍 — `fc531b60c`, `04c1e05f0`
+
+- A-F4: 원장 도구가 행과 반대로 read-only를 주장해도 모든 게이트 green(`followup_task` 뮤턴트 재현)
+  → census arm이 "read-only true + 변경 행"도 거부. 같은 뮤턴트 33/1.
+- A-F5: "원장은 줄기만 한다"는 제목뿐 → 이름으로 핀. 이름 추가 32/2.
+- A-F3: 생성자 파라미터로 이름을 받는 클래스 도구가 unattributed 스캔을 빠져나감 → 클래스 모양
+  (`isReadOnly`/`inputSchema` + `execute`) 열거, paired fixture. 여전히 못 보는 모양은 스캔 doc에 명시.
+- A-F7: census doc의 "const-bound name"은 거짓(`as const`만 읽음) → 정정.
+
+### J-4 (A-F6, LOW) `shadow_verify`의 인용된 `test_target`도 옵션일 수 있었다 — `44d2788b8`
+
+`--preload=<host 파일>`이 scratch 밖 파일을 실행(재현). 스키마가 `-`로 시작하는 대상을 거부.
+같은 커밋에서 C#2 정정: `hitlTier` 선언은 동치가 아니다(reason이 `declared`로 바뀌어 bypass가
+완화하지 않음).
+
+### J-5 (B) 펜스·메모리 — `21c4a9b83`, `812a1396e`, `eba76da10`
+
+- B-F1/C#6: env 없이 띄운 자식은 시작 시점 환경을 받는다(측정). "모든 자식이 scratch를 본다"는
+  거짓이었다 → 프리로드가 `Bun.spawn*`와 `node:child_process` 7종에서 생략된 env를 `process.env`로.
+  canary(패치 제거 시 15/1).
+- B-F2: `QUANTA_BENCH_RESULTS_DIR`는 라이브 코퍼스 하나만 막고 나머지를 신뢰 → scratch/off만 허용.
+- B-F3: `QUANTA_MCP_CONFIG`(커넥터 설치 쓰기 대상)와 카탈로그 밖 `QUANTA_OTEL_SINK` 오분류 → 펜스 대상.
+- K1: 두-스토어 안내가 `QUANTA_MEMORY_PATH`를 권해 plane을 다시 쪼갬, 결정이 sqlite만 봄 → 어떤
+  plane 파일이든 있으면 사용 중, 안내에서 해당 조언 제거. K2: 외부 설정 import가 OS 홈에 씀 →
+  CLI wire가 `memoryDir` 전달.
+- C#7: "키 하나 빼면 두 arm이 red"는 샘플된 두 키만 참(`QUANTA_OTEL_SAVE` 13/1) → 모든 키 검사.
+  de5bd4512의 legacy-cwd `sameFile` 분기 무테스트 → 테스트 추가.
+
+### J-6 (B-M1/M2) merge 탐지기: 기준 비교 규칙 두 개가 반대 방향으로 실패 — `9936b9d17`
+
+단일 base 요구는 이 저장소의 criss-cross 머지 2개를 가짜 손실로 보고, `--no-renames`는 rename+edit
+정상 머지를 9개 손실로 봤다. → 사건의 정의("평범한 머지가 남기는 것을 해결이 버렸다")를 git에 직접
+묻는다: `git merge-tree --write-tree`에도 없고 충돌도 없던 경로면 trivial. 전체 이력 93 머지 중
+미면제 손실은 사건 하나(lost=70 trivial=4).
+
+### J-7 라운드 8 이후 드러난 나머지 두 개 (sep-14)
+
+- A-F8(PLAUSIBLE → 재현): plan 거부가 세션을 default 모드로 바꿨다. default는 쓰기를 허용하므로
+  거부가 plan이 막던 쓰기를 풀었고, CLI는 `/cancel`과 죽은 입력 채널에 fail-closed로 `rejected`를
+  돌려준다. `planExitAllowsMutation("rejected") === false`와 flow doc("그 predicate가 전환을
+  결정한다")에 정면으로 어긋났다. ALBB-20 #1 티켓은 reminder와 이벤트만 요구했는데 구현이 모드
+  전환까지 넣었다. 통합 재현: 거부 다음 턴의 `write`가 착지. → `9f4b864c7`: 전환은
+  `planExitAllowsMutation`일 때만, 거부는 plan 유지·계획 폐기·`mode_changed` 없음. 뮤턴트 2개 red.
+- B(93d5fc492 주석): "`bun install`이 `~/.bun/bin/bun`을 만든다"는 거짓, EC2 user-data가 만든다.
+  내 fake는 준비 판정을 엉뚱한 명령에 걸었다 → `1d3b9a482`: probe가 검사하는 경로마다 실제 생성 지점
+  (launch 시점 bun, shim write, src rsync)에서 답한다. src rsync 생략 뮤턴트는 준비 판정으로 red.
+- A-F2 잔여 문구: `shadow_verify` 주석의 "모든 체크에 OS sandbox 없음"은 부분 거짓 — `test` 체크는
+  `runShell`이라 설치된 셸 sandbox와 env scrub을 탄다. lint/typecheck만 전체 env·무 sandbox → 정정.
+
+### J-8 C의 거짓 수치 (내 과거 커밋 메시지, 재측정 결과만 기록 — 코드 변경 없음)
+
+- `4ebe02c71` "isReadOnly true로 되돌리면 9/3": 커밋된 도구 기준 **8/4**(9/3은 capability를 선언했던
+  중간 버전의 수치).
+- `779e229f5` "rename 감지 복원 39/1": **2 arm** 실패(residue 단독 18/2, 라쳇 포함 39/2).
+  "first-of-many base 39/1": 실패 arm 1개는 맞고 총계는 19/1 단독, 40/1 라쳇 포함.
+- `b7975f6d6` census 3파일 "단독 66/0": **52/0**. "이 캠페인에서 안 바뀜"도 틀림(`2caf24585`,
+  `50aca27d2`가 둘을 수정).
+- `4db28a3f5` "after 27/0": **28/0**.
+- 문서 모순: shadow-verify 테스트 제목(capability 선언), `STATE_PATH_OVERRIDES` doc의 강제 테스트 이름,
+  REPL 헤더의 hadError·banner·`node -i` — 각각 `44d2788b8`, `eba76da10`, `6d976eedc`에서 정정.
+
+### J-9 열어둔 것 — 결정 필요 (임의로 좁히거나 넓히지 않았다)
+
+**A-F1 (HIGH, 재현 확인): 저장소가 통제하는 실행 파일이 신뢰 결정 없이 실행된다.** 내 ground-truth
+probe(실제 서버, 이 머신):
+- pyright: `resolvePythonInterpreter`가 `<cwd>/.venv/bin/python`을 골라 넘기고 pyright가 실행한다 → 마커 생성.
+- typescript-language-server: 워크스페이스 `node_modules/typescript`의 tsserver를 우선 로드 → 마커 생성.
+- rust-analyzer: `build.rs` 실행 → 마커 생성.
+- 노출: `lsp_*`/`diagnostics`는 read-only라 plan 모드에서도 무확인. 게다가 세션 시작 prewarm
+  (`QUANTA_LSP_PREWARM`, 기본 ON, nav 도구가 켜져 있으면)이 cwd의 pyright를 띄우므로 **클론한 저장소에서
+  quanta를 켜기만 해도** `.venv/bin/python`이 실행된다. prewarm 함수(`startBackgroundLspPrewarm`)를 직접
+  호출해 마커 생성을 재현했고, CLI 기동에서 그 함수까지의 경로(`maybeStartLspPrewarm`)는 소스로 추적했다.
+  서버는 provider 키가 든 전체 env를 받는다(A의 probe).
+
+**같은 뿌리의 형제(내 측정, 신규):** CLI 시작 시 `<cwd>/.mcp.json`을 읽고 그 stdio 명령을 띄운다
+(`internal.ts` `loadMcpFeatures` → `readMcpConfig(…, process.cwd())`). central-config가 꺼진 기본값에선
+정책이 없어 신뢰 게이트가 없다. 저장소에 커밋된 `{"command":"sh","args":["-c","…"]}`가 같은 로더로
+실행됨을 재현했다. cwd 폴백은 `21618e469`(aug-24, 커넥터 설치 round-trip 수정)가 들였다.
+
+뿌리는 하나: quanta에는 hooks(central-config ON일 때)를 빼면 "이 폴더를 신뢰하는가"라는 결정이 없다.
+검증된 기준선은 VS Code Workspace Trust(비신뢰 시 번들 tsserver, 실행형 확장 비활성), Claude Code의
+폴더 신뢰 다이얼로그 + 프로젝트 `.mcp.json` 서버별 승인, Codex의 프로젝트 `trust_level`.
+기본 사용성(LSP 가용성, 커넥터 설치 round-trip, 벤치 LSP grounding)이 바뀌므로 사용자 결정으로 남긴다.
