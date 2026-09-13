@@ -223,15 +223,12 @@ export const sessionConfigTool: Tool<SessionConfigInput> = {
     "authority. Use this when asked 'what mode am I in?' or when a task is " +
     "stuck and a higher effort would help.",
   inputSchema: sessionConfigInputSchema,
-  // The tool is structurally mutating because of `set_effort`, so `isReadOnly`
-  // says so. Plan mode nonetheless ALLOWS it: `MUTATING_TOOL_TABLE` classifies
-  // `session_config: null` deliberately, because the only mutation changes an
-  // in-session preference with no FS / shell / git / network effect and mirrors
-  // the operator `/effort` slash, which plan mode also allows. An earlier version
-  // of this comment said plan-mode dispatch "will block it unless the registry
-  // classifies the per-call op, which it does not today" — that contradicted the
-  // table entry, and a reader following it would have concluded the tool is
-  // unusable in plan mode.
+  // Structurally mutating because of `set_effort`, and the Tool contract has no
+  // per-call read-only classification, so both plan layers block it — `op:get`
+  // included — as the docstring above says. `MUTATING_TOOL_TABLE` classifies it
+  // `working_state_write` so the collaboration-mode layer agrees with the agent-mode
+  // one. (A previous edit to this comment claimed plan mode ALLOWS it; that was true
+  // of the collaboration layer only, and only because the table then said `null`.)
   isReadOnly: () => false,
   isConcurrencySafe: () => true,
 

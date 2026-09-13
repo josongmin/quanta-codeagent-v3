@@ -32,7 +32,6 @@ import {
 import { __resetRuntimeConfig } from "@/shared"
 import {
   createUpdateWorkingStateTool,
-  defaultTools,
   gitTools,
   lspNavTools,
   nullLspNavProvider,
@@ -79,6 +78,17 @@ beforeEach(() => {
 // and the repair looks like adding a caller-wire row. MEASURED: ten tools had no
 // table row at all and neither detector could report them.
 const BROADLY_WIRED = buildBroadlyWiredTools()
+
+/** Everything a fixture can reach, BEFORE the caller-wire names are added. */
+const ALL_REGISTERED_TOOL_NAMES_WITHOUT_CALLER_WIRE: readonly string[] = (() => {
+  const names = new Set<string>()
+  for (const t of BROADLY_WIRED) names.add(t.name)
+  for (const t of gitTools()) names.add(t.name)
+  for (const t of lspNavTools(nullLspNavProvider)) names.add(t.name)
+  names.add(createUpdateWorkingStateTool(undefined).name)
+  names.add(requestUserInputTool().name)
+  return [...names].sort()
+})()
 
 const ALL_REGISTERED_TOOL_NAMES = (() => {
   const names = new Set<string>()
@@ -156,17 +166,14 @@ describe("Scenario 1 — tool-registry exhaustiveness drift detector", () => {
     expect(unclassified).toEqual([])
   })
 
-  test("no caller-wire SSOT name is already enumerable from the static surfaces", () => {
-    // If a caller-wire tool starts shipping in `defaultTools`, it should be
-    // dropped from the SSOT (the enumerable set already covers it). Pin that
-    // the SSOT stays disjoint from what the static surfaces enumerate, so the
-    // augmentation is purely additive and never silently stale.
-    const enumerable = new Set<string>()
-    for (const t of defaultTools) enumerable.add(t.name)
-    for (const t of gitTools()) enumerable.add(t.name)
-    for (const t of lspNavTools(nullLspNavProvider)) enumerable.add(t.name)
-    enumerable.add(createUpdateWorkingStateTool(undefined).name)
-    enumerable.add(requestUserInputTool().name)
+  test("no caller-wire SSOT name is already enumerable from the broadly-wired fixture", () => {
+    // A name a fixture can reach must not ALSO be vouched for by the hand list, or a
+    // vanished registration keeps its table row "known" by name. This compared against
+    // the bare `defaultTools` singleton, so 30 port-gated names sat in the list and
+    // MEASURED: removing `code_cell` from `buildDefaultTools` left both detectors at
+    // 520 pass / 0 fail with its row stale. It now compares against the same broadly-
+    // wired set the orphan check enumerates.
+    const enumerable = new Set<string>(ALL_REGISTERED_TOOL_NAMES_WITHOUT_CALLER_WIRE)
     const leaked = CALLER_WIRE_TOOL_NAMES.filter((n) => enumerable.has(n))
     expect(leaked).toEqual([])
   })

@@ -474,3 +474,53 @@ G-9는 "격리에서 재현되는 12개, 전부 내 것 아님"이라고 적었�
 인라인 사본은 선언과 따로 바뀔 수 있었다. 행동 테스트
 `tests/unit/cli/session-runtime-int-defaults-declared-hellgate.test.ts`가 선언=실제값과
 env 우선(paired control)을 단정한다. 뮤턴트: 다른 값 사본 → 5/1, 선언 변경 → 6/0(파생이 따라감).
+
+## H. 라운드 7 — 새 커밋 8개에 대한 적대 어딧 (sep-13)
+
+독립 워크트리 3개(`audit-r7-{a,b,c}`, HEAD `421e3abcb` 고정)에서 렌즈를 분리해 돌렸다.
+각 보고의 주장은 내가 소스·실행으로 재검증한 뒤에만 반영했다.
+
+### H-1 (R7-B) "다섯 개가 plan에서 거부→허용으로 바뀌었다"는 거짓
+
+`ec4aef248`의 커밋 메시지와 `mode.ts` 주석은 `null` 5행이 plan 모드 동작을 바꿨다고
+적었다. 바뀐 게 없다. `consultPlanModeSeam`은 `registry.isReadOnly(name)`이면 표를 읽기
+전에 반환하고, admissibility 게이트도 `isReadOnly`로 판정한다. 다섯 개는 전부 read-only라
+부모 커밋과 이후, 두 plan 자세 모두에서 실행됐다(R7-B 실측, `dispatch.ts:307` 내 확인).
+표 행이 실제로 바꾸는 건 이름을 직접 조회하는 소비자뿐이다.
+
+### H-2 (R7-B) plan은 두 겹이고, 표의 `null`은 약한 겹에만 쓰기 면제였다
+
+- agent-mode `plan`: admissibility 게이트가 non-read-only 도구를 표 없이 전부 차단.
+- `collaborationMode: "plan"` + live mode `default`: `consultPlanModeSeam`이 표만 본다.
+
+두 번째 자세에서 `test_runner { command: "echo pwned > src/x.ts" }`가 acceptEdits 아래
+confirm 0회로 실행됐다. 내가 G에서 "HARD_DENY를 거친다"고 적은 근거는 틀렸다 — HARD_DENY는
+파괴 명령 denylist(`rm -rf /`)지 쓰기 장벽이 아니다. 내 probe로 seam 수준 재확인:
+`test_runner`·`session_config` 둘 다 `collabPlanSeamAllows:true`, `agentModePlanBlocks:true`.
+
+수정: `test_runner` → `bash_mutating`, `session_config` → `working_state_write`. census 전역
+불변식("write-capable 리터럴 도구는 `null` 행 금지")을 새로 걸자 세 번째가 나왔다:
+`subagent_force_background`(`promoted_now`가 큐의 서브에이전트를 **시작**함) → `subagent_control`.
+예외 allowlist는 0개가 됐고 불변식은 strict다. side-conversation 허용목록("all read-only",
+"NO mutating tools")에 들어 있던 `test_runner`는 빠졌다 — 프로덕션 side-conv 호출자 두 곳은
+`resolveTools: () => []`라 실제 도달은 없었다.
+
+내가 G-2/H 이전 커밋에서 `session_config.ts` 주석을 "plan mode nonetheless ALLOWS it"으로
+고친 것도 틀렸다(agent-mode plan에선 `op:get`까지 차단). 원래 주석이 그 자세에선 맞았다.
+
+### H-3 (R7-B) caller-wire 목록 30개가 stale 행을 이름으로 보증했다
+
+76개 중 30개가 broad fixture로 열거 가능한데 disjointness 가드는 bare `defaultTools`와
+비교했다. `code_cell` 등록을 지워도 두 탐지기 520/0 — stale 행이 안 보였다. 30개를 목록에서
+빼고(76→46) 가드를 broad fixture 기준으로 바꿨다. 같은 뮤턴트가 이제 522/2, `code_cell` 명시.
+
+### H-4 (R7-B) bench stream tap이 환각된 도구명 하나로 인스턴스를 죽일 수 있었다
+
+`editTargetOf`가 fail-closed로 **throw**하는 `mutatingToolKind`를 썼다. tap은 run의
+`config.stream`이고, streaming turn은 deferred slot마다 dispatch가 이름을 검증하기 **전**,
+try 블록 **밖**에서 `tool_call`을 emit한다. 실측: `tap.emit({name:"mcp__github__create_issue"})`
+→ `UnknownToolError`. 비-throw 접근자 `classifiedMutatingKind`(own key만)로 교체. 같은 조사에서
+`mutatingToolKind`/`isMutatingTool`이 `in`을 써 `constructor`·`toString`·`__proto__`를
+"분류됨"으로 읽는 것도 발견(함수를 kind로 반환) → `Object.hasOwn`.
+
+### H-5 (R7-B) 내 fixture 주석 "no-ports = 43"은 거짓, 실측 26.

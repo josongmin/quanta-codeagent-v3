@@ -278,6 +278,7 @@ export {
 } from "./memory-tools"
 export { AgentRecorder, METRIC } from "./metrics"
 export {
+  classifiedMutatingKind,
   isMutatingToolBlockedInMode,
   isToolBlockedInMode,
   modeBlockReason,

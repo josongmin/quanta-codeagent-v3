@@ -58,7 +58,7 @@ describe("mode mutating-table cross-check (ADR-0036)", () => {
   // These pins make the footgun structurally impossible: both this test and
   // the e2e drift detector derive their caller-wire set from the SAME exported
   // constant, and every name in it is (a) classified in the table and (b) NOT
-  // already enumerable (so it isn't double-counted / silently stale).
+  // enumerable from the broadly-wired fixture (so it cannot vouch for a stale row).
   test("the broadly-wired fixture is intact (an empty set satisfies every loop)", () => {
     assertBroadlyWiredFixture(broadlyWired)
   })
@@ -73,6 +73,21 @@ describe("mode mutating-table cross-check (ADR-0036)", () => {
     const table = planModeMutatingTable()
     const unclassified = CALLER_WIRE_TOOL_NAMES.filter((n) => !(n in table))
     expect(unclassified).toEqual([])
+  })
+
+  test("no caller-wire SSOT name is enumerable from the broadly-wired fixture", () => {
+    // The integration detector pins the same thing; pinned in this unit file too so the
+    // unit tier alone catches it. A name the fixture reaches must leave the hand list,
+    // or its table row stays "known" after the tool is gone.
+    const callerWire: ReadonlySet<string> = new Set(callerWireToolNames)
+    const enumerable = new Set(allTools.filter((n) => !callerWire.has(n)))
+    const reachable = new Set([
+      ...broadlyWired.map((t) => t.name),
+      ...gitTools().map((t) => t.name),
+      ...lspNavTools(nullLspNavProvider).map((t) => t.name),
+    ])
+    expect(CALLER_WIRE_TOOL_NAMES.filter((n) => reachable.has(n))).toEqual([])
+    expect(enumerable.size).toBeGreaterThan(50)
   })
 
   test("caller-wire SSOT has no duplicate names", () => {

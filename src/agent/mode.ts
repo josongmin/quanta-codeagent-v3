@@ -214,16 +214,19 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
   glob: null,
   localize: null,
   diagnostics: null,
-  // NOT a read-only built-in, despite sitting next to them — `testRunnerTool`
-  // declares `isReadOnly: () => false` and its own docstring says "NOT read-only
-  // and NOT concurrency-safe: arbitrary project tests have side effects". It is
-  // classified `null` DELIBERATELY: running the project's own suite is the
-  // canonical inner-loop action, which is the same reason it carries
-  // `hitlTier: () => "pre-approval-ok"`, and its resolved shell command still
-  // faces the HARD_DENY denylist through the permission policy. Recorded here
-  // because it previously sat under the `// Read-only built-ins` heading with no
-  // reason, so the exemption read as a classification mistake.
-  test_runner: null,
+  // `test_runner` is NOT read-only and is classified MUTATING, like `run_tests` and
+  // `collect_evidence`, which do the same thing.
+  //
+  // It used to be `null`, justified as "the canonical inner-loop action" whose command
+  // "still faces the HARD_DENY denylist". Plan mode has TWO layers and they disagreed:
+  // the admissibility gate blocks every non-read-only tool when the live AGENT mode is
+  // `plan`, while the collaboration seam (`consultPlanModeSeam`) consults only this
+  // table when `collaborationMode` is `plan` and the live mode is not. MEASURED in the
+  // second posture: `test_runner { command: "echo pwned > src/x.ts" }` ran with zero
+  // confirms under acceptEdits, because HARD_DENY is a destructive-command denylist
+  // (it caught `rm -rf /`), not a write barrier. A `null` here was a write exemption
+  // for the weaker layer only, so both layers now block.
+  test_runner: "bash_mutating",
   lsp_definition: null,
   lsp_references: null,
   lsp_hover: null,
@@ -473,17 +476,18 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
   side_agent_list: null,
   side_agent_stop: "subagent_control",
   side_agent_findings: null,
-  // `session_config` — agent self-inspection / self-mutation over its own
-  // SDK posture (effort tier, identity mode, tool profile, model, provider).
-  // Although `op:set_effort` mutates the session EffortStore, the mutation
-  // is purely an internal preference change (no FS / shell / git / network
-  // side effect) and mirrors the existing operator `/effort` slash which is
-  // also allowed in plan mode. Classifying as `null` keeps plan-mode
-  // dispatch a one-table lookup while leaving the only operator-facing risk
-  // — sudden effort bumps — under the operator's eye (every mutation is a
-  // visible tool call in the trace). The unit + hellgate tests assert this
-  // classification stays read-only-permissive.
-  session_config: null,
+  // `session_config` — agent self-inspection over its own SDK posture, plus
+  // `op:set_effort`, which mutates the session EffortStore. `isReadOnly()` is false
+  // because the Tool contract has no per-call read-only classification.
+  //
+  // It used to be `null` "so an in-plan effort bump mirrors the operator /effort
+  // slash", with a unit test claiming plan dispatch "allows null-classified tools
+  // regardless of isReadOnly". That held in ONE plan layer: with the live agent mode
+  // `plan`, the admissibility gate already blocks it — `op:get` included — because
+  // it keys off `isReadOnly()`. The `null` only opened the collaboration-mode layer.
+  // Classified as the in-session state write it is, so the two layers agree. The
+  // operator `/effort` slash is unaffected; it does not dispatch through this tool.
+  session_config: "working_state_write",
   // ─── R3 e2e-integration audit closeout — caller-wire tools that slipped past
   // the `mode-mutating-table.test.ts` cross-check (it enumerates `defaultTools`,
   // which excludes these conditionally-registered tools, and TOLERATES — does
@@ -534,13 +538,19 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
   // PERMANENT entry so plan-mode dispatch never trips UnknownToolError when a host
   // wires the port.
   permission_propose_pattern: "working_state_write",
-  // ADR-0487 — subagent_force_background: promote/reorder a QUEUED background
-  // subagent within its own admission pool (move-to-front / burst-run). It only
-  // reorders work the agent already requested — no NEW workspace mutation — so
-  // it is plan-safe, the same posture as `subagent_poll`. Caller-wire (minted by
-  // subagentBgTools only when QUANTA_FORCE_BACKGROUND + the admission queue are
-  // both on); PERMANENT entry so plan-mode dispatch never trips UnknownToolError.
-  subagent_force_background: null,
+  // ADR-0487 — subagent_force_background: promote a QUEUED background subagent to run
+  // NOW (or to the FIFO head). Classified `subagent_control`, like `task_stop`.
+  //
+  // It was `null`, justified as "it only reorders work the agent already requested",
+  // the same posture as `subagent_poll`. But `promoted_now` STARTS a queued subagent,
+  // and the tool declares `isReadOnly: () => false`. So the admissibility gate already
+  // blocked it with the live agent mode `plan`, while the collaboration-mode layer let
+  // it start work that `subagent_fork` (`bash_mutating`) could not have started in
+  // plan mode. Found by the census-wide invariant that no write-capable tool literal
+  // may carry a `null` row; `subagent_poll` is a genuine read and stays `null`.
+  // Caller-wire (minted by subagentBgTools only when QUANTA_FORCE_BACKGROUND and the
+  // admission queue are both on).
+  subagent_force_background: "subagent_control",
   // G1 — appshot_verify: scaffold/render a UI, screenshot it (BrowserPort), and
   // judge the screenshot with a verify LLM. It WRITES the scaffold + screenshot
   // through the jailed FS scaffold, so `write_filesystem` is the right kind (plan
@@ -594,34 +604,38 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
   // all. MEASURED: `buildDefaultTools` with the full port plan yields 66 tools and
   // these ten threw from `isMutatingTool`.
   //
-  // Read-only ⇒ `null`, by this table's own rule. `threads_handoff` emits a
-  // `quanta://threads/{id}` deeplink and mutates nothing; `ask_user` asks the
-  // operator a question; `reflect` records the agent's own reasoning; `fetch_rules`
-  // reads rule files; `projects_kb` reads a knowledge base whose only write lands
-  // in the in-session store (the same posture as `ci_finding` above). For these
-  // five the classification CHANGES behaviour: plan mode went from denying with a
-  // confusing "not classified" reason to allowing them, which is what plan mode is
-  // for — asking the operator and fetching rules are plan-mode activities.
+  // Read-only ⇒ `null`, by this table's own rule. For these five the row changes NO
+  // dispatch behaviour, and an earlier version of this comment claimed the opposite
+  // ("plan mode went from denying … to allowing them"). A read-only tool never reaches
+  // this table at dispatch: `consultPlanModeSeam` returns early on
+  // `registry.isReadOnly(name)`, and the admissibility gate keys off `isReadOnly` too.
+  // MEASURED at the parent commit and after, in both plan postures: all five ran.
+  // What the rows DO change is every consumer that looks a name up directly —
+  // `isMutatingTool` / `mutatingToolKind` callers, which threw `UnknownToolError`, and
+  // the side-conversation allowlist invariant.
+  //
+  // `threads_handoff` builds a `quanta://threads/{id}` deeplink and does no I/O; the
+  // handoff itself happens on the receiving surface. `ask_user` asks the operator.
+  // `reflect` is a one-shot, tool-less LLM critique of the agent's own plan.
+  // `fetch_rules` reads rule files through its port. `projects_kb` reads a knowledge
+  // base; its `project_write` op loads a jailed file into an in-memory store, and
+  // production wires no persistent backend.
   threads_handoff: null,
   ask_user: null,
   reflect: null,
   fetch_rules: null,
   projects_kb: null,
-  // Write-capable ⇒ a mutating kind. For these five the DENIAL is unchanged —
-  // `UnknownToolError` already denied them — and only the reason becomes correct.
-  // `automation_update` creates/pauses/cancels recurring automations in the engine
-  // port: durable agent-side state with no FS/shell/git effect, the same kind as
-  // `artifact_register` and `permission_propose_pattern`. `notebook_edit` rewrites
-  // `.ipynb` cells through the same FS jail `edit` uses. `debug_inspect` launches a
-  // program under a debug adapter, `run_tests` detects and runs the project suite
-  // (with an optional model-supplied `command`), and `collect_evidence` runs that
-  // suite and fuses the result — all three execute code, the same kind as `bash`.
-  //
-  // OPEN, and deliberately NOT resolved here: `test_runner` is classified `null`
-  // for running the project's own suite, while `run_tests` and `collect_evidence`
-  // do the same thing and are classified mutating. Making them match means either
-  // widening plan mode or narrowing `test_runner`, and both are behaviour decisions
-  // that deserve their own change rather than riding a UnknownToolError fix.
+  // Write-capable ⇒ a mutating kind. For these five the DENIAL is unchanged in both
+  // plan layers — `UnknownToolError` already denied them — and the reason is now the
+  // kind instead of "not classified". `notebook_edit` rewrites `.ipynb` cells through
+  // the FS jail `edit` uses; its `write_filesystem` kind is also what makes the bench
+  // stream tap count notebook edits. `debug_inspect` launches a program under a debug
+  // adapter, `run_tests` detects and runs the project suite (with an optional
+  // model-supplied `command`), and `collect_evidence` runs that suite and fuses the
+  // result — all three execute code. `automation_update` stores a recurring automation
+  // in the engine port, which later injects a prompt into an agent run, so it is agent
+  // state that outlives the turn rather than an FS write; the label is informational,
+  // since plan mode blocks every non-null kind the same way.
   automation_update: "working_state_write",
   notebook_edit: "write_filesystem",
   debug_inspect: "bash_mutating",
@@ -633,10 +647,12 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
  *
  *  A *caller-wire* tool is one whose {@link MUTATING_TOOL_TABLE} entry is
  *  PERMANENT but whose registration is CONDITIONAL — it is minted only when a
- *  host wires the relevant `DefaultToolPort` / `AgentConfig` slot (gated
- *  default-OFF behind an env knob). Such a tool therefore is NOT enumerable
- *  from the static `defaultTools` / `gitTools()` / `lspNavTools()` surfaces a
- *  drift test can reach without injecting every host port.
+ *  host wires the relevant `AgentConfig` slot or tier-1 block (gated default-OFF
+ *  behind an env knob) AND no drift-test fixture can reach it. A tool behind a
+ *  `DefaultToolPort` does NOT belong here: `tests/unit/_shared/wired-tool-ports.ts`
+ *  wires every port through an exhaustive `Record<keyof DefaultToolPorts, …>`, so
+ *  the detectors enumerate it and a vanished registration is reported as an orphan
+ *  row instead of being vouched for by name.
  *
  *  The two drift detectors that cross-check the table against the registered
  *  universe — `tests/integration/plan-mode-dispatch-hell-e2e.test.ts` and
@@ -659,10 +675,10 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
  *  still fail if a table key matches neither an enumerable tool NOR a name
  *  here (true orphan), and still fail if an enumerable tool is missing from
  *  the table (true missing). The SSOT only removes the DUPLICATE copies. The
- *  `caller-wire-ssot` test (in both files) additionally pins that no name here
- *  is already enumerable (a name that leaks into `defaultTools` should be
- *  dropped from this list, not double-counted) and that every name here has a
- *  table entry (so the list cannot reference an unclassified tool). */
+ *  `caller-wire-ssot` test additionally pins that no name here is already
+ *  enumerable from the BROADLY-WIRED fixture (it used to compare against the bare
+ *  `defaultTools`, which let 30 port-gated names sit here and mask stale rows) and
+ *  that every name here has a table entry. */
 export const CALLER_WIRE_TOOL_NAMES = Object.freeze([
   // Shadow git ODB (ADR-0119 / ADR-0122) — config-slot shadowOdb.
   "shadow_snapshots",
@@ -714,57 +730,30 @@ export const CALLER_WIRE_TOOL_NAMES = Object.freeze([
   // `defaultTools` array (enumerable by both drift detectors), so listing it
   // would be a redundant, drift-prone duplicate. Its MUTATING_TOOL_TABLE entry
   // (read-only) is still pinned by the enumerable missing/orphan checks.
-  // jun-04 observability / authoring / image-gen — DefaultToolPorts slots.
-  "coverage_check",
+  // `prompt_cache_status` is reached through `AgentConfig.promptCacheObserver`, which
+  // the broadly-wired `buildDefaultTools` fixture does not supply.
   "prompt_cache_status",
-  "image_gen",
-  "xlsx_write",
-  "docx_write",
-  "pptx_write",
-  // R3 audit closeout — structured patch + artifact (Canvas) tools.
-  "apply_patch_structured",
-  "artifact_list",
-  "artifact_get",
-  "artifact_register",
-  "artifact_destroy",
-  // CLUSTER D #5 — permission pattern proposal (QUANTA_REMEMBER_PATTERNS).
-  "permission_propose_pattern",
-  // jun-6 — file-history rewind + skill authoring.
-  "file_history_rewind",
+  // Skill authoring — tier-1 skill block, gated on QUANTA_SKILL_CREATOR plus a
+  // writable skills dir.
   "skill_create",
-  // jun-05 §7/§9 host-binding session tools (N6 PTY / N3 MCP resources /
-  // N2 MCP connector / C2 progress / N1 side-agent).
-  "pty_list",
-  "pty_attach",
-  "pty_write",
-  "pty_read",
-  "pty_resize",
-  "pty_kill",
-  "mcp_list_resources",
-  "mcp_list_resource_templates",
-  "mcp_read_resource",
-  "mcp_read_resource_dir",
-  "mcp_list_prompts",
-  "mcp_get_prompt",
-  "mcp_connector_list",
-  "mcp_connector_install",
-  "communicate_update",
+  // N1 side-agent — minted by the side-agent daemon binding, not a DefaultToolPort.
   "side_agent_spawn",
   "side_agent_list",
   "side_agent_stop",
   "side_agent_findings",
-  // jun-06 wave-3 — force-background (ADR-0487) + appshot_verify (G1).
+  // ADR-0487 force-background — subagentBgTools, gated on QUANTA_FORCE_BACKGROUND.
   "subagent_force_background",
-  "appshot_verify",
   // ADR-0287 async-tools (QUANTA_ASYNC_TOOLS).
   "poll_deferred",
-  // code-mode (RFC jun-6-code-mode, Phase 1) — DefaultToolPorts.codeMode +
-  // AgentConfig.codeCellDispatchFactory (QUANTA_CODE_MODE).
-  "code_cell",
-  // ADR-0249 node_repl (persistent Node kernel) — DefaultToolPorts.nodeRepl
-  // (QUANTA_NODE_REPL). Not enumerable from the static defaultTools surface, so
-  // pinned here so the orphan-direction drift check stays exact.
-  "node_repl",
+  // THIRTY names left this list (sep-13): `coverage_check`, `image_gen`, the three
+  // Office writers, `apply_patch_structured`, the four `artifact_*`,
+  // `permission_propose_pattern`, `file_history_rewind`, the six `pty_*`, the eight
+  // `mcp_*`, `communicate_update`, `appshot_verify`, `code_cell` and `node_repl`.
+  // Every one is registered by `buildDefaultTools` with its port wired, so both drift
+  // detectors ENUMERATE them through `tests/unit/_shared/wired-tool-ports.ts`. Kept
+  // here, they were known by NAME even after their registration was gone: removing
+  // `code_cell` from `buildDefaultTools` left both detectors at 520 pass / 0 fail with
+  // its table row stale. A name belongs here only if no fixture can reach it.
   // ticket-11 (P8 git-worktree agent tools) — caller-wire, gated on
   // AgentConfig.activeWorktreeSlot (QUANTA_WORKTREE_TOOL). Not enumerable from
   // the static `defaultTools` surface, so listed here so the orphan-direction
@@ -787,7 +776,11 @@ export const CALLER_WIRE_TOOL_NAMES = Object.freeze([
  *  explicitly read-only tools. Throws {@link UnknownToolError} for any tool
  *  name not in the table — no silent fallback. */
 export const isMutatingTool = (toolName: string): boolean => {
-  if (!(toolName in MUTATING_TOOL_TABLE)) throw new UnknownToolError(toolName)
+  // `Object.hasOwn`, not `in`: `in` walks the prototype chain, so `constructor`,
+  // `toString` and `__proto__` read as CLASSIFIED — with a function or
+  // `Object.prototype` as their "kind". It happened to fail toward blocking; it was
+  // still a classification nobody wrote.
+  if (!Object.hasOwn(MUTATING_TOOL_TABLE, toolName)) throw new UnknownToolError(toolName)
   return MUTATING_TOOL_TABLE[toolName] !== null
 }
 
@@ -795,10 +788,23 @@ export const isMutatingTool = (toolName: string): boolean => {
  *  Throws {@link UnknownToolError} for an unrecognized name. Exposed so the
  *  dispatch-seam guard can put the kind into its rejection payload. */
 export const mutatingToolKind = (toolName: string): MutatingToolKind | null => {
-  if (!(toolName in MUTATING_TOOL_TABLE)) throw new UnknownToolError(toolName)
+  if (!Object.hasOwn(MUTATING_TOOL_TABLE, toolName)) throw new UnknownToolError(toolName)
   const kind = MUTATING_TOOL_TABLE[toolName]
   return kind ?? null
 }
+
+/**
+ * The same classification, WITHOUT failing closed: the kind, `null` for a tool the
+ * table marks plan-safe, and `undefined` for a name it does not know.
+ *
+ * For accounting and telemetry only. {@link mutatingToolKind} throws
+ * `UnknownToolError` on an unknown name, which is correct at the plan-mode seam and
+ * wrong anywhere a throw lands inside a running turn: the bench stream tap used it,
+ * and a hallucinated tool name crashed the instance. `Object.hasOwn`, so a name
+ * like `constructor` or `toString` is unknown rather than a prototype method.
+ */
+export const classifiedMutatingKind = (toolName: string): MutatingToolKind | null | undefined =>
+  Object.hasOwn(MUTATING_TOOL_TABLE, toolName) ? (MUTATING_TOOL_TABLE[toolName] ?? null) : undefined
 
 /** Read-only snapshot of the mutating-tool table — exposed for the
  *  cross-check test in `tests/unit/mode-mutating-table.test.ts`. */

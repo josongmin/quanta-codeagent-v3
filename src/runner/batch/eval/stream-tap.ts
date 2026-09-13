@@ -17,7 +17,7 @@
  * bytes, so the default-OFF posture stays byte-identical.
  */
 import { relative, sep } from "node:path"
-import { isVerifyOutputFailing, isVerifySignalCommand, mutatingToolKind } from "@/agent"
+import { classifiedMutatingKind, isVerifyOutputFailing, isVerifySignalCommand } from "@/agent"
 import { isTestFilePath } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { normalizeRepoPath } from "./impacted-test-discovery"
@@ -59,9 +59,20 @@ export const isSourceEditPath = (raw: string): boolean => {
  * private re-list), so a newly added edit tool is captured the moment it is
  * classified there. Path is raw (relativization is the caller's concern — only
  * the caller knows the sandbox root).
+ *
+ * A NAME THE TABLE DOES NOT KNOW IS NOT AN EDIT, and it must not throw. This used
+ * `mutatingToolKind`, the plan-mode classifier, which fails CLOSED by throwing
+ * `UnknownToolError` — the right answer at a permission seam and the wrong one in
+ * telemetry. The bench tap is the run's `config.stream`, and the streaming turn
+ * emits `tool_call` for every deferred slot BEFORE dispatch validates the name and
+ * outside its try block, so a model that hallucinates a tool name (or any
+ * registered tool the table has not classified) threw out of `emit` and crashed
+ * the instance instead of receiving an unknown-tool result. Measured:
+ * `tap.emit({ type: "tool_call", name: "mcp__github__create_issue" })` threw
+ * `UnknownToolError`.
  */
 export const editTargetOf = (name: string, input: unknown): string | undefined => {
-  if (mutatingToolKind(name) !== "write_filesystem") return undefined
+  if (classifiedMutatingKind(name) !== "write_filesystem") return undefined
   if (typeof input !== "object" || input === null) return undefined
   const o = input as Record<string, unknown>
   for (const key of ["file_path", "path", "notebook_path"]) {

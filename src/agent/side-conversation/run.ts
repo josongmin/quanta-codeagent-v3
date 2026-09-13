@@ -81,7 +81,10 @@ export const SIDE_CONVERSATION_TOOL_NAMES: readonly string[] = Object.freeze([
   "task_output",
   "localize",
   "diagnostics",
-  "test_runner",
+  // `test_runner` was listed here, inside an allowlist documented as "all read-only"
+  // for a surface with "NO mutating tools". It runs arbitrary project commands. It is
+  // classified mutating now, so the drift invariant removed it. Production side
+  // conversations pass `resolveTools: () => []`, so nothing reached it through them.
   "budget_status",
   "shadow_snapshots",
   "read_image",
@@ -163,19 +166,15 @@ export const SIDE_CONVERSATION_TOOL_NAMES: readonly string[] = Object.freeze([
  * gate keys off the tool's own `isReadOnly()`), which violates the side-conv
  * contract "non-mutating exploration ... read-only by construction".
  *
- *   - `session_config`: classified `null` in `planModeMutatingTable` so that an
- *     in-plan effort bump mirrors the operator `/effort` slash. But the tool
- *     itself declares `isReadOnly() === false` and carries `op:set_effort`,
- *     which mutates the PARENT session's EffortStore. A delegated, isolated
- *     side-conversation must not be able to mutate the parent session's posture
- *     (effort / identity / model / provider), so it is excluded here.
+ * `session_config` used to be the first entry here, excluded because it mutates the
+ * parent session's EffortStore. It is now classified `working_state_write`, so the
+ * allowlist invariant keeps it out without an exclusion.
  *
  * This set is the seam that makes invariant 2 (allowlist == read-only set MINUS
  * exclusions) fail loudly on genuine drift while permitting this one documented
  * divergence. Adding a tool here requires the same conscious BOTH-list edit.
  */
 export const SIDE_CONVERSATION_TOOL_EXCLUSIONS: readonly string[] = Object.freeze([
-  "session_config",
   // A side-conversation must NOT relay plan-mode entry: `enter_plan_mode` is
   // `null` (plan-mode-permissive) in planModeMutatingTable, but it flips the
   // PARENT thread's collaboration posture at the next turn boundary — a
@@ -222,27 +221,20 @@ export const SIDE_CONVERSATION_TOOL_EXCLUSIONS: readonly string[] = Object.freez
   // async-control surface, not the minimal exploration set a delegated
   // side-conversation needs. Excluded so the allowlist stays a CONSCIOUS subset.
   "poll_deferred",
-  // jun-06 — `subagent_force_background` (ADR-0487) is read-only-classified
-  // (`null`, plan-safe — it only reorders the agent's own background pool) but
-  // is a main-session background-scheduler control surface (like `subagent_poll`),
-  // not part of a lightweight side-conversation's exploration set. Excluded.
-  "subagent_force_background",
-  // sep-13 — the five read-only tools that gained a `planModeMutatingTable` row
-  // when the table's ten missing classifications were filled in. Each is `null`
-  // (plan-safe) and each is a MAIN-SESSION surface, not part of a lightweight
-  // delegated exploration:
+  // `subagent_force_background` used to be excluded here as a "read-only-classified"
+  // tool. It starts a queued subagent, is classified `subagent_control` now, and the
+  // allowlist invariant keeps it out without an exclusion.
+  // sep-13 — five read-only tools that gained a `planModeMutatingTable` row. Each is a
+  // MAIN-SESSION surface rather than part of a lightweight delegated exploration:
   //   `ask_user` interrogates the operator, which a delegated side-conv may not do
   //     (the same parent-interaction rationale as `enter_plan_mode`);
-  //   `reflect` records the agent's own reasoning into the main run's trace;
-  //   `projects_kb` browses an external knowledge base and writes into the main
-  //     session's store;
-  //   `threads_handoff` emits a `quanta://threads/{id}` deeplink that hands the
-  //     MAIN thread to another surface;
+  //   `reflect` spends a second model call critiquing the MAIN agent's plan;
+  //   `projects_kb` loads files into the main session's in-memory store;
+  //   `threads_handoff` mints a deeplink for handing the main thread to another
+  //     surface;
   //   `fetch_rules` reads project rule files — plausibly useful, but `read` and
-  //     `grep` already cover it, and widening the side-conv surface is a separate
-  //     decision from classifying the table.
-  // Excluding all five keeps SIDE_CONVERSATION_TOOL_NAMES byte-identical, so the
-  // table fix changes nothing here.
+  //     `grep` already cover it, and widening the side-conv surface is its own
+  //     decision.
   "ask_user",
   "fetch_rules",
   "projects_kb",

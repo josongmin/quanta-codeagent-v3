@@ -107,7 +107,8 @@ export const buildBroadlyWiredTools = (): readonly Tool[] =>
 
 /**
  * The floor. MEASURED at the commit that introduced this fixture: 66 tools with
- * the full plan, against 43 with no ports at all. A fixture that silently
+ * the full plan, against 26 with no ports at all (an earlier version of this
+ * comment said 43; measured, it is 26). A fixture that silently
  * degraded to the base set would still satisfy every "for each tool" assertion.
  */
 export const BROADLY_WIRED_FLOOR = 60
@@ -132,6 +133,6 @@ export const assertBroadlyWiredFixture = (tools: readonly Tool[]): void => {
   ).toBeGreaterThan(BROADLY_WIRED_FLOOR)
   expect(
     tools.length,
-    "buildDefaultTools with no ports is 43 — the plan wired nothing",
+    "buildDefaultTools with no ports is 26 — the plan wired nothing",
   ).toBeGreaterThan(buildDefaultTools().length)
 }

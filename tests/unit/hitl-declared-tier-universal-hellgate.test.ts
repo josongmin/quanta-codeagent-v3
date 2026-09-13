@@ -47,7 +47,7 @@
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import { isMutatingTool, mutatingToolKind } from "@/agent/mode"
+import { classifiedMutatingKind } from "@/agent/mode"
 import { inferToolTierDetailed } from "@/permission"
 import type { Tool } from "@/tool"
 import { makeBashTool } from "@/tool/bash"
@@ -241,67 +241,42 @@ describe("HITL — the assembled registry agrees with the declarations", () => {
     }
   })
 
-  /**
-   * Plan-mode-safe despite being write-capable — the reviewed exceptions.
-   *
-   * Keyed by name with the REASON, not a bare name list, because this arm found
-   * two entries whose paperwork was wrong in opposite directions and a bare
-   * exemption would have hidden both.
-   */
-  const PLAN_MODE_SAFE_DESPITE_WRITE: Readonly<Record<string, string>> = {
-    test_runner:
-      "running the project's own suite is the canonical inner-loop action; it carries " +
-      "hitlTier pre-approval-ok for the same reason, and its resolved command still " +
-      "faces the HARD_DENY denylist through the permission policy",
-    session_config:
-      "only op:set_effort mutates, and it changes an in-session preference with no FS / " +
-      "shell / git / network effect; it mirrors the operator /effort slash, which plan " +
-      "mode also allows, and every mutation is a visible tool call in the trace",
-  }
-
-  test("each plan-mode-safe write-capable tool is a reviewed exception with a reason", () => {
-    for (const [name, why] of Object.entries(PLAN_MODE_SAFE_DESPITE_WRITE)) {
-      expect(why.split(" ").length, `the reason for ${name} is not a reason`).toBeGreaterThan(12)
-    }
-    // The exemption list must not outlive what it exempts.
-    const assembled = new Set(TOOLS.map((t) => t.name))
-    for (const name of Object.keys(PLAN_MODE_SAFE_DESPITE_WRITE)) {
-      expect(assembled.has(name), `${name} is exempted but no longer assembled`).toBe(true)
-    }
+  test("a plan-mode-safe classification implies the tool is actually read-only (assembled)", () => {
+    // My escape declared a write-capable tool plan-mode-safe (`apply_patch_v2: null`
+    // in MUTATING_TOOL_TABLE) and nothing noticed: the table is a hand-maintained
+    // name→kind map with no link back to `isReadOnly()`.
+    //
+    // WHY THERE IS NO EXEMPTION LIST ANY MORE. This arm used to carry two reviewed
+    // exceptions, `test_runner` and `session_config`. An adversarial audit showed the
+    // reasons were false in the posture that mattered. Plan mode has two layers: the
+    // admissibility gate blocks every non-read-only tool when the live AGENT mode is
+    // `plan`, while `consultPlanModeSeam` consults only this table when
+    // `collaborationMode` is `plan`. A write-capable `null` row is therefore a write
+    // exemption for the weaker layer alone — measured: `test_runner` ran
+    // `echo pwned > src/x.ts` with zero confirms there. Both are classified mutating
+    // now, and the invariant is strict.
+    const lies = TOOLS.filter(
+      (t) => classifiedMutatingKind(t.name) === null && !t.isReadOnly(),
+    ).map((t) => t.name)
+    expect(
+      lies,
+      "a tool is classified null (plan-mode-safe) in MUTATING_TOOL_TABLE while its own " +
+        "isReadOnly() says it writes — the collaboration-mode plan layer will let it run",
+    ).toEqual([])
   })
 
-  test("a plan-mode-safe classification implies the tool is actually read-only", () => {
-    // My escape declared a write-capable tool plan-mode-safe (`apply_patch_v2: null`
-    // in MUTATING_TOOL_TABLE) and nothing noticed, because the table is a
-    // hand-maintained name→kind map with no link back to `isReadOnly()`.
-    const lies: string[] = []
-    for (const t of TOOLS) {
-      let classified: boolean
-      try {
-        isMutatingTool(t.name)
-        classified = true
-      } catch {
-        classified = false
-      }
-      if (!classified) continue
-      if (mutatingToolKind(t.name) === null && !t.isReadOnly()) lies.push(t.name)
-    }
-    // MEASURED when this arm was written: two, and both had bad paperwork.
-    // `test_runner` sat under a `// Read-only built-ins` heading in
-    // MUTATING_TOOL_TABLE — false of a tool whose own docstring says "NOT
-    // read-only" — with no stated reason for the exemption. `session_config`'s own
-    // docstring said "Plan-mode dispatch will block it unless the registry
-    // classifies the per-call op, which it does not today", directly contradicting
-    // the table entry that allows it. Both corrected in the same commit; neither
-    // CLASSIFICATION was changed, because that is a behaviour decision and not a
-    // documentation one.
+  test("the same invariant over EVERY tool literal in src/, not just the assembled 66", () => {
+    // The assembled fixture reaches 66 of 193 names. The source census reaches every
+    // tool with a literal name, so the plan-mode row of a write-capable tool built by a
+    // tier-1 block or a git/gh/lsp factory is checked here too.
+    const writeCapableNull = POSTURES.filter(
+      (p) => p.readOnly === "false" && classifiedMutatingKind(p.name) === null,
+    ).map((p) => `${p.name} (${p.file}:${p.line})`)
+    expect(writeCapableNull).toEqual([])
+    // Anti-vacuity: the arm must actually meet write-capable tools that HAVE a row.
     expect(
-      lies.filter((n) => PLAN_MODE_SAFE_DESPITE_WRITE[n] === undefined),
-      "a tool is classified null (plan-mode-safe) in MUTATING_TOOL_TABLE while its own " +
-        "isReadOnly() says it writes, and it is not a reviewed exception",
-    ).toEqual([])
-    expect(lies.sort(), "the reviewed exception set drifted").toEqual(
-      Object.keys(PLAN_MODE_SAFE_DESPITE_WRITE).sort(),
-    )
+      POSTURES.filter((p) => p.readOnly === "false" && classifiedMutatingKind(p.name) !== undefined)
+        .length,
+    ).toBeGreaterThan(50)
   })
 })

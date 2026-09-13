@@ -254,14 +254,17 @@ describe("session_config — invariants", () => {
     expect(new Set(SESSION_CONFIG_EFFORT_LEVELS)).toEqual(new Set(EFFORT_LEVELS))
   })
 
-  test("MUTATING_TOOL_TABLE classifies session_config as null (read-only-permissive)", () => {
-    // Plan-mode dispatch allows null-classified tools regardless of their
-    // Tool#isReadOnly value. If a future change flips this entry to a
-    // mutating kind, plan mode will silently start blocking session_config
-    // — this test traps that regression.
+  test("MUTATING_TOOL_TABLE classifies session_config as the state write it is", () => {
+    // This used to pin `null`, claiming "plan-mode dispatch allows null-classified
+    // tools regardless of their Tool#isReadOnly value". That was true of ONE plan layer.
+    // With the live agent mode `plan`, the admissibility gate blocks every
+    // non-read-only tool — this one included, `op:get` too — without reading the table.
+    // The `null` only opened the collaboration-mode layer, so the two layers disagreed
+    // about the same call. Both now block it.
     const table = planModeMutatingTable()
-    expect("session_config" in table).toBe(true)
-    expect(table.session_config).toBeNull()
+    expect(Object.hasOwn(table, "session_config")).toBe(true)
+    expect(table.session_config).toBe("working_state_write")
+    expect(sessionConfigTool.isReadOnly()).toBe(false)
   })
 
   test("tool name + isConcurrencySafe contract are stable", () => {
@@ -270,9 +273,7 @@ describe("session_config — invariants", () => {
     // for any well-formed input.
     expect(sessionConfigTool.isConcurrencySafe({ op: "get" })).toBe(true)
     expect(sessionConfigTool.isConcurrencySafe({ op: "set_effort", level: "high" })).toBe(true)
-    // Read+write tool — declared mutating at the Tool level even though the
-    // table classifies as null. The discrepancy is intentional and is what
-    // the parity test above exists to defend.
+    // Read+write tool — declared mutating at the Tool level, and the table agrees.
     expect(sessionConfigTool.isReadOnly()).toBe(false)
   })
 
