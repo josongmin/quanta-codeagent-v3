@@ -460,8 +460,12 @@ const boxWire = (box: FakeBox, bootstrapped: boolean): BoxWire => {
   // at wire creation, so a freshly bootstrapped box stayed not-ready forever and chunk 1
   // threw `readiness probe failed` — red since that commit, for a fake that did not model
   // the new check, not for anything about gold absence.
-  let probedOnce = false
-  let ranAfterFirstProbe = false
+  //
+  // Ready means the thing the probe checks for EXISTS: `~/.bun/bin/bun` after the box's
+  // `bun install`. The first version flipped to ready after ANY ssh command following
+  // the first probe, so a bootstrap that skipped `bun install` still passed both
+  // acceptance arms (round-8 audit; measured 18/1, caught only by the paired control).
+  let installed = false
   const spawn: SpawnFn = async (cmd, args) => {
     spawns.push({ cmd, args: [...args] })
     if (args.includes("run-instances")) {
@@ -471,10 +475,9 @@ const boxWire = (box: FakeBox, bootstrapped: boolean): BoxWire => {
     if (cmd !== "ssh") return ok("")
     const remote = args[args.length - 1] ?? ""
     if (remote.includes("test -x ~/.bun/bin/bun")) {
-      probedOnce = true
-      return bootstrapped || ranAfterFirstProbe ? ok("OK\n") : ok("")
+      return bootstrapped || installed ? ok("OK\n") : ok("")
     }
-    if (probedOnce) ranAfterFirstProbe = true
+    if (/~\/\.bun\/bin\/bun install\b/.test(remote)) installed = true
     return box.run(remote)
   }
   return { spawn, box, spawns }
