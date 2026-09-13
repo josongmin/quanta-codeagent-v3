@@ -42,6 +42,13 @@ import { DEFAULT_SPILL_KEEP } from "@/tool/output-spill"
 import { scopedEnv } from "../_support/scoped-env"
 
 const VICTIM_NOTES = 80
+// The history holds DUMPS old tool results and the wire keeps the newest
+// KEEP_RECENT intact, so every arm clears exactly DUMPS - KEEP_RECENT blocks.
+// QUANTA_MICROCOMPACT_KEEP_RECENT is pinned so that count is fixed by this file,
+// not by the wire's default or a developer shell.
+const DUMPS = 5
+const KEEP_RECENT = 3
+const EXPECTED_CLEARED = DUMPS - KEEP_RECENT
 // QUANTA_TOOL_OUTPUT_SPILL_KEEP is held UNSET, not pinned: the compaction wire
 // builds the port without `spillKeep`, so the knob does not reach eviction and a
 // pinned value here would claim a wire that does not exist. Unset also keeps the
@@ -51,10 +58,12 @@ const env = scopedEnv(
     "QUANTA_MICROCOMPACT",
     "QUANTA_MICROCOMPACT_FLOOR_TOKENS",
     "QUANTA_MICROCOMPACT_INTERVAL_MS",
+    "QUANTA_MICROCOMPACT_KEEP_RECENT",
     "QUANTA_TOOL_OUTPUT_SPILL_KEEP",
   ],
   {
     QUANTA_MICROCOMPACT: "1",
+    QUANTA_MICROCOMPACT_KEEP_RECENT: String(KEEP_RECENT),
     QUANTA_MICROCOMPACT_FLOOR_TOKENS: "100",
     QUANTA_MICROCOMPACT_INTERVAL_MS: "1",
   },
@@ -76,11 +85,11 @@ class NullStream implements StreamPort {
 
 const userText = (text: string): Message => ({ role: "user", content: [{ type: "text", text }] })
 
-/** Five old 60k tool dumps, well under the tier-2 threshold, so only tier-1
+/** DUMPS old 60k tool dumps, well under the tier-2 threshold, so only tier-1
  *  eviction can shrink the transcript. */
 const bloatedHistory = (): Message[] => {
   const out: Message[] = [userText("start the task")]
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < DUMPS; i++) {
     out.push({
       role: "assistant",
       content: [
@@ -170,7 +179,7 @@ describe("NW-2 eviction spill — refused arms through the real loop", () => {
     expect(after.entries).toHaveLength(VICTIM_NOTES)
     expect(after.foreign).toEqual([])
     expect(after.intact).toBe(VICTIM_NOTES)
-    expect(cleared.length).toBeGreaterThan(0)
+    expect(cleared).toHaveLength(EXPECTED_CLEARED)
     for (const block of cleared) {
       expect(block.content).toContain(
         `not persisted to disk: ${join(repo, ".quanta", "tool-output")} is a symbolic link;`,
@@ -190,7 +199,7 @@ describe("NW-2 eviction spill — refused arms through the real loop", () => {
     expect(after.entries).toHaveLength(VICTIM_NOTES)
     expect(after.foreign).toEqual([])
     expect(after.intact).toBe(VICTIM_NOTES)
-    expect(cleared.length).toBeGreaterThan(0)
+    expect(cleared).toHaveLength(EXPECTED_CLEARED)
     for (const block of cleared) {
       expect(block.content).toContain(
         `not persisted to disk: ${join(repo, ".quanta")} is a symbolic link;`,
@@ -209,7 +218,7 @@ describe("NW-2 eviction spill — refused arms through the real loop", () => {
     const cleared = await runEviction()
 
     expect(readdirSync(outside)).toEqual([])
-    expect(cleared.length).toBeGreaterThan(0)
+    expect(cleared).toHaveLength(EXPECTED_CLEARED)
     for (const block of cleared) {
       expect(block.content).toContain(
         `not persisted to disk: ${join(repo, ".quanta")} is a symbolic link;`,
@@ -228,7 +237,7 @@ describe.skipIf(IS_ROOT)("NW-2 eviction spill — an unwritable working director
 
     const cleared = await runEviction()
 
-    expect(cleared.length).toBeGreaterThan(0)
+    expect(cleared).toHaveLength(EXPECTED_CLEARED)
     for (const block of cleared) {
       expect(block.content).toContain(
         `not persisted to disk: ${join(repo, ".quanta")} could not be created or inspected (`,
@@ -246,11 +255,11 @@ describe("NW-2 eviction spill — paired control", () => {
 
     const cleared = await runEviction()
 
-    expect(cleared.length).toBeGreaterThan(0)
+    expect(cleared).toHaveLength(EXPECTED_CLEARED)
     const after = census(spillDir)
     expect(after.entries).toHaveLength(DEFAULT_SPILL_KEEP)
-    expect(after.foreign).toHaveLength(cleared.length)
-    expect(after.intact).toBe(DEFAULT_SPILL_KEEP - cleared.length)
+    expect(after.foreign).toHaveLength(EXPECTED_CLEARED)
+    expect(after.intact).toBe(DEFAULT_SPILL_KEEP - EXPECTED_CLEARED)
     for (const block of cleared) {
       const m = /<persisted-output path="([^"]+)" chars="\d+">/.exec(block.content)
       expect(m).not.toBeNull()
