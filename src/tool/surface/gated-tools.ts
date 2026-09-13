@@ -258,8 +258,6 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
       "git_diff",
       "git_log",
       "git_commit",
-      "git_stage",
-      "git_push",
       "git_branch_switch",
       "git_blame",
       "git_blame_heatmap",
@@ -277,6 +275,21 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     risk: "mutating",
     adr: "0098",
     note: "Opt-in (QUANTA_GIT_TOOLS=1). Mutating git surface kept off the default menu — the agent uses bash for git unless explicitly opted in.",
+  },
+  {
+    name: "git_push",
+    group: ["git_stage"],
+    origin:
+      "@/tool/git (gitPushTool, gitStageTool) — built and tested, registered by NO production path",
+    gate: {
+      kind: "unwired",
+      reason:
+        "listed as members of the `gitTools()` group until sep-13, but `gitTools()` never mints them and no production file calls `gitPushTool` or `gitStageTool`; the only caller is tests/unit/git-directive-stage-push-pr-hooks-hellgate.test.ts. Wire-or-delete is open: wiring exposes an agent-callable `git push` behind QUANTA_GIT_TOOLS, which is a security decision, not a catalogue edit.",
+    },
+    default: {},
+    risk: "mutating",
+    adr: "0098",
+    note: "Found while building the plan-mode table's caller-wire list from measurement: the two names were the only rows whose builder the assembled universe could not reach AND whose factories had no production call site. The git_status row had claimed them for `gitTools()`, so the catalogue said QUANTA_GIT_TOOLS=1 gives the agent git push; it does not.",
   },
   {
     name: "gh_pr_view",

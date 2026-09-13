@@ -556,7 +556,12 @@ describe("tool-surface manifest — FULL-universe completeness (the guard that w
     expect(scanRegisteredToolNames().has("ai_attribution")).toBe(false)
     expect(GATED_TOOLS.find((e) => e.name === "coverage_check")?.gate.kind).toBe("config-slot")
     expect(GATED_TOOLS.find((e) => e.name === "prompt_cache_status")?.gate.kind).toBe("config-slot")
-    expect(GATED_TOOLS.filter((e) => e.gate.kind === "unwired")).toEqual([])
+    // …and ONE pinned exception since sep-13: `git_push` / `git_stage` were catalogued as
+    // `gitTools()` members while no production path ever built them. Recorded unwired,
+    // with the reason, rather than wired (a security decision) or deleted (a product one).
+    expect(
+      GATED_TOOLS.filter((e) => e.gate.kind === "unwired").map((e) => entryToolNames(e)),
+    ).toEqual([["git_push", "git_stage"]])
   })
 
   test("the unwired-orphan catalog mechanism stays available (any future unwired entry must carry a reason)", () => {

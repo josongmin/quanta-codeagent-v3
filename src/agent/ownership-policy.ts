@@ -291,6 +291,12 @@ export const OWNERSHIP_WRITE_CLASSIFICATION: Readonly<Record<string, OwnershipWr
     // targets are extracted; `$VAR`/computed/heredoc escape (accepted FN).
     bash: "shell",
     pty_write: "shell",
+    // sep-13 — the six-tool router's `exec_command` runs a model-supplied shell line and
+    // exposes it through `extractShellCommand`; `write_stdin` feeds a PTY it started, the
+    // same posture as `pty_write`. Classified when every catalogued tool gained a
+    // plan-mode row and these became `bash_mutating` there.
+    exec_command: "shell",
+    write_stdin: "shell",
     // fail-closed — target not statically knowable
     lsp_rename_apply: "fail-closed",
     shadow_rewind: "fail-closed",
@@ -335,6 +341,16 @@ export const OWNERSHIP_WRITE_CLASSIFICATION: Readonly<Record<string, OwnershipWr
     gh_pr_auto_merge: "non-fs",
     gh_pr_edit_labels: "non-fs",
     gh_pr_resolve_thread: "non-fs",
+    gh_pr_open: "non-fs", // GitHub network, same posture as gh_pr_create
+    // sep-13 — container-scoped: both act inside the container transport, the rationale
+    // this class already names.
+    container_exec: "non-fs",
+    container_write_file: "non-fs",
+    // Browser-scoped raw CDP. HONEST RESIDUAL, not a completeness claim: CDP can reach
+    // host-side effects (a download directory, for one), which this content-authoring
+    // fence does not model. Classifying it `fail-closed` would change enforcement for
+    // fenced subagents, and that is a decision, not a catalogue edit.
+    browser_cdp: "non-fs",
     // gated risk:"mutating" tools that mutate ONLY a non-FS surface
     automation_update: "non-fs", // scheduler engine
     collect_evidence: "non-fs", // exec, no FS content write
@@ -348,8 +364,10 @@ export const OWNERSHIP_WRITE_CLASSIFICATION: Readonly<Record<string, OwnershipWr
     // BASE `test_runner` self-reports isReadOnly()===false and exposes
     // extractShellCommand (its `command`/derived `path` run through the shell), so
     // any redirect write is caught by the shell extractor — classified `shell`.
-    // (Distinct from the gated `run_tests`; NOTE the mode.ts MUTATING_TOOL_TABLE
-    // lists test_runner as read-only `null`, a known benign discrepancy.)
+    // (Distinct from the gated `run_tests`. The mode.ts MUTATING_TOOL_TABLE listed
+    // test_runner as read-only `null` — called "a known benign discrepancy" here — until
+    // sep-13, when an audit showed that `null` let it write in collaboration-mode plan;
+    // it is `bash_mutating` now and the discrepancy is gone.)
     test_runner: "shell",
   })
 

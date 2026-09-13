@@ -14,6 +14,7 @@
  * declares.
  */
 import { describe, expect, test } from "bun:test"
+import { CALLER_WIRE_TOOL_NAMES, classifiedMutatingKind, planModeMutatingTable } from "@/agent/mode"
 import { ALL_MANIFEST_TOOL_NAMES } from "@/tool"
 import { assembleToolUniverse } from "./_shared/assembled-tool-universe"
 
@@ -26,66 +27,14 @@ const sourceOf = (name: string): string =>
 
 /**
  * Catalogued names no builder in the assembly can mint WITHOUT a live resource at
- * construction — a browser (CDP), an MCP server handshake, a memory store, a spawned
- * subagent's per-child tools, or a composition-root binding this fixture does not model.
+ * construction, or that no production path builds at all.
  *
- * A LEDGER THAT MAY ONLY SHRINK. It is pinned by name, and both directions are asserted:
- * a catalogued name missing from the assembly and from this list fails, and a name here
- * that the assembly DOES mint fails too ("remove it from the ledger"). Growing it is a
- * visible edit to this file, which is the point.
- *
- * MEASURED at the commit that introduced this gate: 156 distinct names assembled from
- * ten builders, 47 catalogued names outside the assembly.
+ * ONE LIST, NOT TWO. This was a test-local ledger that happened to equal the plan-mode
+ * table's `CALLER_WIRE_TOOL_NAMES` name for name once every catalogued tool had a row
+ * (47 each). It is now that constant: the table's "names no fixture can reach" and this
+ * gate's "names not yet assembled" are the same fact. It may only shrink.
  */
-const NOT_YET_ASSEMBLED: readonly string[] = [
-  "ast_grep",
-  "browser_cdp",
-  "browser_click",
-  "browser_console",
-  "browser_drag",
-  "browser_element_bounds",
-  "browser_fill",
-  "browser_highlight",
-  "browser_mouse_click_xy",
-  "browser_navigate",
-  "browser_network",
-  "browser_press_key",
-  "browser_read",
-  "browser_screenshot",
-  "browser_scroll",
-  "browser_select_option",
-  "browser_snapshot",
-  "browser_tab_close",
-  "browser_tab_list",
-  "browser_tab_new",
-  "browser_tab_switch",
-  "browser_type",
-  "browser_wait",
-  "cancel_mcp_task",
-  "check_secrets",
-  "delegate",
-  "find_references",
-  "followup_task",
-  "fork_session",
-  "get_mcp_task",
-  "git_push",
-  "git_stage",
-  "list_mcp_tasks",
-  "memory_search",
-  "memory_update",
-  "memory_write",
-  "poll_deferred",
-  "report_agent_job_result",
-  "search_codebase",
-  "shadow_verify",
-  "skill_create",
-  "subagent_await",
-  "subagent_force_background",
-  "subagent_fork",
-  "subagent_poll",
-  "update_working_state",
-  "web_search",
-]
+const NOT_YET_ASSEMBLED: readonly string[] = CALLER_WIRE_TOOL_NAMES
 
 describe("tool-surface manifest — runtime parity with the assembled builders", () => {
   test("the assembly reached the tool population (an empty universe satisfies every loop)", () => {
@@ -127,9 +76,31 @@ describe("tool-surface manifest — runtime parity with the assembled builders",
     const notCatalogued = NOT_YET_ASSEMBLED.filter((n) => !MANIFEST.has(n))
     expect(notCatalogued, "the ledger names tools the manifest no longer lists").toEqual([])
     expect(new Set(NOT_YET_ASSEMBLED).size, "duplicate ledger entry").toBe(NOT_YET_ASSEMBLED.length)
-    expect([...NOT_YET_ASSEMBLED], "keep the ledger sorted so diffs stay reviewable").toEqual(
-      [...NOT_YET_ASSEMBLED].sort(),
-    )
+  })
+
+  test("the plan-mode table and the manifest name exactly the same tools", () => {
+    // 67 catalogued names had no plan-mode row, so `isMutatingTool` threw for each and
+    // the collaboration-mode seam denied them as "not classified". Neither drift detector
+    // could see it: both enumerated only fixture-reachable tools.
+    const table = new Set(Object.keys(planModeMutatingTable()))
+    expect(
+      [...MANIFEST].filter((n) => !table.has(n)).sort(),
+      "catalogued with no plan-mode row",
+    ).toEqual([])
+    expect(
+      [...table].filter((n) => !MANIFEST.has(n)).sort(),
+      "a plan-mode row for an uncatalogued tool",
+    ).toEqual([])
+  })
+
+  test("every assembled tool's row agrees with its own isReadOnly(), both directions", () => {
+    const lies = UNIVERSE.tools
+      .filter((t) => {
+        const k = classifiedMutatingKind(t.name)
+        return (k === null && !t.isReadOnly()) || (k !== null && k !== undefined && t.isReadOnly())
+      })
+      .map((t) => `${t.name} (isReadOnly=${t.isReadOnly()}, row=${classifiedMutatingKind(t.name)})`)
+    expect(lies).toEqual([])
   })
 
   test("the seven computed-name LSP tools that motivated this gate are catalogued", () => {

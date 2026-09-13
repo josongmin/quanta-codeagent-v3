@@ -240,6 +240,37 @@ export const SIDE_CONVERSATION_TOOL_EXCLUSIONS: readonly string[] = Object.freez
   "projects_kb",
   "reflect",
   "threads_handoff",
+  // sep-13 — twenty-six more read-only rows, from giving every catalogued tool a plan-mode
+  // classification. Excluded as a block so SIDE_CONVERSATION_TOOL_NAMES stays
+  // byte-identical: the side conversation's surface is its own decision, and each of these
+  // is a main-session, browser, MCP, subagent or objective surface rather than the minimal
+  // exploration set. Widening it deliberately is a separate change.
+  "advisor",
+  "ast_grep",
+  "browser_console",
+  "browser_element_bounds",
+  "browser_highlight",
+  "browser_network",
+  "browser_read",
+  "browser_screenshot",
+  "browser_snapshot",
+  "browser_tab_list",
+  "browser_wait",
+  "check_secrets",
+  "current_plan",
+  "fork_session",
+  "get_mcp_task",
+  "git_compose_commit",
+  "git_compose_pr",
+  "list_agents",
+  "list_mcp_tasks",
+  "lsp_code_action",
+  "lsp_signature_help",
+  "objective_get",
+  "report_agent_job_result",
+  "shadow_verify",
+  "subagent_read_messages",
+  "wait_agent",
 ])
 
 // ===========================================================================

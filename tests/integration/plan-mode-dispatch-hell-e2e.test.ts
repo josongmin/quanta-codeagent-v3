@@ -30,14 +30,7 @@ import {
   UnknownToolError,
 } from "@/agent/mode"
 import { __resetRuntimeConfig } from "@/shared"
-import {
-  createUpdateWorkingStateTool,
-  gitTools,
-  lspNavTools,
-  nullLspNavProvider,
-  requestUserInputTool,
-} from "@/tool"
-import { buildBroadlyWiredTools } from "../unit/_shared/wired-tool-ports"
+import { assembleToolUniverse } from "../unit/_shared/assembled-tool-universe"
 
 /* ────────────────────────────── env baseline ─────────────────────────────── */
 
@@ -77,34 +70,16 @@ beforeEach(() => {
 // through a `DefaultToolPort` is invisible, so its table entry reads as an ORPHAN
 // and the repair looks like adding a caller-wire row. MEASURED: ten tools had no
 // table row at all and neither detector could report them.
-const BROADLY_WIRED = buildBroadlyWiredTools()
+const UNIVERSE_NAMES: readonly string[] = [
+  ...new Set((await assembleToolUniverse()).tools.map((t) => t.name)),
+].sort()
 
 /** Everything a fixture can reach, BEFORE the caller-wire names are added. */
-const ALL_REGISTERED_TOOL_NAMES_WITHOUT_CALLER_WIRE: readonly string[] = (() => {
-  const names = new Set<string>()
-  for (const t of BROADLY_WIRED) names.add(t.name)
-  for (const t of gitTools()) names.add(t.name)
-  for (const t of lspNavTools(nullLspNavProvider)) names.add(t.name)
-  names.add(createUpdateWorkingStateTool(undefined).name)
-  names.add(requestUserInputTool().name)
-  return [...names].sort()
-})()
+const ALL_REGISTERED_TOOL_NAMES_WITHOUT_CALLER_WIRE: readonly string[] = UNIVERSE_NAMES
 
-const ALL_REGISTERED_TOOL_NAMES = (() => {
-  const names = new Set<string>()
-  for (const t of BROADLY_WIRED) names.add(t.name)
-  for (const t of gitTools()) names.add(t.name)
-  for (const t of lspNavTools(nullLspNavProvider)) names.add(t.name)
-  names.add(createUpdateWorkingStateTool(undefined).name)
-  // ADR-0097 — `request_user_input` is registered conditionally (only when
-  // `AgentConfig.userInputPort` is wired in `features.ts`), so it never
-  // shows up in `defaultTools`. Its MUTATING_TOOL_TABLE entry is permanent
-  // (any host that wires the port must NOT trip `UnknownToolError`); we
-  // include it here so the cross-check stays in sync with that contract.
-  names.add(requestUserInputTool().name)
-  for (const n of CALLER_WIRE_TOOL_NAMES) names.add(n)
-  return [...names].sort()
-})()
+const ALL_REGISTERED_TOOL_NAMES = [
+  ...new Set([...UNIVERSE_NAMES, ...CALLER_WIRE_TOOL_NAMES]),
+].sort()
 
 const PLAN: CollaborationMode = "plan"
 const DEFAULT: CollaborationMode = "default"
@@ -166,7 +141,7 @@ describe("Scenario 1 — tool-registry exhaustiveness drift detector", () => {
     expect(unclassified).toEqual([])
   })
 
-  test("no caller-wire SSOT name is already enumerable from the broadly-wired fixture", () => {
+  test("no caller-wire SSOT name is already enumerable from the assembled universe", () => {
     // A name a fixture can reach must not ALSO be vouched for by the hand list, or a
     // vanished registration keeps its table row "known" by name. This compared against
     // the bare `defaultTools` singleton, so 30 port-gated names sat in the list and

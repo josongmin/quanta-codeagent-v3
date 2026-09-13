@@ -13,14 +13,10 @@ import {
   planModeMutatingTable,
   UnknownToolError,
 } from "@/agent/mode"
-import {
-  createUpdateWorkingStateTool,
-  gitTools,
-  lspNavTools,
-  nullLspNavProvider,
-  requestUserInputTool,
-} from "@/tool"
+import { assembleToolUniverse } from "./_shared/assembled-tool-universe"
 import { assertBroadlyWiredFixture, buildBroadlyWiredTools } from "./_shared/wired-tool-ports"
+
+const UNIVERSE = await assembleToolUniverse()
 
 describe("mode mutating-table cross-check (ADR-0036)", () => {
   // Caller-wire tools: registered ONLY when the relevant AgentConfig slot is
@@ -42,17 +38,11 @@ describe("mode mutating-table cross-check (ADR-0036)", () => {
   // have reported them either way. The port plan is an exhaustive
   // `Record<keyof DefaultToolPorts, …>`, so a new port is a compile error there.
   const broadlyWired = buildBroadlyWiredTools()
-  const allTools = [
-    ...broadlyWired.map((t) => t.name),
-    ...gitTools().map((t) => t.name),
-    ...lspNavTools(nullLspNavProvider).map((t) => t.name),
-    createUpdateWorkingStateTool(undefined).name,
-    // ADR-0097 (Tier-S6) — `request_user_input` is registered conditionally
-    // (only when `AgentConfig.userInputPort` is wired). Its MUTATING_TOOL_TABLE
-    // entry (read-only / `null` kind) must still satisfy the cross-check.
-    requestUserInputTool().name,
-    ...callerWireToolNames,
-  ]
+  // The ASSEMBLED universe — ten real builders, including `buildSessionFeatures` over the
+  // slots the manifest declares. It replaced a hand-picked enumeration that could not see
+  // 67 catalogued tools with no table row.
+  const assembledNames = new Set(UNIVERSE.tools.map((t) => t.name))
+  const allTools = [...new Set([...assembledNames, ...callerWireToolNames])]
 
   // ─── SSOT guard — the caller-wire allowlist cannot diverge between tests ──
   // These pins make the footgun structurally impossible: both this test and
@@ -75,19 +65,12 @@ describe("mode mutating-table cross-check (ADR-0036)", () => {
     expect(unclassified).toEqual([])
   })
 
-  test("no caller-wire SSOT name is enumerable from the broadly-wired fixture", () => {
-    // The integration detector pins the same thing; pinned in this unit file too so the
-    // unit tier alone catches it. A name the fixture reaches must leave the hand list,
-    // or its table row stays "known" after the tool is gone.
-    const callerWire: ReadonlySet<string> = new Set(callerWireToolNames)
-    const enumerable = new Set(allTools.filter((n) => !callerWire.has(n)))
-    const reachable = new Set([
-      ...broadlyWired.map((t) => t.name),
-      ...gitTools().map((t) => t.name),
-      ...lspNavTools(nullLspNavProvider).map((t) => t.name),
-    ])
-    expect(CALLER_WIRE_TOOL_NAMES.filter((n) => reachable.has(n))).toEqual([])
-    expect(enumerable.size).toBeGreaterThan(50)
+  test("no caller-wire SSOT name is enumerable from the assembled universe", () => {
+    // A name a fixture can reach must not ALSO be vouched for by the hand list, or its
+    // table row stays "known" after the tool is gone. MEASURED on the bare-fixture version:
+    // removing `code_cell`'s registration left both detectors at 520 pass / 0 fail.
+    expect(CALLER_WIRE_TOOL_NAMES.filter((n) => assembledNames.has(n))).toEqual([])
+    expect(assembledNames.size).toBeGreaterThan(140)
   })
 
   test("caller-wire SSOT has no duplicate names", () => {

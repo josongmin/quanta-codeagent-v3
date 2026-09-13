@@ -641,6 +641,103 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
   debug_inspect: "bash_mutating",
   run_tests: "bash_mutating",
   collect_evidence: "bash_mutating",
+  // ─── sep-13 — the SIXTY-SEVEN catalogued tools with no row ─────────────────
+  // The table's contract is that every tool the registry knows appears here. Measured
+  // against the tool-surface manifest: 67 catalogued names had no row, so
+  // `isMutatingTool` threw for each and the plan-mode seam denied them as "not
+  // classified". Both drift detectors enumerated only fixture-reachable tools and
+  // could not see the gap.
+  //
+  // NO DISPATCH BEHAVIOUR CHANGES, by construction. Each row follows the tool's own
+  // `isReadOnly()` (runtime where the assembled universe builds it, the source
+  // declaration otherwise):
+  //   - read-only ⇒ `null`. A read-only tool never reaches this table at dispatch
+  //     (`consultPlanModeSeam` returns on `isReadOnly`), so nothing that ran stops.
+  //   - write-capable ⇒ a mutating kind. `UnknownToolError` already denied these in
+  //     plan collaboration mode; now the denial names a kind.
+  // The census-wide HITL arm enforces the second half: no write-capable tool literal may
+  // carry `null`.
+  //
+  // Read-only.
+  advisor: null,
+  ast_grep: null,
+  browser_console: null,
+  browser_element_bounds: null,
+  browser_highlight: null,
+  browser_network: null,
+  browser_read: null,
+  browser_screenshot: null,
+  browser_snapshot: null,
+  browser_tab_list: null,
+  browser_wait: null,
+  check_secrets: null,
+  current_plan: null,
+  fork_session: null,
+  get_mcp_task: null,
+  git_compose_commit: null,
+  git_compose_pr: null,
+  list_agents: null,
+  list_mcp_tasks: null,
+  lsp_code_action: null,
+  lsp_signature_help: null,
+  objective_get: null,
+  report_agent_job_result: null,
+  shadow_verify: null,
+  subagent_read_messages: null,
+  wait_agent: null,
+  // Write-capable: code execution and raw protocol access.
+  container_exec: "bash_mutating",
+  exec_command: "bash_mutating",
+  write_stdin: "bash_mutating",
+  browser_cdp: "bash_mutating",
+  // Write-capable: files.
+  container_write_file: "write_filesystem",
+  lsp_format: "write_filesystem",
+  lsp_rename_apply: "write_filesystem",
+  // Write-capable: page interaction that can submit, navigate or close state on a live
+  // site — the first rows of the `network_write` kind, which had no users.
+  browser_click: "network_write",
+  browser_drag: "network_write",
+  browser_fill: "network_write",
+  browser_mouse_click_xy: "network_write",
+  browser_navigate: "network_write",
+  browser_press_key: "network_write",
+  browser_scroll: "network_write",
+  browser_select_option: "network_write",
+  browser_tab_close: "network_write",
+  browser_tab_new: "network_write",
+  browser_tab_switch: "network_write",
+  browser_type: "network_write",
+  // Write-capable: git and GitHub.
+  git_push: "git_mutating",
+  git_stage: "git_mutating",
+  gh_pr_open: "git_mutating",
+  // Write-capable: spawning work.
+  spawn_agent: "subagent_spawn",
+  spawn_batch: "subagent_spawn",
+  spawn_agents_on_csv: "subagent_spawn",
+  run_workflow: "subagent_spawn",
+  delegate: "subagent_spawn",
+  followup_task: "subagent_spawn",
+  // Write-capable: controlling work already spawned.
+  close_agent: "subagent_control",
+  send_input: "subagent_control",
+  subagent_send_message: "subagent_control",
+  team_create: "subagent_control",
+  team_delete: "subagent_control",
+  cancel_mcp_task: "subagent_control",
+  // Write-capable: plan state. OPEN, recorded rather than decided: these are blocked in
+  // plan mode by BOTH layers today (agent-mode plan blocks every non-read-only tool),
+  // which is odd for tools whose job is planning. Allowing them needs a plan-mode rule
+  // that is not "null means read-only", and that is a behaviour decision.
+  create_plan: "plan_control",
+  update_plan: "plan_control",
+  update_todos: "plan_control",
+  remove_todos: "plan_control",
+  // Write-capable: objective state that outlives the turn.
+  objective_set: "working_state_write",
+  objective_update: "working_state_write",
+  objective_verify: "working_state_write",
 })
 
 /** SINGLE SOURCE OF TRUTH for the "caller-wire" tool-name allowlist.
@@ -680,95 +777,70 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
  *  `defaultTools`, which let 30 port-gated names sit here and mask stale rows) and
  *  that every name here has a table entry. */
 export const CALLER_WIRE_TOOL_NAMES = Object.freeze([
-  // Shadow git ODB (ADR-0119 / ADR-0122) — config-slot shadowOdb.
-  "shadow_snapshots",
-  "shadow_rewind",
-  "shadow_restore_partial",
-  // Background subagent (ADR-0130) — config-slot subagentBackground.
+  // EXACTLY the table rows no drift-test fixture can build — measured, not curated.
+  //
+  // sep-13: every catalogued tool gained a row (table and manifest are now the same 203
+  // names), and both drift detectors enumerate the ASSEMBLED universe
+  // (`tests/unit/_shared/assembled-tool-universe.ts`, 156 names from ten real builders)
+  // instead of a hand-picked set. This list is what is left: 47 names whose builders
+  // need a live resource at construction. It is also the runtime-parity gate's
+  // not-yet-assembled ledger — one list, not two — and it may only shrink: a name the
+  // universe starts building must leave (both detectors and the parity gate assert it).
+  //
+  // Browser tools — `@/agent/tier1/browser` needs a CDP endpoint.
+  "browser_cdp",
+  "browser_click",
+  "browser_console",
+  "browser_drag",
+  "browser_element_bounds",
+  "browser_fill",
+  "browser_highlight",
+  "browser_mouse_click_xy",
+  "browser_navigate",
+  "browser_network",
+  "browser_press_key",
+  "browser_read",
+  "browser_screenshot",
+  "browser_scroll",
+  "browser_select_option",
+  "browser_snapshot",
+  "browser_tab_close",
+  "browser_tab_list",
+  "browser_tab_new",
+  "browser_tab_switch",
+  "browser_type",
+  "browser_wait",
+  // MCP task control — needs a server that advertises Tasks.
+  "cancel_mcp_task",
+  "get_mcp_task",
+  "list_mcp_tasks",
+  // Memory — needs a live store.
+  "memory_search",
+  "memory_update",
+  "memory_write",
+  // Background subagents — need the background runner and admission queue.
+  "subagent_await",
+  "subagent_force_background",
   "subagent_fork",
   "subagent_poll",
-  "subagent_await",
-  // Budget surface (ADR-0136) — config-slot budgetLedger.
-  "budget_status",
-  // gh PR / issue surfaces — gitRunner-gated (gitTools but require runner port).
-  "gh_pr_view",
-  "gh_pr_list",
-  "gh_pr_blame",
-  "gh_pr_review_diff",
-  "gh_issue_view",
-  "gh_check_status",
-  "gh_pr_comment",
-  "gh_pr_create",
-  "gh_pr_auto_merge",
-  "gh_pr_edit_labels",
-  "gh_pr_resolve_thread",
-  // Memory layer (ADR-0135) — memory provider port.
-  "memory_search",
-  "memory_write",
-  "memory_update",
-  // Speculative branch search (ADR-0084) — branch-search isolator port.
-  "branch_search",
-  // Background subagent control surfaces.
-  "task_output",
-  "task_stop",
-  // Plan-review exit seam — planExitPort.
-  "request_plan_exit",
-  // Plan-ENTRY seam (inverse of exit) — gated on the same planExitPort slot.
-  "enter_plan_mode",
-  // Sub-agent spawn (ADR-0130) — subagent runner.
-  "agent",
-  // Skill loader + tool-search — loader-gated.
-  "Skill",
-  "ToolSearch",
-  // Web search + workspace retrieval — provider/pipeline ports.
-  "web_search",
-  "search_codebase",
-  // find_references (jun-19) — bench-driver-wired ripgrep ref search (read-only),
-  // gated QUANTA_BENCH_FIND_REFS; not in static defaultTools, so pinned here.
-  "find_references",
-  // NOTE: `read_image_url` is intentionally NOT here — it ships in the static
-  // `defaultTools` array (enumerable by both drift detectors), so listing it
-  // would be a redundant, drift-prone duplicate. Its MUTATING_TOOL_TABLE entry
-  // (read-only) is still pinned by the enumerable missing/orphan checks.
-  // `prompt_cache_status` is reached through `AgentConfig.promptCacheObserver`, which
-  // the broadly-wired `buildDefaultTools` fixture does not supply.
-  "prompt_cache_status",
-  // Skill authoring — tier-1 skill block, gated on QUANTA_SKILL_CREATOR plus a
-  // writable skills dir.
-  "skill_create",
-  // N1 side-agent — minted by the side-agent daemon binding, not a DefaultToolPort.
-  "side_agent_spawn",
-  "side_agent_list",
-  "side_agent_stop",
-  "side_agent_findings",
-  // ADR-0487 force-background — subagentBgTools, gated on QUANTA_FORCE_BACKGROUND.
-  "subagent_force_background",
-  // ADR-0287 async-tools (QUANTA_ASYNC_TOOLS).
   "poll_deferred",
-  // THIRTY names left this list (sep-13): `coverage_check`, `image_gen`, the three
-  // Office writers, `apply_patch_structured`, the four `artifact_*`,
-  // `permission_propose_pattern`, `file_history_rewind`, the six `pty_*`, the eight
-  // `mcp_*`, `communicate_update`, `appshot_verify`, `code_cell` and `node_repl`.
-  // Every one is registered by `buildDefaultTools` with its port wired, so both drift
-  // detectors ENUMERATE them through `tests/unit/_shared/wired-tool-ports.ts`. Kept
-  // here, they were known by NAME even after their registration was gone: removing
-  // `code_cell` from `buildDefaultTools` left both detectors at 520 pass / 0 fail with
-  // its table row stale. A name belongs here only if no fixture can reach it.
-  // ticket-11 (P8 git-worktree agent tools) — caller-wire, gated on
-  // AgentConfig.activeWorktreeSlot (QUANTA_WORKTREE_TOOL). Not enumerable from
-  // the static `defaultTools` surface, so listed here so the orphan-direction
-  // drift check stays exact.
-  "enter_worktree",
-  "exit_worktree",
-  "worktree_status",
-  // jun-08 long-tail NEW model-facing tools — caller-wire (gh/git tools opts,
-  // gated default-OFF on QUANTA_GH_CODE_TOUR / QUANTA_GIT_CO_CHANGE /
-  // QUANTA_CI_FINDING). Not enumerable from the static gitTools()/ghTools()
-  // default surface, so listed here so the orphan-direction drift check stays
-  // exact. All read-only (`null` kind).
-  "gh_pr_code_tour",
-  "git_co_change",
-  "ci_finding",
+  // Per-child or composition-root bindings the fixture does not model.
+  "report_agent_job_result",
+  "delegate",
+  "followup_task",
+  "fork_session",
+  "shadow_verify",
+  "skill_create",
+  "update_working_state",
+  // Retrieval, search and bench-driver wiring.
+  "search_codebase",
+  "web_search",
+  "find_references",
+  "ast_grep",
+  "check_secrets",
+  // Built and tested, registered by NO production path (catalogued `unwired`).
+  "git_push",
+  "git_stage",
 ] as const)
 
 /** Look up a tool's mutating classification. Returns `true` iff the tool is

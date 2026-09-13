@@ -1,6 +1,6 @@
 /**
  * ticket-11 (P8) reinforcement — worktree tools MUST be classified in the
- * plan-mode mutating table + listed in the caller-wire SSOT.
+ * plan-mode mutating table (and, since sep-13, enumerable rather than caller-wire).
  *
  * The worktree tools are caller-wire (registered only when `QUANTA_WORKTREE_TOOL`
  * mints `AgentConfig.activeWorktreeSlot`). Before this fix they were ABSENT from
@@ -44,12 +44,15 @@ describe("worktree tools are classified in the plan-mode mutating table", () => 
     expect(mutatingToolKind("worktree_status")).toBe(null)
   })
 
-  test("all 3 worktree tool names are in the caller-wire SSOT allowlist", () => {
-    // `CALLER_WIRE_TOOL_NAMES` is a frozen LITERAL tuple, so widen to a plain
-    // string[] for the membership check (the values are what matter here).
+  test("the worktree tools are ENUMERABLE, so they are NOT on the caller-wire list", () => {
+    // They used to be pinned INTO `CALLER_WIRE_TOOL_NAMES`, which vouched for their rows
+    // by name. Since sep-13 both drift detectors enumerate the assembled universe, which
+    // builds them through `buildSessionFeatures` with `activeWorktreeSlot` set — so a
+    // vanished registration now surfaces as an orphan row instead of being hidden by the
+    // list. The invariant is the inverse of what this test used to assert.
     const allowlist = [...CALLER_WIRE_TOOL_NAMES] as string[]
     for (const name of WORKTREE_TOOL_NAMES) {
-      expect(allowlist).toContain(name)
+      expect(allowlist, `${name} is back on the caller-wire list`).not.toContain(name)
     }
   })
 })
