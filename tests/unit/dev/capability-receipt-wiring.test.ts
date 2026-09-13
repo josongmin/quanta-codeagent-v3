@@ -54,10 +54,14 @@ import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import {
   CAPABILITY_VERDICTS_ENV,
+  type CapabilitySpec,
   CHROME_CAPABILITY_ID,
   campaignCapabilityIds,
+  campaignIncludesChrome,
+  campaignReceiptMissingIds,
   capabilityReceiptEnvForCampaign,
   type ProbeSpawner,
+  probeCapability,
   produceCapabilityReceipt,
   type SpawnedProbe,
 } from "../../../tools/dev/capability-probe-producer"
@@ -78,8 +82,20 @@ import {
   loadCapabilityReceipt,
 } from "../../../tools/dev/capability-receipt-consumer"
 import { testEnvironmentSha256 } from "../../../tools/dev/test-shard-receipt"
+import { CAMPAIGN_CAPABILITY_ENV } from "../../../tools/dev/worker-home"
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..")
+
+/**
+ * An explicit environment with NO campaign receipt.
+ *
+ * Arms that assert a `blocked-missing` verdict must not read the ambient one.
+ * Inside a shard worker `process.env` carries the campaign's receipt, where git
+ * is `executed`, and three arms that read it were RED under every real campaign
+ * — i.e. `bun run prepush` — while green for a developer running the file
+ * directly. Nothing had run under a campaign since they landed, so nobody saw.
+ */
+const NO_RECEIPT: Readonly<Record<string, string>> = {}
 
 /**
  * A spawner whose answer is decided by the argv, so the round trip is about the
@@ -429,8 +445,8 @@ describe("a required capability cannot be skipped past", () => {
       return true
     }) as typeof process.stdout.write
     try {
-      capability("git")
-      capability("git")
+      capability("git", NO_RECEIPT)
+      capability("git", NO_RECEIPT)
     } finally {
       process.stdout.write = real
     }
@@ -450,6 +466,21 @@ describe("a required capability cannot be skipped past", () => {
     expect(lanePrefix).toBe(CAPABILITY_LINE_PREFIX)
   })
 
+  test("capability() reads the receipt from the env it is GIVEN, both ways round", async () => {
+    // It read the process-cached receipt whatever env it was handed, so an arm
+    // passing `{}` still got the campaign's answer inside a shard worker, and an
+    // arm passing a real receipt got the ambient absence outside one. Each of the
+    // two assertions below catches that in one of those two environments.
+    const dir = mkdtempSync(join(tmpdir(), "cap-env-"))
+    try {
+      const receiptEnv = await produce(join(dir, "receipt.json"), [])
+      expect(capability("git", receiptEnv).verdict).toBe("executed")
+      expect(capability("git", NO_RECEIPT).verdict).toBe("blocked-missing")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }, 30_000)
+
   test("the tally is keyed PER CAPABILITY, not per process", () => {
     // The dedupe Set's stated reason. The previous arm asked for one name twice
     // and asserted one line, which `if (reported.size > 0) return` also
@@ -463,9 +494,9 @@ describe("a required capability cannot be skipped past", () => {
       return true
     }) as typeof process.stdout.write
     try {
-      capability("git")
-      capability("node")
-      capability("git")
+      capability("git", NO_RECEIPT)
+      capability("node", NO_RECEIPT)
+      capability("git", NO_RECEIPT)
     } finally {
       process.stdout.write = real
     }
@@ -565,23 +596,117 @@ describe("a campaign receipt carries chrome", () => {
     expect(ids).toContain("git")
   })
 
-  test("asking for chrome without a profile root is REFUSED, not silently dropped", async () => {
-    // The silent AND. A receipt minted without the capability answers
-    // blocked-missing, which every gated describe turns into a skip reporting PASS.
-    await expect(
-      produceCapabilityReceipt({
-        tier: "pr",
-        binding: {
-          head: "d".repeat(40),
-          policySha256: "e".repeat(64),
-          toolchainSha256: "f".repeat(64),
+  test("chrome without a profile root cannot be WRITTEN", () => {
+    // It was three independent optionals, and "include, no root" was a SILENT
+    // AND that dropped chrome from the receipt. The runtime throw added for it
+    // could be undone by a different conjunct with every arm green. As one
+    // option object the state is unrepresentable, and `typecheck:all` — which
+    // runs over test files — is what enforces the line below.
+    const options: Parameters<typeof produceCapabilityReceipt>[0] = {
+      tier: "pr",
+      binding: {
+        head: "d".repeat(40),
+        policySha256: "e".repeat(64),
+        toolchainSha256: "f".repeat(64),
+      },
+      // @ts-expect-error — a chrome option with no profile root does not typecheck
+      chrome: { probe: fakeChrome },
+    }
+    expect(options.tier).toBe("pr")
+  })
+
+  test("chrome runs INSIDE the total deadline, and a throwing probe costs only chrome", async () => {
+    const binding = {
+      head: "d".repeat(40),
+      policySha256: "e".repeat(64),
+      toolchainSha256: "f".repeat(64),
+    }
+    const good: CapabilitySpec = {
+      id: "fixture-good",
+      description: "fixture",
+      candidates: [{ label: "g", argv: ["good"] }],
+      perCandidateTimeoutMs: 1_000,
+    }
+    const answer: ProbeSpawner = () => ({
+      exited: Promise.resolve(0),
+      stdout: Promise.resolve(""),
+      kill: () => {},
+    })
+
+    // A chrome bring-up that never finishes. It used to run AFTER the deadline
+    // had been spent, with its own 45s budget on top.
+    const startedAt = Date.now()
+    const hung = await produceCapabilityReceipt({
+      tier: "pr",
+      binding,
+      specs: [good],
+      spawn: answer,
+      chrome: { profileRoot: "/unused", probe: () => new Promise<CapabilityFinding>(() => {}) },
+      totalDeadlineMs: 300,
+    })
+    expect(Date.now() - startedAt).toBeLessThan(5_000)
+    expect(hung.capabilities[CHROME_CAPABILITY_ID]?.status).toBe("probe-timeout")
+    expect(hung.capabilities["fixture-good"]?.status).toBe("available")
+
+    // A chrome probe that THROWS. Outside the per-probe catch it took the whole
+    // receipt with it.
+    const threw = await produceCapabilityReceipt({
+      tier: "pr",
+      binding,
+      specs: [good],
+      spawn: answer,
+      chrome: {
+        profileRoot: "/unused",
+        probe: async () => {
+          throw new Error("browser port exploded")
         },
-        specs: [],
-        includeChrome: true,
-        probeChrome: fakeChrome,
-        totalDeadlineMs: 1_000,
-      }),
-    ).rejects.toThrow(/chromeProfileRoot/)
+      },
+      totalDeadlineMs: 5_000,
+    })
+    expect(threw.capabilities[CHROME_CAPABILITY_ID]?.status).toBe("probe-error")
+    expect(threw.capabilities["fixture-good"]?.status).toBe("available")
+  })
+
+  test("a campaign receipt missing an expected id is NAMED, not minted", () => {
+    const ids = campaignCapabilityIds({})
+    const full = Object.fromEntries(
+      ids.map((id) => [id, { status: "available" as const, detail: "fixture", probeMs: 1 }]),
+    )
+    expect(campaignReceiptMissingIds({ capabilities: full }, true, {})).toEqual([])
+
+    const { [CHROME_CAPABILITY_ID]: _chrome, ...withoutChrome } = full
+    expect(campaignReceiptMissingIds({ capabilities: withoutChrome }, true, {})).toEqual([
+      CHROME_CAPABILITY_ID,
+    ])
+    // PAIRED CONTROL — a campaign that did not include chrome does not expect it,
+    // so a wiring test with an injected spawner is not refused.
+    expect(campaignReceiptMissingIds({ capabilities: withoutChrome }, false, {})).toEqual([])
+  })
+
+  test("whether a campaign probes chrome is PINNED, not inlined", () => {
+    // The inline expression could be narrowed to `includeChrome ?? probeChrome
+    // !== undefined` with every arm green, because the only arm that reached the
+    // default injected `probeChrome` — and the shard runner passes neither
+    // `spawn` nor `probeChrome`, so chrome would be in no receipt again.
+    const fakeSpawn: ProbeSpawner = () => ({
+      exited: Promise.resolve(0),
+      stdout: Promise.resolve(""),
+      kill: () => {},
+    })
+    const table: readonly [Parameters<typeof campaignIncludesChrome>[0], boolean][] = [
+      [{}, true], // the shard runner's call: chrome IS probed
+      [{ spawn: fakeSpawn }, false], // a wiring test must not launch a browser
+      [{ spawn: fakeSpawn, probeChrome: fakeChrome }, true],
+      [{ probeChrome: fakeChrome }, true],
+      [{ includeChrome: false }, false],
+      [{ includeChrome: true, spawn: fakeSpawn }, true],
+    ]
+    for (const [input, expected] of table) {
+      expect({ input: Object.keys(input), probes: campaignIncludesChrome(input) }).toEqual({
+        input: Object.keys(input),
+        probes: expected,
+      })
+    }
   })
 })
 
@@ -597,9 +722,15 @@ describe("the switch, in a real run of a real consumer", () => {
   const CONSUMER = "tests/unit/tool/glob-gitignore-mtime-hellgate.test.ts"
 
   const runConsumer = (extra: Record<string, string>): { out: string; code: number } => {
+    // The campaign's receipt variables are REMOVED before `extra` is applied.
+    // Inherited, they made git `executed` in the child, so the armed run fired no
+    // REQUIRED failure and both arms failed inside every shard worker.
+    const inherited = Object.fromEntries(
+      Object.entries(process.env).filter(([key]) => !CAMPAIGN_CAPABILITY_ENV.includes(key)),
+    )
     const result = Bun.spawnSync([process.execPath, "test", CONSUMER], {
       cwd: REPO_ROOT,
-      env: { ...process.env, ...extra },
+      env: { ...inherited, ...extra },
       stdout: "pipe",
       stderr: "pipe",
     })
@@ -611,12 +742,39 @@ describe("the switch, in a real run of a real consumer", () => {
 
   test("a required-but-blocked capability fails the run, and names itself", () => {
     const armed = runConsumer({ QUANTA_REQUIRE_CAPABILITIES: "git" })
+    // PRECONDITION: the child really had no receipt. Without this the arm could
+    // be green or red for reasons that have nothing to do with the switch.
+    expect(armed.out).toContain("verdict=blocked-missing")
     expect(armed.out).toContain("REQUIRED git is blocked-missing")
     expect(armed.code).not.toBe(0)
+    // THE FILE SURVIVED. The requirement used to throw at module scope, which
+    // discards the whole registry; an audit's mutant restoring that throw kept
+    // the two lines above green, because the REQUIRED text still printed and
+    // the exit code was still non-zero. Exactly one failure and the file's own
+    // skips still reported is what separates a failing test from a dead module.
+    expect(armed.out).toMatch(/\b1 fail\b/)
+    expect(armed.out).toMatch(/\b[1-9]\d* skip\b/)
+  }, 60_000)
+
+  test("PAIRED CONTROL — armed, with a receipt that says git RUNS, the file is green", async () => {
+    // The switch must key on the VERDICT, not merely on being set. This is also
+    // exactly what a shard worker sees, which is the environment the two arms
+    // around it were red in before they stopped inheriting the receipt.
+    const dir = mkdtempSync(join(tmpdir(), "cap-armed-ok-"))
+    try {
+      const receiptEnv = await produce(join(dir, "receipt.json"), [])
+      const armed = runConsumer({ ...receiptEnv, QUANTA_REQUIRE_CAPABILITIES: "git" })
+      expect(armed.out).toContain("verdict=executed")
+      expect(armed.out).not.toContain("REQUIRED git")
+      expect(armed.code).toBe(0)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   }, 60_000)
 
   test("PAIRED CONTROL — unset, the same file is green and reports its skips", () => {
     const quiet = runConsumer({ QUANTA_REQUIRE_CAPABILITIES: "" })
+    expect(quiet.out).toContain("verdict=blocked-missing")
     expect(quiet.code).toBe(0)
     expect(quiet.out).not.toContain("REQUIRED git")
     // The skips still REPORT. A requirement that killed the module would take
@@ -624,4 +782,100 @@ describe("the switch, in a real run of a real consumer", () => {
     // throw lived in `canExecute`.
     expect(quiet.out).toMatch(/\d+ skip/)
   }, 60_000)
+})
+
+/**
+ * ★ Three failure kinds, and the order between them.
+ *
+ * `Bun.spawn` THROWS synchronously for a binary that is not installed, so
+ * "this host lacks the tool" arrives as a throw. The commit that introduced
+ * `probe-error` classified every throw that way, and an audit measured the
+ * regression on this host: `ast-grep`, simply not installed, went from
+ * `unavailable` to `probe-error` → `failed-setup`. Driven through
+ * `probeCapability` with fixed specs, so each rule is pinned on its own.
+ */
+describe("absence, a probe that could not run, and a probe that did not answer", () => {
+  const spec = (
+    argvs: readonly (readonly string[])[],
+    perCandidateTimeoutMs = 2_000,
+  ): CapabilitySpec => ({
+    id: "fixture",
+    description: "fixture",
+    candidates: argvs.map((argv, index) => ({ label: `c${index}`, argv })),
+    perCandidateTimeoutMs,
+  })
+  const throwing = (code: string | undefined): never => {
+    const error = new Error(`fixture ${code ?? "no code"}`) as Error & { code?: string }
+    if (code !== undefined) error.code = code
+    throw error
+  }
+  const answering = (exit: number): SpawnedProbe => ({
+    exited: Promise.resolve(exit),
+    stdout: Promise.resolve(""),
+    kill: () => {},
+  })
+
+  test("ENOENT is ABSENCE, not a probe failure", async () => {
+    const finding = await probeCapability(spec([["missing-binary"]]), () => throwing("ENOENT"))
+    expect(finding.status).toBe("unavailable")
+    expect(finding.detail).toContain("ENOENT")
+  })
+
+  test("any OTHER throw means the probe could not run", async () => {
+    for (const code of ["EACCES", "EMFILE", undefined]) {
+      const finding = await probeCapability(spec([["x"]]), () => throwing(code))
+      expect({ code, status: finding.status }).toEqual({ code, status: "probe-error" })
+    }
+  })
+
+  test("a missing preferred interpreter beside a definitive no is ABSENCE", async () => {
+    // The real shape: `python3.11` is not installed, `python3` answers exit 1.
+    // Under the regression this was `probe-error` on every host without Homebrew
+    // python3.11, for a module that is simply not there.
+    const finding = await probeCapability(spec([["python3.11"], ["python3"]]), (argv) =>
+      argv[0] === "python3.11" ? throwing("ENOENT") : answering(1),
+    )
+    expect(finding.status).toBe("unavailable")
+  })
+
+  test("a probe that COULD NOT RUN outranks one that did not answer", async () => {
+    const finding = await probeCapability(spec([["a"], ["b"]], 50), (argv) =>
+      argv[0] === "a"
+        ? throwing("EMFILE")
+        : {
+            exited: new Promise<number>(() => {}),
+            stdout: new Promise<string>(() => {}),
+            kill: () => {},
+          },
+    )
+    expect(finding.status).toBe("probe-error")
+  })
+
+  test("a probe whose exit REJECTS does not take the receipt with it", async () => {
+    // A rejected `exited` escapes `runCandidate`, rejects `probeCapability`, and
+    // used to reject the producer's whole `Promise.all`: one bad probe, no
+    // receipt, every gated describe skipped, every file green. The earlier arm
+    // for this used a spawner that throws synchronously, which `runCandidate`
+    // already caught — so the producer-level catch was never reached by it.
+    const produced = await produceCapabilityReceipt({
+      tier: "pr",
+      binding: {
+        head: "a".repeat(40),
+        policySha256: "b".repeat(64),
+        toolchainSha256: "c".repeat(64),
+      },
+      specs: [spec([["bad"]]), { ...spec([["good"]]), id: "fixture-good" }],
+      spawn: (argv) =>
+        argv[0] === "bad"
+          ? {
+              exited: Promise.reject(new Error("exit rejected")),
+              stdout: Promise.resolve(""),
+              kill: () => {},
+            }
+          : answering(0),
+      totalDeadlineMs: 5_000,
+    })
+    expect(produced.capabilities.fixture?.status).toBe("probe-error")
+    expect(produced.capabilities["fixture-good"]?.status).toBe("available")
+  })
 })

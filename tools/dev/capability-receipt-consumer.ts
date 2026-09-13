@@ -278,7 +278,13 @@ const requireOrRegisterFailure = (decision: CapabilityDecision, env: ConsumerEnv
  * of the receipt, plus the one reported line the tally needs.
  */
 export const capability = (name: string, env: ConsumerEnv = process.env): CapabilityDecision => {
-  const decision = reportDecision(decideFromReceipt(capabilityReceipt(), name))
+  // The receipt is read from the SAME env the requirement is judged against.
+  // It used to come from the process-cached `process.env` receipt whatever env
+  // was passed, so an injected `{}` still answered from the campaign's receipt —
+  // and the one arm that asserted the reported verdict was red inside every
+  // shard worker, because there git is `executed`.
+  const load = env === process.env ? capabilityReceipt() : loadCapabilityReceipt(env)
+  const decision = reportDecision(decideFromReceipt(load, name))
   requireOrRegisterFailure(decision, env)
   return decision
 }
