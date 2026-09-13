@@ -425,6 +425,19 @@ describe("the memory plane follows the quanta home", () => {
     expect(two.legacyNotice).toContain("TWO memory directories exist")
   })
 
+  test("a legacy cwd store that is the SAME file as the home store is not a second store", () => {
+    // Claims audit: only the pre-relocation branch's alias check was tested; removing the
+    // legacy branch's `sameFile` check passed every memory suite.
+    const home = temps.create("mem-legacy-alias-")
+    const cwd = temps.create("mem-legacy-alias-cwd-")
+    const store = join(home, "memory", "memory.sqlite")
+    sqliteWithRows(store, 2)
+    mkdirSync(join(cwd, ".quanta"), { recursive: true })
+    symlinkSync(store, join(cwd, ".quanta", "memory.sqlite"))
+    const r = resolveStorePath({ homeDir: home, cwd })
+    expect(r).toEqual({ path: store, source: "home-default" })
+  })
+
   test("a relocated home with consolidator files and no store is NOT abandoned for the old store", () => {
     // Deciding by the sqlite alone, this home's MEMORY.md and stage-1 data were orphaned the
     // moment its store was missing and the old home still had one (round-9 audit).

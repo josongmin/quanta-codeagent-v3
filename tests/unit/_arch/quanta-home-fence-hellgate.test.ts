@@ -18,6 +18,7 @@ import {
   decideQuantaHomeFence,
   FENCED_ROOTS,
   OUTRANKING_ROOTS,
+  STATE_PATH_OVERRIDES,
   scratchPrefixesFor,
   staleScratchRoots,
   withFencedEnv,
@@ -133,6 +134,15 @@ describe("quanta-home fence — per-subsystem state overrides", () => {
       QUANTA_BENCH_RECORD_TRAJECTORY: "0",
     })
     expect([...d.unset].sort()).toEqual(["QUANTA_MEMORY_PATH", "QUANTA_SESSIONS_DIR"])
+  })
+
+  test("EVERY listed state path is removed when it points into the home — not just a sample", () => {
+    // Claims audit: the arm above sampled two keys, so unlisting any other key failed only
+    // the classification arm. Each key now has its own policy expectation.
+    for (const key of STATE_PATH_OVERRIDES) {
+      expect(decide({ [key]: `/Users/me/.quanta/${key.toLowerCase()}` }).unset, key).toEqual([key])
+      expect(decide({ [key]: `/tmp/w/${key.toLowerCase()}` }).unset, key).toEqual([])
+    }
   })
 })
 

@@ -111,7 +111,8 @@ export const OUTRANKING_ROOTS = ["QUANTA_CONFIG_DIR", "QUANTA_BENCH_HOME"] as co
  * non-path value (`QUANTA_WEB_DB=memory`, `QUANTA_BENCH_RECORD_TRAJECTORY=0`) is a
  * selector, not a location, and is kept. The classification of EVERY string knob in the
  * catalogue — this list, the roots, and the reviewed non-state kinds — is enforced by
- * `quanta-home-fence-hellgate`, so a new path knob cannot land unclassified.
+ * `tests/unit/cli/quanta-home-fence-string-knob-classification-hellgate.test.ts`, so a new
+ * path knob cannot land unclassified.
  */
 export const STATE_PATH_OVERRIDES = [
   "QUANTA_MCP_CONFIG", // the connector-install WRITE target (mcp-connector-wire), not only a read
