@@ -40,7 +40,7 @@ const ALLOWLIST: ReadonlyMap<string, string> = new Map([
   ["src/shared/quanta-home.ts", "THE resolver — the one place the root literal lives"],
   [
     "src/memory/store-path.ts",
-    "`preRelocationHomeStorePath` — the OS-home-scoped path is the POINT: it is where the memory store lived before the plane followed QUANTA_HOME, probed so a relocated home does not silently orphan an existing store. Notice-only, never a redirect. This entry exists because the widened detector correctly found it.",
+    "`preRelocationHomeStorePath` — the OS-home-scoped path is the POINT: it is where the memory store lived before the plane followed QUANTA_HOME, probed so a relocated home does not silently orphan an existing store. When the relocated home has no store yet, the prior store is USED in place (never copied or moved) with a notice naming both paths and a migration command; when both exist, a two-stores notice. This entry exists because the widened detector correctly found it.",
   ],
   [
     "src/runner/batch/corpus/paths.ts",
