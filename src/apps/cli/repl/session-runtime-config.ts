@@ -6,6 +6,7 @@ import {
   type ReviewerSandboxProfile,
 } from "@/permission"
 import { logger } from "@/shared"
+import { CLI_KNOBS } from "../cli-knobs"
 import {
   argvImages,
   argvPrompt,
@@ -88,6 +89,27 @@ const intKnob = (key: string, fallback: number, allowZero = false): number => {
   return n
 }
 
+/**
+ * The fallback an int knob DECLARES in `CLI_KNOBS`, instead of a second copy here.
+ *
+ * `intKnob("QUANTA_IDLE_MS", <literal>)` restated the `default: 60000` declared for the
+ * same key in `cli-knobs.ts`, so a changed default had two homes and `/knobs` could
+ * show one while the session used the other. It also tripped the magic-timeout
+ * scan in `src-no-sketchy-code.test.ts`: the earlier `Number(env(k, "60000"))` hid
+ * the number inside a string, and making the fallback numeric exposed it.
+ *
+ * Throws on a missing or non-numeric declaration: this runs once at session start
+ * and every suite that builds a session config goes red, which is the right place
+ * for a renamed key to surface.
+ */
+const declaredIntDefault = (key: string): number => {
+  const row = CLI_KNOBS.find((k) => k.envKey === key)
+  if (row === undefined || typeof row.default !== "number") {
+    throw new Error(`${key} declares no int default in CLI_KNOBS; declare it there, not here`)
+  }
+  return row.default
+}
+
 /** `QUANTA_PERMISSION`, validated against the closed set with a warning. */
 const readPermissionMode = (): PermissionMode => {
   const raw = env("QUANTA_PERMISSION", "default").trim()
@@ -150,9 +172,16 @@ export const readSessionRuntimeConfig = (): SessionRuntimeConfig => {
     newSession: newSessionFlag(),
     title: titleFlag(),
     idleSuppressOn: env("QUANTA_IDLE_SUPPRESS", "1") !== "0",
-    idleMs: intKnob("QUANTA_IDLE_MS", 60_000),
-    snoozeDefaultMs: intKnob("QUANTA_SNOOZE_DEFAULT_MS", 300_000),
-    rejectLimit: intKnob("QUANTA_REJECT_LIMIT", 20, /* allowZero */ true),
+    idleMs: intKnob("QUANTA_IDLE_MS", declaredIntDefault("QUANTA_IDLE_MS")),
+    snoozeDefaultMs: intKnob(
+      "QUANTA_SNOOZE_DEFAULT_MS",
+      declaredIntDefault("QUANTA_SNOOZE_DEFAULT_MS"),
+    ),
+    rejectLimit: intKnob(
+      "QUANTA_REJECT_LIMIT",
+      declaredIntDefault("QUANTA_REJECT_LIMIT"),
+      /* allowZero */ true,
+    ),
     // ADR-0301 — surface-side argv scan for `--playbook-trigger`. The wire
     // helper enforces env-on precedence; this is the bare CLI echo.
     playbookTriggerFlag: playbookTriggerFlag(),

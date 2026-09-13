@@ -102,8 +102,14 @@ const READ_CALLEES: ReadonlySet<string> = new Set([
  * `cyan` is terminal colouring around operator prose. `overlapGate` is the
  * DECLARATION factory in `cli-feature-gates.ts` — its argument is a registry row,
  * and counting it would let a gate declare its own read-site.
+ *
+ * `declaredIntDefault` (`repl/session-runtime-config.ts`) looks a key up in
+ * `CLI_KNOBS` to get its declared fallback. It reads the REGISTRY, never the env,
+ * and counting it would let the declaration file's own data act as a read-site —
+ * the same reason `overlapGate` is here. Each call sits beside an `intKnob` call
+ * for the same key, which is the real read and stays counted.
  */
-const NON_READ_CALLEES: ReadonlySet<string> = new Set(["cyan", "overlapGate"])
+const NON_READ_CALLEES: ReadonlySet<string> = new Set(["cyan", "declaredIntDefault", "overlapGate"])
 
 /** The declaration file itself, tests, and the `--help` renderer (which NAMES
  *  knobs as documentation) are not read-sites. */
@@ -213,7 +219,7 @@ describe("cli-knob read-site domain ratchet (ADR-0527)", () => {
     // Neither set may rot into the other, and neither may be emptied.
     for (const c of READ_CALLEES) expect(NON_READ_CALLEES.has(c)).toBe(false)
     expect(READ_CALLEES.size).toBe(9)
-    expect(NON_READ_CALLEES.size).toBe(2)
+    expect(NON_READ_CALLEES.size).toBe(3)
   })
 
   /**

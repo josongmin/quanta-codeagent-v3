@@ -459,3 +459,18 @@ merge 히스토리 · tmp 누수 burndown · shard 러너 · storage WAL)에 걸
 라쳇 초과분은 `jul-30-ratchet-burndown-classify-not-paper` 규칙상 항목별 구조
 분류가 필요하다(ceiling bump 금지). 별도 캠페인이며, 여기서 범위를 임의로
 넓히지 않았다.
+
+### G-10 G-9의 귀속이 틀렸다 — 12개 중 1개는 내 것이었다
+
+G-9는 "격리에서 재현되는 12개, 전부 내 것 아님"이라고 적었다. `src-no-sketchy-code`의
+위반 `apps/cli/repl/session-runtime-config.ts:153 idleMs: intKnob("QUANTA_IDLE_MS", 60_000)`은
+내 커밋 `27d7735ef`가 만들었다. 그 전엔 `Number(env("QUANTA_IDLE_MS", "60000"))`로 숫자가
+문자열 안에 숨어 있어 magic-timeout 스캔에 안 걸렸고, 내가 fallback을 숫자로 바꾸면서
+드러났다. G-9는 bare-catch 라쳇만 파일 단위로 귀속하고 나머지 7개 파일은 "다른 레인"이라는
+추정으로 묶었다 — 그 추정이 틀린 사례다.
+
+수정은 ceiling/allowlist가 아니라 **이중 원천 제거**: 세 fallback(`QUANTA_IDLE_MS`,
+`QUANTA_SNOOZE_DEFAULT_MS`, `QUANTA_REJECT_LIMIT`)을 `CLI_KNOBS` 선언에서 파생한다.
+인라인 사본은 선언과 따로 바뀔 수 있었다. 행동 테스트
+`tests/unit/cli/session-runtime-int-defaults-declared-hellgate.test.ts`가 선언=실제값과
+env 우선(paired control)을 단정한다. 뮤턴트: 다른 값 사본 → 5/1, 선언 변경 → 6/0(파생이 따라감).
