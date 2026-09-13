@@ -35,13 +35,16 @@ import { createEvictionSpillPort } from "@/agent/tool-result-evict"
 import { defaultTools, type ToolContext, ToolRegistry, type ToolResult } from "@/tool"
 import {
   capToolOutput,
+  DEFAULT_SPILL_KEEP,
   SPILL_DIR_REFUSAL_KINDS,
   SPILL_DIR_REFUSAL_REASON,
 } from "@/tool/output-spill"
 import { scopedEnv } from "../_support/scoped-env"
 
 const VICTIM_NOTES = 80
-const KEEP = 50
+// Deliberately NOT DEFAULT_SPILL_KEEP (50): the paired control prunes to KEEP
+// only if the registry honours `QUANTA_TOOL_OUTPUT_SPILL_KEEP` via runtimeConfig.
+const KEEP = 30
 const env = scopedEnv(["QUANTA_TOOL_OUTPUT_MAX", "QUANTA_TOOL_OUTPUT_SPILL_KEEP"], {
   QUANTA_TOOL_OUTPUT_MAX: "200000",
   QUANTA_TOOL_OUTPUT_SPILL_KEEP: String(KEEP),
@@ -202,7 +205,12 @@ describe("NW-2 refused arms — a symlinked spill location is never written or p
 })
 
 describe("NW-2 paired controls — a real directory still spills and prunes", () => {
-  test("pre-existing real `.quanta/tool-output` with 80 files: spill written, pruned to keep=50", async () => {
+  test("static pin: KEEP differs from DEFAULT_SPILL_KEEP, so the control below discriminates the knob wire", () => {
+    expect(KEEP).not.toBe(DEFAULT_SPILL_KEEP)
+    expect(VICTIM_NOTES).toBeGreaterThan(DEFAULT_SPILL_KEEP)
+  })
+
+  test("pre-existing real `.quanta/tool-output` with 80 files: spill written, pruned to the knob's keep=30", async () => {
     const spillDir = join(repo, ".quanta", "tool-output")
     seedNotes(spillDir)
 

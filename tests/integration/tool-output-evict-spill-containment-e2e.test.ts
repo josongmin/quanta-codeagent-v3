@@ -4,7 +4,9 @@
  *
  * With `QUANTA_MICROCOMPACT=1` the loop's compaction wire builds the default
  * eviction spill port over `<cwd>/.quanta/tool-output` and persists every cleared
- * tool_result there, pruning the directory to keep=50 after each write. A cloned
+ * tool_result there, pruning the directory to `DEFAULT_SPILL_KEEP` after each
+ * write (the wire passes no `spillKeep`, so `QUANTA_TOOL_OUTPUT_SPILL_KEEP` does
+ * not reach this port today). A cloned
  * repo controls `<cwd>/.quanta`, so a symlinked `.quanta/tool-output` (or
  * `.quanta`) used to turn each eviction into an out-of-repo write plus `*.txt`
  * deletion in the symlink's target.
@@ -13,7 +15,7 @@
  * scratch repo. Refused arms: the victim stays at exactly 80 files and 0 foreign
  * entries, and every cleared block tells the model the original was not
  * persisted and why. Paired control: a real directory still receives one spill
- * file per cleared block and is pruned to keep=50.
+ * file per cleared block and is pruned to `DEFAULT_SPILL_KEEP`.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
@@ -36,10 +38,14 @@ import type { LLMPort, Message, StreamEvent, StreamInput, ToolResultBlock } from
 import type { PermissionContext } from "@/permission"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { defaultTools, ToolRegistry } from "@/tool"
+import { DEFAULT_SPILL_KEEP } from "@/tool/output-spill"
 import { scopedEnv } from "../_support/scoped-env"
 
 const VICTIM_NOTES = 80
-const KEEP = 50
+// QUANTA_TOOL_OUTPUT_SPILL_KEEP is held UNSET, not pinned: the compaction wire
+// builds the port without `spillKeep`, so the knob does not reach eviction and a
+// pinned value here would claim a wire that does not exist. Unset also keeps the
+// control hermetic against a developer shell that exports the knob.
 const env = scopedEnv(
   [
     "QUANTA_MICROCOMPACT",
@@ -51,7 +57,6 @@ const env = scopedEnv(
     QUANTA_MICROCOMPACT: "1",
     QUANTA_MICROCOMPACT_FLOOR_TOKENS: "100",
     QUANTA_MICROCOMPACT_INTERVAL_MS: "1",
-    QUANTA_TOOL_OUTPUT_SPILL_KEEP: String(KEEP),
   },
 )
 
@@ -235,7 +240,7 @@ describe.skipIf(IS_ROOT)("NW-2 eviction spill — an unwritable working director
 })
 
 describe("NW-2 eviction spill — paired control", () => {
-  test("real `.quanta/tool-output` with 80 files: one spill per cleared block, pruned to keep=50", async () => {
+  test("real `.quanta/tool-output` with 80 files: one spill per cleared block, pruned to DEFAULT_SPILL_KEEP", async () => {
     const spillDir = join(repo, ".quanta", "tool-output")
     seedNotes(spillDir)
 
@@ -243,9 +248,9 @@ describe("NW-2 eviction spill — paired control", () => {
 
     expect(cleared.length).toBeGreaterThan(0)
     const after = census(spillDir)
-    expect(after.entries).toHaveLength(KEEP)
+    expect(after.entries).toHaveLength(DEFAULT_SPILL_KEEP)
     expect(after.foreign).toHaveLength(cleared.length)
-    expect(after.intact).toBe(KEEP - cleared.length)
+    expect(after.intact).toBe(DEFAULT_SPILL_KEEP - cleared.length)
     for (const block of cleared) {
       const m = /<persisted-output path="([^"]+)" chars="\d+">/.exec(block.content)
       expect(m).not.toBeNull()

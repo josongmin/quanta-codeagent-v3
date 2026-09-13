@@ -16,8 +16,11 @@ import type { EvictionSpillPort } from "./types"
  * Default {@link EvictionSpillPort} — persist the evicted original to disk,
  * REUSING the existing `output-spill.ts` on-disk surface (§4.4): the same
  * `.quanta/tool-output/<uuid>.txt` file convention and the same
- * `pruneSpillDir(keep)` retention bound (`QUANTA_TOOL_OUTPUT_SPILL_KEEP`). No new
- * on-disk surface, no new retention knob.
+ * `pruneSpillDir(keep)` retention bound. No new on-disk surface, no new
+ * retention knob. The port never reads env or `runtimeConfig`: `keep` is the
+ * injected {@link DefaultEvictionSpillOptions.spillKeep}, else
+ * `DEFAULT_SPILL_KEEP`. `QUANTA_TOOL_OUTPUT_SPILL_KEEP` reaches it only if the
+ * composition root passes `cfg.toolOutputSpillKeep` as `spillKeep`.
  *
  * Unlike `capToolOutput` (which substitutes an 8k-head/4k-tail EXCERPT marker —
  * fine for a one-shot capture cap, but it would keep ~12k of the original and
@@ -47,7 +50,9 @@ export interface DefaultEvictionSpillOptions {
   /** Generate the spill file name (sans dir). Injected for deterministic tests;
    *  defaults to a random uuid (read at call time, not module load). */
   readonly fileName?: () => string
-  /** Max retained spill files (reuses `QUANTA_TOOL_OUTPUT_SPILL_KEEP`). */
+  /** Max retained spill files, resolved by `resolveSpillKeep`; omitted ⇒
+   *  `DEFAULT_SPILL_KEEP`. Supplied by the composition root, never read from env
+   *  here. */
   readonly spillKeep?: number
   /** Injected fs surface for the post-write GC prune (tests). */
   readonly spillFs?: SpillFsOps
@@ -59,10 +64,10 @@ const defaultWrite = (path: string, data: string): void => {
 
 /** Compact one-line retrieval marker (the cleared block's ref suffix). The
  *  best-effort caveat is LOAD-BEARING copy: the spill file is bounded by the
- *  shared `pruneSpillDir(keep)` retention (`QUANTA_TOOL_OUTPUT_SPILL_KEEP`), so a
- *  later eviction can GC this file before the model reads it. Telling the model
- *  the read is best-effort (may be gone) stops it treating a failed `Read` of a
- *  reclaimed path as a hard error. */
+ *  shared `pruneSpillDir(keep)` retention (the injected `spillKeep`), so a later
+ *  eviction or registry spill can GC this file before the model reads it.
+ *  Telling the model the read is best-effort (may be gone) stops it treating a
+ *  failed `Read` of a reclaimed path as a hard error. */
 const refMarker = (path: string, originalChars: number): string =>
   `<persisted-output path="${path}" chars="${originalChars}">` +
   ` full original tool output persisted to disk; Read that file to see it ` +
