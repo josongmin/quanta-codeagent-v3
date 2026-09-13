@@ -29,6 +29,23 @@
  * roots, an injected `{}` env bag, a `homeDir` seam the test did not use, and node-repl's
  * state store hard-coding the OS home. After those: 49 of 49 wrote nothing there.
  *
+ * ## The process must look like a FRESH operator, not a half-relocated one
+ *
+ * The first version fenced the Quanta roots and left `HOME` alone. That is the exact
+ * shape of an operator midway through relocating their home: the memory factory's
+ * pre-relocation probe reads `<env.HOME>/.quanta/memory/memory.sqlite` IN PLACE when
+ * the relocated home has no store. So on a machine with a real store, an ordinary test
+ * opened and migrated the developer's store (round-8 audit, reproduced: sha changed,
+ * journal switched to WAL, 11 columns added) — and the 49-file measurement missed it
+ * because every probe HOME there was empty. `tests/_support/hermetic-quanta-home.ts`
+ * already pinned HOME for injected bags for this reason; the preload did not.
+ *
+ * So the fence mirrors the shard runner's worker layout (`run-test-shards.ts`):
+ * `HOME=<root>/home`, `QUANTA_HOME=<root>/home/.quanta`, `QUANTA_PREFS_HOME=<root>/prefs-home`.
+ * `os.homedir()` still answers the startup HOME inside this process (Bun ignores the
+ * later assignment); code that reads the env — the probe, and every child process —
+ * sees the scratch one.
+ *
  * ## The rule keys on WHERE a value points, not whether it is set
  *
  * An operator who exports `QUANTA_CONFIG_DIR` or `QUANTA_BENCH_HOME` for their own work
@@ -38,8 +55,15 @@
  *   - `QUANTA_CONFIG_DIR`, `QUANTA_BENCH_HOME`: removed unless they point at scratch.
  *     They outrank `QUANTA_HOME`, so leaving an ambient one would defeat the fence; and
  *     setting them here would outrank what an individual test sets.
- *   - `QUANTA_HOME`, `QUANTA_PREFS_HOME`: kept if they already point at scratch (the
- *     sharded runner's workers set them), otherwise pointed at this process's scratch.
+ *   - `HOME`, `QUANTA_HOME`, `QUANTA_PREFS_HOME`: kept if they already point at scratch
+ *     (a shard worker, or a nested `bun test` inheriting this fence), otherwise pointed
+ *     at this process's scratch, with `QUANTA_HOME` under the (possibly kept) `HOME`.
+ *
+ * "Scratch" is under a temp root: this process's `tmpdir()`, `/tmp`, `/var/tmp` (and
+ * their macOS `/private` forms), and the macOS per-user temp root `/var/folders/<a>/<b>/T`
+ * when `tmpdir()` lives under it. The last one is what keeps a shard worker's homes: the
+ * worker's own `TMPDIR` is `<root>/tmp`, a sibling of `<root>/home`, so matching only
+ * `tmpdir()` threw the worker's roots away (round-8 audit).
  *
  * Blank counts as unset, because every resolver reads blank as absent.
  */
@@ -49,7 +73,7 @@ export interface QuantaHomeFenceInput {
   readonly env: Readonly<Record<string, string | undefined>>
   /** This process's scratch root. */
   readonly scratchRoot: string
-  /** Roots that count as scratch (the OS temp dirs, canonical and aliased). */
+  /** Roots that count as scratch (see {@link scratchPrefixesFor}). */
   readonly scratchPrefixes: readonly string[]
 }
 
@@ -69,32 +93,59 @@ const isScratch = (value: string, prefixes: readonly string[]): boolean => {
 const present = (v: string | undefined): v is string => v !== undefined && v.trim() !== ""
 
 export const OUTRANKING_ROOTS = ["QUANTA_CONFIG_DIR", "QUANTA_BENCH_HOME"] as const
-export const FENCED_ROOTS = { QUANTA_HOME: "quanta-home", QUANTA_PREFS_HOME: "prefs-home" } as const
+export const FENCED_ROOTS = ["HOME", "QUANTA_HOME", "QUANTA_PREFS_HOME"] as const
 
 export const decideQuantaHomeFence = (input: QuantaHomeFenceInput): QuantaHomeFenceDecision => {
+  const scratch = (v: string | undefined): v is string =>
+    present(v) && isScratch(v, input.scratchPrefixes)
   const unset: string[] = []
   for (const key of OUTRANKING_ROOTS) {
     const v = input.env[key]
     if (v === undefined) continue
-    if (!present(v) || !isScratch(v, input.scratchPrefixes)) unset.push(key)
+    if (!scratch(v)) unset.push(key)
   }
   const set: Record<string, string> = {}
-  for (const [key, leaf] of Object.entries(FENCED_ROOTS)) {
-    const v = input.env[key]
-    if (present(v) && isScratch(v, input.scratchPrefixes)) continue
-    set[key] = join(input.scratchRoot, leaf)
+  const envHome = input.env.HOME
+  const home = scratch(envHome) ? envHome : join(input.scratchRoot, "home")
+  if (home !== envHome) set.HOME = home
+  if (!scratch(input.env.QUANTA_HOME)) set.QUANTA_HOME = join(home, ".quanta")
+  if (!scratch(input.env.QUANTA_PREFS_HOME)) {
+    set.QUANTA_PREFS_HOME = join(input.scratchRoot, "prefs-home")
   }
   return { set, unset }
 }
 
+/** The macOS per-user temp root (`confstr(_CS_DARWIN_USER_TEMP_DIR)`) that `osTmp` sits
+ *  under, in its `/var` spelling, or undefined. */
+const darwinUserTempRoot = (osTmp: string): string | undefined => {
+  const m = /^(?:\/private)?(\/var\/folders\/[^/]+\/[^/]+\/T)(?:\/|$)/.exec(resolve(osTmp))
+  return m?.[1]
+}
+
 /**
- * The temp roots that count as scratch on this host: the OS temp dir as given, its
- * macOS canonical form (`/var/folders/…` is `/private/var/folders/…`), and `/tmp` with
- * its canonical `/private/tmp`.
+ * The temp roots that count as scratch on this host: the OS temp dir as given (and its
+ * macOS `/private` twin), `/tmp`, `/var/tmp` (both spellings), and the per-user temp
+ * root `osTmp` lives under, if any.
  */
 export const scratchPrefixesFor = (osTmp: string): readonly string[] => {
-  const out = new Set<string>([osTmp, "/tmp", "/private/tmp"])
+  const out = new Set<string>([osTmp, "/tmp", "/private/tmp", "/var/tmp", "/private/var/tmp"])
   if (osTmp.startsWith("/var/")) out.add(`/private${osTmp}`)
   if (osTmp.startsWith("/private/var/")) out.add(osTmp.slice("/private".length))
+  const userTemp = darwinUserTempRoot(osTmp)
+  if (userTemp !== undefined) {
+    out.add(userTemp)
+    out.add(`/private${userTemp}`)
+  }
   return [...out]
 }
+
+/**
+ * Scratch roots left by test processes that no longer exist — a run killed by a
+ * watchdog or a signal never reaches the global `afterAll`. Pure: the caller supplies
+ * the directory listing and a liveness probe, and removes what this returns. A root
+ * named for a LIVE pid is never returned, whoever owns that pid now.
+ */
+export const staleScratchRoots = (
+  entries: readonly string[],
+  isAlive: (pid: number) => boolean,
+): readonly string[] => entries.filter((name) => /^[0-9]+$/.test(name) && !isAlive(Number(name)))

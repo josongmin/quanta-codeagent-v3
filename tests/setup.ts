@@ -1,6 +1,6 @@
 // Preloaded by bun test (see bunfig.toml). Keep global test setup here.
 import { afterAll, afterEach, beforeEach } from "bun:test"
-import { rmSync } from "node:fs"
+import { readdirSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 // The LEAF, not the runner: the runner reaches `@/agent/loop` and from there
@@ -16,7 +16,11 @@ import { quantaHomeDirFrom } from "@/shared/quanta-home"
 import { __resetRuntimeConfig } from "@/shared/runtime-config"
 import { setTerminalIo } from "@/shared/terminal-io"
 import { decideBenchResultsDir } from "./_support/bench-results-fence"
-import { decideQuantaHomeFence, scratchPrefixesFor } from "./_support/quanta-home-fence"
+import {
+  decideQuantaHomeFence,
+  scratchPrefixesFor,
+  staleScratchRoots,
+} from "./_support/quanta-home-fence"
 
 // FORCING FUNCTION (aug-22 incident): `writeReport`/`writeArtifacts` fan out to
 // `mirrorReportToSsot`, whose DEFAULT sink is the operator's LIVE
@@ -62,18 +66,41 @@ if (benchResultsFence.action === "redirect") {
   __resetRuntimeConfig()
 }
 
-// FENCE (sep-13): the Quanta home roots. Forty-nine test files wrote Quanta state into
-// the HOME the test process started with — on a normal run, the developer's. The policy
-// and the measurement live in `_support/quanta-home-fence.ts`; this applies it before any
-// test runs. The scratch root is per process, created lazily by whatever writes into it,
-// and removed by a GLOBAL `afterAll` so a run leaves nothing in TMPDIR.
+// FENCE (sep-13): HOME and the Quanta home roots. Forty-nine test files wrote Quanta state
+// into the HOME the test process started with — on a normal run, the developer's — and
+// with HOME left real, the memory probe opened the developer's existing store in place.
+// The policy and both measurements live in `_support/quanta-home-fence.ts`; this applies
+// it before any test runs. The scratch root is per process, created lazily by whatever
+// writes into it, and removed by a GLOBAL `afterAll` so a run leaves nothing in TMPDIR.
 //
 // Not `process.on("exit")`: measured on Bun 1.3.14, a preload's exit and beforeExit hooks
 // never fire under `bun test`, while its `afterAll` runs exactly once after the last file,
 // failing files included. The first version used the exit hook and left 99
 // `quanta-test-home/<pid>` roots behind in one afternoon.
 {
-  const scratchRoot = join(tmpdir(), "quanta-test-home", String(process.pid))
+  const scratchParent = join(tmpdir(), "quanta-test-home")
+  const scratchRoot = join(scratchParent, String(process.pid))
+  // A killed run never reaches `afterAll`. Remove roots whose process is gone, and our own
+  // pid's root — a previous owner of this pid cannot still be using it.
+  const isAlive = (pid: number): boolean => {
+    try {
+      process.kill(pid, 0)
+      return true
+    } catch (e) {
+      // EPERM: the pid exists and belongs to someone else — alive, leave it.
+      return (e as NodeJS.ErrnoException).code === "EPERM"
+    }
+  }
+  let entries: string[] = []
+  try {
+    entries = readdirSync(scratchParent)
+  } catch {
+    // No parent yet: nothing to sweep.
+  }
+  for (const stale of staleScratchRoots(entries, isAlive)) {
+    rmSync(join(scratchParent, stale), { recursive: true, force: true })
+  }
+  rmSync(scratchRoot, { recursive: true, force: true })
   const fence = decideQuantaHomeFence({
     env: process.env,
     scratchRoot,
