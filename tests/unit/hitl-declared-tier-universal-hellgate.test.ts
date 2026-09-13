@@ -360,6 +360,15 @@ describe("HITL — the assembled registry agrees with the declarations", () => {
       (p) => p.readOnly === "false" && classifiedMutatingKind(p.name) === null,
     ).map((p) => `${p.name} (${p.file}:${p.line})`)
     expect(writeCapableNull).toEqual([])
+    // …and the converse: a tool that SAYS read-only while its row says it mutates. Both plan
+    // layers and the policy key on `isReadOnly()`, so the row would be dead. The runtime
+    // parity gate checks both directions only for ASSEMBLED tools; a caller-wire ledger
+    // tool flipped to `isReadOnly: () => true` passed every gate (round-9 audit).
+    const readOnlyWithMutatingRow = POSTURES.filter((p) => {
+      const kind = classifiedMutatingKind(p.name)
+      return p.readOnly === "true" && kind !== null && kind !== undefined
+    }).map((p) => `${p.name} (${p.file}:${p.line}, row=${classifiedMutatingKind(p.name)})`)
+    expect(readOnlyWithMutatingRow).toEqual([])
     // Anti-vacuity: the arm must actually meet write-capable tools that HAVE a row.
     expect(
       POSTURES.filter((p) => p.readOnly === "false" && classifiedMutatingKind(p.name) !== undefined)

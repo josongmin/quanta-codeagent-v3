@@ -70,6 +70,75 @@ describe("tool-surface manifest — runtime parity with the assembled builders",
     ).toEqual([])
   })
 
+  /**
+   * "May only shrink" was a TITLE: nothing stopped a name from being ADDED. Round-9 audit:
+   * pointing `shadow_verify`'s manifest slot at nothing (so the fixture stopped minting it)
+   * and appending it to the ledger kept every generic gate green — one string edit that
+   * also removed it from the "row agrees with isReadOnly()" arm. The ledger is pinned by
+   * NAME here: a name that joins fails, and a name that leaves must leave this list too.
+   */
+  const LEDGER_PIN: readonly string[] = [
+    "ast_grep",
+    "browser_cdp",
+    "browser_click",
+    "browser_console",
+    "browser_drag",
+    "browser_element_bounds",
+    "browser_fill",
+    "browser_highlight",
+    "browser_mouse_click_xy",
+    "browser_navigate",
+    "browser_network",
+    "browser_press_key",
+    "browser_read",
+    "browser_screenshot",
+    "browser_scroll",
+    "browser_select_option",
+    "browser_snapshot",
+    "browser_tab_close",
+    "browser_tab_list",
+    "browser_tab_new",
+    "browser_tab_switch",
+    "browser_type",
+    "browser_wait",
+    "cancel_mcp_task",
+    "check_secrets",
+    "delegate",
+    "find_references",
+    "followup_task",
+    "fork_session",
+    "get_mcp_task",
+    "git_push",
+    "git_stage",
+    "list_mcp_tasks",
+    "memory_search",
+    "memory_update",
+    "memory_write",
+    "poll_deferred",
+    "report_agent_job_result",
+    "search_codebase",
+    "skill_create",
+    "subagent_await",
+    "subagent_force_background",
+    "subagent_fork",
+    "subagent_poll",
+    "update_working_state",
+    "web_search",
+  ]
+
+  test("no name JOINS the ledger, and a name that left it leaves the pin", () => {
+    const pin = new Set(LEDGER_PIN)
+    expect(
+      NOT_YET_ASSEMBLED.filter((n) => !pin.has(n)).sort(),
+      "joined the not-yet-assembled ledger — make its builder reachable instead",
+    ).toEqual([])
+    const ledger = new Set(NOT_YET_ASSEMBLED)
+    expect(
+      LEDGER_PIN.filter((n) => !ledger.has(n)),
+      "left the ledger — remove it from LEDGER_PIN as well",
+    ).toEqual([])
+  })
+
   test("the ledger may only shrink: a name the assembly now mints must leave it", () => {
     const nowAssembled = NOT_YET_ASSEMBLED.filter((n) => ASSEMBLED.has(n))
     expect(nowAssembled, "these are assembled now — remove them from NOT_YET_ASSEMBLED").toEqual([])
