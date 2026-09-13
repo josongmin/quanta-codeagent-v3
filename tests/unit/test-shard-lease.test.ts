@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test"
-import { mkdtempSync } from "node:fs"
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
@@ -19,11 +19,21 @@ import {
  * A scratch quarantine root for every acquisition here. Without it the lane read
  * — and, since the reader checks the root, could chmod — the developer's real
  * `/tmp/quanta-lease-quarantine-<uid>`, and a bad root on the host turned this
- * suite into timeouts.
+ * suite into timeouts. Made in `beforeAll`, not at module load, where the
+ * module-load effect guard refuses a temp directory.
  */
-const QUARANTINE_ENV = {
-  QUANTA_LEASE_QUARANTINE_DIR: mkdtempSync(join(tmpdir(), "shard-lease-quarantine-")),
-}
+const QUARANTINE_ENV: Record<string, string> = {}
+
+beforeAll(() => {
+  QUARANTINE_ENV.QUANTA_LEASE_QUARANTINE_DIR = mkdtempSync(
+    join(tmpdir(), "shard-lease-quarantine-"),
+  )
+})
+
+afterAll(() => {
+  const root = QUARANTINE_ENV.QUANTA_LEASE_QUARANTINE_DIR
+  if (root !== undefined) rmSync(root, { recursive: true, force: true })
+})
 
 describe("full-suite repository lease", () => {
   test("committed identity survives remote aliases, copies, and worktree paths", () => {

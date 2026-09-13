@@ -1127,22 +1127,50 @@ describe("quarantine slots", () => {
    */
   test("the default spawner hands the keeper its slot and does not hold the owner open", async () => {
     const dir = mkdtempSync(join(tmpdir(), "keeper-argv-"))
-    const argvOut = join(dir, "argv.json")
-    const release = join(dir, "release")
+    const socketPath = join(dir, "k.sock")
     const stub = join(dir, "stub-keeper.ts")
-    // The stub reports its pid and waits for `release`. It also gives up when its
-    // directory is gone: the first version waited for `release` only, and the
-    // `finally` wrote that file and removed the directory in the same tick — so
-    // every run left a stub polling forever. An audit found 18 of them.
+    // The stub reports over a unix socket and lives exactly as long as that
+    // connection. `release` on it ends the stub, and so does this process going
+    // away, which is what closes it. The first version polled a `release` file
+    // and was left polling forever when the arm's `finally` removed its directory
+    // — an audit found 18 stubs. The second polled from HERE with fixed sleeps,
+    // which the determinism ratchet refuses: the socket's `close` is the event.
     writeFileSync(
       stub,
       [
-        'import { existsSync, writeFileSync } from "node:fs"',
-        `writeFileSync(${JSON.stringify(argvOut)}, JSON.stringify({ argv: process.argv.slice(2), pid: process.pid }))`,
-        `while (!existsSync(${JSON.stringify(release)}) && existsSync(${JSON.stringify(dir)})) await Bun.sleep(20)`,
+        `const socket = await Bun.connect({`,
+        `  unix: ${JSON.stringify(socketPath)},`,
+        `  socket: {`,
+        `    data: (_socket, data) => { if (String(data).includes("release")) process.exit(0) },`,
+        `    close: () => process.exit(0),`,
+        `    error: () => process.exit(1),`,
+        `  },`,
+        `})`,
+        `socket.write(JSON.stringify({ argv: process.argv.slice(2), pid: process.pid }) + "\\n")`,
       ].join("\n"),
     )
     let stubPid: number | undefined
+    let peer: { write: (text: string) => number } | undefined
+    let received = ""
+    let onReport: (text: string) => void = () => {}
+    let onClose: () => void = () => {}
+    const report = new Promise<string>((resolve) => {
+      onReport = resolve
+    })
+    const closed = new Promise<void>((resolve) => {
+      onClose = resolve
+    })
+    const server = Bun.listen({
+      unix: socketPath,
+      socket: {
+        data: (socket, data) => {
+          peer = socket
+          received += String(data)
+          if (received.includes("\n")) onReport(received.trim())
+        },
+        close: () => onClose(),
+      },
+    })
     const root = join(dir, "root")
     const moduleUrl = join(import.meta.dir, "..", "..", "..", "tools", "dev", "lease-quarantine.ts")
     try {
@@ -1162,26 +1190,18 @@ describe("quarantine slots", () => {
         ],
         { stdout: "ignore", stderr: "pipe" },
       )
-      // The owner EXITS while the stub keeper is still waiting — without `unref`
+      // The owner EXITS while the stub keeper is still connected — without `unref`
       // this await would last as long as the keeper does.
       expect(await owner.exited).toBe(0)
-      for (let tries = 0; tries < 250 && !existsSync(argvOut); tries += 1) await Bun.sleep(20)
-      const reported = JSON.parse(readFileSync(argvOut, "utf8")) as { argv: string[]; pid: number }
+      const reported = JSON.parse(await report) as { argv: string[]; pid: number }
       stubPid = reported.pid
       expect(reported.argv).toEqual([laneQuarantinePath("acme/argv", root), "acme/argv"])
-      // The keeper this arm started is GONE when the arm ends.
-      writeFileSync(release, "")
-      const alive = (pid: number): boolean => {
-        try {
-          process.kill(pid, 0)
-          return true
-        } catch {
-          return false
-        }
-      }
-      for (let tries = 0; tries < 250 && alive(stubPid); tries += 1) await Bun.sleep(20)
-      expect(alive(stubPid)).toBe(false)
+      // The keeper this arm started is GONE when the arm ends: its connection
+      // closes only when it exits.
+      peer?.write("release\n")
+      await closed
     } finally {
+      server.stop(true)
       rmSync(dir, { recursive: true, force: true })
       if (stubPid !== undefined) {
         try {
