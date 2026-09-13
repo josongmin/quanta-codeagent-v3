@@ -1099,14 +1099,19 @@ describe("quarantine slots", () => {
     const argvOut = join(dir, "argv.json")
     const release = join(dir, "release")
     const stub = join(dir, "stub-keeper.ts")
+    // The stub reports its pid and waits for `release`. It also gives up when its
+    // directory is gone: the first version waited for `release` only, and the
+    // `finally` wrote that file and removed the directory in the same tick — so
+    // every run left a stub polling forever. An audit found 18 of them.
     writeFileSync(
       stub,
       [
         'import { existsSync, writeFileSync } from "node:fs"',
-        `writeFileSync(${JSON.stringify(argvOut)}, JSON.stringify(process.argv.slice(2)))`,
-        `while (!existsSync(${JSON.stringify(release)})) await Bun.sleep(20)`,
+        `writeFileSync(${JSON.stringify(argvOut)}, JSON.stringify({ argv: process.argv.slice(2), pid: process.pid }))`,
+        `while (!existsSync(${JSON.stringify(release)}) && existsSync(${JSON.stringify(dir)})) await Bun.sleep(20)`,
       ].join("\n"),
     )
+    let stubPid: number | undefined
     const root = join(dir, "root")
     const moduleUrl = join(import.meta.dir, "..", "..", "..", "tools", "dev", "lease-quarantine.ts")
     try {
@@ -1130,13 +1135,30 @@ describe("quarantine slots", () => {
       // this await would last as long as the keeper does.
       expect(await owner.exited).toBe(0)
       for (let tries = 0; tries < 250 && !existsSync(argvOut); tries += 1) await Bun.sleep(20)
-      expect(JSON.parse(readFileSync(argvOut, "utf8"))).toEqual([
-        laneQuarantinePath("acme/argv", root),
-        "acme/argv",
-      ])
-    } finally {
+      const reported = JSON.parse(readFileSync(argvOut, "utf8")) as { argv: string[]; pid: number }
+      stubPid = reported.pid
+      expect(reported.argv).toEqual([laneQuarantinePath("acme/argv", root), "acme/argv"])
+      // The keeper this arm started is GONE when the arm ends.
       writeFileSync(release, "")
+      const alive = (pid: number): boolean => {
+        try {
+          process.kill(pid, 0)
+          return true
+        } catch {
+          return false
+        }
+      }
+      for (let tries = 0; tries < 250 && alive(stubPid); tries += 1) await Bun.sleep(20)
+      expect(alive(stubPid)).toBe(false)
+    } finally {
       rmSync(dir, { recursive: true, force: true })
+      if (stubPid !== undefined) {
+        try {
+          process.kill(stubPid, "SIGKILL")
+        } catch {
+          // already exited, which is the expected path
+        }
+      }
     }
   }, 20_000)
 })
