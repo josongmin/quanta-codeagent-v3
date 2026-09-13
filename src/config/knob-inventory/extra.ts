@@ -49,7 +49,7 @@ export const EXTRA: readonly KnobDeclaration[] = [
     home: "runtime-config",
     describe:
       "container_exec tool gate — one-shot command execution over the container transport (the terminal surface's exec workhorse). Opt-in on cli/bench/web/ide/headless; default-ON on the terminal surface only.",
-    readSite: "tool/surface/gated-tools.ts",
+    readSite: "tool/surface/gated-tools-ports.ts",
   },
   // durable cross-session trust grants (CLI comp-root; opt-in, NOT default-seeded)
   {

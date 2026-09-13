@@ -66,8 +66,10 @@
  * (the MCP bridge) have no source literal at all. Those are unreachable for ANY
  * source-level instrument, which is why the manifest's completeness must also be
  * checked against the ASSEMBLED registry — see
- * `tests/unit/tool-surface-runtime-parity-hellgate.test.ts`. This census is the
- * cheap backstop, not the authority.
+ * `tests/unit/tool-surface-runtime-parity-hellgate.test.ts`. (Until sep-13 that file
+ * did not exist while this sentence named it; an audit followed the reference and
+ * found seven computed-name LSP tools uncatalogued.) This census is the cheap
+ * backstop, not the authority.
  */
 import { execFileSync } from "node:child_process"
 import { readFileSync } from "node:fs"
@@ -110,6 +112,7 @@ export const TOOL_SHAPE_KEYS: readonly string[] = [
 export const SSOT_FILES: readonly string[] = [
   "src/tool/surface/manifest.ts",
   "src/tool/surface/gated-tools.ts",
+  "src/tool/surface/gated-tools-ports.ts",
 ]
 
 const propKeyName = (p: ts.ObjectLiteralElementLike): string | undefined => {

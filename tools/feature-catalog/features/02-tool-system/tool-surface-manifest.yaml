@@ -39,12 +39,14 @@ evidence:
   code:
     - src/tool/surface/manifest.ts
     - src/tool/surface/gated-tools.ts
+    - src/tool/surface/gated-tools-ports.ts
     - src/apps/cli/cli-seeded-gates.ts
     - tools/dev/tool-name-literals.ts
   adrs: []
   tests:
     unit:
       - tests/unit/tool-surface-manifest-hellgate.test.ts
+      - tests/unit/tool-surface-runtime-parity-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

@@ -230,13 +230,18 @@ const rootedInCarrier = (node: ts.Expression, carriers: ReadonlySet<string>): bo
   return ts.isIdentifier(current) && carriers.has(current.text)
 }
 
+/** The manifest's row arrays. `PORT_GATED_TOOLS` joined `GATED_TOOLS` when the
+ *  `DefaultToolPorts`-gated rows were split into `gated-tools-ports.ts` to keep the data
+ *  file under the god-module line; its `env:` descriptors are the same declarations. */
+const MANIFEST_ROW_ARRAYS: ReadonlySet<string> = new Set(["GATED_TOOLS", "PORT_GATED_TOOLS"])
+
 const belongsToGatedTools = (node: ts.Node): boolean => {
   let current: ts.Node | undefined = node.parent
   while (current !== undefined) {
     if (
       ts.isVariableDeclaration(current) &&
       ts.isIdentifier(current.name) &&
-      current.name.text === "GATED_TOOLS"
+      MANIFEST_ROW_ARRAYS.has(current.name.text)
     ) {
       return true
     }

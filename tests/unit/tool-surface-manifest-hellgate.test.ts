@@ -42,11 +42,32 @@ import {
   TOOL_SHAPE_KEYS,
 } from "../../tools/dev/tool-name-literals"
 import { gatherYamlFiles, loadFeatures } from "../../tools/feature-catalog/schema"
+import { assembleToolUniverse } from "./_shared/assembled-tool-universe"
 import { assertScanPopulation } from "./_shared/scan-population"
 
 // Load the REAL feature catalog once (top-level await, mirrors the pattern in
 // feature-catalog-surface-integration.test.ts). Used by the manifest→catalog
 // completeness gate below.
+/**
+ * Tools whose `name` is COMPUTED, so the source census can never see their literal. Each
+ * must be minted by the assembled universe instead (`_shared/assembled-tool-universe.ts`).
+ * These seven are built by `positionTool` in `src/tool/lsp_nav/index.ts`; they sat
+ * uncatalogued until an audit followed a docstring to a runtime-parity gate that did not
+ * exist. Pinned exactly, so a stale row cannot hide in "the census cannot see it".
+ */
+const COMPUTED_NAME_TOOLS: ReadonlySet<string> = new Set([
+  "lsp_definition",
+  "lsp_hover",
+  "lsp_implementation",
+  "lsp_incoming_calls",
+  "lsp_outgoing_calls",
+  "lsp_rename_preview",
+  "lsp_type_definition",
+])
+const ASSEMBLED_NAMES: ReadonlySet<string> = new Set(
+  (await assembleToolUniverse()).tools.map((t) => t.name),
+)
+
 const CATALOG_DIR = join(import.meta.dir, "..", "..", "tools/feature-catalog/features")
 const CATALOG_YAMLS = await gatherYamlFiles(CATALOG_DIR)
 assertScanPopulation(CATALOG_YAMLS, CATALOG_DIR, {
@@ -359,7 +380,11 @@ describe("tool-surface manifest — FULL-universe completeness (the guard that w
     expect(extractToolNameLiterals("src/tool/surface/gated-tools.ts", `${row} }`)).toEqual([])
     // …and the path exclusion is still declared, so a future manifest that DOES
     // inline a tool-shaped literal is out by two independent mechanisms.
-    expect(SSOT_FILES).toEqual(["src/tool/surface/manifest.ts", "src/tool/surface/gated-tools.ts"])
+    expect(SSOT_FILES).toEqual([
+      "src/tool/surface/manifest.ts",
+      "src/tool/surface/gated-tools.ts",
+      "src/tool/surface/gated-tools-ports.ts",
+    ])
     for (const f of SSOT_FILES)
       expect(censusFiles(REPO_ROOT), `${f} is in the file list`).not.toContain(f)
   })
@@ -381,8 +406,13 @@ describe("tool-surface manifest — FULL-universe completeness (the guard that w
     // file, and the census is a backstop that may over-report a tool built in a
     // file the manifest groups elsewhere.
     const found = new Set(hits.map((h) => h.name))
-    for (const n of ALL_MANIFEST_TOOL_NAMES) {
-      expect(found.has(n), `${n} is catalogued but the census cannot see it`).toBe(true)
+    // Every catalogued name the census cannot see must be one the ASSEMBLED universe mints
+    // — a computed name the runtime-parity gate vouches for — and that set is pinned, so
+    // it cannot quietly absorb a stale row.
+    const invisible = ALL_MANIFEST_TOOL_NAMES.filter((n) => !found.has(n)).sort()
+    expect(invisible).toEqual([...COMPUTED_NAME_TOOLS].sort())
+    for (const n of invisible) {
+      expect(ASSEMBLED_NAMES.has(n), `${n} is invisible to the census AND not assembled`).toBe(true)
     }
   })
 
@@ -484,8 +514,13 @@ describe("tool-surface manifest — FULL-universe completeness (the guard that w
   })
 
   test("every manifest name is a real registered tool (no stale rows)", () => {
+    // A row is real if the source census finds its literal OR the assembled builders mint
+    // it. The second half exists for the seven LSP tools `positionTool` names at runtime;
+    // it is not a general escape — `COMPUTED_NAME_TOOLS` pins exactly which names use it.
     const found = scanRegisteredToolNames()
-    const stale = [...new Set(ALL_MANIFEST_TOOL_NAMES)].filter((n) => !found.has(n)).sort()
+    const stale = [...new Set(ALL_MANIFEST_TOOL_NAMES)]
+      .filter((n) => !found.has(n) && !(COMPUTED_NAME_TOOLS.has(n) && ASSEMBLED_NAMES.has(n)))
+      .sort()
     expect(stale).toEqual([])
   })
 
