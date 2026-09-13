@@ -15,7 +15,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { mkdtempSync, openSync, readFileSync, rmSync } from "node:fs"
+import { closeSync, mkdtempSync, openSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import ts from "typescript"
@@ -80,6 +80,49 @@ describe("a shard worker cannot be launched without the campaign receipt", () =>
     expect(() =>
       workerSpawnEnv(input({ capabilityEnv: { ...CAPABILITY_ENV, HOME: "/hijacked" } })),
     ).toThrow(/collide/)
+  })
+
+  test("the runner's OWN environment never supplies a receipt", () => {
+    // The all-or-nothing check looked only at the bag. With an empty bag, a stale
+    // receipt in the runner's env — measured: a path with NO binding — went
+    // straight through to the worker, which is the unbound receipt the check
+    // exists to refuse.
+    for (const stale of [
+      { ...CAPABILITY_ENV },
+      { [CAPABILITY_RECEIPT_PATH_ENV]: "/stale/receipt.json" },
+    ]) {
+      const env = workerSpawnEnv(input({ base: { PATH: "/usr/bin", ...stale }, capabilityEnv: {} }))
+      for (const key of [
+        CAPABILITY_RECEIPT_PATH_ENV,
+        CAPABILITY_RECEIPT_BINDING_ENV,
+        CAPABILITY_VERDICTS_ENV,
+      ]) {
+        expect({ stale: Object.keys(stale).length, key, value: env[key] }).toEqual({
+          stale: Object.keys(stale).length,
+          key,
+          value: undefined,
+        })
+      }
+    }
+  })
+
+  test("PRESENT means an own, non-empty string; nothing else rides in the bag", () => {
+    // Inherited through the prototype: `key in bag` counted it, the spread
+    // delivered nothing.
+    const inherited = Object.create({ ...CAPABILITY_ENV }) as Record<string, string>
+    expect(
+      workerSpawnEnv(input({ capabilityEnv: inherited }))[CAPABILITY_RECEIPT_PATH_ENV],
+    ).toBeUndefined()
+    // Own but empty.
+    expect(() =>
+      workerSpawnEnv(
+        input({ capabilityEnv: { ...CAPABILITY_ENV, [CAPABILITY_RECEIPT_BINDING_ENV]: "" } }),
+      ),
+    ).toThrow(/present but empty/)
+    // Anything that is not one of the three.
+    expect(() =>
+      workerSpawnEnv(input({ capabilityEnv: { ...CAPABILITY_ENV, QUANTA_SOMETHING_ELSE: "x" } })),
+    ).toThrow(/not a campaign capability variable/)
   })
 
   test("an EMPTY capability env is legal, because a partial one is not", () => {
@@ -193,9 +236,12 @@ describe("the runner really hands the receipt to the worker", () => {
     // the runner uses, so "the bag is right" becomes "a process got it". One
     // `bun -e` child, no campaign, no lease.
     const dir = mkdtempSync(join(tmpdir(), "spawn-proof-"))
+    const fds: number[] = []
     try {
       const outPath = join(dir, "out.json")
       const fd = openSync(outPath, "w")
+      // Closed in `finally`: it leaked one descriptor per execution, measured.
+      fds.push(fd)
       const registry = new ShardProcessRegistry()
       const handle = registry.spawnWorker({
         // `process.execPath`, not "bun": the fixture base deliberately carries a
@@ -225,6 +271,7 @@ describe("the runner really hands the receipt to the worker", () => {
       expect(seen.verdicts).toBe(CAPABILITY_ENV[CAPABILITY_VERDICTS_ENV])
       expect(seen.home).toBe(join(dir, "home"))
     } finally {
+      for (const fd of fds) closeSync(fd)
       rmSync(dir, { recursive: true, force: true })
     }
   }, 30_000)

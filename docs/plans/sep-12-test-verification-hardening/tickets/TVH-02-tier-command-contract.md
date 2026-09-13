@@ -37,6 +37,23 @@
 - `test:resilient`는 managed shard runner/tier/resource policy/cache/receipt를 모두 우회해 `bun test tests/unit tests/integration`를 직접 실행한다. 진단용 명령이 또 하나의 broad-suite execution authority가 됐다.
 - workflow parity normalizer는 `bun fc check-changed <anything>`을 전부 local admission으로 collapse하고 exemption은 기본 substring match다. `bun fc check-changed origin/main && bun run probe`와 `bun install --frozen-lockfile && bun run probe` 같은 compound command의 새 실행을 숨길 수 있다.
 - local `test:admission`은 implicit `origin/main`, PR CI는 actual base ref를 명시하지만 parity test가 차이를 지운다. non-main-base PR에서는 local prepush와 CI가 다른 commit range를 검사한다.
+- 후속(2026-09-14): 위 "진단만 고쳤다"는 불충분했다 — 감사가 그 메시지가 확인하지 않은
+  corpus 상태를 주장한다는 것과, 12개 narrow suite × tier 조합 **전부**가 거부된다는 것을
+  측정했다. 이제 `test-tier-population.json` v2가 suite별 floor를 가진다. floor는 고른 값이
+  아니라 부모 slack의 몫으로 **도출**되고(`minFiles = selected − floor(slack × selected /
+  parentSelected)`), 로더가 전부 재계산해 하나라도 다르면 거부한다. `core + integration`
+  selected 합이 universe와 같아야 하며, 반올림을 내리므로 두 floor 합은 universe floor 이상이
+  수학적으로 보장된다. 16개 조합 전부 `--discover-only`로 통과(`baf5e2e9f`, 2회 측정 동일):
+
+  | suite | prepush | pr | full | nightly |
+  |---|---|---|---|---|
+  | full (universe) | 3969 / 3900 | 3969 / 3900 | 3979 / 3900 | 3993 / 3900 |
+  | core | 3579 / 3517 | 3579 / 3517 | 3589 / 3518 | 3599 / 3516 |
+  | unit | 3254 / 3198 | 3254 / 3198 | 3264 / 3200 | 3273 / 3198 |
+  | integration | 390 / 384 | 390 / 384 | 390 / 383 | 394 / 385 |
+
+  (selected / floor). `--discover-only`도 이제 같은 floor를 적용하고, 캠페인은 lease·
+  capability probe 전에 선택한다.
 
 ## 목표 계약
 
