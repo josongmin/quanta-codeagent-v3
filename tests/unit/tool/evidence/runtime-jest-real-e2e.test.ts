@@ -26,7 +26,6 @@ import { buildEvidence } from "@/tool/evidence/builder"
 import { runToolchain, type Toolchain } from "@/tool/testrun"
 import { FIXTURE_INSTALL_TIMEOUT_MS } from "../../../../tools/dev/test-capability-manifest"
 import {
-  assertCapabilityNotBlocked,
   capabilityGate,
   hasBinary,
   laneDescribe,
@@ -55,11 +54,10 @@ const GATE = capabilityGate({
 
 let fixture: JsRunnerFixture | undefined
 
-const D = laneDescribe(GROUP, GATE)
+const D = laneDescribe(GATE)
 
 D("defaultRuntimePort — REAL jest (T-02: failure+static localize, runtime degrades)", () => {
   beforeAll(() => {
-    assertCapabilityNotBlocked({ group: GROUP, file: FILE }, GATE)
     // BOUNDED SETUP, not module load. A failed install throws `failed-setup`
     // from inside the helper — never a skip, because the capability was there.
     fixture = prepareJsRunnerFixture({

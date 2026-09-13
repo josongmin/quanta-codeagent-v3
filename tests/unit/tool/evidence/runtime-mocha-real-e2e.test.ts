@@ -20,7 +20,6 @@ import { buildEvidence } from "@/tool/evidence/builder"
 import { runToolchain, type Toolchain } from "@/tool/testrun"
 import { FIXTURE_INSTALL_TIMEOUT_MS } from "../../../../tools/dev/test-capability-manifest"
 import {
-  assertCapabilityNotBlocked,
   capabilityGate,
   hasBinary,
   laneDescribe,
@@ -51,11 +50,10 @@ const GATE = capabilityGate({
 
 let fixture: JsRunnerFixture | undefined
 
-const D = laneDescribe(GROUP, GATE)
+const D = laneDescribe(GATE)
 
 D("defaultRuntimePort — REAL mocha runner routing (T-02)", () => {
   beforeAll(() => {
-    assertCapabilityNotBlocked({ group: GROUP, file: FILE }, GATE)
     fixture = prepareJsRunnerFixture({
       runner: "mocha",
       group: GROUP,

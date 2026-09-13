@@ -34,6 +34,7 @@ import {
   countJunitExecution,
   describeCapabilityRecords,
 } from "../../../tools/dev/capability-result"
+import { CAPABILITY_GROUPS } from "../../../tools/dev/test-capability-manifest"
 import {
   requiredProducers,
   validateCapabilityResult,
@@ -361,6 +362,135 @@ describe("a receipt decision that did not execute is a RECORD the artifact count
   })
 })
 
+/** The text a call's object-literal argument gives `name`; a shorthand gives its own name. */
+const propertyText = (
+  call: ts.CallExpression | undefined,
+  name: string,
+  tree: ts.SourceFile,
+): string | undefined => {
+  const bag = call?.arguments[0]
+  if (bag === undefined || !ts.isObjectLiteralExpression(bag)) return undefined
+  const found = bag.properties.find((one) => one.name?.getText(tree) === name)
+  if (found === undefined) return undefined
+  if (ts.isShorthandPropertyAssignment(found)) return found.name.text
+  return ts.isPropertyAssignment(found) ? found.initializer.getText(tree) : undefined
+}
+
+describe("a lane gate that did not execute is a RECORD too", () => {
+  const GROUP = CAPABILITY_GROUPS[0]?.id ?? "<no groups>"
+  const LANE = join(REPO_ROOT, "tests", "_helpers", "capability-lane")
+
+  /** A real lane file with one absent need, run by a real `bun test` into junit. */
+  const runLane = (
+    env: Readonly<Record<string, string>>,
+  ): { readonly code: number; readonly out: string; readonly xml: string } => {
+    const dir = mkdtempSync(join(tmpdir(), "lane-record-"))
+    try {
+      const file = join(dir, "lane.test.ts")
+      writeFileSync(
+        file,
+        [
+          `import { test } from "bun:test"`,
+          `import { capabilityGate, laneDescribe } from ${JSON.stringify(LANE)}`,
+          // A need whose NAME spans two lines: its detail does too.
+          `const GATE = capabilityGate({ group: ${JSON.stringify(GROUP)}, file: "lane.test.ts", needs: { "tool\\nline-two": false } })`,
+          `laneDescribe(GATE)("the lane", () => {`,
+          `  test("case one", () => {})`,
+          `  test("case two", () => {})`,
+          `})`,
+          ``,
+        ].join("\n"),
+      )
+      const junitPath = join(dir, "junit.xml")
+      const inherited = Object.fromEntries(
+        Object.entries(process.env).filter(
+          (entry): entry is [string, string] =>
+            entry[1] !== undefined &&
+            !CAMPAIGN_CAPABILITY_ENV.includes(entry[0]) &&
+            entry[0] !== "QUANTA_REQUIRE_CAPABILITIES" &&
+            entry[0] !== "QUANTA_REAL_TOOLCHAIN_E2E",
+        ),
+      )
+      const run = Bun.spawnSync(
+        [process.execPath, "test", file, "--reporter=junit", `--reporter-outfile=${junitPath}`],
+        { cwd: REPO_ROOT, env: { ...inherited, ...env }, stdout: "pipe", stderr: "pipe" },
+      )
+      return {
+        code: run.exitCode ?? -1,
+        out: `${run.stdout.toString()}${run.stderr.toString()}`,
+        xml: existsSync(junitPath) ? readFileSync(junitPath, "utf8") : "",
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }
+
+  const tally = (xml: string) => {
+    const result = capabilityResultFromJunit({ producer: "toolchain", xml })
+    return {
+      executedCases: result.executedCases,
+      skipped: result.skippedUnsupported,
+      blocked: result.blockedMissing,
+      setup: result.failedSetup,
+    }
+  }
+
+  test("REQUIRED and blocked: one named failure, zero executed cases, blocked=1", () => {
+    // It threw from `beforeAll`, which Bun writes as `(unnamed)` with a failure:
+    // an audit reduced exactly that to `executedCases:1, blockedMissing:0` for a
+    // red job.
+    const run = runLane({ QUANTA_REAL_TOOLCHAIN_E2E: "1", QUANTA_REQUIRE_CAPABILITIES: GROUP })
+    expect(run.code).not.toBe(0)
+    expect(run.out).toContain(`[capability] REQUIRED group ${GROUP} is blocked-missing`)
+    expect(run.xml).not.toContain("(unnamed)")
+    expect(tally(run.xml)).toEqual({ executedCases: 0, skipped: 2, blocked: 1, setup: 0 })
+    expect(capabilityRecordsFromJunit(run.xml).map((row) => row.capability)).toEqual([
+      `group ${GROUP}`,
+    ])
+  }, 60_000)
+
+  test("PAIRED CONTROL — optional and blocked: green, and still the record, across a newline", () => {
+    // The detail names a need spanning two lines. Bun writes a newline in a test
+    // name as a leading `&#10;`, which hid the record's prefix (measured).
+    const run = runLane({ QUANTA_REAL_TOOLCHAIN_E2E: "1" })
+    expect(run.code).toBe(0)
+    expect(tally(run.xml)).toEqual({ executedCases: 0, skipped: 2, blocked: 1, setup: 0 })
+  }, 60_000)
+
+  test("an absence found inside a hook escalates only blocked-missing, and only when required", async () => {
+    const { assertCapabilityNotBlocked } = await import("../../_helpers/capability-lane")
+    const at = { group: GROUP, file: "lane.test.ts" }
+    const verdict = (outcome: "blocked-missing" | "skipped-unsupported") =>
+      ({ available: false, outcome, missing: ["tool"], detail: "absent" }) as const
+    expect(() =>
+      assertCapabilityNotBlocked(at, verdict("blocked-missing"), {
+        QUANTA_REQUIRE_CAPABILITIES: GROUP,
+      }),
+    ).toThrow(`[capability] REQUIRED group ${GROUP} is blocked-missing`)
+    // An unselected lane is a policy, not an absence, even under `=1`.
+    expect(() =>
+      assertCapabilityNotBlocked(at, verdict("skipped-unsupported"), {
+        QUANTA_REQUIRE_CAPABILITIES: "1",
+      }),
+    ).not.toThrow()
+    expect(() =>
+      assertCapabilityNotBlocked(at, verdict("blocked-missing"), {
+        QUANTA_REQUIRE_CAPABILITIES: "",
+      }),
+    ).not.toThrow()
+  })
+
+  test("PAIRED CONTROL — an unselected lane under `=1` is a skipped-unsupported record, not a red", () => {
+    const run = runLane({ QUANTA_REQUIRE_CAPABILITIES: "1" })
+    expect(run.code).toBe(0)
+    expect(run.out).not.toContain("REQUIRED group")
+    expect(tally(run.xml)).toEqual({ executedCases: 0, skipped: 2, blocked: 0, setup: 0 })
+    expect(capabilityRecordsFromJunit(run.xml)).toEqual([
+      expect.objectContaining({ capability: `group ${GROUP}`, verdict: "skipped-unsupported" }),
+    ])
+  }, 60_000)
+})
+
 describe("the shard runner reads the records a campaign produces", () => {
   const RUNNER = join(REPO_ROOT, "tools", "dev", "run-test-shards.ts")
 
@@ -401,6 +531,58 @@ describe("the shard runner reads the records a campaign produces", () => {
     const pass = source.indexOf("`[test:shards] PASS suite=")
     expect(summary).toBeGreaterThan(0)
     expect(pass).toBeGreaterThan(summary)
+
+    // ONE COLLECTOR. The pushes above land in `input.capabilityRecords`; that is
+    // only the printed array if the caller hands the printed array in. An audit
+    // replaced the argument with `[]` and every assertion above stayed green,
+    // with the campaign printing `blocked-missing=0` forever.
+    const all = <T extends ts.Node>(pick: (node: ts.Node) => node is T): T[] => {
+      const found: T[] = []
+      const visit = (node: ts.Node): void => {
+        if (pick(node)) found.push(node)
+        node.forEachChild(visit)
+      }
+      visit(tree)
+      return found
+    }
+    const calls = (name: string): ts.CallExpression[] =>
+      all(
+        (node): node is ts.CallExpression =>
+          ts.isCallExpression(node) && node.expression.getText(tree) === name,
+      )
+    const printed = calls("describeCapabilityRecords")
+    expect(printed).toHaveLength(1)
+    const collector = printed[0]?.arguments[0]
+    if (collector === undefined || !ts.isIdentifier(collector)) {
+      throw new Error("the printed records are not a named collector")
+    }
+    const declarations = all(
+      (node): node is ts.VariableDeclaration =>
+        ts.isVariableDeclaration(node) && node.name.getText(tree) === collector.text,
+    )
+    expect(declarations).toHaveLength(1)
+    const declared = declarations[0]
+    expect(declared?.initializer?.getText(tree)).toBe("[]")
+    expect(declared !== undefined && (declared.parent.flags & ts.NodeFlags.Const) !== 0).toBe(true)
+    // Handed, as that identifier, to the one execution call.
+    const [execution] = calls("executeChunksWithSourcePostflight")
+    const handedAs = propertyText(execution, "capabilityRecords", tree)
+    expect(handedAs).toBe(collector.text)
+    // And passed through unchanged to the function that pushes.
+    const [wrapper] = all(
+      (node): node is ts.VariableDeclaration =>
+        ts.isVariableDeclaration(node) &&
+        node.name.getText(tree) === "executeChunksWithSourcePostflight",
+    )
+    const forwarded =
+      wrapper === undefined
+        ? []
+        : calls("executeChunks").filter(
+            (call) => call.getStart(tree) >= wrapper.getStart(tree) && call.end <= wrapper.end,
+          )
+    expect(forwarded.map((call) => call.arguments.map((arg) => arg.getText(tree)))).toEqual([
+      ["input"],
+    ])
   })
 
   test("a receipt is a SNAPSHOT: a probe answering after it was minted cannot change it", () => {

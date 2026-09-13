@@ -13,13 +13,12 @@
  * the silent-degrade) ⇒ RED. AUTO-SKIPS without pyright (opt-in serial lane,
  * same gate as the rust-analyzer real e2e: QUANTA_REAL_TOOLCHAIN_E2E=1).
  */
-import { afterAll, beforeAll, expect, test } from "bun:test"
+import { afterAll, expect, test } from "bun:test"
 import { mkdtempSync, realpathSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { evidenceLspStatic } from "@/agent/lsp-bridge"
 import {
-  assertCapabilityNotBlocked,
   boundedVersion,
   capabilityGate,
   hasBinary,
@@ -41,7 +40,7 @@ const GATE = capabilityGate({
     python3: hasBinary("python3"),
   },
 })
-const D = laneDescribe(GROUP, GATE)
+const D = laneDescribe(GATE)
 
 /** A 2-file Python project: `main.py` imports + calls `helpers.compute`. The
  *  failure site is the call line — a real pyright must resolve `compute` there
@@ -65,7 +64,6 @@ const project = (): { dir: string; main: string; line: number } => {
 }
 
 D("evidenceLspStatic — PRODUCTION pyright port rooted at a sandbox (real server)", () => {
-  beforeAll(() => assertCapabilityNotBlocked({ group: GROUP, file: FILE }, GATE))
   afterAll(() =>
     reportExecuted(GATE, GROUP, FILE, "real pyright-langserver served a sandbox", () => ({
       pyrightVersion: boundedVersion(["pyright-langserver", "--version"]),

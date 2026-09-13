@@ -7,7 +7,7 @@
  *
  * AUTO-SKIPS without `bun` + `typescript-language-server`. Verified 2026-06-10.
  */
-import { afterAll, beforeAll, expect, test } from "bun:test"
+import { afterAll, expect, test } from "bun:test"
 import {
   existsSync,
   mkdirSync,
@@ -22,7 +22,6 @@ import { evidenceLspStatic } from "@/agent/lsp-bridge"
 import { buildEvidence } from "@/tool/evidence/builder"
 import { runToolchain, type Toolchain } from "@/tool/testrun"
 import {
-  assertCapabilityNotBlocked,
   boundedVersion,
   capabilityGate,
   hasBinary,
@@ -55,7 +54,7 @@ const GATE = capabilityGate({
     "typescript-language-server": hasBinary("typescript-language-server"),
   },
 })
-const D = laneDescribe(GROUP, GATE)
+const D = laneDescribe(GATE)
 
 const project = (): string => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "evnode-")))
@@ -86,7 +85,6 @@ const project = (): string => {
 }
 
 D("Evidence keystone — REAL bun test failure localizes + fuses tsserver static", () => {
-  beforeAll(() => assertCapabilityNotBlocked({ group: GROUP, file: FILE }, GATE))
   afterAll(() =>
     reportExecuted(GATE, GROUP, FILE, "real bun-test failure enriched by a real tsserver", () => ({
       bunVersion: boundedVersion(["bun", "--version"]),

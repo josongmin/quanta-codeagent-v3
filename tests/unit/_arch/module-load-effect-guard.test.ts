@@ -745,4 +745,114 @@ describe("capability vocabulary and ids do not drift", () => {
     // The explicit-env call is SEEN, just not counted as a campaign consumer.
     expect(capabilityCalls(input).filter((call) => !call.ambient)).toHaveLength(1)
   })
+
+  test("🔴 RED ON INJECTION: an env the scan cannot prove inert reads the campaign receipt", () => {
+    // A third audit ran each of these and got no problem and no callsite: only a
+    // literal `process.env` argument counted as ambient. Each carries the same
+    // receipt at runtime (`Bun.env === process.env` is true).
+    const lines = [
+      `import { capability } from "../../tools/dev/capability-receipt-consumer"`,
+      `const alias = process.env`,
+      `let reused = {}`,
+      `const reused2 = {}`,
+      `const viaBun = capability("id-bun", Bun.env)`,
+      `const viaAlias = capability("id-alias", alias)`,
+      `const viaSpread = capability("id-spread", { ...process.env })`,
+      `const viaValue = capability("id-value", { QUANTA_CAPABILITY_RECEIPT: process.env.QUANTA_CAPABILITY_RECEIPT })`,
+      `const PATH = "x"`,
+      `const viaShorthand = capability("id-shorthand", { PATH })`,
+      `const viaLet = capability("id-let", reused)`,
+      `const viaCast = capability("id-cast", (globalThis.process.env as Record<string, string>))`,
+      `test("inside", () => { capability("id-inside", Bun.env) })`,
+      ``,
+    ]
+    const input = { path: "tests/unit/ambient-shapes.test.ts", text: lines.join("\n") }
+    expect(capabilityCallsites(input).map((site) => site.capabilityId)).toEqual([
+      "id-bun",
+      "id-alias",
+      "id-spread",
+      "id-value",
+      "id-shorthand",
+      "id-let",
+      "id-cast",
+      "id-inside",
+    ])
+    const at = lines.findIndex((line) => line.includes("id-inside")) + 1
+    expect(capabilityCallProblems([input])).toEqual([
+      `${input.path}:${at} ambient-call-inside-a-function`,
+    ])
+    // PAIRED CONTROL: a name bound twice, once inert and once not, is not trusted;
+    // bound once to an inert literal, it is injected.
+    const control = [
+      `import { capability } from "../../tools/dev/capability-receipt-consumer"`,
+      `const KEY = "QUANTA_CAPABILITY_RECEIPT"`,
+      `const EMPTY: Readonly<Record<string, string>> = {}`,
+      `test("inert", () => {`,
+      `  const produced: Record<string, string> = {}`,
+      `  capability("git", EMPTY)`,
+      `  capability("git", { A: "1" })`,
+      `  capability("git", { [KEY]: produced[KEY] } satisfies Record<string, string | undefined>)`,
+      `})`,
+      ``,
+    ].join("\n")
+    const controlInput = { path: "tests/unit/inert-shapes.test.ts", text: control }
+    expect(capabilityCalls(controlInput).map((call) => call.ambient)).toEqual([false, false, false])
+    expect(capabilityCallProblems([controlInput])).toEqual([])
+  })
+
+  test("🔴 conditional means a BRANCH position, and a type or a declaration is not a use", () => {
+    // The standard selector put the call in a ternary's CONDITION, which always
+    // runs, and the scan called it conditional; an interface field named
+    // `capability` was an indirect use. Both were red on ordinary code.
+    const clean = [
+      `import { capability } from "../../tools/dev/capability-receipt-consumer"`,
+      `import * as consumer from "../../tools/dev/capability-receipt-consumer"`,
+      `const D = canExecute(capability("git")) ? describe : describe.skip`,
+      `const a = capability("git") ?? undefined`,
+      `const b = capability("git") && other`,
+      `if (capability("git").verdict === "executed") { run() }`,
+      `switch (capability("git").verdict) { default: }`,
+      `for (const row of [capability("git")]) { use(row) }`,
+      `const typed: consumer.CapabilityDecision = consumer.capability("git")`,
+      `type Asker = typeof capability`,
+      `type Decision = ReturnType<typeof consumer.capability>`,
+      `interface Row { readonly capability: string }`,
+      `const literal: { capability: string } = { capability: "x" }`,
+      `function named(capability: string) { return capability }`,
+      `const { capability: renamed } = { capability: 1 }`,
+      // Type-only: `implements` is erased, so naming the binding there is not a use.
+      `class Impl implements consumer.capability {}`,
+      ``,
+    ].join("\n")
+    expect(capabilityCallProblems([{ path: "tests/unit/clean.test.ts", text: clean }])).toEqual([])
+
+    const lines = [
+      `import { capability } from "../../tools/dev/capability-receipt-consumer"`,
+      `import * as consumer from "../../tools/dev/capability-receipt-consumer"`,
+      `const r1 = gate ?? capability("git")`,
+      `const r2 = gate && capability("git")`,
+      `const r3 = maybe?.wrap(capability("git"))`,
+      `const { r4 = capability("git") } = options`,
+      `while (again()) capability("git")`,
+      `for (let i = 0; i < 2; i++) capability("git")`,
+      `try { load() } catch { capability("git") }`,
+      `switch (mode) { case "a": capability("git") }`,
+      `gate ||= capability("git")`,
+      `const r5 = { alias: capability }`,
+      // Runtime: a class `extends` clause evaluates its expression.
+      `class Sub extends consumer.capability {}`,
+      ``,
+    ]
+    const input = { path: "tests/unit/branches.test.ts", text: lines.join("\n") }
+    const problems = capabilityCallProblems([input])
+    const line = (fragment: string): number => lines.findIndex((one) => one.includes(fragment)) + 1
+    const expected = [
+      ...["r1", "r2", "r3", "r4", "while", "for (let", "catch", "case", "||="].map(
+        (fragment) => `${input.path}:${line(fragment)} conditional-call`,
+      ),
+      `${input.path}:${line("r5")} indirect-use`,
+      `${input.path}:${line("Sub")} indirect-use`,
+    ].sort()
+    expect(problems).toEqual(expected)
+  })
 })

@@ -7,7 +7,7 @@
  *
  * AUTO-SKIPS without cargo + lldb-dap. Verified 2026-06-10.
  */
-import { afterAll, beforeAll, expect, test } from "bun:test"
+import { afterAll, expect, test } from "bun:test"
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -15,7 +15,6 @@ import { defaultRuntimePort } from "@/tool/evidence"
 import { buildEvidence } from "@/tool/evidence/builder"
 import { detectToolchain, runToolchain } from "@/tool/testrun"
 import {
-  assertCapabilityNotBlocked,
   boundedVersion,
   capabilityGate,
   hasBinary,
@@ -43,7 +42,7 @@ const GATE = capabilityGate({
   file: FILE,
   needs: { cargo: hasBinary("cargo"), "lldb-dap": hasLldbDap() },
 })
-const D = laneDescribe(GROUP, GATE)
+const D = laneDescribe(GATE)
 
 const LIB_RS = [
   "pub fn compute(n: i32) -> i32 { let mut t = 0; for i in 0..n { t += i; } t }",
@@ -60,7 +59,6 @@ const LIB_RS = [
 ].join("\n")
 
 D("defaultRuntimePort — REAL Rust runtime via lldb-dap (second runtime language)", () => {
-  beforeAll(() => assertCapabilityNotBlocked({ group: GROUP, file: FILE }, GATE))
   afterAll(() =>
     reportExecuted(GATE, GROUP, FILE, "real cargo test binary under lldb-dap", () => ({
       cargoVersion: boundedVersion(["cargo", "--version"]),

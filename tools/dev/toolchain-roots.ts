@@ -27,7 +27,7 @@
  *
  * Python's user site (`~/Library/Python/X.Y` on macOS) is NOT lent: it is under
  * `~/Library`, which only browser workers are lent on purpose, and a receipt says
- * when a package is hidden this way (`AVAILABLE under the real HOME`).
+ * when a package is hidden this way (`AVAILABLE under the caller's HOME`).
  *
  * Every place that replaces HOME lends through here — the fence, the shard
  * runner's worker and probe homes, the lane wrapper's home — so a probe and the

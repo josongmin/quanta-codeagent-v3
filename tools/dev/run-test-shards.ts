@@ -21,6 +21,11 @@ import {
   mergeRequiredCapabilities,
 } from "./capability-receipt"
 import {
+  capabilityReceiptDirectory,
+  capabilityReceiptPathFor,
+  sweepCapabilityReceipts,
+} from "./capability-receipt-files"
+import {
   type CapabilityRecordRow,
   capabilityRecordsFromJunit,
   describeCapabilityRecords,
@@ -1404,8 +1409,23 @@ const main = async (): Promise<void> => {
   // signal in that window must not find a half-built one — so "nothing to
   // commit" is a real state rather than a missing case.
   let openJournal: TimingJournal | undefined
-  /** Removed in `finally`. Per-process names meant every campaign left one behind. */
+  /** Per-process names meant every campaign that did not remove its own left one behind. */
   let capabilityReceiptPath: string | undefined
+  /**
+   * The receipt, then the lease — on BOTH exits that run code. The removal lived
+   * only in `finally`, which the signal path's `process.exit` skips, so every
+   * Ctrl-C left this campaign's receipt in the shared cache. Guarded, because a
+   * throwing removal must not keep the lane.
+   */
+  const releaseCampaign = (): void => {
+    try {
+      if (capabilityReceiptPath !== undefined) rmSync(capabilityReceiptPath, { force: true })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      process.stderr.write(`[test:shards] WARN capability receipt removal failed: ${message}\n`)
+    }
+    lease?.release()
+  }
   const onTerminationSignal = (signal: NodeJS.Signals): void => {
     if (terminating) return
     terminating = true
@@ -1451,7 +1471,7 @@ const main = async (): Promise<void> => {
           process.stderr.write(`[test:shards] WARN signal-path journal commit failed: ${message}\n`)
         }
       },
-      releaseLease: () => lease?.release(),
+      releaseLease: releaseCampaign,
       log: (line) => process.stderr.write(line),
     }).then((code) => process.exit(code))
   }
@@ -1515,6 +1535,17 @@ const main = async (): Promise<void> => {
     const probeHome = join(runRoot, "capability-probe-home")
     mkdirSync(join(probeHome, ".quanta"), { recursive: true })
     lendToolchainsInto(probeHome)
+    // What earlier campaigns could not remove: a SIGKILL runs no exit path. Swept
+    // while holding the lease, so no campaign of this lane is still reading one.
+    const swept = sweepCapabilityReceipts({
+      directory: capabilityReceiptDirectory(SHARED_CACHE_ROOT),
+      nowMs: Date.now(),
+    })
+    if (swept.length > 0) {
+      process.stdout.write(
+        `[test:shards] removed capability receipts nothing can read: ${swept.join(", ")}\n`,
+      )
+    }
     const capability = await capabilityReceiptEnvForCampaign({
       repoRoot: REPO_ROOT,
       tier: receiptTier,
@@ -1534,11 +1565,7 @@ const main = async (): Promise<void> => {
       // inherited lease or a stale QUANTA_VERIFICATION_LEASE_* in a shell makes
       // it reachable, and a unique name removes the class rather than arguing
       // about the window.
-      outPath: join(
-        SHARED_CACHE_ROOT,
-        "capability",
-        `${opts.suite}-${receiptTier}-${process.pid}.receipt.json`,
-      ),
+      outPath: capabilityReceiptPathFor(SHARED_CACHE_ROOT, `${opts.suite}-${receiptTier}`),
     })
     capabilityReceiptPath = capability.path
     process.stdout.write(
@@ -1732,8 +1759,7 @@ const main = async (): Promise<void> => {
         }
       }
     }
-    if (capabilityReceiptPath !== undefined) rmSync(capabilityReceiptPath, { force: true })
-    lease?.release()
+    releaseCampaign()
   }
 }
 

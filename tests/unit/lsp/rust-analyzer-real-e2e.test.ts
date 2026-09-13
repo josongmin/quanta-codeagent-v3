@@ -7,13 +7,12 @@
  * AUTO-SKIPS when rust-analyzer + cargo are absent (CI without the toolchain
  * stays green). Verified 2026-06-10 with rust-analyzer 1.95.0.
  */
-import { afterAll, beforeAll, expect, test } from "bun:test"
+import { afterAll, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { RustAnalyzerAdapter } from "@/lsp"
 import {
-  assertCapabilityNotBlocked,
   boundedVersion,
   capabilityGate,
   hasBinary,
@@ -31,7 +30,7 @@ const GATE = capabilityGate({
   file: FILE,
   needs: { "rust-analyzer": hasBinary("rust-analyzer"), cargo: hasBinary("cargo") },
 })
-const D = laneDescribe(GROUP, GATE)
+const D = laneDescribe(GATE)
 
 const MAIN_RS = [
   "fn add(a: i32, b: i32) -> i32 {", // line 0
@@ -98,7 +97,6 @@ const pollDefinition = async (
 }
 
 D("RustAnalyzerAdapter — REAL rust-analyzer LSP e2e", () => {
-  beforeAll(() => assertCapabilityNotBlocked({ group: GROUP, file: FILE }, GATE))
   afterAll(() =>
     reportExecuted(GATE, GROUP, FILE, "real rust-analyzer answered definition + hover", () => ({
       cargoVersion: boundedVersion(["cargo", "--version"]),

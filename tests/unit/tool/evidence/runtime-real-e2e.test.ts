@@ -9,7 +9,7 @@
  * `QUANTA_REAL_TOOLCHAIN_E2E` (`bun run test:real-toolchain`) — see the lane
  * note above the gates below. Verified 2026-06-10.
  */
-import { afterAll, beforeAll, expect, test } from "bun:test"
+import { afterAll, expect, test } from "bun:test"
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -17,7 +17,6 @@ import { defaultRuntimePort } from "@/tool/evidence"
 import { buildEvidence } from "@/tool/evidence/builder"
 import { detectToolchain, runToolchain } from "@/tool/testrun"
 import {
-  assertCapabilityNotBlocked,
   boundedVersion,
   capabilityGate,
   hasBinary,
@@ -50,7 +49,7 @@ const PY_GATE = capabilityGate({
   file: FILE,
   needs: { debugpy: laneOn && hasPythonModule("debugpy") },
 })
-const D = laneDescribe(GROUP, PY_GATE)
+const D = laneDescribe(PY_GATE)
 
 const buildSources = (_dir: string) => ({
   detect: (c: string) =>
@@ -74,7 +73,6 @@ const TEST_PY = [
 ].join("\n")
 
 D("defaultRuntimePort — REAL debugpy runtime capture in the evidence packet", () => {
-  beforeAll(() => assertCapabilityNotBlocked({ group: GROUP, file: FILE }, PY_GATE))
   afterAll(() =>
     reportExecuted(PY_GATE, GROUP, FILE, "real debugpy captured stack + locals", () => ({
       debugpyVersion: boundedVersion([
@@ -114,9 +112,8 @@ const RS_GATE = capabilityGate({
   file: FILE,
   needs: { cargo: hasBinary("cargo"), "lldb-dap": hasLldbDap() },
 })
-const DR = laneDescribe(GROUP, RS_GATE)
+const DR = laneDescribe(RS_GATE)
 DR("defaultRuntimePort — REAL Rust runtime capture (cargo + lldb-dap)", () => {
-  beforeAll(() => assertCapabilityNotBlocked({ group: GROUP, file: FILE }, RS_GATE))
   afterAll(() =>
     reportExecuted(RS_GATE, GROUP, FILE, "real cargo test binary under lldb-dap", () => ({
       cargoVersion: boundedVersion(["cargo", "--version"]),
@@ -171,9 +168,8 @@ const GO_GATE = capabilityGate({
   file: FILE,
   needs: { go: hasBinary("go"), dlv: dlvOk() },
 })
-const DG = laneDescribe(GROUP, GO_GATE)
+const DG = laneDescribe(GO_GATE)
 DG("defaultRuntimePort — REAL Go runtime capture (dlv dap over TCP)", () => {
-  beforeAll(() => assertCapabilityNotBlocked({ group: GROUP, file: FILE }, GO_GATE))
   afterAll(() =>
     reportExecuted(GO_GATE, GROUP, FILE, "real dlv dap captured a Go failure over TCP", () => ({
       goVersion: boundedVersion(["go", "version"]),

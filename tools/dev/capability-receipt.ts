@@ -98,20 +98,39 @@ export const CAPABILITY_LINE_PREFIX = "[capability]"
  * capability lanes, and the shard runner's campaign summary.
  */
 export const capabilityRecordName = (capability: string, verdict: string, detail: string): string =>
-  `${CAPABILITY_LINE_PREFIX} RECORD ${capability} ${verdict}: ${detail}`
+  // One line. MEASURED on Bun 1.3.14: a newline in a test name is written into
+  // the junit as `name="&#10;[capability] RECORD …"`, the record no longer starts
+  // with its prefix, and a `failed-setup` whose detail quoted a multi-line error
+  // was counted as an ordinary skip.
+  `${CAPABILITY_LINE_PREFIX} RECORD ${capability} ${verdict}: ${detail.replace(/\p{Cc}+/gu, " ")}`
+
+/**
+ * The subject a `*-real-e2e` lane GROUP is recorded under.
+ *
+ * `tests/_helpers/capability-lane.ts` decides groups, not receipt ids, and a
+ * group id never contains a space, so `group <id>` cannot be read as a receipt id.
+ * The two id spaces are also held disjoint by `module-load-effect-guard`.
+ */
+export const laneGroupSubject = (group: string): string => `group ${group}`
+
+/** A subject: a receipt id, or `group <id>` (`laneGroupSubject`). */
+const SUBJECT = "((?:group )?\\S+)"
 
 export const parseCapabilityRecordName = (
   name: string,
 ): { readonly capability: string; readonly verdict: string } | undefined => {
   const prefix = `${CAPABILITY_LINE_PREFIX} RECORD `
   if (!name.startsWith(prefix)) return undefined
-  const match = /^(\S+) ([a-z-]+): /u.exec(name.slice(prefix.length))
+  const match = new RegExp(`^${SUBJECT} ([a-z-]+): `, "u").exec(name.slice(prefix.length))
   return match?.[1] === undefined || match[2] === undefined
     ? undefined
     : { capability: match[1], verdict: match[2] }
 }
 
-/** The failing test a REQUIRED receipt capability registers (`capability-receipt-consumer`). */
+/**
+ * The failing test a REQUIRED capability registers: a receipt id
+ * (`capability-receipt-consumer`) or a lane group (`capability-lane`).
+ */
 export const capabilityRequiredFailureName = (capability: string, verdict: string): string =>
   `${CAPABILITY_LINE_PREFIX} REQUIRED ${capability} is ${verdict}`
 
@@ -130,7 +149,10 @@ export const contractRequiredFailureName = (dependency: string): string =>
 export const parseRequiredFailureName = (
   name: string,
 ): { readonly capability: string; readonly verdict: string } | undefined => {
-  const capabilityMatch = /^\[capability\] REQUIRED (\S+) is ([a-z-]+)$/u.exec(name)
+  const capabilityMatch = new RegExp(
+    `^\\[capability\\] REQUIRED ${SUBJECT} is ([a-z-]+)$`,
+    "u",
+  ).exec(name)
   if (capabilityMatch?.[1] !== undefined && capabilityMatch[2] !== undefined) {
     return { capability: capabilityMatch[1], verdict: capabilityMatch[2] }
   }

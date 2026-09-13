@@ -43,6 +43,11 @@ import {
   MAX_CAPABILITY_RECEIPT_TTL_MS,
   mergeRequiredCapabilities,
 } from "./capability-receipt"
+import {
+  capabilityReceiptDirectory,
+  capabilityReceiptPathFor,
+  sweepCapabilityReceipts,
+} from "./capability-receipt-files"
 import { lendToolchainRoots, toolchainLinks } from "./toolchain-roots"
 import { sharedVerificationCacheRoot } from "./verification-receipt"
 
@@ -61,6 +66,11 @@ export interface WithCapabilityReceiptInput {
   readonly signal?: AbortSignal
   /** The real home the probes compare against; injected by the arm. */
   readonly hostHome?: string
+  /**
+   * Where the receipt goes. Defaults to the clone's shared verification cache; an
+   * arm passes scratch, or it leaves its receipts where every campaign sweeps.
+   */
+  readonly cacheRoot?: string
 }
 
 export const runWithCapabilityReceipt = async (
@@ -70,11 +80,10 @@ export const runWithCapabilityReceipt = async (
   const head = Bun.spawnSync(["git", "rev-parse", "HEAD"], { cwd: repoRoot, timeout: 10_000 })
     .stdout.toString()
     .trim()
-  const outPath = join(
-    sharedVerificationCacheRoot(repoRoot),
-    "capability",
-    `${input.lane}-${process.pid}.receipt.json`,
-  )
+  const cacheRoot = input.cacheRoot ?? sharedVerificationCacheRoot(repoRoot)
+  // What a killed wrapper or campaign could not remove (`capability-receipt-files`).
+  sweepCapabilityReceipts({ directory: capabilityReceiptDirectory(cacheRoot), nowMs: Date.now() })
+  const outPath = capabilityReceiptPathFor(cacheRoot, input.lane)
   const root = mkdtempSync(join(tmpdir(), `capability-lane-${input.lane}-`))
   const home = join(root, "home")
   const quantaHome = join(home, ".quanta")

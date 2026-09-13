@@ -5,7 +5,7 @@
  * spawning `uv`. `bun run test:real-toolchain` sets the explicit enable flag
  * and selects this `*-real-e2e.test.ts` filename.
  */
-import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -15,7 +15,6 @@ import {
   materializeProjectEnvSourceShimFile,
 } from "@/runner/batch/corpus/project-env"
 import {
-  assertCapabilityNotBlocked,
   boundedVersion,
   capabilityGate,
   capabilityLaneSelected,
@@ -115,7 +114,6 @@ const uvEditableBuilds = (dir: string, extraArgv: readonly string[]): boolean =>
 }
 
 describe("project-env real-build materialization (explicit real-toolchain tier)", () => {
-  beforeAll(() => assertCapabilityNotBlocked({ group: GROUP, file: FILE }, GATE))
   afterAll(() => {
     if (!HAS_UV) return
     reportExecuted(GATE, GROUP, FILE, "real uv editable builds exercised", () => ({

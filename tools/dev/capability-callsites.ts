@@ -84,13 +84,67 @@ const consumerBindings = (source: ts.SourceFile): ConsumerBindings => {
   return { names, namespaces }
 }
 
+/** Every name a binding pattern introduces: `a`, `{ a, b: [c] }`. */
+const bindingNames = (name: ts.BindingName): readonly string[] =>
+  ts.isIdentifier(name)
+    ? [name.text]
+    : name.elements.flatMap((element) =>
+        ts.isOmittedExpression(element) ? [] : bindingNames(element.name),
+      )
+
+/** The names a scope node declares for its own body. */
+const declaredIn = (scope: ts.Node): readonly string[] => {
+  if (ts.isFunctionLike(scope)) {
+    const own = ts.isFunctionExpression(scope) && scope.name !== undefined ? [scope.name.text] : []
+    return [...own, ...scope.parameters.flatMap((parameter) => bindingNames(parameter.name))]
+  }
+  if (ts.isCatchClause(scope)) {
+    return scope.variableDeclaration === undefined
+      ? []
+      : bindingNames(scope.variableDeclaration.name)
+  }
+  if (ts.isForStatement(scope) || ts.isForOfStatement(scope) || ts.isForInStatement(scope)) {
+    const init = scope.initializer
+    return init !== undefined && ts.isVariableDeclarationList(init)
+      ? init.declarations.flatMap((declaration) => bindingNames(declaration.name))
+      : []
+  }
+  if (!ts.isBlock(scope) && !ts.isCaseBlock(scope)) return []
+  const statements = ts.isBlock(scope)
+    ? scope.statements
+    : scope.clauses.flatMap((clause) => [...clause.statements])
+  return statements.flatMap((statement) => {
+    if (ts.isVariableStatement(statement)) {
+      return statement.declarationList.declarations.flatMap((one) => bindingNames(one.name))
+    }
+    return (ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)) &&
+      statement.name !== undefined
+      ? [statement.name.text]
+      : []
+  })
+}
+
+/**
+ * Does a scope between `node` and the module declare `name` again? Then `node`
+ * names that local, not the import: `function f(capability: string) { capability }`.
+ */
+const shadowed = (node: ts.Node, name: string): boolean => {
+  for (let at = node.parent; at !== undefined && !ts.isSourceFile(at); at = at.parent) {
+    if (declaredIn(at).includes(name)) return true
+  }
+  return false
+}
+
 const callsConsumer = (node: ts.CallExpression, bindings: ConsumerBindings): boolean => {
   const callee = node.expression
-  if (ts.isIdentifier(callee)) return bindings.names.has(callee.text)
+  if (ts.isIdentifier(callee)) {
+    return bindings.names.has(callee.text) && !shadowed(callee, callee.text)
+  }
   return (
     ts.isPropertyAccessExpression(callee) &&
     ts.isIdentifier(callee.expression) &&
     bindings.namespaces.has(callee.expression.text) &&
+    !shadowed(callee, callee.expression.text) &&
     callee.name.text === "capability"
   )
 }
@@ -118,11 +172,49 @@ const insideFunction = (node: ts.Node): boolean => {
   return false
 }
 
-const isLogical = (node: ts.Node): boolean =>
-  ts.isBinaryExpression(node) &&
-  (node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken ||
-    node.operatorToken.kind === ts.SyntaxKind.BarBarToken ||
-    node.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken)
+const SHORT_CIRCUIT: ReadonlySet<ts.SyntaxKind> = new Set([
+  ts.SyntaxKind.AmpersandAmpersandToken,
+  ts.SyntaxKind.BarBarToken,
+  ts.SyntaxKind.QuestionQuestionToken,
+  ts.SyntaxKind.AmpersandAmpersandEqualsToken,
+  ts.SyntaxKind.BarBarEqualsToken,
+  ts.SyntaxKind.QuestionQuestionEqualsToken,
+])
+
+/**
+ * Does `parent` run `child` only on some paths, or more than once?
+ *
+ * By POSITION, not by ancestor kind. The first version flagged any ancestor
+ * ternary or `&&`, so `canExecute(capability("git")) ? describe : describe.skip`
+ * — the standard selector, where the call is the condition and always runs —
+ * was a `conditional-call`, and so was `capability("git") ?? fallback`.
+ */
+const runsConditionally = (child: ts.Node, parent: ts.Node): boolean =>
+  inStatementBranch(child, parent) || inExpressionBranch(child, parent)
+
+/** A branch or a loop body; the tested expression itself always runs once. */
+const inStatementBranch = (child: ts.Node, parent: ts.Node): boolean => {
+  if (ts.isIfStatement(parent) || ts.isSwitchStatement(parent)) return child !== parent.expression
+  if (ts.isForStatement(parent)) return child !== parent.initializer
+  if (ts.isForOfStatement(parent) || ts.isForInStatement(parent)) {
+    return child === parent.statement
+  }
+  return ts.isWhileStatement(parent) || ts.isDoStatement(parent) || ts.isCatchClause(parent)
+}
+
+const inExpressionBranch = (child: ts.Node, parent: ts.Node): boolean => {
+  if (ts.isConditionalExpression(parent)) return child !== parent.condition
+  if (ts.isBinaryExpression(parent)) {
+    return SHORT_CIRCUIT.has(parent.operatorToken.kind) && child === parent.right
+  }
+  // `a?.b(capability("x"))` and `a?.[capability("x")]`: skipped when `a` is nullish.
+  if (ts.isCallExpression(parent) || ts.isElementAccessExpression(parent)) {
+    return child !== parent.expression && (parent.flags & ts.NodeFlags.OptionalChain) !== 0
+  }
+  // A default: `const { a = capability("x") } = o`, `(x = capability("y")) => …`.
+  if (ts.isBindingElement(parent) || ts.isParameter(parent)) return child === parent.initializer
+  return ts.isShorthandPropertyAssignment(parent) && child === parent.objectAssignmentInitializer
+}
 
 /**
  * Under a branch or a loop. `const d = gate ? capability("git") : undefined` at
@@ -130,26 +222,103 @@ const isLogical = (node: ts.Node): boolean =>
  * short-circuit the requirement moved into `capability()` to avoid.
  */
 const underCondition = (node: ts.Node): boolean => {
-  for (let at = node.parent; at !== undefined && !ts.isSourceFile(at); at = at.parent) {
-    if (
-      ts.isConditionalExpression(at) ||
-      ts.isIfStatement(at) ||
-      ts.isSwitchStatement(at) ||
-      ts.isIterationStatement(at, false) ||
-      isLogical(at)
-    ) {
-      return true
-    }
+  for (let child = node, at = node.parent; at !== undefined; child = at, at = at.parent) {
+    if (runsConditionally(child, at)) return true
   }
   return false
 }
 
-const isProcessEnv = (node: ts.Node | undefined): boolean =>
-  node !== undefined &&
-  ts.isPropertyAccessExpression(node) &&
-  ts.isIdentifier(node.expression) &&
-  node.expression.text === "process" &&
-  node.name.text === "env"
+const unwrapExpression = (node: ts.Expression): ts.Expression => {
+  let at = node
+  while (
+    ts.isParenthesizedExpression(at) ||
+    ts.isAsExpression(at) ||
+    ts.isSatisfiesExpression(at) ||
+    ts.isTypeAssertionExpression(at) ||
+    ts.isNonNullExpression(at)
+  ) {
+    at = at.expression
+  }
+  return at
+}
+
+const AMBIENT_ROOTS: ReadonlySet<string> = new Set(["process", "Bun", "globalThis"])
+
+/**
+ * An object literal that cannot carry the campaign's receipt: no spread, no
+ * shorthand (a bare name is a value the scan cannot see), and no value naming
+ * `process`, `Bun` or `globalThis`.
+ */
+const isInertObjectLiteral = (node: ts.Expression): boolean => {
+  if (!ts.isObjectLiteralExpression(node)) return false
+  let inert = true
+  const visit = (at: ts.Node): void => {
+    if (ts.isSpreadAssignment(at) || ts.isShorthandPropertyAssignment(at)) inert = false
+    if (ts.isIdentifier(at) && AMBIENT_ROOTS.has(at.text)) inert = false
+    if (inert) at.forEachChild(visit)
+  }
+  node.forEachChild(visit)
+  return inert
+}
+
+/**
+ * Every binding of every variable name in the file: its initializer when it is an
+ * initialised `const`, otherwise `undefined` (a `let`, a `var`, no initializer).
+ */
+const variableBindings = (
+  source: ts.SourceFile,
+): ReadonlyMap<string, readonly (ts.Expression | undefined)[]> => {
+  const out = new Map<string, (ts.Expression | undefined)[]>()
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      ts.isVariableDeclarationList(node.parent)
+    ) {
+      const isConst = (node.parent.flags & ts.NodeFlags.Const) !== 0
+      const list = out.get(node.name.text) ?? []
+      list.push(isConst ? node.initializer : undefined)
+      out.set(node.name.text, list)
+    }
+    node.forEachChild(visit)
+  }
+  source.forEachChild(visit)
+  return out
+}
+
+/**
+ * Is the env argument one the CAMPAIGN receipt cannot be in?
+ *
+ * Inverted. The first rule called a call ambient only when its second argument
+ * was literally `process.env`, and treated everything else as the mechanism's own
+ * injected env. `Bun.env` is the same object, and an alias or a spread carries the
+ * same receipt — measured, each of `capability("x", Bun.env)`,
+ * `const env = process.env; capability("x", env)` and
+ * `capability("x", { ...process.env })` came back with no problem and no callsite.
+ *
+ * Now only what is provably inert is injected: an inert object literal, or a name
+ * whose EVERY binding in the file is a `const` initialised to one (a name match,
+ * not a scope resolution, so a second binding of the name must not be trusted).
+ * Anything the scan cannot prove — a call's result, a parameter, a property — is
+ * ambient.
+ */
+const isInjectedEnv = (
+  argument: ts.Expression,
+  bindings: ReadonlyMap<string, readonly (ts.Expression | undefined)[]>,
+): boolean => {
+  const bare = unwrapExpression(argument)
+  if (isInertObjectLiteral(bare)) return true
+  if (!ts.isIdentifier(bare)) return false
+  const bound = bindings.get(bare.text)
+  return (
+    bound !== undefined &&
+    bound.length > 0 &&
+    bound.every(
+      (initializer) =>
+        initializer !== undefined && isInertObjectLiteral(unwrapExpression(initializer)),
+    )
+  )
+}
 
 /**
  * Every way the consumer's `capability` escapes a direct call, which no call
@@ -170,22 +339,65 @@ const reachesModuleIndirectly = (node: ts.Node): boolean =>
     namesConsumerModule(node.arguments[0])) ||
   (ts.isExportDeclaration(node) && namesConsumerModule(node.moduleSpecifier))
 
-/** A NAME in a declaration or member position, which is not a use of the binding. */
+/** Written in a type, which is erased: `typeof capability`, `consumer.CapabilityDecision`. */
+const inTypePosition = (node: ts.Node): boolean => {
+  for (let at = node.parent; at !== undefined && !ts.isSourceFile(at); at = at.parent) {
+    // `class X extends consumer.Base` is a runtime reference; `implements` is not.
+    if (ts.isExpressionWithTypeArguments(at)) {
+      return !(
+        ts.isHeritageClause(at.parent) &&
+        at.parent.token === ts.SyntaxKind.ExtendsKeyword &&
+        ts.isClassLike(at.parent.parent)
+      )
+    }
+    if (ts.isTypeNode(at)) return true
+    if (ts.isStatement(at) || ts.isFunctionLike(at)) return false
+  }
+  return false
+}
+
+/** Declarations and members whose `name` is a name, not a use of a binding. */
+const NAMED_DECLARATION: readonly ((node: ts.Node) => boolean)[] = [
+  ts.isPropertyAccessExpression,
+  ts.isPropertyAssignment,
+  ts.isMethodDeclaration,
+  ts.isPropertyDeclaration,
+  ts.isPropertySignature,
+  ts.isMethodSignature,
+  ts.isGetAccessorDeclaration,
+  ts.isSetAccessorDeclaration,
+  ts.isEnumMember,
+  ts.isParameter,
+  ts.isBindingElement,
+  ts.isVariableDeclaration,
+  ts.isFunctionDeclaration,
+  ts.isClassDeclaration,
+  ts.isInterfaceDeclaration,
+  ts.isTypeAliasDeclaration,
+]
+
+/**
+ * A NAME in a declaration or member position, which is not a use of the binding.
+ *
+ * The first version knew six positions, so an interface field, a parameter, a
+ * destructured binding, a `for…of` variable or a type annotation mentioning
+ * `capability` was an `indirect-use` — a false red on ordinary code.
+ */
 const isNamePosition = (node: ts.Identifier): boolean => {
   const parent = node.parent
   return (
     ts.isImportSpecifier(parent) ||
     ts.isNamespaceImport(parent) ||
-    (ts.isPropertyAccessExpression(parent) && parent.name === node) ||
-    (ts.isPropertyAssignment(parent) && parent.name === node) ||
-    (ts.isMethodDeclaration(parent) && parent.name === node) ||
-    (ts.isPropertyDeclaration(parent) && parent.name === node)
+    inTypePosition(node) ||
+    (ts.isBindingElement(parent) && parent.propertyName === node) ||
+    (NAMED_DECLARATION.some((is) => is(parent)) &&
+      (parent as ts.Node & { readonly name?: ts.Node }).name === node)
   )
 }
 
 /** Any use of an imported binding other than calling it, or `ns.capability(…)`. */
 const isIndirectReference = (node: ts.Identifier, bindings: ConsumerBindings): boolean => {
-  if (isNamePosition(node)) return false
+  if (isNamePosition(node) || shadowed(node, node.text)) return false
   const parent = node.parent
   if (bindings.names.has(node.text)) {
     return !(ts.isCallExpression(parent) && parent.expression === node)
@@ -230,9 +442,9 @@ export interface CapabilityCall {
   /** `undefined` when the id cannot be read statically. */
   readonly capabilityId: string | undefined
   /**
-   * One argument: the call reads the AMBIENT receipt, `process.env`'s — the
-   * campaign's. A second argument is an explicit env, which is how the mechanism's
-   * own tests drive it, and such a call does not consume the campaign receipt.
+   * The call reads the campaign's receipt: one argument, or an env the scan cannot
+   * prove inert (`isInjectedEnv`). The mechanism's own tests inject an inert
+   * literal, and those calls do not consume the campaign receipt.
    */
   readonly ambient: boolean
   readonly moduleScope: boolean
@@ -255,6 +467,7 @@ export const capabilityCalls = (input: CapabilityCallsiteInput): readonly Capabi
   const bindings = consumerBindings(source)
   if (bindings.names.size === 0 && bindings.namespaces.size === 0) return []
   const constants = moduleStringConstants(source)
+  const variables = variableBindings(source)
   const out: CapabilityCall[] = []
   const visit = (node: ts.Node): void => {
     if (ts.isCallExpression(node) && callsConsumer(node, bindings)) {
@@ -263,9 +476,7 @@ export const capabilityCalls = (input: CapabilityCallsiteInput): readonly Capabi
         file: input.path,
         line: source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1,
         capabilityId,
-        // `capability(id, process.env)` reads the ambient receipt exactly like the
-        // one-argument form; only an injected env is the mechanism's own test.
-        ambient: node.arguments.length === 1 || isProcessEnv(node.arguments[1]),
+        ambient: node.arguments[1] === undefined || !isInjectedEnv(node.arguments[1], variables),
         moduleScope: !insideFunction(node),
         conditional: underCondition(node),
       })

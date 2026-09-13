@@ -4,7 +4,7 @@
  * static at the failure site. No fakes for the fused sources. AUTO-SKIPS when
  * cargo + rust-analyzer are absent. Verified 2026-06-10.
  */
-import { afterAll, beforeAll, expect, test } from "bun:test"
+import { afterAll, expect, test } from "bun:test"
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -12,7 +12,6 @@ import { evidenceLspStatic } from "@/agent/lsp-bridge"
 import { buildEvidence, type EvidenceSources } from "@/tool/evidence/builder"
 import { detectToolchain, runToolchain } from "@/tool/testrun"
 import {
-  assertCapabilityNotBlocked,
   boundedVersion,
   capabilityGate,
   hasBinary,
@@ -30,10 +29,9 @@ const GATE = capabilityGate({
   file: FILE,
   needs: { cargo: hasBinary("cargo"), "rust-analyzer": hasBinary("rust-analyzer") },
 })
-const D = laneDescribe(GROUP, GATE)
+const D = laneDescribe(GATE)
 
 D("buildEvidence — REAL keystone fusion (cargo failure + rust-analyzer static)", () => {
-  beforeAll(() => assertCapabilityNotBlocked({ group: GROUP, file: FILE }, GATE))
   afterAll(() =>
     reportExecuted(
       GATE,
