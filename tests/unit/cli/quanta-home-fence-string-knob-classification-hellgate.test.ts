@@ -34,7 +34,6 @@ describe("quanta-home fence — string knob classification", () => {
       "QUANTA_GITHUB_WEBHOOK_SECRETS_FILE",
       "QUANTA_HITL_OVERRIDES",
       "QUANTA_MANAGED_SETTINGS_PATH",
-      "QUANTA_MCP_CONFIG",
       "QUANTA_ORG_CONFIG_DIR",
       "QUANTA_PROFILES_DIR",
       "QUANTA_TRUSTED_PATHS",
@@ -230,7 +229,16 @@ describe("quanta-home fence — string knob classification", () => {
         "STATE_PATH_OVERRIDES in tests/_support/quanta-home-fence.ts; otherwise put it under " +
         "the kind that describes it here.",
     ).toEqual([])
-    const stale = [...classified.keys()].filter((k) => !stringKnobs.includes(k))
+    // Uncatalogued state paths are admitted only if the source still reads them.
+    const UNCATALOGUED_STATE_PATHS = ["QUANTA_OTEL_SINK"]
+    const srcReads = (key: string): boolean =>
+      Bun.spawnSync(["grep", "-rlF", key, "src"]).stdout.toString().trim() !== ""
+    for (const key of UNCATALOGUED_STATE_PATHS) {
+      expect(srcReads(key), `${key} is no longer read in src/`).toBe(true)
+    }
+    const stale = [...classified.keys()].filter(
+      (k) => !stringKnobs.includes(k) && !UNCATALOGUED_STATE_PATHS.includes(k),
+    )
     expect(stale, "classified names that are no longer string knobs").toEqual([])
   })
 })

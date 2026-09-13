@@ -8,6 +8,7 @@
  * actually applied the policy.
  */
 import { describe, expect, test } from "bun:test"
+import { execSync, spawnSync } from "node:child_process"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { benchHome } from "@/runner/batch/corpus/paths"
@@ -19,6 +20,7 @@ import {
   OUTRANKING_ROOTS,
   scratchPrefixesFor,
   staleScratchRoots,
+  withFencedEnv,
 } from "../../_support/quanta-home-fence"
 
 const SCRATCH = "/tmp/quanta-test-home/4242"
@@ -131,6 +133,52 @@ describe("quanta-home fence — per-subsystem state overrides", () => {
       QUANTA_BENCH_RECORD_TRAJECTORY: "0",
     })
     expect([...d.unset].sort()).toEqual(["QUANTA_MEMORY_PATH", "QUANTA_SESSIONS_DIR"])
+  })
+})
+
+describe("quanta-home fence — children inherit it", () => {
+  const ENV = { HOME: "/scratch/home" } as NodeJS.ProcessEnv
+
+  test("an omitted env becomes the fenced env, for every spawner signature", () => {
+    expect(withFencedEnv("bun", [["ls"]], ENV)).toEqual([["ls"], { env: ENV }])
+    expect(withFencedEnv("bun", [["ls"], { cwd: "/x" }], ENV)).toEqual([
+      ["ls"],
+      { cwd: "/x", env: ENV },
+    ])
+    expect(withFencedEnv("bun", [{ cmd: ["ls"] }], ENV)).toEqual([{ cmd: ["ls"], env: ENV }])
+    expect(withFencedEnv("file-args", ["git", ["status"]], ENV)).toEqual([
+      "git",
+      ["status"],
+      { env: ENV },
+    ])
+    expect(withFencedEnv("file-args", ["git", { cwd: "/x" }], ENV)).toEqual([
+      "git",
+      { cwd: "/x", env: ENV },
+    ])
+    const cb = () => {}
+    expect(withFencedEnv("file-args", ["git", ["s"], cb], ENV)).toEqual([
+      "git",
+      ["s"],
+      { env: ENV },
+      cb,
+    ])
+    expect(withFencedEnv("command", ["ls -la"], ENV)).toEqual(["ls -la", { env: ENV }])
+    expect(withFencedEnv("command", ["ls", cb], ENV)).toEqual(["ls", { env: ENV }, cb])
+  })
+
+  test("an explicit env is the caller's decision and is never replaced", () => {
+    const own = { PATH: "/bin" }
+    expect(withFencedEnv("bun", [["ls"], { env: own }], ENV)).toEqual([["ls"], { env: own }])
+    expect(withFencedEnv("command", ["ls", { env: own }], ENV)).toEqual(["ls", { env: own }])
+  })
+
+  test("CANARY: real children spawned with no env see this process's scratch HOME", () => {
+    const script = 'printf %s "$HOME"'
+    const home = process.env.HOME ?? "(unset)"
+    expect(Bun.spawnSync(["sh", "-c", script]).stdout.toString()).toBe(home)
+    expect(spawnSync("sh", ["-c", script], { encoding: "utf8" }).stdout).toBe(home)
+    expect(execSync(script).toString()).toBe(home)
+    expect(home.includes("quanta-test-home") || home.includes("/home"), home).toBe(true)
   })
 })
 

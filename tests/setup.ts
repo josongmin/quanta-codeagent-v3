@@ -1,6 +1,8 @@
 // Preloaded by bun test (see bunfig.toml). Keep global test setup here.
 import { afterAll, afterEach, beforeEach } from "bun:test"
+import childProcess from "node:child_process"
 import { readdirSync, rmSync } from "node:fs"
+import { syncBuiltinESMExports } from "node:module"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 // The LEAF, not the runner: the runner reaches `@/agent/loop` and from there
@@ -17,9 +19,11 @@ import { __resetRuntimeConfig } from "@/shared/runtime-config"
 import { setTerminalIo } from "@/shared/terminal-io"
 import { decideBenchResultsDir } from "./_support/bench-results-fence"
 import {
+  CHILD_PROCESS_SPAWNERS,
   decideQuantaHomeFence,
   scratchPrefixesFor,
   staleScratchRoots,
+  withFencedEnv,
 } from "./_support/quanta-home-fence"
 
 // FORCING FUNCTION (aug-22 incident): `writeReport`/`writeArtifacts` fan out to
@@ -60,6 +64,7 @@ const benchResultsFence = decideBenchResultsDir({
   configured: process.env.QUANTA_BENCH_RESULTS_DIR,
   liveSsotDir: join(quantaHomeDirFrom(process.env), "bench", "results"),
   fallbackDir: join(tmpdir(), "quanta-bench-test-results"),
+  scratchPrefixes: scratchPrefixesFor(tmpdir()),
 })
 if (benchResultsFence.action === "redirect") {
   process.env.QUANTA_BENCH_RESULTS_DIR = benchResultsFence.dir
@@ -112,6 +117,21 @@ if (benchResultsFence.action === "redirect") {
   afterAll(() => {
     rmSync(scratchRoot, { recursive: true, force: true })
   })
+  // Children: an omitted `env` means THIS process's (fenced) env. Bun otherwise hands a
+  // child the startup environment — the developer's HOME — whatever was assigned above.
+  // `syncBuiltinESMExports` makes named `node:child_process` imports see the wrappers.
+  const bun = Bun as unknown as Record<"spawn" | "spawnSync", (...a: unknown[]) => unknown>
+  for (const name of ["spawn", "spawnSync"] as const) {
+    const original = bun[name]
+    bun[name] = (...a: unknown[]) => original(...withFencedEnv("bun", a, process.env))
+  }
+  const cp = childProcess as unknown as Record<string, (...a: unknown[]) => unknown>
+  for (const [name, family] of Object.entries(CHILD_PROCESS_SPAWNERS)) {
+    const original = cp[name]
+    if (typeof original !== "function") continue
+    cp[name] = (...a: unknown[]) => original(...withFencedEnv(family, a, process.env))
+  }
+  syncBuiltinESMExports()
 }
 
 beforeEach(() => {

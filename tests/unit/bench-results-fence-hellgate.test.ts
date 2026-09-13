@@ -23,12 +23,18 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { decideBenchResultsDir } from "../_support/bench-results-fence"
+import { scratchPrefixesFor } from "../_support/quanta-home-fence"
 
 const LIVE = "/Users/dev/.quanta/bench/results"
 const FALLBACK = "/tmp/quanta-bench-test-results"
 
 const decide = (configured: string | undefined) =>
-  decideBenchResultsDir({ configured, liveSsotDir: LIVE, fallbackDir: FALLBACK })
+  decideBenchResultsDir({
+    configured,
+    liveSsotDir: LIVE,
+    fallbackDir: FALLBACK,
+    scratchPrefixes: scratchPrefixesFor("/var/folders/xy/T"),
+  })
 
 describe("bench-results fence — policy", () => {
   test("BYPASS 1 (historical): an unset variable is redirected, not accepted", () => {
@@ -61,9 +67,14 @@ describe("bench-results fence — policy", () => {
   test("PAIRED CONTROL — the fence is not a blanket override", () => {
     // A per-test directory is the normal, correct case and must survive intact.
     expect(decide("/tmp/my-test-run-42").action).toBe("accept")
-    // A path that merely SHARES A PREFIX with the corpus is a different directory.
-    expect(decide(`${LIVE}-archive`).action).toBe("accept")
-    expect(decide("/Users/dev/.quanta/bench/results-old").action).toBe("accept")
+    expect(decide("/var/folders/xy/T/run-7/results").action).toBe("accept")
+    // A path that merely SHARES A PREFIX with the corpus is a different directory — but it
+    // is a REAL one, so it is redirected too (round 9: an exported archive dir received
+    // test reports). The reason names why, so the redirect is never silent.
+    const archive = decide(`${LIVE}-archive`)
+    expect(archive.action).toBe("redirect")
+    expect(archive.action === "redirect" ? archive.reason : "").toContain("outside scratch")
+    expect(decide("/Users/dev/.quanta/bench/results-old").action).toBe("redirect")
     // The mirror-disabling sentinels must not be rewritten into a real directory,
     // which would silently re-enable mirroring for every test that turned it off.
     expect(decide("off").action).toBe("accept")

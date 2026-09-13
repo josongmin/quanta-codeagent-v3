@@ -41,10 +41,18 @@
  * nothing extra. Redirecting protects the corpus and keeps the suite runnable;
  * the reason is surfaced so the redirect is never silent.
  *
- * Every OTHER explicit value is honoured untouched — per-test dirs, and the
- * `off`/`0` sentinels that disable mirroring entirely.
+ * ## Every value outside scratch is redirected too (round 9)
+ *
+ * This fence used to honour every explicit value except the live corpus. An operator who
+ * exported an ARCHIVE dir (`~/.quanta/bench/results-archive`) had test reports written
+ * into it — measured, five `tmp__bench-art-*__report.json` files beside a real report
+ * (round-9 audit). The quanta-home fence already keys on "is it scratch", and the two
+ * fences now agree: a scratch path and the `off`/`0` sentinels are honoured; anything
+ * else is redirected. A per-test dir set INSIDE a test is unaffected (the preload decides
+ * once, before any test runs).
  */
 import { resolve } from "node:path"
+import { isScratch } from "./quanta-home-fence"
 
 /** `QUANTA_BENCH_RESULTS_DIR` values that disable the mirror outright. */
 const MIRROR_DISABLED_SENTINELS: readonly string[] = ["off", "0"]
@@ -62,6 +70,8 @@ export interface BenchResultsFenceInput {
   readonly liveSsotDir: string
   /** Where the suite's reports go instead. */
   readonly fallbackDir: string
+  /** Roots that count as scratch (`scratchPrefixesFor(tmpdir())`). */
+  readonly scratchPrefixes: readonly string[]
 }
 
 /**
@@ -106,5 +116,10 @@ export const decideBenchResultsDir = (input: BenchResultsFenceInput): BenchResul
     }
   }
 
-  return { action: "accept" }
+  if (isScratch(value, input.scratchPrefixes)) return { action: "accept" }
+  return {
+    action: "redirect",
+    dir: input.fallbackDir,
+    reason: `QUANTA_BENCH_RESULTS_DIR points outside scratch (${value}); test reports would land in a real directory`,
+  }
 }

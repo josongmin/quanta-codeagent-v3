@@ -43,8 +43,16 @@
  * So the fence mirrors the shard runner's worker layout (`run-test-shards.ts`):
  * `HOME=<root>/home`, `QUANTA_HOME=<root>/home/.quanta`, `QUANTA_PREFS_HOME=<root>/prefs-home`.
  * `os.homedir()` still answers the startup HOME inside this process (Bun ignores the
- * later assignment); code that reads the env — the probe, and every child process —
- * sees the scratch one.
+ * later assignment); code that reads the env sees the scratch one.
+ *
+ * ## Children
+ *
+ * A child spawned WITHOUT an `env` option does not see those assignments: Bun hands it the
+ * environment the process STARTED with (measured for `Bun.spawn*` and every
+ * `node:child_process` spawner). An earlier version of this doc said "every child
+ * process sees the scratch one"; that was false, and 260 test-side spawns pass no `env`
+ * (round-9 audit). So the preload also makes an omitted `env` mean `process.env` — see
+ * {@link withFencedEnv} — which is what "the fence" has to mean for a child.
  *
  * ## The rule keys on WHERE a value points, not whether it is set
  *
@@ -82,7 +90,7 @@ export interface QuantaHomeFenceDecision {
   readonly unset: readonly string[]
 }
 
-const isScratch = (value: string, prefixes: readonly string[]): boolean => {
+export const isScratch = (value: string, prefixes: readonly string[]): boolean => {
   const abs = resolve(value)
   return prefixes.some((p) => {
     const root = resolve(p)
@@ -106,6 +114,8 @@ export const OUTRANKING_ROOTS = ["QUANTA_CONFIG_DIR", "QUANTA_BENCH_HOME"] as co
  * `quanta-home-fence-hellgate`, so a new path knob cannot land unclassified.
  */
 export const STATE_PATH_OVERRIDES = [
+  "QUANTA_MCP_CONFIG", // the connector-install WRITE target (mcp-connector-wire), not only a read
+  "QUANTA_OTEL_SINK", // span sink destination; not in the knob catalogue (raw env read)
   "QUANTA_BENCH_AUTH_FILE",
   "QUANTA_BENCH_RECORD_TRAJECTORY",
   "QUANTA_BENCH_SINGLE_BOX_GUARD_DIR",
@@ -191,3 +201,48 @@ export const staleScratchRoots = (
   entries: readonly string[],
   isAlive: (pid: number) => boolean,
 ): readonly string[] => entries.filter((name) => /^[0-9]+$/.test(name) && !isAlive(Number(name)))
+
+/* ── children inherit the fenced environment ───────────────────────────────── */
+
+type Opts = Record<string, unknown>
+const isPlainOptions = (v: unknown): v is Opts =>
+  typeof v === "object" && v !== null && !Array.isArray(v)
+
+/** An options bag whose `env` is `process.env` when the caller named none. */
+const fencedOptions = (o: Opts | undefined, env: NodeJS.ProcessEnv): Opts =>
+  o !== undefined && o.env !== undefined ? o : { ...(o ?? {}), env }
+
+/**
+ * Normalise the arguments of one spawner call so an omitted `env` becomes `env`. Pure:
+ * returns new arguments, never mutates the caller's. Signatures, by family:
+ *  - `Bun.spawn(cmd[], opts?)`, `Bun.spawn({ cmd, … })` (and the Sync twins);
+ *  - `spawn|spawnSync|execFile|execFileSync|fork(file, args?, opts?, cb?)`;
+ *  - `exec|execSync(command, opts?, cb?)`.
+ */
+export const withFencedEnv = (
+  family: "bun" | "file-args" | "command",
+  args: readonly unknown[],
+  env: NodeJS.ProcessEnv,
+): unknown[] => {
+  const out = [...args]
+  if (family === "bun") {
+    if (isPlainOptions(out[0])) out[0] = fencedOptions(out[0], env)
+    else out[1] = fencedOptions(isPlainOptions(out[1]) ? out[1] : undefined, env)
+    return out
+  }
+  const at = family === "command" ? 1 : Array.isArray(out[1]) ? 2 : 1
+  if (isPlainOptions(out[at])) out[at] = fencedOptions(out[at], env)
+  else out.splice(at, 0, fencedOptions(undefined, env))
+  return out
+}
+
+/** The `node:child_process` spawners and the family each one's arguments belong to. */
+export const CHILD_PROCESS_SPAWNERS = {
+  spawn: "file-args",
+  spawnSync: "file-args",
+  execFile: "file-args",
+  execFileSync: "file-args",
+  fork: "file-args",
+  exec: "command",
+  execSync: "command",
+} as const
