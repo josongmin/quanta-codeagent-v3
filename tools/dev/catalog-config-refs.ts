@@ -487,44 +487,27 @@ const isConsumingStatement = (text: string, offset: number): boolean => {
  * comments: `{"msg": ":)", "X": "1"}` lost its key (a dead name backed), and one
  * dict of 8,000 names took 14.5 s against 14 ms (measured).
  */
-interface PythonTokenContext {
-  /** The innermost bracket open at the token. */
-  readonly open: string | undefined
-  /** The last character of CODE before it: comments, strings' insides and whitespace skipped. */
-  readonly previous: string | undefined
-}
-
-const pythonOpenBrackets = (text: string): ReadonlyMap<number, PythonTokenContext> => {
-  const state = { open: [] as string[], previous: undefined as string | undefined }
-  const at = new Map<number, PythonTokenContext>()
+const pythonOpenBrackets = (text: string): ReadonlyMap<number, string | undefined> => {
+  const open: string[] = []
+  const at = new Map<number, string | undefined>()
   for (let index = 0; index < text.length; ) {
     const character = text[index] ?? ""
-    if (character === '"' || character === "'") {
-      at.set(index, { open: state.open.at(-1), previous: state.previous })
-    }
-    index = pythonBracketStep(text, index, state)
+    if (character === '"' || character === "'") at.set(index, open.at(-1))
+    index = pythonBracketStep(text, index, open)
   }
   return at
 }
 
 /** One step of `pythonOpenBrackets`: skip a comment or a string, or track a bracket. */
-const pythonBracketStep = (
-  text: string,
-  index: number,
-  state: { readonly open: string[]; previous: string | undefined },
-): number => {
+const pythonBracketStep = (text: string, index: number, open: string[]): number => {
   const character = text[index] ?? ""
   if (character === "#") {
     const end = text.indexOf("\n", index)
     return end === -1 ? text.length : end
   }
-  if (character === '"' || character === "'") {
-    state.previous = character
-    return pythonStringEnd(text, index)
-  }
-  if ("([{".includes(character)) state.open.push(character)
-  else if (")]}".includes(character)) state.open.pop()
-  if (!/\s/u.test(character)) state.previous = character
+  if (character === '"' || character === "'") return pythonStringEnd(text, index)
+  if ("([{".includes(character)) open.push(character)
+  else if (")]}".includes(character)) open.pop()
   return index + 1
 }
 
@@ -544,23 +527,19 @@ const pythonStringEnd = (text: string, start: number): number => {
   return cursor + quote.length
 }
 
-/** One text's token contexts, kept while its tokens are classified. */
+/** One text's bracket map, kept while its tokens are classified. */
 let bracketCache:
-  | { readonly text: string; readonly map: ReadonlyMap<number, PythonTokenContext> }
+  | { readonly text: string; readonly map: ReadonlyMap<number, string | undefined> }
   | undefined
-const tokenContextAt = (text: string, offset: number): PythonTokenContext | undefined => {
-  if (bracketCache?.text !== text) bracketCache = { text, map: pythonOpenBrackets(text) }
-  return bracketCache.map.get(offset)
-}
 
-/** A dict KEY: `{` innermost, a `{` or `,` as the code before it, and a `:` after. */
+/**
+ * A dict KEY: a `:` after it, and `{` the innermost bracket open at it. No other
+ * valid Python puts a string directly before `:` inside braces.
+ */
 const isDictKey = (text: string, offset: number, after: string): boolean => {
-  const context = tokenContextAt(text, offset)
-  return (
-    /^\s*:/u.test(after) &&
-    context?.open === "{" &&
-    (context.previous === "{" || context.previous === ",")
-  )
+  if (!/^\s*:/u.test(after)) return false
+  if (bracketCache?.text !== text) bracketCache = { text, map: pythonOpenBrackets(text) }
+  return bracketCache.map.get(offset) === "{"
 }
 
 /**
@@ -572,7 +551,7 @@ const isDictKey = (text: string, offset: number, after: string): boolean => {
  * `token = os.environ.pop("X", None)` READS the value it removes, and
  * `v = os.environ.setdefault("X", "1")` returns it. And `for n in "A", "X":`
  * matched the dict-key rule on its comma and colon; a key needs `{` as the
- * innermost open bracket and `{` or `,` as the code before it (`isDictKey`).
+ * innermost open bracket (`isDictKey`).
  */
 const isPythonWrite = (text: string, offset: number, value: string): boolean => {
   const quoteLength =
