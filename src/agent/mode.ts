@@ -160,8 +160,9 @@ export type CollaborationMode = "default" | "plan"
  *     the `gh_pr_*` write surfaces — they shell out via `gh` to push
  *     comments / open PRs / enable auto-merge, mutating the remote VCS.
  *     Read-only git tools are `git_status`/`git_log`/`git_diff`/`git_blame`.
- *   - `network_write`: outbound network writes (none ship today — MCP/HTTP
- *     write surfaces). Reserved for the same reason as `git_mutating`.
+ *   - `network_write`: outbound actions against a remote surface — the browser
+ *     tools that click, type, navigate or open tabs (twelve rows since sep-13, the
+ *     first this kind ever had; it was reserved and empty before).
  *   - `working_state_write`: mutates the durable working-state surface (e.g.
  *     `update_working_state`). Permitted in default mode; blocked in plan
  *     mode because plan mode's contract is to PROPOSE state changes, not

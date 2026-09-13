@@ -264,7 +264,9 @@ export const CLI_KNOBS: readonly CliKnob[] = [
   },
   // The five session-surface settings below share the `env(key, default)` helper
   // with `QUANTA_MAX_TURNS` / `QUANTA_SPINNER_INTERVAL_MS` two lines apart in
-  // `repl/session-runtime-config.ts`, and those two were declared. These were not
+  // `repl/session-runtime-config.ts`. The spinner interval is declared here;
+  // `QUANTA_MAX_TURNS` is NOT a CLI knob row (its registry row is bench-scoped with no
+  // default — see session-runtime-int-defaults-declared-hellgate). These were not
   // — the completeness ratchet's regex could not see `env("KEY", d)` because `env`
   // is a FUNCTION there, not a bag, so the omission never tripped anything. They
   // are ordinary operator settings, not internals: a permission posture, the idle

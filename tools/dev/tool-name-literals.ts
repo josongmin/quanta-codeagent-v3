@@ -49,12 +49,14 @@
  * A comment is not in the AST, so hole 2 cannot exist here. Formatting is not
  * in the AST either: `name:"x"` and a line-wrapped literal are the same node,
  * where the regex demanded exactly one space. Exclusion is by PATH. The file
- * list comes from `git ls-files` restricted to `*.ts`, so a tracked `.ts.tmp`
- * is outside the census by construction rather than by remembering to say
+ * list is tracked AND untracked-but-not-ignored `*.ts` (a new tool file is live
+ * before it is committed; 9890282b5 — this said `git ls-files`, tracked only), so a
+ * `.ts.tmp` is outside the census by construction rather than by remembering to say
  * `--include`.
  *
- * The narrowing is `name: "<literal>"` inside an object literal that ALSO
- * carries at least one member of {@link TOOL_SHAPE_KEYS}. `isReadOnly` is a
+ * The narrowing is `name: "<literal>"` (or an `as const` / const-bound name) inside
+ * an object literal OR a class body that ALSO carries at least one member of
+ * {@link TOOL_SHAPE_KEYS} — classes and methods since 9890282b5. `isReadOnly` is a
  * REQUIRED member of `ToolCore` (`src/tool/factory.ts`), so a tool definition
  * cannot avoid the set; a domain object with a `name` field and none of these
  * keys is not a tool. That is what lets the census widen from six hand-picked

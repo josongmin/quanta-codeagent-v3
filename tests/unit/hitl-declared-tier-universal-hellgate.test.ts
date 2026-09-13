@@ -32,17 +32,16 @@
  * `isReadOnly: () => true`. What was missing is the invariant that keeps them
  * that way.
  *
- * # Why the SOURCE census is the authority here
+ * # What each layer here is — corrected
  *
- * The manifest names 60 distinct origin modules for its gated rows. A runtime
- * two-way comparison means importing and port-stubbing all 60, and it would
- * still miss MCP-bridged tools built from a runtime handshake. MEASURED: the
- * broadest assemblable fixture reaches 66 of 193 names.
- *
- * The invariant, though, is about what a tool is ALLOWED TO SAY — so the
- * declaration is the right object to check, and the AST census is complete over
- * every tool with a literal name (197 literals). The runtime arms below are the
- * cross-check for the cases a source census cannot reduce.
+ * This header used to call the SOURCE census "the authority" because the broadest
+ * fixture of the time reached 66 of 193 names. Both halves moved. The runtime arms
+ * now loop the assembled universe (`_shared/assembled-tool-universe.ts`: 157 of the
+ * manifest's 203 names at sep-14; the other 46 are the caller-wire ledger), and
+ * 9ec5db85a moved the guarantee into the POLICY: `inferToolTierDetailed` voids a
+ * declared "none" on any tool whose `isReadOnly()` is false, whatever shape declares
+ * it. The AST census below is an EARLY WARNING over every tool with a literal name —
+ * useful because it names the file and line — not the thing that holds the invariant.
  */
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
@@ -353,10 +352,10 @@ describe("HITL — the assembled registry agrees with the declarations", () => {
     ).toEqual([])
   })
 
-  test("the same invariant over EVERY tool literal in src/, not just the assembled 66", () => {
-    // The assembled fixture reaches 66 of 193 names. The source census reaches every
-    // tool with a literal name, so the plan-mode row of a write-capable tool built by a
-    // tier-1 block or a git/gh/lsp factory is checked here too.
+  test("the same invariant over EVERY tool literal in src/, not just the assembled universe", () => {
+    // The assembled universe does not reach the caller-wire ledger's names. The source
+    // census reaches every tool with a literal name, so the plan-mode row of a
+    // write-capable tool no fixture builds is checked here too.
     const writeCapableNull = POSTURES.filter(
       (p) => p.readOnly === "false" && classifiedMutatingKind(p.name) === null,
     ).map((p) => `${p.name} (${p.file}:${p.line})`)

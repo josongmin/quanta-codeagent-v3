@@ -284,7 +284,7 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     gate: {
       kind: "unwired",
       reason:
-        "listed as members of the `gitTools()` group until sep-13, but `gitTools()` never mints them and no production file calls `gitPushTool` or `gitStageTool`; the only caller is tests/unit/git-directive-stage-push-pr-hooks-hellgate.test.ts. Wire-or-delete is open: wiring exposes an agent-callable `git push` behind QUANTA_GIT_TOOLS, which is a security decision, not a catalogue edit.",
+        "listed as members of the `gitTools()` group until sep-13, but `gitTools()` never mints them and no production file calls `gitPushTool` or `gitStageTool`. Only tests do: `gitStageTool` in git-directive-stage-push-pr-hooks-hellgate; `gitPushTool` there and in admissibility-gate, permission/sensitive-tool-capability-ratchet and integration/always-confirm-secure-by-default-e2e (an earlier note called the first the only caller). Wire-or-delete is open: wiring exposes an agent-callable `git push` behind QUANTA_GIT_TOOLS, which is a security decision, not a catalogue edit.",
     },
     default: {},
     risk: "mutating",
