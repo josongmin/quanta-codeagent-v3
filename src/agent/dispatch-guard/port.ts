@@ -31,6 +31,17 @@ export interface DispatchGuard {
    *   - Total: every input returns a decision; never throws. Bad / unknown
    *     input degrades to `{ kind: "allow" }` (the dispatch path below has
    *     additional security gates — this port is an EARLY filter, not the
-   *     final word). */
-  check(tool: string, input: unknown): GuardDecision
+   *     final word).
+   *
+   *  `facts` carries what the dispatch seam already derived for this call, so the guard
+   *  judges the same thing the permission policy does. Absent ⇒ the guard falls back to
+   *  reading input fields. */
+  check(tool: string, input: unknown, facts?: GuardCallFacts): GuardDecision
+}
+
+/** Facts the dispatch seam computes once per call and hands to the guard. */
+export interface GuardCallFacts {
+  /** `registry.extractShellCommand(tool, input)` — the HARD_DENY signal. `null` ⇒ the
+   *  tool exposes no shell command for this input. */
+  readonly shellCommand: string | null
 }

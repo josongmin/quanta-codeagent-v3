@@ -7,11 +7,11 @@
  */
 
 export type { DefaultDispatchGuardOptions } from "./default-guard"
-export { defaultDispatchGuard } from "./default-guard"
+export { DENY_ALL_CODE_OR_NETWORK_TOOLS, defaultDispatchGuard } from "./default-guard"
 export type { NetworkGuardSpec, NetworkPosture } from "./network-guard"
 export { buildNetworkDispatchGuard } from "./network-guard"
 export { noOpDispatchGuard } from "./no-op-guard"
-export type { DispatchGuard } from "./port"
+export type { DispatchGuard, GuardCallFacts } from "./port"
 export type { QuestionAvailabilityReader } from "./question-availability"
 export {
   livePostureQuestionReader,

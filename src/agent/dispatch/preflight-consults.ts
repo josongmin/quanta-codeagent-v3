@@ -184,7 +184,13 @@ export const consultDispatchGuard = (
 ): DispatchResult | null => {
   const guard = config.dispatchGuard
   if (!guard) return null
-  const decision = guard.check(call.name, call.input)
+  // The registry's shell-command projection, not just `command`/`cmd` input fields: the
+  // guard read only those two names, so a shell-exposing tool with another input shape
+  // (`shadow_verify`'s test_target, `test_runner`'s path) passed the deny-all egress check
+  // while HARD_DENY saw its command (round-9 audit).
+  const decision = guard.check(call.name, call.input, {
+    shellCommand: config.registry.extractShellCommand(call.name, call.input),
+  })
   if (decision.kind === "allow") return null
   if (decision.kind === "ask") {
     // Collapse `ask` to a deny in v1 (the wire to HITL queue is a deferred

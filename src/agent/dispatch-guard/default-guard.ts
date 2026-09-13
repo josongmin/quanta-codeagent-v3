@@ -23,7 +23,7 @@
 
 import { decideBranchOnly, gitWriteProtectReason } from "@/permission"
 import { isHostAllowed } from "@/runtime/network-allowlist"
-import type { DispatchGuard } from "./port"
+import type { DispatchGuard, GuardCallFacts } from "./port"
 import type { GuardDecision } from "./types"
 
 export interface DefaultDispatchGuardOptions {
@@ -74,6 +74,53 @@ const extractPath = (input: unknown): string | null =>
 const extractShellCommand = (input: unknown): string | null =>
   stringField(input, "command") ?? stringField(input, "cmd")
 
+/** The shell command this call exposes: the registry's projection when the seam passed
+ *  it (the signal HARD_DENY uses), else the two input field names. */
+const commandOf = (input: unknown, facts: GuardCallFacts | undefined): string | null =>
+  facts?.shellCommand ?? extractShellCommand(input)
+
+/**
+ * Tools that run code or drive a network surface WITHOUT exposing a shell command, so the
+ * shell-egress check cannot see them: under the deny-all posture they are refused by name.
+ * The closed partition of every `bash_mutating` / `network_write` plan-mode row (shell-
+ * exposing, this set, reviewed non-egress, or a child loop that inherits the guard) is
+ * enforced by `dispatch-guard-deny-all-coverage-hellgate`.
+ */
+export const DENY_ALL_CODE_OR_NETWORK_TOOLS: ReadonlySet<string> = new Set([
+  "node_repl", // arbitrary Node, `fetch` included
+  "debug_inspect", // runs the program under a debugger
+  "run_tests", // runs the project's suite
+  "collect_evidence", // runs the suite to build the packet
+  "shadow_verify", // lint/typecheck start language servers over patch-controlled code
+  "write_stdin", // feeds a shell the router started
+  "browser_cdp", // raw DevTools protocol
+  "browser_click",
+  "browser_drag",
+  "browser_fill",
+  "browser_mouse_click_xy",
+  "browser_navigate",
+  "browser_press_key",
+  "browser_scroll",
+  "browser_select_option",
+  "browser_tab_close",
+  "browser_tab_new",
+  "browser_tab_switch",
+  "browser_type",
+])
+
+const checkCodeOrNetworkToolUnderDenyAll = (
+  tool: string,
+  opts: DefaultDispatchGuardOptions,
+): GuardDecision | null => {
+  if (opts.networkAllowlist === undefined || opts.networkAllowlist.length > 0) return null
+  if (!DENY_ALL_CODE_OR_NETWORK_TOOLS.has(tool)) return null
+  return {
+    kind: "deny",
+    reason: `'${tool}' runs code or drives a network surface; blocked under the deny-all network posture (no egress permitted)`,
+    hardDeny: true,
+  }
+}
+
 /** Extract a host/URL candidate. Covers `web_fetch`/`web_search` family
  *  (`url`), an explicit `host` field, and the patch-tool `target_url`. */
 const extractUrlOrHost = (input: unknown): string | null =>
@@ -95,8 +142,9 @@ const checkGitWrite = (input: unknown): GuardDecision | null => {
 const checkBranchOnly = (
   input: unknown,
   opts: DefaultDispatchGuardOptions,
+  facts: GuardCallFacts | undefined,
 ): GuardDecision | null => {
-  const command = extractShellCommand(input)
+  const command = commandOf(input, facts)
   if (command === null) return null
   // `decideBranchOnly` is total: it returns `{allowed:true}` for non-git
   // commands. The three optional knobs are forwarded verbatim — undefined
@@ -137,9 +185,10 @@ const checkBranchOnly = (
 const checkShellEgressUnderDenyAll = (
   input: unknown,
   opts: DefaultDispatchGuardOptions,
+  facts: GuardCallFacts | undefined,
 ): GuardDecision | null => {
   if (opts.networkAllowlist === undefined || opts.networkAllowlist.length > 0) return null
-  const command = extractShellCommand(input)
+  const command = commandOf(input, facts)
   if (command === null) return null
   return {
     kind: "deny",
@@ -195,14 +244,15 @@ const composeContributions = (
 /** Construct a default dispatch guard. The returned `check` is pure (no
  *  closure over mutable state — the opts are read verbatim each call). */
 export const defaultDispatchGuard = (opts: DefaultDispatchGuardOptions = {}): DispatchGuard => ({
-  check(_tool, input): GuardDecision {
+  check(tool, input, facts): GuardDecision {
     return composeContributions([
       checkGitWrite(input),
       // Egress-class refusal for the deny-all posture is checked BEFORE the
       // (soft, recoverable) branch-only contribution so a shell call under a
       // fully-denied network surfaces the hard egress deny, not a softer one.
-      checkShellEgressUnderDenyAll(input, opts),
-      checkBranchOnly(input, opts),
+      checkShellEgressUnderDenyAll(input, opts, facts),
+      checkCodeOrNetworkToolUnderDenyAll(tool, opts),
+      checkBranchOnly(input, opts, facts),
       checkHostAllowlist(input, opts),
     ])
   },

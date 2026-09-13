@@ -244,7 +244,13 @@ const inheritQuestionBroker = (
  *  because hoisting them keeps the caller under the cognitive-complexity cap. */
 const inheritParentGuards = (
   parent: AgentConfig,
-): Pick<AgentConfig, "verifyGuard" | "closeoutGuard" | "hitl"> | Record<string, never> => ({
+):
+  | Pick<AgentConfig, "verifyGuard" | "closeoutGuard" | "hitl" | "dispatchGuard">
+  | Record<string, never> => ({
+  // The network/branch dispatch guard is a POSTURE, not a per-agent observation: a child
+  // runs under the parent's. It was not inherited, so under the deny-all network posture
+  // a subagent's `bash` / `node_repl` calls were never checked (round-9 audit).
+  ...(parent.dispatchGuard !== undefined ? { dispatchGuard: parent.dispatchGuard } : {}),
   ...(parent.verifyGuard !== undefined ? { verifyGuard: parent.verifyGuard } : {}),
   ...(parent.closeoutGuard !== undefined ? { closeoutGuard: parent.closeoutGuard } : {}),
   ...(parent.hitl !== undefined ? { hitl: parent.hitl } : {}),
