@@ -72,6 +72,9 @@ describe("ADR-0311 — normalizeGhEvent", () => {
       login: "alice",
       type: "User",
       isCollaborator: true,
+      // Kept verbatim: the trust scope reads it, and the boolean alone made
+      // OWNER and MEMBER indistinguishable from COLLABORATOR.
+      association: "COLLABORATOR",
     })
   })
 

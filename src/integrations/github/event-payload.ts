@@ -182,7 +182,7 @@ const extractSender = (raw: RawEventEnvelope): NormalizedSender => {
   if (isCollaborator === undefined) {
     return Object.freeze({ login, type })
   }
-  return Object.freeze({ login, type, isCollaborator })
+  return Object.freeze({ login, type, isCollaborator, association: assoc as string })
 }
 
 const extractBody = (raw: RawEventEnvelope, kind: GhEventKind): string | undefined => {
