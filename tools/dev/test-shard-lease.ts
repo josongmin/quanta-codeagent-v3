@@ -6,11 +6,13 @@ import {
   clearLeaseQuarantine,
   expiredQuarantinePath,
   groupAlive,
+  LEASE_QUARANTINE_DIR_ENV,
   type LeaseQuarantineRead,
   laneQuarantinePath,
   laneSlotVerdict,
   leaseQuarantineRoot,
   legacyQuarantinePath,
+  privateDirectoryProblem,
   type QuarantineVerdict,
   quarantineVerdict,
   readLeaseQuarantineOutcome,
@@ -510,8 +512,18 @@ const quarantineBlock = (
 ): string | undefined => {
   const nowMs = Date.now()
   const isAlive = options.isGroupAlive ?? groupAlive
-  const slot = laneQuarantinePath(identity, leaseQuarantineRoot(options.env))
-  const slotRead = readLeaseQuarantineOutcome(slot)
+  const root = leaseQuarantineRoot(options.env)
+  const slot = laneQuarantinePath(identity, root)
+  // A root we do not own cannot vouch for what is in it — nor for what is NOT.
+  const rootProblem = privateDirectoryProblem(root)
+  const slotRead: LeaseQuarantineRead =
+    rootProblem === undefined
+      ? readLeaseQuarantineOutcome(slot)
+      : {
+          kind: "unreadable",
+          reason: `the quarantine root is unusable: ${rootProblem}. Remove it, or point ${LEASE_QUARANTINE_DIR_ENV} at a private directory`,
+          writtenAtMs: nowMs,
+        }
   const lane = laneSlotVerdict({ read: slotRead, identity, nowMs, isAlive })
   const legacyPath =
     options.legacyQuarantineCacheRoot === undefined
@@ -568,17 +580,20 @@ const acquireRawTestShardLease = async (
     if (options.signal?.aborted) {
       throw new Error(`[test:shards] repository lease wait aborted on ${LEASE_HOST}:${port}`)
     }
-    // A free PORT is not a free LANE. The previous owner may have exited
-    // without accounting for its workers, and the kernel hands the port back
-    // the moment it does — so the quarantine is checked BEFORE the bind is
-    // accepted, not after.
-    const blocked = consultQuarantine ? quarantineBlock(identity, options) : undefined
-    if (blocked === undefined) {
-      const token = randomBytes(32).toString("hex")
-      const listener = tryListen(port, digest, token)
-      if (listener !== undefined) return leaseFromListener(port, listener, token)
-    } else if (Date.now() >= nextHeartbeatAt + startedAt) {
-      options.onQuarantineWait?.(blocked)
+    // A free PORT is not a free LANE: the previous owner may have exited without
+    // accounting for its workers, and the kernel hands the port back the moment
+    // it does. So the quarantine is read — but AFTER the bind, while this
+    // process HOLDS the port. Read before, it had two holes an audit reproduced:
+    // a holder could write its record and release between the read and the bind,
+    // and a contender still waiting could delete or rename a record a live
+    // holder had just written. Only a holder reads-and-releases now.
+    const token = randomBytes(32).toString("hex")
+    const listener = tryListen(port, digest, token)
+    if (listener !== undefined) {
+      const blocked = consultQuarantine ? quarantineBlock(identity, options) : undefined
+      if (blocked === undefined) return leaseFromListener(port, listener, token)
+      listener.stop(true)
+      if (Date.now() >= nextHeartbeatAt + startedAt) options.onQuarantineWait?.(blocked)
     }
     // Announce the wait BEFORE the (up to 500ms) identity probe, so a waiting
     // contender is visible immediately.

@@ -9,7 +9,10 @@
 
 /** Normalize SSH aliases and HTTPS remotes to the same owner/repository key. */
 export const normalizeRepositoryIdentity = (remote: string): string => {
-  const value = remote.trim().replace(/\.git$/, "")
-  const match = /[:/]([^/:]+\/[^/]+)$/.exec(value)
-  return match?.[1] ?? value
+  // IDEMPOTENT, and an arm holds it to that: the quarantine writer normalises
+  // once and the slot path normalises again, so `x.git.git` or a match with a
+  // leading space was filed under a key its own slot did not hash to.
+  const value = remote.trim().replace(/(?:\.git|\/)+$/u, "")
+  const match = /[:/]([^/:]+\/[^/]+)$/u.exec(value)
+  return (match?.[1] ?? value).trim().replace(/(?:\.git|\/)+$/u, "")
 }
