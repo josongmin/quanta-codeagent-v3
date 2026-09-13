@@ -52,8 +52,9 @@ const toolResultWeight = (b: ToolResultBlock): number => {
 }
 
 /** A tool_result is "already cleared" iff its body begins with the sentinel —
- *  covers BOTH the bare placeholder and the spill-ref marker (§4.5), so a second
- *  pass never re-clears / re-spills / double-counts. */
+ *  covers the bare placeholder and a placeholder followed by the port's line
+ *  (persisted ref or unpersisted-reason block) (§4.5), so a second pass never
+ *  re-clears / re-spills / double-counts. */
 const isCleared = (b: ToolResultBlock): boolean => b.content.startsWith(EVICTED_PLACEHOLDER)
 
 /** Indices `(i, j)` of every tool_result block, in forward order. */
@@ -71,17 +72,18 @@ const collectToolResults = (messages: readonly Message[]): Ref[] => {
   return refs
 }
 
-/** Build the cleared body for a block: spill the original (NO-THROW — a failed
- *  / undefined spill degrades to the bare placeholder), then return the sentinel
- *  optionally followed by the spill ref on the next line (so idempotency stays a
- *  single `startsWith`). */
+/** Build the cleared body for a block: hand the original to the spill port, then
+ *  return the sentinel followed on the next line by whatever the port returned —
+ *  a persisted ref or an unpersisted-reason block — so idempotency stays a single
+ *  `startsWith`. A port that returns undefined, or throws (NO-THROW), gives the
+ *  bare placeholder. */
 const clearedBody = (original: ToolResultBlock, spill: MicrocompactInput["spill"]): string => {
   if (spill === undefined) return EVICTED_PLACEHOLDER
   let ref: string | undefined
   try {
     ref = spill.persist(original.content, original.tool_use_id)
   } catch {
-    // NO-THROW: a spill failure degrades to a bare-placeholder clear.
+    // NO-THROW: a throwing port degrades to a bare-placeholder clear.
     ref = undefined
   }
   return ref === undefined ? EVICTED_PLACEHOLDER : `${EVICTED_PLACEHOLDER}\n${ref}`

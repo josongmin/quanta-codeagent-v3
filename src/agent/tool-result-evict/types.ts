@@ -16,20 +16,28 @@ import type { Message } from "@/llm"
 
 /** The literal placeholder a cleared tool_result body is rewritten to. The
  *  idempotency check (§4.5) is a single `content.startsWith(EVICTED_PLACEHOLDER)`
- *  — both a bare clear and a spill-ref clear begin with this sentinel. */
+ *  — a bare clear and a clear carrying the port's line (persisted ref or
+ *  unpersisted-reason block) all begin with this sentinel. */
 export const EVICTED_PLACEHOLDER = "[Old tool result content cleared]"
 
 /**
- * Persist seam: hand the original body to disk, get back a retrieval ref (the
- * `<persisted-output>` marker string) to embed in the cleared block.
+ * Persist seam: hand the original body to disk, get back the line to embed in
+ * the cleared block after the placeholder.
  *
- * Returns `undefined` ⇒ clear with the bare placeholder (no spill). Injected so
- * the pre-pass stays pure + testable; the default adapter wraps the EXISTING
- * `src/tool/output-spill.ts#capToolOutput` (§4.4). NO-THROW contract: a spill
- * failure degrades to a bare-placeholder clear, it never aborts the pre-pass.
+ * The returned string is one of two things: a retrieval ref (a
+ * `<persisted-output path=…>` marker, the original was written and can be
+ * Read), or an `<unpersisted-output>` block (the original was NOT written, and
+ * the block says why). The default adapter (`spill-adapter.ts`) returns the
+ * second when `src/tool/output-spill.ts` refuses the spill directory or the
+ * write fails. Returning `undefined` or throwing ⇒ the bare placeholder.
+ * Injected so the pre-pass stays pure + testable; the default adapter reuses the
+ * output-spill directory guard, file convention and prune (§4.4). NO-THROW
+ * contract: a throwing port degrades to a bare-placeholder clear, it never
+ * aborts the pre-pass.
  */
 export interface EvictionSpillPort {
-  /** Persist `body`, keyed by `toolUseId`; return a ref marker or undefined. */
+  /** Persist `body`, keyed by `toolUseId`; return a persisted ref, an
+   *  unpersisted-reason block, or undefined for the bare placeholder. */
   persist(body: string, toolUseId: string): string | undefined
 }
 
