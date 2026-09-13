@@ -500,3 +500,61 @@ export const scanUnattributedTierDeclarations = (
   }
   return out
 }
+
+/* ── tool-shaped containers with no literal name ─────────────────────────────── */
+
+/** A container carrying a {@link TOOL_SHAPE_KEYS} member and a `name` it does not spell
+ *  as a literal (or no `name` but a spread that could supply one). */
+export interface UnattributedToolContainer {
+  readonly file: string
+  readonly line: number
+  readonly spreads: boolean
+  readonly hasNameKey: boolean
+}
+
+/**
+ * Every tool-SHAPED object or class whose name the census cannot read.
+ *
+ * WHY. The manifest's completeness rests on two instruments: this census (literal names)
+ * and the assembled universe (tools the fixture's builders mint). A tool with a COMPUTED
+ * name, minted by a builder the fixture does not call, is invisible to both — measured in
+ * the round-8 audit: a fourth, computed-name tool injected into `memoryTools` kept all six
+ * tool-surface gates green. The class is closed here, at the source: each such container
+ * is enumerated with its file, and the consumer pins the set by file WITH A COUNT, so a
+ * new one fails until it is catalogued or reviewed.
+ */
+/** The unattributed-container verdict for ONE module's source text. */
+export const extractUnattributedToolContainers = (
+  file: string,
+  source: string,
+): UnattributedToolContainer[] => {
+  const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true)
+  const out: UnattributedToolContainer[] = []
+  const walk = (node: ts.Node): void => {
+    if (isContainer(node) && shapeKeyOf(node) !== undefined && nameLiteralOf(node) === undefined) {
+      const members = membersOf(node)
+      const spreads = members.some((m) => m.spread)
+      const hasNameKey = members.some((m) => m.key === "name")
+      // `execute` is REQUIRED on `ToolCore`. A permission action, a confirm request or a
+      // stream-callback bag carries `isReadOnly` and never `execute`, so it is not a tool
+      // that could mint a name; a wrapper that spreads a tool and replaces `execute` is.
+      const hasExecute = members.some((m) => m.key === "execute")
+      if (hasExecute && (spreads || hasNameKey)) {
+        out.push({
+          file,
+          line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
+          spreads,
+          hasNameKey,
+        })
+      }
+    }
+    ts.forEachChild(node, walk)
+  }
+  walk(sf)
+  return out
+}
+
+export const scanUnattributedToolContainers = (repoRoot: string): UnattributedToolContainer[] =>
+  censusFiles(repoRoot).flatMap((f) =>
+    cachedExtract("unattributed-tools", repoRoot, f, extractUnattributedToolContainers),
+  )

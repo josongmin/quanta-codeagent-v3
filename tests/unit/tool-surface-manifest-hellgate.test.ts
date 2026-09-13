@@ -37,8 +37,10 @@ import { subagentMailboxTools } from "@/tool/subagent-mailbox"
 import {
   censusFiles,
   extractToolNameLiterals,
+  extractUnattributedToolContainers,
   SSOT_FILES,
   scanToolNameLiterals,
+  scanUnattributedToolContainers,
   TOOL_SHAPE_KEYS,
 } from "../../tools/dev/tool-name-literals"
 import { gatherYamlFiles, loadFeatures } from "../../tools/feature-catalog/schema"
@@ -583,6 +585,94 @@ describe("tool-surface manifest — FULL-universe completeness (the guard that w
     expect(off).not.toContain("coverage_check")
     const on = buildDefaultTools({ coverageCheck: true }).map((t) => t.name)
     expect(on).toContain("coverage_check")
+  })
+})
+
+/**
+ * The class BOTH instruments miss: a tool with a computed name, minted by a builder the
+ * assembled universe does not call. Round-8 audit, measured: a fourth tool with a computed
+ * name injected into `memoryTools` (built by `buildToolingCore`, not a universe source)
+ * kept all six tool-surface gates green. So every tool-SHAPED container (it has `execute`)
+ * whose name is not a literal is enumerated at the source and reviewed here BY FILE WITH A
+ * COUNT: a new factory, a new wrapper, or one more tool in a reviewed file fails by name.
+ */
+const UNATTRIBUTED_TOOL_CONTAINERS = scanUnattributedToolContainers(
+  join(import.meta.dir, "..", ".."),
+)
+
+describe("tool-surface manifest — tools whose NAME no instrument can read are reviewed", () => {
+  const REVIEWED: Readonly<Record<string, { count: number; why: string }>> = {
+    "src/agent/mcp-tool-adapter.ts": {
+      count: 2,
+      why: "MCP tools: the name is mcpToolName(server, def.name) from a server's tool list at runtime — per-server, never catalogueable by name; the MCP governance and annotation-trust gates own these",
+    },
+    "src/observability/metrics/instrument-tool.ts": {
+      count: 1,
+      why: "a metrics wrapper `{ ...tool, execute }` — the name is the wrapped tool's, which is registered and catalogued where that tool is built",
+    },
+    "src/observability/metrics/instrument-tool-dedup.ts": {
+      count: 1,
+      why: "the dedup metrics wrapper `{ ...tool, execute }` — the name is the wrapped tool's, catalogued where that tool is built",
+    },
+    "src/runner/batch/eval/driver/config-build.ts": {
+      count: 1,
+      why: "the bench driver's `{ ...testRunnerTool, execute }` wrapper — it keeps the name test_runner, which has a manifest row and a plan-mode row",
+    },
+    "src/subagent/agent-tools-6.ts": {
+      count: 1,
+      why: "the six-tool router's `make` factory; its names are the literals in SUBAGENT_6_TOOL_CONTRACTS, and createSubagent6Tools is an assembled-universe source",
+    },
+    "src/tool/async-helper.ts": {
+      count: 1,
+      why: "defineToolAsync copies spec.name; each caller's spec object carries a literal name and a shape key, so the census attributes it at the call site",
+    },
+    "src/tool/factory.ts": {
+      count: 1,
+      why: "defineTool copies spec.name; each caller's spec object carries a literal name and a shape key, so the census attributes it at the call site",
+    },
+    "src/tool/lsp_nav/index.ts": {
+      count: 1,
+      why: "positionTool mints the seven LSP position tools (COMPUTED_NAME_TOOLS); lspNavToolList is an assembled-universe source, so each is proven there",
+    },
+  }
+
+  test("every unattributed tool-shaped container is reviewed, with an exact count per file", () => {
+    const perFile = new Map<string, number>()
+    for (const c of UNATTRIBUTED_TOOL_CONTAINERS)
+      perFile.set(c.file, (perFile.get(c.file) ?? 0) + 1)
+    for (const c of UNATTRIBUTED_TOOL_CONTAINERS) {
+      expect(
+        REVIEWED[c.file],
+        `${c.file}:${c.line} builds a tool whose name is not a literal (spreads=${c.spreads} ` +
+          `hasNameKey=${c.hasNameKey}). The census cannot see it, and the assembled universe ` +
+          "sees it only if its builder is a universe source. Give it a literal name, make its " +
+          "builder a universe source, or review it here.",
+      ).toBeDefined()
+    }
+    for (const [file, { count, why }] of Object.entries(REVIEWED)) {
+      expect(
+        perFile.get(file) ?? 0,
+        `${file}: reviewed ${count}, found ${perFile.get(file) ?? 0}`,
+      ).toBe(count)
+      expect(why.split(" ").length, `the reason for ${file} is not a reason`).toBeGreaterThan(10)
+    }
+  })
+
+  test("the scan sees the shape it exists for, and not the look-alikes (paired)", () => {
+    const shapes = extractUnattributedToolContainers(
+      "x.ts",
+      [
+        // RED: the audit's shape — a computed-name tool.
+        "const n = ['memory', 'forget'].join('_'); export const t = { name: n, isReadOnly: () => false, async *execute() {} }",
+        // RED: a wrapper that replaces execute.
+        "export const w = (tool) => ({ ...tool, async *execute() {} })",
+        // control: a literal name is the census's job, not this scan's.
+        'export const lit = { name: "memory_search", isReadOnly: () => true, async *execute() {} }',
+        // control: a permission action carries isReadOnly and never execute.
+        "export const action = { tool: 'bash', input: {}, isReadOnly: false, ...extra }",
+      ].join("\n"),
+    )
+    expect(shapes.map((s) => s.line)).toEqual([1, 2])
   })
 })
 
