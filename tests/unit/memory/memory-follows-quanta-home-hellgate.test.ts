@@ -24,7 +24,7 @@
 import { Database } from "bun:sqlite"
 import { afterAll, afterEach, describe, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { resolveMemoryDirPathsUnder } from "@/memory/consolidate/paths"
@@ -314,6 +314,39 @@ describe("the memory plane follows the quanta home", () => {
     } finally {
       for (const d of [osHome, relocated, cwd]) rmSync(d, { recursive: true, force: true })
     }
+  })
+
+  /**
+   * One file under two spellings is ONE store. The notice above tells the operator to
+   * remove the store the session is not using; when the two paths alias, that is the
+   * store the session IS using.
+   */
+  test("aliased paths to one store are one store: no TWO-stores notice, no removal advice", () => {
+    const osHome = temps.create("mem-alias-")
+    const cwd = temps.create("mem-alias-cwd-")
+    const prior = join(osHome, ".quanta", "memory", "memory.sqlite")
+    sqliteWithRows(prior, 3)
+    // A dotfiles-style QUANTA_HOME: a symlink to the OS home's own `.quanta`.
+    const linked = join(temps.create("mem-alias-link-"), "quanta")
+    symlinkSync(join(osHome, ".quanta"), linked)
+    const viaLink = resolveStorePath({ homeDir: linked, cwd, osHomeDir: osHome })
+    expect(viaLink.legacyNotice).toBeUndefined()
+    expect(viaLink.source).toBe("home-default")
+    // The macOS alias: `/tmp` and `/var` are symlinks into `/private`, so the same
+    // directory has a second spelling.
+    if (process.platform === "darwin" && /^\/(?:tmp|var)\//.test(osHome)) {
+      const aliased = resolveStorePath({
+        homeDir: join(`/private${osHome}`, ".quanta"),
+        cwd,
+        osHomeDir: osHome,
+      })
+      expect(aliased.legacyNotice).toBeUndefined()
+    }
+    // …and two genuinely different files still get the notice (paired control).
+    const other = temps.create("mem-alias-other-")
+    sqliteWithRows(join(other, "memory", "memory.sqlite"), 1)
+    const two = resolveStorePath({ homeDir: other, cwd, osHomeDir: osHome })
+    expect(two.legacyNotice).toContain("TWO stores exist")
   })
 
   test("with the home UNSET the probe is inert — no notice, no behaviour change", () => {

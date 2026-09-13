@@ -1,13 +1,14 @@
 /**
  * ADR-0557 — durable long-term memory store path resolution.
  *
- * Pure path math + legacy detection for the `SqliteStore` the session factory
- * opens by default. No process state is read here: the caller supplies
- * `homeDir` / `cwd` (tests inject temp dirs; the real home is never touched
- * by a unit test) and, optionally, the `exists` probe.
+ * Path math + legacy detection for the `SqliteStore` the session factory opens by
+ * default. No process state is read here: the caller supplies `homeDir` / `cwd` /
+ * `osHomeDir` (tests inject temp dirs; the real home is never touched by a unit test)
+ * and, optionally, the `exists` and `sameFile` probes (default: the filesystem).
  *
  * Layout:
- *   - DEFAULT  `<home>/.quanta/memory/memory.sqlite` — the same parent the
+ *   - DEFAULT  `<quanta home>/memory/memory.sqlite` (`~/.quanta/memory/…` when the
+ *     home is not relocated) — the same parent the
  *     session-memory (B) / consolidator (C) systems already write
  *     (`resolveMemoryDirPaths`, ADR-0068), so one home-scoped store with
  *     per-entry `appliesTo.cwd` routing meta is the whole design; no
@@ -17,7 +18,7 @@
  *     being used (user data is never moved or copied) and the resolution
  *     carries ONE notice naming both paths and the `mv` that migrates.
  */
-import { existsSync } from "node:fs"
+import { existsSync, statSync } from "node:fs"
 import * as path from "node:path"
 import { resolveMemoryDirPathsUnder } from "./consolidate/paths"
 
@@ -65,7 +66,8 @@ export interface StorePathResolution {
 }
 
 export interface ResolveStorePathInput {
-  /** Home directory (tests: a temp dir; prod: `os.homedir()`). */
+  /** The QUANTA home root (tests: a temp dir; prod: `quantaHomeDirFrom(env)`, i.e.
+   *  `QUANTA_CONFIG_DIR ?? QUANTA_HOME ?? ~/.quanta`) — not an OS home. */
   readonly homeDir: string
   /** Working directory the legacy relative default was resolved against. */
   readonly cwd: string
@@ -73,6 +75,10 @@ export interface ResolveStorePathInput {
   readonly explicitPath?: string | undefined
   /** Injectable fs probe (default `existsSync`). */
   readonly exists?: ((p: string) => boolean) | undefined
+  /** Injectable identity probe: do two EXISTING paths name one file? Default compares
+   *  device and inode, so a symlinked home, the macOS `/var` ↔ `/private/var` alias
+   *  and a case-only spelling on a case-insensitive volume all count as one store. */
+  readonly sameFile?: ((a: string, b: string) => boolean) | undefined
   /**
    * The OS home, for the PRE-RELOCATION probe. Injected, never read here.
    *
@@ -84,6 +90,13 @@ export interface ResolveStorePathInput {
    * the old path was never even probed.
    */
   readonly osHomeDir?: string | undefined
+}
+
+/** Device + inode equality for two paths; a path that does not exist is nobody's twin. */
+const sameFileOnDisk = (a: string, b: string): boolean => {
+  const sa = statSync(a, { throwIfNoEntry: false })
+  const sb = statSync(b, { throwIfNoEntry: false })
+  return sa !== undefined && sb !== undefined && sa.dev === sb.dev && sa.ino === sb.ino
 }
 
 /** POSIX single-quote a path: the only quoting in which the shell expands nothing. */
@@ -135,35 +148,18 @@ const twoStoresNotice = (using: string, other: string, why: string): string =>
   `They are not merged and nothing will move either one. To use the other, set ` +
   `QUANTA_MEMORY_PATH=${shq(other)}; once you no longer need it, remove it.`
 
-/** Resolve the sqlite path: explicit > legacy cwd file > pre-relocation home file >
- *  home default. Pure given `exists`. */
-export const resolveStorePath = (input: ResolveStorePathInput): StorePathResolution => {
-  if (input.explicitPath !== undefined && input.explicitPath !== "") {
-    return { path: input.explicitPath, source: "explicit" }
-  }
-  const exists = input.exists ?? existsSync
-  const legacy = legacyCwdStorePath(input.cwd)
-  const home = defaultDurableStorePath(input.homeDir)
-  if (exists(legacy)) {
-    // In place, as before: user data is never moved or copied. But the migration
-    // command is offered ONLY while the destination is absent — if the home store
-    // exists too, a move would at best skip and at worst carry the legacy WAL onto it.
-    return {
-      path: legacy,
-      source: "legacy-cwd",
-      legacyNotice: exists(home)
-        ? twoStoresNotice(legacy, home, "the home default")
-        : `memory store: using legacy cwd-scoped ${legacy}; the default is now ${home}. ` +
-          `To migrate (with no quanta running): ${migrationCommand(legacy, home)}`,
-    }
-  }
-  if (input.osHomeDir === undefined || input.osHomeDir === "") {
-    return { path: home, source: "home-default" }
-  }
-  const prior = preRelocationHomeStorePath(input.osHomeDir)
+/** The pre-relocation branch of {@link resolveStorePath}: the home store is `home`, an
+ *  OS-home store may exist at `prior`. */
+const resolvePriorHomeStore = (
+  prior: string,
+  home: string,
+  exists: (p: string) => boolean,
+  sameFile: (a: string, b: string) => boolean,
+): StorePathResolution => {
   // Skipped when the paths coincide (an unset home), so the common case is silent.
   if (prior === home || !exists(prior)) return { path: home, source: "home-default" }
   if (exists(home)) {
+    if (sameFile(prior, home)) return { path: home, source: "home-default" }
     return {
       path: home,
       source: "home-default",
@@ -189,4 +185,38 @@ export const resolveStorePath = (input: ResolveStorePathInput): StorePathResolut
       `QUANTA_HOME/QUANTA_CONFIG_DIR; this home's store would be ${home}. ` +
       `To migrate (with no quanta running): ${migrationCommand(prior, home)}`,
   }
+}
+
+/** Resolve the sqlite path: explicit > legacy cwd file > pre-relocation home file >
+ *  home default. Pure given `exists` and `sameFile`. */
+export const resolveStorePath = (input: ResolveStorePathInput): StorePathResolution => {
+  if (input.explicitPath !== undefined && input.explicitPath !== "") {
+    return { path: input.explicitPath, source: "explicit" }
+  }
+  const exists = input.exists ?? existsSync
+  // Two SPELLINGS of one file are one store. Comparing strings, a symlinked
+  // QUANTA_HOME (a dotfiles layout) printed "TWO stores exist … once you no longer need
+  // it, remove it" about the store the session was using — advice to delete the only
+  // copy (round-8 audit, reproduced for a symlink, the /private/var alias and a
+  // case-only difference).
+  const sameFile = input.sameFile ?? sameFileOnDisk
+  const legacy = legacyCwdStorePath(input.cwd)
+  const home = defaultDurableStorePath(input.homeDir)
+  if (exists(legacy) && !(exists(home) && sameFile(legacy, home))) {
+    // In place, as before: user data is never moved or copied. But the migration
+    // command is offered ONLY while the destination is absent — if the home store
+    // exists too, a move would at best skip and at worst carry the legacy WAL onto it.
+    return {
+      path: legacy,
+      source: "legacy-cwd",
+      legacyNotice: exists(home)
+        ? twoStoresNotice(legacy, home, "the home default")
+        : `memory store: using legacy cwd-scoped ${legacy}; the default is now ${home}. ` +
+          `To migrate (with no quanta running): ${migrationCommand(legacy, home)}`,
+    }
+  }
+  if (input.osHomeDir === undefined || input.osHomeDir === "") {
+    return { path: home, source: "home-default" }
+  }
+  return resolvePriorHomeStore(preRelocationHomeStorePath(input.osHomeDir), home, exists, sameFile)
 }
