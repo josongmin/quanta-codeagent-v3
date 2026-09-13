@@ -27,8 +27,10 @@
  *                `setenv`) excluded, and in test files only in a read context
  *   shell        `$X` / `${X}` in shell, extensionless scripts and
  *                `package.json` scripts, outside comments and single quotes
- *   workflow     `vars.X` / `env.X` / `secrets.X` in a parsed workflow, and the
- *                shell rule over `run:` bodies; `env:` KEYS are writes
+ *                (quote state carried across lines)
+ *   workflow     `vars.X` / `env.X` / `secrets.X` inside `${{ … }}` or an `if:`
+ *                value of a parsed workflow, and the shell rule over `run:`
+ *                bodies; `env:` KEYS are writes
  *
  * # What the previous version got wrong, each found by an audit of it
  *
@@ -47,6 +49,27 @@
  *   `gate_owner` was not extracted at all.
  * - The corpus was six roots and three TS extensions: `adapters/`, shell
  *   scripts, extensionless scripts and `package.json` were invisible.
+ *
+ * # What the second audit found, and what is still true
+ *
+ * - Shell quote state reset per line, and heredocs were detected on the raw
+ *   line, so a comment or string mentioning `<<EOF`, or `$((1<<N))`, switched
+ *   off all masking for the rest of the file; a quoted delimiter was masked away.
+ * - Workflow `env.X` matched anywhere in a scalar: a step NAME, a `run:` comment
+ *   and an echoed string each backed a name.
+ * - Python `os.environ["X"] = …`, `del`, `.pop` and dict keys, and TypeScript
+ *   destructuring / `for…of` targets, were reads. `expect(process.env.X)` in a
+ *   test backed the name it asserted dead.
+ * - A tracked file deleted in the worktree crashed the scan.
+ * - A dozen masking and language rules could each be deleted with the suite
+ *   green; each now has a fixture line only it decides.
+ *
+ * STILL a limit, measured and left: a registry literal counts wherever a
+ * generic accessor reads `env[entry.envKey]` for every entry (the knob
+ * inventory's is `cli-knobs-accessor.ts`), so removing a knob's BEHAVIOURAL
+ * reader leaves it backed by the accessor. Today no declared name is backed only
+ * by a declaration-only file. Go backtick strings, Rust raw strings and reads
+ * inside Python f-strings are not tokenized; each would show as a false red.
  */
 
 import { execFileSync } from "node:child_process"
@@ -171,15 +194,56 @@ const outermostWrapper = (node: ts.Node): ts.Node => {
   return current
 }
 
+/**
+ * The root of the destructuring TARGET `node` sits in, if any: `[process.env.X] = v`,
+ * `({ a: process.env.X } = v)`, `for (process.env.X of xs)`. Each assigns to the
+ * access; each was counted as a read.
+ */
+const destructuringTargetRoot = (node: ts.Node): ts.Node | undefined => {
+  let current = node
+  let climbed = false
+  for (;;) {
+    const parent = current.parent
+    if (parent === undefined) return undefined
+    const inPattern =
+      ts.isArrayLiteralExpression(parent) ||
+      ts.isSpreadElement(parent) ||
+      (ts.isPropertyAssignment(parent) && parent.initializer === current) ||
+      ts.isObjectLiteralExpression(parent) ||
+      ts.isParenthesizedExpression(parent)
+    if (!inPattern) break
+    climbed = climbed || !ts.isParenthesizedExpression(parent)
+    current = parent
+  }
+  return climbed ? current : undefined
+}
+
 const isWriteTarget = (node: ts.Node): boolean => {
   const target = outermostWrapper(node)
   const parent = target.parent
   if (parent === undefined) return false
   if (ts.isDeleteExpression(parent)) return true
-  return (
+  if (
     ts.isBinaryExpression(parent) &&
     parent.left === target &&
     WRITE_OPERATORS.has(parent.operatorToken.kind)
+  ) {
+    return true
+  }
+  if (
+    (ts.isForOfStatement(parent) || ts.isForInStatement(parent)) &&
+    parent.initializer === target
+  ) {
+    return true
+  }
+  const root = destructuringTargetRoot(target)
+  if (root === undefined || root.parent === undefined) return false
+  const holder = root.parent
+  return (
+    (ts.isBinaryExpression(holder) &&
+      holder.left === root &&
+      holder.operatorToken.kind === K.EqualsToken) ||
+    ((ts.isForOfStatement(holder) || ts.isForInStatement(holder)) && holder.initializer === root)
   )
 }
 
@@ -375,37 +439,88 @@ export const pythonStrings = (text: string): readonly StringToken[] => {
 }
 
 const RAW_WRITE_CONTEXT =
-  /(?:\.env|\.env_remove|set_var|remove_var|setenv|Setenv|Unsetenv|putenv|delenv)\(\s*$/
+  /(?:\.env|\.env_remove|set_var|remove_var|setenv|Setenv|Unsetenv|putenv|delenv|environ\.pop|environ\.setdefault)\(\s*$/
+
+/**
+ * A Python token that is written, not read: `os.environ["X"] = "1"`,
+ * `del os.environ["X"]`, or a dict KEY (`env={"X": "1"}`). All three were backed —
+ * and in a test file `environ[` is a read context, so the write qualified there.
+ */
+const isPythonWrite = (text: string, offset: number, value: string): boolean => {
+  const quoteLength =
+    text.startsWith(`"${value}"`, offset) || text.startsWith(`'${value}'`, offset) ? 1 : 0
+  const after = text.slice(offset + value.length + quoteLength * 2, offset + value.length + 40)
+  const before = text.slice(Math.max(0, offset - 40), offset)
+  return (
+    /^\s*\]\s*=(?!=)/u.test(after) ||
+    /\bdel\s+[\w.]*environ\[\s*$/u.test(before) ||
+    (/^\s*:/u.test(after) && /[{,]\s*$/u.test(before))
+  )
+}
 const RAW_READ_CONTEXT =
   /(?:environment\[|getenv\(|Getenv\(|LookupEnv\(|env::var\(|env::var_os\(|environ\[|environ\.get\(|env_var\(|env_var_or_default\()\s*$/
 
-/** A shell line with single-quoted spans and a trailing `#` comment removed. */
-const shellCode = (line: string): string => {
+/**
+ * Shell text with single-quoted spans and `#` comments removed, one entry per line.
+ *
+ * Quote state CARRIES across lines. It reset per line, so the inner lines of a
+ * multi-line `'…'` string were code, and so was everything after a line that
+ * merely mentioned `<<EOF` in a comment or a quoted string.
+ */
+const shellCodeLines = (text: string): readonly string[] => {
+  const lines: string[] = []
   let code = ""
   let quote: "'" | '"' | undefined
-  for (let index = 0; index < line.length; index += 1) {
-    const character = line[index] ?? ""
+  let comment = false
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index] ?? ""
+    if (character === "\n") {
+      lines.push(code)
+      code = ""
+      comment = false
+      continue
+    }
+    if (comment) continue
     if (quote === "'") {
       if (character === "'") quote = undefined
       continue
     }
     if (quote === '"') {
-      if (character === "\\") index += 1
-      else if (character === '"') quote = undefined
-      code += character
+      if (character === "\\") {
+        code += character + (text[index + 1] ?? "")
+        index += 1
+      } else {
+        if (character === '"') quote = undefined
+        code += character
+      }
       continue
     }
     if (character === "'" || character === '"') {
+      // A quoted heredoc DELIMITER is kept: masked away, `<<'PY'` read as a bare
+      // `<<` and the embedded interpreter's reads were never looked at.
+      const close = text.indexOf(character, index + 1)
+      if (/<<-?\s*$/u.test(code) && close !== -1 && !text.slice(index + 1, close).includes("\n")) {
+        code += text.slice(index, close + 1)
+        index = close
+        continue
+      }
       quote = character
       continue
     }
-    const previous = line[index - 1]
-    if (character === "#" && (index === 0 || /[\s;]/.test(previous ?? "")) && previous !== "$")
-      break
+    const previous = text[index - 1]
+    if (character === "#" && (index === 0 || /[\s;]/.test(previous ?? "")) && previous !== "$") {
+      comment = true
+      continue
+    }
     code += character
   }
-  return code
+  lines.push(code)
+  return lines
 }
+
+/** A heredoc opener in CODE, not in arithmetic: `$((1<<SHIFT))` is a shift. */
+const heredocOpener = (code: string): RegExpExecArray | null =>
+  /<<-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/.exec(code.replace(/\$\(\([^)]*\)\)/g, ""))
 
 /** `$NAME`, `${NAME}`, `${NAME:-x}`, `${#NAME}` outside comments, single quotes and quoted heredocs. */
 export const shellReads = (text: string, names: ReadonlySet<string>): ReadonlySet<string> => {
@@ -416,21 +531,21 @@ export const shellReads = (text: string, names: ReadonlySet<string>): ReadonlySe
       if (name !== undefined && names.has(name)) found.add(name)
     }
   }
-  const lines = text.split("\n")
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index] ?? ""
-    scan(shellCode(line))
-    const heredoc = /<<-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/.exec(line)
-    if (heredoc === null) continue
-    const literal = heredoc[1] !== ""
+  const raw = text.split("\n")
+  const code = shellCodeLines(text)
+  for (let index = 0; index < raw.length; index += 1) {
+    const line = code[index] ?? ""
+    scan(line)
+    // The opener's QUOTES are gone from masked code, so whether the delimiter was
+    // quoted is read from the raw line at the same position.
+    const opener = heredocOpener(line)
+    if (opener === null) continue
+    const delimiter = opener[2]
+    const literal = opener[1] !== ""
     const body: string[] = []
-    for (
-      index += 1;
-      index < lines.length && (lines[index] ?? "").trim() !== heredoc[2];
-      index += 1
-    ) {
-      if (literal) body.push(lines[index] ?? "")
-      else scan(lines[index] ?? "")
+    for (index += 1; index < raw.length && (raw[index] ?? "").trim() !== delimiter; index += 1) {
+      if (literal) body.push(raw[index] ?? "")
+      else scan(raw[index] ?? "")
     }
     // A quoted-delimiter heredoc is usually an embedded interpreter: only a read call counts.
     const embedded = body.join("\n")
@@ -449,18 +564,28 @@ export const shellReads = (text: string, names: ReadonlySet<string>): ReadonlySe
 /** Workflow YAML, parsed: `env:` KEYS are writes; expressions and `run:` bodies read. */
 export const workflowReads = (text: string, names: ReadonlySet<string>): ReadonlySet<string> => {
   const found = new Set<string>()
-  const expressions = (value: string): void => {
+  const references = (value: string): void => {
     for (const match of value.matchAll(/\b(?:vars|env|secrets)\.([A-Za-z_][A-Za-z0-9_]*)/g)) {
       const name = match[1]
       if (name !== undefined && names.has(name)) found.add(name)
     }
+  }
+  // Only EXPRESSIONS read: `${{ … }}` spans, and an `if:` value, which is an
+  // expression without the braces. Matching the raw scalar backed a step NAME
+  // ("previously gated by env.X"), a `run:` comment and an echoed string.
+  const expressions = (value: string, key: string | undefined): void => {
+    if (key === "if") {
+      references(value)
+      return
+    }
+    for (const span of value.matchAll(/\$\{\{([\s\S]*?)\}\}/g)) references(span[1] ?? "")
   }
   const walk = (node: unknown, key: string | undefined): void => {
     if (isMap(node)) for (const pair of node.items) walk(pair, undefined)
     else if (isSeq(node)) for (const item of node.items) walk(item, undefined)
     else if (isPair(node)) walk(node.value, isScalar(node.key) ? String(node.key.value) : undefined)
     else if (isScalar(node) && typeof node.value === "string") {
-      expressions(node.value)
+      expressions(node.value, key)
       if (key === "run") for (const name of shellReads(node.value, names)) found.add(name)
     }
   }
@@ -486,17 +611,37 @@ const tokenEvidence = (
     if (!names.has(value)) continue
     const before = text.slice(Math.max(0, offset - 32), offset)
     if (RAW_WRITE_CONTEXT.test(before)) continue
+    if (lang === "py" && isPythonWrite(text, offset, value)) continue
     if (test && !RAW_READ_CONTEXT.test(before)) continue
     sink(value, "quoted", rel)
   }
 }
 
+/**
+ * Inside `expect(…)` a test ASSERTS on a variable — `expect(process.env.RETIRED)
+ * .toBeUndefined()` asserts a name is dead, and `expect(childEnv.X).toBe("1")`
+ * asserts a write. Both backed the name they were checking.
+ */
+const insideExpect = (node: ts.Node): boolean => {
+  for (let at = node.parent; at !== undefined; at = at.parent) {
+    if (
+      ts.isCallExpression(at) &&
+      ts.isIdentifier(at.expression) &&
+      at.expression.text === "expect"
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
 const parsedEvidence = (rel: string, text: string, lang: Lang, sink: Sink): void => {
-  const literals = !isTestFile(rel)
+  const test = isTestFile(rel)
+  const literals = !test
   const source = ts.createSourceFile(rel, text, ts.ScriptTarget.ESNext, true, scriptKindOf(lang))
   const visit = (node: ts.Node): void => {
     const hit = classifyNode(node, literals)
-    if (hit !== undefined) {
+    if (hit !== undefined && !(test && insideExpect(node))) {
       const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1
       sink(hit.name, hit.kind, `${rel}:${line}`)
     }
@@ -550,7 +695,16 @@ const walkEvidence = (
   for (const rel of files) {
     let text: string | undefined
     const read = (): string => {
-      text ??= readFileSync(join(repoRoot, rel), "utf8")
+      if (text === undefined) {
+        try {
+          text = readFileSync(join(repoRoot, rel), "utf8")
+        } catch (error) {
+          // Tracked and gone: a concurrent session's unstaged deletion. It reads
+          // nothing, and crashing the whole scan over it reported nothing either.
+          if ((error as { code?: string }).code !== "ENOENT") throw error
+          text = ""
+        }
+      }
       return text
     }
     const lang = languageOf(rel, () => read().slice(0, 200))
@@ -615,6 +769,16 @@ export const envKnobNames = (knobs: readonly CatalogKnob[] | undefined): readonl
     if (typeof knob === "string") return ENV_SHAPED.test(knob) ? [knob] : []
     return knob.where === "env" || RESERVED_ENV.test(knob.name) ? [knob.name] : []
   })
+
+/** `wiring.activation` conditions of `kind: env`, whose `key` IS the variable. */
+export const activationEnvNames = (
+  activation: readonly { readonly kind: string; readonly key?: string }[] | undefined,
+): readonly string[] =>
+  (activation ?? []).flatMap((condition) =>
+    condition.kind === "env" && condition.key !== undefined && ENV_SHAPED.test(condition.key)
+      ? [condition.key]
+      : [],
+  )
 
 /** A ledger row's `gate_owner` names, which nothing checked were read either. */
 export const gateOwnerEnvNames = (gateOwner: readonly string[]): readonly string[] =>

@@ -29,6 +29,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join, relative } from "node:path"
 import {
+  activationEnvNames,
   type CatalogEnvSource,
   catalogCorpus,
   type DeclaredEnvNames,
@@ -78,7 +79,16 @@ const SENTINELS: readonly (readonly [string, EnvEvidenceKind, string])[] = [
   ["QUANTA_TERMINAL_BRAIN_REPO", "shell", "adapters/"],
 ]
 
+/** Each env-naming field on its own, so an arm can prove every one reached `declared`. */
+interface FieldNames {
+  readonly configRefs: readonly string[]
+  readonly knobs: readonly string[]
+  readonly gateOwner: readonly string[]
+  readonly activation: readonly string[]
+}
+
 interface Scan {
+  readonly fields: FieldNames
   readonly records: readonly CatalogEnvSource[]
   readonly declared: DeclaredEnvNames
   readonly files: readonly string[]
@@ -95,19 +105,26 @@ beforeAll(async () => {
   const ledger = await loadDefaultOffLedger(
     join(REPO_ROOT, "tools", "feature-catalog", "default-off-ledger.yaml"),
   )
+  const knobsOf = (feature: (typeof features)[number]["feature"]) =>
+    envKnobNames(feature.knobs as Parameters<typeof envKnobNames>[0])
+  const activationOf = (feature: (typeof features)[number]["feature"]) =>
+    activationEnvNames(feature.wiring?.activation)
   const records: CatalogEnvSource[] = [
     ...features.map(({ feature, path }) => ({
       path: relative(REPO_ROOT, path),
-      env: [
-        ...(feature.config_refs?.env ?? []),
-        ...envKnobNames(feature.knobs as Parameters<typeof envKnobNames>[0]),
-      ],
+      env: [...(feature.config_refs?.env ?? []), ...knobsOf(feature), ...activationOf(feature)],
     })),
     ...ledger.rows.map((row) => ({
       path: `tools/feature-catalog/default-off-ledger.yaml#${row.feature_id}.gate_owner`,
       env: gateOwnerEnvNames(row.gate_owner),
     })),
   ]
+  const fields: FieldNames = {
+    configRefs: features.flatMap(({ feature }) => feature.config_refs?.env ?? []),
+    knobs: features.flatMap(({ feature }) => knobsOf(feature)),
+    gateOwner: ledger.rows.flatMap((row) => gateOwnerEnvNames(row.gate_owner)),
+    activation: features.flatMap(({ feature }) => activationOf(feature)),
+  }
   const declared = declaredEnvNames(records)
   const files = catalogCorpus(REPO_ROOT)
   const all = envEvidenceAll(
@@ -122,7 +139,7 @@ beforeAll(async () => {
     ],
     files,
   )
-  scan = { records, declared, files, all }
+  scan = { fields, records, declared, files, all }
 }, 120_000)
 
 describe("every env name the catalog offers is one some code reads", () => {
@@ -158,11 +175,32 @@ describe("every env name the catalog offers is one some code reads", () => {
     expect(unbacked.length === 0 ? "" : describeUnbackedEnvNames(unbacked)).toBe("")
   })
 
-  test("the ledger's gate_owner and knobs WITHOUT `where: env` are declarations too", () => {
-    const { records } = scanned()
-    // Both were extracted by nothing, and five names — three knobs, two ledger
-    // owners — sat unread behind that gap.
-    expect(records.some((record) => record.path.includes("default-off-ledger.yaml#"))).toBe(true)
+  test("EVERY env-naming field reaches the declared set, each by a name only it names", () => {
+    // `records.some(path includes "default-off-ledger.yaml#")` was true with the
+    // ledger's `env: []`, and dropping `config_refs.env`, `knobs` or `gate_owner`
+    // from the scan left `declared.size > 400` — every such mutant was green.
+    const { fields, declared } = scanned()
+    const all = Object.entries(fields) as [keyof FieldNames, readonly string[]][]
+    for (const [field, names] of all) {
+      // ANTI-VACUITY for the field itself, then membership of everything it names.
+      expect({ field, names: names.length > 0 }).toEqual({ field, names: true })
+      expect({ field, missing: names.filter((name) => !declared.has(name)) }).toEqual({
+        field,
+        missing: [],
+      })
+    }
+    // A field whose names all appear elsewhere could be dropped from the scan
+    // with nothing lost TODAY; one with a name only it names could not. Every
+    // field but `activation` has one (its one key, QUANTA_CAP_ENFORCE, is also a
+    // knob), which is what makes dropping those three a red.
+    for (const field of ["configRefs", "knobs", "gateOwner"] as const) {
+      const others = new Set(all.filter(([other]) => other !== field).flatMap(([, list]) => list))
+      const exclusive = fields[field].filter((name) => !others.has(name))
+      expect({ field, exclusive: exclusive.length > 0 }).toEqual({ field, exclusive: true })
+    }
+  })
+
+  test("knobs WITHOUT `where: env`, and activation keys, are declarations too", () => {
     expect(envKnobNames([{ name: "QUANTA_NO_WHERE" }])).toEqual(["QUANTA_NO_WHERE"])
     expect(envKnobNames([{ name: "QUANTA_FILE_WHERE", where: "src/x.ts" }])).toEqual([
       "QUANTA_FILE_WHERE",
@@ -172,6 +210,14 @@ describe("every env name the catalog offers is one some code reads", () => {
     expect(envKnobNames([{ name: "--trigger-phrase", where: "cli" }])).toEqual([])
     expect(envKnobNames([{ name: "AgentConfig.editRepair" }])).toEqual([])
     expect(gateOwnerEnvNames(["QUANTA_GATE", "config.flag"])).toEqual(["QUANTA_GATE"])
+    // `wiring.activation[kind=env].key` names the variable; nothing extracted it.
+    expect(
+      activationEnvNames([
+        { kind: "env", key: "QUANTA_ACTIVATE" },
+        { kind: "config", key: "agent.flag" },
+        { kind: "env", key: "lowercase" },
+      ]),
+    ).toEqual(["QUANTA_ACTIVATE"])
   })
 
   test("a retired name is NOT backed, though grep finds it four times", () => {
@@ -361,5 +407,141 @@ describe("what counts as evidence", () => {
       QUANTA_HELPER: null,
       QUANTA_PROD: "ts-literal",
     })
+  })
+
+  /**
+   * One fixture per tokenizer rule an audit could delete with the suite green:
+   * comment masking in Python, C-style and shell, shell single quotes (and
+   * across lines), fake heredoc openers, workflow expressions, Python and
+   * destructuring writes, the test-file read context, f-strings, every
+   * language branch, and assertions inside `expect`.
+   */
+  test("EVERY RULE — each masking, write and language rule has a line that only it decides", () => {
+    const expected: Readonly<Record<string, EnvEvidenceKind | null>> = {
+      QUANTA_PY_COMMENT: null,
+      QUANTA_PY_READ: "quoted",
+      QUANTA_RS_COMMENT: null,
+      QUANTA_SH_COMMENT: null,
+      QUANTA_SH_SQ: null,
+      QUANTA_SH_MULTI_SQ: null,
+      QUANTA_SH_AFTER_FAKE: null,
+      QUANTA_SH_AFTER_ARITH: null,
+      QUANTA_SH_HEREDOC: "shell",
+      QUANTA_SH_EMBED: "shell",
+      QUANTA_SH_EMBED_MENTION: null,
+      QUANTA_WF_NAME: null,
+      QUANTA_WF_RUNCOMMENT: null,
+      QUANTA_WF_RUNSQ: null,
+      QUANTA_WF_IF: "workflow",
+      QUANTA_WF_EXPR: "workflow",
+      QUANTA_WF_RUNSHELL: "workflow",
+      QUANTA_RS_SETVAR: null,
+      QUANTA_GO_SETENV: null,
+      QUANTA_PY_WRITE: null,
+      QUANTA_PY_DEL: null,
+      QUANTA_PY_DICTKEY: null,
+      QUANTA_PY_POP: null,
+      QUANTA_PY_CMP: "quoted",
+      QUANTA_PY_TESTNAME: null,
+      QUANTA_PY_TESTREAD: "quoted",
+      QUANTA_PY_TESTWRITE: null,
+      QUANTA_PY_FSTRING: null,
+      QUANTA_MJS: "ts-access",
+      QUANTA_CJS: "ts-access",
+      QUANTA_JSX: "ts-access",
+      QUANTA_NODE_SHEBANG: "ts-access",
+      QUANTA_DOCKER: "shell",
+      QUANTA_TS_ARRWRITE: null,
+      QUANTA_TS_OBJWRITE: null,
+      QUANTA_TS_FORWRITE: null,
+      QUANTA_TS_ARRREAD: "ts-access",
+      QUANTA_EXPECT_DEAD: null,
+      QUANTA_TEST_GATE: "ts-access",
+    }
+    const names = Object.keys(expected)
+    const found = inFixture(
+      {
+        "tools/a.py": [
+          '# os.environ["QUANTA_PY_COMMENT"] was removed',
+          'value = os.environ["QUANTA_PY_READ"]',
+          'os.environ["QUANTA_PY_WRITE"] = "1"',
+          'del os.environ["QUANTA_PY_DEL"]',
+          'env = {"QUANTA_PY_DICTKEY": "1"}',
+          'os.environ.pop("QUANTA_PY_POP")',
+          'if os.environ["QUANTA_PY_CMP"] == "1": pass',
+          'label = f"QUANTA_PY_FSTRING"',
+        ].join("\n"),
+        "tests/test_b.py": [
+          'NAME = "QUANTA_PY_TESTNAME"',
+          'os.environ.get("QUANTA_PY_TESTREAD")',
+          'os.environ["QUANTA_PY_TESTWRITE"] = "1"',
+        ].join("\n"),
+        "native/c.rs": [
+          '// std::env::var("QUANTA_RS_COMMENT")',
+          'std::env::set_var("QUANTA_RS_SETVAR", "1");',
+        ].join("\n"),
+        "native/d.go": 'os.Setenv("QUANTA_GO_SETENV", "1")\n',
+        "scripts/e.sh": [
+          `# echo ${DOLLAR}QUANTA_SH_COMMENT`,
+          `echo '${DOLLAR}QUANTA_SH_SQ'`,
+          "echo 'first line",
+          `${DOLLAR}QUANTA_SH_MULTI_SQ`,
+          "last line'",
+          "# cat <<EOF is how this used to be done",
+          `# ${DOLLAR}QUANTA_SH_AFTER_FAKE`,
+          `x=${DOLLAR}((1<<SHIFT))`,
+          `# ${DOLLAR}QUANTA_SH_AFTER_ARITH`,
+          "cat <<EOF",
+          `${DOLLAR}QUANTA_SH_HEREDOC`,
+          "EOF",
+          "python3 - <<'PY'",
+          'import os; os.environ.get("QUANTA_SH_EMBED")',
+          'print("QUANTA_SH_EMBED_MENTION")',
+          "PY",
+        ].join("\n"),
+        ".github/workflows/w.yml": [
+          "jobs:",
+          "  a:",
+          "    steps:",
+          "      - name: previously gated by env.QUANTA_WF_NAME",
+          "        run: |",
+          "          # env.QUANTA_WF_RUNCOMMENT was removed",
+          "          echo 'vars.QUANTA_WF_RUNSQ'",
+          `          echo ${DOLLAR}QUANTA_WF_RUNSHELL`,
+          "      - if: env.QUANTA_WF_IF == 'x'",
+          `        run: echo ${DOLLAR}{{ secrets.QUANTA_WF_EXPR }}`,
+        ].join("\n"),
+        "src/f.mjs": "const a = process.env.QUANTA_MJS\n",
+        "src/g.cjs": "const b = process.env.QUANTA_CJS\n",
+        "apps/h.jsx": "const c = <div>{process.env.QUANTA_JSX}</div>\n",
+        "scripts/tool": "#!/usr/bin/env bun\nconst d = process.env.QUANTA_NODE_SHEBANG\n",
+        "docker/Dockerfile": `RUN echo ${DOLLAR}{QUANTA_DOCKER}\n`,
+        "src/i.ts": [
+          '[process.env.QUANTA_TS_ARRWRITE] = ["1"];',
+          '({ a: process.env.QUANTA_TS_OBJWRITE } = { a: "1" });',
+          'for (process.env.QUANTA_TS_FORWRITE of ["1"]) {}',
+          "const [x] = [process.env.QUANTA_TS_ARRREAD];",
+        ].join("\n"),
+        "tests/unit/j.test.ts": [
+          "expect(process.env.QUANTA_EXPECT_DEAD).toBeUndefined()",
+          "if (process.env.QUANTA_TEST_GATE) {}",
+        ].join("\n"),
+      },
+      names,
+    )
+    expect(backed(found, names)).toEqual(expected)
+  })
+
+  test("a tracked file deleted from the worktree is skipped, not a crash", () => {
+    const found = inFixture({ "src/k.ts": "const e = process.env.QUANTA_STILL_HERE\n" }, [
+      "QUANTA_STILL_HERE",
+    ])
+    expect(found.get("QUANTA_STILL_HERE")?.kind).toBe("ts-access")
+    const root = mkdtempSync(join(tmpdir(), "cfgrefs-gone-"))
+    try {
+      expect(envEvidenceIndex(root, ["QUANTA_GONE"], ["src/deleted.ts"]).size).toBe(0)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })

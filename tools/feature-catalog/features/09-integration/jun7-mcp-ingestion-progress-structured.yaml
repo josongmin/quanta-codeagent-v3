@@ -64,7 +64,7 @@ knobs:
   # code reads that variable: the seam is `McpToolBindOpts.progress`, and the
   # notes below already say the runner-knob registration is future work.
   - name: McpToolBindOpts.progress
-    where: src/agent/mcp-bridge.ts
+    where: src/agent/mcp-tool-adapter.ts
     default: "false"
     purpose: opt-in to streaming notifications/progress (off ⇒ no _meta on the wire). No env variable exists yet.
 deliberate_hold: null
