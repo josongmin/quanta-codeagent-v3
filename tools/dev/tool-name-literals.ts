@@ -54,7 +54,7 @@
  * `.ts.tmp` is outside the census by construction rather than by remembering to say
  * `--include`.
  *
- * The narrowing is `name: "<literal>"` (or an `as const` / const-bound name) inside
+ * The narrowing is `name: "<literal>"` (or an `as const` name) inside
  * an object literal OR a class body that ALSO carries at least one member of
  * {@link TOOL_SHAPE_KEYS} — classes and methods since 9890282b5. `isReadOnly` is a
  * REQUIRED member of `ToolCore` (`src/tool/factory.ts`), so a tool definition
@@ -522,6 +522,14 @@ export interface UnattributedToolContainer {
  * tool-surface gates green. The class is closed here, at the source: each such container
  * is enumerated with its file, and the consumer pins the set by file WITH A COUNT, so a
  * new one fails until it is catalogued or reviewed.
+ *
+ * STILL NOT SEEN, stated rather than implied (round-9 audit, each measured green): a name
+ * set in a second statement (`t.name = …`), `Object.assign({ name }, core)`, a Proxy, a
+ * subclass that inherits `execute`, and a spread-renamer `{ ...tool, name: other }` with no
+ * `execute` of its own — the last is the renaming pattern of `mcp-reload-source.ts` and
+ * `subagent-tool-namespace.ts`, and 63 non-tool objects in `src/` share its shape, so
+ * enumerating it would bury the review list. Those shapes rely on the assembled universe and
+ * on each builder's own tests.
  */
 /** The unattributed-container verdict for ONE module's source text. */
 export const extractUnattributedToolContainers = (
@@ -539,7 +547,16 @@ export const extractUnattributedToolContainers = (
       // stream-callback bag carries `isReadOnly` and never `execute`, so it is not a tool
       // that could mint a name; a wrapper that spreads a tool and replaces `execute` is.
       const hasExecute = members.some((m) => m.key === "execute")
-      if (hasExecute && (spreads || hasNameKey)) {
+      // A CLASS needs no `name` member to be a tool: the name can arrive through a
+      // constructor parameter property (`constructor(readonly name: string)`), which is
+      // not a member here. Round-9 audit: such a class minted behind an undeclared slot
+      // passed every gate.
+      // `execute` alone does not make a class a tool (an effect channel has one); the
+      // REQUIRED `isReadOnly`, or an `inputSchema`, does.
+      const isToolClass =
+        (ts.isClassDeclaration(node) || ts.isClassExpression(node)) &&
+        members.some((m) => m.key === "isReadOnly" || m.key === "inputSchema")
+      if (hasExecute && (spreads || hasNameKey || isToolClass)) {
         out.push({
           file,
           line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,

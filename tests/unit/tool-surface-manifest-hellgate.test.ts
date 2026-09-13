@@ -668,11 +668,15 @@ describe("tool-surface manifest — tools whose NAME no instrument can read are 
         "export const w = (tool) => ({ ...tool, async *execute() {} })",
         // control: a literal name is the census's job, not this scan's.
         'export const lit = { name: "memory_search", isReadOnly: () => true, async *execute() {} }',
+        // RED: a class tool whose name arrives through its constructor (round 9).
+        "export class Reset { constructor(readonly name: string) {} isReadOnly() { return true } async *execute() {} }",
+        // control: an effect channel has `execute` and is not a tool.
+        "export class Channel { constructor(private readonly x: unknown) {} async execute() {} }",
         // control: a permission action carries isReadOnly and never execute.
         "export const action = { tool: 'bash', input: {}, isReadOnly: false, ...extra }",
       ].join("\n"),
     )
-    expect(shapes.map((s) => s.line)).toEqual([1, 2])
+    expect(shapes.map((s) => s.line)).toEqual([1, 2, 4])
   })
 })
 
