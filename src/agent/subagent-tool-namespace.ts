@@ -1,4 +1,4 @@
-import { ToolRegistry } from "@/tool"
+import type { ToolOrigin, ToolRegistry } from "@/tool"
 
 /** Maps a raw tool name to a collision-free child-local name. */
 export interface ToolNamespaceStrategy {
@@ -14,18 +14,22 @@ export const prefixToolNamespace: ToolNamespaceStrategy = {
 }
 
 /** Clone a registry with each tool presented under a child-local name. Each keeps its own
- *  name for policy (`ToolRegistry.policyNameOf`): the rename is for the model, and a gate
- *  keyed by tool name must not see a name it has never classified. */
+ *  name for policy (`ToolRegistry.policyNameOf`) and its origin: the rename is for the
+ *  model, and neither a gate keyed by tool name nor provenance keyed by origin may see a
+ *  tool it has never classified (round 10: the name; round 11: the origin, which the
+ *  rename dropped, so an MCP tool read as `builtin`). */
 export const namespaceRegistry = (
   source: ToolRegistry,
   strategy: ToolNamespaceStrategy,
   namespaceToken: string,
 ): ToolRegistry => {
   const policyNames = new Map<string, string>()
+  const origin = new Map<string, ToolOrigin>()
   const renamed = source.all().map((tool) => {
     const presented = strategy.scope(namespaceToken, tool.name)
-    policyNames.set(presented, tool.name)
+    policyNames.set(presented, source.policyNameOf(tool.name))
+    origin.set(presented, source.originOf(tool.name))
     return { ...tool, name: presented }
   })
-  return new ToolRegistry(renamed, undefined, policyNames)
+  return source.derive(renamed, { origins: origin, policyNames })
 }

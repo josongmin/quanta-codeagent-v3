@@ -17,8 +17,7 @@ import type { AgentConfig } from "@/agent"
 import { lspNavToolList } from "@/agent"
 import { lspSchema } from "@/config/knob-schema/schemas/bench-gap-1"
 import { deriveKnob } from "@/runner/knobs/derive"
-import type { Tool } from "@/tool"
-import { ToolRegistry } from "@/tool"
+import type { Tool, ToolRegistry } from "@/tool"
 
 /** Reconstruct the underlying `Tool[]` from a registry — `ToolRegistry`
  *  is construct-only and exposes specs by name; we round-trip them here. */
@@ -33,7 +32,7 @@ const registryTools = (r: ToolRegistry): Tool[] =>
  *  export; ONE definition so the derived knob is byte-identical to registered. */
 export const applyLsp = (cfg: AgentConfig, on: boolean): AgentConfig => {
   if (!on) return cfg
-  const merged = new ToolRegistry([
+  const merged = cfg.registry.derive([
     ...registryTools(cfg.registry),
     ...lspNavToolList(() => cfg.cwd),
   ])

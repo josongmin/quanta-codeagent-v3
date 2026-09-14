@@ -1,7 +1,7 @@
 import type { Message } from "@/llm"
 import { type RuntimeConfig, runtimeConfig } from "@/shared"
 import type { SubagentTurnGate } from "@/subagent"
-import { type Tool, ToolRegistry } from "@/tool"
+import type { Tool, ToolRegistry } from "@/tool"
 import { ReadFileState } from "@/tool/stale-read-guard"
 import type { SubagentRequest } from "../subagent/types"
 import {
@@ -31,7 +31,7 @@ const filterRegistry = (
       .specs()
       .map((s) => parent.get(s.name))
       .filter((t): t is Tool => t !== undefined)
-  if (!toolFilter) return extra.length === 0 ? parent : new ToolRegistry([...allTools(), ...extra])
+  if (!toolFilter) return extra.length === 0 ? parent : parent.derive([...allTools(), ...extra])
   const allow = new Set(toolFilter)
   const kept = parent
     .specs()
@@ -39,7 +39,7 @@ const filterRegistry = (
     .filter((name) => allow.has(name))
     .map((name) => parent.get(name))
     .filter((t): t is NonNullable<typeof t> => t !== undefined)
-  return new ToolRegistry([...kept, ...extra])
+  return parent.derive([...kept, ...extra])
 }
 
 const chainedSignal = (parent: AbortSignal, extra?: AbortSignal): AbortSignal =>

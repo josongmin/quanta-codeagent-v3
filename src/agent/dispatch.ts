@@ -584,9 +584,11 @@ const dispatchToolInner = async (
     return deny(call.id, `Unknown tool: ${call.name}`, "unknown tool")
   }
 
-  // Every gate below is keyed by tool name. A registry that presents a tool under an alias
-  // (a subagent tool namespace) gives the gates the tool's own name; only execution and
-  // the model-facing call keep the alias.
+  // Every gate below, and everything after execution, is keyed by tool name. A registry
+  // that presents a tool under an alias (a subagent tool namespace) gives them the tool's
+  // own name; only the model-facing call keeps the alias (its result block carries the id,
+  // not the name). Post-execution used the alias until round 11: provenance, post hooks,
+  // edit repair and the cap tracker saw a name no table classifies.
   const policyName = registry.policyNameOf(call.name)
   const gateCall: ToolUseBlock = policyName === call.name ? call : { ...call, name: policyName }
 
@@ -625,7 +627,7 @@ const dispatchToolInner = async (
   // level of the permission config itself, so this is intentional (the model
   // and untrusted content cannot reach it). See hooks.ts `emit` security note.
   const rewritten = admission.rewritten
-  const effectiveCall: ToolUseBlock = rewritten ? { ...call, input: rewritten.value } : call
+  const effectiveCall: ToolUseBlock = rewritten ? { ...gateCall, input: rewritten.value } : gateCall
   // The router is disposed in the `finally` below so the upstream listener + any
   // armed watchdog are always released.
   const { ctx, interruptHandle } = buildInterruptAwareContext(

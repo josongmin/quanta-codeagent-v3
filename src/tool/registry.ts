@@ -52,7 +52,40 @@ export class ToolRegistry {
    *  map, ⇒ `builtin` (the conservative, byte-identical default). O(1) map
    *  lookup — never scans the tool list. */
   originOf(name: string): ToolOrigin {
-    return this.origin?.get(name) ?? "builtin"
+    return (
+      this.origin?.get(name) ?? this.origin?.get(this.presentedNames.get(name) ?? "") ?? "builtin"
+    )
+  }
+
+  /**
+   * A registry of `tools` that keeps what this one knows about each tool it holds: its
+   * origin and its policy name. A tool this registry does not hold (a feature tool merged
+   * in, or a renamed copy) takes both from `fresh`, else reads `builtin` under its own name.
+   *
+   * Every registry built from another registry's tools goes through here. A plain
+   * `new ToolRegistry([...r.all(), extra])` dropped the origin map, so each tool read as
+   * `builtin`: an MCP tool in a tool-filtered subagent, after a feature merge, or in a side
+   * conversation got `internal` provenance and, with the untrusted envelope on, reached the
+   * model unwrapped (round-11 audit A3). A census test pins the construction sites.
+   */
+  derive(
+    tools: readonly Tool[],
+    fresh: {
+      readonly origins?: ReadonlyMap<string, ToolOrigin>
+      readonly policyNames?: ReadonlyMap<string, string>
+    } = {},
+  ): ToolRegistry {
+    const origin = new Map<string, ToolOrigin>()
+    const policyNames = new Map<string, string>()
+    for (const tool of tools) {
+      const held = this.tools.has(tool.name)
+      const known = held ? this.origin?.get(tool.name) : fresh.origins?.get(tool.name)
+      if (known !== undefined) origin.set(tool.name, known)
+      const own = held ? this.policyNames.get(tool.name) : fresh.policyNames?.get(tool.name)
+      if (own !== undefined) policyNames.set(tool.name, own)
+    }
+    const carriesOrigin = this.origin !== undefined || fresh.origins !== undefined
+    return new ToolRegistry([...tools], carriesOrigin ? origin : undefined, policyNames)
   }
 
   has(name: string): boolean {

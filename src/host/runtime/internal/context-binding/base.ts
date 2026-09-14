@@ -13,7 +13,7 @@ import { buildSessionMemoryAutoWires } from "@/runner/session-memory-auto"
 import { getBashBgRegistry } from "@/runtime/bash-bg-registry"
 import type { RuntimeAgentTurnAssembler, RuntimeAgentTurnDeps } from "@/sdk/runtime/base"
 import { fullFidelityEnabled, itemStreamEnabled } from "@/shared"
-import { automationUpdateTool, ToolRegistry } from "@/tool"
+import { automationUpdateTool } from "@/tool"
 import { CAPABILITY_WIRES } from "../../agent-config-assembler"
 import { deriveCapabilityManifest } from "../../capabilities"
 import { foldCapabilityWires } from "../../capability-wire-registry"
@@ -265,7 +265,7 @@ const ensureAutomationRegistry = (
   automationEngine: AgentConfig["automationEngine"] | undefined,
 ): AgentConfig["registry"] => {
   if (automationEngine === undefined || registry.has("automation_update")) return registry
-  return new ToolRegistry([...registry.all(), automationUpdateTool(automationEngine.engine)])
+  return registry.derive([...registry.all(), automationUpdateTool(automationEngine.engine)])
 }
 
 export const buildBaseFromBootstrap = (args: {

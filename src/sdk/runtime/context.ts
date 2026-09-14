@@ -6,7 +6,7 @@ import {
 } from "@/host/runtime/internal/context-binding"
 import type { ObjectivePort } from "@/objective"
 import type { Tool } from "@/tool"
-import { automationUpdateTool, ToolRegistry } from "@/tool"
+import { automationUpdateTool } from "@/tool"
 import type { RuntimeAgentConfigBase, RuntimeAgentTurnAssembler } from "./base"
 import { createRuntime } from "./create-runtime"
 import type { RuntimeFacade } from "./types"
@@ -297,7 +297,7 @@ const applyRuntimeFacadeComposeOptions = (
     const registry = next.snapshot.registry
     const { registryToolMapper } = compose
     next = patchRuntimeContextState(next, {
-      registry: new ToolRegistry(registry.all().map((tool) => registryToolMapper(tool))),
+      registry: registry.derive(registry.all().map((tool) => registryToolMapper(tool))),
     })
   }
   if (compose.automationEngine !== undefined) {
@@ -306,7 +306,7 @@ const applyRuntimeFacadeComposeOptions = (
       automationEngine: compose.automationEngine,
       registry: registry.has("automation_update")
         ? registry
-        : new ToolRegistry([
+        : registry.derive([
             ...registry.all(),
             automationUpdateTool(compose.automationEngine.engine),
           ]),

@@ -4,7 +4,7 @@ import type {
   SessionHostSideConversationResult,
 } from "@/kernel/session"
 import type { Message } from "@/llm"
-import { type Tool, ToolRegistry } from "@/tool"
+import type { Tool, ToolRegistry } from "@/tool"
 import type { RuntimeBase } from "./types"
 
 const SIDE_CONVERSATION_MAX_TURNS_CAP = 5
@@ -63,7 +63,7 @@ const buildSideConversationRegistry = (
     const tool = source.get(name)
     if (tool !== undefined) allowed.push(tool)
   }
-  return new ToolRegistry(allowed)
+  return source.derive(allowed)
 }
 
 const buildSideConversationHistory = (

@@ -15,7 +15,7 @@ import {
 } from "@/observability/tracing"
 import type { RedactionHit, RedactionOrigin } from "@/security"
 import type { RunContext } from "@/shared"
-import { type Tool, ToolRegistry } from "@/tool"
+import type { Tool } from "@/tool"
 import { type CloseoutGuardState, createCloseoutGuardState } from "./closeout-guard"
 import { effectiveModelOf } from "./effective-model"
 import { createLocalizePhaseState, type LocalizePhaseState } from "./localize-phase-guard"
@@ -110,7 +110,7 @@ export const buildEffectiveConfig = (config: AgentConfig, extraTools: Tool[]): A
   const effectiveExtra =
     allowed === undefined ? extraTools : extraTools.filter((t) => allowed.includes(t.name))
   if (effectiveExtra.length === 0) return config
-  config.registry = new ToolRegistry([...registryTools(config.registry), ...effectiveExtra])
+  config.registry = config.registry.derive([...registryTools(config.registry), ...effectiveExtra])
   return config
 }
 
