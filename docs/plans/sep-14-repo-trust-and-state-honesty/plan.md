@@ -114,13 +114,13 @@ land (오케스트레이터, main 트리):
 
 | 웨이브/lane | 상태 | main 커밋 |
 |---|---|---|
-| W1 A | 대기 | |
+| W1 A | 구현 + 5라운드, main 위로 rebase·조정 중: sep-13 SEC-1 스크럽(`28d68bd85`)은 Bun이 먼저 읽는 `.env`에서 동작하지 않음(측정: base URL·bypass·키 헬퍼가 경고 0개로 통과) → checkout-root 로더가 대체하고 스크럽은 제거(두 세션과 합의). sep-12 `operator-trusted-paths.ts`는 유지 | |
 | W1 B1 | 대기 | |
 | W1 C3 | 대기 | |
 | W1 D1 | 대기 | |
 | W1 DS1 | 기반 land (sep-12 truth-guard, ADR-0559) — 아래 §7.1 | `b6d0d27d0`, `d2a8c4b7b` |
 | W1 F1 | 대기 | |
-| W1 S | 대기 | |
+| W1 S | land (구현 + 적대/객관 5라운드, 마지막 라운드 확정 0; 오케스트레이터 재검증: rebase 무충돌, lane·광역 라쳇 176/177(남은 1은 main에도 있는 foreign `test-shard-lease` tmp-leak red), symlink 거부 뮤턴트 8 red, tsc 0, biome clean) | `b7d5488e3`..`75b8679e8` (13) |
 | W2 | 대기 | |
 | W3 | 대기 | |
 
