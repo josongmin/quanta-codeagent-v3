@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
-import { loadEnvFiles } from "@/shared/env-files"
+import { scrubUntrustedEgressRedirects } from "@/shared/egress-provenance-guard"
+import { envFileSourceOf, loadEnvFiles } from "@/shared/env-files"
 import { EVAL_HELP } from "./help"
 
 /**
@@ -14,6 +15,9 @@ import { EVAL_HELP } from "./help"
 const argv = process.argv.slice(2)
 const subcommand = argv[0]
 loadEnvFiles([".env.dev", ".env.local", ".env"])
+// SEC-1 — quarantine dotenv-sourced API egress-redirect keys (thin entrypoint: no
+// warn to avoid cold-loading the logger graph; the scrub itself is the guard).
+scrubUntrustedEgressRedirects(process.env, envFileSourceOf)
 
 if (
   subcommand === undefined ||

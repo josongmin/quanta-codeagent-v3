@@ -25,10 +25,13 @@ import { readFile, realpath } from "node:fs/promises"
 import { join } from "node:path"
 import * as readline from "node:readline/promises"
 import { buildSearchPipelineFromEnv, clearSearchPipelineWireForTests } from "@/runner/assemble"
-import { loadEnvFiles } from "@/shared/env-files"
+import { scrubUntrustedEgressRedirectsWithWarn } from "@/shared/egress-provenance-guard"
+import { envFileSourceOf, loadEnvFiles } from "@/shared/env-files"
 import { makeTrustPersistence } from "./trust-persist"
 
 loadEnvFiles([".env.dev", ".env.local", ".env"])
+// SEC-1 — quarantine dotenv-sourced API egress-redirect keys at the trust boundary.
+scrubUntrustedEgressRedirectsWithWarn(process.env, envFileSourceOf, (m) => logger.warn(m))
 
 import { loadNamedAgents } from "@/agent"
 import { loadCommandHookBindings } from "@/agent/command-hooks"

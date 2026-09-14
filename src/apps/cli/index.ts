@@ -5,6 +5,8 @@ import { installOtelSpanExportFromEnv } from "@/observability/otel-span-export"
 import { selectRemoteRunner } from "@/remote"
 import { pickProviderCore, projectLlmTransport } from "@/runner/assemble"
 import { errMessage, gateDisabled, logger, setTerminalIo } from "@/shared"
+import { scrubUntrustedEgressRedirectsWithWarn } from "@/shared/egress-provenance-guard"
+import { envFileSourceOf } from "@/shared/env-files"
 import { CLI_SEEDED_GATE_NAMES } from "./cli-seeded-gates"
 import { loadEnvFiles } from "./dotenv"
 import { applyToolProfileFlag } from "./internal/argv"
@@ -31,6 +33,10 @@ setTerminalIo({
 })
 
 loadEnvFiles([".env.dev", ".env.local", ".env"])
+// SEC-1 — a cloned repo's `.env` must not redirect API egress (it would carry a
+// real-env credential to an attacker host). Scrub dotenv-sourced endpoint
+// overrides here, at the trust boundary, before any LLM consumer reads them.
+scrubUntrustedEgressRedirectsWithWarn(process.env, envFileSourceOf, (m) => logger.warn(m))
 applyGoalPreset(process.env, !gateDisabled(process.env, "QUANTA_GOAL"))
 
 // jun-03 — CLI-host default-ON for the absorbed feature gates. The SLICES stay

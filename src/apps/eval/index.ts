@@ -27,7 +27,8 @@
  */
 import { DEFAULT_MODEL, type LLMPort, type Provider, pickProvider, tryCreateLLM } from "@/llm"
 import { errMessage, logger, setTerminalIo } from "@/shared"
-import { loadEnvFiles } from "@/shared/env-files"
+import { scrubUntrustedEgressRedirectsWithWarn } from "@/shared/egress-provenance-guard"
+import { envFileSourceOf, loadEnvFiles } from "@/shared/env-files"
 import {
   argValue,
   evalConsole as console,
@@ -858,5 +859,7 @@ export const runEvalCliProcess = async (argv: readonly string[]): Promise<void> 
 
 if (import.meta.main) {
   loadEnvFiles([".env.dev", ".env.local", ".env"])
+  // SEC-1 — quarantine dotenv-sourced API egress-redirect keys at the trust boundary.
+  scrubUntrustedEgressRedirectsWithWarn(process.env, envFileSourceOf, (m) => logger.warn(m))
   await runEvalCliProcess(process.argv.slice(2))
 }
