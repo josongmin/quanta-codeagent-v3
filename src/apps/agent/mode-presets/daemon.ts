@@ -37,8 +37,15 @@
  *       backs (file / SQLite). This runner reads/writes through it via
  *       the standard mechanisms; ownership is the host's.
  *     - `req.base.permission` — defaults to `{ mode: "acceptEdits" }`
- *       since there is no human. Network is gated by the `allowlist`
- *       lever, git writes are gated by `branch-only`.
+ *       since there is no human. Git writes are gated by `branch-only`.
+ *       The `allowlist` network lever checks the calls that NAME a host
+ *       (`url` / `host` / `target_url` fields); it does not bound a shell
+ *       command. Measured sep-14 (round 11): with this preset's guard and
+ *       `acceptEdits`, `bash` running `curl … -d @.env` to an off-list host
+ *       is allowed by both, while `web_fetch` to it is denied. No egress proxy
+ *       is armed by the mode (`QUANTA_NETWORK_PROXY` is a separate opt-in).
+ *       Shell egress from a daemon run is bounded only by the host's own
+ *       sandbox.
  *
  *   Idempotency: invoking `runMode` twice with the same `sessionId` is
  *   safe — the assembler builds a fresh BudgetMeter each call (the meter

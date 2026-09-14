@@ -103,7 +103,8 @@ const IDE: ModePolicy = {
  *  webhook responder). Distinct from `headless` (one-shot) on memory
  *  (`persistent` cron-to-cron) + sandbox (`per-instance` worktree) +
  *  termination (`diff-ready`) + network (`allowlist`) + gitWrite
- *  (`branch-only`). No human ⇒ auto/acceptEdits within the allowlist. */
+ *  (`branch-only`). No human ⇒ acceptEdits. The allowlist bounds host-naming
+ *  tool calls, not shell commands (see the daemon mode-preset runner). */
 const DAEMON: ModePolicy = {
   mode: "daemon",
   permission: { kind: "auto", policy: "acceptEdits" },
