@@ -141,3 +141,37 @@ sep-12 라운드 9의 A-F1(LSP가 워크스페이스 코드 실행)을 고치던
 
 테스트: `tests/unit/cli/workspace-trust-hellgate.test.ts`(가짜 서버 바이너리 + paired control, 뮤턴트 14개 red).
 테스트 프로세스는 스크래치 폴더만 신뢰한다(`tests/setup.ts`).
+
+### 7.2 재조정 (2026-09-14 오후) — 다른 세션이 main에 넣은 것과 이 계획의 대응
+
+| main 커밋 | 무엇 | 이 계획의 대응 |
+|---|---|---|
+| `b6d0d27d0` 외 (sep-12, ADR-0559) | 폴더 신뢰 authority, TTY 프롬프트, `.mcp.json`·plugins·project-grants·LSP spawn 게이트 | DS1 lane은 중복이라 폐기(land 안 함). 남은 신뢰 항목은 W2에서 이 기반 위에 만든다 |
+| `28d68bd85` (sep-13 SEC-1) | dotenv 출처 base URL 스크럽 | 측정: Bun이 먼저 읽는 `.env`에서 동작 안 함(base URL·bypass·키 헬퍼가 경고 0개로 통과), `.env.dev`에서도 `OPENAI_BASE_URL`만 제거. lane A가 원인(컴파일 플래그 + checkout-root 로더)을 고치고 스크럽을 대체. sep-13 세션 합의 |
+| `3188cf2d1`, `93aba3560`, `b302178a5` (sep-13 SEC-2) | pyright 워크스페이스 인터프리터 = 신뢰 폴더일 때만, env 스위치 제거 | B1이 main의 신뢰 결정·canonical root를 소비하도록 재조정(§8) |
+| `aa4de8d8c` (sep-13 BUG-2) | `/context`에 transcript 합산 | E(W3)가 표시·경고·트리거 단일 측정으로 대체. sep-13 세션 합의 |
+| `a0882eaa7` (sep-12) | dotenv 출처·상대경로 MCP config 경로도 폴더 신뢰 필요 | 유지. Bun `.env` 자동 로드 + 절대경로(`${PWD}`)는 lane A 소관 잔여 |
+| `2390b979e` (sep-13 OC-4) | seatbelt 읽기 경계 | 겹침 없음 |
+
+sep-13 세션은 W-SESSION(BUG-1/3/4)·W-PERM(SEC-3/4/5)을 이 계획에 넘기고, OC-1(activity stuck)은 C3·F1 land 후
+커널 `awaiting_approval` 투영 + W2 goal Blocker 소비 + wait_agent·tool-in-flight producer로 진행한다.
+
+## 8. 수렴 규칙 (W1 경험에서 추가)
+
+어딧 루프가 **연속 3라운드 이상 막는 결함을 확정**하면 패치를 멈춘다. 모든 라운드의 발견을 근본원인별로 묶는
+설계 에이전트(읽기 전용)를 돌리고, 그 클래스를 표현 불가능하게 만드는 구조 변경 하나를 구현한 다음 어딧을
+다시 시작한다. 계기: C3는 `ShellSubject`를 `ToolAction`의 느슨한 필드 세 개로 들고 다녀서 라운드마다 "이
+소비자도 채널을 안 본다"가 나왔고, B1은 main에 canonical root authority가 생긴 뒤에도 자체 `.git` 탐색으로
+containment root를 다시 계산해 worktree·submodule 엣지가 계속 나왔다.
+
+범위 fence: lane이 원래 클래스 밖으로 번지면(예: C3의 SEC-4·sandbox·line assembly) W2로 넘기고 lane은 자기
+클래스를 닫는 데서 끝낸다.
+
+### W2 (W1 land 후, main 기반 재매핑)
+- 신뢰 잔여(ADR-0559 위): `quanta trust`·`--trust-project`, `/rules`·`/status` ignored 행, AGENTS.md/CLAUDE.md·`.quanta/agents`·vendor/glob rules 게이트, `environment.toml`(NW-3), legacy-cwd 메모리(NW-1), 커넥터 설치 결과(NW-8), 웹데몬 AGENTS.md arm(NW-10)
+- B: U-5 비신뢰 강화 모드(pyright 신뢰 인터프리터 + extraPaths, PATH tsserver, rust 핀) — main의 "비신뢰 전면 OFF"를 U-5 결정대로 대체, 벤치 LSP grounding 전후 측정(NW-18)
+- F: C8 goal blocker + C6b wake 소비 + C9 CLI stop 줄 + 웹 W1–W4, NW-6 → C10, NW-14 → C11
+- C: SEC-4 floor(NW-12 오프라인 재생, NW-16), SEC-3d exec_command sandbox, stdin logical-line assembly
+
+### W3
+- E1(단일 측정 생산자, `aa4de8d8c` 대체) → NW-13 영수증 → E2
