@@ -230,6 +230,31 @@ describe("node_repl — list / kill lifecycle", () => {
   })
 })
 
+describe("node_repl — every exec is bounded", () => {
+  // 6d976eedc made the tool always pass a deadline; reverting to "no timeout unless given"
+  // kept three node-repl suites green (round-10 audit, 42/0). The kernel sees 120 s when the
+  // call names none, and the caller's value when it does.
+  test("an exec with no timeoutMs reaches the kernel with the 120 s default", async () => {
+    const stub = headlessStub()
+    const seen: (number | undefined)[] = []
+    const recording: NodeReplKernel = {
+      ...stub,
+      spawn: (o) => stub.spawn(o),
+      status: (id) => stub.status(id),
+      kill: (id) => stub.kill(id),
+      list: () => stub.list(),
+      exec: (id, code, opts) => {
+        seen.push(opts?.timeoutMs)
+        return stub.exec(id, code, opts)
+      },
+    }
+    const tool = nodeReplTool(recording)
+    await run(tool, { op: "exec", code: "1+1" })
+    await run(tool, { op: "exec", code: "2+2", timeoutMs: 700 })
+    expect(seen).toEqual([120_000, 700])
+  })
+})
+
 describe("node_repl — a dead session kernel is replaced, on the REAL kernel", () => {
   // The session slot kept a dead kernel's id: after one timeout every later call answered
   // "is dead (process exited). Re-run to spawn a fresh one." and re-running changed nothing

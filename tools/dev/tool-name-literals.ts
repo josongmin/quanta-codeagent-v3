@@ -523,13 +523,15 @@ export interface UnattributedToolContainer {
  * is enumerated with its file, and the consumer pins the set by file WITH A COUNT, so a
  * new one fails until it is catalogued or reviewed.
  *
- * STILL NOT SEEN, stated rather than implied (round-9 audit, each measured green): a name
- * set in a second statement (`t.name = …`), `Object.assign({ name }, core)`, a Proxy, a
- * subclass that inherits `execute`, and a spread-renamer `{ ...tool, name: other }` with no
- * `execute` of its own — the last is the renaming pattern of `mcp-reload-source.ts` and
- * `subagent-tool-namespace.ts`, and 63 non-tool objects in `src/` share its shape, so
+ * STILL NOT SEEN, stated rather than implied (round-9 and round-10 audits, each measured
+ * green): a name set in a second statement (`t.name = …`), `Object.assign({ name }, core)`,
+ * a Proxy, a subclass that inherits `execute`, a subclass that defines `execute` but
+ * inherits `isReadOnly`/`inputSchema` and passes its name to `super(…)`, and a
+ * spread-renamer `{ ...tool, name: other }` with no `execute` of its own — the last is the
+ * renaming pattern of `mcp-reload-source.ts` and `subagent-tool-namespace.ts`, and 61 other
+ * objects in `src/` share its shape (63 counting those two; this said "63 non-tool"), so
  * enumerating it would bury the review list. Those shapes rely on the assembled universe and
- * on each builder's own tests.
+ * on each builder's own tests; a renamed tool is gated under its own name at dispatch.
  */
 /** The unattributed-container verdict for ONE module's source text. */
 export const extractUnattributedToolContainers = (

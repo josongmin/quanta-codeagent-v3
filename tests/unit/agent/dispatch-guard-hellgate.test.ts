@@ -209,6 +209,17 @@ describe("HELL-DG-03 default-guard branch-only hit", () => {
     expect(d.kind).toBe("allow")
   })
 
+  test("the branch check reads the shell line the seam projects, not only `command`", () => {
+    // 9ec7dc6b1 routed the registry's projection to every shell-keyed contribution; a
+    // mutant where this one kept reading input fields passed 50/0 (round-10 audit). A tool
+    // whose shell line has no `command` field — the projection is the only way to see it.
+    const d = guard.check("test_runner", { path: "x" }, { shellCommand: "git push origin main" })
+    expect(d.kind).toBe("deny")
+    if (d.kind === "deny") expect(d.reason.toLowerCase()).toContain("protected branch")
+    // PAIRED CONTROL: without the projection there is nothing to read.
+    expect(guard.check("test_runner", { path: "x" }).kind).toBe("allow")
+  })
+
   test("git push to non-protected branch → allow", () => {
     const g = defaultDispatchGuard({ protectedBranches: ["main"], currentBranch: "feature/x" })
     const d = g.check("bash", { command: "git push origin feature/x" })

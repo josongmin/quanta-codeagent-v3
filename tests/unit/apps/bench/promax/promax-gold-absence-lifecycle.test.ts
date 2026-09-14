@@ -457,6 +457,12 @@ interface BoxWire {
  *  go to the box. */
 const READINESS_PROBE_SHAPE = /(?:^|; )(?:test -[xd] ~\/\S+ && )+echo \w+$/
 
+/** `test -x` needs the file AND its mode: a write without `chmod +x` is not executable, and a
+ *  fake that counted the write alone passed a bootstrap that dropped the chmod (round-10
+ *  audit, 19/0). */
+const writesExecutableShim = (remote: string): boolean =>
+  remote.includes("cat > ~/swebench-python") && remote.includes("chmod +x ~/swebench-python")
+
 const boxWire = (box: FakeBox, bootstrapped: boolean): BoxWire => {
   const spawns: Array<{ cmd: string; args: string[] }> = []
   // A FRESH box is not ready when it is first probed; bootstrap then RUNS on it, and the
@@ -500,7 +506,7 @@ const boxWire = (box: FakeBox, bootstrapped: boolean): BoxWire => {
     if (cmd !== "ssh") return ok("")
     const remote = args[args.length - 1] ?? ""
     if (READINESS_PROBE_SHAPE.test(remote)) return answerProbe(remote)
-    if (remote.includes("cat > ~/swebench-python")) shimWritten = true
+    if (writesExecutableShim(remote)) shimWritten = true
     return box.run(remote)
   }
   return { spawn, box, spawns }
