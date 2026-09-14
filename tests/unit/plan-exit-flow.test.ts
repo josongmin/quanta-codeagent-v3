@@ -46,13 +46,16 @@ describe("runPlanExitFlow — three decisions", () => {
     expect(planExitStaysInPlan(result.decision)).toBe(false)
   })
 
-  test("rejected ⇒ allows mutation false; stays in plan false", async () => {
+  // A rejection stays in plan (9f4b864c7): leaving plan means default mode, which admits
+  // writes. This arm asserted `false` and went red with that fix; the full unit tier caught
+  // it, the targeted runs did not include this file.
+  test("rejected ⇒ allows mutation false; stays in plan true", async () => {
     const port = fixedPort({ decision: "rejected" })
     const result = await runPlanExitFlow("plan", "draft plan", port)
     expect(result.decision).toBe("rejected")
     expect("feedback" in result).toBe(false)
     expect(planExitAllowsMutation(result.decision)).toBe(false)
-    expect(planExitStaysInPlan(result.decision)).toBe(false)
+    expect(planExitStaysInPlan(result.decision)).toBe(true)
   })
 
   test("changes_requested with feedback ⇒ allows mutation false; stays in plan true; feedback propagated", async () => {

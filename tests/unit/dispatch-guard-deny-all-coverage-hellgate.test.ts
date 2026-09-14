@@ -139,6 +139,19 @@ describe("deny-all posture — a subagent runs under its parent's guard", () => 
   })
 })
 
+describe("deny-all posture — tools an embedding host registered", () => {
+  test("a host tool is permitted, and permits nothing else", () => {
+    // `createAnalysisAgent({ tools })` passes its host's tools: the host's own code. The
+    // SDK regression (`analysis profile ALLOWS a mutating tool to execute`) went red when
+    // the posture became an allowlist, because `apply_change` is in no table.
+    const guard = buildNetworkDispatchGuard({ posture: "denied", hostTools: ["apply_change"] })
+    expect(guard?.check("apply_change", {}).kind).toBe("allow")
+    expect(guard?.check("web_search", { query: "q" }).kind).toBe("deny")
+    expect(guard?.check("mcp__apply_change__run", {}).kind).toBe("deny")
+    expect(denied.check("apply_change", {}).kind).toBe("deny")
+  })
+})
+
 describe("deny-all posture — every tool is classified", () => {
   /** Each tool NOT permitted, with why. The permitted side lives in src. */
   const REFUSED: Readonly<Record<string, string>> = {

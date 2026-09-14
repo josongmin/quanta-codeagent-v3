@@ -8,7 +8,8 @@
  * directly, NOT the `@/apps/agent/assemble` shim that binds `process.env`.
  */
 
-import { buildSystemPrompt, runAgent, wireOptionalAgentPorts } from "@/agent"
+import { buildSystemPrompt, MODE_PRESETS, runAgent, wireOptionalAgentPorts } from "@/agent"
+import { buildNetworkDispatchGuard, type DispatchGuard } from "@/agent/dispatch-guard"
 import { assembleAgentConfig } from "@/host/runtime/agent-config-assembler"
 import { type LLMPort, type Message, type Provider, pickProvider, tryCreateLLM } from "@/llm"
 import type { PermissionContext } from "@/permission"
@@ -115,6 +116,17 @@ const resolveRegistry = (opts: AnalysisAgentOptions, profile: AnalysisProfile): 
   return new ToolRegistry(gated)
 }
 
+const hostAwareNetworkGuard = (
+  mode: ReturnType<typeof modeForProfile>,
+  hostTools: AnalysisAgentOptions["tools"],
+): { dispatchGuard?: DispatchGuard } => {
+  const guard = buildNetworkDispatchGuard({
+    posture: MODE_PRESETS[mode].network.kind,
+    hostTools: (hostTools ?? []).map((t) => t.name),
+  })
+  return guard === undefined ? {} : { dispatchGuard: guard }
+}
+
 export const createAnalysisAgent = (opts: AnalysisAgentOptions): AnalysisAgent => {
   const env = opts.env ?? process.env
   const profile = opts.profile ?? DEFAULT_PROFILE
@@ -159,6 +171,11 @@ export const createAnalysisAgent = (opts: AnalysisAgentOptions): AnalysisAgent =
             maxTurns,
             signal: c.signal,
             ...(readOnly ? {} : { hitl: { autoApprove: true } }),
+            // The mode's network guard, set here so the tools this host registered are
+            // permitted under a deny-all posture: they are the host's own code. Without it
+            // the assembler's guard refused every tool the permitted table does not name,
+            // and the analysis profile could not run the host's `apply_change`.
+            ...hostAwareNetworkGuard(mode, opts.tools),
           }
           // ALBB-12 claim 2 — run the FINAL composition transform every other
           // surface runs (CLI/daemon/ide/headless/bench), using embed's own env

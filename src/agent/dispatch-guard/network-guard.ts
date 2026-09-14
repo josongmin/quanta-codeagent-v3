@@ -55,6 +55,11 @@ export interface NetworkGuardSpec {
   /** Current branch HEAD points to (forwarded verbatim). Absent ⇒ the
    *  branch-only check degrades to "no contribution". */
   readonly currentBranch?: string
+  /** Tools an embedding host registered itself (`createAnalysisAgent({ tools })`): the
+   *  host's own code, which it chose to give the agent, so the deny-all posture permits
+   *  them alongside `DENY_ALL_PERMITTED_TOOLS`. Never MCP or plugin tools — those are a
+   *  third party's. */
+  readonly hostTools?: readonly string[]
 }
 
 /**
@@ -81,5 +86,6 @@ export const buildNetworkDispatchGuard = (spec: NetworkGuardSpec): DispatchGuard
       : {}),
     ...(spec.protectedBranches !== undefined ? { protectedBranches: spec.protectedBranches } : {}),
     ...(spec.currentBranch !== undefined ? { currentBranch: spec.currentBranch } : {}),
+    ...(spec.hostTools !== undefined ? { hostPermittedTools: new Set(spec.hostTools) } : {}),
   })
 }

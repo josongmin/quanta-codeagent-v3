@@ -50,6 +50,9 @@ export interface DefaultDispatchGuardOptions {
    *  consulted when `networkAllowlist` is also present (the host check is
    *  SKIPPED entirely when the allowlist is absent). */
   readonly perRequestApproval?: boolean
+  /** Host-registered tools the deny-all posture permits besides the table (see
+   *  `NetworkGuardSpec.hostTools`). */
+  readonly hostPermittedTools?: ReadonlySet<string>
 }
 
 /** Pull a string field from an unknown record, narrow-typed. Returns null when
@@ -88,7 +91,7 @@ const checkToolUnderDenyAll = (
   opts: DefaultDispatchGuardOptions,
 ): GuardDecision | null => {
   if (opts.networkAllowlist === undefined || opts.networkAllowlist.length > 0) return null
-  if (isPermittedUnderDenyAll(tool)) return null
+  if (isPermittedUnderDenyAll(tool) || opts.hostPermittedTools?.has(tool) === true) return null
   return {
     kind: "deny",
     reason: `'${tool}' is not on the deny-all permitted list (it reaches a network, runs code, or is unknown); blocked under the deny-all network posture (no egress permitted)`,

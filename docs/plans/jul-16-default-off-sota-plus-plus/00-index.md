@@ -60,7 +60,7 @@ Truth is the current working tree, 2026-07-19; no commit receipt is claimed (con
 - Structural ratchet: `bun test tests/unit/god-code-ratchet.test.ts` 6 pass, 0 fail.
 - Authority ledger: **184 eligible rows** (175 wired), 31 runtime CLI seeds; checker → `unknown_surfaces=0 unknown_values=0`, 0 errors, **drift=0**. `bun test tests/unit/default-off-ledger-hellgate.test.ts` → 6 pass / 0 fail — now includes the **drift ratchet** (`reachability=wired ⟹ activation≠unwired`, Wave L) + its red-on-injection. Wave S added `memory-self-edit-tools` ledger row + `QUANTA_MEMORY` seed mapping (anti-vacuum count 30→31).
 - DOF-21 real-loop: `bun test tests/integration/read-file-unchanged-dedup-real-loop-e2e.test.ts` → 2 pass / 0 fail. Proves `read-file-unchanged-dedup` fires through real `runAgent` dispatch (gate ON: `file_unchanged:` sentinel; CONTROL gate OFF: full content, no sentinel).
-- Catalog: `bun fc validate` / `check-evidence` / `build` / `diff` all exit 0 for **1,071 features**; `diff: no changes`.
+- Catalog: `bun fc validate` / `check-evidence` / `build` / `diff` all exit 0 for **1,072 features**; `diff: no changes`.
 - Security: **subagent-fs-ownership false-fence FIXED** (Wave Q) — `apply_patch`/`apply_patch_structured`/`scripted_replace` no longer bypass `QUANTA_FS_OWNERSHIP_ENFORCE`; hellgate 10 pass + red-on-injection, security-path regression 49 pass.
 - Consolidations (proven duplicates deleted): retrieval/semantic ADR-0254 port (Wave M), recovery-router wrapper + ratelimit dead-store half (Wave P) — all byte-identical, tests green.
 - Whole-tree typecheck remains RED on pre-existing/concurrent test-shape errors outside these owner seams; it is not promoted to a completion receipt.
