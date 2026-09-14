@@ -22,13 +22,18 @@
  *  7. (round 10) a loss was judged at its own path; when git's merge moved the file that
  *     path is empty, so every drop there was excused. Conflicted paths excused nothing,
  *     and unrelated histories aborted the scan.
+ *  8. (round 11) where git's merge put a file was guessed with `diff --find-renames` from
+ *     the parent, which disagrees with git's own pairing once the losing side edits the
+ *     file; a conflicted path's marker text was searched for the name, so a comment kept a
+ *     clean deletion reported. A loss is now what the resolution removed from git's tree.
  */
 
 import { afterEach, describe, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
-import { mkdirSync, writeFileSync } from "node:fs"
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import {
+  conflictSides,
   createGitReadPort,
   extractExportedSymbols,
   isExcusedByMessage,
@@ -638,6 +643,167 @@ describe("residue 7 — a loss is judged where git's merge put the file", () => 
       const merge = commitAll(dir, "merge other")
       const scan = scanMerge(merge, createGitReadPort(dir))
       expect(scan.losses.map((l) => l.symbol)).toEqual(["y"])
+    })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 8. What the RESOLUTION removed (round 11), through the REAL git port
+// ---------------------------------------------------------------------------
+
+describe("residue 8 — a loss is what the resolution removed from git's merge", () => {
+  const lines = (prefix: string, from: number, to: number): string[] =>
+    Array.from(
+      { length: to - from + 1 },
+      (_, i) => `export const ${prefix}${from + i} = ${from + i}`,
+    )
+
+  test("RED: a rename with edits on both sides, where the resolution dropped an export git kept", () => {
+    // Round-11 audit B1 (reproduced): `git diff --find-renames <parent> <git's merge>` saw
+    // a delete and an add (main's edits pushed similarity under 50%), while git's merge
+    // paired base→side and put main's new export at b.ts. The loss was judged at a.ts,
+    // empty in git's tree, and excused.
+    withTempDirSync("msl-r8-rename-edits-", (dir) => {
+      initRepo(dir)
+      writeFileSync(join(dir, "src", "a.ts"), `${lines("e", 1, 100).join("\n")}\n`)
+      const base = commitAll(dir, "base")
+      runGit(dir, ["checkout", "-q", "-b", "side"])
+      runGit(dir, ["mv", "src/a.ts", "src/b.ts"])
+      writeFileSync(
+        join(dir, "src", "b.ts"),
+        `${[...lines("e", 1, 100), ...lines("s", 1, 100)].join("\n")}\n`,
+      )
+      commitAll(dir, "side renames and grows")
+      runGit(dir, ["checkout", "-q", "main"])
+      runGit(dir, ["reset", "-q", "--hard", base])
+      const mainLines = lines("e", 11, 100)
+      mainLines.splice(35, 0, "export const BUDGET_CEILING = 100")
+      writeFileSync(join(dir, "src", "a.ts"), `${mainLines.join("\n")}\n`)
+      commitAll(dir, "main edits")
+      const merged = spawnSync("git", ["merge", "-q", "--no-ff", "--no-commit", "side"], {
+        cwd: dir,
+      })
+      expect(merged.status).toBe(0)
+      // Ground truth: git's merge keeps it, at b.ts; the parent-to-merge diff does not pair.
+      expect(runGit(dir, ["show", ":src/b.ts"])).toContain("BUDGET_CEILING")
+      const staged = runGit(dir, ["show", ":src/b.ts"])
+      writeFileSync(
+        join(dir, "src", "b.ts"),
+        staged
+          .split("\n")
+          .filter((l) => !l.includes("BUDGET_CEILING"))
+          .join("\n"),
+      )
+      const merge = commitAll(dir, "merge side")
+      const tree = runGit(dir, ["merge-tree", "--write-tree", `${merge}^1`, `${merge}^2`])
+        .split("\n")[0]
+        ?.trim()
+      expect(
+        runGit(dir, ["diff", "--find-renames", "--name-status", `${merge}^1`, tree ?? ""]),
+      ).not.toMatch(/^R/m)
+      const scan = scanMerge(merge, createGitReadPort(dir))
+      expect(scan.losses.map((l) => `${l.file}:${l.symbol}`)).toEqual(["src/a.ts:BUDGET_CEILING"])
+      expect(scan.trivial.map((l) => l.symbol)).not.toContain("BUDGET_CEILING")
+    })
+  })
+
+  test("PAIRED CONTROL: the same merge committed as git made it loses nothing", () => {
+    withTempDirSync("msl-r8-rename-edits-ctl-", (dir) => {
+      initRepo(dir)
+      writeFileSync(join(dir, "src", "a.ts"), `${lines("e", 1, 100).join("\n")}\n`)
+      const base = commitAll(dir, "base")
+      runGit(dir, ["checkout", "-q", "-b", "side"])
+      runGit(dir, ["mv", "src/a.ts", "src/b.ts"])
+      writeFileSync(
+        join(dir, "src", "b.ts"),
+        `${[...lines("e", 1, 100), ...lines("s", 1, 100)].join("\n")}\n`,
+      )
+      commitAll(dir, "side renames and grows")
+      runGit(dir, ["checkout", "-q", "main"])
+      runGit(dir, ["reset", "-q", "--hard", base])
+      const mainLines = lines("e", 11, 100)
+      mainLines.splice(35, 0, "export const BUDGET_CEILING = 100")
+      writeFileSync(join(dir, "src", "a.ts"), `${mainLines.join("\n")}\n`)
+      commitAll(dir, "main edits")
+      runGit(dir, ["merge", "-q", "--no-ff", "-m", "merge side", "side"])
+      const merge = runGit(dir, ["rev-parse", "HEAD"]).trim()
+      const scan = scanMerge(merge, createGitReadPort(dir))
+      expect(scan.losses).toEqual([])
+    })
+  })
+
+  test("RED: an export only the second side of a conflict hunk has, dropped by the resolution, is a loss", () => {
+    // The TypeScript parser reads `=======`…`>>>>>>>` as conflict trivia and skips it, so
+    // parsing git's conflicted text whole would miss what the second side of a hunk exports.
+    withTempDirSync("msl-r8-theirs-", (dir) => {
+      initRepo(dir)
+      writeFileSync(join(dir, "src", "f.ts"), "export const shared = 1\n")
+      const base = commitAll(dir, "base")
+      runGit(dir, ["checkout", "-q", "-b", "side"])
+      writeFileSync(
+        join(dir, "src", "f.ts"),
+        "export const shared = 2\nexport const sideOnly = 1\n",
+      )
+      commitAll(dir, "side")
+      runGit(dir, ["checkout", "-q", "main"])
+      runGit(dir, ["reset", "-q", "--hard", base])
+      writeFileSync(join(dir, "src", "f.ts"), "export const shared = 3\n")
+      commitAll(dir, "main")
+      spawnSync("git", ["merge", "-q", "--no-ff", "side"], { cwd: dir })
+      expect(readFileSync(join(dir, "src", "f.ts"), "utf8")).toMatch(
+        /={7}\nexport const shared = 2\nexport const sideOnly = 1\n>{7}/,
+      )
+      writeFileSync(join(dir, "src", "f.ts"), "export const shared = 4\n")
+      const merge = commitAll(dir, "merge side")
+      const scan = scanMerge(merge, createGitReadPort(dir))
+      expect(scan.losses.map((l) => l.symbol)).toEqual(["sideOnly"])
+    })
+  })
+
+  test("conflictSides splits merge and diff3 markers, and a hunk with one side", () => {
+    const merge = "a\n<<<<<<< ours\nb1\n=======\nb2\n>>>>>>> theirs\nc"
+    expect(conflictSides(merge)).toEqual(["a\nb1\nc", "a\nb2\nc"])
+    const diff3 = "a\n<<<<<<< ours\nb1\n||||||| base\nb0\n=======\nb2\n>>>>>>> theirs\nc"
+    expect(conflictSides(diff3)).toEqual(["a\nb1\nc", "a\nb2\nc"])
+    const oneSide = "<<<<<<< a\nonly\n>>>>>>> b\n"
+    expect(conflictSides(oneSide)).toEqual(["only\n", ""])
+    // Marker-like lines outside a hunk are content.
+    expect(conflictSides("=======\nx")).toEqual(["=======\nx", "=======\nx"])
+  })
+
+  test("PAIRED CONTROL: a name only a comment still spells, in a conflicted file, is not kept by git", () => {
+    // Round-11 audit B7 (reproduced): the conflicted-path rule searched git's marker text
+    // for the name, so a `{@link legacyEntry}` comment left by the clean deletion reported
+    // the deletion as the resolution's. The rule reads each side's exports instead.
+    withTempDirSync("msl-r8-comment-", (dir) => {
+      initRepo(dir)
+      writeFileSync(
+        join(dir, "src", "c.ts"),
+        "/** See also {@link legacyEntry}. */\nexport const legacyEntry = 1\n\n\n\n\nexport const mode = 1\n",
+      )
+      const base = commitAll(dir, "base")
+      runGit(dir, ["checkout", "-q", "-b", "side"])
+      writeFileSync(
+        join(dir, "src", "c.ts"),
+        "/** See also {@link legacyEntry}. */\n\n\n\n\n\nexport const mode = 2\n",
+      )
+      commitAll(dir, "side drops legacyEntry")
+      runGit(dir, ["checkout", "-q", "main"])
+      runGit(dir, ["reset", "-q", "--hard", base])
+      writeFileSync(
+        join(dir, "src", "c.ts"),
+        "/** See also {@link legacyEntry}. */\nexport const legacyEntry = 1\n\n\n\n\nexport const mode = 3\n",
+      )
+      commitAll(dir, "main edits mode")
+      spawnSync("git", ["merge", "-q", "--no-ff", "side"], { cwd: dir })
+      writeFileSync(
+        join(dir, "src", "c.ts"),
+        "/** See also {@link legacyEntry}. */\n\n\n\n\n\nexport const mode = 2\n",
+      )
+      const merge = commitAll(dir, "merge side")
+      const scan = scanMerge(merge, createGitReadPort(dir))
+      expect(scan.losses).toEqual([])
+      expect(scan.trivial.map((l) => l.symbol)).toEqual(["legacyEntry"])
     })
   })
 })

@@ -24,10 +24,10 @@
  *   contributes ALL of its parent exports.
  *
  *   A candidate is NOT a loss when git's OWN merge of the parents drops it too: the
- *   export is absent from that path in `git merge-tree --write-tree <p1> <p2>` and
- *   the path merged without conflict. Those are reported as `trivial`. What the
+ *   merge commit's resolution removed no export of that name from
+ *   `git merge-tree --write-tree <p1> <p2>`. Those are reported as `trivial`. What the
  *   detector exists for is the human part of a merge — a resolution that dropped
- *   what git would have kept — see {@link isTrivialPerGitMerge}.
+ *   what git would have kept — see {@link resolutionRemovals}.
  *
  * That shape separates the real case from controls. RE-MEASURE, do not trust
  * this table — it is a transcript, and history moves under it:
@@ -35,12 +35,17 @@
  *   $ bun run tools/dev/merge-symbol-loss.ts \
  *       9b21d2fd2 79857f28b 615b9b586 528f01ae5 fc199ad3f \
  *     | grep -E '^[0-9a-f]{9}|^scanned'
- *   9b21d2fd2  lost=70  excused=0  trivial=4  files=91  merge: reconcile parallel goal and verification lanes
+ *   9b21d2fd2  lost=69  excused=0  trivial=5  files=91  merge: reconcile parallel goal and verification lanes
  *   79857f28b  lost=0  excused=0  trivial=0  files=24  Merge branch 'codex/true100-message-ids'
  *   615b9b586  lost=0  excused=0  trivial=0  files=17  Merge branch 'codex/feeder-checkpoint-capture'
  *   528f01ae5  lost=0  excused=0  trivial=0  files=44  Merge branch 'codex/rfc-def-skill-startup-render' into codex/def-integration
  *   fc199ad3f  lost=0  excused=0  trivial=0  files=9  Merge branch 'codex/rfc12-1-plan-dag'
  *   scanned 5 merge(s), 185 (parent,file) pair(s); 1 with unexcused symbol loss
+ *
+ * (Re-measured sep-14, round 11: 70 → 69. `slash/objective.ts:SlashContext` moved to
+ * trivial — git's own merge has no `export type { SlashContext }`; the name survives only
+ * in an import inside a conflict hunk, which the old marker-text search counted as kept.
+ * Full reachable history, 97 merges: one merge with unexcused loss, the incident.)
  *
  * The UNSCOPED variant (diffing all of `src` between parent and merge) was
  * measured at 29–64 "losses" on every control merge — pure noise. It is not
@@ -218,8 +223,9 @@ export const createGitReadPort = (cwd: string = REPO_ROOT): GitReadPort => ({
   // `--no-renames`: with rename detection on, a path renamed away appears only under its
   // NEW name, so the old path — where the parent's exports were — was never read, and a
   // merge that renamed a file and dropped symbols from it examined zero files (round-8
-  // audit, reproduced). As a delete plus an add, the old path is compared; when git's own
-  // merge also moved the file, the loss at the old path is excused (isTrivialPerGitMerge).
+  // audit, reproduced). As a delete plus an add, the old path is compared; whether git's
+  // own merge kept the export is decided by comparing its tree with the commit
+  // (resolutionRemovals), not by where the file went.
   changedFiles: (from, to) =>
     git(["diff", "-z", "--no-renames", "--name-only", from, to], cwd)
       .split("\0")
@@ -436,81 +442,116 @@ const mergeSideExports = (
   }
 }
 
+type ConflictRegion = "both" | "ours" | "base" | "theirs"
+
+const CONFLICT_MARKERS: ReadonlyArray<readonly [RegExp, ConflictRegion]> = [
+  [/^<{7}( |$)/, "ours"],
+  [/^\|{7}( |$)/, "base"],
+  [/^={7}$/, "theirs"],
+  [/^>{7}( |$)/, "both"],
+]
+
+/** The region a marker line opens, else `undefined`. Only `<<<<<<<` opens a hunk; the
+ *  other markers mean something only inside one. */
+const markerRegion = (line: string, region: ConflictRegion): ConflictRegion | undefined => {
+  const opens = CONFLICT_MARKERS.find(([marker]) => marker.test(line))?.[1]
+  return opens === "ours" || region !== "both" ? opens : undefined
+}
+
 /**
- * Would git's own merge of the parents have dropped this export too?
+ * The two versions a conflicted file holds, as git's merge wrote it: every line outside
+ * the markers plus one side of each hunk. A diff3/zdiff3 base section (`|||||||`) is
+ * neither side. A hunk with no `=======` (one side deleted the file) is all one side.
+ */
+export const conflictSides = (text: string): readonly [string, string] => {
+  const ours: string[] = []
+  const theirs: string[] = []
+  let region: ConflictRegion = "both"
+  for (const line of text.split("\n")) {
+    const next = markerRegion(line, region)
+    if (next !== undefined) {
+      region = next
+      continue
+    }
+    if (region === "both" || region === "ours") ours.push(line)
+    if (region === "both" || region === "theirs") theirs.push(line)
+  }
+  return [ours.join("\n"), theirs.join("\n")]
+}
+
+/**
+ * The export names the merge RESOLUTION removed: present at a path in git's own merge of
+ * the parents, absent at that path in the merge commit. A conflicted path counts the
+ * exports of either side of its hunks.
  *
  * WHY. The incident this detector is for is a merge RESOLUTION that dropped what a plain
  * merge keeps ("the merge-base LACKED those files and one parent ADDED them"). Comparing
  * each parent to the merge cannot tell that apart from an ordinary change git merged in:
  * a symbol one line of history renamed reads as lost relative to the other parent.
+ * `git merge-tree --write-tree` IS the plain merge — virtual bases for a criss-cross
+ * history, rename detection — so git's tree against the commit is exactly the resolution.
  *
- * TWO EARLIER RULES, BOTH MEASURED WRONG:
- *  - "the losing parent's file equals the merge-base and the merge took the other
- *    parent's file" (4d28097c6) picked ONE base; in a criss-cross history git merges
- *    against a virtual base, and a real loss was filed as trivial (round-8 audit);
- *  - the same rule with a UNIQUE base required (779e229f5) excused nothing for the two
- *    criss-cross merges in this repository (`aae56857e`, `f1e936d9c`), whose drops git's
- *    own merge also makes, and a rename on one side with an edit on the other was
- *    reported as nine losses because the losing parent had changed the file (round-9).
- * Asking git answers both: `git merge-tree --write-tree` IS the plain merge, with virtual
- * bases and rename detection.
+ * RULES MEASURED WRONG BEFORE THIS ONE:
+ *  - one merge base (4d28097c6): in a criss-cross history git merges against a virtual
+ *    base, and a real loss was filed as trivial (round 8);
+ *  - a unique base required (779e229f5): excused nothing for the two criss-cross merges
+ *    in this repository and reported a rename-with-edit as nine losses (round 9);
+ *  - the loss's own path in git's tree: empty when git moved the file (round 10);
+ *  - where `git diff --find-renames <parent> <git's tree>` put the file (d52ed2943): git's
+ *    merge pairs base with the other side, and edits on the losing side can push that
+ *    diff under the similarity threshold (or past the rename limit), so it saw a delete and
+ *    an add and excused an export git had kept at the new path (round 11, reproduced);
+ *  - a conflicted path's marker text searched for the name: a comment spelling it kept a
+ *    clean deletion reported (round 11, reproduced).
+ * Comparing git's tree with the commit path by path needs no guess about where a file went.
  *
- * WHERE TO LOOK (round-10 audit, reproduced). My first version looked at the loss's own
- * path. When git's merge MOVED the file — a rename on the other side, or a new file inside
- * a renamed directory — that path is empty in git's tree, so every loss in the file was
- * excused, including an export git's merge kept at the new path and the resolution then
- * dropped. `placedAt` is where git's merge put the parent's file.
- *
- * A CONFLICTED path is git's text with both sides between markers. The export is excused
- * only when its name appears nowhere in that text — neither side of any hunk has it, as
- * when one side deleted it in a hunk that merged cleanly. My first version excused no
- * conflicted path at all, and reported that clean deletion as a loss.
- *
- * WHAT IT DOES NOT EXCUSE: an export git's merge keeps; a name either side of a conflict
- * still spells; anything in an octopus merge.
+ * WHAT IT DOES NOT EXCUSE: a name the resolution removed anywhere, even from another file
+ * that exports the same name (over-reporting, never a hidden loss); anything in an octopus
+ * merge.
  */
-export const isTrivialPerGitMerge = (
-  loss: SymbolLoss,
-  placement: {
-    readonly auto: AutoMerge | undefined
-    readonly placedAt: string
-    readonly autoExports: (path: string) => Set<string>
-    readonly autoText: (path: string) => string | null
-  },
-): boolean => {
-  const { auto, placedAt } = placement
-  if (auto === undefined) return false
-  if (auto.conflicted.has(loss.file) || auto.conflicted.has(placedAt)) {
-    const text = placement.autoText(placedAt) ?? ""
-    return !messageNamesSymbol(text, loss.symbol)
+const resolutionRemovals = (sha: string, auto: AutoMerge, port: GitReadPort): Set<string> => {
+  const paths = port.changedFiles(auto.tree, sha).filter(isScannedPath)
+  const autoFiles = port.readFiles(auto.tree, paths)
+  const kept = mergeSideExports(sha, paths, port)
+  const removed = new Set<string>()
+  for (const path of paths) {
+    const text = autoFiles.get(path) ?? null
+    if (text === null) continue
+    const versions = auto.conflicted.has(path) ? conflictSides(text) : [text]
+    for (const version of versions) {
+      for (const symbol of extractExportedSymbols(version, path)) {
+        if (!kept(path).has(symbol)) removed.add(symbol)
+      }
+    }
   }
-  return !placement.autoExports(placedAt).has(loss.symbol)
+  return removed
 }
 
-/** Where git's merge put each parent's files, and what it holds there. */
-const gitMergePlacement = (
+/** Would git's own merge of the parents have dropped this export too? See
+ *  {@link resolutionRemovals}. */
+export const isTrivialPerGitMerge = (
+  loss: SymbolLoss,
+  auto: AutoMerge | undefined,
+  removedByResolution: ReadonlySet<string>,
+): boolean => auto !== undefined && !removedByResolution.has(loss.symbol)
+
+/** A file git's merge moved, whose export the merge commit has at the new path, lost
+ *  nothing: the parent-to-merge diff saw a delete and an add. Rename detection only
+ *  shortens the report here; what counts as a loss is {@link resolutionRemovals}. */
+const movedAndKept = (
   sha: string,
+  auto: AutoMerge,
   parents: readonly string[],
   found: readonly SymbolLoss[],
   port: GitReadPort,
-) => {
-  const auto = port.autoMerge(parents)
-  const renamesByParent = new Map(
-    auto === undefined ? [] : parents.map((p) => [p, port.renames(p, auto.tree)] as const),
-  )
+): ((l: SymbolLoss) => boolean) => {
+  const renamesByParent = new Map(parents.map((p) => [p, port.renames(p, auto.tree)] as const))
   const placedAt = (l: SymbolLoss): string => renamesByParent.get(l.parent)?.get(l.file) ?? l.file
-  const placedPaths = [...new Set(found.map(placedAt))]
-  const autoFiles =
-    auto === undefined ? new Map<string, string | null>() : port.readFiles(auto.tree, placedPaths)
-  const autoExports =
-    auto === undefined ? () => new Set<string>() : mergeSideExports(auto.tree, placedPaths, port)
-  return {
-    auto,
-    placedAt,
-    autoExports,
-    autoText: (path: string) => autoFiles.get(path) ?? null,
-    /** The merge commit's exports at the placed paths — a moved export it kept is no loss. */
-    mergeExportsAtPlaced: mergeSideExports(sha, placedPaths, port),
+  const moved = [...new Set(found.map(placedAt))]
+  const mergeExports = mergeSideExports(sha, moved, port)
+  return (l) => {
+    const at = placedAt(l)
+    return at !== l.file && mergeExports(at).has(l.symbol)
   }
 }
 
@@ -539,22 +580,11 @@ export const scanMerge = (sha: string, port: GitReadPort): MergeScan => {
   }
 
   // Only merges that report something pay for git's own merge and the extra reads.
-  const placement = found.length > 0 ? gitMergePlacement(sha, parents, found, port) : undefined
-  // A file git's merge moved, whose export the merge commit has at the new path, lost
-  // nothing: the parent-to-merge diff saw a delete and an add.
-  const candidates =
-    placement === undefined
-      ? found
-      : found.filter((l) => {
-          const at = placement.placedAt(l)
-          return at === l.file || !placement.mergeExportsAtPlaced(at).has(l.symbol)
-        })
-  const trivial =
-    placement === undefined
-      ? []
-      : candidates.filter((l) =>
-          isTrivialPerGitMerge(l, { ...placement, placedAt: placement.placedAt(l) }),
-        )
+  const auto = found.length > 0 ? port.autoMerge(parents) : undefined
+  const kept = auto === undefined ? () => false : movedAndKept(sha, auto, parents, found, port)
+  const candidates = found.filter((l) => !kept(l))
+  const removed = auto === undefined ? new Set<string>() : resolutionRemovals(sha, auto, port)
+  const trivial = candidates.filter((l) => isTrivialPerGitMerge(l, auto, removed))
   const substantive = candidates.filter((l) => !trivial.includes(l))
 
   const ambiguous = ambiguousBasenamesOf(substantive)
