@@ -85,6 +85,10 @@ const EXCEPTIONS: ReadonlyMap<string, string> = new Map<string, string>([
     "QUANTA_SIDE_AGENT_LLM_REPLAY",
     "test-only: side-agent hermetic forked-child LLM replay seam (worker-charter-runner), not a user knob",
   ],
+  [
+    "QUANTA_ALLOW_DOTENV_ENDPOINT",
+    "security opt-in (SEC-1, egress-provenance-guard) — consent to honor a dotenv-sourced LLM endpoint override. Read at the guard call site with real-env provenance (a dotenv-sourced value is void), same class as the secret exceptions: a `/config set` of an egress-consent gate would itself be a security-posture hazard, so it is intentionally NOT a registrable /config knob. NOTE: the sep-14 A lane owns the dotenv-egress cause (Bun autoloads .env before quanta's loader, so the scrub is inert until A adds --no-compile-autoload-dotenv + a checkout-root loader) and will subsume this guard.",
+  ],
   // DEV / BENCH-INTERNAL toggles — read at their own call site, intentionally NOT
   // surfaced in /config (an internal bench/experiment seam, not a user setting).
   [
@@ -431,7 +435,10 @@ describe("knob-registry completeness ratchet (ADR-0503 P0)", () => {
     // exception is the only way past a ceiling of 0, so growing this list is the
     // same act as raising the ceiling.
     expect(EXCEPTIONS.size).toBe(literalRows.length)
-    expect(EXCEPTIONS.size).toBe(40)
+    // 40 → 41: SEC-1 `QUANTA_ALLOW_DOTENV_ENDPOINT` — a security egress-consent gate,
+    // same class as the secret rows (read at the guard call site, deliberately not a
+    // /config knob). Conscious burndown, not papering; the sep-14 A lane will subsume it.
+    expect(EXCEPTIONS.size).toBe(41)
   })
 
   test("no EXCEPTIONS row is inert — excepting a DECLARED key does nothing", () => {
