@@ -156,6 +156,10 @@ export const drivePtyCli = (opts: DrivePtyOpts = {}): PtyCli => {
       TERM: "xterm-256color",
       QUANTA_PROVIDER: "anthropic",
       ANTHROPIC_API_KEY: "test",
+      // The harness's own scratch folder is trusted, so the CLI does not stop at its
+      // one-time workspace-trust question (ADR-0559) — these suites test other things.
+      // `cli-workspace-trust-e2e` passes "" to see the question.
+      QUANTA_TRUSTED_PATHS: cwd,
       ...opts.env,
     },
     stdin: slaveFd,
