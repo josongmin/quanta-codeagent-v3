@@ -109,6 +109,39 @@ describe("the test target is a path, not an option", () => {
   })
 })
 
+describe("the test target stays inside the scratch tree", () => {
+  const run = async (test_target: string) => {
+    const events: { type: string; result?: { ok: boolean; output: string } }[] = []
+    for await (const ev of tool.execute(
+      { patch: "p", checks: ["test"], test_target } as never,
+      { signal: new AbortController().signal } as never,
+    )) {
+      events.push(ev as never)
+    }
+    return events.find((e) => e.type === "result")?.result
+  }
+
+  test("RED (round 10): an absolute, home-relative or '..' target is refused before any spawn", async () => {
+    for (const target of [
+      "/var/tmp/outside/evil.test.ts",
+      "../outside/evil.test.ts",
+      "a/../../b.test.ts",
+      "~/evil.test.ts",
+    ]) {
+      const result = await run(target)
+      expect(result?.ok, target).toBe(false)
+      expect(result?.output, target).toContain("inside the scratch tree")
+    }
+  })
+
+  test("PAIRED CONTROL: a relative path or a name pattern reaches the port", async () => {
+    for (const target of ["src/x.test.ts", "parser", "a..b.test.ts"]) {
+      const result = await run(target)
+      expect(result?.ok, target).toBe(true)
+    }
+  })
+})
+
 describe("the test target is one shell word", () => {
   const HOSTILE = ["x; touch PWNED", "$(touch PWNED)", "`touch PWNED`", "a'b; touch PWNED; echo '"]
 

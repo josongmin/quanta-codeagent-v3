@@ -77,11 +77,20 @@ export const shadowVerifyInputSchema = z.object({
   // A path or pattern, never an option: quoting keeps it one shell word, but `bun test`
   // still parses a word that starts with `-` — `--preload=/host/evil.ts` ran a host file
   // outside the scratch tree (round-9 audit).
+  // And not a path that leaves the scratch tree: `/abs/host/evil.test.ts` and
+  // `../host/evil.test.ts` both ran a host file (round-10 audit, reproduced). A target is
+  // relative, with no `..` segment.
   test_target: z
     .string()
     .refine((t) => !t.startsWith("-"), "test_target is a test path or pattern, not an option")
+    .refine(
+      (t) => !t.startsWith("/") && !t.startsWith("~") && !t.split(/[\\/]/).includes(".."),
+      "test_target is a path or pattern inside the scratch tree: relative, with no '..'",
+    )
     .optional()
-    .describe("Targeted test path/pattern for 'test' check (must not start with '-')"),
+    .describe(
+      "Targeted test path/pattern for 'test' check: relative to the tree, no '..', not starting with '-'",
+    ),
 })
 export type ShadowVerifyInput = z.infer<typeof shadowVerifyInputSchema>
 
