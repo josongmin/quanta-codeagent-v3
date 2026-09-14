@@ -17,7 +17,33 @@ export interface StrictKnobs {
    *  the current baseline does not emit such a line, so this knob is a
    *  no-op until a future arm does). */
   readonly denyMetadataReadAbsolute?: boolean
+  /** OC-4 / S7 — narrow file-CONTENT reads to the workspace (+ extra read paths
+   *  + a system allowlist), while keeping METADATA reads global so dyld/libsystem
+   *  path probes still resolve (the reason the baseline reads globally). Without
+   *  this the sandbox lets a command read `~/.ssh`, `~/.aws`, a sibling repo's
+   *  `.env`, etc. Mirrors Cursor's WORKSPACE read boundary. DEFAULT-OFF.
+   *
+   *  NOTE (honesty): the emitted SBPL is runtime-UNVERIFIED here (no `sandbox-exec`
+   *  in this environment); the shape uses documented seatbelt primitives
+   *  (`file-read-metadata`, `file-read* (subpath …)`) and is asserted structurally.
+   *  Opt-in operators should validate the system allowlist for their toolchain. */
+  readonly readWorkspaceOnly?: boolean
 }
+
+/** System path prefixes whose CONTENT stays readable under `readWorkspaceOnly`
+ *  (interpreters, shared libs, dyld cache, device nodes). Deliberately excludes
+ *  `$HOME` so user secrets outside the workspace are not content-readable. */
+export const READ_BOUNDARY_SYSTEM_SUBPATHS: readonly string[] = [
+  "/usr",
+  "/bin",
+  "/sbin",
+  "/System",
+  "/Library",
+  "/private/var/db/dyld",
+  "/opt/homebrew",
+  "/dev",
+  "/etc",
+]
 
 /**
  * Returns true when every knob is absent or false — the "no strict
@@ -29,6 +55,7 @@ export const isDefaultStrict = (opts: StrictKnobs | undefined): boolean => {
   if (opts.denyNetworkAlways === true) return false
   if (opts.allowTmpWrite === true) return false
   if (opts.denyMetadataReadAbsolute === true) return false
+  if (opts.readWorkspaceOnly === true) return false
   return true
 }
 

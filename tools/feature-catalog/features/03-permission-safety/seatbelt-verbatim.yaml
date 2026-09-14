@@ -1,5 +1,5 @@
 id: seatbelt-verbatim
-title: ADR-0199 macOS Seatbelt verbatim profile + 4 strict knobs
+title: ADR-0199 macOS Seatbelt verbatim profile + 5 wired strict knobs (incl. workspace read boundary)
 section: 3
 subsystem: OS sandbox darwin
 order: 199
@@ -27,6 +27,14 @@ purpose: |
   denyNetworkAlways / allowTmpWrite / denyMetadataReadAbsolute). workspace
   path 정확히 1회 escape (injection 방어). darwin-only — CI Linux는 폴라이트
   skip (describeOnDarwin helper). danger-full-access는 passthrough (compile 안 함).
+  OC-4 (2026-09-13): strict knob은 이전엔 두 call site(wrap-argv/default)가
+  `compileSeatbeltProfile(policy, cwd)`로 opts를 안 넘겨 **도달 불가**였음(과대주장).
+  이제 `SandboxPolicy.strict`로 배선되어 두 call site가 policy를 통해 그대로 전달.
+  신규 `readWorkspaceOnly` (S7): 전역 `(allow file-read*)`를 metadata-global +
+  workspace/system-subpath content-read로 교체($HOME 밖 secret 콘텐츠 read 차단,
+  dyld는 metadata로 유지). 기본 off=byte-identical(HELL-SB-05). ⚠️ readWorkspaceOnly의
+  SBPL은 runtime-UNVERIFIED(이 환경에 sandbox-exec 없음) — 구조 테스트만; opt-in 운영자가
+  자기 toolchain으로 system allowlist 검증 필요.
 evidence:
   code:
     - src/runtime/os-sandbox/seatbelt.ts
@@ -39,7 +47,9 @@ evidence:
   tests:
     unit: [tests/unit/runtime/seatbelt-verbatim-hellgate.test.ts]
     integration: [tests/integration/seatbelt-exec-hellgate.test.ts]
-# No knobs. `QUANTA_SANDBOX_STRICT` was listed with purpose "(no description)"
-# and nothing in the tree reads it.
+# Strict knobs are threaded object-shaped via `SandboxPolicy.strict` (OC-4), not
+# an env var. `QUANTA_SANDBOX_STRICT` remains unread — a knob→policy.strict
+# resolver at the composition root is the follow-up that would surface them to
+# the operator (until then the capability is reachable programmatically only).
 knobs: []
 notes: 'Phase 1 integration test 2개만 (negative-side) — Phase 2에서 framework allowlist 확장 후 positive cases. /tmp symlink → /private/tmp realpath 필수.'

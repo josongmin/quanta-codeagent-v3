@@ -1,4 +1,9 @@
-import { applyStrictKnobs, isDefaultStrict, type StrictKnobs } from "./seatbelt/strict-policy"
+import {
+  applyStrictKnobs,
+  isDefaultStrict,
+  READ_BOUNDARY_SYSTEM_SUBPATHS,
+  type StrictKnobs,
+} from "./seatbelt/strict-policy"
 import type { SandboxPolicy } from "./types"
 
 /**
@@ -51,6 +56,11 @@ export const compileSeatbeltProfile = (
     return null
   }
 
+  // OC-4/S7 — strict knobs from the policy (which flows to every call site) OR the
+  // legacy `opts` param. `policy.strict` is the wired path; default `undefined` ⇒
+  // byte-identical baseline (HELL-SB-05).
+  const strict = policy.strict ?? opts
+
   // Network: allowed when profile is *-net OR explicit override.
   const allowNetwork = policy.profile === "workspace-write-net" || policy.allowNetwork === true
 
@@ -76,8 +86,7 @@ export const compileSeatbeltProfile = (
     "(allow user-preference-read)",
     ";; Bun reads the compatibility page size during startup; keep this to the exact key.",
     '(allow sysctl-read (sysctl-name "hw.pagesize_compat"))',
-    ";; file reads (read-only by write denial)",
-    "(allow file-read*)",
+    ...readAllowLines(strict, workspace),
   ]
 
   if (policy.excludeTmpdir === true) {
@@ -108,8 +117,32 @@ export const compileSeatbeltProfile = (
   lines.push(allowNetwork ? "(allow network*)" : "(deny network*)")
 
   const baseline = `${lines.join("\n")}\n`
-  if (isDefaultStrict(opts)) return baseline
-  return applyStrictKnobs(baseline, opts as StrictKnobs)
+  if (isDefaultStrict(strict)) return baseline
+  return applyStrictKnobs(baseline, strict as StrictKnobs)
+}
+
+/**
+ * The file-read allow line(s). Default (no strict boundary): the codex-verbatim
+ * global `(allow file-read*)` — reads are gated only by write denial (byte-
+ * identical baseline). With `readWorkspaceOnly` (OC-4/S7): keep METADATA reads
+ * global so dyld/libsystem path probes resolve, but limit file CONTENT reads to
+ * the workspace + a system allowlist, so a sandboxed command can no longer read
+ * `~/.ssh`, `~/.aws`, or a sibling repo's `.env`. `extraReadPaths` are emitted as
+ * their own content-read subpaths after this block, so they remain readable.
+ */
+const readAllowLines = (strict: StrictKnobs | undefined, workspace: string): string[] => {
+  if (strict?.readWorkspaceOnly !== true) {
+    return [";; file reads (read-only by write denial)", "(allow file-read*)"]
+  }
+  const contentSubpaths = unique([
+    ...seatbeltPathAliases(workspace),
+    ...READ_BOUNDARY_SYSTEM_SUBPATHS,
+  ]).map((p) => `(subpath "${escapeSbpl(p)}")`)
+  return [
+    ";; strict: read boundary — metadata global (dyld), content limited to workspace + system",
+    "(allow file-read-metadata)",
+    `(allow file-read* ${contentSubpaths.join(" ")})`,
+  ]
 }
 
 /**

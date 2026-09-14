@@ -86,6 +86,12 @@ export interface SandboxPolicy {
    *  Seatbelt (macOS) backend honors this today; the Linux/Windows backends do
    *  not enumerate `/tmp` in their baseline, so the flag is a no-op there. */
   readonly excludeTmpdir?: boolean
+  /** OC-4/S7 — optional strict-knob tightening threaded to the seatbelt compiler
+   *  (which the two composition-root call sites already reach via this policy).
+   *  DEFAULT-OFF: `undefined` ⇒ byte-identical baseline. See {@link
+   *  import("./seatbelt/strict-policy").StrictKnobs} — `readWorkspaceOnly` narrows
+   *  file-content reads off `$HOME`. Honored by the macOS Seatbelt backend today. */
+  readonly strict?: import("./seatbelt/strict-policy").StrictKnobs
 }
 
 export interface SandboxedSpawnSpec {
