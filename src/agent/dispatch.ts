@@ -584,34 +584,40 @@ const dispatchToolInner = async (
     return deny(call.id, `Unknown tool: ${call.name}`, "unknown tool")
   }
 
+  // Every gate below is keyed by tool name. A registry that presents a tool under an alias
+  // (a subagent tool namespace) gives the gates the tool's own name; only execution and
+  // the model-facing call keep the alias.
+  const policyName = registry.policyNameOf(call.name)
+  const gateCall: ToolUseBlock = policyName === call.name ? call : { ...call, name: policyName }
+
   // Plan-mode seam consulted BEFORE the dedup/admissibility gates (dispatch-time,
   // stateless — a `default`⇒`plan` transition only affects later calls).
   const collab = resolveCollaborationMode(config)
   const preAdmissibilityShort = firstConsult(PRE_ADMISSIBILITY_CONSULTS, (consult) =>
-    consult(call, config, collab),
+    consult(gateCall, config, collab),
   )
   if (preAdmissibilityShort) return preAdmissibilityShort
 
   // Uniform pre-flights (dedup, localize-phase, test-scope, dispatch-guard) —
   // consulted in order, first non-null short-circuits before any gate work.
-  const preFlightShort = firstConsult(PRE_FLIGHT_CONSULTS, (consult) => consult(call, config))
+  const preFlightShort = firstConsult(PRE_FLIGHT_CONSULTS, (consult) => consult(gateCall, config))
   if (preFlightShort) return preFlightShort
 
   // S16: populate `shellCommand` from the registry so the permission policy
   // applies HARD_DENY uniformly to ANY tool that exposes a shell-command
   // surface (`extractShellCommand` method) — not just one named "bash".
-  const shellCommand = registry.extractShellCommand(call.name, call.input)
+  const shellCommand = registry.extractShellCommand(gateCall.name, gateCall.input)
   const action = {
-    tool: call.name,
-    input: call.input,
-    isReadOnly: registry.isReadOnly(call.name),
+    tool: gateCall.name,
+    input: gateCall.input,
+    isReadOnly: registry.isReadOnly(gateCall.name),
     ...(shellCommand !== null ? { shellCommand } : {}),
   }
 
-  const admission = await runPreExecuteGate(call, config, permission, action, autoClassifier)
+  const admission = await runPreExecuteGate(gateCall, config, permission, action, autoClassifier)
   if (admission.kind === "short") return admission.result
   const postAdmissibilityShort = firstConsult(POST_ADMISSIBILITY_CONSULTS, (consult) =>
-    consult(call, config, shellCommand, action.isReadOnly),
+    consult(gateCall, config, shellCommand, action.isReadOnly),
   )
   if (postAdmissibilityShort) return postAdmissibilityShort
   // SECURITY: the rewrite is applied AFTER the permission / HARD_DENY gates ran

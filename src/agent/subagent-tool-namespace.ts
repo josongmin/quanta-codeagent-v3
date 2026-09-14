@@ -13,15 +13,19 @@ export const prefixToolNamespace: ToolNamespaceStrategy = {
   },
 }
 
-/** Clone a registry with each tool renamed under a child-local namespace. */
+/** Clone a registry with each tool presented under a child-local name. Each keeps its own
+ *  name for policy (`ToolRegistry.policyNameOf`): the rename is for the model, and a gate
+ *  keyed by tool name must not see a name it has never classified. */
 export const namespaceRegistry = (
   source: ToolRegistry,
   strategy: ToolNamespaceStrategy,
   namespaceToken: string,
-): ToolRegistry =>
-  new ToolRegistry(
-    source.all().map((tool) => ({
-      ...tool,
-      name: strategy.scope(namespaceToken, tool.name),
-    })),
-  )
+): ToolRegistry => {
+  const policyNames = new Map<string, string>()
+  const renamed = source.all().map((tool) => {
+    const presented = strategy.scope(namespaceToken, tool.name)
+    policyNames.set(presented, tool.name)
+    return { ...tool, name: presented }
+  })
+  return new ToolRegistry(renamed, undefined, policyNames)
+}

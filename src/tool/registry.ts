@@ -16,9 +16,36 @@ export class ToolRegistry {
    *  deriving trust ACCURATELY from the call site rather than guessing by name. */
   private readonly origin: ReadonlyMap<string, ToolOrigin> | undefined
 
-  constructor(tools: Tool[], origin?: ReadonlyMap<string, ToolOrigin>) {
+  /** Presented name → the tool's own name, for a registry that presents tools under an
+   *  alias (a subagent tool namespace). Every policy is keyed by the tool's own name —
+   *  plan-mode rows, the ownership fence, the deny-all table, permission rules — so a
+   *  renamed tool used to match none of them: `agent1__apply_patch` wrote outside a fenced
+   *  child's owned set (round-10 audit, reproduced). */
+  private readonly policyNames = new Map<string, string>()
+  private readonly presentedNames = new Map<string, string>()
+
+  constructor(
+    tools: Tool[],
+    origin?: ReadonlyMap<string, ToolOrigin>,
+    policyNames?: ReadonlyMap<string, string>,
+  ) {
     for (const t of tools) this.tools.set(t.name, t as Tool)
     this.origin = origin
+    for (const [presented, own] of policyNames ?? []) {
+      this.policyNames.set(presented, own)
+      this.presentedNames.set(own, presented)
+    }
+  }
+
+  /** The name policies know this tool by: its own name when it is presented under an
+   *  alias, else `name` unchanged. */
+  policyNameOf(name: string): string {
+    return this.policyNames.get(name) ?? name
+  }
+
+  /** A tool by its presented name or, in an aliasing registry, by its own name. */
+  private lookup(name: string): Tool | undefined {
+    return this.tools.get(name) ?? this.tools.get(this.presentedNames.get(name) ?? "")
   }
 
   /** The ORIGIN tag for a tool. No map supplied, or a name absent from the
@@ -29,15 +56,15 @@ export class ToolRegistry {
   }
 
   has(name: string): boolean {
-    return this.tools.has(name)
+    return this.lookup(name) !== undefined
   }
 
   get(name: string): Tool | undefined {
-    return this.tools.get(name)
+    return this.lookup(name)
   }
 
   isReadOnly(name: string): boolean {
-    return this.tools.get(name)?.isReadOnly() ?? false
+    return this.lookup(name)?.isReadOnly() ?? false
   }
 
   /** jun-6 (RFC jun-6-tool-interrupt-behavior) — the tool's declared interrupt
@@ -47,7 +74,7 @@ export class ToolRegistry {
    *  whether to thread a derived suppressible signal + `criticalSection` seam
    *  onto the `ToolContext`. Mirrors {@link isReadOnly}. */
   interruptBehavior(name: string): "cancel" | "block" {
-    return this.tools.get(name)?.interruptBehavior?.() ?? "cancel"
+    return this.lookup(name)?.interruptBehavior?.() ?? "cancel"
   }
 
   /** ADR-0298 / T02 — streaming-dispatch early-start eligibility. A tool whose
@@ -58,7 +85,7 @@ export class ToolRegistry {
    *  parent-mutating concurrency-safe tools (`session_config`,
    *  `automation_update`) stay deferred and a refused turn never commits them. */
   isEarlyDispatchSafe(name: string): boolean {
-    const tool = this.tools.get(name)
+    const tool = this.lookup(name)
     if (!tool) return false
     return (tool.isEarlyDispatchSafe ?? tool.isReadOnly).call(tool)
   }
@@ -123,7 +150,7 @@ export class ToolRegistry {
    *  this to apply HARD_DENY uniformly across every shell-equivalent tool
    *  (bash, future `shell`/`exec`/MCP `run`), instead of hardcoding `bash`. */
   extractShellCommand(name: string, rawInput: unknown): string | null {
-    const tool = this.tools.get(name)
+    const tool = this.lookup(name)
     if (!tool || tool.extractShellCommand === undefined) return null
     const parsed = tool.inputSchema.safeParse(rawInput)
     if (!parsed.success) return null
@@ -134,7 +161,7 @@ export class ToolRegistry {
    *  other concurrency-safe calls. Unknown tool or invalid input ⇒ false
    *  (the safe default: serialize it). */
   isConcurrencySafe(name: string, rawInput: unknown): boolean {
-    const tool = this.tools.get(name)
+    const tool = this.lookup(name)
     if (!tool) return false
     const parsed = tool.inputSchema.safeParse(rawInput)
     if (!parsed.success) return false
@@ -152,7 +179,7 @@ export class ToolRegistry {
     ctx: CoreToolContext,
     onProgress?: (message: string) => void,
   ): Promise<ToolResult> {
-    const tool = this.tools.get(name)
+    const tool = this.lookup(name)
     if (!tool) {
       // Surface the registered surface so the model (and human triage) can spot
       // a typo without round-tripping through a separate `list_tools` call. The
