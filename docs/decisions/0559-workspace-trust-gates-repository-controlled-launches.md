@@ -14,7 +14,8 @@
 - pyright: `resolvePythonInterpreter`가 `<cwd>/.venv/bin/python`을 골라 넘기고 pyright가 실행한다.
 - typescript-language-server: 워크스페이스 `node_modules/typescript`의 tsserver를 우선 로드한다.
 - rust-analyzer: `build.rs`를 실행한다.
-- 이 서버들은 read-only 도구(`lsp_hover` 등, plan 모드에서 무확인)와 세션 시작 prewarm(도구 호출 없음)이 띄운다.
+- 이 서버들은 read-only 도구(`lsp_hover` 등, 기본 켜짐, plan 모드에서 무확인)와, prewarm이 켜진 경로
+  (`QUANTA_LSP_TOOLS=full` 또는 벤치 — 기본 대화형 CLI는 아님)의 세션 시작 prewarm(도구 호출 없음)이 띄운다.
 - CLI 시작 시 `<cwd>/.mcp.json`의 stdio 명령을 띄운다 (`21618e469`가 cwd 폴백을 들이며 "`.mcp.json`은 트리에서 자동 로드하지 않는다"는 기존 설계를 깼다; central-config가 꺼진 기본값에선 정책이 없다).
 - 프로젝트 플러그인 매니페스트(`.quanta/plugins`)의 MCP 명령은 모드 정책(ci-bot/daemon만 차단)만 봤다.
 - `QUANTA_TRUST_SCOPE`가 켜지면 `.quanta/project-grants.json`의 도구 허용 레코드가 적용됐다.

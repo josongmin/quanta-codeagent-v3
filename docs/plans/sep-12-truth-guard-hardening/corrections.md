@@ -783,3 +783,111 @@ probe(실제 서버, 이 머신):
 검증된 기준선은 VS Code Workspace Trust(비신뢰 시 번들 tsserver, 실행형 확장 비활성), Claude Code의
 폴더 신뢰 다이얼로그 + 프로젝트 `.mcp.json` 서버별 승인, Codex의 프로젝트 `trust_level`.
 기본 사용성(LSP 가용성, 커넥터 설치 round-trip, 벤치 LSP grounding)이 바뀌므로 사용자 결정으로 남긴다.
+
+## K. 라운드 10 — 라운드 9 보완 13커밋에 대한 적대 어딧 (sep-14)
+
+컨텍스트 없는 리뷰어 3명(`audit-r10-{a,b,c}`, HEAD `34b1d74fc`): A=보안·도구표면, B=런타임·테스트 인프라,
+C=주장 재측정. 반영한 발견은 내가 재현하거나 소스로 확인했고, 확인 방법을 커밋마다 적었다.
+결과: 새 진짜 결함 다수(아래) — 이 라운드는 clean이 아니다.
+
+### K-1 J-9 결정과 폴더 신뢰 게이트
+
+- 사용자 결정: "폴더 신뢰 게이트". 같은 날 다른 세션의 sep-14 계획(U-1..U-6)이 같은 영역을 더 자세히 정했고,
+  두 번째 결정으로 "이 게이트를 그 계획의 기반으로 land하고 U-1에 맞춘다".
+- `b6d0d27d0`: `@/agent/workspace-trust`(authority, 하위 폴더 포함, 가장 가까운 기록 우선, 미설치=비신뢰) +
+  `@/host/workspace-trust`(trust.json·`QUANTA_TRUSTED_PATHS`·질문). LSP는 `@/lsp` `beforeSpawn`(팩토리 census),
+  `.mcp.json` 폴백·플러그인·grants overlay 게이트, `import.meta.main` 진입점 전수 분류. ADR-0559.
+- `d2a8c4b7b`: 신뢰 키 = git checkout 루트(U-1), 홈 폴더 yes는 세션 한정, 건너뛴 artifact 알림.
+- `8b27e68b1`: PTY 하네스가 새 질문에서 멈춤(stale-read e2e 0/2) → 하네스는 자기 스크래치 신뢰; 질문 자체의 PTY e2e.
+- `1696a2ac1`: sep-14 plan §7.1에 이미 들어간 것/다른 점/남은 것 기록.
+- `647b08111`: `QUANTA_TRUSTED_PATHS`는 운영자 환경에서만(dotenv 출처면 무시) — 모든 신뢰 판독기가 한 접근자.
+  **정정**: 커밋 제목은 "dotenv가 폴더를 신뢰시킬 수 있었다"고 하지만, CLI 바이너리에선 측정상 닿지 않았다
+  (runtime config가 모듈 로드 중 먼저 읽힘, 검사 제거 뮤턴트에서도 PTY arm 통과). 접근자는 import 순서라는
+  우연 대신 규칙으로 만든 것이고, red arm은 단위 테스트다.
+
+### K-2 deny-all 네트워크 자세 (A1·A2·A3·A6·A8)
+
+- A1(재현): 이름 기반 거부 목록이라 `web_search {query}`·`git_push`·`gh_*`·`image_gen`·`mcp__*`가 통과.
+  → `40914897c`: 허용 목록(`DENY_ALL_PERMITTED_TOOLS`, 도구마다 이유), 모름·MCP·개명=거부, 도구 우주 전수 분류 테스트.
+- A3(소스): `side_agent_spawn` 워커는 가드 없이 조립 → 거부. A6(내가 git으로 재현): `worktree add`가
+  `core.hooksPath`의 post-checkout 훅 실행 → `enter_worktree` 거부.
+- A8(소스): 위임 러너·code_cell 팩토리가 `base`를 캡처, 가드는 어셈블러의 spread 사본에만 → base에 먼저 부착.
+- A2(재현): 서브에이전트 네임스페이스 개명 도구가 모든 이름 키 정책(ownership fence 포함)을 빠져나감.
+  → `105fa754e`: 레지스트리가 제시 이름→자기 이름 매핑, dispatch의 모든 게이트는 자기 이름으로.
+- 전체 unit 티어가 찾은 내 red: SDK `createAnalysisAgent`의 호스트 도구가 허용 목록에 없어 거부 →
+  `238946157`: 호스트가 등록한 도구(`hostTools`)만 추가 허용(MCP·플러그인 제외).
+
+### K-3 merge 탐지기 (B1 HIGH — 내 `9936b9d17`이 들인 회귀)
+
+T1(rename 반대편에서 추가된 export를 해결이 버림)·T2(개명된 디렉터리에 추가된 파일 삭제)가 trivial로 면제,
+T3(충돌 파일의 깨끗한 hunk 삭제 과보고)·T4(무관 이력 merge 중단)는 선존. 넷 다 스크래치 repo로 재현.
+→ `d52ed2943`: git 병합이 파일을 둔 경로(`renames`)에서 판단, 충돌 파일은 마커 포함 텍스트에 이름이 없을 때만 면제,
+`--allow-unrelated-histories`. 전체 이력 95 merge: 미면제 1(사건), lost=70 trivial=4 불변.
+
+### K-4 node REPL (B2·B3 — 내 `6d976eedc`이 들인 회귀, B4·B5 선존)
+
+`await` + 끝 `//` 주석 SyntaxError(Node 22/25), U+2028이 커널 사망(Node 25), Node 22 falsy rejection이 성공,
+타임아웃 후 세션이 죽은 id에 고착(+ "process exited" 오보). 전부 실커널 재현 → `d27f31fad`(개행, JSON 이스케이프,
+`e !== null`(양 버전 측정), dead 슬롯 교체, `exec-timeout` kind, `.exit` 문서 제거). 기본 120초 미고정 → `6a4c8e5b5`.
+명시한 한계: 늦게 도착한 타이머 에러·rejection은 그때 실행 중인 exec에, Node 22 `reject(null)`은 성공처럼, 센티널 뒤 출력은 귀속 안 됨.
+
+### K-5 메모리 (B6)
+
+legacy cwd 스토어 + 재배치 홈 + 옛 홈의 컨솔리데이터 파일: 출력된 `mv`가 재배치 홈으로 → 분할.
+`812a1396e`의 "legacy 알림은 바꿀 필요 없다"는 틀렸다(문제는 목적지). → `ecf4d019f`.
+
+### K-6 테스트 펜스 (B10·C11~C14·C17·C12)
+
+`(file, undefined, options)` 옵션 유실, 명시 env에 HOME 없으면 passwd 홈, `QUANTA_BROWSER_MCP_*` 오분류,
+스크래치 HOME에서 canary 실패, 비카탈로그 키 누락을 아무것도 못 잡음, `syncBuiltinESMExports` 주석 거짓 → `55cfa7a21`.
+
+### K-7 나머지
+
+- A5/C15: 절대·`..` test_target이 스크래치 밖 파일 실행 → `29d608171`.
+- A4: 비리터럴 `isReadOnly` posture가 모든 게이트 통과(88/0) → dynamic 집합 이름 고정 `6f4ab273c`.
+- B8(내 `1d3b9a482`): fake가 chmod 없는 shim을 실행 가능으로 → `6a4c8e5b5`. C: 브랜치 검사 projection 미고정 → 같은 커밋.
+- 전체 티어 red: `plan-exit-flow.test.ts`가 `9f4b864c7`의 새 의미와 충돌 — 내 targeted 실행이 이 파일을 빠뜨렸고
+  main에서 몇 시간 red였다 → `238946157`. DOF-91 기능 수 needle → 같은 커밋.
+
+### K-8 C의 재측정 — 내 과거 주장 중 틀렸거나 과했던 것 (코드 수정은 위 커밋들)
+
+수치는 C의 측정이다. 내가 다시 확인한 것은 괄호로 표시했다.
+
+- `6d976eedc` R1 "(69defb3cf^는 맞는 값)": await한 값을 읽지 않는 블록에서만. 테스트 자신의 케이스는 69defb3cf^에서 TypeError.
+- `6d976eedc` R2 "이후 모든 exec가 이전 값": await한 exec만 밀렸다.
+- `6d976eedc` "ADR이 더는 16 cases라 하지 않음": 채택 시점 서술 2곳이 남아 있다(이력으로 둠).
+- `21c4a9b83` "Suites touched 30/0": 재현 불가. 같은 커밋 doc의 "모든 child_process spawner에서 측정"은 거짓.
+- `9936b9d17` "nothing trivial 뮤턴트 4 red": 5.
+- `04c1e05f0` "63 non-tool objects": 61(둘은 렌이머 자신).
+- `9ec7dc6b1` "세 가지 출구": 더 있었다(K-2). `44d2788b8`은 옵션 형태만 닫았다(K-7).
+- J-5 "모든 키 검사": 같은 목록을 도는 arm이라 누락을 못 봤다(K-6).
+- J-8: `2caf24585`는 merge `3b69c9704`로 들어왔다.
+- J-9 "클론에서 quanta를 켜기만 해도 `.venv/bin/python` 실행": 기본 대화형 실행엔 거짓 — prewarm 슬롯은
+  `buildBaseFromArgs` 경로(헤드리스·배치·mcp serve)와 `QUANTA_LSP_TOOLS=full`/`QUANTA_BENCH_LSP`에서만(내가
+  `resolveLspPrewarmSlot`과 CLI 부트스트랩을 읽어 확인). 성립하는 것:
+  첫 `lsp_*` 호출(기본 켜짐, read-only, 무확인)과 prewarm 함수 자체.
+- J-9 "hooks 말고는 신뢰 결정이 없다": central-config ON이면 MCP 실행 정책·configured endpoint도 같은 신뢰를 쓴다.
+
+### K-9 이번 라운드의 내 절차 결함
+
+- `bun test --update-snapshots -t "batch mode"`가 필터 밖 스냅샷 전부를 지웠다 — cp 백업으로 복원 후 손으로 편집.
+- 내가 재정렬한 JSON 두 개를 `git checkout HEAD --`로 되돌렸다(다른 변경은 없었지만 원칙상 cp 백업이어야 했다).
+- dotenv forge PTY arm을 처음엔 red arm처럼 썼다 — 뮤턴트에서도 통과해 regression guard로 정정.
+- 동시 세션 조율: 다른 세션의 sep-14 계획(같은 영역, 사용자 결정 기록)을 게이트를 만든 뒤에 발견 — 사용자에게 물어 정리.
+
+### K-10 외래 red (측정, 내 것 아님)
+
+`34b1d74fc`에서 통과하고 `e90447fc7`(다른 세션 SEC-1/SEC-2 + 이 목록과 무관한 내 커밋 하나)에서 실패:
+raw `process.env.QUANTA_*` 44>43, 게이트 어휘 1>0, `@/agent` env 읽기, orphan knob 2, temp-root 짝(모두 `servers.ts`의
+`QUANTA_LSP_TRUST_WORKSPACE` 직접 읽기와 그 세션의 새 파일). shard-runner admission 2, toolchain-lend canary(probe HOME에
+`~/.rustup`이 없으면 클린 main에서도 실패), slot-registry 지문 4(선존), budget-product-ceiling(부하 시만).
+fc-check-changed: `src/shared/egress-provenance-guard.ts`(다른 세션).
+
+### K-11 열린 것
+
+- U-5: 비신뢰 폴더의 강화 모드 LSP(지금은 완전 차단) — sep-14 lane B. SEC-2의 rust-analyzer 기본 설정은 신뢰 폴더에서도
+  build script를 끈다(U-5는 신뢰=켬) — 그 세션 소유.
+- Bun의 `.env` 자동 로드는 출처가 없다 — sep-14 lane A(SEC-0).
+- web daemon 신뢰 부여 UI 없음. SDK 호스트는 authority 설치 필요.
+- shadow_verify 스크래치의 `bunfig.toml` preload(패치 코드 실행은 설계상, `bash`처럼 확인).
+- 라운드 11 컨텍스트 없는 어딧.
