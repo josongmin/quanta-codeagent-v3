@@ -506,22 +506,82 @@ describe("the memory plane follows the quanta home", () => {
     const first = resolveStorePath({ homeDir: relocated, cwd, osHomeDir: osHome })
     expect(first.source).toBe("legacy-cwd")
     const target = join(priorDir, "memory.sqlite")
-    expect(first.legacyNotice, "the migration target is the consolidator's home").toContain(
-      `the default is now ${target}`,
+    // The store goes where the consolidator's files are first (round 11: then that whole
+    // directory moves, in the same command).
+    expect(first.legacyNotice, "the store's first stop is the consolidator's home").toContain(
+      `'${target}'`,
     )
     expect(first.legacyNotice).not.toContain(defaultDurableStorePath(relocated))
-    // …and the memory home's own notice is not swallowed.
-    expect(first.legacyNotice).toContain(`memory: using ${priorDir}`)
-    // Run the printed store command; the next launch keeps store and consolidator together.
-    const command = /To migrate \(with no quanta running\): (.*)$/m.exec(
-      first.legacyNotice ?? "",
-    )?.[1]
+    // …and the memory home is named, not swallowed.
+    expect(first.legacyNotice).toContain(`memory lives in ${priorDir}`)
+    // Run the printed command; the next launch keeps store and consolidator together.
+    const command = /running\): (.*)$/m.exec(first.legacyNotice ?? "")?.[1]
     if (command === undefined) throw new Error("fixture: no migration command")
     expect(spawnSync("sh", ["-c", command]).status).toBe(0)
     const second = resolveStorePath({ homeDir: relocated, cwd, osHomeDir: osHome })
-    expect(second.path).toBe(target)
-    expect(existsSync(target)).toBe(true)
+    expect(second.path).toBe(defaultDurableStorePath(relocated))
+    expect(existsSync(second.path)).toBe(true)
     expect(existsSync(join(dirname(second.path), "MEMORY.md"))).toBe(true)
+  })
+
+  // Round-11 audit B4, run on real directories: with a legacy cwd store AND memory still in
+  // the pre-relocation home, the notice printed two commands, and order decided the outcome.
+  describe("a legacy cwd store and a pre-relocation home together", () => {
+    const setup = (opts: { readonly homeStore: boolean }) => {
+      const osHome = temps.create("mem-both-osh-")
+      const cwd = temps.create("mem-both-cwd-")
+      const relocated = temps.create("mem-both-home-")
+      const priorDir = join(osHome, ".quanta", "memory")
+      mkdirSync(priorDir, { recursive: true })
+      writeFileSync(join(priorDir, "MEMORY.md"), "# memory\n")
+      if (opts.homeStore) sqliteWithRows(join(priorDir, "memory.sqlite"), 5)
+      const legacy = join(cwd, ".quanta", "memory.sqlite")
+      sqliteWithRows(legacy, 3)
+      const resolve = () => resolveStorePath({ homeDir: relocated, cwd, osHomeDir: osHome })
+      return { osHome, cwd, relocated, priorDir, legacy, resolve }
+    }
+
+    test("RED: ONE command migrates both, in order, and the next launch keeps store and consolidator together", () => {
+      const { relocated, legacy, resolve } = setup({ homeStore: false })
+      const first = resolve()
+      expect(first.source).toBe("legacy-cwd")
+      const commands = (first.legacyNotice ?? "").match(/running\): /g) ?? []
+      expect(commands, "exactly one command to run").toHaveLength(1)
+      const res = spawnSync("sh", ["-c", commandOf(first.legacyNotice) as string], {
+        encoding: "utf8",
+      })
+      expect(res.status, `exit ${res.status}: ${res.stderr}`).toBe(0)
+      const dest = join(relocated, "memory", "memory.sqlite")
+      expect(resolve()).toEqual({ path: dest, source: "home-default" })
+      expect(rowCount(dest)).toBe(3)
+      expect(existsSync(join(relocated, "memory", "MEMORY.md"))).toBe(true)
+      expect(existsSync(legacy)).toBe(false)
+    })
+
+    test("RED: two stores — no advice names a path the printed migration moves away", () => {
+      const { priorDir, relocated, resolve } = setup({ homeStore: true })
+      const first = resolve()
+      expect(first.source).toBe("legacy-cwd")
+      expect(first.legacyNotice).toContain(join(priorDir, "memory.sqlite"))
+      expect(first.legacyNotice).not.toContain("the home default")
+      expect(first.legacyNotice).not.toContain(
+        `QUANTA_MEMORY_PATH=${join(priorDir, "memory.sqlite")}`,
+      )
+      expect(first.legacyNotice).not.toContain(
+        `QUANTA_MEMORY_PATH='${join(priorDir, "memory.sqlite")}'`,
+      )
+      // Following the one command the notice offers leaves every store it names reachable.
+      const res = spawnSync("sh", ["-c", commandOf(first.legacyNotice) as string], {
+        encoding: "utf8",
+      })
+      expect(res.status, `exit ${res.status}: ${res.stderr}`).toBe(0)
+      const moved = join(relocated, "memory", "memory.sqlite")
+      expect(rowCount(moved)).toBe(5)
+      expect(existsSync(join(relocated, "memory", "MEMORY.md"))).toBe(true)
+      const second = resolve()
+      expect(second.source).toBe("legacy-cwd")
+      expect(second.legacyNotice).toContain(moved)
+    })
   })
 
   test("the factory takes the OS home from the injected env, never homedir()", () => {

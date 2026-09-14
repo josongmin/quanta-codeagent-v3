@@ -197,7 +197,50 @@ const twoStoresNotice = (using: string, other: string, why: string): string =>
   `They are not merged and nothing will move either one. To use the other, set ` +
   `QUANTA_MEMORY_PATH=${shq(other)}; once you no longer need it, remove it.`
 
-/** Where the memory plane's HOME came from. */
+/**
+ * A legacy cwd store while memory still lives in the pre-relocation home: ONE notice, and
+ * at most ONE command.
+ *
+ * It printed the store notice and the home notice, each with its own command, and the
+ * outcome depended on which ran first (round-11 audit, run on real directories): the
+ * directory move first, then the store move, recreated the old directory for the store
+ * alone — an empty store under the new home and a "TWO memory directories" notice. With a
+ * store in the old home too, it said "(the home default)" and recommended
+ * `QUANTA_MEMORY_PATH=<old home store>`, which the directory move then took away.
+ *
+ * - No store in the old home: one command moves the legacy store into the old memory
+ *   directory, then that directory to this home — the order is inside the command.
+ * - A store there too: nothing moves the legacy store (a move would land on a store). The
+ *   only command moves the old directory, and no advice names a path it moves.
+ */
+const legacyWithPriorHomeNotice = (
+  legacy: string,
+  priorStore: string,
+  priorHome: string,
+  currentHome: string,
+  priorStoreExists: boolean,
+): string => {
+  const priorDir = resolveMemoryDirPathsUnder(priorHome).root
+  const currentDir = resolveMemoryDirPathsUnder(currentHome).root
+  const where =
+    `memory lives in ${priorDir}, where it lived before the plane followed ` +
+    `QUANTA_HOME/QUANTA_CONFIG_DIR; this home's memory directory would be ${currentDir}.`
+  const moveDir = memoryDirMigrationCommand(priorDir, currentDir)
+  if (!priorStoreExists) {
+    return (
+      `memory store: using legacy cwd-scoped ${legacy}; ${where} ` +
+      `To migrate both, in order (with no quanta running): ` +
+      `${migrationCommand(legacy, priorStore)} && ${moveDir}`
+    )
+  }
+  return (
+    `memory store: TWO stores exist. This session uses ${legacy}; another is at ${priorStore}. ` +
+    `They are not merged and nothing will move either one. The cwd store takes precedence ` +
+    `while it is there. ${where} To move that directory (with no quanta running): ${moveDir}`
+  )
+}
+
+/** Where the memory plane's HOME came from. */ /** Where the memory plane's HOME came from. */
 export type MemoryHomeSource = "home-default" | "pre-relocation-home"
 
 export interface MemoryHomeResolution {
@@ -289,17 +332,17 @@ export const resolveStorePath = (input: ResolveStorePathInput): StorePathResolut
         })
   const home = defaultDurableStorePath(memory.home)
   if (exists(legacy) && !(exists(home) && sameFile(legacy, home))) {
-    // In place, as before: user data is never moved or copied. But the migration
-    // command is offered ONLY while the destination is absent — if the home store
-    // exists too, a move would at best skip and at worst carry the legacy WAL onto it.
-    const storeNotice = exists(home)
-      ? twoStoresNotice(legacy, home, "the home default")
-      : `memory store: using legacy cwd-scoped ${legacy}; the default is now ${home}. ` +
-        `To migrate (with no quanta running): ${migrationCommand(legacy, home)}`
+    // In place, as before: user data is never moved or copied.
     return {
       path: legacy,
       source: "legacy-cwd",
-      legacyNotice: memory.notice === undefined ? storeNotice : `${storeNotice}\n${memory.notice}`,
+      legacyNotice:
+        memory.source === "pre-relocation-home"
+          ? legacyWithPriorHomeNotice(legacy, home, memory.home, input.homeDir, exists(home))
+          : exists(home)
+            ? twoStoresNotice(legacy, home, "the home default")
+            : `memory store: using legacy cwd-scoped ${legacy}; the default is now ${home}. ` +
+              `To migrate (with no quanta running): ${migrationCommand(legacy, home)}`,
     }
   }
   return {
