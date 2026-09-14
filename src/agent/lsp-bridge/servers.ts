@@ -32,9 +32,21 @@ export interface ServerSpec {
 
 const lspProcessTreeKiller = defaultPpidWalkKiller()
 
+// SEC-2 — a workspace-relative Python interpreter is repo-controlled and pyright
+// EXECUTES it. Default-OFF: the interactive CLI on a cloned repo uses a system
+// interpreter (safe). A trusted/bench context that legitimately needs the repo's
+// own venv opts in with QUANTA_LSP_TRUST_WORKSPACE=1 (consent from the real env
+// only — a repo `.env`-sourced value was already quarantined by SEC-1).
+const trustWorkspaceInterpreter = (): boolean => process.env.QUANTA_LSP_TRUST_WORKSPACE === "1"
+
 export const PYRIGHT: ServerSpec = {
   bin: PYRIGHT_LANGSERVER_BIN,
-  create: (cwd) => new PyrightAdapter({ cwd, processTreeKiller: lspProcessTreeKiller }),
+  create: (cwd) =>
+    new PyrightAdapter({
+      cwd,
+      processTreeKiller: lspProcessTreeKiller,
+      allowWorkspaceInterpreter: trustWorkspaceInterpreter(),
+    }),
 }
 const TYPESCRIPT: ServerSpec = {
   bin: TYPESCRIPT_LANGUAGE_SERVER_BIN,
