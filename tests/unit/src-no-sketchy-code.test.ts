@@ -142,6 +142,10 @@ const RULES: readonly Rule[] = [
       "lsp/server-rss-watchdog.ts":
         "Injection-first: `process.env` is ONLY the default for the injected `env` param; the RSS-watchdog reads its budget gate off that param, tests pass a fake env. Same DI-boundary posture as lsp/server-mem-budget.ts.",
       "apps/eval/index.ts": "eval CLI bootstraps env BEFORE other modules read it (mirrors bench)",
+      "apps/eval/entry.ts":
+        "thin eval PROCESS entrypoint (mirrors apps/eval/index.ts) — its only process.env is the launch-time bag handed to the SEC-1 egress scrub (scrubUntrustedEgressRedirects) right after loadEnvFiles, a composition-root concern; downstream receives a scrubbed env. Same bootstrap posture as apps/eval/index.ts.",
+      "agent/lsp-bridge/servers.ts":
+        "SEC-2 security gate at the LSP SPAWN SITE — trustWorkspaceInterpreter() reads QUANTA_LSP_TRUST_WORKSPACE together with its dotenv PROVENANCE (envFileSourceOf) to decide whether pyright may execute a workspace-supplied interpreter (arbitrary code execution on a cloned repo otherwise). A spawn-time security decision paired with a provenance check that the plain gate accessor cannot express; same spawn-site posture as lsp/adapters/base/transport.ts.",
       "apps/probe/index.ts":
         "probe CLI bootstraps env before module loads (same posture as other CLI entries)",
       "tool/git/runner.ts":

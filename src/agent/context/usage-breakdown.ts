@@ -128,10 +128,25 @@ export interface ContextUsageBreakdown {
   readonly windowModel?: string
 }
 
+/** A category contribution whose tokens are ALREADY counted by the loop's own
+ *  estimator at the producer (OC-5/BUG-2) — used when carrying the source TEXT to
+ *  the `/context` surface would be wasteful (the whole transcript) or impossible.
+ *  The producer MUST use the same {@link estimateTokens} so the total stays
+ *  consistent with the loop's compaction accounting. */
+export interface PreCountedSegment {
+  readonly category: ContextCategory
+  readonly tokens: number
+  readonly chars: number
+}
+
 export interface BuildBreakdownInput {
   readonly sections: readonly PromptSection[]
   /** Extra sources mapped to categories (tools/skills/mcp/subagents). */
   readonly extras?: readonly ExtraContextSource[]
+  /** Pre-counted category contributions (e.g. the Conversation transcript), added
+   *  to the text-estimated segments so `total` reflects the WHOLE context, not
+   *  just the system prompt (OC-5/BUG-2). */
+  readonly preCounted?: readonly PreCountedSegment[]
   /** Maximum context window for the active model. */
   readonly max: number
   readonly model?: string
@@ -152,6 +167,37 @@ const asMessage = (text: string): Message => ({
  * the injected estimator (the loop's own `estimateTokens`). Empty categories
  * are omitted; segments follow {@link CATEGORY_ORDER}.
  */
+/** Sum {@link BuildBreakdownInput.preCounted} contributions per category. Pure. */
+const accumulatePreCounted = (
+  preCounted: readonly PreCountedSegment[] | undefined,
+): Map<ContextCategory, { tokens: number; chars: number }> => {
+  const preByCat = new Map<ContextCategory, { tokens: number; chars: number }>()
+  for (const pc of preCounted ?? []) {
+    const cur = preByCat.get(pc.category) ?? { tokens: 0, chars: 0 }
+    preByCat.set(pc.category, {
+      tokens: cur.tokens + Math.max(0, pc.tokens),
+      chars: cur.chars + Math.max(0, pc.chars),
+    })
+  }
+  return preByCat
+}
+
+/** One category's merged segment (text-estimated + pre-counted), or `null` when
+ *  the category is empty (omitted from the breakdown, as before). Pure. */
+const resolveCategorySegment = (
+  cat: ContextCategory,
+  parts: string[] | undefined,
+  pre: { tokens: number; chars: number } | undefined,
+  estimate: TokenEstimator,
+): UsageSegment | null => {
+  const joined = parts === undefined ? "" : parts.join("\n\n")
+  const textTokens = joined.length === 0 ? 0 : Math.max(0, estimate([asMessage(joined)]))
+  const tokens = textTokens + (pre?.tokens ?? 0)
+  const chars = joined.length + (pre?.chars ?? 0)
+  if (tokens === 0 && chars === 0) return null
+  return { id: cat, tokens, chars, color: CATEGORY_COLOR[cat] }
+}
+
 export function buildUsageBreakdown(
   input: BuildBreakdownInput,
   estimate: TokenEstimator,
@@ -169,16 +215,18 @@ export function buildUsageBreakdown(
   }
   for (const extra of input.extras ?? []) push(extra.category, extra.text)
 
+  // Pre-counted contributions (OC-5/BUG-2): tokens/chars already measured by the
+  // loop's estimator at the producer. Accumulated per category and merged with any
+  // text-estimated tokens for the same category below.
+  const preByCat = accumulatePreCounted(input.preCounted)
+
   const segments: UsageSegment[] = []
   let total = 0
   for (const cat of CATEGORY_ORDER) {
-    const parts = textByCat.get(cat)
-    if (parts === undefined || parts.length === 0) continue
-    const joined = parts.join("\n\n")
-    if (joined.length === 0) continue
-    const tokens = Math.max(0, estimate([asMessage(joined)]))
-    total += tokens
-    segments.push({ id: cat, tokens, chars: joined.length, color: CATEGORY_COLOR[cat] })
+    const seg = resolveCategorySegment(cat, textByCat.get(cat), preByCat.get(cat), estimate)
+    if (seg === null) continue // empty category — omitted as before
+    total += seg.tokens
+    segments.push(seg)
   }
 
   return {
@@ -252,6 +300,13 @@ export interface PromptAssembledSnapshot {
    *  scraping prompt text. */
   readonly firedAtomIds?: readonly string[]
   readonly byChannel?: Readonly<Partial<Record<PromptPolicyChannel, readonly string[]>>>
+  /** OC-5/BUG-2 — the CONVERSATION transcript's tokens/chars, measured by the
+   *  loop's own `estimateTokens` at the producer. Without these the snapshot only
+   *  carried the system prompt, so `/context` reported "94% left" no matter how
+   *  long the dialogue grew and the pre-compaction warning never fired. Absent ⇒
+   *  the pre-fix system-only total (back-compat). */
+  readonly conversationTokens?: number
+  readonly conversationChars?: number
 }
 
 /** Reconstruct the per-section `name`s the breakdown needs from a captured
@@ -279,9 +334,22 @@ export function snapshotToSections(snap: PromptAssembledSnapshot): PromptSection
 /** Map a captured {@link PromptAssembledSnapshot} to a {@link BuildBreakdownInput}
  *  ready for {@link buildUsageBreakdownDefault}. Pure. */
 export function snapshotToBreakdownInput(snap: PromptAssembledSnapshot): BuildBreakdownInput {
+  // OC-5/BUG-2 — fold the conversation transcript into the breakdown as a
+  // pre-counted Conversation segment so `total` covers the whole context.
+  const preCounted: PreCountedSegment[] =
+    snap.conversationTokens !== undefined && snap.conversationTokens > 0
+      ? [
+          {
+            category: "Conversation",
+            tokens: snap.conversationTokens,
+            chars: snap.conversationChars ?? 0,
+          },
+        ]
+      : []
   return {
     sections: snapshotToSections(snap),
     max: snap.max,
+    ...(preCounted.length > 0 ? { preCounted } : {}),
     ...(snap.model !== undefined ? { model: snap.model } : {}),
     // aug-28 — carry the window key through, or the DISPLAY re-derives the
     // compaction threshold from the real model id and disagrees with the loop.

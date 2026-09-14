@@ -21,6 +21,8 @@ import { BUDGET_PRESETS } from "@/agent/run-mode"
 import type { LLMPort } from "@/llm"
 import type { RunHealthSummary } from "@/runner/batch/report"
 import { errMessage, gateOn, logger, runtimeConfig } from "@/shared"
+import { scrubUntrustedEgressRedirectsWithWarn } from "@/shared/egress-provenance-guard"
+import { envFileSourceOf, loadEnvFiles } from "@/shared/env-files"
 import { resolveBenchmarkRunConfig } from "./benchmark-suite"
 import {
   benchInstanceWorkSlug,
@@ -45,7 +47,6 @@ import {
   argFlag,
   argPositiveInt,
   argValue,
-  loadEnv,
   repairConfigFromArg,
   resolveConcurrency,
 } from "./run-args"
@@ -847,7 +848,12 @@ export const applyBenchEnvDefaults = (
 
 export const runMain = async (deps: MainDeps = {}): Promise<void> => {
   exitFn = deps.exit ?? defaultExitFn
-  loadEnv([".env.dev", ".env.local", ".env"])
+  // SEC-1 (round-1 audit) — bench runs against untrusted SWE-bench repos and
+  // builds a real LLM, so it is an egress-exfil target too. Use the shared
+  // provenance-recording loader (not bench's own copy) so the scrub can see which
+  // keys came from a repo `.env` and quarantine a poisoned endpoint override.
+  loadEnvFiles([".env.dev", ".env.local", ".env"])
+  scrubUntrustedEgressRedirectsWithWarn(process.env, envFileSourceOf, (m) => logger.warn(m))
   // T2 — resolve the ONE typed run config at the composition root. Parses the
   // family selector (argv `--dataset-family` wins, then env) EXACTLY ONCE and
   // FAILS CLOSED on an explicit-but-unknown selector (a typo now errors instead

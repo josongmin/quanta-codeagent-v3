@@ -10,15 +10,18 @@ import { resolvePythonInterpreter } from "@/lsp/adapters/pyright"
  * sandbox creates its own venv, so that must win over a PATH interpreter.
  */
 describe("resolvePythonInterpreter", () => {
-  test("prefers the project's own .venv over a PATH interpreter", () => {
+  test("prefers the project's own .venv ONLY with the trusted opt-in (SEC-2)", () => {
     const dir = mkdtempSync(join(tmpdir(), "pyr-interp-"))
     try {
       mkdirSync(join(dir, ".venv", "bin"), { recursive: true })
       const venvPy = join(dir, ".venv", "bin", "python")
       writeFileSync(venvPy, "#!/bin/sh\n")
       chmodSync(venvPy, 0o755)
-      // RED-on-injection: drop the venv-scan loop and this returns a PATH python.
-      expect(resolvePythonInterpreter(dir)).toBe(venvPy)
+      // SEC-2: pyright EXECUTES this interpreter, so a repo-relative venv is only
+      // consulted for a trusted workspace (allowWorkspaceInterpreter=true, e.g.
+      // the bench sandbox). The untrusted default must NOT pick it.
+      expect(resolvePythonInterpreter(dir, true)).toBe(venvPy)
+      expect(resolvePythonInterpreter(dir)).not.toBe(venvPy)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

@@ -126,4 +126,39 @@ describe("maybeCreateMidTurnCaptureWire — #8 seam", () => {
     // A different thread's partition is empty (per-thread isolation).
     expect(q.peek("t-other")).toEqual([])
   })
+
+  test("F (OC-2). enqueuing a mid-turn line emits response_queued once per line", async () => {
+    const q = freshQueue()
+    const queued: string[] = []
+    const handle = maybeCreateMidTurnCaptureWire({
+      enabled: true,
+      threadId: "t-1",
+      planQueue: q,
+      pushExternal: () => {},
+      now,
+      onQueued: (reason) => void queued.push(reason),
+    })
+    if (!handle) throw new Error("handle expected")
+
+    await handle.captureLine("deferred line", 2)
+    await handle.captureLine("another one", 2)
+
+    // The `⏸ queued` signal fires at the enqueue site — once per deferred line —
+    // with the paused reason the FollowUp is stamped with (a turn is in flight).
+    expect(queued).toEqual(["tool_in_flight", "tool_in_flight"])
+  })
+
+  test("F2 (OC-2). onQueued absent ⇒ no-op, capture still enqueues (byte-identical)", async () => {
+    const q = freshQueue()
+    const handle = maybeCreateMidTurnCaptureWire({
+      enabled: true,
+      threadId: "t-1",
+      planQueue: q,
+      pushExternal: () => {},
+      now,
+    })
+    if (!handle) throw new Error("handle expected")
+    await handle.captureLine("no sink", 1)
+    expect(q.peek("t-1")).toHaveLength(1)
+  })
 })

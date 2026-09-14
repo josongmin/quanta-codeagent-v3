@@ -7,6 +7,7 @@ import type { TaskBudget } from "../budget"
 import type { BgSummaryPayload } from "../compaction"
 import { TokenBaselineBox } from "../compaction"
 import type { BackgroundSummarizationController } from "../compaction/index"
+import { charsOf, estimateTokens } from "../compaction/token-baseline"
 import type { BreakerVerdict, CompactionBreaker } from "../compaction-breaker"
 import type { ConversationSummaryArchive } from "../conversation-summary-archive"
 import { probeRepoMap } from "../env-context"
@@ -609,9 +610,18 @@ export const emitPromptAssembled = (
   if (hook === undefined) return
   try {
     const policy = ctx.promptPolicy
+    // OC-5/BUG-2 — measure the conversation transcript with the loop's OWN
+    // estimator so `/context` counts the whole context, not just the system
+    // prompt. `ctx.messages` is what this turn sends alongside `ctx.system`;
+    // `?? []` keeps the snapshot alive even if a caller/mock omits it (an
+    // estimator throw here would otherwise be swallowed and lose the whole snapshot).
+    const convMessages = ctx.messages ?? []
+    const conversationTokens = estimateTokens(convMessages)
+    const conversationChars = charsOf(convMessages)
     hook({
       system: ctx.system,
       layout: policy.systemLayout,
+      ...(conversationTokens > 0 ? { conversationTokens, conversationChars } : {}),
       repoRulesPresent: policy.repoRulesPresent,
       sessionCtxPresent: policy.sessionCtxPresent,
       userAppendPresent: policy.userAppendPresent,
