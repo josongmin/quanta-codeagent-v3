@@ -369,6 +369,18 @@ describe("HITL — the assembled registry agrees with the declarations", () => {
       return p.readOnly === "true" && kind !== null && kind !== undefined
     }).map((p) => `${p.name} (${p.file}:${p.line}, row=${classifiedMutatingKind(p.name)})`)
     expect(readOnlyWithMutatingRow).toEqual([])
+    // Both arms read only literal `true`/`false`. A posture this census cannot reduce —
+    // `() => FLAG` with `const FLAG = true`, `() => !0`, a deps field — is `dynamic`, and a
+    // ledger tool flipped to one passed every gate (round-10 audit: 88/0 and 34/0). None
+    // exists today, so the dynamic set is pinned: a new one is reviewed here by name.
+    const REVIEWED_DYNAMIC_READ_ONLY: readonly string[] = []
+    const dynamic = POSTURES.filter((p) => p.readOnly === "dynamic").map(
+      (p) => `${p.name} (${p.file}:${p.line})`,
+    )
+    expect(
+      dynamic.filter((d) => !REVIEWED_DYNAMIC_READ_ONLY.some((n) => d.startsWith(`${n} (`))),
+      "a tool's isReadOnly() is not a literal the census can read; make it one, or review it",
+    ).toEqual([])
     // Anti-vacuity: the arm must actually meet write-capable tools that HAVE a row.
     expect(
       POSTURES.filter((p) => p.readOnly === "false" && classifiedMutatingKind(p.name) !== undefined)
