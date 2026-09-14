@@ -26,7 +26,8 @@ import { installResolvedWorkspaceTrust } from "@/host/workspace-trust"
 import { installOtelSpanExportFromEnv } from "@/observability/otel-span-export"
 import { type SupportedReadModels, supported } from "@/protocol/session"
 import type { RuntimeFacade } from "@/sdk/runtime"
-import { errMessage, gateOn, gateOnStrict, runtimeConfig } from "@/shared"
+import { errMessage, gateOn, gateOnStrict } from "@/shared"
+import { operatorTrustedPaths } from "@/shared/operator-trusted-paths"
 import type { ObservableRuntimeFacade } from "./runtime-factory"
 import {
   type AgentStatePorts,
@@ -490,7 +491,7 @@ if (import.meta.main) {
       // trusted at the CLI's question is trusted here, since both read the same file.
       await installResolvedWorkspaceTrust({
         cwd: process.cwd(),
-        trustedPaths: runtimeConfig().trustedPaths,
+        trustedPaths: operatorTrustedPaths(),
         warn: (message) => process.stderr.write(`${message}\n`),
       })
       await main()

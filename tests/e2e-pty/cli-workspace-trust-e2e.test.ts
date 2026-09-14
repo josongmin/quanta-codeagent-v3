@@ -8,7 +8,7 @@
  * scratch folder so they do not stop at it).
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { drivePtyCli, PTY_AVAILABLE, type PtyCli } from "./pty-harness"
@@ -63,6 +63,30 @@ describe.skipIf(!PTY_AVAILABLE)("CLI workspace-trust question e2e (PTY)", () => 
     second.send("\r")
     await second.waitFor(BOOT, T)
     expect(QUESTION.test(second.screen()), "a trusted folder was asked about again").toBe(false)
+  }, 90_000)
+
+  // A regression guard, not a red-on-mutant arm: measured with `operatorTrustedPaths`'s
+  // provenance check removed, this still passes, because the CLI's runtime config is first
+  // read during module loading, before `loadEnvFiles` runs. The accessor makes the rule
+  // explicit instead of an accident of import order; its unit test is the red arm.
+  test("a launch folder's .env.dev cannot trust the folder; the real environment can", async () => {
+    writeFileSync(join(folder, ".env.dev"), `QUANTA_TRUSTED_PATHS=${realpathSync(folder)}\n`)
+    const forged = drivePtyCli({
+      cwd: folder,
+      env: { QUANTA_CONFIG_DIR: configDir },
+      unsetEnv: ["QUANTA_TRUSTED_PATHS"],
+    })
+    cli = forged
+    await forged.waitFor(QUESTION, T)
+    forged.kill()
+    // PAIRED CONTROL: the same value from the real environment trusts the folder.
+    const real = drivePtyCli({
+      cwd: folder,
+      env: { QUANTA_CONFIG_DIR: configDir, QUANTA_TRUSTED_PATHS: realpathSync(folder) },
+    })
+    cli = real
+    await real.waitFor(BOOT, T)
+    expect(QUESTION.test(real.screen())).toBe(false)
   }, 90_000)
 
   test("PAIRED CONTROL: no is not saved, and the session still starts", async () => {

@@ -36,6 +36,7 @@ import {
 } from "@/config"
 import { type ResolvedEndpoint, resolveConfiguredEndpoint } from "@/runner/assemble"
 import { errMessage, logger, quantaHomeDir, runtimeConfig } from "@/shared"
+import { operatorTrustedPaths } from "@/shared/operator-trusted-paths"
 
 /** The fixed allowlist of SYMBOLIC endpoint secret refs resolved to concrete
  *  host secret VALUES. A ref the profile references but that is absent here ⇒
@@ -103,7 +104,7 @@ export const resolveConfiguredEndpointForCli = async (): Promise<ResolvedEndpoin
       commit: async () => {},
     })
     const trustedFromEnv = canonicalizeTrustedPaths(
-      (rc.trustedPaths ?? "").split(",").map((s) => s.trim()),
+      (operatorTrustedPaths() ?? "").split(",").map((s) => s.trim()),
     )
     const trusted = store.isTrusted(realCwd) || trustedFromEnv.has(realCwd)
     const layers = await readDiskLayers({

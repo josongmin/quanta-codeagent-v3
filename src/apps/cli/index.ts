@@ -5,9 +5,10 @@ import { applyGoalPreset } from "@/objective"
 import { installOtelSpanExportFromEnv } from "@/observability/otel-span-export"
 import { selectRemoteRunner } from "@/remote"
 import { pickProviderCore, projectLlmTransport } from "@/runner/assemble"
-import { errMessage, gateDisabled, logger, runtimeConfig, setTerminalIo } from "@/shared"
+import { errMessage, gateDisabled, logger, setTerminalIo } from "@/shared"
 import { scrubUntrustedEgressRedirectsWithWarn } from "@/shared/egress-provenance-guard"
 import { envFileSourceOf } from "@/shared/env-files"
+import { operatorTrustedPaths } from "@/shared/operator-trusted-paths"
 import { CLI_SEEDED_GATE_NAMES } from "./cli-seeded-gates"
 import { loadEnvFiles } from "./dotenv"
 import { applyToolProfileFlag } from "./internal/argv"
@@ -238,7 +239,7 @@ const main = async (): Promise<void> => {
   // server or a project MCP server. Recorded decisions only; the interactive REPL asks.
   await installResolvedWorkspaceTrust({
     cwd: process.cwd(),
-    trustedPaths: runtimeConfig().trustedPaths,
+    trustedPaths: operatorTrustedPaths(),
     warn: (message) => process.stderr.write(`${message}\n`),
   })
 

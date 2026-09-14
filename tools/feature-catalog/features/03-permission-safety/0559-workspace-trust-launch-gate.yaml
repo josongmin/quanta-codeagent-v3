@@ -31,6 +31,7 @@ evidence:
     - src/agent/workspace-trust.ts
     - src/host/workspace-trust.ts
     - src/host/trust-persist.ts
+    - src/shared/operator-trusted-paths.ts
     - src/apps/cli/repl/workspace-trust-prompt.ts
     - src/agent/lsp-bridge/servers.ts
     - src/host/mcp-composition.ts
@@ -39,6 +40,7 @@ evidence:
   tests:
     unit:
       - tests/unit/cli/workspace-trust-hellgate.test.ts
+      - tests/unit/shared/operator-trusted-paths.test.ts
     integration: []
     contract: []
 knobs:

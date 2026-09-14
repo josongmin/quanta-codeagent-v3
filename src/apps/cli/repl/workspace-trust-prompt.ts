@@ -14,7 +14,7 @@
 import * as readline from "node:readline/promises"
 import { isWorkspaceTrusted } from "@/agent/workspace-trust"
 import { installResolvedWorkspaceTrust } from "@/host/workspace-trust"
-import { runtimeConfig } from "@/shared"
+import { operatorTrustedPaths } from "@/shared/operator-trusted-paths"
 
 export const renderWorkspaceTrustQuestion = (folder: string): string =>
   [
@@ -46,7 +46,7 @@ export const maybeConfirmWorkspaceTrust = async (): Promise<void> => {
   if (isWorkspaceTrusted(cwd)) return
   await installResolvedWorkspaceTrust({
     cwd,
-    trustedPaths: runtimeConfig().trustedPaths,
+    trustedPaths: operatorTrustedPaths(),
     confirm: askOnTerminal,
     warn: (message) => process.stderr.write(`${message}\n`),
   })

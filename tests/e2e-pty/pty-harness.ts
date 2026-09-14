@@ -84,6 +84,8 @@ export interface DrivePtyOpts {
   readonly cwd?: string
   readonly cols?: number
   readonly rows?: number
+  /** Keys removed from the child's environment after the base and `env` are merged. */
+  readonly unsetEnv?: readonly string[]
 }
 
 export interface PtyCli {
@@ -146,22 +148,24 @@ export const drivePtyCli = (opts: DrivePtyOpts = {}): PtyCli => {
           return d
         })()
   const command = opts.command ?? (["bun", CLI_ENTRY] as const)
+  const childEnv: Record<string, string> = {
+    PATH: process.env.PATH ?? "/usr/bin:/bin",
+    HOME: home,
+    QUANTA_PREFS_HOME: home,
+    CODEX_HOME: join(home, ".codex"),
+    TERM: "xterm-256color",
+    QUANTA_PROVIDER: "anthropic",
+    ANTHROPIC_API_KEY: "test",
+    // The harness's own scratch folder is trusted, so the CLI does not stop at its
+    // one-time workspace-trust question (ADR-0559) — these suites test other things.
+    // `cli-workspace-trust-e2e` passes "" to see the question.
+    QUANTA_TRUSTED_PATHS: cwd,
+    ...opts.env,
+  }
+  for (const key of opts.unsetEnv ?? []) delete childEnv[key]
   const child = Bun.spawn([...command, ...(opts.args ?? [])], {
     cwd,
-    env: {
-      PATH: process.env.PATH ?? "/usr/bin:/bin",
-      HOME: home,
-      QUANTA_PREFS_HOME: home,
-      CODEX_HOME: join(home, ".codex"),
-      TERM: "xterm-256color",
-      QUANTA_PROVIDER: "anthropic",
-      ANTHROPIC_API_KEY: "test",
-      // The harness's own scratch folder is trusted, so the CLI does not stop at its
-      // one-time workspace-trust question (ADR-0559) — these suites test other things.
-      // `cli-workspace-trust-e2e` passes "" to see the question.
-      QUANTA_TRUSTED_PATHS: cwd,
-      ...opts.env,
-    },
+    env: childEnv,
     stdin: slaveFd,
     stdout: slaveFd,
     stderr: slaveFd,

@@ -54,6 +54,7 @@ import type { Metrics, StructuredLogger } from "@/observability"
 import { parseEnvFlag } from "@/runner/assemble"
 import type { ProxyEnvInput } from "@/runtime/network-proxy"
 import { emitOperatorNotice, errMessage, logger, quantaHomeDir, runtimeConfig } from "@/shared"
+import { operatorTrustedPaths } from "@/shared/operator-trusted-paths"
 import { MCPRootSchema, PLUGIN_MCP_FILE } from "@/skill/plugin-manifest"
 import {
   type McpResourceCaptureHolder,
@@ -512,7 +513,7 @@ export const resolveMcpLaunchPolicy = async (
       commit: async () => {},
     })
     const trustedFromEnv = canonicalizeTrustedPaths(
-      (rc.trustedPaths ?? "").split(",").map((s) => s.trim()),
+      (operatorTrustedPaths() ?? "").split(",").map((s) => s.trim()),
     )
     const trusted = store.isTrusted(realCwd) || trustedFromEnv.has(realCwd)
     const layers = await readDiskLayers({

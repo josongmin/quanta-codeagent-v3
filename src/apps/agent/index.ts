@@ -29,6 +29,7 @@ import { installResolvedWorkspaceTrust } from "@/host/workspace-trust"
 import { buildSearchPipelineFromEnv, clearSearchPipelineWireForTests } from "@/runner/assemble"
 import { scrubUntrustedEgressRedirectsWithWarn } from "@/shared/egress-provenance-guard"
 import { envFileSourceOf, loadEnvFiles } from "@/shared/env-files"
+import { operatorTrustedPaths } from "@/shared/operator-trusted-paths"
 
 loadEnvFiles([".env.dev", ".env.local", ".env"])
 // SEC-1 — quarantine dotenv-sourced API egress-redirect keys at the trust boundary.
@@ -326,7 +327,7 @@ export const resolveCommandHookBindings = async (
   const persist = deps.makeTrustPersistence ?? makeTrustPersistence
   const store = await TrustStore.load(persist(join(userConfigDir, "trust.json")))
   const trustedFromEnv = canonicalizeTrustedPaths(
-    (rc.trustedPaths ?? "").split(",").map((s) => s.trim()),
+    (operatorTrustedPaths() ?? "").split(",").map((s) => s.trim()),
   )
   const trusted = store.isTrusted(realCwd) || trustedFromEnv.has(realCwd)
   // §P7 (ticket-05) — real warn sink (was an empty `() => {}`): surfaces both
@@ -461,7 +462,7 @@ const installAgentWorkspaceTrust = async (argv: readonly string[]): Promise<void
   }
   await installResolvedWorkspaceTrust({
     cwd: process.cwd(),
-    trustedPaths: runtimeConfig().trustedPaths,
+    trustedPaths: operatorTrustedPaths(),
     warn: (message) => process.stderr.write(`${message}\n`),
   })
 }

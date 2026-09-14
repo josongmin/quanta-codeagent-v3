@@ -8,7 +8,8 @@
  */
 
 import { installResolvedWorkspaceTrust } from "@/host/workspace-trust"
-import { errMessage, runtimeConfig } from "@/shared"
+import { errMessage } from "@/shared"
+import { operatorTrustedPaths } from "@/shared/operator-trusted-paths"
 import { runServeStdioCmd } from "./serve-stdio-cmd"
 
 export const runServeStdioEntry = async (argv: readonly string[]): Promise<number> =>
@@ -18,7 +19,7 @@ if (import.meta.main) {
   // Workspace trust from the operator's recorded decisions; an IDE sidecar has no terminal.
   void installResolvedWorkspaceTrust({
     cwd: process.cwd(),
-    trustedPaths: runtimeConfig().trustedPaths,
+    trustedPaths: operatorTrustedPaths(),
   })
     .then(() => runServeStdioEntry(process.argv.slice(2)))
     .then((code) => process.exit(code))
