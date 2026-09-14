@@ -34,7 +34,7 @@
  */
 
 import { defaultMidTurnCapture, type MidTurnCapture } from "@/agent/mid-turn-interruption"
-import type { PlanQueueStore } from "@/agent/plan-queue"
+import type { PausedReason, PlanQueueStore } from "@/agent/plan-queue"
 
 /** A live mid-turn capture handle. A future concurrent keystroke reader (or a
  *  test) calls `captureLine(text)` for every completed input line that arrives
@@ -67,6 +67,15 @@ export interface MidTurnCaptureWireDeps {
   readonly pushExternal: (text: string) => void
   /** Injected clock for the capture facade (tests pin it). Default `Date.now`. */
   readonly now?: () => number
+  /** OC-2 — emit `response_queued` when a mid-turn line is actually enqueued
+   *  (deferred to the next turn boundary). This is the FIRST correct producer of
+   *  the `⏸ queued` signal: `control-poll` reads `cfg.pausedReason`, but that
+   *  callback is never assigned at any composition root, so the poll path never
+   *  fired. The enqueue site is where the deferral demonstrably happens, so the
+   *  reason is `tool_in_flight` (captureLine only runs WHILE a turn is streaming,
+   *  which is exactly the stamped {@link inferPausedReason}). Best-effort; absent
+   *  ⇒ no-op (byte-identical, e.g. a surface with no live stream sink). */
+  readonly onQueued?: (reason: PausedReason) => void
 }
 
 /**
@@ -92,12 +101,15 @@ export const maybeCreateMidTurnCaptureWire = (
     captureLine: async (text: string, turnIndex: number): Promise<void> => {
       // Persist into the plan-queue via the facade (mode "queue" ⇒ the line is
       // held for the next turn boundary, the typing-while-streaming default).
-      await capture.capture({
+      const decision = await capture.capture({
         text,
         receivedAtMs: deps.now?.() ?? Date.now(),
         mode: "queue",
         observedTurnIndex: turnIndex,
       })
+      // OC-2 — the line was deferred ⇒ surface the `response_queued` signal now,
+      // at the enqueue site (the poll-time `cfg.pausedReason` path is dead wiring).
+      if (decision.action === "queue") deps.onQueued?.("tool_in_flight")
       // Mirror onto the live external ingress so the turn-boundary race surfaces
       // it as the next prompt. Best-effort: a queue fault must never break the
       // in-flight turn that produced the keystroke.

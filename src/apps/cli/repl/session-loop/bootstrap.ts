@@ -104,6 +104,14 @@ const buildPromptPlumbing = (deps: RunSessionLoopDeps, state: LoopStateHolder) =
           threadId: setup.sessionId,
           planQueue: deps.planQueueStore,
           pushExternal: (text) => externalPromptQueue.push(text),
+          // OC-2 — emit `response_queued` on the live stream when a mid-turn line
+          // is deferred. `routeEventSink` is the same live AgentEvent sink the
+          // loop uses; absent ⇒ no-op (best-effort observability).
+          ...(setup.routeEventSink !== undefined
+            ? {
+                onQueued: (reason) => setup.routeEventSink?.({ type: "response_queued", reason }),
+              }
+            : {}),
         })
       : undefined
   // Wrap a `runOneTurn` invocation with the concurrent in-turn reader (factory
