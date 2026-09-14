@@ -53,6 +53,14 @@ export interface NormalizedSender {
    *  (`COLLABORATOR`/`MEMBER`/`OWNER`/`CONTRIBUTOR`/`NONE`/...). Resolved into
    *  a closed {@link TrustScope} by the mention filter. */
   readonly isCollaborator?: boolean
+  /**
+   * The payload's `author_association`, verbatim, when present. `isCollaborator`
+   * folds OWNER, MEMBER and COLLABORATOR into one boolean, and the mention filter
+   * resolved that boolean to `collaborator` before it ever looked for the owner —
+   * so `--trust-scope owner` and `member` admitted NOBODY on any real comment,
+   * which always carries an association.
+   */
+  readonly association?: string
 }
 
 export interface NormalizedRepo {

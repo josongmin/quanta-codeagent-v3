@@ -24,15 +24,19 @@
  * "keeper binds" is a race a third contender can win — in which case the
  * quarantine silently did nothing.
  *
- * A record has no such window: it is written BEFORE the lease is released, and
- * `acquireTestShardLease` consults it. The keeper's only job is to delete the
- * record once the survivors are gone, and its own death is not a bypass —
- * liveness is re-derived from the SURVIVORS on every read, so a record whose
- * survivors have exited is stale no matter who is holding it.
+ * A record is written BEFORE the lease is released, and `acquireTestShardLease`
+ * reads it only after binding the port — while holding it — so a record written
+ * by a holder cannot slip between a contender's read and its bind, and only a
+ * holder clears one. The window was real when the read came first; an audit
+ * reproduced it. Liveness is re-derived from the SURVIVORS on every read, so a
+ * record whose survivors have exited is stale no matter who wrote it, and the
+ * keeper deletes nothing (see `lease-quarantine-keeper.ts` for what deleting
+ * cost).
  */
 
 import { createHash } from "node:crypto"
 import {
+  chmodSync,
   existsSync,
   linkSync,
   lstatSync,
@@ -87,6 +91,12 @@ export interface LeaseQuarantineRecord {
    * keeper from bricking verification for everyone.
    */
   readonly expiresAtMs: number
+  /**
+   * Blocked until at least this time whatever the survivors say: the ceiling of an
+   * UNREADABLE record this one displaced. Its groups could not be read, so they
+   * cannot be carried — and moving the file aside used to lift the block it held.
+   */
+  readonly holdUntilMs?: number
 }
 
 /** Absolute directory override for the quarantine root. Tests use it; production does not. */
@@ -176,6 +186,11 @@ const isGroup = (value: unknown): value is QuarantinedGroup => {
   )
 }
 
+const hasValidTimes = (row: Partial<LeaseQuarantineRecord>): boolean =>
+  isCount(row.createdAtMs) &&
+  isCount(row.expiresAtMs) &&
+  (row.holdUntilMs === undefined || isCount(row.holdUntilMs))
+
 export const parseLeaseQuarantine = (candidate: unknown): LeaseQuarantineRecord | undefined => {
   if (typeof candidate !== "object" || candidate === null) return undefined
   const row = candidate as Partial<LeaseQuarantineRecord>
@@ -184,7 +199,7 @@ export const parseLeaseQuarantine = (candidate: unknown): LeaseQuarantineRecord 
   if (typeof row.repositoryId !== "string" || row.repositoryId === "") return undefined
   const keeperless = row.schema === LEASE_QUARANTINE_SCHEMA && row.keeperPid === null
   if (!keeperless && (!isCount(row.keeperPid) || (row.keeperPid as number) <= 0)) return undefined
-  if (!isCount(row.createdAtMs) || !isCount(row.expiresAtMs)) return undefined
+  if (!hasValidTimes(row)) return undefined
   if (!Array.isArray(row.survivors) || row.survivors.length === 0) return undefined
   if (!row.survivors.every(isGroup)) return undefined
   return row as LeaseQuarantineRecord
@@ -264,7 +279,8 @@ export const quarantineVerdict = (
     return { kind: "foreign", reason: `quarantine belongs to "${record.repositoryId}"` }
   }
   const alive = record.survivors.map((group) => group.pgid).filter((pgid) => isAlive(pgid))
-  if (nowMs >= record.expiresAtMs) {
+  const expiresAtMs = effectiveQuarantineExpiry(record, read.writtenAtMs)
+  if (nowMs >= expiresAtMs) {
     // THE TTL CEILING IS DELIBERATE — a crashed keeper must not brick
     // verification for everyone — but it was SILENT about the one fact that
     // makes releasing dangerous. Liveness was computed only on the path below,
@@ -277,7 +293,7 @@ export const quarantineVerdict = (
     // names the groups it is releasing over — and, since an audit showed nothing
     // printed or kept that reason, the gate now hands it to `onQuarantineRelease`
     // and preserves an expired record over live groups instead of deleting it.
-    const expiredForMs = nowMs - record.expiresAtMs
+    const expiredForMs = nowMs - expiresAtMs
     return {
       kind: "stale",
       reason:
@@ -290,6 +306,8 @@ export const quarantineVerdict = (
             "still running",
     }
   }
+  const held = displacedHold(record, nowMs, expiresAtMs, alive)
+  if (held !== undefined) return held
   if (alive.length === 0) {
     return { kind: "stale", reason: "every quarantined group has exited" }
   }
@@ -302,6 +320,23 @@ export const quarantineVerdict = (
     alive,
   }
 }
+
+/** Blocked while a displaced unreadable record's ceiling (`holdUntilMs`) has not passed. */
+const displacedHold = (
+  record: LeaseQuarantineRecord,
+  nowMs: number,
+  expiresAtMs: number,
+  alive: readonly number[],
+): QuarantineVerdict | undefined =>
+  record.holdUntilMs !== undefined && nowMs < Math.min(record.holdUntilMs, expiresAtMs)
+    ? {
+        kind: "blocked",
+        reason:
+          `lane held until ${record.holdUntilMs} for an unreadable record this one displaced ` +
+          `(its groups could not be read; ${alive.length} of this record's own still alive)`,
+        alive,
+      }
+    : undefined
 
 export const writeLeaseQuarantine = (path: string, record: LeaseQuarantineRecord): void => {
   mkdirSync(dirname(path), { recursive: true })
@@ -334,14 +369,28 @@ export const writeLeaseQuarantine = (path: string, record: LeaseQuarantineRecord
 export type LeaseQuarantineRead =
   | { readonly kind: "absent" }
   | { readonly kind: "unreadable"; readonly reason: string; readonly writtenAtMs: number }
-  | { readonly kind: "record"; readonly record: LeaseQuarantineRecord }
+  | {
+      readonly kind: "record"
+      readonly record: LeaseQuarantineRecord
+      /** The file's mtime, when read from disk: a second ceiling a record body cannot move. */
+      readonly writtenAtMs?: number
+    }
 
 export const readLeaseQuarantineOutcome = (path: string): LeaseQuarantineRead => {
   let text: string
   try {
     text = readFileSync(path, "utf8")
-  } catch {
-    return { kind: "absent" }
+  } catch (error) {
+    // ONLY a missing file is absent. Every read error answered `absent` —
+    // measured: a chmod-000 record, a directory at the slot, an EACCES root —
+    // and `absent` is "the lane is free".
+    const code = (error as { code?: string }).code
+    if (code === "ENOENT") return { kind: "absent" }
+    return {
+      kind: "unreadable",
+      reason: `the record could not be read (${code ?? String(error)})`,
+      writtenAtMs: mtimeOf(path),
+    }
   }
   let parsed: unknown
   try {
@@ -361,16 +410,42 @@ export const readLeaseQuarantineOutcome = (path: string): LeaseQuarantineRead =>
       writtenAtMs: mtimeOf(path),
     }
   }
-  return { kind: "record", record }
+  return { kind: "record", record, writtenAtMs: mtimeOf(path) }
 }
 
+/**
+ * The file's mtime, or NOW when it cannot be read.
+ *
+ * It was 0, which made an unreadable record "written in 1970", past every TTL,
+ * and therefore stale: the lane was granted over a file nobody could read. Now
+ * an unstat-able record ages from each read, so it blocks until someone fixes
+ * the file — fail closed, with the error in the reason.
+ */
 const mtimeOf = (path: string): number => {
   try {
     return statSync(path).mtimeMs
   } catch {
-    return 0
+    return Date.now()
   }
 }
+
+/**
+ * When a record stops blocking, whatever its body says.
+ *
+ * `expiresAtMs` was trusted without a cap, so a record with an expiry of
+ * `Number.MAX_SAFE_INTEGER` — or a `createdAtMs` in the future — blocked the lane
+ * for as long as it said, with every survivor dead. The TTL is the ceiling from
+ * creation, and from the file's own mtime, which a body cannot move.
+ */
+export const effectiveQuarantineExpiry = (
+  record: LeaseQuarantineRecord,
+  writtenAtMs?: number,
+): number =>
+  Math.min(
+    record.expiresAtMs,
+    record.createdAtMs + QUARANTINE_TTL_MS,
+    writtenAtMs === undefined ? Number.POSITIVE_INFINITY : writtenAtMs + QUARANTINE_TTL_MS,
+  )
 
 /** The record, or `undefined` for absent OR unreadable. Prefer the outcome form:
  *  this shape is what made a corrupt record read as an empty lane. */
@@ -419,6 +494,68 @@ export interface QuarantineHandoffInput {
   readonly log?: (line: string) => void
 }
 
+export interface HoldLaneOptions {
+  readonly pollMs?: number
+  readonly deadlineMs?: number
+  readonly sleep?: (ms: number) => Promise<void>
+  readonly now?: () => number
+}
+
+/**
+ * `quarantineLane`, and when no record could be written ANYWHERE, keep the lane.
+ *
+ * Every owner caught the throw, printed a WARN and released the lease, so on a
+ * full or read-only disk — the slot and the per-clone legacy file share a volume
+ * on this host — the next contender took the lane over live groups (measured:
+ * `ACQUIRED over live pgid 424242`). With no record to hand the lane on, the only
+ * thing still holding it is this process's port. So this waits until the groups
+ * are gone, bounded by the record TTL, and says so; the caller releases after.
+ *
+ * Returns the record, or `undefined` when none could be written.
+ */
+export const quarantineOrHoldLane = async (
+  input: QuarantineHandoffInput & { readonly hold?: HoldLaneOptions },
+): Promise<LeaseQuarantineRecord | undefined> => {
+  try {
+    return quarantineLane(input)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    await holdWhileGroupsLive(input, message)
+    return undefined
+  }
+}
+
+const holdWhileGroupsLive = async (
+  input: QuarantineHandoffInput & { readonly hold?: HoldLaneOptions },
+  why: string,
+): Promise<void> => {
+  const isAlive = input.isAlive ?? groupAlive
+  const now = input.hold?.now ?? Date.now
+  const sleep =
+    input.hold?.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)))
+  const deadline = now() + (input.hold?.deadlineMs ?? QUARANTINE_TTL_MS)
+  const pollMs = input.hold?.pollMs ?? 1_000
+  input.log?.(
+    `[quarantine] WARN no quarantine record could be written (${why}); HOLDING the lane while ` +
+      `${input.groups.length} group(s) live, until ${new Date(deadline).toISOString()} at the latest\n`,
+  )
+  for (;;) {
+    const alive = input.groups.filter((group) => isAlive(group.pgid))
+    if (alive.length === 0) {
+      input.log?.("[quarantine] every held group has exited; releasing the lane\n")
+      return
+    }
+    if (now() >= deadline) {
+      input.log?.(
+        `[quarantine] WARN hold deadline reached with ${alive.length} group(s) alive ` +
+          `[${alive.map((group) => group.pgid).join(", ")}]; releasing the lane\n`,
+      )
+      return
+    }
+    await sleep(pollMs)
+  }
+}
+
 /** The keeper script this module spawns. Exported so a test can prove it exists. */
 export const KEEPER_SCRIPT_PATH = join(import.meta.dir, "lease-quarantine-keeper.ts")
 
@@ -457,16 +594,45 @@ const spawnDetachedKeeper = (
   return child.pid
 }
 
+/**
+ * Why `directory` cannot hold quarantine records, or `undefined` when it can.
+ *
+ * Checked on READ as well as write. Only the writer checked, so a directory
+ * another user created first — or a symlink planted in `/tmp` — was never
+ * refused by the reader, which then trusted whatever records it held. A
+ * directory we own with a loose mode is tightened rather than refused: that is
+ * a umask, not an attack. An absent directory is fine: nothing was written.
+ */
+export const privateDirectoryProblem = (directory: string): string | undefined => {
+  let stat: ReturnType<typeof lstatSync>
+  try {
+    stat = lstatSync(directory)
+  } catch (error) {
+    const code = (error as { code?: string }).code
+    return code === "ENOENT" ? undefined : `${directory} cannot be inspected (${code})`
+  }
+  const uid = process.getuid?.()
+  if (stat.isSymbolicLink() || !stat.isDirectory()) {
+    return `${directory} is not a directory (a symlink or file stands in its place)`
+  }
+  if (uid !== undefined && stat.uid !== uid) {
+    return `${directory} is owned by uid ${stat.uid}, not ${uid}`
+  }
+  if ((stat.mode & 0o077) !== 0) {
+    try {
+      chmodSync(directory, 0o700)
+    } catch (error) {
+      return `${directory} has mode ${(stat.mode & 0o777).toString(8)} and could not be tightened (${String(error)})`
+    }
+  }
+  return undefined
+}
+
 /** A private directory we own, not a symlink a stranger planted in /tmp. */
 const ensurePrivateDirectory = (directory: string): void => {
   mkdirSync(directory, { recursive: true, mode: 0o700 })
-  const stat = lstatSync(directory)
-  const uid = process.getuid?.()
-  if (!stat.isDirectory() || stat.isSymbolicLink() || (uid !== undefined && stat.uid !== uid)) {
-    throw new Error(
-      `[quarantine] refusing ${directory}: not a private directory owned by uid ${uid}`,
-    )
-  }
+  const problem = privateDirectoryProblem(directory)
+  if (problem !== undefined) throw new Error(`[quarantine] refusing ${problem}`)
 }
 
 /**
@@ -492,7 +658,8 @@ export const laneSlotVerdict = (input: {
   })
   if (verdict.kind !== "foreign" || input.read.kind !== "record") return verdict
   const record = input.read.record
-  return input.nowMs >= record.expiresAtMs
+  const expiresAtMs = effectiveQuarantineExpiry(record, input.read.writtenAtMs)
+  return input.nowMs >= expiresAtMs
     ? {
         kind: "stale",
         reason: `misfiled record for "${record.repositoryId}" in the slot for "${key}", expired`,
@@ -500,7 +667,7 @@ export const laneSlotVerdict = (input: {
     : {
         kind: "blocked",
         alive: [],
-        reason: `misfiled record for "${record.repositoryId}" in the slot for "${key}" until ${record.expiresAtMs}`,
+        reason: `misfiled record for "${record.repositoryId}" in the slot for "${key}" until ${expiresAtMs}`,
       }
 }
 
@@ -516,7 +683,17 @@ const mirrorLegacyNoClobber = (
 ): void => {
   mkdirSync(dirname(legacy), { recursive: true })
   const temporary = `${legacy}.mirror-${process.pid}`
-  writeFileSync(temporary, `${JSON.stringify(record, null, 2)}\n`)
+  // v1 SHAPE, for the readers this mirror exists for. A v1-only reader parsed the
+  // v2 record as unreadable, which blocks by mtime: with the keeper no longer
+  // deleting, an old checkout waited out the full TTL over dead groups. Liveness
+  // in every version comes from the survivors, so the keeper pid is forensic.
+  const { holdUntilMs: _hold, keeperRefusal: _refusal, ...rest } = record
+  const mirrored = {
+    ...rest,
+    schema: LEASE_QUARANTINE_SCHEMA_V1,
+    keeperPid: record.keeperPid ?? process.pid,
+  }
+  writeFileSync(temporary, `${JSON.stringify(mirrored, null, 2)}\n`)
   try {
     try {
       linkSync(temporary, legacy)
@@ -557,47 +734,243 @@ const mirrorLegacyNoClobber = (
  * The runner and the campaign wrapper can both fail to drain in one campaign.
  * Each wrote a fresh record, and the second erased the first one's groups.
  */
+const startKeeper = (
+  input: QuarantineHandoffInput,
+  slot: { readonly path: string; readonly key: string; readonly legacyPath: string | undefined },
+  slotRefusal: string | undefined,
+): { readonly keeperPid: number | null; readonly keeperRefusal?: string } => {
+  if (slotRefusal !== undefined) {
+    return { keeperPid: null, keeperRefusal: `no keeper: the slot is unusable (${slotRefusal})` }
+  }
+  try {
+    return {
+      keeperPid:
+        input.spawnKeeper === undefined
+          ? spawnDetachedKeeper(slot.path, slot.key, slot.legacyPath, input.keeperScriptPath)
+          : input.spawnKeeper(slot.path, slot.key, slot.legacyPath),
+    }
+  } catch (error) {
+    return {
+      keeperPid: null,
+      keeperRefusal: error instanceof Error ? error.message : String(error),
+    }
+  }
+}
+
+/**
+ * What an existing record at `target` hands on to the record replacing it.
+ *
+ * - A readable record: its live groups. In OUR slot they are carried whatever
+ *   identity they name (a misfiled record's live groups are still live — an audit
+ *   measured one lost from a replaced v3 record). In the shared legacy file a
+ *   record of another identity is theirs, and is never taken over (see
+ *   `refuseForeignLegacy`).
+ * - An unreadable record: read once more (a transient EMFILE is not corruption),
+ *   then kept beside the slot, and its ceiling is carried as `holdUntilMs` —
+ *   moving it aside used to lift the block it held, measured
+ *   `unreadable blocked → record stale → ACQUIRED`.
+ */
+const carryExisting = (input: {
+  readonly target: string
+  readonly key: string
+  readonly groups: readonly QuarantinedGroup[]
+  readonly isAlive: (pgid: number) => boolean
+  readonly nowMs: number
+  readonly carryForeign: boolean
+  readonly log: ((line: string) => void) | undefined
+}): { readonly carried: readonly QuarantinedGroup[]; readonly holdUntilMs?: number } => {
+  let existing = readLeaseQuarantineOutcome(input.target)
+  if (existing.kind === "unreadable") existing = readLeaseQuarantineOutcome(input.target)
+  if (existing.kind === "record") {
+    const record = existing.record
+    if (!input.carryForeign && record.repositoryId !== input.key) return { carried: [] }
+    return {
+      carried: record.survivors.filter(
+        (group) =>
+          input.isAlive(group.pgid) && !input.groups.some((fresh) => fresh.pgid === group.pgid),
+      ),
+      ...(record.holdUntilMs === undefined ? {} : { holdUntilMs: record.holdUntilMs }),
+    }
+  }
+  if (existing.kind === "absent") return { carried: [] }
+  // A second NAME for it, not a move. Renamed aside, the slot was empty until the
+  // replacement landed, and a replacement write that failed (ENOSPC) left it empty
+  // for good — measured, another clone then ACQUIRED. Linked, the unreadable
+  // record keeps blocking until the replacement is renamed over it.
+  const displaced = `${input.target}.displaced-${input.nowMs}.json`
+  try {
+    linkSync(input.target, displaced)
+    input.log?.(`[quarantine] an unreadable record (${existing.reason}) was kept as ${displaced}\n`)
+  } catch (error) {
+    input.log?.(`[quarantine] an unreadable record could not be kept aside: ${String(error)}\n`)
+  }
+  // Rounded UP to an integer: an mtime has a fractional part, and a fractional
+  // hold made the new record fail its own parse — blocking for the wrong reason.
+  return { carried: [], holdUntilMs: Math.ceil(existing.writtenAtMs + QUARANTINE_TTL_MS) }
+}
+
+/**
+ * The shared legacy file holds ONE record. Another identity's record with live
+ * groups there is not ours to replace: overwriting it made its own reader see a
+ * `foreign` record, which does not block — measured, `ACQUIRED` over its live
+ * pgid. `mirrorLegacyNoClobber` refused exactly this; the fallback now does too.
+ */
+const refuseForeignLegacy = (
+  legacy: string,
+  key: string,
+  isAlive: (pgid: number) => boolean,
+  nowMs: number,
+): void => {
+  const held = readLeaseQuarantineOutcome(legacy)
+  if (held.kind !== "record" || held.record.repositoryId === key) return
+  // An active hold blocks with every survivor dead (`displacedHold`); overwriting
+  // it turned that identity's `blocked` into `foreign`.
+  const holding = held.record.holdUntilMs !== undefined && nowMs < held.record.holdUntilMs
+  if (!holding && !held.record.survivors.some((group) => isAlive(group.pgid))) return
+  throw new Error(
+    `[quarantine] refusing to overwrite the legacy quarantine of "${held.record.repositoryId}", ` +
+      "which still holds its lane",
+  )
+}
+
+interface LaneContext {
+  readonly key: string
+  readonly nowMs: number
+  readonly groups: readonly QuarantinedGroup[]
+  readonly isAlive: (pgid: number) => boolean
+  readonly keeper: { readonly keeperPid: number | null; readonly keeperRefusal?: string }
+  readonly log: ((line: string) => void) | undefined
+}
+
+const recordWith = (
+  context: LaneContext,
+  carry: { readonly carried: readonly QuarantinedGroup[]; readonly holdUntilMs?: number },
+): LeaseQuarantineRecord => ({
+  schema: LEASE_QUARANTINE_SCHEMA,
+  repositoryId: context.key,
+  keeperPid: context.keeper.keeperPid,
+  ...(context.keeper.keeperRefusal === undefined
+    ? {}
+    : { keeperRefusal: context.keeper.keeperRefusal }),
+  survivors: [...context.groups, ...carry.carried],
+  createdAtMs: context.nowMs,
+  expiresAtMs: context.nowMs + QUARANTINE_TTL_MS,
+  ...(carry.holdUntilMs === undefined ? {} : { holdUntilMs: carry.holdUntilMs }),
+})
+
+/**
+ * Write `base` to the per-clone legacy file instead of the slot, MERGED with the
+ * legacy file's own same-identity record. `base` already carries what the slot
+ * held when the slot was readable; rebuilding from scratch dropped those groups.
+ */
+const fallBackToLegacy = (
+  context: LaneContext,
+  legacyPath: string | undefined,
+  base: LeaseQuarantineRecord,
+  why: string,
+): LeaseQuarantineRecord => {
+  if (legacyPath === undefined) {
+    // Nowhere to write. The caller's lane release must not read as a handoff.
+    throw new Error(`${why}; and no legacy location was given to fall back to`)
+  }
+  refuseForeignLegacy(legacyPath, context.key, context.isAlive, context.nowMs)
+  const carry = carryExisting({
+    target: legacyPath,
+    key: context.key,
+    groups: base.survivors,
+    isAlive: context.isAlive,
+    nowMs: context.nowMs,
+    carryForeign: false,
+    log: context.log,
+  })
+  const holds = [base.holdUntilMs, carry.holdUntilMs].filter((one) => one !== undefined)
+  const record: LeaseQuarantineRecord = {
+    ...base,
+    survivors: [...base.survivors, ...carry.carried],
+    ...(holds.length === 0 ? {} : { holdUntilMs: Math.max(...holds) }),
+  }
+  mkdirSync(dirname(legacyPath), { recursive: true })
+  writeLeaseQuarantine(legacyPath, record)
+  context.log?.(
+    `[quarantine] WARN the host slot could not hold the record (${why}); it went to the ` +
+      `per-clone legacy file ${legacyPath}, which other clones of this repository cannot see\n`,
+  )
+  return record
+}
+
+const slotProblem = (path: string): string | undefined => {
+  try {
+    ensurePrivateDirectory(dirname(path))
+    return undefined
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error)
+  }
+}
+
+/** Write the slot; the failure text, or `undefined` when it was written. */
+const writeFailure = (path: string, record: LeaseQuarantineRecord): string | undefined => {
+  try {
+    writeLeaseQuarantine(path, record)
+    return undefined
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error)
+  }
+}
+
 export const quarantineLane = (input: QuarantineHandoffInput): LeaseQuarantineRecord => {
   const nowMs = input.nowMs ?? Date.now()
   const key = normalizeRepositoryIdentity(input.repositoryId)
   const path = laneQuarantinePath(key, leaseQuarantineRoot(input.env))
   const legacyPath =
     input.legacyCacheRoot === undefined ? undefined : legacyQuarantinePath(input.legacyCacheRoot)
-  ensurePrivateDirectory(dirname(path))
-  let keeperPid: number | null = null
-  let keeperRefusal: string | undefined
-  try {
-    keeperPid =
-      input.spawnKeeper === undefined
-        ? spawnDetachedKeeper(path, key, legacyPath, input.keeperScriptPath)
-        : input.spawnKeeper(path, key, legacyPath)
-  } catch (error) {
-    keeperRefusal = error instanceof Error ? error.message : String(error)
+  const slotRefusal = slotProblem(path)
+  const context: LaneContext = {
+    key,
+    nowMs,
+    groups: input.groups,
+    isAlive: input.isAlive ?? groupAlive,
+    keeper: startKeeper(input, { path, key, legacyPath }, slotRefusal),
+    log: input.log,
   }
-  const isAlive = input.isAlive ?? groupAlive
-  const existing = readLeaseQuarantineOutcome(path)
-  const carried =
-    existing.kind === "record" && existing.record.repositoryId === key
-      ? existing.record.survivors.filter(
-          (group) =>
-            isAlive(group.pgid) && !input.groups.some((fresh) => fresh.pgid === group.pgid),
-        )
-      : []
-  const record: LeaseQuarantineRecord = {
-    schema: LEASE_QUARANTINE_SCHEMA,
-    repositoryId: key,
-    keeperPid,
-    ...(keeperRefusal === undefined ? {} : { keeperRefusal }),
-    survivors: [...input.groups, ...carried],
-    createdAtMs: nowMs,
-    expiresAtMs: nowMs + QUARANTINE_TTL_MS,
+  let record: LeaseQuarantineRecord
+  let inSlot = false
+  if (slotRefusal !== undefined) {
+    record = fallBackToLegacy(
+      context,
+      legacyPath,
+      recordWith(context, { carried: [] }),
+      slotRefusal,
+    )
+  } else {
+    const slotted = recordWith(
+      context,
+      carryExisting({ ...context, target: path, carryForeign: true }),
+    )
+    // ENOSPC, EROFS, EACCES on the WRITE, after the directory checked out: it
+    // threw to the caller, which released the lane over live groups.
+    const failed = writeFailure(path, slotted)
+    inSlot = failed === undefined
+    record = inSlot
+      ? slotted
+      : fallBackToLegacy(context, legacyPath, slotted, `slot write failed: ${failed}`)
   }
-  writeLeaseQuarantine(path, record)
-  if (legacyPath !== undefined) mirrorLegacyNoClobber(legacyPath, record, input.log)
+  if (inSlot && legacyPath !== undefined) {
+    // The mirror is a courtesy to older readers. Its failure used to escape AFTER
+    // the slot was written, so the caller recorded no quarantine for a lane that
+    // was quarantined.
+    try {
+      mirrorLegacyNoClobber(legacyPath, record, input.log)
+    } catch (error) {
+      input.log?.(`[quarantine] legacy mirror failed: ${String(error)}\n`)
+    }
+  }
+  const keeperNote =
+    record.keeperPid === null
+      ? `NO KEEPER (${record.keeperRefusal ?? "unknown"})`
+      : `keeper=${record.keeperPid}`
   input.log?.(
-    `[quarantine] lane held for ${key} at ${path}: ${record.survivors.length} group(s) ` +
-      `[${record.survivors.map((g) => `${g.pgid}:${g.verdict}`).join(", ")}] ` +
-      `${keeperPid === null ? `NO KEEPER (${keeperRefusal ?? "unknown"})` : `keeper=${keeperPid}`} ` +
+    `[quarantine] lane held for ${key} at ${inSlot ? path : legacyPath}: ${record.survivors.length} group(s) ` +
+      `[${record.survivors.map((g) => `${g.pgid}:${g.verdict}`).join(", ")}] ${keeperNote} ` +
       `ttl=${QUARANTINE_TTL_MS}ms\n`,
   )
   return record

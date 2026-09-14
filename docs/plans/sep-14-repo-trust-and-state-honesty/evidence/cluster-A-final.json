@@ -1,0 +1,435 @@
+{
+ "cluster": "A — launch-cwd-trust (untrusted launch-cwd config/env reaches the process) — Round-2 objective verification + final design",
+ "attackVerdicts": [
+  {
+   "attack": "designBreak-1: a source-path launch (bun run src/..., brain shim) from an untrusted cwd still gets Bun's .env/.env.local autoload, so R1 Option 1 does not close SEC-1/QUANTA_PERMISSION/QUANTA_API_KEY_HELPER on that path",
+   "verdict": "CONFIRMED",
+   "evidence": "Probe S1/S2 (bun 1.3.14, evil cwd): `bun file` and `bun run file` both printed EVIL_PRELOAD_RAN and ENTRY {DOTENV_X, DOTENV_LOCAL_X, DOTENV_DEVELOPMENT_X}. Real CLI one-shot (`bun <repo>/src/apps/cli/index.ts \"say hi\"`) from a cwd whose `.env` carried QUANTA_API_KEY_HELPER + OPENAI_BASE_URL: pwned=true, listener got 45x POST /v1/chat/completions `Bearer sk-minted` + 6x /v1/embeddings `Bearer sk-probe-REALENV-openai`. Scope caveat (measured): package.json scripts run with cwd = package root (`bun run x` from pkg/sub printed pkg), so the dev scripts never launch from a foreign cwd. Quanta-authored launchers with an uncontrolled cwd are the terminal shim (quanta-terminal-brain:83) and the side-agent fork (side-agent-fork-port.ts:228, cwd=cfg.cwd per agent-config-assembler.ts:487)."
+  },
+  {
+   "attack": "designBreak-2: a cwd bunfig.toml preload runs on the source path, and no bun runtime flag suppresses it",
+   "verdict": "CONFIRMED (mechanism); the 'no flag suppresses it' part is REFUTED",
+   "evidence": "The preload does run on source: S1/S2 printed EVIL_PRELOAD_RAN, and S3 `--no-env-file` still ran it (only dotenv was suppressed). But `--config=/dev/null` does suppress it: S11 showed no preload (dotenv still loaded), S6/S12 `--no-env-file --config=/dev/null` gave ENTRY {} with no preload, and child_process.fork with execArgv [\"--no-env-file\",\"--config=/dev/null\"] and cwd=evil gave ENTRY {} with no preload (the default fork printed EVIL_PRELOAD_RAN). `-c <path>` with a space is not a working form; use `--config=`. Parent directories are not walked (S8 subdir: nothing loaded). Whether Harbor's host cwd can be attacker-controlled is still unmeasured."
+  },
+  {
+   "attack": "wrongClaim-1: R1 said Bun's own autoload only happens in --compile binaries",
+   "verdict": "CONFIRMED",
+   "evidence": "S1/S2/S7 on the source path: bunfig preload plus .env, .env.local and .env.development (or .env.production under NODE_ENV=production) are all autoloaded. .env.dev is never autoloaded by Bun."
+  },
+  {
+   "attack": "wrongClaim-2: R1 called the source path 'unaffected' as though that made it safe",
+   "verdict": "CONFIRMED",
+   "evidence": "Same probes. It is 'unaffected' only because the build flags never reach `bun run`."
+  },
+  {
+   "attack": "wrongClaim-3: 'Bun's parallel channel is removed at build time so there is a single load path to gate'",
+   "verdict": "CONFIRMED",
+   "evidence": "Source path: two Bun channels are still live (S1/S2). Even compiled binaries do not end up with a single path: a HEAD-built binary with both --no-compile-autoload flags still ended in mode=bypass for .env.dev, .env AND .env.local (binperm probe), and still sent the real key 45x chat + 6x embeddings from a cwd .env/.env.dev, because quanta's own loader reads those same three names."
+  },
+  {
+   "attack": "wrongClaim-4: R1 said trust-store resolution is 'small and mechanical'",
+   "verdict": "CONFIRMED",
+   "evidence": "grep -i trust in src/apps/cli/index.ts returns 0 hits. TrustStore.load is async (src/config/trust-store.ts:84). apps/agent/index.ts loads dotenv at :31 but only builds the store at :322. The CLI module-top env consumers run synchronously at index.ts:34/53/56."
+  },
+  {
+   "attack": "missedHole-1: QUANTA_API_KEY_HELPER from launch-cwd dotenv = arbitrary command execution, bypassing the SESSION_FORBIDDEN hardening of QUANTA_LLM_CREDENTIAL_TRUSTED",
+   "verdict": "CONFIRMED for Bun-autoloaded .env/.env.local; REFUTED for .env.dev through the real entrypoints",
+   "evidence": "Real CLI from source with cwd .env: pwned=true. HEAD-built binary without the flags, same .env: pwned=true and chat carried `Bearer sk-minted`. For .env.dev (quanta's loader), both the source CLI and the binary gave pwned=false. A getter trap on process.env.QUANTA_API_KEY_HELPER shows why: the first read happens at logger.ts:78 -> resolveLevel (logger.ts:9) -> runtimeConfig() (runtime-config.ts:805), which caches, and only afterwards does TRAP_SET fire from env-files.ts:49 via cli/index.ts:33. So runtimeConfig-read knobs set by quanta's loader are inert by accident. The attacker's direct buildLLMWithByok call skipped that cache. QUANTA_LLM_CREDENTIAL_TRUSTED is in SESSION_FORBIDDEN_KNOBS (knob-overrides.ts:31)."
+  },
+  {
+   "attack": "missedHole-2: SESSION_FORBIDDEN_KNOBS is the natural SSOT anchor and undercuts R1's Option-2 rejection",
+   "verdict": "REFUTED as a sufficient anchor (the set itself exists)",
+   "evidence": "knob-overrides.ts:24-51 lacks OPENAI_BASE_URL, ANTHROPIC_BASE_URL, QUANTA_API_KEY_HELPER(_LEGACY_VENDOR), HTTP(S)_PROXY, QUANTA_LLM_REPLAY, QUANTA_SANDBOX and QUANTA_TRUSTED_PATHS. The measured exploits use exactly those keys: base-URL exfil, helper RCE, and the proxy probe (runtime-set HTTP_PROXY routed a Bun fetch: proxyHits=1). It is a denylist, so it fails open. It also cannot strip keys Bun set before any quanta code, because those are indistinguishable from real env."
+  },
+  {
+   "attack": "missedHole-3: web-daemon POST /config is a third write channel the one-SSOT claim does not reconcile",
+   "verdict": "REFUTED as a cluster-A hole (the channel exists)",
+   "evidence": "http.ts:37-44 CONFIG_ALLOWED_KEYS is a closed 6-key allowlist (QUANTA_FAST/SERVICE_TIER/MODEL/REASONING_*) intersected with isSessionForbidden (http.ts:58-61). It is a runtime HTTP channel, not a launch-cwd one, and it already fails closed."
+  },
+  {
+   "attack": "jankyTest-1: R1 hellgate #1 spawns source from an untrusted cwd, so it either stays red after the fix or needs --no-env-file masking",
+   "verdict": "CONFIRMED",
+   "evidence": "S1 plus the real-CLI .env arm. Revised fix: put the payload only in `.env.dev`, which Bun never autoloads (S1). That isolates quanta's loader with no masking flag. Bun's .env/.env.local channel is covered on the compiled binary (T5)."
+  },
+  {
+   "attack": "jankyTest-2: R1 hellgate #3 has no production constant to bind to, and a real compile blows the unit budget (~180s)",
+   "verdict": "CONFIRMED (decoupling); REFUTED (duration)",
+   "evidence": "tools/bin/build-cli.ts:85-93 has the args inline with no export, so a test that hard-codes its own flags is decoupled from production. Duration measured: a tiny-entry compile takes under 1s, and a full hardened compile of src/apps/cli/index.ts takes 2s (build log: bundle 138ms, minify 429ms, compile 639ms). The unit budget is 8529ms per test / 43517ms per file (tools/dev/unit-speed-budget.json)."
+  },
+  {
+   "attack": "jankyTest-3: R1 hellgate #4 proximity text census would match comments/README and miss Bun.build({compile})",
+   "verdict": "CONFIRMED",
+   "evidence": "apps/tauri-shell/binaries/README.md:10 contains an unhardened compile line. HEAD baf5e2e9f is itself a 'guard accepted comments' fix. The repo already has an AST census idiom (tools/dev/module-load-effects.ts uses the typescript AST)."
+  },
+  {
+   "attack": "overEng-1: under a load-time gate the ADR-0555 provenance registry is vestigial and should be retired",
+   "verdict": "REFUTED as stated",
+   "evidence": "Under the revised gate a checkout-root load still records provenance (env-files.ts:49-50), and store.ts:113-119 still refuses to egress a dotenv-sourced key without QUANTA_MEMORY_EMBED=1. It becomes consent UX for the developer's own files rather than a security boundary. Retiring it is a separate decision."
+  },
+  {
+   "attack": "overEng-2: quarantine the forbidden set from any untrusted source at the earliest point",
+   "verdict": "REFUTED",
+   "evidence": "Keys Bun autoloads are set before any quanta module runs (the preload ordering in S1). A denylist fails open (see missedHole-2). Only launcher argv and build flags reach Bun's channels."
+  },
+  {
+   "attack": "overEng-3: R1's real-env snapshot ordering is under-specified",
+   "verdict": "CONFIRMED",
+   "evidence": "Async TrustStore at agent/index.ts:322 after the sync load at :31; the CLI has no trust wiring. The revised design takes trust inputs out of the loader decision entirely (checkout-root identity), so there is nothing to snapshot."
+  }
+ ],
+ "r1ClaimCorrections": [
+  {
+   "claim": "R1 siblingHoles: the census of explicit loaders is exhaustive at 4 sites (cli/index.ts:33, agent/index.ts:31, eval/entry.ts:16, eval/index.ts:860)",
+   "correction": "There are FIVE sites and TWO parsers. src/apps/bench/run-main.ts:850 calls a duplicate cwd-relative parser with no provenance, `loadEnv` (src/apps/bench/run-args.ts:31-40, parseEnvLine at :22). tests/unit/dev/verdict-dotenv.test.ts:28-32 LOADER_SOURCES also misses bench and eval/entry.ts. Its regex `loadEnvFiles?\\(` cannot match `loadEnv(` anyway.",
+   "evidence": "git grep '\"\\.env(\\.dev|\\.local)?\"' in src returns run-main.ts:850; run-args.ts:31 `export const loadEnv = (files) => { const p = resolve(process.cwd(), f) ... }`. Found by neither R1 nor the attack."
+  },
+  {
+   "claim": "R1 L1: a compiled binary autoloads bunfig.toml (preload+[env])",
+   "correction": "The preload is the measured channel. A bunfig `[env]` table of KEY = \"value\" pairs did NOT inject env: that probe arm got 0 listener hits and pwned=false. Also, Bun autoloads `.env.development` when NODE_ENV is unset and `.env.production` under NODE_ENV=production, on both the source and default-compiled paths. The orchestrator fact list names only .env/.env.local.",
+   "evidence": "bunfig-env arm of the e2e probe (0 hits); S1 ENTRY includes DOTENV_DEVELOPMENT_X; S7 includes DOTENV_PROD_X."
+  },
+  {
+   "claim": "R1 risks: runtimeConfig() is 'likely' memoized at import before loadEnvFiles (cause unverified); feature catalog says the loader runs 'BEFORE any module reads process.env'",
+   "correction": "Cause verified. The first read of a runtimeConfig knob happens during import at src/observability/logger.ts:78 (module-top `new StructuredLogger` -> resolveLevel logger.ts:9 -> runtimeConfig() runtime-config.ts:805), before cli/index.ts:33 runs the loader. The whole RuntimeConfig is cached then. So runtimeConfig-read knobs set by quanta's loader are inert, while direct process.env readers (SDK base URLs, QUANTA_PERMISSION via env(), factory.ts:511-514) see them. dotenv-loader-first-wins.yaml:28-29 is false.",
+   "evidence": "Getter-trap probe (`bun --preload trap.ts src/apps/cli/index.ts --version`): TRAP_READ#1 val=undefined stack parseSecuritySlice<-runtimeConfig<-resolveLevel<-logger.ts:78, then TRAP_SET from env-files.ts:49 <- cli/index.ts:33."
+  },
+  {
+   "claim": "R1 siblingHoles (unverified): proxy vars from launch-cwd dotenv route the parent's outbound traffic",
+   "correction": "Measured, not inferred. Bun fetch honors HTTP_PROXY assigned into process.env at runtime (after startup), so a runtime loader like quanta's can reroute parent egress. HTTPS CONNECT MITM, NODE_EXTRA_CA_CERTS and NODE_TLS_REJECT_UNAUTHORIZED were not measured.",
+   "evidence": "proxy.ts: runtime-set HTTP_PROXY -> fetch http://example.invalid/probe returned 200 'via-proxy', proxyHits=1."
+  },
+  {
+   "claim": "R1 L5/L6: base-URL exfil hits chat; ADR-0555 guard only checks apiKeyFrom",
+   "correction": "Confirmed and quantified. With OPENAI_BASE_URL from a cwd dotenv and the key from real env, the listener got 45x POST /v1/chat/completions AND 6x POST /v1/embeddings carrying `Bearer sk-probe-REALENV-openai`. The embedder guard never fires because the key's provenance is the real env.",
+   "evidence": "run.ts dotenv-dev arm on source; runbin.ts on a HEAD-built binary with and without the hardening flags."
+  },
+  {
+   "claim": "R1 rollout/userDecision #4: source is the safe dev escape hatch; build flags alone close compiled binaries",
+   "correction": "On compiled binaries the flags close only Bun's channel. Quanta's loader reads the same .env/.env.local names plus .env.dev, so a flags-only binary still escalates posture and exfiltrates. Both fixes are required.",
+   "evidence": "binperm probe on HEAD-built agent-hardened: control mode=default; .env.dev, .env and .env.local each gave mode=bypass. runbin.ts agent-hardened .env: pwned=false but 45+6 real-key hits."
+  },
+  {
+   "claim": "R1: the committed web-daemon sibling is HIGH",
+   "correction": "The mechanism is confirmed. Exposure depends on launch cwd: Tauri spawns the sidecar with no current_dir (apps/tauri-shell/src/daemon.rs:121-145), so it inherits the app's cwd (value unmeasured, typically / for a Finder launch). Direct runs of the binary are fully exposed. The tracked binary dates from commit 60300c637 (2026-05-27) and stays vulnerable until it is rebuilt.",
+   "evidence": "Committed apps/tauri-shell/binaries/quanta-web-daemon run from an evil cwd printed EVIL_PRELOAD_RAN; prepare-build.sh:38-43 has no hardening flags."
+  },
+  {
+   "claim": "R1 missed sibling: every bun child quanta forks with a workspace cwd",
+   "correction": "The side-agent OS-process backer forks bun with cwd = the workspace (agent-config-assembler.ts:487 `cwd: cfg.cwd` -> side-agent-fork-port.ts:228-231, no execArgv). The child runs the workspace bunfig preload and loads its .env*. It is default-OFF (QUANTA_SIDE_AGENT_PROCESS), source-only, and compiled binaries refuse it.",
+   "evidence": "fork probe: node fork cwd=evil printed EVIL_PRELOAD_RAN plus dotenv keys; the same fork with execArgv [--no-env-file, --config=/dev/null] gave ENTRY {}."
+  },
+  {
+   "claim": "R1 competitor baseline: Claude Code probe was login-gated/inconclusive for bunfig",
+   "correction": "Measured directly: Claude Code 2.1.259 (a Bun v1.4.1 compiled binary) running `claude --version` in an evil cwd did NOT run the bunfig preload. Its sandbox also lists the cwd `bunfig.toml`, `package.json` and all `.env*` variants as denyWrite targets, so it treats them as auto-executed config. Quanta's git-write-guard has no bunfig/.env entry.",
+   "evidence": "env -i ... /opt/homebrew/bin/claude --version in evil cwd printed only `2.1.259 (Claude Code)`. .extracted_source/claude-code-cli/src-2.1.270/chunk-bdzrjgqf.js:1306 (the .env family list) and :1520 (`${r}/bunfig.toml`, `${r}/package.json`, ...Q.map(d=>`${r}/${d}`) in denyWrite). src/permission/git-write-guard.ts covers only .git/hooks etc."
+  },
+  {
+   "claim": "R1 hellgate plan: 19 test files depend on ambient cwd dotenv and must run trusted after the fix",
+   "correction": "Under the revised checkout-root rule these files keep their behaviour. In-process tests run with cwd = repo root (= checkout root), and subprocess tests already use scratch cwds precisely to avoid the repo .env.dev (tests/integration/session-cli-subprocess.test.ts:34-36, 97-99). The only intended flip is the R15 integration arm that pins loading from a scratch launch cwd (eval-env-precedence.integration.test.ts:40-48).",
+   "evidence": "git grep shows 43 test files mention the entrypoints (spawns and comments); exact dependence not run."
+  }
+ ],
+ "confirmedHoles": [
+  {
+   "id": "A-H1 (SEC-0)",
+   "what": "Compiled quanta binaries autoload the launch cwd's bunfig.toml preload (arbitrary code before any quanta code) and its .env/.env.local/.env.development(.production).",
+   "evidence": "Installed ~/.local/bin/quanta 1.0.035 `--version` in evil cwd printed EVIL_PRELOAD_RAN. HEAD-built default binary with cwd .env: QUANTA_API_KEY_HELPER ran (pwned=true). Flag matrix: each --no-compile-autoload-{dotenv,bunfig} flag only closes its own channel; both together close both. tools/bin/build-cli.ts:85-93 has neither.",
+   "severity": "CRITICAL",
+   "defaultConfigExposure": "Every installed binary run in any directory containing bunfig.toml or .env*. No knob needed."
+  },
+  {
+   "id": "A-H2",
+   "what": "The committed Tauri web-daemon binary has the same autoload (prepare-build.sh:38-43 has no flags).",
+   "evidence": "apps/tauri-shell/binaries/quanta-web-daemon run from evil cwd printed EVIL_PRELOAD_RAN.",
+   "severity": "HIGH",
+   "defaultConfigExposure": "Direct runs from an attacker directory. Under the Tauri sidecar the cwd is inherited from the app (value unmeasured)."
+  },
+  {
+   "id": "A-H3 (SEC-1)",
+   "what": "Quanta's own launch-cwd loader (.env.dev/.env.local/.env) redirects OPENAI_BASE_URL/ANTHROPIC_BASE_URL, so the REAL-env key is sent to an attacker host for chat AND the memory embedder.",
+   "evidence": "Source CLI and HEAD-built binaries with and without the flags: 45x /v1/chat/completions + 6x /v1/embeddings with `Bearer sk-probe-REALENV-openai`. Anthropic arm per R1. SDK reads: @anthropic-ai/sdk index.js:56, openai client.js:73; factory.ts:511-514.",
+   "severity": "CRITICAL",
+   "defaultConfigExposure": "Default config. The embedder is on by default, and the ADR-0555 guard does not look at baseUrl."
+  },
+  {
+   "id": "A-H4 (SEC-2)",
+   "what": "QUANTA_PERMISSION=bypass from a launch-cwd dotenv changes the startup posture.",
+   "evidence": "Source CLI: control mode=default; .env.dev and .env gave mode=bypass (same as the real-env control). HEAD binary with flags: .env.dev, .env and .env.local each gave mode=bypass. Read at session-runtime-config.ts:115.",
+   "severity": "CRITICAL",
+   "defaultConfigExposure": "Default config."
+  },
+  {
+   "id": "A-H5",
+   "what": "QUANTA_API_KEY_HELPER (+LEGACY_VENDOR, +LLM_CREDENTIAL_TRUSTED) from a Bun-autoloaded .env runs an arbitrary shell command during LLM assembly, without bypass or replay.",
+   "evidence": "pwned=true on source CLI and on the HEAD default binary; chat then used `Bearer sk-minted`. Chain: internal.ts:437-475 -> llm.ts:354/365 -> credential-helper.ts:165-174. Through quanta's loader (.env.dev) it currently does not fire, only because runtimeConfig is cached at logger.ts:78.",
+   "severity": "CRITICAL",
+   "defaultConfigExposure": "Source launches and unhardened binaries in a directory containing .env/.env.local."
+  },
+  {
+   "id": "A-H6",
+   "what": "Quanta-authored bun launchers with an uncontrolled cwd inherit Bun's cwd autoload: the terminal-bench brain shim (`exec bun run`, caller's cwd) and the side-agent OS-process fork (cwd = workspace).",
+   "evidence": "Fork probe gave EVIL_PRELOAD_RAN plus dotenv keys; the hardened execArgv arm gave neither. Shim line adapters/terminal-bench/bin/quanta-terminal-brain:83. Fork port side-agent-fork-port.ts:228-234.",
+   "severity": "MEDIUM",
+   "defaultConfigExposure": "Fork: default-OFF (QUANTA_SIDE_AGENT_PROCESS), source-only. Shim: whatever cwd Harbor uses on the host (unmeasured)."
+  },
+  {
+   "id": "A-H7",
+   "what": "A fifth, parallel dotenv parser (bench `loadEnv`) reads cwd .env* with no provenance, outside every existing census.",
+   "evidence": "src/apps/bench/run-args.ts:31-40; src/apps/bench/run-main.ts:850.",
+   "severity": "MEDIUM",
+   "defaultConfigExposure": "`quanta-bench` run from any cwd. The normal path is `bun run bench`, which runs from the repo root."
+  },
+  {
+   "id": "A-H8",
+   "what": "Egress-routing proxy vars set by a runtime loader reroute the parent's own fetch.",
+   "evidence": "proxy.ts: runtime-set HTTP_PROXY gave proxyHits=1. HTTPS/TLS-trust vars not measured.",
+   "severity": "MEDIUM",
+   "defaultConfigExposure": "Default config wherever quanta's loader reads a hostile directory."
+  }
+ ],
+ "revisedDesign": {
+  "summary": "Close both launch-cwd channels with exact rules, no trust prompt and no key classification. (1) Every quanta-controlled Bun invocation disables Bun's cwd autoload: shipped compiled artifacts get --no-compile-autoload-dotenv --no-compile-autoload-bunfig, and quanta-authored bun launchers with an uncontrolled cwd (side-agent fork, terminal-bench shim) get --no-env-file --config=/dev/null. All flags are measured on Bun 1.3.14. (2) Quanta's one dotenv loader resolves its directory only from the running code's own checkout root. It loads .env.dev/.env.local/.env only when realpath(launch cwd) === realpath(checkout root), and never inside a compiled binary. The bench duplicate parser is deleted. (3) An AST census makes a new unhardened compile site, a new bun fork launcher, a sixth dotenv reader, or an argument-injected loader call a red build.",
+  "structuralMechanism": "Same-owner identity replaces trust inference. The only directory that may feed quanta's process env from launch-time files is the directory holding the code being executed, because anyone who can write its .env.dev can already edit src/. The loader's single exported entry `loadLaunchDotenv()` computes a closed discriminated resolution `{kind: 'checkout-root'} | {kind: 'not-checkout-root'} | {kind: 'compiled-binary'} | {kind: 'cwd-unresolvable'}` from import.meta.url (Bun realpaths module URLs — measured with a symlinked tree) and realpath(process.cwd()). Only 'checkout-root' reaches the private loadOne. 'compiled-binary' is decided explicitly from the `/$bunfs/` marker, which is required because resolve('/$bunfs/root','..','..') === '/' (measured) would otherwise equal a '/' launch cwd. The raw `loadEnvFiles(files)` export is removed, so a stale caller fails at module link time. There are two SSOTs for Bun flag facts, each with its own consumers: tools/bin/compile-flags.ts `BUN_COMPILE_NO_CWD_AUTOLOAD_FLAGS` for build tooling, and src/shared/bun-runtime.ts `BUN_RUNTIME_NO_CWD_AUTOLOAD_ARGV` plus `isCompiledSingleFileBinaryUrl`, hoisted from side-agent-fork-port.ts:86-97. A pure AST detector (tools/dev/launch-cwd-autoload-census.ts, closed-union finding kinds with an exhaustive Record and a runtime drift guard) and a closed JSON manifest enforce every site.",
+  "changes": [
+   {
+    "path": "tools/bin/compile-flags.ts (NEW)",
+    "change": "`export const BUN_COMPILE_NO_CWD_AUTOLOAD_FLAGS = [\"--no-compile-autoload-dotenv\", \"--no-compile-autoload-bunfig\"] as const`, with a MEASURED docstring (Bun 1.3.14 flag matrix: each flag closes only its own channel)."
+   },
+   {
+    "path": "tools/bin/build-cli.ts:85-93",
+    "change": "Spread `...BUN_COMPILE_NO_CWD_AUTOLOAD_FLAGS` into the args array right after \"--compile\". No other change; the QUANTA_BUILD_* stamp is untouched."
+   },
+   {
+    "path": "apps/tauri-shell/scripts/prepare-build.sh:39-43 and apps/tauri-shell/binaries/README.md:10",
+    "change": "Add both flags to the web-daemon `bun build --compile` line and to the README instruction. The census checks the shell tokens against the imported constant."
+   },
+   {
+    "path": "src/shared/bun-runtime.ts (NEW, leaf)",
+    "change": "`BUN_RUNTIME_NO_CWD_AUTOLOAD_ARGV = [\"--no-env-file\", \"--config=/dev/null\"] as const` (measured: --no-env-file alone still runs the preload, --config=/dev/null alone still loads dotenv) and `isCompiledSingleFileBinaryUrl(moduleUrl: string): boolean` (the `/$bunfs/` marker, moved here)."
+   },
+   {
+    "path": "src/host/runtime/side-agent-fork-port.ts:86-97, 226-236",
+    "change": "Use `isCompiledSingleFileBinaryUrl(import.meta.url)` (its import.meta count stays 1 in the asset ratchet). Add `execArgv: [...BUN_RUNTIME_NO_CWD_AUTOLOAD_ARGV]` to the nodeFork options."
+   },
+   {
+    "path": "adapters/terminal-bench/bin/quanta-terminal-brain:83",
+    "change": "`exec bun --no-env-file --config=/dev/null run \"$root/$brain_rel\" \"$@\"`. The census asserts the tokens between `bun` and `run` equal BUN_RUNTIME_NO_CWD_AUTOLOAD_ARGV."
+   },
+   {
+    "path": "src/shared/env-files.ts",
+    "change": "Remove the exported `loadEnvFiles`. Add `LAUNCH_DOTENV_FILES = [\".env.dev\", \".env.local\", \".env\"] as const`, `type LaunchDotenvResolution` (closed union above), `resolveLaunchDotenv(input?: {moduleUrl; launchCwd})` (no side effects beyond realpath; defaults are import.meta.url and process.cwd(); checkout root = realpath(resolve(dirname(fileURLToPath(moduleUrl)), '..', '..')); a realpath throw yields cwd-unresolvable, fail-closed), and `loadLaunchDotenv(input?)`, which returns `{resolution, loadedFiles}` and loads only for checkout-root. Keep the first-wins semantics, the `export ` strip and provenance (ADR-0555) unchanged for the loaded case."
+   },
+   {
+    "path": "src/apps/cli/index.ts:9,33; src/apps/cli/dotenv.ts; src/apps/agent/index.ts:28,31; src/apps/eval/entry.ts:3,16; src/apps/eval/index.ts:30,860; src/apps/bench/run-main.ts:48,850",
+    "change": "Replace each loader call with a zero-argument `loadLaunchDotenv()`. dotenv.ts re-exports it (the feature-catalog evidence path stays valid)."
+   },
+   {
+    "path": "src/apps/bench/run-args.ts:9-40",
+    "change": "Delete `loadEnv`, `parseEnvLine` and `unquote`, plus their now-unused fs/path imports."
+   },
+   {
+    "path": "tools/dev/launch-cwd-autoload-census.ts (NEW) + tools/dev/launch-cwd-autoload-census.json (NEW)",
+    "change": "Pure detector over {path,text}. (a) TS/JS: an ArrayLiteral holding StringLiteral \"--compile\" must contain a SpreadElement of the imported BUN_COMPILE_NO_CWD_AUTOLOAD_FLAGS, and `Bun.build({compile})` counts as a site. (b) .sh/package.json scripts: a `--compile` shell word (comments stripped, continuations joined) must carry every flag token. (c) src/**/*.ts (non-test): StringLiteral values in LAUNCH_DOTENV_FILES ∪ {.env.development,.env.production,.env.test} outside env-files.ts must match the closed allowlist exactly (today src/security/sensitivity-classifier.ts:87 `.env`:1). (d) `loadLaunchDotenv` call sites in src must be exactly the 5 entry files, with arguments.length === 0. (e) `fork` imported from node:child_process in src must be exactly side-agent-fork-port.ts, with an execArgv spreading BUN_RUNTIME_NO_CWD_AUTOLOAD_ARGV. (f) listed shell launchers (the brain shim) must carry the runtime argv tokens. The manifest holds the 5 test-harness compile sites with exact counts and justifications (compiled-binary-asset-ratchet.test.ts:447, shell-parser-compiled-binary-hellgate.test.ts:71,122, side-agent-fork-port-compiled-binary-hellgate.test.ts:121, system-skills-compiled-binary-hellgate.test.ts:74)."
+   },
+   {
+    "path": "tools/dev/compiled-binary-assets.json",
+    "change": "Enroll src/shared/env-files.ts with patterns {\"import.meta\": 1}, status dev-only, justification that compiled binaries resolve to kind compiled-binary and load nothing by design, override null, and a MEASURED compiledBehavior from T5."
+   },
+   {
+    "path": ".env.example:1-2; tools/feature-catalog/features/10-app/dotenv-loader-first-wins.yaml; tools/feature-catalog/features/10-app/cli-single-binary-build.yaml; docs/decisions/<next-free>-launch-cwd-autoload-boundary.md (NEW, cross-ref ADR-0555)",
+    "change": "Document the checkout-root rule, the compiled binary loading nothing, the Bun flag matrix and the known keys that matter (base URLs, proxy, QUANTA_PERMISSION, QUANTA_API_KEY_HELPER family, QUANTA_LLM_REPLAY). Remove the false 'BEFORE any module reads process.env' claim. Regenerate docs/10.feature-catalog.md with `bun run fc` (generator invocation unmeasured)."
+   }
+  ],
+  "compatibilityAndMigration": "Byte-identical in three cases. (1) Every package.json script: `bun run <script>` executes with cwd = package root, measured from a subdir, so cwd === checkout root. (2) In-process tests: bun test runs from the repo root. (3) Scratch-cwd subprocess tests, which already avoided the repo .env.dev on purpose. The remote bench runs `~/.bun/bin/bun run src/apps/bench/cli.ts` with a relative path (box-session.ts:408), i.e. from the repo root, so it is also unchanged. Intended behaviour changes: compiled binaries (the installed quanta and a rebuilt web daemon) never load any launch-cwd dotenv or bunfig; source launches from a non-root cwd no longer load that cwd's .env.dev/.env.local/.env through quanta's loader; the side-agent worker and brain shim children ignore their cwd's bunfig/.env. Tests that change in the same commit: tests/unit/sep8-remediation/r15/eval-env-order.test.ts (drop the string pin, now covered by census (d), and port the first-wins case to a scratch checkout tree); tests/integration/sep8-remediation/r15/eval-env-precedence.integration.test.ts arm 1 flips from PROBE=dev-wins to PROBE=unset (shell-wins arm unchanged); tests/unit/dotenv.test.ts and tests/unit/apps/cli/memory-truth-and-egress-hellgate.test.ts E1 move to loadLaunchDotenv with scratch checkout inputs; tests/unit/dev/verdict-dotenv.test.ts imports LAUNCH_DOTENV_FILES instead of using a regex. The tracked daemon binaries stay vulnerable until rebuilt (user decision). Developers who run the INSTALLED binary inside the quanta repo and rely on .env.dev for keys must export them or use /login (user decision).",
+  "userVisibleBehavior": "The installed `quanta` and the desktop daemon (after rebuild) no longer execute a bunfig.toml preload or read any .env* from the directory they are launched in. `bun run dev/start/agent/eval/bench` from the quanta checkout behaves as today. Running quanta source from any other directory no longer loads that directory's .env* through quanta. There is no new prompt and no new knob. An optional one-line CLI notice when the launch cwd has LAUNCH_DOTENV_FILES that were not loaded is left to user decision D4.",
+  "rollout": "Default-ON and unconditional, with no gate. This is a security boundary: a knob would itself be settable from a Bun-autoloaded .env on the source path, and a default-OFF gate would ship the hole. The escape hatch for developers is launching from the checkout root or exporting real env.",
+  "costEstimate": "M overall. C1 build flags + compile census: S. C2 fork execArgv + shim + two behavioural tests: S. C3a additive loader API + unit tests: S. C3b swapping 5 sites, deleting bench parser, migrating 5 test files, dotenv/call-site census, 2 integration hellgates: M. C4 docs/ADR/catalog: S. Measured costs: tiny compile under 1s, full CLI compile 2s, CLI one-shot to listener about 7-11s (integration lane).",
+  "reusedExisting": [
+   "src/shared/env-files.ts: the one parser, first-wins semantics and ADR-0555 provenance are kept; only the directory input changes",
+   "side-agent-fork-port.ts:86-97 `/$bunfs/` compiled-binary probe, moved into src/shared/bun-runtime.ts instead of duplicated",
+   "tools/dev/compiled-binary-assets.json + tests/unit/compiled-binary-asset-ratchet.test.ts closed-universe self-rooting ratchet (forces classification of the new import.meta read)",
+   "tools/dev/module-load-effects.ts pattern: pure typescript-AST detector plus a tests/unit/_arch enforcement test",
+   "tests/unit/apps/bench/terminal/brain-shim-hellgate.test.ts, extended with an evil-cwd arm",
+   "tools/dev/verdict-env.ts VERDICT_RELEVANT_DOTENV_FILES, kept as a superset of LAUNCH_DOTENV_FILES",
+   "Bun-native --no-compile-autoload-* / --no-env-file / --config=/dev/null flags, each measured on 1.3.14"
+  ]
+ },
+ "revisedTests": [
+  {
+   "name": "T1 compiled autoload is off with the production flag SSOT (per-channel)",
+   "tier": "unit (tests/unit/runtime/bun-compile-no-cwd-autoload-hellgate.test.ts)",
+   "seam": "Imports BUN_COMPILE_NO_CWD_AUTOLOAD_FLAGS from tools/bin/compile-flags.ts. Runs a real `bun build --compile ...FLAGS probe.ts --outfile bin` with cwd = scratch, then runs bin from a scratch evil cwd containing bunfig.toml preload (writes a marker file) plus .env/.env.local/.env.development sentinel keys. The probe prints its process.env sentinel subset as JSON.",
+   "setup": "Three separate test() cases (each under 3s; tiny compile measured under 1s): full flags, flags minus bunfig, flags minus dotenv. Scratch dirs only; never cwd REPO_ROOT (Bun writes .bun-build files into cwd).",
+   "assertions": "Full flags: marker file does not exist AND env JSON deep-equals {} over the 3 sentinel keys. Minus-bunfig: marker exists (exactly 1 file) AND env JSON is {}. Minus-dotenv: marker absent AND env JSON deep-equals exactly {DOTENV_X, DOTENV_LOCAL_X, DOTENV_DEVELOPMENT_X} with their file values.",
+   "pairedControl": "The two single-flag-removed arms prove the probe detects each channel in this Bun version, so a Bun default change turns the test red instead of passing vacuously.",
+   "mutationThatMustTurnRed": "Delete either element of BUN_COMPILE_NO_CWD_AUTOLOAD_FLAGS (cp-backup, confirm with grep that the element is gone, run, restore from backup; never git checkout). The full-flags arm fails on the marker (bunfig) or on the env JSON (dotenv).",
+   "redTodayProof": "The constant does not exist at HEAD (import fails). Behaviourally, a binary built with today's build-cli args (no flags) printed EVIL_PRELOAD_RAN and loaded all 3 keys (probe bin-default), and the flag matrix bin-dotoff/bin-cfgoff showed each flag is independent."
+  },
+  {
+   "name": "T2 launch-cwd autoload census (STATIC AST census, labeled as such)",
+   "tier": "ratchet/census (tests/unit/_arch/launch-cwd-autoload-census.test.ts over tools/dev/launch-cwd-autoload-census.ts)",
+   "seam": "Runs the pure detector over `git ls-files` content: .ts/.tsx/.js/.mjs/.cjs, *.sh, package.json scripts and adapters/**/bin/*. The closed manifest is tools/dev/launch-cwd-autoload-census.json.",
+   "setup": "Two describes: detector fixtures (synthetic {path,text} records) and the real corpus.",
+   "assertions": "Real corpus: findings deep-equal [] AND the discovered site population matches the manifest exactly: compile sites {tools/bin/build-cli.ts:1 production, prepare-build.sh:1 production, 5 test-harness files with exact counts}, dotenv literal readers {src/shared/env-files.ts:3, src/security/sensitivity-classifier.ts:1}, loadLaunchDotenv zero-arg call files = exactly the 5 entry files, node fork importers = exactly [side-agent-fork-port.ts], shell launchers = [quanta-terminal-brain]. Anti-vacuity: each population is non-empty with the exact count stated. The finding-kind Record is exhaustive with a runtime check that Object.keys(Record) equals FINDING_KINDS.",
+   "pairedControl": "Fixtures: `[\"build\",\"--compile\",e]` gives compile-array-missing-flags; the same array with the spread gives none; `// bun build --compile x` gives none; `Bun.build({entrypoints:[e], compile:true})` gives bun-build-api-compile; a new `readFileSync(resolve(process.cwd(), \".env.dev\"))` in src gives dotenv-literal-outside-loader; `loadLaunchDotenv({launchCwd: x})` gives launch-dotenv-call-with-args; `fork(m, [], {cwd})` without execArgv gives node-fork-missing-runtime-argv; a shim line `exec bun run \"$f\"` gives shell-bun-exec-missing-runtime-argv.",
+   "mutationThatMustTurnRed": "Remove the spread from build-cli.ts; OR re-add `loadEnv([\".env.dev\"])` to run-main.ts; OR drop execArgv from side-agent-fork-port.ts; OR remove the flags from the shim exec line. Each yields exactly one named finding.",
+   "redTodayProof": "At HEAD: build-cli.ts:85-93 array lacks the spread; prepare-build.sh:39-43 has `--compile` without flags; run-main.ts:850 and the 4 loadEnvFiles sites hold dotenv literals; side-agent-fork-port.ts:228 has no execArgv; quanta-terminal-brain:83 has no flags; git grep 'compile-autoload|no-env-file|config=/dev/null' finds 0 source hits."
+  },
+  {
+   "name": "T3 loadLaunchDotenv checkout-root identity (real loader, scratch checkout trees)",
+   "tier": "unit (tests/unit/shared/launch-dotenv-checkout-root.test.ts)",
+   "seam": "The real exported resolveLaunchDotenv/loadLaunchDotenv from src/shared/env-files.ts, with explicit inputs (moduleUrl = pathToFileURL(T/src/shared/env-files.ts).href). Tests only; census (d) forbids arguments in production. Plus the REAL module URL via import.meta.resolve of the repo file.",
+   "setup": "Scratch T with .env.dev/.env.local/.env carrying colliding key K plus ONLY_* keys. Sibling scratch D with identical files. Snapshot and restore process.env keys and __resetEnvFileProvenanceForTest in afterEach. HOME fence respected (no HOME writes).",
+   "assertions": "(1) launchCwd=T gives kind 'checkout-root', K === 'from-dev', provenance deep-equals {K:T/.env.dev, ONLY_DEV:T/.env.dev, ONLY_LOCAL:T/.env.local, ONLY_DOTENV:T/.env}; a key pre-set in real env keeps its value and is absent from provenance. (2) launchCwd=D (same files) gives kind 'not-checkout-root', zero of the 4 keys set, provenance size 0. (3) launchCwd=T/sub gives not-checkout-root, zero keys. (4) moduleUrl 'file:///$bunfs/root/agent', launchCwd '/' gives kind 'compiled-binary' and zero reads. (5) launchCwd nonexistent gives 'cwd-unresolvable', zero keys. (6) Real module URL with launchCwd=REPO_ROOT gives resolveLaunchDotenv kind 'checkout-root' with root === realpathSync(REPO_ROOT), without loading. (7) Adversarial: D's .env.dev contains QUANTA_TRUSTED_PATHS=D and still yields not-checkout-root (there is no trust input).",
+   "pairedControl": "Arm 1 (loads, byte-identical first-wins plus provenance) pairs with arm 2 (identical files, different cwd, loads nothing). Arm 4's '/'=='/' construction is exactly what a missing compiled check would accept.",
+   "mutationThatMustTurnRed": "Remove the `/$bunfs/` compiled check: arm 4 resolves checkout-root. Change '..','..' to '..': arm 6 root mismatch. Replace the identity test with `true` (the old cwd behaviour): arms 2/3/7 load keys.",
+   "redTodayProof": "The API does not exist at HEAD. Behaviourally, at HEAD a scratch launch cwd's .env.dev IS loaded (tests/integration/sep8-remediation/r15/eval-env-precedence.integration.test.ts:40-48 asserts PROBE=dev-wins from a tmp cwd; the SEC-1 probe egressed from a scratch .env.dev)."
+  },
+  {
+   "name": "T4 real entrypoint wire: launch-cwd .env.dev cannot move egress or posture (bytes on the wire + file effect)",
+   "tier": "integration (tests/integration/launch-cwd-dotenv-egress-hellgate.test.ts)",
+   "seam": "Spawns the REAL `bun <REPO>/src/apps/cli/index.ts \"hi\"` with no masking flags from a scratch cwd whose payload is ONLY in .env.dev, a name Bun never autoloads (measured S1), so quanta's loader is the sole channel. A 127.0.0.1 Bun.serve records (method, path, authorization). Real env: OPENAI_API_KEY=sk-probe-REALENV-openai, QUANTA_PROVIDER=openai, scratch HOME. The eval/agent/bench entries are covered by census (d) and the R15 flip.",
+   "setup": "The listener answers a minimal valid SSE completion so a turn ends after one chat request (exact shape to be measured in the RED step). Egress arm: .env.dev OPENAI_BASE_URL=listener. Posture arm: .env.dev QUANTA_PERMISSION=bypass, real-env QUANTA_LLM_REPLAY=<scratch cassette emitting one `write` to <cwd>/posture-probe.txt>, stdin ignore. The non-interactive default-posture denial of write is UNVERIFIED: measure it first; if one-shot mode hangs instead of denying, fall back to asserting the startup `mode=` line, labeled as a text read.",
+   "assertions": "Egress arm: the set of received (path, authorization) pairs deep-equals [] (the real key never reached the listener). Posture arm: posture-probe.txt does not exist after exit.",
+   "pairedControl": "Same spawn with OPENAI_BASE_URL in REAL env: the received set contains exactly ('/v1/chat/completions','Bearer sk-probe-REALENV-openai') as its first chat request. Same posture spawn with real-env QUANTA_PERMISSION=bypass: posture-probe.txt exists with the cassette's content.",
+   "mutationThatMustTurnRed": "Make resolveLaunchDotenv return checkout-root unconditionally: the egress set becomes non-empty and the posture file appears.",
+   "redTodayProof": "Measured at HEAD: the .env.dev arm got 45x chat + 6x embeddings with the real key; perm probe .env.dev gave mode=bypass vs control mode=default."
+  },
+  {
+   "name": "T5 production CLI binary hellgate: SSOT build of the real entry ignores launch-cwd bunfig and .env*",
+   "tier": "integration (tests/integration/compiled-cli-launch-cwd-hellgate.test.ts)",
+   "seam": "Compiles the REAL src/apps/cli/index.ts with [\"build\",\"--compile\",\"--minify\",...BUN_COMPILE_NO_CWD_AUTOLOAD_FLAGS, entry, \"--outfile\", scratch/agent] with cwd = scratch (measured 2s, exit 0). Runs `agent \"say hi\"` from an evil scratch cwd with bunfig preload (marker file), and .env/.env.local/.env.dev carrying OPENAI_BASE_URL=listener, QUANTA_API_KEY_HELPER=`touch <cwd>/PWNED; echo sk-minted`, QUANTA_API_KEY_HELPER_LEGACY_VENDOR=1 and QUANTA_LLM_CREDENTIAL_TRUSTED=1.",
+   "setup": "Scratch HOME; real-env OPENAI_API_KEY=sk-probe-REALENV-openai; 60s kill timer; rm scratch dirs in afterAll.",
+   "assertions": "Preload marker absent; PWNED absent; received (path, authorization) set deep-equals []; exit code 0.",
+   "pairedControl": "Same binary with OPENAI_BASE_URL in real env: the listener receives the real key on /v1/chat/completions (proves the binary can egress and the listener observes it).",
+   "mutationThatMustTurnRed": "Drop the compile flags gives marker plus PWNED (measured with agent-default). Keep the flags but revert the loader to cwd gives a non-empty received set (measured with agent-hardened: 45+6 real-key hits).",
+   "redTodayProof": "Measured at HEAD. agent-default with .env: pwned=true, `Bearer sk-minted` x45, real key x6 on embeddings. agent-hardened (flags only) with .env and .env.dev: 45x chat + 6x embeddings with the real key; binperm: .env.dev/.env/.env.local each gave mode=bypass."
+  },
+  {
+   "name": "T6 side-agent fork port ignores the workspace's bunfig/.env",
+   "tier": "unit (tests/unit/side-agent-fork-port-cwd-autoload-hellgate.test.ts)",
+   "seam": "The production `nodeProcessForkPort.fork({modulePath: <scratch probe.mjs>, cwd: <evil scratch>})` from src/host/runtime/side-agent-fork-port.ts; wait on handle.onExit.",
+   "setup": "The probe writes JSON of its sentinel env keys plus process.execArgv to <scratch>/out.json. The bunfig preload writes a marker file. .env/.env.local carry sentinel keys.",
+   "assertions": "Marker absent; out.json env subset deep-equals {}; out.json execArgv deep-equals [...BUN_RUNTIME_NO_CWD_AUTOLOAD_ARGV].",
+   "pairedControl": "Raw `fork` from node:child_process with the same modulePath and cwd and no execArgv: marker exists and the env subset holds both sentinel keys, so the probe observes the channel.",
+   "mutationThatMustTurnRed": "Delete the execArgv line from the port (cp-backup plus grep-confirm): marker appears and the execArgv assertion fails.",
+   "redTodayProof": "Measured: fork with cwd=evil printed EVIL_PRELOAD_RAN plus dotenv keys; side-agent-fork-port.ts:228-234 has no execArgv."
+  },
+  {
+   "name": "T7 terminal brain shim ignores the caller cwd's bunfig/.env",
+   "tier": "unit (extend tests/unit/apps/bench/terminal/brain-shim-hellgate.test.ts)",
+   "seam": "Executes the tracked adapters/terminal-bench/bin/quanta-terminal-brain with QUANTA_TERMINAL_BRAIN_REPO=<scratch fake repo> whose src/apps/terminal/brain-mode.ts writes argv plus env sentinels to a file; cwd = evil scratch (bunfig preload marker, .env keys).",
+   "setup": "Reuse the existing fixture builders in that test file.",
+   "assertions": "Marker absent; env sentinels deep-equal {}; forwarded argv still equals the given argv verbatim and in order (existing contract).",
+   "pairedControl": "`bun run <fake brain-mode.ts>` executed directly from the same evil cwd: marker exists and the keys are present.",
+   "mutationThatMustTurnRed": "Revert line 83 to `exec bun run \"$root/$brain_rel\" \"$@\"`: marker appears.",
+   "redTodayProof": "At HEAD line 83 has no flags; S2 shows `bun run` from an evil cwd runs the preload and loads .env/.env.local."
+  },
+  {
+   "name": "T8 verdict fingerprint covers every loader filename (structured, no regex)",
+   "tier": "unit (tests/unit/dev/verdict-dotenv.test.ts)",
+   "seam": "Imports LAUNCH_DOTENV_FILES from src/shared/env-files.ts and VERDICT_RELEVANT_DOTENV_FILES from tools/dev/verdict-env.ts, replacing the LOADER_CALL regex over 3 hand-listed files (which missed bench and eval/entry.ts).",
+   "setup": "Keep the existing fingerprint-changes-with-content cases.",
+   "assertions": "LAUNCH_DOTENV_FILES.length === 3 exactly, and every element is in VERDICT_RELEVANT_DOTENV_FILES (missing list deep-equals []).",
+   "pairedControl": "The existing tests showing that adding or removing a dotenv file changes verdictDotenvSha256.",
+   "mutationThatMustTurnRed": "Add \".env.ci\" to LAUNCH_DOTENV_FILES without updating verdict-env: missing = ['.env.ci'].",
+   "redTodayProof": "The import does not exist at HEAD. The current regex census reads only 3 LOADER_SOURCES and cannot see run-main.ts:850 `loadEnv(`."
+  }
+ ],
+ "implementationOrder": [
+  "C1 (RED: T1 + T2 compile-site part) — add tools/bin/compile-flags.ts, spread it into tools/bin/build-cli.ts, add the flags to apps/tauri-shell/scripts/prepare-build.sh and binaries/README.md, and add tools/dev/launch-cwd-autoload-census.ts with its manifest (compile detector only). Green on its own. Closes Bun's channel for newly built binaries (A-H1, and A-H2 once the daemon is rebuilt).",
+  "C2 (RED: T6 + T7 + T2 fork/shell parts) — add src/shared/bun-runtime.ts (BUN_RUNTIME_NO_CWD_AUTOLOAD_ARGV plus the hoisted isCompiledSingleFileBinaryUrl); side-agent-fork-port.ts uses the predicate and adds execArgv; add the flags to the brain shim exec line; extend the census with fork and shell-launcher detectors. Green on its own (A-H6).",
+  "C3a (RED: T3) — additive API in src/shared/env-files.ts (LAUNCH_DOTENV_FILES, resolveLaunchDotenv, loadLaunchDotenv) with the old loadEnvFiles still exported; enroll env-files.ts in tools/dev/compiled-binary-assets.json. Green on its own, no behaviour change. Blocked on decision D1.",
+  "C3b (RED: T4 + T5 + T2 dotenv/call-site parts + T8) — switch the 5 entry sites to loadLaunchDotenv(); delete the loadEnvFiles export and bench loadEnv/parseEnvLine; update src/apps/cli/dotenv.ts; migrate tests/unit/dotenv.test.ts, memory-truth-and-egress-hellgate E1, both R15 tests (integration arm 1 flips to PROBE=unset) and verdict-dotenv. Closes A-H3/H4/H5 (on built binaries together with C1), A-H7 and A-H8.",
+  "C4 (docs only, no behaviour) — .env.example comment, dotenv-loader-first-wins.yaml and cli-single-binary-build.yaml, the new ADR cross-referencing ADR-0555, and regenerated feature-catalog docs. Then, as a user-owned step (D3), rebuild the tracked Tauri daemon binaries through prepare-build.sh."
+ ],
+ "fileOwnership": [
+  "tools/bin/compile-flags.ts",
+  "tools/bin/build-cli.ts",
+  "apps/tauri-shell/scripts/prepare-build.sh",
+  "apps/tauri-shell/binaries/README.md",
+  "src/shared/bun-runtime.ts",
+  "src/host/runtime/side-agent-fork-port.ts",
+  "adapters/terminal-bench/bin/quanta-terminal-brain",
+  "src/shared/env-files.ts",
+  "src/apps/cli/dotenv.ts",
+  "src/apps/cli/index.ts",
+  "src/apps/agent/index.ts",
+  "src/apps/eval/entry.ts",
+  "src/apps/eval/index.ts",
+  "src/apps/bench/run-main.ts",
+  "src/apps/bench/run-args.ts",
+  "tools/dev/launch-cwd-autoload-census.ts",
+  "tools/dev/launch-cwd-autoload-census.json",
+  "tools/dev/compiled-binary-assets.json",
+  "tests/unit/runtime/bun-compile-no-cwd-autoload-hellgate.test.ts",
+  "tests/unit/_arch/launch-cwd-autoload-census.test.ts",
+  "tests/unit/shared/launch-dotenv-checkout-root.test.ts",
+  "tests/unit/side-agent-fork-port-cwd-autoload-hellgate.test.ts",
+  "tests/unit/apps/bench/terminal/brain-shim-hellgate.test.ts",
+  "tests/unit/dev/verdict-dotenv.test.ts",
+  "tests/unit/sep8-remediation/r15/eval-env-order.test.ts",
+  "tests/integration/sep8-remediation/r15/eval-env-precedence.integration.test.ts",
+  "tests/unit/dotenv.test.ts",
+  "tests/unit/apps/cli/memory-truth-and-egress-hellgate.test.ts",
+  "tests/integration/launch-cwd-dotenv-egress-hellgate.test.ts",
+  "tests/integration/compiled-cli-launch-cwd-hellgate.test.ts",
+  ".env.example",
+  "tools/feature-catalog/features/10-app/dotenv-loader-first-wins.yaml",
+  "tools/feature-catalog/features/10-app/cli-single-binary-build.yaml",
+  "docs/decisions/<next-free>-launch-cwd-autoload-boundary.md",
+  "docs/10.feature-catalog.md (regenerated, not hand-edited; generator invocation unverified)",
+  "apps/tauri-shell/binaries/quanta-web-daemon + quanta-web-daemon-aarch64-apple-darwin (rebuild only, user-owned, D3)"
+ ],
+ "userDecisions": [
+  {
+   "question": "D1: Which rule decides whether a launch directory's .env.dev/.env.local/.env may enter the quanta process?",
+   "options": "(a) Checkout-root identity: load only when realpath(cwd) === the running code's checkout root; compiled binaries never load. Synchronous, no trust input, no prompt, identical for package scripts and tests. (b) R1 trust-store gate: async TrustStore plus QUANTA_TRUSTED_PATHS; needs new CLI trust wiring and a prompt; keeps installed-binary .env.dev once the repo is trusted. (c) Drop the loader entirely: dev scripts switch to Bun's native --env-file (measured later-file-wins, missing file silently ignored, real env wins; its parser differs from quanta's) and ADR-0555 provenance is retired.",
+   "recommendation": "(a). It is the smallest change that removes the channel, a strict subset of today's behaviour, and needs no bootstrap-trust ordering. (b) can be layered on later for compiled binaries without undoing (a).",
+   "blocking": true
+  },
+  {
+   "question": "D2: Accept that the INSTALLED binary run inside the quanta repo stops reading .env.dev (keys and knobs)?",
+   "options": "Accept (keys come from real env or /login; the Bash tool shell exported no provider keys, and ~/.quanta/auth holds chatgpt accounts) vs. add an operator channel for compiled binaries later (trust-store gate, or an absolute QUANTA_ENV_FILE read from real env).",
+   "recommendation": "Accept now and revisit only if it causes friction. Any operator channel must never be cwd-relative.",
+   "blocking": false
+  },
+  {
+   "question": "D3: The tracked apps/tauri-shell/binaries/quanta-web-daemon* (commit 60300c637, 2026-05-27) stay exploitable until rebuilt. Rebuild and commit, or untrack?",
+   "options": "Rebuild via prepare-build.sh after C1 (needs the Tauri/Swift toolchain) vs. stop tracking prebuilt binaries.",
+   "recommendation": "Rebuild right after C1 lands. Tracked binaries will drift from the source flags again, so consider untracking as a follow-up.",
+   "blocking": false
+  },
+  {
+   "question": "D4: Print a notice when the launch cwd holds LAUNCH_DOTENV_FILES that were not loaded?",
+   "options": "No notice (silent) vs. one logger.warn in the CLI entry only, naming the files and how to supply keys (existence check only, no values read).",
+   "recommendation": "One CLI-only warn, as a transitional aid for D2 users.",
+   "blocking": false
+  },
+  {
+   "question": "D5: Fix the separate correctness bug that runtimeConfig() is cached at logger.ts:78 before any dotenv load, so runtimeConfig-read knobs from .env.dev are inert while direct process.env reads are not?",
+   "options": "Out of scope (follow-up that moves the loader into a pre-import bootstrap entry) vs. fold into C3b.",
+   "recommendation": "Separate follow-up. Folding it in would change which developer .env.dev knobs take effect, which is a behaviour change unrelated to the security boundary.",
+   "blocking": false
+  },
+  {
+   "question": "D6: Stop the model from writing workspace bunfig.toml/.env*/package.json, matching Claude Code's denyWrite (chunk-bdzrjgqf.js:1520)?",
+   "options": "Separate cluster vs. extend src/permission/git-write-guard.ts now.",
+   "recommendation": "Separate cluster. After C1-C3 quanta itself no longer autoloads them, but any later `bun` in that workspace would.",
+   "blocking": false
+  }
+ ],
+ "residualRisks": [
+  "A human launching quanta source by hand (`bun /path/to/quanta/src/...`) from a hostile cwd is still exposed to Bun's own bunfig preload and .env/.env.local autoload before any quanta code runs. Nothing in-process can undo that (measured S1 ordering). It is bounded to developer/manual use: package scripts pin cwd to the package root (measured), and quanta-authored launchers are hardened in C2.",
+  "Bun version drift: the flag names and defaults, `--config=/dev/null` semantics, realpath'd module URLs and the `/$bunfs/` marker were measured only on Bun 1.3.14 (Claude Code's binary is 1.4.1). T1/T6/T7 re-measure behaviourally with paired controls on every run, so drift shows up as red rather than a silent pass.",
+  "Real-env BUN_OPTIONS is still honored by a hardened compiled binary (measured: `BUN_OPTIONS=--preload` injected). That is operator-controlled env, not a launch-cwd channel.",
+  "runtimeConfig is cached before the loader (logger.ts:78, D5), so .env.dev knobs read through runtimeConfig are inert for developers while direct process.env reads are live.",
+  "The ADR-0555 provenance registry stays blind to .env/.env.local that Bun autoloads from the developer's own checkout root on the source path. After the fix this affects consent UX only.",
+  "Unmeasured: HTTPS-proxy MITM without CA injection, NODE_EXTRA_CA_CERTS, NODE_TLS_REJECT_UNAUTHORIZED, QUANTA_SANDBOX / QUANTA_TRUSTED_PATHS / QUANTA_CENTRAL_CONFIG end-to-end, and QUANTA_LLM_REPLAY (only R1 measured it). All are closed wholesale by C1+C3b because the design classifies no keys.",
+  "Unmeasured: the terminal-bench host cwd under Harbor, the Tauri sidecar's actual cwd, and whether the non-interactive default posture denies a replayed `write` (T4 must measure this in its RED step).",
+  "Unmeasured: whether an unused-export or dead-code ratchet objects to tools/bin/compile-flags.ts or src/shared/bun-runtime.ts exports consumed only by tools/tests; check during C1/C2.",
+  "The committed Tauri daemon binaries stay vulnerable until D3 is done.",
+  "tools/leaderboard-dashboard/server.ts:1080 and tools/dev/mutation-check.ts:390 spawn `bun` from dev tooling. They were not classified by the census because they are not production launchers."
+ ],
+ "readiness": "READY-WITH-DECISIONS. C1 (compile flags + census) and C2 (fork/shim runtime argv) can start now; both are measured to close their channels and are small, independently green commits. C3a/C3b wait only on D1 (loader rule). Checkout-root identity is recommended because its RED proofs are measured, it adds no trust input or prompt, and it is byte-identical for scripts and tests. D2-D6 are non-blocking."
+}

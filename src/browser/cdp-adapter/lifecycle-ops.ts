@@ -100,7 +100,19 @@ export const lifecycleOps = (
           "--disable-gpu",
           "--no-default-browser-check",
         ])
+        // Observed from the moment of spawn, so the endpoint wait can tell a Chrome
+        // that died from one that is slow.
+        let exitCode: number | undefined
+        void proc.exited.then(
+          (code) => {
+            exitCode = code
+          },
+          () => {
+            exitCode = -1
+          },
+        )
         const endpoint = await readDevToolsEndpoint({
+          exitCode: () => exitCode,
           read: () => deps.fs.readFile(`${profileDir}/DevToolsActivePort`),
           scheduler: deps.scheduler,
           clock: deps.clock,

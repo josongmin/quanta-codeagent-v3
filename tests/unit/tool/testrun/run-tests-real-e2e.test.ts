@@ -7,14 +7,13 @@
  * Each block AUTO-SKIPS when its toolchain is absent. Verified 2026-06-10
  * (cargo 1.95, go 1.25.4, python3 unittest).
  */
-import { afterAll, beforeAll, expect, test } from "bun:test"
+import { afterAll, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { makeRunTestsTool } from "@/tool/testrun/tool"
 import type { ToolContext, ToolEvent, ToolResult } from "@/tool/types"
 import {
-  assertCapabilityNotBlocked,
   boundedVersion,
   capabilityGate,
   hasBinary,
@@ -49,7 +48,7 @@ const GATE = capabilityGate({
     python3: hasBinary("python3"),
   },
 })
-const D = laneDescribe(GROUP, GATE)
+const D = laneDescribe(GATE)
 
 const reportMatrixExecuted = (): void =>
   reportExecuted(GATE, GROUP, FILE, "real go / cargo / python unittest runs parsed", () => ({
@@ -60,7 +59,6 @@ const reportMatrixExecuted = (): void =>
 
 const Dgo = D
 Dgo("run_tests — REAL go test -json", () => {
-  beforeAll(() => assertCapabilityNotBlocked({ group: GROUP, file: FILE }, GATE))
   afterAll(reportMatrixExecuted)
 
   test("detects go, runs, reports the failing test by name + file:line", async () => {

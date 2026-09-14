@@ -5,7 +5,7 @@
  * fuses it into a real buildEvidence packet. AUTO-SKIPS without cargo +
  * rust-analyzer. Verified 2026-06-10.
  */
-import { afterAll, beforeAll, expect, test } from "bun:test"
+import { afterAll, expect, test } from "bun:test"
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -13,7 +13,6 @@ import { evidenceLspStatic } from "@/agent/lsp-bridge"
 import { buildEvidence } from "@/tool/evidence/builder"
 import { detectToolchain, runToolchain } from "@/tool/testrun"
 import {
-  assertCapabilityNotBlocked,
   boundedVersion,
   capabilityGate,
   hasBinary,
@@ -35,7 +34,7 @@ const GATE = capabilityGate({
   file: FILE,
   needs: { cargo: hasBinary("cargo"), "rust-analyzer": hasBinary("rust-analyzer") },
 })
-const D = laneDescribe(GROUP, GATE)
+const D = laneDescribe(GATE)
 
 const project = (): string => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "evbridge-")))
@@ -62,7 +61,6 @@ const project = (): string => {
 }
 
 D("evidenceLspStatic — PRODUCTION LSP static port (real rust-analyzer)", () => {
-  beforeAll(() => assertCapabilityNotBlocked({ group: GROUP, file: FILE }, GATE))
   afterAll(() =>
     reportExecuted(GATE, GROUP, FILE, "real cargo + rust-analyzer exercised", () => ({
       cargoVersion: boundedVersion(["cargo", "--version"]),

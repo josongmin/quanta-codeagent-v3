@@ -85,10 +85,19 @@ What each admits today (`src/integrations/github/mention-filter.ts`):
 
 | scope | admits |
 |---|---|
-| `owner` | the repository owner |
-| `member` | the repository owner only — no sender currently resolves to `member`, so this ranks above `collaborator` without admitting anyone new |
-| `collaborator` | senders GitHub marks as collaborators, and the owner |
+| `owner` | the repository owner (`author_association: OWNER`) |
+| `member` | organization members (`MEMBER`) and the owner |
+| `collaborator` | collaborators (`COLLABORATOR`), members and the owner |
 | `public` | any non-bot account — use only in trusted private repos |
+
+The sender's scope comes from the comment's `author_association`, and only when the
+comment's author IS the sender. On an `edited` or `deleted` event someone else may be
+acting on the comment, and anyone with write access can edit comments, so another
+account's association never lends its rank. Before
+2026-09-14 OWNER and MEMBER were folded into "collaborator" first, so `owner` and
+`member` admitted nobody on a real comment; the table above is what the code does
+now, and `tests/unit/integrations/github/mention-filter-trust-scope-hellgate.test.ts`
+drives it through real payloads.
 
 ## Security defaults
 

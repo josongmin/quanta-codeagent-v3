@@ -292,8 +292,11 @@ export const loadPolicyOverrides = (
   path: string,
   /** Injected so a test can drive the expiry boundary without waiting for it. */
   nowMs: number = Date.now(),
-): TestPolicyFile => {
-  const parsed = JSON.parse(readFileSync(path, "utf8")) as TestPolicyFile
+): TestPolicyFile => parsePolicyOverrides(readFileSync(path, "utf8"), nowMs)
+
+/** The same validation over text, for a file read from a git tree rather than the disk. */
+export const parsePolicyOverrides = (text: string, nowMs: number = Date.now()): TestPolicyFile => {
+  const parsed = JSON.parse(text) as TestPolicyFile
   if (parsed.schema !== "quanta.test-policy-overrides.v1") {
     throw new Error(`unknown policy override schema: ${String(parsed.schema)}`)
   }
@@ -307,27 +310,48 @@ export const loadPolicyOverrides = (
   return parsed
 }
 
-export const resolveTestPolicy = (
+/**
+ * The tiers one id belongs to, and nothing else.
+ *
+ * `resolveTestPolicy` also resolves `resources`, which reads and classifies the
+ * file's source: measured, about six seconds for the whole corpus in a cold
+ * process. Tier membership never depends on it, so a caller that only needs
+ * membership (recounting a committed population) must not pay for it.
+ * `resolveTestPolicy` takes its tiers from here, so the two cannot disagree.
+ */
+export const resolveTestTiers = (
   id: string,
   overrides: readonly TestPolicyOverride[] = [],
-): TestPolicy => {
+): readonly VerificationTier[] => {
   const matches = overrides.filter((row) => row.id === id)
   if (matches.length > 1) throw new Error(`conflicting overrides for ${id}`)
-  const base = defaultPolicy(id)
+  const { klass, capability } = classifyPolicy(id)
+  const base = tiersForClass(klass, capability)
   const over = matches[0]
   if (over === undefined) return base
-  const tiers = over.tiers ?? base.tiers
+  const tiers = over.tiers ?? base
   if (tiers.length === 0) throw new Error(`tier gap: ${id}`)
   // A capability member is physically separated from the ordinary tiers by the
   // manifest; letting a hand-written override put it back into `pr` would undo
   // the split invisibly, one row at a time.
-  if (base.class === "capability" && tiers.includes("pr")) {
+  if (klass === "capability" && tiers.includes("pr")) {
     throw new Error(
-      `override ${id} puts a capability-group member (${String(base.capabilityGroup)}) back into ` +
+      `override ${id} puts a capability-group member (${String(capability?.groupId)}) back into ` +
         "the merge-blocking PR tier. Remove it from the capability manifest instead, in a diff " +
         "that says why the capability is no longer external.",
     )
   }
+  return tiers
+}
+
+export const resolveTestPolicy = (
+  id: string,
+  overrides: readonly TestPolicyOverride[] = [],
+): TestPolicy => {
+  const tiers = resolveTestTiers(id, overrides)
+  const base = defaultPolicy(id)
+  const over = overrides.find((row) => row.id === id)
+  if (over === undefined) return base
   return {
     id,
     runner: over.runner ?? base.runner,
@@ -353,6 +377,16 @@ export const resolveTestPopulation = (
   const unique = [...new Set(ids)].sort((left, right) => left.localeCompare(right))
   return unique.map((id) => resolveTestPolicy(id, overrides))
 }
+
+/** Membership only: the ids of `ids` (deduplicated, sorted) that `tier` selects. */
+export const selectIdsForTier = (
+  ids: readonly string[],
+  tier: VerificationTier,
+  overrides: readonly TestPolicyOverride[] = [],
+): readonly string[] =>
+  [...new Set(ids)]
+    .sort((left, right) => left.localeCompare(right))
+    .filter((id) => resolveTestTiers(id, overrides).includes(tier))
 
 export const selectTestPoliciesForTier = (
   policies: readonly TestPolicy[],

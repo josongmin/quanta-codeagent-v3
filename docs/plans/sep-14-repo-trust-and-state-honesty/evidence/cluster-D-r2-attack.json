@@ -1,0 +1,135 @@
+{
+ "cluster": "D — prompt authority: SEC-5 (repo instruction files reach the system prompt with no trust decision) + BUG-1 (harness `origin` stripped by the session schema). Round-2 adversary. HEAD while probing had `git status` M on tools/dev/* from the concurrent session; I wrote nothing to the repo.",
+ "designBreaks": [
+  {
+   "attack": "Repo-committed bunfig.toml preload executes arbitrary code at `quanta` startup — before main(), before argv parse, before ANY trust decision. S-D gates application loaders; it does not touch Bun's runtime autoload, so the entire cluster-D fix is bypassed by a file S-D never looks at.",
+   "bypassOrRegression": "BYPASS of the whole SEC-5 fix (and worse than SEC-5: arbitrary code exec, not just prompt text). The compiled binary is built with `bun build --compile --minify --env=QUANTA_BUILD_*` (tools/bin/build-cli.ts:85-92) and NO `--no-compile-autoload-bunfig`, so Bun's default bunfig autoload is ON. A cloned repo with `bunfig.toml` {preload=[\"./evil.ts\"]} runs evil.ts the instant a user types `quanta` in that directory. Structural fix is a BUILD flag (`--no-compile-autoload-bunfig`, plus `--no-compile-autoload-dotenv`/`--no-env-file`), not an app-level ProjectTrustDecision — R1 designed the wrong layer.",
+   "evidence": "Ran the INSTALLED binary /Users/songmin/.local/bin/quanta --version in a dir containing bunfig.toml with preload=[\"./evil.ts\"]: 'PWNED marker after quanta --version: YES-CODE-EXECUTED'; control with no bunfig: 'no'. tools/bin/build-cli.ts:85-92 shows the compile argv omits the disable flags.",
+   "severity": "CRITICAL",
+   "reproduced": true
+  },
+  {
+   "attack": "Bun autoloads repo `.env` and `.env.local` into process.env BEFORE the app's loadEnvFiles runs, so the ADR-0555 provenance registry never records those keys (first-wins skips them). S-D mechanism #3 (\"operator-env view drops keys where envFileSourceOf(key)!==undefined\") is therefore BLIND to `.env`/`.env.local`-supplied trust vars — the forge-resistance S-D advertises does not exist in the shipped binary.",
+   "bypassOrRegression": "BYPASS: a repo `.env` with QUANTA_TRUSTED_PATHS=<abs repo path> makes resolveProjectTrust return trusted('operator-env') even under the fix, because operatorEnvFrom cannot tell it from real env. QUANTA_MCP_CONFIG/QUANTA_CONFIG_DIR/QUANTA_HOME forge the same way. Only the separate 'trust-store-inside-project' refusal catches the CONFIG_DIR relocation; the direct QUANTA_TRUSTED_PATHS forge is completely undefended.",
+   "evidence": "probe with a PRE-EXISTING .env (as a real clone has on disk at startup), compiled with the exact build-cli flags: beforeCliLoad='/forged/by/repo', provenance=null. operatorEnvFrom check: {value:'/forged/by/repo', provenance:null, operatorEnvFrom_would_drop:false, trusted_survives_filter:true}. Control `--no-compile-autoload-dotenv`: beforeCliLoad=null, provenance='<repo>/.env' — proving it is Bun's autoload, not loadEnvFiles, that supplies the key. `.env.dev` (not a Bun-autoloaded name) keeps provenance, so only the loadEnvFiles-exclusive files are tracked. Also reproduced the consequence: repo `.env` QUANTA_MCP_CONFIG spawned a marker command through readMcpConfig in the untrusted arm (markerAfter:true; control no-.env markerAfter:false).",
+   "severity": "CRITICAL",
+   "reproduced": true
+  },
+  {
+   "attack": "The reused TrustStore.isTrusted / canonicalizeProjectPath key on `normalize()`, NOT `realpath()`. S-D reuses TrustStore and HG-S1's paired control preloads persistence keyed by realpath(repo) expecting a hit, but a lookup on a symlinked cwd (or macOS /tmp→/private/tmp) canonicalizes to the symlink path and MISSES — unless resolveProjectTrust realpaths the cwd before lookup, which the reused primitive does not do and R1 never specifies for the lookup side.",
+   "bypassOrRegression": "Either a REGRESSION (a legitimately-granted trust silently missed when cwd is reached through a symlink, so the user loses their own rules) or, if resolveProjectTrust realpaths on grant but the loadRepoRules walk uses the raw cwd, a key/walk disagreement (TOCTOU / bypass). The design conflates normalize-keyed TrustStore with realpath-keyed grants without reconciling them.",
+   "evidence": "probe-truststore-symlink-mismatch: grant setTrusted(realpath); isTrusted(linkPath)=false, isTrusted(realPath)=true; canonicalizeProjectPath('/tmp/x/..')='/tmp' while realpathSync('/tmp')='/private/tmp'. src/config/trust-store.ts:59-70 uses normalize(); no realpath anywhere in the store.",
+   "severity": "HIGH",
+   "reproduced": true
+  },
+  {
+   "attack": "R1's recommended compile-time guard KeyPathsEqual<__Paths<zodOut>, __Paths<SavedSession>> is BLIND to removing a field from ONE discriminated-union variant when a SIBLING variant carries a same-named field, because __Paths unions all key names across variants. HG-B3's mutation claim ('red when a nested field is removed') is false for exactly that class.",
+   "bypassOrRegression": "REGRESSION / false-green guard: removing documentBlockSchema.data or .mediaType (both names also exist on imageBlockSchema) leaves __Paths identical, so the guard still COMPILES and HG-B3 stays green while a real lossy strip ships. The whole point of B-F ('a schema silently drops a Message field fails typecheck') has a documented gap it does not cover.",
+   "evidence": "probe-keypaths-hole (in-memory overlay): 'K +origin -documentBlock.mediaType → COMPILES (guard passes)', 'M +origin -documentBlock.data → COMPILES'. Control 'I +origin -signature → ERROR' (signature is unique to thinkingBlock, so __Paths does change). An alternative strict-Eq over DeepRequired (probe-deeprequired-*) goes RED on K and M and on today's unmodified schema, so a correct guard exists but is not the one R1 specified.",
+   "severity": "HIGH",
+   "reproduced": true
+  },
+  {
+   "attack": "R1's KeyPathsEqual guard also cannot see a VALUE-DOMAIN divergence: widening Message.origin in @/llm to `\"harness\"|\"hook\"` (or any literal-set change) leaves the key PATHS equal, so the schema (still z.literal(\"harness\")) would refuse or misvalidate such files with no compile signal.",
+   "bypassOrRegression": "BYPASS of the drift intent: the guard's promise ('any Message field change is caught') is false for value-type changes, only key presence is checked. B-F's 'invalid states unrepresentable' claim is overstated.",
+   "evidence": "probe-keypaths-hole: 'O +origin, types.ts origin?: harness|hook → COMPILES (guard passes)'. The DeepRequired strict-Eq alternative catches it (RED).",
+   "severity": "MED",
+   "reproduced": true
+  },
+  {
+   "attack": "S-D's non-TTY default (untrusted unless operator grant) regresses the shipped bench/eval and headless surfaces that run in cloned repos and rely on repo AGENTS.md/glob rules loading. The Harbor terminal-bench adapter spawns the brain on the HOST from os.environ; SWE-bench/eval runs are non-TTY one-shots. All become 'untrusted' and lose repo rules unless each harness is taught to grant.",
+   "bypassOrRegression": "REGRESSION to the concurrent bench/eval campaigns and any CI: silent loss of project rules on exactly the surfaces measured for leaderboard parity. R1 lists ~12 test files to migrate but does not enumerate the bench adapters (adapters/terminal-bench/quanta_agent.py, src/apps/eval/*, src/apps/bench/*) that also assume loading.",
+   "evidence": "adapters/terminal-bench/quanta_agent.py:236-259 spawns brain with _overlay_env({**os.environ,...}); src/apps/eval/index.ts:860 and src/apps/eval/entry.ts:16 call loadEnvFiles then run non-TTY. brain-mode bootstrap pins 'interactive' (session-state-ports.ts:252) but its cwd defaults to '/' (brain-mode-session-scaffold.ts:122), so on the host it would only load repo rules if cwd is redirected — a subtlety R1's brain-mode MED does not mention.",
+   "severity": "MED",
+   "reproduced": false
+  }
+ ],
+ "wrongClaimsInR1": [
+  {
+   "claim": "HG-S2 redTodayProof and the F-env arm: 'probe-dotenv-trust-forge: after the CLI's dotenv load, trustedFromEnv.has(cwd)=true with provenance <repo>/.env' — presented as proof the provenance filter would catch the forge (mutation: remove the filter → F-env goes red).",
+   "whyWrong": "The R1 probe (and HG-S2 as designed) writes `.env` at RUNTIME with fs.writeFileSync AFTER Bun has already started, so Bun's autoload never saw it and loadEnvFiles records provenance. The real binary reads a `.env` that already exists on disk at startup, which Bun autoloads FIRST (provenance null). So the provenance is an artifact of test ordering; the filter the mutation tests is inert in production, and the F-env arm is a false green. The claim that the filter provides forge-resistance for QUANTA_TRUSTED_PATHS is false.",
+   "evidence": "probe-bun-dotenv-autoload (pre-existing .env, both `bun run` and compiled binary): provenance=null for QUANTA_TRUSTED_PATHS and QUANTA_PROBE_LOCAL; QUANTA_PROBE_DEV (.env.dev, not Bun-autoloaded) provenance set. Contrast R1's D-r1 probe that fs.writeFileSync('.env') at runtime and got provenance set."
+  },
+  {
+   "claim": "reusedExisting + structuralMechanism (4): 'the loader walk is bounded by decision.root so the key and the walk cannot disagree' and F-symlink '→ trusted, root === realpath', built on reusing TrustStore + canonicalizeTrustedPaths.",
+   "whyWrong": "canonicalizeProjectPath/TrustStore.isTrusted use normalize(), not realpath(). A realpath-keyed grant and a normalize-keyed lookup (or walk) DO disagree on any symlinked path; R1 never specifies realpath on the lookup side and the reused primitive does not provide it, so 'cannot disagree' is unproven and demonstrably false on a symlink.",
+   "evidence": "src/config/trust-store.ts:59-70 (normalize, no realpath); probe-truststore-symlink-mismatch (grant-by-realpath, lookup-by-linkpath → false)."
+  },
+  {
+   "claim": "BUG-1 L7 / rewind-predicate-split rated MED 'verified' as a live default-path defect: an origin-only summary 'is an addressable rewind target and is taken as the operator's last turn.'",
+   "whyWrong": "A compaction summary built by buildCompactionSummaryMessage has NO id, and rewind target resolution / countRewindDrops require m.id to be a string. It only becomes addressable when id-assignment mints an m{k} id, which is gated by `messageIds || rewindCapture` (persist-turn.ts:190) — and neither QUANTA_MESSAGE_IDS nor QUANTA_REWIND_CAPTURE is in the CLI default-on seed list (src/apps/cli/cli-feature-gates.ts). So on the default shipping CLI the split does not bite; the code-level predicate divergence is real but the default-path severity is overstated.",
+   "evidence": "persist-turn.ts:190 `const gateOn = input.assignIds ?? (cfg.messageIds || cfg.rewindCapture)`; src/shared/runtime-config.ts:684,688 read the two gates from env with no default-on; grep of cli-feature-gates.ts finds neither key. rewind-cmd.ts:421-448 requires typeof id === 'string'."
+  },
+  {
+   "claim": "BUG-1 L9 / L7: 'isHarnessAuthored is used by the keep-window' (cited as a false comment R1 will correct) and simultaneously R1 states it 'has no caller (not itself a defect).'",
+   "whyWrong": "The first is correctly flagged as a false comment, but the deeper point is the keep-window compaction actually has NO origin-aware turn counting at all — nothing consumes isHarnessAuthored, so harness reminders ARE counted as human turns by whatever the keep-window uses. R1 dismisses 'no caller' as 'not a defect' without checking what the keep-window uses instead, leaving a real behavior gap unassessed.",
+   "evidence": "grep isHarnessAuthored across src and tests: only its definition in harness-speech.ts:41; zero callers."
+  }
+ ],
+ "missedHoles": [
+  {
+   "what": "Repo bunfig.toml `[run] preload` / `preload` = arbitrary code execution at `quanta` startup in a cloned repo, before command dispatch. Entirely outside SEC-5's threat model and S-D's mechanism (which gates app loaders, not Bun runtime autoload). This is the highest-severity same-class hole and R1 never enumerated Bun's own autoload surfaces (bunfig, .env, .env.local) as attack vectors.",
+   "evidence": "Installed binary executed a repo bunfig preload on `quanta --version` (marker written). Fix is at tools/bin/build-cli.ts (add --no-compile-autoload-bunfig / --no-compile-autoload-dotenv / --no-env-file), a build-layer change absent from R1's changes[].",
+   "severity": "CRITICAL",
+   "reproduced": true
+  },
+  {
+   "what": "Repo `.env`/`.env.local` autoload as a trust-input forge vector that defeats the provenance filter (see designBreaks). The correct structural fix is to disable Bun's dotenv autoload at build time and make loadEnvFiles the SOLE dotenv path (so envFileProvenance is complete), coordinated with cluster A — R1 relies on the provenance filter alone, which is insufficient.",
+   "evidence": "probe-bun-dotenv-autoload + operatorEnvFrom check: trusted_survives_filter=true.",
+   "severity": "CRITICAL",
+   "reproduced": true
+  },
+  {
+   "what": "Repo dotenv relocating QUANTA_SKILLS_DIR / QUANTA_ORG_CONFIG_DIR into the repo makes repo-authored SKILL.md files load as user- AND admin-scope skills whose descriptions ride the `Skill` tool's model-facing 'Available skills:' catalogue — a prompt-authority injection sibling R1 did not list (it checked repo `.quanta/skills` is not passed to the session skill authority, but missed the dotenv-relocation of the user/org skills dirs).",
+   "evidence": "probe-dotenv-skill-dirs: with repo .env {QUANTA_SKILLS_DIR=.skills, QUANTA_ORG_CONFIG_DIR=.org}, buildCliSkillAuthority().resolveActive('repo-planted')→{scope:'user'} and resolveActive('org-planted')→{scope:'admin'}; renderSkillToolDescription (skill-tool.ts:309-316) lists the active projection into the tool description. Provenance null (Bun autoload), so the same dotenv-forge class applies.",
+   "severity": "MED",
+   "reproduced": true
+  },
+  {
+   "what": "Repo `.quanta/plugins` manifest mcpServers command spawn IS live on the shipping interactive CLI: runtime-context-compose.ts:501 → buildInteractiveTurnAssembler (pins mode:'interactive') → assembleAgentConfig → autoWirePluginActivation(cfg,{},{mode:'interactive'}) → modeLoadsRepoRules('interactive')=true, so the mode gate does NOT block. R1 marked this UNVERIFIED; the wire is confirmed. (S-D does cover it via the gate list, so it is a verification gap, not a design break.)",
+   "evidence": "src/apps/cli/repl/runtime-context-compose.ts:501; src/host/runtime/agent-config-assembler.ts:866,881-895; auto-wire.ts:145 gate is `opts.mode !== undefined && !modeLoadsRepoRules(opts.mode)` → interactive passes.",
+   "severity": "MED",
+   "reproduced": false
+  },
+  {
+   "what": "The migration/external-config PERSIST path WRITES a repo/home `.mcp.json`, subagent `.quanta/agents/*.md`, glob rules and appends CLAUDE.md memory into ~/.quanta/memory/raw_memories.md from a competitor tree — an untrusted-repo import path that lands executable/authority artifacts, adjacent to the trust model. Default-OFF but if enabled it converts repo content into loaded authority with no trust decision.",
+   "evidence": "src/migration/external-config/persist.ts:640-679 (memory append), :720-728 (agents/rules/skills dirs), detect.ts:67-76 (.mcp.json probes). Gated by an enabled knob but not by TrustStore.",
+   "severity": "MED",
+   "reproduced": false
+  },
+  {
+   "what": "R1's DeepRequired-strict-Eq alternative (which I built to catch the union-variant hole) would go RED on HEAD TODAY not only on messages[].origin but on meta/objective/rollback value-domain differences (e.g. objective.threads). R1's own probe-schema-deepdiff claimed 'the only STRIPPED field is messages[].origin' — true for stripping, but a strict guard must be scoped to strip-only, or it fails for legitimately-different value domains between zod output and the TS type. B-F does not address how the guard tolerates those intentional differences.",
+   "evidence": "probe-meta-valuediff: __Deep<zodOut, SavedSession> surfaces 'objective.threads' as a value-type difference (persistedObjectiveThreadSchema vs the TS thread type). So a naive strict-Eq guard is RED today for reasons unrelated to origin.",
+   "severity": "MED",
+   "reproduced": true
+  }
+ ],
+ "jankyTests": [
+  {
+   "test": "HG-S2 project-trust-forge-hellgate, F-env arm + its mutation ('remove the envFileSourceOf filter → F-env goes red').",
+   "whyVacuousOrWeak": "It establishes the forged QUANTA_TRUSTED_PATHS by writing `.env` at runtime and calling loadEnvFiles, then asserts the provenance filter catches it. That ordering never happens in the shipped binary, where Bun autoloads a pre-existing `.env` before the app runs and provenance is null. The test would pass (and its mutation would go red) while the production filter is inert — a false-green that proves a defense that does not defend.",
+   "fix": "Drive the REAL startup ordering: place `.env` on disk BEFORE spawning a spawnScrubbed bun child (or the compiled binary) whose cwd is the repo, and assert on the child's resolved decision. The correct control is `--no-compile-autoload-dotenv` vs default. The real fix under test must be the build flag + loadEnvFiles-as-sole-source, not the provenance filter; assert envFileProvenance is COMPLETE (every dotenv key attributed) as the invariant."
+  },
+  {
+   "test": "HG-B3 saved-session-schema KeyPathsEqual compile guard, mutation 'Remove signature/workspaceOwnership → TS2322' presented as covering 'a nested field removed'.",
+   "whyVacuousOrWeak": "The chosen mutation fields (signature, workspaceOwnership) are unique key names, so __Paths changes and the guard reddens. But the guard is BLIND to removing a field whose name is shared by a sibling union variant (documentBlockSchema.data/.mediaType vs imageBlockSchema). The mutation set is cherry-picked to the cases the guard happens to catch, hiding the class it misses.",
+   "fix": "Add mutation arms that remove documentBlockSchema.data and .mediaType and REQUIRE red; they stay green under __Paths. Replace __Paths with a strict-Eq over a DeepRequired (union-variant-preserving) mapping, scoped strip-only so it is not red for intentional value-domain differences (objective.threads). Prove the guard red on both the shared-name removal and a value-domain widen (origin literal set)."
+  },
+  {
+   "test": "HG-B5 rewind-harness-origin-hellgate (unit), fixture 'm2 origin-only summary with persist-turn-minted id'.",
+   "whyVacuousOrWeak": "It hand-assumes the summary carries an m{k} id, but on the default CLI persist-turn does NOT mint ids for summaries (messageIds/rewindCapture gates default-OFF, not in the CLI seed). The test asserts a default-path behavior that only occurs with a non-default gate ON, so it either fabricates the id (mock-only, not the production shape) or silently depends on an unstated gate — a hidden precondition that makes the 'red today' claim not reflect the shipped default.",
+   "fix": "Make the gate explicit and visible: run one arm with QUANTA_MESSAGE_IDS on (documented) and a paired arm with it OFF asserting the summary is NOT addressable at all (no id). Decide at collection time; do not hand-mint the id as if production always does."
+  },
+  {
+   "test": "HG-S1/HG-S8 paired TRUSTED control: 'persistence preloaded with {[realpath(repo)]:{trusted:true}} gives count===1 / via==='trust-store''.",
+   "whyVacuousOrWeak": "Depends on resolveProjectTrust realpath-ing the lookup cwd before consulting the normalize-keyed TrustStore. If the repo cwd is reached via a symlink (or on macOS under /tmp), a realpath-keyed record misses a normalize-keyed lookup, so the 'trusted' arm would falsely go red — or, if the test uses a non-symlink mkdtemp under HOME, it never exercises the realpath/normalize divergence at all and gives false confidence.",
+   "fix": "Add an explicit symlinked-cwd arm and a macOS /tmp arm; assert the resolved root and the trust hit are identity under realpath. Pin the canonicalization contract (realpath then normalize) as the invariant so the store and the walk cannot key differently."
+  }
+ ],
+ "overEngineeringOrHeuristics": [
+  "S-D adds a new branded ProjectTrustDecision/TrustedProjectRoot type threaded through ~20 files plus a syntax-AST census (HG-S5) and a type-checker census (HG-B4, ~11s). Given that the two CRITICAL live exec paths (bunfig preload, .env autoload) are fixed by ~3 build flags in tools/bin/build-cli.ts, the branded-type ratchet is disproportionate to what it closes and leaves the biggest holes untouched. Land the build-flag fix first; it is S and closes arbitrary code exec.",
+  "The provenance-based operator-env filter (S-D mechanism #3) is a heuristic dressed as structure: 'a key is untrusted if envFileSourceOf(key)!==undefined'. It is only as complete as the provenance registry, which Bun's autoload defeats. The structural answer is a single dotenv source (disable Bun autoload, loadEnvFiles-only) so provenance is total — not a filter over a registry with known blind spots.",
+  "R1's KeyPathsEqual guard is presented as making 'invalid states unrepresentable' but is a name-set comparison that ignores union-variant membership and value domains (proven blind to two mutation classes). A single strict-Eq over DeepRequired is both simpler and strictly stronger; the bespoke __Paths recursion is over-engineered AND weaker.",
+  "HG-B4's Message.role render census runs the full TS type-checker program (~11s, R1's own number) as a unit/integration gate. A type-level KeyPathsEqual const plus a small syntax-AST scan already covers most of it; running a whole tsc program per test is heavyweight for a ratchet and will be skipped locally (R1 admits it must move lanes), which defeats the ratchet's purpose."
+ ]
+}

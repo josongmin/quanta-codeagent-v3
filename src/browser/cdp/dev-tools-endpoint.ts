@@ -35,7 +35,24 @@ export interface ReadEndpointDeps {
   /** Abort the poll early (R1 audit [18] — without this an aborted turn hangs
    *  to the full timeout while the spawned Chrome keeps running). */
   readonly signal?: AbortSignal
+  /**
+   * The spawned process's exit code once it has exited, else `undefined`.
+   *
+   * Without it a Chrome that died at launch ("No usable sandbox!") polled the
+   * whole budget and was reported as the TIMEOUT below — which the capability
+   * probe reads as "slow host", so the failure the browser suite exists to catch
+   * skipped green.
+   */
+  readonly exitCode?: () => number | undefined
 }
+
+/**
+ * The detail of the one `spawn-failed` that means "not ready in time" rather than
+ * "could not start". Exported so a caller can tell a slow bring-up from a broken
+ * one without matching prose: the capability probe did not, and reported a
+ * loaded host's slow Chrome as "present but the CDP session would not come up".
+ */
+export const DEVTOOLS_ENDPOINT_TIMEOUT_DETAIL = "DevTools endpoint not ready before timeout"
 
 export const readDevToolsEndpoint = async (
   deps: ReadEndpointDeps,
@@ -45,6 +62,13 @@ export const readDevToolsEndpoint = async (
   const start = deps.clock.now()
   for (;;) {
     if (deps.signal?.aborted === true) return err({ kind: "cancelled" })
+    const exited = deps.exitCode?.()
+    if (exited !== undefined) {
+      return err({
+        kind: "spawn-failed",
+        detail: `Chrome exited with code ${exited} before the DevTools endpoint was ready`,
+      })
+    }
     const content = deps.read()
     if (content !== null) {
       const parsed = parseDevToolsActivePort(content)
@@ -52,7 +76,7 @@ export const readDevToolsEndpoint = async (
       // malformed (mid-write) — fall through and retry until timeout
     }
     if (deps.clock.now() - start >= timeoutMs) {
-      return err({ kind: "spawn-failed", detail: "DevTools endpoint not ready before timeout" })
+      return err({ kind: "spawn-failed", detail: DEVTOOLS_ENDPOINT_TIMEOUT_DETAIL })
     }
     // R3 audit [8]: race the poll sleep against abort and cancel the timer on
     // settle — without this an abort waits a full pollMs and leaks the timer.

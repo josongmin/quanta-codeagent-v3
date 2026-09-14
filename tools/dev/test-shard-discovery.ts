@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs"
+import { existsSync, realpathSync } from "node:fs"
 import { relative, resolve } from "node:path"
 import { expandTestFiles } from "./sandboxed-test"
 
@@ -247,4 +247,93 @@ export const discoverInventory = (repoRoot: string): DiscoveryInventory => {
       },
     },
   }
+}
+
+/**
+ * A repo-relative path that discovery finds: `expandTestFiles` walks the roots,
+ * skips `node_modules` and every dot-directory, and keeps `*.test.ts`. The same
+ * rule as a path predicate, so a population can be recounted from a git tree.
+ */
+export const isDiscoverableTestPath = (path: string): boolean =>
+  path.endsWith(".test.ts") &&
+  !path.split("/").some((segment) => segment === "node_modules" || segment.startsWith("."))
+
+/** The repo-relative paths that fall under a suite's roots. */
+export const suiteMembers = (paths: readonly string[], suite: SuiteName): readonly string[] =>
+  paths.filter((path) => underAnyRoot(path, SUITE_ROOTS[suite]))
+
+/** Every `*.test.ts` the git index tracks under a suite's roots, repo-relative. */
+export const trackedSuiteTestFiles = (repoRoot: string, suite: SuiteName): readonly string[] => {
+  const git = (args: readonly string[]): string => {
+    const result = Bun.spawnSync(["git", ...args], {
+      cwd: repoRoot,
+      stdout: "pipe",
+      stderr: "pipe",
+      timeout: 30_000,
+    })
+    if (result.exitCode !== 0) {
+      throw new Error(
+        `[discovery] git ${args[0]} failed (${String(result.exitCode)}): ${result.stderr.toString().trim()}. ` +
+          "Discovery completeness is proven against the git index; without one it cannot be.",
+      )
+    }
+    return result.stdout.toString()
+  }
+  // From a nested directory `ls-files` lists only that subtree, and completeness
+  // then passed over nothing — measured from a pristine extract kept inside the repo.
+  const top = git(["rev-parse", "--show-toplevel"]).trim()
+  if (realpathSync(top) !== realpathSync(repoRoot)) {
+    throw new Error(
+      `[discovery] ${repoRoot} is not the top level of its git work tree (${top}); the tracked set ` +
+        "would be a subtree and the completeness check vacuous",
+    )
+  }
+  const roots = SUITE_ROOTS[suite].map(normalizeRoot)
+  // A file deleted in the work tree but not yet staged is still in the index. It
+  // is not discovery loss — it is a dirty tree, which a campaign refuses on its
+  // own — so it is not counted as tracked here.
+  const deleted = new Set(git(["ls-files", "-z", "--deleted", "--", ...roots]).split("\0"))
+  return git(["ls-files", "-z", "--", ...roots])
+    .split("\0")
+    .filter((path) => path.endsWith(".test.ts") && !deleted.has(path))
+    .sort((left, right) => left.localeCompare(right))
+}
+
+/**
+ * What discovery lost, at a threshold of ZERO.
+ *
+ * The population floors carry slack, and an audit measured how much: every test
+ * under `tools/`, `tests/meta`, `tests/adversarial` and `tests/measurement` plus
+ * 42 `src/` tests could vanish with all sixteen suite × tier pairs still green.
+ * Slack is the wrong instrument for the failure it was meant to catch — a
+ * directory moved under a dot prefix, a walker change, a root that stops
+ * yielding. Those leave the files TRACKED and make them undiscovered, which is
+ * exact. A root yielding nothing at all is the other shape (a deleted or renamed
+ * root). A file deleted in a commit is not discovery loss; it is in the diff.
+ *
+ * Untracked files that discovery finds are fine: they are new work.
+ */
+export const discoveryCompletenessProblems = (input: {
+  readonly suite: SuiteName
+  /** Repo-relative. */
+  readonly discovered: readonly string[]
+  /** Repo-relative, from `trackedSuiteTestFiles`. */
+  readonly tracked: readonly string[]
+}): readonly string[] => {
+  const discovered = new Set(input.discovered)
+  const lost = input.tracked.filter((path) => !discovered.has(path))
+  const problems: string[] = []
+  if (lost.length > 0) {
+    problems.push(
+      `${lost.length} tracked test file(s) under suite=${input.suite} were not discovered ` +
+        `(a dot-directory, node_modules, or a file deleted from the working tree): ` +
+        `${lost.slice(0, 10).join(", ")}${lost.length > 10 ? ", …" : ""}`,
+    )
+  }
+  for (const root of SUITE_ROOTS[input.suite]) {
+    if (!input.discovered.some((path) => underAnyRoot(path, [root]))) {
+      problems.push(`suite root ${root} yielded no test files`)
+    }
+  }
+  return problems
 }

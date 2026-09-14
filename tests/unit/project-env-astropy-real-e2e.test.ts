@@ -19,7 +19,7 @@
  * It is intentionally opt-in and serial (`bun run test:real-toolchain`) because
  * it clones/builds a real upstream snapshot and may take several minutes.
  */
-import { afterAll, beforeAll, expect, test } from "bun:test"
+import { afterAll, expect, test } from "bun:test"
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { readdir, readFile, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -33,7 +33,6 @@ import {
 import { execArgv } from "@/runner/batch/eval/exec"
 import { withCandidatePatch } from "@/runner/batch/eval/rematerialize"
 import {
-  assertCapabilityNotBlocked,
   boundedVersion,
   capabilityGate,
   hasBinary,
@@ -68,7 +67,7 @@ const GATE = capabilityGate({
   file: FILE,
   needs: { git: hasBinary("git"), uv: hasBinary("uv") },
 })
-const D = laneDescribe(GROUP, GATE)
+const D = laneDescribe(GATE)
 
 const ASTROPY_13033: SwebenchTask = {
   instanceId: "astropy__astropy-13033",
@@ -131,7 +130,6 @@ const buildTrivialPatch = async (sandbox: string): Promise<string> => {
 }
 
 D("project-env astropy real e2e", () => {
-  beforeAll(() => assertCapabilityNotBlocked({ group: GROUP, file: FILE }, GATE))
   afterAll(() =>
     reportExecuted(GATE, GROUP, FILE, "real astropy clone + native build exercised", () => ({
       upstreamRepo: ASTROPY_13033.repo,

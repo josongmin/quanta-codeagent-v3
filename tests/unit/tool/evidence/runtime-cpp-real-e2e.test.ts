@@ -7,7 +7,7 @@
  *
  * AUTO-SKIPS without clang++ / lldb-dap / clangd. Verified 2026-06-10.
  */
-import { afterAll, beforeAll, expect, test } from "bun:test"
+import { afterAll, expect, test } from "bun:test"
 import { mkdtempSync, realpathSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -16,7 +16,6 @@ import { defaultRuntimePort } from "@/tool/evidence"
 import { buildEvidence } from "@/tool/evidence/builder"
 import type { Toolchain } from "@/tool/testrun"
 import {
-  assertCapabilityNotBlocked,
   boundedVersion,
   capabilityGate,
   hasBinary,
@@ -41,7 +40,7 @@ const RUNTIME_GATE = capabilityGate({
   file: FILE,
   needs: { "clang++/g++": cxxPresent, "lldb-dap": hasLldbDap() },
 })
-const DRUN = laneDescribe(GROUP, RUNTIME_GATE)
+const DRUN = laneDescribe(RUNTIME_GATE)
 
 const SRC = [
   "#include <cassert>",
@@ -61,7 +60,6 @@ const writeCpp = (): string => {
 }
 
 DRUN("defaultRuntimePort — REAL C++ runtime (clang++ -g → lldb-dap)", () => {
-  beforeAll(() => assertCapabilityNotBlocked({ group: GROUP, file: FILE }, RUNTIME_GATE))
   afterAll(() =>
     reportExecuted(
       RUNTIME_GATE,
@@ -102,9 +100,8 @@ const STATIC_GATE = capabilityGate({
   file: FILE,
   needs: { clangd: hasBinary("clangd") },
 })
-const DSTATIC = laneDescribe(GROUP, STATIC_GATE)
+const DSTATIC = laneDescribe(STATIC_GATE)
 DSTATIC("evidenceLspStatic — REAL clangd (Tier-2 C++ static)", () => {
-  beforeAll(() => assertCapabilityNotBlocked({ group: GROUP, file: FILE }, STATIC_GATE))
   afterAll(() =>
     reportExecuted(
       STATIC_GATE,

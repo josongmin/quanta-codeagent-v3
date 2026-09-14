@@ -1,12 +1,22 @@
 /**
- * `tools/dev/lease-quarantine-keeper` — watch the survivors out, then release.
+ * `tools/dev/lease-quarantine-keeper` — watch the survivors out, and say when.
  *
  * Detached on purpose: the campaign that wrote the quarantine is about to exit,
- * and something has to observe the processes it could not account for. The
- * keeper holds no socket and grants nothing — it only removes the record once
- * the groups are gone, so a keeper that dies costs an expiry wait rather than a
- * stranded lane. `quarantineVerdict` re-derives liveness from the SURVIVORS on
- * every read, so correctness never depends on this process being alive.
+ * and something should observe the processes it could not account for. The
+ * keeper holds no socket, grants nothing, and — since an audit — DELETES
+ * NOTHING. `quarantineVerdict` re-derives liveness from the survivors on every
+ * read, so a record whose groups have exited already stops blocking; removing
+ * it bought no early release. What deleting did buy, measured:
+ *
+ *  - an expired record over LIVE groups was removed by the keeper at the TTL, so
+ *    the next contender saw nothing, no `.expired-*` record was kept, and
+ *    `onQuarantineRelease` never fired — the "kept and reported" fix never ran
+ *    whenever a keeper existed;
+ *  - the keeper deleted by path, not by record, so a newer campaign's record
+ *    written after the keeper's read was the one removed.
+ *
+ * Clearing is now done only by a contender that HOLDS the lane's port
+ * (`test-shard-lease.ts`), which is the one place no second writer can race.
  *
  * "Detached" was a claim about a function named `spawnDetachedKeeper`, and it
  * was false. MEASURED: `Bun.spawn` has no `detached` option and `unref()` only
@@ -20,10 +30,8 @@
 
 import { dlopen, FFIType, suffix } from "bun:ffi"
 import {
-  clearLeaseQuarantine,
   groupAlive,
   type LeaseQuarantineRead,
-  type LeaseQuarantineRecord,
   laneSlotVerdict,
   readLeaseQuarantineOutcome,
 } from "./lease-quarantine"
@@ -54,7 +62,8 @@ export const detachIntoOwnSession = (): number => {
   }
 }
 
-export type KeeperAction = "hold" | "release"
+/** `watch` keeps polling; `done` exits WITHOUT touching the record. */
+export type KeeperAction = "watch" | "done"
 
 export const keeperTick = (
   read: LeaseQuarantineRead,
@@ -67,12 +76,10 @@ export const keeperTick = (
   const verdict = laneSlotVerdict({ read, identity: repositoryId, nowMs, isAlive })
   // An ABSENT record right after spawn is the write it is waiting for:
   // `quarantineLane` spawns the keeper BEFORE it writes, so that the record can
-  // never name a pid that was never started. MEASURED: the keeper's first tick
-  // against an absent record answered `release`, which deletes — so a keeper that
-  // won that race removed the record it existed to watch. Holding on absence is
-  // bounded by `absentGraceMs` below.
-  if (read.kind === "absent") return "hold"
-  return verdict.kind === "blocked" ? "hold" : "release"
+  // never name a pid that was never started. Watching on absence is bounded by
+  // `absentGraceMs` below.
+  if (read.kind === "absent") return "watch"
+  return verdict.kind === "blocked" ? "watch" : "done"
 }
 
 if (import.meta.main) {
@@ -86,7 +93,6 @@ if (import.meta.main) {
     )
     process.exit(2)
   }
-  let watched: LeaseQuarantineRecord | undefined
   const session = detachIntoOwnSession()
   process.stderr.write(
     session > 0
@@ -101,26 +107,17 @@ if (import.meta.main) {
   const startedAtMs = Date.now()
   for (;;) {
     const read = readLeaseQuarantineOutcome(path)
-    if (read.kind === "record") watched = read.record
-    const action = keeperTick(read, repositoryId, Date.now(), groupAlive)
-    if (action === "release") {
-      clearLeaseQuarantine(path)
-      // The legacy mirror only if it still holds the very record watched here: a
-      // newer campaign, or another identity, may have written it since.
-      if (legacyPath !== undefined && watched !== undefined) {
-        const legacy = readLeaseQuarantineOutcome(legacyPath)
-        if (
-          legacy.kind === "record" &&
-          legacy.record.repositoryId === watched.repositoryId &&
-          legacy.record.createdAtMs === watched.createdAtMs
-        ) {
-          clearLeaseQuarantine(legacyPath)
-        }
-      }
-      process.stderr.write(`[quarantine] released ${repositoryId} at ${new Date().toISOString()}\n`)
+    const nowMs = Date.now()
+    if (keeperTick(read, repositoryId, nowMs, groupAlive) === "done") {
+      const verdict = laneSlotVerdict({ read, identity: repositoryId, nowMs, isAlive: groupAlive })
+      process.stderr.write(
+        `[quarantine] keeper done for ${repositoryId} at ${new Date(nowMs).toISOString()}: ` +
+          `${"reason" in verdict ? verdict.reason : verdict.kind}. The record is left for the next ` +
+          `lane holder to clear${legacyPath === undefined ? "" : ` (legacy mirror ${legacyPath} too)`}.\n`,
+      )
       process.exit(0)
     }
-    if (read.kind === "absent" && Date.now() - startedAtMs > absentGraceMs) {
+    if (read.kind === "absent" && nowMs - startedAtMs > absentGraceMs) {
       process.stderr.write(
         `[quarantine] keeper giving up: no record appeared at ${path} within ${absentGraceMs}ms\n`,
       )

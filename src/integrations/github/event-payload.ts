@@ -174,7 +174,8 @@ const extractSender = (raw: RawEventEnvelope): NormalizedSender => {
     typeof typeRaw === "string" && (SENDER_TYPES as readonly string[]).includes(typeRaw)
       ? (typeRaw as SenderType)
       : "User"
-  const assoc = raw.comment?.author_association ?? raw.review?.author_association
+  const authored = raw.comment ?? raw.review
+  const assoc = authored?.author_association
   const isCollaborator =
     typeof assoc === "string"
       ? assoc === "COLLABORATOR" || assoc === "MEMBER" || assoc === "OWNER"
@@ -182,7 +183,18 @@ const extractSender = (raw: RawEventEnvelope): NormalizedSender => {
   if (isCollaborator === undefined) {
     return Object.freeze({ login, type })
   }
-  return Object.freeze({ login, type, isCollaborator })
+  // `author_association` describes who WROTE the comment or review; `sender` is who
+  // ACTED. They differ on `edited` and `deleted` events, and anyone with write
+  // access can edit anyone's comment. Carried as the SENDER's association only when
+  // the payload names the author and it is the sender — otherwise a collaborator
+  // editing an owner's comment ran the injected body at owner rank (reproduced on
+  // an `issue_comment.edited` payload). The coarse `isCollaborator` keeps its old
+  // meaning: an editor already has write access, so it grants nothing new.
+  const authorLogin = authored?.user?.login
+  if (authorLogin === undefined || authorLogin !== login) {
+    return Object.freeze({ login, type, isCollaborator })
+  }
+  return Object.freeze({ login, type, isCollaborator, association: assoc as string })
 }
 
 const extractBody = (raw: RawEventEnvelope, kind: GhEventKind): string | undefined => {

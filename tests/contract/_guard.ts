@@ -16,17 +16,17 @@
  * installed'" hole that plain `skipIf` leaves open.
  */
 import { test } from "bun:test"
+import { contractRequiredFailureName, switchWord } from "../../tools/dev/capability-receipt"
 
 const warned = new Set<string>()
 
 /**
- * The same grammar as `QUANTA_REQUIRE_CAPABILITIES`: unset, empty and `0` are
- * off. A bare truthiness test made `REQUIRE_CONTRACT=0` the strict mode.
+ * The same words as `QUANTA_REQUIRE_CAPABILITIES` (`switchWord`): unset, empty,
+ * `0`, `false`, `no` and `off` are off. A bare truthiness test made
+ * `REQUIRE_CONTRACT=0` the strict mode. Anything else is on — this switch has no
+ * list form, so an unrecognised value fails toward strict.
  */
-export const contractRequired = (value: string | undefined): boolean => {
-  const raw = (value ?? "").trim()
-  return raw !== "" && raw !== "0"
-}
+export const contractRequired = (value: string | undefined): boolean => switchWord(value) !== "off"
 
 /**
  * Loud as a REGISTERED FAILING TEST, not a module-scope throw.
@@ -51,7 +51,7 @@ export const requireContract = (name: string, available: boolean): boolean => {
       `[contract] "${name}" is unavailable but REQUIRE_CONTRACT is set. ` +
       "CI must provision this dependency; failing instead of skipping silently."
     try {
-      test(`[contract] REQUIRED ${name} is unavailable`, () => {
+      test(contractRequiredFailureName(name), () => {
         throw new Error(message)
       })
     } catch {

@@ -27,8 +27,10 @@
  *                `setenv`) excluded, and in test files only in a read context
  *   shell        `$X` / `${X}` in shell, extensionless scripts and
  *                `package.json` scripts, outside comments and single quotes
- *   workflow     `vars.X` / `env.X` / `secrets.X` in a parsed workflow, and the
- *                shell rule over `run:` bodies; `env:` KEYS are writes
+ *                (quote state carried across lines)
+ *   workflow     `vars.X` / `env.X` / `secrets.X` inside `${{ … }}` or an `if:`
+ *                value of a parsed workflow, and the shell rule over `run:`
+ *                bodies; `env:` KEYS are writes
  *
  * # What the previous version got wrong, each found by an audit of it
  *
@@ -47,13 +49,57 @@
  *   `gate_owner` was not extracted at all.
  * - The corpus was six roots and three TS extensions: `adapters/`, shell
  *   scripts, extensionless scripts and `package.json` were invisible.
+ *
+ * # What the second audit found, and what is still true
+ *
+ * - Shell quote state reset per line, and heredocs were detected on the raw
+ *   line, so a comment or string mentioning `<<EOF`, or `$((1<<N))`, switched
+ *   off all masking for the rest of the file; a quoted delimiter was masked away.
+ * - Workflow `env.X` matched anywhere in a scalar: a step NAME, a `run:` comment
+ *   and an echoed string each backed a name.
+ * - Python `os.environ["X"] = …`, `del`, `.pop` and dict keys, and TypeScript
+ *   destructuring / `for…of` targets, were reads. `expect(process.env.X)` in a
+ *   test backed the name it asserted dead.
+ * - A tracked file deleted in the worktree crashed the scan.
+ * - A dozen masking and language rules could each be deleted with the suite
+ *   green; each now has a fixture line only it decides.
+ *
+ * # What the third audit found
+ *
+ * - Masking ran over heredoc bodies, so an apostrophe in a body masked every read
+ *   after it; `$'it\'s'`, `don\'t` and `"$(echo "don't")"` did the same. Openers
+ *   were still found inside double quotes, in nested arithmetic and in `<<<`.
+ * - Only `${{ }}` read in a workflow, which dropped `process.env.X` in a
+ *   github-script `script:` and in a `bun -e '…'` of a `run:` body.
+ * - `token = os.environ.pop("X")` and `for n in "A", "X":` were writes.
+ * - Fourteen rules still had no fixture line, and the four catalog fields were
+ *   composed in the test, where dropping `activation` was green.
+ *
+ * # What the fourth audit found (in the third audit's fixes)
+ *
+ * - The interpreter of a heredoc or `-e` script was matched anywhere on the line:
+ *   `cd packages/node && python3 - <<'PY'` parsed Python as JavaScript, and
+ *   `echo bun -e '…'` was a script. It is now the command word of its segment.
+ * - A heredoc inside `"$(…)"` was masked as code; a multi-line quoted script lost
+ *   its line breaks; a double-quoted or nested script never matched its command;
+ *   `<<< '…'` kept its quote as a delimiter.
+ * - A consuming pop/setdefault was a write only if it started and fitted on its
+ *   line, and the dict-key test counted brackets inside strings and comments, in
+ *   a backward scan that took 14.5 s on an 8,000-name dict. It is one forward pass.
+ *
+ * STILL a limit, measured and left: a registry literal counts wherever a
+ * generic accessor reads `env[entry.envKey]` for every entry (the knob
+ * inventory's is `cli-knobs-accessor.ts`), so removing a knob's BEHAVIOURAL
+ * reader leaves it backed by the accessor. Today no declared name is backed only
+ * by a declaration-only file. Go backtick strings, Rust raw strings and reads
+ * inside Python f-strings are not tokenized; each would show as a false red.
  */
 
 import { execFileSync } from "node:child_process"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import ts from "typescript"
-import { isMap, isPair, isScalar, isSeq, parseDocument } from "yaml"
+import { isMap, isPair, isScalar, isSeq, parseDocument, type YAMLMap } from "yaml"
 
 export type EnvEvidenceKind = "ts-literal" | "ts-access" | "quoted" | "shell" | "workflow"
 
@@ -171,15 +217,56 @@ const outermostWrapper = (node: ts.Node): ts.Node => {
   return current
 }
 
+/**
+ * The root of the destructuring TARGET `node` sits in, if any: `[process.env.X] = v`,
+ * `({ a: process.env.X } = v)`, `for (process.env.X of xs)`. Each assigns to the
+ * access; each was counted as a read.
+ */
+const destructuringTargetRoot = (node: ts.Node): ts.Node | undefined => {
+  let current = node
+  let climbed = false
+  for (;;) {
+    const parent = current.parent
+    if (parent === undefined) return undefined
+    const inPattern =
+      ts.isArrayLiteralExpression(parent) ||
+      ts.isSpreadElement(parent) ||
+      (ts.isPropertyAssignment(parent) && parent.initializer === current) ||
+      ts.isObjectLiteralExpression(parent) ||
+      ts.isParenthesizedExpression(parent)
+    if (!inPattern) break
+    climbed = climbed || !ts.isParenthesizedExpression(parent)
+    current = parent
+  }
+  return climbed ? current : undefined
+}
+
 const isWriteTarget = (node: ts.Node): boolean => {
   const target = outermostWrapper(node)
   const parent = target.parent
   if (parent === undefined) return false
   if (ts.isDeleteExpression(parent)) return true
-  return (
+  if (
     ts.isBinaryExpression(parent) &&
     parent.left === target &&
     WRITE_OPERATORS.has(parent.operatorToken.kind)
+  ) {
+    return true
+  }
+  if (
+    (ts.isForOfStatement(parent) || ts.isForInStatement(parent)) &&
+    parent.initializer === target
+  ) {
+    return true
+  }
+  const root = destructuringTargetRoot(target)
+  if (root === undefined || root.parent === undefined) return false
+  const holder = root.parent
+  return (
+    (ts.isBinaryExpression(holder) &&
+      holder.left === root &&
+      holder.operatorToken.kind === K.EqualsToken) ||
+    ((ts.isForOfStatement(holder) || ts.isForInStatement(holder)) && holder.initializer === root)
   )
 }
 
@@ -374,37 +461,413 @@ export const pythonStrings = (text: string): readonly StringToken[] => {
   return out
 }
 
+/** Go `os.Unsetenv(` ends in `setenv(`: its own alternative was dead, and no mutant of it could fail. */
 const RAW_WRITE_CONTEXT =
-  /(?:\.env|\.env_remove|set_var|remove_var|setenv|Setenv|Unsetenv|putenv|delenv)\(\s*$/
-const RAW_READ_CONTEXT =
-  /(?:environment\[|getenv\(|Getenv\(|LookupEnv\(|env::var\(|env::var_os\(|environ\[|environ\.get\(|env_var\(|env_var_or_default\()\s*$/
+  /(?:\.env|\.env_remove|set_var|remove_var|setenv|Setenv|putenv|delenv)\(\s*$/
 
-/** A shell line with single-quoted spans and a trailing `#` comment removed. */
-const shellCode = (line: string): string => {
-  let code = ""
-  let quote: "'" | '"' | undefined
-  for (let index = 0; index < line.length; index += 1) {
-    const character = line[index] ?? ""
-    if (quote === "'") {
-      if (character === "'") quote = undefined
-      continue
-    }
-    if (quote === '"') {
-      if (character === "\\") index += 1
-      else if (character === '"') quote = undefined
-      code += character
-      continue
-    }
-    if (character === "'" || character === '"') {
-      quote = character
-      continue
-    }
-    const previous = line[index - 1]
-    if (character === "#" && (index === 0 || /[\s;]/.test(previous ?? "")) && previous !== "$")
-      break
-    code += character
+/**
+ * `os.environ.pop(` / `.setdefault(` whose value nothing uses: the call begins a
+ * statement — at a line start, after `;`, or after a `:` (`finally:`, `lambda:`).
+ * It was "starts its line and fits on it", so `os.environ.pop(\n "X")`, a second
+ * call after `;` and `lambda: os.environ.pop("X")` were reads (measured). A dict
+ * VALUE after a `:` reads as a write too; that is the rarer shape.
+ */
+const isConsumingStatement = (text: string, offset: number): boolean => {
+  const window = text.slice(Math.max(0, offset - 400), offset)
+  const call = /[\w.]*environ\.(?:pop|setdefault)\(\s*$/u.exec(window)
+  if (call === null) return false
+  return /(?:^|[\n;:])[ \t]*$/u.test(window.slice(0, call.index))
+}
+
+/**
+ * The innermost bracket open at each string token of a Python text, found in ONE
+ * forward pass that skips strings and comments.
+ *
+ * It scanned backwards from every token, counting brackets inside strings and
+ * comments: `{"msg": ":)", "X": "1"}` lost its key (a dead name backed), and one
+ * dict of 8,000 names took 14.5 s against 14 ms (measured).
+ */
+const pythonOpenBrackets = (text: string): ReadonlyMap<number, string | undefined> => {
+  const open: string[] = []
+  const at = new Map<number, string | undefined>()
+  for (let index = 0; index < text.length; ) {
+    const character = text[index] ?? ""
+    if (character === '"' || character === "'") at.set(index, open.at(-1))
+    index = pythonBracketStep(text, index, open)
   }
-  return code
+  return at
+}
+
+/** One step of `pythonOpenBrackets`: skip a comment or a string, or track a bracket. */
+const pythonBracketStep = (text: string, index: number, open: string[]): number => {
+  const character = text[index] ?? ""
+  if (character === "#") {
+    const end = text.indexOf("\n", index)
+    return end === -1 ? text.length : end
+  }
+  if (character === '"' || character === "'") return pythonStringEnd(text, index)
+  if ("([{".includes(character)) open.push(character)
+  else if (")]}".includes(character)) open.pop()
+  return index + 1
+}
+
+/** Index just past the string starting at `start` (the tokenizer `pythonStrings` uses). */
+const pythonStringEnd = (text: string, start: number): number => {
+  const character = text[start] ?? ""
+  const triple = text.startsWith(character.repeat(3), start)
+  const quote = triple ? character.repeat(3) : character
+  let cursor = start + quote.length
+  while (
+    cursor < text.length &&
+    !text.startsWith(quote, cursor) &&
+    (triple || text[cursor] !== "\n")
+  ) {
+    cursor += text[cursor] === "\\" ? 2 : 1
+  }
+  return cursor + quote.length
+}
+
+/** One text's bracket map, kept while its tokens are classified. */
+let bracketCache:
+  | { readonly text: string; readonly map: ReadonlyMap<number, string | undefined> }
+  | undefined
+
+/**
+ * A dict KEY: a `:` after it, and `{` the innermost bracket open at it. No other
+ * valid Python puts a string directly before `:` inside braces.
+ */
+const isDictKey = (text: string, offset: number, after: string): boolean => {
+  if (!/^\s*:/u.test(after)) return false
+  if (bracketCache?.text !== text) bracketCache = { text, map: pythonOpenBrackets(text) }
+  return bracketCache.map.get(offset) === "{"
+}
+
+/**
+ * A Python token that is written, not read: `os.environ["X"] = "1"`,
+ * `del os.environ["X"]`, a dict KEY (`env={"X": "1"}`), or a consuming
+ * `os.environ.pop("X")` / `.setdefault("X", …)` statement. All were backed — and
+ * in a test file `environ[` is a read context, so the write qualified there.
+ *
+ * `token = os.environ.pop("X", None)` READS the value it removes, and
+ * `v = os.environ.setdefault("X", "1")` returns it. And `for n in "A", "X":`
+ * matched the dict-key rule on its comma and colon; a key needs `{` as the
+ * innermost open bracket (`isDictKey`).
+ */
+const isPythonWrite = (text: string, offset: number, value: string): boolean => {
+  const quoteLength =
+    text.startsWith(`"${value}"`, offset) || text.startsWith(`'${value}'`, offset) ? 1 : 0
+  const after = text.slice(offset + value.length + quoteLength * 2, offset + value.length + 40)
+  const before = text.slice(Math.max(0, offset - 40), offset)
+  return (
+    /^\s*\]\s*=(?!=)/u.test(after) ||
+    /\bdel\s+[\w.]*environ\[\s*$/u.test(before) ||
+    isConsumingStatement(text, offset) ||
+    isDictKey(text, offset, after)
+  )
+}
+const RAW_READ_CONTEXT =
+  /(?:environment\[|getenv\(|Getenv\(|LookupEnv\(|env::var\(|env::var_os\(|environ\[|environ\.get\(|environ\.pop\(|environ\.setdefault\(|env_var\(|env_var_or_default\()\s*$/
+
+/** Python READS by call shape only: in a test, an embedded heredoc, or a `-c` argument. */
+const pythonReads = (text: string, names: ReadonlySet<string>): readonly string[] =>
+  pythonStrings(text).flatMap(({ value, offset }) =>
+    names.has(value) &&
+    RAW_READ_CONTEXT.test(text.slice(Math.max(0, offset - 32), offset)) &&
+    !isPythonWrite(text, offset, value)
+      ? [value]
+      : [],
+  )
+
+/** JavaScript READS (accesses, never bare literals) in code embedded in another file. */
+const scriptReads = (code: string, names: ReadonlySet<string>): readonly string[] => {
+  const found: string[] = []
+  const source = ts.createSourceFile(
+    "inline.js",
+    code,
+    ts.ScriptTarget.ESNext,
+    true,
+    ts.ScriptKind.JS,
+  )
+  const visit = (node: ts.Node): void => {
+    const hit = classifyNode(node, false)
+    if (hit !== undefined && names.has(hit.name)) found.push(hit.name)
+    node.forEachChild(visit)
+  }
+  visit(source)
+  return found
+}
+
+/**
+ * The start of the simple command a text ends inside — after `;`, `&`, `|`, `(`,
+ * a newline or `$(` — and any `NAME=value` prefixes. An interpreter counts only as
+ * that command: `echo bun -e '…'` was an inline script, and so was a Python body
+ * whose line merely mentioned `node` (`cd packages/node && python3 - <<'PY'`).
+ */
+const SEGMENT = String.raw`(?:^|[;&|(\n]|\$\()\s*(?:[A-Za-z_]\w*=\S*\s+)*`
+const FLAGS = String.raw`(?:\s+-{1,2}[\w-]+(?:=\S*)?)*?`
+
+/** An interpreter handed code on its command line: `bun -e '…'`, `python3 -c '…'`. */
+const JS_INLINE = new RegExp(
+  `${SEGMENT}(?:bun|node|deno|tsx)(?:\\s+run)?${FLAGS}\\s+(?:-e|--eval|-p|--print)\\s*$`,
+  "u",
+)
+const PY_INLINE = new RegExp(`${SEGMENT}python[\\d.]*${FLAGS}\\s+-c\\s*$`, "u")
+/** The command a heredoc feeds: the segment the opener sits in. */
+const JS_INTERPRETER = new RegExp(`${SEGMENT}(?:bun|node|deno|tsx)\\b[^;&|(\\n]*$`, "u")
+
+type ShellFrameKind = "single" | "ansi" | "double" | "substitution"
+
+interface ShellFrame {
+  readonly kind: ShellFrameKind
+  /** The code in front of the opening quote: an inline script's command. */
+  readonly before: string
+  parens: number
+  text: string
+}
+
+/** A quoted span that closed, with the code in front of it: an inline script's argument. */
+interface QuotedSpan {
+  readonly before: string
+  readonly text: string
+}
+
+interface HeredocBody {
+  readonly heredoc: number
+  /** A quoted or escaped delimiter: the body does not expand. */
+  readonly literal: boolean
+  /** The code in front of the opener: which interpreter reads the body. */
+  readonly command: string
+}
+
+interface ShellLine {
+  /** Code: single-quoted text and comments removed, double-quoted text kept (it expands). */
+  readonly code: string
+  readonly raw: string
+  readonly spans: readonly QuotedSpan[]
+  readonly body?: HeredocBody
+}
+
+/** Remove balanced `((…))` spans, `$((…))` included: `1<<SHIFT` is a shift, not a heredoc. */
+const stripArithmetic = (code: string): string => {
+  let out = ""
+  let index = 0
+  while (index < code.length) {
+    if (!code.startsWith("((", index)) {
+      out += code[index]
+      index += 1
+      continue
+    }
+    let depth = 0
+    let end = index
+    for (; end < code.length; end += 1) {
+      depth += code[end] === "(" ? 1 : code[end] === ")" ? -1 : 0
+      if (depth === 0) break
+    }
+    index = end + 1
+  }
+  return out
+}
+
+const HEREDOC =
+  /(?<!<)<<(?!<)-?\s*(?:(['"])([A-Za-z_][A-Za-z0-9_]*)\1|\\([A-Za-z_][A-Za-z0-9_]*)|([A-Za-z_][A-Za-z0-9_]*))/gu
+
+interface PendingHeredoc {
+  readonly delimiter: string
+  readonly literal: boolean
+  readonly command: string
+}
+
+/** Every heredoc a finished line opens, in order: bodies follow one after another. */
+const heredocsOpenedBy = (bare: string): readonly PendingHeredoc[] => {
+  const code = stripArithmetic(bare)
+  return [...code.matchAll(HEREDOC)].map((match) => ({
+    delimiter: match[2] ?? match[3] ?? match[4] ?? "",
+    literal: match[2] !== undefined || match[3] !== undefined,
+    command: code.slice(0, match.index),
+  }))
+}
+
+/**
+ * The masking of one line of shell CODE, with quote state carried in `stack`
+ * from the line before.
+ *
+ * Escapes are honoured outside quotes (`don\'t`) and inside `$'…'` (`it\'s`), and
+ * a `$(…)` inside double quotes is its own context (`"$(echo "don't")"`). `bare`
+ * is `code` without double-quoted text, which is where an opener is looked for:
+ * `echo "use <<EOF"` opens nothing.
+ */
+class ShellLineMasker {
+  code = ""
+  bare = ""
+  /** Code emitted while the innermost context is a `$(…)` inside double quotes. */
+  substitutionBare = ""
+  spans: QuotedSpan[] = []
+
+  constructor(private readonly stack: ShellFrame[]) {}
+
+  mask(raw: string): void {
+    for (let index = 0; index < raw.length; index = this.step(raw, index) + 1) {
+      if (index < 0) return
+    }
+  }
+
+  /** Consumes `raw[index]`; returns the last index consumed, or -2 at a comment. */
+  private step(raw: string, index: number): number {
+    const frame = this.stack.at(-1)
+    if (frame?.kind === "single" || frame?.kind === "ansi") return this.inSingle(frame, raw, index)
+    if (frame?.kind === "double") return this.inDouble(frame, raw, index)
+    return this.inCode(frame, raw, index)
+  }
+
+  private emit(piece: string): void {
+    this.code += piece
+    if (this.stack.at(-1)?.kind === "substitution") this.substitutionBare += piece
+    else if (!this.stack.some((frame) => frame.kind === "double")) this.bare += piece
+  }
+
+  /** Where an opener in the CURRENT context is looked for. */
+  contextBare(): string {
+    return this.stack.at(-1)?.kind === "substitution" ? this.substitutionBare : this.bare
+  }
+
+  /**
+   * A quoted span closes: recorded at ANY depth (`"$(bun -e '…')"` was lost at
+   * depth 2), and a closed single-quoted span leaves `''` in the code, so the next
+   * argument of `node -e '…' 'x'` is not read as the script.
+   */
+  private close(frame: ShellFrame): void {
+    this.stack.pop()
+    this.spans.push({ before: frame.before, text: frame.text })
+    if (frame.kind !== "double") this.emit("''")
+  }
+
+  private inSingle(frame: ShellFrame, raw: string, index: number): number {
+    const character = raw[index] ?? ""
+    if (frame.kind === "ansi" && character === "\\") {
+      frame.text += raw.slice(index, index + 2)
+      return index + 1
+    }
+    if (character === "'") this.close(frame)
+    else frame.text += character
+    return index
+  }
+
+  private inDouble(frame: ShellFrame, raw: string, index: number): number {
+    const character = raw[index] ?? ""
+    const piece = character === "\\" || (character === "$" && raw[index + 1] === "(")
+    const taken = piece ? raw.slice(index, index + 2) : character
+    this.emit(taken)
+    if (character === '"') {
+      this.close(frame)
+      return index
+    }
+    frame.text += taken
+    if (taken === "$(")
+      this.stack.push({ kind: "substitution", before: this.code, parens: 1, text: "" })
+    return index + taken.length - 1
+  }
+
+  /** Top level, or a `$(…)` inside double quotes. */
+  private inCode(frame: ShellFrame | undefined, raw: string, index: number): number {
+    const character = raw[index] ?? ""
+    if (character === "\\") {
+      this.emit(raw.slice(index, index + 2))
+      return index + 1
+    }
+    if (frame !== undefined && this.closesSubstitution(frame, character)) return index
+    if (character === "'" || character === '"') return this.openQuote(raw, index)
+    if (character === "#" && (index === 0 || /[\s;]/u.test(raw[index - 1] ?? ""))) return -2
+    this.emit(character)
+    return index
+  }
+
+  private closesSubstitution(frame: ShellFrame, character: string): boolean {
+    if (character === "(") frame.parens += 1
+    if (character !== ")") return false
+    frame.parens -= 1
+    if (frame.parens > 0) return false
+    this.stack.pop()
+    this.emit(character)
+    return true
+  }
+
+  private openQuote(raw: string, index: number): number {
+    const character = raw[index] ?? ""
+    // A quoted heredoc DELIMITER is kept: masked away, `<<'PY'` read as a bare
+    // `<<` and the embedded interpreter's reads were never looked at.
+    // `(?<!<)`: `grep x <<< '$X'` is a here-string, whose quote is not a delimiter.
+    const end = raw.indexOf(character, index + 1)
+    if (/(?<!<)<<-?\s*$/u.test(this.contextBare()) && end !== -1) {
+      this.emit(raw.slice(index, end + 1))
+      return end
+    }
+    const kind: ShellFrameKind =
+      character === '"' ? "double" : this.code.endsWith("$") ? "ansi" : "single"
+    // The command in FRONT of the quote, taken before the quote is emitted: taken
+    // after, a double-quoted `python3 -c "…"` could never match its interpreter.
+    const before = this.code
+    if (kind === "double") this.emit(character)
+    this.stack.push({ kind, before, parens: 0, text: "" })
+    return index
+  }
+}
+
+/**
+ * Shell, one entry per line, in ONE pass that knows heredocs.
+ *
+ * Quote state carries across lines, and a heredoc BODY never touches it. The
+ * masking ran over the whole text first and found heredocs afterwards, so an
+ * apostrophe in a body (`Don't`) opened a single quote that swallowed every real
+ * read after the heredoc. `<<<` is a here-string, not an opener.
+ */
+const shellLines = (text: string): readonly ShellLine[] => {
+  const out: ShellLine[] = []
+  const stack: ShellFrame[] = []
+  const pending: PendingHeredoc[] = []
+  let heredocs = 0
+  for (const raw of text.split("\n")) {
+    const current = pending[0]
+    if (current !== undefined) {
+      const ends = raw.trim() === current.delimiter
+      out.push(ends ? { code: "", raw, spans: [] } : bodyLine(raw, current, heredocs))
+      if (ends) {
+        pending.shift()
+        heredocs += 1
+      }
+      continue
+    }
+    out.push(maskLine(raw, stack, pending))
+  }
+  return out
+}
+
+const bodyLine = (raw: string, heredoc: PendingHeredoc, index: number): ShellLine => ({
+  code: "",
+  raw,
+  spans: [],
+  body: { heredoc: index, literal: heredoc.literal, command: heredoc.command },
+})
+
+/** One line of code, masked with the carried `stack`; queues the heredocs it opens. */
+const maskLine = (raw: string, stack: ShellFrame[], pending: PendingHeredoc[]): ShellLine => {
+  // A span still open from an earlier line keeps its line break: joined without
+  // one, a `// comment` line swallowed the `bun -e '…'` code after it.
+  for (const frame of stack) if (frame.kind !== "substitution") frame.text += "\n"
+  const masker = new ShellLineMasker(stack)
+  masker.mask(raw)
+  // An opener counts where its context ends the line: at top level, or inside a
+  // `"$(…)"` that runs on (`x="$(cat <<'EOF'`, whose body used to be masked).
+  if (stack.length === 0) pending.push(...heredocsOpenedBy(masker.bare))
+  else if (stack.at(-1)?.kind === "substitution") {
+    pending.push(...heredocsOpenedBy(masker.substitutionBare))
+  }
+  return { code: masker.code, raw, spans: masker.spans }
+}
+
+/** The reads in a quoted argument handed to an interpreter (`bun -e '…'`). */
+const spanReads = (span: QuotedSpan, names: ReadonlySet<string>): readonly string[] => {
+  if (JS_INLINE.test(span.before)) return scriptReads(span.text, names)
+  return PY_INLINE.test(span.before) ? pythonReads(span.text, names) : []
 }
 
 /** `$NAME`, `${NAME}`, `${NAME:-x}`, `${#NAME}` outside comments, single quotes and quoted heredocs. */
@@ -416,53 +879,65 @@ export const shellReads = (text: string, names: ReadonlySet<string>): ReadonlySe
       if (name !== undefined && names.has(name)) found.add(name)
     }
   }
-  const lines = text.split("\n")
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index] ?? ""
-    scan(shellCode(line))
-    const heredoc = /<<-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/.exec(line)
-    if (heredoc === null) continue
-    const literal = heredoc[1] !== ""
-    const body: string[] = []
-    for (
-      index += 1;
-      index < lines.length && (lines[index] ?? "").trim() !== heredoc[2];
-      index += 1
-    ) {
-      if (literal) body.push(lines[index] ?? "")
-      else scan(lines[index] ?? "")
+  const embedded = new Map<number, { readonly command: string; readonly lines: string[] }>()
+  for (const line of shellLines(text)) {
+    if (line.body?.literal === true) {
+      const body = embedded.get(line.body.heredoc) ?? { command: line.body.command, lines: [] }
+      body.lines.push(line.raw)
+      embedded.set(line.body.heredoc, body)
+      continue
     }
-    // A quoted-delimiter heredoc is usually an embedded interpreter: only a read call counts.
-    const embedded = body.join("\n")
-    for (const { value, offset } of pythonStrings(embedded)) {
-      if (
-        names.has(value) &&
-        RAW_READ_CONTEXT.test(embedded.slice(Math.max(0, offset - 32), offset))
-      ) {
-        found.add(value)
-      }
-    }
+    scan(line.body === undefined ? line.code : line.raw)
+    for (const name of line.spans.flatMap((span) => spanReads(span, names))) found.add(name)
+  }
+  // A quoted-delimiter heredoc is usually an embedded interpreter: only a read counts.
+  for (const { command, lines } of embedded.values()) {
+    const body = lines.join("\n")
+    const reads = JS_INTERPRETER.test(command) ? scriptReads(body, names) : pythonReads(body, names)
+    for (const name of reads) found.add(name)
   }
   return found
+}
+
+/** `uses: actions/github-script` runs its `with.script` as JavaScript. */
+const githubScriptReads = (step: YAMLMap, names: ReadonlySet<string>): readonly string[] => {
+  const uses = step.get("uses")
+  const inputs = step.get("with")
+  if (typeof uses !== "string" || !uses.startsWith("actions/github-script") || !isMap(inputs)) {
+    return []
+  }
+  const script = inputs.get("script")
+  return typeof script === "string" ? scriptReads(script, names) : []
+}
+
+/** A YAML node's children, each with the key it sits under (a pair's key names its value). */
+const yamlChildren = (node: unknown): readonly (readonly [unknown, string | undefined])[] => {
+  if (isMap(node) || isSeq(node)) return node.items.map((item) => [item, undefined] as const)
+  if (!isPair(node)) return []
+  return [[node.value, isScalar(node.key) ? String(node.key.value) : undefined]]
 }
 
 /** Workflow YAML, parsed: `env:` KEYS are writes; expressions and `run:` bodies read. */
 export const workflowReads = (text: string, names: ReadonlySet<string>): ReadonlySet<string> => {
   const found = new Set<string>()
-  const expressions = (value: string): void => {
+  const references = (value: string): void => {
     for (const match of value.matchAll(/\b(?:vars|env|secrets)\.([A-Za-z_][A-Za-z0-9_]*)/g)) {
       const name = match[1]
       if (name !== undefined && names.has(name)) found.add(name)
     }
   }
+  // Only EXPRESSIONS read: `${{ … }}` spans, and an `if:` value, which is an
+  // expression without the braces. Matching the raw scalar backed a step NAME
+  // ("previously gated by env.X"), a `run:` comment and an echoed string.
+  const scalar = (value: string, key: string | undefined): void => {
+    if (key === "if") references(value)
+    else for (const span of value.matchAll(/\$\{\{([\s\S]*?)\}\}/g)) references(span[1] ?? "")
+    if (key === "run") for (const name of shellReads(value, names)) found.add(name)
+  }
   const walk = (node: unknown, key: string | undefined): void => {
-    if (isMap(node)) for (const pair of node.items) walk(pair, undefined)
-    else if (isSeq(node)) for (const item of node.items) walk(item, undefined)
-    else if (isPair(node)) walk(node.value, isScalar(node.key) ? String(node.key.value) : undefined)
-    else if (isScalar(node) && typeof node.value === "string") {
-      expressions(node.value)
-      if (key === "run") for (const name of shellReads(node.value, names)) found.add(name)
-    }
+    if (isMap(node)) for (const name of githubScriptReads(node, names)) found.add(name)
+    if (isScalar(node) && typeof node.value === "string") scalar(node.value, key)
+    for (const [child, childKey] of yamlChildren(node)) walk(child, childKey)
   }
   walk(parseDocument(text).contents, undefined)
   return found
@@ -486,17 +961,37 @@ const tokenEvidence = (
     if (!names.has(value)) continue
     const before = text.slice(Math.max(0, offset - 32), offset)
     if (RAW_WRITE_CONTEXT.test(before)) continue
+    if (lang === "py" && isPythonWrite(text, offset, value)) continue
     if (test && !RAW_READ_CONTEXT.test(before)) continue
     sink(value, "quoted", rel)
   }
 }
 
+/**
+ * Inside `expect(…)` a test ASSERTS on a variable — `expect(process.env.RETIRED)
+ * .toBeUndefined()` asserts a name is dead, and `expect(childEnv.X).toBe("1")`
+ * asserts a write. Both backed the name they were checking.
+ */
+const insideExpect = (node: ts.Node): boolean => {
+  for (let at = node.parent; at !== undefined; at = at.parent) {
+    if (
+      ts.isCallExpression(at) &&
+      ts.isIdentifier(at.expression) &&
+      at.expression.text === "expect"
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
 const parsedEvidence = (rel: string, text: string, lang: Lang, sink: Sink): void => {
-  const literals = !isTestFile(rel)
+  const test = isTestFile(rel)
+  const literals = !test
   const source = ts.createSourceFile(rel, text, ts.ScriptTarget.ESNext, true, scriptKindOf(lang))
   const visit = (node: ts.Node): void => {
     const hit = classifyNode(node, literals)
-    if (hit !== undefined) {
+    if (hit !== undefined && !(test && insideExpect(node))) {
       const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1
       sink(hit.name, hit.kind, `${rel}:${line}`)
     }
@@ -550,7 +1045,16 @@ const walkEvidence = (
   for (const rel of files) {
     let text: string | undefined
     const read = (): string => {
-      text ??= readFileSync(join(repoRoot, rel), "utf8")
+      if (text === undefined) {
+        try {
+          text = readFileSync(join(repoRoot, rel), "utf8")
+        } catch (error) {
+          // Tracked and gone: a concurrent session's unstaged deletion. It reads
+          // nothing, and crashing the whole scan over it reported nothing either.
+          if ((error as { code?: string }).code !== "ENOENT") throw error
+          text = ""
+        }
+      }
       return text
     }
     const lang = languageOf(rel, () => read().slice(0, 200))
@@ -616,9 +1120,88 @@ export const envKnobNames = (knobs: readonly CatalogKnob[] | undefined): readonl
     return knob.where === "env" || RESERVED_ENV.test(knob.name) ? [knob.name] : []
   })
 
+/** `wiring.activation` conditions of `kind: env`, whose `key` IS the variable. */
+export const activationEnvNames = (
+  activation: readonly { readonly kind: string; readonly key?: string | undefined }[] | undefined,
+): readonly string[] =>
+  (activation ?? []).flatMap((condition) =>
+    condition.kind === "env" && condition.key !== undefined && ENV_SHAPED.test(condition.key)
+      ? [condition.key]
+      : [],
+  )
+
 /** A ledger row's `gate_owner` names, which nothing checked were read either. */
 export const gateOwnerEnvNames = (gateOwner: readonly string[]): readonly string[] =>
   gateOwner.filter((name) => ENV_SHAPED.test(name))
+
+/** The four env-naming fields of the catalog, each on its own. */
+export interface CatalogEnvFields {
+  readonly configRefs: readonly string[]
+  readonly knobs: readonly string[]
+  readonly gateOwner: readonly string[]
+  readonly activation: readonly string[]
+}
+
+export interface CatalogFeatureSource {
+  readonly path: string
+  readonly feature: {
+    readonly config_refs?: { readonly env?: readonly string[] | undefined } | undefined
+    readonly knobs?: readonly CatalogKnob[] | undefined
+    readonly wiring?:
+      | {
+          readonly activation?:
+            | readonly { readonly kind: string; readonly key?: string | undefined }[]
+            | undefined
+        }
+      | undefined
+  }
+}
+
+export interface LedgerGateSource {
+  readonly feature_id: string
+  readonly gate_owner: readonly string[]
+}
+
+/**
+ * The records the ratchet checks: every feature's four fields, and every ledger
+ * row's `gate_owner`.
+ *
+ * Composed HERE, not in the test. It lived in the test's `beforeAll`, where
+ * dropping a field was an edit to the test, and dropping `activation` was green:
+ * its one real key is also a knob. `catalog-config-refs.test.ts` drives this with
+ * a record per field that only that field names.
+ */
+export const catalogEnvSources = (
+  features: readonly CatalogFeatureSource[],
+  ledger: readonly LedgerGateSource[],
+  relativePath: (path: string) => string,
+): { readonly records: readonly CatalogEnvSource[]; readonly fields: CatalogEnvFields } => {
+  const perFeature = features.map(({ path, feature }) => ({
+    path: relativePath(path),
+    configRefs: feature.config_refs?.env ?? [],
+    knobs: envKnobNames(feature.knobs),
+    activation: activationEnvNames(feature.wiring?.activation),
+  }))
+  const perRow = ledger.map((row) => ({
+    path: `tools/feature-catalog/default-off-ledger.yaml#${row.feature_id}.gate_owner`,
+    env: gateOwnerEnvNames(row.gate_owner),
+  }))
+  return {
+    records: [
+      ...perFeature.map((one) => ({
+        path: one.path,
+        env: [...one.configRefs, ...one.knobs, ...one.activation],
+      })),
+      ...perRow,
+    ],
+    fields: {
+      configRefs: perFeature.flatMap((one) => one.configRefs),
+      knobs: perFeature.flatMap((one) => one.knobs),
+      gateOwner: perRow.flatMap((row) => row.env),
+      activation: perFeature.flatMap((one) => one.activation),
+    },
+  }
+}
 
 /** Every env name any record declares, mapped to the records that declare it. */
 export const declaredEnvNames = (records: readonly CatalogEnvSource[]): DeclaredEnvNames => {

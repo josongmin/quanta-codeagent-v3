@@ -45,8 +45,9 @@
 
 ## 진행 (2026-09-12)
 
-- 작업 중(별도 lane). `tools/dev/capability-probe-producer.ts`, `capability-receipt.ts`,
+- (2026-09-12 당시 기록) 작업 중(별도 lane). `tools/dev/capability-probe-producer.ts`, `capability-receipt.ts`,
   `capability-receipt-consumer.ts`, `module-load-effect-guard.ts` 등이 트리에 있으나 미커밋.
-- 통합 요구사항: TVH-03의 `tools/dev/test-capability-manifest.ts`와 `quanta.capability-result.v1`이
+  → 2026-09-14 기준 **전부 커밋·배선됨**(runner와 `with-capability-receipt.ts`가 in-process로 receipt 생산).
+- 통합 요구사항: TVH-03의 `tools/dev/test-capability-manifest.ts`와 `quanta.capability-result.v2`가
   이미 착륙했으므로 **세 번째 스키마를 만들지 말 것**.
 - 현재 `lint:debt` RED에 이 lane 파일 다수 포함(lsp-pyright/lsp-typescript의 noUnusedVariables 등).

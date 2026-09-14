@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { relative, resolve } from "node:path"
+import ts from "typescript"
 import { loadTestResourceCertifications } from "../../../tools/dev/test-resource-certification"
 import {
   CLASS_RESOURCE_CLAIMS,
@@ -481,11 +482,28 @@ describe("chunk claim overlap", () => {
     expect(runner).toMatch(
       /runResourceAwareSchedule<[\s\S]*?resourceClass: cached\.chunk\.resourceClass/,
     )
-    const imported = runner.slice(0, runner.indexOf("\n\n"))
-    // ANTI-VACUITY: a blank line moved into the import block would shrink this
-    // slice to nothing, and "nothing" contains no forbidden symbol either.
+    // The import DECLARATIONS, read from the parse. This was a slice up to the
+    // first blank line, and a blank line that landed inside the import block
+    // (baca6158c) cut it short of the import it asserts on: red since 09-10 for
+    // a runner that had not changed what it imports.
+    const tree = ts.createSourceFile("run-test-shards.ts", runner, ts.ScriptTarget.Latest, false)
+    const imported = tree.statements
+      .filter(ts.isImportDeclaration)
+      .map((declaration) => declaration.getText(tree))
+      .join("\n")
+    // ANTI-VACUITY: an extraction that found no imports contains no forbidden
+    // symbol either.
     expect(imported).toContain("runResourceAwareSchedule")
     expect(imported).toContain("resourceClassesOverlap")
     expect(imported).not.toContain("chunkClaimsOverlap")
+    // ...nor through a namespace or any other name: `claims.chunkClaimsOverlap(…)`
+    // passed the import check (measured). No identifier in the runner may name it.
+    const named: string[] = []
+    const visit = (node: ts.Node): void => {
+      if (ts.isIdentifier(node) && node.text === "chunkClaimsOverlap") named.push(node.text)
+      node.forEachChild(visit)
+    }
+    visit(tree)
+    expect(named).toEqual([])
   })
 })

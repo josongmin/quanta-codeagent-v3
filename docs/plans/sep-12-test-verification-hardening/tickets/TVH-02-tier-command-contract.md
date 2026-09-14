@@ -54,6 +54,42 @@
 
   (selected / floor). `--discover-only`도 이제 같은 floor를 적용하고, 캠페인은 lease·
   capability probe 전에 선택한다.
+- 2차 적대 감사 대응(2026-09-14, v3): 위 문단의 "측정값을 낮추면 partition identity가
+  깨진다"는 `core`·`integration`에만 참이었다. `unit.*.selected = 1`에 floor를 재도출하면
+  로드됐고, `universeSelected`와 `integration`을 같이 낮춰도 로드됐다. 그리고 floor slack
+  때문에 `tools/`·`tests/meta`·`tests/adversarial`·`tests/measurement` 전부와 `src/` 42개가
+  사라져도 16조합이 green이었다. 또 `selected === discovered`일 때만 corpus loss로 봐서
+  prepush/pr/full의 실제 파일 삭제가 "SELECTION shrink … lower the floor"로 보고됐다. 조치:
+  - discovery 완전성을 **threshold 0**으로 먼저 검사한다: git index가 추적하는 suite root 아래
+    `*.test.ts`는 전부 discovered여야 하고, 모든 root가 최소 1개를 내야 한다(`discoveryCompletenessProblems`).
+  - 레코드 v3가 suite별 measured `discovered`를 가진다. floor 미달은 측정 대비 corpus가 줄었으면
+    corpus loss, 아니면 exclusion 증가(narrowed)로 판정하고, 조치 문구는 "floor를 낮춰라"가 아니라
+    `--measure` 재측정이다.
+  - 레코드는 `bun run tools/dev/test-tier-population.ts --measure`가 커밋 트리·그 커밋의 override
+    파일로 재계산해 쓰고, arm이 `measuredAt` 재계산과 **완전 일치**를 요구한다. 손으로 일관되게
+    낮춘 **측정값**은 로더는 통과하지만 이 arm이 거부한다. 단 `tiers.*.minFiles`(universe floor)는
+    재계산이 그대로 싣고 가는 유일한 고른 값이라 이 arm으로는 막히지 않는다 — 리뷰되는 숫자의
+    가시적 편집이다(3차 감사 R3B-3).
+  - 3차 감사 대응: CI의 depth-1 checkout에서는 `measuredAt`이 없어 재계산 arm이 throw했다 →
+    tier 선택 테스트를 돌리는 job 3개(`full-shard`·`full-suite`·nightly)에 `fetch-depth: 0`,
+    workflow arm이 이를 강제. shallow·nested 디렉터리는 이름 붙은 거부, 과거 override 행은 그
+    커밋 시각 기준 만료 판정, `measuredAt`은 HEAD의 조상이어야 함, 미스테이징 삭제는 완전성
+    손실이 아님, 원인 판정은 순증감이 아니라 counterfactual.
+  - 캠페인의 git snapshot을 선택 **전에** 찍는다(후에 찍으면 선택 중 착륙한 커밋이 양쪽 snapshot에
+    다 들어가 비교를 통과했다).
+
+  v3 측정(`34b1d74fc`; discovered full 3995 · core 3601 · unit 3275 · integration 394):
+
+  | suite | prepush | pr | full | nightly |
+  |---|---|---|---|---|
+  | full (universe) | 3971 / 3900 | 3971 / 3900 | 3981 / 3900 | 3995 / 3900 |
+  | core | 3581 / 3517 | 3581 / 3517 | 3591 / 3518 | 3601 / 3516 |
+  | unit | 3256 / 3198 | 3256 / 3198 | 3266 / 3200 | 3275 / 3198 |
+  | integration | 390 / 384 | 390 / 384 | 390 / 383 | 394 / 385 |
+
+  남은 한계: universe floor 3900 자체는 고른 값이다(c7e91b306 당시 3925). 파생 floor의 slack은
+  corpus가 자랄수록 커지므로, 재측정 없이 오래 두면 floor가 느슨해진다. 완전성 검사가 slack에
+  의존하지 않는 이유다.
 
 ## 목표 계약
 

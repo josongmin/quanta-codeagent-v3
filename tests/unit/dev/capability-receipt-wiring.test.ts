@@ -16,11 +16,11 @@
  *    3 of the 13 used to call `requireCapability` too (the `tests/contract/`
  *      three); the requirement now lives in `capability()` and they do not
  *
- * The numbers above were 15 and 33, and both were wrong. The bare grep counts
- * two files that are not consumers — one mentions `canExecute` in a COMMENT and
- * never imports the module, the other is the test OF the mechanism, whose own
- * assertions and docstring supplied fourteen of the matches. Recompute by
- * intersecting the two facts that make a consumer, not by matching a word:
+ * The numbers above were 15 and 33, and both were wrong. A bare grep for
+ * `canExecute` over-counts, and by more as tests OF the mechanism accumulate: at
+ * a128bc99d it matched 18 files outside `_helpers/`, five of them not consumers
+ * (comments, fixtures, and the mechanism's own arms). Recompute by intersecting
+ * the two facts that make a consumer, not by matching a word:
  *
  *   comm -12 \
  *     <(grep -rln canExecute tests --include='*.ts' | grep -v _helpers/ | sort) \
@@ -474,8 +474,16 @@ describe("a required capability cannot be skipped past", () => {
     // two assertions below catches that in one of those two environments.
     const dir = mkdtempSync(join(tmpdir(), "cap-env-"))
     try {
-      const receiptEnv = await produce(join(dir, "receipt.json"), [])
-      expect(capability("git", receiptEnv).verdict).toBe("executed")
+      const minted = await produce(join(dir, "receipt.json"), [])
+      // Passed as a literal of the two variables the consumer reads. The callsite
+      // scan treats any env it cannot prove inert — like `minted` itself — as the
+      // campaign's receipt, and asks that of a call inside a test. Its taint is by
+      // NAME: this was `produced`, which another test here binds from process.env.
+      const givenEnv = {
+        [CAPABILITY_RECEIPT_PATH_ENV]: minted[CAPABILITY_RECEIPT_PATH_ENV],
+        [CAPABILITY_RECEIPT_BINDING_ENV]: minted[CAPABILITY_RECEIPT_BINDING_ENV],
+      }
+      expect(capability("git", givenEnv).verdict).toBe("executed")
       expect(capability("git", NO_RECEIPT).verdict).toBe("blocked-missing")
     } finally {
       rmSync(dir, { recursive: true, force: true })
@@ -691,8 +699,9 @@ describe("a campaign receipt carries chrome", () => {
     })
 
     // A chrome bring-up that never finishes. It used to run AFTER the deadline
-    // had been spent, with its own 45s budget on top.
-    const startedAt = Date.now()
+    // had been spent, with its own 45s budget on top. The contract, not a wall
+    // bound: a probe that never answers can only come back through the
+    // producer's total deadline, and the detail says that is what decided it.
     const hung = await produceCapabilityReceipt({
       tier: "pr",
       binding,
@@ -701,8 +710,10 @@ describe("a campaign receipt carries chrome", () => {
       chrome: { profileRoot: "/unused", probe: () => new Promise<CapabilityFinding>(() => {}) },
       totalDeadlineMs: 300,
     })
-    expect(Date.now() - startedAt).toBeLessThan(5_000)
     expect(hung.capabilities[CHROME_CAPABILITY_ID]?.status).toBe("probe-timeout")
+    expect(hung.capabilities[CHROME_CAPABILITY_ID]?.detail).toBe(
+      "the producer's total deadline (300ms) fired before chrome answered",
+    )
     expect(hung.capabilities["fixture-good"]?.status).toBe("available")
 
     // A chrome probe that THROWS. Outside the per-probe catch it took the whole

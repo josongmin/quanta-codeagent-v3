@@ -68,11 +68,19 @@ describe("ADR-0311 — normalizeGhEvent", () => {
     expect(ev.repo).toEqual({ owner: "octo", name: "demo" })
     expect(ev.prNumber).toBe(7)
     expect(ev.body).toBe("@quanta review please")
+    // No `comment.user` in this payload, so nothing says the sender WROTE the
+    // comment: the coarse boolean is kept, the scope-bearing association is not.
     expect(ev.sender).toEqual({
       login: "alice",
       type: "User",
       isCollaborator: true,
     })
+    const authored = normalizeGhEvent({
+      raw: { ...samplePayload, comment: { ...samplePayload.comment, user: { login: "alice" } } },
+      kind: "issue_comment",
+    })
+    // ...and when it does, the association is kept verbatim for the trust scope.
+    expect(authored?.sender.association).toBe("COLLABORATOR")
   })
 
   test("deliveryId override is honored", () => {

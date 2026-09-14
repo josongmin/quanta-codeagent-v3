@@ -1,0 +1,818 @@
+{
+ "cluster": "E — context occupancy shown to the user is wrong (BUG-2). Round-2 objective verification of R1 Option C against the R2 attacks, plus the final revised design and test plan. No repo files were written. Probes: E-r2a/a1..a6 were re-run and all reproduced. New probes E-r2o/o1 (today's within-prompt anchor after an @file), o2 (revised projection formula checked against the real loop), o3 (digest cost with images).",
+ "attackVerdicts": [
+  {
+   "attack": "DB1: the cross-prompt anchor includes per-round injected messages that never enter wm, so R1 overcounts after an @file prompt",
+   "verdict": "CONFIRMED",
+   "evidence": "Re-ran a1. R1 anchored total 109,390 vs actual prompt-2 round-1 send 59,390 (+50,000); wm_contains_big=false. prompt.ts:766-770 builds injectedMessages as a copy of baseMessages plus hook/context-change/mention, and :796-815 pushes the trailing reminder, none of it into wm. Worse than claimed, TODAY's within-prompt anchor already does this. o1 (real runAgent: @big then a tool round) gives a round-2 trigger of 84,424 against 34,423 sent (+50,001). latestUserTextFromWm (context-assembler.ts:171-183) returns undefined once the latest non-synthetic user message is a tool_result, so the mention vanishes in round 2 while the D5 baseline still contains it."
+  },
+  {
+   "attack": "DB2: the trigger runs before assembly, so it cannot equal the round's request",
+   "verdict": "CONFIRMED",
+   "evidence": "a1 event order is [preflight#1, send#1, preflight#2, send#2]. maybeCompact is called at context-assembler.ts:514, mentions resolve at :555, emitPromptAssembled at :598, visibleSpecs at stream-consume.ts:499, and the request tap at :535. R1's no-anchor undercount on prompt 1 is 50,086."
+  },
+  {
+   "attack": "DB3: removing the >=estimate gate fails open, because adapters coerce a missing prompt count to 0",
+   "verdict": "CONFIRMED",
+   "evidence": "Re-ran a2. The real AnthropicAdapter (127.0.0.1 SSE) and parseResponsesEvents both emit {inputTokens:0}. Today's TokenBaselineBox gives accepted:false (trigger 100000); R1's anchor would be 0. Sources: adapters/shared.ts:126-129 (`inputTokens ?? 0`), openai-responses-wire.ts:913 (`input_tokens ?? 0`), anthropic.ts:268-284 (message_delta folds output_tokens only). Which real vendors send this shape: UNVERIFIED."
+  },
+  {
+   "attack": "DB4: after a /model switch to a 1M candidate port, the window/threshold still resolve from the boot port",
+   "verdict": "CONFIRMED",
+   "evidence": "Re-ran a6: thresholdUsed 123000 and windowUsed 200000, versus 923000 and 1000000 for the served port's key. emit-helpers.ts:346-352 reads only config.llm.contextWindowKey. skill-gate.ts:161-165 resolveActiveModelId holds snapshot.port but returns only `.model`, dropping the port's contextWindowKey. The end-to-end CLI switch was not run."
+  },
+  {
+   "attack": "DB5: the web StatusBar has its own warning with different logic and a false 'will compact' claim",
+   "verdict": "CONFIRMED",
+   "evidence": "Re-ran a3. At total 112k and 150k the CLI warns 91%/122% while the web returns null; at 160k the web says 'context 80% full — the runtime will compact soon'. Sources: apps/web-frontend/src/lib/context-warning.ts:15-24 (ratio 0.8, Math.floor, no threshold), StatusBar.tsx:3,48. grep 'compaction' in src/apps/web-daemon finds only the index.ts:443 comment (static)."
+  },
+  {
+   "attack": "DB6: per-app ledger roots miss the other session hosts",
+   "verdict": "CONFIRMED",
+   "evidence": "Static reading. Every surface creates sessions through createRuntimeSessionHost (context-binding.ts:549-560): CLI session-loop/bootstrap.ts:275, headless/session-bridge.ts:123, terminal/brain-mode.ts:839, web-daemon/server.ts:553. That host already owns per-session state (emittedArtifactIds, context-binding.ts:395-401), so it is the one correct owner. Hosts were not probed at runtime."
+  },
+  {
+   "attack": "DB7: a required surfaceId on the usage StreamEvent breaks the public SDK",
+   "verdict": "CONFIRMED",
+   "evidence": "sdk/types.ts:11 re-exports LLMPort; sdk/testing.ts:16 exposes FakeCompletion {events: StreamEvent[]}; package.json exports './sdk'. Revised: an optional, adapter-computed `promptTokens`, which is additive."
+  },
+  {
+   "attack": "DB8: the SWE-bench/loop-d4-d5 receipt cannot see the cross-prompt anchor or the injected channel",
+   "verdict": "CONFIRMED",
+   "evidence": "runner/batch/eval/driver/config-build.ts:623 sets `compaction: {}`. grep for mentionInjector in src/runner and src/apps/bench finds nothing. Repair rounds are separate seeded runs (context-types.ts:104-116). loop-d4-d5 is a single runAgent."
+  },
+  {
+   "attack": "DB9: FallbackLLM and cross-vendor switches apply one tokenizer's anchor to another model",
+   "verdict": "CONFIRMED",
+   "evidence": "Static. fallback.ts:196-205 mirrors providers[0] model/contextWindowKey/surfaceId. R1's ProviderAnchor has no model identity. LOW. Revised: anchoring requires record.servedModelId === the window's modelId (identity equality)."
+  },
+  {
+   "attack": "DB10: branch_search candidates spread the parent config and inherit session slots",
+   "verdict": "CONFIRMED",
+   "evidence": "Mechanism confirmed statically. branch-search-runner.ts:64 strips only branchSearch, and :92-100 spreads the rest, so onPromptAssembled is already inherited today. Candidates get depth=childDepthOf(config), so isRootAgent (spawn-depth.ts:66) is false and a root-only guard is structural. Whether this is reachable from CLI or web: PLAUSIBLE-UNMEASURED."
+  },
+  {
+   "attack": "WC1: R1 says the gate only proxied cache arithmetic",
+   "verdict": "CONFIRMED",
+   "evidence": "a2: the gate also rejects coerced zeros (see DB3)."
+  },
+  {
+   "attack": "WC2: R1 says 'display ≡ warning ≡ trigger by construction; the fixed prefix is always counted'",
+   "verdict": "CONFIRMED",
+   "evidence": "a1 and o2: the injected channel is neither fixed nor wm, and the preflight fires before send. R1's 'fixed prefix' was staticSystemFor(config) (compaction-wire.ts:780-787: baseMessages [], cwd/planMode/system only), which omits project_md, session_ctx and user_append and counts all registry specs rather than the visible ones."
+  },
+  {
+   "attack": "WC3: R1 found no SDK re-export",
+   "verdict": "CONFIRMED",
+   "evidence": "Same as DB7: that grep searched compaction symbols only."
+  },
+  {
+   "attack": "WC4: H1's expected 150k/200k, 25%, 123k and 122% under QUANTA_LLM_REPLAY",
+   "verdict": "CONFIRMED",
+   "evidence": "Re-ran a4: {portModel:null, portSurfaceId:null, windowModel:'unknown', window:null, threshold:120000}. factory.ts:473-497 returns the bare replay port with no identity."
+  },
+  {
+   "attack": "WC5: H4's surface-id drift guard is a tautology",
+   "verdict": "CONFIRMED",
+   "evidence": "llm-route-types.ts:5 LlmSurfaceId is a type-only union. The only runtime literal is openai.ts:350 (anthropic.ts:106 and openai-responses.ts:66 are class fields). No runtime list exists."
+  },
+  {
+   "attack": "WC6: H7 asserts web compactThresholdTokens 123000",
+   "verdict": "CONFIRMED",
+   "evidence": "Contradicts R1's own decision 6(b) (not-configured on web) and the a4 replay identity."
+  },
+  {
+   "attack": "WC7: H5(e) asserts sum(categories)===total together with a clamped residual",
+   "verdict": "CONFIRMED",
+   "evidence": "Logically impossible when clamped. Consumers assume the sum: status-line.ts:156 (share = tokens/total), slash-context-gauge.ts:50-56 (share of spent)."
+  },
+  {
+   "attack": "WC8: R1's consumer inventory is incomplete",
+   "verdict": "CONFIRMED",
+   "evidence": "Missing lib/context-warning.ts + StatusBar.tsx:48, and category-hues.ts:26-34, a Record<string,PaletteColor> keyed 'Conversation'/'MCP' that renames would silently break."
+  },
+  {
+   "attack": "MH1: injected messages are invisible to every occupancy computation",
+   "verdict": "CONFIRMED",
+   "evidence": "a1, o1, o2 (E_last = 50,053 tokens in the @file round, 53 in the next). CC avoids this because attachments are transcript entries its estimator counts (claude-code-cli chunk-3j0en1hg.js:106077-106083 Rzo handles type 'attachment'; Wm/ALn :106359-106399 anchor on assistant usage)."
+  },
+  {
+   "attack": "MH2: adapters hide 'prompt count not reported' as 0",
+   "verdict": "CONFIRMED",
+   "evidence": "a2; shared.ts:126-129; openai-responses-wire.ts:909-915."
+  },
+  {
+   "attack": "MH3: a switched candidate port's contextWindowKey is ignored",
+   "verdict": "CONFIRMED",
+   "evidence": "a6; emit-helpers.ts:346-352; skill-gate.ts:164."
+  },
+  {
+   "attack": "MH4: a second web warning implementation exists",
+   "verdict": "CONFIRMED",
+   "evidence": "a3; lib/context-warning.ts:15-24."
+  },
+  {
+   "attack": "MH5: no drift contract binds the canvas ContextUsageMessage mirror",
+   "verdict": "CONFIRMED",
+   "evidence": "It has already drifted. apps/web-frontend/src/types/protocol.ts:395-407 has segments[].chars?, which src/protocol/canvas/messages.ts:111-118 lacks. The drift hellgate's canonical set is the four session files (web-frontend-protocol-drift-contract-hellgate.test.ts:541-546) and it skips out-of-session interfaces (:528-534)."
+  },
+  {
+   "attack": "MH6: plan mode or skill scope changes visible tools between prompts, so the fixed-prefix delta goes stale",
+   "verdict": "PLAUSIBLE-UNMEASURED",
+   "evidence": "stream-consume.ts:372-379,499 recompute visible specs per request. The magnitude was not measured. LOW."
+  },
+  {
+   "attack": "MH7: exceeds_200k_tokens is also never filled; R1 cited :183",
+   "verdict": "CONFIRMED",
+   "evidence": "status-command-runner.ts:96-97,126,193-194; grep finds no producer of exceeds200kTokens."
+  },
+  {
+   "attack": "MH8: migration cost is undercounted",
+   "verdict": "CONFIRMED",
+   "evidence": "grep: 21 test files reference the baseline internals and 13 the snapshot usage path. Also 2 reference resolveWindowModel (context-1m-window-bump-hellgate, albb-07-ptl-salvage-activemodel), plus apps/web-frontend lib/context-warning.test.ts and StatusBar.test.tsx, and src/apps/cli/__tests__/context-warning-model-aware.hellgate.test.ts."
+  },
+  {
+   "attack": "JT-H1: the PTY e2e numbers are unreachable, the suffix is invisible, and the control state is impossible",
+   "verdict": "CONFIRMED",
+   "evidence": "a4 (replay has no model). status-line.ts:23-28 formatTokens rounds values of 100k and up to whole k. a5: the default system plus tools estimate is 9,461 tokens, so an inputTokens 2,000 control cannot occur."
+  },
+  {
+   "attack": "JT-H2: the spy runs before inputs[1] exists; round 1 is tautological; mutation 3 is a no-op; the control margin is 89%",
+   "verdict": "CONFIRMED",
+   "evidence": "a1 order. filterSpecsByScope returns the same array without an armed gate (skill-gate.ts:51-57). a5: 109,461 = 89% of 123k. Additionally, the preflight needs findBoundary>0 (compaction.ts:679-686); o1 got no preflight on a 3-message round 1."
+  },
+  {
+   "attack": "JT-H3: no injected-message case",
+   "verdict": "CONFIRMED",
+   "evidence": "o2 scenario A: R1 anchor 109,390 vs actual 59,390."
+  },
+  {
+   "attack": "JT-H4: tautological drift guard and no absent-count case",
+   "verdict": "CONFIRMED",
+   "evidence": "llm-route-types.ts:5; a2."
+  },
+  {
+   "attack": "JT-H5: (c) locks in fail-open; (e) is contradictory",
+   "verdict": "CONFIRMED",
+   "evidence": "a2; WC7."
+  },
+  {
+   "attack": "JT-H7: asserts a threshold on a not-configured surface and relies on replay identity",
+   "verdict": "CONFIRMED",
+   "evidence": "WC6; a4."
+  },
+  {
+   "attack": "JT-H8: hand-built frames with no binding to the daemon",
+   "verdict": "CONFIRMED",
+   "evidence": "MH5: the mirror is already drifted (chars?) with all tests green."
+  },
+  {
+   "attack": "JT-H9: a name-matching census is brittle and blind to arithmetic re-derivation",
+   "verdict": "CONFIRMED",
+   "evidence": "grep counts: 90 estimateTokens references in 22 production files, and 156 .inputTokens/.cacheReadTokens reads outside src/llm and usage-accounting. The attacker's 87/21/96 differ, but the conclusion holds. lib/context-warning.ts re-derives the verdict with no tracked symbol."
+  },
+  {
+   "attack": "OE1: replace the side ledger with a usage anchor carried on the assistant message (CC-style)",
+   "verdict": "REFUTED",
+   "evidence": "Refuted as the smaller design; the ownership concern is accepted via DB6. Assistant messages enter wm at 9 recovery-executor append sites, some transformed (recovery-executor.ts:83,90,104,334-350), so every branch would have to carry the field. saved-session-schema.ts:106-115 parses messages as {role,content,id} and strips unknown keys, so it would not survive resume. A content digest is still required for rewind and microcompact. Revised: one per-session carry minted in createRuntimeSessionHost, plus a content digest, with no per-message field."
+  },
+  {
+   "attack": "OE2: USAGE_CONVENTION_BY_SURFACE is ceremony without a runtime SSOT",
+   "verdict": "CONFIRMED",
+   "evidence": "llm-route-types.ts:5. Revised: an LLM_SURFACE_IDS const tuple with the type derived from it. Adapters compute an optional promptTokens through one @/shared convention function, so an absent count is representable."
+  },
+  {
+   "attack": "OE3: 'Compaction buffer'/'Free space' as segments break the sum-to-total math",
+   "verdict": "CONFIRMED",
+   "evidence": "status-line.ts:153-157; slash-context-gauge.ts:50-56; category-hues.ts:26-34. Revised: head annotations, not segments."
+  },
+  {
+   "attack": "OE4: the residual 'Messages' row hides estimator error",
+   "verdict": "CONFIRMED",
+   "evidence": "R1's H5 did not require shipping the fixed-prefix estimate alongside the provider count. Revised: the reading carries providerPromptTokens, the fixed and injected char estimates, and a closed union for 'estimate exceeds measured'."
+  },
+  {
+   "attack": "OE5: a WeakMap chain-value memo could validate a stale anchor",
+   "verdict": "PLAUSIBLE-UNMEASURED",
+   "evidence": "Not implemented, so not measurable. Revised design uses no memo: a full sha256 per trigger. o3 (n=20, one machine): 0.95 ms for 811,890 bytes of text; 10.31 ms for 13.8 MB including 10 base64 images."
+  },
+  {
+   "attack": "OE6: a ceremonial receipt",
+   "verdict": "CONFIRMED",
+   "evidence": "Same as DB8. The revised receipt adds scripted multi-prompt @file scenarios (T3/T4) whose first-fire round and compaction count are recorded."
+  }
+ ],
+ "r1ClaimCorrections": [
+  {
+   "claim": "L7: the >=estimate gate only proxied cache arithmetic and can be removed once the convention is structural",
+   "correction": "The gate also blocks coerced zeros. The provider count must become optional at the adapter boundary (absent means no anchor) before the gate goes.",
+   "evidence": "a2: both adapters emit inputTokens:0; shared.ts:126-129; openai-responses-wire.ts:913"
+  },
+  {
+   "claim": "Option C is 'display ≡ warning ≡ trigger by construction' and 'the fixed prefix is always counted'",
+   "correction": "The request has three parts: fixed (system + visible tools), transcript (wm), and per-round injected (mentions, hook/context-change messages, trailing reminder). The injected part is not in wm and is built after the trigger. Identity can only hold if displays render the trigger's own reading object.",
+   "evidence": "a1 order; prompt.ts:766-815; o2: E is 50,053 tokens in the @file round and 53 in the next"
+  },
+  {
+   "claim": "The baseline problem is only 'lost across user prompts' (L5)",
+   "correction": "Today's within-prompt anchor is already wrong after an ephemeral injection. An @file plus a tool call overcounts round 2 by about 50k and forces premature compaction on a default-ON path.",
+   "evidence": "o1: trigger 84,424 vs sent 34,423; context-assembler.ts:171-183 (no mention re-injection after a tool_result); agent-config-assembler.ts:714-715 (@file default-ON)"
+  },
+  {
+   "claim": "The fixed prefix before the first send = staticSystemFor(config) + registry specs, labeled static",
+   "correction": "This is a lower-bound static estimate, not the fixed prefix. It omits project_md/session_ctx/user_append and uses all specs, not the visible ones. It must be labeled static-base and replaced by the last request's measured partition as soon as one exists.",
+   "evidence": "compaction-wire.ts:780-787"
+  },
+  {
+   "claim": "resolveOccupancyWindow should copy 'the exact precedence compactIfNeeded uses today' (resolveWindowModel(config.llm, activeModel))",
+   "correction": "That copies a bug. The window key must come from the served port that the routing authority resolves.",
+   "evidence": "a6: 123000/200000 vs 923000/1000000; emit-helpers.ts:346-352; skill-gate.ts:161-165 discards snapshot.port.contextWindowKey"
+  },
+  {
+   "claim": "compatibilityAndMigration: 'No SDK re-export'; a required surfaceId on StreamEvent",
+   "correction": "The public SDK types expose StreamEvent. Use an optional adapter-computed `promptTokens`, which is additive.",
+   "evidence": "sdk/types.ts:11; sdk/testing.ts:16; package.json ./sdk"
+  },
+  {
+   "claim": "H4 drift guard: Object.keys(USAGE_CONVENTION_BY_SURFACE) vs 'the runtime LLM surface id list'",
+   "correction": "No runtime list exists. First introduce an LLM_SURFACE_IDS const tuple and derive LlmSurfaceId from it.",
+   "evidence": "src/shared/llm-route-types.ts:5"
+  },
+  {
+   "claim": "H1 expects 150k/200k, 25% left, compaction at 123k, 122% under replay",
+   "correction": "The replay port has no model, so the window is unknown and the threshold is 120000 (or an env pin). formatTokens hides small suffixes above 100k.",
+   "evidence": "a4; factory.ts:473-497; status-line.ts:23-28"
+  },
+  {
+   "claim": "H2: QUANTA_COMPACT_TOKENS=1 makes the preflight fire every round",
+   "correction": "The preflight also requires findBoundary>0. The scripted history must have a summarizable prefix at every round.",
+   "evidence": "compaction.ts:679-686; o1: round 1 with 3 messages fired no preflight"
+  },
+  {
+   "claim": "H5(e): sum(categories)===total together with residualClamped",
+   "correction": "Contradictory. Model it as a closed union: messages {kind:'residual'} (rows sum to total) | {kind:'estimate-exceeds-measured', overBy} (rows sum to total + overBy).",
+   "evidence": "status-line.ts:156; slash-context-gauge.ts:50-56"
+  },
+  {
+   "claim": "H7: web frame compactThresholdTokens === 123000",
+   "correction": "The web base composes no compaction (static), so the reading must carry compaction.kind 'not-configured' and no threshold.",
+   "evidence": "grep 'compaction' in src/apps/web-daemon: index.ts:443 comment only; base.ts:255-290 builds compaction for the CLI base"
+  },
+  {
+   "claim": "Consumer list (L3) and about 21 test files to migrate",
+   "correction": "Add apps/web-frontend lib/context-warning.ts, StatusBar.tsx and category-hues.ts. Tests: 21 baseline + 13 snapshot-path + 2 resolveWindowModel + 2 web warning + context-warning-model-aware.",
+   "evidence": "grep lists in this round; lib/context-warning.ts:15-24; category-hues.ts:26-34"
+  },
+  {
+   "claim": "statusLine sibling: context_window at :183",
+   "correction": "The fields are at :96-97 and :193-194, and there is a second unfilled field, exceeds_200k_tokens.",
+   "evidence": "src/apps/cli/status-command-runner.ts:96-97,126,193-194"
+  },
+  {
+   "claim": "Digest memo 'per message object' is correctness-neutral",
+   "correction": "Only if it memoizes per-message content hashes, not chain values. The revised design uses no memo; the measured cost is acceptable.",
+   "evidence": "o3: 0.95 ms (811,890 bytes of text), 10.31 ms (13.8 MB with 10 base64 images), n=20"
+  },
+  {
+   "claim": "The rollout receipt (6-pick smoke + loop-d4-d5) validates the trigger change",
+   "correction": "Those single-run lanes without a mention wire cannot exercise the cross-prompt or injected-channel changes. The receipt must include scripted multi-prompt @file scenarios.",
+   "evidence": "config-build.ts:623; context-types.ts:104-116; no mentionInjector in src/runner"
+  }
+ ],
+ "confirmedHoles": [
+  {
+   "id": "E-H1",
+   "what": "CLI /context, the pre-compaction warning, the web canvas, the web /context readout and the slash gauge show a system-prompt-only total that ignores the transcript, tools and provider usage",
+   "evidence": "usage-breakdown.ts:281-290; context-usage-snapshot.ts:78-90; canvas-usage-source.ts:53-58; readout-sources.ts:111; R1 p1 (12,500 regardless of transcript), p2/p3 ('12.5k/200k · Context 94% left' while the trigger was at 125,005 > 123,000)",
+   "severity": "HIGH",
+   "defaultConfigExposure": "Default-on: CLI /context and the warning (TTY), web /context readout always; canvas frames with QUANTA_WEB_CANVAS=1"
+  },
+  {
+   "id": "E-H2",
+   "what": "After a round that carried an ephemeral injection (@file mention, hook or context-change message), today's in-run token baseline keeps that injection in the anchor, so the next round's trigger overcounts and compaction fires prematurely",
+   "evidence": "o1: round-2 trigger 84,424 vs 34,423 sent (+50,001); context-assembler.ts:147-157,171-183; prompt.ts:766-770; token-baseline.ts:87-102",
+   "severity": "HIGH",
+   "defaultConfigExposure": "Default-ON @file mention (agent-config-assembler.ts:714-715) on any @file prompt that makes a tool call, with compaction configured (CLI)"
+  },
+  {
+   "id": "E-H3",
+   "what": "The un-anchored trigger counts messages only (no system prompt, tool schemas or injected context)",
+   "evidence": "token-baseline.ts:98; R1 p2 (100,005 counted vs 116,817 sent); a1 (50,039 vs 109,351)",
+   "severity": "HIGH",
+   "defaultConfigExposure": "Default: round 1 of every user prompt (see E-H4)"
+  },
+  {
+   "id": "E-H4",
+   "what": "The provider anchor is per-runAgent and the host runs one runAgent per prompt, so it is lost at every prompt",
+   "evidence": "session-bootstrap.ts:380; turn-runner.ts:283 (runAgent per host turn); R1 p4 (100,072 vs 116,848)",
+   "severity": "HIGH",
+   "defaultConfigExposure": "Default on CLI (compaction configured)"
+  },
+  {
+   "id": "E-H5",
+   "what": "Cache-token convention is inferred from the model name, in two copies that disagree on an empty model. OpenAI-compatible non-gpt ids double-count cached tokens",
+   "evidence": "token-baseline.ts:177-180; normalize.ts:23-27,61; emit-helpers.ts:295-303 (no provider passed); R1 p5 (deepseek-chat 190,000)",
+   "severity": "HIGH",
+   "defaultConfigExposure": "Any OPENAI_BASE_URL endpoint with a non-gpt/o1/o3 model id that reports cached_tokens"
+  },
+  {
+   "id": "E-H6",
+   "what": "Adapters coerce a missing prompt-side count to inputTokens:0, so 'not reported' is unrepresentable",
+   "evidence": "a2; shared.ts:126-129; openai-responses-wire.ts:913; anthropic.ts:284",
+   "severity": "MED",
+   "defaultConfigExposure": "Masked today by the >=estimate gate; vendors that send this shape UNVERIFIED"
+  },
+  {
+   "id": "E-H7",
+   "what": "The >=chars/4 gate discards authoritative provider counts that fall below the estimate",
+   "evidence": "token-baseline.ts:181; R1 p7 (30,000/99,999 rejected against a 100,000 estimate)",
+   "severity": "MED",
+   "defaultConfigExposure": "Default whenever real tokenization beats chars/4 (repetitive text); real-tokenizer magnitude UNVERIFIED"
+  },
+  {
+   "id": "E-H8",
+   "what": "Window and threshold resolve from the boot port; a switched 1M candidate compacts at 123k on a 1M window",
+   "evidence": "a6; emit-helpers.ts:346-352; skill-gate.ts:161-165",
+   "severity": "MED",
+   "defaultConfigExposure": "QUANTA_CONTEXT_1M or a [1m] candidate plus a session model switch"
+  },
+  {
+   "id": "E-H9",
+   "what": "The CLI warning is silent for models missing from the window table (max=0), although the loop compacts at 120k",
+   "evidence": "context-warning.ts:80; R1 p8 (deepseek-chat, 119,000 used, warning '')",
+   "severity": "MED",
+   "defaultConfigExposure": "Default for any model without a window-table entry"
+  },
+  {
+   "id": "E-H10",
+   "what": "The web StatusBar decides its warning itself (0.8 of window, Math.floor, no threshold) and claims 'runtime will compact soon' on a base with no compaction",
+   "evidence": "a3; lib/context-warning.ts:15-24; StatusBar.tsx:48",
+   "severity": "MED",
+   "defaultConfigExposure": "Web UI whenever context.usage frames arrive (QUANTA_WEB_CANVAS=1)"
+  },
+  {
+   "id": "E-H11",
+   "what": "The headroom advisory and background-compaction controller use the messages-only `before` count, while the trigger uses the anchored count",
+   "evidence": "compaction-wire.ts:701,713,717; maybeStart :800-806",
+   "severity": "MED",
+   "defaultConfigExposure": "Default-OFF (contextHeadroomAdvisory, QUANTA_BG_COMPACTION)"
+  },
+  {
+   "id": "E-H12",
+   "what": "The canvas ContextUsageMessage frontend mirror has no field-level drift contract and has already drifted",
+   "evidence": "apps/web-frontend/src/types/protocol.ts:395-407 (chars?) vs src/protocol/canvas/messages.ts:111-118; drift hellgate :528-546 skips canvas",
+   "severity": "LOW",
+   "defaultConfigExposure": "Build/test time"
+  },
+  {
+   "id": "E-H13",
+   "what": "The warning re-resolves the threshold and ignores config.compaction.thresholdTokens",
+   "evidence": "notify-and-warning.ts:89-92; compaction-wire.ts:501-503",
+   "severity": "LOW",
+   "defaultConfigExposure": "Latent: the CLI compaction config never sets it (base.ts:255-290)"
+  },
+  {
+   "id": "E-H14",
+   "what": "The get_context_usage control request always rejects because its port has no usage dependency",
+   "evidence": "session-collaborators.ts (no usage dep); R1-verified web-control-request-port.ts:133-140",
+   "severity": "LOW",
+   "defaultConfigExposure": "QUANTA_CONTROL_REQUEST"
+  },
+  {
+   "id": "E-H15",
+   "what": "statusLine payload fields context_window (typed as a number) and exceeds_200k_tokens have no producer",
+   "evidence": "status-command-runner.ts:96-97,126,193-194",
+   "severity": "LOW",
+   "defaultConfigExposure": "User-configured statusLine command"
+  },
+  {
+   "id": "E-H16",
+   "what": "Web slash gauge detects reasoning with /reason/i over closed category ids, so the line can never render; categories are mislabeled ('Conversation' = session_ctx/user_append system sections) and hues are keyed by string",
+   "evidence": "slash-context-gauge.ts:22-25,60-66; prompt-sections.ts:185-193 (R1); category-hues.ts:26-34",
+   "severity": "LOW",
+   "defaultConfigExposure": "Web UI"
+  },
+  {
+   "id": "E-H17",
+   "what": "branch_search candidates inherit parent observer slots through a config spread (onPromptAssembled today)",
+   "evidence": "branch-search-runner.ts:64,92-100",
+   "severity": "LOW",
+   "defaultConfigExposure": "Only where branchSearch is set (daemon/IDE presets per attacker; CLI/web reachability UNVERIFIED)"
+  }
+ ],
+ "revisedDesign": {
+  "summary": "Keep R1's idea of one measurement SSOT, but rebuild it around the three-part shape of quanta's request, and let only the loop produce readings. (1) At the exact send seam the loop records a SentRequestRecord. Its partition has three parts: fixed chars (system blocks plus JSON of the visible specs); transcript length and a content digest of wm; and injected chars (request messages minus transcript, covering mentions, hook and context-change messages, and the trailing reminder). (2) Adapters report an optional promptTokens computed with the adapter's own cache convention, absent when the prompt-side count was not reported. (3) At one line in maybeCompact, after the microcompact pre-pass (also on the not-configured and breaker paths), and again at run end, the loop computes one branded ContextOccupancy. The formula subtracts the last request's injected estimate and excludes the next round's injected context by definition (D2), which is what removes both the +50k overcount and the system/tools undercount. (4) compactIfNeeded, the headroom advisory, the bg controller, the preflight query, the CLI holder and warning, the web canvas/readout/get_context_usage and the web StatusBar all consume that reading object and never compute. The warning verdict is one pure function whose result rides on the frame. (5) Window and threshold are resolved once per reading from the served port identity. (6) The last record lives in a per-session carry minted in createRuntimeSessionHost, which every surface goes through, and is written only by the root config. (7) TokenBaselineBox, triggerTokenCount, resolveWindowModel, snapshotToBreakdownInput, buildUsageBreakdownDefault and the web lib/context-warning.ts are deleted, not kept alongside.",
+  "structuralMechanism": "SSOT: `measureContextOccupancy(input)` in NEW src/agent/compaction/occupancy.ts is the only producer. Its brand constructor is module-private; the `ContextOccupancy` type is exported type-only from NEW src/shared/context-occupancy.ts so fenced renderers (CLI context-warning, which has no @/agent import) can type against it. A small AST census (T10, labeled static) forbids brand casts elsewhere. INVALID STATES ARE UNREPRESENTABLE: (a) `ProviderPromptTokens` brand is constructible only from an adapter usage event's optional `promptTokens` when it is a positive safe integer; absent means no anchor. (b) The anchor verdict is a closed union {kind:'anchored'} | {kind:'rejected', reason: 'no-record'|'provider-count-absent'|'served-model-changed'|'transcript-prefix-changed'|'partition-estimate-exceeds-provider-count'|'request-not-superset-of-transcript'}. Anchored iff the record exists, P is present, servedModelId === window.modelId, transcriptLength <= wm.length, sha256(role+content of wm[0..n)) === record.transcriptDigest, and P − ceil((fixedChars+injectedChars)/4) >= 0. Then total = P − ceil((fixedChars+injectedChars)/4) + ceil((fixedChars + charsOf(wm[n..]))/4); otherwise total = ceil((fixedChars + charsOf(wm))/4), with fixedChars taken from the latest record or labeled 'static-base'. No >=estimate gate and no model-name inference. (c) Categories: `messages: {kind:'residual', tokens} | {kind:'estimate-exceeds-measured', overBy}`. (d) Compaction: `{kind:'configured', thresholdTokens, source:'config'|'env'|'model-window'|'legacy-default'} | {kind:'not-configured'}`. (e) Warning verdict: `{level:'none'} | {level:'window', pct} | {level:'compaction', pct}` from `occupancyWarningOf(reading)`. CONVENTION SSOT: `LLM_SURFACE_IDS` const tuple in llm-route-types.ts (type derived) and `USAGE_CONVENTION_BY_SURFACE: Record<LlmSurfaceId,'cache-additive'|'cache-inclusive'>` in NEW src/shared/usage-prompt-tokens.ts, with a runtime drift guard; both @/llm (closed-port, @/shared only) and later @/observability can use it. WINDOW SSOT: `resolveOccupancyWindow({modelId, windowKey}, config.compaction)` reuses resolveThreshold and resolveModelWindow. The served identity comes from the routing authority's snapshot.port (resolveActiveModelId becomes resolveServedModel returning the port's contextWindowKey), and resolveWindowModel is deleted. PORTS: `contextOccupancyCarry` is minted per SessionHost in createRuntimeSessionHost and threaded per turn; session-bootstrap uses it only when isRootAgent(cfg), else a run-scoped carry. `onContextOccupancy` is one observer slot published only for the root config. WIRE PROOF: PreCompactRequestQuery gains `occupancy`, and T3 asserts q.occupancy === the published reading (identity), q.currentTokens === reading.totalTokens, and that the CLI holder and warning closure render that same reading. T4 proves the cross-prompt carry through the real session host. T8 makes canvas mirror drift fail CI.",
+  "changes": [
+   {
+    "path": "src/shared/llm-route-types.ts",
+    "change": "Add `export const LLM_SURFACE_IDS = ['anthropic-messages','openai-chat-completions','openai-responses'] as const` and derive `LlmSurfaceId` from it. The type is unchanged."
+   },
+   {
+    "path": "src/shared/usage-prompt-tokens.ts (NEW)",
+    "change": "`USAGE_CONVENTION_BY_SURFACE: Record<LlmSurfaceId, UsageConvention>` plus `promptTokensFromReportedCounts(convention, {inputTokens?, cacheReadTokens?, cacheCreationTokens?}) → number | undefined` (undefined when inputTokens was not reported; additive = input+cacheRead+cacheCreation, inclusive = input)."
+   },
+   {
+    "path": "src/llm/types.ts",
+    "change": "Usage StreamEvent gains an optional `promptTokens?: number` with doc: set only by the adapter that parsed the wire, absent when not reported. inputTokens is unchanged, so /cost stays byte-identical."
+   },
+   {
+    "path": "src/llm/adapters/shared.ts, src/llm/adapters/anthropic.ts, src/llm/adapters/openai.ts, src/llm/openai-responses-wire.ts",
+    "change": "buildUsageEvent takes the emitting surface id and spreads promptTokens only when promptTokensFromReportedCounts returns a number. The Anthropic mapper passes 'anthropic-messages' (shared by bedrock/vertex), openai.ts 'openai-chat-completions', and the responses wire keeps `input` undefined-aware for promptTokens while still emitting inputTokens:0 for accounting compatibility."
+   },
+   {
+    "path": "src/agent/compaction/occupancy.ts (NEW)",
+    "change": "Pure module: SentRequestRecord + recordSentRequest(streamInput, transcript, servedModelId), withProviderCount(record, usageEvent), contentDigest (node:crypto sha256 over role + JSON(content), no memo), measureContextOccupancy({phase:'turn-start'|'after-compaction'|'run-end', transcript, carry, staticFixedChars, window}), resolveOccupancyWindow, category rows (reusing SECTION_CONTEXT_CATEGORY and ToolRegistry.originOf for Tools/MCP), and the brand. Kept out of compaction.ts, which is at 983/1000 lines."
+   },
+   {
+    "path": "src/shared/context-occupancy.ts (NEW)",
+    "change": "Type-only ContextOccupancy brand and wire/view types, OCCUPANCY_CATEGORY_IDS const tuple with Record labels and a drift guard, and the pure `occupancyWarningOf(reading)` verdict using the existing 0.8 window / 0.9 compaction ratios (window level only when the window is known; compaction level only when configured)."
+   },
+   {
+    "path": "src/agent/loop/stream-consume.ts",
+    "change": "At the request seam (:535, the same object as llm.stream :429) call recordSentRequest with state.wm.snapshot() and turnLlm.llm.model. In teeUsage (root config only) call withProviderCount(ev). Delete captureTokenBaseline and the sentEstimate parameter (:48-60, :142-157, :451-452)."
+   },
+   {
+    "path": "src/agent/loop/compaction-wire.ts",
+    "change": "maybeCompact computes `const occupancy = measureContextOccupancy(...)` exactly once after runMicrocompactPrepass (:701), and also before the `!compaction` return (:693) and on the breaker-abort path. It publishes via config.onContextOccupancy when root, passes the same object to compactIfNeeded, emitContextHeadroomAdvisory and bgController (replacing `before`/bgLimitTokens at :704-718), and publishes 'after-compaction' after applyProactiveResult. compactNowOnDemand (:251-320) does the same. Delete the TokenBaselineBox calls (:319-320, :683-684, :486-500)."
+   },
+   {
+    "path": "src/agent/compaction.ts",
+    "change": "CompactInput replaces tokenBaseline/model/thresholdTokens with a required `occupancy: ContextOccupancy`. currentTokens = occupancy.totalTokens and threshold = occupancy.window.compaction.thresholdTokens (a not-configured reading never reaches here). The preflight query forwards `occupancy`."
+   },
+   {
+    "path": "src/agent/compaction/token-baseline.ts",
+    "change": "Delete TokenBaseline, TokenBaselineBox(State), triggerTokenCount and markBaselineStaleIfShrunk. Keep charsOf, estimateTokens, resolveThreshold and resolveCompactionLimitTokens, whose callers become resolveOccupancyWindow only (census)."
+   },
+   {
+    "path": "src/agent/loop/context-assembler.ts",
+    "change": "Delete the invalidate/recordSendCount block (:526-535). emitPromptAssembled drops max/windowModel (:625-630). The snapshot stays for prompt-policy observability."
+   },
+   {
+    "path": "src/agent/loop/skill-gate.ts, src/agent/loop/emit-helpers.ts, src/agent/loop/recovery-executor.ts",
+    "change": "resolveActiveModelId becomes resolveServedModel → {modelId, windowKey: snapshot.port.contextWindowKey ?? modelId} (skill-gate.ts:153-166). Delete resolveWindowModel (emit-helpers.ts:346-352) and migrate recovery-executor.ts:181."
+   },
+   {
+    "path": "src/agent/loop/session-bootstrap.ts, turn-iteration.ts, turn-loop.ts, same-turn-engine.ts, src/agent/turn-context.ts, src/agent/index.ts",
+    "change": "Replace tokenBaseline with `occupancyCarry`: `isRootAgent(cfg) && cfg.contextOccupancyCarry !== undefined ? cfg.contextOccupancyCarry : createRunScopedCarry()`, always allocated. Publish a 'run-end' reading over the final messages in teardown. Update exports."
+   },
+   {
+    "path": "src/agent/types/wire-slots-runtime.ts, src/agent/types/compaction-config.ts",
+    "change": "Slots `onContextOccupancy?: (r: ContextOccupancy) => void` and `contextOccupancyCarry?: ContextOccupancyCarry`. PreCompactRequestQuery gains `occupancy`, and the currentTokens doc is corrected (no longer chars/4 only)."
+   },
+   {
+    "path": "src/host/runtime/internal/context-binding.ts, context-binding/turn-runner.ts, context-binding/types.ts, context-binding/base.ts, src/sdk/runtime/context.ts",
+    "change": "Mint one carry per SessionHost next to emittedArtifactIds (context-binding.ts:395-401) and thread it through runSessionHostTurn → runRuntimeTurn into the per-turn base (turn-runner.ts:268-285). Add onContextOccupancy next to onPromptAssembled in PASS_THROUGH_COMPOSE_KEYS (context.ts:258-275) and whenDefined in base.ts. Extend side-conversation isolation to exclude both slots."
+   },
+   {
+    "path": "src/apps/cli/repl/context-usage-snapshot.ts, session-setup.ts, surface-compose/runtime-compose.ts, surface-compose/dispatch.ts",
+    "change": "The holder retains the latest ContextOccupancy (sink typed to the reading); view() is a projection of it plus reasoningTokens. Wire `onContextOccupancy: holder.sink` instead of the snapshot sink."
+   },
+   {
+    "path": "src/apps/cli/status-line.ts, src/apps/cli/context-warning.ts, src/apps/cli/repl/factories/notify-and-warning.ts",
+    "change": "Render: the projected total with a label (provider-anchored or estimated), 'compaction at T (N%)' or 'auto-compaction not configured', window % (or 'window unknown'), a detail line with the exact providerPromptTokens and the last request's injected estimate, and categories per the messages union. The warning renders occupancyWarningOf(reading). Delete the resolveCompactionLimitTokens import and the second resolution (:21, :89-92) and fix the stale headers (context-warning.ts:6-12, usage-breakdown.ts:19-25)."
+   },
+   {
+    "path": "src/agent/prompt-sections.ts, src/agent/context/usage-breakdown.ts",
+    "change": "session_ctx/user_append map to 'Session context'. Replace buildUsageBreakdown's total/max output with category rows only (so it cannot masquerade as occupancy), and delete snapshotToBreakdownInput and buildUsageBreakdownDefault once CLI and web are migrated."
+   },
+   {
+    "path": "src/apps/web-daemon/canvas-usage-source.ts, canvas-emitter.ts, readout.ts, runtime-factory/readout-sources.ts, runtime-factory/agent-config-base.ts, runtime-factory/session-collaborators.ts, runtime-factory/observable-facade.ts, server/sinks.ts, src/protocol/canvas/messages.ts",
+    "change": "The source subscribes to onContextOccupancy and serializes the reading verbatim: totalTokens, source, anchor verdict, providerPromptTokens?, lastRequestInjectedTokensEstimate, window {tokens|unknown}, compaction union, warning verdict, categories with the messages union, reasoningTokens?. The readout renders the same numbers. The control-request port gets `usage: () => source.latest()`."
+   },
+   {
+    "path": "apps/web-frontend/src/types/protocol.ts, adapters/usage-adapter.ts, components/slash-context-gauge.ts, components/canvas/UsageBreakdownPanel.tsx, components/canvas/category-hues.ts, components/StatusBar.tsx, lib/context-warning.ts (DELETE) + lib/context-warning.test.ts (DELETE)",
+    "change": "Mirror the frame. StatusBar renders frame.warning (web copy never says 'will compact' unless compaction.kind==='configured'). Hues become Record<OccupancyCategoryWire, PaletteColor>. The reasoning line reads frame.reasoningTokens and the /reason/i regex is removed."
+   },
+   {
+    "path": "tests/unit/web-frontend-protocol-drift-contract-hellgate.test.ts",
+    "change": "Add src/protocol/canvas/messages.ts to the canonical set compared field-by-field against the barrel's canvas mirrors (this is RED today on segments[].chars?)."
+   },
+   {
+    "path": "src/apps/cli/status-command-runner.ts, src/apps/cli/status-line-driver.ts (optional, D8)",
+    "change": "context_window becomes an object {total_input_tokens, context_window_size, used_percentage, remaining_percentage} from the reading, and exceeds_200k_tokens is filled from it."
+   }
+  ],
+  "compatibilityAndMigration": "Additive at the SDK boundary: the optional usage.promptTokens leaves LLMPort/FakeCompletion consumers compiling, and events without it take the labeled estimate path (reason 'provider-count-absent'). LlmSurfaceId's type is unchanged. Internal removals from @/agent: TokenBaselineBox(State), triggerTokenCount, markBaselineStaleIfShrunk, resolveWindowModel, snapshotToBreakdownInput, buildUsageBreakdownDefault, and the PromptAssembledSnapshot max/windowModel fields. The public src/sdk/index.ts re-exports none of them (grep), and RuntimeFacadeComposeOptions.onPromptAssembled stays. compactIfNeeded's input changes. Tests to migrate: 21 baseline-internal files, 13 snapshot-path files, 2 resolveWindowModel files, src/apps/cli/__tests__/context-warning-model-aware.hellgate.test.ts, tests/integration/loop-d4-d5-baseline-e2e.test.ts (behavioral), and 2 web frontend warning tests (deleted with the module); tests asserting index-based invalidation are rewritten against digest semantics, not deleted. Canvas frames change shape, with the frontend mirror updated in the same commit and pinned by the drift contract. Replay cassettes without promptTokens keep working (estimate). The carry is not persisted: the session schema strips unknown message keys (saved-session-schema.ts:106-115), so a resumed session starts at estimate until its first response (D6). Land in file-disjoint commits and re-check HEAD before each; wire-slots-runtime.ts, sdk/runtime/context.ts and context-binding base.ts are shared hot files with the concurrent campaign. No overlap with docs/plans/sep-12-truth-guard-hardening (grep for occupancy/token-baseline/usage-breakdown: none).",
+  "userVisibleBehavior": "/context shows one projected occupancy, e.g. 'Context 148.7k · compaction at 123k (121%) · window 200k (74%) · provider-anchored', with a detail line 'last request: 150000 prompt tokens (provider-reported) · injected context ≈1.3k (estimated, not counted toward compaction)'. Rows: System, Rules, Session context, Tools, MCP tools, Messages. Categories are marked estimated, and an explicit note appears when estimates exceed the measured total. The warning is decided from the same reading, including for models missing from the window table (against the 120k legacy threshold). The web canvas bar, web /context, get_context_usage and StatusBar show identical numbers, and on web they say 'auto-compaction not configured' instead of 'will compact soon'. Compaction behavior: it fires earlier on round 1 of every prompt, since the fixed prefix is now counted (~9.5k tokens for default tools + system per a5). It keeps the provider anchor across prompts. It no longer fires about 50k early after an @file + tool round (o1). It fires later for OpenAI-compatible non-gpt ids with cached tokens (no double count), and later than today's anchored rounds by the size of the next round's injected context (D2; real-CLI reminder size UNVERIFIED).",
+  "rollout": "Display, warning and web consumers (C6/C7): default-on, since today's numbers are wrong and this is observability only. Trigger semantics (C4/C5): default-on with no knob, because a knob would re-create two trigger measurements. Landing is blocked on D1/D2 and on a receipt that can actually see the change: (1) T3/T4 scripted multi-prompt scenarios (@file + tool round, cross-prompt), recording first-fire round and compaction count before and after as committed numbers; (2) tests/integration/loop-d4-d5-baseline-e2e.test.ts; (3) the SWE-bench 6-pick smoke, honestly labeled as covering only the single-run fixed-prefix effect. C1-C3 (convention SSOT, pure core, served-window key) can land before D1/D2.",
+  "costEstimate": "About 6-8 focused days. C1 S (~120 lines + T1). C2 M (~350 lines across occupancy.ts and shared view + T2). C3 S-M (6 call sites + 2 test migrations). C4 M-L (loop rewire in 8 files + 21 test migrations + T3). C5 S-M (session host threading + T4). C6 M (CLI 7 files + 14 test migrations + T5/T6). C7 M-L (daemon 9 files + frontend 7 + drift contract + T7/T9). C8 S (census + dead-field removal). C9/C10 optional S.",
+  "reusedExisting": [
+   "resolveThreshold / resolveCompactionLimitTokens precedence (src/agent/compaction/token-baseline.ts:320-345) inside resolveOccupancyWindow",
+   "resolveModelWindow (src/llm/provider-metadata.ts:183)",
+   "charsOf / estimateTokens (token-baseline.ts:20-33) as the single chars/4 estimator",
+   "the exact request seam notifyTurnStreamInput / llm.stream (src/agent/loop/stream-consume.ts:429,535) and the onTurnStreamInput tap (wire-slots-runtime.ts:318) for test oracles",
+   "the routing authority snapshot port (src/agent/loop/skill-gate.ts:161-165) for served window identity",
+   "createRuntimeSessionHost per-session state pattern (src/host/runtime/internal/context-binding.ts:395-401, emittedArtifactIds)",
+   "isRootAgent (src/agent/spawn-depth.ts:66) for root-only writes and publishes",
+   "SECTION_CONTEXT_CATEGORY + category estimation in usage-breakdown.ts, and ToolRegistry.originOf (src/tool/registry.ts) for the Tools/MCP split",
+   "existing warning ratios 0.8/0.9 (src/apps/cli/context-warning.ts:47-48)",
+   "PASS_THROUGH_COMPOSE_KEYS + whenDefined base binding (src/sdk/runtime/context.ts:258-275; context-binding/base.ts)",
+   "fanOutIsolated canvas subscriber isolation (src/apps/web-daemon/canvas-fanout)",
+   "web-frontend-protocol-drift-contract-hellgate interface-field parser (extend canonical set)",
+   "createRuntimeFromAgentConfigBase facade seam used by tests/unit/onprompt-assembled-wire-hellgate.test.ts",
+   "PTY harness + QUANTA_LLM_REPLAY (tests/e2e-pty/pty-harness.ts; src/llm/factory.ts:473-497)",
+   "AST call-site census pattern with scan-population floor (tests/unit/runagent-callsite-authority-fence-hellgate.test.ts)"
+  ]
+ },
+ "revisedTests": [
+  {
+   "name": "T1 usage-prompt-tokens-convention-hellgate",
+   "tier": "unit (local 127.0.0.1 SSE; move to integration if over the unit speed budget)",
+   "seam": "Real AnthropicAdapter (ANTHROPIC_BASE_URL=127.0.0.1, fake key), real OpenAIAdapter streaming against a 127.0.0.1 SSE server, real parseResponsesEvents, plus the exported LLM_SURFACE_IDS and USAGE_CONVENTION_BY_SURFACE.",
+   "setup": "Anthropic message_start usage {input_tokens:1200, cache_read_input_tokens:148800, cache_creation_input_tokens:0} and message_delta output 10. Chat Completions final chunk for model 'deepseek-chat' {prompt_tokens:100000, completion_tokens:5, prompt_tokens_details:{cached_tokens:90000}}. Responses response.completed usage {input_tokens:100000, input_tokens_details:{cached_tokens:90000}, output_tokens:7}.",
+   "assertions": "Anthropic usage event: promptTokens === 150000, inputTokens === 1200, cacheReadTokens === 148800. OpenAI chat: promptTokens === 100000, inputTokens === 100000. Responses: promptTokens === 100000. Object.keys(USAGE_CONVENTION_BY_SURFACE).sort() deep-equals [...LLM_SURFACE_IDS].sort(), length exactly 3. All unconditional.",
+   "pairedControl": "The a2 payloads (Anthropic message_start without input_tokens but message_delta input 90000; Responses usage without input_tokens): `'promptTokens' in ev === false`, while inputTokens === 0 and outputTokens === 10 / 7 stay byte-identical for accounting.",
+   "mutationThatMustTurnRed": "(1) buildUsageEvent sets promptTokens = inputTokens ?? 0 → control RED. (2) Anthropic mapper passes 'cache-inclusive' → 1200 ≠ 150000 RED. (3) Delete one Record entry → runtime drift guard RED (and typecheck:all). Apply mutants by cp backup, then assert the mutant token is present in the file before running; restore by cp, never git checkout.",
+   "redTodayProof": "a2 re-run: the usage events carry only {type,inputTokens,outputTokens,model}, with no promptTokens. LLM_SURFACE_IDS does not exist (llm-route-types.ts:5 is type-only)."
+  },
+  {
+   "name": "T2 occupancy-measure (pure invariants)",
+   "tier": "unit",
+   "seam": "Exported production functions recordSentRequest, withProviderCount, measureContextOccupancy, resolveOccupancyWindow (src/agent/compaction/occupancy.ts) and occupancyWarningOf (src/shared/context-occupancy.ts). Records are built only through the production constructors, never hand-built.",
+   "setup": "Text-only literal messages; oracle char sums computed by a test-local loop over literal string lengths (not charsOf). System blocks; 3 ToolSpecs via a ToolRegistry with 2 builtin and 1 MCP origin (the MCP tool name has no 'mcp__' prefix).",
+   "assertions": "(a) No record: total === ceil((F+T)/4), anchor.kind 'rejected' reason 'no-record', fixedPrefixBasis 'static-base'. (b) Record with P and appended A chars: total === P − ceil((F+E)/4) + ceil((F+A)/4), source 'provider-anchored'. (c) The o2 case, E = 200,000 injected chars with P = ceil((F+T+E)/4): total === P − ceil((F+E)/4) + ceil((F+A)/4) (not P + ceil(A/4)). (d) P < ceil((F+E)/4) → reason 'partition-estimate-exceeds-provider-count'. (e) Same-length content change at index 0, shrink, and shrink-then-regrow-past-n each give 'transcript-prefix-changed'; a different servedModelId gives 'served-model-changed'. (f) Usage without promptTokens → 'provider-count-absent'. (g) Unknown model → window 'unknown', compaction configured 120000 source 'legacy-default'; thresholdTokens 5000 → 5000 'config'; served {modelId:'claude-sonnet-4-6', windowKey:'claude-sonnet-4-6-1m'} → window 1000000, threshold 923000; compaction absent → 'not-configured'. (h) Verdicts: unknown window, 120000, 119,000 → {level:'compaction', pct:99}; 50,000 → none; not-configured, window 200000, 160,000 → {level:'window', pct:80}; not-configured with unknown window → none. (i) Rows sum === total for 'residual'; when anchored total < fixed rows, messages.kind 'estimate-exceeds-measured' with overBy === sum(fixed rows) − total, exact; Tools/MCP split exactly 2/1 by origin.",
+   "pairedControl": "A deep-copied transcript with identical content keeps 'provider-anchored' (the digest is content-based, not identity). A known model derives its threshold from the window table (claude-opus-4-8 → 155000, the R1-cited value).",
+   "mutationThatMustTurnRed": "Drop the injected subtraction → (c) RED. Index-only validity → (e) RED. Treat absent as 0 → (f) RED. Resolve the window from modelId ignoring windowKey → (g) 1M case RED. Keep `!(max>0) ⇒ none` → (h) first case RED. Classify MCP by the 'mcp__' prefix → (i) split RED.",
+   "redTodayProof": "Honest label: the module does not exist, so the import is RED. The meaningful RED is behavioral: today's equivalents produce (c) 84,424 vs 34,423 sent (o1), index validity (token-baseline.ts:96), a coerced-0 path (a2), 123000/200000 (a6), and warning '' (R1 p8)."
+  },
+  {
+   "name": "T3 context-occupancy-trigger-display-identity-hellgate",
+   "tier": "integration (tests/integration/)",
+   "seam": "Real runAgent with the real CLI createContextUsageHolder and real buildNotifyAndContextWarning (process.stderr.isTTY forced via defineProperty and restored in afterEach) wired through the real onContextOccupancy slot. The real mentionInjector slot returns a 200,000-char message when the latest user text contains '@big'. ScriptedLLM records every StreamInput through the onTurnStreamInput tap. QUANTA_COMPACT_TOKENS=1 with __resetRuntimeConfig() (env precedence path). onPreCompact spy returns 'defer_one_turn'. Scratch HOME and QUANTA_PERMISSION_STATE.",
+   "setup": "History [u(100k chars), a('ok'), u(100k chars), a('ok'), u('please read @big')], so findBoundary > 0 at every round (compaction.ts:679-686). Round 1: tool_use read(scratch file), usage {inputTokens:P1, promptTokens:P1, outputTokens:10}, where the fake computes P1 as ceil(recorded chars/4) from its own input. Round 2: text + end_turn + usage. model 'claude-sonnet-4-5'.",
+   "assertions": "1. Exactly 2 preflight calls; exactly 2 'turn-start' readings, 0 'after-compaction' readings and 1 'run-end' reading published. 2. For each preflight i: q.occupancy === turnStartReadings[i] (toBe), q.currentTokens === that reading's totalTokens, q.threshold === reading.window.compaction.thresholdTokens === 1. 3. Inside the spy, holder.view().totalTokens === q.currentTokens, and the warning closure string contains `${occupancyWarningOf(reading).pct}% of compaction limit`. 4. Round 2: reading.source === 'provider-anchored' and totalTokens === P1 − ceil((F1+E1)/4) + ceil((F1+A)/4). F1 = recorded input0 system text chars + JSON.stringify(input0.tools).length; E1 = chars of input0 messages not identical (===) to an element of outcome.messages; A = chars of outcome.messages elements present in input1 but not input0. All sums use a test-local loop. 5. E1 === 200,000 + the recorded trailing-reminder text length (exact), and reading.lastRequestInjectedTokensEstimate === ceil(E1/4).",
+   "pairedControl": "(a) The same scenario without '@big': round 2 is still exact by the same oracle, with E1 = reminder only. (b) Usage events without promptTokens: round 2 source 'estimate', totalTokens === ceil((F1 + chars(wm at round 2))/4) exact. (c) Default threshold (env unset) with history sized from the recorded request so the run-end total is below 0.8·window and 0.9·threshold by at least 10%. That margin is asserted unconditionally first, then 0 preflight calls and warning === ''.",
+   "mutationThatMustTurnRed": "(1) compactIfNeeded recomputes currentTokens from messages → assertion 2 RED. (2) Remove the injected subtraction → assertion 4 RED (+50k). (3) Publish a separately computed display reading → toBe identity RED. (4) Record specs() instead of visibleSpecs, run with planMode:true so write tools are filtered → F1 mismatch, assertion 4 RED. Each mutant is cp-applied with a sentinel check that the mutant token is present.",
+   "redTodayProof": "o1 (same shape): today's round-2 trigger is 84,424 against 34,423 sent. R1 p2: the display stays at 12,500 while the trigger reads 100,005/116,890. The `occupancy` query field and the onContextOccupancy slot do not exist."
+  },
+  {
+   "name": "T4 context-occupancy-cross-prompt-carry-hellgate",
+   "tier": "integration",
+   "seam": "createRuntimeFromAgentConfigBase (src/sdk/runtime) → createSession → SessionHost.runTurn called twice, with history taken from the first result exactly as the kernel does (scheduler-turn-execution.ts:188). This exercises the real createRuntimeSessionHost carry owner (context-binding.ts:383) and turn-runner (turn-runner.ts:268-285). Readings observed through the onContextOccupancy compose option.",
+   "setup": "Base with compaction {thresholdTokens:1, keepRecentTurns:1}, onPreCompact spy 'defer_one_turn', a mentionInjector as in T3, and a ScriptedLLM whose usage promptTokens are computed from its recorded input. Turn 1 prompt 'please read @big' (history of 2×100k chars); turn 2 prompt 'now something else'.",
+   "assertions": "The turn-2 round-1 turn-start reading has source 'provider-anchored' and totalTokens === P_last(turn 1) − ceil((F+E_last)/4) + ceil((F + chars[turn-1 final assistant message, turn-2 user message])/4), exact from the recorded inputs. It also equals the turn-1 'run-end' reading at chars level: turn2.adjustmentChars === runEnd.adjustmentChars + chars(turn-2 user message), and turn2.anchor.record === runEnd.anchor.record (toBe).",
+   "pairedControl": "(a) The turn-2 history passed to runTurn replaces index 0 with a same-length different string → source 'estimate', reason 'transcript-prefix-changed'. (b) A second session from the same facade gets 'no-record' on its first turn (the carry is per session). (c) runAgent with depth:1 given the same carry object leaves the carry's record unchanged (toBe the same record) and publishes nothing (0 readings).",
+   "mutationThatMustTurnRed": "(1) session-bootstrap ignores cfg.contextOccupancyCarry → main assertion 'no-record' RED. (2) Carry minted per turn in runRuntimeTurn instead of per SessionHost → main RED. (3) Digest check removed → (a) RED. (4) Root-only guard removed → (c) RED. Mutants are cp-applied with a sentinel check.",
+   "redTodayProof": "R1 p4: turn-2 round-1 trigger 100,072 vs previous provider 116,848, because the box is per run (session-bootstrap.ts:380). a1: 50,078 vs 59,390 sent."
+  },
+  {
+   "name": "T5 cli-context-occupancy-composition-hellgate",
+   "tier": "integration",
+   "seam": "The CLI surface-compose composer, as in tests/unit/apps/cli/repl/surface-compose-composer-hellgate.test.ts. It yields the real AgentConfig/base from runtime-compose, and one scripted turn is run through it.",
+   "setup": "Composer with scratch HOME/cwd and a ScriptedLLM emitting usage with promptTokens; one prompt.",
+   "assertions": "The composed base's onContextOccupancy is the holder's sink: after the turn, holder.view().reading === the last published reading (toBe, captured by a tap wrapped around the same slot), with exactly 1 run-end reading. The composed contextWarning closure returns the string rendered from occupancyWarningOf(that reading) (exact equality). The composed base carries no onPromptAssembled-based usage holder (the snapshot sink is not the holder).",
+   "pairedControl": "A composer with no turn run: holder.view() === undefined and the warning closure returns ''.",
+   "mutationThatMustTurnRed": "runtime-compose wires the holder to onPromptAssembled again → identity RED. notify-and-warning re-resolves the threshold from view.model → string mismatch RED under an explicit threshold.",
+   "redTodayProof": "context-usage-snapshot.ts:30,82: the holder's sink takes PromptAssembledSnapshot and view() is system-only; runtime-compose.ts:103 wires the snapshot sink."
+  },
+  {
+   "name": "T6 cli-context-occupancy-e2e",
+   "tier": "e2e-pty (opt-in `bun run e2e:pty`; describe.skipIf(!PTY_AVAILABLE) decided at collection time, a visible skip)",
+   "seam": "The real CLI via drivePtyCli. QUANTA_LLM_REPLAY swaps only the network adapter (factory.ts:473-497). The replay port has no model (a4), so QUANTA_COMPACT_TOKENS=120000 pins the threshold explicitly. Scratch HOME, cwd and QUANTA_SESSIONS_DIR.",
+   "setup": "Cassette: text_delta 'occ-turn', usage {inputTokens:150000, outputTokens:10, model:'', promptTokens:150000}, message_stop. Submit 'measure me', wait for 'occ-turn', then submit '/context'.",
+   "assertions": "The screen contains the exact line 'provider-reported prompt tokens (last request): 150000', the label 'provider-anchored', 'compaction at 120k' and 'window unknown'. The integers on the printed 'projected', 'injected (last request, estimated)' and 'appended since (estimated)' lines satisfy projected === 150000 − injected + appended (printed exact integers). The warning line before the next prompt contains '% of compaction limit'.",
+   "pairedControl": "(a) Cassette promptTokens 40000 (above the 9,461-token default fixed prefix from a5, below 0.9·120k): no '⚠ context' anywhere on screen, and the provider line shows 40000. (b) Cassette without promptTokens: label 'estimated', no provider line.",
+   "mutationThatMustTurnRed": "The holder view built from anything but the reading → provider line absent, RED. The warning factory resolving its own threshold → the 'compaction at' text or warning presence changes, RED. Mutants are cp-applied with a sentinel check.",
+   "redTodayProof": "context-usage-snapshot.ts:71-82 retains only reasoningTokens from usage, so no provider number can reach /context. R1 p2 render: '12.5k/200k · Context 94% left'. Whether jsonlReplayStore preserves promptTokens verbatim is UNVERIFIED; this test decides it."
+  },
+  {
+   "name": "T7 web-context-occupancy-daemon-e2e",
+   "tier": "integration (real daemon on 127.0.0.1, fake credentials, scratch HOME)",
+   "seam": "startWebDaemon composition root (runtime-factory/agent-config-base.ts, session-collaborators.ts) with QUANTA_WEB_CANVAS=1, QUANTA_CONTROL_REQUEST on, a QUANTA_LLM_REPLAY cassette, a real WebSocket client and the HTTP readout.",
+   "setup": "Cassette usage {inputTokens:150000, promptTokens:150000, outputTokens:10, model:''}. Run one turn over WS, then GET the /context readout and send get_context_usage.",
+   "assertions": "Exactly 2 context.usage frames (1 turn-start + 1 run-end). The run-end frame has source 'provider-anchored', providerPromptTokens === 150000, compaction.kind === 'not-configured', no threshold field, and warning.level decided by the window only ('none' with window unknown). The readout text contains frame.totalTokens as an exact integer. The control effect's totalTokens === frame.totalTokens.",
+   "pairedControl": "Canvas gate off: 0 context.usage frames, while the readout still answers with the same totalTokens. A cassette without promptTokens gives source 'estimate'.",
+   "mutationThatMustTurnRed": "canvas-usage-source reverts to snapshot-based computation → no source field, RED. The control port usage is left unwired → rejection 'context usage unavailable', RED.",
+   "redTodayProof": "canvas-usage-source.ts:56 is system-only; canvas-emitter.ts:218-225 frame has no source/compaction; session-collaborators.ts supplies no usage dependency."
+  },
+  {
+   "name": "T8 canvas protocol drift contract (extend existing hellgate)",
+   "tier": "unit (static AST over the two TS sources; labeled a static pin)",
+   "seam": "tests/unit/web-frontend-protocol-drift-contract-hellgate.test.ts interface-field parser, with src/protocol/canvas/messages.ts added to the canonical set compared against the frontend barrel's canvas mirrors.",
+   "setup": "No fixtures; parses the committed files.",
+   "assertions": "For every canvas interface with a namesake in the barrel, field names, optionality and whole type text are equal in both directions. Exact count of compared canvas interfaces pinned.",
+   "pairedControl": "An in-memory copy (ts.createSourceFile, never written) with identical fields passes; the same copy with `source` removed is reported with the field name.",
+   "mutationThatMustTurnRed": "Remove `source` from the frontend ContextUsageMessage mirror, or add a daemon field without mirroring it → RED.",
+   "redTodayProof": "The frontend mirror has segments[].chars? (apps/web-frontend/src/types/protocol.ts:395-407) and the canonical interface does not (src/protocol/canvas/messages.ts:111-118); the hellgate skips canvas today (:528-546)."
+  },
+  {
+   "name": "T9 web frontend renders the frame verdict (vitest)",
+   "tier": "web vitest (apps/web-frontend)",
+   "seam": "StatusBar.tsx render, usageMessageToBarProps (usage-adapter.ts), renderContextGauge (slash-context-gauge.ts), UsageBreakdownPanel and category-hues, all using the mirror type pinned by T8.",
+   "setup": "Frames typed as ContextUsageMessage with warning verdicts, compaction union, messages union and reasoningTokens.",
+   "assertions": "warning {level:'compaction', pct:122} with compaction configured renders exactly 'context 122% of compaction threshold'. {level:'window', pct:80} with not-configured renders 'context 80% of window — auto-compaction not configured'. No rendered text contains 'compact soon'. The reasoning line appears iff reasoningTokens > 0, with the exact formatted value. Object.keys(CATEGORY_TO_HUE).sort() equals the mirror's category tuple (drift guard, exact length). An 'estimate-exceeds-measured' frame renders the note with the exact overBy.",
+   "pairedControl": "total 160000 / max 200000 with warning {level:'none'} renders no warning element (today's lib warns on this). A segment id 'Reasoning' with reasoningTokens absent renders no reasoning line.",
+   "mutationThatMustTurnRed": "Re-derive the warning from total/max in StatusBar → paired control RED. Reintroduce /reason/i → paired RED. Drop one hue key → drift RED.",
+   "redTodayProof": "a3: contextWarningLabel({total:160000,max:200000}) = 'context 80% full — the runtime will compact soon' (lib/context-warning.ts:20-23); slash-context-gauge.ts:25 uses the regex."
+  },
+  {
+   "name": "T10 context-occupancy-authority-census",
+   "tier": "ratchet/census (unit; static AST, honestly labeled as a static pin, not runtime proof)",
+   "seam": "TypeScript AST over production files in src/ (tests excluded), resolving import aliases per file, following tests/unit/runagent-callsite-authority-fence-hellgate.test.ts with the tests/unit/_shared/scan-population floor.",
+   "setup": "Tracked: the ContextOccupancy brand symbol and `as ContextOccupancy` assertions; call sites of resolveThreshold, resolveCompactionLimitTokens, resolveModelWindow and measureContextOccupancy.",
+   "assertions": "The brand symbol and casts appear only in src/agent/compaction/occupancy.ts. resolveThreshold/resolveCompactionLimitTokens are called only inside resolveOccupancyWindow. measureContextOccupancy is called only from compaction-wire.ts (maybeCompact, compactNowOnDemand) and session-bootstrap.ts (run end). Every key is in an exact pinned list with 0 unclassified and 0 stale entries. resolveModelWindow call sites outside src/llm form an exact pinned list. Scanned file count is at least the population floor.",
+   "pairedControl": "An in-memory fixture (ts.createSourceFile, never written) with `import { resolveThreshold as rt } from \"@/agent/compaction\"` inside a function in a CLI-like path is detected as unclassified, proving alias resolution.",
+   "mutationThatMustTurnRed": "Re-add resolveCompactionLimitTokens(undefined, view.model) to notify-and-warning.ts, or a measureContextOccupancy call in canvas-usage-source.ts → RED.",
+   "redTodayProof": "Today's tree has out-of-authority resolutions: notify-and-warning.ts:89-92, compaction-wire.ts:704-707, context-assembler.ts:625-630, compaction.ts:668."
+  }
+ ],
+ "implementationOrder": [
+  "C1 (RED: T1). Add the LLM_SURFACE_IDS const tuple, the src/shared/usage-prompt-tokens.ts convention SSOT, and the optional usage.promptTokens from the anthropic/openai/responses producers. Additive; accounting byte-identical.",
+  "C2 (RED: T2). Pure core: src/agent/compaction/occupancy.ts plus src/shared/context-occupancy.ts (brand type, verdict, category tuple), with no production callers yet. Category estimation in usage-breakdown.ts is reshaped to rows only, keeping the old default builder until C6/C7.",
+  "C3 (RED: T2(g) extended with a maybeCompact-level case: a routing stub serving a port with contextWindowKey 'claude-sonnet-4-6-1m' → preflight threshold 923000). resolveActiveModelId becomes resolveServedModel with the served window key; delete resolveWindowModel and migrate its 6 production sites and 2 tests. Behavior change only for 1M candidates.",
+  "C4 (RED: T3; blocked on D1 and D2 plus the receipt). Loop trigger reads the single measured reading: record at the send seam, provider count at usage, measure once in maybeCompact (all paths), the onContextOccupancy root-only publish and PreCompactRequestQuery.occupancy, run-scoped carry. Delete TokenBaselineBox/triggerTokenCount/markBaselineStaleIfShrunk and the invalidation sites; migrate the 21 baseline tests and loop-d4-d5. Record the before/after receipt (first-fire round, compaction count) for the T3/T4 scenarios, loop-d4-d5 and the 6-pick smoke in the commit body.",
+  "C5 (RED: T4). Per-SessionHost carry minted in createRuntimeSessionHost and threaded through turn-runner/base keys, plus the root-only guard in session-bootstrap and side-conversation isolation for both new slots.",
+  "C6 (RED: T5, then T6 in the opt-in PTY lane). CLI consumers: holder retains readings; status-line, warning verdict and the 'Session context' rename; delete the second threshold resolution; migrate the 13 snapshot-path tests and context-warning-model-aware.",
+  "C7 (RED: T8 first, since it is RED today on chars?, then T7 and T9). Web daemon source/emitter/readout/get_context_usage, canvas protocol, frontend mirror, StatusBar verdict rendering, typed hues; delete apps/web-frontend/src/lib/context-warning.ts and its test.",
+  "C8 (RED: T10). Census, and removal of snapshotToBreakdownInput, buildUsageBreakdownDefault and PromptAssembledSnapshot max/windowModel (emit-prompt-assembled-window-hellgate migrated).",
+  "C9 optional (D8). statusLine payload context_window object and exceeds_200k_tokens from the reading, with a unit test on the real status-command-runner payload.",
+  "C10 optional (D7, coordinate with the aug-30 usage-accounting owners). emitUsage passes the adapter-declared convention into normalizeUsage instead of providerOf(model), with a paired /cost test for deepseek-chat plus cached tokens."
+ ],
+ "fileOwnership": [
+  "src/shared/llm-route-types.ts",
+  "src/shared/usage-prompt-tokens.ts",
+  "src/shared/context-occupancy.ts",
+  "src/llm/types.ts",
+  "src/llm/adapters/shared.ts",
+  "src/llm/adapters/anthropic.ts",
+  "src/llm/adapters/openai.ts",
+  "src/llm/openai-responses-wire.ts",
+  "src/agent/compaction/occupancy.ts",
+  "src/agent/compaction/token-baseline.ts",
+  "src/agent/compaction.ts",
+  "src/agent/index.ts",
+  "src/agent/turn-context.ts",
+  "src/agent/types/wire-slots-runtime.ts",
+  "src/agent/types/compaction-config.ts",
+  "src/agent/context/usage-breakdown.ts",
+  "src/agent/prompt-sections.ts",
+  "src/agent/loop/compaction-wire.ts",
+  "src/agent/loop/context-assembler.ts",
+  "src/agent/loop/stream-consume.ts",
+  "src/agent/loop/session-bootstrap.ts",
+  "src/agent/loop/turn-iteration.ts",
+  "src/agent/loop/turn-loop.ts",
+  "src/agent/loop/same-turn-engine.ts",
+  "src/agent/loop/recovery-executor.ts",
+  "src/agent/loop/emit-helpers.ts",
+  "src/agent/loop/skill-gate.ts",
+  "src/host/runtime/internal/context-binding.ts",
+  "src/host/runtime/internal/context-binding/turn-runner.ts",
+  "src/host/runtime/internal/context-binding/types.ts",
+  "src/host/runtime/internal/context-binding/base.ts",
+  "src/host/runtime/internal/context-binding/side-conversation.ts",
+  "src/sdk/runtime/context.ts",
+  "src/apps/cli/repl/context-usage-snapshot.ts",
+  "src/apps/cli/repl/session-setup.ts",
+  "src/apps/cli/repl/surface-compose/runtime-compose.ts",
+  "src/apps/cli/repl/surface-compose/dispatch.ts",
+  "src/apps/cli/status-line.ts",
+  "src/apps/cli/context-warning.ts",
+  "src/apps/cli/repl/factories/notify-and-warning.ts",
+  "src/apps/cli/status-command-runner.ts (optional C9)",
+  "src/apps/cli/status-line-driver.ts (optional C9)",
+  "src/apps/web-daemon/canvas-usage-source.ts",
+  "src/apps/web-daemon/canvas-emitter.ts",
+  "src/apps/web-daemon/readout.ts",
+  "src/apps/web-daemon/runtime-factory/readout-sources.ts",
+  "src/apps/web-daemon/runtime-factory/agent-config-base.ts",
+  "src/apps/web-daemon/runtime-factory/session-collaborators.ts",
+  "src/apps/web-daemon/runtime-factory/observable-facade.ts",
+  "src/apps/web-daemon/server/sinks.ts",
+  "src/protocol/canvas/messages.ts",
+  "apps/web-frontend/src/types/protocol.ts",
+  "apps/web-frontend/src/adapters/usage-adapter.ts",
+  "apps/web-frontend/src/components/slash-context-gauge.ts",
+  "apps/web-frontend/src/components/canvas/UsageBreakdownPanel.tsx",
+  "apps/web-frontend/src/components/canvas/category-hues.ts",
+  "apps/web-frontend/src/components/StatusBar.tsx",
+  "apps/web-frontend/src/lib/context-warning.ts (delete)",
+  "apps/web-frontend/src/lib/context-warning.test.ts (delete)",
+  "apps/web-frontend/src/components/StatusBar.test.tsx",
+  "apps/web-frontend/src/adapters/usage-adapter.test.ts",
+  "apps/web-frontend/src/components/slash-context-gauge.test.ts",
+  "apps/web-frontend/src/components/canvas/UsageBreakdownPanel.test.tsx",
+  "apps/web-frontend/src/components/canvas/category-hues.test.ts",
+  "tests/unit/llm/usage-prompt-tokens-convention-hellgate.test.ts (new)",
+  "tests/unit/agent/compaction/occupancy-measure.test.ts (new)",
+  "tests/integration/context-occupancy-trigger-display-identity-hellgate.test.ts (new)",
+  "tests/integration/context-occupancy-cross-prompt-carry-hellgate.test.ts (new)",
+  "tests/integration/cli-context-occupancy-composition-hellgate.test.ts (new)",
+  "tests/e2e-pty/cli-context-occupancy-e2e.test.ts (new)",
+  "tests/integration/web-context-occupancy-daemon-e2e.test.ts (new)",
+  "tests/unit/context-occupancy-authority-census.test.ts (new)",
+  "tests/unit/web-frontend-protocol-drift-contract-hellgate.test.ts",
+  "tests/integration/loop-d4-d5-baseline-e2e.test.ts",
+  "tests/unit/compaction-wire-attribution-wired-hellgate.test.ts",
+  "tests/unit/microcompaction-wire-failclosed-hellgate.test.ts",
+  "tests/unit/compaction-measurement-hellgate.test.ts",
+  "tests/unit/token-baseline-box-hellgate.test.ts",
+  "tests/unit/context-headroom-advisory.test.ts",
+  "tests/unit/agent/albb-19-compaction-system-parity.test.ts",
+  "tests/unit/agent/compaction-event-reason-hellgate.test.ts",
+  "tests/unit/agent/loop/midloop-conversation-action-drain-hellgate.test.ts",
+  "tests/unit/agent/control-request-drain-wire-hellgate.test.ts",
+  "tests/unit/loop/token-baseline-capture-hellgate.test.ts",
+  "tests/integration/identity-per-turn-reminder-hellgate.test.ts",
+  "tests/integration/background-compaction-e2e.test.ts",
+  "src/agent/loop/__tests__/bg-compaction-live-suffix-install.test.ts",
+  "tests/integration/interrupted-turn-signal-abort.test.ts",
+  "tests/integration/agent-loop-bugbash/applyProactiveResult-strike.test.ts",
+  "tests/integration/crash-resume-hellgate.test.ts",
+  "src/agent/loop/__tests__/compact-now-baseline-invalidation.test.ts",
+  "src/agent/loop/__tests__/proactive-compact-failure-breaker.test.ts",
+  "src/agent/loop/__tests__/proactive-empty-summary-strike-hellgate.test.ts",
+  "src/agent/loop/__tests__/summarize-baseline-wiring.test.ts",
+  "src/apps/cli/__tests__/interrupted-turn-e2e.hellgate.test.ts",
+  "tests/unit/onprompt-assembled-wire-hellgate.test.ts",
+  "tests/unit/canvas-fanout-failclosed-hellgate.test.ts",
+  "tests/unit/host/runtime-side-conversation-isolation-hellgate.test.ts",
+  "tests/unit/agent/context-usage-breakdown-hellgate.test.ts",
+  "tests/unit/agent/prompt-assembled-capture-hellgate.test.ts",
+  "tests/unit/agent/context-snapshot-converter-hellgate.test.ts",
+  "tests/unit/cli/context-usage-snapshot-hellgate.test.ts",
+  "tests/unit/cli/s3-reasoning-gauge-wire-hellgate.test.ts",
+  "tests/unit/cli/context-warning-threshold-coherence-hellgate.test.ts",
+  "tests/unit/loop/emit-prompt-assembled-window-hellgate.test.ts",
+  "tests/unit/apps/cli/repl/surface-compose-composer-hellgate.test.ts",
+  "tests/integration/canvas-tool-diff-usage-daemon-e2e.test.ts",
+  "src/apps/cli/__tests__/context-warning.hellgate.test.ts",
+  "src/apps/cli/__tests__/context-warning-model-aware.hellgate.test.ts",
+  "tests/unit/context-1m-window-bump-hellgate.test.ts",
+  "tests/unit/agent/albb-07-ptl-salvage-activemodel.test.ts"
+ ],
+ "userDecisions": [
+  {
+   "question": "D1: Ship the compaction-trigger semantic change default-on? It counts the fixed prefix on every round, keeps the anchor across prompts, subtracts the last request's injected context, removes the >=estimate gate, and uses the adapter-declared prompt count.",
+   "options": "(a) Default-on after a receipt that can see it: T3/T4 scripted @file and cross-prompt scenarios (first-fire round and compaction count before/after), loop-d4-d5, and the 6-pick smoke labeled single-run-only. (b) A knob for one cycle. (c) Display-only now, leaving the trigger as it is.",
+   "recommendation": "(a). A knob, or (c), re-creates two measurements, which is the defect class being removed.",
+   "blocking": true
+  },
+  {
+   "question": "D2: The next round's injected context (mentions, hook/context-change messages, trailing reminder) is resolved after the compaction trigger. How should the trigger treat it?",
+   "options": "(a) Exclude it by definition and label it. The reading carries the last request's injected estimate, and both display and warning show the same number. (b) Reorder prepareTurnContext to resolve the dynamic inputs and compile before maybeCompact so it is counted exactly. That is a larger hot-path change; ordering with QUANTA_TYPED_EVENT_REPLAY compaction events is UNVERIFIED.",
+   "recommendation": "(a) now. The reading exposes the per-request injected size, so measure the real CLI reminder distribution after C6 and decide (b) with data. o2 shows (a) equals actual-next-send minus the next round's injected context exactly.",
+   "blocking": true
+  },
+  {
+   "question": "D3: What should the /context head express?",
+   "options": "(a) Projected total with '% until compaction' and '% of window', plus a detail line with the provider-reported last-request count and injected estimate. (b) Window % only. (c) Compaction % only.",
+   "recommendation": "(a).",
+   "blocking": false
+  },
+  {
+   "question": "D4: Categories and names.",
+   "options": "Rename to System / Rules / Session context / Tools / MCP tools / Messages, with Messages as the residual via the union (note shown when estimates exceed measured), and buffer/free space as head annotations rather than segments. Or keep the current names.",
+   "recommendation": "Adopt the renames and the union; the current 'Conversation' label is false.",
+   "blocking": false
+  },
+  {
+   "question": "D5: The web base composes no compaction config (static reading). What should web show?",
+   "options": "(a) The reading says not-configured and web shows no threshold and no 'will compact' copy. (b) Compose the CLI compaction config on web, a separate measured behavior change.",
+   "recommendation": "(a) now; (b) as its own packet.",
+   "blocking": false
+  },
+  {
+   "question": "D6: Persist the carry across --resume?",
+   "options": "(a) Add it to the saved-session schema, validated by digest on load. (b) A resumed session starts at estimate until its first response.",
+   "recommendation": "(b) now. The schema strips unknown keys today (saved-session-schema.ts:106-115).",
+   "blocking": false
+  },
+  {
+   "question": "D7: Also route /cost normalization through the adapter-declared convention instead of providerOf(model)?",
+   "options": "(a) Yes, as C10 with the aug-30 owners (visible price change for OpenAI-compatible non-gpt ids with cached tokens). (b) Occupancy only.",
+   "recommendation": "(a) as a separate commit after agreement.",
+   "blocking": false
+  },
+  {
+   "question": "D8: Fill the statusLine payload context_window in CC's object shape and exceeds_200k_tokens from the reading?",
+   "options": "(a) Yes (C9). (b) Leave them unfilled.",
+   "recommendation": "(a).",
+   "blocking": false
+  },
+  {
+   "question": "D9: Warning ratios.",
+   "options": "(a) Keep 0.8 window / 0.9 compaction. (b) CC's threshold − 20k warn level.",
+   "recommendation": "(a) in this cluster so the number fix is not mixed with a threshold change.",
+   "blocking": false
+  }
+ ],
+ "residualRisks": [
+  "Under D2(a) the trigger excludes the next round's injected context. In steady state it undercounts by the trailing-reminder size relative to today's anchored rounds (probe reminder 53 tokens; real CLI size UNVERIFIED), and reactive PTL recovery stays the backstop.",
+  "The fixed-prefix part comes from the last request, so it goes stale for one round when plan mode or skill scope changes tool visibility (magnitude unmeasured).",
+  "chars/4 error in the injected subtraction lands in the anchored transcript term. The reading labels it, but it is not exact.",
+  "OpenAI Responses continuation (previous_response_id): whether usage.input_tokens covers the stored context is UNVERIFIED. If it reported only the delta, anchors would undercount; recommend an opt-in real-e2e check.",
+  "Which real vendors omit prompt-side counts is UNVERIFIED; they fall to the labeled estimate path.",
+  "Digest cost is 0.95 ms per 800KB of text and 10.31 ms for 13.8 MB with images per trigger (o3, n=20, one machine).",
+  "The carry is not persisted, so resumed sessions start at estimate. Host transcript edits between runs leave /context 'as of last turn' until the next run.",
+  "Web daemon 'no compaction' is static reading only; the reading's not-configured flag keeps the display honest either way.",
+  "Replay cassettes: whether jsonlReplayStore round-trips promptTokens is UNVERIFIED (T6 decides).",
+  "branch_search and side-conversation observer inheritance is mitigated by root-only publish and carry writes; CLI/web reachability of branch_search is UNVERIFIED.",
+  "dropOldestSalvage still fits against a messages-only estimate (compaction.ts:637; default-OFF), outside this packet.",
+  "Turn indicator 'N in' showing raw inputTokens (excluding Anthropic cache reads) is UNVERIFIED and outside this packet.",
+  "Concurrent-session commits touch shared hot files (wire-slots-runtime.ts, sdk/runtime/context.ts, context-binding base.ts); re-check HEAD before each commit and never rewrite refs.",
+  "C4 changes compaction timing. The receipt covers scripted multi-prompt scenarios and single-run bench, not live multi-hour CLI sessions."
+ ],
+ "readiness": "READY-WITH-DECISIONS. C1-C3 (convention SSOT with optional promptTokens, the pure occupancy core, served-window key) are ready now and independently green. C4/C5, the trigger semantics and cross-prompt carry that C6/C7 consumers depend on, are blocked on D1 (default-on with a receipt that can see the change) and D2 (exclude next-round injected context now vs reorder assembly). Every attack except OE1's on-message remedy (refuted) and MH6/OE5/DB10-exposure (unmeasured) was confirmed, and the revised design and tests absorb them."
+}

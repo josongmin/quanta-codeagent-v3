@@ -397,6 +397,163 @@ red-on-injection 뮤턴트로 확인했고, **등가 뮤턴트는 등가라고 �
 
 ---
 
+## 3차 감사 대응 (2026-09-14, 병렬 적대 감사 2라운드) — 사용자 액션리스트
+
+범위는 `4db28a3f5..922910655`, local `main`이다. 1라운드는 감사 4개(capability·catalog·
+test-shards·quarantine)를 반영했다. 2라운드는 immutable snapshot `a128bc99d`에서 서로
+겹치지 않는 범위로 적대 감사 5개(capability 체인·catalog·shard tier·quarantine·주장 대
+실제)를 병렬로 돌렸다. 감사는 전부 read-only였고, 수정은 통합 담당 한 명이 순차로 반영했다.
+감사 보고는 직접 재현한 뒤에만 반영했다. 뮤턴트 원복은 cp 백업으로 했다.
+
+### 반영 완료
+
+| # | 결함 | 조치 | 뮤턴트 |
+|---|---|---|---:|
+| C1 | 워커가 receipt bag을 잃으면 gated describe가 skip으로 green | runner가 자기 `process.env`에 definite id로 `QUANTA_REQUIRE_CAPABILITIES`를 무장. bag이 빠지면 이름 붙은 실패 | 20 |
+| C2 | `test:contract`·`test:real-toolchain`에 receipt가 없음(로컬 skip-green, CI 계약 job은 red) | `with-capability-receipt.ts` 래퍼. probe와 child가 preload가 유지하는 scratch HOME 하나를 공유 | (C1에 포함) |
+| C3 | contract guard가 module-scope throw라 `--bail=1`에서 junit이 비고 같은 파일 case가 사라짐. `REQUIRE_CONTRACT=0`이 strict. lint sweep이 skip 경고를 삭제 | 등록형 실패, 스위치 문법 통일(`0/false/no/off`), 경고 복구 | (C1에 포함) |
+| C4 | aggregator의 `blockedMissing`·`failedSetup`이 아무도 넘기지 않는 CLI 플래그 전용이라 두 hard-failure 검사가 발화 불가 | consumer가 파일마다 `[capability] RECORD` testcase를 남기고 reducer가 집계. REQUIRED 실패도 record(실행 case 아님) | 18+17 |
+| C5 | call-site scanner가 상수·namespace·alias·dynamic import·조건부·`process.env` 2번째 인자를 못 봄 | 모든 호출 분류, 보증 불가 형태를 문제로 명시. consumer import 없는 파일은 파싱 생략 | (C4에 포함) |
+| C6 | campaign에서 `failed-setup`을 읽는 곳이 없음. 느린 Chrome(endpoint 15s timeout)을 `unavailable`로 기록해 fail-loud가 회귀로 오판 | runner가 fresh·cached chunk의 record를 PASS 줄 앞에 출력. endpoint timeout은 `probe-timeout`(예산 불변) | (C4에 포함) |
+| C7 | 늦게 도착한 probe가 이미 쓰고 무장한 receipt를 변경(map 공유). runner가 receipt를 지우지 않음 | mint snapshot, `finally`에서 삭제 | (C4에 포함) |
+| C8 | scratch HOME이 도구를 가려도 receipt는 "없음"이라고만 기록 | 실제 HOME에서 재probe해 `AVAILABLE under the real HOME` 표기(status·verdict digest 불변) | (C4에 포함) |
+| T1 | floor slack 때문에 `tools/`·`tests/meta`·`tests/adversarial`·`tests/measurement` 전체와 src 42개가 사라져도 16조합 green | discovery 완전성 threshold 0: tracked ⊆ discovered, root마다 ≥1 | 12 (11 red, 1개는 정책 suite가 잡음) |
+| T2 | prepush/pr/full의 실제 파일 삭제를 "SELECTION shrink … lower the floor"로 보고 | 레코드 v3가 측정 `discovered`를 보관하고 측정 대비로 판정. 조치 문구는 `--measure` | (T1에 포함) |
+| T3 | 일관되게 낮춘 레코드(`unit.selected=1`)가 로더를 통과 | `--measure`가 커밋 트리에서 재계산해 레코드를 씀. arm이 `measuredAt` 재계산과 완전 일치를 요구 | (T1에 포함) |
+| T4 | git snapshot을 선택 **후에** 찍어서 선택 중 착륙한 커밋이 비교를 통과 | 선택 전에 snapshot | (T1에 포함) |
+| Q1 | keeper가 TTL에 live 그룹 위의 expired 레코드를 path 기준으로 삭제 → "보관+보고" 경로가 실행되지 않음, 새 레코드도 삭제 가능 | keeper는 감시·로그만. 정리는 포트를 잡은 holder만 | 15 |
+| Q2 | 슬롯 확인 후 bind라서 쓰기·해제 사이 창과 대기자의 live 레코드 삭제가 재현됨 | bind 후 포트를 잡은 채로 읽음 | (Q1에 포함) |
+| Q3 | 모든 읽기 오류가 `absent`=free(chmod 000·slot 자리의 디렉터리·탐색 불가 root). mtime 실패가 1970=stale | ENOENT만 absent. 나머지는 block, mtime 불가 시 읽을 때마다 새로 나이 계산 | (Q1에 포함) |
+| Q4 | reader가 root를 검증 안 함. expiry 무상한. identity 비멱등. 병합에서 survivor 유실. mirror 실패가 quarantine을 숨김 | 비사설 root는 block, 느슨한 mode 교정, legacy fallback, TTL cap, 멱등 normalizer, misfiled 운반·unreadable 보관 | (Q1에 포함) |
+| Q5 | 테스트 arm이 stub keeper 프로세스를 영구 누수(호스트에서 18개 발견) | stub가 디렉터리가 사라지면 종료, arm이 종료를 assert. 남은 17개는 kill | — |
+| K1 | 가짜 heredoc·산술 `<<`·여러 줄 작은따옴표가 shell 마스킹을 꺼버림. quoted delimiter도 마스킹됨 | 줄 사이 quote 상태 유지, 마스킹된 코드에서 opener 탐지, delimiter 보존 | 21 |
+| K2 | workflow `env.X`를 스칼라 전체에서 매칭(step name·run 주석·echo 문자열) | `${{ }}`와 `if:` 값만 읽음 | (K1에 포함) |
+| K3 | Python·TS 구조분해 쓰기와 테스트 `expect(process.env.X)`를 읽기로 계산. 삭제된 tracked 파일이 스캔을 crash | 쓰기 제외, expect 제외, ENOENT skip, `wiring.activation` env key 추출 | (K1에 포함) |
+| K4 | 마스킹·언어 규칙 12개 이상과 필드 3개 누락이 각각 green(`declared.size > 400`이 고른 수) | 규칙마다 그 규칙만 결정하는 fixture 줄, 필드마다 전용 이름이 declared에 도달해야 함 | (K1에 포함) |
+| G1 | `--trust-scope owner`·`member`가 실제 댓글에 아무에게도 응답 안 함(OWNER/MEMBER가 collaborator로 먼저 접힘). SETUP.md 예시가 곧 먹통 봇 | association → scope 매핑, SETUP 표를 코드 동작으로 교정 — **보안 회귀였음, 아래 4·5차 섹션 정정(`e9cd6491d`)** | 2 |
+
+이번 세션 뮤턴트는 105개다. 104개가 red였고 1개(override tier 무시)는 현재 override로는
+등가지만 정책 suite가 잡는다. (`c5e23b02f` 커밋 메시지의 "21 mutants"는 20이 맞다.)
+
+### 수치 (current HEAD 실측, 성능 주장 아님)
+
+| 항목 | 값 |
+|---|---|
+| contract 레인 | 8 pass/5 skip → receipt 후 14/3 → record 후 14/4, fail 0 유지 |
+| real-toolchain 레인 | 22 pass / 28 skip / **7 fail**(Rust 전부, 아래 A1) |
+| tracked vs discovered (full) | 3995 / 3995 |
+| catalog env | 532 declared / 0 unbacked |
+| tier 레코드 v3 (`34b1d74fc`) | discovered full 3995·core 3601·unit 3275·integration 394 |
+
+### 남은 액션 (기능 · 왜 · ROI)
+
+| # | 기능 | 왜 | ROI |
+|---|---|---|---|
+| A1 | test preload HOME fence가 toolchain root(`RUSTUP_HOME`·`CARGO_HOME`, Python user site)를 유지하도록 하거나, lane helper가 버전 probe 실패를 `failed-setup`으로 분류 | `4f8d4a89b`(다른 세션) 이후 Rust real-e2e 7개가 rustup toolchain을 못 찾아 fail. helper는 binary만 보고 `executed`라고 보고함. hermeticity와 도구 접근의 트레이드오프라 소유자 결정 필요 | 높음: 개발 호스트에서 toolchain 레인이 초록으로 돌아오고 lane 보고가 정직해짐 |
+| A2 | `resolveTestPopulation`의 source 분류(37 MB, 단일 프로세스 실측 ~5.5–6.1s) 가속: 내용 해시 영속 캐시 또는 `resourceEvidenceFor` 프로파일 | always-run prepush canary(`test-policy-enrollment`)가 부하에서 5s timeout. 모든 campaign 선택도 비용 지불. ABBA 측정 필수 | 높음: prepush flake 제거와 campaign 시작 단축 |
+| A3 | receipt 유효성을 runner lease 수명에 묶기(6h TTL, 실행 중 toolchain fingerprint 변경) | 무장한 스위치가 만료·지문 변경 후의 consumer를 전부 REQUIRED 실패로 만듦(메시지는 이유를 명시) | 중간: 장시간·동시 설치 상황의 가짜 red |
+| A4 | quarantine 슬롯과 legacy 쓰기가 둘 다 실패하면 survivor가 사는 동안 listener 유지(TTL cap) | 지금은 둘 다 실패 시 WARN 후 release | 중간: 드문 fs 장애에서 격리 누락 |
+| A5 | pgid 재사용 방어(leader start time을 `DrainedGroupRecord`까지 전달) | 죽은 그룹 pgid를 다른 프로세스가 재사용하면 alive로 오판 | 낮음–중간 |
+| A6 | catalog: registry 항목은 `readSite` 파일의 실제 read로 교차검증 | generic accessor(`cli-knobs-accessor.ts`)가 모든 inventory knob을 읽어서 행동 reader가 사라져도 backed로 남음. 현재 declaration 전용 파일로만 backed인 이름은 0 | 중간: 죽은 knob 탐지 정밀도 |
+| A7 | catalog tokenizer에 Go backtick·Rust raw string·Python f-string 내부 read 추가 | 지금은 false red 방향(누락 read)이라 시끄럽게 실패함 | 낮음 |
+| A8 | worker·probe·fence HOME 레이아웃 함수 하나로 통합 | runner·래퍼·fence가 같은 레이아웃을 따로 들고 있어 drift 위험 | 낮음–중간 |
+| A9 | universe floor 3900(`c7e91b306`에 고른 값) 재검토와 정기 `--measure` | corpus가 자라며 파생 floor slack이 커짐. 완전성 검사가 slack에 의존하지 않는 이유 | 낮음 |
+| A10 | healthy load에서 full-suite campaign 1회와 ABBA | 이번 세션은 부하 20–56 구간이라 campaign·성능 주장을 하지 않음 | 높음(증거) |
+
+### 외부 권한 blocker
+
+- 원격 push·PR·branch protection: 권한이 없어 하지 않았다. 전부 local `main`에만 있다.
+- hosted CI는 GitHub Actions 빌링 차단 상태다. 그래서 다음이 미검증이다:
+  - capability 레인과 `required` aggregator가 실제 runner에서 도는지.
+  - toolchain CI job이 rust-analyzer·gopls·pyright·typescript-language-server를 설치하지 않아 group floor 4개가 구성상 **확정** 실패(4·5차 섹션 B1).
+- `ci.yml`의 capability 단계 이름은 `capability-result.v1`이라고 적혀 있지만 artifact는 v2다. gate-manifest가
+  단계 이름을 pin하고, ci.yml은 다른 세션이 편집 중이라 손대지 않았다.
+- `41a86c849` 커밋 설명의 근거(false green이 아니라 false RED)는 history를 rewrite하지 않는 한 고칠 수 없다.
+
+---
+
+## 4·5차 감사 대응 (2026-09-14, 적대 감사 3·4라운드) — 사용자 액션리스트
+
+범위는 `922910655..bab5c692b`, local `main`이다. 3라운드는 감사 5개(capability 코드·catalog와 trust scope·tier record·quarantine·교차 통합)를 돌렸다. 4라운드는 3라운드 수정 자체를 snapshot `59c619cd5`에서 감사 3개(capability record와 scanner·receipt와 matrix와 quarantine·catalog)로 다시 봤다. 감사는 전부 read-only였다. 보고는 직접 재현한 뒤에만 반영했고, 수정은 한 명이 순차로 넣었다. 뮤턴트는 커밋된 코드에서 cp 백업으로 원복했다.
+
+### 앞 섹션 정정 (이 캠페인이 만든 회귀)
+
+- **G1은 보안 회귀였다.** `ac5bc1c52`는 댓글 **작성자**의 association을 **sender**에게 줬다. 그래서 write 권한자가 owner의 옛 댓글을 편집하면 owner scope로 실행됐다. `e9cd6491d`에서 association은 `comment.user.login === sender.login`일 때만 쓰고, 조회는 `Map`으로 바꿨다(prototype key가 모든 scope를 통과하던 것도 막음).
+- **C6은 시작 즉시 죽는 Chrome을 skip-green으로 만들었다.** endpoint timeout을 `probe-timeout`으로 매핑하면서 sandbox 없는 CI의 launch crash까지 여기에 들어갔다. `4776f1bed`에서 endpoint 대기가 프로세스 종료를 관찰한다. 종료는 `spawn-failed`로 기록되고 fail-loud 대상이다.
+- **C8의 문구**는 "real HOME"이 아니라 "caller's HOME"이다. Bun의 `userInfo().homedir`는 `$HOME`을 돌려준다.
+- **A1(Rust 7 fail)은 해결됐다(`37d5c4a72`).** fence가 `.rustup`·`.cargo`를 scratch HOME에 symlink로 빌려준다. 제품 env scrub이 `RUSTUP_HOME`을 지워서 env var 방식은 효과가 없었다. 다른 세션의 `c63a8e393`("done")이 중간 버전을 함께 커밋했고, history는 rewrite하지 않았다.
+- **커밋 메시지 오류** (history rewrite 없이는 못 고쳐서 여기 기록):
+  - `fc7fcb016`: "16 of 17" → 실제는 19줄 중 17개 실패(대조군 2). "complexity 5→4" → 실제는 7→4. "body가 quote state를 건드리지 않는다"와 "`<<<`는 opener가 아니다"는 `2dcd61ee0` 전까지 거짓.
+  - `3ef6c2e75`: "Either way it is a junit RECORD"는 hook 안에서 부른 gate에 대해서는 거짓이었다. `ee3ff16d1`에서 gate는 module scope에서만 부르도록 arm으로 강제했다.
+
+### 반영 완료
+
+| # | 결함 (재현) | 조치 | 커밋 |
+|---|---|---|---|
+| R3A-1 | 시작 즉시 죽는 Chrome → `probe-timeout` → 17개 browser case skip-green | 종료 관찰, `spawn-failed` | `4776f1bed` |
+| R3A-2 / R4-F3 | `Bun.env`·alias·spread, 이어서 `node:process` import·`import.meta.env`·`global`·getter·`Object.assign`으로 채운 literal이 scanner에서 "injected" | ambient 이름을 fixed point까지 전파(함수 본문 제외). 모든 binding 종류를 반영하고, 쓰기가 일어난 이름은 불신 | `3ef6c2e75`, `ee3ff16d1` |
+| R3A-3 / R4-F4 | WIRING arm이 `capabilityRecords: []` 호출에도, `return` 뒤로 옮긴 push에도 green | const collector 하나가 전달·forward·출력됨을 증명. push는 도달 가능한 statement여야 함 | `3ef6c2e75`, `ee3ff16d1` |
+| R3A-4 / R3E-2 | lane REQUIRED 실패가 `beforeAll` throw라서 junit `(unnamed)`로 기록되고 `executedCases:1, blocked=0` | gate가 `[capability] REQUIRED group <id>` 이름 붙은 실패 또는 RECORD를 등록 | `3ef6c2e75` |
+| R4-F1 | 위 수정 이후 선택 group(nightly-heavy, floor 제외)이 PR `required`를 red로 만듦 | 두 체계에서 `blocked-missing`의 뜻이 다름. receipt id는 항상 hard, lane group은 REQUIRED일 때만 hard | `ee3ff16d1` |
+| R4-F2 | hook 실패(npm install 실패, Ollama 불통)가 실행 case로 계산돼 `js-test-runner` floor 2/2를 채움 | Bun junit에서 `line` 없는 failure를 failed-setup으로 분류. Ollama는 `capabilitySetupFailed`로 보고 | `ee3ff16d1` |
+| R3A-5 / R4-F6 | 표준 selector·interface 필드·label·type parameter·hoisted `var`가 false red, pattern default·instance field가 false green | 위치 기반 conditional, 이름 위치 확장, scope 해석 | `3ef6c2e75`, `ee3ff16d1` |
+| R3A-6 | signal 경로가 receipt를 지우지 않음 | `releaseCampaign`(guarded 삭제 후 lease 해제)을 두 출구 모두 호출 | `3ef6c2e75` |
+| R3A-7 | caller HOME 재probe 하나가 reject하면 campaign이 죽음 | probe마다 catch, 남은 deadline 안에서만 실행 | `3ef6c2e75` |
+| R3A-8 / R4-F7 | detail의 개행이 `&#10;`로 record prefix를 가림. id 형태 가정이 검증되지 않음 | 제어문자 치환, id가 `^[a-z0-9-]+$`이고 receipt id에 `group` 없음을 arm으로 확인 | `3ef6c2e75`, `ee3ff16d1` |
+| R4-F5 | gate를 hook 안에서 부르면 record 등록이 조용히 실패 | 모든 lane gate를 module top level에서만 부르도록 corpus arm으로 강제 | `ee3ff16d1` |
+| R3E-3 / R4 matrix F1·F5 | shadow matrix worker에 receipt가 없고 이후엔 chrome이 없음. planner에 완전성 검사 없음. worker가 signal에 lane을 누수 | `prepareCapabilityLane`(`includeChrome`)으로 실행, planner도 거부, SIGINT/SIGTERM이면 abort와 dispose | `1724ed65f`, `950946244` |
+| R3E-5 / R4 matrix F6 | arm·kill된 campaign이 실제 shared cache에 receipt를 누수. sweep 오류가 campaign을 죽임 | dead writer·만료 receipt sweep(경고만 하고 계속), `cacheRoot`를 필수로 | `3ef6c2e75`, `59c619cd5`, `950946244` |
+| R3C-1..7,9 | 대체 쓰기가 격리를 해제, slot 쓰기 실패가 lane을 해제, 다른 identity를 덮어씀, 포트 누수, 이유 1개만 남음, 구 reader 대기, normalizer가 포트를 이동 | `holdUntilMs`, fallback 병합, foreign 거부, listener 해제, 이유 누적, v1 mirror, fixed point normalizer | `e6547f183` |
+| R4 quarantine F2·F3·F4 | 이름 옮기기 후 쓰기 실패 → 격리 해제. 두 쓰기 모두 실패(같은 볼륨) → 살아있는 그룹 위로 lane 해제. foreign의 active hold를 덮어씀 | hard link로 보존한 뒤 rename. owner 4곳이 `quarantineOrHoldLane`을 await(그룹이 살아있는 동안, TTL 이내에서 hold). hold도 거부 | `950946244` |
+| R3D-1·2 | (G1 정정 참조) | | `e9cd6491d` |
+| R3D-3..7 / R4 catalog F1..F8 | heredoc 본문·escape·`"$(…)"`가 이후 read를 마스킹. interpreter를 줄 전체에서 매칭. 여러 줄·큰따옴표·중첩 inline script 누락. `<<<` 오판. Python pop 문장 오판. 문자열 속 괄호를 세고 dict 1개에 14.5s | 한 pass 마스커(frame stack), 세그먼트 command word, 줄바꿈 보존, 모든 깊이 span, 한 pass bracket 추적, 규칙마다 fixture | `fc7fcb016`..`bab5c692b` |
+| 부수 | `tests/unit/dev`에 red 3개: 내가 넣은 module-load `mkdtemp`, fixed sleep, 09-10부터 red였던 INTERLOCK arm. unused import 2개 | beforeAll 이동, unix socket barrier, AST로 import 판정, import 제거 | `5fca11988`, `950946244` |
+
+**뮤턴트:** 이번 두 라운드에서 121개를 돌렸고 마지막에 전부 red다.
+- quarantine R3: 9
+- capability R3: 37 (arm 구멍 2개와 잘못 만든 뮤턴트 1개를 보완)
+- matrix R3: 3
+- catalog R3: 33 (fixture 1줄 보완)
+- R4 capability·quarantine·matrix: 27
+- R4 catalog: 12
+
+감사자가 추가로 돌린 catalog 뮤턴트 43개 중 25개가 살아남았다. 동등하지 않은 16개는 fixture로 닫았다.
+
+**부수효과(보고):** `toolchain-roots.test.ts`가 `cacheRoot` 없이 wrapper를 불러서, 테스트 실행 중에 clone의 실제 shared receipt cache를 sweep했다. 죽은 프로세스가 남긴 receipt 13개가 삭제됐다. 삭제 대상 자체는 sweep이 원래 지우는 것이지만, 테스트에서 일어나면 안 되는 일이다. `cacheRoot`를 필수로 바꿔 타입 수준에서 막았다.
+
+### 수치 (HEAD `bab5c692b`, load ≈6, 성능 주장 아님)
+
+| 항목 | 값 |
+|---|---|
+| `tests/unit/dev` + module-load guard + lease + lane 17파일 | 843 pass / 91 skip / 0 fail |
+| contract 레인 (`bun run test:contract`) | 14 pass / 4 skip / 0 fail. artifact: executed 4 files·14 cases, blocked 0, setup 0 |
+| real-toolchain 레인 | 30 pass / 26 skip / 0 fail. 이전 22/28/7 → 25/26/5(load 30–46). artifact: executed 16 files·30 cases, blocked 0. 선택 group 기록 2개(`lsp-go` gopls 없음, `native-debugger` dlv 없음) |
+| rust-analyzer arm 4개 | load 30–46에서 실패했고 load 6에서 통과. 부하 원인 확정 |
+| catalog, old 대 new, 실제 corpus | 8,503 files·1,105 names, 잃은 것 0·새로 생긴 것 0 |
+| 8,000-name Python dict 스캔 | 14.5 s(감사 측정) → 45 ms (단일 측정. 알고리즘을 역방향 반복에서 한 pass로 바꾼 결과이고 suite 성능 주장이 아님) |
+| shared receipt cache 누수 | 13 → 0 |
+| typecheck:all · lint:debt · fc validate | pass · 23/0 regression · 1071 features |
+
+### 남은 액션 (기능 · 왜 · ROI)
+
+| # | 기능 | 왜 | ROI |
+|---|---|---|---|
+| B1 | CI `toolchain` job에 gopls·pyright·typescript-language-server·rust-analyzer 설치 단계 추가 | group floor 7개 중 4개(`lsp-rust`·`lsp-go`·`lsp-pyright`·`lsp-typescript`)가 구성상 확정 red다. 앞 섹션의 "가능성"은 틀린 표현. 설치 단계는 manifest `needs[].provision`에 있다 | 높음. 단 빌링 차단이라 검증 불가(외부 blocker) |
+| B2 | `quarantineOrHoldLane` hold 중 두 번째 Ctrl-C가 경고와 함께 즉시 해제 | 지금은 첫 signal의 `terminating` guard 때문에 두 번째 signal이 무시되고, 최대 30분 hold를 끊으려면 SIGKILL밖에 없다 | 중간. 드문 disk-full 상황의 UX |
+| B3 | quarantine root를 사용자 전용 경로(`DARWIN_USER_TEMP_DIR`, `$XDG_RUNTIME_DIR`)로 | 다른 local 사용자가 `/tmp/quanta-lease-quarantine-<uid>`를 먼저 만들면 lane이 재부팅까지 막힌다(R3C-8) | 낮음. 단일 사용자 개발 호스트 |
+| B4 | scanner가 call 결과(`{K: read()}`)도 추적, 이름 기반을 scope 기반 binding으로 | 문서화된 한계. arm 자체가 produce 결과를 넘겨서 지금은 추적하지 않는다 | 낮음. 의도적 우회만 해당 |
+| B5 | hook 실패 분류가 Bun junit 형태(`line` 없음)에 의존 | Bun writer가 바뀌면 분류가 달라진다. 실제 Bun을 도는 arm이 red로 알려준다 | 낮음 |
+| B6 | Python dict 값 위치의 `os.environ.pop(`(`{"a": pop("X")}`) | `:` 경계를 lambda·block과 구분하지 못해 write로 분류된다 | 낮음 |
+| A2·A3·A5·A6·A7·A8·A9·A10 | 앞 섹션과 동일 | 이번 라운드에서 다루지 않음 | 앞 섹션 참조 |
+
+### 외부 권한 blocker
+
+- 원격 push·PR·branch protection은 권한이 없어 하지 않았다. 전부 local `main`에만 있다.
+- hosted CI는 GitHub Actions 빌링 차단이다. B1(toolchain 설치), capability 레인과 `required` aggregator의 실제 실행, `fetch-depth: 0` 변경(`dc0878fa0`)이 미검증이다.
+- `ci.yml`의 capability 단계 이름(`capability-result.v1`)과 artifact 버전(v2) 불일치는 그대로다.
+
+---
+
 ## prepush 실행 로그 (2026-09-12, clean tree, healthy load)
 
 부하가 8–20까지 떨어진 창에서 prepush를 반복 실행했다. **매 실행마다 red가 하나씩

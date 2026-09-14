@@ -1,0 +1,80 @@
+{
+ "cluster": "C — shell hard-deny coverage holes (SEC-3 write_stdin + SEC-4 unresolvable destructive targets)",
+ "designBreaks": [
+  {
+   "attack": "exec_command env-overlay fix over-restricts and breaks the tool's documented purpose",
+   "bypassOrRegression": "REGRESSION. R1's changes[] says to build exec_command's declared-env overlay 'through the SAME allowlist governance as buildPtyEnv/applyLocalEnv (only DEFAULT_ENV_ALLOWLIST names pass)'. DEFAULT_ENV_ALLOWLIST (src/shared/env-scrub.ts:44-68) is ~18 fixed names (PATH/HOME/LANG/…/VIRTUAL_ENV/PYTHONPATH/PYTEST_ADDOPTS). But ExecCommandInputSchema (src/subagent/tools-6.ts:82-88) DOCUMENTS supporting up to 64 ARBITRARY new env vars ('a child shell that needs more than 64 NEW env vars'). Routing the declared overlay through the allowlist SILENTLY DROPS every model-declared var not in the ~18-name list (CFLAGS, MYVAR, per-repo config vars), whereas exec_command's current `{...scrubEnvFrom(process.env), ...(input.env)}` passes them. The correct structural fix is a code-injecting-NAME denylist (BASH_ENV/ENV/SHELLOPTS/PS4/BASH_FUNC_*/LD_PRELOAD/DYLD_*) that preserves the arbitrary overlay, or routing through getShellSandbox — not DEFAULT_ENV_ALLOWLIST. R1 argued a denylist is 'less safe' and never flagged that its allowlist choice guts the feature.",
+   "evidence": "Probe buildPtyEnv({parentEnv:{PATH,OPENAI_API_KEY,FOO}, declared:{CFLAGS:'-O2',MYVAR:'hello',PYTHONPATH:'/repo',BASH_ENV:'$(touch m)'}, inheritEnv:false}) => result keys = PATH,PYTHONPATH only; CFLAGS present? false, MYVAR present? false, BASH_ENV present? false, OPENAI_API_KEY present? false. Confirmed the hole it closes is real too: handleExecCommand({command:'true',env:{BASH_ENV:'.../rc.sh'}}) => exit 0 and marker.txt CREATED (arbitrary code ran that HARD_DENY never saw).",
+   "severity": "high",
+   "reproduced": true
+  },
+  {
+   "attack": "SEC-4 bypass-immune ASK floor flips legitimate scripted cleanup ADMIT→DENY inside the bench/eval lane",
+   "bypassOrRegression": "REGRESSION. The bench driver wires mode:'acceptEdits' AND onConfirm:async()=>false (src/runner/batch/eval/driver/config-build.ts:721 + :619). R1's floor makes evaluate() return `ask` for any recursive+force delete with an unresolvable target; the gate's resolveAskBranch then calls onConfirm, which in bench returns false ⇒ DENY. So `rm -rf \"$BUILD_DIR\"`, `cd \"$T\" && rm -rf *`, `rm -rf \"$@\"` — ordinary scripted cleanup in SWE-bench repos — flip from silently ADMITTED today to DENIED mid-eval, with unmeasured pass-rate impact. R1's compatibility/risks section frames the fail-closed deny as intended for 'headless/SDK/non-TTY' and never once mentions the bench lane's auto-declining onConfirm, which is exactly a no-real-operator surface that R1's decision (a) says must deny. Violates MEASURE-FIRST before a bench-affecting default-ON change.",
+   "evidence": "Real runAdmissibilityGate over ToolRegistry([bashTool,...createSubagent6Tools]) with permission {mode:'acceptEdits'} + onConfirm:async()=>false: `rm -rf \"$@\"`→ADMIT, `rm -rf \"$BUILD_DIR\"`→ADMIT, `cd \"$T\" && rm -rf *`→ADMIT today; control `rm -rf ~`→SHORT:deny. assessShellCommand on all three = kind 'unknown' (would become R1's new destructive-unresolved kind → ask → onConfirm(false) → deny). config-build.ts:619 onConfirm: async () => false; :721 mode 'acceptEdits'.",
+   "severity": "high",
+   "reproduced": true
+  },
+  {
+   "attack": "Recommended fix (Option C alone) does not deliver the 'ONE shared stdin assessment path' the task requires; split writes and interpreter payloads still bypass",
+   "bypassOrRegression": "BYPASS. R1's SEC-3 core change gives write_stdin `extractShellCommand:(i)=>i.data` — a second copy of pty_write's one-liner, NOT a shared path, and it reads the RAW single write, so a fragmented `rm -rf ` then `~\\n` each assesses safe; and write_stdin bytes into a retained `python3 -i` foreground process are Python (shutil.rmtree) that the shell grammar reads as safe. The task explicitly asks how every PTY-writing tool shares ONE assessment path assembling a logical command line (control chars ^U/backspace/bracketed-paste/heredoc) and rejecting NUL — R1 defers ALL of that to Option D as a 'fast-follow', so the RECOMMENDED deliverable leaves the stated core requirement unmet.",
+   "evidence": "assessShellCommand('rm -rf ')=safe / assessShellCommand('~\\n')=safe (split); assessShellCommand(\"import shutil,os; shutil.rmtree(os.path.expanduser('~'))\")=safe-known. pty_write's line-fragment buffer lives only in src/tool/pty/tools.ts (projectPtyInput/pendingInput) and is used for provenance, not fed to extractShellCommand; write_stdin (agent-tools-6.ts) and exec-command have no such buffer.",
+   "severity": "medium",
+   "reproduced": true
+  }
+ ],
+ "wrongClaimsInR1": [
+  {
+   "claim": "`cat \"$X\"` assesses `unknown` (benign-unreadable), and the SEC-4 unit hellgate asserts kind==='unknown' for `cat \"$X\"` as the paired control that must NOT become the new kind",
+   "whyWrong": "`cat \"$X\"` assesses `safe-known`, not `unknown`: `cat` is not a gated head, so assessSimple returns null and assessByHead falls to `?? safe()`; the unresolved-operand escalation only fires for gated heads. R1 repeats the 'cat \"$X\" → unknown / benign-unreadable stays unknown' claim in L0, the recommended structuralMechanism, the assess.ts change spec, and hellgate test #4. Written as specified, that unit assertion is RED on HEAD. The real distinction R1 needs is destructive-head+unresolvable-target (currently `unknown`) vs OTHER currently-`unknown` non-destructive commands like `git \"$SUB\" status` / `diskutil $verb` — not `cat`.",
+   "evidence": "assess 'cat \"$X\"' => safe-known; assess 'tar xzf \"$F\"' => safe-known; assess 'kill -9 $PID' => safe-known; assess 'git \"$SUB\" status' => unknown; assess 'diskutil $verb' => unknown (real parser via initShellEffectParser)."
+  },
+  {
+   "claim": "hellgate test #2: switch the completeness census surface to the assembled universe and 'add write_stdin to KNOWN_SHELL_INPUT_TOOLS + send_input to NON_CHANNEL_ALLOWLIST'; declared-extractor set === KNOWN with drift either direction failing",
+   "whyWrong": "The assembled universe declares extractShellCommand on container_exec, container_write_file, shadow_verify, and exec_command too — none in R1's proposed KNOWN list {bash,test_runner,pty_write,write_stdin}. It also mints DUPLICATE names (exec_command×2, pty_write×2, write_stdin×2 from different builders), so `surface.filter(...).map(t=>t.name).sort()` yields duplicates that `expect(declared).toEqual(known)` cannot match without dedup. And the smell oracle flags `run_tests` (not declared, not in R1's allowlist) → the SEMANTIC backstop assertion also fails. R1's concrete test-change spec is under-specified to the point of not passing; only R1's generic risk note ('may surface OTHER tools') hints at it.",
+   "evidence": "assembleToolUniverse(): 175 tools; declare extractShellCommand = [bash, container_exec, container_write_file, exec_command, exec_command, pty_write, pty_write, shadow_verify, test_runner]; declared-but-not-in-R1-KNOWN = container_exec, container_write_file, exec_command, shadow_verify; smell-positive-unhandled = run_tests, write_stdin(x2)."
+  },
+  {
+   "claim": "Option C 'Reuses the exact universal-floor semantics quanta already ships for confirm:\"sensitive\" (decideFloor, git push)'",
+   "whyWrong": "The shipped universal floor keys on a TOOL-LEVEL capability declaration (`capability.confirm === 'sensitive'` → decideFloor → universal-floor), evaluated in runHitlReviewGate BEFORE mode. R1's floor is a NEW per-command code path (shellReviewFloor consulting assessShellCommand(action.shellCommand)) inserted into evaluate/evaluateStack/evaluateAuto. It is a new mechanism modeled on the pattern, not a reuse of the existing floor — and it must be added to three separate functions plus a gate guard, which is not 'no new gate step'.",
+   "evidence": "src/agent/admissibility-gate/gates.ts:196-210 decideFloor keys on {tier,capability}; the recommended shellReviewFloor is a net-new function in src/permission/policy.ts consulting assessShellCommand, wired into evaluate() (policy.ts:296+), evaluateAuto, evaluateStack, and runHitlReviewGate's bypass-fallthrough guard."
+  }
+ ],
+ "missedHoles": [
+  {
+   "what": "node_repl is a FOURTH stdin-writing channel the design body's census omits",
+   "evidence": "src/runtime/node-repl/default-kernel.ts:446 `writeStdin(k,s)` → `k.proc.stdin.write(s)` feeds model-authored code into a live Node REPL child; :250 also writes a sentinel. The task asks to 'census all tools that write to a child's stdin'; R1's design body names only write_stdin/pty_write/send_input (node_repl appears only as an UNFENCEABLE/always-confirm aside). Same threat class as the interpreter-REPL bypass R1 lists; it is gated always-confirm, so lower urgency, but the census the task requested is incomplete.",
+   "severity": "low",
+   "reproduced": true
+  },
+  {
+   "what": "R1's plan to make assessFind emit the new destructive-unresolved kind is DEAD code",
+   "evidence": "Any `find … -delete|-exec|-execdir|-fprintf|-fprint|-fprint0|-fls|-ok|-okdir` is already `hard-deny` via the regex rule `find-action-flag-set` (src/permission/policy-rules.ts:122-125), and hardDenyReason runs the regex layer BEFORE assessShellCommand. Probe: hardDeny('find \"$ROOT\" -delete') = 'Blocked dangerous command…' (true). So assessFind never reaches the floor for the action-flag case — modifying it is over-engineering, not coverage. The genuine residuals are xargs→rm (echo ~|xargs rm -rf → unknown), positional/var rm (rm -rf \"$@\", x=~;rm -rf \"$x\"), chmod -R $VAR, and cd+glob — all confirmed `unknown`.",
+   "severity": "low",
+   "reproduced": true
+  }
+ ],
+ "jankyTests": [
+  {
+   "test": "hellgate #4 (SEC-4 unit) — asserts assessShellCommand('cat \"$X\"').kind==='unknown' as the benign-unreadable paired control",
+   "whyVacuousOrWeak": "Factually wrong: `cat \"$X\"` is safe-known, so the assertion is RED on HEAD and after the fix. The intended 'benign command I could not read stays distinct from destructive-unresolved' control is mis-chosen; cat with an unresolved arg is already fully allowed as safe-known, so it proves nothing about the unknown→new-kind boundary.",
+   "fix": "Use a currently-`unknown` NON-destructive control instead: `git \"$SUB\" status` and `diskutil $verb` both assess `unknown` on HEAD; assert they STAY `unknown` (not the new kind), and separately assert `cat \"$X\"`/`tar xzf \"$F\"` stay `safe-known`. That is the real invariant (destructive-unresolved leaves benign-unresolved and safe-unresolved untouched)."
+  },
+  {
+   "test": "hellgate #2 (SEC-3 completeness census) — swap surface to assembleToolUniverse and expect(declared).toEqual(KNOWN) with KNOWN = current 3 + write_stdin",
+   "whyVacuousOrWeak": "As specified it cannot pass: the assembled universe declares extractShellCommand on container_exec/container_write_file/shadow_verify/exec_command (absent from KNOWN) and mints duplicate names (exec_command×2, pty_write×2, write_stdin×2), so toEqual fails on membership AND duplication; run_tests trips the smell backstop. A test author would 'fix' it by loosening the assertion (dedup + toContain), quietly turning the EXACT-equality drift guard into a weak subset check — defeating its purpose.",
+   "fix": "De-duplicate names before comparing; enumerate the FULL declared set as KNOWN (bash, test_runner, pty_write, write_stdin, exec_command, container_exec, container_write_file, shadow_verify) each with a danger/benign/expectedExtract probe; add run_tests + node_repl to NON_CHANNEL_ALLOWLIST (argv/DAP, not shell-string) with reasons; keep the strict set-equality after dedup."
+  },
+  {
+   "test": "hellgate #7 (exec_command env sibling e2e) — BASH_ENV marker NOT created; paired control exec_command{command:'touch $MARKER'} still creates its file",
+   "whyVacuousOrWeak": "The paired control uses NO declared env, so it stays GREEN even though R1's allowlist fix silently DROPS legitimate declared vars (CFLAGS/MYVAR). The test guards the injection it closes but not the regression it introduces — a broken allowlist fix that also breaks the arbitrary-env feature passes this test.",
+   "fix": "Add a paired control asserting a legit NON-allowlisted declared var reaches the child, e.g. exec_command{command:'printf %s \"$CFLAGS\" > out', env:{CFLAGS:'-O2'}} ⇒ out contains '-O2'. Under R1's DEFAULT_ENV_ALLOWLIST fix this FAILS (CFLAGS dropped), forcing the denylist-not-allowlist design; under the correct denylist fix it stays green while BASH_ENV is still blocked."
+  }
+ ],
+ "overEngineeringOrHeuristics": [
+  "exec_command env fix via DEFAULT_ENV_ALLOWLIST is over-restriction disguised as structure: it drops legitimate model-declared env (CFLAGS/MYVAR) the schema explicitly supports. Correct structural fix is a code-injecting-name DENYLIST (BASH_ENV/ENV/SHELLOPTS/PS4/BASH_FUNC_*/LD_PRELOAD/DYLD_*/IFS) preserving the arbitrary overlay, or routing the spawn through getShellSandbox — not an 18-name allowlist.",
+  "assessFind emitting the new destructive-unresolved kind is dead work: the regex `find-action-flag-set` hard-denies every action-flag find before assessShellCommand is consulted. The assessor list should be scoped to the genuinely-open shapes (assessDelete recursive+force with unresolvable operand, stdinOperandVerdict xargs→rm/sh, assessSimple chmod/chown -R with unresolvable operand, cd-unknown+glob).",
+  "Prefix-verb suppression for stdin tools (write_stdin|y is a meaningless keystroke-fragment key) is only in userDecisions, not in changes[]; the recommended change set does not actually close it. The content-keyed grant amplifier is auto-fixed by the extractor, but the meaningless session_prefix path is left unaddressed in the deliverable.",
+  "Floor at precedence 1.5 in evaluateStack sits ABOVE the post-denial-override axis (precedence 2), so a command a user already override-approved via the full denied→seenRisk→override sequence is re-asked; R1 states 'before per-thread' but does not call out that it also defeats post-denial overrides. Minor (permissionStack default-OFF) but an unflagged behavior change."
+ ]
+}

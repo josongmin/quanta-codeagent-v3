@@ -1,5 +1,6 @@
 import {
   closeSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   openSync,
@@ -10,7 +11,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs"
-import { availableParallelism, freemem, loadavg, tmpdir, totalmem } from "node:os"
+import { availableParallelism, freemem, loadavg, tmpdir, totalmem, userInfo } from "node:os"
 import { dirname, join, relative, resolve } from "node:path"
 import { capabilityReceiptEnvForCampaign } from "./capability-probe-producer"
 import {
@@ -19,6 +20,16 @@ import {
   MAX_CAPABILITY_RECEIPT_TTL_MS,
   mergeRequiredCapabilities,
 } from "./capability-receipt"
+import {
+  capabilityReceiptDirectory,
+  capabilityReceiptPathFor,
+  sweepCapabilityReceipts,
+} from "./capability-receipt-files"
+import {
+  type CapabilityRecordRow,
+  capabilityRecordsFromJunit,
+  describeCapabilityRecords,
+} from "./capability-result"
 import {
   type ExecutedFileSetVerdict,
   executedFileSetDigest,
@@ -31,7 +42,7 @@ import {
   failureRecordsFromJunit,
   writeFailureAttemptArtifact,
 } from "./failure-attempt-producer"
-import { quarantineLane } from "./lease-quarantine"
+import { quarantineOrHoldLane } from "./lease-quarantine"
 import { mintableScanReachAuthority } from "./scan-reach-authority"
 import {
   describeWatchdogKill,
@@ -48,6 +59,7 @@ import {
   discoverSuiteFiles,
   SUITE_FLOORS,
   type SuiteName,
+  trackedSuiteTestFiles,
 } from "./test-shard-discovery"
 import {
   acquireTestShardLease,
@@ -113,6 +125,7 @@ import {
   type TimingSample,
 } from "./test-shard-timings"
 import { loadTierPopulationFloors } from "./test-tier-population"
+import { lendToolchainRoots, toolchainLinks } from "./toolchain-roots"
 import { ADMISSION_DEADLINE_ENV } from "./verification-admission"
 import { executionPolicyDigest } from "./verification-execution-policy"
 import { sharedVerificationCacheRoot } from "./verification-receipt"
@@ -489,6 +502,7 @@ const runShard = async (
   mkdirSync(workerTmp, { recursive: true })
   mkdirSync(quantaHome, { recursive: true })
   const userLibrary = lendRealUserLibrary(workerHome, plan.resourceClass)
+  lendToolchainsInto(workerHome)
   mkdirSync(prefsHome, { recursive: true })
   mkdirSync(benchResults, { recursive: true })
   process.stdout.write(`[test:shards] chunk=${shard} user_library=${userLibrary}\n`)
@@ -963,6 +977,12 @@ const executeChunks = async (input: {
   readonly journal: TimingJournal
   /** `QUANTA_CAPABILITY_RECEIPT` + `QUANTA_CAPABILITY_BINDING` for the workers. */
   readonly capabilityEnv: Record<string, string>
+  /**
+   * Every capability record in every chunk's junit, fresh or replayed. Collected
+   * so the campaign SAYS what it did not execute: a `failed-setup` used to be a
+   * skip in a green chunk with nothing reading it outside the CI lanes.
+   */
+  readonly capabilityRecords: CapabilityRecordRow[]
 }): Promise<readonly string[]> => {
   const totalChunks = input.chunks.length
   const scanReachSinks = new Map<number, string>()
@@ -991,6 +1011,7 @@ const executeChunks = async (input: {
       continue
     }
     materializeCachedJunit(input.opts, cached.chunk.index, lookup.receipt)
+    input.capabilityRecords.push(...capabilityRecordsFromJunit(lookup.receipt.junitXml ?? ""))
     // A cache HIT must restore the scheduling evidence the executed run
     // produced, or the speed budget sees a green shard with no timings and
     // fails forever with no way to repair it. The sample keeps the RECEIPT's
@@ -1050,6 +1071,9 @@ const executeChunks = async (input: {
           testTimeoutMs: input.testTimeoutMs,
         }
         const sink = validateCompletedShard(input.before, completedShard)
+        input.capabilityRecords.push(
+          ...capabilityRecordsFromJunit(readFileSync(result.junitPath, "utf8")),
+        )
         cacheSuccessfulShard(cached, result, input.opts, input.journal, input.testTimeoutMs)
         return { index: cached.chunk.index, sink }
       },
@@ -1127,6 +1151,14 @@ const readSpoolTail = (path: string, windowBytes: number): string => {
   }
 }
 
+/**
+ * Lend this process's toolchain roots into a HOME it is about to replace — a
+ * worker's or the capability probe's, through ONE call so the probe and the
+ * workers it answers for see the same toolchains (`tools/dev/toolchain-roots.ts`).
+ */
+const lendToolchainsInto = (home: string): readonly string[] =>
+  lendToolchainRoots(toolchainLinks({ home, realHome: process.env.HOME, exists: existsSync }))
+
 const digestFiles = (files: readonly string[]): string =>
   new Bun.CryptoHasher("sha256").update(files.join("\0")).digest("hex")
 
@@ -1143,6 +1175,7 @@ const emitDiscovery = (opts: RunnerOptions): void => {
     suite: opts.suite,
     tier: opts.tier,
     discovered: suite.files,
+    tracked: trackedSuiteTestFiles(REPO_ROOT, opts.suite),
     suiteFloor: SUITE_FLOORS[opts.suite],
     tierFloors: loadTierPopulationFloors(),
     selectForTier: (ids, tier) => tierSelectionFromPolicy(ids, tier, TEST_POLICY_OVERRIDES),
@@ -1180,6 +1213,7 @@ const selectManifest = (opts: RunnerOptions): ShardSelection =>
     // re-relativises them itself through `membershipFile`.
     discovered: [...discoverSuiteFiles(REPO_ROOT, opts.suite)],
     idOf: (file) => relative(REPO_ROOT, file),
+    tracked: trackedSuiteTestFiles(REPO_ROOT, opts.suite),
     suiteFloor: SUITE_FLOORS[opts.suite],
     tierFloors: loadTierPopulationFloors(),
     selectForTier: (files, tier) => tierSelectionFromPolicy(files, tier, TEST_POLICY_OVERRIDES),
@@ -1298,8 +1332,12 @@ const main = async (): Promise<void> => {
   // source-JS preflight, and the capability probe (which launches Chrome). A
   // refused suite/tier used to be reported only after all three, and on a dirty
   // tree the clean-checkout refusal fired first and hid it.
-  const selection = selectManifest(opts)
+  // The tree is snapshotted BEFORE it is read, not after. Taken after, a commit
+  // landing during discovery or policy resolution appeared in both this snapshot
+  // and the pre-run one, so the comparison passed over a manifest that had
+  // missed the commit's files.
   const selectedAt = await gitSnapshot()
+  const selection = selectManifest(opts)
   // A campaign wrapper (verification-campaign.ts) may already own the
   // repository lane for this whole verification run. A live ancestor-owned
   // token means "do not reacquire" — reacquiring would deadlock against the
@@ -1371,6 +1409,23 @@ const main = async (): Promise<void> => {
   // signal in that window must not find a half-built one — so "nothing to
   // commit" is a real state rather than a missing case.
   let openJournal: TimingJournal | undefined
+  /** Per-process names meant every campaign that did not remove its own left one behind. */
+  let capabilityReceiptPath: string | undefined
+  /**
+   * The receipt, then the lease — on BOTH exits that run code. The removal lived
+   * only in `finally`, which the signal path's `process.exit` skips, so every
+   * Ctrl-C left this campaign's receipt in the shared cache. Guarded, because a
+   * throwing removal must not keep the lane.
+   */
+  const releaseCampaign = (): void => {
+    try {
+      if (capabilityReceiptPath !== undefined) rmSync(capabilityReceiptPath, { force: true })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      process.stderr.write(`[test:shards] WARN capability receipt removal failed: ${message}\n`)
+    }
+    lease?.release()
+  }
   const onTerminationSignal = (signal: NodeJS.Signals): void => {
     if (terminating) return
     terminating = true
@@ -1382,24 +1437,9 @@ const main = async (): Promise<void> => {
       // block entirely, so a Ctrl-C used to release the lane with unaccounted
       // survivors and leave the timing journal behind — measured as a quarantine
       // file that exists on the finally path and not on this one.
-      accountForSurvivors: (outcome) => {
-        // INDEPENDENTLY guarded. These two were one try/catch in the caller, so
-        // a quarantine write that threw — and `quarantineLane` now throws by
-        // design when the keeper script is missing — skipped the journal commit
-        // as well, losing the forensics in exactly the state that needs them.
-        try {
-          if (outcome.groups.length > 0) {
-            quarantineLane({
-              legacyCacheRoot: SHARED_CACHE_ROOT,
-              repositoryId: leaseIdentity,
-              groups: outcome.groups,
-              log: (line) => process.stderr.write(line),
-            })
-          }
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error)
-          process.stderr.write(`[test:shards] WARN signal-path quarantine failed: ${message}\n`)
-        }
+      accountForSurvivors: async (outcome) => {
+        // INDEPENDENTLY guarded, and the journal FIRST: holding the lane below can
+        // last until the survivors exit, and the forensics must not wait on it.
         // Timing is a scheduler hint, never a verdict input, so committing it on
         // the way out is safe — and NOT committing it is what left orphan
         // journals in the shared cache for a recycled pid to strand forever.
@@ -1415,8 +1455,18 @@ const main = async (): Promise<void> => {
           const message = error instanceof Error ? error.message : String(error)
           process.stderr.write(`[test:shards] WARN signal-path journal commit failed: ${message}\n`)
         }
+        // A quarantine write that fails EVERYWHERE holds the lane instead of
+        // releasing it over live groups (`quarantineOrHoldLane`).
+        if (outcome.groups.length > 0) {
+          await quarantineOrHoldLane({
+            legacyCacheRoot: SHARED_CACHE_ROOT,
+            repositoryId: leaseIdentity,
+            groups: outcome.groups,
+            log: (line) => process.stderr.write(line),
+          })
+        }
       },
-      releaseLease: () => lease?.release(),
+      releaseLease: releaseCampaign,
       log: (line) => process.stderr.write(line),
     }).then((code) => process.exit(code))
   }
@@ -1479,11 +1529,25 @@ const main = async (): Promise<void> => {
     // this says, and the cost is a `skipped-capability`, never a false green.
     const probeHome = join(runRoot, "capability-probe-home")
     mkdirSync(join(probeHome, ".quanta"), { recursive: true })
+    lendToolchainsInto(probeHome)
+    // What earlier campaigns could not remove: a SIGKILL runs no exit path. Swept
+    // while holding the lease, so no campaign of this lane is still reading one.
+    const swept = sweepCapabilityReceipts({
+      directory: capabilityReceiptDirectory(SHARED_CACHE_ROOT),
+      nowMs: Date.now(),
+      log: (line) => process.stderr.write(line),
+    })
+    if (swept.length > 0) {
+      process.stdout.write(
+        `[test:shards] removed capability receipts nothing can read: ${swept.join(", ")}\n`,
+      )
+    }
     const capability = await capabilityReceiptEnvForCampaign({
       repoRoot: REPO_ROOT,
       tier: receiptTier,
       head: before.head,
       probeEnv: { ...(process.env as Record<string, string>), HOME: probeHome },
+      hostHome: userInfo().homedir,
       // The campaign's own ceiling, not the one-hour default: a receipt that
       // expires mid-campaign sends every later worker back to skipping
       // everything, silently and green.
@@ -1497,12 +1561,9 @@ const main = async (): Promise<void> => {
       // inherited lease or a stale QUANTA_VERIFICATION_LEASE_* in a shell makes
       // it reachable, and a unique name removes the class rather than arguing
       // about the window.
-      outPath: join(
-        SHARED_CACHE_ROOT,
-        "capability",
-        `${opts.suite}-${receiptTier}-${process.pid}.receipt.json`,
-      ),
+      outPath: capabilityReceiptPathFor(SHARED_CACHE_ROOT, `${opts.suite}-${receiptTier}`),
     })
+    capabilityReceiptPath = capability.path
     process.stdout.write(
       `[test:shards] capability receipt tier=${opts.tier} binding=${capability.bindingSha256.slice(0, 16)} ` +
         `available=${Object.values(capability.receipt.capabilities).filter((f) => f.status === "available").length}/` +
@@ -1594,11 +1655,13 @@ const main = async (): Promise<void> => {
       concurrency,
     })
 
+    const capabilityRecords: CapabilityRecordRow[] = []
     const scanReachSinks = await executeChunksWithSourcePostflight({
       chunks: cachedChunks,
       opts,
       runRoot,
       capabilityEnv: capability.env,
+      capabilityRecords,
       before,
       testTimeoutMs,
       registry,
@@ -1634,6 +1697,11 @@ const main = async (): Promise<void> => {
         chunks.map(({ index }) => index),
       )
     }
+    // Not a verdict input — a skipped capability is not a failure here — but never
+    // silent: the PASS below covers what ran, and this line says what did not.
+    process.stdout.write(
+      `[test:shards] capability records: ${describeCapabilityRecords(capabilityRecords)}\n`,
+    )
     process.stdout.write(
       `[test:shards] PASS suite=${opts.suite} chunks=${chunks.length}/${chunks.length} ` +
         `manifest_files=${manifest.length} head=${before.head}\n`,
@@ -1670,24 +1738,19 @@ const main = async (): Promise<void> => {
       // BEFORE the release, because the kernel frees the port the instant this
       // process exits.
       if (drain.groups.length > 0) {
-        // Guarded like the signal path. Bare, a throw here replaced the real
-        // verdict ("3 chunks red") with a quarantine error AND skipped
-        // `lease?.release()` on the next line — measured. The record is
-        // best-effort; the verdict and the release are not.
-        try {
-          quarantineLane({
-            legacyCacheRoot: SHARED_CACHE_ROOT,
-            repositoryId: leaseIdentity,
-            groups: drain.groups,
-            log: (line) => process.stderr.write(line),
-          })
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error)
-          process.stderr.write(`[test:shards] WARN quarantine write failed: ${message}\n`)
-        }
+        // Never throws. Bare, a throw here replaced the real verdict ("3 chunks
+        // red") with a quarantine error AND skipped the release below — measured.
+        // And a write that fails everywhere HOLDS the lane until the groups exit
+        // (bounded), instead of releasing it over them.
+        await quarantineOrHoldLane({
+          legacyCacheRoot: SHARED_CACHE_ROOT,
+          repositoryId: leaseIdentity,
+          groups: drain.groups,
+          log: (line) => process.stderr.write(line),
+        })
       }
     }
-    lease?.release()
+    releaseCampaign()
   }
 }
 

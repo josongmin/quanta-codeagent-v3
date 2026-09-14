@@ -340,4 +340,38 @@ describe("HELLGATE adapter — navigate invalidates stale refs [12]", () => {
     expect(stale.ok).toBe(false)
     if (!stale.ok) expect(stale.error.kind).toBe("element-not-found")
   })
+
+  test("WIRING — the adapter tells the endpoint wait when Chrome has exited", async () => {
+    // The endpoint wait can only see a death it is told about. A spawner whose
+    // process exits at once, and a profile that never gets the port file: the
+    // spawn must fail as an EXIT, well before its endpoint budget.
+    const state = { t: 0 }
+    const b = createCdpBrowser({
+      spawner: {
+        which: () => "/usr/bin/google-chrome",
+        spawn: () => ({ pid: 1, kill: () => {}, exited: Promise.resolve(1) }),
+      },
+      transport: { connect: async () => ok({} as CdpConnection) } as unknown as CdpTransport,
+      fs: { existsSync: () => false, readFile: () => null, mkdirp: () => {}, rmrf: () => {} },
+      scheduler: {
+        schedule: (ms, cb) => {
+          state.t += ms
+          queueMicrotask(cb)
+          return () => {}
+        },
+      },
+      clock: { now: () => state.t },
+      profileRoot: "/tmp/cdp-exit-arm",
+      endpointTimeoutMs: 60_000,
+    })
+    const spawned = await b.spawn()
+    expect(spawned.ok).toBe(false)
+    if (!spawned.ok) {
+      expect(spawned.error).toEqual({
+        kind: "spawn-failed",
+        detail: "Chrome exited with code 1 before the DevTools endpoint was ready",
+      })
+    }
+    expect(state.t).toBeLessThan(60_000)
+  })
 })

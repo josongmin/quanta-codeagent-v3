@@ -31,7 +31,7 @@ import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import ts from "typescript"
-
+import { SUITE_ROOTS, type SuiteName } from "../../../tools/dev/test-shard-discovery"
 import {
   CorpusLostError,
   type ShardSelectionInput,
@@ -42,7 +42,10 @@ import type { TierPopulationFile } from "../../../tools/dev/test-tier-population
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 
-/** A v2 record in memory; the loader re-derives, `checkTierPopulation` does not. */
+/**
+ * A v3 record in memory; the loader re-derives, `checkTierPopulation` does not.
+ * `measured` is what every suite discovered and selected when it was measured.
+ */
 const recordWith = (
   tiers: Readonly<Record<string, number>>,
   narrow: Readonly<Record<"core" | "unit" | "integration", number>> = {
@@ -50,55 +53,75 @@ const recordWith = (
     unit: 1,
     integration: 1,
   },
-): TierPopulationFile => ({
-  schema: "quanta.test-tier-population.v2",
-  tiers: Object.fromEntries(
-    Object.entries(tiers).map(([t, minFiles]) => [t, { minFiles, reason: "fixture" }]),
-  ),
-  suites: {
-    measuredAt: "fixture",
-    universeSelected: Object.fromEntries(Object.keys(tiers).map((t) => [t, 0])),
-    floors: {
-      core: Object.fromEntries(
-        Object.keys(tiers).map((t) => [
-          t,
-          { selected: 0, minFiles: narrow.core, reason: "fixture" },
-        ]),
-      ),
-      unit: Object.fromEntries(
-        Object.keys(tiers).map((t) => [
-          t,
-          { selected: 0, minFiles: narrow.unit, reason: "fixture" },
-        ]),
-      ),
-      integration: Object.fromEntries(
-        Object.keys(tiers).map((t) => [
-          t,
-          { selected: 0, minFiles: narrow.integration, reason: "fixture" },
-        ]),
-      ),
-    },
+  measured: { readonly discovered: number; readonly selected: number } = {
+    discovered: 100,
+    selected: 100,
   },
-})
+): TierPopulationFile => {
+  const row = (minFiles: number) =>
+    Object.fromEntries(
+      Object.keys(tiers).map((t) => [
+        t,
+        { selected: measured.selected, minFiles, reason: "fixture" },
+      ]),
+    )
+  return {
+    schema: "quanta.test-tier-population.v3",
+    tiers: Object.fromEntries(
+      Object.entries(tiers).map(([t, minFiles]) => [t, { minFiles, reason: "fixture" }]),
+    ),
+    suites: {
+      measuredAt: "fixture",
+      discovered: {
+        full: measured.discovered,
+        core: measured.discovered,
+        unit: measured.discovered,
+        integration: measured.discovered,
+      },
+      universeSelected: Object.fromEntries(Object.keys(tiers).map((t) => [t, measured.selected])),
+      floors: {
+        core: row(narrow.core),
+        unit: row(narrow.unit),
+        integration: row(narrow.integration),
+      },
+    },
+  }
+}
 
 const floors: TierPopulationFile = recordWith({ pr: 80, full: 80 })
 
-const files = (count: number, prefix = "/abs/repo/tests/unit"): readonly string[] =>
-  Array.from(
+/**
+ * Absolute paths spread round-robin over the SUITE's roots, so discovery is
+ * complete for that suite: every root yields at least one file.
+ */
+const files = (count: number, suite: SuiteName = "full"): readonly string[] => {
+  const roots = SUITE_ROOTS[suite].map((root) => root.replace(/^\.\//u, "").replace(/\/+$/u, ""))
+  return Array.from(
     { length: count },
-    (_, index) => `${prefix}/f-${String(index).padStart(4, "0")}.test.ts`,
+    (_, index) =>
+      `/abs/repo/${roots[index % roots.length]}/f-${String(index).padStart(4, "0")}.test.ts`,
   )
+}
 
-const input = (overrides: Partial<ShardSelectionInput> = {}): ShardSelectionInput => ({
-  suite: "full",
-  tier: "pr",
-  discovered: files(100),
-  idOf: (file) => file.replace("/abs/repo/", ""),
-  suiteFloor: 90,
-  tierFloors: floors,
-  selectForTier: (ids) => ({ files: ids, policySha256: "d".repeat(64) }),
-  ...overrides,
-})
+const relativeId = (file: string): string => file.replace("/abs/repo/", "")
+
+/** `tracked` follows `discovered` unless an arm says otherwise — a complete checkout. */
+const input = (overrides: Partial<ShardSelectionInput> = {}): ShardSelectionInput => {
+  const merged = {
+    suite: "full" as SuiteName,
+    tier: "pr" as string | undefined,
+    discovered: files(100),
+    idOf: relativeId,
+    suiteFloor: 90,
+    tierFloors: floors,
+    selectForTier: (ids: readonly string[]) => ({ files: ids, policySha256: "d".repeat(64) }),
+    ...overrides,
+  }
+  return {
+    ...merged,
+    tracked: overrides.tracked ?? merged.discovered.map(merged.idOf),
+  }
+}
 
 describe("shard manifest selection", () => {
   test("a lost corpus and a narrowed tier are different failures", () => {
@@ -111,9 +134,65 @@ describe("shard manifest selection", () => {
     const narrowed = (): unknown =>
       selectShardManifest(input({ selectForTier: (ids) => ({ files: ids.slice(0, 10) }) }))
     expect(narrowed).toThrow(TierSelectionError)
-    expect(narrowed).toThrow(/SELECTION shrink, not corpus loss/)
+    expect(narrowed).toThrow(/The SELECTION is the cause/)
     // …and it must NOT claim the corpus is gone, which is the whole point.
-    expect(narrowed).not.toThrow(/corpus shrank under the runner/)
+    expect(narrowed).not.toThrow(/corpus shrank under the runner|left the CORPUS/)
+  })
+
+  test("a corpus loss at a tier that already excludes files is corpus loss", () => {
+    // The audit's reproduction, in miniature: measured 100 discovered / 90
+    // selected; 12 SELECTED files are deleted in a commit and the policy is
+    // untouched. The old rule (`selected === discovered` or it is a narrowing)
+    // called this "a SELECTION shrink … lower the floor".
+    const measured = recordWith({ pr: 85 }, undefined, { discovered: 100, selected: 90 })
+    const everything = files(100)
+    const excluded = new Set(everything.slice(0, 10).map(relativeId))
+    const kept = everything.slice(0, 10).concat(everything.slice(22))
+    const policy = (ids: readonly string[]) => ({ files: ids.filter((id) => !excluded.has(id)) })
+    const lost = (): unknown =>
+      selectShardManifest(
+        input({ discovered: kept, suiteFloor: 1, tierFloors: measured, selectForTier: policy }),
+      )
+    expect(lost).toThrow(CorpusLostError)
+    expect(lost).toThrow(/12 file\(s\) left the CORPUS/)
+    // PAIRED CONTROL: the corpus intact, 12 more excluded by policy.
+    const moreExcluded = new Set(everything.slice(0, 22).map(relativeId))
+    const narrowed = (): unknown =>
+      selectShardManifest(
+        input({
+          suiteFloor: 1,
+          tierFloors: measured,
+          selectForTier: (ids) => ({ files: ids.filter((id) => !moreExcluded.has(id)) }),
+        }),
+      )
+    expect(narrowed).toThrow(TierSelectionError)
+    expect(narrowed).toThrow(/excludes 12 more file\(s\)/)
+  })
+
+  test("discovery is complete before any floor: a tracked file not discovered is corpus loss", () => {
+    // Far above every floor, and still refused: slack is not the instrument for a
+    // file that is tracked and was not found.
+    let selectorCalls = 0
+    const moved = (): unknown =>
+      selectShardManifest(
+        input({
+          tracked: [...files(100).map(relativeId), "tools/.moved/lost.test.ts"],
+          selectForTier: (ids) => {
+            selectorCalls += 1
+            return { files: ids }
+          },
+        }),
+      )
+    expect(moved).toThrow(CorpusLostError)
+    expect(moved).toThrow(/tools\/\.moved\/lost\.test\.ts/)
+    expect(selectorCalls).toBe(0)
+    // A root that yields nothing, even with its files untracked as well.
+    const withoutMeta = files(100).filter((file) => !file.includes("/tests/meta/"))
+    expect(() => selectShardManifest(input({ discovered: withoutMeta, suiteFloor: 1 }))).toThrow(
+      /suite root tests\/meta yielded no test files/,
+    )
+    // PAIRED CONTROL: an untracked file discovery found is new work.
+    expect(() => selectShardManifest(input({ tracked: files(99).map(relativeId) }))).not.toThrow()
   })
 
   /**
@@ -122,11 +201,15 @@ describe("shard manifest selection", () => {
    * sibling file, where a mutation at this call site is invisible.
    */
   test("a narrow suite is judged by its own floor through THIS function", () => {
-    const record = recordWith({ pr: 80 }, { core: 60, unit: 30, integration: 20 })
+    const record = recordWith(
+      { pr: 80 },
+      { core: 60, unit: 30, integration: 20 },
+      { discovered: 90, selected: 90 },
+    )
     // 40 selected clears unit's 30 and fails the universe's 80.
     expect(() =>
       selectShardManifest(
-        input({ suite: "unit", discovered: files(40), suiteFloor: 1, tierFloors: record }),
+        input({ suite: "unit", discovered: files(40, "unit"), suiteFloor: 1, tierFloors: record }),
       ),
     ).not.toThrow()
     expect(() =>
@@ -135,19 +218,24 @@ describe("shard manifest selection", () => {
       ),
     ).toThrow(CorpusLostError)
 
-    // Below its own floor with nothing narrowed: corpus loss, for a narrow suite too.
+    // Below its own floor with files gone: corpus loss, for a narrow suite too.
     expect(() =>
       selectShardManifest(
-        input({ suite: "integration", discovered: files(10), suiteFloor: 1, tierFloors: record }),
+        input({
+          suite: "integration",
+          discovered: files(10, "integration"),
+          suiteFloor: 1,
+          tierFloors: record,
+        }),
       ),
     ).toThrow(CorpusLostError)
 
-    // Narrowed below its own floor: a selection shrink.
+    // Narrowed below its own floor, nothing gone: a selection shrink.
     expect(() =>
       selectShardManifest(
         input({
           suite: "core",
-          discovered: files(90),
+          discovered: files(90, "core"),
           suiteFloor: 1,
           tierFloors: record,
           selectForTier: (ids) => ({ files: ids.slice(0, 50) }),
@@ -199,8 +287,8 @@ describe("shard manifest selection", () => {
       }
     })()
     expect(thrown).toBeInstanceOf(CorpusLostError)
-    expect(thrown.message).toContain("NOTHING was narrowed")
-    expect(thrown.message).not.toContain("SELECTION shrink")
+    expect(thrown.message).toContain("15 file(s) left the CORPUS")
+    expect(thrown.message).not.toContain("did not shrink")
   })
 
   test("an empty tier selection is named as an empty selection", () => {
@@ -318,13 +406,56 @@ describe("shard manifest selection", () => {
         suite: value("suite"),
         suiteFloor: value("suiteFloor"),
         tierFloors: value("tierFloors"),
+        tracked: value("tracked"),
       }).toEqual({
         line,
         suite: "opts.suite",
         suiteFloor: "SUITE_FLOORS[opts.suite]",
         tierFloors: "loadTierPopulationFloors()",
+        tracked: "trackedSuiteTestFiles(REPO_ROOT, opts.suite)",
       })
       expect(value("selectForTier")).toContain("tierSelectionFromPolicy(")
     }
+  })
+
+  test("WIRING — the runner snapshots the tree BEFORE it selects", () => {
+    // Taken after, a commit landing during discovery or policy resolution was in
+    // both snapshots and the "checkout moved" comparison passed over a manifest
+    // that missed the commit's files.
+    const source = readFileSync(join(REPO_ROOT, "tools", "dev", "run-test-shards.ts"), "utf8")
+    const tree = ts.createSourceFile(
+      "run-test-shards.ts",
+      source,
+      ts.ScriptTarget.ESNext,
+      true,
+      ts.ScriptKind.TS,
+    )
+    const declarationOf = (name: string): ts.VariableStatement[] => {
+      const found: ts.VariableStatement[] = []
+      const walk = (node: ts.Node): void => {
+        if (
+          ts.isVariableStatement(node) &&
+          node.declarationList.declarations.some(
+            (one) => ts.isIdentifier(one.name) && one.name.text === name,
+          )
+        ) {
+          found.push(node)
+        }
+        node.forEachChild(walk)
+      }
+      walk(tree)
+      return found
+    }
+    const [snapshot] = declarationOf("selectedAt")
+    const [selection] = declarationOf("selection").filter((one) =>
+      one.getText(tree).includes("selectManifest(opts)"),
+    )
+    if (snapshot === undefined || selection === undefined) {
+      throw new Error("main no longer declares selectedAt / selection")
+    }
+    expect(snapshot.getText(tree)).toContain("await gitSnapshot()")
+    expect(snapshot.parent).toBe(selection.parent)
+    const block = snapshot.parent as ts.Block
+    expect(block.statements.indexOf(snapshot)).toBeLessThan(block.statements.indexOf(selection))
   })
 })

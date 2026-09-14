@@ -738,7 +738,7 @@ export interface CampaignTerminationInput extends CampaignCleanupInput {
    * Never throws into the signal path: an accounting failure must not stop the
    * lease from being released, and a swallowed reason is printed.
    */
-  accountForSurvivors?(outcome: DrainOutcome): void
+  accountForSurvivors?(outcome: DrainOutcome): void | Promise<void>
 }
 
 /** Signal path: cancel every group, drain, ACCOUNT, release the lease, exit code. */
@@ -748,7 +748,9 @@ export const terminateCampaignOnSignal = async (
   input.log(`[test:shards] SIGNAL ${input.signal}; cancelling worker group(s)\n`)
   const outcome = await drainCampaign(input)
   try {
-    input.accountForSurvivors?.(outcome)
+    // AWAITED: the accounting may hold the lane until survivors exit, and the
+    // release below must wait for it.
+    await input.accountForSurvivors?.(outcome)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     input.log(`[test:shards] WARN signal-path accounting failed: ${message}\n`)

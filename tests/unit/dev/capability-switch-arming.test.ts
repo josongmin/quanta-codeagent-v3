@@ -21,13 +21,24 @@
  * Both now run through `tools/dev/with-capability-receipt.ts`.
  */
 
-import { describe, expect, test } from "bun:test"
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import ts from "typescript"
+import { DEVTOOLS_ENDPOINT_TIMEOUT_DETAIL } from "@/browser"
 import {
   capabilityReceiptEnvForCampaign,
+  chromeBringUpFailure,
   type ProbeSpawner,
   type SpawnedProbe,
 } from "../../../tools/dev/capability-probe-producer"
@@ -38,6 +49,11 @@ import {
   definiteCapabilityIds,
   mergeRequiredCapabilities,
 } from "../../../tools/dev/capability-receipt"
+import {
+  capabilityReceiptDirectory,
+  capabilityReceiptPathFor,
+  sweepCapabilityReceipts,
+} from "../../../tools/dev/capability-receipt-files"
 import { runWithCapabilityReceipt } from "../../../tools/dev/with-capability-receipt"
 import { CAMPAIGN_CAPABILITY_ENV, workerSpawnEnv } from "../../../tools/dev/worker-home"
 import { contractRequired } from "../../contract/_guard"
@@ -99,6 +115,8 @@ describe("which ids a campaign arms, and how an operator's own list survives", (
       ["0", ["a"], "a"],
       ["1", ["a"], "1"],
       [" 1 ", ["a"], "1"],
+      ["true", ["a"], "1"],
+      ["OFF", ["a"], "a"],
       ["z, a ,", ["b", "a"], "a,b,z"],
       ["x", [], "x"],
     ]
@@ -226,6 +244,152 @@ describe("the runner arms the switch where a dropped bag cannot take it", () => 
     }
   })
 
+  test("the runner probes under a worker-shaped HOME and compares against the real one", () => {
+    // Workers run under a fresh HOME, so a probe under the runner's own HOME
+    // answered for a process that does not exist. An audit dropped
+    // `HOME: probeHome` and every arm stayed green.
+    const calls = nodes(
+      (node): node is ts.CallExpression =>
+        ts.isCallExpression(node) && calleeName(node) === "capabilityReceiptEnvForCampaign",
+    )
+    expect(calls).toHaveLength(1)
+    const options = calls[0]?.arguments[0]
+    if (options === undefined || !ts.isObjectLiteralExpression(options)) {
+      throw new Error("capabilityReceiptEnvForCampaign is not given an object literal")
+    }
+    const property = (name: string): ts.Expression | undefined => {
+      const found = options.properties.find(
+        (one): one is ts.PropertyAssignment =>
+          ts.isPropertyAssignment(one) && ts.isIdentifier(one.name) && one.name.text === name,
+      )
+      return found?.initializer
+    }
+    const probeEnv = property("probeEnv")
+    if (probeEnv === undefined || !ts.isObjectLiteralExpression(probeEnv)) {
+      throw new Error("probeEnv is not an object literal")
+    }
+    const home = probeEnv.properties.find(
+      (one): one is ts.PropertyAssignment =>
+        ts.isPropertyAssignment(one) && ts.isIdentifier(one.name) && one.name.text === "HOME",
+    )
+    expect(home?.initializer.getText(source)).toBe("probeHome")
+    // HOME is the LAST property, so the spread before it cannot override it.
+    expect(probeEnv.properties.at(-1)).toBe(home)
+    expect(property("hostHome")?.getText(source)).toBe("userInfo().homedir")
+    const probeHome = nodes(
+      (node): node is ts.VariableDeclaration =>
+        ts.isVariableDeclaration(node) &&
+        ts.isIdentifier(node.name) &&
+        node.name.text === "probeHome",
+    )
+    expect(probeHome).toHaveLength(1)
+    expect(probeHome[0]?.initializer?.getText(source)).toMatch(/^join\(runRoot, /u)
+  })
+
+  test("the runner removes its receipt on BOTH exits that run code, and the lease after it", () => {
+    // Named per process, so a runner that kept its receipt left one per campaign
+    // in the shared cache. The removal was in `finally` only, and the signal path
+    // ends in `process.exit`, which skips it — an audit found the arm titled "on
+    // every exit" reading that one block.
+    const assigned = nodes(
+      (node): node is ts.BinaryExpression =>
+        ts.isBinaryExpression(node) &&
+        node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        node.left.getText(source) === "capabilityReceiptPath",
+    )
+    expect(assigned.map((node) => node.right.getText(source))).toEqual(["capability.path"])
+    const isCallOf = (node: ts.Node, text: string): node is ts.CallExpression =>
+      ts.isCallExpression(node) && node.expression.getText(source) === text
+    // ONE removal and ONE lease release, both inside `releaseCampaign`.
+    const removals = nodes(
+      (node): node is ts.CallExpression =>
+        isCallOf(node, "rmSync") && node.arguments[0]?.getText(source) === "capabilityReceiptPath",
+    )
+    const releases = nodes((node): node is ts.CallExpression => isCallOf(node, "lease?.release"))
+    expect(removals).toHaveLength(1)
+    expect(releases).toHaveLength(1)
+    const [helper] = nodes(
+      (node): node is ts.VariableDeclaration =>
+        ts.isVariableDeclaration(node) && node.name.getText(source) === "releaseCampaign",
+    )
+    if (helper?.initializer === undefined) throw new Error("no releaseCampaign in the runner")
+    const within = (node: ts.Node | undefined, outer: ts.Node): boolean =>
+      node !== undefined && node.getStart(source) >= outer.getStart(source) && node.end <= outer.end
+    expect(within(removals[0], helper.initializer)).toBe(true)
+    expect(within(releases[0], helper.initializer)).toBe(true)
+    // Guarded: a throwing removal must not keep the lane.
+    const guard = nodes((node): node is ts.TryStatement => ts.isTryStatement(node)).find((one) =>
+      within(removals[0], one.tryBlock),
+    )
+    expect(guard !== undefined && within(guard, helper.initializer)).toBe(true)
+    expect(guard !== undefined && within(releases[0], guard)).toBe(false)
+    expect(releases[0]?.getStart(source) ?? 0).toBeGreaterThan(removals[0]?.getStart(source) ?? 0)
+    // Both exits call it: the signal handler's lease hook and the `finally`.
+    const [signal] = nodes((node): node is ts.CallExpression =>
+      isCallOf(node, "terminateCampaignOnSignal"),
+    )
+    const bag = signal?.arguments[0]
+    const hook =
+      bag !== undefined && ts.isObjectLiteralExpression(bag)
+        ? bag.properties.find((one) => one.name?.getText(source) === "releaseLease")
+        : undefined
+    expect(
+      hook !== undefined && ts.isPropertyAssignment(hook) ? hook.initializer.getText(source) : "",
+    ).toBe("releaseCampaign")
+    const campaignFinally = nodes((node): node is ts.TryStatement => ts.isTryStatement(node)).find(
+      (one) => one.finallyBlock?.getText(source).includes("drainCampaign(") === true,
+    )
+    expect(campaignFinally?.finallyBlock?.statements.at(-1)?.getText(source)).toBe(
+      "releaseCampaign()",
+    )
+  })
+
+  const unwrapAwait = (node: ts.Expression | undefined): ts.Expression | undefined =>
+    node !== undefined && ts.isAwaitExpression(node) ? node.expression : node
+
+  test("a campaign sweeps receipts nothing can read BEFORE it writes its own, in the same directory", () => {
+    // Only a kill runs no exit path at all; the audit counted six campaign
+    // receipts from one day of killed runs.
+    const [sweep] = nodes(
+      (node): node is ts.CallExpression =>
+        ts.isCallExpression(node) && node.expression.getText(source) === "sweepCapabilityReceipts",
+    )
+    const [produce] = nodes(
+      (node): node is ts.CallExpression =>
+        ts.isCallExpression(node) &&
+        node.expression.getText(source) === "capabilityReceiptEnvForCampaign",
+    )
+    const field = (call: ts.CallExpression | undefined, name: string): string => {
+      const bag = call?.arguments[0]
+      const found =
+        bag !== undefined && ts.isObjectLiteralExpression(bag)
+          ? bag.properties.find((one) => one.name?.getText(source) === name)
+          : undefined
+      return found !== undefined && ts.isPropertyAssignment(found)
+        ? found.initializer.getText(source)
+        : ""
+    }
+    expect(field(sweep, "directory")).toBe("capabilityReceiptDirectory(SHARED_CACHE_ROOT)")
+    expect(field(produce, "outPath")).toMatch(/^capabilityReceiptPathFor\(SHARED_CACHE_ROOT, /u)
+    expect(sweep?.getStart(source) ?? Number.POSITIVE_INFINITY).toBeLessThan(
+      produce?.getStart(source) ?? 0,
+    )
+    // UNCONDITIONAL: each call is a declaration's whole initializer, in a
+    // statement of the same block. `const swept = [] || sweepCapabilityReceipts(…)`
+    // kept a call in the tree and never made it.
+    const statementBlock = (call: ts.CallExpression | undefined): ts.Node | undefined => {
+      const holder = call?.parent
+      const declaration =
+        holder !== undefined && ts.isAwaitExpression(holder) ? holder.parent : holder
+      if (declaration === undefined || !ts.isVariableDeclaration(declaration)) return undefined
+      if (unwrapAwait(declaration.initializer) !== call) return undefined
+      return declaration.parent.parent.parent
+    }
+    const block = statementBlock(sweep)
+    expect(block !== undefined && ts.isBlock(block)).toBe(true)
+    expect(statementBlock(produce)).toBe(block)
+  })
+
   test("nothing else in the runner touches the switch", () => {
     const references = nodes(
       (node): node is ts.Identifier =>
@@ -337,6 +501,17 @@ describe("the runner arms the switch where a dropped bag cannot take it", () => 
 })
 
 describe("a lane outside the runner gets a receipt, under its own environment", () => {
+  // Every wrapper run here writes under this root. Without one, the arms wrote
+  // their receipts into the clone's REAL shared cache — an audit found seven
+  // `arm-*` receipts there — and a kill mid-arm left them for every campaign.
+  let cacheRoot = ""
+  beforeAll(() => {
+    cacheRoot = mkdtempSync(join(tmpdir(), "lane-cache-"))
+  })
+  afterAll(() => {
+    rmSync(cacheRoot, { recursive: true, force: true })
+  })
+
   const report = [
     "const fs = require('node:fs');",
     "const path = process.env.QUANTA_CAPABILITY_RECEIPT;",
@@ -356,6 +531,7 @@ describe("a lane outside the runner gets a receipt, under its own environment", 
     const callerHome = "/nonexistent-caller-home"
     const code = await runWithCapabilityReceipt({
       lane: "arm-live",
+      cacheRoot,
       cmd: [process.execPath, "-e", report],
       env: {
         PATH: process.env.PATH ?? "",
@@ -365,6 +541,7 @@ describe("a lane outside the runner gets a receipt, under its own environment", 
         [CAPABILITY_RECEIPT_PATH_ENV]: "/stale/receipt.json",
       },
       spawn: spawner(["lancedb"], probes),
+      hostHome: "/nonexistent-real-home",
       onStdout: (text) => {
         stdout += text
       },
@@ -394,7 +571,11 @@ describe("a lane outside the runner gets a receipt, under its own environment", 
     expect(seen.require.split(",")).toContain("lancedb")
     // One scratch HOME for the probes and the child, never the caller's.
     expect(probes.length).toBeGreaterThan(0)
-    expect(new Set(probes.map((probe) => probe.home))).toEqual(new Set([seen.home]))
+    // Plus the one re-probe of the unavailable id under the REAL home, which is
+    // how a receipt says "the test HOME hides it" instead of "absent".
+    expect(new Set(probes.map((probe) => probe.home))).toEqual(
+      new Set([seen.home, "/nonexistent-real-home"]),
+    )
     expect(seen.home).not.toBe(callerHome)
     expect(seen.home.startsWith(tmpdir())).toBe(true)
     // Gone afterwards: the shared cache is one directory for every worktree.
@@ -418,10 +599,12 @@ describe("a lane outside the runner gets a receipt, under its own environment", 
       let out = ""
       const code = await runWithCapabilityReceipt({
         lane: "arm-home",
+        cacheRoot,
         cmd: [process.execPath, "test", fixture],
         // A HOME the preload does NOT keep, which is what a developer's shell has.
         env: { ...inheritedWithoutReceipt(), HOME: "/nonexistent-caller-home" },
         spawn: spawner([], probes),
+        hostHome: "/nonexistent-real-home",
         onStdout: (text) => {
           out += text
         },
@@ -442,6 +625,7 @@ describe("a lane outside the runner gets a receipt, under its own environment", 
     let stdout = ""
     const code = await runWithCapabilityReceipt({
       lane: "arm-exit",
+      cacheRoot,
       cmd: [
         process.execPath,
         "-e",
@@ -455,9 +639,102 @@ describe("a lane outside the runner gets a receipt, under its own environment", 
     })
     expect(code).toBe(7)
     const path = stdout.trim().split("\n").at(-1) ?? ""
-    expect(path).toMatch(/arm-exit-\d+\.receipt\.json$/)
+    expect(path).toBe(capabilityReceiptPathFor(cacheRoot, "arm-exit"))
     expect(existsSync(path)).toBe(false)
   }, 60_000)
+
+  test("the wrapper removes what a killed run left, and nothing a live one still reads", async () => {
+    const directory = capabilityReceiptDirectory(cacheRoot)
+    mkdirSync(directory, { recursive: true })
+    // A pid that has certainly exited: this process reaped it.
+    const deadPid = Bun.spawnSync([process.execPath, "-e", ""]).pid
+    const dead = capabilityReceiptPathFor(cacheRoot, "killed-lane", deadPid)
+    const live = capabilityReceiptPathFor(cacheRoot, "running-lane", process.ppid)
+    writeFileSync(dead, JSON.stringify({ expiresAtMs: Date.now() + 3_600_000 }))
+    writeFileSync(live, JSON.stringify({ expiresAtMs: Date.now() + 3_600_000 }))
+    const code = await runWithCapabilityReceipt({
+      lane: "arm-sweep",
+      cacheRoot,
+      cmd: [process.execPath, "-e", "process.exit(0)"],
+      env: { PATH: process.env.PATH ?? "", HOME: tmpdir() },
+      spawn: spawner([]),
+    })
+    expect(code).toBe(0)
+    expect(existsSync(dead)).toBe(false)
+    // PAIRED CONTROL: a live writer's unexpired receipt is its campaign's.
+    expect(existsSync(live)).toBe(true)
+    rmSync(live, { force: true })
+  }, 60_000)
+
+  test("what the sweep may remove: a dead writer's files, and an expired receipt of anyone's", () => {
+    const directory = mkdtempSync(join(tmpdir(), "receipt-sweep-"))
+    try {
+      const now = 1_000_000
+      const write = (name: string, expiresAtMs: number | string): void =>
+        writeFileSync(join(directory, name), JSON.stringify({ expiresAtMs }))
+      write("pr-11.receipt.json", now + 1) // dead writer, unexpired
+      write("pr-22.receipt.json", now) // live writer, expired at this instant
+      write("pr-23.receipt.json", now + 1) // live writer, unexpired
+      write("pr-24.receipt.json", "soon") // live writer, no numeric expiry
+      write("pr-11.receipt.json.33.tmp", now + 1) // dead writer's staging
+      write("pr-11.receipt.json.44.tmp", now + 1) // live writer's staging
+      write("pr-99.receipt.json", now - 1) // this process, even expired
+      write("notes.json", now - 1) // not a receipt
+      const alive = new Set([22, 23, 24, 44])
+      const removed = sweepCapabilityReceipts({
+        directory,
+        nowMs: now,
+        isAlive: (pid) => alive.has(pid),
+        selfPid: 99,
+      })
+      expect(removed).toEqual([
+        "pr-11.receipt.json",
+        "pr-11.receipt.json.33.tmp",
+        "pr-22.receipt.json",
+      ])
+      expect(readdirSync(directory).sort()).toEqual([
+        "notes.json",
+        "pr-11.receipt.json.44.tmp",
+        "pr-23.receipt.json",
+        "pr-24.receipt.json",
+        "pr-99.receipt.json",
+      ])
+      // A cache that has never held a receipt is not an error.
+      expect(sweepCapabilityReceipts({ directory: join(directory, "absent"), nowMs: now })).toEqual(
+        [],
+      )
+      // Housekeeping NEVER throws: an unlistable directory and an unremovable entry
+      // each killed the campaign before it ran anything. Both are said instead.
+      const lines: string[] = []
+      const log = (line: string): void => {
+        lines.push(line)
+      }
+      expect(
+        sweepCapabilityReceipts({ directory: join(directory, "notes.json"), nowMs: now, log }),
+      ).toEqual([])
+      const locked = join(directory, "locked")
+      mkdirSync(locked)
+      writeFileSync(join(locked, "pr-11.receipt.json"), "{}")
+      chmodSync(locked, 0o555)
+      try {
+        expect(
+          sweepCapabilityReceipts({
+            directory: locked,
+            nowMs: now,
+            isAlive: () => false,
+            selfPid: 99,
+            log,
+          }),
+        ).toEqual([])
+      } finally {
+        chmodSync(locked, 0o755)
+      }
+      expect(lines.join("")).toContain("cannot list")
+      expect(lines.join("")).toContain("cannot remove")
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
 
   test("REAL LANE — an armed consumer run through the wrapper executes instead of failing", async () => {
     // The paired red is `capability-receipt-wiring`'s armed arm: the same file,
@@ -466,6 +743,7 @@ describe("a lane outside the runner gets a receipt, under its own environment", 
     let out = ""
     const code = await runWithCapabilityReceipt({
       lane: "arm-real",
+      cacheRoot,
       cmd: [process.execPath, "test", CONSUMER],
       env: inheritedWithoutReceipt(),
       spawn: spawner([]),
@@ -507,8 +785,8 @@ describe("a lane outside the runner gets a receipt, under its own environment", 
 })
 
 describe("the contract guard fails as a test, and its switch has the capability grammar", () => {
-  test("unset, empty and 0 are off; anything else is on", () => {
-    const table = [undefined, "", "0", " 0 ", "1", "true"].map((value) => [
+  test("unset, empty, 0, false, no and off are off; anything else is on", () => {
+    const table = [undefined, "", "0", " 0 ", "false", "Off", "1", "true", "yes"].map((value) => [
       value,
       contractRequired(value),
     ])
@@ -517,9 +795,16 @@ describe("the contract guard fails as a test, and its switch has the capability 
       ["", false],
       ["0", false],
       [" 0 ", false],
+      ["false", false],
+      ["Off", false],
       ["1", true],
       ["true", true],
+      ["yes", true],
     ])
+    // ONE grammar: the capability switch reads `true` as "everything", not as a
+    // capability named "true".
+    expect(capabilityRequiredFor("git", { [CAPABILITY_REQUIRE_ENV]: "true" })).toBe(true)
+    expect(capabilityRequiredFor("git", { [CAPABILITY_REQUIRE_ENV]: "off" })).toBe(false)
   })
 
   const runFixture = (
@@ -596,4 +881,149 @@ describe("the contract guard fails as a test, and its switch has the capability 
     expect(run.out).toContain('"late-dep" is unavailable but REQUIRE_CONTRACT is set')
     expect(run.code).not.toBe(0)
   }, 60_000)
+})
+
+describe("what the receipt says about a capability the tests cannot reach", () => {
+  test("unavailable under the test HOME and present under the real one is SAID, not changed", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "hidden-by-home-"))
+    try {
+      const realHome = join(dir, "real-home")
+      // cargo answers only under the caller's HOME (a rustup proxy under ~/.cargo);
+      // node is absent under both.
+      const byHome: ProbeSpawner = (argv, env): SpawnedProbe => {
+        // By program name: "cargo" contains "go", and a substring test refused both.
+        const program = (argv[0] ?? "").split("/").at(-1) ?? ""
+        const refused = program === "node" || (program === "cargo" && env.HOME !== realHome)
+        return {
+          exited: Promise.resolve(refused ? 127 : 0),
+          stdout: Promise.resolve(refused ? "" : `${argv[0] ?? "fake"}\n`),
+          kill: () => {},
+        }
+      }
+      const produced = await capabilityReceiptEnvForCampaign({
+        repoRoot: REPO_ROOT,
+        tier: "pr",
+        head: "e".repeat(40),
+        outPath: join(dir, "receipt.json"),
+        probeEnv: { PATH: process.env.PATH ?? "", HOME: join(dir, "scratch-home") },
+        spawn: byHome,
+        includeChrome: false,
+        totalDeadlineMs: 10_000,
+        hostHome: realHome,
+      })
+      const cargo = produced.receipt.capabilities.cargo
+      const node = produced.receipt.capabilities.node
+      expect(cargo?.status).toBe("unavailable")
+      expect(cargo?.detail).toContain(`AVAILABLE under the caller's HOME ${realHome}`)
+      // PAIRED CONTROL: absent everywhere is just absent.
+      expect(node?.status).toBe("unavailable")
+      expect(node?.detail).not.toContain("AVAILABLE under")
+      // The file the workers read carries the same words, and the verdict digest
+      // (which only statuses move) is the digest of what was written.
+      const written = JSON.parse(readFileSync(join(dir, "receipt.json"), "utf8")) as {
+        capabilities: Record<string, { detail: string }>
+      }
+      expect(written.capabilities.cargo?.detail).toContain("AVAILABLE under the caller's HOME")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }, 30_000)
+
+  test("a re-probe under the caller's HOME that throws or outlives the deadline costs only the note", async () => {
+    // The note is a detail. Its re-probes ran as a bare Promise.all outside the
+    // producer's deadline, and an audit's spawner whose `exited` rejected only
+    // under the caller's HOME ended the whole campaign (`waitpid EINTR`).
+    const dir = mkdtempSync(join(tmpdir(), "hidden-by-home-bounded-"))
+    try {
+      const callerHome = join(dir, "caller-home")
+      const program = (argv: readonly string[]): string => (argv[0] ?? "").split("/").at(-1) ?? ""
+      const answer = (argv: readonly string[]): SpawnedProbe => {
+        const refused = program(argv) === "cargo" || program(argv) === "node"
+        return {
+          exited: Promise.resolve(refused ? 127 : 0),
+          stdout: Promise.resolve(refused ? "" : `${argv[0] ?? "fake"}\n`),
+          kill: () => {},
+        }
+      }
+      const produce = (spawn: ProbeSpawner, totalDeadlineMs: number) =>
+        capabilityReceiptEnvForCampaign({
+          repoRoot: REPO_ROOT,
+          tier: "pr",
+          head: "e".repeat(40),
+          outPath: join(dir, `receipt-${totalDeadlineMs}.json`),
+          probeEnv: { PATH: process.env.PATH ?? "", HOME: join(dir, "scratch-home") },
+          spawn,
+          includeChrome: false,
+          totalDeadlineMs,
+          hostHome: callerHome,
+        })
+      // THROWS under the caller's HOME, for cargo only.
+      const rejecting: ProbeSpawner = (argv, env) =>
+        env.HOME === callerHome && program(argv) === "cargo"
+          ? {
+              exited: Promise.reject(new Error("waitpid EINTR")),
+              stdout: Promise.resolve(""),
+              kill: () => {},
+            }
+          : answer(argv)
+      const survived = await produce(rejecting, 10_000)
+      expect(survived.receipt.capabilities.cargo?.status).toBe("unavailable")
+      expect(survived.receipt.capabilities.cargo?.detail).not.toContain("AVAILABLE under")
+      // ANSWERS LATE under the caller's HOME: "available" 4s in, inside the 5s
+      // per-candidate timeout, so only the producer's total deadline (1s) keeps
+      // it out of the receipt.
+      let release = (): void => {}
+      const late = new Promise<number>((resolve) => {
+        release = () => resolve(0)
+      })
+      const timer = setTimeout(() => release(), 4_000)
+      const slow: ProbeSpawner = (argv, env) =>
+        env.HOME === callerHome && program(argv) === "cargo"
+          ? { exited: late, stdout: late.then(() => "cargo\n"), kill: () => {} }
+          : answer(argv)
+      try {
+        const bounded = await produce(slow, 1_000)
+        expect(bounded.receipt.capabilities.cargo?.status).toBe("unavailable")
+        expect(bounded.receipt.capabilities.cargo?.detail).not.toContain("AVAILABLE under")
+      } finally {
+        clearTimeout(timer)
+        release()
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }, 30_000)
+
+  test("a Chrome that ran out of time is probe-timeout; one that refused is unavailable", () => {
+    const context = {
+      binary: "chromium",
+      probeMs: 15_000,
+      endpointTimeoutDetail: DEVTOOLS_ENDPOINT_TIMEOUT_DETAIL,
+    }
+    expect(
+      chromeBringUpFailure(
+        { kind: "spawn-failed", detail: DEVTOOLS_ENDPOINT_TIMEOUT_DETAIL },
+        context,
+      ).status,
+    ).toBe("probe-timeout")
+    expect(chromeBringUpFailure({ kind: "timeout" }, context).status).toBe("probe-timeout")
+    // PAIRED CONTROL: a bring-up that failed for any other reason is a refusal,
+    // and keeps the binary so the fail-loud arm still sees "present".
+    const refused = chromeBringUpFailure(
+      { kind: "spawn-failed", detail: "Target.createTarget failed during bring-up" },
+      context,
+    )
+    expect(refused).toMatchObject({ status: "unavailable", resolved: "chromium" })
+    // A Chrome that EXITED before its endpoint is a refusal too — the launch crash
+    // the browser suite's fail-loud arm exists for — not a slow host.
+    expect(
+      chromeBringUpFailure(
+        {
+          kind: "spawn-failed",
+          detail: "Chrome exited with code 1 before the DevTools endpoint was ready",
+        },
+        context,
+      ).status,
+    ).toBe("unavailable")
+  })
 })

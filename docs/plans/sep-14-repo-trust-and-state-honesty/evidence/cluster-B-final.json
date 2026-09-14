@@ -1,0 +1,335 @@
+{
+ "cluster": "B — lsp-workspace-exec (SEC-2): LSP servers execute workspace-controlled code (interpreter/build.rs/proc-macro/toolchain/tsserver/plugins/server-binary) with the full live parent env, launched default-on by read-only nav tools AND by the @-mention symbol resolver, through a single unhardened transport spawn that never touches the env-scrub funnel, the OS sandbox, or the TrustStore.",
+ "attackVerdicts": [
+  {
+   "attack": "DB1 — bunScrubbedSpawner `extra` spread defeats the ScrubbedEnv brand: extra:{env:process.env} overrides the branded env at runtime",
+   "verdict": "CONFIRMED",
+   "evidence": "O1 probe against the REAL production bunScrubbedSpawner: control scrubbed spawn → child sees runtime=absent; extra:{env:{...process.env with RUNTIME_KEY}} → child sees runtime=sk-runtime-FAKE. Source scrubbed-spawn.ts:74-84 destructures {…,extra} and spreads `...(extra ?? {})` AFTER `env:`, so extra.env wins. extra is typed Readonly<Record<string,unknown>> — 'MUST NOT carry an env' (line 61) is a comment, not a type. The brand is not the structural backstop R1 claims; the census is."
+  },
+  {
+   "attack": "DB2 — R1's proposed ratchet predicate (argv head ∈ LSP_SERVER_BINARIES) matches NEITHER real LSP spawn site",
+   "verdict": "CONFIRMED",
+   "evidence": "transport.ts:73 spawns `this.command` (PropertyAccessExpression, no local initializer); availability.ts:28 spawns `[bin,'--version']` (Identifier head from a param). exec-cluster test argvHeadIsShell (lines 376-404) resolves only string literals + local-initialized identifiers, fail-closed otherwise. R1's own anti-vacuity assertion ('transport.ts and availability.ts IN population') would FAIL under R1's predicate. Post-fix both are caught only because routing through the funnel trips the EXISTING IMPORTS_FUNNEL predicate — so the argv-head extension is both unnecessary for the fixed state and unable to catch a NEW literal-argv LSP spawn in a non-funnel file."
+  },
+  {
+   "attack": "DB3 — per-server initializationOptions hardening does NOT close the .cargo/config.toml rustc-wrapper RCE; only the RUSTC_WRAPPER='' env delta does",
+   "verdict": "CONFIRMED",
+   "evidence": "O2 via real RustAnalyzerAdapter+LspTransport in repo cwd: wrapper-rel:none → 20 execs of ./wrap.sh; wrapper-rel:init (R1 hardened initOptions ONLY) → 12 execs (STILL LIVE); wrapper-rel:init+env (adds RUSTC_WRAPPER='') → 0. R1 hellgate #2 mutates only buildScripts.enable, so the entire env-delta half of the rust fix can be deleted and the test stays green. EXTENDED: I found TWO more init-immune rust RCE vectors — (a) .cargo/config.toml [build] rustc=./evil (rustc-cfg): init+env → 12 execs, only RUSTC=<trusted abs> pin → 0; (b) rust-toolchain.toml absolute-path toolchain: init+env (repo cwd) → 1 exec + server crash, only RUSTUP_TOOLCHAIN=<default> pin → 0. init options close build.rs alone."
+  },
+  {
+   "attack": "DB4 — LSP_ENV_ALLOWLIST is a divergent hand-rolled allowlist that drops HOME/RUSTUP_HOME/CARGO_HOME the rustup proxy needs",
+   "verdict": "CONFIRMED",
+   "evidence": "rust-analyzer on this machine is ~/.cargo/bin/rust-analyzer → symlink to rustup (a proxy). O2 shows the hardened cases WORK (server started, def resolved) only because RUSTUP_HOME/CARGO_HOME/HOME were kept; the proxy exports RUSTUP_TOOLCHAIN to children (rt probe) and resolves the toolchain via RUSTUP_HOME. R1's PATH+locale+SSL+TMPDIR-only set would break the proxy launch ('rustup could not choose a version', the artifact seen in P4's first run). env-scrub.ts already has DEFAULT_ENV_ALLOWLIST + CI_ENV_ALLOWLIST, and git-runner/runner.ts:7 adds a 4th ALLOWED_ENV — MEMORY's 'no sixth parallel model' applies. But the LSP list genuinely must DIFFER from DEFAULT (drop PYTHONPATH/VIRTUAL_ENV/PYTHONHOME/NODE_OPTIONS which are pyright/node exec vectors, ADD RUSTUP_HOME/CARGO_HOME) — so it should be DERIVED from the SSOT with per-var justification, not a fresh copy, and MUST keep the rustup-home vars."
+  }
+ ],
+ "r1ClaimCorrections": [
+  {
+   "claim": "availability.ts:28 Bun.spawn([bin,'--version']) 'omits env entirely (inherit-by-omission FULL env)' — a full-env leak, severity high",
+   "correction": "WRONG as stated. Bun 1.3.14 env-less spawn passes the process LAUNCH-env snapshot, NOT live process.env. O1: env-less child saw launch=sk-launch-FAKE (exported before bun) but runtime=absent (set after start). A credential loaded from .env.dev at runtime (loadEnvFiles, src/apps/cli/index.ts:33 — MEMORY sep-04) does NOT reach the availability child; only a shell-exported cred does. The availability leak is REAL but strictly weaker than 'full env'. The TRANSPORT leak is the strong one: transport.ts:86 passes buildLspServerEnv(process.env,…) = LIVE env, so dotenv creds DO leak — every O2/O3/O4 probe set the key at runtime and the child saw it. Any test that proves the availability leak by mutating process.env at runtime is vacuous.",
+   "evidence": "O1 envless={launch=present,runtime=absent}; live={launch=present,runtime=present}. Transport probes: FAKE_PROVIDER_KEY set at runtime reached build.rs/tsserver/interpreter."
+  },
+  {
+   "claim": "rust-toolchain.toml rustup auto-install / relative path as a live availability-probe RCE (severity high, unverified)",
+   "correction": "WRONG for the RELATIVE/ ./-prefixed form (rustup refuses 'invalid/relative path toolchain', attacker P-C). Only an ABSOLUTE path executes a repo binary, which needs the attacker to know the clone path. The CONFIRMED rust RCE vectors are build.rs, .cargo rustc-wrapper, .cargo build.rustc, and rust-toolchain.toml ABSOLUTE path — all through the TRANSPORT-launched server in repo cwd (O2), not primarily the version probe. Practical severity is high for build.rs/wrapper/rustc/toolchain-abs on the server, low for the availability probe.",
+   "evidence": "O2 server-in-repo-cwd: toolchain-abs:init+env → 1 exec; attacker P-C: relative refused, absolute executes."
+  },
+  {
+   "claim": "'Claude Code CLI 2.1.270 does NOT spawn its own language servers — code intelligence comes through the IDE MCP connection'",
+   "correction": "FALSE. CC 2.1.270 self-launches plugin-provided LSP servers over stdio: chunk-3j0en1hg.js:223374 `P.start(n.command, n.args||[], {env:n.env, cwd:n.workspaceFolder})` and :223396 `initializationOptions: n.initializationOptions ?? {}`. LSP env = {...Di(),...p.env} with extendEnv:false (chunk-ngmp8r9p.js:3043-3052), and Di() (chunk-bdzrjgqf.js:1424) returns the FULL process.env in the common no-proxy case (early `return process.env`), scrubbing only OTEL_* per CHANGELOG:3237. Correct baseline: CC self-launches LSP behind folder-trust but does NOT credential-scrub. Codex remains the ONLY strong env-scrub baseline (main-D87AK7lw.js:97487-97575: findTrustedCommand + PATH rebuilt from trusted dirs + PYTHONHOME/PYTHONPATH/VIRTUAL_ENV='' for pyright; RUSTC/RUSTC_WRAPPER=''/RUSTUP_AUTO_INSTALL=0 for rust).",
+   "evidence": "Quoted CC bundle lines above + Codex main-D87AK7lw.js hardening blocks re-read."
+  },
+  {
+   "claim": "R1 designOption A 'servers.ts create(cwd) returns a null/degraded client when untrusted'",
+   "correction": "Conflicts with ServerSpec.create's non-null LspClient return (servers.ts:30) and the warm-pool pyrightClientFactory (warm-pool.ts:41) — the degrade path is untyped and unwired, and is silent on the @-mention path. Better: DROP the decline path. Make env-scrub + trusted-interpreter/binary + RUSTC/RUSTUP pins default-on and trust-INDEPENDENT (they already reduce every proven vector to 0 in probes); let TrustStore only RE-WIDEN rust-analyzer buildScripts/procMacro fidelity for a trusted repo. This sidesteps the typing problem and automatically covers the mention path (which has no decline path).",
+   "evidence": "servers.ts:30 create(cwd):LspClient non-null; O2/O3 show hardening→0 execs regardless of trust."
+  }
+ ],
+ "confirmedHoles": [
+  {
+   "id": "H-MENTION",
+   "what": "@-symbol mention resolver is a SECOND default-on launch trigger R1 never models. Every turn context-assembler.ts:151 calls config.mentionInjector, wired unconditionally by mentionResolverDep (agent-config-assembler.ts:158,716) and installCliMentionInjector (mention-wire.ts:54-84); QUANTA_MENTION_SYMBOL default-on (mention-symbol-deps.ts:266). A prompt with @FooBar → kind=symbol → buildLspLookup → lspNavProvider().open → pyright warm pool → PYRIGHT.create → repo interpreter/.pth, carrying live process.env. It is NOT a tool, never reaches policy.evaluate/isReadOnly, and is UNAFFECTED by the nav kill-switch QUANTA_LSP_TOOLS=0.",
+   "evidence": "Re-ran attacker P-A: with QUANTA_LSP_TOOLS=0 (resolveLspNavMode→'none'), resolver.resolveSymbol('FooBar') executed the planted .venv/bin/python 6× (first='REPO_INTERPRETER_EXEC key=sk-ant-FAKE-mention'), semantic backend stubbed null. Wiring re-read in source.",
+   "severity": "HIGH",
+   "defaultConfigExposure": "EXPOSED out-of-box on any interactive/headless turn whose prompt contains @Symbol, even with LSP nav tools disabled; the launch-layer fix (transport/adapter) covers it but R1's RCA scope and every hellgate drive only lspNavToolList."
+  },
+  {
+   "id": "H-PTH",
+   "what": "pyright executes repo-controlled code through a LEGIT venv (interpreter = symlink to system python) via a site-packages .pth whose line starts with `import`, and via PYTHONPATH→sitecustomize.py. Neither requires a planted executable .venv/bin/python. -I does NOT stop .pth processing. PYTHONPATH is in DEFAULT_ENV_ALLOWLIST (env-scrub.ts:66) and dotenv-settable.",
+   "evidence": "O3 via real PyrightAdapter: V1 production defaults (real python3 -m venv + zz_probe.pth) → 12 .pth execs (key present); V2 trusted interpreter but PYTHONPATH=<ws> → 5 sitecustomize.py execs; control (trusted interp + PYTHONPATH unset + site-packages on extraPaths) → 0 execs AND cross-file venv/editable-install resolution still works.",
+   "severity": "MEDIUM",
+   "defaultConfigExposure": "EXPOSED — the fix (trusted pythonPath + PYTHONPATH/VIRTUAL_ENV blanked + site-packages via extraPaths) closes it, but a fix that only refuses a planted executable interpreter, or an allowlist that keeps PYTHONPATH, leaves it OPEN."
+  },
+  {
+   "id": "H-SERVERBIN",
+   "what": "NEW (beyond R1 and R2): the SERVER BINARY itself is workspace-controllable. Bun.spawn resolves a bare argv[0] through options.env.PATH; buildLspServerEnv/the LSP allowlist keeps PATH, and an activated repo venv (or a dotenv-set PATH, or node_modules/.bin) puts <cwd>/.venv/bin first, so the WORKSPACE's own pyright-langserver/rust-analyzer runs.",
+   "evidence": "O6: Bun.spawn(['fakebin-o6'],{env:{PATH:<ws>/only}}) → CHILD_ENV_PATH_RESOLVED (resolves via options.env.PATH); real PyrightAdapter with PATH=<ws>/.venv/bin:... + a workspace .venv/bin/pyright-langserver → the WORKSPACE server executed (WORKSPACE_PYRIGHT_LANGSERVER key present). Scrubbing PATH's VALUE does not help; the binary must be resolved to a TRUSTED absolute path (Codex findTrustedCommand rejects node_modules paths and requires the path be outside workspaceRoot — main-D87AK7lw.js:91219 trustedPath).",
+   "severity": "HIGH",
+   "defaultConfigExposure": "EXPOSED for any Python dev who activated the repo venv before launching, or a repo whose .env sets PATH; both the transport and the availability probe inherit that PATH."
+  },
+  {
+   "id": "H-RATCHET",
+   "what": "Class-ratchet gap persists for a NEW literal-argv LSP spawn. SHELL_BINARIES excludes LSP binaries and argvHeadIsShell resolves only local string literals, so a new file with Bun.spawn(['rust-analyzer'],{env:process.env}) that does NOT import the funnel stays invisible — the exact defect-1 blind spot, still open for the LSP-binary class. R1's argv-head extension cannot close it (see DB2).",
+   "evidence": "deriveClusterFiles membership = FUNNEL | IMPORTS_FUNNEL | isUserCommandShell (test lines ~451-460); SHELL_BINARIES={bash,sh,zsh,dash,ksh} (line ~105). transport.ts + availability.ts absent from the derivation today (attacker P5). server-rss-watchdog.ts:114 also spawns ['ps',…] uncovered.",
+   "severity": "MEDIUM",
+   "defaultConfigExposure": "latent — the ratchet does not fire, so a future unscrubbed LSP spawn lands green."
+  },
+  {
+   "id": "H-RUSTC-CFG",
+   "what": "NEW rust exec vector (extends DB3): .cargo/config.toml [build] rustc=./evil executes a repo script as rustc during rust-analyzer flycheck; init options AND RUSTC_WRAPPER='' do NOT close it — only pinning RUSTC to a trusted absolute rustc does.",
+   "evidence": "O2 rustc-cfg:none → 20 execs; rustc-cfg:init+env (buildScripts off + RUSTC_WRAPPER='') → 12 execs (LIVE); rustc-cfg:init+env+rustcpin (RUSTC=<trusted abs>) → 0.",
+   "severity": "HIGH",
+   "defaultConfigExposure": "EXPOSED on any untrusted Rust repo; Codex closes it by pinning RUSTC (main-D87AK7lw.js:97567 RUSTC:a)."
+  },
+  {
+   "id": "H-TSPIN-VALIDATE",
+   "what": "NEW (implementation trap): pinning initializationOptions.tsserver.path closes the workspace-tsserver AND tsconfig-plugin vectors ONLY if the pinned path exists; an invalid/missing trusted path SILENTLY falls back to the workspace tsserver.",
+   "evidence": "O4 via real TypescriptAdapter: prod → WORKSPACE_TSSERVER + TSCONFIG_PLUGIN_LOADED (key present); pin-valid (trusted tsserver.js outside ws) → 0 execs (both vectors closed); pin-invalid (nonexistent path) → 3 execs (falls back to workspace). Codex validates with isFile/getTypeScriptServerPath (main-D87AK7lw.js:91266,97665).",
+   "severity": "MEDIUM",
+   "defaultConfigExposure": "a fix that pins without an existence check regresses to workspace exec whenever the trusted TS install is absent."
+  }
+ ],
+ "revisedDesign": {
+  "summary": "Make the LSP LAUNCH itself safe so the read-only nav tools AND the mention resolver can both stay prompt-free. Single hardened launch chokepoint = LspTransport.spawn routed through the existing scrubbed-spawn funnel with an LSP-derived allowlist + per-server env delta + trusted binary/interpreter resolution + per-server no-exec initializationOptions. The env-scrub + trusted-toolchain + no-exec init ship DEFAULT-ON and trust-INDEPENDENT (probes show they reduce every proven vector to 0); TrustStore only RE-WIDENS rust-analyzer buildScripts/procMacro fidelity for a trusted repo (no decline/null path, so the non-null create() type and the mention path both stay intact). Same 'stop the exec + stop the credential leak at the funnel' shape as 4ebe02c71 (shadow_verify) and e0c1912c0 (node-repl), applied to the interactive+mention LSP path those commits skipped.",
+  "structuralMechanism": "(1) One hardened launch PORT: LspTransport.spawn goes through bunScrubbedSpawner so its env is the branded ScrubbedEnv — an unscrubbed LSP spawn is a tsc error; the funnel's `extra` bug is sealed first so the brand actually holds. (2) A location/import CENSUS ratchet (not argv-head): any Bun.spawn under src/lsp/** or src/agent/lsp-bridge/** must route through the funnel — makes an unscrubbed LSP spawn impossible to reintroduce regardless of argv shape. (3) One SSOT: an exhaustive Record<LspServerKind, HardeningSpec> (initializationOptions + envDelta + resolveTrustedBinary + resolveTrustedInterpreter) with a runtime drift guard, wired into a new initializationOptions channel on initialize. (4) Trusted resolution: a findTrustedCommand-style resolver (mirror Codex trustedPath: absolute, reject paths under cwd / containing node_modules|.venv) is the single authority for both the server binary and the python interpreter.",
+  "changes": [
+   {
+    "path": "src/runtime/scrubbed-spawn.ts",
+    "change": "SEAL the extra escape hatch (DB1): in bunScrubbedSpawner, spread `...(extra ?? {})` BEFORE `env:` (and cwd/stdio) so the branded env always wins, OR strip `env` from extra. COORDINATE — sep-12 truth-guard campaign owns this file (4ebe02c71/e0c1912c0). Do not fork."
+   },
+   {
+    "path": "src/shared/env-scrub.ts",
+    "change": "Add LSP_ENV_ALLOWLIST DERIVED from DEFAULT_ENV_ALLOWLIST with per-var justification (NOT a fresh copy — MEMORY no-parallel-model): DEFAULT minus {PYTHONPATH, PYTHONHOME, VIRTUAL_ENV, NODE_OPTIONS} (pyright/node exec vectors) plus {RUSTUP_HOME, CARGO_HOME} (rustup proxy needs them — DB4). Keep SSL/proxy/TMPDIR."
+   },
+   {
+    "path": "src/lsp/adapters/base/config.ts",
+    "change": "Add initializationOptions?: Readonly<Record<string,unknown>> to LspClientOptions and LspClientSpec."
+   },
+   {
+    "path": "src/lsp/adapters/base.ts",
+    "change": "In start() initialize params (~185-210) include initializationOptions from spec/options when present (O4/O2 proved tsls honors tsserver.path and rust-analyzer honors buildScripts/procMacro through this channel)."
+   },
+   {
+    "path": "src/lsp/adapters/lsp-hardening.ts (new)",
+    "change": "SSOT: export type LspServerKind = 'pyright'|'typescript'|'rust-analyzer'|'gopls'|'clangd'; const HARDENING: Record<LspServerKind, HardeningSpec> with runtime drift guard (exhaustive-record pattern). pyright: trusted interpreter + PYTHONPATH/VIRTUAL_ENV/PYTHONHOME='' + venv site-packages via extraPaths. typescript: tsserver.path=<VALIDATED trusted tsserver.js> (isFile check — H-TSPIN-VALIDATE) + useSyntaxServer:never + disableAutomaticTypingAcquisition. rust-analyzer: initOptions {cargo.buildScripts.enable:false, rebuildOnSave:false, noDeps:true, checkOnSave:false, procMacro.enable:false, files.exclude:['rust-analyzer.toml']} + envDelta {CARGO_NET_OFFLINE:'true', RUSTC_WRAPPER:'', RUSTC_WORKSPACE_WRAPPER:'', RUSTC:<trusted abs rustc> (H-RUSTC-CFG), RUSTUP_AUTO_INSTALL:'0', RUSTUP_TOOLCHAIN:<resolved default> (DB3 toolchain-abs)}. gopls: envDelta {GOFLAGS:'-mod=readonly', GOTOOLCHAIN:'local', CGO_ENABLED:'0'} (UNVERIFIED-by-probe — gopls not installed). clangd: no-op (O5 proved compile_commands -fplugin/-Xclang-load do NOT dlopen through clangd). Values mirror Codex main-D87AK7lw.js:97487-97575."
+   },
+   {
+    "path": "src/lsp/adapters/base/transport.ts",
+    "change": "Replace raw Bun.spawn at :73 with bunScrubbedSpawner; env = asScrubbedEnv({...scrubEnvFrom(process.env, LSP_ENV_ALLOWLIST), ...envDelta}) with the mem cap composed AFTER the scrub (so a repo NODE_OPTIONS is dropped, only the trusted --max-old-space-size added). Resolve command[0] to a trusted absolute path via the shared resolver (H-SERVERBIN). Inject the ScrubbedSpawner + trusted-resolver ports from the composition root so a unit test records {argv,env} without a real process."
+   },
+   {
+    "path": "src/lsp/adapters/{pyright,typescript,rust-analyzer,gopls,clangd}.ts",
+    "change": "Thread the per-kind HardeningSpec (initializationOptions + envDelta) from lsp-hardening.ts. pyright.ts: resolvePythonInterpreter returns a TRUSTED interpreter (not <cwd>/.venv/bin/python); venv site-packages surfaced via extraPaths (filesystem read, O3 control proved 0 exec + full resolution). Keep a real pythonPath so the jun-19 no-hang requirement holds."
+   },
+   {
+    "path": "src/agent/lsp-bridge/availability.ts",
+    "change": "Route the :28 `<bin> --version` probe through the scrubbed spawner (env = asScrubbedEnv(scrubEnvFrom(process.env, LSP_ENV_ALLOWLIST))), resolve bin to a trusted absolute path, and pin cwd to a NEUTRAL dir (not the repo) so rust-toolchain.toml cannot act (O2 neutral → 0)."
+   },
+   {
+    "path": "src/agent/lsp-bridge/servers.ts + warm-pool.ts",
+    "change": "Thread the TrustStore verdict for cwd into the hardening resolution (NOT a decline/null path): untrusted → buildScripts/procMacro stay OFF; trusted → the fidelity delta re-enables them (U2). Cover BOTH the tool path (spec.create) and the mention/warm-pool factory (pyrightClientFactory)."
+   },
+   {
+    "path": "src/agent/shadow-verify-adapters/check-lsp-test.ts",
+    "change": "Construct PyrightAdapter/TypescriptAdapter through the same hardened path (U6) — the scratch tree is the model's patched code, same class."
+   },
+   {
+    "path": "tests/unit/runtime/exec-cluster-spawn-env-scrub-ban-hellgate.test.ts",
+    "change": "Extend deriveClusterFiles: any Bun.spawn under src/lsp/** OR src/agent/lsp-bridge/** is a member and must route through the funnel (honest label: LOCATION/IMPORT census, not argv-head — DB2/H-RATCHET). Allowlist the server-rss-watchdog.ts ['ps',…] runner. COORDINATE — sep-12 campaign owns this file; add the LSP predicate, do not fork; keep KNOWN_OPEN_LEAKS two-way."
+   }
+  ],
+  "structuralMechanism_note": "",
+  "compatibilityAndMigration": "pyright: pythonPath flips from repo .venv to a trusted interpreter — venv packages still resolve via extraPaths (O3). tsls: workspace/yarn-sdk TypeScript ignored for a VALIDATED trusted tsserver; a repo pinning an old TS sees the trusted version's diagnostics (surface which path was used). rust-analyzer: build-script/proc-macro-derived symbols do not resolve when untrusted (same tradeoff Codex ships); trusted repos opt back in (U2). Env: any server needing a now-dropped var must be added to LSP_ENV_ALLOWLIST explicitly. QUANTA_LSP_MEM_BUDGET_MB=0 opt-out and default-on nav registration unchanged. The existing pyright-python-interpreter.test.ts PINS the vulnerable 'prefer .venv' behavior and MUST be flipped as part of the pyright commit.",
+  "userVisibleBehavior": "Trusted repo: nav + @mention behave as today (no prompt, cross-file works), but the server no longer sees API keys and no longer runs the repo's build.rs/rustc/tsserver/interpreter/plugins/server-binary. Untrusted repo: same, minus build-script/proc-macro-derived Rust symbols (safe-but-reduced), with a one-line 'trust this project for full fidelity' hint.",
+  "rollout": "Env-scrub + trusted binary/interpreter + RUSTC/RUSTUP/RUSTC_WRAPPER pins + no-exec initOptions + census extension: DEFAULT-ON, trust-INDEPENDENT (security fix, matches how buildLspServerEnv/node-repl/shadow_verify shipped). An opt-out QUANTA_LSP_HARDENED=0 for a trusted power user who needs build-script symbols, mirroring QUANTA_LSP_MEM_BUDGET_MB=0. TrustStore only re-widens rust fidelity. OS-sandbox wrap (R1 Option C): DEFER — not needed to close any proven vector, macOS/Linux-only, degrades to passthrough.",
+  "costEstimate": "M-L, ~50-70 tool-uses. Funnel seal + LSP allowlist + census: S (reuses funnel/SSOT). initOptions channel + lsp-hardening SSOT + trusted resolver + per-adapter wiring: M. pyright trusted-interp/extraPaths + interpreter-test flip: S (O3 recipe ready). trusted-binary resolver: M (new, mirrors Codex). Trust re-widen wire: S. File-disjoint waves: [scrubbed-spawn+census (sep-12 coord)] | [config+base+lsp-hardening+trusted-resolver] | [5 adapters+pyright] | [transport+availability+servers/warm-pool] | [check-lsp-test].",
+  "reusedExisting": [
+   "src/runtime/scrubbed-spawn.ts (asScrubbedEnv/bunScrubbedSpawner/ScrubbedSpawner — after sealing extra)",
+   "src/shared/env-scrub.ts scrubEnvFrom + DEFAULT_ENV_ALLOWLIST (DERIVE the LSP list, don't add a 5th copy)",
+   "src/lsp/server-mem-budget.ts (mem cap, composed after scrub)",
+   "src/config/trust-store.ts isTrusted + QUANTA_TRUSTED_PATHS + confirmTrust/defaultTrustPrompt (apps/agent/index.ts:237,413)",
+   "src/lsp/server-registry.ts LSP binary constants (census + trusted-resolver)",
+   "tests/unit/runtime/exec-cluster-spawn-env-scrub-ban-hellgate.test.ts deriveClusterFiles (extend)",
+   "the exhaustive Record<Union,…> + runtime drift-guard pattern",
+   "the capability-lane / QUANTA_REAL_TOOLCHAIN_E2E opt-in lane (test-capability-manifest.ts lsp-rust/lsp-pyright/lsp-typescript groups) for the real-server hellgates"
+  ]
+ },
+ "revisedTests": [
+  {
+   "name": "funnel extra{} cannot smuggle an env past the ScrubbedEnv brand",
+   "tier": "unit",
+   "seam": "the REAL bunScrubbedSpawner, spawning /bin/sh that echoes an env var, with extra:{env:{...parent with a secret}}",
+   "assertions": "child stdout shows the secret ABSENT even though extra carried it; PAIRED CONTROL: the branded scrubbed PATH IS present; a second control with no extra is byte-identical",
+   "pairedControl": "extra.env forbidden AND branded env still delivered",
+   "mutationThatMustTurnRed": "revert to spreading `...(extra ?? {})` AFTER env → child sees the secret (O1 reproduced this today: extraEnvOverride runtime=present)",
+   "redTodayProof": "O1 on current scrubbed-spawn.ts: extra:{env:process.env+RUNTIME_KEY} → child runtime=sk-runtime-FAKE while scrubbed control=absent",
+   "tier_note": "COORDINATE with sep-12 campaign (owns scrubbed-spawn.ts + its brand hellgate)"
+  },
+  {
+   "name": "the LSP transport spawn env is scrubbed of secrets and repo NODE_OPTIONS",
+   "tier": "unit",
+   "seam": "LspTransport constructed with a recording ScrubbedSpawner port; spawn() invoked; recorded options.env inspected — no real process",
+   "assertions": "for every /_(API_KEY|TOKEN|SECRET)$/ in a seeded parent env the recorded env omits it (exact: forbidden set empty); a seeded NODE_OPTIONS=--require=/evil.js is NOT forwarded (only the trusted --max-old-space-size cap present); PYTHONPATH/VIRTUAL_ENV omitted; RUSTUP_HOME/CARGO_HOME/PATH present; recorded env is a ScrubbedEnv (asScrubbedEnv the only producer)",
+   "pairedControl": "credentials/PYTHONPATH/NODE_OPTIONS forbidden AND PATH/RUSTUP_HOME allowed",
+   "mutationThatMustTurnRed": "revert transport env to buildLspServerEnv(process.env,…) → API-key/PYTHONPATH assertions red; the brand makes it a tsc error at the call site",
+   "redTodayProof": "transport.ts:86 passes buildLspServerEnv(process.env,…) today; O2/O3/O4 markers show the runtime-set key reaching the child",
+   "tier_note": ""
+  },
+  {
+   "name": "the LSP server BINARY is resolved to a trusted absolute path, never the workspace venv/node_modules copy",
+   "tier": "unit",
+   "seam": "the trusted-command resolver directly + a recording spawner: seed PATH=<ws>/.venv/bin:<real> with a fake <ws>/.venv/bin/pyright-langserver present",
+   "assertions": "recorded argv[0] is an ABSOLUTE path NOT under <ws> and not containing node_modules/.venv; PAIRED CONTROL: with no workspace shadow the resolver still finds the real server",
+   "pairedControl": "workspace-shadowed binary rejected AND a genuine install resolves",
+   "mutationThatMustTurnRed": "resolve the bare name through the child PATH (status quo) → argv[0] resolves under <ws> (O6 reproduced: workspace pyright-langserver executed)",
+   "redTodayProof": "O6: bare 'pyright-langserver' with <ws>/.venv/bin first on PATH → the WORKSPACE binary executed (key present)",
+   "tier_note": "mirror Codex trustedPath (main-D87AK7lw.js:91219)"
+  },
+  {
+   "name": "CLASS RATCHET — every Bun.spawn under src/lsp/** and src/agent/lsp-bridge/** routes through the scrubbed funnel",
+   "tier": "ratchet/census (extends deriveClusterFiles; honest LOCATION/IMPORT census, NOT argv-head)",
+   "seam": "deriveClusterFiles membership gains: rel under src/lsp/ or src/agent/lsp-bridge/ with a real Bun.spawn ⇒ member ⇒ must import the funnel / reach a scrubber token",
+   "assertions": "transport.ts AND availability.ts are IN the derived population (anti-vacuity); offender set == KNOWN_OPEN_LEAKS exactly (two-way); server-rss-watchdog ['ps'] runner is allowlisted with reason",
+   "pairedControl": "an injected Bun.spawn(['rust-analyzer'],{env:process.env}) in a scratch lsp file is FLAGGED; the funnel-routed form is not",
+   "mutationThatMustTurnRed": "append a raw Bun.spawn(['rust-analyzer'],{env:process.env}) to any src/lsp file → census red; today it stays GREEN because the argv head is non-literal (DB2) and the file need not import the funnel",
+   "redTodayProof": "attacker P5 + source: deriveClusterFiles excludes transport.ts/availability.ts (non-literal argv heads `this.command` / `bin`); DB2 confirmed via TS AST",
+   "tier_note": "COORDINATE with sep-12 campaign (owns this file)"
+  },
+  {
+   "name": "pyright on a hostile Python repo runs neither a planted interpreter, a legit-venv .pth, nor sitecustomize.py; still resolves cross-file",
+   "tier": "real-e2e opt-in (capability group lsp-pyright, QUANTA_REAL_TOOLCHAIN_E2E; VISIBLE skip at collection when pyright-langserver/python3 absent)",
+   "seam": "production servers.ts PYRIGHT.create → PyrightAdapter.start driven through the tool's execute AND (a second arm) through the mention resolver",
+   "assertions": "after definition: planted <cwd>/.venv/bin/python marker absent (exact 0); a real python3 -m venv + site-packages .pth marker absent (exact 0); sitecustomize.py marker absent with PYTHONPATH seeded; PAIRED CONTROL: cross-file `from pkg import x` resolves to the site-packages file (exact uri) AND an editable __editable__.pth package resolves; PATH present in spawn env",
+   "pairedControl": "interpreter/.pth/sitecustomize exec + key leak blocked AND venv+editable resolution preserved",
+   "mutationThatMustTurnRed": "revert pyright.ts to prefer <cwd>/.venv/bin/python → .pth/interpreter markers appear; keep PYTHONPATH in the LSP allowlist → sitecustomize marker appears",
+   "redTodayProof": "O3 on current HEAD: V1 → 12 .pth execs; V2 PYTHONPATH → 5 sitecustomize execs; control → 0 execs + full resolution. Existing pyright-python-interpreter.test.ts asserts the vulnerable .venv-preference and MUST flip.",
+   "tier_note": ""
+  },
+  {
+   "name": "rust-analyzer on a hostile Rust repo runs no build.rs, no rustc-wrapper, no build.rustc, no rust-toolchain.toml path binary",
+   "tier": "real-e2e opt-in (capability group lsp-rust; VISIBLE skip when cargo/rust-analyzer absent)",
+   "seam": "production servers.ts RUST_ANALYZER.create → RustAnalyzerAdapter.start with HARDENING initOptions + envDelta",
+   "assertions": "after a definition + settle: build.rs marker absent (exact 0); .cargo rustc-wrapper marker absent; .cargo build.rustc marker absent; rust-toolchain.toml abs-path toolchain marker absent; PAIRED CONTROL: definition on a crate with none of these still resolves (exact range)",
+   "pairedControl": "all four exec vectors blocked AND ordinary nav works",
+   "mutationThatMustTurnRed": "buildScripts.enable=true → build.rs runs; drop RUSTC_WRAPPER='' → wrapper runs (O2: 12 execs); drop RUSTC pin → build.rustc runs (O2: 12); drop RUSTUP_TOOLCHAIN pin → toolchain-abs runs (O2: 1)",
+   "redTodayProof": "O2 current-HEAD adapter: buildrs:none 2, wrapper-rel:init 12, rustc-cfg:init+env 12, toolchain-abs:init+env 1 — each closed only by the specific delta",
+   "tier_note": "each mutation-that-must-turn-red pairs to ONE delta so no half of the fix can be deleted green"
+  },
+  {
+   "name": "tsls on a hostile TS repo forks a VALIDATED trusted tsserver, never the workspace tsserver or its tsconfig plugin, and fails-closed if the trusted path is missing",
+   "tier": "real-e2e opt-in (capability group lsp-typescript)",
+   "seam": "production TypescriptAdapter.start with initializationOptions.tsserver.path from lsp-hardening (validated isFile)",
+   "assertions": "workspace node_modules/typescript/lib/tsserver.js marker absent (exact 0); tsconfig compilerOptions.plugins evil-plugin NOT loaded (exact 0); when the pinned trusted path does NOT exist the adapter REFUSES to launch (does not silently fall back to workspace — H-TSPIN-VALIDATE); PAIRED CONTROL: definition still resolves with the trusted server",
+   "pairedControl": "workspace tsserver + plugin blocked AND nav works; invalid pin declines rather than regressing",
+   "mutationThatMustTurnRed": "drop tsserver.path → workspace tsserver + plugin run (O4 prod: both markers); drop the isFile validation → pin-invalid falls back to workspace (O4 pin-invalid: 3 execs)",
+   "redTodayProof": "O4 current HEAD: prod → WORKSPACE_TSSERVER + TSCONFIG_PLUGIN_LOADED; pin-valid → 0; pin-invalid → 3 (silent fallback)",
+   "tier_note": ""
+  },
+  {
+   "name": "@-mention @Symbol does NOT execute the repo interpreter even with LSP nav tools disabled, and its server env carries no secrets",
+   "tier": "integration (real mention resolver + real pyright, capability-gated)",
+   "seam": "the production buildDefaultMentionResolver + buildMentionSymbolDeps → lspNavProvider → warm pool → PYRIGHT.create, driven by resolver.resolveSymbol with QUANTA_LSP_TOOLS=0",
+   "assertions": "planted <cwd>/.venv/bin/python marker absent (exact 0); server env carries no *_API_KEY; PAIRED CONTROL: @Symbol still resolves to its defining file (semantic backend stubbed null so only LSP fires)",
+   "pairedControl": "mention-path interpreter exec + leak blocked AND symbol resolution preserved",
+   "mutationThatMustTurnRed": "revert pyright.ts / transport env → planted interpreter runs on the mention path (P-A reproduced 6 execs with the kill switch ON)",
+   "redTodayProof": "re-ran P-A on current HEAD: QUANTA_LSP_TOOLS=0, resolveSymbol('FooBar') → repoInterpreterExecs=6, key present",
+   "tier_note": "proves the mention trigger is covered, closing the RCA-scope gap"
+  },
+  {
+   "name": "HARDENING is an exhaustive Record<LspServerKind,…> with a runtime drift guard",
+   "tier": "unit",
+   "seam": "import the HARDENING SSOT + the drift-guard directly",
+   "assertions": "every LspServerKind has an arm (exact keyset); deleting an arm throws at module load; each arm's load-bearing keys present (rust envDelta has RUSTC_WRAPPER='' AND RUSTC AND RUSTUP_TOOLCHAIN; pyright blanks PYTHONPATH/VIRTUAL_ENV; typescript has a tsserver.path resolver)",
+   "pairedControl": "complete record passes AND a missing arm throws",
+   "mutationThatMustTurnRed": "drop the rust-analyzer arm → drift guard throws; remove RUSTC from the rust envDelta → the arm-key assertion red",
+   "redTodayProof": "no SSOT exists on HEAD — the assertion is red until lsp-hardening.ts lands",
+   "tier_note": ""
+  }
+ ],
+ "implementationOrder": [
+  "C1 SEAL the funnel: fix bunScrubbedSpawner extra-vs-env ordering + RED unit (extra.env cannot smuggle a secret). COORDINATE with sep-12 (owns scrubbed-spawn.ts). Independently green.",
+  "C2 LSP_ENV_ALLOWLIST derived from DEFAULT_ENV_ALLOWLIST in env-scrub.ts + RED unit (PYTHONPATH/VIRTUAL_ENV out, RUSTUP_HOME/CARGO_HOME in, provider keys never).",
+  "C3 initializationOptions channel: config.ts + base.ts start + RED unit driving the real base with a recording transport (spec.initializationOptions reaches initialize params).",
+  "C4 lsp-hardening.ts SSOT + trusted-command resolver + RED unit (exhaustive record + drift guard; resolver rejects workspace/node_modules/.venv paths).",
+  "C5 transport.spawn through funnel + trusted binary + per-server env/initopts wiring + adapter threading + RED units (transport env scrub; trusted-binary resolution). Flip nothing user-visible until adapters wired.",
+  "C6 pyright trusted interpreter + extraPaths + FLIP pyright-python-interpreter.test.ts + RED real-e2e (interpreter/.pth/sitecustomize not run, cross-file preserved).",
+  "C7 availability.ts scrub + trusted bin + neutral cwd + RED unit (launch-env-exported secret does not reach the probe child — subprocess with secret in STARTUP env, per node-repl pattern; NOT a runtime process.env mutation).",
+  "C8 class-ratchet extension (location/import census) in the exec-cluster hellgate + RED (injected raw LSP spawn flagged). COORDINATE with sep-12 (owns this file).",
+  "C9 rust-analyzer + tsls + gopls/clangd real-e2e hellgates (capability-gated) proving each vector closed with per-delta mutations.",
+  "C10 TrustStore re-widen for rust fidelity (servers.ts + warm-pool) + check-lsp-test.ts shares hardening + RED units."
+ ],
+ "fileOwnership": [
+  "src/runtime/scrubbed-spawn.ts",
+  "src/shared/env-scrub.ts",
+  "src/lsp/adapters/base/config.ts",
+  "src/lsp/adapters/base.ts",
+  "src/lsp/adapters/base/transport.ts",
+  "src/lsp/adapters/lsp-hardening.ts",
+  "src/lsp/adapters/pyright.ts",
+  "src/lsp/adapters/typescript.ts",
+  "src/lsp/adapters/rust-analyzer.ts",
+  "src/lsp/adapters/gopls.ts",
+  "src/lsp/adapters/clangd.ts",
+  "src/agent/lsp-bridge/availability.ts",
+  "src/agent/lsp-bridge/servers.ts",
+  "src/agent/lsp-bridge/warm-pool.ts",
+  "src/agent/shadow-verify-adapters/check-lsp-test.ts",
+  "tests/unit/runtime/exec-cluster-spawn-env-scrub-ban-hellgate.test.ts",
+  "tests/unit/runtime/scrubbed-spawn-brand-hellgate.test.ts",
+  "tests/unit/pyright-python-interpreter.test.ts",
+  "tests/unit/lsp-transport-env-scrub-hellgate.test.ts (new)",
+  "tests/unit/lsp-hardening-ssot.test.ts (new)",
+  "tests/unit/lsp-trusted-binary-resolution.test.ts (new)",
+  "tests/unit/evidence-lsp-bridge-pyright-real-e2e.test.ts (extend, or new lsp-workspace-exec-pyright-real-e2e.test.ts)",
+  "tests/unit/lsp/rust-analyzer-real-e2e.test.ts (extend, or new)",
+  "tests/unit/lsp-mention-symbol-exec-hellgate.test.ts (new, capability-gated)",
+  "tools/dev/test-capability-manifest.ts (add members to lsp-* groups)"
+ ],
+ "userDecisions": [
+  {
+   "question": "U1 — Ship env-scrub + trusted binary/interpreter + no-exec init + RUSTC/RUSTUP/RUSTC_WRAPPER pins DEFAULT-ON and trust-independent, or behind a knob?",
+   "options": "default-on (matches buildLspServerEnv/node-repl/shadow_verify security fixes) with QUANTA_LSP_HARDENED=0 opt-out | opt-in knob",
+   "recommendation": "Default-ON, trust-independent, with a QUANTA_LSP_HARDENED=0 escape for a trusted power user who needs build-script symbols. This closes a credential leak + multi-vector RCE that fires out-of-box, including on the mention path with nav tools disabled.",
+   "blocking": true
+  },
+  {
+   "question": "U2 — rust-analyzer buildScripts/procMacro: OFF always, or OFF-untrusted / ON-trusted?",
+   "options": "OFF always | OFF for untrusted, ON for trusted (TrustStore) | ON always (status quo RCE)",
+   "recommendation": "OFF for untrusted, ON for trusted. Never ON for an untrusted repo. This is fidelity re-widening layered on the always-on safety base, not a decline path — so the non-null create() type and the mention path are unaffected.",
+   "blocking": false
+  },
+  {
+   "question": "U3 — Trusted-binary/interpreter resolution strictness: reject any resolved path under cwd / containing node_modules|.venv (Codex trustedPath), or recompute PATH from a trusted allow-set?",
+   "options": "reject-workspace-paths (Codex trustedPath) | recompute PATH from trusted dirs only | both",
+   "recommendation": "reject-workspace-paths as the primary (simplest, matches Codex main-D87AK7lw.js:91219 and O6's need), with the resolved absolute path passed as argv[0]. This is NEW plumbing (not in R1) and needs sign-off on the exact rejection predicate — it changes which binary launches on a dev who activated a repo venv.",
+   "blocking": true
+  },
+  {
+   "question": "U4 — OS-sandbox (seatbelt/landlock) wrap of the LSP process?",
+   "options": "defer | opt-in first | default where available",
+   "recommendation": "Defer. Not needed to close any proven vector (env-scrub + trusted-toolchain + RUSTC/RUSTUP pins already reduce build.rs/wrapper/rustc/toolchain/.pth/interpreter/server-binary to 0 in probes), macOS/Linux-only, degrades to passthrough.",
+   "blocking": false
+  },
+  {
+   "question": "U5 — Coordination with the concurrent sep-12 truth-guard campaign, which owns src/runtime/scrubbed-spawn.ts and the exec-cluster scrub-ban test (both required edits) and is ACTIVELY committing (moved from 15 to 2 dirty files during this audit).",
+   "options": "land LSP commits on top of the campaign's current HEAD after re-reading those two files | hand the funnel-seal + census-extension to the campaign owner",
+   "recommendation": "Re-read scrubbed-spawn.ts and the exec-cluster hellgate at land time; ADD the LSP-location predicate and the extra-seal, do not fork; keep KNOWN_OPEN_LEAKS a two-way ratchet. The campaign already fixed node-repl/shadow_verify by the same funnel, so the mechanism is shared.",
+   "blocking": true
+  },
+  {
+   "question": "U6 — gopls hardening (GOFLAGS/GOTOOLCHAIN/CGO) is UNVERIFIED-by-probe (gopls not installed on this machine).",
+   "options": "ship the documented Go/gopls deltas now, gated behind the same default-on hardening | defer gopls until a real gopls probe",
+   "recommendation": "Ship the deltas (grounded in documented Go behavior + Codex parity) but label the gopls arm UNVERIFIED-by-probe in-code, and add a real-gopls hellgate to the lsp-go capability group before claiming that vector closed.",
+   "blocking": false
+  }
+ ],
+ "residualRisks": [
+  "pyright trusted-interpreter could regress resolution on repos whose imports resolve only through the venv interpreter's COMPUTED sys.path (not site-packages / .pth) — O3 covered site-packages + editable .pth; conda/namespace-package layouts UNVERIFIED before default-on.",
+  "rust-analyzer.toml overrideCommand did NOT execute in O2 on rust-analyzer 1.95 (all ratoml cases → 0 execs), so files.exclude:['rust-analyzer.toml'] is defense-in-depth against a version where it does; the live-exec of that vector is UNVERIFIED — kept because Codex defends it and it is free.",
+  "gopls GOTOOLCHAIN/CGO/GOFLAGS block is UNVERIFIED-by-probe (gopls absent) — U6.",
+  "trusted-binary rejection could refuse to launch on an exotic install where the only server binary legitimately lives under a path the predicate rejects (e.g. a project-local toolchain the user actually trusts) — needs the QUANTA_LSP_HARDENED=0 / trusted-path escape to be discoverable.",
+  "LSP_ENV_ALLOWLIST too narrow could break a server behind a corp MITM proxy / custom CA — the derivation MUST keep SSL_CERT_FILE/SSL_CERT_DIR/proxy vars (it inherits them from DEFAULT_ENV_ALLOWLIST).",
+  "Concurrent sep-12 campaign owns scrubbed-spawn.ts + the exec-cluster hellgate and is committing live — a land without re-reading risks a conflict or a forked ratchet (U5).",
+  "The funnel-seal (extra ordering) changes a shared primitive used by pty-backend/status-runner/node-repl/shell/sandbox — the change is safe (branded env wins) but every funnel caller must be re-green after it."
+ ],
+ "readiness": "READY-WITH-DECISIONS. Every R2 attack CONFIRMED against source or a fresh real-adapter probe (DB1 funnel-extra, DB2 census-argv, DB3 rustc-wrapper + two EXTENDED rust vectors, DB4 allowlist/rustup-home); all three R1 wrong-claims corrected with evidence (availability = launch-env not full-env; rust-toolchain relative refused; Claude Code DOES self-launch LSP without cred-scrub); all missed holes confirmed (mention trigger, .pth/PYTHONPATH pyright, ratchet gap) plus THREE new confirmed holes (workspace server-binary via PATH, .cargo build.rustc, tsserver-pin-must-validate) and one refutation kept honest (clangd compile_commands -fplugin does NOT dlopen through clangd — R1's low-risk clangd call stands). Blocking before implementation: U1 (default-on posture), U3 (trusted-binary rejection predicate — new plumbing), U5 (coordinate the two sep-12-owned files, do not fork). Non-blocking: U2/U4/U6. The design closes the class structurally (single funnel-routed launch port + location/import census + exhaustive-record SSOT + trusted resolver), reuses the funnel/env-scrub/TrustStore/capability-lane rather than adding a parallel model, and every hellgate has a per-delta mutation so no half of the fix can be deleted green."
+}

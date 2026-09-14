@@ -54,6 +54,10 @@ evidence:
     - tools/dev/capability-probe-producer.ts
     - tools/dev/capability-receipt-consumer.ts
     - tools/dev/capability-callsites.ts
+    - tools/dev/with-capability-receipt.ts
+    - tools/dev/capability-receipt-files.ts
+    - tools/dev/repository-identity.ts
+    - tools/dev/toolchain-roots.ts
     - tools/dev/verification-required-producers.ts
     - tools/dev/module-load-effects.ts
     - tools/dev/module-load-effect-guard.ts

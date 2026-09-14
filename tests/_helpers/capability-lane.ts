@@ -30,8 +30,10 @@
  *                        platform cannot ever have the capability (bwrap on
  *                        macOS). A visible, policy-explicit non-selection.
  *   blocked-missing      the lane WAS selected and the capability is absent.
- *                        In a required job this is RED — see `capability()`
- *                        in `tools/dev/capability-receipt-consumer.ts`.
+ *                        RED only when `QUANTA_REQUIRE_CAPABILITIES` names this
+ *                        GROUP's id (or is `1`); otherwise a visible skip. Either
+ *                        way it is a junit RECORD (see `capabilityGate`), which
+ *                        the CI aggregator counts as blocked.
  *   failed-setup         the capability is present but its fixture could not be
  *                        built (an install failed, a clone failed). Never a
  *                        skip: a broken fixture is a defect in the lane, not a
@@ -44,11 +46,14 @@
  * caller's explicit choice (a required capability, or `describe.skip`).
  */
 
-import { describe as describeFn } from "bun:test"
+import { describe as describeFn, test } from "bun:test"
 import {
   CAPABILITY_LINE_PREFIX,
   CAPABILITY_REQUIRE_ENV,
+  capabilityRecordName,
+  capabilityRequiredFailureName,
   capabilityRequiredFor,
+  laneGroupSubject,
 } from "../../tools/dev/capability-receipt"
 import { CAPABILITY_GROUPS } from "../../tools/dev/test-capability-manifest"
 
@@ -73,7 +78,8 @@ export interface CapabilityResult {
 const KNOWN_GROUPS: ReadonlySet<string> = new Set(CAPABILITY_GROUPS.map((group) => group.id))
 
 /**
- * Marker the CI aggregator greps for. Stable, one line, parseable.
+ * The prefix of the human-readable outcome line. Nothing parses these lines:
+ * the CI aggregator reads the capability-result artifact, built from junit.
  *
  * Re-exported, not defined: the receipt consumer writes the same prefix, and a
  * second literal would let the two halves drift into two greps.
@@ -84,9 +90,9 @@ export { CAPABILITY_LINE_PREFIX }
  * Record an outcome. Writes one line to stdout and returns the result so a
  * caller can assert on it.
  *
- * An unknown group id THROWS rather than logging: a result attributed to a
- * group the manifest does not know is not counted by the fan-out, so it would
- * silently vanish from exactly the tally it exists to feed.
+ * An unknown group id THROWS rather than logging: a result attributed to a group
+ * the manifest does not know names nothing an operator or the manifest can act
+ * on, so it would be an outcome about nothing.
  */
 export const reportCapability = (result: CapabilityResult): CapabilityResult => {
   if (!KNOWN_GROUPS.has(result.group)) {
@@ -248,6 +254,12 @@ export interface CapabilityGateVerdict {
  * 17 files used to be textually identical to one that ran them.
  */
 export const capabilityGate = (input: CapabilityGateInput): CapabilityGateVerdict => {
+  const verdict = decideGate(input)
+  recordGate(input.group, input.file, verdict, input.env ?? process.env)
+  return verdict
+}
+
+const decideGate = (input: CapabilityGateInput): CapabilityGateVerdict => {
   const env = input.env ?? process.env
   const missing = Object.entries(input.needs)
     .filter(([, present]) => !present)
@@ -268,6 +280,53 @@ export const capabilityGate = (input: CapabilityGateInput): CapabilityGateVerdic
   reportCapability({ group: input.group, file: input.file, outcome, detail })
   return { available, outcome, missing, detail }
 }
+
+/**
+ * A gate that did not execute, as a junit case in the file that asked — the
+ * receipt consumer's records (`capabilityRecordName`), for the lane's groups.
+ *
+ * # The defect
+ *
+ * A REQUIRED blocked group threw from `beforeAll`. MEASURED on Bun 1.3.14, that is
+ * written as ONE `<testcase name="(unnamed)"><failure/>`, the describe's own cases
+ * vanish, and the junit carries no message. `capability-result` then counted the
+ * throw as an executed case in an executed file and published `blocked=0` for a
+ * red job, and a skip left nothing in the junit at all. The consumer and
+ * `requireContract` had already moved to registered, named cases; this helper
+ * was the third system and still threw.
+ *
+ * Only `blocked-missing` is ever escalated. `skipped-unsupported` is a lane that
+ * was not selected, and `QUANTA_REQUIRE_CAPABILITIES=1` in a campaign must not
+ * turn every unselected lane file red. Registration throws inside a running
+ * test; there the requirement throws instead, so it is never quiet.
+ */
+const recordGate = (
+  group: string,
+  file: string,
+  verdict: CapabilityGateVerdict,
+  env: Readonly<Record<string, string | undefined>>,
+): void => {
+  if (verdict.available) return
+  const subject = laneGroupSubject(group)
+  const required = verdict.outcome === "blocked-missing" && capabilityRequired(group, env)
+  const message = requiredMessage(group, file, verdict)
+  try {
+    if (required) {
+      test(capabilityRequiredFailureName(subject, verdict.outcome), () => {
+        throw new Error(message)
+      })
+    } else {
+      test.skip(capabilityRecordName(subject, verdict.outcome, verdict.detail), () => {})
+    }
+  } catch {
+    if (required) throw new Error(message)
+  }
+}
+
+const requiredMessage = (group: string, file: string, verdict: CapabilityGateVerdict): string =>
+  `[capability] REQUIRED group ${group} is ${verdict.outcome} in ${file}: ` +
+  `${verdict.detail}. ${CAPABILITY_REQUIRE_ENV} names this group, so an absent capability ` +
+  "is the failure, not a reason to pass."
 
 /**
  * `executed` plus a receipt, for an `afterAll`.
@@ -294,52 +353,26 @@ export const reportExecuted = (
 }
 
 /**
- * The describe-selector every lane file uses.
+ * The describe-selector every lane file uses: the real `describe` only when the
+ * gate is available.
  *
- * THE HOLE THIS CLOSES. `const D = GATE.available ? describe : describe.skip`
- * reads correctly and is wrong in exactly the case that matters: when a REQUIRED
- * capability job cannot reach its capability, `describe.skip` means `beforeAll`
- * never runs, so `assertCapabilityNotBlocked` never fires and the job exits 0
- * having executed nothing. "the tool was not installed" would go back to
- * printing the same green as "the tool ran" — the defect the whole ticket is
- * about, reintroduced one level down.
- *
- * So a blocked REQUIRED group selects the REAL `describe`: its `beforeAll`
- * throws, every case in it is reported FAILED, and the failure text names the
- * group and the missing need. A blocked OPTIONAL group still gets the visible
- * skip, with its `[capability]` line already written by `capabilityGate`.
+ * A REQUIRED blocked group used to select the real `describe` so that a
+ * `beforeAll` assertion could throw. That throw was the unattributed
+ * `(unnamed)` failure `recordGate` describes; the gate now registers the named
+ * failure itself, so a gate that cannot run always skips its cases visibly.
  */
-export const laneDescribe = (
-  group: string,
-  verdict: CapabilityGateVerdict,
-  env: Readonly<Record<string, string | undefined>> = process.env,
-): typeof describeFn =>
-  verdict.available || capabilityRequired(group, env) ? describeFn : describeFn.skip
+export const laneDescribe = (verdict: CapabilityGateVerdict): typeof describeFn =>
+  verdict.available ? describeFn : describeFn.skip
 
 /**
- * The RED half. A required capability job that reaches this has proven the one
- * thing it was asked to prove: the capability is not there.
+ * A fixture that could not be built while the capability WAS present — an
+ * install that failed, a daemon that does not answer. Always a throw, from a hook:
+ * `failed-setup` is a defect in the lane, never a host property, and
+ * `capability-result` counts a failing hook as exactly that, never as a case.
  *
- * Deliberately an `Error`, not an `expect` — so it is usable from `beforeAll`
- * and from a setup step, where a failed expectation is not always attributed.
- */
-export const assertCapabilityNotBlocked = (
-  input: { readonly group: string; readonly file: string },
-  verdict: CapabilityGateVerdict,
-  env: Readonly<Record<string, string | undefined>> = process.env,
-): void => {
-  if (verdict.available) return
-  if (!capabilityRequired(input.group, env)) return
-  throw new Error(
-    `[capability] REQUIRED group ${input.group} is ${verdict.outcome} in ${input.file}: ` +
-      `${verdict.detail}. ${CAPABILITY_REQUIRE_ENV} names this group, so an absent capability ` +
-      "is the failure, not a reason to pass.",
-  )
-}
-
-/**
- * A fixture that could not be built while the capability WAS present.
- * Always a throw: `failed-setup` is a defect in the lane, never a host property.
+ * (`assertCapabilityNotBlocked` lived here for an absence found inside a hook.
+ * Its one caller, the Ollama lane, now reports that as the setup failure it is,
+ * and a gate's own absence is registered by `capabilityGate`.)
  */
 export const capabilitySetupFailed = (
   group: string,

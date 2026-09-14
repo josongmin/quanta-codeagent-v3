@@ -8,7 +8,7 @@
  *
  * AUTO-SKIPS without node. Verified 2026-06-10.
  */
-import { afterAll, beforeAll, expect, test } from "bun:test"
+import { afterAll, expect, test } from "bun:test"
 import { mkdtempSync, realpathSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -16,7 +16,6 @@ import { defaultRuntimePort } from "@/tool/evidence"
 import { buildEvidence } from "@/tool/evidence/builder"
 import { runToolchain, type Toolchain } from "@/tool/testrun"
 import {
-  assertCapabilityNotBlocked,
   boundedVersion,
   capabilityGate,
   hasBinary,
@@ -33,7 +32,7 @@ const FILE = "tests/unit/tool/evidence/runtime-node-real-e2e.test.ts"
 // inside the ordinary unit suite (measured 3,455ms idle, 9,387ms at load 68 —
 // past the 8,529ms per-test budget, a ceiling that may only go DOWN).
 const GATE = capabilityGate({ group: GROUP, file: FILE, needs: { node: hasBinary("node") } })
-const D = laneDescribe(GROUP, GATE)
+const D = laneDescribe(GATE)
 
 // A node:test file that self-runs inline (one process). `result` is 10 (0+1+2+3+4),
 // the assertion expects 99 → fails. The CDP breakpoint lands on the assert line.
@@ -53,7 +52,6 @@ const TEST_MJS = [
 ].join("\n")
 
 D("defaultRuntimePort — REAL Node runtime via CDP (fourth language, non-DAP carrier)", () => {
-  beforeAll(() => assertCapabilityNotBlocked({ group: GROUP, file: FILE }, GATE))
   afterAll(() =>
     reportExecuted(GATE, GROUP, FILE, "real node --inspect-brk CDP capture", () => ({
       nodeVersion: boundedVersion(["node", "--version"]),

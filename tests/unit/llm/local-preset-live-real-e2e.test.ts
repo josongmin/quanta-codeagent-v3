@@ -34,8 +34,8 @@ import { beforeAll, expect, test } from "bun:test"
 import { OpenAIAdapter } from "@/llm/adapters/openai"
 import type { StreamEvent } from "@/llm/types"
 import {
-  assertCapabilityNotBlocked,
   capabilityGate,
+  capabilitySetupFailed,
   hasBinary,
   laneDescribe,
   reportCapability,
@@ -55,9 +55,12 @@ const OLLAMA_TAGS = "http://127.0.0.1:11434/api/tags"
  * and `test:real-toolchain` printed the same green a host that really ran a
  * 150s inference prints. The prose was the only place the truth lived.
  *
- * Now: no server ⇒ `blocked-missing` (RED when this group is REQUIRED, a
- * VISIBLE bun skip otherwise); lane not selected ⇒ `skipped-unsupported`.
- * Neither is ever a passing assertion.
+ * Now: lane not selected ⇒ `skipped-unsupported`; no `ollama` binary ⇒
+ * `blocked-missing` (a recorded skip, RED when this group is REQUIRED); the
+ * binary present and no server answering ⇒ `failed-setup` from `beforeAll`, RED
+ * in every selected run. None is ever a passing assertion, and the last is not a
+ * case either: it used to throw from the test body when the group was optional,
+ * which counted as an executed case in an executed file.
  */
 const GATE = capabilityGate({
   group: GROUP,
@@ -91,97 +94,83 @@ const collect = async (it: AsyncIterable<StreamEvent>): Promise<StreamEvent[]> =
 /** Resolved once, in a bounded setup step — never at module load. */
 let liveModel: string | null = null
 
-laneDescribe(GROUP, GATE)(
-  "RFC05-3 LIVE Ollama streaming tool-call smoke (honest reachability)",
-  () => {
-    beforeAll(async () => {
-      liveModel = await probeOllama()
-      if (liveModel !== null) return
-      // The lane WAS selected and the binary IS present, but the daemon does
-      // not answer. That is `blocked-missing`, and in a REQUIRED job it is the
-      // finding — not a reason to assert `true`.
-      reportCapability({
-        group: GROUP,
-        file: FILE,
-        outcome: "blocked-missing",
-        detail: `no local Ollama server answered ${OLLAMA_TAGS} within 3s`,
-      })
-      assertCapabilityNotBlocked({ group: GROUP, file: FILE }, { ...GATE, available: false })
-    })
+laneDescribe(GATE)("RFC05-3 LIVE Ollama streaming tool-call smoke (honest reachability)", () => {
+  beforeAll(async () => {
+    liveModel = await probeOllama()
+    if (liveModel !== null) return
+    // The lane WAS selected and the binary IS present, but the daemon does not
+    // answer: the fixture this lane needs could not be reached. A hook failure,
+    // which `capability-result` counts as failed-setup and never as coverage.
+    capabilitySetupFailed(
+      GROUP,
+      FILE,
+      `no local Ollama server answered ${OLLAMA_TAGS} within 3s; start \`ollama serve\` or deselect this group`,
+    )
+  })
 
-    test("real Ollama /v1/chat/completions streams text or a structured tool-call through the Chat adapter", async () => {
-      const model = liveModel
-      if (model === null) {
-        // Reached only when this group is NOT required: beforeAll already
-        // reported `blocked-missing`. Fail the case rather than pass it — a
-        // capability lane that was SELECTED and could not run has not proven
-        // anything, and `test:real-toolchain` must not print green over it.
-        throw new Error(
-          `[capability] ${GROUP} blocked-missing in ${FILE}: no local Ollama server reachable at ` +
-            `${OLLAMA_BASE}. Start \`ollama serve\` or deselect this group; an unreachable live ` +
-            "model is not a pass.",
-        )
-      }
-      reportCapability({
-        group: GROUP,
-        file: FILE,
-        outcome: "executed",
-        detail: "live Ollama reachable",
-        receipt: { ollamaBaseUrl: OLLAMA_BASE, ollamaModel: model },
-      })
-      // The REAL Chat adapter — no fake client. Ollama ignores the placeholder key.
-      const adapter = new OpenAIAdapter({
-        apiKey: "ollama-local-no-auth",
-        model,
-        baseURL: OLLAMA_BASE,
-        streamFirstChunkMs: 120_000,
-        streamIdleMs: 120_000,
-      })
-      const events = await collect(
-        adapter.stream({
-          system: "You are a helpful assistant. When asked the time, call get_time.",
-          messages: [
-            {
-              role: "user",
-              content: [{ type: "text", text: "What time is it in Tokyo? Use the get_time tool." }],
+  test("real Ollama /v1/chat/completions streams text or a structured tool-call through the Chat adapter", async () => {
+    const model = liveModel
+    // Unreachable: `beforeAll` refuses a server that did not answer.
+    if (model === null) throw new Error(`[capability] ${GROUP}: no live model resolved`)
+    reportCapability({
+      group: GROUP,
+      file: FILE,
+      outcome: "executed",
+      detail: "live Ollama reachable",
+      receipt: { ollamaBaseUrl: OLLAMA_BASE, ollamaModel: model },
+    })
+    // The REAL Chat adapter — no fake client. Ollama ignores the placeholder key.
+    const adapter = new OpenAIAdapter({
+      apiKey: "ollama-local-no-auth",
+      model,
+      baseURL: OLLAMA_BASE,
+      streamFirstChunkMs: 120_000,
+      streamIdleMs: 120_000,
+    })
+    const events = await collect(
+      adapter.stream({
+        system: "You are a helpful assistant. When asked the time, call get_time.",
+        messages: [
+          {
+            role: "user",
+            content: [{ type: "text", text: "What time is it in Tokyo? Use the get_time tool." }],
+          },
+        ],
+        tools: [
+          {
+            name: "get_time",
+            description: "Return the current time for a city",
+            input_schema: {
+              type: "object",
+              properties: { city: { type: "string" } },
+              required: ["city"],
             },
-          ],
-          tools: [
-            {
-              name: "get_time",
-              description: "Return the current time for a city",
-              input_schema: {
-                type: "object",
-                properties: { city: { type: "string" } },
-                required: ["city"],
-              },
-            },
-          ],
-          signal: AbortSignal.timeout(150_000),
-        }),
-      )
-      const kinds = new Set(events.map((e) => e.type))
-      // The stream MUST terminate with a message_stop (finish reason mapped).
-      expect(kinds.has("message_stop")).toBe(true)
-      // And it MUST carry model output — either streamed text OR a structured
-      // tool-call round-trip (tool_use_end). A local model may choose either; both
-      // prove the Chat adapter decoded the real Ollama SSE grammar with NO new
-      // adapter (RFC05-3 DoD: "config sugar, no runtime branch").
-      const hadText = events.some((e) => e.type === "text_delta")
-      const hadToolCall = events.some((e) => e.type === "tool_use_end")
-      expect(hadText || hadToolCall).toBe(true)
-      reportCapability({
-        group: GROUP,
-        file: FILE,
-        outcome: "executed",
-        detail: `live smoke completed — events=${events.length} kinds=${[...kinds].join(",")}`,
-        receipt: {
-          ollamaBaseUrl: OLLAMA_BASE,
-          ollamaModel: model,
-          streamedText: String(hadText),
-          streamedToolCall: String(hadToolCall),
-        },
-      })
-    }, 160_000)
-  },
-)
+          },
+        ],
+        signal: AbortSignal.timeout(150_000),
+      }),
+    )
+    const kinds = new Set(events.map((e) => e.type))
+    // The stream MUST terminate with a message_stop (finish reason mapped).
+    expect(kinds.has("message_stop")).toBe(true)
+    // And it MUST carry model output — either streamed text OR a structured
+    // tool-call round-trip (tool_use_end). A local model may choose either; both
+    // prove the Chat adapter decoded the real Ollama SSE grammar with NO new
+    // adapter (RFC05-3 DoD: "config sugar, no runtime branch").
+    const hadText = events.some((e) => e.type === "text_delta")
+    const hadToolCall = events.some((e) => e.type === "tool_use_end")
+    expect(hadText || hadToolCall).toBe(true)
+    reportCapability({
+      group: GROUP,
+      file: FILE,
+      outcome: "executed",
+      detail: `live smoke completed — events=${events.length} kinds=${[...kinds].join(",")}`,
+      receipt: {
+        ollamaBaseUrl: OLLAMA_BASE,
+        ollamaModel: model,
+        streamedText: String(hadText),
+        streamedToolCall: String(hadToolCall),
+      },
+    })
+  }, 160_000)
+})

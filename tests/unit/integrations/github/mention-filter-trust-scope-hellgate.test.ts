@@ -5,7 +5,12 @@
 
 import { describe, expect, test } from "bun:test"
 
-import { createMentionFilter, matchMention, type NormalizedGhEvent } from "@/integrations/github"
+import {
+  createMentionFilter,
+  matchMention,
+  type NormalizedGhEvent,
+  normalizeGhEvent,
+} from "@/integrations/github"
 
 const ev = (body: string, overrides: Partial<NormalizedGhEvent> = {}): NormalizedGhEvent =>
   Object.freeze({
@@ -138,5 +143,129 @@ describe("ADR-0314 hellgate — mention filter", () => {
 
   test("phrase followed by punctuation IS a word boundary", () => {
     expect(matchMention("@quanta, please look", ["@quanta"]).matched).toBe(true)
+  })
+})
+
+/**
+ * ★ Every scope, driven by a REAL comment payload through the real normalizer.
+ *
+ * `isCollaborator` is true for OWNER, MEMBER and COLLABORATOR, and the filter
+ * checked it first, so every owner and member resolved to `collaborator`:
+ * `--trust-scope owner` — the example in SETUP.md — and `member` answered no one.
+ * The arms above hand-build a sender with `isCollaborator`, which is exactly the
+ * shape that could not see it.
+ */
+describe("trust scope from author_association, through normalizeGhEvent", () => {
+  const payload = (association: string | undefined, login = "alice", author = login) =>
+    normalizeGhEvent({
+      kind: "issue_comment",
+      raw: {
+        action: "created",
+        issue: { number: 7 },
+        repository: { owner: { login: "octo" }, name: "demo" },
+        sender: { login, type: "User" },
+        comment: {
+          body: "@quanta review",
+          user: { login: author },
+          ...(association === undefined ? {} : { author_association: association }),
+        },
+      },
+    })
+  const admits = (scope: "owner" | "member" | "collaborator" | "public", association?: string) => {
+    const event = payload(association)
+    if (event === undefined) throw new Error("the payload did not normalize")
+    return createMentionFilter({
+      triggerPhrases: ["@quanta"],
+      requireTrustScope: scope,
+      allowBots: false,
+    }).evaluate(event).matched
+  }
+
+  test("each scope admits its association and every stronger one, and nothing weaker", () => {
+    const associations = ["OWNER", "MEMBER", "COLLABORATOR", "CONTRIBUTOR", "NONE"] as const
+    const table = Object.fromEntries(
+      (["owner", "member", "collaborator", "public"] as const).map((scope) => [
+        scope,
+        associations.filter((association) => admits(scope, association)),
+      ]),
+    )
+    expect(table).toEqual({
+      owner: ["OWNER"],
+      member: ["OWNER", "MEMBER"],
+      collaborator: ["OWNER", "MEMBER", "COLLABORATOR"],
+      public: ["OWNER", "MEMBER", "COLLABORATOR", "CONTRIBUTOR", "NONE"],
+    })
+  })
+
+  test("PAIRED CONTROL — with no association, the owner is still recognised by login", () => {
+    const event = payload(undefined, "octo")
+    if (event === undefined) throw new Error("the payload did not normalize")
+    const owner = createMentionFilter({
+      triggerPhrases: ["@quanta"],
+      requireTrustScope: "owner",
+      allowBots: false,
+    })
+    expect(owner.evaluate(event).matched).toBe(true)
+    const stranger = payload(undefined, "mallory")
+    if (stranger === undefined) throw new Error("the payload did not normalize")
+    expect(owner.evaluate(stranger).matched).toBe(false)
+  })
+
+  test("🔴 an EDITOR is not the author: another account's association never lends its rank", () => {
+    // `issue_comment.edited` by carol on the owner's comment: sender carol, the
+    // comment's author and association the owner's. Anyone with write access can
+    // edit comments, so trusting the association let carol run her injected body
+    // at owner rank — reproduced against this module before the fix.
+    for (const [association, author] of [
+      ["OWNER", "octo"],
+      ["MEMBER", "bob"],
+    ] as const) {
+      const edited = normalizeGhEvent({
+        kind: "issue_comment",
+        raw: {
+          action: "edited",
+          issue: { number: 7 },
+          repository: { owner: { login: "octo" }, name: "demo" },
+          sender: { login: "carol", type: "User" },
+          comment: {
+            body: "@quanta deploy",
+            user: { login: author },
+            author_association: association,
+          },
+        },
+      })
+      if (edited === undefined) throw new Error("the payload did not normalize")
+      expect(edited.sender).not.toHaveProperty("association")
+      for (const scope of ["owner", "member"] as const) {
+        const filter = createMentionFilter({
+          triggerPhrases: ["@quanta"],
+          requireTrustScope: scope,
+          allowBots: false,
+        })
+        expect({ association, scope, matched: filter.evaluate(edited).matched }).toEqual({
+          association,
+          scope,
+          matched: false,
+        })
+      }
+    }
+  })
+
+  test("🔴 a prototype key as the association fails closed at every scope but public", () => {
+    for (const association of [
+      "constructor",
+      "__proto__",
+      "toString",
+      "hasOwnProperty",
+      "valueOf",
+    ]) {
+      for (const scope of ["owner", "member", "collaborator"] as const) {
+        expect({ association, scope, admitted: admits(scope, association) }).toEqual({
+          association,
+          scope,
+          admitted: false,
+        })
+      }
+    }
   })
 })

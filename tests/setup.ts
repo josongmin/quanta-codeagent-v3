@@ -1,7 +1,7 @@
 // Preloaded by bun test (see bunfig.toml). Keep global test setup here.
 import { afterAll, afterEach, beforeEach } from "bun:test"
 import childProcess from "node:child_process"
-import { readdirSync, rmSync } from "node:fs"
+import { existsSync, readdirSync, rmSync } from "node:fs"
 import { syncBuiltinESMExports } from "node:module"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -18,6 +18,7 @@ import { __resetKnobOverrides } from "@/shared/knob-overrides"
 import { quantaHomeDirFrom } from "@/shared/quanta-home"
 import { __resetRuntimeConfig } from "@/shared/runtime-config"
 import { setTerminalIo } from "@/shared/terminal-io"
+import { lendToolchainRoots } from "../tools/dev/toolchain-roots"
 import { decideBenchResultsDir } from "./_support/bench-results-fence"
 import {
   CHILD_PROCESS_SPAWNERS,
@@ -112,7 +113,9 @@ if (benchResultsFence.action === "redirect") {
     env: process.env,
     scratchRoot,
     scratchPrefixes: scratchPrefixesFor(tmpdir()),
+    exists: existsSync,
   })
+  lendToolchainRoots(fence.lend)
   for (const key of fence.unset) delete process.env[key]
   for (const [key, value] of Object.entries(fence.set)) process.env[key] = value
   if (fence.unset.length > 0 || Object.keys(fence.set).length > 0) __resetRuntimeConfig()

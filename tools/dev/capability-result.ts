@@ -25,6 +25,12 @@
  * counts as executed when at least one of its cases ran, so a file whose every
  * case skipped does not inflate the floor.
  *
+ * A failing HOOK is not a case. Counted as one, a `beforeAll` whose fixture could
+ * not be built (`capabilitySetupFailed`: an npm install that failed) made two
+ * lane files "executed" and met the `js-test-runner` floor of 2 files / 2 cases
+ * with `failedSetup: 0` — the aggregator said ok for a lane that ran nothing. It
+ * is `failedSetup` now.
+ *
  * `blockedMissing` and `failedSetup` are NOT skips. A lane that declared a
  * dependency required and did not get it is blocked, and provisioning that
  * broke is a setup failure; both are hard failures at the aggregator.
@@ -32,11 +38,12 @@
  * They were ONLY passed in by the caller, as flags, and no lane passed them: all
  * three `capability:*` scripts published `blocked=0 setup_failed=0` whatever
  * happened, so the aggregator's two hard-failure checks could not fire. They are
- * now also READ from the junit: every receipt consumer registers a skipped
- * `[capability] RECORD <id> <verdict>` testcase in the file that asked (see
- * `capabilityRecordName`). Records are not cases and are counted in neither
- * `executedCases` nor `skippedUnsupported`. The flags remain for a dependency
- * that is not a receipt capability.
+ * now also READ from the junit: every receipt consumer and every lane gate
+ * registers a skipped `[capability] RECORD <id> <verdict>` testcase, or a named
+ * REQUIRED failure, in the file that asked (see `capabilityRecordName`). Records
+ * are not cases and are counted in neither `executedCases` nor
+ * `skippedUnsupported`; which records are HARD is `hardVerdict`. The flags remain
+ * for a dependency that is not a receipt capability.
  *
  * # Bounded by construction
  *
@@ -47,7 +54,11 @@
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname } from "node:path"
-import { parseCapabilityRecordName } from "./capability-receipt"
+import {
+  isLaneGroupSubject,
+  parseCapabilityRecordName,
+  parseRequiredFailureName,
+} from "./capability-receipt"
 
 export interface CapabilityResultV1 {
   readonly schema: "quanta.capability-result.v2"
@@ -106,6 +117,13 @@ interface JunitCase {
   readonly file: string
   readonly skipped: boolean
   readonly name: string
+  /**
+   * A failing HOOK. MEASURED on Bun 1.3.14: a throw in `beforeAll`/`afterAll` is
+   * written as `<testcase name="(unnamed)">` with a failure and NO `line`
+   * attribute, and the describe's own cases vanish. Every real case carries
+   * `line`, even one named `""`, so the shape is exact where the name is not.
+   */
+  readonly hookFailure: boolean
 }
 
 const junitCases = (xml: string): JunitCase[] => {
@@ -114,10 +132,12 @@ const junitCases = (xml: string): JunitCase[] => {
   for (let match = caseTag.exec(xml); match !== null; match = caseTag.exec(xml)) {
     const attrs = match[1] ?? ""
     let skipped = false
+    let failed = false
     if (match[2] !== "/") {
       const closeAt = xml.indexOf("</testcase>", caseTag.lastIndex)
       const body = closeAt === -1 ? "" : xml.slice(caseTag.lastIndex, closeAt)
       skipped = /<skipped\b/u.test(body)
+      failed = /<(?:failure|error)\b/u.test(body)
     }
     cases.push({
       // Bun writes the file path as `file`; other emitters use `classname`.
@@ -126,9 +146,86 @@ const junitCases = (xml: string): JunitCase[] => {
       // Undecoded: the record prefix has nothing XML escapes, and the id and verdict
       // are read only up to the first ": ".
       name: attribute(attrs, "name") ?? "",
+      hookFailure: failed && attribute(attrs, "line") === undefined,
     })
   }
   return cases
+}
+
+export interface CapabilityRecordRow {
+  readonly file: string
+  readonly capability: string
+  readonly verdict: string
+  /** A REQUIRED failure, as opposed to a skipped RECORD of an optional capability. */
+  readonly required: boolean
+}
+
+/**
+ * What a junit case says about a capability, if anything.
+ *
+ * A RECORD is a SKIPPED case with the record name: a case that ran is a case,
+ * whatever it is called, so a name cannot hide coverage or invent a record. A
+ * REQUIRED failure is a record whether it ran (failed) or a filter skipped it.
+ */
+const recordOf = (one: JunitCase): CapabilityRecordRow | undefined => {
+  const required = parseRequiredFailureName(one.name)
+  if (required !== undefined) return { file: one.file, ...required, required: true }
+  const optional = one.skipped ? parseCapabilityRecordName(one.name) : undefined
+  return optional === undefined ? undefined : { file: one.file, ...optional, required: false }
+}
+
+/** Every capability record in a junit document, one row per case. */
+export const capabilityRecordsFromJunit = (xml: string): readonly CapabilityRecordRow[] =>
+  junitCases(xml).flatMap((one) => {
+    const row = recordOf(one)
+    return row === undefined ? [] : [row]
+  })
+
+/**
+ * One line for a campaign: counts per non-executed verdict, then each
+ * hard-failure record by name. Deduplicated per file and capability.
+ */
+export const describeCapabilityRecords = (rows: readonly CapabilityRecordRow[]): string => {
+  const unique = [
+    ...new Map(rows.map((row) => [`${row.verdict} ${row.capability} ${row.file}`, row])).values(),
+  ]
+  const count = (verdict: string): number => unique.filter((row) => row.verdict === verdict).length
+  const named = unique
+    .filter((row) => row.verdict === "blocked-missing" || row.verdict === "failed-setup")
+    .map((row) => `${row.verdict} ${row.capability} in ${row.file}`)
+    .sort()
+  return (
+    `blocked-missing=${count("blocked-missing")} failed-setup=${count("failed-setup")} ` +
+    `skipped-unsupported=${count("skipped-unsupported")}` +
+    (named.length === 0 ? "" : ` — ${named.join("; ")}`)
+  )
+}
+
+/**
+ * The hard-failure counter a record belongs to, if any.
+ *
+ * `blocked-missing` means two different things in the two systems, and only one
+ * of them is a property of the host:
+ *
+ *  - a RECEIPT id: nobody probed it (no receipt, an invalid one, an id the receipt
+ *    lacks). The chain broke — hard, required or not.
+ *  - a lane GROUP: the lane was selected and the capability is not on this host.
+ *    Hard only when REQUIRED. Counted unconditionally, an OPTIONAL group the
+ *    manifest keeps out of the floor on purpose (nightly-heavy, absent on ubuntu
+ *    by design) failed the PR `required` gate once the gate recorded its groups
+ *    (measured: `validateCapabilityResult` ok → "1 blocked-missing"). Its record
+ *    is still printed and still in the junit; the per-group floors catch a lane
+ *    that ran too little.
+ *
+ * `failed-setup` counts either way: a probe or fixture that broke is a defect in
+ * the lane whether or not anyone required it.
+ */
+const hardVerdict = (
+  record: CapabilityRecordRow,
+): "blocked-missing" | "failed-setup" | undefined => {
+  if (record.verdict === "failed-setup") return "failed-setup"
+  if (record.verdict !== "blocked-missing") return undefined
+  return record.required || !isLaneGroupSubject(record.capability) ? "blocked-missing" : undefined
 }
 
 export const countJunitExecution = (xml: string): JunitCounts => {
@@ -137,13 +234,12 @@ export const countJunitExecution = (xml: string): JunitCounts => {
   let skippedCases = 0
   const recorded = { "blocked-missing": new Set<string>(), "failed-setup": new Set<string>() }
   for (const one of junitCases(xml)) {
-    // A record is a SKIPPED case with the record name. A case that ran is a case,
-    // whatever it is called, so a name cannot hide coverage or invent a record.
-    const record = one.skipped ? parseCapabilityRecordName(one.name) : undefined
+    const record = recordOf(one)
     if (record !== undefined) {
-      if (record.verdict === "blocked-missing" || record.verdict === "failed-setup") {
-        recorded[record.verdict].add(`${one.file} ${record.capability}`)
-      }
+      const hard = hardVerdict(record)
+      if (hard !== undefined) recorded[hard].add(`${one.file} ${record.capability}`)
+    } else if (one.hookFailure) {
+      recorded["failed-setup"].add(`${one.file} (hook)`)
     } else if (one.skipped) {
       skippedCases += 1
     } else {

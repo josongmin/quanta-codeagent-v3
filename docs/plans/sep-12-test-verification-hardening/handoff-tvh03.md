@@ -305,14 +305,18 @@ PTY_AVAILABLE=false across all 8 files" hole TVH-03 names. `contract` likewise:
       QUANTA_REAL_TOOLCHAIN_E2E=1 QUANTA_REQUIRE_CAPABILITIES=lsp-go \
         bun test tests/unit/evidence-lsp-bridge-go-real-e2e.test.ts
       → [capability] group=lsp-go … outcome=blocked-missing detail="absent on this host: gopls"
-      → error: [capability] REQUIRED group lsp-go is blocked-missing … QUANTA_REQUIRE_CAPABILITIES
-        names this group, so an absent capability is the failure, not a reason to pass.
-      → 0 pass 1 fail
+      → (fail) [capability] REQUIRED group lsp-go is blocked-missing
+      → 0 pass 3 skip 1 fail
 
   PAIRED CONTROL, same file, switch unset: 0 pass 4 skip 0 fail. So the RED is
-  the switch's doing and not the host's. (The counts differ because the switch
-  names ONE group: the required group's cases are selected into the real
-  `describe` and fail, and the file's other groups still skip.)
+  the switch's doing and not the host's.
+
+  RE-MEASURED 2026-09-14 after the gate became a junit record. The failure used
+  to be a `beforeAll` throw (`0 pass 1 fail`), which Bun writes as an
+  `(unnamed)` testcase; `capability-result` counted it as an executed case and
+  published `blocked=0` for a red job. The gate now registers the named failing
+  test itself and the three cases skip; unarmed, the fourth skip is the
+  `[capability] RECORD group lsp-go …` record.
 
 - Each job then publishes its artifact:
   `bun run tools/dev/capability-result.ts --producer=<group.id>
@@ -366,8 +370,9 @@ from `prepush`, `pr` and `full`. What that file needs from its owner:
    `Bun.spawnSync` with an explicit `timeout`). `Bun.spawnSync` DOES honour
    `timeout` on Bun 1.3.14 — verified: a 5s sleep under `timeout: 300` returns
    in 302ms with SIGTERM.
-4. It must report through `capabilityGate` / `laneDescribe` /
-   `assertCapabilityNotBlocked` / `reportExecuted` like its 16 siblings, or the
+4. It must report through `capabilityGate` / `laneDescribe(GATE)` /
+   `reportExecuted` like its 16 siblings (`capabilitySetupFailed` from a hook
+   for a fixture or service that turns out to be unreachable), or the
    `native-debugger` group's executed count will be short by one file and the
    group floor (4 files / 6 cases) will not be reachable.
 5. `tests/unit/dev/test-capability-lanes.test.ts` asserts from source that every

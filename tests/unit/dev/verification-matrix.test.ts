@@ -1,6 +1,13 @@
 import { describe, expect, test } from "bun:test"
-import { readFileSync } from "node:fs"
-import { join, resolve } from "node:path"
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { dirname, join, resolve } from "node:path"
+import ts from "typescript"
+import {
+  CHROME_CAPABILITY_ID,
+  campaignReceiptMissingIds,
+} from "../../../tools/dev/capability-probe-producer"
+import type { CapabilityReceipt } from "../../../tools/dev/capability-receipt"
 import { executedFileSetDigest } from "../../../tools/dev/executed-file-set"
 import { testToolchainSha256 } from "../../../tools/dev/test-shard-receipt"
 import { junitExecutedFiles } from "../../../tools/dev/test-shard-timings"
@@ -19,6 +26,7 @@ import {
   matrixPlanFileFloor,
   matrixPopulationProblem,
 } from "../../../tools/dev/verification-matrix-population"
+import { prepareCapabilityLane } from "../../../tools/dev/with-capability-receipt"
 
 describe("verification matrix aggregate", () => {
   const HEAD = "a".repeat(40)
@@ -748,5 +756,177 @@ describe("matrix tier wiring", () => {
     expect(ci).toContain("--expect-tier=pr")
     // The monolith's own tier, unchanged: this is the value the other two match.
     expect(ci).toContain("QUANTA_VERIFICATION_TIER: pr")
+  })
+})
+
+/** The text a named call's object-literal argument gives `name`. */
+const callArgument = (tree: ts.SourceFile, callee: string, name: string): string | undefined => {
+  const calls: ts.CallExpression[] = []
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && node.expression.getText(tree) === callee) calls.push(node)
+    node.forEachChild(visit)
+  }
+  visit(tree)
+  const properties = calls.flatMap((call) => {
+    const bag = call.arguments[0]
+    return bag !== undefined && ts.isObjectLiteralExpression(bag) ? [...bag.properties] : []
+  })
+  const property = properties.find((one) => one.name?.getText(tree) === name)
+  return property !== undefined && ts.isPropertyAssignment(property)
+    ? property.initializer.getText(tree)
+    : undefined
+}
+
+/**
+ * ★ Third adversarial audit: the shadow matrix ran a different coverage than the
+ * runner it is compared with. Its workers got no capability receipt, so every
+ * gated consumer skipped green, and its planner accepted a discovery the runner
+ * refuses.
+ */
+describe("the shadow matrix runs what the monolith runs", () => {
+  test("the planner refuses a discovery that lost a tracked test file", () => {
+    const base = realpathSync(mkdtempSync(join(tmpdir(), "matrix-lost-")))
+    const git = (...args: string[]): void => {
+      const run = Bun.spawnSync(["git", ...args], {
+        cwd: base,
+        stdout: "pipe",
+        stderr: "pipe",
+        env: {
+          ...process.env,
+          GIT_AUTHOR_NAME: "t",
+          GIT_AUTHOR_EMAIL: "t@t",
+          GIT_COMMITTER_NAME: "t",
+          GIT_COMMITTER_EMAIL: "t@t",
+        },
+      })
+      if (run.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${run.stderr.toString()}`)
+    }
+    const write = (rel: string, body = ""): void => {
+      mkdirSync(dirname(join(base, rel)), { recursive: true })
+      writeFileSync(join(base, rel), body)
+    }
+    try {
+      git("init", "-q", "-b", "main")
+      for (const root of ["unit", "meta", "adversarial", "measurement", "integration"]) {
+        write(`tests/${root}/a.test.ts`)
+      }
+      write("src/a.test.ts")
+      write("tools/a.test.ts")
+      const overridesPath = join(base, "overrides.json")
+      write(
+        "overrides.json",
+        JSON.stringify({ schema: "quanta.test-policy-overrides.v1", overrides: [] }),
+      )
+      const plan = (): string => {
+        try {
+          currentMatrixPopulation({
+            repoRoot: base,
+            tier: "pr",
+            policyOverridesPath: overridesPath,
+          })
+          return "planned"
+        } catch (error) {
+          return error instanceof Error ? error.message : String(error)
+        }
+      }
+      git("add", "-A")
+      git("commit", "-q", "-m", "a")
+      // PAIRED CONTROL: the same tree, complete, plans.
+      expect(plan()).toBe("planned")
+      // A tracked test under a dot-directory, which discovery does not walk.
+      write("tests/unit/.hidden/lost.test.ts")
+      git("add", "-A")
+      git("commit", "-q", "-m", "b")
+      expect(plan()).toContain("discovery is incomplete")
+      expect(plan()).toContain("tests/unit/.hidden/lost.test.ts")
+    } finally {
+      rmSync(base, { recursive: true, force: true })
+    }
+  })
+
+  test("a matrix lane's receipt carries every id a campaign receipt carries, chrome included", async () => {
+    // The lane helper hardcoded `includeChrome: false` for the contract and
+    // toolchain lanes; the matrix worker inherited it, and all 17 gated browser
+    // cases skipped in the matrix while the monolith, which probes Chrome, ran them.
+    const scratch = mkdtempSync(join(tmpdir(), "matrix-chrome-"))
+    try {
+      const lane = await prepareCapabilityLane({
+        lane: "matrix-arm",
+        env: { PATH: process.env.PATH ?? "", HOME: tmpdir() },
+        cacheRoot: join(scratch, "cache"),
+        includeChrome: true,
+        spawn: (argv) => ({
+          exited: Promise.resolve(0),
+          stdout: Promise.resolve(`${argv[0] ?? "x"}\n`),
+          kill: () => {},
+        }),
+        probeChrome: async () => ({ status: "available", detail: "fake bring-up", probeMs: 1 }),
+      })
+      try {
+        const receipt = JSON.parse(
+          readFileSync(lane.env.QUANTA_CAPABILITY_RECEIPT ?? "", "utf8"),
+        ) as Pick<CapabilityReceipt, "capabilities">
+        expect(receipt.capabilities[CHROME_CAPABILITY_ID]?.status).toBe("available")
+        expect(campaignReceiptMissingIds(receipt, true, lane.env)).toEqual([])
+      } finally {
+        lane.dispose()
+      }
+    } finally {
+      rmSync(scratch, { recursive: true, force: true })
+    }
+    // ...and the worker asks for it, and ends its child on SIGINT/SIGTERM.
+    const cli = readFileSync(
+      resolve(import.meta.dir, "..", "..", "..", "tools/dev/verification-matrix-cli.ts"),
+      "utf8",
+    )
+    const tree = ts.createSourceFile("cli.ts", cli, ts.ScriptTarget.Latest, true)
+    expect(callArgument(tree, "prepareCapabilityLane", "includeChrome")).toBe("true")
+    expect(callArgument(tree, "runBoundedChild", "signal")).toBe("interrupt.signal")
+    expect(cli).toContain(
+      'for (const name of ["SIGINT", "SIGTERM"] as const) process.once(name, () => interrupt.abort())',
+    )
+  }, 60_000)
+
+  test("a worker's child runs under the capability lane it prepared, which it then disposes", () => {
+    const text = readFileSync(
+      resolve(import.meta.dir, "..", "..", "..", "tools/dev/verification-matrix-cli.ts"),
+      "utf8",
+    )
+    const source = ts.createSourceFile("cli.ts", text, ts.ScriptTarget.Latest, true)
+    const found: ts.Node[] = []
+    const visit = (node: ts.Node): void => {
+      found.push(node)
+      node.forEachChild(visit)
+    }
+    visit(source)
+    const calls = (name: string): ts.CallExpression[] =>
+      found.filter(
+        (node): node is ts.CallExpression =>
+          ts.isCallExpression(node) && node.expression.getText(source) === name,
+      )
+    const [prepared] = calls("prepareCapabilityLane")
+    const declaration = prepared?.parent?.parent
+    expect(declaration !== undefined && ts.isVariableDeclaration(declaration)).toBe(true)
+    const laneName = (declaration as ts.VariableDeclaration).name.getText(source)
+    // The ONE bounded child, whose env is the lane's and nothing else.
+    const children = calls("runBoundedChild")
+    expect(children).toHaveLength(1)
+    const bag = children[0]?.arguments[0]
+    const env =
+      bag !== undefined && ts.isObjectLiteralExpression(bag)
+        ? bag.properties.find((one) => one.name?.getText(source) === "env")
+        : undefined
+    expect(
+      env !== undefined && ts.isPropertyAssignment(env) ? env.initializer.getText(source) : "",
+    ).toBe(`${laneName}.env`)
+    // Disposed whichever way the child ends.
+    const settle = children[0]?.parent
+    expect(
+      settle !== undefined &&
+        ts.isPropertyAccessExpression(settle) &&
+        settle.name.text === "finally" &&
+        ts.isCallExpression(settle.parent) &&
+        settle.parent.arguments[0]?.getText(source) === `() => ${laneName}.dispose()`,
+    ).toBe(true)
   })
 })

@@ -124,10 +124,32 @@ export const createMentionFilter = (opts: MentionFilterOpts): MentionFilter => {
 }
 
 /**
- * Resolve the sender's trust scope. Order: explicit isCollaborator → "owner"
- * if repo owner login matches sender login → "public" otherwise.
+ * GitHub's own association, where it names a scope directly. A `Map`, not an
+ * object: `ASSOCIATION_SCOPE["constructor"]` on an object literal is a function,
+ * and a function scope then ranked `undefined`, which passed every gate.
+ */
+const ASSOCIATION_SCOPE: ReadonlyMap<string, TrustScope> = new Map([
+  ["OWNER", "owner"],
+  ["MEMBER", "member"],
+  ["COLLABORATOR", "collaborator"],
+])
+
+/**
+ * Resolve the sender's trust scope. Order: GitHub's `author_association` when it
+ * names a scope → explicit `isCollaborator` (payloads that carry only the
+ * boolean) → "owner" when the repo owner's login is the sender's → "public".
+ *
+ * The association used to be read only through `isCollaborator`, which is true
+ * for OWNER and MEMBER too, and that check came first — so every owner and
+ * member resolved to `collaborator`, and the `owner` and `member` scopes
+ * silently answered no one.
  */
 const resolveScope = (event: NormalizedGhEvent): TrustScope => {
+  const byAssociation =
+    event.sender.association === undefined
+      ? undefined
+      : ASSOCIATION_SCOPE.get(event.sender.association)
+  if (byAssociation !== undefined) return byAssociation
   if (event.sender.isCollaborator === true) return "collaborator"
   if (event.repo.owner === event.sender.login) return "owner"
   return "public"
