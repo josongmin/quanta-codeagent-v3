@@ -273,31 +273,37 @@ export const resolveStorePath = (input: ResolveStorePathInput): StorePathResolut
   // case-only difference).
   const sameFile = input.sameFile ?? sameFileOnDisk
   const legacy = legacyCwdStorePath(input.cwd)
-  const home = defaultDurableStorePath(input.homeDir)
+  // The memory home is decided once for the whole plane, and the legacy store's migration
+  // target is THAT home's store. It was `input.homeDir`'s: with consolidator files still in
+  // the pre-relocation home, the printed `mv` put the store in the relocated home while
+  // MEMORY.md and raw_memories.md stayed behind, and that home's notice never printed,
+  // because this branch returned first (round-10 audit, run on real directories).
+  const memory =
+    input.osHomeDir === undefined || input.osHomeDir === ""
+      ? { home: input.homeDir, source: "home-default" as const, notice: undefined }
+      : resolveMemoryHome({
+          quantaHome: input.homeDir,
+          osHomeDir: input.osHomeDir,
+          exists,
+          sameFile,
+        })
+  const home = defaultDurableStorePath(memory.home)
   if (exists(legacy) && !(exists(home) && sameFile(legacy, home))) {
     // In place, as before: user data is never moved or copied. But the migration
     // command is offered ONLY while the destination is absent — if the home store
     // exists too, a move would at best skip and at worst carry the legacy WAL onto it.
+    const storeNotice = exists(home)
+      ? twoStoresNotice(legacy, home, "the home default")
+      : `memory store: using legacy cwd-scoped ${legacy}; the default is now ${home}. ` +
+        `To migrate (with no quanta running): ${migrationCommand(legacy, home)}`
     return {
       path: legacy,
       source: "legacy-cwd",
-      legacyNotice: exists(home)
-        ? twoStoresNotice(legacy, home, "the home default")
-        : `memory store: using legacy cwd-scoped ${legacy}; the default is now ${home}. ` +
-          `To migrate (with no quanta running): ${migrationCommand(legacy, home)}`,
+      legacyNotice: memory.notice === undefined ? storeNotice : `${storeNotice}\n${memory.notice}`,
     }
   }
-  if (input.osHomeDir === undefined || input.osHomeDir === "") {
-    return { path: home, source: "home-default" }
-  }
-  const memory = resolveMemoryHome({
-    quantaHome: input.homeDir,
-    osHomeDir: input.osHomeDir,
-    exists,
-    sameFile,
-  })
   return {
-    path: defaultDurableStorePath(memory.home),
+    path: home,
     source: memory.source,
     ...(memory.notice !== undefined ? { legacyNotice: memory.notice } : {}),
   }

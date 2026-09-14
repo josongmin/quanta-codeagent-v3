@@ -488,6 +488,42 @@ describe("the memory plane follows the quanta home", () => {
     }
   })
 
+  test("a legacy cwd store migrates to where the consolidator's files are, and following the command splits nothing", () => {
+    // Round-10 audit, run on real directories: legacy cwd store, a relocated QUANTA_HOME with
+    // an empty memory dir, and MEMORY.md + raw_memories.md still in <os home>/.quanta/memory.
+    // The printed `mv` targeted the RELOCATED home's store while the consolidator stayed in
+    // the OS home, and that home's notice never printed (this branch returned first).
+    const osHome = temps.create("mem-split-osh-")
+    const cwd = temps.create("mem-split-cwd-")
+    const relocated = temps.create("mem-split-home-")
+    const priorDir = join(osHome, ".quanta", "memory")
+    mkdirSync(priorDir, { recursive: true })
+    writeFileSync(join(priorDir, "MEMORY.md"), "# memory\n")
+    writeFileSync(join(priorDir, "raw_memories.md"), "- a raw memory\n")
+    const legacy = join(cwd, ".quanta", "memory.sqlite")
+    mkdirSync(dirname(legacy), { recursive: true })
+    new Database(legacy).close()
+    const first = resolveStorePath({ homeDir: relocated, cwd, osHomeDir: osHome })
+    expect(first.source).toBe("legacy-cwd")
+    const target = join(priorDir, "memory.sqlite")
+    expect(first.legacyNotice, "the migration target is the consolidator's home").toContain(
+      `the default is now ${target}`,
+    )
+    expect(first.legacyNotice).not.toContain(defaultDurableStorePath(relocated))
+    // …and the memory home's own notice is not swallowed.
+    expect(first.legacyNotice).toContain(`memory: using ${priorDir}`)
+    // Run the printed store command; the next launch keeps store and consolidator together.
+    const command = /To migrate \(with no quanta running\): (.*)$/m.exec(
+      first.legacyNotice ?? "",
+    )?.[1]
+    if (command === undefined) throw new Error("fixture: no migration command")
+    expect(spawnSync("sh", ["-c", command]).status).toBe(0)
+    const second = resolveStorePath({ homeDir: relocated, cwd, osHomeDir: osHome })
+    expect(second.path).toBe(target)
+    expect(existsSync(target)).toBe(true)
+    expect(existsSync(join(dirname(second.path), "MEMORY.md"))).toBe(true)
+  })
+
   test("the factory takes the OS home from the injected env, never homedir()", () => {
     // Because a found pre-relocation store is now read IN PLACE, the probe's reach
     // decides whose store a session opens. `homedir()` answers the developer's real home
