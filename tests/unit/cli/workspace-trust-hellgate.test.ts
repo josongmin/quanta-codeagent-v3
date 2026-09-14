@@ -19,6 +19,8 @@ import {
   __resetLspAvailabilityCacheForTest,
   __setLspAvailabilityOverrideForTest,
 } from "@/agent/lsp-bridge/availability"
+import { lspDiagnosticsProvider } from "@/agent/lsp-bridge/diagnostics"
+import { lspNavProvider } from "@/agent/lsp-bridge/nav"
 import { PYRIGHT, TYPESCRIPT } from "@/agent/lsp-bridge/servers"
 import { lspNavCheapToolList } from "@/agent/lsp-bridge/tools"
 import {
@@ -367,6 +369,85 @@ describe("language servers", () => {
     expect(diags[0]?.severity).toBe("error")
     expect(diags[0]?.message).toContain("lint did not run")
     expect(diags[0]?.message).toContain("not a trusted folder")
+  })
+})
+
+// sep-14, reported by the sep-14 lane B session and reproduced: every surface asked
+// `isAvailable(bin)` — which spawns `<bin> --version` with the agent's environment —
+// BEFORE the trust gate. With a workspace `bin/` first on PATH (direnv, an activated venv,
+// npm-run), an untrusted folder's own `gopls` / `pyright-langserver` ran with the API key,
+// and only then was the launch refused. The fake servers here leave a marker on ANY
+// invocation, `--version` included, and the real probe runs (no availability override).
+describe("the availability probe", () => {
+  const probedServerOnPath = (bin: string): { ran: () => boolean } => {
+    const dir = temps.create("probe-lsp-")
+    const marker = join(dir, `${bin}.ran`)
+    const script = join(dir, bin)
+    writeFileSync(
+      script,
+      `#!/bin/sh\ntouch '${marker}'\n[ "$1" = "--version" ] && exit 0\nexit 3\n`,
+    )
+    chmodSync(script, 0o755)
+    process.env.PATH = `${dir}:${priorPath}`
+    __setLspAvailabilityOverrideForTest(null)
+    __resetLspAvailabilityCacheForTest()
+    return { ran: () => existsSync(marker) }
+  }
+  const project = (file: string): string => {
+    const folder = temps.create("wt-probe-")
+    writeFileSync(join(folder, file), file.endsWith(".go") ? "package main\n" : "x = 1\n")
+    return folder
+  }
+
+  test("RED: lsp nav in an untrusted folder runs nothing, not even --version", async () => {
+    const server = probedServerOnPath("gopls")
+    const folder = project("main.go")
+    await expect(lspNavProvider().open(join(folder, "main.go"), folder)).rejects.toBeInstanceOf(
+      WorkspaceUntrustedError,
+    )
+    expect(server.ran()).toBe(false)
+  })
+
+  test("RED: the pooled server path (pyright) runs nothing either", async () => {
+    const server = probedServerOnPath("pyright-langserver")
+    const folder = project("app.py")
+    await expect(lspNavProvider().open(join(folder, "app.py"), folder)).rejects.toBeInstanceOf(
+      WorkspaceUntrustedError,
+    )
+    expect(server.ran()).toBe(false)
+  })
+
+  test("RED: diagnostics in an untrusted folder runs nothing", async () => {
+    const server = probedServerOnPath("gopls")
+    const folder = project("main.go")
+    await expect(
+      lspDiagnosticsProvider().open(join(folder, "main.go"), folder),
+    ).rejects.toBeInstanceOf(WorkspaceUntrustedError)
+    expect(server.ran()).toBe(false)
+  })
+
+  test("RED: shadow_verify's check runs nothing and says it did not run", async () => {
+    // The check groups files by the servers it knows (pyright, typescript).
+    const server = probedServerOnPath("typescript-language-server")
+    const scratch = temps.create("wt-probe-sv-")
+    writeFileSync(join(scratch, "a.ts"), "export const a = 1\n")
+    const diags = await createLspTestCheckPort({ trustRoot: temps.create("wt-probe-origin-") }).run(
+      scratch,
+      "lint",
+      undefined,
+    )
+    expect(server.ran()).toBe(false)
+    expect(diags.map((d) => d.message).join("\n")).toContain("lint did not run")
+  })
+
+  test("PAIRED CONTROL: in a trusted folder the same nav call probes the binary", async () => {
+    const server = probedServerOnPath("gopls")
+    const folder = project("main.go")
+    trust(folder)
+    await lspNavProvider()
+      .open(join(folder, "main.go"), folder)
+      .catch(() => undefined)
+    expect(server.ran()).toBe(true)
   })
 })
 

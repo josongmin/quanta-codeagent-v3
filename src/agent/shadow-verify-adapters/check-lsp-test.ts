@@ -163,6 +163,15 @@ const groupFilesByServer = (
  *  failure becomes one error diag for that file; the client is stopped in a
  *  `finally`. The caller must skip the group when `isAvailable` returned
  *  `false` — this helper assumes a live binary. */
+/** A check that could not start: one error diagnostic that says so. */
+const didNotRun = (check: "lint" | "typecheck", e: unknown): ShadowDiagnostic => ({
+  file: "",
+  line: 0,
+  severity: "error",
+  message: `${check} did not run: ${errMessage(e)}`,
+  source: check,
+})
+
 const collectGroupDiagnostics = async (
   spec: ServerSpec,
   serverFiles: readonly string[],
@@ -180,15 +189,7 @@ const collectGroupDiagnostics = async (
     await client.stop().catch(() => undefined)
     // Not an empty list: an empty list reads as "the check ran and found nothing", and a
     // server that never started — refused by workspace trust or crashed — checked nothing.
-    return [
-      {
-        file: "",
-        line: 0,
-        severity: "error",
-        message: `${check} did not run: ${errMessage(e)}`,
-        source: check,
-      },
-    ]
+    return [didNotRun(check, e)]
   }
   const diagnostics: ShadowDiagnostic[] = []
   try {
@@ -238,7 +239,12 @@ const runLspCheck = async (
   const byBin = groupFilesByServer(files)
   const diagnostics: ShadowDiagnostic[] = []
   for (const { spec, files: serverFiles } of byBin.values()) {
-    if (!(await isAvailable(spec.bin))) continue
+    const available = await isAvailable(spec.bin, trustRoot ?? handle).catch((e: unknown) => e)
+    if (available instanceof Error) {
+      diagnostics.push(didNotRun(check, available))
+      continue
+    }
+    if (!available) continue
     const groupDiags = await collectGroupDiagnostics(spec, serverFiles, handle, check, trustRoot)
     diagnostics.push(...groupDiags)
   }

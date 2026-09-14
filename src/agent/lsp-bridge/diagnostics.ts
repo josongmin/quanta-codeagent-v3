@@ -32,7 +32,7 @@ export const lspDiagnosticsProvider = (): DiagnosticsProvider => ({
   open: async (filePath, cwd): Promise<DiagnosticsSession | null> => {
     const spec = specFor(filePath)
     if (!spec) return null
-    if (!(await isAvailable(spec.bin))) return null
+    if (!(await isAvailable(spec.bin, cwd))) return null
     const client = spec.create(cwd)
     if (!(await startLspClient(client, spec.bin, "diagnostics"))) return null
     return client

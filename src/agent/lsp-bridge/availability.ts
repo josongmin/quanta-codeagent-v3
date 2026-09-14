@@ -1,3 +1,5 @@
+import { assertWorkspaceTrusted } from "../workspace-trust"
+
 /** Probe whether a server binary is launchable. Cached per process so a single
  *  agent run does not re-spawn `--version` for every diagnostics call. */
 /** Wall-clock budget for the `<bin> --version` availability probe. Set short
@@ -44,7 +46,7 @@ const probeAvailable = async (bin: string): Promise<boolean> => {
     return false
   }
 }
-export const isAvailable = (bin: string): Promise<boolean> => {
+const cachedProbe = (bin: string): Promise<boolean> => {
   if (availabilityOverrideForTest !== null) {
     return Promise.resolve(availabilityOverrideForTest(bin))
   }
@@ -62,10 +64,29 @@ export const isAvailable = (bin: string): Promise<boolean> => {
   return probe
 }
 
+/**
+ * Whether `bin` launches, asked for a session in `trustRoot`. Rejects with
+ * `WorkspaceUntrustedError` when that folder is not trusted — before the cache, the test
+ * override, or any spawn.
+ *
+ * The probe runs `<bin> --version` with the agent's environment, and `bin` resolves on
+ * PATH, which a workspace can lead (direnv `PATH_add`, an activated venv, npm-run's
+ * `node_modules/.bin`). Every surface asked this BEFORE the trust gate, so an untrusted
+ * folder's own `gopls` / `pyright-langserver` ran with the API key and only then was the
+ * launch refused (reported by the sep-14 lane B session, reproduced). `trustRoot` is
+ * required so no caller can ask without saying for which folder. Once trust is
+ * established the answer does not depend on the folder, so the cache stays keyed by bin.
+ */
+export const isAvailable = async (bin: string, trustRoot: string): Promise<boolean> => {
+  assertWorkspaceTrusted(`Language server ${bin}`, trustRoot)
+  return cachedProbe(bin)
+}
+
 /** Production-safe availability probe for one language-server binary. Shares
  *  the same per-process cache as the tool surfaces, so a bench preflight and
  *  the later tool/session open do not double-spawn `--version`. */
-export const lspBinaryAvailable = (bin: string): Promise<boolean> => isAvailable(bin)
+export const lspBinaryAvailable = (bin: string, trustRoot: string): Promise<boolean> =>
+  isAvailable(bin, trustRoot)
 
 /** TEST-ONLY: clear the per-process availability cache. The cache is a module
  *  singleton (one `bin --version` per process by design — see above), so a test
@@ -92,7 +113,7 @@ export const __setLspAvailabilityOverrideForTest = (
  *  resolves `false` (binary off `PATH`) must NOT poison a later probe once the
  *  binary is reachable. Mirrors the other `__*ForTest` seams; NEVER called in
  *  production. */
-export const __isLspAvailableForTest = (bin: string): Promise<boolean> => lspBinaryAvailable(bin)
+export const __isLspAvailableForTest = (bin: string): Promise<boolean> => cachedProbe(bin)
 
 /** TEST-ONLY: report whether a binary currently has a cached availability entry.
  *  Lets a unit test prove that a settled `false` is EVICTED (cache miss) while a

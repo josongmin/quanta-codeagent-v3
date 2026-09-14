@@ -57,7 +57,7 @@ const lspRenameApplyPort = (cwd: string): RenameApplyPort => {
     computeRename: async (file, line, col, newName, signal) => {
       const spec = specFor(file)
       if (!spec) return null
-      if (!(await isAvailable(spec.bin))) return null
+      if (!(await isAvailable(spec.bin, cwd))) return null
       // A held client from a prior aborted call must not leak.
       await stopHeld()
       const client = spec.create(cwd)
@@ -102,7 +102,7 @@ export const lspCodeActionPort = (getCwd: () => string): CodeActionPort => {
     resolveCodeActions: async (file, line, col, kind, signal) => {
       const spec = specFor(file)
       if (!spec) return null
-      if (!(await isAvailable(spec.bin))) return null
+      if (!(await isAvailable(spec.bin, getCwd()))) return null
       const client = spec.create(getCwd())
       if (!(await startLspClient(client, spec.bin, "code-action"))) return null
       try {
@@ -135,7 +135,7 @@ export const lspCodeActionPort = (getCwd: () => string): CodeActionPort => {
       const file = uriToPath(firstUri)
       const spec = specFor(file)
       if (!spec) throw new Error(`lsp_code_action: no server for ${file}`)
-      if (!(await isAvailable(spec.bin))) return
+      if (!(await isAvailable(spec.bin, getCwd()))) return
       const client = spec.create(getCwd())
       try {
         await client.start()
@@ -154,7 +154,7 @@ const lspFormatPort = (getCwd: () => string): FormatPort => ({
   format: async (file, range, signal) => {
     const spec = specFor(file)
     if (!spec) return null
-    if (!(await isAvailable(spec.bin))) return null
+    if (!(await isAvailable(spec.bin, getCwd()))) return null
     const client = spec.create(getCwd())
     if (!(await startLspClient(client, spec.bin, "format"))) return null
     try {
@@ -171,7 +171,7 @@ const lspSignatureHelpPort = (getCwd: () => string): SignatureHelpPort => ({
   signatureHelp: async (file, line, col, signal) => {
     const spec = specFor(file)
     if (!spec) return null
-    if (!(await isAvailable(spec.bin))) return null
+    if (!(await isAvailable(spec.bin, getCwd()))) return null
     const client = spec.create(getCwd())
     if (!(await startLspClient(client, spec.bin, "signature-help"))) return null
     try {

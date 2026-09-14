@@ -218,7 +218,7 @@ export const verifyStrictPresetLspGrounding = async (
     )
   }
   // Cheap launch preflight first (a missing binary needs no pool spawn).
-  if (!(await lspBinaryAvailable(probe.bin))) {
+  if (!(await lspBinaryAvailable(probe.bin, sandbox))) {
     throw new StrictLspGroundingDegradedError(
       `[bench] preset ${preset} requires live LSP grounding, but ${probe.bin} is not launchable on PATH ` +
         `(dominant repo-language probe: ${probe.rel}, ${probe.count} file(s)).`,

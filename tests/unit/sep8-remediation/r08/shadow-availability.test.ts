@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
+  __isLspAvailableForTest,
   __resetLspAvailabilityCacheForTest,
   __setLspAvailabilityOverrideForTest,
   isAvailable,
@@ -45,18 +46,21 @@ describe("P2-A-02 shadow probe uses canonical success-only cache", () => {
     // Recovery probe goes through the SAME `isAvailable` the shadow checker uses.
     // Do not `checker.run` with allow=true: that would start a real
     // typescript-language-server and the unit timeout is 5s.
-    expect(await isAvailable("typescript-language-server")).toBe(true)
+    // `dir` is scratch, which the test preload trusts; the probe asks for a folder.
+    expect(await isAvailable("typescript-language-server", dir)).toBe(true)
     expect(probes).toBe(3)
   })
 
   test("canonical cache dedups in-flight probes and evicts false", async () => {
+    // The cache under `isAvailable` (which asks workspace trust first, per call): the
+    // shared in-flight promise lives there.
     const bin = `r08-missing-lsp-${Date.now()}`
-    const first = isAvailable(bin)
-    const second = isAvailable(bin)
+    const first = __isLspAvailableForTest(bin)
+    const second = __isLspAvailableForTest(bin)
     expect(second).toBe(first)
     expect(await first).toBe(false)
     expect(await second).toBe(false)
-    const third = isAvailable(bin)
+    const third = __isLspAvailableForTest(bin)
     expect(third).not.toBe(first)
     expect(await third).toBe(false)
   })
