@@ -260,6 +260,20 @@ describe("quanta-home fence — children inherit it", () => {
     ])
   })
 
+  test("RED: `env: null` means process.env, as Node reads it — the fenced env, not a TypeError", () => {
+    // Round-11 audit B8 (reproduced): `own.HOME` threw on `{ env: null }`, which Node
+    // accepts as "use process.env".
+    expect(withFencedEnv("file-args", ["sh", ["-c", "true"], { env: null }], ENV)).toEqual([
+      "sh",
+      ["-c", "true"],
+      { env: ENV },
+    ])
+    expect(withFencedEnv("command", ["ls", { env: null, cwd: "/x" }], ENV)).toEqual([
+      "ls",
+      { env: ENV, cwd: "/x" },
+    ])
+  })
+
   test("CANARY: real children spawned with no env see this process's scratch HOME", () => {
     const script = 'printf %s "$HOME"'
     const home = process.env.HOME ?? "(unset)"

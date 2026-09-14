@@ -58,8 +58,10 @@
  *
  * An EXPLICIT `env` is the caller's, with one addition: when it names no `HOME`, the child
  * gets the fenced one. Without `HOME` a child's `os.homedir()` falls back to the passwd
- * entry — the developer's real home (round-10 audit, measured). Worker threads are not
- * patched; nothing under `src/`, `tests/` or `tools/` starts one.
+ * entry — the developer's real home (round-10 audit, measured). Not patched, so neither
+ * rule reaches them: worker threads (nothing under `src/`, `tests/` or `tools/` starts one)
+ * and `Bun.$` — `$\`…\`.env({ PATH })` hands the child exactly that env, no `HOME`
+ * (round-11 audit, measured; no test calls `.env()` on a Bun shell today).
  *
  * ## The rule keys on WHERE a value points, not whether it is set
  *
@@ -232,10 +234,11 @@ type Opts = Record<string, unknown>
 const isPlainOptions = (v: unknown): v is Opts =>
   typeof v === "object" && v !== null && !Array.isArray(v)
 
-/** An options bag whose `env` is `process.env` when the caller named none, and whose
- *  explicit `env` gains the fenced `HOME` when it names none. */
+/** An options bag whose `env` is `process.env` when the caller named none — `null`
+ *  included, which Node reads as `process.env` (round-11: `own.HOME` threw on it) — and
+ *  whose explicit `env` gains the fenced `HOME` when it names none. */
 const fencedOptions = (o: Opts | undefined, env: NodeJS.ProcessEnv): Opts => {
-  if (o === undefined || o.env === undefined) return { ...(o ?? {}), env }
+  if (o === undefined || o.env == null) return { ...(o ?? {}), env }
   const own = o.env as Record<string, unknown>
   return own.HOME === undefined && env.HOME !== undefined
     ? { ...o, env: { ...own, HOME: env.HOME } }
