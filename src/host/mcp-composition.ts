@@ -62,6 +62,7 @@ import {
   type ResourcesHandle,
   type Tool,
 } from "@/tool"
+import { resolveMcpConfigSource } from "./mcp-config-source"
 import type { McpHealthHolder } from "./mcp-health"
 
 /**
@@ -324,7 +325,10 @@ export const resolveMcpOAuthProvider = (
  *  (`QUANTA_MCP_CONFIG`) and the thinner browser/plugin bridge:
  *    - `QUANTA_BROWSER_MCP_CONFIG` → direct path to a plugin-style `.mcp.json`
  *    - `QUANTA_BROWSER_MCP_PLUGIN_DIR` → plugin root; we append `/.mcp.json`
- *  Precedence is explicit config first so existing callers stay byte-identical. */
+ *  Precedence is explicit config first so existing callers stay byte-identical.
+ *
+ *  The raw path, for display and `/mcp` write-through. Which file a launch opens, and
+ *  whether the launch folder must be trusted first, is `resolveMcpConfigSource`. */
 export const resolveMcpConfigPath = (
   envSource: NodeJS.ProcessEnv = process.env,
   // §17 packet F1b — the PROJECT root. Supplied ⇒ the resolver falls back to
@@ -380,7 +384,8 @@ const pluginSpecToServerConfig = (
 /** Read MCP server configs from a config file. Accepts BOTH:
  *    - CLI wrapper format: `{ "servers": [{ "name": "...", "command": ["..."] }] }`
  *    - plugin/browser format: `{ "mcpServers": { "browser": { "command": "...", "args": [...] } } }`
- *  OFF when no resolver yields a path. */
+ *  OFF when no resolver yields a path; a config the launch folder chose loads only when
+ *  that folder is trusted (`resolveMcpConfigSource`). */
 export const readMcpConfig = async (
   slog: StructuredLogger,
   envSource: NodeJS.ProcessEnv = process.env,
@@ -413,23 +418,21 @@ export const readMcpConfig = async (
       if (off) slog.info("mcp.config.disabled", { server: name })
       return !off
     })
-  const path = resolveMcpConfigPath(envSource, projectRoot)
-  if (!path) return []
-  // A path the operator named (QUANTA_MCP_CONFIG / the browser plugin knobs) is their
-  // config. The project fallback is `<project>/.mcp.json`, a file that arrives with a
-  // clone and names commands to spawn, so it loads only in a trusted folder — the design
-  // this function had before the fallback existed ("never auto-loaded from the tree").
-  if (
-    projectRoot !== undefined &&
-    resolveMcpConfigPath(envSource) === undefined &&
-    !isWorkspaceTrusted(projectRoot)
-  ) {
+  const source = resolveMcpConfigSource(envSource, projectRoot)
+  if (source === undefined) return []
+  const path = source.path
+  // Only an absolute path from the real environment is the operator's config. A
+  // `.mcp.json` fallback, a relative path, or a path a dotenv file supplied arrives with
+  // the launch folder and names commands to spawn, so it loads only when that folder is
+  // trusted (`mcp-config-source.ts`).
+  if (source.kind === "folder" && !isWorkspaceTrusted(source.folder)) {
     if (await Bun.file(path).exists()) {
-      slog.warn("mcp.project.untrusted", { path })
+      const named = source.namedBy === undefined ? "" : ` (named by ${source.namedBy})`
+      slog.warn("mcp.project.untrusted", { path, ...(named ? { namedBy: source.namedBy } : {}) })
       emitOperatorNotice({
         severity: "warn",
         source: "mcp",
-        message: untrustedWorkspaceMessage(`The MCP servers in ${path}`, projectRoot),
+        message: untrustedWorkspaceMessage(`The MCP servers in ${path}${named}`, source.folder),
         hint: "no project MCP server was started",
       })
     }

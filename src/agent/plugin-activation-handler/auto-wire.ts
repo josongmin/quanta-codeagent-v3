@@ -139,9 +139,10 @@ export const autoWirePluginActivation = (
     // WITH A CLONE, and a discovered manifest's `mcpServers[].command` reaches
     // an argv spawn. Nothing on this path consulted the trust store, so a PR
     // that adds `.quanta/plugins/x/.codex-plugin/plugin.json` executed the
-    // attacker's argv on any surface that ran the checkout. Contrast the
-    // sibling design that got this right: `.mcp.json` is NEVER auto-loaded
-    // from the tree (`resolveMcpConfigPath` is env-only).
+    // attacker's argv on any surface that ran the checkout. The sibling
+    // `.mcp.json` path has the same rule: a folder's own config, or one a
+    // relative or dotenv-supplied path names, loads only in a trusted folder
+    // (`readMcpConfig`, ADR-0559).
     //
     // This reuses the EXISTING repo-content trust policy rather than inventing
     // a second one: `modeLoadsRepoRules` already classifies `ci-bot` (PR

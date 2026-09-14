@@ -35,13 +35,15 @@ evidence:
     - src/apps/cli/repl/workspace-trust-prompt.ts
     - src/agent/lsp-bridge/servers.ts
     - src/host/mcp-composition.ts
+    - src/host/mcp-config-source.ts
   adrs:
     - docs/decisions/0559-workspace-trust-gates-repository-controlled-launches.md
   tests:
     unit:
       - tests/unit/cli/workspace-trust-hellgate.test.ts
       - tests/unit/shared/operator-trusted-paths.test.ts
-    integration: []
+    integration:
+      - tests/integration/cli-mcp-config-launch-folder-trust-e2e.test.ts
     contract: []
 knobs:
   - QUANTA_TRUSTED_PATHS

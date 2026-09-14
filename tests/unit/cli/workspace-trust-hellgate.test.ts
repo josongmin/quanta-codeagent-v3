@@ -45,6 +45,7 @@ import { readMcpConfig } from "@/host/mcp-composition"
 import { resolveWorkspaceTrust } from "@/host/workspace-trust"
 import type { StructuredLogger } from "@/observability"
 import { installOperatorNoticeSink } from "@/shared"
+import { __resetEnvFileProvenanceForTest, envFileSourceOf, loadEnvFiles } from "@/shared/env-files"
 import { REPO_ROOT } from "../../_helpers/repo-root"
 import { makeTempDirOwner } from "../../_helpers/temp-dir"
 import { assertScanPopulation } from "../_shared/scan-population"
@@ -403,6 +404,80 @@ describe("project MCP servers", () => {
       folder,
     )
     expect(configs.map((c) => c.name)).toEqual(["x"])
+  })
+
+  // ROUND-11 AUDIT A1 (reproduced on the real CLI): the exemption above counted any env
+  // value as the operator's. The CLI loads the launch folder's dotenv files first, so a
+  // clone's `.env.dev` naming its own config ran that config's command with the trust
+  // question answered no; a relative value from the real env opened the folder's own file.
+  describe("a config path the launch folder chose", () => {
+    /** Each env name, and the value that makes it select `<folder>/.mcp.json`. */
+    const NAMES = [
+      ["QUANTA_MCP_CONFIG", (f: string) => join(f, ".mcp.json"), ".mcp.json"],
+      ["QUANTA_BROWSER_MCP_CONFIG", (f: string) => join(f, ".mcp.json"), "./.mcp.json"],
+      ["QUANTA_BROWSER_MCP_PLUGIN_DIR", (f: string) => f, "."],
+    ] as const
+    afterEach(() => {
+      for (const [name] of NAMES) delete process.env[name]
+      __resetEnvFileProvenanceForTest()
+    })
+    const read = async (env: NodeJS.ProcessEnv, folder: string) => {
+      const notices: string[] = []
+      const uninstall = installOperatorNoticeSink((n) => notices.push(n.message))
+      try {
+        const configs = await readMcpConfig(
+          slog as unknown as StructuredLogger,
+          env,
+          undefined,
+          folder,
+        )
+        return { names: configs.map((c) => c.name), notices: notices.join("\n") }
+      } finally {
+        uninstall()
+      }
+    }
+    /** Load `<folder>/.env.dev` through the CLI's own loader, so the value carries the
+     *  provenance a launch gives it. */
+    const loadDotenv = (folder: string, name: string, value: string): void => {
+      const file = join(folder, ".env.dev")
+      writeFileSync(file, `${name}=${value}\n`)
+      loadEnvFiles([file])
+    }
+
+    for (const [name, absoluteFor, relative] of NAMES) {
+      test(`RED: ${name} from the folder's dotenv (absolute) loads nothing, and says why`, async () => {
+        const folder = projectWithMcp()
+        loadDotenv(folder, name, absoluteFor(folder))
+        expect(envFileSourceOf(name)).toBe(join(folder, ".env.dev"))
+        const got = await read(process.env, folder)
+        expect(got.names).toEqual([])
+        expect(got.notices).toContain("not a trusted folder")
+        expect(got.notices).toContain(`${name} in ${join(folder, ".env.dev")}`)
+      })
+
+      test(`PAIRED CONTROL: the same dotenv value in a trusted folder loads the server (${name})`, async () => {
+        const folder = projectWithMcp()
+        loadDotenv(folder, name, absoluteFor(folder))
+        trust(folder)
+        expect((await read(process.env, folder)).names).toEqual(["x"])
+      })
+
+      test(`RED: a relative ${name} from the real environment opens the folder's own file only when trusted`, async () => {
+        const folder = projectWithMcp()
+        const untrusted = await read({ [name]: relative }, folder)
+        expect(untrusted.names).toEqual([])
+        expect(untrusted.notices).toContain("relative to")
+        trust(folder)
+        expect((await read({ [name]: relative }, folder)).names).toEqual(["x"])
+      })
+    }
+
+    test("the same absolute value from the real environment is still the operator's", async () => {
+      const folder = projectWithMcp()
+      for (const [name, absoluteFor] of NAMES) {
+        expect((await read({ [name]: absoluteFor(folder) }, folder)).names).toEqual(["x"])
+      }
+    })
   })
 })
 

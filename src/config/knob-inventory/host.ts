@@ -416,7 +416,8 @@ export const HOST: readonly KnobDeclaration[] = [
     default: ".mcp.json",
     group: "mcp",
     home: "runtime-config",
-    describe: "MCP config file path override.",
+    describe:
+      "MCP config file path override. Only an absolute path from the real environment loads in any folder; a relative or dotenv-supplied value loads only in a trusted folder (ADR-0559).",
     readSite: "host/runtime/agent-arg-builder/gated-tool-ports.ts",
   },
   {
@@ -657,7 +658,7 @@ export const HOST: readonly KnobDeclaration[] = [
     default: undefined,
     group: "mcp",
     describe:
-      "Path to a browser-MCP server config JSON. Unset ⇒ the browser MCP server is not composed.",
+      "Path to a browser-MCP server config JSON. Unset ⇒ the browser MCP server is not composed. A relative or dotenv-supplied value loads only in a trusted folder (ADR-0559).",
     home: "runtime-config",
     readSite: "host/mcp-composition.ts",
   },
@@ -666,7 +667,8 @@ export const HOST: readonly KnobDeclaration[] = [
     kind: "string",
     default: undefined,
     group: "mcp",
-    describe: "Directory scanned for browser-MCP plugins. Unset ⇒ no plugin discovery.",
+    describe:
+      "Directory scanned for browser-MCP plugins. Unset ⇒ no plugin discovery. A relative or dotenv-supplied value loads only in a trusted folder (ADR-0559).",
     home: "runtime-config",
     readSite: "host/mcp-composition.ts",
   },

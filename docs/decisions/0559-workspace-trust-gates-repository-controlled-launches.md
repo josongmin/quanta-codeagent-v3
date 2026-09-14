@@ -43,8 +43,12 @@ Claude Code의 폴더 신뢰 질문 + 프로젝트 `.mcp.json` 서버 승인, Co
    - 언어 서버: `@/lsp` 클라이언트의 `beforeSpawn` 훅. 에이전트는 `lsp-bridge/servers.ts`의 팩토리로만 서버를
      만들고(census 테스트), 모든 클라이언트가 spawn 직전에 신뢰를 확인한다. scratch 복사본(shadow_verify)은
      원본 폴더로 판단한다. 거부는 "서버 없음"이 아니라 이유로 도구에 전달된다.
-   - 프로젝트 `.mcp.json`: `readMcpConfig`의 cwd 폴백은 신뢰 폴더에서만 읽는다. 운영자가 경로를 지정한 설정
-     (`QUANTA_MCP_CONFIG` 등)은 신뢰와 무관하다.
+   - 프로젝트 `.mcp.json`: `readMcpConfig`의 cwd 폴백은 신뢰 폴더에서만 읽는다. 운영자 설정으로 치는 것은
+     실제 환경변수의 **절대경로**(`QUANTA_MCP_CONFIG`·`QUANTA_BROWSER_MCP_CONFIG`·`QUANTA_BROWSER_MCP_PLUGIN_DIR`)뿐이다.
+     dotenv 파일이 준 값(`envFileSourceOf`)은 그 파일의 폴더, 상대경로는 실행 폴더의 신뢰를 따른다
+     (`src/host/mcp-config-source.ts`). 라운드 11 어딧이 CLI에서 재현: `.env.dev`의 `QUANTA_MCP_CONFIG=evil.json`이
+     신뢰 질문에 no를 답해도 명령을 실행했다. 남은 것: Bun이 먼저 자동 로드하는 `.env`의 절대경로(`${PWD}/x`)는
+     출처가 없어 운영자 값으로 읽힌다 — sep-14 lane A.
    - 프로젝트 플러그인: `autoWirePluginActivation`이 비신뢰 폴더에선 배선하지 않는다.
    - 프로젝트 grants overlay: 신뢰 폴더에서만 읽는다. 사용자 자신의 `~/.quanta/grants.json`은 그대로 적용된다.
 5. **진입점마다 결정.** `import.meta.main` 파일 전부를 분류하는 테스트가 있다.
