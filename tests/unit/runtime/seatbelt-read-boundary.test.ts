@@ -39,9 +39,17 @@ describe("seatbelt read boundary (OC-4/S7)", () => {
 
   test("WIRING: policy.strict reaches the compiler exactly as the call sites pass it", () => {
     // both wrap-argv.ts and default.ts call compileSeatbeltProfile(policy, cwd) —
-    // no third arg — so a knob is only reachable through policy.strict. Prove the
-    // 2-arg call shape honours it (the exact production call shape).
-    const withKnob = compileSeatbeltProfile(base({ strict: { denyNetworkAlways: true } }), "/work")
+    // no third arg — so a knob is only reachable through policy.strict. Use a
+    // *-net profile (which emits `(allow network*)`) so denyNetworkAlways has a
+    // line to flip; on a base workspace-write profile network is already denied and
+    // the assertion would be vacuous (round-1 audit fix).
+    const netBase: SandboxPolicy = { profile: "workspace-write-net" }
+    const withoutKnob = compileSeatbeltProfile(netBase, "/work")
+    expect(withoutKnob).toContain("(allow network*)") // the line the knob must flip
+    const withKnob = compileSeatbeltProfile(
+      { ...netBase, strict: { denyNetworkAlways: true } },
+      "/work",
+    )
     expect(withKnob).toContain("(deny network*)")
     expect(withKnob).not.toContain("(allow network*)")
   })

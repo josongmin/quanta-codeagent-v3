@@ -21,6 +21,9 @@ export const EGRESS_REDIRECT_KEYS = [
   "ANTHROPIC_BEDROCK_BASE_URL",
   "ANTHROPIC_VERTEX_BASE_URL",
   "ANTHROPIC_FOUNDRY_BASE_URL",
+  // Round-1 audit: an alt selector for the SAME foundry endpoint (Azure resource
+  // name → base URL); redirects egress just like `ANTHROPIC_FOUNDRY_BASE_URL`.
+  "ANTHROPIC_FOUNDRY_RESOURCE",
 ] as const
 
 /** Opt-in for a legit local-proxy dev setup (LM Studio, a corporate gateway) that
