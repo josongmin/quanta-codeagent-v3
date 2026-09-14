@@ -118,8 +118,26 @@ land (오케스트레이터, main 트리):
 | W1 B1 | 대기 | |
 | W1 C3 | 대기 | |
 | W1 D1 | 대기 | |
-| W1 DS1 | 대기 | |
+| W1 DS1 | 기반 land (sep-12 truth-guard, ADR-0559) — 아래 §7.1 | `b6d0d27d0`, `d2a8c4b7b` |
 | W1 F1 | 대기 | |
 | W1 S | 대기 | |
 | W2 | 대기 | |
 | W3 | 대기 | |
+
+### 7.1 sep-12 truth-guard 캠페인이 먼저 land한 기반 (2026-09-14, 운영자 결정)
+
+sep-12 라운드 9의 A-F1(LSP가 워크스페이스 코드 실행)을 고치던 세션이 같은 영역의 폴더 신뢰 게이트를 만들었고,
+운영자가 "이 계획의 기반으로 land하고 U-1에 맞춘다"를 골랐다. ADR-0559가 정본이다. 이 계획의 lane은 아래를
+전제로 이어서 만든다(재구현하지 않는다).
+
+| 이 계획 항목 | 들어간 것 | 이 계획과 다른 점 / 남은 것 |
+|---|---|---|
+| DS1 결정 | `@/agent/workspace-trust`(authority, 하위 폴더 포함·가장 가까운 기록 우선, 미설치=비신뢰) + `@/host/workspace-trust`(trust.json·`QUANTA_TRUSTED_PATHS`·질문 해석). 신뢰 대상은 realpath git checkout 루트, 홈 폴더 yes는 세션 한정 | 모듈 위치가 `src/config/project-trust.ts`가 아니다. branded decision 타입, `MODE_PROJECT_TRUST_SOURCE` Record는 없다(헤드리스 에이전트는 `AGENT_MODE_WORKSPACE_TRUST` Record) |
+| U-1 질문 | 대화형 REPL 시작 전 1회(TTY만, 기본 no) | `/rules`·`/status`의 ignored 표시, `quanta trust`, `--trust-project`는 없다 |
+| D-S2 `.mcp.json` | `readMcpConfig`의 cwd 폴백을 신뢰 폴더에서만 읽음 + 운영자 알림(CLI·웹데몬 공통) | `quanta trust` 명령, 커넥터 설치기 결과 문구(NW-8)는 남음 |
+| D-S5 계열 | 플러그인 auto-wire, project-grants overlay 신뢰 게이트 + 알림 | AGENTS.md/CLAUDE.md, `.quanta/agents`, rules, skill dir, environment.toml(NW-3), legacy-cwd 메모리(NW-1)는 남음 |
+| B | spawn 직전 `beforeSpawn` 게이트(에이전트는 게이트된 팩토리로만 서버 생성, census), prewarm·멘션·shadow_verify 포함, 거부는 이유로 도구에 전달 | **U-5 강화 모드는 없다**: 비신뢰 폴더의 LSP는 지금 완전히 꺼진다(계획보다 엄격). env 스크럽, 신뢰 경로 바이너리·shebang 해석(NW-4), recording spawner wiring arm(NW-9), 벤치 전후 측정(NW-18)은 남음 |
+| 진입점 | 모든 `import.meta.main` 파일 분류 테스트. CLI 바이너리·헤드리스(ci-bot/daemon은 항상 비신뢰)·웹데몬·serve는 기록된 결정, 벤치·eval·terminal brain-mode는 전체 신뢰 | SDK 호스트는 authority를 설치해야 LSP가 동작 |
+
+테스트: `tests/unit/cli/workspace-trust-hellgate.test.ts`(가짜 서버 바이너리 + paired control, 뮤턴트 14개 red).
+테스트 프로세스는 스크래치 폴더만 신뢰한다(`tests/setup.ts`).
