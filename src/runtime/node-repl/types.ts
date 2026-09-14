@@ -44,6 +44,10 @@ export interface ExecResult {
   readonly stdout: string
   readonly stderr: string
   readonly hadError: boolean
+  /** Output that reached the kernel while no command ran — an earlier command's timer,
+   *  rejection or console call — returned with this exec, never as its output or error.
+   *  Absent when there was none. */
+  readonly earlier?: { readonly stdout: string; readonly stderr: string }
 }
 
 /** Closed-union failure code. Every public method returns

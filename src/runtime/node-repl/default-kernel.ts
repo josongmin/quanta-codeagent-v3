@@ -10,11 +10,13 @@
  * Protocol: one JSON line per command, evaluated WHOLE by the REPL's own `eval`.
  *   1. spawn `node --no-warnings -e <REPL_BOOT>` with stdin/stdout/stderr piped.
  *   2. warm-up: send `{ code: "void 0", sentinel }` and read both streams to the sentinel.
- *   3. each `exec(code)` sends `{ code, sentinel }`. The boot script evaluates `code` as
- *      ONE command, writes the echoed value (if any) to stdout and an uncaught error to
- *      stderr, then writes `"\n" + sentinel` to stderr and stdout. Each stream is read up
- *      to its own copy: before it is that exec's stdout / stderr.
- *   4. AbortSignal / timeout → kill the child; state → "dead".
+ *   3. each `exec(code)` sends `{ code, sentinel, start }`. The boot script writes
+ *      `start + "\n"` to both streams, evaluates `code` as ONE command, writes the echoed
+ *      value (if any) to stdout and an uncaught error to stderr, then writes
+ *      `"\n" + sentinel` to stderr and stdout. Each stream is read up to its own copy:
+ *      between the two markers is that exec's stdout / stderr.
+ *   4. AbortSignal / timeout → stop the child and its tree (SIGTERM, then SIGKILL after
+ *      the grace window); state → "dead".
  *
  * History, each step measured (Node 25.9 unless stated):
  *   - `node -i` + a prompt scrub: every exec ended in a stray `'` (the sentinel's own
@@ -41,6 +43,8 @@
  */
 
 import { err, errMessage, ok, type Result } from "@/shared"
+import { escalatingKill } from "../guarded-spawn"
+import { defaultPpidWalkKiller, type ProcessTreeKiller } from "../process-tree"
 import { scrubEnv } from "../sandbox"
 import { asScrubbedEnv, bunScrubbedSpawner } from "../scrubbed-spawn"
 import type {
@@ -79,12 +83,18 @@ interface LiveKernel {
   proc: ReturnType<typeof Bun.spawn>
   stdoutReader: ChunkReader
   stderrReader: ChunkReader
+  /** Text read past the last sentinel, owed to the next read of each stream. */
+  stdoutRest: string
+  stderrRest: string
   /** Mutex — one exec at a time; the second call awaits this. */
   pending: Promise<unknown>
 }
 
 const DEFAULT_READY_TIMEOUT_MS = 5_000
 const SENTINEL_PREFIX = "__quanta_repl_done_"
+/** Written on both streams as a command STARTS, so what arrived while the kernel was idle
+ *  is told apart from what this command wrote. */
+const START_PREFIX = "__quanta_repl_start_"
 /** How long, after an exec's STDOUT sentinel arrived, its STDERR sentinel may take. Both
  *  are written by one statement (stderr first); only pipe delivery separates them. */
 const STDERR_SENTINEL_GRACE_MS = 5_000
@@ -125,6 +135,7 @@ const REPL_BOOT = [
   'errors.on("data",(c)=>{process.stderr.write(c);if(current!==null)current()});',
   "const queue=[];let busy=false;",
   "const pump=()=>{if(busy)return;const m=queue.shift();if(m===undefined)return;busy=true;let settled=false;",
+  'if(typeof m.start==="string"){process.stderr.write(m.start+"\\n");process.stdout.write(m.start+"\\n")}',
   'const marker="\\n"+m.sentinel;',
   "const finish=()=>{if(settled)return;settled=true;current=null;",
   "setImmediate(()=>setImmediate(()=>{process.stderr.write(marker);process.stdout.write(marker);busy=false;pump()}))};",
@@ -141,8 +152,8 @@ const REPL_BOOT = [
 /** One command on the wire. U+2028 and U+2029 are escaped: `JSON.stringify` leaves them
  *  raw, Node 25's readline ends a line at them, and both halves then fail to parse — the
  *  command was dropped and the exec waited out its deadline (round-10 audit, reproduced). */
-const commandLine = (code: string, sentinel: string): string =>
-  `${JSON.stringify({ code, sentinel })
+const commandLine = (code: string, sentinel: string, start?: string): string =>
+  `${JSON.stringify({ code, sentinel, ...(start !== undefined ? { start } : {}) })
     .replace(/\u2028/g, "\\u2028")
     .replace(/\u2029/g, "\\u2029")}\n`
 
@@ -196,9 +207,19 @@ interface SpawnedProcess {
   readonly stderrReader: ChunkReader
 }
 
-const killQuietly = (proc: ReturnType<typeof Bun.spawn>): void => {
+let replTreeKiller: ProcessTreeKiller | undefined
+
+/**
+ * Stop a kernel process and everything it started: SIGTERM to the tree, then SIGKILL
+ * after the grace window unless it exited. A plain `proc.kill()` sends one SIGTERM, and the
+ * REPL runs model-authored code: `process.on('SIGTERM', () => {})` kept a timed-out kernel
+ * alive at 99% CPU, reparented to pid 1 and gone from `list()`, while the tool said it was
+ * stopped — one more per timeout (round-11 audit, reproduced on Node 22 and 25).
+ */
+const stopProcess = (proc: ReturnType<typeof Bun.spawn>): void => {
+  replTreeKiller ??= defaultPpidWalkKiller()
   try {
-    proc.kill()
+    escalatingKill(proc, replTreeKiller).kill()
   } catch {
     /* already dead */
   }
@@ -268,13 +289,13 @@ const warmUpNode = async (
   try {
     ;(proc.stdin as { write: (s: string) => unknown }).write(commandLine("void 0", sentinel))
   } catch (e) {
-    killQuietly(proc)
+    stopProcess(proc)
     return { ok: false, detail: errMessage(e) }
   }
   const read = await readUntil(stdoutReader, sentinel, readyTimeoutMs)
   const readErr = read.ok ? await readUntil(stderrReader, sentinel, readyTimeoutMs) : read
   if (readErr.ok) return { ok: true }
-  killQuietly(proc)
+  stopProcess(proc)
   return { ok: false, detail: readErr.error }
 }
 
@@ -326,10 +347,22 @@ const executeWithLock = async (
     write.sentinel,
     execOpts?.timeoutMs ?? 0,
     execOpts?.signal,
+    k.stdoutRest,
   )
   if (read.ok) {
-    const errRead = await readUntil(k.stderrReader, write.sentinel, STDERR_SENTINEL_GRACE_MS)
-    if (errRead.ok) return finishExec(k, id, read.body, errRead.body, touchIfHome, release)
+    k.stdoutRest = read.rest
+    const errRead = await readUntil(
+      k.stderrReader,
+      write.sentinel,
+      STDERR_SENTINEL_GRACE_MS,
+      DEFAULT_TIMERS,
+      k.stderrRest,
+    )
+    if (errRead.ok) {
+      k.stderrRest = errRead.rest
+      const bodies = { stdout: read.body, stderr: errRead.body }
+      return finishExec(k, id, bodies, write.start, touchIfHome, release)
+    }
     // The stdout sentinel arrived and the stderr one did not: the streams are out of step,
     // and every later exec would read the wrong stderr. Nothing trustworthy is left.
     markDead(k, id, removeIfHome, dropKernel)
@@ -384,6 +417,8 @@ const spawnOps = (ctx: KernelCtx): Pick<NodeReplKernel, "spawn"> => {
         proc,
         stdoutReader,
         stderrReader,
+        stdoutRest: "",
+        stderrRest: "",
         pending: Promise.resolve(),
       })
       writeIfHome(spec)
@@ -432,11 +467,7 @@ const sessionOps = (ctx: KernelCtx): Pick<NodeReplKernel, "exec" | "status" | "k
     async kill(id: KernelId): Promise<void> {
       const k = kernels.get(id)
       if (k === undefined) return
-      try {
-        k.proc.kill()
-      } catch {
-        /* already dead */
-      }
+      stopProcess(k.proc)
       k.state = "dead"
       removeIfHome(id)
       kernels.delete(id)
@@ -489,11 +520,7 @@ const markDead = (
   dropKernel: (id: KernelId) => void,
 ): void => {
   k.state = "dead"
-  try {
-    k.proc.kill()
-  } catch {
-    /* already dead */
-  }
+  stopProcess(k.proc)
   removeIfHome(id)
   dropKernel(id)
 }
@@ -519,12 +546,13 @@ const acquireExecLock = async (k: LiveKernel): Promise<() => void> => {
 const writeExec = (
   k: LiveKernel,
   code: string,
-): { ok: true; sentinel: string } | { ok: false; detail: string } => {
-  const sentinel = `${SENTINEL_PREFIX}${randomNonce()}__`
-  const wrapped = commandLine(code, sentinel)
-  const w = writeStdin(k, wrapped)
+): { ok: true; sentinel: string; start: string } | { ok: false; detail: string } => {
+  const nonce = randomNonce()
+  const sentinel = `${SENTINEL_PREFIX}${nonce}__`
+  const start = `${START_PREFIX}${nonce}__`
+  const w = writeStdin(k, commandLine(code, sentinel, start))
   if (!w.ok) return { ok: false, detail: w.detail }
-  return { ok: true, sentinel }
+  return { ok: true, sentinel, start }
 }
 
 /** Finalise a successful read: bump lastUseMs, transition to idle, release the lock,
@@ -532,23 +560,35 @@ const writeExec = (
 const finishExec = (
   k: LiveKernel,
   id: KernelId,
-  body: string,
-  stderrBody: string,
+  bodies: { readonly stdout: string; readonly stderr: string },
+  start: string,
   touchIfHome: (id: KernelId, ms: number) => void,
   release: () => void,
 ): Result<ExecResult, KernelError> => {
-  const stderrText = replOutput(stderrBody)
+  const stdout = splitAtStart(bodies.stdout, start)
+  const stderr = splitAtStart(bodies.stderr, start)
+  const stderrText = replOutput(stderr.own)
   const now = Date.now()
   k.spec = { ...k.spec, lastUseMs: now }
   touchIfHome(id, now)
   k.state = "idle"
   release()
+  const earlier = { stdout: replOutput(stdout.earlier), stderr: replOutput(stderr.earlier) }
   return ok({
     id,
-    stdout: replOutput(body),
+    stdout: replOutput(stdout.own),
     stderr: stderrText,
     hadError: stderrText.length > 0,
+    ...(earlier.stdout.length > 0 || earlier.stderr.length > 0 ? { earlier } : {}),
   })
+}
+
+/** A stream body split at this command's start marker: what arrived before it was written
+ *  while no command ran — an earlier command's timer, rejection or console call. */
+const splitAtStart = (body: string, start: string): { earlier: string; own: string } => {
+  const at = body.indexOf(`${start}\n`)
+  if (at < 0) return { earlier: "", own: body }
+  return { earlier: body.slice(0, at), own: body.slice(at + start.length + 1) }
 }
 
 /**
@@ -561,6 +601,8 @@ export const replOutput = (body: string): string => body.replace(/\n$/, "").repl
 interface ReadResult {
   ok: true
   body: string
+  /** What followed the sentinel in the same read — owed to the next read of the stream. */
+  rest: string
 }
 interface ReadFail {
   ok: false
@@ -644,10 +686,14 @@ export const readUntil = async (
   sentinel: string,
   timeoutMs: number,
   timers: ReadUntilTimers = DEFAULT_TIMERS,
+  initial = "",
 ): Promise<ReadResult | ReadFail> => {
   const decoder = new TextDecoder()
-  let buf = ""
+  let buf = initial
   const start = Date.now()
+  const found = buf.indexOf(sentinel)
+  if (found >= 0)
+    return { ok: true, body: buf.slice(0, found), rest: buf.slice(found + sentinel.length) }
   while (true) {
     const remainingMs = remainingReadMs(timeoutMs, start)
     if (timeoutMs > 0 && remainingMs <= 0) {
@@ -660,7 +706,7 @@ export const readUntil = async (
     if (next.value !== undefined) buf += decoder.decode(next.value, { stream: true })
     const idx = buf.indexOf(sentinel)
     if (idx >= 0) {
-      return { ok: true, body: buf.slice(0, idx) }
+      return { ok: true, body: buf.slice(0, idx), rest: buf.slice(idx + sentinel.length) }
     }
   }
 }
@@ -675,11 +721,9 @@ const readUntilWithAbort = async (
   sentinel: string,
   timeoutMs: number,
   signal: AbortSignal | undefined,
+  initial: string,
 ): Promise<ReadResult | AbortRead> => {
-  if (signal === undefined) {
-    const r = await readUntil(reader, sentinel, timeoutMs)
-    return r
-  }
+  if (signal === undefined) return readUntil(reader, sentinel, timeoutMs, DEFAULT_TIMERS, initial)
   // Race: the read against the abort. `reader.read()` cannot be cancelled without
   // releasing the lock, so the abort resolves this race and the caller kills the process,
   // which ends the pending read.
@@ -691,7 +735,7 @@ const readUntilWithAbort = async (
       resolve({ ok: false, error: "aborted" })
     }
     signal.addEventListener("abort", onAbort, { once: true })
-    void readUntil(reader, sentinel, timeoutMs).then((r) => {
+    void readUntil(reader, sentinel, timeoutMs, DEFAULT_TIMERS, initial).then((r) => {
       if (settled) return
       settled = true
       signal.removeEventListener("abort", onAbort)

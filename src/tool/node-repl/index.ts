@@ -85,23 +85,35 @@ const okEvent = (output: string, ok = true, source?: ResultSource): ToolEvent =>
   result: { ok, output, ...(source !== undefined ? { source } : {}) },
 })
 
-/** Render a `KernelError` to a compact, model-readable line. */
-const renderKernelError = (e: {
-  kind: string
-  detail?: string
-  id?: string
-  raw?: string
-  timeoutMs?: number
-}): string => {
+/** What a later call does about a kernel that is gone. Only a call without `id` starts a
+ *  fresh one; an explicit `id` keeps naming the gone kernel, and this said "the next call
+ *  starts a fresh kernel" to a model that repeated the same `id` forever (round-11 audit). */
+const nextCallAdvice = (explicitId: boolean): string =>
+  explicitId
+    ? "Calls naming this id will keep failing: an exec without `id` uses the session kernel (starting a fresh one), and op:'list' shows live kernels."
+    : "The next exec without `id` starts a fresh kernel."
+
+/** Render a `KernelError` to a compact, model-readable line. `explicitId`: the call named
+ *  its kernel. */
+const renderKernelError = (
+  e: {
+    kind: string
+    detail?: string
+    id?: string
+    raw?: string
+    timeoutMs?: number
+  },
+  explicitId = false,
+): string => {
   switch (e.kind) {
     case "node-missing":
       return `node_repl: node binary not found on PATH (${e.detail ?? ""}). Install Node or ensure it is on PATH.`
     case "spawn-failed":
       return `node_repl: kernel spawn failed (${e.detail ?? ""}).`
     case "kernel-dead":
-      return `node_repl: kernel ${e.id ?? "?"} is dead (process exited). The next call starts a fresh kernel; its bindings are gone.`
+      return `node_repl: kernel ${e.id ?? "?"} is not running (it exited, was stopped, or never existed); its bindings are gone. ${nextCallAdvice(explicitId)}`
     case "exec-timeout":
-      return `node_repl: exec timed out after ${e.timeoutMs ?? 0}ms; kernel ${e.id ?? "?"} was stopped and its bindings are gone. The next call starts a fresh kernel.`
+      return `node_repl: exec timed out after ${e.timeoutMs ?? 0}ms; kernel ${e.id ?? "?"} was stopped and its bindings are gone. ${nextCallAdvice(explicitId)}`
     case "exec-aborted":
       return `node_repl: exec aborted for kernel ${e.id ?? "?"}.`
     case "invalid-id":
@@ -110,6 +122,15 @@ const renderKernelError = (e: {
       return `node_repl: kernel error (${e.kind}).`
   }
 }
+
+/** Output an earlier exec's code wrote after that exec returned. Labeled so it is not read
+ *  as this exec's result; it does not make this exec fail. */
+const renderEarlier = (earlier: { readonly stdout: string; readonly stderr: string }): string =>
+  [
+    "\n[written after an earlier exec returned — not this exec's output]",
+    earlier.stdout.length > 0 ? `\n${earlier.stdout}` : "",
+    earlier.stderr.length > 0 ? `\n[stderr]\n${earlier.stderr}` : "",
+  ].join("")
 
 /** A mutable one-field holder for the session's own kernel id — threaded to the
  *  op handlers so `kill` can clear it (forcing a re-spawn on the next exec) and
@@ -193,7 +214,8 @@ const handleExec = async (
   // An explicit `id` targets a specific kernel; otherwise reuse/spawn the
   // session's own kernel (the variable-persistence path).
   let targetId: KernelId
-  if (input.id !== undefined && input.id !== "") {
+  const explicitId = input.id !== undefined && input.id !== ""
+  if (explicitId) {
     targetId = input.id as KernelId
   } else {
     const ensured = await ensureSessionKernel(kernel, slot, ctx)
@@ -208,11 +230,12 @@ const handleExec = async (
       // unbounded as `while (true) {}` (round-9 audit: pending after 8 s with none set).
       timeoutMs: input.timeoutMs ?? NODE_REPL_DEFAULT_EXEC_TIMEOUT_MS,
     })
-    if (!result.ok) return fail(renderKernelError(result.error), source)
-    const { stdout, stderr, hadError } = result.value
+    if (!result.ok) return fail(renderKernelError(result.error, explicitId), source)
+    const { stdout, stderr, hadError, earlier } = result.value
     const body = [
       stdout.length > 0 ? stdout : "(no stdout)",
       stderr.length > 0 ? `\n[stderr]\n${stderr}` : "",
+      earlier === undefined ? "" : renderEarlier(earlier),
     ].join("")
     // hadError ⇒ the eval reported to stderr / threw; surface as ok:false so the
     // model treats it as a failing evaluation (not a tool crash).
@@ -242,6 +265,11 @@ export const makeNodeReplTool = (kernel: NodeReplKernel): Tool<Input> => {
   const classifyExecSource = (input: Input): SensitivityClass | null => {
     if (input.op !== "exec" || input.code === undefined) return null
     const observed = classifyCodeShape(input.code)
+    // A session kernel that is gone is replaced before this code runs, so nothing it read
+    // is in scope: its class does not carry (round-11 audit — after a timeout the fresh
+    // kernel's `typeof x` stayed `secret`).
+    const sessionGone = slot.id !== undefined && kernel.status(slot.id) === "dead"
+    if (input.id === undefined && sessionGone) sessionSourceClass = null
     const prior =
       input.id === undefined ? sessionSourceClass : (sourceByKernel.get(input.id) ?? null)
     const next = strongestSourceClass(prior, observed)

@@ -283,6 +283,51 @@ describe("ADR-0249 node-repl-hellgate", () => {
   }, 60_000)
 
   /**
+   * HELL-NR-02F — what arrives while no command runs belongs to no command. Round-11 audit
+   * B6 (measured on Node 22 and 25): after `setTimeout(() => { throw … }, 200); 2` and an
+   * idle wait, `3+3` came back `hadError:true` with the throw as its stderr, and a late
+   * `console.log` came back as the next exec's stdout.
+   */
+  test("HELL-NR-02F a late throw or console.log while idle is returned as earlier output, not the next exec's", async () => {
+    await withTempDir("qnr-late-", async (home) => {
+      const k = createDefaultNodeReplKernel({ home })
+      const sp = await k.spawn({ sessionId: "late" })
+      expect(sp.ok, JSON.stringify(sp)).toBe(true)
+      if (!sp.ok) return
+      const id = sp.value.id
+      const idle = () => new Promise((r) => setTimeout(r, 700))
+      try {
+        const armErr = await k.exec(
+          id,
+          "setTimeout(() => { throw new Error('LATE-ERR') }, 200); 2",
+          {
+            timeoutMs: 10_000,
+          },
+        )
+        expect(armErr.ok && armErr.value.stdout).toBe("2")
+        await idle()
+        const afterErr = await k.exec(id, "3 + 3", { timeoutMs: 10_000 })
+        if (!afterErr.ok) throw new Error(JSON.stringify(afterErr.error))
+        expect(afterErr.value).toMatchObject({ stdout: "6", stderr: "", hadError: false })
+        expect(afterErr.value.earlier?.stderr).toContain("LATE-ERR")
+
+        await k.exec(id, "setTimeout(() => console.log('LATE-OUT'), 200); 2", { timeoutMs: 10_000 })
+        await idle()
+        const afterOut = await k.exec(id, "1 + 1", { timeoutMs: 10_000 })
+        if (!afterOut.ok) throw new Error(JSON.stringify(afterOut.error))
+        expect(afterOut.value).toMatchObject({ stdout: "2", stderr: "", hadError: false })
+        expect(afterOut.value.earlier).toEqual({ stdout: "LATE-OUT", stderr: "" })
+
+        // PAIRED CONTROL: a command with nothing late before it carries no `earlier`.
+        const clean = await k.exec(id, "4 + 4", { timeoutMs: 10_000 })
+        expect(clean.ok && clean.value).toEqual({ id, stdout: "8", stderr: "", hadError: false })
+      } finally {
+        await k.kill(id)
+      }
+    })
+  }, 60_000)
+
+  /**
    * HELL-NR-02E — the callback shape Node 22 uses for an awaited rejection with a falsy
    * reason: `cb(undefined)` / `cb(0)`, never the output stream. The kernel read `if (e)`
    * and reported success (round-10 audit, measured on Node 22.22). The suite's `node` is

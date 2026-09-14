@@ -15,6 +15,7 @@
 import { describe, expect, test } from "bun:test"
 import { existsSync } from "node:fs"
 import { join } from "node:path"
+import { KILL_GRACE_MS } from "@/runtime/guarded-spawn"
 import { createDefaultNodeReplKernel } from "@/runtime/node-repl/default-kernel"
 import { quantaHomeDir } from "@/shared/quanta-home"
 
@@ -80,6 +81,49 @@ describe("node-repl exec-timeout reaps the child (U2)", () => {
     expect(await waitDead(pid)).toBe(true)
     await kernel.kill(id) // idempotent — no throw on a second kill
   })
+
+  // Round-11 audit B2 (reproduced on Node 22 and 25): the REPL runs model-authored code, and
+  // `process.on('SIGTERM', () => {})` kept a timed-out kernel alive at 99% CPU, reparented
+  // to pid 1 and gone from list(), while the tool said it was stopped. The stop now sends
+  // SIGTERM to the tree and SIGKILL after the grace window.
+  const forceKill = (pid: number): void => {
+    try {
+      process.kill(pid, "SIGKILL")
+    } catch {
+      /* already gone */
+    }
+  }
+  const ignoringSigterm = async (sessionId: string) => {
+    const kernel = createDefaultNodeReplKernel()
+    const spawned = await kernel.spawn({ sessionId })
+    if (!spawned.ok) throw new Error(`spawn failed: ${JSON.stringify(spawned.error)}`)
+    const armed = await kernel.exec(spawned.value.id, "process.on('SIGTERM', () => {}); 1", {
+      timeoutMs: 5_000,
+    })
+    expect(armed.ok).toBe(true)
+    return { kernel, ...spawned.value }
+  }
+
+  test("RED: a timed-out kernel whose code ignores SIGTERM is still stopped", async () => {
+    const { kernel, id, pid } = await ignoringSigterm("reap-term")
+    try {
+      const res = await kernel.exec(id, "while (true) {}", { timeoutMs: 400 })
+      expect(res.ok ? "ok" : res.error.kind).toBe("exec-timeout")
+      expect(await waitDead(pid, KILL_GRACE_MS + 3_000)).toBe(true)
+    } finally {
+      forceKill(pid)
+    }
+  }, 20_000)
+
+  test("RED: kill() stops a kernel that ignores SIGTERM too", async () => {
+    const { kernel, id, pid } = await ignoringSigterm("reap-term-kill")
+    try {
+      await kernel.kill(id)
+      expect(await waitDead(pid, KILL_GRACE_MS + 3_000)).toBe(true)
+    } finally {
+      forceKill(pid)
+    }
+  }, 20_000)
 
   test("a healthy exec still completes (the reap path does not break normal use)", async () => {
     const kernel = createDefaultNodeReplKernel()

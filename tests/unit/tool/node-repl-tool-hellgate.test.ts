@@ -277,6 +277,65 @@ describe("node_repl — a dead session kernel is replaced, on the REAL kernel", 
   }, 60_000)
 })
 
+describe("node_repl — after a timeout, on the REAL kernel (round 11)", () => {
+  test("an explicit id that timed out does not promise a fresh kernel on the next call", async () => {
+    // Round-11 audit B3 (reproduced): repeating the exec with the same `id` answered
+    // "kernel-dead … The next call starts a fresh kernel" every time.
+    await withTempDir("qnr-tool-explicit-", async (home) => {
+      const kernel = createDefaultNodeReplKernel({ home })
+      const tool = nodeReplTool(kernel)
+      try {
+        expect((await run(tool, { op: "exec", code: "1" })).ok).toBe(true)
+        const id = kernel.list()[0]?.spec.id
+        if (id === undefined) throw new Error("no session kernel")
+        const timedOut = await run(tool, {
+          op: "exec",
+          id,
+          code: "while (true) {}",
+          timeoutMs: 400,
+        })
+        expect(timedOut.output).toContain("timed out after 400ms")
+        expect(timedOut.output).toContain("Calls naming this id will keep failing")
+        const again = await run(tool, { op: "exec", id, code: "1 + 1" })
+        expect(again.ok).toBe(false)
+        expect(again.output).toContain("Calls naming this id will keep failing")
+        expect(again.output).not.toContain("process exited")
+        // PAIRED CONTROL: without `id` the session kernel is replaced, as the message says.
+        expect(await run(tool, { op: "exec", code: "1 + 1" })).toMatchObject({
+          ok: true,
+          output: "2",
+        })
+      } finally {
+        for (const row of kernel.list()) await kernel.kill(row.spec.id)
+      }
+    })
+  }, 60_000)
+
+  test("a replaced session kernel does not inherit the dead kernel's sensitivity", async () => {
+    // Round-11 audit B5 (reproduced): after a secret read timed out, `typeof x` on the fresh
+    // kernel stayed `secret`; only op:'kill' reset it.
+    await withTempDir("qnr-tool-class-", async (home) => {
+      const kernel = createDefaultNodeReplKernel({ home })
+      const tool = nodeReplTool(kernel)
+      try {
+        const secret = await run(tool, {
+          op: "exec",
+          code: "Object.keys(process['env']).length; while (true) {}",
+          timeoutMs: 400,
+        })
+        expect(secret.sourceClass).toBe("secret")
+        const fresh = await run(tool, { op: "exec", code: "typeof x" })
+        expect(fresh).toMatchObject({ ok: true, sourceClass: "public" })
+        // PAIRED CONTROL: on a LIVE session kernel the class stays sticky.
+        await run(tool, { op: "exec", code: "globalThis.k = Object.keys(process['env']).length" })
+        expect((await run(tool, { op: "exec", code: "typeof k" })).sourceClass).toBe("secret")
+      } finally {
+        for (const row of kernel.list()) await kernel.kill(row.spec.id)
+      }
+    })
+  }, 60_000)
+})
+
 describe("node_repl — distinct from code_cell (neither subsumes the other)", () => {
   test("both names present when both are wired", () => {
     const names = buildDefaultTools({ nodeRepl: headlessStub(), codeMode: true }).map((t) => t.name)

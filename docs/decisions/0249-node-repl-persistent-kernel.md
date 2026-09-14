@@ -127,6 +127,10 @@ schedule on it.
   output (routed to stderr), whichever comes first. The value, if any, goes to stdout;
   after two `setImmediate` turns the sentinel goes to stderr then stdout, and the kernel
   reads each stream up to it. `hadError` is "the exec wrote to stderr" (a throw does).
+  **Amended sep-14 (round 11):** each command also writes a start marker to both streams
+  before it runs; what arrived while no command ran (a timer's throw, a late
+  `console.log`) is returned as that exec's `earlier`, not as its output or error, and
+  bytes read past a sentinel carry to the next read.
   Same behaviour measured on Node 22 and 25. The earlier `node -i` + prompt scrub, the
   line-fed promptless REPL, and a serialised-eval variant each mis-attributed output.
 - State transitions: `starting` → (warm-up sentinel read) → `ready` → (exec
@@ -136,7 +140,10 @@ schedule on it.
   `{ kind: "exec-aborted" }`; an exec past `timeoutMs` kills it and resolves with
   `{ kind: "exec-timeout" }` (round-10: this was `kernel-dead`, rendered "process
   exited"). Either way the kernel is `dead` and not restarted; the `node_repl` tool
-  spawns a fresh session kernel on its next exec (it used to keep the dead id).
+  spawns a fresh session kernel on its next exec without `id` (it used to keep the dead
+  id), and a call that names the dead id keeps failing and says so. "Kills" is SIGTERM to
+  the process tree, then SIGKILL after the grace window (round 11: code that ignored
+  SIGTERM kept a timed-out kernel running, unlisted).
   (Amended sep-14: abort once wrote `.exit` to stdin; the channel now carries JSON
   commands only.)
 - Synchronous `Bun.spawn` throw on ENOENT (`node` not on PATH) becomes
