@@ -9,7 +9,11 @@ Scope: the P0 set from the 2026-09-13 competitor-reconciliation campaign — sec
 - **SEC-2**: my `QUANTA_LSP_TRUST_WORKSPACE` orphan knob (broke 5 ratchets) REMOVED — replaced by the existing `isWorkspaceTrusted()` authority (b302178a5). Interpreter/rust-analyzer hardening stands.
 - **BUG-2/OC-5 SUPERSEDED**: s14 E found the transcript-sum trigger wrong (+50k after @file, per-prompt anchor loss) and replaces it with one shared measurement. Don't build further.
 - **OC-2, OC-4**: stand (no teammate objection).
-- **OC-1**: MINE to continue (confirmed non-overlapping).
+- **OC-1**: MINE, but HELD until s14 C3 (SEC-3) + F1 land — all three producer sites overlap those lanes. **Refined design (from 8c, use this when picking it up):**
+  1. **approval-wait `stuck` = CONSUME not produce** — project the existing kernel `awaiting_approval` status (F1 makes `KERNEL_SESSION_STATUSES` a closed tuple + `SESSION_STATUS_SETTLED` Record) into the activity spine as a `node_status stuck{reason}`. Lives in the activity-producer layer reading kernel status; touches NO admissibility-gate file → no C3 collision.
+  2. **goal-blocked = consume** the s14 W2 objective `Blocker` (`turn-failure:<code>` → goal derives `blocked`) into the spine, after F1/W2 land.
+  3. **wait_agent + tool-in-flight = my own additive `node_status` emits** at new call sites (subagent handlers / a loop watchdog), after C3+F1 land. Keep hunks small, emit from new calls, don't restructure the gate/loop; ping 8c before touching kernel/session or agent/loop.
+  Land all three as one coherent change (not half a signal). 8c pings per-lane when each is on main.
 
 **Status (2026-09-13, implementing):**
 - ✅ **W-EGRESS LANDED + round-1 audited** — SEC-1 (28d68bd85), SEC-2 (3188cf2d1), OC-4 (2390b979e); round-1 parallel adversarial+objective audit found a CRITICAL (repo `.env` self-arming the LSP RCE via `QUANTA_LSP_TRUST_WORKSPACE`) + HIGH (bench entrypoint unscrubbed) + a RED test — all fixed in 93aba3560. Residuals disclosed (pyright repo-config venvPath, gopls/clangd/tsserver, OC-4 no producer).
