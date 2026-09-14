@@ -167,6 +167,37 @@ const asMessage = (text: string): Message => ({
  * the injected estimator (the loop's own `estimateTokens`). Empty categories
  * are omitted; segments follow {@link CATEGORY_ORDER}.
  */
+/** Sum {@link BuildBreakdownInput.preCounted} contributions per category. Pure. */
+const accumulatePreCounted = (
+  preCounted: readonly PreCountedSegment[] | undefined,
+): Map<ContextCategory, { tokens: number; chars: number }> => {
+  const preByCat = new Map<ContextCategory, { tokens: number; chars: number }>()
+  for (const pc of preCounted ?? []) {
+    const cur = preByCat.get(pc.category) ?? { tokens: 0, chars: 0 }
+    preByCat.set(pc.category, {
+      tokens: cur.tokens + Math.max(0, pc.tokens),
+      chars: cur.chars + Math.max(0, pc.chars),
+    })
+  }
+  return preByCat
+}
+
+/** One category's merged segment (text-estimated + pre-counted), or `null` when
+ *  the category is empty (omitted from the breakdown, as before). Pure. */
+const resolveCategorySegment = (
+  cat: ContextCategory,
+  parts: string[] | undefined,
+  pre: { tokens: number; chars: number } | undefined,
+  estimate: TokenEstimator,
+): UsageSegment | null => {
+  const joined = parts === undefined ? "" : parts.join("\n\n")
+  const textTokens = joined.length === 0 ? 0 : Math.max(0, estimate([asMessage(joined)]))
+  const tokens = textTokens + (pre?.tokens ?? 0)
+  const chars = joined.length + (pre?.chars ?? 0)
+  if (tokens === 0 && chars === 0) return null
+  return { id: cat, tokens, chars, color: CATEGORY_COLOR[cat] }
+}
+
 export function buildUsageBreakdown(
   input: BuildBreakdownInput,
   estimate: TokenEstimator,
@@ -187,27 +218,15 @@ export function buildUsageBreakdown(
   // Pre-counted contributions (OC-5/BUG-2): tokens/chars already measured by the
   // loop's estimator at the producer. Accumulated per category and merged with any
   // text-estimated tokens for the same category below.
-  const preByCat = new Map<ContextCategory, { tokens: number; chars: number }>()
-  for (const pc of input.preCounted ?? []) {
-    const cur = preByCat.get(pc.category) ?? { tokens: 0, chars: 0 }
-    preByCat.set(pc.category, {
-      tokens: cur.tokens + Math.max(0, pc.tokens),
-      chars: cur.chars + Math.max(0, pc.chars),
-    })
-  }
+  const preByCat = accumulatePreCounted(input.preCounted)
 
   const segments: UsageSegment[] = []
   let total = 0
   for (const cat of CATEGORY_ORDER) {
-    const parts = textByCat.get(cat)
-    const joined = parts === undefined ? "" : parts.join("\n\n")
-    const pre = preByCat.get(cat)
-    const textTokens = joined.length === 0 ? 0 : Math.max(0, estimate([asMessage(joined)]))
-    const tokens = textTokens + (pre?.tokens ?? 0)
-    const chars = joined.length + (pre?.chars ?? 0)
-    if (tokens === 0 && chars === 0) continue // empty category — omitted as before
-    total += tokens
-    segments.push({ id: cat, tokens, chars, color: CATEGORY_COLOR[cat] })
+    const seg = resolveCategorySegment(cat, textByCat.get(cat), preByCat.get(cat), estimate)
+    if (seg === null) continue // empty category — omitted as before
+    total += seg.tokens
+    segments.push(seg)
   }
 
   return {
