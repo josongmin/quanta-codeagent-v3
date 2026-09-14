@@ -231,12 +231,33 @@ describe("quanta-home fence — children inherit it", () => {
     ])
     expect(withFencedEnv("command", ["ls -la"], ENV)).toEqual(["ls -la", { env: ENV }])
     expect(withFencedEnv("command", ["ls", cb], ENV)).toEqual(["ls", { env: ENV }, cb])
+    // `(file, undefined | null, options)`: the options stay in slot 2 (round-10: they were
+    // pushed to slot 3 and lost, explicit env and cwd included).
+    for (const hole of [undefined, null]) {
+      expect(withFencedEnv("file-args", ["sh", hole, { cwd: "/x" }], ENV)).toEqual([
+        "sh",
+        hole,
+        { cwd: "/x", env: ENV },
+      ])
+    }
+    expect(withFencedEnv("file-args", ["sh", undefined], ENV)).toEqual(["sh", { env: ENV }])
   })
 
-  test("an explicit env is the caller's decision and is never replaced", () => {
-    const own = { PATH: "/bin" }
+  test("an explicit env is the caller's decision, and gains only a missing HOME", () => {
+    const own = { PATH: "/bin", HOME: "/their/home" }
     expect(withFencedEnv("bun", [["ls"], { env: own }], ENV)).toEqual([["ls"], { env: own }])
     expect(withFencedEnv("command", ["ls", { env: own }], ENV)).toEqual(["ls", { env: own }])
+    const explicitEnv = { env: own, cwd: "/x" }
+    expect(withFencedEnv("file-args", ["sh", undefined, explicitEnv], ENV)).toEqual([
+      "sh",
+      undefined,
+      explicitEnv,
+    ])
+    // No HOME: the child's `os.homedir()` would fall back to the passwd home (round-10).
+    expect(withFencedEnv("bun", [["ls"], { env: { PATH: "/bin" } }], ENV)).toEqual([
+      ["ls"],
+      { env: { PATH: "/bin", HOME: "/scratch/home" } },
+    ])
   })
 
   test("CANARY: real children spawned with no env see this process's scratch HOME", () => {
@@ -245,7 +266,16 @@ describe("quanta-home fence — children inherit it", () => {
     expect(Bun.spawnSync(["sh", "-c", script]).stdout.toString()).toBe(home)
     expect(spawnSync("sh", ["-c", script], { encoding: "utf8" }).stdout).toBe(home)
     expect(execSync(script).toString()).toBe(home)
-    expect(home.includes("quanta-test-home") || home.includes("/home"), home).toBe(true)
+    // Not the account's passwd home. (This checked for "quanta-test-home" or "/home" in the
+    // path, which fails whenever the startup HOME was already scratch and kept.)
+    const passwdHome = Bun.spawnSync(["sh", "-c", 'eval "printf %s ~$(id -un)"']).stdout.toString()
+    expect(home).not.toBe(passwdHome)
+    // An explicit env without HOME still reaches the fenced one.
+    expect(
+      Bun.spawnSync(["sh", "-c", script], {
+        env: { PATH: process.env.PATH ?? "/bin" },
+      }).stdout.toString(),
+    ).toBe(home)
   })
 })
 

@@ -29,8 +29,6 @@ describe("quanta-home fence — string knob classification", () => {
     "fenced by bench-results-fence": ["QUANTA_BENCH_RESULTS_DIR"],
     "operator config, read": [
       "QUANTA_BENCH_AUTH_POOL",
-      "QUANTA_BROWSER_MCP_CONFIG",
-      "QUANTA_BROWSER_MCP_PLUGIN_DIR",
       "QUANTA_GITHUB_WEBHOOK_SECRETS_FILE",
       "QUANTA_HITL_OVERRIDES",
       "QUANTA_MANAGED_SETTINGS_PATH",
@@ -235,6 +233,9 @@ describe("quanta-home fence — string knob classification", () => {
       Bun.spawnSync(["grep", "-rlF", key, "src"]).stdout.toString().trim() !== ""
     for (const key of UNCATALOGUED_STATE_PATHS) {
       expect(srcReads(key), `${key} is no longer read in src/`).toBe(true)
+      // The catalogue cannot notice an uncatalogued key leaving the fence, so this does
+      // (round-10 audit: unlisting QUANTA_OTEL_SINK failed nothing).
+      expect(STATE_PATH_OVERRIDES as readonly string[], `${key} left the fence`).toContain(key)
     }
     const stale = [...classified.keys()].filter(
       (k) => !stringKnobs.includes(k) && !UNCATALOGUED_STATE_PATHS.includes(k),

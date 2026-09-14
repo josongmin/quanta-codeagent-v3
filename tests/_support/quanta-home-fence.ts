@@ -47,12 +47,19 @@
  *
  * ## Children
  *
- * A child spawned WITHOUT an `env` option does not see those assignments: Bun hands it the
- * environment the process STARTED with (measured for `Bun.spawn*` and every
- * `node:child_process` spawner). An earlier version of this doc said "every child
- * process sees the scratch one"; that was false, and 260 test-side spawns pass no `env`
- * (round-9 audit). So the preload also makes an omitted `env` mean `process.env` — see
- * {@link withFencedEnv} — which is what "the fence" has to mean for a child.
+ * A child spawned WITHOUT an `env` option may not see those assignments. Measured in plain
+ * `bun` after reassigning `process.env.HOME`: `Bun.spawn`, `Bun.spawnSync`, `spawnSync`,
+ * `execSync` and `execFileSync` hand the child the environment the process STARTED with;
+ * `spawn`, `exec`, `execFile`, `fork` and `Bun.$` pass the new value (round-10 audit; this
+ * said "every `node:child_process` spawner"). An earlier version said "every child process
+ * sees the scratch one"; that was false, and 260 test-side spawns pass no `env` (round-9
+ * audit). So the preload makes an omitted `env` mean `process.env` for all of them — see
+ * {@link withFencedEnv}.
+ *
+ * An EXPLICIT `env` is the caller's, with one addition: when it names no `HOME`, the child
+ * gets the fenced one. Without `HOME` a child's `os.homedir()` falls back to the passwd
+ * entry — the developer's real home (round-10 audit, measured). Worker threads are not
+ * patched; nothing under `src/`, `tests/` or `tools/` starts one.
  *
  * ## The rule keys on WHERE a value points, not whether it is set
  *
@@ -124,6 +131,10 @@ export const OUTRANKING_ROOTS = ["QUANTA_CONFIG_DIR", "QUANTA_BENCH_HOME"] as co
  * path knob cannot land unclassified.
  */
 export const STATE_PATH_OVERRIDES = [
+  // `/mcp enable|disable` writes the file `resolveMcpConfigPath` names, and these two name
+  // it when QUANTA_MCP_CONFIG is unset (round-10 audit; they were filed "operator config").
+  "QUANTA_BROWSER_MCP_CONFIG",
+  "QUANTA_BROWSER_MCP_PLUGIN_DIR",
   "QUANTA_MCP_CONFIG", // the connector-install WRITE target (mcp-connector-wire), not only a read
   "QUANTA_OTEL_SINK", // span sink destination; not in the knob catalogue (raw env read)
   "QUANTA_BENCH_AUTH_FILE",
@@ -221,9 +232,15 @@ type Opts = Record<string, unknown>
 const isPlainOptions = (v: unknown): v is Opts =>
   typeof v === "object" && v !== null && !Array.isArray(v)
 
-/** An options bag whose `env` is `process.env` when the caller named none. */
-const fencedOptions = (o: Opts | undefined, env: NodeJS.ProcessEnv): Opts =>
-  o !== undefined && o.env !== undefined ? o : { ...(o ?? {}), env }
+/** An options bag whose `env` is `process.env` when the caller named none, and whose
+ *  explicit `env` gains the fenced `HOME` when it names none. */
+const fencedOptions = (o: Opts | undefined, env: NodeJS.ProcessEnv): Opts => {
+  if (o === undefined || o.env === undefined) return { ...(o ?? {}), env }
+  const own = o.env as Record<string, unknown>
+  return own.HOME === undefined && env.HOME !== undefined
+    ? { ...o, env: { ...own, HOME: env.HOME } }
+    : o
+}
 
 /**
  * Normalise the arguments of one spawner call so an omitted `env` becomes `env`. Pure:
@@ -232,6 +249,21 @@ const fencedOptions = (o: Opts | undefined, env: NodeJS.ProcessEnv): Opts =>
  *  - `spawn|spawnSync|execFile|execFileSync|fork(file, args?, opts?, cb?)`;
  *  - `exec|execSync(command, opts?, cb?)`.
  */
+/** Where a `file-args` or `command` call keeps its options. `(file, undefined | null,
+ *  options)` is a valid call with the options in slot 2; the previous rule saw no args
+ *  array, spliced options into slot 1 and pushed the caller's options — explicit env and
+ *  cwd included — out of reach (round-10 audit, measured). */
+const optionsSlot = (family: "file-args" | "command", out: readonly unknown[]): number => {
+  if (family === "command") return 1
+  return Array.isArray(out[1]) || (out[1] == null && out.length > 2) ? 2 : 1
+}
+
+const fenceSlot = (out: unknown[], at: number, env: NodeJS.ProcessEnv): void => {
+  if (isPlainOptions(out[at])) out[at] = fencedOptions(out[at], env)
+  else if (at < out.length && out[at] == null) out[at] = fencedOptions(undefined, env)
+  else out.splice(at, 0, fencedOptions(undefined, env))
+}
+
 export const withFencedEnv = (
   family: "bun" | "file-args" | "command",
   args: readonly unknown[],
@@ -243,9 +275,7 @@ export const withFencedEnv = (
     else out[1] = fencedOptions(isPlainOptions(out[1]) ? out[1] : undefined, env)
     return out
   }
-  const at = family === "command" ? 1 : Array.isArray(out[1]) ? 2 : 1
-  if (isPlainOptions(out[at])) out[at] = fencedOptions(out[at], env)
-  else out.splice(at, 0, fencedOptions(undefined, env))
+  fenceSlot(out, optionsSlot(family, out), env)
   return out
 }
 

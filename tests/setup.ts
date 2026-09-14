@@ -2,7 +2,6 @@
 import { afterAll, afterEach, beforeEach } from "bun:test"
 import childProcess from "node:child_process"
 import { existsSync, readdirSync, rmSync } from "node:fs"
-import { syncBuiltinESMExports } from "node:module"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 // The LEAF, not the runner: the runner reaches `@/agent/loop` and from there
@@ -82,8 +81,9 @@ if (benchResultsFence.action === "redirect") {
 // writes into it, and removed by a GLOBAL `afterAll` so a run leaves nothing in TMPDIR.
 //
 // Not `process.on("exit")`: measured on Bun 1.3.14, a preload's exit and beforeExit hooks
-// never fire under `bun test`, while its `afterAll` runs exactly once after the last file,
-// failing files included. The first version used the exit hook and left 99
+// never fire under `bun test`, while its `afterAll` runs after the last file, failing files
+// included. Under `--parallel` / `--isolate` the preload runs per file, so each file's
+// `afterAll` removes the per-pid root (round-10 audit) — still inside scratch. The first version used the exit hook and left 99
 // `quanta-test-home/<pid>` roots behind in one afternoon.
 {
   const scratchParent = join(tmpdir(), "quanta-test-home")
@@ -124,7 +124,10 @@ if (benchResultsFence.action === "redirect") {
   })
   // Children: an omitted `env` means THIS process's (fenced) env. Bun otherwise hands a
   // child the startup environment — the developer's HOME — whatever was assigned above.
-  // `syncBuiltinESMExports` makes named `node:child_process` imports see the wrappers.
+  // Test modules load after this runs, so their named `node:child_process` imports bind to
+  // the wrappers. There used to be a `syncBuiltinESMExports()` here, commented as what made
+  // named imports work; removing it changed nothing measured (round-10 audit), and in Bun a
+  // module that bound a name BEFORE the patch keeps the original even after the call.
   const bun = Bun as unknown as Record<"spawn" | "spawnSync", (...a: unknown[]) => unknown>
   for (const name of ["spawn", "spawnSync"] as const) {
     const original = bun[name]
@@ -136,7 +139,6 @@ if (benchResultsFence.action === "redirect") {
     if (typeof original !== "function") continue
     cp[name] = (...a: unknown[]) => original(...withFencedEnv(family, a, process.env))
   }
-  syncBuiltinESMExports()
 }
 
 // Workspace trust (`@/agent/workspace-trust`). Production entries install an authority;
