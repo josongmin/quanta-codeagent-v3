@@ -2,7 +2,11 @@
 
 Scope: the P0 set from the 2026-09-13 competitor-reconciliation campaign — security holes reachable in default config + self-defects where the feature catalog (fc) claims a capability the code never fires. Evidence: `.extracted_source/GAP-RECONCILE-2026-09-13.md` (Part 1 overclaims, Part 2 gaps), `.extracted_source/REFRESH-DIFF-2026-09-13.md` (§A defects), `.extracted_source/_verify-2026-09-13-*.md` (probes). NOT competitor-feature absorption — that is the P1 backlog, parked.
 
-**Status: PLAN ONLY. No implementation until the user greenlights a wave.**
+**Status (2026-09-13, implementing):**
+- ✅ **W-EGRESS LANDED + round-1 audited** — SEC-1 (28d68bd85), SEC-2 (3188cf2d1), OC-4 (2390b979e); round-1 parallel adversarial+objective audit found a CRITICAL (repo `.env` self-arming the LSP RCE via `QUANTA_LSP_TRUST_WORKSPACE`) + HIGH (bench entrypoint unscrubbed) + a RED test — all fixed in 93aba3560. Residuals disclosed (pyright repo-config venvPath, gopls/clangd/tsserver, OC-4 no producer).
+- ✅ **W-OBS 2/3** — OC-5 /context transcript (aa4de8d8c + refactor 4b025e840), OC-2 response_queued at enqueue (4381dd90d). ⏳ OC-1 activity `stuck` REMAINS: needs a real waiting-signal threaded from the approval gate / wait_agent / a tool-in-flight watchdog into the spine (FleetRow.status has no "waiting" value) — a genuine multi-site wiring, deferred rather than rushed.
+- ⏳ **REMAINING:** OC-1; W-SESSION (OC-3/BUG-1, BUG-3, BUG-4); W-PERM (SEC-3, SEC-4, SEC-5) — land last, fresh HEAD; W-EGRESS round-2 audit; audits for W-OBS/W-SESSION/W-PERM.
+- Main is green (tsc 0, touched-area + ratchet tests pass). Process lesson re-learned: run the BROAD ratchet/scan tests (`src-no-sketchy-code`) after each security commit, not just touched-dir tests — SEC-1/SEC-2 landed with a red sketchy-code scan caught only at OC-2.
 
 ---
 
