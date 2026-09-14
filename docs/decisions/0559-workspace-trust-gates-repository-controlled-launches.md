@@ -32,9 +32,12 @@ Claude Code의 폴더 신뢰 질문 + 프로젝트 `.mcp.json` 서버 승인, Co
    명시적 비신뢰가 유지된다). 설정 레이어 병합은 ADR-0498의 정확-경로 규칙을 그대로 쓴다.
 2. **기본은 비신뢰.** 프로세스가 authority를 설치하지 않으면 모든 폴더가 비신뢰다. 설치를 잊은 표면은 실행하지
    않고 이유를 말한다.
-3. **입력은 명시적인 것만.** `~/.quanta/trust.json`(ADR-0498의 `TrustStore`), `QUANTA_TRUSTED_PATHS`(부여만,
-   철회 불가), 대화형 CLI의 1회 질문(기본 no, yes는 기록, no는 기록하지 않아 다음 실행에 다시 묻는다).
+3. **입력은 명시적인 것만.** `~/.quanta/trust.json`(ADR-0498의 `TrustStore`), `QUANTA_TRUSTED_PATHS`(절대경로,
+   부여만, 철회 불가), 대화형 CLI의 1회 질문(기본 no, yes는 기록, no는 기록하지 않아 다음 실행에 다시 묻는다).
    cwd라는 이유만으로는 신뢰되지 않는다. trust 파일을 읽지 못하면 비신뢰이고 질문도 하지 않는다.
+   묻고 기록하는 대상은 실행 폴더가 속한 **git checkout 루트**(realpath)다(sep-14 U-1). checkout 밖이면 실행 폴더.
+   홈 폴더에 대한 yes는 이번 세션에만 적용하고 기록하지 않는다(기록하면 그 아래 모든 클론이 영구 신뢰된다).
+   건너뛴 artifact(`.mcp.json`, 플러그인, grants overlay)는 운영자 알림 한 줄로 이유를 남긴다.
 4. **게이트 지점.**
    - 언어 서버: `@/lsp` 클라이언트의 `beforeSpawn` 훅. 에이전트는 `lsp-bridge/servers.ts`의 팩토리로만 서버를
      만들고(census 테스트), 모든 클라이언트가 spawn 직전에 신뢰를 확인한다. scratch 복사본(shadow_verify)은
@@ -49,9 +52,19 @@ Claude Code의 폴더 신뢰 질문 + 프로젝트 `.mcp.json` 서버 승인, Co
    - 헤드리스 에이전트의 ci-bot/daemon 모드: 기록과 무관하게 비신뢰 (외부인이 쓴 트리).
    - 하네스(bench cli/index, eval, terminal brain-mode): 스스로 만든 트리에서 어차피 그 코드를 실행하므로 전부 신뢰.
 
+## sep-14 계획과의 관계
+
+같은 날 다른 세션이 `docs/plans/sep-14-repo-trust-and-state-honesty/plan.md`(U-1..U-6)를 세웠다. 운영자 결정으로
+이 게이트를 그 계획의 기반으로 먼저 land했다. 이 ADR이 채운 것: DS1의 결정 authority(모듈 위치는 계획의
+`src/config/project-trust.ts`가 아니라 위 두 슬라이스), D-S2의 `.mcp.json` 게이트(`quanta trust` 명령 제외),
+D-S5 계열의 플러그인·grants overlay, B의 spawn 지점 게이트와 진입점 분류. 남은 것: U-5의 비신뢰 폴더 강화 모드
+LSP(지금은 완전 차단), `quanta trust [--revoke]`·`--trust-project`, AGENTS.md·rules·dotenv·environment.toml·
+legacy-cwd 메모리 스토어(NW-1)·env 스크럽 등 계획의 나머지 lane.
+
 ## Consequences
 
 - 신뢰하지 않은 폴더에서 LSP 네비게이션·진단, prewarm, 프로젝트 MCP 서버, 프로젝트 플러그인이 동작하지 않는다.
+  LSP는 U-5의 강화 모드가 들어오기 전까지 완전히 꺼진다(계획보다 엄격한 과도기).
   CLI는 처음 한 번 묻고, 헤드리스·web daemon은 CLI에서 신뢰한 기록(같은 파일)이나 `QUANTA_TRUSTED_PATHS`를 쓴다.
 - web daemon(Tauri)에는 아직 신뢰를 부여하는 UI가 없다. 기록된 결정만 쓴다.
 - 벤치 LSP grounding은 하네스 진입점의 전체 신뢰로 유지된다.

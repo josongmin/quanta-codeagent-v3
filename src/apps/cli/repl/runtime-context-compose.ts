@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs"
 import { join } from "node:path"
 import {
   type ConfirmDecision,
@@ -8,7 +9,7 @@ import {
 } from "@/agent"
 import type { ConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import { createClassifierBackedAutoReview } from "@/agent/reviewer-port"
-import { isWorkspaceTrusted } from "@/agent/workspace-trust"
+import { isWorkspaceTrusted, UNTRUSTED_WORKSPACE_HOW_TO } from "@/agent/workspace-trust"
 import type { SessionBootstrapResult } from "@/host/bootstrap"
 import { type AssemblerEnv, buildInteractiveTurnAssembler } from "@/host/runtime"
 import type { MentionLiveSources } from "@/host/runtime/internal/mention-source-deps"
@@ -16,6 +17,7 @@ import { wireSecurityRailsForOverlay } from "@/host/runtime/security-rails-wire"
 import type { ResponsesContinuationStore } from "@/llm"
 import {
   createPersistentTrustScopeRegistry,
+  defaultProjectOverlayPath,
   type PermissionStore,
   type ReviewerSandboxProfile,
   setAutoApprovalReviewObserver,
@@ -31,7 +33,7 @@ import { resolveNetworkProxyFromEnv } from "@/runner/knobs/knobs/network-proxy"
 import type { ApprovalDecisionResult } from "@/runner/orchestrate"
 import { composeRuntimeBootstrapContext, type RuntimeContext } from "@/sdk/runtime"
 import { listSessions, type SessionMeta, sessionsRoot } from "@/session"
-import { gateOn, runtimeConfigFromEnv } from "@/shared"
+import { emitOperatorNotice, gateOn, runtimeConfigFromEnv } from "@/shared"
 import { decisionEmitterFromStream, type StreamPort } from "@/stream"
 import type { WorktreeSlotHandle } from "@/tool"
 import { buildShellSnapshotConfig, buildSummarizerLlm } from "../internal"
@@ -374,9 +376,18 @@ export const hydrateTrustScope = async (
   // The overlay is `<cwd>/.quanta/project-grants.json`, a file a clone can carry, and its
   // records ALLOW tools. It is read only in a trusted folder; elsewhere the user's own
   // `~/.quanta/grants.json` still applies, keyed by this project.
-  const registry = createPersistentTrustScopeRegistry(
-    isWorkspaceTrusted(cwd) ? { projectRoot: cwd } : {},
-  )
+  const trusted = isWorkspaceTrusted(cwd)
+  if (!trusted && existsSync(defaultProjectOverlayPath(cwd))) {
+    emitOperatorNotice({
+      severity: "warn",
+      source: "trust-scope",
+      message:
+        `The grants in ${defaultProjectOverlayPath(cwd)} were not applied: they would allow ` +
+        `tools in ${cwd}, which is not a trusted folder. ${UNTRUSTED_WORKSPACE_HOW_TO}`,
+      hint: "only your own grants apply",
+    })
+  }
+  const registry = createPersistentTrustScopeRegistry(trusted ? { projectRoot: cwd } : {})
   await registry.hydrate()
   return { registry, projectKey: cwd }
 }

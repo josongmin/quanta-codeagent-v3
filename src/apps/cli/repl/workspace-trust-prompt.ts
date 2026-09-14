@@ -3,8 +3,10 @@
  * starts anything the folder controls (see `@/agent/workspace-trust`).
  *
  * Asked only on a terminal, only when the folder is not already trusted, and answered
- * "no" by default. A yes is recorded in `~/.quanta/trust.json`, so it is asked once per
- * folder; a no is not recorded, so the next launch asks again (Claude Code's behaviour).
+ * "no" by default. The folder named is the git checkout the launch folder belongs to.
+ * A yes is recorded in `~/.quanta/trust.json`, so it is asked once per checkout (the home
+ * folder excepted: this session only); a no is not recorded, so the next launch asks
+ * again (Claude Code's behaviour).
  * Piped and one-shot runs are never asked: they stay untrusted unless the folder was
  * granted before or is listed in `QUANTA_TRUSTED_PATHS`.
  */

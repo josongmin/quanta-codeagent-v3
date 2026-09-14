@@ -44,6 +44,7 @@ import type { TrustPersistencePort, TrustRecord } from "@/config"
 import { readMcpConfig } from "@/host/mcp-composition"
 import { resolveWorkspaceTrust } from "@/host/workspace-trust"
 import type { StructuredLogger } from "@/observability"
+import { installOperatorNoticeSink } from "@/shared"
 import { REPO_ROOT } from "../../_helpers/repo-root"
 import { makeTempDirOwner } from "../../_helpers/temp-dir"
 import { assertScanPopulation } from "../_shared/scan-population"
@@ -159,6 +160,54 @@ describe("recorded decisions", () => {
     })
     expect(declined.trusted).toBe(false)
     expect(no.commits).toEqual([])
+  })
+
+  test("the decision is about the git checkout: a subfolder launch asks about, and grants, the root", async () => {
+    const repo = temps.create("wt-gitroot-")
+    mkdirSync(join(repo, ".git"))
+    mkdirSync(join(repo, "packages/app"), { recursive: true })
+    const persistence = memoryPersistence()
+    let askedAbout = ""
+    const granted = await resolveWorkspaceTrust({
+      cwd: join(repo, "packages/app"),
+      trustedPaths: undefined,
+      persistence: persistence.port,
+      confirm: async (folder) => {
+        askedAbout = folder
+        return true
+      },
+      now: () => 1,
+      homeDir: temps.create("wt-home-"),
+    })
+    expect(askedAbout).toBe(granted.folder)
+    expect(granted.folder.endsWith(repo.split("/").pop() as string)).toBe(true)
+    expect(Object.keys(persistence.commits[0] ?? {})).toEqual([granted.folder])
+    expect(granted.authority.isTrusted(join(repo, "packages/app"))).toBe(true)
+    // Outside any checkout the launch folder itself is the subject.
+    const loose = temps.create("wt-loose-")
+    const outside = await resolveWorkspaceTrust({
+      cwd: loose,
+      trustedPaths: undefined,
+      persistence: memoryPersistence().port,
+    })
+    expect(outside.folder.endsWith(loose.split("/").pop() as string)).toBe(true)
+  })
+
+  test("a grant of the home folder is for this session only", async () => {
+    const home = temps.create("wt-homegrant-")
+    const persistence = memoryPersistence()
+    const warnings: string[] = []
+    const granted = await resolveWorkspaceTrust({
+      cwd: home,
+      trustedPaths: undefined,
+      persistence: persistence.port,
+      confirm: async () => true,
+      homeDir: home,
+      warn: (m) => warnings.push(m),
+    })
+    expect(granted).toMatchObject({ trusted: true, source: "granted", sessionOnly: true })
+    expect(persistence.commits).toEqual([])
+    expect(warnings.join("\n")).toContain("home folder")
   })
 
   test("an unreadable trust file is not a grant, and nobody is asked to write to it", async () => {
@@ -373,11 +422,15 @@ describe("project plugins and project grants", () => {
     return folder
   }
 
-  test("a plugin manifest is wired only in a trusted folder", () => {
+  test("a plugin manifest is wired only in a trusted folder, and a skip says so", () => {
     const folder = withPlugin(temps.create("wt-plugin-"))
+    const notices: string[] = []
+    const uninstall = installOperatorNoticeSink((n) => notices.push(n.message))
     const untrusted = { cwd: folder } as AgentConfig
     autoWirePluginActivation(untrusted)
+    uninstall()
     expect(untrusted.activatePlugins).toBeUndefined()
+    expect(notices.join("\n")).toContain("not a trusted folder")
     trust(folder)
     const trusted = { cwd: folder } as AgentConfig
     autoWirePluginActivation(trusted)
@@ -395,8 +448,12 @@ describe("project plugins and project grants", () => {
       }),
     )
     const env = { QUANTA_TRUST_SCOPE: "1" }
+    const notices: string[] = []
+    const uninstall = installOperatorNoticeSink((n) => notices.push(n.message))
     const untrusted = await hydrateTrustScope(folder, env)
+    uninstall()
     expect(untrusted?.registry.hasGrant(folder, { tool: "bash" })).toBe(false)
+    expect(notices.join("\n")).toContain("were not applied")
     trust(folder)
     const trusted = await hydrateTrustScope(folder, env)
     expect(trusted?.registry.hasGrant(folder, { tool: "bash" })).toBe(true)

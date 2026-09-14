@@ -99,11 +99,15 @@ export const installWorkspaceTrustAuthority = (
 
 export const isWorkspaceTrusted = (path: string): boolean => installed.isTrusted(path)
 
+/** How a folder becomes trusted — the tail of every refusal. */
+export const UNTRUSTED_WORKSPACE_HOW_TO =
+  "Trust it at quanta's startup question, add it to QUANTA_TRUSTED_PATHS, or record it " +
+  "in ~/.quanta/trust.json."
+
 /** What a refused launch tells the model and the operator. */
 export const untrustedWorkspaceMessage = (what: string, path: string): string =>
   `${what} was not started: it would run code from ${path}, which is not a trusted folder. ` +
-  "Trust it at quanta's startup question, add it to QUANTA_TRUSTED_PATHS, or record it " +
-  "in ~/.quanta/trust.json."
+  UNTRUSTED_WORKSPACE_HOW_TO
 
 export class WorkspaceUntrustedError extends QuantaError {
   readonly path: string
