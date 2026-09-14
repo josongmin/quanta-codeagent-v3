@@ -1,4 +1,4 @@
-import { wireOptionalAgentPorts } from "@/agent"
+import { MODE_PRESETS, wireOptionalAgentPorts } from "@/agent"
 import type { CommandHookBinding } from "@/agent/command-hooks"
 import { defaultDelegationRunner } from "@/agent/delegation-runner"
 import { defaultFocusChainTracker, type FocusChainPort } from "@/agent/focus-chain"
@@ -27,7 +27,10 @@ import {
   type ToolProfileResolver,
 } from "@/agent/tool-profile"
 import type { AgentArgs, IdentityModeToken, ToolProfileToken } from "@/host/runtime/agent-args"
-import type { AssembleRequest } from "@/host/runtime/agent-config-assembler"
+import {
+  type AssembleRequest,
+  networkDispatchGuardFor,
+} from "@/host/runtime/agent-config-assembler"
 import { type CapabilityNegotiator, defaultNegotiator, fullNegotiator } from "@/mcp"
 import { metrics } from "@/observability"
 import { buildAutorunEligibility } from "@/permission"
@@ -742,6 +745,16 @@ export const buildBaseFromArgs = (
     slotCtx,
   )
 
+  // The mode's network-posture guard goes on `base` BEFORE anything captures it: the
+  // delegation runner (below) and the code_cell factory (`wireOptionalAgentPorts`) close
+  // over this object, and the guard `assembleAgentConfig` derives lands on its spread
+  // copy, which they never see — so delegate children and in-cell tool calls ran
+  // unguarded under a restrictive posture (round-10 audit A8). The assembler keeps a
+  // pre-set guard. No production path sets `ciBot` extras on the partial.
+  if (base.dispatchGuard === undefined) {
+    const guard = networkDispatchGuardFor({}, MODE_PRESETS[p.mode])
+    if (guard !== undefined) base.dispatchGuard = guard
+  }
   attachExecutionPlaneSlots(base, p)
   // ADR-0454 — install disk-configured command hooks onto base.hooks (default-OFF
   // unless QUANTA_COMMAND_HOOKS=1 + acknowledgedRisk + bindings; see helper).

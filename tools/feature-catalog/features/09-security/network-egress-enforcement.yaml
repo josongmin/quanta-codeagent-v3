@@ -38,12 +38,14 @@ evidence:
   code:
     - src/agent/dispatch-guard/network-guard.ts
     - src/agent/dispatch-guard/default-guard.ts
+    - src/agent/dispatch-guard/deny-all-permitted.ts
     - src/agent/dispatch-guard/index.ts
     - src/apps/agent/assemble.ts
   adrs: []
   tests:
     unit:
       - tests/unit/agent/network-egress-wiring-hellgate.test.ts
+      - tests/unit/dispatch-guard-deny-all-coverage-hellgate.test.ts
     integration: []
     contract: []
 knobs:

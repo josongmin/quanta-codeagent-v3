@@ -184,7 +184,10 @@ const mentionResolverDep = (cwd: string, env: AssemblerEnv) => ({
  * Extracted so the `assembleAgentConfig` closure stays under biome's
  * cognitive-complexity cap.
  */
-const networkDispatchGuardFor = (req: AssembleRequest, policy: ModePolicy) => {
+export const networkDispatchGuardFor = (
+  req: Pick<AssembleRequest, "ciBot">,
+  policy: ModePolicy,
+) => {
   const posture = policy.network.kind
   if (posture === "open") return undefined
   // For the allowlist posture, the effective hosts are the audited ci-bot

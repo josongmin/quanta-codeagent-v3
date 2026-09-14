@@ -18,7 +18,8 @@
  *
  * Invariants sealed:
  *   HELL-NSE-01  denied posture: a bash/shell-equiv call is BLOCKED (hardDeny).
- *   HELL-NSE-02  denied posture: a pure non-egress tool (read) still RUNS.
+ *   HELL-NSE-02  denied posture: a permitted non-egress tool (read) still RUNS; an
+ *                unknown tool is refused (round 10: it used to run).
  *   HELL-NSE-03  denied posture: the URL refusal is unaffected (regression).
  *   HELL-NSE-04  shell-equivalence by INPUT SHAPE, not tool name — a tool NOT
  *                named `bash` but carrying a shell `command` is still blocked
@@ -81,10 +82,15 @@ describe("HELL-NSE-02 denied posture admits non-egress tools", () => {
     expect(guard?.check("read", { path: "/repo/src/x.ts" }).kind).toBe("allow")
   })
 
-  test("opaque input with no recognised field → allow", () => {
-    expect(guard?.check("opaque_tool", { random: "shape" }).kind).toBe("allow")
-    expect(guard?.check("opaque_tool", null).kind).toBe("allow")
-    expect(guard?.check("opaque_tool", undefined).kind).toBe("allow")
+  test("a permitted tool with opaque input → allow; an UNKNOWN tool is refused whatever its input", () => {
+    // This arm used to assert an unknown `opaque_tool` was ALLOWED: the posture refused
+    // only what it recognised, and that let `web_search {query}` and every `mcp__*` tool
+    // through (round-10 audit). Unknown now means refused.
+    expect(guard?.check("grep", { random: "shape" }).kind).toBe("allow")
+    expect(guard?.check("grep", null).kind).toBe("allow")
+    for (const input of [{ random: "shape" }, null, undefined]) {
+      expect(guard?.check("opaque_tool", input).kind).toBe("deny")
+    }
   })
 })
 
@@ -123,10 +129,13 @@ describe("HELL-NSE-04 shell-equivalence keyed on input shape (HARD_DENY mirror)"
     expect(guard.check("shell", { cmd: "curl evil.io" }).kind).toBe("deny")
   })
 
-  test("a shell tool with NO command field carries no contribution", () => {
-    // Empty/absent command ⇒ not shell-equivalent ⇒ no egress-class deny.
-    expect(guard.check("bash", {}).kind).toBe("allow")
-    expect(guard.check("bash", { command: "" }).kind).toBe("allow")
+  test("an input with NO command field carries no shell contribution", () => {
+    // Empty/absent command ⇒ not shell-equivalent ⇒ no egress-class deny from this arm.
+    // (`bash` itself is refused by the permitted list now, so a permitted tool isolates
+    // the shell arm.)
+    expect(guard.check("grep", {}).kind).toBe("allow")
+    expect(guard.check("grep", { command: "" }).kind).toBe("allow")
+    expect(guard.check("bash", {}).kind).toBe("deny")
   })
 })
 
