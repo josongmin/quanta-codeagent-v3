@@ -27,9 +27,10 @@ export interface NodeReplSpawnOptions {
   readonly signal?: AbortSignal
 }
 
-/** Caller options for `exec`. `signal` aborts a long-running evaluation
- *  by writing `.exit` to the REPL stdin — the kernel transitions to
- *  `dead` and the call resolves with `{ kind: "exec-aborted" }`. */
+/** Caller options for `exec`. `signal` aborts a long-running evaluation by killing the
+ *  kernel process — it transitions to `dead` and the call resolves with
+ *  `{ kind: "exec-aborted" }`. Past `timeoutMs` the kernel is killed the same way and the
+ *  call resolves with `{ kind: "exec-timeout" }`. */
 export interface NodeReplExecOptions {
   readonly signal?: AbortSignal
   readonly timeoutMs?: number

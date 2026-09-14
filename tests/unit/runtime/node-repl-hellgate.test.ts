@@ -25,7 +25,15 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { KernelId } from "@/runtime/node-repl"
@@ -176,6 +184,13 @@ describe("ADR-0249 node-repl-hellgate", () => {
           "await new Promise((r) => setTimeout(r, 20))\nfunction g() {\n  return 41 + 1\n}\ng()",
           "42",
         ],
+        // A final `// comment` with `await` anywhere (round-10: without the line mode's
+        // trailing newline it swallowed the await wrapper's closing brace).
+        ["const n = await Promise.resolve(3)\nn * 2 // doubled", "6"],
+        ["let s = 'await'; s // label", "'await'"],
+        // U+2028 in the code (round-10: readline split the JSON line there and the kernel
+        // waited out its deadline and died).
+        ["'a\u2028b'.length", "3"],
         ["x", "42"],
       ]
       try {
@@ -263,6 +278,58 @@ describe("ADR-0249 node-repl-hellgate", () => {
         })
       } finally {
         await k.kill(id)
+      }
+    })
+  }, 60_000)
+
+  /**
+   * HELL-NR-02E — the callback shape Node 22 uses for an awaited rejection with a falsy
+   * reason: `cb(undefined)` / `cb(0)`, never the output stream. The kernel read `if (e)`
+   * and reported success (round-10 audit, measured on Node 22.22). The suite's `node` is
+   * whatever is on PATH, so a preload makes that REPL call back the way Node 22 does, for
+   * commands carrying a marker — the measured shape, reproduced on any version.
+   */
+  test("HELL-NR-02E a falsy error in the eval callback is an error (Node 22's rejection shape)", async () => {
+    await withTempDir("qnr-falsy-", async (home) => {
+      const stub = join(home, "node22-callback.cjs")
+      writeFileSync(
+        stub,
+        [
+          'const repl = require("node:repl")',
+          "const start = repl.start",
+          "repl.start = (...a) => {",
+          "  const r = start(...a)",
+          "  const ev = r.eval",
+          "  r.eval = (code, ctx, file, cb) => {",
+          "    const m = /__NODE22_REJECT_(UNDEFINED|ZERO)__/.exec(code)",
+          '    if (m) return cb(m[1] === "ZERO" ? 0 : undefined, undefined)',
+          "    return ev.call(r, code, ctx, file, cb)",
+          "  }",
+          "  return r",
+          "}",
+        ].join("\n"),
+      )
+      const nodeBin = join(home, "node-with-node22-callback")
+      writeFileSync(nodeBin, `#!/bin/sh\nexec node -r '${stub}' "$@"\n`)
+      chmodSync(nodeBin, 0o755)
+      const k = createDefaultNodeReplKernel({ home, nodeBin })
+      const sp = await k.spawn({ sessionId: "falsy" })
+      expect(sp.ok, JSON.stringify(sp)).toBe(true)
+      if (!sp.ok) return
+      try {
+        for (const marker of ["__NODE22_REJECT_UNDEFINED__", "__NODE22_REJECT_ZERO__"]) {
+          const r = await execOn(k, sp.value.id, `/* ${marker} */ 1`)
+          expect(r.hadError, marker).toBe(true)
+          expect(r.stderr, marker).toContain("Uncaught")
+        }
+        // PAIRED CONTROL: an ordinary command through the same stub succeeds.
+        expect(await execOn(k, sp.value.id, "1 + 1")).toEqual({
+          stdout: "2",
+          stderr: "",
+          hadError: false,
+        })
+      } finally {
+        await k.kill(sp.value.id)
       }
     })
   }, 60_000)

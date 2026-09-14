@@ -27,10 +27,11 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { headlessStub, type NodeReplKernel } from "@/runtime/node-repl"
+import { createDefaultNodeReplKernel, headlessStub, type NodeReplKernel } from "@/runtime/node-repl"
 import { __resetRuntimeConfig, runtimeConfig } from "@/shared"
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
 import { buildDefaultTools } from "@/tool"
+import { withTempDir } from "../../_helpers/temp-dir"
 
 const withEnv = <T>(key: string, value: string | undefined, fn: () => T): T => {
   const prev = process.env[key]
@@ -227,6 +228,28 @@ describe("node_repl — list / kill lifecycle", () => {
     expect(live.length).toBe(1)
     expect(live[0]?.spec.id).not.toBe(firstId)
   })
+})
+
+describe("node_repl — a dead session kernel is replaced, on the REAL kernel", () => {
+  // The session slot kept a dead kernel's id: after one timeout every later call answered
+  // "is dead (process exited). Re-run to spawn a fresh one." and re-running changed nothing
+  // (round-10 audit, reproduced). The stub arm above covers only an explicit kill.
+  test("after an exec times out, it says so, and the next exec runs on a fresh kernel", async () => {
+    await withTempDir("qnr-tool-timeout-", async (home) => {
+      const kernel = createDefaultNodeReplKernel({ home })
+      const tool = nodeReplTool(kernel)
+      try {
+        expect((await run(tool, { op: "exec", code: "let kept = 1" })).ok).toBe(true)
+        const timedOut = await run(tool, { op: "exec", code: "while (true) {}", timeoutMs: 500 })
+        expect(timedOut.ok).toBe(false)
+        expect(timedOut.output).toContain("timed out after 500ms")
+        const next = await run(tool, { op: "exec", code: "typeof kept + ' ' + (1 + 1)" })
+        expect(next).toMatchObject({ ok: true, output: "'undefined 2'" })
+      } finally {
+        for (const row of kernel.list()) await kernel.kill(row.spec.id)
+      }
+    })
+  }, 60_000)
 })
 
 describe("node_repl — distinct from code_cell (neither subsumes the other)", () => {

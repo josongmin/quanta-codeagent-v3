@@ -48,12 +48,13 @@ describe("node-repl exec-timeout reaps the child (U2)", () => {
     const handle = join(quantaHomeDir(), "node_repl", "active_execs", `${id}.json`)
     expect(existsSync(handle)).toBe(true)
 
-    // A synchronous infinite loop blocks the REPL from ever evaluating the
-    // post-code sentinel line ⇒ read-timeout fires. `node -i` installs no
-    // SIGTERM handler, so the OS default action terminates even a CPU-spinning
-    // child when markDead issues proc.kill() — exactly the reap we assert.
+    // A synchronous infinite loop never reaches the sentinel ⇒ read-timeout fires. The
+    // kernel installs no SIGTERM handler, so the OS default action terminates even a
+    // CPU-spinning child when markDead issues proc.kill() — exactly the reap we assert.
     const res = await kernel.exec(id, "while (true) {}", { timeoutMs: 400 })
-    expect(res.ok).toBe(false) // timed out, not a normal completion
+    // Timed out — and said so: this used to be `kernel-dead`, which the tool rendered as
+    // "process exited" (round-10 audit).
+    expect(res.ok ? "ok" : res.error).toEqual({ kind: "exec-timeout", id, timeoutMs: 400 })
 
     // THE FIX — observable contract of markDead:
     expect(kernel.list().some((k) => k.spec.id === id)).toBe(false) // Map evicted

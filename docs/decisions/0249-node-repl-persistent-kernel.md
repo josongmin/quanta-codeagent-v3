@@ -98,8 +98,8 @@ export interface NodeReplSpawnOptions {
 }
 
 export interface NodeReplExecOptions {
-  readonly signal?: AbortSignal       // abort writes `.exit` and resolves with exec-aborted
-  readonly timeoutMs?: number         // optional hard cap per exec
+  readonly signal?: AbortSignal       // abort kills the process and resolves with exec-aborted
+  readonly timeoutMs?: number         // hard cap per exec; past it the process is killed (exec-timeout)
 }
 
 export interface NodeReplKernel {
@@ -132,10 +132,13 @@ schedule on it.
 - State transitions: `starting` → (warm-up sentinel read) → `ready` → (exec
   in flight) → `running` → (exec done) → `idle` → … → `dead` (process
   exit, kill, or unrecoverable parse error).
-- AbortSignal during `exec` writes `.exit` to stdin and resolves with
-  `{ kind: "exec-aborted" }` — the kernel transitions to `dead`. The
-  abort is one-shot (a killed kernel is not restarted; the caller spawns
-  a new one).
+- AbortSignal during `exec` kills the process and resolves with
+  `{ kind: "exec-aborted" }`; an exec past `timeoutMs` kills it and resolves with
+  `{ kind: "exec-timeout" }` (round-10: this was `kernel-dead`, rendered "process
+  exited"). Either way the kernel is `dead` and not restarted; the `node_repl` tool
+  spawns a fresh session kernel on its next exec (it used to keep the dead id).
+  (Amended sep-14: abort once wrote `.exit` to stdin; the channel now carries JSON
+  commands only.)
 - Synchronous `Bun.spawn` throw on ENOENT (`node` not on PATH) becomes
   `{ kind: "node-missing", detail }` — same idiom as
   `shell-snapshot/bun-spawner.ts`.
@@ -200,7 +203,9 @@ the path discipline.
   user program that *prints the exact sentinel* would mis-frame.
   Mitigation: sentinel includes `execId` (random nonce) — collision
   probability is `2^-64`. Documented in the adapter header.
-- The default adapter assumes `node` ≥ 14 (REPL `.exit` semantics). A
+- The default adapter needs a `node` whose REPL `eval` calls back with `e === null` on
+  success (measured on Node 22.22 and 25.9; on 22 an awaited `Promise.reject(null)` is
+  indistinguishable from a value of `undefined`, a stated limit). A
   stripped CI image without `node` resolves at `spawn` time as
   `node-missing`; the caller's gate decides whether to degrade or
   surface to the user.

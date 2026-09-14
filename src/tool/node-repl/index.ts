@@ -5,7 +5,7 @@
  * DISTINCT FROM `code_cell` (code-mode): code-mode runs model-authored JS in a
  * ONE-SHOT QuickJS-WASM sandbox whose every `tools.X()` re-enters the real
  * `dispatchTool` — it is a tool-COMPOSITION surface with NO cross-call state and
- * NO real Node runtime. `node_repl` is a long-lived REAL `node -i` subprocess
+ * NO real Node runtime. `node_repl` is a long-lived REAL `node` REPL subprocess
  * whose variable bindings PERSIST across calls (`let x = 42` then a later
  * `x` → `42`), with FULL Node.js access (fs, net, require). Two different
  * capabilities; neither subsumes the other.
@@ -91,6 +91,7 @@ const renderKernelError = (e: {
   detail?: string
   id?: string
   raw?: string
+  timeoutMs?: number
 }): string => {
   switch (e.kind) {
     case "node-missing":
@@ -98,7 +99,9 @@ const renderKernelError = (e: {
     case "spawn-failed":
       return `node_repl: kernel spawn failed (${e.detail ?? ""}).`
     case "kernel-dead":
-      return `node_repl: kernel ${e.id ?? "?"} is dead (process exited). Re-run to spawn a fresh one.`
+      return `node_repl: kernel ${e.id ?? "?"} is dead (process exited). The next call starts a fresh kernel; its bindings are gone.`
+    case "exec-timeout":
+      return `node_repl: exec timed out after ${e.timeoutMs ?? 0}ms; kernel ${e.id ?? "?"} was stopped and its bindings are gone. The next call starts a fresh kernel.`
     case "exec-aborted":
       return `node_repl: exec aborted for kernel ${e.id ?? "?"}.`
     case "invalid-id":
@@ -124,15 +127,17 @@ const strongestSourceClass = (
   return "public"
 }
 
-/** Lazily spawn (once) the session's own kernel — the variable-persistence unit.
- *  Returns the existing id when already spawned; a typed message on spawn error
- *  (never throws). */
+/** Lazily spawn the session's own kernel — the variable-persistence unit. Returns the
+ *  existing id while that kernel lives; a dead one (timed out, aborted, exited) is
+ *  replaced. It used to be returned forever: every later call answered "dead, re-run",
+ *  and re-running changed nothing (round-10 audit, reproduced). A typed message on spawn
+ *  error (never throws). */
 const ensureSessionKernel = async (
   kernel: NodeReplKernel,
   slot: SessionSlot,
   ctx: CoreToolContext,
 ): Promise<{ ok: true; id: KernelId } | { ok: false; output: string }> => {
-  if (slot.id !== undefined) return { ok: true, id: slot.id }
+  if (slot.id !== undefined && kernel.status(slot.id) !== "dead") return { ok: true, id: slot.id }
   const spawned = await kernel.spawn({
     // No sessionId seam on ToolContext — use the stable per-turn id when present,
     // else a constant. Provenance metadata on the persisted handle only; the

@@ -53,4 +53,6 @@ export type KernelError =
   | { kind: "kernel-dead"; id: KernelId }
   | { kind: "spawn-failed"; detail: string }
   | { kind: "exec-aborted"; id: KernelId }
+  /** The exec ran past its deadline; the kernel was stopped and its bindings are gone. */
+  | { kind: "exec-timeout"; id: KernelId; timeoutMs: number }
   | { kind: "invalid-id"; raw: string }

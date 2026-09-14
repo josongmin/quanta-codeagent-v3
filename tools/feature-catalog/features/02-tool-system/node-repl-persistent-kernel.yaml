@@ -36,9 +36,9 @@ purpose: |
     - `NodeReplKernel { spawn, exec, status, kill, list }` — 모든 메서드
       `Result<…, KernelError>` (no-throw)
     - `KernelState = "starting"|"ready"|"running"|"idle"|"dead"` (closed)
-    - production adapter: line-protocol around node REPL — per-exec
-      nonce-sentinel framing, stderr drain in parallel, AbortSignal로
-      `.exit` 후 `exec-aborted` 분기
+    - production adapter: JSON 한 줄 명령을 REPL `eval`에 통째로 — per-exec
+      nonce-sentinel framing, stderr drain in parallel, AbortSignal·timeout 시
+      프로세스 kill 후 `exec-aborted` / `exec-timeout` 분기
     - state-store: 핸들만 디스크에 (`pid` / `lastUseMs` / `sessionId`);
       변수 상태 자체는 살아 있는 node 프로세스 안에만 있다
     - default-OFF byte-identical: 어떤 tool / composition root도 이 슬라이스를

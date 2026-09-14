@@ -101,9 +101,20 @@ const STDERR_SENTINEL_GRACE_MS = 5_000
  *   write, whichever comes first, exactly once. A late callback after an error is
  *   ignored, so nothing shifts to the next exec.
  * - The sentinel waits two `setImmediate` turns, so a rejection the command left
- *   unhandled is reported on THAT exec rather than the next.
- * Limit: if an error from an earlier exec's timer arrives while a later command is
- * awaiting, that command is reported finished (with the error); its late value is dropped.
+ *   unhandled and that settles within them is reported on THAT exec.
+ * - The command gets a trailing newline, as line mode gave it: with `await` anywhere in
+ *   it, Node wraps it in a function, and a final `// comment` otherwise swallowed the
+ *   wrapper's closing brace (round-10 audit, reproduced on Node 22 and 25).
+ * - Success always calls back with `e === null` (measured, Node 22.22 and 25.9), so any
+ *   other `e` is an error: Node 22 reports an awaited rejection whose reason is
+ *   `undefined`, `0` or `""` through the callback, not through the output stream.
+ * Limits, each measured:
+ *  - an error from a timer or a rejection that settles after the exec finished is
+ *    reported on the exec running when it arrives — the next one, or none if idle; if
+ *    that exec is awaiting, it is reported finished and its late value is dropped;
+ *  - on Node 22, `await Promise.reject(null)` calls back exactly like a command whose
+ *    value is `undefined`, and reads as success;
+ *  - console output written after the exec's sentinel is not attributed to any exec.
  */
 const REPL_BOOT = [
   'const repl=require("node:repl"),{PassThrough}=require("node:stream"),readline=require("node:readline");',
@@ -118,8 +129,8 @@ const REPL_BOOT = [
   "const finish=()=>{if(settled)return;settled=true;current=null;",
   "setImmediate(()=>setImmediate(()=>{process.stderr.write(marker);process.stdout.write(marker);busy=false;pump()}))};",
   "current=finish;",
-  'try{r.eval(m.code,r.context,"REPL",(e,v)=>{if(settled)return;',
-  'if(e)process.stderr.write("Uncaught "+(e instanceof repl.Recoverable?"SyntaxError: Unexpected end of input":String((e&&e.stack)||e))+"\\n");',
+  'try{r.eval(m.code+"\\n",r.context,"REPL",(e,v)=>{if(settled)return;',
+  'if(e!==null)process.stderr.write("Uncaught "+(e instanceof repl.Recoverable?"SyntaxError: Unexpected end of input":String((e&&e.stack)||e))+"\\n");',
   'else if(v!==undefined)process.stdout.write(r.writer(v)+"\\n");',
   "finish()})}",
   'catch(e){process.stderr.write("Uncaught "+String((e&&e.stack)||e)+"\\n");finish()}};',
@@ -127,9 +138,13 @@ const REPL_BOOT = [
   "let m;try{m=JSON.parse(l)}catch{return}queue.push(m);pump()});",
 ].join("")
 
-/** One command on the wire. */
+/** One command on the wire. U+2028 and U+2029 are escaped: `JSON.stringify` leaves them
+ *  raw, Node 25's readline ends a line at them, and both halves then fail to parse — the
+ *  command was dropped and the exec waited out its deadline (round-10 audit, reproduced). */
 const commandLine = (code: string, sentinel: string): string =>
-  `${JSON.stringify({ code, sentinel })}\n`
+  `${JSON.stringify({ code, sentinel })
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029")}\n`
 
 /** Build a production-shaped `NodeReplKernel`. STATEFUL — call once at
  *  composition-root and reuse across the session. */
@@ -296,7 +311,7 @@ const executeWithLock = async (
 ): Promise<Result<ExecResult, KernelError>> => {
   const { removeIfHome, dropKernel, touchIfHome } = ctx
   if (execOpts?.signal?.aborted === true) {
-    markDeadAndExit(k, id, removeIfHome, dropKernel)
+    markDead(k, id, removeIfHome, dropKernel)
     release()
     return err({ kind: "exec-aborted", id })
   }
@@ -321,11 +336,15 @@ const executeWithLock = async (
     release()
     return err({ kind: "kernel-dead", id })
   }
-  const aborted = read.error === "aborted"
-  if (aborted) markDeadAndExit(k, id, removeIfHome, dropKernel)
-  else markDead(k, id, removeIfHome, dropKernel)
+  markDead(k, id, removeIfHome, dropKernel)
   release()
-  return err({ kind: aborted ? "exec-aborted" : "kernel-dead", id })
+  if (read.error === "aborted") return err({ kind: "exec-aborted", id })
+  // A deadline is not a process exit: the kernel was stopped BECAUSE the exec ran long,
+  // and saying "process exited" sent the model looking for a crash (round-10 audit).
+  if ("timedOut" in read && read.timedOut === true) {
+    return err({ kind: "exec-timeout", id, timeoutMs: execOpts?.timeoutMs ?? 0 })
+  }
+  return err({ kind: "kernel-dead", id })
 }
 
 /** Session spawn — the long pole: allocate the child, wire its streams, and
@@ -479,18 +498,6 @@ const markDead = (
   dropKernel(id)
 }
 
-/** Sibling to `markDead` for an aborted exec. It wrote `.exit` to stdin first; the
- *  channel now carries JSON commands only, so teardown is the kill itself (plus handle
- *  removal and Map eviction). */
-const markDeadAndExit = (
-  k: LiveKernel,
-  id: KernelId,
-  removeIfHome: (id: KernelId) => void,
-  dropKernel: (id: KernelId) => void,
-): void => {
-  markDead(k, id, removeIfHome, dropKernel)
-}
-
 /** Mutex acquire — once the prior exec's tail resolves, transition to
  *  `running` and return a release fn the caller invokes on completion.
  *  Fail-closed: if a concurrent teardown killed the kernel while we were
@@ -558,6 +565,8 @@ interface ReadResult {
 interface ReadFail {
   ok: false
   error: string
+  /** The deadline passed; the process may still be running. */
+  timedOut?: true
 }
 
 /** Read from `reader` until `sentinel` appears in the accumulated text.
@@ -620,7 +629,7 @@ const readNext = async (
     const chunk =
       timeoutMs > 0 ? await readChunkWithin(reader, remainingMs, timers) : await reader.read()
     if (chunk === READ_TIMED_OUT) {
-      return { ok: false, error: `read timeout after ${timeoutMs}ms` }
+      return { ok: false, error: `read timeout after ${timeoutMs}ms`, timedOut: true }
     }
     if (chunk.done) return { ok: false, error: "stream closed" }
     if (chunk.value === undefined) return { ok: true }
@@ -642,7 +651,7 @@ export const readUntil = async (
   while (true) {
     const remainingMs = remainingReadMs(timeoutMs, start)
     if (timeoutMs > 0 && remainingMs <= 0) {
-      return { ok: false, error: `read timeout after ${timeoutMs}ms` }
+      return { ok: false, error: `read timeout after ${timeoutMs}ms`, timedOut: true }
     }
     // A bare `await reader.read()` blocks forever on a silent child; this
     // bounded helper also clears its race timer when a reader rejects.
@@ -671,10 +680,9 @@ const readUntilWithAbort = async (
     const r = await readUntil(reader, sentinel, timeoutMs)
     return r
   }
-  // Race: the read against the abort. We can't cancel `reader.read()`
-  // directly without releasing the lock; the abort path simply causes
-  // the caller to write `.exit` so the next `read()` resolves with
-  // `done: true`. We poll on abort by chunking.
+  // Race: the read against the abort. `reader.read()` cannot be cancelled without
+  // releasing the lock, so the abort resolves this race and the caller kills the process,
+  // which ends the pending read.
   return new Promise((resolve) => {
     let settled = false
     const onAbort = (): void => {
