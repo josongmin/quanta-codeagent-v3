@@ -2,6 +2,15 @@
 
 Scope: the P0 set from the 2026-09-13 competitor-reconciliation campaign — security holes reachable in default config + self-defects where the feature catalog (fc) claims a capability the code never fires. Evidence: `.extracted_source/GAP-RECONCILE-2026-09-13.md` (Part 1 overclaims, Part 2 gaps), `.extracted_source/REFRESH-DIFF-2026-09-13.md` (§A defects), `.extracted_source/_verify-2026-09-13-*.md` (probes). NOT competitor-feature absorption — that is the P1 backlog, parked.
 
+**⚠️ CROSS-SESSION RECONCILIATION (2026-09-13, from s14 teammates 9a + 8c):** A folder-trust gate (ADR-0559, b6d0d27d0) + the whole sep-14 plan (`docs/plans/sep-14-repo-trust-and-state-honesty/plan.md`) are landing in parallel. Re-scoped:
+- **W-SESSION (BUG-1/3/4) + W-PERM (SEC-3/4/5): CEDED** — the s14 lanes already implemented+audited them. Do NOT build these here.
+- **BUG-3 REFUTED**: `classifyErrorReason` returns `runtime.unknown_error` for real 401/402/quota, so a `reasonCode` lookup can't work; s14 F1 carries a typed `LLMError` kind instead.
+- **SEC-1 INERT on main**: Bun autoloads `.env`/`.env.local` before quanta's loader, so `envFileSourceOf` never sees those keys → the scrub is a no-op for the primary vector. s14 A lane owns the cause fix (`--no-compile-autoload-dotenv` + checkout-root loader) and will subsume the guard; its `QUANTA_ALLOW_DOTENV_ENDPOINT` knob is now a knob-registry EXCEPTIONS row naming A as owner. (Once A disables Bun autoload, the scrub's provenance populates and it becomes live.)
+- **SEC-2**: my `QUANTA_LSP_TRUST_WORKSPACE` orphan knob (broke 5 ratchets) REMOVED — replaced by the existing `isWorkspaceTrusted()` authority (b302178a5). Interpreter/rust-analyzer hardening stands.
+- **BUG-2/OC-5 SUPERSEDED**: s14 E found the transcript-sum trigger wrong (+50k after @file, per-prompt anchor loss) and replaces it with one shared measurement. Don't build further.
+- **OC-2, OC-4**: stand (no teammate objection).
+- **OC-1**: MINE to continue (confirmed non-overlapping).
+
 **Status (2026-09-13, implementing):**
 - ✅ **W-EGRESS LANDED + round-1 audited** — SEC-1 (28d68bd85), SEC-2 (3188cf2d1), OC-4 (2390b979e); round-1 parallel adversarial+objective audit found a CRITICAL (repo `.env` self-arming the LSP RCE via `QUANTA_LSP_TRUST_WORKSPACE`) + HIGH (bench entrypoint unscrubbed) + a RED test — all fixed in 93aba3560. Residuals disclosed (pyright repo-config venvPath, gopls/clangd/tsserver, OC-4 no producer).
 - ✅ **W-OBS 2/3** — OC-5 /context transcript (aa4de8d8c + refactor 4b025e840), OC-2 response_queued at enqueue (4381dd90d). ⏳ OC-1 activity `stuck` REMAINS: needs a real waiting-signal threaded from the approval gate / wait_agent / a tool-in-flight watchdog into the spine (FleetRow.status has no "waiting" value) — a genuine multi-site wiring, deferred rather than rushed.
