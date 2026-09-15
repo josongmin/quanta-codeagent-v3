@@ -130,6 +130,26 @@ sep-12 라운드 9의 A-F1(LSP가 워크스페이스 코드 실행)을 고치던
 운영자가 "이 계획의 기반으로 land하고 U-1에 맞춘다"를 골랐다. ADR-0559가 정본이다. 이 계획의 lane은 아래를
 전제로 이어서 만든다(재구현하지 않는다).
 
+#### 7.1.1 sep-12 라운드 11이 추가로 land한 것 (2026-09-14/15, main `bafdd1b7e`)
+
+라운드 11 적대 어딧에서 나온 것들. lane은 이것들을 전제로 만든다(세션 간 합의 기록: 이전 sep-14 오케스트레이터와 조율함).
+
+- `a0882eaa7` MCP 설정 경로: 운영자 설정은 **실제 env의 절대경로**뿐. dotenv 출처 값은 그 dotenv 폴더, 상대경로는 실행
+  폴더의 신뢰를 따른다(`src/host/mcp-config-source.ts`, ADR-0559 결정 4 개정). DS1 lane의 `e76f27329`(상대경로)와
+  같은 결함을 덮으므로 재구현하지 않는다. **남은 것**: Bun이 먼저 자동 로드하는 `.env`의 절대경로(`${PWD}/x.json`)는
+  출처가 없어 운영자 값으로 읽힌다 — lane A(SEC-0).
+- `0b1e62e2d` LSP 가용성 프로브: `isAvailable`/`lspBinaryAvailable`가 신뢰 판단 폴더를 **필수 인자**로 받고
+  캐시·test override·spawn 전에 신뢰를 확인한다(그 전에는 `<ws>/bin/gopls --version`이 API 키와 함께 먼저 실행됐다).
+  nav 풀의 별도 assert는 이 호출로 합쳤다. **lane B(2)가 이어서**: env 스크럽, PATH 필터, 신뢰 바이너리·shebang 해석,
+  `beforeSpawn` 필수화, 위치 census(내 regex arm 대체). lane B는 이 필수 인자 위에 쌓는다.
+- `d89b0e569` 도구 identity: 승인된 호출은 도구 **자기 이름**으로 실행된다(모델용 tool_use만 별칭; tool_result는 id를
+  나른다). `ToolRegistry.derive`가 origin·policy 이름을 보존하고 `new ToolRegistry(` 위치를 census가 고정한다.
+  C3 lane은 이 dispatch 한 줄 위로 rebase한다(shellSubject 리더는 action에서 읽으면 호환).
+- `3ae3db325` daemon allowlist 문서 정정 + **열린 결정**: daemon preset 가드 + `acceptEdits`에서 `bash`의
+  `curl … -d @.env`가 off-list 호스트로 허용된다(측정). allowlist 자세에서 셸 거부 vs OS egress 강제 — 운영자 결정 대기.
+- 그 외 같은 라운드: `49ac088eb`(merge 탐지기 규칙), `73a920bb9`(node REPL 정지·늦은 출력), `5c8b7805f`(메모리 안내),
+  `9ed041e44`(테스트 fence `env: null`). 상세와 재현은 `docs/plans/sep-12-truth-guard-hardening/corrections.md` §L.
+
 | 이 계획 항목 | 들어간 것 | 이 계획과 다른 점 / 남은 것 |
 |---|---|---|
 | DS1 결정 | `@/agent/workspace-trust`(authority, 하위 폴더 포함·가장 가까운 기록 우선, 미설치=비신뢰) + `@/host/workspace-trust`(trust.json·`QUANTA_TRUSTED_PATHS`·질문 해석). 신뢰 대상은 realpath git checkout 루트, 홈 폴더 yes는 세션 한정 | 모듈 위치가 `src/config/project-trust.ts`가 아니다. branded decision 타입, `MODE_PROJECT_TRUST_SOURCE` Record는 없다(헤드리스 에이전트는 `AGENT_MODE_WORKSPACE_TRUST` Record) |
