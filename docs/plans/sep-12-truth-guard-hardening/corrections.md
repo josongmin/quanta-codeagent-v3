@@ -966,13 +966,18 @@ fc-check-changed: `src/shared/egress-provenance-guard.ts`(다른 세션).
 - "Network is gated by the allowlist lever"를 사실대로 정정. 결함(신뢰 안 된 PR 트리를 보는 daemon의 셸 egress가
   호스트 샌드박스로만 제한됨)은 결정 필요: allowlist 자세에서 셸 거부 vs OS 수준 egress 강제. 명령 텍스트 휴리스틱은 쓰지 않는다.
 
-### L-8 A3 이름공간 도구의 후처리 경로 — 열림(잠재)
+### L-8 A3 이름공간 도구의 후처리 경로 + 파생 레지스트리의 origin — `d89b0e569`
 
 - 라운드 10(`105fa754e`)의 "모든 게이트를 도구 자기 이름으로"는 실행 전 게이트에만 사실이었다. 실행 후 provenance
   (`deriveProvenance(call.name, originOf(call.name))`), post 훅 이름, edit-repair, capEnforcer는 표시 이름을 쓴다.
   별개로 `namespaceRegistry`·`filterRegistry` 등 레지스트리 파생이 origin 맵을 버려(선존), untrusted envelope을 켜면
   도구 필터가 걸린 서브에이전트의 MCP 출력이 `internal`로 분류된다. 운영 코드에 toolNamespace 생산자가 없고 envelope은
-  기본 OFF라 지금은 잠재. sep-14 C3 lane이 이름공간 레지스트리를 만지는 중이라 소유를 8c와 조율 중.
+  기본 OFF라 드러나지는 않았다.
+- 수정: 승인된 호출은 도구 자기 이름으로 실행된다(모델용 tool_use만 별칭 유지; tool_result 블록은 이름이 아니라 id를 나른다).
+  `ToolRegistry.derive(tools, fresh?)`가 origin·policy 이름을 보존하고, `originOf`는 자기/표시 이름 둘 다 해석한다.
+  이름 변경도 origin을 같이 나른다. 파생 생성 지점은 전부 `derive`를 쓰고, `new ToolRegistry(` 위치 전수 census가 고정한다.
+  RED 5(뮤턴트: 별칭 2 red / 이름변경 origin 1 red / derive origin 2 red), 관련 165파일 2034 테스트 통과.
+  8c와 조율: C3 lane이 이 dispatch 한 줄 위로 rebase한다.
 
 ### L-9 A4 (정보) deny-all에서 provider 채널 도구 허용 — 의도된 예외
 
@@ -990,7 +995,6 @@ fc-check-changed: `src/shared/egress-provenance-guard.ts`(다른 세션).
 
 - **daemon 셸 egress 결정**(L-7): 신뢰 안 된 PR을 자동 리뷰하는 daemon이 `.env`를 외부로 보낼 수 있음 → 결정 필요.
   ROI 높음(보안, daemon 사용 시).
-- **이름공간 후처리 + origin 보존**(L-8): envelope을 켜는 순간 MCP 출력 분류가 틀림 → C3와 조율. ROI 중(현재 잠재).
 - **Bun `.env` 자동 로드 절대경로**(L-1): lane A. ROI 높음(설치 바이너리 경로).
 - **LSP 프로브 env 스크럽·신뢰 바이너리 해석**(L-6): lane B(2). ROI 높음.
 - **라운드 12 컨텍스트 없는 어딧**: 이번 라운드가 clean이 아니므로 100점 주장 불가. 재개 시 서브에이전트 프롬프트에
