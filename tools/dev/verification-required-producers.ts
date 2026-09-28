@@ -241,6 +241,83 @@ export const parseWorkflowJobGraph = (workflowYaml: string): WorkflowJobGraph =>
   return { jobIds: Object.keys(jobs as Record<string, unknown>), needsByJob }
 }
 
+/**
+ * The provisioning steps of one job, as the strings a step names: its `uses:`
+ * action and its `run:` script.
+ */
+export const workflowJobSteps = (workflowYaml: string, jobId: string): readonly string[] => {
+  const document: unknown = parseYaml(workflowYaml)
+  const jobs = (document as { readonly jobs?: Record<string, unknown> } | null)?.jobs
+  const job = jobs?.[jobId]
+  const steps = (job as { readonly steps?: unknown } | undefined)?.steps
+  if (!Array.isArray(steps)) return []
+  return steps.flatMap((step) => {
+    if (typeof step !== "object" || step === null) return []
+    const { uses, run } = step as { readonly uses?: unknown; readonly run?: unknown }
+    return [...(typeof uses === "string" ? [uses] : []), ...(typeof run === "string" ? [run] : [])]
+  })
+}
+
+/** A job's `runs-on`, which is what a `runnerImage` provisioning claim is checked against. */
+export const workflowJobRunsOn = (workflowYaml: string, jobId: string): string | undefined => {
+  const document: unknown = parseYaml(workflowYaml)
+  const jobs = (document as { readonly jobs?: Record<string, unknown> } | null)?.jobs
+  const runsOn = (jobs?.[jobId] as { readonly "runs-on"?: unknown } | undefined)?.["runs-on"]
+  return typeof runsOn === "string" ? runsOn : undefined
+}
+
+/** Shell comments dropped: a step that MENTIONS a tool in a comment does not install it. */
+const withoutComments = (script: string): string =>
+  script
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("#"))
+    .join("\n")
+
+/**
+ * A REQUIRED group whose need its producer's job does not provision.
+ *
+ * # Why the manifest is the authority here
+ *
+ * Every need of a PR-required group declares `provisionedBy` (see
+ * `NeedProvisioning`): the runner image ships it, or a named step installs it.
+ * The `toolchain` job had NO step for any of its four language servers —
+ * measured at `bab5c692b`, four of its seven group floors (`lsp-rust`, `lsp-go`,
+ * `lsp-pyright`, `lsp-typescript`) could not be met by construction, and the
+ * job's own `success` said nothing, because a capability lane exits 0 having
+ * executed nothing. An audit could only call that a possibility; this decides
+ * it from the two files, with no runner.
+ */
+export const capabilityProvisioningProblems = (input: {
+  readonly producerId: string
+  readonly workflowYaml: string
+  readonly jobId: string
+  readonly groups?: readonly CapabilityGroup[]
+}): readonly string[] => {
+  const steps = workflowJobSteps(input.workflowYaml, input.jobId).map(withoutComments)
+  const runsOn = workflowJobRunsOn(input.workflowYaml, input.jobId)
+  const groups = input.groups ?? CAPABILITY_GROUPS
+  const required = new Set(requiredCapabilityGroups(input.producerId, groups).map(({ id }) => id))
+  return groups
+    .filter((group) => required.has(group.id))
+    .flatMap((group) =>
+      group.needs.flatMap((need) => {
+        const at = `${group.id}: need "${need.id}"`
+        const by = need.provisionedBy
+        if (by === undefined) return [`${at} declares no machine-checkable provisioning`]
+        if (by.runnerImage !== undefined) {
+          return by.runnerImage === runsOn
+            ? []
+            : [
+                `${at} is claimed from image "${by.runnerImage}", but job "${input.jobId}" runs on "${String(runsOn)}"`,
+              ]
+        }
+        return steps.some((step) => step.includes(by.step))
+          ? []
+          : [`${at} is not provisioned by job "${input.jobId}" (no step names "${by.step}")`]
+      }),
+    )
+}
+
 /* ------------------------------------------------------------------ */
 /* capability-result.v2                                                */
 /* ------------------------------------------------------------------ */

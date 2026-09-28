@@ -103,12 +103,37 @@ export type MembershipAuthority = "lane-gated" | "declared-pending-gate" | "out-
  * binary's inode is not a live daemon: `binary` is satisfied by PATH
  * resolution, `daemon` needs the service to actually answer.
  */
+/**
+ * How a hosted runner comes to have a need — the machine-checkable half of
+ * `provision`, which is prose.
+ *
+ * `runnerImage`: the image already ships it (`ubuntu-latest` has node, go,
+ * cargo, python3, npm and the docker daemon). The guard then checks the job's
+ * `runs-on`, so a job moved to another image is a named failure.
+ * `step`: a step of the producer's job whose `uses:` or `run:` contains this
+ * text. Checked against the workflow, with shell comments stripped.
+ */
+export type NeedProvisioning =
+  | { readonly runnerImage: string; readonly step?: undefined }
+  | { readonly step: string; readonly runnerImage?: undefined }
+
 export interface CapabilityNeed {
   readonly id: string
   readonly kind: "binary" | "module" | "daemon" | "platform"
   /** How a runner obtains it. Empty means "cannot be provisioned here". */
   readonly provision: string
+  /**
+   * REQUIRED for every need of a PR-required group: `capabilityProvisioningProblems`
+   * refuses a required need that declares none. Measured at `bab5c692b`, the
+   * `toolchain` job provisioned none of its four language servers, so four of its
+   * seven group floors could not be met — and nothing said so, because a lane
+   * exits 0 having executed nothing.
+   */
+  readonly provisionedBy?: NeedProvisioning
 }
+
+/** `ubuntu-latest` ships it; see `NeedProvisioning`. */
+const UBUNTU: NeedProvisioning = { runnerImage: "ubuntu-latest" }
 
 export interface CapabilityGroup {
   readonly id: string
@@ -152,10 +177,11 @@ export interface CapabilityGroup {
   readonly receiptFields: readonly string[]
 }
 
-const bin = (id: string, provision: string): CapabilityNeed => ({
+const bin = (id: string, provision: string, provisionedBy?: NeedProvisioning): CapabilityNeed => ({
   id,
   kind: "binary",
   provision,
+  ...(provisionedBy === undefined ? {} : { provisionedBy }),
 })
 
 /**
@@ -176,8 +202,10 @@ export const CAPABILITY_GROUPS: readonly CapabilityGroup[] = [
     why: "the PRODUCTION evidenceLspStatic port against a REAL rust-analyzer; the replay test proves the fusion, not that a live server answers",
     envGate: "QUANTA_REAL_TOOLCHAIN_E2E",
     needs: [
-      bin("cargo", "rustup toolchain install stable"),
-      bin("rust-analyzer", "rustup component add rust-analyzer"),
+      bin("cargo", "rustup toolchain install stable", UBUNTU),
+      bin("rust-analyzer", "rustup component add rust-analyzer", {
+        step: "rustup component add rust-analyzer",
+      }),
     ],
     members: [
       "tests/unit/evidence-lsp-bridge-real-e2e.test.ts",
@@ -196,7 +224,12 @@ export const CAPABILITY_GROUPS: readonly CapabilityGroup[] = [
     owner: "verification-rail",
     why: "the `.go` → GoplsAdapter wiring driving a real gopls at a failure site",
     envGate: "QUANTA_REAL_TOOLCHAIN_E2E",
-    needs: [bin("go", "actions/setup-go"), bin("gopls", "go install golang.org/x/tools/gopls")],
+    needs: [
+      bin("go", "actions/setup-go", UBUNTU),
+      bin("gopls", "go install golang.org/x/tools/gopls", {
+        step: "go install golang.org/x/tools/gopls",
+      }),
+    ],
     members: ["tests/unit/evidence-lsp-bridge-go-real-e2e.test.ts"],
     minExecutedFiles: 1,
     minExecutedCases: 2,
@@ -210,7 +243,10 @@ export const CAPABILITY_GROUPS: readonly CapabilityGroup[] = [
     owner: "verification-rail",
     why: "a real pyright must SERVE a per-instance sandbox; every other pyright test injects a fake client, so an inert-at-the-sandbox regression passes the whole default suite",
     envGate: "QUANTA_REAL_TOOLCHAIN_E2E",
-    needs: [bin("pyright-langserver", "npm i -g pyright"), bin("python3", "actions/setup-python")],
+    needs: [
+      bin("pyright-langserver", "npm i -g pyright", { step: "pyright@" }),
+      bin("python3", "actions/setup-python", UBUNTU),
+    ],
     members: ["tests/unit/evidence-lsp-bridge-pyright-real-e2e.test.ts"],
     minExecutedFiles: 1,
     minExecutedCases: 1,
@@ -225,8 +261,10 @@ export const CAPABILITY_GROUPS: readonly CapabilityGroup[] = [
     why: "a real bun-test failure localized by parseNodeTest, then enriched by a real typescript-language-server — the JS/TS half of the evidence keystone",
     envGate: "QUANTA_REAL_TOOLCHAIN_E2E",
     needs: [
-      bin("bun", "oven-sh/setup-bun"),
-      bin("typescript-language-server", "npm i -g typescript-language-server typescript"),
+      bin("bun", "oven-sh/setup-bun", { step: "oven-sh/setup-bun" }),
+      bin("typescript-language-server", "npm i -g typescript-language-server typescript", {
+        step: "typescript-language-server@",
+      }),
     ],
     members: ["tests/unit/evidence-node-failure-static-real-e2e.test.ts"],
     minExecutedFiles: 1,
@@ -241,7 +279,7 @@ export const CAPABILITY_GROUPS: readonly CapabilityGroup[] = [
     owner: "verification-rail",
     why: "the only NON-DAP runtime carrier — node speaks CDP, so this is the one arm that proves the carrier abstraction is real",
     envGate: "QUANTA_REAL_TOOLCHAIN_E2E",
-    needs: [bin("node", "actions/setup-node")],
+    needs: [bin("node", "actions/setup-node", UBUNTU)],
     members: ["tests/unit/tool/evidence/runtime-node-real-e2e.test.ts"],
     minExecutedFiles: 1,
     minExecutedCases: 1,
@@ -255,7 +293,7 @@ export const CAPABILITY_GROUPS: readonly CapabilityGroup[] = [
     owner: "verification-rail",
     why: "jest (transformed ⇒ runtime degrades to null) and mocha (in-proc ⇒ runtime captures) are the two halves of the honest JS runner-routing contract",
     envGate: "QUANTA_REAL_TOOLCHAIN_E2E",
-    needs: [bin("node", "actions/setup-node"), bin("npm", "actions/setup-node")],
+    needs: [bin("node", "actions/setup-node", UBUNTU), bin("npm", "actions/setup-node", UBUNTU)],
     members: [
       "tests/unit/tool/evidence/runtime-jest-real-e2e.test.ts",
       "tests/unit/tool/evidence/runtime-mocha-real-e2e.test.ts",
@@ -275,9 +313,9 @@ export const CAPABILITY_GROUPS: readonly CapabilityGroup[] = [
     why: "the normalized {passed, failed:[{name,file,line}]} shape over three REAL runners; a parser that stops matching returns an empty failure list and every fake-backed test still passes",
     envGate: "QUANTA_REAL_TOOLCHAIN_E2E",
     needs: [
-      bin("go", "actions/setup-go"),
-      bin("cargo", "rustup toolchain install stable"),
-      bin("python3", "actions/setup-python"),
+      bin("go", "actions/setup-go", UBUNTU),
+      bin("cargo", "rustup toolchain install stable", UBUNTU),
+      bin("python3", "actions/setup-python", UBUNTU),
     ],
     members: ["tests/unit/tool/testrun/run-tests-real-e2e.test.ts"],
     minExecutedFiles: 1,
@@ -441,7 +479,14 @@ export const CAPABILITY_GROUPS: readonly CapabilityGroup[] = [
     producer: "contract",
     owner: "contract lane",
     why: "the contract suite's docker arms, which the required CI job runs with REQUIRE_CONTRACT=1 so an absent dependency is a hard fail. nightly has no such job today, which is how the same gate can skip its way to green",
-    needs: [{ id: "docker-daemon", kind: "daemon", provision: "docker desktop / dockerd" }],
+    needs: [
+      {
+        id: "docker-daemon",
+        kind: "daemon",
+        provision: "docker desktop / dockerd",
+        provisionedBy: UBUNTU,
+      },
+    ],
     members: ["tests/contract/remote-cli-docker.test.ts", "tests/contract/sandbox-docker.test.ts"],
     minExecutedFiles: 2,
     minExecutedCases: 2,
@@ -455,9 +500,11 @@ export const CAPABILITY_GROUPS: readonly CapabilityGroup[] = [
     owner: "contract lane",
     why: "per-file serial probes of TypeScript/Pyright/Lance today; the group exists so the probe happens ONCE per job and the files consume its receipt",
     needs: [
-      bin("typescript-language-server", "npm i -g typescript-language-server typescript"),
-      bin("pyright-langserver", "npm i -g pyright"),
-      bin("python3", "actions/setup-python"),
+      bin("typescript-language-server", "npm i -g typescript-language-server typescript", {
+        step: "typescript-language-server@",
+      }),
+      bin("pyright-langserver", "npm i -g pyright", { step: "pyright@" }),
+      bin("python3", "actions/setup-python", UBUNTU),
     ],
     members: [
       "tests/contract/lance-real-wire.test.ts",
@@ -475,7 +522,14 @@ export const CAPABILITY_GROUPS: readonly CapabilityGroup[] = [
     producer: "pty",
     owner: "pty lane",
     why: "raw-mode interactive CLI e2e over a real pty. The required job can succeed today with PTY_AVAILABLE=false across all 8 files — a visible skip with no executed floor",
-    needs: [{ id: "pty", kind: "platform", provision: "openpty via FFI on the runner" }],
+    needs: [
+      {
+        id: "pty",
+        kind: "platform",
+        provision: "openpty via FFI on the runner",
+        provisionedBy: UBUNTU,
+      },
+    ],
     members: [
       "tests/e2e-pty/cli-approval-preflight-prefix-e2e.test.ts",
       "tests/e2e-pty/cli-goal-pursuit-e2e.test.ts",

@@ -455,6 +455,20 @@ jobs:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ runner.arch }}-1.3.14-${{ hashFiles('bun.lock') }}
       - run: bun install --frozen-lockfile
+      - name: provision the language servers four group floors need
+        # `lsp-rust`, `lsp-go`, `lsp-pyright` and `lsp-typescript` are PR-required
+        # group floors, and this job installed NONE of their servers: measured at
+        # bab5c692b, four of its seven floors could not be met by construction,
+        # while the job still reported success — a capability lane exits 0 having
+        # executed nothing. `capabilityProvisioningProblems` now checks every
+        # required need against these steps, so a floor and its provisioning
+        # cannot drift apart again. Pinned like the contract job's servers.
+        run: |
+          rustup component add rust-analyzer
+          go install golang.org/x/tools/gopls@v0.16.2
+          bun add -g pyright@1.1.414 typescript@5.9.3 typescript-language-server@6.0.0
+      - name: put `go install` binaries on PATH
+        run: echo "$HOME/go/bin" >> "$GITHUB_PATH"
       - name: real-toolchain e2e (opt-in lane — visible skips without the toolchain)
         # The `*-real-e2e.test.ts` lane is gated on QUANTA_REAL_TOOLCHAIN_E2E so it
         # cannot blow the per-test unit speed budget on a developer machine that
