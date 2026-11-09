@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="340" viewBox="0 0 1280 340" role="img" aria-labelledby="title desc">
+  <title id="title">Quanta CodeAgent v3</title>
+  <desc id="desc">Terminal, web, desktop, and SDK surfaces connect to a shared coding agent runtime with tools, context, policy, and events.</desc>
+  <defs>
+    <linearGradient id="background" x2="1" y2="1"><stop stop-color="#0b1020"/><stop offset="1" stop-color="#12172c"/></linearGradient>
+    <linearGradient id="accent" x2="1" y2="1"><stop stop-color="#68e0cf"/><stop offset="1" stop-color="#91a0ff"/></linearGradient>
+    <radialGradient id="glow"><stop stop-color="#617de3" stop-opacity=".18"/><stop offset="1" stop-color="#617de3" stop-opacity="0"/></radialGradient>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M32 0H0V32" fill="none" stroke="#93a4d1" stroke-opacity=".05"/></pattern>
+  </defs>
+  <rect x="1" y="1" width="1278" height="338" rx="20" fill="url(#background)" stroke="#2b3450"/>
+  <rect x="2" y="2" width="1276" height="336" rx="19" fill="url(#grid)"/>
+  <ellipse cx="940" cy="170" rx="320" ry="240" fill="url(#glow)"/>
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+    <rect x="52" y="44" width="6" height="18" rx="3" fill="#68e0cf"/>
+    <text x="72" y="58" fill="#aebbd8" font-size="12" font-weight="600" letter-spacing="3">CODING AGENT RUNTIME</text>
+    <text x="48" y="145" fill="#f1f5ff" font-size="76" font-weight="700" letter-spacing="-3">Quanta</text>
+    <rect x="333" y="109" width="46" height="29" rx="7" fill="#1d2844" stroke="#3b4a70"/>
+    <text x="344" y="129" fill="#aebfff" font-size="17" font-weight="600">v3</text>
+    <text x="53" y="188" fill="#b4c0dc" font-size="21">Run. Inspect. Extend.</text>
+    <text x="53" y="222" fill="#7e90b5" font-size="15">Code, tools, context, and execution policy.</text>
+    <path d="M53 259H461" stroke="#28334e"/>
+    <text x="53" y="289" fill="#9daecc" font-size="12" letter-spacing="1.5">TYPESCRIPT</text>
+    <circle cx="168" cy="285" r="2" fill="#566483"/>
+    <text x="186" y="289" fill="#9daecc" font-size="12" letter-spacing="1.5">BUN</text>
+    <circle cx="234" cy="285" r="2" fill="#566483"/>
+    <text x="252" y="289" fill="#9daecc" font-size="12" letter-spacing="1.5">PORTS &amp; ADAPTERS</text>
+  </g>
+  <g fill="none" stroke="#435779" stroke-width="1.5">
+    <path d="M724 101H765Q785 101 785 121V150H826"/>
+    <path d="M724 229H765Q785 229 785 209V180H826"/>
+    <path d="M1068 101H1027Q1007 101 1007 121V150H966"/>
+    <path d="M1068 229H1027Q1007 229 1007 209V180H966"/>
+    <path d="M856 208V263H815M887 208V289M918 208V289M948 208V263H989" stroke="#4b6389"/>
+  </g>
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" text-anchor="middle">
+    <g fill="#111b30" stroke="#334563">
+      <rect x="612" y="79" width="112" height="44" rx="10"/>
+      <rect x="612" y="207" width="112" height="44" rx="10"/>
+      <rect x="1068" y="79" width="148" height="44" rx="10"/>
+      <rect x="1068" y="207" width="148" height="44" rx="10"/>
+    </g>
+    <g fill="#bbcae5">
+      <text x="668" y="106">TERMINAL</text><text x="668" y="234">WEB</text>
+      <text x="1142" y="106">DESKTOP</text><text x="1142" y="234">SDK</text>
+    </g>
+    <rect x="826" y="120" width="140" height="88" rx="16" fill="#172540" stroke="url(#accent)" stroke-width="1.5"/>
+    <text x="896" y="162" fill="#e8f3ff" font-size="30" font-weight="700">Q</text>
+    <text x="896" y="187" fill="#91b7d3" font-size="11" letter-spacing="2">RUNTIME</text>
+    <g fill="#8fa3c7" font-size="10">
+      <text x="791" y="267">TOOLS</text><text x="873" y="310">CONTEXT</text>
+      <text x="938" y="310">POLICY</text><text x="1015" y="267">EVENTS</text>
+    </g>
+  </g>
+  <g fill="#74dcca"><circle cx="785" cy="150" r="3"/><circle cx="1007" cy="180" r="3"/></g>
+</svg>
