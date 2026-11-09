@@ -6,26 +6,29 @@
 
 TypeScript · Bun · Ports & adapters · Streaming sessions
 
-[Quick start](#quick-start) · [Architecture](#architecture) · [Documentation](docs/README.md)
+[Quick start](#quick-start) · [Engineering highlights](#engineering-highlights) · [Architecture](#architecture) · [Documentation](docs/README.md)
 
 </div>
 
 ---
 
-Quanta combines a tool-using agent loop with session persistence, permission policies, context management, and provider adapters. Use it from the terminal, connect a web or desktop surface, or embed the runtime in your own application.
+Quanta is a modular coding agent runtime built around streaming execution, explicit session authority, and inspectable state. Its core connects model providers, tools, context, permissions, and event streams through typed ports. Terminal, web, desktop, and SDK entry points compose that runtime for different execution environments.
 
-## What is inside
+## Engineering highlights
 
-| Area | Implementation |
+| Mechanism | What the runtime does |
 | :--- | :--- |
-| **Agent loop** | Streaming output, tool dispatch, planning, cancellation, and recovery |
-| **Code tools** | File operations, shell execution, Git tools, and language-server integration |
-| **Context & memory** | Context compaction, persistent memory, recall, and session resume |
-| **Execution policy** | Permission decisions, human approval, filesystem restrictions, and sandbox adapters |
-| **Extensions** | MCP integration, custom tools, skills, subagents, and workflows |
-| **Inspection** | Structured events, trajectories, replay, telemetry, and benchmark tooling |
+| **Streaming execution with ordering barriers** | Starts eligible tools while the model is still streaming. The first ineligible call forms a barrier; deferred calls execute serially, and results retain the model's original call order. |
+| **Versioned session control** | Validates command, event, and snapshot envelopes. Session commands carry identities and optional revision preconditions; the session kernel separates state reduction from execution. |
+| **Context compaction that preserves live work** | Optional background compaction prepares a summary, then reconciles it against live history before installation. Stale boundaries and invalid tool-result seams are discarded. |
+| **Explicit permission and authority boundaries** | Hard-deny checks precede permission-mode decisions. Host-issued goal-continuation capabilities are single-use and bound to an objective identity and revision. |
+| **Selective checkpoint recovery** | Restores files, conversation state, or both through separate ports. File restoration binds to a checkpoint SHA; combined restoration reports partial failure explicitly. |
+| **Embeddable and replayable execution** | Inject model ports and custom tools through the SDK. Scripted models and strict cassette replay exercise runtime behavior without a live provider. |
+| **Verification tied to its inputs** | Verification receipts bind results to source, worktree state, comparison base, dependencies, toolchain, and environment. Architecture checks pair boundary rules with registered test entry points. |
 
-Availability depends on the surface, configuration, and installed tools. The [feature catalog](docs/10.feature-catalog.md) records per-feature evidence and maturity.
+[**Read the runtime architecture →**](docs/architecture/runtime-overview.md) — execution diagrams, concurrency rules, failure semantics, and links to the owning implementation and regression tests.
+
+Feature availability depends on the surface, configuration, and installed tools. The [feature catalog](docs/10.feature-catalog.md) records per-feature evidence and maturity.
 
 ## Quick start
 
@@ -94,20 +97,31 @@ bun run build:sdk:types  # SDK declarations
 
 ## Architecture
 
-Ports and adapters separate model providers, tools, storage, policy, and user interfaces. Composition layers assemble these pieces; lint rules and architecture tests check library boundaries.
+The architecture separates **session control**, **runtime composition**, and **agent execution**. Session-based clients enter through a versioned protocol and kernel. Direct CLI runs and in-process SDK consumers can compose the agent without taking the transport path.
 
 ```mermaid
 flowchart TB
-    CLI[Terminal] --> HOST[Host and session composition]
-    WEB[Web / Desktop] --> HOST
-    SDK[SDK / Editor] --> HOST
-    HOST --> AGENT[Agent loop]
-    AGENT --> LLM[Model provider ports]
-    AGENT --> TOOLS[Tool dispatch and runtime]
-    AGENT --> CONTEXT[Context, memory, and sessions]
-    AGENT --> POLICY[Permissions and approvals]
-    AGENT --> EVENTS[Events, traces, and replay]
+    CLIENTS["Session clients: CLI attach / web / desktop / editor"]
+    DIRECT["Direct CLI / in-process SDK"]
+    CLIENTS --> WIRE["stdio / WebSocket + versioned session protocol"]
+    WIRE --> KERNEL["Session kernel: revisions, commands, cancellation"]
+    KERNEL --> HOST["Host composition: policy, budgets, ports"]
+    DIRECT --> HOST
+    HOST --> AGENT["Agent loop: prepare, stream, dispatch, resolve"]
+    AGENT --> LLM["LLM port: provider / recording / replay"]
+    AGENT --> DISPATCH["Tool admission and dispatch"]
+    DISPATCH --> POLICY["Permission and execution guards"]
+    POLICY --> TOOLS["Tools, filesystem, shell, sandbox adapters"]
+    AGENT --> STATE["Working memory, compaction, checkpoints"]
+    AGENT --> EVENTS["Typed events and observation sinks"]
 ```
+
+- **State and effects have different owners.** The session reducer computes state transitions; the scheduler coordinates host actions and turn execution.
+- **Concurrency is an explicit tool contract.** Eligibility comes from tool metadata and injected predicates. An ordinary mutating tool cannot become speculative merely because its call finished streaming.
+- **Failure remains observable.** Protocol errors, revision conflicts, denied actions, discarded summaries, replay misses, and partial restores retain distinct outcomes.
+- **Dependencies are checked.** Composition lives in host/runner layers; library slices have AST-scanned import restrictions and a configuration-to-test parity check.
+
+See the [detailed runtime architecture](docs/architecture/runtime-overview.md) for the control path, scheduling example, tradeoffs, and evidence map.
 
 | Path | Responsibility |
 | :--- | :--- |
@@ -121,6 +135,27 @@ flowchart TB
 | [`tests/`](tests/) · [`tools/`](tools/) | Verification, development tools, and evaluation |
 
 Read the [architecture guide](docs/ARCHITECTURE.md), [design RFC](rfc/0001-architecture.md), and [agent-loop reference](docs/runbooks/agent-loop-reference.md) for the contracts behind this map.
+
+## Exercise the core without a live model
+
+The public SDK accepts a scripted `LLMPort`, so an application can drive the real agent loop without configuring provider credentials. Run this with Bun from the repository root:
+
+```ts
+import { createAnalysisAgent, fakeLlm } from "./src/sdk"
+
+const agent = createAnalysisAgent({
+  cwd: process.cwd(),
+  model: "scripted",
+  llm: fakeLlm([{ text: "Ready." }]),
+  profile: "read-only",
+  includeDefaultTools: false,
+})
+
+const outcome = await agent.run("Say Ready.")
+console.log(outcome.reason, outcome.turns)
+```
+
+Replace `llm` with your provider implementation, inject tools with `defineTool`, or consume the run as an async event iterable. See the [SDK API](src/sdk/index.ts) and [embed guide](docs/plans/jul-4-sdk-embed-dx/USAGE.md).
 
 ## Development & evidence
 

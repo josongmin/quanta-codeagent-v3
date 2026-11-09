@@ -10,6 +10,7 @@ Find the right entry point for running, extending, and understanding Quanta Code
 | :--- | :--- |
 | Install and run the CLI | [Quick start](../README.md#quick-start) |
 | Configure credentials and environment | [Environment example](../.env.example) |
+| Understand the runtime mechanisms | [Runtime architecture](architecture/runtime-overview.md) |
 | Understand the system | [Architecture guide](ARCHITECTURE.md) · [Design RFC](../rfc/0001-architecture.md) |
 | Trace execution and recovery | [Agent-loop operational reference](runbooks/agent-loop-reference.md) |
 | Check feature maturity and evidence | [Feature catalog](10.feature-catalog.md) |
@@ -30,6 +31,7 @@ Find the right entry point for running, extending, and understanding Quanta Code
 
 | Question | Start here |
 | :--- | :--- |
+| How do streaming execution, session authority, compaction, and recovery work? | [Runtime architecture](architecture/runtime-overview.md) |
 | How are dependencies between slices constrained? | [Architecture and ports & adapters](ARCHITECTURE.md) |
 | Why was a design chosen? | [Architecture decision records](decisions/README.md) |
 | Where are the session and event contracts? | [Protocol](../src/protocol/) · [SDK](../src/sdk/) |
