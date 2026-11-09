@@ -192,6 +192,10 @@ The generated feature catalog is authored under `tools/feature-catalog/features/
 | **Debug a session** | [Agent-loop operational reference](docs/runbooks/agent-loop-reference.md) |
 | **Contribute a change** | [Repository rules](AGENTS.md) · [Test guide](tests/README.md) · [Catalog workflow](tools/feature-catalog/README.md) |
 
+## Related systems
+
+The [project map](https://github.com/josongmin) covers the surrounding work: [Quanta Index](https://github.com/josongmin/quanta-index) for search infrastructure, [Taskmesh](https://github.com/josongmin/quanta-taskmesh) for execution governance, and [Quanta Memory Platform](https://github.com/josongmin/quanta-memory-platform) for memory accounting. Each repository owns its interfaces and qualification status; these links do not imply that every integration is active.
+
 <div align="center">
 
 <sub>Quanta CodeAgent v3 · <a href="docs/README.md">Documentation</a></sub>
