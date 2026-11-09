@@ -6,7 +6,7 @@
 
 TypeScript · Bun · Ports & adapters · Streaming sessions
 
-[Quick start](#quick-start) · [Architecture](#architecture) · [Documentation](docs/README.md) · [한국어](README.ko.md)
+[Quick start](#quick-start) · [Architecture](#architecture) · [Documentation](docs/README.md)
 
 </div>
 
@@ -155,6 +155,6 @@ Benchmark tooling includes SWE-bench and a [Terminal-Bench adapter](adapters/ter
 
 <div align="center">
 
-<sub>Quanta CodeAgent v3 · <a href="docs/README.md">Documentation</a> · <a href="README.ko.md">한국어 안내</a></sub>
+<sub>Quanta CodeAgent v3 · <a href="docs/README.md">Documentation</a></sub>
 
 </div>
