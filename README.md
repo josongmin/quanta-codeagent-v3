@@ -1,3 +1,5 @@
+# Quanta CodeAgent v3
+
 <div align="center">
 
 <img src="docs/assets/quanta-readme-banner.svg" alt="Quanta CodeAgent v3 — a coding agent runtime for terminal, web, desktop, and SDK" width="100%">
@@ -176,6 +178,8 @@ bun test tests/unit/_arch/repo-index-hygiene.test.ts
 `bun run prepush` runs the configured pre-push verification campaign. Contract tests, live model evaluations, and remote benchmarks have additional toolchain, credential, or infrastructure requirements. A focused test does not establish a full-suite or benchmark verdict.
 
 Benchmark tooling includes SWE-bench and a [Terminal-Bench adapter](adapters/terminal-bench/README.md). Start with the [SWE-bench smoke guide](tests/smoke/swebench/README.md) and [evaluation runbook](docs/swebench-ec2-runbook.md). Historical measurements have their own datasets, model settings, and execution conditions; this README does not claim a current leaderboard score.
+
+The generated feature catalog is authored under `tools/feature-catalog/features/`: use `bun fc validate` and `bun fc build` rather than editing its generated Markdown.
 
 ## Explore the repository
 
