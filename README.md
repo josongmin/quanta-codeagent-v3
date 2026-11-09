@@ -18,15 +18,15 @@ Quanta is a modular coding agent runtime built around streaming execution, expli
 
 ## Engineering highlights
 
-| Mechanism | What the runtime does |
-| :--- | :--- |
-| **Streaming execution with ordering barriers** | Starts eligible tools while the model is still streaming. The first ineligible call forms a barrier; deferred calls execute serially, and results retain the model's original call order. |
-| **Versioned session control** | Validates command, event, and snapshot envelopes. Session commands carry identities and optional revision preconditions; the session kernel separates state reduction from execution. |
-| **Context compaction that preserves live work** | Optional background compaction prepares a summary, then reconciles it against live history before installation. Stale boundaries and invalid tool-result seams are discarded. |
-| **Explicit permission and authority boundaries** | Hard-deny checks precede permission-mode decisions. Host-issued goal-continuation capabilities are single-use and bound to an objective identity and revision. |
-| **Selective checkpoint recovery** | Restores files, conversation state, or both through separate ports. File restoration binds to a checkpoint SHA; combined restoration reports partial failure explicitly. |
-| **Embeddable and replayable execution** | Inject model ports and custom tools through the SDK. Scripted models and strict cassette replay exercise runtime behavior without a live provider. |
-| **Verification tied to its inputs** | Verification receipts bind results to source, worktree state, comparison base, dependencies, toolchain, and environment. Architecture checks pair boundary rules with registered test entry points. |
+| Mechanism | What the runtime does | Source |
+| :--- | :--- | :--- |
+| **Streaming execution with ordering barriers** | Starts eligible tools while the model is still streaming. The first ineligible call forms a barrier; deferred calls execute serially, and results retain the model's original call order. | [Streaming scheduler](src/agent/streaming-dispatch.ts) |
+| **Versioned session control** | Validates command, event, and snapshot envelopes. Session commands carry identities and optional revision preconditions; the session kernel separates state reduction from execution. | [Session codec](src/protocol/session/codec.ts) |
+| **Context compaction that preserves live work** | Optional background compaction prepares a summary, then reconciles it against live history before installation. Stale boundaries and invalid tool-result seams are discarded. | [Compaction wire](src/agent/loop/compaction-wire.ts) |
+| **Explicit permission and authority boundaries** | Hard-deny checks precede permission-mode decisions. Host-issued goal-continuation capabilities are single-use and bound to an objective identity and revision. | [Policy](src/permission/policy.ts) · [Authority](src/sdk/runtime/session/turn-submit-authority.ts) |
+| **Selective checkpoint recovery** | Restores files, conversation state, or both through separate ports. File restoration binds to a checkpoint SHA; combined restoration reports partial failure explicitly. | [Restore owner](src/agent/per-tool-checkpoint/three-way-restore.ts) |
+| **Embeddable and replayable execution** | Inject model ports and custom tools through the SDK. Scripted models and strict cassette replay exercise runtime behavior without a live provider. | [SDK](src/sdk/index.ts) · [Replay](src/llm/replay/replay-llm.ts) |
+| **Verification tied to its inputs** | Verification receipts bind results to source, worktree state, comparison base, dependencies, toolchain, and environment. Architecture checks pair boundary rules with registered test entry points. | [Receipts](tools/dev/verification-receipt.ts) · [Boundaries](tests/unit/_arch/slice-boundary-configs.ts) |
 
 [**Read the runtime architecture →**](docs/architecture/runtime-overview.md) — execution diagrams, concurrency rules, failure semantics, and links to the owning implementation and regression tests.
 
@@ -198,6 +198,6 @@ The [project map](https://github.com/josongmin) covers the surrounding work: [Qu
 
 <div align="center">
 
-<sub>Quanta CodeAgent v3 · <a href="docs/README.md">Documentation</a></sub>
+<sub>Quanta CodeAgent v3 · <a href="docs/README.md">Documentation</a> · <a href="https://github.com/josongmin">Project map</a></sub>
 
 </div>
